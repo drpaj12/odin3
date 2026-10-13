@@ -1,0 +1,82 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent
+(UNIT:c5_casez_casex @C5_casez_casex.v:2:1
+  (MODULE:c5_casez_casex @C5_casez_casex.v:2:1
+    _
+    (LIST @C5_casez_casex.v:2:23
+      (PORT_DECL.input [IN_HEADER NET=1] @C5_casez_casex.v:2:24
+        (RANGE @C5_casez_casex.v:2:30
+          (NUMBER.dec [SIGNED] @C5_casez_casex.v:2:31 32'sd3)
+          (NUMBER.dec [SIGNED] @C5_casez_casex.v:2:33 32'sd0))
+        (DECLARATOR:r @C5_casez_casex.v:2:36
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C5_casez_casex.v:2:39
+        (RANGE @C5_casez_casex.v:2:50
+          (NUMBER.dec [SIGNED] @C5_casez_casex.v:2:51 32'sd1)
+          (NUMBER.dec [SIGNED] @C5_casez_casex.v:2:53 32'sd0))
+        (DECLARATOR:y1 @C5_casez_casex.v:2:56
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C5_casez_casex.v:2:39
+        (RANGE @C5_casez_casex.v:2:50
+          (NUMBER.dec [SIGNED] @C5_casez_casex.v:2:51 32'sd1)
+          (NUMBER.dec [SIGNED] @C5_casez_casex.v:2:53 32'sd0))
+        (DECLARATOR:y2 @C5_casez_casex.v:2:60
+          _)))
+    (ALWAYS.always @C5_casez_casex.v:3:3
+      (TIMING_STMT @C5_casez_casex.v:3:10
+        (EVENT_CONTROL [STAR] @C5_casez_casex.v:3:10
+          _)
+        (CASE.casez @C5_casez_casex.v:4:5
+          (IDENT:r @C5_casez_casex.v:4:12)
+          (CASE_ITEM @C5_casez_casex.v:5:7
+            (BLOCKING_ASSIGN @C5_casez_casex.v:5:16
+              (IDENT:y1 @C5_casez_casex.v:5:16)
+              _
+              (NUMBER.dec @C5_casez_casex.v:5:21 2'd3))
+            (NUMBER.bin @C5_casez_casex.v:5:7 4'b1???))
+          (CASE_ITEM @C5_casez_casex.v:6:7
+            (BLOCKING_ASSIGN @C5_casez_casex.v:6:16
+              (IDENT:y1 @C5_casez_casex.v:6:16)
+              _
+              (NUMBER.dec @C5_casez_casex.v:6:21 2'd2))
+            (NUMBER.bin @C5_casez_casex.v:6:7 4'b01??))
+          (CASE_ITEM @C5_casez_casex.v:7:7
+            (BLOCKING_ASSIGN @C5_casez_casex.v:7:16
+              (IDENT:y1 @C5_casez_casex.v:7:16)
+              _
+              (NUMBER.dec @C5_casez_casex.v:7:21 2'd1))
+            (NUMBER.bin @C5_casez_casex.v:7:7 4'b001z))
+          (CASE_ITEM [DEFAULT] @C5_casez_casex.v:8:7
+            (BLOCKING_ASSIGN @C5_casez_casex.v:8:16
+              (IDENT:y1 @C5_casez_casex.v:8:16)
+              _
+              (NUMBER.dec @C5_casez_casex.v:8:21 2'd0))))))
+    (ALWAYS.always @C5_casez_casex.v:10:3
+      (TIMING_STMT @C5_casez_casex.v:10:10
+        (EVENT_CONTROL [STAR] @C5_casez_casex.v:10:10
+          _)
+        (CASE.casex @C5_casez_casex.v:11:5
+          (IDENT:r @C5_casez_casex.v:11:12)
+          (CASE_ITEM @C5_casez_casex.v:12:7
+            (BLOCKING_ASSIGN @C5_casez_casex.v:12:16
+              (IDENT:y2 @C5_casez_casex.v:12:16)
+              _
+              (NUMBER.dec @C5_casez_casex.v:12:21 2'd3))
+            (NUMBER.bin @C5_casez_casex.v:12:7 4'b1xxx))
+          (CASE_ITEM @C5_casez_casex.v:13:7
+            (BLOCKING_ASSIGN @C5_casez_casex.v:13:16
+              (IDENT:y2 @C5_casez_casex.v:13:16)
+              _
+              (NUMBER.dec @C5_casez_casex.v:13:21 2'd2))
+            (NUMBER.bin @C5_casez_casex.v:13:7 4'b01xx))
+          (CASE_ITEM @C5_casez_casex.v:14:7
+            (BLOCKING_ASSIGN @C5_casez_casex.v:14:16
+              (IDENT:y2 @C5_casez_casex.v:14:16)
+              _
+              (NUMBER.dec @C5_casez_casex.v:14:21 2'd1))
+            (NUMBER.bin @C5_casez_casex.v:14:7 4'b001?))
+          (CASE_ITEM [DEFAULT] @C5_casez_casex.v:15:7
+            (BLOCKING_ASSIGN @C5_casez_casex.v:15:16
+              (IDENT:y2 @C5_casez_casex.v:15:16)
+              _
+              (NUMBER.dec @C5_casez_casex.v:15:21 2'd0))))))))

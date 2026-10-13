@@ -1,0 +1,139 @@
+# generated: elab-check --write
+(UNIT:n6_genvar @N6_genvar.v:2:1
+  (MODULE:n6_genvar @N6_genvar.v:2:1
+    _
+    (LIST @N6_genvar.v:2:18
+      (PORT_DECL.input [IN_HEADER NET=1] @N6_genvar.v:2:19
+        (RANGE @N6_genvar.v:2:25
+          (NUMBER.dec [SIGNED] @N6_genvar.v:2:26 32'sd3)
+          (NUMBER.dec [SIGNED] @N6_genvar.v:2:28 32'sd0))
+        (DECLARATOR:a @N6_genvar.v:2:31
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N6_genvar.v:2:34
+        (RANGE @N6_genvar.v:2:41
+          (NUMBER.dec [SIGNED] @N6_genvar.v:2:42 32'sd3)
+          (NUMBER.dec [SIGNED] @N6_genvar.v:2:44 32'sd0))
+        (DECLARATOR:y @N6_genvar.v:2:47
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N6_genvar.v:2:34
+        (RANGE @N6_genvar.v:2:41
+          (NUMBER.dec [SIGNED] @N6_genvar.v:2:42 32'sd3)
+          (NUMBER.dec [SIGNED] @N6_genvar.v:2:44 32'sd0))
+        (DECLARATOR:z @N6_genvar.v:2:50
+          _)))
+    (GEN_BLOCK:g @N6_genvar.v:4:33
+      (NUMBER.dec [SIGNED] @N6_genvar.v:4:33 32'sd0)
+      (CONT_ASSIGN @N6_genvar.v:5:5
+        _
+        _
+        (NET_ASSIGN @N6_genvar.v:5:12
+          (SELECT.bit @N6_genvar.v:5:12
+            (IDENT:y @N6_genvar.v:5:12)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:5:14 32'sd0)
+            _)
+          (SELECT.bit @N6_genvar.v:5:19
+            (IDENT:a @N6_genvar.v:5:19)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:5:21 32'sd0)
+            _))))
+    (GEN_BLOCK:g @N6_genvar.v:4:33
+      (NUMBER.dec [SIGNED] @N6_genvar.v:4:33 32'sd1)
+      (CONT_ASSIGN @N6_genvar.v:5:5
+        _
+        _
+        (NET_ASSIGN @N6_genvar.v:5:12
+          (SELECT.bit @N6_genvar.v:5:12
+            (IDENT:y @N6_genvar.v:5:12)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:5:14 32'sd1)
+            _)
+          (SELECT.bit @N6_genvar.v:5:19
+            (IDENT:a @N6_genvar.v:5:19)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:5:21 32'sd1)
+            _))))
+    (GEN_BLOCK:g @N6_genvar.v:4:33
+      (NUMBER.dec [SIGNED] @N6_genvar.v:4:33 32'sd2)
+      (CONT_ASSIGN @N6_genvar.v:5:5
+        _
+        _
+        (NET_ASSIGN @N6_genvar.v:5:12
+          (SELECT.bit @N6_genvar.v:5:12
+            (IDENT:y @N6_genvar.v:5:12)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:5:14 32'sd2)
+            _)
+          (SELECT.bit @N6_genvar.v:5:19
+            (IDENT:a @N6_genvar.v:5:19)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:5:21 32'sd2)
+            _))))
+    (GEN_BLOCK:g @N6_genvar.v:4:33
+      (NUMBER.dec [SIGNED] @N6_genvar.v:4:33 32'sd3)
+      (CONT_ASSIGN @N6_genvar.v:5:5
+        _
+        _
+        (NET_ASSIGN @N6_genvar.v:5:12
+          (SELECT.bit @N6_genvar.v:5:12
+            (IDENT:y @N6_genvar.v:5:12)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:5:14 32'sd3)
+            _)
+          (SELECT.bit @N6_genvar.v:5:19
+            (IDENT:a @N6_genvar.v:5:19)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:5:21 32'sd3)
+            _))))
+    (GEN_BLOCK:h @N6_genvar.v:9:35
+      (NUMBER.dec [SIGNED] @N6_genvar.v:9:35 32'sd0)
+      (CONT_ASSIGN @N6_genvar.v:10:7
+        _
+        _
+        (NET_ASSIGN @N6_genvar.v:10:14
+          (SELECT.bit @N6_genvar.v:10:14
+            (IDENT:z @N6_genvar.v:10:14)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:10:16 32'sd0)
+            _)
+          (UNARY.~ @N6_genvar.v:10:21
+            (SELECT.bit @N6_genvar.v:10:22
+              (IDENT:a @N6_genvar.v:10:22)
+              (NUMBER.dec [SIGNED] @N6_genvar.v:10:24 32'sd0)
+              _)))))
+    (GEN_BLOCK:h @N6_genvar.v:9:35
+      (NUMBER.dec [SIGNED] @N6_genvar.v:9:35 32'sd1)
+      (CONT_ASSIGN @N6_genvar.v:10:7
+        _
+        _
+        (NET_ASSIGN @N6_genvar.v:10:14
+          (SELECT.bit @N6_genvar.v:10:14
+            (IDENT:z @N6_genvar.v:10:14)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:10:16 32'sd1)
+            _)
+          (UNARY.~ @N6_genvar.v:10:21
+            (SELECT.bit @N6_genvar.v:10:22
+              (IDENT:a @N6_genvar.v:10:22)
+              (NUMBER.dec [SIGNED] @N6_genvar.v:10:24 32'sd1)
+              _)))))
+    (GEN_BLOCK:h @N6_genvar.v:9:35
+      (NUMBER.dec [SIGNED] @N6_genvar.v:9:35 32'sd2)
+      (CONT_ASSIGN @N6_genvar.v:10:7
+        _
+        _
+        (NET_ASSIGN @N6_genvar.v:10:14
+          (SELECT.bit @N6_genvar.v:10:14
+            (IDENT:z @N6_genvar.v:10:14)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:10:16 32'sd2)
+            _)
+          (UNARY.~ @N6_genvar.v:10:21
+            (SELECT.bit @N6_genvar.v:10:22
+              (IDENT:a @N6_genvar.v:10:22)
+              (NUMBER.dec [SIGNED] @N6_genvar.v:10:24 32'sd2)
+              _)))))
+    (GEN_BLOCK:h @N6_genvar.v:9:35
+      (NUMBER.dec [SIGNED] @N6_genvar.v:9:35 32'sd3)
+      (CONT_ASSIGN @N6_genvar.v:10:7
+        _
+        _
+        (NET_ASSIGN @N6_genvar.v:10:14
+          (SELECT.bit @N6_genvar.v:10:14
+            (IDENT:z @N6_genvar.v:10:14)
+            (NUMBER.dec [SIGNED] @N6_genvar.v:10:16 32'sd3)
+            _)
+          (UNARY.~ @N6_genvar.v:10:21
+            (SELECT.bit @N6_genvar.v:10:22
+              (IDENT:a @N6_genvar.v:10:22)
+              (NUMBER.dec [SIGNED] @N6_genvar.v:10:24 32'sd3)
+              _)))))))

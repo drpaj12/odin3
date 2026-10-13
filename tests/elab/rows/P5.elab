@@ -1,0 +1,138 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent; key fields hand-checked 2026-10-13
+(UNIT:p5_override @P5_parameter_override.v:6:1
+  (MODULE:p5_override @P5_parameter_override.v:6:1
+    _
+    (LIST @P5_parameter_override.v:6:20
+      (PORT_DECL.input [IN_HEADER NET=1] @P5_parameter_override.v:6:21
+        (RANGE @P5_parameter_override.v:6:27
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:28 32'sd7)
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:30 32'sd0))
+        (DECLARATOR:a @P5_parameter_override.v:6:33
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P5_parameter_override.v:6:36
+        (RANGE @P5_parameter_override.v:6:43
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:44 32'sd7)
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:46 32'sd0))
+        (DECLARATOR:y1 @P5_parameter_override.v:6:49
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P5_parameter_override.v:6:36
+        (RANGE @P5_parameter_override.v:6:43
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:44 32'sd7)
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:46 32'sd0))
+        (DECLARATOR:y2 @P5_parameter_override.v:6:53
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P5_parameter_override.v:6:36
+        (RANGE @P5_parameter_override.v:6:43
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:44 32'sd7)
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:46 32'sd0))
+        (DECLARATOR:y3 @P5_parameter_override.v:6:57
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P5_parameter_override.v:6:36
+        (RANGE @P5_parameter_override.v:6:43
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:44 32'sd7)
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:46 32'sd0))
+        (DECLARATOR:y4 @P5_parameter_override.v:6:61
+          _)))
+    (INSTANTIATION:p5_leaf$W=8 @P5_parameter_override.v:7:3
+      (LIST @P5_parameter_override.v:7:3
+        (CONNECTION:W @P5_parameter_override.v:7:3
+          (NUMBER.bin [SIGNED] @P5_parameter_override.v:7:3 32'sb00000000000000000000000000001000))
+        (CONNECTION:D @P5_parameter_override.v:7:3
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:7:3 2)))
+      (INSTANCE:u1 @P5_parameter_override.v:7:16
+        _
+        (CONNECTION:a @P5_parameter_override.v:7:20
+          (IDENT:a @P5_parameter_override.v:7:23))
+        (CONNECTION:y @P5_parameter_override.v:7:27
+          (IDENT:y1 @P5_parameter_override.v:7:30))))
+    (INSTANTIATION:p5_leaf$W=8$D=3 @P5_parameter_override.v:8:3
+      (LIST @P5_parameter_override.v:8:3
+        (CONNECTION:W @P5_parameter_override.v:8:3
+          (NUMBER.bin [SIGNED] @P5_parameter_override.v:8:3 32'sb00000000000000000000000000001000))
+        (CONNECTION:D @P5_parameter_override.v:8:3
+          (NUMBER.bin [SIGNED] @P5_parameter_override.v:8:3 32'sb00000000000000000000000000000011)))
+      (INSTANCE:u2 @P5_parameter_override.v:8:19
+        _
+        (CONNECTION:a @P5_parameter_override.v:8:23
+          (IDENT:a @P5_parameter_override.v:8:26))
+        (CONNECTION:y @P5_parameter_override.v:8:30
+          (IDENT:y2 @P5_parameter_override.v:8:33))))
+    (INSTANTIATION:p5_leaf$W=8 @P5_parameter_override.v:9:3
+      (LIST @P5_parameter_override.v:9:3
+        (CONNECTION:W @P5_parameter_override.v:9:3
+          (NUMBER.bin [SIGNED] @P5_parameter_override.v:9:3 32'sb00000000000000000000000000001000))
+        (CONNECTION:D @P5_parameter_override.v:9:3
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:9:3 2)))
+      (INSTANCE:u3 @P5_parameter_override.v:9:20
+        _
+        (CONNECTION:a @P5_parameter_override.v:9:24
+          (IDENT:a @P5_parameter_override.v:9:27))
+        (CONNECTION:y @P5_parameter_override.v:9:31
+          (IDENT:y3 @P5_parameter_override.v:9:34))))
+    (INSTANTIATION:p5_leaf$W=8 @P5_parameter_override.v:10:3
+      (LIST @P5_parameter_override.v:10:3
+        (CONNECTION:W @P5_parameter_override.v:10:3
+          (NUMBER.bin [SIGNED] @P5_parameter_override.v:10:3 32'sb00000000000000000000000000001000))
+        (CONNECTION:D @P5_parameter_override.v:10:3
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:10:3 2)))
+      (INSTANCE:u4 @P5_parameter_override.v:10:26
+        _
+        (CONNECTION:a @P5_parameter_override.v:10:30
+          (IDENT:a @P5_parameter_override.v:10:33))
+        (CONNECTION:y @P5_parameter_override.v:10:37
+          (IDENT:y4 @P5_parameter_override.v:10:40)))))
+  (MODULE:p5_leaf$W=8 @P5_parameter_override.v:2:1
+    (LIST @P5_parameter_override.v:2:16
+      (PARAM_DECL.localparam [IN_HEADER] @P5_parameter_override.v:2:18
+        _
+        (DECLARATOR:W @P5_parameter_override.v:2:28
+          (NUMBER.bin [SIGNED] @P5_parameter_override.v:2:28 32'sb00000000000000000000000000001000))
+        (DECLARATOR:D @P5_parameter_override.v:2:35
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:35 2))))
+    (LIST @P5_parameter_override.v:2:42
+      (PORT_DECL.input [IN_HEADER NET=1] @P5_parameter_override.v:2:43
+        (RANGE @P5_parameter_override.v:2:49
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:50 32'sd7)
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:54 32'sd0))
+        (DECLARATOR:a @P5_parameter_override.v:2:57
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P5_parameter_override.v:2:60
+        (RANGE @P5_parameter_override.v:2:67
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:68 32'sd7)
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:72 32'sd0))
+        (DECLARATOR:y @P5_parameter_override.v:2:75
+          _)))
+    (CONT_ASSIGN @P5_parameter_override.v:3:3
+      _
+      _
+      (NET_ASSIGN @P5_parameter_override.v:3:10
+        (IDENT:y @P5_parameter_override.v:3:10)
+        (IDENT:a @P5_parameter_override.v:3:14))))
+  (MODULE:p5_leaf$W=8$D=3 @P5_parameter_override.v:2:1
+    (LIST @P5_parameter_override.v:2:16
+      (PARAM_DECL.localparam [IN_HEADER] @P5_parameter_override.v:2:18
+        _
+        (DECLARATOR:W @P5_parameter_override.v:2:28
+          (NUMBER.bin [SIGNED] @P5_parameter_override.v:2:28 32'sb00000000000000000000000000001000))
+        (DECLARATOR:D @P5_parameter_override.v:2:35
+          (NUMBER.bin [SIGNED] @P5_parameter_override.v:2:35 32'sb00000000000000000000000000000011))))
+    (LIST @P5_parameter_override.v:2:42
+      (PORT_DECL.input [IN_HEADER NET=1] @P5_parameter_override.v:2:43
+        (RANGE @P5_parameter_override.v:2:49
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:50 32'sd7)
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:54 32'sd0))
+        (DECLARATOR:a @P5_parameter_override.v:2:57
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P5_parameter_override.v:2:60
+        (RANGE @P5_parameter_override.v:2:67
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:68 32'sd7)
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:72 32'sd0))
+        (DECLARATOR:y @P5_parameter_override.v:2:75
+          _)))
+    (CONT_ASSIGN @P5_parameter_override.v:3:3
+      _
+      _
+      (NET_ASSIGN @P5_parameter_override.v:3:10
+        (IDENT:y @P5_parameter_override.v:3:10)
+        (IDENT:a @P5_parameter_override.v:3:14)))))

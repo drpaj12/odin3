@@ -1,0 +1,89 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent
+(UNIT:n12_multidim @N12_multidim_arrays.v:2:1
+  (MODULE:n12_multidim @N12_multidim_arrays.v:2:1
+    _
+    (LIST @N12_multidim_arrays.v:2:21
+      (PORT_DECL.input [IN_HEADER NET=1] @N12_multidim_arrays.v:2:22
+        (RANGE @N12_multidim_arrays.v:2:28
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:2:29 32'sd1)
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:2:31 32'sd0))
+        (DECLARATOR:i @N12_multidim_arrays.v:2:34
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @N12_multidim_arrays.v:2:22
+        (RANGE @N12_multidim_arrays.v:2:28
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:2:29 32'sd1)
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:2:31 32'sd0))
+        (DECLARATOR:j @N12_multidim_arrays.v:2:37
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N12_multidim_arrays.v:2:40
+        (RANGE @N12_multidim_arrays.v:2:47
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:2:48 32'sd7)
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:2:50 32'sd0))
+        (DECLARATOR:y @N12_multidim_arrays.v:2:53
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N12_multidim_arrays.v:2:56
+        _
+        (DECLARATOR:z @N12_multidim_arrays.v:2:63
+          _)))
+    (VAR_DECL.reg @N12_multidim_arrays.v:3:3
+      (RANGE @N12_multidim_arrays.v:3:7
+        (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:3:8 32'sd7)
+        (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:3:10 32'sd0))
+      (DECLARATOR:m2 @N12_multidim_arrays.v:3:13
+        _
+        (RANGE @N12_multidim_arrays.v:3:16
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:3:17 32'sd0)
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:3:19 32'sd3))
+        (RANGE @N12_multidim_arrays.v:3:21
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:3:22 32'sd0)
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:3:24 32'sd1))))
+    (VAR_DECL.reg @N12_multidim_arrays.v:4:3
+      _
+      (DECLARATOR:m3 @N12_multidim_arrays.v:4:7
+        _
+        (RANGE @N12_multidim_arrays.v:4:10
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:4:11 32'sd1)
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:4:13 32'sd0))
+        (RANGE @N12_multidim_arrays.v:4:15
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:4:16 32'sd1)
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:4:18 32'sd0))
+        (RANGE @N12_multidim_arrays.v:4:20
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:4:21 32'sd1)
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:4:23 32'sd0))))
+    (CONT_ASSIGN @N12_multidim_arrays.v:5:3
+      _
+      _
+      (NET_ASSIGN @N12_multidim_arrays.v:5:10
+        (IDENT:y @N12_multidim_arrays.v:5:10)
+        (SELECT.bit @N12_multidim_arrays.v:5:14
+          (SELECT.bit @N12_multidim_arrays.v:5:14
+            (IDENT:m2 @N12_multidim_arrays.v:5:14)
+            (IDENT:i @N12_multidim_arrays.v:5:17)
+            _)
+          (SELECT.bit @N12_multidim_arrays.v:5:20
+            (IDENT:j @N12_multidim_arrays.v:5:20)
+            (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:5:22 0)
+            _)
+          _)))
+    (CONT_ASSIGN @N12_multidim_arrays.v:6:3
+      _
+      _
+      (NET_ASSIGN @N12_multidim_arrays.v:6:10
+        (IDENT:z @N12_multidim_arrays.v:6:10)
+        (SELECT.bit @N12_multidim_arrays.v:6:14
+          (SELECT.bit @N12_multidim_arrays.v:6:14
+            (SELECT.bit @N12_multidim_arrays.v:6:14
+              (IDENT:m3 @N12_multidim_arrays.v:6:14)
+              (SELECT.bit @N12_multidim_arrays.v:6:17
+                (IDENT:i @N12_multidim_arrays.v:6:17)
+                (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:6:19 0)
+                _)
+              _)
+            (SELECT.bit @N12_multidim_arrays.v:6:23
+              (IDENT:j @N12_multidim_arrays.v:6:23)
+              (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:6:25 0)
+              _)
+            _)
+          (NUMBER.dec [SIGNED] @N12_multidim_arrays.v:6:29 1)
+          _)))))

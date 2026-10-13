@@ -1,0 +1,69 @@
+# generated: elab-check --write
+(UNIT:s4_readmem @S4_readmem.v:2:1
+  (MODULE:s4_readmem @S4_readmem.v:2:1
+    _
+    (LIST @S4_readmem.v:2:19
+      (PORT_DECL.input [IN_HEADER NET=1] @S4_readmem.v:2:20
+        (RANGE @S4_readmem.v:2:26
+          (NUMBER.dec [SIGNED] @S4_readmem.v:2:27 32'sd3)
+          (NUMBER.dec [SIGNED] @S4_readmem.v:2:29 32'sd0))
+        (DECLARATOR:addr @S4_readmem.v:2:32
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @S4_readmem.v:2:38
+        (RANGE @S4_readmem.v:2:45
+          (NUMBER.dec [SIGNED] @S4_readmem.v:2:46 32'sd7)
+          (NUMBER.dec [SIGNED] @S4_readmem.v:2:48 32'sd0))
+        (DECLARATOR:y @S4_readmem.v:2:51
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @S4_readmem.v:2:38
+        (RANGE @S4_readmem.v:2:45
+          (NUMBER.dec [SIGNED] @S4_readmem.v:2:46 32'sd7)
+          (NUMBER.dec [SIGNED] @S4_readmem.v:2:48 32'sd0))
+        (DECLARATOR:z @S4_readmem.v:2:54
+          _)))
+    (VAR_DECL.reg @S4_readmem.v:3:3
+      (RANGE @S4_readmem.v:3:7
+        (NUMBER.dec [SIGNED] @S4_readmem.v:3:8 32'sd7)
+        (NUMBER.dec [SIGNED] @S4_readmem.v:3:10 32'sd0))
+      (DECLARATOR:rom_h @S4_readmem.v:3:13
+        _
+        (RANGE @S4_readmem.v:3:19
+          (NUMBER.dec [SIGNED] @S4_readmem.v:3:20 32'sd0)
+          (NUMBER.dec [SIGNED] @S4_readmem.v:3:22 32'sd15))))
+    (VAR_DECL.reg @S4_readmem.v:4:3
+      (RANGE @S4_readmem.v:4:7
+        (NUMBER.dec [SIGNED] @S4_readmem.v:4:8 32'sd7)
+        (NUMBER.dec [SIGNED] @S4_readmem.v:4:10 32'sd0))
+      (DECLARATOR:rom_b @S4_readmem.v:4:13
+        _
+        (RANGE @S4_readmem.v:4:19
+          (NUMBER.dec [SIGNED] @S4_readmem.v:4:20 32'sd0)
+          (NUMBER.dec [SIGNED] @S4_readmem.v:4:22 32'sd15))))
+    (INITIAL @S4_readmem.v:5:3
+      (TASK_CALL:$readmemh [SYSTEM] @S4_readmem.v:5:11
+        (STRING:"s4_rom.hex" @S4_readmem.v:5:21)
+        (IDENT:rom_h @S4_readmem.v:5:35)))
+    (INITIAL @S4_readmem.v:6:3
+      (TASK_CALL:$readmemb [SYSTEM] @S4_readmem.v:6:11
+        (STRING:"s4_rom.bin" @S4_readmem.v:6:21)
+        (IDENT:rom_b @S4_readmem.v:6:35)
+        (NUMBER.dec [SIGNED] @S4_readmem.v:6:42 0)
+        (NUMBER.dec [SIGNED] @S4_readmem.v:6:45 15)))
+    (CONT_ASSIGN @S4_readmem.v:7:3
+      _
+      _
+      (NET_ASSIGN @S4_readmem.v:7:10
+        (IDENT:y @S4_readmem.v:7:10)
+        (SELECT.bit @S4_readmem.v:7:14
+          (IDENT:rom_h @S4_readmem.v:7:14)
+          (IDENT:addr @S4_readmem.v:7:20)
+          _)))
+    (CONT_ASSIGN @S4_readmem.v:8:3
+      _
+      _
+      (NET_ASSIGN @S4_readmem.v:8:10
+        (IDENT:z @S4_readmem.v:8:10)
+        (SELECT.bit @S4_readmem.v:8:14
+          (IDENT:rom_b @S4_readmem.v:8:14)
+          (IDENT:addr @S4_readmem.v:8:20)
+          _)))))

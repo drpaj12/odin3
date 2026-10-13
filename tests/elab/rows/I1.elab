@@ -1,0 +1,100 @@
+# generated: elab-check --write
+(UNIT:i1_instances @I1_module_instances.v:7:1
+  (MODULE:i1_instances @I1_module_instances.v:7:1
+    _
+    (LIST @I1_module_instances.v:7:21
+      (PORT_DECL.input [IN_HEADER NET=1] @I1_module_instances.v:7:22
+        _
+        (DECLARATOR:p @I1_module_instances.v:7:28
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @I1_module_instances.v:7:22
+        _
+        (DECLARATOR:q @I1_module_instances.v:7:31
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @I1_module_instances.v:7:34
+        _
+        (DECLARATOR:r1 @I1_module_instances.v:7:41
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @I1_module_instances.v:7:34
+        _
+        (DECLARATOR:r2 @I1_module_instances.v:7:45
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @I1_module_instances.v:7:34
+        _
+        (DECLARATOR:r3 @I1_module_instances.v:7:49
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @I1_module_instances.v:7:34
+        _
+        (DECLARATOR:r4 @I1_module_instances.v:7:53
+          _)))
+    (INSTANTIATION:i1_leaf @I1_module_instances.v:8:3
+      _
+      (INSTANCE:u_ordered @I1_module_instances.v:8:11
+        _
+        (CONNECTION:a @I1_module_instances.v:8:22
+          (IDENT:p @I1_module_instances.v:8:22))
+        (CONNECTION:b @I1_module_instances.v:8:25
+          (IDENT:q @I1_module_instances.v:8:25))
+        (CONNECTION:y @I1_module_instances.v:8:28
+          (IDENT:r1 @I1_module_instances.v:8:28))
+        (CONNECTION:z @I1_module_instances.v:8:32
+          (IDENT:r2 @I1_module_instances.v:8:32))))
+    (INSTANTIATION:i1_leaf @I1_module_instances.v:9:3
+      _
+      (INSTANCE:u_named @I1_module_instances.v:9:11
+        _
+        (CONNECTION:a @I1_module_instances.v:9:20
+          (IDENT:p @I1_module_instances.v:9:23))
+        (CONNECTION:b @I1_module_instances.v:9:27
+          (IDENT:q @I1_module_instances.v:9:30))
+        (CONNECTION:y @I1_module_instances.v:9:34
+          (IDENT:r3 @I1_module_instances.v:9:37))
+        (CONNECTION:z @I1_module_instances.v:9:42
+          _)))
+    (INSTANTIATION:i1_leaf @I1_module_instances.v:10:3
+      _
+      (INSTANCE:u_empty @I1_module_instances.v:10:11
+        _
+        (CONNECTION:a @I1_module_instances.v:10:20
+          (IDENT:p @I1_module_instances.v:10:20))
+        (CONNECTION:b @I1_module_instances.v:10:22
+          _)
+        (CONNECTION:y @I1_module_instances.v:10:25
+          (IDENT:r4 @I1_module_instances.v:10:25))
+        (CONNECTION:z @I1_module_instances.v:10:28
+          _))))
+  (MODULE:i1_leaf @I1_module_instances.v:2:1
+    _
+    (LIST @I1_module_instances.v:2:16
+      (PORT_DECL.input [IN_HEADER NET=1] @I1_module_instances.v:2:17
+        _
+        (DECLARATOR:a @I1_module_instances.v:2:23
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @I1_module_instances.v:2:17
+        _
+        (DECLARATOR:b @I1_module_instances.v:2:26
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @I1_module_instances.v:2:29
+        _
+        (DECLARATOR:y @I1_module_instances.v:2:36
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @I1_module_instances.v:2:29
+        _
+        (DECLARATOR:z @I1_module_instances.v:2:39
+          _)))
+    (CONT_ASSIGN @I1_module_instances.v:3:3
+      _
+      _
+      (NET_ASSIGN @I1_module_instances.v:3:10
+        (IDENT:y @I1_module_instances.v:3:10)
+        (BINARY.& @I1_module_instances.v:3:14
+          (IDENT:a @I1_module_instances.v:3:14)
+          (IDENT:b @I1_module_instances.v:3:18))))
+    (CONT_ASSIGN @I1_module_instances.v:4:3
+      _
+      _
+      (NET_ASSIGN @I1_module_instances.v:4:10
+        (IDENT:z @I1_module_instances.v:4:10)
+        (BINARY.| @I1_module_instances.v:4:14
+          (IDENT:a @I1_module_instances.v:4:14)
+          (IDENT:b @I1_module_instances.v:4:18))))))

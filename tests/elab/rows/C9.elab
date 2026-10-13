@@ -1,0 +1,41 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent
+(UNIT:c9_xz_items @C9_xz_in_plain_case.v:2:1
+  (MODULE:c9_xz_items @C9_xz_in_plain_case.v:2:1
+    _
+    (LIST @C9_xz_in_plain_case.v:2:20
+      (PORT_DECL.input [IN_HEADER NET=1] @C9_xz_in_plain_case.v:2:21
+        (RANGE @C9_xz_in_plain_case.v:2:27
+          (NUMBER.dec [SIGNED] @C9_xz_in_plain_case.v:2:28 32'sd1)
+          (NUMBER.dec [SIGNED] @C9_xz_in_plain_case.v:2:30 32'sd0))
+        (DECLARATOR:s @C9_xz_in_plain_case.v:2:33
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C9_xz_in_plain_case.v:2:36
+        (RANGE @C9_xz_in_plain_case.v:2:47
+          (NUMBER.dec [SIGNED] @C9_xz_in_plain_case.v:2:48 32'sd1)
+          (NUMBER.dec [SIGNED] @C9_xz_in_plain_case.v:2:50 32'sd0))
+        (DECLARATOR:y @C9_xz_in_plain_case.v:2:53
+          _)))
+    (ALWAYS.always @C9_xz_in_plain_case.v:3:3
+      (TIMING_STMT @C9_xz_in_plain_case.v:3:10
+        (EVENT_CONTROL [STAR] @C9_xz_in_plain_case.v:3:10
+          _)
+        (CASE.case @C9_xz_in_plain_case.v:4:5
+          (IDENT:s @C9_xz_in_plain_case.v:4:11)
+          (CASE_ITEM @C9_xz_in_plain_case.v:5:7
+            (BLOCKING_ASSIGN @C9_xz_in_plain_case.v:5:14
+              (IDENT:y @C9_xz_in_plain_case.v:5:14)
+              _
+              (NUMBER.dec @C9_xz_in_plain_case.v:5:18 2'd1))
+            (NUMBER.bin @C9_xz_in_plain_case.v:5:7 2'b0x))
+          (CASE_ITEM @C9_xz_in_plain_case.v:6:7
+            (BLOCKING_ASSIGN @C9_xz_in_plain_case.v:6:14
+              (IDENT:y @C9_xz_in_plain_case.v:6:14)
+              _
+              (NUMBER.dec @C9_xz_in_plain_case.v:6:18 2'd2))
+            (NUMBER.bin @C9_xz_in_plain_case.v:6:7 2'b1z))
+          (CASE_ITEM [DEFAULT] @C9_xz_in_plain_case.v:7:7
+            (BLOCKING_ASSIGN @C9_xz_in_plain_case.v:7:16
+              (IDENT:y @C9_xz_in_plain_case.v:7:16)
+              _
+              (NUMBER.dec @C9_xz_in_plain_case.v:7:20 2'd0))))))))

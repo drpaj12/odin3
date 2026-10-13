@@ -1,0 +1,91 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent; key fields hand-checked 2026-10-13
+(UNIT:k8_automatic @K8_automatic_recursive.v:2:1
+  (MODULE:k8_automatic @K8_automatic_recursive.v:2:1
+    _
+    (LIST @K8_automatic_recursive.v:2:21
+      (PORT_DECL.input [IN_HEADER NET=1] @K8_automatic_recursive.v:2:22
+        _
+        (DECLARATOR:clk @K8_automatic_recursive.v:2:28
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @K8_automatic_recursive.v:2:33
+        (RANGE @K8_automatic_recursive.v:2:39
+          (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:2:40 32'sd3)
+          (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:2:42 32'sd0))
+        (DECLARATOR:a @K8_automatic_recursive.v:2:45
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @K8_automatic_recursive.v:2:48
+        (RANGE @K8_automatic_recursive.v:2:55
+          (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:2:56 32'sd31)
+          (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:2:59 32'sd0))
+        (DECLARATOR:y @K8_automatic_recursive.v:2:62
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @K8_automatic_recursive.v:2:65
+        (RANGE @K8_automatic_recursive.v:2:76
+          (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:2:77 32'sd3)
+          (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:2:79 32'sd0))
+        (DECLARATOR:q @K8_automatic_recursive.v:2:82
+          _)))
+    (FUNCTION_DECL:fact [AUTOMATIC DT=2] @K8_automatic_recursive.v:3:3
+      _
+      (LIST @K8_automatic_recursive.v:3:36
+        (PORT_DECL.input [IN_HEADER DT=2] @K8_automatic_recursive.v:3:36
+          _
+          (DECLARATOR:n @K8_automatic_recursive.v:3:50
+            _)))
+      (LIST @K8_automatic_recursive.v:3:53)
+      (IF @K8_automatic_recursive.v:4:5
+        (BINARY.<= @K8_automatic_recursive.v:4:9
+          (IDENT:n @K8_automatic_recursive.v:4:9)
+          (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:4:14 1))
+        (BLOCKING_ASSIGN @K8_automatic_recursive.v:5:7
+          (IDENT:fact @K8_automatic_recursive.v:5:7)
+          _
+          (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:5:14 1))
+        (BLOCKING_ASSIGN @K8_automatic_recursive.v:7:7
+          (IDENT:fact @K8_automatic_recursive.v:7:7)
+          _
+          (BINARY.* @K8_automatic_recursive.v:7:14
+            (IDENT:n @K8_automatic_recursive.v:7:14)
+            (CALL:fact @K8_automatic_recursive.v:7:18
+              (BINARY.- @K8_automatic_recursive.v:7:23
+                (IDENT:n @K8_automatic_recursive.v:7:23)
+                (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:7:27 1)))))))
+    (TASK_DECL:copy [AUTOMATIC] @K8_automatic_recursive.v:9:3
+      (LIST @K8_automatic_recursive.v:9:24
+        (PORT_DECL.input [IN_HEADER NET=1] @K8_automatic_recursive.v:9:24
+          (RANGE @K8_automatic_recursive.v:9:30
+            (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:9:31 32'sd3)
+            (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:9:33 32'sd0))
+          (DECLARATOR:src @K8_automatic_recursive.v:9:36
+            _))
+        (PORT_DECL.output [IN_HEADER NET=1] @K8_automatic_recursive.v:9:41
+          (RANGE @K8_automatic_recursive.v:9:48
+            (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:9:49 32'sd3)
+            (NUMBER.dec [SIGNED] @K8_automatic_recursive.v:9:51 32'sd0))
+          (DECLARATOR:dst @K8_automatic_recursive.v:9:54
+            _)))
+      (LIST @K8_automatic_recursive.v:9:59)
+      (BLOCKING_ASSIGN @K8_automatic_recursive.v:10:5
+        (IDENT:dst @K8_automatic_recursive.v:10:5)
+        _
+        (IDENT:src @K8_automatic_recursive.v:10:11)))
+    (PARAM_DECL.localparam @K8_automatic_recursive.v:12:3
+      _
+      (DECLARATOR:F4 @K8_automatic_recursive.v:12:14
+        (NUMBER.bin [SIGNED] @K8_automatic_recursive.v:12:14 32'sb00000000000000000000000000011000)))
+    (CONT_ASSIGN @K8_automatic_recursive.v:13:3
+      _
+      _
+      (NET_ASSIGN @K8_automatic_recursive.v:13:10
+        (IDENT:y @K8_automatic_recursive.v:13:10)
+        (IDENT:F4 @K8_automatic_recursive.v:13:14)))
+    (ALWAYS.always @K8_automatic_recursive.v:14:3
+      (TIMING_STMT @K8_automatic_recursive.v:14:10
+        (EVENT_CONTROL @K8_automatic_recursive.v:14:10
+          _
+          (EVENT_EXPR.posedge @K8_automatic_recursive.v:14:12
+            (IDENT:clk @K8_automatic_recursive.v:14:20)))
+        (TASK_CALL:copy @K8_automatic_recursive.v:15:5
+          (IDENT:a @K8_automatic_recursive.v:15:10)
+          (IDENT:q @K8_automatic_recursive.v:15:13))))))

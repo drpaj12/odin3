@@ -1,0 +1,29 @@
+# generated: elab-check --write
+(UNIT:n3_reg @N3_reg.v:2:1
+  (MODULE:n3_reg @N3_reg.v:2:1
+    _
+    _
+    (VAR_DECL.reg @N3_reg.v:3:3
+      _
+      (DECLARATOR:s @N3_reg.v:3:7
+        _))
+    (VAR_DECL.reg @N3_reg.v:4:3
+      (RANGE @N3_reg.v:4:7
+        (NUMBER.dec [SIGNED] @N3_reg.v:4:8 32'sd7)
+        (NUMBER.dec [SIGNED] @N3_reg.v:4:10 32'sd0))
+      (DECLARATOR:r @N3_reg.v:4:13
+        _))
+    (VAR_DECL.reg @N3_reg.v:5:3
+      (RANGE @N3_reg.v:5:7
+        (NUMBER.dec [SIGNED] @N3_reg.v:5:8 32'sd3)
+        (NUMBER.dec [SIGNED] @N3_reg.v:5:10 32'sd0))
+      (DECLARATOR:a @N3_reg.v:5:13
+        _)
+      (DECLARATOR:b @N3_reg.v:5:16
+        _))
+    (VAR_DECL.reg @N3_reg.v:6:3
+      _
+      (DECLARATOR:p @N3_reg.v:6:7
+        _)
+      (DECLARATOR:q @N3_reg.v:6:10
+        _))))

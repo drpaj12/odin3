@@ -31,9 +31,12 @@ Exit codes: 0 equivalent; 1 NOT equivalent, only when ``equiv-check`` exits 1 *a
 ``equiv-check: NOT equivalent`` verdict line; 2 error: a tool named on the command line that is
 not an executable, a child that failed or crashed (any exit but 0 from odin3 or Yosys, an exit
 other than 0/1 from ``equiv-check``, an exit 1 without its verdict line such as a Python
-traceback or a ``systemd-run`` that cannot find the program), a bad argument; 77 skipped (an ASan
-child and no ``systemd-run``: it cannot be capped). A driver that gates on "differs" tests
-for exit 1 only.
+traceback or a ``systemd-run`` that cannot find the program), a bad argument; 3 oracle crash
+(Task 26: Yosys died of a signal other than the cap's SIGKILL on side B, the Yosys read of the
+source, or while odin3 itself rejected the file: Yosys 0.55 segfaults on recursive instantiation,
+where 2D reports "recursive instantiation of 'top'"; neither a mismatch nor a 2D failure); 77
+skipped (an ASan child and no ``systemd-run``: it cannot be capped). A child killed by its cap is
+reported ``out of memory (cap 4G)``. A driver that gates on "differs" tests for exit 1 only.
 """
 
 from __future__ import annotations
@@ -51,9 +54,12 @@ from pathlib import Path
 import memcap
 
 TOOL = "elab-equiv"
-GIB = 1 << 30
+GIB, MIB = 1 << 30, 1 << 20
 DEFAULT_CAP = 4 * GIB  # plan point (n): 4 GiB per child by default
-EXIT_EQUAL, EXIT_DIFFER, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
+EXIT_EQUAL, EXIT_DIFFER, EXIT_ERROR, EXIT_ORACLE_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
+SIGKILL = 9  # how a cgroup's MemoryMax ends a child
+CRASH_SIGNALS = (4, 6, 7, 8, 11)  # SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV
+SHELL_SIGNAL = 128  # a shell reports a signal as 128 + n
 # equiv-check's own verdict line for exit 1 (tools/equiv-check): without it exit 1 is a crash.
 NOT_EQUIVALENT_RE = re.compile(r"^equiv-check: NOT equivalent\b", re.MULTILINE)
 TAIL_LINES = 20  # lines of a failing child's output shown
@@ -72,6 +78,32 @@ class EquivError(Exception):
     """A usage error or a failing child (exit code 2)."""
 
 
+class OracleCrash(Exception):
+    """Yosys died of a signal (exit code 3): the oracle's bug, not a verdict on 2D."""
+
+
+def format_cap(cap: int) -> str:
+    """A cap as the reports spell it: 4G, 512M, else bytes."""
+    if cap % GIB == 0:
+        return f"{cap // GIB}G"
+    return f"{cap // MIB}M" if cap % MIB == 0 else str(cap)
+
+
+def signal_of(code: int) -> int | None:
+    """The signal that ended a child (a negative status, or a shell's 128 + n), else None."""
+    if code < 0:
+        return -code
+    return code - SHELL_SIGNAL if code > SHELL_SIGNAL else None
+
+
+def killed_by_cap(code: int) -> bool:
+    return signal_of(code) == SIGKILL
+
+
+def crashed(code: int) -> bool:
+    return signal_of(code) in CRASH_SIGNALS
+
+
 @dataclass
 class Options:
     odin3: str
@@ -84,6 +116,19 @@ class Options:
     allow_version: str | None
     a_only: bool
     unmap: bool = False
+
+
+def wants_auto_blackbox(source: Path) -> bool:
+    """True when the file's head holds the ``// elab-check: ... --auto-blackbox`` directive, the
+    same in-file spelling elab-check honours (a line after line 1, within the first 1024 bytes)."""
+    try:
+        head = source.read_bytes()[:1024].decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(
+        line.startswith("// elab-check:") and "--auto-blackbox" in line
+        for line in head.split("\n")[1:]
+    )
 
 
 def yosys_script(read: str, top: str | None, blif: str, unmap: bool = False) -> str:
@@ -120,12 +165,19 @@ class Bridge:
         except ValueError as exc:
             raise EquivError(f"memcap refused {argv[0]}: {exc}") from exc
 
-    def must(self, what: str, argv: Sequence[str]) -> None:
-        """A child that has to exit 0."""
+    def must(self, what: str, argv: Sequence[str], oracle: bool = False) -> None:
+        """A child that has to exit 0. ``oracle``: it is Yosys reading the source itself, so a
+        crash is the oracle's (OracleCrash)."""
         done = self.child(argv)
-        if done.returncode != 0:
-            raise EquivError(f"{what} failed (exit {done.returncode}):\n"
-                             f"{tail((done.stdout or '') + (done.stderr or ''))}")
+        code = done.returncode
+        if code == 0:
+            return
+        if oracle and crashed(code):
+            raise OracleCrash(f"{what} crashed (signal {signal_of(code)})")
+        if killed_by_cap(code):
+            raise EquivError(f"{what} failed: out of memory (cap {format_cap(self.opts.cap)})")
+        raise EquivError(f"{what} failed (exit {code}):\n"
+                         f"{tail((done.stdout or '') + (done.stderr or ''))}")
 
     def check_version(self) -> None:
         done = self.child([self.opts.yosys, "-V"])
@@ -136,20 +188,37 @@ class Bridge:
 
     def side_a(self) -> None:
         opts = self.opts
+        flags = "--nolatches --auto-blackbox" if wants_auto_blackbox(opts.source) else "--nolatches"
         odin3 = [opts.odin3, *(["--top", opts.top] if opts.top else []), "-p",
-                 f"read_verilog --nolatches {opts.source}; write_rtlil a.il"]
-        self.must("odin3 (side A)", odin3)
+                 f"read_verilog {flags} {opts.source}; write_rtlil a.il"]
+        try:
+            self.must("odin3 (side A)", odin3)
+        except EquivError as exc:
+            self.probe_oracle(exc)
+            raise
         if not (self.work / "a.il").is_file():
             raise EquivError("odin3 (side A) wrote no a.il")
         self.blif("side A", "read_rtlil a.il", "a.blif")
 
     def side_b(self) -> None:
         read = f"read_verilog -sv -nolatches {self.opts.source}"
-        self.blif("side B", read, "b.blif")
+        self.blif("side B", read, "b.blif", oracle=True)
 
-    def blif(self, what: str, read: str, name: str) -> None:
+    def probe_oracle(self, rejected: EquivError) -> None:
+        """odin3 rejected the file: if Yosys dies of a signal on the same source, that is an
+        oracle crash (recursive instantiation, Task 26), else the rejection stands."""
+        try:
+            self.side_b()
+        except OracleCrash as crash:
+            lines = str(rejected).strip().splitlines()
+            why = next((ln for ln in lines if "error" in ln), lines[-1] if lines else "no output")
+            raise OracleCrash(f"{crash}; odin3 rejected the file: {why}") from crash
+        except EquivError:
+            pass
+
+    def blif(self, what: str, read: str, name: str, oracle: bool = False) -> None:
         script = yosys_script(read, self.opts.top, name, self.opts.unmap)
-        self.must(f"Yosys {what}", [self.opts.yosys, "-p", script])
+        self.must(f"Yosys {what}", [self.opts.yosys, "-p", script], oracle)
         if not (self.work / name).is_file():
             raise EquivError(f"Yosys {what} wrote no {name}")
 
@@ -238,6 +307,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except memcap.CapUnavailable as exc:
         print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
         return EXIT_SKIP
+    except OracleCrash as exc:
+        print(f"{TOOL}: oracle crash: {exc}")
+        return EXIT_ORACLE_CRASH
     except EquivError as exc:
         print(f"{TOOL}: error: {exc}", file=sys.stderr)
         return EXIT_ERROR

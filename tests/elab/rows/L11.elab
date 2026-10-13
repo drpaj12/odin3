@@ -1,0 +1,145 @@
+# generated: elab-check --write
+(UNIT:l11_attributes @L11_attributes.v:3:1
+  (MODULE:l11_attributes @L11_attributes.v:3:1
+    _
+    (LIST @L11_attributes.v:3:23
+      (PORT_DECL.input [IN_HEADER NET=1] @L11_attributes.v:3:36
+        _
+        (DECLARATOR:clk @L11_attributes.v:3:42
+          _)
+        {(ATTR:clock @L11_attributes.v:3:27
+           _)})
+      (PORT_DECL.input [IN_HEADER NET=1] @L11_attributes.v:3:47
+        _
+        (DECLARATOR:a @L11_attributes.v:3:53
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @L11_attributes.v:3:47
+        _
+        (DECLARATOR:b @L11_attributes.v:3:56
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L11_attributes.v:3:59
+        _
+        (DECLARATOR:y @L11_attributes.v:3:66
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L11_attributes.v:3:59
+        _
+        (DECLARATOR:z @L11_attributes.v:3:69
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @L11_attributes.v:3:72
+        _
+        (DECLARATOR:q @L11_attributes.v:3:83
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @L11_attributes.v:3:72
+        _
+        (DECLARATOR:r @L11_attributes.v:3:86
+          _)))
+    (NET_DECL.wire @L11_attributes.v:4:14
+      _
+      _
+      _
+      (DECLARATOR:w @L11_attributes.v:4:19
+        _)
+      {(ATTR:keep @L11_attributes.v:4:6
+         _)})
+    (VAR_DECL.reg @L11_attributes.v:5:47
+      _
+      (DECLARATOR:t @L11_attributes.v:5:51
+        _)
+      {(ATTR:keep @L11_attributes.v:5:6
+         _)
+       (ATTR:init @L11_attributes.v:5:12
+         (STRING:"x" @L11_attributes.v:5:19))
+       (ATTR:dont_touch @L11_attributes.v:5:29
+         (NUMBER.dec [SIGNED] @L11_attributes.v:5:42 1))})
+    (CONT_ASSIGN @L11_attributes.v:6:3
+      _
+      _
+      (NET_ASSIGN @L11_attributes.v:6:10
+        (IDENT:w @L11_attributes.v:6:10)
+        (BINARY.& @L11_attributes.v:6:14
+          (IDENT:a @L11_attributes.v:6:14)
+          (IDENT:b @L11_attributes.v:6:32)
+          {(ATTR:op_attr @L11_attributes.v:6:21
+             _)})))
+    (CONT_ASSIGN @L11_attributes.v:7:3
+      _
+      _
+      (NET_ASSIGN @L11_attributes.v:7:10
+        (IDENT:y @L11_attributes.v:7:10)
+        (UNARY.~ @L11_attributes.v:7:14
+          (IDENT:w @L11_attributes.v:7:33)
+          {(ATTR:unary_attr @L11_attributes.v:7:19
+             _)})))
+    (CONT_ASSIGN @L11_attributes.v:8:3
+      _
+      _
+      (NET_ASSIGN @L11_attributes.v:8:10
+        (IDENT:z @L11_attributes.v:8:10)
+        (TERNARY @L11_attributes.v:8:14
+          (IDENT:a @L11_attributes.v:8:14)
+          (IDENT:b @L11_attributes.v:8:34)
+          (IDENT:w @L11_attributes.v:8:38)
+          {(ATTR:cond_attr @L11_attributes.v:8:21
+             _)})))
+    (ALWAYS.always @L11_attributes.v:9:14
+      (TIMING_STMT @L11_attributes.v:9:21
+        (EVENT_CONTROL @L11_attributes.v:9:21
+          _
+          (EVENT_EXPR.posedge @L11_attributes.v:9:23
+            (IDENT:clk @L11_attributes.v:9:31)))
+        (SEQ_BLOCK @L11_attributes.v:9:36
+          _
+          (NONBLOCKING_ASSIGN @L11_attributes.v:10:21
+            (IDENT:q @L11_attributes.v:10:21)
+            _
+            (IDENT:w @L11_attributes.v:10:26)
+            {(ATTR:stmt_attr @L11_attributes.v:10:8
+               _)})
+          (CASE.case @L11_attributes.v:11:25
+            (IDENT:a @L11_attributes.v:11:31)
+            (CASE_ITEM @L11_attributes.v:12:7
+              (NONBLOCKING_ASSIGN @L11_attributes.v:12:13
+                (IDENT:r @L11_attributes.v:12:13)
+                _
+                (NUMBER.bin @L11_attributes.v:12:18 1'b0))
+              (NUMBER.bin @L11_attributes.v:12:7 1'b0))
+            (CASE_ITEM [DEFAULT] @L11_attributes.v:13:7
+              (NONBLOCKING_ASSIGN @L11_attributes.v:13:16
+                (IDENT:r @L11_attributes.v:13:16)
+                _
+                (NUMBER.bin @L11_attributes.v:13:21 1'b1)))
+            {(ATTR:case_attr @L11_attributes.v:11:8
+               (NUMBER.dec [SIGNED] @L11_attributes.v:11:20 1))})))
+      {(ATTR:proc @L11_attributes.v:9:6
+         _)})
+    (INSTANTIATION:l11_leaf @L11_attributes.v:16:19
+      _
+      (INSTANCE:u @L11_attributes.v:16:28
+        _
+        (CONNECTION:d @L11_attributes.v:16:31
+          (IDENT:a @L11_attributes.v:16:34))
+        (CONNECTION:e @L11_attributes.v:16:38
+          _))
+      {(ATTR:inst_attr @L11_attributes.v:16:6
+         _)})
+    {(ATTR:top_module @L11_attributes.v:2:4
+       _)
+     (ATTR:version @L11_attributes.v:2:16
+       (NUMBER.dec [SIGNED] @L11_attributes.v:2:26 1))})
+  (MODULE:l11_leaf @L11_attributes.v:19:1
+    _
+    (LIST @L11_attributes.v:19:17
+      (PORT_DECL.input [IN_HEADER NET=1] @L11_attributes.v:19:18
+        _
+        (DECLARATOR:d @L11_attributes.v:19:24
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L11_attributes.v:19:27
+        _
+        (DECLARATOR:e @L11_attributes.v:19:34
+          _)))
+    (CONT_ASSIGN @L11_attributes.v:20:3
+      _
+      _
+      (NET_ASSIGN @L11_attributes.v:20:10
+        (IDENT:e @L11_attributes.v:20:10)
+        (IDENT:d @L11_attributes.v:20:14)))))

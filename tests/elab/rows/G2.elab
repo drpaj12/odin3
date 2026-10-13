@@ -1,0 +1,732 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent; key fields hand-checked 2026-10-13
+(UNIT:g2_loop_gen @G2_loop_generate.v:2:1
+  (MODULE:g2_loop_gen @G2_loop_generate.v:2:1
+    _
+    (LIST @G2_loop_generate.v:2:20
+      (PORT_DECL.input [IN_HEADER NET=1] @G2_loop_generate.v:2:21
+        (RANGE @G2_loop_generate.v:2:27
+          (NUMBER.dec [SIGNED] @G2_loop_generate.v:2:28 32'sd7)
+          (NUMBER.dec [SIGNED] @G2_loop_generate.v:2:30 32'sd0))
+        (DECLARATOR:a @G2_loop_generate.v:2:33
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G2_loop_generate.v:2:36
+        (RANGE @G2_loop_generate.v:2:43
+          (NUMBER.dec [SIGNED] @G2_loop_generate.v:2:44 32'sd7)
+          (NUMBER.dec [SIGNED] @G2_loop_generate.v:2:46 32'sd0))
+        (DECLARATOR:y1 @G2_loop_generate.v:2:49
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G2_loop_generate.v:2:36
+        (RANGE @G2_loop_generate.v:2:43
+          (NUMBER.dec [SIGNED] @G2_loop_generate.v:2:44 32'sd7)
+          (NUMBER.dec [SIGNED] @G2_loop_generate.v:2:46 32'sd0))
+        (DECLARATOR:y2 @G2_loop_generate.v:2:53
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G2_loop_generate.v:2:36
+        (RANGE @G2_loop_generate.v:2:43
+          (NUMBER.dec [SIGNED] @G2_loop_generate.v:2:44 32'sd7)
+          (NUMBER.dec [SIGNED] @G2_loop_generate.v:2:46 32'sd0))
+        (DECLARATOR:y4 @G2_loop_generate.v:2:57
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G2_loop_generate.v:2:61
+        (RANGE @G2_loop_generate.v:2:68
+          (NUMBER.dec [SIGNED] @G2_loop_generate.v:2:69 32'sd15)
+          (NUMBER.dec [SIGNED] @G2_loop_generate.v:2:72 32'sd0))
+        (DECLARATOR:y3 @G2_loop_generate.v:2:75
+          _)))
+    (GEN_BLOCK:bitrev @G2_loop_generate.v:5:35
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:5:35 32'sd0)
+      (CONT_ASSIGN @G2_loop_generate.v:6:7
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:6:14
+          (SELECT.bit @G2_loop_generate.v:6:14
+            (IDENT:y1 @G2_loop_generate.v:6:14)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:17 32'sd0)
+            _)
+          (SELECT.bit @G2_loop_generate.v:6:22
+            (IDENT:a @G2_loop_generate.v:6:22)
+            (BINARY.- @G2_loop_generate.v:6:24
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:24 7)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:28 32'sd0))
+            _))))
+    (GEN_BLOCK:bitrev @G2_loop_generate.v:5:35
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:5:35 32'sd1)
+      (CONT_ASSIGN @G2_loop_generate.v:6:7
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:6:14
+          (SELECT.bit @G2_loop_generate.v:6:14
+            (IDENT:y1 @G2_loop_generate.v:6:14)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:17 32'sd1)
+            _)
+          (SELECT.bit @G2_loop_generate.v:6:22
+            (IDENT:a @G2_loop_generate.v:6:22)
+            (BINARY.- @G2_loop_generate.v:6:24
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:24 7)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:28 32'sd1))
+            _))))
+    (GEN_BLOCK:bitrev @G2_loop_generate.v:5:35
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:5:35 32'sd2)
+      (CONT_ASSIGN @G2_loop_generate.v:6:7
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:6:14
+          (SELECT.bit @G2_loop_generate.v:6:14
+            (IDENT:y1 @G2_loop_generate.v:6:14)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:17 32'sd2)
+            _)
+          (SELECT.bit @G2_loop_generate.v:6:22
+            (IDENT:a @G2_loop_generate.v:6:22)
+            (BINARY.- @G2_loop_generate.v:6:24
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:24 7)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:28 32'sd2))
+            _))))
+    (GEN_BLOCK:bitrev @G2_loop_generate.v:5:35
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:5:35 32'sd3)
+      (CONT_ASSIGN @G2_loop_generate.v:6:7
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:6:14
+          (SELECT.bit @G2_loop_generate.v:6:14
+            (IDENT:y1 @G2_loop_generate.v:6:14)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:17 32'sd3)
+            _)
+          (SELECT.bit @G2_loop_generate.v:6:22
+            (IDENT:a @G2_loop_generate.v:6:22)
+            (BINARY.- @G2_loop_generate.v:6:24
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:24 7)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:28 32'sd3))
+            _))))
+    (GEN_BLOCK:bitrev @G2_loop_generate.v:5:35
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:5:35 32'sd4)
+      (CONT_ASSIGN @G2_loop_generate.v:6:7
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:6:14
+          (SELECT.bit @G2_loop_generate.v:6:14
+            (IDENT:y1 @G2_loop_generate.v:6:14)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:17 32'sd4)
+            _)
+          (SELECT.bit @G2_loop_generate.v:6:22
+            (IDENT:a @G2_loop_generate.v:6:22)
+            (BINARY.- @G2_loop_generate.v:6:24
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:24 7)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:28 32'sd4))
+            _))))
+    (GEN_BLOCK:bitrev @G2_loop_generate.v:5:35
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:5:35 32'sd5)
+      (CONT_ASSIGN @G2_loop_generate.v:6:7
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:6:14
+          (SELECT.bit @G2_loop_generate.v:6:14
+            (IDENT:y1 @G2_loop_generate.v:6:14)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:17 32'sd5)
+            _)
+          (SELECT.bit @G2_loop_generate.v:6:22
+            (IDENT:a @G2_loop_generate.v:6:22)
+            (BINARY.- @G2_loop_generate.v:6:24
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:24 7)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:28 32'sd5))
+            _))))
+    (GEN_BLOCK:bitrev @G2_loop_generate.v:5:35
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:5:35 32'sd6)
+      (CONT_ASSIGN @G2_loop_generate.v:6:7
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:6:14
+          (SELECT.bit @G2_loop_generate.v:6:14
+            (IDENT:y1 @G2_loop_generate.v:6:14)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:17 32'sd6)
+            _)
+          (SELECT.bit @G2_loop_generate.v:6:22
+            (IDENT:a @G2_loop_generate.v:6:22)
+            (BINARY.- @G2_loop_generate.v:6:24
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:24 7)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:28 32'sd6))
+            _))))
+    (GEN_BLOCK:bitrev @G2_loop_generate.v:5:35
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:5:35 32'sd7)
+      (CONT_ASSIGN @G2_loop_generate.v:6:7
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:6:14
+          (SELECT.bit @G2_loop_generate.v:6:14
+            (IDENT:y1 @G2_loop_generate.v:6:14)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:17 32'sd7)
+            _)
+          (SELECT.bit @G2_loop_generate.v:6:22
+            (IDENT:a @G2_loop_generate.v:6:22)
+            (BINARY.- @G2_loop_generate.v:6:24
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:24 7)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:6:28 32'sd7))
+            _))))
+    (GEN_BLOCK:genblk2 @G2_loop_generate.v:9:33
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:9:33 32'sd0)
+      (CONT_ASSIGN @G2_loop_generate.v:10:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:10:12
+          (SELECT.part_plus @G2_loop_generate.v:10:12
+            (IDENT:y2 @G2_loop_generate.v:10:12)
+            (BINARY.* @G2_loop_generate.v:10:15
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:15 2)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:19 32'sd0))
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:24 32'sd2))
+          (SELECT.part_plus @G2_loop_generate.v:10:29
+            (IDENT:a @G2_loop_generate.v:10:29)
+            (BINARY.* @G2_loop_generate.v:10:31
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:31 2)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:35 32'sd0))
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:40 32'sd2)))))
+    (GEN_BLOCK:genblk2 @G2_loop_generate.v:9:33
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:9:33 32'sd1)
+      (CONT_ASSIGN @G2_loop_generate.v:10:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:10:12
+          (SELECT.part_plus @G2_loop_generate.v:10:12
+            (IDENT:y2 @G2_loop_generate.v:10:12)
+            (BINARY.* @G2_loop_generate.v:10:15
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:15 2)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:19 32'sd1))
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:24 32'sd2))
+          (SELECT.part_plus @G2_loop_generate.v:10:29
+            (IDENT:a @G2_loop_generate.v:10:29)
+            (BINARY.* @G2_loop_generate.v:10:31
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:31 2)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:35 32'sd1))
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:40 32'sd2)))))
+    (GEN_BLOCK:genblk2 @G2_loop_generate.v:9:33
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:9:33 32'sd2)
+      (CONT_ASSIGN @G2_loop_generate.v:10:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:10:12
+          (SELECT.part_plus @G2_loop_generate.v:10:12
+            (IDENT:y2 @G2_loop_generate.v:10:12)
+            (BINARY.* @G2_loop_generate.v:10:15
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:15 2)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:19 32'sd2))
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:24 32'sd2))
+          (SELECT.part_plus @G2_loop_generate.v:10:29
+            (IDENT:a @G2_loop_generate.v:10:29)
+            (BINARY.* @G2_loop_generate.v:10:31
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:31 2)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:35 32'sd2))
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:40 32'sd2)))))
+    (GEN_BLOCK:genblk2 @G2_loop_generate.v:9:33
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:9:33 32'sd3)
+      (CONT_ASSIGN @G2_loop_generate.v:10:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:10:12
+          (SELECT.part_plus @G2_loop_generate.v:10:12
+            (IDENT:y2 @G2_loop_generate.v:10:12)
+            (BINARY.* @G2_loop_generate.v:10:15
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:15 2)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:19 32'sd3))
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:24 32'sd2))
+          (SELECT.part_plus @G2_loop_generate.v:10:29
+            (IDENT:a @G2_loop_generate.v:10:29)
+            (BINARY.* @G2_loop_generate.v:10:31
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:31 2)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:35 32'sd3))
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:10:40 32'sd2)))))
+    (GEN_BLOCK:outer @G2_loop_generate.v:12:33
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:12:33 32'sd0)
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd0)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd0))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd0))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd0)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd0)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd1)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd0))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd1))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd0)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd1)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd2)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd0))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd2))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd0)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd2)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd3)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd0))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd3))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd0)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd3)
+                _))))))
+    (GEN_BLOCK:outer @G2_loop_generate.v:12:33
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:12:33 32'sd1)
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd0)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd1))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd0))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd1)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd0)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd1)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd1))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd1))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd1)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd1)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd2)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd1))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd2))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd1)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd2)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd3)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd1))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd3))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd1)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd3)
+                _))))))
+    (GEN_BLOCK:outer @G2_loop_generate.v:12:33
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:12:33 32'sd2)
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd0)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd2))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd0))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd2)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd0)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd1)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd2))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd1))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd2)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd1)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd2)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd2))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd2))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd2)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd2)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd3)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd2))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd3))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd2)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd3)
+                _))))))
+    (GEN_BLOCK:outer @G2_loop_generate.v:12:33
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:12:33 32'sd3)
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd0)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd3))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd0))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd3)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd0)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd1)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd3))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd1))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd3)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd1)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd2)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd3))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd2))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd3)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd2)
+                _)))))
+      (GEN_BLOCK:inner @G2_loop_generate.v:13:35
+        (NUMBER.dec [SIGNED] @G2_loop_generate.v:13:35 32'sd3)
+        (CONT_ASSIGN @G2_loop_generate.v:14:7
+          _
+          _
+          (NET_ASSIGN @G2_loop_generate.v:14:14
+            (SELECT.bit @G2_loop_generate.v:14:14
+              (IDENT:y3 @G2_loop_generate.v:14:14)
+              (BINARY.+ @G2_loop_generate.v:14:17
+                (BINARY.* @G2_loop_generate.v:14:17
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:17 4)
+                  (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:21 32'sd3))
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:25 32'sd3))
+              _)
+            (BINARY.& @G2_loop_generate.v:14:30
+              (SELECT.bit @G2_loop_generate.v:14:30
+                (IDENT:a @G2_loop_generate.v:14:30)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:32 32'sd3)
+                _)
+              (SELECT.bit @G2_loop_generate.v:14:37
+                (IDENT:a @G2_loop_generate.v:14:37)
+                (NUMBER.dec [SIGNED] @G2_loop_generate.v:14:39 32'sd3)
+                _))))))
+    (GEN_BLOCK:genblk4 @G2_loop_generate.v:18:5
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:5 32'sd0)
+      (CONT_ASSIGN @G2_loop_generate.v:18:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:18:12
+          (SELECT.bit @G2_loop_generate.v:18:12
+            (IDENT:y4 @G2_loop_generate.v:18:12)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:15 32'sd0)
+            _)
+          (UNARY.~ @G2_loop_generate.v:18:20
+            (SELECT.bit @G2_loop_generate.v:18:21
+              (IDENT:a @G2_loop_generate.v:18:21)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:23 32'sd0)
+              _)))))
+    (GEN_BLOCK:genblk4 @G2_loop_generate.v:18:5
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:5 32'sd1)
+      (CONT_ASSIGN @G2_loop_generate.v:18:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:18:12
+          (SELECT.bit @G2_loop_generate.v:18:12
+            (IDENT:y4 @G2_loop_generate.v:18:12)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:15 32'sd1)
+            _)
+          (UNARY.~ @G2_loop_generate.v:18:20
+            (SELECT.bit @G2_loop_generate.v:18:21
+              (IDENT:a @G2_loop_generate.v:18:21)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:23 32'sd1)
+              _)))))
+    (GEN_BLOCK:genblk4 @G2_loop_generate.v:18:5
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:5 32'sd2)
+      (CONT_ASSIGN @G2_loop_generate.v:18:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:18:12
+          (SELECT.bit @G2_loop_generate.v:18:12
+            (IDENT:y4 @G2_loop_generate.v:18:12)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:15 32'sd2)
+            _)
+          (UNARY.~ @G2_loop_generate.v:18:20
+            (SELECT.bit @G2_loop_generate.v:18:21
+              (IDENT:a @G2_loop_generate.v:18:21)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:23 32'sd2)
+              _)))))
+    (GEN_BLOCK:genblk4 @G2_loop_generate.v:18:5
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:5 32'sd3)
+      (CONT_ASSIGN @G2_loop_generate.v:18:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:18:12
+          (SELECT.bit @G2_loop_generate.v:18:12
+            (IDENT:y4 @G2_loop_generate.v:18:12)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:15 32'sd3)
+            _)
+          (UNARY.~ @G2_loop_generate.v:18:20
+            (SELECT.bit @G2_loop_generate.v:18:21
+              (IDENT:a @G2_loop_generate.v:18:21)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:23 32'sd3)
+              _)))))
+    (GEN_BLOCK:genblk4 @G2_loop_generate.v:18:5
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:5 32'sd4)
+      (CONT_ASSIGN @G2_loop_generate.v:18:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:18:12
+          (SELECT.bit @G2_loop_generate.v:18:12
+            (IDENT:y4 @G2_loop_generate.v:18:12)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:15 32'sd4)
+            _)
+          (UNARY.~ @G2_loop_generate.v:18:20
+            (SELECT.bit @G2_loop_generate.v:18:21
+              (IDENT:a @G2_loop_generate.v:18:21)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:23 32'sd4)
+              _)))))
+    (GEN_BLOCK:genblk4 @G2_loop_generate.v:18:5
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:5 32'sd5)
+      (CONT_ASSIGN @G2_loop_generate.v:18:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:18:12
+          (SELECT.bit @G2_loop_generate.v:18:12
+            (IDENT:y4 @G2_loop_generate.v:18:12)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:15 32'sd5)
+            _)
+          (UNARY.~ @G2_loop_generate.v:18:20
+            (SELECT.bit @G2_loop_generate.v:18:21
+              (IDENT:a @G2_loop_generate.v:18:21)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:23 32'sd5)
+              _)))))
+    (GEN_BLOCK:genblk4 @G2_loop_generate.v:18:5
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:5 32'sd6)
+      (CONT_ASSIGN @G2_loop_generate.v:18:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:18:12
+          (SELECT.bit @G2_loop_generate.v:18:12
+            (IDENT:y4 @G2_loop_generate.v:18:12)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:15 32'sd6)
+            _)
+          (UNARY.~ @G2_loop_generate.v:18:20
+            (SELECT.bit @G2_loop_generate.v:18:21
+              (IDENT:a @G2_loop_generate.v:18:21)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:23 32'sd6)
+              _)))))
+    (GEN_BLOCK:genblk4 @G2_loop_generate.v:18:5
+      (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:5 32'sd7)
+      (CONT_ASSIGN @G2_loop_generate.v:18:5
+        _
+        _
+        (NET_ASSIGN @G2_loop_generate.v:18:12
+          (SELECT.bit @G2_loop_generate.v:18:12
+            (IDENT:y4 @G2_loop_generate.v:18:12)
+            (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:15 32'sd7)
+            _)
+          (UNARY.~ @G2_loop_generate.v:18:20
+            (SELECT.bit @G2_loop_generate.v:18:21
+              (IDENT:a @G2_loop_generate.v:18:21)
+              (NUMBER.dec [SIGNED] @G2_loop_generate.v:18:23 32'sd7)
+              _)))))))

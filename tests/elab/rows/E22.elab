@@ -1,0 +1,83 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent
+(UNIT:e22_widths @E22_bit_length_rules.v:2:1
+  (MODULE:e22_widths @E22_bit_length_rules.v:2:1
+    _
+    (LIST @E22_bit_length_rules.v:2:19
+      (PORT_DECL.input [IN_HEADER NET=1] @E22_bit_length_rules.v:2:20
+        (RANGE @E22_bit_length_rules.v:2:26
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:27 32'sd7)
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:29 32'sd0))
+        (DECLARATOR:a @E22_bit_length_rules.v:2:32
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @E22_bit_length_rules.v:2:20
+        (RANGE @E22_bit_length_rules.v:2:26
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:27 32'sd7)
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:29 32'sd0))
+        (DECLARATOR:b @E22_bit_length_rules.v:2:35
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E22_bit_length_rules.v:2:38
+        (RANGE @E22_bit_length_rules.v:2:45
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:46 32'sd7)
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:48 32'sd0))
+        (DECLARATOR:sum1 @E22_bit_length_rules.v:2:51
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E22_bit_length_rules.v:2:38
+        (RANGE @E22_bit_length_rules.v:2:45
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:46 32'sd7)
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:48 32'sd0))
+        (DECLARATOR:sum2 @E22_bit_length_rules.v:2:57
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E22_bit_length_rules.v:2:38
+        (RANGE @E22_bit_length_rules.v:2:45
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:46 32'sd7)
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:48 32'sd0))
+        (DECLARATOR:sum3 @E22_bit_length_rules.v:2:63
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E22_bit_length_rules.v:2:69
+        (RANGE @E22_bit_length_rules.v:2:76
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:77 32'sd8)
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:2:79 32'sd0))
+        (DECLARATOR:wide @E22_bit_length_rules.v:2:82
+          _)))
+    (CONT_ASSIGN @E22_bit_length_rules.v:3:3
+      _
+      _
+      (NET_ASSIGN @E22_bit_length_rules.v:3:10
+        (IDENT:sum1 @E22_bit_length_rules.v:3:10)
+        (BINARY.>> @E22_bit_length_rules.v:3:17
+          (BINARY.+ @E22_bit_length_rules.v:3:18
+            (IDENT:a @E22_bit_length_rules.v:3:18)
+            (IDENT:b @E22_bit_length_rules.v:3:22))
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:3:28 1))))
+    (CONT_ASSIGN @E22_bit_length_rules.v:4:3
+      _
+      _
+      (NET_ASSIGN @E22_bit_length_rules.v:4:10
+        (IDENT:sum2 @E22_bit_length_rules.v:4:10)
+        (BINARY.>> @E22_bit_length_rules.v:4:17
+          (BINARY.+ @E22_bit_length_rules.v:4:18
+            (BINARY.+ @E22_bit_length_rules.v:4:18
+              (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:4:18 0)
+              (IDENT:a @E22_bit_length_rules.v:4:22))
+            (IDENT:b @E22_bit_length_rules.v:4:26))
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:4:32 1))))
+    (CONT_ASSIGN @E22_bit_length_rules.v:5:3
+      _
+      _
+      (NET_ASSIGN @E22_bit_length_rules.v:5:10
+        (IDENT:wide @E22_bit_length_rules.v:5:10)
+        (BINARY.+ @E22_bit_length_rules.v:5:17
+          (IDENT:a @E22_bit_length_rules.v:5:17)
+          (IDENT:b @E22_bit_length_rules.v:5:21))))
+    (CONT_ASSIGN @E22_bit_length_rules.v:6:3
+      _
+      _
+      (NET_ASSIGN @E22_bit_length_rules.v:6:10
+        (IDENT:sum3 @E22_bit_length_rules.v:6:10)
+        (BINARY.>> @E22_bit_length_rules.v:6:17
+          (CONCAT @E22_bit_length_rules.v:6:17
+            (BINARY.+ @E22_bit_length_rules.v:6:18
+              (IDENT:a @E22_bit_length_rules.v:6:18)
+              (IDENT:b @E22_bit_length_rules.v:6:22)))
+          (NUMBER.dec [SIGNED] @E22_bit_length_rules.v:6:28 1))))))
