@@ -16,6 +16,7 @@
 #include "ast/srcman.h"
 #include "ast/symtab.h"
 #include "frontends/elab/elab.h"
+#include "frontends/elab/elab2_mem.h"
 #include "frontends/elab/elab_internal.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
@@ -75,6 +76,8 @@ struct odin3_elab2_drive {
     odin3_u64map *fwd;     /* a net merged away -> the net that replaced it */
     odin3_u64map *always;  /* symbol ID -> offset of its bits in abits */
     odin3_u64map *covered; /* net -> 1: reported by a loop note */
+    odin3_u64map *words;   /* wire ID of a register-array word -> offset of its bits in wbits */
+    odin3_vec wbits;       /* uint8_t: one flag per bit of a word wire assigned in an always */
     odin3_vec wired;       /* wired_rec */
     odin3_vec abits;       /* uint8_t: one flag per bit of an object assigned in an always */
     odin3_vec loops;       /* loop_note */
@@ -96,12 +99,14 @@ void odin3_elab2_drive_free(odin3_elab2 *e2) {
     odin3_vec_free(&dr->info);
     odin3_vec_free(&dr->wired);
     odin3_vec_free(&dr->abits);
+    odin3_vec_free(&dr->wbits);
     odin3_vec_free(&dr->loops);
     odin3_u64map_destroy(dr->claims);
     odin3_u64map_destroy(dr->uwires);
     odin3_u64map_destroy(dr->fwd);
     odin3_u64map_destroy(dr->always);
     odin3_u64map_destroy(dr->covered);
+    odin3_u64map_destroy(dr->words);
     odin3_util_free(dr);
     e2->drive = NULL;
 }
@@ -123,17 +128,19 @@ static struct odin3_elab2_drive *drive_get(odin3_elab2 *e2) {
     odin3_vec_init(&dr->info, sizeof(net_info));
     odin3_vec_init(&dr->wired, sizeof(wired_rec));
     odin3_vec_init(&dr->abits, sizeof(uint8_t));
+    odin3_vec_init(&dr->wbits, sizeof(uint8_t));
     odin3_vec_init(&dr->loops, sizeof(loop_note));
     dr->claims = odin3_u64map_create(0);
     dr->uwires = odin3_u64map_create(0);
     dr->fwd = odin3_u64map_create(0);
     dr->always = odin3_u64map_create(0);
     dr->covered = odin3_u64map_create(0);
+    dr->words = odin3_u64map_create(0);
     odin3_ast_id unit = odin3_ast_root(e2->elab, 0);
     dr->is_top = e2->mod_node.v != 0 && odin3_ast_child(e2->elab, unit, 0).v == e2->mod_node.v;
     e2->drive = dr;
     if (dr->claims == NULL || dr->uwires == NULL || dr->fwd == NULL || dr->always == NULL ||
-        dr->covered == NULL) {
+        dr->covered == NULL || dr->words == NULL) {
         odin3_elab2_drive_free(e2);
         return NULL;
     }
@@ -436,6 +443,11 @@ static void claim_emit(claim_run *run, odin3_loc loc, const claim_text *tx) {
                           tx->label);
         break;
     default:
+        if (run->kind == ODIN3_DRV_PROCESS && run->prev.kind == ODIN3_DRV_PROCESS) { /* T10 */
+            odin3_elab2_error(e2, loc, "'%s' is assigned in two always blocks (also at %s)",
+                              tx->label, tx->place);
+            break;
+        }
         odin3_elab2_error(e2, loc,
                           tx->constant ? "'%s' has two drivers (also driven by %s)"
                                        : "'%s' has two drivers (also driven at %s)",
@@ -860,6 +872,39 @@ bool odin3_elab2_always_assigned(const odin3_elab2 *e2, odin3_sym_id sym, uint32
     uint32_t width =
         rec->ir_wire.v != 0 && rec->n_unpacked == 0 ? odin3_wire_width(e2->mod, rec->ir_wire) : 1U;
     return bit < width && ((const uint8_t *)e2->drive->abits.data)[at + bit] != 0;
+}
+
+odin3_status odin3_elab2_word_assigned(odin3_elab2 *e2, odin3_wire_id wire) {
+    struct odin3_elab2_drive *dr = drive_get(e2);
+    if (dr == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    if (odin3_u64map_get(dr->words, wire.v, NULL)) {
+        return ODIN3_OK;
+    }
+    uint32_t width = odin3_wire_width(e2->mod, wire);
+    size_t at = dr->wbits.len;
+    for (uint32_t i = 0; i < width; i++) {
+        uint8_t *flag = odin3_vec_push(&dr->wbits);
+        if (flag == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *flag = 1;
+    }
+    return odin3_u64map_put(dr->words, (odin3_kv){wire.v, at});
+}
+
+bool odin3_elab2_always_assigned_word(const odin3_elab2 *e2, odin3_wire_id wire, uint32_t bit) {
+    uint64_t at = 0;
+    if (e2->drive == NULL || !odin3_u64map_get(e2->drive->words, wire.v, &at)) {
+        return false;
+    }
+    return bit < odin3_wire_width(e2->mod, wire) &&
+           ((const uint8_t *)e2->drive->wbits.data)[at + bit] != 0;
+}
+
+bool odin3_elab2_net_is_wired(const odin3_elab2 *e2, odin3_net_id net) {
+    return e2->drive != NULL && net.v != 0 && info_get(e2->drive, net).wrec != 0;
 }
 
 static const char *const k_wired_names[] = {[ODIN3_AST_NET_DECL_WAND] = "wand",

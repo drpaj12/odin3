@@ -667,13 +667,12 @@ static void test_keep_all(void) {
 
 /* After a failed stage 2 the stores follow the keep level too. */
 static void test_keep_after_failure(void) {
-    read_text("module top;\n  reg r;\n  always @(*) r = 1;\nendmodule\n", ODIN3_KEEP_AST_NONE);
+    read_text("module top;\n  reg r;\n  initial r = 1;\nendmodule\n", ODIN3_KEEP_AST_NONE);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_ast_count(rs.design));
     et_free(&rs);
     memset(&rs, 0, sizeof rs);
-    read_text("module top;\n  reg r;\n  always @(*) r = 1;\nendmodule\n",
-              ODIN3_KEEP_AST_ELABORATED);
+    read_text("module top;\n  reg r;\n  initial r = 1;\nendmodule\n", ODIN3_KEEP_AST_ELABORATED);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
     TEST_ASSERT_EQUAL_UINT32(1, odin3_design_ast_count(rs.design));
 }
@@ -740,12 +739,12 @@ static void test_refused_port_stops_stage(void) {
 }
 
 /* A pending kind: the located line once, the rest of the module emitted, PARSE (point (l)). */
-static void test_pending_always(void) {
-    read_text("module top;\n  reg r;\n  always @(*) r = 1;\n  wire w;\nendmodule\n",
+static void test_pending_initial(void) {
+    read_text("module top;\n  reg r;\n  initial r = 1;\n  wire w;\nendmodule\n",
               ODIN3_KEEP_AST_NONE);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
     et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:3:3: error: elaboration is not available yet (2D): 'ALWAYS'");
+              "t.v:3:3: error: elaboration is not available yet (2D): 'INITIAL'");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
     odin3_module *top = module_named("top");
     TEST_ASSERT_TRUE(has_wire(top, "w"));
@@ -757,12 +756,11 @@ static void test_pending_always(void) {
 
 /* A kind reported once however many times it occurs; other kinds each have their line. */
 static void test_pending_once_per_kind(void) {
-    read_text("module top;\n  reg a;\n  always @(*) a = 1;\n  always @(*) a = 0;\n"
+    read_text("module top;\n  reg a;\n  always @(*) if (a) a = 1;\n  always @(*) if (a) a = 0;\n"
               "  initial a = 0;\nendmodule\n",
               ODIN3_KEEP_AST_NONE);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
-    et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:3:3: error: elaboration is not available yet (2D): 'ALWAYS'");
+    et_expect(&rs, ODIN3_LOG_ERROR, "t.v:3:15: error: elaboration is not available yet (2D): 'IF'");
     et_expect(&rs, ODIN3_LOG_ERROR,
               "t.v:5:3: error: elaboration is not available yet (2D): 'INITIAL'");
     TEST_ASSERT_EQUAL_UINT32(2, diag_errors());
@@ -1501,7 +1499,7 @@ int main(void) {
     RUN_TEST(test_second_read_duplicate_module);
     RUN_TEST(test_second_read_other_module);
     RUN_TEST(test_refused_port_stops_stage);
-    RUN_TEST(test_pending_always);
+    RUN_TEST(test_pending_initial);
     RUN_TEST(test_pending_once_per_kind);
     RUN_TEST(test_pending_initialisers);
     RUN_TEST(test_forced_pending_declaration);

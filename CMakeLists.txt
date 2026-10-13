@@ -218,6 +218,10 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_memport.c
     src/frontends/elab/elab2_memscan.c
     src/frontends/elab/elab2_bbox.c
+    src/frontends/elab/elab2_words.c
+    src/frontends/elab/pg.c
+    src/frontends/elab/pg_always.c
+    src/frontends/elab/pg_emit.c
     src/frontends/elab/elab2_inst.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
@@ -892,6 +896,12 @@ if(BUILD_TESTING)
     add_dependencies(test_elab_stage2_mem verilog_generated)
     target_compile_definitions(test_elab_stage2_mem PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 21: the process generator (always blocks to $proc nodes; EL-33 to EL-35).
+    odin3_add_unit_test(test_elab_stage2_proc)
+    target_include_directories(test_elab_stage2_proc PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_proc verilog_generated)
+    target_compile_definitions(test_elab_stage2_proc PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
@@ -1362,9 +1372,10 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     add_test(NAME verilog_handover_parse
         COMMAND $<TARGET_FILE:odin3-parse-check> --smallest-first ${_handover_cases})
     set_tests_properties(verilog_handover_parse PROPERTIES LABELS verilog)
-    # Task 16: stage 1 reports every row; T9 and T10 are stage 2's (Task 24) and stay pending until
-    # it lands (A4 is Task 19's: the second driver of a net); none of the ignore cases is.
-    set(_handover_pending_reject-2d "T9.v,T10.v")
+    # Task 16: stage 1 reports every row; A4 is Task 19's (the second driver of a net) and T9 and
+    # T10 Task 21's (the process generator's per-bit rules, EL-41); none of the ignore cases is
+    # pending.
+    set(_handover_pending_reject-2d "")
     set(_handover_pending_ignore-2d "")
     foreach(_handover reject-2d ignore-2d)
         string(REPLACE "-" "_" _handover_test "verilog_${_handover}")
@@ -1522,6 +1533,21 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # the workspace 0.69 of ODIN3_YOSYS.
         set_property(TEST test_verilog_writer APPEND PROPERTY
             ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+        # 2D Task 21: the round trip of the process generator's write_rtlil through Yosys 0.55
+        # (read_rtlil; proc exits 0).
+        set_property(TEST test_elab_stage2_proc APPEND PROPERTY
+            ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+        # 2D Task 21 (spec 14.3): elab-equiv on the T7, T8 and `q + 1` sources: Odin III's
+        # processes and Yosys's own, through one Yosys back end, are equivalent. Exit 77 (skip)
+        # when an ASan child cannot be capped (no systemd-run).
+        add_test(NAME elab_proc_bridge_smoke
+            COMMAND sh -c "for f in t7 t8 qplus1; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t \"$4/$f.v\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/verilog/proc-bridge)
+        set_tests_properties(elab_proc_bridge_smoke PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
     endif()
 
     # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys

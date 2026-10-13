@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# elab-equiv: 2D's elaboration against Yosys 0.55's on one Verilog file. See elab_equiv.py.
+# Exit codes: 0 equivalent, 1 not equivalent, 2 error, 77 skipped (no memory cap possible).
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/elab_equiv.py" "$@"

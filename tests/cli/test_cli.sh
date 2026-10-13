@@ -336,8 +336,8 @@ elab_only)
     grep -qF 'read_verilog: elaborated top' "$work/err" || fail "--project: no summary"
     grep -qF 'stats: design:' "$work/err" || fail "--project: no stats"
     # A located elaboration error fails the run (and stats does not run).
-    printf 'module c;\n    reg a;\n    always @(*) a = 1;\nendmodule\n' >"$work/c.v"
-    expect_fail "c.v:3:5: error: elaboration is not available yet (2D): 'ALWAYS'" \
+    printf 'module c;\n    reg a;\n    initial a = 1;\nendmodule\n' >"$work/c.v"
+    expect_fail "c.v:3:5: error: elaboration is not available yet (2D): 'INITIAL'" \
         --elab-only "$work/c.v"
     ;;
 elab_only_with_script)

@@ -7,7 +7,8 @@
  * point (l) stages it in. Task 16 emptied the stage-1 tables; Task 17 removed stage 2's store,
  * scope, declaration and port kinds; Task 18 its expression and continuous-assignment kinds; Task
  * 19 its instance, connection and gate kinds and the driver check; Task 20 the memory word read;
- * Task 24 asserts the rest of stage 2's table is empty.
+ * Task 21 the always block and the assignments; Task 24 asserts the rest of stage 2's table is
+ * empty.
  */
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -30,18 +31,13 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
              * the continuous-context call, Task 23). */
             /* Task 20 landed memory word reads: nothing is left of it. */
             /* Task 19 landed instances, gates and the driver check: nothing is left of it. */
-            /* Task 21: always blocks and assignments. */
-            [ODIN3_AST_ALWAYS] = true,
-            [ODIN3_AST_TIMING_STMT] = true,
-            [ODIN3_AST_EVENT_CONTROL] = true,
-            [ODIN3_AST_EVENT_EXPR] = true,
-            [ODIN3_AST_BLOCKING_ASSIGN] = true,
-            [ODIN3_AST_NONBLOCKING_ASSIGN] = true,
-            [ODIN3_AST_NULL_STMT] = true,
-            /* Task 22: if and case. */
+            /* Task 21 landed always blocks, their event controls and the assignments: nothing is
+             * left of them. */
+            /* Task 22: if and case, and the case method for a variable index in a target. */
             [ODIN3_AST_IF] = true,
             [ODIN3_AST_CASE] = true,
             [ODIN3_AST_CASE_ITEM] = true,
+            [ODIN3_PEND_VAR_LVALUE] = true,
             /* Task 23: loops, task calls, calls in processes, the two read features. */
             [ODIN3_AST_FOR] = true,
             [ODIN3_AST_REPEAT] = true,
@@ -78,6 +74,7 @@ static const char *const k_feature_names[ODIN3_PEND_END - ODIN3_AST_KIND_COUNT] 
     "continuous-context call",
     "variable index into a register array",
     "memory write",
+    "variable index in a procedural assignment target",
 };
 
 static bool g_forced[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END];

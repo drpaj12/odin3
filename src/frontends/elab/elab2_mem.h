@@ -52,4 +52,10 @@ int32_t odin3_elab2_dim_low(const odin3_dim *dim);
  */
 odin3_status odin3_elab2_mem_scan(odin3_elab2 *e2, odin3_ast_id module_node, odin3_vec *facts);
 
+/*
+ * Marks every bit of a register-array word's wire as assigned in an always block (the table behind
+ * odin3_elab2_always_assigned_word; elab2_drive.c). ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab2_word_assigned(odin3_elab2 *e2, odin3_wire_id wire);
+
 #endif

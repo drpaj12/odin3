@@ -272,6 +272,22 @@ is left out (its instances get "value of parameter … is not an integer"). (3) 
 parameters: `black box 'bb': port 'p' has different widths in parameter sets with equal values`,
 at the definition. (4) Remaining divergences are in §17 #46.
 
+v4.20 (2026-10-12; 2D Task 21, agent defaults). (1) EL-35 step 7: the driver claims are made a chunk
+at a time (the output chunks of step 1), so a chunk with a conflicting bit is refused whole and the
+actions of all its bits leave the body (an error path: the stage fails either way); a bit of a
+wired net is left out of the claim and its actions dropped (the pre-scan reported it). (2) EL-28
+step (2): the second half of the pre-scan runs after the mem2reg decision and marks the word wires
+of a register array that an `always` assigns (`odin3_elab2_prescan_words`: a NUMBER index marks that
+word's wire, any other index every word's, a part select of a word the whole wire), because those
+wires do not exist when the first half runs. (3) EL-41: T10 and T9 are reported by the process
+generator in Task 21 (T10 is the driver claim of a process against a process, T9 a per-net record
+of how each bit was first assigned, kept for the module), so the handover cases T9 and T10 pass
+for real; Task 24 adds the memory and task-output cases. (4) `variable index in a procedural
+assignment target` is a new point (l) feature, pending until Task 22 (the case method of EL-32); a
+memory word write is `memory write` until Task 24. (5) EL-34: T3's analysis records the nets a
+level-list block reads that no assignment of the block supplied; the warning is located at the
+`always`.
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog

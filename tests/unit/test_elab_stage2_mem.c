@@ -415,11 +415,12 @@ static void test_read_only_reg_array_is_memory(void) {
 
 /* Rule 2: written in always @*: registers, with the warning naming the write's line. */
 static void test_rule2_always_star(void) {
-    read_failing("  reg [7:0] m [0:3];\n  always @*\n    m[1] = a;\n");
+    read_body("  reg [7:0] m [0:3];\n  always @*\n    m[1] = a;\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
     expect_warning((at_loc){1, 13}, replacing("m", place(3)));
-    expect_error((at_loc){2, 3}, pending("ALWAYS"));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, find_wire("m[3]").v);
     TEST_ASSERT_EQUAL_UINT32(0, count_of("$mem"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$proc")); /* the write of the word is a process now */
 }
 
 /* Rule 2: an asynchronous reset is two edge events, so not a single-edge block. */
@@ -473,9 +474,11 @@ static void test_rule4_concat_lvalue(void) {
 
 /* Rule 5: every write outside initial blocks has a constant index. */
 static void test_rule5_constant_writes_only(void) {
-    read_failing("  reg [7:0] m [0:3];\n  always @(posedge c)\n    m[1] <= a;\n");
+    read_body("  reg [7:0] m [0:3];\n  always @(posedge c)\n    m[1] <= a;\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
     expect_warning((at_loc){1, 13}, replacing("m", place(3)));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, find_wire("m[3]").v);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$proc"));
 }
 
 /* A for loop whose variable starts and steps by constants under a constant condition is unrolled

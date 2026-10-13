@@ -253,7 +253,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
       - Task 22 lands `IF` and `CASE`;
       - Task 23 lands `FOR`, `REPEAT`, `TASK_CALL`, calls in processes and the two read features;
       - Task 24 lands `INITIAL` (variable initialisers included) and `ODIN3_PEND_MEM_WRITE`.
-  - Reaching a pending kind or feature logs, once per kind per run, `file:line:col: error: elaboration is not available yet (2D): '<KIND>'`. `<KIND>` is the dump's kind name, or `continuous-context call` / `variable index into a register array` / `memory write`. It counts as an error.
+  - Reaching a pending kind or feature logs, once per kind per run, `file:line:col: error: elaboration is not available yet (2D): '<KIND>'`. `<KIND>` is the dump's kind name, or `continuous-context call` / `variable index into a register array` / `memory write` / `variable index in a procedural assignment target` (Task 21; Task 22 lands it). It counts as an error.
   - A stage-1 error destroys the elaborated store, so rule 7 never sees an unhandled kind. A stage-2 error skips the construct, so the IR stays valid.
   - Until Task 17, `odin3_elab_stage2` is the stub `src/frontends/elab/elab2_stub.c`, which logs 2C's exact unlocated text `elaboration is not available yet (2D)` and returns `PARSE`.
   - Task 10 makes `run-reject --elaborate` judge per case. An expected line found → **pass**. Else a line containing `elaboration is not available yet (2D)` → **pending** (listed, not failed). Else → **fail**. Exit 1 on any fail, 77 when every case is pending.

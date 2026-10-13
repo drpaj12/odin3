@@ -185,7 +185,8 @@ struct odin3_elab2 {
     odin3_vec vals;        /* the expression walk's value stack: odin3_sig (Task 18) */
     odin3_u64map *bboxes;  /* black-box MODULE node ID -> its cell type ID (Task 19, EL-11) */
     struct odin3_elab2_drive *drive; /* the driver tables of the module being emitted (Task 19) */
-    odin3_vec mems; /* odin3_elab_mem of the module being emitted, by symbol (Task 20) */
+    odin3_vec mems;      /* odin3_elab_mem of the module being emitted, by symbol (Task 20) */
+    struct odin3_pg *pg; /* the process generator of the module being emitted (Task 21) */
     /* the module being emitted */
     odin3_module *mod;
     odin3_module_id mod_id;
@@ -706,6 +707,10 @@ typedef struct odin3_elab2_lvalue {
     odin3_vec bits; /* odin3_elab2_lvbit */
     odin3_vec work; /* odin3_ast_id: the nodes still to take apart */
     bool dropped;   /* some bit lies outside its net */
+    /* An assignment target inside a process (Task 21), set by the caller after init: a memory word
+     * is the pending memory write, a variable index the pending case method (Task 22), and the
+     * messages do not speak of continuous assignments. */
+    bool procedural;
 } odin3_elab2_lvalue;
 
 void odin3_elab2_lvalue_init(odin3_elab2_lvalue *lv);
@@ -1004,5 +1009,29 @@ odin3_status odin3_elab2_mem_emit(odin3_elab2 *e2);
 /* Forgets the memory table (a new module starts); frees it when e2 is destroyed. */
 void odin3_elab2_mem_reset(odin3_elab2 *e2);
 void odin3_elab2_mem_free(odin3_elab2 *e2);
+
+/* --- stage 2: processes (Task 21; EL-28 step (6), EL-33, EL-34, EL-35; the generator is pg.h) ---
+ */
+
+/* True when net is a bit of a wired net (`wand`, `wor`, `triand`, `trior`) whose drivers the
+ * module collects (EL-26); a process cannot drive one (the pre-scan reported it). */
+bool odin3_elab2_net_is_wired(const odin3_elab2 *e2, odin3_net_id net);
+
+/*
+ * EL-28 step (2), second half: the always-assigned bits of the word wires that the mem2reg decision
+ * made after the pre-scan (EL-27): scans the module's `always` blocks again, and for each
+ * assignment to a word of a register array (a bit or part select of the word too) marks the bits
+ * of that word's wire, or of every word's wire when an index is not a NUMBER (a conservative
+ * superset). ODIN3_OK even after located errors; ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG for a
+ * module that is not the one being emitted.
+ */
+odin3_status odin3_elab2_prescan_words(odin3_elab2 *e2, odin3_ast_id module_node);
+
+/* True when an always block assigns bit `bit` of the wire of a register-array word (false before
+ * odin3_elab2_prescan_words, and for any wire that is not one). */
+bool odin3_elab2_always_assigned_word(const odin3_elab2 *e2, odin3_wire_id wire, uint32_t bit);
+
+/* Frees the process generator (a new module starts); frees it when e2 is destroyed. */
+void odin3_elab2_pg_free(odin3_elab2 *e2);
 
 #endif

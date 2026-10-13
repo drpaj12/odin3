@@ -624,8 +624,13 @@ static const pend_case k_pend_cases[] = {
     {ODIN3_ELAB_STAGE2, ODIN3_AST_BINARY, false},        /* landed by Task 18 */
     {ODIN3_ELAB_STAGE2, ODIN3_AST_MODULE, false},        /* landed by Task 17 */
     {ODIN3_ELAB_STAGE2, ODIN3_AST_NET_DECL, false},
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_ALWAYS, true},    /* Task 21 */
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_DEFPARAM, false}, /* never in an elaborated store */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_ALWAYS, false}, /* landed by Task 21 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_BLOCKING_ASSIGN, false},
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_NULL_STMT, false},
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_EVENT_EXPR, false},
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_IF, true},          /* Task 22 */
+    {ODIN3_ELAB_STAGE2, ODIN3_PEND_VAR_LVALUE, true}, /* Task 22 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_DEFPARAM, false},   /* never in an elaborated store */
     {0, ODIN3_AST_LIST, false},
     {ODIN3_ELAB_STAGE2 + 1, ODIN3_AST_LIST, false},
     {ODIN3_ELAB_STAGE1, ODIN3_PEND_END, false},
@@ -651,11 +656,13 @@ static void test_pending_report(void) {
     odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_COMB_CALL, seen);
     odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_COMB_CALL, seen);
     odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_REGS_VAR_READ, seen);
+    odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_VAR_LVALUE, seen);
     odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_END, seen);
     odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_MEM_WRITE, NULL);
-    TEST_ASSERT_EQUAL_UINT32(before + 2, rs.errors);
+    TEST_ASSERT_EQUAL_UINT32(before + 3, rs.errors);
     et_expect(&rs, ODIN3_LOG_ERROR, PENDING ": 'continuous-context call'");
     et_expect(&rs, ODIN3_LOG_ERROR, PENDING ": 'variable index into a register array'");
+    et_expect(&rs, ODIN3_LOG_ERROR, PENDING ": 'variable index in a procedural assignment target'");
 }
 
 /* --- diagnostics helpers --------------------------------------------------------------------- */
