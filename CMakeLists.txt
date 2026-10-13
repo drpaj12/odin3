@@ -478,6 +478,11 @@ add_executable(odin3-parse-check tools/parse-check/odin3-parse-check.c
 target_include_directories(odin3-parse-check PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(odin3-parse-check PRIVATE odin3_core odin3_flags)
 
+# --- elab-check: the elaboration coverage-row driver (2D §14.2, plan Task 25) -------------------
+add_executable(elab-check tools/elab-check/elab-check.c)
+target_include_directories(elab-check PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(elab-check PRIVATE odin3_core odin3_flags)
+
 # --- odin3-sim-vectors: the simulator's random-vector driver (tools/sim-check, 1E) --------------
 add_executable(odin3-sim-vectors tools/sim-check/odin3-sim-vectors.c)
 target_include_directories(odin3-sim-vectors PRIVATE ${PROJECT_SOURCE_DIR}/src)
