@@ -113,10 +113,10 @@ odin3_status odin3_ff_emit(odin3_opt_ctx *oc, odin3_ffdata *ff, odin3_node_id *o
 /*
  * Yosys ff.remove() + module->connect(Q, src): the live FF node goes, the init of its Q nets with
  * it, and its Q net k is tied to src[k] (kit_connect: the Q net merged into src[k]; queued
- * instead under oc->defer_ties); src[k] equal to Q net k hands the net to another driver (init kept,
- * nothing merged). n is the width of its Q port. INVALID_ARG (logged) for a node
- * that is not a live FF or another n; NO_MEMORY before the delete leaves the IR as it was (the
- * removed inits written back); kit_connect's half-done failures otherwise.
+ * instead under oc->defer_ties); src[k] equal to Q net k hands the net to another driver (init
+ * kept, nothing merged). n is the width of its Q port. INVALID_ARG (logged) for a node that is not
+ * a live FF or another n; NO_MEMORY before the delete leaves the IR as it was (the removed inits
+ * written back); kit_connect's half-done failures otherwise.
  */
 odin3_status odin3_ff_remove_tie(odin3_opt_ctx *oc, odin3_node_id node, const odin3_net_id *src,
                                  uint32_t n);

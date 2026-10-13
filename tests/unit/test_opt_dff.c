@@ -35,7 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { LOG_TEXT = 512, OOM_LIMIT = 4000, N_WORD = 15 };
+enum { LOG_TEXT = 512, OOM_LIMIT = 4000, MERGE_OOM_LIMIT = 16000, N_WORD = 15 };
 
 static char last_error[LOG_TEXT];
 static uint32_t n_errors;
@@ -1440,6 +1440,500 @@ static void test_dff_fine(void) {
     expect_const("q", 0, ODIN3_CONST_1);
 }
 
+/* --- rules 10 and 11: SRST and EN merging, the feedback patterns ------------------------------
+ *
+ * Yosys 0.55 (the VTR build) re-derivation, `yosys -p "read_rtlil X.il; opt_dff; write_rtlil"`:
+ * - srst_merge: $dff, D = $mux(A d, B 1'0, S r) -> $sdff SRST r, SRST_POLARITY 1, SRST_VALUE 1'0,
+ *   D d, the $mux left in place; A 1'0, B d -> SRST_POLARITY 0.
+ * - en_merge: D = $mux(A q, B d, S e) -> $dffe EN e.
+ * - srst_then_en: one call gives $sdffe; en_then_srst: one call gives $sdffce (Yosys pushes the
+ *   FFs a rule makes on its work list; the plan's "$dffe first" example is not what it does).
+ */
+#define MUX1(name, a, b, s, y)                                                                     \
+    CELL("$mux", name, PW,                                                                         \
+         "    connect \\A " a "\n    connect \\B " b "\n    connect \\S " s "\n    connect \\Y " y \
+         "\n")
+#define W_MID "  wire \\m1\n  wire \\m2\n"
+#define FF_ON(d) CELL("$dff", "f", PW PCLK, CCLK "    connect \\D " d "\n" CQ)
+
+static void expect_pin(odin3_node_id node, const char *port, odin3_net_id want) {
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(want.v, pin_net_of(node, port, 0).v, port);
+}
+
+static void expect_bit_param(odin3_node_id node, const char *name, odin3_bit want) {
+    const odin3_value *val = param_of(node, name);
+    TEST_ASSERT_EQUAL_INT(ODIN3_VAL_BITS, val->kind);
+    TEST_ASSERT_EQUAL_UINT32(1, val->len);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(want, val->bits[0], name);
+}
+
+static void expect_int_param(odin3_node_id node, const char *name, int64_t want) {
+    TEST_ASSERT_EQUAL_INT64_MESSAGE(want, param_of(node, name)->i, name);
+}
+
+static void test_dff_srst_merge(void) {
+    build(MOD(W_STD W_MID MUX1("mx", "\\d", "1'0", "\\r", "\\m1") FF_ON("\\m1")));
+    run_dff();
+    expect_ff("$sdff");
+    odin3_node_id node = first_ff();
+    expect_pin(node, "SRST", wnet("r", 0));
+    expect_pin(node, "D", wnet("d", 0));
+    expect_pin(node, "Q", wnet("q", 0));
+    expect_pin(node, "CLK", wnet("clk", 0));
+    expect_int_param(node, "SRST_POLARITY", 1);
+    expect_bit_param(node, "SRST_VALUE", ODIN3_BIT_0);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$mux")); /* opt_clean's */
+    expect_action("adding SRST", "$dff", "f");
+    expect_info(1, 0);
+}
+
+static void test_dff_srst_polarity(void) {
+    build(MOD(W_STD W_MID MUX1("mx", "1'0", "\\d", "\\r", "\\m1") FF_ON("\\m1")));
+    run_dff();
+    expect_ff("$sdff");
+    odin3_node_id node = first_ff();
+    expect_pin(node, "SRST", wnet("r", 0));
+    expect_pin(node, "D", wnet("d", 0));
+    expect_int_param(node, "SRST_POLARITY", 0);
+    expect_bit_param(node, "SRST_VALUE", ODIN3_BIT_0);
+}
+
+static void test_dff_srst_two_controls(void) {
+    /* two resets to the same value: SRST = $reduce_or of both selects */
+    build(MOD(W_STD W_MID MUX1("m_a", "\\m2", "1'1", "\\r", "\\m1")
+                  MUX1("m_b", "\\d", "1'1", "\\e", "\\m2") FF_ON("\\m1")));
+    run_dff();
+    expect_ff("$sdff");
+    odin3_node_id node = first_ff();
+    expect_pin(node, "D", wnet("d", 0));
+    expect_bit_param(node, "SRST_VALUE", ODIN3_BIT_1);
+    expect_int_param(node, "SRST_POLARITY", 1);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$reduce_or"));
+    odin3_net_id srst = pin_net_of(node, "SRST", 0);
+    odin3_node_id gate = odin3_pin_node(fx.module, odin3_net_driver(fx.module, srst));
+    TEST_ASSERT_EQUAL_STRING("$reduce_or", type_name(gate));
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_node_port(fx.module, gate, port_of(gate, "A")).count);
+    uint32_t sels = 0;
+    for (uint32_t k = 0; k < 2; k++) {
+        odin3_net_id in = pin_net_of(gate, "A", k);
+        sels += in.v == wnet("r", 0).v || in.v == wnet("e", 0).v ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, sels);
+}
+
+static void test_dff_srst_value_conflict(void) {
+    /* a reset to 1 under a reset to 0: only the outer mux is a reset */
+    build(MOD(W_STD W_MID MUX1("m_a", "\\m2", "1'0", "\\r", "\\m1")
+                  MUX1("m_b", "\\d", "1'1", "\\e", "\\m2") FF_ON("\\m1")));
+    run_dff();
+    expect_ff("$sdff");
+    odin3_node_id node = first_ff();
+    expect_pin(node, "SRST", wnet("r", 0));
+    expect_pin(node, "D", wnet("m2", 0));
+    expect_bit_param(node, "SRST_VALUE", ODIN3_BIT_0);
+}
+
+static void test_dff_en_merge(void) {
+    build(MOD(W_STD W_MID MUX1("mx", "\\q", "\\d", "\\e", "\\m1") FF_ON("\\m1")));
+    run_dff();
+    expect_ff("$dffe");
+    odin3_node_id node = first_ff();
+    expect_pin(node, "EN", wnet("e", 0));
+    expect_pin(node, "D", wnet("d", 0));
+    expect_pin(node, "Q", wnet("q", 0));
+    expect_int_param(node, "EN_POLARITY", 1);
+    expect_action("adding EN", "$dff", "f");
+    /* Q on the B side: the select is the enable, active low */
+    build(MOD(W_STD W_MID MUX1("mx", "\\d", "\\q", "\\e", "\\m1") FF_ON("\\m1")));
+    run_dff();
+    expect_ff("$dffe");
+    node = first_ff();
+    expect_pin(node, "EN", wnet("e", 0));
+    expect_pin(node, "D", wnet("d", 0));
+    expect_int_param(node, "EN_POLARITY", 0);
+    TEST_ASSERT_EQUAL_UINT32(0, count_of("$not"));
+}
+
+static void test_dff_srst_then_en(void) {
+    build(MOD(W_STD W_MID MUX1("m_en", "\\q", "\\d", "\\e", "\\m1")
+                  MUX1("m_rs", "\\m1", "1'0", "\\r", "\\m2") FF_ON("\\m2")));
+    run_dff();
+    expect_ff("$sdffe");
+    odin3_node_id node = first_ff();
+    expect_pin(node, "SRST", wnet("r", 0));
+    expect_pin(node, "EN", wnet("e", 0));
+    expect_pin(node, "D", wnet("d", 0));
+    expect_pin(node, "Q", wnet("q", 0));
+    expect_bit_param(node, "SRST_VALUE", ODIN3_BIT_0);
+    expect_info(2, 0); /* the $dff and the $sdff it made */
+}
+
+static void test_dff_en_then_srst(void) {
+    build(MOD(W_STD W_MID MUX1("m_rs", "\\d", "1'0", "\\r", "\\m1")
+                  MUX1("m_en", "\\q", "\\m1", "\\e", "\\m2") FF_ON("\\m2")));
+    run_dff();
+    expect_ff("$sdffce");
+    odin3_node_id node = first_ff();
+    expect_pin(node, "SRST", wnet("r", 0));
+    expect_pin(node, "EN", wnet("e", 0));
+    expect_pin(node, "D", wnet("d", 0));
+    expect_pin(node, "Q", wnet("q", 0));
+    expect_bit_param(node, "SRST_VALUE", ODIN3_BIT_0);
+    run_dff(); /* a second call changes nothing */
+    expect_ff("$sdffce");
+    expect_pin(first_ff(), "D", wnet("d", 0));
+}
+
+static void test_dff_nodffe_nosdff(void) {
+    build(MOD(W_STD W_MID MUX1("mx", "\\q", "\\d", "\\e", "\\m1") FF_ON("\\m1")));
+    fx.opts.nodffe = true;
+    run_dff();
+    expect_ff("$dff");
+    expect_pin(first_ff(), "D", wnet("m1", 0));
+    build(MOD(W_STD W_MID MUX1("mx", "\\d", "1'0", "\\r", "\\m1") FF_ON("\\m1")));
+    fx.opts.nosdff = true;
+    run_dff();
+    expect_ff("$dff");
+    expect_pin(first_ff(), "D", wnet("m1", 0));
+    /* -nosdff leaves the EN merge, -nodffe the SRST one */
+    build(MOD(W_STD W_MID MUX1("mx", "\\d", "1'0", "\\r", "\\m1") FF_ON("\\m1")));
+    fx.opts.nodffe = true;
+    run_dff();
+    expect_ff("$sdff");
+}
+
+static void test_dff_single_user(void) {
+    /* \m1 is also an output port: the mux is not absorbed */
+    build(MOD(W_STD "  wire output 7 \\m1\n  wire \\m2\n" MUX1("mx", "\\q", "\\d", "\\e", "\\m1")
+                  FF_ON("\\m1")));
+    run_dff();
+    expect_ff("$dff");
+    expect_pin(first_ff(), "D", wnet("m1", 0));
+    build(MOD(W_STD "  wire output 7 \\m1\n  wire \\m2\n" MUX1("mx", "\\d", "1'0", "\\r", "\\m1")
+                  FF_ON("\\m1")));
+    run_dff();
+    expect_ff("$dff");
+    expect_info(0, 0);
+}
+
+static void test_dff_no_aload_srst(void) {
+    /* Yosys 0.55 drops the reset when it merges one into an $aldff (spec §17 #33): we do not */
+    build(MOD(W_STD W_MID MUX1("mx", "\\d", "1'0", "\\r", "\\m1")
+                  CELL("$aldff", "f", PW PCLK PALOAD,
+                       CCLK "    connect \\ALOAD \\e\n    connect \\AD \\a\n"
+                            "    connect \\D \\m1\n" CQ)));
+    run_dff();
+    expect_ff("$aldff");
+    expect_pin(first_ff(), "D", wnet("m1", 0));
+}
+
+/* The cone of an EN evaluated without recursion: nets with their values (-1 unknown), as many
+ * passes as it takes. The selects \a, \r and \e read bits 0, 1 and 2 of the mask. */
+enum { CONE_MAX = 64 };
+
+typedef struct cone {
+    uint32_t net[CONE_MAX];
+    int val[CONE_MAX];
+    uint32_t count;
+} cone;
+
+static uint32_t cone_slot(cone *cn, odin3_net_id net) {
+    for (uint32_t i = 0; i < cn->count; i++) {
+        if (cn->net[i] == net.v) {
+            return i;
+        }
+    }
+    TEST_ASSERT_TRUE(cn->count < CONE_MAX);
+    cn->net[cn->count] = net.v;
+    cn->val[cn->count] = -1;
+    return cn->count++;
+}
+
+/* The value of a net that needs no cell: a constant or a select; -1 otherwise. */
+static int leaf_value(odin3_net_id net, unsigned mask) {
+    static const char *const k_in[] = {"a", "r", "e"};
+    odin3_const val = odin3_net_const_value(fx.module, net);
+    if (val == ODIN3_CONST_0 || val == ODIN3_CONST_1) {
+        return val == ODIN3_CONST_1 ? 1 : 0;
+    }
+    for (unsigned k = 0; k < 3U; k++) {
+        if (net.v == wnet(k_in[k], 0).v) {
+            return (int)(mask >> k & 1U);
+        }
+    }
+    return -1;
+}
+
+/* A cell's inputs as slots; the values of its A and B ports bit by bit; false if one is unknown. */
+static bool cell_inputs(cone *cn, odin3_node_id node, const char *port, int *vals, uint32_t *n) {
+    odin3_pinslice pins = odin3_node_port(fx.module, node, port_of(node, port));
+    *n = pins.count;
+    bool known = true;
+    for (uint32_t k = 0; k < pins.count; k++) {
+        vals[k] = cn->val[cone_slot(cn, pin_net_of(node, port, k))];
+        known = known && vals[k] >= 0;
+    }
+    return known;
+}
+
+/* $ne (A against B bit by bit) and $reduce_and of the known input bits. */
+static int cone_reduce(const char *name, const int *lhs, const int *rhs, uint32_t n_in) {
+    bool is_ne = strcmp(name, "$ne") == 0;
+    if (!is_ne) {
+        TEST_ASSERT_EQUAL_STRING("$reduce_and", name);
+    }
+    int differ = 0;
+    int all = 1;
+    for (uint32_t k = 0; k < n_in; k++) {
+        all = all && lhs[k];
+        differ = differ || (is_ne && lhs[k] != rhs[k]);
+    }
+    return is_ne ? differ : all;
+}
+
+/* One try at the value of net; -1 while an input is unknown. */
+static int cone_try(cone *cn, odin3_net_id net, unsigned mask) {
+    int leaf = leaf_value(net, mask);
+    if (leaf >= 0) {
+        return leaf;
+    }
+    odin3_pin_id drv = odin3_net_driver(fx.module, net);
+    TEST_ASSERT_TRUE(drv.v != 0);
+    odin3_node_id node = odin3_pin_node(fx.module, drv);
+    const char *name = type_name(node);
+    int lhs[CONE_MAX];
+    int rhs[CONE_MAX];
+    uint32_t n_in = 0;
+    uint32_t n_rhs = 0;
+    bool known = cell_inputs(cn, node, "A", lhs, &n_in);
+    if (strcmp(name, "$ne") == 0 || strcmp(name, "$and") == 0) {
+        known = cell_inputs(cn, node, "B", rhs, &n_rhs) && known;
+    }
+    if (!known) {
+        return -1;
+    }
+    if (strcmp(name, "$not") == 0) {
+        return !lhs[0];
+    }
+    if (strcmp(name, "$and") == 0) {
+        return lhs[0] && rhs[0];
+    }
+    return cone_reduce(name, lhs, rhs, n_in);
+}
+
+static bool eval_cone(odin3_net_id net, unsigned mask) {
+    cone cn;
+    memset(&cn, 0, sizeof cn);
+    uint32_t target = cone_slot(&cn, net);
+    for (uint32_t pass = 0; pass < CONE_MAX && cn.val[target] < 0; pass++) {
+        for (uint32_t i = 0; i < cn.count; i++) {
+            cn.val[i] = cn.val[i] < 0 ? cone_try(&cn, (odin3_net_id){cn.net[i]}, mask) : cn.val[i];
+        }
+    }
+    TEST_ASSERT_TRUE(cn.val[target] >= 0);
+    return cn.val[target] != 0;
+}
+
+#define FEEDBACK_TEXT                                                                              \
+    MOD(W_STD W_MID MUX1("mi", "\\d", "\\q", "\\r", "\\m1")                                        \
+            MUX1("mo", "\\m1", "\\e", "\\a", "\\m2") FF_ON("\\m2"))
+
+static void test_dff_feedback_patterns(void) {
+    build(FEEDBACK_TEXT);
+    run_dff();
+    expect_ff("$dffe");
+    odin3_node_id node = first_ff();
+    expect_pin(node, "D", wnet("m2", 0));
+    expect_pin(node, "Q", wnet("q", 0));
+    expect_int_param(node, "EN_POLARITY", 1);
+    odin3_net_id en = pin_net_of(node, "EN", 0);
+    for (unsigned mask = 0; mask < 4U; mask++) {
+        bool val_a = (mask & 1U) != 0;
+        bool val_r = (mask & 2U) != 0;
+        /* the FF holds exactly when a = 0 (the outer mux takes m1) and r = 1 (m1 takes Q) */
+        TEST_ASSERT_EQUAL_INT_MESSAGE(!(!val_a && val_r), eval_cone(en, mask) ? 1 : 0,
+                                      "enable cone");
+    }
+    /* the inner mux's B input, which read Q, reads x */
+    odin3_node_id inner = node_named("mi");
+    TEST_ASSERT_EQUAL_INT(ODIN3_CONST_X,
+                          odin3_net_const_value(fx.module, pin_net_of(inner, "B", 0)));
+    expect_pin(inner, "A", wnet("d", 0));
+    expect_pin(inner, "S", wnet("r", 0));
+    expect_pin(node_named("mo"), "A", wnet("m1", 0));
+    expect_pin(node_named("mo"), "B", wnet("e", 0));
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$ne"));
+    expect_action("adding EN", "$dff", "f");
+}
+
+static void test_dff_feedback_two_paths(void) {
+    /* Q under two selects in different arms: both paths are patterns, ANDed by $reduce_and */
+    build(MOD(W_STD W_MID "  wire \\m3\n" MUX1("m_a", "\\d", "\\q", "\\r", "\\m1")
+                  MUX1("m_b", "\\q", "\\d", "\\e", "\\m3") MUX1("mo", "\\m1", "\\m3", "\\a", "\\m2")
+                      FF_ON("\\m2")));
+    run_dff();
+    expect_ff("$dffe");
+    odin3_node_id node = first_ff();
+    odin3_net_id en = pin_net_of(node, "EN", 0);
+    for (unsigned mask = 0; mask < 8U; mask++) {
+        bool val_a = (mask & 1U) != 0;
+        bool val_r = (mask & 2U) != 0;
+        bool val_e = (mask & 4U) != 0;
+        /* holds when a = 1 and e = 0 (m_b takes Q) or a = 0 and r = 1 (m_a takes Q) */
+        bool holds = val_a ? !val_e : val_r;
+        TEST_ASSERT_EQUAL_INT(holds ? 0 : 1, eval_cone(en, mask) ? 1 : 0);
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, count_of("$ne"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$reduce_and"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_CONST_X,
+                          odin3_net_const_value(fx.module, pin_net_of(node_named("m_a"), "B", 0)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_CONST_X,
+                          odin3_net_const_value(fx.module, pin_net_of(node_named("m_b"), "A", 0)));
+}
+
+#define SLICE_TEXT                                                                                 \
+    MOD("  wire input 1 \\clk\n  wire width 2 input 2 \\d\n  wire input 3 \\e\n"                   \
+        "  wire width 2 output 4 \\q\n  wire \\m\n"                                                \
+        "  attribute \\src \"m.v:2.1\"\n  cell $mux \\mx\n" PW                                     \
+        "    connect \\A \\q [0]\n    connect \\B \\d [0]\n"                                       \
+        "    connect \\S \\e\n    connect \\Y \\m\n  end\n"                                        \
+        "  attribute \\src \"f.v:1.1\"\n  cell $dff \\f\n    parameter \\WIDTH 2\n" PCLK CCLK      \
+        "    connect \\D { \\d [1] \\m }\n"                                                        \
+        "    connect \\Q \\q\n  end\n")
+
+static void test_dff_slices(void) {
+    build(SLICE_TEXT);
+    odin3_prov_id ff_prov = odin3_node_prov(fx.module, node_named("f"));
+    odin3_prov_id mux_prov = odin3_node_prov(fx.module, node_named("mx"));
+    TEST_ASSERT_TRUE(ff_prov.v != 0 && mux_prov.v != 0 && ff_prov.v != mux_prov.v);
+    run_dff();
+    TEST_ASSERT_EQUAL_UINT32(2, count_ffs());
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$dffe"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$dff"));
+    odin3_node_id plain = node_named("f"); /* the bit that stays keeps the old name */
+    TEST_ASSERT_EQUAL_STRING("$dff", type_name(plain));
+    TEST_ASSERT_EQUAL_UINT32(wnet("q", 1).v, pin_net_of(plain, "Q", 0).v);
+    TEST_ASSERT_EQUAL_UINT32(wnet("d", 1).v, pin_net_of(plain, "D", 0).v);
+    expect_derived_from(plain, ff_prov);
+    for (uint32_t id = 1; id < odin3_module_node_end(fx.module); id++) {
+        odin3_node_id node = {id};
+        if (strcmp(type_name(node), "$dffe") != 0) {
+            continue;
+        }
+        TEST_ASSERT_EQUAL_UINT32(wnet("q", 0).v, pin_net_of(node, "Q", 0).v);
+        TEST_ASSERT_EQUAL_UINT32(wnet("d", 0).v, pin_net_of(node, "D", 0).v);
+        expect_pin(node, "EN", wnet("e", 0));
+        const odin3_prov_record *rec =
+            odin3_prov_get(fx.res.design, odin3_node_prov(fx.module, node));
+        TEST_ASSERT_NOT_NULL(rec);
+        TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
+        TEST_ASSERT_EQUAL_UINT32(2, rec->parents.count); /* [FF, absorbed mux] */
+        TEST_ASSERT_EQUAL_UINT32(ff_prov.v, rec->parents.ids[0].v);
+        TEST_ASSERT_EQUAL_UINT32(mux_prov.v, rec->parents.ids[1].v);
+    }
+}
+
+static void test_dff_groups_by_control(void) {
+    /* bits 0 and 1 share the enable, bit 2 has another: two $dffe, in bit order */
+    build(MOD("  wire input 1 \\clk\n  wire width 3 input 2 \\d\n  wire input 3 \\e\n"
+              "  wire input 4 \\r\n  wire width 3 output 5 \\q\n  wire width 3 \\m\n"
+              "  cell $mux \\mx\n    parameter \\WIDTH 2\n    connect \\A \\q [1:0]\n"
+              "    connect \\B \\d [1:0]\n    connect \\S \\e\n    connect \\Y \\m [1:0]\n  end\n"
+              "  cell $mux \\my\n" PW "    connect \\A \\q [2]\n    connect \\B \\d [2]\n"
+              "    connect \\S \\r\n    connect \\Y \\m [2]\n  end\n"
+              "  cell $dff \\f\n    parameter \\WIDTH 3\n" PCLK CCLK
+              "    connect \\D \\m\n    connect \\Q \\q\n  end\n"));
+    run_dff();
+    TEST_ASSERT_EQUAL_UINT32(2, count_of("$dffe"));
+    TEST_ASSERT_EQUAL_UINT32(2, count_ffs());
+    uint32_t wide = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(fx.module); id++) {
+        odin3_node_id node = {id};
+        if (strcmp(type_name(node), "$dffe") != 0) {
+            continue;
+        }
+        uint32_t width = odin3_node_port(fx.module, node, port_of(node, "Q")).count;
+        wide += width == 2 ? 1U : 0U;
+        odin3_net_id en = pin_net_of(node, "EN", 0);
+        TEST_ASSERT_EQUAL_UINT32(width == 2 ? wnet("e", 0).v : wnet("r", 0).v, en.v);
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, wide);
+}
+
+static void test_dff_merge_keeps_init(void) {
+    build(MOD("  wire input 1 \\clk\n  wire input 2 \\d\n  wire input 3 \\e\n  wire \\m\n"
+              "  attribute \\init 1'1\n  wire output 4 \\q\n" MUX1("mx", "\\q", "\\d", "\\e", "\\m")
+                  FF_ON("\\m")));
+    run_dff();
+    expect_ff("$dffe");
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("q", 0)));
+    check_full();
+}
+
+/* --- rules 10 and 11 out of memory ---------------------------------------------------------- */
+
+#define MERGE_OOM_TEXT                                                                             \
+    MOD("  wire input 1 \\clk\n  wire input 2 \\d\n  wire input 3 \\r\n  wire input 4 \\e\n"       \
+        "  wire input 5 \\a\n  wire width 2 input 6 \\dd\n"                                        \
+        "  attribute \\init 1'1\n  wire output 7 \\q1\n  attribute \\init 1'0\n"                   \
+        "  wire output 8 \\q2\n  attribute \\init 2'01\n  wire width 2 output 9 \\q3\n"            \
+        "  attribute \\init 1'1\n  wire output 10 \\q4\n"                                          \
+        "  wire \\m1\n  wire \\m2\n  wire \\m3\n  wire \\m4\n  wire \\m5\n"                        \
+        "  cell $mux \\x1\n" PW "    connect \\A \\d\n    connect \\B 1'0\n    connect \\S \\r\n"  \
+        "    connect \\Y \\m1\n  end\n"                                                            \
+        "  cell $dff \\f1\n" PW PCLK CCLK "    connect \\D \\m1\n    connect \\Q \\q1\n  end\n"    \
+        "  cell $mux \\x2\n" PW "    connect \\A \\q2\n    connect \\B \\d\n    connect \\S \\e\n" \
+        "    connect \\Y \\m2\n  end\n"                                                            \
+        "  cell $dff \\f2\n" PW PCLK CCLK "    connect \\D \\m2\n    connect \\Q \\q2\n  end\n"    \
+        "  cell $mux \\x3\n" PW "    connect \\A \\q3 [0]\n    connect \\B \\d\n"                  \
+        "    connect \\S \\e\n    connect \\Y \\m3\n  end\n"                                       \
+        "  cell $dff \\f3\n    parameter \\WIDTH 2\n" PCLK CCLK                                    \
+        "    connect \\D { \\dd [1] \\m3 }\n    connect \\Q \\q3\n  end\n"                         \
+        "  cell $mux \\x4\n" PW "    connect \\A \\d\n    connect \\B \\q4\n    connect \\S \\r\n" \
+        "    connect \\Y \\m4\n  end\n"                                                            \
+        "  cell $mux \\x5\n" PW "    connect \\A \\m4\n    connect \\B \\e\n    connect \\S \\a\n" \
+        "    connect \\Y \\m5\n  end\n"                                                            \
+        "  cell $dff \\f4\n" PW PCLK CCLK "    connect \\D \\m5\n    connect \\Q \\q4\n  end\n")
+
+static void expect_merge_inits(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("q1", 0)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_0, odin3_ffinit_get(fx.module, wnet("q2", 0)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("q3", 0)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_0, odin3_ffinit_get(fx.module, wnet("q3", 1)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("q4", 0)));
+}
+
+static bool merge_oom_step(long fail, uint32_t *discard) {
+    close_fixture();
+    memset(&fx.counts, 0, sizeof fx.counts);
+    build(MERGE_OOM_TEXT);
+    n_discard = 0;
+    odin3_util_set_alloc_fail_after(fail);
+    odin3_status st = odin3_opt_dff_run(&fx.ctx, fx.res.design, &fx.opts, &fx.counts);
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY, last_error);
+    check_full(); /* no second driver, no dangling pin, whatever the failure point */
+    expect_merge_inits();
+    *discard += n_discard;
+    return st == ODIN3_OK;
+}
+
+static void test_dff_merge_oom(void) {
+    uint32_t discard = 0;
+    long failures = 0;
+    bool done = false;
+    for (long fail = 0; !done && fail < MERGE_OOM_LIMIT; fail++) {
+        done = merge_oom_step(fail, &discard);
+        failures += done ? 0 : 1;
+    }
+    TEST_ASSERT_TRUE(done);
+    TEST_ASSERT_TRUE(failures > 100); /* not vacuous */
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$sdff"));
+    TEST_ASSERT_EQUAL_UINT32(3, count_of("$dffe"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$dff"));
+    printf("opt_dff merge OOM: %ld failing allocation points, %u half-done\n", failures, discard);
+}
+
 /* --- Yosys 0.55's own cases ----------------------------------------------------------------------
  */
 
@@ -1784,6 +2278,25 @@ static void test_dff_oom(void) {
     printf("opt_dff OOM: %ld failing allocation points, %u half-done\n", failures, discard);
 }
 
+static void run_merge_tests(void) {
+    RUN_TEST(test_dff_srst_merge);
+    RUN_TEST(test_dff_srst_polarity);
+    RUN_TEST(test_dff_srst_two_controls);
+    RUN_TEST(test_dff_srst_value_conflict);
+    RUN_TEST(test_dff_en_merge);
+    RUN_TEST(test_dff_srst_then_en);
+    RUN_TEST(test_dff_en_then_srst);
+    RUN_TEST(test_dff_nodffe_nosdff);
+    RUN_TEST(test_dff_single_user);
+    RUN_TEST(test_dff_no_aload_srst);
+    RUN_TEST(test_dff_feedback_patterns);
+    RUN_TEST(test_dff_feedback_two_paths);
+    RUN_TEST(test_dff_slices);
+    RUN_TEST(test_dff_groups_by_control);
+    RUN_TEST(test_dff_merge_keeps_init);
+    RUN_TEST(test_dff_merge_oom);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_ff_load_each_type);
@@ -1829,5 +2342,6 @@ int main(void) {
     RUN_TEST(test_dff_args);
     RUN_TEST(test_dff_deterministic);
     RUN_TEST(test_dff_oom);
+    run_merge_tests();
     return UNITY_END();
 }

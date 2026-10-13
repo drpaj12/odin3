@@ -36,7 +36,9 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { NO_GROUP = UINT32_MAX };
+static const uint32_t NO_GROUP = UINT32_MAX;
+static const uint64_t FNV_OFFSET = 0xcbf29ce484222325ULL;
+static const uint64_t FNV_PRIME = 0x100000001b3ULL;
 
 /* --- grouping --------------------------------------------------------------------------------- */
 
@@ -68,9 +70,9 @@ static const uint64_t *key_words(const odin3_dff_plan *plan, const odin3_dff_bit
 
 static uint64_t key_hash(const odin3_dff_plan *plan, const odin3_dff_bitplan *bp) {
     const uint64_t *words = key_words(plan, bp);
-    uint64_t hash = 1469598103934665603ULL; /* FNV-1a over the words */
+    uint64_t hash = FNV_OFFSET; /* FNV-1a over the words */
     for (uint32_t k = 0; k < bp->key_len; k++) {
-        hash = (hash ^ words[k]) * 1099511628211ULL;
+        hash = (hash ^ words[k]) * FNV_PRIME;
     }
     return hash;
 }
@@ -78,9 +80,8 @@ static uint64_t key_hash(const odin3_dff_plan *plan, const odin3_dff_bitplan *bp
 static bool key_equal(const odin3_dff_plan *plan, const odin3_dff_bitplan *lhs,
                       const odin3_dff_bitplan *rhs) {
     return lhs->key_len == rhs->key_len &&
-           (lhs->key_len == 0 ||
-            memcmp(key_words(plan, lhs), key_words(plan, rhs), lhs->key_len * sizeof(uint64_t)) ==
-                0);
+           (lhs->key_len == 0 || memcmp(key_words(plan, lhs), key_words(plan, rhs),
+                                        lhs->key_len * sizeof(uint64_t)) == 0);
 }
 
 /* The group of the chain at `head` whose key is bit's, NO_GROUP if none. */
@@ -127,19 +128,19 @@ static odin3_status group_members(groups *gr, uint32_t n_merged) {
     odin3_vec_init(&fill, sizeof(uint32_t));
     odin3_status st = odin3_vec_reserve(&fill, gr->list.len);
     uint32_t next = 0;
-    for (size_t g = 0; st == ODIN3_OK && g < gr->list.len; g++) {
+    for (size_t gidx = 0; st == ODIN3_OK && gidx < gr->list.len; gidx++) {
         st = odin3_kit_push_u32(&fill, next);
-        ((group *)gr->list.data)[g].start = next;
-        next += ((const group *)gr->list.data)[g].count;
+        ((group *)gr->list.data)[gidx].start = next;
+        next += ((const group *)gr->list.data)[gidx].count;
     }
     st = st == ODIN3_OK ? odin3_vec_reserve(&gr->members, n_merged) : st;
     for (uint32_t k = 0; st == ODIN3_OK && k < n_merged; k++) {
         st = odin3_kit_push_u32(&gr->members, 0);
     }
     for (size_t i = 0; st == ODIN3_OK && i < gr->of_bit.len; i++) {
-        uint32_t g = ((const uint32_t *)gr->of_bit.data)[i];
-        if (g != NO_GROUP) {
-            ((uint32_t *)gr->members.data)[((uint32_t *)fill.data)[g]++] = (uint32_t)i;
+        uint32_t gidx = ((const uint32_t *)gr->of_bit.data)[i];
+        if (gidx != NO_GROUP) {
+            ((uint32_t *)gr->members.data)[((uint32_t *)fill.data)[gidx]++] = (uint32_t)i;
         }
     }
     odin3_vec_free(&fill);
@@ -152,8 +153,8 @@ static odin3_status groups_build(groups *gr, const odin3_dff_plan *plan, uint32_
     odin3_vec_init(&gr->of_bit, sizeof(uint32_t));
     odin3_vec_init(&gr->members, sizeof(uint32_t));
     gr->heads = odin3_u64map_create(0);
-    odin3_status st = gr->heads != NULL ? odin3_vec_reserve(&gr->of_bit, plan->bits.len)
-                                        : ODIN3_ERR_NO_MEMORY;
+    odin3_status st =
+        gr->heads != NULL ? odin3_vec_reserve(&gr->of_bit, plan->bits.len) : ODIN3_ERR_NO_MEMORY;
     *n_merged = 0;
     for (uint32_t i = 0; st == ODIN3_OK && i < plan->bits.len; i++) {
         bool merged = plan_bit(plan, i)->merged;
@@ -239,10 +240,10 @@ static odin3_status patterns_inputs(odin3_dff_state *ds, const uint64_t *key, od
     uint64_t n_pats = key[1U + n_ctrls];
     const uint64_t *at = key + 2U + n_ctrls;
     odin3_status st = odin3_vec_reserve(inputs, n_ctrls + n_pats);
-    for (uint64_t p = 0; st == ODIN3_OK && p < n_pats; p++) {
-        odin3_net_id y = {0};
-        st = pattern_ne(ds, at + 1, at[0], &y);
-        st = st == ODIN3_OK ? odin3_kit_push_net(inputs, y) : st;
+    for (uint64_t pat_i = 0; st == ODIN3_OK && pat_i < n_pats; pat_i++) {
+        odin3_net_id ne_net = {0};
+        st = pattern_ne(ds, at + 1, at[0], &ne_net);
+        st = st == ODIN3_OK ? odin3_kit_push_net(inputs, ne_net) : st;
         at += 1U + at[0];
     }
     for (uint64_t k = 0; st == ODIN3_OK && k < n_ctrls; k++) {
@@ -304,9 +305,9 @@ static odin3_status group_prov(merge_job *job, const group *grp) {
     odin3_status st = ODIN3_OK;
     for (uint32_t k = 0; st == ODIN3_OK && k < grp->count; k++) {
         const odin3_dff_bitplan *bp = plan_bit(job->plan, bits[k]);
-        for (uint32_t w = 0; st == ODIN3_OK && w < bp->node_len; w++) {
+        for (uint32_t word_i = 0; st == ODIN3_OK && word_i < bp->node_len; word_i++) {
             st = odin3_kit_push_u64(
-                &nodes, ((const uint64_t *)job->plan->nodes.data)[bp->node_off + w]);
+                &nodes, ((const uint64_t *)job->plan->nodes.data)[bp->node_off + word_i]);
         }
     }
     odin3_kit_sort_unify(&nodes, 0);
@@ -353,7 +354,7 @@ static odin3_status group_ff(merge_job *job, const group *grp, ctrl control, odi
     return st;
 }
 
-/* The control of group g: from its first bit's key. */
+/* The control of group gidx: from its first bit's key. */
 static odin3_status group_control(merge_job *job, const group *grp, ctrl *control) {
     const odin3_dff_bitplan *bp = plan_bit(job->plan, grp->first);
     const uint64_t *key = key_words(job->plan, bp);
@@ -361,10 +362,10 @@ static odin3_status group_control(merge_job *job, const group *grp, ctrl *contro
                         : patterns_logic(job->ds, key, control);
 }
 
-/* Makes group g: its gates, then its FF (a second driver on the Q nets). */
-static odin3_status group_emit(merge_job *job, uint32_t g) {
+/* Makes group gidx: its gates, then its FF (a second driver on the Q nets). */
+static odin3_status group_emit(merge_job *job, uint32_t gidx) {
     odin3_dff_state *ds = job->ds;
-    const group *grp = odin3_vec_cat(&job->gr.list, g);
+    const group *grp = odin3_vec_cat(&job->gr.list, gidx);
     ctrl control = {{0}, true};
     odin3_ffdata nf;
     odin3_ffdata_init(&nf);
@@ -390,8 +391,8 @@ static odin3_status group_emit(merge_job *job, uint32_t g) {
 static odin3_status marks_apply(merge_job *job) {
     odin3_module *module = job->ds->oc->module;
     odin3_net_id xnet = {0};
-    odin3_status st = job->plan->marks.len > 0 ? odin3_dff_const_net(job->ds, ODIN3_BIT_X, &xnet)
-                                               : ODIN3_OK;
+    odin3_status st =
+        job->plan->marks.len > 0 ? odin3_dff_const_net(job->ds, ODIN3_BIT_X, &xnet) : ODIN3_OK;
     for (size_t k = 0; st == ODIN3_OK && k < job->plan->marks.len; k++) {
         const odin3_dff_xmark *mark = odin3_vec_cat(&job->plan->marks, k);
         st = odin3_pin_disconnect(module, mark->pin);
@@ -454,8 +455,8 @@ static odin3_status job_run(merge_job *job) {
     st = st == ODIN3_OK && ds->queue != NULL
              ? odin3_vec_reserve(ds->queue, ds->queue->len + job->gr.list.len)
              : st;
-    for (uint32_t g = 0; st == ODIN3_OK && g < job->gr.list.len; g++) {
-        st = group_emit(job, g);
+    for (uint32_t gidx = 0; st == ODIN3_OK && gidx < job->gr.list.len; gidx++) {
+        st = group_emit(job, gidx);
     }
     st = st == ODIN3_OK ? marks_apply(job) : st;
     st = st == ODIN3_OK ? job_retire(job) : st;

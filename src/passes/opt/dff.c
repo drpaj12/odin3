@@ -41,8 +41,8 @@
 
 /* The rules of §9.3 in order: 2-9, then 10 (SRST merging) and 11 (EN merging). */
 static const odin3_dff_rule_fn k_rules[] = {
-    odin3_dff_rule_sr, odin3_dff_rule_aload, odin3_dff_rule_arst, odin3_dff_rule_srst,
-    odin3_dff_rule_en, odin3_dff_rule_clk,   odin3_dff_rule_dq,   odin3_dff_rule_adq,
+    odin3_dff_rule_sr,         odin3_dff_rule_aload,   odin3_dff_rule_arst, odin3_dff_rule_srst,
+    odin3_dff_rule_en,         odin3_dff_rule_clk,     odin3_dff_rule_dq,   odin3_dff_rule_adq,
     odin3_dff_rule_srst_merge, odin3_dff_rule_en_merge};
 
 /* Rule 12: a changed FF is re-emitted (Yosys `ff.emit()`), on the bits left of its node's Q. The
@@ -53,10 +53,10 @@ odin3_status odin3_dff_commit(odin3_dff_state *ds) {
         return ODIN3_OK;
     }
     ds->ff.node = ds->cell;
-    odin3_status st = ds->ff.width == ds->width0
-                          ? odin3_ff_emit(ds->oc, &ds->ff, &out)
-                          : odin3_ff_emit_shrunk(ds->oc, &ds->ff, ds->pend.data,
-                                                 (uint32_t)ds->pend.len, &out);
+    odin3_status st =
+        ds->ff.width == ds->width0
+            ? odin3_ff_emit(ds->oc, &ds->ff, &out)
+            : odin3_ff_emit_shrunk(ds->oc, &ds->ff, ds->pend.data, (uint32_t)ds->pend.len, &out);
     if (st == ODIN3_OK) {
         ds->counted = true;
         ds->changed = false;

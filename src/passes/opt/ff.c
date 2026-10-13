@@ -603,6 +603,16 @@ static odin3_net_id *port_nets_of(const odin3_opt_ctx *oc, odin3_node_id node, u
     return nets;
 }
 
+/* A Q net whose source is the net itself is handed to another driver: it leaves the list of nets
+ * whose init is taken. */
+static void hand_on(odin3_net_id *qnets, const odin3_net_id *src, uint32_t n) {
+    for (uint32_t k = 0; k < n; k++) {
+        if (qnets[k].v == src[k].v) {
+            qnets[k] = (odin3_net_id){0};
+        }
+    }
+}
+
 odin3_status odin3_ff_remove_tie(odin3_opt_ctx *oc, odin3_node_id node, const odin3_net_id *src,
                                  uint32_t n) {
     if (oc == NULL || src == NULL || !odin3_node_live(oc->module, node) ||
@@ -619,10 +629,10 @@ odin3_status odin3_ff_remove_tie(odin3_opt_ctx *oc, odin3_node_id node, const od
         odin3_log(ODIN3_LOG_ERROR, "opt: ff_remove_tie: %u sources for %u Q bits", n, width);
         st = ODIN3_ERR_INVALID_ARG;
     }
-    for (uint32_t k = 0; st == ODIN3_OK && k < width; k++) {
-        qnets[k] = qnets[k].v == src[k].v ? (odin3_net_id){0} : qnets[k]; /* handed on: init kept */
+    if (st == ODIN3_OK) {
+        hand_on(qnets, src, width);
+        st = inits_take(oc, qnets, width, saved);
     }
-    st = st == ODIN3_OK ? inits_take(oc, qnets, width, saved) : st;
     if (st == ODIN3_OK) {
         odin3_kit_conn conn = {node, port, src, width};
         st = odin3_kit_connect(oc, &conn);
@@ -981,7 +991,10 @@ static odin3_status shrink_ties(odin3_opt_ctx *oc, const odin3_ffdata *ff, bool 
     }
     for (uint32_t i = 0; i < job->n_ties; i++) {
         bool handed = job->ties[i].drop.v == job->ties[i].keep.v; /* init kept, nothing merged */
-        job->nets[i] = handed ? (odin3_net_id){0} : job->ties[i].drop;
+        job->nets[i] = job->ties[i].drop;
+        if (handed) {
+            job->nets[i] = (odin3_net_id){0};
+        }
         job->src[i] = job->ties[i].keep;
     }
     odin3_status st = ODIN3_OK;

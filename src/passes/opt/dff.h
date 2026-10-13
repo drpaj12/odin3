@@ -121,7 +121,8 @@ odin3_status odin3_dff_rule_clk(odin3_dff_state *ds);
 odin3_status odin3_dff_rule_dq(odin3_dff_state *ds);
 odin3_status odin3_dff_rule_adq(odin3_dff_state *ds);
 
-/* --- dff_muxes.c: the mux snapshot and the per-bit searches of rules 10 and 11 ----------------- */
+/* --- dff_muxes.c: the mux snapshot and the per-bit searches of rules 10 and 11 -----------------
+ */
 
 /*
  * One FF bit's merge plan. d: the D net left once the muxes are eaten; key: the group key (words
