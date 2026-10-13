@@ -201,6 +201,9 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_select.c
     src/frontends/elab/elab2_assign.c
     src/frontends/elab/elab2_drive.c
+    src/frontends/elab/elab2_mem.c
+    src/frontends/elab/elab2_memport.c
+    src/frontends/elab/elab2_memscan.c
     src/frontends/elab/elab2_inst.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
@@ -846,6 +849,12 @@ if(BUILD_TESTING)
     target_compile_definitions(test_elab_stage2_drive PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 20: memories (the mem2reg decision, registers per word, $mem and its read ports).
+    odin3_add_unit_test(test_elab_stage2_mem)
+    target_include_directories(test_elab_stage2_mem PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_mem verilog_generated)
+    target_compile_definitions(test_elab_stage2_mem PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")

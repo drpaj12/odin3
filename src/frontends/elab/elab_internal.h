@@ -184,6 +184,7 @@ struct odin3_elab2 {
     odin3_vec vals;        /* the expression walk's value stack: odin3_sig (Task 18) */
     odin3_u64map *bboxes;  /* black-box MODULE node ID -> its cell type ID (Task 19, EL-11) */
     struct odin3_elab2_drive *drive; /* the driver tables of the module being emitted (Task 19) */
+    odin3_vec mems; /* odin3_elab_mem of the module being emitted, by symbol (Task 20) */
     /* the module being emitted */
     odin3_module *mod;
     odin3_module_id mod_id;
@@ -418,13 +419,13 @@ typedef struct odin3_elab2_expr_req {
  * operators), the node's attributes and its SOURCE record. Extension and truncation are wiring.
  * *out is the root's signal at the width it was generated (not extended to the context), signed as
  * the root is in context. An identifier that names a generate or named block is `'x' is not a net,
- * variable or parameter` (Yosys makes an implicit net; §17); a memory word read is the pending
- * `memory read` line (Task 20); a call of a user function is the pending continuous-context call
- * (Task 23). ODIN3_ERR_PARSE after a located error (counted; the caller goes on with the next
- * item) or when a fatal cap stopped the stage (the cell-pins cap of point (aa), the net-bits cap,
- * the byte budget); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG for a node that is no expression or
- * a stage with no module being emitted. Nothing is attached for an expression that failed before
- * its last cell; cells made earlier stay (valid, unused).
+ * variable or parameter` (Yosys makes an implicit net; §17); a memory word `m[i]` is a $mem read
+ * port or a register word (EL-27, Task 20); a call of a user function is the pending
+ * continuous-context call (Task 23). ODIN3_ERR_PARSE after a located error (counted; the caller
+ * goes on with the next item) or when a fatal cap stopped the stage (the cell-pins cap of point
+ * (aa), the net-bits cap, the byte budget); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG for a node
+ * that is no expression or a stage with no module being emitted. Nothing is attached for an
+ * expression that failed before its last cell; cells made earlier stay (valid, unused).
  */
 odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);
 
@@ -812,5 +813,173 @@ odin3_status odin3_elab2_gate(odin3_elab2 *e2, odin3_ast_id gate_decl);
  * cell type: <why>`. Called by odin3_elab2_ports.
  */
 odin3_status odin3_elab2_blackbox(odin3_elab2 *e2, odin3_ast_id module_node);
+
+/* --- stage 2: memories (Task 20; EL-27, EL-39 reads) ---------------------------------------- */
+
+/* One asynchronous read port of a memory, in source order. */
+typedef struct odin3_elab_mem_rd_port {
+    odin3_sig addr;           /* the raw index, or the row-major address of a flattened array */
+    const odin3_net_id *data; /* the RD_DATA nets (the word's width of them, scratch arena) */
+    odin3_ast_id node;        /* the word select that read it */
+} odin3_elab_mem_rd_port;
+
+/* One clocked write port of a memory, in source order (Task 24 adds them). */
+typedef struct odin3_elab_mem_wr_port {
+    odin3_sig addr, data, en; /* addr at its own width; data and en one bit per word bit */
+    odin3_net_id clk;
+    bool posedge;
+    odin3_ast_id stmt;
+} odin3_elab_mem_wr_port;
+
+/*
+ * An array of the module being emitted (EL-27): one memory (a `$mem`) or one register per word.
+ * The table `odin3_elab2.mems` is sorted by symbol (declaration order), so a lookup by symbol is a
+ * binary search. width, size, offset and flat follow the declaration: width the word's packed
+ * width, size the number of words (the product of the dimensions' sizes), offset the lowest
+ * declared index of a one-dimensional array (0 for a flattened multi-dimensional one, `flat`),
+ * abits the widest address of any port so far (at least 1).
+ */
+typedef struct odin3_elab_mem {
+    odin3_sym_id sym;
+    bool to_regs;
+    uint32_t width, size, abits;
+    int32_t offset;
+    bool flat;
+    odin3_vec rd_ports, wr_ports;
+    odin3_value init; /* the initial contents (EL-40, Task 24): empty BITS = all x */
+    /* the fields the brief did not list (agent default) */
+    bool is_signed;
+    bool failed;   /* an error was reported for the array (no second one for its accesses) */
+    uint32_t name; /* strtab ID of the array's IR name: the MEMID, and the base of word names */
+    uint32_t n_dims;
+    odin3_vec words; /* odin3_wire_id of word position 0 .. size - 1 (registers per word) */
+} odin3_elab_mem;
+
+/* The memory at table index mem; NULL outside the table. */
+const odin3_elab_mem *odin3_elab2_mem_get(const odin3_elab2 *e2, uint32_t mem);
+
+/*
+ * The mem2reg decision of EL-27 for the module being emitted (EL-28 step (2), after the pre-scan):
+ * one table entry per array (a declarator with unpacked dimensions, in the module's, generate and
+ * named-block scopes; a function's or task's are not the module's), then the rules in Yosys's
+ * mem2reg_as_needed order: (1) a net array, `(* mem2reg *)` on the array or the module; (2) a write
+ * in an `always` whose event list has not exactly one edge event; (3) a read after a blocking
+ * write in the same block; (4) the array inside an lvalue's index or in a concatenation lvalue;
+ * (5) every write outside `initial` has a constant index. `(* nomem2reg *)` on the array or its
+ * module exempts rules 2-5; `--nomem2reg` (opts.nomem2reg) disables them all, rule 1 included,
+ * and an array it leaves that is assigned by `assign` or in such a block is the located error
+ * `array 'w' cannot be a memory (it is written in a combinational block) and --nomem2reg is set`.
+ * Rules 2-5 warn at the declarator, `replacing memory 'm' with list of registers; see f.v:12`,
+ * naming the places Yosys names (the first write of each kind, each block's first blocking write,
+ * the first read after it, the first complex lvalue), newest first. An array of SIZE x WIDTH bits
+ * above the memory-bits cap is the fatal `memory 'm' of N bits exceeds the limit of M bits`. An
+ * array that becomes registers makes its words as wires named `m[k]` (k the declared index; a
+ * flattened array's the row-major position), with a SOURCE record at the declarator, the
+ * declaration's attributes and the net-bits cap. ODIN3_OK even after located errors;
+ * ODIN3_ERR_PARSE when a fatal cap stopped the stage; ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG
+ * for a module that is not the one being emitted.
+ */
+odin3_status odin3_elab2_mem_decide(odin3_elab2 *e2, odin3_ast_id module_node);
+
+/* How the word SELECT chain of a node names a table entry. */
+typedef struct odin3_elab2_wordref {
+    uint32_t mem; /* the table index */
+    uint32_t n;   /* the number of indices: the array's dimensions */
+} odin3_elab2_wordref;
+
+/*
+ * True when node is a SELECT whose chain of bit selects down to an IDENT or HIER_NAME is exactly as
+ * deep as the unpacked dimensions of the array that name is (a word `m[i]`, `m[i][j]`), and the
+ * array is in the table; then *ref says which. A chain with a part select in it, a deeper chain
+ * (the outer selects are selects of the word) and a shallower one are not words.
+ */
+bool odin3_elab2_mem_word_of(const odin3_elab2 *e2, odin3_ast_id node, odin3_elab2_wordref *ref);
+
+/* The index expression of dimension dim (0: the first, outermost) of the word node names. */
+odin3_ast_id odin3_elab2_mem_word_index(const odin3_elab2 *e2, odin3_ast_id node, uint32_t dim);
+
+/*
+ * One read of a word. select is the word SELECT (provenance, the located messages); idx are the
+ * index signals of its dimensions, as generated at their self-determined width and sign (n_idx of
+ * them, the array's dimensions); reads is the process generator's substitution hook the indices
+ * were generated with (the signals already carry it: informational).
+ */
+typedef struct odin3_elab2_mem_rd {
+    uint32_t mem;
+    odin3_ast_id select;
+    const odin3_sig *idx;
+    uint32_t n_idx;
+    const odin3_elab2_reads *reads;
+} odin3_elab2_mem_rd;
+
+/*
+ * Adds an asynchronous read port to the memory (not registers) and gives its data: a signal of
+ * the word's width on fresh nets that the `$mem` drives at step (8) (odin3_elab2_mem_emit). The
+ * port's address is the raw index of a one-dimensional array (`$mem` subtracts OFFSET itself,
+ * simlib; Yosys's front end puts the raw index on its ports), at the width the index was generated
+ * at; a flattened array's is the row-major address Yosys builds, (i - low_i) * n_j + (j - low_j)
+ * with a descending dimension counting from its left bound, as word cells of the widest operand
+ * (constant operands are folded). ABITS becomes the widest address. The pins cap of point (aa) is
+ * checked before the port is added (`cell of N pins exceeds the limit of M pins`, fatal).
+ * ODIN3_ERR_PARSE after that; ODIN3_ERR_NO_MEMORY with the IR unchanged but for constant nets;
+ * ODIN3_ERR_INVALID_ARG (logged) for a memory that is registers or a wrong index count.
+ */
+odin3_status odin3_elab2_mem_read(odin3_elab2 *e2, const odin3_elab2_mem_rd *rd, odin3_sig *data);
+
+/* What a word of an array that became registers is. */
+typedef enum odin3_elab2_word_kind {
+    ODIN3_WORD_WIRE, /* the word's wire */
+    ODIN3_WORD_X, /* outside the array, or an index with an x or z bit: reads x, writes nothing */
+    ODIN3_WORD_VARIABLE /* an index that is not constant */
+} odin3_elab2_word_kind;
+
+typedef struct odin3_elab2_word {
+    odin3_elab2_word_kind kind;
+    odin3_wire_id wire; /* ODIN3_WORD_WIRE */
+} odin3_elab2_word;
+
+/*
+ * The word of a register array that rd's constant indices select (rd->idx constant signals):
+ * the word's wire; outside the array x with the warning `word select [7] of 'w' is out of bounds;
+ * the word is x` (`assignment to word [7] outside array 'w' is ignored` when write is set), and an
+ * index with an x or z bit x silently; any index that is not constant is ODIN3_WORD_VARIABLE
+ * (nothing logged: the caller reports it, EL-27 / Task 23). ODIN3_ERR_INVALID_ARG (logged) for a
+ * memory that is not registers or a wrong index count.
+ */
+odin3_status odin3_elab2_mem_word(odin3_elab2 *e2, const odin3_elab2_mem_rd *rd, bool write,
+                                  odin3_elab2_word *out);
+
+/*
+ * One clocked write port (EL-39; Task 24 adds them from processes, in source order): the word at
+ * addr (a signal at its own width, constant or not; no temporary is needed for a constant index
+ * or a full-word value) takes data where en is 1, on the clk edge (posedge: rising, else falling).
+ * addr, data and en are copied; data and en are as wide as the word. ABITS becomes the widest
+ * address. Caps and statuses as odin3_elab2_mem_read.
+ */
+typedef struct odin3_elab2_mem_wr {
+    uint32_t mem;
+    const odin3_sig *addr, *data, *en;
+    odin3_net_id clk;
+    bool posedge;
+    odin3_ast_id stmt;
+} odin3_elab2_mem_wr;
+
+odin3_status odin3_elab2_mem_write(odin3_elab2 *e2, const odin3_elab2_mem_wr *wr);
+
+/*
+ * EL-28 step (8): one `$mem` per memory that has a port or initial contents, ports in source order
+ * (a read-only, write-only or unused array: an unused one makes none). MEMID = the array's IR name,
+ * WIDTH, SIZE, OFFSET and ABITS as the table says, RD_PORTS and WR_PORTS the port counts, reads
+ * asynchronous (RD_CLK_ENABLE, RD_CLK_POLARITY and RD_TRANSPARENT zero, RD_CLK the x net, RD_EN
+ * the constant 1), writes clocked (WR_CLK_ENABLE one, WR_CLK_POLARITY from the edge), INIT the
+ * initial contents. Addresses are zero-extended to ABITS (Yosys's memory_collect); every net
+ * recorded is followed through merges (odin3_elab2_resolve). The node has a SOURCE record at the
+ * array's declarator and the declaration's attributes. Status as odin3_elab2_module.
+ */
+odin3_status odin3_elab2_mem_emit(odin3_elab2 *e2);
+
+/* Forgets the memory table (a new module starts); frees it when e2 is destroyed. */
+void odin3_elab2_mem_reset(odin3_elab2 *e2);
+void odin3_elab2_mem_free(odin3_elab2 *e2);
 
 #endif

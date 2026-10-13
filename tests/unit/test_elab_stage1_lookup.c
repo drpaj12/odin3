@@ -616,7 +616,6 @@ static const pend_case k_pend_cases[] = {
     {ODIN3_ELAB_STAGE1, ODIN3_AST_DIRECTIVE, false}, /* landed by Task 16 */
     {ODIN3_ELAB_STAGE1, ODIN3_PEND_COMB_CALL, false},
     {ODIN3_ELAB_STAGE2, ODIN3_PEND_MEM_WRITE, true},
-    {ODIN3_ELAB_STAGE2, ODIN3_PEND_MEM_READ, true},      /* Task 20 */
     {ODIN3_ELAB_STAGE2, ODIN3_AST_INSTANTIATION, false}, /* landed by Task 19 */
     {ODIN3_ELAB_STAGE2, ODIN3_AST_INSTANCE, false},      /* landed by Task 19 */
     {ODIN3_ELAB_STAGE2, ODIN3_AST_CONNECTION, false},    /* landed by Task 19 */
