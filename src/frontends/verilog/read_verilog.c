@@ -345,6 +345,7 @@ odin3_status odin3_read_verilog_files(odin3_design *design, const odin3_rv_opts 
  * for odin3_elab_run's step 1) and the files (odin3_bytes views into the script). */
 typedef struct rv_args {
     bool parse_only;
+    bool lib; /* --lib: keep the modules as library units for later reads (2D-7b) */
     odin3_elab_opts elab;
     odin3_vec files;
 } rv_args;
@@ -353,6 +354,8 @@ typedef struct rv_args {
 static bool set_flag(odin3_bytes word, rv_args *out) {
     if (odin3_pass_arg_is(word, "--parse-only")) {
         out->parse_only = true;
+    } else if (odin3_pass_arg_is(word, "--lib")) {
+        out->lib = true;
     } else if (odin3_pass_arg_is(word, "--nolatches")) {
         out->elab.nolatches = true;
     } else if (odin3_pass_arg_is(word, "--nomem2reg")) {
@@ -363,6 +366,18 @@ static bool set_flag(odin3_bytes word, rv_args *out) {
         return false;
     }
     return true;
+}
+
+/* --lib reads and keeps; it elaborates nothing, so --auto-blackbox (a design read's option) has
+ * nothing to act on and is refused rather than silently dropped. */
+static odin3_status check_lib_args(const rv_args *args) {
+    if (args->lib && args->elab.auto_blackbox) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: --lib cannot be combined with --auto-blackbox (it is an option of "
+                  "the design read)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
 }
 
 static odin3_status parse_args(odin3_bytes args, rv_args *out) {
@@ -383,7 +398,7 @@ static odin3_status parse_args(odin3_bytes args, rv_args *out) {
         }
         *slot = word;
     }
-    return ODIN3_OK;
+    return check_lib_args(out);
 }
 
 /* One file given directly: its path as given, resolved against the working directory. */
@@ -495,14 +510,30 @@ static odin3_status collect_sources(odin3_design *design, const rv_args *args, o
 
 /* --- the pass: step 8 ------------------------------------------------------------------------ */
 
-/* Hands the store to the design; with --parse-only it stays held until the design is destroyed
+/* The flags of a --lib read on every root of its store (the carrier of later reads, 2D-7b). */
+static odin3_status mark_library(odin3_ast *ast, const rv_args *args) {
+    unsigned flags = ODIN3_UNIT_LIB;
+    flags |= args->elab.nolatches ? ODIN3_UNIT_NOLATCHES : 0U;
+    flags |= args->elab.nomem2reg ? ODIN3_UNIT_NOMEM2REG : 0U;
+    return odin3_ast_mark_units(ast, 0, odin3_ast_root_count(ast), (uint8_t)flags);
+}
+
+/* Hands the store to the design; with --lib it stays held for later reads, with --parse-only it stays held until the design is destroyed
  * (AST-15), otherwise 2D's entry runs with the pass's options (its step 3 drops the parsed store,
  * kept under ALL, AST-16; the drop here is then a no-op, plan point (a)). */
 static odin3_status hand_over(odin3_pass_ctx *ctx, odin3_ast *ast, const rv_args *args) {
-    odin3_status st = odin3_design_set_ast(ctx->design, ast);
+    odin3_status st = args->lib ? mark_library(ast, args) : ODIN3_OK;
+    st = st != ODIN3_OK ? st : odin3_design_set_ast(ctx->design, ast);
     if (st != ODIN3_OK) {
         odin3_ast_destroy(ast);
         return st;
+    }
+    if (args->lib) {
+        odin3_log(ODIN3_LOG_INFO,
+                  "read_verilog --lib: %" PRIu32 " units kept as library units (elaborated where a "
+                  "later read instantiates them)",
+                  odin3_ast_root_count(ast));
+        return ODIN3_OK;
     }
     if (args->parse_only) {
         return ODIN3_OK;
@@ -534,11 +565,14 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
 
 const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog",
-    "read_verilog [--parse-only] [--nolatches] [--nomem2reg] [--auto-blackbox] [<file>...]: read "
+    "read_verilog [--parse-only] [--lib] [--nolatches] [--nomem2reg] [--auto-blackbox] [<file>...]: "
+    "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
     "libraries; --parse-only keeps it (write_verilog_ast prints it), otherwise elaboration (2D) "
     "follows: --nolatches makes unassigned paths of combinational blocks x, --nomem2reg keeps "
-    "memories unless forced, --auto-blackbox makes an undefined module a black box",
+    "memories unless forced, --auto-blackbox makes an undefined module a black box; --lib keeps "
+    "the modules as library units for later reads (elaborated, under this read's --nolatches and "
+    "--nomem2reg, only where a later design instantiates them)",
     read_verilog_run,
     NULL,
     false,

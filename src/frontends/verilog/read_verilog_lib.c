@@ -182,11 +182,67 @@ static odin3_status search_dirs(odin3_rv *rv, const odin3_rv_want *want) {
     return st;
 }
 
+/* --- the units kept by `read_verilog --lib` (2D-7b) ----------------------------------------- */
+
+/* The source of a kept UNIT: its FILE buffer's names and library, as the read that made it gave
+ * them. False when the buffer is unknown. */
+static bool kept_source(odin3_rv *rv, const odin3_ast *kept, odin3_ast_id unit,
+                        odin3_pp_source *src) {
+    odin3_srcman *sm = NULL;
+    odin3_srcbuf_info info;
+    if (odin3_design_get_srcman(rv->design, &sm) != ODIN3_OK ||
+        !odin3_srcman_buffer_info(sm, odin3_srcman_buffer_of(sm, odin3_ast_loc(kept, unit)),
+                                  &info) ||
+        info.resolved == 0) {
+        return false;
+    }
+    *src = (odin3_pp_source){info.name != 0 ? info.name : info.resolved, info.resolved,
+                             info.library, (odin3_loc){0}};
+    return true;
+}
+
+/* One kept store: every design UNIT's file not read yet, read again as library UNITs that carry
+ * the store's flags (the library UNITs of a --lib read's own -v/-y files are not kept: a later
+ * read finds those itself). */
+static odin3_status read_kept_store(odin3_rv *rv, const odin3_ast *kept) {
+    uint32_t from = odin3_ast_library_units_from(kept);
+    uint32_t end = from != 0 ? from : odin3_ast_root_count(kept);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t idx = 0; st == ODIN3_OK && !rv->vl.stop && idx < end; idx++) {
+        odin3_pp_source src = {0};
+        if (!kept_source(rv, kept, odin3_ast_root(kept, idx), &src) ||
+            odin3_u64map_get(rv->libread, src.resolved, NULL)) {
+            continue;
+        }
+        uint32_t before = odin3_ast_root_count(rv->ast);
+        st = read_library(rv, &src);
+        st = st != ODIN3_OK ? st
+                            : odin3_ast_mark_units(rv->ast, before, odin3_ast_root_count(rv->ast),
+                                                   odin3_ast_unit_flags(kept, idx));
+    }
+    return st;
+}
+
+/* Every store an earlier `read_verilog --lib` kept, in read order (a later --lib read sees them
+ * too: harmless, nothing is elaborated, and its own kept UNITs are only its design UNITs). */
+static odin3_status read_kept_libraries(odin3_rv *rv) {
+    odin3_status st = ODIN3_OK;
+    uint32_t count = odin3_design_ast_count(rv->design);
+    for (uint32_t i = 0; st == ODIN3_OK && i < count; i++) {
+        const odin3_ast *kept = odin3_design_ast_at(rv->design, i);
+        if (kept != NULL && (odin3_ast_unit_flags(kept, 0) & ODIN3_UNIT_LIB) != 0) {
+            st = read_kept_store(rv, kept);
+        }
+    }
+    return st;
+}
+
 /* --- step 3 ------------------------------------------------------------------------------- */
 
 odin3_status odin3_rv_resolve_libraries(odin3_rv *rv) {
     odin3_status st = sweep(rv, false);
     uint32_t first = odin3_ast_root_count(rv->ast);
+    st = st != ODIN3_OK ? st : read_kept_libraries(rv);
     for (size_t i = 0; st == ODIN3_OK && !rv->vl.stop && i < rv->wanted.len; i++) {
         odin3_rv_want want = *(const odin3_rv_want *)odin3_vec_cat(&rv->wanted, i);
         if (is_defined(rv, want.name)) {

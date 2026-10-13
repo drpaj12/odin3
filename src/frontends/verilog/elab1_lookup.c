@@ -233,6 +233,11 @@ static odin3_status module_parts(odin3_elab1 *e1, odin3_elab_def *def, odin3_ela
     st = st != ODIN3_OK ? st : gather_insts(e1, def->node, ext);
     if (def->kind == ODIN3_DEF_MODULE) {
         ext->taken = taken_of(e1, def->name);
+        /* A `read_verilog --lib` unit may share a hard or black-box cell type's name: which of the
+         * two an instance means is odin3_elab1_prefer_unit's decision (spec 3.1a). */
+        bool cell = ext->taken == ODIN3_TAKEN_HARD || ext->taken == ODIN3_TAKEN_BLACKBOX;
+        ext->shadows_cell = cell && (def->unit_flags & ODIN3_UNIT_LIB) != 0;
+        ext->taken = ext->shadows_cell ? ODIN3_TAKEN_NONE : ext->taken;
     }
     return st;
 }
@@ -292,8 +297,11 @@ static uint8_t def_kind_of(const odin3_elab1 *e1, odin3_ast_id node) {
 }
 
 /* One UNIT's definitions; Q7 and S2 at a design unit's UDP_DECL and CONFIG_DECL. */
-static odin3_status unit_defs(odin3_elab1 *e1, odin3_ast_id unit, bool library_unit) {
-    odin3_elab_def where = {.library_unit = library_unit, .library = unit_library(e1, unit)};
+static odin3_status unit_defs(odin3_elab1 *e1, uint32_t idx, bool library_unit) {
+    odin3_ast_id unit = odin3_ast_root(e1->parsed, idx);
+    odin3_elab_def where = {.library_unit = library_unit,
+                            .unit_flags = odin3_ast_unit_flags(e1->parsed, idx),
+                            .library = unit_library(e1, unit)};
     odin3_ast_span kids = odin3_ast_children(e1->parsed, unit);
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < kids.n; i++) {
@@ -305,6 +313,10 @@ static odin3_status unit_defs(odin3_elab1 *e1, odin3_ast_id unit, bool library_u
         }
     }
     return st;
+}
+
+bool odin3_elab1_def_shadows_cell(const odin3_elab1 *e1, uint32_t def) {
+    return ((const odin3_elab1_defx *)odin3_vec_cat(&e1->defx, def))->shadows_cell;
 }
 
 void odin3_elab1_reject_def(odin3_elab1 *e1, uint32_t def) {
@@ -325,7 +337,7 @@ odin3_status odin3_elab1_collect_defs(odin3_elab1 *e1) {
     uint32_t from = odin3_ast_library_units_from(e1->parsed);
     odin3_status st = ODIN3_OK;
     for (uint32_t idx = 0; st == ODIN3_OK && idx < roots; idx++) {
-        st = unit_defs(e1, odin3_ast_root(e1->parsed, idx), from != 0 && idx >= from);
+        st = unit_defs(e1, idx, from != 0 && idx >= from);
     }
     return st;
 }

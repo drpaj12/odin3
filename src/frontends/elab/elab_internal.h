@@ -170,6 +170,8 @@ struct odin3_elab2 {
     odin3_design *design;
     odin3_ast *elab;
     odin3_elab_opts opts;
+    bool mod_nolatches; /* the options in force for the module being emitted: the run's, or those */
+    bool mod_nomem2reg; /* of the `read_verilog --lib` read that supplied it (2D-7b) */
     const odin3_elab_limits *limits;
     odin3_elab_binding bind;
     odin3_symtab *st;

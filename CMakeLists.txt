@@ -205,6 +205,7 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/read_verilog_lib.c
     src/frontends/verilog/elab1.c
     src/frontends/verilog/elab1_lookup.c
+    src/frontends/verilog/elab1_unit.c
     src/frontends/verilog/elab1_top.c
     src/frontends/verilog/elab1_params.c
     src/frontends/verilog/elab1_spec.c
@@ -931,6 +932,13 @@ if(BUILD_TESTING)
     target_include_directories(test_elab_stage2_drive PRIVATE ${_gen})
     add_dependencies(test_elab_stage2_drive verilog_generated)
     target_compile_definitions(test_elab_stage2_drive PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D-7b: the library-unit read (read_verilog --lib; spec 3.1a, 17 #80).
+    odin3_add_unit_test(test_read_verilog_lib)
+    target_include_directories(test_read_verilog_lib PRIVATE ${_gen})
+    add_dependencies(test_read_verilog_lib verilog_generated)
+    target_compile_definitions(test_read_verilog_lib PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     # 2D Task 20: memories (the mem2reg decision, registers per word, $mem and its read ports).

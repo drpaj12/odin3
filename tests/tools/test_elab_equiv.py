@@ -189,6 +189,19 @@ class BridgeTest(unittest.TestCase):
                          "write_rtlil a.il")
         self.assertNotIn("techlib", calls[3][2])  # side B (Yosys) is unchanged
 
+    def test_lib_reaches_both_sides(self) -> None:
+        lib = self.dir / "p.v"
+        lib.write_text("module p; endmodule\n")
+        code, out, err = self.run_tool("--lib", str(lib), "--lib-nomem2reg")
+        self.assertEqual(code, 0, out + err)
+        f, p = str(self.src), str(lib.resolve())
+        calls = self.calls()
+        self.assertEqual(calls[1][2], f"read_verilog --lib --nomem2reg --nolatches {p}; "
+                         f"read_verilog --nolatches {f}; write_rtlil a.il")
+        self.assertEqual(calls[3][2], f"read_verilog -sv -nolatches -nomem2reg {p}; "
+                         f"read_verilog -sv -nolatches {f}; hierarchy -auto-top; "
+                         + self.BACK + "b.blif")
+
     def test_nolatches_on_both_sides(self) -> None:
         self.run_tool()
         scripts = [c[2] for c in self.calls() if c[0] in ("odin3", "yosys") and "-p" in c]

@@ -226,6 +226,32 @@ bool odin3_elab2_is_blackbox(const odin3_elab2 *e2, odin3_ast_id module) {
     return false;
 }
 
+/* Whether module carries the value-less attribute named text. */
+static bool module_has_attr(const odin3_elab2 *e2, odin3_ast_id module, const char *text) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(e2->design), odin3_bytes_cstr(text), &key)) {
+        return false;
+    }
+    odin3_ast_span attrs = odin3_ast_attrs(e2->elab, module);
+    for (uint32_t i = 0; i < attrs.n; i++) {
+        if (odin3_ast_name(e2->elab, attrs.ids[i]) == key) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The options of the module: those of its `--lib` read when it came from one (stage 1 marked it
+ * `odin3_lib`, its flags `odin3_lib_nolatches` and `odin3_lib_nomem2reg`), else the run's. */
+static void module_options(odin3_elab2 *e2, odin3_ast_id module) {
+    e2->mod_nolatches = e2->opts.nolatches;
+    e2->mod_nomem2reg = e2->opts.nomem2reg;
+    if (module_has_attr(e2, module, "odin3_lib")) {
+        e2->mod_nolatches = module_has_attr(e2, module, "odin3_lib_nolatches");
+        e2->mod_nomem2reg = module_has_attr(e2, module, "odin3_lib_nomem2reg");
+    }
+}
+
 odin3_status odin3_elab2_enter(odin3_elab2 *e2, odin3_ast_id module_node) {
     uint64_t id = 0;
     if (!odin3_u64map_get(e2->modules, module_node.v, &id)) {
@@ -242,6 +268,7 @@ odin3_status odin3_elab2_enter(odin3_elab2 *e2, odin3_ast_id module_node) {
     e2->mod_id = (odin3_module_id){(uint32_t)id};
     e2->mod = odin3_module_get(e2->design, e2->mod_id);
     e2->mod_node = module_node;
+    module_options(e2, module_node);
     e2->scope = (odin3_scope_id){0};
     e2->mod_name = odin3_ast_name(e2->elab, module_node);
     memset(e2->const_net, 0, sizeof e2->const_net);

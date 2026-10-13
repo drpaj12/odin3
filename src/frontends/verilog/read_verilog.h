@@ -104,7 +104,10 @@ odin3_status odin3_rv_read(odin3_rv *rv, const odin3_pp_source *src);
  * modules). Library UNITs follow every design UNIT; odin3_ast_set_library_units_from records
  * where they begin. A library module or UDP whose name a design unit or an earlier library
  * definition already has stays in the store with an info line. What stays undefined is left to
- * 2D. Returns OK, or a fatal status (odin3_rv_read; NO_MEMORY).
+ * 2D. Before the -v/-y files, the files of every
+ * earlier `read_verilog --lib` read (2D-7b: the carrier stores the design holds) are read again
+ * as library UNITs, each carrying its carrier's ODIN3_UNIT_* flags (odin3_ast_mark_units); a file
+ * already read is skipped. Returns OK, or a fatal status (odin3_rv_read; NO_MEMORY).
  */
 odin3_status odin3_rv_resolve_libraries(odin3_rv *rv);
 

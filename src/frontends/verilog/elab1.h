@@ -52,6 +52,7 @@ typedef enum odin3_elab_def_kind {
 typedef struct odin3_elab_def {
     uint8_t kind; /* odin3_elab_def_kind */
     bool library_unit;
+    uint8_t unit_flags; /* the UNIT's ODIN3_UNIT_* (a `read_verilog --lib` unit: ODIN3_UNIT_LIB + flags) */
     uint32_t name;
     uint32_t library;
     odin3_ast_id node; /* the MODULE, UDP_DECL or CONFIG_DECL */
@@ -699,6 +700,16 @@ uint32_t odin3_elab1_given_of(int32_t decision);
 
 /* --- internals (elab1*.c only) ------------------------------------------------------------ */
 
+/*
+ * 2D-7b, spec 3.1a: a `read_verilog --lib` unit named like a hard or black-box cell type. res is
+ * odin3_elab1_resolve's answer for INSTANTIATION item; when it is such a unit, the cell replaces it
+ * (res becomes ODIN3_RES_CELLTYPE, an info line once per name) if every value of the item's `#()`
+ * fits a parameter of the cell, else the unit stays (a warning at the item). Any other answer is
+ * left alone. odin3_elab1_def_shadows_cell: whether definition def is such a unit.
+ */
+void odin3_elab1_prefer_unit(odin3_elab1 *e1, odin3_ast_id item, odin3_elab_res *res);
+bool odin3_elab1_def_shadows_cell(const odin3_elab1 *e1, uint32_t def);
+
 /* Why a MODULE's name is taken (EL-6), recorded by collect_defs and reported when reached. */
 typedef enum odin3_elab1_taken {
     ODIN3_TAKEN_NONE = 0,
@@ -717,6 +728,7 @@ typedef struct odin3_elab1_defx {
     bool reached;             /* reached from the top (odin3_elab1_reach_def) */
     bool ports_indexed;       /* its port names are in odin3_elab1.port_pos, dirs in port_dirs */
     bool reported;            /* its Q7 (a library unit's UDP) or taken-name error is logged */
+    bool shadows_cell;        /* a --lib unit named like a hard or black-box cell type (2D-7b) */
     bool body_noted;          /* a black box's "body … is ignored" info is logged (Task 12) */
     bool bb_default_asked;    /* a black box's default specialization was requested (EL-11) */
     bool scanned;             /* its body went through odin3_elab1_scan (Task 16) */

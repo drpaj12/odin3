@@ -3,7 +3,8 @@
 Usage::
 
     elab-equiv --odin3 O --yosys Y --equiv-check E [--top T] [--mem-cap BYTES] [--keep DIR]
-               [--allow-version V] [--a-only] [--unmap-enables] [--yosys-tribuf] [--techlib T] FILE
+               [--allow-version V] [--a-only] [--unmap-enables] [--yosys-tribuf] [--techlib T]
+               [--lib FILE]... [--lib-nomem2reg] FILE
 
 Side A is Odin III's elaboration and side B Yosys's own, both through one Yosys back end, so x is
 resolved by the same ``opt`` on both and a difference is 2D's (or a documented divergence):
@@ -29,6 +30,12 @@ them itself (D3, spec 17 #79: a ``$pmux`` over an x default, as ``tribuf -logic`
 needs no flag. ``tribuf -logic`` leaves a bus that reaches an output port a ``$tribuf``, which 2D's
 side A keeps too, but ``equiv-check`` cannot read that: use the option on designs whose tri-states
 are all internal.
+
+``--lib FILE`` (repeatable, in order, before FILE) reads FILE as library units for the read of
+FILE: side A ``read_verilog --lib --nolatches FILE`` (2D-7b, spec 3.1a) and side B
+``read_verilog -sv -nolatches FILE`` into the same design, so a module the file instantiates
+resolves to the library's in both (Parmys's ``vtr_primitives.v``). ``--lib-nomem2reg`` adds
+``--nomem2reg`` / ``-nomem2reg`` to those library reads only, as Parmys reads its primitives.
 
 ``--a-only`` stops after ``a.blif`` (kept in ``--keep DIR``): the hand-off to 2H (plan point (m)),
 which compares side A's netlist with Parmys's goldens. ``--keep DIR`` keeps every file; without it
@@ -127,6 +134,8 @@ class Options:
     unmap: bool = False
     techlib: str | None = None
     yosys_tribuf: bool = False
+    libs: tuple[str, ...] = ()
+    lib_nomem2reg: bool = False
 
 
 def wants_directive(source: Path, flag: str) -> bool:
@@ -215,6 +224,8 @@ class Bridge:
         opts = self.opts
         flags = "--nolatches --auto-blackbox" if wants_auto_blackbox(opts.source) else "--nolatches"
         lib = f"read_techlib {opts.techlib}; " if opts.techlib else ""
+        units = "--lib --nomem2reg" if opts.lib_nomem2reg else "--lib"
+        lib += "".join(f"read_verilog {units} --nolatches {path}; " for path in opts.libs)
         odin3 = [opts.odin3, *(["--top", opts.top] if opts.top else []), "-p",
                  f"{lib}read_verilog {flags} {opts.source}; write_rtlil a.il"]
         try:
@@ -227,7 +238,9 @@ class Bridge:
         self.blif("side A", "read_rtlil a.il", "a.blif")
 
     def side_b(self) -> None:
-        read = f"read_verilog -sv -nolatches {self.opts.source}"
+        units = "-nomem2reg " if self.opts.lib_nomem2reg else ""
+        read = "".join(f"read_verilog -sv -nolatches {units}{path}; " for path in self.opts.libs)
+        read += f"read_verilog -sv -nolatches {self.opts.source}"
         tribuf = self.opts.yosys_tribuf or wants_yosys_tribuf(self.opts.source)
         self.blif("side B", read, "b.blif", oracle=True, tribuf=tribuf)
 
@@ -324,13 +337,18 @@ def parse(argv: Sequence[str] | None) -> Options:
     ap.add_argument("--yosys-tribuf", action="store_true",
                     help="side B runs tribuf -logic after proc; flatten (internal tri-state buses)")
     ap.add_argument("--techlib", metavar="T", help="a .o3lib read first on side A (hard blocks)")
+    ap.add_argument("--lib", action="append", default=[], metavar="FILE",
+                    help="a file read as library units first (odin3 --lib; Yosys reads it too)")
+    ap.add_argument("--lib-nomem2reg", action="store_true",
+                    help="the --lib reads use --nomem2reg (Parmys's reading of vtr_primitives.v)")
     ap.add_argument("file", type=Path, help="the Verilog file")
     args = ap.parse_args(argv)
     return Options(exe(args.odin3), exe(args.yosys), exe(args.equiv_check), args.file.resolve(),
                    args.top,
                    args.mem_cap, args.keep, args.allow_version, args.a_only, args.unmap_enables,
                    str(Path(args.techlib).resolve()) if args.techlib else None,
-                   args.yosys_tribuf)
+                   args.yosys_tribuf, tuple(str(Path(lib).resolve()) for lib in args.lib),
+                   args.lib_nomem2reg)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

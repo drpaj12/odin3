@@ -1460,6 +1460,7 @@ static odin3_status instantiation(e1_pass *ps, odin3_ast_id item) {
     odin3_elab1 *e1 = ps->e1;
     uint32_t name = odin3_ast_name(e1->parsed, item);
     odin3_elab_res res = odin3_elab1_resolve(e1, name, odin3_elab1_def(e1, ps->def)->library);
+    odin3_elab1_prefer_unit(e1, item, &res);
     switch (res.kind) {
     case ODIN3_RES_MODULE:
         if (odin3_elab1_reach_def(e1, res.def)) {

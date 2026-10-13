@@ -149,6 +149,7 @@ typedef struct w_attrs_of {
     odin3_ast_id from; /* the parsed node whose attributes are written */
     odin3_ast_id made; /* the elaborated node they are attached to */
     odin3_ast_id then; /* a second parsed node merged in after from's (0: none); it wins a name */
+    uint8_t unit_flags; /* the MODULE of a --lib unit: its ODIN3_UNIT_* become attributes (EL-4) */
 } w_attrs_of;
 
 static void w_attach_attrs(e1w *wr, const w_attrs_of *at);
@@ -308,16 +309,56 @@ static bool w_has_attr(const e1w *wr, odin3_ast_id node, uint32_t name) {
     return false;
 }
 
+/* The attributes a --lib unit's MODULE carries beside its own (EL-4, spec 3.1a): the marker says
+ * "elaborate under my flags, not the run's"; the others are those flags. */
+static const struct {
+    const char *name;
+    unsigned bit;
+} k_unit_attrs[] = {{"odin3_lib", ODIN3_UNIT_LIB},
+                    {"odin3_lib_nolatches", ODIN3_UNIT_NOLATCHES},
+                    {"odin3_lib_nomem2reg", ODIN3_UNIT_NOMEM2REG}};
+enum { W_UNIT_ATTRS = 3 };
+
+/* A value-less ATTR named text on made. */
+static odin3_ast_id w_flag_attr(e1w *wr, odin3_ast_id made, const char *text) {
+    odin3_ast_spec spec = {.kind = ODIN3_AST_ATTR,
+                           .loc = odin3_ast_loc(wr->out, made).v,
+                           .end = odin3_ast_end(wr->out, made).v};
+    const odin3_ast_id none = {0};
+    odin3_ast_id attr = {0};
+    odin3_status st = odin3_ast_intern(wr->out, odin3_bytes_cstr(text), &spec.name);
+    st = st != ODIN3_OK ? st : odin3_ast_make(wr->out, &spec, &none, 1, &attr);
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+    }
+    return attr;
+}
+
+/* The unit-flag attributes of at into ids[0 ..); how many. */
+static uint32_t w_unit_attrs(e1w *wr, const w_attrs_of *at, odin3_ast_id *ids) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; at->unit_flags != 0 && i < W_UNIT_ATTRS && live(wr); i++) {
+        if ((at->unit_flags & k_unit_attrs[i].bit) != 0) {
+            ids[count] = w_flag_attr(wr, at->made, k_unit_attrs[i].name);
+            count += ids[count].v != 0 ? 1U : 0U;
+        }
+    }
+    return count;
+}
+
 /* The attributes of the parsed node from (then those of at->then, which win a name both give),
- * evaluated and attached to the elaborated node made. */
+ * evaluated and attached to the elaborated node made, then the unit-flag attributes. */
 static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
     odin3_ast_span first = odin3_ast_attrs(wr->ast, at->from);
     odin3_ast_span second = odin3_ast_attrs(wr->ast, at->then);
-    if (first.n + second.n == 0 || at->made.v == 0 || !live(wr)) {
+    if (first.n + second.n == 0 && at->unit_flags == 0) {
         return;
     }
-    odin3_ast_id *ids =
-        odin3_arena_alloc(wr->env->arena, ((size_t)first.n + second.n) * sizeof *ids);
+    if (at->made.v == 0 || !live(wr)) {
+        return;
+    }
+    odin3_ast_id *ids = odin3_arena_alloc(
+        wr->env->arena, ((size_t)first.n + second.n + W_UNIT_ATTRS) * sizeof *ids);
     if (ids == NULL) {
         fail(wr, ODIN3_ERR_NO_MEMORY);
         return;
@@ -331,6 +372,7 @@ static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
         ids[count] = w_attr_one(wr, attr);
         count += ids[count].v != 0 ? 1U : 0U;
     }
+    count += w_unit_attrs(wr, at, ids + count);
     if (!live(wr)) {
         return;
     }
@@ -1964,7 +2006,11 @@ static odin3_ast_id w_module(e1w *wr) {
     w_body(wr, node);
     odin3_ast_spec spec = spec_of(wr, ODIN3_AST_MODULE, node);
     spec.name = wr->spec->name;
-    return w_make_marked(wr, &spec, mark, node);
+    odin3_ast_id made = w_make_plain(wr, &spec, mark, node);
+    w_attach_attrs(wr, &(w_attrs_of){.from = node,
+                                     .made = made,
+                                     .unit_flags = odin3_elab1_def(wr->e1, wr->spec->def)->unit_flags});
+    return made;
 }
 
 odin3_status odin3_elab1_write(odin3_elab1 *e1, uint32_t spec) {

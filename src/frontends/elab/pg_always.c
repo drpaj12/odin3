@@ -338,7 +338,7 @@ static void pg_incomplete(odin3_pg *pg) {
  * edge sync none, and an output reads x until it is assigned. */
 static odin3_status pg_defaults(odin3_pg *pg) {
     const pg_out *outs = pg->outs.data;
-    if (pg->e2->opts.nolatches && !pg->edge) {
+    if (pg->e2->mod_nolatches && !pg->edge) {
         odin3_status st = ODIN3_OK;
         for (uint32_t i = 0; st == ODIN3_OK && i < pg->outs.len; i++) {
             st = pg_rv_set(pg, outs[i].net, odin3_sb_of_bit(ODIN3_BIT_X));
