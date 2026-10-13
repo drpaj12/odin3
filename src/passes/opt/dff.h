@@ -67,6 +67,7 @@ typedef struct odin3_dff_state {
     odin3_vec pend;
     odin3_prov_id prov;
     bool prov_ready, changed, gone, counted;
+    bool checking; /* Debug: a skipped FF is being visited as a check (dff.c) */
     uint32_t n_changed, n_bits;
     odin3_dff_muxes muxes;
     odin3_vec *queue;

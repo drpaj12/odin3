@@ -283,7 +283,7 @@ static srst_move srst_move_of(const odin3_dff_state *ds, const eat_step *step, o
  * itself, so opt_dff's incremental mode (dff_dirty.c) visits it again.
  */
 static void note_guard(const odin3_dff_state *ds, size_t guard) {
-    if (guard > ds->muxes.bits.len) {
+    if (guard > ds->muxes.bits.len && !ds->checking) {
         odin3_module_journal_add(ds->oc->module, ODIN3_JOURNAL_NODE, ds->cell.v);
     }
 }

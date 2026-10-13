@@ -1142,6 +1142,34 @@ static void test_opt_oom(void) {
     TEST_ASSERT_TRUE(failures > OOM_MIN_POINTS);
 }
 
+#ifndef NDEBUG
+/* Skips the first FF visit only: a sweep with the journal not active, where the old after-the-sweep
+ * check did not look, and the FF is visited in full by the next sweep as if nothing had happened.
+ */
+static uint32_t skip_asked;
+
+static bool skip_every_ff(uint32_t node) {
+    (void)node;
+    return skip_asked++ >= 2;
+}
+
+/* Review I1: opt_dff's Debug check visits every FF it skipped, wherever the skip came from. A skip
+ * injected on an FF that would change (dff_srst_merge) is found; the honest run finds nothing. */
+static void test_dff_skip_check_catches(void) {
+    uint32_t violations = 0;
+    odin3_opt_test_dff_skip(NULL, &violations);
+    char *honest = run_case("dff_constbits_one_stage", "");
+    free(honest);
+    TEST_ASSERT_EQUAL_UINT32(0, violations);
+    skip_asked = 0;
+    odin3_opt_test_dff_skip(skip_every_ff, &violations);
+    char *wrong = run_case("dff_constbits_one_stage", "");
+    free(wrong);
+    odin3_opt_test_dff_skip(NULL, NULL);
+    TEST_ASSERT_TRUE(violations > 0);
+}
+#endif
+
 /*
  * The incremental session's own allocations (the IR change journal's growth, opt_dff's dirty marks
  * and walk arrays, opt_clean's keep-flag copy) fall back to a full sweep: a run that fails at one
@@ -1282,6 +1310,9 @@ int main(void) {
     RUN_TEST(test_loop_fast_pipeline);
     RUN_TEST(test_loop_cap_modules);
     RUN_TEST(test_dirty_vs_full_rescan);
+#ifndef NDEBUG
+    RUN_TEST(test_dff_skip_check_catches);
+#endif
     RUN_TEST(test_dirty_chain);
     RUN_TEST(test_dirty_tie);
     RUN_TEST(test_compact_after_opt);
