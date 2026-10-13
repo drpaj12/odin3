@@ -103,6 +103,11 @@ PRE_PROC_TRIO = "opt_expr; opt_clean; opt -nodffe -nosdff; "
 # which cut ``single_port_ram`` with DATA_WIDTH 8 to one bit. Side B has no module for the cell, so
 # it prints every bit; with the stubs gone both sides print the connection as it is. (``=`` is
 # select's prefix for boxed modules, which a plain pattern skips.)
+# No ``-param`` (PR 2D-7b review I2, tried): side A's RTLIL carries every parameter of a black-box
+# instance at 32 bits, defaults included (spec 17 #30), while side B carries only the explicit ones
+# at the literal's width (``.param MODE 00000000000000000000000000000010`` against ``.param MODE
+# 10``), so equiv-check's new ``.param`` comparison would reject equal instances. Black-box
+# parameters are therefore compared by equiv-check on BLIF files that carry them, not here.
 BACK_END = (
     "proc; flatten; {tribuf}opt{o}; memory -nomap; opt{o}; memory_map; opt -full{o}; "
     "{a2s}{unmap}techmap; opt -fast{o}; "

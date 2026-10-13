@@ -30,8 +30,9 @@ one, else the first output pin (lowest port, lowest bit) whose net has a stable 
 ``$``-prefixed), as ``out=memtroll.str_out[0]`` (a one-bit port is ``p`` whether written
 ``p`` or ``p[0]``); the name is normalized like a primary I/O
 name.  Matching is exact and never guessed: instances that exist on one side only, two
-instances with one name, an instance with no usable name, a different cell type or different
-port widths all exit 2 with a message listing them.  The cut makes two netlists equivalent
+instances with one name, an instance with no usable name, a different cell type, different
+port widths or different ``.param`` lists (a RAM mode, an INIT value: a box's configuration is
+part of what it is) all exit 2 with a message listing them.  The cut makes two netlists equivalent
 only when everything around the black boxes is equivalent and each box's inputs and outputs
 connect identically; a box's behaviour is assumed equal, never checked.  A black box clocked
 by a primary clock is fine (its outputs are free inputs), but a clocked black box's internal
@@ -166,6 +167,7 @@ class BlackBox:
     line: int
     inputs: dict[str, str]
     outputs: dict[str, str]
+    params: dict[str, str] = field(default_factory=dict)  # the cell's ``.param NAME VALUE`` lines
 
 
 @dataclass
@@ -346,7 +348,7 @@ class _Flattener:
         pins = {names[f]: frame.resolve(a) for f, a in ordered}
         box = BlackBox(cell.model, self.instance_key(cell, frame, pins, is_out), cell.line,
                        {f: n for f, n in pins.items() if not is_out[f]},
-                       {f: n for f, n in pins.items() if is_out[f]})
+                       {f: n for f, n in pins.items() if is_out[f]}, _box_params(cell))
         other = self.instances.get(box.key)
         if other is not None:
             raise EquivError(f"{self.netlist.path}:{cell.line}: two black-box instances named "
@@ -456,6 +458,16 @@ def flatten(netlist: blif.Netlist, strict_init: bool = False, allow_undriven: bo
     return flat
 
 
+def _box_params(cell: blif.Subckt) -> dict[str, str]:
+    """The ``.param NAME VALUE`` lines of a black-box cell (a repeated name: the last wins)."""
+    params: dict[str, str] = {}
+    for attr, value in cell.attrs:
+        if attr == ".param":
+            name, _, rest = value.partition(" ")
+            params[name] = rest.strip()
+    return params
+
+
 def _widths(box: BlackBox) -> dict[str, int]:
     widths: dict[str, int] = {}
     for formal in (*box.inputs, *box.outputs):
@@ -482,6 +494,12 @@ def _compare_boxes(key: str, box_a: BlackBox, box_b: BlackBox) -> list[str]:
     if pa != pb or set(box_a.outputs) != set(box_b.outputs):
         return [f"ports differ for {box_a.cell_type} instance {key!r}: only in A: "
                 f"{sorted(pa - pb)}; only in B: {sorted(pb - pa)}"]
+    if box_a.params != box_b.params:
+        names = sorted(set(box_a.params) | set(box_b.params))
+        diffs = ", ".join(f"{n}: {box_a.params.get(n, '(none)')} in A, "
+                          f"{box_b.params.get(n, '(none)')} in B"
+                          for n in names if box_a.params.get(n) != box_b.params.get(n))
+        return [f"parameters differ for {box_a.cell_type} instance {key!r}: {diffs}"]
     return []
 
 
@@ -501,8 +519,8 @@ def match_blackboxes(flats: Sequence[Flat]) -> None:
                          "instance name, never guessed)", "\n".join(lines))
     problems = [p for key, box in boxes_a.items() for p in _compare_boxes(key, box, boxes_b[key])]
     if problems:
-        raise EquivError("matched black-box instances do not have the same cell type and "
-                         "port widths", "\n".join(f"  {p}" for p in problems))
+        raise EquivError("matched black-box instances do not have the same cell type, "
+                         "port widths and parameters", "\n".join(f"  {p}" for p in problems))
 
 
 # --------------------------------------------------------------------------- clocking
