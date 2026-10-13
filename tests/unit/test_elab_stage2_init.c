@@ -715,10 +715,12 @@ static void test_readmem_size_cap(void) {
 /* --- per-bit rules (EL-41; built by Task 21, the remaining cases) ----------------------------- */
 
 static void test_inlined_task_output_counts_as_blocking(void) {
-    pt_read_failing("module t(input c, a, output reg r);\n"
-                    "  task put(output o);\n    o = a;\n  endtask\n"
-                    "  always @(posedge c) begin\n    put(r);\n    r <= a;\n  end\nendmodule\n");
-    pt_expect_error((at_loc){7, 5}, "'r' is assigned with both '=' and '<=' (also at t.v:6:5)");
+    pt_read_src("module t(input c, a, output reg r);\n"
+                "  task put(output o);\n    o = a;\n  endtask\n"
+                "  always @(posedge c) begin\n    put(r);\n    r <= a;\n  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_warning((at_loc){7, 5}, "'r' is assigned with both '=' and '<=' on one control path "
+                                      "(also at t.v:6:5); simulation and synthesis may differ");
 }
 
 static void test_bits_split_across_blocks_are_fine(void) {

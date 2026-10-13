@@ -216,7 +216,10 @@ struct odin3_pg {
     odin3_u64map *seen;
     uint32_t serial;
     /* the module: T9's record of how each bit was first assigned (kept across blocks) */
-    odin3_u64map *kinds; /* net -> (1 + blocking) << 32 | the statement */
+    odin3_u64map *kinds;      /* net << 1 | blocking -> the net's first assignment of that kind */
+    odin3_u64map *kind_at;    /* the same key -> block number << 32 | the case of that assignment */
+    odin3_u64map *mixed_seen; /* T9 warnings given: wire (or net) << 1 | same control path */
+    uint32_t block_no;        /* the blocks begun so far (pg_block_reset counts them) */
 };
 
 /* --- pg.c: the builder ------------------------------------------------------------------------ */

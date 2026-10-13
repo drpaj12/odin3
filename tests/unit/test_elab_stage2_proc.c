@@ -424,19 +424,74 @@ static void test_two_processes_one_bit_of_a_vector(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
 }
 
-/* T9: `=` and `<=` on one bit, in one block or in two. */
-static void test_blocking_and_nonblocking(void) {
-    pt_read_failing("module t(input c, a, b, output reg r);\n"
-                    "  always @(posedge c) begin\n    r = a;\n    r <= b;\n  end\nendmodule\n");
-    pt_expect_error((at_loc){4, 5}, "'r' is assigned with both '=' and '<=' (also at t.v:3:5)");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
-    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
+/* T9 (accepted, Peter 2026-10-13): `=` and `<=` on one bit follow Yosys, with a warning that
+ * names the variable. On one control path the warning also says that simulation and synthesis
+ * may differ; on exclusive arms it does not. */
+#define T9_SAME_PATH "on one control path"
+#define T9_DIFFER "simulation and synthesis may differ"
+
+static void test_blocking_and_nonblocking_same_path(void) {
+    pt_read_src("module t(input c, a, b, output reg r);\n"
+                "  always @(posedge c) begin\n    r = a;\n    r <= b;\n  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, pt_diag_errors(), et_log(&pt_rs));
+    pt_expect_warning((at_loc){4, 5}, "'r' is assigned with both '=' and '<=' " T9_SAME_PATH
+                                      " (also at t.v:3:5); " T9_DIFFER);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_soft_warnings(), et_log(&pt_rs));
+    pt_expect_ir_ok();
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
     et_free(&pt_rs);
     memset(&pt_rs, 0, sizeof pt_rs);
+    /* the other order, and the two kinds on the same path through an if: still one warning */
+    pt_read_src("module t(input c, a, b, output reg r);\n  always @(posedge c) begin\n"
+                "    r <= b;\n    if (a) r = a;\n  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_warning((at_loc){4, 12}, "'r' is assigned with both '=' and '<=' " T9_SAME_PATH
+                                       " (also at t.v:3:5); " T9_DIFFER);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_soft_warnings(), et_log(&pt_rs));
+}
+
+static void test_blocking_and_nonblocking_exclusive_arms(void) {
+    pt_read_src("module t(input c, a, b, output reg r);\n  always @(posedge c) begin\n"
+                "    if (a) r = b;\n    else r <= b;\n  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_warning((at_loc){4, 10}, "'r' is assigned with both '=' and '<=' (also at t.v:3:12)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_soft_warnings(), et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with(T9_DIFFER));
+    pt_expect_ir_ok();
+}
+
+/* Bits of one vector, a case's arms and two ifs that can both run. */
+static void test_blocking_and_nonblocking_other_shapes(void) {
+    pt_read_src("module t(input c, a, b, output reg [1:0] r);\n  always @(posedge c) begin\n"
+                "    r[0] = a;\n    r[1] <= b;\n  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, pt_soft_warnings(), et_log(&pt_rs)); /* different bits */
+    et_free(&pt_rs);
+    memset(&pt_rs, 0, sizeof pt_rs);
+    pt_read_src("module t(input c, a, b, output reg r);\n  always @(posedge c) begin\n"
+                "    case (a)\n      1'b0: r = b;\n      1'b1: r <= b;\n    endcase\n"
+                "  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with(T9_DIFFER));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_warnings_with("'r' is assigned with both"),
+                                     et_log(&pt_rs));
+    et_free(&pt_rs);
+    memset(&pt_rs, 0, sizeof pt_rs);
+    pt_read_src("module t(input c, a, b, output reg r);\n  always @(posedge c) begin\n"
+                "    if (a) r = b;\n    if (b) r <= a;\n  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_warnings_with(T9_DIFFER), et_log(&pt_rs));
+}
+
+/* Two blocks on one bit stay T10's error (the T9 warning is given first). */
+static void test_blocking_and_nonblocking_two_blocks(void) {
     pt_read_failing("module t(input c, a, b, output reg [1:0] r);\n"
                     "  always @(posedge c) r[0] <= a;\n  always @* r[1] = b;\n"
                     "  always @(posedge c) r[1] <= a;\nendmodule\n");
-    pt_expect_error((at_loc){4, 23}, "'r' is assigned with both '=' and '<=' (also at t.v:3:13)");
+    pt_expect_warning((at_loc){4, 23}, "'r' is assigned with both '=' and '<=' (also at t.v:3:13)");
+    pt_expect_error((at_loc){4, 23}, "'r[1]' is assigned in two always blocks (also at t.v:3:13)");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with(T9_DIFFER));
 }
 
 /* Different variables, or the same kind everywhere, are no conflict. */
@@ -1057,7 +1112,10 @@ static void test_oom_sweep(void) {
     X(test_process_after_assign)                                                                   \
     X(test_two_processes_one_bit)                                                                  \
     X(test_two_processes_one_bit_of_a_vector)                                                      \
-    X(test_blocking_and_nonblocking)                                                               \
+    X(test_blocking_and_nonblocking_same_path)                                                \
+    X(test_blocking_and_nonblocking_exclusive_arms)                                                \
+    X(test_blocking_and_nonblocking_other_shapes)                                                \
+    X(test_blocking_and_nonblocking_two_blocks)                                                \
     X(test_same_kind_is_fine)                                                                      \
     X(test_conflict_drops_only_the_conflicting_chunk)                                              \
     X(test_wired_net_is_not_driven)                                                                \

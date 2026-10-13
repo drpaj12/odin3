@@ -412,7 +412,10 @@ its cap as `out of memory (cap 4G)`. (3) `micro-top` follows nested golden group
 
 v4.27 (2026-10-13; 2D-7b, Peter 2026-10-13 "accept T6/D3/T9 with warnings", PHASE2 #20). (1) T6 is
 accepted (§8.2, §9.2, §17 #76): an `always` with no event control is `always @*`, with a located
-warning. The T6 row leaves §9.1.
+warning. The T6 row leaves §9.1. (2) T9 is accepted (§8.9, §9.2, §17 #77): `=` and `<=` on one
+bit follow Yosys (every assignment is an action, the last on a path wins) with a warning that
+names the variable, and on one control path adds that simulation and synthesis may differ. T10
+stays an error. The T9 row leaves §9.1; `reject-2d` holds 23 cases and `ignore-2d` 12.
 
 ## 1. Purpose and scope (EL-1)
 
@@ -2002,9 +2005,20 @@ is attached (EL-28), with both locations from the symbol table's assignment list
 
 - **T10**: a bit that is an output of two `always` blocks: "'r[2]' is assigned in two always
   blocks (also at f.v:14:9)". (Different bits of one variable in different blocks are legal.)
-- **T9**: a bit assigned by both `=` and `<=` (in one block or several, source assignments only;
-  inlined task outputs count as `=`): "'r' is assigned with both '=' and '<=' (also at
-  f.v:20:5)" — REJECT per the coverage audit (B §2.2.4), where Yosys accepts.
+- **T9 (accepted, Peter 2026-10-13, 2D-7b)**: a bit assigned by both `=` and `<=` (in one block
+  or several, source assignments only; inlined task outputs count as `=`) follows Yosys 0.55:
+  every assignment is an action and the last one on a path wins (the `=` also updates the value
+  later statements of the block read, EL-35). A warning names the variable, at the later
+  assignment of the other kind, once per variable: "'r' is assigned with both '=' and '<='
+  (also at f.v:20:5)". When the other kind's first assignment can run in the same evaluation of
+  the same block (the root, one an arm and the other after its switch, arms of different
+  switches; not different arms of one `if` or `case`), the warning is "'r' is assigned with both
+  '=' and '<=' on one control path (also at f.v:20:5); simulation and synthesis may differ"
+  (simulation applies a nonblocking update after the blocking ones, Yosys's last action wins:
+  `q <= b; q = a;` is `q = b` in a simulator and `q = a` in the netlist). Both warnings may come
+  once per variable. The comparison is with the first `=` and the first `<=` assignment to the
+  bit, so a later one on a shared path after an exclusive first one gets the plain warning. Two
+  blocks assigning one bit remain T10's error.
 - **A4**: EL-28. A bit driven by a process and by a continuous assignment, gate or instance is A4.
 - Loop variables (EL-35) and function and task locals are exempt: they are not outputs.
 
@@ -2031,7 +2045,6 @@ cases (2C §7.3) expect, at the node named:
 | E20 | the `CALL` | `system function '$random' is not supported` |
 | E21 | the `HIER_NAME`/`CALL`/`TASK_CALL` | `hierarchical reference 'u.w' is not supported` |
 | A4 | the second driver | `'y[3]' has two drivers (also driven at f.v:L:C)` (a whole-net conflict names the net: `'y' has two drivers …`) |
-| T9 | the later assignment | `'r' is assigned with both '=' and '<=' (also at f.v:L:C)` |
 | T10 | the later block's assignment | `'r[2]' is assigned in two always blocks (also at f.v:L:C)` |
 | T12 | the inner `TIMING_STMT` | `event control inside an always body is not supported` |
 | T13 | the `WAIT` | `'wait' is not supported` |
@@ -2051,8 +2064,8 @@ cases (2C §7.3) expect, at the node named:
 (L14 is 2B's error and M11's duplicate module is 2C's `duplicate_module`; 2D raises every other
 REJECT, including M11's other duplicates. The `reject-2d/` handover holds 23 cases: the 20 rows
 other than L14, M11, T6 and T9, 2C plan point (i), and the REJECT parts of N15, P4 and F2
-tabulated above. T6 and T9 are accepted since 2D-7b, with a warning each: T6 is `ignore-2d/T6`,
-T9 is §9.2's warning.)
+tabulated above. T6 and T9 are accepted since 2D-7b, with a warning each: `ignore-2d/T6` and
+`ignore-2d/T9`.)
 
 Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
 
@@ -2140,6 +2153,7 @@ specialized twice — warns once, keyed by its parsed node):
 | S1 | the `SPECIFY_BLOCK` | `specify block is ignored` |
 | S3 | the `TASK_CALL` | `system task '$display' is ignored` (any system task but `$readmemh`/`$readmemb`) |
 | T6 | the `ALWAYS` | `always without an event control treated as always @*` (accepted, not ignored: §8.2) |
+| T9 | the later assignment | `'r' is assigned with both '=' and '<=' (also at f.v:L:C)`, or `... on one control path (also at f.v:L:C); simulation and synthesis may differ` (accepted: §8.9) |
 
 Other warnings: D1's two (EL-36), at the attribute; D2's two (EL-40); D5/M12 (EL-24); M10 `'x' is implicitly
 declared`; T3 (EL-34); E9's two (EL-30: `'===' is treated as '==' (synthesis has no x or z)`,
@@ -2543,7 +2557,7 @@ writer's text is valid RTLIL. The bridge is also 2E's and 2F's oracle later (the
 
 ### 14.4 The 2C handover
 
-`tests/verilog/reject-2d/` (23 cases: 20 rows plus the REJECT parts of N15, P4 and F2) and `tests/verilog/ignore-2d/` (11 rows, T6 added by 2D-7b), already registered
+`tests/verilog/reject-2d/` (23 cases: 20 rows plus the REJECT parts of N15, P4 and F2) and `tests/verilog/ignore-2d/` (12 rows, T6 and T9 added by 2D-7b), already registered
 by 2C as `verilog_reject_2d`/`verilog_ignore_2d` and skipped while `odin3_elab_run` is a stub,
 turn on with 2D; their `.err`/`.warn` texts are §9's tables. The project corpus's Verilog cases
 (2B §10.2 `--with-frontend`) run: the positive phase-2 cases (`auto_top`, `param_instance`,
@@ -2696,7 +2710,7 @@ and reported, never relaxed (2A's rule).
 | 9 | automatic top = the single uninstantiated module, else an error | deepest hierarchy, ties to the last defined | — | DESIGN §4.0 and the project corpus; the micro harness passes `--top` |
 | 10 | any undeclared identifier is an implicit net (warning) | same | only net lvalues and port connections | Parmys compatibility |
 | 11 | an edge on a multi-bit signal is an error | same | uses the LSB | Yosys |
-| 12 | T9, T10, A4 are errors | accepted (A4/T10 later flagged by `check`; T9 silently, verified) | T9/T10 legal in simulation | the coverage audit's REJECT verdicts |
+| 12 | T10, A4 are errors (T9 was one until 2D-7b, see #77) | accepted (A4/T10 later flagged by `check`) | T10 legal in simulation | the coverage audit's REJECT verdicts |
 | 13 | `===`/`!==`: exact fold when both constant; a wildcard compare over the 0/1 positions when one side has x/z constant bits (warning); `$eq`/`$ne` otherwise | `$eqx`/`$nex`; `techmap` drops the x bits, giving the same wildcard compare (verified through the Parmys script) | x/z compared literally (always false against a signal in hardware) | matches Parmys's netlist |
 | 14 | no `$pos` or `$sshl`; extension is wiring; constants folded at elaboration | `$pos`, `$sshl`; folding in `opt` | — | IR-1; same netlist after `opt` |
 | 15 | memories are collected into one `$mem` at elaboration (raw-index ports, simlib applies `OFFSET`) | `$memrd`/`$memwr`/`$meminit` + `memory_collect` (raw-index ports) | — | the IR has no memory record |
@@ -2761,6 +2775,7 @@ and reported, never relaxed (2A's rule).
 | 74 | a call in an expression is inlined by C recursion (`pg_run` to the walker to `pg_call_hook` to `pg_run`); the nesting is capped at 256 (`function call nesting deeper than 256 at 'f'`), so a deep chain of non-recursive functions is a located error, not a stack overflow | Yosys inlines by AST rewriting to any depth | running the call after the expression walk (the walker hands back a placeholder) | the hoist is 2D-7's (plan constraint ledger: "No recursion in `src/`", deviation recorded); the cap is far above real designs (chains of 3 to 10) |
 | 75 | an unrolled `for` that never ends (`reg [3:0] k; for (k = 7; k >= 0; k = k - 1)`) is the located error `for-loop never ends: 'k' takes the value 7 again` when its test and step read only the variable (Brent's cycle check), else `loop creates more than 2097152 IR objects (is it endless?)` (`ODIN3_ELAB_MAX_LOOP_OBJECTS`) or the iteration cap `loop exceeds 1048576 iterations` | Yosys 0.55 has no limit: it unrolls until it runs out of memory | the caps of EL-37 | review M3: the cap used to fire only after 5.7 GB of cells |
 | 76 | an `always` with no event control (`always x = a;`, `always #5 clk = ~clk;`) is `always @*`, with the warning "always without an event control treated as always @*" (T6; Peter 2026-10-13, PHASE2 #20) | Yosys 0.55 reads it the same way: the process has no sync rule, so it is combinational (verified: micros `task_endtask/{inside_port,outside_port,task_call_function,task_call_task}` are `elab-equiv`-equivalent) | an `always` with no timing runs forever in simulation (a zero-delay loop hangs) | accepted for Parmys compatibility; the warning names the risky construct |
+| 77 | a bit assigned by both `=` and `<=` is accepted with a warning (T9; Peter 2026-10-13, PHASE2 #20); on one control path the warning says that simulation and synthesis may differ | Yosys 0.55 accepts it without a word: each assignment is an action and the last on a path wins (verified: `elab-equiv` equivalent for `q = a; q <= b;`, `q <= b; q = a;`, if/case arms, `full/matmul`; `syntax/multi_clock_reader_writer` equals Yosys's netlist under a merged-clock abstraction, `equiv-check` being single-clock) | a simulator applies the nonblocking update after the blocking ones, so `q <= b; q = a;` ends as `b` there and `a` in the netlist | Parmys compatibility; the warning marks the case where the netlist and a simulation disagree |
 
 ## 18. Implementation split (EL-51)
 
