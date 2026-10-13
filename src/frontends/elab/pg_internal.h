@@ -102,6 +102,11 @@ typedef struct pg_loop {
     odin3_sym_id sym;
     uint64_t count;
     int64_t remaining;
+    uint64_t objects0;  /* e2->objects when the loop opened (the loop's IR object budget) */
+    uint64_t snap;      /* Brent's cycle check: the variable's value at the last snapshot, */
+    uint64_t next_snap; /* the iteration count of the next snapshot, */
+    bool snap_ok;       /* whether there is one, */
+    bool pure;          /* and whether the test and the step read only the variable and constants */
 } pg_loop;
 
 /* A call being inlined (EL-38): the declaration, the call, the call the generator inlined before
@@ -188,17 +193,17 @@ struct odin3_pg {
     odin3_elab2_reads hooks; /* the walker's hooks over this generator (pg_reads) */
     odin3_elab2_lvalue slv;  /* a synthetic target: a switch's exit, a select write's case */
     /* loops and calls (Task 23) */
-    odin3_vec loops;       /* pg_loop, innermost last */
-    odin3_vec calls;       /* pg_callrec, innermost last */
-    odin3_vec fsyms;       /* uint32_t: the symbols whose ir_wire a call frame set */
-    odin3_u64map *tvis;    /* TASK_DECL node -> 1: its body is scanned (this scan) */
-    odin3_u64map *active;  /* FUNCTION_DECL / TASK_DECL node -> 1: being inlined */
+    odin3_vec loops;        /* pg_loop, innermost last */
+    odin3_vec calls;        /* pg_callrec, innermost last */
+    odin3_vec fsyms;        /* uint32_t: the symbols whose ir_wire a call frame set */
+    odin3_u64map *tvis;     /* TASK_DECL node -> 1: its body is scanned (this scan) */
+    odin3_u64map *active;   /* FUNCTION_DECL / TASK_DECL node -> 1: being inlined */
     odin3_u64map *assigned; /* net -> 1: the nets a user assignment's action has as lhs (I2) */
-    odin3_u64map *loopout; /* symbol -> 1: read outside the loops it is the variable of */
-    bool loopout_ready;    /* loopout is built for the module */
-    bool scan_frame;       /* the scan is of a call's body: no new outputs */
-    bool scan_local;       /* the target being scanned names a callee's variable in an index */
-    bool scanning;         /* pg_scan is under way: an index with a call in it is not generated */
+    odin3_u64map *loopout;  /* symbol -> 1: read outside the loops it is the variable of */
+    bool loopout_ready;     /* loopout is built for the module */
+    bool scan_frame;        /* the scan is of a call's body: no new outputs */
+    bool scan_local;        /* the target being scanned names a callee's variable in an index */
+    bool scanning;          /* pg_scan is under way: an index with a call in it is not generated */
     /* T3 */
     odin3_u64map *reads;  /* net -> 1: read, not supplied by an assignment of the block */
     odin3_u64map *listed; /* net -> 1: a bit of a signal the level list names */

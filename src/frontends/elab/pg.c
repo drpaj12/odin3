@@ -30,9 +30,9 @@ enum { GROUP_SHIFT = 32 };
 
 /* The maps a block fills, with the address of each. */
 static odin3_u64map **pg_maps(odin3_pg *pg, size_t index) {
-    odin3_u64map **const all[] = {&pg->out_of,    &pg->group,     &pg->lv,    &pg->rv,
-                                  &pg->slot_head, &pg->dead_nets, &pg->reads, &pg->listed,
-                                  &pg->seen,      &pg->swl,       &pg->folds, &pg->active, &pg->assigned};
+    odin3_u64map **const all[] = {
+        &pg->out_of, &pg->group, &pg->lv,  &pg->rv,    &pg->slot_head, &pg->dead_nets, &pg->reads,
+        &pg->listed, &pg->seen,  &pg->swl, &pg->folds, &pg->active,    &pg->assigned};
     return all[index];
 }
 

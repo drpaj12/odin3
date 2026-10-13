@@ -136,7 +136,7 @@ static odin3_status chunk_action(odin3_pg *pg, uint32_t index, const chunk_to *t
         *right = to->hold ? outs[i].net.v : outs[i].t0.v;
     }
     pg_act_req req = {to->owner,  to->sync, pg->run_l.data, pg->run_r.data,
-                      chunk->len, pg->prov, false, true};
+                      chunk->len, pg->prov, false,          true};
     return pg_act_add(pg, &req);
 }
 

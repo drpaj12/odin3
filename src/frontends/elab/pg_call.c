@@ -142,8 +142,7 @@ static odin3_status info_check(odin3_pg *pg, const call_info *info) {
                        ? e2->limits->max_call_depth
                        : e2->limits->max_inline_depth;
     if (pg->calls.len >= cap) {
-        odin3_elab2_fatal(e2, loc, "function call nesting deeper than %u at '%s'", cap,
-                          info->name);
+        odin3_elab2_fatal(e2, loc, "function call nesting deeper than %u at '%s'", cap, info->name);
         return ODIN3_ERR_PARSE;
     }
     return ODIN3_OK;

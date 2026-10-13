@@ -119,8 +119,8 @@ static void test_for_counts_down(void) {
 
 static void test_for_cap(void) {
     with_limits(&(caps){16, 0, 0});
-    pt_read_failing("module t(input a, output reg y);\n  reg [1:0] k;\n  always @* begin\n"
-                    "    for (k = 0; k < 4; k = k + 1) y = a;\n  end\nendmodule\n");
+    pt_read_failing("module t(input a, output reg y);\n  reg [4:0] k;\n  always @* begin\n"
+                    "    for (k = 0; k < 20; k = k + 1) y = a;\n  end\nendmodule\n");
     pt_expect_error((at_loc){4, 5}, "loop exceeds 16 iterations");
 }
 
@@ -389,12 +389,42 @@ static void test_inline_nesting_is_capped_below_the_stack(void) {
                                               " + 1; endfunction\n",
                                               k, k, k + 1));
     }
-    snprintf(src + len, SRC_MAX - len, "  always @* y = f1(a);\nendmodule\n");
+    (void)snprintf(src + len, SRC_MAX - len, "  always @* y = f1(a);\nendmodule\n");
     pt_read_failing(src);
     free(src);
     TEST_ASSERT_NOT_NULL_MESSAGE(
         strstr(et_log(&pt_rs), "error: function call nesting deeper than 256 at 'f"),
         et_log(&pt_rs));
+}
+
+/* PR 2D-6 review M3: the classic unsigned countdown never ends (k >= 0 is always true for a
+ * 4-bit k). The cycle check finds it after a few wraps: no cells for 2^20 iterations (it took
+ * 1.8 GB and half a minute), so the test is quick and small. */
+static void test_endless_unsigned_countdown_is_found_by_its_cycle(void) {
+    pt_read_failing("module t(input [7:0] a, output reg [7:0] y);\n  reg [3:0] k;\n"
+                    "  always @* begin\n    y = 0;\n"
+                    "    for (k = 7; k >= 0; k = k - 1) y = y + a[k];\n  end\nendmodule\n");
+    pt_expect_error((at_loc){5, 5}, "for-loop never ends: 'k' takes the value 7 again");
+}
+
+/* A loop whose test reads another variable is not checked for a cycle: its IR object budget ends
+ * it (ODIN3_ELAB_MAX_LOOP_OBJECTS; the test lowers it). */
+static void test_endless_loop_with_a_second_variable_hits_the_object_budget(void) {
+    odin3_elab_limits lim = *odin3_elab_limits_get();
+    lim.max_loop_objects = 3000;
+    odin3_elab_test_set_limits(&lim);
+    pt_read_failing("module t(input [7:0] a, output reg [7:0] y);\n  reg [3:0] k, j;\n"
+                    "  always @* begin\n    y = 0; j = 0;\n"
+                    "    for (k = 7; k >= j; k = k - 1) y = y + a[k];\n  end\nendmodule\n");
+    pt_expect_error((at_loc){5, 5}, "loop creates more than 3000 IR objects (is it endless?)");
+}
+
+/* A loop that ends is untouched: a 4-bit variable counting 0..9 repeats nothing. */
+static void test_ending_loop_is_not_a_cycle(void) {
+    pt_read_clean("module t(input [9:0] a, output reg [9:0] y);\n  reg [3:0] k;\n"
+                  "  always @* begin\n    y = 0;\n"
+                  "    for (k = 0; k < 10; k = k + 1) y[k] = a[9 - k];\n  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
 }
 
 static void test_while_needs_constant_arguments(void) {
@@ -893,6 +923,9 @@ static void test_call_in_edge_expression_is_error(void) {
     X(test_recursion_not_constant)                                                                 \
     X(test_nesting_depth)                                                                          \
     X(test_inline_nesting_is_capped_below_the_stack)                                               \
+    X(test_endless_unsigned_countdown_is_found_by_its_cycle)                                       \
+    X(test_endless_loop_with_a_second_variable_hits_the_object_budget)                             \
+    X(test_ending_loop_is_not_a_cycle)                                                             \
     X(test_while_needs_constant_arguments)                                                         \
     X(test_argument_count)                                                                         \
     X(test_array_written_in_task_forces_registers)                                                 \

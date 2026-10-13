@@ -418,6 +418,10 @@ static odin3_status pins_one(odin3_pg *pg, const pg_pins *pins, odin3_sigbit bit
         return ODIN3_OK;
     }
     at = st == ODIN3_OK ? find_u32(&pins->inets, net.v) : -1;
+    if (st == ODIN3_OK && at < 0) { /* every net read was collected as an input: a 2D bug */
+        odin3_log(ODIN3_LOG_ERROR, "odin3_pg: a net of the process body has no pin (a 2D bug)");
+        return ODIN3_ERR_CHECK;
+    }
     *out = ODIN3_PBIT_IN | (uint32_t)(at >= 0 ? at : 0);
     return st;
 }

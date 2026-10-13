@@ -22,11 +22,12 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-enum { LOOP_INIT = 0, LOOP_TEST = 1, LOOP_STEP = 2 };
+enum { LOOP_INIT = 0, LOOP_TEST = 1, LOOP_STEP = 2, LOOP_VALUE_BITS = 64 };
 enum { FOR_INIT = 0, FOR_COND = 1, FOR_STEP = 2, FOR_BODY = 3 };
 enum { REPEAT_COUNT = 0, REPEAT_BODY = 1 };
 
@@ -131,7 +132,7 @@ static odin3_status loop_record(odin3_pg *pg, odin3_ast_id node, odin3_sym_id sy
     if (loop == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *loop = (pg_loop){node, sym, 0, times};
+    *loop = (pg_loop){node, sym, 0, times, pg->e2->objects, 0, 0, false, false};
     odin3_elab2 *e2 = pg->e2;
     if (sym.v != 0) {
         if (e2->bound == NULL) {
@@ -155,6 +156,31 @@ static odin3_status loop_record(odin3_pg *pg, odin3_ast_id node, odin3_sym_id sy
     return st;
 }
 
+/* Whether expr reads nothing but the variable sym and constants (parameters, literals, system
+ * functions): no other variable, no user function. */
+static bool reads_only(const odin3_pg *pg, odin3_ast_id expr, odin3_sym_id sym) {
+    odin3_ast_cursor cur;
+    bool only = odin3_ast_cursor_init(&cur, pg->e2->elab, expr) == ODIN3_OK;
+    odin3_ast_event ev;
+    odin3_ast_id node;
+    while (only && odin3_ast_cursor_next(&cur, &ev, &node)) {
+        odin3_ast_kind kind = odin3_ast_kind_of(pg->e2->elab, node);
+        if (ev != ODIN3_AST_ENTER) {
+            continue;
+        }
+        if (kind == ODIN3_AST_CALL) {
+            only = (odin3_ast_flags(pg->e2->elab, node) & ODIN3_AST_F_CALL_SYSTEM) != 0;
+        } else if (kind == ODIN3_AST_IDENT || kind == ODIN3_AST_HIER_NAME) {
+            odin3_sym_id name = odin3_elab_sym_of(&pg->e2->bind, node);
+            const odin3_symbol *rec = odin3_symbol_get(pg->e2->st, name);
+            only = name.v == sym.v ||
+                   (rec != NULL && rec->kind != ODIN3_SYM_NET && rec->kind != ODIN3_SYM_VAR);
+        }
+    }
+    odin3_ast_cursor_free(&cur);
+    return only;
+}
+
 /* for (i = a; c; i = s) body: both assignments must write the same plain variable. */
 static odin3_status open_for(odin3_pg *pg, odin3_ast_id node) {
     const odin3_ast *ast = pg->e2->elab;
@@ -165,7 +191,13 @@ static odin3_status open_for(odin3_pg *pg, odin3_ast_id node) {
                           "for-loop initialisation and step must assign the same variable");
         return ODIN3_ERR_PARSE;
     }
-    return loop_record(pg, node, init, 0);
+    odin3_status st = loop_record(pg, node, init, 0);
+    if (st == ODIN3_OK) {
+        ((pg_loop *)odin3_vec_at(&pg->loops, pg->loops.len - 1))->pure =
+            reads_only(pg, odin3_ast_child(ast, node, FOR_COND), init) &&
+            reads_only(pg, odin3_ast_child(ast, odin3_ast_child(ast, node, FOR_STEP), 2), init);
+    }
+    return st;
 }
 
 /* repeat (n) body: n is a NUMBER after stage 1; an x, z or negative count runs nothing. */
@@ -210,6 +242,11 @@ static odin3_status admit(odin3_pg *pg, pg_loop *loop) {
                           e2->limits->max_total_iterations);
         return ODIN3_ERR_PARSE;
     }
+    if (e2->objects - loop->objects0 > e2->limits->max_loop_objects) {
+        odin3_elab2_error(e2, loc, "loop creates more than %u IR objects (is it endless?)",
+                          e2->limits->max_loop_objects);
+        return ODIN3_ERR_PARSE;
+    }
     loop->count++;
     e2->iterations++;
     return ODIN3_OK;
@@ -221,6 +258,51 @@ static odin3_status push_body(odin3_pg *pg, odin3_ast_id body) {
     }
     pg_frame frame = {PG_F_STMT, body, 0, 0, 0, 0};
     return pg_frame_push(pg, &frame);
+}
+
+/* The value of the loop variable when every bit is a known constant and it fits 64 bits. */
+static bool variable_value(const odin3_pg *pg, odin3_sym_id sym, uint64_t *value) {
+    const odin3_symbol *rec = odin3_symbol_get(pg->e2->st, sym);
+    if (rec == NULL || rec->n_unpacked > 0 || rec->ir_wire.v == 0) {
+        return false;
+    }
+    uint32_t width = odin3_wire_width(pg->e2->mod, rec->ir_wire);
+    *value = 0;
+    for (uint32_t bit = 0; width <= LOOP_VALUE_BITS && bit < width; bit++) {
+        odin3_sigbit sig = 0;
+        if (!pg_rv_get(pg, odin3_wire_net(pg->e2->mod, rec->ir_wire, bit), &sig) ||
+            !odin3_sb_is_const(sig) || odin3_sb_bit(sig) > ODIN3_BIT_1) {
+            return false;
+        }
+        *value |= (uint64_t)(odin3_sb_bit(sig) == ODIN3_BIT_1 ? 1U : 0U) << bit;
+    }
+    return width <= LOOP_VALUE_BITS;
+}
+
+/* A loop whose test and step read only its variable and constants is a function of that variable
+ * alone: when the variable takes a value it had at an earlier test, the loop never ends. Brent's
+ * cycle check keeps one snapshot (taken at the iteration counts 1, 2, 4, ...), so a countdown of
+ * an unsigned variable (`reg [3:0] k; for (k = 7; k >= 0; k = k - 1)`) is found after a few
+ * wraps instead of after the iteration cap (PR 2D-6 review M3). */
+static odin3_status check_cycle(odin3_pg *pg, pg_loop *loop) {
+    uint64_t value = 0;
+    if (!loop->pure || !variable_value(pg, loop->sym, &value)) {
+        return ODIN3_OK;
+    }
+    if (loop->snap_ok && value == loop->snap) {
+        odin3_elab2_error(pg->e2, odin3_ast_loc(pg->e2->elab, loop->node),
+                          "for-loop never ends: '%s' takes the value %" PRIu64 " again",
+                          odin3_strtab_get(odin3_design_strtab(pg->e2->design),
+                                           odin3_symbol_get(pg->e2->st, loop->sym)->name),
+                          value);
+        return ODIN3_ERR_PARSE;
+    }
+    if (!loop->snap_ok || loop->count >= loop->next_snap) {
+        loop->snap = value;
+        loop->snap_ok = true;
+        loop->next_snap = loop->count > 0 ? loop->count * 2U : 1U;
+    }
+    return ODIN3_OK;
 }
 
 /* A for statement's assignment (init or step): its value must be constant, then it is built. */
@@ -238,6 +320,7 @@ static odin3_status for_test(odin3_pg *pg, pg_frame *frame, pg_loop *loop) {
     need nd = {loop->node, cond, "condition"};
     odin3_status st = need_constant(pg, &nd);
     bool truth = false;
+    st = st != ODIN3_OK ? st : check_cycle(pg, loop);
     st = st != ODIN3_OK ? st : const_truth(pg, cond, &truth);
     if (st != ODIN3_OK) {
         return st;
