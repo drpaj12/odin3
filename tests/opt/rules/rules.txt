@@ -9,6 +9,13 @@
 # opt_expr only) or `log:<regex>` for a line of Yosys's log (run under `debug`). `dev=N` is spec 17
 # row N. Run: tools/opt-check/opt-rules --odin3 O [--yosys Y] tests/opt/rules/<sub>.
 #
+# The <yosys id> of several rows is shared (all merge rows `is identical to cell`, all muxtree rows
+# `dead port`, most reduce rows `New input vector`, all share rows `Found cells that share an
+# operand`), so a Yosys log line does not tell sibling rules apart and the Odin III counters of these
+# passes are INFO totals. What does separate them is the golden diff plus the refinement check
+# `opt-rules` runs on every row (tests/opt/rules/refine_skip.txt lists the documented skips). The
+# `action_<line>` cover ids are line numbers of Yosys 0.55's opt_expr.cc and break on any other build.
+#
 # Reachable only from RTLIL, not from Verilog or BLIF through `proc --noopt` plus at most a
 # `// prepass:` of opt_expr/opt_dff; the unit data cases of tests/unit/data/opt/ cover them against
 # Yosys 0.55 (the .expect files record the commands):

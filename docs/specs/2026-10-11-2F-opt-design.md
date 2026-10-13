@@ -690,6 +690,7 @@ lines DEBUG.
 | WARN | `opt: module 'm': no fixed point after 10000 iterations; stopping` | the cap (OP-12) |
 | WARN | `opt: snapshot skipped: <reason>` | a `--opt-snapshot` file that cannot be written (a cell with no RTLIL form, an I/O error); the call goes on and returns its own status |
 | WARN | `opt_muxtree: module 'm': giving up after 100000 evaluations` | Yosys's "Giving up (too many iterations)" |
+| ERROR | `opt: <sub>: simulation differs on module 'm' at cycle K` | `--opt-simcheck` (Debug; §20.2): the module's outputs differ before and after a sub-pass call (`ODIN3_ERR_CHECK`) |
 | ERROR | `<pass>: unknown argument '<arg>'` | an unknown option (`INVALID_ARG`, the 1D style) |
 | ERROR | `opt needs more than N bytes (the design's budget is 60% of physical memory)` | the shared byte budget (§19; `ODIN3_ERR_PARSE`) |
 
@@ -880,9 +881,9 @@ after.il; rename -top gate; equiv_make gold gate eq; hierarchy -top eq; flatten;
 -seq 4; equiv_induct -undef; equiv_status -assert` — a **refinement** check (x in the gold is a
 don't-care; probe: `s ? a : 4'bx` → `a` passes, the reverse and a wrong enable fail). Inputs holding
 processes (the pre-`proc` trio) get Yosys `proc` on both sides first. A failing pair names the
-sub-pass call and rule counters. A cheaper in-process check runs alongside when the module has no x
+sub-pass call and rule counters. Spec 20.2's script alone cannot prove the async flip-flops, so the check tries `async2sync` first and then `async2sync; techmap` (techmap loses the proof of a division by zero and of a `$pmux`); a pass in either is a proof. `opt-rules` runs the same check on every row's `in.il` and `out.il`; `$pow` has no SAT model, and the one x-refinement the flow cannot prove, `dff/never_active_en`, is a documented skip (`tests/opt/rules/refine_skip.txt`). A cheaper in-process check runs alongside when the module has no x
 constant, no FF and no cell without a `simulate` hook (`$shiftx`, `$pow`; word FFs have none, IR
-change D): 1E's simulator, 64 cycles × 3 seeds, before/after copies. It must drive the selects of every `$pmux` one-hot, or skip a module holding a `$pmux` whose selects are not provably exclusive (`opt_share` is a refinement only there, §17 #46). Run on: every per-rule golden
+change D): 1E's simulator, 64 cycles × 3 seeds, before/after copies. The check is `--opt-simcheck` on `opt` and the sub-passes (a Debug option, `src/passes/opt/simcheck.c`): around each sub-pass call it records the outputs of every module that passes the predicate on seeds 1, 2, 3 × 64 cycles, before and after, so the "before copy" is a trace and the IR needs no module copy; a differing trace is `ODIN3_ERR_CHECK` (§16). The 2-state simulator judges a module only where the sub-pass must keep every output, so it skips a module with a `$proc`, an instance, a cell with no `simulate` hook, an x or z constant, a flip-flop with INIT 2/3 or an `init` on its Q net, a module that does not build (a clock that is no primary input, two drivers, a loop, an inout), and a module holding a `$pmux` whose select is wider than one bit (the selects are not provably exclusive, and `opt_share` is a refinement only there, §17 #46). Run on: every per-rule golden
 (CTest), the micros (CTest, label `opt_equiv`, smallest first), the VTR set (nightly).
 
 ### 20.3 Differential against Yosys on the same input (`opt-diff`)
@@ -896,9 +897,10 @@ change D): 1E's simulator, 64 cycles × 3 seeds, before/after copies. It must dr
    count target;
 4. `yosys.il` refined by `odin.il` (§20.2's check with Yosys's result as gold), so Odin III
    resolved no x differently where Yosys kept it defined;
-5. **identity after a common lowering**: both through Yosys `flatten; techmap; opt -fast;
-   dffunmap; opt -fast -noff; opt_clean -purge; write_blif -undef + unconn`, then
-   `netlist-compare` (exit 0);
+5. **identity after a common lowering**: both through Yosys `flatten; memory; techmap; opt -fast;
+   dffunmap; opt -fast -noff; opt_clean -purge; write_blif -undef + unconn` (`memory` is added: BLIF
+   has no memory cell), then `netlist-compare --implicit-models` (exit 0; an exit 2, e.g. an `inout`
+   with two drivers, counts as a difference of this step);
 6. the per-rule counters of both, printed for diagnosis (not a gate).
 
 `S` ∈ {the Phase 2 script, `opt -full`, `opt -fast`, `opt -fast -noff`, `opt -nodffe -nosdff`}.

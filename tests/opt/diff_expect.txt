@@ -1,0 +1,95 @@
+# tests/opt/diff_expect.txt: the differences opt-diff accepts on the micros (2F Task 17; spec 20.3).
+#
+#   <path relative to tests/micro/verilog> <script> <step> <reason>
+#
+# script: phase2, full (opt -full), fast, fast-noff, nodffe-nosdff, or *. step: histogram, refine or
+# identity. A difference not listed fails; a listed one that does not occur fails (stale).
+# First populated from a run of the files up to 5.9 KB (phase2 and opt -full, Yosys 0.55): the reasons
+# are the class of the difference, not an analysis per design. The larger micros (> 5.9 KB) were not
+# run when this was written; Task 20's full run adds their lines (or removes stale ones).
+#
+# Soundness is the refinement of each Odin III sub-pass call (opt-equiv), not this list: a `refine`
+# line here says only that Yosys's own result is not provably refined by Odin III's, e.g. Yosys picked
+# a defined value for an x, or the flow has no model.
+keywords/inout/inout_failure.v phase2 refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+keywords/inout/inout_failure.v phase2 identity netlist-compare cannot read the lowered BLIF (inout net with two drivers)
+keywords/inout/inout_failure.v full refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+keywords/inout/inout_failure.v full identity netlist-compare cannot read the lowered BLIF (inout net with two drivers)
+keywords/inout/simple_inout.v phase2 refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+keywords/inout/simple_inout.v phase2 identity netlist-compare cannot read the lowered BLIF (inout net with two drivers)
+keywords/inout/simple_inout.v full refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+keywords/inout/simple_inout.v full identity netlist-compare cannot read the lowered BLIF (inout net with two drivers)
+micro/multiply_hard_block.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+micro/multiply_hard_block.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+operators/eightbit_arithmetic_power.v phase2 refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+operators/eightbit_arithmetic_power.v full refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+micro/bm_DL_74381_ALU.v full histogram cell-type histogram differs (proc/ROM or opt_share structure); not yet analysed per design (Task 20)
+micro/bm_DL_74381_ALU.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+operators/twobits_arithmetic_power.v phase2 refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+operators/twobits_arithmetic_power.v full refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+common/pow_const.v phase2 refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+common/pow_const.v full refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+large/LargeRam.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+large/LargeRam.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+common/spram.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+common/spram.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+common/pow.v phase2 refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+common/pow.v full refine equiv_simple has no SAT model for the cell ($pow or a tribuf): not provable by this flow, not a counterexample
+common/dpram.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+common/dpram.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+syntax/spram_big.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+syntax/spram_big.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+syntax/memlooptesting.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+syntax/memlooptesting.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+micro/bm_tester.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+micro/bm_tester.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+syntax/constant_module_inst.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+syntax/constant_module_inst.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+micro/bm_if_common.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+micro/bm_match4_str_arch.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+syntax/both_ram.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+syntax/both_ram.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+micro/bm_if_collapse.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+micro/bm_match2_str_arch.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+micro/bm_match5_str_arch.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+full/memory_controller.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+full/memory_controller.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+micro/bm_stmt_compare_padding.v phase2 histogram cell-type histogram differs (proc/ROM or opt_share structure); not yet analysed per design (Task 20)
+micro/bm_stmt_compare_padding.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+common/nrnw.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+common/nrnw.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+full/diffeq1.v phase2 refine equiv proof past 60 s (multipliers): inconclusive, not a counterexample
+full/diffeq1.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+full/diffeq1.v full refine equiv proof past 60 s (multipliers): inconclusive, not a counterexample
+full/diffeq1.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+syntax/diffeq_paj_convert.v phase2 refine equiv proof past 60 s (multipliers): inconclusive, not a counterexample
+syntax/diffeq_paj_convert.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+syntax/diffeq_paj_convert.v full refine equiv proof past 60 s (multipliers): inconclusive, not a counterexample
+syntax/diffeq_paj_convert.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+syntax/inferred_ram_w_clog2.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+syntax/inferred_ram_w_clog2.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+micro/bm_functional_test.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+micro/bm_functional_test.v full histogram cell-type histogram differs (proc/ROM or opt_share structure); not yet analysed per design (Task 20)
+micro/bm_functional_test.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+micro/bm_stmt_all_mod.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+micro/bm_dag3_mod.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+micro/bm_dag3_mod.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+full/diffeq2.v phase2 refine equiv proof past 60 s (multipliers): inconclusive, not a counterexample
+full/diffeq2.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+full/diffeq2.v full refine equiv proof past 60 s (multipliers): inconclusive, not a counterexample
+full/diffeq2.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+full/bm_sfifo_rtl.v full histogram cell-type histogram differs (proc/ROM or opt_share structure); not yet analysed per design (Task 20)
+full/bm_sfifo_rtl.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+syntax/sign_extend_nomem.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+syntax/memory_combinational.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+syntax/memory_combinational.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+syntax/memory_combinational.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+full/iir_no_combinational.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+full/iir_no_combinational.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+full/ch_intrinsics.v phase2 refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+full/ch_intrinsics.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+full/ch_intrinsics.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+full/ch_intrinsics.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+large/iir.v full refine unproven by the flow (black-box hard block or memory port, or sequential induction); Yosys's result is not provably refined: not yet analysed per design (Task 20)
+full/fir_scu_rtl_restructured_for_cmm_exp.v phase2 identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)
+full/fir_scu_rtl_restructured_for_cmm_exp.v full identity not identical after the common lowering; histogram and refinement agree: structure differs, not yet analysed per design (Task 20)

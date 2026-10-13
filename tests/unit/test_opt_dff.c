@@ -2097,6 +2097,44 @@ static const char *const k_cases[] = {
     "dq_ce_over_srst", "mux",          "en",
 };
 
+/* The rule counter each case must raise in its plain run (Task 16 review M3): the .expect output
+ * alone does not prove that the named rule fired, so a case that reaches a rule only through this
+ * data (always_active_set, clr_set_to_arst) asserts its counter here. */
+typedef struct case_action {
+    const char *name;
+    odin3_opt_dff_action action;
+} case_action;
+
+static const case_action k_case_actions[] = {
+    {"arst_always", ODIN3_OPT_DFF_ALWAYS_ARST},
+    {"arst_never", ODIN3_OPT_DFF_NEVER_ARST},
+    {"clk", ODIN3_OPT_DFF_CONST_CLK},
+    {"const", ODIN3_OPT_DFF_CONST_BIT_0},
+    {"const", ODIN3_OPT_DFF_CONST_BIT_1},
+    {"qd", ODIN3_OPT_DFF_D_EQ_Q},
+    {"sr_always", ODIN3_OPT_DFF_ALWAYS_CLR},
+    {"sr_always", ODIN3_OPT_DFF_ALWAYS_SET},
+    {"sr_never_clr", ODIN3_OPT_DFF_NEVER_CLR},
+    {"sr_never_set", ODIN3_OPT_DFF_NEVER_SET},
+    {"sr_arst_merge", ODIN3_OPT_DFF_CLR_SET_TO_ARST},
+    {"srst_always", ODIN3_OPT_DFF_ALWAYS_SRST},
+    {"srst_never", ODIN3_OPT_DFF_NEVER_SRST},
+    {"aload_always_sr", ODIN3_OPT_DFF_ALWAYS_ALOAD},
+    {"aload_always_arst", ODIN3_OPT_DFF_ALWAYS_ALOAD},
+    {"dq_ce_over_srst", ODIN3_OPT_DFF_D_EQ_Q},
+    {"mux", ODIN3_OPT_DFF_ADD_SRST},
+    {"mux", ODIN3_OPT_DFF_ADD_EN},
+    {"en", ODIN3_OPT_DFF_ALWAYS_EN},
+};
+
+static void expect_case_actions(const char *name) {
+    for (size_t i = 0; i < sizeof k_case_actions / sizeof k_case_actions[0]; i++) {
+        if (strcmp(k_case_actions[i].name, name) == 0) {
+            TEST_ASSERT_TRUE_MESSAGE(fx.counts.dff_action[k_case_actions[i].action] >= 1U, name);
+        }
+    }
+}
+
 /* The mux case also runs with the merges switched off (the flags line of each .expect). */
 static const char *const k_mux_flags[] = {".nodffe", ".nosdff", ".nodffe_nosdff"};
 
@@ -2241,6 +2279,9 @@ static void run_case(const char *name, const char *suffix) {
     build(text);
     fx.opts = opts;
     run_dff();
+    if (suffix[0] == '\0') {
+        expect_case_actions(name);
+    }
     summary got;
     summarize(&got);
     for (uint32_t i = 0; i < want.n && i < got.n; i++) {

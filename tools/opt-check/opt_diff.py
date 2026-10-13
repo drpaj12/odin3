@@ -2,7 +2,7 @@
 
 Usage::
 
-    opt-diff --odin3 O --yosys Y [--top T] [--script S]... [--expect F] [--root R]
+    opt-diff --odin3 O --yosys Y [--top T] [--script S]... [--expect F] [--root R] [--techlib L]
              [--netlist-compare N] [--mem-cap C] [--work DIR] [--verbose] FILE...
 
 For each ``S`` (default ``phase2``; ``phase2``, ``opt -full``, ``opt -fast``, ``opt -fast -noff``,
@@ -14,13 +14,15 @@ For each ``S`` (default ``phase2``; ``phase2``, ``opt -full``, ``opt -fast``, ``
    opt_expr; ...``;
 2. Yosys 0.55: ``read_rtlil in.il; S; write_rtlil yosys.il; stat`` with ``YOSYS_COVER_DIR``. Its
    ``phase2`` is Parmys's lines without ``compact``: ``opt_expr; opt_clean; opt -nodffe -nosdff;
-   proc; opt``;
+   proc -norom; opt`` (Parmys's ``procs -norom``);
 3. **histogram**: the per-module cell-type counts of ``stats`` and ``stat`` are equal;
 4. **refine**: ``yosys.il`` is refined by ``odin.il`` (``opt-equiv``'s check, Yosys's result as
    the gold), so Odin III resolved no x differently where Yosys kept it defined;
-5. **identity**: both through Yosys ``hierarchy -auto-top; flatten; techmap; opt -fast; dffunmap;
-   opt -fast -noff; opt_clean -purge; write_blif -true + vcc -false + gnd -undef + unconn
-   -blackbox``, then ``netlist-compare --implicit-models`` (exit 0);
+5. **identity**: both through Yosys ``hierarchy -auto-top; flatten; memory; techmap; opt -fast;
+   dffunmap; opt -fast -noff; opt_clean -purge; write_blif -true + vcc -false + gnd -undef + unconn
+   -blackbox`` (``memory`` is added to the spec's lowering: BLIF has no memory cell), then
+   ``netlist-compare --implicit-models`` (exit 0; an exit 2, e.g. an inout with two drivers, is a
+   difference of this step);
 6. the rule counters of both, printed for a design with a difference (``--verbose``: always); no
    gate.
 
@@ -56,8 +58,9 @@ NETLIST_COMPARE = HERE.parent / "netlist-compare" / "netlist-compare"
 EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
 STEPS = ("histogram", "refine", "identity")
 ODIN_FRONT = "proc", "opt_expr -keepdc"
-LOWERING = ("hierarchy -auto-top", "flatten", "techmap", "opt -fast", "dffunmap", "opt -fast -noff",
-            "opt_clean -purge", "write_blif -true + vcc -false + gnd -undef + unconn -blackbox")
+LOWERING = ("hierarchy -auto-top", "flatten", "memory", "techmap", "opt -fast", "dffunmap",
+            "opt -fast -noff", "opt_clean -purge",
+            "write_blif -true + vcc -false + gnd -undef + unconn -blackbox")
 DEFAULT_CAP = 2 << 30
 TIMEOUT_SECONDS = 600.0
 
@@ -75,7 +78,10 @@ class Script:
 
 def _phase2() -> Script:
     commands = tuple(opt_equiv.phase2_commands())
-    return Script("phase2", commands, tuple(c for c in commands if c != "compact"), True)
+    # Parmys runs `procs -norom` (Yosys's `proc` would also make ROMs: $meminit and $memrd_v2),
+    # and `compact` is not a Yosys line.
+    yosys = tuple("proc -norom" if c == "proc" else c for c in commands if c != "compact")
+    return Script("phase2", commands, yosys, True)
 
 
 def _single(slug: str, command: str) -> Script:
@@ -95,9 +101,9 @@ def script_named(name: str) -> Script:
 
 
 def odin_script(script: Script, files: Sequence[str], top: str | None, in_il: Path,
-                odin_il: Path) -> str:
+                odin_il: Path, techlib: str | None = None) -> str:
     """Step 1's Odin III ``-p`` script (``read_verilog --nolatches``, ruling I8)."""
-    front = opt_equiv.read_commands(files, top, True)
+    front = opt_equiv.read_commands(files, top, True, techlib)
     middle = [] if script.trio else list(ODIN_FRONT)
     body = opt_equiv.with_stats(script.odin)
     return "; ".join([*front, *middle, f"write_rtlil {in_il}", *body, f"write_rtlil {odin_il}",
@@ -156,6 +162,7 @@ class Diff:
         self.work = work
         self.cap: int = args.mem_cap
         self.checker = opt_equiv.Checker(args.yosys, work, self.cap, top=args.top)
+        self.techlib = str(Path(args.techlib).resolve()) if args.techlib else None
 
     def child(self, what: str, argv: Sequence[str], env: dict[str, str] | None = None
               ) -> subprocess.CompletedProcess[str]:
@@ -181,7 +188,8 @@ class Diff:
         top = self.args.top
         odin_log = self.must("odin3", [opt_equiv.exe(self.args.odin3),
                                        *(["--top", top] if top else []), "-p",
-                                       odin_script(script, files, top, in_il, odin_il)])
+                                       odin_script(script, files, top, in_il, odin_il,
+                                                   self.techlib)])
         cover = run_dir / "cover"
         cover.mkdir(exist_ok=True)
         yosys_log = self.must("yosys", [opt_equiv.exe(self.args.yosys), "-p",
@@ -221,8 +229,8 @@ class Diff:
             return ""
         if done.returncode == 1:
             return "netlist-compare: not identical"
-        raise opt_equiv.ToolError(f"netlist-compare exit {done.returncode}: "
-                                  f"{opt_equiv.tail((done.stdout or '') + (done.stderr or ''))}")
+        return ("netlist-compare cannot compare them (exit "
+                f"{done.returncode}): {opt_equiv.why((done.stdout or '') + (done.stderr or ''))}")
 
 
 def yosys_cover(cover: Path) -> dict[str, int]:
@@ -281,6 +289,7 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--script", action="append", default=[], metavar="S",
                     help="phase2 (default) or an opt spelling; repeatable")
     ap.add_argument("--expect", type=Path, help="tests/opt/diff_expect.txt")
+    ap.add_argument("--techlib", help="read this tech library (.o3lib) first: the hard blocks")
     ap.add_argument("--root", type=Path, help="expect-list paths are relative to this directory")
     ap.add_argument("--netlist-compare", default=str(NETLIST_COMPARE), metavar="N")
     ap.add_argument("--mem-cap", type=opt_equiv.parse_size, default=DEFAULT_CAP, metavar="SIZE",

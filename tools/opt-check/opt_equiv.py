@@ -2,8 +2,8 @@
 
 Usage::
 
-    opt-equiv --odin3 O --yosys Y [--top T] [--script F] [--no-lower] [--no-techmap]
-              [--mem-cap C] [--work DIR] FILE...
+    opt-equiv --odin3 O --yosys Y [--top T] [--script F] [--techlib L] [--no-lower]
+              [--no-techmap] [--mem-cap C] [--work DIR] FILE...
 
 Odin III runs ``read_verilog --nolatches FILE...; hierarchy; <the Phase 2 script>`` (``F``, default
 ``phase2.script`` beside this tool) with ``--opt-snapshot DIR``: ``NNNN-<sub>-before.il`` and
@@ -18,10 +18,10 @@ The modules of the two files are renamed ``gold``/``gate`` first (a submodule be
 ``gate.m``), so one Yosys design holds both. An x in the gold is a don't-care: ``s ? a : 4'bx``
 to ``a`` passes, the reverse and a wrong enable fail. A pair with ``process`` blocks (the
 pre-``proc`` calls) gets Yosys ``proc`` first. Spec 20.2's flow alone cannot prove the async
-flip-flops, so the check tries ``async2sync`` first and then ``async2sync; techmap`` (techmap
-loses the proof of a division by zero and of a ``$pmux``, which the first try gives); a pass in
-either is a proof.
-``--no-lower`` runs the plain flow, ``--no-techmap`` the first try only.
+flip-flops, so the check tries ``async2sync`` first, then ``async2sync; techmap`` (techmap loses
+the proof of a division by zero and of a ``$pmux``, which the first try gives), then ``memory;
+async2sync; techmap`` (the memories); a pass in any is a proof. A proof that takes past 60 s is
+"inconclusive" and fails. ``--no-lower`` runs the plain flow, ``--no-techmap`` the first try only.
 
 A failing pair prints ``opt-equiv: <NNNN>-<sub>: not a refinement`` with the rule counters of the
 run (Odin III's ``--opt-stats`` lines, which cover the whole run). A work directory this tool
@@ -51,6 +51,7 @@ PHASE2 = HERE / "phase2.script"
 EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
 DEFAULT_CAP = 2 << 30
 TIMEOUT_SECONDS = 600.0
+REFINE_TIMEOUT_SECONDS = 60.0  # one equivalence proof; past it the answer is "inconclusive"
 TAIL_LINES = 6
 ERROR_LINES = 3
 PAIR_NAME = re.compile(r"^(\d{4})-(opt_[a-z]+)-before\.il$")
@@ -112,10 +113,13 @@ def with_stats(commands: Sequence[str]) -> list[str]:
     return [f"{c} --opt-stats" if OPT_WORD.match(c) else c for c in commands]
 
 
-def read_commands(files: Sequence[str], top: str | None, nolatches: bool) -> list[str]:
-    """The front of every Odin III run: ``read_verilog [--nolatches] FILE...; hierarchy``."""
+def read_commands(files: Sequence[str], top: str | None, nolatches: bool,
+                  techlib: str | None = None) -> list[str]:
+    """The front of every Odin III run: ``[read_techlib L;] read_verilog [--nolatches] FILE...;
+    hierarchy``."""
     flag = " --nolatches" if nolatches else ""
-    return [f"read_verilog{flag} {' '.join(quote(f) for f in files)}",
+    return [*([f"read_techlib {quote(techlib)}"] if techlib else []),
+            f"read_verilog{flag} {' '.join(quote(f) for f in files)}",
             f"hierarchy --top {top}" if top else "hierarchy -auto"]
 
 
@@ -167,17 +171,15 @@ def rename_modules(text: str, side: str, top: str) -> str:
     return re.sub(r"^(\s*)cell (\\\S+) ", cell, out, flags=re.M)
 
 
-def refinement_script(gold: str, gate: str, procs: bool = False, lower: bool = True,
-                      techmap: bool = True) -> str:
+LOWERINGS = (("async2sync",), ("async2sync", "techmap"), ("memory", "async2sync", "techmap"))
+
+
+def refinement_script(gold: str, gate: str, procs: bool = False,
+                      lowering: Sequence[str] = LOWERINGS[1]) -> str:
     """Spec 20.2's Yosys script for two RTLIL files that ``rename_modules`` already made
-    ``gold``/``gate``; ``procs`` adds ``proc``, ``lower`` adds ``async2sync`` and ``techmap``."""
-    steps = [f"read_rtlil {gold}", f"read_rtlil {gate}"]
-    if procs:
-        steps.append("proc")
-    if lower:
-        steps.append("async2sync")
-        if techmap:
-            steps.append("techmap")
+    ``gold``/``gate``; ``procs`` adds ``proc``, ``lowering`` the commands that run on both sides
+    before the miter."""
+    steps = [f"read_rtlil {gold}", f"read_rtlil {gate}", *(["proc"] if procs else []), *lowering]
     steps += ["equiv_make gold gate eq", "hierarchy -top eq", "flatten",
               "equiv_simple -undef -seq 4", "equiv_induct -undef", "equiv_status -assert"]
     return "; ".join(steps)
@@ -211,7 +213,7 @@ class Checker:
 
     def child(self, argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
         return memcap.run(list(argv), self.cap, capture_output=True, cwd=self.work,
-                          timeout=TIMEOUT_SECONDS)
+                          timeout=REFINE_TIMEOUT_SECONDS)
 
     def refines(self, gold: Path, gate: Path, tag: str) -> tuple[bool, str]:
         """(True, '') when ``gate`` refines ``gold``; else (False, Yosys's last lines)."""
@@ -225,24 +227,24 @@ class Checker:
                             encoding="utf-8")
         procs = has_processes(gold_text) or has_processes(gate_text)
         why = ""
-        for lower, techmap in self.flows():
-            script = refinement_script(str(gold_out), str(gate_out), procs, lower, techmap)
+        for lowering in self.flows():
+            script = refinement_script(str(gold_out), str(gate_out), procs, lowering)
             try:
                 done = self.child([self.yosys, "-p", script])
             except subprocess.TimeoutExpired:
-                return False, f"timed out after {TIMEOUT_SECONDS:.0f} s"
+                return False, f"inconclusive: timed out after {REFINE_TIMEOUT_SECONDS:.0f} s"
             if done.returncode == 0:
                 return True, ""
             why = tail((done.stdout or "") + (done.stderr or ""))
         return False, why
 
-    def flows(self) -> list[tuple[bool, bool]]:
-        """The (async2sync, techmap) variants tried in order; a pass in any one is a proof (each
-        variant lowers both sides alike). Techmap makes the async flip-flops and some cells
-        provable, and others (divisions by zero, a ``$pmux``) not, so it is a second try."""
+    def flows(self) -> list[Sequence[str]]:
+        """The lowerings tried in order; a pass in any one is a proof (each lowers both sides
+        alike). ``async2sync`` makes the async flip-flops provable; ``techmap`` makes more cells
+        provable and loses a division by zero and a ``$pmux``; ``memory`` maps the memories."""
         if not self.lower:
-            return [(False, False)]
-        return [(True, False)] if not self.techmap else [(True, False), (True, True)]
+            return [()]
+        return [LOWERINGS[0]] if not self.techmap else list(LOWERINGS)
 
 
 def collect_pairs(snap: Path) -> list[Pair]:
@@ -277,12 +279,12 @@ def run_odin(odin3: str, args: Sequence[str], script: str, work: Path, cap: int
 
 
 def snapshot_run(odin3: str, files: Sequence[str], top: str | None, script: Sequence[str],
-                 nolatches: bool, work: Path, cap: int) -> Run:
+                 work: Path, cap: int, techlib: str | None = None) -> Run:
     """Odin III with ``--opt-snapshot``: the pairs it wrote and its counters. ``ToolError`` when
     it fails."""
     snap = work / "snap"
     snap.mkdir(exist_ok=True)
-    commands = [*read_commands(files, top, nolatches), *with_stats(script)]
+    commands = [*read_commands(files, top, True, techlib), *with_stats(script)]
     argv = [*(["--top", top] if top else []), "--opt-snapshot", str(snap)]
     done = run_odin(odin3, argv, "; ".join(commands), work, cap)
     log = (done.stdout or "") + (done.stderr or "")
@@ -320,7 +322,7 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--yosys", required=True, help="the Yosys 0.55 binary")
     ap.add_argument("--top", help="the top module (odin3 --top and hierarchy --top)")
     ap.add_argument("--script", type=Path, default=PHASE2, help="the script (default Phase 2's)")
-    ap.add_argument("--nolatches", action="store_true", default=True, help=argparse.SUPPRESS)
+    ap.add_argument("--techlib", help="read this tech library (.o3lib) first: the hard blocks")
     ap.add_argument("--no-lower", action="store_true", help="no async2sync and techmap")
     ap.add_argument("--no-techmap", action="store_true", help="async2sync only")
     ap.add_argument("--mem-cap", type=parse_size, default=DEFAULT_CAP, metavar="SIZE",
@@ -341,8 +343,9 @@ def parse_size(text: str) -> int:
 
 def execute(args: argparse.Namespace, work: Path) -> int:
     files = [str(Path(f).resolve()) for f in args.files]
-    run = snapshot_run(args.odin3, files, args.top, phase2_commands(args.script), args.nolatches,
-                       work, args.mem_cap)
+    techlib = str(Path(args.techlib).resolve()) if args.techlib else None
+    run = snapshot_run(args.odin3, files, args.top, phase2_commands(args.script), work,
+                       args.mem_cap, techlib)
     checker = Checker(args.yosys, work, args.mem_cap, not args.no_lower, not args.no_techmap,
                       args.top)
     verdicts = check_all(run, checker)

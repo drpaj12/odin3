@@ -1,0 +1,4 @@
+# tests/opt/equiv_expect_fail.txt: the micros opt_equiv_micro expects to fail beyond
+# tests/proc/micro_expect_fail.txt and tests/opt/micro_expect_fail.txt (2F Task 17). Format:
+# `<path> [needle] <reason>`.
+syntax/constant_module_inst.v [not a refinement] opt-equiv harness: the design instantiates the single_port_ram hard block, which equiv_make cannot match (the same file against itself fails); the rewrite itself ($eq(1-bit, 32'd1) to the bit) is correct

@@ -1855,6 +1855,39 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
                     --seeds 1..200 --mem-cap 3G --work ${PROJECT_BINARY_DIR}/proc_gen_work)
+        # 2F Task 17 (spec 20.2, 20.3, point (m), (o)): the opt evidence tools, through
+        # elab-sweep's --opt-equiv / --opt-diff modes (one tool child per file, smallest first,
+        # under memcap; the micros that 2D or proc reject are tests/proc/micro_expect_fail.txt).
+        # opt_equiv_rules: opt-equiv on every per-rule source (the refinement of each sub-pass call
+        # of the Phase 2 script, not a sweep). Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R
+        # '^opt_(equiv|diff)_micro$'.
+        set(_opt_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+            --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+            --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 2 --mem-cap 2G)
+        add_test(NAME opt_equiv_rules
+            COMMAND ${_opt_sweep} --opt-equiv --root ${PROJECT_SOURCE_DIR}/tests/opt/rules
+                    ${PROJECT_SOURCE_DIR}/tests/opt/rules)
+        set_tests_properties(opt_equiv_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 1800)
+        odin3_add_sweep_test(opt_equiv_micro LABEL sweep
+            COMMAND ${_opt_sweep} --opt-equiv ${_micro_expect}
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
+                    ${_micro_dir})
+        set_tests_properties(opt_equiv_micro PROPERTIES LABELS "sweep;opt_equiv")
+        # opt_diff_micro: every micro with the Phase 2 script and `opt -full`; a difference fails
+        # unless tests/opt/diff_expect.txt lists it with a reason.
+        odin3_add_sweep_test(opt_diff_micro LABEL sweep
+            COMMAND ${_opt_sweep} --opt-diff ${_micro_expect}
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
+                    --opt-arg=--script=phase2 "--opt-arg=--script=opt -full"
+                    --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
+                    --opt-arg=--root=${_micro_dir} ${_micro_dir})
+        # opt_order_probe: spec 3's pass-order evidence (point (o)); evidence only, always exit 0.
+        odin3_add_sweep_test(opt_order_probe LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/order-probe.sh --yosys ${ODIN3_YOSYS055}
+                    --limit 60 ${_micro_dir})
+        set_tests_properties(opt_order_probe PROPERTIES LABELS "sweep;nightly")
         # The 31 VTR and 33 Koios benchmarks as one set by size, when VTR_ROOT is set at
         # configure time (also label nightly). lenet.v is listed `xl` in vtr_expect_fail.txt: the
         # 6G sweeps skip it, and the sweep-xl CTests run exactly it, alone, 8 GiB per child.

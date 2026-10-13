@@ -98,13 +98,15 @@ class PureTest(unittest.TestCase):
             "equiv_status -assert")
 
     def test_script_variants(self) -> None:
-        plain = oe.refinement_script("g.il", "h.il", lower=False)
+        plain = oe.refinement_script("g.il", "h.il", lowering=())
         self.assertNotIn("async2sync", plain)
         self.assertNotIn("proc", plain)
         self.assertIn("read_rtlil h.il; equiv_make gold gate eq", plain)
-        procs = oe.refinement_script("g.il", "h.il", procs=True, techmap=False)
+        procs = oe.refinement_script("g.il", "h.il", procs=True, lowering=oe.LOWERINGS[0])
         self.assertIn("read_rtlil h.il; proc; async2sync; equiv_make", procs)
         self.assertNotIn("techmap", procs)
+        self.assertIn("memory; async2sync; techmap; equiv_make",
+                      oe.refinement_script("g.il", "h.il", lowering=oe.LOWERINGS[2]))
 
     def test_phase2_commands_and_stats(self) -> None:
         commands = oe.phase2_commands()

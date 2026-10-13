@@ -456,8 +456,8 @@ def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
     assert cfg.yosys is not None
     top = top_for(item, cfg.tops, cfg.golden_root)
     argv = [sys.executable, str(OPT_TOOLS[cfg.opt_tool]), "--odin3", cfg.odin3, "--yosys",
-            cfg.yosys, "--mem-cap", str(cap), *(["--top", top] if top else []), *cfg.opt_args,
-            str(item.path)]
+            cfg.yosys, "--mem-cap", str(cap), *(["--top", top] if top else []),
+            *(["--techlib", cfg.techlib] if cfg.techlib else []), *cfg.opt_args, str(item.path)]
     here = str(Path(__file__).resolve().parent)  # the tool imports memcap from here
     env = {**os.environ, "PYTHONPATH": os.pathsep.join([here, os.environ.get("PYTHONPATH", "")])}
     try:  # the tool caps each of its own children

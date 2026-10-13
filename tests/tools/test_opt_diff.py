@@ -78,7 +78,8 @@ sys.exit(spec.get("compare_rc", 0))
 
 ODIN_LOG = ("odin3: info: opt: rule const_and 2\n"
             "odin3: info: stats: module t: cell $xor 2\n")
-YSTAT = "\n=== t ===\n\n   Number of cells:                  2\n     $xor                            2\n"
+YSTAT = ("\n=== t ===\n\n   Number of cells:                  2\n"
+         "     $xor                            2\n")
 COVER = "passes/opt/opt_expr.cc:570:f   3 opt.opt_expr.const_and\nx.cc:1:g   0 opt.opt_expr.zero\n"
 
 
@@ -141,7 +142,7 @@ class ScriptTest(unittest.TestCase):
             "opt --opt-stats; compact; write_rtlil w/odin.il; stats")
         self.assertEqual(
             self.yosys("phase2"),
-            "read_rtlil w/in.il; opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt; "
+            "read_rtlil w/in.il; opt_expr; opt_clean; opt -nodffe -nosdff; proc -norom; opt; "
             "write_rtlil w/yosys.il; stat")
 
     def test_every_opt_script(self) -> None:
@@ -163,7 +164,7 @@ class ScriptTest(unittest.TestCase):
     def test_lowering_script(self) -> None:
         self.assertEqual(
             od.lowering_script(Path("o.il"), Path("o.blif")),
-            "read_rtlil o.il; hierarchy -auto-top; flatten; techmap; opt -fast; dffunmap; "
+            "read_rtlil o.il; hierarchy -auto-top; flatten; memory; techmap; opt -fast; dffunmap; "
             "opt -fast -noff; opt_clean -purge; "
             "write_blif -true + vcc -false + gnd -undef + unconn -blackbox o.blif")
 
@@ -202,6 +203,12 @@ class RunTest(unittest.TestCase):
         self.assertEqual(len(self.tree.log("compare.log")), 2)
         self.assertIn("--implicit-models", self.tree.log("compare.log")[0])
 
+    def test_techlib_is_read_first(self) -> None:
+        code, _, _ = self.tree.run("--techlib", "lib/x.o3lib")
+        self.assertEqual(code, 0)
+        self.assertIn("-p read_techlib ", self.tree.log("odin.log")[0])
+        self.assertIn("x.o3lib; read_verilog --nolatches ", self.tree.log("odin.log")[0])
+
     def test_default_script_is_phase2(self) -> None:
         code, out, _ = self.tree.run()
         self.assertEqual(code, 0)
@@ -232,9 +239,9 @@ class RunTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("identity: DIFFERS: netlist-compare: not identical", out)
         self.tree.set_spec(compare_rc=2)
-        code, _, err = self.tree.run()
-        self.assertEqual(code, 2)
-        self.assertIn("netlist-compare exit 2", err)
+        code, out, _ = self.tree.run()
+        self.assertEqual(code, 1)
+        self.assertIn("identity: DIFFERS: netlist-compare cannot compare them (exit 2)", out)
 
     def test_tool_failures_are_errors(self) -> None:
         self.tree.set_spec(odin_rc=1, odin_log="odin3: error: bad thing\n")
