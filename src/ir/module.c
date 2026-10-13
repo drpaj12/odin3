@@ -201,6 +201,18 @@ bool odin3_module_journal_get(const odin3_module *module, const uint64_t **entri
     return module->journal.on && !module->journal.overflow;
 }
 
+uint64_t odin3_module_journal_gen(const odin3_module *module) {
+    return module->journal.gen;
+}
+
+bool odin3_module_journal_on(const odin3_module *module) {
+    return module->journal.on;
+}
+
+uint64_t odin3_module_journal_bytes(const odin3_module *module) {
+    return (uint64_t)module->journal.cap * sizeof *module->journal.ent;
+}
+
 void odin3_module_journal_drop(odin3_module *module, size_t n) {
     odin3_module_journal *jr = &module->journal;
     if (n >= jr->len) {
@@ -214,6 +226,7 @@ void odin3_module_journal_drop(odin3_module *module, size_t n) {
 void odin3_module_journal_add(odin3_module *module, uint32_t kind, uint32_t id) {
     odin3_module_journal *jr = &module->journal;
     uint64_t entry = ((uint64_t)kind << JOURNAL_KIND_SHIFT) | id;
+    jr->gen += jr->on ? 1U : 0U;
     if (!jr->on || jr->overflow || (jr->len > 0 && jr->ent[jr->len - 1] == entry)) {
         return;
     }

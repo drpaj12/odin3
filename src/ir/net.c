@@ -152,6 +152,7 @@ odin3_status odin3_pin_disconnect(odin3_module *module, odin3_pin_id pin) {
 
 odin3_status odin3_net_create(odin3_module *module, uint32_t name_str, odin3_prov_id prov,
                               odin3_net_id *out) {
+    odin3_journal_touch(module);
     odin3_net_id id = {odin3_module_net_end(module)};
     odin3_name_change name = {module->net_names, "net_create", id.v, 0, name_str};
     if (!odin3_names_available(module, &name)) {
@@ -175,6 +176,7 @@ odin3_status odin3_net_create(odin3_module *module, uint32_t name_str, odin3_pro
 }
 
 odin3_status odin3_net_delete(odin3_module *module, odin3_net_id net) {
+    odin3_journal_touch(module);
     odin3_net_rec *rec = odin3_net_live_rec(module, net, "net_delete");
     if (rec == NULL) {
         return ODIN3_ERR_INVALID_ARG;
@@ -192,6 +194,7 @@ odin3_status odin3_net_delete(odin3_module *module, odin3_net_id net) {
 }
 
 odin3_status odin3_net_rename(odin3_module *module, odin3_net_id net, uint32_t name_str) {
+    odin3_journal_touch(module);
     odin3_net_rec *rec = odin3_net_live_rec(module, net, "net_rename");
     if (rec == NULL) {
         return ODIN3_ERR_INVALID_ARG;

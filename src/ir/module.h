@@ -477,6 +477,21 @@ bool odin3_module_journal_get(const odin3_module *module, const uint64_t **entri
 /* Forgets the first n entries (n at most the count). */
 void odin3_module_journal_drop(odin3_module *module, size_t n);
 
+/*
+ * The journal's mutation count: it rises on every mutation of the module while the journal is on,
+ * whether or not it makes an entry (an entry equal to the last one, a journal that overflowed, a
+ * node or net created or deleted, a wire made, an attribute of any object set or removed, a
+ * compact). opt_clean skips its sweep when it has not moved since a sweep that changed nothing.
+ * Zero when off; begin keeps it, end resets it.
+ */
+uint64_t odin3_module_journal_gen(const odin3_module *module);
+
+/* True while the journal is on. */
+bool odin3_module_journal_on(const odin3_module *module);
+
+/* The bytes the journal's entry array holds (opt counts them in its memory budget). */
+uint64_t odin3_module_journal_bytes(const odin3_module *module);
+
 /* Appends an entry by hand (no-op when off). */
 void odin3_module_journal_add(odin3_module *module, uint32_t kind, uint32_t id);
 

@@ -226,6 +226,7 @@ static odin3_net_id new_member_net(odin3_module *module, odin3_prov_id prov, odi
 }
 
 void odin3_wire_commit(odin3_module *module, const odin3_wire_plan *plan) {
+    odin3_journal_touch(module);
     const odin3_wire_spec *spec = plan->spec;
     odin3_wire_rec *rec = odin3_pagevec_push(module->wires, NULL);
     assert(rec != NULL && odin3_module_wire_end(module) == plan->id.v + 1);
@@ -364,6 +365,7 @@ static void membership_drop(odin3_module *module, odin3_net_id net, odin3_wirebi
 }
 
 odin3_status odin3_wire_delete(odin3_module *module, odin3_wire_id wire) {
+    odin3_journal_touch(module);
     odin3_wire_rec *rec = odin3_wire_live_rec(module, wire, "wire_delete");
     if (rec == NULL) {
         return ODIN3_ERR_INVALID_ARG;

@@ -130,6 +130,7 @@ static odin3_status attr_append(odin3_module *module, odin3_objref obj, uint32_t
 /* Journal (module.h): an attribute of a wire changed, so every net of its bits did (ffinit reads
  * `init` through the wire memberships). */
 static void journal_attr(odin3_module *module, odin3_objref obj) {
+    odin3_journal_touch(module); /* an attribute of any object (`keep`, `init`, ...) */
     if (!module->journal.on || obj.kind != ODIN3_OBJ_WIRE) {
         return;
     }

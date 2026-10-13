@@ -23,6 +23,7 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -672,6 +673,60 @@ typedef struct clean_call {
     clean_shared shared;
 } clean_call;
 
+#ifndef NDEBUG
+/* What the Debug check compares: the live objects of a module, and its pins. */
+typedef struct module_digest {
+    uint32_t nodes, nets, wires;
+    uint64_t pins;
+} module_digest;
+
+static module_digest digest_of(const odin3_module *module) {
+    module_digest dg = {0, 0, 0, 0};
+    for (uint32_t id = 1; id < odin3_module_node_end(module); id++) {
+        if (odin3_node_live(module, (odin3_node_id){id})) {
+            dg.nodes++;
+            dg.pins += odin3_node_pins(module, (odin3_node_id){id}).count;
+        }
+    }
+    for (uint32_t id = 1; id < odin3_module_net_end(module); id++) {
+        dg.nets += odin3_net_live(module, (odin3_net_id){id}) ? 1U : 0U;
+    }
+    for (uint32_t id = 1; id < odin3_module_wire_end(module); id++) {
+        dg.wires += odin3_wire_live(module, (odin3_wire_id){id}) ? 1U : 0U;
+    }
+    return dg;
+}
+#endif
+
+/*
+ * One module's sweep, unless the journal shows nothing changed since a sweep that changed nothing
+ * (odin3_opt_clean_skippable). Debug builds sweep the module anyway and abort if the sweep
+ * changed anything (the skip would have been wrong): its tally, the journal's mutation count
+ * and the digest of live objects must all be as before.
+ */
+static odin3_status sweep_or_skip(odin3_opt_ctx *oc, const clean_shared *sh, clean_tally *out) {
+    bool skip = odin3_opt_clean_skippable(oc);
+#ifdef NDEBUG
+    if (skip) {
+        return ODIN3_OK;
+    }
+#else
+    module_digest before = digest_of(oc->module);
+#endif
+    odin3_clean_start start = {odin3_module_journal_gen(oc->module),
+                               odin3_module_journal_on(oc->module)};
+    odin3_status st = clean_module(oc, sh, out);
+    odin3_opt_clean_done(oc, &start, st == ODIN3_OK);
+#ifndef NDEBUG
+    module_digest after = digest_of(oc->module);
+    assert(!skip || st != ODIN3_OK ||
+           (out->cells == 0 && out->nets == 0 && out->wires == 0 &&
+            odin3_module_journal_gen(oc->module) == start.gen && before.nodes == after.nodes &&
+            before.nets == after.nets && before.wires == after.wires && before.pins == after.pins));
+#endif
+    return st;
+}
+
 /* Cleans every module without processes; adds this call's removals into total. */
 static odin3_status clean_modules(odin3_design *design, const clean_call *call,
                                   clean_tally *total) {
@@ -690,7 +745,7 @@ static odin3_status clean_modules(odin3_design *design, const clean_call *call,
         }
         oc.counts = call->counts;
         clean_tally tally = {0, 0, 0};
-        st = clean_module(&oc, &call->shared, &tally);
+        st = sweep_or_skip(&oc, &call->shared, &tally);
         odin3_opt_ctx_free(&oc);
         total->cells += tally.cells;
         total->nets += tally.nets;
@@ -716,6 +771,9 @@ odin3_status odin3_opt_clean_run(odin3_pass_ctx *ctx, odin3_design *design,
     type_map tm = {NULL, 0};
     odin3_status st = odin3_opt_keep_modules(design, &keep);
     st = st == ODIN3_OK ? type_map_build(design, &tm) : st;
+    if (st == ODIN3_OK) {
+        odin3_opt_clean_keep(keep.data, keep.len);
+    }
     clean_tally total = {0, 0, 0};
     if (st == ODIN3_OK) {
         clean_call call = {ctx, opts, counts, {keep.data, &tm, 0, 0, 0}};

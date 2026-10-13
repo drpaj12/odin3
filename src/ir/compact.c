@@ -586,6 +586,7 @@ static void commit(compact_ctx *ctx) {
     out_free(&ctx->out);
     odin3_module_dead_pins_free(module); /* every dead node is gone */
     module->journal.overflow = true;     /* the IDs it holds are stale */
+    odin3_journal_touch(module);
     module->journal.len = 0;
 }
 

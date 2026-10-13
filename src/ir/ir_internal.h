@@ -190,6 +190,7 @@ typedef struct odin3_attr_rec {
 typedef struct odin3_module_journal {
     uint64_t *ent;
     size_t len, cap;
+    uint64_t gen; /* mutations while on (any kind; the opt_clean early-out reads it) */
     bool on, overflow;
 } odin3_module_journal;
 
@@ -232,6 +233,13 @@ struct odin3_module {
 };
 
 /* Appends to the journal when it is on (module.h's odin3_module_journal_add). */
+/* Counts a mutation of a kind the entries do not carry (module.h's journal gen). */
+static inline void odin3_journal_touch(odin3_module *module) {
+    if (module->journal.on) {
+        module->journal.gen++;
+    }
+}
+
 static inline void odin3_journal_note(odin3_module *module, uint32_t kind, uint32_t id) {
     if (module->journal.on) {
         odin3_module_journal_add(module, kind, id);

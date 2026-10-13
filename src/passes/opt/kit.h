@@ -33,6 +33,7 @@
 #include "util/vec.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* The number of constant values (and constant cell types): 0, 1, x, z, indexed by odin3_bit. */
@@ -321,7 +322,8 @@ bool odin3_opt_dirty_peek(const odin3_opt_ctx *oc, odin3_node_id node, bool x_ro
 void odin3_opt_dirty_settle(odin3_opt_ctx *oc);
 /* Marks module as needing a full sweep again (the verification pass of Debug builds). */
 void odin3_opt_dirty_sweep_all(odin3_opt_ctx *oc);
-/* The bytes the module's marks hold (the budget check's side arrays). */
+/* The bytes the module's marks, opt_dff's marks and the session's journals hold (the budget
+ * check's side arrays). */
 uint64_t odin3_opt_dirty_bytes(const odin3_opt_ctx *oc);
 
 /*
@@ -331,5 +333,25 @@ uint64_t odin3_opt_dirty_bytes(const odin3_opt_ctx *oc);
  */
 bool odin3_opt_dff_prime(odin3_opt_ctx *oc);
 bool odin3_opt_dff_primed(const odin3_opt_ctx *oc);
+/* Tells the budget how many bytes opt_dff's dirty marks of this module hold now (0: none). */
+void odin3_opt_dff_note_bytes(const odin3_opt_ctx *oc, uint64_t bytes);
+
+/*
+ * opt_clean's early-out (dirty.c; spec section 19). Within an incremental session whose journal is
+ * on, a module whose last sweep changed nothing need not be swept again while the journal's
+ * mutation count (module.h) has not moved, the keep flags of the design are the same and -purge is
+ * the same. odin3_opt_clean_keep gives each call's flags (one per module ID, index 0 unused);
+ * odin3_opt_clean_skippable says the module's sweep may be skipped; odin3_opt_clean_done records
+ * the sweep that began at `start` (ok: it succeeded) so that a clean one makes the next skippable.
+ * odin3_opt_journal_bytes is what the session's journals hold (the budget check counts it).
+ */
+typedef struct odin3_clean_start {
+    uint64_t gen;
+    bool journal_on;
+} odin3_clean_start;
+void odin3_opt_clean_keep(const bool *flags, size_t n);
+bool odin3_opt_clean_skippable(const odin3_opt_ctx *oc);
+void odin3_opt_clean_done(const odin3_opt_ctx *oc, const odin3_clean_start *start, bool ok);
+uint64_t odin3_opt_journal_bytes(void);
 
 #endif
