@@ -1,0 +1,4 @@
+# yosys 0.55 (VTR build): ulimit -v 3000000; yosys -q -p 'read_rtlil xor3.il; opt_share; write_rtlil'
+cell $pmux WIDTH=4 S_WIDTH=3
+cell $pmux WIDTH=4 S_WIDTH=3
+cell $xor A_WIDTH=4 B_WIDTH=4 Y_WIDTH=4

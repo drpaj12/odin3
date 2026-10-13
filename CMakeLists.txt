@@ -123,6 +123,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/merge.c
     src/passes/opt/muxtree.c
     src/passes/opt/reduce.c
+    src/passes/opt/share.c
     src/passes/opt/dff.c
     src/passes/opt/dff_state.c
     src/passes/opt/dff_gates.c
@@ -622,6 +623,11 @@ if(BUILD_TESTING)
     target_sources(test_opt_reduce PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_opt_reduce PRIVATE
         ODIN3_REDUCE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/reduce")
+    # 2F Task 14: opt_share.
+    odin3_add_unit_test(test_opt_share)
+    target_sources(test_opt_share PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_share PRIVATE
+        ODIN3_SHARE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/share")
     # 2F Task 10: opt_muxtree.
     odin3_add_unit_test(test_opt_muxtree)
     target_sources(test_opt_muxtree PRIVATE tests/unit/proc_build.c)
