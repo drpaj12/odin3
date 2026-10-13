@@ -1476,6 +1476,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         COMMAND ${_parse_corpus}
                 --expect-fail ${PROJECT_SOURCE_DIR}/tests/verilog/micro_expect_fail.txt
                 ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
+    # 2D Task 26 (spec 14.5): every micro under `odin3 --elab-only`, smallest first, with
+    # --top from its Parmys golden (micro-top); failures only as listed in
+    # tests/elab/micro_expect_fail.txt. Run as `ODIN3_HEAVY_OK=1 ctest --preset sweep -R
+    # verilog_micro_elab`.
+    odin3_add_sweep_test(verilog_micro_elab LABEL sweep
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                --odin3 $<TARGET_FILE:odin3>
+                --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
+                --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
+                ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
     odin3_add_sweep_test(verilog_writer_parse LABEL sweep
         COMMAND ${_parse_corpus} --writer $<TARGET_FILE:odin3-write>
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
@@ -1670,6 +1680,27 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
                     --rows ${PROJECT_SOURCE_DIR}/tests/elab/rows
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/equiv_expect_fail.txt)
+        # 2D Task 26 (spec 14.5): the micros through the bridge (elab-equiv per file, Yosys
+        # 0.55), smallest first. The micros that fail before the bridge are in
+        # micro_expect_fail.txt; the ones the bridge finds not equivalent in
+        # micro_equiv_expect_fail.txt. A Yosys crash is an `oracle crash`, not a failure.
+        odin3_add_sweep_test(elab_equiv_micro LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                    --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_equiv_expect_fail.txt
+                    --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
+        # 2D Task 26 (spec 14.4): the project corpus's positive phase-2 Verilog cases through the
+        # bridge against their ref.blif (oracle drift against the recorded 0.69 is reported, not
+        # failed), and the negative front-end cases' kind, location and names. In the gate.
+        add_test(NAME project_corpus_frontend
+            COMMAND ${Python3_EXECUTABLE}
+                    ${PROJECT_SOURCE_DIR}/tools/project-fixtures/project_fixtures.py compare
+                    --odin3 $<TARGET_FILE:odin3> --with-frontend --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
+        set_tests_properties(project_corpus_frontend PROPERTIES LABELS tools)
     endif()
 
     # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys

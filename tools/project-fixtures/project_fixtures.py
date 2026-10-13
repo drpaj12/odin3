@@ -6,7 +6,7 @@ Usage::
     project-fixtures parse  CASE_DIR FORMAT [--entry FILE] [--revision REV]
     project-fixtures oracle [--root DIR] [--case NAME]... [--write] [--yosys PATH] [--ghdl PATH]
     project-fixtures compare --odin3 BIN [--root DIR] [--case NAME]... [--format FMT]...
-                             [--with-frontend]
+                             [--with-frontend [--yosys Y --equiv-check E [--mem-cap BYTES]]]
 
 The corpus (``tests/golden/projects/<case>/``, see its README) describes one small design per
 case in every project format that can express it: ``.o3proj``, an EDA ``-f`` file list, a
@@ -31,6 +31,15 @@ case's ``env``, and compares the dumped record (paths made relative to the case)
 lines, or the located error, with ``expected.json``; include errors run ``preprocess`` instead
 of ``dump_project``, front-end errors ``read_verilog`` with ``--with-frontend`` (else skipped),
 and a format whose ``format_phase`` has not landed is skipped.
+
+``--with-frontend`` with ``--yosys`` (Yosys 0.55) and ``--equiv-check`` also runs the bridge (2D
+spec 14.4, plan Task 26) on every positive phase-2 Verilog case and format whose record matched:
+``read_project; read_verilog --nolatches; write_rtlil`` through odin3, the shared Yosys back end
+of ``elab-equiv``, then ``equiv-check`` against the case's ``ref.blif``. The fixtures'
+``ref.cmd`` oracles were recorded with Yosys 0.69: a non-equivalent result reruns ``ref.cmd``
+with the 0.55 given, and when that disagrees with ``ref.blif`` the case is reported ``oracle
+drift`` (not a failure); a Yosys signal exit on that rerun is an ``oracle crash`` (likewise).
+Every child runs through ``memcap.run`` (plan point (n)).
 
 Exit 0 success, 1 check failure / oracle or compare mismatch, 2 usage or input error.
 """
@@ -2090,13 +2099,161 @@ def compare_format(binary: str, case_dir: Path, fmt: str, exp: dict[str, Any],
     return ("FAIL" if probs else "ok"), probs
 
 
+# ---- the bridge for the positive front-end cases (--with-frontend, plan Task 26) ---------------
+
+ELAB_CHECK_DIR = REPO_ROOT / "tools" / "elab-check"
+BRIDGE_CAP = 4 << 30  # plan point (n): 4 GiB per child by default
+
+
+@dataclass(frozen=True)
+class Bridge:
+    """The Yosys 0.55 and equiv-check binaries the bridge runs, and the cap of each child."""
+
+    yosys: str
+    equiv_check: str
+    cap: int = BRIDGE_CAP
+
+
+def elab_tools() -> tuple[Any, Any]:
+    """(elab_equiv, memcap): 2D's bridge modules, imported on first use from tools/elab-check."""
+    if str(ELAB_CHECK_DIR) not in sys.path:
+        sys.path.append(str(ELAB_CHECK_DIR))
+    import elab_equiv  # noqa: PLC0415
+    import memcap  # noqa: PLC0415
+
+    return elab_equiv, memcap
+
+
+def positive_frontend(exp: dict[str, Any]) -> bool:
+    """A phase-2 Verilog-only case with a Yosys oracle: the bridge applies."""
+    project = exp.get("project")
+    return (
+        "error" not in exp and exp.get("phase") == 2 and exp.get("oracle") == "yosys"
+        and project is not None and bool(project["files"])
+        and all(f["language"] == "verilog" for f in project["files"])
+    )
+
+
+def bridge_child(argv: Sequence[str], bridge: Bridge, work: Path,
+                 env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    """One bridge child under the cap, in the work directory (ValueError/OSError to the caller)."""
+    memcap = elab_tools()[1]
+    done: subprocess.CompletedProcess[str] = memcap.run(
+        list(argv), bridge.cap, capture_output=True, cwd=work, env=env, timeout=ODIN3_TIMEOUT * 5)
+    return done
+
+
+def equivalent(bridge: Bridge, work: Path, left: str, right: str) -> bool | None:
+    """True/False for equiv-check's verdict on two BLIFs in the work directory; None when it
+    failed without a verdict (a crash or a read error)."""
+    done = bridge_child([bridge.equiv_check, left, right], bridge, work)
+    if done.returncode == 0:
+        return True
+    verdict = re.search(r"^equiv-check: NOT equivalent\b", done.stdout or "", re.M)
+    if done.returncode == 1 and verdict:
+        return False
+    return None
+
+
+def rerun_ref_cmd(case_dir: Path, bridge: Bridge, work: Path) -> str:
+    """Reruns ref.cmd with the 0.55 Yosys into work/r55.blif: "ok", "crash" (a signal exit) or
+    "failed"."""
+    elab_equiv = elab_tools()[0]
+    scratch = work / "oracle"
+    shutil.copytree(case_dir, scratch, ignore=shutil.ignore_patterns("ref.blif"))
+    env = {**os.environ, "YOSYS": bridge.yosys}
+    done = bridge_child(["bash", "ref.cmd"], bridge, scratch, env)
+    if elab_equiv.crashed(done.returncode):
+        return "crash"
+    produced = scratch / "out" / "ref.blif"
+    if done.returncode != 0 or not produced.is_file():
+        return "failed"
+    shutil.copyfile(produced, work / "r55.blif")
+    return "ok"
+
+
+def drift_status(case_dir: Path, bridge: Bridge, work: Path) -> tuple[str, list[str]]:
+    """The status of a case whose netlist differs from ref.blif: "FAIL" when Yosys 0.55 reproduces
+    ref.blif (so the difference is 2D's), "drift" when 0.55 disagrees with the recorded 0.69
+    result or cannot rerun ref.cmd, "crash" when it dies of a signal."""
+    rerun = rerun_ref_cmd(case_dir, bridge, work)
+    if rerun == "crash":
+        return "crash", ["Yosys 0.55 crashed (signal exit) rerunning ref.cmd"]
+    if rerun == "failed":
+        return "drift", ["oracle drift: ref.cmd fails under Yosys 0.55"]
+    agrees = equivalent(bridge, work, "r55.blif", str(case_dir / "ref.blif"))
+    if agrees is True:
+        return "FAIL", ["not equivalent to ref.blif, and Yosys 0.55 reproduces ref.blif"]
+    if agrees is False:
+        return "drift", ["oracle drift: Yosys 0.55 on ref.cmd differs from the 0.69 ref.blif"]
+    return "FAIL", ["not equivalent to ref.blif; equiv-check failed on the 0.55 rerun"]
+
+
+def frontend_equiv(binary: str, case_dir: Path, fmt: str, exp: dict[str, Any],
+                   bridge: Bridge) -> tuple[str, list[str]]:
+    """("ok" | "FAIL" | "drift" | "crash" | "skip", problems) for one format of one positive case:
+    odin3's elaboration of the project, through the shared Yosys back end, against ref.blif."""
+    elab_equiv, memcap = elab_tools()
+    entry = os.path.abspath(entry_of(case_dir, fmt, exp))
+    top = str(exp["resolved"]["top"]).split(".")[-1]
+    back_end = elab_equiv.yosys_script("read_rtlil a.il", top, "a.blif", True)
+    # memcap's systemd-run needs the session's own environment (the record was already compared
+    # from a clean one); the case's `env` is added to it
+    run_env = {**os.environ, **exp.get("env", {})}
+    try:
+        with tempfile.TemporaryDirectory(prefix="pf-frontend-") as tmp:
+            work = Path(tmp)
+            tail = f"read_verilog --nolatches; write_rtlil {script_word(str(work / 'a.il'))}"
+            script = compare_script(fmt, exp, Path(entry), tail)
+            steps = [
+                ("odin3", [binary, "--diag-paths", "resolved", "-p", script], run_env),
+                ("Yosys back end", [bridge.yosys, "-p", back_end], None),
+            ]
+            for what, argv, env in steps:
+                done = bridge_child(argv, bridge, work, env)
+                if done.returncode != 0:
+                    return "FAIL", [f"{what} exit {done.returncode}: {error_tail(done.stderr)}"]
+            same = equivalent(bridge, work, "a.blif", str(case_dir / "ref.blif"))
+            if same is True:
+                return "ok", []
+            if same is None:
+                return "FAIL", ["equiv-check failed without a verdict"]
+            return drift_status(case_dir, bridge, work)
+    except memcap.CapUnavailable as exc:
+        return "skip", [str(exc)]
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        return "FAIL", [f"bridge error: {exc}"]
+
+
+def make_bridge(args: argparse.Namespace) -> Bridge | None:
+    """The bridge for --with-frontend when --yosys and --equiv-check name executables."""
+    if not (args.with_frontend and args.yosys and args.equiv_check):
+        return None
+    tools = []
+    for given in (args.yosys, args.equiv_check):
+        found = shutil.which(given)
+        if found is None:
+            raise UsageError(f"{given}: no such executable")
+        tools.append(os.path.abspath(found))
+    return Bridge(tools[0], tools[1], args.mem_cap)
+
+
+def bridge_line(case: str, fmt: str, status: str, probs: list[str]) -> None:
+    label = {"drift": "drift", "crash": "ocrash"}.get(status, status)
+    print(f"{label:6} {case} {fmt} (bridge)")
+    for p in probs:
+        print(f"     {fmt}: {p}")
+
+
 def cmd_compare(args: argparse.Namespace) -> int:
     binary = shutil.which(args.odin3)
     if binary is None:
         raise UsageError(f"{args.odin3}: no such odin3 executable")
     binary = os.path.abspath(binary)
+    bridge = make_bridge(args)
     dirs = sorted(case_dirs(args.root, args.case), key=lambda d: (source_bytes(d), d.name))
     counts = {fmt: {"ok": 0, "FAIL": 0, "skip": 0} for fmt in FORMATS}
+    through = {"ok": 0, "FAIL": 0, "drift": 0, "crash": 0, "skip": 0}
     for d in dirs:  # smallest case first
         exp = json.loads((d / "expected.json").read_text(encoding="utf-8"))
         for fmt in exp["formats"]:
@@ -2110,16 +2267,25 @@ def cmd_compare(args: argparse.Namespace) -> int:
             print(f"{status:4} {d.name} {fmt}")
             for p in probs:
                 print(f"     {fmt}: {p}")
+            if status == "ok" and bridge is not None and positive_frontend(exp):
+                bstatus, bprobs = frontend_equiv(binary, d, fmt, exp, bridge)
+                through[bstatus] += 1
+                bridge_line(d.name, fmt, bstatus, bprobs)
     print("project-fixtures compare: " + "; ".join(
         f"{fmt} {c['ok']} ok, {c['FAIL']} failed, {c['skip']} skipped"
         for fmt, c in counts.items()))
     total = {s: sum(c[s] for c in counts.values()) for s in ("ok", "FAIL", "skip")}
     print(f"project-fixtures compare: {total['ok']} ok, {total['FAIL']} failed, "
           f"{total['skip']} skipped")
+    if args.with_frontend:
+        note = "" if bridge is not None else " (not run: --yosys and --equiv-check not given)"
+        print(f"project-fixtures compare: bridge {through['ok']} ok, {through['FAIL']} failed, "
+              f"{through['drift']} oracle drift, {through['crash']} oracle crash, "
+              f"{through['skip']} skipped{note}")
     if total["ok"] + total["FAIL"] == 0:
         print("project-fixtures compare: no case was run (every format skipped or filtered)")
         return 1
-    return 1 if total["FAIL"] else 0
+    return 1 if total["FAIL"] or through["FAIL"] else 0
 
 
 # ---- oracle -----------------------------------------------------------------------------------
@@ -2221,6 +2387,10 @@ def main(argv: Sequence[str]) -> int:
     p.add_argument("--case", action="append", default=[])
     p.add_argument("--format", action="append", default=[], choices=FORMATS)
     p.add_argument("--with-frontend", action="store_true")
+    p.add_argument("--yosys", help="Yosys 0.55: the bridge of the positive front-end cases")
+    p.add_argument("--equiv-check", help="tools/equiv-check/equiv-check (the bridge)")
+    p.add_argument("--mem-cap", type=int, default=BRIDGE_CAP, metavar="BYTES",
+                    help="the memory cap of each bridge child (default 4 GiB)")
     p = sub.add_parser("parse")
     p.add_argument("case_dir")
     p.add_argument("format", choices=FORMATS)
