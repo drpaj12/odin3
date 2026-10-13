@@ -373,7 +373,15 @@ static const char k_oom_text[] = "`timescale 1ns/1ps\n`define W 8 // width\nmodu
 static const char k_oom_want[] = "`timescale 1ns/1ps\n\nmodule m;\n  wire a;  /* c */ wire b;\n"
                                  "\n  `default_nettype none\nendmodule\n";
 
-static bool oom_try(long fail_after, const char *path) {
+/* A failed run: NO_MEMORY, no stream, and never reported as a missing file. */
+static void expect_no_memory(odin3_status st) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_NO_MEMORY, st, captured);
+    TEST_ASSERT_NULL(strstr(captured, "missing_file:"));
+    TEST_ASSERT_NULL(stream.text.ptr);
+}
+
+/* One run with allocation limit fail_after; limits (NULL: the defaults) are set once created. */
+static bool oom_try(long fail_after, const char *path, const odin3_pp_limits *limits) {
     odin3_pp_destroy(pp);
     pp = NULL;
     odin3_design_destroy(design);
@@ -385,30 +393,47 @@ static bool oom_try(long fail_after, const char *path) {
     memset(&stream, 0, sizeof stream);
     odin3_util_set_alloc_fail_after(fail_after);
     odin3_status st = odin3_pp_create(design, &none, &pp);
+    if (st == ODIN3_OK && limits != NULL) {
+        odin3_pp_test_set_limits(pp, *limits);
+    }
     if (st == ODIN3_OK) {
         st = odin3_pp_run(pp, &src, &stream);
     }
     odin3_util_set_alloc_fail_after(-1);
     if (st != ODIN3_OK) {
-        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
-        TEST_ASSERT_NULL(stream.text.ptr);
+        expect_no_memory(st);
         return false;
     }
     assert_text(k_oom_want);
     return true;
 }
 
-static void test_out_of_memory(void) {
-    char path[PATH_BUF];
-    put("t.v", odin3_bytes_cstr(k_oom_text), path);
+/* Fails every allocation in turn until the run succeeds; returns the tries. */
+static long oom_sweep(const char *path, const odin3_pp_limits *limits) {
     bool succeeded = false;
     long tries = 0;
     for (long k = 0; k < OOM_LIMIT && !succeeded; k++) {
-        succeeded = oom_try(k, path);
+        succeeded = oom_try(k, path, limits);
         tries++;
     }
     TEST_ASSERT_TRUE(succeeded);
-    TEST_ASSERT_TRUE(tries > 20);
+    return tries;
+}
+
+/* The file cache bounded to just fit the file: the bound path reads the same way. */
+static void test_out_of_memory_bounded_cache(void) {
+    char path[PATH_BUF];
+    put("t.v", odin3_bytes_cstr(k_oom_text), path);
+    odin3_pp_limits bounded = odin3_pp_default_limits();
+    bounded.file_cache_bytes = (uint64_t)sizeof k_oom_text;
+    TEST_ASSERT_TRUE(oom_sweep(path, &bounded) > 20);
+    TEST_ASSERT_EQUAL_INT(0, errors);
+}
+
+static void test_out_of_memory(void) {
+    char path[PATH_BUF];
+    put("t.v", odin3_bytes_cstr(k_oom_text), path);
+    TEST_ASSERT_TRUE(oom_sweep(path, NULL) > 20);
     TEST_ASSERT_EQUAL_INT(0, errors);
     /* a run after a failed run starts clean */
     odin3_util_set_alloc_fail_after(30);
@@ -442,5 +467,6 @@ int main(void) {
     RUN_TEST(test_root_counts_towards_stream_caps);
     RUN_TEST(test_cap_file_cache_bytes);
     RUN_TEST(test_out_of_memory);
+    RUN_TEST(test_out_of_memory_bounded_cache);
     return UNITY_END();
 }
