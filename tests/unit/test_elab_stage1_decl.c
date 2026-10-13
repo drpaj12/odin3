@@ -536,7 +536,8 @@ static void test_reserved_lib_attrs_are_dropped(void) {
                 "reads; ignored");
     expect_absent("ATTR:odin3_lib");
     EXPECT_SEQ("(MODULE:m", "(ATTR:keep");
-    /* only reserved attributes: nothing is left to attach (was "odin3_ast_attach: no attributes") */
+    /* only reserved attributes: nothing is left to attach (was "odin3_ast_attach: no attributes")
+     */
     run_clean("(* odin3_lib *) module m(input a, output y);\n  assign y = a;\nendmodule\n");
     expect_warn("t.v:1:4: warning: attribute 'odin3_lib' is reserved for library reads; ignored");
     expect_absent("ATTR:odin3_lib");
