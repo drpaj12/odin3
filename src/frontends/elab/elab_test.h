@@ -21,6 +21,8 @@ typedef struct odin3_elab_limits {
     uint32_t max_total_iterations; /* ODIN3_ELAB_MAX_TOTAL_ITERATIONS */
     uint32_t max_eval_steps;       /* ODIN3_ELAB_MAX_EVAL_STEPS */
     uint32_t max_call_depth;       /* ODIN3_ELAB_MAX_CALL_DEPTH */
+    uint32_t max_inline_depth;     /* ODIN3_ELAB_MAX_INLINE_DEPTH */
+    uint32_t max_loop_objects;     /* ODIN3_ELAB_MAX_LOOP_OBJECTS */
     uint32_t max_reentry_depth;    /* ODIN3_ELAB_MAX_REENTRY_DEPTH */
     uint32_t max_hier_depth;       /* ODIN3_ELAB_MAX_HIER_DEPTH */
     uint32_t max_specializations;  /* ODIN3_ELAB_MAX_SPECIALIZATIONS */

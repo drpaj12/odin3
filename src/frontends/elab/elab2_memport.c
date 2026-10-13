@@ -3,9 +3,10 @@
  * the address of a read or write (the raw index of a one-dimensional array; a multi-dimensional
  * array's row-major address, built node for node like Yosys 0.55's normalize_index and
  * index_offset, simplify.cc 483-540), the asynchronous read port and its fresh data nets, the
- * clocked write port Task 24 will add, and EL-28 step (8): one `$mem` per memory with its ports in
- * source order. `$mem` has simlib's semantics, which subtract OFFSET themselves, so no port
- * subtracts it; an address narrower than ABITS is zero-extended (Yosys's memory_collect).
+ * clocked write port (the process generator's, Task 24), and EL-28 step (8): one `$mem` per memory
+ * with its ports in source order. `$mem` has simlib's semantics, which subtract OFFSET themselves,
+ * so no port subtracts it; an address narrower than ABITS is zero-extended (Yosys's
+ * memory_collect).
  */
 #include "ast/ast.h"
 #include "ast/kinds.h"
@@ -77,13 +78,7 @@ static odin3_status mem_cap(odin3_elab2 *e2, const odin3_elab_mem *mem, const po
     uint64_t rd = mem->rd_ports.len + (add->is_read ? 1U : 0U);
     uint64_t wr = mem->wr_ports.len + (add->is_read ? 0U : 1U);
     uint64_t pins = mem_pins(mem, abits, rd, wr);
-    if (pins <= e2->limits->max_cell_pins) {
-        return ODIN3_OK;
-    }
-    odin3_elab2_fatal(e2, node_loc(e2, add->node),
-                      "cell of %" PRIu64 " pins exceeds the limit of %" PRIu32 " pins", pins,
-                      e2->limits->max_cell_pins);
-    return ODIN3_ERR_PARSE;
+    return odin3_elab2_pins_cap(e2, node_loc(e2, add->node), pins);
 }
 
 /* --- addresses ---------------------------------------------------------------------------------
@@ -206,9 +201,12 @@ static odin3_status addr_flat(addr_run *run, const odin3_elab_mem *mem,
     return st;
 }
 
-/* The address of the word rd names. */
-static odin3_status mem_address(odin3_elab2 *e2, const odin3_elab_mem *mem,
-                                const odin3_elab2_mem_rd *rd, odin3_sig *out) {
+odin3_status odin3_elab2_mem_addr(odin3_elab2 *e2, const odin3_elab2_mem_rd *rd, odin3_sig *out) {
+    const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, rd->mem);
+    if (mem == NULL || rd->n_idx != mem->n_dims || rd->idx == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_elab2_mem_addr: not a memory, or a wrong index count");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     if (!mem->flat) {
         *out = rd->idx[0];
         return ODIN3_OK;
@@ -261,7 +259,7 @@ odin3_status odin3_elab2_mem_read(odin3_elab2 *e2, const odin3_elab2_mem_rd *rd,
     odin3_elab_mem *mem = odin3_elab2_mem_at(e2, rd->mem);
     odin3_sig addr;
     odin3_net_id *nets = NULL;
-    odin3_status st = mem_address(e2, mem, rd, &addr);
+    odin3_status st = odin3_elab2_mem_addr(e2, rd, &addr);
     port_add add = {rd->select, addr.width, true};
     st = st != ODIN3_OK ? st : mem_cap(e2, mem, &add);
     st = st != ODIN3_OK ? st : port_data_nets(e2, mem, rd->select, &nets);

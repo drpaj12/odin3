@@ -3,7 +3,7 @@
  * of a module, a black box or a registered cell type with its ports resized to the port (I4,
  * Yosys's hierarchy rules), the parameters of a cell type, the attributes `parameter:<NAME>`, and
  * the primitives lowered as Yosys's simplify does. The black-box cell types are elab2_bbox.c;
- * drivers (the claim of every output) are elab2_drive.c.
+ * drivers (the claim of every output) are elab2_claim.c.
  */
 #include "ast/ast.h"
 #include "ast/kinds.h"
@@ -59,11 +59,6 @@ typedef struct inst_run {
     uint64_t pins;
 } inst_run;
 
-static const char *str_of(const odin3_elab2 *e2, uint32_t id) {
-    const char *str = odin3_strtab_get(odin3_design_strtab(e2->design), id);
-    return str != NULL ? str : "";
-}
-
 /* The cell type of the INSTANTIATION: a module of the store, a black box, or a registered type. */
 static odin3_status inst_find_target(inst_run *run, bool *found) {
     odin3_elab2 *e2 = run->e2;
@@ -109,7 +104,7 @@ static int64_t conn_port(const inst_run *run, odin3_ast_id conn, uint32_t positi
     if (name == 0) {
         return position < def->n_ports ? (int64_t)position : -1;
     }
-    const char *want = str_of(run->e2, name);
+    const char *want = odin3_elab2_str_of(run->e2, name);
     for (uint32_t i = 0; i < def->n_ports; i++) {
         if (strcmp(def->ports[i].name, want) == 0) {
             return (int64_t)i;
@@ -291,13 +286,7 @@ static odin3_status inst_widths(inst_run *run) {
         run->ports[i].width = width;
         run->pins += width;
     }
-    if (run->pins > e2->limits->max_cell_pins) {
-        odin3_elab2_fatal(e2, odin3_ast_loc(e2->elab, run->instance),
-                          "cell of %" PRIu64 " pins exceeds the limit of %" PRIu32 " pins",
-                          run->pins, e2->limits->max_cell_pins);
-        return ODIN3_ERR_PARSE;
-    }
-    return ODIN3_OK;
+    return odin3_elab2_pins_cap(e2, odin3_ast_loc(e2->elab, run->instance), run->pins);
 }
 
 /* --- claiming the outputs and building the pins' nets -------------------------------------------

@@ -1004,12 +1004,12 @@ static void test_memory_read_port(void) {
     expect_pins_are(mem, "RD_DATA", (bits_of){"y", 0}, 8);
 }
 
-/* A user function call is the pending continuous-context call until Task 23. */
-static void test_function_call_pending(void) {
-    read_failing("  function [7:0] f;\n    input [7:0] p;\n    f = p;\n  endfunction\n"
-                 "  assign y = f(a);\n  assign y1 = b;\n");
-    expect_error((at_loc){5, 14},
-                 "elaboration is not available yet (2D): 'continuous-context call'");
+/* A user function call in a continuous assignment is a combinational process of its own (Task
+ * 23); the exact body is test_elab_stage2_call.c's. */
+static void test_function_call_continuous(void) {
+    read_clean("  function [7:0] f;\n    input [7:0] p;\n    f = p;\n  endfunction\n"
+               "  assign y = f(a);\n  assign y1 = b;\n");
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$proc"));
     expect_same_nets((bits_of){"y1", 0}, (bits_of){"b", 0}, 8);
 }
 
@@ -1359,7 +1359,7 @@ static void test_reads_hook(void) {
     odin3_elab2 *e2 = context_over("module top (input [3:0] a, input [3:0] b, output [3:0] y);\n"
                                    "  assign y = a + b;\nendmodule\n");
     reads_ctx ctx = {{wnet("a", 0), wnet("a", 1), wnet("a", 2), wnet("a", 3)}, 0};
-    odin3_elab2_reads reads = {reads_zero_a, &ctx};
+    odin3_elab2_reads reads = {reads_zero_a, &ctx, NULL, NULL};
     odin3_elab2_expr_req req = {find_kind(ODIN3_AST_BINARY), {4, true, false}, NULL, &reads};
     odin3_sig sig;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_elab2_expr(e2, &req, &sig));
@@ -1654,7 +1654,7 @@ static void test_oom_sweep(void) {
     X(test_cell_provenance)                                                                        \
     X(test_block_name_is_not_a_value)                                                              \
     X(test_memory_read_port)                                                                       \
-    X(test_function_call_pending)                                                                  \
+    X(test_function_call_continuous)                                                               \
     X(test_zero_width_part)                                                                        \
     X(test_cell_pins_cap)                                                                          \
     X(test_chain_depth)                                                                            \

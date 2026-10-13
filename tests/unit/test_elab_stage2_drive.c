@@ -547,8 +547,8 @@ static void test_wand_with_cell_driver(void) {
     expect_ir_ok();
 }
 
-/* A procedural assignment to a wired net is the pre-scan's error (the always block itself is
- * Task 21's, so its pending line follows). */
+/* A procedural assignment to a wired net is the pre-scan's error; the process generator does not
+ * drive the net (no node) and reports nothing more. */
 static void test_wired_always(void) {
     read_failing("module top (input a, output y);\n"
                  "  wand w;\n"
@@ -557,7 +557,8 @@ static void test_wired_always(void) {
                  "endmodule\n");
     expect_error((at_loc){3, 13},
                  "'w' is a wired net (wand) and cannot be assigned in an always block");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, diag_errors(), et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of("$proc"));
 }
 
 /* --- the always-assigned bit set (EL-27's input) ------------------------------------------------

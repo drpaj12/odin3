@@ -73,6 +73,7 @@ add_library(odin3_core OBJECT
     src/util/u64map.c
     src/util/idindex.c
     src/util/str.c
+    src/util/clock.c
     src/util/log.c
     src/util/file.c
     src/util/sha256.c
@@ -219,12 +220,30 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_wires.c
     src/frontends/elab/elab2_expr.c
     src/frontends/elab/elab2_select.c
+    src/frontends/elab/elab2_varsel.c
     src/frontends/elab/elab2_assign.c
-    src/frontends/elab/elab2_drive.c
+    src/frontends/elab/elab2_claim.c
+    src/frontends/elab/elab2_wired.c
+    src/frontends/elab/elab2_prescan.c
+    src/frontends/elab/elab2_warn.c
+    src/frontends/elab/elab2_tri.c
     src/frontends/elab/elab2_mem.c
     src/frontends/elab/elab2_memport.c
     src/frontends/elab/elab2_memscan.c
     src/frontends/elab/elab2_bbox.c
+    src/frontends/elab/elab2_words.c
+    src/frontends/elab/pg.c
+    src/frontends/elab/elab2_call.c
+    src/frontends/elab/pg_always.c
+    src/frontends/elab/pg_call.c
+    src/frontends/elab/pg_case.c
+    src/frontends/elab/pg_emit.c
+    src/frontends/elab/pg_loop.c
+    src/frontends/elab/pg_scan.c
+    src/frontends/elab/pg_memw.c
+    src/frontends/elab/pg_init.c
+    src/frontends/elab/pg_readmem.c
+    src/frontends/elab/pg_select.c
     src/frontends/elab/elab2_inst.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
@@ -901,6 +920,37 @@ if(BUILD_TESTING)
     add_dependencies(test_elab_stage2_mem verilog_generated)
     target_compile_definitions(test_elab_stage2_mem PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 21: the process generator (always blocks to $proc nodes; EL-33 to EL-35).
+    odin3_add_unit_test(test_elab_stage2_proc)
+    target_sources(test_elab_stage2_proc PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_stage2_proc PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_proc verilog_generated)
+    target_compile_definitions(test_elab_stage2_proc PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 22: if, case, case temporaries, flags and the case method for variable selects.
+    odin3_add_unit_test(test_elab_stage2_case)
+    target_sources(test_elab_stage2_case PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_stage2_case PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_case verilog_generated)
+    target_compile_definitions(test_elab_stage2_case PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 23: loops, function and task calls, calls in continuous contexts, register-array words.
+    odin3_add_unit_test(test_elab_stage2_call)
+    target_sources(test_elab_stage2_call PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_stage2_call PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_call verilog_generated)
+    target_compile_definitions(test_elab_stage2_call PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 24: memory writes (the write ports of $mem), initial values, $readmemh/b, the
+    # per-bit rules, the empty pending tables and the sink module (OOM, determinism).
+    odin3_add_unit_test(test_elab_stage2_init)
+    target_sources(test_elab_stage2_init PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_stage2_init PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_init verilog_generated)
+    target_compile_definitions(test_elab_stage2_init PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_READMEM_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/elab/readmem"
+        ODIN3_SINK_V="${PROJECT_SOURCE_DIR}/tests/elab/sink/sink.v")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
@@ -1371,9 +1421,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     add_test(NAME verilog_handover_parse
         COMMAND $<TARGET_FILE:odin3-parse-check> --smallest-first ${_handover_cases})
     set_tests_properties(verilog_handover_parse PROPERTIES LABELS verilog)
-    # Task 16: stage 1 reports every row; T9 and T10 are stage 2's (Task 24) and stay pending until
-    # it lands (A4 is Task 19's: the second driver of a net); none of the ignore cases is.
-    set(_handover_pending_reject-2d "T9.v,T10.v")
+    # Task 24 (point (l)): no coverage row and not the sink module hits a not-yet-built construct.
+    file(GLOB _no_pending_rows CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/verilog/coverage/*.v
+                                                 ${PROJECT_SOURCE_DIR}/tests/elab/sink/sink.v)
+    add_test(NAME elab_no_pending
+        COMMAND sh -c "for f in \"$@\"; do if \"$0\" -p \"read_verilog $f\" 2>&1 | grep -q 'elaboration is not available yet (2D)'; then echo \"pending: $f\"; exit 1; fi; done"
+                $<TARGET_FILE:odin3> ${_no_pending_rows})
+    set_tests_properties(elab_no_pending PROPERTIES LABELS verilog)
+    # Task 16: stage 1 reports every row; A4 is Task 19's (the second driver of a net) and T9 and
+    # T10 Task 21's (the process generator's per-bit rules, EL-41); none of the ignore cases is
+    # pending.
+    set(_handover_pending_reject-2d "")
     set(_handover_pending_ignore-2d "")
     foreach(_handover reject-2d ignore-2d)
         string(REPLACE "-" "_" _handover_test "verilog_${_handover}")
@@ -1531,6 +1589,57 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # the workspace 0.69 of ODIN3_YOSYS.
         set_property(TEST test_verilog_writer APPEND PROPERTY
             ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+        # 2D Task 21: the round trip of the process generator's write_rtlil through Yosys 0.55
+        # (read_rtlil; proc exits 0).
+        set_property(TEST test_elab_stage2_proc APPEND PROPERTY
+            ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+        # 2D Task 21 (spec 14.3): elab-equiv on the T7, T8 and `q + 1` sources: Odin III's
+        # processes and Yosys's own, through one Yosys back end, are equivalent. Exit 77 (skip)
+        # when an ASan child cannot be capped (no systemd-run).
+        add_test(NAME elab_proc_bridge_smoke
+            COMMAND sh -c "for f in t7 t8 qplus1; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t \"$4/$f.v\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/verilog/proc-bridge)
+        set_tests_properties(elab_proc_bridge_smoke PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
+        # 2D Task 22 (spec 14.3): elab-equiv on every source of tests/verilog/case-bridge: if,
+        # case, casez/casex wildcards, nesting with blocking temporaries, full_case, folding, item
+        # expressions and the case method for variable selects (--unmap-enables: a held register is an
+        # enabled flip-flop on the Yosys side). Exit 77 (skip) as above.
+        add_test(NAME elab_case_bridge
+            COMMAND sh -c "for f in \"$4\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t --unmap-enables \"$f\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/verilog/case-bridge)
+        set_tests_properties(elab_case_bridge PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
+        # 2D Task 23 (spec 14.3): elab-equiv on every source of tests/verilog/call-bridge: unrolled
+        # loops, functions and tasks inlined (in processes and in continuous contexts), nested calls
+        # and variable-index reads of net arrays. Exit 77 (skip) as above.
+        add_test(NAME elab_call_bridge
+            COMMAND sh -c "for f in \"$4\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t \"$f\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/verilog/call-bridge)
+        set_tests_properties(elab_call_bridge PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
+        # 2D Task 24 (spec 14.3): elab-equiv on every source of tests/verilog/mem-bridge: the write
+        # ports of $mem (all three ranges, a write then a read at the same index and a cycle with
+        # the enable off; conditional, nested, in loops, tasks and functions; partial and
+        # concatenated targets). memory_map makes enabled flip-flops, which equiv-check cannot
+        # read: --unmap-enables. Exit 77 (skip) as above.
+        add_test(NAME elab_mem_bridge
+            COMMAND sh -c "for f in \"$4\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t --unmap-enables \"$f\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/verilog/mem-bridge)
+        set_tests_properties(elab_mem_bridge PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
     endif()
 
     # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys

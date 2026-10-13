@@ -6,8 +6,10 @@
  * and the places Yosys names in its warning. The traversal order, the first-time guards on the
  * places and the proc-local blocking-write flag are Yosys's, so the places come out the same.
  *
- * Differences, deliberate: a function's or task's body is not scanned (its statements run where it
- * is called, Task 23); a concatenation lvalue is split into its parts first, as Yosys does; a
+ * Differences, deliberate: a function's or task's body is scanned where it is called (Yosys has
+ * inlined it by then; Task 23: an array written inside a function or task forces registers as
+ * rules 2 to 5 say of the calling block, and `m[f(1)]` is a variable index, as in Yosys where the
+ * call is not a constant); a concatenation lvalue is split into its parts first, as Yosys does; a
  * constant index is a NUMBER, a localparam, an operator over them or the variable of a `for` that
  * Yosys unrolls before this point (Yosys has folded and unrolled by then).
  */
@@ -17,6 +19,7 @@
 #include "frontends/elab/elab2_mem.h"
 #include "frontends/elab/elab_internal.h"
 #include "odin3/odin3.h"
+#include "util/alloc.h"
 #include "util/vec.h"
 
 #include <stdbool.h>
@@ -39,12 +42,15 @@ typedef struct ms_run {
     odin3_vec constwork; /* odin3_ast_id: the nodes of a constant test still to visit */
     odin3_vec chain;     /* odin3_ast_id: the selects of the lvalue being looked at */
     odin3_vec loops;     /* ms_loop: the for statements being scanned, innermost last */
-    uint32_t serial;     /* the block being scanned (0: outside any) */
+    odin3_vec subs;  /* odin3_ast_cursor *: the bodies of the calls being walked, innermost last */
+    uint32_t serial; /* the block being scanned (0: outside any) */
     uint32_t last_serial;
     bool async;
     bool init;
     odin3_ast_id lhs; /* the lvalue the walk is to skip */
 } ms_run;
+
+enum { MS_CALL_DEPTH = 64 }; /* bodies walked inside one another (recursion stops here) */
 
 typedef enum ms_mode { MS_MARK, MS_READ } ms_mode;
 
@@ -208,6 +214,14 @@ static bool ms_const_node(ms_run *run, odin3_ast_id node, odin3_status *st) {
         *st = ms_push_kids(run, &run->constwork, node);
         return true;
     case ODIN3_AST_CALL: {
+        if ((odin3_ast_flags(ast, node) & ODIN3_AST_F_CALL_SYSTEM) == 0) {
+            /* a user call is constant when the interpreter folds it, as Yosys does before this pass
+             * (`m[f(1)] <= d` is a constant write; a call on a loop variable is not folded here) */
+            odin3_cval val;
+            bool folded = false;
+            *st = odin3_elab2_call_try(run->e2, node, &val, &folded);
+            return *st == ODIN3_OK && folded;
+        }
         const char *name = odin3_ast_name_str(ast, node);
         bool known = strcmp(name, "$signed") == 0 || strcmp(name, "$unsigned") == 0 ||
                      strcmp(name, "$clog2") == 0;
@@ -399,6 +413,51 @@ static odin3_status ms_loop_open(ms_run *run, odin3_ast_id node) {
     return st;
 }
 
+/* A call met in a block: the callee's body is walked next, above the cursor of the caller (a stack
+ * of cursors, no recursion), with the block's context. */
+static odin3_status ms_push_sub(ms_run *run, odin3_ast_id body) {
+    odin3_ast_cursor *sub = odin3_util_calloc(sizeof *sub);
+    odin3_ast_cursor **slot = sub != NULL ? (odin3_ast_cursor **)odin3_vec_push(&run->subs) : NULL;
+    if (slot == NULL) {
+        odin3_util_free(sub);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = odin3_ast_cursor_init(sub, run->e2->elab, body);
+    if (st != ODIN3_OK) {
+        odin3_vec_pop(&run->subs);
+        odin3_util_free(sub);
+        return st;
+    }
+    *slot = sub;
+    return ODIN3_OK;
+}
+
+static odin3_status ms_call(ms_run *run, odin3_ast_id call) {
+    const odin3_symbol *rec =
+        odin3_symbol_get(run->e2->st, odin3_elab_sym_of(&run->e2->bind, call));
+    bool task = odin3_ast_kind_of(run->e2->elab, call) == ODIN3_AST_TASK_CALL;
+    if (run->serial == 0 || rec == NULL || run->subs.len >= MS_CALL_DEPTH ||
+        (odin3_ast_flags(run->e2->elab, call) & ODIN3_AST_F_CALL_SYSTEM) != 0 ||
+        rec->kind != (task ? ODIN3_SYM_TASK : ODIN3_SYM_FUNCTION)) {
+        return ODIN3_OK;
+    }
+    odin3_ast_id body = odin3_ast_child(run->e2->elab, rec->decl, task ? 2 : 3);
+    return body.v == 0 ? ODIN3_OK : ms_push_sub(run, body);
+}
+
+/* An assignment met in a block (or a continuous one, whose lvalue is skipped by the walk). */
+static odin3_status ms_enter_assign(ms_run *run, odin3_ast_cursor *cur, odin3_ast_id node) {
+    odin3_ast_kind kind = odin3_ast_kind_of(run->e2->elab, node);
+    if (kind == ODIN3_AST_NET_ASSIGN) {
+        odin3_ast_cursor_skip(cur); /* outside a block nothing is read after a blocking write */
+        odin3_status st = ms_assign(run, node, false, false);
+        run->lhs = (odin3_ast_id){0};
+        return st;
+    }
+    return run->serial == 0 ? ODIN3_OK
+                            : ms_assign(run, node, kind == ODIN3_AST_BLOCKING_ASSIGN, true);
+}
+
 /* One ENTER of the walk. */
 static odin3_status ms_enter(ms_run *run, odin3_ast_cursor *cur, odin3_ast_id node) {
     if (run->lhs.v == node.v) {
@@ -419,25 +478,32 @@ static odin3_status ms_enter(ms_run *run, odin3_ast_cursor *cur, odin3_ast_id no
         return ODIN3_OK;
     case ODIN3_AST_FOR:
         return run->serial == 0 ? ODIN3_OK : ms_loop_open(run, node);
-    case ODIN3_AST_NET_ASSIGN: {
-        odin3_ast_cursor_skip(cur); /* outside a block nothing is read after a blocking write */
-        odin3_status st = ms_assign(run, node, false, false);
-        run->lhs = (odin3_ast_id){0};
-        return st;
-    }
+    case ODIN3_AST_NET_ASSIGN:
     case ODIN3_AST_BLOCKING_ASSIGN:
     case ODIN3_AST_NONBLOCKING_ASSIGN:
-        return run->serial == 0
-                   ? ODIN3_OK
-                   : ms_assign(run, node,
-                               odin3_ast_kind_of(run->e2->elab, node) == ODIN3_AST_BLOCKING_ASSIGN,
-                               true);
+        return ms_enter_assign(run, cur, node);
     case ODIN3_AST_IDENT:
     case ODIN3_AST_HIER_NAME:
         return ms_read(run, node);
+    case ODIN3_AST_CALL:
+    case ODIN3_AST_TASK_CALL:
+        return ms_call(run, node);
     default:
         return ODIN3_OK;
     }
+}
+
+/* The cursor to read next: the innermost call body's, else the module's. */
+static odin3_ast_cursor *ms_cursor(ms_run *run, odin3_ast_cursor *root) {
+    return run->subs.len > 0 ? *(odin3_ast_cursor **)odin3_vec_cat(&run->subs, run->subs.len - 1)
+                             : root;
+}
+
+static void ms_end_sub(ms_run *run) {
+    odin3_ast_cursor *sub = *(odin3_ast_cursor **)odin3_vec_cat(&run->subs, run->subs.len - 1);
+    odin3_ast_cursor_free(sub);
+    odin3_util_free(sub);
+    odin3_vec_pop(&run->subs);
 }
 
 odin3_status odin3_elab2_mem_scan(odin3_elab2 *e2, odin3_ast_id module_node, odin3_vec *facts) {
@@ -447,14 +513,23 @@ odin3_status odin3_elab2_mem_scan(odin3_elab2 *e2, odin3_ast_id module_node, odi
     odin3_vec_init(&run.constwork, sizeof(odin3_ast_id));
     odin3_vec_init(&run.chain, sizeof(odin3_ast_id));
     odin3_vec_init(&run.loops, sizeof(ms_loop));
-    odin3_ast_cursor cur;
-    odin3_status st = odin3_ast_cursor_init(&cur, e2->elab, module_node);
+    odin3_vec_init(&run.subs, sizeof(odin3_ast_cursor *));
+    odin3_ast_cursor root;
+    odin3_status st = odin3_ast_cursor_init(&root, e2->elab, module_node);
     odin3_ast_event ev;
     odin3_ast_id node;
-    while (st == ODIN3_OK && odin3_ast_cursor_next(&cur, &ev, &node)) {
+    while (st == ODIN3_OK) {
+        odin3_ast_cursor *cur = ms_cursor(&run, &root);
+        if (!odin3_ast_cursor_next(cur, &ev, &node)) {
+            if (cur == &root) {
+                break;
+            }
+            ms_end_sub(&run);
+            continue;
+        }
         odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, node);
         if (ev == ODIN3_AST_ENTER) {
-            st = ms_enter(&run, &cur, node);
+            st = ms_enter(&run, cur, node);
         } else if (kind == ODIN3_AST_FOR && run.loops.len > 0 &&
                    ((const ms_loop *)odin3_vec_cat(&run.loops, run.loops.len - 1))->node ==
                        node.v) {
@@ -465,11 +540,15 @@ odin3_status odin3_elab2_mem_scan(odin3_elab2 *e2, odin3_ast_id module_node, odi
             run.async = false;
         }
     }
-    odin3_ast_cursor_free(&cur);
+    while (run.subs.len > 0) {
+        ms_end_sub(&run);
+    }
+    odin3_ast_cursor_free(&root);
     odin3_vec_free(&run.work);
     odin3_vec_free(&run.constwork);
     odin3_vec_free(&run.parts);
     odin3_vec_free(&run.chain);
     odin3_vec_free(&run.loops);
+    odin3_vec_free(&run.subs);
     return st;
 }

@@ -26,6 +26,7 @@
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
+#include "util/clock.h"
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -38,7 +39,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 
 /* Debug builds check the sealed store whatever the options say (§4.2 step 7). */
@@ -49,7 +49,7 @@ enum { RV_ALWAYS_CHECK = 1 };
 #endif
 
 /* getcwd's buffer: first try and largest (a working directory deeper than 1 MB is refused). */
-enum { MS_PER_S = 1000, NS_PER_MS = 1000000, CWD_BUF = 4096, CWD_MAX = 1 << 20 };
+enum { CWD_BUF = 4096, CWD_MAX = 1 << 20 };
 
 /* duplicate_module keys: library << 32 | name. */
 enum { RV_LIBRARY_SHIFT = 32 };
@@ -63,12 +63,6 @@ static void *g_hook_user;
 void odin3_rv_test_set_hook(odin3_rv_test_hook fn, void *user) {
     g_hook = fn;
     g_hook_user = user;
-}
-
-static double now_ms(void) {
-    struct timespec ts;
-    (void)clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * MS_PER_S + (double)ts.tv_nsec / NS_PER_MS;
 }
 
 static const char *text_of(const odin3_design *design, uint32_t str) {
@@ -301,7 +295,7 @@ static odin3_status seal(odin3_rv *rv, double start) {
               "read_verilog: %" PRIu32 " units (%" PRIu32 " library), %" PRIu32 " nodes, %" PRIu32
               " comments, %" PRIu64 " bytes, %.3f ms",
               units, from != 0 ? units - from : 0, odin3_ast_node_end(rv->ast).v - 1,
-              odin3_ast_comment_count(rv->ast), rv->bytes, now_ms() - start);
+              odin3_ast_comment_count(rv->ast), rv->bytes, odin3_now_ms() - start);
     return ODIN3_OK;
 }
 
@@ -332,7 +326,7 @@ odin3_status odin3_read_verilog_files(odin3_design *design, const odin3_rv_opts 
         odin3_log(ODIN3_LOG_ERROR, "odin3_read_verilog_files: NULL argument or no files");
         return ODIN3_ERR_INVALID_ARG;
     }
-    double start = now_ms();
+    double start = odin3_now_ms();
     odin3_rv rv;
     odin3_status st = rv_open(&rv, design, opts);
     st = st != ODIN3_OK ? st : read_all(&rv, opts);

@@ -614,6 +614,11 @@ static int64_t word_position(const odin3_elab2 *e2, const odin3_elab_mem *mem,
     return pos;
 }
 
+int64_t odin3_elab2_mem_pos(const odin3_elab2 *e2, uint32_t mem, const int64_t *values) {
+    const odin3_elab_mem *rec = odin3_elab2_mem_get(e2, mem);
+    return rec == NULL ? -1 : word_position(e2, rec, values);
+}
+
 /* The out-of-range warning of a read or a write. */
 static odin3_status word_warn(odin3_elab2 *e2, const odin3_elab2_mem_rd *rd, const int64_t *values,
                               bool write) {

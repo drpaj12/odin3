@@ -40,8 +40,7 @@ uint32_t odin3_elab2_mem_find(const odin3_elab2 *e2, odin3_sym_id sym);
 /* The table entry at index mem for update; NULL outside the table. */
 odin3_elab_mem *odin3_elab2_mem_at(odin3_elab2 *e2, uint32_t mem);
 
-/* The number of indices of an unpacked dimension, and its lowest declared one. */
-uint64_t odin3_elab2_dim_size(const odin3_dim *dim);
+/* The lowest declared index of a dimension (its size is odin3_elab2_dim_size). */
 int32_t odin3_elab2_dim_low(const odin3_dim *dim);
 
 /*
@@ -51,5 +50,11 @@ int32_t odin3_elab2_dim_low(const odin3_dim *dim);
  * ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_elab2_mem_scan(odin3_elab2 *e2, odin3_ast_id module_node, odin3_vec *facts);
+
+/*
+ * Marks every bit of a register-array word's wire as assigned in an always block (the table behind
+ * odin3_elab2_always_assigned_word; elab2_prescan.c). ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab2_word_assigned(odin3_elab2 *e2, odin3_wire_id wire);
 
 #endif

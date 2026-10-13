@@ -336,9 +336,8 @@ elab_only)
     grep -qF 'read_verilog: elaborated top' "$work/err" || fail "--project: no summary"
     grep -qF 'stats: design:' "$work/err" || fail "--project: no stats"
     # A located elaboration error fails the run (and stats does not run).
-    printf 'module c;\n    reg a;\n    always @(*) a = 1;\nendmodule\n' >"$work/c.v"
-    expect_fail "c.v:3:5: error: elaboration is not available yet (2D): 'ALWAYS'" \
-        --elab-only "$work/c.v"
+    printf 'module c;\n    wire w;\n    assign w = 1;\n    assign w = 0;\nendmodule\n' >"$work/c.v"
+    expect_fail "c.v:4:12: error: 'w' has two drivers (also driven at" --elab-only "$work/c.v"
     ;;
 elab_only_with_script)
     printf 'module b;\nendmodule\n' >"$work/b.v"
