@@ -7,3 +7,9 @@
 koios/hard_mem_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
 koios/complex_dsp_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
 koios/hard_block_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
+# bench_proc has no --top and elab-sweep --bench passes none (2D follow-up): the ambiguous-top pair
+# and two files the 2D reader rejects (fixed by 2D-7b; each then XPASSes and its line goes).
+koios/bwave_like.fixed.small.v [ambiguous_top: no top given and several modules are not instantiated: 'work.NPU', 'work.sp_ram'] needs --top; elab-sweep --bench passes none (2D follow-up)
+koios/bwave_like.fixed.large.v [ambiguous_top: no top given and several modules are not instantiated: 'work.NPU', 'work.sp_ram'] needs --top; elab-sweep --bench passes none (2D follow-up)
+koios/eltwise_layer.v ['bram_rdata_ext' is assigned with both '=' and '<='] T9: the reader rejects it until 2D-7b
+koios/dnnweaver.v [pass read_verilog: failed: ODIN3_ERR_INVALID_ARG] the reader rejects it (not diagnosed; presumably fixed by 2D-7b)
