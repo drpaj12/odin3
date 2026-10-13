@@ -1,4 +1,11 @@
 # tests/opt/equiv_expect_fail.txt: the micros opt_equiv_micro expects to fail beyond
-# tests/proc/micro_expect_fail.txt and tests/opt/micro_expect_fail.txt (2F Task 17). Format:
+# tests/proc/micro_expect_fail.txt and tests/opt/micro_expect_fail.txt (the CTest line reads all three) (2F Task 17). Format:
 # `<path> [needle] <reason>`.
+#
+# TEMPORARY (review I3): the hard-block listing below goes when opt-equiv handles black boxes. The
+# failure is Yosys `equiv_make` (a black-box instance's outputs get a different $equiv source on each
+# side), not tools/equiv-check; the cut-point mode of equiv_check.py is BLIF/ABC and opt-equiv does not
+# use it. Removal is tied to the I1 fix (a Yosys-level cut-point step in Checker.refines: replace each
+# matched black-box instance's outputs by a shared free input and compare its inputs), not to 2D-7b.
+# Other hard-block micros whose opt changes something fail the same way when Task 20 runs them all.
 syntax/constant_module_inst.v [not a refinement] opt-equiv harness: the design instantiates the single_port_ram hard block, which equiv_make cannot match (the same file against itself fails); the rewrite itself ($eq(1-bit, 32'd1) to the bit) is correct

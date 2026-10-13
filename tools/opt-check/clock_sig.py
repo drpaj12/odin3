@@ -9,7 +9,8 @@ so the ``async2sync`` proof plus equal signatures is a proof. Any other pair (se
 module, a clock that is not a primary input, a clock or an edge that differs between the sides)
 needs the clock-aware ``clk2fflogic`` proof.
 
-``signatures(text)`` maps a module name to its set of clock uses ``(pin, signal, polarity)``;
+``signatures(text)`` maps a module name to its set of clock uses ``(edge or level, signal,
+polarity)``, whatever the pin (a memory's ports and its flip-flops share a clock);
 ``single_clock(text)`` is True when every module has at most one use and it is a primary input.
 """
 
@@ -45,11 +46,11 @@ def cell_uses(kind: str, body: str) -> set[Use]:
     if kind in WORD_CLOCKS:
         pin = WORD_CLOCKS[kind]
         pol = params.get(f"\\{pin}_POLARITY", "?")
-        return {(pin, pins.get(f"\\{pin}", "?"), pol)}
+        return {("level" if pin == "EN" else "edge", pins.get(f"\\{pin}", "?"), pol)}
     gate = GATE_STORAGE.match(kind)
     if gate is not None:
         pin = "E" if "LATCH" in kind else "C"
-        return {(pin, pins.get(f"\\{pin}", "?"), gate.group(1))}
+        return {("level" if pin == "E" else "edge", pins.get(f"\\{pin}", "?"), gate.group(1))}
     if kind in MEMORY_TYPES:
         return memory_uses(pins, params)
     return set()
@@ -65,7 +66,7 @@ def memory_uses(pins: dict[str, str], params: dict[str, str]) -> set[Use]:
         if clk and set(enable.split("'")[-1]) != {"0"}:
             pol = "".join(sorted(set(params.get(f"\\{group}_CLK_POLARITY", "?").split("'")[-1])))
             signals = set(re.findall(r"\\\S+(?: \[\d+\])?|\d+'[01xz]+", clk.strip("{} ")))
-            uses |= {(f"{group}_CLK", signal, pol) for signal in signals}
+            uses |= {("edge", signal, pol) for signal in signals}
     return uses
 
 

@@ -103,7 +103,8 @@ made=0
 if [ -z "$work" ]; then
     work="$(mktemp -d "${TMPDIR:-/tmp}/order-probe.XXXXXX")"
     made=1
-    trap 'rm -rf "$work"' EXIT
+    # only the directory mktemp made above (an order-probe.XXXXXX name) is ever removed
+    trap 'case "$work" in */order-probe.??????) rm -rf "$work" ;; esac' EXIT
 fi
 mkdir -p "$work"
 

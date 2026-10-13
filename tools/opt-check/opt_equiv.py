@@ -245,7 +245,7 @@ class Checker:
         gate_out.write_text(rename_modules(gate_text, "gate", top_module(gate_text, self.top)),
                             encoding="utf-8")
         procs = has_processes(gold_text) or has_processes(gate_text)
-        why = ""
+        last = ""
         for lowering in self.flows(clock_sig.same_clocks(gold_text, gate_text)):
             script = refinement_script(str(gold_out), str(gate_out), procs, lowering)
             try:
@@ -254,8 +254,8 @@ class Checker:
                 return False, f"inconclusive: timed out after {REFINE_TIMEOUT_SECONDS:.0f} s"
             if done.returncode == 0:
                 return True, ""
-            why = tail((done.stdout or "") + (done.stderr or ""))
-        return False, why
+            last = tail((done.stdout or "") + (done.stderr or ""))
+        return False, last
 
     def flows(self, one_clock: bool = False) -> list[Sequence[str]]:
         """The lowerings tried in order; a pass in any one is a proof (each lowers both sides

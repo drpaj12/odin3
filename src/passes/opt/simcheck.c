@@ -263,6 +263,35 @@ void odin3_opt_simcheck_free(odin3_opt_simcheck *check) {
     odin3_util_free(check);
 }
 
+/* Records one module's trace into check (or counts it as skipped). */
+static odin3_status record_module(odin3_design *design, odin3_module_id id,
+                                  odin3_opt_simcheck *check) {
+    const odin3_module *mod = odin3_module_get(design, id);
+    simcheck_trace trace;
+    bool usable = false;
+    bool x_init = false;
+    if (mod == NULL) {
+        return ODIN3_OK;
+    }
+    if (!module_simulable(design, mod, &x_init)) {
+        check->skipped++;
+        return ODIN3_OK;
+    }
+    odin3_status st = trace_module(design, id, &trace, &usable);
+    if (st != ODIN3_OK || !usable) {
+        check->skipped += st == ODIN3_OK ? 1U : 0U; /* the build refused it */
+        return st;
+    }
+    simcheck_trace *slot = odin3_vec_push(&check->traces);
+    if (slot == NULL) {
+        odin3_util_free(trace.bits);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = trace;
+    check->x_init_checked += x_init ? 1U : 0U;
+    return ODIN3_OK;
+}
+
 odin3_status odin3_opt_simcheck_before(odin3_design *design, odin3_opt_simcheck **out) {
     if (design == NULL || out == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "opt: invalid arguments to odin3_opt_simcheck_before");
@@ -277,29 +306,7 @@ odin3_status odin3_opt_simcheck_before(odin3_design *design, odin3_opt_simcheck 
     odin3_status st = ODIN3_OK;
     uint32_t end = odin3_design_module_end(design);
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
-        const odin3_module *mod = odin3_module_get(design, (odin3_module_id){id});
-        simcheck_trace trace;
-        bool usable = false;
-        bool x_init = false;
-        if (mod == NULL) {
-            continue;
-        }
-        if (!module_simulable(design, mod, &x_init)) {
-            check->skipped++;
-            continue;
-        }
-        st = trace_module(design, (odin3_module_id){id}, &trace, &usable);
-        simcheck_trace *slot = st == ODIN3_OK && usable ? odin3_vec_push(&check->traces) : NULL;
-        if (st == ODIN3_OK && !usable) {
-            check->skipped++; /* the build refused it */
-        }
-        if (slot != NULL) {
-            *slot = trace;
-            check->x_init_checked += x_init ? 1U : 0U;
-        } else if (usable) {
-            odin3_util_free(trace.bits);
-            st = ODIN3_ERR_NO_MEMORY;
-        }
+        st = record_module(design, (odin3_module_id){id}, check);
     }
     if (st != ODIN3_OK) {
         odin3_opt_simcheck_free(check);
