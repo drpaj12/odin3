@@ -1994,6 +1994,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --seeds 1..200 --mem-cap 2G --yosys-069 ${ODIN3_YOSYS}
                         --work ${PROJECT_BINARY_DIR}/elab_gen_drift_work)
             set_tests_properties(elab_gen_drift PROPERTIES LABELS "sweep;nightly")
+            # 2D Task 28 follow-up (spec 17 #82): the sources of tests/verilog/oracle-bug lose a
+            # select write in Yosys 0.55's opt_muxtree (2F OP-13) though 2D's RTLIL is right:
+            # elab-equiv is equivalent on Yosys 0.69 and NOT equivalent (exit 1) on 0.55. A 0.55
+            # that passes makes the test fail (stale: move the sources to case-bridge). Exit 77
+            # (skip) as above.
+            add_test(NAME elab_oracle_muxtree_bug
+                COMMAND sh -c "for f in \"$5\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --allow-version 0.69 --equiv-check \"$3\" --top gtop \"$f\" || exit $?; \"$0\" --odin3 \"$1\" --yosys \"$4\" --equiv-check \"$3\" --top gtop \"$f\"; rc=$?; [ $rc -eq 77 ] && exit 77; [ $rc -eq 1 ] || { echo \"$f: Yosys 0.55 no longer loses the write (exit $rc)\"; exit 1; }; done"
+                        ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                        $<TARGET_FILE:odin3> ${ODIN3_YOSYS}
+                        ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        ${ODIN3_YOSYS055}
+                        ${PROJECT_SOURCE_DIR}/tests/verilog/oracle-bug)
+            set_tests_properties(elab_oracle_muxtree_bug PROPERTIES
+                LABELS differential SKIP_RETURN_CODE 77)
         endif()
         # The 31 VTR and 33 Koios benchmarks as one set by size, when VTR_ROOT is set at
         # configure time (also label nightly). lenet.v is listed `xl` in vtr_expect_fail.txt: the
