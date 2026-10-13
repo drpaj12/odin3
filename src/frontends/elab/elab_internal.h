@@ -486,6 +486,41 @@ typedef struct odin3_elab2_expr_req {
 odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);
 
 /*
+ * The same walk, suspendable at a user call (PR 2D-7, review I6): the generator that inlines calls
+ * runs the callee from its own frame stack instead of from inside the walk, so one call inside
+ * another costs no C stack. The walk's state is e2->frames and e2->vals above frame_base and
+ * val_base (stack discipline: whatever runs while the walk is suspended must leave both as it found
+ * them). req.reads must outlive the walk; its call hook is not called: a non-constant call of a
+ * user function suspends the walk with walk->call set, and the caller gives the call's value to
+ * odin3_elab2_walk_resume. A walk with no reads->call hook (a continuous context) never suspends.
+ * The cells made and their order are those of odin3_elab2_expr.
+ */
+typedef struct odin3_elab2_walk {
+    odin3_elab2_expr_req req;
+    size_t frame_base, val_base;
+    odin3_ast_id call; /* the call awaiting its value, or 0 */
+    uint32_t held_next;
+    uint8_t held_pick;
+} odin3_elab2_walk;
+
+/* Types the expression and opens its root. ODIN3_ERR_INVALID_ARG as odin3_elab2_expr. */
+odin3_status odin3_elab2_walk_begin(odin3_elab2 *e2, const odin3_elab2_expr_req *req,
+                                    odin3_elab2_walk *walk);
+
+/* Steps until the walk is done or suspended at a call (walk->call.v != 0). */
+odin3_status odin3_elab2_walk_run(odin3_elab2 *e2, odin3_elab2_walk *walk);
+
+/* The suspended call's value is the node's signal; the walk goes on with odin3_elab2_walk_run. */
+odin3_status odin3_elab2_walk_resume(odin3_elab2 *e2, odin3_elab2_walk *walk,
+                                     const odin3_sig *value);
+
+/* A finished walk's root signal; pops the walk's stacks. */
+void odin3_elab2_walk_take(odin3_elab2 *e2, odin3_elab2_walk *walk, odin3_sig *out);
+
+/* Pops whatever a walk (finished or not) left on the stacks (an error unwinds through this). */
+void odin3_elab2_walk_abort(odin3_elab2 *e2, odin3_elab2_walk *walk);
+
+/*
  * The self-determined type of an expression (EL-13): its width and sign, typed without generating
  * anything (no cell, no net). The typer's located errors and warnings are given as for
  * odin3_elab2_expr (ODIN3_ERR_PARSE after an error); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG

@@ -413,9 +413,11 @@ static void test_nesting_depth(void) {
     pt_expect_error((at_loc){3, 42}, "function call nesting deeper than 4 at 'f1'");
 }
 
-/* PR 2D-6 review I6 (interim): a chain of 300 functions, each calling the next in an expression,
- * is a located error at depth 256 (ODIN3_ELAB_MAX_INLINE_DEPTH), never a C stack overflow. */
-static void test_inline_nesting_is_capped_below_the_stack(void) {
+/* PR 2D-7 (review I6 fixed): a call inside a call is inlined from the frame stack, not by C
+ * recursion, so a chain of 300 functions, each calling the next in an expression, elaborates (the
+ * 256 cap of the interim guard is gone; tools/ test_inline_stack.py runs 1000 under a 2 MiB
+ * stack). */
+static void test_inline_nesting_is_not_limited_by_the_stack(void) {
     enum { CHAIN = 300, SRC_MAX = 64 * 1024 };
     char *src = malloc(SRC_MAX);
     TEST_ASSERT_NOT_NULL(src);
@@ -431,11 +433,9 @@ static void test_inline_nesting_is_capped_below_the_stack(void) {
                                               k, k, k + 1));
     }
     (void)snprintf(src + len, SRC_MAX - len, "  always @* y = f1(a);\nendmodule\n");
-    pt_read_failing(src);
+    pt_read_clean(src);
     free(src);
-    TEST_ASSERT_NOT_NULL_MESSAGE(
-        strstr(et_log(&pt_rs), "error: function call nesting deeper than 256 at 'f"),
-        et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
 }
 
 /* PR 2D-6 review M3: the classic unsigned countdown never ends (k >= 0 is always true for a
@@ -966,7 +966,7 @@ static void test_call_in_edge_expression_is_error(void) {
     X(test_inlined_provenance)                                                                     \
     X(test_recursion_not_constant)                                                                 \
     X(test_nesting_depth)                                                                          \
-    X(test_inline_nesting_is_capped_below_the_stack)                                               \
+    X(test_inline_nesting_is_not_limited_by_the_stack)                                             \
     X(test_endless_unsigned_countdown_is_found_by_its_cycle)                                       \
     X(test_endless_loop_with_a_second_variable_hits_the_object_budget)                             \
     X(test_ending_loop_is_not_a_cycle)                                                             \

@@ -77,6 +77,8 @@ static void vecs_init(odin3_pg *pg) {
     odin3_vec_init(&pg->loops, sizeof(pg_loop));
     odin3_vec_init(&pg->calls, sizeof(pg_callrec));
     odin3_vec_init(&pg->fsyms, sizeof(uint32_t));
+    odin3_vec_init(&pg->walks, sizeof(odin3_elab2_walk));
+    odin3_vec_init(&pg->cruns, sizeof(pg_crun *));
 }
 
 /* Every vector of the generator, with the address of each (the block's lists and the scratch). */
@@ -86,7 +88,8 @@ static odin3_vec *pg_vec(odin3_pg *pg, size_t index) {
                               &pg->slots,  &pg->frames,  &pg->work,  &pg->items,     &pg->runs,
                               &pg->run_l,  &pg->run_r,   &pg->blk,   &pg->blk_marks, &pg->sw_pool,
                               &pg->sw_ctx, &pg->sw_nets, &pg->sw_t1, &pg->sw_rv,     &pg->cmp_sigs,
-                              &pg->loops,  &pg->calls,   &pg->fsyms, &pg->late};
+                              &pg->loops,  &pg->calls,   &pg->fsyms, &pg->late,      &pg->walks,
+                              &pg->cruns};
     _Static_assert(sizeof all / sizeof all[0] == PG_VEC_COUNT, "PG_VEC_COUNT");
     return all[index];
 }
@@ -128,7 +131,8 @@ odin3_status pg_block_reset(odin3_pg *pg) {
         &pg->outs,  &pg->chunks,    &pg->undo,    &pg->pool,   &pg->dead,    &pg->cmps,
         &pg->acts,  &pg->cases,     &pg->sws,     &pg->syncs,  &pg->slots,   &pg->frames,
         &pg->blk,   &pg->blk_marks, &pg->sw_pool, &pg->sw_ctx, &pg->sw_nets, &pg->sw_t1,
-        &pg->sw_rv, &pg->cmp_sigs,  &pg->loops,   &pg->calls,  &pg->fsyms,   &pg->late};
+        &pg->sw_rv, &pg->cmp_sigs,  &pg->loops,   &pg->calls,  &pg->fsyms,   &pg->late,
+        &pg->walks, &pg->cruns};
     for (size_t i = 0; i < sizeof lists / sizeof lists[0]; i++) {
         odin3_vec_clear(lists[i]);
     }

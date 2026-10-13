@@ -454,20 +454,48 @@ static odin3_status assign_split(odin3_pg *pg, odin3_ast_id stmt, odin3_ast_id l
     return st;
 }
 
-odin3_status pg_exec_assign(odin3_pg *pg, odin3_ast_id stmt) {
+/* The statement up to its value: the loop variable check, the split of a memory word in a
+ * concatenation (done whole: *done), the target taken apart. */
+static odin3_status assign_target(odin3_pg *pg, odin3_ast_id stmt, bool *done) {
     const odin3_elab2 *e2 = pg->e2;
     odin3_ast_id lhs = odin3_ast_child(e2->elab, stmt, 0);
     odin3_status st = loop_var_assigned(pg, stmt);
+    *done = false;
     if (st == ODIN3_OK && pg_lhs_has_memw(pg, lhs)) {
+        *done = true;
         return assign_split(pg, stmt, lhs);
     }
-    st = st != ODIN3_OK ? st : pg_take_target_of(pg, lhs);
-    if (st != ODIN3_OK) {
+    return st != ODIN3_OK ? st : pg_take_target_of(pg, lhs);
+}
+
+odin3_status pg_exec_assign_sync(odin3_pg *pg, odin3_ast_id stmt) {
+    bool done = false;
+    odin3_status st = assign_target(pg, stmt, &done);
+    if (st != ODIN3_OK || done) {
         return st;
     }
-    /* the value's calls run above this statement with a scratch lvalue of their own (pg_call.c) */
     odin3_sig sig;
     st = assign_value(pg, stmt, target_width(pg), &sig);
+    return st != ODIN3_OK ? st : assign_to_target(pg, stmt, &sig);
+}
+
+odin3_status pg_exec_assign(odin3_pg *pg, odin3_ast_id stmt) {
+    bool done = false;
+    odin3_status st = assign_target(pg, stmt, &done);
+    if (st != ODIN3_OK || done) {
+        return st;
+    }
+    /* the value's calls run above this statement with a scratch lvalue of their own (pg_call.c);
+     * the target stays taken apart until pg_assign_done */
+    uint32_t width = target_width(pg);
+    pg_gen_req req = {
+        odin3_ast_child(pg->e2->elab, stmt, 2), stmt, {width, true, false}, PG_G_ASSIGN, width};
+    return pg_gen_push(pg, &req);
+}
+
+odin3_status pg_assign_done(odin3_pg *pg, odin3_ast_id stmt, uint32_t width) {
+    odin3_sig sig = pg->gen_sig;
+    odin3_status st = odin3_elab2_extend(pg->e2, &sig, width, sig.is_signed, &sig);
     return st != ODIN3_OK ? st : assign_to_target(pg, stmt, &sig);
 }
 
@@ -537,6 +565,12 @@ static odin3_status frame_next(odin3_pg *pg, odin3_ast_id *node) {
     if (frame->kind == PG_F_LOOP) {
         return pg_loop_step(pg);
     }
+    if (frame->kind == PG_F_GEN) {
+        return pg_gen_step(pg);
+    }
+    if (frame->kind == PG_F_CALL) {
+        return pg_call_step(pg);
+    }
     if (frame->kind == PG_F_STMT) {
         *node = frame->node;
         odin3_vec_pop(&pg->frames);
@@ -554,18 +588,25 @@ static odin3_status frame_next(odin3_pg *pg, odin3_ast_id *node) {
     return ODIN3_OK;
 }
 
-odin3_status pg_run(odin3_pg *pg, odin3_ast_id stmt) {
-    size_t base = pg->frames.len; /* a call inlined by an expression runs above the frames there */
-    odin3_status st = frame_stmt(pg, stmt);
+odin3_status pg_drive(odin3_pg *pg, size_t base) {
+    odin3_status st = ODIN3_OK;
     while (st == ODIN3_OK && pg->frames.len > base && !pg->e2->stopped) {
         odin3_ast_id node;
         st = frame_next(pg, &node);
         st = st == ODIN3_OK && node.v != 0 ? exec_node(pg, node) : st;
     }
-    while (pg->frames.len > base) {
+    while (pg->frames.len > base) { /* top down: a call gives back its symbols, a walk its stacks */
+        pg_frame_abort(pg, odin3_vec_cat(&pg->frames, pg->frames.len - 1));
         odin3_vec_pop(&pg->frames);
     }
     return st;
+}
+
+odin3_status pg_run(odin3_pg *pg, odin3_ast_id stmt) {
+    size_t base =
+        pg->frames.len; /* a call inlined from a nested driver runs above the frames there */
+    odin3_status st = frame_stmt(pg, stmt);
+    return st != ODIN3_OK ? st : pg_drive(pg, base);
 }
 
 odin3_status odin3_pg_stmt(odin3_pg *pg, odin3_ast_id stmt) {
