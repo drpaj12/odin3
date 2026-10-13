@@ -2,7 +2,8 @@
 
 Usage::
 
-    elab-sweep --odin3 O [--equiv --yosys Y --equiv-check E | --bench B] [--expect-fail F]...
+    elab-sweep --odin3 O [--equiv --yosys Y --equiv-check E | --bench B [--bench-report P]]
+               [--expect-fail F]...
                [--jobs J] [--mem-cap C] [--cap-for SUFFIX=C]... [--tops F] [--golden-root D]
                [--root R] [--xl] [--skip-over BYTES] [--partial] <dir or file>...
 
@@ -20,7 +21,9 @@ runs it alone). A child killed by its cap is reported ``out of memory (cap 4G)``
 - ``--equiv`` (needs ``--yosys`` and ``--equiv-check``): ``elab-equiv`` on the file (§14.3).
   Its exit 3 is an ``oracle crash`` (Yosys died of a signal, e.g. 0.55 on recursive
   instantiation): counted and shown, neither a mismatch nor a 2D failure.
-- ``--bench B``: ``B --one FILE``; the child's stdout line follows the file's line as ``bench:``.
+- ``--bench B``: ``B --one FILE [--techlib T]``; the child's stdout line follows the file's line as
+  ``bench:``. ``--bench-report P`` then prints the targets of profile ``P`` from those lines
+  (``bench_report.py``: ``elab`` is spec §15's table) and fails the run when one is MISSED.
 
 ``--expect-fail F`` (repeatable) lists ``<relative path> <one-line reason>`` lines (blank lines
 and ``#`` comments ignored), the path relative to ``--root`` when under it, else to the directory
@@ -57,6 +60,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
+import bench_report
 import memcap
 from elab_equiv import GIB, MIB, format_cap
 from run_rows_equiv import parse_expect_line
@@ -302,6 +306,7 @@ class Config:
     tops: dict[str, str]
     golden_root: Path | None
     techlib: str | None = None
+    bench_report: str | None = None
 
     def cap_of(self, item: Item) -> int:
         for suffix, cap in self.caps.items():
@@ -348,7 +353,10 @@ def run_elab(cfg: Config, item: Item, cap: int) -> Outcome:
 def run_bench(cfg: Config, item: Item, cap: int) -> Outcome:
     start = time.monotonic()
     assert cfg.bench is not None
-    done, failed = run_child([cfg.bench, "--one", str(item.path)], cap, start)
+    argv = [cfg.bench, "--one", str(item.path)]
+    if cfg.techlib:
+        argv += ["--techlib", cfg.techlib]
+    done, failed = run_child(argv, cap, start)
     if done is None:
         assert failed is not None
         return failed
@@ -435,6 +443,14 @@ def verdict(item: Item, outcome: Outcome, expect: dict[str, Expect], xl: bool) -
     return "FAIL", f"FAIL  {head}: {outcome.why}"
 
 
+def parse_bench(text: str) -> dict[str, str]:
+    """The columns of a bench line; a line that is not key=value words has none."""
+    try:
+        return bench_report.parse_line(text)
+    except ValueError:
+        return {}
+
+
 class Sweep:
     def __init__(self, cfg: Config, expect: dict[str, Expect], jobs: int, xl: bool) -> None:
         self.cfg = cfg
@@ -443,12 +459,14 @@ class Sweep:
         self.xl = xl
         self.counts = {"ok": 0, "xfail": 0, "FAIL": 0, "XPASS": 0, "crash": 0, "skip": 0}
         self.skipped_run = False
+        self.bench_rows: dict[str, dict[str, str]] = {}
 
     def report(self, item: Item, outcome: Outcome) -> None:
         cls, line = verdict(item, outcome, self.expect, self.xl)
         print(line, flush=True)
         if outcome.kind == "ok" and self.cfg.mode() == "bench" and outcome.output:
             print(f"bench: {outcome.output}", flush=True)
+            self.bench_rows[item.rel] = parse_bench(outcome.output)
         self.counts[cls] += 1
         if outcome.kind == "skip":
             self.skipped_run = True
@@ -498,7 +516,11 @@ def sweep(cfg: Config, args: argparse.Namespace, items: list[Item],
           f"{len(stale)} stale entries, {time.monotonic() - start:.1f} s")
     if state.skipped_run and not counts["ok"] + counts["xfail"]:
         return EXIT_SKIP
-    return EXIT_FAIL if counts["FAIL"] or counts["XPASS"] or stale else EXIT_OK
+    missed = False
+    if cfg.bench_report:
+        lines, missed = bench_report.report(cfg.bench_report, state.bench_rows)
+        print("\n".join(lines))
+    return EXIT_FAIL if counts["FAIL"] or counts["XPASS"] or stale or missed else EXIT_OK
 
 
 # ---- arguments --------------------------------------------------------------------------------
@@ -512,6 +534,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--yosys", help="the Yosys 0.55 binary (--equiv)")
     ap.add_argument("--equiv-check", help="tools/equiv-check/equiv-check (--equiv)")
     ap.add_argument("--bench", metavar="B", help="start `B --one FILE` per file")
+    ap.add_argument("--bench-report", metavar="PROFILE",
+                    help="after a --bench sweep, print the targets of this profile (elab)")
     ap.add_argument("--expect-fail", type=Path, action="append", default=[],
                     help="<relative path> <reason> lines (repeatable)")
     ap.add_argument("--jobs", type=int, default=1)
@@ -536,6 +560,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 def build_config(args: argparse.Namespace) -> Config:
     if args.equiv and args.bench:
         raise UsageError("--equiv and --bench cannot be combined")
+    if args.bench_report and not args.bench:
+        raise UsageError("--bench-report needs --bench")
+    if args.bench_report and args.bench_report not in bench_report.PROFILES:
+        raise UsageError(f"unknown bench profile {args.bench_report!r} "
+                         f"(known: {', '.join(bench_report.PROFILES)})")
     if args.equiv and not (args.yosys and args.equiv_check):
         raise UsageError("--equiv needs --yosys and --equiv-check")
     caps: dict[str, int] = {}
@@ -556,7 +585,7 @@ def build_config(args: argparse.Namespace) -> Config:
                   _abs(args.yosys) if args.equiv else None,
                   _abs(args.equiv_check) if args.equiv else None,
                   _abs(args.bench) if args.bench else None, cap, caps, tops, golden,
-                  _abs(args.techlib) if args.techlib else None)
+                  _abs(args.techlib) if args.techlib else None, args.bench_report)
 
 
 def _abs(tool: str | None) -> str | None:

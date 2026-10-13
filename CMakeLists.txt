@@ -512,6 +512,11 @@ add_executable(bench_pp tests/bench/bench_pp.c)
 target_include_directories(bench_pp PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(bench_pp PRIVATE odin3_core odin3_flags)
 
+# 2D Task 27 (spec 15): one file per run, `bench_elab --one FILE`, for `elab-sweep --bench`.
+add_executable(bench_elab tests/bench/bench_elab.c)
+target_include_directories(bench_elab PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(bench_elab PRIVATE odin3_core odin3_flags)
+
 # --- Fuzzers (ODIN3_FUZZ) ---------------------------------------------------------------
 if(ODIN3_FUZZ)
     # tests/fuzz/fuzz_pp.c: the preprocessor's crash fuzzer (2B §10.5).
@@ -1509,6 +1514,29 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     elseif(DEFINED ENV{VTR_ROOT})
         message(STATUS "verilog_vtr_parse not registered: no benchmarks under $ENV{VTR_ROOT}")
     endif()
+    # 2D Task 27 (spec 14.5, 15): the 64 VTR and Koios files (31 + 33) as ONE set under
+    # `odin3 --elab-only`, smallest first, koios/lenet.v last (it gets 5G, alone, in the 6G slice);
+    # failures only as listed in tests/elab/vtr_expect_fail.txt. Run as `ODIN3_HEAVY_OK=1 ctest
+    # --preset sweep -R verilog_vtr_elab` from a Release build. The benchmarks' hard blocks
+    # (adder, multiply, *_port_ram) come from lib/vtr.o3lib.
+    if(_vtr_benchmarks)
+        odin3_add_sweep_test(verilog_vtr_elab LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                    --odin3 $<TARGET_FILE:odin3>
+                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 2 --mem-cap 3G
+                    --cap-for koios/lenet.v=5G
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_expect_fail.txt
+                    --root ${_vtr_verilog} ${_vtr_benchmarks})
+    endif()
+    # 2D Task 27 (spec 15): bench_elab prints the columns the targets are judged from. The smoke
+    # runs `--one` on two micros (a plain assign; a memory under a clocked process) and checks
+    # every column.
+    odin3_add_sweep_test(bench_elab_smoke LABEL sweep
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/bench-report smoke
+                --bench $<TARGET_FILE:bench_elab>
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                ${PROJECT_SOURCE_DIR}/tests/micro/verilog/keywords/assign/assign_wide.v
+                ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax/inferred_SPram.v)
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
     set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>"
@@ -1702,6 +1730,32 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_equiv_expect_fail.txt
                     --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
                     ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
+        # 2D Task 27 (spec 14.5): the 64 VTR and Koios files through the bridge (Yosys 0.55), one
+        # set, smallest first; koios/lenet.v's Yosys side (~7 GB) is an `xl` entry of
+        # tests/elab/vtr_equiv_expect_fail.txt, run by elab_equiv_vtr_xl. A Yosys crash is an
+        # `oracle crash`. Labels sweep and nightly. Run as `ODIN3_HEAVY_OK=1 ctest --preset sweep
+        # -R elab_equiv_vtr$`.
+        if(_vtr_benchmarks)
+            odin3_add_sweep_test(elab_equiv_vtr LABEL sweep
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                        --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --jobs 2 --mem-cap 3G
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_expect_fail.txt
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_equiv_expect_fail.txt
+                        --root ${_vtr_verilog} ${_vtr_benchmarks})
+            set_tests_properties(elab_equiv_vtr PROPERTIES LABELS "sweep;nightly")
+            # lenet.v alone: both sides in an 8G child cap, in the 9G slice (the controller sets
+            # ODIN3_HEAVY_XL_OK=1 by hand, with no agent running). Its outcome (the peak RSS, or
+            # `out of memory (cap 8G)`) is reported, never listed as expected.
+            odin3_add_sweep_test(elab_equiv_vtr_xl LABEL sweep-xl
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                        --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --xl --mem-cap 8G --partial
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_equiv_expect_fail.txt
+                        --root ${_vtr_verilog} ${_vtr_verilog}/koios/lenet.v)
+        endif()
         # 2D Task 26 (spec 14.4): the project corpus's positive phase-2 Verilog cases through the
         # bridge against their ref.blif (oracle drift against the recorded 0.69 is reported, not
         # failed), and the negative front-end cases' kind, location and names. In the gate.

@@ -733,8 +733,12 @@ static odin3_status each_module(odin3_elab2 *e2,
 
 /* Binds the store (EL-5) and makes the context's symbol table the store's. */
 static odin3_status bind_store(odin3_elab2 *e2) {
+    double started = odin3_now_ms();
     odin3_status st = odin3_elab_bind(e2->elab, &e2->bind);
     e2->st = odin3_ast_symtab(e2->elab);
+    if (e2->opts.bind_ms_out != NULL) {
+        *e2->opts.bind_ms_out = odin3_now_ms() - started;
+    }
     return st;
 }
 
@@ -790,7 +794,7 @@ static bool specialization_suffix(const char *seg) {
 }
 
 /* A specialization's name has one of those suffixes after a '$' (stage 1 marks nothing else). */
-static bool is_specialization(const char *name) {
+bool odin3_elab2_is_specialization(const char *name) {
     for (const char *at = name[0] != '\0' ? strchr(name + 1, '$') : NULL; at != NULL;
          at = strchr(at + 1, '$')) {
         if (specialization_suffix(at + 1)) {
@@ -804,7 +808,7 @@ static void count_module(const odin3_elab2 *e2, odin3_module_id id, summary *sum
     const odin3_module *mod = odin3_module_get(e2->design, id);
     const char *name = odin3_strtab_get(odin3_design_strtab(e2->design), odin3_module_name(mod));
     sum->modules++;
-    sum->specializations += is_specialization(name) ? 1U : 0U;
+    sum->specializations += odin3_elab2_is_specialization(name) ? 1U : 0U;
     for (uint32_t net = 1; net < odin3_module_net_end(mod); net++) {
         sum->nets += odin3_net_live(mod, (odin3_net_id){net}) ? 1U : 0U;
     }

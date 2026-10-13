@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# bench-report: the bench_elab line, the spec 15 targets and the smoke check. See bench_report.py.
+# Exit codes: 0 pass, 1 a failure, 2 usage error, 77 skipped (no memory cap possible).
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/bench_report.py" "$@"

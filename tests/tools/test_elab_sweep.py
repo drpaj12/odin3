@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import bench_report
 import elab_sweep
 import memcap
 
@@ -409,3 +410,62 @@ class ModeTest(SweepTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FAKE_BENCH_FULL = """#!{python}
+import json, os, sys
+argv = sys.argv[1:]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(json.dumps(["bench", *argv]) + "\\n")
+text = open(argv[1]).read()
+ms = "900" if "SLOW" in text else "1"
+print(" ".join(f"{k}={ms if k == 'elab_ms' else 1}" for k in bench_report.ELAB_COLUMNS))
+"""
+
+
+class BenchReportTest(SweepTestCase):
+    """Task 27: elab-sweep --bench passes --techlib on, and --bench-report prints the targets."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.bench = _exe(self.bin / "bench_elab", FAKE_BENCH_FULL.replace(
+            "bench_report.ELAB_COLUMNS", repr(bench_report.ELAB_COLUMNS)))
+
+    def test_bench_passes_the_techlib_to_each_child(self) -> None:
+        self.write("m/a.v", "xx")
+        lib = self.write("lib.o3lib", "x")
+        code, _, err = self.run_tool("--bench", str(self.bench), "--techlib", str(lib),
+                                     str(self.dir / "m"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls(),
+                         [["bench", "--one", str(self.dir / "m/a.v"), "--techlib", str(lib)]])
+
+    def test_bench_report_prints_the_targets_after_the_sweep(self) -> None:
+        self.write("m/mcml.v", "module m; endmodule\n")
+        code, out, err = self.run_tool("--bench", str(self.bench), "--bench-report", "elab",
+                                       "--root", str(self.dir / "m"), str(self.dir / "m"))
+        self.assertEqual(code, 0, err)
+        self.assertIn("bench targets (spec 15):", out)
+        self.assertRegex(out, r"ok +mcml\.v stage 1 \+ stage 2")
+        self.assertRegex(out, r"n/a +lenet\.v peak RSS")
+
+    def test_a_missed_target_fails_the_run(self) -> None:
+        self.write("m/mcml.v", "SLOW\n")
+        code, out, _ = self.run_tool("--bench", str(self.bench), "--bench-report", "elab",
+                                     "--root", str(self.dir / "m"), str(self.dir / "m"))
+        self.assertEqual(code, 1)
+        self.assertRegex(out, r"MISSED +mcml\.v stage 1 \+ stage 2")
+        self.assertIn("estimate terms of mcml.v", out)
+
+    def test_bench_report_needs_bench(self) -> None:
+        self.write("m/a.v")
+        code, _, err = self.run_tool("--bench-report", "elab", str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("--bench-report needs --bench", err)
+
+    def test_unknown_profile_is_a_usage_error(self) -> None:
+        self.write("m/a.v")
+        code, _, err = self.run_tool("--bench", str(self.bench), "--bench-report", "nope",
+                                     str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("unknown bench profile", err)

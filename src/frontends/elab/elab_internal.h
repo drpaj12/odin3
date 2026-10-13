@@ -385,6 +385,13 @@ odin3_status odin3_elab2_account(odin3_elab2 *e2, const odin3_elab2_counts *made
  */
 odin3_status odin3_elab2_budget(odin3_elab2 *e2);
 
+/*
+ * True when the module name is a specialization's: a '$' followed by a `P=v` entry, the `$2` of a
+ * name already taken, or `h` and 16 hex digits (EL-9); an escaped identifier with a '$' in it is
+ * none of them. The summary line and tests/bench/bench_elab.c count with it.
+ */
+bool odin3_elab2_is_specialization(const char *name);
+
 /* True once the stage was stopped (the cap, a fatal cap, the budget). */
 bool odin3_elab2_stopped(const odin3_elab2 *e2);
 

@@ -71,6 +71,8 @@ typedef struct odin3_elab_opts {
     uint64_t gen_iters; /* generate-loop iterations stage 1 unrolled: stage 2's loops count on from
                            it against the run's total cap (point (k); odin3_elab_run fills it) */
     uint64_t *gen_iters_out; /* stage 1 writes its count here when set (odin3_elab_run's) */
+    double *bind_ms_out;     /* stage 2 writes the time of its binding step here when set
+                                (tests/bench/bench_elab.c's); NULL: not measured */
 } odin3_elab_opts;
 
 /* --- the stages (§2.1, EL-2) --------------------------------------------------------------- */
