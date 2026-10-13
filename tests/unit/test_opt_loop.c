@@ -1213,6 +1213,69 @@ static void test_simcheck_skips_what_it_cannot_judge(void) {
                    "  cell $_NOT_ \\dead\n    connect \\A \\b\n    connect \\Y \\t\n  end\nend\n");
 }
 
+/* A flip-flop with the default INIT (3, x) no longer takes its module out of the check. */
+#define SIMCHECK_XINIT_TEXT                                                                        \
+    "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire output 3 \\y\n"                    \
+    "  wire input 4 \\clk\n  wire output 5 \\q\n  wire \\t\n"                                      \
+    "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\n"                         \
+    "  cell $_NOT_ \\dead\n    connect \\A \\b\n    connect \\Y \\t\n  end\n"                      \
+    "  cell $_DFF_P_ \\f\n    connect \\C \\clk\n    connect \\D \\b\n    connect \\Q \\q\n  "     \
+    "end\nend\n"
+
+static void test_simcheck_judges_an_x_init_flip_flop(void) {
+#ifdef NDEBUG
+    TEST_IGNORE_MESSAGE("--opt-simcheck is a Debug option");
+#endif
+    build(SIMCHECK_XINIT_TEXT);
+    install_wrong_rewrite();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, run_pass("opt_clean", "--opt-simcheck"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_prefix("opt: opt_clean: simulation differs on module 'm' at cycle"));
+    pb_free(&res);
+    odin3_opt_test_set_hooks(NULL);
+    build(SIMCHECK_XINIT_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", "--opt-simcheck"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO,
+                                            "opt: opt_clean: simcheck: 1 modules checked (1 with x "
+                                            "init), 0 skipped before, 0 skipped after"));
+}
+
+/* The call moves the flip-flop's clock to a net a gate drives: the IR stays valid, the module
+ * built before and does not build after (a clock that is no primary input). */
+static void clock_from_a_gate(void *user, const char *sub, odin3_design *design) {
+    (void)user;
+    if (strcmp(sub, "opt_clean") != 0) {
+        return;
+    }
+    uint32_t f_name = 0;
+    uint32_t t_name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("f"), &f_name));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("t"), &t_name));
+    odin3_pinslice clock =
+        odin3_node_port(res.module, odin3_module_find_node(res.module, f_name), 0);
+    odin3_net_id gate_net =
+        odin3_wire_net(res.module, odin3_module_find_wire(res.module, t_name), 0);
+    TEST_ASSERT_EQUAL_UINT32(1, clock.count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(res.module, clock.first));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(res.module, clock.first, gate_net));
+}
+
+static void test_simcheck_unsimulable_after_is_an_error(void) {
+#ifdef NDEBUG
+    TEST_IGNORE_MESSAGE("--opt-simcheck is a Debug option");
+#endif
+    build("module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire input 3 \\clk\n"
+          "  wire output 4 \\q\n  wire output 5 \\t\n"
+          "  cell $_NOT_ \\n\n    connect \\A \\b\n    connect \\Y \\t\n  end\n"
+          "  cell $_DFF_P_ \\f\n    connect \\C \\clk\n    connect \\D \\a\n    connect \\Q \\q\n"
+          "  end\nend\n");
+    odin3_opt_test_hooks hooks = {NULL, NULL, NULL, clock_from_a_gate};
+    odin3_opt_test_set_hooks(&hooks);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, run_pass("opt_clean", "--opt-simcheck"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_ERROR, "opt: opt_clean: module 'm' can no longer be simulated"));
+}
+
 /* A module the simulator cannot build (a clock that is no primary input) is skipped, quietly. */
 static void test_simcheck_build_failure_is_quiet(void) {
     build("module \\m\n  wire input 1 \\a\n  wire input 2 \\d\n  wire output 3 \\q\n"
@@ -1328,6 +1391,8 @@ int main(void) {
     RUN_TEST(test_simcheck_catches_a_wrong_rewrite);
     RUN_TEST(test_simcheck_passes_a_correct_run);
     RUN_TEST(test_simcheck_skips_what_it_cannot_judge);
+    RUN_TEST(test_simcheck_judges_an_x_init_flip_flop);
+    RUN_TEST(test_simcheck_unsimulable_after_is_an_error);
     RUN_TEST(test_simcheck_build_failure_is_quiet);
     RUN_TEST(test_determinism);
     return UNITY_END();

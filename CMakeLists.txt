@@ -1302,6 +1302,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-rules
                 --odin3 $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/opt/rules)
     set_tests_properties(opt_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77 TIMEOUT 600)
+    # opt_simcheck_rules (review I2): the same 141 rows with --opt-simcheck (Debug builds), the
+    # in-process 1E simulation check around every sub-pass call; it fails unless at least 90
+    # modules were judged (95 at the time of writing), so a silent no-op cannot pass.
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR ODIN3_SANITIZE)
+        add_test(NAME opt_simcheck_rules
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-rules
+                    --odin3 $<TARGET_FILE:odin3> --simcheck-min 90
+                    ${PROJECT_SOURCE_DIR}/tests/opt/rules)
+        set_tests_properties(opt_simcheck_rules PROPERTIES LABELS opt
+                             SKIP_RETURN_CODE 77 TIMEOUT 600)
+    endif()
     # 2E Task 13 (spec 19): bench_proc prints the columns the targets are judged from. A Debug or
     # sanitized build refuses to run (tests/bench/bench_guard.h, exit 2: its times are not the
     # targets'); a Release build's smoke runs `--one` on two micros (a case under a combinational

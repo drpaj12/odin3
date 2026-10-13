@@ -10,23 +10,27 @@ Odin III runs ``read_verilog --nolatches FILE...; hierarchy; <the Phase 2 script
 ``-after.il`` for every sub-pass call that changed something. Per pair, in sequence order, Yosys
 0.55 runs the refinement check of ``refinement_script``::
 
-    read_rtlil gold.il; read_rtlil gate.il; [proc;] [clk2fflogic; [techmap;]]
+    read_rtlil gold.il; read_rtlil gate.il; [proc;] [<lowering>;]
     equiv_make gold gate eq; hierarchy -top eq; flatten; equiv_simple -undef -seq 4;
     equiv_induct -undef; equiv_status -assert
 
 The modules of the two files are renamed ``gold``/``gate`` first (a submodule becomes ``gold.m`` or
 ``gate.m``), so one Yosys design holds both. An x in the gold is a don't-care: ``s ? a : 4'bx``
 to ``a`` passes, the reverse and a wrong enable fail. A pair with ``process`` blocks (the
-pre-``proc`` calls) gets Yosys ``proc`` first. Every lowering holds ``clk2fflogic``: the clock
-becomes an ordinary sampled signal and the asynchronous controls become logic, so a flipped clock
-edge or a wrong clock net is a counterexample (Yosys's ``async2sync`` alone puts every flip-flop on
-one implicit clock and accepted both; review C1). The check tries ``clk2fflogic`` first, then
-``clk2fflogic; techmap`` (techmap loses the proof of a division by zero and of a ``$pmux``, which
-the first try gives), then ``memory; clk2fflogic; techmap`` (the memories); a pass in any is a
-proof. A proof that takes past 60 s is "inconclusive" and fails (a failing pair costs up to 3 x 60
-s, each lowering has its own limit; a timeout stops the pair). The Yosys child runs in
-its own process group and a timeout kills the group. ``--no-lower`` runs the plain flow (the clock
-is not checked), ``--no-techmap`` the first try only.
+pre-``proc`` calls) gets Yosys ``proc`` first.
+
+The lowering depends on the clocks (review C1). Yosys's ``async2sync`` puts every flip-flop on one
+implicit clock, so it cannot see a clock net or an edge that changed. When each module has one
+clock, a primary input with one polarity, with the same use on both sides (``clock_sig``), that
+model is exact: the check tries ``async2sync``, then ``async2sync; techmap`` (techmap loses the
+proof of a division by zero and of a ``$pmux``, which the first try gives), then ``memory;
+async2sync; techmap`` (the memories). Any other pair (a clock or an edge that differs, several
+clocks, a derived clock) must pass ``clk2fflogic; opt_merge; opt_clean`` (the clock becomes a
+sampled signal, a flipped edge or a wrong clock net is a counterexample), also with ``techmap`` and
+with ``memory`` first. A pass in any is a proof. A proof that takes past 60 s is "inconclusive" and
+fails (a failing pair costs up to 3 x 60 s, each lowering has its own limit; a timeout stops the
+pair). The Yosys child runs in its own process group and a timeout kills the group. ``--no-lower``
+runs the plain flow (the clock is not checked), ``--no-techmap`` the first try of the family only.
 
 A failing pair prints ``opt-equiv: <NNNN>-<sub>: not a refinement`` with the rule counters of the
 run (Odin III's ``--opt-stats`` lines, which cover the whole run). A work directory this tool
@@ -48,6 +52,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import clock_sig
 import memcap
 
 TOOL = "opt-equiv"
@@ -176,11 +181,16 @@ def rename_modules(text: str, side: str, top: str) -> str:
     return re.sub(r"^(\s*)cell (\\\S+) ", cell, out, flags=re.M)
 
 
-# Every lowering has ``clk2fflogic``: it turns each clock edge into an explicit sampled clock
-# and the asynchronous controls into logic, so the clock net and its polarity are part of the
-# proof. ``async2sync`` (the old first step) models every flip-flop on one implicit clock and
-# accepted a posedge flip-flop for a negedge one (review C1), so it is not used.
-LOWERINGS = (("clk2fflogic",), ("clk2fflogic", "techmap"), ("memory", "clk2fflogic", "techmap"))
+# Two families of lowering (review C1). ``async2sync`` puts every flip-flop on one implicit clock:
+# it is exact, and cheap, only when each module has one clock (a primary input, one polarity) on
+# both sides with the same use (``clock_sig.same_clocks``); it is blind to a changed clock net or
+# edge otherwise. ``clk2fflogic`` makes each clock edge an explicit sampled clock, so the proof
+# sees the clock net and its polarity, at a price: its shadow registers match nothing across the
+# sides, so the induction is weak for big designs. ``opt_merge; opt_clean`` folds its
+# per-flip-flop copies of the past clock (a sequential design took > 120 s without, 1 s with).
+ONE_CLOCK = (("async2sync",), ("async2sync", "techmap"), ("memory", "async2sync", "techmap"))
+CLK = ("clk2fflogic", "opt_merge", "opt_clean")
+LOWERINGS = (CLK, (*CLK, "techmap"), ("memory", *CLK, "techmap"))
 
 
 def refinement_script(gold: str, gate: str, procs: bool = False,
@@ -236,7 +246,7 @@ class Checker:
                             encoding="utf-8")
         procs = has_processes(gold_text) or has_processes(gate_text)
         why = ""
-        for lowering in self.flows():
+        for lowering in self.flows(clock_sig.same_clocks(gold_text, gate_text)):
             script = refinement_script(str(gold_out), str(gate_out), procs, lowering)
             try:
                 done = self.child([self.yosys, "-p", script])
@@ -247,14 +257,15 @@ class Checker:
             why = tail((done.stdout or "") + (done.stderr or ""))
         return False, why
 
-    def flows(self) -> list[Sequence[str]]:
+    def flows(self, one_clock: bool = False) -> list[Sequence[str]]:
         """The lowerings tried in order; a pass in any one is a proof (each lowers both sides
-        alike). ``clk2fflogic`` makes the clock and the async flip-flops visible and provable;
-        ``techmap`` makes more cells provable and loses a division by zero and a ``$pmux``;
-        ``memory`` maps the memories."""
+        alike). ``one_clock``: both sides have the same single clock, so ``async2sync`` is exact;
+        else the clock-aware ``clk2fflogic`` family. ``techmap`` makes more cells provable and loses
+        a division by zero and a ``$pmux``; ``memory`` maps the memories."""
+        family = ONE_CLOCK if one_clock else LOWERINGS
         if not self.lower:
             return [()]
-        return [LOWERINGS[0]] if not self.techmap else list(LOWERINGS)
+        return [family[0]] if not self.techmap else list(family)
 
 
 def collect_pairs(snap: Path) -> list[Pair]:

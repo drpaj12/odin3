@@ -86,6 +86,7 @@ INFO_COUNTERS = {
     "clean.wires": r"opt_clean: removed \d+ unused cells, \d+ unused nets and (\d+) unused wires",
 }
 STAT_LINE = re.compile(r"opt: rule (\S+) (\d+)\s*$", re.M)
+SIMCHECK_LINE = re.compile(r"simcheck: (\d+) modules checked", re.M)
 ODIN_CELL = re.compile(r"stats: module (\S+): cell (\S+) (\d+)\s*$", re.M)
 ODIN_MODULE = re.compile(r"stats: module (\S+): ports", re.M)
 YOSYS_SECTION = re.compile(r"^=== (.+?) ===\s*$", re.M)
@@ -142,6 +143,7 @@ class Outcome:
     out_il: str = ""
     skipped: bool = False
     refine: str = ""  # "", "proved", "skip" or "fail"
+    simchecked: int = 0  # modules --opt-simcheck judged in this row
 
     @property
     def ok(self) -> bool:
@@ -200,14 +202,16 @@ def source_prepass(source: str) -> list[str]:
 
 
 def odin_script(rule: Rule, source: Path, options: Sequence[str], in_il: Path, out_il: Path,
-                prepass: Sequence[str] = ()) -> str:
+                prepass: Sequence[str] = (), simcheck: bool = False) -> str:
     """Plan point (g)'s Odin III side, ``--nolatches`` on its read. The prepass commands run
-    between the read and ``write_rtlil in.il``, so Yosys reads their result."""
+    between the read and ``write_rtlil in.il``, so Yosys reads their result. ``simcheck`` adds
+    ``--opt-simcheck`` (Debug builds; a no-op in Release)."""
     if source.suffix == ".blif":
         read = [f"read_blif {source}"]
     else:
         read = [f"read_verilog --nolatches {source}", "proc --noopt"]
-    sub_pass = " ".join([f"opt_{rule.sub}", *options, "--opt-stats"])
+    sub_pass = " ".join([f"opt_{rule.sub}", *options, "--opt-stats",
+                         *(["--opt-simcheck"] if simcheck else [])])
     return "; ".join([*read, *prepass, f"write_rtlil {in_il}", sub_pass, "stats",
                       f"write_rtlil {out_il}"])
 
@@ -346,12 +350,14 @@ class Runner:
                  outcome: Outcome) -> str | None:
         """Odin III's side; the log, or None after a failure was recorded."""
         prepass = source_prepass(source.read_text(encoding="utf-8"))
-        script = odin_script(rule, source, options, run_dir / "in.il", run_dir / "out.il", prepass)
+        script = odin_script(rule, source, options, run_dir / "in.il", run_dir / "out.il", prepass,
+                             self.args.simcheck_min > 0)
         done = self.child([exe(self.args.odin3), "-p", script])
         log = (done.stdout or "") + (done.stderr or "")
         if done.returncode != 0:
             outcome.failures.append(f"odin3 exit {done.returncode}: {tail(log)}")
             return None
+        outcome.simchecked = sum(int(n) for n in SIMCHECK_LINE.findall(log))
         count = counter_value(rule, log)
         if count < 1:
             outcome.failures.append(f"counter {rule.counter} is {count}, want at least 1")
@@ -508,7 +514,16 @@ def run(args: argparse.Namespace) -> int:
               for kind in ("proved", "skip", "fail")}
         print(f"{TOOL}: refinement: {by['proved']} proved, {by['skip']} documented skips, "
               f"{by['fail']} failed")
-    runner.cleanup(not failed and not args.write)
+    judged = sum(o.simchecked for o in outcomes)
+    short = False
+    if args.simcheck_min > 0:
+        print(f"{TOOL}: simcheck: {judged} modules judged in "
+              f"{sum(1 for o in outcomes if o.simchecked)} rows")
+        if judged < args.simcheck_min:
+            print(f"{TOOL}: simcheck judged {judged} modules, want at least {args.simcheck_min}: "
+                  "--opt-simcheck is a no-op here (a Release build?)")
+            short = True
+    runner.cleanup(not failed and not short and not args.write)
     if args.write:
         if failed:
             print(f"{TOOL}: --write refused: {len(failed)} rules failed; nothing written")
@@ -517,7 +532,7 @@ def run(args: argparse.Namespace) -> int:
             if not outcome.skipped:
                 golden_path(source).write_text(outcome.out_il, encoding="utf-8")
         print(f"{TOOL}: wrote {len(outcomes) - len(pending)} goldens")
-    return EXIT_FAIL if failed else EXIT_OK
+    return EXIT_FAIL if failed or short else EXIT_OK
 
 
 def parse(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -535,6 +550,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
                     help="per child (default 2G)")
     ap.add_argument("--work", metavar="DIR", help="the work directory (kept)")
     ap.add_argument("--no-refine", action="store_true", help="leave the refinement check out")
+    ap.add_argument("--simcheck-min", type=int, default=0, metavar="N",
+                    help="run every row with --opt-simcheck (Debug) and fail unless it judged "
+                    "at least N modules in all")
     ap.add_argument("--refine-skip", metavar="F",
                     help="the documented refinement skips (default: refine_skip.txt "
                          "beside the rules)")

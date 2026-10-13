@@ -12,13 +12,26 @@
  *   - holds a $proc, an instance of a module, or a cell type with no simulate hook ($shiftx, $pow,
  *     the word-level flip-flops);
  *   - holds an x or z constant ($_CONSTX_, $_CONSTZ_: an x in the input is a don't-care);
- *   - holds a flip-flop or latch whose INIT is 2 or 3 or that has an `init` on its Q net (the
- *     simulator starts those at 0, where the refinement may pick either value);
+ *   - holds a flip-flop or latch that has an `init` on its Q net (the simulator does not read it);
  *   - holds a $pmux whose S is wider than 1: opt_share is a refinement only where the selects are
  *     exclusive (spec 17 #46), and random inputs drive them anywhere; skipping is spec 20.2's
  *     "or skip a module holding a $pmux whose selects are not provably exclusive";
  *   - does not build (a clock that is not a primary input, two drivers, a loop, an inout port): the
  *     build's errors are muted.
+ *
+ * x init. A flip-flop or latch with INIT 2 or 3 (3 is the default of every storage cell) has an x
+ * initial value: the simulator starts it at 0, and a sub-pass may resolve the x to either value.
+ * Such a module is checked, not skipped, with the x taken as 0 in both traces: the first recorded
+ * cycle is after the first clock edge, so a flip-flop that loads shows the same value before and
+ * after, and only a flip-flop that holds its x (and that the call replaces by a constant other than
+ * 0) can differ. That difference is reported like any other; it is then a flip-flop to look at, and
+ * the summary line counts the modules checked this way.
+ *
+ * A module the check could simulate before the call and cannot build after it (a loop, a second
+ * driver, a clock that stopped being a primary input) is ODIN3_ERR_CHECK, not a skip. A module the
+ * predicate rejects after the call (the call introduced an x constant or a wide $pmux) is not
+ * judged, and counted as skipped in the summary line, which is one INFO line per call:
+ * "opt: <sub>: simcheck: N modules checked (K with x init), M skipped before, L skipped after".
  */
 #include "ir/celltype.h"
 #include "ir/design.h"
@@ -44,7 +57,7 @@ enum {
     SIMCHECK_SEEDS = 3,
     SIMCHECK_MAX_BYTES = 1 << 26, /* one module's trace: more output bits than this skips it */
     PMUX_S_PORT = 2,              /* $pmux's ports are A, B, S, Y */
-    INIT_DONT_CARE = 2,           /* INIT 2 (don't care) and 3 (unknown) */
+    INIT_DONT_CARE = 2,           /* INIT 2 (don't care) and 3 (unknown, the default) are x */
     INIT_UNKNOWN = 3
 };
 
@@ -55,7 +68,9 @@ typedef struct simcheck_trace {
 } simcheck_trace;
 
 struct odin3_opt_simcheck {
-    odin3_vec traces; /* simcheck_trace, one per checked module */
+    odin3_vec traces;        /* simcheck_trace, one per checked module */
+    uint32_t skipped;        /* modules the predicate or the build rejected before the call */
+    uint32_t x_init_checked; /* checked modules with a flip-flop of x initial value */
 };
 
 /* --- the predicate --------------------------------------------------------------------------- */
@@ -69,15 +84,15 @@ static bool is_wide_pmux(const odin3_celltype_def *def, const odin3_module *mod,
     return strcmp(def->name, "$pmux") == 0 && odin3_node_port(mod, node, PMUX_S_PORT).count > 1;
 }
 
-static bool has_dont_care_init(const odin3_celltype_def *def, const odin3_module *mod,
-                               odin3_node_id node) {
+/* True when the cell has an INIT parameter that is x: 2, 3, or unset (the default is 3). */
+static bool has_x_init(const odin3_celltype_def *def, const odin3_module *mod, odin3_node_id node) {
     for (uint32_t i = 0; i < def->n_params; i++) {
         if (strcmp(def->params[i].name, "INIT") != 0) {
             continue;
         }
         const odin3_value *init = odin3_node_param(mod, node, i);
-        return init != NULL && init->kind == ODIN3_VAL_INT &&
-               (init->i == INIT_DONT_CARE || init->i == INIT_UNKNOWN);
+        return init == NULL || init->kind != ODIN3_VAL_INT || init->i == INIT_DONT_CARE ||
+               init->i == INIT_UNKNOWN;
     }
     return false;
 }
@@ -113,17 +128,23 @@ static bool node_blocks(const odin3_design *design, const odin3_module *mod, odi
         def->simulate == NULL) {
         return true;
     }
-    return is_x_const(def) || is_wide_pmux(def, mod, node) || has_dont_care_init(def, mod, node) ||
-           has_wire_init(def, mod, node);
+    return is_x_const(def) || is_wide_pmux(def, mod, node) || has_wire_init(def, mod, node);
 }
 
-static bool module_simulable(const odin3_design *design, const odin3_module *mod) {
+/* True when the check can judge the module; *x_init is set when it holds an x-init storage cell. */
+static bool module_simulable(const odin3_design *design, const odin3_module *mod, bool *x_init) {
     uint32_t end = odin3_module_node_end(mod);
+    *x_init = false;
     for (uint32_t id = 1; id < end; id++) {
         odin3_node_id node = {id};
-        if (odin3_node_live(mod, node) && node_blocks(design, mod, node)) {
+        if (!odin3_node_live(mod, node)) {
+            continue;
+        }
+        if (node_blocks(design, mod, node)) {
             return false;
         }
+        const odin3_celltype_def *def = odin3_celltype_get(design, odin3_node_type(mod, node));
+        *x_init = *x_init || has_x_init(def, mod, node);
     }
     return true;
 }
@@ -259,13 +280,22 @@ odin3_status odin3_opt_simcheck_before(odin3_design *design, odin3_opt_simcheck 
         const odin3_module *mod = odin3_module_get(design, (odin3_module_id){id});
         simcheck_trace trace;
         bool usable = false;
-        if (mod == NULL || !module_simulable(design, mod)) {
+        bool x_init = false;
+        if (mod == NULL) {
+            continue;
+        }
+        if (!module_simulable(design, mod, &x_init)) {
+            check->skipped++;
             continue;
         }
         st = trace_module(design, (odin3_module_id){id}, &trace, &usable);
         simcheck_trace *slot = st == ODIN3_OK && usable ? odin3_vec_push(&check->traces) : NULL;
+        if (st == ODIN3_OK && !usable) {
+            check->skipped++; /* the build refused it */
+        }
         if (slot != NULL) {
             *slot = trace;
+            check->x_init_checked += x_init ? 1U : 0U;
         } else if (usable) {
             odin3_util_free(trace.bits);
             st = ODIN3_ERR_NO_MEMORY;
@@ -279,22 +309,34 @@ odin3_status odin3_opt_simcheck_before(odin3_design *design, odin3_opt_simcheck 
     return ODIN3_OK;
 }
 
-/* One module after the call: ODIN3_ERR_CHECK (logged) when its outputs differ from before. */
-static odin3_status compare_module(odin3_design *design, const simcheck_trace *old,
-                                   const char *sub) {
+/* One module after the call: ODIN3_ERR_CHECK (logged) when its outputs differ from before, or when
+ * it can no longer be simulated although it could be before. *judged is set when it was compared.
+ */
+static odin3_status compare_module(odin3_design *design, const simcheck_trace *old, const char *sub,
+                                   bool *judged) {
     const odin3_module *mod = odin3_module_get(design, old->module);
     simcheck_trace now;
     bool usable = false;
-    if (mod == NULL || !module_simulable(design, mod)) {
-        return ODIN3_OK; /* the call made it a module the check cannot judge */
+    bool x_init = false;
+    *judged = false;
+    if (mod == NULL || !module_simulable(design, mod, &x_init)) {
+        return ODIN3_OK; /* the call made it a module the predicate rejects: counted, not judged */
     }
     odin3_status st = trace_module(design, old->module, &now, &usable);
+    const char *name = odin3_strtab_get(odin3_design_strtab(design), odin3_module_name(mod));
     uint32_t cycle = 0;
-    if (st == ODIN3_OK && usable && now.n_out == old->n_out &&
-        first_difference(old, &now, &cycle)) {
+    if (st == ODIN3_OK && !usable) {
+        odin3_log(ODIN3_LOG_ERROR, "opt: %s: module '%s' can no longer be simulated", sub, name);
+        return ODIN3_ERR_CHECK;
+    }
+    *judged = st == ODIN3_OK;
+    if (st == ODIN3_OK && now.n_out != old->n_out) {
+        odin3_log(ODIN3_LOG_ERROR, "opt: %s: module '%s' has %u output bits, was %u", sub, name,
+                  (unsigned)now.n_out, (unsigned)old->n_out);
+        st = ODIN3_ERR_CHECK;
+    } else if (st == ODIN3_OK && first_difference(old, &now, &cycle)) {
         odin3_log(ODIN3_LOG_ERROR, "opt: %s: simulation differs on module '%s' at cycle %u", sub,
-                  odin3_strtab_get(odin3_design_strtab(design), odin3_module_name(mod)),
-                  (unsigned)cycle);
+                  name, (unsigned)cycle);
         st = ODIN3_ERR_CHECK;
     }
     odin3_util_free(now.bits);
@@ -308,8 +350,16 @@ odin3_status odin3_opt_simcheck_after(odin3_design *design, const odin3_opt_simc
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_status st = ODIN3_OK;
+    uint32_t checked = 0;
     for (size_t i = 0; st == ODIN3_OK && i < before->traces.len; i++) {
-        st = compare_module(design, odin3_vec_cat(&before->traces, i), sub);
+        bool judged = false;
+        st = compare_module(design, odin3_vec_cat(&before->traces, i), sub, &judged);
+        checked += judged ? 1U : 0U;
     }
+    odin3_log(ODIN3_LOG_INFO,
+              "opt: %s: simcheck: %u modules checked (%u with x init), %u skipped before, %u "
+              "skipped after",
+              sub, (unsigned)checked, (unsigned)before->x_init_checked, (unsigned)before->skipped,
+              (unsigned)(before->traces.len - checked));
     return st;
 }

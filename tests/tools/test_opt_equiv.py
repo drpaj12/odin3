@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import clock_sig
 import memcap
 import opt_equiv as oe
 
@@ -93,20 +94,29 @@ class PureTest(unittest.TestCase):
     def test_script_default_lowering(self) -> None:
         self.assertEqual(
             oe.refinement_script("g.il", "h.il"),
-            "read_rtlil g.il; read_rtlil h.il; clk2fflogic; techmap; equiv_make gold gate eq; "
-            "hierarchy -top eq; flatten; equiv_simple -undef -seq 4; equiv_induct -undef; "
-            "equiv_status -assert")
+            "read_rtlil g.il; read_rtlil h.il; clk2fflogic; opt_merge; opt_clean; techmap; "
+            "equiv_make gold gate eq; hierarchy -top eq; flatten; equiv_simple -undef -seq 4; "
+            "equiv_induct -undef; equiv_status -assert")
 
     def test_script_variants(self) -> None:
         plain = oe.refinement_script("g.il", "h.il", lowering=())
         self.assertNotIn("clk2fflogic", plain)
         self.assertNotIn("proc", plain)
         self.assertIn("read_rtlil h.il; equiv_make gold gate eq", plain)
-        procs = oe.refinement_script("g.il", "h.il", procs=True, lowering=oe.LOWERINGS[0])
-        self.assertIn("read_rtlil h.il; proc; clk2fflogic; equiv_make", procs)
+        procs = oe.refinement_script("g.il", "h.il", procs=True, lowering=oe.ONE_CLOCK[0])
+        self.assertIn("read_rtlil h.il; proc; async2sync; equiv_make", procs)
         self.assertNotIn("techmap", procs)
-        self.assertIn("memory; clk2fflogic; techmap; equiv_make",
+        self.assertIn("memory; clk2fflogic; opt_merge; opt_clean; techmap; equiv_make",
                       oe.refinement_script("g.il", "h.il", lowering=oe.LOWERINGS[2]))
+
+    def test_flows_follow_the_clocks(self) -> None:
+        checker = oe.Checker("y", Path("."), 1 << 30)
+        self.assertEqual(checker.flows(True), list(oe.ONE_CLOCK))
+        self.assertEqual(checker.flows(False), list(oe.LOWERINGS))
+        for lowering in oe.LOWERINGS:
+            self.assertIn("clk2fflogic", lowering)
+        no_techmap = oe.Checker("y", Path("."), 1 << 30, techmap=False)
+        self.assertEqual(no_techmap.flows(True), [oe.ONE_CLOCK[0]])
 
     def test_phase2_commands_and_stats(self) -> None:
         commands = oe.phase2_commands()
@@ -355,10 +365,12 @@ class ProbeTest(unittest.TestCase):
             with self.subTest(mutant=name):
                 self.assertFalse(self.refines(CLOCK_GOLD, text))
 
-    def test_no_lowering_of_the_chain_hides_the_clock(self) -> None:
-        for lowering in oe.LOWERINGS:
-            self.assertIn("clk2fflogic", lowering)
-            self.assertNotIn("async2sync", lowering)
+    def test_same_clock_pairs_take_the_one_clock_family(self) -> None:
+        self.assertTrue(clock_sig.same_clocks(CLOCK_GOLD, CLOCK_GOLD))
+        for name in ("negedge", "clock_net"):
+            with self.subTest(mutant=name):
+                self.assertFalse(clock_sig.same_clocks(CLOCK_GOLD, CLOCK_MUTANTS[name]))
+        self.assertTrue(clock_sig.same_clocks(CLOCK_GOLD, CLOCK_MUTANTS["arst_value"]))
 
 
 if __name__ == "__main__":
