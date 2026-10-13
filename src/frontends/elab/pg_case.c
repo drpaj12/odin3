@@ -379,7 +379,7 @@ static odin3_status entry_run(odin3_pg *pg, const pg_swctx *ctx, uint32_t from, 
             *slot = x_entry ? odin3_sb_of_bit(ODIN3_BIT_X) : rv[k];
         }
     }
-    pg_act_req req = {pg->cur, 0, t1 + from, pg->run_r.data, to - from, pg->prov, false, false};
+    pg_act_req req = {pg->cur, 0, t1 + from, pg->run_r.data, to - from, pg->prov, false, true};
     return st != ODIN3_OK ? st : pg_act_add(pg, &req);
 }
 
@@ -439,7 +439,9 @@ odin3_status pg_sw_end(odin3_pg *pg) {
     if (st == ODIN3_OK && ctx.n > 0) {
         odin3_sig rhs = {(odin3_sigbit *)pg->sw_t1.data + ctx.first, ctx.n, false};
         pg_asg asg = {&pg->slv, &rhs, ctx.node, true, true};
+        pg->exiting = true;
         st = pg_apply(pg, &asg);
+        pg->exiting = false;
     }
     st = st != ODIN3_OK ? st : pg_late_exit(pg);
     odin3_vec_pop(&pg->sw_ctx);

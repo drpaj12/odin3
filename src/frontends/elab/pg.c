@@ -138,6 +138,7 @@ odin3_status pg_block_reset(odin3_pg *pg) {
     pg->failed = false;
     pg->scan_frame = false;
     pg->scanning = false;
+    pg->exiting = false;
     pg->has_memw = false;
     pg->groups = 0;
     pg->block_no++;
@@ -309,14 +310,20 @@ static odin3_status act_slots(odin3_pg *pg, const pg_act *act, uint32_t index) {
 }
 
 /* The nets a user assignment's action drives: emit drops the outputs no such action drives, so a
- * variable-indexed loop write holds and claims only the bits it writes (PR 2D-6 review I2). */
+ * variable-indexed loop write holds and claims only the bits it writes (PR 2D-6 review I2). A
+ * switch's exit action (pg->exiting) drives a target bit only where some arm assigned its case
+ * temporary, so a loop write under a runtime `if` claims only the bits an arm writes (N1). */
 static odin3_status note_assigned(odin3_pg *pg, const pg_act_req *req) {
     for (uint32_t i = 0; i < req->n; i++) {
-        if ((req->lhs[i] & ODIN3_SB_CONST) == 0) {
-            odin3_status st = odin3_u64map_put(pg->assigned, (odin3_kv){req->lhs[i], 1});
-            if (st != ODIN3_OK) {
-                return st;
-            }
+        if ((req->lhs[i] & ODIN3_SB_CONST) != 0) {
+            continue;
+        }
+        if (pg->exiting && !odin3_u64map_get(pg->assigned, req->rhs[i], NULL)) {
+            continue;
+        }
+        odin3_status st = odin3_u64map_put(pg->assigned, (odin3_kv){req->lhs[i], 1});
+        if (st != ODIN3_OK) {
+            return st;
         }
     }
     return ODIN3_OK;

@@ -223,6 +223,30 @@ static void test_loops_over_overlapping_halves_conflict(void) {
     pt_expect_error((at_loc){4, 43}, "'y[3]' is assigned in two always blocks (also at t.v:3:43)");
 }
 
+/* PR 2D-6 re-review N1: a loop write under a runtime if/else: the switch's exit claims only the
+ * bits an arm assigns, so two blocks over disjoint halves are no conflict. */
+static void test_runtime_if_loops_over_disjoint_halves_are_no_conflict(void) {
+    pt_read_clean("module t(input [7:0] a, input [7:0] b, output [7:0] q);\n  reg [7:0] w;\n"
+                  "  assign q = w;\n  integer i, j;\n"
+                  "  always @* for (i = 0; i < 4; i = i + 1) if (a[i]) w[i] = b[i]; else w[i] = 0;\n"
+                  "  always @* for (j = 0; j < 4; j = j + 1)\n"
+                  "    case (a[j+4]) 1'b1: w[4+j] = b[j]; default: w[4+j] = 1; endcase\n"
+                  "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(2, pt_count_of("$proc"));
+    pt_expect_ir_ok();
+}
+
+/* The soundness half of N1: two runtime-if loops that do write the same bit are still rejected. */
+static void test_runtime_if_loops_over_overlapping_halves_conflict(void) {
+    pt_read_failing(
+        "module t(input [7:0] a, input [7:0] b, output [7:0] q);\n  reg [7:0] w;\n"
+        "  assign q = w;\n  integer i, j;\n"
+        "  always @* for (i = 0; i < 4; i = i + 1) if (a[i]) w[i] = b[i]; else w[i] = 0;\n"
+        "  always @* for (j = 0; j < 4; j = j + 1) if (a[j]) w[j+3] = b[j]; else w[j+3] = 1;\n"
+        "endmodule\n");
+    pt_expect_error((at_loc){6, 53}, "'w[3]' is assigned in two always blocks (also at t.v:5:53)");
+}
+
 /* Task 22's carry: inside an unrolled loop a branch on the variable folds in every iteration. */
 static void test_loop_folds_branches(void) {
     pt_read_clean("module t(input [3:0] a, output reg [3:0] y);\n  integer i;\n"
@@ -898,6 +922,8 @@ static void test_call_in_edge_expression_is_error(void) {
     X(test_loops_over_disjoint_halves_are_no_conflict)                                             \
     X(test_loop_writing_half_holds_only_that_half)                                                 \
     X(test_loops_over_overlapping_halves_conflict)                                                 \
+    X(test_runtime_if_loops_over_disjoint_halves_are_no_conflict)                                  \
+    X(test_runtime_if_loops_over_overlapping_halves_conflict)                                      \
     X(test_for_unrolled)                                                                           \
     X(test_for_variable_read_outside)                                                              \
     X(test_for_counts_down)                                                                        \
