@@ -32,11 +32,11 @@ enum { GROUP_SHIFT = 32 };
 static odin3_u64map **pg_maps(odin3_pg *pg, size_t index) {
     odin3_u64map **const all[] = {&pg->out_of,    &pg->group,     &pg->lv,    &pg->rv,
                                   &pg->slot_head, &pg->dead_nets, &pg->reads, &pg->listed,
-                                  &pg->seen,      &pg->swl,       &pg->folds, &pg->active};
+                                  &pg->seen,      &pg->swl,       &pg->folds, &pg->active, &pg->assigned};
     return all[index];
 }
 
-enum { PG_MAP_COUNT = 12 };
+enum { PG_MAP_COUNT = 13 };
 
 /* An empty map: the same one when it is empty already. */
 static odin3_status map_fresh(odin3_u64map **map) {
@@ -296,6 +296,20 @@ static odin3_status act_slots(odin3_pg *pg, const pg_act *act, uint32_t index) {
     return ODIN3_OK;
 }
 
+/* The nets a user assignment's action drives: emit drops the outputs no such action drives, so a
+ * variable-indexed loop write holds and claims only the bits it writes (PR 2D-6 review I2). */
+static odin3_status note_assigned(odin3_pg *pg, const pg_act_req *req) {
+    for (uint32_t i = 0; i < req->n; i++) {
+        if ((req->lhs[i] & ODIN3_SB_CONST) == 0) {
+            odin3_status st = odin3_u64map_put(pg->assigned, (odin3_kv){req->lhs[i], 1});
+            if (st != ODIN3_OK) {
+                return st;
+            }
+        }
+    }
+    return ODIN3_OK;
+}
+
 odin3_status pg_act_add(odin3_pg *pg, const pg_act_req *req) {
     pg_act act = {{0, 0}, {0, 0}, req->prov, 0, req->cs};
     uint32_t index = (uint32_t)pg->acts.len;
@@ -309,6 +323,12 @@ odin3_status pg_act_add(odin3_pg *pg, const pg_act_req *req) {
         return st; /* the pool keeps the bits: unreferenced, freed with the block */
     }
     *slot = act;
+    if (!req->synth) {
+        st = note_assigned(pg, req);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
     if (req->cs == PG_SYNC_OWNER) {
         pg_sync *sync = odin3_vec_at(&pg->syncs, req->sync);
         list_link(pg, &sync->first_act, &sync->last_act, index);
@@ -589,7 +609,7 @@ static odin3_status asg_run_action(odin3_pg *pg, const pg_asg *asg, uint32_t fro
         *left = target.v;
         *right = asg->rhs->bits[item];
     }
-    pg_act_req req = {pg->cur, 0, pg->run_l.data, pg->run_r.data, to - from, prov, false};
+    pg_act_req req = {pg->cur, 0, pg->run_l.data, pg->run_r.data, to - from, prov, false, false};
     return pg_act_add(pg, &req);
 }
 

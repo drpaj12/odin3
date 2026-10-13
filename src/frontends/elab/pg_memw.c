@@ -89,7 +89,7 @@ static odin3_status late_add(odin3_pg *pg, const late_act *la) {
         lhs[k] = la->lhs + k;
         rhs[k] = la->rhs != NULL ? la->rhs[k] : odin3_sb_of_bit(la->fill);
     }
-    pg_act_req req = {la->cs, 0, lhs, rhs, la->width, pg->prov, la->front};
+    pg_act_req req = {la->cs, 0, lhs, rhs, la->width, pg->prov, la->front, false};
     return pg_act_add(pg, &req);
 }
 
@@ -230,7 +230,7 @@ static odin3_status mw_assign(mw_write *mw, const mw_var *var) {
     for (uint32_t k = 0; st == ODIN3_OK && k < var->width; k++) {
         lhs[k] = target + k;
     }
-    pg_act_req req = {pg->cur, 0, lhs, var->value.bits, var->width, prov, false};
+    pg_act_req req = {pg->cur, 0, lhs, var->value.bits, var->width, prov, false, false};
     return st != ODIN3_OK ? st : pg_act_add(pg, &req);
 }
 

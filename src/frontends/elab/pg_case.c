@@ -379,7 +379,7 @@ static odin3_status entry_run(odin3_pg *pg, const pg_swctx *ctx, uint32_t from, 
             *slot = x_entry ? odin3_sb_of_bit(ODIN3_BIT_X) : rv[k];
         }
     }
-    pg_act_req req = {pg->cur, 0, t1 + from, pg->run_r.data, to - from, pg->prov, false};
+    pg_act_req req = {pg->cur, 0, t1 + from, pg->run_r.data, to - from, pg->prov, false, false};
     return st != ODIN3_OK ? st : pg_act_add(pg, &req);
 }
 

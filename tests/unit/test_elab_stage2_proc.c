@@ -539,7 +539,7 @@ static odin3_sig sig_of(odin3_elab2 *e2, const odin3_sigbit *bits, uint32_t n) {
 }
 
 static odin3_status add_action(odin3_pg *pg, odin3_sigbit lhs, odin3_sigbit rhs) {
-    pg_act_req req = {pg->cur, 0, &lhs, &rhs, 1, pg->prov, false};
+    pg_act_req req = {pg->cur, 0, &lhs, &rhs, 1, pg->prov, false, false};
     return pg_act_add(pg, &req);
 }
 

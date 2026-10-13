@@ -193,6 +193,7 @@ struct odin3_pg {
     odin3_vec fsyms;       /* uint32_t: the symbols whose ir_wire a call frame set */
     odin3_u64map *tvis;    /* TASK_DECL node -> 1: its body is scanned (this scan) */
     odin3_u64map *active;  /* FUNCTION_DECL / TASK_DECL node -> 1: being inlined */
+    odin3_u64map *assigned; /* net -> 1: the nets a user assignment's action has as lhs (I2) */
     odin3_u64map *loopout; /* symbol -> 1: read outside the loops it is the variable of */
     bool loopout_ready;    /* loopout is built for the module */
     bool scan_frame;       /* the scan is of a call's body: no new outputs */
@@ -241,6 +242,7 @@ typedef struct pg_act_req {
     uint32_t n;
     odin3_prov_id prov;
     bool front; /* at the start of the case's actions (a memory write variable's entry, Task 24) */
+    bool synth; /* made by the generator (a root hold or a sync update), not a user assignment */
 } pg_act_req;
 odin3_status pg_act_add(odin3_pg *pg, const pg_act_req *req);
 

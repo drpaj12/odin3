@@ -256,7 +256,8 @@ static odin3_status claim_lvalue(odin3_pg *pg, uint32_t index, odin3_elab2_lvalu
     odin3_vec_clear(&lv->nets);
     odin3_vec_clear(&lv->bits);
     for (uint32_t i = chunk->first; i < chunk->first + chunk->len; i++) {
-        if (odin3_elab2_net_is_wired(pg->e2, outs[i].net)) {
+        if (odin3_elab2_net_is_wired(pg->e2, outs[i].net) ||
+            odin3_u64map_get(pg->dead_nets, outs[i].net.v, NULL)) {
             odin3_status st = odin3_u64map_put(pg->dead_nets, (odin3_kv){outs[i].net.v, 1});
             st = st != ODIN3_OK ? st : odin3_u64map_put(pg->dead_nets, (odin3_kv){outs[i].t0.v, 1});
             if (st != ODIN3_OK) {
@@ -280,6 +281,23 @@ static odin3_status drop_chunk(odin3_pg *pg, uint32_t index) {
     const pg_out *outs = pg->outs.data;
     const pg_chunk *chunk = odin3_vec_cat(&pg->chunks, index);
     for (uint32_t i = chunk->first; i < chunk->first + chunk->len; i++) {
+        odin3_status st = odin3_u64map_put(pg->dead_nets, (odin3_kv){outs[i].net.v, 1});
+        st = st != ODIN3_OK ? st : odin3_u64map_put(pg->dead_nets, (odin3_kv){outs[i].t0.v, 1});
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
+/* The outputs no action assigns are dropped: the pre-scan takes a variable-indexed target (a loop's
+ * `y[i]`) for its whole object, but only the bits the block writes are held, claimed and driven. */
+static odin3_status drop_unassigned(odin3_pg *pg) {
+    const pg_out *outs = pg->outs.data;
+    for (uint32_t i = 0; i < pg->outs.len; i++) {
+        if (odin3_u64map_get(pg->assigned, outs[i].t0.v, NULL)) {
+            continue;
+        }
         odin3_status st = odin3_u64map_put(pg->dead_nets, (odin3_kv){outs[i].net.v, 1});
         st = st != ODIN3_OK ? st : odin3_u64map_put(pg->dead_nets, (odin3_kv){outs[i].t0.v, 1});
         if (st != ODIN3_OK) {
@@ -504,6 +522,16 @@ static odin3_status make_node(odin3_pg *pg, odin3_ast_id prov_node, const pg_lai
     return st;
 }
 
+/* The temporaries of the dropped outputs have no pins: removed, so the IR has no pin-less nets. */
+static void delete_unassigned_t0(odin3_pg *pg) {
+    const pg_out *outs = pg->outs.data;
+    for (uint32_t i = 0; i < pg->outs.len; i++) {
+        if (!odin3_u64map_get(pg->assigned, outs[i].t0.v, NULL)) {
+            (void)odin3_net_delete(pg->e2->mod, outs[i].t0);
+        }
+    }
+}
+
 odin3_status odin3_pg_emit(odin3_pg *pg, odin3_ast_id prov_node, odin3_node_id *out) {
     odin3_elab2 *e2 = pg->e2;
     *out = (odin3_node_id){0};
@@ -513,7 +541,8 @@ odin3_status odin3_pg_emit(odin3_pg *pg, odin3_ast_id prov_node, odin3_node_id *
     odin3_vec_init(&pins.onets, sizeof(uint32_t));
     odin3_vec_init(&pins.inets, sizeof(uint32_t));
     odin3_vec_init(&pins.pbits, sizeof(odin3_pbit));
-    odin3_status st = emit_claims(pg, prov_node);
+    odin3_status st = drop_unassigned(pg);
+    st = st != ODIN3_OK ? st : emit_claims(pg, prov_node);
     st = st != ODIN3_OK ? st : pg_layout(pg, &lay);
     if (st == ODIN3_OK && lay.acts.len > 0) {
         st = pins_make(pg, &lay, &pins);
@@ -527,5 +556,6 @@ odin3_status odin3_pg_emit(odin3_pg *pg, odin3_ast_id prov_node, odin3_node_id *
     }
     pins_free(&pins);
     pg_laid_free(&lay);
+    delete_unassigned_t0(pg);
     return st;
 }

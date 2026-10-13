@@ -192,6 +192,36 @@ static void test_shared_counter(void) {
     TEST_ASSERT_EQUAL_UINT32(2, pt_count_of("$proc"));
 }
 
+/* PR 2D-6 review I2: the pre-scan takes `y[i]` for the whole of y, but only the bits an action
+ * assigns are held, claimed and driven. Two loops over disjoint halves are no conflict. */
+static void test_loops_over_disjoint_halves_are_no_conflict(void) {
+    pt_read_clean("module t(input [7:0] a, input [3:0] b, output reg [7:0] y);\n"
+                  "  integer i, j;\n"
+                  "  always @* for (i = 0; i < 4; i = i + 1) y[i] = a[i];\n"
+                  "  always @* for (j = 0; j < 4; j = j + 1) y[4+j] = b[j];\n"
+                  "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(2, pt_count_of("$proc"));
+    pt_expect_ir_ok();
+}
+
+/* A loop writing four bits of an 8-bit register holds only those four (no latch for y[7:4]). */
+static void test_loop_writing_half_holds_only_that_half(void) {
+    pt_read_clean("module t(input [7:0] a, output reg [7:0] y);\n  integer i;\n"
+                  "  always @* for (i = 0; i < 4; i = i + 1) y[i] = a[i];\n"
+                  "endmodule\n");
+    pt_expect_dump(0, "I4 O8\nC0 [O4<-I0 O5<-I1 O6<-I2 O7<-I3]\nS always [O0..O3<-O4..O7]\n");
+    pt_expect_ir_ok();
+}
+
+/* The soundness half: two loops that do write the same bit are still rejected. */
+static void test_loops_over_overlapping_halves_conflict(void) {
+    pt_read_failing("module t(input [7:0] a, output reg [7:0] y);\n  integer i, j;\n"
+                    "  always @* for (i = 0; i < 4; i = i + 1) y[i] = a[i];\n"
+                    "  always @* for (j = 0; j < 4; j = j + 1) y[j+3] = a[j];\n"
+                    "endmodule\n");
+    pt_expect_error((at_loc){4, 43}, "'y[3]' is assigned in two always blocks (also at t.v:3:43)");
+}
+
 /* Task 22's carry: inside an unrolled loop a branch on the variable folds in every iteration. */
 static void test_loop_folds_branches(void) {
     pt_read_clean("module t(input [3:0] a, output reg [3:0] y);\n  integer i;\n"
@@ -809,6 +839,9 @@ static void test_call_in_edge_expression_is_error(void) {
 }
 
 #define ALL_TESTS(X)                                                                               \
+    X(test_loops_over_disjoint_halves_are_no_conflict)                                             \
+    X(test_loop_writing_half_holds_only_that_half)                                                 \
+    X(test_loops_over_overlapping_halves_conflict)                                                 \
     X(test_for_unrolled)                                                                           \
     X(test_for_variable_read_outside)                                                              \
     X(test_for_counts_down)                                                                        \
