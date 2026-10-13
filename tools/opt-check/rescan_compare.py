@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import argparse
 import filecmp
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -91,7 +93,10 @@ class Comparison:
         argv = [exe(self.args.odin3), *(["--top", top] if top else []), "-p",
                 pass_script(item.path, commands, out, self.args.techlib)]
         try:
-            done = memcap.run(argv, self.cap, capture_output=True, cwd=self.work)
+            done = memcap.run(argv, self.cap, capture_output=True, cwd=self.work,
+                              timeout=self.args.timeout)
+        except subprocess.TimeoutExpired:
+            return f"timed out after {self.args.timeout:.0f} s"
         except (OSError, ValueError) as exc:
             return f"cannot run {argv[0]}: {exc}"
         if done.returncode == 0:
@@ -108,7 +113,12 @@ class Comparison:
                   f"{first or second}")
             return EXIT_ERROR
         if not filecmp.cmp(self.work / "a.il", self.work / "b.il", shallow=False):
-            print(f"{TOOL}: {item.rel}: DIFFERS ({secs:.1f} s; {self.work}/a.il, b.il)")
+            # a.il and b.il are the next design's scratch files: keep this pair under its own name
+            stem = item.rel.replace("/", "_")
+            kept = [self.work / f"{stem}.{side}.il" for side in ("a", "b")]
+            shutil.copyfile(self.work / "a.il", kept[0])
+            shutil.copyfile(self.work / "b.il", kept[1])
+            print(f"{TOOL}: {item.rel}: DIFFERS ({secs:.1f} s; {kept[0]}, {kept[1].name})")
             return EXIT_DIFFER
         print(f"{TOOL}: {item.rel}: identical ({secs:.1f} s)")
         return EXIT_OK
@@ -126,6 +136,8 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--odin3", required=True, help="the odin3 binary (a Release build)")
     ap.add_argument("--mem-cap", type=elab_sweep.parse_size, default=4 << 30, metavar="SIZE",
                     help="per child (default 4G)")
+    ap.add_argument("--timeout", type=float, default=3600.0, metavar="SECS",
+                    help="per child (default 3600)")
     ap.add_argument("--work", metavar="DIR", help="the work directory (kept)")
     ap.add_argument("--tops", metavar="F", help="<file> <top> lines, as elab-sweep --tops")
     ap.add_argument("--golden-root", metavar="D", help="Parmys goldens, as elab-sweep")

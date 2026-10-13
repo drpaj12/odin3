@@ -780,7 +780,8 @@ static char *run_case(const char *name, const char *args) {
 /* Internal risk 4: the dirty set is exact. opt_expr's Debug build also sweeps the module in full
  * after each incremental call and aborts when that finds more to do. */
 static void test_dirty_vs_full_rescan(void) {
-    static const char *const k_args[] = {"", "-mux_undef -mux_bool -undriven -fine", "-keepdc"};
+    static const char *const k_args[] = {"", "-mux_undef -mux_bool -undriven -fine", "-keepdc",
+                                         "-full"}; /* -full: opt_share in the loop (review M4) */
     for (size_t set = 0; set < sizeof k_args / sizeof k_args[0]; set++) {
         for (size_t i = 0; i < N_LOOP_CASES; i++) {
             char *incremental = run_case(k_loop_cases[i], k_args[set]);
@@ -887,6 +888,71 @@ static void test_compact_after_opt(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("compact", ""));
     module = pb_module(&res, "m");
     TEST_ASSERT_EQUAL_UINT32(live_nodes(module) + 1U, odin3_module_node_end(module));
+}
+
+/* One node's handle answers: live, type and name. */
+typedef struct node_snap {
+    bool live;
+    odin3_celltype_id type;
+    uint32_t name;
+} node_snap;
+
+enum { SNAP_MAX = 256 };
+
+static uint32_t take_snaps(node_snap *snaps) {
+    const odin3_module *module = pb_module(&res, "m");
+    uint32_t end = odin3_module_node_end(module);
+    TEST_ASSERT_TRUE(end <= SNAP_MAX);
+    for (uint32_t id = 1; id < end; id++) {
+        odin3_node_id node = {id};
+        snaps[id] = (node_snap){odin3_node_live(module, node), odin3_node_type(module, node),
+                                odin3_node_name(module, node)};
+    }
+    return end;
+}
+
+/* A dead node stays dead and a node that died keeps its old type and name; the number of nodes
+ * that died. */
+static uint32_t count_died(const node_snap *before, uint32_t end_before, const node_snap *after) {
+    uint32_t died = 0;
+    for (uint32_t id = 1; id < end_before; id++) {
+        TEST_ASSERT_TRUE(before[id].live || !after[id].live); /* no node comes back to life */
+        if (after[id].live) {
+            continue;
+        }
+        died += before[id].live ? 1U : 0U;
+        TEST_ASSERT_EQUAL_UINT32(before[id].type.v, after[id].type.v);
+        TEST_ASSERT_EQUAL_UINT32(before[id].name, after[id].name);
+    }
+    return died;
+}
+
+/* Handles survive `opt -full` (IR-6 unchanged; review M3): the node store never shrinks, the
+ * handles of the nodes that died keep answering; `compact` then makes the store dense. */
+static void handles_survive(const char *text) {
+    build(text);
+    node_snap before[SNAP_MAX];
+    node_snap after[SNAP_MAX];
+    uint32_t end_before = take_snaps(before);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-full"));
+    TEST_ASSERT_TRUE(take_snaps(after) >= end_before);
+    TEST_ASSERT_TRUE(count_died(before, end_before, after) > 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("compact", ""));
+    const odin3_module *module = pb_module(&res, "m");
+    TEST_ASSERT_EQUAL_UINT32(live_nodes(module) + 1U, odin3_module_node_end(module));
+    pb_free(&res);
+}
+
+static void test_handles_survive_opt(void) {
+    handles_survive(DEAD_TEXT);
+    const char *const files[] = {"const_and.il", "cse_cascade.il", "share_same_type.il"};
+    for (size_t i = 0; i < sizeof files / sizeof files[0]; i++) {
+        char path[PATH_LEN];
+        TEST_ASSERT_TRUE(snprintf(path, sizeof path, "%s/%s", ODIN3_LOOP_DATA, files[i]) > 0);
+        char *text = slurp(path);
+        handles_survive(text);
+        free(text);
+    }
 }
 
 /* The BODY blob of the nth $proc of `m` (malloc'd, *len bytes): what opt must never touch. */
@@ -1115,6 +1181,7 @@ int main(void) {
     RUN_TEST(test_dirty_chain);
     RUN_TEST(test_dirty_tie);
     RUN_TEST(test_compact_after_opt);
+    RUN_TEST(test_handles_survive_opt);
     RUN_TEST(test_opacity_mode_p);
     RUN_TEST(test_opt_after_failed_proc);
     RUN_TEST(test_budget_opt);

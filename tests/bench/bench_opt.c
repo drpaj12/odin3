@@ -117,7 +117,8 @@ static double now_seconds(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
-/* --- RSS: each phase's own peak ---------------------------------------------------------------- */
+/* --- RSS: each phase's own peak ----------------------------------------------------------------
+ */
 
 /* The KiB after `key` (e.g. "VmHWM:") in /proc/self/status, or -1. */
 static long status_kib(const char *key) {
@@ -440,8 +441,7 @@ static bool format_row(const bench_row *row, const char *name, char *buf, size_t
         row->rss_proc_kib, row->rss_proc_cur_kib, row->rss_opt_kib,
         base > 0 ? 100.0 * ((double)row->rss_opt_kib - base) / base : 0.0);
     put(&out, " rss_compact_kib=%ld rss_full_kib=%ld rss_peak_kib=%ld rss_src=%s",
-        row->rss_compact_kib, row->rss_full_kib, row->rss_peak_kib,
-        row->rss_hwm ? "hwm" : "cur");
+        row->rss_compact_kib, row->rss_full_kib, row->rss_peak_kib, row->rss_hwm ? "hwm" : "cur");
     return !out.full;
 }
 

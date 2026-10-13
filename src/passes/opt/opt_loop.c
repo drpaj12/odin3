@@ -8,7 +8,6 @@
 #include "ir/design.h"
 #include "ir/module.h"
 #include "odin3/odin3.h"
-#include "passes/builtin.h"
 #include "passes/opt/dirty.h"
 #include "passes/opt/opt.h"
 #include "passes/opt/opt_test.h"

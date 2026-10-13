@@ -176,7 +176,8 @@ def yosys_script(arch: str, config: str | None) -> str:
 
 def precheck_script(primitives: str, files: Sequence[str]) -> str:
     """The scc precondition on the source."""
-    return _fill(SCC_PRECHECK, primitives=primitives, files=" ".join(files))
+    return _fill(SCC_PRECHECK, primitives=quote(primitives),
+                 files=" ".join(quote(name) for name in files))
 
 
 def version_ok(version: str, allow: str | None) -> bool:

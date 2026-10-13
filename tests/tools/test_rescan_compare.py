@@ -86,6 +86,8 @@ class RescanCompareTest(unittest.TestCase):
         code, out, _ = self.run_tool({"FAKE_DIFFER": "big.v"})
         self.assertEqual(code, 1)
         self.assertIn("big.v: DIFFERS", out)
+        for side in "ab":  # the pair survives the next design's a.il and b.il
+            self.assertTrue((self.work / f"big.v.{side}.il").is_file())
         self.assertIn("small.v: identical", out)
 
     def test_a_failing_variant_is_exit_2(self) -> None:
