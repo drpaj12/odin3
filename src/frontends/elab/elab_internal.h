@@ -831,7 +831,7 @@ typedef struct odin3_elab2_lvalue {
     odin3_vec work; /* odin3_ast_id: the nodes still to take apart */
     bool dropped;   /* some bit lies outside its net */
     /* An assignment target inside a process (Task 21), set by the caller after init: a memory word
-     * is the pending memory write, a non-constant select the case method (Task 22; var), and the
+     * is a write port of its memory, a non-constant select the case method (Task 22; var), and the
      * messages do not speak of continuous assignments. */
     bool procedural;
     odin3_ast_id top;       /* the lhs being taken apart (set by odin3_elab2_lvalue_make) */

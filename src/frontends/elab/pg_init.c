@@ -324,6 +324,11 @@ static odin3_status run_exec(odin3_init *run, odin3_ast_id stmt) {
     }
     if (!is_const) {
         journal_undo(run);
+        if (odin3_ast_kind_of(e2->elab, stmt) == ODIN3_AST_TASK_CALL) {
+            odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, stmt),
+                             "task call in an initial block is not applied and is ignored");
+            return ODIN3_OK;
+        }
         odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, stmt),
                          "initial statement is not constant and is ignored");
         return ODIN3_OK;

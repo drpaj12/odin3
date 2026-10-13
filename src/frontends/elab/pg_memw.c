@@ -395,8 +395,8 @@ odin3_status pg_mem_apply(odin3_pg *pg, const odin3_pg_assign_req *req) {
     if (!mw_clock(pg, &clock, &posedge)) {
         const odin3_symbol *rec = odin3_symbol_get(e2->st, mem->sym);
         odin3_elab2_error(e2, odin3_ast_loc(e2->elab, req->stmt),
-                          "array '%s' cannot be a memory (it is written in a combinational block) "
-                          "and (* nomem2reg *) is set",
+                          "array '%s' cannot be a memory (it is written in a block without exactly "
+                          "one edge) and (* nomem2reg *) is set",
                           odin3_strtab_get(odin3_design_strtab(e2->design), rec->name));
         return ODIN3_ERR_PARSE;
     }

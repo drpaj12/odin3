@@ -342,21 +342,80 @@ static odin3_status mark_lvalue(odin3_elab2 *e2, odin3_ast_id lhs) {
     return st;
 }
 
-/* Every blocking and nonblocking assignment below one ALWAYS (functions and tasks are inlined
- * where they are called, EL-38). */
-static odin3_status scan_one_always(odin3_elab2 *e2, odin3_ast_id always) {
+enum { PRESCAN_TASK_BODY = 2, PRESCAN_FN_BODY = 3 };
+
+/* A task enable or function call met in an always block: its body joins the walk once (a callee
+ * may assign a variable of the module, so those bits are the block's, EL-38). */
+static odin3_status scan_callee(odin3_elab2 *e2, odin3_u64map *seen, odin3_vec *work,
+                                odin3_ast_id call) {
+    odin3_ast_id decl = {0};
+    if ((odin3_ast_flags(e2->elab, call) & ODIN3_AST_F_CALL_SYSTEM) != 0) {
+        return ODIN3_OK;
+    }
+    odin3_status st = odin3_elab2_callee(e2, call, &decl);
+    if (st != ODIN3_OK) {
+        /* the callee is reported (located, counted); the process generator stops on it */
+        return st == ODIN3_ERR_NO_MEMORY ? st : ODIN3_OK;
+    }
+    if (odin3_u64map_get(seen, decl.v, NULL)) {
+        return ODIN3_OK;
+    }
+    st = odin3_u64map_put(seen, (odin3_kv){decl.v, 1});
+    odin3_ast_id body = st == ODIN3_OK
+                            ? odin3_ast_child(e2->elab, decl,
+                                              odin3_ast_kind_of(e2->elab, call) == ODIN3_AST_CALL
+                                                  ? PRESCAN_FN_BODY
+                                                  : PRESCAN_TASK_BODY)
+                            : (odin3_ast_id){0};
+    odin3_ast_id *slot = st == ODIN3_OK && body.v != 0 ? odin3_vec_push(work) : NULL;
+    if (slot != NULL) {
+        *slot = body;
+    } else if (st == ODIN3_OK && body.v != 0) {
+        st = ODIN3_ERR_NO_MEMORY;
+    }
+    return st;
+}
+
+/* One root of the walk: the assignments below it are marked, its callees queued. */
+static odin3_status scan_root(odin3_elab2 *e2, odin3_u64map *seen, odin3_vec *work,
+                              odin3_ast_id root) {
     odin3_ast_cursor cur;
-    odin3_status st = odin3_ast_cursor_init(&cur, e2->elab, always);
+    odin3_status st = odin3_ast_cursor_init(&cur, e2->elab, root);
     odin3_ast_event ev;
     odin3_ast_id node;
     while (st == ODIN3_OK && odin3_ast_cursor_next(&cur, &ev, &node)) {
         odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, node);
-        if (ev == ODIN3_AST_ENTER &&
-            (kind == ODIN3_AST_BLOCKING_ASSIGN || kind == ODIN3_AST_NONBLOCKING_ASSIGN)) {
+        if (ev != ODIN3_AST_ENTER) {
+            continue;
+        }
+        if (kind == ODIN3_AST_BLOCKING_ASSIGN || kind == ODIN3_AST_NONBLOCKING_ASSIGN) {
             st = mark_lvalue(e2, odin3_ast_child(e2->elab, node, 0));
+        } else if (kind == ODIN3_AST_CALL || kind == ODIN3_AST_TASK_CALL) {
+            st = scan_callee(e2, seen, work, node);
         }
     }
     odin3_ast_cursor_free(&cur);
+    return st;
+}
+
+/* Every blocking and nonblocking assignment below one ALWAYS and below the bodies of the tasks and
+ * functions it calls, each callee once (so a recursive one ends). */
+static odin3_status scan_one_always(odin3_elab2 *e2, odin3_ast_id always) {
+    odin3_vec work;
+    odin3_vec_init(&work, sizeof(odin3_ast_id));
+    odin3_u64map *seen = odin3_u64map_create(0);
+    odin3_ast_id *slot = seen != NULL ? odin3_vec_push(&work) : NULL;
+    odin3_status st = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    if (slot != NULL) {
+        *slot = always;
+    }
+    while (st == ODIN3_OK && work.len > 0) {
+        odin3_ast_id root = *(const odin3_ast_id *)odin3_vec_cat(&work, work.len - 1);
+        odin3_vec_pop(&work);
+        st = scan_root(e2, seen, &work, root);
+    }
+    odin3_vec_free(&work);
+    odin3_u64map_destroy(seen);
     return st;
 }
 

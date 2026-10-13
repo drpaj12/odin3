@@ -28,6 +28,7 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -47,7 +48,10 @@ typedef struct rm_run {
     int64_t low, high; /* its lowest and highest declared index */
     int64_t cursor, finish;
     int increment;
-    bool finished; /* the cursor has passed the last word to write */
+    bool finished; /* the cursor has passed the last word to write (an explicit finish) */
+    bool full;     /* the cursor has left the array: the words that follow are dropped */
+    uint32_t dropped;
+    int64_t first_dropped; /* the address of the first of them */
 } rm_run;
 
 /* `bad address '@zz' in 'f' line N`, `bad word 'g' in 'f' line N`, at the call. */
@@ -247,9 +251,12 @@ static bool word_bits(const char *token, bool hex, uint8_t *bits, uint32_t width
     return len > 0;
 }
 
-/* The word at the cursor, when it is inside the array. */
+/* The word at the cursor, when it is inside the array; one outside it is counted for the warning.
+ */
 static odin3_status rm_store(rm_run *rm, const uint8_t *bits) {
     if (rm->cursor < rm->low || rm->cursor > rm->high) {
+        rm->first_dropped = rm->dropped == 0 ? rm->cursor : rm->first_dropped;
+        rm->dropped++;
         return ODIN3_OK;
     }
     odin3_status st = ODIN3_OK;
@@ -271,6 +278,16 @@ static bool rm_done(const rm_run *rm) {
            (rm->increment < 0 && rm->cursor < rm->low);
 }
 
+/* The cursor has passed the last word to write: at an explicit finish inside the array the load
+ * ends; past the end of the array the file is read on, to count the words it cannot place. */
+static void rm_stop(rm_run *rm) {
+    if (rm->cursor < rm->low || rm->cursor > rm->high) {
+        rm->full = true;
+    } else {
+        rm->finished = true;
+    }
+}
+
 /* The tokens of one line (the comments already blanked). */
 typedef struct rm_line {
     char *text;
@@ -286,6 +303,12 @@ static odin3_status rm_token(rm_run *rm, const rm_line *line, const char *token,
             return ODIN3_ERR_PARSE;
         }
         rm->cursor = address;
+        return ODIN3_OK;
+    }
+    if (rm->full) { /* past the end of the array (Yosys stops reading here): counted, not read */
+        rm->first_dropped = rm->dropped == 0 ? rm->cursor : rm->first_dropped;
+        rm->dropped++;
+        rm->cursor += rm->increment;
         return ODIN3_OK;
     }
     const odin3_elab_mem *mem = odin3_elab2_mem_get(rm->init->e2, rm->mem);
@@ -327,12 +350,16 @@ static odin3_status rm_tokens(rm_run *rm, rm_line *line, uint8_t *scratch) {
             break;
         }
         st = rm_token(rm, line, tok, scratch);
-        if (st == ODIN3_OK && tok[0] != '@' && rm_done(rm)) {
-            rm->finished = true;
-            break;
+        if (st == ODIN3_OK && tok[0] != '@' && !rm->full && rm_done(rm)) {
+            rm_stop(rm);
+            if (rm->finished) {
+                break;
+            }
         }
     }
-    rm->finished = rm->finished || rm_done(rm);
+    if (st == ODIN3_OK && !rm->full && rm_done(rm)) {
+        rm_stop(rm);
+    }
     return st;
 }
 
@@ -381,6 +408,13 @@ odin3_status odin3_elab2_readmem(const odin3_elab2 *e2, odin3_ast_id call,
     odin3_status st = rm_args(&rm);
     st = st != ODIN3_OK ? st : rm_read(&rm, &bytes);
     st = st != ODIN3_OK ? st : rm_parse(&rm, &bytes);
+    if (st == ODIN3_OK && rm.dropped > 0) {
+        odin3_elab2_warn(rm.init->e2, odin3_ast_loc(e2->elab, call),
+                         "%s of '%s' dropped %u word%s outside the array (the first at address "
+                         "%" PRId64 ")",
+                         rm.task, rm.file, rm.dropped, rm.dropped == 1 ? "" : "s",
+                         rm.first_dropped);
+    }
     odin3_file_bytes_free(&bytes);
     return st;
 }

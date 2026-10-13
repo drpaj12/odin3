@@ -111,9 +111,9 @@ odin3_status odin3_pg_assign(odin3_pg *pg, const odin3_pg_assign_req *req);
  * constant goes to the port. The variables have no sync action. One write port per statement is
  * added to the memory, in the order the statements are built (source order). rhs->width must be
  * the target's. A block that is not clocked by exactly one edge is `array 'm' cannot be a memory
- * (it is written in a combinational block) and (* nomem2reg *) is set` (located, counted,
- * ODIN3_ERR_PARSE); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG (logged) for a target that is no
- * word of a memory or a width mismatch. Only valid inside a block.
+ * (it is written in a block without exactly one edge) and (* nomem2reg *) is set` (located,
+ * counted, ODIN3_ERR_PARSE); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG (logged) for a target that
+ * is no word of a memory or a width mismatch. Only valid inside a block.
  */
 odin3_status odin3_pg_mem_write(odin3_pg *pg, const odin3_pg_assign_req *req);
 

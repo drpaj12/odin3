@@ -353,13 +353,13 @@ word in one cycle are a race, §17 #66). A constant index is kept at its self-de
 (`m[2]` is a 32-bit integer: `ABITS` 32, as Yosys); an `addr` variable is the wider of the index and the
 smallest address width that numbers the words. (2) EL-39: a write in a block that has not exactly one edge
 event to an array that stayed a memory (`(* nomem2reg *)` exempts it from the mem2reg rules) is the
-located error `array 'm' cannot be a memory (it is written in a combinational block) and (* nomem2reg *) is
-set`, at the statement (Task 20's carry). A concatenation target with a word of a memory is split into one
+located error `array 'm' cannot be a memory (it is written in a block without exactly one edge) and (* nomem2reg *)
+is set`, at the statement (Task 20's carry). A concatenation target with a word of a memory is split into one
 write per part, the least significant first, the value taken once at the target's width (Yosys's
 `$splitcmplxassign`); a word in a nested concatenation, and a non-constant bit or part select of a word
 (`m[i][b] <= x`; Yosys shifts the data and the enable) are located errors (§17 #65). Messages added to
 §9.1: `memory word of 'm' in a concatenation target is not supported`, `array 'm' cannot be a memory (it is
-written in a combinational block) and (* nomem2reg *) is set`. (3) EL-40: the initial values are run after
+written in a block without exactly one edge) and (* nomem2reg *) is set`. (3) EL-40: the initial values are run after
 the instances and the continuous assignments (end of emission step 5, still a step that may merge nets), not
 at step 3, because the classification of a result needs the driver tables of those steps; the results are the
 same. An `initial` block without locals is run statement by statement, so one statement that is not constant
@@ -2692,8 +2692,11 @@ and reported, never relaxed (2A's rule).
 | 63 | a register-array word with a variable index is supported for one-dimensional arrays only; a multi-dimensional one is the located error `non-constant index into the multi-dimensional register array 'm' is not supported` | Yosys's `mem2reg_as_needed_pass2` handles every dimension | the row-major address as a case selector | rare; the flattened address needs `$mul`/`$add` cells before the switch |
 | 64 | the variables of a memory write join the open switches when the statement is built, and the root's start-of-block actions go in then | Yosys inserts `addr = x; data = x; en = 0` at the start of the top block when it simplifies the statement, before any process is generated | the scan listing them (it cannot count the writes of an unrolled loop or a call) | none in the body: the same cases, actions and temporaries a listed variable would give (bridge `mem-bridge`) |
 | 65 | a word of a memory inside a nested concatenation target, and a non-constant bit or part select of a word, are located errors | Yosys splits the outer concatenation only (a nested one is not split) and shifts the data and the enable for a variable select | — | rare; both are refused loudly, never mis-written |
-| 66 | two `always` blocks writing one word in one cycle: the later block's port wins | Yosys gives a port priority over the ports of its own process only (`current_memwr_visible`); across processes the result is undefined | IEEE 1364-2005 11: a race | `elab-equiv` reports NOT equivalent on a source that enables both (the bridge sources keep the enables exclusive) |
+| 66 | two `always` blocks writing one word in one cycle: the later block's port wins (the priority is `$mem` v1's implicit later-port-wins; no `WR_PRIORITY_MASK` is emitted) | Yosys gives a port priority over the ports of its own process only (`current_memwr_visible`); across processes the result is undefined | IEEE 1364-2005 11: a race | `elab-equiv` reports NOT equivalent on a source that enables both (the bridge sources keep the enables exclusive) |
 | 67 | `$readmemh/b` inside an `if` or a loop of an `initial` is a located error | Yosys reads it when the condition is constant or the loop unrolls | — | rare; the statement-level `$readmem` is the supported form |
+| 68 | `$readmemh/b` loads the words that fit and warns once per call (`$readmemh of 'f' dropped N words outside the array (the first at address A)`) when the file has words past the last array word or after an `@addr` outside the array | Yosys drops those words silently | IEEE 1364-2005 17.2.8: an address outside the range is an error and the load ends | a write is never dropped silently; the in-range words are kept |
+| 69 | a register array read with a variable index past its end (`m[ra]`, 3-bit `ra`, 4 words) reads x | Yosys's mem2reg truncates the address to `ceil_log2(size)` bits, so `ra` = 4..7 aliases words 0..3 | IEEE 1364-2005 7.4.1: an out-of-range read is x | `elab-equiv` reports NOT equivalent on such a source (the bridge sources keep the index in range); #50 covers constant indices |
+| 70 | a task call as a statement of an `initial` block is not applied: `task call in an initial block is not applied and is ignored` | Yosys applies a constant call (`initial tk(7);` gives the register init 7) | — | rare; assign in the `initial` block itself |
 
 ## 18. Implementation split (EL-51)
 

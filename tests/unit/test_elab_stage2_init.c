@@ -318,8 +318,8 @@ static void test_nomem2reg_combinational_write(void) {
                     "  always @* if (we) m[wa] = d;\n"
                     "  assign q = m[ra];\nendmodule\n");
     pt_expect_error((at_loc){3, 21},
-                    "array 'm' cannot be a memory (it is written in a combinational block) and "
-                    "(* nomem2reg *) is set");
+                    "array 'm' cannot be a memory (it is written in a block without exactly one "
+                    "edge) and (* nomem2reg *) is set");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
 }
 
@@ -374,6 +374,44 @@ static void test_initial_value_of_a_register(void) {
         pt_id_of("init"));
     TEST_ASSERT_NOT_NULL(init);
     TEST_ASSERT_EQUAL_STRING("1010", bits_text(init)); /* 4'b0101, LSB first */
+}
+
+/* Task 24 fix round 1 (I1): a task or function called from an always block assigns the register,
+ * so its initial value is the wire's init attribute (a bound constant would give two drivers). */
+static void expect_r_init_is_3(void) {
+    const odin3_value *init = odin3_attr_get(
+        pt_top(), (odin3_objref){ODIN3_OBJ_WIRE, odin3_module_find_wire(pt_top(), pt_id_of("r")).v},
+        pt_id_of("init"));
+    TEST_ASSERT_NOT_NULL(init);
+    TEST_ASSERT_EQUAL_STRING("1100", bits_text(init));
+}
+
+static void test_initial_register_assigned_in_task(void) {
+    pt_read_clean("module t(input c, input [3:0] a, output [3:0] q);\n"
+                  "  reg [3:0] r = 4'd3;\n"
+                  "  task tk(input [3:0] x); begin r <= x; end endtask\n"
+                  "  always @(posedge c) tk(a);\n"
+                  "  assign q = r;\nendmodule\n");
+    expect_r_init_is_3();
+    pt_expect_ir_ok();
+}
+
+static void test_initial_register_assigned_in_function(void) {
+    pt_read_clean("module t(input c, input [3:0] a, output [3:0] q, output reg [3:0] p);\n"
+                  "  reg [3:0] r = 4'd3;\n"
+                  "  function [3:0] f(input [3:0] x); begin r = x; f = x + 1; end endfunction\n"
+                  "  always @(posedge c) p <= f(a);\n"
+                  "  assign q = r;\nendmodule\n");
+    expect_r_init_is_3();
+    pt_expect_ir_ok();
+}
+
+static void test_initial_task_call_not_applied(void) {
+    read_ok("module t(output reg [3:0] r);\n"
+            "  task tk(input [3:0] x); begin r = x; end endtask\n"
+            "  initial tk(7);\nendmodule\n");
+    pt_expect_warning((at_loc){3, 11},
+                      "task call in an initial block is not applied and is ignored");
 }
 
 static void test_initial_memory_contents(void) {
@@ -535,6 +573,34 @@ static void test_readmem_errors(void) {
     pt_read_files(word, 2, "sub/t.v");
     et_expect(&pt_rs, ODIN3_LOG_ERROR,
               "sub/t.v:3:11: error: bad word 'g1' in 'bad_word.hex' line 1");
+}
+
+/* Words the array cannot hold are dropped with one warning that names the first address. */
+static void test_readmem_dropped_words_warn(void) {
+    read_with_file("sub/drop_after_address.hex",
+                   "module t(input [1:0] ra, output [7:0] q);\n"
+                   "  reg [7:0] m [0:3];\n"
+                   "  initial $readmemh(\"drop_after_address.hex\", m);\n"
+                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("11 22 xx xx", words_of_init());
+    et_expect(&pt_rs, ODIN3_LOG_WARN,
+              "sub/t.v:3:11: warning: $readmemh of 'drop_after_address.hex' dropped 6 words "
+              "outside the array (the first at address 7)");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_soft_warnings());
+}
+
+static void test_readmem_words_past_the_end_warn(void) {
+    read_with_file("sub/drop_past_end.hex", "module t(input [1:0] ra, output [7:0] q);\n"
+                                            "  reg [7:0] m [0:3];\n"
+                                            "  initial $readmemh(\"drop_past_end.hex\", m);\n"
+                                            "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("xx 44 55 66", words_of_init());
+    et_expect(&pt_rs, ODIN3_LOG_WARN,
+              "sub/t.v:3:11: warning: $readmemh of 'drop_past_end.hex' dropped 2 words "
+              "outside the array (the first at address 4)");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_soft_warnings());
 }
 
 static void test_readmem_outside_initial(void) {
@@ -804,6 +870,9 @@ int main(void) {
     RUN_TEST(test_concatenation_target);
     RUN_TEST(test_variable_bit_of_a_word);
     RUN_TEST(test_initial_value_of_a_register);
+    RUN_TEST(test_initial_register_assigned_in_task);
+    RUN_TEST(test_initial_register_assigned_in_function);
+    RUN_TEST(test_initial_task_call_not_applied);
     RUN_TEST(test_initial_memory_contents);
     RUN_TEST(test_initial_statement_not_constant);
     RUN_TEST(test_initial_block_statements_are_separate);
@@ -813,6 +882,8 @@ int main(void) {
     RUN_TEST(test_readmemh);
     RUN_TEST(test_readmemb_with_start_and_finish);
     RUN_TEST(test_readmem_errors);
+    RUN_TEST(test_readmem_dropped_words_warn);
+    RUN_TEST(test_readmem_words_past_the_end_warn);
     RUN_TEST(test_readmem_outside_initial);
     RUN_TEST(test_readmem_size_cap);
     RUN_TEST(test_inlined_task_output_counts_as_blocking);
