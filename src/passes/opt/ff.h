@@ -31,6 +31,8 @@
  *   beyond the briefed fields, so that a $_FF_ is not taken for an FF without control inputs.
  * - prov: the record of the node it was loaded from (kept by ff_slice, 0 for none); ff_emit gives
  *   a new cell a DERIVED record of it (agent default, beyond the briefed fields).
+ * - prov_final: a new cell takes prov itself instead of a DERIVED record of it (a caller that made
+ *   the record it wants, as opt_dff's SRST/EN groups do with parents [FF, absorbed muxes]).
  */
 typedef struct odin3_ffdata {
     odin3_node_id node;
@@ -42,6 +44,7 @@ typedef struct odin3_ffdata {
     odin3_vec val_arst, val_srst, val_init;
     bool has_gclk;
     odin3_prov_id prov;
+    bool prov_final;
 } odin3_ffdata;
 
 /* Bit indices into an FF, for ff_slice. */
@@ -110,7 +113,8 @@ odin3_status odin3_ff_emit(odin3_opt_ctx *oc, odin3_ffdata *ff, odin3_node_id *o
 /*
  * Yosys ff.remove() + module->connect(Q, src): the live FF node goes, the init of its Q nets with
  * it, and its Q net k is tied to src[k] (kit_connect: the Q net merged into src[k]; queued
- * instead under oc->defer_ties). n is the width of its Q port. INVALID_ARG (logged) for a node
+ * instead under oc->defer_ties); src[k] equal to Q net k hands the net to another driver (init kept,
+ * nothing merged). n is the width of its Q port. INVALID_ARG (logged) for a node
  * that is not a live FF or another n; NO_MEMORY before the delete leaves the IR as it was (the
  * removed inits written back); kit_connect's half-done failures otherwise.
  */
@@ -121,7 +125,9 @@ odin3_status odin3_ff_remove_tie(odin3_opt_ctx *oc, odin3_node_id node, const od
  * Yosys `ff = ff.slice(keep); ff.cell = cell; ff.emit()` plus the `module->connect(q_i, src)` of
  * the bits it dropped: ff->node is a live FF whose Q nets are sig_q (the bits kept) and the
  * drops of ties[0 .. n_ties) (the others, once each); ties[i].drop is a Q net given up and
- * ties[i].keep the net it is tied to (module->connect). The cell ff now describes is made on the
+ * ties[i].keep the net it is tied to (module->connect); keep == drop means the net is handed to
+ * another driver: its init stays and nothing is merged (opt_dff's slices, built on the same Q net).
+ * The cell ff now describes is made on the
  * kept Q nets, with the old node's attributes, then the old node goes, the given-up bits have
  * their init removed and are tied, and the new node takes the old name; *out = the new node, and
  * ff->node = it. With width 0 left the whole node goes (every Q net tied); with no control left

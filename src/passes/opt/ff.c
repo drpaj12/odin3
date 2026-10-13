@@ -619,6 +619,9 @@ odin3_status odin3_ff_remove_tie(odin3_opt_ctx *oc, odin3_node_id node, const od
         odin3_log(ODIN3_LOG_ERROR, "opt: ff_remove_tie: %u sources for %u Q bits", n, width);
         st = ODIN3_ERR_INVALID_ARG;
     }
+    for (uint32_t k = 0; st == ODIN3_OK && k < width; k++) {
+        qnets[k] = qnets[k].v == src[k].v ? (odin3_net_id){0} : qnets[k]; /* handed on: init kept */
+    }
     st = st == ODIN3_OK ? inits_take(oc, qnets, width, saved) : st;
     if (st == ODIN3_OK) {
         odin3_kit_conn conn = {node, port, src, width};
@@ -766,7 +769,8 @@ static odin3_status plan_open(const odin3_opt_ctx *oc, odin3_ffdata *ff, emit_pl
 /* A DERIVED record of ff->prov in the current operation (one is begun if none), 0 without. */
 static odin3_status new_prov(odin3_opt_ctx *oc, const odin3_ffdata *ff, odin3_prov_id *out) {
     *out = (odin3_prov_id){0};
-    if (ff->prov.v == 0) {
+    if (ff->prov.v == 0 || ff->prov_final) {
+        *out = ff->prov;
         return ODIN3_OK;
     }
     if (oc->pass->op == 0) {
@@ -976,7 +980,8 @@ static odin3_status shrink_ties(odin3_opt_ctx *oc, const odin3_ffdata *ff, bool 
         return ODIN3_ERR_NO_MEMORY;
     }
     for (uint32_t i = 0; i < job->n_ties; i++) {
-        job->nets[i] = job->ties[i].drop;
+        bool handed = job->ties[i].drop.v == job->ties[i].keep.v; /* init kept, nothing merged */
+        job->nets[i] = handed ? (odin3_net_id){0} : job->ties[i].drop;
         job->src[i] = job->ties[i].keep;
     }
     odin3_status st = ODIN3_OK;

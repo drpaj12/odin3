@@ -13,6 +13,7 @@
 #include "passes/opt/ff.h"
 #include "passes/opt/kit.h"
 #include "passes/opt/opt.h"
+#include "util/u64map.h"
 #include "util/vec.h"
 
 #include <stdbool.h>
@@ -21,12 +22,29 @@
 enum { ODIN3_DFF_LABEL_LEN = 128, ODIN3_DFF_TYPE_LEN = 32 };
 
 /*
+ * The module's mux bits as they were when the pass began (Yosys's bit2mux and bitusers, built once
+ * per worker): the Y net of each bit of a $mux, $pmux or $_MUX_, the node and bit it is, its
+ * readers then and the indices of the node's A, B and S ports. index maps a Y net to its entry.
+ */
+typedef struct odin3_dff_muxbit {
+    uint32_t net, node, bit, users, port_a, port_b, port_s;
+} odin3_dff_muxbit;
+
+typedef struct odin3_dff_muxes {
+    odin3_vec bits;
+    odin3_u64map *index;
+} odin3_dff_muxes;
+
+/*
  * The state of one FF's visit.
  * - ff: the FF as the rules have left it (Yosys `ff`); cell: the node it was loaded from (Yosys
  *   `cell`), live until the commit; width0: the width of that node's Q.
  * - pend: odin3_net_pair {keep = what a given-up Q bit is tied to, drop = its Q net}.
  * - changed, gone: the FF changed / its node is gone (a rule removed it).
  * - n_changed, n_bits: this call's totals.
+ * - counted: a commit already made this visit's changes (rules 10 and 11 re-emit the FF at once).
+ * - muxes, queue: the mux snapshot of the module, and the work list (node IDs) the groups of
+ *   rules 10 and 11 push the FFs they make on.
  */
 typedef struct odin3_dff_state {
     odin3_opt_ctx *oc;
@@ -37,8 +55,10 @@ typedef struct odin3_dff_state {
     char label[ODIN3_DFF_LABEL_LEN];
     odin3_vec pend;
     odin3_prov_id prov;
-    bool prov_ready, changed, gone;
+    bool prov_ready, changed, gone, counted;
     uint32_t n_changed, n_bits;
+    odin3_dff_muxes muxes;
+    odin3_vec *queue;
 } odin3_dff_state;
 
 typedef odin3_status (*odin3_dff_rule_fn)(odin3_dff_state *ds);
@@ -82,6 +102,10 @@ odin3_status odin3_dff_gate_bin(odin3_dff_state *ds, const char *op, const odin3
                                 const odin3_vec *rhs, odin3_vec *dst);
 odin3_status odin3_dff_gate_mux(odin3_dff_state *ds, const odin3_vec *lhs, const odin3_vec *rhs,
                                 odin3_net_id sel, odin3_vec *dst);
+odin3_status odin3_dff_gate_reduce(odin3_dff_state *ds, const char *op, const odin3_vec *vec,
+                                   odin3_net_id *out);
+odin3_status odin3_dff_gate_ne(odin3_dff_state *ds, const odin3_vec *lhs, const odin3_vec *rhs,
+                               odin3_net_id *out);
 odin3_status odin3_dff_not_net(odin3_dff_state *ds, odin3_net_id net, odin3_net_id *out);
 odin3_status odin3_dff_and_nets(odin3_dff_state *ds, odin3_net_id lhs, odin3_net_id rhs,
                                 odin3_net_id *out);
@@ -96,6 +120,50 @@ odin3_status odin3_dff_rule_en(odin3_dff_state *ds);
 odin3_status odin3_dff_rule_clk(odin3_dff_state *ds);
 odin3_status odin3_dff_rule_dq(odin3_dff_state *ds);
 odin3_status odin3_dff_rule_adq(odin3_dff_state *ds);
+
+/* --- dff_muxes.c: the mux snapshot and the per-bit searches of rules 10 and 11 ----------------- */
+
+/*
+ * One FF bit's merge plan. d: the D net left once the muxes are eaten; key: the group key (words
+ * of the plan's keys: the number of controls, the controls as (net << 1 | polarity), then the
+ * patterns, each as its length and its (net << 1 | value) words); nodes: the muxes the bit
+ * absorbed (words of the plan's nodes); reset: the reset value SRST collected; merged: the bit
+ * gets a control (else it stays in the FF).
+ */
+typedef struct odin3_dff_bitplan {
+    odin3_net_id d;
+    uint32_t key_off, key_len, node_off, node_len;
+    odin3_bit reset;
+    bool merged;
+} odin3_dff_bitplan;
+
+/* A mux input pin that read Q and takes x (the feedback patterns); old is the net it read. */
+typedef struct odin3_dff_xmark {
+    odin3_pin_id pin;
+    odin3_net_id old;
+} odin3_dff_xmark;
+
+typedef struct odin3_dff_plan {
+    odin3_vec bits;  /* odin3_dff_bitplan, one per FF bit */
+    odin3_vec keys;  /* uint64_t */
+    odin3_vec nodes; /* uint32_t */
+    odin3_vec marks; /* odin3_dff_xmark */
+} odin3_dff_plan;
+
+void odin3_dff_plan_init(odin3_dff_plan *plan);
+void odin3_dff_plan_free(odin3_dff_plan *plan);
+
+odin3_status odin3_dff_muxes_build(odin3_dff_state *ds);
+void odin3_dff_muxes_free(odin3_dff_muxes *muxes);
+
+/* Appends the plan of FF bit idx (Yosys rule 10's / rule 11's per-bit loop). */
+odin3_status odin3_dff_plan_srst_bit(odin3_dff_state *ds, odin3_dff_plan *plan, uint32_t idx);
+odin3_status odin3_dff_plan_en_bit(odin3_dff_state *ds, odin3_dff_plan *plan, uint32_t idx);
+
+/* --- dff_merge.c: rules 10 and 11 ------------------------------------------------------------- */
+
+odin3_status odin3_dff_rule_srst_merge(odin3_dff_state *ds);
+odin3_status odin3_dff_rule_en_merge(odin3_dff_state *ds);
 
 /* --- dff_constbits.c -------------------------------------------------------------------------- */
 

@@ -58,6 +58,7 @@ void odin3_dff_state_init(odin3_dff_state *ds, odin3_opt_ctx *oc) {
     ds->oc = oc;
     odin3_ffdata_init(&ds->ff);
     odin3_vec_init(&ds->pend, sizeof(odin3_net_pair));
+    odin3_vec_init(&ds->muxes.bits, sizeof(odin3_dff_muxbit));
 }
 
 void odin3_dff_state_free(odin3_dff_state *ds) {
@@ -180,7 +181,7 @@ odin3_status odin3_dff_state_load(odin3_dff_state *ds, odin3_node_id node, bool 
     odin3_ffdata_free(&ds->ff);
     odin3_vec_clear(&ds->pend);
     ds->cell = node;
-    ds->changed = ds->gone = ds->prov_ready = false;
+    ds->changed = ds->gone = ds->prov_ready = ds->counted = false;
     *usable = false;
     odin3_status st = odin3_ff_load(ds->oc, node, &ds->ff);
     if (st != ODIN3_OK) {

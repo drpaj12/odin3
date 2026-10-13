@@ -39,21 +39,35 @@
 
 /* --- one FF ----------------------------------------------------------------------------------- */
 
-/* The rules of §9.3 in order (Task 12 adds 10 and 11 after the last). */
+/* The rules of §9.3 in order: 2-9, then 10 (SRST merging) and 11 (EN merging). */
 static const odin3_dff_rule_fn k_rules[] = {
     odin3_dff_rule_sr, odin3_dff_rule_aload, odin3_dff_rule_arst, odin3_dff_rule_srst,
-    odin3_dff_rule_en, odin3_dff_rule_clk,   odin3_dff_rule_dq,   odin3_dff_rule_adq};
+    odin3_dff_rule_en, odin3_dff_rule_clk,   odin3_dff_rule_dq,   odin3_dff_rule_adq,
+    odin3_dff_rule_srst_merge, odin3_dff_rule_en_merge};
 
-/* Rule 12: a changed FF is re-emitted (Yosys `ff.emit()`), on the bits left of its node's Q. */
+/* Rule 12: a changed FF is re-emitted (Yosys `ff.emit()`), on the bits left of its node's Q. The
+ * visit then goes on with the node made (rules 10 and 11 commit in the middle of a visit). */
 odin3_status odin3_dff_commit(odin3_dff_state *ds) {
     odin3_node_id out = {0};
     if (ds->gone || !ds->changed) {
         return ODIN3_OK;
     }
     ds->ff.node = ds->cell;
-    return ds->ff.width == ds->width0
-               ? odin3_ff_emit(ds->oc, &ds->ff, &out)
-               : odin3_ff_emit_shrunk(ds->oc, &ds->ff, ds->pend.data, (uint32_t)ds->pend.len, &out);
+    odin3_status st = ds->ff.width == ds->width0
+                          ? odin3_ff_emit(ds->oc, &ds->ff, &out)
+                          : odin3_ff_emit_shrunk(ds->oc, &ds->ff, ds->pend.data,
+                                                 (uint32_t)ds->pend.len, &out);
+    if (st == ODIN3_OK) {
+        ds->counted = true;
+        ds->changed = false;
+        ds->gone = out.v == 0;
+        ds->cell = out.v != 0 ? out : ds->cell;
+        ds->ff.node = out;
+        ds->width0 = ds->ff.width;
+        ds->prov_ready = false;
+        odin3_vec_clear(&ds->pend);
+    }
+    return st;
 }
 
 static odin3_status visit_ff(odin3_dff_state *ds, odin3_node_id node) {
@@ -64,7 +78,7 @@ static odin3_status visit_ff(odin3_dff_state *ds, odin3_node_id node) {
         st = k_rules[i](ds);
     }
     st = st == ODIN3_OK && usable ? odin3_dff_commit(ds) : st;
-    ds->n_changed += st == ODIN3_OK && usable && (ds->gone || ds->changed) ? 1U : 0U;
+    ds->n_changed += st == ODIN3_OK && usable && (ds->gone || ds->changed || ds->counted) ? 1U : 0U;
     return st;
 }
 
@@ -87,11 +101,15 @@ static odin3_status module_rules(odin3_dff_state *ds) {
     odin3_vec list;
     odin3_vec_init(&list, sizeof(uint32_t));
     odin3_status st = collect_ffs(ds->oc, &list);
-    /* the list grows when Task 12's groups push the FFs they make */
+    st = st == ODIN3_OK ? odin3_dff_muxes_build(ds) : st;
+    ds->queue = &list;
+    /* the list grows when the groups of rules 10 and 11 push the FFs they make */
     for (size_t i = 0; st == ODIN3_OK && i < list.len; i++) {
         st = visit_ff(ds, (odin3_node_id){*(const uint32_t *)odin3_vec_cat(&list, i)});
     }
+    ds->queue = NULL;
     odin3_vec_free(&list);
+    odin3_dff_muxes_free(&ds->muxes);
     return st;
 }
 
