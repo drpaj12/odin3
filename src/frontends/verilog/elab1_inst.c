@@ -179,6 +179,52 @@ static odin3_status ty_call(odin3_elab1_env *env, odin3_ast_id call, odin3_etype
     return ty_function(env, idx, out);
 }
 
+/* The declaration of `name` among the locals of a named begin/end block of a process (a VAR_DECL
+ * or NET_DECL declarator); the declaration node, or 0. */
+static odin3_ast_id ty_block_decl(const odin3_ast *ast, odin3_ast_id block, uint32_t name) {
+    odin3_ast_span locals = odin3_ast_children(ast, odin3_ast_child(ast, block, 0));
+    for (uint32_t i = 0; i < locals.n; i++) {
+        odin3_ast_kind kind = odin3_ast_kind_of(ast, locals.ids[i]);
+        if (kind != ODIN3_AST_VAR_DECL && kind != ODIN3_AST_NET_DECL) {
+            continue;
+        }
+        odin3_ast_span kids = odin3_ast_children(ast, locals.ids[i]);
+        for (uint32_t k = odin3_ast_slot_count(kind); k < kids.n; k++) {
+            if (odin3_ast_name(ast, kids.ids[k]) == name) {
+                return locals.ids[i];
+            }
+        }
+    }
+    return (odin3_ast_id){0};
+}
+
+/* The type of `blk.count`, a variable or net declared in a named begin/end block of an always or
+ * initial (I-1): the binder finds the symbol, the connection typer needs its width and sign. */
+static odin3_status ty_proc_member(odin3_elab1_env *env, odin3_ast_id hier, odin3_ast_id block,
+                                   odin3_etype *out) {
+    const odin3_ast *ast = env->e1->parsed;
+    odin3_ast_id last = odin3_ast_child(ast, hier, odin3_ast_nchild(ast, hier) - 1U);
+    odin3_ast_id decl = odin3_ast_nchild(ast, hier) == 2
+                            ? ty_block_decl(ast, block, odin3_ast_name(ast, last))
+                            : (odin3_ast_id){0};
+    if (decl.v == 0) {
+        return ty_error(env, hier, odin3_ast_name_str(ast, last));
+    }
+    bool net = odin3_ast_kind_of(ast, decl) == ODIN3_AST_NET_DECL;
+    bool integer = !net && odin3_ast_sub(ast, decl) == ODIN3_AST_VAR_DECL_INTEGER;
+    odin3_ast_id range = odin3_ast_child(ast, decl, net ? 1 : 0);
+    bool is_signed = integer || (odin3_ast_flags(ast, decl) & ODIN3_AST_F_VAR_DECL_SIGNED) != 0;
+    *out = (odin3_etype){integer ? TY_INTEGER_BITS : 1, is_signed, false};
+    int64_t msb = 0;
+    int64_t lsb = 0;
+    odin3_status st =
+        !integer && range.v != 0 ? odin3_elab1_env_range(env, range, &msb, &lsb) : ODIN3_OK;
+    if (st == ODIN3_OK && !integer && range.v != 0) {
+        out->width = (uint32_t)(msb >= lsb ? msb - lsb : lsb - msb) + 1U;
+    }
+    return st;
+}
+
 static odin3_status ty_leaf(void *user, odin3_ast_id node, odin3_etype *out) {
     odin3_elab1_env *env = user;
     switch (odin3_ast_kind_of(env->e1->parsed, node)) {
@@ -188,9 +234,13 @@ static odin3_status ty_leaf(void *user, odin3_ast_id node, odin3_etype *out) {
         return ty_ident(env, node, out);
     case ODIN3_AST_CALL:
         return ty_call(env, node, out);
-    default: { /* a HIER_NAME into the generate blocks (G7) */
+    default: { /* a HIER_NAME into the generate blocks (G7) or a named block of a process (I-1) */
         uint32_t idx = 0;
-        odin3_status st = odin3_elab1_scope_target(env, node, &idx);
+        odin3_ast_id block = {0};
+        odin3_status st = odin3_elab1_scope_proc(env, node, &block, &idx);
+        if (st == ODIN3_OK && block.v != 0) {
+            return ty_proc_member(env, node, block, out);
+        }
         return st != ODIN3_OK ? st : ty_slot(env, node, idx, out);
     }
     }

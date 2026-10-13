@@ -69,15 +69,22 @@ typedef struct odin3_width_args {
 } odin3_width_args;
 
 /*
- * A compiled width expression (the fourth width rule), produced outside the IR (the tech library,
- * src/techlib). The IR only calls its hooks, which never log: the IR reports their reason with the
- * port and cell type. check runs when a definition is registered: true when every identifier of
- * the expression names an INT parameter of def, else false with the reason in *why. eval computes
- * the width: ODIN3_ERR_INVALID_ARG when a parameter it reads is not an INT or the result is not an
- * integer in [0, UINT32_MAX]; ODIN3_ERR_NO_MEMORY when an unusually deep expression cannot get
+ * A compiled width expression (the fourth width rule), produced outside the IR by two producers:
+ * the tech library (src/techlib), whose expressions read INT parameters, and the elaborator
+ * (src/frontends/elab/elab2_bbox.c, 2D black-box widths), whose expressions look the cell's
+ * parameter values up in a closed table of the parameter sets an instance uses and may read
+ * parameters of any kind (INT, STRING, BITS). The IR only calls the hooks, which never log: the
+ * IR reports their reason with the port and cell type. check runs when a definition is
+ * registered: false with the reason in *why when the expression cannot be used with def (the tech
+ * library's: an identifier that is not an INT parameter of def; the elaborator's: a table that
+ * does not fit def's parameters). eval computes the width: ODIN3_ERR_INVALID_ARG when a parameter
+ * it reads is of a kind it cannot use, when the result is not an integer in [0, UINT32_MAX], or
+ * (the elaborator's) when the parameter values are outside its table, so a width may be undefined
+ * for a parameter set; ODIN3_ERR_NO_MEMORY when an unusually deep expression cannot get
  * evaluation memory (typical expressions evaluate without allocating); *width is untouched on
  * failure. Registration never copies a width expression: it must live as long as every design
- * holding a type that uses it (a producer allocates it in odin3_celltype_arena).
+ * holding a type that uses it (a producer allocates it in odin3_celltype_arena or the design's
+ * arena).
  */
 struct odin3_width_expr {
     bool (*check)(const odin3_width_expr *wexpr, const odin3_celltype_def *def,
@@ -89,11 +96,13 @@ struct odin3_width_expr {
 
 /*
  * One port. Width rule, first match wins: width_fn (any function of the parameters), else
- * width_expr (an integer expression over INT parameters of the same type), else width_param (the
- * name of an INT parameter of the same type), else the constant width. scalar records whether the
- * port is written without brackets (writers reproduce it). is_signed records a signed module port
- * (odin3_module_add_port sets it; IR-7, 2D IR change C) for writers and the elaborator; it is
- * false on every other type. It is internal: the ABI's odin3_plugin_port has no sign.
+ * width_expr (an integer expression over INT parameters, or a lookup of all the parameter values
+ * in a closed table, see odin3_width_expr; a table's type accepts only its table's parameter
+ * sets), else width_param (the name of an INT parameter of the same type), else the constant
+ * width. scalar records whether the port is written without brackets (writers reproduce it).
+ * is_signed records a signed module port (odin3_module_add_port sets it; IR-7, 2D IR change C)
+ * for writers and the elaborator; it is false on every other type. It is internal: the ABI's
+ * odin3_plugin_port has no sign.
  */
 typedef struct odin3_port_def {
     const char *name;
@@ -175,7 +184,9 @@ const odin3_celltype_def *odin3_celltype_get(const odin3_design *design, odin3_c
  * Width of port `port` of type id for the given parameter values (one per parameter definition;
  * may be NULL only for a type without parameters). 0 when id or port is out of range, the width
  * parameter is not an INT in [0, UINT32_MAX], or the width expression fails to evaluate (logged;
- * also 0, unlogged, when a width expression runs out of memory).
+ * also 0, unlogged, when a width expression runs out of memory). Callers that size cells whose
+ * parameters may be outside a table width rule (a black box with several parameter sets) use
+ * odin3_celltype_port_width_checked, which tells that case from a width of 0.
  */
 uint32_t odin3_celltype_port_width(const odin3_design *design, odin3_celltype_id id,
                                    const odin3_value *params, uint32_t port);

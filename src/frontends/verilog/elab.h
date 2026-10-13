@@ -16,18 +16,21 @@
  * --auto-blackbox, and top 0) with the top filled from --top, else the project record
  * (odin3_elab1_options); (2) odin3_elab_stage1, and in Debug or under --check
  * odin3_ast_check(FULL) of the elaborated store (a violation is ODIN3_ERR_CHECK, a 2D bug);
- * (3) odin3_design_drop_ast(design, run, PARSED); (4) odin3_elab_stage2; (5)–(7) from Task 17
- * (the top, the summary line); (6) the elaborated store is handed to the design, which keeps it
- * under --keep-ast (ELABORATED or ALL) and otherwise destroys it at once.
+ * (3) odin3_design_drop_ast(design, run, PARSED); (4) odin3_elab_stage2, which also sets the top
+ * (5) and logs the summary line (7) on success; (6) the elaborated store (with the symbol table
+ * stage 2 bound) is handed to the design, which keeps it under --keep-ast (ELABORATED or ALL) and
+ * otherwise destroys it at once, also after a failed stage 2.
  *
  * Ownership (review I10): read_verilog hands parsed to the design (odin3_design_set_ast) before
  * the call. This function never destroys parsed itself: step (3) asks the design to drop it, which
  * destroys it unless the keep level is ALL, so it is gone before stage 2; read_verilog's own
  * drop afterwards is a no-op. A store the design does not hold is left to its caller.
  *
- * Returns ODIN3_OK, or ODIN3_ERR_PARSE after the located diagnostics (until Task 17, stage 2's
- * stub always: "elaboration is not available yet (2D)"), ODIN3_ERR_NO_MEMORY, ODIN3_ERR_CHECK, or
- * ODIN3_ERR_INVALID_ARG (logged) for a NULL ctx, design or parsed.
+ * Returns ODIN3_OK, or ODIN3_ERR_PARSE after the located diagnostics (stage 1's or stage 2's: a
+ * construct whose elaboration has not landed is point (l)'s "elaboration is not available yet
+ * (2D)"), ODIN3_ERR_NO_MEMORY, ODIN3_ERR_CHECK, or ODIN3_ERR_INVALID_ARG (logged) for a NULL
+ * ctx, design or parsed. After a failed stage 2 the design holds valid, incomplete modules and no
+ * top (EL-2).
  */
 odin3_status odin3_elab_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_ast *parsed,
                             const odin3_elab_opts *opts);

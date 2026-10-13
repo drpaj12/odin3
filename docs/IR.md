@@ -186,7 +186,11 @@ reader run is recorded from 1C on): the cell type, the parameter values the decl
 (`odin3_design_declared_model_params`), and the declaration as written — its ports in declared
 order with their widths and scalar flags (`odin3_design_declared_model_decl`) — so the BLIF writer
 reproduces the `.model … .blackbox` stanzas in their original order and spelling (PHASE1 #2).
-Ports are scalar or vector: a reader groups formals `a[0] … a[w-1]` into vector port `a` of
+A black box may carry table width rules (IR-8, amended 2026-10-12, approved by Peter 2026-10-13; the
+elaborator gives a `(* blackbox *)` module with several parameter sets exact per-set widths): the
+width of such a port is a lookup of the cell's parameter values, not an INT width parameter, so
+the ports it sizes are not inferred (above) and keep the declared model's defaults. Ports are
+scalar or vector: a reader groups formals `a[0] … a[w-1]` into vector port `a` of
 width *w*, and the port records whether it was written with brackets so writers reproduce `a[k]`
 versus `a` byte-for-byte (PHASE1 #2). Instances use the spelling of the declaration (Odin II
 writes a width-1 library port as `cin[0]`, Yosys+Parmys as `cin`).
@@ -214,9 +218,19 @@ spec §5.2. An entry declares:
   (`tristate`: output pins may legally share a net with other tristate/inout drivers);
 - ports: name, direction, scalar/vector, and a width rule — a constant, or the name of an
   integer parameter (`A_WIDTH`), or a function pointer for anything else, or (1G) a compiled
-  width expression over integer parameters (`A_WIDTH + B_WIDTH`) supplied by the tech library:
-  the IR calls its `check` hook at registration and its `eval` hook to size ports, never parses
-  it;
+  width expression over integer parameters (`A_WIDTH + B_WIDTH`) supplied by the tech library
+  or, for black boxes, by elaboration (a lookup of the cell's parameter values, any kind, in a
+  closed table of parameter sets; the width is undefined, an INVALID_ARG, outside it): the IR
+  calls its `check` hook at registration and its `eval` hook to size ports, never parses it.
+  Consumer obligation: a type with a table rule accepts only the parameter sets of its table.
+  Any other creator of such a node (a reader, a pass, a plugin, an ABI call) gets
+  `ODIN3_ERR_INVALID_ARG` at node creation, and check rule 5 (`port ... has no width for its
+  parameters`) reports it if one ever slips through. A BLIF `.subckt` of such a type derives
+  default parameters (IR-7b), so a design that uses several parameter sets of one black box does
+  not round-trip through BLIF. Callers that size ports of cells whose parameters may be unlisted
+  use `odin3_celltype_port_width_checked`: the unchecked `odin3_celltype_port_width` returns 0
+  for the undefined case;
+  (amended 2026-10-12, 2D black-box widths; approved by Peter 2026-10-13)
 - parameters: name, kind, default. Signedness of word-level operands is a parameter
   (`A_SIGNED`, `B_SIGNED`), as in Yosys;
 - hooks, each may be NULL: `verify` (consistency beyond widths), `const_value` (IR-4),

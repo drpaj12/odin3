@@ -40,7 +40,7 @@
 
 #define PENDING "elaboration is not available yet (2D)"
 
-enum { OOM_LIMIT = 200000, OOM_SETTLE = 64, SCRIPT_BUF = 1024 };
+enum { OOM_LIMIT = 200000, OOM_SETTLE = 64, OOM_HAND_OVER = 1024, SCRIPT_BUF = 1024 };
 
 static et_result rs;
 
@@ -616,7 +616,15 @@ static const pend_case k_pend_cases[] = {
     {ODIN3_ELAB_STAGE1, ODIN3_AST_DIRECTIVE, false}, /* landed by Task 16 */
     {ODIN3_ELAB_STAGE1, ODIN3_PEND_COMB_CALL, false},
     {ODIN3_ELAB_STAGE2, ODIN3_PEND_MEM_WRITE, true},
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_MODULE, true},
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_INSTANTIATION, false}, /* landed by Task 19 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_INSTANCE, false},      /* landed by Task 19 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_CONNECTION, false},    /* landed by Task 19 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_GATE_DECL, false},     /* landed by Task 19 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_CONT_ASSIGN, false},   /* landed by Task 18 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_BINARY, false},        /* landed by Task 18 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_MODULE, false},        /* landed by Task 17 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_NET_DECL, false},
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_ALWAYS, true},    /* Task 21 */
     {ODIN3_ELAB_STAGE2, ODIN3_AST_DEFPARAM, false}, /* never in an elaborated store */
     {0, ODIN3_AST_LIST, false},
     {ODIN3_ELAB_STAGE2 + 1, ODIN3_AST_LIST, false},
@@ -704,14 +712,14 @@ static odin3_status read_through_pass(odin3_keep_ast keep, body_probe *probe) {
     et_setup(&req, &rs);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(rs.design, keep));
     *probe = (body_probe){rs.design, 0, true};
-    odin3_elab_test_hooks hooks = {0, probe_body, probe};
+    odin3_elab_test_hooks hooks = {0, probe_body, probe, 0, NULL};
     odin3_elab_test_set_hooks(&hooks);
     return odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("e.v"));
 }
 
 static void test_ownership_keep_none(void) {
     body_probe probe;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_through_pass(ODIN3_KEEP_AST_NONE, &probe));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_through_pass(ODIN3_KEEP_AST_NONE, &probe));
     TEST_ASSERT_EQUAL_UINT32(1, probe.calls);
     TEST_ASSERT_FALSE(probe.parsed_held); /* dropped before stage 2 */
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_ast_count(rs.design));
@@ -721,7 +729,7 @@ static void test_ownership_keep_none(void) {
 
 static void test_ownership_keep_all(void) {
     body_probe probe;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_through_pass(ODIN3_KEEP_AST_ALL, &probe));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_through_pass(ODIN3_KEEP_AST_ALL, &probe));
     TEST_ASSERT_TRUE(probe.parsed_held);
     odin3_ast *found = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_find_ast(rs.design, (odin3_passrun_id){1},
@@ -738,7 +746,7 @@ static void test_ownership_keep_all(void) {
 /* --keep-ast (ELABORATED) keeps the elaborated store only. */
 static void test_ownership_keep_elaborated(void) {
     body_probe probe;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_through_pass(ODIN3_KEEP_AST_ELABORATED, &probe));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_through_pass(ODIN3_KEEP_AST_ELABORATED, &probe));
     TEST_ASSERT_FALSE(probe.parsed_held);
     TEST_ASSERT_EQUAL_UINT32(1, odin3_design_ast_count(rs.design));
     TEST_ASSERT_EQUAL_INT(ODIN3_AST_FORM_ELABORATED,
@@ -781,7 +789,7 @@ static odin3_status pass_on(const et_src *src, const char *args) {
 }
 
 static void test_entry_nolatches(void) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, pass_on(&k_t_empty, "--nolatches t.v"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass_on(&k_t_empty, "--nolatches t.v"));
     const odin3_elab_opts *seen = odin3_elab_test_last_opts();
     TEST_ASSERT_TRUE(seen->nolatches);
     TEST_ASSERT_FALSE(seen->nomem2reg);
@@ -789,7 +797,7 @@ static void test_entry_nolatches(void) {
 }
 
 static void test_entry_other_flags(void) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, pass_on(&k_t_empty, "--auto-blackbox --nomem2reg t.v"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass_on(&k_t_empty, "--auto-blackbox --nomem2reg t.v"));
     const odin3_elab_opts *seen = odin3_elab_test_last_opts();
     TEST_ASSERT_FALSE(seen->nolatches);
     TEST_ASSERT_TRUE(seen->nomem2reg);
@@ -800,7 +808,7 @@ static void test_entry_other_flags(void) {
 /* EL-2 step 1: --top fills the top read_verilog leaves 0. */
 static void test_entry_top_option(void) {
     set_cli_top("t");
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, pass_on(&k_t_empty, "t.v"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass_on(&k_t_empty, "t.v"));
     TEST_ASSERT_EQUAL_STRING("t", str(odin3_elab_test_last_opts()->top));
 }
 
@@ -809,11 +817,12 @@ static void test_entry_unknown_option(void) {
     et_expect(&rs, ODIN3_LOG_ERROR, "read_verilog: unknown option '--bogus'");
 }
 
-/* A clean stage 1 reaches stage 2's stub: the unlocated text and PARSE (until Task 17). */
-static void test_entry_reaches_stub(void) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, pass_on(&k_t_empty, "t.v"));
-    et_expect(&rs, ODIN3_LOG_ERROR, PENDING);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, et_count_with(&rs, ODIN3_LOG_ERROR, PENDING), et_log(&rs));
+/* A clean stage 1 reaches stage 2, which elaborates the empty module (Task 17). */
+static void test_entry_reaches_stage2(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass_on(&k_t_empty, "t.v"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, et_count_with(&rs, ODIN3_LOG_INFO, "read_verilog: elaborated top 't'"));
 }
 
 /* The elaborated store of a clean stage 1 passes check FULL; its shape. */
@@ -987,45 +996,53 @@ static void arm_failure(void *user, odin3_ast_id module) {
 /* A design under --keep-ast all holding 7 stores (a --parse-only read, then three reads), so the
  * next read's elaborated store is the 9th: handing it over grows the design's store list. */
 static void seven_stores(void) {
-    et_src src = {"e.v", "module e;\nendmodule\n"};
-    et_req req = {&src, 1, NULL, NULL, NULL};
+    static const et_src srcs[] = {{"e.v", "module e;\nendmodule\n"},
+                                  {"f.v", "module f;\nendmodule\n"},
+                                  {"g.v", "module g;\nendmodule\n"},
+                                  {"h.v", "module h;\nendmodule\n"}};
+    et_req req = {srcs, 4, NULL, NULL, NULL};
     et_setup(&req, &rs);
     odin3_log_set_sink(quiet_sink, NULL); /* the sink must not take the failure */
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(rs.design, ODIN3_KEEP_AST_ALL));
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("--parse-only e.v")));
-    for (int i = 0; i < 3; i++) {
-        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE,
-                              odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("e.v")));
+    static const char *const k_files[] = {"f.v", "g.v", "h.v"}; /* each module is new to the IR */
+    for (size_t i = 0; i < sizeof k_files / sizeof k_files[0]; i++) {
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_OK, odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr(k_files[i])));
     }
     TEST_ASSERT_EQUAL_UINT32(7, odin3_design_ast_count(rs.design));
 }
 
 /* n3 (m6): out of memory while the elaborated store is handed to the design wins over stage 2's
- * PARSE. Each allocation after stage 2 starts fails in turn until the store is held; while it is
- * not, the read must say NO_MEMORY. */
+ * status. Each allocation after stage 2's first body starts fails in turn until the read runs
+ * clean; a failure in stage 2 itself is NO_MEMORY with the store still handed over, one in the
+ * hand-over leaves it unheld and is NO_MEMORY too. */
+static bool hand_over_step(long after, int *missed) {
+    seven_stores();
+    arm_at arm = {after, false};
+    odin3_elab_test_hooks hooks = {0, arm_failure, &arm, 0, NULL};
+    odin3_elab_test_set_hooks(&hooks);
+    odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("e.v"));
+    odin3_util_set_alloc_fail_after(-1);
+    odin3_elab_test_set_hooks(NULL);
+    bool held = odin3_design_ast_count(rs.design) == 9;
+    TEST_ASSERT_EQUAL_UINT32(held ? 9 : 8, odin3_design_ast_count(rs.design));
+    *missed += held ? 0 : 1;
+    bool clean = st == ODIN3_OK;
+    TEST_ASSERT_TRUE(clean || st == ODIN3_ERR_NO_MEMORY);
+    TEST_ASSERT_TRUE(!clean || held);
+    et_free(&rs);
+    return clean;
+}
+
 static void test_oom_hand_over(void) {
     int missed = 0;
-    bool held = false;
-    for (long after = 0; after < OOM_SETTLE && !held; after++) {
-        seven_stores();
-        arm_at arm = {after, false};
-        odin3_elab_test_hooks hooks = {0, arm_failure, &arm};
-        odin3_elab_test_set_hooks(&hooks);
-        odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("e.v"));
-        odin3_util_set_alloc_fail_after(-1);
-        odin3_elab_test_set_hooks(NULL);
-        held = odin3_design_ast_count(rs.design) == 9;
-        if (!held) {
-            TEST_ASSERT_EQUAL_UINT32(8, odin3_design_ast_count(rs.design));
-            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
-            missed++;
-        } else {
-            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, st); /* the stage-2 stub */
-        }
-        et_free(&rs);
+    bool clean = false;
+    for (long after = 0; after < OOM_HAND_OVER && !clean; after++) {
+        clean = hand_over_step(after, &missed);
     }
-    TEST_ASSERT_TRUE(held);
+    TEST_ASSERT_TRUE(clean);
     TEST_ASSERT_TRUE(missed > 0);
 }
 
@@ -1080,7 +1097,7 @@ int main(void) {
     RUN_TEST(test_entry_other_flags);
     RUN_TEST(test_entry_top_option);
     RUN_TEST(test_entry_unknown_option);
-    RUN_TEST(test_entry_reaches_stub);
+    RUN_TEST(test_entry_reaches_stage2);
     RUN_TEST(test_entry_store_checks);
     RUN_TEST(test_misuse);
     RUN_TEST(test_oom);

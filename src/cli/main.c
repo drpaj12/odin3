@@ -33,6 +33,7 @@ enum { PROJECT_ARGS_BUF = 4096 + 32 };
 static void print_usage(FILE *out) {
     (void)fputs("usage: odin3 [options] [-p \"pass args; pass args\"]... [script.o3]...\n"
                 "       odin3 [options] --parse-only [file.v]...\n"
+                "       odin3 [options] --elab-only [file.v]...\n"
                 "\n"
                 "Runs pass scripts on one design, in command-line order, after looking up\n"
                 "every pass name in all of them. A script holds commands separated by ';' or\n"
@@ -56,6 +57,8 @@ static void print_usage(FILE *out) {
                 "  -p SCRIPT        run the passes given inline\n"
                 "  --parse-only     parse the files given (else the project's) and stop:\n"
                 "                   read_verilog --parse-only FILE... (no script allowed)\n"
+                "  --elab-only      elaborate the files given (else the project's), then stats:\n"
+                "                   read_verilog FILE...; stats (no script allowed)\n"
                 "\n"
                 "passes:\n",
                 out);
@@ -89,6 +92,7 @@ typedef struct cli_state {
     bool inline_script;   /* a -p is given */
     bool script_file;     /* a positional argument ending in .o3 (a script) is given */
     bool parse_only;      /* --parse-only: the other arguments are Verilog files, not scripts */
+    bool elab_only;       /* --elab-only: likewise; read_verilog elaborates, then stats runs */
     bool project;         /* a --project or -f is given */
     bool dump;            /* --dump-project */
     bool help;            /* --help: printed after the scan (plugin passes listed), nothing runs */
@@ -180,6 +184,8 @@ static bool scan_flag(const char *arg, cli_state *state) {
         state->dump = true;
     } else if (strcmp(arg, "--parse-only") == 0) {
         state->parse_only = true;
+    } else if (strcmp(arg, "--elab-only") == 0) {
+        state->elab_only = true;
     } else if (strcmp(arg, "--keep-ast") == 0 || strcmp(arg, "--keep-ast=all") == 0) {
         state->keep =
             arg[strlen("--keep-ast")] == '=' ? ODIN3_KEEP_AST_ALL : ODIN3_KEEP_AST_ELABORATED;
@@ -252,21 +258,35 @@ static int scan_one(char **argv, int argc, int *at, cli_state *state) {
     return EXIT_OK;
 }
 
-/* --parse-only takes no script (2C §4.1): the files are its arguments; a -p or a positional
- * argument ending in .o3 (the script suffix) is refused. */
-static int check_parse_only(const cli_state *state) {
-    if (!state->parse_only) {
+/* True when the other arguments are Verilog files for read_verilog, not scripts. */
+static bool files_mode(const cli_state *state) {
+    return state->parse_only || state->elab_only;
+}
+
+/* --parse-only and --elab-only take no script (2C §4.1; plan point (w)): the files are their
+ * arguments; a -p or a positional argument ending in .o3 (the script suffix) is refused, and so
+ * are the two together. */
+static int check_files_mode(const cli_state *state) {
+    if (!files_mode(state)) {
         return EXIT_OK;
     }
+    if (state->parse_only && state->elab_only) {
+        (void)fputs("odin3: --parse-only and --elab-only cannot be combined\n", stderr);
+        print_usage(stderr);
+        return EXIT_USAGE;
+    }
     if (state->inline_script || state->script_file) {
-        (void)fputs("odin3: --parse-only cannot be combined with a script: use the pass option "
-                    "(read_verilog --parse-only)\n",
+        (void)fputs(state->elab_only
+                        ? "odin3: --elab-only cannot be combined with a script; use read_verilog "
+                          "in the script\n"
+                        : "odin3: --parse-only cannot be combined with a script: use the pass "
+                          "option (read_verilog --parse-only)\n",
                     stderr);
         print_usage(stderr);
         return EXIT_USAGE;
     }
     if (state->quoted != NULL) {
-        return bad_value("--parse-only", state->quoted,
+        return bad_value(state->elab_only ? "--elab-only" : "--parse-only", state->quoted,
                          "a path holding '\"' cannot be passed to read_verilog");
     }
     return EXIT_OK;
@@ -337,9 +357,10 @@ static const char *positional(char **argv, int argc, int *at) {
     return argv[*at];
 }
 
-/* --parse-only: read_verilog --parse-only "file"... (2C §4.1), after any --project/-f. */
-static odin3_status run_parse_only(char **argv, int argc, odin3_design *design) {
-    size_t len = strlen("--parse-only") + 1;
+/* --parse-only and --elab-only: read_verilog [--parse-only] "file"... (2C §4.1), after any
+ * --project/-f; flag is "--parse-only" or "" (--elab-only, which runs stats afterwards). */
+static odin3_status run_read_files(char **argv, int argc, odin3_design *design, const char *flag) {
+    size_t len = strlen(flag) + 1;
     for (int i = 1; i < argc; i++) {
         const char *file = positional(argv, argc, &i);
         len += file != NULL ? strlen(file) + strlen(" \"\"") : 0;
@@ -349,7 +370,7 @@ static odin3_status run_parse_only(char **argv, int argc, odin3_design *design) 
         (void)fprintf(stderr, "odin3: out of memory\n");
         return ODIN3_ERR_NO_MEMORY;
     }
-    size_t used = (size_t)snprintf(args, len, "--parse-only");
+    size_t used = (size_t)snprintf(args, len, "%s", flag);
     for (int i = 1; i < argc; i++) {
         const char *file = positional(argv, argc, &i);
         used += file != NULL ? (size_t)snprintf(args + used, len - used, " \"%s\"", file) : 0;
@@ -357,6 +378,20 @@ static odin3_status run_parse_only(char **argv, int argc, odin3_design *design) 
     odin3_status st = odin3_design_run_pass(design, "read_verilog", args);
     free(args);
     return st;
+}
+
+/* The step after the projects: the files given to --parse-only or --elab-only (the latter then
+ * runs stats: -p "read_verilog FILE...; stats"), else the scripts in command-line order. */
+static odin3_status each_files_or_scripts(char **argv, int argc, odin3_design *design,
+                                          const cli_state *state) {
+    if (state->parse_only) {
+        return run_read_files(argv, argc, design, "--parse-only");
+    }
+    if (!state->elab_only) {
+        return each_script(argv, argc, design, false);
+    }
+    odin3_status st = run_read_files(argv, argc, design, "");
+    return st == ODIN3_OK ? odin3_design_run_pass(design, "stats", "") : st;
 }
 
 /*
@@ -380,10 +415,10 @@ static void warn_unapplied_top(const odin3_design *design, const char *top) {
 
 /* Resolves every -p and script file (a typo anywhere costs nothing), then runs on one design
  * every --project and -f (read_project), the scripts in command-line order (with --parse-only:
- * read_verilog --parse-only on the files given instead), and dump_project when --dump-project
- * is given. */
+ * read_verilog --parse-only on the files given instead; with --elab-only: read_verilog, then
+ * stats), and dump_project when --dump-project is given. */
 static int run_scripts(char **argv, int argc, const cli_state *state) {
-    if (each_script(argv, argc, NULL, state->parse_only) != ODIN3_OK) {
+    if (each_script(argv, argc, NULL, files_mode(state)) != ODIN3_OK) {
         return EXIT_FAIL;
     }
     odin3_design *design = odin3_design_create();
@@ -396,8 +431,7 @@ static int run_scripts(char **argv, int argc, const cli_state *state) {
         st = each_project(argv, argc, design);
     }
     if (st == ODIN3_OK) {
-        st = state->parse_only ? run_parse_only(argv, argc, design)
-                               : each_script(argv, argc, design, false);
+        st = each_files_or_scripts(argv, argc, design, state);
     }
     if (st == ODIN3_OK && state->dump) {
         st = odin3_design_run_pass(design, "dump_project", "");
@@ -429,12 +463,12 @@ int main(int argc, char **argv) {
     if (argc == 1 || state.help) {
         print_usage(stdout);
     }
-    int rc = check_parse_only(&state);
+    int rc = check_files_mode(&state);
     if (rc != EXIT_OK) {
         return rc;
     }
     if (!(state.scripts || state.inline_script || state.project || state.dump ||
-          state.parse_only) ||
+          files_mode(&state)) ||
         state.help) {
         return EXIT_OK;
     }

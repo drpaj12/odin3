@@ -65,6 +65,7 @@ typedef struct odin3_elab_opts {
     bool nolatches;     /* Yosys -nolatches: unassigned paths of combinational blocks are x */
     bool nomem2reg;     /* never replace a memory by registers except where forced (EL-27) */
     bool auto_blackbox; /* an undefined module becomes a black box, not unresolved_module */
+    double stage1_ms;   /* stage 1's time, for stage 2's summary line (odin3_elab_run fills it) */
 } odin3_elab_opts;
 
 /* --- the stages (§2.1, EL-2) --------------------------------------------------------------- */
@@ -85,10 +86,18 @@ odin3_status odin3_elab_stage1(odin3_pass_ctx *ctx, odin3_ast *parsed, const odi
                                odin3_ast **elab_out);
 
 /*
- * Stage 2 (any front end; src/frontends/elab/): an ELABORATED store → IR in ctx->design. Never
- * destroys elab. Until Task 17 it is the stub elab2_stub.c, which logs 2C's unlocated
- * "elaboration is not available yet (2D)" and returns ODIN3_ERR_PARSE (and odin3_elab_run calls
- * the on_body_start test hook, elab_test.h, for each MODULE of the store just before it).
+ * Stage 2 (any front end; src/frontends/elab/): an ELABORATED store → IR in ctx->design (EL-2
+ * steps 4–5). Binds the store (odin3_elab_bind: the symbol table stays with it), makes every
+ * MODULE's IR module and ports (odin3_elab2_ports), then every body in the UNIT's order
+ * (odin3_elab2_module), skipping the constructs whose elaboration has not landed with point (l)'s
+ * located error. On success it sets the design's top (the UNIT's first MODULE) and logs
+ * `read_verilog: elaborated top 'T': M modules (S specializations), P processes, C cells, N nets,
+ * t1 + t2 ms` (t1 = opts->stage1_ms). Never destroys elab. A failed run leaves valid, incomplete
+ * modules and no top (EL-2; the design is fit only for destruction): ODIN3_ERR_PARSE after at
+ * least one located diagnostic (user errors, the caps, the byte budget), at most the error cap of
+ * them; ODIN3_ERR_NO_MEMORY (stops at once); ODIN3_ERR_CHECK (a 2D bug); ODIN3_ERR_INVALID_ARG
+ * (logged) for a NULL ctx or elab, a store that is not ELABORATED or belongs to another design, or
+ * one the binder refuses as a misuse of the seam (EL-4).
  */
 odin3_status odin3_elab_stage2(odin3_pass_ctx *ctx, odin3_ast *elab, const odin3_elab_opts *opts);
 

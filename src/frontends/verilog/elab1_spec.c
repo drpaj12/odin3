@@ -166,15 +166,11 @@ static bool keeps_base(const odin3_elab1 *e1, const odin3_elab_def *def) {
     return e1->specs.len == 0 || def->kind == ODIN3_DEF_BLACKBOX;
 }
 
-/* base$P=v for each parameter that differs from its default, then $path=v per pending (the top
- * and a `(* blackbox *)` definition: its definition's name, v4.7, v4.10). */
-static odin3_status spell(const odin3_elab1 *e1, const odin3_elab1_params_out *res,
-                          const odin3_elab_def *def, odin3_strbuf *out) {
-    odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr(odin3_elab1_str(e1, def->name)));
+/* $P=v for each parameter that differs from its default, then $path=v per pending. */
+static odin3_status spell_values(const odin3_elab1 *e1, const odin3_elab1_params_out *res,
+                                 const odin3_elab_def *def, odin3_strbuf *out) {
+    odin3_status st = ODIN3_OK;
     uint32_t count = def->n_header_params + def->n_body_params;
-    if (keeps_base(e1, def)) {
-        return st;
-    }
     for (uint32_t k = 0; st == ODIN3_OK && k < count; k++) {
         if (!res->differ[k]) {
             continue;
@@ -192,9 +188,55 @@ static odin3_status spell(const odin3_elab1 *e1, const odin3_elab1_params_out *r
     return st;
 }
 
-/* The name of a new specialization: spelled, hashed past the length cap, then `$2`, `$3`, … until
- * free; interned and recorded. Every specialization of a `(* blackbox *)` definition shares its
- * first one's name (EL-9 v4.10). */
+/* A new specialization's naming: its definition, results and hash; full spells the values even
+ * for the top and a `(* blackbox *)` definition, whose names are the definition's (v4.7, v4.10),
+ * as a black-box carrier MODULE's name does (v4.19). */
+typedef struct e1_namereq {
+    const odin3_elab_def *def;
+    const odin3_elab1_params_out *res;
+    uint64_t hash;
+    bool full;
+} e1_namereq;
+
+/* base$P=v for each parameter that differs from its default, then $path=v per pending. */
+static odin3_status spell(const odin3_elab1 *e1, const e1_namereq *req, odin3_strbuf *out) {
+    odin3_status st =
+        odin3_strbuf_append(out, odin3_bytes_cstr(odin3_elab1_str(e1, req->def->name)));
+    if (st != ODIN3_OK || (keeps_base(e1, req->def) && !req->full)) {
+        return st;
+    }
+    return spell_values(e1, req->res, req->def, out);
+}
+
+/* The free name for a new specialization: the spelling (hashed past the length cap), then `$2`,
+ * `$3`, … until free; interned and recorded as taken. */
+static odin3_status free_name(odin3_elab1 *e1, const e1_namereq *req, uint32_t *name) {
+    odin3_strbuf base;
+    odin3_strbuf_init(&base);
+    odin3_status st = spell(e1, req, &base);
+    if (st == ODIN3_OK && base.len > ODIN3_ELAB_MAX_MODULE_NAME) {
+        odin3_strbuf_clear(&base);
+        st = odin3_strbuf_appendf(&base, "%s$h%016" PRIx64, odin3_elab1_str(e1, req->def->name),
+                                  req->hash);
+    }
+    odin3_strbuf cand;
+    odin3_strbuf_init(&cand);
+    st = st != ODIN3_OK ? st : odin3_strbuf_append(&cand, (odin3_bytes){base.data, base.len});
+    for (uint32_t suffix = E1_FIRST_SUFFIX;
+         st == ODIN3_OK && name_taken(e1, req->def, (odin3_bytes){cand.data, cand.len}); suffix++) {
+        odin3_strbuf_clear(&cand);
+        st = odin3_strbuf_appendf(&cand, "%s$%" PRIu32, base.data, suffix);
+    }
+    st = st != ODIN3_OK ? st
+                        : odin3_design_intern(e1->design, (odin3_bytes){cand.data, cand.len}, name);
+    st = st != ODIN3_OK ? st : odin3_u64map_put(e1->spec_names, (odin3_kv){*name, 1});
+    odin3_strbuf_free(&base);
+    odin3_strbuf_free(&cand);
+    return st;
+}
+
+/* The name of a new specialization (EL-9). Every specialization of a `(* blackbox *)` definition
+ * shares its first one's name (v4.10). */
 static odin3_status spec_name(odin3_elab1 *e1, uint32_t def_idx, const odin3_elab1_params_out *res,
                               uint64_t hash, uint32_t *name) {
     const odin3_elab_def *def = odin3_elab1_def(e1, def_idx);
@@ -203,27 +245,9 @@ static odin3_status spec_name(odin3_elab1 *e1, uint32_t def_idx, const odin3_ela
         *name = ext->bb_name;
         return ODIN3_OK;
     }
-    odin3_strbuf base;
-    odin3_strbuf_init(&base);
-    odin3_status st = spell(e1, res, def, &base);
-    if (st == ODIN3_OK && base.len > ODIN3_ELAB_MAX_MODULE_NAME) {
-        odin3_strbuf_clear(&base);
-        st = odin3_strbuf_appendf(&base, "%s$h%016" PRIx64, odin3_elab1_str(e1, def->name), hash);
-    }
-    odin3_strbuf cand;
-    odin3_strbuf_init(&cand);
-    st = st != ODIN3_OK ? st : odin3_strbuf_append(&cand, (odin3_bytes){base.data, base.len});
-    for (uint32_t suffix = E1_FIRST_SUFFIX;
-         st == ODIN3_OK && name_taken(e1, def, (odin3_bytes){cand.data, cand.len}); suffix++) {
-        odin3_strbuf_clear(&cand);
-        st = odin3_strbuf_appendf(&cand, "%s$%" PRIu32, base.data, suffix);
-    }
-    st = st != ODIN3_OK ? st
-                        : odin3_design_intern(e1->design, (odin3_bytes){cand.data, cand.len}, name);
-    st = st != ODIN3_OK ? st : odin3_u64map_put(e1->spec_names, (odin3_kv){*name, 1});
+    e1_namereq req = {def, res, hash, false};
+    odin3_status st = free_name(e1, &req, name);
     ext->bb_name = st == ODIN3_OK && def->kind == ODIN3_DEF_BLACKBOX ? *name : 0;
-    odin3_strbuf_free(&base);
-    odin3_strbuf_free(&cand);
     return st;
 }
 
@@ -298,6 +322,21 @@ static odin3_status check_caps(odin3_elab1 *e1, const odin3_elab_spec_req *req) 
     return ODIN3_OK;
 }
 
+/* A `(* blackbox *)` specialization with other than the default values also gets the name of its
+ * carrier MODULE, spelled like a module's specialization (v4.19); not when the definition's name is
+ * a registered cell type, which stage 2 reuses whatever the parameters (IR-7b). */
+static odin3_status carrier_name(odin3_elab1 *e1, const odin3_elab1_params_out *res,
+                                 odin3_elab1_spec *rec) {
+    const odin3_elab_def *def = odin3_elab1_def(e1, rec->def);
+    odin3_celltype_id registered;
+    if (def->kind != ODIN3_DEF_BLACKBOX || rec->dflt ||
+        odin3_celltype_find(e1->design, def->name, &registered)) {
+        return ODIN3_OK;
+    }
+    e1_namereq req = {def, res, rec->hash, true};
+    return free_name(e1, &req, &rec->carrier);
+}
+
 /* A new specialization of req with the key and results (FIFO: appended). */
 static odin3_status create_spec(odin3_elab1 *e1, const odin3_elab_spec_req *req,
                                 const odin3_elab1_params_out *res, odin3_bytes key,
@@ -320,6 +359,7 @@ static odin3_status create_spec(odin3_elab1 *e1, const odin3_elab_spec_req *req,
         rec.key = bytes;
         rec.key_len = (uint32_t)key.len;
         st = spec_name(e1, req->def, res, rec.hash, &rec.name);
+        st = st != ODIN3_OK ? st : carrier_name(e1, res, &rec);
     }
     uint64_t head = 0;
     rec.next_same_hash = odin3_u64map_get(e1->spec_hash, rec.hash, &head) ? (uint32_t)head : 0;
@@ -623,7 +663,8 @@ static odin3_status run_specs(odin3_elab1 *e1) {
 /* The implicit black boxes' MODULEs, after every specialization (EL-4 v4.8); the node cap's
  * fatal error is counted, not returned. */
 static odin3_status implicit_modules(odin3_elab1 *e1) {
-    odin3_status st = odin3_elab1_write_implicit(e1);
+    odin3_status st = odin3_elab1_write_carriers(e1);
+    st = st == ODIN3_OK ? odin3_elab1_write_implicit(e1) : st;
     return st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
 }
 

@@ -142,6 +142,23 @@ static int64_t number_int(odin3_ast_id node) {
 
 /* A leaf of the elaborated store as text: IDENT name, SELECT name[a] / name[a:b] over a name, a
  * NUMBER's value. */
+/* A select's object as text: a name, or the parts of a HIER_NAME joined with dots. */
+static const char *object_text(odin3_ast_id obj) {
+    static char buf[TEXT_BUF];
+    if (odin3_ast_kind_of(rs.elab, obj) != ODIN3_AST_HIER_NAME) {
+        return name_of(obj);
+    }
+    size_t at = 0;
+    buf[0] = '\0';
+    for (uint32_t i = 0; i < odin3_ast_nchild(rs.elab, obj); i++) {
+        int got = snprintf(buf + at, sizeof buf - at, "%s%s", i > 0 ? "." : "",
+                           name_of(odin3_ast_child(rs.elab, obj, i)));
+        TEST_ASSERT_TRUE(got > 0 && (size_t)got < sizeof buf - at);
+        at += (size_t)got;
+    }
+    return buf;
+}
+
 static void spell_leaf(odin3_ast_id expr, char *buf, size_t len) {
     odin3_ast_kind kind = odin3_ast_kind_of(rs.elab, expr);
     int got = -1;
@@ -153,8 +170,8 @@ static void spell_leaf(odin3_ast_id expr, char *buf, size_t len) {
         odin3_ast_id obj = odin3_ast_child(rs.elab, expr, 0);
         odin3_ast_id lsb = odin3_ast_child(rs.elab, expr, 2);
         long long msb = (long long)number_int(odin3_ast_child(rs.elab, expr, 1));
-        got = lsb.v == 0 ? snprintf(buf, len, "%s[%lld]", name_of(obj), msb)
-                         : snprintf(buf, len, "%s[%lld:%lld]", name_of(obj), msb,
+        got = lsb.v == 0 ? snprintf(buf, len, "%s[%lld]", object_text(obj), msb)
+                         : snprintf(buf, len, "%s[%lld:%lld]", object_text(obj), msb,
                                     (long long)number_int(lsb));
     }
     TEST_ASSERT_TRUE_MESSAGE(got > 0 && (size_t)got < len, odin3_ast_kind_name(kind));
@@ -231,6 +248,23 @@ static odin3_ast_id expect_blackbox(const char *name, uint32_t n_ports) {
     TEST_ASSERT_EQUAL_UINT32(1, attrs.n);
     TEST_ASSERT_EQUAL_STRING("blackbox", name_of(attrs.ids[0]));
     TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_child(rs.elab, attrs.ids[0], 0).v);
+    TEST_ASSERT_EQUAL_UINT32(n_ports,
+                             odin3_ast_nchild(rs.elab, odin3_ast_child(rs.elab, module, 1)));
+    return module;
+}
+
+/* A carrier MODULE of the `(* blackbox *)` definition `pb` (spec v4.19): a black-box MODULE whose
+ * `blackbox` ATTR holds the definition's name as a STRING. */
+static odin3_ast_id expect_carrier(const char *name, uint32_t n_ports) {
+    odin3_ast_id module = find(ODIN3_AST_MODULE, name);
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, module.v, name);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_ast_nchild(rs.elab, module));
+    odin3_ast_span attrs = odin3_ast_attrs(rs.elab, module);
+    TEST_ASSERT_EQUAL_UINT32(1, attrs.n);
+    TEST_ASSERT_EQUAL_STRING("blackbox", name_of(attrs.ids[0]));
+    odin3_ast_id value = odin3_ast_child(rs.elab, attrs.ids[0], 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_STRING, odin3_ast_kind_of(rs.elab, value));
+    TEST_ASSERT_EQUAL_STRING("pb", name_of(value));
     TEST_ASSERT_EQUAL_UINT32(n_ports,
                              odin3_ast_nchild(rs.elab, odin3_ast_child(rs.elab, module, 1)));
     return module;
@@ -381,6 +415,18 @@ static void test_array_slices(void) {
         expect_conn(inst, 0, "d", slices[k]);
         expect_conn(inst, 1, "q", "q2");
     }
+}
+
+/* Task 19 (review carry): a member of a named begin/end block of a process in a typed connection
+ * (an instance array) types as its declaration; the slices are cut as for any other expression. */
+static void test_array_proc_block_member(void) {
+    run_one("module sub (input [1:0] a, output o);\nendmodule\n"
+            "module top (input clk, output [1:0] o);\n"
+            "  always @(posedge clk) begin : blk\n    reg [3:0] count;\n    count = 4'd1;\n  end\n"
+            "  sub u[1:0] (.a(blk.count), .o(o));\nendmodule\n");
+    expect_clean();
+    expect_conn(instance("u[0]"), 0, "a", "blk.count[1:0]");
+    expect_conn(instance("u[1]"), 0, "a", "blk.count[3:2]");
 }
 
 static void test_array_width_error(void) {
@@ -552,9 +598,12 @@ static odin3_ast_id nth_instantiation(const char *name, uint32_t n) {
 }
 
 /* A parameterized `(* blackbox *)` definition keeps its name, as Yosys 0.55's module and cells
- * do (PR 2D-3 final review I2, EL-9/EL-11 v5.0): one ports-only MODULE with the defaults' ports
+ * do (PR 2D-3 final review I2, EL-9/EL-11 v5.0): the MODULE named after it has the defaults' ports
  * and values, written even when no instance uses the defaults; each INSTANTIATION names it and
- * carries its final values; connections are checked against the instance's own widths. */
+ * carries its final values; connections are checked against the instance's own widths. Spec v4.19
+ * (Peter decision 3): each other parameter set an instance uses is also a ports-only carrier
+ * MODULE, named as a module's specialization (`pb$W=2`), whose `blackbox` ATTR holds the
+ * definition's name and whose ports and values are that set's. */
 static void test_blackbox_specializations(void) {
     run_one("(* blackbox *) module pb #(parameter W = 4) (input [W-1:0] a);\nendmodule\n"
             "module top; wire [1:0] x2; wire [2:0] x3; wire [7:0] x8;\n"
@@ -563,7 +612,7 @@ static void test_blackbox_specializations(void) {
     expect_clean();
     TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_INFO, "black box"));
     TEST_ASSERT_EQUAL_UINT32(0, find(ODIN3_AST_INSTANTIATION, "pb$W=2").v);
-    TEST_ASSERT_EQUAL_STRING("top,pb", module_names());
+    TEST_ASSERT_EQUAL_STRING("top,pb,pb$W=2,pb$W=3", module_names());
     odin3_ast_id module = expect_blackbox("pb", 1);
     expect_port(module, 0, "a input [3:0]");
     odin3_ast_id params = odin3_ast_child(rs.elab, module, 0);
@@ -571,6 +620,8 @@ static void test_blackbox_specializations(void) {
     odin3_ast_id decl = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, params, 0), 1);
     TEST_ASSERT_EQUAL_STRING("W", name_of(decl));
     TEST_ASSERT_EQUAL_INT64(4, number_int(odin3_ast_child(rs.elab, decl, 0)));
+    expect_port(expect_carrier("pb$W=2", 1), 0, "a input [1:0]");
+    expect_port(expect_carrier("pb$W=3", 1), 0, "a input [2:0]");
     static const int64_t widths[] = {2, 3, 2};
     for (uint32_t i = 0; i < 3; i++) {
         odin3_ast_id holder = nth_instantiation("pb", i);
@@ -581,6 +632,23 @@ static void test_blackbox_specializations(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(0, nth_instantiation("pb", 3).v);
     expect_conn(instance("u3[0]"), 0, "a", "x8[1:0]");
+}
+
+/* A set used twice has one carrier; the defaults have none (their MODULE is the definition's). */
+static void test_blackbox_carriers_per_set(void) {
+    run_one("(* blackbox *) module pb #(parameter W = 4) (input [W-1:0] a);\nendmodule\n"
+            "module top; wire [3:0] x4; wire [1:0] x2;\n"
+            "  pb u1 (.a(x4));\n  pb #(.W(4)) u2 (.a(x4));\n"
+            "  pb #(.W(2)) u3 (.a(x2));\n  pb #(.W(2)) u4 (.a(x2));\nendmodule\n");
+    expect_clean();
+    TEST_ASSERT_EQUAL_STRING("top,pb,pb$W=2", module_names());
+}
+
+static void test_blackbox_defaults_only_no_carrier(void) {
+    run_one("(* blackbox *) module pb #(parameter W = 4) (input [W-1:0] a);\nendmodule\n"
+            "module top; wire [3:0] x4;\n  pb u1 (.a(x4));\nendmodule\n");
+    expect_clean();
+    TEST_ASSERT_EQUAL_STRING("top,pb", module_names());
 }
 
 /* An instance's connection width is checked against its own specialization's ports. */
@@ -890,6 +958,7 @@ int main(void) {
     RUN_TEST(test_unnamed_position);
     RUN_TEST(test_portless_instance);
     RUN_TEST(test_array_slices);
+    RUN_TEST(test_array_proc_block_member);
     RUN_TEST(test_array_width_error);
     RUN_TEST(test_gate_array);
     RUN_TEST(test_ascending_array);
@@ -901,6 +970,8 @@ int main(void) {
     RUN_TEST(test_output_lvalues);
     RUN_TEST(test_blackbox_module);
     RUN_TEST(test_blackbox_specializations);
+    RUN_TEST(test_blackbox_carriers_per_set);
+    RUN_TEST(test_blackbox_defaults_only_no_carrier);
     RUN_TEST(test_blackbox_specialization_widths);
     RUN_TEST(test_blackbox_param_keeps_celltype_name);
     RUN_TEST(test_celltype_named);
