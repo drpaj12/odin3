@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# exit-check: the Phase 2 exit-test harness (2H): designs vs their Parmys goldens, smallest first.
+# See exit_check.py. Exit codes: 0 every design identical, equivalent or listed, 1 anything else,
+# 2 usage error, 77 skipped (no memory cap possible).
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/exit_check.py" "$@"

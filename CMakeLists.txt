@@ -1934,6 +1934,40 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         ${_vtr_bridge_expect} ${_vtr_benchmarks})
             set_tests_properties(proc_diff_vtr proc_bridge_vtr PROPERTIES LABELS "sweep;nightly")
         endif()
+
+        # 2H (PHASE2 #4, decision 13; tools/exit-check): every micro, and the VTR benchmarks that
+        # have a Parmys golden, through sp-splice (Odin III's front end through opt and proc, then
+        # Yosys 0.55 with Parmys) against the Parmys golden of the k6_frac arch: netlist-compare,
+        # then equiv-check --x-report; identical / equivalent / equivalent outside x-cones /
+        # differs / error, smallest first, one design at a time, every child under memcap (3G; the
+        # four biggest files 5G, alone, in the 6G slice). Exceptions: tests/exit/micro_expect.txt
+        # (the 104 micros Parmys rejects) and tests/exit/vtr_expect.txt; a `differs` is listed
+        # only with a proven reason. exit_vtr runs the 31 files directly under
+        # benchmarks/verilog (the Koios designs have no k6_frac golden). Run as
+        # `ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^exit_'` from a Release build.
+        set(_exit_arch $ENV{VTR_ROOT}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml)
+        if(DEFINED ENV{VTR_ROOT} AND EXISTS ${_exit_arch})
+            set(_exit_check ${PROJECT_SOURCE_DIR}/tools/exit-check/exit-check
+                --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055} --arch ${_exit_arch}
+                --jobs 1 --mem-cap 3G
+                --cap-for mcml.v=5G --cap-for arm_core.v=5G
+                --cap-for mkDelayWorker32B.v=5G --cap-for LU64PEEng.v=5G)
+            odin3_add_sweep_test(exit_micro LABEL sweep
+                COMMAND ${_exit_check}
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/exit/micro_expect.txt
+                        --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
+                        ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
+            file(GLOB _exit_vtr_files CONFIGURE_DEPENDS $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog/*.v)
+            if(_exit_vtr_files)
+                odin3_add_sweep_test(exit_vtr LABEL sweep
+                    COMMAND ${_exit_check}
+                            --expect-fail ${PROJECT_SOURCE_DIR}/tests/exit/vtr_expect.txt
+                            --root $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog
+                            ${_exit_vtr_files})
+            endif()
+        else()
+            message(STATUS "exit_micro, exit_vtr not registered: needs VTR_ROOT with the k6_frac arch")
+        endif()
     endif()
 
     # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys

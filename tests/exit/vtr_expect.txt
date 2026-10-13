@@ -1,0 +1,7 @@
+# The VTR benchmarks (paths relative to $VTR_ROOT/vtr_flow/benchmarks/verilog) that exit-check may
+# report as an exception, one per line: `<path> [needle] <one-line reason>`, elab-sweep's syntax.
+# exit_vtr runs the 31 files directly under benchmarks/verilog; the Koios designs have no golden for
+# the k6_frac arch. A `differs` is listed here only with a proven reason (decision 13: an
+# `equivalent outside x-cones` design counts only when its excluded outputs were reviewed and are
+# recorded here); a crash, a cap kill and a timeout are never listed. The list must shrink, never
+# rot.

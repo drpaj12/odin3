@@ -1,0 +1,119 @@
+# The micros of tests/micro/verilog that have no Parmys golden because Parmys itself rejected them
+# (PHASE2 #4's exceptions; 2H). One line per micro: `<path relative to tests/micro/verilog>
+# [needle] <one-line reason>`, the same syntax and matching as elab-sweep's lists. `exit-check`
+# reports such a micro as an `error` (no golden to compare with), and the needle must appear in its
+# log: `[Parmys rejected the design]` is exit-check's own message for a golden whose recorded
+# status is `failed`. The reason is the first error line of the oracle's log
+# (golden/<arch>/regression/verilog/<group>/<leaf>/<leaf>.parmys.log), which `golden/` keeps.
+# A micro whose golden run was CAPPED (large/LargeRam.v) is NOT listed: a cap kill is no verdict on
+# the design, so it stays an unexpected `error` until its golden is regenerated with a larger
+# ODIN3_ORACLE_MEM_MB. Nothing is listed here for a design that has a golden: a `differs` needs a
+# proven reason before it may be listed (decision 13).
+#
+# The list must shrink, never rot: exit-check fails on a listed micro that now passes and on an
+# entry that names no micro.
+
+common/nrnw.v [Parmys rejected the design] Parmys rejects it: Yosys aborts (exit 134): block_memory.cc:1040 create_nrmw_dual_port_ram: Assertion num_wr_ports > 1 failed
+keywords/.generic/range_any_width_binary_test.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `WIDTH.
+keywords/.generic/range_any_width_unary_test.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `WIDTH.
+keywords/.generic/replicate_any_width_binary_test.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `WIDTH.
+keywords/.generic/replicate_any_width_unary_test.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `WIDTH.
+keywords/.generic/wire_test.v [Parmys rejected the design] Parmys rejects it: ERROR: Duplicate definition of module dual_port_ram!
+keywords/always/always_posedge_negedge.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+keywords/assign/assign_int_wide.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `assign.vh'!
+keywords/assign/assign_ultra_wide.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `assign.vh'!
+keywords/assign/assign_wide.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `assign.vh'!
+keywords/automatic/recursive_function.v [Parmys rejected the design] Parmys rejects it: Parmys fails on the recursive function (see the golden log)
+keywords/automatic/recursive_task.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_INTEGER, expecting TOK_ID
+keywords/default/multiple_defaults_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+keywords/defparam/defparam.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't find object for defparam `simple_op.m1.width`!
+keywords/defparam/defparam_depth_1_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `assg' referenced in module `simple_op' in cell `m2' does not have a parameter named 'width'.
+keywords/defparam/defparam_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't find object for defparam `simple_op.m1.width`!
+keywords/defparam/defparam_simple_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't find object for defparam `simple_op.m1.width`!
+keywords/defparam/defparam_string.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't find object for defparam `simple_op.msg`!
+keywords/for/generate_for_int.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `generate_for.vh'!
+keywords/for/generate_for_ultra_wide.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `generate_for.vh'!
+keywords/for/generate_for_wide.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `generate_for.vh'!
+keywords/function_endfunction/function_input_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+keywords/function_endfunction/time_control_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+keywords/generate_endgenerate/generate_case_00.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `generate_case.vh'!
+keywords/generate_endgenerate/generate_case_01.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `generate_case.vh'!
+keywords/generate_endgenerate/generate_case_10.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `generate_case.vh'!
+keywords/generate_endgenerate/generate_case_11.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `generate_case.vh'!
+keywords/generate_endgenerate/generate_else_if_0.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `generate_else_if.vh'!
+keywords/generate_endgenerate/generate_else_if_1.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `generate_else_if.vh'!
+keywords/generate_endgenerate/generate_if_else_0.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `generate_if_else.vh'!
+keywords/generate_endgenerate/generate_if_else_1.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `generate_if_else.vh'!
+keywords/inout/double_assign_inout.v [Parmys rejected the design] Parmys rejects it: ERROR: Assertion failed: selection is not empty: %
+keywords/inout/inout_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: BUF_NODE
+keywords/inout/simple_inout.v [Parmys rejected the design] Parmys rejects it: ERROR: BUF_NODE
+keywords/input/input_port_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Module port `\a' is not declared in module header.
+keywords/integer/integer_outside.v [Parmys rejected the design] Parmys rejects it: ERROR: Incompatible re-declaration of wire \c.
+keywords/macromodule/macromodules_modules.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+keywords/macromodule/missing_endmodule_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+keywords/macromodule/multiple_macromodules.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+keywords/macromodule/multiple_topmodules.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+keywords/macromodule/repeated_macromodule_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+keywords/module_endmodule/missing_endmodule_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected end of file
+keywords/module_endmodule/repeated_module_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Re-definition of module `\simple_op'!
+keywords/output/output_port_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Module port `\b' is not declared in module header.
+keywords/specparam/specparam_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_SPECPARAM
+keywords/while/while_loop.v [Parmys rejected the design] Parmys rejects it: ERROR: While loops are only allowed in constant functions!
+large/paj_boundtop_hierarchy_no_mem.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+large/paj_framebuftop_hierarchy_no_mem.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+large/paj_raygentop_hierarchy_no_mem.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+large/paj_top_hierarchy_no_mem.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+operators/macromudule_test.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+preprocessor/default_net.v [Parmys rejected the design] Parmys rejects it: ERROR: Unsupported default nettype: tri
+preprocessor/elsif_both_defined.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+preprocessor/ifdef_undefined.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+preprocessor/ifndef_defined.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+preprocessor/nested_ifdef_alldef.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `nested_ifdef.vh'!
+preprocessor/nested_ifdef_middef.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `nested_ifdef.vh'!
+preprocessor/nested_ifdef_nonedef.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `nested_ifdef.vh'!
+preprocessor/nested_ifdef_outsidedef.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `nested_ifdef.vh'!
+preprocessor/nested_ifdef_twodef.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `nested_ifdef.vh'!
+preprocessor/nested_operation_define.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+preprocessor/undef.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+syntax/basic_expression_in_function_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/basic_expression_in_task_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/bitwise_op_expression_in_function_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/bitwise_op_expression_in_task_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/bm_function_1.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+syntax/bm_function_2.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+syntax/conditional_expression_in_function_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/conditional_expression_in_task_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/deassign.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ASSIGN
+syntax/diffeq_f_systemC.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+syntax/fir_scu_rtl_restructured_for_cmm_exp.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+syntax/function_hdr.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `function_hdr.vh'!
+syntax/ifdef-else-syntax/module_a_and.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `BITS.
+syntax/ifdef-else-syntax/module_a_or.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `BITS.
+syntax/ifdef-else-syntax/module_b.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `BITS.
+syntax/ifdef-else-syntax.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `ifdef-else-syntax/module_a_and.v'!
+syntax/ifndef-else-syntax/module_a_and.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `BITS.
+syntax/ifndef-else-syntax/module_a_or.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `BITS.
+syntax/ifndef-else-syntax/module_b.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `BITS.
+syntax/ifndef-else-syntax.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `ifndef-else-syntax/module_a_or.v'!
+syntax/include-syntax/module_a.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `BITS.
+syntax/include-syntax/module_b.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `BITS.
+syntax/include-syntax.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `include-syntax/module_a.v'!
+syntax/instantiated_by_name_function_invalid.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiated_by_name_function_invalid_1.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiated_by_name_function_valid.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiated_by_name_task_invalid.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiated_by_name_task_invalid_1.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiated_by_name_task_valid.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiating_by_name_invalid.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `and2' referenced in module `top' in cell `a1' does not have a port named 'in3'.
+syntax/instantiating_by_name_invalid_1.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `and2' referenced in module `top' in cell `a1' does not have a port named 'in3'.
+syntax/instantiating_by_name_invalid_mix_ports.v [Parmys rejected the design] Parmys rejects it: ERROR: Mix of positional and named cell ports.
+syntax/instantiating_by_name_valid.v [Parmys rejected the design] Parmys rejects it: ERROR: Module port `\in3' is not declared in module header.
+syntax/matrix_multiplication.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+syntax/mix_expression_in_function_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/mix_expression_in_task_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/nested-ifdef-syntax/module_b.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `BITS.
+syntax/nested-ifdef-syntax.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't open include file `nested-ifdef-syntax/module_b.v'!
+syntax/preprocessor_complex_define.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `ADDITION_num.
+syntax/preprocessor_define.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `ADDITION_num.
+syntax/preprocessor_define_with_comment.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `ADDITION_num.
+syntax/top_and.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `\and_primitive' referenced in module `\top_and' in cell `\and4' is not part of the design.
