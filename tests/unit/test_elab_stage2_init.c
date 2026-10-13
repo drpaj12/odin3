@@ -574,6 +574,48 @@ static void test_readmemb_with_start_and_finish(void) {
     TEST_ASSERT_EQUAL_STRING("xx a5 3c xx", words_of_init());
 }
 
+/* A `$readmemh` under an `if` with a constant condition is the branch the `if` takes (Yosys
+ * reads it that way; dnnweaver.v's `if (INITIALIZE_FIFO == "yes")`). */
+static void test_readmem_under_a_true_constant_if_is_read(void) {
+    read_with_file("sub/init.hex", "module t(input [1:0] ra, output [7:0] q);\n"
+                                   "  parameter P = \"yes\";\n  reg [7:0] m [0:3];\n"
+                                   "  initial begin if (P == \"yes\") begin\n"
+                                   "    $readmemh(\"init.hex\", m);\n  end end\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
+}
+
+static void test_readmem_under_a_false_constant_if_is_not_read(void) {
+    read_with_file("sub/init.hex", "module t(input [1:0] ra, output [7:0] q);\n"
+                                   "  parameter P = \"no\";\n  reg [7:0] m [0:3];\n"
+                                   "  initial begin if (P == \"yes\") begin\n"
+                                   "    $readmemh(\"init.hex\", m);\n  end end\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+}
+
+/* The soundness half: under a condition that is not constant it stays the located error. */
+static void test_readmem_under_a_runtime_if_is_an_error(void) {
+    read_with_file("sub/init.hex", "module t(input c, input [1:0] ra, output [7:0] q);\n"
+                                   "  reg [7:0] m [0:3];\n"
+                                   "  initial begin if (c) $readmemh(\"init.hex\", m); end\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, pt_rs.status);
+    et_expect(
+        &pt_rs, ODIN3_LOG_ERROR,
+        "sub/t.v:3:24: error: $readmemh is supported only as a statement of an initial block");
+}
+
+/* A string widened by `?:` (`"MULT"` is 32 bits, `"FMA"` 24: the result has a NUL byte) is the
+ * same bits as a number: it was an unlocated ODIN3_ERR_INVALID_ARG (dnnweaver.v). */
+static void test_widened_string_parameter_is_a_number(void) {
+    pt_read_clean("module t(input a, output y);\n  parameter n = 1;\n"
+                  "  localparam PE_MODE = n == 0 ? \"MULT\" : \"FMA\";\n"
+                  "  assign y = (PE_MODE == \"FMA\") ? a : ~a;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
+}
+
 static void test_readmem_errors(void) {
     read_with_file("sub/init.hex", "module t(input [1:0] ra, output [7:0] q);\n"
                                    "  reg [7:0] m [0:3];\n"
@@ -975,6 +1017,10 @@ int main(void) {
     RUN_TEST(test_readmemb_with_start_and_finish);
     RUN_TEST(test_readmem_errors);
     RUN_TEST(test_readmem_dropped_words_warn);
+    RUN_TEST(test_readmem_under_a_true_constant_if_is_read);
+    RUN_TEST(test_readmem_under_a_false_constant_if_is_not_read);
+    RUN_TEST(test_readmem_under_a_runtime_if_is_an_error);
+    RUN_TEST(test_widened_string_parameter_is_a_number);
     RUN_TEST(test_readmem_words_past_the_end_warn);
     RUN_TEST(test_readmem_address_forms_are_checked);
     RUN_TEST(test_readmem_huge_but_valid_address_drops_with_a_warning);

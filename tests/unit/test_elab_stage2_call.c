@@ -226,12 +226,13 @@ static void test_loops_over_overlapping_halves_conflict(void) {
 /* PR 2D-6 re-review N1: a loop write under a runtime if/else: the switch's exit claims only the
  * bits an arm assigns, so two blocks over disjoint halves are no conflict. */
 static void test_runtime_if_loops_over_disjoint_halves_are_no_conflict(void) {
-    pt_read_clean("module t(input [7:0] a, input [7:0] b, output [7:0] q);\n  reg [7:0] w;\n"
-                  "  assign q = w;\n  integer i, j;\n"
-                  "  always @* for (i = 0; i < 4; i = i + 1) if (a[i]) w[i] = b[i]; else w[i] = 0;\n"
-                  "  always @* for (j = 0; j < 4; j = j + 1)\n"
-                  "    case (a[j+4]) 1'b1: w[4+j] = b[j]; default: w[4+j] = 1; endcase\n"
-                  "endmodule\n");
+    pt_read_clean(
+        "module t(input [7:0] a, input [7:0] b, output [7:0] q);\n  reg [7:0] w;\n"
+        "  assign q = w;\n  integer i, j;\n"
+        "  always @* for (i = 0; i < 4; i = i + 1) if (a[i]) w[i] = b[i]; else w[i] = 0;\n"
+        "  always @* for (j = 0; j < 4; j = j + 1)\n"
+        "    case (a[j+4]) 1'b1: w[4+j] = b[j]; default: w[4+j] = 1; endcase\n"
+        "endmodule\n");
     TEST_ASSERT_EQUAL_UINT32(2, pt_count_of("$proc"));
     pt_expect_ir_ok();
 }
@@ -251,11 +252,12 @@ static void test_runtime_if_loops_over_overlapping_halves_conflict(void) {
  * builds a block of its own while the ALWAYS is open; the open block is put aside, never cleared
  * (it was `'' is assigned in two always blocks`). */
 static void test_edge_event_word_read_keeps_the_open_block(void) {
-    pt_read_src("module t(input [1:0] s, input d, input [7:0] x, output reg q);\n"
-                  "  reg [3:0] m [0:3];\n"
-                  "  always @(posedge m[s][0]) q <= d;\n"
-                  "  always @* begin m[0] = x[3:0]; m[1] = x[7:4]; m[2] = x[1:0]; m[3] = x[5:2]; end\n"
-                  "endmodule\n");
+    pt_read_src(
+        "module t(input [1:0] s, input d, input [7:0] x, output reg q);\n"
+        "  reg [3:0] m [0:3];\n"
+        "  always @(posedge m[s][0]) q <= d;\n"
+        "  always @* begin m[0] = x[3:0]; m[1] = x[7:4]; m[2] = x[1:0]; m[3] = x[5:2]; end\n"
+        "endmodule\n");
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
     pt_expect_warning((at_loc){2, 13}, "replacing memory 'm' with list of registers; see t.v:4");
     TEST_ASSERT_EQUAL_UINT32(3, pt_count_of("$proc"));

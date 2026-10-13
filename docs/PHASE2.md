@@ -898,8 +898,11 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       only, passes no top and defaults to 4G, hence `--mem-cap 6G`); `tests/proc/
       bench_expect_fail.txt` lists the three macro-only Koios include files (no module), the two
       `bwave_like.fixed.*` files (ambiguous top: `bench_proc` has no `--top` and `elab-sweep
-      --bench` passes none, a 2D follow-up) and `eltwise_layer.v` and `dnnweaver.v` (the reader
-      rejects them until 2D-7b; each XPASSes then and its line goes), so 26 Koios files are timed.
+      --bench` passes none, a 2D follow-up) (`eltwise_layer.v` and `dnnweaver.v` were listed too, as
+      rejected until 2D-7b: eltwise_layer's line went with T9's acceptance, dnnweaver's with the
+      2D-7b carry fix, a string parameter widened by `?:` with a NUL byte, an unlocated
+      `ODIN3_ERR_INVALID_ARG`, and a `$readmemh` under a constant `if`, §17 #67), so 28 Koios
+      files are timed.
       `tools/proc-check/bench-proc-report report --expect-fail tests/proc/bench_expect_fail.txt
       LOG` prints §19's targets from the sweep's output and exits 1 on a MISSED one, with the
       estimate terms and step times of the files it names. A file or set missing from the log, or a

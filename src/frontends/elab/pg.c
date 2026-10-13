@@ -167,9 +167,10 @@ odin3_status pg_block_save(odin3_pg *pg, pg_saved *sv) {
     sv->bound = pg->e2->bound;
     sv->call = pg->e2->call;
     pg->e2->bound = NULL;
-    sv->scalars = (pg_saved_scalars){pg->always, pg->control, pg->body, pg->prov, pg->cur,
-                                     pg->groups, pg->block_no, pg->edge,    pg->track_reads,
-                                     pg->failed, pg->scan_frame, pg->scanning, pg->has_memw};
+    sv->scalars =
+        (pg_saved_scalars){pg->always,     pg->control,  pg->body,    pg->prov,        pg->cur,
+                           pg->groups,     pg->block_no, pg->edge,    pg->track_reads, pg->failed,
+                           pg->scan_frame, pg->scanning, pg->has_memw};
     vecs_init(pg); /* the saved ones are kept, not freed: these are the nested block's own */
     return pg_block_reset(pg);
 }

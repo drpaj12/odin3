@@ -207,12 +207,12 @@ struct odin3_pg {
     odin3_u64map *tvis;     /* TASK_DECL node -> 1: its body is scanned (this scan) */
     odin3_u64map *active;   /* FUNCTION_DECL / TASK_DECL node -> 1: being inlined */
     odin3_u64map *assigned; /* net -> 1: the nets a user assignment's action has as lhs (I2) */
-    bool exiting;           /* pg_sw_end applies a switch's exit action: note_assigned follows t1 (N1) */
-    odin3_u64map *loopout;  /* symbol -> 1: read outside the loops it is the variable of */
-    bool loopout_ready;     /* loopout is built for the module */
-    bool scan_frame;        /* the scan is of a call's body: no new outputs */
-    bool scan_local;        /* the target being scanned names a callee's variable in an index */
-    bool scanning;          /* pg_scan is under way: an index with a call in it is not generated */
+    bool exiting; /* pg_sw_end applies a switch's exit action: note_assigned follows t1 (N1) */
+    odin3_u64map *loopout; /* symbol -> 1: read outside the loops it is the variable of */
+    bool loopout_ready;    /* loopout is built for the module */
+    bool scan_frame;       /* the scan is of a call's body: no new outputs */
+    bool scan_local;       /* the target being scanned names a callee's variable in an index */
+    bool scanning;         /* pg_scan is under way: an index with a call in it is not generated */
     /* T3 */
     odin3_u64map *reads;  /* net -> 1: read, not supplied by an assignment of the block */
     odin3_u64map *listed; /* net -> 1: a bit of a signal the level list names */

@@ -34,6 +34,7 @@
 #include "util/vec.h"
 
 #include <inttypes.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -190,18 +191,29 @@ static odin3_ast_id w_number(e1w *wr, const odin3_ast_number *num, odin3_ast_spe
     return w_make_marked(wr, spec, odin3_ast_mark(wr->out), from);
 }
 
-/* A STRING value as a STRING node's spec (the empty string: EMPTY, no name). */
-static odin3_status string_spec(odin3_elab1 *e1, odin3_arena *arena, const odin3_cval *val,
-                                odin3_ast_spec *spec) {
-    odin3_bytes bytes = {NULL, 0};
-    odin3_status st = odin3_cval_string_bytes(arena, val, &bytes);
-    spec->kind = ODIN3_AST_STRING;
-    if (st == ODIN3_OK && bytes.len == 0) {
-        spec->flags = ODIN3_AST_F_STRING_EMPTY;
-    } else if (st == ODIN3_OK) {
-        st = odin3_ast_intern(e1->elab, bytes, &spec->name);
+/* The bytes of a STRING value that a STRING node can hold: whole known bytes, none of them NUL
+ * (a NUL byte cannot be a name; the empty string is EMPTY). A string that was widened (`n == 0 ?
+ * "MULT" : "FMA"` is 32 bits, its leading byte NUL) is a number: the same bits. */
+static bool string_leaf_bytes(odin3_arena *arena, const odin3_cval *val, odin3_bytes *bytes) {
+    *bytes = (odin3_bytes){NULL, 0};
+    if (val == NULL || (val->flags & ODIN3_CVAL_STRING) == 0 || val->width % CHAR_BIT != 0 ||
+        !odin3_cval_is_known(val)) {
+        return false;
     }
-    return st;
+    if (odin3_cval_string_bytes(arena, val, bytes) != ODIN3_OK) {
+        return false;
+    }
+    return bytes->len == 0 || memchr(bytes->ptr, '\0', bytes->len) == NULL;
+}
+
+/* A STRING value as a STRING node's spec (the empty string: EMPTY, no name). */
+static odin3_status string_spec(odin3_elab1 *e1, odin3_bytes bytes, odin3_ast_spec *spec) {
+    spec->kind = ODIN3_AST_STRING;
+    if (bytes.len == 0) {
+        spec->flags = ODIN3_AST_F_STRING_EMPTY;
+        return ODIN3_OK;
+    }
+    return odin3_ast_intern(e1->elab, bytes, &spec->name);
 }
 
 /* A NUMBER's spec and payload for a value (point (bb)), or num in the integer form. */
@@ -233,9 +245,9 @@ odin3_status odin3_elab1_make_leaf(odin3_elab1 *e1, odin3_arena *arena,
     }
     odin3_ast_spec spec = {.loc = odin3_ast_loc(e1->parsed, leaf->from).v,
                            .end = odin3_ast_end(e1->parsed, leaf->from).v};
-    bool string = leaf->val != NULL && (leaf->val->flags & ODIN3_CVAL_STRING) != 0;
-    odin3_status st =
-        string ? string_spec(e1, arena, leaf->val, &spec) : number_spec(e1, arena, leaf, &spec);
+    odin3_bytes bytes;
+    bool string = string_leaf_bytes(arena, leaf->val, &bytes);
+    odin3_status st = string ? string_spec(e1, bytes, &spec) : number_spec(e1, arena, leaf, &spec);
     return st != ODIN3_OK ? st : odin3_ast_make(e1->elab, &spec, NULL, 0, out);
 }
 
