@@ -81,6 +81,20 @@ for code in (1, 2, 3):
 print("proc-diff: identical")
 """
 
+# The opt-equiv / opt-diff stand-in (2F Task 17): exit 0 passes, 1 is a difference.
+FAKE_OPT_TOOL = """#!{python}
+import json, os, sys
+argv = sys.argv[1:]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(json.dumps(["opt-tool", os.path.basename(sys.argv[0]), *argv]) + "\\n")
+text = open(argv[-1]).read()
+for code in (1, 2):
+    if f"OT{code}" in text:
+        print(f"opt-tool: message for exit {code}")
+        sys.exit(code)
+print("opt-tool: ok")
+"""
+
 # An odin3 on which `opt` exists: every run succeeds (the trio probe included).
 FAKE_ODIN3_OPT = """#!{python}
 import json, os, sys
@@ -431,6 +445,43 @@ class ModeTest(SweepTestCase):
         code, _, _ = self.run_tool("--equiv", "--yosys", "Y", "--equiv-check", "E",
                                    str(self.dir / "m"))
         self.assertEqual(code, 77)
+
+
+class OptModesTest(SweepTestCase):
+    """2F Task 17: --opt-equiv and --opt-diff run their tool per file."""
+
+    def tool_calls(self) -> list[list[str]]:
+        return [c[1:] for c in self.calls() if c[0] == "opt-tool"]
+
+    def test_both_modes_pass_the_options_on_and_map_the_exit_codes(self) -> None:
+        fake = _exe(self.bin / "fake_opt_tool.py", FAKE_OPT_TOOL)
+        self.write("m/ok.v", "x\n")
+        self.write("m/diff.v", "OT1\n")
+        self.write("m/err.v", "OT2\n")
+        tops = self.write("tops.txt", "ok.v cpu\n")
+        for mode, name in (("--opt-equiv", "opt-equiv"), ("--opt-diff", "opt-diff")):
+            self.log.write_text("", encoding="utf-8")
+            tools = dict(elab_sweep.OPT_TOOLS, **{name: fake})
+            with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+                code, out, _ = self.run_tool(mode, "--yosys", "Y", "--opt-arg=--script=phase2",
+                                             "--tops", str(tops), str(self.dir / "m"))
+            self.assertEqual(code, 1)
+            self.assertIn("FAIL  diff.v", out)
+            self.assertIn("NOT ok: opt-tool: message for exit 1", out)
+            self.assertIn("FAIL  err.v", out)
+            self.assertIn("1 passed", out)
+            argv = next(c for c in self.tool_calls() if c[-1].endswith("ok.v"))[1:]
+            self.assertEqual(argv[argv.index("--top") + 1], "cpu")
+            self.assertEqual(argv[argv.index("--yosys") + 1].split("/")[-1], "Y")
+            self.assertIn("--script=phase2", argv)
+
+    def test_modes_need_yosys_and_exclude_each_other(self) -> None:
+        self.write("m/a.v", "x\n")
+        self.assertEqual(self.run_tool("--opt-diff", str(self.dir / "m"))[0], 2)
+        code, _, err = self.run_tool("--opt-diff", "--opt-equiv", "--yosys", "Y",
+                                     str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("cannot be combined", err)
 
 
 class ProcModesTest(SweepTestCase):

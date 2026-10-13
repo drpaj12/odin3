@@ -18,8 +18,9 @@ The modules of the two files are renamed ``gold``/``gate`` first (a submodule be
 ``gate.m``), so one Yosys design holds both. An x in the gold is a don't-care: ``s ? a : 4'bx``
 to ``a`` passes, the reverse and a wrong enable fail. A pair with ``process`` blocks (the
 pre-``proc`` calls) gets Yosys ``proc`` first. Spec 20.2's flow alone cannot prove the async
-flip-flops, so the check tries ``async2sync`` first and then ``async2sync; techmap`` (techmap loses the proof of a
-division by zero and of a ``$pmux``, which the first try gives); a pass in either is a proof.
+flip-flops, so the check tries ``async2sync`` first and then ``async2sync; techmap`` (techmap
+loses the proof of a division by zero and of a ``$pmux``, which the first try gives); a pass in
+either is a proof.
 ``--no-lower`` runs the plain flow, ``--no-techmap`` the first try only.
 
 A failing pair prints ``opt-equiv: <NNNN>-<sub>: not a refinement`` with the rule counters of the
@@ -51,6 +52,7 @@ EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
 DEFAULT_CAP = 2 << 30
 TIMEOUT_SECONDS = 600.0
 TAIL_LINES = 6
+ERROR_LINES = 3
 PAIR_NAME = re.compile(r"^(\d{4})-(opt_[a-z]+)-before\.il$")
 STAT_LINE = re.compile(r"opt: rule (\S+) (\d+)\s*$", re.M)
 MODULE_LINE = re.compile(r"^module (\\\S+)\s*$", re.M)
@@ -185,6 +187,12 @@ def tail(text: str, lines: int = TAIL_LINES) -> str:
     return " | ".join(text.strip().splitlines()[-lines:])
 
 
+def why(text: str) -> str:
+    """A child's failure in one line: its first error lines, else the last lines of its output."""
+    errors = [line.strip() for line in text.splitlines() if "error" in line.lower()]
+    return " | ".join(errors[:ERROR_LINES]) if errors else tail(text)
+
+
 def exe(name: str) -> str:
     return str(Path(name).resolve()) if "/" in name else name
 
@@ -279,7 +287,7 @@ def snapshot_run(odin3: str, files: Sequence[str], top: str | None, script: Sequ
     done = run_odin(odin3, argv, "; ".join(commands), work, cap)
     log = (done.stdout or "") + (done.stderr or "")
     if done.returncode != 0:
-        raise ToolError(f"odin3 exit {done.returncode}: {tail(log)}")
+        raise ToolError(f"odin3 exit {done.returncode}: {why(log)}")
     return Run(collect_pairs(snap), parse_counters(log), log)
 
 
@@ -315,14 +323,14 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--nolatches", action="store_true", default=True, help=argparse.SUPPRESS)
     ap.add_argument("--no-lower", action="store_true", help="no async2sync and techmap")
     ap.add_argument("--no-techmap", action="store_true", help="async2sync only")
-    ap.add_argument("--mem-cap", type=_size, default=DEFAULT_CAP, metavar="SIZE",
+    ap.add_argument("--mem-cap", type=parse_size, default=DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 2G)")
     ap.add_argument("--work", type=Path, help="the work directory (kept)")
     ap.add_argument("files", nargs="+", help="the Verilog files of one design")
     return ap.parse_args(argv)
 
 
-def _size(text: str) -> int:
+def parse_size(text: str) -> int:
     units = {"k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
     scale = units.get(text[-1:].lower(), 1)
     digits = text[:-1] if text[-1:].lower() in units else text

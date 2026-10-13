@@ -266,7 +266,7 @@ def yosys_histogram(log: str, ignored: Sequence[str] = ()) -> Histogram:
         counts: dict[str, int] = {}
         if cells:
             for cell_type, count in YOSYS_CELL.findall(body[cells.end():]):
-                if cell_type.startswith(("$", "\\")) and cell_type not in ignored:
+                if cell_type not in ignored:
                     counts[cell_type] = int(count)
         hist[clean_module(name)] = counts
     return hist
