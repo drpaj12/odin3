@@ -28,11 +28,11 @@ a temporary directory is used and removed. Every child runs in that directory th
 lacks ``0.55`` is refused unless ``--allow-version V`` names it (the nightly drift job only).
 
 Exit codes: 0 equivalent; 1 NOT equivalent, only when ``equiv-check`` exits 1 *and* prints its own
-``equiv-check: NOT equivalent`` verdict line; 2 error: a tool named on the command line that is not
-an executable, a child that failed or crashed (any exit but 0 from odin3 or Yosys, an exit other than
-0/1 from ``equiv-check``, an exit 1 without its verdict line such as a Python traceback or a
-``systemd-run`` that cannot find the program), a bad argument; 77 skipped (an ASan child and no
-``systemd-run``: it cannot be capped). A driver that gates on "differs" must test for exit 1 only.
+``equiv-check: NOT equivalent`` verdict line; 2 error: a tool named on the command line that is
+not an executable, a child that failed or crashed (any exit but 0 from odin3 or Yosys, an exit
+other than 0/1 from ``equiv-check``, an exit 1 without its verdict line such as a Python
+traceback or a ``systemd-run`` that cannot find the program), a bad argument; 77 skipped (an ASan
+child and no ``systemd-run``: it cannot be capped). A driver that gates on "differs" must test for exit 1 only.
 """
 
 from __future__ import annotations
