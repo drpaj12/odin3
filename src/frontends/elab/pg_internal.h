@@ -248,6 +248,9 @@ bool pg_out_continues(const pg_out *prev, const pg_out *out);
  * still pending. */
 odin3_status pg_scan(odin3_pg *pg, odin3_ast_id body);
 
+/* The qsort order of a vec of uint32_t (net IDs, positions). */
+int pg_u32_compare(const void *lhs, const void *rhs);
+
 /* --- pg_case.c: if and case (EL-36) ----------------------------------------------------------- */
 
 /* Whether an if/case statement folds to one branch by the AST alone (a constant condition or

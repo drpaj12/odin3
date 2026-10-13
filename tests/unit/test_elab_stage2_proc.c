@@ -12,6 +12,7 @@
  *   yosys -p "read_verilog w.v"                                (the net-in-process warning)
  */
 #include "elab_test.h"
+#include "proc_test.h"
 /* elab_test_tree.h (hand-built stores) defines its own et_free: rename it for this file. */
 #define et_free et_tree_free
 #include "elab_test_tree.h"
@@ -46,14 +47,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-enum { OOM_LIMIT = 400000, OOM_SETTLE = 32, TEXT_MAX = 1 << 16, DUMP_MAX = 1 << 13 };
+enum { OOM_LIMIT = 400000, OOM_SETTLE = 32, TEXT_MAX = 1 << 16 };
 
 extern char **environ;
 
-static et_result rs;
-
 void setUp(void) {
-    memset(&rs, 0, sizeof rs);
+    memset(&pt_rs, 0, sizeof pt_rs);
 }
 
 void tearDown(void) {
@@ -61,307 +60,12 @@ void tearDown(void) {
     odin3_elab_test_set_limits(NULL);
     odin3_elab_test_set_hooks(NULL);
     odin3_log_set_sink(NULL, NULL);
-    if (rs.design != NULL || rs.dir[0] != '\0') {
-        et_free(&rs);
+    if (pt_rs.design != NULL || pt_rs.dir[0] != '\0') {
+        et_free(&pt_rs);
     }
 }
 
 /* --- reading --------------------------------------------------------------------------------- */
-
-/* The pass's arguments and the text of t.v. */
-typedef struct pass_src {
-    const char *args;
-    const char *text;
-} pass_src;
-
-static void read_with(const pass_src *src) {
-    et_src file = {"t.v", src->text};
-    et_req req = {&file, 1, NULL, NULL, NULL};
-    et_setup(&req, &rs);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(rs.design, ODIN3_KEEP_AST_NONE));
-    rs.status = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr(src->args));
-}
-
-static void read_src(const char *text) {
-    pass_src src = {"t.v", text};
-    read_with(&src);
-}
-
-static void expect_ir_ok(void) {
-    odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_check_design(rs.design, opts), et_log(&rs));
-}
-
-/* Errors that are located diagnostics: not the pass manager's own "failed" line. */
-static uint32_t diag_errors(void) {
-    return rs.errors - et_count_with(&rs, ODIN3_LOG_ERROR, "pass read_verilog: failed");
-}
-
-/* The warnings of 2D: not the IR check's. */
-static uint32_t soft_warnings(void) {
-    return rs.warnings - et_count_with(&rs, ODIN3_LOG_WARN, "check: ");
-}
-
-static void read_clean(const char *text) {
-    read_src(text);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, diag_errors(), et_log(&rs));
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, soft_warnings(), et_log(&rs));
-    expect_ir_ok();
-}
-
-/* A failed stage 2 leaves valid, incomplete modules (EL-2). */
-static void read_failing(const char *text) {
-    read_src(text);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE, rs.status, et_log(&rs));
-    expect_ir_ok();
-}
-
-typedef struct at_loc {
-    uint32_t line, col;
-} at_loc;
-
-static const char *diag_line(at_loc at, const char *level, const char *msg) {
-    static char buf[768];
-    int got = snprintf(buf, sizeof buf, "t.v:%u:%u: %s: %s", (unsigned)at.line, (unsigned)at.col,
-                       level, msg);
-    TEST_ASSERT_TRUE(got > 0 && (size_t)got < sizeof buf);
-    return buf;
-}
-
-static void expect_warning(at_loc at, const char *msg) {
-    et_expect(&rs, ODIN3_LOG_WARN, diag_line(at, "warning", msg));
-}
-
-static void expect_error(at_loc at, const char *msg) {
-    et_expect(&rs, ODIN3_LOG_ERROR, diag_line(at, "error", msg));
-}
-
-static uint32_t warnings_with(const char *needle) {
-    return et_count_with(&rs, ODIN3_LOG_WARN, needle);
-}
-
-/* --- reading the IR back --------------------------------------------------------------------- */
-
-static uint32_t id_of(const char *text) {
-    uint32_t id = 0;
-    TEST_ASSERT_TRUE_MESSAGE(
-        odin3_strtab_find(odin3_design_strtab(rs.design), odin3_bytes_cstr(text), &id), text);
-    return id;
-}
-
-static const char *str_of(uint32_t id) {
-    return odin3_strtab_get(odin3_design_strtab(rs.design), id);
-}
-
-static odin3_module *top(void) {
-    uint32_t id = id_of("t");
-    for (uint32_t index = 1; index < odin3_design_module_end(rs.design); index++) {
-        odin3_module *module = odin3_module_get(rs.design, (odin3_module_id){index});
-        if (odin3_module_name(module) == id) {
-            return module;
-        }
-    }
-    TEST_FAIL_MESSAGE("no module t");
-    return NULL;
-}
-
-static odin3_net_id wnet(const char *name, uint32_t bit) {
-    odin3_wire_id wire = odin3_module_find_wire(top(), id_of(name));
-    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, wire.v, name);
-    odin3_net_id net = odin3_wire_net(top(), wire, bit);
-    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, net.v, name);
-    return net;
-}
-
-static const odin3_celltype_def *def_of(odin3_node_id node) {
-    return odin3_celltype_get(rs.design, odin3_node_type(top(), node));
-}
-
-static odin3_node_id nth_node(const char *type, uint32_t nth) {
-    const odin3_module *module = top();
-    uint32_t seen = 0;
-    for (uint32_t id = 1; id < odin3_module_node_end(module); id++) {
-        odin3_node_id node = {id};
-        if (odin3_node_live(module, node) && strcmp(def_of(node)->name, type) == 0 &&
-            seen++ == nth) {
-            return node;
-        }
-    }
-    return (odin3_node_id){0};
-}
-
-static uint32_t count_of(const char *type) {
-    uint32_t count = 0;
-    while (nth_node(type, count).v != 0) {
-        count++;
-    }
-    return count;
-}
-
-static odin3_node_id proc_node(uint32_t nth) {
-    odin3_node_id node = nth_node("$proc", nth);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, node.v);
-    return node;
-}
-
-/* The net on pin `index` of a port of a $proc node. */
-static odin3_net_id slice_net(odin3_pinslice slice, uint32_t index) {
-    TEST_ASSERT_TRUE(index < slice.count);
-    return odin3_pin_net(top(), (odin3_pin_id){slice.first.v + index});
-}
-
-static odin3_net_id in_net(odin3_node_id node, uint32_t index) {
-    return slice_net(odin3_node_port(top(), node, ODIN3_PROC_PORT_I), index);
-}
-
-static odin3_net_id out_net(odin3_node_id node, uint32_t index) {
-    return slice_net(odin3_node_port(top(), node, ODIN3_PROC_PORT_O), index);
-}
-
-static const odin3_proc_body *body_of(odin3_node_id node, odin3_proc_body *storage) {
-    const odin3_value *value = odin3_node_param(top(), node, ODIN3_PROC_P_BODY);
-    TEST_ASSERT_NOT_NULL(value);
-    TEST_ASSERT_TRUE(odin3_proc_body_view(value, storage));
-    return storage;
-}
-
-/* --- the dump of a body: pins in net-ID order, cases, switches and syncs ---------------------- */
-
-static void put_pbit(odin3_strbuf *out, odin3_pbit pbit) {
-    if (pbit == ODIN3_PBIT_ANY) {
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr("-")));
-        return;
-    }
-    char tag = (pbit & ~ODIN3_PBIT_INDEX_MASK) == ODIN3_PBIT_OUT ? 'O' : 'I';
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_strbuf_appendf(out, "%c%u", tag, (unsigned)(pbit & ODIN3_PBIT_INDEX_MASK)));
-}
-
-/* A span as a list: consecutive pins of one port as a range (O8..O15). */
-static void put_span(odin3_strbuf *out, const odin3_proc_body *body, odin3_pspan span) {
-    for (uint32_t i = 0; i < span.len;) {
-        odin3_pbit first = body->pbits[span.first + i];
-        uint32_t j = i;
-        while (first != ODIN3_PBIT_ANY && j + 1 < span.len &&
-               body->pbits[span.first + j + 1] == first + (j + 1 - i)) {
-            j++;
-        }
-        if (i > 0) {
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr(",")));
-        }
-        put_pbit(out, first);
-        if (j > i) {
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr("..")));
-            put_pbit(out, body->pbits[span.first + j]);
-        }
-        i = j + 1;
-    }
-}
-
-static void put_actions(odin3_strbuf *out, const odin3_proc_body *body, uint32_t first,
-                        uint32_t n) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr("[")));
-    for (uint32_t i = first; i < first + n; i++) {
-        if (i > first) {
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr(" ")));
-        }
-        put_span(out, body, body->actions[i].lhs);
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr("<-")));
-        put_span(out, body, body->actions[i].rhs);
-    }
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr("]")));
-}
-
-static void put_case(odin3_strbuf *out, const odin3_proc_body *body, uint32_t index) {
-    const odin3_proc_case *cs = &body->cases[index];
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(out, "C%u", (unsigned)index));
-    if (cs->n_compares > 0) {
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr(" cmp(")));
-        for (uint32_t k = 0; k < cs->n_compares; k++) {
-            if (k > 0) {
-                TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr("|")));
-            }
-            put_span(out, body, body->compares[cs->first_compare + k]);
-        }
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr(")")));
-    }
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr(" ")));
-    put_actions(out, body, cs->first_action, cs->n_actions);
-    if (cs->n_switches > 0) {
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                              odin3_strbuf_appendf(out, " sw%u+%u", (unsigned)cs->first_switch,
-                                                   (unsigned)cs->n_switches));
-    }
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr("\n")));
-}
-
-static void put_sync(odin3_strbuf *out, const odin3_proc_body *body, uint32_t index) {
-    static const char *const k_names[] = {"?", "posedge", "negedge", "low", "high", "always"};
-    const odin3_proc_sync *sync = &body->syncs[index];
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(out, "S %s", k_names[sync->type]));
-    if (sync->type != ODIN3_SYNC_ALWAYS) {
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr(" ")));
-        put_pbit(out, sync->signal);
-    }
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr(" ")));
-    put_actions(out, body, sync->first_action, sync->n_actions);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr("\n")));
-}
-
-/* "I<w> O<w>", a line per case, switch and sync. */
-static const char *dump(odin3_node_id node) {
-    static char text[DUMP_MAX];
-    odin3_proc_body storage;
-    const odin3_proc_body *body = body_of(node, &storage);
-    odin3_strbuf out;
-    odin3_strbuf_init(&out);
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK,
-        odin3_strbuf_appendf(&out, "I%u O%u\n",
-                             (unsigned)odin3_node_port(top(), node, ODIN3_PROC_PORT_I).count,
-                             (unsigned)odin3_node_port(top(), node, ODIN3_PROC_PORT_O).count));
-    for (uint32_t i = 0; i < body->n_cases; i++) {
-        put_case(&out, body, i);
-    }
-    for (uint32_t j = 0; j < body->n_switches; j++) {
-        const odin3_proc_switch *sw = &body->switches[j];
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&out, "W%u (", (unsigned)j));
-        put_span(&out, body, sw->signal);
-        TEST_ASSERT_EQUAL_INT(
-            ODIN3_OK, odin3_strbuf_appendf(&out, ") f%u C%u+%u\n", (unsigned)sw->flags,
-                                           (unsigned)sw->first_case, (unsigned)sw->n_cases));
-    }
-    for (uint32_t k = 0; k < body->n_syncs; k++) {
-        put_sync(&out, body, k);
-    }
-    TEST_ASSERT_TRUE(out.len < sizeof text);
-    memcpy(text, out.data, out.len);
-    text[out.len] = '\0';
-    odin3_strbuf_free(&out);
-    return text;
-}
-
-static void expect_dump(uint32_t nth, const char *want) {
-    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, dump(proc_node(nth)), et_log(&rs));
-}
-
-static void expect_in(odin3_node_id node, uint32_t index, odin3_net_id want) {
-    TEST_ASSERT_EQUAL_UINT32(want.v, in_net(node, index).v);
-}
-
-static void expect_out(odin3_node_id node, uint32_t index, odin3_net_id want) {
-    TEST_ASSERT_EQUAL_UINT32(want.v, out_net(node, index).v);
-}
-
-/* The constant net of bit (the shared $_CONST*_ node's Y). */
-static odin3_net_id const_net_of(odin3_bit bit) {
-    static const char *const k_names[4] = {"$_CONST0_", "$_CONST1_", "$_CONSTX_", "$_CONSTZ_"};
-    odin3_node_id node = nth_node(k_names[bit], 0);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, node.v);
-    odin3_pinslice slice = odin3_node_port(top(), node, 0);
-    return odin3_pin_net(top(), slice.first);
-}
 
 /* --- the cases of the brief: T7, T8, held values, defaults ------------------------------------ */
 
@@ -370,138 +74,138 @@ static const char k_t7[] = "module t(input clk, a, b, output reg r);\n  reg t;\n
                            "  always @(posedge clk) begin t = a & b; r <= t; end\nendmodule\n";
 
 static void test_t7_blocking_then_nonblocking(void) {
-    read_clean(k_t7);
-    TEST_ASSERT_EQUAL_UINT32(1, count_of("$proc"));
-    odin3_node_id proc = proc_node(0);
-    expect_dump(0, "I2 O4\nC0 [O3<-I1 O2<-I1]\nS posedge I0 [O0<-O2 O1<-O3]\n");
-    expect_in(proc, 0, wnet("clk", 0));
-    TEST_ASSERT_EQUAL_UINT32(1, count_of("$and"));
-    odin3_node_id and_cell = nth_node("$and", 0);
-    odin3_pinslice y_pins = odin3_node_port(top(), and_cell, 2);
-    expect_in(proc, 1, odin3_pin_net(top(), y_pins.first));
-    expect_out(proc, 0, wnet("r", 0));
-    expect_out(proc, 1, wnet("t", 0));
-    TEST_ASSERT_TRUE(out_net(proc, 2).v > wnet("t", 0).v &&
-                     out_net(proc, 3).v > out_net(proc, 2).v);
-    TEST_ASSERT_EQUAL_UINT32(1, odin3_module_proc_count(top()));
+    pt_read_clean(k_t7);
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
+    odin3_node_id proc = pt_proc_node(0);
+    pt_expect_dump(0, "I2 O4\nC0 [O3<-I1 O2<-I1]\nS posedge I0 [O0<-O2 O1<-O3]\n");
+    pt_expect_in(proc, 0, pt_wnet("clk", 0));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$and"));
+    odin3_node_id and_cell = pt_nth_node("$and", 0);
+    odin3_pinslice y_pins = odin3_node_port(pt_top(), and_cell, 2);
+    pt_expect_in(proc, 1, odin3_pin_net(pt_top(), y_pins.first));
+    pt_expect_out(proc, 0, pt_wnet("r", 0));
+    pt_expect_out(proc, 1, pt_wnet("t", 0));
+    TEST_ASSERT_TRUE(pt_out_net(proc, 2).v > pt_wnet("t", 0).v &&
+                     pt_out_net(proc, 3).v > pt_out_net(proc, 2).v);
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_module_proc_count(pt_top()));
 }
 
 /* T8: a non-blocking assignment's value is the one at the block's start. */
 static void test_t8_nonblocking_reads_held_value(void) {
-    read_clean("module t(input clk, a, output reg r1, r2);\n"
-               "  always @(posedge clk) begin r1 <= a; r2 <= r1; end\nendmodule\n");
-    odin3_node_id proc = proc_node(0);
-    expect_dump(0, "I2 O4\nC0 [O2<-I1 O3<-O0]\nS posedge I0 [O0<-O2 O1<-O3]\n");
-    expect_in(proc, 0, wnet("clk", 0));
-    expect_in(proc, 1, wnet("a", 0));
-    expect_out(proc, 0, wnet("r1", 0));
-    expect_out(proc, 1, wnet("r2", 0));
+    pt_read_clean("module t(input clk, a, output reg r1, r2);\n"
+                  "  always @(posedge clk) begin r1 <= a; r2 <= r1; end\nendmodule\n");
+    odin3_node_id proc = pt_proc_node(0);
+    pt_expect_dump(0, "I2 O4\nC0 [O2<-I1 O3<-O0]\nS posedge I0 [O0<-O2 O1<-O3]\n");
+    pt_expect_in(proc, 0, pt_wnet("clk", 0));
+    pt_expect_in(proc, 1, pt_wnet("a", 0));
+    pt_expect_out(proc, 0, pt_wnet("r1", 0));
+    pt_expect_out(proc, 1, pt_wnet("r2", 0));
 }
 
 /* The held value: `q <= q + 1` reads the register (the $add reads q's net, the process holds
  * the sum), and the sync updates q from its temporary. */
 static void test_held_value(void) {
-    read_clean("module t(input clk, output reg q);\n"
-               "  always @(posedge clk) q <= q + 1;\nendmodule\n");
-    odin3_node_id proc = proc_node(0);
-    expect_dump(0, "I2 O2\nC0 [O1<-I1]\nS posedge I0 [O0<-O1]\n");
-    odin3_node_id add = nth_node("$add", 0);
+    pt_read_clean("module t(input clk, output reg q);\n"
+                  "  always @(posedge clk) q <= q + 1;\nendmodule\n");
+    odin3_node_id proc = pt_proc_node(0);
+    pt_expect_dump(0, "I2 O2\nC0 [O1<-I1]\nS posedge I0 [O0<-O1]\n");
+    odin3_node_id add = pt_nth_node("$add", 0);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, add.v);
-    odin3_pinslice a_in = odin3_node_port(top(), add, 0);
-    TEST_ASSERT_EQUAL_UINT32(wnet("q", 0).v, odin3_pin_net(top(), a_in.first).v);
-    odin3_pinslice y_out = odin3_node_port(top(), add, 2);
-    expect_in(proc, 1, odin3_pin_net(top(), y_out.first));
+    odin3_pinslice a_in = odin3_node_port(pt_top(), add, 0);
+    TEST_ASSERT_EQUAL_UINT32(pt_wnet("q", 0).v, odin3_pin_net(pt_top(), a_in.first).v);
+    odin3_pinslice y_out = odin3_node_port(pt_top(), add, 2);
+    pt_expect_in(proc, 1, odin3_pin_net(pt_top(), y_out.first));
 }
 
 /* Combinational default mode: one ALWAYS sync, the root default replaced by the assignment. */
 static void test_combinational_default_mode(void) {
-    read_clean("module t(input a, output reg y);\n  always @* y = a;\nendmodule\n");
-    expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
+    pt_read_clean("module t(input a, output reg y);\n  always @* y = a;\nendmodule\n");
+    pt_expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
 }
 
 /* --nolatches: no root action; an output reads x until it is assigned (EL-35 step 3). */
 static void test_nolatches_reads_x(void) {
     pass_src nolatches = {"--nolatches t.v", "module t(input a, output reg y, z);\n"
                                              "  always @* begin z = y; y = a; end\nendmodule\n"};
-    read_with(&nolatches);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    expect_ir_ok();
-    odin3_node_id proc = proc_node(0);
-    expect_dump(0, "I2 O4\nC0 [O3<-I1 O2<-I0]\nS always [O0<-O2 O1<-O3]\n");
-    expect_in(proc, 0, wnet("a", 0));
-    expect_in(proc, 1, const_net_of(ODIN3_BIT_X));
-    et_free(&rs);
-    memset(&rs, 0, sizeof rs);
-    read_clean("module t(input a, output reg y, z);\n"
-               "  always @* begin z = y; y = a; end\nendmodule\n");
-    expect_dump(0, "I1 O4\nC0 [O3<-O0 O2<-I0]\nS always [O0<-O2 O1<-O3]\n");
+    pt_read_with(&nolatches);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_ir_ok();
+    odin3_node_id proc = pt_proc_node(0);
+    pt_expect_dump(0, "I2 O4\nC0 [O3<-I1 O2<-I0]\nS always [O0<-O2 O1<-O3]\n");
+    pt_expect_in(proc, 0, pt_wnet("a", 0));
+    pt_expect_in(proc, 1, pt_const_net_of(ODIN3_BIT_X));
+    et_free(&pt_rs);
+    memset(&pt_rs, 0, sizeof pt_rs);
+    pt_read_clean("module t(input a, output reg y, z);\n"
+                  "  always @* begin z = y; y = a; end\nendmodule\n");
+    pt_expect_dump(0, "I1 O4\nC0 [O3<-O0 O2<-I0]\nS always [O0<-O2 O1<-O3]\n");
 }
 
 /* --nolatches keeps the root defaults of a block with an edge. */
 static void test_nolatches_keeps_clocked_defaults(void) {
     pass_src clocked = {"--nolatches t.v", "module t(input c, a, output reg y, z);\n"
                                            "  always @(posedge c) y <= a;\nendmodule\n"};
-    read_with(&clocked);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    expect_dump(0, "I2 O2\nC0 [O1<-I1]\nS posedge I0 [O0<-O1]\n");
+    pt_read_with(&clocked);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_dump(0, "I2 O2\nC0 [O1<-I1]\nS posedge I0 [O0<-O1]\n");
 }
 
 /* --- chunks (v4.2) --------------------------------------------------------------------------- */
 
 static void test_chunks_concat_lvalue(void) {
-    read_clean("module t(input c, x, y, output reg a, b);\n"
-               "  always @(posedge c) {a, b} <= {x, y};\nendmodule\n");
-    odin3_node_id proc = proc_node(0);
+    pt_read_clean("module t(input c, x, y, output reg a, b);\n"
+                  "  always @(posedge c) {a, b} <= {x, y};\nendmodule\n");
+    odin3_node_id proc = pt_proc_node(0);
     /* two sync actions and two t0 groups, one per variable; the user assignment is split in
      * lvalue order: t0(a) <- x first, then t0(b) <- y */
-    expect_dump(0, "I3 O4\nC0 [O2<-I1 O3<-I2]\nS posedge I0 [O0<-O2 O1<-O3]\n");
-    expect_out(proc, 0, wnet("a", 0));
-    expect_out(proc, 1, wnet("b", 0));
+    pt_expect_dump(0, "I3 O4\nC0 [O2<-I1 O3<-I2]\nS posedge I0 [O0<-O2 O1<-O3]\n");
+    pt_expect_out(proc, 0, pt_wnet("a", 0));
+    pt_expect_out(proc, 1, pt_wnet("b", 0));
 }
 
 static void test_chunks_reversed_concat(void) {
-    read_clean("module t(input c, x, y, output reg a, b);\n"
-               "  always @(posedge c) {b, a} <= {x, y};\nendmodule\n");
+    pt_read_clean("module t(input c, x, y, output reg a, b);\n"
+                  "  always @(posedge c) {b, a} <= {x, y};\nendmodule\n");
     /* sorted: a first (root and sync); the assignment in lvalue order: t0(b) <- x, t0(a) <- y */
-    expect_dump(0, "I3 O4\nC0 [O3<-I1 O2<-I2]\nS posedge I0 [O0<-O2 O1<-O3]\n");
+    pt_expect_dump(0, "I3 O4\nC0 [O3<-I1 O2<-I2]\nS posedge I0 [O0<-O2 O1<-O3]\n");
 }
 
 static void test_chunks_vector_is_one_action(void) {
-    read_clean("module t(input c, input [7:0] d8, output reg [7:0] q);\n"
-               "  always @(posedge c) q <= d8;\nendmodule\n");
-    expect_dump(0, "I9 O16\nC0 [O8..O15<-I1..I8]\nS posedge I0 [O0..O7<-O8..O15]\n");
+    pt_read_clean("module t(input c, input [7:0] d8, output reg [7:0] q);\n"
+                  "  always @(posedge c) q <= d8;\nendmodule\n");
+    pt_expect_dump(0, "I9 O16\nC0 [O8..O15<-I1..I8]\nS posedge I0 [O0..O7<-O8..O15]\n");
 }
 
 static void test_chunks_partial_write(void) {
-    read_clean("module t(input c, input [3:0] d4, output reg [7:0] q);\n"
-               "  always @(posedge c) q[3:0] <= d4;\nendmodule\n");
-    odin3_node_id proc = proc_node(0);
+    pt_read_clean("module t(input c, input [3:0] d4, output reg [7:0] q);\n"
+                  "  always @(posedge c) q[3:0] <= d4;\nendmodule\n");
+    odin3_node_id proc = pt_proc_node(0);
     /* only the chunk q[3:0]: four outputs, four temporaries */
-    expect_dump(0, "I5 O8\nC0 [O4..O7<-I1..I4]\nS posedge I0 [O0..O3<-O4..O7]\n");
+    pt_expect_dump(0, "I5 O8\nC0 [O4..O7<-I1..I4]\nS posedge I0 [O0..O3<-O4..O7]\n");
     for (uint32_t k = 0; k < 4; k++) {
-        expect_out(proc, k, wnet("q", k));
+        pt_expect_out(proc, k, pt_wnet("q", k));
     }
 }
 
 static void test_chunks_split_at_the_chunk_boundary(void) {
     /* q[1] and q[3] are written: two chunks of one bit each (a gap in the bit positions) */
-    read_clean("module t(input c, x, y, output reg [3:0] q);\n"
-               "  always @(posedge c) begin q[1] <= x; q[3] <= y; end\nendmodule\n");
-    expect_dump(0, "I3 O4\nC0 [O2<-I1 O3<-I2]\nS posedge I0 [O0<-O2 O1<-O3]\n");
+    pt_read_clean("module t(input c, x, y, output reg [3:0] q);\n"
+                  "  always @(posedge c) begin q[1] <= x; q[3] <= y; end\nendmodule\n");
+    pt_expect_dump(0, "I3 O4\nC0 [O2<-I1 O3<-I2]\nS posedge I0 [O0<-O2 O1<-O3]\n");
 }
 
 static void test_chunks_overwrite_one_run(void) {
     /* a vector written whole after a bit: the earlier action is removed, one 4-bit action stays */
-    read_clean("module t(input c, input [3:0] d, input x, output reg [3:0] q);\n"
-               "  always @(posedge c) begin q[0] <= x; q <= d; end\nendmodule\n");
-    expect_dump(0, "I5 O8\nC0 [O4..O7<-I1..I4]\nS posedge I0 [O0..O3<-O4..O7]\n");
+    pt_read_clean("module t(input c, input [3:0] d, input x, output reg [3:0] q);\n"
+                  "  always @(posedge c) begin q[0] <= x; q <= d; end\nendmodule\n");
+    pt_expect_dump(0, "I5 O8\nC0 [O4..O7<-I1..I4]\nS posedge I0 [O0..O3<-O4..O7]\n");
 }
 
 static void test_partial_overwrite_keeps_the_rest(void) {
-    read_clean("module t(input c, input [3:0] d, input x, output reg [3:0] q);\n"
-               "  always @(posedge c) begin q <= d; q[1] <= x; end\nendmodule\n");
+    pt_read_clean("module t(input c, input [3:0] d, input x, output reg [3:0] q);\n"
+                  "  always @(posedge c) begin q <= d; q[1] <= x; end\nendmodule\n");
     /* the first action keeps its bits but q[1] (d[1] is no longer read: not an I pin) */
-    expect_dump(0, "I5 O8\nC0 [O4,O6..O7<-I1..I3 O5<-I4]\nS posedge I0 [O0..O3<-O4..O7]\n");
+    pt_expect_dump(0, "I5 O8\nC0 [O4,O6..O7<-I1..I3 O5<-I4]\nS posedge I0 [O0..O3<-O4..O7]\n");
 }
 
 /* --- constants ------------------------------------------------------------------------------- */
@@ -509,35 +213,35 @@ static void test_partial_overwrite_keeps_the_rest(void) {
 static void test_constant_pin_in_net_order(void) {
     /* the constant 0 net exists (assign) before the $xor's Y, so it sits before it among the
      * I pins; the second constant 0 of the block reuses its pin */
-    read_clean("module t(input c, a, b, output reg r, s, output z);\n"
-               "  assign z = 1'b0;\n"
-               "  always @(posedge c) begin r <= 1'b0; s <= a ^ b; end\nendmodule\n");
-    odin3_node_id proc = proc_node(0);
-    expect_dump(0, "I3 O4\nC0 [O2<-I1 O3<-I2]\nS posedge I0 [O0<-O2 O1<-O3]\n");
-    expect_in(proc, 1, const_net_of(ODIN3_BIT_0));
-    odin3_node_id xor_cell = nth_node("$xor", 0);
-    odin3_pinslice y_pins = odin3_node_port(top(), xor_cell, 2);
-    expect_in(proc, 2, odin3_pin_net(top(), y_pins.first));
+    pt_read_clean("module t(input c, a, b, output reg r, s, output z);\n"
+                  "  assign z = 1'b0;\n"
+                  "  always @(posedge c) begin r <= 1'b0; s <= a ^ b; end\nendmodule\n");
+    odin3_node_id proc = pt_proc_node(0);
+    pt_expect_dump(0, "I3 O4\nC0 [O2<-I1 O3<-I2]\nS posedge I0 [O0<-O2 O1<-O3]\n");
+    pt_expect_in(proc, 1, pt_const_net_of(ODIN3_BIT_0));
+    odin3_node_id xor_cell = pt_nth_node("$xor", 0);
+    odin3_pinslice y_pins = odin3_node_port(pt_top(), xor_cell, 2);
+    pt_expect_in(proc, 2, odin3_pin_net(pt_top(), y_pins.first));
 }
 
 static void test_constant_shared_pin(void) {
-    read_clean("module t(input c, output reg r, s);\n"
-               "  always @(posedge c) begin r <= 1'b0; s <= 1'b0; end\nendmodule\n");
-    odin3_node_id proc = proc_node(0);
-    expect_dump(0, "I2 O4\nC0 [O2<-I1 O3<-I1]\nS posedge I0 [O0<-O2 O1<-O3]\n");
-    expect_in(proc, 1, const_net_of(ODIN3_BIT_0));
-    TEST_ASSERT_EQUAL_UINT32(1, count_of("$_CONST0_"));
+    pt_read_clean("module t(input c, output reg r, s);\n"
+                  "  always @(posedge c) begin r <= 1'b0; s <= 1'b0; end\nendmodule\n");
+    odin3_node_id proc = pt_proc_node(0);
+    pt_expect_dump(0, "I2 O4\nC0 [O2<-I1 O3<-I1]\nS posedge I0 [O0<-O2 O1<-O3]\n");
+    pt_expect_in(proc, 1, pt_const_net_of(ODIN3_BIT_0));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$_CONST0_"));
 }
 
 /* --- event lists (EL-34) ---------------------------------------------------------------------- */
 
 static void test_two_edges(void) {
-    read_clean("module t(input a, b, d, output reg q);\n"
-               "  always @(posedge a or negedge b) q <= d;\nendmodule\n");
-    odin3_node_id proc = proc_node(0);
-    expect_dump(0, "I3 O2\nC0 [O1<-I2]\nS posedge I0 [O0<-O1]\nS negedge I1 [O0<-O1]\n");
-    expect_in(proc, 0, wnet("a", 0));
-    expect_in(proc, 1, wnet("b", 0));
+    pt_read_clean("module t(input a, b, d, output reg q);\n"
+                  "  always @(posedge a or negedge b) q <= d;\nendmodule\n");
+    odin3_node_id proc = pt_proc_node(0);
+    pt_expect_dump(0, "I3 O2\nC0 [O1<-I2]\nS posedge I0 [O0<-O1]\nS negedge I1 [O0<-O1]\n");
+    pt_expect_in(proc, 0, pt_wnet("a", 0));
+    pt_expect_in(proc, 1, pt_wnet("b", 0));
 }
 
 static void test_level_lists_are_one_always(void) {
@@ -548,94 +252,96 @@ static void test_level_lists_are_one_always(void) {
                                   "module t(input a, b, output reg y);\n  always %s y = a & b;\n"
                                   "endmodule\n",
                                   k_events[i]) > 0);
-        read_clean(text);
-        expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
-        et_free(&rs);
-        memset(&rs, 0, sizeof rs);
+        pt_read_clean(text);
+        pt_expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
+        et_free(&pt_rs);
+        memset(&pt_rs, 0, sizeof pt_rs);
     }
-    read_clean("module t(input a, output reg y);\n  always @a y = ~a;\nendmodule\n");
-    expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
+    pt_read_clean("module t(input a, output reg y);\n  always @a y = ~a;\nendmodule\n");
+    pt_expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
 }
 
 static void test_edge_on_wide_signal(void) {
-    read_failing("module t(input [3:0] w4, input d, output reg q);\n"
-                 "  always @(posedge w4) q <= d;\nendmodule\n");
-    expect_error((at_loc){2, 12}, "posedge on 'w4', which is 4 bits; a 1-bit signal is needed");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
-    TEST_ASSERT_EQUAL_UINT32(0, count_of("$proc"));
-    et_free(&rs);
-    memset(&rs, 0, sizeof rs);
-    read_failing("module t(input [3:0] w4, input d, output reg q);\n"
-                 "  always @(negedge w4[2:0]) q <= d;\nendmodule\n");
-    expect_error((at_loc){2, 12}, "negedge on 'w4', which is 3 bits; a 1-bit signal is needed");
+    pt_read_failing("module t(input [3:0] w4, input d, output reg q);\n"
+                    "  always @(posedge w4) q <= d;\nendmodule\n");
+    pt_expect_error((at_loc){2, 12}, "posedge on 'w4', which is 4 bits; a 1-bit signal is needed");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
+    et_free(&pt_rs);
+    memset(&pt_rs, 0, sizeof pt_rs);
+    pt_read_failing("module t(input [3:0] w4, input d, output reg q);\n"
+                    "  always @(negedge w4[2:0]) q <= d;\nendmodule\n");
+    pt_expect_error((at_loc){2, 12}, "negedge on 'w4', which is 3 bits; a 1-bit signal is needed");
 }
 
 static void test_edge_on_expression(void) {
-    read_clean("module t(input a, b, d, output reg q);\n"
-               "  always @(posedge a & b) q <= d;\nendmodule\n");
-    odin3_node_id proc = proc_node(0);
-    odin3_node_id and_cell = nth_node("$and", 0);
-    odin3_pinslice y_pins = odin3_node_port(top(), and_cell, 2);
-    TEST_ASSERT_EQUAL_UINT32(1, count_of("$and"));
-    expect_dump(0, "I2 O2\nC0 [O1<-I0]\nS posedge I1 [O0<-O1]\n");
-    expect_in(proc, 1, odin3_pin_net(top(), y_pins.first));
+    pt_read_clean("module t(input a, b, d, output reg q);\n"
+                  "  always @(posedge a & b) q <= d;\nendmodule\n");
+    odin3_node_id proc = pt_proc_node(0);
+    odin3_node_id and_cell = pt_nth_node("$and", 0);
+    odin3_pinslice y_pins = odin3_node_port(pt_top(), and_cell, 2);
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$and"));
+    pt_expect_dump(0, "I2 O2\nC0 [O1<-I0]\nS posedge I1 [O0<-O1]\n");
+    pt_expect_in(proc, 1, odin3_pin_net(pt_top(), y_pins.first));
 }
 
 /* T3: an incomplete level list warns once, naming the first missing signal by name. */
 static void test_incomplete_sensitivity_list(void) {
-    read_src("module t(input a, b, c, output reg y);\n  always @(a) y = a & b & c;\nendmodule\n");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    expect_warning((at_loc){2, 3},
-                   "incomplete sensitivity list: 'b' is read but not listed; the block is built "
-                   "as @*");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, warnings_with("incomplete sensitivity list"), et_log(&rs));
-    expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
-    et_free(&rs);
-    memset(&rs, 0, sizeof rs);
+    pt_read_src(
+        "module t(input a, b, c, output reg y);\n  always @(a) y = a & b & c;\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_warning((at_loc){2, 3},
+                      "incomplete sensitivity list: 'b' is read but not listed; the block is built "
+                      "as @*");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_warnings_with("incomplete sensitivity list"),
+                                     et_log(&pt_rs));
+    pt_expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
+    et_free(&pt_rs);
+    memset(&pt_rs, 0, sizeof pt_rs);
     /* @* and a complete list never warn; a value the block assigned first is no read */
-    read_clean("module t(input a, b, output reg y, z, w);\n"
-               "  always @(a or b) begin z = a; y = z & b; end\n"
-               "  always @* w = a;\nendmodule\n");
+    pt_read_clean("module t(input a, b, output reg y, z, w);\n"
+                  "  always @(a or b) begin z = a; y = z & b; end\n"
+                  "  always @* w = a;\nendmodule\n");
 }
 
 /* Point (h): an edge on a net the block itself assigns. */
 static void test_edge_on_own_output(void) {
-    read_clean("module t(output reg a);\n  always @(posedge a) a <= ~a;\nendmodule\n");
-    expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS posedge O0 [O0<-O1]\n");
+    pt_read_clean("module t(output reg a);\n  always @(posedge a) a <= ~a;\nendmodule\n");
+    pt_expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS posedge O0 [O0<-O1]\n");
 }
 
 /* --- diagnostics, attributes, provenance ----------------------------------------------------- */
 
 static void test_net_in_process_warning(void) {
-    read_src("module t(input a, output y);\n  wire w;\n  always @* w = a;\n  assign y = w;\n"
-             "endmodule\n");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    expect_warning((at_loc){3, 13},
-                   "'w' is a net assigned in an always block; treated as a variable");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, warnings_with("is a net assigned in an always block"),
-                                     et_log(&rs));
-    expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
-    expect_ir_ok();
+    pt_read_src("module t(input a, output y);\n  wire w;\n  always @* w = a;\n  assign y = w;\n"
+                "endmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_warning((at_loc){3, 13},
+                      "'w' is a net assigned in an always block; treated as a variable");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_warnings_with("is a net assigned in an always block"),
+                                     et_log(&pt_rs));
+    pt_expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
+    pt_expect_ir_ok();
 }
 
 static void test_attributes_and_provenance(void) {
-    read_clean("module t(input a, output reg y);\n  (* keep *) always @* y = a;\nendmodule\n");
-    odin3_node_id proc = proc_node(0);
+    pt_read_clean("module t(input a, output reg y);\n  (* keep *) always @* y = a;\nendmodule\n");
+    odin3_node_id proc = pt_proc_node(0);
     const odin3_value *keep =
-        odin3_attr_get(top(), (odin3_objref){ODIN3_OBJ_NODE, proc.v}, id_of("keep"));
+        odin3_attr_get(pt_top(), (odin3_objref){ODIN3_OBJ_NODE, proc.v}, pt_id_of("keep"));
     TEST_ASSERT_NOT_NULL(keep);
     TEST_ASSERT_EQUAL_INT(ODIN3_VAL_INT, keep->kind);
     TEST_ASSERT_EQUAL_INT64(1, keep->i);
     /* the node's SOURCE record is its ALWAYS (the attribute starts the construct's span) */
-    const odin3_prov_record *rec = odin3_prov_get(rs.design, odin3_node_prov(top(), proc));
+    const odin3_prov_record *rec = odin3_prov_get(pt_rs.design, odin3_node_prov(pt_top(), proc));
     TEST_ASSERT_NOT_NULL(rec);
     TEST_ASSERT_EQUAL_INT(ODIN3_PROV_SOURCE, rec->kind);
     TEST_ASSERT_EQUAL_UINT32(2, rec->locs[0].line);
-    TEST_ASSERT_EQUAL_STRING("t", str_of(rec->hier));
+    TEST_ASSERT_EQUAL_STRING("t", pt_str_of(rec->hier));
     /* the root action records its statement `y = a` */
     odin3_proc_body storage;
-    const odin3_proc_body *body = body_of(proc, &storage);
-    const odin3_prov_record *act = odin3_prov_get(rs.design, body->actions[0].prov);
+    const odin3_proc_body *body = pt_body_of(proc, &storage);
+    const odin3_prov_record *act = odin3_prov_get(pt_rs.design, body->actions[0].prov);
     TEST_ASSERT_NOT_NULL(act);
     TEST_ASSERT_EQUAL_UINT32(2, act->locs[0].line);
     TEST_ASSERT_EQUAL_UINT32(24, act->locs[0].col);
@@ -644,114 +350,117 @@ static void test_attributes_and_provenance(void) {
 /* --- no node, other bits, pending ------------------------------------------------------------ */
 
 static void test_empty_block_makes_no_node(void) {
-    read_clean("module t(input a, output y);\n  assign y = a;\n  always @* ;\n"
-               "  always @* begin end\nendmodule\n");
-    TEST_ASSERT_EQUAL_UINT32(0, count_of("$proc"));
-    TEST_ASSERT_EQUAL_UINT32(0, odin3_module_proc_count(top()));
+    pt_read_clean("module t(input a, output y);\n  assign y = a;\n  always @* ;\n"
+                  "  always @* begin end\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_module_proc_count(pt_top()));
 }
 
 static void test_different_bits_two_nodes(void) {
-    read_clean("module t(input c, x, y, output reg [1:0] r);\n"
-               "  always @(posedge c) r[0] <= x;\n  always @(posedge c) r[1] <= y;\nendmodule\n");
-    TEST_ASSERT_EQUAL_UINT32(2, count_of("$proc"));
-    expect_dump(0, "I2 O2\nC0 [O1<-I1]\nS posedge I0 [O0<-O1]\n");
-    expect_dump(1, "I2 O2\nC0 [O1<-I1]\nS posedge I0 [O0<-O1]\n");
-    TEST_ASSERT_EQUAL_UINT32(wnet("r", 0).v, out_net(proc_node(0), 0).v);
-    TEST_ASSERT_EQUAL_UINT32(wnet("r", 1).v, out_net(proc_node(1), 0).v);
+    pt_read_clean(
+        "module t(input c, x, y, output reg [1:0] r);\n"
+        "  always @(posedge c) r[0] <= x;\n  always @(posedge c) r[1] <= y;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(2, pt_count_of("$proc"));
+    pt_expect_dump(0, "I2 O2\nC0 [O1<-I1]\nS posedge I0 [O0<-O1]\n");
+    pt_expect_dump(1, "I2 O2\nC0 [O1<-I1]\nS posedge I0 [O0<-O1]\n");
+    TEST_ASSERT_EQUAL_UINT32(pt_wnet("r", 0).v, pt_out_net(pt_proc_node(0), 0).v);
+    TEST_ASSERT_EQUAL_UINT32(pt_wnet("r", 1).v, pt_out_net(pt_proc_node(1), 0).v);
 }
 
 static void test_pending_loop(void) {
-    read_failing("module t(input c, s, a, output reg y);\n"
-                 "  always @* begin repeat (2) y = a; end\nendmodule\n");
-    expect_error((at_loc){2, 19}, "elaboration is not available yet (2D): 'REPEAT'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
-    TEST_ASSERT_EQUAL_UINT32(0, count_of("$proc"));
+    pt_read_failing("module t(input c, s, a, output reg y);\n"
+                    "  always @* begin repeat (2) y = a; end\nendmodule\n");
+    pt_expect_error((at_loc){2, 19}, "elaboration is not available yet (2D): 'REPEAT'");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
 }
 
 /* A word of a register array with a variable index in a target is Task 23's (the bit and part
  * selects of a vector are the case method, Task 22). */
 static void test_pending_variable_index_target(void) {
-    read_failing("module t(input [1:0] s, input [3:0] d, output [3:0] y);\n  reg [3:0] w [0:3];\n"
-                 "  assign y = w[0];\n  always @* w[s] = d;\nendmodule\n");
-    expect_error((at_loc){4, 13},
-                 "elaboration is not available yet (2D): 'variable index into a register array in "
-                 "a procedural assignment target'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
+    pt_read_failing(
+        "module t(input [1:0] s, input [3:0] d, output [3:0] y);\n  reg [3:0] w [0:3];\n"
+        "  assign y = w[0];\n  always @* w[s] = d;\nendmodule\n");
+    pt_expect_error(
+        (at_loc){4, 13},
+        "elaboration is not available yet (2D): 'variable index into a register array in "
+        "a procedural assignment target'");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
 }
 
 /* A word of an array that stayed a memory: the memory write is pending (Task 24), not dropped. */
 static void test_pending_memory_write(void) {
-    read_failing("module t(input c, input [1:0] i, input [7:0] d, output [7:0] y);\n"
-                 "  reg [7:0] m [0:3];\n  assign y = m[i];\n"
-                 "  always @(posedge c) m[i] <= d;\nendmodule\n");
-    expect_error((at_loc){4, 23}, "elaboration is not available yet (2D): 'memory write'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
+    pt_read_failing("module t(input c, input [1:0] i, input [7:0] d, output [7:0] y);\n"
+                    "  reg [7:0] m [0:3];\n  assign y = m[i];\n"
+                    "  always @(posedge c) m[i] <= d;\nendmodule\n");
+    pt_expect_error((at_loc){4, 23}, "elaboration is not available yet (2D): 'memory write'");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
 }
 
 /* --- drivers: processes beside continuous drivers and each other (carried from Tasks 19, 20) -- */
 
 static void test_process_after_assign(void) {
-    read_failing(
+    pt_read_failing(
         "module t(input a, b, output reg o);\n  assign o = a;\n  always @* o = b;\nendmodule\n");
-    expect_error((at_loc){3, 13}, "'o' has two drivers (also driven at t.v:2:10)");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
-    TEST_ASSERT_EQUAL_UINT32(0, count_of("$proc")); /* the conflicting actions were dropped */
+    pt_expect_error((at_loc){3, 13}, "'o' has two drivers (also driven at t.v:2:10)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc")); /* the conflicting actions were dropped */
 }
 
 static void test_two_processes_one_bit(void) {
-    read_failing("module t(input c, a, b, output reg r);\n"
-                 "  always @(posedge c) r <= a;\n  always @(posedge c) r <= b;\nendmodule\n");
-    expect_error((at_loc){3, 23}, "'r' is assigned in two always blocks (also at t.v:2:23)");
-    TEST_ASSERT_EQUAL_UINT32(1, count_of("$proc"));
+    pt_read_failing("module t(input c, a, b, output reg r);\n"
+                    "  always @(posedge c) r <= a;\n  always @(posedge c) r <= b;\nendmodule\n");
+    pt_expect_error((at_loc){3, 23}, "'r' is assigned in two always blocks (also at t.v:2:23)");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
 }
 
 /* T10 per bit: the bit named in the message, the other bits of the variable are no conflict. */
 static void test_two_processes_one_bit_of_a_vector(void) {
-    read_failing("module t(input c, a, b, output reg [3:0] r);\n"
-                 "  always @(posedge c) r[2] <= a;\n  always @(posedge c) r[2:1] <= {b, a};\n"
-                 "endmodule\n");
-    expect_error((at_loc){3, 23}, "'r[2]' is assigned in two always blocks (also at t.v:2:23)");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
+    pt_read_failing("module t(input c, a, b, output reg [3:0] r);\n"
+                    "  always @(posedge c) r[2] <= a;\n  always @(posedge c) r[2:1] <= {b, a};\n"
+                    "endmodule\n");
+    pt_expect_error((at_loc){3, 23}, "'r[2]' is assigned in two always blocks (also at t.v:2:23)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
 }
 
 /* T9: `=` and `<=` on one bit, in one block or in two. */
 static void test_blocking_and_nonblocking(void) {
-    read_failing("module t(input c, a, b, output reg r);\n"
-                 "  always @(posedge c) begin\n    r = a;\n    r <= b;\n  end\nendmodule\n");
-    expect_error((at_loc){4, 5}, "'r' is assigned with both '=' and '<=' (also at t.v:3:5)");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
-    TEST_ASSERT_EQUAL_UINT32(0, count_of("$proc"));
-    et_free(&rs);
-    memset(&rs, 0, sizeof rs);
-    read_failing("module t(input c, a, b, output reg [1:0] r);\n"
-                 "  always @(posedge c) r[0] <= a;\n  always @* r[1] = b;\n"
-                 "  always @(posedge c) r[1] <= a;\nendmodule\n");
-    expect_error((at_loc){4, 23}, "'r' is assigned with both '=' and '<=' (also at t.v:3:13)");
+    pt_read_failing("module t(input c, a, b, output reg r);\n"
+                    "  always @(posedge c) begin\n    r = a;\n    r <= b;\n  end\nendmodule\n");
+    pt_expect_error((at_loc){4, 5}, "'r' is assigned with both '=' and '<=' (also at t.v:3:5)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
+    et_free(&pt_rs);
+    memset(&pt_rs, 0, sizeof pt_rs);
+    pt_read_failing("module t(input c, a, b, output reg [1:0] r);\n"
+                    "  always @(posedge c) r[0] <= a;\n  always @* r[1] = b;\n"
+                    "  always @(posedge c) r[1] <= a;\nendmodule\n");
+    pt_expect_error((at_loc){4, 23}, "'r' is assigned with both '=' and '<=' (also at t.v:3:13)");
 }
 
 /* Different variables, or the same kind everywhere, are no conflict. */
 static void test_same_kind_is_fine(void) {
-    read_clean("module t(input c, a, b, output reg p, q);\n"
-               "  always @(posedge c) begin p = a; q <= p; p = b; end\nendmodule\n");
-    TEST_ASSERT_EQUAL_UINT32(1, count_of("$proc"));
+    pt_read_clean("module t(input c, a, b, output reg p, q);\n"
+                  "  always @(posedge c) begin p = a; q <= p; p = b; end\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
 }
 
 static void test_conflict_drops_only_the_conflicting_chunk(void) {
-    read_failing("module t(input c, a, b, output reg p, q);\n  assign p = a;\n"
-                 "  always @(posedge c) begin p <= b; q <= b; end\nendmodule\n");
-    expect_error((at_loc){3, 29}, "'p' has two drivers (also driven at t.v:2:10)");
-    TEST_ASSERT_EQUAL_UINT32(1, count_of("$proc"));
-    odin3_node_id proc = proc_node(0);
-    expect_dump(0, "I2 O2\nC0 [O1<-I1]\nS posedge I0 [O0<-O1]\n");
-    expect_out(proc, 0, wnet("q", 0));
+    pt_read_failing("module t(input c, a, b, output reg p, q);\n  assign p = a;\n"
+                    "  always @(posedge c) begin p <= b; q <= b; end\nendmodule\n");
+    pt_expect_error((at_loc){3, 29}, "'p' has two drivers (also driven at t.v:2:10)");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
+    odin3_node_id proc = pt_proc_node(0);
+    pt_expect_dump(0, "I2 O2\nC0 [O1<-I1]\nS posedge I0 [O0<-O1]\n");
+    pt_expect_out(proc, 0, pt_wnet("q", 0));
 }
 
 static void test_wired_net_is_not_driven(void) {
-    read_failing("module t(input a, output y);\n  wand w;\n  always @* w = a;\n"
-                 "  assign y = w;\nendmodule\n");
-    expect_error((at_loc){3, 13},
-                 "'w' is a wired net (wand) and cannot be assigned in an always block");
-    TEST_ASSERT_EQUAL_UINT32(0, count_of("$proc"));
+    pt_read_failing("module t(input a, output y);\n  wand w;\n  always @* w = a;\n"
+                    "  assign y = w;\nendmodule\n");
+    pt_expect_error((at_loc){3, 13},
+                    "'w' is a wired net (wand) and cannot be assigned in an always block");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
 }
 
 /* Register-array words are made after the pre-scan: their wires are marked by the second walk. */
@@ -794,31 +503,31 @@ static void test_register_words_are_always_assigned(void) {
     memset(&g_probe, 0, sizeof g_probe);
     odin3_elab_test_hooks hooks = {.after_prescan = probe_words};
     odin3_elab_test_set_hooks(&hooks);
-    read_src(
+    pt_read_src(
         "module t(input c, input [3:0] d, output [3:0] y);\n  reg [3:0] m [0:3];\n"
         "  always @* begin m[1] = d; m[3][2:1] = d[1:0]; end\n  assign y = m[2];\nendmodule\n");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    expect_warning((at_loc){2, 13}, "replacing memory 'm' with list of registers; see t.v:3");
-    expect_ir_ok();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_warning((at_loc){2, 13}, "replacing memory 'm' with list of registers; see t.v:3");
+    pt_expect_ir_ok();
     /* a part select marks the whole word's wire */
     expect_marked_words((const bool[4]){false, true, false, true});
-    expect_dump(0, "I4 O12\nC0 [O6..O9<-I0..I3 O10..O11<-I0..I1]\n"
-                   "S always [O0..O3<-O6..O9 O4..O5<-O10..O11]\n");
+    pt_expect_dump(0, "I4 O12\nC0 [O6..O9<-I0..I3 O10..O11<-I0..I1]\n"
+                      "S always [O0..O3<-O6..O9 O4..O5<-O10..O11]\n");
 }
 
 /* A write to a register-array word beside the array's other words (constant index). */
 static void test_register_word_write(void) {
-    read_src("module t(input [3:0] d, output [3:0] y);\n  reg [3:0] m [0:3];\n"
-             "  always @* m[1] = d;\n  assign y = m[1];\nendmodule\n");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    expect_ir_ok();
-    TEST_ASSERT_EQUAL_UINT32(1, count_of("$proc"));
-    odin3_node_id proc = proc_node(0);
-    odin3_wire_id word = odin3_module_find_wire(top(), id_of("m[1]"));
+    pt_read_src("module t(input [3:0] d, output [3:0] y);\n  reg [3:0] m [0:3];\n"
+                "  always @* m[1] = d;\n  assign y = m[1];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_ir_ok();
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
+    odin3_node_id proc = pt_proc_node(0);
+    odin3_wire_id word = odin3_module_find_wire(pt_top(), pt_id_of("m[1]"));
     for (uint32_t k = 0; k < 4; k++) {
-        expect_out(proc, k, odin3_wire_net(top(), word, k));
+        pt_expect_out(proc, k, odin3_wire_net(pt_top(), word, k));
     }
-    expect_dump(0, "I4 O8\nC0 [O4..O7<-I0..I3]\nS always [O0..O3<-O4..O7]\n");
+    pt_expect_dump(0, "I4 O8\nC0 [O4..O7<-I0..I3]\nS always [O0..O3<-O4..O7]\n");
 }
 
 /* --- the builder: the canonical layout of nested switches (white-box) --------------------------
@@ -953,26 +662,26 @@ static void test_canonical_layout_of_nested_switches(void) {
     odin3_elab_test_hooks hooks = {.after_prescan = layout_hook};
     odin3_elab_test_set_hooks(&hooks);
     memset(&g_layout, 0, sizeof g_layout);
-    read_src("module t(input a);\nendmodule\n");
+    pt_read_src("module t(input a);\nendmodule\n");
     TEST_ASSERT_TRUE(g_layout.ran);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, g_layout.status, et_log(&rs));
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    expect_ir_ok();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, g_layout.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_ir_ok();
     /* nets: o0..o7 are O0..O7, s0..s3 I0..I3, in I4, the constants 1 and 0 I5 and I6; the cases
      * are numbered breadth first, the cases of a switch together */
-    expect_dump(0, "I7 O8\n"
-                   "C0 [O0<-I4] sw0+2\n"
-                   "C1 cmp(I5) [O1<-I4] sw2+1\n"
-                   "C2 cmp(I6) [O2<-I6]\n"
-                   "C3 [O3<-I4] sw3+1\n"
-                   "C4 cmp(-) [O7<-I4]\n"
-                   "C5 cmp(I5) [O4<-I4]\n"
-                   "C6 [O5<-I5]\n"
-                   "C7 [O6<-I4]\n"
-                   "W0 (I0) f0 C1+3\n"
-                   "W1 (I1) f1 C4+1\n"
-                   "W2 (I2) f0 C5+2\n"
-                   "W3 (I3) f2 C7+1\n");
+    pt_expect_dump(0, "I7 O8\n"
+                      "C0 [O0<-I4] sw0+2\n"
+                      "C1 cmp(I5) [O1<-I4] sw2+1\n"
+                      "C2 cmp(I6) [O2<-I6]\n"
+                      "C3 [O3<-I4] sw3+1\n"
+                      "C4 cmp(-) [O7<-I4]\n"
+                      "C5 cmp(I5) [O4<-I4]\n"
+                      "C6 [O5<-I5]\n"
+                      "C7 [O6<-I4]\n"
+                      "W0 (I0) f0 C1+3\n"
+                      "W1 (I1) f1 C4+1\n"
+                      "W2 (I2) f0 C5+2\n"
+                      "W3 (I3) f2 C7+1\n");
 }
 
 /* --- save and restore of lv and rv, temporaries (white-box) --------------------------------- */
@@ -1052,9 +761,9 @@ static void test_maps_save_restore_and_temporaries(void) {
     odin3_elab_test_hooks hooks = {.after_prescan = maps_hook};
     odin3_elab_test_set_hooks(&hooks);
     g_maps_ok = false;
-    read_src("module t(input a);\nendmodule\n");
-    TEST_ASSERT_TRUE_MESSAGE(g_maps_ok, et_log(&rs));
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    pt_read_src("module t(input a);\nendmodule\n");
+    TEST_ASSERT_TRUE_MESSAGE(g_maps_ok, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
 }
 
 /* --- caps, scopes, hierarchy ------------------------------------------------------------------ */
@@ -1064,10 +773,10 @@ static void test_net_bits_cap_counts_temporaries(void) {
     odin3_elab_limits limits = *odin3_elab_limits_get();
     limits.max_net_bits = 10; /* 1 + 4 + 4 wire bits, then 4 temporaries */
     odin3_elab_test_set_limits(&limits);
-    read_failing("module t(input c, input [3:0] d, output reg [3:0] q);\n"
-                 "  always @(posedge c) q <= d;\nendmodule\n");
-    expect_error((at_loc){2, 3}, "elaboration needs more than 10 net bits");
-    TEST_ASSERT_EQUAL_UINT32(0, count_of("$proc"));
+    pt_read_failing("module t(input c, input [3:0] d, output reg [3:0] q);\n"
+                    "  always @(posedge c) q <= d;\nendmodule\n");
+    pt_expect_error((at_loc){2, 3}, "elaboration needs more than 10 net bits");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
 }
 
 /* Point (aa): the pins of one process are capped like a cell's. */
@@ -1075,34 +784,35 @@ static void test_pins_cap(void) {
     odin3_elab_limits limits = *odin3_elab_limits_get();
     limits.max_cell_pins = 12; /* the process has 5 + 8 pins */
     odin3_elab_test_set_limits(&limits);
-    read_failing("module t(input c, input [3:0] d, output reg [3:0] q);\n"
-                 "  always @(posedge c) q <= d;\nendmodule\n");
-    expect_error((at_loc){2, 3}, "cell of 13 pins exceeds the limit of 12 pins");
-    TEST_ASSERT_EQUAL_UINT32(0, count_of("$proc"));
+    pt_read_failing("module t(input c, input [3:0] d, output reg [3:0] q);\n"
+                    "  always @(posedge c) q <= d;\nendmodule\n");
+    pt_expect_error((at_loc){2, 3}, "cell of 13 pins exceeds the limit of 12 pins");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
 }
 
 /* An always block in a generate block: its records carry the scope path. */
 static void test_generate_scopes(void) {
-    read_clean("module t(input [1:0] a, output reg [1:0] y);\n  genvar i;\n"
-               "  for (i = 0; i < 2; i = i + 1) begin : g\n    always @* y[i] = a[i];\n  end\n"
-               "endmodule\n");
-    TEST_ASSERT_EQUAL_UINT32(2, count_of("$proc"));
+    pt_read_clean("module t(input [1:0] a, output reg [1:0] y);\n  genvar i;\n"
+                  "  for (i = 0; i < 2; i = i + 1) begin : g\n    always @* y[i] = a[i];\n  end\n"
+                  "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(2, pt_count_of("$proc"));
     for (uint32_t k = 0; k < 2; k++) {
         const odin3_prov_record *rec =
-            odin3_prov_get(rs.design, odin3_node_prov(top(), proc_node(k)));
+            odin3_prov_get(pt_rs.design, odin3_node_prov(pt_top(), pt_proc_node(k)));
         TEST_ASSERT_NOT_NULL(rec);
         char want[16];
         TEST_ASSERT_TRUE(snprintf(want, sizeof want, "t/g[%u]", (unsigned)k) > 0);
-        TEST_ASSERT_EQUAL_STRING(want, str_of(rec->hier));
-        TEST_ASSERT_EQUAL_UINT32(wnet("y", k).v, out_net(proc_node(k), 0).v);
+        TEST_ASSERT_EQUAL_STRING(want, pt_str_of(rec->hier));
+        TEST_ASSERT_EQUAL_UINT32(pt_wnet("y", k).v, pt_out_net(pt_proc_node(k), 0).v);
     }
 }
 
 /* Two modules, both with processes: the generator is made again for the second. */
 static void test_two_modules(void) {
-    read_clean("module sub(input c, a, output reg q);\n  always @(posedge c) q <= a;\nendmodule\n"
-               "module t(input c, a, output q);\n  sub u(c, a, q);\nendmodule\n");
-    odin3_design *design = rs.design;
+    pt_read_clean(
+        "module sub(input c, a, output reg q);\n  always @(posedge c) q <= a;\nendmodule\n"
+        "module t(input c, a, output q);\n  sub u(c, a, q);\nendmodule\n");
+    odin3_design *design = pt_rs.design;
     uint32_t procs = 0;
     for (uint32_t index = 1; index < odin3_design_module_end(design); index++) {
         procs += odin3_module_proc_count(odin3_module_get(design, (odin3_module_id){index}));
@@ -1116,7 +826,7 @@ static void test_two_modules(void) {
 static void open_held_store(et_tree *tree, odin3_design *design) {
     *tree = (et_tree){.design = design, .line = 1, .lines = ET_LINES};
     odin3_pass_ctx ctx;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, et_intern(&rs, "hand"), &ctx));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, et_intern(&pt_rs, "hand"), &ctx));
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_design_new_ast(design, ODIN3_AST_FORM_ELABORATED, ctx.run.v, &tree->ast));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(design, &tree->sm));
@@ -1141,16 +851,16 @@ static odin3_ast_id hand_port(et_tree *tree, uint8_t dir, uint16_t flags, const 
 /* module t(input clk, a, b, output reg r); reg t;
  * always @(posedge clk) begin t = a & b; r <= t; end endmodule, built by hand. */
 static void test_hand_built_store(void) {
-    read_clean(k_t7);
+    pt_read_clean(k_t7);
     char parsed[256];
-    TEST_ASSERT_TRUE(snprintf(parsed, sizeof parsed, "%s", dump(proc_node(0))) > 0);
-    et_free(&rs);
-    memset(&rs, 0, sizeof rs);
+    TEST_ASSERT_TRUE(snprintf(parsed, sizeof parsed, "%s", pt_dump(pt_proc_node(0))) > 0);
+    et_free(&pt_rs);
+    memset(&pt_rs, 0, sizeof pt_rs);
 
     et_req req = {NULL, 0, NULL, NULL, NULL};
-    et_setup(&req, &rs);
+    et_setup(&req, &pt_rs);
     et_tree tree;
-    open_held_store(&tree, rs.design);
+    open_held_store(&tree, pt_rs.design);
     uint16_t reg = (uint16_t)(ODIN3_AST_DT_REG << ODIN3_AST_F_PORT_DECL_DT_SHIFT);
     odin3_ast_id ports[4] = {hand_port(&tree, ODIN3_AST_PORT_DECL_INPUT, 0, "clk"),
                              hand_port(&tree, ODIN3_AST_PORT_DECL_INPUT, 0, "a"),
@@ -1169,10 +879,10 @@ static void test_hand_built_store(void) {
     eb_mod mod = {"t", {0}, eb_list(&tree, ports, 4), items, 2};
     odin3_ast_id module = eb_module(&tree, &mod);
     (void)eb_unit(&tree, &module, 1);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_ast_elaborate(rs.design, tree.ast, NULL),
-                                  et_log(&rs));
-    TEST_ASSERT_EQUAL_STRING(parsed, dump(proc_node(0)));
-    expect_ir_ok();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_ast_elaborate(pt_rs.design, tree.ast, NULL),
+                                  et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING(parsed, pt_dump(pt_proc_node(0)));
+    pt_expect_ir_ok();
 }
 
 /* --- determinism and the round trip ----------------------------------------------------------- */
@@ -1191,9 +901,9 @@ static const char k_rich[] =
     "  always @* begin r = q; s = ~r[0]; end\nendmodule\n";
 
 static void write_rich(const char *path) {
-    read_clean(k_rich);
+    pt_read_clean(k_rich);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_pass_run(rs.design, "write_rtlil", odin3_bytes_cstr(path)));
+                          odin3_pass_run(pt_rs.design, "write_rtlil", odin3_bytes_cstr(path)));
 }
 
 static void rtlil_of_rich(char *out, size_t cap, const char *path) {
@@ -1206,8 +916,8 @@ static void test_deterministic_and_check(void) {
     static char first[TEXT_MAX];
     static char second[TEXT_MAX];
     rtlil_of_rich(first, sizeof first, "rich.il");
-    et_free(&rs);
-    memset(&rs, 0, sizeof rs);
+    et_free(&pt_rs);
+    memset(&pt_rs, 0, sizeof pt_rs);
     rtlil_of_rich(second, sizeof second, "rich2.il");
     TEST_ASSERT_NOT_NULL(strstr(first, "process $proc"));
     TEST_ASSERT_NOT_NULL(strstr(first, "sync posedge \\c"));
@@ -1258,15 +968,15 @@ static void quiet_sink(odin3_log_level level, const char *msg, void *user) {
 }
 
 static void fresh_quiet_design(void) {
-    odin3_design_destroy(rs.design);
-    rs.design = odin3_design_create();
-    TEST_ASSERT_NOT_NULL(rs.design);
+    odin3_design_destroy(pt_rs.design);
+    pt_rs.design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(pt_rs.design);
     odin3_log_set_sink(quiet_sink, NULL);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_ERROR));
 }
 
 static bool read_complete(void) {
-    return odin3_design_module_end(rs.design) == 2 && odin3_design_top(rs.design).v != 0;
+    return odin3_design_module_end(pt_rs.design) == 2 && odin3_design_top(pt_rs.design).v != 0;
 }
 
 /* A swallowed failure is an OK read that is incomplete or that logged an error. */
@@ -1283,7 +993,7 @@ static odin3_status read_failing_at(long limit) {
     g_saw_missing_file = false;
     g_saw_error = false;
     odin3_util_set_alloc_fail_after(limit);
-    odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("t.v"));
+    odin3_status st = odin3_pass_run(pt_rs.design, "read_verilog", odin3_bytes_cstr("t.v"));
     odin3_util_set_alloc_fail_after(-1);
     /* an injected allocation failure is NO_MEMORY, never a user error and never a missing file;
      * an OK read is complete and logged no error */
@@ -1291,14 +1001,14 @@ static odin3_status read_failing_at(long limit) {
     TEST_ASSERT_FALSE(g_saw_missing_file);
     check_not_swallowed(st);
     odin3_check_opts full = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(rs.design, full));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(pt_rs.design, full));
     return st;
 }
 
 static void oom_sweep(const char *text, uint32_t min_failures) {
     et_src src = {"t.v", text};
     et_req req = {&src, 1, NULL, NULL, NULL};
-    et_setup(&req, &rs);
+    et_setup(&req, &pt_rs);
     uint32_t failures = 0;
     uint32_t settled = 0;
     for (long limit = 0; limit < OOM_LIMIT && settled < OOM_SETTLE; limit++) {

@@ -142,7 +142,7 @@ static odin3_status scan_switch(odin3_pg *pg, odin3_ast_id node) {
                      1); /* the branches (an if) or the items (a case), not the condition */
 }
 
-static int net_compare(const void *lhs, const void *rhs) {
+int pg_u32_compare(const void *lhs, const void *rhs) {
     uint32_t first = *(const uint32_t *)lhs;
     uint32_t second = *(const uint32_t *)rhs;
     return (first > second) - (first < second);
@@ -155,7 +155,7 @@ static odin3_status scan_unique(odin3_pg *pg, size_t start, uint32_t *first, uin
     uint32_t kept = 0;
     if (total > 0) {
         uint32_t *run = (uint32_t *)pg->blk.data + start;
-        qsort(run, total, sizeof *run, net_compare);
+        qsort(run, total, sizeof *run, pg_u32_compare);
         for (size_t i = 0; i < total; i++) {
             if (kept == 0 || run[i] != run[kept - 1U]) {
                 run[kept++] = run[i];

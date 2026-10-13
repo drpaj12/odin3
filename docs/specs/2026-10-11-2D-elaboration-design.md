@@ -299,8 +299,8 @@ adds an empty one, §17 #57. (3) D1's two warnings are located at the attribute 
 metacomment) and given when the switch is built, not when a folded case drops it. (4) EL-32 writes:
 the position temporary `p` is assigned the index in the **root** case (a conditional write must not
 leave it unassigned: a latch), the switch on `p` has a case for every declared index value the
-index expression's own width and sign can hold at which the whole slice lies inside the target, and
-a write that could straddle the end of the target has no case there, §17 #54; a select that can
+index expression's own width and sign can hold at which the slice lies at least partly inside the
+target, and a case writes the bits of the slice that are inside it (v4.22), §17 #54; a select that can
 reach nothing is the located warning `assignment to bits outside 'y' [7:4] is ignored`. A
 non-constant select inside a concatenation target is an error, §17 #55. (5) Point (l): `if`,
 `case` and the case method for a bit or part select landed; the feature `variable index in a
@@ -309,6 +309,15 @@ assignment target` and stays pending for a register array's word until Task 23 (
 the words). (6) The API: the statement entries are `odin3_pg_if` and `odin3_pg_case_stmt` (the
 name `odin3_pg_case` is Task 21's primitive); a switch's blocking targets are collected once by the
 scan (a sorted unique list per `if`/`case`), not once per nesting level.
+
+v4.22 (2026-10-12; 2D Task 22 fix round 1, controller rulings). (1) EL-32 writes: a part select
+that straddles an end of the target writes the bits inside it (IEEE 1364-2005 4.2.1), at either end,
+for `+:` and `-:`, in both declared directions and for a signed base (`y[s +: 2]`, s = -1, writes
+`y[0]`): the switch has a case for every declared index value at which some bit of the slice lies in
+the target, and a case writes only those bits. Yosys 0.55 agrees except for `-:` with an unsigned
+base below the width minus one (§17 #54). (2) A constant index with an x or z bit as a procedural
+target writes nothing, with the warning of any write outside the object (`assignment to bits
+outside 'y' [3:0] is ignored`), §17 #58.
 
 ## 1. Purpose and scope (EL-1)
 
@@ -1452,13 +1461,14 @@ lowering for `$pow` and `$shiftx` — stays in Appendix A for reference (§20 it
   bit select's cells match Yosys's.
 - **Non-constant writes** in a process (`y[s] = d`, `y[b +: 4] <= d`) are rewritten to a `case`
   over the position with one item per in-range position, each assigning that constant slice,
-  no default (an out-of-range write changes nothing): Yosys's case method (`nowrshmsk`), chosen
+  no default (an out-of-range write changes nothing; a slice that straddles an end of the target
+writes the bits inside it): Yosys's case method (`nowrshmsk`), chosen
   over its default mask-and-shift method because it needs no `$shift` cell (none is registered, EL-31) and maps to
-  the same mux structure after `proc`; equivalent in every case but one (§17 #4, #54). The position
+  the same mux structure after `proc`; equivalent in every case but two (§17 #4, #54). The position
   is a temporary assigned once, in the root case, before the switch (v4.21). The positions are the
   declared index values the index expression, at its own width and sign, can hold (a signed 2-bit
-  index takes 0 and 1 of a `[3:0]` target, as Yosys's items do) at which the whole slice lies in the
-  target; a blocking write has the case temporaries of EL-36 beside, so its switch also has the
+  index takes -2 to 1, as Yosys's items do) at which some bit of the slice lies in the target
+  (v4.22); a blocking write has the case temporaries of EL-36 beside, so its switch also has the
   default case that holds them. Outside processes, a non-constant select target is EL-28's error;
   inside a concatenation it is `non-constant index into 'y' is not supported in a concatenation
   target` (§17 #55).
@@ -2599,7 +2609,7 @@ and reported, never relaxed (2A's rule).
 | 37 | a port declaration and the net or variable declaration merged into it that both carry a value (`module m(input a, output wire w = a); wire w = ~a;`, `output reg q = 1'b0; reg q = 1'b1;`) are the error "port 'w' has a value in both of its declarations" at the second declaration | accepted: two drivers of `w` (`connect \w \a` and `connect \w $not…`), or two init processes for `q` (verified on 0.55, the PR 2D-4 final review's fixes) | a net is declared once with at most one declaration assignment; a variable has one initial value | the declaration assignment of a port is one value in the port's `DECLARATOR` (EL-4, v4.15); a second would have to be dropped or resolved, and both readings are silent wrong answers |
 | 38 | a path into a named procedural block whose member does not exist (`blk.nope`) is the binder's error "'blk.nope' is not declared" | warning "Identifier `\blk.nope' is implicitly declared" and a new one-bit wire `blk.nope` (verified on 0.55, the PR 2D-4 final review's fixes) | an undeclared name is an error | Yosys treats the dotted path as one identifier and declares it implicitly (v4.15) |
 | 39 | a generate block's or named block's name read as a value (`assign o = gb;`) is the binder-bound error `'gb' is not a net, variable or parameter` | an implicit one-bit net `gb`, with the warning "Identifier `\gb' is implicitly declared" (verified on 0.55: `connect \o \gb`) | an undeclared name is an error | the symbol table cannot hold a net beside the block of one name; the case is a typo in practice (Task 18, Task 13's carry m1) |
-| 40 | a constant select index with an x or z bit (`w[1'bx]`) reads x bits; as an lhs it is the non-constant error | the index is read with x as 0 (verified on 0.55: `a[1'bx]` is `a[0]`, `y[1'bx] = c` drives `y[0]`) | an x or z index reads x (IEEE 1364-2005 4.2.1) | E17: the don't-care resolution of Parmys's `$shiftx` for variable indices; a constant x is the same case (Task 18) |
+| 40 | a constant select index with an x or z bit (`w[1'bx]`) reads x bits; as an lhs it is the non-constant error (in a process the write is dropped with a warning, #58) | the index is read with x as 0 (verified on 0.55: `a[1'bx]` is `a[0]`, `y[1'bx] = c` drives `y[0]`) | an x or z index reads x (IEEE 1364-2005 4.2.1) | E17: the don't-care resolution of Parmys's `$shiftx` for variable indices; a constant x is the same case (Task 18) |
 | 41 | a plain decimal (`1`, `5`) keeps its 32 bits in any context; the apostrophe forms (`'d1`, `'h3`, `33'd1`) are widened to it. The AST does not record the apostrophe, so a signed unsized decimal is taken as plain: `'sd5` is (wrongly) kept at 32 bits too | same, except `'sd5`, which Yosys widens (verified on 0.55: `y64 = a + 1` is `$add` with `B_WIDTH` 32, `a + 'd1` 64; `c ? a : 5` a 32-bit `$mux`) | an unsized literal is context-determined | matches Yosys's cells for every form but `'sd` (Task 18 fix round 1) |
 | 42 | a non-constant `x[b -: w]` is one `$sub(b, w − 1)` on the index as generated, `x[b +: w]` has no cell for the base; `B_SIGNED` follows the index | `-:`: `$add(zext32(b), 1)`, `$sub(_, w)`, then a 32-bit signed `$shiftx`; `+:`: `$add(zext32(b), 0)` and the same `$shiftx` (verified on 0.55) | — | the plan mandates `b − (w − 1)`; the values are equal modulo 2^32 and the `$shiftx` reads the same bits (Task 18 fix round 1) |
 | 43 | in a self-determined position (the operand of a reduction, `!`, `&&`, `||`, a ternary condition or a concatenation) an inner unary `~`, `-` or `+` over a signed name (`!(-s)`, `{~s, a}`) keeps `A_SIGNED` 1 on its cell | the inner cell has `A_SIGNED` 0: genrtlil passes no sign hint down a unary operator (verified on 0.55) | — | parameter only, the values are identical; deferred (Task 18 fix round 2) |
@@ -2613,10 +2623,11 @@ and reported, never relaxed (2A's rule).
 | 51 | an array with no read port, write port or initial value makes no `$mem` | a `memory` record stays until `opt_clean` (verified on 0.55: `memory width 8 size 4 \unused`) | — | the IR has no memory record (row 15), and a cell without ports is dead logic (Task 20) |
 | 52 | the `replacing memory` warning is located at the array's declarator and names each place by the line of the node that makes it, a place inside a concatenation lvalue included | an unlocated warning; a place inside a concatenation lvalue has line 0 (verified on 0.55: `See c1.v:0` for `always @(*) {m[0], t} = {x, c};` with `reg [1:0] m [0:1]`; v4.18: a concatenation lvalue no longer forces registers by itself, so the line-0 place comes from the other rules) | — | diagnostics are located (§9); a line-0 place helps no reader (Task 20) |
 | 53 | a constant-folded reduction or logical result (`&4'b1111`, `!1'b0`, `1'b1 && 1'b1`) keeps the context width of the expression it sits in (its value in the low bit, the rest zero) | Yosys keeps 1 bit there (verified on 0.55: `assign y = a + &4'b1111;` with an 8-bit `a` has `B_WIDTH 1` and `connect \B 1'1`, ours `B_WIDTH 8`, `8'00000001`; 6 of 450 random expressions of the review's differential differ, all this case) | — | the values are identical, only the width of an intermediate constant differs; the `$eq`/`$mux` cells around it see the same bits (PR 2D-5 review) |
-| 54 | a non-constant indexed part-select write `y[b +: w] <= d` or `y[b -: w]` has a case only at the positions where the whole slice lies inside the target, so a base at which the slice would straddle the end of `y` (`y[3 +: 2]` of `[3:0]`) writes nothing | the case method has an item for it too, writing the in-range bits only (`assign $0\y[3:0] [3] \d2 [0]`; verified on 0.55 with `(* nowrshmsk *)`, and `elab-equiv` reports `y[b +: 2]` with a 2-bit `b` as not equivalent: b = 3 writes `y[3]` there, nothing here) | writes the in-range bits (IEEE 1364-2005 4.2.1) | EL-32 and the task brief say "one item per in-range position"; a follow-up can emit the partial slice at the end positions (Task 22) |
+| 54 | a non-constant `y[b -: w] = d` or `<= d` with an unsigned base `b` below `w - 1` whose slice straddles the bottom of `y` (`y[b -: 3]` of `[3:0]`, 3-bit `b` = 0 or 1) writes the bits of the slice inside `y` (v4.22) | writes nothing: the case method's offset `b - (w - 1)` is computed unsigned and wraps (verified on 0.55, `elab-equiv` reports `y[s -: 3]` with a 3-bit unsigned `s` as not equivalent: s = 0 and s = 1 leave `y` unchanged; the same for `[0:3]`, `[4:1]`, `[5:2]`; a signed base, `+:`, and the top end of `-:` are equivalent) | writes the in-range bits (IEEE 1364-2005 4.2.1) | Yosys drops data here; the straddling top end, the low end of `+:` and a signed base agree and are covered by `tests/verilog/case-bridge/select_straddle_*.v` (Task 22 fix round 1) |
 | 55 | a non-constant select inside a concatenation target (`{y[s], z} <= d`) is the located error `non-constant index into 'y' is not supported in a concatenation target`; a word of a register array with a non-constant index stays pending until Task 23 | accepted, and silently wrong: the select is read as a `$shiftx` whose output wire is then assigned, so the write to `y` is lost (verified on 0.55: `{y[s], z} <= d2` leaves `y` undriven by the process and `$shiftx` output assigned) | an lvalue concatenation may hold a variable select | fail-closed: no silent wrong answer (Task 22) |
 | 56 | an `if` or `case` whose condition or selector and items are literals and parameters folds to the branch it takes: no switch, and an output assigned only in a dead branch is no output of the block | `switch` on the constant with the matched item and an added default that holds the case temporaries (`switch 1'1 / case 1'1 / assign $1\y \a / case / assign $1\y \y`, verified on 0.55); the items after a match, and the items that cannot match, are removed before the outputs are collected (an all-dead `case` leaves an empty process), so a dead-only output is not an output there either | — | the same logic after `opt`; `elab-equiv` on `tests/verilog/case-bridge/const_fold.v` (Task 22) |
 | 57 | a switch whose branches assign nothing by `=` and that has no `default` item has no default case (`if (e) q <= d;` is one case) | an empty default case (`case` with no action) on every `if` and `case` (verified on 0.55: `if (e) q <= d` ends in an empty `case `) | — | an empty case changes nothing; the IR body is smaller (Task 22) |
+| 58 | a constant index with an x or z bit as the target of a procedural select (`y[1'bx] = d;`, `y[1'bz] <= d;`) writes nothing, with the warning `assignment to bits outside 'y' [3:0] is ignored` | writes bit 0 (the index is read with x as 0; verified on 0.55: `y = 4'd0; y[1'bx] = d;` is `connect \y { 3'000 \d }`, `elab-equiv` reports NOT equivalent for x and for z) | an x or z index selects nothing (IEEE 1364-2005 4.2.1); the same rule as a read, #40 | silent in Yosys; the warning is EL-43's "every write outside the object warns" (Task 22 fix round 1) |
 
 ## 18. Implementation split (EL-51)
 

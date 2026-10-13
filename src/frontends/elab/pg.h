@@ -104,9 +104,9 @@ odin3_status odin3_pg_assign(odin3_pg *pg, const odin3_pg_assign_req *req);
  * in the root case, and a switch on p has one case per position the select can take
  * (odin3_elab2_varsel_make), each assigning the constant slice of d at that position, with no
  * default; for `=` the switch has the case temporaries of EL-36 (and so a default that holds them).
- * A position at which the slice would straddle the end of the target has no case (spec 17 #54). The
- * target must be such a select alone (ODIN3_ERR_INVALID_ARG, logged, otherwise); odin3_pg_assign
- * calls this for one. rhs->width must be the select's width. ODIN3_ERR_NO_MEMORY.
+ * A position at which the slice straddles an end of the target has a case writing the bits inside
+ * it. The target must be such a select alone (ODIN3_ERR_INVALID_ARG, logged, otherwise);
+ * odin3_pg_assign calls this for one. rhs->width must be the select's width. ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_pg_select_write(odin3_pg *pg, const odin3_pg_assign_req *req);
 

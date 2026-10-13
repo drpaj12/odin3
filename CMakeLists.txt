@@ -907,12 +907,14 @@ if(BUILD_TESTING)
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 21: the process generator (always blocks to $proc nodes; EL-33 to EL-35).
     odin3_add_unit_test(test_elab_stage2_proc)
+    target_sources(test_elab_stage2_proc PRIVATE tests/unit/proc_test.c)
     target_include_directories(test_elab_stage2_proc PRIVATE ${_gen})
     add_dependencies(test_elab_stage2_proc verilog_generated)
     target_compile_definitions(test_elab_stage2_proc PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 22: if, case, case temporaries, flags and the case method for variable selects.
     odin3_add_unit_test(test_elab_stage2_case)
+    target_sources(test_elab_stage2_case PRIVATE tests/unit/proc_test.c)
     target_include_directories(test_elab_stage2_case PRIVATE ${_gen})
     add_dependencies(test_elab_stage2_case verilog_generated)
     target_compile_definitions(test_elab_stage2_case PRIVATE

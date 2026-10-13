@@ -746,17 +746,21 @@ typedef struct odin3_elab2_lvbit {
 } odin3_elab2_lvbit;
 
 /* One position a non-constant select can take: the declared index value the base holds there and
- * the wire position (LSB first) of the select's bit 0; bit j sits at pos + j. */
+ * the part of the select inside the object: its bits first .. first + count - 1 (bit 0 is the
+ * right end), of which bit first sits at wire position pos (LSB first) and bit j at pos + j -
+ * first. A slice that straddles an end of the object has count < the select's width. */
 typedef struct odin3_elab2_varcand {
     int64_t value;
     uint32_t pos;
+    uint32_t first;
+    uint32_t count;
 } odin3_elab2_varcand;
 
 /* A non-constant select that is a whole procedural target (`y[s]`, `y[b +: w]`: EL-32's case
  * method, Task 22). node is 0 when the lvalue has none. cands are the positions at which the select
- * lies wholly inside the object and its base can hold the value (the index's self-determined
- * width and sign limit them), by ascending value; lv->nets then holds every bit some position
- * writes. */
+ * lies at least partly inside the object and its base can hold the value (the index's
+ * self-determined width and sign limit them), by ascending value; lv->nets then holds every bit
+ * some position writes. */
 typedef struct odin3_elab2_varsel {
     odin3_ast_id node;  /* the SELECT */
     odin3_ast_id index; /* its base index expression, not generated */

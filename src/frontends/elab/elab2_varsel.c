@@ -6,10 +6,10 @@
  * the case and elab2_assign.c puts the union of the bits onto the lvalue.
  *
  * A position is a declared index value the base can hold (the index expression's self-determined
- * width and sign limit it: a 2-bit unsigned `s` takes 0..3, a signed one 0..1 on a [3:0] object,
- * as Yosys's case items do) at which the slice lies wholly inside the object. A slice that
- * straddles the end of the object has no case here: its in-range bits are not written, where
- * Yosys 0.55 writes them (spec 17 #54).
+ * width and sign limit it: a 2-bit unsigned `s` takes 0..3, a signed one -2..1, as Yosys's case
+ * items do) at which the slice lies at least partly inside the object. A slice that straddles
+ * either end of the object writes its in-range bits only (IEEE 1364-2005 4.2.1; Yosys 0.55 does
+ * the same): the position records which bits of the select those are.
  */
 #include "ast/ast.h"
 #include "ast/kinds.h"
@@ -46,20 +46,25 @@ static odin3_status varsel_width(odin3_elab2 *e2, odin3_elab2_varsel *vs) {
     return st;
 }
 
-/* One value: a position when the slice it selects lies wholly inside the object. */
+/* One value: a position when some bit of the slice it selects lies inside the object. */
 static odin3_status varsel_try(odin3_elab2_varsel *vs, bool plus, int64_t value) {
     odin3_elab2_selrange range = {0, 0, vs->width, true, true};
     odin3_elab2_sel_orient(&vs->obj, plus, value, &range);
-    int64_t first = odin3_elab2_sel_pos(&vs->obj, odin3_elab2_sel_index(&range, 0));
-    int64_t last = odin3_elab2_sel_pos(&vs->obj, odin3_elab2_sel_index(&range, vs->width - 1U));
-    if (first < 0 || last < 0) {
+    /* bit j sits at wire position pos0 + j, whether or not that is inside the object */
+    int64_t index0 = odin3_elab2_sel_index(&range, 0);
+    int64_t pos0 = vs->obj.msb >= vs->obj.lsb ? index0 - vs->obj.lsb : vs->obj.lsb - index0;
+    int64_t first = pos0 < 0 ? -pos0 : 0;
+    int64_t end = pos0 + (int64_t)vs->width; /* one past the last bit's position */
+    end = end > (int64_t)vs->obj.width ? (int64_t)vs->obj.width : end;
+    if (first >= (int64_t)vs->width || pos0 + first >= end) {
         return ODIN3_OK;
     }
     odin3_elab2_varcand *cand = odin3_vec_push(&vs->cands);
     if (cand == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *cand = (odin3_elab2_varcand){value, (uint32_t)first};
+    *cand = (odin3_elab2_varcand){value, (uint32_t)(pos0 + first), (uint32_t)first,
+                                  (uint32_t)(end - (pos0 + first))};
     return ODIN3_OK;
 }
 
@@ -76,7 +81,9 @@ odin3_status odin3_elab2_varsel_make(odin3_elab2 *e2, odin3_elab2_varsel *vs) {
     bool plus = odin3_ast_sub(e2->elab, vs->node) != ODIN3_AST_SELECT_PART_MINUS;
     int64_t low = vs->obj.msb < vs->obj.lsb ? vs->obj.msb : vs->obj.lsb;
     int64_t high = vs->obj.msb < vs->obj.lsb ? vs->obj.lsb : vs->obj.msb;
-    for (int64_t value = low; st == ODIN3_OK && value <= high; value++) {
+    /* a base outside the declared range still reaches the object when the slice straddles it */
+    int64_t reach = (int64_t)vs->width - 1;
+    for (int64_t value = low - reach; st == ODIN3_OK && value <= high + reach; value++) {
         st = varsel_fits(vs, value) ? varsel_try(vs, plus, value) : ODIN3_OK;
     }
     uint64_t bits = (uint64_t)vs->cands.len * vs->width;

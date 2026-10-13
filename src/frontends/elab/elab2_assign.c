@@ -461,7 +461,7 @@ static odin3_status lv_variable_index(odin3_elab2 *e2, const odin3_elab2_lvalue 
 
 /* A select whose index is not constant by the AST, as the whole target of a procedural assignment
  * (EL-32's case method, Task 22): its positions (elab2_varsel.c) and every bit some position
- * writes. In a concatenation it is an error: Yosys 0.55 silently drops such a write (spec 17 #54).
+ * writes. In a concatenation it is an error: Yosys 0.55 silently drops such a write (spec 17 #55).
  */
 static odin3_status lv_variable_select(odin3_elab2 *e2, odin3_elab2_lvalue *lv,
                                        const lv_sel *target) {
@@ -491,12 +491,12 @@ static odin3_status lv_variable_select(odin3_elab2 *e2, odin3_elab2_lvalue *lv,
     }
     const odin3_elab2_varcand *cands = vs->cands.data;
     uint32_t low = UINT32_MAX;
-    uint32_t high = 0;
+    uint32_t end = 0; /* one past the highest bit written */
     for (size_t i = 0; i < vs->cands.len; i++) {
         low = cands[i].pos < low ? cands[i].pos : low;
-        high = cands[i].pos > high ? cands[i].pos : high;
+        end = cands[i].pos + cands[i].count > end ? cands[i].pos + cands[i].count : end;
     }
-    for (uint32_t pos = low; st == ODIN3_OK && pos < high + vs->width; pos++) {
+    for (uint32_t pos = low; st == ODIN3_OK && pos < end; pos++) {
         st = lv_push(lv, odin3_wire_net(e2->mod, vs->wire, pos),
                      (odin3_elab2_lvbit){{vs->wire, pos}, sel, false});
     }
@@ -546,11 +546,18 @@ static odin3_status lv_select_range(odin3_elab2 *e2, odin3_elab2_lvalue *lv, con
     lv_sel ls = *target;
     ls.range = &range;
     if (!range.constant || !range.known) {
-        /* an x or z index in a process writes nothing; otherwise it is a continuous assignment's
-         * error (or a word of a register array: pending) */
-        return lv->procedural && range.constant
-                   ? lv_select_absent(lv, &ls)
-                   : lv_variable_index(e2, lv, target->node, target->obj->name);
+        /* an x or z index in a process writes nothing (IEEE 1364-2005 4.2.1; Yosys 0.55 writes
+         * bit 0, spec 17 #54), with the warning of any write outside the object; otherwise it is
+         * a continuous assignment's error (or a word of a register array: pending) */
+        if (!lv->procedural || !range.constant) {
+            return lv_variable_index(e2, lv, target->node, target->obj->name);
+        }
+        if (ls.wire.v != 0) {
+            odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, target->node),
+                             "assignment to bits outside '%s' [%d:%d] is ignored",
+                             target->obj->name, (int)target->obj->msb, (int)target->obj->lsb);
+        }
+        return lv_select_absent(lv, &ls);
     }
     return ls.wire.v == 0 ? lv_select_absent(lv, &ls) : lv_select_bits(e2, lv, &ls);
 }

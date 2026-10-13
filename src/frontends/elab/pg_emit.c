@@ -312,18 +312,12 @@ static odin3_status emit_claims(odin3_pg *pg, odin3_ast_id node) {
 /* --- the pins ----------------------------------------------------------------------------------
  */
 
-static int u32_compare(const void *lhs, const void *rhs) {
-    uint32_t first = *(const uint32_t *)lhs;
-    uint32_t second = *(const uint32_t *)rhs;
-    return (first > second) - (first < second);
-}
-
 /* Sorts and removes the duplicates of a vec of uint32_t. */
 static void unique_u32(odin3_vec *vec) {
     if (vec->len == 0) {
         return;
     }
-    qsort(vec->data, vec->len, sizeof(uint32_t), u32_compare);
+    qsort(vec->data, vec->len, sizeof(uint32_t), pg_u32_compare);
     uint32_t *items = vec->data;
     size_t kept = 1;
     for (size_t i = 1; i < vec->len; i++) {

@@ -61,12 +61,6 @@ static odin3_status select_compare(odin3_pg *pg, int64_t value, odin3_sig *out) 
     return st;
 }
 
-static int net_order(const void *lhs, const void *rhs) {
-    uint32_t first = *(const uint32_t *)lhs;
-    uint32_t second = *(const uint32_t *)rhs;
-    return (first > second) - (first < second);
-}
-
 /* The bits some position writes, sorted and unique (the targets of a `=` switch), in pg->blk. */
 static odin3_status select_targets(odin3_pg *pg) {
     odin3_vec_clear(&pg->blk);
@@ -78,7 +72,7 @@ static odin3_status select_targets(odin3_pg *pg) {
         *slot = ((const odin3_net_id *)odin3_vec_cat(&pg->lvs.nets, i))->v;
     }
     if (pg->blk.len > 0) {
-        qsort(pg->blk.data, pg->blk.len, sizeof(uint32_t), net_order);
+        qsort(pg->blk.data, pg->blk.len, sizeof(uint32_t), pg_u32_compare);
     }
     return ODIN3_OK;
 }
@@ -89,14 +83,16 @@ static odin3_status select_arm(odin3_pg *pg, const odin3_pg_assign_req *req,
     const odin3_elab2_varsel *vs = &pg->lvs.var;
     odin3_vec_clear(&pg->slv.nets);
     odin3_vec_clear(&pg->slv.bits);
-    for (uint32_t j = 0; j < vs->width; j++) {
+    for (uint32_t j = 0; j < cand->count; j++) {
         odin3_net_id *slot = odin3_vec_push(&pg->slv.nets);
         if (slot == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
         *slot = odin3_wire_net(pg->e2->mod, vs->wire, cand->pos + j);
     }
-    pg_asg asg = {&pg->slv, req->rhs, req->stmt, req->blocking, true};
+    /* a slice that straddles an end of the object writes the bits of the value that fall inside */
+    odin3_sig part = {req->rhs->bits + cand->first, cand->count, req->rhs->is_signed};
+    pg_asg asg = {&pg->slv, &part, req->stmt, req->blocking, true};
     return pg_apply(pg, &asg);
 }
 
