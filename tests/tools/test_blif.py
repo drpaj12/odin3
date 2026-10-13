@@ -57,7 +57,8 @@ class ParseTest(unittest.TestCase):
             "undefined model": ".model t\n.inputs a\n.outputs y\n.subckt foo x=a z=y\n.end\n",
             "unknown port": (".model t\n.inputs a\n.outputs y\n.subckt s q=a\n.end\n"
                              ".model s\n.inputs x\n.blackbox\n.end\n"),
-            "unknown directive": ".model t\n.inputs a\n.gate and2 A=a\n.end\n",
+            "unknown directive": ".model t\n.inputs a\n.mystery and2 A=a\n.end\n",
+            "gate not enabled": ".model t\n.inputs a\n.gate and2 A=a\n.end\n",
             "mixed cover": ".model t\n.inputs a b\n.outputs y\n.names a b y\n11 1\n00 0\n.end\n",
             "no model": "# nothing\n",
             "cell outside model": ".names a y\n1 1\n",
@@ -71,6 +72,65 @@ class ParseTest(unittest.TestCase):
         with self.assertRaises(blif.BlifError) as ctx:
             blif.parse_text(".model t\n.inputs a\n.outputs y\n.names a y\n11 1\n", "x.blif")
         self.assertTrue(str(ctx.exception).startswith("x.blif:5: "))
+
+
+class GateTest(unittest.TestCase):
+    """``.gate`` is Yosys's spelling of a cell instance; parsed like ``.subckt`` on request."""
+
+    TEXT = (".model t\n.inputs clk a b\n.outputs y\n"
+            ".gate single_port_ram addr[0]=a clk=clk data[0]=b out[0]=q we=a\n"
+            ".cname ram0\n"
+            ".names q y\n1 1\n.end\n")
+
+    def test_gate_is_off_by_default(self) -> None:
+        with self.assertRaises(blif.BlifError) as ctx:
+            blif.parse_text(self.TEXT, "g.blif")
+        self.assertIn("g.blif:4: unsupported directive .gate", str(ctx.exception))
+
+    def test_gate_parses_like_subckt(self) -> None:
+        cell = blif.parse_text(self.TEXT, "g.blif", gates=True).top.cells[0]
+        assert isinstance(cell, blif.Subckt)
+        self.assertTrue(cell.gate)
+        self.assertEqual(cell.model, "single_port_ram")
+        self.assertEqual(cell.conns, [("addr[0]", "a"), ("clk", "clk"), ("data[0]", "b"),
+                                      ("out[0]", "q"), ("we", "a")])
+        self.assertEqual(cell.attrs, [(".cname", "ram0")])
+        self.assertEqual(cell.line, 4)
+
+    def test_subckt_is_not_a_gate(self) -> None:
+        text = (".model t\n.inputs a\n.outputs y\n.subckt s x=a z=y\n.end\n"
+                ".model s\n.inputs x\n.outputs z\n.blackbox\n.end\n")
+        cell = blif.parse_text(text, gates=True).top.cells[0]
+        assert isinstance(cell, blif.Subckt)
+        self.assertFalse(cell.gate)
+
+    def test_undefined_model_is_still_an_error_for_subckt(self) -> None:
+        text = ".model t\n.inputs a\n.outputs y\n.subckt foo x=a z=y\n.end\n"
+        with self.assertRaises(blif.BlifError):
+            blif.parse_text(text, gates=True)
+
+    def test_gate_outputs_by_cell_type(self) -> None:
+        cases = {
+            ("single_port_ram", "out[3]"): True,
+            ("single_port_ram", "data[3]"): False,
+            ("dual_port_ram", "out1[0]"): True,
+            ("dual_port_ram", "out2"): True,
+            ("dual_port_ram", "addr1[0]"): False,
+            ("multiply", "out[35]"): True,
+            ("multiply", "a[0]"): False,
+            ("$_DFF_P_", "Q"): True,
+            ("$_DFF_P_", "D"): False,
+        }
+        for (cell_type, formal), expected in cases.items():
+            with self.subTest(cell_type=cell_type, formal=formal):
+                self.assertEqual(blif.gate_port_is_output(cell_type, formal), expected)
+
+    def test_gate_drivers_are_checked(self) -> None:
+        text = (".model t\n.inputs a\n.outputs y\n"
+                ".gate single_port_ram clk=a out[0]=y\n.names a y\n1 1\n.end\n")
+        with self.assertRaises(blif.BlifError) as ctx:
+            blif.parse_text(text, "g.blif", gates=True)
+        self.assertIn("more than one driver", str(ctx.exception))
 
 
 if __name__ == "__main__":
