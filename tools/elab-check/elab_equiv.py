@@ -27,8 +27,12 @@ a temporary directory is used and removed. Every child runs in that directory th
 ``memcap.run(argv, cap)`` (point (n); ``--mem-cap`` bytes, default 4 GiB). A Yosys whose ``-V``
 lacks ``0.55`` is refused unless ``--allow-version V`` names it (the nightly drift job only).
 
-Exit 0 equivalent, 1 not equivalent, 2 error (a child failed, a bad argument), 77 skipped (an ASan
-child and no ``systemd-run``: it cannot be capped).
+Exit codes: 0 equivalent; 1 NOT equivalent, only when ``equiv-check`` exits 1 *and* prints its own
+``equiv-check: NOT equivalent`` verdict line; 2 error: a tool named on the command line that is not
+an executable, a child that failed or crashed (any exit but 0 from odin3 or Yosys, an exit other than
+0/1 from ``equiv-check``, an exit 1 without its verdict line such as a Python traceback or a
+``systemd-run`` that cannot find the program), a bad argument; 77 skipped (an ASan child and no
+``systemd-run``: it cannot be capped). A driver that gates on "differs" must test for exit 1 only.
 """
 
 from __future__ import annotations
@@ -49,6 +53,8 @@ TOOL = "elab-equiv"
 GIB = 1 << 30
 DEFAULT_CAP = 4 * GIB  # plan point (n): 4 GiB per child by default
 EXIT_EQUAL, EXIT_DIFFER, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
+# equiv-check's own verdict line for exit 1 (tools/equiv-check): without it exit 1 is a crash.
+NOT_EQUIVALENT_RE = re.compile(r"^equiv-check: NOT equivalent\b", re.MULTILINE)
 TAIL_LINES = 20  # lines of a failing child's output shown
 
 # Yosys's script after the read: hierarchy (the top is chosen by --top or found), proc, then the
@@ -158,10 +164,19 @@ class Bridge:
             print(f"{TOOL}: {name}: equivalent")
             return EXIT_EQUAL
         output = tail((done.stdout or "") + (done.stderr or ""))
-        if done.returncode == 1:
+        if done.returncode == 1 and NOT_EQUIVALENT_RE.search(done.stdout or ""):
             print(f"{TOOL}: {name}: NOT equivalent\n{output}")
             return EXIT_DIFFER
-        raise EquivError(f"equiv-check failed (exit {done.returncode}):\n{output}")
+        raise EquivError(f"equiv-check failed (exit {done.returncode}, no verdict line):\n{output}")
+
+    def check_tools(self) -> None:
+        """Every tool named on the command line is an executable, else exit 2 before any child."""
+        opts = self.opts
+        named = [("--odin3", opts.odin3), ("--yosys", opts.yosys)]
+        named += [] if opts.a_only else [("--equiv-check", opts.equiv_check)]
+        for flag, tool in named:
+            if shutil.which(tool) is None:
+                raise EquivError(f"{flag} {tool} is not an executable file")
 
     def run(self) -> int:
         opts = self.opts
@@ -175,6 +190,7 @@ class Bridge:
             temp = tempfile.mkdtemp(prefix="elab-equiv-")
             self.work = Path(temp)
         try:
+            self.check_tools()
             self.check_version()
             self.side_a()
             if opts.a_only:

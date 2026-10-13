@@ -68,8 +68,12 @@ FAKE_EQUIV = """#!{python}
 import json, os, sys
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(["equiv-check", *sys.argv[1:], os.getcwd()]) + "\\n")
-print("equiv-check says", os.environ.get("FAKE_EQUIV_RC", "0"))
-sys.exit(int(os.environ.get("FAKE_EQUIV_RC", "0")))
+rc = os.environ.get("FAKE_EQUIV_RC", "0")
+if rc == "1" and not os.environ.get("FAKE_EQUIV_NO_VERDICT"):
+    print("equiv-check: NOT equivalent (abc cec)")
+else:
+    print("equiv-check says", rc)
+sys.exit(int(rc))
 """
 
 # systemd-run: logs, drops its own options, then runs the command.
@@ -199,6 +203,33 @@ class BridgeTest(unittest.TestCase):
             code, out, err = self.run_tool(extra={"FAKE_EQUIV_RC": str(rc)})
             self.assertEqual(code, want, out + err)
         self.assertIn("NOT equivalent", self.run_tool(extra={"FAKE_EQUIV_RC": "1"})[1])
+
+    def test_exit_one_without_the_verdict_line_is_an_error(self) -> None:
+        """A crash of equiv-check (a traceback exits 1) is not "NOT equivalent" (review I5)."""
+        code, out, err = self.run_tool(extra={"FAKE_EQUIV_RC": "1", "FAKE_EQUIV_NO_VERDICT": "1"})
+        self.assertEqual(code, 2, out + err)
+        self.assertNotIn("NOT equivalent", out)
+        self.assertIn("equiv-check failed (exit 1, no verdict line)", err)
+
+    def test_a_tool_that_is_not_an_executable_is_an_error(self) -> None:
+        """A wrong --equiv-check/--odin3/--yosys path exits 2 before any child runs (review I5)."""
+        for flag in ("--odin3", "--yosys", "--equiv-check"):
+            self.log.unlink(missing_ok=True)
+            argv = {"--odin3": str(self.odin3), "--yosys": str(self.yosys),
+                    "--equiv-check": str(self.equiv)}
+            argv[flag] = str(self.dir / "nonexistent")
+            args = [x for pair in argv.items() for x in pair]
+            code, out, err = helpers.run_main(elab_equiv.main, [*args, str(self.src)])
+            self.assertEqual(code, 2, flag + out + err)
+            self.assertIn(f"{flag} {self.dir / 'nonexistent'} is not an executable", err)
+            self.assertEqual(self.names(), [], flag)
+
+    def test_a_only_does_not_need_equiv_check(self) -> None:
+        code, _, err = helpers.run_main(
+            elab_equiv.main,
+            ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--equiv-check",
+             str(self.dir / "nonexistent"), "--keep", str(self.keep), "--a-only", str(self.src)])
+        self.assertEqual(code, 0, err)
 
     def test_odin3_failure_is_an_error(self) -> None:
         code, _, err = self.run_tool(extra={"FAKE_ODIN3_RC": "1"})
