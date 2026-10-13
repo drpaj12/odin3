@@ -398,23 +398,10 @@ odin3_status odin3_expr_rebuild(odin3_expr_ctx *ec, odin3_opt_rule rule,
     return st;
 }
 
-/* Copies one attribute of the visited cell onto the helper cell (odin3_attr_foreach's visitor). */
-typedef struct attr_copy {
-    odin3_module *module;
-    odin3_node_id to;
-} attr_copy;
-
-static odin3_status copy_one(void *user, uint32_t key_str, const odin3_value *value) {
-    const attr_copy *copy = user;
-    return odin3_attr_set(copy->module, (odin3_objref){ODIN3_OBJ_NODE, copy->to.v}, key_str, value);
-}
-
 odin3_status odin3_expr_wire_keep(odin3_expr_ctx *ec, odin3_opt_rule rule,
                                   const odin3_expr_sig *src, odin3_node_id fresh) {
-    attr_copy copy = {ec->module, fresh};
     uint32_t name = odin3_node_name(ec->module, ec->node);
-    odin3_status st =
-        odin3_attr_foreach(ec->module, (odin3_objref){ODIN3_OBJ_NODE, ec->node.v}, copy_one, &copy);
+    odin3_status st = odin3_kit_copy_attrs(ec->module, ec->node, fresh);
     st = st == ODIN3_OK ? odin3_expr_wire(ec, rule, src) : st;
     /* the visited cell's name left the map with it, so this re-insertion does not grow the map */
     if (st == ODIN3_OK && name != 0) {

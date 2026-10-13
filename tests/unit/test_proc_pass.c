@@ -38,6 +38,7 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -1015,13 +1016,16 @@ static void test_step_f_folds(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_proc(&res, NULL, &stats));
     TEST_ASSERT_TRUE(stats.opt_expr.folded >= 1);
     TEST_ASSERT_EQUAL_UINT32(0, reduce_or_of_one(&res));
-    const char *info = proc_info();
-    const char *at = strstr(info, "; opt_expr: ");
-    TEST_ASSERT_NOT_NULL_MESSAGE(at, info);
-    const char *digits = at + strlen("; opt_expr: ");
-    unsigned long changes = strtoul(digits, NULL, 10);
-    TEST_ASSERT_EQUAL_UINT32(stats.opt_expr.rewritten + stats.opt_expr.folded, (uint32_t)changes);
+    uint32_t changes = stats.opt_expr.rewritten + stats.opt_expr.folded;
     TEST_ASSERT_TRUE(changes >= 1);
+    char want[256];
+    (void)snprintf(want, sizeof want,
+                   "proc: 2 processes in 1 modules: 0 $dff, 1 $adff, 0 $aldff, 0 $dffsr, "
+                   "1 $dlatch, 1 $mux, 0 $pmux; opt_expr: %" PRIu32 " changes; ",
+                   changes);
+    const char *info = proc_info();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, strncmp(want, info, strlen(want)), info);
+    TEST_ASSERT_TRUE_MESSAGE(is_ms(info + strlen(want)), info);
     pb_free(&res);
 }
 

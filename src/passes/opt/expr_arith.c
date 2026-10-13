@@ -136,6 +136,9 @@ static iw_side identity_of(const odin3_expr_ctx *ec, bool *negative) {
         break;
     case ODIN3_EXPR_T_DIV:
         wrt_a = is_int_one(ec, PORT_B);
+        /* a 1-bit signed 1 is -1 (Yosys's `as_int` reads it as +1: §17 #30) */
+        *negative = wrt_a && odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED) != 0 &&
+                    odin3_expr_width(ec, PORT_B) == 1;
         break;
     default:
         break;
@@ -180,11 +183,23 @@ odin3_status odin3_expr_rule_identwrt(odin3_expr_ctx *ec) {
 
 /* --- $pow ------------------------------------------------------------------------------------- */
 
+/* The number of bits in value (0 for 0). */
+static uint32_t bit_length(uint32_t value) {
+    uint32_t bits = 0;
+    for (; value != 0; value >>= 1) {
+        bits++;
+    }
+    return bits;
+}
+
 /*
  * A constant one-hot base and an unsigned exponent: 2 ** b is 1 << b; 2^k ** b is 1 << (k * b), the
  * product in a new $mul. Yosys 0.55 forgets to clear A_SIGNED in the first case and to exclude a
  * signed base whose one-hot bit is its sign; both would change the value, so this follows the later
- * Yosys (external/yosys, passes/opt/opt_expr.cc): A_SIGNED 0 and no signed MSB.
+ * Yosys (external/yosys, passes/opt/opt_expr.cc): A_SIGNED 0 and no signed MSB. Both Yosys versions
+ * also make the product k * b only Y_WIDTH bits wide, so it wraps (4 ** 128 in 8 bits gives 1, not
+ * 0); here it is B_WIDTH + bit_length(k) bits, which holds it, and a $shl by an amount of Y_WIDTH
+ * or more gives 0 (§17 #29).
  */
 odin3_status odin3_expr_rule_pow(odin3_expr_ctx *ec) {
     uint32_t index = 0;
@@ -211,10 +226,11 @@ odin3_status odin3_expr_rule_pow(odin3_expr_ctx *ec) {
             .type = ODIN3_EXPR_T_MUL, .n_params = N_BIN_PARAMS, .in = {&amount, &exponent}};
         mul.params[ODIN3_EXPR_P_BIN_AW] = a_width;
         mul.params[ODIN3_EXPR_P_BIN_BW] = exponent.n;
-        mul.params[ODIN3_EXPR_P_BIN_YW] = y_width;
+        uint32_t product_width = exponent.n + bit_length(index);
+        mul.params[ODIN3_EXPR_P_BIN_YW] = product_width;
         st = st == ODIN3_OK ? odin3_expr_new_cell(ec, &mul, NULL, &product) : st;
         shl.in[1] = &product;
-        shl.params[ODIN3_EXPR_P_BIN_BW] = y_width;
+        shl.params[ODIN3_EXPR_P_BIN_BW] = product_width;
     }
     return st == ODIN3_OK ? odin3_expr_rebuild(ec, ODIN3_OPT_RULE_POW_SHIFT, &shl) : st;
 }

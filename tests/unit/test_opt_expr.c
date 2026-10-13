@@ -131,6 +131,12 @@ static void build_run(const char *text) {
 
 /* --- reading the result ----------------------------------------------------------------------- */
 
+static odin3_node_id named_node(const char *name) {
+    odin3_node_id node = odin3_module_find_node(fx.res.module, intern(name));
+    TEST_ASSERT_TRUE_MESSAGE(odin3_node_valid(node), name);
+    return node;
+}
+
 static odin3_net_id wnet(const char *wire, uint32_t bit) {
     odin3_wire_id wire_id = odin3_module_find_wire(fx.res.module, intern(wire));
     TEST_ASSERT_TRUE_MESSAGE(odin3_wire_valid(wire_id), wire);
@@ -1939,6 +1945,43 @@ static void test_identwrt_needs_consume_x(void) {
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$add"));
 }
 
+/* Holds the 8-bit input port `wire` to the constant `value`: its pins let go and its nets join the
+ * constants' (as read_rtlil's `connect \\wire 8'...` would have given before any rewrite). The port
+ * node no longer drives its wire then, which odin3_check_design's rule 9 rejects: callers skip it.
+ */
+static void hold_input(const char *wire, uint32_t value) {
+    odin3_opt_ctx oc;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_ctx_init(&oc, &fx.ctx, fx.res.module, &fx.opts));
+    odin3_wire_id wire_id = odin3_module_find_wire(fx.res.module, intern(wire));
+    odin3_pinslice pins =
+        odin3_node_pins(fx.res.module, odin3_wire_port_node(fx.res.module, wire_id));
+    TEST_ASSERT_EQUAL_UINT32(8, pins.count);
+    for (uint32_t k = 0; k < 8; k++) {
+        odin3_net_id net = wnet(wire, k);
+        odin3_net_id const_net = {0};
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_OK, odin3_opt_const_net(&oc, (value >> k & 1U) != 0 ? ODIN3_BIT_1 : ODIN3_BIT_0,
+                                          &const_net));
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_OK, odin3_pin_disconnect(fx.res.module, (odin3_pin_id){pins.first.v + k}));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_net_merge(fx.res.module, (odin3_net_pair){const_net, net}));
+    }
+    odin3_opt_ctx_free(&oc);
+}
+
+/* The 8 bits of wire as a number (0..255); every bit must be 0 or 1. */
+static uint32_t wire_value(const char *wire) {
+    char bits[BITS_MAX];
+    wbits(wire, 8, bits);
+    uint32_t value = 0;
+    for (size_t k = 0; k < 8; k++) {
+        TEST_ASSERT_TRUE_MESSAGE(bits[k] == '0' || bits[k] == '1', bits);
+        value = value << 1 | (bits[k] == '1' ? 1U : 0U);
+    }
+    return value;
+}
+
 /* yosys -p "read_rtlil pow_shift_two.il; opt_expr": $pow(2, b3) is $shl(1, b3) */
 static void test_pow_shift_two(void) {
     build_run(K_POW_SHIFT_TWO);
@@ -1974,7 +2017,9 @@ static void test_pow_signed_base(void) {
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$pow"));
 }
 
-/* yosys -p "read_rtlil pow_shift_eight.il; opt_expr": $pow(8, b3) is $mul(3, b3) into $shl(1, .) */
+/* yosys -p "read_rtlil pow_shift_eight.il; opt_expr": $pow(8, b3) is $mul(3, b3) into $shl(1, .);
+ * Yosys makes the product Y_WIDTH wide (a miscompile, §17 #29); Odin III makes it B_WIDTH +
+ * bitlen(3) = 5 bits wide, so it cannot wrap */
 static void test_pow_shift_eight(void) {
     build_run(K_POW_SHIFT_EIGHT);
     TEST_ASSERT_EQUAL_UINT32(0, count_type("$pow"));
@@ -1987,13 +2032,46 @@ static void test_pow_shift_eight(void) {
         TEST_ASSERT_EQUAL_CHAR('0', cbit(pnet(mul, "A", k)));
     }
     expect_port_is_wire(mul, "B", "b3", 0);
-    TEST_ASSERT_EQUAL_INT64(8, pparam(mul, "Y_WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(5, pparam(mul, "Y_WIDTH"));
     TEST_ASSERT_EQUAL_CHAR('1', cbit(pnet(shl, "A", 0)));
-    TEST_ASSERT_EQUAL_INT64(8, pparam(shl, "B_WIDTH"));
-    for (uint32_t k = 0; k < 8; k++) {
+    TEST_ASSERT_EQUAL_INT64(5, pparam(shl, "B_WIDTH"));
+    for (uint32_t k = 0; k < 5; k++) {
         expect_same(pnet(shl, "B", k), pnet(mul, "Y", k), "$shl reads the $mul");
     }
     expect_same(pnet(shl, "Y", 0), wnet("y", 0), "$shl drives y");
+}
+
+static const char K_POW_OVERFLOW[] = "module \\m\n"
+                                     "  wire width 8 input 1 \\b\n"
+                                     "  wire width 8 output 2 \\y\n"
+                                     "  cell $pow \\c\n"
+                                     "    parameter \\A_WIDTH 8\n"
+                                     "    parameter \\B_WIDTH 8\n"
+                                     "    parameter \\Y_WIDTH 8\n"
+                                     "    connect \\A 8'00000100\n"
+                                     "    connect \\B \\b\n"
+                                     "    connect \\Y \\y\n"
+                                     "  end\n"
+                                     "end\n";
+
+/*
+ * 4 ** b in 8 bits (§17 #29). yosys 0.55 (and later) makes the exponent product k * b as wide as Y:
+ *   yosys -p "read_rtlil pow.il; eval -set b 128 -show y m; opt_expr; eval -set b 128 -show y m"
+ * prints y = 8'00000000, then 8'00000001 (2 * 128 wraps to 0 in 8 bits). The product here is
+ * exact, so b = 128 (and 129, whose wrapped product is 2: 4) give 0.
+ */
+static void test_pow_overflow(void) {
+    static const uint32_t bs[] = {0, 1, 2, 3, 4, 5, 127, 128, 129, 192, 255};
+    for (size_t i = 0; i < sizeof bs / sizeof bs[0]; i++) {
+        build_run(K_POW_OVERFLOW);
+        TEST_ASSERT_EQUAL_UINT32(0, count_type("$pow"));
+        hold_input("b", bs[i]);
+        n_lines = 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_opt_expr_run(&fx.ctx, fx.res.module, &fx.opts, &fx.counts));
+        uint32_t want = bs[i] < 4 ? 1U << (2U * bs[i]) : 0U; /* 4 ** b mod 256 */
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(want, wire_value("y"), "4 ** b");
+    }
 }
 
 /* yosys -p "read_rtlil mul_shift.il; opt_expr": $mul by 4 is a $shl by 2, then wiring */
@@ -2041,6 +2119,70 @@ static void test_mul_low_zeros(void) {
     TEST_ASSERT_EQUAL_STRING("$mul", driver_type(wnet("y", 7)));
 }
 
+#define ATTRS_TEXT                                                                                 \
+    "  attribute \\note \"t.v:3.1\"\n"                                                             \
+    "  attribute \\foo 1\n"                                                                        \
+    "  attribute \\bar 2\n"                                                                        \
+    "  attribute \\baz 3\n"
+
+static const char K_MUL_LOW_ZEROS_ATTRS[] =
+    "module \\m\n"
+    "  wire width 2 input 1 \\b2\n"
+    "  wire width 4 input 2 \\a4\n"
+    "  wire width 8 output 3 \\y\n" ATTRS_TEXT "  cell $mul \\c\n"
+    "    parameter \\A_WIDTH 4\n"
+    "    parameter \\B_WIDTH 4\n"
+    "    parameter \\Y_WIDTH 8\n"
+    "    connect \\A \\a4\n"
+    "    connect \\B { \\b2 2'00 }\n"
+    "    connect \\Y \\y\n"
+    "  end\n"
+    "end\n";
+
+static const char K_FINE_ADD_ATTRS[] =
+    "module \\m\n"
+    "  wire width 4 input 1 \\a4\n"
+    "  wire width 3 input 2 \\b3\n"
+    "  wire width 4 output 3 \\y\n" ATTRS_TEXT "  cell $add \\c\n"
+    "    parameter \\A_WIDTH 4\n"
+    "    parameter \\B_WIDTH 4\n"
+    "    parameter \\Y_WIDTH 4\n"
+    "    connect \\A \\a4\n"
+    "    connect \\B { \\b3 1'0 }\n"
+    "    connect \\Y \\y\n"
+    "  end\n"
+    "end\n";
+
+/* The attributes of the cell a rewrite replaced with a helper cell are all on the helper. */
+static void expect_attrs(odin3_node_id node) {
+    odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
+    const odin3_value *note = odin3_attr_get(fx.res.module, obj, intern("note"));
+    TEST_ASSERT_NOT_NULL(note);
+    TEST_ASSERT_EQUAL_STRING("t.v:3.1",
+                             odin3_strtab_get(odin3_design_strtab(fx.res.design), note->str));
+    static const char *const keys[] = {"foo", "bar", "baz"};
+    for (int64_t k = 0; k < 3; k++) {
+        const odin3_value *val = odin3_attr_get(fx.res.module, obj, intern(keys[k]));
+        TEST_ASSERT_NOT_NULL_MESSAGE(val, keys[k]);
+        TEST_ASSERT_EQUAL_INT64_MESSAGE(k + 1, val->i, keys[k]);
+    }
+    TEST_ASSERT_EQUAL_UINT32(node.v, named_node("c").v); /* and the name */
+}
+
+/* I1: wire_keep copies the attributes through odin3_kit_copy_attrs (not from inside the walk) */
+static void test_mul_low_zeros_attrs(void) {
+    build_run(K_MUL_LOW_ZEROS_ATTRS);
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_MUL_LOW_ZEROS));
+    expect_attrs(need_type("$mul"));
+}
+
+static void test_fine_add_attrs(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_ADD_ATTRS);
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_FINE_ADDSUB));
+    expect_attrs(need_type("$add"));
+}
+
 /* yosys -p "read_rtlil divmod_zero.il; opt_expr" (also with -keepdc) */
 static void test_divmod_zero(void) {
     build_run(K_DIVMOD_ZERO);
@@ -2050,6 +2192,49 @@ static void test_divmod_zero(void) {
     fx.opts.keepdc = true;
     build_run(K_DIVMOD_ZERO);
     expect_wire("y", 4, "xxxx");
+}
+
+static const char K_DIV_MINUS_ONE[] = "module \\m\n"
+                                      "  wire width 8 input 1 \\a\n"
+                                      "  wire width 8 output 2 \\y\n"
+                                      "  cell $div \\c\n"
+                                      "    parameter \\A_SIGNED 1\n"
+                                      "    parameter \\A_WIDTH 8\n"
+                                      "    parameter \\B_SIGNED 1\n"
+                                      "    parameter \\B_WIDTH 1\n"
+                                      "    parameter \\Y_WIDTH 8\n"
+                                      "    connect \\A \\a\n"
+                                      "    connect \\B 1'1\n"
+                                      "    connect \\Y \\y\n"
+                                      "  end\n"
+                                      "end\n";
+
+/*
+ * A signed $div by the 1-bit signed 1'1, which is -1 (§17 #30). yosys 0.55 makes it the identity:
+ *   yosys -p "read_rtlil divm1.il; eval -set a 4 -show y m; opt_expr; eval -set a 4 -show y m"
+ * (A 4-bit signed, Y 4 bits) prints y = 4'1100, then 4'0100 and leaves `cell $pos`. Here it is a
+ * $neg: a = 4 gives -4.
+ */
+static void test_div_minus_one(void) {
+    build_run(K_DIV_MINUS_ONE);
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$div"));
+    odin3_node_id neg = need_type("$neg");
+    TEST_ASSERT_EQUAL_INT64(1, pparam(neg, "A_SIGNED"));
+    TEST_ASSERT_EQUAL_INT64(8, pparam(neg, "Y_WIDTH"));
+    expect_port_is_wire(neg, "A", "a", 0);
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_IDENTWRT_A));
+    static const uint32_t values[] = {0, 1, 4, 127, 128, 129, 255};
+    for (size_t i = 0; i < sizeof values / sizeof values[0]; i++) {
+        build_run(K_DIV_MINUS_ONE);
+        hold_input("a", values[i]);
+        n_lines = 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_opt_expr_run(&fx.ctx, fx.res.module, &fx.opts, &fx.counts));
+        int32_t signed_value =
+            values[i] < VALUES / 2 ? (int32_t)values[i] : (int32_t)values[i] - VALUES;
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)(-signed_value) & 0xFFU, wire_value("y"),
+                                         "a / -1");
+    }
 }
 
 /* yosys -p "read_rtlil div_shift_mod_mask.il; opt_expr": a $sshr by 2 and an $and with 2'b11,
@@ -2117,43 +2302,6 @@ static void test_div_shift_signed_structure(void) {
     expect_same(pnet(ext, "A", 0), wnet("s8", 7), "sign");
     TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_DIV_SHIFT));
     TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_MOD_MASK));
-}
-
-/* Holds the 8-bit input port `wire` to the constant `value`: its pins let go and its nets join the
- * constants' (as read_rtlil's `connect \\wire 8'...` would have given before any rewrite). The port
- * node no longer drives its wire then, which odin3_check_design's rule 9 rejects: callers skip it.
- */
-static void hold_input(const char *wire, uint32_t value) {
-    odin3_opt_ctx oc;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_ctx_init(&oc, &fx.ctx, fx.res.module, &fx.opts));
-    odin3_wire_id wire_id = odin3_module_find_wire(fx.res.module, intern(wire));
-    odin3_pinslice pins =
-        odin3_node_pins(fx.res.module, odin3_wire_port_node(fx.res.module, wire_id));
-    TEST_ASSERT_EQUAL_UINT32(8, pins.count);
-    for (uint32_t k = 0; k < 8; k++) {
-        odin3_net_id net = wnet(wire, k);
-        odin3_net_id const_net = {0};
-        TEST_ASSERT_EQUAL_INT(
-            ODIN3_OK, odin3_opt_const_net(&oc, (value >> k & 1U) != 0 ? ODIN3_BIT_1 : ODIN3_BIT_0,
-                                          &const_net));
-        TEST_ASSERT_EQUAL_INT(
-            ODIN3_OK, odin3_pin_disconnect(fx.res.module, (odin3_pin_id){pins.first.v + k}));
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                              odin3_net_merge(fx.res.module, (odin3_net_pair){const_net, net}));
-    }
-    odin3_opt_ctx_free(&oc);
-}
-
-/* The 8 bits of wire as a number (0..255); every bit must be 0 or 1. */
-static uint32_t wire_value(const char *wire) {
-    char bits[BITS_MAX];
-    wbits(wire, 8, bits);
-    uint32_t value = 0;
-    for (size_t k = 0; k < 8; k++) {
-        TEST_ASSERT_TRUE_MESSAGE(bits[k] == '0' || bits[k] == '1', bits);
-        value = value << 1 | (bits[k] == '1' ? 1U : 0U);
-    }
-    return value;
 }
 
 /*
@@ -2318,6 +2466,10 @@ static void test_undriven(void) {
     expect_wire("y", 2, "0x"); /* the $not of 1x folds */
     TEST_ASSERT_EQUAL_UINT32(2, rule(ODIN3_OPT_RULE_UNDRIVEN));
     TEST_ASSERT_EQUAL_UINT32(1, fx.counts.folded);
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': undriven on net 'w[0]'"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': undriven on net 'w[1]'"));
     /* without the option the wire stays undriven and keeps its init */
     memset(&fx.opts, 0, sizeof fx.opts);
     memset(&fx.counts, 0, sizeof fx.counts);
@@ -2895,12 +3047,6 @@ static const char K_CLKINV_RING[] = "module \\m\n"
                                     "  end\n"
                                     "end\n";
 
-static odin3_node_id named_node(const char *name) {
-    odin3_node_id node = odin3_module_find_node(fx.res.module, intern(name));
-    TEST_ASSERT_TRUE_MESSAGE(odin3_node_valid(node), name);
-    return node;
-}
-
 /* Bit `bit` of the BITS parameter `name` of node. */
 static uint8_t pparam_bit(odin3_node_id node, const char *name, uint32_t bit) {
     const odin3_value *val = param_value(node, name);
@@ -2981,6 +3127,42 @@ static void test_clkinv_set_clr(void) {
     TEST_ASSERT_EQUAL_UINT32(2, rule(ODIN3_OPT_RULE_CLKINV));
 }
 
+static const char K_CLKINV_ALDFF[] = "module \\m\n"
+                                     "  wire input 1 \\c\n"
+                                     "  wire input 2 \\l\n"
+                                     "  wire input 3 \\ad\n"
+                                     "  wire input 4 \\d\n"
+                                     "  wire output 5 \\q\n"
+                                     "  wire \\nl\n"
+                                     "  cell $not \\inv\n"
+                                     "    connect \\A \\l\n"
+                                     "    connect \\Y \\nl\n"
+                                     "  end\n"
+                                     "  cell $aldff \\ff\n"
+                                     "    connect \\CLK \\c\n"
+                                     "    connect \\ALOAD \\nl\n"
+                                     "    connect \\AD \\ad\n"
+                                     "    connect \\D \\d\n"
+                                     "    connect \\Q \\q\n"
+                                     "  end\n"
+                                     "end\n";
+
+/* yosys -p "read_rtlil aldff.il; opt_expr": ALOAD = l, ALOAD_POLARITY 0; CLK and AD are as they
+ * were */
+static void test_clkinv_aldff(void) {
+    build_run(K_CLKINV_ALDFF);
+    odin3_node_id ff = named_node("ff");
+    TEST_ASSERT_EQUAL_STRING("$aldff", type_name(ff));
+    expect_same(pnet(ff, "ALOAD", 0), wnet("l", 0), "ALOAD is l");
+    expect_same(pnet(ff, "CLK", 0), wnet("c", 0), "CLK is c");
+    expect_same(pnet(ff, "AD", 0), wnet("ad", 0), "AD is ad");
+    TEST_ASSERT_EQUAL_INT64(0, pparam(ff, "ALOAD_POLARITY"));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(ff, "CLK_POLARITY"));
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_CLKINV));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': clkinv on $aldff 'ff'"));
+}
+
 /* a $mem port's RD_CLK bit is its own: bit 1 flips, bit 0 stays */
 static void test_clkinv_mem(void) {
     build_run(K_CLKINV_MEM);
@@ -3048,7 +3230,13 @@ static void test_clkinv_chain(void) {
     TEST_ASSERT_EQUAL_UINT32(2, rule(ODIN3_OPT_RULE_CLKINV));
 }
 
-/* A ring of inverters would flip the clock for ever (Yosys's loop never ends on it): left alone. */
+/*
+ * A ring of inverters is left alone (§17 #28). Yosys flips the clock input once and exits (its
+ * invert.double then removes the ring):
+ *   yosys -q -p "read_rtlil ffring.il; opt_expr; write_rtlil -"  -> CLK_POLARITY 0, CLK \n2
+ * Without the in_ring guard this test fails (the FF is flipped, as Yosys does), so the guard is
+ * reached; it is a safety net, not a termination need.
+ */
 static void test_clkinv_ring(void) {
     build_run(K_CLKINV_RING);
     odin3_node_id ff = need_type("$dff");
@@ -3874,6 +4062,7 @@ static void run_fine_tests(void) {
     RUN_TEST(test_clkinv_adff_arst);
     RUN_TEST(test_clkinv_all_ports);
     RUN_TEST(test_clkinv_set_clr);
+    RUN_TEST(test_clkinv_aldff);
     RUN_TEST(test_clkinv_mem);
     RUN_TEST(test_clkinv_memrd);
     RUN_TEST(test_clkinv_fine);
@@ -3890,6 +4079,7 @@ static void run_fine_tests(void) {
     RUN_TEST(test_fine_const_sides);
     RUN_TEST(test_fine_reduce_and_const);
     RUN_TEST(test_fine_add_low_bit);
+    RUN_TEST(test_fine_add_attrs);
     RUN_TEST(test_fine_add_operand_gone);
     RUN_TEST(test_fine_eq_unionfind);
     RUN_TEST(test_fine_eq_off);
@@ -3943,10 +4133,13 @@ static void run_arith_tests(void) {
     RUN_TEST(test_identwrt_needs_consume_x);
     RUN_TEST(test_pow_shift_two);
     RUN_TEST(test_pow_shift_eight);
+    RUN_TEST(test_pow_overflow);
     RUN_TEST(test_mul_shift);
     RUN_TEST(test_keepdc_arith);
     RUN_TEST(test_mul_low_zeros);
+    RUN_TEST(test_mul_low_zeros_attrs);
     RUN_TEST(test_divmod_zero);
+    RUN_TEST(test_div_minus_one);
     RUN_TEST(test_div_shift_mod_mask);
     RUN_TEST(test_const_fold);
     RUN_TEST(test_div_shift_signed_structure);

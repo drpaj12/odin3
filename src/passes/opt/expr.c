@@ -353,13 +353,14 @@ static void visit_reset(odin3_expr_ctx *ec, odin3_node_id node) {
     ec->rule_text = NULL;
 }
 
-/* Where fn stands in the rule list of kind: its index, the list's length when it is not there. */
+/* Where fn stands in the rule list of kind: its index, (size_t)-1 when it is not there (the
+ * visit must not step past the list's NULL end marker). */
 static size_t position_of(odin3_expr_type kind, odin3_expr_rule_fn fn) {
     size_t at = 0;
     while (k_rules[kind][at] != NULL && k_rules[kind][at] != fn) {
         at++;
     }
-    return at;
+    return k_rules[kind][at] != NULL ? at : (size_t)-1;
 }
 
 /*

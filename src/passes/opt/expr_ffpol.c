@@ -134,8 +134,9 @@ static int32_t polarity_slot(const odin3_celltype_def *def, const pol_type *type
     return NO_SLOT;
 }
 
-/* True when net is on a ring of inverters (flipping it would never end): following the invert map
- * from it comes back to it. */
+/* True when net is on a ring of inverters: following the invert map from it comes back to it. The
+ * ring has no defined value; Yosys flips it once and its invert.double then removes it, here it is
+ * left alone (§17 #28). */
 static bool in_ring(const odin3_opt_ctx *oc, odin3_net_id net) {
     odin3_net_id walk = net;
     for (uint32_t step = 0; step < RING_STEPS; step++) {

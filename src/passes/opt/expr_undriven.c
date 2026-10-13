@@ -12,10 +12,15 @@
 #include "passes/ffinit.h"
 #include "passes/opt/kit.h"
 #include "passes/opt/opt.h"
+#include "util/log.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+
+enum { LABEL_MAX = 256 };
 
 /* What the wires of a net say: some public wire names it, and some `keep` wire does. */
 typedef struct wire_facts {
@@ -45,9 +50,38 @@ static wire_facts facts_of(const odin3_expr_ctx *ec, odin3_net_id net) {
     return facts;
 }
 
+/* A net's label (§16): its name, else its primary wire bit `w[k]` (k the declared index), else
+ * `$n<ID>`. */
+static void net_label(const odin3_expr_ctx *ec, odin3_net_id net, char *out, size_t size) {
+    const odin3_strtab *tab = odin3_design_strtab(ec->oc->design);
+    uint32_t name = odin3_net_name(ec->module, net);
+    odin3_wirebit primary = odin3_net_primary(ec->module, net);
+    if (name != 0) {
+        (void)snprintf(out, size, "%s", odin3_strtab_get(tab, name));
+    } else if (odin3_wire_valid(primary.wire)) {
+        (void)snprintf(out, size, "%s[%" PRId32 "]",
+                       odin3_strtab_get(tab, odin3_wire_name(ec->module, primary.wire)),
+                       odin3_wire_index(ec->module, primary.wire, primary.bit));
+    } else {
+        (void)snprintf(out, size, "$n%" PRIu32, net.v);
+    }
+}
+
+/* DEBUG "opt_expr: module 'm': undriven on net '<net>'" (the label is read before the merge). */
+static void log_undriven(const odin3_expr_ctx *ec, const char *label) {
+    const odin3_strtab *tab = odin3_design_strtab(ec->oc->design);
+    odin3_log(ODIN3_LOG_DEBUG, "opt_expr: module '%s': undriven on net '%s'",
+              odin3_strtab_get(tab, odin3_module_name(ec->module)), label);
+}
+
 /* Replaces one undriven net by its init value or x; the used init bits go. */
 static odin3_status replace_net(odin3_expr_ctx *ec, odin3_net_id net) {
     odin3_bit init = odin3_ffinit_get(ec->module, net);
+    char label[LABEL_MAX] = "";
+    bool debug = odin3_log_get_level() >= ODIN3_LOG_DEBUG;
+    if (debug) {
+        net_label(ec, net, label, sizeof label);
+    }
     odin3_net_id value = {0};
     /* the constant net first: it can allocate, and a failure must leave the init as it was */
     odin3_status st = odin3_opt_const_net(ec->oc, init, &value);
@@ -59,6 +93,9 @@ static odin3_status replace_net(odin3_expr_ctx *ec, odin3_net_id net) {
         ec->oc->changed = true;
         ec->oc->counts->expr.rule[ODIN3_OPT_RULE_UNDRIVEN]++;
         ec->oc->counts->expr.rewritten++;
+        if (debug) {
+            log_undriven(ec, label);
+        }
     }
     return st;
 }
