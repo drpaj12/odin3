@@ -851,6 +851,22 @@ static const char K_IDENTWRT_ADD[] = "module \\m\n"
                                      "  end\n"
                                      "end\n";
 
+/* fuzz_opt's finding (§17 #55): a mixed-sign $sub of 0 extends A with zeros, not its sign. */
+static const char K_IDENTWRT_MIXED[] = "module \\m\n"
+                                       "  wire width 3 input 1 \\a3\n"
+                                       "  wire width 7 output 2 \\y\n"
+                                       "  cell $sub \\c\n"
+                                       "    parameter \\A_SIGNED 1\n"
+                                       "    parameter \\B_SIGNED 0\n"
+                                       "    parameter \\A_WIDTH 3\n"
+                                       "    parameter \\B_WIDTH 3\n"
+                                       "    parameter \\Y_WIDTH 7\n"
+                                       "    connect \\A \\a3\n"
+                                       "    connect \\B 3'000\n"
+                                       "    connect \\Y \\y\n"
+                                       "  end\n"
+                                       "end\n";
+
 static const char K_IDENTWRT_MUL[] = "module \\m\n"
                                      "  wire width 4 input 1 \\a4\n"
                                      "  wire width 4 output 2 \\y\n"
@@ -1935,6 +1951,19 @@ static void test_identwrt(void) {
     build_run(K_DIV_IDENTITY);
     for (uint32_t k = 0; k < 4; k++) {
         expect_same(wnet("y", k), wnet("a4", k), "$div by 1 is a4");
+    }
+}
+
+/* §17 #55: A - 0 with A signed and B unsigned is an unsigned operation, so the 3-bit A reaches the
+ * 7-bit Y zero-extended (Yosys 0.55's $pos sign-extends it: a miscompile, OP-13 outranks parity) */
+static void test_identwrt_mixed_sign_zero_extends(void) {
+    build_run(K_IDENTWRT_MIXED);
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$sub"));
+    for (uint32_t k = 0; k < 3; k++) {
+        expect_same(wnet("y", k), wnet("a3", k), "y is a3");
+    }
+    for (uint32_t k = 3; k < 7; k++) {
+        TEST_ASSERT_EQUAL_CHAR('0', cbit(wnet("y", k)));
     }
 }
 
@@ -4176,6 +4205,7 @@ static void run_arith_tests(void) {
     RUN_TEST(test_shiftx_trim);
     RUN_TEST(test_identwrt);
     RUN_TEST(test_identwrt_needs_consume_x);
+    RUN_TEST(test_identwrt_mixed_sign_zero_extends);
     RUN_TEST(test_pow_shift_two);
     RUN_TEST(test_pow_shift_eight);
     RUN_TEST(test_pow_overflow);

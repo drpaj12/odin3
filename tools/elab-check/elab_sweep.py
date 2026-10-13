@@ -650,7 +650,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--opt-diff", action="store_true", dest="opt_diff",
                     help="run opt-diff (Odin III's opt against Yosys 0.55's) per file")
     ap.add_argument("--opt-run", action="store_true", dest="opt_run",
-                    help="run opt-run (the Phase 2 script, ODIN3_OK, check, iteration cap) per file")
+                    help="run opt-run (Phase 2 script, ODIN3_OK, check, iteration cap) per file")
     ap.add_argument("--opt-arg", action="append", default=[], metavar="ARG",
                     help="--opt-equiv/--opt-diff: an argument for the child (use --opt-arg=ARG)")
     ap.add_argument("--pass", choices=("elab", "proc"), default="elab", dest="stop_pass",

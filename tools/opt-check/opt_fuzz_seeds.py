@@ -3,7 +3,7 @@
 
 Usage::
 
-    opt_fuzz_seeds.py OUT_DIR [--generated N] BLIF_DIR...
+    opt_fuzz_seeds.py OUT_DIR [--generated N] [--regress DIR] BLIF_DIR...
 
 OUT_DIR is created if missing; its files are written by name (an earlier seed of the same name is
 overwritten; nothing is deleted). Each file starts with fuzz_opt's mode byte (bits 0-2 the ``opt``
@@ -13,7 +13,9 @@ spelling, bit 3 the payload: 0 BLIF, 1 builder records):
   cannot drift): a 4-bit design with that cell over two inputs, and a second with an enable or
   reset nest around it, the spelling cycling over the eight;
 - ``--generated N`` (default 24) random builder seeds: seed ``k`` is a function of ``k`` alone;
-- every ``*.blif`` of the BLIF_DIRs, smallest first, each under the default spelling.
+- every ``*.blif`` of the BLIF_DIRs, smallest first, each under the default spelling;
+- ``--regress DIR``: the files of DIR as they are (each already starts with its mode byte): the
+  inputs of earlier findings, named ``regress-<file name>``.
 
 Exit 0 written, 2 usage or I/O error.
 """
@@ -95,13 +97,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("out", type=Path)
     ap.add_argument("--generated", type=int, default=DEFAULT_GENERATED)
+    ap.add_argument("--regress", type=Path, help="a directory of earlier findings, copied as is")
     ap.add_argument("blif_dirs", nargs="*", type=Path)
-    args = ap.parse_args(argv)
+    args = ap.parse_intermixed_args(argv)
     try:
         count = cell_types(FUZZER.read_text(encoding="utf-8"))
         seeds = type_seeds(count)
         seeds.update({f"gen{k:03d}": random_seed(k, count) for k in range(1, args.generated + 1)})
         seeds.update(blif_seeds(args.blif_dirs))
+        if args.regress is not None:
+            seeds.update({f"regress-{p.name}": p.read_bytes()
+                          for p in sorted(args.regress.iterdir()) if p.is_file()})
         write_all(args.out, seeds)
     except (OSError, IndexError) as exc:
         print(f"opt_fuzz_seeds: {exc}", file=sys.stderr)

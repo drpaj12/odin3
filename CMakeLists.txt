@@ -1475,7 +1475,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         file(MAKE_DIRECTORY ${_fo_corpus})
         add_test(NAME fuzz_opt_seeds
             COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/opt-check/opt_fuzz_seeds.py
-                    ${_fo_seeds} ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+                    ${_fo_seeds} --regress ${PROJECT_SOURCE_DIR}/tests/fuzz/fuzz_opt_regress
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif)
         set_tests_properties(fuzz_opt_seeds PROPERTIES FIXTURES_SETUP fuzz_opt_seeds LABELS fuzz)
         add_test(NAME fuzz_opt_seed_inputs
             COMMAND $<TARGET_FILE:fuzz_opt> -runs=0 -timeout=60 -rss_limit_mb=2048
