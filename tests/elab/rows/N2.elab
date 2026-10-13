@@ -1,0 +1,57 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:n2_ascending @N2_ascending_ranges.v:2:1
+  (MODULE:n2_ascending @N2_ascending_ranges.v:2:1
+    _
+    (LIST @N2_ascending_ranges.v:2:21
+      (PORT_DECL.input [IN_HEADER NET=1] @N2_ascending_ranges.v:2:22
+        (RANGE @N2_ascending_ranges.v:2:28
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:2:29 32'sd0)
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:2:31 32'sd3))
+        (DECLARATOR:a @N2_ascending_ranges.v:2:34
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N2_ascending_ranges.v:2:37
+        (RANGE @N2_ascending_ranges.v:2:44
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:2:45 32'sd1)
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:2:47 32'sd3))
+        (DECLARATOR:y @N2_ascending_ranges.v:2:50
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N2_ascending_ranges.v:2:53
+        (RANGE @N2_ascending_ranges.v:2:60
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:2:61 32'sd4294967295)
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:2:64 32'sd2))
+        (DECLARATOR:z @N2_ascending_ranges.v:2:67
+          _)))
+    (VAR_DECL.reg @N2_ascending_ranges.v:3:3
+      (RANGE @N2_ascending_ranges.v:3:7
+        (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:3:8 32'sd0)
+        (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:3:10 32'sd3))
+      (DECLARATOR:mem @N2_ascending_ranges.v:3:13
+        _
+        (RANGE @N2_ascending_ranges.v:3:17
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:3:18 32'sd0)
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:3:20 32'sd7))))
+    (VAR_DECL.reg @N2_ascending_ranges.v:4:3
+      (RANGE @N2_ascending_ranges.v:4:7
+        (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:4:8 32'sd3)
+        (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:4:10 32'sd0))
+      (DECLARATOR:neg @N2_ascending_ranges.v:4:13
+        _
+        (RANGE @N2_ascending_ranges.v:4:17
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:4:18 32'sd4294967294)
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:4:21 32'sd1))))
+    (CONT_ASSIGN @N2_ascending_ranges.v:5:3
+      _
+      _
+      (NET_ASSIGN @N2_ascending_ranges.v:5:10
+        (IDENT:y @N2_ascending_ranges.v:5:10)
+        (SELECT.part @N2_ascending_ranges.v:5:14
+          (IDENT:a @N2_ascending_ranges.v:5:14)
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:5:16 32'sd1)
+          (NUMBER.dec [SIGNED] @N2_ascending_ranges.v:5:18 32'sd3))))
+    (CONT_ASSIGN @N2_ascending_ranges.v:6:3
+      _
+      _
+      (NET_ASSIGN @N2_ascending_ranges.v:6:10
+        (IDENT:z @N2_ascending_ranges.v:6:10)
+        (IDENT:a @N2_ascending_ranges.v:6:14)))))

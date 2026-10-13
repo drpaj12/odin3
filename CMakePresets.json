@@ -38,13 +38,30 @@
       "name": "debug",
       "configurePreset": "debug",
       "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "execution": { "noTestsAction": "error" },
+      "filter": { "exclude": { "label": "sweep|sweep-xl" } }
     },
     {
       "name": "release",
       "configurePreset": "release",
       "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "execution": { "noTestsAction": "error" },
+      "filter": { "exclude": { "label": "sweep|sweep-xl" } }
+    },
+    {
+      "name": "sweep",
+      "configurePreset": "release",
+      "output": { "outputOnFailure": true },
+      "execution": { "jobs": 1 },
+      "filter": { "include": { "label": "^sweep$" } },
+      "environment": { "ODIN3_HEAVY_OK": "1" }
+    },
+    {
+      "name": "sweep-xl",
+      "configurePreset": "release",
+      "output": { "outputOnFailure": true },
+      "execution": { "jobs": 1 },
+      "filter": { "include": { "label": "sweep-xl" } }
     }
   ]
 }

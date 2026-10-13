@@ -1,0 +1,117 @@
+# generated: elab-check --write
+(UNIT:c1_if_else @C1_if_else.v:2:1
+  (MODULE:c1_if_else @C1_if_else.v:2:1
+    _
+    (LIST @C1_if_else.v:2:19
+      (PORT_DECL.input [IN_HEADER NET=1] @C1_if_else.v:2:20
+        _
+        (DECLARATOR:a @C1_if_else.v:2:26
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C1_if_else.v:2:20
+        _
+        (DECLARATOR:b @C1_if_else.v:2:29
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C1_if_else.v:2:20
+        _
+        (DECLARATOR:c @C1_if_else.v:2:32
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C1_if_else.v:2:35
+        (RANGE @C1_if_else.v:2:41
+          (NUMBER.dec [SIGNED] @C1_if_else.v:2:42 32'sd1)
+          (NUMBER.dec [SIGNED] @C1_if_else.v:2:44 32'sd0))
+        (DECLARATOR:s @C1_if_else.v:2:47
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C1_if_else.v:2:50
+        _
+        (DECLARATOR:y1 @C1_if_else.v:2:61
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C1_if_else.v:2:50
+        _
+        (DECLARATOR:y2 @C1_if_else.v:2:65
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C1_if_else.v:2:50
+        _
+        (DECLARATOR:y3 @C1_if_else.v:2:69
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C1_if_else.v:2:50
+        _
+        (DECLARATOR:y4 @C1_if_else.v:2:73
+          _)))
+    (ALWAYS.always @C1_if_else.v:3:3
+      (TIMING_STMT @C1_if_else.v:3:10
+        (EVENT_CONTROL [STAR] @C1_if_else.v:3:10
+          _)
+        (SEQ_BLOCK @C1_if_else.v:3:13
+          _
+          (BLOCKING_ASSIGN @C1_if_else.v:4:5
+            (IDENT:y1 @C1_if_else.v:4:5)
+            _
+            (NUMBER.bin @C1_if_else.v:4:10 1'b0))
+          (IF @C1_if_else.v:5:5
+            (IDENT:a @C1_if_else.v:5:9)
+            (BLOCKING_ASSIGN @C1_if_else.v:6:7
+              (IDENT:y1 @C1_if_else.v:6:7)
+              _
+              (IDENT:b @C1_if_else.v:6:12))
+            _))))
+    (ALWAYS.always @C1_if_else.v:8:3
+      (TIMING_STMT @C1_if_else.v:8:10
+        (EVENT_CONTROL [STAR] @C1_if_else.v:8:10
+          _)
+        (IF @C1_if_else.v:9:5
+          (IDENT:a @C1_if_else.v:9:9)
+          (BLOCKING_ASSIGN @C1_if_else.v:10:7
+            (IDENT:y2 @C1_if_else.v:10:7)
+            _
+            (IDENT:b @C1_if_else.v:10:12))
+          (BLOCKING_ASSIGN @C1_if_else.v:12:7
+            (IDENT:y2 @C1_if_else.v:12:7)
+            _
+            (IDENT:c @C1_if_else.v:12:12)))))
+    (ALWAYS.always @C1_if_else.v:13:3
+      (TIMING_STMT @C1_if_else.v:13:10
+        (EVENT_CONTROL [STAR] @C1_if_else.v:13:10
+          _)
+        (IF @C1_if_else.v:14:5
+          (BINARY.== @C1_if_else.v:14:9
+            (IDENT:s @C1_if_else.v:14:9)
+            (NUMBER.dec @C1_if_else.v:14:14 2'd0))
+          (BLOCKING_ASSIGN @C1_if_else.v:15:7
+            (IDENT:y3 @C1_if_else.v:15:7)
+            _
+            (IDENT:a @C1_if_else.v:15:12))
+          (IF @C1_if_else.v:16:10
+            (BINARY.== @C1_if_else.v:16:14
+              (IDENT:s @C1_if_else.v:16:14)
+              (NUMBER.dec @C1_if_else.v:16:19 2'd1))
+            (BLOCKING_ASSIGN @C1_if_else.v:17:7
+              (IDENT:y3 @C1_if_else.v:17:7)
+              _
+              (IDENT:b @C1_if_else.v:17:12))
+            (BLOCKING_ASSIGN @C1_if_else.v:19:7
+              (IDENT:y3 @C1_if_else.v:19:7)
+              _
+              (IDENT:c @C1_if_else.v:19:12))))))
+    (ALWAYS.always @C1_if_else.v:20:3
+      (TIMING_STMT @C1_if_else.v:20:10
+        (EVENT_CONTROL [STAR] @C1_if_else.v:20:10
+          _)
+        (SEQ_BLOCK @C1_if_else.v:20:13
+          _
+          (BLOCKING_ASSIGN @C1_if_else.v:21:5
+            (IDENT:y4 @C1_if_else.v:21:5)
+            _
+            (NUMBER.bin @C1_if_else.v:21:10 1'b0))
+          (IF @C1_if_else.v:22:5
+            (IDENT:a @C1_if_else.v:22:9)
+            (IF @C1_if_else.v:23:7
+              (IDENT:b @C1_if_else.v:23:11)
+              (BLOCKING_ASSIGN @C1_if_else.v:24:9
+                (IDENT:y4 @C1_if_else.v:24:9)
+                _
+                (IDENT:c @C1_if_else.v:24:14))
+              (BLOCKING_ASSIGN @C1_if_else.v:26:9
+                (IDENT:y4 @C1_if_else.v:26:9)
+                _
+                (NUMBER.bin @C1_if_else.v:26:14 1'b1)))
+            _))))))

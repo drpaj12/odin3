@@ -1,0 +1,69 @@
+# generated: elab-check --write
+(UNIT:e17_out_of_range @E17_out_of_range_index.v:2:1
+  (MODULE:e17_out_of_range @E17_out_of_range_index.v:2:1
+    _
+    (LIST @E17_out_of_range_index.v:2:25
+      (PORT_DECL.input [IN_HEADER NET=1] @E17_out_of_range_index.v:2:26
+        (RANGE @E17_out_of_range_index.v:2:32
+          (NUMBER.dec [SIGNED] @E17_out_of_range_index.v:2:33 32'sd7)
+          (NUMBER.dec [SIGNED] @E17_out_of_range_index.v:2:35 32'sd0))
+        (DECLARATOR:a @E17_out_of_range_index.v:2:38
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @E17_out_of_range_index.v:2:41
+        (RANGE @E17_out_of_range_index.v:2:47
+          (NUMBER.dec [SIGNED] @E17_out_of_range_index.v:2:48 32'sd3)
+          (NUMBER.dec [SIGNED] @E17_out_of_range_index.v:2:50 32'sd0))
+        (DECLARATOR:s @E17_out_of_range_index.v:2:53
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E17_out_of_range_index.v:2:56
+        _
+        (DECLARATOR:y1 @E17_out_of_range_index.v:2:63
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E17_out_of_range_index.v:2:56
+        _
+        (DECLARATOR:y2 @E17_out_of_range_index.v:2:67
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E17_out_of_range_index.v:2:56
+        _
+        (DECLARATOR:y3 @E17_out_of_range_index.v:2:71
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E17_out_of_range_index.v:2:56
+        _
+        (DECLARATOR:y4 @E17_out_of_range_index.v:2:75
+          _)))
+    (CONT_ASSIGN @E17_out_of_range_index.v:3:3
+      _
+      _
+      (NET_ASSIGN @E17_out_of_range_index.v:3:10
+        (IDENT:y1 @E17_out_of_range_index.v:3:10)
+        (SELECT.bit @E17_out_of_range_index.v:3:15
+          (IDENT:a @E17_out_of_range_index.v:3:15)
+          (NUMBER.dec [SIGNED] @E17_out_of_range_index.v:3:17 9)
+          _)))
+    (CONT_ASSIGN @E17_out_of_range_index.v:4:3
+      _
+      _
+      (NET_ASSIGN @E17_out_of_range_index.v:4:10
+        (IDENT:y2 @E17_out_of_range_index.v:4:10)
+        (SELECT.bit @E17_out_of_range_index.v:4:15
+          (IDENT:a @E17_out_of_range_index.v:4:15)
+          (NUMBER.bin @E17_out_of_range_index.v:4:17 4'bx)
+          _)))
+    (CONT_ASSIGN @E17_out_of_range_index.v:5:3
+      _
+      _
+      (NET_ASSIGN @E17_out_of_range_index.v:5:10
+        (IDENT:y3 @E17_out_of_range_index.v:5:10)
+        (SELECT.bit @E17_out_of_range_index.v:5:15
+          (IDENT:a @E17_out_of_range_index.v:5:15)
+          (NUMBER.bin @E17_out_of_range_index.v:5:17 4'bz)
+          _)))
+    (CONT_ASSIGN @E17_out_of_range_index.v:6:3
+      _
+      _
+      (NET_ASSIGN @E17_out_of_range_index.v:6:10
+        (IDENT:y4 @E17_out_of_range_index.v:6:10)
+        (SELECT.bit @E17_out_of_range_index.v:6:15
+          (IDENT:a @E17_out_of_range_index.v:6:15)
+          (IDENT:s @E17_out_of_range_index.v:6:17)
+          _)))))

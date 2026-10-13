@@ -1,0 +1,99 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:e12_concat @E12_concatenation.v:2:1
+  (MODULE:e12_concat @E12_concatenation.v:2:1
+    _
+    (LIST @E12_concatenation.v:2:19
+      (PORT_DECL.input [IN_HEADER NET=1] @E12_concatenation.v:2:20
+        (RANGE @E12_concatenation.v:2:26
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:27 32'sd3)
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:29 32'sd0))
+        (DECLARATOR:a @E12_concatenation.v:2:32
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @E12_concatenation.v:2:20
+        (RANGE @E12_concatenation.v:2:26
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:27 32'sd3)
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:29 32'sd0))
+        (DECLARATOR:b @E12_concatenation.v:2:35
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E12_concatenation.v:2:38
+        (RANGE @E12_concatenation.v:2:45
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:46 32'sd7)
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:48 32'sd0))
+        (DECLARATOR:y1 @E12_concatenation.v:2:51
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E12_concatenation.v:2:55
+        (RANGE @E12_concatenation.v:2:62
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:63 32'sd8)
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:65 32'sd0))
+        (DECLARATOR:y2 @E12_concatenation.v:2:68
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E12_concatenation.v:2:72
+        (RANGE @E12_concatenation.v:2:79
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:80 32'sd11)
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:83 32'sd0))
+        (DECLARATOR:y3 @E12_concatenation.v:2:86
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E12_concatenation.v:2:90
+        (RANGE @E12_concatenation.v:2:97
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:98 32'sd3)
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:100 32'sd0))
+        (DECLARATOR:y4 @E12_concatenation.v:2:103
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E12_concatenation.v:2:107
+        _
+        (DECLARATOR:c @E12_concatenation.v:2:114
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E12_concatenation.v:2:117
+        (RANGE @E12_concatenation.v:2:124
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:125 32'sd3)
+          (NUMBER.dec [SIGNED] @E12_concatenation.v:2:127 32'sd0))
+        (DECLARATOR:s @E12_concatenation.v:2:130
+          _)))
+    (CONT_ASSIGN @E12_concatenation.v:3:3
+      _
+      _
+      (NET_ASSIGN @E12_concatenation.v:3:10
+        (IDENT:y1 @E12_concatenation.v:3:10)
+        (CONCAT @E12_concatenation.v:3:15
+          (IDENT:a @E12_concatenation.v:3:16)
+          (IDENT:b @E12_concatenation.v:3:19))))
+    (CONT_ASSIGN @E12_concatenation.v:4:3
+      _
+      _
+      (NET_ASSIGN @E12_concatenation.v:4:10
+        (IDENT:y2 @E12_concatenation.v:4:10)
+        (CONCAT @E12_concatenation.v:4:15
+          (IDENT:a @E12_concatenation.v:4:16)
+          (NUMBER.bin @E12_concatenation.v:4:19 2'b01)
+          (SELECT.part @E12_concatenation.v:4:26
+            (IDENT:b @E12_concatenation.v:4:26)
+            (NUMBER.dec [SIGNED] @E12_concatenation.v:4:28 32'sd2)
+            (NUMBER.dec [SIGNED] @E12_concatenation.v:4:30 32'sd0)))))
+    (CONT_ASSIGN @E12_concatenation.v:5:3
+      _
+      _
+      (NET_ASSIGN @E12_concatenation.v:5:10
+        (IDENT:y3 @E12_concatenation.v:5:10)
+        (CONCAT @E12_concatenation.v:5:15
+          (IDENT:a @E12_concatenation.v:5:16)
+          (CONCAT @E12_concatenation.v:5:19
+            (IDENT:b @E12_concatenation.v:5:20)
+            (IDENT:a @E12_concatenation.v:5:23)))))
+    (CONT_ASSIGN @E12_concatenation.v:6:3
+      _
+      _
+      (NET_ASSIGN @E12_concatenation.v:6:10
+        (IDENT:y4 @E12_concatenation.v:6:10)
+        (CONCAT @E12_concatenation.v:6:15
+          (IDENT:a @E12_concatenation.v:6:16))))
+    (CONT_ASSIGN @E12_concatenation.v:7:3
+      _
+      _
+      (NET_ASSIGN @E12_concatenation.v:7:10
+        (CONCAT @E12_concatenation.v:7:10
+          (IDENT:c @E12_concatenation.v:7:11)
+          (IDENT:s @E12_concatenation.v:7:14))
+        (BINARY.+ @E12_concatenation.v:7:19
+          (IDENT:a @E12_concatenation.v:7:19)
+          (IDENT:b @E12_concatenation.v:7:23))))))

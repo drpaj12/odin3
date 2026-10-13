@@ -1,0 +1,142 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:i6_instance_array @I6_instance_arrays.v:6:1
+  (MODULE:i6_instance_array @I6_instance_arrays.v:6:1
+    _
+    (LIST @I6_instance_arrays.v:6:26
+      (PORT_DECL.input [IN_HEADER NET=1] @I6_instance_arrays.v:6:27
+        (RANGE @I6_instance_arrays.v:6:33
+          (NUMBER.dec [SIGNED] @I6_instance_arrays.v:6:34 32'sd3)
+          (NUMBER.dec [SIGNED] @I6_instance_arrays.v:6:36 32'sd0))
+        (DECLARATOR:a @I6_instance_arrays.v:6:39
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @I6_instance_arrays.v:6:42
+        (RANGE @I6_instance_arrays.v:6:49
+          (NUMBER.dec [SIGNED] @I6_instance_arrays.v:6:50 32'sd3)
+          (NUMBER.dec [SIGNED] @I6_instance_arrays.v:6:52 32'sd0))
+        (DECLARATOR:y @I6_instance_arrays.v:6:55
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @I6_instance_arrays.v:6:42
+        (RANGE @I6_instance_arrays.v:6:49
+          (NUMBER.dec [SIGNED] @I6_instance_arrays.v:6:50 32'sd3)
+          (NUMBER.dec [SIGNED] @I6_instance_arrays.v:6:52 32'sd0))
+        (DECLARATOR:z @I6_instance_arrays.v:6:58
+          _)))
+    (INSTANTIATION:i6_inv @I6_instance_arrays.v:7:3
+      _
+      (INSTANCE:u[3] @I6_instance_arrays.v:7:10
+        _
+        (CONNECTION:a @I6_instance_arrays.v:7:18
+          (SELECT.bit @I6_instance_arrays.v:7:21
+            (IDENT:a @I6_instance_arrays.v:7:21)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:7:21 32'sd3)
+            _))
+        (CONNECTION:y @I6_instance_arrays.v:7:25
+          (SELECT.bit @I6_instance_arrays.v:7:28
+            (IDENT:y @I6_instance_arrays.v:7:28)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:7:28 32'sd3)
+            _)))
+      (INSTANCE:u[2] @I6_instance_arrays.v:7:10
+        _
+        (CONNECTION:a @I6_instance_arrays.v:7:18
+          (SELECT.bit @I6_instance_arrays.v:7:21
+            (IDENT:a @I6_instance_arrays.v:7:21)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:7:21 32'sd2)
+            _))
+        (CONNECTION:y @I6_instance_arrays.v:7:25
+          (SELECT.bit @I6_instance_arrays.v:7:28
+            (IDENT:y @I6_instance_arrays.v:7:28)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:7:28 32'sd2)
+            _)))
+      (INSTANCE:u[1] @I6_instance_arrays.v:7:10
+        _
+        (CONNECTION:a @I6_instance_arrays.v:7:18
+          (SELECT.bit @I6_instance_arrays.v:7:21
+            (IDENT:a @I6_instance_arrays.v:7:21)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:7:21 32'sd1)
+            _))
+        (CONNECTION:y @I6_instance_arrays.v:7:25
+          (SELECT.bit @I6_instance_arrays.v:7:28
+            (IDENT:y @I6_instance_arrays.v:7:28)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:7:28 32'sd1)
+            _)))
+      (INSTANCE:u[0] @I6_instance_arrays.v:7:10
+        _
+        (CONNECTION:a @I6_instance_arrays.v:7:18
+          (SELECT.bit @I6_instance_arrays.v:7:21
+            (IDENT:a @I6_instance_arrays.v:7:21)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:7:21 32'sd0)
+            _))
+        (CONNECTION:y @I6_instance_arrays.v:7:25
+          (SELECT.bit @I6_instance_arrays.v:7:28
+            (IDENT:y @I6_instance_arrays.v:7:28)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:7:28 32'sd0)
+            _))))
+    (INSTANTIATION:i6_inv @I6_instance_arrays.v:8:3
+      _
+      (INSTANCE:v[0] @I6_instance_arrays.v:8:10
+        _
+        (CONNECTION:a @I6_instance_arrays.v:8:18
+          (SELECT.bit @I6_instance_arrays.v:8:18
+            (IDENT:a @I6_instance_arrays.v:8:18)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:8:18 32'sd0)
+            _))
+        (CONNECTION:y @I6_instance_arrays.v:8:21
+          (SELECT.bit @I6_instance_arrays.v:8:21
+            (IDENT:z @I6_instance_arrays.v:8:21)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:8:21 32'sd0)
+            _)))
+      (INSTANCE:v[1] @I6_instance_arrays.v:8:10
+        _
+        (CONNECTION:a @I6_instance_arrays.v:8:18
+          (SELECT.bit @I6_instance_arrays.v:8:18
+            (IDENT:a @I6_instance_arrays.v:8:18)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:8:18 32'sd1)
+            _))
+        (CONNECTION:y @I6_instance_arrays.v:8:21
+          (SELECT.bit @I6_instance_arrays.v:8:21
+            (IDENT:z @I6_instance_arrays.v:8:21)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:8:21 32'sd1)
+            _)))
+      (INSTANCE:v[2] @I6_instance_arrays.v:8:10
+        _
+        (CONNECTION:a @I6_instance_arrays.v:8:18
+          (SELECT.bit @I6_instance_arrays.v:8:18
+            (IDENT:a @I6_instance_arrays.v:8:18)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:8:18 32'sd2)
+            _))
+        (CONNECTION:y @I6_instance_arrays.v:8:21
+          (SELECT.bit @I6_instance_arrays.v:8:21
+            (IDENT:z @I6_instance_arrays.v:8:21)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:8:21 32'sd2)
+            _)))
+      (INSTANCE:v[3] @I6_instance_arrays.v:8:10
+        _
+        (CONNECTION:a @I6_instance_arrays.v:8:18
+          (SELECT.bit @I6_instance_arrays.v:8:18
+            (IDENT:a @I6_instance_arrays.v:8:18)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:8:18 32'sd3)
+            _))
+        (CONNECTION:y @I6_instance_arrays.v:8:21
+          (SELECT.bit @I6_instance_arrays.v:8:21
+            (IDENT:z @I6_instance_arrays.v:8:21)
+            (NUMBER.dec [SIGNED] @I6_instance_arrays.v:8:21 32'sd3)
+            _)))))
+  (MODULE:i6_inv @I6_instance_arrays.v:2:1
+    _
+    (LIST @I6_instance_arrays.v:2:15
+      (PORT_DECL.input [IN_HEADER NET=1] @I6_instance_arrays.v:2:16
+        _
+        (DECLARATOR:a @I6_instance_arrays.v:2:22
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @I6_instance_arrays.v:2:25
+        _
+        (DECLARATOR:y @I6_instance_arrays.v:2:32
+          _)))
+    (CONT_ASSIGN @I6_instance_arrays.v:3:3
+      _
+      _
+      (NET_ASSIGN @I6_instance_arrays.v:3:10
+        (IDENT:y @I6_instance_arrays.v:3:10)
+        (UNARY.~ @I6_instance_arrays.v:3:14
+          (IDENT:a @I6_instance_arrays.v:3:15))))))

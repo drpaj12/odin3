@@ -1,0 +1,40 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:p1_parameter @P1_parameter.v:2:1
+  (MODULE:p1_parameter @P1_parameter.v:2:1
+    _
+    (LIST @P1_parameter.v:2:21
+      (PORT_DECL.output [IN_HEADER NET=1] @P1_parameter.v:2:22
+        (RANGE @P1_parameter.v:2:29
+          (NUMBER.dec [SIGNED] @P1_parameter.v:2:30 32'sd31)
+          (NUMBER.dec [SIGNED] @P1_parameter.v:2:33 32'sd0))
+        (DECLARATOR:y @P1_parameter.v:2:36
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P1_parameter.v:2:22
+        (RANGE @P1_parameter.v:2:29
+          (NUMBER.dec [SIGNED] @P1_parameter.v:2:30 32'sd31)
+          (NUMBER.dec [SIGNED] @P1_parameter.v:2:33 32'sd0))
+        (DECLARATOR:z @P1_parameter.v:2:39
+          _)))
+    (PARAM_DECL.localparam @P1_parameter.v:3:3
+      _
+      (DECLARATOR:W @P1_parameter.v:3:13
+        (NUMBER.dec [SIGNED] @P1_parameter.v:3:13 8)))
+    (PARAM_DECL.localparam @P1_parameter.v:4:3
+      _
+      (DECLARATOR:A @P1_parameter.v:4:13
+        (NUMBER.dec [SIGNED] @P1_parameter.v:4:13 1))
+      (DECLARATOR:B @P1_parameter.v:4:20
+        (NUMBER.dec [SIGNED] @P1_parameter.v:4:20 2)))
+    (CONT_ASSIGN @P1_parameter.v:5:3
+      _
+      _
+      (NET_ASSIGN @P1_parameter.v:5:10
+        (IDENT:y @P1_parameter.v:5:10)
+        (IDENT:W @P1_parameter.v:5:14)))
+    (CONT_ASSIGN @P1_parameter.v:6:3
+      _
+      _
+      (NET_ASSIGN @P1_parameter.v:6:10
+        (IDENT:z @P1_parameter.v:6:10)
+        (IDENT:B @P1_parameter.v:6:14)))))

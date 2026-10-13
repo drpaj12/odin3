@@ -1,0 +1,115 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:k4_func_locals @K4_function_locals_control.v:2:1
+  (MODULE:k4_func_locals @K4_function_locals_control.v:2:1
+    _
+    (LIST @K4_function_locals_control.v:2:23
+      (PORT_DECL.input [IN_HEADER NET=1] @K4_function_locals_control.v:2:24
+        (RANGE @K4_function_locals_control.v:2:30
+          (NUMBER.dec [SIGNED] @K4_function_locals_control.v:2:31 32'sd7)
+          (NUMBER.dec [SIGNED] @K4_function_locals_control.v:2:33 32'sd0))
+        (DECLARATOR:a @K4_function_locals_control.v:2:36
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @K4_function_locals_control.v:2:39
+        (RANGE @K4_function_locals_control.v:2:45
+          (NUMBER.dec [SIGNED] @K4_function_locals_control.v:2:46 32'sd1)
+          (NUMBER.dec [SIGNED] @K4_function_locals_control.v:2:48 32'sd0))
+        (DECLARATOR:s @K4_function_locals_control.v:2:51
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @K4_function_locals_control.v:2:54
+        (RANGE @K4_function_locals_control.v:2:61
+          (NUMBER.dec [SIGNED] @K4_function_locals_control.v:2:62 32'sd3)
+          (NUMBER.dec [SIGNED] @K4_function_locals_control.v:2:64 32'sd0))
+        (DECLARATOR:y @K4_function_locals_control.v:2:67
+          _)))
+    (FUNCTION_DECL:count_ones @K4_function_locals_control.v:3:3
+      (RANGE @K4_function_locals_control.v:3:12
+        (NUMBER.dec [SIGNED] @K4_function_locals_control.v:3:13 32'sd3)
+        (NUMBER.dec [SIGNED] @K4_function_locals_control.v:3:15 32'sd0))
+      (LIST @K4_function_locals_control.v:3:30
+        (PORT_DECL.input [IN_HEADER NET=1] @K4_function_locals_control.v:3:30
+          (RANGE @K4_function_locals_control.v:3:36
+            (NUMBER.dec [SIGNED] @K4_function_locals_control.v:3:37 32'sd7)
+            (NUMBER.dec [SIGNED] @K4_function_locals_control.v:3:39 32'sd0))
+          (DECLARATOR:x @K4_function_locals_control.v:3:42
+            _))
+        (PORT_DECL.input [IN_HEADER NET=1] @K4_function_locals_control.v:3:45
+          (RANGE @K4_function_locals_control.v:3:51
+            (NUMBER.dec [SIGNED] @K4_function_locals_control.v:3:52 32'sd1)
+            (NUMBER.dec [SIGNED] @K4_function_locals_control.v:3:54 32'sd0))
+          (DECLARATOR:mode @K4_function_locals_control.v:3:57
+            _)))
+      (LIST @K4_function_locals_control.v:4:5
+        (VAR_DECL.reg @K4_function_locals_control.v:4:5
+          (RANGE @K4_function_locals_control.v:4:9
+            (NUMBER.dec [SIGNED] @K4_function_locals_control.v:4:10 32'sd3)
+            (NUMBER.dec [SIGNED] @K4_function_locals_control.v:4:12 32'sd0))
+          (DECLARATOR:c @K4_function_locals_control.v:4:15
+            _))
+        (VAR_DECL.integer @K4_function_locals_control.v:5:5
+          _
+          (DECLARATOR:i @K4_function_locals_control.v:5:13
+            _)))
+      (SEQ_BLOCK @K4_function_locals_control.v:6:5
+        _
+        (BLOCKING_ASSIGN @K4_function_locals_control.v:7:7
+          (IDENT:c @K4_function_locals_control.v:7:7)
+          _
+          (NUMBER.dec @K4_function_locals_control.v:7:11 4'd0))
+        (FOR @K4_function_locals_control.v:8:7
+          (BLOCKING_ASSIGN @K4_function_locals_control.v:8:12
+            (IDENT:i @K4_function_locals_control.v:8:12)
+            _
+            (NUMBER.dec [SIGNED] @K4_function_locals_control.v:8:16 0))
+          (BINARY.< @K4_function_locals_control.v:8:19
+            (IDENT:i @K4_function_locals_control.v:8:19)
+            (NUMBER.dec [SIGNED] @K4_function_locals_control.v:8:23 8))
+          (BLOCKING_ASSIGN @K4_function_locals_control.v:8:26
+            (IDENT:i @K4_function_locals_control.v:8:26)
+            _
+            (BINARY.+ @K4_function_locals_control.v:8:30
+              (IDENT:i @K4_function_locals_control.v:8:30)
+              (NUMBER.dec [SIGNED] @K4_function_locals_control.v:8:34 1)))
+          (IF @K4_function_locals_control.v:9:9
+            (SELECT.bit @K4_function_locals_control.v:9:13
+              (IDENT:x @K4_function_locals_control.v:9:13)
+              (IDENT:i @K4_function_locals_control.v:9:15)
+              _)
+            (BLOCKING_ASSIGN @K4_function_locals_control.v:10:11
+              (IDENT:c @K4_function_locals_control.v:10:11)
+              _
+              (BINARY.+ @K4_function_locals_control.v:10:15
+                (IDENT:c @K4_function_locals_control.v:10:15)
+                (NUMBER.dec [SIGNED] @K4_function_locals_control.v:10:19 1)))
+            (BLOCKING_ASSIGN @K4_function_locals_control.v:12:11
+              (IDENT:c @K4_function_locals_control.v:12:11)
+              _
+              (IDENT:c @K4_function_locals_control.v:12:15))))
+        (CASE.case @K4_function_locals_control.v:13:7
+          (IDENT:mode @K4_function_locals_control.v:13:13)
+          (CASE_ITEM @K4_function_locals_control.v:14:9
+            (BLOCKING_ASSIGN @K4_function_locals_control.v:14:15
+              (IDENT:count_ones @K4_function_locals_control.v:14:15)
+              _
+              (IDENT:c @K4_function_locals_control.v:14:28))
+            (NUMBER.dec @K4_function_locals_control.v:14:9 2'd0))
+          (CASE_ITEM @K4_function_locals_control.v:15:9
+            (BLOCKING_ASSIGN @K4_function_locals_control.v:15:15
+              (IDENT:count_ones @K4_function_locals_control.v:15:15)
+              _
+              (UNARY.~ @K4_function_locals_control.v:15:28
+                (IDENT:c @K4_function_locals_control.v:15:29)))
+            (NUMBER.dec @K4_function_locals_control.v:15:9 2'd1))
+          (CASE_ITEM [DEFAULT] @K4_function_locals_control.v:16:9
+            (BLOCKING_ASSIGN @K4_function_locals_control.v:16:18
+              (IDENT:count_ones @K4_function_locals_control.v:16:18)
+              _
+              (NUMBER.dec @K4_function_locals_control.v:16:31 4'd0))))))
+    (CONT_ASSIGN @K4_function_locals_control.v:20:3
+      _
+      _
+      (NET_ASSIGN @K4_function_locals_control.v:20:10
+        (IDENT:y @K4_function_locals_control.v:20:10)
+        (CALL:count_ones @K4_function_locals_control.v:20:14
+          (IDENT:a @K4_function_locals_control.v:20:25)
+          (IDENT:s @K4_function_locals_control.v:20:28))))))

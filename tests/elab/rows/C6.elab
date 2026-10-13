@@ -1,0 +1,58 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:c6_default_position @C6_default_position_empty_item.v:2:1
+  (MODULE:c6_default_position @C6_default_position_empty_item.v:2:1
+    _
+    (LIST @C6_default_position_empty_item.v:2:28
+      (PORT_DECL.input [IN_HEADER NET=1] @C6_default_position_empty_item.v:2:29
+        (RANGE @C6_default_position_empty_item.v:2:35
+          (NUMBER.dec [SIGNED] @C6_default_position_empty_item.v:2:36 32'sd1)
+          (NUMBER.dec [SIGNED] @C6_default_position_empty_item.v:2:38 32'sd0))
+        (DECLARATOR:s @C6_default_position_empty_item.v:2:41
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C6_default_position_empty_item.v:2:44
+        (RANGE @C6_default_position_empty_item.v:2:50
+          (NUMBER.dec [SIGNED] @C6_default_position_empty_item.v:2:51 32'sd3)
+          (NUMBER.dec [SIGNED] @C6_default_position_empty_item.v:2:53 32'sd0))
+        (DECLARATOR:a @C6_default_position_empty_item.v:2:56
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C6_default_position_empty_item.v:2:44
+        (RANGE @C6_default_position_empty_item.v:2:50
+          (NUMBER.dec [SIGNED] @C6_default_position_empty_item.v:2:51 32'sd3)
+          (NUMBER.dec [SIGNED] @C6_default_position_empty_item.v:2:53 32'sd0))
+        (DECLARATOR:b @C6_default_position_empty_item.v:2:59
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C6_default_position_empty_item.v:2:62
+        (RANGE @C6_default_position_empty_item.v:2:73
+          (NUMBER.dec [SIGNED] @C6_default_position_empty_item.v:2:74 32'sd3)
+          (NUMBER.dec [SIGNED] @C6_default_position_empty_item.v:2:76 32'sd0))
+        (DECLARATOR:y @C6_default_position_empty_item.v:2:79
+          _)))
+    (ALWAYS.always @C6_default_position_empty_item.v:3:3
+      (TIMING_STMT @C6_default_position_empty_item.v:3:10
+        (EVENT_CONTROL [STAR] @C6_default_position_empty_item.v:3:10
+          _)
+        (CASE.case @C6_default_position_empty_item.v:4:5
+          (IDENT:s @C6_default_position_empty_item.v:4:11)
+          (CASE_ITEM @C6_default_position_empty_item.v:5:7
+            (BLOCKING_ASSIGN @C6_default_position_empty_item.v:5:13
+              (IDENT:y @C6_default_position_empty_item.v:5:13)
+              _
+              (IDENT:a @C6_default_position_empty_item.v:5:17))
+            (NUMBER.dec @C6_default_position_empty_item.v:5:7 2'd0))
+          (CASE_ITEM [DEFAULT] @C6_default_position_empty_item.v:6:7
+            (BLOCKING_ASSIGN @C6_default_position_empty_item.v:6:16
+              (IDENT:y @C6_default_position_empty_item.v:6:16)
+              _
+              (IDENT:b @C6_default_position_empty_item.v:6:20)))
+          (CASE_ITEM @C6_default_position_empty_item.v:7:7
+            (NULL_STMT @C6_default_position_empty_item.v:7:13)
+            (NUMBER.dec @C6_default_position_empty_item.v:7:7 2'd1))
+          (CASE_ITEM @C6_default_position_empty_item.v:8:7
+            (BLOCKING_ASSIGN @C6_default_position_empty_item.v:8:13
+              (IDENT:y @C6_default_position_empty_item.v:8:13)
+              _
+              (BINARY.^ @C6_default_position_empty_item.v:8:17
+                (IDENT:a @C6_default_position_empty_item.v:8:17)
+                (IDENT:b @C6_default_position_empty_item.v:8:21)))
+            (NUMBER.dec @C6_default_position_empty_item.v:8:7 2'd2)))))))

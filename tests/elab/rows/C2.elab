@@ -1,0 +1,57 @@
+# generated: elab-check --write
+(UNIT:c2_latch @C2_incomplete_if_case.v:2:1
+  (MODULE:c2_latch @C2_incomplete_if_case.v:2:1
+    _
+    (LIST @C2_incomplete_if_case.v:2:17
+      (PORT_DECL.input [IN_HEADER NET=1] @C2_incomplete_if_case.v:2:18
+        _
+        (DECLARATOR:en @C2_incomplete_if_case.v:2:24
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C2_incomplete_if_case.v:2:18
+        _
+        (DECLARATOR:d @C2_incomplete_if_case.v:2:28
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C2_incomplete_if_case.v:2:31
+        (RANGE @C2_incomplete_if_case.v:2:37
+          (NUMBER.dec [SIGNED] @C2_incomplete_if_case.v:2:38 32'sd1)
+          (NUMBER.dec [SIGNED] @C2_incomplete_if_case.v:2:40 32'sd0))
+        (DECLARATOR:s @C2_incomplete_if_case.v:2:43
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C2_incomplete_if_case.v:2:46
+        _
+        (DECLARATOR:q @C2_incomplete_if_case.v:2:57
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C2_incomplete_if_case.v:2:46
+        _
+        (DECLARATOR:y @C2_incomplete_if_case.v:2:60
+          _)))
+    (ALWAYS.always @C2_incomplete_if_case.v:3:3
+      (TIMING_STMT @C2_incomplete_if_case.v:3:10
+        (EVENT_CONTROL [STAR] @C2_incomplete_if_case.v:3:10
+          _)
+        (IF @C2_incomplete_if_case.v:4:5
+          (IDENT:en @C2_incomplete_if_case.v:4:9)
+          (BLOCKING_ASSIGN @C2_incomplete_if_case.v:5:7
+            (IDENT:q @C2_incomplete_if_case.v:5:7)
+            _
+            (IDENT:d @C2_incomplete_if_case.v:5:11))
+          _)))
+    (ALWAYS.always @C2_incomplete_if_case.v:6:3
+      (TIMING_STMT @C2_incomplete_if_case.v:6:10
+        (EVENT_CONTROL [STAR] @C2_incomplete_if_case.v:6:10
+          _)
+        (CASE.case @C2_incomplete_if_case.v:7:5
+          (IDENT:s @C2_incomplete_if_case.v:7:11)
+          (CASE_ITEM @C2_incomplete_if_case.v:8:7
+            (BLOCKING_ASSIGN @C2_incomplete_if_case.v:8:13
+              (IDENT:y @C2_incomplete_if_case.v:8:13)
+              _
+              (IDENT:d @C2_incomplete_if_case.v:8:17))
+            (NUMBER.dec @C2_incomplete_if_case.v:8:7 2'd0))
+          (CASE_ITEM @C2_incomplete_if_case.v:9:7
+            (BLOCKING_ASSIGN @C2_incomplete_if_case.v:9:13
+              (IDENT:y @C2_incomplete_if_case.v:9:13)
+              _
+              (UNARY.~ @C2_incomplete_if_case.v:9:17
+                (IDENT:d @C2_incomplete_if_case.v:9:18)))
+            (NUMBER.dec @C2_incomplete_if_case.v:9:7 2'd1)))))))

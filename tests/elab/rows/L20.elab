@@ -1,0 +1,67 @@
+# generated: elab-check --write
+(UNIT:l20_top @L20_resetall.v:11:1
+  (MODULE:l20_top @L20_resetall.v:11:1
+    _
+    (LIST @L20_resetall.v:11:16
+      (PORT_DECL.input [IN_HEADER NET=1] @L20_resetall.v:11:17
+        _
+        (DECLARATOR:a @L20_resetall.v:11:23
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L20_resetall.v:11:26
+        _
+        (DECLARATOR:y1 @L20_resetall.v:11:33
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L20_resetall.v:11:26
+        _
+        (DECLARATOR:y2 @L20_resetall.v:11:37
+          _)))
+    (INSTANTIATION:l20_a @L20_resetall.v:12:3
+      _
+      (INSTANCE:u1 @L20_resetall.v:12:9
+        _
+        (CONNECTION:a @L20_resetall.v:12:13
+          (IDENT:a @L20_resetall.v:12:16))
+        (CONNECTION:y @L20_resetall.v:12:20
+          (IDENT:y1 @L20_resetall.v:12:23))))
+    (INSTANTIATION:l20_b @L20_resetall.v:13:3
+      _
+      (INSTANCE:u2 @L20_resetall.v:13:9
+        _
+        (CONNECTION:a @L20_resetall.v:13:13
+          (IDENT:a @L20_resetall.v:13:16))
+        (CONNECTION:y @L20_resetall.v:13:20
+          (IDENT:y2 @L20_resetall.v:13:23)))))
+  (MODULE:l20_a @L20_resetall.v:4:1
+    _
+    (LIST @L20_resetall.v:4:14
+      (PORT_DECL.input [IN_HEADER NET=1] @L20_resetall.v:4:15
+        _
+        (DECLARATOR:a @L20_resetall.v:4:26
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L20_resetall.v:4:29
+        _
+        (DECLARATOR:y @L20_resetall.v:4:41
+          _)))
+    (CONT_ASSIGN @L20_resetall.v:5:3
+      _
+      _
+      (NET_ASSIGN @L20_resetall.v:5:10
+        (IDENT:y @L20_resetall.v:5:10)
+        (IDENT:a @L20_resetall.v:5:14))))
+  (MODULE:l20_b @L20_resetall.v:8:1
+    _
+    (LIST @L20_resetall.v:8:14
+      (PORT_DECL.input [IN_HEADER NET=1] @L20_resetall.v:8:15
+        _
+        (DECLARATOR:a @L20_resetall.v:8:21
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L20_resetall.v:8:24
+        _
+        (DECLARATOR:y @L20_resetall.v:8:31
+          _)))
+    (CONT_ASSIGN @L20_resetall.v:9:3
+      _
+      _
+      (NET_ASSIGN @L20_resetall.v:9:10
+        (IDENT:y @L20_resetall.v:9:10)
+        (IDENT:a @L20_resetall.v:9:14)))))

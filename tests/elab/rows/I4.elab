@@ -1,0 +1,66 @@
+# generated: elab-check --write
+(UNIT:i4_widths @I4_port_width_signed.v:6:1
+  (MODULE:i4_widths @I4_port_width_signed.v:6:1
+    _
+    (LIST @I4_port_width_signed.v:6:18
+      (PORT_DECL.input [IN_HEADER NET=1] @I4_port_width_signed.v:6:19
+        (RANGE @I4_port_width_signed.v:6:25
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:6:26 32'sd1)
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:6:28 32'sd0))
+        (DECLARATOR:narrow @I4_port_width_signed.v:6:31
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @I4_port_width_signed.v:6:39
+        (RANGE @I4_port_width_signed.v:6:45
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:6:46 32'sd7)
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:6:48 32'sd0))
+        (DECLARATOR:wide @I4_port_width_signed.v:6:51
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @I4_port_width_signed.v:6:57
+        (RANGE @I4_port_width_signed.v:6:64
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:6:65 32'sd11)
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:6:68 32'sd0))
+        (DECLARATOR:y1 @I4_port_width_signed.v:6:71
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @I4_port_width_signed.v:6:75
+        (RANGE @I4_port_width_signed.v:6:82
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:6:83 32'sd3)
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:6:85 32'sd0))
+        (DECLARATOR:y2 @I4_port_width_signed.v:6:88
+          _)))
+    (INSTANTIATION:i4_leaf @I4_port_width_signed.v:7:3
+      _
+      (INSTANCE:u1 @I4_port_width_signed.v:7:11
+        _
+        (CONNECTION:a @I4_port_width_signed.v:7:15
+          (IDENT:narrow @I4_port_width_signed.v:7:18))
+        (CONNECTION:y @I4_port_width_signed.v:7:27
+          (IDENT:y1 @I4_port_width_signed.v:7:30))))
+    (INSTANTIATION:i4_leaf @I4_port_width_signed.v:8:3
+      _
+      (INSTANCE:u2 @I4_port_width_signed.v:8:11
+        _
+        (CONNECTION:a @I4_port_width_signed.v:8:15
+          (IDENT:wide @I4_port_width_signed.v:8:18))
+        (CONNECTION:y @I4_port_width_signed.v:8:25
+          (IDENT:y2 @I4_port_width_signed.v:8:28)))))
+  (MODULE:i4_leaf @I4_port_width_signed.v:2:1
+    _
+    (LIST @I4_port_width_signed.v:2:16
+      (PORT_DECL.input [SIGNED IN_HEADER NET=1] @I4_port_width_signed.v:2:17
+        (RANGE @I4_port_width_signed.v:2:30
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:2:31 32'sd3)
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:2:33 32'sd0))
+        (DECLARATOR:a @I4_port_width_signed.v:2:36
+          _))
+      (PORT_DECL.output [SIGNED IN_HEADER NET=1] @I4_port_width_signed.v:2:39
+        (RANGE @I4_port_width_signed.v:2:53
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:2:54 32'sd7)
+          (NUMBER.dec [SIGNED] @I4_port_width_signed.v:2:56 32'sd0))
+        (DECLARATOR:y @I4_port_width_signed.v:2:59
+          _)))
+    (CONT_ASSIGN @I4_port_width_signed.v:3:3
+      _
+      _
+      (NET_ASSIGN @I4_port_width_signed.v:3:10
+        (IDENT:y @I4_port_width_signed.v:3:10)
+        (IDENT:a @I4_port_width_signed.v:3:14)))))

@@ -1,0 +1,59 @@
+# generated: elab-check --write
+(UNIT:t20_null @T20_null_statement.v:2:1
+  (MODULE:t20_null @T20_null_statement.v:2:1
+    _
+    (LIST @T20_null_statement.v:2:17
+      (PORT_DECL.input [IN_HEADER NET=1] @T20_null_statement.v:2:18
+        _
+        (DECLARATOR:a @T20_null_statement.v:2:24
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @T20_null_statement.v:2:18
+        _
+        (DECLARATOR:b @T20_null_statement.v:2:27
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @T20_null_statement.v:2:30
+        (RANGE @T20_null_statement.v:2:36
+          (NUMBER.dec [SIGNED] @T20_null_statement.v:2:37 32'sd1)
+          (NUMBER.dec [SIGNED] @T20_null_statement.v:2:39 32'sd0))
+        (DECLARATOR:s @T20_null_statement.v:2:42
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @T20_null_statement.v:2:45
+        _
+        (DECLARATOR:y @T20_null_statement.v:2:56
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @T20_null_statement.v:2:45
+        _
+        (DECLARATOR:z @T20_null_statement.v:2:59
+          _)))
+    (ALWAYS.always @T20_null_statement.v:3:3
+      (TIMING_STMT @T20_null_statement.v:3:10
+        (EVENT_CONTROL [STAR] @T20_null_statement.v:3:10
+          _)
+        (SEQ_BLOCK @T20_null_statement.v:3:13
+          _
+          (BLOCKING_ASSIGN @T20_null_statement.v:4:5
+            (IDENT:y @T20_null_statement.v:4:5)
+            _
+            (NUMBER.bin @T20_null_statement.v:4:9 1'b0))
+          (IF @T20_null_statement.v:5:5
+            (IDENT:a @T20_null_statement.v:5:9)
+            (NULL_STMT @T20_null_statement.v:6:7)
+            (BLOCKING_ASSIGN @T20_null_statement.v:8:7
+              (IDENT:y @T20_null_statement.v:8:7)
+              _
+              (IDENT:b @T20_null_statement.v:8:11)))
+          (NULL_STMT @T20_null_statement.v:9:5))))
+    (ALWAYS.always @T20_null_statement.v:11:3
+      (TIMING_STMT @T20_null_statement.v:11:10
+        (EVENT_CONTROL [STAR] @T20_null_statement.v:11:10
+          _)
+        (CASE.case @T20_null_statement.v:12:5
+          (IDENT:s @T20_null_statement.v:12:11)
+          (CASE_ITEM @T20_null_statement.v:13:7
+            (NULL_STMT @T20_null_statement.v:13:13)
+            (NUMBER.dec @T20_null_statement.v:13:7 2'd0))
+          (CASE_ITEM [DEFAULT] @T20_null_statement.v:14:7
+            (BLOCKING_ASSIGN @T20_null_statement.v:14:16
+              (IDENT:z @T20_null_statement.v:14:16)
+              _
+              (IDENT:a @T20_null_statement.v:14:20))))))))

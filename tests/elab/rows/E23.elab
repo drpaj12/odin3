@@ -1,0 +1,107 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:e23_signed @E23_signed_expressions.v:2:1
+  (MODULE:e23_signed @E23_signed_expressions.v:2:1
+    _
+    (LIST @E23_signed_expressions.v:2:19
+      (PORT_DECL.input [SIGNED IN_HEADER NET=1] @E23_signed_expressions.v:2:20
+        (RANGE @E23_signed_expressions.v:2:33
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:34 32'sd3)
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:36 32'sd0))
+        (DECLARATOR:a @E23_signed_expressions.v:2:39
+          _))
+      (PORT_DECL.input [SIGNED IN_HEADER NET=1] @E23_signed_expressions.v:2:20
+        (RANGE @E23_signed_expressions.v:2:33
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:34 32'sd3)
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:36 32'sd0))
+        (DECLARATOR:b @E23_signed_expressions.v:2:42
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @E23_signed_expressions.v:2:45
+        (RANGE @E23_signed_expressions.v:2:51
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:52 32'sd3)
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:54 32'sd0))
+        (DECLARATOR:u @E23_signed_expressions.v:2:57
+          _))
+      (PORT_DECL.output [SIGNED IN_HEADER NET=1] @E23_signed_expressions.v:2:60
+        (RANGE @E23_signed_expressions.v:2:74
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:75 32'sd7)
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:77 32'sd0))
+        (DECLARATOR:y1 @E23_signed_expressions.v:2:80
+          _))
+      (PORT_DECL.output [SIGNED IN_HEADER NET=1] @E23_signed_expressions.v:2:60
+        (RANGE @E23_signed_expressions.v:2:74
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:75 32'sd7)
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:77 32'sd0))
+        (DECLARATOR:y2 @E23_signed_expressions.v:2:84
+          _))
+      (PORT_DECL.output [SIGNED IN_HEADER NET=1] @E23_signed_expressions.v:2:60
+        (RANGE @E23_signed_expressions.v:2:74
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:75 32'sd7)
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:77 32'sd0))
+        (DECLARATOR:y5 @E23_signed_expressions.v:2:88
+          _))
+      (PORT_DECL.output [SIGNED IN_HEADER NET=1] @E23_signed_expressions.v:2:60
+        (RANGE @E23_signed_expressions.v:2:74
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:75 32'sd7)
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:77 32'sd0))
+        (DECLARATOR:y6 @E23_signed_expressions.v:2:92
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E23_signed_expressions.v:2:96
+        _
+        (DECLARATOR:y3 @E23_signed_expressions.v:2:103
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E23_signed_expressions.v:2:107
+        (RANGE @E23_signed_expressions.v:2:114
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:115 32'sd7)
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:2:117 32'sd0))
+        (DECLARATOR:y4 @E23_signed_expressions.v:2:120
+          _)))
+    (CONT_ASSIGN @E23_signed_expressions.v:3:3
+      _
+      _
+      (NET_ASSIGN @E23_signed_expressions.v:3:10
+        (IDENT:y1 @E23_signed_expressions.v:3:10)
+        (BINARY.+ @E23_signed_expressions.v:3:15
+          (IDENT:a @E23_signed_expressions.v:3:15)
+          (IDENT:b @E23_signed_expressions.v:3:19))))
+    (CONT_ASSIGN @E23_signed_expressions.v:4:3
+      _
+      _
+      (NET_ASSIGN @E23_signed_expressions.v:4:10
+        (IDENT:y2 @E23_signed_expressions.v:4:10)
+        (BINARY.+ @E23_signed_expressions.v:4:15
+          (IDENT:a @E23_signed_expressions.v:4:15)
+          (IDENT:u @E23_signed_expressions.v:4:19))))
+    (CONT_ASSIGN @E23_signed_expressions.v:5:3
+      _
+      _
+      (NET_ASSIGN @E23_signed_expressions.v:5:10
+        (IDENT:y3 @E23_signed_expressions.v:5:10)
+        (BINARY.< @E23_signed_expressions.v:5:15
+          (IDENT:a @E23_signed_expressions.v:5:15)
+          (IDENT:b @E23_signed_expressions.v:5:19))))
+    (CONT_ASSIGN @E23_signed_expressions.v:6:3
+      _
+      _
+      (NET_ASSIGN @E23_signed_expressions.v:6:10
+        (IDENT:y4 @E23_signed_expressions.v:6:10)
+        (BINARY.>>> @E23_signed_expressions.v:6:15
+          (IDENT:a @E23_signed_expressions.v:6:15)
+          (NUMBER.dec [SIGNED] @E23_signed_expressions.v:6:21 1))))
+    (CONT_ASSIGN @E23_signed_expressions.v:7:3
+      _
+      _
+      (NET_ASSIGN @E23_signed_expressions.v:7:10
+        (IDENT:y5 @E23_signed_expressions.v:7:10)
+        (BINARY.+ @E23_signed_expressions.v:7:15
+          (NUMBER.bin [SIGNED] @E23_signed_expressions.v:7:15 4'sb1000)
+          (IDENT:a @E23_signed_expressions.v:7:26))))
+    (CONT_ASSIGN @E23_signed_expressions.v:8:3
+      _
+      _
+      (NET_ASSIGN @E23_signed_expressions.v:8:10
+        (IDENT:y6 @E23_signed_expressions.v:8:10)
+        (BINARY.+ @E23_signed_expressions.v:8:15
+          (CALL:$signed [SYSTEM] @E23_signed_expressions.v:8:15
+            (IDENT:u @E23_signed_expressions.v:8:23))
+          (IDENT:a @E23_signed_expressions.v:8:28))))))

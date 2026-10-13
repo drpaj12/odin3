@@ -1,0 +1,101 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:t18_block_decls @T18_block_declarations.v:2:1
+  (MODULE:t18_block_decls @T18_block_declarations.v:2:1
+    _
+    (LIST @T18_block_declarations.v:2:24
+      (PORT_DECL.input [IN_HEADER NET=1] @T18_block_declarations.v:2:25
+        _
+        (DECLARATOR:clk @T18_block_declarations.v:2:31
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @T18_block_declarations.v:2:36
+        (RANGE @T18_block_declarations.v:2:42
+          (NUMBER.dec [SIGNED] @T18_block_declarations.v:2:43 32'sd3)
+          (NUMBER.dec [SIGNED] @T18_block_declarations.v:2:45 32'sd0))
+        (DECLARATOR:a @T18_block_declarations.v:2:48
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @T18_block_declarations.v:2:51
+        (RANGE @T18_block_declarations.v:2:62
+          (NUMBER.dec [SIGNED] @T18_block_declarations.v:2:63 32'sd3)
+          (NUMBER.dec [SIGNED] @T18_block_declarations.v:2:65 32'sd0))
+        (DECLARATOR:q @T18_block_declarations.v:2:68
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @T18_block_declarations.v:2:71
+        (RANGE @T18_block_declarations.v:2:82
+          (NUMBER.dec [SIGNED] @T18_block_declarations.v:2:83 32'sd3)
+          (NUMBER.dec [SIGNED] @T18_block_declarations.v:2:85 32'sd0))
+        (DECLARATOR:n @T18_block_declarations.v:2:88
+          _)))
+    (ALWAYS.always @T18_block_declarations.v:3:3
+      (TIMING_STMT @T18_block_declarations.v:3:10
+        (EVENT_CONTROL @T18_block_declarations.v:3:10
+          _
+          (EVENT_EXPR.posedge @T18_block_declarations.v:3:12
+            (IDENT:clk @T18_block_declarations.v:3:20)))
+        (SEQ_BLOCK:body @T18_block_declarations.v:3:25
+          (LIST @T18_block_declarations.v:4:5
+            (VAR_DECL.reg @T18_block_declarations.v:4:5
+              (RANGE @T18_block_declarations.v:4:9
+                (NUMBER.dec [SIGNED] @T18_block_declarations.v:4:10 32'sd3)
+                (NUMBER.dec [SIGNED] @T18_block_declarations.v:4:12 32'sd0))
+              (DECLARATOR:t @T18_block_declarations.v:4:15
+                _))
+            (VAR_DECL.integer @T18_block_declarations.v:5:5
+              _
+              (DECLARATOR:i @T18_block_declarations.v:5:13
+                _))
+            (PARAM_DECL.localparam @T18_block_declarations.v:6:5
+              _
+              (DECLARATOR:K @T18_block_declarations.v:6:16
+                (NUMBER.dec [SIGNED] @T18_block_declarations.v:6:16 2)))
+            (VAR_DECL.reg @T18_block_declarations.v:7:16
+              _
+              (DECLARATOR:u @T18_block_declarations.v:7:20
+                _)
+              {(ATTR:keep @T18_block_declarations.v:7:8
+                 _)}))
+          (BLOCKING_ASSIGN @T18_block_declarations.v:8:5
+            (IDENT:t @T18_block_declarations.v:8:5)
+            _
+            (BINARY.+ @T18_block_declarations.v:8:9
+              (IDENT:a @T18_block_declarations.v:8:9)
+              (IDENT:K @T18_block_declarations.v:8:13)))
+          (BLOCKING_ASSIGN @T18_block_declarations.v:9:5
+            (IDENT:u @T18_block_declarations.v:9:5)
+            _
+            (SELECT.bit @T18_block_declarations.v:9:9
+              (IDENT:t @T18_block_declarations.v:9:9)
+              (NUMBER.dec [SIGNED] @T18_block_declarations.v:9:11 0)
+              _))
+          (FOR @T18_block_declarations.v:10:5
+            (BLOCKING_ASSIGN @T18_block_declarations.v:10:10
+              (IDENT:i @T18_block_declarations.v:10:10)
+              _
+              (NUMBER.dec [SIGNED] @T18_block_declarations.v:10:14 0))
+            (BINARY.< @T18_block_declarations.v:10:17
+              (IDENT:i @T18_block_declarations.v:10:17)
+              (NUMBER.dec [SIGNED] @T18_block_declarations.v:10:21 4))
+            (BLOCKING_ASSIGN @T18_block_declarations.v:10:24
+              (IDENT:i @T18_block_declarations.v:10:24)
+              _
+              (BINARY.+ @T18_block_declarations.v:10:28
+                (IDENT:i @T18_block_declarations.v:10:28)
+                (NUMBER.dec [SIGNED] @T18_block_declarations.v:10:32 1)))
+            (NONBLOCKING_ASSIGN @T18_block_declarations.v:11:7
+              (SELECT.bit @T18_block_declarations.v:11:7
+                (IDENT:n @T18_block_declarations.v:11:7)
+                (IDENT:i @T18_block_declarations.v:11:9)
+                _)
+              _
+              (BINARY.^ @T18_block_declarations.v:11:15
+                (SELECT.bit @T18_block_declarations.v:11:15
+                  (IDENT:t @T18_block_declarations.v:11:15)
+                  (BINARY.- @T18_block_declarations.v:11:17
+                    (NUMBER.dec [SIGNED] @T18_block_declarations.v:11:17 3)
+                    (IDENT:i @T18_block_declarations.v:11:21))
+                  _)
+                (IDENT:u @T18_block_declarations.v:11:26))))
+          (NONBLOCKING_ASSIGN @T18_block_declarations.v:12:5
+            (IDENT:q @T18_block_declarations.v:12:5)
+            _
+            (IDENT:t @T18_block_declarations.v:12:10)))))))

@@ -1,0 +1,83 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:n11_net_arrays @N11_net_arrays.v:2:1
+  (MODULE:n11_net_arrays @N11_net_arrays.v:2:1
+    _
+    (LIST @N11_net_arrays.v:2:23
+      (PORT_DECL.input [IN_HEADER NET=1] @N11_net_arrays.v:2:24
+        (RANGE @N11_net_arrays.v:2:30
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:2:31 32'sd3)
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:2:33 32'sd0))
+        (DECLARATOR:a @N11_net_arrays.v:2:36
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @N11_net_arrays.v:2:24
+        (RANGE @N11_net_arrays.v:2:30
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:2:31 32'sd3)
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:2:33 32'sd0))
+        (DECLARATOR:b @N11_net_arrays.v:2:39
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N11_net_arrays.v:2:42
+        (RANGE @N11_net_arrays.v:2:49
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:2:50 32'sd3)
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:2:52 32'sd0))
+        (DECLARATOR:y @N11_net_arrays.v:2:55
+          _)))
+    (NET_DECL.wire @N11_net_arrays.v:3:3
+      _
+      (RANGE @N11_net_arrays.v:3:8
+        (NUMBER.dec [SIGNED] @N11_net_arrays.v:3:9 32'sd3)
+        (NUMBER.dec [SIGNED] @N11_net_arrays.v:3:11 32'sd0))
+      _
+      (DECLARATOR:w @N11_net_arrays.v:3:14
+        _
+        (RANGE @N11_net_arrays.v:3:16
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:3:17 32'sd1)
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:3:19 32'sd0))))
+    (NET_DECL.wire @N11_net_arrays.v:4:3
+      _
+      _
+      _
+      (DECLARATOR:s @N11_net_arrays.v:4:8
+        _
+        (RANGE @N11_net_arrays.v:4:10
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:4:11 32'sd0)
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:4:13 32'sd3))))
+    (CONT_ASSIGN @N11_net_arrays.v:5:3
+      _
+      _
+      (NET_ASSIGN @N11_net_arrays.v:5:10
+        (SELECT.bit @N11_net_arrays.v:5:10
+          (IDENT:w @N11_net_arrays.v:5:10)
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:5:12 0)
+          _)
+        (IDENT:a @N11_net_arrays.v:5:17)))
+    (CONT_ASSIGN @N11_net_arrays.v:6:3
+      _
+      _
+      (NET_ASSIGN @N11_net_arrays.v:6:10
+        (SELECT.bit @N11_net_arrays.v:6:10
+          (IDENT:w @N11_net_arrays.v:6:10)
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:6:12 1)
+          _)
+        (IDENT:b @N11_net_arrays.v:6:17)))
+    (CONT_ASSIGN @N11_net_arrays.v:7:3
+      _
+      _
+      (NET_ASSIGN @N11_net_arrays.v:7:10
+        (SELECT.bit @N11_net_arrays.v:7:10
+          (IDENT:s @N11_net_arrays.v:7:10)
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:7:12 2)
+          _)
+        (SELECT.bit @N11_net_arrays.v:7:17
+          (IDENT:a @N11_net_arrays.v:7:17)
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:7:19 0)
+          _)))
+    (CONT_ASSIGN @N11_net_arrays.v:8:3
+      _
+      _
+      (NET_ASSIGN @N11_net_arrays.v:8:10
+        (IDENT:y @N11_net_arrays.v:8:10)
+        (SELECT.bit @N11_net_arrays.v:8:14
+          (IDENT:w @N11_net_arrays.v:8:14)
+          (NUMBER.dec [SIGNED] @N11_net_arrays.v:8:16 1)
+          _)))))

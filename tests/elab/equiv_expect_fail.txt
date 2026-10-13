@@ -1,0 +1,17 @@
+# Rows whose elab-equiv result is not "equivalent" (spec 14.2). `<row> <reason>`; every row listed
+# must still fail (run-rows-equiv reports a listed row that passes as stale). Checked against
+# Yosys 0.55 on 2026-10-13.
+E17 IEEE 1364-2005 4.1.14: an out-of-range index reads x; Yosys resolves it differently after opt (spec 17 #40)
+E7 the Yosys back end leaves $pow as a .gate line that equiv-check cannot read (tool limit)
+I7 an undefined module needs --auto-blackbox, which the bridge does not pass; Yosys hierarchy also rejects it
+L19 Yosys 0.55 rejects `default_nettype tri (and the other net types of the row)
+L22 Yosys 0.55 has no `begin_keywords
+M3 Yosys 0.55 rejects the non-ANSI `output integer n; integer n;` re-declaration
+M7 the Yosys back end leaves $_TBUF_ as a .gate line that equiv-check cannot read (tool limit)
+M8 Yosys 0.55 does not parse macromodule
+N15 Yosys 0.55 does not parse a uwire declaration (syntax error at the first one)
+N16 Yosys 0.55 does not parse the ranged supply net of the row (syntax error at line 5)
+Q3 the Yosys back end leaves $_TBUF_ as a .gate line that equiv-check cannot read (tool limit)
+Q5 Yosys 0.55 asserts (simplify.cc:2755) on a gate-primitive array
+T4 Yosys 0.55 rejects an event control without parentheses (IEEE 9.7.2 allows it)
+T5 Yosys keeps the $display of the initial block as a $print cell; 2D ignores system tasks with a warning

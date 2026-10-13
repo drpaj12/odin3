@@ -1207,7 +1207,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(abc_adapter_no_assert PROPERTIES LABELS unit)
     set(_tools_env "ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>"
-                   "ODIN3_PARSE_CHECK=$<TARGET_FILE:odin3-parse-check>")
+                   "ODIN3_PARSE_CHECK=$<TARGET_FILE:odin3-parse-check>"
+                   "ODIN3_ELAB_CHECK=$<TARGET_FILE:elab-check>")
     if(ODIN3_WITH_ABC)
         # REQUIRE makes the ABC-backed tests fail, not skip, if this ABC is unusable.
         list(APPEND _tools_env "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>" "ODIN3_REQUIRE_ABC=1")
@@ -1404,6 +1405,30 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     add_test(NAME verilog_coverage
         COMMAND $<TARGET_FILE:odin3-parse-check> --smallest-first ${_coverage_rows})
     set_tests_properties(verilog_coverage PROPERTIES LABELS verilog)
+
+    # 2D Task 25 (spec 14.2): the 125 coverage rows of tests/elab/rows elaborate, pass check FULL
+    # and match their goldens, smallest first, in both latch modes (the nolatches goldens exist for
+    # every row with a combinational always).
+    file(STRINGS ${PROJECT_SOURCE_DIR}/tests/elab/rows/rows.txt _elab_row_lines)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 ${PROJECT_SOURCE_DIR}/tests/elab/rows/rows.txt)
+    set(_elab_rows_all "")
+    set(_elab_rows_comb "")
+    foreach(_line IN LISTS _elab_row_lines)
+        if(_line MATCHES "^[A-Z][0-9]+ ([^ ]+) comb=([01]) clocks=[0-9]+$")
+            list(APPEND _elab_rows_all ${PROJECT_SOURCE_DIR}/tests/elab/rows/${CMAKE_MATCH_1})
+            if(CMAKE_MATCH_2 STREQUAL "1")
+                list(APPEND _elab_rows_comb ${PROJECT_SOURCE_DIR}/tests/elab/rows/${CMAKE_MATCH_1})
+            endif()
+        else()
+            message(FATAL_ERROR "tests/elab/rows/rows.txt: bad line '${_line}'")
+        endif()
+    endforeach()
+    add_test(NAME elab_coverage
+        COMMAND elab-check --smallest-first ${_elab_rows_all})
+    add_test(NAME elab_coverage_nolatches
+        COMMAND elab-check --nolatches --smallest-first ${_elab_rows_comb})
+    set_tests_properties(elab_coverage elab_coverage_nolatches PROPERTIES LABELS elab)
     # 2C §7.3: the negative cases (odin3 --parse-only in the case directory), and the 2D handover
     # cases (read_verilog without --parse-only; pending, exit 77, while 2D's entry is the stub).
     add_test(NAME verilog_reject
@@ -1636,6 +1661,15 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/verilog/mem-bridge)
         set_tests_properties(elab_mem_bridge PROPERTIES
             LABELS differential SKIP_RETURN_CODE 77)
+        # 2D Task 25 (spec 14.2): elab-equiv on every coverage row, smallest first, except the
+        # rows with several clocks (goldens only) and those in tests/elab/equiv_expect_fail.txt.
+        odin3_add_sweep_test(elab_coverage_equiv LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/run-rows-equiv
+                    --elab-equiv ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --rows ${PROJECT_SOURCE_DIR}/tests/elab/rows
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/equiv_expect_fail.txt)
     endif()
 
     # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys

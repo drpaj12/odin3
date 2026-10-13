@@ -1,0 +1,37 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:k10_task_no_args @K10_task_without_arguments.v:2:1
+  (MODULE:k10_task_no_args @K10_task_without_arguments.v:2:1
+    _
+    (LIST @K10_task_without_arguments.v:2:25
+      (PORT_DECL.input [IN_HEADER NET=1] @K10_task_without_arguments.v:2:26
+        _
+        (DECLARATOR:clk @K10_task_without_arguments.v:2:32
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @K10_task_without_arguments.v:2:37
+        (RANGE @K10_task_without_arguments.v:2:48
+          (NUMBER.dec [SIGNED] @K10_task_without_arguments.v:2:49 32'sd3)
+          (NUMBER.dec [SIGNED] @K10_task_without_arguments.v:2:51 32'sd0))
+        (DECLARATOR:q @K10_task_without_arguments.v:2:54
+          _)))
+    (TASK_DECL:clr @K10_task_without_arguments.v:3:3
+      (LIST @K10_task_without_arguments.v:3:12)
+      (LIST @K10_task_without_arguments.v:3:12)
+      (BLOCKING_ASSIGN @K10_task_without_arguments.v:4:5
+        (IDENT:q @K10_task_without_arguments.v:4:5)
+        _
+        (NUMBER.dec @K10_task_without_arguments.v:4:9 4'd0)))
+    (TASK_DECL:nop @K10_task_without_arguments.v:6:3
+      (LIST @K10_task_without_arguments.v:6:12)
+      (LIST @K10_task_without_arguments.v:6:12)
+      (NULL_STMT @K10_task_without_arguments.v:7:5))
+    (ALWAYS.always @K10_task_without_arguments.v:9:3
+      (TIMING_STMT @K10_task_without_arguments.v:9:10
+        (EVENT_CONTROL @K10_task_without_arguments.v:9:10
+          _
+          (EVENT_EXPR.posedge @K10_task_without_arguments.v:9:12
+            (IDENT:clk @K10_task_without_arguments.v:9:20)))
+        (SEQ_BLOCK @K10_task_without_arguments.v:9:25
+          _
+          (TASK_CALL:clr @K10_task_without_arguments.v:10:5)
+          (TASK_CALL:nop @K10_task_without_arguments.v:11:5))))))

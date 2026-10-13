@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""micro-top: the --top of a micro (2D plan point (o), EL-7): the first `.model` of its Parmys golden.
+
+    micro-top [--golden-root DIR] <micro.v | group/leaf>
+
+The golden is DIR/regression/verilog/<group>/<leaf>/<leaf>.parmys.blif, DIR defaulting to
+~/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm. For a path such as
+tests/micro/verilog/<group>/<leaf>.v the group is the directory's name and the leaf the stem.
+Prints the model name. Exit 0, 1 when the golden has no `.model` line or does not exist, 2 on a
+usage error.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+DEFAULT_ROOT = Path.home() / "odin3-ws" / "golden" / "k6_frac_N10_frac_chain_mem32K_40nm"
+MODEL = re.compile(r"^\.model[ \t]+(\S+)", re.M)
+
+
+def group_and_leaf(spec: str) -> tuple[str, str]:
+    """(group, leaf) of `group/leaf` or of a micro source path (`.../<group>/<leaf>.v`)."""
+    path = Path(spec)
+    leaf = path.stem if path.suffix == ".v" else path.name
+    group = path.parent.name
+    if not group or not leaf:
+        raise ValueError(f"cannot find the group and leaf of {spec!r}")
+    return group, leaf
+
+
+def first_model(blif: Path) -> str:
+    """The name on the first `.model` line of blif."""
+    match = MODEL.search(blif.read_text(encoding="utf-8", errors="replace"))
+    if match is None:
+        raise ValueError(f"{blif}: no .model line")
+    return match.group(1)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="micro-top", description=__doc__.split("\n\n")[0])
+    ap.add_argument("--golden-root", type=Path, default=DEFAULT_ROOT)
+    ap.add_argument("micro", help="the micro's .v path or group/leaf")
+    args = ap.parse_args(argv)
+    try:
+        group, leaf = group_and_leaf(args.micro)
+        blif = args.golden_root / "regression" / "verilog" / group / leaf / f"{leaf}.parmys.blif"
+        print(first_model(blif))
+    except (OSError, ValueError) as exc:
+        print(f"micro-top: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

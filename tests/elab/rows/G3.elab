@@ -1,0 +1,400 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:g3_gen_items @G3_generate_block_items.v:6:1
+  (MODULE:g3_gen_items @G3_generate_block_items.v:6:1
+    _
+    (LIST @G3_generate_block_items.v:6:21
+      (PORT_DECL.input [IN_HEADER NET=1] @G3_generate_block_items.v:6:22
+        _
+        (DECLARATOR:clk @G3_generate_block_items.v:6:28
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @G3_generate_block_items.v:6:33
+        (RANGE @G3_generate_block_items.v:6:39
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:6:40 32'sd3)
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:6:42 32'sd0))
+        (DECLARATOR:a @G3_generate_block_items.v:6:45
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G3_generate_block_items.v:6:48
+        (RANGE @G3_generate_block_items.v:6:55
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:6:56 32'sd3)
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:6:58 32'sd0))
+        (DECLARATOR:y @G3_generate_block_items.v:6:61
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G3_generate_block_items.v:6:48
+        (RANGE @G3_generate_block_items.v:6:55
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:6:56 32'sd3)
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:6:58 32'sd0))
+        (DECLARATOR:z @G3_generate_block_items.v:6:64
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G3_generate_block_items.v:6:48
+        (RANGE @G3_generate_block_items.v:6:55
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:6:56 32'sd3)
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:6:58 32'sd0))
+        (DECLARATOR:w @G3_generate_block_items.v:6:67
+          _)))
+    (GEN_BLOCK:lane @G3_generate_block_items.v:8:33
+      (NUMBER.dec [SIGNED] @G3_generate_block_items.v:8:33 32'sd0)
+      (PARAM_DECL.localparam @G3_generate_block_items.v:9:5
+        _
+        (DECLARATOR:P @G3_generate_block_items.v:9:16
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:9:16 1)))
+      (NET_DECL.wire @G3_generate_block_items.v:10:5
+        _
+        _
+        _
+        (DECLARATOR:t @G3_generate_block_items.v:10:10
+          _))
+      (VAR_DECL.reg @G3_generate_block_items.v:11:5
+        _
+        (DECLARATOR:r @G3_generate_block_items.v:11:9
+          _))
+      (CONT_ASSIGN @G3_generate_block_items.v:12:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:12:12
+          (IDENT:t @G3_generate_block_items.v:12:12)
+          (BINARY.^ @G3_generate_block_items.v:12:16
+            (SELECT.bit @G3_generate_block_items.v:12:16
+              (IDENT:a @G3_generate_block_items.v:12:16)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:12:18 32'sd0)
+              _)
+            (IDENT:P @G3_generate_block_items.v:12:23))))
+      (ALWAYS.always @G3_generate_block_items.v:13:5
+        (TIMING_STMT @G3_generate_block_items.v:13:12
+          (EVENT_CONTROL @G3_generate_block_items.v:13:12
+            _
+            (EVENT_EXPR.posedge @G3_generate_block_items.v:13:14
+              (IDENT:clk @G3_generate_block_items.v:13:22)))
+          (NONBLOCKING_ASSIGN @G3_generate_block_items.v:14:7
+            (IDENT:r @G3_generate_block_items.v:14:7)
+            _
+            (IDENT:t @G3_generate_block_items.v:14:12))))
+      (CONT_ASSIGN @G3_generate_block_items.v:15:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:15:12
+          (SELECT.bit @G3_generate_block_items.v:15:12
+            (IDENT:y @G3_generate_block_items.v:15:12)
+            (NUMBER.dec [SIGNED] @G3_generate_block_items.v:15:14 32'sd0)
+            _)
+          (IDENT:r @G3_generate_block_items.v:15:19)))
+      (INSTANTIATION:g3_leaf @G3_generate_block_items.v:16:5
+        _
+        (INSTANCE:u @G3_generate_block_items.v:16:13
+          _
+          (CONNECTION:d @G3_generate_block_items.v:16:16
+            (SELECT.bit @G3_generate_block_items.v:16:19
+              (IDENT:a @G3_generate_block_items.v:16:19)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:16:21 32'sd0)
+              _))
+          (CONNECTION:q @G3_generate_block_items.v:16:26
+            (SELECT.bit @G3_generate_block_items.v:16:29
+              (IDENT:z @G3_generate_block_items.v:16:29)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:16:31 32'sd0)
+              _)))))
+    (GEN_BLOCK:lane @G3_generate_block_items.v:8:33
+      (NUMBER.dec [SIGNED] @G3_generate_block_items.v:8:33 32'sd1)
+      (PARAM_DECL.localparam @G3_generate_block_items.v:9:5
+        _
+        (DECLARATOR:P @G3_generate_block_items.v:9:16
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:9:16 1)))
+      (NET_DECL.wire @G3_generate_block_items.v:10:5
+        _
+        _
+        _
+        (DECLARATOR:t @G3_generate_block_items.v:10:10
+          _))
+      (VAR_DECL.reg @G3_generate_block_items.v:11:5
+        _
+        (DECLARATOR:r @G3_generate_block_items.v:11:9
+          _))
+      (CONT_ASSIGN @G3_generate_block_items.v:12:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:12:12
+          (IDENT:t @G3_generate_block_items.v:12:12)
+          (BINARY.^ @G3_generate_block_items.v:12:16
+            (SELECT.bit @G3_generate_block_items.v:12:16
+              (IDENT:a @G3_generate_block_items.v:12:16)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:12:18 32'sd1)
+              _)
+            (IDENT:P @G3_generate_block_items.v:12:23))))
+      (ALWAYS.always @G3_generate_block_items.v:13:5
+        (TIMING_STMT @G3_generate_block_items.v:13:12
+          (EVENT_CONTROL @G3_generate_block_items.v:13:12
+            _
+            (EVENT_EXPR.posedge @G3_generate_block_items.v:13:14
+              (IDENT:clk @G3_generate_block_items.v:13:22)))
+          (NONBLOCKING_ASSIGN @G3_generate_block_items.v:14:7
+            (IDENT:r @G3_generate_block_items.v:14:7)
+            _
+            (IDENT:t @G3_generate_block_items.v:14:12))))
+      (CONT_ASSIGN @G3_generate_block_items.v:15:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:15:12
+          (SELECT.bit @G3_generate_block_items.v:15:12
+            (IDENT:y @G3_generate_block_items.v:15:12)
+            (NUMBER.dec [SIGNED] @G3_generate_block_items.v:15:14 32'sd1)
+            _)
+          (IDENT:r @G3_generate_block_items.v:15:19)))
+      (INSTANTIATION:g3_leaf @G3_generate_block_items.v:16:5
+        _
+        (INSTANCE:u @G3_generate_block_items.v:16:13
+          _
+          (CONNECTION:d @G3_generate_block_items.v:16:16
+            (SELECT.bit @G3_generate_block_items.v:16:19
+              (IDENT:a @G3_generate_block_items.v:16:19)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:16:21 32'sd1)
+              _))
+          (CONNECTION:q @G3_generate_block_items.v:16:26
+            (SELECT.bit @G3_generate_block_items.v:16:29
+              (IDENT:z @G3_generate_block_items.v:16:29)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:16:31 32'sd1)
+              _)))))
+    (GEN_BLOCK:lane @G3_generate_block_items.v:8:33
+      (NUMBER.dec [SIGNED] @G3_generate_block_items.v:8:33 32'sd2)
+      (PARAM_DECL.localparam @G3_generate_block_items.v:9:5
+        _
+        (DECLARATOR:P @G3_generate_block_items.v:9:16
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:9:16 1)))
+      (NET_DECL.wire @G3_generate_block_items.v:10:5
+        _
+        _
+        _
+        (DECLARATOR:t @G3_generate_block_items.v:10:10
+          _))
+      (VAR_DECL.reg @G3_generate_block_items.v:11:5
+        _
+        (DECLARATOR:r @G3_generate_block_items.v:11:9
+          _))
+      (CONT_ASSIGN @G3_generate_block_items.v:12:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:12:12
+          (IDENT:t @G3_generate_block_items.v:12:12)
+          (BINARY.^ @G3_generate_block_items.v:12:16
+            (SELECT.bit @G3_generate_block_items.v:12:16
+              (IDENT:a @G3_generate_block_items.v:12:16)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:12:18 32'sd2)
+              _)
+            (IDENT:P @G3_generate_block_items.v:12:23))))
+      (ALWAYS.always @G3_generate_block_items.v:13:5
+        (TIMING_STMT @G3_generate_block_items.v:13:12
+          (EVENT_CONTROL @G3_generate_block_items.v:13:12
+            _
+            (EVENT_EXPR.posedge @G3_generate_block_items.v:13:14
+              (IDENT:clk @G3_generate_block_items.v:13:22)))
+          (NONBLOCKING_ASSIGN @G3_generate_block_items.v:14:7
+            (IDENT:r @G3_generate_block_items.v:14:7)
+            _
+            (IDENT:t @G3_generate_block_items.v:14:12))))
+      (CONT_ASSIGN @G3_generate_block_items.v:15:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:15:12
+          (SELECT.bit @G3_generate_block_items.v:15:12
+            (IDENT:y @G3_generate_block_items.v:15:12)
+            (NUMBER.dec [SIGNED] @G3_generate_block_items.v:15:14 32'sd2)
+            _)
+          (IDENT:r @G3_generate_block_items.v:15:19)))
+      (INSTANTIATION:g3_leaf @G3_generate_block_items.v:16:5
+        _
+        (INSTANCE:u @G3_generate_block_items.v:16:13
+          _
+          (CONNECTION:d @G3_generate_block_items.v:16:16
+            (SELECT.bit @G3_generate_block_items.v:16:19
+              (IDENT:a @G3_generate_block_items.v:16:19)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:16:21 32'sd2)
+              _))
+          (CONNECTION:q @G3_generate_block_items.v:16:26
+            (SELECT.bit @G3_generate_block_items.v:16:29
+              (IDENT:z @G3_generate_block_items.v:16:29)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:16:31 32'sd2)
+              _)))))
+    (GEN_BLOCK:lane @G3_generate_block_items.v:8:33
+      (NUMBER.dec [SIGNED] @G3_generate_block_items.v:8:33 32'sd3)
+      (PARAM_DECL.localparam @G3_generate_block_items.v:9:5
+        _
+        (DECLARATOR:P @G3_generate_block_items.v:9:16
+          (NUMBER.dec [SIGNED] @G3_generate_block_items.v:9:16 1)))
+      (NET_DECL.wire @G3_generate_block_items.v:10:5
+        _
+        _
+        _
+        (DECLARATOR:t @G3_generate_block_items.v:10:10
+          _))
+      (VAR_DECL.reg @G3_generate_block_items.v:11:5
+        _
+        (DECLARATOR:r @G3_generate_block_items.v:11:9
+          _))
+      (CONT_ASSIGN @G3_generate_block_items.v:12:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:12:12
+          (IDENT:t @G3_generate_block_items.v:12:12)
+          (BINARY.^ @G3_generate_block_items.v:12:16
+            (SELECT.bit @G3_generate_block_items.v:12:16
+              (IDENT:a @G3_generate_block_items.v:12:16)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:12:18 32'sd3)
+              _)
+            (IDENT:P @G3_generate_block_items.v:12:23))))
+      (ALWAYS.always @G3_generate_block_items.v:13:5
+        (TIMING_STMT @G3_generate_block_items.v:13:12
+          (EVENT_CONTROL @G3_generate_block_items.v:13:12
+            _
+            (EVENT_EXPR.posedge @G3_generate_block_items.v:13:14
+              (IDENT:clk @G3_generate_block_items.v:13:22)))
+          (NONBLOCKING_ASSIGN @G3_generate_block_items.v:14:7
+            (IDENT:r @G3_generate_block_items.v:14:7)
+            _
+            (IDENT:t @G3_generate_block_items.v:14:12))))
+      (CONT_ASSIGN @G3_generate_block_items.v:15:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:15:12
+          (SELECT.bit @G3_generate_block_items.v:15:12
+            (IDENT:y @G3_generate_block_items.v:15:12)
+            (NUMBER.dec [SIGNED] @G3_generate_block_items.v:15:14 32'sd3)
+            _)
+          (IDENT:r @G3_generate_block_items.v:15:19)))
+      (INSTANTIATION:g3_leaf @G3_generate_block_items.v:16:5
+        _
+        (INSTANCE:u @G3_generate_block_items.v:16:13
+          _
+          (CONNECTION:d @G3_generate_block_items.v:16:16
+            (SELECT.bit @G3_generate_block_items.v:16:19
+              (IDENT:a @G3_generate_block_items.v:16:19)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:16:21 32'sd3)
+              _))
+          (CONNECTION:q @G3_generate_block_items.v:16:26
+            (SELECT.bit @G3_generate_block_items.v:16:29
+              (IDENT:z @G3_generate_block_items.v:16:29)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:16:31 32'sd3)
+              _)))))
+    (GEN_BLOCK:genblk2 @G3_generate_block_items.v:18:33
+      (NUMBER.dec [SIGNED] @G3_generate_block_items.v:18:33 32'sd0)
+      (NET_DECL.wire @G3_generate_block_items.v:19:5
+        _
+        _
+        _
+        (DECLARATOR:n @G3_generate_block_items.v:19:10
+          _))
+      (CONT_ASSIGN @G3_generate_block_items.v:20:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:20:12
+          (IDENT:n @G3_generate_block_items.v:20:12)
+          (UNARY.~ @G3_generate_block_items.v:20:16
+            (SELECT.bit @G3_generate_block_items.v:20:17
+              (IDENT:a @G3_generate_block_items.v:20:17)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:20:19 32'sd0)
+              _))))
+      (CONT_ASSIGN @G3_generate_block_items.v:21:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:21:12
+          (SELECT.bit @G3_generate_block_items.v:21:12
+            (IDENT:w @G3_generate_block_items.v:21:12)
+            (NUMBER.dec [SIGNED] @G3_generate_block_items.v:21:14 32'sd0)
+            _)
+          (IDENT:n @G3_generate_block_items.v:21:19))))
+    (GEN_BLOCK:genblk2 @G3_generate_block_items.v:18:33
+      (NUMBER.dec [SIGNED] @G3_generate_block_items.v:18:33 32'sd1)
+      (NET_DECL.wire @G3_generate_block_items.v:19:5
+        _
+        _
+        _
+        (DECLARATOR:n @G3_generate_block_items.v:19:10
+          _))
+      (CONT_ASSIGN @G3_generate_block_items.v:20:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:20:12
+          (IDENT:n @G3_generate_block_items.v:20:12)
+          (UNARY.~ @G3_generate_block_items.v:20:16
+            (SELECT.bit @G3_generate_block_items.v:20:17
+              (IDENT:a @G3_generate_block_items.v:20:17)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:20:19 32'sd1)
+              _))))
+      (CONT_ASSIGN @G3_generate_block_items.v:21:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:21:12
+          (SELECT.bit @G3_generate_block_items.v:21:12
+            (IDENT:w @G3_generate_block_items.v:21:12)
+            (NUMBER.dec [SIGNED] @G3_generate_block_items.v:21:14 32'sd1)
+            _)
+          (IDENT:n @G3_generate_block_items.v:21:19))))
+    (GEN_BLOCK:genblk2 @G3_generate_block_items.v:18:33
+      (NUMBER.dec [SIGNED] @G3_generate_block_items.v:18:33 32'sd2)
+      (NET_DECL.wire @G3_generate_block_items.v:19:5
+        _
+        _
+        _
+        (DECLARATOR:n @G3_generate_block_items.v:19:10
+          _))
+      (CONT_ASSIGN @G3_generate_block_items.v:20:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:20:12
+          (IDENT:n @G3_generate_block_items.v:20:12)
+          (UNARY.~ @G3_generate_block_items.v:20:16
+            (SELECT.bit @G3_generate_block_items.v:20:17
+              (IDENT:a @G3_generate_block_items.v:20:17)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:20:19 32'sd2)
+              _))))
+      (CONT_ASSIGN @G3_generate_block_items.v:21:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:21:12
+          (SELECT.bit @G3_generate_block_items.v:21:12
+            (IDENT:w @G3_generate_block_items.v:21:12)
+            (NUMBER.dec [SIGNED] @G3_generate_block_items.v:21:14 32'sd2)
+            _)
+          (IDENT:n @G3_generate_block_items.v:21:19))))
+    (GEN_BLOCK:genblk2 @G3_generate_block_items.v:18:33
+      (NUMBER.dec [SIGNED] @G3_generate_block_items.v:18:33 32'sd3)
+      (NET_DECL.wire @G3_generate_block_items.v:19:5
+        _
+        _
+        _
+        (DECLARATOR:n @G3_generate_block_items.v:19:10
+          _))
+      (CONT_ASSIGN @G3_generate_block_items.v:20:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:20:12
+          (IDENT:n @G3_generate_block_items.v:20:12)
+          (UNARY.~ @G3_generate_block_items.v:20:16
+            (SELECT.bit @G3_generate_block_items.v:20:17
+              (IDENT:a @G3_generate_block_items.v:20:17)
+              (NUMBER.dec [SIGNED] @G3_generate_block_items.v:20:19 32'sd3)
+              _))))
+      (CONT_ASSIGN @G3_generate_block_items.v:21:5
+        _
+        _
+        (NET_ASSIGN @G3_generate_block_items.v:21:12
+          (SELECT.bit @G3_generate_block_items.v:21:12
+            (IDENT:w @G3_generate_block_items.v:21:12)
+            (NUMBER.dec [SIGNED] @G3_generate_block_items.v:21:14 32'sd3)
+            _)
+          (IDENT:n @G3_generate_block_items.v:21:19)))))
+  (MODULE:g3_leaf @G3_generate_block_items.v:2:1
+    _
+    (LIST @G3_generate_block_items.v:2:16
+      (PORT_DECL.input [IN_HEADER NET=1] @G3_generate_block_items.v:2:17
+        _
+        (DECLARATOR:d @G3_generate_block_items.v:2:23
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G3_generate_block_items.v:2:26
+        _
+        (DECLARATOR:q @G3_generate_block_items.v:2:33
+          _)))
+    (CONT_ASSIGN @G3_generate_block_items.v:3:3
+      _
+      _
+      (NET_ASSIGN @G3_generate_block_items.v:3:10
+        (IDENT:q @G3_generate_block_items.v:3:10)
+        (UNARY.~ @G3_generate_block_items.v:3:14
+          (IDENT:d @G3_generate_block_items.v:3:15))))))

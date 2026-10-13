@@ -1,0 +1,64 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:m2_ansi @M2_ansi_ports.v:2:1
+  (MODULE:m2_ansi @M2_ansi_ports.v:2:1
+    _
+    (LIST @M2_ansi_ports.v:2:16
+      (PORT_DECL.input [IN_HEADER NET=1] @M2_ansi_ports.v:3:3
+        _
+        (DECLARATOR:clk @M2_ansi_ports.v:3:14
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @M2_ansi_ports.v:4:3
+        (RANGE @M2_ansi_ports.v:4:9
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:4:10 32'sd3)
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:4:12 32'sd0))
+        (DECLARATOR:a @M2_ansi_ports.v:4:15
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @M2_ansi_ports.v:4:3
+        (RANGE @M2_ansi_ports.v:4:9
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:4:10 32'sd3)
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:4:12 32'sd0))
+        (DECLARATOR:b @M2_ansi_ports.v:4:18
+          _))
+      (PORT_DECL.input [SIGNED IN_HEADER NET=1] @M2_ansi_ports.v:5:3
+        (RANGE @M2_ansi_ports.v:5:16
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:5:17 32'sd3)
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:5:19 32'sd0))
+        (DECLARATOR:s @M2_ansi_ports.v:5:22
+          _))
+      (PORT_DECL.input [SIGNED IN_HEADER NET=1] @M2_ansi_ports.v:6:3
+        (RANGE @M2_ansi_ports.v:6:21
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:6:22 32'sd7)
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:6:24 32'sd0))
+        (DECLARATOR:ws @M2_ansi_ports.v:6:27
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @M2_ansi_ports.v:7:3
+        (RANGE @M2_ansi_ports.v:7:10
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:7:11 32'sd3)
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:7:13 32'sd0))
+        (DECLARATOR:y @M2_ansi_ports.v:7:16
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @M2_ansi_ports.v:8:3
+        (RANGE @M2_ansi_ports.v:8:14
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:8:15 32'sd3)
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:8:17 32'sd0))
+        (DECLARATOR:q @M2_ansi_ports.v:8:20
+          _))
+      (PORT_DECL.output [SIGNED IN_HEADER NET=1] @M2_ansi_ports.v:9:3
+        (RANGE @M2_ansi_ports.v:9:22
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:9:23 32'sd4)
+          (NUMBER.dec [SIGNED] @M2_ansi_ports.v:9:25 32'sd0))
+        (DECLARATOR:z @M2_ansi_ports.v:9:28
+          _)))
+    (CONT_ASSIGN @M2_ansi_ports.v:11:3
+      _
+      _
+      (NET_ASSIGN @M2_ansi_ports.v:11:10
+        (IDENT:y @M2_ansi_ports.v:11:10)
+        (IDENT:a @M2_ansi_ports.v:11:14)))
+    (CONT_ASSIGN @M2_ansi_ports.v:12:3
+      _
+      _
+      (NET_ASSIGN @M2_ansi_ports.v:12:10
+        (IDENT:z @M2_ansi_ports.v:12:10)
+        (IDENT:s @M2_ansi_ports.v:12:14)))))

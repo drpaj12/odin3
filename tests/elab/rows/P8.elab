@@ -1,0 +1,74 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:p8_constant_expressions @P8_constant_expressions.v:2:1
+  (MODULE:p8_constant_expressions @P8_constant_expressions.v:2:1
+    (LIST @P8_constant_expressions.v:2:32
+      (PARAM_DECL.localparam [IN_HEADER] @P8_constant_expressions.v:2:34
+        _
+        (DECLARATOR:W @P8_constant_expressions.v:2:44
+          (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:44 4))))
+    (LIST @P8_constant_expressions.v:2:51
+      (PORT_DECL.input [IN_HEADER NET=1] @P8_constant_expressions.v:2:52
+        (RANGE @P8_constant_expressions.v:2:58
+          (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:59 32'sd15)
+          (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:66 32'sd0))
+        (DECLARATOR:a @P8_constant_expressions.v:2:69
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P8_constant_expressions.v:2:72
+        (RANGE @P8_constant_expressions.v:2:79
+          (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:80 32'sd1)
+          (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:92 32'sd0))
+        (DECLARATOR:y @P8_constant_expressions.v:2:95
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P8_constant_expressions.v:2:98
+        (RANGE @P8_constant_expressions.v:2:105
+          (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:106 32'sd7)
+          (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:108 32'sd0))
+        (DECLARATOR:z @P8_constant_expressions.v:2:111
+          _)))
+    (PARAM_DECL.localparam @P8_constant_expressions.v:3:3
+      _
+      (DECLARATOR:A @P8_constant_expressions.v:3:14
+        (NUMBER.bin [SIGNED] @P8_constant_expressions.v:3:14 32'sb00000000000000000000000000000011)))
+    (PARAM_DECL.localparam @P8_constant_expressions.v:4:3
+      _
+      (DECLARATOR:B @P8_constant_expressions.v:4:14
+        (NUMBER.dec [SIGNED] @P8_constant_expressions.v:4:14 2)))
+    (PARAM_DECL.localparam @P8_constant_expressions.v:5:3
+      _
+      (DECLARATOR:N @P8_constant_expressions.v:5:14
+        (NUMBER.bin [SIGNED] @P8_constant_expressions.v:5:14 32'sb00000000000000000000000000001000)))
+    (FUNCTION_DECL:width_of [DT=2] @P8_constant_expressions.v:6:3
+      _
+      (LIST @P8_constant_expressions.v:6:29
+        (PORT_DECL.input [IN_HEADER DT=2] @P8_constant_expressions.v:6:29
+          _
+          (DECLARATOR:n @P8_constant_expressions.v:6:43
+            _)))
+      (LIST @P8_constant_expressions.v:6:46)
+      (BLOCKING_ASSIGN @P8_constant_expressions.v:7:5
+        (IDENT:width_of @P8_constant_expressions.v:7:5)
+        _
+        (BINARY.* @P8_constant_expressions.v:7:16
+          (NUMBER.dec [SIGNED] @P8_constant_expressions.v:7:16 2)
+          (IDENT:n @P8_constant_expressions.v:7:20))))
+    (NET_DECL.wire @P8_constant_expressions.v:9:3
+      _
+      (RANGE @P8_constant_expressions.v:9:8
+        (NUMBER.dec [SIGNED] @P8_constant_expressions.v:9:9 32'sd7)
+        (NUMBER.dec [SIGNED] @P8_constant_expressions.v:9:23 32'sd0))
+      _
+      (DECLARATOR:t @P8_constant_expressions.v:9:26
+        _))
+    (CONT_ASSIGN @P8_constant_expressions.v:10:3
+      _
+      _
+      (NET_ASSIGN @P8_constant_expressions.v:10:10
+        (IDENT:y @P8_constant_expressions.v:10:10)
+        (IDENT:A @P8_constant_expressions.v:10:14)))
+    (CONT_ASSIGN @P8_constant_expressions.v:11:3
+      _
+      _
+      (NET_ASSIGN @P8_constant_expressions.v:11:10
+        (IDENT:z @P8_constant_expressions.v:11:10)
+        (IDENT:N @P8_constant_expressions.v:11:14)))))

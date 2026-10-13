@@ -1,0 +1,136 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:e8_compare @E8_relational_equality.v:2:1
+  (MODULE:e8_compare @E8_relational_equality.v:2:1
+    _
+    (LIST @E8_relational_equality.v:2:19
+      (PORT_DECL.input [IN_HEADER NET=1] @E8_relational_equality.v:2:20
+        (RANGE @E8_relational_equality.v:2:26
+          (NUMBER.dec [SIGNED] @E8_relational_equality.v:2:27 32'sd3)
+          (NUMBER.dec [SIGNED] @E8_relational_equality.v:2:29 32'sd0))
+        (DECLARATOR:a @E8_relational_equality.v:2:32
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @E8_relational_equality.v:2:35
+        (RANGE @E8_relational_equality.v:2:41
+          (NUMBER.dec [SIGNED] @E8_relational_equality.v:2:42 32'sd7)
+          (NUMBER.dec [SIGNED] @E8_relational_equality.v:2:44 32'sd0))
+        (DECLARATOR:b @E8_relational_equality.v:2:47
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @E8_relational_equality.v:2:50
+        _
+        (DECLARATOR:c @E8_relational_equality.v:2:56
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E8_relational_equality.v:2:59
+        _
+        (DECLARATOR:y1 @E8_relational_equality.v:2:66
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E8_relational_equality.v:2:59
+        _
+        (DECLARATOR:y2 @E8_relational_equality.v:2:70
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E8_relational_equality.v:2:59
+        _
+        (DECLARATOR:y3 @E8_relational_equality.v:2:74
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E8_relational_equality.v:2:59
+        _
+        (DECLARATOR:y4 @E8_relational_equality.v:2:78
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E8_relational_equality.v:2:59
+        _
+        (DECLARATOR:y5 @E8_relational_equality.v:2:82
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E8_relational_equality.v:2:59
+        _
+        (DECLARATOR:y6 @E8_relational_equality.v:2:86
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E8_relational_equality.v:2:59
+        _
+        (DECLARATOR:y7 @E8_relational_equality.v:2:90
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E8_relational_equality.v:2:59
+        _
+        (DECLARATOR:y8 @E8_relational_equality.v:2:94
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E8_relational_equality.v:2:59
+        _
+        (DECLARATOR:y9 @E8_relational_equality.v:2:98
+          _)))
+    (CONT_ASSIGN @E8_relational_equality.v:3:3
+      _
+      _
+      (NET_ASSIGN @E8_relational_equality.v:3:10
+        (IDENT:y1 @E8_relational_equality.v:3:10)
+        (BINARY.< @E8_relational_equality.v:3:15
+          (IDENT:a @E8_relational_equality.v:3:15)
+          (IDENT:b @E8_relational_equality.v:3:19))))
+    (CONT_ASSIGN @E8_relational_equality.v:4:3
+      _
+      _
+      (NET_ASSIGN @E8_relational_equality.v:4:10
+        (IDENT:y2 @E8_relational_equality.v:4:10)
+        (BINARY.> @E8_relational_equality.v:4:15
+          (IDENT:a @E8_relational_equality.v:4:15)
+          (IDENT:b @E8_relational_equality.v:4:19))))
+    (CONT_ASSIGN @E8_relational_equality.v:5:3
+      _
+      _
+      (NET_ASSIGN @E8_relational_equality.v:5:10
+        (IDENT:y3 @E8_relational_equality.v:5:10)
+        (BINARY.<= @E8_relational_equality.v:5:15
+          (IDENT:a @E8_relational_equality.v:5:15)
+          (IDENT:b @E8_relational_equality.v:5:20))))
+    (CONT_ASSIGN @E8_relational_equality.v:6:3
+      _
+      _
+      (NET_ASSIGN @E8_relational_equality.v:6:10
+        (IDENT:y4 @E8_relational_equality.v:6:10)
+        (BINARY.>= @E8_relational_equality.v:6:15
+          (IDENT:a @E8_relational_equality.v:6:15)
+          (IDENT:b @E8_relational_equality.v:6:20))))
+    (CONT_ASSIGN @E8_relational_equality.v:7:3
+      _
+      _
+      (NET_ASSIGN @E8_relational_equality.v:7:10
+        (IDENT:y5 @E8_relational_equality.v:7:10)
+        (BINARY.== @E8_relational_equality.v:7:15
+          (IDENT:a @E8_relational_equality.v:7:15)
+          (IDENT:b @E8_relational_equality.v:7:20))))
+    (CONT_ASSIGN @E8_relational_equality.v:8:3
+      _
+      _
+      (NET_ASSIGN @E8_relational_equality.v:8:10
+        (IDENT:y6 @E8_relational_equality.v:8:10)
+        (BINARY.!= @E8_relational_equality.v:8:15
+          (IDENT:a @E8_relational_equality.v:8:15)
+          (IDENT:b @E8_relational_equality.v:8:20))))
+    (CONT_ASSIGN @E8_relational_equality.v:9:3
+      _
+      _
+      (NET_ASSIGN @E8_relational_equality.v:9:10
+        (IDENT:y7 @E8_relational_equality.v:9:10)
+        (BINARY.== @E8_relational_equality.v:9:15
+          (BINARY.< @E8_relational_equality.v:9:15
+            (IDENT:a @E8_relational_equality.v:9:15)
+            (IDENT:b @E8_relational_equality.v:9:19))
+          (IDENT:c @E8_relational_equality.v:9:24))))
+    (CONT_ASSIGN @E8_relational_equality.v:10:3
+      _
+      _
+      (NET_ASSIGN @E8_relational_equality.v:10:10
+        (IDENT:y8 @E8_relational_equality.v:10:10)
+        (BINARY.!= @E8_relational_equality.v:10:15
+          (BINARY.== @E8_relational_equality.v:10:15
+            (IDENT:a @E8_relational_equality.v:10:15)
+            (IDENT:b @E8_relational_equality.v:10:20))
+          (IDENT:c @E8_relational_equality.v:10:25))))
+    (CONT_ASSIGN @E8_relational_equality.v:11:3
+      _
+      _
+      (NET_ASSIGN @E8_relational_equality.v:11:10
+        (IDENT:y9 @E8_relational_equality.v:11:10)
+        (BINARY.< @E8_relational_equality.v:11:15
+          (BINARY.+ @E8_relational_equality.v:11:15
+            (IDENT:a @E8_relational_equality.v:11:15)
+            (IDENT:b @E8_relational_equality.v:11:19))
+          (IDENT:c @E8_relational_equality.v:11:23))))))

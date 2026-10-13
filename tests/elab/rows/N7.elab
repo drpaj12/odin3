@@ -1,0 +1,46 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:n7_net_init @N7_net_decl_assign.v:2:1
+  (MODULE:n7_net_init @N7_net_decl_assign.v:2:1
+    _
+    (LIST @N7_net_decl_assign.v:2:20
+      (PORT_DECL.input [IN_HEADER NET=1] @N7_net_decl_assign.v:2:21
+        (RANGE @N7_net_decl_assign.v:2:27
+          (NUMBER.dec [SIGNED] @N7_net_decl_assign.v:2:28 32'sd3)
+          (NUMBER.dec [SIGNED] @N7_net_decl_assign.v:2:30 32'sd0))
+        (DECLARATOR:a @N7_net_decl_assign.v:2:33
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @N7_net_decl_assign.v:2:21
+        (RANGE @N7_net_decl_assign.v:2:27
+          (NUMBER.dec [SIGNED] @N7_net_decl_assign.v:2:28 32'sd3)
+          (NUMBER.dec [SIGNED] @N7_net_decl_assign.v:2:30 32'sd0))
+        (DECLARATOR:b @N7_net_decl_assign.v:2:36
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N7_net_decl_assign.v:2:39
+        (RANGE @N7_net_decl_assign.v:2:46
+          (NUMBER.dec [SIGNED] @N7_net_decl_assign.v:2:47 32'sd3)
+          (NUMBER.dec [SIGNED] @N7_net_decl_assign.v:2:49 32'sd0))
+        (DECLARATOR:y @N7_net_decl_assign.v:2:52
+          _)))
+    (NET_DECL.wire @N7_net_decl_assign.v:3:3
+      _
+      (RANGE @N7_net_decl_assign.v:3:8
+        (NUMBER.dec [SIGNED] @N7_net_decl_assign.v:3:9 32'sd3)
+        (NUMBER.dec [SIGNED] @N7_net_decl_assign.v:3:11 32'sd0))
+      _
+      (DECLARATOR:w @N7_net_decl_assign.v:3:14
+        (IDENT:a @N7_net_decl_assign.v:3:18)))
+    (NET_DECL.wire @N7_net_decl_assign.v:4:3
+      _
+      _
+      _
+      (DECLARATOR:t @N7_net_decl_assign.v:4:8
+        (NUMBER.bin @N7_net_decl_assign.v:4:12 1'b1))
+      (DECLARATOR:u @N7_net_decl_assign.v:4:18
+        (NUMBER.bin @N7_net_decl_assign.v:4:22 1'b0)))
+    (CONT_ASSIGN @N7_net_decl_assign.v:5:3
+      _
+      _
+      (NET_ASSIGN @N7_net_decl_assign.v:5:10
+        (IDENT:y @N7_net_decl_assign.v:5:10)
+        (IDENT:w @N7_net_decl_assign.v:5:14)))))

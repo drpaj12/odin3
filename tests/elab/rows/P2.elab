@@ -1,0 +1,46 @@
+# hand-written
+# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+(UNIT:p2_localparam @P2_localparam.v:2:1
+  (MODULE:p2_localparam @P2_localparam.v:2:1
+    _
+    (LIST @P2_localparam.v:2:22
+      (PORT_DECL.output [IN_HEADER NET=1] @P2_localparam.v:2:23
+        (RANGE @P2_localparam.v:2:30
+          (NUMBER.dec [SIGNED] @P2_localparam.v:2:31 32'sd31)
+          (NUMBER.dec [SIGNED] @P2_localparam.v:2:34 32'sd0))
+        (DECLARATOR:y @P2_localparam.v:2:37
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P2_localparam.v:2:40
+        (RANGE @P2_localparam.v:2:47
+          (NUMBER.dec [SIGNED] @P2_localparam.v:2:48 32'sd3)
+          (NUMBER.dec [SIGNED] @P2_localparam.v:2:50 32'sd0))
+        (DECLARATOR:z @P2_localparam.v:2:53
+          _)))
+    (PARAM_DECL.localparam @P2_localparam.v:3:3
+      _
+      (DECLARATOR:L @P2_localparam.v:3:14
+        (NUMBER.dec [SIGNED] @P2_localparam.v:3:14 4)))
+    (PARAM_DECL.localparam @P2_localparam.v:4:3
+      _
+      (DECLARATOR:M @P2_localparam.v:4:14
+        (NUMBER.dec [SIGNED] @P2_localparam.v:4:14 5))
+      (DECLARATOR:N @P2_localparam.v:4:21
+        (NUMBER.dec [SIGNED] @P2_localparam.v:4:21 6)))
+    (PARAM_DECL.localparam @P2_localparam.v:5:3
+      (RANGE @P2_localparam.v:5:14
+        (NUMBER.dec [SIGNED] @P2_localparam.v:5:15 32'sd3)
+        (NUMBER.dec [SIGNED] @P2_localparam.v:5:17 32'sd0))
+      (DECLARATOR:R @P2_localparam.v:5:20
+        (NUMBER.bin @P2_localparam.v:5:20 4'b1001)))
+    (CONT_ASSIGN @P2_localparam.v:6:3
+      _
+      _
+      (NET_ASSIGN @P2_localparam.v:6:10
+        (IDENT:y @P2_localparam.v:6:10)
+        (IDENT:M @P2_localparam.v:6:14)))
+    (CONT_ASSIGN @P2_localparam.v:7:3
+      _
+      _
+      (NET_ASSIGN @P2_localparam.v:7:10
+        (IDENT:z @P2_localparam.v:7:10)
+        (IDENT:R @P2_localparam.v:7:14)))))

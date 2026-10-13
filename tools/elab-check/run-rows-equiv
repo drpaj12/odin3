@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# run-rows-equiv: elab-equiv over tests/elab/rows, smallest first. See run_rows_equiv.py.
+# Exit codes: 0 as expected, 1 an unexpected result, 2 usage or I/O error, 77 skipped.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/run_rows_equiv.py" "$@"
