@@ -20,8 +20,9 @@
  *  - no leak, no sanitizer report, no hang (libFuzzer's -rss_limit_mb and -timeout).
  * Under an injected failure only the status rule and the OK-path check apply.
  *
- * The seeds come from `elab-fuzz-seeds` (CMake target fuzz_elab_seeds): tests/elab/rows/*.v and
- * the micros' common/ directory, each after mode bytes 0x01 and 0x00, smallest first.
+ * The seeds come from tools/elab-check/elab_fuzz_seeds.py: the .v files of tests/elab/rows and
+ * the micros' common/ directory, each after mode byte 0x01, smallest first, then ten generated
+ * modules (verilog_gen.py --elab).
  */
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -199,8 +200,9 @@ static void run_file(unsigned mode) {
     odin3_design *design = odin3_design_create();
     long nth = (long)((mode >> MODE_FAIL_SHIFT) & MODE_FAIL_MASK);
     char args[PATH_MAX_LEN + 64];
-    int len = snprintf(args, sizeof args, "%s%s\"%s\"", (mode & MODE_NOLATCHES) ? "--nolatches " : "",
-                       (mode & MODE_NOMEM2REG) ? "--nomem2reg " : "", input);
+    int len =
+        snprintf(args, sizeof args, "%s%s\"%s\"", (mode & MODE_NOLATCHES) ? "--nolatches " : "",
+                 (mode & MODE_NOMEM2REG) ? "--nomem2reg " : "", input);
     if (len < 0 || (size_t)len >= sizeof args) {
         fail("the argument string does not fit");
     }

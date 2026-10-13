@@ -495,6 +495,12 @@ add_executable(elab-check tools/elab-check/elab-check.c)
 target_include_directories(elab-check PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(elab-check PRIVATE odin3_core odin3_flags)
 
+# 2D Task 28 (spec 14.5): const-replay, the tiny driver of const-diff (a constant table through
+# odin3_cval_op).
+add_executable(const-replay tools/elab-check/const-replay.c)
+target_include_directories(const-replay PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(const-replay PRIVATE odin3_core odin3_flags)
+
 # --- odin3-sim-vectors: the simulator's random-vector driver (tools/sim-check, 1E) --------------
 add_executable(odin3-sim-vectors tools/sim-check/odin3-sim-vectors.c)
 target_include_directories(odin3-sim-vectors PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -901,6 +907,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test_rtlil_writer PRIVATE
         ODIN3_RTLIL_OUT="${PROJECT_BINARY_DIR}/rtlil")
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP rtlil_fixtures)
+    # 2D Task 28 (review M18): odin3_cval_op against the word cells' simulate hooks.
+    odin3_add_unit_test(test_elab_cellsim)
     odin3_add_unit_test(test_elab_cval)
     target_compile_definitions(test_elab_cval PRIVATE
         ODIN3_ELAB_DATA="${PROJECT_SOURCE_DIR}/tests/elab")
@@ -1908,6 +1916,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # test_hard_cell_widths runs write_rtlil's black-box stubs through it and the bridge.
         set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT
                      "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+        # 2D Task 28: test_elab_diff runs const-diff against this Yosys and the replay driver.
+        set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT
+                     "ODIN3_CONST_REPLAY=$<TARGET_FILE:const-replay>")
 
         # 2E Task 12 (spec 18.6, plan point (p)): the proc sweeps. Every one is an elab-sweep run
         # (smallest first, one child per file under memcap, expected failures with needles) whose
@@ -1946,6 +1957,40 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
                     --seeds 1..200 --mem-cap 3G --work ${PROJECT_BINARY_DIR}/proc_gen_work)
+        # 2D Task 28 (spec 14.5, review M24): the --elab generator's modules through the bridge
+        # (elab-diff, 200 seeds) and 500 random constant expressions, odin3_cval_op against Yosys
+        # 0.55's folds (const-diff). The nightly runs are the *_long tests: 5,000 seeds, 10,000
+        # expressions, and the 0.69 drift (a file where 0.55 and 0.69 disagree is `oracle drift`,
+        # not a failure). A failing seed keeps its file under the build directory.
+        odin3_add_sweep_test(elab_gen_vs_yosys LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --seeds 1..200 --mem-cap 2G --work ${PROJECT_BINARY_DIR}/elab_gen_work)
+        odin3_add_sweep_test(elab_const_diff LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/const-diff
+                    --yosys ${ODIN3_YOSYS055} --replay $<TARGET_FILE:const-replay>
+                    --count 500 --seed 1)
+        odin3_add_sweep_test(elab_gen_vs_yosys_long LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --seeds 1..5000 --mem-cap 2G --work ${PROJECT_BINARY_DIR}/elab_gen_long_work)
+        odin3_add_sweep_test(elab_const_diff_long LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/const-diff
+                    --yosys ${ODIN3_YOSYS055} --replay $<TARGET_FILE:const-replay>
+                    --count 10000 --seed 2)
+        set_tests_properties(elab_gen_vs_yosys_long elab_const_diff_long
+                             PROPERTIES LABELS "sweep;nightly")
+        if(ODIN3_YOSYS)
+            odin3_add_sweep_test(elab_gen_drift LABEL sweep
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-diff
+                        --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --seeds 1..200 --mem-cap 2G --yosys-069 ${ODIN3_YOSYS}
+                        --work ${PROJECT_BINARY_DIR}/elab_gen_drift_work)
+            set_tests_properties(elab_gen_drift PROPERTIES LABELS "sweep;nightly")
+        endif()
         # The 31 VTR and 33 Koios benchmarks as one set by size, when VTR_ROOT is set at
         # configure time (also label nightly). lenet.v is listed `xl` in vtr_expect_fail.txt: the
         # 6G sweeps skip it, and the sweep-xl CTests run exactly it, alone, 8 GiB per child.

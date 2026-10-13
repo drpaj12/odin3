@@ -51,7 +51,7 @@ TREE_DEPTH = 3
 BLOCK_DEPTH = 2
 COMPARE_OPS = ("==", "!=", "<", "<=", ">", ">=")
 BIT_OPS = ("&", "|", "^", "~^")
-ARITH_OPS = ("+", "-", "*")
+ARITH_OPS = ("+", "-", "*")  # "*" is by a constant (tree)
 SHIFT_OPS = ("<<", ">>", "<<<", ">>>")
 REDUCE_OPS = ("&", "|", "^", "~&", "~|", "~^")
 SIGNED_LEAVES = ("sa", "sc")
@@ -142,6 +142,10 @@ class Gen:
         k = self.r.random()
         if k < 0.34:
             op = self.ch(ARITH_OPS + BIT_OPS)
+            if op == "*":
+                # A variable-by-variable multiplier of 16 bits is beyond ABC's dsec (UNDECIDED):
+                # one operand is a small constant.
+                return f"({self.tree(depth - 1)} * {self.r.randrange(2, 8)})"
             return f"({self.tree(depth - 1)} {op} {self.tree(depth - 1)})"
         if k < 0.48:
             op = self.ch(COMPARE_OPS + ("&&", "||"))
@@ -388,11 +392,17 @@ class Gen:
             if value not in used:
                 used.add(value)
                 items.append(self.case_item(kind, value, depth, ctx, ind))
-        if self.p(0.6):
+        has_default = self.p(0.6)
+        if has_default:
             default = f"{' ' * (ind + 2)}default: {self.stmt(depth - 1, ctx, 0)}"
             items.insert(self.r.randrange(len(items) + 1) if self.p(0.3) else len(items), default)
         attr = ""
-        if self.p(0.12) and not ctx["seq"]:
+        # full_case / parallel_case are promises: on a case that breaks them Yosys's choice of x
+        # and 2D's differ legally (gen seed 42), so only a plain case with a default and no
+        # overlapping item carries one.
+        overlap = any(re.match(r"\s*2'd\d+, 2'd", i) for i in items)
+        promise_holds = kind == "case" and has_default and not overlap
+        if self.p(0.5) and promise_holds and not ctx["seq"]:
             attr = self.ch(("(* full_case *) ", "(* parallel_case *) ",
                             "(* full_case, parallel_case *) "))
         return f"{' ' * ind}{attr}{kind} ({sel})\n" + "\n".join(items) + f"\n{' ' * ind}endcase"

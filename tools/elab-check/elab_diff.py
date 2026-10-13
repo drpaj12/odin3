@@ -17,8 +17,14 @@ at the top of its block, so no latch or x source differs between the two sides).
 - Exit 3 is an ``oracle crash`` (Yosys died of a signal, for example 0.55's segfault on a
   recursive instantiation where 2D must still give its recursion error): counted and shown,
   never a failure by itself. Exit 77 is a skip.
-- A seed with a crash or a skip is ``unverified``. The run fails (exit 1) when more than 10% of
-  its seeds are unverified, or when all of them are.
+- An ``UNDECIDED`` verdict (ABC's ``dsec`` could not decide the miter, which ``elab-equiv``
+  reports as exit 2 with no verdict line) is no verdict either: listed as ``undecided`` and
+  ``unverified``, never a failure.
+- ``--expect-fail FILE`` lists seeds known not equivalent (``N: reason`` per line, ``#`` comments):
+  such a seed that fails is ``expected failure`` (counted, not a failure) and one that passes is
+  a failure (``unexpectedly passes``: delete its line). It keeps a found bug in the loop.
+- A seed with a crash, a skip or an undecided verdict is ``unverified``. The run fails (exit 1)
+  when more than 10% of its seeds are unverified, or when all of them are.
 - ``--yosys-069 Y2`` (the nightly drift job): a seed that Yosys 0.55 passes runs again with
   ``--yosys Y2 --allow-version 0.69``; a difference there is ``oracle drift``, reported and
   counted, never a failure. A 0.55 failure is a failure whatever 0.69 says.
@@ -57,6 +63,7 @@ TOP = "gtop"  # every generated module
 CHILD_TIMEOUT_S = 1800
 MAX_UNVERIFIED = 0.10
 DRIFT_VERSION = "0.69"
+UNDECIDED_RE = re.compile(r"Networks are UNDECIDED")
 _RANGE = re.compile(r"(\d+)\.\.(\d+)")
 _SIZE = re.compile(r"(\d+)([KMG]?)")
 _UNITS = {"": 1, "K": 1 << 10, "M": 1 << 20, "G": GIB}
@@ -74,6 +81,7 @@ class Config:
     yosys_069: str | None
     cap: int
     work: Path
+    expect_fail: dict[int, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -83,6 +91,9 @@ class SeedResult:
     drift: list[str] = field(default_factory=list)
     crashes: list[str] = field(default_factory=list)
     skips: list[str] = field(default_factory=list)
+    undecided: list[str] = field(default_factory=list)
+    xfail: str | None = None  # the reason, for a seed in --expect-fail that failed
+    xpass: bool = False  # a seed in --expect-fail that passed
     detail: list[str] = field(default_factory=list)
 
 
@@ -150,6 +161,8 @@ def run_seed(cfg: Config, seed: int, profile: ModuleType) -> tuple[SeedResult, P
         result.crashes.append("oracle: " + (tail(out) or ["oracle crash"])[-1])
     elif code == EXIT_SKIP:
         result.skips.append("bridge")
+    elif code == EXIT_USAGE and UNDECIDED_RE.search(out):
+        result.undecided.append("equiv-check: Networks are UNDECIDED")
     elif code != EXIT_OK:
         result.failures.append(f"elab-equiv: exit {code}")
         result.detail += tail(out)
@@ -162,9 +175,36 @@ def run_seed(cfg: Config, seed: int, profile: ModuleType) -> tuple[SeedResult, P
     return result, source
 
 
+def parse_expect_fail(path: Path) -> dict[int, str]:
+    """``N: reason`` lines of an --expect-fail file (``#`` comments, blank lines skipped)."""
+    seeds: dict[int, str] = {}
+    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        head, _, reason = line.partition(":")
+        if not head.strip().isdigit():
+            raise DiffError(f"{path}:{number}: expected 'SEED: reason', got {raw!r}")
+        seeds[int(head)] = reason.strip() or "no reason given"
+    return seeds
+
+
+def apply_expected(cfg: Config, result: SeedResult) -> None:
+    """Turns a listed seed's failure into an expected one, and its pass into a failure."""
+    if result.seed not in cfg.expect_fail:
+        return
+    reason = cfg.expect_fail[result.seed]
+    if result.failures:
+        result.xfail = reason
+        result.failures = []
+    elif not unverified(result):
+        result.xpass = True
+        result.failures.append(f"unexpectedly passes (listed: {reason}); remove it from the list")
+
+
 def unverified(result: SeedResult) -> bool:
-    """True when an oracle crash or a skip left the seed unchecked."""
-    return bool(result.crashes or result.skips)
+    """True when an oracle crash, a skip or an undecided verdict left the seed unchecked."""
+    return bool(result.crashes or result.skips or result.undecided)
 
 
 def too_many_unverified(count: int, total: int) -> bool:
@@ -180,7 +220,10 @@ def report(result: SeedResult, source: Path) -> None:
         return
     notes = [*(f"oracle drift: {d}" for d in result.drift),
              *(f"oracle crash: {c}" for c in result.crashes),
+             *(f"undecided: {u}" for u in result.undecided),
              *(f"skipped: {s}" for s in result.skips)]
+    if result.xfail is not None:
+        notes.append(f"expected failure: {result.xfail}")
     print(f"seed {result.seed}: {'; '.join(notes) if notes else 'ok'}")
 
 
@@ -192,6 +235,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--seeds", required=True, metavar="A..B", help="the seeds, e.g. 1..200")
     ap.add_argument("--yosys-069", metavar="Y2", help="also run with this Yosys 0.69; a "
                     "disagreement is oracle drift")
+    ap.add_argument("--expect-fail", type=Path, metavar="FILE",
+                    help="seeds known not equivalent ('N: reason' lines)")
     ap.add_argument("--mem-cap", type=parse_size, default=DEFAULT_CAP, help="per child (2G)")
     ap.add_argument("--work", type=Path, help="keep every seed's files here (default: a new "
                     "directory under the temporary one)")
@@ -203,25 +248,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = parse_args(sys.argv[1:] if argv is None else argv)
         seeds = parse_seeds(args.seeds)
         profile = load_profile()
-    except DiffError as exc:
+        expect = parse_expect_fail(args.expect_fail) if args.expect_fail else {}
+    except (DiffError, OSError) as exc:
         print(f"{TOOL}: {exc}", file=sys.stderr)
         return EXIT_USAGE
     except SystemExit as exc:  # argparse's usage error
         return exc.code if isinstance(exc.code, int) else EXIT_USAGE
     work = args.work or Path(tempfile.mkdtemp(prefix="elab-diff-"))
     cfg = Config(odin3=args.odin3, yosys=args.yosys, equiv_check=args.equiv_check,
-                 yosys_069=args.yosys_069, cap=args.mem_cap, work=work.resolve())
+                 yosys_069=args.yosys_069, cap=args.mem_cap, work=work.resolve(),
+                 expect_fail=expect)
     print(f"{TOOL}: seeds {args.seeds}, files under {cfg.work}")
-    failed = drifted = crashed = unproven = 0
+    failed = drifted = crashed = unproven = expected = 0
     for seed in seeds:
         result, source = run_seed(cfg, seed, profile)
+        apply_expected(cfg, result)
         report(result, source)
+        expected += result.xfail is not None
         failed += bool(result.failures)
         drifted += bool(result.drift)
         crashed += bool(result.crashes)
         unproven += unverified(result)
     print(f"{TOOL}: {len(seeds)} seeds, {len(seeds) - failed} not failed, {failed} failed, "
-          f"{drifted} oracle drift, {crashed} oracle crashes, {unproven} unverified")
+          f"{drifted} oracle drift, {crashed} oracle crashes, {expected} expected failures, "
+          f"{unproven} unverified")
     if too_many_unverified(unproven, len(seeds)) and not failed:
         print(f"{TOOL}: FAIL: {unproven} of {len(seeds)} seeds unverified (an oracle crash or a "
               f"skip; the limit is {MAX_UNVERIFIED:.0%}, and never all)")
