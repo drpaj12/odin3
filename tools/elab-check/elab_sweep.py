@@ -349,6 +349,16 @@ def run_bench(cfg: Config, item: Item, cap: int) -> Outcome:
     return Outcome("fail", secs, child_why(done, cap))
 
 
+def lock_fds() -> tuple[int, ...]:
+    """The heavy lock's descriptor when open (tools/heavy-run holds it), for elab-equiv to pass
+    on to its own memcap children."""
+    try:
+        os.fstat(memcap.LOCK_FD)
+    except OSError:
+        return ()
+    return (memcap.LOCK_FD,)
+
+
 def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
     start = time.monotonic()
     assert cfg.yosys is not None and cfg.equiv_check is not None
@@ -358,7 +368,7 @@ def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
             *(["--top", top] if top else []), str(item.path)]
     try:  # elab-equiv caps each of its own children
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
-                              timeout=TIMEOUT_S, check=False)
+                              timeout=TIMEOUT_S, check=False, pass_fds=lock_fds())
     except subprocess.TimeoutExpired:
         return Outcome("fail", time.monotonic() - start, f"timed out after {TIMEOUT_S} s")
     secs = time.monotonic() - start
