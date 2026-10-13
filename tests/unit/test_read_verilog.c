@@ -669,6 +669,8 @@ static odin3_status oom_step(const oom_case *oc, int limit) {
     odin3_status st = run("read_verilog", oc->args);
     odin3_util_set_alloc_fail_after(-1);
     TEST_ASSERT_TRUE_MESSAGE(st == oc->want || st == ODIN3_ERR_NO_MEMORY, logged());
+    /* an allocation failure is never reported as a missing file */
+    TEST_ASSERT_NULL_MESSAGE(strstr(logged(), "missing_file:"), logged());
     TEST_ASSERT_EQUAL_UINT32(st == ODIN3_OK ? 1 : 0, odin3_design_ast_count(design));
     return st;
 }
