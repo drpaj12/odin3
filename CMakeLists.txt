@@ -607,9 +607,11 @@ if(BUILD_TESTING)
     # 2F Task 3: opt_clean.
     odin3_add_unit_test(test_opt_clean)
     target_sources(test_opt_clean PRIVATE tests/unit/proc_build.c)
-    # 2F Task 4: the opt pass registrations, options, the call wrapper (Task 13 extends it).
+    # 2F Task 4: the opt pass registrations, options, the call wrapper; Task 13: the opt driver.
     odin3_add_unit_test(test_opt_loop)
     target_sources(test_opt_loop PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_loop PRIVATE
+        ODIN3_LOOP_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/loop")
     # 2F Task 8: opt_merge.
     odin3_add_unit_test(test_opt_cse)
     target_sources(test_opt_cse PRIVATE tests/unit/proc_build.c)

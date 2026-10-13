@@ -3,16 +3,13 @@ module \m
   wire input 2 \d
   attribute \init 1'1
   wire output 3 \q
-  wire \
-
+  wire \n
   cell $not \inv
     connect \A \c
-    connect \Y \
-
+    connect \Y \n
   end
   cell $dff \ff
-    connect \CLK \
-
+    connect \CLK \n
     connect \D \d
     connect \Q \q
   end

@@ -77,6 +77,7 @@ void tearDown(void) {
     odin3_budget_test_set_limit(0);
     (void)odin3_pass_set_opt_snapshot(NULL);
     odin3_opt_test_set_hooks(NULL);
+    odin3_opt_test_set_limits(NULL);
     pb_free(&res);
     odin3_log_set_sink(NULL, NULL);
 }
@@ -581,6 +582,259 @@ static void test_stats_dff(void) {
     check_full();
 }
 
+/* --- the opt driver (Task 13): loop, dirty set, cap, compact, opacity, budget -------------------
+ */
+
+/* y = s ? (s ? a : b) : c: the inner mux's A port is dead, the only rewrite opt has to make. */
+#define NESTED_TEXT                                                                                \
+    "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire input 3 \\c\n  wire input 4 \\s\n" \
+    "  wire output 5 \\y\n  wire \\t\n"                                                            \
+    "  cell $mux \\inner\n    parameter \\WIDTH 1\n    connect \\A \\b\n    connect \\B \\a\n"     \
+    "    connect \\S \\s\n    connect \\Y \\t\n  end\n"                                            \
+    "  cell $mux \\outer\n    parameter \\WIDTH 1\n    connect \\A \\c\n    connect \\B \\t\n"     \
+    "    connect \\S \\s\n    connect \\Y \\y\n  end\nend\n"
+
+/* A constant 3-stage register pipeline: one stage becomes constant per opt_dff call. */
+#define PIPELINE_TEXT                                                                              \
+    "module \\m\n  wire input 1 \\clk\n  wire output 2 \\q1\n  wire output 3 \\q2\n"               \
+    "  wire output 4 \\q3\n"                                                                       \
+    "  cell $dff \\f1\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D 1'0\n    connect \\Q \\q1\n  end\n"                  \
+    "  cell $dff \\f2\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D \\q1\n    connect \\Q \\q2\n  end\n"                 \
+    "  cell $dff \\f3\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D \\q2\n    connect \\Q \\q3\n  end\nend\n"
+
+enum { SEQ_LEN = 2048 };
+static char seq[SEQ_LEN];
+
+static void on_seq(void *user, const char *sub) {
+    (void)user;
+    size_t len = strlen(seq);
+    int wrote = snprintf(seq + len, sizeof seq - len, "%s%s", len == 0 ? "" : " ", sub);
+    TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof seq - len);
+}
+
+static void record_calls(void) {
+    seq[0] = '\0';
+    odin3_opt_test_hooks hooks = {on_seq, NULL};
+    odin3_opt_test_set_hooks(&hooks);
+}
+
+#define ITER_DEFAULT " opt_muxtree opt_reduce opt_merge opt_dff opt_clean opt_expr"
+
+static void test_loop_sequences_default(void) {
+    build(NESTED_TEXT);
+    record_calls();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    TEST_ASSERT_EQUAL_STRING("opt_expr opt_merge" ITER_DEFAULT ITER_DEFAULT, seq);
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: fixed point after 2 iterations"));
+    check_full();
+}
+
+static void test_loop_sequences_noff(void) {
+    build(NESTED_TEXT);
+    record_calls();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-noff"));
+    TEST_ASSERT_EQUAL_STRING("opt_expr opt_merge"
+                             " opt_muxtree opt_reduce opt_merge opt_clean opt_expr"
+                             " opt_muxtree opt_reduce opt_merge opt_clean opt_expr",
+                             seq);
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: fixed point after 2 iterations"));
+}
+
+/* opt_share (Task 14) is still a stub: the sequence up to its first call, and the full one once it
+ * runs. */
+static void test_loop_sequences_full(void) {
+    build(NESTED_TEXT);
+    record_calls();
+    odin3_status st = run_pass("opt", "-full");
+    static const char k_head[] = "opt_expr opt_merge opt_muxtree opt_reduce opt_merge opt_share";
+    TEST_ASSERT_EQUAL_INT(0, strncmp(seq, k_head, sizeof k_head - 1U));
+    if (st == ODIN3_OK) {
+        TEST_ASSERT_EQUAL_STRING(
+            "opt_expr opt_merge"
+            " opt_muxtree opt_reduce opt_merge opt_share opt_dff opt_clean opt_expr"
+            " opt_muxtree opt_reduce opt_merge opt_share opt_dff opt_clean opt_expr",
+            seq);
+    } else {
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, st);
+        TEST_ASSERT_EQUAL_UINT32(1,
+                                 count_lines(ODIN3_LOG_ERROR, "opt_share: not available yet (2F)"));
+    }
+    check_full();
+}
+
+static void test_loop_sequences_fast(void) {
+    build(NESTED_TEXT);
+    record_calls();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-fast"));
+    TEST_ASSERT_EQUAL_STRING("opt_expr opt_merge opt_dff opt_clean", seq);
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: -fast: done after 1 iterations"));
+    seq[0] = '\0';
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-fast -noff"));
+    TEST_ASSERT_EQUAL_STRING("opt_expr opt_merge opt_clean", seq);
+    check_full();
+}
+
+/* The text of the design (write_rtlil), malloc'd. */
+static char *design_text(void) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_rtlil_text(res.design, &text));
+    char *copy = malloc(text.len + 1U);
+    TEST_ASSERT_NOT_NULL(copy);
+    memcpy(copy, text.data, text.len + 1U);
+    odin3_strbuf_free(&text);
+    return copy;
+}
+
+static void expect_pipeline_constant(void) {
+    char *text = design_text();
+    TEST_ASSERT_NULL(strstr(text, "cell $dff"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "connect \\q1 1'0"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "connect \\q2 1'0"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "connect \\q3 1'0"));
+    free(text);
+}
+
+/* Review Focus 4: one stage becomes constant per opt_dff call, so three stages take four
+ * iterations (the last one finds nothing). */
+static void test_loop_pipeline_iterations(void) {
+    build(PIPELINE_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: fixed point after 4 iterations"));
+    expect_pipeline_constant();
+    check_full();
+}
+
+static void test_loop_cap(void) {
+    build(PIPELINE_TEXT);
+    odin3_opt_limits limits = {2, ODIN3_OPT_MUXTREE_MAX_EVALS};
+    odin3_opt_test_set_limits(&limits);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_WARN,
+                       "opt: module 'm': no fixed point after 2 iterations; stopping"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_prefix("opt: fixed point"));
+    check_full();
+    /* the same cap in -fast mode */
+    pb_free(&res);
+    setUp();
+    build(PIPELINE_TEXT);
+    odin3_opt_test_set_limits(&limits);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-fast"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_WARN,
+                       "opt: module 'm': no fixed point after 2 iterations; stopping"));
+    check_full();
+}
+
+/* The twenty inputs of the dirty-set comparison (tests/unit/data/opt/loop): the module of one
+ * test of each of the rule families (opt_expr, opt_merge, opt_reduce, opt_muxtree, opt_dff). */
+static const char *const k_loop_cases[] = {
+    "const_and",
+    "and_bit_inverse",
+    "bitwise_and_x",
+    "bitwise_xor_x",
+    "eqneq_resize",
+    "constshift",
+    "mul_low_zeros",
+    "mux_undef",
+    "fine_group",
+    "clkinv_dff",
+    "cse_cascade",
+    "cse_pmux_pairs",
+    "reduce_inline",
+    "pmux_equal_slices",
+    "muxtree_nested_same_sel",
+    "dff_srst_merge",
+    "dff_en_then_srst",
+    "dff_feedback_patterns",
+    "dff_constbits_one_stage",
+    "share_same_type",
+};
+
+enum { N_LOOP_CASES = sizeof k_loop_cases / sizeof k_loop_cases[0] };
+
+/* The case's file, built into res, run with args, and its write_rtlil text (malloc'd). */
+static char *run_case(const char *name, const char *args) {
+    char path[PATH_LEN];
+    int len = snprintf(path, sizeof path, "%s/%s.il", ODIN3_LOOP_DATA, name);
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof path);
+    char *input = slurp(path);
+    pb_free(&res);
+    n_lines = 0;
+    odin3_status built = pb_build(input, &res);
+    free(input);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, built, n_lines > 0 ? lines[0].text : name);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_pass("opt", args), name);
+    check_full();
+    return design_text();
+}
+
+/* Internal risk 4: the dirty set is exact. opt_expr's Debug build also sweeps the module in full
+ * after each incremental call and aborts when that finds more to do. */
+static void test_dirty_vs_full_rescan(void) {
+    static const char *const k_args[] = {"", "-mux_undef -mux_bool -undriven -fine", "-keepdc"};
+    for (size_t a = 0; a < sizeof k_args / sizeof k_args[0]; a++) {
+        for (size_t i = 0; i < N_LOOP_CASES; i++) {
+            char *incremental = run_case(k_loop_cases[i], k_args[a]);
+            char full_args[128];
+            int len = snprintf(full_args, sizeof full_args, "%s --opt-full-rescan", k_args[a]);
+            TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof full_args);
+            char *rescan = run_case(k_loop_cases[i], full_args);
+            TEST_ASSERT_EQUAL_STRING_MESSAGE(incremental, rescan, k_loop_cases[i]);
+            free(incremental);
+            free(rescan);
+        }
+    }
+}
+
+/*
+ * What the dirty set exists for: opt_merge makes the two $not cells one, and only then can
+ * opt_expr see that the $mux's two data inputs are the same net (mux_same). The $mux is in no
+ * place opt_expr's second call would look at by itself.
+ */
+#define CHAIN_TEXT                                                                                 \
+    "module \\m\n  wire input 1 \\a\n  wire input 2 \\s\n  wire output 3 \\y\n"                    \
+    "  wire \\n1\n  wire \\n2\n"                                                                   \
+    "  cell $not \\i1\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"                    \
+    "    parameter \\Y_WIDTH 1\n    connect \\A \\a\n    connect \\Y \\n1\n  end\n"                \
+    "  cell $not \\i2\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"                    \
+    "    parameter \\Y_WIDTH 1\n    connect \\A \\a\n    connect \\Y \\n2\n  end\n"                \
+    "  cell $mux \\mx\n    parameter \\WIDTH 1\n    connect \\A \\n1\n    connect \\B \\n2\n"      \
+    "    connect \\S \\s\n    connect \\Y \\y\n  end\nend\n"
+
+static void test_dirty_chain(void) {
+    build(CHAIN_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    char *text = design_text();
+    TEST_ASSERT_NULL(strstr(text, "cell $mux"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "cell $not"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: fixed point after 2 iterations"));
+    free(text);
+    check_full();
+    pb_free(&res);
+    build(CHAIN_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "--opt-full-rescan"));
+    char *rescan = design_text();
+    TEST_ASSERT_NULL(strstr(rescan, "cell $mux"));
+    free(rescan);
+}
+
+/* Two runs, byte-identical write_rtlil; and the reverse creation order of the nodes gives the
+ * same netlist (compared as a sorted list of the cells' types, a stand-in for netlist-compare). */
+static void test_determinism(void) {
+    for (size_t i = 0; i < N_LOOP_CASES; i++) {
+        char *first = run_case(k_loop_cases[i], "");
+        char *second = run_case(k_loop_cases[i], "");
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(first, second, k_loop_cases[i]);
+        free(first);
+        free(second);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parse_opts);
@@ -598,5 +852,14 @@ int main(void) {
     RUN_TEST(test_stats);
     RUN_TEST(test_stats_expr);
     RUN_TEST(test_stats_dff);
+    RUN_TEST(test_loop_sequences_default);
+    RUN_TEST(test_loop_sequences_noff);
+    RUN_TEST(test_loop_sequences_full);
+    RUN_TEST(test_loop_sequences_fast);
+    RUN_TEST(test_loop_pipeline_iterations);
+    RUN_TEST(test_loop_cap);
+    RUN_TEST(test_dirty_vs_full_rescan);
+    RUN_TEST(test_dirty_chain);
+    RUN_TEST(test_determinism);
     return UNITY_END();
 }
