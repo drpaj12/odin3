@@ -444,7 +444,7 @@ static odin3_status mem_resolve(odin3_elab2 *e2, uint32_t index, const odin3_mem
                                 const mem_keys *keys) {
     odin3_elab_mem *mem = odin3_elab2_mem_at(e2, index);
     const odin3_symbol *rec = odin3_symbol_get(e2->st, mem->sym);
-    if (e2->opts.nomem2reg) {
+    if (e2->mod_nomem2reg) {
         mem_conflict(e2, mem, fact);
         return ODIN3_OK;
     }

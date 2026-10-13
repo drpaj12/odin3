@@ -34,6 +34,7 @@
 #include "util/vec.h"
 
 #include <inttypes.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -146,9 +147,10 @@ static bool w_room(e1w *wr, odin3_ast_id from) {
 }
 
 typedef struct w_attrs_of {
-    odin3_ast_id from; /* the parsed node whose attributes are written */
-    odin3_ast_id made; /* the elaborated node they are attached to */
-    odin3_ast_id then; /* a second parsed node merged in after from's (0: none); it wins a name */
+    odin3_ast_id from;  /* the parsed node whose attributes are written */
+    odin3_ast_id made;  /* the elaborated node they are attached to */
+    odin3_ast_id then;  /* a second parsed node merged in after from's (0: none); it wins a name */
+    uint8_t unit_flags; /* the MODULE of a --lib unit: its ODIN3_UNIT_* become attributes (EL-4) */
 } w_attrs_of;
 
 static void w_attach_attrs(e1w *wr, const w_attrs_of *at);
@@ -189,18 +191,29 @@ static odin3_ast_id w_number(e1w *wr, const odin3_ast_number *num, odin3_ast_spe
     return w_make_marked(wr, spec, odin3_ast_mark(wr->out), from);
 }
 
-/* A STRING value as a STRING node's spec (the empty string: EMPTY, no name). */
-static odin3_status string_spec(odin3_elab1 *e1, odin3_arena *arena, const odin3_cval *val,
-                                odin3_ast_spec *spec) {
-    odin3_bytes bytes = {NULL, 0};
-    odin3_status st = odin3_cval_string_bytes(arena, val, &bytes);
-    spec->kind = ODIN3_AST_STRING;
-    if (st == ODIN3_OK && bytes.len == 0) {
-        spec->flags = ODIN3_AST_F_STRING_EMPTY;
-    } else if (st == ODIN3_OK) {
-        st = odin3_ast_intern(e1->elab, bytes, &spec->name);
+/* The bytes of a STRING value that a STRING node can hold: whole known bytes, none of them NUL
+ * (a NUL byte cannot be a name; the empty string is EMPTY). A string that was widened (`n == 0 ?
+ * "MULT" : "FMA"` is 32 bits, its leading byte NUL) is a number: the same bits. */
+static bool string_leaf_bytes(odin3_arena *arena, const odin3_cval *val, odin3_bytes *bytes) {
+    *bytes = (odin3_bytes){NULL, 0};
+    if (val == NULL || (val->flags & ODIN3_CVAL_STRING) == 0 || val->width % CHAR_BIT != 0 ||
+        !odin3_cval_is_known(val)) {
+        return false;
     }
-    return st;
+    if (odin3_cval_string_bytes(arena, val, bytes) != ODIN3_OK) {
+        return false;
+    }
+    return bytes->len == 0 || memchr(bytes->ptr, '\0', bytes->len) == NULL;
+}
+
+/* A STRING value as a STRING node's spec (the empty string: EMPTY, no name). */
+static odin3_status string_spec(odin3_elab1 *e1, odin3_bytes bytes, odin3_ast_spec *spec) {
+    spec->kind = ODIN3_AST_STRING;
+    if (bytes.len == 0) {
+        spec->flags = ODIN3_AST_F_STRING_EMPTY;
+        return ODIN3_OK;
+    }
+    return odin3_ast_intern(e1->elab, bytes, &spec->name);
 }
 
 /* A NUMBER's spec and payload for a value (point (bb)), or num in the integer form. */
@@ -232,9 +245,9 @@ odin3_status odin3_elab1_make_leaf(odin3_elab1 *e1, odin3_arena *arena,
     }
     odin3_ast_spec spec = {.loc = odin3_ast_loc(e1->parsed, leaf->from).v,
                            .end = odin3_ast_end(e1->parsed, leaf->from).v};
-    bool string = leaf->val != NULL && (leaf->val->flags & ODIN3_CVAL_STRING) != 0;
-    odin3_status st =
-        string ? string_spec(e1, arena, leaf->val, &spec) : number_spec(e1, arena, leaf, &spec);
+    odin3_bytes bytes;
+    bool string = string_leaf_bytes(arena, leaf->val, &bytes);
+    odin3_status st = string ? string_spec(e1, bytes, &spec) : number_spec(e1, arena, leaf, &spec);
     return st != ODIN3_OK ? st : odin3_ast_make(e1->elab, &spec, NULL, 0, out);
 }
 
@@ -308,30 +321,94 @@ static bool w_has_attr(const e1w *wr, odin3_ast_id node, uint32_t name) {
     return false;
 }
 
+/* The attributes a --lib unit's MODULE carries beside its own (EL-4, spec 3.1a): the marker says
+ * "elaborate under my flags, not the run's"; the others are those flags. */
+static const struct {
+    const char *name;
+    unsigned bit;
+} k_unit_attrs[] = {{"odin3_lib", ODIN3_UNIT_LIB},
+                    {"odin3_lib_nolatches", ODIN3_UNIT_NOLATCHES},
+                    {"odin3_lib_nomem2reg", ODIN3_UNIT_NOMEM2REG}};
+enum { W_UNIT_ATTRS = 3, W_ATTR_MSG = 160 };
+
+/* A value-less ATTR named text on made. */
+static odin3_ast_id w_flag_attr(e1w *wr, odin3_ast_id made, const char *text) {
+    odin3_ast_spec spec = {.kind = ODIN3_AST_ATTR,
+                           .loc = odin3_ast_loc(wr->out, made).v,
+                           .end = odin3_ast_end(wr->out, made).v};
+    const odin3_ast_id none = {0};
+    odin3_ast_id attr = {0};
+    odin3_status st = odin3_ast_intern(wr->out, odin3_bytes_cstr(text), &spec.name);
+    st = st != ODIN3_OK ? st : odin3_ast_make(wr->out, &spec, &none, 1, &attr);
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+    }
+    return attr;
+}
+
+/* The unit-flag attributes of at into ids[0 ..); how many. */
+static uint32_t w_unit_attrs(e1w *wr, const w_attrs_of *at, odin3_ast_id *ids) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; at->unit_flags != 0 && i < W_UNIT_ATTRS && live(wr); i++) {
+        if ((at->unit_flags & k_unit_attrs[i].bit) != 0) {
+            ids[count] = w_flag_attr(wr, at->made, k_unit_attrs[i].name);
+            count += ids[count].v != 0 ? 1U : 0U;
+        }
+    }
+    return count;
+}
+
+/* A user attribute named like the markers of a --lib unit (`odin3_lib*`) would pick the flags stage
+ * 2 elaborates a module under (PR 2D-7b review M1): dropped, with a warning. */
+static bool w_reserved_attr(e1w *wr, odin3_ast_id attr) {
+    const char *name = odin3_elab1_str(wr->env->e1, odin3_ast_name(wr->ast, attr));
+    static const char k_prefix[] = "odin3_lib";
+    if (strncmp(name, k_prefix, sizeof k_prefix - 1U) != 0) {
+        return false;
+    }
+    char text[W_ATTR_MSG];
+    (void)snprintf(text, sizeof text, "attribute '%s' is reserved for library reads; ignored",
+                   name);
+    odin3_elab1_report(wr->env->e1, ODIN3_LOG_WARN, odin3_ast_loc(wr->ast, attr), text);
+    return true;
+}
+
 /* The attributes of the parsed node from (then those of at->then, which win a name both give),
- * evaluated and attached to the elaborated node made. */
-static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
-    odin3_ast_span first = odin3_ast_attrs(wr->ast, at->from);
-    odin3_ast_span second = odin3_ast_attrs(wr->ast, at->then);
-    if (first.n + second.n == 0 || at->made.v == 0 || !live(wr)) {
-        return;
-    }
-    odin3_ast_id *ids =
-        odin3_arena_alloc(wr->env->arena, ((size_t)first.n + second.n) * sizeof *ids);
-    if (ids == NULL) {
-        fail(wr, ODIN3_ERR_NO_MEMORY);
-        return;
-    }
+ * evaluated and attached to the elaborated node made, then the unit-flag attributes. */
+/* The attributes of first and second (the later wins a name both give) evaluated into ids;
+ * how many were made. */
+static uint32_t w_copy_attrs(e1w *wr, const w_attrs_of *at, odin3_ast_span first,
+                             odin3_ast_span second, odin3_ast_id *ids) {
     uint32_t count = 0;
     for (uint32_t i = 0; i < first.n + second.n && live(wr); i++) {
         odin3_ast_id attr = i < first.n ? first.ids[i] : second.ids[i - first.n];
+        if (w_reserved_attr(wr, attr)) {
+            continue;
+        }
         if (i < first.n && w_has_attr(wr, at->then, odin3_ast_name(wr->ast, attr))) {
             continue; /* the later declaration's value wins */
         }
         ids[count] = w_attr_one(wr, attr);
         count += ids[count].v != 0 ? 1U : 0U;
     }
-    if (!live(wr)) {
+    return count;
+}
+
+static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
+    odin3_ast_span first = odin3_ast_attrs(wr->ast, at->from);
+    odin3_ast_span second = odin3_ast_attrs(wr->ast, at->then);
+    if ((first.n + second.n == 0 && at->unit_flags == 0) || at->made.v == 0 || !live(wr)) {
+        return;
+    }
+    odin3_ast_id *ids = odin3_arena_alloc(
+        wr->env->arena, ((size_t)first.n + second.n + W_UNIT_ATTRS) * sizeof *ids);
+    if (ids == NULL) {
+        fail(wr, ODIN3_ERR_NO_MEMORY);
+        return;
+    }
+    uint32_t count = w_copy_attrs(wr, at, first, second, ids);
+    count += w_unit_attrs(wr, at, ids + count);
+    if (!live(wr) || count == 0) { /* every attribute was a dropped reserved odin3_lib* one */
         return;
     }
     odin3_status st = odin3_ast_attach(wr->out, at->made, ids, count);
@@ -1675,16 +1752,41 @@ static void w_close_block(e1w *wr, const e1w_frame *frame) {
 
 /* --- the module ----------------------------------------------------------------------------- */
 
-/* ALWAYS and INITIAL: the statement tree copied (T6: an always without an event control is
- * rejected). */
-static odin3_ast_id w_process(e1w *wr, odin3_ast_id item) {
+/* T6 (accepted): an `always` whose statement is not led by an event control (none at all, or a
+ * delay, which is dropped as T11) is written as `always @*`: ALWAYS(TIMING_STMT(EVENT_CONTROL
+ * star, body)), the one form IR-checked ALWAYS nodes have. */
+static odin3_ast_id w_always_star(e1w *wr, odin3_ast_id item, odin3_ast_id first) {
+    uint32_t outer = w_mark(wr);
+    uint32_t inner = w_mark(wr);
+    odin3_ast_id from = first.v != 0 ? first : item;
+    odin3_ast_spec control = spec_of(wr, ODIN3_AST_EVENT_CONTROL, from);
+    control.flags = ODIN3_AST_F_EVENT_CONTROL_STAR;
+    w_push(wr, (odin3_ast_id){0}); /* the control's optional expression slot */
+    w_push(wr, w_make_plain(wr, &control, inner, from));
+    w_push(wr, first.v != 0 ? w_expr(wr, first) : w_null_make(wr, item));
+    odin3_ast_spec timing = spec_of(wr, ODIN3_AST_TIMING_STMT, from);
+    w_push(wr, w_make_plain(wr, &timing, inner, from));
+    odin3_ast_spec always = spec_of(wr, ODIN3_AST_ALWAYS, item);
+    always.sub = (uint8_t)odin3_ast_sub(wr->ast, item);
+    always.name = odin3_ast_name(wr->ast, item);
+    return w_make_marked(wr, &always, outer, item);
+}
+
+/* Whether an ALWAYS (the plain `always` keyword) lacks an event control (T6). */
+static bool always_untimed(const e1w *wr, odin3_ast_id item) {
     odin3_ast_id first = odin3_ast_child(wr->ast, item, 0);
-    if (odin3_ast_kind_of(wr->ast, item) == ODIN3_AST_ALWAYS &&
-        odin3_ast_sub(wr->ast, item) == ODIN3_AST_ALWAYS_ALWAYS && first.v != 0 &&
-        odin3_ast_kind_of(wr->ast, first) != ODIN3_AST_TIMING_STMT) {
-        (void)odin3_elab1_reject(wr->e1, item); /* T6 */
-        halt(wr);
-        return (odin3_ast_id){0};
+    return odin3_ast_kind_of(wr->ast, item) == ODIN3_AST_ALWAYS &&
+           odin3_ast_sub(wr->ast, item) == ODIN3_AST_ALWAYS_ALWAYS &&
+           !(first.v != 0 && odin3_ast_kind_of(wr->ast, first) == ODIN3_AST_TIMING_STMT &&
+             odin3_ast_kind_of(wr->ast, odin3_ast_child(wr->ast, first, 0)) ==
+                 ODIN3_AST_EVENT_CONTROL);
+}
+
+/* ALWAYS and INITIAL: the statement tree copied (T6: an always without an event control is
+ * written as `always @*`, the warning being the scan's). */
+static odin3_ast_id w_process(e1w *wr, odin3_ast_id item) {
+    if (always_untimed(wr, item)) {
+        return w_always_star(wr, item, odin3_ast_child(wr->ast, item, 0));
     }
     wr->in_initial = odin3_ast_kind_of(wr->ast, item) == ODIN3_AST_INITIAL;
     odin3_ast_id made = w_expr(wr, item);
@@ -1939,7 +2041,12 @@ static odin3_ast_id w_module(e1w *wr) {
     w_body(wr, node);
     odin3_ast_spec spec = spec_of(wr, ODIN3_AST_MODULE, node);
     spec.name = wr->spec->name;
-    return w_make_marked(wr, &spec, mark, node);
+    odin3_ast_id made = w_make_plain(wr, &spec, mark, node);
+    w_attach_attrs(wr,
+                   &(w_attrs_of){.from = node,
+                                 .made = made,
+                                 .unit_flags = odin3_elab1_def(wr->e1, wr->spec->def)->unit_flags});
+    return made;
 }
 
 odin3_status odin3_elab1_write(odin3_elab1 *e1, uint32_t spec) {

@@ -55,6 +55,7 @@ void odin3_elab2_drive_free(odin3_elab2 *e2) {
     odin3_vec_free(&dr->abits);
     odin3_vec_free(&dr->wbits);
     odin3_vec_free(&dr->loops);
+    odin3_vec_free(&dr->tribufs);
     odin3_u64map_destroy(dr->claims);
     odin3_u64map_destroy(dr->uwires);
     odin3_u64map_destroy(dr->fwd);
@@ -84,6 +85,7 @@ struct odin3_elab2_drive *odin3_elab2_drive_tables(odin3_elab2 *e2) {
     odin3_vec_init(&dr->abits, sizeof(uint8_t));
     odin3_vec_init(&dr->wbits, sizeof(uint8_t));
     odin3_vec_init(&dr->loops, sizeof(odin3_elab2_loop_note));
+    odin3_vec_init(&dr->tribufs, sizeof(odin3_elab2_tri_rec));
     dr->claims = odin3_u64map_create(0);
     dr->uwires = odin3_u64map_create(0);
     dr->fwd = odin3_u64map_create(0);
@@ -172,8 +174,7 @@ typedef enum claim_code {
     CC_OK,
     CC_A4,
     CC_UWIRE,
-    CC_INOUT_LOGIC, /* an inout pin and ordinary logic on one net */
-    CC_D3           /* a tri-state driver where D3 does not allow one */
+    CC_INOUT_LOGIC /* an inout pin and ordinary logic on one net */
 } claim_code;
 
 /* One claim being checked: the request, the tables and what the first conflict was. */
@@ -242,27 +243,8 @@ odin3_status odin3_elab2_claim_put(struct odin3_elab2_drive *dr, odin3_wirebit w
         (odin3_kv){claim_key(wb), ((uint64_t)entry.kind << CLAIM_KIND_SHIFT) | entry.node.v});
 }
 
-/* True when the net is on a $port_out or $port_inout of the module (a top-level D3 port). */
-static bool on_output_port(const odin3_elab2 *e2, odin3_net_id net) {
-    odin3_pinlist pins = odin3_net_pins(e2->mod, net);
-    for (uint32_t i = 0; i < pins.count; i++) {
-        odin3_node_id node = odin3_pin_node(e2->mod, pins.pins[i]);
-        const odin3_celltype_def *def =
-            odin3_celltype_get(e2->design, odin3_node_type(e2->mod, node));
-        if (def != NULL && def->gran == ODIN3_GRAN_PORT && strcmp(def->name, "$port_in") != 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* The port and the node's name of an inout pin. */
-typedef struct inout_pin {
-    const char *port, *instance;
-} inout_pin;
-
 /* The inout pin of a child instance on the net; false for none. */
-static bool child_inout(const odin3_elab2 *e2, odin3_net_id net, inout_pin *out) {
+static bool child_inout(const odin3_elab2 *e2, odin3_net_id net, odin3_elab2_inout_pin *out) {
     odin3_pinlist pins = odin3_net_pins(e2->mod, net);
     for (uint32_t i = 0; i < pins.count; i++) {
         if (odin3_pin_dir(e2->mod, pins.pins[i]) != ODIN3_DIR_INOUT) {
@@ -282,13 +264,49 @@ static bool child_inout(const odin3_elab2 *e2, odin3_net_id net, inout_pin *out)
     return false;
 }
 
+/* The port of the module a net is on: 2 an inout, 1 an output, 0 none (an input is no tri-state
+ * place). */
+static int port_class(const odin3_elab2 *e2, odin3_net_id net) {
+    odin3_pinlist pins = odin3_net_pins(e2->mod, net);
+    int found = 0;
+    for (uint32_t i = 0; i < pins.count; i++) {
+        odin3_node_id node = odin3_pin_node(e2->mod, pins.pins[i]);
+        const odin3_celltype_def *def =
+            odin3_celltype_get(e2->design, odin3_node_type(e2->mod, node));
+        if (def == NULL || def->gran != ODIN3_GRAN_PORT) {
+            continue;
+        }
+        if (strcmp(def->name, "$port_inout") == 0) {
+            return 2;
+        }
+        found = strcmp(def->name, "$port_in") != 0 ? 1 : found;
+    }
+    return found;
+}
+
+odin3_tri_net odin3_elab2_tri_net(const odin3_elab2 *e2, odin3_net_id net,
+                                  odin3_elab2_inout_pin *pin) {
+    const struct odin3_elab2_drive *dr = e2->drive;
+    int port = port_class(e2, net);
+    if (port != 0 && dr->is_top) {
+        return ODIN3_TRI_NET_PORT;
+    }
+    if (port == 2) {
+        return ODIN3_TRI_NET_BELOW_TOP_INOUT;
+    }
+    if (port == 1) {
+        return ODIN3_TRI_NET_BELOW_TOP_OUT;
+    }
+    return child_inout(e2, net, pin) ? ODIN3_TRI_NET_CHILD_INOUT : ODIN3_TRI_NET_INTERNAL;
+}
+
 /* What a previous driver of a bit means for the new one (CC_OK: they share). */
 static claim_code against(const claim_run *run, odin3_drv prev, odin3_wirebit wb,
                           odin3_net_id net) {
     if (prev.kind == ODIN3_DRV_NONE || shares(prev, run->kind)) {
         return CC_OK;
     }
-    inout_pin pin = {NULL, NULL};
+    odin3_elab2_inout_pin pin = {NULL, NULL};
     bool child = child_inout(run->e2, net, &pin);
     if (run->kind == ODIN3_DRV_INOUT_PIN && is_logic(prev.kind)) {
         return CC_INOUT_LOGIC;
@@ -340,9 +358,6 @@ static claim_code check_bit(claim_run *run, uint32_t bit, odin3_status *st) {
     odin3_net_id net = run->nets[bit];
     if (net.v == 0 || odin3_elab2_info_get(run->dr, net).wrec != 0) {
         return CC_OK;
-    }
-    if (run->kind == ODIN3_DRV_TRIBUF && (!run->dr->is_top || !on_output_port(run->e2, net))) {
-        return CC_D3;
     }
     claim_code code = run->n > 1 ? check_dup(run, bit, st) : CC_OK;
     return code != CC_OK || *st != ODIN3_OK ? code : check_prev(run, bit);
@@ -404,12 +419,6 @@ static void claim_emit(claim_run *run, odin3_loc loc, const claim_text *tx) {
                           tx->label, tx->port != NULL ? tx->port : "?",
                           tx->instance != NULL ? tx->instance : "?", tx->place);
         break;
-    case CC_D3:
-        odin3_elab2_error(e2, loc,
-                          "tri-state driver on '%s' is supported only on a top-level output or "
-                          "inout port (D3)",
-                          tx->label);
-        break;
     default:
         if (run->kind == ODIN3_DRV_PROCESS && run->prev.kind == ODIN3_DRV_PROCESS) { /* T10 */
             odin3_elab2_error(e2, loc, "'%s' is assigned in two always blocks (also at %s)",
@@ -456,7 +465,7 @@ static odin3_status claim_report(claim_run *run) {
                          pos.data != NULL ? pos.data : "a constant", run->port, run->instance,
                          other.v == 0};
         if (run->code == CC_INOUT_LOGIC && run->kind != ODIN3_DRV_INOUT_PIN) {
-            inout_pin pin = {tx.port, tx.instance};
+            odin3_elab2_inout_pin pin = {tx.port, tx.instance};
             (void)child_inout(e2, run->nets[run->at], &pin);
             tx.port = pin.port;
             tx.instance = pin.instance;

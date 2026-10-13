@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# const-diff: random constant expressions, odin3_cval_op against Yosys 0.55. See const_diff.py.
+# Exit codes: 0 all agree, 1 any differs or Yosys fails, 2 usage or setup error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/const_diff.py" "$@"

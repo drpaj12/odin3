@@ -1,0 +1,4 @@
+# Seeds of `verilog_gen.py --elab` that elab-diff finds not equivalent to Yosys 0.55 because of a
+# known 2D bug (elab_gen_vs_yosys, --expect-fail). One `SEED: reason` per line. A listed seed that
+# passes is a failure: delete its line when the bug is fixed. The generator's output is a
+# function of the seed, so changing tools/verilog-gen/elab_profile.py invalidates this list.

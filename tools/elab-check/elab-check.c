@@ -222,7 +222,7 @@ static odin3_status run_stage1(const ec_args *args, const char *name, ec_result 
         intern(res->design, name), intern(res->design, resolved), intern(res->design, "work"), {0}};
     odin3_status st = odin3_pass_run_begin(res->design, intern(res->design, "read_verilog"), &ctx);
     odin3_ast *parsed = NULL;
-    odin3_rv_opts ropts = {&src, 1, ctx.run, NULL};
+    odin3_rv_opts ropts = {&src, 1, ctx.run, NULL, false};
     st = st != ODIN3_OK ? st : odin3_read_verilog_files(res->design, &ropts, &parsed);
     odin3_elab_opts opts;
     st = st != ODIN3_OK ? st : odin3_elab1_options(res->design, &(odin3_elab_opts){0}, &opts);

@@ -569,12 +569,12 @@ static void test_pending_forced_kind(void) {
     TEST_ASSERT_NULL(rs.elab); /* destroyed: no check ever sees an unhandled kind */
 }
 
-/* Before Task 15 an always block is pending. */
+/* T6 (accepted since 2D-7b): an always without an event control is read with a warning. */
 static void test_pending_always(void) {
-    run_one("t.v", "module t;\n  reg r;\n  always r = 1;\nendmodule\n"); /* T6 (Task 16) */
-    et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:3:3: error: always block without an event control is not supported");
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
+    run_one("t.v", "module t;\n  reg r;\n  always r = 1;\nendmodule\n");
+    et_expect(&rs, ODIN3_LOG_WARN,
+              "t.v:3:3: warning: always without an event control treated as always @*");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rs.status);
 }
 
 /* A kind stage 1 handles, forced pending: its line replaces it (the table is consulted). */

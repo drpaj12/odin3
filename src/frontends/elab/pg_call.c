@@ -11,14 +11,26 @@
  * actuals are generated in the caller's context first; the inputs are assigned to the formals by
  * blocking assignment, the body runs in the same builder (so `if`, `case` and loops inside work),
  * and for a task each `output`/`inout` formal is copied to its actual. A function's value is
- * `rv(result)`. A call as a statement (a task enable) nests on the statement stack, but a call in
- * an expression does not: the expression walker reaches it through pg_call_hook and the body is
- * run by a nested pg_run, so one call inside another costs C stack (pg_run -> exec_node ->
- * assign_value -> odin3_elab2_expr -> pg_call_hook -> odin3_pg_call -> call_inline -> pg_run).
- * That is a known deviation from the no-recursion rule (PR 2D-6 review I6; plan ledger, hoist
- * planned for 2D-7): recursion is rejected and the nesting is capped at the lower of
- * ODIN3_ELAB_MAX_INLINE_DEPTH (256) and ODIN3_ELAB_MAX_CALL_DEPTH, a located error, so the stack
- * cannot overflow (about 2 KiB of C stack a level in Release, more under ASan).
+ * `rv(result)`.
+ *
+ * No call is run from inside an expression walk (PR 2D-7, review I6; the no-recursion rule): the
+ * walker is suspendable (odin3_elab2_walk), the statement code that needs a value pushes a
+ * PG_F_GEN frame for it (pg_gen_push), and when the walk meets a call the frame loop pushes a
+ * PG_F_CALL frame above it. The call frame is a small state machine (the callee's checks, the
+ * actuals, each a PG_F_GEN frame of its own, the frame's wires and the binding, the body as an
+ * ordinary statement frame, then the copy-out and the value); when it ends the walk is resumed
+ * with the value. Everything runs in the order the nested calls used to: the same cells, nets and
+ * names. One call inside another costs a few heap records, never C stack. An assignment's value,
+ * an if's condition and a call's actuals go this way, as does a task enable.
+ *
+ * What still runs a call by C recursion (odin3_pg_call: pg_call_hook from a plain
+ * odin3_elab2_expr) is an expression the statement code needs whole before it can go on: a case
+ * selector or item, an index of a select, a memory word or a register-array word, the lvalue of a
+ * copy-out, and the actuals of a call in a continuous context (odin3_pg_comb_call: `assign y =
+ * f(f(a))`, review M9). Those nest by C stack, so they are capped at PG_SYNC_NEST_MAX levels (a
+ * located error).
+ * The call nesting as a whole (ODIN3_ELAB_MAX_INLINE_DEPTH, ODIN3_ELAB_MAX_CALL_DEPTH) is a
+ * resource cap on the heap records, not on the stack. Recursion is rejected.
  *
  * A call met outside a process builds a combinational `$proc` of its own (one ALWAYS sync) whose
  * output is the result variable's wire; a register-array word with a variable index is a case over
@@ -39,6 +51,7 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -46,26 +59,8 @@
 enum { FN_PORTS = 1, FN_BODY = 3, TASK_PORTS = 0, TASK_BODY = 2 };
 enum { SIGN_BITS = 63, GROUP_SHIFT = 32 };
 
-/* The callee as the inliner sees it. */
-typedef struct call_info {
-    odin3_ast_id call, decl, ports, body;
-    bool is_task;
-    const char *name;
-} call_info;
-
-/* One formal: its symbol and direction (an odin3_ast_direction). */
-typedef struct formal {
-    odin3_sym_id sym;
-    uint8_t dir;
-} formal;
-
-typedef struct call_run {
-    odin3_pg *pg;
-    call_info info;
-    formal *formals;
-    odin3_sig *args; /* the actual of each input formal, generated */
-    uint32_t n;
-} call_run;
+/* A nested sync call (odin3_pg_call) is C recursion: its depth is capped. */
+enum { PG_SYNC_NEST_MAX = 128 };
 
 /* --- the callee ------------------------------------------------------------------------------- */
 
@@ -78,7 +73,7 @@ static uint32_t count_formals(const odin3_ast *ast, odin3_ast_id ports) {
     return total;
 }
 
-static odin3_status info_make(odin3_pg *pg, odin3_ast_id call, call_info *info) {
+static odin3_status info_make(odin3_pg *pg, odin3_ast_id call, pg_cinfo *info) {
     odin3_elab2 *e2 = pg->e2;
     const odin3_ast *ast = e2->elab;
     odin3_status st = odin3_elab2_callee(e2, call, &info->decl);
@@ -119,7 +114,7 @@ static bool uses_while(const odin3_elab2 *e2, odin3_ast_id body) {
 }
 
 /* The refusals of point (aa): a body only the interpreter runs, recursion, the nesting cap. */
-static odin3_status info_check(odin3_pg *pg, const call_info *info) {
+static odin3_status info_check(odin3_pg *pg, const pg_cinfo *info) {
     odin3_elab2 *e2 = pg->e2;
     odin3_loc loc = odin3_ast_loc(e2->elab, info->call);
     if (!info->is_task && uses_while(e2, info->body)) {
@@ -136,8 +131,7 @@ static odin3_status info_check(odin3_pg *pg, const call_info *info) {
                           info->name);
         return ODIN3_ERR_PARSE;
     }
-    /* an expression call is inlined by C recursion (see the header), so the depth that bounds the
-     * stack is the lower of the two caps */
+    /* a resource cap on the heap records of the nesting (not on the stack: see the header) */
     uint32_t cap = e2->limits->max_call_depth < e2->limits->max_inline_depth
                        ? e2->limits->max_call_depth
                        : e2->limits->max_inline_depth;
@@ -149,7 +143,7 @@ static odin3_status info_check(odin3_pg *pg, const call_info *info) {
 }
 
 /* The formals in order (a ports LIST of PORT_DECLs, each with its DECLARATORs after the range). */
-static odin3_status formals_make(call_run *cr) {
+static odin3_status formals_make(pg_crun *cr) {
     const odin3_ast *ast = cr->pg->e2->elab;
     cr->n = count_formals(ast, cr->info.ports);
     cr->formals = odin3_arena_alloc(cr->pg->e2->scratch, (cr->n + 1U) * sizeof *cr->formals);
@@ -162,7 +156,7 @@ static odin3_status formals_make(call_run *cr) {
         odin3_ast_id port = odin3_ast_child(ast, cr->info.ports, k);
         for (uint32_t j = 1; j < odin3_ast_nchild(ast, port); j++) {
             odin3_sym_id sym = odin3_elab_sym_of(&cr->pg->e2->bind, odin3_ast_child(ast, port, j));
-            cr->formals[at++] = (formal){sym, (uint8_t)odin3_ast_sub(ast, port)};
+            cr->formals[at++] = (pg_cformal){sym, (uint8_t)odin3_ast_sub(ast, port)};
         }
     }
     return ODIN3_OK;
@@ -193,6 +187,16 @@ static odin3_status frame_note(odin3_pg *pg, odin3_sym_id id) {
     return ODIN3_OK;
 }
 
+/* The wire is noted, so the module's end can delete it when nothing used it. */
+static odin3_status fwire_note(odin3_pg *pg, odin3_wire_id wire) {
+    pg_fwire *rec = odin3_vec_push(&pg->fwires);
+    if (rec == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *rec = (pg_fwire){pg->e2->mod_id, wire};
+    return ODIN3_OK;
+}
+
 /* The unnamed wire of one symbol of the callee. */
 static odin3_status frame_wire(odin3_pg *pg, odin3_sym_id id) {
     odin3_elab2 *e2 = pg->e2;
@@ -210,6 +214,7 @@ static odin3_status frame_wire(odin3_pg *pg, odin3_sym_id id) {
     odin3_status st = odin3_elab2_reserve_nets(e2, width, odin3_ast_loc(e2->elab, req.node));
     st = st != ODIN3_OK ? st : odin3_elab2_prov(e2, &req, &spec.prov);
     st = st != ODIN3_OK ? st : odin3_wire_create(e2->mod, &spec, NULL, &wire);
+    st = st != ODIN3_OK ? st : fwire_note(pg, wire);
     st = st != ODIN3_OK ? st : frame_note(pg, id);
     odin3_elab2_counts made = {0, 0, width, 1};
     st = st != ODIN3_OK ? st : odin3_symbol_set_ir(e2->st, id, e2->mod_id, wire);
@@ -274,7 +279,7 @@ void pg_frames_unwind(odin3_pg *pg) {
     pg->e2->call = (odin3_ast_id){0};
 }
 
-static odin3_status frame_enter(call_run *cr) {
+static odin3_status frame_enter(pg_crun *cr) {
     odin3_pg *pg = cr->pg;
     pg_callrec *rec = odin3_vec_push(&pg->calls);
     if (rec == NULL) {
@@ -339,7 +344,7 @@ static odin3_status read_wire(odin3_pg *pg, odin3_wire_id wire, bool is_signed, 
     return st;
 }
 
-static const odin3_symbol *formal_rec(const call_run *cr, uint32_t index) {
+static const odin3_symbol *formal_rec(const pg_crun *cr, uint32_t index) {
     return odin3_symbol_get(cr->pg->e2->st, cr->formals[index].sym);
 }
 
@@ -351,7 +356,7 @@ static bool is_lvalue_kind(odin3_ast_kind kind) {
 /* The actuals: an input's expression generated in the caller's context as an assignment to its
  * formal (K1); an output's must be a variable (K9). reads is the caller's hook, NULL outside a
  * process. */
-static odin3_status call_args(call_run *cr, const odin3_elab2_reads *reads) {
+static odin3_status call_args(pg_crun *cr, const odin3_elab2_reads *reads) {
     odin3_elab2 *e2 = cr->pg->e2;
     for (uint32_t i = 0; i < cr->n; i++) {
         odin3_ast_id actual = odin3_ast_child(e2->elab, cr->info.call, i);
@@ -381,7 +386,7 @@ static odin3_status call_args(call_run *cr, const odin3_elab2_reads *reads) {
 }
 
 /* The inputs and inouts are assigned to their formals' wires (blocking). */
-static odin3_status call_bind(call_run *cr) {
+static odin3_status call_bind(pg_crun *cr) {
     for (uint32_t i = 0; i < cr->n; i++) {
         if (cr->formals[i].dir == ODIN3_AST_PORT_DECL_OUTPUT) {
             continue;
@@ -397,7 +402,7 @@ static odin3_status call_bind(call_run *cr) {
 }
 
 /* A task's output or inout formal copied to its actual by blocking assignment (K9). */
-static odin3_status copy_out(call_run *cr, uint32_t index) {
+static odin3_status copy_out(pg_crun *cr, uint32_t index) {
     odin3_pg *pg = cr->pg;
     odin3_ast_id actual = odin3_ast_child(pg->e2->elab, cr->info.call, index);
     const odin3_symbol *rec = formal_rec(cr, index);
@@ -416,7 +421,7 @@ static odin3_status copy_out(call_run *cr, uint32_t index) {
     return st != ODIN3_OK ? st : odin3_pg_assign(pg, &req);
 }
 
-static odin3_status call_copy_out(call_run *cr) {
+static odin3_status call_copy_out(pg_crun *cr) {
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < cr->n; i++) {
         if (cr->formals[i].dir != ODIN3_AST_PORT_DECL_INPUT) {
@@ -428,7 +433,7 @@ static odin3_status call_copy_out(call_run *cr) {
 
 /* The body, in the frame: its switch targets are found (the scan of a call's body), then it runs.
  */
-static odin3_status call_body(call_run *cr) {
+static odin3_status call_body(pg_crun *cr) {
     odin3_pg *pg = cr->pg;
     if (cr->info.body.v == 0) {
         return ODIN3_OK;
@@ -438,7 +443,7 @@ static odin3_status call_body(call_run *cr) {
 }
 
 /* The function's value: its result variable's current value. */
-static odin3_status call_value(call_run *cr, odin3_sig *out) {
+static odin3_status call_value(pg_crun *cr, odin3_sig *out) {
     odin3_sym_id sym = {0};
     const odin3_symbol *res = odin3_elab2_fn_result(cr->pg->e2, cr->info.decl, &sym);
     if (res == NULL) {
@@ -447,40 +452,287 @@ static odin3_status call_value(call_run *cr, odin3_sig *out) {
     return read_wire(cr->pg, res->ir_wire, (res->flags & ODIN3_SYM_F_SIGNED) != 0, out);
 }
 
-/* --- a call in a process ---------------------------------------------------------------------- */
+/* --- the frame wires nothing used ------------------------------------------------------------- */
 
-static odin3_status call_inline(call_run *cr, odin3_sig *result) {
-    odin3_pg *pg = cr->pg;
-    odin3_elab2_reads reads = pg_reads(pg);
-    odin3_status st = info_make(pg, cr->info.call, &cr->info);
-    st = st != ODIN3_OK ? st : info_check(pg, &cr->info);
-    st = st != ODIN3_OK ? st : formals_make(cr);
-    st = st != ODIN3_OK ? st : call_args(cr, &reads);
-    st = st != ODIN3_OK ? st : frame_enter(cr);
-    st = st != ODIN3_OK ? st : call_bind(cr);
-    st = st != ODIN3_OK ? st : call_body(cr);
-    st = st != ODIN3_OK ? st : call_copy_out(cr);
-    if (st == ODIN3_OK && !cr->info.is_task && result != NULL) {
-        st = call_value(cr, result);
+/* Whether no net of the wire has a pin. */
+static bool wire_pinless(const odin3_module *mod, odin3_wire_id wire) {
+    uint32_t width = odin3_wire_width(mod, wire);
+    for (uint32_t bit = 0; bit < width; bit++) {
+        odin3_net_id net = odin3_wire_net(mod, wire, bit);
+        if (odin3_net_driver_count(mod, net) != 0 || odin3_net_sinks(mod, net).count != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The wire and its nets are deleted. */
+static odin3_status wire_drop(odin3_module *mod, odin3_wire_id wire) {
+    uint32_t width = odin3_wire_width(mod, wire);
+    odin3_status st = odin3_wire_delete(mod, wire);
+    for (uint32_t bit = 0; st == ODIN3_OK && bit < width; bit++) {
+        st = odin3_net_delete(mod, odin3_wire_net(mod, wire, bit));
     }
     return st;
 }
 
-/* Runs fn on a call with a scratch lvalue (an expression's calls must not disturb the target the
- * statement that holds them has taken apart), and always leaves the frame. */
-static odin3_status call_guarded(odin3_pg *pg, odin3_ast_id call, odin3_sig *result) {
-    odin3_elab2_lvalue saved = pg->lvs;
-    odin3_elab2_lvalue_init(&pg->lvs);
-    pg->lvs.procedural = true;
-    size_t depth = pg->calls.len;
-    call_run cr = {.pg = pg};
-    cr.info.call = call;
-    odin3_status st = call_inline(&cr, result);
-    while (pg->calls.len > depth) {
+/* A callee variable nothing assigns or reads (an unused local) leaves its frame wire pinless; the
+ * wire is no declared signal of the design but an internal temporary, so it is deleted when the
+ * module is done (PR 2D-7: a leaked net, `rule 4: net has no pins`). Named wires are never touched.
+ */
+odin3_status odin3_elab2_sweep_frames(odin3_elab2 *e2) {
+    odin3_pg *pg = e2->pg;
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; pg != NULL && st == ODIN3_OK && i < pg->fwires.len; i++) {
+        const pg_fwire *rec = odin3_vec_cat(&pg->fwires, i);
+        if (rec->mod.v == e2->mod_id.v && odin3_wire_live(e2->mod, rec->wire) &&
+            wire_pinless(e2->mod, rec->wire)) {
+            st = wire_drop(e2->mod, rec->wire);
+        }
+    }
+    if (pg != NULL) {
+        odin3_vec_clear(&pg->fwires);
+    }
+    return st;
+}
+
+/* --- a call in a process: the PG_F_CALL frame --------------------------------------------------
+ */
+
+enum { CP_START = 0, CP_ARGS = 1, CP_AFTER = 2 };
+
+/* The innermost call frame's record (a PG_F_CALL frame is on top, or its actuals' frames are
+ * above it and done). */
+static pg_crun *crun_top(const odin3_pg *pg) {
+    return *(pg_crun *const *)odin3_vec_cat(&pg->cruns, pg->cruns.len - 1);
+}
+
+/* Gives the call back: its frames' symbols, the statement's target, its record. */
+static void call_unwind(odin3_pg *pg) {
+    const pg_crun *cr = crun_top(pg);
+    while (pg->calls.len > cr->depth) {
         frame_exit(pg);
     }
     odin3_elab2_lvalue_free(&pg->lvs);
-    pg->lvs = saved;
+    pg->lvs = cr->saved_lvs;
+    odin3_vec_pop(&pg->cruns);
+}
+
+/* Pushes the call's frame. The call runs with a scratch lvalue: an expression's calls must not
+ * disturb the target the statement that holds them has taken apart (it is put back at the end). */
+static odin3_status call_push(odin3_pg *pg, odin3_ast_id call, bool from_walk) {
+    pg_crun *cr = odin3_arena_alloc(pg->e2->scratch, sizeof *cr);
+    pg_crun **slot = cr != NULL ? (pg_crun **)odin3_vec_push(&pg->cruns) : NULL;
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *cr = (pg_crun){.pg = pg, .depth = pg->calls.len, .from_walk = from_walk};
+    cr->info.call = call;
+    cr->saved_lvs = pg->lvs;
+    odin3_elab2_lvalue_init(&pg->lvs);
+    pg->lvs.procedural = true;
+    *slot = cr;
+    pg_frame frame = {PG_F_CALL, call, CP_START, 0, 0, 0};
+    odin3_status st = pg_frame_push(pg, &frame);
+    if (st != ODIN3_OK) {
+        call_unwind(pg);
+    }
+    return st;
+}
+
+/* The callee's checks and its formals. */
+static odin3_status call_start(pg_crun *cr) {
+    odin3_status st = info_make(cr->pg, cr->info.call, &cr->info);
+    st = st != ODIN3_OK ? st : info_check(cr->pg, &cr->info);
+    return st != ODIN3_OK ? st : formals_make(cr);
+}
+
+/* The next input actual (K1; an output's must be a variable, K9): its PG_F_GEN frame is pushed and
+ * *waiting set; none left: the actuals are all generated. */
+static odin3_status call_args_next(pg_crun *cr, bool *waiting) {
+    odin3_pg *pg = cr->pg;
+    odin3_elab2 *e2 = pg->e2;
+    pg_frame *frame = odin3_vec_at(&pg->frames, pg->frames.len - 1);
+    *waiting = false;
+    while (frame->end < cr->n) {
+        uint32_t i = frame->end++;
+        odin3_ast_id actual = odin3_ast_child(e2->elab, cr->info.call, i);
+        const odin3_symbol *rec = formal_rec(cr, i);
+        if (cr->formals[i].dir != ODIN3_AST_PORT_DECL_INPUT &&
+            !is_lvalue_kind(odin3_ast_kind_of(e2->elab, actual))) {
+            odin3_elab2_error(e2, odin3_ast_loc(e2->elab, actual),
+                              "output argument %u of task '%s' must be a variable", i + 1U,
+                              cr->info.name);
+            return ODIN3_ERR_PARSE;
+        }
+        if (cr->formals[i].dir == ODIN3_AST_PORT_DECL_OUTPUT) {
+            continue;
+        }
+        uint32_t width = rec->has_packed ? (uint32_t)odin3_elab2_dim_size(&rec->packed) : 1U;
+        pg_gen_req req = {actual, cr->info.call, {width, true, false}, PG_G_ARG, i};
+        *waiting = true;
+        return pg_gen_push(pg, &req);
+    }
+    return ODIN3_OK;
+}
+
+/* The frame's wires, the actuals bound to the formals, the body's statement pushed. */
+static odin3_status call_enter(pg_crun *cr) {
+    odin3_pg *pg = cr->pg;
+    odin3_status st = frame_enter(cr);
+    st = st != ODIN3_OK ? st : call_bind(cr);
+    if (st != ODIN3_OK || cr->info.body.v == 0) {
+        return st;
+    }
+    st = pg_scan_call(pg, cr->info.body);
+    pg_frame body = {PG_F_STMT, cr->info.body, 0, 0, 0, 0};
+    return st != ODIN3_OK ? st : pg_frame_push(pg, &body);
+}
+
+/* The body is done: the outputs copied out, the value read, the call given back, the walk that
+ * waits for the value resumed. */
+static odin3_status call_after(pg_crun *cr) {
+    odin3_pg *pg = cr->pg;
+    odin3_status st = call_copy_out(cr);
+    st = st != ODIN3_OK || cr->info.is_task ? st : call_value(cr, &pg->call_sig);
+    bool resume = cr->from_walk;
+    call_unwind(pg);
+    odin3_vec_pop(&pg->frames);
+    if (st == ODIN3_OK && resume) {
+        odin3_elab2_walk *walk = odin3_vec_at(&pg->walks, pg->walks.len - 1);
+        st = odin3_elab2_walk_resume(pg->e2, walk, &pg->call_sig);
+    }
+    return st;
+}
+
+odin3_status pg_call_step(odin3_pg *pg) {
+    pg_crun *cr = crun_top(pg);
+    pg_frame *frame = odin3_vec_at(&pg->frames, pg->frames.len - 1);
+    odin3_status st = ODIN3_OK;
+    if (frame->next == CP_START) {
+        frame->next = CP_ARGS;
+        st = call_start(cr);
+    }
+    if (st != ODIN3_OK || frame->next == CP_AFTER) {
+        return st != ODIN3_OK ? st : call_after(cr);
+    }
+    bool waiting = false;
+    st = call_args_next(cr, &waiting);
+    if (st != ODIN3_OK || waiting) {
+        return st;
+    }
+    frame = odin3_vec_at(&pg->frames, pg->frames.len - 1);
+    frame->next = CP_AFTER;
+    return call_enter(cr);
+}
+
+/* --- an expression whose calls run from the frame stack ----------------------------------------
+ */
+
+odin3_status pg_gen_push(odin3_pg *pg, const pg_gen_req *req) {
+    pg->hooks = pg_reads(pg);
+    odin3_elab2_expr_req expr = {req->expr, req->context, NULL, &pg->hooks};
+    odin3_elab2_walk *walk = odin3_vec_push(&pg->walks);
+    if (walk == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = odin3_elab2_walk_begin(pg->e2, &expr, walk);
+    if (st != ODIN3_OK) {
+        odin3_vec_pop(&pg->walks);
+        return st;
+    }
+    pg_frame frame = {PG_F_GEN, req->node, req->cont, req->aux, 0, 0};
+    st = pg_frame_push(pg, &frame);
+    if (st != ODIN3_OK) {
+        odin3_elab2_walk_abort(pg->e2, walk);
+        odin3_vec_pop(&pg->walks);
+    }
+    return st;
+}
+
+/* An actual is generated: it is extended to its formal's width and kept. */
+static odin3_status gen_arg(odin3_pg *pg, uint32_t index) {
+    pg_crun *cr = crun_top(pg);
+    odin3_sig *arg = &cr->args[index];
+    const odin3_symbol *rec = formal_rec(cr, index);
+    uint32_t width = rec->has_packed ? (uint32_t)odin3_elab2_dim_size(&rec->packed) : 1U;
+    *arg = pg->gen_sig;
+    return odin3_elab2_extend(pg->e2, arg, width, arg->is_signed, arg);
+}
+
+/* What runs once the value is in pg->gen_sig; the frame is already popped. */
+static odin3_status gen_done(odin3_pg *pg, const pg_frame *frame) {
+    switch (frame->next) {
+    case PG_G_ASSIGN:
+        return pg_assign_done(pg, frame->node, frame->end);
+    case PG_G_IF:
+        return pg_if_done(pg, frame->node);
+    default:
+        return gen_arg(pg, frame->end);
+    }
+}
+
+odin3_status pg_gen_step(odin3_pg *pg) {
+    /* `walk` points into pg->walks across the run. That is safe only because nothing reached from
+     * inside a walk pushes a walk: a call suspends it and the word hook takes indices computed
+     * beforehand (review M4). */
+    odin3_elab2_walk *walk = odin3_vec_at(&pg->walks, pg->walks.len - 1);
+    size_t walks = pg->walks.len;
+    (void)walks; /* only the assert reads it */
+    odin3_status st = odin3_elab2_walk_run(pg->e2, walk);
+    assert(pg->walks.len == walks);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (walk->call.v != 0) {
+        return call_push(pg, walk->call, true);
+    }
+    pg_frame frame = *(const pg_frame *)odin3_vec_cat(&pg->frames, pg->frames.len - 1);
+    odin3_elab2_walk_take(pg->e2, walk, &pg->gen_sig);
+    odin3_vec_pop(&pg->walks);
+    odin3_vec_pop(&pg->frames);
+    return gen_done(pg, &frame);
+}
+
+void pg_frame_abort(odin3_pg *pg, const pg_frame *frame) {
+    if (frame->kind == PG_F_GEN) {
+        odin3_elab2_walk_abort(pg->e2, odin3_vec_at(&pg->walks, pg->walks.len - 1));
+        odin3_vec_pop(&pg->walks);
+    } else if (frame->kind == PG_F_CALL) {
+        call_unwind(pg);
+    }
+}
+
+/* --- the entries --------------------------------------------------------------------------------
+ */
+
+/* One more level of C-recursive call nesting (a nested frame loop, or a call in a call's actuals
+ * in a continuous context), or the located resource error at the cap; sync_leave undoes it. */
+static odin3_status sync_enter(odin3_pg *pg, odin3_ast_id call) {
+    if (pg->cdepth >= PG_SYNC_NEST_MAX) {
+        odin3_elab2_fatal(pg->e2, odin3_ast_loc(pg->e2->elab, call),
+                          "function call nesting deeper than %u at '%s'",
+                          (unsigned)PG_SYNC_NEST_MAX, odin3_ast_name_str(pg->e2->elab, call));
+        return ODIN3_ERR_PARSE;
+    }
+    pg->cdepth++;
+    return ODIN3_OK;
+}
+
+/* A call run whole before it returns, by a nested frame loop (C recursion, capped). */
+static odin3_status call_sync(odin3_pg *pg, odin3_ast_id call, odin3_sig *result) {
+    odin3_status st = sync_enter(pg, call);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    size_t base = pg->frames.len;
+    st = call_push(pg, call, false);
+    st = st != ODIN3_OK ? st : pg_drive(pg, base);
+    pg->cdepth--;
+    if (st == ODIN3_OK && result != NULL) {
+        st = pg->e2->stopped ? ODIN3_ERR_PARSE : ODIN3_OK; /* stopped: there is no value */
+        *result = pg->call_sig;
+    }
     return st;
 }
 
@@ -494,14 +746,14 @@ odin3_status odin3_pg_call(odin3_pg *pg, odin3_ast_id call, odin3_sig *result) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_pg_call: a function call needs a result");
         return ODIN3_ERR_INVALID_ARG;
     }
-    return call_guarded(pg, call, result);
+    return call_sync(pg, call, result);
 }
 
 odin3_status pg_task_call(odin3_pg *pg, odin3_ast_id call) {
     if ((odin3_ast_flags(pg->e2->elab, call) & ODIN3_AST_F_CALL_SYSTEM) != 0) {
         return ODIN3_OK; /* the $display family was removed by stage 1 (S3) */
     }
-    return odin3_pg_call(pg, call, NULL);
+    return call_push(pg, call, false);
 }
 
 odin3_status pg_call_hook(void *user, odin3_ast_id call, odin3_sig *out) {
@@ -545,7 +797,7 @@ static odin3_status wire_sig(odin3_elab2 *e2, odin3_wire_id wire, bool is_signed
     return st;
 }
 
-static odin3_status comb_run(call_run *cr, odin3_sig *result) {
+static odin3_status comb_run(pg_crun *cr, odin3_sig *result) {
     odin3_pg *pg = cr->pg;
     odin3_elab2 *e2 = pg->e2;
     odin3_status st = comb_block(pg, cr->info.call);
@@ -569,22 +821,37 @@ static odin3_status comb_run(call_run *cr, odin3_sig *result) {
     return st != ODIN3_OK ? st : wire_sig(e2, wire, (res->flags & ODIN3_SYM_F_SIGNED) != 0, result);
 }
 
+/* The call's block on a builder of its own: the open block (an edge event's expression being
+ * generated while its ALWAYS is built) is put aside and brought back, never cleared (I7). */
+static odin3_status comb_nested(pg_crun *cr, odin3_sig *result) {
+    odin3_pg *pg = cr->pg;
+    pg_saved saved;
+    odin3_status st = pg_block_save(pg, &saved);
+    st = st != ODIN3_OK ? st : comb_run(cr, result);
+    while (pg->calls.len > 0) {
+        frame_exit(pg);
+    }
+    pg_block_restore(pg, &saved);
+    return st;
+}
+
 odin3_status odin3_pg_comb_call(odin3_pg *pg, odin3_ast_id call, odin3_sig *result) {
     if (odin3_ast_kind_of(pg->e2->elab, call) != ODIN3_AST_CALL || result == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_pg_comb_call: not a CALL, or no result");
         return ODIN3_ERR_INVALID_ARG;
     }
-    call_run cr = {.pg = pg};
+    pg_crun cr = {.pg = pg};
     cr.info.call = call;
     odin3_status st = info_make(pg, call, &cr.info);
     st = st != ODIN3_OK ? st : info_check(pg, &cr.info);
     st = st != ODIN3_OK ? st : formals_make(&cr);
-    st = st != ODIN3_OK ? st : call_args(&cr, NULL);
-    st = st != ODIN3_OK ? st : comb_run(&cr, result);
-    while (pg->calls.len > 0) {
-        frame_exit(pg);
+    st = st != ODIN3_OK ? st : sync_enter(pg, call); /* the actuals nest calls by C stack (M9) */
+    if (st != ODIN3_OK) {
+        return st;
     }
-    return st;
+    st = call_args(&cr, NULL);
+    pg->cdepth--;
+    return st != ODIN3_OK ? st : comb_nested(&cr, result);
 }
 
 odin3_status odin3_elab2_comb_call(odin3_elab2 *e2, odin3_ast_id call, odin3_sig *out) {
@@ -742,7 +1009,9 @@ odin3_status pg_regs_apply(odin3_pg *pg, const odin3_pg_assign_req *req) {
     odin3_elab2_reads reads = pg_reads(pg);
     odin3_elab2_expr_req ireq = {regs.index, {0, false, false}, NULL, &reads};
     odin3_sig idx;
+    pg_mem_ref wref = {regs.mem, NULL, req->stmt, req->blocking};
     odin3_status st = pg_check_mixed(pg, &mixed);
+    st = st != ODIN3_OK ? st : pg_mem_check_mixed(pg, &wref);
     st = st != ODIN3_OK ? st : odin3_elab2_expr(pg->e2, &ireq, &idx);
     size_t count = pg->lvs.nets.len;
     odin3_sigbit *targets =
@@ -796,7 +1065,13 @@ odin3_status odin3_elab2_comb_word(odin3_elab2 *e2, const odin3_elab2_regs_rd *r
     odin3_wire_id wire = {0};
     odin3_status st = odin3_elab2_pg_get(e2, &pg);
     st = st != ODIN3_OK ? st : word_wire(e2, rd, &wire);
+    pg_saved saved;
+    bool saving = st == ODIN3_OK;
+    st = saving ? pg_block_save(pg, &saved) : st; /* the open block is put aside (I7) */
     st = st != ODIN3_OK ? st : word_block(pg, rd, wire);
+    if (saving) {
+        pg_block_restore(pg, &saved);
+    }
     return st != ODIN3_OK ? st
                           : wire_sig(e2, wire, odin3_elab2_mem_get(e2, rd->mem)->is_signed, out);
 }

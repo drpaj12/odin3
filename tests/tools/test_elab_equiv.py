@@ -148,7 +148,8 @@ class BridgeTest(unittest.TestCase):
     # -- the command strings ---------------------------------------------------------------
 
     BACK = ("proc; flatten; opt; memory -nomap; opt; memory_map; opt -full; techmap; opt -fast; "
-            "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; write_blif -gates -undef + unconn ")
+            "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; "
+            "delete =A:blackbox; write_blif -gates -undef + unconn ")
 
     def test_commands_exactly_with_top(self) -> None:
         code, out, err = self.run_tool("--top", "t")
@@ -177,6 +178,29 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(calls[2][2], "read_rtlil a.il; hierarchy -auto-top; " + self.BACK
                          + "a.blif")
         self.assertEqual(calls[3][2], f"read_verilog -sv -nolatches {f}; hierarchy -auto-top; "
+                         + self.BACK + "b.blif")
+
+    def test_techlib_reaches_side_a_only(self) -> None:
+        lib = self.dir / "t.o3lib"
+        code, out, err = self.run_tool("--techlib", str(lib))
+        self.assertEqual(code, 0, out + err)
+        f = str(self.src)
+        calls = self.calls()
+        self.assertEqual(calls[1][2], f"read_techlib {lib}; read_verilog --nolatches {f}; "
+                         "write_rtlil a.il")
+        self.assertNotIn("techlib", calls[3][2])  # side B (Yosys) is unchanged
+
+    def test_lib_reaches_both_sides(self) -> None:
+        lib = self.dir / "p.v"
+        lib.write_text("module p; endmodule\n")
+        code, out, err = self.run_tool("--lib", str(lib), "--lib-nomem2reg")
+        self.assertEqual(code, 0, out + err)
+        f, p = str(self.src), str(lib.resolve())
+        calls = self.calls()
+        self.assertEqual(calls[1][2], f"read_verilog --lib --nomem2reg --nolatches {p}; "
+                         f"read_verilog --nolatches {f}; write_rtlil a.il")
+        self.assertEqual(calls[3][2], f"read_verilog -sv -nolatches -nomem2reg {p}; "
+                         f"read_verilog -sv -nolatches {f}; hierarchy -auto-top; "
                          + self.BACK + "b.blif")
 
     # -- --pass proc (2E spec 18.5, point (r)) ----------------------------------------------
@@ -379,6 +403,25 @@ class BridgeTest(unittest.TestCase):
         self.assertIn("dffunmap; techmap", unmapped)
         self.assertEqual(unmapped.count("-nodffe -nosdff"), 4)
         self.assertEqual(plain, unmapped.replace(" -nodffe -nosdff", "").replace("dffunmap; ", ""))
+
+    # -- side B as `tribuf -logic` (D3, spec 17 #79) -------------------------------------------
+
+    def test_yosys_tribuf_adds_one_step_after_flatten(self) -> None:
+        plain = elab_equiv.yosys_script("read_verilog a.v", "t", "x.blif")
+        tri = elab_equiv.yosys_script("read_verilog a.v", "t", "x.blif", tribuf=True)
+        self.assertNotIn("tribuf", plain)
+        self.assertIn("proc; flatten; tribuf -logic; opt;", tri)
+        self.assertEqual(plain, tri.replace("tribuf -logic; ", ""))
+
+    def test_in_file_directive_asks_for_tribuf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            on = Path(tmp) / "on.v"
+            off = Path(tmp) / "off.v"
+            on.write_text("module m;\nendmodule\n// elab-check: --yosys-tribuf\n")
+            off.write_text("// elab-check: --yosys-tribuf\nmodule m;\nendmodule\n")  # line 1 only
+            self.assertTrue(elab_equiv.wants_yosys_tribuf(on))
+            self.assertFalse(elab_equiv.wants_yosys_tribuf(off))
+            self.assertFalse(elab_equiv.wants_auto_blackbox(on))
 
     def test_async2sync_adds_one_step_before_the_flop_mapping(self) -> None:
         plain = elab_equiv.yosys_script("read_verilog a.v", "t", "x.blif")

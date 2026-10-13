@@ -5,6 +5,7 @@ Usage::
 
     verilog_gen.py --seed N --out F.v [--mutate] [--no-ast]
     verilog_gen.py --proc --seed N --out F.v
+    verilog_gen.py --elab --seed N --out F.v
 
 writes ``F.v``, one compilation unit of one to four modules generated from seed N over the MUST
 and SHOULD coverage rows, weighted toward the common forms: ANSI and non-ANSI headers, parameter
@@ -30,6 +31,10 @@ parser's code; the tree shapes are the 2A slot table (``docs/specs/2026-10-09-2A
 for the ``proc`` differential (``proc_profile.py``; its first line lists the features used), no
 ``F.ast``.
 
+``--elab`` (2D Task 28) is the third profile: one synthesisable module for the elaboration
+differential (``tools/elab-check/elab-diff``; ``elab_profile.py``; its first line lists the
+counted traps it used), no ``F.ast``.
+
 Exit 0 written, 2 usage or I/O error.
 """
 
@@ -44,6 +49,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import elab_profile
 import proc_profile
 
 # --- the tree -------------------------------------------------------------------------------
@@ -2320,6 +2326,16 @@ def write_proc(seed: int, out: Path) -> int:
     return 0
 
 
+def write_elab(seed: int, out: Path) -> int:
+    """``--elab``: the elaboration profile's module for seed into out."""
+    try:
+        out.write_text(elab_profile.generate(seed).text, encoding="utf-8")
+    except OSError as exc:
+        print(f"verilog_gen: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--seed", type=int, required=True)
@@ -2328,12 +2344,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--no-ast", action="store_true", help="do not write F.ast")
     parser.add_argument("--proc", action="store_true",
                         help="the proc profile (always blocks, resets, latches, memories)")
+    parser.add_argument("--elab", action="store_true",
+                        help="the elaboration profile (expression trees, parameters, generate)")
     args = parser.parse_args(argv)
     out = Path(args.out)
-    if args.proc:
-        if args.mutate:
-            parser.error("--proc and --mutate cannot be combined")
-        return write_proc(args.seed, out)
+    if args.proc or args.elab:
+        if args.mutate or (args.proc and args.elab):
+            parser.error("--proc, --elab and --mutate cannot be combined")
+        return write_proc(args.seed, out) if args.proc else write_elab(args.seed, out)
     result = render(args.seed, out.name, args.mutate)
     try:
         out.write_text(result.text, encoding="utf-8")

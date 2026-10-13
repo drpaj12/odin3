@@ -128,8 +128,9 @@ static void test_reject_expression_and_declaration_rows(void) {
 }
 
 static void test_reject_statement_rows(void) {
-    REJECT("module m(output reg x);\n  always #5 x = ~x;\nendmodule\n",
-           "t.v:2:3: error: always block without an event control is not supported");
+    /* a delay in front of an event control is not T6: the inner control is T12's */
+    REJECT("module m(input a, output reg x);\n  always #5 @(a) x = a;\nendmodule\n",
+           "t.v:2:13: error: event control inside an always body is not supported");
     REJECT("module m(input clk, a, output reg x, z);\n  always @(posedge clk) begin\n"
            "    x = a;\n    @(negedge clk) z = a;\n  end\nendmodule\n",
            "t.v:4:5: error: event control inside an always body is not supported");
@@ -203,6 +204,18 @@ static void test_ignore_directive_rows(void) {
     IGNORED("module m;\n`pragma protect\nendmodule\n", "t.v:2:1: warning: `pragma is ignored");
     IGNORED("module m;\n`timescale 1ns/1ps\nendmodule\n",
             "t.v:2:1: warning: `timescale is ignored");
+}
+
+/* T6 (accepted, Peter 2026-10-13): an always without an event control is `always @*`, with a
+ * warning at the ALWAYS; the elaborated store checks (ALWAYS over TIMING_STMT[EVENT_CONTROL, S])
+ * and binds. A delay in front of the statement is T11's (dropped) and does not count as one. */
+static void test_accept_always_without_event_control(void) {
+    IGNORED("module m(output reg x);\n  always x = 1;\nendmodule\n",
+            "t.v:2:3: warning: always without an event control treated as always @*");
+    IGNORED_OF("module m(output reg x);\n  always #5 x = 1;\nendmodule\n",
+               "t.v:2:3: warning: always without an event control treated as always @*", 2);
+    IGNORED("module m(input a, output reg x);\n  always begin x = a; end\nendmodule\n",
+            "t.v:2:3: warning: always without an event control treated as always @*");
 }
 
 static void test_ignore_declaration_rows(void) {
@@ -649,6 +662,7 @@ int main(void) {
     RUN_TEST(test_reject_statement_rows);
     RUN_TEST(test_reject_function_rows);
     RUN_TEST(test_ignore_directive_rows);
+    RUN_TEST(test_accept_always_without_event_control);
     RUN_TEST(test_ignore_declaration_rows);
     RUN_TEST(test_specparam_one_warning_each);
     RUN_TEST(test_charge_strength_row);

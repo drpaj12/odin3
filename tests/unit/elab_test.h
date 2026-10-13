@@ -299,7 +299,7 @@ static inline void et_stage1(const et_req *req, et_result *out) {
     TEST_ASSERT_TRUE(count > 0);
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_pass_run_begin(out->design, et_intern(out, "read_verilog"), &out->ctx));
-    odin3_rv_opts ropts = {srcs, count, out->ctx.run, NULL};
+    odin3_rv_opts ropts = {srcs, count, out->ctx.run, NULL, false};
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         ODIN3_OK, odin3_read_verilog_files(out->design, &ropts, &out->parsed), et_log(out));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_elab1_options(out->design, req->opts, &out->opts));

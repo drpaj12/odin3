@@ -1,0 +1,2 @@
+T6.v:4:3: warning:
+always without an event control treated as always @*

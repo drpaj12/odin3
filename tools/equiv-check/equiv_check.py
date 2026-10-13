@@ -3,15 +3,42 @@
 Usage::
 
     equiv-check A.blif B.blif [--abc PATH] [--keep-temp] [--strict-init] [--no-io-normalize]
+                [--no-cut]
 
-Exit 0 equivalent, 1 not equivalent (including mismatched primary I/O sets), 2 usage,
-input, unsupported-construct or ABC error.
+Exit 0 equivalent, 1 not equivalent (including mismatched primary I/O sets and black-box
+cut-point inputs that are wired differently), 2 usage, input, unsupported-construct or ABC
+error, and black-box instances that cannot be matched one-to-one.
 
 Each netlist is flattened in Python into one model (``.subckt`` of models defined in the
-same file are inlined; known VTR hard blocks are replaced by logic; other black boxes are
-rejected), primary I/O names are normalized so Parmys and Odin II spellings meet, internal
-nets get plain names, and ABC runs ``cec`` (no latches) or ``dsec`` (latches) on the two
-flat files; if only one side has latches, the other gets a dangling const-0 latch.
+same file are inlined; the VTR ``adder`` hard block is replaced by logic; other black boxes
+are cut, see below), primary I/O names are normalized so Parmys and Odin II spellings meet,
+internal nets get plain names, and ABC runs ``cec`` (no latches) or ``dsec`` (latches) on the
+two flat files; if only one side has latches, the other gets a dangling const-0 latch.
+
+Black boxes (cut points).  A black-box instance other than ``adder`` is a ``.subckt`` of a
+``.blackbox`` model or a ``.gate`` (Yosys's spelling of a cell instance, parsed like
+``.subckt``; ``write_blif -gates`` writes the hard blocks it does not know that way, with no
+``.model`` at all, so port directions come from the cell type: the VTR hard blocks' ``out``,
+``out1``, ``out2``, ``sumout`` and ``cout``, and Yosys's ``Q``/``QN``/``Y``/``O``).  Each is
+cut out of the logic:
+
+- its output bits become fresh primary inputs, shared by the two netlists;
+- its input bits (clocks included) become extra primary outputs, compared between the two.
+
+Instances are matched across the files by instance name: the ``.cname`` if the instance has
+one, else the first output pin (lowest port, lowest bit) whose net has a stable name (not
+``$``-prefixed), as ``out=memtroll.str_out[0]`` (a one-bit port is ``p`` whether written
+``p`` or ``p[0]``); the name is normalized like a primary I/O
+name.  Matching is exact and never guessed: instances that exist on one side only, two
+instances with one name, an instance with no usable name, a different cell type, different
+port widths or different ``.param`` lists (a RAM mode, an INIT value: a box's configuration is
+part of what it is) all exit 2 with a message listing them.  The cut makes two netlists equivalent
+only when everything around the black boxes is equivalent and each box's inputs and outputs
+connect identically; a box's behaviour is assumed equal, never checked.  A black box clocked
+by a primary clock is fine (its outputs are free inputs), but a clocked black box's internal
+state is not modelled: only its connections are compared.  The cut is on whenever black
+boxes are present; ``--no-cut`` restores the old behaviour of rejecting them (exit 2, and
+``.gate`` is rejected as an unsupported directive).
 
 ABC models every latch as a flip-flop on one implicit clock, so each file must use a single
 (edge type, clock) pair -- the clock being a primary input, possibly through buffers -- and
@@ -132,8 +159,20 @@ def normalize_io_name(name: str, top: str) -> str:
 
 
 @dataclass
+class BlackBox:
+    """A cut black-box instance: its pins as flat nets, keyed by instance name."""
+
+    cell_type: str
+    key: str
+    line: int
+    inputs: dict[str, str]
+    outputs: dict[str, str]
+    params: dict[str, str] = field(default_factory=dict)  # the cell's ``.param NAME VALUE`` lines
+
+
+@dataclass
 class Flat:
-    """A flattened, black-box-free netlist ready for ABC."""
+    """A flattened netlist ready for ABC: black boxes are cut into ports (``blackboxes``)."""
 
     path: str
     top: str
@@ -141,6 +180,7 @@ class Flat:
     outputs: list[str]
     names: list[blif.Names] = field(default_factory=list)
     latches: list[blif.Latch] = field(default_factory=list)
+    blackboxes: list[BlackBox] = field(default_factory=list)
 
 
 @dataclass
@@ -184,12 +224,37 @@ def _adder_shape(model: blif.Model) -> tuple[list[str], list[str], str, list[str
     return a, b, cin[0], s, cout[0]
 
 
+def _formal_order(formal: str) -> tuple[str, int]:
+    match = re.fullmatch(r"(.*)\[(\d+)\]", formal)
+    return (match.group(1), int(match.group(2))) if match else (formal, 0)
+
+
+def _canonical_formals(formals: list[str]) -> dict[str, str]:
+    """Pin name -> name used for matching: a one-bit port is ``p`` whether it is spelled
+    ``p`` (Yosys) or ``p[0]`` (Parmys, Odin II); ports of several bits keep their indices."""
+    wide = {blif.port_base(f) for f in formals if _formal_order(f)[1] > 0}
+    return {f: (blif.port_base(f) if f == blif.port_base(f) + "[0]"
+                and blif.port_base(f) not in wide else f) for f in formals}
+
+
+def _gate_adder_model(cell: blif.Subckt) -> blif.Model:
+    """The ``adder`` model a model-less ``.gate adder`` stands for, from its connections."""
+    formals = [f for f, _ in cell.conns]
+    return blif.Model(
+        name="adder", blackbox=True,
+        inputs=[f for f in formals if not blif.gate_port_is_output("adder", f)],
+        outputs=[f for f in formals if blif.gate_port_is_output("adder", f)])
+
+
 class _Flattener:
-    def __init__(self, netlist: blif.Netlist, strict_init: bool, allow_undriven: bool) -> None:
+    def __init__(self, netlist: blif.Netlist, strict_init: bool, cut: bool,
+                 normalize: bool) -> None:
         self.netlist = netlist
+        self.cut = cut
+        self.normalize = normalize
+        self.instances: dict[str, BlackBox] = {}
         self.models = netlist.by_name()
         self.strict_init = strict_init
-        self.allow_undriven = allow_undriven
         self.counter = 0
         self.dc_inits = 0
         top = netlist.top
@@ -215,7 +280,6 @@ class _Flattener:
             frame = stack.pop()
             for cell in frame.model.cells:
                 self.add_cell(cell, frame, stack)
-        self.check_undriven()
         if self.dc_inits:
             notice(f"{self.netlist.path}: {self.dc_inits} latch(es) with init 2/3 "
                    "(don't care/unknown) treated as 0")
@@ -246,12 +310,14 @@ class _Flattener:
             init=init, line=cell.line))
 
     def add_subckt(self, cell: blif.Subckt, frame: _Frame, stack: list[_Frame]) -> None:
-        sub = self.models[cell.model]
+        sub = self.models.get(cell.model)
         conns = {f: frame.resolve(a) for f, a in cell.conns}
+        if sub is None and cell.model == "adder":
+            sub = _gate_adder_model(cell)
+        if sub is None or (sub.blackbox and sub.name != "adder"):
+            self.add_blackbox(cell, sub, frame)
+            return
         if sub.blackbox:
-            if sub.name != "adder":
-                raise EquivError(f"{self.netlist.path}:{cell.line}: unsupported black box "
-                                 f"{sub.name}")
             self.expand_adder(sub, conns)
             return
         if not sub.cells and (sub.inputs or sub.outputs or sub.clocks):
@@ -267,6 +333,53 @@ class _Flattener:
             if port not in conns:
                 child.netmap[port] = self.const0()
         stack.append(child)
+
+    def add_blackbox(self, cell: blif.Subckt, sub: blif.Model | None, frame: _Frame) -> None:
+        """Cut a black-box instance: outputs become inputs, inputs become outputs."""
+        if not self.cut:
+            raise EquivError(f"{self.netlist.path}:{cell.line}: unsupported black box "
+                             f"{cell.model}")
+        names = _canonical_formals([f for f, _ in cell.conns])
+        if sub is None:
+            is_out = {names[f]: blif.gate_port_is_output(cell.model, f) for f, _ in cell.conns}
+        else:
+            is_out = {names[f]: f in sub.outputs for f, _ in cell.conns}
+        ordered = sorted(cell.conns, key=lambda c: _formal_order(names[c[0]]))
+        pins = {names[f]: frame.resolve(a) for f, a in ordered}
+        box = BlackBox(cell.model, self.instance_key(cell, frame, pins, is_out), cell.line,
+                       {f: n for f, n in pins.items() if not is_out[f]},
+                       {f: n for f, n in pins.items() if is_out[f]}, _box_params(cell))
+        other = self.instances.get(box.key)
+        if other is not None:
+            raise EquivError(f"{self.netlist.path}:{cell.line}: two black-box instances named "
+                             f"{box.key!r} (also line {other.line}); cannot match them")
+        self.instances[box.key] = box
+        self.flat.blackboxes.append(box)
+        for formal, net in box.outputs.items():
+            free = f"bbout:{box.cell_type}:{box.key}:{formal}"
+            self.flat.inputs.append(free)
+            self.flat.names.append(blif.Names(inputs=[free], output=net, rows=[("1", "1")]))
+        for formal, net in box.inputs.items():
+            probe = f"bbin:{box.cell_type}:{box.key}:{formal}"
+            self.flat.outputs.append(probe)
+            self.flat.names.append(blif.Names(inputs=[net], output=probe, rows=[("1", "1")]))
+
+    def instance_key(self, cell: blif.Subckt, frame: _Frame, pins: dict[str, str],
+                     is_out: dict[str, bool]) -> str:
+        """The instance name used to match black boxes across the two files."""
+        def norm(name: str) -> str:
+            name = normalize_io_name(name, self.flat.top) if self.normalize else name
+            return name.replace(" ", "_")
+
+        for attr, value in cell.attrs:
+            if attr == ".cname" and value:
+                return "/".join([*frame.path[1:], norm(value)])
+        for formal, net in pins.items():
+            if is_out[formal] and _SEP not in net and not net.startswith("$"):
+                base, bit = _formal_order(formal)  # width-independent: out[0] and out agree
+                return f"{base}{f'[{bit}]' if bit else ''}={norm(net)}"
+        raise EquivError(f"{self.netlist.path}:{cell.line}: cannot name black box "
+                         f"{cell.model}: no .cname and no named output net to match it by")
 
     def expand_adder(self, model: blif.Model, conns: dict[str, str]) -> None:
         """Replace a VTR ``adder`` hard block (ripple of full adders) with logic."""
@@ -286,46 +399,46 @@ class _Flattener:
             self.flat.names.append(blif.Names(inputs=ins, output=carry_out, rows=list(MAJ3)))
             carry = carry_out
 
-    def check_undriven(self) -> None:
-        """Undriven nets that reach a primary output or a latch D input are an error (they
-        would silently become constants); with --allow-undriven, and for undriven nets that
-        only feed dangling logic, they are tied to 0 with a notice."""
-        flat = self.flat
-        driven = set(flat.inputs)
-        driven.update(c.output for c in flat.names)
-        driven.update(c.output for c in flat.latches)
-        used: dict[str, None] = dict.fromkeys(flat.outputs)
-        for names in flat.names:
-            used.update(dict.fromkeys(names.inputs))
-        used.update(dict.fromkeys(c.input for c in flat.latches))
-        undriven = sorted(n for n in used if n not in driven)
-        if not self.allow_undriven:
-            self._reject_observable(undriven)
-        for net in undriven:
-            flat.names.append(blif.Names(inputs=[], output=net))
-        if undriven:
-            notice(f"{flat.path}: {len(undriven)} undriven net(s) tied to 0")
 
-    def _reject_observable(self, undriven: list[str]) -> None:
-        flat = self.flat
-        fanout: dict[str, list[str]] = {}
-        for names in flat.names:
-            for net in names.inputs:
-                fanout.setdefault(net, []).append(names.output)
-        sinks = {n: "primary output" for n in flat.outputs}
-        sinks.update({c.input: f"the D input of latch {show(c.output)}" for c in flat.latches})
-        seen: set[str] = set()
-        for source in undriven:
-            work = [source]
-            while work:
-                net = work.pop()
-                if net in sinks:
-                    raise EquivError(f"{flat.path}: undriven net {show(source)} reaches "
-                                     f"{sinks[net]} {show(net)}; pass --allow-undriven to "
-                                     "tie it to 0")
-                if net not in seen:
-                    seen.add(net)
-                    work.extend(fanout.get(net, []))
+def check_undriven(flat: Flat, allow_undriven: bool) -> None:
+    """Undriven nets that reach a primary output or a latch D input are an error (they
+    would silently become constants); with --allow-undriven, and for undriven nets that
+    only feed dangling logic, they are tied to 0 with a notice."""
+    driven = set(flat.inputs)
+    driven.update(c.output for c in flat.names)
+    driven.update(c.output for c in flat.latches)
+    used: dict[str, None] = dict.fromkeys(flat.outputs)
+    for names in flat.names:
+        used.update(dict.fromkeys(names.inputs))
+    used.update(dict.fromkeys(c.input for c in flat.latches))
+    undriven = sorted(n for n in used if n not in driven)
+    if not allow_undriven:
+        _reject_observable(flat, undriven)
+    for net in undriven:
+        flat.names.append(blif.Names(inputs=[], output=net))
+    if undriven:
+        notice(f"{flat.path}: {len(undriven)} undriven net(s) tied to 0")
+
+
+def _reject_observable(flat: Flat, undriven: list[str]) -> None:
+    fanout: dict[str, list[str]] = {}
+    for names in flat.names:
+        for net in names.inputs:
+            fanout.setdefault(net, []).append(names.output)
+    sinks = {n: "primary output" for n in flat.outputs}
+    sinks.update({c.input: f"the D input of latch {show(c.output)}" for c in flat.latches})
+    seen: set[str] = set()
+    for source in undriven:
+        work = [source]
+        while work:
+            net = work.pop()
+            if net in sinks:
+                raise EquivError(f"{flat.path}: undriven net {show(source)} reaches "
+                                 f"{sinks[net]} {show(net)}; pass --allow-undriven to "
+                                 "tie it to 0")
+            if net not in seen:
+                seen.add(net)
+                work.extend(fanout.get(net, []))
 
 
 def show(net: str) -> str:
@@ -333,10 +446,81 @@ def show(net: str) -> str:
     return net.replace(_SEP, "/")
 
 
-def flatten(netlist: blif.Netlist, strict_init: bool = False,
-            allow_undriven: bool = False) -> Flat:
-    """Flatten ``netlist`` into one model without black boxes (see module docstring)."""
-    return _Flattener(netlist, strict_init, allow_undriven).run()
+def flatten(netlist: blif.Netlist, strict_init: bool = False, allow_undriven: bool = False,
+            cut: bool = True, normalize: bool = True, check: bool = True) -> Flat:
+    """Flatten ``netlist`` into one model; black boxes are cut (``cut``) or rejected.
+
+    ``check=False`` leaves the undriven-net check to the caller (``check_undriven``), so that
+    black-box mismatches between the two files are reported first."""
+    flat = _Flattener(netlist, strict_init, cut, normalize).run()
+    if check:
+        check_undriven(flat, allow_undriven)
+    return flat
+
+
+def _box_params(cell: blif.Subckt) -> dict[str, str]:
+    """The ``.param NAME VALUE`` lines of a black-box cell (a repeated name: the last wins)."""
+    params: dict[str, str] = {}
+    for attr, value in cell.attrs:
+        if attr == ".param":
+            name, _, rest = value.partition(" ")
+            params[name] = rest.strip()
+    return params
+
+
+def _widths(box: BlackBox) -> dict[str, int]:
+    widths: dict[str, int] = {}
+    for formal in (*box.inputs, *box.outputs):
+        base = blif.port_base(formal)
+        widths[base] = widths.get(base, 0) + 1
+    return widths
+
+
+def _describe(box: BlackBox, flat: Flat) -> str:
+    return f"{box.cell_type} {box.key} ({Path(flat.path).name}:{box.line})"
+
+
+def _compare_boxes(key: str, box_a: BlackBox, box_b: BlackBox) -> list[str]:
+    if box_a.cell_type != box_b.cell_type:
+        return [f"cell types differ for instance {key!r}: {box_a.cell_type} in A, "
+                f"{box_b.cell_type} in B"]
+    wa, wb = _widths(box_a), _widths(box_b)
+    if wa != wb:
+        diffs = ", ".join(f"{base}: {wa.get(base, 0)} in A, {wb.get(base, 0)} in B"
+                          for base in sorted(set(wa) | set(wb)) if wa.get(base) != wb.get(base))
+        return [f"port widths differ for {box_a.cell_type} instance {key!r}: {diffs}"]
+    pa = {*box_a.inputs, *box_a.outputs}
+    pb = {*box_b.inputs, *box_b.outputs}
+    if pa != pb or set(box_a.outputs) != set(box_b.outputs):
+        return [f"ports differ for {box_a.cell_type} instance {key!r}: only in A: "
+                f"{sorted(pa - pb)}; only in B: {sorted(pb - pa)}"]
+    if box_a.params != box_b.params:
+        names = sorted(set(box_a.params) | set(box_b.params))
+        diffs = ", ".join(f"{n}: {box_a.params.get(n, '(none)')} in A, "
+                          f"{box_b.params.get(n, '(none)')} in B"
+                          for n in names if box_a.params.get(n) != box_b.params.get(n))
+        return [f"parameters differ for {box_a.cell_type} instance {key!r}: {diffs}"]
+    return []
+
+
+def match_blackboxes(flats: Sequence[Flat]) -> None:
+    """Require the cut black boxes of two flats to match one-to-one by name, type and ports.
+
+    Raises EquivError (exit 2) listing every unmatched instance or mismatch."""
+    fa, fb = flats
+    boxes_a = {box.key: box for box in fa.blackboxes}
+    boxes_b = {box.key: box for box in fb.blackboxes}
+    lines = [f"  only in A: {_describe(box, fa)}" for key, box in boxes_a.items()
+             if key not in boxes_b]
+    lines += [f"  only in B: {_describe(box, fb)}" for key, box in boxes_b.items()
+              if key not in boxes_a]
+    if lines:
+        raise EquivError("black-box instances cannot be matched one-to-one (matched by "
+                         "instance name, never guessed)", "\n".join(lines))
+    problems = [p for key, box in boxes_a.items() for p in _compare_boxes(key, box, boxes_b[key])]
+    if problems:
+        raise EquivError("matched black-box instances do not have the same cell type, "
+                         "port widths and parameters", "\n".join(f"  {p}" for p in problems))
 
 
 # --------------------------------------------------------------------------- clocking
@@ -472,8 +656,9 @@ def write_flat(flat: Flat, ports: dict[str, str], path: Path) -> None:
     """Write ``flat`` as plain single-model BLIF that ABC's reader accepts."""
     rn = _renamer(ports)
     lines = [f".model {flat.top}"]
-    lines += [f".inputs {rn(p)}" for p in flat.inputs]
-    lines += [f".outputs {rn(p)}" for p in flat.outputs]
+    # Sorted, so that cut points added in file order line up between the two files.
+    lines += [f".inputs {rn(p)}" for p in sorted(flat.inputs, key=lambda p: ports[p])]
+    lines += [f".outputs {rn(p)}" for p in sorted(flat.outputs, key=lambda p: ports[p])]
     for names in flat.names:
         inputs, rows = constant_folded(names)
         lines.append(" ".join([".names", *(rn(n) for n in inputs), rn(names.output)]))
@@ -519,8 +704,16 @@ def _io_mismatch(a: tuple[set[str], set[str]], b: tuple[set[str], set[str]]) -> 
 
 
 def _check(args: argparse.Namespace) -> int:
-    nets = [blif.parse_file(f) for f in args.files]
-    flats = [flatten(n, args.strict_init, args.allow_undriven) for n in nets]
+    nets = [blif.parse_file(f, gates=not args.no_cut) for f in args.files]
+    flats = [flatten(n, args.strict_init, args.allow_undriven, not args.no_cut,
+                     not args.no_io_normalize, check=False) for n in nets]
+    match_blackboxes(flats)
+    for flat in flats:
+        check_undriven(flat, args.allow_undriven)
+    cuts = sum(len(f.blackboxes) for f in flats)
+    if cuts:
+        notice(f"{cuts // 2} black-box instance(s) cut: outputs are free inputs shared by both "
+               "files, inputs are compared; a clocked black box's internal state is not modelled")
     maps = [io_map(f, not args.no_io_normalize) for f in flats]
     domains = [clock_domain(f, m) for f, m in zip(flats, maps, strict=True)]
     sets = [({m[p] for p in f.inputs}, {m[p] for p in f.outputs}) for f, m in zip(flats, maps,
@@ -579,6 +772,9 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--allow-undriven", action="store_true",
                     help="tie undriven nets that reach an output or latch to 0 instead of "
                     "failing (exit 2)")
+    ap.add_argument("--no-cut", action="store_true",
+                    help="reject black boxes other than adder (exit 2) instead of cutting them "
+                    "out as free outputs / compared inputs matched by instance name")
     ap.add_argument("--no-io-normalize", action="store_true",
                     help="match primary I/O names verbatim")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,

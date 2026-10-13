@@ -379,7 +379,7 @@ static odin3_status entry_run(odin3_pg *pg, const pg_swctx *ctx, uint32_t from, 
             *slot = x_entry ? odin3_sb_of_bit(ODIN3_BIT_X) : rv[k];
         }
     }
-    pg_act_req req = {pg->cur, 0, t1 + from, pg->run_r.data, to - from, pg->prov, false, false};
+    pg_act_req req = {pg->cur, 0, t1 + from, pg->run_r.data, to - from, pg->prov, false, true};
     return st != ODIN3_OK ? st : pg_act_add(pg, &req);
 }
 
@@ -439,7 +439,9 @@ odin3_status pg_sw_end(odin3_pg *pg) {
     if (st == ODIN3_OK && ctx.n > 0) {
         odin3_sig rhs = {(odin3_sigbit *)pg->sw_t1.data + ctx.first, ctx.n, false};
         pg_asg asg = {&pg->slv, &rhs, ctx.node, true, true};
+        pg->exiting = true;
         st = pg_apply(pg, &asg);
+        pg->exiting = false;
     }
     st = st != ODIN3_OK ? st : pg_late_exit(pg);
     odin3_vec_pop(&pg->sw_ctx);
@@ -544,12 +546,18 @@ odin3_status pg_if_open(odin3_pg *pg, odin3_ast_id node) {
     if (fst != ODIN3_OK || now != 0) {
         return fst != ODIN3_OK ? fst : folded_run(pg, node, now);
     }
+    /* the condition's calls run from the frame stack; pg_if_done goes on with its value */
+    pg_gen_req gen = {odin3_ast_child(pg->e2->elab, node, 0), node, {0, false, false}, PG_G_IF, 0};
+    return pg_gen_push(pg, &gen);
+}
+
+odin3_status pg_if_done(odin3_pg *pg, odin3_ast_id node) {
     const odin3_ast *ast = pg->e2->elab;
     odin3_ast_id cond = odin3_ast_child(ast, node, 0);
-    odin3_sig sig;
+    odin3_sig sig = pg->gen_sig;
     pg_sw_req req = {node, &sig, NULL, 0, 0, 1, false, PG_WILD_NONE};
-    odin3_status st = gen_at(pg, cond, (odin3_etype){0, false, false}, &sig);
-    if (st == ODIN3_OK && sig.width != 1) { /* $reduce_bool(c) */
+    odin3_status st = ODIN3_OK;
+    if (sig.width != 1) { /* $reduce_bool(c) */
         odin3_elab2_cell_req cell = {ODIN3_E2T_REDUCE_BOOL, cond, &sig, NULL, 1, NULL, NULL};
         st = odin3_elab2_cell(pg->e2, &cell, &sig);
     }

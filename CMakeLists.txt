@@ -209,6 +209,7 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/read_verilog_lib.c
     src/frontends/verilog/elab1.c
     src/frontends/verilog/elab1_lookup.c
+    src/frontends/verilog/elab1_unit.c
     src/frontends/verilog/elab1_top.c
     src/frontends/verilog/elab1_params.c
     src/frontends/verilog/elab1_spec.c
@@ -231,6 +232,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_prescan.c
     src/frontends/elab/elab2_warn.c
     src/frontends/elab/elab2_tri.c
+    src/frontends/elab/elab2_trilogic.c
     src/frontends/elab/elab2_mem.c
     src/frontends/elab/elab2_memport.c
     src/frontends/elab/elab2_memscan.c
@@ -494,6 +496,12 @@ add_executable(elab-check tools/elab-check/elab-check.c)
 target_include_directories(elab-check PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(elab-check PRIVATE odin3_core odin3_flags)
 
+# 2D Task 28 (spec 14.5): const-replay, the tiny driver of const-diff (a constant table through
+# odin3_cval_op).
+add_executable(const-replay tools/elab-check/const-replay.c)
+target_include_directories(const-replay PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(const-replay PRIVATE odin3_core odin3_flags)
+
 # --- odin3-sim-vectors: the simulator's random-vector driver (tools/sim-check, 1E) --------------
 add_executable(odin3-sim-vectors tools/sim-check/odin3-sim-vectors.c)
 target_include_directories(odin3-sim-vectors PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -515,6 +523,19 @@ target_link_libraries(bench_ast PRIVATE odin3_core odin3_flags)
 add_executable(bench_pp tests/bench/bench_pp.c)
 target_include_directories(bench_pp PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(bench_pp PRIVATE odin3_core odin3_flags)
+
+# 2D Task 27 (spec 15): one file per run, `bench_elab --one FILE`, for `elab-sweep --bench`.
+add_executable(bench_elab tests/bench/bench_elab.c)
+target_include_directories(bench_elab PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(bench_elab PRIVATE odin3_core odin3_flags)
+# tests/bench/bench_guard.h refuses a Debug or sanitized binary (review I1).
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
+    target_compile_definitions(bench_elab PRIVATE ODIN3_BENCH_RELEASE)
+else()
+    add_test(NAME bench_elab_refuses_debug COMMAND bench_elab --one /dev/null)
+    set_tests_properties(bench_elab_refuses_debug PROPERTIES
+        PASS_REGULAR_EXPRESSION "needs a Release build")
+endif()
 
 # 2E Task 13 (spec 19): one file per run, `bench_proc --one FILE`, for `elab-sweep --bench`.
 add_executable(bench_proc tests/bench/bench_proc.c)
@@ -556,6 +577,11 @@ if(ODIN3_FUZZ)
     target_include_directories(fuzz_abc_script PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(fuzz_abc_script PRIVATE odin3_core odin3_flags)
     target_link_options(fuzz_abc_script PRIVATE -fsanitize=fuzzer)
+    # tests/fuzz/fuzz_elab.c: the elaborator's crash fuzzer (2D §14.5, plan Task 28).
+    add_executable(fuzz_elab tests/fuzz/fuzz_elab.c)
+    target_include_directories(fuzz_elab PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_elab PRIVATE odin3_core odin3_flags)
+    target_link_options(fuzz_elab PRIVATE -fsanitize=fuzzer)
 endif()
 
 # --- Tests ----------------------------------------------------------------------
@@ -882,6 +908,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test_rtlil_writer PRIVATE
         ODIN3_RTLIL_OUT="${PROJECT_BINARY_DIR}/rtlil")
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP rtlil_fixtures)
+    # 2D Task 28 (review M18): odin3_cval_op against the word cells' simulate hooks.
+    odin3_add_unit_test(test_elab_cellsim)
     odin3_add_unit_test(test_elab_cval)
     target_compile_definitions(test_elab_cval PRIVATE
         ODIN3_ELAB_DATA="${PROJECT_SOURCE_DIR}/tests/elab")
@@ -957,6 +985,13 @@ if(BUILD_TESTING)
     target_include_directories(test_elab_stage2_drive PRIVATE ${_gen})
     add_dependencies(test_elab_stage2_drive verilog_generated)
     target_compile_definitions(test_elab_stage2_drive PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D-7b: the library-unit read (read_verilog --lib; spec 3.1a, 17 #80).
+    odin3_add_unit_test(test_read_verilog_lib)
+    target_include_directories(test_read_verilog_lib PRIVATE ${_gen})
+    add_dependencies(test_read_verilog_lib verilog_generated)
+    target_compile_definitions(test_read_verilog_lib PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     # 2D Task 20: memories (the mem2reg decision, registers per word, $mem and its read ports).
@@ -1418,6 +1453,34 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                                  ENVIRONMENT "${_fuzz_env}")
         endif()
 
+        # 2D §14.5 (plan Task 28): the elaborator's seeds (`elab_fuzz_seeds.py`): every
+        # tests/elab/rows file and the micros' common/ directory, smallest first, and ten
+        # generated modules (verilog_gen.py --elab), each after a mode byte (--nolatches on).
+        # fuzz_elab_seed_inputs runs each once; fuzz_elab_smoke fuzzes 10 s (-max_len 4096, the
+        # caps lowered by the harness). One worker, 2 GB RSS; long runs are local.
+        set(_fe_seeds ${PROJECT_BINARY_DIR}/fuzz_elab_seeds)
+        set(_fe_corpus ${PROJECT_BINARY_DIR}/fuzz_elab_corpus)
+        file(MAKE_DIRECTORY ${_fe_corpus})
+        add_test(NAME fuzz_elab_seeds
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/elab-check/elab_fuzz_seeds.py
+                    ${_fe_seeds} ${PROJECT_SOURCE_DIR}/tests/elab/rows
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/common --generated 10)
+        set_tests_properties(fuzz_elab_seeds PROPERTIES FIXTURES_SETUP fuzz_elab_seeds
+                             LABELS fuzz)
+        add_test(NAME fuzz_elab_seed_inputs
+            COMMAND $<TARGET_FILE:fuzz_elab> -runs=0 -timeout=60 -rss_limit_mb=2048
+                    -print_funcs=0 ${_fe_seeds})
+        add_test(NAME fuzz_elab_smoke
+            COMMAND $<TARGET_FILE:fuzz_elab> -seed=1 -max_total_time=10 -timeout=10
+                    -rss_limit_mb=2048 -max_len=4096 -print_funcs=0 -print_final_stats=1
+                    ${_fe_corpus} ${_fe_seeds})
+        set_tests_properties(fuzz_elab_seed_inputs fuzz_elab_smoke PROPERTIES
+                             FIXTURES_REQUIRED fuzz_elab_seeds LABELS fuzz TIMEOUT 600)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_elab_seed_inputs fuzz_elab_smoke PROPERTIES
+                                 ENVIRONMENT "${_fuzz_env}")
+        endif()
+
         # 3D §13.7 (plan Task 11): the ABC script checker (no ABC runs). The seeds
         # (tests/fuzz/abc_script_seeds: a K byte, then lib/abc/vtr.abc, VTR's whole stage, one
         # script per abc.rc alias and one per refused example of test_abc_script) run once;
@@ -1553,7 +1616,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     odin3_add_sweep_test(verilog_micro_elab LABEL sweep
         COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
                 --odin3 $<TARGET_FILE:odin3>
-                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 2 --mem-cap 3G
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                --lib ${PROJECT_SOURCE_DIR}/tests/elab/lib/vtr_primitives.v --jobs 2 --mem-cap 3G
                 --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
                 --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
                 ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
@@ -1570,6 +1634,29 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     elseif(DEFINED ENV{VTR_ROOT})
         message(STATUS "verilog_vtr_parse not registered: no benchmarks under $ENV{VTR_ROOT}")
     endif()
+    # 2D Task 27 (spec 14.5, 15): the 64 VTR and Koios files (31 + 33) as ONE set under
+    # `odin3 --elab-only`, smallest first, koios/lenet.v last (it gets 5G, alone, in the 6G slice);
+    # failures only as listed in tests/elab/vtr_expect_fail.txt. Run as `ODIN3_HEAVY_OK=1 ctest
+    # --preset sweep -R verilog_vtr_elab` from a Release build. The benchmarks' hard blocks
+    # (adder, multiply, *_port_ram) come from lib/vtr.o3lib.
+    if(_vtr_benchmarks)
+        odin3_add_sweep_test(verilog_vtr_elab LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                    --odin3 $<TARGET_FILE:odin3>
+                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 2 --mem-cap 3G
+                    --cap-for koios/lenet.v=5G
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_expect_fail.txt
+                    --root ${_vtr_verilog} ${_vtr_benchmarks})
+    endif()
+    # 2D Task 27 (spec 15): bench_elab prints the columns the targets are judged from. The smoke
+    # runs `--one` on two micros (a plain assign; a memory under a clocked process) and checks
+    # every column.
+    odin3_add_sweep_test(bench_elab_smoke LABEL sweep
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/bench-report smoke
+                --bench $<TARGET_FILE:bench_elab>
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                ${PROJECT_SOURCE_DIR}/tests/micro/verilog/keywords/assign/assign_wide.v
+                ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax/inferred_SPram.v)
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
     set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>"
@@ -1783,10 +1870,40 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
                     --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                    --lib ${PROJECT_SOURCE_DIR}/tests/elab/lib/vtr_primitives.v
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_equiv_expect_fail.txt
                     --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
                     ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
+        # 2D Task 27 (spec 14.5): the 64 VTR and Koios files through the bridge (Yosys 0.55), one
+        # set, smallest first; koios/lenet.v's Yosys side (~7 GB) is an `xl` entry of
+        # tests/elab/vtr_equiv_expect_fail.txt, run by elab_equiv_vtr_xl. A Yosys crash is an
+        # `oracle crash`. Labels sweep and nightly. Run as `ODIN3_HEAVY_OK=1 ctest --preset sweep
+        # -R elab_equiv_vtr$`.
+        if(_vtr_benchmarks)
+            odin3_add_sweep_test(elab_equiv_vtr LABEL sweep
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                        --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                        --jobs 2 --mem-cap 3G
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_expect_fail.txt
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_equiv_expect_fail.txt
+                        --root ${_vtr_verilog} ${_vtr_benchmarks})
+            set_tests_properties(elab_equiv_vtr PROPERTIES LABELS "sweep;nightly")
+            # lenet.v alone: both sides in an 8G child cap, in the 9G slice (the controller sets
+            # ODIN3_HEAVY_XL_OK=1 by hand, with no agent running). Its outcome (the peak RSS, or
+            # `out of memory (cap 8G)`) is reported, never listed as expected.
+            odin3_add_sweep_test(elab_equiv_vtr_xl LABEL sweep-xl
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                        --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                        --xl --mem-cap 8G --partial
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_equiv_expect_fail.txt
+                        --root ${_vtr_verilog} ${_vtr_verilog}/koios/lenet.v)
+        endif()
         # 2D Task 26 (spec 14.4): the project corpus's positive phase-2 Verilog cases through the
         # bridge against their ref.blif (oracle drift against the recorded 0.69 is reported, not
         # failed), and the negative front-end cases' kind, location and names. In the gate.
@@ -1796,9 +1913,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --odin3 $<TARGET_FILE:odin3> --with-frontend --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
         set_tests_properties(project_corpus_frontend PROPERTIES LABELS tools)
-        # 2E Task 12: test_proc_gen_diff parses the --proc profile with this Yosys.
+        # 2E Task 12: test_proc_gen_diff parses the --proc profile with this Yosys; 2D-7b:
+        # test_hard_cell_widths runs write_rtlil's black-box stubs through it and the bridge.
         set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT
                      "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+        # 2D Task 28: test_elab_diff runs const-diff against this Yosys and the replay driver.
+        set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT
+                     "ODIN3_CONST_REPLAY=$<TARGET_FILE:const-replay>")
 
         # 2E Task 12 (spec 18.6, plan point (p)): the proc sweeps. Every one is an elab-sweep run
         # (smallest first, one child per file under memcap, expected failures with needles) whose
@@ -1837,6 +1958,58 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
                     --seeds 1..200 --mem-cap 3G --work ${PROJECT_BINARY_DIR}/proc_gen_work)
+        # 2D Task 28 (spec 14.5, review M24): the --elab generator's modules through the bridge
+        # (elab-diff, 200 seeds) and 500 random constant expressions, odin3_cval_op against Yosys
+        # 0.55's folds (const-diff). The nightly runs are the *_long tests: 5,000 seeds, 10,000
+        # expressions, and the 0.69 drift (a file where 0.55 and 0.69 disagree is `oracle drift`,
+        # not a failure). A failing seed keeps its file under the build directory.
+        odin3_add_sweep_test(elab_gen_vs_yosys LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --seeds 1..200 --mem-cap 2G
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/gen_expect_fail.txt
+                    --work ${PROJECT_BINARY_DIR}/elab_gen_work)
+        odin3_add_sweep_test(elab_const_diff LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/const-diff
+                    --yosys ${ODIN3_YOSYS055} --replay $<TARGET_FILE:const-replay>
+                    --count 500 --seed 1)
+        odin3_add_sweep_test(elab_gen_vs_yosys_long LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --seeds 1..5000 --mem-cap 2G
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/gen_expect_fail.txt
+                    --work ${PROJECT_BINARY_DIR}/elab_gen_long_work)
+        odin3_add_sweep_test(elab_const_diff_long LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/const-diff
+                    --yosys ${ODIN3_YOSYS055} --replay $<TARGET_FILE:const-replay>
+                    --count 10000 --seed 2)
+        set_tests_properties(elab_gen_vs_yosys_long elab_const_diff_long
+                             PROPERTIES LABELS "sweep;nightly")
+        if(ODIN3_YOSYS)
+            odin3_add_sweep_test(elab_gen_drift LABEL sweep
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-diff
+                        --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --seeds 1..200 --mem-cap 2G --yosys-069 ${ODIN3_YOSYS}
+                        --work ${PROJECT_BINARY_DIR}/elab_gen_drift_work)
+            set_tests_properties(elab_gen_drift PROPERTIES LABELS "sweep;nightly")
+            # 2D Task 28 follow-up (spec 17 #82): the sources of tests/verilog/oracle-bug lose a
+            # select write in Yosys 0.55's opt_muxtree (2F OP-13) though 2D's RTLIL is right:
+            # elab-equiv is equivalent on Yosys 0.69 and NOT equivalent (exit 1) on 0.55. A 0.55
+            # that passes makes the test fail (stale: move the sources to case-bridge). Exit 77
+            # (skip) as above.
+            add_test(NAME elab_oracle_muxtree_bug
+                COMMAND sh -c "for f in \"$5\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --allow-version 0.69 --equiv-check \"$3\" --top gtop \"$f\" || exit $?; \"$0\" --odin3 \"$1\" --yosys \"$4\" --equiv-check \"$3\" --top gtop \"$f\"; rc=$?; [ $rc -eq 77 ] && exit 77; [ $rc -eq 1 ] || { echo \"$f: Yosys 0.55 no longer loses the write (exit $rc)\"; exit 1; }; done"
+                        ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                        $<TARGET_FILE:odin3> ${ODIN3_YOSYS}
+                        ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        ${ODIN3_YOSYS055}
+                        ${PROJECT_SOURCE_DIR}/tests/verilog/oracle-bug)
+            set_tests_properties(elab_oracle_muxtree_bug PROPERTIES
+                LABELS differential SKIP_RETURN_CODE 77)
+        endif()
         # The 31 VTR and 33 Koios benchmarks as one set by size, when VTR_ROOT is set at
         # configure time (also label nightly). lenet.v is listed `xl` in vtr_expect_fail.txt: the
         # 6G sweeps skip it, and the sweep-xl CTests run exactly it, alone, 8 GiB per child.

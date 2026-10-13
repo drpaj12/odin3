@@ -182,11 +182,59 @@ static odin3_status search_dirs(odin3_rv *rv, const odin3_rv_want *want) {
     return st;
 }
 
+/* --- the units kept by `read_verilog --lib` (2D-7b) ----------------------------------------- */
+
+/* One kept stream: parsed again as library UNITs that carry the store's flags, from the
+ * preprocessed text its own read produced (its macros and include directories; I1 of the PR
+ * review: a re-preprocess under this read's macros is a different unit). A file already read is
+ * skipped. */
+static odin3_status parse_kept_stream(odin3_rv *rv, const odin3_ast *kept,
+                                      const odin3_ast_stream *stream) {
+    if (odin3_u64map_get(rv->libread, stream->resolved, NULL)) {
+        return ODIN3_OK;
+    }
+    uint32_t before = odin3_ast_root_count(rv->ast);
+    odin3_status st = odin3_u64map_put(rv->libread, (odin3_kv){stream->resolved, 1});
+    st = st != ODIN3_OK ? st : odin3_rv_parse_kept(rv, stream);
+    st = st != ODIN3_OK ? st : sweep(rv, true);
+    return st != ODIN3_OK ? st
+                          : odin3_ast_mark_units(rv->ast, before, odin3_ast_root_count(rv->ast),
+                                                 odin3_ast_unit_flags(kept, 0));
+}
+
+/* One kept store: every design file of its read not parsed yet, in read order (the library UNITs
+ * of a --lib read's own -v/-y files are not kept: a later read finds those itself). */
+static odin3_status read_kept_store(odin3_rv *rv, const odin3_ast *kept) {
+    odin3_status st = ODIN3_OK;
+    const odin3_ast_stream *stream = NULL;
+    for (uint32_t idx = 0;
+         st == ODIN3_OK && !rv->vl.stop && (stream = odin3_ast_stream_at(kept, idx)) != NULL;
+         idx++) {
+        st = parse_kept_stream(rv, kept, stream);
+    }
+    return st;
+}
+
+/* Every store an earlier `read_verilog --lib` kept, in read order (a later --lib read sees them
+ * too: harmless, nothing is elaborated, and its own kept UNITs are only its design UNITs). */
+static odin3_status read_kept_libraries(odin3_rv *rv) {
+    odin3_status st = ODIN3_OK;
+    uint32_t count = odin3_design_ast_count(rv->design);
+    for (uint32_t i = 0; st == ODIN3_OK && i < count; i++) {
+        const odin3_ast *kept = odin3_design_ast_at(rv->design, i);
+        if (kept != NULL && (odin3_ast_unit_flags(kept, 0) & ODIN3_UNIT_LIB) != 0) {
+            st = read_kept_store(rv, kept);
+        }
+    }
+    return st;
+}
+
 /* --- step 3 ------------------------------------------------------------------------------- */
 
 odin3_status odin3_rv_resolve_libraries(odin3_rv *rv) {
     odin3_status st = sweep(rv, false);
     uint32_t first = odin3_ast_root_count(rv->ast);
+    st = st != ODIN3_OK ? st : read_kept_libraries(rv);
     for (size_t i = 0; st == ODIN3_OK && !rv->vl.stop && i < rv->wanted.len; i++) {
         odin3_rv_want want = *(const odin3_rv_want *)odin3_vec_cat(&rv->wanted, i);
         if (is_defined(rv, want.name)) {

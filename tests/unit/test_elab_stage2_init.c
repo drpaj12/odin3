@@ -574,6 +574,48 @@ static void test_readmemb_with_start_and_finish(void) {
     TEST_ASSERT_EQUAL_STRING("xx a5 3c xx", words_of_init());
 }
 
+/* A `$readmemh` under an `if` with a constant condition is the branch the `if` takes (Yosys
+ * reads it that way; dnnweaver.v's `if (INITIALIZE_FIFO == "yes")`). */
+static void test_readmem_under_a_true_constant_if_is_read(void) {
+    read_with_file("sub/init.hex", "module t(input [1:0] ra, output [7:0] q);\n"
+                                   "  parameter P = \"yes\";\n  reg [7:0] m [0:3];\n"
+                                   "  initial begin if (P == \"yes\") begin\n"
+                                   "    $readmemh(\"init.hex\", m);\n  end end\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
+}
+
+static void test_readmem_under_a_false_constant_if_is_not_read(void) {
+    read_with_file("sub/init.hex", "module t(input [1:0] ra, output [7:0] q);\n"
+                                   "  parameter P = \"no\";\n  reg [7:0] m [0:3];\n"
+                                   "  initial begin if (P == \"yes\") begin\n"
+                                   "    $readmemh(\"init.hex\", m);\n  end end\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+}
+
+/* The soundness half: under a condition that is not constant it stays the located error. */
+static void test_readmem_under_a_runtime_if_is_an_error(void) {
+    read_with_file("sub/init.hex", "module t(input c, input [1:0] ra, output [7:0] q);\n"
+                                   "  reg [7:0] m [0:3];\n"
+                                   "  initial begin if (c) $readmemh(\"init.hex\", m); end\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, pt_rs.status);
+    et_expect(
+        &pt_rs, ODIN3_LOG_ERROR,
+        "sub/t.v:3:24: error: $readmemh is supported only as a statement of an initial block");
+}
+
+/* A string widened by `?:` (`"MULT"` is 32 bits, `"FMA"` 24: the result has a NUL byte) is the
+ * same bits as a number: it was an unlocated ODIN3_ERR_INVALID_ARG (dnnweaver.v). */
+static void test_widened_string_parameter_is_a_number(void) {
+    pt_read_clean("module t(input a, output y);\n  parameter n = 1;\n"
+                  "  localparam PE_MODE = n == 0 ? \"MULT\" : \"FMA\";\n"
+                  "  assign y = (PE_MODE == \"FMA\") ? a : ~a;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
+}
+
 static void test_readmem_errors(void) {
     read_with_file("sub/init.hex", "module t(input [1:0] ra, output [7:0] q);\n"
                                    "  reg [7:0] m [0:3];\n"
@@ -715,10 +757,69 @@ static void test_readmem_size_cap(void) {
 /* --- per-bit rules (EL-41; built by Task 21, the remaining cases) ----------------------------- */
 
 static void test_inlined_task_output_counts_as_blocking(void) {
-    pt_read_failing("module t(input c, a, output reg r);\n"
-                    "  task put(output o);\n    o = a;\n  endtask\n"
-                    "  always @(posedge c) begin\n    put(r);\n    r <= a;\n  end\nendmodule\n");
-    pt_expect_error((at_loc){7, 5}, "'r' is assigned with both '=' and '<=' (also at t.v:6:5)");
+    pt_read_src("module t(input c, a, output reg r);\n"
+                "  task put(output o);\n    o = a;\n  endtask\n"
+                "  always @(posedge c) begin\n    put(r);\n    r <= a;\n  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_warning((at_loc){7, 5}, "'r' is assigned with both '=' and '<=' on one control path "
+                                      "(also at t.v:6:5); simulation and synthesis may differ");
+}
+
+/* --- T9 on a memory word (PR 2D-7b review I3) ------------------------------------------------- */
+
+/* A 4-word array under attr, written by the two statements (lines 4 and 5) of one edge block. */
+static void mem_t9(const char *attr, const char *first, const char *second) {
+    char text[512];
+    (void)snprintf(text, sizeof text,
+                   "module t(input c, input [1:0] a, input [3:0] d, input s, output [3:0] q);\n"
+                   "  %s reg [3:0] m [0:3];\n"
+                   "  always @(posedge c) begin\n    %s\n    %s\n  end\n"
+                   "  assign q = m[a];\nendmodule\n",
+                   attr, first, second);
+    pt_read_src(text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+}
+
+static const char k_mem_one_path[] =
+    "'m' is assigned with both '=' and '<=' on one control path (also at t.v:4:5); simulation and "
+    "synthesis may differ";
+
+/* A `$mem` word: `=` and `<=` at one variable address. */
+static void test_mem_word_mixed_one_path(void) {
+    mem_t9("(* nomem2reg *)", "m[a] = d;", "m[a] <= d + 4'd1;");
+    pt_expect_warning((at_loc){5, 5}, k_mem_one_path);
+    TEST_ASSERT_EQUAL_UINT32(1, pt_warnings_with("assigned with both"));
+}
+
+/* The same array as registers (variable-index words are a case over the words). */
+static void test_regs_word_mixed_one_path(void) {
+    mem_t9("(* mem2reg *)", "m[a] = d;", "m[a] <= d + 4'd1;");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_warnings_with("'m' is assigned with both"),
+                                     et_log(&pt_rs));
+    pt_expect_warning((at_loc){5, 5}, k_mem_one_path);
+}
+
+/* The two kinds in the arms of one `if` cannot both run: no "one control path" clause. */
+static void test_mem_word_mixed_exclusive_paths(void) {
+    mem_t9("(* nomem2reg *)", "if (s) m[a] = d;", "else m[a] <= d;");
+    pt_expect_warning((at_loc){5, 10}, "'m' is assigned with both '=' and '<=' (also at t.v:4:12)");
+}
+
+/* A constant word is its own record: other words are fine, the same word and a variable index
+ * are not. */
+static void test_mem_word_constant_addresses(void) {
+    mem_t9("(* nomem2reg *)", "m[1] = d;", "m[2] <= d;");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, pt_warnings_with("assigned with both"), et_log(&pt_rs));
+}
+
+static void test_mem_word_same_constant_word(void) {
+    mem_t9("(* nomem2reg *)", "m[1] = d;", "m[1] <= d;");
+    pt_expect_warning((at_loc){5, 5}, k_mem_one_path);
+}
+
+static void test_mem_word_constant_then_variable(void) {
+    mem_t9("(* nomem2reg *)", "m[1] = d;", "m[a] <= d;");
+    pt_expect_warning((at_loc){5, 5}, k_mem_one_path);
 }
 
 static void test_bits_split_across_blocks_are_fine(void) {
@@ -973,6 +1074,10 @@ int main(void) {
     RUN_TEST(test_readmemb_with_start_and_finish);
     RUN_TEST(test_readmem_errors);
     RUN_TEST(test_readmem_dropped_words_warn);
+    RUN_TEST(test_readmem_under_a_true_constant_if_is_read);
+    RUN_TEST(test_readmem_under_a_false_constant_if_is_not_read);
+    RUN_TEST(test_readmem_under_a_runtime_if_is_an_error);
+    RUN_TEST(test_widened_string_parameter_is_a_number);
     RUN_TEST(test_readmem_words_past_the_end_warn);
     RUN_TEST(test_readmem_address_forms_are_checked);
     RUN_TEST(test_readmem_huge_but_valid_address_drops_with_a_warning);
@@ -981,6 +1086,12 @@ int main(void) {
     RUN_TEST(test_readmem_outside_initial);
     RUN_TEST(test_readmem_size_cap);
     RUN_TEST(test_inlined_task_output_counts_as_blocking);
+    RUN_TEST(test_mem_word_mixed_one_path);
+    RUN_TEST(test_regs_word_mixed_one_path);
+    RUN_TEST(test_mem_word_mixed_exclusive_paths);
+    RUN_TEST(test_mem_word_constant_addresses);
+    RUN_TEST(test_mem_word_same_constant_word);
+    RUN_TEST(test_mem_word_constant_then_variable);
     RUN_TEST(test_bits_split_across_blocks_are_fine);
     RUN_TEST(test_pending_tables_are_empty);
     RUN_TEST(test_oom_sweep_sink);

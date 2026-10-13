@@ -360,10 +360,45 @@ static odin3_status frame_open(odin3_init *run, odin3_ast_id block) {
     return ODIN3_OK;
 }
 
+/* The branch an `if` with a constant condition takes: *stmt (0 for none), *folded false when the
+ * condition is not constant or has an x or z bit. */
+static odin3_status if_branch(odin3_init *run, odin3_ast_id *stmt, bool *folded) {
+    const odin3_ast *ast = run->e2->elab;
+    const odin3_ceval_req req = {odin3_ast_child(ast, *stmt, 0), {0, false, false}, "condition"};
+    odin3_cval value;
+    bool is_const = false;
+    *folded = false;
+    odin3_status st = odin3_ceval_try(run->ev, &req, run->e2->scratch, &value, &is_const);
+    if (st != ODIN3_OK || !is_const || !odin3_cval_is_known(&value)) {
+        return st;
+    }
+    *folded = true;
+    *stmt = odin3_ast_child(ast, *stmt, odin3_cval_truth(&value) == ODIN3_BIT_1 ? 1U : 2U);
+    return ODIN3_OK;
+}
+
+/* An `if` that holds a `$readmem` and whose condition is constant (`if (INIT == "yes") begin
+ * $readmemh(...); end`, as Yosys reads it) is the branch it takes, else-if chains followed. */
+static odin3_status fold_readmem_ifs(odin3_init *run, odin3_ast_id *stmt) {
+    bool folded = true;
+    while (folded && stmt->v != 0 && odin3_ast_kind_of(run->e2->elab, *stmt) == ODIN3_AST_IF &&
+           find_readmem(run->e2, *stmt).v != 0) {
+        odin3_status st = if_branch(run, stmt, &folded);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
 /* One statement: a block without locals opens a frame (D2 is per statement; a `$readmem` among
  * them is a statement of its own), a `$readmem` is read, anything else is run as one unit. */
 static odin3_status run_leaf(odin3_init *run, odin3_ast_id stmt) {
     const odin3_ast *ast = run->e2->elab;
+    odin3_status folded = fold_readmem_ifs(run, &stmt);
+    if (folded != ODIN3_OK || stmt.v == 0) {
+        return folded;
+    }
     odin3_ast_kind kind = odin3_ast_kind_of(ast, stmt);
     if (kind == ODIN3_AST_NULL_STMT) {
         return ODIN3_OK;

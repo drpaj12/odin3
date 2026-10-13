@@ -10,10 +10,13 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
+import bench_report
 import elab_sweep
 import memcap
 
@@ -58,6 +61,10 @@ argv = sys.argv[1:]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(["elab-equiv", *argv]) + "\\n")
 text = open(argv[-1]).read()
+if "EQOOM" in text:
+    print("elab-equiv: error: Yosys (side B) failed: out of memory (cap 4G)\\nequiv-check failed",
+          file=sys.stderr)
+    sys.exit(2)
 for code in (1, 2, 3, 77):
     if f"EQ{code}" in text:
         print(f"elab-equiv: message for exit {code}")
@@ -235,6 +242,59 @@ class LimitsTest(SweepTestCase):
         self.assertEqual(caps, [4 * GIB, 5 * GIB])
         self.assertLess(out.index("small.v"), out.index("lenet.v"))
 
+    def test_techlib_run_still_elaborates_with_nolatches(self) -> None:
+        item = elab_sweep.Item(self.write("a/x.v"), "a/x.v", 1)
+        cfg = elab_sweep.Config(odin3=str(self.odin3), yosys=None, equiv_check=None, bench=None,
+                                cap=GIB, caps={}, tops={}, golden_root=None,
+                                techlib="/lib/t.o3lib")
+        seen: list[list[str]] = []
+
+        def spy(argv: list[str], cap: int, start: float) -> tuple[None, elab_sweep.Outcome]:
+            seen.append(list(argv))
+            return None, elab_sweep.Outcome("fail", 0.0, "spy")
+
+        with mock.patch.object(elab_sweep, "run_child", spy):
+            elab_sweep.run_elab(cfg, item, GIB)
+        self.assertIn(f"read_techlib /lib/t.o3lib; read_verilog --nolatches {item.path}; stats",
+                      seen[0])
+
+    def test_a_cap_for_file_starts_with_nothing_else_in_flight(self) -> None:
+        for n in range(4):
+            self.write(f"a/s{n}.v", "x" * (n + 1))
+        self.write("koios/lenet.v", "x" * 50)
+        live = [0]
+        at_start: dict[int, int] = {}
+        lock = threading.Lock()
+        def spy(argv: list[str], cap: int, *a: object, **k: object) -> object:
+            with lock:
+                live[0] += 1
+                at_start[cap] = max(at_start.get(cap, 0), live[0])
+            time.sleep(0.05)
+            try:  # no real child: under load a real one can fail and hide the scheduling check
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            finally:
+                with lock:
+                    live[0] -= 1
+
+        with mock.patch.object(memcap, "run", spy):
+            code, _, err = self.run_tool(
+                "--jobs", "2", "--cap-for", "koios/lenet.v=5G", "--root", str(self.dir),
+                str(self.dir / "a"), str(self.dir / "koios"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(at_start[5 * GIB], 1)
+
+    def test_a_cap_for_file_is_checked_alone_against_the_slice(self) -> None:
+        self.write("koios/lenet.v", "x")
+        argv = ["--jobs", "2", "--mem-cap", "2G", "--cap-for", "koios/lenet.v=5G", "--root",
+                str(self.dir), str(self.dir / "koios")]
+        with mock.patch.object(elab_sweep, "slice_limit", return_value=4 * GIB):
+            code, _, err = self.run_tool(*argv)
+        self.assertEqual(code, 2)
+        self.assertIn("--cap-for 5G (alone)", err)
+        with mock.patch.object(elab_sweep, "slice_limit", return_value=6 * GIB):
+            code, _, err = self.run_tool(*argv)
+        self.assertEqual(code, 0, err)
+
 
 class VerdictTest(SweepTestCase):
     def test_listed_pass_unlisted_failure_and_listed_failure(self) -> None:
@@ -406,6 +466,23 @@ class ModeTest(SweepTestCase):
         self.assertEqual(argv[argv.index("--mem-cap") + 1], str(4 * GIB))
         self.assertEqual(argv[argv.index("--yosys") + 1].split("/")[-1], "Y")
 
+    def test_equiv_forwards_the_techlib(self) -> None:
+        self.write("m/eq.v", "x\n")
+        base = ["--equiv", "--yosys", "Y", "--equiv-check", "E", "--techlib", "/lib/t.o3lib"]
+        code, out, _ = self.run_tool(*base, str(self.dir / "m"))
+        self.assertEqual(code, 0, out)
+        argv = next(c for c in self.calls() if c[-1].endswith("eq.v"))
+        self.assertEqual(argv[argv.index("--techlib") + 1], "/lib/t.o3lib")
+
+    def test_a_cap_killed_bridge_run_is_never_an_expected_failure(self) -> None:
+        self.write("m/oom.v", "EQOOM\n")
+        listed = self.expect("oom.v [equiv-check failed] listed\n")
+        code, out, _ = self.run_tool("--equiv", "--yosys", "Y", "--equiv-check", "E",
+                                     "--expect-fail", listed, str(self.dir / "m"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  oom.v", out)
+        self.assertNotIn("xfail", out)
+
     def test_an_oracle_crash_alone_is_not_a_failure_and_a_listed_one_is_expected(self) -> None:
         self.write("m/crash.v", "EQ3\n")
         base = ["--equiv", "--yosys", "Y", "--equiv-check", "E"]
@@ -525,3 +602,62 @@ class ProcModesTest(SweepTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FAKE_BENCH_FULL = """#!{python}
+import json, os, sys
+argv = sys.argv[1:]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(json.dumps(["bench", *argv]) + "\\n")
+text = open(argv[1]).read()
+ms = "900" if "SLOW" in text else "1"
+print(" ".join(f"{k}={ms if k == 'elab_ms' else 1}" for k in bench_report.ELAB_COLUMNS))
+"""
+
+
+class BenchReportTest(SweepTestCase):
+    """Task 27: elab-sweep --bench passes --techlib on, and --bench-report prints the targets."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.bench = _exe(self.bin / "bench_elab", FAKE_BENCH_FULL.replace(
+            "bench_report.ELAB_COLUMNS", repr(bench_report.ELAB_COLUMNS)))
+
+    def test_bench_passes_the_techlib_to_each_child(self) -> None:
+        self.write("m/a.v", "xx")
+        lib = self.write("lib.o3lib", "x")
+        code, _, err = self.run_tool("--bench", str(self.bench), "--techlib", str(lib),
+                                     str(self.dir / "m"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls(),
+                         [["bench", "--one", str(self.dir / "m/a.v"), "--techlib", str(lib)]])
+
+    def test_bench_report_prints_the_targets_after_the_sweep(self) -> None:
+        self.write("m/mcml.v", "module m; endmodule\n")
+        code, out, err = self.run_tool("--bench", str(self.bench), "--bench-report", "elab",
+                                       "--root", str(self.dir / "m"), str(self.dir / "m"))
+        self.assertEqual(code, 0, err)
+        self.assertIn("bench targets (spec 15):", out)
+        self.assertRegex(out, r"ok +mcml\.v stage 1 \+ stage 2")
+        self.assertRegex(out, r"n/a +lenet\.v peak RSS")
+
+    def test_a_missed_target_fails_the_run(self) -> None:
+        self.write("m/mcml.v", "SLOW\n")
+        code, out, _ = self.run_tool("--bench", str(self.bench), "--bench-report", "elab",
+                                     "--root", str(self.dir / "m"), str(self.dir / "m"))
+        self.assertEqual(code, 1)
+        self.assertRegex(out, r"MISSED +mcml\.v stage 1 \+ stage 2")
+        self.assertIn("estimate terms of mcml.v", out)
+
+    def test_bench_report_needs_bench(self) -> None:
+        self.write("m/a.v")
+        code, _, err = self.run_tool("--bench-report", "elab", str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("--bench-report needs --bench", err)
+
+    def test_unknown_profile_is_a_usage_error(self) -> None:
+        self.write("m/a.v")
+        code, _, err = self.run_tool("--bench", str(self.bench), "--bench-report", "nope",
+                                     str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("unknown bench profile", err)

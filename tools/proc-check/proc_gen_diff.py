@@ -272,8 +272,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return exc.code if isinstance(exc.code, int) else EXIT_USAGE
     work = args.work or Path(tempfile.mkdtemp(prefix="proc-gen-diff-"))
     trio = not args.no_trio and trio_available(args.odin3)
-    cfg = Config(args.odin3, args.yosys, args.equiv_check, args.yosys_069, trio, args.mem_cap,
-                 work.resolve())
+    cfg = Config(odin3=args.odin3, yosys=args.yosys, equiv_check=args.equiv_check,
+                 yosys_069=args.yosys_069, trio=trio, cap=args.mem_cap, work=work.resolve())
     print(f"{TOOL}: seeds {args.seeds}, files under {cfg.work}")
     failed = drifted = crashed = tied = unproven = 0
     for seed in seeds:

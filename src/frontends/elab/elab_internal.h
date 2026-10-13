@@ -148,6 +148,7 @@ typedef enum odin3_elab2_type {
     ODIN3_E2T_LOGIC_OR,
     ODIN3_E2T_MUX,
     ODIN3_E2T_TRIBUF,
+    ODIN3_E2T_PMUX,
     ODIN3_E2T_MEM,
     ODIN3_E2T_PROC,
     ODIN3_E2T_CONST0,
@@ -169,6 +170,8 @@ struct odin3_elab2 {
     odin3_design *design;
     odin3_ast *elab;
     odin3_elab_opts opts;
+    bool mod_nolatches; /* the options in force for the module being emitted: the run's, or those */
+    bool mod_nomem2reg; /* of the `read_verilog --lib` read that supplied it (2D-7b) */
     const odin3_elab_limits *limits;
     odin3_elab_binding bind;
     odin3_symtab *st;
@@ -385,6 +388,13 @@ odin3_status odin3_elab2_account(odin3_elab2 *e2, const odin3_elab2_counts *made
  */
 odin3_status odin3_elab2_budget(odin3_elab2 *e2);
 
+/*
+ * True when the module name is a specialization's: a '$' followed by a `P=v` entry, the `$2` of a
+ * name already taken, or `h` and 16 hex digits (EL-9); an escaped identifier with a '$' in it is
+ * none of them. The summary line and tests/bench/bench_elab.c count with it.
+ */
+bool odin3_elab2_is_specialization(const char *name);
+
 /* True once the stage was stopped (the cap, a fatal cap, the budget). */
 bool odin3_elab2_stopped(const odin3_elab2 *e2);
 
@@ -474,6 +484,41 @@ typedef struct odin3_elab2_expr_req {
  * expression that failed before its last cell; cells made earlier stay (valid, unused).
  */
 odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);
+
+/*
+ * The same walk, suspendable at a user call (PR 2D-7, review I6): the generator that inlines calls
+ * runs the callee from its own frame stack instead of from inside the walk, so one call inside
+ * another costs no C stack. The walk's state is e2->frames and e2->vals above frame_base and
+ * val_base (stack discipline: whatever runs while the walk is suspended must leave both as it found
+ * them). req.reads must outlive the walk; its call hook is not called: a non-constant call of a
+ * user function suspends the walk with walk->call set, and the caller gives the call's value to
+ * odin3_elab2_walk_resume. A walk with no reads->call hook (a continuous context) never suspends.
+ * The cells made and their order are those of odin3_elab2_expr.
+ */
+typedef struct odin3_elab2_walk {
+    odin3_elab2_expr_req req;
+    size_t frame_base, val_base;
+    odin3_ast_id call; /* the call awaiting its value, or 0 */
+    uint32_t held_next;
+    uint8_t held_pick;
+} odin3_elab2_walk;
+
+/* Types the expression and opens its root. ODIN3_ERR_INVALID_ARG as odin3_elab2_expr. */
+odin3_status odin3_elab2_walk_begin(odin3_elab2 *e2, const odin3_elab2_expr_req *req,
+                                    odin3_elab2_walk *walk);
+
+/* Steps until the walk is done or suspended at a call (walk->call.v != 0). */
+odin3_status odin3_elab2_walk_run(odin3_elab2 *e2, odin3_elab2_walk *walk);
+
+/* The suspended call's value is the node's signal; the walk goes on with odin3_elab2_walk_run. */
+odin3_status odin3_elab2_walk_resume(odin3_elab2 *e2, odin3_elab2_walk *walk,
+                                     const odin3_sig *value);
+
+/* A finished walk's root signal; pops the walk's stacks. */
+void odin3_elab2_walk_take(odin3_elab2 *e2, odin3_elab2_walk *walk, odin3_sig *out);
+
+/* Pops whatever a walk (finished or not) left on the stacks (an error unwinds through this). */
+void odin3_elab2_walk_abort(odin3_elab2 *e2, odin3_elab2_walk *walk);
 
 /*
  * The self-determined type of an expression (EL-13): its width and sign, typed without generating
@@ -699,11 +744,11 @@ typedef struct odin3_elab2_claim_req {
  *    redirected onto a fresh net (odin3_elab2_lvalue_claim does, odin3_elab2_wired chains them);
  *    this net-only function cannot, so a wired net in req is ODIN3_ERR_INVALID_ARG (logged,
  * *granted false, nothing recorded): the caller uses the lvalue form;
- *  - ODIN3_DRV_TRIBUF is legal only on a net of a top-level output or inout port
- *    (`tri-state driver on 'x' is supported only on a top-level output or inout port (D3)`), and
- *    shares a net only with other tristate drivers and inout pins; ODIN3_DRV_INOUT_PIN shares a net
- *    only with those, and with ordinary logic is `net 'x' is driven by inout port 'p' of instance
- *    'u' and by logic at f.v:L:C; internal tri-state nets are not supported (D3)`.
+ *  - ODIN3_DRV_TRIBUF shares a net only with other tristate drivers and inout pins;
+ *    ODIN3_DRV_INOUT_PIN shares a net only with those, and with ordinary logic is `net 'x' is
+ *    driven by inout port 'p' of instance 'u' and by logic at f.v:L:C; internal tri-state nets are
+ *    not supported (D3)`. Whether a tri-state net may stay one (a top-level port) or becomes logic
+ *    is decided at the end of the module (odin3_elab2_tri_logic), not here.
  * ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG (logged) for a NULL argument, a kind past the
  * enum, or no module being emitted.
  */
@@ -749,6 +794,10 @@ odin3_status odin3_elab2_wired(odin3_elab2 *e2, odin3_ast_id module_node);
  * odin3_elab2_module.
  */
 odin3_status odin3_elab2_undriven(odin3_elab2 *e2);
+
+/* Deletes the unnamed wires that call frames made and nothing used (an unused local of a callee),
+ * after the module's processes are emitted. */
+odin3_status odin3_elab2_sweep_frames(odin3_elab2 *e2);
 
 /* Forgets the driver tables (a new module starts); frees them when e2 is destroyed. */
 void odin3_elab2_drive_reset(odin3_elab2 *e2);
@@ -920,6 +969,20 @@ typedef struct odin3_elab2_tri_req {
 } odin3_elab2_tri_req;
 
 odin3_status odin3_elab2_tribuf(odin3_elab2 *e2, const odin3_elab2_tri_req *req);
+
+/*
+ * Step (7b) of EL-28 (EL-29, spec 17 #79), after every net of the module is merged: the `$tribuf`
+ * cells of nets that reach no port of the top module become logic as Yosys's `tribuf -logic` does
+ * (a cell with a net on a top-level output or inout port keeps its handling). The cells whose Y is
+ * the same list of nets are one group, in source order; a group becomes one `$pmux` (WIDTH the
+ * nets, S_WIDTH the drivers) whose A is x (no driver enabled), B the drivers' data in order, S
+ * their enables and Y the nets, and the `$tribuf` cells are deleted. One warning per group, at its
+ * first driver: `tri-state drivers on internal net 'data' converted to logic (no driver enabled: x;
+ * several enabled: undefined)`. Located errors, the cell left alone: Y lists that overlap without
+ * being the same, a Y with both top-level port and internal nets, an inout port of a module below
+ * the top, an inout pin of a child instance on the net. Status as odin3_elab2_module.
+ */
+odin3_status odin3_elab2_tri_logic(odin3_elab2 *e2);
 
 /* The IR name of a net, variable or instance symbol: its scope path and its name, interned. */
 odin3_status odin3_elab2_scoped_name(odin3_elab2 *e2, const odin3_symbol *rec, uint32_t *name);

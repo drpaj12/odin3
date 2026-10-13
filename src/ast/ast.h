@@ -271,6 +271,35 @@ odin3_ast_id odin3_ast_root(const odin3_ast *ast, uint32_t idx);
 void odin3_ast_set_library_units_from(odin3_ast *ast, uint32_t root_idx);
 uint32_t odin3_ast_library_units_from(const odin3_ast *ast);
 
+/*
+ * Library-read flags of a root (2D-7b, `read_verilog --lib`): ODIN3_UNIT_LIB marks a UNIT that
+ * came from a library read (kept for later reads, elaborated only where instantiated), with the
+ * elaboration flags of that read: ODIN3_UNIT_NOLATCHES and ODIN3_UNIT_NOMEM2REG. 0 = a plain
+ * UNIT, which takes the flags of the read that elaborates it. odin3_ast_mark_units sets flags
+ * for the roots [first, end) (open or sealed store alike; roots past the root count, a NULL store
+ * or a range with first >= end are ignored; NO_MEMORY with the marks unchanged); the reader gives
+ * 0 for NULL or a root past the count.
+ */
+enum { ODIN3_UNIT_LIB = 1, ODIN3_UNIT_NOLATCHES = 2, ODIN3_UNIT_NOMEM2REG = 4 };
+odin3_status odin3_ast_mark_units(odin3_ast *ast, uint32_t first, uint32_t end, uint8_t flags);
+uint8_t odin3_ast_unit_flags(const odin3_ast *ast, uint32_t root_idx);
+
+/*
+ * The preprocessed streams of a `read_verilog --lib` read (2D-7b, I1 of the PR review): each
+ * design file's names, its stream FILE buffer and a copy of its preprocessed text, kept so a
+ * later read parses exactly what the library read's own macros and include directories produced,
+ * never what the later read's would. odin3_ast_keep_stream copies src.text into the store's
+ * arena (NO_MEMORY with nothing kept); odin3_ast_stream_at returns the idx-th (read order) or
+ * NULL past the end or for a NULL store. The record and its text live as long as the store.
+ */
+typedef struct odin3_ast_stream {
+    uint32_t given, resolved, library;
+    odin3_srcbuf_id buffer;
+    odin3_bytes text;
+} odin3_ast_stream;
+odin3_status odin3_ast_keep_stream(odin3_ast *ast, const odin3_ast_stream *src);
+const odin3_ast_stream *odin3_ast_stream_at(const odin3_ast *ast, uint32_t idx);
+
 /* The number of comments recorded in the store's side table (§7); 0 for NULL. */
 uint32_t odin3_ast_comment_count(const odin3_ast *ast);
 

@@ -141,6 +141,14 @@ static odin3_status given_top(odin3_elab1 *e1, uint32_t *def) {
         odin3_elab1_error(e1, e1->opts.top_at, "unknown_top: '%s' is not a defined module", text);
         return ODIN3_ERR_PARSE;
     }
+    if (defx_at(e1, at - 1)->shadows_cell) {
+        /* the IR names a module and a cell type alike (IR-11): the unit has no name to give */
+        odin3_elab1_error(e1, e1->opts.top_at,
+                          "unknown_top: '%s' is a library unit with the name of a registered cell "
+                          "type, so it cannot be the top; rename it",
+                          text);
+        return ODIN3_ERR_PARSE;
+    }
     if (odin3_elab1_def(e1, at - 1)->kind == ODIN3_DEF_BLACKBOX) {
         /* EL-4: a black box is never a MODULE, so it cannot head the UNIT (review m1). */
         odin3_elab1_error(e1, e1->opts.top_at,

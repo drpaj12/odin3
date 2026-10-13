@@ -127,6 +127,21 @@ static bool port_pair(const odin3_elab1_env *env, const odin3_elab1_slot *first,
     return (lhs_port && rhs_obj) || (lhs_obj && rhs_port);
 }
 
+/* A port merged with a reg or net that has unpacked dimensions (PR 2D-7b review M10): Yosys 0.55
+ * accepts `output q; reg [3:0] q [0:1];` and keeps the one-bit port and the array apart (the port
+ * stays undriven); the merged object here would drop the dimension without a word, so it is a
+ * located error at the declarator that has them (spec 17 #84). */
+static void unpacked_port(const odin3_elab1_env *env, const odin3_elab1_slot *first,
+                          const odin3_elab1_slot *proto) {
+    const odin3_elab1_slot *arr = proto->n_unpacked != 0 ? proto : first;
+    if (arr->n_unpacked != 0) {
+        env_error(env, arr->entry.decl,
+                  "'%s' is a port and its declaration has unpacked dimensions; a port cannot be an "
+                  "array",
+                  odin3_elab1_str(env->e1, arr->name));
+    }
+}
+
 odin3_status odin3_elab1_env_add(odin3_elab1_env *env, const odin3_elab1_slot *proto) {
     uint64_t key = (uint64_t)proto->scope << E1_SCOPE_SHIFT | proto->name;
     uint64_t at = 0;
@@ -137,6 +152,7 @@ odin3_status odin3_elab1_env_add(odin3_elab1_env *env, const odin3_elab1_slot *p
             return ODIN3_OK; /* the branches of one construct may share a block name */
         }
         if (port_pair(env, first, proto)) {
+            unpacked_port(env, first, proto);
             first->group2 = proto->group;
             first->decl2 = proto->entry.decl;
             return ODIN3_OK;
@@ -1283,10 +1299,10 @@ static odin3_status too_many(e1_pass *ps, const e1_ptarget *tg, odin3_ast_span e
     if (tg->n_params == E1_NONE || entries.n <= tg->n_params) {
         return ODIN3_OK;
     }
-    odin3_elab1_error(ps->e1, odin3_ast_loc(ps->e1->parsed, entries.ids[tg->n_params]),
-                      "too many parameter values for %s '%s' (%" PRIu32 " given, %" PRIu32
-                      " parameters)",
-                      tg->what, tg->name, entries.n, tg->n_params);
+    odin3_elab1_error(
+        ps->e1, odin3_ast_loc(ps->e1->parsed, entries.ids[tg->n_params]),
+        "too many parameter values for %s '%s' (%" PRIu32 " given, %" PRIu32 " parameters)%s",
+        tg->what, tg->name, entries.n, tg->n_params, odin3_elab1_fixed_width_why(tg->type));
     return ODIN3_ERR_PARSE;
 }
 
@@ -1460,6 +1476,7 @@ static odin3_status instantiation(e1_pass *ps, odin3_ast_id item) {
     odin3_elab1 *e1 = ps->e1;
     uint32_t name = odin3_ast_name(e1->parsed, item);
     odin3_elab_res res = odin3_elab1_resolve(e1, name, odin3_elab1_def(e1, ps->def)->library);
+    odin3_elab1_prefer_unit(e1, item, &res);
     switch (res.kind) {
     case ODIN3_RES_MODULE:
         if (odin3_elab1_reach_def(e1, res.def)) {

@@ -312,10 +312,12 @@ def parse(argv: Sequence[str] | None, vtr_root: str | None = None) -> Options:
     primitives = args.primitives
     if primitives is None and (args.scc_precheck or not args.no_primitives):
         primitives = find_primitives(vtr_root)
-    return Options(exe(args.odin3), exe(args.yosys), absolute(args.arch) or args.arch, args.top,
-                   absolute(args.config), args.keep, absolute(primitives),
-                   args.mem_cap, args.allow_version, args.scc_precheck, tuple(args.odin3_pre),
-                   args.no_primitives, tuple(path.resolve() for path in args.files))
+    return Options(
+        odin3=exe(args.odin3), yosys=exe(args.yosys), arch=absolute(args.arch) or args.arch,
+        top=args.top, config=absolute(args.config), keep=args.keep,
+        primitives=absolute(primitives), cap=args.mem_cap, allow_version=args.allow_version,
+        scc_precheck=args.scc_precheck, pre=tuple(args.odin3_pre),
+        no_primitives=args.no_primitives, files=tuple(path.resolve() for path in args.files))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

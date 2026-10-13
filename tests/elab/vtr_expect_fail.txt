@@ -1,0 +1,13 @@
+# The VTR and Koios files (one set of 64: $VTR_ROOT/vtr_flow/benchmarks/verilog/*.v and koios/*.v,
+# paths relative to that directory) that `odin3 --elab-only` rejects, one per line:
+# `<path> [needle] <one-line reason>` (2D spec 14.5, plan Task 27). The bracketed needle must appear
+# in odin3's output; a listed file that fails differently, or dies of a signal, a memory cap or a
+# timeout, is a failure (Task 26's rule). elab-sweep fails the run on an unlisted failure, on a
+# listed file that passes and on an entry that names no file: the list must shrink, never rot.
+# verilog_vtr_elab and elab_equiv_vtr read it; the bridge's own entries (and koios/lenet.v's `xl`
+# run class, whose Yosys side needs ~7 GB) are in vtr_equiv_expect_fail.txt.
+#
+# --- fragments: `define-only files the VTR task configs add to a run as include files, no module of their own ---
+koios/hard_mem_include.v [no_top: no top given and no module is defined] a `define-only include file (config.txt: include_list_add=...), no module; no koios design includes it by name
+koios/complex_dsp_include.v [no_top: no top given and no module is defined] a `define-only include file (config.txt: include_list_add=...), no module; no koios design includes it by name
+koios/hard_block_include.v [no_top: no top given and no module is defined] a `define-only include file (config.txt: include_list_add=...), no module; no koios design includes it by name

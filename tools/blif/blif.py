@@ -2,9 +2,16 @@
 
 Supported: multiple ``.model`` blocks (the first one is the top), ``.inputs``,
 ``.outputs``, ``.clock``, ``.names`` with single-output covers, ``.latch``,
-``.subckt``, ``.blackbox``, the VTR/Yosys extensions ``.cname``, ``.attr`` and
-``.param`` (attached to the preceding cell), ``#`` comments, ``\\`` line
-continuation and ``.end``.  Anything else raises :class:`BlifError`.
+``.subckt``, ``.blackbox``, ``.gate`` (only when asked for: see below), the VTR/Yosys
+extensions ``.cname``, ``.attr`` and ``.param`` (attached to the preceding cell), ``#``
+comments, ``\\`` line continuation and ``.end``.  Anything else raises :class:`BlifError`.
+
+``.gate`` is Yosys's spelling of a cell instance (``write_blif -gates`` writes the hard blocks
+it does not know, ``single_port_ram`` and the like, as ``.gate TYPE PORT=NET ...``).  It is
+parsed exactly like ``.subckt`` (a :class:`Subckt` with ``gate`` set) but only when
+``parse_text(..., gates=True)`` asks for it, so a tool that cannot handle a model-less cell
+keeps rejecting the directive.  A ``.gate`` of a type with no ``.model`` in the file is a
+black box without ports on record; :func:`gate_port_is_output` says which ports drive.
 
 The reader is a single linear pass; nothing here recurses over the netlist.
 Standard library only.
@@ -55,12 +62,13 @@ class Latch:
 
 @dataclass
 class Subckt:
-    """A ``.subckt`` instance; ``conns`` is the list of (formal, actual) pairs."""
+    """A ``.subckt`` (or ``.gate``) instance; ``conns`` is the list of (formal, actual) pairs."""
 
     model: str
     conns: list[tuple[str, str]]
     attrs: list[tuple[str, str]] = field(default_factory=list)
     line: int = 0
+    gate: bool = False  # spelled ``.gate`` (Yosys); its type need not have a ``.model``
 
 
 Cell: TypeAlias = Names | Latch | Subckt
@@ -98,6 +106,34 @@ class Netlist:
         return {m.name: m for m in self.models}
 
 
+# Output ports of the VTR hard blocks (lib/vtr.o3lib) when a ``.gate`` has no ``.model`` to
+# say.  Any other model-less cell type (Yosys's internal ``$_DFF_P_`` and the like) follows the
+# Yosys naming convention: Q, QN, Y, O and ``out``/``outN`` drive.
+_HARD_BLOCK_OUTPUTS = {
+    "adder": frozenset({"sumout", "cout"}),
+    "multiply": frozenset({"out"}),
+    "single_port_ram": frozenset({"out"}),
+    "dual_port_ram": frozenset({"out1", "out2"}),
+}
+_GENERIC_OUTPUT_RE = re.compile(r"(?:Q|QN|Y|O|out\d*|sumout|cout)")
+_BIT_RE = re.compile(r"(.*?)(?:\[(\d+)\])?")
+
+
+def port_base(formal: str) -> str:
+    """``out[3]`` -> ``out``; a name without a trailing ``[i]`` is returned as is."""
+    match = _BIT_RE.fullmatch(formal)
+    return match.group(1) if match else formal
+
+
+def gate_port_is_output(cell_type: str, formal: str) -> bool:
+    """True if port ``formal`` of the model-less cell ``cell_type`` drives its net."""
+    base = port_base(formal)
+    known = _HARD_BLOCK_OUTPUTS.get(cell_type)
+    if known is not None:
+        return base in known
+    return _GENERIC_OUTPUT_RE.fullmatch(base) is not None
+
+
 def latch_control(latch: Latch) -> str | None:
     """The latch control net, or None when absent or ``NIL``."""
     if latch.control is None or latch.control == NO_CONTROL:
@@ -112,7 +148,11 @@ def cell_io(cell: Cell, models: dict[str, Model]) -> tuple[list[str], list[str]]
     if isinstance(cell, Latch):
         ctrl = latch_control(cell)
         return ([cell.input] if ctrl is None else [cell.input, ctrl]), [cell.output]
-    outs = set(models[cell.model].outputs)
+    sub = models.get(cell.model)
+    if sub is None:  # a .gate whose type has no .model: directions from the cell type
+        outs = {f for f, _ in cell.conns if gate_port_is_output(cell.model, f)}
+    else:
+        outs = set(sub.outputs)
     ins = [a for f, a in cell.conns if f not in outs]
     return ins, [a for f, a in cell.conns if f in outs]
 
@@ -149,8 +189,9 @@ def logical_lines(text: str) -> Iterator[tuple[int, list[str]]]:
 
 
 class _Parser:
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, gates: bool = False) -> None:
         self.path = path
+        self.gates = gates
         self.models: list[Model] = []
         self.model: Model | None = None
         self.cell: Cell | None = None
@@ -214,14 +255,22 @@ class _Parser:
                 raise self.error(f"bad .latch type {latch.ltype!r}")
         self.add_cell(latch)
 
+    def d_gate(self, tokens: list[str]) -> None:
+        if not self.gates:
+            raise self.error("unsupported directive .gate")
+        self.d_subckt(tokens)
+        cell = self.cell
+        assert isinstance(cell, Subckt)
+        cell.gate = True
+
     def d_subckt(self, tokens: list[str]) -> None:
         if len(tokens) < 2:
-            raise self.error(".subckt needs a model name")
+            raise self.error(f"{tokens[0]} needs a model name")
         conns: list[tuple[str, str]] = []
         for tok in tokens[2:]:
             formal, eq, actual = tok.partition("=")
             if not eq or not formal or not actual:
-                raise self.error(f"bad .subckt connection {tok!r}")
+                raise self.error(f"bad {tokens[0]} connection {tok!r}")
             conns.append((formal, actual))
         self.add_cell(Subckt(model=tokens[1], conns=conns, line=self.line))
 
@@ -272,6 +321,7 @@ _HANDLERS = {
     ".names": _Parser.d_names,
     ".latch": _Parser.d_latch,
     ".subckt": _Parser.d_subckt,
+    ".gate": _Parser.d_gate,
     ".cname": _Parser.d_attr,
     ".attr": _Parser.d_attr,
     ".param": _Parser.d_attr,
@@ -290,6 +340,8 @@ def _err(path: str, line: int, msg: str) -> BlifError:
 def _check_subckt(path: str, cell: Subckt, models: dict[str, Model]) -> None:
     sub = models.get(cell.model)
     if sub is None:
+        if cell.gate:  # a model-less cell: the type is all there is to check
+            return
         raise _err(path, cell.line, f".subckt of undefined model {cell.model!r}")
     ports = set(sub.inputs) | set(sub.outputs) | set(sub.clocks)
     seen: set[str] = set()
@@ -327,9 +379,9 @@ def validate(netlist: Netlist) -> None:
         _check_model(netlist.path, model, models)
 
 
-def parse_text(text: str, path: str = "<string>") -> Netlist:
-    """Parse and validate BLIF text."""
-    parser = _Parser(path)
+def parse_text(text: str, path: str = "<string>", gates: bool = False) -> Netlist:
+    """Parse and validate BLIF text.  ``gates`` accepts ``.gate`` (see the module docstring)."""
+    parser = _Parser(path, gates)
     for lineno, tokens in logical_lines(text):
         parser.feed(lineno, tokens)
     netlist = Netlist(path=path, models=parser.models)
@@ -337,11 +389,11 @@ def parse_text(text: str, path: str = "<string>") -> Netlist:
     return netlist
 
 
-def parse_file(path: str) -> Netlist:
+def parse_file(path: str, gates: bool = False) -> Netlist:
     """Parse and validate a BLIF file.  I/O and decode errors become BlifError."""
     try:
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
     except (OSError, UnicodeDecodeError) as exc:
         raise BlifError(f"{path}: cannot read: {exc}") from exc
-    return parse_text(text, path)
+    return parse_text(text, path, gates)

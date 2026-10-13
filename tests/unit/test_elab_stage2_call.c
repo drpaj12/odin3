@@ -223,6 +223,47 @@ static void test_loops_over_overlapping_halves_conflict(void) {
     pt_expect_error((at_loc){4, 43}, "'y[3]' is assigned in two always blocks (also at t.v:3:43)");
 }
 
+/* PR 2D-6 re-review N1: a loop write under a runtime if/else: the switch's exit claims only the
+ * bits an arm assigns, so two blocks over disjoint halves are no conflict. */
+static void test_runtime_if_loops_over_disjoint_halves_are_no_conflict(void) {
+    pt_read_clean(
+        "module t(input [7:0] a, input [7:0] b, output [7:0] q);\n  reg [7:0] w;\n"
+        "  assign q = w;\n  integer i, j;\n"
+        "  always @* for (i = 0; i < 4; i = i + 1) if (a[i]) w[i] = b[i]; else w[i] = 0;\n"
+        "  always @* for (j = 0; j < 4; j = j + 1)\n"
+        "    case (a[j+4]) 1'b1: w[4+j] = b[j]; default: w[4+j] = 1; endcase\n"
+        "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(2, pt_count_of("$proc"));
+    pt_expect_ir_ok();
+}
+
+/* The soundness half of N1: two runtime-if loops that do write the same bit are still rejected. */
+static void test_runtime_if_loops_over_overlapping_halves_conflict(void) {
+    pt_read_failing(
+        "module t(input [7:0] a, input [7:0] b, output [7:0] q);\n  reg [7:0] w;\n"
+        "  assign q = w;\n  integer i, j;\n"
+        "  always @* for (i = 0; i < 4; i = i + 1) if (a[i]) w[i] = b[i]; else w[i] = 0;\n"
+        "  always @* for (j = 0; j < 4; j = j + 1) if (a[j]) w[j+3] = b[j]; else w[j+3] = 1;\n"
+        "endmodule\n");
+    pt_expect_error((at_loc){6, 53}, "'w[3]' is assigned in two always blocks (also at t.v:5:53)");
+}
+
+/* PR 2D-6 review I7: an edge event that reads a word of a register array with a variable index
+ * builds a block of its own while the ALWAYS is open; the open block is put aside, never cleared
+ * (it was `'' is assigned in two always blocks`). */
+static void test_edge_event_word_read_keeps_the_open_block(void) {
+    pt_read_src(
+        "module t(input [1:0] s, input d, input [7:0] x, output reg q);\n"
+        "  reg [3:0] m [0:3];\n"
+        "  always @(posedge m[s][0]) q <= d;\n"
+        "  always @* begin m[0] = x[3:0]; m[1] = x[7:4]; m[2] = x[1:0]; m[3] = x[5:2]; end\n"
+        "endmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_warning((at_loc){2, 13}, "replacing memory 'm' with list of registers; see t.v:4");
+    TEST_ASSERT_EQUAL_UINT32(3, pt_count_of("$proc"));
+    pt_expect_ir_ok();
+}
+
 /* Task 22's carry: inside an unrolled loop a branch on the variable folds in every iteration. */
 static void test_loop_folds_branches(void) {
     pt_read_clean("module t(input [3:0] a, output reg [3:0] y);\n  integer i;\n"
@@ -372,9 +413,31 @@ static void test_nesting_depth(void) {
     pt_expect_error((at_loc){3, 42}, "function call nesting deeper than 4 at 'f1'");
 }
 
-/* PR 2D-6 review I6 (interim): a chain of 300 functions, each calling the next in an expression,
- * is a located error at depth 256 (ODIN3_ELAB_MAX_INLINE_DEPTH), never a C stack overflow. */
-static void test_inline_nesting_is_capped_below_the_stack(void) {
+/* PR 2D-7: a callee's local that nothing uses (in a call met in a process and in one met outside
+ * one) leaves a frame wire with no pin; the frame wires are swept at the end of the module, so
+ * the IR check has no `rule 4: net has no pins`. A declared, unused reg of the module is no leak.
+ */
+static void test_unused_callee_local_leaves_no_pinless_net(void) {
+    pt_read_src("module t(input [3:0] a, b, output [3:0] c, output reg [3:0] y);\n"
+                "  reg [7:0] declared_but_unused;\n"
+                "  function [3:0] f(input [3:0] x, input [3:0] z);\n"
+                "    reg [3:0] unused_local;\n"
+                "    f = x ^ z;\n"
+                "  endfunction\n"
+                "  assign c = f(a, b);\n"
+                "  always @* y = f(b, a);\n"
+                "endmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_ir_ok();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, et_count_with(&pt_rs, ODIN3_LOG_WARN, "has no pins"),
+                                     et_log(&pt_rs));
+}
+
+/* PR 2D-7 (review I6 fixed): a call inside a call is inlined from the frame stack, not by C
+ * recursion, so a chain of 300 functions, each calling the next in an expression, elaborates (the
+ * 256 cap of the interim guard is gone; tools/ test_inline_stack.py runs 1000 under a 2 MiB
+ * stack). */
+static void test_inline_nesting_is_not_limited_by_the_stack(void) {
     enum { CHAIN = 300, SRC_MAX = 64 * 1024 };
     char *src = malloc(SRC_MAX);
     TEST_ASSERT_NOT_NULL(src);
@@ -390,11 +453,9 @@ static void test_inline_nesting_is_capped_below_the_stack(void) {
                                               k, k, k + 1));
     }
     (void)snprintf(src + len, SRC_MAX - len, "  always @* y = f1(a);\nendmodule\n");
-    pt_read_failing(src);
+    pt_read_clean(src);
     free(src);
-    TEST_ASSERT_NOT_NULL_MESSAGE(
-        strstr(et_log(&pt_rs), "error: function call nesting deeper than 256 at 'f"),
-        et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
 }
 
 /* PR 2D-6 review M3: the classic unsigned countdown never ends (k >= 0 is always true for a
@@ -898,6 +959,9 @@ static void test_call_in_edge_expression_is_error(void) {
     X(test_loops_over_disjoint_halves_are_no_conflict)                                             \
     X(test_loop_writing_half_holds_only_that_half)                                                 \
     X(test_loops_over_overlapping_halves_conflict)                                                 \
+    X(test_runtime_if_loops_over_disjoint_halves_are_no_conflict)                                  \
+    X(test_runtime_if_loops_over_overlapping_halves_conflict)                                      \
+    X(test_edge_event_word_read_keeps_the_open_block)                                              \
     X(test_for_unrolled)                                                                           \
     X(test_for_variable_read_outside)                                                              \
     X(test_for_counts_down)                                                                        \
@@ -922,7 +986,8 @@ static void test_call_in_edge_expression_is_error(void) {
     X(test_inlined_provenance)                                                                     \
     X(test_recursion_not_constant)                                                                 \
     X(test_nesting_depth)                                                                          \
-    X(test_inline_nesting_is_capped_below_the_stack)                                               \
+    X(test_unused_callee_local_leaves_no_pinless_net)                                              \
+    X(test_inline_nesting_is_not_limited_by_the_stack)                                             \
     X(test_endless_unsigned_countdown_is_found_by_its_cycle)                                       \
     X(test_endless_loop_with_a_second_variable_hits_the_object_budget)                             \
     X(test_ending_loop_is_not_a_cycle)                                                             \

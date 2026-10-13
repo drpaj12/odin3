@@ -53,6 +53,8 @@ struct odin3_ast {
     uint32_t max_nodes;          /* ODIN3_AST_MAX_NODES unless a test lowered it */
     uint32_t max_depth;          /* ODIN3_AST_MAX_DEPTH unless a test lowered it */
     uint32_t library_units_from; /* root index of the first library UNIT; 0 = none (2C §9 b) */
+    odin3_vec unit_flags;        /* uint8_t per root (ODIN3_UNIT_*); shorter than units = 0 */
+    odin3_vec streams;           /* odin3_ast_stream: a --lib read's preprocessed files (arena) */
 };
 
 /* The record of node, NULL for 0 or an ID at or past the end. */
