@@ -16,6 +16,7 @@
 #include "passes/opt/opt_test.h"
 #include "proc_build.h"
 #include "unity.h"
+#include "util/alloc.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -691,12 +692,17 @@ static char *design_text(void) {
     return copy;
 }
 
+/* The text has (present) or lacks needle. */
+static void expect_text(const char *text, const char *needle, bool present) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(present ? 1 : 0, strstr(text, needle) != NULL ? 1 : 0, needle);
+}
+
 static void expect_pipeline_constant(void) {
     char *text = design_text();
-    TEST_ASSERT_NULL(strstr(text, "cell $dff"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "connect \\q1 1'0"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "connect \\q2 1'0"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "connect \\q3 1'0"));
+    expect_text(text, "cell $dff", false);
+    expect_text(text, "connect \\q1 1'0", true);
+    expect_text(text, "connect \\q2 1'0", true);
+    expect_text(text, "connect \\q3 1'0", true);
     free(text);
 }
 
@@ -779,11 +785,11 @@ static char *run_case(const char *name, const char *args) {
  * after each incremental call and aborts when that finds more to do. */
 static void test_dirty_vs_full_rescan(void) {
     static const char *const k_args[] = {"", "-mux_undef -mux_bool -undriven -fine", "-keepdc"};
-    for (size_t a = 0; a < sizeof k_args / sizeof k_args[0]; a++) {
+    for (size_t set = 0; set < sizeof k_args / sizeof k_args[0]; set++) {
         for (size_t i = 0; i < N_LOOP_CASES; i++) {
-            char *incremental = run_case(k_loop_cases[i], k_args[a]);
+            char *incremental = run_case(k_loop_cases[i], k_args[set]);
             char full_args[128];
-            int len = snprintf(full_args, sizeof full_args, "%s --opt-full-rescan", k_args[a]);
+            int len = snprintf(full_args, sizeof full_args, "%s --opt-full-rescan", k_args[set]);
             TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof full_args);
             char *rescan = run_case(k_loop_cases[i], full_args);
             TEST_ASSERT_EQUAL_STRING_MESSAGE(incremental, rescan, k_loop_cases[i]);
@@ -891,6 +897,14 @@ static void expect_body(uint32_t nth, const uint8_t *want, uint32_t want_len) {
     "  process $p1\n    sync always\n      update \\z1 \\s\n  end\n"                               \
     "  process $p2\n    sync always\n      update \\z2 \\s\n  end\nend\n"
 
+/* opt_muxtree and opt_clean logged their skip line for the module `m` (at least once). */
+static void expect_skip_lines(void) {
+    TEST_ASSERT_GREATER_THAN_UINT32(
+        0, count_lines(ODIN3_LOG_INFO, "opt_muxtree: module 'm' has processes; skipped"));
+    TEST_ASSERT_GREATER_THAN_UINT32(
+        0, count_lines(ODIN3_LOG_INFO, "opt_clean: module 'm' has processes; skipped"));
+}
+
 /* Review Focus 5 (mode P): the cells around a $proc are optimised, the $proc is opaque. */
 static void test_opacity_mode_p(void) {
     build(OPAQUE_TEXT);
@@ -901,16 +915,13 @@ static void test_opacity_mode_p(void) {
     TEST_ASSERT_EQUAL_UINT32(2, odin3_module_proc_count(pb_module(&res, "m")));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-nodffe -nosdff"));
     char *text = design_text();
-    TEST_ASSERT_NULL(strstr(text, "cell $add"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "cell $or"));
+    expect_text(text, "cell $add", false);
+    expect_text(text, "cell $or", true);
     free(text);
     TEST_ASSERT_EQUAL_UINT32(2, odin3_module_proc_count(pb_module(&res, "m")));
     expect_body(0, body1, len1);
     expect_body(1, body2, len2);
-    TEST_ASSERT_TRUE(
-        count_lines(ODIN3_LOG_INFO, "opt_muxtree: module 'm' has processes; skipped") >= 1U);
-    TEST_ASSERT_TRUE(count_lines(ODIN3_LOG_INFO, "opt_clean: module 'm' has processes; skipped") >=
-                     1U);
+    expect_skip_lines();
     free(body1);
     free(body2);
     check_full();
@@ -943,13 +954,10 @@ static void test_opt_after_failed_proc(void) {
     TEST_ASSERT_EQUAL_UINT32(1, odin3_module_proc_count(pb_module(&res, "m")));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_expr", ""));
     char *text = design_text();
-    TEST_ASSERT_NULL(strstr(text, "cell $add"));
+    expect_text(text, "cell $add", false);
     free(text);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-nodffe -nosdff"));
-    TEST_ASSERT_TRUE(
-        count_lines(ODIN3_LOG_INFO, "opt_muxtree: module 'm' has processes; skipped") >= 1U);
-    TEST_ASSERT_TRUE(count_lines(ODIN3_LOG_INFO, "opt_clean: module 'm' has processes; skipped") >=
-                     1U);
+    expect_skip_lines();
     expect_body(0, body, len);
     free(body);
     check_full();
@@ -987,6 +995,57 @@ static void test_opt_stats_driver(void) {
             TEST_ASSERT_NULL_MESSAGE(strstr(lines[i].text, " 0"), lines[i].text);
         }
     }
+}
+
+/* A module for the OOM sweep: a dead mux port, a duplicate gate, a constant pipeline. */
+#define OOM_TEXT                                                                                   \
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\a\n  wire input 3 \\b\n"                   \
+    "  wire input 4 \\s\n  wire output 5 \\y\n  wire output 6 \\w\n  wire output 7 \\q1\n"         \
+    "  wire output 8 \\q2\n  wire \\t\n  wire \\n1\n  wire \\n2\n"                                 \
+    "  cell $mux \\inner\n    parameter \\WIDTH 1\n    connect \\A \\b\n    connect \\B \\a\n"     \
+    "    connect \\S \\s\n    connect \\Y \\t\n  end\n"                                            \
+    "  cell $mux \\outer\n    parameter \\WIDTH 1\n    connect \\A \\a\n    connect \\B \\t\n"     \
+    "    connect \\S \\s\n    connect \\Y \\y\n  end\n"                                            \
+    "  cell $not \\i1\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"                    \
+    "    parameter \\Y_WIDTH 1\n    connect \\A \\a\n    connect \\Y \\n1\n  end\n"                \
+    "  cell $not \\i2\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"                    \
+    "    parameter \\Y_WIDTH 1\n    connect \\A \\a\n    connect \\Y \\n2\n  end\n"                \
+    "  cell $mux \\mx\n    parameter \\WIDTH 1\n    connect \\A \\n1\n    connect \\B \\n2\n"      \
+    "    connect \\S \\b\n    connect \\Y \\w\n  end\n"                                            \
+    "  cell $dff \\f1\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D 1'0\n    connect \\Q \\q1\n  end\n"                  \
+    "  cell $dff \\f2\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D \\q1\n    connect \\Q \\q2\n  end\nend\n"
+
+enum { OOM_LIMIT = 4000, OOM_MIN_POINTS = 20 };
+
+/* One run of `opt` with the allocation fail-th failing: true when it succeeded (the sweep's end).
+ * A failed run leaves the IR valid, and a second run without failure finishes. */
+static bool oom_once(long fail) {
+    pb_free(&res);
+    build(OOM_TEXT);
+    n_lines = 0;
+    odin3_util_set_alloc_fail_after(fail);
+    odin3_status st = odin3_design_run_pass(res.design, "opt", "");
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+    check_full();
+    if (st != ODIN3_OK) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+        check_full();
+    }
+    return st == ODIN3_OK;
+}
+
+/* Every allocation point of an `opt` run fails once, in turn. */
+static void test_opt_oom(void) {
+    long failures = 0;
+    while (failures < OOM_LIMIT && !oom_once(failures)) {
+        failures++;
+    }
+    printf("opt OOM: %ld failing allocation points\n", failures);
+    TEST_ASSERT_TRUE(failures < OOM_LIMIT);
+    TEST_ASSERT_TRUE(failures > OOM_MIN_POINTS);
 }
 
 /* Two runs, byte-identical write_rtlil; and the reverse creation order of the nodes gives the
@@ -1031,6 +1090,7 @@ int main(void) {
     RUN_TEST(test_opt_after_failed_proc);
     RUN_TEST(test_budget_opt);
     RUN_TEST(test_opt_stats_driver);
+    RUN_TEST(test_opt_oom);
     RUN_TEST(test_determinism);
     return UNITY_END();
 }

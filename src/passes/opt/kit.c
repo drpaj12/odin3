@@ -642,8 +642,7 @@ static odin3_status budget_tick(odin3_opt_ctx *oc, uint64_t pins) {
     if (before / ODIN3_OPT_BUDGET_PINS == oc->pins_created / ODIN3_OPT_BUDGET_PINS) {
         return ODIN3_OK;
     }
-    uint64_t extra = (uint64_t)oc->invert.cap * oc->invert.elem_size +
-                     odin3_opt_dirty_bytes(oc);
+    uint64_t extra = (uint64_t)oc->invert.cap * oc->invert.elem_size + odin3_opt_dirty_bytes(oc);
     odin3_status st = odin3_budget_check(oc->pass, oc->design, extra);
     if (st != ODIN3_ERR_PARSE) {
         return st;

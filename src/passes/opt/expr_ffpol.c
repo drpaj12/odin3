@@ -359,7 +359,7 @@ odin3_status odin3_opt_expr_ffpol(odin3_opt_ctx *oc, bool x_round) {
             type = table_find(&tab, odin3_node_type(oc->module, node));
         }
         st = type != NULL && odin3_opt_dirty_take(oc, node, x_round) ? fold_node(oc, type, node)
-                                                                          : ODIN3_OK;
+                                                                     : ODIN3_OK;
     }
     return st;
 }

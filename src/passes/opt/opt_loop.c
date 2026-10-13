@@ -95,7 +95,7 @@ static void warn_cap(const loop *lp, uint32_t iterations) {
     uint32_t end = odin3_design_module_end(lp->design);
     uint32_t warned = 0;
     for (uint32_t id = 1; id < end; id++) {
-        odin3_module *module = odin3_module_get(lp->design, (odin3_module_id){id});
+        const odin3_module *module = odin3_module_get(lp->design, (odin3_module_id){id});
         if (module == NULL || !odin3_opt_session_module_changed((odin3_module_id){id})) {
             continue;
         }
@@ -106,7 +106,7 @@ static void warn_cap(const loop *lp, uint32_t iterations) {
         warned++;
     }
     if (warned == 0 && end > 1) {
-        odin3_module *module = odin3_module_get(lp->design, (odin3_module_id){end - 1U});
+        const odin3_module *module = odin3_module_get(lp->design, (odin3_module_id){end - 1U});
         odin3_log(ODIN3_LOG_WARN,
                   "opt: module '%s': no fixed point after %" PRIu32 " iterations; stopping",
                   odin3_strtab_get(odin3_design_strtab(lp->design), odin3_module_name(module)),

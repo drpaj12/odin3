@@ -1198,7 +1198,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                            help_runs_nothing check_flag usage techlib plugin writers sim keep_ast
                            project_dump project_top project_revision project_diag_paths
                            project_preprocess parse_only parse_only_with_script elab_only
-                           elab_only_with_script abc_script_missing abc_script_project opt_snapshot)
+                           elab_only_with_script abc_script_missing abc_script_project opt_snapshot opt_determinism)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare

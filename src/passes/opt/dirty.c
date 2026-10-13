@@ -104,12 +104,13 @@ struct odin3_opt_modstate *odin3_opt_modstate_of(const odin3_design *design,
 /* --- marks ----------------------------------------------------------------------------------- */
 
 /* Room for node's byte; false (and the module falls back to "all dirty") when it cannot grow. */
-static bool mark_room(struct odin3_opt_modstate *mod, uint32_t node, uint32_t node_end) {
-    if ((size_t)node < mod->n_bits) {
+static bool mark_room(struct odin3_opt_modstate *mod, const odin3_module *module,
+                      odin3_node_id node) {
+    if ((size_t)node.v < mod->n_bits) {
         return true;
     }
-    size_t want = (size_t)node_end + GROW_SLACK;
-    want = want > (size_t)node + 1U ? want : (size_t)node + 1U;
+    size_t want = (size_t)odin3_module_node_end(module) + GROW_SLACK;
+    want = want > (size_t)node.v + 1U ? want : (size_t)node.v + 1U;
     uint8_t *grown = odin3_util_realloc(mod->bits, want);
     if (grown == NULL) {
         odin3_util_free(mod->bits);
@@ -128,7 +129,7 @@ static bool mark_room(struct odin3_opt_modstate *mod, uint32_t node, uint32_t no
 /* Sets bits on node; returns the bits it had. */
 static uint8_t mark_set(struct odin3_opt_modstate *mod, const odin3_module *module,
                         odin3_node_id node, uint8_t bits) {
-    if (mod->all || !mark_room(mod, node.v, odin3_module_node_end(module))) {
+    if (mod->all || !mark_room(mod, module, node)) {
         return MARK_ALL;
     }
     uint8_t had = mod->bits[node.v];
