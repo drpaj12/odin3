@@ -346,6 +346,17 @@ class MicroTopTest(unittest.TestCase):
                 mod.group_and_leaf("tests/micro/verilog/grp/leaf1.v"), ("grp", "leaf1")
             )
             self.assertEqual(mod.group_and_leaf("grp/leaf1"), ("grp", "leaf1"))
+            # a nested group (keywords/assign/assign_wide.v) keeps its whole directory
+            self.assertEqual(
+                mod.group_and_leaf("/x/tests/micro/verilog/keywords/assign/assign_wide.v"),
+                ("keywords/assign", "assign_wide"),
+            )
+            nested = Path(tmp) / "regression" / "verilog" / "kw" / "sub" / "leaf2"
+            nested.mkdir(parents=True)
+            (nested / "leaf2.parmys.blif").write_text(".model deep\n.end\n")
+            self.assertEqual(
+                mod.main(["--golden-root", tmp, "tests/micro/verilog/kw/sub/leaf2.v"]), 0
+            )
             self.assertEqual(mod.main(["--golden-root", tmp, "grp/leaf1"]), 0)
             self.assertEqual(mod.main(["--golden-root", tmp, "grp/none"]), 1)
             (leaf / "leaf1.parmys.blif").write_text("# no model\n")

@@ -51,6 +51,9 @@ if argv == ["-V"]:
     print(os.environ.get("FAKE_YOSYS_VERSION", "{oracle}"))
     sys.exit(0)
 script = argv[argv.index("-p") + 1]
+sig = os.environ.get("FAKE_YOSYS_SIGNAL")
+if sig and os.environ.get("FAKE_YOSYS_SIGNAL_ON", "") in script:
+    os.kill(os.getpid(), int(sig))
 fail = os.environ.get("FAKE_YOSYS_FAIL")
 if fail and fail in script:
     print("ERROR: no")
@@ -235,7 +238,37 @@ class BridgeTest(unittest.TestCase):
         code, _, err = self.run_tool(extra={"FAKE_ODIN3_RC": "1"})
         self.assertEqual(code, 2)
         self.assertIn("odin3 (side A) failed (exit 1)", err)
-        self.assertEqual(self.names(), ["yosys", "odin3"])
+        # odin3 rejected the file: Yosys reads the source once more, to tell a crash of its own
+        self.assertEqual(self.names(), ["yosys", "odin3", "yosys"])
+
+    def test_yosys_crash_is_an_oracle_crash(self) -> None:
+        """Task 26 (PR 2D-3 review m6): Yosys 0.55 segfaults on recursive instantiation, where
+        odin3 reports the recursion. Exit 3, naming both; never exit 1 or 2."""
+        signal_b = {"FAKE_YOSYS_SIGNAL": "11", "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"}
+        code, out, err = self.run_tool(extra={"FAKE_ODIN3_RC": "1", **signal_b})
+        self.assertEqual(code, 3, err)
+        self.assertIn("oracle crash", out)
+        self.assertIn("signal 11", out)
+        self.assertIn("odin3 rejected the file: odin3: error: no", out)
+        code, out, err = self.run_tool(extra=signal_b)  # odin3 accepts, Yosys crashes
+        self.assertEqual(code, 3, err)
+        self.assertIn("Yosys side B crashed", out)
+        # a crash while Yosys reads odin3's own output is not the oracle's
+        code, _, err = self.run_tool(
+            extra={"FAKE_YOSYS_SIGNAL": "11", "FAKE_YOSYS_SIGNAL_ON": "read_rtlil a.il; hierarchy"})
+        self.assertEqual(code, 2)
+        self.assertIn("Yosys side A failed (exit -11)", err)
+        # odin3 rejects and Yosys accepts: still a 2D rejection
+        code, _, _ = self.run_tool(extra={"FAKE_ODIN3_RC": "1"})
+        self.assertEqual(code, 2)
+
+    def test_a_child_killed_by_its_cap_is_out_of_memory(self) -> None:
+        code, _, err = self.run_tool("--mem-cap", str(4 * GIB),
+                                     extra={"FAKE_YOSYS_SIGNAL": "9",
+                                            "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"})
+        self.assertEqual(code, 2)
+        self.assertIn("out of memory (cap 4G)", err)
+        self.assertEqual(elab_equiv.format_cap(512 << 20), "512M")
 
     def test_yosys_failures_are_errors(self) -> None:
         for fail, what in (("read_rtlil a.il; hierarchy", "Yosys side A"),
