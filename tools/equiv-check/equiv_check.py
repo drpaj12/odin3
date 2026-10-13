@@ -3,7 +3,7 @@
 Usage::
 
     equiv-check A.blif B.blif [--abc PATH] [--keep-temp] [--strict-init] [--no-io-normalize]
-                [--no-cut] [--match-dollar] [--x-report]
+                [--no-cut] [--match-unnamed] [--x-report]
 
 Exit 0 equivalent, 1 not equivalent (including mismatched primary I/O sets and black-box
 cut-point inputs that are wired differently), 2 usage, input, unsupported-construct or ABC
@@ -50,12 +50,36 @@ connect identically; a box's behaviour is assumed equal, never checked.  A black
 by a primary clock is fine (its outputs are free inputs), but a clocked black box's internal
 state is not modelled: only its connections are compared.  The cut is on whenever black
 boxes are present; ``--no-cut`` restores the old behaviour of rejecting them (exit 2, and
-``.gate`` is rejected as an unsupported directive).  ``--match-dollar`` (2H) lets an instance with
-no ``.cname`` and no stable output net be named by its first output net even when it starts with
-``$``: Parmys names a hard multiplier's output ``$mul~14[0]`` and writes no ``.cname``, and both
-netlists of the exit test come out of Parmys's own counter.  The cut stays sound, because every
-matched pair must have equal input functions; a pairing that differs between the two files can
-only make the verdict a false "not equivalent" or exit 2.
+``.gate`` is rejected as an unsupported directive).
+
+``--match-unnamed`` (2H; spelled ``--match-dollar`` before) matches every black box that has no
+``.cname`` by *simulation signature* instead of by a name: Parmys writes no ``.cname`` for its hard
+blocks and numbers their output nets with counters (``$mul~14[0]``,
+``dual_port_ram^MEM~0-30^out1[0]``) that differ between two runs.  The signature of a box is its
+cell type, its parameters, its port widths and the function of each of its input bits.  Both
+netlists are simulated on the same random vectors (primary inputs by normalised name, latches
+from their init values, cut boxes as free outputs driven by a pseudo-random function of their
+type and input history, see ``bbmatch``), so an input bit's response vector identifies the
+function that drives it, even through latches whose names differ.  Boxes are then paired:
+
+- one box with a signature on each side: paired;
+- several with one signature on each side: paired in file order only if they are interchangeable
+  (the same input net on every pin, constants and buffers looked through), else exit 2;
+- anything else (no partner, a different count, a signature that differs because the logic in
+  front of the box differs): exit 2, listing the boxes.  A genuine difference upstream of a box
+  can show as exit 2 here instead of as "not equivalent".
+
+Soundness: the signature only *proposes* a pairing; it is never trusted.  After pairing, each
+pair is an ordinary named cut point and the normal ABC check runs: the outputs of paired boxes are
+one shared free input, and the input pins of paired boxes are compared as primary outputs.  The
+two netlists are called equivalent only if every paired pair has the same cell type, parameters
+and port widths and provably the same function on every input pin, and everything else is
+equivalent given any values of the free outputs; since a (deterministic) box with the same
+inputs has the same outputs, and the proof held for every value the shared outputs could take,
+the netlists are equivalent.  A wrong pairing (boxes of the same type whose inputs differ) makes
+the proof of some pin fail, so the verdict is "not equivalent", never "equivalent"; sampling
+can only lose a match, not create a false one.  As before, a box's internal behaviour is assumed,
+not checked (RAM contents, initial state).
 
 ABC models every latch as a flip-flop on one implicit clock, so each file must use a single
 (edge type, clock) pair -- the clock being a primary input, possibly through buffers -- and
@@ -84,6 +108,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blif"))
+import bbmatch  # noqa: E402
 import blif  # noqa: E402
 
 TOOL = "equiv-check"
@@ -184,6 +209,10 @@ class BlackBox:
     line: int
     inputs: dict[str, str]
     outputs: dict[str, str]
+    anon: bool = False  # no name: matched by simulation signature (``--match-unnamed``)
+    params: tuple[tuple[str, str], ...] = ()
+    free: dict[str, str] = field(default_factory=dict)  # output pin -> its free input net
+    probes: dict[str, str] = field(default_factory=dict)  # input pin -> its probe output net
 
 
 @dataclass
@@ -264,11 +293,12 @@ def _gate_adder_model(cell: blif.Subckt) -> blif.Model:
 
 class _Flattener:
     def __init__(self, netlist: blif.Netlist, strict_init: bool, cut: bool,
-                 normalize: bool, match_dollar: bool = False) -> None:
+                 normalize: bool, match_unnamed: bool = False) -> None:
         self.netlist = netlist
         self.cut = cut
         self.normalize = normalize
-        self.match_dollar = match_dollar
+        self.match_unnamed = match_unnamed
+        self.anon_count = 0
         self.instances: dict[str, BlackBox] = {}
         self.models = netlist.by_name()
         self.strict_init = strict_init
@@ -363,9 +393,15 @@ class _Flattener:
             is_out = {names[f]: f in sub.outputs for f, _ in cell.conns}
         ordered = sorted(cell.conns, key=lambda c: _formal_order(names[c[0]]))
         pins = {names[f]: frame.resolve(a) for f, a in ordered}
-        box = BlackBox(cell.model, self.instance_key(cell, frame, pins, is_out), cell.line,
+        key = self.instance_key(cell, frame, pins, is_out)
+        anon = key is None
+        if key is None:  # a provisional key: it must be a legal BLIF net name, and unique
+            self.anon_count += 1
+            key = f"?anon{self.anon_count}"
+        box = BlackBox(cell.model, key, cell.line,
                        {f: n for f, n in pins.items() if not is_out[f]},
-                       {f: n for f, n in pins.items() if is_out[f]})
+                       {f: n for f, n in pins.items() if is_out[f]}, anon=anon,
+                       params=tuple(sorted(a for a in cell.attrs if a[0] != ".cname")))
         other = self.instances.get(box.key)
         if other is not None:
             raise EquivError(f"{self.netlist.path}:{cell.line}: two black-box instances named "
@@ -374,16 +410,19 @@ class _Flattener:
         self.flat.blackboxes.append(box)
         for formal, net in box.outputs.items():
             free = f"bbout:{box.cell_type}:{box.key}:{formal}"
+            box.free[formal] = free
             self.flat.inputs.append(free)
             self.flat.names.append(blif.Names(inputs=[free], output=net, rows=[("1", "1")]))
         for formal, net in box.inputs.items():
             probe = f"bbin:{box.cell_type}:{box.key}:{formal}"
+            box.probes[formal] = probe
             self.flat.outputs.append(probe)
             self.flat.names.append(blif.Names(inputs=[net], output=probe, rows=[("1", "1")]))
 
     def instance_key(self, cell: blif.Subckt, frame: _Frame, pins: dict[str, str],
-                     is_out: dict[str, bool]) -> str:
-        """The instance name used to match black boxes across the two files."""
+                     is_out: dict[str, bool]) -> str | None:
+        """The instance name used to match black boxes across the two files; None for an
+        instance that ``--match-unnamed`` leaves to the signature matching (no ``.cname``)."""
         def norm(name: str) -> str:
             name = normalize_io_name(name, self.flat.top) if self.normalize else name
             return name.replace(" ", "_")
@@ -391,11 +430,12 @@ class _Flattener:
         for attr, value in cell.attrs:
             if attr == ".cname" and value:
                 return "/".join([*frame.path[1:], norm(value)])
-        for dollar_ok in (False, True) if self.match_dollar else (False,):
-            for formal, net in pins.items():
-                if is_out[formal] and _SEP not in net and (dollar_ok or not net.startswith("$")):
-                    base, bit = _formal_order(formal)  # width-independent: out[0] and out agree
-                    return f"{base}{f'[{bit}]' if bit else ''}={norm(net)}"
+        if self.match_unnamed:
+            return None
+        for formal, net in pins.items():
+            if is_out[formal] and _SEP not in net and not net.startswith("$"):
+                base, bit = _formal_order(formal)  # width-independent: out[0] and out agree
+                return f"{base}{f'[{bit}]' if bit else ''}={norm(net)}"
         raise EquivError(f"{self.netlist.path}:{cell.line}: cannot name black box "
                          f"{cell.model}: no .cname and no named output net to match it by")
 
@@ -466,12 +506,12 @@ def show(net: str) -> str:
 
 def flatten(netlist: blif.Netlist, strict_init: bool = False, allow_undriven: bool = False,
             cut: bool = True, normalize: bool = True, check: bool = True,
-            match_dollar: bool = False) -> Flat:
+            match_unnamed: bool = False) -> Flat:
     """Flatten ``netlist`` into one model; black boxes are cut (``cut``) or rejected.
 
     ``check=False`` leaves the undriven-net check to the caller (``check_undriven``), so that
     black-box mismatches between the two files are reported first."""
-    flat = _Flattener(netlist, strict_init, cut, normalize, match_dollar).run()
+    flat = _Flattener(netlist, strict_init, cut, normalize, match_unnamed).run()
     if check:
         check_undriven(flat, allow_undriven)
     return flat
@@ -486,6 +526,10 @@ def _widths(box: BlackBox) -> dict[str, int]:
 
 
 def _describe(box: BlackBox, flat: Flat) -> str:
+    if box.anon:
+        first = next(iter(box.outputs.items()), ("", ""))
+        return (f"{box.cell_type} unnamed, {first[0]}={show(first[1])} "
+                f"({Path(flat.path).name}:{box.line})")
     return f"{box.cell_type} {box.key} ({Path(flat.path).name}:{box.line})"
 
 
@@ -504,6 +548,93 @@ def _compare_boxes(key: str, box_a: BlackBox, box_b: BlackBox) -> list[str]:
         return [f"ports differ for {box_a.cell_type} instance {key!r}: only in A: "
                 f"{sorted(pa - pb)}; only in B: {sorted(pb - pa)}"]
     return []
+
+
+def _spec(box: BlackBox) -> bbmatch.BoxSpec:
+    """The simulator's view of a cut box: pins in port order, named boxes seeded by name."""
+    def ordered(pins: dict[str, str]) -> tuple[tuple[str, str], ...]:
+        return tuple(sorted(pins.items(), key=lambda kv: _formal_order(kv[0])))
+
+    return bbmatch.BoxSpec(box.cell_type, box.params, None if box.anon else box.key,
+                           ordered(box.inputs), ordered(box.free))
+
+
+def _rename_nets(flat: Flat, nets: dict[str, str]) -> None:
+    """Apply old net -> new net to the ports and covers of ``flat`` (an input listed twice by
+    a merge is kept once)."""
+    flat.inputs = list(dict.fromkeys(nets.get(n, n) for n in flat.inputs))
+    flat.outputs = [nets.get(n, n) for n in flat.outputs]
+    for cell in flat.names:
+        cell.output = nets.get(cell.output, cell.output)
+        cell.inputs = [nets.get(n, n) for n in cell.inputs]
+
+
+def _rekey(flat: Flat, renames: dict[str, str]) -> None:
+    """Rename black boxes of ``flat`` (old key -> new key) everywhere their keys appear: the
+    instance key, the free output inputs and the probe outputs."""
+    nets: dict[str, str] = {}
+    for box in flat.blackboxes:
+        new = renames.get(box.key)
+        if new is None:
+            continue
+        for table, prefix in ((box.free, "bbout"), (box.probes, "bbin")):
+            for formal, old_net in table.items():
+                table[formal] = nets[old_net] = f"{prefix}:{box.cell_type}:{new}:{formal}"
+        box.key = new
+    _rename_nets(flat, nets)
+
+
+def _merge_outputs(flat: Flat, group: Sequence[BlackBox]) -> None:
+    """Make the boxes of ``group`` (same type, same inputs) share one free output per pin."""
+    nets = {box.free[pin]: group[0].free[pin] for box in group[1:] for pin in box.free}
+    _rename_nets(flat, nets)
+    for box in group[1:]:
+        box.free = {pin: group[0].free[pin] for pin in box.free}
+
+
+def _signatures(flat: Flat, normalize: bool) -> list[bbmatch.Signature]:
+    def pi_key(net: str) -> str:
+        return normalize_io_name(net, flat.top) if normalize else net
+
+    try:
+        return bbmatch.simulate(flat.names, flat.latches, flat.inputs,
+                                [_spec(b) for b in flat.blackboxes], pi_key)
+    except bbmatch.SimError as exc:
+        raise EquivError(f"{flat.path}: cannot simulate the netlist to match unnamed black "
+                         f"boxes: {exc}") from exc
+
+
+def pair_unnamed(flats: Sequence[Flat], normalize: bool = True) -> int:
+    """Pair the unnamed black boxes (``anon``) of the two flats by simulation signature (see
+    ``bbmatch``) and give each pair one key in both; returns the number of pairs.
+
+    A box is paired when its signature -- type, parameters, ports and the response of each input
+    bit -- is the only one of its kind on both sides, or when several have it and they are
+    interchangeable (the same input net on every pin).  Anything else raises EquivError (exit 2)
+    listing the boxes left over or ambiguous."""
+    fa, fb = flats
+    if not any(b.anon for f in flats for b in f.blackboxes):
+        return 0
+    sigs = [_signatures(f, normalize) for f in flats]
+    idx = [[i for i, b in enumerate(f.blackboxes) if b.anon] for f in flats]
+    result = bbmatch.pair([sigs[0][i] for i in idx[0]], [sigs[1][i] for i in idx[1]])
+    lines = [f"  only in A: {_describe(fa.blackboxes[idx[0][i]], fa)}" for i in result.only_a]
+    lines += [f"  only in B: {_describe(fb.blackboxes[idx[1][i]], fb)}" for i in result.only_b]
+    for group_a, group_b in result.ambiguous:
+        lines.append(f"  ambiguous: {len(group_a)} in A and {len(group_b)} in B have one "
+                     "signature but different input nets; first in A: "
+                     f"{_describe(fa.blackboxes[idx[0][group_a[0]]], fa)}")
+    if lines:
+        raise EquivError("unnamed black-box instances cannot be matched one-to-one (matched "
+                         "by simulation signature: type, parameters, ports and input functions; "
+                         "an instance whose inputs differ between the files is left over)",
+                         "\n".join(lines))
+    _rekey(fb, {fb.blackboxes[idx[1][j]].key: fa.blackboxes[idx[0][i]].key
+                for i, j in result.pairs})
+    for group_a, group_b in result.twins:
+        _merge_outputs(fa, [fa.blackboxes[idx[0][i]] for i in group_a])
+        _merge_outputs(fb, [fb.blackboxes[idx[1][j]] for j in group_b])
+    return len(result.pairs)
 
 
 def match_blackboxes(flats: Sequence[Flat]) -> None:
@@ -790,11 +921,14 @@ def x_report(flats: Sequence[Flat], maps: Sequence[dict[str, str]], abc: str,
 def _check(args: argparse.Namespace) -> int:
     nets = [blif.parse_file(f, gates=not args.no_cut) for f in args.files]
     flats = [flatten(n, args.strict_init, args.allow_undriven, not args.no_cut,
-                     not args.no_io_normalize, check=False, match_dollar=args.match_dollar)
+                     not args.no_io_normalize, check=False, match_unnamed=args.match_unnamed)
              for n in nets]
+    paired = pair_unnamed(flats, not args.no_io_normalize) if args.match_unnamed else 0
     match_blackboxes(flats)
     for flat in flats:
         check_undriven(flat, args.allow_undriven)
+    if paired:
+        notice(f"{paired} unnamed black-box instance(s) paired by simulation signature")
     cuts = sum(len(f.blackboxes) for f in flats)
     if cuts:
         notice(f"{cuts // 2} black-box instance(s) cut: outputs are free inputs shared by both "
@@ -848,12 +982,14 @@ def _parser() -> argparse.ArgumentParser:
                     "out as free outputs / compared inputs matched by instance name")
     ap.add_argument("--no-io-normalize", action="store_true",
                     help="match primary I/O names verbatim")
-    ap.add_argument("--match-dollar", action="store_true",
-                    help="name a black box that has no .cname and no stable output net by its "
-                    "first output net even when that name starts with '$' (Parmys's own "
-                    "counter names, e.g. $mul~14): sound, since a matched pair must have equal "
-                    "input functions, but a pairing that differs between the files is a "
-                    "false 'not equivalent' (or exit 2), never a false 'equivalent'")
+    ap.add_argument("--match-unnamed", "--match-dollar", dest="match_unnamed",
+                    action="store_true",
+                    help="match every black box without a .cname by simulation signature (type, "
+                    "parameters, ports and the response of each input bit) instead of by its "
+                    "output net names, which Parmys numbers with counters ($mul~14); sound, "
+                    "since a paired box must have equal input functions, so a wrong pairing is "
+                    "a false 'not equivalent' (or exit 2), never a false 'equivalent' "
+                    "(--match-dollar is the old spelling)")
     ap.add_argument("--x-report", action="store_true",
                     help="when not equivalent, rerun without the outputs in an x-cone (reached "
                     "by `unconn`) and list them; exit 3 if equivalent outside them")

@@ -239,7 +239,7 @@ class ArgvTest(ExitCheckCase):
         self.assertTrue(compare[2].endswith("g/a/a.parmys.blif"))
         self.assertTrue(compare[3].endswith("out.blif"))
         equiv = self.calls("equiv-check")[0]  # only the design netlist-compare did not settle
-        self.assertEqual(equiv[1:3], ["--x-report", "--match-dollar"])
+        self.assertEqual(equiv[1:3], ["--x-report", "--match-unnamed"])
         self.assertTrue(equiv[-2].endswith("g/b/b.parmys.blif"))
         self.assertEqual(len(self.calls("equiv-check")), 1)
 

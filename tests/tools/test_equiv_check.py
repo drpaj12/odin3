@@ -8,6 +8,7 @@ errors, interface or clocking mismatches) always run.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import os
@@ -17,6 +18,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import bbmatch
 import blif
 import equiv_check
 
@@ -314,23 +316,33 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("no .cname and no named output net", err)
 
-    def test_match_dollar_names_a_box_by_its_dollar_output(self) -> None:
+    def test_match_unnamed_ignores_output_net_names(self) -> None:
+        """Without a .cname a box is anonymous with --match-unnamed, whatever its nets are called;
+        the same netlist twice pairs with itself."""
+        text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$mul~7")
+                + ".names $mul~7 a y\n11 1\n.end\n")
+        a = self.write("a.blif", text)
+        code, _, err = check("--match-unnamed", a, a)
+        self.assertEqual(code, 0 if ABC else 2, err)
+        flats = [equiv_check.flatten(blif.parse_file(a, gates=True), match_unnamed=True)
+                 for _ in range(2)]
+        self.assertTrue(all(f.blackboxes[0].anon for f in flats))
+        self.assertEqual(equiv_check.pair_unnamed(flats), 1)
+        equiv_check.match_blackboxes(flats)
+        self.assertEqual(flats[0].blackboxes[0].key, flats[1].blackboxes[0].key)
+
+    def test_match_dollar_is_the_old_spelling(self) -> None:
         text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$mul~7")
                 + ".names $mul~7 a y\n11 1\n.end\n")
         a = self.write("a.blif", text)
         code, _, err = check("--match-dollar", a, a)
         self.assertEqual(code, 0 if ABC else 2, err)
-        flats = [equiv_check.flatten(blif.parse_file(a, gates=True), match_dollar=True)
-                 for _ in range(2)]
-        equiv_check.match_blackboxes(flats)
-        self.assertEqual(flats[0].blackboxes[0].key, "out=$mul[7]")
 
-    def test_match_dollar_prefers_a_stable_name(self) -> None:
-        two = (".model t\n.inputs clk a b c\n.outputs y\n"
-               ".gate single_port_ram addr[0]=a clk=clk data[0]=b out[0]=$x out[1]=named we=c\n"
-               ".names $x named y\n11 1\n.end\n")
-        flat = equiv_check.flatten(blif.parse_text(two, gates=True), match_dollar=True)
-        self.assertEqual(flat.blackboxes[0].key, "out[1]=named")
+    def test_cname_still_names_an_instance_with_match_unnamed(self) -> None:
+        flat = equiv_check.flatten(blif.parse_text(BB_HEAD + RAM_Q + ".cname ram\n" + BB_TAIL,
+                                                   gates=True), match_unnamed=True)
+        self.assertFalse(flat.blackboxes[0].anon)
+        self.assertEqual(flat.blackboxes[0].key, "ram")
 
     def test_duplicate_cname_exit_2(self) -> None:
         text = (BB_HEAD + RAM_Q + ".cname ram\n" + RAM_Q.replace("q", "r") + ".cname ram\n"
@@ -576,6 +588,190 @@ class EquivCheckAbcTest(unittest.TestCase):
         result = subprocess.run([str(wrapper), fx("add2_parmys.blif"), fx("add2_logic.blif")],
                                 capture_output=True, text=True, check=False, env=env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class UnnamedBlackBoxTest(unittest.TestCase):
+    """--match-unnamed: boxes without a .cname are paired by simulation signature."""
+
+    HEAD = ".model t\n.inputs clk a b c\n.outputs y z\n"
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    @staticmethod
+    def ram(out: str, addr: str = "a", data: str = "b", we: str = "c") -> str:
+        return (f".gate single_port_ram addr[0]={addr} clk=clk data[0]={data} out[0]={out} "
+                f"we={we}\n")
+
+    def flats(self, text_a: str, text_b: str) -> list[equiv_check.Flat]:
+        return [equiv_check.flatten(blif.parse_text(t, gates=True), match_unnamed=True,
+                                    check=False) for t in (text_a, text_b)]
+
+    def two_boxes(self, first: str, second: str, swap: bool = False) -> str:
+        """Two boxes of different inputs, each read by one output; ``swap`` lists them in the
+        other order."""
+        boxes = [self.ram(first, "a", "b"), self.ram(second, "b", "a")]
+        return (self.HEAD + "".join(boxes[::-1] if swap else boxes)
+                + f".names {first} c y\n11 1\n.names {second} c z\n10 1\n.end\n")
+
+    def test_unique_signatures_pair_whatever_the_names_and_order(self) -> None:
+        flats = self.flats(self.two_boxes("$m~1", "$m~2"),
+                           self.two_boxes("$m~9", "$m~4", swap=True))
+        self.assertEqual(equiv_check.pair_unnamed(flats), 2)
+        equiv_check.match_blackboxes(flats)
+        by_inputs = [{(b.inputs["addr"], b.inputs["data"]): b.key for b in f.blackboxes}
+                     for f in flats]
+        self.assertEqual(by_inputs[0], by_inputs[1])
+        self.assertEqual(len(set(by_inputs[0].values())), 2)
+        self.assertEqual(sorted(flats[0].inputs), sorted(flats[1].inputs))
+
+    def test_interchangeable_twins_pair_in_order_and_share_outputs(self) -> None:
+        def twins(first: str, second: str, y_from: str, z_from: str) -> str:
+            return (self.HEAD + self.ram(first) + self.ram(second)
+                    + f".names {y_from} c y\n11 1\n.names {z_from} z\n1 1\n.end\n")
+
+        flats = self.flats(twins("$t~1", "$t~2", "$t~1", "$t~2"),
+                           twins("$t~9", "$t~4", "$t~4", "$t~9"))
+        self.assertEqual(equiv_check.pair_unnamed(flats), 2)
+        equiv_check.match_blackboxes(flats)
+        for flat in flats:
+            self.assertEqual([n for n in flat.inputs if n.startswith("bbout:")],
+                             ["bbout:single_port_ram:?anon1:out"])
+        self.assertEqual(sorted(flats[0].inputs), sorted(flats[1].inputs))
+        self.assertEqual(sorted(flats[0].outputs), sorted(flats[1].outputs))
+
+    def test_equivalent_with_twins_swapped_exit_0(self) -> None:
+        if ABC is None and not REQUIRE_ABC:
+            self.skipTest("no ABC")
+        a = self.write("a.blif", self.HEAD + self.ram("$t~1") + self.ram("$t~2")
+                       + ".names $t~1 c y\n11 1\n.names $t~2 z\n1 1\n.end\n")
+        b = self.write("b.blif", self.HEAD + self.ram("$t~9") + self.ram("$t~4")
+                       + ".names $t~4 c y\n11 1\n.names $t~9 z\n1 1\n.end\n")
+        code, out, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 0, out + err)
+
+    def test_same_signature_different_nets_is_ambiguous_exit_2(self) -> None:
+        """a2 computes the same function as a, but through another net: the two boxes cannot be
+        told apart by their inputs, and are not interchangeable (a and a2 are different nets)."""
+        def text(first: str, second: str) -> str:
+            return (self.HEAD + ".names a b a2\n11 1\n10 1\n" + self.ram(first, "a")
+                    + self.ram(second, "a2") + f".names {first} {second} y\n11 1\n"
+                    ".names c z\n1 1\n.end\n")
+
+        a = self.write("a.blif", text("$m~1", "$m~2"))
+        b = self.write("b.blif", text("$m~7", "$m~8"))
+        code, _, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 2, err)
+        self.assertIn("ambiguous: 2 in A and 2 in B", err)
+
+    def test_box_whose_inputs_differ_is_left_over_exit_2(self) -> None:
+        a = self.write("a.blif", self.HEAD + self.ram("$m~1", "a") + self.ram("$m~2", "b")
+                       + ".names $m~1 $m~2 y\n11 1\n.names c z\n1 1\n.end\n")
+        b = self.write("b.blif", self.HEAD + self.ram("$m~1", "a") + self.ram("$m~2", "c")
+                       + ".names $m~1 $m~2 y\n11 1\n.names c z\n1 1\n.end\n")
+        code, _, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 2, err)
+        self.assertIn("cannot be matched one-to-one", err)
+        self.assertIn("only in A: single_port_ram unnamed, out=$m~2 (a.blif:5)", err)
+        self.assertIn("only in B: single_port_ram unnamed, out=$m~2 (b.blif:5)", err)
+
+    def test_different_counts_exit_2(self) -> None:
+        a = self.write("a.blif", self.HEAD + self.ram("$m~1") + self.ram("$m~2")
+                       + ".names $m~1 $m~2 y\n11 1\n.names c z\n1 1\n.end\n")
+        b = self.write("b.blif", self.HEAD + self.ram("$m~1")
+                       + ".names $m~1 c y\n11 1\n.names c z\n1 1\n.end\n")
+        code, _, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 2, err)
+        self.assertIn("only in A", err)
+
+    def test_named_boxes_stay_named_and_are_not_paired(self) -> None:
+        text = (self.HEAD + self.ram("$m~1") + ".cname named\n" + self.ram("$m~2", "b", "a")
+                + ".names $m~1 $m~2 y\n11 1\n.names c z\n1 1\n.end\n")
+        flats = self.flats(text, text)
+        self.assertEqual([b.anon for b in flats[0].blackboxes], [False, True])
+        self.assertEqual(equiv_check.pair_unnamed(flats), 1)
+        equiv_check.match_blackboxes(flats)
+
+    def test_pairs_through_latches_with_other_names(self) -> None:
+        """Box 2 reads a latch that box 1 feeds; the latches and nets are named differently."""
+        def text(m1: str, m2: str, latch: str) -> str:
+            return (self.HEAD + self.ram(m1) + f".latch {m1} {latch} re clk 0\n"
+                    + self.ram(m2, latch, "b") + f".names {m2} c y\n11 1\n"
+                    f".names {latch} z\n1 1\n.end\n")
+
+        flats = self.flats(text("$m~1", "$m~2", "$dff~3^Q~0"), text("$m~5", "$m~6", "q"))
+        self.assertEqual(equiv_check.pair_unnamed(flats), 2)
+        if ABC is None and not REQUIRE_ABC:
+            return
+        code, out, err = check("--match-unnamed", self.write("a.blif", text("$m~1", "$m~2", "x")),
+                               self.write("b.blif", text("$m~5", "$m~6", "q")))
+        self.assertEqual(code, 0, out + err)
+
+    @needs_abc
+    def test_a_wrong_pairing_is_never_equivalent(self) -> None:
+        """Cross the pairing by hand: the check on the paired cut points must reject it."""
+        flats = self.flats(self.two_boxes("$m~1", "$m~2"), self.two_boxes("$m~1", "$m~2"))
+        self.assertEqual(equiv_check.pair_unnamed(flats), 2)
+        args = argparse.Namespace(timeout=60, keep_temp=False)
+        assert ABC is not None
+
+        def verdict() -> bool:
+            equiv_check.match_blackboxes(flats)
+            for flat in flats:
+                equiv_check.check_undriven(flat, False)
+            maps = [equiv_check.io_map(f, True) for f in flats]
+            return equiv_check.prove(flats, maps, ABC, args)[0]
+
+        self.assertTrue(verdict())
+        first, second = (b.key for b in flats[1].blackboxes)
+        equiv_check._rekey(flats[1], {first: second, second: first})
+        self.assertFalse(verdict())
+
+    @needs_abc
+    def test_wrong_pairing_of_twins_with_other_logic_is_rejected(self) -> None:
+        """Boxes with equal signatures whose inputs the netlists wire differently: not
+        equivalent (exit 1) or left over (exit 2), never 0."""
+        a = self.write("a.blif", self.two_boxes("$m~1", "$m~2"))
+        b = self.write("b.blif", self.two_boxes("$m~1", "$m~2").replace(
+            ".names $m~1 c y\n11 1\n.names $m~2 c z\n10 1", ".names $m~2 c y\n11 1\n"
+            ".names $m~1 c z\n10 1"))
+        code, out, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 1, out + err)
+
+
+class BbmatchTest(unittest.TestCase):
+    def sig(self, digest: bytes, *identity: str) -> bbmatch.Signature:
+        return bbmatch.Signature(digest, identity)
+
+    def test_unique_and_twins(self) -> None:
+        a = [self.sig(b"1", "x"), self.sig(b"2", "y"), self.sig(b"2", "y")]
+        b = [self.sig(b"2", "u"), self.sig(b"2", "u"), self.sig(b"1", "w")]
+        result = bbmatch.pair(a, b)
+        self.assertEqual(result.pairs, [(0, 2), (1, 0), (2, 1)])
+        self.assertEqual(result.twins, [([1, 2], [0, 1])])
+        self.assertFalse(result.ambiguous or result.only_a or result.only_b)
+
+    def test_not_interchangeable_is_ambiguous(self) -> None:
+        a = [self.sig(b"1", "x"), self.sig(b"1", "y")]
+        b = [self.sig(b"1", "x"), self.sig(b"1", "x")]
+        result = bbmatch.pair(a, b)
+        self.assertEqual((result.pairs, result.ambiguous), ([], [([0, 1], [0, 1])]))
+
+    def test_counts_must_agree(self) -> None:
+        result = bbmatch.pair([self.sig(b"1", "x"), self.sig(b"1", "x")], [self.sig(b"1", "x")])
+        self.assertEqual((result.pairs, result.only_a, result.only_b), ([], [0, 1], [0]))
+
+    def test_combinational_loop_is_a_sim_error(self) -> None:
+        loop = [blif.Names(inputs=["q"], output="p", rows=[("1", "1")]),
+                blif.Names(inputs=["p"], output="q", rows=[("1", "1")])]
+        with self.assertRaises(bbmatch.SimError):
+            bbmatch.simulate(loop, [], [], [], lambda n: n)
 
 
 if __name__ == "__main__":

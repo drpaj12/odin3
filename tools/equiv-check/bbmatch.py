@@ -1,0 +1,261 @@
+"""bbmatch: simulation signatures that pair the unnamed black boxes of two netlists (equiv-check).
+
+A hard block that Parmys writes has no ``.cname`` and no stable name: its outputs are counters
+(``$mul~20[0]``, ``dual_port_ram^MEM~0-30^out1[0]``) that differ between two runs.  Such a box is
+identified by what it *is*, not what it is called: its cell type, its parameters, its port list
+and widths, and the function of each of its input bits -- the *signature*.
+
+The signature is a simulation signature.  Both netlists are simulated on the same random input
+vectors (``LANES`` independent lanes for ``CYCLES`` clock cycles, latches starting at their init
+value, primary inputs drawn from their normalised name, so a name means the same vector on both
+sides).  A cut box has no logic to simulate; its outputs are driven by a pseudo-random function of
+the box's *history*: a digest of its type, its parameters, its ports and every input vector it saw
+in the cycles before.  Two boxes with the same type and the same input history therefore get the
+same outputs, in either netlist, and a box downstream of them gets the same history again.  That
+is congruence closure by simulation, computed in one forward pass with no matching decision taken
+during the run (a box in a feedback loop through a latch needs none).  A named box (``.cname``) is
+paired by its name; its outputs are driven by a function of the name instead, so a difference
+upstream of it does not hide the unnamed boxes downstream.
+
+The signature of a box is its digest after the last cycle.  Boxes of the two netlists are paired
+when their signatures are equal and unique on both sides.  Several boxes with one signature are
+paired in file order only if they are interchangeable: every one of them has the same input net
+for every pin (a buffer chain or a constant is looked through), so which is which cannot matter.
+Twins also share their outputs (one free variable per group and pin): a box is a function of its
+inputs, so boxes with the same inputs have the same outputs, and which of them a consumer reads
+must not decide the verdict.
+
+The pairing is a *guess* that the equivalence check afterwards verifies; nothing here is trusted.
+See ``equiv_check``'s docstring for why that makes any pairing sound.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
+
+import blif
+
+LANES = 128
+CYCLES = 10
+MASK = (1 << LANES) - 1
+_LANE_BYTES = LANES // 8
+_DIGEST_BYTES = 16
+
+
+@dataclass(frozen=True)
+class BoxSpec:
+    """One cut black box as the simulator sees it.  ``seed`` is its name (None: unnamed),
+    ``inputs`` its (pin, flat net) pairs and ``outputs`` its (pin, free input net) pairs, both in
+    a fixed pin order."""
+
+    cell_type: str
+    params: tuple[tuple[str, str], ...]
+    seed: str | None
+    inputs: tuple[tuple[str, str], ...]
+    outputs: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class Signature:
+    """``digest``: type, parameters, ports and the whole input history.  ``identity``: the
+    canonical driver of each input pin (equal identities make two boxes interchangeable)."""
+
+    digest: bytes
+    identity: tuple[str, ...]
+
+
+@dataclass
+class Pairing:
+    """The result of ``pair``: index pairs (A, B); ``twins``, the groups of several interchangeable
+    boxes among them (their members are paired in order); ``ambiguous``, groups of equal
+    signature that cannot be told apart; and the indices left over on each side."""
+
+    pairs: list[tuple[int, int]]
+    twins: list[tuple[list[int], list[int]]]
+    ambiguous: list[tuple[list[int], list[int]]]
+    only_a: list[int]
+    only_b: list[int]
+
+
+class SimError(Exception):
+    """The netlist cannot be simulated (a combinational loop)."""
+
+
+def _vector(*parts: bytes | str) -> int:
+    """A pseudo-random ``LANES``-bit integer determined by ``parts``."""
+    hasher = hashlib.blake2b(digest_size=_LANE_BYTES)
+    for part in parts:
+        raw = part.encode() if isinstance(part, str) else part
+        hasher.update(len(raw).to_bytes(4, "little"))
+        hasher.update(raw)
+    return int.from_bytes(hasher.digest(), "little")
+
+
+def _bytes(value: int) -> bytes:
+    return value.to_bytes(_LANE_BYTES, "little")
+
+
+# A compiled cover: (output net, input nets, rows as (positive nets, negative nets), on-set).
+_Cover = tuple[str, tuple[str, ...], tuple[tuple[tuple[str, ...], tuple[str, ...]], ...], bool]
+
+
+def _compile(cell: blif.Names) -> _Cover:
+    rows = []
+    for plane, _ in cell.rows:
+        pos = tuple(n for n, ch in zip(cell.inputs, plane, strict=False) if ch == "1")
+        neg = tuple(n for n, ch in zip(cell.inputs, plane, strict=False) if ch == "0")
+        rows.append((pos, neg))
+    on_set = not cell.rows or cell.rows[0][1] == "1"
+    return cell.output, tuple(cell.inputs), tuple(rows), on_set
+
+
+def _topological(covers: Sequence[_Cover], sources: set[str]) -> list[_Cover]:
+    """The covers in an order where each follows the covers that drive its inputs."""
+    driver = {c[0]: c for c in covers}
+    waiting: dict[str, int] = {}
+    fanout: dict[str, list[str]] = {}
+    ready: list[_Cover] = []
+    for cover in covers:
+        deps = {n for n in cover[1] if n in driver and n not in sources}
+        waiting[cover[0]] = len(deps)
+        for net in deps:
+            fanout.setdefault(net, []).append(cover[0])
+        if not deps:
+            ready.append(cover)
+    order: list[_Cover] = []
+    while ready:
+        cover = ready.pop()
+        order.append(cover)
+        for out in fanout.get(cover[0], []):
+            waiting[out] -= 1
+            if waiting[out] == 0:
+                ready.append(driver[out])
+    if len(order) != len(driver):
+        raise SimError("combinational loop")
+    return order
+
+
+def _evaluate(order: Iterable[_Cover], vals: dict[str, int]) -> None:
+    for out, _, rows, on_set in order:
+        acc = 0
+        for pos, neg in rows:
+            term = MASK
+            for net in pos:
+                term &= vals[net]
+            for net in neg:
+                term &= ~vals[net]
+            acc |= term
+        vals[out] = acc if on_set else ~acc & MASK
+
+
+def canonical_drivers(names: Sequence[blif.Names]) -> Callable[[str], str]:
+    """net -> its canonical identity: buffers are looked through and constants are named."""
+    buffers: dict[str, str] = {}
+    consts: dict[str, str] = {}
+    for cell in names:
+        if not cell.inputs:
+            consts[cell.output] = "const1" if cell.rows and cell.rows[0][1] == "1" else "const0"
+        elif len(cell.inputs) == 1 and _is_identity(cell):
+            buffers[cell.output] = cell.inputs[0]
+
+    def canon(net: str) -> str:
+        seen = 0
+        while net in buffers and seen <= len(buffers):
+            net = buffers[net]
+            seen += 1
+        return consts.get(net, net)
+
+    return canon
+
+
+def _is_identity(cell: blif.Names) -> bool:
+    if not cell.rows:
+        return False
+    on_set = cell.rows[0][1] == "1"
+
+    def value(bit: str) -> bool:
+        hit = any(plane in (bit, "-") for plane, _ in cell.rows)
+        return hit if on_set else not hit
+
+    return not value("0") and value("1")
+
+
+def _start_digest(box: BoxSpec) -> bytes:
+    """The digest of a box before any cycle: type, parameters and the port list."""
+    hasher = hashlib.blake2b(digest_size=_DIGEST_BYTES)
+    for field in (box.cell_type, repr(box.params), repr([p for p, _ in box.inputs]),
+                  repr([p for p, _ in box.outputs])):
+        hasher.update(field.encode())
+        hasher.update(b"\0")
+    return hasher.digest()
+
+
+def _next_digest(digest: bytes, box: BoxSpec, vals: dict[str, int]) -> bytes:
+    hasher = hashlib.blake2b(digest, digest_size=_DIGEST_BYTES)
+    for _, net in box.inputs:
+        hasher.update(_bytes(vals[net]))
+    return hasher.digest()
+
+
+def simulate(names: Sequence[blif.Names], latches: Sequence[blif.Latch],
+             inputs: Sequence[str], boxes: Sequence[BoxSpec],
+             pi_key: Callable[[str], str]) -> list[Signature]:
+    """The signature of each of ``boxes``, from simulating the flat netlist ``names``/``latches``.
+
+    ``inputs`` are the flat primary inputs (the boxes' free output nets included); ``pi_key``
+    names a primary input in the way both netlists share.  Raises SimError on a loop."""
+    covers = [_compile(c) for c in names]
+    free = {net for box in boxes for _, net in box.outputs}
+    pis = [n for n in inputs if n not in free]
+    state = {latch.output: MASK if latch.init == "1" else 0 for latch in latches}
+    sources = set(pis) | free | set(state)
+    order = _topological(covers, sources)
+    nets = {n for c in covers for n in (c[0], *c[1])} | {lat.input for lat in latches}
+    nets |= {net for box in boxes for _, net in box.inputs}
+    base = dict.fromkeys(nets - {c[0] for c in covers}, 0)
+    digests = [_start_digest(box) for box in boxes]
+    for cycle in range(CYCLES):
+        vals = dict(base)
+        vals.update(state)
+        for net in pis:
+            vals[net] = _vector("pi", pi_key(net), str(cycle))
+        for box, digest in zip(boxes, digests, strict=True):
+            key = digest if box.seed is None else f"{box.cell_type}\0{box.seed}".encode()
+            for pin, net in box.outputs:
+                vals[net] = _vector("out", key, pin, str(cycle))
+        _evaluate(order, vals)
+        digests = [_next_digest(d, box, vals) for box, d in zip(boxes, digests, strict=True)]
+        state = {latch.output: vals[latch.input] for latch in latches}
+    canon = canonical_drivers(names)
+    return [Signature(d, tuple(canon(net) for _, net in box.inputs))
+            for box, d in zip(boxes, digests, strict=True)]
+
+
+def pair(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature]) -> Pairing:
+    """Pair two lists of signatures (see the module docstring for the rules)."""
+    groups: dict[bytes, tuple[list[int], list[int]]] = {}
+    for side, sigs in enumerate((sigs_a, sigs_b)):
+        for index, sig in enumerate(sigs):
+            groups.setdefault(sig.digest, ([], []))[side].append(index)
+    result = Pairing([], [], [], [], [])
+    for list_a, list_b in groups.values():
+        if len(list_a) != len(list_b):
+            result.only_a += list_a
+            result.only_b += list_b
+        elif len(list_a) == 1 or (_interchangeable(sigs_a, list_a)
+                                  and _interchangeable(sigs_b, list_b)):
+            result.pairs += zip(list_a, list_b, strict=True)
+            if len(list_a) > 1:
+                result.twins.append((list_a, list_b))
+        else:
+            result.ambiguous.append((list_a, list_b))
+    result.pairs.sort()
+    result.only_a.sort()
+    result.only_b.sort()
+    return result
+
+
+def _interchangeable(sigs: Sequence[Signature], group: Sequence[int]) -> bool:
+    return all(sigs[i].identity == sigs[group[0]].identity for i in group)

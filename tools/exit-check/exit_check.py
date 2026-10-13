@@ -25,9 +25,9 @@ each design:
    threshold 1); it caps its own children at ``--mem-cap``;
 3. ``netlist-compare --implicit-models`` golden vs output (Parmys leaves a ``$pow`` and the like
    as a ``.subckt`` with no model): exit 0 is ``identical``;
-4. else ``equiv-check --x-report --match-dollar`` (Parmys writes no ``.cname`` for a hard
-   multiplier and names its outputs ``$mul~14[0]``, which the black-box matching needs) golden vs
-   output: exit 0 is ``equivalent``, exit 3
+4. else ``equiv-check --x-report --match-unnamed`` (Parmys writes no ``.cname`` for a hard block
+   and numbers its output nets with counters, ``$mul~14[0]``, so equiv-check pairs the blocks by
+   simulation signature, not by name) golden vs output: exit 0 is ``equivalent``, exit 3
    ``equivalent outside x-cones`` (``eq-x``; the removed outputs are listed), exit 1 ``differs``,
    anything else ``error``. Each of these children runs under ``memcap.run``.
 
@@ -313,7 +313,7 @@ def cone_names(text: str) -> tuple[str, ...]:
 
 def run_equiv(cfg: Config, golden: Path, out: Path, cap: int, log: list[str]) -> Result:
     """``equiv-check --x-report golden out`` classified."""
-    got = run_capped([cfg.equiv_check, "--x-report", "--match-dollar", "--timeout",
+    got = run_capped([cfg.equiv_check, "--x-report", "--match-unnamed", "--timeout",
                       str(cfg.equiv_timeout), str(golden), str(out)], cap, log)
     if isinstance(got, Result):
         return got
