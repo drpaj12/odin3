@@ -148,7 +148,8 @@ class BridgeTest(unittest.TestCase):
     # -- the command strings ---------------------------------------------------------------
 
     BACK = ("proc; flatten; opt; memory -nomap; opt; memory_map; opt -full; techmap; opt -fast; "
-            "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; write_blif -gates -undef + unconn ")
+            "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; "
+            "delete =A:blackbox; write_blif -gates -undef + unconn ")
 
     def test_commands_exactly_with_top(self) -> None:
         code, out, err = self.run_tool("--top", "t")

@@ -1746,6 +1746,10 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # the workspace 0.69 of ODIN3_YOSYS.
         set_property(TEST test_verilog_writer APPEND PROPERTY
             ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+        # 2D-7b: test_hard_cell_widths (python_tools) runs write_rtlil's black-box stubs through
+        # Yosys 0.55 and the elab-equiv back end (a parameterised hard cell keeps its widths).
+        set_property(TEST python_tools APPEND PROPERTY
+            ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
         # 2D Task 21: the round trip of the process generator's write_rtlil through Yosys 0.55
         # (read_rtlil; proc exits 0).
         set_property(TEST test_elab_stage2_proc APPEND PROPERTY

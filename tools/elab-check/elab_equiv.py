@@ -11,8 +11,9 @@ resolved by the same ``opt`` on both and a difference is 2D's (or a documented d
 
 - A: ``O [--top T] -p "read_verilog --nolatches F; write_rtlil a.il"``, then ``Y -p "read_rtlil
   a.il; hierarchy -top T; proc; flatten; opt; memory -nomap; opt; memory_map; opt -full; techmap;
-  opt -fast; abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; write_blif -gates -undef + unconn
-  a.blif"``. Without ``--top`` the script says ``hierarchy -auto-top``.
+  opt -fast; abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean;
+  delete =A:blackbox; write_blif -gates -undef + unconn a.blif"``. Without ``--top`` the script
+  says ``hierarchy -auto-top``.
 - B: the same Yosys script with ``read_verilog -sv -nolatches F`` in place of ``read_rtlil a.il``.
   Both sides are always ``--nolatches``: equiv-check cannot model latches (PHASE0 #7).
 - ``Y -p "read_rtlil a.il; write_rtlil b.il"`` must exit 0 (write_rtlil's text is valid RTLIL).
@@ -95,11 +96,18 @@ TAIL_LINES = 20  # lines of a failing child's output shown
 PRE_PROC_TRIO = "opt_expr; opt_clean; opt -nodffe -nosdff; "
 
 # Yosys's script after the read: hierarchy (the top is chosen by --top or found), proc, then the
-# Parmys-style flattening to gates (the one back end both sides share).
+# Parmys-style flattening to gates (the one back end both sides share). ``delete =A:blackbox``
+# drops side A's black-box stubs (write_rtlil writes one per hard or black-box type at the default
+# port widths) just before write_blif: write_blif prints only ``min(connection width, the stub
+# wire's width)`` bits of a connection to a port the module has (Yosys backends/blif/blif.cc:428),
+# which cut ``single_port_ram`` with DATA_WIDTH 8 to one bit. Side B has no module for the cell, so
+# it prints every bit; with the stubs gone both sides print the connection as it is. (``=`` is
+# select's prefix for boxed modules, which a plain pattern skips.)
 BACK_END = (
     "proc; flatten; {tribuf}opt{o}; memory -nomap; opt{o}; memory_map; opt -full{o}; "
     "{a2s}{unmap}techmap; opt -fast{o}; "
-    "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; write_blif -gates -undef + unconn {blif}"
+    "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; "
+    "delete =A:blackbox; write_blif -gates -undef + unconn {blif}"
 )
 _ORACLE_RE = re.compile(r"\bYosys 0\.55(?:[^0-9]|$)")
 

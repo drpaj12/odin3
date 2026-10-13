@@ -2540,8 +2540,11 @@ bullets above differ from it, this note and `writer.h` win. The eight difference
    derives the instances). `Cell::known()` is now true for these instances, so Yosys counts only
    their input connections as users, and `opt_clean` *removes* a black-box instance whose
    outputs are unused (without stubs it kept every instance); 2F's `opt_clean` mirrors this (2F
-   §10). Yosys's `write_blif` writes only the low `min(connection, stub port)` bits of a
-   parameterised instance, on both sides of a BLIF comparison.
+   §10). Yosys's `write_blif` writes only the low `min(connection, stub port)` bits of an instance
+   whose type has a module in the design (`backends/blif/blif.cc:428`); the `elab-equiv` back end
+   therefore runs `delete =A:blackbox` before `write_blif` (2D-7b: `single_port_ram` with
+   `DATA_WIDTH 8` had come out 1 bit wide on side A only), so the instances are written at their
+   own widths on both sides.
 8. **Which nets get `wire $n`.** A net is spelled as a net of its own, and declared as a wire,
    exactly when it is live, not constant, and its primary is not a bit of a *named* wire
    (`odin3_proc_sig_is_net`). So the nets of unnamed wires, and nets with no wire at all, are
@@ -2678,7 +2681,7 @@ bin/yosys`, Parmys's; 0.69 `read_rtlil` was also verified to accept the format):
 - **A** (2D under test): `odin3 -p "read_verilog --nolatches F; write_rtlil a.il"`, then
   `yosys -p "read_rtlil a.il; hierarchy -top T; proc; flatten; opt; memory -nomap; opt;
   memory_map; opt -full; techmap; opt -fast; abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean;
-  write_blif -gates -undef + unconn a.blif"`;
+  delete =A:blackbox; write_blif -gates -undef + unconn a.blif"`;
 - **B** (oracle): the same script with `read_verilog -sv -nolatches F` in place of
   `read_rtlil a.il`;
 - `tools/equiv-check/equiv-check a.blif b.blif` (exit 0 equivalent).
