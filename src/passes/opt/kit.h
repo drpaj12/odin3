@@ -44,6 +44,7 @@ enum { ODIN3_OPT_N_CONST = 4 };
  * of odin3_bit b (0: not looked up yet). invert holds one odin3_net_id per net ID, 0 for none
  * (odin3_kit_invert_map). dirty is Task 13's (opt_expr's dirty set; uint32_t elements until then).
  * pins_created counts the pins kit_new_cell and kit_rebuild_node created (the budget check).
+ * ties and defer_ties are opt_dff's (Task 11): see odin3_kit_connect and odin3_kit_flush_ties.
  */
 typedef struct odin3_opt_ctx {
     odin3_pass_ctx *pass;
@@ -56,6 +57,8 @@ typedef struct odin3_opt_ctx {
     odin3_vec invert;
     odin3_vec dirty;
     uint64_t pins_created;
+    odin3_vec ties;
+    bool defer_ties;
 } odin3_opt_ctx;
 
 /* Zeroes *oc and fills it; allocates nothing. INVALID_ARG (logged) for a NULL argument. */
@@ -100,8 +103,28 @@ typedef struct odin3_kit_conn {
  * must have exactly one output port, `port`, of direction OUT, and be neither a port node nor a
  * $proc; every src[k] must be a live net and width the port's width; else INVALID_ARG (a kit
  * misuse, nothing changed). Sets changed.
+ *
+ * With oc->defer_ties the merges are not made: node is deleted and the pairs (keep = src[k],
+ * drop = the output net) are queued in oc->ties, to be made by odin3_kit_flush_ties. A caller
+ * that reads nets after a tie in the same pass then sees the net as it was before the tie, which
+ * is Yosys's SigMap (built once per worker, module->connect does not update it). The queue is
+ * reserved before the delete, so a NO_MEMORY leaves the IR unchanged.
  */
 odin3_status odin3_kit_connect(odin3_opt_ctx *oc, const odin3_kit_conn *conn);
+
+/*
+ * The deferred merges (oc->defer_ties). reserve_ties makes room for n more (NO_MEMORY, nothing
+ * queued); defer_tie queues one pair, keep = src and drop = the net that stands for it, into that
+ * room (it never fails; no room is a misuse and the pair is dropped). flush_ties makes the queued
+ * merges in order and empties the queue: a net an earlier merge of the flush removed stands for
+ * the net it went into (as in kit_connect), a pair with a net that is gone or whose two sides
+ * are one net merges nothing. NO_MEMORY before the first merge leaves the queue as it was; a
+ * failing merge stops the flush with the rest queued (IR valid, partly tied: the caller treats it
+ * as a half-done rewrite).
+ */
+odin3_status odin3_kit_reserve_ties(odin3_opt_ctx *oc, size_t extra);
+void odin3_kit_defer_tie(odin3_opt_ctx *oc, odin3_net_id keep, odin3_net_id drop);
+odin3_status odin3_kit_flush_ties(odin3_opt_ctx *oc);
 
 /*
  * A cell to create: its type and parameters (as odin3_node_spec: NULL params are the defaults),
@@ -165,6 +188,13 @@ odin3_status odin3_kit_copy_attrs(odin3_module *module, odin3_node_id from, odin
  * The registered cell type named name, none ({0}) when the design has none; no allocation, no log.
  */
 odin3_celltype_id odin3_kit_type_named(const odin3_design *design, const char *name);
+
+/*
+ * Passes st through; when it is not OK, logs the "out of memory in the middle of a rewrite in
+ * module '<m>': the design no longer matches its input; discard it" line (the failure came after
+ * the rewrite's destructive step). For callers that make such steps themselves (ff.c, dff.c).
+ */
+odin3_status odin3_kit_half_done(const odin3_opt_ctx *oc, odin3_status st);
 
 /* Appends net to vec (elements odin3_net_id). NO_MEMORY with vec unchanged. */
 odin3_status odin3_kit_push_net(odin3_vec *vec, odin3_net_id net);

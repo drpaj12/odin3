@@ -1,0 +1,10 @@
+# yosys 0.55 (VTR build): read_rtlil srst_always.il; opt_dff -keepdc; write_rtlil
+# input: Yosys 0.55's own write_rtlil of the `read_verilog -icells` heredoc of tests/opt/opt_dff_srst.ys (always-active SRST) in the Yosys source (srst_always.il), edited by sed in two places: `parameter \X_POLARITY 1'b` written `b` and `parameter signed \WIDTH` written `parameter \WIDTH` (proc_build.c reads plain integer polarity and width parameters; the 2D-1 read_rtlil gap), in every cell
+# flags: -keepdc
+cell $dff CLK_POLARITY=1 WIDTH=2
+cell $dff CLK_POLARITY=1 WIDTH=2
+cell $dffe CLK_POLARITY=1 EN_POLARITY=1 WIDTH=2
+cell $sdff CLK_POLARITY=1 SRST_POLARITY=1 SRST_VALUE=2'10 WIDTH=2
+cell $sdffce CLK_POLARITY=1 EN_POLARITY=1 SRST_POLARITY=0 SRST_VALUE=2'10 WIDTH=2
+cell $sdffe CLK_POLARITY=1 EN_POLARITY=1 SRST_POLARITY=0 SRST_VALUE=2'10 WIDTH=2
+init Q 010101010101

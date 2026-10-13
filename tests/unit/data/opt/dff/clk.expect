@@ -1,0 +1,18 @@
+# yosys 0.55 (VTR build): read_rtlil clk.il; opt_dff; write_rtlil
+# input: Yosys 0.55's own write_rtlil of the `read_verilog -icells` heredoc of tests/opt/opt_dff_clk.ys in the Yosys source (clk.il), edited by sed in two places: `parameter \X_POLARITY 1'b` written `b` and `parameter signed \WIDTH` written `parameter \WIDTH` (proc_build.c reads plain integer polarity and width parameters; the 2D-1 read_rtlil gap), in every cell
+# flags:
+cell $dlatch EN_POLARITY=1 WIDTH=2
+cell $dlatch EN_POLARITY=1 WIDTH=2
+cell $sr CLR_POLARITY=1 SET_POLARITY=0 WIDTH=2
+cell $sr CLR_POLARITY=1 SET_POLARITY=0 WIDTH=2
+const Q 0 1
+const Q 1 0
+const Q 10 1
+const Q 11 0
+const Q 12 1
+const Q 13 0
+const Q 2 1
+const Q 3 0
+const Q 8 1
+const Q 9 0
+init Q 0101xxxxxx0101xxxx
