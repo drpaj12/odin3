@@ -954,12 +954,15 @@ static void test_block_name_is_not_a_value(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
 }
 
-/* A memory word read waits for Task 20: the located pending line, the rest of the module emitted.
- */
-static void test_memory_read_pending(void) {
-    read_failing("  reg [7:0] mem [0:3];\n  assign y = mem[1];\n  assign y1 = a;\n");
-    expect_error((at_loc){2, 14}, "elaboration is not available yet (2D): 'memory read'");
+/* A memory word read is a $mem read port (Task 20): the rest of the module is emitted as well. */
+static void test_memory_read_port(void) {
+    read_clean("  reg [7:0] mem [0:3];\n  assign y = mem[1];\n  assign y1 = a;\n");
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$mem"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of("$memrd"));
     expect_same_nets((bits_of){"y1", 0}, (bits_of){"a", 0}, 8);
+    odin3_node_id mem = nth_node("$mem", 0);
+    TEST_ASSERT_EQUAL_INT64(1, param_of(mem, "RD_PORTS"));
+    expect_pins_are(mem, "RD_DATA", (bits_of){"y", 0}, 8);
 }
 
 /* A user function call is the pending continuous-context call until Task 23. */
@@ -1591,7 +1594,7 @@ static void test_oom_sweep(void) {
     X(test_attributes_on_every_cell)                                                               \
     X(test_cell_provenance)                                                                        \
     X(test_block_name_is_not_a_value)                                                              \
-    X(test_memory_read_pending)                                                                    \
+    X(test_memory_read_port)                                                                       \
     X(test_function_call_pending)                                                                  \
     X(test_zero_width_part)                                                                        \
     X(test_cell_pins_cap)                                                                          \

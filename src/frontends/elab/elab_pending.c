@@ -6,8 +6,8 @@
  * Each task that lands a kind deletes its line in the same commit; the comments name the task
  * point (l) stages it in. Task 16 emptied the stage-1 tables; Task 17 removed stage 2's store,
  * scope, declaration and port kinds; Task 18 its expression and continuous-assignment kinds; Task
- * 19 its instance, connection and gate kinds and the driver check; Task 24 asserts the rest of
- * stage 2's table is empty.
+ * 19 its instance, connection and gate kinds and the driver check; Task 20 the memory word read;
+ * Task 24 asserts the rest of stage 2's table is empty.
  */
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -28,8 +28,7 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
             /* Task 17 landed the store, scopes, declarations and ports: nothing is left of it. */
             /* Task 18 landed continuous assignments and expressions (a user call inside them is
              * the continuous-context call, Task 23). */
-            /* Task 20: memory word reads. */
-            [ODIN3_PEND_MEM_READ] = true,
+            /* Task 20 landed memory word reads: nothing is left of it. */
             /* Task 19 landed instances, gates and the driver check: nothing is left of it. */
             /* Task 21: always blocks and assignments. */
             [ODIN3_AST_ALWAYS] = true,
@@ -79,7 +78,6 @@ static const char *const k_feature_names[ODIN3_PEND_END - ODIN3_AST_KIND_COUNT] 
     "continuous-context call",
     "variable index into a register array",
     "memory write",
-    "memory read",
 };
 
 static bool g_forced[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END];

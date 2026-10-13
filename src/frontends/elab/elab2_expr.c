@@ -19,6 +19,7 @@
 #include "ir/module.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
+#include "util/arena.h"
 #include "util/log.h"
 #include "util/vec.h"
 
@@ -113,30 +114,23 @@ static odin3_status ex_name_type(odin3_elab2 *e2, odin3_ast_id node, odin3_etype
     return ex_name_error(e2, node, "'%s' is not a net, variable or parameter", name);
 }
 
-/* A SELECT of a memory name with all its indices is a word read: Task 20's. Any other select
- * leaves the typer to type the object and the indices (the width stays 0). */
-static odin3_status ex_select_leaf(odin3_elab2 *e2, odin3_ast_id node) {
-    uint32_t depth = 0;
-    odin3_ast_id object = node;
-    while (odin3_ast_kind_of(e2->elab, object) == ODIN3_AST_SELECT) {
-        object = odin3_ast_child(e2->elab, object, 0);
-        depth++;
-    }
-    odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, object);
-    const odin3_symbol *rec =
-        kind == ODIN3_AST_IDENT || kind == ODIN3_AST_HIER_NAME ? ex_symbol(e2, object) : NULL;
-    if (rec == NULL || rec->n_unpacked == 0 || rec->n_unpacked != depth) {
+/* A SELECT of an array name with all its indices is a word (EL-27): its type is the array's word.
+ * Any other select leaves the typer to type the object and the indices (the width stays 0). */
+static odin3_status ex_select_leaf(const odin3_elab2 *e2, odin3_ast_id node, odin3_etype *out) {
+    odin3_elab2_wordref ref;
+    if (!odin3_elab2_mem_word_of(e2, node, &ref)) {
         return ODIN3_OK;
     }
-    odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, node), ODIN3_PEND_MEM_READ);
-    return ODIN3_ERR_PARSE;
+    const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, ref.mem);
+    *out = (odin3_etype){mem->width, mem->is_signed, false};
+    return ODIN3_OK;
 }
 
 static odin3_status ex_host_leaf(void *user, odin3_ast_id node, odin3_etype *out) {
     odin3_elab2 *e2 = user;
     switch (odin3_ast_kind_of(e2->elab, node)) {
     case ODIN3_AST_SELECT:
-        return ex_select_leaf(e2, node);
+        return ex_select_leaf(e2, node, out);
     case ODIN3_AST_CALL: /* a user function: inlined into a process (Task 23) */
         odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, node), ODIN3_PEND_COMB_CALL);
         return ODIN3_ERR_PARSE;
@@ -286,14 +280,14 @@ static odin3_status ex_string(ex_run *run, const ex_frame *frame, odin3_sig *out
     return st != ODIN3_OK ? st : ex_from_cval(e2, &text, out);
 }
 
-/* The nets of a net or variable's wire, each through the reads hook inside a process. */
-static odin3_status ex_wire_sig(ex_run *run, const odin3_symbol *rec, odin3_sig *out) {
+/* The nets of a wire, each through the reads hook inside a process. */
+static odin3_status ex_wire_nets(ex_run *run, odin3_wire_id wire, odin3_sig *out) {
     odin3_elab2 *e2 = run->e2;
     const odin3_elab2_reads *reads = run->req->reads;
-    uint32_t width = odin3_wire_width(e2->mod, rec->ir_wire);
+    uint32_t width = odin3_wire_width(e2->mod, wire);
     odin3_status st = odin3_elab2_sig_new(e2, width, out);
     for (uint32_t bit = 0; st == ODIN3_OK && bit < width; bit++) {
-        odin3_net_id net = odin3_wire_net(e2->mod, rec->ir_wire, bit);
+        odin3_net_id net = odin3_wire_net(e2->mod, wire, bit);
         out->bits[bit] = net.v;
         if (reads != NULL) {
             st = reads->bit(reads->user, net, &out->bits[bit]);
@@ -310,7 +304,7 @@ static odin3_status ex_name(ex_run *run, const ex_frame *frame, odin3_sig *out) 
             return ex_name_error(e2, frame->node, "'%s' is not a net or variable of this module",
                                  ex_sym_name(e2, rec));
         }
-        return ex_wire_sig(run, rec, out);
+        return ex_wire_nets(run, rec->ir_wire, out);
     }
     uint32_t width = ex_final(e2, frame->node).width;
     bool wide = ex_param_unsized(e2, rec) &&
@@ -735,8 +729,52 @@ static odin3_status ex_sign_call(ex_run *run, const ex_frame *frame, odin3_sig *
     return odin3_elab2_extend(e2, &arg, ex_max(arg.width, fin.width), fin.is_signed, out);
 }
 
+/* The x word: a register word outside the array reads x. */
+static odin3_status ex_x_word(ex_run *run, uint32_t width, odin3_sig *out) {
+    odin3_status st = odin3_elab2_sig_new(run->e2, width, out);
+    for (uint32_t k = 0; st == ODIN3_OK && k < width; k++) {
+        out->bits[k] = odin3_sb_of_bit(ODIN3_BIT_X);
+    }
+    return st;
+}
+
+/* A memory word `m[i]` (EL-27): a `$mem` read port, or the word of an array that became
+ * registers; a variable index into registers is Task 23's. The operands are the indices. */
+static odin3_status ex_word(ex_run *run, const ex_frame *frame, const odin3_elab2_wordref *ref,
+                            odin3_sig *out) {
+    odin3_elab2 *e2 = run->e2;
+    odin3_sig *idx = odin3_arena_alloc(e2->scratch, (size_t)ref->n * sizeof *idx);
+    if (idx == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t k = 0; k < ref->n; k++) {
+        idx[k] = ex_operand(e2, frame, k);
+    }
+    const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, ref->mem);
+    odin3_elab2_mem_rd rd = {ref->mem, frame->node, idx, ref->n, run->req->reads};
+    if (!mem->to_regs) {
+        return odin3_elab2_mem_read(e2, &rd, out);
+    }
+    odin3_elab2_word word;
+    odin3_status st = odin3_elab2_mem_word(e2, &rd, false, &word);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (word.kind == ODIN3_WORD_VARIABLE) {
+        odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, frame->node),
+                                 ODIN3_PEND_REGS_VAR_READ);
+        return ODIN3_ERR_PARSE;
+    }
+    return word.kind == ODIN3_WORD_WIRE ? ex_wire_nets(run, word.wire, out)
+                                        : ex_x_word(run, mem->width, out);
+}
+
 static odin3_status ex_select(ex_run *run, const ex_frame *frame, odin3_sig *out) {
     odin3_elab2 *e2 = run->e2;
+    odin3_elab2_wordref ref;
+    if (odin3_elab2_mem_word_of(e2, frame->node, &ref)) {
+        return ex_word(run, frame, &ref, out);
+    }
     odin3_sig object = ex_operand(e2, frame, 0);
     odin3_sig index = frame->next > 1 ? ex_operand(e2, frame, 1) : (odin3_sig){NULL, 0, false};
     const odin3_elab2_expr_req *req = run->req;
@@ -765,9 +803,15 @@ static odin3_ast_id ex_kid_ternary(const odin3_ast *ast, const ex_frame *frame, 
     return frame->pick != 0 && idx == 1 ? odin3_ast_child(ast, frame->node, frame->pick) : none;
 }
 
-/* A select's operands: its object, then its index (not for [m:l]: its bounds are NUMBERs). */
-static odin3_ast_id ex_kid_select(const odin3_ast *ast, odin3_ast_id node, uint32_t idx) {
+/* A select's operands: its object, then its index (not for [m:l]: its bounds are NUMBERs). A memory
+ * word has the index expressions of its dimensions instead (EL-27). */
+static odin3_ast_id ex_kid_select(const odin3_elab2 *e2, odin3_ast_id node, uint32_t idx) {
+    const odin3_ast *ast = e2->elab;
     odin3_ast_id none = {0};
+    odin3_elab2_wordref ref;
+    if (odin3_elab2_mem_word_of(e2, node, &ref)) {
+        return idx < ref.n ? odin3_elab2_mem_word_index(e2, node, idx) : none;
+    }
     if (idx == 0) {
         return odin3_ast_child(ast, node, 0);
     }
@@ -798,7 +842,7 @@ static odin3_ast_id ex_kid(const odin3_elab2 *e2, const ex_frame *frame, uint32_
     case ODIN3_AST_TERNARY:
         return ex_kid_ternary(ast, frame, idx);
     case ODIN3_AST_SELECT:
-        return ex_kid_select(ast, frame->node, idx);
+        return ex_kid_select(e2, frame->node, idx);
     case ODIN3_AST_REPLICATE:
         return idx < 1 ? odin3_ast_child(ast, frame->node, 1) : none;
     case ODIN3_AST_CALL:

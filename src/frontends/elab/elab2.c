@@ -157,6 +157,7 @@ odin3_status odin3_elab2_create(odin3_pass_ctx *ctx, odin3_ast *elab, const odin
     odin3_vec_init(&e2->stack, sizeof(odin3_elab2_item));
     odin3_vec_init(&e2->chain, sizeof(odin3_scope_id));
     odin3_vec_init(&e2->vals, sizeof(odin3_sig));
+    odin3_vec_init(&e2->mems, sizeof(odin3_elab_mem));
     e2->modules = odin3_u64map_create(0);
     e2->warned = odin3_u64map_create(0);
     e2->scratch = odin3_arena_create(0);
@@ -179,6 +180,7 @@ void odin3_elab2_destroy(odin3_elab2 *e2) {
     }
     odin3_elab_binding_free(&e2->bind);
     odin3_elab2_drive_free(e2);
+    odin3_elab2_mem_free(e2);
     odin3_u64map_destroy(e2->bboxes);
     odin3_u64map_destroy(e2->modules);
     odin3_u64map_destroy(e2->warned);
@@ -231,6 +233,7 @@ odin3_status odin3_elab2_enter(odin3_elab2 *e2, odin3_ast_id module_node) {
     e2->mod_name = odin3_ast_name(e2->elab, module_node);
     memset(e2->const_net, 0, sizeof e2->const_net);
     odin3_elab2_drive_reset(e2);
+    odin3_elab2_mem_reset(e2);
     return ODIN3_OK;
 }
 
@@ -551,10 +554,11 @@ static odin3_status items_walk(odin3_elab2 *e2, odin3_ast_id module_node, unsign
     return st != ODIN3_OK ? st : e2->fatal;
 }
 
-/* Steps (2) to (7) so far: the pre-scan, the instances and gates, the assignments, the wired nets
- * and the end-of-module warnings. */
+/* Steps (2) to (8) so far: the pre-scan and the mem2reg decision, the instances and gates, the
+ * assignments, the wired nets, the `$mem` cells and the end-of-module warnings. */
 static odin3_status steps_after_wires(odin3_elab2 *e2, odin3_ast_id module_node) {
     odin3_status st = odin3_elab2_prescan(e2, module_node);
+    st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_mem_decide(e2, module_node);
     const odin3_elab_test_hooks *hooks = odin3_elab_test_hooks_get();
     if (st == ODIN3_OK && hooks->after_prescan != NULL) {
         hooks->after_prescan(hooks->user, e2, module_node);
@@ -562,6 +566,7 @@ static odin3_status steps_after_wires(odin3_elab2 *e2, odin3_ast_id module_node)
     st = st != ODIN3_OK || e2->stopped ? st : items_walk(e2, module_node, PHASE_INSTANCES);
     st = st != ODIN3_OK || e2->stopped ? st : items_walk(e2, module_node, PHASE_ASSIGNS);
     st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_wired(e2, module_node);
+    st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_mem_emit(e2);
     return st != ODIN3_OK || e2->stopped ? st : odin3_elab2_undriven(e2);
 }
 

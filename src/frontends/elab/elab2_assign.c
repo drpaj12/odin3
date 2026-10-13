@@ -371,16 +371,22 @@ static odin3_status lv_push(odin3_elab2_lvalue *lv, odin3_net_id net, odin3_elab
     return ODIN3_OK;
 }
 
+/* Every bit of a wire. */
+static odin3_status lv_whole_wire(const odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_wire_id wire,
+                                  odin3_ast_id node) {
+    uint32_t width = odin3_wire_width(e2->mod, wire);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t bit = 0; st == ODIN3_OK && bit < width; bit++) {
+        st = lv_push(lv, odin3_wire_net(e2->mod, wire, bit),
+                     (odin3_elab2_lvbit){{wire, bit}, node, true});
+    }
+    return st;
+}
+
 /* Every bit of the symbol's wire. */
 static odin3_status lv_whole(const odin3_elab2 *e2, odin3_elab2_lvalue *lv, const odin3_symbol *rec,
                              odin3_ast_id node) {
-    uint32_t width = odin3_wire_width(e2->mod, rec->ir_wire);
-    odin3_status st = ODIN3_OK;
-    for (uint32_t bit = 0; st == ODIN3_OK && bit < width; bit++) {
-        st = lv_push(lv, odin3_wire_net(e2->mod, rec->ir_wire, bit),
-                     (odin3_elab2_lvbit){{rec->ir_wire, bit}, node, true});
-    }
-    return st;
+    return lv_whole_wire(e2, lv, rec->ir_wire, node);
 }
 
 static odin3_status lv_name_target(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_id name) {
@@ -388,18 +394,18 @@ static odin3_status lv_name_target(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin
     return rec == NULL ? ODIN3_ERR_PARSE : lv_whole(e2, lv, rec, name);
 }
 
-/* The select being taken apart: its node, the net it selects from, the object and its range. */
+/* The select being taken apart: its node, the wire it selects from (0: a word outside its array,
+ * every bit dropped), the object and its range. */
 typedef struct lv_sel {
     odin3_ast_id node;
-    const odin3_symbol *rec;
+    odin3_wire_id wire;
     const odin3_elab2_selobj *obj;
     const odin3_elab2_selrange *range;
 } lv_sel;
 
-/* The bits a constant select of the net covers, from the lsb; the ones outside it are dropped. */
+/* The bits a constant select of the wire covers, from the lsb; the ones outside it are dropped. */
 static odin3_status lv_select_bits(odin3_elab2 *e2, odin3_elab2_lvalue *lv, const lv_sel *ls) {
     odin3_ast_id sel = ls->node;
-    const odin3_symbol *rec = ls->rec;
     const odin3_elab2_selobj *obj = ls->obj;
     const odin3_elab2_selrange *range = ls->range;
     bool outside = false;
@@ -410,8 +416,8 @@ static odin3_status lv_select_bits(odin3_elab2 *e2, odin3_elab2_lvalue *lv, cons
         odin3_net_id net = {0};
         odin3_elab2_lvbit bit = {{{0}, 0}, sel, false};
         if (pos >= 0) {
-            net = odin3_wire_net(e2->mod, rec->ir_wire, (uint32_t)pos);
-            bit.wb = (odin3_wirebit){rec->ir_wire, (uint32_t)pos};
+            net = odin3_wire_net(e2->mod, ls->wire, (uint32_t)pos);
+            bit.wb = (odin3_wirebit){ls->wire, (uint32_t)pos};
         }
         st = lv_push(lv, net, bit);
     }
@@ -424,10 +430,130 @@ static odin3_status lv_select_bits(odin3_elab2 *e2, odin3_elab2_lvalue *lv, cons
     return st;
 }
 
-/* A bit or part select target: its index must be constant (IEEE 6.1.2; Yosys rejects it too). */
+/* The bits a select of a word outside its array covers: dropped (the warning was the word's). */
+static odin3_status lv_select_absent(odin3_elab2_lvalue *lv, const lv_sel *ls) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t j = 0; st == ODIN3_OK && j < ls->range->width; j++) {
+        st = lv_push(lv, (odin3_net_id){0}, (odin3_elab2_lvbit){{{0}, 0}, ls->node, false});
+    }
+    lv->dropped = true;
+    return st;
+}
+
+/* The range of a bit or part select of obj, which must be constant (IEEE 6.1.2; Yosys rejects it
+ * too); the bits go onto the lvalue. */
+static odin3_status lv_select_range(odin3_elab2 *e2, odin3_elab2_lvalue *lv, const lv_sel *target) {
+    odin3_ast_id sel = target->node;
+    odin3_elab2_selrange range;
+    odin3_sig index = {NULL, 0, false};
+    bool has_index = odin3_ast_sub(e2->elab, sel) != ODIN3_AST_SELECT_PART;
+    odin3_elab2_expr_req req = {odin3_ast_child(e2->elab, sel, 1), {0, false, false}, NULL, NULL};
+    odin3_status st = has_index ? odin3_elab2_expr(e2, &req, &index) : ODIN3_OK;
+    st = st != ODIN3_OK
+             ? st
+             : odin3_elab2_sel_range(e2, sel, target->obj, has_index ? &index : NULL, &range);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (!range.constant || !range.known) {
+        odin3_elab2_error(
+            e2, odin3_ast_loc(e2->elab, sel),
+            "continuous assignment to '%s' with a non-constant index is not supported",
+            target->obj->name);
+        return ODIN3_ERR_PARSE;
+    }
+    lv_sel ls = *target;
+    ls.range = &range;
+    return ls.wire.v == 0 ? lv_select_absent(lv, &ls) : lv_select_bits(e2, lv, &ls);
+}
+
+/* --- words of arrays (EL-27) ------------------------------------------------------------------ */
+
+/* The word an lvalue SELECT chain names (word is the SELECT that completes the word), once its
+ * indices are generated and constant. An array that stayed a memory cannot be assigned
+ * continuously. */
+static odin3_status lv_word_of(odin3_elab2 *e2, odin3_ast_id word, const odin3_elab2_wordref *ref,
+                               odin3_elab2_word *out) {
+    const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, ref->mem);
+    const odin3_symbol *rec = odin3_symbol_get(e2->st, mem->sym);
+    odin3_loc loc = odin3_ast_loc(e2->elab, word);
+    if (!mem->to_regs && mem->failed) {
+        return ODIN3_ERR_PARSE; /* reported with the array */
+    }
+    if (!mem->to_regs) {
+        odin3_elab2_error(e2, loc,
+                          "continuous assignment to a word of memory '%s' is not supported",
+                          lv_name(e2, rec));
+        return ODIN3_ERR_PARSE;
+    }
+    odin3_sig *idx = odin3_arena_alloc(e2->scratch, (size_t)ref->n * sizeof *idx);
+    if (idx == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = ODIN3_OK;
+    for (uint32_t k = 0; st == ODIN3_OK && k < ref->n; k++) {
+        odin3_elab2_expr_req req = {
+            odin3_elab2_mem_word_index(e2, word, k), {0, false, false}, NULL, NULL};
+        st = odin3_elab2_expr(e2, &req, &idx[k]);
+    }
+    odin3_elab2_mem_rd rd = {ref->mem, word, idx, ref->n, NULL};
+    st = st != ODIN3_OK ? st : odin3_elab2_mem_word(e2, &rd, true, out);
+    if (st == ODIN3_OK && out->kind == ODIN3_WORD_VARIABLE) {
+        odin3_elab2_error(
+            e2, loc, "continuous assignment to '%s' with a non-constant index is not supported",
+            lv_name(e2, rec));
+        return ODIN3_ERR_PARSE;
+    }
+    return st;
+}
+
+/* A whole word as the target: its wire's bits, or dropped bits for a word outside the array. */
+static odin3_status lv_word(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_id sel,
+                            const odin3_elab2_wordref *ref) {
+    odin3_elab2_word word;
+    odin3_status st = lv_word_of(e2, sel, ref, &word);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (word.kind == ODIN3_WORD_WIRE) {
+        return lv_whole_wire(e2, lv, word.wire, sel);
+    }
+    uint32_t width = odin3_elab2_mem_get(e2, ref->mem)->width;
+    lv->dropped = true;
+    for (uint32_t bit = 0; st == ODIN3_OK && bit < width; bit++) {
+        st = lv_push(lv, (odin3_net_id){0}, (odin3_elab2_lvbit){{{0}, 0}, sel, false});
+    }
+    return st;
+}
+
+/* A bit or part select of a word (`w[1][2:1]`): the select's range within the word. */
+static odin3_status lv_word_select(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_id sel,
+                                   const odin3_elab2_wordref *ref) {
+    odin3_ast_id word_node = odin3_ast_child(e2->elab, sel, 0);
+    odin3_elab2_word word;
+    odin3_status st = lv_word_of(e2, word_node, ref, &word);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, ref->mem);
+    const odin3_symbol *rec = odin3_symbol_get(e2->st, mem->sym);
+    odin3_elab2_selobj obj = {rec->has_packed ? rec->packed.msb : 0,
+                              rec->has_packed ? rec->packed.lsb : 0, mem->width, lv_name(e2, rec)};
+    lv_sel ls = {sel, word.kind == ODIN3_WORD_WIRE ? word.wire : (odin3_wire_id){0}, &obj, NULL};
+    return lv_select_range(e2, lv, &ls);
+}
+
+/* A bit or part select target, or a word of an array (EL-27). */
 static odin3_status lv_select(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_id sel) {
     odin3_ast_id object = odin3_ast_child(e2->elab, sel, 0);
     odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, object);
+    odin3_elab2_wordref ref;
+    if (odin3_elab2_mem_word_of(e2, sel, &ref)) {
+        return lv_word(e2, lv, sel, &ref);
+    }
+    if (kind == ODIN3_AST_SELECT && odin3_elab2_mem_word_of(e2, object, &ref)) {
+        return lv_word_select(e2, lv, sel, &ref);
+    }
     if (kind != ODIN3_AST_IDENT && kind != ODIN3_AST_HIER_NAME) {
         odin3_elab2_error(e2, odin3_ast_loc(e2->elab, sel),
                           "the target of a continuous assignment must be a net, variable or "
@@ -439,25 +565,9 @@ static odin3_status lv_select(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast
         return ODIN3_ERR_PARSE;
     }
     odin3_elab2_selobj obj;
-    odin3_elab2_selrange range;
-    odin3_sig index = {NULL, 0, false};
-    bool has_index = odin3_ast_sub(e2->elab, sel) != ODIN3_AST_SELECT_PART;
-    odin3_elab2_expr_req req = {odin3_ast_child(e2->elab, sel, 1), {0, false, false}, NULL, NULL};
     odin3_elab2_sel_object(e2, object, odin3_wire_width(e2->mod, rec->ir_wire), &obj);
-    odin3_status st = has_index ? odin3_elab2_expr(e2, &req, &index) : ODIN3_OK;
-    st = st != ODIN3_OK ? st
-                        : odin3_elab2_sel_range(e2, sel, &obj, has_index ? &index : NULL, &range);
-    if (st != ODIN3_OK) {
-        return st;
-    }
-    if (!range.constant || !range.known) {
-        odin3_elab2_error(
-            e2, odin3_ast_loc(e2->elab, sel),
-            "continuous assignment to '%s' with a non-constant index is not supported", obj.name);
-        return ODIN3_ERR_PARSE;
-    }
-    lv_sel ls = {sel, rec, &obj, &range};
-    return lv_select_bits(e2, lv, &ls);
+    lv_sel ls = {sel, rec->ir_wire, &obj, NULL};
+    return lv_select_range(e2, lv, &ls);
 }
 
 static odin3_status lv_push_parts(const odin3_elab2 *e2, odin3_elab2_lvalue *lv,
