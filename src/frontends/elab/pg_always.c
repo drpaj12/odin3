@@ -1,9 +1,9 @@
 /*
  * pg_always.c — one `always` block through the process generator (2D Task 21; EL-34, EL-35 steps
- * 1-5): the scan that collects the outputs and finds the constructs still pending, the outputs
- * with their temporaries and chunks, the syncs of the event list (and T3's analysis of a level
- * list), the root defaults, and the statements through the frame stack. The builder is pg.c and
- * the node pg_emit.c.
+ * 2-5): the outputs with their temporaries and chunks, the syncs of the event list (and T3's
+ * analysis of a level list), the root defaults, and the statements through the frame stack (an
+ * `if` or `case` is a frame of pg_case.c's). The scan that finds the outputs is pg_scan.c, the
+ * builder pg.c and the node pg_emit.c.
  */
 #include "frontends/elab/pg_internal.h"
 
@@ -27,126 +27,6 @@
 
 enum { PG_CHUNK_SHIFT = 32 };
 
-/* --- the scan: outputs (step 1) and pending constructs ---------------------------------------- */
-
-/* The symbol a lhs piece names: through its selects to the identifier. */
-static const odin3_symbol *piece_symbol(const odin3_elab2 *e2, odin3_ast_id piece) {
-    while (odin3_ast_kind_of(e2->elab, piece) == ODIN3_AST_SELECT) {
-        piece = odin3_ast_child(e2->elab, piece, 0);
-    }
-    return odin3_symbol_get(e2->st, odin3_elab_sym_of(&e2->bind, piece));
-}
-
-/* `'w' is a net assigned in an always block; treated as a variable` (Yosys: "wire '\\w' is
- * assigned in a block"), once per piece of a target. */
-static void warn_nets(odin3_pg *pg, const odin3_elab2_lvalue *lv) {
-    odin3_elab2 *e2 = pg->e2;
-    odin3_ast_id last = {0};
-    for (size_t i = 0; i < lv->bits.len; i++) {
-        odin3_ast_id piece = ((const odin3_elab2_lvbit *)odin3_vec_cat(&lv->bits, i))->node;
-        if (piece.v == last.v) {
-            continue;
-        }
-        last = piece;
-        const odin3_symbol *rec = piece_symbol(e2, piece);
-        if (rec != NULL && rec->kind == ODIN3_SYM_NET) {
-            odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, piece),
-                             "'%s' is a net assigned in an always block; treated as a variable",
-                             odin3_strtab_get(odin3_design_strtab(e2->design), rec->name));
-        }
-    }
-}
-
-/* Takes the target of an assignment apart into pg->lvs. */
-static odin3_status take_target(odin3_pg *pg, odin3_ast_id assign) {
-    odin3_elab2_lvalue *lv = &pg->lvs;
-    odin3_vec_clear(&lv->nets);
-    odin3_vec_clear(&lv->bits);
-    odin3_vec_clear(&lv->work);
-    lv->dropped = false;
-    return odin3_elab2_lvalue_make(pg->e2, odin3_ast_child(pg->e2->elab, assign, 0), lv);
-}
-
-/* The bits an assignment can write join the outputs (first writer kept). */
-static odin3_status scan_assign(odin3_pg *pg, odin3_ast_id assign) {
-    odin3_status st = take_target(pg, assign);
-    if (st != ODIN3_OK) {
-        return st;
-    }
-    const odin3_elab2_lvalue *lv = &pg->lvs;
-    warn_nets(pg, lv);
-    for (size_t i = 0; i < lv->nets.len; i++) {
-        odin3_net_id net = *(const odin3_net_id *)odin3_vec_cat(&lv->nets, i);
-        if (net.v == 0 || odin3_u64map_get(pg->out_of, net.v, NULL)) {
-            continue;
-        }
-        const odin3_elab2_lvbit *bit = odin3_vec_cat(&lv->bits, i);
-        pg_out *out = odin3_vec_push(&pg->outs);
-        if (out == NULL) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
-        *out = (pg_out){net, {0}, bit->wb, bit->node, bit->whole, 0};
-        st = odin3_u64map_put(pg->out_of, (odin3_kv){net.v, pg->outs.len});
-        if (st != ODIN3_OK) {
-            return st;
-        }
-    }
-    return ODIN3_OK;
-}
-
-/* Pushes the children of node last to first, so the first one is scanned first. */
-static odin3_status scan_push(odin3_pg *pg, odin3_ast_id node, uint32_t from) {
-    odin3_ast_span kids = odin3_ast_children(pg->e2->elab, node);
-    for (uint32_t i = kids.n; i > from; i--) {
-        if (kids.ids[i - 1U].v == 0) {
-            continue;
-        }
-        odin3_ast_id *slot = odin3_vec_push(&pg->work);
-        if (slot == NULL) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
-        *slot = kids.ids[i - 1U];
-    }
-    return ODIN3_OK;
-}
-
-/* One node of the scan: an assignment adds its outputs, a block its statements, a pending
- * construct is reported; any other kind is looked into (the statements of Tasks 22-23). */
-static odin3_status scan_node(odin3_pg *pg, odin3_ast_id node) {
-    switch (odin3_ast_kind_of(pg->e2->elab, node)) {
-    case ODIN3_AST_BLOCKING_ASSIGN:
-    case ODIN3_AST_NONBLOCKING_ASSIGN:
-        return scan_assign(pg, node);
-    case ODIN3_AST_SEQ_BLOCK:
-        return scan_push(pg, node, odin3_ast_slot_count(ODIN3_AST_SEQ_BLOCK));
-    case ODIN3_AST_NULL_STMT:
-        return ODIN3_OK;
-    default:
-        if (odin3_elab2_pending(pg->e2, node)) {
-            return ODIN3_ERR_PARSE;
-        }
-        return scan_push(pg, node, 0);
-    }
-}
-
-static odin3_status pg_scan(odin3_pg *pg, odin3_ast_id body) {
-    odin3_vec_clear(&pg->work);
-    odin3_ast_id *slot = body.v != 0 ? odin3_vec_push(&pg->work) : NULL;
-    if (body.v != 0 && slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    if (slot != NULL) {
-        *slot = body;
-    }
-    odin3_status st = ODIN3_OK;
-    while (st == ODIN3_OK && pg->work.len > 0 && !pg->e2->stopped) {
-        odin3_ast_id node = *(const odin3_ast_id *)odin3_vec_cat(&pg->work, pg->work.len - 1);
-        odin3_vec_pop(&pg->work);
-        st = scan_node(pg, node);
-    }
-    return st;
-}
-
 /* --- the outputs, their temporaries and chunks (steps 1-2) ------------------------------------ */
 
 static int out_compare(const void *lhs, const void *rhs) {
@@ -155,8 +35,7 @@ static int out_compare(const void *lhs, const void *rhs) {
     return (first > second) - (first < second);
 }
 
-/* Whether out follows prev as the next bit of the same variable. */
-static bool chunk_continues(const pg_out *prev, const pg_out *out) {
+bool pg_out_continues(const pg_out *prev, const pg_out *out) {
     return prev->wb.wire.v != 0 && prev->wb.wire.v == out->wb.wire.v &&
            out->wb.bit == prev->wb.bit + 1U;
 }
@@ -167,7 +46,7 @@ static odin3_status make_chunks(odin3_pg *pg) {
     pg_out *outs = pg->outs.data;
     odin3_vec_clear(&pg->chunks);
     for (uint32_t i = 0; i < pg->outs.len; i++) {
-        bool same = i > 0 && chunk_continues(&outs[i - 1U], &outs[i]);
+        bool same = i > 0 && pg_out_continues(&outs[i - 1U], &outs[i]);
         if (!same) {
             pg_chunk *chunk = odin3_vec_push(&pg->chunks);
             if (chunk == NULL) {
@@ -455,23 +334,29 @@ odin3_status pg_read_bit(void *user, odin3_net_id net, odin3_sigbit *out) {
 }
 
 /* `lhs = rhs` / `lhs <= rhs`: the target, the value at max(L(lhs), L(rhs)) through rv, truncated
- * or extended to L(lhs), then the assignment. */
+ * or extended to L(lhs), then the assignment (a select with a non-constant index: the case
+ * method, whose width is the select's). */
 static odin3_status exec_assign(odin3_pg *pg, odin3_ast_id stmt) {
     odin3_elab2 *e2 = pg->e2;
-    odin3_status st = take_target(pg, stmt);
+    odin3_status st = pg_take_target_of(pg, odin3_ast_child(e2->elab, stmt, 0));
     if (st != ODIN3_OK) {
         return st;
     }
-    uint32_t width = (uint32_t)pg->lvs.nets.len;
+    bool variable = pg->lvs.var.node.v != 0;
+    uint32_t width = variable ? pg->lvs.var.width : (uint32_t)pg->lvs.nets.len;
     odin3_elab2_reads reads = {pg_read_bit, pg};
     odin3_elab2_expr_req req = {
         odin3_ast_child(e2->elab, stmt, 2), {width, true, false}, NULL, &reads};
     odin3_sig sig;
     st = odin3_elab2_expr(e2, &req, &sig);
     st = st != ODIN3_OK ? st : odin3_elab2_extend(e2, &sig, width, sig.is_signed, &sig);
-    pg_asg asg = {&pg->lvs, &sig, stmt,
-                  odin3_ast_kind_of(e2->elab, stmt) == ODIN3_AST_BLOCKING_ASSIGN};
-    return st != ODIN3_OK ? st : pg_apply(pg, &asg);
+    bool blocking = odin3_ast_kind_of(e2->elab, stmt) == ODIN3_AST_BLOCKING_ASSIGN;
+    odin3_pg_assign_req areq = {stmt, odin3_ast_child(e2->elab, stmt, 0), &sig, blocking};
+    pg_asg asg = {&pg->lvs, &sig, stmt, blocking, false};
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    return variable ? pg_select_apply(pg, &areq) : pg_apply(pg, &asg);
 }
 
 /* A kind neither built nor pending is a 2D bug (the stage-1 counterpart is odin3_elab1_unhandled).
@@ -488,23 +373,35 @@ static odin3_status exec_unhandled(odin3_pg *pg, odin3_ast_id node) {
     return ODIN3_ERR_PARSE;
 }
 
-static odin3_status frame_push(odin3_pg *pg, uint8_t kind, odin3_ast_id node, uint32_t next) {
-    pg_frame *frame = odin3_vec_push(&pg->frames);
-    if (frame == NULL) {
+odin3_status pg_frame_push(odin3_pg *pg, const pg_frame *frame) {
+    pg_frame *slot = odin3_vec_push(&pg->frames);
+    if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *frame = (pg_frame){kind, node, next};
+    *slot = *frame;
     return ODIN3_OK;
+}
+
+/* A frame of a lone statement to run. */
+static odin3_status frame_stmt(odin3_pg *pg, odin3_ast_id node) {
+    pg_frame frame = {PG_F_STMT, node, 0, 0, 0, 0};
+    return pg_frame_push(pg, &frame);
 }
 
 /* One statement: a block opens a frame, an assignment is built, the rest is pending. */
 static odin3_status exec_node(odin3_pg *pg, odin3_ast_id node) {
     switch (odin3_ast_kind_of(pg->e2->elab, node)) {
-    case ODIN3_AST_SEQ_BLOCK:
-        return frame_push(pg, PG_F_BLOCK, node, odin3_ast_slot_count(ODIN3_AST_SEQ_BLOCK));
+    case ODIN3_AST_SEQ_BLOCK: {
+        pg_frame frame = {PG_F_BLOCK, node, odin3_ast_slot_count(ODIN3_AST_SEQ_BLOCK), 0, 0, 0};
+        return pg_frame_push(pg, &frame);
+    }
     case ODIN3_AST_BLOCKING_ASSIGN:
     case ODIN3_AST_NONBLOCKING_ASSIGN:
         return exec_assign(pg, node);
+    case ODIN3_AST_IF:
+        return pg_if_open(pg, node);
+    case ODIN3_AST_CASE:
+        return pg_case_open(pg, node);
     case ODIN3_AST_NULL_STMT:
         return ODIN3_OK;
     default:
@@ -512,30 +409,37 @@ static odin3_status exec_node(odin3_pg *pg, odin3_ast_id node) {
     }
 }
 
-/* The next statement of the top frame, or none (0) after popping a finished block. */
-static odin3_ast_id frame_next(odin3_pg *pg) {
+/* The next statement of the top frame in *node, or none (0) after popping a finished block or
+ * after a switch step (which pushes what it needs itself). */
+static odin3_status frame_next(odin3_pg *pg, odin3_ast_id *node) {
     pg_frame *frame = odin3_vec_at(&pg->frames, pg->frames.len - 1);
+    *node = (odin3_ast_id){0};
+    if (frame->kind == PG_F_SWITCH) {
+        return pg_switch_step(pg);
+    }
     if (frame->kind == PG_F_STMT) {
-        odin3_ast_id node = frame->node;
+        *node = frame->node;
         odin3_vec_pop(&pg->frames);
-        return node;
+        return ODIN3_OK;
     }
     odin3_ast_span kids = odin3_ast_children(pg->e2->elab, frame->node);
     while (frame->next < kids.n) {
-        odin3_ast_id node = kids.ids[frame->next++];
-        if (node.v != 0) {
-            return node;
+        odin3_ast_id kid = kids.ids[frame->next++];
+        if (kid.v != 0) {
+            *node = kid;
+            return ODIN3_OK;
         }
     }
     odin3_vec_pop(&pg->frames);
-    return (odin3_ast_id){0};
+    return ODIN3_OK;
 }
 
 odin3_status pg_run(odin3_pg *pg, odin3_ast_id stmt) {
-    odin3_status st = frame_push(pg, PG_F_STMT, stmt, 0);
+    odin3_status st = frame_stmt(pg, stmt);
     while (st == ODIN3_OK && pg->frames.len > 0 && !pg->e2->stopped) {
-        odin3_ast_id node = frame_next(pg);
-        st = node.v != 0 ? exec_node(pg, node) : ODIN3_OK;
+        odin3_ast_id node;
+        st = frame_next(pg, &node);
+        st = st == ODIN3_OK && node.v != 0 ? exec_node(pg, node) : st;
     }
     odin3_vec_clear(&pg->frames);
     return st;

@@ -458,6 +458,24 @@ typedef struct odin3_elab2_expr_req {
 odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);
 
 /*
+ * The self-determined type of an expression (EL-13): its width and sign, typed without generating
+ * anything (no cell, no net). The typer's located errors and warnings are given as for
+ * odin3_elab2_expr (ODIN3_ERR_PARSE after an error); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG
+ * (logged) for a node that is no expression.
+ */
+odin3_status odin3_elab2_self_type(odin3_elab2 *e2, odin3_ast_id expr, odin3_etype *out);
+
+/*
+ * Whether expr is constant by the AST alone: its leaves are literals and parameters (a localparam,
+ * a genvar), and its calls are $signed, $unsigned or $clog2 of such. No variable, net, memory word
+ * or user call; nothing is generated. This is the test of the process generator's folding of
+ * `if`/`case` and of its non-constant lvalue selects (Yosys folds an AST constant only); a
+ * variable that merely holds a constant at that point (rv) is not constant here. Iterative.
+ * ODIN3_ERR_NO_MEMORY (*out unchanged).
+ */
+odin3_status odin3_elab2_expr_is_const(const odin3_elab2 *e2, odin3_ast_id expr, bool *out);
+
+/*
  * odin3_elab2_expr for a SELECT node (EL-32 reads): constant selects (the bits at the declared
  * indices; out-of-range bits are x with the warning `range select [9:6] of 'w' is out of bounds;
  * bits outside [7:0] are x`, or `bit select [9] of 'w' is out of bounds; the bit is x`; a part
@@ -555,6 +573,15 @@ void odin3_elab2_sel_object(const odin3_elab2 *e2, odin3_ast_id object, uint32_t
 odin3_status odin3_elab2_sel_range(odin3_elab2 *e2, odin3_ast_id select,
                                    const odin3_elab2_selobj *obj, const odin3_sig *index,
                                    odin3_elab2_selrange *range);
+
+/*
+ * The indices a [b +: w] (plus) or [b -: w] select covers when its base is the known value base,
+ * oriented as the declaration of obj: range->width is w on entry, left and right are set (a bit
+ * select is plus with w = 1). A base far outside the object is clamped to a band that stays
+ * outside it. Wiring only: no diagnostics.
+ */
+void odin3_elab2_sel_orient(const odin3_elab2_selobj *obj, bool plus, int64_t base,
+                            odin3_elab2_selrange *range);
 
 /* What the walk hands a SELECT's emission: its operands already emitted, and the lhs nets the
  * root may drive by construction (dest, dest_width of them; NULL when this is not the root). */
@@ -718,6 +745,37 @@ typedef struct odin3_elab2_lvbit {
     bool whole;
 } odin3_elab2_lvbit;
 
+/* One position a non-constant select can take: the declared index value the base holds there and
+ * the wire position (LSB first) of the select's bit 0; bit j sits at pos + j. */
+typedef struct odin3_elab2_varcand {
+    int64_t value;
+    uint32_t pos;
+} odin3_elab2_varcand;
+
+/* A non-constant select that is a whole procedural target (`y[s]`, `y[b +: w]`: EL-32's case
+ * method, Task 22). node is 0 when the lvalue has none. cands are the positions at which the select
+ * lies wholly inside the object and its base can hold the value (the index's self-determined
+ * width and sign limit them), by ascending value; lv->nets then holds every bit some position
+ * writes. */
+typedef struct odin3_elab2_varsel {
+    odin3_ast_id node;  /* the SELECT */
+    odin3_ast_id index; /* its base index expression, not generated */
+    odin3_wire_id wire; /* the wire selected from */
+    odin3_elab2_selobj obj;
+    uint32_t width;       /* bits written at a position */
+    uint32_t index_width; /* the index's self-determined width ... */
+    bool index_signed;    /* ... and sign */
+    odin3_vec cands;      /* odin3_elab2_varcand */
+} odin3_elab2_varsel;
+
+/*
+ * Fills vs->width, index_width, index_signed and cands from vs->node (a bit, [b +: w] or [b -: w]
+ * SELECT), obj and index, which the caller set. A width that is not positive or too large and the
+ * typer's errors are located and counted, ODIN3_ERR_PARSE; the positions times the width over
+ * the width cap is `width N exceeds the limit of M bits` at the select. ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab2_varsel_make(odin3_elab2 *e2, odin3_elab2_varsel *vs);
+
 /* An lvalue taken apart: nets[i] and bits[i] for result bit i (LSB first); net 0 and wire 0 for a
  * bit outside its net. */
 typedef struct odin3_elab2_lvalue {
@@ -726,9 +784,11 @@ typedef struct odin3_elab2_lvalue {
     odin3_vec work; /* odin3_ast_id: the nodes still to take apart */
     bool dropped;   /* some bit lies outside its net */
     /* An assignment target inside a process (Task 21), set by the caller after init: a memory word
-     * is the pending memory write, a variable index the pending case method (Task 22), and the
+     * is the pending memory write, a non-constant select the case method (Task 22; var), and the
      * messages do not speak of continuous assignments. */
     bool procedural;
+    odin3_ast_id top;       /* the lhs being taken apart (set by odin3_elab2_lvalue_make) */
+    odin3_elab2_varsel var; /* procedural only: the non-constant select that is the target */
 } odin3_elab2_lvalue;
 
 void odin3_elab2_lvalue_init(odin3_elab2_lvalue *lv);
@@ -740,6 +800,12 @@ void odin3_elab2_lvalue_free(odin3_elab2_lvalue *lv);
  * variable`, a memory, `continuous assignment to 'y' with a non-constant index is not supported`,
  * bits outside the net warned and dropped) are counted and ODIN3_ERR_PARSE. A `reg` target warns
  * `'r' is a variable assigned by a continuous assignment; treated as a net` when as_assign.
+ * A procedural lvalue (lv->procedural) may be a select whose index is not constant by the AST
+ * (odin3_elab2_expr_is_const), alone: lv->var is then filled (the index is not generated) and
+ * lv->nets holds every bit some position writes, or none when the index can select nothing inside
+ * the object (`assignment to bits outside 'y' [3:0] is ignored`, the bits dropped); inside a
+ * concatenation it is `non-constant index into 'y' is not supported in a concatenation target`.
+ * A word of a register array with a non-constant index is the pending point (l) feature.
  * ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_elab2_lvalue_make(odin3_elab2 *e2, odin3_ast_id lhs, odin3_elab2_lvalue *lv);

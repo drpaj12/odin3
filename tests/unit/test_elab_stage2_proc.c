@@ -660,20 +660,22 @@ static void test_different_bits_two_nodes(void) {
     TEST_ASSERT_EQUAL_UINT32(wnet("r", 1).v, out_net(proc_node(1), 0).v);
 }
 
-static void test_pending_if(void) {
+static void test_pending_loop(void) {
     read_failing("module t(input c, s, a, output reg y);\n"
-                 "  always @* begin if (s) y = a; end\nendmodule\n");
-    expect_error((at_loc){2, 19}, "elaboration is not available yet (2D): 'IF'");
+                 "  always @* begin repeat (2) y = a; end\nendmodule\n");
+    expect_error((at_loc){2, 19}, "elaboration is not available yet (2D): 'REPEAT'");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
     TEST_ASSERT_EQUAL_UINT32(0, count_of("$proc"));
 }
 
+/* A word of a register array with a variable index in a target is Task 23's (the bit and part
+ * selects of a vector are the case method, Task 22). */
 static void test_pending_variable_index_target(void) {
-    read_failing("module t(input c, input [1:0] s, input d, output reg [3:0] y);\n"
-                 "  always @(posedge c) y[s] <= d;\nendmodule\n");
-    expect_error((at_loc){2, 23},
-                 "elaboration is not available yet (2D): 'variable index in a procedural "
-                 "assignment target'");
+    read_failing("module t(input [1:0] s, input [3:0] d, output [3:0] y);\n  reg [3:0] w [0:3];\n"
+                 "  assign y = w[0];\n  always @* w[s] = d;\nendmodule\n");
+    expect_error((at_loc){4, 13},
+                 "elaboration is not available yet (2D): 'variable index into a register array in "
+                 "a procedural assignment target'");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
 }
 
@@ -1339,7 +1341,7 @@ static void test_oom_sweep(void) {
     X(test_attributes_and_provenance)                                                              \
     X(test_empty_block_makes_no_node)                                                              \
     X(test_different_bits_two_nodes)                                                               \
-    X(test_pending_if)                                                                             \
+    X(test_pending_loop)                                                                           \
     X(test_pending_variable_index_target)                                                          \
     X(test_pending_memory_write)                                                                   \
     X(test_process_after_assign)                                                                   \

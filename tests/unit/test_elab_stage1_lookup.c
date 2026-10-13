@@ -628,8 +628,12 @@ static const pend_case k_pend_cases[] = {
     {ODIN3_ELAB_STAGE2, ODIN3_AST_BLOCKING_ASSIGN, false},
     {ODIN3_ELAB_STAGE2, ODIN3_AST_NULL_STMT, false},
     {ODIN3_ELAB_STAGE2, ODIN3_AST_EVENT_EXPR, false},
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_IF, true},          /* Task 22 */
-    {ODIN3_ELAB_STAGE2, ODIN3_PEND_VAR_LVALUE, true}, /* Task 22 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_IF, false},         /* landed by Task 22 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_CASE, false},       /* landed by Task 22 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_CASE_ITEM, false},  /* landed by Task 22 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_FOR, true},         /* Task 23 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_REPEAT, true},      /* Task 23 */
+    {ODIN3_ELAB_STAGE2, ODIN3_PEND_VAR_LVALUE, true}, /* Task 23: a register array's word */
     {ODIN3_ELAB_STAGE2, ODIN3_AST_DEFPARAM, false},   /* never in an elaborated store */
     {0, ODIN3_AST_LIST, false},
     {ODIN3_ELAB_STAGE2 + 1, ODIN3_AST_LIST, false},
@@ -662,7 +666,9 @@ static void test_pending_report(void) {
     TEST_ASSERT_EQUAL_UINT32(before + 3, rs.errors);
     et_expect(&rs, ODIN3_LOG_ERROR, PENDING ": 'continuous-context call'");
     et_expect(&rs, ODIN3_LOG_ERROR, PENDING ": 'variable index into a register array'");
-    et_expect(&rs, ODIN3_LOG_ERROR, PENDING ": 'variable index in a procedural assignment target'");
+    et_expect(&rs, ODIN3_LOG_ERROR,
+              PENDING ": 'variable index into a register array in a procedural assignment "
+                      "target'");
 }
 
 /* --- diagnostics helpers --------------------------------------------------------------------- */

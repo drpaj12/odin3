@@ -30,12 +30,13 @@ enum { GROUP_SHIFT = 32 };
 
 /* The maps a block fills, with the address of each. */
 static odin3_u64map **pg_maps(odin3_pg *pg, size_t index) {
-    odin3_u64map **const all[] = {&pg->out_of,    &pg->group, &pg->lv,     &pg->rv,  &pg->slot_head,
-                                  &pg->dead_nets, &pg->reads, &pg->listed, &pg->seen};
+    odin3_u64map **const all[] = {&pg->out_of,    &pg->group,     &pg->lv,    &pg->rv,
+                                  &pg->slot_head, &pg->dead_nets, &pg->reads, &pg->listed,
+                                  &pg->seen,      &pg->swl,       &pg->folds};
     return all[index];
 }
 
-enum { PG_MAP_COUNT = 9 };
+enum { PG_MAP_COUNT = 11 };
 
 /* An empty map: the same one when it is empty already. */
 static odin3_status map_fresh(odin3_u64map **map) {
@@ -65,13 +66,22 @@ static void vecs_init(odin3_pg *pg) {
     odin3_vec_init(&pg->runs, sizeof(uint32_t));
     odin3_vec_init(&pg->run_l, sizeof(odin3_sigbit));
     odin3_vec_init(&pg->run_r, sizeof(odin3_sigbit));
+    odin3_vec_init(&pg->blk, sizeof(uint32_t));
+    odin3_vec_init(&pg->blk_marks, sizeof(uint32_t));
+    odin3_vec_init(&pg->sw_pool, sizeof(uint32_t));
+    odin3_vec_init(&pg->sw_ctx, sizeof(pg_swctx));
+    odin3_vec_init(&pg->sw_nets, sizeof(odin3_sigbit));
+    odin3_vec_init(&pg->sw_t1, sizeof(odin3_sigbit));
+    odin3_vec_init(&pg->sw_rv, sizeof(odin3_sigbit));
+    odin3_vec_init(&pg->cmp_sigs, sizeof(odin3_sig));
 }
 
 static void vecs_free(odin3_pg *pg) {
-    odin3_vec *const all[] = {&pg->outs,  &pg->chunks, &pg->undo,  &pg->pool,  &pg->dead,
-                              &pg->cmps,  &pg->acts,   &pg->cases, &pg->sws,   &pg->syncs,
-                              &pg->slots, &pg->frames, &pg->work,  &pg->items, &pg->runs,
-                              &pg->run_l, &pg->run_r};
+    odin3_vec *const all[] = {&pg->outs,   &pg->chunks,  &pg->undo,  &pg->pool,      &pg->dead,
+                              &pg->cmps,   &pg->acts,    &pg->cases, &pg->sws,       &pg->syncs,
+                              &pg->slots,  &pg->frames,  &pg->work,  &pg->items,     &pg->runs,
+                              &pg->run_l,  &pg->run_r,   &pg->blk,   &pg->blk_marks, &pg->sw_pool,
+                              &pg->sw_ctx, &pg->sw_nets, &pg->sw_t1, &pg->sw_rv,     &pg->cmp_sigs};
     for (size_t i = 0; i < sizeof all / sizeof all[0]; i++) {
         odin3_vec_free(all[i]);
     }
@@ -87,6 +97,7 @@ void odin3_pg_destroy(odin3_pg *pg) {
     odin3_u64map_destroy(pg->kinds);
     vecs_free(pg);
     odin3_elab2_lvalue_free(&pg->lvs);
+    odin3_elab2_lvalue_free(&pg->slv);
     odin3_util_free(pg);
 }
 
@@ -96,9 +107,11 @@ void odin3_elab2_pg_free(odin3_elab2 *e2) {
 }
 
 odin3_status pg_block_reset(odin3_pg *pg) {
-    odin3_vec *const lists[] = {&pg->outs, &pg->chunks, &pg->undo,  &pg->pool,
-                                &pg->dead, &pg->cmps,   &pg->acts,  &pg->cases,
-                                &pg->sws,  &pg->syncs,  &pg->slots, &pg->frames};
+    odin3_vec *const lists[] = {&pg->outs,    &pg->chunks,    &pg->undo,    &pg->pool,
+                                &pg->dead,    &pg->cmps,      &pg->acts,    &pg->cases,
+                                &pg->sws,     &pg->syncs,     &pg->slots,   &pg->frames,
+                                &pg->blk,     &pg->blk_marks, &pg->sw_pool, &pg->sw_ctx,
+                                &pg->sw_nets, &pg->sw_t1,     &pg->sw_rv,   &pg->cmp_sigs};
     for (size_t i = 0; i < sizeof lists / sizeof lists[0]; i++) {
         odin3_vec_clear(lists[i]);
     }
@@ -134,6 +147,7 @@ odin3_status odin3_pg_create(odin3_elab2 *e2, odin3_pg **out) {
     pg->e2 = e2;
     vecs_init(pg);
     odin3_elab2_lvalue_init(&pg->lvs);
+    odin3_elab2_lvalue_init(&pg->slv);
     pg->lvs.procedural = true;
     pg->kinds = odin3_u64map_create(0);
     odin3_status st = pg->kinds != NULL ? pg_block_reset(pg) : ODIN3_ERR_NO_MEMORY;
@@ -496,8 +510,7 @@ static bool asg_target(const odin3_pg *pg, const odin3_elab2_lvalue *lv, uint32_
     return pg_lv_get(pg, *(const odin3_net_id *)odin3_vec_cat(&lv->nets, item), target);
 }
 
-/* Whether target (with the previous one, prev) continues a run: one group, the next position. */
-static bool run_continues(const odin3_pg *pg, odin3_net_id prev, odin3_net_id target) {
+bool pg_run_continues(const odin3_pg *pg, odin3_net_id prev, odin3_net_id target) {
     pg_grp before = {0, 0};
     pg_grp after = {0, 0};
     return pg_group_of(pg, prev, &before) && pg_group_of(pg, target, &after) &&
@@ -517,7 +530,7 @@ static odin3_status asg_runs(odin3_pg *pg, const pg_asg *asg) {
             continue;
         }
         *(uint32_t *)odin3_vec_at(&pg->items, kept) = item;
-        if (kept == 0 || !run_continues(pg, prev, target)) {
+        if (kept == 0 || !pg_run_continues(pg, prev, target)) {
             uint32_t *run = odin3_vec_push(&pg->runs);
             if (run == NULL) {
                 return ODIN3_ERR_NO_MEMORY;
@@ -587,7 +600,7 @@ static odin3_status mixed_error(odin3_pg *pg, const pg_asg *asg, uint32_t bit, o
 
 /* T9 (EL-41): a bit assigned with both `=` and `<=`, in one block or several. The first
  * assignment of each bit is remembered for the module. */
-static odin3_status check_mixed(odin3_pg *pg, const pg_asg *asg) {
+odin3_status pg_check_mixed(odin3_pg *pg, const pg_asg *asg) {
     uint64_t mine = (uint64_t)(asg->blocking ? 2U : 1U) << GROUP_SHIFT;
     for (uint32_t i = 0; i < asg->lv->nets.len; i++) {
         odin3_net_id net = *(const odin3_net_id *)odin3_vec_cat(&asg->lv->nets, i);
@@ -608,7 +621,7 @@ static odin3_status check_mixed(odin3_pg *pg, const pg_asg *asg) {
 }
 
 odin3_status pg_apply(odin3_pg *pg, const pg_asg *asg) {
-    odin3_status st = check_mixed(pg, asg);
+    odin3_status st = asg->raw ? ODIN3_OK : pg_check_mixed(pg, asg);
     st = st != ODIN3_OK ? st : asg_keep(pg, asg->lv);
     for (uint32_t k = 0; st == ODIN3_OK && asg->blocking && k < pg->items.len; k++) {
         uint32_t item = *(const uint32_t *)odin3_vec_cat(&pg->items, k);
@@ -633,22 +646,47 @@ odin3_status pg_apply(odin3_pg *pg, const pg_asg *asg) {
     return st;
 }
 
-odin3_status odin3_pg_assign(odin3_pg *pg, const odin3_pg_assign_req *req) {
-    if (req == NULL || req->rhs == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "odin3_pg_assign: bad argument");
-        return ODIN3_ERR_INVALID_ARG;
-    }
+odin3_status pg_take_target_of(odin3_pg *pg, odin3_ast_id lhs) {
     odin3_elab2_lvalue *lv = &pg->lvs;
     odin3_vec_clear(&lv->nets);
     odin3_vec_clear(&lv->bits);
     odin3_vec_clear(&lv->work);
     lv->dropped = false;
-    odin3_status st = odin3_elab2_lvalue_make(pg->e2, req->lhs, lv);
-    if (st == ODIN3_OK && req->rhs->width != lv->nets.len) {
+    return odin3_elab2_lvalue_make(pg->e2, lhs, lv);
+}
+
+odin3_status odin3_pg_assign(odin3_pg *pg, const odin3_pg_assign_req *req) {
+    if (req == NULL || req->rhs == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_pg_assign: bad argument");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_status st = pg_take_target_of(pg, req->lhs);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    odin3_elab2_lvalue *lv = &pg->lvs;
+    if (lv->var.node.v != 0) {
+        return pg_select_apply(pg, req);
+    }
+    if (req->rhs->width != lv->nets.len) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_pg_assign: the value is %u bits; the target %zu",
                   req->rhs->width, lv->nets.len);
         return ODIN3_ERR_INVALID_ARG;
     }
-    pg_asg asg = {lv, req->rhs, req->stmt, req->blocking};
-    return st != ODIN3_OK ? st : pg_apply(pg, &asg);
+    pg_asg asg = {lv, req->rhs, req->stmt, req->blocking, false};
+    return pg_apply(pg, &asg);
+}
+
+odin3_status odin3_pg_select_write(odin3_pg *pg, const odin3_pg_assign_req *req) {
+    if (req == NULL || req->rhs == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_pg_select_write: bad argument");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_status st = pg_take_target_of(pg, req->lhs);
+    if (st == ODIN3_OK && pg->lvs.var.node.v == 0) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "odin3_pg_select_write: the target is not a select with a non-constant index");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return st != ODIN3_OK ? st : pg_select_apply(pg, req);
 }

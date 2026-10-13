@@ -183,8 +183,8 @@ static odin3_status sel_plus_width(odin3_elab2 *e2, odin3_ast_id select, uint32_
 }
 
 /* [b +: w] and [b -: w] with a known base: the indices lo .. hi, oriented as the declaration. */
-static void sel_orient(const odin3_elab2_selobj *obj, bool plus, int64_t base_in,
-                       odin3_elab2_selrange *range) {
+void odin3_elab2_sel_orient(const odin3_elab2_selobj *obj, bool plus, int64_t base_in,
+                            odin3_elab2_selrange *range) {
     /* A base beyond the band is clamped to its edge: it stays far outside every object (a width
      * is at most 2^32 bits), so the select reads x with the out-of-bounds warning, and the sums
      * below cannot overflow. */
@@ -220,7 +220,7 @@ odin3_status odin3_elab2_sel_range(odin3_elab2 *e2, odin3_ast_id select,
     if (st != ODIN3_OK || rc <= 0) {
         return st;
     }
-    sel_orient(obj, sub == ODIN3_AST_SELECT_PART_PLUS, base, range);
+    odin3_elab2_sel_orient(obj, sub == ODIN3_AST_SELECT_PART_PLUS, base, range);
     return ODIN3_OK;
 }
 

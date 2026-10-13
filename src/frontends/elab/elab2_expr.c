@@ -954,3 +954,61 @@ odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, 
     }
     return st;
 }
+
+/* --- types without generating, and constant-ness by the AST --------------------------------- */
+
+odin3_status odin3_elab2_self_type(odin3_elab2 *e2, odin3_ast_id expr, odin3_etype *out) {
+    if (!ex_is_expression(e2, expr)) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_elab2_self_type: not an expression");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_status st = ex_typer(e2);
+    st = st != ODIN3_OK ? st : odin3_ctype_expr(e2->ty, expr, (odin3_etype){0, false, false});
+    if (st == ODIN3_OK) {
+        *out = odin3_ctype_final(e2->ty, expr);
+    }
+    return st;
+}
+
+/* A system call that keeps its argument constant: $signed, $unsigned, $clog2. */
+static bool ex_const_call(const odin3_elab2 *e2, odin3_ast_id node) {
+    if ((odin3_ast_flags(e2->elab, node) & ODIN3_AST_F_CALL_SYSTEM) == 0) {
+        return false;
+    }
+    const char *name = odin3_ast_name_str(e2->elab, node);
+    return strcmp(name, "$signed") == 0 || strcmp(name, "$unsigned") == 0 ||
+           strcmp(name, "$clog2") == 0;
+}
+
+/* One entered node of the constant test: false when it reads a variable or calls a function. */
+static bool ex_const_node(const odin3_elab2 *e2, odin3_ast_id node) {
+    switch (odin3_ast_kind_of(e2->elab, node)) {
+    case ODIN3_AST_IDENT:
+    case ODIN3_AST_HIER_NAME: {
+        const odin3_symbol *rec = ex_symbol(e2, node);
+        return rec != NULL && (rec->kind == ODIN3_SYM_PARAM || rec->kind == ODIN3_SYM_LOCALPARAM ||
+                               rec->kind == ODIN3_SYM_GENVAR);
+    }
+    case ODIN3_AST_CALL:
+        return ex_const_call(e2, node);
+    default:
+        return true;
+    }
+}
+
+odin3_status odin3_elab2_expr_is_const(const odin3_elab2 *e2, odin3_ast_id expr, bool *out) {
+    odin3_ast_cursor cur;
+    odin3_status st = odin3_ast_cursor_init(&cur, e2->elab, expr);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    bool constant = true;
+    odin3_ast_event ev;
+    odin3_ast_id node;
+    while (constant && odin3_ast_cursor_next(&cur, &ev, &node)) {
+        constant = ev != ODIN3_AST_ENTER || ex_const_node(e2, node);
+    }
+    odin3_ast_cursor_free(&cur);
+    *out = constant;
+    return ODIN3_OK;
+}

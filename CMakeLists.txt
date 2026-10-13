@@ -213,6 +213,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_wires.c
     src/frontends/elab/elab2_expr.c
     src/frontends/elab/elab2_select.c
+    src/frontends/elab/elab2_varsel.c
     src/frontends/elab/elab2_assign.c
     src/frontends/elab/elab2_claim.c
     src/frontends/elab/elab2_wired.c
@@ -226,7 +227,10 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_words.c
     src/frontends/elab/pg.c
     src/frontends/elab/pg_always.c
+    src/frontends/elab/pg_case.c
     src/frontends/elab/pg_emit.c
+    src/frontends/elab/pg_scan.c
+    src/frontends/elab/pg_select.c
     src/frontends/elab/elab2_inst.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
@@ -907,6 +911,12 @@ if(BUILD_TESTING)
     add_dependencies(test_elab_stage2_proc verilog_generated)
     target_compile_definitions(test_elab_stage2_proc PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 22: if, case, case temporaries, flags and the case method for variable selects.
+    odin3_add_unit_test(test_elab_stage2_case)
+    target_include_directories(test_elab_stage2_case PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_case verilog_generated)
+    target_compile_definitions(test_elab_stage2_case PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
@@ -1552,6 +1562,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
                     ${PROJECT_SOURCE_DIR}/tests/verilog/proc-bridge)
         set_tests_properties(elab_proc_bridge_smoke PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
+        # 2D Task 22 (spec 14.3): elab-equiv on every source of tests/verilog/case-bridge: if,
+        # case, casez/casex wildcards, nesting with blocking temporaries, full_case, folding, item
+        # expressions and the case method for variable selects. Exit 77 (skip) as above.
+        add_test(NAME elab_case_bridge
+            COMMAND sh -c "for f in \"$4\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t \"$f\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/verilog/case-bridge)
+        set_tests_properties(elab_case_bridge PROPERTIES
             LABELS differential SKIP_RETURN_CODE 77)
     endif()
 

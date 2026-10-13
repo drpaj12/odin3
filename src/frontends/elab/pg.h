@@ -3,8 +3,9 @@
  * follows Yosys 0.55's ProcessGenerator step for step and builds one `$proc` node (docs/IR.md
  * IR-19) per `always` block, off the IR in vectors (cases, switches, actions, compares and syncs,
  * whose signal bits are odin3_sigbit: a net, a constant 0/1/x/z or ODIN3_SB_ANY), then creates the
- * node whole in odin3_pg_emit (step 7). Tasks 22-24 add if/case, loops, calls and memory writes to
- * the same builder.
+ * node whole in odin3_pg_emit (step 7). Task 22 added if/case (EL-36) and the case method for a
+ * non-constant lvalue select (EL-32); Tasks 23-24 add loops, calls and memory writes to the same
+ * builder.
  *
  * One odin3_pg serves a whole module (elab2.c makes it on the first block); everything it keeps
  * per block is reset by the next odin3_pg_always. No recursion: statements run through an explicit
@@ -46,12 +47,29 @@ odin3_status odin3_pg_always(odin3_pg *pg, odin3_ast_id always_node);
 
 /*
  * Runs one statement of the block being built through the frame stack (EL-35 step 5): blocking and
- * non-blocking assignments, `begin ... end` and the null statement are built; a construct that is
- * pending (Tasks 22-24) is reported by point (l)'s line, once per kind, and is ODIN3_ERR_PARSE.
- * Statuses as odin3_pg_always. Only valid between odin3_pg_open and odin3_pg_emit (odin3_pg_always
- * does all three).
+ * non-blocking assignments, `begin ... end`, `if`, `case`, `casez`, `casex` and the null statement
+ * are built; a construct that is pending (Tasks 23-24) is reported by point (l)'s line, once per
+ * kind, and is ODIN3_ERR_PARSE. Statuses as odin3_pg_always. Only valid between odin3_pg_open and
+ * odin3_pg_emit (odin3_pg_always does all three), for a statement of the body odin3_pg_open
+ * scanned.
  */
 odin3_status odin3_pg_stmt(odin3_pg *pg, odin3_ast_id stmt);
+
+/*
+ * odin3_pg_stmt for one IF (odin3_pg_if) or one CASE, CASEZ or CASEX (odin3_pg_case_stmt) statement
+ * of the scanned body, which EL-36 builds as a switch: a constant condition or selector with
+ * constant items keeps the taken branch alone (no switch); else the bits the branches assign by
+ * `=` get case temporaries t1 (one group per chunk, v4.2), every case starts with `t1 = rv(bits)`
+ * and runs with lv(bits) = t1 (lv and rv saved and restored around it), the cases are the items in
+ * source order and the default item last, an added default case holds `t1 = rv(bits)` (x under
+ * `full_case`) when the branches assign by `=` and no item is the default, and after the switch
+ * rv(bits) = t1 and the current case gets `lv(bits) = t1`. The switch flags come from the
+ * `full_case` and `parallel_case` attributes and metacomments, each with D1's warning. These are
+ * odin3_pg_stmt with a kind check (the brief's `odin3_pg_case` is the Task 21 primitive below).
+ * ODIN3_ERR_INVALID_ARG (logged) for another kind of statement or one the scan did not see.
+ */
+odin3_status odin3_pg_if(odin3_pg *pg, odin3_ast_id stmt);
+odin3_status odin3_pg_case_stmt(odin3_pg *pg, odin3_ast_id stmt);
 
 /*
  * One assignment to build (EL-35 step 5): stmt is the statement (provenance, messages), lhs the
@@ -73,10 +91,24 @@ typedef struct odin3_pg_assign_req {
  * action `lv(bit) = value` is appended to the current case as one action per run, in the target's
  * lvalue order (the leftmost part of a concatenation first), of consecutive bits of one temporary
  * group. rhs->width must equal the target's width (ODIN3_ERR_INVALID_ARG, logged, otherwise).
- * Errors of the target (not a variable, a variable index, a memory word) are counted and
- * ODIN3_ERR_PARSE. ODIN3_ERR_NO_MEMORY.
+ * A target that is a select with a non-constant index is odin3_pg_select_write's. Errors of the
+ * target (not a variable, a memory word, a non-constant index in a concatenation) are counted and
+ * ODIN3_ERR_PARSE; a word of a register array with a non-constant index is the pending line.
+ * ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_pg_assign(odin3_pg *pg, const odin3_pg_assign_req *req);
+
+/*
+ * The case method for a target that is a select with a non-constant index (EL-32 writes): `y[s] =
+ * d`, `y[b +: w] <= d`. A position temporary p (as wide as the index) is assigned the index once,
+ * in the root case, and a switch on p has one case per position the select can take
+ * (odin3_elab2_varsel_make), each assigning the constant slice of d at that position, with no
+ * default; for `=` the switch has the case temporaries of EL-36 (and so a default that holds them).
+ * A position at which the slice would straddle the end of the target has no case (spec 17 #54). The
+ * target must be such a select alone (ODIN3_ERR_INVALID_ARG, logged, otherwise); odin3_pg_assign
+ * calls this for one. rhs->width must be the select's width. ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_pg_select_write(odin3_pg *pg, const odin3_pg_assign_req *req);
 
 /*
  * The undo log of the `lv` and `rv` maps: odin3_pg_save returns a mark, odin3_pg_restore(mark)
@@ -96,14 +128,14 @@ void odin3_pg_restore(odin3_pg *pg, uint32_t mark);
 odin3_status odin3_pg_temp(odin3_pg *pg, uint32_t width, odin3_ast_id why, odin3_net_id *first);
 
 /*
- * The switch and case primitives of EL-36 (Task 22 builds if/case on them). odin3_pg_switch opens a
- * switch on `signal` in the current case (the current case does not change; a case of the switch
- * follows); odin3_pg_case opens a case of the newest switch of the current case, with `n_compares`
- * compares (each as wide as the switch's signal, ODIN3_SB_ANY allowed; none: the default case), and
- * makes it the current case, so assignments go into it and removals reach it; odin3_pg_case_end
- * makes the owner of the switch current again. stmt (a CASE, IF or CASE_ITEM node, or none) gives
- * the SOURCE record. ODIN3_ERR_INVALID_ARG (logged) for a case with no switch to join or compares
- * of the wrong width; ODIN3_ERR_NO_MEMORY.
+ * The switch and case primitives of EL-36 (odin3_pg_if and odin3_pg_case_stmt build on them).
+ * odin3_pg_switch opens a switch on `signal` in the current case (the current case does not change;
+ * a case of the switch follows); odin3_pg_case opens a case of the newest switch of the current
+ * case, with `n_compares` compares (each as wide as the switch's signal, ODIN3_SB_ANY allowed;
+ * none: the default case), and makes it the current case, so assignments go into it and removals
+ * reach it; odin3_pg_case_end makes the owner of the switch current again. stmt (a CASE, IF or
+ * CASE_ITEM node, or none) gives the SOURCE record. ODIN3_ERR_INVALID_ARG (logged) for a case with
+ * no switch to join or compares of the wrong width; ODIN3_ERR_NO_MEMORY.
  */
 typedef struct odin3_pg_switch_req {
     odin3_ast_id stmt;
