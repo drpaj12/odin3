@@ -66,6 +66,7 @@ void odin3_dff_state_free(odin3_dff_state *ds) {
     odin3_ffdata_free(&ds->ff);
     odin3_vec_free(&ds->pend);
     odin3_dff_dirty_free(&ds->dirty);
+    odin3_opt_dff_note_bytes(ds->oc, 0);
 }
 
 /* What net carries: odin3_net_const_value (CONST_NONE for a wire or an open pin). */

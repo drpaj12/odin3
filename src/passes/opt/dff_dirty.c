@@ -193,6 +193,7 @@ odin3_status odin3_dff_dirty_begin(odin3_dff_state *ds) {
     odin3_dff_dirty *dd = &ds->dirty;
     odin3_opt_ctx *oc = ds->oc;
     odin3_dff_dirty_free(dd);
+    odin3_opt_dff_note_bytes(oc, 0);
     if (!odin3_opt_dff_primed(oc)) {
         (void)odin3_opt_dff_prime(
             oc); /* the first sweep is full; changes from here are journaled */
@@ -211,6 +212,7 @@ odin3_status odin3_dff_dirty_begin(odin3_dff_state *ds) {
         (void)odin3_opt_dff_prime(oc);
         return ODIN3_OK; /* out of memory: a full sweep is always right */
     }
+    odin3_opt_dff_note_bytes(oc, (uint64_t)dd->n_marks + 1U); /* the budget counts them */
     walker wk;
     walker_init(&wk, ds, dd);
     odin3_status st = walk_entries(&wk, entries, count);
@@ -248,6 +250,7 @@ odin3_status odin3_dff_dirty_extend(odin3_dff_state *ds) {
         return ODIN3_OK;
     }
     memset(grown + dd->n_marks + 1U, 0, (size_t)end - dd->n_marks);
+    odin3_opt_dff_note_bytes(oc, (uint64_t)end + 1U);
     dd->marks = grown;
     dd->n_marks = end;
     clear_followed(dd);
