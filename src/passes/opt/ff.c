@@ -155,11 +155,11 @@ static odin3_vec *value_slot(odin3_ffdata *ff, const char *name) {
     return strcmp(name, "SRST_VALUE") == 0 ? &ff->val_srst : NULL;
 }
 
-static odin3_bit bit_at(const odin3_vec *vec, uint32_t idx) {
+odin3_bit odin3_ff_bit_at(const odin3_vec *vec, uint32_t idx) {
     return *(const odin3_bit *)odin3_vec_cat(vec, idx);
 }
 
-static odin3_net_id net_at(const odin3_vec *vec, uint32_t idx) {
+odin3_net_id odin3_ff_net_at(const odin3_vec *vec, uint32_t idx) {
     return *(const odin3_net_id *)odin3_vec_cat(vec, idx);
 }
 
@@ -282,13 +282,13 @@ static odin3_status read_init(const odin3_module *module, const odin3_celltype_d
                               odin3_ffdata *ff) {
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < ff->width; i++) {
-        odin3_net_id qnet = net_at(&ff->sig_q, i);
+        odin3_net_id qnet = odin3_ff_net_at(&ff->sig_q, i);
         st = push_bit(&ff->val_init,
                       odin3_net_valid(qnet) ? odin3_ffinit_get(module, qnet) : ODIN3_BIT_X);
     }
     uint32_t init = odin3_kit_param_index(def, "INIT");
     if (st != ODIN3_OK || !ff->is_fine || ff->width == 0 || init == ODIN3_KIT_NONE ||
-        bit_at(&ff->val_init, 0) != ODIN3_BIT_X) {
+        odin3_ff_bit_at(&ff->val_init, 0) != ODIN3_BIT_X) {
         return st;
     }
     const odin3_value *val = odin3_node_param(module, ff->node, init);
@@ -304,14 +304,14 @@ static odin3_status const_latch(const odin3_module *module, odin3_ffdata *ff) {
         return ODIN3_OK;
     }
     for (uint32_t i = 0; i < ff->width; i++) {
-        odin3_net_id net = net_at(&ff->sig_ad, i);
+        odin3_net_id net = odin3_ff_net_at(&ff->sig_ad, i);
         if (!odin3_net_valid(net) || odin3_net_const_value(module, net) == ODIN3_CONST_NONE) {
             return ODIN3_OK;
         }
     }
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < ff->width; i++) {
-        odin3_const val = odin3_net_const_value(module, net_at(&ff->sig_ad, i));
+        odin3_const val = odin3_net_const_value(module, odin3_ff_net_at(&ff->sig_ad, i));
         st = push_bit(&ff->val_arst, (odin3_bit)(val - ODIN3_CONST_0));
     }
     if (st != ODIN3_OK) {
@@ -523,7 +523,7 @@ static bool q_matches(const odin3_opt_ctx *oc, const odin3_ffdata *ff) {
     bool same = port < def->n_ports && pins.count == ff->width;
     for (uint32_t k = 0; same && k < pins.count; k++) {
         same = odin3_pin_net(oc->module, (odin3_pin_id){pins.first.v + k}).v ==
-               net_at(&ff->sig_q, k).v;
+               odin3_ff_net_at(&ff->sig_q, k).v;
     }
     return same;
 }
@@ -652,7 +652,7 @@ static odin3_status emit_tie(odin3_opt_ctx *oc, odin3_ffdata *ff) {
     odin3_net_id *src = odin3_util_calloc(sizeof *src * ((size_t)ff->width + 1));
     odin3_status st = src != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
     for (uint32_t i = 0; st == ODIN3_OK && i < ff->width; i++) {
-        st = odin3_opt_const_net(oc, bit_at(&ff->val_init, i), &src[i]);
+        st = odin3_opt_const_net(oc, odin3_ff_bit_at(&ff->val_init, i), &src[i]);
     }
     if (st == ODIN3_OK && ff->node.v != 0) {
         st = odin3_ff_remove_tie(oc, ff->node, src, ff->width);
@@ -674,7 +674,7 @@ static odin3_status arst_to_aload(odin3_opt_ctx *oc, odin3_ffdata *ff) {
     odin3_status st = odin3_vec_reserve(&ff->sig_ad, ff->width);
     for (uint32_t i = 0; st == ODIN3_OK && i < ff->width; i++) {
         odin3_net_id net = {0};
-        st = odin3_opt_const_net(oc, bit_at(&ff->val_arst, i), &net);
+        st = odin3_opt_const_net(oc, odin3_ff_bit_at(&ff->val_arst, i), &net);
         st = st == ODIN3_OK ? odin3_kit_push_net(&ff->sig_ad, net) : st;
     }
     if (st != ODIN3_OK) {
@@ -701,7 +701,7 @@ typedef struct emit_plan {
 
 /* A fine FF's INIT: val_init 0 or 1, else the node's 2 or 3, else 3. */
 static int64_t fine_init(const odin3_opt_ctx *oc, const odin3_ffdata *ff, uint32_t index) {
-    odin3_bit bit = bit_at(&ff->val_init, 0);
+    odin3_bit bit = odin3_ff_bit_at(&ff->val_init, 0);
     if (bit == ODIN3_BIT_0 || bit == ODIN3_BIT_1) {
         return bit == ODIN3_BIT_1 ? 1 : 0;
     }
@@ -732,7 +732,7 @@ static odin3_status plan_param(const odin3_opt_ctx *oc, odin3_ffdata *ff, emit_p
             return ODIN3_ERR_NO_MEMORY;
         }
         for (uint32_t k = 0; k < ff->width; k++) {
-            plan->bits[index][k] = (uint8_t)bit_at(vals, k);
+            plan->bits[index][k] = (uint8_t)odin3_ff_bit_at(vals, k);
         }
         val->bits = plan->bits[index];
         val->len = ff->width;
@@ -799,12 +799,12 @@ static odin3_status emit_cell(odin3_opt_ctx *oc, odin3_ffdata *ff, odin3_celltyp
 /* Every Q net whose init differs from val_init gets it (a fine FF: where the wire has one). */
 static odin3_status write_inits(odin3_opt_ctx *oc, const odin3_ffdata *ff) {
     for (uint32_t i = 0; i < ff->width; i++) {
-        odin3_net_id qnet = net_at(&ff->sig_q, i);
+        odin3_net_id qnet = odin3_ff_net_at(&ff->sig_q, i);
         if (!odin3_net_valid(qnet)) {
             continue;
         }
         odin3_bit cur = odin3_ffinit_get(oc->module, qnet);
-        odin3_bit want = bit_at(&ff->val_init, i);
+        odin3_bit want = odin3_ff_bit_at(&ff->val_init, i);
         if (cur == want || (ff->is_fine && cur == ODIN3_BIT_X)) {
             continue;
         }
@@ -882,7 +882,7 @@ static odin3_status split_keys(const odin3_ffdata *ff, const odin3_net_pair *tie
                                odin3_vec *keys) {
     odin3_status st = odin3_vec_reserve(keys, (size_t)ff->width + n_ties);
     for (uint32_t i = 0; st == ODIN3_OK && i < ff->width; i++) {
-        st = odin3_kit_push_u64(keys, net_at(&ff->sig_q, i).v);
+        st = odin3_kit_push_u64(keys, odin3_ff_net_at(&ff->sig_q, i).v);
     }
     for (uint32_t i = 0; st == ODIN3_OK && i < n_ties; i++) {
         st = odin3_kit_push_u64(keys, ties[i].drop.v);
@@ -981,8 +981,8 @@ static odin3_status shrink_ties(odin3_opt_ctx *oc, const odin3_ffdata *ff, bool 
     }
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && cellless && i < ff->width; i++) {
-        job->nets[job->n_ties + i] = net_at(&ff->sig_q, i);
-        st = odin3_opt_const_net(oc, bit_at(&ff->val_init, i), &job->src[job->n_ties + i]);
+        job->nets[job->n_ties + i] = odin3_ff_net_at(&ff->sig_q, i);
+        st = odin3_opt_const_net(oc, odin3_ff_bit_at(&ff->val_init, i), &job->src[job->n_ties + i]);
     }
     job->n_tie = total;
     return st;

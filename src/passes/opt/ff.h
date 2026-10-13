@@ -56,6 +56,10 @@ typedef struct odin3_ff_bits {
  */
 void odin3_ffdata_init(odin3_ffdata *ff);
 
+/* Element idx of an odin3_net_id / odin3_bit vector (a net id of sig_*, a bit of val_*). */
+odin3_net_id odin3_ff_net_at(const odin3_vec *vec, uint32_t idx);
+odin3_bit odin3_ff_bit_at(const odin3_vec *vec, uint32_t idx);
+
 /* Frees ff's vectors and leaves it as odin3_ffdata_init does; NULL is a no-op. */
 void odin3_ffdata_free(odin3_ffdata *ff);
 

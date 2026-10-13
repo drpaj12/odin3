@@ -121,6 +121,10 @@ add_library(odin3_core OBJECT
     src/passes/opt/muxtree.c
     src/passes/opt/reduce.c
     src/passes/opt/dff.c
+    src/passes/opt/dff_state.c
+    src/passes/opt/dff_gates.c
+    src/passes/opt/dff_rules.c
+    src/passes/opt/dff_constbits.c
     src/passes/opt/register.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
