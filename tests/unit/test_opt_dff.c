@@ -2094,7 +2094,7 @@ static const char *const k_cases[] = {
     "arst_always",     "arst_never",   "clk",        "const",           "qd",
     "sr_always",       "sr_never_clr", "sr_clr_na",  "sr_never_set",    "sr_set_na",
     "sr_arst_merge",   "srst_always",  "srst_never", "aload_always_sr", "aload_always_arst",
-    "dq_ce_over_srst", "mux",
+    "dq_ce_over_srst", "mux",          "en",
 };
 
 /* The mux case also runs with the merges switched off (the flags line of each .expect). */

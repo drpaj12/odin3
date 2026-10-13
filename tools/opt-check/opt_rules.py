@@ -17,16 +17,16 @@ Per row, smallest source first, Odin III runs plan point (g)::
     opt_<sub> <options> --opt-stats; stats; write_rtlil out.il
 
 (``read_blif R.blif`` for a BLIF source; a ``// prepass: <commands>`` line adds Odin III
-commands before ``write_rtlil in.il``, e.g. ``opt_expr`` to make a control signal constant), and checks that the counter is at least 1 and that
-``out.il`` equals ``<rule>.il``. With ``--yosys`` Yosys 0.55 runs
-``read_rtlil in.il; debug opt_<sub> <options>; stat`` under ``YOSYS_COVER_DIR``; its cover file must
-count the row's cover id (``opt.opt_expr.const_and``; Yosys has cover points in ``opt_expr`` only),
-or its log must match ``log:<regex>`` (the other passes), and its per-module cell-type histogram
-must equal Odin III's ``stats`` (without ``$port_*`` and constants). A row ``dev=N`` is a
-documented divergence (spec 17 row N): rows 2 and 24 are checked against an adjusted Yosys side
-(``$pos`` ignored; the pass, ``opt_clean``, the pass), any other row's Yosys difference is reported,
-not failed. A ``pending``
-row is listed and not run. The refinement check of Task 17 is not run here.
+commands before ``write_rtlil in.il``, e.g. ``opt_expr`` to make a control signal constant), and
+checks that the counter is at least 1 and that ``out.il`` equals ``<rule>.il``. With ``--yosys``
+Yosys 0.55 runs ``read_rtlil in.il; debug opt_<sub> <options>; stat`` under ``YOSYS_COVER_DIR``; its
+cover file must count the row's cover id (``opt.opt_expr.const_and``; Yosys has cover points in
+``opt_expr`` only), or its log must match ``log:<regex>`` (the other passes), and its per-module
+cell-type histogram must equal Odin III's ``stats`` (without ``$port_*`` and constants). A row
+``dev=N`` is a documented divergence (spec 17 row N): rows 2 and 24 are checked against an adjusted
+Yosys side (``$pos`` ignored; the pass, ``opt_clean``, the pass), any other row's Yosys difference
+is reported, not failed. A ``pending`` row is listed and not run. The refinement check of
+Task 17 is not run here.
 
 ``--write`` (which needs ``--yosys``) writes the ``.il`` goldens only when every row passes every
 check; on any failure nothing is written. Every child runs through ``memcap.run`` (one at a time).
