@@ -367,13 +367,16 @@ static void test_different_bits_two_nodes(void) {
     TEST_ASSERT_EQUAL_UINT32(pt_wnet("r", 1).v, pt_out_net(pt_proc_node(1), 0).v);
 }
 
-/* A word of an array that stayed a memory: the memory write is pending (Task 24), not dropped. */
-static void test_pending_memory_write(void) {
-    pt_read_failing("module t(input c, input [1:0] i, input [7:0] d, output [7:0] y);\n"
-                    "  reg [7:0] m [0:3];\n  assign y = m[i];\n"
-                    "  always @(posedge c) m[i] <= d;\nendmodule\n");
-    pt_expect_error((at_loc){4, 23}, "elaboration is not available yet (2D): 'memory write'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
+/* A word of an array that stayed a memory: the write is a port of its `$mem` (Task 24), whose
+ * address, data and enable are three `O` pins of the one `$proc` (no sync action). */
+static void test_memory_write_is_a_port(void) {
+    pt_read_clean("module t(input c, input [1:0] i, input [7:0] d, output [7:0] y);\n"
+                  "  reg [7:0] m [0:3];\n  assign y = m[i];\n"
+                  "  always @(posedge c) m[i] <= d;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$mem"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
+    pt_expect_dump(0, "I12 O18\nC0 [O0..O1<-I1..I2 O2..O9<-I3..I10 O10..O17<-I11,I11,I11,I11,I11,"
+                      "I11,I11,I11]\nS posedge I0 []\n");
 }
 
 /* --- drivers: processes beside continuous drivers and each other (carried from Tasks 19, 20) -- */
@@ -536,7 +539,7 @@ static odin3_sig sig_of(odin3_elab2 *e2, const odin3_sigbit *bits, uint32_t n) {
 }
 
 static odin3_status add_action(odin3_pg *pg, odin3_sigbit lhs, odin3_sigbit rhs) {
-    pg_act_req req = {pg->cur, 0, &lhs, &rhs, 1, pg->prov};
+    pg_act_req req = {pg->cur, 0, &lhs, &rhs, 1, pg->prov, false};
     return pg_act_add(pg, &req);
 }
 
@@ -1030,7 +1033,7 @@ static void test_oom_sweep(void) {
     X(test_attributes_and_provenance)                                                              \
     X(test_empty_block_makes_no_node)                                                              \
     X(test_different_bits_two_nodes)                                                               \
-    X(test_pending_memory_write)                                                                   \
+    X(test_memory_write_is_a_port)                                                                 \
     X(test_process_after_assign)                                                                   \
     X(test_two_processes_one_bit)                                                                  \
     X(test_two_processes_one_bit_of_a_vector)                                                      \

@@ -46,7 +46,7 @@ static odin3_status select_position(odin3_pg *pg, odin3_ast_id stmt, odin3_sig *
     for (uint32_t i = 0; st == ODIN3_OK && i < index.width; i++) {
         position->bits[i] = first.v + i;
     }
-    pg_act_req act = {PG_ROOT, 0, position->bits, index.bits, index.width, pg->prov};
+    pg_act_req act = {PG_ROOT, 0, position->bits, index.bits, index.width, pg->prov, false};
     return st != ODIN3_OK ? st : pg_act_add(pg, &act);
 }
 

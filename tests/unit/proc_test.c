@@ -33,6 +33,13 @@ void pt_read_with(const pass_src *src) {
     pt_rs.status = odin3_pass_run(pt_rs.design, "read_verilog", odin3_bytes_cstr(src->args));
 }
 
+void pt_read_files(const et_src *srcs, uint32_t n, const char *args) {
+    et_req req = {srcs, n, NULL, NULL, NULL};
+    et_setup(&req, &pt_rs);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(pt_rs.design, ODIN3_KEEP_AST_NONE));
+    pt_rs.status = odin3_pass_run(pt_rs.design, "read_verilog", odin3_bytes_cstr(args));
+}
+
 void pt_read_src(const char *text) {
     pass_src src = {"t.v", text};
     pt_read_with(&src);

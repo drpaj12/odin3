@@ -438,8 +438,8 @@ odin3_status odin3_elab2_account(odin3_elab2 *e2, const odin3_elab2_counts *made
 
 /* Pushes the items of GEN_BLOCK or MODULE node (its tail after nslots slots), in the scope they
  * are in, so the first pops first. */
-static odin3_status push_items(odin3_elab2 *e2, odin3_ast_id node, uint32_t nslots,
-                               odin3_scope_id scope) {
+odin3_status odin3_elab2_push_items(odin3_elab2 *e2, odin3_ast_id node, uint32_t nslots,
+                                    odin3_scope_id scope) {
     odin3_ast_span kids = odin3_ast_children(e2->elab, node);
     for (uint32_t i = kids.n; i > nslots; i--) {
         odin3_elab2_item *slot = odin3_vec_push(&e2->stack);
@@ -467,14 +467,17 @@ static odin3_status assign_one(odin3_elab2 *e2, odin3_ast_id node) {
     return carry_on(e2, odin3_ast_loc(e2->elab, node), odin3_elab2_assign(e2, node));
 }
 
-/* One declarator's initialiser: a net's is a continuous assignment (Task 18), a variable's an
- * initial block (Task 24, pending until it lands). The symbol says which. */
+/* One declarator's initialiser: a net's is a continuous assignment (Task 18); a variable's is an
+ * initial value (Task 24), which odin3_elab2_initials runs in its own step. The symbol says
+ * which. */
 static odin3_status declarator_initialiser(odin3_elab2 *e2, odin3_ast_id declarator) {
     const odin3_symbol *rec = odin3_symbol_get(e2->st, odin3_elab_sym_of(&e2->bind, declarator));
-    uint32_t feature = rec != NULL && rec->kind == ODIN3_SYM_VAR ? (uint32_t)ODIN3_AST_INITIAL
-                                                                 : (uint32_t)ODIN3_AST_NET_ASSIGN;
-    if (odin3_elab_pending(ODIN3_ELAB_STAGE2, feature)) {
-        odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, declarator), feature);
+    if (rec != NULL && rec->kind == ODIN3_SYM_VAR) {
+        return ODIN3_OK;
+    }
+    if (odin3_elab_pending(ODIN3_ELAB_STAGE2, (uint32_t)ODIN3_AST_NET_ASSIGN)) {
+        odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, declarator),
+                                 (uint32_t)ODIN3_AST_NET_ASSIGN);
         return ODIN3_OK;
     }
     return assign_one(e2, declarator);
@@ -533,7 +536,7 @@ static odin3_status instance_step(odin3_elab2 *e2, odin3_ast_id item) {
     case ODIN3_AST_GEN_BLOCK:
         return odin3_elab2_pending(e2, item)
                    ? ODIN3_OK
-                   : push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
+                   : odin3_elab2_push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
     case ODIN3_AST_INSTANTIATION:
         return emit_one(e2, item, odin3_elab2_instance);
     case ODIN3_AST_GATE_DECL:
@@ -543,29 +546,42 @@ static odin3_status instance_step(odin3_elab2 *e2, odin3_ast_id item) {
     }
 }
 
+/* The kinds the assignment walk leaves to another step: instances and gates (step (4)), `always`
+ * blocks (6), initial blocks (odin3_elab2_initials, after this walk), and the declarations that
+ * only need their pending check. */
+static bool assign_leaves(odin3_elab2 *e2, odin3_ast_id item) {
+    switch (odin3_ast_kind_of(e2->elab, item)) {
+    case ODIN3_AST_INSTANTIATION:
+    case ODIN3_AST_GATE_DECL:
+    case ODIN3_AST_ALWAYS:
+        return true;
+    case ODIN3_AST_INITIAL:
+    case ODIN3_AST_PARAM_DECL:
+    case ODIN3_AST_FUNCTION_DECL:
+    case ODIN3_AST_TASK_DECL:
+        (void)odin3_elab2_pending(e2, item); /* a test may force one */
+        return true;
+    default:
+        return false;
+    }
+}
+
 /* One module item of the assignment walk (5): net declaration assignments and continuous
  * assignments are emitted and every other kind that is still pending is reported. */
 static odin3_status assign_step(odin3_elab2 *e2, odin3_ast_id item) {
+    if (assign_leaves(e2, item)) {
+        return ODIN3_OK;
+    }
     switch (odin3_ast_kind_of(e2->elab, item)) {
     case ODIN3_AST_GEN_BLOCK:
         return odin3_elab2_pending(e2, item)
                    ? ODIN3_OK
-                   : push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
-    case ODIN3_AST_INSTANTIATION:
-    case ODIN3_AST_GATE_DECL:
-        return ODIN3_OK; /* step (4) did them */
+                   : odin3_elab2_push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
     case ODIN3_AST_NET_DECL:
     case ODIN3_AST_VAR_DECL:
         return odin3_elab2_pending(e2, item) ? ODIN3_OK : declaration_initialisers(e2, item);
     case ODIN3_AST_CONT_ASSIGN:
         return odin3_elab2_pending(e2, item) ? ODIN3_OK : cont_assign(e2, item);
-    case ODIN3_AST_ALWAYS:
-        return ODIN3_OK; /* step (6) does them */
-    case ODIN3_AST_PARAM_DECL:
-    case ODIN3_AST_FUNCTION_DECL:
-    case ODIN3_AST_TASK_DECL:
-        (void)odin3_elab2_pending(e2, item);
-        return ODIN3_OK;
     default:
         if (!odin3_elab2_pending(e2, item)) {
             unhandled(e2, item);
@@ -605,7 +621,7 @@ static odin3_status process_step(odin3_elab2 *e2, odin3_ast_id item) {
     case ODIN3_AST_GEN_BLOCK:
         return odin3_elab2_pending(e2, item)
                    ? ODIN3_OK
-                   : push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
+                   : odin3_elab2_push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
     case ODIN3_AST_ALWAYS:
         return always_step(e2, item);
     default:
@@ -630,9 +646,10 @@ static odin3_status items_walk(odin3_elab2 *e2, odin3_ast_id module_node, unsign
     odin3_vec_clear(&e2->stack);
     e2->scope = (odin3_scope_id){0};
     odin3_status st = phase == PHASE_ASSIGNS ? port_initialisers(e2, module_node) : ODIN3_OK;
-    st = st != ODIN3_OK ? st
-                        : push_items(e2, module_node, odin3_ast_slot_count(ODIN3_AST_MODULE),
-                                     (odin3_scope_id){0});
+    st = st != ODIN3_OK
+             ? st
+             : odin3_elab2_push_items(e2, module_node, odin3_ast_slot_count(ODIN3_AST_MODULE),
+                                      (odin3_scope_id){0});
     while (st == ODIN3_OK && e2->stack.len > 0 && !e2->stopped) {
         odin3_elab2_item item = *(odin3_elab2_item *)odin3_vec_at(&e2->stack, e2->stack.len - 1);
         odin3_vec_pop(&e2->stack);
@@ -641,6 +658,13 @@ static odin3_status items_walk(odin3_elab2 *e2, odin3_ast_id module_node, unsign
     }
     e2->scope = (odin3_scope_id){0};
     return st != ODIN3_OK ? st : e2->fatal;
+}
+
+/* Step (3) of EL-28 (EL-40), run after the assignments walk of step (5) so that the drivers of a
+ * net are known (the spec's order puts it first; the results are the same). */
+static odin3_status initial_values(odin3_elab2 *e2, odin3_ast_id module_node) {
+    return carry_on(e2, odin3_ast_loc(e2->elab, module_node),
+                    odin3_elab2_initials(e2, module_node));
 }
 
 /* Step (2): the pre-scan, the mem2reg decision and the words it made, then the test hook. */
@@ -660,6 +684,7 @@ static odin3_status prescans(odin3_elab2 *e2, odin3_ast_id module_node) {
 static odin3_status emissions(odin3_elab2 *e2, odin3_ast_id module_node) {
     odin3_status st = items_walk(e2, module_node, PHASE_INSTANCES);
     st = st != ODIN3_OK || e2->stopped ? st : items_walk(e2, module_node, PHASE_ASSIGNS);
+    st = st != ODIN3_OK || e2->stopped ? st : initial_values(e2, module_node);
     st = st != ODIN3_OK || e2->stopped ? st : items_walk(e2, module_node, PHASE_PROCESSES);
     st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_wired(e2, module_node);
     st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_mem_emit(e2);

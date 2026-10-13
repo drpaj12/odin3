@@ -432,8 +432,8 @@ static void test_rule2_async_reset(void) {
 
 /* One edge event with a variable-index write: a memory, no warning. */
 static void test_rule2_single_edge_stays_memory(void) {
-    read_failing("  reg [7:0] m [0:3];\n  always @(posedge c)\n    m[wa] <= a;\n"
-                 "  assign y = m[ra];\n");
+    read_ok("  reg [7:0] m [0:3];\n  always @(posedge c)\n    m[wa] <= a;\n"
+            "  assign y = m[ra];\n");
     TEST_ASSERT_EQUAL_UINT32(0, warnings_with("replacing memory"));
     TEST_ASSERT_EQUAL_UINT32(1, count_of("$mem"));
     TEST_ASSERT_EQUAL_UINT32(0, find_wire("m[0]").v);
@@ -450,8 +450,8 @@ static void test_rule3_read_after_blocking_write(void) {
 
 /* A read in another block than the blocking write is no rule 3. */
 static void test_rule3_other_block_stays_memory(void) {
-    read_failing("  reg [7:0] m [0:3];\n  reg [7:0] t;\n  always @(posedge c)\n    m[wa] = a;\n"
-                 "  always @(posedge c)\n    t = m[1];\n");
+    read_ok("  reg [7:0] m [0:3];\n  reg [7:0] t;\n  always @(posedge c)\n    m[wa] = a;\n"
+            "  always @(posedge c)\n    t = m[1];\n");
     TEST_ASSERT_EQUAL_UINT32(0, warnings_with("replacing memory"));
 }
 
@@ -467,8 +467,8 @@ static void test_rule4_nested_index(void) {
  *   yosys -p "read_verilog t.v; proc; stat"  with  {m[wa], t} <= {a, a};  and  assign y = m[ra];
  * keeps one memory and prints no "replacing memory" warning. */
 static void test_rule4_concat_lvalue(void) {
-    read_failing("  reg [7:0] m [0:3];\n  reg [7:0] t;\n  always @(posedge c)\n"
-                 "    {m[wa], t} <= {a, a};\n");
+    read_ok("  reg [7:0] m [0:3];\n  reg [7:0] t;\n  always @(posedge c)\n"
+            "    {m[wa], t} <= {a, a};\n");
     TEST_ASSERT_EQUAL_UINT32(0, warnings_with("replacing memory"));
 }
 
@@ -498,14 +498,14 @@ static void test_rule5_loop_with_variable_bound(void) {
 
 /* One variable-index write among constant ones keeps the memory. */
 static void test_rule5_variable_write_keeps_memory(void) {
-    read_failing("  reg [7:0] m [0:3];\n  always @(posedge c) begin\n    m[1] <= a;\n"
-                 "    m[wa] <= d;\n  end\n");
+    read_ok("  reg [7:0] m [0:3];\n  always @(posedge c) begin\n    m[1] <= a;\n"
+            "    m[wa] <= d;\n  end\n");
     TEST_ASSERT_EQUAL_UINT32(0, warnings_with("replacing memory"));
 }
 
 /* Writes in initial blocks do not count for rule 5 (read-only otherwise: a memory). */
 static void test_initial_writes_are_not_rule5(void) {
-    read_failing("  reg [7:0] m [0:3];\n  initial m[0] = 8'd1;\n  assign y = m[ra];\n");
+    read_ok("  reg [7:0] m [0:3];\n  initial m[0] = 8'd1;\n  assign y = m[ra];\n");
     TEST_ASSERT_EQUAL_UINT32(0, warnings_with("replacing memory"));
     TEST_ASSERT_EQUAL_UINT32(1, count_of("$mem"));
 }
@@ -513,8 +513,8 @@ static void test_initial_writes_are_not_rule5(void) {
 /* The initial block's context ends with it: a continuous write after it is rule 5 again, and
  * Yosys's places are the initial write and the assignment, newest first. */
 static void test_initial_context_ends(void) {
-    read_failing("  reg [3:0] m [0:3];\n  initial m[0] = 4'd1;\n  assign m[2] = a4;\n"
-                 "  assign y4 = m[2];\n");
+    read_ok("  reg [3:0] m [0:3];\n  initial m[0] = 4'd1;\n  assign m[2] = a4;\n"
+            "  assign y4 = m[2];\n");
     expect_warning((at_loc){1, 13}, replacing("m", places2(3, 2)));
 }
 
@@ -532,10 +532,10 @@ static void test_rule5_continuous_constant_write(void) {
     expect_ir_ok();
 }
 
-/* `(* nomem2reg *)` exempts the array from rules 2 to 5 (the write belongs to Task 24). */
+/* `(* nomem2reg *)` exempts the array from rules 2 to 5 (its write is a port: Task 24). */
 static void test_nomem2reg_attribute_exempts(void) {
-    read_failing("  (* nomem2reg *) reg [7:0] m [0:3];\n  always @(posedge c)\n    m[1] <= a;\n"
-                 "  assign y = m[ra];\n");
+    read_ok("  (* nomem2reg *) reg [7:0] m [0:3];\n  always @(posedge c)\n    m[1] <= a;\n"
+            "  assign y = m[ra];\n");
     TEST_ASSERT_EQUAL_UINT32(0, warnings_with("replacing memory"));
     TEST_ASSERT_EQUAL_UINT32(1, count_of("$mem"));
 }

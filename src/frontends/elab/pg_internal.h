@@ -125,7 +125,18 @@ typedef struct pg_swctx {
     uint32_t mark;  /* the undo mark of the open case */
     bool is_signed, full_case;
     uint8_t wild;
+    uint32_t sw; /* the switch's index in sws, 1-based (its cases are walked from first_case) */
 } pg_swctx;
+
+/* A memory write variable (EL-39 v4) that joined an open switch: a group of `width` consecutive
+ * nets `net` (the process-local variable), its case temporaries t1 of switch level `level` (the
+ * index in sw_ctx), and `outer`, the nets the switch's exit assigns (the enclosing level's t1, or
+ * the variable itself at level 0). `init` is the value it holds before the write: x, or 0 (en). */
+typedef struct pg_late {
+    uint32_t level, width;
+    odin3_sigbit net, t1, outer;
+    odin3_bit init;
+} pg_late;
 
 /* The result of folding a statement: none, or the child to run + 1 (PG_FOLD_NONE: nothing runs). */
 #define PG_FOLD_NONE UINT32_MAX
@@ -168,6 +179,8 @@ struct odin3_pg {
     odin3_vec blk_marks; /* uint32_t: where each open switch's nets begin in blk */
     odin3_vec sw_pool;   /* uint32_t: the targets of every switch, sorted and unique */
     odin3_vec sw_ctx;    /* pg_swctx */
+    odin3_vec late;      /* pg_late: memory write variables that joined the open switches */
+    bool has_memw;       /* the scan met a write to a memory: the block is not empty (Task 24) */
     odin3_vec sw_nets;   /* odin3_sigbit: targets of the switches being built */
     odin3_vec sw_t1;     /* odin3_sigbit: their case temporaries */
     odin3_vec sw_rv;     /* odin3_sigbit: their values at the switch's start */
@@ -210,6 +223,9 @@ odin3_status pg_lv_set(odin3_pg *pg, odin3_net_id net, odin3_net_id target);
 bool pg_rv_get(const odin3_pg *pg, odin3_net_id net, odin3_sigbit *out);
 odin3_status pg_rv_set(odin3_pg *pg, odin3_net_id net, odin3_sigbit value);
 
+/* The SOURCE record of stmt (the block's own for none). */
+odin3_status pg_stmt_prov(odin3_pg *pg, odin3_ast_id stmt, odin3_prov_id *out);
+
 /* Takes the lvalue lhs apart into pg->lvs (cleared first; a non-constant select fills lvs.var). */
 odin3_status pg_take_target_of(odin3_pg *pg, odin3_ast_id lhs);
 
@@ -224,6 +240,7 @@ typedef struct pg_act_req {
     const odin3_sigbit *lhs, *rhs;
     uint32_t n;
     odin3_prov_id prov;
+    bool front; /* at the start of the case's actions (a memory write variable's entry, Task 24) */
 } pg_act_req;
 odin3_status pg_act_add(odin3_pg *pg, const pg_act_req *req);
 
@@ -366,6 +383,25 @@ odin3_status pg_sw_begin(odin3_pg *pg, const pg_sw_req *req);
 odin3_status pg_sw_case(odin3_pg *pg, const odin3_pg_case_req *req, bool x_entry);
 void pg_sw_case_end(odin3_pg *pg);
 odin3_status pg_sw_end(odin3_pg *pg);
+
+/* --- pg_memw.c: writes to memories (EL-39 v4, Task 24) -----------------------------------------
+ */
+
+/* Whether lhs is a concatenation with a direct part that is a word (or a select of a word) of a
+ * memory that stays one: Yosys splits such an assignment into one per part. */
+bool pg_lhs_has_memw(const odin3_pg *pg, odin3_ast_id lhs);
+
+/* The write of the word pg->lvs.memw names (the lvalue already taken apart): rhs is as wide as the
+ * target. Up to three variables join the open switches (pg_late), the port is added to the
+ * memory. A located error for a block that is not clocked by exactly one edge. */
+odin3_status pg_mem_apply(odin3_pg *pg, const odin3_pg_assign_req *req);
+
+/* The late variables of the switch level being opened or closed: entry actions in the open case
+ * (x when x_entry), exit actions after the switch (which also forgets the level's variables), and
+ * how many there are. */
+odin3_status pg_late_entry(odin3_pg *pg, bool x_entry);
+odin3_status pg_late_exit(odin3_pg *pg);
+uint32_t pg_late_count(const odin3_pg *pg);
 
 /* --- pg_select.c: the case method for a non-constant lvalue select (EL-32) -------------------- */
 

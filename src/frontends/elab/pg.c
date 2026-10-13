@@ -70,6 +70,7 @@ static void vecs_init(odin3_pg *pg) {
     odin3_vec_init(&pg->blk_marks, sizeof(uint32_t));
     odin3_vec_init(&pg->sw_pool, sizeof(uint32_t));
     odin3_vec_init(&pg->sw_ctx, sizeof(pg_swctx));
+    odin3_vec_init(&pg->late, sizeof(pg_late));
     odin3_vec_init(&pg->sw_nets, sizeof(odin3_sigbit));
     odin3_vec_init(&pg->sw_t1, sizeof(odin3_sigbit));
     odin3_vec_init(&pg->sw_rv, sizeof(odin3_sigbit));
@@ -85,7 +86,7 @@ static void vecs_free(odin3_pg *pg) {
                               &pg->slots,  &pg->frames,  &pg->work,  &pg->items,     &pg->runs,
                               &pg->run_l,  &pg->run_r,   &pg->blk,   &pg->blk_marks, &pg->sw_pool,
                               &pg->sw_ctx, &pg->sw_nets, &pg->sw_t1, &pg->sw_rv,     &pg->cmp_sigs,
-                              &pg->loops,  &pg->calls,   &pg->fsyms};
+                              &pg->loops,  &pg->calls,   &pg->fsyms, &pg->late};
     for (size_t i = 0; i < sizeof all / sizeof all[0]; i++) {
         odin3_vec_free(all[i]);
     }
@@ -118,7 +119,7 @@ odin3_status pg_block_reset(odin3_pg *pg) {
         &pg->outs,  &pg->chunks,    &pg->undo,    &pg->pool,   &pg->dead,    &pg->cmps,
         &pg->acts,  &pg->cases,     &pg->sws,     &pg->syncs,  &pg->slots,   &pg->frames,
         &pg->blk,   &pg->blk_marks, &pg->sw_pool, &pg->sw_ctx, &pg->sw_nets, &pg->sw_t1,
-        &pg->sw_rv, &pg->cmp_sigs,  &pg->loops,   &pg->calls,  &pg->fsyms};
+        &pg->sw_rv, &pg->cmp_sigs,  &pg->loops,   &pg->calls,  &pg->fsyms,   &pg->late};
     for (size_t i = 0; i < sizeof lists / sizeof lists[0]; i++) {
         odin3_vec_clear(lists[i]);
     }
@@ -133,6 +134,7 @@ odin3_status pg_block_reset(odin3_pg *pg) {
     pg->failed = false;
     pg->scan_frame = false;
     pg->scanning = false;
+    pg->has_memw = false;
     pg->groups = 0;
     odin3_u64map_destroy(pg->e2->bound);
     pg->e2->bound = NULL;
@@ -272,6 +274,13 @@ static void list_link(odin3_pg *pg, uint32_t *first, uint32_t *last, uint32_t ac
     *last = act + 1U;
 }
 
+/* Links action number act (0-based) at the start of the list. */
+static void list_link_front(odin3_pg *pg, uint32_t *first, uint32_t *last, uint32_t act) {
+    ((pg_act *)odin3_vec_at(&pg->acts, act))->next = *first;
+    *first = act + 1U;
+    *last = *last == 0 ? act + 1U : *last;
+}
+
 /* The slots of an action's lhs nets: each lhs net bit is assigned here. */
 static odin3_status act_slots(odin3_pg *pg, const pg_act *act, uint32_t index) {
     const odin3_sigbit *lhs = odin3_vec_cat(&pg->pool, act->lhs.first);
@@ -306,7 +315,11 @@ odin3_status pg_act_add(odin3_pg *pg, const pg_act_req *req) {
         return ODIN3_OK;
     }
     pg_case *cs = odin3_vec_at(&pg->cases, req->cs);
-    list_link(pg, &cs->first_act, &cs->last_act, index);
+    if (req->front) {
+        list_link_front(pg, &cs->first_act, &cs->last_act, index);
+    } else {
+        list_link(pg, &cs->first_act, &cs->last_act, index);
+    }
     return act_slots(pg, &act, index);
 }
 
@@ -356,7 +369,7 @@ odin3_status pg_remove(odin3_pg *pg, odin3_net_id net) {
 
 /* --- switches and cases ---------------------------------------------------------------------- */
 
-static odin3_status stmt_prov(odin3_pg *pg, odin3_ast_id stmt, odin3_prov_id *out) {
+odin3_status pg_stmt_prov(odin3_pg *pg, odin3_ast_id stmt, odin3_prov_id *out) {
     if (stmt.v == 0) {
         *out = pg->prov;
         return ODIN3_OK;
@@ -371,7 +384,7 @@ odin3_status odin3_pg_switch(odin3_pg *pg, const odin3_pg_switch_req *req) {
         return ODIN3_ERR_INVALID_ARG;
     }
     pg_switch sw = {{0, 0}, 0, 0, 0, req->flags, {0}};
-    odin3_status st = stmt_prov(pg, req->stmt, &sw.prov);
+    odin3_status st = pg_stmt_prov(pg, req->stmt, &sw.prov);
     st = st != ODIN3_OK ? st : pg_pool_add(pg, req->signal->bits, req->signal->width, &sw.signal);
     pg_switch *slot = st == ODIN3_OK ? odin3_vec_push(&pg->sws) : NULL;
     if (st == ODIN3_OK && slot == NULL) {
@@ -425,7 +438,7 @@ odin3_status odin3_pg_case(odin3_pg *pg, const odin3_pg_case_req *req) {
     }
     uint32_t width = ((const pg_switch *)odin3_vec_cat(&pg->sws, sw_index - 1U))->signal.len;
     pg_case cs = {pg->cur, 0, 0, 0, 0, 0, 0, 0, {0}};
-    odin3_status st = stmt_prov(pg, req->stmt, &cs.prov);
+    odin3_status st = pg_stmt_prov(pg, req->stmt, &cs.prov);
     st = st != ODIN3_OK ? st : case_compares(pg, req, width, &cs);
     pg_case *slot = st == ODIN3_OK ? odin3_vec_push(&pg->cases) : NULL;
     if (st == ODIN3_OK && slot == NULL) {
@@ -479,7 +492,7 @@ odin3_status odin3_pg_temp(odin3_pg *pg, uint32_t width, odin3_ast_id why, odin3
     }
     odin3_prov_id prov = {0};
     odin3_status st = odin3_elab2_reserve_nets(e2, width, odin3_ast_loc(e2->elab, why));
-    st = st != ODIN3_OK ? st : stmt_prov(pg, why, &prov);
+    st = st != ODIN3_OK ? st : pg_stmt_prov(pg, why, &prov);
     uint32_t group = ++pg->groups;
     for (uint32_t i = 0; st == ODIN3_OK && i < width; i++) {
         odin3_net_id net = {0};
@@ -576,7 +589,7 @@ static odin3_status asg_run_action(odin3_pg *pg, const pg_asg *asg, uint32_t fro
         *left = target.v;
         *right = asg->rhs->bits[item];
     }
-    pg_act_req req = {pg->cur, 0, pg->run_l.data, pg->run_r.data, to - from, prov};
+    pg_act_req req = {pg->cur, 0, pg->run_l.data, pg->run_r.data, to - from, prov, false};
     return pg_act_add(pg, &req);
 }
 
@@ -647,7 +660,7 @@ odin3_status pg_apply(odin3_pg *pg, const pg_asg *asg) {
     }
     st = st != ODIN3_OK ? st : asg_runs(pg, asg);
     odin3_prov_id prov = {0};
-    st = st != ODIN3_OK ? st : stmt_prov(pg, asg->stmt, &prov);
+    st = st != ODIN3_OK ? st : pg_stmt_prov(pg, asg->stmt, &prov);
     /* the leftmost part of the target first: the runs from the last to the first */
     for (size_t run = pg->runs.len; st == ODIN3_OK && run-- > 1;) {
         uint32_t from = *(const uint32_t *)odin3_vec_cat(&pg->runs, run - 1U);
@@ -682,6 +695,9 @@ odin3_status odin3_pg_assign(odin3_pg *pg, const odin3_pg_assign_req *req) {
     odin3_elab2_lvalue *lv = &pg->lvs;
     if (lv->var.node.v != 0) {
         return pg_select_apply(pg, req);
+    }
+    if (lv->memw.node.v != 0 && req->rhs->width == lv->nets.len) {
+        return pg_mem_apply(pg, req);
     }
     if (req->rhs->width != lv->nets.len) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_pg_assign: the value is %u bits; the target %zu",

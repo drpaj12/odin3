@@ -15,6 +15,7 @@
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "odin3/odin3.h"
+#include "util/arena.h"
 #include "util/log.h"
 #include "util/u64map.h"
 #include "util/vec.h"
@@ -85,7 +86,9 @@ static odin3_status make_t0(odin3_pg *pg) {
 
 /* The outputs sorted by net ID, the maps rebuilt, the chunks and the temporaries made. */
 static odin3_status pg_outputs(odin3_pg *pg) {
-    qsort(pg->outs.data, pg->outs.len, sizeof(pg_out), out_compare);
+    if (pg->outs.len > 1) {
+        qsort(pg->outs.data, pg->outs.len, sizeof(pg_out), out_compare);
+    }
     const pg_out *outs = pg->outs.data;
     for (uint32_t i = 0; i < pg->outs.len; i++) {
         odin3_status st = odin3_u64map_put(pg->out_of, (odin3_kv){outs[i].net.v, (uint64_t)i + 1U});
@@ -132,7 +135,8 @@ static odin3_status chunk_action(odin3_pg *pg, uint32_t index, const chunk_to *t
         *left = to->hold ? outs[i].t0.v : outs[i].net.v;
         *right = to->hold ? outs[i].net.v : outs[i].t0.v;
     }
-    pg_act_req req = {to->owner, to->sync, pg->run_l.data, pg->run_r.data, chunk->len, pg->prov};
+    pg_act_req req = {to->owner,  to->sync, pg->run_l.data, pg->run_r.data,
+                      chunk->len, pg->prov, false};
     return pg_act_add(pg, &req);
 }
 
@@ -389,37 +393,82 @@ static odin3_status loop_var_assigned(odin3_pg *pg, odin3_ast_id stmt) {
     return ODIN3_OK;
 }
 
-odin3_status pg_exec_assign(odin3_pg *pg, odin3_ast_id stmt) {
+/* The value of an assignment statement at `width` bits. */
+static odin3_status assign_value(odin3_pg *pg, odin3_ast_id stmt, uint32_t width, odin3_sig *sig) {
     odin3_elab2 *e2 = pg->e2;
+    odin3_elab2_reads reads = pg_reads(pg);
+    odin3_elab2_expr_req req = {
+        odin3_ast_child(e2->elab, stmt, 2), {width, true, false}, NULL, &reads};
+    odin3_status st = odin3_elab2_expr(e2, &req, sig);
+    return st != ODIN3_OK ? st : odin3_elab2_extend(e2, sig, width, sig->is_signed, sig);
+}
+
+/* The width of the target taken apart in pg->lvs. */
+static uint32_t target_width(const odin3_pg *pg) {
+    if (pg->lvs.regs.node.v != 0) {
+        return odin3_elab2_mem_get(pg->e2, pg->lvs.regs.mem)->width;
+    }
+    return pg->lvs.var.node.v != 0 ? pg->lvs.var.width : (uint32_t)pg->lvs.nets.len;
+}
+
+/* The value goes to the target taken apart in pg->lvs. */
+static odin3_status assign_to_target(odin3_pg *pg, odin3_ast_id stmt, const odin3_sig *sig) {
+    bool blocking = odin3_ast_kind_of(pg->e2->elab, stmt) == ODIN3_AST_BLOCKING_ASSIGN;
+    odin3_pg_assign_req areq = {stmt, odin3_ast_child(pg->e2->elab, stmt, 0), sig, blocking};
+    pg_asg asg = {&pg->lvs, sig, stmt, blocking, false};
+    if (pg->lvs.memw.node.v != 0) {
+        return pg_mem_apply(pg, &areq);
+    }
+    if (pg->lvs.regs.node.v != 0) {
+        return pg_regs_apply(pg, &areq);
+    }
+    return pg->lvs.var.node.v != 0 ? pg_select_apply(pg, &areq) : pg_apply(pg, &asg);
+}
+
+/* The part of a concatenation target that holds a word of a memory (Yosys splits such an
+ * assignment: a temporary takes the value and each part, the least significant first, takes its
+ * slice). The parts' widths first, then the value, then the parts. */
+static odin3_status assign_split(odin3_pg *pg, odin3_ast_id stmt, odin3_ast_id lhs) {
+    odin3_elab2 *e2 = pg->e2;
+    odin3_ast_span parts = odin3_ast_children(e2->elab, lhs);
+    uint32_t *widths = odin3_arena_alloc(e2->scratch, ((size_t)parts.n + 1U) * sizeof *widths);
+    if (widths == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    uint32_t total = 0;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = parts.n; st == ODIN3_OK && i > 0; i--) {
+        st = pg_take_target_of(pg, parts.ids[i - 1U]);
+        widths[i - 1U] = st == ODIN3_OK ? target_width(pg) : 0U;
+        total += widths[i - 1U];
+    }
+    odin3_sig sig;
+    st = st != ODIN3_OK ? st : assign_value(pg, stmt, total, &sig);
+    uint32_t cursor = 0;
+    for (uint32_t i = parts.n; st == ODIN3_OK && i > 0; i--) {
+        odin3_sig slice = {sig.bits + cursor, widths[i - 1U], sig.is_signed};
+        st = pg_take_target_of(pg, parts.ids[i - 1U]);
+        st = st != ODIN3_OK ? st : assign_to_target(pg, stmt, &slice);
+        cursor += widths[i - 1U];
+    }
+    return st;
+}
+
+odin3_status pg_exec_assign(odin3_pg *pg, odin3_ast_id stmt) {
+    const odin3_elab2 *e2 = pg->e2;
+    odin3_ast_id lhs = odin3_ast_child(e2->elab, stmt, 0);
     odin3_status st = loop_var_assigned(pg, stmt);
-    st = st != ODIN3_OK ? st : pg_take_target_of(pg, odin3_ast_child(e2->elab, stmt, 0));
+    if (st == ODIN3_OK && pg_lhs_has_memw(pg, lhs)) {
+        return assign_split(pg, stmt, lhs);
+    }
+    st = st != ODIN3_OK ? st : pg_take_target_of(pg, lhs);
     if (st != ODIN3_OK) {
         return st;
     }
     /* the value's calls run above this statement with a scratch lvalue of their own (pg_call.c) */
-    bool variable = pg->lvs.var.node.v != 0;
-    bool regs = pg->lvs.regs.node.v != 0;
-    uint32_t width = variable ? pg->lvs.var.width : (uint32_t)pg->lvs.nets.len;
-    if (regs) {
-        const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, pg->lvs.regs.mem);
-        width = mem->width;
-    }
-    odin3_elab2_reads reads = pg_reads(pg);
-    odin3_elab2_expr_req req = {
-        odin3_ast_child(e2->elab, stmt, 2), {width, true, false}, NULL, &reads};
     odin3_sig sig;
-    st = odin3_elab2_expr(e2, &req, &sig);
-    st = st != ODIN3_OK ? st : odin3_elab2_extend(e2, &sig, width, sig.is_signed, &sig);
-    if (st != ODIN3_OK) {
-        return st;
-    }
-    bool blocking = odin3_ast_kind_of(e2->elab, stmt) == ODIN3_AST_BLOCKING_ASSIGN;
-    odin3_pg_assign_req areq = {stmt, odin3_ast_child(e2->elab, stmt, 0), &sig, blocking};
-    pg_asg asg = {&pg->lvs, &sig, stmt, blocking, false};
-    if (regs) {
-        return pg_regs_apply(pg, &areq);
-    }
-    return variable ? pg_select_apply(pg, &areq) : pg_apply(pg, &asg);
+    st = assign_value(pg, stmt, target_width(pg), &sig);
+    return st != ODIN3_OK ? st : assign_to_target(pg, stmt, &sig);
 }
 
 /* A kind neither built nor pending is a 2D bug (the stage-1 counterpart is odin3_elab1_unhandled).
@@ -558,7 +607,7 @@ odin3_status odin3_pg_open(odin3_pg *pg, odin3_ast_id always_node) {
     odin3_elab2_prov_req req = {always_node, {0}, e2->scope.v};
     st = st != ODIN3_OK ? st : odin3_elab2_prov(e2, &req, &pg->prov);
     st = st != ODIN3_OK ? st : pg_scan(pg, pg->body);
-    if (st != ODIN3_OK || pg->outs.len == 0) {
+    if (st != ODIN3_OK || (pg->outs.len == 0 && !pg->has_memw)) {
         return st;
     }
     return pg_start_block(pg);
@@ -566,7 +615,7 @@ odin3_status odin3_pg_open(odin3_pg *pg, odin3_ast_id always_node) {
 
 odin3_status odin3_pg_always(odin3_pg *pg, odin3_ast_id always_node) {
     odin3_status st = odin3_pg_open(pg, always_node);
-    if (st != ODIN3_OK || pg->outs.len == 0) {
+    if (st != ODIN3_OK || (pg->outs.len == 0 && !pg->has_memw)) {
         return st;
     }
     st = pg->body.v != 0 ? pg_run(pg, pg->body) : ODIN3_OK;

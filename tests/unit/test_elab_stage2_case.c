@@ -652,25 +652,25 @@ static void test_variable_index_in_concatenation_is_an_error(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
 }
 
-/* --- what is still pending (point (l)) ---------------------------------------------------------
+/* --- memory writes under if and case (Task 24) -----------------------------------------------
  */
 
-/* A memory write inside an if arm and inside a case arm is reported, not dropped (Task 24). */
-static void test_memory_write_in_if_arm_is_pending(void) {
-    pt_read_failing("module t(input c, e, input [1:0] i, input [7:0] d, output [7:0] y);\n"
-                    "  reg [7:0] m [0:3];\n  assign y = m[i];\n"
-                    "  always @(posedge c) if (e) m[i] <= d;\nendmodule\n");
-    pt_expect_error((at_loc){4, 30}, "elaboration is not available yet (2D): 'memory write'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
-    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
+/* A memory write inside an if arm and inside a case arm is a port, its variables joining the
+ * switch. */
+static void test_memory_write_in_if_arm_is_a_port(void) {
+    pt_read_clean("module t(input c, e, input [1:0] i, input [7:0] d, output [7:0] y);\n"
+                  "  reg [7:0] m [0:3];\n  assign y = m[i];\n"
+                  "  always @(posedge c) if (e) m[i] <= d;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$mem"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
 }
 
-static void test_memory_write_in_case_arm_is_pending(void) {
-    pt_read_failing("module t(input c, e, input [1:0] i, input [7:0] d, output [7:0] y);\n"
-                    "  reg [7:0] m [0:3];\n  assign y = m[i];\n"
-                    "  always @(posedge c) case (e) 1'b1: m[i] <= d; endcase\nendmodule\n");
-    pt_expect_error((at_loc){4, 38}, "elaboration is not available yet (2D): 'memory write'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
+static void test_memory_write_in_case_arm_is_a_port(void) {
+    pt_read_clean("module t(input c, e, input [1:0] i, input [7:0] d, output [7:0] y);\n"
+                  "  reg [7:0] m [0:3];\n  assign y = m[i];\n"
+                  "  always @(posedge c) case (e) 1'b1: m[i] <= d; endcase\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$mem"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
 }
 
 /* --- out of memory ----------------------------------------------------------------------------
@@ -974,8 +974,8 @@ static void test_public_entry_points_refuse_misuse(void) {
     X(test_x_index_write_is_ignored_with_a_warning)                                                \
     X(test_z_index_blocking_write_is_ignored_with_a_warning)                                       \
     X(test_variable_index_in_concatenation_is_an_error)                                            \
-    X(test_memory_write_in_if_arm_is_pending)                                                      \
-    X(test_memory_write_in_case_arm_is_pending)                                                    \
+    X(test_memory_write_in_if_arm_is_a_port)                                                       \
+    X(test_memory_write_in_case_arm_is_a_port)                                                     \
     X(test_public_entry_points_refuse_misuse)                                                      \
     X(test_oom_sweep_builder_primitives)                                                           \
     X(test_oom_sweep)                                                                              \

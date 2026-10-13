@@ -233,6 +233,9 @@ add_library(odin3_core OBJECT
     src/frontends/elab/pg_emit.c
     src/frontends/elab/pg_loop.c
     src/frontends/elab/pg_scan.c
+    src/frontends/elab/pg_memw.c
+    src/frontends/elab/pg_init.c
+    src/frontends/elab/pg_readmem.c
     src/frontends/elab/pg_select.c
     src/frontends/elab/elab2_inst.c
     src/ir/cells/builtin.c
@@ -929,6 +932,16 @@ if(BUILD_TESTING)
     add_dependencies(test_elab_stage2_call verilog_generated)
     target_compile_definitions(test_elab_stage2_call PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 24: memory writes (the write ports of $mem), initial values, $readmemh/b, the
+    # per-bit rules, the empty pending tables and the sink module (OOM, determinism).
+    odin3_add_unit_test(test_elab_stage2_init)
+    target_sources(test_elab_stage2_init PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_stage2_init PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_init verilog_generated)
+    target_compile_definitions(test_elab_stage2_init PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_READMEM_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/elab/readmem"
+        ODIN3_SINK_V="${PROJECT_SOURCE_DIR}/tests/elab/sink/sink.v")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
@@ -1399,6 +1412,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     add_test(NAME verilog_handover_parse
         COMMAND $<TARGET_FILE:odin3-parse-check> --smallest-first ${_handover_cases})
     set_tests_properties(verilog_handover_parse PROPERTIES LABELS verilog)
+    # Task 24 (point (l)): no coverage row and not the sink module hits a not-yet-built construct.
+    file(GLOB _no_pending_rows CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/verilog/coverage/*.v
+                                                 ${PROJECT_SOURCE_DIR}/tests/elab/sink/sink.v)
+    add_test(NAME elab_no_pending
+        COMMAND sh -c "for f in \"$@\"; do if \"$0\" -p \"read_verilog $f\" 2>&1 | grep -q 'elaboration is not available yet (2D)'; then echo \"pending: $f\"; exit 1; fi; done"
+                $<TARGET_FILE:odin3> ${_no_pending_rows})
+    set_tests_properties(elab_no_pending PROPERTIES LABELS verilog)
     # Task 16: stage 1 reports every row; A4 is Task 19's (the second driver of a net) and T9 and
     # T10 Task 21's (the process generator's per-bit rules, EL-41); none of the ignore cases is
     # pending.
@@ -1596,6 +1616,19 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
                     ${PROJECT_SOURCE_DIR}/tests/verilog/call-bridge)
         set_tests_properties(elab_call_bridge PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
+        # 2D Task 24 (spec 14.3): elab-equiv on every source of tests/verilog/mem-bridge: the write
+        # ports of $mem (all three ranges, a write then a read at the same index and a cycle with
+        # the enable off; conditional, nested, in loops, tasks and functions; partial and
+        # concatenated targets). memory_map makes enabled flip-flops, which equiv-check cannot
+        # read: --unmap-enables. Exit 77 (skip) as above.
+        add_test(NAME elab_mem_bridge
+            COMMAND sh -c "for f in \"$4\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t --unmap-enables \"$f\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/verilog/mem-bridge)
+        set_tests_properties(elab_mem_bridge PROPERTIES
             LABELS differential SKIP_RETURN_CODE 77)
     endif()
 

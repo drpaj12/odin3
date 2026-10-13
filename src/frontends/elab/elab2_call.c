@@ -154,9 +154,7 @@ static void host_report(void *user, odin3_log_level level, odin3_loc loc, const 
     }
 }
 
-odin3_status odin3_elab2_call_try(odin3_elab2 *e2, odin3_ast_id call, odin3_cval *out,
-                                  bool *is_const) {
-    *is_const = false;
+odin3_status odin3_elab2_ceval_get(odin3_elab2 *e2, odin3_ceval **out) {
     if (e2->ev == NULL) {
         const odin3_ceval_host host = {host_lookup, host_callee, host_report, e2};
         odin3_status st = odin3_ceval_create(e2->elab, &host, &e2->ev);
@@ -164,6 +162,18 @@ odin3_status odin3_elab2_call_try(odin3_elab2 *e2, odin3_ast_id call, odin3_cval
             return st;
         }
     }
+    *out = e2->ev;
+    return ODIN3_OK;
+}
+
+odin3_status odin3_elab2_call_try(odin3_elab2 *e2, odin3_ast_id call, odin3_cval *out,
+                                  bool *is_const) {
+    *is_const = false;
+    odin3_ceval *ev = NULL;
+    odin3_status st = odin3_elab2_ceval_get(e2, &ev);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     const odin3_ceval_req req = {call, {0, false, false}, "function call"};
-    return odin3_ceval_try(e2->ev, &req, e2->scratch, out, is_const);
+    return odin3_ceval_try(ev, &req, e2->scratch, out, is_const);
 }

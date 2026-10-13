@@ -37,6 +37,9 @@ typedef struct at_loc {
 
 /* Runs the read_verilog pass with src->args on a fresh design holding t.v (pt_rs.status). */
 void pt_read_with(const pass_src *src);
+/* Runs the read_verilog pass with args on a fresh design holding the n files (pt_rs.status);
+ * a file's path may have one directory level ("sub/t.v"). */
+void pt_read_files(const et_src *srcs, uint32_t n, const char *args);
 /* pt_read_with of "t.v" and text. */
 void pt_read_src(const char *text);
 /* The full IR check passes. */

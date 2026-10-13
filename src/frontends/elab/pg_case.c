@@ -248,7 +248,7 @@ static odin3_status fold_case(odin3_pg *pg, odin3_ast_id node, uint32_t *pick) {
         return st;
     }
     fold_run run = {
-        {node, 0, 0, 0, 0, false, false, case_wild(pg, node)}, {NULL, 0, false}, 0, 0, false};
+        {node, 0, 0, 0, 0, false, false, case_wild(pg, node), 0}, {NULL, 0, false}, 0, 0, false};
     st = fold_case_scan(pg, node, &run);
     if (st != ODIN3_OK || run.unknown || !sig_known(&run.sel)) {
         return st;
@@ -335,6 +335,8 @@ static odin3_status sw_push_targets(odin3_pg *pg, const pg_sw_req *req) {
     return ODIN3_OK;
 }
 
+static pg_swctx *sw_top(odin3_pg *pg);
+
 odin3_status pg_sw_begin(odin3_pg *pg, const pg_sw_req *req) {
     pg_swctx *ctx = odin3_vec_push(&pg->sw_ctx);
     if (ctx == NULL) {
@@ -347,11 +349,16 @@ odin3_status pg_sw_begin(odin3_pg *pg, const pg_sw_req *req) {
                       0,
                       req->is_signed,
                       (req->flags & ODIN3_SWITCH_FULL_CASE) != 0,
-                      req->wild};
+                      req->wild,
+                      0};
     odin3_status st = sw_push_targets(pg, req);
     st = st != ODIN3_OK ? st : sw_make_t1(pg, req);
     odin3_pg_switch_req sw = {req->stmt, req->signal, req->flags};
-    return st != ODIN3_OK ? st : odin3_pg_switch(pg, &sw);
+    st = st != ODIN3_OK ? st : odin3_pg_switch(pg, &sw);
+    if (st == ODIN3_OK) {
+        sw_top(pg)->sw = (uint32_t)pg->sws.len;
+    }
+    return st;
 }
 
 static pg_swctx *sw_top(odin3_pg *pg) {
@@ -372,7 +379,7 @@ static odin3_status entry_run(odin3_pg *pg, const pg_swctx *ctx, uint32_t from, 
             *slot = x_entry ? odin3_sb_of_bit(ODIN3_BIT_X) : rv[k];
         }
     }
-    pg_act_req req = {pg->cur, 0, t1 + from, pg->run_r.data, to - from, pg->prov};
+    pg_act_req req = {pg->cur, 0, t1 + from, pg->run_r.data, to - from, pg->prov, false};
     return st != ODIN3_OK ? st : pg_act_add(pg, &req);
 }
 
@@ -406,7 +413,8 @@ odin3_status pg_sw_case(odin3_pg *pg, const odin3_pg_case_req *req, bool x_entry
         st = pg_lv_set(pg, (odin3_net_id){*(const odin3_sigbit *)odin3_vec_cat(&pg->sw_nets, at)},
                        (odin3_net_id){*(const odin3_sigbit *)odin3_vec_cat(&pg->sw_t1, at)});
     }
-    return st != ODIN3_OK ? st : sw_entry(pg, x_entry);
+    st = st != ODIN3_OK ? st : sw_entry(pg, x_entry);
+    return st != ODIN3_OK ? st : pg_late_entry(pg, x_entry);
 }
 
 void pg_sw_case_end(odin3_pg *pg) {
@@ -433,6 +441,7 @@ odin3_status pg_sw_end(odin3_pg *pg) {
         pg_asg asg = {&pg->slv, &rhs, ctx.node, true, true};
         st = pg_apply(pg, &asg);
     }
+    st = st != ODIN3_OK ? st : pg_late_exit(pg);
     odin3_vec_pop(&pg->sw_ctx);
     while (pg->sw_nets.len > ctx.first) {
         odin3_vec_pop(&pg->sw_nets);
@@ -698,7 +707,7 @@ static odin3_status open_item(odin3_pg *pg, const item_ref *ref) {
 static odin3_status open_default(odin3_pg *pg, uint32_t frame_at) {
     pg_frame frame = *(const pg_frame *)odin3_vec_cat(&pg->frames, frame_at);
     const pg_swctx *ctx = sw_top(pg);
-    if (frame.dflt == 0 && ctx->n == 0) {
+    if (frame.dflt == 0 && ctx->n == 0 && pg_late_count(pg) == 0) {
         return ODIN3_OK;
     }
     odin3_ast_id stmt =

@@ -91,12 +91,31 @@ typedef struct odin3_pg_assign_req {
  * action `lv(bit) = value` is appended to the current case as one action per run, in the target's
  * lvalue order (the leftmost part of a concatenation first), of consecutive bits of one temporary
  * group. rhs->width must equal the target's width (ODIN3_ERR_INVALID_ARG, logged, otherwise).
- * A target that is a select with a non-constant index is odin3_pg_select_write's. Errors of the
- * target (not a variable, a memory word, a non-constant index in a concatenation) are counted and
- * ODIN3_ERR_PARSE; a word of a register array with a non-constant index is the pending line.
+ * A target that is a select with a non-constant index is odin3_pg_select_write's, a word of a
+ * memory odin3_pg_mem_write's (which this function calls for one). Errors of the target (not a
+ * variable, a non-constant index in a concatenation) are counted and ODIN3_ERR_PARSE.
  * ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_pg_assign(odin3_pg *pg, const odin3_pg_assign_req *req);
+
+/*
+ * The write of a word of a memory (EL-39 v4, Task 24): `m[i] <= d`, `m[i][3:0] = d`, a target that
+ * is a word of a memory that stays a `$mem` (or a constant bit or part select of one), in a block
+ * clocked by exactly one edge. Up to three process-local variables per statement hold the port's
+ * values: `addr` (the wider of the index and ABITS), `data` (the memory's width) and `en`; the
+ * statements `addr = x`, `data = x`, `en = 0` are put at the start of the block, in that order,
+ * and processed like any blocking assignment (EL-35/EL-36's removal rule shapes the final body),
+ * so under a conditional write the x/x/0 values end in the switch's default case and the root
+ * assigns the case temporaries, and an unconditional write leaves `en` alone in the root. No
+ * `addr` variable for a constant index and no `data` for a constant full-word value: the
+ * constant goes to the port. The variables have no sync action. One write port per statement is
+ * added to the memory, in the order the statements are built (source order). rhs->width must be
+ * the target's. A block that is not clocked by exactly one edge is `array 'm' cannot be a memory
+ * (it is written in a combinational block) and (* nomem2reg *) is set` (located, counted,
+ * ODIN3_ERR_PARSE); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG (logged) for a target that is no
+ * word of a memory or a width mismatch. Only valid inside a block.
+ */
+odin3_status odin3_pg_mem_write(odin3_pg *pg, const odin3_pg_assign_req *req);
 
 /*
  * The case method for a target that is a select with a non-constant index (EL-32 writes): `y[s] =

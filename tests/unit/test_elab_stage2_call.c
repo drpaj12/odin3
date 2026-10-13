@@ -425,19 +425,20 @@ static void test_word_variable_read_in_process(void) {
                       "S always [O0..O3<-O4..O7]\n");
 }
 
-/* Memory writes keep their located pending line (Task 24): in a loop and in a task body. */
-static void test_memory_write_in_loop_and_task_is_pending(void) {
-    pt_read_failing("module t(input c, input [1:0] i, input [3:0] d, output [3:0] y);\n"
-                    "  reg [3:0] m [0:3];\n  integer k;\n  assign y = m[i];\n"
-                    "  always @(posedge c) begin\n    for (k = 0; k < 2; k = k + 1) m[i] <= d;\n"
-                    "  end\nendmodule\n");
-    pt_expect_error((at_loc){6, 35}, "elaboration is not available yet (2D): 'memory write'");
+/* Memory writes in a loop body and in a task body are ports (Task 24): one per execution. */
+static void test_memory_write_in_loop_and_task(void) {
+    pt_read_clean("module t(input c, input [1:0] i, input [3:0] d, output [3:0] y);\n"
+                  "  reg [3:0] m [0:3];\n  integer k;\n  assign y = m[i];\n"
+                  "  always @(posedge c) begin\n    for (k = 0; k < 2; k = k + 1) m[i + k] <= d;\n"
+                  "  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$mem"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
     tearDown();
     setUp();
-    pt_read_failing("module t(input c, input [1:0] i, input [3:0] d, output [3:0] y);\n"
-                    "  reg [3:0] m [0:3];\n  task wr;\n    m[i] <= d;\n  endtask\n"
-                    "  assign y = m[i];\n  always @(posedge c) wr;\nendmodule\n");
-    pt_expect_error((at_loc){4, 5}, "elaboration is not available yet (2D): 'memory write'");
+    pt_read_clean("module t(input c, input [1:0] i, input [3:0] d, output [3:0] y);\n"
+                  "  reg [3:0] m [0:3];\n  task wr;\n    m[i] <= d;\n  endtask\n"
+                  "  assign y = m[i];\n  always @(posedge c) wr;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$mem"));
 }
 
 /* --- out of memory ------------------------------------------------------------------------------
@@ -838,7 +839,7 @@ static void test_call_in_edge_expression_is_error(void) {
     X(test_word_variable_read)                                                                     \
     X(test_word_variable_write)                                                                    \
     X(test_word_variable_read_in_process)                                                          \
-    X(test_memory_write_in_loop_and_task_is_pending)                                               \
+    X(test_memory_write_in_loop_and_task)                                                          \
     X(test_oom_sweep_calls)                                                                        \
     X(test_oom_sweep_primitives_and_misuse)                                                        \
     X(test_constant_call_index_is_constant)                                                        \

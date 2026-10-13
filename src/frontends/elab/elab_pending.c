@@ -9,7 +9,8 @@
  * 19 its instance, connection and gate kinds and the driver check; Task 20 the memory word read;
  * Task 21 the always block and the assignments; Task 22 `if` and `case`; Task 23 loops, task and
  * function calls (in processes and in continuous contexts) and the words of register arrays with
- * a variable index; Task 24 asserts the rest of stage 2's table is empty.
+ * a variable index; Task 24 initial blocks, variable initialisers and memory writes: both tables
+ * are empty.
  */
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -39,9 +40,9 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
             /* Task 23 landed loops, task enables and function calls (`while` only reaches stage 2
              * in a function that is inlined, which is refused by its own located error), and the
              * word of a register array with a variable index in a read or a target. */
-            /* Task 24: initial blocks and memory writes. */
-            [ODIN3_AST_INITIAL] = true,
-            [ODIN3_PEND_MEM_WRITE] = true,
+            /* Task 24 landed initial blocks, variable initialisers and memory writes (the write
+             * ports of `$mem`): the table is empty. */
+            [0] = false,
         },
 };
 
@@ -63,11 +64,6 @@ uint32_t odin3_elab_pending_form_count(uint8_t stage) {
     return count;
 }
 
-/* The features' names in point (l)'s line. */
-static const char *const k_feature_names[ODIN3_PEND_END - ODIN3_AST_KIND_COUNT] = {
-    "memory write",
-};
-
 static bool g_forced[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END];
 
 static bool stage_ok(uint8_t stage) {
@@ -88,9 +84,6 @@ void odin3_elab_test_pend(uint8_t stage, uint32_t kind_or_feature, bool pending)
 }
 
 static const char *pend_name(uint32_t kind_or_feature) {
-    if (kind_or_feature >= ODIN3_AST_KIND_COUNT) {
-        return k_feature_names[kind_or_feature - ODIN3_AST_KIND_COUNT];
-    }
     return odin3_ast_kind_name(kind_or_feature);
 }
 

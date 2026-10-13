@@ -219,6 +219,19 @@ static odin3_drv claim_get(const struct odin3_elab2_drive *dr, odin3_wirebit wb)
     return (odin3_drv){(uint8_t)(value >> CLAIM_KIND_SHIFT), {(uint32_t)(value & CLAIM_NODE_MASK)}};
 }
 
+odin3_drv odin3_elab2_bit_driver(const odin3_elab2 *e2, odin3_wirebit wb) {
+    const struct odin3_elab2_drive *dr = e2->drive;
+    if (dr == NULL || wb.wire.v == 0) {
+        return (odin3_drv){ODIN3_DRV_NONE, {0}};
+    }
+    odin3_drv claim = claim_get(dr, wb);
+    if (claim.kind != ODIN3_DRV_NONE) {
+        return claim;
+    }
+    odin3_net_id net = odin3_elab2_resolve(e2, odin3_wire_net(e2->mod, wb.wire, wb.bit));
+    return drv_get(dr, net);
+}
+
 odin3_status odin3_elab2_claim_put(struct odin3_elab2_drive *dr, odin3_wirebit wb,
                                    odin3_drv entry) {
     if (wb.wire.v == 0 || claim_get(dr, wb).kind != ODIN3_DRV_NONE) {

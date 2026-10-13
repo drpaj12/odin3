@@ -256,6 +256,17 @@ class BridgeTest(unittest.TestCase):
         self.assertFalse(elab_equiv.version_ok("Yosys 0.555", None))
         self.assertFalse(elab_equiv.version_ok("Yosys 0.5", None))
 
+    # -- the enable-free back end (2D Task 24's memory bridge) -------------------------------
+
+    def test_unmap_enables_changes_only_the_flop_steps(self) -> None:
+        plain = elab_equiv.yosys_script("read_verilog a.v", "t", "x.blif")
+        unmapped = elab_equiv.yosys_script("read_verilog a.v", "t", "x.blif", unmap=True)
+        self.assertNotIn("dffunmap", plain)
+        self.assertNotIn("-nodffe", plain)
+        self.assertIn("dffunmap; techmap", unmapped)
+        self.assertEqual(unmapped.count("-nodffe -nosdff"), 4)
+        self.assertEqual(plain, unmapped.replace(" -nodffe -nosdff", "").replace("dffunmap; ", ""))
+
     # -- the cap ---------------------------------------------------------------------------
 
     def test_every_child_goes_through_memcap(self) -> None:

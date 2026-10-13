@@ -3,7 +3,7 @@
 Usage::
 
     elab-equiv --odin3 O --yosys Y --equiv-check E [--top T] [--mem-cap BYTES] [--keep DIR]
-               [--allow-version V] [--a-only] FILE
+               [--allow-version V] [--a-only] [--unmap-enables] FILE
 
 Side A is Odin III's elaboration and side B Yosys's own, both through one Yosys back end, so x is
 resolved by the same ``opt`` on both and a difference is 2D's (or a documented divergence):
@@ -16,6 +16,10 @@ resolved by the same ``opt`` on both and a difference is 2D's (or a documented d
   Both sides are always ``--nolatches``: equiv-check cannot model latches (PHASE0 #7).
 - ``Y -p "read_rtlil a.il; write_rtlil b.il"`` must exit 0 (write_rtlil's text is valid RTLIL).
 - Then ``E a.blif b.blif`` (tools/equiv-check/equiv-check).
+
+``--unmap-enables`` keeps enables out of the flip-flops on both sides (``opt -nodffe -nosdff``
+and a ``dffunmap`` before ``techmap``): ``memory_map`` and ``opt_dff`` make enabled flip-flops,
+which ``equiv-check`` cannot read as ``.gate`` cells (2D Task 24's memory bridge).
 
 ``--a-only`` stops after ``a.blif`` (kept in ``--keep DIR``): the hand-off to 2H (plan point (m)),
 which compares side A's netlist with Parmys's goldens. ``--keep DIR`` keeps every file; without it
@@ -50,7 +54,8 @@ TAIL_LINES = 20  # lines of a failing child's output shown
 # Yosys's script after the read: hierarchy (the top is chosen by --top or found), proc, then the
 # Parmys-style flattening to gates (the one back end both sides share).
 BACK_END = (
-    "proc; flatten; opt; memory -nomap; opt; memory_map; opt -full; techmap; opt -fast; "
+    "proc; flatten; opt{o}; memory -nomap; opt{o}; memory_map; opt -full{o}; {unmap}techmap; "
+    "opt -fast{o}; "
     "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; write_blif -gates -undef + unconn {blif}"
 )
 _ORACLE_RE = re.compile(r"\bYosys 0\.55(?:[^0-9]|$)")
@@ -71,12 +76,15 @@ class Options:
     keep: Path | None
     allow_version: str | None
     a_only: bool
+    unmap: bool = False
 
 
-def yosys_script(read: str, top: str | None, blif: str) -> str:
+def yosys_script(read: str, top: str | None, blif: str, unmap: bool = False) -> str:
     """Yosys's ``-p`` script: the read, the hierarchy, the shared back end writing ``blif``."""
     hierarchy = f"hierarchy -top {top}" if top else "hierarchy -auto-top"
-    return f"{read}; {hierarchy}; {BACK_END.format(blif=blif)}"
+    flags = " -nodffe -nosdff" if unmap else ""
+    back_end = BACK_END.format(blif=blif, unmap="dffunmap; " if unmap else "", o=flags)
+    return f"{read}; {hierarchy}; {back_end}"
 
 
 def version_ok(version: str, allow: str | None) -> bool:
@@ -133,7 +141,7 @@ class Bridge:
         self.blif("side B", read, "b.blif")
 
     def blif(self, what: str, read: str, name: str) -> None:
-        script = yosys_script(read, self.opts.top, name)
+        script = yosys_script(read, self.opts.top, name, self.opts.unmap)
         self.must(f"Yosys {what}", [self.opts.yosys, "-p", script])
         if not (self.work / name).is_file():
             raise EquivError(f"Yosys {what} wrote no {name}")
@@ -197,11 +205,13 @@ def parse(argv: Sequence[str] | None) -> Options:
     ap.add_argument("--keep", type=Path, metavar="DIR", help="keep the files in DIR")
     ap.add_argument("--allow-version", metavar="V", help="accept a Yosys whose -V names V")
     ap.add_argument("--a-only", action="store_true", help="stop after a.blif (the 2H hand-off)")
+    ap.add_argument("--unmap-enables", action="store_true",
+                    help="dffunmap before techmap (the memory bridge's enabled flip-flops)")
     ap.add_argument("file", type=Path, help="the Verilog file")
     args = ap.parse_args(argv)
     return Options(exe(args.odin3), exe(args.yosys), exe(args.equiv_check), args.file.resolve(),
                    args.top,
-                   args.mem_cap, args.keep, args.allow_version, args.a_only)
+                   args.mem_cap, args.keep, args.allow_version, args.a_only, args.unmap_enables)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

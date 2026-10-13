@@ -114,8 +114,7 @@ enum { ODIN3_ELAB_STAGE1 = 1, ODIN3_ELAB_STAGE2 = 2, ODIN3_ELAB_STAGES = 2 };
  * these features, which have no kind of their own.
  */
 typedef enum odin3_elab_pend_feature {
-    ODIN3_PEND_MEM_WRITE = ODIN3_AST_KIND_COUNT, /* "memory write" (Task 24) */
-    ODIN3_PEND_END
+    ODIN3_PEND_END = ODIN3_AST_KIND_COUNT /* no feature is left: Task 24 landed the last one */
 } odin3_elab_pend_feature;
 
 /*

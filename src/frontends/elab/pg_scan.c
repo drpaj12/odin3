@@ -107,7 +107,7 @@ static bool names_local(const odin3_elab2 *e2, odin3_ast_id lhs) {
 
 /* The bits a target can write join the outputs (first writer kept), unless the scan is of a call's
  * body, whose variables are temporaries and whose other targets are the block's already. */
-static odin3_status scan_target(odin3_pg *pg, odin3_ast_id lhs, bool blocking) {
+static odin3_status scan_one(odin3_pg *pg, odin3_ast_id lhs, bool blocking) {
     if (scan_local(pg->e2, lhs)) {
         return ODIN3_OK;
     }
@@ -118,6 +118,10 @@ static odin3_status scan_target(odin3_pg *pg, odin3_ast_id lhs, bool blocking) {
         return st;
     }
     const odin3_elab2_lvalue *lv = &pg->lvs;
+    if (lv->memw.node.v != 0) { /* a write port: its variables are made where it is written */
+        pg->has_memw = true;
+        return ODIN3_OK;
+    }
     warn_nets(pg, lv);
     for (size_t i = 0; !pg->scan_frame && i < lv->nets.len; i++) {
         odin3_net_id net = *(const odin3_net_id *)odin3_vec_cat(&lv->nets, i);
@@ -136,6 +140,21 @@ static odin3_status scan_target(odin3_pg *pg, odin3_ast_id lhs, bool blocking) {
         }
     }
     return blocking ? scan_blocking(pg, lv) : ODIN3_OK;
+}
+
+/* A target: a concatenation with a word of a memory is scanned part by part, as the assignment
+ * is split (Yosys), the least significant part first. */
+static odin3_status scan_target(odin3_pg *pg, odin3_ast_id lhs, bool blocking) {
+    if (!pg_lhs_has_memw(pg, lhs)) {
+        return scan_one(pg, lhs, blocking);
+    }
+    odin3_ast_span parts = odin3_ast_children(pg->e2->elab, lhs);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = parts.n; st == ODIN3_OK && i > 0; i--) {
+        st = scan_one(pg, parts.ids[i - 1U], blocking);
+        parts = odin3_ast_children(pg->e2->elab, lhs);
+    }
+    return st;
 }
 
 static odin3_status scan_push_id(odin3_pg *pg, uint32_t entry);
