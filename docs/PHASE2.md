@@ -639,3 +639,15 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
 19. **IR-6 unchanged** (Peter, 2026-10-13: "do recommended"). `opt` does not compact; scripts run
     `compact` after `opt` (the Phase 2 script is `opt; compact`). This withdraws the 2F Task 13
     IR-6 amendment (spec 2F §17 #39). The sub-passes never compact either.
+22. **IR change journal approved** (Peter, 2026-10-13, option 1a; IR-18a in `docs/IR.md`; spec 2F
+    §19). `opt_dff` and `opt_clean` skip work that the IR's change journal shows cannot have
+    changed: after its first sweep of a module in an `opt` invocation, `opt_dff` visits only the
+    flip-flops whose cone the journal touched; `opt_clean` skips a module's sweep when its last
+    sweep changed nothing and the journal's mutation count, the design's keep-module flags and
+    `-purge` are all as then. Conditions Peter set: every new allocation (the journal's growth,
+    the dirty marks, the walk arrays, the keep-flag copy) is reached by an OOM sweep and falls
+    back to a full sweep with the IR valid and the output byte-identical (`test_opt_oom_fallback`);
+    the journal's bytes count in `opt`'s budget, its 16 MB cap kept (`test_budget_journal`); Debug
+    builds sweep the modules `opt_clean` would skip and abort if one changes anything, and visit
+    the flip-flops `opt_dff` skipped likewise. Nothing outside `opt` may depend on the journal.
+    The output is byte-identical to the full sweeps (41 designs; `rescan-compare`).
