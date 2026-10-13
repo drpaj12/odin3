@@ -95,6 +95,19 @@ for code in (1, 2):
 print("opt-tool: ok")
 """
 
+# The opt-run stand-in (2F Task 18): prints the iteration count the file names (`IT<n>`).
+FAKE_OPT_RUN = """#!{python}
+import json, os, re, sys
+argv = sys.argv[1:]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(json.dumps(["opt-tool", os.path.basename(sys.argv[0]), *argv]) + "\\n")
+text = open(argv[-1]).read()
+if "BAD" in text:
+    print("opt-run: FAIL: no fixed point after 3 iterations (the cap)")
+    sys.exit(1)
+print("opt-run: ok: iterations max=" + re.search(r"IT(\\d+)", text).group(1) + " opt-runs=2")
+"""
+
 # An odin3 on which `opt` exists: every run succeeds (the trio probe included).
 FAKE_ODIN3_OPT = """#!{python}
 import json, os, sys
@@ -479,6 +492,31 @@ class OptModesTest(SweepTestCase):
         self.write("m/a.v", "x\n")
         self.assertEqual(self.run_tool("--opt-diff", str(self.dir / "m"))[0], 2)
         code, _, err = self.run_tool("--opt-diff", "--opt-equiv", "--yosys", "Y",
+                                     str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("cannot be combined", err)
+
+
+    def test_opt_run_needs_no_yosys_and_reports_the_largest_iteration_count(self) -> None:
+        fake = _exe(self.bin / "fake_opt_run.py", FAKE_OPT_RUN)
+        self.write("m/a.v", "IT3\n")
+        self.write("m/bb.v", "IT12 and padding\n")
+        self.write("m/c.v", "IT5 more padding to sort it last\n" * 4)
+        self.write("m/bad.v", "BAD\n")
+        tools = dict(elab_sweep.OPT_TOOLS, **{"opt-run": fake})
+        with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+            code, out, _ = self.run_tool("--opt-run", "--techlib", "L.o3lib", str(self.dir / "m"))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  bad.v", out)
+        self.assertIn("NOT ok: opt-run: FAIL: no fixed point after 3 iterations", out)
+        self.assertIn("opt-run: maximum opt iterations 12 (bb.v; the cap is 10000)", out)
+        argv = next(c for c in self.tool_calls() if c[-1].endswith("a.v"))[1:]
+        self.assertNotIn("--yosys", argv)
+        self.assertEqual(argv[argv.index("--techlib") + 1].split("/")[-1], "L.o3lib")
+
+    def test_opt_run_excludes_the_other_modes(self) -> None:
+        self.write("m/a.v", "x\n")
+        code, _, err = self.run_tool("--opt-run", "--opt-diff", "--yosys", "Y",
                                      str(self.dir / "m"))
         self.assertEqual(code, 2)
         self.assertIn("cannot be combined", err)

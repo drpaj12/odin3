@@ -1931,6 +1931,22 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/order-probe.sh --yosys ${ODIN3_YOSYS055}
                     --limit 60 ${_micro_dir})
         set_tests_properties(opt_order_probe PROPERTIES LABELS "sweep;nightly")
+        # 2F Task 18 (spec 20.4): the corpus sweeps. opt_micro: the Phase 2 script on every micro,
+        # Odin III only (ODIN3_OK, check FULL, iterations below the cap; the largest count is
+        # printed). The micros that 2D or proc reject are tests/proc/micro_expect_fail.txt. One
+        # child at a time under 3G. Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_micro$'.
+        set(_opt_run_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+            --odin3 $<TARGET_FILE:odin3> --opt-run
+            --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 1 --mem-cap 3G)
+        odin3_add_sweep_test(opt_micro LABEL sweep
+            COMMAND ${_opt_run_sweep} ${_micro_expect} ${_micro_dir})
+        # opt_gen_vs_yosys: 200 seeds of the --opt generator through opt-diff's steps 3-5 (the
+        # Phase 2 script and `opt -full`); nightly runs 5,000 and the same files against Yosys
+        # 0.69 (--yosys-069: a disagreement is `oracle drift`, reported, never a failure).
+        odin3_add_sweep_test(opt_gen_vs_yosys LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-gen-diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --seeds 1..200 --jobs 1 --mem-cap 3G --work ${PROJECT_BINARY_DIR}/opt_gen_work)
         # The 31 VTR and 33 Koios benchmarks as one set by size, when VTR_ROOT is set at
         # configure time (also label nightly). lenet.v is listed `xl` in vtr_expect_fail.txt: the
         # 6G sweeps skip it, and the sweep-xl CTests run exactly it, alone, 8 GiB per child.
@@ -1951,6 +1967,14 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 COMMAND ${_proc_sweep} ${_proc_bridge} ${_vtr_xl} ${_vtr_expect}
                         ${_vtr_bridge_expect} ${_vtr_benchmarks})
             set_tests_properties(proc_diff_vtr proc_bridge_vtr PROPERTIES LABELS "sweep;nightly")
+            # 2F Task 18: the Phase 2 script on the 64 files as one set by size, Odin III only
+            # (also nightly). lenet.v runs last, in the 6G slice, under a 5G child cap: unlike the
+            # proc differentials there is no Yosys side to push it to sweep-xl.
+            odin3_add_sweep_test(opt_vtr LABEL sweep
+                COMMAND ${_opt_run_sweep}
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/vtr_expect_fail.txt
+                        --root ${_vtr_verilog} --cap-for koios/lenet.v=5G ${_vtr_benchmarks})
+            set_tests_properties(opt_vtr PROPERTIES LABELS "sweep;nightly")
         endif()
     endif()
 

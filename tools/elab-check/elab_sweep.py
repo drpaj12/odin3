@@ -3,7 +3,8 @@
 Usage::
 
     elab-sweep --odin3 O [--equiv --yosys Y --equiv-check E [--pass proc] | --proc-diff --yosys Y
-               | --opt-equiv --yosys Y | --opt-diff --yosys Y [--opt-arg ARG]... | --bench B]
+               | --opt-equiv --yosys Y | --opt-diff --yosys Y [--opt-arg ARG]... | --opt-run
+               | --bench B]
                [--trio auto|on|off] [--also-no-trio] [--nolatches]
                [--expect-fail F]...
                [--jobs J] [--mem-cap C] [--cap-for SUFFIX=C]... [--tops F] [--golden-root D]
@@ -38,6 +39,9 @@ runs it alone). A child killed by its cap is reported ``out of memory (cap 4G)``
   ``--opt-arg=--script=phase2`` or ``--opt-arg=--expect=tests/opt/diff_expect.txt``). Exit 0 is a
   pass, 1 a difference, anything else the child's first error line.
 
+- ``--opt-run`` (2F Task 18; Odin III only, no ``--yosys``): ``opt-run`` on the file, the Phase 2
+  script with ``ODIN3_OK``, ``check`` FULL and the iteration cap (``--techlib`` passed on; ``--top``
+  as in the default mode). The summary adds the largest ``opt`` iteration count and its file.
 ``--expect-fail F`` (repeatable) lists ``<relative path> <one-line reason>`` lines (blank lines
 and ``#`` comments ignored), the path relative to ``--root`` when under it, else to the directory
 argument it was found under, else the file's name. An unlisted failure, a listed file that
@@ -87,8 +91,10 @@ EQUIV_OK, EQUIV_DIFFER, EQUIV_ERROR, EQUIV_CRASH = 0, 1, 2, 3  # elab-equiv's ex
 ELAB_EQUIV = Path(__file__).resolve().parent / "elab_equiv.py"
 PROC_DIFF = Path(__file__).resolve().parents[1] / "proc-check" / "proc_diff.py"
 OPT_TOOLS = {"opt-equiv": Path(__file__).resolve().parents[1] / "opt-check" / "opt_equiv.py",
-             "opt-diff": Path(__file__).resolve().parents[1] / "opt-check" / "opt_diff.py"}
+             "opt-diff": Path(__file__).resolve().parents[1] / "opt-check" / "opt_diff.py",
+             "opt-run": Path(__file__).resolve().parents[1] / "opt-check" / "opt_run.py"}
 TRIO_PROBE = "opt -nodffe -nosdff"  # the trio's own flags; fails until `opt` exists (2F-5)
+OPT_RUN_ITERATIONS = re.compile(r"iterations max=(\d+)")
 _XL_REASON = re.compile(r"xl\b:?\s*")
 _SIZE = re.compile(r"(\d+)([KMG]?)", re.IGNORECASE)
 _UNITS = {"": 1, "K": 1 << 10, "M": MIB, "G": GIB}
@@ -324,7 +330,7 @@ class Config:
     golden_root: Path | None
     techlib: str | None = None
     proc_diff: bool = False
-    opt_tool: str = ""  # "opt-equiv" or "opt-diff" (2F Task 17)
+    opt_tool: str = ""  # "opt-equiv", "opt-diff" (2F Task 17) or "opt-run" (Task 18)
     opt_args: tuple[str, ...] = ()
     pass_proc: bool = False  # --equiv: elab-equiv --pass proc
     no_trio: bool = False
@@ -451,12 +457,13 @@ def run_proc_diff(cfg: Config, item: Item, cap: int) -> Outcome:
 
 
 def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
-    """opt-equiv or opt-diff on the file: exit 0 passes, 1 is a difference."""
+    """opt-equiv, opt-diff or opt-run on the file: exit 0 passes, 1 is a difference."""
     start = time.monotonic()
-    assert cfg.yosys is not None
+    assert cfg.yosys is not None or cfg.opt_tool == "opt-run"
     top = top_for(item, cfg.tops, cfg.golden_root)
-    argv = [sys.executable, str(OPT_TOOLS[cfg.opt_tool]), "--odin3", cfg.odin3, "--yosys",
-            cfg.yosys, "--mem-cap", str(cap), *(["--top", top] if top else []),
+    argv = [sys.executable, str(OPT_TOOLS[cfg.opt_tool]), "--odin3", cfg.odin3,
+            *(["--yosys", cfg.yosys] if cfg.yosys else []), "--mem-cap", str(cap),
+            *(["--top", top] if top else []),
             *(["--techlib", cfg.techlib] if cfg.techlib else []), *cfg.opt_args, str(item.path)]
     here = str(Path(__file__).resolve().parent)  # the tool imports memcap from here
     env = {**os.environ, "PYTHONPATH": os.pathsep.join([here, os.environ.get("PYTHONPATH", "")])}
@@ -556,12 +563,20 @@ class Sweep:
         self.xl = xl
         self.counts = {"ok": 0, "xfail": 0, "FAIL": 0, "XPASS": 0, "crash": 0, "skip": 0}
         self.skipped_run = False
+        self.max_iterations = (0, "")  # opt-run: the largest `opt` iteration count and its file
+
+    def note_iterations(self, item: Item, output: str) -> None:
+        found = OPT_RUN_ITERATIONS.search(output)
+        if found is not None and int(found.group(1)) > self.max_iterations[0]:
+            self.max_iterations = (int(found.group(1)), item.rel)
 
     def report(self, item: Item, outcome: Outcome) -> None:
         cls, line = verdict(item, outcome, self.expect, self.xl)
         print(line, flush=True)
         if outcome.kind == "ok" and self.cfg.mode() == "bench" and outcome.output:
             print(f"bench: {outcome.output}", flush=True)
+        if outcome.kind == "ok" and self.cfg.opt_tool == "opt-run":
+            self.note_iterations(item, outcome.output)
         self.counts[cls] += 1
         if outcome.kind == "skip":
             self.skipped_run = True
@@ -609,6 +624,9 @@ def sweep(cfg: Config, args: argparse.Namespace, items: list[Item],
           f"expected failures, {counts['FAIL']} unexpected failures, {counts['XPASS']} listed but "
           f"passing, {counts['crash']} oracle crashes, {len(skipped) + counts['skip']} skipped, "
           f"{len(stale)} stale entries, {time.monotonic() - start:.1f} s")
+    if cfg.opt_tool == "opt-run":
+        print(f"{TOOL}: opt-run: maximum opt iterations {state.max_iterations[0]} "
+              f"({state.max_iterations[1] or 'none'}; the cap is 10000)")
     if state.skipped_run and not counts["ok"] + counts["xfail"]:
         return EXIT_SKIP
     return EXIT_FAIL if counts["FAIL"] or counts["XPASS"] or stale else EXIT_OK
@@ -631,6 +649,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                     help="run opt-equiv (refinement after every opt call) per file")
     ap.add_argument("--opt-diff", action="store_true", dest="opt_diff",
                     help="run opt-diff (Odin III's opt against Yosys 0.55's) per file")
+    ap.add_argument("--opt-run", action="store_true", dest="opt_run",
+                    help="run opt-run (the Phase 2 script, ODIN3_OK, check, iteration cap) per file")
     ap.add_argument("--opt-arg", action="append", default=[], metavar="ARG",
                     help="--opt-equiv/--opt-diff: an argument for the child (use --opt-arg=ARG)")
     ap.add_argument("--pass", choices=("elab", "proc"), default="elab", dest="stop_pass",
@@ -663,10 +683,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def build_config(args: argparse.Namespace) -> Config:
-    modes = [args.equiv, args.bench, args.proc_diff, args.opt_equiv, args.opt_diff]
+    modes = [args.equiv, args.bench, args.proc_diff, args.opt_equiv, args.opt_diff, args.opt_run]
     if sum(bool(m) for m in modes) > 1:
-        raise UsageError("--equiv, --bench, --proc-diff, --opt-equiv and --opt-diff cannot be "
-                         "combined")
+        raise UsageError("--equiv, --bench, --proc-diff, --opt-equiv, --opt-diff and --opt-run "
+                         "cannot be combined")
     if (args.opt_equiv or args.opt_diff) and not args.yosys:
         raise UsageError("--opt-equiv and --opt-diff need --yosys")
     if args.equiv and not (args.yosys and args.equiv_check):
@@ -695,7 +715,8 @@ def build_config(args: argparse.Namespace) -> Config:
                   _abs(args.equiv_check) if args.equiv else None,
                   _abs(args.bench) if args.bench else None, cap, caps, tops, golden,
                   _abs(args.techlib) if args.techlib else None, bool(args.proc_diff),
-                  "opt-equiv" if args.opt_equiv else "opt-diff" if args.opt_diff else "",
+                  "opt-equiv" if args.opt_equiv else "opt-diff" if args.opt_diff
+                  else "opt-run" if args.opt_run else "",
                   tuple(args.opt_arg), args.stop_pass == "proc", args.trio == "off",
                   bool(args.also_no_trio), bool(args.nolatches))
 

@@ -1,0 +1,11 @@
+# tests/opt/vtr_expect_fail.txt: the VTR and Koios benchmarks (31 + 33 files, one set by size) that
+# opt_vtr expects to fail (2F spec 20.4, plan Task 18, point (n)). Odin III only: there is no Yosys
+# side, so koios/lenet.v is NOT listed `xl` here: it runs last in the 6G slice under a 5G child cap
+# (CMake: --cap-for koios/lenet.v=5G). Format: `<path relative to $VTR_ROOT/vtr_flow/benchmarks/
+# verilog> [needle] <reason>`.
+#
+# The three Koios `*_include.v` files hold one `define each and no module: odin3 has nothing to
+# lower (2D's parse sweep reads them; they are in the 33 Koios files).
+koios/hard_mem_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
+koios/complex_dsp_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
+koios/hard_block_include.v [no_top: no top given and no module is defined] a macro-only include file: no module

@@ -4,7 +4,7 @@ plan Task 18).
 Usage::
 
     opt-gen-diff --odin3 O --yosys Y --seeds A..B [--yosys-069 Y2] [--script S]...
-                 [--mem-cap C] [--work DIR]
+                 [--jobs 1] [--mem-cap C] [--work DIR]
 
 For each seed N in A..B, ``verilog_gen --opt`` (``opt_profile.generate``) writes
 ``DIR/seedN/seedN.v`` (the module is always ``t``), then, for each ``S`` (default ``phase2`` and
@@ -188,6 +188,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                     help="phase2 or an opt spelling; repeatable (default phase2, opt -full)")
     ap.add_argument("--mem-cap", type=opt_equiv.parse_size, default=DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 2G)")
+    ap.add_argument("--jobs", type=int, default=1, help="1 (the only value: one tool at a time)")
     ap.add_argument("--work", type=Path, help="keep every seed's files here")
     return ap.parse_args(argv)
 
@@ -221,6 +222,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = parse_args(sys.argv[1:] if argv is None else argv)
         seeds = parse_seeds(args.seeds)
+        if args.jobs != 1:
+            raise GenDiffError("--jobs: only 1 is supported")
         load_profile()
     except GenDiffError as exc:
         print(f"{TOOL}: {exc}", file=sys.stderr)
