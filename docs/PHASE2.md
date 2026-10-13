@@ -635,3 +635,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
     width rules: the width of a port of a `(* blackbox *)` module with several parameter sets is
     a lookup of the cell's parameter values (docs/IR.md IR-8, IR-7b; `src/ir/celltype.h`). Merged
     with 2D-5 (#86).
+
+19. **IR-6 unchanged** (Peter, 2026-10-13: "do recommended"). `opt` does not compact; scripts run
+    `compact` after `opt` (the Phase 2 script is `opt; compact`). This withdraws the 2F Task 13
+    IR-6 amendment (spec 2F §17 #39). The sub-passes never compact either.

@@ -639,9 +639,8 @@ a value). This is what §20.2 checks after every sub-pass.
   pointer, address, time or randomness decides anything.
 - Tested (§20.5): two runs give byte-identical `write_rtlil`; reordered input gives a
   `netlist-compare`-identical result.
-- A top-level `opt` ends with `odin3_design_compact` itself (#39, the IR-6 amendment, for Peter's
-  ruling; the alternative is for the pass manager or script to compact after `opt`), not after
-  sub-passes.
+- `opt` never compacts (IR-6 unchanged; PHASE2 #19, Peter, 2026-10-13): the script runs `compact`
+  after `opt` (the Phase 2 script is `opt; compact`), and the sub-passes never compact either.
 
 ## 15. Provenance (OP-15)
 
@@ -708,7 +707,7 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 7 | CSE survivor = lowest ID (unless `keep`) | the later cell (its cell dict walks newest first) | names only |
 | 8 | x-with-init substitution only in `replace_undriven` | also in `opt_clean` | rare (2D folds `initial`-only regs, EL-40); x stays x, a refinement |
 | 9 | loop cap 10,000 | none | safety net |
-| 10 | `compact` after `opt` | — | IR-6 |
+| 10 | `opt` never compacts; the script runs `compact` after it | — | IR-6 (PHASE2 #19) |
 | 11 | Odin III log text (§16) | Yosys text | — |
 | 12 | no `opt_dff -sat`, `-simple-dffe`; no `-share_all` (`opt_dff`, `opt_merge`, `opt`) | available | Parmys uses none of them |
 | 13 | `opt_merge` candidates have exactly one output port, so `$memwr` (no output) never merges | merges `$memwr` | `kit_connect` redirects one output port; a missed merge, never a wrong one |
@@ -737,7 +736,7 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 36 | an empty feedback pattern (a bit whose D is Q after the enable muxes) makes the enable's `$ne` input a constant 0, not a zero-width `$ne` | `addNe` on empty signals (a width-0 cell) | the registry rejects width 0; the value is the same (an empty pattern never enables) |
 | 37 | a merge's new FFs are built on the old FF's Q nets (a second driver) before the old node is shrunk with those Q nets handed on (`keep == drop` ties, init kept), so a NO_MEMORY before the shrink deletes them again and leaves the IR as it was | creates the cells and `module->remove(cell)` | OP-2 build before destroy; the group's gates stay as dead cells on a failure (opt_clean) |
 | 38 | the feedback search gives up (the bit keeps the enables it has, as in #34) on a mux whose select is a constant x or z; 0 and 1 selects are searched as before | Yosys 0.55 searches through it, and the select is then read twice (in the `$ne` pattern and in the surviving mux) as two independent x values: `q <= b ? d : mux(S=1'x, A=1'1, B=q)` becomes a `$dffe` whose output differs from the input for x_sel=1, x_B=0, x_en=0 (q drops from 1 to 0), also under `-keepdc`; `async2sync; miter -equiv; sat -seq 2` fails on Yosys's own output (reviewer's 4 of 1,500 random cases, all with an x select; 0 failures in 12,000 runs without) | OP-13: soundness outranks parity; a missed enable is only an optimisation lost. Test `test_dff_feedback_x_select` |
-| 39 | a top-level `opt` ends with `compact` (IR-6 amendment, point (h), for Peter's review): IDs of nodes, nets and wires are renumbered densely when it returns; the sub-passes called alone leave dead objects | Yosys has no IDs to renumber | §14 ("the pass manager compacts after each top-level `opt`") names the point; doing it in the `opt` driver keeps `opt` callable from scripts, `-p` and the tests alike, and holds the dead objects of one run only until its end |
+| 39 | — (withdrawn, Peter 2026-10-13, PHASE2 #19: `opt` does not compact; the Phase 2 script runs `compact` after it, IR-6 unchanged) | | |
 | 40 | after its first call in an `opt` invocation, `opt_expr` applies its rules (visits) only to the nodes the kit marked (inputs connected, merged or re-driven since, plus the readers of their outputs), in the same topological order as a full sweep; `--opt-full-rescan` sweeps everything. The per-round setup (invert map, FF-polarity scan, topological sort) still costs O(N) per non-empty round. Debug builds sweep in full after every incremental call and abort if that rewrites anything | a full sweep per call (Yosys rebuilds a SigMap and rescans) | §19 performance; the result is the full sweep's (the 20 files of `dirty_vs_full_rescan`, three option sets, byte-identical `write_rtlil`) |
 | 41 | the iteration cap warns once per module that the last iteration changed (a module no kit rewrite touched in it is not named; when none was, the last module is) and returns `ODIN3_OK` | no cap | OP-12; `opt` runs design-wide, so the module in the §16 line is the changed ones |
 | 42 | — (the `opt_share` stub of Task 13 is gone: `opt -full` runs it) | | |
@@ -753,7 +752,7 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | File | Content |
 |---|---|
 | `src/passes/opt/opt.h` | `odin3_opt_opts` (§3 flags), `odin3_opt_expr_counts`, `odin3_opt_run` (the loop), `odin3_opt_<sub>_run(ctx, design, &opts, &counts)` per sub-pass, `odin3_opt_expr_run` (module scope, for 2E, §4.8) |
-| `src/passes/opt/opt_loop.c`, `dirty.c/.h` | the `opt` driver (`odin3_opt_run`: the mode tables, the cap, `compact`) and the opt session: per-module dirty marks the kit fills and `opt_expr` drains, per-iteration change flags |
+| `src/passes/opt/opt_loop.c`, `dirty.c/.h` | the `opt` driver (`odin3_opt_run`: the mode tables and the cap) and the opt session: per-module dirty marks the kit fills and `opt_expr` drains, per-iteration change flags |
 | `src/passes/opt/kit.c/.h` | opt context (`changed`, counters, caps), constant nets, `kit_connect`, `kit_rebuild`, `kit_new_cell`, fanout counts, invert map, topological order (Kahn, explicit queue), dirty sets |
 | `src/passes/opt/fold.c` | pins ↔ `odin3_cval`, dispatch to 2D's operators |
 | `src/passes/opt/expr*.c` | §4, one function per rule, a rule table per cell type (lizard: ≤ 60 lines, CCN ≤ 15) |
@@ -805,8 +804,8 @@ collide with a dirty one. All are O(pins) per call (on lenet.v Yosys spends 29 s
 `opt_share` together). The Debug option `--opt-full-rescan` runs `opt_expr` as a full sweep too
 and asserts the same result.
 
-**Memory.** Rebuilds and FF re-emission leave a dead node per rewrite until the `opt` driver
-compacts at its end (#39; IR-6 pending Peter's ruling); mcml.v's 31 iterations re-emit constant-register pipelines each
+**Memory.** Rebuilds and FF re-emission leave a dead node per rewrite until the script's
+`compact` after `opt` (IR-6 unchanged; PHASE2 #19); mcml.v's 31 iterations re-emit constant-register pipelines each
 round. `bench_opt` reports dead objects at the peak; if the RSS target below slips, the remedy is
 a compact point per `opt` iteration — an IR-6 amendment, for Peter — never a relaxed target. 2F
 uses the design-wide byte budget of 2E-1's `src/passes/budget.[ch]` (2E v2 §16): it calls
@@ -821,7 +820,7 @@ one 60% limit. Exceeding it is fatal with `opt needs more than N bytes (the desi
 | mcml.v, the opt passes of the Phase 2 script (the trio and the main `opt`) | ≤ 1.0 s |
 | mcml.v, `opt -full` on that result | ≤ 0.3 s |
 | lenet.v, the opt passes of the Phase 2 script (the trio, then the main `opt` on ≈ 661k cells) | ≤ 15 s |
-| lenet.v, peak RSS growth over the post-`proc` IR (side arrays, CSE table, dead objects before `compact`) | ≤ 25% |
+| lenet.v, peak RSS growth over the post-`proc` IR (side arrays, CSE table, dead objects before the script's `compact`) | ≤ 25% |
 | the 31 VTR files, opt passes of the Phase 2 script, total | ≤ 3 s |
 | per sub-pass call | O(pins) full sweep (`opt_expr` after the first iteration: rule visits O(dirty), per-round setup O(N): invert map, FF-polarity scan, global topological sort); `opt_muxtree` O(budget × S²) worst case, each eval of an S-way `$pmux` costing O(S²) (O(W·S) more for `replace_known` on W-bit data), as Yosys; `opt_merge` O(candidate pins) expected |
 | per `opt` invocation | O(iterations × pins) worst case; iterations ≤ sequential depth of constant-register chains + a small constant on the corpus |
@@ -945,7 +944,7 @@ Six PRs; the plan fixes tasks and interfaces. PHASE2's 2F row: Opus `high`.
 | 2F-2 expr | `fold.c` on 2D's evaluator, `opt_expr` §4 all rules, `replace_undriven`, polarity folding; `odin3_opt_expr_run` for 2E; per-rule goldens for §4 | 2F-1, 2D-2 | Opus `high` |
 | 2F-3 merge/reduce/muxtree | §6, §7, §8; goldens | 2F-1 | Opus `high` |
 | 2F-4 dff | §9: all actions, SRST/EN merging, feedback patterns, constbits; goldens | 2F-1, 2F-2 | Opus `high` |
-| 2F-5 loop | `opt` driver and modes, `opt_share`, `opt_expr`'s dirty set, caps, logs, compact point, the run-level byte budget; `$proc` opacity across sub-passes; the Phase 2 script and the S-P splice script; `bench_opt` | 2F-2…4 | Opus `high` |
+| 2F-5 loop | `opt` driver and modes, `opt_share`, `opt_expr`'s dirty set, caps, logs, the run-level byte budget; `$proc` opacity across sub-passes; the Phase 2 script and the S-P splice script; `bench_opt` | 2F-2…4 | Opus `high` |
 | 2F-6 evidence | `opt-equiv`, `opt-diff`, `order-probe.sh`, fold table, corpus sweeps, fuzzers, the PHASE2 entry with bench output | grows from 2F-2; needs 2E for corpus runs | Opus `high`; Sonnet `high` for bulk goldens and bench runs |
 
 Lanes: 2F-1; 2F-2 ‖ 2F-3; 2F-4; 2F-5; 2F-6 alongside. Before 2E lands, tests start from hand-built

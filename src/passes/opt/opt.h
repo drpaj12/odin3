@@ -315,9 +315,9 @@ odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed);
  * At ODIN3_OPT_MAX_ITERATIONS (odin3_opt_limits_now) the loop stops with WARN "opt: module 'm': no
  * fixed point after K iterations; stopping" per module the last iteration changed, and the call
  * is still ODIN3_OK. INFO "opt: fixed point after K iterations" or "opt: -fast: done after K
- * iterations"; counts->iterations gets K. A top-level opt ends with odin3_design_compact (IR-6),
- * which invalidates module-local IDs held outside the IR. A failing sub-pass ends the run with its
- * status (the IR valid, no compact). INVALID_ARG (logged) for a NULL argument.
+ * iterations"; counts->iterations gets K. opt never compacts (IR-6 unchanged, PHASE2 #19): the
+ * dead objects stay until a script runs `compact`. A failing sub-pass ends the run with its
+ * status (the IR valid). INVALID_ARG (logged) for a NULL argument.
  */
 odin3_status odin3_opt_run(odin3_pass_ctx *ctx, odin3_design *design, const odin3_opt_args *args,
                            odin3_opt_counts *counts);

@@ -862,11 +862,16 @@ static uint32_t live_nodes(const odin3_module *module) {
     return live;
 }
 
-/* IR-6 point (h): a top-level opt ends with compact, a standalone opt_expr leaves dead nodes. */
+/* IR-6 unchanged (PHASE2 #19): opt leaves dead nodes; the script's `compact` after it removes
+ * them. A standalone opt_expr leaves dead nodes too. */
 static void test_compact_after_opt(void) {
     build(DEAD_TEXT);
     odin3_module *module = pb_module(&res, "m");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    module = pb_module(&res, "m");
+    TEST_ASSERT_TRUE(live_nodes(module) + 1U < odin3_module_node_end(module));
+    check_full();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("compact", ""));
     module = pb_module(&res, "m");
     TEST_ASSERT_EQUAL_UINT32(live_nodes(module) + 1U, odin3_module_node_end(module));
     check_full();

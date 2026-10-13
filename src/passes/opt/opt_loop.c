@@ -2,8 +2,8 @@
  * opt_loop.c — the `opt` driver (2F spec §3, §12, OP-12; plan Task 13): Yosys 0.55 opt.cc's loop,
  * mirrored, as a table of sub-pass steps per mode, each run through odin3_opt_call (hook, budget,
  * snapshot, Debug check). The session (dirty.h) makes opt_expr incremental after its first call;
- * the cap (ODIN3_OPT_MAX_ITERATIONS) ends a loop that does not reach its fixed point; the last
- * step is `compact` (IR-6; point (h)).
+ * the cap (ODIN3_OPT_MAX_ITERATIONS) ends a loop that does not reach its fixed point. `opt` never
+ * compacts (IR-6 unchanged, PHASE2 #19): scripts run `compact` after it.
  */
 #include "ir/design.h"
 #include "ir/module.h"
@@ -196,5 +196,5 @@ odin3_status odin3_opt_run(odin3_pass_ctx *ctx, odin3_design *design, const odin
                                   : "opt: fixed point after %" PRIu32 " iterations",
                   iterations);
     }
-    return odin3_design_compact(ctx, design);
+    return ODIN3_OK;
 }
