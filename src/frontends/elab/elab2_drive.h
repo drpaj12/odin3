@@ -61,6 +61,7 @@ typedef enum odin3_tri_net {
     ODIN3_TRI_NET_INTERNAL,        /* no port of the module */
     ODIN3_TRI_NET_PORT,            /* a $port_out or $port_inout of the top module */
     ODIN3_TRI_NET_BELOW_TOP_INOUT, /* a $port_inout of a module below the top */
+    ODIN3_TRI_NET_BELOW_TOP_OUT,   /* a $port_out of a module below the top (may reach the top) */
     ODIN3_TRI_NET_CHILD_INOUT      /* internal, with an inout pin of a child instance */
 } odin3_tri_net;
 

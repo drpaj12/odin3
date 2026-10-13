@@ -193,20 +193,6 @@ static uint32_t count_of(const char *type) {
     return count;
 }
 
-/* Live nodes of a type over every module of the design. */
-static uint32_t count_in_all(const char *type) {
-    uint32_t count = 0;
-    for (uint32_t index = 1; index < odin3_design_module_end(rs.design); index++) {
-        const odin3_module *module = odin3_module_get(rs.design, (odin3_module_id){index});
-        uint32_t here = 0;
-        while (nth_in(module, type, here).v != 0) {
-            here++;
-        }
-        count += here;
-    }
-    return count;
-}
-
 /* The cells 2D made: neither a port nor a constant driver. */
 static uint32_t count_logic(void) {
     const odin3_module *module = top();
@@ -774,17 +760,17 @@ static void test_tribuf_internal_disjoint(void) {
     expect_ir_ok();
 }
 
-/* A port of a module below the top is not a top-level port: its tri-state driver becomes logic. */
+/* An output port of a module below the top may reach a top-level port through the parent (Yosys
+ * keeps a $tribuf there); elaboration is per module and cannot tell, so it is a located error
+ * rather than a silent z-to-x change (probe d3h). */
 static void test_tribuf_below_top(void) {
-    read_src("module sub (input d, input en, output y);\n"
-             "  assign y = en ? d : 'bz;\nendmodule\n"
-             "module top (input d, input en, output y);\n"
-             "  sub u (.d(d), .en(en), .y(y));\nendmodule\n");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    expect_warning((at_loc){2, 10}, "tri-state drivers on internal net 'y'" TRI_WARN_TAIL);
-    TEST_ASSERT_EQUAL_UINT32(0, count_in_all("$tribuf"));
-    TEST_ASSERT_EQUAL_UINT32(1, count_in_all("$pmux"));
-    expect_ir_ok();
+    read_failing("module sub (input d, input en, output y);\n"
+                 "  assign y = en ? d : 'bz;\nendmodule\n"
+                 "module top (input d, input en, output y);\n"
+                 "  sub u (.d(d), .en(en), .y(y));\nendmodule\n");
+    expect_error((at_loc){2, 10},
+                 "tri-state driver on 'y' of an output port of a module below the top is not "
+                 "supported: the instance may drive a top-level port, where z must stay (D3)");
 }
 
 /* A net with a tri-state driver and an ordinary one stays A4's located error (spec 17 #79). */

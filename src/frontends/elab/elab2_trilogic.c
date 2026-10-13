@@ -106,7 +106,7 @@ static odin3_status bus_label(const odin3_elab2 *e2, odin3_elab2_tri_rec rec, od
 }
 
 /* The messages about the bus of a cell. */
-typedef enum tri_msg { MSG_WARN, MSG_OVERLAP, MSG_MIX, MSG_BELOW_TOP } tri_msg;
+typedef enum tri_msg { MSG_WARN, MSG_OVERLAP, MSG_MIX, MSG_BELOW_TOP, MSG_BELOW_TOP_OUT } tri_msg;
 
 /* One located message about the bus of rec, at its driver. */
 static odin3_status bus_say(odin3_elab2 *e2, odin3_elab2_tri_rec rec, tri_msg msg) {
@@ -133,6 +133,13 @@ static odin3_status bus_say(odin3_elab2 *e2, odin3_elab2_tri_rec rec, tri_msg ms
             odin3_elab2_error(e2, at,
                               "tri-state driver on '%s' of an inout port of a module below the "
                               "top is not supported (D3)",
+                              text);
+            break;
+        case MSG_BELOW_TOP_OUT:
+            odin3_elab2_error(e2, at,
+                              "tri-state driver on '%s' of an output port of a module below the "
+                              "top is not supported: the instance may drive a top-level port, "
+                              "where z must stay (D3)",
                               text);
             break;
         default:
@@ -175,13 +182,13 @@ static odin3_status child_inout_error(odin3_elab2 *e2, odin3_elab2_tri_rec rec,
  * bit's fresh net) says nothing. */
 typedef struct y_nets {
     uint32_t port, internal;
-    bool below_top;
+    bool below_top, below_out;
     bool child;
     odin3_elab2_inout_pin pin;
 } y_nets;
 
 static y_nets count_y(const odin3_elab2 *e2, odin3_elab2_tri_rec rec) {
-    y_nets out = {0, 0, false, false, {"?", "?"}};
+    y_nets out = {0, 0, false, false, false, {"?", "?"}};
     odin3_pinslice ys = tri_port(e2, rec, TRI_Y);
     for (uint32_t bit = 0; bit < ys.count; bit++) {
         odin3_net_id net = tri_net(e2, ys, bit);
@@ -192,6 +199,7 @@ static y_nets count_y(const odin3_elab2 *e2, odin3_elab2_tri_rec rec) {
         out.port += kind == ODIN3_TRI_NET_PORT ? 1U : 0U;
         out.internal += kind == ODIN3_TRI_NET_PORT ? 0U : 1U;
         out.below_top = out.below_top || kind == ODIN3_TRI_NET_BELOW_TOP_INOUT;
+        out.below_out = out.below_out || kind == ODIN3_TRI_NET_BELOW_TOP_OUT;
         out.child = out.child || kind == ODIN3_TRI_NET_CHILD_INOUT;
     }
     return out;
@@ -204,6 +212,10 @@ static bool becomes_logic(odin3_elab2 *e2, odin3_elab2_tri_rec rec, odin3_status
     y_nets nets = count_y(e2, rec);
     if (nets.below_top) {
         *st = bus_say(e2, rec, MSG_BELOW_TOP);
+        return false;
+    }
+    if (nets.below_out) {
+        *st = bus_say(e2, rec, MSG_BELOW_TOP_OUT);
         return false;
     }
     if (nets.port != 0 && nets.internal != 0) {

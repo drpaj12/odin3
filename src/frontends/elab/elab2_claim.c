@@ -294,6 +294,9 @@ odin3_tri_net odin3_elab2_tri_net(const odin3_elab2 *e2, odin3_net_id net,
     if (port == 2) {
         return ODIN3_TRI_NET_BELOW_TOP_INOUT;
     }
+    if (port == 1) {
+        return ODIN3_TRI_NET_BELOW_TOP_OUT;
+    }
     return child_inout(e2, net, pin) ? ODIN3_TRI_NET_CHILD_INOUT : ODIN3_TRI_NET_INTERNAL;
 }
 
