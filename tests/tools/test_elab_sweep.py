@@ -66,6 +66,29 @@ print("elab-equiv: equivalent")
 """
 
 
+# Stands in for proc_diff.py: the exit code is the one a source asks for (PD1 differs, PD2 error,
+# PD3 tie); PD2 prints a line a needle can match.
+FAKE_PROC_DIFF = """#!{python}
+import json, os, sys
+argv = sys.argv[1:]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(json.dumps(["proc-diff", *argv]) + "\\n")
+text = open(argv[-1]).read()
+for code in (1, 2, 3):
+    if f"PD{code}" in text:
+        print(f"proc-diff: message for exit {code}: odin3: error: no latch allowed")
+        sys.exit(code)
+print("proc-diff: identical")
+"""
+
+# An odin3 on which `opt` exists: every run succeeds (the trio probe included).
+FAKE_ODIN3_OPT = """#!{python}
+import json, os, sys
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(json.dumps(["odin3", *sys.argv[1:]]) + "\\n")
+"""
+
+
 def _exe(path: Path, text: str) -> Path:
     path.write_text(text.replace("{python}", sys.executable), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -84,6 +107,8 @@ class SweepTestCase(unittest.TestCase):
         self.odin3 = _exe(self.bin / "odin3", FAKE_ODIN3)
         self.bench = _exe(self.bin / "bench_elab", FAKE_BENCH)
         self.fake_equiv = _exe(self.bin / "fake_elab_equiv.py", FAKE_EQUIV)
+        self.fake_proc_diff = _exe(self.bin / "fake_proc_diff.py", FAKE_PROC_DIFF)
+        self.odin3_opt = _exe(self.bin / "odin3_opt", FAKE_ODIN3_OPT)
         self.log = self.dir / "argv.log"
         self.meminfo = self.dir / "meminfo"
         self.meminfo.write_text(MEMINFO_32G, encoding="ascii")
@@ -93,6 +118,7 @@ class SweepTestCase(unittest.TestCase):
         stack.enter_context(mock.patch.object(memcap, "MEMINFO", str(self.meminfo)))
         stack.enter_context(mock.patch.object(memcap, "SYSTEMD_RUN", "no-such-systemd-run"))
         stack.enter_context(mock.patch.object(elab_sweep, "ELAB_EQUIV", self.fake_equiv))
+        stack.enter_context(mock.patch.object(elab_sweep, "PROC_DIFF", self.fake_proc_diff))
         self.addCleanup(stack.close)
 
     def write(self, rel: str, text: str = "module m; endmodule\n") -> Path:
@@ -405,6 +431,96 @@ class ModeTest(SweepTestCase):
         code, _, _ = self.run_tool("--equiv", "--yosys", "Y", "--equiv-check", "E",
                                    str(self.dir / "m"))
         self.assertEqual(code, 77)
+
+
+class ProcModesTest(SweepTestCase):
+    """2E Task 12: --proc-diff, and the bridge with --pass proc."""
+
+    def proc_diff_calls(self) -> list[list[str]]:
+        return [c[1:] for c in self.calls() if c[0] == "proc-diff"]
+
+    def test_proc_diff_maps_its_exit_codes_and_passes_the_options_on(self) -> None:
+        self.write("m/ok.v", "x\n")
+        self.write("m/diff.v", "PD1\n")
+        self.write("m/err.v", "PD2\n")
+        self.write("m/tie.v", "PD3\n")
+        tops = self.write("tops.txt", "ok.v cpu\n")
+        code, out, _ = self.run_tool("--proc-diff", "--yosys", "Y", "--techlib", "L.o3lib",
+                                     "--nolatches", "--tops", str(tops), str(self.dir / "m"))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  diff.v", out)
+        self.assertIn("NOT identical", out)
+        self.assertIn("FAIL  err.v", out)
+        self.assertIn("FAIL  tie.v", out)
+        self.assertIn("tie: netlist-compare cannot order", out)
+        self.assertIn("1 passed", out)
+        argv = next(c for c in self.proc_diff_calls() if c[-1].endswith("ok.v"))
+        self.assertEqual(argv[argv.index("--top") + 1], "cpu")
+        self.assertEqual(argv[argv.index("--mem-cap") + 1], str(4 * GIB))
+        self.assertEqual(Path(argv[argv.index("--techlib") + 1]).name, "L.o3lib")
+        self.assertIn("--nolatches", argv)
+
+    def test_a_listed_failure_needs_its_needle_in_proc_diffs_output(self) -> None:
+        self.write("m/err.v", "PD2\n")
+        base = ["--proc-diff", "--yosys", "Y", "--trio", "off", str(self.dir / "m")]
+        listed = self.expect("err.v [no latch allowed] E2: listed\n")
+        code, out, _ = self.run_tool(*base[:3], "--expect-fail", listed, *base[3:])
+        self.assertEqual(code, 0, out)
+        self.assertIn("xfail err.v", out)
+        wrong = self.expect("err.v [E1a] listed\n")
+        code, out, _ = self.run_tool(*base[:3], "--expect-fail", wrong, *base[3:])
+        self.assertEqual(code, 1)
+        self.assertIn("fails differently from the listing", out)
+
+    def test_trio_auto_follows_opt(self) -> None:
+        self.write("m/a.v", "x\n")
+        base = ["--proc-diff", "--yosys", "Y", str(self.dir / "m")]
+        code, out, _ = self.run_tool(*base)  # the fake odin3 cannot run the probe: no opt yet
+        self.assertEqual(code, 0, out)
+        self.assertIn("trio: skipped", out)
+        self.assertIn("--no-trio", self.proc_diff_calls()[0])
+        self.log.write_text("", encoding="utf-8")
+        argv = ["--odin3", str(self.odin3_opt), "--golden-root", str(self.golden), *base]
+        code, out, _ = helpers.run_main(elab_sweep.main, argv)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("trio: skipped", out)
+        self.assertEqual(self.calls()[0], ["odin3", "-p", "opt -nodffe -nosdff"])
+        self.assertNotIn("--no-trio", self.proc_diff_calls()[0])
+
+    def test_trio_on_requires_opt_and_also_no_trio_runs_twice(self) -> None:
+        self.write("m/a.v", "x\n")
+        base = ["--proc-diff", "--yosys", "Y", "--trio", "on", str(self.dir / "m")]
+        code, _, err = self.run_tool(*base)
+        self.assertEqual(code, 2)
+        self.assertIn("--trio on", err)
+        argv = ["--odin3", str(self.odin3_opt), "--golden-root", str(self.golden),
+                "--also-no-trio", *base]
+        code, out, _ = helpers.run_main(elab_sweep.main, argv)
+        self.assertEqual(code, 0, out)
+        runs = self.proc_diff_calls()
+        self.assertEqual(["--no-trio" in r for r in runs], [False, True])
+
+    def test_the_bridge_ends_after_proc_with_pass_proc(self) -> None:
+        self.write("m/a.v", "x\n")
+        base = ["--equiv", "--yosys", "Y", "--equiv-check", "E", "--pass", "proc", "--trio", "off",
+                str(self.dir / "m")]
+        code, out, _ = self.run_tool(*base)
+        self.assertEqual(code, 0, out)
+        argv = next(c for c in self.calls() if c[0] == "elab-equiv")
+        self.assertIn("proc", argv)
+        self.assertEqual(argv[argv.index("--pass") + 1], "proc")
+        self.assertIn("--async2sync", argv)
+        self.assertIn("--unmap-enables", argv)
+        self.assertIn("--no-trio", argv)  # --trio off
+
+    def test_pass_proc_needs_the_bridge_and_proc_diff_needs_yosys(self) -> None:
+        self.write("m/a.v", "x\n")
+        code, _, err = self.run_tool("--pass", "proc", str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("--pass proc needs --equiv", err)
+        code, _, err = self.run_tool("--proc-diff", str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("--proc-diff needs --yosys", err)
 
 
 if __name__ == "__main__":

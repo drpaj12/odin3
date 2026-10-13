@@ -1,0 +1,1 @@
+err_nonconst_reset.v:6:3: error: asynchronous reset 'rst' does not give 'dataout' a constant value

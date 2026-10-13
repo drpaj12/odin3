@@ -176,6 +176,18 @@ odin3_status odin3_pw_sig_remove2(odin3_proc_mctx *mctx, odin3_pw *pw, odin3_pw_
 odin3_status odin3_pw_sig_extract(odin3_proc_mctx *mctx, odin3_pw *pw, odin3_pw_pair in,
                                   odin3_pw_sig pattern, odin3_pw_sig *out);
 
+/*
+ * A pattern kept marked across several tests (one mark of the pattern instead of one per test, for
+ * a caller that tests many signals against the same pattern). odin3_pw_pattern_open marks the nets
+ * of pattern in the module's scratch index; odin3_pw_pattern_meets is true when a bit of sig is
+ * one of them; odin3_pw_pattern_close clears the marks. Between open and close the scratch index
+ * is in use: no other pw_sig operation may run (each resets it). ODIN3_ERR_NO_MEMORY from open
+ * marks nothing; close is then still safe.
+ */
+odin3_status odin3_pw_pattern_open(odin3_proc_mctx *mctx, const odin3_pw *pw, odin3_pw_sig pattern);
+bool odin3_pw_pattern_meets(const odin3_proc_mctx *mctx, const odin3_pw *pw, odin3_pw_sig sig);
+void odin3_pw_pattern_close(odin3_proc_mctx *mctx);
+
 /* Bit by bit, as SigSpec::operator==. */
 bool odin3_pw_sig_equal(const odin3_pw *pw, odin3_pw_sig lhs, odin3_pw_sig rhs);
 

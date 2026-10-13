@@ -3,7 +3,8 @@
 Usage::
 
     elab-equiv --odin3 O --yosys Y --equiv-check E [--top T] [--mem-cap BYTES] [--keep DIR]
-               [--allow-version V] [--a-only] [--unmap-enables] FILE
+               [--allow-version V] [--a-only] [--unmap-enables] [--pass elab|proc] [--no-trio]
+               [--async2sync] FILE
 
 Side A is Odin III's elaboration and side B Yosys's own, both through one Yosys back end, so x is
 resolved by the same ``opt`` on both and a difference is 2D's (or a documented divergence):
@@ -20,6 +21,17 @@ resolved by the same ``opt`` on both and a difference is 2D's (or a documented d
 ``--unmap-enables`` keeps enables out of the flip-flops on both sides (``opt -nodffe -nosdff``
 and a ``dffunmap`` before ``techmap``): ``memory_map`` and ``opt_dff`` make enabled flip-flops,
 which ``equiv-check`` cannot read as ``.gate`` cells (2D Task 24's memory bridge).
+
+``--async2sync`` runs Yosys's ``async2sync`` before ``techmap`` on both sides (2E Task 11):
+``equiv-check`` reads no ``.gate`` flip-flop with an asynchronous reset, set or load, so the rows
+that have one are checked after the same rewrite of both sides into a ``$dff`` and logic.
+
+``--pass proc`` (2E spec 18.5, point (r)) moves side A to the Phase 2 script up to ``proc``:
+``O [--top T] -p "read_verilog --nolatches F; opt_expr; opt_clean; opt -nodffe -nosdff; proc;
+write_rtlil a.il"`` (2E's ``proc`` is run, so ``a.il`` holds no process and Yosys's ``proc`` in the
+back end is a no-op). ``--no-trio`` drops the three ``opt`` passes (until 2F-5 has merged ``opt``).
+Side B and the back end are unchanged. The default ``--pass elab`` is 2D's bridge, which ignores
+``--no-trio``. It is an equivalence oracle only (the exit splice is 2F's S-P, 2E 18.5).
 
 ``--a-only`` stops after ``a.blif`` (kept in ``--keep DIR``): the hand-off to 2H (plan point (m)),
 which compares side A's netlist with Parmys's goldens. ``--keep DIR`` keeps every file; without it
@@ -64,10 +76,13 @@ SHELL_SIGNAL = 128  # a shell reports a signal as 128 + n
 NOT_EQUIVALENT_RE = re.compile(r"^equiv-check: NOT equivalent\b", re.MULTILINE)
 TAIL_LINES = 20  # lines of a failing child's output shown
 
+# 2E's side A, up to proc, after the pre-proc passes of 2F's mode P (2E spec 18.5).
+PRE_PROC_TRIO = "opt_expr; opt_clean; opt -nodffe -nosdff; "
+
 # Yosys's script after the read: hierarchy (the top is chosen by --top or found), proc, then the
 # Parmys-style flattening to gates (the one back end both sides share).
 BACK_END = (
-    "proc; flatten; opt{o}; memory -nomap; opt{o}; memory_map; opt -full{o}; {unmap}techmap; "
+    "proc; flatten; opt{o}; memory -nomap; opt{o}; memory_map; opt -full{o}; {a2s}{unmap}techmap; "
     "opt -fast{o}; "
     "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; write_blif -gates -undef + unconn {blif}"
 )
@@ -116,6 +131,9 @@ class Options:
     allow_version: str | None
     a_only: bool
     unmap: bool = False
+    pass_name: str = "elab"
+    async2sync: bool = False
+    no_trio: bool = False
 
 
 def wants_auto_blackbox(source: Path) -> bool:
@@ -131,11 +149,13 @@ def wants_auto_blackbox(source: Path) -> bool:
     )
 
 
-def yosys_script(read: str, top: str | None, blif: str, unmap: bool = False) -> str:
+def yosys_script(read: str, top: str | None, blif: str, unmap: bool = False,
+                 async2sync: bool = False) -> str:
     """Yosys's ``-p`` script: the read, the hierarchy, the shared back end writing ``blif``."""
     hierarchy = f"hierarchy -top {top}" if top else "hierarchy -auto-top"
     flags = " -nodffe -nosdff" if unmap else ""
-    back_end = BACK_END.format(blif=blif, unmap="dffunmap; " if unmap else "", o=flags)
+    back_end = BACK_END.format(blif=blif, unmap="dffunmap; " if unmap else "", o=flags,
+                               a2s="async2sync; " if async2sync else "")
     return f"{read}; {hierarchy}; {back_end}"
 
 
@@ -189,8 +209,12 @@ class Bridge:
     def side_a(self) -> None:
         opts = self.opts
         flags = "--nolatches --auto-blackbox" if wants_auto_blackbox(opts.source) else "--nolatches"
-        odin3 = [opts.odin3, *(["--top", opts.top] if opts.top else []), "-p",
-                 f"read_verilog {flags} {opts.source}; write_rtlil a.il"]
+        if opts.pass_name == "proc":
+            trio = "" if opts.no_trio else PRE_PROC_TRIO
+            script = f"read_verilog {flags} {opts.source}; {trio}proc; write_rtlil a.il"
+        else:
+            script = f"read_verilog {flags} {opts.source}; write_rtlil a.il"
+        odin3 = [opts.odin3, *(["--top", opts.top] if opts.top else []), "-p", script]
         try:
             self.must("odin3 (side A)", odin3)
         except EquivError as exc:
@@ -217,7 +241,7 @@ class Bridge:
             pass
 
     def blif(self, what: str, read: str, name: str, oracle: bool = False) -> None:
-        script = yosys_script(read, self.opts.top, name, self.opts.unmap)
+        script = yosys_script(read, self.opts.top, name, self.opts.unmap, self.opts.async2sync)
         self.must(f"Yosys {what}", [self.opts.yosys, "-p", script], oracle)
         if not (self.work / name).is_file():
             raise EquivError(f"Yosys {what} wrote no {name}")
@@ -293,11 +317,19 @@ def parse(argv: Sequence[str] | None) -> Options:
     ap.add_argument("--a-only", action="store_true", help="stop after a.blif (the 2H hand-off)")
     ap.add_argument("--unmap-enables", action="store_true",
                     help="dffunmap before techmap (the memory bridge's enabled flip-flops)")
+    ap.add_argument("--async2sync", action="store_true",
+                    help="async2sync before techmap on both sides (equiv-check reads no "
+                         "asynchronous flip-flop)")
+    ap.add_argument("--pass", dest="pass_name", choices=("elab", "proc"), default="elab",
+                    help="side A stops after elaboration (elab, default) or after proc")
+    ap.add_argument("--no-trio", action="store_true",
+                    help="--pass proc: no opt_expr/opt_clean/opt before proc (until 2F-5)")
     ap.add_argument("file", type=Path, help="the Verilog file")
     args = ap.parse_args(argv)
     return Options(exe(args.odin3), exe(args.yosys), exe(args.equiv_check), args.file.resolve(),
                    args.top,
-                   args.mem_cap, args.keep, args.allow_version, args.a_only, args.unmap_enables)
+                   args.mem_cap, args.keep, args.allow_version, args.a_only, args.unmap_enables,
+                   args.pass_name, args.async2sync, args.no_trio)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

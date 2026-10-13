@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# proc-rows: the proc_rows, proc_diff_rows and proc_bridge_rows CTests. See proc_rows.py.
+# Exit codes: 0 all rows ok, 1 a row failed, 2 error, 77 skipped.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/proc_rows.py" "$@"

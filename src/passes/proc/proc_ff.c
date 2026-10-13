@@ -25,6 +25,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 enum {
     NOT_PARAMS = 3,   /* $not and $reduce_or: A_SIGNED, A_WIDTH, Y_WIDTH */
@@ -35,7 +36,8 @@ enum {
     ALDFF_PARAMS = 3, /* $aldff: WIDTH, CLK_POLARITY, ALOAD_POLARITY */
     DFFSR_PARAMS = 4, /* $dffsr: WIDTH, CLK_POLARITY, SET_POLARITY, CLR_POLARITY */
     REG_INPUTS = 4,   /* the most input ports of a register: $aldff's and $dffsr's */
-    W4_NAMES = 3      /* W3 and W4 name the first three resets (§15) */
+    W4_NAMES = 3,     /* W3 and W4 name the first three resets (§15) */
+    INDEX_SHIFT = 32  /* ff_build_index: a pair is net << 32 | sync */
 };
 
 #define NO_SYNC UINT32_MAX
@@ -56,8 +58,11 @@ typedef struct ff_ctx {
     odin3_pw_sig live;  /* the group's nets: sig through the net map */
     odin3_pw_sig insig; /* the edge sync's value, z where it does not assign */
     uint32_t edge;      /* the edge sync's index, NO_SYNC before one is met */
-    odin3_vec rules;    /* ff_rule, in sync and action order */
-    odin3_vec resets;   /* odin3_pw_bit: every rule's signal, before the collapse (W3, W4) */
+    odin3_vec meets;    /* uint8_t per action, in sync and action order: it assigns a group bit */
+    odin3_vec index; /* uint64_t: the sorted (net, sync) pairs of the action lhs (ff_build_index) */
+    bool indexed;    /* index is built */
+    odin3_vec rules; /* ff_rule, in sync and action order */
+    odin3_vec resets; /* odin3_pw_bit: every rule's signal, before the collapse (W3, W4) */
 } ff_ctx;
 
 static odin3_status ff_internal(const char *what) {
@@ -154,19 +159,84 @@ static odin3_pw_sig ff_first_lhs(const odin3_pw *pw) {
     return found;
 }
 
-/* *out = every action lhs of sync, appended in order as one run (each odin3_pw_sig_new appends
- * at the end of pw->bits, so consecutive copies are contiguous). */
-static odin3_status ff_sync_lhs(odin3_pw *pw, const odin3_pw_sync *sync, odin3_pw_sig *out) {
-    odin3_pw_sig all = {(uint32_t)pw->bits.len, 0};
-    odin3_status st = ODIN3_OK;
-    for (size_t j = 0; st == ODIN3_OK && j < sync->actions.len; j++) {
-        odin3_pw_sig lhs = ((const odin3_pw_action *)odin3_vec_cat(&sync->actions, j))->lhs;
-        odin3_pw_sig piece = {0, 0};
-        st = odin3_pw_sig_new(pw, odin3_pw_sig_bits(pw, lhs), lhs.len, &piece);
-        all.len += st == ODIN3_OK ? lhs.len : 0;
+/* One pair of fc->index: (net << 32 | sync index), the net being a raw net some action of the
+ * sync assigns. */
+static int ff_pair_cmp(const void *lhs, const void *rhs) {
+    uint64_t pair_l = *(const uint64_t *)lhs;
+    uint64_t pair_r = *(const uint64_t *)rhs;
+    return (pair_l > pair_r) - (pair_l < pair_r);
+}
+
+/* fc->index = the sorted (net, sync) pairs of every action lhs, built once. A group's bits leave
+ * every action, so the nets a sync still assigns are its indexed nets minus the nets of the groups
+ * done: find_any_lvalue's per-group sort of each sync's left side is not needed. */
+static odin3_status ff_build_index(ff_ctx *fc) {
+    odin3_pw *pw = fc->pw;
+    size_t total = 0;
+    for (size_t i = 0; i < pw->syncs.len; i++) {
+        const odin3_pw_sync *sync = odin3_vec_cat(&pw->syncs, i);
+        for (size_t j = 0; j < sync->actions.len; j++) {
+            total += ((const odin3_pw_action *)odin3_vec_cat(&sync->actions, j))->lhs.len;
+        }
     }
-    *out = all;
-    return st;
+    if (odin3_vec_reserve(&fc->index, total) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (size_t i = 0; i < pw->syncs.len; i++) {
+        const odin3_pw_sync *sync = odin3_vec_cat(&pw->syncs, i);
+        for (size_t j = 0; j < sync->actions.len; j++) {
+            odin3_pw_sig lhs = ((const odin3_pw_action *)odin3_vec_cat(&sync->actions, j))->lhs;
+            const odin3_pw_bit *bits = odin3_pw_sig_bits(pw, lhs);
+            for (uint32_t k = 0; k < lhs.len; k++) {
+                if ((bits[k] & ODIN3_PW_CONST) == 0) {
+                    *(uint64_t *)odin3_vec_push(&fc->index) = /* reserved */
+                        (uint64_t)bits[k] << INDEX_SHIFT | i;
+                }
+            }
+        }
+    }
+    if (fc->index.len > 1) {
+        qsort(fc->index.data, fc->index.len, sizeof(uint64_t), ff_pair_cmp);
+    }
+    fc->indexed = true;
+    return ODIN3_OK;
+}
+
+/* True when sync `sync` assigns net `bit` in some action (before any group left). */
+static bool ff_in_sync(const ff_ctx *fc, odin3_pw_bit bit, size_t sync) {
+    uint64_t key = (uint64_t)bit << INDEX_SHIFT | sync;
+    return fc->index.len > 0 &&
+           bsearch(&key, fc->index.data, fc->index.len, sizeof key, ff_pair_cmp) != NULL;
+}
+
+/* fc->sig narrowed to its bits that sync `sync` assigns, in fc->sig's order, when there are any
+ * (the common part of the sync's sorted left side with the group, as both are in
+ * odin3_proc_raw_key order). The bits of fc->sig are all still on some action: a finished group
+ * leaves no action and the first left side is read from the actions. */
+static odin3_status ff_narrow(ff_ctx *fc, size_t sync) {
+    odin3_pw *pw = fc->pw;
+    const odin3_pw_bit *bits = odin3_pw_sig_bits(pw, fc->sig);
+    uint32_t keep = 0;
+    for (uint32_t k = 0; k < fc->sig.len; k++) {
+        keep += ff_in_sync(fc, bits[k], sync) ? 1U : 0U;
+    }
+    if (keep == 0 || keep == fc->sig.len) {
+        return ODIN3_OK;
+    }
+    odin3_pw_sig run = {0, 0};
+    odin3_status st = odin3_pw_sig_new(pw, bits, fc->sig.len, &run);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    odin3_pw_bit *dst = (odin3_pw_bit *)pw->bits.data + run.first;
+    uint32_t kept = 0;
+    for (uint32_t k = 0; k < run.len; k++) {
+        if (ff_in_sync(fc, dst[k], sync)) {
+            dst[kept++] = dst[k];
+        }
+    }
+    fc->sig = (odin3_pw_sig){run.first, kept};
+    return ODIN3_OK;
 }
 
 /* find_any_lvalue: fc->sig = ff_first_lhs, sorted and unified, then for each sync its common
@@ -179,17 +249,10 @@ static odin3_status ff_find_lvalue(ff_ctx *fc) {
     if (lhs.len == 0) {
         return ODIN3_OK;
     }
-    odin3_status st = odin3_pw_sig_sort_unify(fc->mctx, pw, lhs, &fc->sig);
+    odin3_status st = fc->indexed ? ODIN3_OK : ff_build_index(fc);
+    st = st == ODIN3_OK ? odin3_pw_sig_sort_unify(fc->mctx, pw, lhs, &fc->sig) : st;
     for (size_t i = 0; st == ODIN3_OK && i < pw->syncs.len; i++) {
-        odin3_pw_sig all = {0, 0};
-        odin3_pw_sig common = {0, 0};
-        st = ff_sync_lhs(pw, odin3_vec_cat(&pw->syncs, i), &all);
-        st = st == ODIN3_OK ? odin3_pw_sig_sort_unify(fc->mctx, pw, all, &all) : st;
-        odin3_pw_pair in = {all, {0, 0}};
-        st = st == ODIN3_OK ? odin3_pw_sig_extract(fc->mctx, pw, in, fc->sig, &common) : st;
-        if (st == ODIN3_OK && common.len > 0) {
-            fc->sig = common;
-        }
+        st = ff_narrow(fc, i);
     }
     return st;
 }
@@ -225,15 +288,13 @@ static odin3_status ff_edge_add(ff_ctx *fc, uint32_t si, const odin3_pw_action *
 }
 
 /* One action of sync si against the group (proc_dff's loop body), skipped when it assigns none of
- * the group's bits; then those bits leave the action (remove2). */
-static odin3_status ff_action(ff_ctx *fc, uint32_t si, odin3_pw_action *act) {
-    odin3_pw_sig meet = {0, 0};
-    odin3_pw_pair lhs_only = {act->lhs, {0, 0}};
-    odin3_status st = odin3_pw_sig_extract(fc->mctx, fc->pw, lhs_only, fc->sig, &meet);
-    if (st != ODIN3_OK || meet.len == 0) {
-        return st;
+ * the group's bits (meets false); then those bits leave the action (remove2). */
+static odin3_status ff_action(ff_ctx *fc, uint32_t si, odin3_pw_action *act, bool meets) {
+    if (!meets) {
+        return ODIN3_OK;
     }
     const odin3_pw_sync *sync = odin3_vec_cat(&fc->pw->syncs, si);
+    odin3_status st = ODIN3_OK;
     if (sync->type == ODIN3_SYNC_LEVEL0 || sync->type == ODIN3_SYNC_LEVEL1) {
         st = ff_rule_add(fc, sync, act);
     } else if (sync->type == ODIN3_SYNC_POSEDGE || sync->type == ODIN3_SYNC_NEGEDGE) {
@@ -251,13 +312,39 @@ static odin3_status ff_action(ff_ctx *fc, uint32_t si, odin3_pw_action *act) {
     return st;
 }
 
+/* fc->meets = for every action, in order, whether its lhs has a net of the group: one mark of the
+ * group for all of them. */
+static odin3_status ff_note_meets(ff_ctx *fc) {
+    size_t total = 0;
+    for (size_t i = 0; i < fc->pw->syncs.len; i++) {
+        total += ((const odin3_pw_sync *)odin3_vec_cat(&fc->pw->syncs, i))->actions.len;
+    }
+    odin3_vec_clear(&fc->meets);
+    if (odin3_vec_reserve(&fc->meets, total) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = odin3_pw_pattern_open(fc->mctx, fc->pw, fc->sig);
+    for (size_t i = 0; st == ODIN3_OK && i < fc->pw->syncs.len; i++) {
+        const odin3_pw_sync *sync = odin3_vec_cat(&fc->pw->syncs, i);
+        for (size_t j = 0; j < sync->actions.len; j++) {
+            const odin3_pw_action *act = odin3_vec_cat(&sync->actions, j);
+            *(uint8_t *)odin3_vec_push(&fc->meets) = /* reserved */
+                act->lhs.len > 0 && odin3_pw_pattern_meets(fc->mctx, fc->pw, act->lhs) ? 1 : 0;
+        }
+    }
+    odin3_pw_pattern_close(fc->mctx);
+    return st;
+}
+
 /* Every action of every sync, in order. */
 static odin3_status ff_gather(ff_ctx *fc) {
-    odin3_status st = ODIN3_OK;
+    odin3_status st = ff_note_meets(fc);
+    size_t at = 0;
     for (size_t i = 0; st == ODIN3_OK && i < fc->pw->syncs.len; i++) {
         odin3_pw_sync *sync = odin3_vec_at(&fc->pw->syncs, i);
         for (size_t j = 0; st == ODIN3_OK && j < sync->actions.len; j++) {
-            st = ff_action(fc, (uint32_t)i, odin3_vec_at(&sync->actions, j));
+            bool meets = *(const uint8_t *)odin3_vec_cat(&fc->meets, at++) != 0;
+            st = ff_action(fc, (uint32_t)i, odin3_vec_at(&sync->actions, j), meets);
         }
     }
     return st;
@@ -659,7 +746,9 @@ odin3_status odin3_proc_ffs(odin3_proc_mctx *mctx, odin3_pw *pw) {
         odin3_log(ODIN3_LOG_ERROR, "proc: ffs: no module context or process");
         return ODIN3_ERR_INVALID_ARG;
     }
-    ff_ctx fc = {mctx, pw, {0, 0}, {0, 0}, {0, 0}, NO_SYNC, {0}, {0}};
+    ff_ctx fc = {mctx, pw, {0, 0}, {0, 0}, {0, 0}, NO_SYNC, {0}, {0}, false, {0}, {0}};
+    odin3_vec_init(&fc.meets, sizeof(uint8_t));
+    odin3_vec_init(&fc.index, sizeof(uint64_t));
     odin3_vec_init(&fc.rules, sizeof(ff_rule));
     odin3_vec_init(&fc.resets, sizeof(odin3_pw_bit));
     odin3_status st = ff_live(mctx, pw);
@@ -670,6 +759,8 @@ odin3_status odin3_proc_ffs(odin3_proc_mctx *mctx, odin3_pw *pw) {
         st = more ? ff_group(&fc) : st;
         more = more && st == ODIN3_OK;
     }
+    odin3_vec_free(&fc.meets);
+    odin3_vec_free(&fc.index);
     odin3_vec_free(&fc.rules);
     odin3_vec_free(&fc.resets);
     return st;

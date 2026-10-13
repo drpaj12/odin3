@@ -45,19 +45,37 @@ typedef struct odin3_proc_phase_call {
     odin3_pw *pw;
 } odin3_proc_phase_call;
 
+/* The steps of the per-module schedule (spec §2.2) the on_step hook times; BUDGET nests in the
+ * others (every odin3_budget_check of odin3_proc_budget). */
+typedef enum odin3_proc_step {
+    ODIN3_PROC_STEP_A,
+    ODIN3_PROC_STEP_B,
+    ODIN3_PROC_STEP_C,
+    ODIN3_PROC_STEP_D,
+    ODIN3_PROC_STEP_E,
+    ODIN3_PROC_STEP_F,
+    ODIN3_PROC_STEP_BUDGET,
+    ODIN3_PROC_N_STEPS
+} odin3_proc_step;
+
 /*
  * phase: called before each phase; when it returns true the hook replaced the phase and *st is its
  * status (a phase reports a user error with odin3_proc_error and ODIN3_ERR_PARSE); returning false
  * runs the real phase. on_step_f: called at step F for each lowered module (unless --noopt or
  * --stop-after). on_expand: called by the latch phase's walk each time it expands a mux bit, with
  * the net and the walk's set_undef there (2E Task 8; §8's memo expands each (net, set_undef) at
- * most once per latch output). Any of them may be NULL.
+ * most once per latch output). on_step: called when step A (the module's analysis), B (all mux
+ * trees), C (the latches), D (all flip-flops), E (orphan nets), F (opt_expr, unless --noopt or
+ * --stop-after) of a module begins (begin true) and ends (false, also after a failure), and around
+ * each byte-budget check (BUDGET, inside a step); m is the module's state (2E Task 13: bench_proc
+ * times the steps with it). Any of them may be NULL.
  */
 typedef struct odin3_proc_test_hooks {
     bool (*phase)(void *user, const odin3_proc_phase_call *call, odin3_status *st);
     void (*on_step_f)(void *user, odin3_module_id module);
     void (*on_expand)(void *user, odin3_net_id net, bool set_undef);
     void *user;
+    void (*on_step)(void *user, odin3_proc_step step, bool begin, const odin3_proc_mctx *mctx);
 } odin3_proc_test_hooks;
 
 /* Installs the hooks (copied; NULL clears them). */

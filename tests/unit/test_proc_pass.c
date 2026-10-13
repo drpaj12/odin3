@@ -117,6 +117,8 @@ typedef struct fake_state {
     uint32_t calls[MODULES_MAX][ODIN3_PROC_N_PHASES]; /* by module ID and phase */
     uint32_t step_f[MODULES_MAX];                     /* on_step_f calls by module ID */
     bool promote;                                     /* PRUNE promotes pure root actions */
+    char trace[TEXT_MAX]; /* on_step: "A+ A- B+ ...", a budget check as "b" and "e" */
+    int depth;            /* on_step: open steps */
 } fake_state;
 
 static fake_state fakes;
@@ -174,9 +176,26 @@ static void fake_step_f(void *user, odin3_module_id module) {
     state->step_f[module.v]++;
 }
 
+static void on_step(void *user, odin3_proc_step step, bool begin, const odin3_proc_mctx *mctx) {
+    static const char *const k_names[] = {"A", "B", "C", "D", "E", "F"};
+    fake_state *state = user;
+    char word[8] = "?";
+    if (mctx != NULL && step == ODIN3_PROC_STEP_BUDGET) {
+        /* a budget check nests in a step: outside one it is traced as "!" */
+        (void)snprintf(word, sizeof word, "%s%s ", state->depth > 0 ? "" : "!", begin ? "b" : "e");
+    } else if (mctx != NULL && step < ODIN3_PROC_STEP_BUDGET) {
+        state->depth += begin ? 1 : -1;
+        (void)snprintf(word, sizeof word, "%s%c ", k_names[step], begin ? '+' : '-');
+    }
+    size_t used = strlen(state->trace);
+    if (used + strlen(word) < sizeof state->trace) {
+        (void)memcpy(state->trace + used, word, strlen(word) + 1);
+    }
+}
+
 static void install_fakes(void) {
     memset(&fakes, 0, sizeof fakes);
-    odin3_proc_test_hooks hooks = {fake_phase, fake_step_f, NULL, &fakes};
+    odin3_proc_test_hooks hooks = {fake_phase, fake_step_f, NULL, &fakes, on_step};
     odin3_proc_test_set_hooks(&hooks);
 }
 
@@ -394,6 +413,38 @@ static void test_step_f_schedule(void) {
         }
         pb_free(&res);
     }
+}
+
+/* --- the on_step hook (2E Task 13: bench_proc times the steps with it) ------------------- */
+
+/* The events of a run of text under opts. */
+static const char *trace_of(const char *text, const odin3_proc_opts *opts, odin3_status want) {
+    pb_result res;
+    build(text, &res);
+    TEST_ASSERT_EQUAL_INT(want, run_proc(&res, opts, NULL));
+    pb_free(&res);
+    TEST_ASSERT_EQUAL_INT(0, fakes.depth);
+    return fakes.trace;
+}
+
+static void test_on_step(void) {
+    /* One module, one process: A, B, C, D, E and F, each opened and closed once, a budget check
+     * before the process's decode (A), its lowering (B) and its flip-flops (D). */
+    TEST_ASSERT_EQUAL_STRING("A+ b e A- B+ b e B- C+ C- D+ b e D- E+ E- F+ F- ",
+                             trace_of(ONE_PROC_TEXT("m3", ""), NULL, ODIN3_OK));
+    /* --noopt has no step F. */
+    install_fakes();
+    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
+    TEST_ASSERT_EQUAL_STRING("A+ b e A- B+ b e B- C+ C- D+ b e D- E+ E- ",
+                             trace_of(ONE_PROC_TEXT("m3", ""), &noopt, ODIN3_OK));
+    /* An error in step A ends the module's run there (and the open step is closed). */
+    install_fakes();
+    TEST_ASSERT_EQUAL_STRING("A+ b e A- ",
+                             trace_of(ONE_PROC_TEXT("m2", FAIL_ATTR), NULL, ODIN3_ERR_PARSE));
+    /* --stop-after has A only. */
+    install_fakes();
+    const odin3_proc_opts stop = {false, ODIN3_PROC_STOP_PRUNE};
+    TEST_ASSERT_EQUAL_STRING("A+ b e A- ", trace_of(ONE_PROC_TEXT("m3", ""), &stop, ODIN3_OK));
 }
 
 /* --- --stop-after -------------------------------------------------------------------------- */
@@ -1214,6 +1265,7 @@ int main(void) {
     RUN_TEST(test_real_orphans);
     RUN_TEST(test_info_line_success);
     RUN_TEST(test_step_f_folds);
+    RUN_TEST(test_on_step);
     RUN_TEST(test_real_determinism);
     RUN_TEST(test_postcondition);
     RUN_TEST(test_real_oom);

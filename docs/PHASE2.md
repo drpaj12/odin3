@@ -639,3 +639,105 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
 19. **IR-6 unchanged** (Peter, 2026-10-13: "do recommended"). `opt` does not compact; scripts run
     `compact` after `opt` (the Phase 2 script is `opt; compact`). This withdraws the 2F Task 13
     IR-6 amendment (spec 2F §17 #39). The sub-passes never compact either.
+
+21. **2E `proc`: what landed, the agent defaults and the bench** (2E Task 13, 2026-10-13; spec §19,
+    §20, §23; plan points (a)–(u)). Landed as PRs 2E-1 to 2E-4 (the last as 2E-4b). Peter reviews the IR items below;
+    everything else is an agent default (reversible, logged here per the plan).
+    - **`proc`** (`src/passes/proc/`, docs/PASSES.md): Yosys 0.55's `proc -norom` on 2D's `$proc`
+      bodies, mode P (it runs on the output of `opt_expr; opt_clean; opt -nodffe -nosdff`, or
+      without it). Step F is 2F's `opt_expr -keepdc` (`proc_step_f`), absent under `--noopt` and
+      `--stop-after`.
+    - **Landed, for Peter's review:** IR change D (spec §13; docs/IR.md IR-8): the eleven word
+      flip-flop and latch cells `$adffe $sdffe $sdffce $aldff $aldffe $dffsr $dffsre $dlatch
+      $adlatch $dlatchsr $sr`, with simlib's ports and parameters and no simulate hooks, written
+      as generic instances (point (b)); and `odin3_attr_remove` (IR-10; point (e)), which `ffinit`
+      needs for "an attribute left all x is removed". Also `odin3_design_bytes_reserved`
+      (read-only, IR-8) and the shared byte budget (`src/passes/budget.[ch]`: 60% of physical
+      memory, one check for 2E and 2F).
+    - **Agent defaults, points (a)–(u)** (plan "Spec points made exact here"; none needed Peter):
+      (a) `yosys-phase` in Task 2; (b) IR change D needs no writer edit; (c) `src/passes/opt/opt.h`
+      from 2E-1; (d) the budget's message is built apart from the check; (e) `odin3_attr_remove`
+      and `odin3_ffinit_remove`'s `defined_on`; (f) step F's call site (below); (g) the chunk
+      check (below); (h) pending phases kept `main` green until Task 9 (gone); (i) `pw.attrs`,
+      `pw.lowered`, `odin3_proc_cell.{pw,output,attrs_from}`; (j) statistics; (k) diagnostics
+      without a location; (l) the rows' goldens are `proc --noopt`; (m) five error rows; (n) E4 is a
+      step-A check; (o) `tools/proc-check/int_params.txt`; (p) heavy runs (`tools/heavy-run`,
+      `odin3_add_sweep_test`, 6G and 9G slices, builds through `tools/build-locked`); (q) the bisect
+      lists; (r) `elab-equiv --pass proc` in Task 11; (s) `$tmp` names in `proc_build`; (t)
+      `proc-diff` imports `memcap` lazily; (u) the net map keeps the lower net ID when both
+      primary wires are port wires.
+    - **Divergences** from Yosys 0.55 and Parmys: spec §20, #1 to #19, by reference (the ones with
+      a correctness argument are #17 (an all-`-` item of a `parallel_case` group: lowered, where
+      Yosys asserts), #18 (Yosys 0.55 keeps a mux open across a group boundary in `casez` and gives
+      wrong logic, proved by a sat counterexample and confirmed by Icarus: 2E gives Verilog's value;
+      correctness over parity) and #19 (a mux cycle in the latch walk reads as no feedback, where
+      Yosys never terminates)). §9 is amended: a register is built from the last sync's first
+      assignment, as Yosys's `find_any_lvalue` does.
+    - **Point (f), step F:** wired by 2E itself, in PR 2E-3 (`proc_step_f` calls
+      `odin3_opt_expr_run` with `keepdc`, and `test_step_f_folds` pins it), because 2F-2's
+      `opt_expr` had merged first. The info line reports `opt_expr: K changes`.
+    - **Point (g), the chunk check:** 2D-6's process generator emits one action per chunk of each
+      left side and groups case temporaries by the same chunks (2D spec v4.2), and constant `I` pins
+      follow net-ID order. Outcome: no mismatch found. The rows' lowering (48
+      `proc_rows`, 43 against Yosys 0.55, both latch modes) is identical to Yosys's, including
+      `case_default`'s single 8-bit `$pmux`; decode-to-encode identity was not run separately on
+      2D's real bodies (the identity tests use hand-built bodies), and plan point (g)'s third
+      bullet (every body position referenced by a span, no empty span) was not checked. (The 2E-3
+      PR description did not record the outcome; reconstructed from Task 11's evidence,
+      2026-10-13.)
+    - **`opt` is still 2F-5's stub**, so the sweeps and the bench run the pre-`proc` passes
+      without it: `proc-diff --trio auto` falls back to `--no-trio`, and `bench_proc` reports
+      `trio=partial` (`opt_expr`, `opt_clean`). The numbers below are to be repeated with the full
+      trio once `opt` lands; the cell counts and the input differ by `opt`'s changes.
+    - **For 2H's exceptions list** (spec §4, §18.6; `tests/proc/micro_expect_fail.txt`). Five
+      micros 2E rejects, each with its error kind: `keywords/always/always_posedge_negedge.v`,
+      `syntax/bm_function_1.v`, `syntax/bm_function_2.v` and `large/matrix_multiplication.v` are
+      real two-clock blocks (E1a, `two clocks`: Yosys 0.55 fails on them too), and
+      `large/paj_top_hierarchy_no_mem.v` has a non-constant reset value (E2: Yosys fails too). Of
+      the nine micros Parmys rejects with `Multiple edge sensitive events found for this signal!`,
+      three more lower in 2E and in plain Yosys 0.55 `proc`, and `proc_diff_micro_lowers` asserts
+      they are identical in both input modes: `large/paj_framebuftop_hierarchy_no_mem.v`,
+      `large/paj_raygentop_hierarchy_no_mem.v` and `syntax/diffeq_f_systemC.v` (their resets are
+      found as nets, so `opt_expr`'s connections do not hide them, §4). The ninth,
+      `large/paj_boundtop_hierarchy_no_mem.v`, is a 2D reject (`'debugcount01' has two drivers`, a
+      typo in the source); its typo-fixed copy `tests/proc/paj_boundtop_typo_fixed.v` stands in for
+      it and lowers identically. All nine stay Parmys-rejected exceptions of the exit bar (#4).
+    - **The bench** (`tests/bench/bench_proc.c`, Release only: `bench_guard.h`, 2D's, refuses a
+      Debug or sanitized build with exit 2; one warm-up pass, then the measured one). `bench_proc
+      --one F [--techlib T] [--no-trio] [--noopt]` prints one `key=value` line: bytes; the untimed
+      `read_verilog --nolatches` and trio; the time of steps A, B, C, D, E and F, `noopt_ms` = A to E
+      (§19's targets are `proc --noopt`), the whole `proc_ms`, the byte-budget share
+      (`budget_ms`, `budget_calls`: `odin3_design_bytes_reserved` is O(modules) and the budget is
+      checked at every process boundary, O(modules x processes), 2E Task 3 review finding 6);
+      processes, the cells created per kind and nets, nodes and pins created; the §19 estimate
+      terms (mux pins x 28 x 1.3, nets x 48, nodes x 48, the working forms' peak) and `ir_B`; peak
+      RSS (`getrusage`). The steps are timed through the `on_step` hook of `proc_test.h` (added in
+      Task 13, with a unit test). The set is the 64 files as one set by size, `lenet.v` included
+      (Odin III's side fits the 6G slice), through `elab-sweep --bench` (which runs `B --one F`
+      only, passes no top and defaults to 4G, hence `--mem-cap 6G`); `tests/proc/
+      bench_expect_fail.txt` lists the three macro-only Koios include files (no module), the two
+      `bwave_like.fixed.*` files (ambiguous top: `bench_proc` has no `--top` and `elab-sweep
+      --bench` passes none, a 2D follow-up) and `eltwise_layer.v` and `dnnweaver.v` (the reader
+      rejects them until 2D-7b; each XPASSes then and its line goes), so 26 Koios files are timed.
+      `tools/proc-check/bench-proc-report report --expect-fail tests/proc/bench_expect_fail.txt
+      LOG` prints §19's targets from the sweep's output and exits 1 on a MISSED one, with the
+      estimate terms and step times of the files it names. A file or set missing from the log, or a
+      row short of a column, is MISSED unless the expect file lists it: partial data never passes.
+      The slice margin is nil (`--jobs 2 --mem-cap 3G` is the 6G slice, as 2D's). `noopt_ms` equals `proc --noopt` run alone to within 0.1% (mcml.v, diffeq1).
+      `proc_diff_micro_lowers --also-no-trio` runs one mode only, vacuous until 2F-5.
+      The full bench, from a Release build, on an idle machine (the controller):
+      `ODIN3_HEAVY_OK=1 tools/heavy-run tools/elab-check/elab-sweep --odin3 build/release/odin3
+      --bench build/release/bench_proc --techlib lib/vtr.o3lib --mem-cap 6G --jobs 1 --expect-fail
+      tests/proc/bench_expect_fail.txt --root $VTR_ROOT/vtr_flow/benchmarks/verilog
+      $VTR_ROOT/vtr_flow/benchmarks/verilog/*.v $VTR_ROOT/vtr_flow/benchmarks/verilog/koios/*.v
+      | tee LOG` under `set -o pipefail` (elab-sweep has no `--log`; without it the sweep's exit
+      code is lost to `tee`), and then `tools/proc-check/bench-proc-report report --expect-fail
+      tests/proc/bench_expect_fail.txt LOG` .
+    - **Results (§19 targets): NOT YET FILLED; the controller records the full run here, verbatim (the
+      sweeps' summaries and the tie count too). `lenet.v` time and RSS are unmeasured; only a
+      3G-capped smoke on seven small files exists.**
+      mcml.v `proc --noopt` <= 0.2 s; lenet.v `proc --noopt` <= 5 s; lenet.v through the Phase 2
+      script to `proc`, peak RSS <= 3.0 GB; the 31 VTR files <= 0.5 s in total; the 33 Koios files
+      <= 8 s in total. A miss is investigated with the printed terms and reported, never relaxed.
+    - **Sweeps' summaries and `sweep-xl` (lenet.v, Yosys side, 9G slice): not yet run (needs an
+      idle machine).**
