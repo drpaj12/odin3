@@ -439,7 +439,8 @@ def _failed_step(step: str, tool: str, child: Child) -> Outcome:
     kind = OUT_E3 if step == "A" and ODIN3_E3 in output else "error"
     how = f"{tool} exited {child.code}"
     if child.code < 0 or child.code >= SIGNAL_EXIT:  # a cap kill or crash: elab-sweep reads it
-        how = f"{tool} crashed (signal {-child.code if child.code < 0 else child.code - SIGNAL_EXIT})"
+        signal = -child.code if child.code < 0 else child.code - SIGNAL_EXIT
+        how = f"{tool} crashed (signal {signal})"
     return Outcome(EXIT_ERROR, kind, f"{how} (step {step})", lines=_tail(child))
 
 

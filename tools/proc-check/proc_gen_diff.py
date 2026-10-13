@@ -32,8 +32,9 @@ each run's work directory are kept and named.
   again with ``--yosys Y2 --allow-version 0.69``; a difference there is ``oracle drift``, reported
   and counted, never a failure. A 0.55 failure is a failure whatever 0.69 says.
 
-Exit 0 every seed ok, 1 a seed failed or too many are unverified, 2 usage or setup error. Children run with the lock
-descriptor of ``tools/heavy-run`` inherited and a per-child memory cap (``--mem-cap``, default 3G).
+Exit 0 every seed ok, 1 a seed failed or too many are unverified, 2 usage or setup error.
+Children run with the lock descriptor of ``tools/heavy-run`` inherited and a per-child memory cap
+(``--mem-cap``, default 3G).
 """
 
 from __future__ import annotations
