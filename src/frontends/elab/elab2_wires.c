@@ -209,8 +209,7 @@ static uint32_t symbol_width(const odin3_symbol *rec) {
     if (!rec->has_packed) {
         return 1;
     }
-    int64_t span = (int64_t)rec->packed.msb - (int64_t)rec->packed.lsb;
-    return (uint32_t)(span < 0 ? -span : span) + 1U;
+    return (uint32_t)odin3_elab2_dim_size(&rec->packed);
 }
 
 /* The IR name of rec: its scope path ('.'-joined) and its own name, interned. */

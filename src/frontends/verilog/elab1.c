@@ -19,6 +19,7 @@
 #include "passes/manager.h"
 #include "util/alloc.h"
 #include "util/arena.h"
+#include "util/clock.h"
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -32,7 +33,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 /* Debug builds check the elaborated store whatever the options say (EL-2 step 2). */
 #ifdef NDEBUG
@@ -41,7 +41,7 @@ enum { E1_ALWAYS_CHECK = 0 };
 enum { E1_ALWAYS_CHECK = 1 };
 #endif
 
-enum { E1_KEY_SHIFT = 32, E1_MS_PER_S = 1000, E1_NS_PER_MS = 1000000 };
+enum { E1_KEY_SHIFT = 32 };
 
 static const char k_work[] = "work";
 
@@ -499,12 +499,6 @@ odin3_status odin3_elab_stage1(odin3_pass_ctx *ctx, odin3_ast *parsed, const odi
 
 /* --- odin3_elab_run (EL-2) ------------------------------------------------------------------- */
 
-static double now_ms(void) {
-    struct timespec ts;
-    (void)clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * E1_MS_PER_S + (double)ts.tv_nsec / E1_NS_PER_MS;
-}
-
 /* Step 2's check of the elaborated store (Debug, --check); the store is destroyed on failure. */
 static odin3_status check_elab(odin3_ast **elab) {
     if (!E1_ALWAYS_CHECK && !odin3_pass_get_options().check) {
@@ -542,10 +536,10 @@ odin3_status odin3_elab_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_ast
     odin3_status st = odin3_elab1_options(design, opts, &options);
     odin3_elab_test_note_opts(&options);
     odin3_ast *elab = NULL;
-    double started = now_ms();
+    double started = odin3_now_ms();
     st = st != ODIN3_OK ? st : odin3_elab_stage1(ctx, parsed, &options, &elab);
     st = st != ODIN3_OK ? st : check_elab(&elab);
-    options.stage1_ms = now_ms() - started;
+    options.stage1_ms = odin3_now_ms() - started;
     odin3_design_drop_ast(design, parsed_run, ODIN3_AST_FORM_PARSED); /* step 3 */
     if (st != ODIN3_OK) {
         return st;

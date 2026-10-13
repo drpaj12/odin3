@@ -77,13 +77,7 @@ static odin3_status mem_cap(odin3_elab2 *e2, const odin3_elab_mem *mem, const po
     uint64_t rd = mem->rd_ports.len + (add->is_read ? 1U : 0U);
     uint64_t wr = mem->wr_ports.len + (add->is_read ? 0U : 1U);
     uint64_t pins = mem_pins(mem, abits, rd, wr);
-    if (pins <= e2->limits->max_cell_pins) {
-        return ODIN3_OK;
-    }
-    odin3_elab2_fatal(e2, node_loc(e2, add->node),
-                      "cell of %" PRIu64 " pins exceeds the limit of %" PRIu32 " pins", pins,
-                      e2->limits->max_cell_pins);
-    return ODIN3_ERR_PARSE;
+    return odin3_elab2_pins_cap(e2, node_loc(e2, add->node), pins);
 }
 
 /* --- addresses ---------------------------------------------------------------------------------

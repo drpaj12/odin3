@@ -7,9 +7,9 @@
  * third (Task 18) is expressions: signals to word cells, selects and continuous assignments
  * (elab2_expr.c, elab2_select.c, elab2_assign.c). The fourth (Task 19) is drivers, instances and
  * gates: the driver table and claims, wired nets, tri-state, the lvalue an output takes apart
- * (elab2_drive.c, elab2_assign.c), instances and gates (elab2_inst.c), black-box cell types
- * (elab2_bbox.c). The fifth is memories (elab2_mem.c, elab2_memscan.c, elab2_memport.c). Later
- * tasks add processes to it.
+ * (elab2_claim.c, elab2_wired.c, elab2_assign.c), instances and gates (elab2_inst.c), black-box
+ * cell types (elab2_bbox.c). The fifth is memories (elab2_mem.c, elab2_memscan.c, elab2_memport.c).
+ * Later tasks add processes to it.
  */
 #ifndef ODIN3_FRONTENDS_ELAB_ELAB_INTERNAL_H
 #define ODIN3_FRONTENDS_ELAB_ELAB_INTERNAL_H
@@ -326,6 +326,23 @@ void odin3_elab2_fatal(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...) ODI
 void odin3_elab2_warn(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...) ODIN3_PRINTF(3, 4);
 
 /*
+ * The string table's text for id; "" for an ID with none. The result belongs to the design.
+ */
+const char *odin3_elab2_str_of(const odin3_elab2 *e2, uint32_t id);
+
+/*
+ * The one cap on a cell's pins (ODIN3_ELAB_MAX_CELL_PINS in force): ODIN3_OK when pins is within
+ * it, else the fatal `cell of N pins exceeds the limit of M pins` at loc and ODIN3_ERR_PARSE.
+ */
+odin3_status odin3_elab2_pins_cap(odin3_elab2 *e2, odin3_loc loc, uint64_t pins);
+
+/*
+ * The number of indices of a dimension, |msb - lsb| + 1 (a packed range's width, an unpacked
+ * dimension's size). Defined in elab2_mem.c.
+ */
+uint64_t odin3_elab2_dim_size(const odin3_dim *dim);
+
+/*
  * The safety net of an ODIN3_ERR_PARSE ("counted, go on"): a producer that returned it without
  * raising any error would let the read succeed with the construct missing (end_status looks at
  * the error count). This counts one located internal error at loc when no error is counted yet
@@ -608,7 +625,8 @@ typedef struct odin3_drv {
     odin3_ast_id node;
 } odin3_drv;
 
-/* The tables of one module's drivers (elab2_drive.c); opaque to everything else. */
+/* The tables of one module's drivers (elab2_claim.c; elab2_drive.h shares it); opaque to everything
+ * else. */
 struct odin3_elab2_drive;
 
 /*

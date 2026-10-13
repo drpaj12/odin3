@@ -73,6 +73,7 @@ add_library(odin3_core OBJECT
     src/util/u64map.c
     src/util/idindex.c
     src/util/str.c
+    src/util/clock.c
     src/util/log.c
     src/util/file.c
     src/util/sha256.c
@@ -213,7 +214,11 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_expr.c
     src/frontends/elab/elab2_select.c
     src/frontends/elab/elab2_assign.c
-    src/frontends/elab/elab2_drive.c
+    src/frontends/elab/elab2_claim.c
+    src/frontends/elab/elab2_wired.c
+    src/frontends/elab/elab2_prescan.c
+    src/frontends/elab/elab2_warn.c
+    src/frontends/elab/elab2_tri.c
     src/frontends/elab/elab2_mem.c
     src/frontends/elab/elab2_memport.c
     src/frontends/elab/elab2_memscan.c

@@ -5,7 +5,7 @@
  * point (aa), the net lvalue (an assignment's, an instance output's or a gate output's) and the
  * assignment of a right side to it (Task 19: claimed first; by construction when a cell drives the
  * lhs nets, else by merge). The expression walk is elab2_expr.c, selects elab2_select.c, the driver
- * tables elab2_drive.c.
+ * tables elab2_claim.c.
  */
 #include "ast/ast.h"
 #include "ast/kinds.h"
@@ -173,13 +173,7 @@ static odin3_status cell_plan(cell_ctx *cx) {
 /* Point (aa): the pins of one cell. Fatal; nothing has been made. */
 static odin3_status cell_cap(const cell_ctx *cx) {
     odin3_elab2 *e2 = cx->e2;
-    if (cx->pins <= e2->limits->max_cell_pins) {
-        return ODIN3_OK;
-    }
-    odin3_elab2_fatal(e2, odin3_ast_loc(e2->elab, cx->req->node),
-                      "cell of %" PRIu64 " pins exceeds the limit of %" PRIu32 " pins", cx->pins,
-                      e2->limits->max_cell_pins);
-    return ODIN3_ERR_PARSE;
+    return odin3_elab2_pins_cap(e2, odin3_ast_loc(e2->elab, cx->req->node), cx->pins);
 }
 
 static odin3_status cell_port_nets(cell_ctx *cx, unsigned port, const odin3_sig *sig) {

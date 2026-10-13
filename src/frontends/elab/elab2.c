@@ -4,7 +4,8 @@
  * (l)'s pending report, the byte budget, the module loop (bind, ports of every module, then every
  * body in EL-28's order: wires, the pre-scan, instances and gates, assignments, wired nets and the
  * end-of-module warnings), the top and the summary line. Ports, wires, provenance and attributes
- * are elab2_wires.c; drivers are elab2_drive.c, instances and gates elab2_inst.c.
+ * are elab2_wires.c; drivers are elab2_claim.c, elab2_wired.c, elab2_prescan.c, elab2_warn.c and
+ * elab2_tri.c, instances and gates elab2_inst.c.
  */
 #include "ast/ast.h"
 #include "ast/kinds.h"
@@ -20,6 +21,7 @@
 #include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "util/alloc.h"
+#include "util/clock.h"
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/u64map.h"
@@ -33,7 +35,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 /* EL-46's per-object estimate of the IR (bytes) and how often the budget is looked at (objects). */
 enum {
@@ -42,8 +43,6 @@ enum {
     E2_BYTES_PER_NET = 48,
     E2_BYTES_PER_WIRE = 64,
     E2_BUDGET_EVERY = 1 << 16,
-    E2_MS_PER_S = 1000,
-    E2_NS_PER_MS = 1000000,
     E2_HASH_DIGITS = 16 /* the hex digits of a hashed module name (EL-9) */
 };
 
@@ -89,10 +88,18 @@ static const char *const k_type_names[ODIN3_E2T_COUNT] = {
     [ODIN3_E2T_CONSTZ] = "$_CONSTZ_",
 };
 
-static double now_ms(void) {
-    struct timespec ts;
-    (void)clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * E2_MS_PER_S + (double)ts.tv_nsec / E2_NS_PER_MS;
+const char *odin3_elab2_str_of(const odin3_elab2 *e2, uint32_t id) {
+    const char *str = odin3_strtab_get(odin3_design_strtab(e2->design), id);
+    return str != NULL ? str : "";
+}
+
+odin3_status odin3_elab2_pins_cap(odin3_elab2 *e2, odin3_loc loc, uint64_t pins) {
+    if (pins <= e2->limits->max_cell_pins) {
+        return ODIN3_OK;
+    }
+    odin3_elab2_fatal(e2, loc, "cell of %" PRIu64 " pins exceeds the limit of %" PRIu32 " pins",
+                      pins, e2->limits->max_cell_pins);
+    return ODIN3_ERR_PARSE;
 }
 
 /* --- the context ----------------------------------------------------------------------------- */
@@ -785,7 +792,7 @@ static odin3_status finish(odin3_elab2 *e2, double started) {
                   " specializations), %" PRIu32 " processes, %" PRIu32 " cells, %" PRIu32
                   " nets, %.3f + %.3f ms",
                   odin3_ast_name_str(e2->elab, unit), sum.modules, sum.specializations,
-                  sum.processes, sum.cells, sum.nets, e2->opts.stage1_ms, now_ms() - started);
+                  sum.processes, sum.cells, sum.nets, e2->opts.stage1_ms, odin3_now_ms() - started);
     }
     return st;
 }
@@ -799,7 +806,7 @@ static odin3_status end_status(const odin3_elab2 *e2) {
 }
 
 odin3_status odin3_elab_stage2(odin3_pass_ctx *ctx, odin3_ast *elab, const odin3_elab_opts *opts) {
-    double started = now_ms();
+    double started = odin3_now_ms();
     odin3_elab2 *e2 = NULL;
     odin3_status st = odin3_elab2_create(ctx, elab, opts, &e2);
     st = st != ODIN3_OK ? st : run_steps(e2);

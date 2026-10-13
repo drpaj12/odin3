@@ -476,17 +476,6 @@ static odin3_status port_nets(const odin3_vec *keys, odin3_arena *arena, odin3_n
     return ODIN3_OK;
 }
 
-/* Point (aa): the pins of the node. Fatal; nothing has been made. */
-static odin3_status pins_cap(odin3_elab2 *e2, odin3_ast_id node, uint64_t pins) {
-    if (pins <= e2->limits->max_cell_pins) {
-        return ODIN3_OK;
-    }
-    odin3_elab2_fatal(e2, odin3_ast_loc(e2->elab, node),
-                      "cell of %" PRIu64 " pins exceeds the limit of %" PRIu32 " pins", pins,
-                      e2->limits->max_cell_pins);
-    return ODIN3_ERR_PARSE;
-}
-
 /* The node whole from the laid body and its pins. */
 static odin3_status make_node(odin3_pg *pg, odin3_ast_id prov_node, const pg_laid *lay,
                               const pg_pins *pins, odin3_node_id *out) {
@@ -534,8 +523,10 @@ odin3_status odin3_pg_emit(odin3_pg *pg, odin3_ast_id prov_node, odin3_node_id *
     st = st != ODIN3_OK ? st : pg_layout(pg, &lay);
     if (st == ODIN3_OK && lay.acts.len > 0) {
         st = pins_make(pg, &lay, &pins);
+        /* point (aa): the pins of the node; fatal, nothing has been made */
         st = st != ODIN3_OK ? st
-                            : pins_cap(e2, prov_node, (uint64_t)pins.inets.len + pins.onets.len);
+                            : odin3_elab2_pins_cap(e2, odin3_ast_loc(e2->elab, prov_node),
+                                                   (uint64_t)pins.inets.len + pins.onets.len);
         st = st != ODIN3_OK ? st : make_node(pg, prov_node, &lay, &pins, out);
         odin3_elab2_counts made = {1, (uint32_t)(pins.inets.len + pins.onets.len), 0, 0};
         st = st != ODIN3_OK ? st : odin3_elab2_account(e2, &made);

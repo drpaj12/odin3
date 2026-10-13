@@ -1,8 +1,8 @@
 /*
  * elab2_words.c — stage 2's second half of the pre-scan (2D Task 21; EL-28 step (2), EL-27): the
  * word wires of an array that became registers are made by the mem2reg decision, after the first
- * pre-scan of elab2_drive.c, so a second walk over the module's `always` blocks marks the wires of
- * the words they assign (odin3_elab2_always_assigned_word). A word is exact for NUMBER indices
+ * pre-scan of elab2_prescan.c, so a second walk over the module's `always` blocks marks the wires
+ * of the words they assign (odin3_elab2_always_assigned_word). A word is exact for NUMBER indices
  * (`m[2] <= x`, also under a bit or part select) and every word of the array otherwise (a variable
  * index, or an index written as an expression): a superset, never a miss.
  */

@@ -2102,7 +2102,7 @@ allocation (`odin3_util_set_alloc_fail_after`) and assert the status, no leak an
 | `src/frontends/elab/elab.h`, `elab_internal.h`, `elab_test.h` | the stage APIs, `odin3_elab_opts`, caps, test hooks |
 | `src/frontends/elab/cval.c`, `cval_arith.c`, `ceval.c`, `ceval_interp.c`, `ctype.c` | values, operators, expression evaluation, the interpreter, typing (EL-12–EL-18) |
 | `src/frontends/elab/bind.c` | the binder (EL-5) |
-| `src/frontends/elab/elab2.c`, `elab2_wires.c`, `elab2_inst.c`, `elab2_assign.c`, `elab2_expr.c`, `elab2_select.c`, `elab2_mem.c`, `elab2_drive.c` | stage 2 module emission (EL-23–EL-32) |
+| `src/frontends/elab/elab2.c`, `elab2_wires.c`, `elab2_inst.c`, `elab2_assign.c`, `elab2_expr.c`, `elab2_select.c`, `elab2_mem.c`, `elab2_claim.c`, `elab2_wired.c`, `elab2_prescan.c`, `elab2_warn.c`, `elab2_tri.c` | stage 2 module emission (EL-23–EL-32) |
 | `src/frontends/elab/pg.c`, `pg_case.c`, `pg_loop.c`, `pg_call.c`, `pg_init.c` | the process generator and initial values (EL-35–EL-40) |
 | `src/ir/cells/proc.c`, `src/ir/proc.[ch]` (body types, `verify`, body text), `src/ir/value.[ch]` (`ODIN3_VAL_PROC`), `src/ir/node.c` (the process counter), `src/passes/manager.[ch]` (the `processes` flag) | IR change B |
 | `src/ir/cells/arith.c`, `logic.c`, `reduce.c`, `shift.c`, `builtin.c` | IR change A (nine cells) |

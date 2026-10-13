@@ -57,8 +57,7 @@ static uint32_t ex_sym_width(const odin3_symbol *rec) {
     if (!rec->has_packed) {
         return 1;
     }
-    int64_t span = (int64_t)rec->packed.msb - (int64_t)rec->packed.lsb;
-    return (uint32_t)(span < 0 ? -span : span) + 1U;
+    return (uint32_t)odin3_elab2_dim_size(&rec->packed);
 }
 
 /* A localparam is still unsized when its declarator's NUMBER says so (review I11): the symbol
