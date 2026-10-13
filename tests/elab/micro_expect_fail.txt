@@ -100,10 +100,6 @@ syntax/fir_scu_rtl_restructured_for_cmm_exp.v [fir_scu_rtl_restructured_for_cmm_
 #
 # --- 2D-7b triage (the micros left over once the sweep reads lib/vtr.o3lib for the hard blocks) --
 # Deliberate rejections (2D spec §9; Yosys accepts them, 2D rejects on purpose, soundness first):
-keywords/task_endtask/inside_port.v [inside_port.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
-keywords/task_endtask/outside_port.v [outside_port.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
-keywords/task_endtask/task_call_function.v [task_call_function.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
-keywords/task_endtask/task_call_task.v [task_call_task.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
 syntax/multi_assignment.v [multi_assignment.v:8:8: error: tri-state driver on 'data' is supported only on a top-level output or inout port (D3)] 2D spec 7 D3 (EL-29): a tri-state driver on an internal net is rejected
 full/matmul.v [matmul.v:35:4: error: 'direction_tmp' is assigned with both '=' and '<='] 2D spec 9 T9: a bit assigned by both = and <= is rejected (REJECT, coverage audit B 2.2.4)
 syntax/multi_clock_reader_writer.v [multi_clock_reader_writer.v:77:5: error: 'register' is assigned with both '=' and '<='] 2D spec 9 T9: a bit assigned by both = and <= is rejected (REJECT, coverage audit B 2.2.4)

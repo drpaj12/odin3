@@ -410,6 +410,10 @@ with `--xl`). `elab-equiv` exits 3 (`oracle crash`) when Yosys dies of a signal 
 on recursive instantiation, where 2D reports "recursive instantiation of 'top'") and reports a child killed by
 its cap as `out of memory (cap 4G)`. (3) `micro-top` follows nested golden groups (`keywords/assign/assign_wide`).
 
+v4.27 (2026-10-13; 2D-7b, Peter 2026-10-13 "accept T6/D3/T9 with warnings", PHASE2 #20). (1) T6 is
+accepted (§8.2, §9.2, §17 #76): an `always` with no event control is `always @*`, with a located
+warning. The T6 row leaves §9.1.
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -1756,9 +1760,17 @@ From the `ALWAYS`'s `EVENT_CONTROL`:
   pure combinatorial block … use of @* instead of @(...)") and never names a missing signal.
 - Edge and level events in one list: "edge and level events in one event list are not supported"
   (Yosys: "Found non-synthesizable event list").
-- `always` with no event control (T6), an event control inside the body (T12), `wait` (T13),
-  `->` (T14), `fork` (T15), procedural `assign`/`deassign`/`force`/`release` (T16), `disable`
+- `always` with no event control (T6, accepted: below), an event control inside the body (T12),
+  `wait` (T13), `->` (T14), `fork` (T15), procedural `assign`/`deassign`/`force`/`release` (T16), `disable`
   (T19), `forever` (F4): stage 1's errors (§9.1). Delays (T11) were dropped with a warning.
+- **T6 (accepted, Peter 2026-10-13, 2D-7b)**: an `always` (not `always_ff`/`always_comb`/
+  `always_latch`) whose statement is not led by an event control, with no timing at all or with a
+  delay (`always #5 clk = ~clk`, the delay itself T11's warning), is `always @*`: stage 1 writes
+  `ALWAYS(TIMING_STMT(EVENT_CONTROL[star], body))`, the one form the elaborated store's check
+  allows, and the generator builds the one `ALWAYS` sync of `@*` (EL-34, T2). Warning at the
+  `ALWAYS`: "always without an event control treated as always @*" (§9.2, once per parsed
+  node). This is Yosys 0.55's reading (a process with no sync rule is combinational). A delay
+  in front of an event control (`always #5 @(a) …`) is not T6: the inner control is T12's error.
 
 ### 8.3 The process generator (EL-35)
 
@@ -2019,7 +2031,6 @@ cases (2C §7.3) expect, at the node named:
 | E20 | the `CALL` | `system function '$random' is not supported` |
 | E21 | the `HIER_NAME`/`CALL`/`TASK_CALL` | `hierarchical reference 'u.w' is not supported` |
 | A4 | the second driver | `'y[3]' has two drivers (also driven at f.v:L:C)` (a whole-net conflict names the net: `'y' has two drivers …`) |
-| T6 | the `ALWAYS` | `always block without an event control is not supported` |
 | T9 | the later assignment | `'r' is assigned with both '=' and '<=' (also at f.v:L:C)` |
 | T10 | the later block's assignment | `'r[2]' is assigned in two always blocks (also at f.v:L:C)` |
 | T12 | the inner `TIMING_STMT` | `event control inside an always body is not supported` |
@@ -2038,9 +2049,10 @@ cases (2C §7.3) expect, at the node named:
 | F2 | the `WHILE` | `'while' is supported only in constant functions` |
 
 (L14 is 2B's error and M11's duplicate module is 2C's `duplicate_module`; 2D raises every other
-REJECT, including M11's other duplicates. The `reject-2d/` handover holds 25 cases: the 22 rows
-other than L14 and M11, 2C plan point (i), and the REJECT parts of N15, P4 and F2 tabulated
-above.)
+REJECT, including M11's other duplicates. The `reject-2d/` handover holds 23 cases: the 20 rows
+other than L14, M11, T6 and T9, 2C plan point (i), and the REJECT parts of N15, P4 and F2
+tabulated above. T6 and T9 are accepted since 2D-7b, with a warning each: T6 is `ignore-2d/T6`,
+T9 is §9.2's warning.)
 
 Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
 
@@ -2127,6 +2139,7 @@ specialized twice — warns once, keyed by its parsed node):
 | Q4 | the `DELAY`/`STRENGTH` | `gate delay is ignored` / `gate drive strength is ignored` |
 | S1 | the `SPECIFY_BLOCK` | `specify block is ignored` |
 | S3 | the `TASK_CALL` | `system task '$display' is ignored` (any system task but `$readmemh`/`$readmemb`) |
+| T6 | the `ALWAYS` | `always without an event control treated as always @*` (accepted, not ignored: §8.2) |
 
 Other warnings: D1's two (EL-36), at the attribute; D2's two (EL-40); D5/M12 (EL-24); M10 `'x' is implicitly
 declared`; T3 (EL-34); E9's two (EL-30: `'===' is treated as '==' (synthesis has no x or z)`,
@@ -2530,7 +2543,7 @@ writer's text is valid RTLIL. The bridge is also 2E's and 2F's oracle later (the
 
 ### 14.4 The 2C handover
 
-`tests/verilog/reject-2d/` (25 cases: 22 rows plus the REJECT parts of N15, P4 and F2) and `tests/verilog/ignore-2d/` (10 rows), already registered
+`tests/verilog/reject-2d/` (23 cases: 20 rows plus the REJECT parts of N15, P4 and F2) and `tests/verilog/ignore-2d/` (11 rows, T6 added by 2D-7b), already registered
 by 2C as `verilog_reject_2d`/`verilog_ignore_2d` and skipped while `odin3_elab_run` is a stub,
 turn on with 2D; their `.err`/`.warn` texts are §9's tables. The project corpus's Verilog cases
 (2B §10.2 `--with-frontend`) run: the positive phase-2 cases (`auto_top`, `param_instance`,
@@ -2747,6 +2760,7 @@ and reported, never relaxed (2A's rule).
 | 73 | `$readmemh/b` truncates a word with non-zero digits beyond the memory's width and warns once per call (`$readmemh of 'f' truncated N words wider than the memory's W bits (the first, 'w', at line L)`); leading zeros are no loss and no warning | Yosys 0.55 warns per word (`Literal has a width of 8 bit, but value requires 9 bit`) and truncates | IEEE 1364-2005 17.2.8: the file's word is sized to the memory | a write is never dropped silently; one warning per call as #68 (review I4) |
 | 74 | a call in an expression is inlined by C recursion (`pg_run` to the walker to `pg_call_hook` to `pg_run`); the nesting is capped at 256 (`function call nesting deeper than 256 at 'f'`), so a deep chain of non-recursive functions is a located error, not a stack overflow | Yosys inlines by AST rewriting to any depth | running the call after the expression walk (the walker hands back a placeholder) | the hoist is 2D-7's (plan constraint ledger: "No recursion in `src/`", deviation recorded); the cap is far above real designs (chains of 3 to 10) |
 | 75 | an unrolled `for` that never ends (`reg [3:0] k; for (k = 7; k >= 0; k = k - 1)`) is the located error `for-loop never ends: 'k' takes the value 7 again` when its test and step read only the variable (Brent's cycle check), else `loop creates more than 2097152 IR objects (is it endless?)` (`ODIN3_ELAB_MAX_LOOP_OBJECTS`) or the iteration cap `loop exceeds 1048576 iterations` | Yosys 0.55 has no limit: it unrolls until it runs out of memory | the caps of EL-37 | review M3: the cap used to fire only after 5.7 GB of cells |
+| 76 | an `always` with no event control (`always x = a;`, `always #5 clk = ~clk;`) is `always @*`, with the warning "always without an event control treated as always @*" (T6; Peter 2026-10-13, PHASE2 #20) | Yosys 0.55 reads it the same way: the process has no sync rule, so it is combinational (verified: micros `task_endtask/{inside_port,outside_port,task_call_function,task_call_task}` are `elab-equiv`-equivalent) | an `always` with no timing runs forever in simulation (a zero-delay loop hangs) | accepted for Parmys compatibility; the warning names the risky construct |
 
 ## 18. Implementation split (EL-51)
 

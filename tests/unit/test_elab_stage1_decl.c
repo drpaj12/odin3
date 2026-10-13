@@ -540,11 +540,13 @@ static void test_readmem(void) {
               "t.v:3:13: error: $readmemh is supported only in an initial block");
 }
 
-/* What Task 16 still owns stays a located pending line, never a 2D bug. */
+/* What Task 16 still owns stays a located pending line, never a 2D bug (T6 is accepted with a
+ * warning since 2D-7b). */
 static void test_task16_rows_in_blocks(void) {
     run_one("module m(input c);\n  reg r;\n  always r = 1;\nendmodule\n");
-    et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:3:3: error: always block without an event control is not supported");
+    et_expect(&rs, ODIN3_LOG_WARN,
+              "t.v:3:3: warning: always without an event control treated as always @*");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
     run_one("module m(input c);\n  reg r;\n  always @(c) $display(\"x\");\nendmodule\n");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
     expect_warn("t.v:3:15: warning: system task '$display' is ignored");

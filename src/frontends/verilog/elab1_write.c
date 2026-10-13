@@ -1675,16 +1675,41 @@ static void w_close_block(e1w *wr, const e1w_frame *frame) {
 
 /* --- the module ----------------------------------------------------------------------------- */
 
-/* ALWAYS and INITIAL: the statement tree copied (T6: an always without an event control is
- * rejected). */
-static odin3_ast_id w_process(e1w *wr, odin3_ast_id item) {
+/* T6 (accepted): an `always` whose statement is not led by an event control (none at all, or a
+ * delay, which is dropped as T11) is written as `always @*`: ALWAYS(TIMING_STMT(EVENT_CONTROL
+ * star, body)), the one form IR-checked ALWAYS nodes have. */
+static odin3_ast_id w_always_star(e1w *wr, odin3_ast_id item, odin3_ast_id first) {
+    uint32_t outer = w_mark(wr);
+    uint32_t inner = w_mark(wr);
+    odin3_ast_id from = first.v != 0 ? first : item;
+    odin3_ast_spec control = spec_of(wr, ODIN3_AST_EVENT_CONTROL, from);
+    control.flags = ODIN3_AST_F_EVENT_CONTROL_STAR;
+    w_push(wr, (odin3_ast_id){0}); /* the control's optional expression slot */
+    w_push(wr, w_make_plain(wr, &control, inner, from));
+    w_push(wr, first.v != 0 ? w_expr(wr, first) : w_null_make(wr, item));
+    odin3_ast_spec timing = spec_of(wr, ODIN3_AST_TIMING_STMT, from);
+    w_push(wr, w_make_plain(wr, &timing, inner, from));
+    odin3_ast_spec always = spec_of(wr, ODIN3_AST_ALWAYS, item);
+    always.sub = (uint8_t)odin3_ast_sub(wr->ast, item);
+    always.name = odin3_ast_name(wr->ast, item);
+    return w_make_marked(wr, &always, outer, item);
+}
+
+/* Whether an ALWAYS (the plain `always` keyword) lacks an event control (T6). */
+static bool always_untimed(const e1w *wr, odin3_ast_id item) {
     odin3_ast_id first = odin3_ast_child(wr->ast, item, 0);
-    if (odin3_ast_kind_of(wr->ast, item) == ODIN3_AST_ALWAYS &&
-        odin3_ast_sub(wr->ast, item) == ODIN3_AST_ALWAYS_ALWAYS && first.v != 0 &&
-        odin3_ast_kind_of(wr->ast, first) != ODIN3_AST_TIMING_STMT) {
-        (void)odin3_elab1_reject(wr->e1, item); /* T6 */
-        halt(wr);
-        return (odin3_ast_id){0};
+    return odin3_ast_kind_of(wr->ast, item) == ODIN3_AST_ALWAYS &&
+           odin3_ast_sub(wr->ast, item) == ODIN3_AST_ALWAYS_ALWAYS &&
+           !(first.v != 0 && odin3_ast_kind_of(wr->ast, first) == ODIN3_AST_TIMING_STMT &&
+             odin3_ast_kind_of(wr->ast, odin3_ast_child(wr->ast, first, 0)) ==
+                 ODIN3_AST_EVENT_CONTROL);
+}
+
+/* ALWAYS and INITIAL: the statement tree copied (T6: an always without an event control is
+ * written as `always @*`, the warning being the scan's). */
+static odin3_ast_id w_process(e1w *wr, odin3_ast_id item) {
+    if (always_untimed(wr, item)) {
+        return w_always_star(wr, item, odin3_ast_child(wr->ast, item, 0));
     }
     wr->in_initial = odin3_ast_kind_of(wr->ast, item) == ODIN3_AST_INITIAL;
     odin3_ast_id made = w_expr(wr, item);

@@ -123,6 +123,25 @@ static void test_combinational_default_mode(void) {
     pt_expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
 }
 
+/* T6 (Peter 2026-10-13, accepted): an always with no event control is `always @*`, with a
+ * located warning; the process is the one `always @*` makes. */
+static void test_t6_always_without_event_control(void) {
+    pt_read_src("module t(input a, output reg y);\n  always y = a;\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, pt_diag_errors(), et_log(&pt_rs));
+    pt_expect_warning((at_loc){2, 3}, "always without an event control treated as always @*");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_soft_warnings(), et_log(&pt_rs));
+    pt_expect_ir_ok();
+    pt_expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
+    et_free(&pt_rs);
+    memset(&pt_rs, 0, sizeof pt_rs);
+    /* a delay control is no event control: the same rule (the delay itself is T11's warning) */
+    pt_read_src("module t(input a, output reg y);\n  always #5 y = a;\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_warning((at_loc){2, 3}, "always without an event control treated as always @*");
+    pt_expect_dump(0, "I1 O2\nC0 [O1<-I0]\nS always [O0<-O1]\n");
+}
+
 /* --nolatches: no root action; an output reads x until it is assigned (EL-35 step 3). */
 static void test_nolatches_reads_x(void) {
     pass_src nolatches = {"--nolatches t.v", "module t(input a, output reg y, z);\n"
@@ -1012,6 +1031,7 @@ static void test_oom_sweep(void) {
     X(test_t8_nonblocking_reads_held_value)                                                        \
     X(test_held_value)                                                                             \
     X(test_combinational_default_mode)                                                             \
+    X(test_t6_always_without_event_control)                                                        \
     X(test_nolatches_reads_x)                                                                      \
     X(test_nolatches_keeps_clocked_defaults)                                                       \
     X(test_chunks_concat_lvalue)                                                                   \
