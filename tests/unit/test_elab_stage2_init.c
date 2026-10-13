@@ -396,6 +396,34 @@ static void test_initial_register_assigned_in_task(void) {
     pt_expect_ir_ok();
 }
 
+/* PR 2D-6 review I1: the register is the output (or inout) actual of a task enable: the block
+ * drives it, so its initial value is the init attribute and the IR checks (no second driver). */
+static void expect_r_init_is_5(void) {
+    const odin3_value *init = odin3_attr_get(
+        pt_top(), (odin3_objref){ODIN3_OBJ_WIRE, odin3_module_find_wire(pt_top(), pt_id_of("r")).v},
+        pt_id_of("init"));
+    TEST_ASSERT_NOT_NULL(init);
+    TEST_ASSERT_EQUAL_STRING("10100000", bits_text(init));
+}
+
+static void test_initial_register_as_task_output_actual(void) {
+    pt_read_clean("module t(input clk, output reg [7:0] y0);\n"
+                  "  reg [7:0] r = 8'h5;\n"
+                  "  task tk(output [7:0] z); z = 7; endtask\n"
+                  "  always @(posedge clk) begin tk(r); y0 <= r; end\nendmodule\n");
+    expect_r_init_is_5();
+    pt_expect_ir_ok();
+}
+
+static void test_initial_register_as_task_inout_actual(void) {
+    pt_read_clean("module t(input clk, input [7:0] a, output reg [7:0] y0);\n"
+                  "  reg [7:0] r = 8'h5;\n"
+                  "  task tk(inout [7:0] z, input [7:0] x); z = z + x; endtask\n"
+                  "  always @(posedge clk) begin tk(r, a); y0 <= r; end\nendmodule\n");
+    expect_r_init_is_5();
+    pt_expect_ir_ok();
+}
+
 static void test_initial_register_assigned_in_function(void) {
     pt_read_clean("module t(input c, input [3:0] a, output [3:0] q, output reg [3:0] p);\n"
                   "  reg [3:0] r = 4'd3;\n"
@@ -871,6 +899,8 @@ int main(void) {
     RUN_TEST(test_variable_bit_of_a_word);
     RUN_TEST(test_initial_value_of_a_register);
     RUN_TEST(test_initial_register_assigned_in_task);
+    RUN_TEST(test_initial_register_as_task_output_actual);
+    RUN_TEST(test_initial_register_as_task_inout_actual);
     RUN_TEST(test_initial_register_assigned_in_function);
     RUN_TEST(test_initial_task_call_not_applied);
     RUN_TEST(test_initial_memory_contents);

@@ -344,6 +344,28 @@ static odin3_status mark_lvalue(odin3_elab2 *e2, odin3_ast_id lhs) {
 
 enum { PRESCAN_TASK_BODY = 2, PRESCAN_FN_BODY = 3 };
 
+enum { PRESCAN_TASK_PORTS = 0 };
+
+/* The actuals of a task enable's output and inout formals are assigned by the call (copied out
+ * at its end), so their bits are the block's (PR 2D-6 review I1). Actual k pairs with the k-th
+ * declarator over the ports list; an input formal's actual is only read. */
+static odin3_status mark_task_outputs(odin3_elab2 *e2, odin3_ast_id call, odin3_ast_id decl) {
+    odin3_ast_id ports = odin3_ast_child(e2->elab, decl, PRESCAN_TASK_PORTS);
+    uint32_t given = odin3_ast_nchild(e2->elab, call);
+    uint32_t at = 0;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t k = 0; ports.v != 0 && st == ODIN3_OK && k < odin3_ast_nchild(e2->elab, ports);
+         k++) {
+        odin3_ast_id port = odin3_ast_child(e2->elab, ports, k);
+        bool is_input = odin3_ast_sub(e2->elab, port) == ODIN3_AST_PORT_DECL_INPUT;
+        for (uint32_t j = 1; st == ODIN3_OK && j < odin3_ast_nchild(e2->elab, port); j++, at++) {
+            st = !is_input && at < given ? mark_lvalue(e2, odin3_ast_child(e2->elab, call, at))
+                                         : ODIN3_OK;
+        }
+    }
+    return st;
+}
+
 /* A task enable or function call met in an always block: its body joins the walk once (a callee
  * may assign a variable of the module, so those bits are the block's, EL-38). */
 static odin3_status scan_callee(odin3_elab2 *e2, odin3_u64map *seen, odin3_vec *work,
@@ -357,8 +379,11 @@ static odin3_status scan_callee(odin3_elab2 *e2, odin3_u64map *seen, odin3_vec *
         /* the callee is reported (located, counted); the process generator stops on it */
         return st == ODIN3_ERR_NO_MEMORY ? st : ODIN3_OK;
     }
-    if (odin3_u64map_get(seen, decl.v, NULL)) {
-        return ODIN3_OK;
+    if (odin3_ast_kind_of(e2->elab, call) == ODIN3_AST_TASK_CALL) {
+        st = mark_task_outputs(e2, call, decl);
+    }
+    if (st != ODIN3_OK || odin3_u64map_get(seen, decl.v, NULL)) {
+        return st;
     }
     st = odin3_u64map_put(seen, (odin3_kv){decl.v, 1});
     odin3_ast_id body = st == ODIN3_OK
