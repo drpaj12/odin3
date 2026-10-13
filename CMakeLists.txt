@@ -1726,6 +1726,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
                     --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_equiv_expect_fail.txt
                     --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
@@ -1740,6 +1741,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
                         --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
                         --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
                         --jobs 2 --mem-cap 3G
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_expect_fail.txt
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_equiv_expect_fail.txt
@@ -1752,6 +1754,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
                         --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
                         --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
                         --xl --mem-cap 8G --partial
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_equiv_expect_fail.txt
                         --root ${_vtr_verilog} ${_vtr_verilog}/koios/lenet.v)

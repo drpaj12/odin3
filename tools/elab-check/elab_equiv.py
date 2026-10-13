@@ -3,7 +3,7 @@
 Usage::
 
     elab-equiv --odin3 O --yosys Y --equiv-check E [--top T] [--mem-cap BYTES] [--keep DIR]
-               [--allow-version V] [--a-only] [--unmap-enables] FILE
+               [--allow-version V] [--a-only] [--unmap-enables] [--techlib T] FILE
 
 Side A is Odin III's elaboration and side B Yosys's own, both through one Yosys back end, so x is
 resolved by the same ``opt`` on both and a difference is 2D's (or a documented divergence):
@@ -116,6 +116,7 @@ class Options:
     allow_version: str | None
     a_only: bool
     unmap: bool = False
+    techlib: str | None = None
 
 
 def wants_auto_blackbox(source: Path) -> bool:
@@ -189,8 +190,9 @@ class Bridge:
     def side_a(self) -> None:
         opts = self.opts
         flags = "--nolatches --auto-blackbox" if wants_auto_blackbox(opts.source) else "--nolatches"
+        lib = f"read_techlib {opts.techlib}; " if opts.techlib else ""
         odin3 = [opts.odin3, *(["--top", opts.top] if opts.top else []), "-p",
-                 f"read_verilog {flags} {opts.source}; write_rtlil a.il"]
+                 f"{lib}read_verilog {flags} {opts.source}; write_rtlil a.il"]
         try:
             self.must("odin3 (side A)", odin3)
         except EquivError as exc:
@@ -293,11 +295,13 @@ def parse(argv: Sequence[str] | None) -> Options:
     ap.add_argument("--a-only", action="store_true", help="stop after a.blif (the 2H hand-off)")
     ap.add_argument("--unmap-enables", action="store_true",
                     help="dffunmap before techmap (the memory bridge's enabled flip-flops)")
+    ap.add_argument("--techlib", metavar="T", help="a .o3lib read first on side A (hard blocks)")
     ap.add_argument("file", type=Path, help="the Verilog file")
     args = ap.parse_args(argv)
     return Options(exe(args.odin3), exe(args.yosys), exe(args.equiv_check), args.file.resolve(),
                    args.top,
-                   args.mem_cap, args.keep, args.allow_version, args.a_only, args.unmap_enables)
+                   args.mem_cap, args.keep, args.allow_version, args.a_only, args.unmap_enables,
+                   str(Path(args.techlib).resolve()) if args.techlib else None)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

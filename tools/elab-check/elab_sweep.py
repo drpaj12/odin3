@@ -382,7 +382,8 @@ def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
     top = top_for(item, cfg.tops, cfg.golden_root)
     argv = [sys.executable, str(ELAB_EQUIV), "--odin3", cfg.odin3, "--yosys", cfg.yosys,
             "--equiv-check", cfg.equiv_check, "--mem-cap", str(cap), "--unmap-enables",
-            *(["--top", top] if top else []), str(item.path)]
+            *(["--top", top] if top else []), *(["--techlib", cfg.techlib] if cfg.techlib else []),
+            str(item.path)]
     try:  # elab-equiv caps each of its own children
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
                               timeout=TIMEOUT_S, check=False, pass_fds=lock_fds())

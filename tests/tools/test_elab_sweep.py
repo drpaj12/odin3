@@ -381,6 +381,14 @@ class ModeTest(SweepTestCase):
         self.assertEqual(argv[argv.index("--mem-cap") + 1], str(4 * GIB))
         self.assertEqual(argv[argv.index("--yosys") + 1].split("/")[-1], "Y")
 
+    def test_equiv_forwards_the_techlib(self) -> None:
+        self.write("m/eq.v", "x\n")
+        base = ["--equiv", "--yosys", "Y", "--equiv-check", "E", "--techlib", "/lib/t.o3lib"]
+        code, out, _ = self.run_tool(*base, str(self.dir / "m"))
+        self.assertEqual(code, 0, out)
+        argv = next(c for c in self.calls() if c[-1].endswith("eq.v"))
+        self.assertEqual(argv[argv.index("--techlib") + 1], "/lib/t.o3lib")
+
     def test_an_oracle_crash_alone_is_not_a_failure_and_a_listed_one_is_expected(self) -> None:
         self.write("m/crash.v", "EQ3\n")
         base = ["--equiv", "--yosys", "Y", "--equiv-check", "E"]
