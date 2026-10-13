@@ -66,6 +66,9 @@ typedef struct odin3_elab_opts {
     bool nomem2reg;     /* never replace a memory by registers except where forced (EL-27) */
     bool auto_blackbox; /* an undefined module becomes a black box, not unresolved_module */
     double stage1_ms;   /* stage 1's time, for stage 2's summary line (odin3_elab_run fills it) */
+    uint64_t gen_iters; /* generate-loop iterations stage 1 unrolled: stage 2's loops count on from
+                           it against the run's total cap (point (k); odin3_elab_run fills it) */
+    uint64_t *gen_iters_out; /* stage 1 writes its count here when set (odin3_elab_run's) */
 } odin3_elab_opts;
 
 /* --- the stages (§2.1, EL-2) --------------------------------------------------------------- */
@@ -111,11 +114,7 @@ enum { ODIN3_ELAB_STAGE1 = 1, ODIN3_ELAB_STAGE2 = 2, ODIN3_ELAB_STAGES = 2 };
  * these features, which have no kind of their own.
  */
 typedef enum odin3_elab_pend_feature {
-    ODIN3_PEND_COMB_CALL = ODIN3_AST_KIND_COUNT, /* "continuous-context call" */
-    ODIN3_PEND_REGS_VAR_READ,                    /* "variable index into a register array" */
-    ODIN3_PEND_MEM_WRITE,                        /* "memory write" */
-    ODIN3_PEND_VAR_LVALUE, /* "variable index into a register array in a procedural assignment
-                              target" */
+    ODIN3_PEND_MEM_WRITE = ODIN3_AST_KIND_COUNT, /* "memory write" (Task 24) */
     ODIN3_PEND_END
 } odin3_elab_pend_feature;
 

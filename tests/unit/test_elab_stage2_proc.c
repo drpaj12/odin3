@@ -367,27 +367,6 @@ static void test_different_bits_two_nodes(void) {
     TEST_ASSERT_EQUAL_UINT32(pt_wnet("r", 1).v, pt_out_net(pt_proc_node(1), 0).v);
 }
 
-static void test_pending_loop(void) {
-    pt_read_failing("module t(input c, s, a, output reg y);\n"
-                    "  always @* begin repeat (2) y = a; end\nendmodule\n");
-    pt_expect_error((at_loc){2, 19}, "elaboration is not available yet (2D): 'REPEAT'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
-    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$proc"));
-}
-
-/* A word of a register array with a variable index in a target is Task 23's (the bit and part
- * selects of a vector are the case method, Task 22). */
-static void test_pending_variable_index_target(void) {
-    pt_read_failing(
-        "module t(input [1:0] s, input [3:0] d, output [3:0] y);\n  reg [3:0] w [0:3];\n"
-        "  assign y = w[0];\n  always @* w[s] = d;\nendmodule\n");
-    pt_expect_error(
-        (at_loc){4, 13},
-        "elaboration is not available yet (2D): 'variable index into a register array in "
-        "a procedural assignment target'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
-}
-
 /* A word of an array that stayed a memory: the memory write is pending (Task 24), not dropped. */
 static void test_pending_memory_write(void) {
     pt_read_failing("module t(input c, input [1:0] i, input [7:0] d, output [7:0] y);\n"
@@ -1051,8 +1030,6 @@ static void test_oom_sweep(void) {
     X(test_attributes_and_provenance)                                                              \
     X(test_empty_block_makes_no_node)                                                              \
     X(test_different_bits_two_nodes)                                                               \
-    X(test_pending_loop)                                                                           \
-    X(test_pending_variable_index_target)                                                          \
     X(test_pending_memory_write)                                                                   \
     X(test_process_after_assign)                                                                   \
     X(test_two_processes_one_bit)                                                                  \

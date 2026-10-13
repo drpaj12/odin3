@@ -122,6 +122,13 @@ static void read_failing(const char *body) {
     expect_ir_ok();
 }
 
+/* A read that succeeds (warnings allowed) with a valid IR. */
+static void read_ok(const char *body) {
+    read_body(body);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    expect_ir_ok();
+}
+
 /* "t.v:<line>:<col>: <level>: <msg>" (body line numbers count from the head's end). */
 typedef struct at_loc {
     uint32_t line, col;
@@ -141,13 +148,6 @@ static void expect_warning(at_loc at, const char *msg) {
 
 static void expect_error(at_loc at, const char *msg) {
     et_expect(&rs, ODIN3_LOG_ERROR, diag_line(at, "error", msg));
-}
-
-static const char *pending(const char *what) {
-    static char buf[256];
-    TEST_ASSERT_TRUE(
-        snprintf(buf, sizeof buf, "elaboration is not available yet (2D): '%s'", what) > 0);
-    return buf;
 }
 
 /* The "replacing memory" warning: name and the places ("t.v:L" joined by ", "). */
@@ -425,7 +425,7 @@ static void test_rule2_always_star(void) {
 
 /* Rule 2: an asynchronous reset is two edge events, so not a single-edge block. */
 static void test_rule2_async_reset(void) {
-    read_failing("  reg [7:0] m [0:3];\n  always @(posedge c or posedge r)\n    m[wa] <= a;\n");
+    read_ok("  reg [7:0] m [0:3];\n  always @(posedge c or posedge r)\n    m[wa] <= a;\n");
     expect_warning((at_loc){1, 13}, replacing("m", place(3)));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, find_wire("m[0]").v);
 }
@@ -442,8 +442,8 @@ static void test_rule2_single_edge_stays_memory(void) {
 /* Rule 3: read after a blocking write in the same block. Yosys's places: each block's first
  * blocking write and the read, newest first (a hashlib pool iterates in reverse). */
 static void test_rule3_read_after_blocking_write(void) {
-    read_failing("  reg [7:0] m [0:3];\n  reg [7:0] t;\n  always @(posedge c) begin\n"
-                 "    m[wa] = a;\n    t = m[1];\n  end\n");
+    read_ok("  reg [7:0] m [0:3];\n  reg [7:0] t;\n  always @(posedge c) begin\n"
+            "    m[wa] = a;\n    t = m[1];\n  end\n");
     expect_warning((at_loc){1, 13}, replacing("m", places2(5, 4)));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, find_wire("m[2]").v);
 }
@@ -457,7 +457,7 @@ static void test_rule3_other_block_stays_memory(void) {
 
 /* Rule 4: the array inside the index of its own write. */
 static void test_rule4_nested_index(void) {
-    read_failing("  reg [7:0] m [0:3];\n  always @(posedge c)\n    m[m[0]] <= a;\n");
+    read_ok("  reg [7:0] m [0:3];\n  always @(posedge c)\n    m[m[0]] <= a;\n");
     expect_warning((at_loc){1, 13}, replacing("m", place(3)));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, find_wire("m[1]").v);
 }
@@ -484,8 +484,8 @@ static void test_rule5_constant_writes_only(void) {
 /* A for loop whose variable starts and steps by constants under a constant condition is unrolled
  * by Yosys before mem2reg: its indices are constants (a reset loop makes registers: rule 5). */
 static void test_rule5_unrolled_loop(void) {
-    read_failing("  reg [3:0] m [0:3];\n  integer i;\n  always @(posedge c)\n"
-                 "    for (i = 0; i < 4; i = i + 1)\n      m[i + 1] <= a4;\n");
+    read_ok("  reg [3:0] m [0:3];\n  integer i;\n  always @(posedge c)\n"
+            "    for (i = 0; i < 4; i = i + 1)\n      m[i + 1] <= a4;\n");
     expect_warning((at_loc){1, 13}, replacing("m", place(5)));
 }
 
@@ -798,10 +798,11 @@ static void test_word_write_out_of_range(void) {
     expect_ir_ok();
 }
 
-/* A variable index into registers: pending until Task 23 (on read), an error on write. */
-static void test_word_variable_read_pending(void) {
-    read_failing("  wire [3:0] w [0:3];\n  assign y4 = w[s2];\n  assign y5 = a4;\n");
-    expect_error((at_loc){2, 15}, pending("variable index into a register array"));
+/* A variable index into registers on read is a case over the words (Task 23): a `$proc` of its
+ * own (the combinational read process); the full dump is test_elab_stage2_call.c's. */
+static void test_word_variable_read(void) {
+    read_ok("  wire [3:0] w [0:3];\n  assign y4 = w[s2];\n  assign y5 = a4;\n");
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$proc"));
     TEST_ASSERT_EQUAL_UINT32(wnet("a4", 0).v, wnet("y5", 0).v);
 }
 
@@ -1097,7 +1098,7 @@ static void test_oom_sweep_write_ports(void) {
     X(test_word_part_select_target)                                                                \
     X(test_word_read_out_of_range)                                                                 \
     X(test_word_write_out_of_range)                                                                \
-    X(test_word_variable_read_pending)                                                             \
+    X(test_word_variable_read)                                                                     \
     X(test_word_variable_write_error)                                                              \
     X(test_memory_bits_cap)                                                                        \
     X(test_memory_bits_at_cap)                                                                     \

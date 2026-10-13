@@ -321,6 +321,9 @@ void odin3_elab2_lvalue_init(odin3_elab2_lvalue *lv) {
     lv->procedural = false;
     lv->top = (odin3_ast_id){0};
     lv->var.node = (odin3_ast_id){0};
+    lv->regs.node = (odin3_ast_id){0};
+    lv->reads = NULL;
+    lv->scan_only = false;
 }
 
 void odin3_elab2_lvalue_free(odin3_elab2_lvalue *lv) {
@@ -442,20 +445,17 @@ static odin3_status lv_select_absent(odin3_elab2_lvalue *lv, const lv_sel *ls) {
     return st;
 }
 
-/* A select (or a word of a register array) whose index is not constant: IEEE 6.1.2 forbids it in a
- * continuous assignment (Yosys rejects it too). In a process a select is lv_variable_select's; the
- * word of a register array is EL-27's case over the words, pending until Task 23. */
+/* A select (or a word of a register array) whose index is not constant in a continuous
+ * assignment: IEEE 6.1.2 forbids it (Yosys rejects it too). In a process a select is
+ * lv_variable_select's and the word of a register array lv_regs_target's. */
 static odin3_status lv_variable_index(odin3_elab2 *e2, const odin3_elab2_lvalue *lv,
                                       odin3_ast_id sel, const char *name) {
     odin3_loc loc = odin3_ast_loc(e2->elab, sel);
-    if (lv->procedural) {
-        odin3_elab2_pend_feature(e2, loc, ODIN3_PEND_VAR_LVALUE);
-    } else {
-        odin3_elab2_error(e2, loc,
-                          "continuous assignment to '%s' with a non-constant index is not "
-                          "supported",
-                          name);
-    }
+    odin3_elab2_error(e2, loc,
+                      lv->procedural ? "non-constant index into '%s' is not supported here"
+                                     : "continuous assignment to '%s' with a non-constant index "
+                                       "is not supported",
+                      name);
     return ODIN3_ERR_PARSE;
 }
 
@@ -518,12 +518,13 @@ static odin3_status lv_index_variable(const odin3_elab2 *e2, const odin3_elab2_l
 
 /* The range a select with a constant index covers: its index generated (a part select [m:l] has
  * none) and typed against the object. */
-static odin3_status lv_range_of(odin3_elab2 *e2, const lv_sel *target,
+static odin3_status lv_range_of(odin3_elab2 *e2, const odin3_elab2_lvalue *lv, const lv_sel *target,
                                 odin3_elab2_selrange *range) {
     odin3_ast_id sel = target->node;
     odin3_sig index = {NULL, 0, false};
     bool has_index = odin3_ast_sub(e2->elab, sel) != ODIN3_AST_SELECT_PART;
-    odin3_elab2_expr_req req = {odin3_ast_child(e2->elab, sel, 1), {0, false, false}, NULL, NULL};
+    odin3_elab2_expr_req req = {
+        odin3_ast_child(e2->elab, sel, 1), {0, false, false}, NULL, lv->reads};
     odin3_status st = has_index ? odin3_elab2_expr(e2, &req, &index) : ODIN3_OK;
     return st != ODIN3_OK
                ? st
@@ -539,7 +540,7 @@ static odin3_status lv_select_range(odin3_elab2 *e2, odin3_elab2_lvalue *lv, con
         return st != ODIN3_OK ? st : lv_variable_select(e2, lv, target);
     }
     odin3_elab2_selrange range;
-    st = lv_range_of(e2, target, &range);
+    st = lv_range_of(e2, lv, target, &range);
     if (st != ODIN3_OK) {
         return st;
     }
@@ -564,6 +565,17 @@ static odin3_status lv_select_range(odin3_elab2 *e2, odin3_elab2_lvalue *lv, con
 
 /* --- words of arrays (EL-27) ------------------------------------------------------------------ */
 
+/* Whether the scan of a callee's body (lv->scan_only) meets an index it cannot generate: one that
+ * reads the callee's variables, which have no wires until the call. */
+static bool lv_word_deferred(const odin3_elab2 *e2, const odin3_elab2_lvalue *lv, odin3_ast_id word,
+                             const odin3_elab2_wordref *ref) {
+    bool constant = true;
+    for (uint32_t k = 0; lv->scan_only && constant && k < ref->n; k++) {
+        (void)odin3_elab2_expr_is_const(e2, odin3_elab2_mem_word_index(e2, word, k), &constant);
+    }
+    return !constant;
+}
+
 /* The word an lvalue SELECT chain names (word is the SELECT that completes the word), once its
  * indices are generated and constant. An array that stayed a memory cannot be assigned
  * continuously. */
@@ -586,6 +598,10 @@ static odin3_status lv_word_of(odin3_elab2 *e2, const odin3_elab2_lvalue *lv, od
                           lv_name(e2, rec));
         return ODIN3_ERR_PARSE;
     }
+    if (lv_word_deferred(e2, lv, word, ref)) {
+        *out = (odin3_elab2_word){ODIN3_WORD_VARIABLE, {0}};
+        return ODIN3_OK;
+    }
     odin3_sig *idx = odin3_arena_alloc(e2->scratch, (size_t)ref->n * sizeof *idx);
     if (idx == NULL) {
         return ODIN3_ERR_NO_MEMORY;
@@ -593,13 +609,43 @@ static odin3_status lv_word_of(odin3_elab2 *e2, const odin3_elab2_lvalue *lv, od
     odin3_status st = ODIN3_OK;
     for (uint32_t k = 0; st == ODIN3_OK && k < ref->n; k++) {
         odin3_elab2_expr_req req = {
-            odin3_elab2_mem_word_index(e2, word, k), {0, false, false}, NULL, NULL};
+            odin3_elab2_mem_word_index(e2, word, k), {0, false, false}, NULL, lv->reads};
         st = odin3_elab2_expr(e2, &req, &idx[k]);
     }
     odin3_elab2_mem_rd rd = {ref->mem, word, idx, ref->n};
     st = st != ODIN3_OK ? st : odin3_elab2_mem_word(e2, &rd, true, out);
-    if (st == ODIN3_OK && out->kind == ODIN3_WORD_VARIABLE) {
+    if (st == ODIN3_OK && out->kind == ODIN3_WORD_VARIABLE && !procedural) {
         return lv_variable_index(e2, lv, word, lv_name(e2, rec));
+    }
+    return st; /* a variable index in a process is lv_regs_target's */
+}
+
+/* A word of a register array with a variable index as the whole procedural target (EL-27's case
+ * over the words, Task 23): every word's bits are targets; pg_regs_apply writes the one the index
+ * selects. Only a one-dimensional array, and only alone (not inside a concatenation). */
+static odin3_status lv_regs_target(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_id sel,
+                                   const odin3_elab2_wordref *ref) {
+    const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, ref->mem);
+    const odin3_symbol *rec = odin3_symbol_get(e2->st, mem->sym);
+    odin3_loc loc = odin3_ast_loc(e2->elab, sel);
+    if (sel.v != lv->top.v) {
+        odin3_elab2_error(e2, loc,
+                          "non-constant index into '%s' is not supported in a concatenation target",
+                          lv_name(e2, rec));
+        return ODIN3_ERR_PARSE;
+    }
+    if (ref->n != 1) {
+        odin3_elab2_error(e2, loc,
+                          "non-constant index into the multi-dimensional register array '%s' is "
+                          "not supported",
+                          lv_name(e2, rec));
+        return ODIN3_ERR_PARSE;
+    }
+    lv->regs = (odin3_elab2_regsel){sel, odin3_elab2_mem_word_index(e2, sel, 0), ref->mem};
+    odin3_status st = ODIN3_OK;
+    for (size_t pos = 0; st == ODIN3_OK && pos < mem->words.len; pos++) {
+        odin3_wire_id wire = *(const odin3_wire_id *)odin3_vec_cat(&mem->words, pos);
+        st = wire.v != 0 ? lv_whole_wire(e2, lv, wire, sel) : ODIN3_OK;
     }
     return st;
 }
@@ -611,6 +657,9 @@ static odin3_status lv_word(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_i
     odin3_status st = lv_word_of(e2, lv, sel, ref, &word);
     if (st != ODIN3_OK) {
         return st;
+    }
+    if (word.kind == ODIN3_WORD_VARIABLE) {
+        return lv_regs_target(e2, lv, sel, ref);
     }
     if (word.kind == ODIN3_WORD_WIRE) {
         return lv_whole_wire(e2, lv, word.wire, sel);
@@ -634,6 +683,9 @@ static odin3_status lv_word_select(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin
     }
     const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, ref->mem);
     const odin3_symbol *rec = odin3_symbol_get(e2->st, mem->sym);
+    if (word.kind == ODIN3_WORD_VARIABLE) {
+        return lv_variable_index(e2, lv, word_node, lv_name(e2, rec));
+    }
     odin3_elab2_selobj obj = {rec->has_packed ? rec->packed.msb : 0,
                               rec->has_packed ? rec->packed.lsb : 0, mem->width, lv_name(e2, rec)};
     lv_sel ls = {sel, word.kind == ODIN3_WORD_WIRE ? word.wire : (odin3_wire_id){0}, &obj, NULL};
@@ -708,6 +760,7 @@ static odin3_status lv_node(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_i
 odin3_status odin3_elab2_lvalue_make(odin3_elab2 *e2, odin3_ast_id lhs, odin3_elab2_lvalue *lv) {
     lv->top = lhs;
     lv->var.node = (odin3_ast_id){0};
+    lv->regs.node = (odin3_ast_id){0};
     odin3_vec_clear(&lv->var.cands);
     odin3_ast_id *slot = odin3_vec_push(&lv->work);
     if (slot == NULL) {

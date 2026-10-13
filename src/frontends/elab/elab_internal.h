@@ -187,6 +187,10 @@ struct odin3_elab2 {
     struct odin3_elab2_drive *drive; /* the driver tables of the module being emitted (Task 19) */
     odin3_vec mems;      /* odin3_elab_mem of the module being emitted, by symbol (Task 20) */
     struct odin3_pg *pg; /* the process generator of the module being emitted (Task 21) */
+    odin3_ceval *ev;     /* the interpreter of user function calls (Task 23, EL-17), made on use */
+    odin3_ast_id call; /* the CALL or TASK_CALL being inlined: the second loc of EL-45 (Task 23) */
+    odin3_u64map *bound; /* symbols of the loops being unrolled: constants to the AST test (T23) */
+    uint64_t iterations; /* loop iterations unrolled so far in the run, generate loops included */
     /* the module being emitted */
     odin3_module *mod;
     odin3_module_id mod_id;
@@ -418,9 +422,23 @@ odin3_status odin3_elab2_sig_new(odin3_elab2 *e2, uint32_t width, odin3_sig *out
  * The `rv` substitution hook of the process generator (Task 21): inside a process the current value
  * of a net replaces the net, bit by bit. NULL outside processes (and in every Task 18 call).
  */
+typedef struct odin3_elab2_regs_rd {
+    odin3_ast_id select;  /* the word SELECT */
+    uint32_t mem;         /* the register array's table index */
+    const odin3_sig *idx; /* the index of the one dimension, generated */
+} odin3_elab2_regs_rd;
+
+/*
+ * The hooks a process gives the expression walker (Task 23): call yields the value of a user
+ * function CALL by inlining it in the process (EL-38; NULL: a continuous context, which makes a
+ * combinational process of its own), word the value of a register-array word with a variable index
+ * as a case inline in the process (EL-27; NULL: likewise a process of its own). Both may be NULL.
+ */
 typedef struct odin3_elab2_reads {
     odin3_status (*bit)(void *user, odin3_net_id net, odin3_sigbit *out);
     void *user;
+    odin3_status (*call)(void *user, odin3_ast_id call, odin3_sig *out);
+    odin3_status (*word)(void *user, const odin3_elab2_regs_rd *rd, odin3_sig *out);
 } odin3_elab2_reads;
 
 /*
@@ -780,6 +798,15 @@ typedef struct odin3_elab2_varsel {
  */
 odin3_status odin3_elab2_varsel_make(odin3_elab2 *e2, odin3_elab2_varsel *vs);
 
+/* A word of a register array with a non-constant index as the whole procedural target (`m[s] <=
+ * d`, EL-27's case over the words, Task 23). node is 0 when the lvalue has none; lv->nets then
+ * holds the bits of every word, word 0 first. */
+typedef struct odin3_elab2_regsel {
+    odin3_ast_id node;  /* the word SELECT */
+    odin3_ast_id index; /* its index expression, not generated */
+    uint32_t mem;       /* the table index of the array */
+} odin3_elab2_regsel;
+
 /* An lvalue taken apart: nets[i] and bits[i] for result bit i (LSB first); net 0 and wire 0 for a
  * bit outside its net. */
 typedef struct odin3_elab2_lvalue {
@@ -793,6 +820,11 @@ typedef struct odin3_elab2_lvalue {
     bool procedural;
     odin3_ast_id top;       /* the lhs being taken apart (set by odin3_elab2_lvalue_make) */
     odin3_elab2_varsel var; /* procedural only: the non-constant select that is the target */
+    odin3_elab2_regsel
+        regs;       /* procedural only: the word of a register array with a variable index */
+    bool scan_only; /* procedural only: names of a callee's variables are not resolved (the scan) */
+    const odin3_elab2_reads
+        *reads; /* procedural only: the hooks the index expressions are read through */
 } odin3_elab2_lvalue;
 
 void odin3_elab2_lvalue_init(odin3_elab2_lvalue *lv);
@@ -1121,5 +1153,51 @@ bool odin3_elab2_always_assigned_word(const odin3_elab2 *e2, odin3_wire_id wire,
 
 /* Frees the process generator (a new module starts); frees it when e2 is destroyed. */
 void odin3_elab2_pg_free(odin3_elab2 *e2);
+
+/* --- user function and task calls (Task 23; EL-17, EL-38; elab2_call.c, pg_call.c) ---------------
+ */
+
+/*
+ * The type of a user function CALL as the typer asks for it: the function's result variable (its
+ * return range, 32 bits for `integer`, 1 bit by default; signed per `signed`/`integer`). A call
+ * of an undeclared or non-function name, or of a system function, is a located error and
+ * ODIN3_ERR_PARSE.
+ */
+odin3_status odin3_elab2_call_type(odin3_elab2 *e2, odin3_ast_id call, odin3_etype *out);
+
+/* The FUNCTION_DECL (a CALL) or TASK_DECL (a TASK_CALL) a call names; a located error and
+ * ODIN3_ERR_PARSE for an undeclared name, a name of the other kind or a system function. */
+odin3_status odin3_elab2_callee(odin3_elab2 *e2, odin3_ast_id call, odin3_ast_id *decl);
+
+/* The result variable of the FUNCTION_DECL decl (its symbol in *sym); NULL when it has none. */
+const odin3_symbol *odin3_elab2_fn_result(const odin3_elab2 *e2, odin3_ast_id decl,
+                                          odin3_sym_id *sym);
+
+/*
+ * Tries the interpreter (EL-17) on a user function CALL: *is_const is true and *out holds the value
+ * (the result's own width, in the scratch arena) when the call is constant (constant arguments and
+ * a constant body); otherwise OK with *is_const false and nothing logged. A located error of the
+ * call itself (`function 'f' has 1 inputs; 2 arguments given`) or a cap is reported and
+ * ODIN3_ERR_PARSE. ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab2_call_try(odin3_elab2 *e2, odin3_ast_id call, odin3_cval *out,
+                                  bool *is_const);
+
+/*
+ * A user function call, or a register-array word with a variable index, met outside a process (a
+ * continuous assignment, a port connection, a net declaration assignment): a combinational `$proc`
+ * of its own (one ALWAYS sync) computes it into the nets of *out (pg_call.c; odin3_pg_comb_call and
+ * odin3_pg_comb_mem_read are these on a generator). The arguments and the index are generated
+ * first, in the caller's context. The located errors of the call, ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab2_comb_call(odin3_elab2 *e2, odin3_ast_id call, odin3_sig *out);
+odin3_status odin3_elab2_comb_word(odin3_elab2 *e2, const odin3_elab2_regs_rd *rd, odin3_sig *out);
+
+/* The process generator of the module being emitted, made on first use (Task 21). */
+odin3_status odin3_elab2_pg_get(odin3_elab2 *e2, struct odin3_pg **out);
+
+/* Whether a symbol is a loop variable being unrolled: the AST constant test takes it as a constant
+ * (EL-37). */
+bool odin3_elab2_is_bound(const odin3_elab2 *e2, odin3_sym_id sym);
 
 #endif

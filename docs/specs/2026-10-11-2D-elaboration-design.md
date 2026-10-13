@@ -310,6 +310,26 @@ the words). (6) The API: the statement entries are `odin3_pg_if` and `odin3_pg_c
 name `odin3_pg_case` is Task 21's primitive); a switch's blocking targets are collected once by the
 scan (a sorted unique list per `if`/`case`), not once per nesting level.
 
+v4.22 (2026-10-13; 2D Task 23, agent defaults). (1) EL-37: an unrolled loop's variable is bound for the
+AST constant test while the loop runs, so a branch that reads it folds in every iteration at
+generation (Task 22's carry); the scan still counts the outputs of every branch (§17 #62). The variable
+is an output of the block only when the module reads it outside the loops it is the variable of
+(EL-35, divergence 5; a read after the loop in the same block counts, as in Yosys). The loop frames
+count on from the generate loops stage 1 unrolled (`odin3_elab_opts.gen_iters`, point (k)). Messages
+added to §9.1: `for-loop initialisation is not constant (it reads 'x')`, `for-loop step is not
+constant (it reads 'x')`, `task 't' has N arguments; M given`, `non-constant index into the
+multi-dimensional register array 'm' is not supported`. (2) EL-38: a call frame gives the callee's
+ports, locals and result unnamed IR wires for the call's duration (the symbols' `ir_wire` is set and
+reset), so the walker and the lvalue code see them like variables; the frame's nets are plain
+process-local temporaries (`O` pins with no sync action), not Yosys's `$0` temporaries with a sync
+action that updates the wire to x (§17 #59). The interpreter is tried first; a call that stays is
+inlined above the caller's frames (the walker, the statement stack and the lvalue scratch are
+re-entrant). (3) EL-27: the words of a register array with a variable index are a case over the
+words, inline in a process or a `$proc` of its own outside one; mem2reg rules 2 to 5 scan the bodies
+of called functions and tasks, and `m[f(1)]` is a constant index when the interpreter folds the call
+(Yosys, verified on 0.55). (4) The brief's `odin3_pg_comb_call`/`odin3_pg_comb_mem_read` take the
+generator; the walker reaches them through `odin3_elab2_comb_call`/`odin3_elab2_comb_word`.
+
 v4.22 (2026-10-12; 2D Task 22 fix round 1, controller rulings). (1) EL-32 writes: a part select
 that straddles an end of the target writes the bits inside it (IEEE 1364-2005 4.2.1), at either end,
 for `+:` and `-:`, in both declared directions and for a signed base (`y[s +: 2]`, s = -1, writes
@@ -2628,6 +2648,13 @@ and reported, never relaxed (2A's rule).
 | 56 | an `if` or `case` whose condition or selector and items are literals and parameters folds to the branch it takes: no switch, and an output assigned only in a dead branch is no output of the block | `switch` on the constant with the matched item and an added default that holds the case temporaries (`switch 1'1 / case 1'1 / assign $1\y \a / case / assign $1\y \y`, verified on 0.55); the items after a match, and the items that cannot match, are removed before the outputs are collected (an all-dead `case` leaves an empty process), so a dead-only output is not an output there either | — | the same logic after `opt`; `elab-equiv` on `tests/verilog/case-bridge/const_fold.v` (Task 22) |
 | 57 | a switch whose branches assign nothing by `=` and that has no `default` item has no default case (`if (e) q <= d;` is one case) | an empty default case (`case` with no action) on every `if` and `case` (verified on 0.55: `if (e) q <= d` ends in an empty `case `) | — | an empty case changes nothing; the IR body is smaller (Task 22) |
 | 58 | a constant index with an x or z bit as the target of a procedural select (`y[1'bx] = d;`, `y[1'bz] <= d;`) writes nothing, with the warning `assignment to bits outside 'y' [3:0] is ignored` | writes bit 0 (the index is read with x as 0; verified on 0.55: `y = 4'd0; y[1'bx] = d;` is `connect \y { 3'000 \d }`, `elab-equiv` reports NOT equivalent for x and for z) | an x or z index selects nothing (IEEE 1364-2005 4.2.1); the same rule as a read, #40 | silent in Yosys; the warning is EL-43's "every write outside the object warns" (Task 22 fix round 1) |
+| 59 | a call frame's variables are plain process-local temporaries: `O` pins assigned in the case tree and by no sync action | Yosys makes `$0\f$func$…` temporaries for them and a sync action `update \f$func$…v 4'x` that drives the wire to x (verified on 0.55: `yosys -p "read_verilog f.v; write_rtlil"` on `q <= inc(d)`) | — | the sync action is a dead register after `opt`; EL-38's "no flip-flop for `v` or `inc`" |
+| 60 | the actual of an input is read directly by the body (`$add` reads `d`, not the frame's `v`) | Yosys 0.55 does the same: `connect \A \d` (blocking assignment updates `rv`) | — | none: the brief's "reading the frame temporary of `v`" is the net the process also drives |
+| 61 | a continuous-context call is a `$proc` whose output is the result variable's own wire; the expression reads that wire | Yosys wraps the call in `always @*` over `\f$func$…$result` and `connect`s the lhs to it | — | none |
+| 62 | outputs of an `if`/`case` inside an unrolled loop are counted over every iteration's branches by the scan; the generator folds the taken branch per iteration | Yosys unrolls first, so a branch dead in every iteration writes nothing and its target is no output | scan-time unrolling (cost: the body scanned once per iteration) | the difference needs a branch that is dead in every iteration; its target would be an output held by a latch or flip-flop |
+| 63 | a register-array word with a variable index is supported for one-dimensional arrays only; a multi-dimensional one is the located error `non-constant index into the multi-dimensional register array 'm' is not supported` | Yosys's `mem2reg_as_needed_pass2` handles every dimension | the row-major address as a case selector | rare; the flattened address needs `$mul`/`$add` cells before the switch |
+| 64 | a call inside a case item expression may disturb the compares of the case being opened (`cmp_sigs` is shared) | — | a per-call stack | calls in case item expressions are unusual |
+| 65 | a write to a module variable inside a function (not a task) is dropped silently: only a task's targets are outputs of the block | Yosys inlines the function body, so the write is the block's | scan function bodies for module-level targets | synthesizable functions have no side effects (IEEE 1364 §10.3) |
 
 ## 18. Implementation split (EL-51)
 

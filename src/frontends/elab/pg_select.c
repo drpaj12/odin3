@@ -29,7 +29,7 @@ enum { SEL_SIGN_BITS = 63 };
 /* The index, generated through rv at its self-determined width. */
 static odin3_status select_index(odin3_pg *pg, odin3_sig *out) {
     const odin3_elab2_varsel *vs = &pg->lvs.var;
-    odin3_elab2_reads reads = {pg_read_bit, pg};
+    odin3_elab2_reads reads = pg_reads(pg);
     odin3_elab2_expr_req req = {vs->index, {0, false, false}, NULL, &reads};
     odin3_status st = odin3_elab2_expr(pg->e2, &req, out);
     return st != ODIN3_OK ? st

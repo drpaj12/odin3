@@ -159,6 +159,7 @@ odin3_status odin3_elab2_create(odin3_pass_ctx *ctx, odin3_ast *elab, const odin
     e2->opts = opts != NULL ? *opts : (odin3_elab_opts){0};
     e2->limits = odin3_elab_limits_get();
     e2->fatal = ODIN3_OK;
+    e2->iterations = e2->opts.gen_iters;
     e2->next_check = E2_BUDGET_EVERY;
     odin3_strbuf_init(&e2->text);
     odin3_vec_init(&e2->built, sizeof(odin3_module_id));
@@ -200,6 +201,8 @@ void odin3_elab2_destroy(odin3_elab2 *e2) {
     odin3_vec_free(&e2->frames);
     odin3_vec_free(&e2->vals);
     odin3_ctype_destroy(e2->ty);
+    odin3_ceval_destroy(e2->ev);
+    odin3_u64map_destroy(e2->bound);
     odin3_strbuf_free(&e2->text);
     odin3_util_free(e2);
 }
@@ -571,13 +574,27 @@ static odin3_status assign_step(odin3_elab2 *e2, odin3_ast_id item) {
     }
 }
 
-/* One `always` block through the process generator, made on the first one of the module. */
-static odin3_status always_step(odin3_elab2 *e2, odin3_ast_id always) {
+odin3_status odin3_elab2_pg_get(odin3_elab2 *e2, struct odin3_pg **out) {
     if (e2->pg == NULL) {
         odin3_status st = odin3_pg_create(e2, &e2->pg);
         if (st != ODIN3_OK) {
             return st;
         }
+    }
+    *out = e2->pg;
+    return ODIN3_OK;
+}
+
+bool odin3_elab2_is_bound(const odin3_elab2 *e2, odin3_sym_id sym) {
+    return e2->bound != NULL && sym.v != 0 && odin3_u64map_get(e2->bound, sym.v, NULL);
+}
+
+/* One `always` block through the process generator, made on the first one of the module. */
+static odin3_status always_step(odin3_elab2 *e2, odin3_ast_id always) {
+    odin3_pg *pg = NULL;
+    odin3_status st = odin3_elab2_pg_get(e2, &pg);
+    if (st != ODIN3_OK) {
+        return st;
     }
     return carry_on(e2, odin3_ast_loc(e2->elab, always), odin3_pg_always(e2->pg, always));
 }

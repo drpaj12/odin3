@@ -336,25 +336,61 @@ odin3_status pg_read_bit(void *user, odin3_net_id net, odin3_sigbit *out) {
 /* `lhs = rhs` / `lhs <= rhs`: the target, the value at max(L(lhs), L(rhs)) through rv, truncated
  * or extended to L(lhs), then the assignment (a select with a non-constant index: the case
  * method, whose width is the select's). */
-static odin3_status exec_assign(odin3_pg *pg, odin3_ast_id stmt) {
+odin3_elab2_reads pg_reads(odin3_pg *pg) {
+    return (odin3_elab2_reads){pg_read_bit, pg, pg_call_hook, pg_word_hook};
+}
+
+/* The error of an assignment to the variable of a loop being unrolled (EL-37). */
+static odin3_status loop_var_assigned(odin3_pg *pg, odin3_ast_id stmt) {
+    const odin3_ast *ast = pg->e2->elab;
+    odin3_ast_id lhs = odin3_ast_child(ast, stmt, 0);
+    while (odin3_ast_kind_of(ast, lhs) == ODIN3_AST_SELECT) {
+        lhs = odin3_ast_child(ast, lhs, 0);
+    }
+    odin3_sym_id sym = odin3_elab_sym_of(&pg->e2->bind, lhs);
+    for (size_t i = 0; sym.v != 0 && i < pg->loops.len; i++) {
+        const pg_loop *loop = odin3_vec_cat(&pg->loops, i);
+        bool header = odin3_ast_child(ast, loop->node, 0).v == stmt.v ||
+                      odin3_ast_child(ast, loop->node, 2).v == stmt.v;
+        if (loop->sym.v == sym.v && !header) {
+            odin3_elab2_error(pg->e2, odin3_ast_loc(ast, stmt),
+                              "loop variable '%s' is assigned in the loop body",
+                              odin3_ast_name_str(ast, lhs));
+            return ODIN3_ERR_PARSE;
+        }
+    }
+    return ODIN3_OK;
+}
+
+odin3_status pg_exec_assign(odin3_pg *pg, odin3_ast_id stmt) {
     odin3_elab2 *e2 = pg->e2;
-    odin3_status st = pg_take_target_of(pg, odin3_ast_child(e2->elab, stmt, 0));
+    odin3_status st = loop_var_assigned(pg, stmt);
+    st = st != ODIN3_OK ? st : pg_take_target_of(pg, odin3_ast_child(e2->elab, stmt, 0));
     if (st != ODIN3_OK) {
         return st;
     }
+    /* the value's calls run above this statement with a scratch lvalue of their own (pg_call.c) */
     bool variable = pg->lvs.var.node.v != 0;
+    bool regs = pg->lvs.regs.node.v != 0;
     uint32_t width = variable ? pg->lvs.var.width : (uint32_t)pg->lvs.nets.len;
-    odin3_elab2_reads reads = {pg_read_bit, pg};
+    if (regs) {
+        const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, pg->lvs.regs.mem);
+        width = mem->width;
+    }
+    odin3_elab2_reads reads = pg_reads(pg);
     odin3_elab2_expr_req req = {
         odin3_ast_child(e2->elab, stmt, 2), {width, true, false}, NULL, &reads};
     odin3_sig sig;
     st = odin3_elab2_expr(e2, &req, &sig);
     st = st != ODIN3_OK ? st : odin3_elab2_extend(e2, &sig, width, sig.is_signed, &sig);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     bool blocking = odin3_ast_kind_of(e2->elab, stmt) == ODIN3_AST_BLOCKING_ASSIGN;
     odin3_pg_assign_req areq = {stmt, odin3_ast_child(e2->elab, stmt, 0), &sig, blocking};
     pg_asg asg = {&pg->lvs, &sig, stmt, blocking, false};
-    if (st != ODIN3_OK) {
-        return st;
+    if (regs) {
+        return pg_regs_apply(pg, &areq);
     }
     return variable ? pg_select_apply(pg, &areq) : pg_apply(pg, &asg);
 }
@@ -397,7 +433,12 @@ static odin3_status exec_node(odin3_pg *pg, odin3_ast_id node) {
     }
     case ODIN3_AST_BLOCKING_ASSIGN:
     case ODIN3_AST_NONBLOCKING_ASSIGN:
-        return exec_assign(pg, node);
+        return pg_exec_assign(pg, node);
+    case ODIN3_AST_FOR:
+    case ODIN3_AST_REPEAT:
+        return pg_loop_open(pg, node);
+    case ODIN3_AST_TASK_CALL:
+        return pg_task_call(pg, node);
     case ODIN3_AST_IF:
         return pg_if_open(pg, node);
     case ODIN3_AST_CASE:
@@ -417,6 +458,9 @@ static odin3_status frame_next(odin3_pg *pg, odin3_ast_id *node) {
     if (frame->kind == PG_F_SWITCH) {
         return pg_switch_step(pg);
     }
+    if (frame->kind == PG_F_LOOP) {
+        return pg_loop_step(pg);
+    }
     if (frame->kind == PG_F_STMT) {
         *node = frame->node;
         odin3_vec_pop(&pg->frames);
@@ -435,13 +479,16 @@ static odin3_status frame_next(odin3_pg *pg, odin3_ast_id *node) {
 }
 
 odin3_status pg_run(odin3_pg *pg, odin3_ast_id stmt) {
+    size_t base = pg->frames.len; /* a call inlined by an expression runs above the frames there */
     odin3_status st = frame_stmt(pg, stmt);
-    while (st == ODIN3_OK && pg->frames.len > 0 && !pg->e2->stopped) {
+    while (st == ODIN3_OK && pg->frames.len > base && !pg->e2->stopped) {
         odin3_ast_id node;
         st = frame_next(pg, &node);
         st = st == ODIN3_OK && node.v != 0 ? exec_node(pg, node) : st;
     }
-    odin3_vec_clear(&pg->frames);
+    while (pg->frames.len > base) {
+        odin3_vec_pop(&pg->frames);
+    }
     return st;
 }
 
@@ -466,6 +513,12 @@ static void block_parts(odin3_pg *pg) {
     }
 }
 
+odin3_status pg_start_block(odin3_pg *pg) {
+    odin3_status st = pg_outputs(pg);
+    st = st != ODIN3_OK ? st : pg_syncs(pg);
+    return st != ODIN3_OK ? st : pg_defaults(pg);
+}
+
 odin3_status odin3_pg_open(odin3_pg *pg, odin3_ast_id always_node) {
     odin3_elab2 *e2 = pg->e2;
     if (odin3_ast_kind_of(e2->elab, always_node) != ODIN3_AST_ALWAYS) {
@@ -481,9 +534,7 @@ odin3_status odin3_pg_open(odin3_pg *pg, odin3_ast_id always_node) {
     if (st != ODIN3_OK || pg->outs.len == 0) {
         return st;
     }
-    st = pg_outputs(pg);
-    st = st != ODIN3_OK ? st : pg_syncs(pg);
-    return st != ODIN3_OK ? st : pg_defaults(pg);
+    return pg_start_block(pg);
 }
 
 odin3_status odin3_pg_always(odin3_pg *pg, odin3_ast_id always_node) {

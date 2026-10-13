@@ -614,7 +614,7 @@ static const pend_case k_pend_cases[] = {
     {ODIN3_ELAB_STAGE1, ODIN3_AST_ATTR, false},
     {ODIN3_ELAB_STAGE1, ODIN3_AST_DELAY, false},     /* landed by Task 16 */
     {ODIN3_ELAB_STAGE1, ODIN3_AST_DIRECTIVE, false}, /* landed by Task 16 */
-    {ODIN3_ELAB_STAGE1, ODIN3_PEND_COMB_CALL, false},
+    {ODIN3_ELAB_STAGE1, ODIN3_PEND_MEM_WRITE, false},
     {ODIN3_ELAB_STAGE2, ODIN3_PEND_MEM_WRITE, true},
     {ODIN3_ELAB_STAGE2, ODIN3_AST_INSTANTIATION, false}, /* landed by Task 19 */
     {ODIN3_ELAB_STAGE2, ODIN3_AST_INSTANCE, false},      /* landed by Task 19 */
@@ -628,13 +628,14 @@ static const pend_case k_pend_cases[] = {
     {ODIN3_ELAB_STAGE2, ODIN3_AST_BLOCKING_ASSIGN, false},
     {ODIN3_ELAB_STAGE2, ODIN3_AST_NULL_STMT, false},
     {ODIN3_ELAB_STAGE2, ODIN3_AST_EVENT_EXPR, false},
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_IF, false},         /* landed by Task 22 */
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_CASE, false},       /* landed by Task 22 */
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_CASE_ITEM, false},  /* landed by Task 22 */
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_FOR, true},         /* Task 23 */
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_REPEAT, true},      /* Task 23 */
-    {ODIN3_ELAB_STAGE2, ODIN3_PEND_VAR_LVALUE, true}, /* Task 23: a register array's word */
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_DEFPARAM, false},   /* never in an elaborated store */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_IF, false},        /* landed by Task 22 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_CASE, false},      /* landed by Task 22 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_CASE_ITEM, false}, /* landed by Task 22 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_FOR, false},       /* landed by Task 23 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_REPEAT, false},    /* landed by Task 23 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_TASK_CALL, false}, /* landed by Task 23 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_WHILE, false},     /* only in an inlined function: its error */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_DEFPARAM, false},  /* never in an elaborated store */
     {0, ODIN3_AST_LIST, false},
     {ODIN3_ELAB_STAGE2 + 1, ODIN3_AST_LIST, false},
     {ODIN3_ELAB_STAGE1, ODIN3_PEND_END, false},
@@ -657,18 +658,12 @@ static void test_pending_report(void) {
     run_one("t.v", "module t;\nendmodule\n");
     bool seen[ODIN3_PEND_END] = {false};
     uint32_t before = rs.errors;
-    odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_COMB_CALL, seen);
-    odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_COMB_CALL, seen);
-    odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_REGS_VAR_READ, seen);
-    odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_VAR_LVALUE, seen);
+    odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_MEM_WRITE, seen);
+    odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_MEM_WRITE, seen);
     odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_END, seen);
     odin3_elab_pend_report(rs.design, (odin3_loc){0}, ODIN3_PEND_MEM_WRITE, NULL);
-    TEST_ASSERT_EQUAL_UINT32(before + 3, rs.errors);
-    et_expect(&rs, ODIN3_LOG_ERROR, PENDING ": 'continuous-context call'");
-    et_expect(&rs, ODIN3_LOG_ERROR, PENDING ": 'variable index into a register array'");
-    et_expect(&rs, ODIN3_LOG_ERROR,
-              PENDING ": 'variable index into a register array in a procedural assignment "
-                      "target'");
+    TEST_ASSERT_EQUAL_UINT32(before + 1, rs.errors);
+    et_expect(&rs, ODIN3_LOG_ERROR, PENDING ": 'memory write'");
 }
 
 /* --- diagnostics helpers --------------------------------------------------------------------- */

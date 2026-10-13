@@ -119,7 +119,11 @@ odin3_status odin3_elab2_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req,
         odin3_log(ODIN3_LOG_ERROR, "odin3_elab2_prov: no module is being emitted");
         return ODIN3_ERR_INVALID_ARG;
     }
-    return prov_for(e2, e2->mod_name, req, out);
+    odin3_elab2_prov_req inlined = *req;
+    if (inlined.call.v == 0) { /* inside a call being inlined: the second loc of EL-45 */
+        inlined.call = e2->call;
+    }
+    return prov_for(e2, e2->mod_name, &inlined, out);
 }
 
 /* --- attributes (2A §7) ---------------------------------------------------------------------- */

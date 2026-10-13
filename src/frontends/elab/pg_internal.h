@@ -84,7 +84,7 @@ typedef struct pg_undo {
     uint64_t key, old;
 } pg_undo;
 
-enum { PG_F_STMT = 1, PG_F_BLOCK = 2, PG_F_SWITCH = 3 };
+enum { PG_F_STMT = 1, PG_F_BLOCK = 2, PG_F_SWITCH = 3, PG_F_LOOP = 4 };
 
 /* One frame of the statement stack: a lone statement, a `begin ... end` and the next child, or an
  * `if`/`case` being built (PG_F_SWITCH: next..end are the item children still to open, dflt the
@@ -94,6 +94,22 @@ typedef struct pg_frame {
     odin3_ast_id node;
     uint32_t next, end, dflt, aux;
 } pg_frame;
+
+/* A loop being unrolled (Task 23, EL-37): its node, its variable's symbol (0 for `repeat`), the
+ * iterations done and (repeat) still to do. The PG_F_LOOP frame's aux is its index. */
+typedef struct pg_loop {
+    odin3_ast_id node;
+    odin3_sym_id sym;
+    uint64_t count;
+    int64_t remaining;
+} pg_loop;
+
+/* A call being inlined (EL-38): the declaration, the call, the call the generator inlined before
+ * it (the provenance's second loc) and where its symbols begin in pg->fsyms. */
+typedef struct pg_callrec {
+    odin3_ast_id decl, call, saved_call;
+    uint32_t fsyms_mark;
+} pg_callrec;
 
 /* The wildcard rule of a case statement (EL-36). */
 enum { PG_WILD_NONE = 0, PG_WILD_Z = 1, PG_WILD_X = 2 };
@@ -146,17 +162,28 @@ struct odin3_pg {
     uint32_t cur;            /* the current case */
     odin3_vec frames;        /* pg_frame */
     /* switches (Task 22) */
-    odin3_u64map *swl;      /* if/case node -> (first in sw_pool << 32) | count: its targets */
-    odin3_u64map *folds;    /* if/case node -> the child to run + 1 (PG_FOLD_NONE: none) */
-    odin3_vec blk;          /* uint32_t: nets assigned by `=` so far in the open switches (scan) */
-    odin3_vec blk_marks;    /* uint32_t: where each open switch's nets begin in blk */
-    odin3_vec sw_pool;      /* uint32_t: the targets of every switch, sorted and unique */
-    odin3_vec sw_ctx;       /* pg_swctx */
-    odin3_vec sw_nets;      /* odin3_sigbit: targets of the switches being built */
-    odin3_vec sw_t1;        /* odin3_sigbit: their case temporaries */
-    odin3_vec sw_rv;        /* odin3_sigbit: their values at the switch's start */
-    odin3_vec cmp_sigs;     /* odin3_sig: the compares of the case being opened */
-    odin3_elab2_lvalue slv; /* a synthetic target: a switch's exit, a select write's case */
+    odin3_u64map *swl;       /* if/case node -> (first in sw_pool << 32) | count: its targets */
+    odin3_u64map *folds;     /* if/case node -> the child to run + 1 (PG_FOLD_NONE: none) */
+    odin3_vec blk;           /* uint32_t: nets assigned by `=` so far in the open switches (scan) */
+    odin3_vec blk_marks;     /* uint32_t: where each open switch's nets begin in blk */
+    odin3_vec sw_pool;       /* uint32_t: the targets of every switch, sorted and unique */
+    odin3_vec sw_ctx;        /* pg_swctx */
+    odin3_vec sw_nets;       /* odin3_sigbit: targets of the switches being built */
+    odin3_vec sw_t1;         /* odin3_sigbit: their case temporaries */
+    odin3_vec sw_rv;         /* odin3_sigbit: their values at the switch's start */
+    odin3_vec cmp_sigs;      /* odin3_sig: the compares of the case being opened */
+    odin3_elab2_reads hooks; /* the walker's hooks over this generator (pg_reads) */
+    odin3_elab2_lvalue slv;  /* a synthetic target: a switch's exit, a select write's case */
+    /* loops and calls (Task 23) */
+    odin3_vec loops;       /* pg_loop, innermost last */
+    odin3_vec calls;       /* pg_callrec, innermost last */
+    odin3_vec fsyms;       /* uint32_t: the symbols whose ir_wire a call frame set */
+    odin3_u64map *tvis;    /* TASK_DECL node -> 1: its body is scanned (this scan) */
+    odin3_u64map *active;  /* FUNCTION_DECL / TASK_DECL node -> 1: being inlined */
+    odin3_u64map *loopout; /* symbol -> 1: read outside the loops it is the variable of */
+    bool loopout_ready;    /* loopout is built for the module */
+    bool scan_frame;       /* the scan is of a call's body: no new outputs */
+    bool scan_local;       /* the target being scanned names a callee's variable in an index */
     /* T3 */
     odin3_u64map *reads;  /* net -> 1: read, not supplied by an assignment of the block */
     odin3_u64map *listed; /* net -> 1: a bit of a signal the level list names */
@@ -232,8 +259,16 @@ bool pg_run_continues(const odin3_pg *pg, odin3_net_id prev, odin3_net_id target
 /* The read hook of the expression walker (odin3_elab2_reads) over rv. */
 odin3_status pg_read_bit(void *user, odin3_net_id net, odin3_sigbit *out);
 
-/* Runs one statement through the frame stack. */
+/* Steps 2 to 4 of a block whose outputs are in pg->outs: their temporaries, chunks and syncs, and
+ * the root defaults. */
+odin3_status pg_start_block(odin3_pg *pg);
+
+/* Runs one statement through the frame stack, on top of the frames already there (a call inlined
+ * by an expression runs its body this way). */
 odin3_status pg_run(odin3_pg *pg, odin3_ast_id stmt);
+
+/* `lhs = rhs` / `lhs <= rhs` of an assignment statement (exec_assign). */
+odin3_status pg_exec_assign(odin3_pg *pg, odin3_ast_id stmt);
 
 /* Pushes a frame (a statement to run, a block, a switch). */
 odin3_status pg_frame_push(odin3_pg *pg, const pg_frame *frame);
@@ -241,7 +276,48 @@ odin3_status pg_frame_push(odin3_pg *pg, const pg_frame *frame);
 /* Whether out follows prev as the next bit of the same variable (they form one chunk, v4.2). */
 bool pg_out_continues(const pg_out *prev, const pg_out *out);
 
+/* --- pg_loop.c: for and repeat (EL-37) ---------------------------------------------------------
+ */
+
+/* Opens a FOR or REPEAT statement: pushes its PG_F_LOOP frame. */
+odin3_status pg_loop_open(odin3_pg *pg, odin3_ast_id node);
+
+/* One step of the PG_F_LOOP frame on top of the stack: the init, a test (pushing the body), a
+ * step, or the end of the loop (popping the frame). */
+odin3_status pg_loop_step(odin3_pg *pg);
+
+/* Whether the variable of a for statement of the module (a symbol) is read outside the loops it is
+ * the variable of, which makes it an output of the block (EL-35); *out. */
+odin3_status pg_loopvar_is_output(odin3_pg *pg, odin3_sym_id sym, bool *out);
+
+/* The symbol a loop's init or step assignment writes (0: its target is no plain name). */
+odin3_sym_id pg_assign_symbol(const odin3_pg *pg, odin3_ast_id assign);
+
+/* --- pg_call.c: function and task calls, register-array words (EL-38, EL-27) -------------------
+ */
+
+/* A TASK_CALL statement (K9 to K11). */
+odin3_status pg_task_call(odin3_pg *pg, odin3_ast_id call);
+
+/* The hooks of the expression walker (odin3_elab2_reads.call, .word) over the generator. */
+odin3_status pg_call_hook(void *user, odin3_ast_id call, odin3_sig *out);
+odin3_status pg_word_hook(void *user, const odin3_elab2_regs_rd *rd, odin3_sig *out);
+
+/* The assignment of a register-array word with a variable index (pg->lvs.regs): a case over the
+ * words. rhs is as wide as a word. */
+odin3_status pg_regs_apply(odin3_pg *pg, const odin3_pg_assign_req *req);
+
+/* Gives every symbol a call frame set back its (absent) wire; for a block that stopped inside a
+ * call. */
+void pg_frames_unwind(odin3_pg *pg);
+
+/* The reads hook the generator gives the walker. */
+odin3_elab2_reads pg_reads(odin3_pg *pg);
+
 /* --- pg_scan.c: the scan of a block's statements (EL-35 step 1, EL-36 targets, folding) ------ */
+
+/* The scan of a call's body in its frame: the targets of its switches, no new outputs. */
+odin3_status pg_scan_call(odin3_pg *pg, odin3_ast_id body);
 
 /* Collects the outputs (every bit an assignment can write) into pg->outs/out_of, each if/case's
  * blocking targets into swl/sw_pool, and the folded if/case into folds; reports the constructs

@@ -46,7 +46,7 @@ enum { SW_ARM_OPEN = 1, SW_DEFAULT_DONE = 2, SW_SHIFT = 32 };
 /* expr at the context (through rv), extended to the context width (not when it is self-determined,
  * width 0). */
 static odin3_status gen_at(odin3_pg *pg, odin3_ast_id expr, odin3_etype ctx, odin3_sig *out) {
-    odin3_elab2_reads reads = {pg_read_bit, pg};
+    odin3_elab2_reads reads = pg_reads(pg);
     odin3_elab2_expr_req req = {expr, ctx, NULL, &reads};
     odin3_status st = odin3_elab2_expr(pg->e2, &req, out);
     if (st == ODIN3_OK && ctx.width > 0) {
@@ -509,10 +509,28 @@ static odin3_status switch_frame(odin3_pg *pg, const pg_sw_req *req, const pg_fr
     return st != ODIN3_OK ? st : pg_frame_push(pg, frame);
 }
 
+/* Inside an unrolled loop a condition that reads its variable is constant now: the branch is taken
+ * at generation (the scan could not know it). The pick is not kept: the next iteration decides
+ * again. *pick is 0 when the statement is not folded. */
+static odin3_status fold_now(odin3_pg *pg, odin3_ast_id node, uint32_t *pick) {
+    *pick = 0;
+    if (pg->loops.len == 0) {
+        return ODIN3_OK;
+    }
+    odin3_status st = pg_fold(pg, node, pick);
+    (void)odin3_u64map_remove(pg->folds, node.v);
+    return st;
+}
+
 odin3_status pg_if_open(odin3_pg *pg, odin3_ast_id node) {
     uint64_t fold = 0;
     if (odin3_u64map_get(pg->folds, node.v, &fold)) {
         return folded_run(pg, node, (uint32_t)fold);
+    }
+    uint32_t now = 0;
+    odin3_status fst = fold_now(pg, node, &now);
+    if (fst != ODIN3_OK || now != 0) {
+        return fst != ODIN3_OK ? fst : folded_run(pg, node, now);
     }
     const odin3_ast *ast = pg->e2->elab;
     odin3_ast_id cond = odin3_ast_child(ast, node, 0);
@@ -533,6 +551,11 @@ odin3_status pg_case_open(odin3_pg *pg, odin3_ast_id node) {
     uint64_t fold = 0;
     if (odin3_u64map_get(pg->folds, node.v, &fold)) {
         return folded_run(pg, node, (uint32_t)fold);
+    }
+    uint32_t now = 0;
+    odin3_status fst = fold_now(pg, node, &now);
+    if (fst != ODIN3_OK || now != 0) {
+        return fst != ODIN3_OK ? fst : folded_run(pg, node, now);
     }
     const odin3_ast *ast = pg->e2->elab;
     odin3_etype type = {1, false, false};

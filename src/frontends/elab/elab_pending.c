@@ -7,8 +7,9 @@
  * point (l) stages it in. Task 16 emptied the stage-1 tables; Task 17 removed stage 2's store,
  * scope, declaration and port kinds; Task 18 its expression and continuous-assignment kinds; Task
  * 19 its instance, connection and gate kinds and the driver check; Task 20 the memory word read;
- * Task 21 the always block and the assignments; Task 22 `if` and `case`; Task 24 asserts the rest
- * of stage 2's table is empty.
+ * Task 21 the always block and the assignments; Task 22 `if` and `case`; Task 23 loops, task and
+ * function calls (in processes and in continuous contexts) and the words of register arrays with
+ * a variable index; Task 24 asserts the rest of stage 2's table is empty.
  */
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -34,16 +35,10 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
             /* Task 21 landed always blocks, their event controls and the assignments: nothing is
              * left of them. */
             /* Task 22 landed if and case (and the case method for a bit or part select with a
-             * non-constant index in a target): only a word of a register array with a variable
-             * index in a target is left of it, with Task 23's register-array cases. */
-            [ODIN3_PEND_VAR_LVALUE] = true,
-            /* Task 23: loops, task calls, calls in processes, the two read features. */
-            [ODIN3_AST_FOR] = true,
-            [ODIN3_AST_REPEAT] = true,
-            [ODIN3_AST_WHILE] = true,
-            [ODIN3_AST_TASK_CALL] = true,
-            [ODIN3_PEND_COMB_CALL] = true,
-            [ODIN3_PEND_REGS_VAR_READ] = true,
+             * non-constant index in a target). */
+            /* Task 23 landed loops, task enables and function calls (`while` only reaches stage 2
+             * in a function that is inlined, which is refused by its own located error), and the
+             * word of a register array with a variable index in a read or a target. */
             /* Task 24: initial blocks and memory writes. */
             [ODIN3_AST_INITIAL] = true,
             [ODIN3_PEND_MEM_WRITE] = true,
@@ -70,10 +65,7 @@ uint32_t odin3_elab_pending_form_count(uint8_t stage) {
 
 /* The features' names in point (l)'s line. */
 static const char *const k_feature_names[ODIN3_PEND_END - ODIN3_AST_KIND_COUNT] = {
-    "continuous-context call",
-    "variable index into a register array",
     "memory write",
-    "variable index into a register array in a procedural assignment target",
 };
 
 static bool g_forced[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END];

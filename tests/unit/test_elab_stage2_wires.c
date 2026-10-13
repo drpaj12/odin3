@@ -756,16 +756,12 @@ static void test_pending_initial(void) {
 
 /* A kind reported once however many times it occurs; other kinds each have their line. */
 static void test_pending_once_per_kind(void) {
-    read_text(
-        "module top;\n  reg a;\n  always @(*) repeat (2) a = 1;\n  always @(*) repeat (3) a = 0;\n"
-        "  initial a = 0;\nendmodule\n",
-        ODIN3_KEEP_AST_NONE);
+    read_text("module top;\n  reg a;\n  initial a = 0;\n  initial a = 1;\nendmodule\n",
+              ODIN3_KEEP_AST_NONE);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
     et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:3:15: error: elaboration is not available yet (2D): 'REPEAT'");
-    et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:5:3: error: elaboration is not available yet (2D): 'INITIAL'");
-    TEST_ASSERT_EQUAL_UINT32(2, diag_errors());
+              "t.v:3:3: error: elaboration is not available yet (2D): 'INITIAL'");
+    TEST_ASSERT_EQUAL_UINT32(1, diag_errors());
 }
 
 /* A declaration's initialiser: a net's is a continuous assignment (Task 18), a variable's waits

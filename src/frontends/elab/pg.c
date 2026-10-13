@@ -32,11 +32,11 @@ enum { GROUP_SHIFT = 32 };
 static odin3_u64map **pg_maps(odin3_pg *pg, size_t index) {
     odin3_u64map **const all[] = {&pg->out_of,    &pg->group,     &pg->lv,    &pg->rv,
                                   &pg->slot_head, &pg->dead_nets, &pg->reads, &pg->listed,
-                                  &pg->seen,      &pg->swl,       &pg->folds};
+                                  &pg->seen,      &pg->swl,       &pg->folds, &pg->active};
     return all[index];
 }
 
-enum { PG_MAP_COUNT = 11 };
+enum { PG_MAP_COUNT = 12 };
 
 /* An empty map: the same one when it is empty already. */
 static odin3_status map_fresh(odin3_u64map **map) {
@@ -74,6 +74,9 @@ static void vecs_init(odin3_pg *pg) {
     odin3_vec_init(&pg->sw_t1, sizeof(odin3_sigbit));
     odin3_vec_init(&pg->sw_rv, sizeof(odin3_sigbit));
     odin3_vec_init(&pg->cmp_sigs, sizeof(odin3_sig));
+    odin3_vec_init(&pg->loops, sizeof(pg_loop));
+    odin3_vec_init(&pg->calls, sizeof(pg_callrec));
+    odin3_vec_init(&pg->fsyms, sizeof(uint32_t));
 }
 
 static void vecs_free(odin3_pg *pg) {
@@ -81,7 +84,8 @@ static void vecs_free(odin3_pg *pg) {
                               &pg->cmps,   &pg->acts,    &pg->cases, &pg->sws,       &pg->syncs,
                               &pg->slots,  &pg->frames,  &pg->work,  &pg->items,     &pg->runs,
                               &pg->run_l,  &pg->run_r,   &pg->blk,   &pg->blk_marks, &pg->sw_pool,
-                              &pg->sw_ctx, &pg->sw_nets, &pg->sw_t1, &pg->sw_rv,     &pg->cmp_sigs};
+                              &pg->sw_ctx, &pg->sw_nets, &pg->sw_t1, &pg->sw_rv,     &pg->cmp_sigs,
+                              &pg->loops,  &pg->calls,   &pg->fsyms};
     for (size_t i = 0; i < sizeof all / sizeof all[0]; i++) {
         odin3_vec_free(all[i]);
     }
@@ -95,6 +99,8 @@ void odin3_pg_destroy(odin3_pg *pg) {
         odin3_u64map_destroy(*pg_maps(pg, i));
     }
     odin3_u64map_destroy(pg->kinds);
+    odin3_u64map_destroy(pg->loopout);
+    odin3_u64map_destroy(pg->tvis);
     vecs_free(pg);
     odin3_elab2_lvalue_free(&pg->lvs);
     odin3_elab2_lvalue_free(&pg->slv);
@@ -107,11 +113,12 @@ void odin3_elab2_pg_free(odin3_elab2 *e2) {
 }
 
 odin3_status pg_block_reset(odin3_pg *pg) {
-    odin3_vec *const lists[] = {&pg->outs,    &pg->chunks,    &pg->undo,    &pg->pool,
-                                &pg->dead,    &pg->cmps,      &pg->acts,    &pg->cases,
-                                &pg->sws,     &pg->syncs,     &pg->slots,   &pg->frames,
-                                &pg->blk,     &pg->blk_marks, &pg->sw_pool, &pg->sw_ctx,
-                                &pg->sw_nets, &pg->sw_t1,     &pg->sw_rv,   &pg->cmp_sigs};
+    pg_frames_unwind(pg);
+    odin3_vec *const lists[] = {
+        &pg->outs,  &pg->chunks,    &pg->undo,    &pg->pool,   &pg->dead,    &pg->cmps,
+        &pg->acts,  &pg->cases,     &pg->sws,     &pg->syncs,  &pg->slots,   &pg->frames,
+        &pg->blk,   &pg->blk_marks, &pg->sw_pool, &pg->sw_ctx, &pg->sw_nets, &pg->sw_t1,
+        &pg->sw_rv, &pg->cmp_sigs,  &pg->loops,   &pg->calls,  &pg->fsyms};
     for (size_t i = 0; i < sizeof lists / sizeof lists[0]; i++) {
         odin3_vec_clear(lists[i]);
     }
@@ -124,7 +131,10 @@ odin3_status pg_block_reset(odin3_pg *pg) {
     pg->edge = false;
     pg->track_reads = false;
     pg->failed = false;
+    pg->scan_frame = false;
     pg->groups = 0;
+    odin3_u64map_destroy(pg->e2->bound);
+    pg->e2->bound = NULL;
     pg->cur = PG_ROOT;
     if (st == ODIN3_OK && odin3_vec_push(&pg->cases) == NULL) {
         st = ODIN3_ERR_NO_MEMORY;
@@ -652,6 +662,9 @@ odin3_status pg_take_target_of(odin3_pg *pg, odin3_ast_id lhs) {
     odin3_vec_clear(&lv->bits);
     odin3_vec_clear(&lv->work);
     lv->dropped = false;
+    pg->hooks = pg_reads(pg);
+    lv->reads = &pg->hooks;
+    lv->scan_only = pg->scan_local;
     return odin3_elab2_lvalue_make(pg->e2, lhs, lv);
 }
 

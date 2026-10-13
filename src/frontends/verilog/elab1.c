@@ -463,6 +463,9 @@ static odin3_status stage1_steps(odin3_elab1 *e1, odin3_ast **elab) {
         st = odin3_elab1_run_queue(e1, top);
     }
     st = st != ODIN3_OK ? st : e1->fatal;
+    if (e1->opts.gen_iters_out != NULL) { /* the run's loop total goes on in stage 2 (point (k)) */
+        *e1->opts.gen_iters_out = e1->n_gen_iters;
+    }
     if (st == ODIN3_OK && e1->errors == 0 && !e1->stopped) {
         *elab = e1->elab; /* the UNIT is made: the store is the caller's */
         e1->elab = NULL;
@@ -536,10 +539,14 @@ odin3_status odin3_elab_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_ast
     odin3_status st = odin3_elab1_options(design, opts, &options);
     odin3_elab_test_note_opts(&options);
     odin3_ast *elab = NULL;
+    uint64_t gen_iters = 0;
+    options.gen_iters_out = &gen_iters;
     double started = odin3_now_ms();
     st = st != ODIN3_OK ? st : odin3_elab_stage1(ctx, parsed, &options, &elab);
     st = st != ODIN3_OK ? st : check_elab(&elab);
     options.stage1_ms = odin3_now_ms() - started;
+    options.gen_iters = gen_iters;
+    options.gen_iters_out = NULL;
     odin3_design_drop_ast(design, parsed_run, ODIN3_AST_FORM_PARSED); /* step 3 */
     if (st != ODIN3_OK) {
         return st;

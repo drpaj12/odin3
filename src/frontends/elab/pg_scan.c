@@ -71,15 +71,55 @@ static odin3_status scan_blocking(odin3_pg *pg, const odin3_elab2_lvalue *lv) {
     return ODIN3_OK;
 }
 
-/* The bits an assignment can write join the outputs (first writer kept). */
-static odin3_status scan_assign(odin3_pg *pg, odin3_ast_id assign) {
-    odin3_status st = pg_take_target_of(pg, odin3_ast_child(pg->e2->elab, assign, 0));
+/* Whether a lvalue names a variable of a function or task that has no frame now: its writes belong
+ * to the callee's frame (made where the call is), not to the block's outputs. */
+static bool scan_local(const odin3_elab2 *e2, odin3_ast_id lhs) {
+    while (odin3_ast_kind_of(e2->elab, lhs) == ODIN3_AST_SELECT) {
+        lhs = odin3_ast_child(e2->elab, lhs, 0);
+    }
+    odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, lhs);
+    if (kind != ODIN3_AST_IDENT && kind != ODIN3_AST_HIER_NAME) {
+        return false;
+    }
+    const odin3_symbol *rec = odin3_symbol_get(e2->st, odin3_elab_sym_of(&e2->bind, lhs));
+    return rec != NULL && (rec->kind == ODIN3_SYM_VAR || rec->kind == ODIN3_SYM_NET) &&
+           rec->ir_wire.v == 0 && rec->n_unpacked == 0;
+}
+
+/* Whether a lvalue reads a variable of a function or task that has no frame now (in an index). */
+static bool names_local(const odin3_elab2 *e2, odin3_ast_id lhs) {
+    odin3_ast_cursor cur;
+    bool found = false;
+    if (odin3_ast_cursor_init(&cur, e2->elab, lhs) != ODIN3_OK) {
+        return false;
+    }
+    odin3_ast_event ev;
+    odin3_ast_id node;
+    while (!found && odin3_ast_cursor_next(&cur, &ev, &node)) {
+        odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, node);
+        if (ev == ODIN3_AST_ENTER && (kind == ODIN3_AST_IDENT || kind == ODIN3_AST_HIER_NAME)) {
+            found = scan_local(e2, node);
+        }
+    }
+    odin3_ast_cursor_free(&cur);
+    return found;
+}
+
+/* The bits a target can write join the outputs (first writer kept), unless the scan is of a call's
+ * body, whose variables are temporaries and whose other targets are the block's already. */
+static odin3_status scan_target(odin3_pg *pg, odin3_ast_id lhs, bool blocking) {
+    if (scan_local(pg->e2, lhs)) {
+        return ODIN3_OK;
+    }
+    pg->scan_local = !pg->scan_frame && names_local(pg->e2, lhs);
+    odin3_status st = pg_take_target_of(pg, lhs);
+    pg->scan_local = false;
     if (st != ODIN3_OK) {
         return st;
     }
     const odin3_elab2_lvalue *lv = &pg->lvs;
     warn_nets(pg, lv);
-    for (size_t i = 0; i < lv->nets.len; i++) {
+    for (size_t i = 0; !pg->scan_frame && i < lv->nets.len; i++) {
         odin3_net_id net = *(const odin3_net_id *)odin3_vec_cat(&lv->nets, i);
         if (net.v == 0 || odin3_u64map_get(pg->out_of, net.v, NULL)) {
             continue;
@@ -95,8 +135,12 @@ static odin3_status scan_assign(odin3_pg *pg, odin3_ast_id assign) {
             return st;
         }
     }
-    bool blocking = odin3_ast_kind_of(pg->e2->elab, assign) == ODIN3_AST_BLOCKING_ASSIGN;
     return blocking ? scan_blocking(pg, lv) : ODIN3_OK;
+}
+
+static odin3_status scan_assign(odin3_pg *pg, odin3_ast_id assign) {
+    bool blocking = odin3_ast_kind_of(pg->e2->elab, assign) == ODIN3_AST_BLOCKING_ASSIGN;
+    return scan_target(pg, odin3_ast_child(pg->e2->elab, assign, 0), blocking);
 }
 
 static odin3_status scan_push_id(odin3_pg *pg, uint32_t entry) {
@@ -201,6 +245,79 @@ static odin3_status scan_branching(odin3_pg *pg, odin3_ast_id node) {
     return pick != 0 ? scan_folded(pg, node, pick) : scan_switch(pg, node);
 }
 
+/* A for statement: its init and step assign a variable that is an output only when the module reads
+ * it outside its loops (EL-35, divergence 5); the condition is not a statement. */
+static odin3_status scan_for(odin3_pg *pg, odin3_ast_id node) {
+    const odin3_ast *ast = pg->e2->elab;
+    odin3_ast_id init = odin3_ast_child(ast, node, 0);
+    odin3_ast_id step = odin3_ast_child(ast, node, 2);
+    odin3_sym_id sym = pg_assign_symbol(pg, init);
+    bool output = true;
+    odin3_status st = ODIN3_OK;
+    if (sym.v != 0) {
+        const odin3_symbol *rec = odin3_symbol_get(pg->e2->st, sym);
+        output = false;
+        if (rec != NULL && rec->ir_wire.v != 0 && !pg->scan_frame) {
+            st = pg_loopvar_is_output(pg, sym, &output);
+        }
+    }
+    st = st != ODIN3_OK || !output ? st : scan_assign(pg, init);
+    st = st != ODIN3_OK || !output ? st : scan_assign(pg, step);
+    odin3_ast_id body = odin3_ast_child(ast, node, 3);
+    return st != ODIN3_OK || body.v == 0 ? st : scan_push_id(pg, body.v);
+}
+
+/* Whether node is a name, select or concatenation: something an output argument can be. */
+static bool is_variable_kind(const odin3_ast *ast, odin3_ast_id node) {
+    odin3_ast_kind kind = odin3_ast_kind_of(ast, node);
+    return kind == ODIN3_AST_IDENT || kind == ODIN3_AST_HIER_NAME || kind == ODIN3_AST_SELECT ||
+           kind == ODIN3_AST_CONCAT;
+}
+
+/* The actual of an output or inout formal is a target (blocking, K9); anything else is the error.
+ */
+static odin3_status scan_output_actual(odin3_pg *pg, odin3_ast_id call, uint32_t at) {
+    const odin3_ast *ast = pg->e2->elab;
+    odin3_ast_id actual = odin3_ast_child(ast, call, at);
+    if (actual.v == 0) {
+        return ODIN3_OK;
+    }
+    if (!is_variable_kind(ast, actual)) {
+        odin3_elab2_error(pg->e2, odin3_ast_loc(ast, actual),
+                          "output argument %u of task '%s' must be a variable", at + 1U,
+                          odin3_ast_name_str(ast, call));
+        return ODIN3_ERR_PARSE;
+    }
+    return scan_target(pg, actual, true);
+}
+
+/* A task enable: the actuals of its output and inout formals are targets; its body is scanned once
+ * for the targets that are the block's own. */
+static odin3_status scan_task_call(odin3_pg *pg, odin3_ast_id node) {
+    odin3_elab2 *e2 = pg->e2;
+    const odin3_ast *ast = e2->elab;
+    if ((odin3_ast_flags(ast, node) & ODIN3_AST_F_CALL_SYSTEM) != 0) {
+        return ODIN3_OK;
+    }
+    odin3_ast_id decl = {0};
+    odin3_status st = odin3_elab2_callee(e2, node, &decl);
+    odin3_ast_id ports = st == ODIN3_OK ? odin3_ast_child(ast, decl, 0) : (odin3_ast_id){0};
+    uint32_t at = 0;
+    for (uint32_t k = 0; st == ODIN3_OK && ports.v != 0 && k < odin3_ast_nchild(ast, ports); k++) {
+        odin3_ast_id port = odin3_ast_child(ast, ports, k);
+        bool out = odin3_ast_sub(ast, port) != ODIN3_AST_PORT_DECL_INPUT;
+        for (uint32_t j = 1; st == ODIN3_OK && j < odin3_ast_nchild(ast, port); j++, at++) {
+            st = out ? scan_output_actual(pg, node, at) : ODIN3_OK;
+        }
+    }
+    if (st != ODIN3_OK || odin3_u64map_get(pg->tvis, decl.v, NULL)) {
+        return st;
+    }
+    st = odin3_u64map_put(pg->tvis, (odin3_kv){decl.v, 1});
+    odin3_ast_id body = st == ODIN3_OK ? odin3_ast_child(ast, decl, 2) : (odin3_ast_id){0};
+    return st != ODIN3_OK || body.v == 0 ? st : scan_push_id(pg, body.v);
+}
+
 /* One node of the scan: an assignment adds its outputs, a block its statements, an if or case its
  * branches, a pending construct is reported; any other kind is looked into (the statements of
  * Task 23). */
@@ -217,6 +334,10 @@ static odin3_status scan_node(odin3_pg *pg, odin3_ast_id node) {
     case ODIN3_AST_IF:
     case ODIN3_AST_CASE:
         return scan_branching(pg, node);
+    case ODIN3_AST_FOR:
+        return scan_for(pg, node);
+    case ODIN3_AST_TASK_CALL:
+        return scan_task_call(pg, node);
     case ODIN3_AST_CASE_ITEM: /* its body; the match expressions are not statements */
         return scan_push_id(pg, odin3_ast_child(pg->e2->elab, node, 0).v);
     case ODIN3_AST_NULL_STMT:
@@ -229,7 +350,19 @@ static odin3_status scan_node(odin3_pg *pg, odin3_ast_id node) {
     }
 }
 
+odin3_status pg_scan_call(odin3_pg *pg, odin3_ast_id body) {
+    pg->scan_frame = true;
+    odin3_status st = pg_scan(pg, body);
+    pg->scan_frame = false;
+    return st;
+}
+
 odin3_status pg_scan(odin3_pg *pg, odin3_ast_id body) {
+    odin3_u64map_destroy(pg->tvis);
+    pg->tvis = odin3_u64map_create(0);
+    if (pg->tvis == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
     odin3_vec_clear(&pg->work);
     odin3_status st = body.v != 0 ? scan_push_id(pg, body.v) : ODIN3_OK;
     while (st == ODIN3_OK && pg->work.len > 0 && !pg->e2->stopped) {

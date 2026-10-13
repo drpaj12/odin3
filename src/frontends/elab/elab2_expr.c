@@ -130,9 +130,8 @@ static odin3_status ex_host_leaf(void *user, odin3_ast_id node, odin3_etype *out
     switch (odin3_ast_kind_of(e2->elab, node)) {
     case ODIN3_AST_SELECT:
         return ex_select_leaf(e2, node, out);
-    case ODIN3_AST_CALL: /* a user function: inlined into a process (Task 23) */
-        odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, node), ODIN3_PEND_COMB_CALL);
-        return ODIN3_ERR_PARSE;
+    case ODIN3_AST_CALL: /* a user function: its result variable's type (Task 23) */
+        return odin3_elab2_call_type(e2, node, out);
     default:
         return ex_name_type(e2, node, out);
     }
@@ -737,6 +736,29 @@ static odin3_status ex_x_word(ex_run *run, uint32_t width, odin3_sig *out) {
     return st;
 }
 
+/* A word of a register array with a variable index (EL-27): a case over the words, inline in the
+ * process when the walker has the hook for it, else a combinational process of its own. */
+static odin3_status ex_word_variable(ex_run *run, const ex_frame *frame,
+                                     const odin3_elab2_wordref *ref, const odin3_sig *idx,
+                                     odin3_sig *out) {
+    odin3_elab2 *e2 = run->e2;
+    odin3_ast_id node = frame->node;
+    if (ref->n != 1) {
+        odin3_elab2_error(e2, odin3_ast_loc(e2->elab, node),
+                          "non-constant index into the multi-dimensional register array '%s' is "
+                          "not supported",
+                          odin3_strtab_get(odin3_design_strtab(e2->design),
+                                           odin3_elab2_mem_get(e2, ref->mem)->name));
+        return ODIN3_ERR_PARSE;
+    }
+    const odin3_elab2_regs_rd rd = {node, ref->mem, idx};
+    const odin3_elab2_reads *reads = run->req->reads;
+    if (reads != NULL && reads->word != NULL) {
+        return reads->word(reads->user, &rd, out);
+    }
+    return odin3_elab2_comb_word(e2, &rd, out);
+}
+
 /* A memory word `m[i]` (EL-27): a `$mem` read port, or the word of an array that became
  * registers; a variable index into registers is Task 23's. The operands are the indices. */
 static odin3_status ex_word(ex_run *run, const ex_frame *frame, const odin3_elab2_wordref *ref,
@@ -760,9 +782,7 @@ static odin3_status ex_word(ex_run *run, const ex_frame *frame, const odin3_elab
         return st;
     }
     if (word.kind == ODIN3_WORD_VARIABLE) {
-        odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, frame->node),
-                                 ODIN3_PEND_REGS_VAR_READ);
-        return ODIN3_ERR_PARSE;
+        return ex_word_variable(run, frame, ref, idx, out);
     }
     return word.kind == ODIN3_WORD_WIRE ? ex_wire_nets(run, word.wire, out)
                                         : ex_x_word(run, mem->width, out);
@@ -786,8 +806,32 @@ static odin3_status ex_select(ex_run *run, const ex_frame *frame, odin3_sig *out
 /* --- the walk -------------------------------------------------------------------------------- */
 
 static bool ex_is_sign_call(const odin3_elab2 *e2, odin3_ast_id call) {
+    if ((odin3_ast_flags(e2->elab, call) & ODIN3_AST_F_CALL_SYSTEM) == 0) {
+        return false;
+    }
     const char *name = odin3_ast_name_str(e2->elab, call);
     return strcmp(name, "$signed") == 0 || strcmp(name, "$unsigned") == 0;
+}
+
+/* A user function call (EL-38): folded by the interpreter when its arguments and body are
+ * constant; else inlined into the process through the walker's hook, or, in a continuous context,
+ * a combinational process of its own. */
+static odin3_status ex_user_call(ex_run *run, const ex_frame *frame, odin3_sig *out) {
+    odin3_elab2 *e2 = run->e2;
+    odin3_cval val;
+    bool is_const = false;
+    odin3_status st = odin3_elab2_call_try(e2, frame->node, &val, &is_const);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (is_const) {
+        return ex_from_cval(e2, &val, out);
+    }
+    const odin3_elab2_reads *reads = run->req->reads;
+    if (reads != NULL && reads->call != NULL) {
+        return reads->call(reads->user, frame->node, out);
+    }
+    return odin3_elab2_comb_call(e2, frame->node, out);
 }
 
 /* A ternary's operands: its condition, then the branches its pick leaves (frame->pick). */
@@ -876,7 +920,8 @@ static odin3_status ex_node(ex_run *run, const ex_frame *frame, odin3_sig *out) 
     case ODIN3_AST_SELECT:
         return ex_select(run, frame, out);
     case ODIN3_AST_CALL:
-        return ex_sign_call(run, frame, out);
+        return ex_is_sign_call(run->e2, frame->node) ? ex_sign_call(run, frame, out)
+                                                     : ex_user_call(run, frame, out);
     default:
         odin3_log(ODIN3_LOG_ERROR, "stage 2: '%s' is not an expression",
                   odin3_ast_kind_name(odin3_ast_kind_of(run->e2->elab, frame->node)));
@@ -940,17 +985,25 @@ odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, 
         odin3_log(ODIN3_LOG_ERROR, "odin3_elab2_expr: not an expression, or no module is emitted");
         return ODIN3_ERR_INVALID_ARG;
     }
+    /* re-entrant: a user call inlined by the walker generates its own expressions on the stacks
+     * above this one's */
     ex_run run = {e2, req};
-    odin3_vec_clear(&e2->frames);
-    odin3_vec_clear(&e2->vals);
+    size_t frame_base = e2->frames.len;
+    size_t val_base = e2->vals.len;
     odin3_status st = ex_typer(e2);
     st = st != ODIN3_OK ? st : odin3_ctype_expr(e2->ty, req->expr, req->context);
     st = st != ODIN3_OK ? st : ex_open(e2, req->expr);
-    while (st == ODIN3_OK && e2->frames.len > 0) {
+    while (st == ODIN3_OK && e2->frames.len > frame_base) {
         st = ex_step(&run);
     }
     if (st == ODIN3_OK) {
-        *out = *(const odin3_sig *)odin3_vec_cat(&e2->vals, 0);
+        *out = *(const odin3_sig *)odin3_vec_cat(&e2->vals, val_base);
+    }
+    while (e2->frames.len > frame_base) {
+        odin3_vec_pop(&e2->frames);
+    }
+    while (e2->vals.len > val_base) {
+        odin3_vec_pop(&e2->vals);
     }
     return st;
 }
@@ -987,7 +1040,8 @@ static bool ex_const_node(const odin3_elab2 *e2, odin3_ast_id node) {
     case ODIN3_AST_HIER_NAME: {
         const odin3_symbol *rec = ex_symbol(e2, node);
         return rec != NULL && (rec->kind == ODIN3_SYM_PARAM || rec->kind == ODIN3_SYM_LOCALPARAM ||
-                               rec->kind == ODIN3_SYM_GENVAR);
+                               rec->kind == ODIN3_SYM_GENVAR ||
+                               odin3_elab2_is_bound(e2, odin3_elab_sym_of(&e2->bind, node)));
     }
     case ODIN3_AST_CALL:
         return ex_const_call(e2, node);

@@ -168,6 +168,57 @@ void odin3_pg_case_end(odin3_pg *pg);
 odin3_status odin3_pg_emit(odin3_pg *pg, odin3_ast_id prov_node, odin3_node_id *out);
 
 /*
+ * Loops (EL-37, Task 23): odin3_pg_stmt for one FOR or REPEAT statement of the scanned body.
+ * `for (i = a; c; i = s) body` is unrolled: a is evaluated (constants, and the values of variables
+ * the generator holds as constants), i is bound to it for the AST constant test, c must be
+ * constant ("for-loop condition is not constant (it reads 'n')"), and while it is true the body is
+ * run and s evaluated; init and step must assign the same variable ("for-loop initialisation and
+ * step must assign the same variable"), the body may not ("loop variable 'i' is assigned in the
+ * loop body"). The variable is an output of the block only when the module reads it outside the
+ * loops it is the variable of (EL-35, divergence 5); else only `rv` holds its values, the final
+ * one after the loop. `repeat (n)` runs the body n times (a NUMBER after stage 1). A loop that
+ * runs past ODIN3_ELAB_MAX_LOOP_ITERATIONS is `loop exceeds N iterations`, one past the run's
+ * ODIN3_ELAB_MAX_TOTAL_ITERATIONS (counted on from stage 1's generate loops, point (k)) the fatal
+ * `unrolled loops exceed N iterations in this design`, both located at the loop and
+ * ODIN3_ERR_PARSE. ODIN3_ERR_INVALID_ARG (logged) for another kind of statement.
+ */
+odin3_status odin3_pg_for(odin3_pg *pg, odin3_ast_id stmt);
+odin3_status odin3_pg_repeat(odin3_pg *pg, odin3_ast_id stmt);
+
+/*
+ * Inlines a user function CALL (result gets its value: the result variable's width, in the frame)
+ * or a TASK_CALL (result may be NULL), EL-38: the actuals are generated in the caller's context,
+ * a frame of unnamed wires holds the callee's ports, locals and result (process-local: `O` pins
+ * with no sync action), the inputs are assigned to the formals by blocking assignment, the body
+ * runs in this builder, and a task's output and inout formals are copied to their actuals (K9: an
+ * actual that is no variable is `output argument N of task 't' must be a variable`). The
+ * interpreter is tried first by the expression walker, so a constant call never gets here. The
+ * errors of point (aa): `function 'f' has N inputs; M arguments given`, `recursive call of 'f'
+ * cannot be inlined (its arguments are not constant)`, `function call nesting deeper than N at
+ * 'f'` (fatal), `function 'f' can be called only with constant arguments (it uses 'while')`;
+ * ODIN3_ERR_PARSE after one. ODIN3_ERR_INVALID_ARG (logged) for another node. Only valid inside a
+ * block (between odin3_pg_open and odin3_pg_emit).
+ */
+odin3_status odin3_pg_call(odin3_pg *pg, odin3_ast_id call, odin3_sig *result);
+
+/*
+ * A user function CALL met in a continuous context (an assign right side, a port connection, a net
+ * declaration assignment): a `$proc` of its own with one ALWAYS sync whose output is the result
+ * variable's wire, generated whole (the block it needs is its own: no block may be open). result
+ * gets the wire's nets. Statuses as odin3_pg_call. Outside the walker's context the arguments are
+ * generated first, in the caller's.
+ */
+odin3_status odin3_pg_comb_call(odin3_pg *pg, odin3_ast_id call, odin3_sig *result);
+
+/*
+ * A word `m[s]` of a register array (EL-27, one dimension) with a variable index met outside a
+ * process: a `$proc` of its own with one ALWAYS sync, a switch on the index with one case per
+ * word the index can name (each assigning the word) and a default of x. result gets the nets.
+ * ODIN3_ERR_INVALID_ARG (logged) for another select; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_pg_comb_mem_read(odin3_pg *pg, odin3_ast_id select, odin3_sig *result);
+
+/*
  * Starts a block without running it (steps 1-4): odin3_pg_always is open, odin3_pg_stmt of the
  * body and odin3_pg_emit. Exposed for the tasks that build blocks of their own (call frames,
  * mem2reg reads outside a process). Statuses as odin3_pg_always.

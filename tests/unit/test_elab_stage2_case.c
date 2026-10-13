@@ -673,25 +673,6 @@ static void test_memory_write_in_case_arm_is_pending(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
 }
 
-/* Loops are Task 23's: the located line, from inside an if arm too. */
-static void test_loop_in_if_arm_is_pending(void) {
-    pt_read_failing("module t(input e, output reg y);\n"
-                    "  always @* if (e) repeat (2) y = 1'b1;\nendmodule\n");
-    pt_expect_error((at_loc){2, 20}, "elaboration is not available yet (2D): 'REPEAT'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
-}
-
-/* A word of a register array with a variable index is EL-27's case over the words (Task 23). */
-static void test_register_word_variable_index_is_pending(void) {
-    pt_read_failing(
-        "module t(input [1:0] s, input [3:0] d, output [3:0] y);\n  reg [3:0] w [0:3];\n"
-        "  assign y = w[0];\n  always @* w[s] = d;\nendmodule\n");
-    pt_expect_error((at_loc){4, 13},
-                    "elaboration is not available yet (2D): 'variable index into a register array "
-                    "in a procedural assignment target'");
-    TEST_ASSERT_EQUAL_UINT32(1, pt_warnings_with("replacing memory 'w' with list of registers"));
-}
-
 /* --- out of memory ----------------------------------------------------------------------------
  */
 
@@ -995,8 +976,6 @@ static void test_public_entry_points_refuse_misuse(void) {
     X(test_variable_index_in_concatenation_is_an_error)                                            \
     X(test_memory_write_in_if_arm_is_pending)                                                      \
     X(test_memory_write_in_case_arm_is_pending)                                                    \
-    X(test_loop_in_if_arm_is_pending)                                                              \
-    X(test_register_word_variable_index_is_pending)                                                \
     X(test_public_entry_points_refuse_misuse)                                                      \
     X(test_oom_sweep_builder_primitives)                                                           \
     X(test_oom_sweep)                                                                              \
