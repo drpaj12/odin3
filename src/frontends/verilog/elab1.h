@@ -52,7 +52,8 @@ typedef enum odin3_elab_def_kind {
 typedef struct odin3_elab_def {
     uint8_t kind; /* odin3_elab_def_kind */
     bool library_unit;
-    uint8_t unit_flags; /* the UNIT's ODIN3_UNIT_* (a `read_verilog --lib` unit: ODIN3_UNIT_LIB + flags) */
+    uint8_t unit_flags; /* the UNIT's ODIN3_UNIT_* (a `read_verilog --lib` unit: ODIN3_UNIT_LIB +
+                           flags) */
     uint32_t name;
     uint32_t library;
     odin3_ast_id node; /* the MODULE, UDP_DECL or CONFIG_DECL */

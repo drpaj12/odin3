@@ -518,9 +518,10 @@ static odin3_status mark_library(odin3_ast *ast, const rv_args *args) {
     return odin3_ast_mark_units(ast, 0, odin3_ast_root_count(ast), (uint8_t)flags);
 }
 
-/* Hands the store to the design; with --lib it stays held for later reads, with --parse-only it stays held until the design is destroyed
- * (AST-15), otherwise 2D's entry runs with the pass's options (its step 3 drops the parsed store,
- * kept under ALL, AST-16; the drop here is then a no-op, plan point (a)). */
+/* Hands the store to the design; with --lib it stays held for later reads, with --parse-only it
+ * stays held until the design is destroyed (AST-15), otherwise 2D's entry runs with the pass's
+ * options (its step 3 drops the parsed store, kept under ALL, AST-16; the drop here is then a
+ * no-op, plan point (a)). */
 static odin3_status hand_over(odin3_pass_ctx *ctx, odin3_ast *ast, const rv_args *args) {
     odin3_status st = args->lib ? mark_library(ast, args) : ODIN3_OK;
     st = st != ODIN3_OK ? st : odin3_design_set_ast(ctx->design, ast);
@@ -565,7 +566,8 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
 
 const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog",
-    "read_verilog [--parse-only] [--lib] [--nolatches] [--nomem2reg] [--auto-blackbox] [<file>...]: "
+    "read_verilog [--parse-only] [--lib] [--nolatches] [--nomem2reg] [--auto-blackbox] "
+    "[<file>...]: "
     "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
     "libraries; --parse-only keeps it (write_verilog_ast prints it), otherwise elaboration (2D) "

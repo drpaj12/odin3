@@ -146,9 +146,9 @@ static bool w_room(e1w *wr, odin3_ast_id from) {
 }
 
 typedef struct w_attrs_of {
-    odin3_ast_id from; /* the parsed node whose attributes are written */
-    odin3_ast_id made; /* the elaborated node they are attached to */
-    odin3_ast_id then; /* a second parsed node merged in after from's (0: none); it wins a name */
+    odin3_ast_id from;  /* the parsed node whose attributes are written */
+    odin3_ast_id made;  /* the elaborated node they are attached to */
+    odin3_ast_id then;  /* a second parsed node merged in after from's (0: none); it wins a name */
     uint8_t unit_flags; /* the MODULE of a --lib unit: its ODIN3_UNIT_* become attributes (EL-4) */
 } w_attrs_of;
 
@@ -348,21 +348,10 @@ static uint32_t w_unit_attrs(e1w *wr, const w_attrs_of *at, odin3_ast_id *ids) {
 
 /* The attributes of the parsed node from (then those of at->then, which win a name both give),
  * evaluated and attached to the elaborated node made, then the unit-flag attributes. */
-static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
-    odin3_ast_span first = odin3_ast_attrs(wr->ast, at->from);
-    odin3_ast_span second = odin3_ast_attrs(wr->ast, at->then);
-    if (first.n + second.n == 0 && at->unit_flags == 0) {
-        return;
-    }
-    if (at->made.v == 0 || !live(wr)) {
-        return;
-    }
-    odin3_ast_id *ids = odin3_arena_alloc(
-        wr->env->arena, ((size_t)first.n + second.n + W_UNIT_ATTRS) * sizeof *ids);
-    if (ids == NULL) {
-        fail(wr, ODIN3_ERR_NO_MEMORY);
-        return;
-    }
+/* The attributes of first and second (the later wins a name both give) evaluated into ids;
+ * how many were made. */
+static uint32_t w_copy_attrs(e1w *wr, const w_attrs_of *at, odin3_ast_span first,
+                             odin3_ast_span second, odin3_ast_id *ids) {
     uint32_t count = 0;
     for (uint32_t i = 0; i < first.n + second.n && live(wr); i++) {
         odin3_ast_id attr = i < first.n ? first.ids[i] : second.ids[i - first.n];
@@ -372,6 +361,22 @@ static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
         ids[count] = w_attr_one(wr, attr);
         count += ids[count].v != 0 ? 1U : 0U;
     }
+    return count;
+}
+
+static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
+    odin3_ast_span first = odin3_ast_attrs(wr->ast, at->from);
+    odin3_ast_span second = odin3_ast_attrs(wr->ast, at->then);
+    if ((first.n + second.n == 0 && at->unit_flags == 0) || at->made.v == 0 || !live(wr)) {
+        return;
+    }
+    odin3_ast_id *ids = odin3_arena_alloc(
+        wr->env->arena, ((size_t)first.n + second.n + W_UNIT_ATTRS) * sizeof *ids);
+    if (ids == NULL) {
+        fail(wr, ODIN3_ERR_NO_MEMORY);
+        return;
+    }
+    uint32_t count = w_copy_attrs(wr, at, first, second, ids);
     count += w_unit_attrs(wr, at, ids + count);
     if (!live(wr)) {
         return;
@@ -2007,9 +2012,10 @@ static odin3_ast_id w_module(e1w *wr) {
     odin3_ast_spec spec = spec_of(wr, ODIN3_AST_MODULE, node);
     spec.name = wr->spec->name;
     odin3_ast_id made = w_make_plain(wr, &spec, mark, node);
-    w_attach_attrs(wr, &(w_attrs_of){.from = node,
-                                     .made = made,
-                                     .unit_flags = odin3_elab1_def(wr->e1, wr->spec->def)->unit_flags});
+    w_attach_attrs(wr,
+                   &(w_attrs_of){.from = node,
+                                 .made = made,
+                                 .unit_flags = odin3_elab1_def(wr->e1, wr->spec->def)->unit_flags});
     return made;
 }
 

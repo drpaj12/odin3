@@ -65,13 +65,14 @@ static uint32_t cells_of(const char *type) {
     uint32_t end = odin3_design_module_end(rs.design);
     for (uint32_t id = 1; id < end; id++) {
         const odin3_module *module = odin3_module_get(rs.design, (odin3_module_id){id});
-        for (uint32_t n = 1; module != NULL && n < odin3_module_node_end(module); n++) {
-            odin3_node_id node = {n};
-            count += odin3_node_live(module, node) &&
-                             strcmp(odin3_celltype_get(rs.design, odin3_node_type(module, node))->name,
-                                    type) == 0
-                         ? 1U
-                         : 0U;
+        for (uint32_t nid = 1; module != NULL && nid < odin3_module_node_end(module); nid++) {
+            odin3_node_id node = {nid};
+            count +=
+                odin3_node_live(module, node) &&
+                        strcmp(odin3_celltype_get(rs.design, odin3_node_type(module, node))->name,
+                               type) == 0
+                    ? 1U
+                    : 0U;
         }
     }
     return count;
@@ -95,43 +96,59 @@ static void test_lib_read_alone(void) {
     TEST_ASSERT_NULL(module_like("unused"));
 }
 
-/* A later read elaborates the instantiated unit, drops the others without a word. */
-static void test_lib_unit_elaborated_where_used(void) {
-    et_src srcs[] = {{"p.vl", k_sub}, {"t.v", k_top}};
-    setup_files(srcs, 2, NULL);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--lib p.vl"), et_log(&rs));
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "t.v"), et_log(&rs));
-    TEST_ASSERT_NOT_NULL_MESSAGE(module_like("top"), et_log(&rs));
-    const odin3_module *sub = module_like("sub");
-    TEST_ASSERT_NOT_NULL_MESSAGE(sub, et_log(&rs));
-    TEST_ASSERT_TRUE_MESSAGE(odin3_module_node_end(sub) > 3, "the unit has a body, not a black box");
-    TEST_ASSERT_NULL(module_like("unused"));
+/* No message mentions a dropped unit, a warning or the not-elaborated list. */
+static void expect_silent(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.warnings, et_log(&rs));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, et_count_with(&rs, ODIN3_LOG_INFO, "not instantiated"),
                                      et_log(&rs));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, et_count_with(&rs, ODIN3_LOG_INFO, "unused"), et_log(&rs));
 }
 
+/* The unit `sub` is a module with a body, not a black box. */
+static void expect_sub_body(void) {
+    const odin3_module *sub = module_like("sub");
+    TEST_ASSERT_NOT_NULL_MESSAGE(sub, et_log(&rs));
+    TEST_ASSERT_TRUE_MESSAGE(odin3_module_node_end(sub) > 3,
+                             "the unit has a body, not a black box");
+}
+
+static void expect_sub_only(void) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(module_like("top"), et_log(&rs));
+    expect_sub_body();
+    TEST_ASSERT_NULL(module_like("unused"));
+}
+
+/* A later read elaborates the instantiated unit, drops the others without a word. */
+static void test_lib_unit_elaborated_where_used(void) {
+    et_src srcs[] = {{"p.vl", k_sub}, {"t.v", k_top}};
+    setup_files(srcs, 2, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--lib p.vl"), et_log(&rs));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "t.v"), et_log(&rs));
+    expect_sub_only();
+    expect_silent();
+}
+
 /* Library units are never top candidates: with one design module the top is that one. */
 static void test_lib_units_not_top_candidates(void) {
-    et_src srcs[] = {{"p.vl", k_sub}, {"t.v", "module only (input a, output y);\n  assign y = a;\n"
-                                              "endmodule\n"}};
+    et_src srcs[] = {{"p.vl", k_sub},
+                     {"t.v", "module only (input a, output y);\n  assign y = a;\n"
+                             "endmodule\n"}};
     setup_files(srcs, 2, NULL);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_verilog", "--lib p.vl"));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "t.v"), et_log(&rs));
     TEST_ASSERT_TRUE_MESSAGE(
         et_find(&rs, ODIN3_LOG_INFO,
-                "top module 'work.only' chosen: the only module no other module instantiates") >=
-            0,
+                "top module 'work.only' chosen: the only module no other module instantiates") >= 0,
         et_log(&rs));
 }
 
 /* A unit chain across two library reads: mid (second read) instantiates leaf (first read). */
 static void test_lib_units_chain_across_reads(void) {
-    et_src srcs[] = {{"p1.vl", "module leaf (input a, output y);\n  assign y = ~a;\nendmodule\n"},
-                     {"p2.vl", "module mid (input a, output y);\n  leaf l (.a(a), .y(y));\n"
-                               "endmodule\n"},
-                     {"t.v", "module top (input a, output y);\n  mid m (.a(a), .y(y));\nendmodule\n"}};
+    et_src srcs[] = {
+        {"p1.vl", "module leaf (input a, output y);\n  assign y = ~a;\nendmodule\n"},
+        {"p2.vl", "module mid (input a, output y);\n  leaf l (.a(a), .y(y));\n"
+                  "endmodule\n"},
+        {"t.v", "module top (input a, output y);\n  mid m (.a(a), .y(y));\nendmodule\n"}};
     setup_files(srcs, 3, NULL);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_verilog", "--lib p1.vl"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_verilog", "--lib p2.vl"));
@@ -143,8 +160,9 @@ static void test_lib_units_chain_across_reads(void) {
 /* A design unit of the same name wins over a library unit. */
 static void test_design_unit_wins_over_lib_unit(void) {
     et_src srcs[] = {{"p.vl", "module m (input a, output y);\n  assign y = ~a;\nendmodule\n"},
-                     {"t.v", "module m (input a, output y);\n  assign y = a;\nendmodule\n"
-                             "module top (input a, output y);\n  m u (.a(a), .y(y));\nendmodule\n"}};
+                     {"t.v",
+                      "module m (input a, output y);\n  assign y = a;\nendmodule\n"
+                      "module top (input a, output y);\n  m u (.a(a), .y(y));\nendmodule\n"}};
     setup_files(srcs, 2, NULL);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_verilog", "--lib p.vl"));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "t.v"), et_log(&rs));
@@ -213,8 +231,8 @@ static bool module_has_attr(const odin3_ast *elab, const char *attr) {
     odin3_ast_span kids = odin3_ast_children(elab, unit);
     for (uint32_t i = 0; i < kids.n; i++) {
         odin3_ast_span attrs = odin3_ast_attrs(elab, kids.ids[i]);
-        for (uint32_t k = 0; odin3_ast_kind_of(elab, kids.ids[i]) == ODIN3_AST_MODULE && k < attrs.n;
-             k++) {
+        for (uint32_t k = 0;
+             odin3_ast_kind_of(elab, kids.ids[i]) == ODIN3_AST_MODULE && k < attrs.n; k++) {
             if (odin3_ast_name(elab, attrs.ids[k]) == key) {
                 return true;
             }
@@ -236,7 +254,8 @@ static const odin3_ast *kept_elaborated(void) {
 static void test_unit_flag_nolatches_recorded(void) {
     et_src srcs[] = {{"p.vl", k_sub}, {"t.v", k_top}};
     setup_files(srcs, 2, NULL);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(rs.design, ODIN3_KEEP_AST_ELABORATED));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_set_keep_ast(rs.design, ODIN3_KEEP_AST_ELABORATED));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_verilog", "--lib --nolatches p.vl"));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "t.v"), et_log(&rs));
     const odin3_ast *elab = kept_elaborated();
@@ -289,9 +308,10 @@ static void test_hard_cell_kept_when_params_fit(void) {
 /* A named parameter the hard cell lacks does not fit either. */
 static void test_named_parameter_not_on_hard_cell(void) {
     et_src srcs[] = {{"p.vl", k_adder},
-                     {"t.v", "module top (input [1:0] a, b, input c, output [1:0] s, output o);\n"
-                             "  adder #(.WIDTH(2)) u (.a(a), .b(b), .cin(c), .sumout(s), .cout(o));\n"
-                             "endmodule\n"}};
+                     {"t.v",
+                      "module top (input [1:0] a, b, input c, output [1:0] s, output o);\n"
+                      "  adder #(.WIDTH(2)) u (.a(a), .b(b), .cin(c), .sumout(s), .cout(o));\n"
+                      "endmodule\n"}};
     setup_files(srcs, 2, TECHLIB);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_verilog", "--lib p.vl"));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "t.v"), et_log(&rs));

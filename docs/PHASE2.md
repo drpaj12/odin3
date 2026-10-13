@@ -800,6 +800,20 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       equivalent. Yosys 0.55's plain flow shorts the four drivers' data, so the equivalence is
       judged against `tribuf -logic` after `proc; flatten`, not the plain Parmys flow. Several enables
       at once: undefined, as a `$pmux`; a mixed tri-state and ordinary net stays an error.
-    - **Adder**: `adder #(W)` on the hard `adder` stays an error, now explained (§17 #78): the
-      library cell is the 1-bit hard block; Parmys's n-bit adder is a soft module of
-      `vtr_primitives.v` mapped to a chain of 1-bit hard adders (3E/Phase 4).
+    - **Adder**: `adder #(W)` on the hard `adder` is an error unless `vtr_primitives.v` is read with
+      `read_verilog --lib` (#21, spec §3.1a, §17 #78): the library cell is the 1-bit hard block;
+      Parmys's n-bit adder is a soft module of that file. With it the micros elaborate and are
+      `elab-equiv` equivalent; matching Parmys's chain of 1-bit hard adders is 3E's (§17 #80).
+
+21. **2D-7b: the library-unit read** (agent default, spec §3.1a, §17 #78, #80; the S-P splice of
+    2F-5 and the two `adder #(W)` micros). `read_verilog --lib [--nolatches] [--nomem2reg] FILE...`
+    keeps a read's modules as library units for later reads (not Yosys `-lib`: no black boxes).
+    They are never top candidates, are dropped without a word when unused, and each is elaborated
+    where a design instantiates it under the flags of the read that supplied it (the design read's
+    flags do not reach it). A unit named like a hard cell (`adder`) replaces the cell for an
+    instance only when the instance's `#()` does not fit the cell, with a warning; otherwise the
+    cell stays, with an info line. `tools/opt-check/sp-splice` (2F-5, not on this branch) reads
+    `vtr_primitives.v` with `--lib --nomem2reg` in place of its plain read; `elab-equiv` and
+    `elab-sweep` take `--lib FILE`. The loose ends of the 2D-7b review (M5) are closed: the "3E"
+    wording, the exemption of a library unit from the cell-name check, and the structural gap to the
+    Parmys goldens (§17 #80).

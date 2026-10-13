@@ -417,7 +417,7 @@ bit follow Yosys (every assignment is an action, the last on a path wins) with a
 names the variable, and on one control path adds that simulation and synthesis may differ. T10
 stays an error. The T9 row leaves §9.1; `reject-2d` holds 23 cases and `ignore-2d` 12. (3) The hard `adder`'s positional width
 (`adder #(W)`) stays a located error that now says why (§17 #78): the library cell is the 1-bit hard block;
-Parmys's n-bit `adder` is a soft module. (4) D3 (internal tri-state nets to mux logic, as `tribuf -logic`:
+Parmys's n-bit `adder` is a soft module (v4.29: it elaborates once `vtr_primitives.v` is read with `--lib`, §3.1a). (4) D3 (internal tri-state nets to mux logic, as `tribuf -logic`:
 a `$pmux` of the data by the enables over an x default) is ruled accepted but not yet implemented; EL-29
 and §17 #45 still describe the error until it lands.
 
@@ -431,6 +431,16 @@ evidence, the several-enabled case, the single-driver case). (3) `elab-equiv --y
 `tribuf -logic` after `proc; flatten` on side B; plain `proc` shorts the drivers, so a bus is not comparable
 without it. Micro `syntax/multi_assignment` and `tests/elab/accept/D3_*.v` are `elab-equiv` equivalent; the
 micro leaves `micro_expect_fail.txt`.
+
+v4.29 (2026-10-13; 2D-7b library read, agent defaults; PHASE2 #21). (1) New §3.1a: `read_verilog
+--lib` keeps a read's modules as library units for later reads, each elaborated where a later design
+instantiates it and under the flags (`--nolatches`, `--nomem2reg`) of the read that supplied it; it is
+not Yosys `read_verilog -lib` (no black boxes). (2) EL-6: a `--lib` unit is exempt from the "has the name
+of cell type" error, and an instance resolves to the unit or to the hard cell by the parameter rule of
+§3.1a. (3) EL-3 gains `--lib`; EL-4 gains the MODULE attributes `odin3_lib*`. (4) §17 #78 is rewritten
+(the `adder #(W)` micros now elaborate, equivalent to Yosys with `vtr_primitives.v` read as a library) and
+#80 added (the structural gap to the Parmys goldens). (5) `elab-equiv` and `elab-sweep` take `--lib FILE`;
+`tests/elab/lib/vtr_primitives.v` is a copy of Parmys's file (trailing blanks stripped) for the micro sweeps.
 
 ## 1. Purpose and scope (EL-1)
 
@@ -510,7 +520,8 @@ typedef struct odin3_elab_opts {
 } odin3_elab_opts;
 ```
 
-`read_verilog` gains `--nolatches`, `--nomem2reg` and `--auto-blackbox` (all off by default);
+`read_verilog` gains `--nolatches`, `--nomem2reg` and `--auto-blackbox` (all off by default) and
+`--lib` (§3.1a: keep the modules as library units, elaborate nothing);
 `--top` is the 1D pass option (`odin3_pass_get_options().top`), which replaces the project top
 (PHASE2 #9). Project parameters (`param top[.inst…].name value`, PRJ records) are read from the
 design's project record by stage 1 (EL-8). The ABI mirror `odin3_elab_options` has the same
@@ -551,7 +562,7 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | Kind | In the elaborated form |
 |---|---|
 | `UNIT` | exactly one; name = the top specialization's name; tail = `MODULE`s, the top first, then every other specialization in the order a breadth-first walk of instances (in source order) first reaches it |
-| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), then the **carriers** (v4.19: one more such `MODULE` per other parameter set an instance uses, named as a module's specialization, its `ATTR` `blackbox` valued with the definition's name as a `STRING`, its ports and `PARAM_DECL` values those of the set; none when the definition's name is a registered cell type), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from the definition's (EL-11; the carriers give it its per-set widths), never an IR module |
+| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept (a specialization of a `read_verilog --lib` unit also carries the synthesized value-less `ATTR`s `odin3_lib` and, when its read had the flag, `odin3_lib_nolatches` / `odin3_lib_nomem2reg`: stage 2 uses them for that module instead of the run's options, v4.29, §3.1a); ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), then the **carriers** (v4.19: one more such `MODULE` per other parameter set an instance uses, named as a module's specialization, its `ATTR` `blackbox` valued with the definition's name as a `STRING`, its ports and `PARAM_DECL` values those of the set; none when the definition's name is a registered cell type), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from the definition's (EL-11; the carriers give it its per-set widths), never an IR module |
 | `PORT_DECL` | only in the port LIST, `IN_HEADER` set, exactly one `DECLARATOR`, in port order; direction sub; `DT` = `reg`, `integer` or none; `NET` field = 1 + the net kind for a net port (never 0: an untyped port is `wire`, EL-24); `SIGNED`; `RANGE` with `NUMBER` bounds or absent (scalar); merged from the non-ANSI declarations (EL-24): the `DECLARATOR`'s `E?` is the value of the port's own declaration or of the merged `wire w = e` / `reg q = v` (v4.15: a net port's `E?` is its net declaration assignment, which the binder queues as `CONTINUOUS` and stage 2 drives the port's net with; a `reg`/`integer` port's is its initial value, as for an ANSI `output reg q = 1'b1`; a value on both declarations is an error), and the `PORT_DECL`'s attributes are those of both declarations (the later declaration wins a name both give) |
 | `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type), except on a black-box `MODULE`, whose `PARAM_DECL`s are bare: no `RANGE`, `SIGNED` or `DT`, the value's `NUMBER` carrying the width and sign (v4.9) |
 | `NET_DECL` | sub ∈ `wire tri wand wor triand trior uwire supply0 supply1`; no `STRENGTH`, no `DELAY`, no `VECTORED`/`SCALARED`; `RANGE`/unpacked `RANGE`s with `NUMBER` bounds; a declarator's `E?` is a net declaration assignment (N7) |
@@ -688,7 +699,9 @@ in order:
 2. a design-unit `MODULE` `N` in another library, the first in project order (when several
    libraries define it, an info line names the one taken: `module 'N' found in libraries 'A',
    'B'; using 'A.N'`);
-3. a library-unit `MODULE` `N`, the first in store order (2C: first file wins);
+3. a library-unit `MODULE` `N`, the first in store order (2C: first file wins); a unit of a
+   `read_verilog --lib` read is one (§3.1a), and when a hard or black-box cell type of the same name
+   is registered, §3.1a's parameter rule decides between item 3 and item 5;
 4. a `UDP_DECL` `N` → Q7's error, at the `UDP_DECL` (§9.1: at the definition, whether or not
    it is instantiated; a library unit's UDP when an instance resolves to it), not at the instance;
 5. a registered cell type `N` of granularity `hard` or `blackbox` (a tech library read earlier,
@@ -705,7 +718,7 @@ name, and `odin3_module_create` refuses a name that is already a cell type). Sta
 every definition it is about to specialize, before stage 2 creates anything, so the IR call can
 never fail with `INVALID_ARG` on user input:
 
-- a design or library `MODULE` (not a `(* blackbox *)` one, which IR-7b reuses) whose name is a
+- a design or `-v`/`-y` library `MODULE` (a `--lib` unit is exempt: §3.1a; not a `(* blackbox *)` one, which IR-7b reuses) whose name is a
   registered cell type of granularity `hard` or `blackbox` — a tech library's `adder`,
   `multiply`, `single_port_ram`, or a model a BLIF read declared — is the located error, at the
   `MODULE`'s keyword (the parsed store records no location for a name; 2C §4.2 step 4 locates
@@ -720,6 +733,58 @@ never fail with `INVALID_ARG` on user input:
   definition is reached from the top (the definitions stage 1 is about to specialize); a module
   named after a built-in cell type is `module '$add' has the name of built-in cell type '$add';
   rename the module` (v4.5).
+
+### 3.1a Library reads: `read_verilog --lib` (2D-7b)
+
+Two problems have one cause: a file of modules cannot be kept for a later design read. Parmys reads
+`vtr_primitives.v` (the n-bit soft `adder`, `multiply`, the RAM wrappers) as real modules, with
+`-nomem2reg` for that read only, and the design after it; and the hard `adder` of a tech library is
+1-bit, so `adder #(W)` has no module to mean. This is **not** Yosys `read_verilog -lib` (which makes
+black boxes): a library unit has a body and is fully elaborated where it is instantiated.
+
+- **The read.** `read_verilog --lib [--nolatches] [--nomem2reg] FILE...` preprocesses and parses the
+  files as a design read does (syntax errors are reported at this read), makes no IR, elaborates
+  nothing (so a file of several uninstantiated modules is not `ambiguous_top`), and keeps its parsed
+  store in the design (as `--parse-only` does) marked with the read's flags. `--auto-blackbox` is
+  refused with `--lib` (it is an option of the design read). `--top` is not looked at.
+- **Later reads.** A `read_verilog` (including another `--lib`) first reads again the files of every
+  kept library store, in read order, after the design files and before the `-v`/`-y` files, as
+  **library `UNIT`s** (EL-6 item 3: never a top candidate, shadowed by a design unit of the same name,
+  the first definition wins, an already read file is skipped). Each such `UNIT` carries the
+  `ODIN3_UNIT_*` flags of its read (`odin3_ast_unit_flags`). The files are parsed again under the later
+  read's defines and include directories; a kept unit costs only that parse.
+- **Per-unit flags.** The flags of the *supplying* read replace, never add to, the design read's:
+  a module defined by a `--lib` read elaborates under that read's `--nolatches` and `--nomem2reg`
+  whatever the reading design says, and the design read's flags do not reach it. Stage 1 writes the
+  elaborated `MODULE` of such a unit with the value-less attributes `odin3_lib` (the marker) and
+  `odin3_lib_nolatches` / `odin3_lib_nomem2reg` when set; stage 2 (`odin3_elab2_enter`) reads them
+  and uses them for that module in place of the run's options. `--auto-blackbox` is a design-read
+  option and stays the run's. The attributes are not copied to the IR.
+- **Unused units.** A library unit nothing instantiates is dropped without a message (the "not
+  instantiated under the top" info line lists design units only).
+- **Precedence against a hard cell.** A `--lib` unit may carry the name of a registered hard or
+  black-box cell type (`adder`, `multiply`, `single_port_ram`): it is exempt from the "has the name
+  of cell type" error of EL-6, because a design that reads both a tech library and
+  `vtr_primitives.v` is exactly Parmys's situation. Which one an instance means is never silent, and
+  is decided by the instance's `#()`:
+  1. every value fits a parameter of the cell (no `#()`; ordered values no more than the cell's
+     parameters; every named parameter one of the cell's): the **hard cell**, with one info line per
+     name (`instance of 'adder' uses the hard cell 'adder': its parameters fit the cell, so the
+     library unit of that name (read with --lib) is not used`). The 1-bit `adder u(...)` therefore
+     stays the hard block the BLIF goldens instantiate;
+  2. otherwise (`adder #(4)`, `adder #(.WIDTH(4))`) the **library unit**, with the warning `instance of
+     'adder' uses the library unit 'adder' (read with --lib), not the hard cell of that name: its
+     parameters do not fit the cell`, once per `INSTANTIATION`.
+  The decision reads only the parameter list (not port names or widths). A design that wants one
+  meaning everywhere reads no `--lib` file defining the name, or no tech library defining the cell.
+  The unit's modules take the `$2` suffix on a clash with the cell type (EL-9), so
+  `odin3_module_create` never sees the name; a shadowing unit cannot be the `--top` (`unknown_top:
+  'adder' is a library unit with the name of a registered cell type, so it cannot be the top;
+  rename it`).
+- **Decided here (agent defaults).** The flag spelling `--lib`; precedence by parameter fit; the
+  kept store is re-parsed rather than copied (the elaborated form has no way to merge two stores);
+  nothing is elaborated before a design instantiates it (so an error inside a unused unit is never
+  reported, unlike Parmys, which simplifies every module: §17 #2).
 
 ### 3.2 Top selection (EL-7)
 
@@ -2845,8 +2910,9 @@ and reported, never relaxed (2A's rule).
 | 75 | an unrolled `for` that never ends (`reg [3:0] k; for (k = 7; k >= 0; k = k - 1)`) is the located error `for-loop never ends: 'k' takes the value 7 again` when its test and step read only the variable (Brent's cycle check), else `loop creates more than 2097152 IR objects (is it endless?)` (`ODIN3_ELAB_MAX_LOOP_OBJECTS`) or the iteration cap `loop exceeds 1048576 iterations` | Yosys 0.55 has no limit: it unrolls until it runs out of memory | the caps of EL-37 | review M3: the cap used to fire only after 5.7 GB of cells |
 | 76 | an `always` with no event control (`always x = a;`, `always #5 clk = ~clk;`) is `always @*`, with the warning "always without an event control treated as always @*" (T6; Peter 2026-10-13, PHASE2 #20) | Yosys 0.55 reads it the same way: the process has no sync rule, so it is combinational (verified: micros `task_endtask/{inside_port,outside_port,task_call_function,task_call_task}` are `elab-equiv`-equivalent) | an `always` with no timing runs forever in simulation (a zero-delay loop hangs) | accepted for Parmys compatibility; the warning names the risky construct |
 | 77 | a bit assigned by both `=` and `<=` is accepted with a warning (T9; Peter 2026-10-13, PHASE2 #20); on one control path the warning says that simulation and synthesis may differ | Yosys 0.55 accepts it without a word: each assignment is an action and the last on a path wins (verified: `elab-equiv` equivalent for `q = a; q <= b;`, `q <= b; q = a;`, if/case arms, `full/matmul`; `syntax/multi_clock_reader_writer` equals Yosys's netlist under a merged-clock abstraction, `equiv-check` being single-clock) | a simulator applies the nonblocking update after the blocking ones, so `q <= b; q = a;` ends as `b` there and `a` in the netlist | Parmys compatibility; the warning marks the case where the netlist and a simulation disagree |
-| 78 | `adder #(W) u (...)` (a positional or named width, bus connections) on the library's hard `adder` is the located error "too many parameter values for cell type 'adder' (1 given, 0 parameters); the library cell has fixed port widths (an n-bit adder is a soft module Parmys supplies, not modelled: spec 17 #78)"; micros `micro/adder_hard_block` and `micro/hard_adder_cin_propagation` stay in `micro_expect_fail.txt` (2D-7b ruling) | Parmys reads `vtr_primitives.v`, whose `adder #(WIDTH=1)` is a soft module (`assign {cout, sumout} = a + b + cin`, buses a, b, sumout, 1-bit cin and cout) that its adder pass maps to a chain of 1-bit hard adders (the goldens' `adder_hard_block` netlist) | — | `lib/vtr.o3lib` declares `adder` as the 1-bit hard block the BLIF goldens instantiate (ports a, b, cin, cout, sumout; no parameter), and the writers, the BLIF reader's IR-7b check and the simulator rely on that; binding `#(W)` to a parameter would need a W-bit hard adder with no BLIF form (VPR reads 1-bit adders only) or the soft module and the chain mapping, which are 3E/Phase 4's. Bit-exact: nothing is dropped, the elaboration fails |
+| 78 | `adder #(W) u (...)` (a positional or named width, bus connections) on the library's 1-bit hard `adder` with no `--lib` unit of that name is the located error "too many parameter values for cell type 'adder' (1 given, 0 parameters); the library cell has fixed port widths (an n-bit adder is a soft module Parmys supplies: read its vtr_primitives.v with read_verilog --lib, spec 3.1a)". With `read_verilog --lib vtr_primitives.v` the instance takes the library unit (the n-bit soft `adder #(WIDTH)`), with a warning (§3.1a precedence); micros `micro/adder_hard_block` and `micro/hard_adder_cin_propagation` elaborate and are `elab-equiv` equivalent to Yosys 0.55 with the same file read as a library (2D-7b) | Parmys reads `vtr_primitives.v`, whose `adder #(WIDTH=1)` is a soft module (`assign {cout, sumout} = a + b + cin`, buses a, b, sumout, 1-bit cin and cout) that its adder pass maps to a chain of 1-bit hard adders (the goldens' `adder_hard_block` netlist) | the 2D result is the soft module's `$add`, not the chain (see #80); a 1-bit `adder u(...)` keeps the hard cell even when the library is read | `lib/vtr.o3lib` declares `adder` as the 1-bit hard block the BLIF goldens instantiate (ports a, b, cin, cout, sumout; no parameter), and the writers, the BLIF reader's IR-7b check and the simulator rely on that; the n-bit instance needs the soft module, which the library read supplies. Bit-exact: the function is the same (`elab-equiv`), the structure is not |
 | 79 | a tri-state driver on an internal net (a net with no bit on a top-level output or inout port once all merges are done) becomes mux logic, as `tribuf -logic`: the drivers of one net list are one `$pmux` (A = x, B = data with the last driver first, S = enables) and the warning "tri-state drivers on internal net 'data' converted to logic (no driver enabled: x; several enabled: undefined)" names it (D3; Peter 2026-10-13, PHASE2 #20). With several enables on at once the value is undefined (the `$pmux` rule; the netlist is the OR of the selected data); with none it is x; a net with a tri-state and an ordinary driver, overlapping but different bit lists, a driver over port and internal bits, a module-below-top `inout` or `output` port (review I1: the instance may drive a top-level port) and a child `inout` pin on the net stay located errors (§6.7) | Yosys 0.55 plain (`read_verilog; proc`) shorts the drivers: every driver's data reaches the net whatever the enables (micro `syntax/multi_assignment` becomes `busout = enable ? data : f` with `data` driven by the four data inputs at once, so `equiv-check` rejects its b.blif: "more than one driver"). With `tribuf -logic` after `proc; flatten` (`elab-equiv --yosys-tribuf`) the micro and `tests/elab/accept/D3_{single_driver,bus_one_hot,disjoint_halves}.v` are equivalent. `tribuf -logic` also keeps a `$tribuf` on any net with a bit on an output port, which 2D matches; it merges with the newest driver first and 2D follows it | a simulator gives z while no driver is on and x for contention; the netlist gives x (a don't care `opt` may resolve to any driver) and the OR of the data | Parmys reads the micro (it shorts the drivers, the same as plain Yosys); the ruling follows the oracle's `tribuf -logic`, the one Yosys flow that treats the construct as a bus; the warning names the risky net | known divergence for 2H: the netlist is not the golden Parmys gives for `multi_assignment` (Parmys keeps only `bus0`; Yosys shorts the four drivers), so the 2H table shows "differs" there. Constant enables (`1'b1 ? d : 'bz`) are not comparable with Yosys (it folds them into a plain connection, equiv-check then sees two drivers); 2D gives a `$pmux` over the constant selects (unit test `test_tribuf_constant_enables`). The netlist is not the golden Parmys gives for `multi_assignment` (shorted drivers): it models a bus, which is what the source says. The don't care case is the part a user must not rely on |
+| 80 | a `read_verilog --lib` unit that shares a hard or black-box cell type's name (`vtr_primitives.v`'s `adder`, `multiply`, `single_port_ram` beside a tech library) is chosen per instance by the parameter rule of §3.1a, not always (Parmys: always the soft module, because it reads no cell of that name) | Parmys resolves every instance of `adder` to the soft module of `vtr_primitives.v` and maps it to hard adders later, in its own pass; the structural result for `adder #(W)` is a chain of 1-bit hard adders, ours a W-bit `$add` (2D-7b: `micro/adder_hard_block` and `micro/hard_adder_cin_propagation` are equivalent to Yosys but not netlist-identical to the Parmys goldens until 3E maps soft adders) | a 1-bit or parameterless `adder`, and `single_port_ram`/`dual_port_ram` with the cell's own parameters, stay the hard cells even when `vtr_primitives.v` is read; Parmys would build the soft RAM wrapper and map it later | an unconditional unit-over-cell rule would turn every 1-bit hard adder of a design into `$add` silently (review M5); a unit-never rule would make `adder #(W)` unreachable. The parameter rule keeps the golden-compatible meaning of every instance the cell can express and warns on each one it cannot | Bit-exact in function; the choice is logged (info or warning), never silent |
 
 ## 18. Implementation split (EL-51)
 

@@ -1108,7 +1108,7 @@ static odin3_elab1_gparam *given_named(odin3_elab1 *e1, uint32_t first, uint32_t
 const char *odin3_elab1_fixed_width_why(const odin3_celltype_def *type) {
     return type != NULL && type->n_params == 0 && strcmp(type->name, "adder") == 0
                ? "; the library cell has fixed port widths (an n-bit adder is a soft module Parmys "
-                 "supplies, not modelled: spec 17 #78)"
+                 "supplies: read its vtr_primitives.v with read_verilog --lib, spec 3.1a)"
                : "";
 }
 

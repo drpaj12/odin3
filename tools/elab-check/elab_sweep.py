@@ -315,6 +315,7 @@ class Config:
     golden_root: Path | None
     techlib: str | None = None
     bench_report: str | None = None
+    libs: tuple[str, ...] = ()  # files read as library units first (--lib; 2D-7b)
 
     def cap_of(self, item: Item) -> int:
         for suffix, cap in self.caps.items():
@@ -345,9 +346,11 @@ def run_elab(cfg: Config, item: Item, cap: int) -> Outcome:
     start = time.monotonic()
     top = top_for(item, cfg.tops, cfg.golden_root)
     argv = [cfg.odin3, *(["--top", top] if top else []), "--elab-only", str(item.path)]
-    if cfg.techlib:  # the arch's hard blocks (adder, multiply, *_port_ram) come from a tech library
+    if cfg.techlib or cfg.libs:  # hard blocks (adder, ...) from a tech library, soft ones --lib
+        pre = f"read_techlib {cfg.techlib}; " if cfg.techlib else ""
+        pre += "".join(f"read_verilog --lib --nomem2reg --nolatches {lib}; " for lib in cfg.libs)
         argv = [cfg.odin3, *(["--top", top] if top else []), "-p",
-                f"read_techlib {cfg.techlib}; read_verilog --nolatches {item.path}; stats"]
+                f"{pre}read_verilog --nolatches {item.path}; stats"]
     done, failed = run_child(argv, cap, start)
     if done is None:
         assert failed is not None
@@ -391,7 +394,8 @@ def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
     argv = [sys.executable, str(ELAB_EQUIV), "--odin3", cfg.odin3, "--yosys", cfg.yosys,
             "--equiv-check", cfg.equiv_check, "--mem-cap", str(cap), "--unmap-enables",
             *(["--top", top] if top else []), *(["--techlib", cfg.techlib] if cfg.techlib else []),
-            str(item.path)]
+            *[arg for lib in cfg.libs for arg in ("--lib", lib)],
+            *(["--lib-nomem2reg"] if cfg.libs else []), str(item.path)]
     try:  # elab-equiv caps each of its own children
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
                               timeout=TIMEOUT_S, check=False, pass_fds=lock_fds())
@@ -555,6 +559,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--techlib", type=Path,
                     help="read this tech library (.o3lib) before each file: the hard blocks "
                          "(adder, multiply, single/dual_port_ram) the micros instantiate")
+    ap.add_argument("--lib", type=Path, action="append", default=[], metavar="FILE",
+                    help="read FILE as library units (read_verilog --lib --nomem2reg) before each "
+                         "file: Parmys's vtr_primitives.v, for the micros' `adder #(W)`")
     ap.add_argument("--tops", type=Path, help="one `<file> <top>` per line")
     ap.add_argument("--golden-root", type=Path, default=None,
                     help="the Parmys golden tree for --top (default: micro-top's)")
@@ -595,7 +602,8 @@ def build_config(args: argparse.Namespace) -> Config:
                   _abs(args.yosys) if args.equiv else None,
                   _abs(args.equiv_check) if args.equiv else None,
                   _abs(args.bench) if args.bench else None, cap, caps, tops, golden,
-                  _abs(args.techlib) if args.techlib else None, args.bench_report)
+                  _abs(args.techlib) if args.techlib else None, args.bench_report,
+                  tuple(str(Path(lib).resolve()) for lib in args.lib))
 
 
 def _abs(tool: str | None) -> str | None:

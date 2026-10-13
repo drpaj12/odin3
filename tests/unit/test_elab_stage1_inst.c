@@ -735,7 +735,8 @@ static void test_celltype_adder_has_no_width_parameter(void) {
             NULL, TECHLIB);
     expect_only_error("t.v:2:11: error: too many parameter values for cell type 'adder' (1 given, "
                       "0 parameters); the library cell has fixed port widths (an n-bit adder is a "
-                      "soft module Parmys supplies, not modelled: spec 17 #78)");
+                      "soft module Parmys supplies: read its vtr_primitives.v with read_verilog "
+                      "--lib, spec 3.1a)");
 }
 
 /* The named form gets the same reason (review M1). */
@@ -745,7 +746,7 @@ static void test_celltype_adder_named_width_parameter(void) {
             NULL, TECHLIB);
     expect_only_error("t.v:2:11: error: cell type 'adder' has no parameter 'WIDTH'; the library "
                       "cell has fixed port widths (an n-bit adder is a soft module Parmys "
-                      "supplies, not modelled: spec 17 #78)");
+                      "supplies: read its vtr_primitives.v with read_verilog --lib, spec 3.1a)");
 }
 
 static void test_celltype_errors(void) {
