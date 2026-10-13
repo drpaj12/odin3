@@ -347,7 +347,8 @@ static void test_lib_unit_keeps_its_own_macros(void) {
 }
 
 /* The same, with the macro defined by an earlier file of the --lib read that holds no module (it
- * has no UNIT of its own to be found again), and a macro the later read would leak the other way. */
+ * has no UNIT of its own to be found again), and a macro the later read would leak the other way.
+ */
 static void test_lib_unit_sees_macro_of_unitless_lib_file(void) {
     et_src srcs[] = {{"d.vl", "`define WIDE\n"},
                      {"p.vl", "`ifdef WIDE\nmodule sub (input a, output y);\n"

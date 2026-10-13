@@ -395,7 +395,13 @@ static odin3_status mw_start(mw_write *mw) {
  * its word's and the variable-address writes' record of the other kind, a variable-address write
  * against any write of the other kind. */
 
-enum { MK_FLAG = 63, MK_CLASS_SHIFT = 61, MK_MEM_SHIFT = 29, MK_WORD_BITS = 28 };
+enum {
+    MK_FLAG = 63,
+    MK_CLASS_SHIFT = 61,
+    MK_MEM_SHIFT = 29,
+    MK_WORD_BITS = 28,
+    MK_MEM_ID_SHIFT = 32
+};
 typedef enum { MK_WORD = 0, MK_VAR = 1, MK_ANY = 2 } mk_class;
 
 static uint64_t mem_key(uint32_t mem, mk_class cls, uint32_t word) {
@@ -424,13 +430,13 @@ static bool const_word(const odin3_sig *addr, uint32_t *word) {
 }
 
 odin3_status pg_mem_check_mixed(odin3_pg *pg, const pg_mem_ref *ref) {
-    odin3_elab2 *e2 = pg->e2;
+    const odin3_elab2 *e2 = pg->e2;
     const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, ref->mem);
     uint32_t word = 0;
     bool known = const_word(ref->addr, &word);
     uint64_t mine = ref->blocking ? 1U : 0U;
     pg_mixed_subject subj = {
-        ((uint64_t)2 << 32) | ref->mem,
+        ((uint64_t)2 << MK_MEM_ID_SHIFT) | ref->mem,
         odin3_strtab_get(odin3_design_strtab(e2->design), odin3_symbol_get(e2->st, mem->sym)->name),
         ref->stmt};
     uint64_t own = known ? mem_key(ref->mem, MK_WORD, word) : mem_key(ref->mem, MK_VAR, 0);

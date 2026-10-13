@@ -207,8 +207,8 @@ static odin3_status parse_kept_stream(odin3_rv *rv, const odin3_ast *kept,
 static odin3_status read_kept_store(odin3_rv *rv, const odin3_ast *kept) {
     odin3_status st = ODIN3_OK;
     const odin3_ast_stream *stream = NULL;
-    for (uint32_t idx = 0; st == ODIN3_OK && !rv->vl.stop &&
-                           (stream = odin3_ast_stream_at(kept, idx)) != NULL;
+    for (uint32_t idx = 0;
+         st == ODIN3_OK && !rv->vl.stop && (stream = odin3_ast_stream_at(kept, idx)) != NULL;
          idx++) {
         st = parse_kept_stream(rv, kept, stream);
     }

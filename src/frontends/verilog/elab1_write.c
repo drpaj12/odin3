@@ -329,7 +329,7 @@ static const struct {
 } k_unit_attrs[] = {{"odin3_lib", ODIN3_UNIT_LIB},
                     {"odin3_lib_nolatches", ODIN3_UNIT_NOLATCHES},
                     {"odin3_lib_nomem2reg", ODIN3_UNIT_NOMEM2REG}};
-enum { W_UNIT_ATTRS = 3 };
+enum { W_UNIT_ATTRS = 3, W_ATTR_MSG = 160 };
 
 /* A value-less ATTR named text on made. */
 static odin3_ast_id w_flag_attr(e1w *wr, odin3_ast_id made, const char *text) {
@@ -366,7 +366,7 @@ static bool w_reserved_attr(e1w *wr, odin3_ast_id attr) {
     if (strncmp(name, k_prefix, sizeof k_prefix - 1U) != 0) {
         return false;
     }
-    char text[160];
+    char text[W_ATTR_MSG];
     (void)snprintf(text, sizeof text, "attribute '%s' is reserved for library reads; ignored",
                    name);
     odin3_elab1_report(wr->env->e1, ODIN3_LOG_WARN, odin3_ast_loc(wr->ast, attr), text);

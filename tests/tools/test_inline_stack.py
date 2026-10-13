@@ -5,8 +5,8 @@ a 2 MiB stack (``ulimit -s 2048``) with the default caps: the calls are inlined 
 frame stack (src/frontends/elab/pg_call.c), not by C recursion. A function that calls itself is
 still refused, with its located error. A call nested in a call's arguments in a continuous
 ``assign`` still nests by C stack (PR 2D-7b review M9); it is capped at 128 levels with a located
-error, so it can never overflow the stack. CTest ``python_tools`` runs this with ODIN3_CLI set to the
-odin3 executable; without it the tests are skipped.
+error, so it can never overflow the stack. CTest ``python_tools`` runs this with ODIN3_CLI set to
+the odin3 executable; without it the tests are skipped.
 """
 
 from __future__ import annotations

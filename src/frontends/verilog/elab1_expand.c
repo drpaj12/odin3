@@ -131,7 +131,7 @@ static bool port_pair(const odin3_elab1_env *env, const odin3_elab1_slot *first,
  * accepts `output q; reg [3:0] q [0:1];` and keeps the one-bit port and the array apart (the port
  * stays undriven); the merged object here would drop the dimension without a word, so it is a
  * located error at the declarator that has them (spec 17 #84). */
-static void unpacked_port(odin3_elab1_env *env, const odin3_elab1_slot *first,
+static void unpacked_port(const odin3_elab1_env *env, const odin3_elab1_slot *first,
                           const odin3_elab1_slot *proto) {
     const odin3_elab1_slot *arr = proto->n_unpacked != 0 ? proto : first;
     if (arr->n_unpacked != 0) {
