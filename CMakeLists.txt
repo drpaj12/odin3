@@ -121,6 +121,13 @@ add_library(odin3_core OBJECT
     src/passes/opt/merge.c
     src/passes/opt/muxtree.c
     src/passes/opt/reduce.c
+    src/passes/opt/dff.c
+    src/passes/opt/dff_state.c
+    src/passes/opt/dff_gates.c
+    src/passes/opt/dff_rules.c
+    src/passes/opt/dff_constbits.c
+    src/passes/opt/dff_merge.c
+    src/passes/opt/dff_muxes.c
     src/passes/opt/register.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
@@ -595,9 +602,11 @@ if(BUILD_TESTING)
     # 2F Task 1: the opt context and the rewrite kit (every test_opt_* links proc_build.c).
     odin3_add_unit_test(test_opt_kit)
     target_sources(test_opt_kit PRIVATE tests/unit/proc_build.c)
-    # 2F Task 2: the FF model (Tasks 11-12 extend test_opt_dff with opt_dff's rules).
+    # 2F Task 2: the FF model; Tasks 11-12: opt_dff's rules (test_opt_dff).
     odin3_add_unit_test(test_opt_dff)
     target_sources(test_opt_dff PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_dff PRIVATE
+        ODIN3_DFF_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/dff")
     # 2F Task 3: opt_clean.
     odin3_add_unit_test(test_opt_clean)
     target_sources(test_opt_clean PRIVATE tests/unit/proc_build.c)

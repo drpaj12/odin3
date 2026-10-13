@@ -1,0 +1,15 @@
+# yosys 0.55 (VTR build): read_rtlil arst_always.il; opt_dff; write_rtlil
+# input: Yosys 0.55's own write_rtlil of the `read_verilog -icells` heredoc of tests/opt/opt_dff_arst.ys (first block) in the Yosys source (arst_always.il), edited by sed in two places: `parameter \X_POLARITY 1'b` written `b` and `parameter signed \WIDTH` written `parameter \WIDTH` (proc_build.c reads plain integer polarity and width parameters; the 2D-1 read_rtlil gap), in every cell
+# flags:
+const Q 0 0
+const Q 1 1
+const Q 10 0
+const Q 11 1
+const Q 2 0
+const Q 3 1
+const Q 4 0
+const Q 5 1
+const Q 6 0
+const Q 7 1
+const Q 8 0
+const Q 9 1

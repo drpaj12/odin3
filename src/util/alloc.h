@@ -21,4 +21,16 @@ void *odin3_util_calloc(size_t bytes);
  */
 void odin3_util_set_alloc_fail_after(long n);
 
+/*
+ * The persistent form (what real out-of-memory does): n allocations succeed, then every later one
+ * fails until odin3_util_set_alloc_fail_after(-1).
+ */
+void odin3_util_set_alloc_fail_from(long n);
+
+/* A burst: `after` allocations succeed, the next `len` fail, then the hook disables itself. */
+typedef struct odin3_alloc_window {
+    long after, len;
+} odin3_alloc_window;
+void odin3_util_set_alloc_fail_window(odin3_alloc_window window);
+
 #endif

@@ -47,13 +47,12 @@ static const char *const k_sub_names[ODIN3_OPT_N_SUBS] = {
     "opt_expr", "opt_merge", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff", "opt_clean"};
 
 /*
- * Point (e): the passes that are still stubs. Each later task removes its own line (opt_dff: Task
- * 11 and 12; opt: 13; opt_share: 14).
+ * Point (e): the passes that are still stubs. Each later task removes its own line (opt: 13;
+ * opt_share: 14).
  */
 static const char *const k_stubs[] = {
     "opt",
     "opt_share",
-    "opt_dff",
 };
 
 static bool is_stub(const char *name) {
@@ -212,7 +211,7 @@ typedef odin3_status (*sub_run_fn)(odin3_pass_ctx *ctx, odin3_design *design,
 static const sub_run_fn k_sub_run[ODIN3_OPT_N_SUBS] = {
     [ODIN3_OPT_SUB_EXPR] = odin3_opt_expr_design,    [ODIN3_OPT_SUB_MERGE] = odin3_opt_merge_run,
     [ODIN3_OPT_SUB_MUXTREE] = odin3_opt_muxtree_run, [ODIN3_OPT_SUB_REDUCE] = odin3_opt_reduce_run,
-    [ODIN3_OPT_SUB_CLEAN] = odin3_opt_clean_run,
+    [ODIN3_OPT_SUB_DFF] = odin3_opt_dff_run,         [ODIN3_OPT_SUB_CLEAN] = odin3_opt_clean_run,
 };
 
 /* How much the sub-pass changed so far: the sum of its counters (a change is growth). */
@@ -339,10 +338,34 @@ odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed) {
 
 /*
  * The counter names: odin3_opt_rule's cover names (odin3_opt_rule_name), the folds' "const.$<type>"
- * (odin3_opt_fold_name) and odin3_opt_dff_action's (Task 11, printed as "opt_dff.<name>"). A NULL
- * name has no output.
+ * (odin3_opt_fold_name) and odin3_opt_dff_action's (printed as "opt_dff.<name>"). A NULL name has
+ * no output.
  */
-static const char *const k_dff_names[ODIN3_OPT_DFF_MAX_ACTIONS];
+static const char *const k_dff_names[ODIN3_OPT_DFF_MAX_ACTIONS] = {
+    [ODIN3_OPT_DFF_NEVER_CLR] = "never_active_clr",
+    [ODIN3_OPT_DFF_NEVER_SET] = "never_active_set",
+    [ODIN3_OPT_DFF_ALWAYS_CLR] = "always_active_clr",
+    [ODIN3_OPT_DFF_ALWAYS_SET] = "always_active_set",
+    [ODIN3_OPT_DFF_CLR_SET_TO_ARST] = "clr_set_to_arst",
+    [ODIN3_OPT_DFF_NEVER_ALOAD] = "never_active_aload",
+    [ODIN3_OPT_DFF_ALWAYS_ALOAD] = "always_active_aload",
+    [ODIN3_OPT_DFF_ALOAD_TO_ARST] = "aload_to_arst",
+    [ODIN3_OPT_DFF_NEVER_ARST] = "never_active_arst",
+    [ODIN3_OPT_DFF_ALWAYS_ARST] = "always_active_arst",
+    [ODIN3_OPT_DFF_NEVER_SRST] = "never_active_srst",
+    [ODIN3_OPT_DFF_ALWAYS_SRST] = "always_active_srst",
+    [ODIN3_OPT_DFF_NEVER_EN] = "never_active_en",
+    [ODIN3_OPT_DFF_ALWAYS_EN] = "always_active_en",
+    [ODIN3_OPT_DFF_CONST_CLK] = "const_clk",
+    [ODIN3_OPT_DFF_D_EQ_Q] = "d_eq_q",
+    [ODIN3_OPT_DFF_AD_EQ_Q] = "ad_eq_q",
+    [ODIN3_OPT_DFF_ADD_SRST] = "add_srst",
+    [ODIN3_OPT_DFF_ADD_EN] = "add_en",
+    [ODIN3_OPT_DFF_CONST_BIT_0] = "const_bit_0",
+    [ODIN3_OPT_DFF_CONST_BIT_1] = "const_bit_1",
+    [ODIN3_OPT_DFF_CONST_BIT_X] = "const_bit_x",
+    [ODIN3_OPT_DFF_CONST_BIT_Z] = "const_bit_z",
+};
 
 enum { STAT_NAME_LEN = 96 };
 

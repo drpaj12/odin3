@@ -392,6 +392,61 @@ static void test_connect_swap(void) {
     TEST_ASSERT_EQUAL_UINT32(0, odin3_net_driver_count(fx.module, wnet("y", 0)));
 }
 
+/* defer_ties (opt_dff): kit_connect deletes the node and queues the merge; nothing reads the tie
+ * until the flush, which then makes it (and the alias y2 of the net follows). */
+static void test_connect_deferred(void) {
+    build(k_alias);
+    odin3_node_id gate = node_named("g");
+    odin3_net_id net_a = wnet("a", 0);
+    odin3_net_id net_y = wnet("y", 0);
+    fx.oc.defer_ties = true;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, connect_to(gate, &net_a, 1));
+    TEST_ASSERT_FALSE(odin3_node_live(fx.module, gate));
+    TEST_ASSERT_EQUAL_size_t(1, fx.oc.ties.len);
+    TEST_ASSERT_EQUAL_UINT32(net_y.v, pin_net_of(node_named("r"), "A", 0).v); /* not tied yet */
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_driver_count(fx.module, net_y));
+    check_full();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_flush_ties(&fx.oc));
+    TEST_ASSERT_EQUAL_size_t(0, fx.oc.ties.len);
+    TEST_ASSERT_EQUAL_UINT32(net_a.v, pin_net_of(node_named("r"), "A", 0).v);
+    TEST_ASSERT_EQUAL_UINT32(net_a.v, wnet("y2", 0).v);
+    check_full();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_flush_ties(&fx.oc)); /* empty: nothing to do */
+}
+
+static const char *const k_loose = "module \\m\n  wire \\w1\n  wire \\w2\n  wire \\w3\nend\n";
+
+/* A chain of queued ties: w1 into w2, then a pair naming w1 (merged away by the first) still
+ * lands: w2 into w3. */
+static void test_flush_ties_chain(void) {
+    build(k_loose);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_reserve_ties(&fx.oc, 3));
+    odin3_kit_defer_tie(&fx.oc, wnet("w2", 0), wnet("w1", 0));
+    odin3_kit_defer_tie(&fx.oc, wnet("w3", 0), wnet("w1", 0));
+    odin3_kit_defer_tie(&fx.oc, wnet("w3", 0), wnet("w3", 0)); /* a net with itself: nothing */
+    TEST_ASSERT_EQUAL_size_t(3, fx.oc.ties.len);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_flush_ties(&fx.oc));
+    TEST_ASSERT_EQUAL_size_t(0, fx.oc.ties.len);
+    TEST_ASSERT_EQUAL_UINT32(wnet("w3", 0).v, wnet("w1", 0).v);
+    TEST_ASSERT_EQUAL_UINT32(wnet("w3", 0).v, wnet("w2", 0).v);
+    check_full();
+}
+
+/* NO_MEMORY in the flush's own reservation leaves the queue as it was. */
+static void test_flush_ties_oom(void) {
+    build(k_loose);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_reserve_ties(&fx.oc, 1));
+    odin3_kit_defer_tie(&fx.oc, wnet("w2", 0), wnet("w1", 0));
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_kit_flush_ties(&fx.oc));
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_size_t(1, fx.oc.ties.len);
+    TEST_ASSERT_NOT_EQUAL_UINT32(wnet("w2", 0).v, wnet("w1", 0).v);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_flush_ties(&fx.oc));
+    TEST_ASSERT_EQUAL_UINT32(wnet("w2", 0).v, wnet("w1", 0).v);
+    check_full();
+}
+
 static void test_connect_port(void) {
     build("module \\m\n"
           "  wire input 1 \\a\n"
@@ -1148,6 +1203,9 @@ int main(void) {
     RUN_TEST(test_connect_constant);
     RUN_TEST(test_connect_self);
     RUN_TEST(test_connect_swap);
+    RUN_TEST(test_connect_deferred);
+    RUN_TEST(test_flush_ties_chain);
+    RUN_TEST(test_flush_ties_oom);
     RUN_TEST(test_connect_port);
     RUN_TEST(test_connect_misuse);
     RUN_TEST(test_new_cell);

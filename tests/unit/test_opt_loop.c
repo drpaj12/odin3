@@ -204,7 +204,6 @@ static void test_parse_unknown(void) {
 static const char *const k_stub_passes[] = {
     "opt",
     "opt_share",
-    "opt_dff",
 };
 
 static void test_stubs(void) {
@@ -542,6 +541,47 @@ static void test_stats_expr(void) {
     check_full();
 }
 
+/*
+ * opt_dff --opt-stats (2F plan ruling R3): one "opt: rule opt_dff.<name>" line per non-zero action
+ * counter, sorted by name (not in enum order: never_active_srst comes after always_active_en
+ * alphabetically, before it in the enum).
+ */
+static void test_stats_dff(void) {
+    build("module \\m\n  wire input 1 \\clk\n  wire input 2 \\d\n  wire output 3 \\q1\n"
+          "  wire output 4 \\q2\n  wire output 5 \\q3\n  wire output 6 \\q4\n"
+          "  cell $adff \\f1\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+          "    parameter \\ARST_POLARITY 1\n    parameter \\ARST_VALUE 1'1\n"
+          "    connect \\CLK \\clk\n    connect \\ARST 1'1\n    connect \\D \\d\n"
+          "    connect \\Q \\q1\n  end\n"
+          "  cell $dffe \\f2\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+          "    parameter \\EN_POLARITY 1\n    connect \\CLK \\clk\n    connect \\EN 1'1\n"
+          "    connect \\D \\d\n    connect \\Q \\q2\n  end\n"
+          "  cell $sdff \\f3\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+          "    parameter \\SRST_POLARITY 1\n    parameter \\SRST_VALUE 1'0\n"
+          "    connect \\CLK \\clk\n    connect \\SRST 1'0\n    connect \\D \\d\n"
+          "    connect \\Q \\q3\n  end\n"
+          "  cell $dff \\f4\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+          "    connect \\CLK \\clk\n    connect \\D 1'0\n    connect \\Q \\q4\n  end\nend\n");
+    n_lines = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_dff", "--opt-stats"));
+    static const char *const k_want[] = {
+        "opt: rule opt_dff.always_active_arst 1", "opt: rule opt_dff.always_active_en 1",
+        "opt: rule opt_dff.const_bit_0 1", "opt: rule opt_dff.never_active_srst 1"};
+    uint32_t seen = 0;
+    for (uint32_t i = 0; i < n_lines; i++) {
+        if (strncmp(lines[i].text, "opt: rule", strlen("opt: rule")) == 0) {
+            TEST_ASSERT_TRUE(seen < sizeof k_want / sizeof k_want[0]);
+            TEST_ASSERT_EQUAL_STRING(k_want[seen], lines[i].text);
+            TEST_ASSERT_EQUAL_INT(ODIN3_LOG_INFO, lines[i].level);
+            seen++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(sizeof k_want / sizeof k_want[0], seen);
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_INFO, "opt_dff: 3 flip-flops changed, 1 constant bits"));
+    check_full();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parse_opts);
@@ -558,5 +598,6 @@ int main(void) {
     RUN_TEST(test_processes_flag);
     RUN_TEST(test_stats);
     RUN_TEST(test_stats_expr);
+    RUN_TEST(test_stats_dff);
     return UNITY_END();
 }
