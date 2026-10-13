@@ -548,7 +548,7 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
 endif()
 # 2F Task 15: bench_opt (Release; `bench_opt --one FILE`, the interface of elab-sweep --bench). Its
 # measuring core (bench_opt.c without main) is also linked into the gate test
-# test_bench_opt_columns below; bench_opt_smoke is registered by Task 19.
+# test_bench_opt_columns below; bench_opt_smoke is registered with the Python tools (Task 19).
 add_executable(bench_opt tests/bench/bench_opt.c)
 target_include_directories(bench_opt PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/tests/bench)
 target_link_libraries(bench_opt PRIVATE odin3_core odin3_flags)
@@ -1370,6 +1370,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         odin3_add_sweep_test(bench_proc_smoke LABEL sweep
             COMMAND ${PROJECT_SOURCE_DIR}/tools/proc-check/bench-proc-report smoke
                     --bench $<TARGET_FILE:bench_proc>
+                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/keywords/always/case_default.v
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax/inferred_SPram.v)
+    endif()
+    # 2F Task 19 (spec 19): bench_opt prints the columns the targets are judged from. A Debug or
+    # sanitized build refuses to run (bench_opt_refuses_debug); a Release build's smoke runs `--one`
+    # on two micros (a case under a combinational block; a memory under a clocked process) and
+    # checks every column. The full bench is `elab-sweep --bench build/release/bench_opt`
+    # (tools/opt-check/bench-opt-report report --expect-fail tests/opt/bench_expect_fail.txt LOG
+    # prints the targets).
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
+        odin3_add_sweep_test(bench_opt_smoke LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/bench-opt-report smoke
+                    --bench $<TARGET_FILE:bench_opt>
                     --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
                     ${PROJECT_SOURCE_DIR}/tests/micro/verilog/keywords/always/case_default.v
                     ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax/inferred_SPram.v)

@@ -3,9 +3,10 @@
  * through Odin III's Phase 2 script, `opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt;
  * compact` (tools/opt-check/phase2.script), then `opt -full` on the result.
  *
- * Usage: bench_opt --one FILE    (elab-sweep --bench passes exactly this, 2D-7a's interface)
+ * Usage: bench_opt --one FILE [--techlib T]    (elab-sweep --bench passes exactly this, 2D-7a's
+ * interface)
  * A file that instantiates hard blocks (single_port_ram, adder, ...) needs the arch's tech library:
- * set ODIN3_BENCH_TECHLIB to its .o3lib (elab-sweep --bench does not forward --techlib).
+ * --techlib T (elab-sweep --techlib forwards it) or ODIN3_BENCH_TECHLIB, the .o3lib's path.
  *
  * It prints ONE line of key=value columns, in 2D's bench_elab style:
  *   - the read and `proc` are untimed; cells, nets and pins (live) after the read (suffix 0),
@@ -516,8 +517,13 @@ int main(int argc, char **argv) {
     if (bench_refuse_unoptimized(argv[0]) != 0) {
         return 2;
     }
-    if (argc != 3 || strcmp(argv[1], "--one") != 0) {
-        (void)fprintf(stderr, "usage: bench_opt --one FILE\n");
+    bool shaped = (argc == 3 || (argc == 5 && strcmp(argv[3], "--techlib") == 0)) &&
+                  strcmp(argv[1], "--one") == 0;
+    if (!shaped) {
+        (void)fprintf(stderr, "usage: bench_opt --one FILE [--techlib T]\n");
+        return 2;
+    }
+    if (argc == 5 && setenv("ODIN3_BENCH_TECHLIB", argv[4], 1) != 0) {
         return 2;
     }
     warm_up(argv[2]);
