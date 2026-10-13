@@ -61,6 +61,10 @@ argv = sys.argv[1:]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(["elab-equiv", *argv]) + "\\n")
 text = open(argv[-1]).read()
+if "EQOOM" in text:
+    print("elab-equiv: error: Yosys (side B) failed: out of memory (cap 4G)\\nequiv-check failed",
+          file=sys.stderr)
+    sys.exit(2)
 for code in (1, 2, 3, 77):
     if f"EQ{code}" in text:
         print(f"elab-equiv: message for exit {code}")
@@ -444,6 +448,15 @@ class ModeTest(SweepTestCase):
         self.assertEqual(code, 0, out)
         argv = next(c for c in self.calls() if c[-1].endswith("eq.v"))
         self.assertEqual(argv[argv.index("--techlib") + 1], "/lib/t.o3lib")
+
+    def test_a_cap_killed_bridge_run_is_never_an_expected_failure(self) -> None:
+        self.write("m/oom.v", "EQOOM\n")
+        listed = self.expect("oom.v [equiv-check failed] listed\n")
+        code, out, _ = self.run_tool("--equiv", "--yosys", "Y", "--equiv-check", "E",
+                                     "--expect-fail", listed, str(self.dir / "m"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  oom.v", out)
+        self.assertNotIn("xfail", out)
 
     def test_an_oracle_crash_alone_is_not_a_failure_and_a_listed_one_is_expected(self) -> None:
         self.write("m/crash.v", "EQ3\n")

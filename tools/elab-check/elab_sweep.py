@@ -290,6 +290,11 @@ def child_why(done: subprocess.CompletedProcess[str], cap: int) -> str:
     return f"exit {code}: {first_error(text)}"
 
 
+# Texts of elab-equiv's own errors that are never a listed rejection: its children's cap kill and
+# a tool it cannot run.
+BRIDGE_HARD = ("out of memory (cap ", "is not an executable file", "cannot run ")
+
+
 def child_outcome(done: subprocess.CompletedProcess[str], cap: int, secs: float) -> Outcome:
     """The failed Outcome of a child that exited non-zero: its whole output is kept for the
     expect-fail needle, and a signal or cap kill is ``hard`` (never an expected failure)."""
@@ -404,7 +409,8 @@ def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
         return Outcome("skip", secs, "cannot be capped")
     if code == EQUIV_DIFFER:
         return Outcome("fail", secs, "NOT equivalent: " + first_error(text), text)
-    return Outcome("fail", secs, first_error(text) or f"exit {code}", text, hard=code < 0)
+    return Outcome("fail", secs, first_error(text) or f"exit {code}", text,
+                   hard=code < 0 or any(mark in text for mark in BRIDGE_HARD))
 
 
 def run_file(cfg: Config, item: Item) -> Outcome:
