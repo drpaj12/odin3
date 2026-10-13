@@ -1,6 +1,6 @@
 /*
  * elab_limits.c — the caps in force (elab.h, elab_test.h): the §11 defaults, the byte budget
- * from physical memory, and the test hook that lowers them process-wide.
+ * from physical memory, the test hook that lowers them process-wide, and the stage hooks.
  */
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -46,6 +46,9 @@ static odin3_elab_limits defaults(void) {
         .max_total_iterations = ODIN3_ELAB_MAX_TOTAL_ITERATIONS,
         .max_eval_steps = ODIN3_ELAB_MAX_EVAL_STEPS,
         .max_call_depth = ODIN3_ELAB_MAX_CALL_DEPTH,
+        .max_inline_depth = ODIN3_ELAB_MAX_INLINE_DEPTH,
+        .max_loop_objects = ODIN3_ELAB_MAX_LOOP_OBJECTS,
+        .max_reentry_depth = ODIN3_ELAB_MAX_REENTRY_DEPTH,
         .max_hier_depth = ODIN3_ELAB_MAX_HIER_DEPTH,
         .max_specializations = ODIN3_ELAB_MAX_SPECIALIZATIONS,
         .max_instances = ODIN3_ELAB_MAX_INSTANCES,
@@ -85,6 +88,9 @@ void odin3_elab_test_set_limits(const odin3_elab_limits *limits) {
         .max_total_iterations = clamp32(limits->max_total_iterations, dflt.max_total_iterations),
         .max_eval_steps = clamp32(limits->max_eval_steps, dflt.max_eval_steps),
         .max_call_depth = clamp32(limits->max_call_depth, dflt.max_call_depth),
+        .max_inline_depth = clamp32(limits->max_inline_depth, dflt.max_inline_depth),
+        .max_loop_objects = clamp32(limits->max_loop_objects, dflt.max_loop_objects),
+        .max_reentry_depth = clamp32(limits->max_reentry_depth, dflt.max_reentry_depth),
         .max_hier_depth = clamp32(limits->max_hier_depth, dflt.max_hier_depth),
         .max_specializations = clamp32(limits->max_specializations, dflt.max_specializations),
         .max_instances = clamp32(limits->max_instances, dflt.max_instances),
@@ -104,4 +110,24 @@ const odin3_elab_limits *odin3_elab_limits_get(void) {
         g_ready = true;
     }
     return &g_limits;
+}
+
+static odin3_elab_test_hooks g_hooks;
+
+void odin3_elab_test_set_hooks(const odin3_elab_test_hooks *hooks) {
+    g_hooks = hooks != NULL ? *hooks : (odin3_elab_test_hooks){0};
+}
+
+const odin3_elab_test_hooks *odin3_elab_test_hooks_get(void) {
+    return &g_hooks;
+}
+
+static odin3_elab_opts g_last_opts;
+
+void odin3_elab_test_note_opts(const odin3_elab_opts *opts) {
+    g_last_opts = opts != NULL ? *opts : (odin3_elab_opts){0};
+}
+
+const odin3_elab_opts *odin3_elab_test_last_opts(void) {
+    return &g_last_opts;
 }

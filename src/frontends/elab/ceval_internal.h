@@ -17,10 +17,11 @@
  * count, a part-select bound or a function's return range evaluates it with a nested ev_run on
  * the stacks above the caller's. A host's own re-entry (a lazy parameter through lookup, Task 11;
  * a store callback) nests the same way. Both count against the call-depth cap with the function
- * frames (the 2D Task 9 ruling; final review, finding 1), which bounds the C stack: about
- * 2.5 KiB a level under ASan for a nested run (1024 levels, a return range calling itself, need
- * about 3 MiB of the 8 MiB default) and about 4 KiB for a re-entry through the test host (a
- * 1024-link parameter chain, about 4 MiB); less without ASan.
+ * frames (the 2D Task 9 ruling; final review, finding 1), and alone against the lower C re-entry
+ * cap (ODIN3_ELAB_MAX_REENTRY_DEPTH, 256; 2D Task 11), which bounds the C stack: about 2.5 KiB a
+ * level under ASan for a nested run and 4-6 KiB for a re-entry through a host (a 256-link
+ * parameter chain, about 1.5 MiB of the 8 MiB default; 1024 levels needed 4-6 MiB under gcc ASan
+ * and overflowed under clang ASan with fuzzer flags); less without ASan.
  *
  * Levels: every nested run (and every API call made from a host callback) raises the level, and
  * each level has its own typer. A frame types and reads types through the typer of the level it

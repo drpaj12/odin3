@@ -441,6 +441,10 @@ enforces:
   (resolution is the symbol table's job, built in 2D for both forms), attributes, `INITIAL`
   (D2), tri-state forms (D3).
 
+The refined elaborated form that 2D stage 1 writes (and stage 2's binder checks) is the 2D spec's
+EL-4 (`docs/specs/2026-10-11-2D-elaboration-design.md` §2.4), including the unsized `PARAM_DECL`
+value, the merged ports, the implicit nets' `implicit` marker and the unnamed blocks' names (§19).
+
 A store is never rewritten in place (§2); the elaborated form is a second store built with the
 same builders. Which store the design holds: §9.
 
@@ -615,8 +619,8 @@ operator's `UNARY`/`BINARY`/`TERNARY` node.
 (Yosys's rule). The lexer records the comment and the metacomment; the parser makes the `ATTR`
 nodes flagged `METACOMMENT` at the `CASE` reduction (2C §2.6, §9 amendment (d)) and attaches them
 to the `CASE` whose header they **immediately follow, before its first item** (so a nested case's metacomment never reaches the outer one; elsewhere they are plain
-comments), merged with that case's `(* *)` attributes into its single attach (§5). 2E emits
-D1's per-use warning when it honours one. The
+comments), merged with that case's `(* *)` attributes into its single attach (§5). 2D emits
+D1's per-use warning (EL-36; 2D spec §19) when it builds a switch from one; 2E does not. The
 printer writes a `METACOMMENT` attribute back as the metacomment after the header, so the
 round trip holds.
 
@@ -658,6 +662,13 @@ blocks, functions and tasks, so one `u64map` keyed `(scope << 32) | name` → sy
 all; named child scopes are found through a second map `(parent << 32) | name` → the first
 same-named child, chained in index order, so `odin3_scope_child(st, parent, name, index)`
 resolves `g[0]` (G7) and `odin3_scope_child(st, parent, name, NO_INDEX)` a plain block.
+Amendment (2D Task 13 fix round, review I1): a third map `(parent << 32) | name` → the chain's
+last member makes an insert past the tail (a generate loop's next iteration) O(1), and a fourth,
+a hash of `(parent, name, index)` → the scope there, makes `odin3_scope_child` O(1); a hash
+collision only sends that lookup back to the chain walk. The chain stays strictly ascending (rule
+8 also checks the tail and that every member is found by its position), front and middle inserts
+walk it as before, and the API is unchanged. Without them a 40,000-iteration loop bound in 4.65 s
+(quadratic); with them, iterations that each read their predecessor bind in 0.06 s (Release).
 
 **Symbols** (pagevec, IDs from 1):
 

@@ -38,11 +38,9 @@
   (LIST @M6_port_expressions.v:8:23
     (PORT_REF:a @M6_port_expressions.v:8:24
       _)
-    (PORT_REF @M6_port_expressions.v:8:26
+    (PORT_REF:e @M6_port_expressions.v:8:27
       _)
-    (PORT_REF:e @M6_port_expressions.v:8:29
-      _)
-    (PORT_REF @M6_port_expressions.v:8:31
+    (PORT_REF @M6_port_expressions.v:8:29
       _))
   (PORT_DECL.input @M6_port_expressions.v:9:3
     _

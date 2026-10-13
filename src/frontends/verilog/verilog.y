@@ -124,7 +124,7 @@
 /* u: a pending-stack mark, a spec (VP_SPEC: kind, sub-kind and flags of the node an item rule
  * builds from what it pushed), a flag set or an enum value. node: a made node (0: none). */
 %type <u> source_text module_body module_items list_mark group_close module_params module_ports
-%type <u> ansi_ports ansi_port_head ansi_port_open nonansi_ports
+%type <u> ansi_ports ansi_port_head ansi_port_open nonansi_ports nonansi_list
 %type <u> header_params header_param_head header_param_open
 %type <u> port_dir port_head port_spec port_kind signed_opt port_item port_slot port_declarators
 %type <u> param_kw param_type param_spec param_item param_slot param_assigns
@@ -136,7 +136,7 @@
 %type <u> hier_ref hier_index hier_open select_open select_part select_plus select_minus lvalues
 %type <u> number_size number_base number_digits
 %type <node> description module_decl module_item item_node directive
-%type <node> port_entry port_or_empty empty_port port_declarator var_declarator dim_declarator
+%type <node> port_entry empty_port port_declarator var_declarator dim_declarator
 %type <node> genvar_declarator param_assign defparam_assign range range_opt strength_opt
 %type <node> drive_strength charge_strength delay_opt delay3 delay_value mintypmax net_assign
 %type <node> lvalue lvalue_concat select attr_spec number
@@ -247,13 +247,15 @@ ansi_port_open: group_close attrs_opt port_spec
 
 group_close: %empty                    { VP($$, vp_group_close(ctx, &$$)); } ;
 
-/* Non-ANSI ports (§3.1 k): the first entry may be empty only before a comma. */
-nonansi_ports: port_entry                      { VP($$, vp_list_first(ctx, $1, &$$)); }
-             | empty_port ',' port_or_empty    { VP($$, vp_list_two(ctx, $1, $3, &$$)); }
-             | nonansi_ports ',' port_or_empty { VP($$, vp_list_next(ctx, $1, $3, &$$)); }
+/* Non-ANSI ports (§3.1 k): only the last entry may be empty, a trailing comma (Yosys 0.55
+ * rejects `(a, , b)` and `(, a)` with a syntax error; PR 2D-3 review m5). */
+nonansi_ports: nonansi_list
+             | nonansi_list ',' empty_port     { VP($$, vp_list_next(ctx, $1, $3, &$$)); }
              ;
 
-port_or_empty: empty_port | port_entry ;
+nonansi_list: port_entry                       { VP($$, vp_list_first(ctx, $1, &$$)); }
+            | nonansi_list ',' port_entry      { VP($$, vp_list_next(ctx, $1, $3, &$$)); }
+            ;
 
 empty_port: %empty                     { VP($$, vp_port_empty(ctx, &@$, &$$)); } ;
 
@@ -514,7 +516,9 @@ mintypmax_pair: expression ':' expression  { VP($$, vp_list_two(ctx, $1, $3, &$$
 /* ==== A.1.4 Module items — Task 4 ==== */
 
 /* An item's node is made without its attributes, so its range starts at its own first token
- * (point (g)); several (* *) instances merge into one attach. */
+ * (point (g)); several (* *) instances merge into one attach. A stray `;` is an empty item with a
+ * warning and no node (PHASE2 #16, as Yosys 0.55 and Icarus); module_items also lists a generate
+ * region's and a generate block's items, where Yosys accepts it too. */
 module_items: %empty                   { VP($$, vp_mark(ctx, &$$)); }
             | module_items module_item { VP($$, vp_item_next(ctx, $1, $2, &$$)); }
             ;
@@ -524,6 +528,7 @@ module_item: attrs_opt item_decl       { VP($$, vp_item(ctx, $1, &@2, $2, &$$));
            | attrs_opt gate_item       { VP($$, vp_gate(ctx, $1, &@2, $2, &$$)); }  /* Task 7 */
            | defparam_list ';'         { VP($$, vp_none(ctx, &$$)); }
            | directive
+           | ';'                       { VP($$, vp_empty_item(ctx, &@1, &$$)); }  /* PHASE2 #16 */
            | error ';'                 { VP($$, vp_none(ctx, &$$)); }
            ;
 

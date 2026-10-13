@@ -1,0 +1,5 @@
+# yosys 0.55 (VTR build): read_rtlil bug2824.il; opt_muxtree; write_rtlil
+# bug2824.il is the module top of tests/opt/bug2824.ys written as RTLIL by hand (the .ys reads it with read_verilog -icells): the $pmux m with S = {I, 1'b0}, B = {I, 1'b0}, A = 1'b0
+# normalised by name: see the top of test_opt_muxtree.c
+cell $mux WIDTH=1 A=0 B=1 S=I:0 Y=O:0
+removed 1

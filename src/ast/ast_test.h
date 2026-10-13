@@ -93,4 +93,12 @@ odin3_status odin3_ast_test_corrupt(odin3_ast *ast, odin3_ast_test_target target
  */
 odin3_status odin3_ast_test_set_range(odin3_ast *ast, odin3_ast_id node, odin3_range range);
 
+/*
+ * Masks the keys of every symbol table's indexed scope map (symtab.h), process-wide; UINT64_MAX
+ * (the default) restores them. A narrow mask forces collisions, so a test can check that chain
+ * lookups stay exact through the fallback walk. Set it before a table is built and keep it until
+ * the table is destroyed: entries keep the keys they were put with.
+ */
+void odin3_symtab_test_set_index_mask(uint64_t mask);
+
 #endif

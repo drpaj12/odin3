@@ -1,6 +1,6 @@
 """run-reject: the Verilog negative cases (2C spec §7.3, plan Task 9 points (i), (j)).
 
-    run-reject [--elaborate] <odin3> <dir>
+    run-reject [--elaborate [--pending A4.v,T9.v]] <odin3> <dir>
 
 Every ``<case>.v`` in <dir> (smallest first) runs in <dir> under its basename, with the default
 given paths (plan point (j)): ``odin3 --parse-only <case>.v``, or with --elaborate
@@ -13,19 +13,28 @@ tests/verilog/reject-2d and ignore-2d). Its expectation is ``<case>.err`` or ``<
 The logger's ``odin3: <level>: `` prefix is removed from each output line before matching. A
 case passes when a line starts with line 1 and contains line 2 — for an .err without
 --elaborate, the first error line (the error a 2C case pins; cascades may follow), otherwise
-any line (a 2D handover file may raise another row's error first) — the exit status is non-zero
-for an .err (zero for a .warn), and no line reports ODIN3_ERR_INVALID_ARG, ODIN3_ERR_CHECK or a
-check failure (a builder or check failure on user input is a 2C bug).
+any line (a 2D handover file may raise another row's error first) — the exit status is odin3's
+failure status 1 for an .err (0 for a .warn; a signal or any other status is a crash), and no
+line reports ODIN3_ERR_INVALID_ARG, ODIN3_ERR_CHECK, a check failure (a builder or check failure
+on user input is a 2C bug; the IR check's warnings are not failures) or a sanitizer report
+(AddressSanitizer, LeakSanitizer, UBSan's ``runtime error:``).
 
-With --elaborate a case that does not pass but prints the 2D stub's ``elaboration is not
-available yet (2D)`` is pending, not failed: the handover cases run as soon as 2D replaces the
-stub. Exit codes: 0 every case passes (or passes or is pending), 1 any case fails, 2 usage or
-input error, 77 (--elaborate) every case is pending.
+With --elaborate each case is judged on its own (2D plan point (l), review I4): **pass** as
+above; else **fail** on a forbidden line, a signal or a status other than 0 and 1 (2D Task 10
+review I2: a crash never hides behind a pending line); else **pending** when a line contains
+``elaboration is not available yet (2D)`` — 2D's located line for a construct whose elaboration
+has not landed (``f.v:3:5: error: elaboration is not available yet (2D): 'ALWAYS'``) or stage 2's
+unlocated stub text — listed, not failed; else **fail**. A ``.warn`` case whose warning is found
+passes although the run fails on that stub text alone (stage 1 is done; stage 2 is the stub). The
+summary line is ``run-reject: pass N, pending P, fail F``. With ``--pending`` the set of pending
+cases must be exactly the one given (else exit 1). Exit codes: 0 every case passes or is
+pending, 1 any case fails, 2 usage or input error, 77 (--elaborate) every case is pending.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -37,8 +46,28 @@ EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_SKIP = 0, 1, 2, 77
 STUB_TEXT = "elaboration is not available yet (2D)"
 ERROR = "odin3: error: "
 LOGGER_PREFIX = re.compile(r"^odin3: (?:error|warning|info|debug): ")
-FORBIDDEN = re.compile(r"ODIN3_ERR_INVALID_ARG|ODIN3_ERR_CHECK|^(?:ast check|check|pp_check): ")
+FORBIDDEN = re.compile(
+    r"ODIN3_ERR_INVALID_ARG|ODIN3_ERR_CHECK|^(?:ast check|check|pp_check): "
+    r"|AddressSanitizer|LeakSanitizer|UndefinedBehaviorSanitizer|MemorySanitizer|ThreadSanitizer"
+    r"|runtime error: "
+)
+# The IR check's warnings (rule W, e.g. an output port nothing drives yet) are not failures: stage 2
+# of a case whose assignment is still pending (2D Task 17) leaves one. An error-level check line is.
+CHECK_WARNING = "odin3: warning: check: "
+EXIT_ODIN3_FAIL = 1  # odin3's exit status for a failed pass (0 success, 2 usage)
 TIMEOUT_S = 120
+# A sanitizer report is printed unsymbolized: symbolizing one can take about two minutes on a
+# machine without an unversioned llvm-symbolizer, which the timeout would misread (2D Task 10
+# review, n1). The report's banner is what FORBIDDEN judges; addresses are enough to see a fail.
+SANITIZER_QUIET = "symbolize=0"
+
+
+def case_env() -> dict[str, str]:
+    """The environment of each case: ours, with symbolize=0 added to ASAN_OPTIONS."""
+    env = dict(os.environ)
+    given = env.get("ASAN_OPTIONS", "")
+    env["ASAN_OPTIONS"] = f"{given}:{SANITIZER_QUIET}" if given else SANITIZER_QUIET
+    return env
 
 
 @dataclass(frozen=True)
@@ -82,25 +111,34 @@ def candidates(expect: Expect, output: str, elaborate: bool) -> list[str]:
 
 
 def judge(expect: Expect, code: int, output: str, elaborate: bool) -> Verdict:
-    """Pass, pending (--elaborate and the 2D stub) or fail, with the reason."""
+    """Pass, pending (--elaborate and a not-yet-available line of 2D) or fail, with the reason."""
     lines = log_lines(output)
     found = any(
         line.startswith(expect.prefix) and expect.text in line
         for line in candidates(expect, output, elaborate)
     )
-    forbidden = [line for line in lines if FORBIDDEN.search(line)]
-    exit_ok = code != 0 if expect.is_error else code == 0
+    raws = output.splitlines()
+    forbidden = [
+        line
+        for raw, line in zip(raws, lines, strict=True)
+        if FORBIDDEN.search(line) and not raw.startswith(CHECK_WARNING)
+    ]
+    exit_ok = code == EXIT_ODIN3_FAIL if expect.is_error else code == 0
     if found and exit_ok and not forbidden:
         return Verdict("pass", "")
-    if elaborate and any(STUB_TEXT in line for line in lines):
-        return Verdict("pending", "2D stub")
+    if forbidden:  # a sanitizer report, a check failure, misuse: never pending
+        return Verdict("fail", f"forbidden line: {forbidden[0]}")
+    if code not in (0, EXIT_ODIN3_FAIL):  # a signal (< 0) or a crash's status: never pending
+        return Verdict("fail", f"exit status {code}")
+    stub = any(STUB_TEXT in line for line in lines)
+    if elaborate and stub and found and not expect.is_error and code == EXIT_ODIN3_FAIL:
+        # stage 1 warned as expected; only stage 2's unlocated stub failed the run (until Task 17)
+        return Verdict("pass", "")
+    if elaborate and stub:
+        return Verdict("pending", "2D: not available yet")
     if not found:
-        why = f"no line '{expect.prefix} ...{expect.text}...'"
-    elif not exit_ok:
-        why = f"exit status {code}"
-    else:
-        why = f"forbidden line: {forbidden[0]}"
-    return Verdict("fail", why)
+        return Verdict("fail", f"no line '{expect.prefix} ...{expect.text}...'")
+    return Verdict("fail", f"exit status {code}")
 
 
 def command(odin3: str, name: str, elaborate: bool) -> list[str]:
@@ -113,6 +151,7 @@ def run_case(odin3: str, case: Path, elaborate: bool) -> tuple[int, str]:
     proc = subprocess.run(
         command(odin3, case.name, elaborate),
         cwd=case.parent,
+        env=case_env(),
         capture_output=True,
         text=True,
         errors="replace",
@@ -127,7 +166,9 @@ def cases_of(directory: Path) -> list[Path]:
     return sorted(directory.glob("*.v"), key=lambda p: (p.stat().st_size, p.name))
 
 
-def summarize(verdicts: dict[str, Verdict], elaborate: bool) -> int:
+def summarize(
+    verdicts: dict[str, Verdict], elaborate: bool, expect_pending: set[str] | None = None
+) -> int:
     counts = {s: sum(v.status == s for v in verdicts.values()) for s in ("pass", "pending", "fail")}
     for name, verdict in verdicts.items():
         if verdict.status != "pass":
@@ -135,7 +176,14 @@ def summarize(verdicts: dict[str, Verdict], elaborate: bool) -> int:
     print(f"run-reject: pass {counts['pass']}, pending {counts['pending']}, fail {counts['fail']}")
     if counts["fail"] > 0:
         return EXIT_FAIL
-    if elaborate and counts["pending"] == len(verdicts):
+    pending = {name for name, verdict in verdicts.items() if verdict.status == "pending"}
+    if expect_pending is not None and pending != expect_pending:
+        print(
+            f"run-reject: pending {sorted(pending)}, expected exactly {sorted(expect_pending)}",
+            file=sys.stderr,
+        )
+        return EXIT_FAIL
+    if elaborate and expect_pending is None and counts["pending"] == len(verdicts):
         return EXIT_SKIP
     return EXIT_OK
 
@@ -144,6 +192,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="run-reject", description="the Verilog negative cases")
     parser.add_argument(
         "--elaborate", action="store_true", help="read_verilog without --parse-only"
+    )
+    parser.add_argument(
+        "--pending",
+        help="comma-separated cases (e.g. A4.v,T9.v) that must be pending, and no other "
+        "(2D: the cases stage 2 will report); empty = none pending",
     )
     parser.add_argument("odin3", help="the odin3 executable")
     parser.add_argument("dir", type=Path, help="the case directory")
@@ -165,7 +218,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"run-reject: {case}: {exc}", file=sys.stderr)
             return EXIT_USAGE
         verdicts[case.name] = judge(expect, code, output, args.elaborate)
-    return summarize(verdicts, args.elaborate)
+    expect_pending = (
+        {name for name in args.pending.split(",") if name} if args.pending is not None else None
+    )
+    return summarize(verdicts, args.elaborate, expect_pending)
 
 
 if __name__ == "__main__":

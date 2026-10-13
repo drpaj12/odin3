@@ -1,9 +1,11 @@
 /* symtab_lookup.c — symbol table lookup, iteration, accessors, IR remap and check rule 8. */
 #include "ast/ast.h"
+#include "ast/ast_test.h"
 #include "ast/symtab.h"
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "odin3/odin3.h"
+#include "util/hash.h"
 #include "util/log.h"
 #include "util/pagevec.h"
 #include "util/u64map.h"
@@ -78,11 +80,31 @@ odin3_sym_id odin3_symtab_lookup(const odin3_symtab *st, odin3_scope_id scope, u
     return (odin3_sym_id){0};
 }
 
+/* The indexed keys' mask: all bits unless a test forces collisions (ast_test.h). */
+static uint64_t g_index_mask = UINT64_MAX;
+
+void odin3_symtab_test_set_index_mask(uint64_t mask) {
+    g_index_mask = mask;
+}
+
+uint64_t odin3_symtab_index_key(odin3_scope_key key) {
+    uint64_t pair = odin3_hash_u64(odin3_symtab_key(key.parent.v, key.name));
+    return odin3_hash_combine(pair, (uint64_t)key.order) & g_index_mask;
+}
+
 odin3_chain_slot odin3_symtab_chain_find(const odin3_symtab *st, odin3_scope_key key) {
     odin3_chain_slot slot = {{0}, {0}, false};
+    uint64_t pair = odin3_symtab_key(key.parent.v, key.name);
     uint64_t head = 0;
-    if (key.name == 0 ||
-        !odin3_u64map_get(st->children, odin3_symtab_key(key.parent.v, key.name), &head)) {
+    if (key.name == 0 || !odin3_u64map_get(st->children, pair, &head)) {
+        return slot;
+    }
+    uint64_t tail = 0;
+    const odin3_scope *last = odin3_u64map_get(st->tails, pair, &tail)
+                                  ? odin3_scope_get(st, (odin3_scope_id){(uint32_t)tail})
+                                  : NULL;
+    if (last != NULL && odin3_scope_order(last) < key.order) {
+        slot.prev = (odin3_scope_id){(uint32_t)tail}; /* past the tail: an append */
         return slot;
     }
     slot.cur = (odin3_scope_id){(uint32_t)head};
@@ -96,17 +118,30 @@ odin3_chain_slot odin3_symtab_chain_find(const odin3_symtab *st, odin3_scope_key
     return slot;
 }
 
+odin3_scope_id odin3_symtab_chain_get(const odin3_symtab *st, odin3_scope_key key) {
+    uint64_t at = 0;
+    if (key.name != 0 && odin3_u64map_get(st->indexed, odin3_symtab_index_key(key), &at)) {
+        odin3_scope_id id = {(uint32_t)at};
+        const odin3_scope *rec = odin3_scope_get(st, id);
+        if (rec != NULL && rec->parent.v == key.parent.v && rec->name == key.name &&
+            odin3_scope_order(rec) == key.order) {
+            return id;
+        }
+    }
+    if (key.name == 0 || !st->index_collided) {
+        return (odin3_scope_id){0}; /* every named scope is in the map */
+    }
+    odin3_chain_slot slot = odin3_symtab_chain_find(st, key);
+    return slot.found ? slot.cur : (odin3_scope_id){0};
+}
+
 odin3_scope_id odin3_scope_child(const odin3_symtab *st, odin3_scope_id parent, uint32_t name,
                                  int64_t index) {
     bool in_range = index == ODIN3_SCOPE_NO_INDEX || (index >= INT32_MIN && index <= INT32_MAX);
     if (st == NULL || !in_range) {
         return (odin3_scope_id){0};
     }
-    odin3_chain_slot slot = odin3_symtab_chain_find(st, (odin3_scope_key){parent, name, index});
-    if (!slot.found) {
-        return (odin3_scope_id){0};
-    }
-    return slot.cur;
+    return odin3_symtab_chain_get(st, (odin3_scope_key){parent, name, index});
 }
 
 /* --- iteration ----------------------------------------------------------------------------- */
@@ -302,32 +337,71 @@ static void check_symbol(check_ctx *cx, uint32_t id, const odin3_symbol *rec) {
     check_assigns(cx, id, rec);
 }
 
-/* Every chain: members match the key, orders strictly increase; returns the member count. */
+/* One chain from its head: members match the key, orders strictly increase, each is found by its
+ * position (the indexed map), and the tail entry is the last member; returns the member count. */
+static uint32_t check_chain(check_ctx *cx, odin3_kv head) {
+    uint32_t parent = (uint32_t)(head.key >> ODIN3_SYMTAB_KEY_SHIFT);
+    uint32_t name = (uint32_t)head.key;
+    uint32_t members = 0;
+    const odin3_scope *prev = NULL;
+    odin3_scope_id last = {0};
+    odin3_scope_id at = {(uint32_t)head.value};
+    for (const odin3_scope *rec = odin3_scope_get(cx->st, at); at.v != 0;
+         rec = odin3_scope_get(cx->st, at)) {
+        if (rec == NULL || rec->parent.v != parent || rec->name != name ||
+            (prev != NULL && odin3_scope_order(prev) >= odin3_scope_order(rec))) {
+            bad(cx, "scope", at.v, "scope name chain broken");
+            return members;
+        }
+        odin3_scope_key key = {rec->parent, rec->name, odin3_scope_order(rec)};
+        if (odin3_symtab_chain_get(cx->st, key).v != at.v) {
+            bad(cx, "scope", at.v, "scope not found by its (parent, name, index)");
+        }
+        members++;
+        prev = rec;
+        last = at;
+        at = rec->same_name_next;
+    }
+    uint64_t tail = 0;
+    if (!odin3_u64map_get(cx->st->tails, head.key, &tail) || tail != last.v) {
+        bad(cx, "scope", last.v, "scope name chain tail wrong");
+    }
+    return members;
+}
+
+/* Every chain; returns the member count. */
 static uint32_t check_chains(check_ctx *cx) {
     uint32_t members = 0;
     size_t cursor = 0;
     odin3_kv entry;
     while (odin3_u64map_next(cx->st->children, &cursor, &entry)) {
-        uint32_t parent = (uint32_t)(entry.key >> ODIN3_SYMTAB_KEY_SHIFT);
-        uint32_t name = (uint32_t)entry.key;
-        const odin3_scope *prev = NULL;
-        odin3_scope_id at = {(uint32_t)entry.value};
-        for (const odin3_scope *rec = odin3_scope_get(cx->st, at); at.v != 0;
-             rec = odin3_scope_get(cx->st, at)) {
-            if (rec == NULL || rec->parent.v != parent || rec->name != name ||
-                (prev != NULL && odin3_scope_order(prev) >= odin3_scope_order(rec))) {
-                bad(cx, "scope", at.v, "scope name chain broken");
-                break;
-            }
-            members++;
-            prev = rec;
-            at = rec->same_name_next;
-        }
+        members += check_chain(cx, entry);
+    }
+    if (odin3_u64map_count(cx->st->tails) != odin3_u64map_count(cx->st->children)) {
+        bad(cx, "symtab", (uint32_t)odin3_u64map_count(cx->st->tails),
+            "chain tail map count differs from the head map");
     }
     return members;
 }
 
+/* Every indexed entry names a named scope whose position has that key (no stale entry). */
+static void check_indexed(check_ctx *cx) {
+    size_t cursor = 0;
+    odin3_kv entry;
+    while (odin3_u64map_next(cx->st->indexed, &cursor, &entry)) {
+        const odin3_scope *rec = odin3_scope_get(cx->st, (odin3_scope_id){(uint32_t)entry.value});
+        odin3_scope_key key = {{0}, 0, 0};
+        if (rec != NULL) {
+            key = (odin3_scope_key){rec->parent, rec->name, odin3_scope_order(rec)};
+        }
+        if (rec == NULL || rec->name == 0 || odin3_symtab_index_key(key) != entry.key) {
+            bad(cx, "symtab", (uint32_t)entry.value, "scope index map entry stale");
+        }
+    }
+}
+
 static void check_maps(check_ctx *cx) {
+    check_indexed(cx);
     if (odin3_u64map_count(cx->st->by_name) != (size_t)cx->n_symbols - 1) {
         bad(cx, "symtab", cx->n_symbols - 1, "symbol map count differs from the symbols");
     }

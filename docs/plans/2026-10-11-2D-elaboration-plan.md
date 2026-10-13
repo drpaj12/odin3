@@ -253,7 +253,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
       - Task 22 lands `IF` and `CASE`;
       - Task 23 lands `FOR`, `REPEAT`, `TASK_CALL`, calls in processes and the two read features;
       - Task 24 lands `INITIAL` (variable initialisers included) and `ODIN3_PEND_MEM_WRITE`.
-  - Reaching a pending kind or feature logs, once per kind per run, `file:line:col: error: elaboration is not available yet (2D): '<KIND>'`. `<KIND>` is the dump's kind name, or `continuous-context call` / `variable index into a register array` / `memory write`. It counts as an error.
+  - Reaching a pending kind or feature logs, once per kind per run, `file:line:col: error: elaboration is not available yet (2D): '<KIND>'`. `<KIND>` is the dump's kind name, or `continuous-context call` / `variable index into a register array` / `memory write` / `variable index in a procedural assignment target` (Task 21; Task 22 lands it). It counts as an error.
   - A stage-1 error destroys the elaborated store, so rule 7 never sees an unhandled kind. A stage-2 error skips the construct, so the IR stays valid.
   - Until Task 17, `odin3_elab_stage2` is the stub `src/frontends/elab/elab2_stub.c`, which logs 2C's exact unlocated text `elaboration is not available yet (2D)` and returns `PARSE`.
   - Task 10 makes `run-reject --elaborate` judge per case. An expected line found → **pass**. Else a line containing `elaboration is not available yet (2D)` → **pending** (listed, not failed). Else → **fail**. Exit 1 on any fail, 77 when every case is pending.
@@ -337,6 +337,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   - C17 with the `-Werror` flag set.
   - Functions ≤ 60 lines, CCN ≤ 15, ≤ 5 parameters, no adjacent convertible parameters (use request structs).
   - **No recursion in `src/`**: the typer, evaluator, interpreter, generate expansion, hierarchy walk, binder, emitter and process generator all use explicit stacks or worklists. Tests may recurse in reference models.
+    - **Known deviation (PR 2D-6 review I6, recorded for 2D-7).** A call in an expression is inlined by C recursion (`pg_run` → `exec_node` → `assign_value` → `odin3_elab2_expr` → `pg_call_hook` → `odin3_pg_call` → `call_inline` → `pg_run`). Interim guard: `ODIN3_ELAB_MAX_INLINE_DEPTH` (256) gives a located error, so the stack cannot overflow (spec §17 #74). 2D-7: run the call after the expression walk (the walker hands back a placeholder) and drop the cap.
   - No VLA; no `goto` but `cleanup:`; `abort` only in IR check.
   - No `NOLINT`; no `.clang-tidy` or lizard change; never `--no-verify`.
   - `odin3_` snake_case, with `elab1_*`/`elab2_*`/`pg_*`/`cval_*` for file-static helpers.
@@ -361,6 +362,8 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   | `ODIN3_ELAB_MAX_TOTAL_ITERATIONS` | 2^24 |
   | `ODIN3_ELAB_MAX_EVAL_STEPS` | 2^26 |
   | `ODIN3_ELAB_MAX_CALL_DEPTH` | 1024 |
+  | `ODIN3_ELAB_MAX_INLINE_DEPTH` | 256 |
+  | `ODIN3_ELAB_MAX_LOOP_OBJECTS` | 2^21 |
   | `ODIN3_ELAB_MAX_HIER_DEPTH` | 1024 |
   | `ODIN3_ELAB_MAX_SPECIALIZATIONS` | 2^16 |
   | `ODIN3_ELAB_MAX_INSTANCES` | 2^24 |
@@ -1255,6 +1258,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - empty positions are recorded for EL-10.
 - `odin3_status odin3_elab1_decls(odin3_elab1 *e1, uint32_t scope, odin3_ast_id item);` completes Task 11's declarations: no `STRENGTH`/`DELAY`/`VECTORED`/`SCALARED`; initialisers kept.
 - `odin3_status odin3_elab1_implicit(odin3_elab1 *e1, uint32_t spec);`: implicit nets per EL-25, first in the `MODULE`'s items, in first-use order, of the `` `default_nettype `` kind in effect.
+  - *Carry from Task 13's review:* define the elaborated form's marker of the implicit nets' `NET_DECL` (for example a `NET_DECL` flag or a synthesized `ATTR`) in EL-4, **and** make the binder set `ODIN3_SYM_F_IMPLICIT` from it (EL-5 lists the flag; nothing sets it yet).
 - `uint8_t odin3_elab1_nettype_at(const odin3_elab1 *e1, odin3_ast_id module_node);`: the last `DIRECTIVE[default_nettype]` before the module in stream order, reset by `` `resetall ``.
 - `odin3_status odin3_elab1_subroutine(odin3_elab1 *e1, odin3_ast_id decl, uint32_t scope);`: non-ANSI inputs move to the ports `LIST`, one declarator each; locals go to `LIST`.
 - `ALWAYS`, `INITIAL` and every statement kind are written per EL-4.
@@ -1398,6 +1402,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - ABI:
   - `typedef struct odin3_elab_options { uint32_t top; uint32_t top_at; bool nolatches, nomem2reg, auto_blackbox; uint32_t reserved[4]; } odin3_elab_options;`
   - `odin3_status odin3_ast_elaborate(odin3_design *design, odin3_ast *ast, const odin3_elab_options *opts);` (point (b)), with the paragraph and the run-ID caveat. `reserved` must be zero, else `INVALID_ARG`.
+  - *Carry from Task 13's review (m4):* on this path `odin3_ast_check` rule 7 runs **in every build** (not only Debug or `--check`) before `odin3_elab_bind`, since an adapter's store is untrusted; a violation is `INVALID_ARG`. The binder checks only the rows rule 7 does not (EL-4, v4.9).
 - CLI: `odin3 --elab-only a.v b.v` ≡ `-p "read_verilog a.v b.v; stats"`. With a script it fails with point (w)'s text.
 
 **Tests (`test_elab_stage2_wires.c`; `et_read(const et_req *req, et_result *out)` added to `elab_test.h` runs the whole pass):**
@@ -1440,6 +1445,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `typedef struct odin3_elab2_reads { odin3_status (*bit)(void *user, odin3_net_id net, odin3_sigbit *out); void *user; } odin3_elab2_reads;` is the `rv` substitution hook (Task 21); NULL outside processes.
 - `typedef struct odin3_elab2_expr_req { odin3_ast_id expr; odin3_etype context; const odin3_net_id *dest; const odin3_elab2_reads *reads; } odin3_elab2_expr_req;`: `dest` is NULL, or `context.width` nets the outermost cell drives by construction (EL-28).
 - `odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);` types the expression and emits it post-order. All-constant operands fold through `odin3_cval_op`.
+  - *Carry from Task 13's review (m1):* an `IDENT` or `HIER_NAME` that names a generate block or named block binds to its `BLOCK` symbol (the binder rejects instance, function and task names with `'u' is not a net, variable or parameter`). Yosys 0.55 makes such a name an implicit net (`Warning: Identifier '\g' is implicitly declared`); the binder's symbol table cannot hold a net beside the block of one name, so Task 18 (or Task 15, declaring it in stage 1) decides: an implicit net with the warning, as Yosys, or an error recorded as a §17 divergence.
   - An unsized `localparam` read takes `UNSIZED` from its declarator's `NUMBER` (payload width 0), because the symtab value holds only bits and sign (review I11).
 - `odin3_status odin3_elab2_assign(odin3_elab2 *e2, odin3_ast_id net_assign);` (A1, moved here from Task 19; review R1):
   - it assigns by construction (`dest`) or by merge (`odin3_net_merge`), with the same-net no-op;
@@ -1561,7 +1567,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - **Instances and cell types.**
   - Module instances carry `parameter:W` (BITS) for each overridden parameter.
   - `single_port_ram` (with `pre_script` `read_techlib lib/vtr.o3lib`) and 10/8-bit address/data connections → `ADDR_WIDTH` 10, `DATA_WIDTH` 8 by inference.
-  - A `(* blackbox *)` module → `odin3_celltype_declare_blackbox` once per specialization. A mismatch with a registered type → located `black box 'single_port_ram' does not match the registered cell type: <IR's why>`.
+  - A `(* blackbox *)` module → `odin3_celltype_declare_blackbox` **once per definition, under its base name** (spec v4.10, EL-11; PR 2D-3 final review I2, ruling: Yosys 0.55 keeps `module \bb` and `cell \bb \u1` with `parameter \W 8`). Stage 1 writes one ports-only `MODULE` named `bb` (the defaults' ports and values) and every `INSTANTIATION` of the definition is named `bb` with its final values in its params LIST; it never writes `bb$W=8`. Task 19 declares the type from that `MODULE`; each cell takes its `INSTANTIATION`'s values as cell parameters, and its port widths are its own specialization's (stage 1 has checked the connections against them): the type is parametric (IR-7b width rules, for a port whose width depends on a parameter) or Task 19 records the widths per cell from stage 1's specialization table — Task 19 decides, and a black box whose port widths do not depend on its parameters needs neither. `write_blif --vtr` (3E) writes `.subckt bb`, never a `$`-suffixed name, so an architecture model named after the definition matches. A mismatch with a registered type → located `black box 'single_port_ram' does not match the registered cell type: <IR's why>`; a source `(* blackbox *)` named like a registered type reuses it whatever its parameters (IR-7b's check by port name).
 - **Error cap and top (moved from Task 17; review R1).**
   - 25 two-driver assignments → 20 errors, then `too many errors; elaboration stopped after 20`, `PARSE`, `odin3_design_top` unset, IR check passes.
   - A clean three-module design (one specialization) → `odin3_design_top` set, and the summary line `… 3 modules (1 specializations), …`.
@@ -1931,6 +1937,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
   - `neg_unresolved_module`, `neg_unknown_top`, `neg_ambiguous_top` and `neg_no_top` give their kind, location and names;
   - a case where the fixture's 0.69 `ref.cmd` and 0.55 disagree is reported `oracle drift`, not failed.
 - `verilog_reject_2d` and `verilog_ignore_2d` are re-run here with 0 pending.
+- **Oracle crash (PR 2D-3 final review m6):** Yosys 0.55 segfaults (core dumped) on recursive instantiation under `hierarchy -check -top` (`top` instantiating itself; `ping`→`pong`→`ping`), where 2D reports "recursive instantiation of 'top'". `elab-sweep --equiv` and `project_corpus_frontend` class a Yosys crash (signal exit) on such a case as `oracle crash`, not a mismatch or a 2D failure.
 
 ### Task 27: The VTR sweep, `bench_elab`, the PHASE2 entry (§14.5, §15)
 **Files:**
@@ -1952,6 +1959,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
   - peak RSS (`getrusage`).
 - The bench set is `elab-sweep --bench build/release/bench_elab` over the **one set** of 64 files (`$VTR_ROOT/vtr_flow/benchmarks/verilog/*.v` and `koios/*.v` together), smallest first. `lenet.v` is last, alone under 8 GiB. It then prints the §15 targets, each `ok` or `MISSED`.
 - `verilog_vtr_elab` runs the same one set under `--elab-only` with `vtr_expect_fail.txt`, as a `sweep` test (never in the `-j4` gate; ruling I12).
+- `elab_equiv_vtr` classes a Yosys 0.55 crash on recursive instantiation as `oracle crash` (Task 26's rule; PR 2D-3 final review m6).
 
 **Tests:**
 - `bench_elab_smoke` runs `--one` on two micros and checks every column is present.
@@ -2001,7 +2009,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
   - `always` blocks mixing `=` and `<=`;
   - `case`/`casez`, loops, functions and tasks;
   - memories with non-zero low indices.
-- `elab-diff --seeds A..B [--yosys-069 Y2]` runs `elab-equiv` per seed. A non-equivalence fails and keeps the seed and file. With `--yosys-069`, a file where 0.55 and 0.69 disagree is listed as `oracle drift`, not failed.
+- `elab-diff --seeds A..B [--yosys-069 Y2]` runs `elab-equiv` per seed. A non-equivalence fails and keeps the seed and file. With `--yosys-069`, a file where 0.55 and 0.69 disagree is listed as `oracle drift`, not failed. Yosys 0.55 segfaults on recursive instantiation (PR 2D-3 final review m6): a generator case that recurses and makes Yosys crash is listed as `oracle crash`, not failed (2D must still give its recursion error).
 - `const-diff --count N --seed S` generates random constant expressions over Task 7's ops and compares `odin3_cval_op` through a tiny driver against Yosys 0.55's values.
 
 **Tests:**

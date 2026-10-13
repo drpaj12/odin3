@@ -23,10 +23,17 @@
 # files-read.txt; without --out the text goes to stdout), parse_only (--parse-only a.v b.v is
 # -p "read_verilog --parse-only a.v b.v"; with --project or -f it reads the record's files; a
 # syntax error fails), parse_only_with_script (--parse-only with -p or a .o3 script exits 2:
-# use the pass option), abc_script_missing (--abc-script naming no file exits 2),
+# use the pass option), elab_only (--elab-only a.v is -p "read_verilog a.v; stats": the summary and
+# the stats lines; with --top and --project; an elaboration error fails), elab_only_with_script
+# (--elab-only with -p or a .o3 script exits 2: use read_verilog in the script), abc_script_missing (--abc-script naming no file exits 2),
 # abc_script_project (--abc-script replaces the project's abc_script with an info line; --help
-# shows the option). The project cases run from the project's directory (tests/cli/project), so
-# the paths given are relative.
+# shows the option), version_abc (with linked ABC, --version ends with exactly one
+# "linked ABC <40 hex> (adapters/abc/NOTICE)" line), abc_unavailable_warning (ODIN3 is the test
+# CLI whose adapter cannot register: it warns "odin3: warning: linked ABC unavailable: <status>",
+# runs stats anyway, and --version names no linked ABC), opt_snapshot (--opt-snapshot DIR writes
+# 0001-opt_clean-before.il and -after.il when opt_clean removes a cell; a missing DIR exits 2).
+# The project cases run from the project's directory (tests/cli/project), so the paths given are
+# relative.
 set -euo pipefail
 
 [[ $# -eq 4 ]] || { echo "usage: test_cli.sh CASE ODIN3 NETLIST_COMPARE FIXTURES_DIR" >&2; exit 2; }
@@ -308,6 +315,47 @@ parse_only_with_script)
     [[ $rc -eq 2 ]] || fail "--parse-only with a script file: exit code $rc, expected 2"
     grep -qF -- "use the pass option" "$work/err" || fail "script file: stderr lacks the message"
     ;;
+elab_only)
+    printf 'module a (input wire i, output wire [3:0] o);\n    wire [3:0] w;\nendmodule\n' \
+        >"$work/a.v"
+    printf 'module b;\n    wire x;\nendmodule\n' >"$work/b.v"
+    # odin3 --elab-only a.v b.v --top a is -p "read_verilog a.v b.v; stats" with --top a.
+    "$odin3" --top a --elab-only "$work/a.v" "$work/b.v" 2>"$work/err" || fail "--elab-only failed"
+    grep -q "read_verilog: elaborated top 'a': 1 modules (0 specializations), 0 processes, 0 cells" \
+        "$work/err" || fail "no summary line for --elab-only"
+    grep -qF "stats: design: modules 1, top a" "$work/err" || fail "--elab-only: no stats: line"
+    "$odin3" --top a -p "read_verilog $work/a.v $work/b.v; stats" 2>"$work/script" ||
+        fail "-p read_verilog; stats failed"
+    grep -o 'stats: module a: .*' "$work/err" >"$work/sugar" || fail "no stats line for a"
+    grep -o 'stats: module a: .*' "$work/script" >"$work/pass" || fail "no stats line (script)"
+    cmp -s "$work/sugar" "$work/pass" || fail "--elab-only differs from the script"
+    # With --project or -f: read_project, then read_verilog (the record's files), then stats.
+    printf 'file verilog %s/a.v\ntop a\n' "$work" >"$work/e.o3proj"
+    "$odin3" --project "$work/e.o3proj" --elab-only 2>"$work/err" ||
+        fail "--project --elab-only failed"
+    grep -qF 'read_verilog: elaborated top' "$work/err" || fail "--project: no summary"
+    grep -qF 'stats: design:' "$work/err" || fail "--project: no stats"
+    # A located elaboration error fails the run (and stats does not run).
+    printf 'module c;\n    wire w;\n    assign w = 1;\n    assign w = 0;\nendmodule\n' >"$work/c.v"
+    expect_fail "c.v:4:12: error: 'w' has two drivers (also driven at" --elab-only "$work/c.v"
+    ;;
+elab_only_with_script)
+    printf 'module b;\nendmodule\n' >"$work/b.v"
+    set +e
+    "$odin3" --elab-only -p "stats" "$work/b.v" 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 2 ]] || fail "--elab-only with -p: exit code $rc, expected 2"
+    grep -qF -- "--elab-only cannot be combined with a script; use read_verilog in the script" \
+        "$work/err" || fail "stderr lacks the message"
+    printf 'stats\n' >"$work/flow.o3"
+    set +e
+    "$odin3" --elab-only "$work/flow.o3" 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 2 ]] || fail "--elab-only with a script file: exit code $rc, expected 2"
+    grep -qF -- "use read_verilog in the script" "$work/err" || fail "script file: no message"
+    ;;
 abc_script_missing)
     cd "$work"
     set +e
@@ -345,6 +393,45 @@ abc_script_project)
     "$odin3" --help >"$work/out" 2>"$work/err" || fail "--help failed"
     grep -qxF "  --abc-script FILE the ABC script of every abc pass (below abc --script)" \
         "$work/out" || fail "--help lacks the --abc-script line"
+    ;;
+version_abc)
+    "$odin3" --version >"$work/out" 2>"$work/err" || fail "odin3 --version failed"
+    [[ $(wc -l <"$work/out") -eq 2 ]] || fail "--version printed $(wc -l <"$work/out") lines, not 2"
+    [[ $(grep -cE '^linked ABC [0-9a-f]{40} \(adapters/abc/NOTICE\)$' "$work/out") -eq 1 ]] ||
+        fail "no single 'linked ABC <commit> (adapters/abc/NOTICE)' line: $(cat "$work/out")"
+    tail -1 "$work/out" | grep -qE '^linked ABC ' || fail "the linked ABC line is not the last"
+    [[ ! -s $work/err ]] || fail "--version wrote to stderr"
+    ;;
+abc_unavailable_warning)
+    "$odin3" -p "read_blif $fixture; stats" >"$work/out" 2>"$work/err" ||
+        fail "odin3 without linked ABC failed"
+    grep -qxF "odin3: warning: linked ABC unavailable: ODIN3_ERR_INVALID_ARG" "$work/err" ||
+        fail "no 'linked ABC unavailable' warning"
+    grep -qF "stats: design: modules 2" "$work/err" || fail "stats did not run"
+    "$odin3" --version >"$work/out" 2>"$work/err" || fail "odin3 --version failed"
+    ! grep -qF "linked ABC " "$work/out" || fail "--version names a linked ABC that is not registered"
+    ;;
+opt_snapshot)
+    cat >"$work/x.blif" <<'BLIF'
+.model top
+.inputs a
+.outputs y
+.subckt $_NOT_ A=a Y=y
+.subckt $_NOT_ A=a Y=dead
+.end
+BLIF
+    mkdir "$work/snap"
+    "$odin3" --opt-snapshot "$work/snap" -p "read_blif $work/x.blif; opt_clean" \
+        >"$work/out" 2>"$work/err" || fail "--opt-snapshot run failed"
+    [[ -f $work/snap/0001-opt_clean-before.il ]] || fail "no 0001-opt_clean-before.il"
+    [[ -f $work/snap/0001-opt_clean-after.il ]] || fail "no 0001-opt_clean-after.il"
+    ! cmp -s "$work/snap/0001-opt_clean-before.il" "$work/snap/0001-opt_clean-after.il" ||
+        fail "before and after are equal"
+    set +e
+    "$odin3" --opt-snapshot "$work/nope" -p stats 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 2 ]] || fail "--opt-snapshot nope: exit code $rc, expected 2"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

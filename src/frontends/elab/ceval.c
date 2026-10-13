@@ -8,7 +8,8 @@
  * them (ev_mark / ev_unwind), so a host callback may call the evaluator again. The typer's
  * callbacks run nested evaluations the same way; inside an active evaluation each, and each
  * host re-entry, counts as one level of the call-depth cap, as a function frame does (2D Task 9
- * ruling: the C stack they use is bounded by that cap).
+ * ruling), and the C nestings alone are bounded by the lower C re-entry cap
+ * (ODIN3_ELAB_MAX_REENTRY_DEPTH, 2D Task 11), which bounds the C stack they use.
  */
 #include "frontends/elab/ceval.h"
 
@@ -682,8 +683,34 @@ odin3_status ev_subtree_size(const odin3_ceval *ev, odin3_ast_id node, uint64_t 
     return st;
 }
 
-/* The call-depth cap before a nested run inside an evaluation (name: for the message). */
+/* The C re-entry cap (ODIN3_ELAB_MAX_REENTRY_DEPTH, 2D Task 11): one more evaluation nested in C
+ * (a typer callback's run or a host's re-entry) must stay within it, apart from the call-depth cap
+ * that counts the nestings with the function frames. */
+static odin3_status ev_reentry_cap(const odin3_ceval *ev, odin3_ast_id node, const char *what) {
+    uint32_t cap = odin3_elab_limits_get()->max_reentry_depth;
+    if (ev->nest + 1 <= cap) {
+        return ODIN3_OK;
+    }
+    return ev_error(ev, node, "constant evaluation of %s nested deeper than %" PRIu32, what, cap);
+}
+
+/* The <what> of a nested run the typer asks for: its constant's role ("replication count",
+ * "range bound"), or "range bound" for a function's return range (typed outside a callback). */
+static const char *ev_nested_what(const odin3_ceval *ev) {
+    const char *what = NULL;
+    if (ev->cur < ev->typers.len) {
+        what = odin3_ctype_constant_what(((odin3_ctype *const *)ev->typers.data)[ev->cur]);
+    }
+    return what != NULL ? what : "range bound";
+}
+
+/* The caps before a nested run inside an evaluation (name: for the message): the C re-entry cap,
+ * then the call-depth cap. */
 static odin3_status ev_nest_check(const odin3_ceval *ev, odin3_ast_id node, const char *name) {
+    odin3_status st = ev_reentry_cap(ev, node, ev_nested_what(ev));
+    if (st != ODIN3_OK) {
+        return st;
+    }
     uint32_t cap = odin3_elab_limits_get()->max_call_depth;
     if (ev_function_frames(ev) + ev->nest + 1 <= cap) {
         return ODIN3_OK;
@@ -696,11 +723,18 @@ static odin3_status ev_nest_check(const odin3_ceval *ev, odin3_ast_id node, cons
 }
 
 /* A host's re-entry (a lazy parameter read through lookup, a store callback) nests one more
- * evaluation in C: counted with the function frames and callback runs against the call-depth
- * cap (final review, finding 1). No check for the outermost call. */
+ * evaluation in C: within the C re-entry cap, and counted with the function frames and callback
+ * runs against the call-depth cap (final review, finding 1). No check for the outermost call. */
 static odin3_status ev_reentry_check(const odin3_ceval *ev, odin3_ast_id node, const char *what) {
+    if (ev->depth == 0) {
+        return ODIN3_OK;
+    }
+    odin3_status st = ev_reentry_cap(ev, node, what);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     uint32_t cap = odin3_elab_limits_get()->max_call_depth;
-    if (ev->depth == 0 || ev_function_frames(ev) + ev->nest + 1 <= cap) {
+    if (ev_function_frames(ev) + ev->nest + 1 <= cap) {
         return ODIN3_OK;
     }
     return ev_error(ev, node, "constant evaluation of %s nested deeper than %" PRIu32, what, cap);

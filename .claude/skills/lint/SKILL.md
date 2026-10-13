@@ -13,7 +13,7 @@ Group the diagnostics **by file, then by tool** (table or nested list): `file ->
 
 ## Fix
 - **clang-format**: run `clang-format -i <files>` on the offending files (never under `third_party/`), then re-run the gate. Formatting is applied automatically anyway; no need to ask.
-- **rules** (`tools/check_rules.py`): `exit`/`_exit`/`_Exit`/`quick_exit` only in `src/cli/`; no `abort()`, `raise(SIGABRT)`, `__builtin_trap()` outside `check` in debug; `goto` only for the single `cleanup:` label. Return `odin3_status` instead.
+- **rules** (`tools/check_rules.py`): `exit`/`_exit`/`_Exit`/`quick_exit` only in `src/cli/`; no `abort()`, `raise(SIGABRT)`, `__builtin_trap()` outside `check` in debug (one exception: the ABC adapter's off-thread stop, PHASE3 #28); `goto` only for the single `cleanup:` label. Return `odin3_status` instead.
 - **clang-tidy**: `bugprone`, `cert`, `misc`, `performance`, `readability` (function size, cognitive complexity); one-letter names are only `i`/`j`/`k`; magic numbers are allowed under `tests/` only. Fix the code (name the constant, split the function).
 - **cppcheck / lizard**: lizard limits are cyclomatic complexity 15, 60 lines, 5 parameters per function in `src/`. Split functions or pass a struct. No recursion in IR traversals, no VLAs.
 - **ruff / mypy --strict**: fix the Python in `tools/`, `plugins/`, `tests/tools/`; add real type annotations.

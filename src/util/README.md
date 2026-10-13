@@ -12,6 +12,7 @@ The only generic containers in the tree (spec §15.1): `arena`, `vec`, `pagevec`
 - `idindex` — ID-only hash-cons index (Robin Hood open addressing); stores IDs, the caller owns the keys.
 - `str` — string interning (`strtab`, ID 0 is the empty string) and a growable string builder (`strbuf`).
 - `log` — process-global diagnostics with levels, per-level counts and a replaceable sink.
+- `clock` — `odin3_now_ms`, the monotonic millisecond clock of the info lines.
 - `file` — atomic file output (not a container): `odin3_atomic_file_open` makes a private temporary beside the destination with `mkstemp`, `odin3_atomic_file_close` renames it over the destination or removes it on failure. Every writer (dot, JSON, Verilog) saves through it.
 - `sha256` — streaming SHA-256 (FIPS 180-4), no allocation: `init`/`update`/`final`/`hex`; the run-info identity hash. Its test is `test_sha256` (not `test_util_sha256`) because the 3D plan names it so.
 

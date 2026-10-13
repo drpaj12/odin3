@@ -1,0 +1,5 @@
+# yosys 0.55 (VTR build): read_rtlil andor.il; opt_reduce; write_rtlil
+# input andor.il: yosys -p 'read_verilog reduce_const.v; write_rtlil andor.il', reduce_const.v = the module of tests/opt/opt_reduce_andor.ys
+# flags:
+cell $reduce_and A_WIDTH=1 A=1
+cell $reduce_or A_WIDTH=1 A=0

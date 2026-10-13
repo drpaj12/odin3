@@ -243,7 +243,9 @@ and are never top candidates. Instances of Altera megafunctions in RTL (`altsync
 library, not the project; in a VQM netlist, instances of the device primitives the VQM reader
 knows (`dffeas`, `cyclonev_lcell_comb`, `cyclonev_io_ibuf`, `cyclonev_io_obuf`,
 `cycloneive_lcell_comb`, `cycloneive_io_ibuf`, `cycloneive_io_obuf`; the VQM library grows in
-Phase 6) resolve through that library. Any other unresolved instance is `unresolved_module`.
+Phase 6) resolve through that library. Any other unresolved instance is `unresolved_module`,
+unless `read_verilog --auto-blackbox` makes it an implicit black box (2D EL-11: named
+connections, `inout` ports sized by the first instance, an info line naming it).
 
 *Errors* are located at the project-file or source line (`file:line`) where there is one:
 `missing_file`, `unknown_key`, `unknown_option`, `unknown_file_type`, `unsupported_input_type`,
@@ -415,7 +417,7 @@ The goal is code an agent can write and a human can review in one pass: small fu
 - `-std=c17 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Wmissing-prototypes -Werror`.
 - No `goto` except the single `cleanup:` label pattern for error paths. No variable-length arrays. No recursion in IR traversals (use an explicit worklist) — the IR can be 2M nodes deep.
 - Memory: every IR object lives in storage owned by its `Module` (per-module paged arrays and arena; the string table and provenance are design-global — `docs/IR.md` IR-18); passes never `malloc` IR objects directly. `util/` provides `arena`, `vec`, `pagevec`, `u64map`, `idindex`, `str`, `log`; nothing else in the tree defines a generic container.
-- Errors: functions return `odin3_status` (an enum); no `exit()`/`_exit()`/`_Exit()`/`quick_exit()` outside `cli/`; no `abort()`, `raise(SIGABRT)` or `__builtin_trap()` outside `check` in debug builds. `assert()` is allowed (it compiles out of release builds). Checked by `tools/check_rules.py` and, at link level, `tools/check-symbols.sh`.
+- Errors: functions return `odin3_status` (an enum); no `exit()`/`_exit()`/`_Exit()`/`quick_exit()` outside `cli/`; no `abort()`, `raise(SIGABRT)` or `__builtin_trap()` outside `check` in debug builds, except the ABC adapter's off-thread stop, which is `__builtin_trap()` (PHASE3 #28). `assert()` is allowed (it compiles out of release builds). Checked by `tools/check_rules.py` and, at link level, `tools/check-symbols.sh`.
 - One header per module, `#include` only what you use (`include-what-you-use` advisory in CI, not blocking).
 - Every public function in `odin3.h` has a one-paragraph comment: purpose, ownership of returned memory, failure modes.
 

@@ -573,10 +573,13 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
        (`'.*' (implicit port connections) is SystemVerilog, not Verilog-2005`, spec §3.1; Yosys
        accepts it under `-sv`, the Parmys mode). A design with either form reads in Parmys and
        not in Odin III;
-     - *a stray `;` module item is a syntax error* (Task 11, 2C-2 final review): `wire a;;` is
-       rejected, as Annex A has no empty module item; Yosys 0.55 (with or without `-sv`) and
-       Icarus accept it. No corpus file has one. Open for Peter: accept it leniently like
-       Yosys/Icarus (the reviewer's recommendation) or keep rejecting;
+     - *a stray `;` module item is accepted with a warning (PHASE2 #16)* (Task 11, 2C-2 final
+       review; Peter's ruling): `wire a;;` or a lone `;` between items makes no node and logs
+       `<file>:<line>:<col>: warning: empty module item ';' ignored`, as Yosys 0.55 (with or
+       without `-sv`) and Icarus accept it, though Annex A has no empty module item. The rule is
+       in `module_items`, so a generate region's and a generate block's items take it too (Yosys
+       accepts both); a `;` at unit level, in a port list or in a declarator list stays a syntax
+       error. No corpus file has one;
      - *more lenient than Parmys*: `macromodule` is a module (1364-2005 §12.1); Yosys has no
        such keyword, so every `keywords/macromodule` micro fails in Parmys at its `macromodule`;
      - *lenient forms 2D judges* (parse-lenient, no tree change): module items of any kind in a
@@ -617,3 +620,18 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    - *Heavy runs:* the three sweep CTests are registered through `odin3_add_sweep_test()`, so
      `tools/heavy-run` alone gates (77 without `ODIN3_HEAVY_OK=1`), locks, caps and decides
      nesting; `parse-corpus` keeps no heavy logic (`--heavy` removed; Task 10 re-review R1/R2).
+
+16. **Peter's rulings of 2026-10-12** (Peter: "Accept all recommendations other than 6").
+    - **A stray `;` module item is accepted with a warning,** as Yosys 0.55 and Icarus accept
+      it. This replaces 2C's rejection in #15's declared divergences.
+    - **Confirmed agent defaults:**
+      - 2E §20 #18: 2E gives Verilog's value where Yosys 0.55's `casez` mux grouping gives wrong
+        logic (correctness over parity);
+      - 2D: the top keeps its plain name under parameter overrides, as `chparam` does;
+      - 2D: black boxes are ports-only `(* blackbox *)` MODULEs;
+      - 2D divergence 26: project parameter numbers keep their sign.
+
+17. **IR-8 amendment approved** (Peter, 2026-10-13: "IR-8 approved"). A black box may carry table
+    width rules: the width of a port of a `(* blackbox *)` module with several parameter sets is
+    a lookup of the cell's parameter values (docs/IR.md IR-8, IR-7b; `src/ir/celltype.h`). Merged
+    with 2D-5 (#86).

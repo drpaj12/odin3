@@ -4,7 +4,7 @@
  * (EL-40): the BITS attribute `init` (one bit per wire bit, x where unknown) on a wire, so a net's
  * initial value is the `init` bit of its wire memberships: its primary (wire, bit), then its
  * aliases that are wire bits, oldest first. Shared by proc (2E) and the opt family (2F, which
- * appends odin3_ffinit_get).
+ * appends odin3_ffinit_get, the read side).
  */
 #ifndef ODIN3_PASSES_FFINIT_H
 #define ODIN3_PASSES_FFINIT_H
@@ -34,5 +34,14 @@ odin3_status odin3_ffinit_set(odin3_module *module, odin3_net_id net, odin3_bit 
  * created: with no `init` key interned yet, nothing has one. Errors as odin3_ffinit_set.
  */
 odin3_status odin3_ffinit_remove(odin3_module *module, odin3_net_id net, odin3_wire_id *defined_on);
+
+/*
+ * Yosys FfInitVals operator() (2F spec §9.4): net's initial value, the first defined (0 or 1)
+ * `init` bit among its wire memberships in the order above (primary first, then aliases oldest
+ * first); x when none has one (an x or z bit, a non-BITS or too short `init`, no wire membership,
+ * no `init` key interned). A conflict between memberships is opt_clean's warning (2F §10), not
+ * this call's. Allocates nothing; a NULL module or a net that is not live reads x.
+ */
+odin3_bit odin3_ffinit_get(const odin3_module *module, odin3_net_id net);
 
 #endif

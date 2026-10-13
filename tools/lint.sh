@@ -95,8 +95,10 @@ read_list() {
     done < <(list_files "$@")
 }
 
-# ---- 0. §15.1 rules no other tool checks (exit/abort/goto; the .y/.l hygiene of 2C §6) ------
-read_list rule_files 'src/*.c' 'src/*.h' 'src/*.y' 'src/*.l' 'plugins/*.c' 'plugins/*.h'
+# ---- 0. §15.1 rules no other tool checks (exit/abort/goto; the .y/.l hygiene of 2C §6; no assert(
+# in the ABC adapter, 3D §4.1) --------------------------------------------------------------------
+read_list rule_files 'src/*.c' 'src/*.h' 'src/*.y' 'src/*.l' 'plugins/*.c' 'plugins/*.h' \
+    'adapters/abc/*.c' 'adapters/abc/*.h'
 if [ "${#rule_files[@]}" -eq 0 ]; then
     record rules PASS
 else
@@ -114,7 +116,7 @@ fi
 # ---- 2. clang-tidy ---------------------------------------------------------------------------
 tidy_step() {
     local files
-    read_list files 'src/*.c' 'plugins/*.c' 'tests/unit/*.c'
+    read_list files 'src/*.c' 'plugins/*.c' 'tests/unit/*.c' 'adapters/abc/*.c'
     if [ "${#files[@]}" -eq 0 ]; then
         record clang-tidy PASS
         return
@@ -125,10 +127,13 @@ tidy_step() {
         record clang-tidy FAIL
         return
     fi
-    if [ ! -f build/lint/compile_commands.json ]; then
+    # ABC is on, so the ABC adapter (adapters/abc/, 3D §4.1) and its test have compile commands;
+    # nothing is built here. A build/lint configured before the adapter existed is reconfigured.
+    if [ ! -f build/lint/compile_commands.json ] ||
+        ! grep -q '/adapters/abc/' build/lint/compile_commands.json; then
         echo "==> configuring build/lint for clang-tidy"
         local cfg_log="$LOG_DIR/tidy-configure.log"
-        if ! cmake -S . -B build/lint -G Ninja -DODIN3_WITH_ABC=OFF \
+        if ! cmake -S . -B build/lint -G Ninja -DODIN3_WITH_ABC=ON \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >"$cfg_log" 2>&1; then
             sed 's/^/    /' "$cfg_log" >&2
             record clang-tidy FAIL
@@ -151,7 +156,7 @@ tidy_step() {
     local root_re
     root_re=$(printf '%s' "$ROOT" | sed 's/[][\.^$*+?(){}|]/\\&/g')
     run_tool clang-tidy clang-tidy -p build/lint --quiet \
-        "--header-filter=^${root_re}/(include|src|plugins|tests/unit)/" "${files[@]}"
+        "--header-filter=^${root_re}/(include|src|plugins|tests/unit|adapters/abc)/" "${files[@]}"
 }
 if [ "$run_tidy" -eq 1 ]; then
     tidy_step
@@ -160,7 +165,8 @@ else
 fi
 
 # ---- 3. cppcheck -----------------------------------------------------------------------------
-read_list cpp_files 'src/*.c' 'src/*.h' 'plugins/*.c' 'plugins/*.h'
+read_list cpp_files 'src/*.c' 'src/*.h' 'plugins/*.c' 'plugins/*.h' 'adapters/abc/*.c' \
+    'adapters/abc/*.h'
 if [ "${#cpp_files[@]}" -eq 0 ]; then
     record cppcheck PASS
 else
@@ -169,10 +175,16 @@ else
 fi
 
 # ---- 4. lizard -------------------------------------------------------------------------------
-if [ -d src ]; then
-    run_tool lizard lizard -C 15 -L 60 -a 5 -w src/
-else
+lizard_dirs=()
+for d in src adapters/abc; do
+    if [ -d "$d" ]; then
+        lizard_dirs+=("$d/")
+    fi
+done
+if [ "${#lizard_dirs[@]}" -eq 0 ]; then
     record lizard PASS
+else
+    run_tool lizard lizard -C 15 -L 60 -a 5 -w "${lizard_dirs[@]}"
 fi
 
 # ---- 5. ruff ---------------------------------------------------------------------------------

@@ -609,6 +609,36 @@ then the options considered.
       SHA-256 identity and run record unchanged), with a wall-clock and an output cap. That is
       Peter's question 4; nothing was built for it in 3D-4.
 
+28. **Peter's rulings of 2026-10-12** (Peter: "Accept all recommendations other than 6 - I can't
+    imagine I will run nightly QoR").
+    - **(a) The ABC adapter's off-thread stop is `__builtin_trap()`.** `check_rules.py` gets one
+      narrow allowance for that single call site in `adapters/abc/`, so its exit status (132,
+      SIGILL) can be told apart from an OOM kill (137) and ASan prints a backtrace. CLAUDE.md's
+      "trap only in `check`" rule gains this one exception. This replaces the interim
+      `raise(SIGKILL)`, and 3D-2 may merge once it is in.
+    - **Licences: GipSAT and saucy are accepted.** GipSAT is a port of rIC3, which is
+      BSD-3-Clause on master from the same holder. saucy's LICENSE file is missing from ABC's
+      tree, which NOTICE records; VTR is in the same position.
+    - **User-supplied ABC scripts run in a subprocess.** The vetted built-in default script
+      stays in-process through the linked engine. Any other script, from `abc --script`,
+      `--abc-script` or the project's `abc_script`, runs in a child `abc` process with a
+      wall-clock limit and an output cap, and still goes through the AB-21 checker first. A
+      crash or timeout in the child is an `ODIN3_ERR_ENGINE` failure of that run, not of
+      `odin3`. This changes D3 (PHASE3 Risk 1's fallback, now chosen for non-default scripts);
+      the 3D spec and plan gain it before 3D-5.
+    - **The P-baseline table is published** to odin3-golden `qor/3c9a4d23b27d/P-baseline/`.
+      This is a one-time permission; the controller runs `vtr-qor publish` and the commit.
+    - **No nightly QoR runs and no timer.** `vtr-qor nightly` (3H Task 13) is kept only as a
+      hand-run command. The 3D sweeps that ruling I10 gave to the nightly (§13.4 golden
+      equivalence, §13.5 `abc-diff`, §13.8 determinism) run instead through `tools/heavy-run`,
+      started by the controller, before 3D-5, 3D-7 and 3D-8 merge.
+    - **Confirmed:**
+      - `odin3_get_passrun_count` is one past the last run, which is now frozen ABI;
+      - run information quotes any byte outside `!`..`~` (#26);
+      - `check` has no run-row rules;
+      - the checker defaults of #27;
+      - the QoR INCOMPLETE semantics, and EArch gated over its smoke set (#25 and E-QH14a–c).
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this

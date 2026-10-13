@@ -244,13 +244,13 @@ exactly as each Yosys rule tests (`== State::Sx` versus "not 0/1").
 | (`action`) | 1-bit `$eq`/`$ne`, B constant | B all undef → Y = x; B = 1 (`$eq`) or 0 (`$ne`) → Y = A; else `eqneq.isnot` → `$not` of A | |
 | `eqneq.cmpzero` | `$eq $ne` | A or B all zero | `$logic_not` / `$reduce_bool` of the other side |
 | `constshift` | `$shl $shr $sshr $shiftx` | B fully constant (`-keepdc`: fully defined) | wiring: Y bit i = A bit (i + shift) (A extended to Y first except `$shiftx`), fill 0, the sign bit (`$sshr` signed) or x (`$shiftx`); shift saturates at A's width |
-| `identwrt.a/b` (only `consume_x`) | `$add $or $xor` (A or B zero), `$sub` (B zero); shifts (B zero); `$mul` by 1 or −1; `$div` by 1 | the identity holds | Y = the other operand extended to Y (wiring; Yosys makes `$pos`) or `$neg` of it for −1 |
+| `identwrt.a/b` (only `consume_x`) | `$add $or $xor` (A or B zero), `$sub` (B zero); shifts (B zero); `$mul` by 1 or −1; `$div` by 1 (by the 1-bit signed `1'1`, which is −1: `$neg`, only when A_SIGNED && B_SIGNED, §17 #30) | the identity holds | Y = the other operand extended to Y (wiring; Yosys makes `$pos`) or `$neg` of it for −1 |
 | `mux_bool` / `mux_invert` (`-mux_bool`) | 1-bit `$mux`, `$_MUX_` | A = 0, B = 1 / A = 1, B = 0 | Y = S / `$not` of S |
 | `mux_and` / `mux_or` (`-mux_bool`, `consume_x`) | 1-bit `$mux`, `$_MUX_` | A = 0 / B = 1 | `$and(S, B)` / `$or(A, S)` |
 | `mux_undef`, `mux_empty`, `mux_sel01`, `mux_reduce` (`-mux_undef`) | `$mux $pmux` | (A and B all undef) or S all undef → Y = A; B slices that are all undef or whose S bit is undef are dropped; an all-undef A takes the last remaining B slice; none left → Y = A; A = 0, B = 1 → Y = S; else rebuilt as `$pmux` (≥ 2 selects) or `$mux` | |
 | `const.$<type>` | every evaluable registry cell: `$not $and $or $xor $xnor $reduce_* $logic_* $shl $shr $sshr $shiftx $lt $le $eq $ne $gt $ge $add $sub $mul $div $mod $pow $neg $mux $pmux` | every input bit constant | Y = the 4-state fold (OP-5) |
 | (`$mux` conservative) | `$mux` | S constant (`-keepdc`: and defined) → Y = B if S is 1, else A (so **S = x picks A**); A = B → Y = A | |
-| `$pow` strength reduction | `$pow`, A constant one-hot, B unsigned | A = 2 → `$shl(1, B)`; A = 2^k → `$mul(k, B)` feeding `$shl(1, ·)` | |
+| `$pow` strength reduction | `$pow`, A constant one-hot (not the sign bit of a signed A), B unsigned | A = 2 → `$shl(1, B)` with `A_SIGNED` 0; A = 2^k → `$mul(k, B)` feeding `$shl(1, ·)` | Yosys 0.55 keeps `A_SIGNED` 1 on the 1-bit `1'1` (`-1 << B`) and also rewrites a signed A whose one-hot bit is the sign: §17 #21 |
 | `mul_shift.zero` / `.swapped` / `.unswapped`, `mul_low_zeros` (`!keepdc`) | `$mul` | a fully defined constant side: 0 → Y = 0; one-hot (not the signed MSB) → `$shl` by its index; low zero bits on either side → a narrower `$mul` and Y's low bits 0 | |
 | `divmod_zero` | `$div $mod` | B fully defined and zero | Y = all x |
 | `div_shift` / `mod_mask` (`!keepdc`) | `$div` / `$mod` | B one-hot (not the signed MSB) | `$sshr` by the index (signed truncating: plus `$reduce_or`/`$and`/`$add` correction) / `$and` mask (signed truncating: the remainder bits plus a sign fix) |
@@ -262,8 +262,12 @@ Unless `-noclkinv`: a `CLK`, `EN`, `ARST`, `SRST`, `ALOAD`, `SET`, `CLR` input o
 $dffe $adff $adffe $aldff $aldffe $sdff $sdffe $sdffce $dffsr $dffsre $dlatch $adlatch $dlatchsr
 $sr`) driven by an invert-map output takes the inverter's input and flips its `*_POLARITY` parameter
 (rebuild); likewise each bit of a `$mem`'s `RD_CLK`/`WR_CLK` (one `$mem` per array, 2D EL-27) flips
-that port's bit of `RD_CLK_POLARITY`/`WR_CLK_POLARITY`; `$_DFF_P_`↔`$_DFF_N_` and
-`$_DLATCH_P_`↔`$_DLATCH_N_` swap types the same way.
+that port's bit of `RD_CLK_POLARITY`/`WR_CLK_POLARITY` (a `$memrd`/`$memwr`'s `CLK` likewise);
+`$_DFF_P_`↔`$_DFF_N_` and `$_DLATCH_P_`↔`$_DLATCH_N_` swap types the same way. `SET` and `CLR` are
+WIDTH-bit ports: only a 1-bit FF has an inverter's output there (the invert map is keyed by whole
+signals, as Yosys's). The node is rebuilt once however many inputs change, its Q nets kept (so the
+`init` on them stays); `DEBUG` line and `clkinv` count per input, as Yosys logs per input. An input
+on a ring of inverters is left alone (§17 #28).
 
 ### 4.5 `-fine` rules
 
@@ -277,7 +281,14 @@ Nothing happens when one group already holds every bit. `fine.neutral_A/B` drop 
 $reduce_bool`; `fine.$reduce_and`, `fine.A`, `fine.B` collapse an all-constant input to its one-bit
 4-state reduction; `fine` (`$add`/`$sub`) strips low result bits that are copies of an operand
 bit (B bit 0; `$add` A bit 0; `$sub` 1 − 1 = 0); `$eq`/`$ne` drop redundant bit pairs and fold
-when a union-find over the constant-equal positions merges 0 with 1.
+when a union-find over the constant-equal positions merges 0 with 1. Counter and `DEBUG` names:
+`fine.group`, `fine.neutral_A`, `fine.neutral_B`, `fine.$reduce_and`, `fine.A`, `fine.B`, `fine`
+(the `$add`/`$sub` strip), and, with no Yosys `cover` name, `fine.eqne` and `fine.cmp`. Every rule
+is skipped without `-fine` (or `-full`). Where the rules sit in a cell type's list is Yosys's: the
+group, neutral, reduce_and, A and B rules after the logic rules and before `xbit`, the strip first
+for `$add`/`$sub`, the `$eq`/`$ne` and comparison rules after folding. `fine.neutral_*`, `fine.A/B`,
+`fine.$reduce_and` and the strip go on with the rebuilt cell in the same visit (§4.1), the others
+end it. Differences: §17 #25-27.
 
 ### 4.6 `replace_undriven` (`-undriven`)
 
@@ -349,7 +360,9 @@ lands (PHASE2 #13, 2D §14.6; not 2F's change).
 erases `$tribuf`/`$_TBUF_` from its cell set), `$proc`,
 port and constant nodes (constants are canonical, OP-2), `$mux`/`$pmux` under `-nomux`, and
 `module`/`blackbox`/`hard` nodes (Yosys merges user cells only with `-share_all`, which Parmys
-never passes); with `-keepdc`, FFs whose init is not fully defined.
+never passes); with `-keepdc`, FFs whose init is not fully defined. Nodes with no output port or
+with more than one are not candidates either, because `kit_connect` redirects exactly one output
+port; this misses Yosys's `$memwr` merges (§17 row 13).
 
 **Key** of a node: its cell type ID; its parameters in declaration order (values compared
 exactly: INT, BITS bit by bit, STRING by strtab ID); and its input pins as a sequence of
@@ -358,7 +371,8 @@ is constant, so a constant `$sop` and a `$_CONST1_` pin agree. Normalisations, f
 `hash_cell_inputs`/`compare_cell_parameters_and_connections`:
 
 - `$and $or $xor $xnor $add $mul $logic_and $logic_or $_AND_ $_OR_ $_XOR_`: the A and B operand
-  vectors ordered (lexicographic on (kind, value)) — the commutative swap;
+  vectors ordered (lexicographic on (kind, value)) — the commutative swap — only when `A_SIGNED`
+  equals `B_SIGNED` (or the type has neither; §17 row 14);
 - `$reduce_xor $reduce_xnor`: A's operands sorted (a multiset);
 - `$reduce_and $reduce_or $reduce_bool`: A sorted and de-duplicated (a set);
 - `$pmux`: the (S bit, B slice) pairs sorted, then A;
@@ -396,7 +410,13 @@ levels deep, else re-queued as non-pure. Ports never enabled are dead: a mux wit
 becomes wiring, with several a narrower `$pmux`/`$mux`, with none it is deleted. The recursion of
 `eval_mux`/`eval_mux_port` becomes an explicit frame stack (CLAUDE.md: no recursion); a global
 budget of **100,000** evaluations per module, as in Yosys, stops the analysis with the warning of
-§16 and changes nothing in that module. Count: `opt_muxtree: removed N multiplexer ports`.
+§16 and changes nothing in that module (§17 row 18). Roots are evaluated from the last mux to the
+first, then the re-queued ones last-in first-out: Yosys's cell dictionary and pool iterate newest
+first, and the order is observable (a root promoted to pure prunes later evaluations; observed in a scratch
+differential on several thousand random layered DAGs, most with re-queues, which agreed with Yosys
+0.55 only in this order; the generator is not committed and lands with the corpus work of Task 15/18). The
+known-bit replacements are kept aside and applied with the dead ports. Count:
+`opt_muxtree: removed N multiplexer ports`.
 
 ## 8. `opt_reduce` (OP-8)
 
@@ -522,11 +542,22 @@ Per module without live `$proc` nodes (others are skipped, §3), as `rmunused_mo
 3. Dead nodes are deleted in ID order; a dead FF's Q init bits are removed.
 4. Nets left with no pins, no wire membership and no aliases are deleted.
 5. A wire is deleted when every one of its nets has no pins, unless it is a port wire, has `keep`
-   or a defined `init` bit; with `-purge` also a wire whose name does not start with `$`
-   (Yosys's public names) — its nets stay, only the name goes. Yosys also drops `$`-named wires
-   that are still used; Odin III keeps them as names (IR-2; §17 #3).
-6. `init` cleanup (`rmunused_module_init`): an init bit on a net that no FF drives is removed; on
-   a constant net whose value differs it is removed with the warning of §16.
+   or a defined `init` bit. **Without `-purge`** (Yosys 0.55, the `!purge_mode &&
+   check_public_name && (... || s1 != s2)` branch) a public wire (name not starting with `$`) also
+   stays when one of its nets has another wire membership (the net's primary is another wire bit,
+   or an alias is another wire bit) or was constant-driven before step 3 (the same mark as step 6):
+   `wire c; connect c 1'0` and two unused aliased wires keep their names. With `-purge` also a
+   public wire that is not the name a live net depends on: for each bit, the net has no pins or
+   the wire is not the net's primary. A used public wire that is its net's primary name stays
+   (Yosys 0.55 probe: `w = a&b; y = ~w` keeps `w` under `-purge`; a wire that is only an alias is
+   dropped). Its nets stay, only the name goes. `$`-named used wires stay (IR-2; §17 #3).
+6. `init` normalisation (Yosys 0.55 `rmunused_module_signals`, which runs before the wire decision
+   of step 5, so Odin III runs it between steps 3 and 5): (a) an init on a net that was
+   constant-driven (decided before step 3 deletes the dead `$_CONST*_` node) is removed whatever
+   its value, silently, and is no change; (b) when more than one wire membership of a net carries
+   a defined bit, the net keeps exactly one (its primary first), also silently. There is no
+   conflict warning: Yosys's "Initial value conflict" is unreachable after this step. Every other
+   init stays (an unused wire with init, and a used non-FF net with init, keep it).
 
 Count: `opt_clean: removed N unused cells, M unused nets and W unused wires`. Yosys's
 "driver-driver conflict" warning has no counterpart (check rule 4).
@@ -553,7 +584,8 @@ sub-pass call (agent default; Release: off).
 **Termination of each sub-pass invocation.** Every inner loop is over a finite work list that only
 shrinks or is refilled by strictly simplifying rewrites: `opt_expr`'s rounds stop when a round
 rewrites nothing, which the ranking below bounds; `opt_merge` sweeps strictly decrease the number of
-candidates; `opt_muxtree` is bounded by its evaluation budget; `opt_reduce`'s worker runs strictly
+candidates; `opt_muxtree` is bounded by its evaluation budget (the budget counts eval_mux entries, not their
+cost: each entry on an S-way `$pmux` costs O(S²), O(W·S) more with `replace_known`, as in Yosys); `opt_reduce`'s worker runs strictly
 decrease the number of reduction inputs driven by a same-type reduction (inlining adds inputs, so
 the total count is not the measure) or the mux port count; `opt_dff`'s work list receives only
 sliced FFs, whose bit count is smaller than the FF they came from, or FFs whose feature set strictly
@@ -639,13 +671,14 @@ lines DEBUG.
 | INFO | `opt_expr: module 'm': cells could not be sorted topologically; visiting them in ID order` | a combinational loop (Yosys: "Couldn't topologically sort cells…") |
 | INFO | `opt_muxtree: module 'm' has processes; skipped` (likewise `opt_clean`) | before `proc` (Yosys's `has_processes_warn`) |
 | DEBUG | `opt_expr: module 'm': <rule> on <type> '<cell>'` (rule = §4 name) | every `opt_expr` rewrite |
+| DEBUG | `opt_expr: module 'm': undriven on net '<net>'` (`<net>`: the net's name, else its primary wire bit `w[k]` with `k` the declared index, else `$n<ID>`) | every net `replace_undriven` ties off |
 | DEBUG | `opt_merge: module 'm': '<cell>' is identical to '<cell>'` | every merge |
 | DEBUG | `opt_muxtree: module 'm': dead port K/N on <type> '<cell>'` | every dead port |
 | DEBUG | `opt_dff: module 'm': <action> on <type> '<cell>'`; `<action>` ∈ `removing never-active <port>`, `handling always-active <port>`, `handling const clock`, `handling D = Q`, `adding SRST`, `adding EN`, `setting constant <v> at bit K` | every `opt_dff` change |
 | DEBUG | `opt_clean: module 'm': removing unused <type> '<cell>'` | every removed node |
 | WARN | `opt: module 'm': no fixed point after 10000 iterations; stopping` | the cap (OP-12) |
+| WARN | `opt: snapshot skipped: <reason>` | a `--opt-snapshot` file that cannot be written (a cell with no RTLIL form, an I/O error); the call goes on and returns its own status |
 | WARN | `opt_muxtree: module 'm': giving up after 100000 evaluations` | Yosys's "Giving up (too many iterations)" |
-| WARN | `opt_clean: module 'm': initial value conflict for <net>: driven by 1'<v>, init 1'<i>` | Yosys's "Initial value conflict" |
 | ERROR | `<pass>: unknown argument '<arg>'` | an unknown option (`INVALID_ARG`, the 1D style) |
 | ERROR | `opt needs more than N bytes (the design's budget is 60% of physical memory)` | the shared byte budget (§19; `ODIN3_ERR_PARSE`) |
 
@@ -663,12 +696,30 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 4 | ties and candidate order by node ID | by name or container order | determinism without names; may change which of two equal rewrites fires first |
 | 5 | rules on cells outside the registry are not ported; fine FFs keep their type | `$alu`, `$eqx`, `$_DFFE_*`… rules | those cells do not occur in Odin III's Phase 2 IR |
 | 6 | `opt_share` operand order by net ID | `std::map` by wire name | competing merges may differ; equivalent |
-| 7 | CSE survivor = lowest ID (unless `keep`) | first in the cell dict | names only |
+| 7 | CSE survivor = lowest ID (unless `keep`) | the later cell (its cell dict walks newest first) | names only |
 | 8 | x-with-init substitution only in `replace_undriven` | also in `opt_clean` | rare (2D folds `initial`-only regs, EL-40); x stays x, a refinement |
 | 9 | loop cap 10,000 | none | safety net |
 | 10 | `compact` after `opt` | — | IR-6 |
 | 11 | Odin III log text (§16) | Yosys text | — |
-| 12 | no `opt_dff -sat` | available | Parmys does not use it |
+| 12 | no `opt_dff -sat`, `-simple-dffe`; no `-share_all` (`opt_dff`, `opt_merge`, `opt`) | available | Parmys uses none of them |
+| 13 | `opt_merge` candidates have exactly one output port, so `$memwr` (no output) never merges | merges `$memwr` | `kit_connect` redirects one output port; a missed merge, never a wrong one |
+| 14 | the commutative swap only when `A_SIGNED == B_SIGNED` | merges mixed-sign commutative cells with swapped operands (unsound) | OP-13: with mixed signs, sext(x)+zext(y) differs from sext(y)+zext(x) (Yosys's `calc.cc` extends each operand by its own sign; `simlib.v` reads mixed signs as unsigned) |
+| 15 | `opt_reduce` sorts a reduction's inputs by key (constants by value, then net ID) and rebuilds the cell only when its input set changed (or had repeats) | sorts by wire name, and `setPort`s the sorted `A` of every reduction it visits, counted or not | same function and the same change count (observed in a scratch differential on a few thousand random designs, `-fine` or not, `$mem` write enables or not, compared with Yosys 0.55 over cell types, widths, constant inputs and change counts; the generator is not committed and lands with Task 15/18); only the order of a unique, constant-free input vector differs |
+| 16 | `opt_expr`, `opt_reduce` and `opt_merge` leave a cell with an unconnected input pin alone (`opt_merge`: it is no candidate) | has no open pins (an undriven wire is a full-width signal) | a missed rewrite, never a wrong one; two cells with dangling inputs are not known to read the same value |
+| 17 | `opt_muxtree`'s `replace_known` reads a data bit that is a select of the same mux as 1 in the slice of that select and 0 in the others and in A | compares an index into the distinct select nets (constants counting as one) with the slice number | the two agree unless a select repeats (or a constant repeats before it); Yosys 0.55 then writes 0 for a slice's own select (`B = { t s y }`, `S = { t s s }` gives `{ 0 0 y }`), which changes the function when only that select is set (OP-13) |
+| 18 | `opt_muxtree` that gives up (100,000 evaluations in a module) changes nothing in that module | has already replaced known bits in place by then | the replacements are applied with the dead ports at the end; a run that finished is identical |
+| 19 | `opt_muxtree` treats a `$mux`/`$pmux` with an unconnected pin, a second driver on a Y net or port widths that disagree with its parameters as a non-mux node | has no open pins | a missed rewrite, never a wrong one |
+| 20 | `opt_muxtree` makes no known-bit replacement in a mux whose output reaches more than one (user, port) pair (nor in the non-root muxes below it); its dead-port analysis is unchanged | `replace_known` writes the first port's knowledge into the mux's data bits, the second port's opposite knowledge never wins | OP-13: Yosys 0.55 turns `C = $mux(A=s0,…)` feeding `$pmux(B={c c}, S={s1 s0})` into `A = 1'1`, and `eval` gives y = 0 before and y = 1 after (`tests/unit/data/opt/muxtree/multiport_*.yosys`); a few missed constants |
+| 21 | `$pow` with a signed A whose one-hot bit is the sign bit is left alone; the `$shl` made from `2 ** B` has `A_SIGNED` 0 | Yosys 0.55 rewrites both, leaving `$shl` with `A_SIGNED` 1 on `1'1`, i.e. `-1 << B` (a miscompile) | follows later Yosys (`external/yosys`); `yosys -p "read_rtlil powsigned.il; opt_expr"` shows the 0.55 result |
+| 22 | `mul_low_zeros`: an operand all of whose bits are 0 gives Y = 0 | Yosys strips its bits and leaves a 0-bit port (folded to 0 later) | same value; Odin III cells have no 0-width ports |
+| 23 | `div_shift` / `mod_mask`: the low bits examined are cut at A's width | 0.55 extracts `exp` bits even when `exp` exceeds A | later Yosys does the same cut; avoids an out-of-range extract |
+| 24 | one `opt_expr` call can reduce further than one Yosys `opt_expr` | Yosys rules that read `cell->getPort` see a connected constant only after the next `opt_clean` | constants are read through merged nets at once (IR-1); after Yosys's own `opt` loop the results converge (observed in an uncommitted scratch differential over some 19,000 modules, which compared the results of the full `opt` loop; undefined values may resolve differently) |
+| 25 | `fine.group`: the new cells' bits are in (constant, then net ID) order of their operand pair | `std::map` by wire name | IR has no wire-name order (§17 #4); only the order of bits inside the new cells changes |
+| 26 | `fine` on `$add`/`$sub`: a stripped cell with no result bit left is wiring; an operand with no bit left is a constant 0 (unsigned) or its last stripped bit (signed), not a 0-bit port; an `$eq`/`$ne` that loses every bit of a side becomes `$logic_not`/`$reduce_bool` of the other side at once | Yosys leaves 0-bit ports (the cell is rewritten in a later round, or stays under `-keepdc`) | Odin III cells have no 0-width ports (as #22); same value, and the strip goes on in the same run |
+| 27 | `fine` `$add`/`$sub`, `$eq`/`$ne` and comparisons treat the operands as signed only when both `A_SIGNED` and `B_SIGNED` are set | Yosys tests `A_SIGNED` alone | Yosys 0.55 rejects mixed-sign cells (`check`: matched sign), whose constant evaluation is unsigned; the two agree on every valid cell |
+| 28 | an FF input on a ring of inverters (two or more `$not`s in a cycle) is not folded into the polarity | Yosys flips it once (`handle_polarity_inv` sets no `did_something`, and `invert.double` removes the ring's inverters in the same round, so the next round finds no inverter): `yosys -q -p "read_rtlil ffring.il; opt_expr; write_rtlil -"` shows `CLK_POLARITY 0` and `CLK` on the ring's other net | a ring is a combinational loop with no defined value, so either result refines it; the guard stops the fold from depending on `invert.double` removing the ring first (without it the unit test `test_clkinv_ring` fails: the guard is reached). A missed rewrite, never a wrong one; the walk that finds the ring is capped at 1024 inverters |
+| 29 | `$pow` of a one-hot `2^k` (k ≥ 2) and an unsigned B: the exponent product `k * B` is a `$mul` of `B_WIDTH + bitlen(k)` bits, and the `$shl(1, ·)` it feeds has that width for its B | the `$mul` is `Y_WIDTH` bits wide and the `$shl`'s B is too, so the product wraps (`4'd4 ** b` in 8 bits with b = 128 gives 1, not 0). Yosys 0.55 and later truncate the exponent product; Odin III widens it | OP-13: `yosys -p "read_rtlil pow.il; eval -set b 128 -show y m; opt_expr; eval -set b 128 -show y m"` (`$pow`, A = `8'00000100`, B and Y 8 bits) prints `y = 8'00000000`, then `8'00000001`; follows neither Yosys version (`test_pow_overflow`) |
+| 30 | a `$div` by a constant 1-bit signed `1'1` (which is -1) is a `$neg` of A, not the identity (`identwrt`); so is a `$mul` by -1; both only when A_SIGNED && B_SIGNED. A mixed-sign cell is left unchanged: our registry evaluator (`operation_signed`) reads it unsigned (1'1 is +1) while the 2D fold reads each operand by its own sign, so no rewrite is right under both | `is_int_one` (`b.as_int() == 1`) ignores signedness, so Yosys rewrites A / -1 to `$pos` | OP-13: `yosys -p "read_rtlil div.il; eval -set a 4 -show y m; opt_expr; eval -set a 4 -show y m"` (A, B signed, B = `1'1`, A and Y 4 bits) prints `y = 4'1100`, then `4'0100`; the `$mul` by -1 case already builds `$neg` (`test_div_minus_one`) |
 
 ## 18. Files, interfaces and data structures (OP-17)
 
@@ -686,8 +737,8 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | `tools/opt-check/` | `opt-rules`, `opt-equiv`, `opt-diff`, `gen-fold-table`, `order-probe.sh` |
 | `tests/unit/test_opt_*.c`, `tests/opt/`, `tests/bench/bench_opt.c` | §20 |
 
-No public ABI change (passes are reached through the pass manager); `docs/PASSES.md` gains eight
-rows. Side arrays indexed by net or node ID (fanout counts, liveness marks, order, mux port
+One additive ABI v4 setter, `odin3_pass_set_opt_snapshot` (the passes are reached through the
+pass manager); `docs/PASSES.md` gains eight rows. Side arrays indexed by net or node ID (fanout counts, liveness marks, order, mux port
 tables) come from `util/vec`, sized at the store length and freed after each call; the CSE table
 is a `u64map` plus a chain `vec`; `fold.c` uses a per-call arena.
 
@@ -741,7 +792,7 @@ one 60% limit. Exceeding it is fatal with `opt needs more than N bytes (the desi
 | lenet.v, the opt passes of the Phase 2 script (the trio, then the main `opt` on ≈ 661k cells) | ≤ 15 s |
 | lenet.v, peak RSS growth over the post-`proc` IR (side arrays, CSE table, dead objects before `compact`) | ≤ 25% |
 | the 31 VTR files, opt passes of the Phase 2 script, total | ≤ 3 s |
-| per sub-pass call | O(pins) full sweep (O(dirty pins) for `opt_expr` after the first iteration); `opt_muxtree` O(mux ports × budget) worst case; `opt_merge` O(candidate pins) expected |
+| per sub-pass call | O(pins) full sweep (O(dirty pins) for `opt_expr` after the first iteration); `opt_muxtree` O(budget × S²) worst case, each eval of an S-way `$pmux` costing O(S²) (O(W·S) more for `replace_known` on W-bit data), as Yosys; `opt_merge` O(candidate pins) expected |
 | per `opt` invocation | O(iterations × pins) worst case; iterations ≤ sequential depth of constant-register chains + a small constant on the corpus |
 
 The bench prints per file cells/nets/pins before and after, iterations, time per sub-pass, rewrites

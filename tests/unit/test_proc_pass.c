@@ -38,6 +38,7 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -968,7 +969,63 @@ static void test_info_line_success(void) {
     TEST_ASSERT_EQUAL_UINT32(6, stats.cells[ODIN3_PROC_K_HELPER]);
     TEST_ASSERT_EQUAL_UINT32(1, stats.warnings[ODIN3_PROC_W1]);
     TEST_ASSERT_EQUAL_UINT32(2, stats.processes_lowered);
-    TEST_ASSERT_EQUAL_UINT32(0, stats.opt_expr.folded); /* step F has no call yet (point (f)) */
+    TEST_ASSERT_EQUAL_UINT32(0, stats.opt_expr.folded); /* --noopt: no step F */
+    pb_free(&res);
+}
+
+/* The live $reduce_or nodes of the last module whose A is the constant 1 (the latch's enable). */
+static uint32_t reduce_or_of_one(const pb_result *res) {
+    uint32_t hits = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(res->module); id++) {
+        odin3_node_id node = {id};
+        if (!odin3_node_live(res->module, node)) {
+            continue;
+        }
+        const odin3_celltype_def *def =
+            odin3_celltype_get(res->design, odin3_node_type(res->module, node));
+        odin3_pinslice pins = odin3_node_port(res->module, node, 0);
+        if (strcmp(def->name, "$reduce_or") == 0 && pins.count == 1) {
+            odin3_net_id net = odin3_pin_net(res->module, pins.first);
+            hits += odin3_net_const_value(res->module, net) == ODIN3_CONST_1 ? 1U : 0U;
+        }
+    }
+    return hits;
+}
+
+/*
+ * Step F (point (f); the pre-merge step of 2F-2): proc without --noopt ends with opt_expr -keepdc
+ * on each lowered module. k_adff_latch_text's latch enable is a $reduce_or of the constant 1 (the
+ * rmdead'ed condition of a full case), which opt_expr folds and then takes the $and and $not chain
+ * above it apart (the $dlatch's EN becomes `en`); under --noopt the cell stays and
+ * stats.opt_expr is zero. Yosys 0.55's proc builds the latch another way, so the oracle runs on
+ * the cells that Odin III's `proc --noopt` writes (write_rtlil, the post-lowering dump):
+ *   yosys -p "read_rtlil stepf.il; opt_expr -keepdc; write_rtlil"
+ * leaves the $not, the $dlatch with EN = en, and connects the $reduce_or's Y to 1'1.
+ */
+static void test_step_f_folds(void) {
+    odin3_proc_test_set_hooks(NULL);
+    pb_result res;
+    build(k_adff_latch_text, &res);
+    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
+    odin3_proc_stats stats;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_proc(&res, &noopt, &stats));
+    TEST_ASSERT_EQUAL_UINT32(1, reduce_or_of_one(&res));
+    TEST_ASSERT_EQUAL_UINT32(0, stats.opt_expr.folded + stats.opt_expr.rewritten);
+    pb_free(&res);
+    build(k_adff_latch_text, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_proc(&res, NULL, &stats));
+    TEST_ASSERT_TRUE(stats.opt_expr.folded >= 1);
+    TEST_ASSERT_EQUAL_UINT32(0, reduce_or_of_one(&res));
+    uint32_t changes = stats.opt_expr.rewritten + stats.opt_expr.folded;
+    TEST_ASSERT_TRUE(changes >= 1);
+    char want[256];
+    (void)snprintf(want, sizeof want,
+                   "proc: 2 processes in 1 modules: 0 $dff, 1 $adff, 0 $aldff, 0 $dffsr, "
+                   "1 $dlatch, 1 $mux, 0 $pmux; opt_expr: %" PRIu32 " changes; ",
+                   changes);
+    const char *info = proc_info();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, strncmp(want, info, strlen(want)), info);
+    TEST_ASSERT_TRUE_MESSAGE(is_ms(info + strlen(want)), info);
     pb_free(&res);
 }
 
@@ -1156,6 +1213,7 @@ int main(void) {
     RUN_TEST(test_budget_e6_at_ff);
     RUN_TEST(test_real_orphans);
     RUN_TEST(test_info_line_success);
+    RUN_TEST(test_step_f_folds);
     RUN_TEST(test_real_determinism);
     RUN_TEST(test_postcondition);
     RUN_TEST(test_real_oom);

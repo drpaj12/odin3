@@ -2,9 +2,15 @@
  * main.c — the odin3 command-line driver. The only place exit codes and
  * process-level output policy live (spec §15.1: no exit() outside cli/).
  * Uses only the public ABI (odin3.h): it links libodin3, so plugins it loads
- * register into the same pass registry.
+ * register into the same pass registry. With ODIN3_HAVE_ABC it also links the
+ * linked-ABC adapter (libodin3_abc.so, odin3_abc.h) and registers its engine at
+ * start-up, before any --plugin (3D spec §4.3).
  */
 #include "odin3/odin3.h"
+
+#ifdef ODIN3_HAVE_ABC
+#include "odin3_abc.h"
+#endif
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -27,6 +33,7 @@ enum { PROJECT_ARGS_BUF = 4096 + 32 };
 static void print_usage(FILE *out) {
     (void)fputs("usage: odin3 [options] [-p \"pass args; pass args\"]... [script.o3]...\n"
                 "       odin3 [options] --parse-only [file.v]...\n"
+                "       odin3 [options] --elab-only [file.v]...\n"
                 "\n"
                 "Runs pass scripts on one design, in command-line order, after looking up\n"
                 "every pass name in all of them. A script holds commands separated by ';' or\n"
@@ -42,12 +49,16 @@ static void print_usage(FILE *out) {
                 "  -f LIST          read a file list first (read_project --format f LIST)\n"
                 "  --revision R     the Quartus revision every read_project reads\n"
                 "  --abc-script FILE the ABC script of every abc pass (below abc --script)\n"
+                "  --opt-snapshot DIR write the design before and after every changing opt step\n"
+                "                   (DIR must exist: NNNN-<sub>-before.il, -after.il)\n"
                 "  --dump-project   write the project record as JSON after the scripts\n"
                 "  --diag-paths given|resolved\n"
                 "                   name files in diagnostics as given (default) or absolute\n"
                 "  -p SCRIPT        run the passes given inline\n"
                 "  --parse-only     parse the files given (else the project's) and stop:\n"
                 "                   read_verilog --parse-only FILE... (no script allowed)\n"
+                "  --elab-only      elaborate the files given (else the project's), then stats:\n"
+                "                   read_verilog FILE...; stats (no script allowed)\n"
                 "\n"
                 "passes:\n",
                 out);
@@ -81,6 +92,7 @@ typedef struct cli_state {
     bool inline_script;   /* a -p is given */
     bool script_file;     /* a positional argument ending in .o3 (a script) is given */
     bool parse_only;      /* --parse-only: the other arguments are Verilog files, not scripts */
+    bool elab_only;       /* --elab-only: likewise; read_verilog elaborates, then stats runs */
     bool project;         /* a --project or -f is given */
     bool dump;            /* --dump-project */
     bool help;            /* --help: printed after the scan (plugin passes listed), nothing runs */
@@ -88,11 +100,14 @@ typedef struct cli_state {
     odin3_keep_ast keep;  /* --keep-ast (ELABORATED), --keep-ast=all (ALL); NONE by default */
     /* --abc-script FILE, NULL for none */
     const char *abc_script;
+    bool linked_abc;          /* the linked ABC engine is registered (--version names it) */
+    const char *opt_snapshot; /* --opt-snapshot DIR, NULL for none */
 } cli_state;
 
 /* The options that take a value. */
-static const char *const k_value_options[] = {
-    "--plugin", "--top", "-p", "--project", "-f", "--revision", "--diag-paths", "--abc-script"};
+static const char *const k_value_options[] = {"--plugin",     "--top",        "-p",
+                                              "--project",    "-f",           "--revision",
+                                              "--diag-paths", "--abc-script", "--opt-snapshot"};
 
 /* An option that takes a value: true (and *value) when argv[*at] is one; advances *at. */
 static bool option_value(char **argv, int argc, int *at, const char **value) {
@@ -126,10 +141,41 @@ static int bad_value(const char *option, const char *value, const char *why) {
     return EXIT_USAGE;
 }
 
+/* --version: the version and ABI lines, then the linked ABC's commit when it is registered. */
+static void print_version(const cli_state *state) {
+    (void)printf("odin3 %s (ABI %u)\n", odin3_version_string(), odin3_abi_version());
+#ifdef ODIN3_HAVE_ABC
+    if (state->linked_abc) {
+        (void)printf("linked ABC %s (adapters/abc/NOTICE)\n", ODIN3_ABC_COMMIT_STR);
+    }
+#else
+    (void)state;
+#endif
+}
+
+/*
+ * Registers the linked ABC engine (3D spec §4.3), before any --plugin can register another. A
+ * failure is the warning "linked ABC unavailable: <status>", which the default log sink prints as
+ * "odin3: warning: linked ABC unavailable: <status>" (§11's "odin3: " is the sink's, as for the
+ * unlocated project diagnostics), and odin3 runs on without linked ABC. True when registered.
+ */
+static bool init_linked_abc(void) {
+#ifdef ODIN3_HAVE_ABC
+    odin3_status status = odin3_abc_adapter_init();
+    if (status == ODIN3_OK) {
+        return true;
+    }
+    char msg[MSG_BUF];
+    (void)snprintf(msg, sizeof msg, "linked ABC unavailable: %s", odin3_status_string(status));
+    (void)odin3_log_write(ODIN3_LOG_WARN, msg);
+#endif
+    return false;
+}
+
 /* A flag of the first scan: true when arg is one (recorded in state). */
 static bool scan_flag(const char *arg, cli_state *state) {
     if (strcmp(arg, "--version") == 0) {
-        (void)printf("odin3 %s (ABI %u)\n", odin3_version_string(), odin3_abi_version());
+        print_version(state);
     } else if (strcmp(arg, "--help") == 0) {
         state->help = true;
     } else if (strcmp(arg, "--check") == 0) {
@@ -138,6 +184,8 @@ static bool scan_flag(const char *arg, cli_state *state) {
         state->dump = true;
     } else if (strcmp(arg, "--parse-only") == 0) {
         state->parse_only = true;
+    } else if (strcmp(arg, "--elab-only") == 0) {
+        state->elab_only = true;
     } else if (strcmp(arg, "--keep-ast") == 0 || strcmp(arg, "--keep-ast=all") == 0) {
         state->keep =
             arg[strlen("--keep-ast")] == '=' ? ODIN3_KEEP_AST_ALL : ODIN3_KEEP_AST_ELABORATED;
@@ -151,6 +199,12 @@ static bool scan_flag(const char *arg, cli_state *state) {
 static bool is_regular_file(const char *path) {
     struct stat info;
     return stat(path, &info) == 0 && S_ISREG(info.st_mode);
+}
+
+/* True when path names a directory (symbolic links followed). */
+static bool is_directory(const char *path) {
+    struct stat info;
+    return stat(path, &info) == 0 && S_ISDIR(info.st_mode);
 }
 
 /* An option with its value (loads a plugin, records the rest). */
@@ -170,11 +224,15 @@ static int scan_value(const char *arg, const char *value, cli_state *state) {
     if (strcmp(arg, "--abc-script") == 0 && !is_regular_file(value)) {
         return bad_value(arg, value, "no such file");
     }
+    if (strcmp(arg, "--opt-snapshot") == 0 && !is_directory(value)) {
+        return bad_value(arg, value, "no such directory");
+    }
     state->inline_script |= strcmp(arg, "-p") == 0;
     state->project |= is_project_option(arg);
     state->top = strcmp(arg, "--top") == 0 ? value : state->top;
     state->revision = strcmp(arg, "--revision") == 0 ? value : state->revision;
     state->abc_script = strcmp(arg, "--abc-script") == 0 ? value : state->abc_script;
+    state->opt_snapshot = strcmp(arg, "--opt-snapshot") == 0 ? value : state->opt_snapshot;
     return EXIT_OK;
 }
 
@@ -200,21 +258,35 @@ static int scan_one(char **argv, int argc, int *at, cli_state *state) {
     return EXIT_OK;
 }
 
-/* --parse-only takes no script (2C §4.1): the files are its arguments; a -p or a positional
- * argument ending in .o3 (the script suffix) is refused. */
-static int check_parse_only(const cli_state *state) {
-    if (!state->parse_only) {
+/* True when the other arguments are Verilog files for read_verilog, not scripts. */
+static bool files_mode(const cli_state *state) {
+    return state->parse_only || state->elab_only;
+}
+
+/* --parse-only and --elab-only take no script (2C §4.1; plan point (w)): the files are their
+ * arguments; a -p or a positional argument ending in .o3 (the script suffix) is refused, and so
+ * are the two together. */
+static int check_files_mode(const cli_state *state) {
+    if (!files_mode(state)) {
         return EXIT_OK;
     }
+    if (state->parse_only && state->elab_only) {
+        (void)fputs("odin3: --parse-only and --elab-only cannot be combined\n", stderr);
+        print_usage(stderr);
+        return EXIT_USAGE;
+    }
     if (state->inline_script || state->script_file) {
-        (void)fputs("odin3: --parse-only cannot be combined with a script: use the pass option "
-                    "(read_verilog --parse-only)\n",
+        (void)fputs(state->elab_only
+                        ? "odin3: --elab-only cannot be combined with a script; use read_verilog "
+                          "in the script\n"
+                        : "odin3: --parse-only cannot be combined with a script: use the pass "
+                          "option (read_verilog --parse-only)\n",
                     stderr);
         print_usage(stderr);
         return EXIT_USAGE;
     }
     if (state->quoted != NULL) {
-        return bad_value("--parse-only", state->quoted,
+        return bad_value(state->elab_only ? "--elab-only" : "--parse-only", state->quoted,
                          "a path holding '\"' cannot be passed to read_verilog");
     }
     return EXIT_OK;
@@ -285,9 +357,10 @@ static const char *positional(char **argv, int argc, int *at) {
     return argv[*at];
 }
 
-/* --parse-only: read_verilog --parse-only "file"... (2C §4.1), after any --project/-f. */
-static odin3_status run_parse_only(char **argv, int argc, odin3_design *design) {
-    size_t len = strlen("--parse-only") + 1;
+/* --parse-only and --elab-only: read_verilog [--parse-only] "file"... (2C §4.1), after any
+ * --project/-f; flag is "--parse-only" or "" (--elab-only, which runs stats afterwards). */
+static odin3_status run_read_files(char **argv, int argc, odin3_design *design, const char *flag) {
+    size_t len = strlen(flag) + 1;
     for (int i = 1; i < argc; i++) {
         const char *file = positional(argv, argc, &i);
         len += file != NULL ? strlen(file) + strlen(" \"\"") : 0;
@@ -297,7 +370,7 @@ static odin3_status run_parse_only(char **argv, int argc, odin3_design *design) 
         (void)fprintf(stderr, "odin3: out of memory\n");
         return ODIN3_ERR_NO_MEMORY;
     }
-    size_t used = (size_t)snprintf(args, len, "--parse-only");
+    size_t used = (size_t)snprintf(args, len, "%s", flag);
     for (int i = 1; i < argc; i++) {
         const char *file = positional(argv, argc, &i);
         used += file != NULL ? (size_t)snprintf(args + used, len - used, " \"%s\"", file) : 0;
@@ -305,6 +378,20 @@ static odin3_status run_parse_only(char **argv, int argc, odin3_design *design) 
     odin3_status st = odin3_design_run_pass(design, "read_verilog", args);
     free(args);
     return st;
+}
+
+/* The step after the projects: the files given to --parse-only or --elab-only (the latter then
+ * runs stats: -p "read_verilog FILE...; stats"), else the scripts in command-line order. */
+static odin3_status each_files_or_scripts(char **argv, int argc, odin3_design *design,
+                                          const cli_state *state) {
+    if (state->parse_only) {
+        return run_read_files(argv, argc, design, "--parse-only");
+    }
+    if (!state->elab_only) {
+        return each_script(argv, argc, design, false);
+    }
+    odin3_status st = run_read_files(argv, argc, design, "");
+    return st == ODIN3_OK ? odin3_design_run_pass(design, "stats", "") : st;
 }
 
 /*
@@ -328,10 +415,10 @@ static void warn_unapplied_top(const odin3_design *design, const char *top) {
 
 /* Resolves every -p and script file (a typo anywhere costs nothing), then runs on one design
  * every --project and -f (read_project), the scripts in command-line order (with --parse-only:
- * read_verilog --parse-only on the files given instead), and dump_project when --dump-project
- * is given. */
+ * read_verilog --parse-only on the files given instead; with --elab-only: read_verilog, then
+ * stats), and dump_project when --dump-project is given. */
 static int run_scripts(char **argv, int argc, const cli_state *state) {
-    if (each_script(argv, argc, NULL, state->parse_only) != ODIN3_OK) {
+    if (each_script(argv, argc, NULL, files_mode(state)) != ODIN3_OK) {
         return EXIT_FAIL;
     }
     odin3_design *design = odin3_design_create();
@@ -344,8 +431,7 @@ static int run_scripts(char **argv, int argc, const cli_state *state) {
         st = each_project(argv, argc, design);
     }
     if (st == ODIN3_OK) {
-        st = state->parse_only ? run_parse_only(argv, argc, design)
-                               : each_script(argv, argc, design, false);
+        st = each_files_or_scripts(argv, argc, design, state);
     }
     if (st == ODIN3_OK && state->dump) {
         st = odin3_design_run_pass(design, "dump_project", "");
@@ -357,8 +443,17 @@ static int run_scripts(char **argv, int argc, const cli_state *state) {
     return st == ODIN3_OK ? EXIT_OK : EXIT_FAIL;
 }
 
+/* The options that are copied strings; false when one runs out of memory. */
+static bool apply_string_options(const cli_state *state) {
+    return odin3_pass_set_top_name(state->top) == ODIN3_OK &&
+           odin3_pass_set_revision(state->revision) == ODIN3_OK &&
+           odin3_pass_set_abc_script(state->abc_script) == ODIN3_OK &&
+           odin3_pass_set_opt_snapshot(state->opt_snapshot) == ODIN3_OK;
+}
+
 int main(int argc, char **argv) {
     cli_state state = {0};
+    state.linked_abc = init_linked_abc();
     for (int i = 1; i < argc; i++) {
         int rc = scan_one(argv, argc, &i, &state);
         if (rc != EXIT_OK) {
@@ -368,20 +463,18 @@ int main(int argc, char **argv) {
     if (argc == 1 || state.help) {
         print_usage(stdout);
     }
-    int rc = check_parse_only(&state);
+    int rc = check_files_mode(&state);
     if (rc != EXIT_OK) {
         return rc;
     }
     if (!(state.scripts || state.inline_script || state.project || state.dump ||
-          state.parse_only) ||
+          files_mode(&state)) ||
         state.help) {
         return EXIT_OK;
     }
     odin3_pass_set_check(state.check);
     odin3_pass_set_diag_paths(state.resolved);
-    if (odin3_pass_set_top_name(state.top) != ODIN3_OK ||
-        odin3_pass_set_revision(state.revision) != ODIN3_OK ||
-        odin3_pass_set_abc_script(state.abc_script) != ODIN3_OK) {
+    if (!apply_string_options(&state)) {
         (void)fprintf(stderr, "odin3: out of memory\n");
         return EXIT_FAIL;
     }

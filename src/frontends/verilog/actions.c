@@ -115,6 +115,12 @@ odin3_status vp_none(odin3_vp_ctx *ctx, odin3_ast_id *out) {
     return ODIN3_OK;
 }
 
+odin3_status vp_empty_item(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id *out) {
+    odin3_vl_report(ctx->run, ODIN3_LOG_WARN, at->loc, "empty module item ';' ignored");
+    *out = (odin3_ast_id){0};
+    return ODIN3_OK;
+}
+
 odin3_status vp_pass(odin3_vp_ctx *ctx, odin3_ast_id node, odin3_ast_id *out) {
     (void)ctx;
     *out = node;

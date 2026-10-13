@@ -1,0 +1,4 @@
+# yosys 0.55 (VTR build): read_rtlil pmux_groups.il; opt_reduce; write_rtlil
+# flags:
+cell $reduce_or A_WIDTH=2
+cell $pmux WIDTH=1 S_WIDTH=2

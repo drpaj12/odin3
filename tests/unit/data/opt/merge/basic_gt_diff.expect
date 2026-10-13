@@ -1,0 +1,4 @@
+# yosys 0.55 (VTR build): read_rtlil basic_gt_diff.il; opt_merge; write_rtlil
+# flags:
+cell $gt $gt$basic_gt_diff.v:4$1
+cell $gt $gt$basic_gt_diff.v:5$2

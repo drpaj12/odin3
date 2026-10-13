@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.25)
 project(odin3 VERSION 0.0.0 LANGUAGES C)
 
 # --- Options -----------------------------------------------------------------
-option(ODIN3_WITH_ABC "Build third_party/abc (abc executable now; libabc linked from Phase 3)" ON)
+option(ODIN3_WITH_ABC "Build third_party/abc (libabc-pic, the abc tool; the adapter from 3D-2)"
+       ON)
 option(ODIN3_SANITIZE "Build Odin III targets with ASan + UBSan" OFF)
 option(ODIN3_WERROR "Treat warnings as errors in Odin III targets" ON)
 # libFuzzer harnesses (tests/fuzz): clang only, in a build directory of their own
@@ -56,12 +57,14 @@ add_library(odin3_core OBJECT
     src/api/celltype.c
     src/api/prov.c
     src/api/ast_abi.c
+    src/api/elab_abi.c
     src/api/srcman_abi.c
     src/api/module.c
     src/api/node.c
     src/api/net.c
     src/api/attr.c
     src/api/log.c
+    src/api/abc.c
     src/util/alloc.c
     src/util/arena.c
     src/util/hash.c
@@ -70,6 +73,7 @@ add_library(odin3_core OBJECT
     src/util/u64map.c
     src/util/idindex.c
     src/util/str.c
+    src/util/clock.c
     src/util/log.c
     src/util/file.c
     src/util/sha256.c
@@ -101,9 +105,27 @@ add_library(odin3_core OBJECT
     src/passes/proc/proc_pass.c
     src/passes/budget.c
     src/passes/ffinit.c
+    src/passes/opt/kit.c
+    src/passes/opt/ff.c
+    src/passes/opt/fold.c
+    src/passes/opt/expr.c
+    src/passes/opt/expr_util.c
+    src/passes/opt/expr_logic.c
+    src/passes/opt/expr_cmp.c
+    src/passes/opt/expr_arith.c
+    src/passes/opt/expr_mux.c
+    src/passes/opt/expr_undriven.c
+    src/passes/opt/expr_ffpol.c
+    src/passes/opt/expr_fine.c
+    src/passes/opt/clean.c
+    src/passes/opt/merge.c
+    src/passes/opt/muxtree.c
+    src/passes/opt/reduce.c
+    src/passes/opt/register.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
+    src/passes/abc/engine.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -171,9 +193,51 @@ add_library(odin3_core OBJECT
     src/frontends/elab/ceval.c
     src/frontends/elab/ceval_expr.c
     src/frontends/elab/ceval_interp.c
+    src/frontends/elab/bind.c
     src/frontends/verilog/read_verilog.c
     src/frontends/verilog/read_verilog_lib.c
-    src/frontends/verilog/elab_stub.c
+    src/frontends/verilog/elab1.c
+    src/frontends/verilog/elab1_lookup.c
+    src/frontends/verilog/elab1_top.c
+    src/frontends/verilog/elab1_params.c
+    src/frontends/verilog/elab1_spec.c
+    src/frontends/verilog/elab1_expand.c
+    src/frontends/verilog/elab1_write.c
+    src/frontends/verilog/elab1_inst.c
+    src/frontends/verilog/elab1_bbox.c
+    src/frontends/verilog/elab1_gen.c
+    src/frontends/verilog/elab1_decl.c
+    src/frontends/verilog/elab1_diag.c
+    src/frontends/elab/elab_pending.c
+    src/frontends/elab/elab2.c
+    src/frontends/elab/elab2_wires.c
+    src/frontends/elab/elab2_expr.c
+    src/frontends/elab/elab2_select.c
+    src/frontends/elab/elab2_varsel.c
+    src/frontends/elab/elab2_assign.c
+    src/frontends/elab/elab2_claim.c
+    src/frontends/elab/elab2_wired.c
+    src/frontends/elab/elab2_prescan.c
+    src/frontends/elab/elab2_warn.c
+    src/frontends/elab/elab2_tri.c
+    src/frontends/elab/elab2_mem.c
+    src/frontends/elab/elab2_memport.c
+    src/frontends/elab/elab2_memscan.c
+    src/frontends/elab/elab2_bbox.c
+    src/frontends/elab/elab2_words.c
+    src/frontends/elab/pg.c
+    src/frontends/elab/elab2_call.c
+    src/frontends/elab/pg_always.c
+    src/frontends/elab/pg_call.c
+    src/frontends/elab/pg_case.c
+    src/frontends/elab/pg_emit.c
+    src/frontends/elab/pg_loop.c
+    src/frontends/elab/pg_scan.c
+    src/frontends/elab/pg_memw.c
+    src/frontends/elab/pg_init.c
+    src/frontends/elab/pg_readmem.c
+    src/frontends/elab/pg_select.c
+    src/frontends/elab/elab2_inst.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -296,18 +360,106 @@ target_link_libraries(example_plugin PRIVATE libodin3 odin3_flags)
 
 # --- Third-party ----------------------------------------------------------------
 if(ODIN3_WITH_ABC)
-    # ABC's own CMake project enables C++ and drives its Makefile for flags; it
-    # builds the `abc` executable (used by tools/equiv-check) and, on demand, libabc.
-    # A function scope keeps our strict C17 settings out of ABC, which needs GNU extensions.
+    # ABC (3D spec AB-5). cmake/abc_pin.cmake stops configure unless third_party/abc is at the
+    # commit docs/ORACLES.md pins, and sets ODIN3_ABC_COMMIT. ABC's own CMake project enables C++
+    # and drives its Makefile for flags; we build only its `libabc-pic` (a PIC static archive,
+    # linked into the adapter from 3D-2) and `odin3_abc_exe`, the `abc` tool linked to it, so
+    # ABC compiles once per build directory. ABC's own `abc` and `libabc` targets are never built.
+    include(${PROJECT_SOURCE_DIR}/cmake/abc_pin.cmake)
+    # ABC has C++ sources, so whatever links libabc-pic links through the C++ driver.
+    enable_language(CXX)
+    # The function scope keeps our C17 settings out of ABC, which needs GNU extensions; neither
+    # odin3_flags nor the sanitisers (both on odin3_flags only) reach ABC's targets.
     function(odin3_add_abc)
         unset(CMAKE_C_STANDARD)
         unset(CMAKE_C_EXTENSIONS)
+        # ABC is always optimised: unoptimised, it would stretch the large runs several-fold.
+        # Debug keeps its assertions; Release drops them.
+        set(CMAKE_C_FLAGS_DEBUG "-g -O2")
+        set(CMAKE_CXX_FLAGS_DEBUG "-g -O2")
+        set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG")
+        set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
         set(READLINE_FOUND FALSE)
         set(ABC_SKIP_TESTS ON CACHE BOOL "Skip ABC googletest suite (needs network at configure)")
         add_subdirectory(third_party/abc EXCLUDE_FROM_ALL)
+        # No abc.history in the working directory (ABC's cmd/cmdHist.c).
+        set_property(TARGET libabc-pic APPEND PROPERTY COMPILE_DEFINITIONS ABC_NO_HISTORY)
+        # ABC's main.c, created here so it keeps ABC's GNU C settings, not C17 (finding 19).
+        add_executable(odin3_abc_exe third_party/abc/src/base/main/main.c)
+        target_link_libraries(odin3_abc_exe PRIVATE libabc-pic)
+        set_target_properties(odin3_abc_exe PROPERTIES
+            OUTPUT_NAME abc
+            LINKER_LANGUAGE CXX
+            RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/third_party/abc)
+        # ABC's own (never built) `abc` would claim the same path: move it aside.
+        set_target_properties(abc PROPERTIES OUTPUT_NAME abc-upstream)
     endfunction()
     odin3_add_abc()
-    add_custom_target(abc_tool ALL DEPENDS abc)
+    add_custom_target(abc_tool ALL DEPENDS odin3_abc_exe)
+    target_compile_definitions(odin3 PRIVATE ODIN3_HAVE_ABC)
+
+    # --- libodin3_abc.so: the linked-ABC adapter (3D spec §4.1-§4.2, AB-5/AB-6) -------------
+    # C17 with odin3_flags (and the sanitisers, which never reach ABC's objects). libabc-pic is
+    # linked as $<LINK_ONLY:...>: its objects and libraries, but none of ABC's compile flags or
+    # include directories, which only bridge.c gets (below).
+    set(ODIN3_ABC_ADAPTER_SOURCES
+        adapters/abc/adapter.c adapters/abc/bridge.c adapters/abc/capture.c
+        adapters/abc/guard.c adapters/abc/session.c)
+    # bridge.c alone includes ABC's headers: as SYSTEM headers, with ABC's own -D flags (they fix
+    # the sizes of the types those headers declare), and without -Wstrict-prototypes (ABC
+    # declares Abc_FrameCreate() and others without a prototype).
+    get_target_property(_abc_iface_opts libabc-pic INTERFACE_COMPILE_OPTIONS)
+    set(_abc_defs "")
+    foreach(_opt IN LISTS _abc_iface_opts)
+        if(_opt MATCHES "^-D")
+            list(APPEND _abc_defs "${_opt}")
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _abc_defs)  # ABC lists its -D flags once for C and once for C++
+    set_source_files_properties(adapters/abc/bridge.c PROPERTIES COMPILE_OPTIONS
+        "-Wno-strict-prototypes;-isystem${PROJECT_SOURCE_DIR}/third_party/abc/src;${_abc_defs}")
+    # The adapter's __FILE__ is repository-relative ("adapters/abc/guard.c"), so
+    # ODIN3_ADAPTER_ASSERT's text does not depend on where the tree is checked out.
+    set(_abc_adapter_copts -fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=)
+    set(_abc_adapter_defs ODIN3_ABC_COMMIT_STR="${ODIN3_ABC_COMMIT}")
+    # §4.2's wraps: exit, _exit, abort and __assert_fail escape through the guard; the process
+    # control and code loading calls are refused (adapters/abc/guard.c): execl (base/sn's child)
+    # and dlopen (Libs_Init loads every libabc_*.so of the cwd or $ABC_LIB_PATH at frame creation;
+    # Task 5 review C1). The test variant links with them too.
+    set(ODIN3_ABC_WRAPS
+        -Wl,--wrap=exit -Wl,--wrap=_exit -Wl,--wrap=abort -Wl,--wrap=__assert_fail
+        -Wl,--wrap=system -Wl,--wrap=popen -Wl,--wrap=fork -Wl,--wrap=execv -Wl,--wrap=execvp
+        -Wl,--wrap=execl -Wl,--wrap=signal -Wl,--wrap=dlopen)
+    # §4.2's link options. clang links no sanitiser runtime into a shared object (the executable
+    # carries it), so -z defs would refuse every __asan_/__ubsan_ reference: it is dropped for
+    # sanitised clang builds only.
+    set(_abc_zdefs -Wl,-z,defs)
+    if(ODIN3_SANITIZE AND CMAKE_C_COMPILER_ID MATCHES "Clang")
+        set(_abc_zdefs "")
+    endif()
+    # One adapter library with §4.1-§4.2's properties and link options: odin3_abc, and the CLI's
+    # test variant (cli_abc_unavailable_warning). Extra arguments are compile definitions.
+    function(odin3_add_abc_adapter name)
+        add_library(${name} SHARED ${ODIN3_ABC_ADAPTER_SOURCES})
+        set_target_properties(${name} PROPERTIES
+            OUTPUT_NAME ${name}
+            C_VISIBILITY_PRESET hidden
+            LINKER_LANGUAGE CXX
+            LINK_DEPENDS ${PROJECT_SOURCE_DIR}/adapters/abc/exports.map)
+        target_compile_definitions(${name} PRIVATE ${_abc_adapter_defs} ${ARGN})
+        target_compile_options(${name} PRIVATE ${_abc_adapter_copts})
+        target_link_libraries(${name} PRIVATE libodin3 odin3_flags $<LINK_ONLY:libabc-pic>)
+        target_link_options(${name} PRIVATE
+            -Wl,--exclude-libs,ALL
+            -Wl,--version-script=${PROJECT_SOURCE_DIR}/adapters/abc/exports.map
+            ${_abc_zdefs} ${ODIN3_ABC_WRAPS})
+    endfunction()
+    odin3_add_abc_adapter(odin3_abc)
+    # The CLI links the adapter (P3-8) and registers its engine at start-up, before any --plugin
+    # (3D spec §4.3); --version names the commit (plan point (u)). libodin3 never links ABC.
+    target_link_libraries(odin3 PRIVATE odin3_abc)
+    target_include_directories(odin3 PRIVATE ${PROJECT_SOURCE_DIR}/adapters/abc)
+    target_compile_definitions(odin3 PRIVATE ${_abc_adapter_defs})
 endif()
 
 # --- odin3-write: writer driver (used by tools/writer-check/writer-check) -------------------
@@ -435,6 +587,41 @@ if(BUILD_TESTING)
     target_sources(test_proc_ff PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_budget)
     odin3_add_unit_test(test_ffinit)
+    # 2F Task 1: the opt context and the rewrite kit (every test_opt_* links proc_build.c).
+    odin3_add_unit_test(test_opt_kit)
+    target_sources(test_opt_kit PRIVATE tests/unit/proc_build.c)
+    # 2F Task 2: the FF model (Tasks 11-12 extend test_opt_dff with opt_dff's rules).
+    odin3_add_unit_test(test_opt_dff)
+    target_sources(test_opt_dff PRIVATE tests/unit/proc_build.c)
+    # 2F Task 3: opt_clean.
+    odin3_add_unit_test(test_opt_clean)
+    target_sources(test_opt_clean PRIVATE tests/unit/proc_build.c)
+    # 2F Task 4: the opt pass registrations, options, the call wrapper (Task 13 extends it).
+    odin3_add_unit_test(test_opt_loop)
+    target_sources(test_opt_loop PRIVATE tests/unit/proc_build.c)
+    # 2F Task 8: opt_merge.
+    odin3_add_unit_test(test_opt_cse)
+    target_sources(test_opt_cse PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_cse PRIVATE
+        ODIN3_MERGE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/merge")
+    # 2F Task 9: opt_reduce.
+    odin3_add_unit_test(test_opt_reduce)
+    target_sources(test_opt_reduce PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_reduce PRIVATE
+        ODIN3_REDUCE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/reduce")
+    # 2F Task 10: opt_muxtree.
+    odin3_add_unit_test(test_opt_muxtree)
+    target_sources(test_opt_muxtree PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_muxtree PRIVATE
+        ODIN3_MUXTREE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/muxtree")
+    # 2F Task 5: folding on 2D's evaluator, replayed against the Yosys 0.55 fold table.
+    odin3_add_unit_test(test_opt_fold)
+    target_sources(test_opt_fold PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_fold PRIVATE
+        ODIN3_OPT_DATA="${PROJECT_SOURCE_DIR}/tests/opt")
+    # 2F Task 6: opt_expr (the driver, the rules of spec 4.2-4.3, replace_undriven).
+    odin3_add_unit_test(test_opt_expr)
+    target_sources(test_opt_expr PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
@@ -649,6 +836,114 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_elab_interp)
     target_include_directories(test_elab_interp PRIVATE ${_gen})
     add_dependencies(test_elab_interp verilog_generated)
+    # 2D Task 10: stage 1's context, lookup, top, pending kinds, ownership (tests/unit/elab_test.h
+    # writes each case's files into a fresh directory under elab_tmp).
+    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/elab_tmp)
+    odin3_add_unit_test(test_elab_stage1_lookup)
+    target_include_directories(test_elab_stage1_lookup PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_lookup verilog_generated)
+    target_compile_definitions(test_elab_stage1_lookup PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects")
+    # 2D Task 11: parameters, specializations, passes E/W, defparam and project push-down.
+    odin3_add_unit_test(test_elab_stage1_params)
+    target_include_directories(test_elab_stage1_params PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_params verilog_generated)
+    target_compile_definitions(test_elab_stage1_params PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects")
+    # 2D Task 12: instances, connections, arrays, black boxes and cell types.
+    odin3_add_unit_test(test_elab_stage1_inst)
+    target_include_directories(test_elab_stage1_inst PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_inst verilog_generated)
+    target_compile_definitions(test_elab_stage1_inst PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 14: generate, scope names and references.
+    odin3_add_unit_test(test_elab_stage1_gen)
+    target_include_directories(test_elab_stage1_gen PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_gen verilog_generated)
+    target_compile_definitions(test_elab_stage1_gen PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 15: declarations, ports, implicit nets, blocks and subroutines.
+    odin3_add_unit_test(test_elab_stage1_decl)
+    target_include_directories(test_elab_stage1_decl PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_decl verilog_generated)
+    target_compile_definitions(test_elab_stage1_decl PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 16: the REJECT and IGNORE rows, the error cap, the empty stage-1 tables.
+    odin3_add_unit_test(test_elab_stage1_diag)
+    target_include_directories(test_elab_stage1_diag PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_diag verilog_generated)
+    target_compile_definitions(test_elab_stage1_diag PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_COVERAGE_DIR="${PROJECT_SOURCE_DIR}/tests/verilog/coverage"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 17: stage 2's modules, ports, wires, provenance, attributes, keep levels, budget and
+    # the ABI entry odin3_ast_elaborate (tests/unit/elab_test.h's et_read runs the whole pass).
+    odin3_add_unit_test(test_elab_stage2_wires)
+    target_include_directories(test_elab_stage2_wires PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_wires verilog_generated)
+    target_compile_definitions(test_elab_stage2_wires PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 18: expressions and selects to word cells, continuous and net declaration
+    # assignments (EL-28, EL-30, EL-31, EL-32 reads).
+    odin3_add_unit_test(test_elab_stage2_expr)
+    target_include_directories(test_elab_stage2_expr PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_expr verilog_generated)
+    target_compile_definitions(test_elab_stage2_expr PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 19: drivers (A4, uwire, supply, wired nets, tri-state), instances, gates, the error
+    # cap and the summary line.
+    odin3_add_unit_test(test_elab_stage2_drive)
+    target_include_directories(test_elab_stage2_drive PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_drive verilog_generated)
+    target_compile_definitions(test_elab_stage2_drive PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 20: memories (the mem2reg decision, registers per word, $mem and its read ports).
+    odin3_add_unit_test(test_elab_stage2_mem)
+    target_include_directories(test_elab_stage2_mem PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_mem verilog_generated)
+    target_compile_definitions(test_elab_stage2_mem PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 21: the process generator (always blocks to $proc nodes; EL-33 to EL-35).
+    odin3_add_unit_test(test_elab_stage2_proc)
+    target_sources(test_elab_stage2_proc PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_stage2_proc PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_proc verilog_generated)
+    target_compile_definitions(test_elab_stage2_proc PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 22: if, case, case temporaries, flags and the case method for variable selects.
+    odin3_add_unit_test(test_elab_stage2_case)
+    target_sources(test_elab_stage2_case PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_stage2_case PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_case verilog_generated)
+    target_compile_definitions(test_elab_stage2_case PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 23: loops, function and task calls, calls in continuous contexts, register-array words.
+    odin3_add_unit_test(test_elab_stage2_call)
+    target_sources(test_elab_stage2_call PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_stage2_call PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_call verilog_generated)
+    target_compile_definitions(test_elab_stage2_call PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 24: memory writes (the write ports of $mem), initial values, $readmemh/b, the
+    # per-bit rules, the empty pending tables and the sink module (OOM, determinism).
+    odin3_add_unit_test(test_elab_stage2_init)
+    target_sources(test_elab_stage2_init PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_stage2_init PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_init verilog_generated)
+    target_compile_definitions(test_elab_stage2_init PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_READMEM_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/elab/readmem"
+        ODIN3_SINK_V="${PROJECT_SOURCE_DIR}/tests/elab/sink/sink.v")
+    # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
+    odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
 
     add_executable(test_api tests/unit/test_api.c)
@@ -701,6 +996,46 @@ if(BUILD_TESTING)
     add_dependencies(test_abi_ext example_plugin plugin_bad_init)
     add_test(NAME test_abi_ext COMMAND test_abi_ext)
     set_tests_properties(test_abi_ext PROPERTIES LABELS unit)
+    # 3D Task 4: the ABC engine ABI and registry (cases in order: registration is final).
+    odin3_add_unit_test(test_abc_engine_abi)
+    if(ODIN3_WITH_ABC)
+        # 3D Task 5: the linked engine's session, capture and guard on the real ABC. The adapter's
+        # sources again, with the test hooks (ODIN3_ABC_TEST_HOOKS), linked with the same wraps.
+        # The escapes and the adapter assertion run in child processes (detect_leaks=0: each
+        # leaks its frame by design); the parent leaks nothing, and LeakSanitizer may suppress
+        # only ABC's own functions (adapters/abc/lsan.supp).
+        add_library(odin3_abc_testlib OBJECT ${ODIN3_ABC_ADAPTER_SOURCES})
+        target_compile_definitions(odin3_abc_testlib PRIVATE ${_abc_adapter_defs}
+                                                             ODIN3_ABC_TEST_HOOKS=1)
+        target_compile_options(odin3_abc_testlib PRIVATE ${_abc_adapter_copts})
+        target_link_libraries(odin3_abc_testlib PRIVATE libodin3 odin3_flags)
+        add_executable(test_abc_adapter tests/unit/test_abc_adapter.c)
+        target_include_directories(test_abc_adapter PRIVATE ${PROJECT_SOURCE_DIR}/adapters/abc)
+        target_compile_definitions(test_abc_adapter PRIVATE ODIN3_ABC_TEST_HOOKS=1)
+        target_link_libraries(test_abc_adapter PRIVATE odin3_abc_testlib libodin3 unity odin3_flags
+                                                       $<LINK_ONLY:libabc-pic>)
+        # 3D Task 6: pthread_create is wrapped with a counter here only (bridge.c's test hook;
+        # §9: the default script starts no thread). The 40-AND networks use odin3_prng.
+        target_link_options(test_abc_adapter PRIVATE ${ODIN3_ABC_WRAPS}
+                                                     -Wl,--wrap=pthread_create)
+        target_sources(test_abc_adapter PRIVATE src/sim/prng.c)
+        target_include_directories(test_abc_adapter PRIVATE ${PROJECT_SOURCE_DIR}/src)
+        set_target_properties(test_abc_adapter PROPERTIES LINKER_LANGUAGE CXX)
+        # A planted libabc_o3test.so, alone in its directory: ABC would dlopen it from the cwd or
+        # $ABC_LIB_PATH at frame creation, and its constructor exits 9 (review finding C1).
+        add_library(abc_planted_lib MODULE tests/unit/abc_planted_lib.c)
+        set_target_properties(abc_planted_lib PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME libabc_o3test
+            LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/abc_planted)
+        target_link_libraries(abc_planted_lib PRIVATE odin3_flags)
+        add_dependencies(test_abc_adapter abc_planted_lib)
+        target_compile_definitions(test_abc_adapter PRIVATE
+            ODIN3_ABC_PLANTED_DIR="${PROJECT_BINARY_DIR}/abc_planted")
+        add_test(NAME test_abc_adapter COMMAND test_abc_adapter)
+        set_tests_properties(test_abc_adapter PROPERTIES LABELS unit
+            ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
+    endif()
     odin3_add_unit_test(test_abi_core)
     target_compile_definitions(test_abi_core PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
@@ -758,8 +1093,8 @@ if(BUILD_TESTING)
     set(_wc_env "")
     set(_wc_env_list "")
     if(ODIN3_WITH_ABC)
-        set(_wc_env "ODIN3_ABC=$<TARGET_FILE:abc>")
-        set(_wc_env_list "ODIN3_ABC=$<TARGET_FILE:abc>;")
+        set(_wc_env "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>")
+        set(_wc_env_list "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>;")
     endif()
     add_test(NAME writer_check_fixtures
              COMMAND ${PROJECT_SOURCE_DIR}/tools/writer-check/writer-check -j 2 ${_wc_args})
@@ -782,9 +1117,12 @@ if(BUILD_TESTING)
         PASS_REGULAR_EXPRESSION "verilog equiv: equivalent 0, excluded [0-9]+, NOT-equivalent 0, yosys-error 0, error [1-9]"
         ENVIRONMENT "${_wc_env_list}WC_CORRUPT=bbox;WC_REAL_WRITE=$<TARGET_FILE:odin3-write>")
 
+    set(_symbol_libs $<TARGET_FILE:libodin3> $<TARGET_FILE:example_plugin>)
+    if(ODIN3_WITH_ABC)
+        list(APPEND _symbol_libs $<TARGET_FILE:odin3_abc>)  # 3D §4.2: the wraps leave no exit
+    endif()
     add_test(NAME symbol_rules
-        COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh
-                $<TARGET_FILE:libodin3> $<TARGET_FILE:example_plugin>)
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh ${_symbol_libs})
     set_tests_properties(symbol_rules PROPERTIES LABELS unit)
 
     add_test(NAME abi_exports
@@ -792,19 +1130,62 @@ if(BUILD_TESTING)
                 --exports ${PROJECT_SOURCE_DIR}/include/odin3/odin3.h $<TARGET_FILE:libodin3>)
     set_tests_properties(abi_exports PROPERTIES LABELS unit)
 
+    if(ODIN3_WITH_ABC)
+        # 3D §4.2: the adapter exports exactly its two functions and imports none of the
+        # process-ending, process-control or code-loading calls (the wraps took those ABC makes;
+        # the rest of the exec, spawn and dl families must not appear with a pin bump).
+        set(_abc_exports_args
+            --only odin3_plugin_init,odin3_abc_adapter_init
+            --forbid exit,_exit,_Exit,quick_exit,abort,system,popen,fork,vfork,execv,execvp,execl,execle,execlp,execve,execvpe,fexecve,posix_spawn,posix_spawnp,signal,dlopen,dlmopen)
+        add_test(NAME abc_adapter_exports
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh ${_abc_exports_args}
+                    $<TARGET_FILE:odin3_abc>)
+        set_tests_properties(abc_adapter_exports PROPERTIES LABELS unit)
+        # The same check on libodin3.so must fail: exit 1, with the "not in --only" line.
+        add_test(NAME abc_adapter_exports_refuses_libodin3
+            COMMAND sh -c "out=$(\"$0\" \"$@\" 2>&1); rc=$?; printf '%s\\n' \"$out\"; \
+test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_version, which is not in --only$'"
+                    ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh ${_abc_exports_args}
+                    $<TARGET_FILE:libodin3>)
+        set_tests_properties(abc_adapter_exports_refuses_libodin3 PROPERTIES LABELS unit)
+    endif()
+
     # The ABI stays v4 through 2D (ruling I1) and 3D (spec Q4): their additions are additive.
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
         LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 4\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
+    if(ODIN3_WITH_ABC)
+        # 3D Task 6: --version names the linked ABC; a CLI whose adapter cannot register (the
+        # test variant's abc_commit is refused) warns and runs on without it.
+        odin3_add_abc_adapter(odin3_abc_unavailable ODIN3_ABC_TEST_UNREGISTRABLE=1)
+        add_executable(odin3_abc_unavailable_cli src/cli/main.c)
+        target_link_libraries(odin3_abc_unavailable_cli PRIVATE libodin3 odin3_abc_unavailable
+                                                                odin3_flags)
+        target_include_directories(odin3_abc_unavailable_cli PRIVATE
+            ${PROJECT_SOURCE_DIR}/adapters/abc)
+        target_compile_definitions(odin3_abc_unavailable_cli PRIVATE ODIN3_HAVE_ABC
+                                                                     ${_abc_adapter_defs})
+        foreach(_case IN ITEMS version_abc abc_unavailable_warning)
+            set(_cli $<TARGET_FILE:odin3>)
+            if(_case STREQUAL "abc_unavailable_warning")
+                set(_cli $<TARGET_FILE:odin3_abc_unavailable_cli>)
+            endif()
+            add_test(NAME cli_${_case}
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} ${_cli}
+                        ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                        ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+            set_tests_properties(cli_${_case} PROPERTIES LABELS unit)
+        endforeach()
+    endif()
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
     foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
                            unknown_pass_later_script top top_written_first top_unapplied quoted
                            help_runs_nothing check_flag usage techlib plugin writers sim keep_ast
                            project_dump project_top project_revision project_diag_paths
-                           project_preprocess parse_only parse_only_with_script
-                           abc_script_missing abc_script_project)
+                           project_preprocess parse_only parse_only_with_script elab_only
+                           elab_only_with_script abc_script_missing abc_script_project opt_snapshot)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
@@ -814,11 +1195,17 @@ if(BUILD_TESTING)
     endforeach()
 
     find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
+    # 3D §4.1: no assert( in the adapter (ODIN3_ADAPTER_ASSERT instead), and the other §15.1 rules.
+    add_test(NAME abc_adapter_no_assert
+        COMMAND sh -c "\"$0\" tools/check_rules.py adapters/abc/*.c adapters/abc/*.h"
+                ${Python3_EXECUTABLE}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(abc_adapter_no_assert PROPERTIES LABELS unit)
     set(_tools_env "ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>"
                    "ODIN3_PARSE_CHECK=$<TARGET_FILE:odin3-parse-check>")
     if(ODIN3_WITH_ABC)
         # REQUIRE makes the ABC-backed tests fail, not skip, if this ABC is unusable.
-        list(APPEND _tools_env "ODIN3_ABC=$<TARGET_FILE:abc>" "ODIN3_REQUIRE_ABC=1")
+        list(APPEND _tools_env "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>" "ODIN3_REQUIRE_ABC=1")
     endif()
     # sim-check (1E exit test, tools/sim-check) also needs Yosys and Icarus Verilog; without them
     # sim_check_fixtures is not registered and the sim-check Python tests skip.
@@ -832,7 +1219,8 @@ if(BUILD_TESTING)
         # -m 0: no address-space cap (the debug driver is an ASan build).
         add_test(NAME sim_check_fixtures
                  COMMAND ${PROJECT_SOURCE_DIR}/tools/sim-check/sim-check -m 0
-                         --driver $<TARGET_FILE:odin3-sim-vectors> --abc $<TARGET_FILE:abc>
+                         --driver $<TARGET_FILE:odin3-sim-vectors>
+                         --abc $<TARGET_FILE:odin3_abc_exe>
                          --yosys ${ODIN3_YOSYS} --iverilog ${ODIN3_IVERILOG} --vvp ${ODIN3_VVP}
                          --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --fixtures ${_sim_fixtures})
         set_tests_properties(sim_check_fixtures PROPERTIES LABELS tools)
@@ -1024,11 +1412,24 @@ if(BUILD_TESTING)
     add_test(NAME verilog_handover_parse
         COMMAND $<TARGET_FILE:odin3-parse-check> --smallest-first ${_handover_cases})
     set_tests_properties(verilog_handover_parse PROPERTIES LABELS verilog)
+    # Task 24 (point (l)): no coverage row and not the sink module hits a not-yet-built construct.
+    file(GLOB _no_pending_rows CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/verilog/coverage/*.v
+                                                 ${PROJECT_SOURCE_DIR}/tests/elab/sink/sink.v)
+    add_test(NAME elab_no_pending
+        COMMAND sh -c "for f in \"$@\"; do if \"$0\" -p \"read_verilog $f\" 2>&1 | grep -q 'elaboration is not available yet (2D)'; then echo \"pending: $f\"; exit 1; fi; done"
+                $<TARGET_FILE:odin3> ${_no_pending_rows})
+    set_tests_properties(elab_no_pending PROPERTIES LABELS verilog)
+    # Task 16: stage 1 reports every row; A4 is Task 19's (the second driver of a net) and T9 and
+    # T10 Task 21's (the process generator's per-bit rules, EL-41); none of the ignore cases is
+    # pending.
+    set(_handover_pending_reject-2d "")
+    set(_handover_pending_ignore-2d "")
     foreach(_handover reject-2d ignore-2d)
         string(REPLACE "-" "_" _handover_test "verilog_${_handover}")
         add_test(NAME ${_handover_test}
             COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/run_reject.py
-                    --elaborate $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/verilog/${_handover})
+                    --elaborate "--pending=${_handover_pending_${_handover}}"
+                    $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/verilog/${_handover})
         set_tests_properties(${_handover_test} PROPERTIES LABELS verilog SKIP_RETURN_CODE 77)
     endforeach()
 
@@ -1179,6 +1580,57 @@ if(BUILD_TESTING)
         # the workspace 0.69 of ODIN3_YOSYS.
         set_property(TEST test_verilog_writer APPEND PROPERTY
             ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+        # 2D Task 21: the round trip of the process generator's write_rtlil through Yosys 0.55
+        # (read_rtlil; proc exits 0).
+        set_property(TEST test_elab_stage2_proc APPEND PROPERTY
+            ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+        # 2D Task 21 (spec 14.3): elab-equiv on the T7, T8 and `q + 1` sources: Odin III's
+        # processes and Yosys's own, through one Yosys back end, are equivalent. Exit 77 (skip)
+        # when an ASan child cannot be capped (no systemd-run).
+        add_test(NAME elab_proc_bridge_smoke
+            COMMAND sh -c "for f in t7 t8 qplus1; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t \"$4/$f.v\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/verilog/proc-bridge)
+        set_tests_properties(elab_proc_bridge_smoke PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
+        # 2D Task 22 (spec 14.3): elab-equiv on every source of tests/verilog/case-bridge: if,
+        # case, casez/casex wildcards, nesting with blocking temporaries, full_case, folding, item
+        # expressions and the case method for variable selects (--unmap-enables: a held register is an
+        # enabled flip-flop on the Yosys side). Exit 77 (skip) as above.
+        add_test(NAME elab_case_bridge
+            COMMAND sh -c "for f in \"$4\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t --unmap-enables \"$f\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/verilog/case-bridge)
+        set_tests_properties(elab_case_bridge PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
+        # 2D Task 23 (spec 14.3): elab-equiv on every source of tests/verilog/call-bridge: unrolled
+        # loops, functions and tasks inlined (in processes and in continuous contexts), nested calls
+        # and variable-index reads of net arrays. Exit 77 (skip) as above.
+        add_test(NAME elab_call_bridge
+            COMMAND sh -c "for f in \"$4\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t \"$f\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/verilog/call-bridge)
+        set_tests_properties(elab_call_bridge PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
+        # 2D Task 24 (spec 14.3): elab-equiv on every source of tests/verilog/mem-bridge: the write
+        # ports of $mem (all three ranges, a write then a read at the same index and a cycle with
+        # the enable off; conditional, nested, in loops, tasks and functions; partial and
+        # concatenated targets). memory_map makes enabled flip-flops, which equiv-check cannot
+        # read: --unmap-enables. Exit 77 (skip) as above.
+        add_test(NAME elab_mem_bridge
+            COMMAND sh -c "for f in \"$4\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t --unmap-enables \"$f\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/verilog/mem-bridge)
+        set_tests_properties(elab_mem_bridge PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
     endif()
 
     # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys

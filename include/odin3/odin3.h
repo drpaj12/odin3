@@ -13,12 +13,23 @@
  * provenance visitors, logging.
  * ABI v4 (Phase 2, 2A): the source manager and AST stores (kinds, sub-kinds, flags, caps, read
  * and build functions, keep levels); odin3_source gains the raw source-manager loc.
- * ABI v4 (cont., 2D): $proc processes and process counts, value kind PROC, pass processes slot.
- * ABI v4 (cont., 3D): pass-run arguments and run information; odin3_pass_set_abc_script.
+ * ABI v4 (cont., 2D): $proc processes and process counts, value kind PROC, pass processes slot,
+ * library units, odin3_ast_elaborate and odin3_elab_options.
+ * ABI v4 (cont., 3D): pass-run arguments and run information; odin3_pass_set_abc_script;
+ * ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register).
+ * ABI v4 (cont., 2F): odin3_pass_set_opt_snapshot.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
  * attributes.
+ *
+ * Stack: Odin III never recurses over a design, but constant evaluation during elaboration
+ * (read_verilog) nests in C up to 256 levels (a parameter whose value reads a later parameter,
+ * a function's return range; ODIN3_ELAB_MAX_REENTRY_DEPTH, 2D spec v4.6). Call the library from a
+ * thread with at least 1 MB of stack in a release build and 4 MB under the sanitizers (measured:
+ * 256 levels need under 1 MB at -O3, about 2 MB under gcc ASan and 4 MB under clang ASan with
+ * -fsanitize=fuzzer-no-link). The main thread's 8 MB default is enough; a secondary thread's
+ * default may not be (512 KB on macOS): give it the size explicitly.
  */
 #ifndef ODIN3_ODIN3_H
 #define ODIN3_ODIN3_H
@@ -47,9 +58,10 @@ typedef enum odin3_status {
     ODIN3_ERR_IO = 3,
     ODIN3_ERR_PLUGIN = 4,
     ODIN3_ERR_ABI_MISMATCH = 5,
-    ODIN3_ERR_CHECK = 6, /* the IR violates an invariant (docs/IR.md section 9) */
-    ODIN3_ERR_PARSE = 7, /* malformed input file (logged as file:line: message) */
-    ODIN3_STATUS_COUNT = 8
+    ODIN3_ERR_CHECK = 6,  /* the IR violates an invariant (docs/IR.md section 9) */
+    ODIN3_ERR_PARSE = 7,  /* malformed input file (logged as file:line: message) */
+    ODIN3_ERR_ENGINE = 8, /* the ABC engine failed or is unavailable (3D) */
+    ODIN3_STATUS_COUNT = 9
 } odin3_status;
 
 /*
@@ -197,7 +209,9 @@ void odin3_design_destroy(odin3_design *design);
  * (logged); ODIN3_ERR_CHECK when a check around it fails; ODIN3_ERR_INVALID_ARG for a NULL design
  * or name (as the conventions say), or (logged by the pass manager) an unknown pass, bad
  * arguments or an unclosed quote; ODIN3_ERR_NO_MEMORY.
- * Mutates the IR (see Strings above). Nothing is returned for the caller to free.
+ * Mutates the IR (see Strings above). Nothing is returned for the caller to free. After a pass
+ * fails, the design stays valid but may no longer compute what its input did (a pass can stop in
+ * the middle of a rewrite), so the caller must discard it (odin3_design_destroy).
  */
 odin3_status odin3_design_run_pass(odin3_design *design, const char *name, const char *args);
 
@@ -295,6 +309,18 @@ odin3_status odin3_pass_set_revision(const char *revision);
 odin3_status odin3_pass_set_abc_script(const char *path);
 
 /*
+ * Makes every later opt-family sub-pass call that changes the design write its design as RTLIL
+ * text before and after into dir (the CLI's --opt-snapshot; 2F OP-16), as
+ * <dir>/<NNNN>-<sub>-before.il and <dir>/<NNNN>-<sub>-after.il: NNNN is the call sequence (four
+ * digits from 0001, counted from this call) and <sub> the sub-pass (opt_expr, opt_merge, ...).
+ * dir must exist; it is copied. NULL turns snapshots off. Process-wide. Every call restarts the
+ * sequence at 0001. A snapshot that cannot be written (a cell with no RTLIL form, an I/O error)
+ * logs WARN "opt: snapshot skipped: <reason>" and the sub-pass call goes on with its own result.
+ * Fails only with ODIN3_ERR_NO_MEMORY (the old directory and sequence are kept).
+ */
+odin3_status odin3_pass_set_opt_snapshot(const char *dir);
+
+/*
  * How later passes' located diagnostics name files (the CLI's --diag-paths; 2B PRJ-18): false
  * (the default) as the path was given, true as its absolute resolved path. Applied to the design
  * before each pass runs. Process-wide. Never fails.
@@ -316,7 +342,10 @@ typedef struct odin3_script_src {
  * is looked up before anything runs (an unknown one is "<loc>: unknown pass '<name>'",
  * ODIN3_ERR_PARSE); then the commands run in order through the pass manager until one fails, whose
  * status is returned ("<loc>: pass '<name>' failed: <status>" logged). ODIN3_ERR_INVALID_ARG
- * (logged) for a NULL design, text or src.origin; ODIN3_ERR_NO_MEMORY. Mutates the IR.
+ * (logged) for a NULL design, text or src.origin; ODIN3_ERR_NO_MEMORY. Mutates the IR. After a
+ * failed pass the design must be discarded, as for odin3_design_run_pass. A design whose
+ * `read_verilog` failed holds valid but incomplete modules and is fit only for destruction (2D:
+ * the IR has no module-delete primitive, and the top is not set).
  */
 odin3_status odin3_design_run_script(odin3_design *design, const char *text, odin3_script_src src);
 
@@ -1460,6 +1489,60 @@ odin3_status odin3_ast_get_run(const odin3_ast *ast, uint32_t *run);
 odin3_status odin3_ast_get_root_count(const odin3_ast *ast, uint32_t *count);
 odin3_status odin3_ast_get_root_at(const odin3_ast *ast, uint32_t index, uint32_t *root);
 
+/*
+ * (ABI v4, 2D) *index gets where the library UNITs of a parsed store begin (2C §4.2 step 3, 2A
+ * §9 (b)): the root index of the first UNIT read from a -v library file or a -y library
+ * directory. Every root before it came from a design file, every root at or past it from a
+ * library; 0 when the store has none (a read always has a design UNIT first, so root 0 is never
+ * a library UNIT) and for an elaborated store. Fails only with ODIN3_ERR_INVALID_ARG, as the
+ * conventions say.
+ */
+odin3_status odin3_ast_get_library_units_from(const odin3_ast *ast, uint32_t *index);
+
+/*
+ * (ABI v4, 2D) The options of odin3_ast_elaborate (EL-3): nolatches (Yosys -nolatches: the
+ * unassigned paths of a combinational block are x), nomem2reg (never replace a memory by
+ * registers except where forced). top, top_at and auto_blackbox are options of the front end that
+ * writes the store (stage 1 chose the top and the black boxes); they are ignored here.
+ * reserved_pad (the byte after the three flags, explicit so the layout has no hidden padding) and
+ * reserved must be zero.
+ */
+typedef struct odin3_elab_options {
+    uint32_t top;
+    uint32_t top_at;
+    bool nolatches, nomem2reg, auto_blackbox;
+    uint8_t reserved_pad;
+    uint32_t reserved[4];
+} odin3_elab_options;
+
+/*
+ * (ABI v4, 2D) Elaborates the ELABORATED store `ast` (spec EL-2 steps 4 and 5; the seam an adapter
+ * that builds the elaborated form itself, such as the slang adapter, drives) into IR in `design`:
+ * binds it (the symbol table becomes the store's), makes one IR module per MODULE with its ports,
+ * then every body, and on success sets the design's top to the UNIT's first MODULE and logs
+ * `read_verilog: elaborated top 'T': ...`. The store must be held by the design (made with
+ * odin3_design_new_ast, form ODIN3_AST_FORM_ELABORATED), complete (an adapter ends it with
+ * odin3_ast_finish; this call does not check that) and in the form the spec's EL-4 describes; it is
+ * never destroyed and, being held, stays so whatever the keep level. Its provenance run is the
+ * store's (odin3_ast_get_run): the SOURCE records of the IR carry that run, which must be a pass
+ * run of the design (a plugin cannot yet learn a pass-run ID, so until an ABI function opens one
+ * the slang adapter supplies the run of the read it performs itself). `opts` may be NULL (the
+ * defaults). Because an adapter's store is untrusted, 2A's check of the elaborated form runs in
+ * every build before anything is bound. Errors in the source the store came from are located
+ * diagnostics and ODIN3_ERR_PARSE: the modules made stay in the design (valid, incomplete) and the
+ * top is not set, so after such a failure the design is fit only for destruction.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL design or ast, non-zero reserved words, a store that is
+ * not elaborated (`odin3_ast_elaborate: the store is not elaborated`), not held by the design, of
+ * an unknown run, that breaks the elaborated form (also found while the modules are made, such as a
+ * black-box carrier whose ports or parameters differ from its definition's) or has a symbol table
+ * already (so a second call on one store); ODIN3_ERR_NO_MEMORY (the IR made so far stays valid);
+ * ODIN3_ERR_CHECK (logged) for an inconsistency inside the stage itself (a 2D bug, never a property
+ * of the input). Once a call has bound the store to its symbol table, the store stays bound even
+ * if that call fails, so any later call on it is ODIN3_ERR_INVALID_ARG.
+ */
+odin3_status odin3_ast_elaborate(odin3_design *design, odin3_ast *ast,
+                                 const odin3_elab_options *opts);
+
 /* --- AST builders (adapters; spec §5) ------------------------------------------------------- */
 
 /*
@@ -1612,6 +1695,98 @@ odin3_status odin3_srcman_get_spelling(const odin3_srcman *sm, uint32_t loc, uin
  * ODIN3_ERR_NO_MEMORY (*text unchanged).
  */
 odin3_status odin3_srcman_get_format(odin3_srcman *sm, uint32_t loc, const char **text);
+
+/* --- the ABC engine (3D) -------------------------------------------------------------------- */
+enum { ODIN3_ABC_ENGINE_VERSION = 1, ODIN3_ABC_FAIL_TEXT_BYTES = 256 };
+
+typedef enum odin3_abc_fail_kind {
+    ODIN3_ABC_FAIL_NONE = 0,
+    ODIN3_ABC_FAIL_COMMAND = 1,  /* a command returned non-zero (code = its value) */
+    ODIN3_ABC_FAIL_EXIT = 2,     /* ABC called exit(code) or _exit(code) on the session thread */
+    ODIN3_ABC_FAIL_ABORT = 3,    /* ABC called abort() on the session thread */
+    ODIN3_ABC_FAIL_ASSERT = 4,   /* an ABC assertion failed (text = "file:line: expr") */
+    ODIN3_ABC_FAIL_RESULT = 5,   /* no network, or a malformed one, where one was asked for */
+    ODIN3_ABC_FAIL_DISABLED = 6, /* an earlier escape disabled the engine for this process */
+    ODIN3_ABC_FAIL_BUSY = 7      /* a session is already open (one at a time, process-wide) */
+} odin3_abc_fail_kind;
+
+typedef struct odin3_abc_fail {
+    uint32_t kind; /* odin3_abc_fail_kind */
+    int32_t code;
+    char text[ODIN3_ABC_FAIL_TEXT_BYTES]; /* NUL-terminated detail, "" when none */
+} odin3_abc_fail;
+
+/* One line of ABC's output (stdout and stderr merged), without its newline and without trailing
+ * blanks or '\r'; valid during the call only, and called only from inside an engine call. The
+ * callback must not call the engine: it runs while the call that produced the line finishes. */
+typedef void (*odin3_abc_text_fn)(void *user, const char *line);
+
+/* Odin III's exchange layout, equal to ABC's MiniAIG at the pin (aig/miniaig/miniaig.h; the
+ * adapter converts if a pin bump changes it). objs has 2 * n_objs entries: object 0 is constant
+ * 0; a PI is (0x7FFFFFFF, 0x7FFFFFFF), an AND (lit0, lit1) with lit0 < lit1 < 2 * index, a PO
+ * (lit, 0x7FFFFFFF); the last n_regs PIs and POs are register outputs and inputs, in order. */
+typedef struct odin3_abc_aig {
+    const int32_t *objs;
+    uint32_t n_objs;
+    uint32_t n_regs;
+} odin3_abc_aig;
+
+/* Odin III's exchange layout, equal to ABC's MiniLUT at the pin (minilut.h). fanins has
+ * lut_size * n_objs entries (0x7FFFFFFF unused; a PO has its driver in slot 0 and 0x7FFFFFFE in
+ * slot 1); objects 0 and 1 are constants, then PIs, LUTs in topological order, POs. truths has
+ * W * n_objs 32-bit words, W = (lut_size > 5 ? 1 << (lut_size - 5) : 1); a k-input object's
+ * function is bits 0 .. 2^k - 1 of its W words, word 0 and bit 0 least significant, variable v
+ * = fanin v. ci_from has (number of PIs) entries: the index of the loaded AIG's PI each PI came
+ * from (ABC's names, AB-16), or -1; NULL when no names came back. */
+typedef struct odin3_abc_luts {
+    const int32_t *fanins;
+    const uint32_t *truths;
+    const int32_t *ci_from;
+    uint32_t n_objs;
+    uint32_t n_regs;
+    uint32_t lut_size;
+} odin3_abc_luts;
+
+/*
+ * An ABC engine; one session per ABC run (§4.4). All but close return ODIN3_OK, ODIN3_ERR_ENGINE
+ * (*fail filled; any call may fail EXIT, ABORT or ASSERT) or ODIN3_ERR_NO_MEMORY.
+ * open: fresh ABC state, generators and libc rand() reset, output to text (NULL: dropped).
+ *   BUSY, DISABLED.
+ * load_aig: aig (copied) becomes the & space's network, its PIs named by index, and the name
+ *   map's reference. RESULT.
+ * exec: one already-checked command line, run as given. COMMAND.
+ * get_luts: the & space's mapping with ci_from, owned by the session until close or the next
+ *   call. RESULT.
+ * name_map: aligned (the loaded AIG's PI, PO, register counts) as ABC's LUT side; *lits gets one
+ *   MiniAIG literal or -1 per object, valid until close or the next name_map. RESULT.
+ * close: frees all the session returned; after an escape, leaks ABC's state and disables.
+ * Every call of a session must come from the thread that opened it; the linked engine treats a
+ * call from another thread as an adapter assertion (ASSERT), which disables it for the process.
+ */
+typedef struct odin3_abc_engine {
+    uint32_t version;       /* ODIN3_ABC_ENGINE_VERSION */
+    const char *name;       /* "linked"; a test double names itself */
+    const char *abc_commit; /* 40 lower-case hex digits */
+    void *self;
+    odin3_status (*open)(void *self, odin3_abc_text_fn text, void *user, odin3_abc_fail *fail);
+    odin3_status (*load_aig)(void *self, const odin3_abc_aig *aig, odin3_abc_fail *fail);
+    odin3_status (*exec)(void *self, const char *command, odin3_abc_fail *fail);
+    odin3_status (*get_luts)(void *self, odin3_abc_luts *luts, odin3_abc_fail *fail);
+    odin3_status (*name_map)(void *self, const odin3_abc_luts *aligned, const int32_t **lits,
+                             odin3_abc_fail *fail);
+    void (*close)(void *self);
+    void *reserved[4]; /* NULL */
+} odin3_abc_engine;
+
+/*
+ * Makes *engine (copied; self and the strings must outlive the process) the process's ABC engine.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL engine or name, another version, a NULL function, a
+ * non-NULL reserved slot, an abc_commit that is not 40 lower-case hex digits, or an engine already
+ * registered ("abc engine already registered (<name>)"). Process-wide, not thread-safe, final;
+ * an engine call from another thread than the session's own disables the linked engine for the
+ * process (see odin3_abc_engine).
+ */
+odin3_status odin3_abc_engine_register(const odin3_abc_engine *engine);
 
 /* ODIN3_CDEF_END */
 

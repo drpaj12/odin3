@@ -1,0 +1,3 @@
+# yosys 0.55 (VTR build): read_rtlil basic_xor_unary.il; opt_merge; write_rtlil
+# flags:
+cell $reduce_xor $reduce_xor$basic_xor_unary.v:5$2

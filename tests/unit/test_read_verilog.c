@@ -1,7 +1,8 @@
 /*
  * test_read_verilog.c — the read_verilog pass (2C spec §4, VP-18/VP-19) through odin3_pass_run
  * on the trees in tests/unit/data/verilog/read and temporary ones: direct files and project
- * records, --parse-only and the 2D stub, duplicate_module, the unnamed-instance rule, -v/-y
+ * records, --parse-only and the hand-over to 2D's entry, duplicate_module, the unnamed-instance
+ * rule, -v/-y
  * library resolution, unsupported_language, a missing file, the error cap across files, the
  * Debug check and an OOM sweep. Every located message is asserted exactly.
  */
@@ -85,7 +86,7 @@ void setUp(void) {
 }
 
 /* The files a test may leave in tmp (and p1.v .. p25.v). */
-static const char *const k_outputs[] = {"e1.v", "e2.v", "e3.v", "out.v", "u.v", "f.v"};
+static const char *const k_outputs[] = {"e1.v", "e2.v", "e3.v", "out.v", "u.v", "f.v", "l.o3proj"};
 
 void tearDown(void) {
     char path[PATH_BUF];
@@ -177,7 +178,7 @@ static const char *slurp(const char *name, char *buf) {
 
 static void test_arguments(void) {
     expect_log(ODIN3_ERR_INVALID_ARG, run("read_verilog", "--bogus a.v"),
-               "read_verilog: unknown argument '--bogus'\n");
+               "read_verilog: unknown option '--bogus'\n");
     expect_log(ODIN3_ERR_INVALID_ARG, run("read_verilog", "--parse-only"),
                "read_verilog: no project read\n");
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_ast_count(design));
@@ -297,21 +298,32 @@ static void test_parse_only_printable(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "module b"), text);
 }
 
-/* Without --parse-only the 2D entry runs: its stub fails, and the store is freed (keep NONE). */
-static void test_stub_without_parse_only(void) {
-    enter(D "/proj");
-    expect_log(ODIN3_ERR_INVALID_ARG, run("read_verilog", "src/b.v"),
-               "elaboration is not available yet (2D)\n");
+/* An empty module: stage 1 is clean on it while every module item is pending (2D point (l)). */
+static const char k_empty_module[] = "module e;\nendmodule\n";
+
+/* Without --parse-only 2D's entry runs: a clean stage 1 reaches stage 2, which elaborates the
+ * empty module, sets the top and logs the summary; both stores are freed (keep NONE). */
+static void test_elaborates_without_parse_only(void) {
+    put_tmp("e1.v", odin3_bytes_cstr(k_empty_module));
+    enter(tmp);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_verilog", "e1.v"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(logged(), "read_verilog: elaborated top 'e': 1 modules"),
+                                 logged());
+    TEST_ASSERT_EQUAL_INT(0, errors);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_ast_count(design));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, odin3_design_top(design).v);
 }
 
-/* Under --keep-ast=all the parsed store survives the failed elaboration (AST-16). */
-static void test_stub_keeps_parsed_under_all(void) {
-    enter(D "/proj");
+/* Under --keep-ast=all both stores survive the elaboration (AST-16). */
+static void test_keeps_both_under_all(void) {
+    put_tmp("e1.v", odin3_bytes_cstr(k_empty_module));
+    enter(tmp);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(design, ODIN3_KEEP_AST_ALL));
-    expect_log(ODIN3_ERR_INVALID_ARG, run("read_verilog", "src/b.v"),
-               "elaboration is not available yet (2D)\n");
-    TEST_ASSERT_EQUAL_INT(ODIN3_AST_FORM_PARSED, odin3_ast_form_of(held()));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_verilog", "e1.v"));
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_design_ast_count(design));
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_FORM_PARSED, odin3_ast_form_of(odin3_design_ast_at(design, 0)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_FORM_ELABORATED,
+                          odin3_ast_form_of(odin3_design_ast_at(design, 1)));
 }
 
 /* --- duplicate_module (step 4) ---------------------------------------------------------------- */
@@ -322,6 +334,21 @@ static void test_duplicate_module(void) {
                "one.v:5:1: error: duplicate_module: module 'm' is already defined\n");
     TEST_ASSERT_EQUAL_INT(1, errors);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_ast_count(design));
+}
+
+/* Design units are identified by library and name (DESIGN §4.0): one module name in two
+ * libraries is no duplicate (2D's lookup picks by library, EL-6); twice in one library is. */
+static void test_duplicate_module_per_library(void) {
+    put_tmp("e2.v", odin3_bytes_cstr("module m;\nendmodule\n"));
+    put_tmp("e3.v", odin3_bytes_cstr("module m;\nendmodule\n"));
+    put_tmp("l.o3proj", odin3_bytes_cstr("file verilog e2.v\nfile verilog e3.v library lib2\n"));
+    enter(tmp);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", "l.o3proj"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--parse-only"), logged());
+    TEST_ASSERT_EQUAL_INT(0, errors);
+    fresh_design();
+    expect_log(ODIN3_ERR_PARSE, run("read_verilog", "--parse-only e2.v e3.v"),
+               "e3.v:1:1: error: duplicate_module: module 'm' is already defined\n");
 }
 
 /* The 2B corpus case: src/other.v:2, names [helper]. */
@@ -629,6 +656,7 @@ typedef struct oom_case {
     const char *project;
     const char *args;
     odin3_status want;
+    uint32_t held; /* stores the design holds after a run that ends in want */
 } oom_case;
 
 /* One step: a fresh design, the record, then the read with allocation limit limit; NO_MEMORY or
@@ -642,14 +670,16 @@ static odin3_status oom_step(const oom_case *oc, int limit) {
     odin3_status st = run("read_verilog", oc->args);
     odin3_util_set_alloc_fail_after(-1);
     TEST_ASSERT_TRUE_MESSAGE(st == oc->want || st == ODIN3_ERR_NO_MEMORY, logged());
-    TEST_ASSERT_EQUAL_UINT32(st == ODIN3_OK ? 1 : 0, odin3_design_ast_count(design));
+    /* an allocation failure is never reported as a missing file */
+    TEST_ASSERT_NULL_MESSAGE(strstr(logged(), "missing_file:"), logged());
+    TEST_ASSERT_EQUAL_UINT32(st == oc->want ? oc->held : 0, odin3_design_ast_count(design));
     return st;
 }
 
 /* Fails every allocation in turn until the case runs to its own status; returns the steps. */
 static int oom_sweep(const oom_case *oc) {
     int limit = 0;
-    while (limit < OOM_LIMIT && oom_step(oc, limit) == ODIN3_ERR_NO_MEMORY) {
+    while (limit < OOM_LIMIT && oom_step(oc, limit) != oc->want) {
         limit++;
     }
     TEST_ASSERT_TRUE(limit < OOM_LIMIT);
@@ -657,16 +687,18 @@ static int oom_sweep(const oom_case *oc) {
 }
 
 /* Every allocation fails in turn: a library run, a duplicate_module run (its map, the error
- * path) and a run through the 2D entry (set_ast, the stub, drop_ast); nothing leaked. */
+ * path) and a run through the 2D entry (set_ast, stage 1, drop_ast, stage 2, the elaborated
+ * store's hand-over); nothing leaked. */
 static void test_oom_sweep(void) {
     enter(D "/lib_v_y");
-    oom_case lib = {"ext.o3proj", "--parse-only", ODIN3_OK};
+    oom_case lib = {"ext.o3proj", "--parse-only", ODIN3_OK, 1};
     TEST_ASSERT_TRUE(oom_sweep(&lib) > 50); /* the read itself allocates, not only the run */
     enter(D "/dup");
-    oom_case dup = {NULL, "--parse-only one.v", ODIN3_ERR_PARSE};
+    oom_case dup = {NULL, "--parse-only one.v", ODIN3_ERR_PARSE, 0};
     (void)oom_sweep(&dup);
-    enter(D "/proj");
-    oom_case elab = {NULL, "src/b.v", ODIN3_ERR_INVALID_ARG};
+    put_tmp("e1.v", odin3_bytes_cstr(k_empty_module));
+    enter(tmp);
+    oom_case elab = {NULL, "e1.v", ODIN3_OK, 0};
     (void)oom_sweep(&elab);
 }
 
@@ -695,10 +727,11 @@ int main(void) {
     RUN_TEST(test_missing_file);
     RUN_TEST(test_unreadable_file);
     RUN_TEST(test_parse_only_printable);
-    RUN_TEST(test_stub_without_parse_only);
-    RUN_TEST(test_stub_keeps_parsed_under_all);
+    RUN_TEST(test_elaborates_without_parse_only);
+    RUN_TEST(test_keeps_both_under_all);
     RUN_TEST(test_duplicate_module);
     RUN_TEST(test_duplicate_module_corpus);
+    RUN_TEST(test_duplicate_module_per_library);
     RUN_TEST(test_syntax_error_and_duplicate);
     RUN_TEST(test_unnamed_udp_instance_passes);
     RUN_TEST(test_unnamed_module_instance_errors);
