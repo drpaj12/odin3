@@ -1227,7 +1227,10 @@ difference; E3 on side A; the assertion on side B), or the run fails.
 it with the remaining sub-passes (after `clean`:
 `proc_rmdead; proc_prune; proc_arst; proc_mux; proc_dlatch; proc_dff; proc_memwr; proc_clean`,
 and so on), then step 3–4 above. The first X whose result differs from b.blif names the phase at
-fault. Run by the rows CTest on failure and by hand.
+fault. Run by the rows CTest on failure and by hand. *(Added, 2E Task 12, 2E-4a review M5.)*
+Bisect cannot separate the working-form round trip (decode, encode) from `clean`:
+`--stop-after` offers no phase before `clean`, so a fault there reports `first difference
+after clean`.
 
 ### 18.5 The bridge (end to end)
 
@@ -1248,11 +1251,21 @@ shape `fsm` needs (one register per chunk, §9, 2D v4.2).
 - Every sweep feeds 2E the input of §18.3 step 1 (after the pre-`proc` passes) and, nightly,
   also `--no-trio`.
 - `proc_diff_micro` and `proc_bridge_micro`: every micro that 2D elaborates (539 files, the
-  multi-file ones through their includer; `--top` from the Parmys golden, 2D point (o)); expected
-  failures in `tests/proc/micro_expect_fail.txt` with reasons: the five micros 2E rejects
-  (`always_posedge_negedge`, `bm_function_1`, `bm_function_2`, `matrix_multiplication` with E1;
-  `paj_top_hierarchy_no_mem` with E2), asserted to fail with those exact errors, plus 2D's own
-  list; the four Parmys rejects that 2E lowers (§4) are asserted to lower in both input modes.
+  multi-file ones through their includer; `--top` from the Parmys golden, 2D point (o)), as
+  `elab-sweep --proc-diff` and `elab-sweep --equiv --pass proc` (2D's collection, sizes, caps, `--tops`,
+  `xl` skips and `[needle]` expect lists; a signal, a cap kill or a timeout is never an expected
+  failure). Expected failures in `tests/proc/micro_expect_fail.txt`, one line each with a needle:
+  2D's own list (copied) plus the micros 2E rejects, asserted to fail with those errors:
+  `always_posedge_negedge`, `bm_function_1`, `bm_function_2` (E1a) and `paj_top_hierarchy_no_mem`
+  (E2). (*Corrected, 2E Task 12*: the brief's fifth, `matrix_multiplication`, is
+  `syntax/matrix_multiplication.v`, which 2D already rejects for a non-constant index into a
+  multi-dimensional array; there is no `large/` one. The kind is asserted by odin3's message text,
+  which does not print the `E1a`/`E2` code.) `proc_diff_micro_lowers` asserts that the Parmys rejects 2E
+  lowers (`paj_framebuftop_hierarchy_no_mem`, `paj_raygentop_hierarchy_no_mem`,
+  `diffeq_f_systemC`) lower and are identical in both input modes, with `tests/proc/paj_boundtop_typo_fixed.v`
+  standing in for `paj_boundtop_hierarchy_no_mem` (a 2D reject: `'debugcount01' has two drivers`, a typo
+  in the source, fixed in the copy). Without `opt` (2F-5) the trio input does not exist: the sweeps run
+  `--no-trio` and say `trio: skipped`.
 
 - `proc_diff_vtr` and `proc_bridge_vtr`: the 31 VTR and 33 Koios files as one set sorted by size
   (lenet.v last, 8 GiB cap alone), when `VTR_ROOT` is set; nightly.

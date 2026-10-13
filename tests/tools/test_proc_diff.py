@@ -267,17 +267,90 @@ class ProcDiffTest(unittest.TestCase):
         self.set_blif("a", head + ".subckt $reduce_or A[0]=b A[1]=a Y=y\n.end\n")
         self.assertEqual(self.run_tool()[0], 0)
 
+    # -- cell order (netlist-compare ties) ---------------------------------------------------
+
+    CELLS = (".model top\n.inputs a b\n.outputs y z\n.names n1\n1\n"
+             ".subckt $eq A[0]=a B[0]=b Y=y\n.param A_WIDTH 1\n.param B_WIDTH 1\n"
+             ".subckt $eq A[0]=a B[0]=b Y=z\n.param A_WIDTH 1\n.param B_WIDTH 1\n.end\n")
+
+    def test_shuffle_keeps_every_cell_with_its_lines(self) -> None:
+        for seed in range(1, 6):
+            shuffled = proc_diff.shuffle_cells(self.CELLS, seed)
+            self.assertEqual(sorted(shuffled.splitlines()), sorted(self.CELLS.splitlines()))
+            self.assertTrue(shuffled.startswith(".model top\n.inputs a b\n.outputs y z\n"))
+            self.assertTrue(shuffled.endswith(".end\n"))
+            self.assertEqual(shuffled, proc_diff.shuffle_cells(self.CELLS, seed))
+        self.assertTrue(any(proc_diff.shuffle_cells(self.CELLS, s) != self.CELLS
+                            for s in range(1, 20)))
+        # a cover row stays under its .names, a .param under its .subckt
+        for seed in range(1, 20):
+            lines = proc_diff.shuffle_cells(self.CELLS, seed).splitlines()
+            at = lines.index(".names n1")
+            self.assertEqual(lines[at + 1], "1")
+            for idx, line in enumerate(lines):
+                if line.startswith(".param A_WIDTH"):
+                    self.assertTrue(lines[idx - 1].startswith(".subckt $eq"))
+
+    def test_a_difference_is_retried_on_reordered_cells(self) -> None:
+        """netlist-compare can canonicalise tied cells by line order: a reordered copy of side A
+        that it accepts is an identical verdict (sound: the canonical text is a renaming)."""
+        runner = proc_diff.Runner(cap=1 << 30)
+        seen: list[str] = []
+
+        def fake(argv: list[str]) -> proc_diff.Child:
+            seen.append(Path(argv[-2]).name)
+            return proc_diff.Child(0 if "shuf3" in argv[-2] else 1, "", "")
+
+        work = self.dir / "retry"
+        work.mkdir()
+        (work / "a.blif").write_text(self.CELLS, encoding="utf-8")
+        (work / "b.blif").write_text(self.CELLS, encoding="utf-8")
+        argv = ["nc", str(work / "a.norm.blif"), str(work / "b.norm.blif")]
+        with mock.patch.object(runner, "run", side_effect=fake):
+            child = proc_diff._compare(runner, argv, frozenset())
+        self.assertEqual(child.code, 0)
+        self.assertEqual(seen, ["a.norm.blif", "a.norm.shuf1.blif", "a.norm.shuf2.blif",
+                                "a.norm.shuf3.blif"])
+
+        def stable(argv: list[str]) -> proc_diff.Child:  # tells a side from the other, not itself
+            same = Path(argv[-2]).name.split(".")[0] == Path(argv[-1]).name.split(".")[0]
+            return proc_diff.Child(0 if same else 1, "d", "")
+
+        with mock.patch.object(runner, "run", side_effect=stable):
+            child = proc_diff._compare(runner, argv, frozenset())
+        self.assertEqual((child.code, child.stdout), (1, "d"))  # no reordering agrees: differs
+        # netlist-compare also tells a side from a reordered copy of itself: a tie, not a difference
+        with mock.patch.object(runner, "run", return_value=proc_diff.Child(1, "d", "")):
+            child = proc_diff._compare(runner, argv, frozenset())
+        self.assertEqual((child.code, child.stdout), (proc_diff.EXIT_TIE, "d"))
+
+    def test_a_missing_yosys_is_named(self) -> None:
+        code, _, err = helpers.run_main(proc_diff.main, [
+            "--odin3", str(self.odin3), "--yosys", str(self.dir / "no-such-yosys"),
+            str(self.rows)])
+        self.assertEqual(code, 2)
+        self.assertIn("cannot run", err)
+
+    def test_a_blank_line_in_a_cover_is_not_a_buffer(self) -> None:
+        """A cover with a blank line then another row is the parser's constant, not a buffer."""
+        text = ".model top\n.names x y\n1 1\n\n0 1\n.names y z\n1 1\n.end\n"
+        self.assertEqual(proc_diff.normalise_text(text, frozenset()).count(".names x y"), 1)
+
     # -- exit mapping ----------------------------------------------------------------------
 
     def test_exit_mapping(self) -> None:
         self.assertEqual(self.run_tool()[0], 0)
-        self.assertFalse((self.keep / "t" / "diff.txt").exists())
+        self.assertEqual((self.keep / "t" / "diff.txt").read_text(), "identical\n")
         self.set_blif("a", DFF_BLIF.format(pol="0"))
         code, out, _ = self.run_tool()
         self.assertEqual(code, 1)
         self.assertIn("t.v: differs", out)
         self.assertIn(f"files kept in {self.keep / 't'}", out)
         self.assertIn("CLK_POLARITY", (self.keep / "t" / "diff.txt").read_text())
+        # a rerun that is identical overwrites the older diff (2E-4a review M6)
+        self.set_blif("a", DFF_BLIF.format(pol="1"))
+        self.assertEqual(self.run_tool()[0], 0)
+        self.assertEqual((self.keep / "t" / "diff.txt").read_text(), "identical\n")
         code, out, err = self.run_tool(env={"FAKE_ODIN3_RC": "1"})
         self.assertEqual(code, 2)
         self.assertIn("t.v: error", out)

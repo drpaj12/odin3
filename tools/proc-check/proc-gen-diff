@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# proc-gen-diff: seeds of the --proc generator through proc-diff and the bridge. See proc_gen_diff.py.
+# Exit codes: 0 every seed ok (drift and oracle crashes are reported, not failed), 1 a seed failed
+# (its file is kept), 2 usage or setup error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/proc_gen_diff.py" "$@"

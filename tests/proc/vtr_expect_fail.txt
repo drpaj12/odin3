@@ -1,0 +1,7 @@
+# tests/proc/vtr_expect_fail.txt: the VTR and Koios benchmarks (31 + 33 files, one set by size) that
+# proc_diff_vtr and proc_bridge_vtr do not run or expect to fail (2E spec 18.6, plan Task 12).
+# Format: `<path relative to $VTR_ROOT/vtr_flow/benchmarks/verilog> [needle] <reason>`; a reason that
+# starts with `xl` marks a file for the oversized run: the 6G sweeps skip it, and the sweep-xl CTests
+# (proc_diff_vtr_xl, proc_bridge_vtr_xl) run exactly such files with 8 GiB per child (elab-sweep
+# --xl --cap-for), each of which must pass.
+koios/lenet.v xl: Yosys side ≈ 5–7 GB (proc-diff and bridge)

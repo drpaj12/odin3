@@ -30,3 +30,21 @@ jobs:
   #     - run: ODIN3_HEAVY_OK=1 ctest --preset release -L sweep -R '^verilog_(micro|vtr|writer)_parse$'
   #     # The generator against Yosys, 5,000 seeds (2C §7.5, Task 11's verilog_gen_vs_yosys).
   #     - run: ctest --preset release -R '^verilog_gen_vs_yosys$'  # with --seeds 5000
+
+  # 2E spec §18.6 (plan Task 12): placeholders until the nightly has Yosys 0.55 (VTR's build), a
+  # cached VTR checkout and a Yosys 0.69. proc_gen_vs_yosys runs 200 seeds in CTest; nightly runs
+  # 5,000, the same files again without the pre-proc trio, and against Yosys 0.69 (a 0.55/0.69
+  # disagreement is `oracle drift`, reported and never a failure).
+  # proc-evidence:
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: cmake --preset release && cmake --build --preset release -j4
+  #     # 5,000 seeds through proc-diff (both latch modes) and the bridge (--nolatches).
+  #     - run: tools/heavy-run tools/proc-check/proc-gen-diff --odin3 build/release/odin3 --yosys "$YOSYS_055" --equiv-check tools/equiv-check/equiv-check --seeds 1..5000 --work "$RUNNER_TEMP/proc-gen"
+  #     # The input before the pre-proc passes (opt_expr; opt_clean; opt -nodffe -nosdff).
+  #     - run: tools/heavy-run tools/proc-check/proc-gen-diff --odin3 build/release/odin3 --yosys "$YOSYS_055" --equiv-check tools/equiv-check/equiv-check --seeds 1..5000 --no-trio --work "$RUNNER_TEMP/proc-gen-no-trio"
+  #     # Oracle drift: every seed 0.55 passes runs again under Yosys 0.69.
+  #     - run: tools/heavy-run tools/proc-check/proc-gen-diff --odin3 build/release/odin3 --yosys "$YOSYS_055" --yosys-069 "$YOSYS_069" --equiv-check tools/equiv-check/equiv-check --seeds 1..5000 --work "$RUNNER_TEMP/proc-gen-069"
+  #     # The micro and VTR/Koios sweeps (VTR_ROOT set at configure time registers the _vtr ones).
+  #     - run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^proc_(diff|bridge)_(micro|vtr)$'

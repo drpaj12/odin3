@@ -4,6 +4,7 @@
 Usage::
 
     verilog_gen.py --seed N --out F.v [--mutate] [--no-ast]
+    verilog_gen.py --proc --seed N --out F.v
 
 writes ``F.v``, one compilation unit of one to four modules generated from seed N over the MUST
 and SHOULD coverage rows, weighted toward the common forms: ANSI and non-ANSI headers, parameter
@@ -25,6 +26,10 @@ parser's code; the tree shapes are the 2A slot table (``docs/specs/2026-10-09-2A
 ``--mutate`` drops, duplicates or swaps one token of the generated text instead (no ``F.ast``);
 ``--no-ast`` skips ``F.ast``.  The output is a function of N alone.
 
+``--proc`` (2E Task 12) is another profile: one small synthesisable module of ``always`` blocks
+for the ``proc`` differential (``proc_profile.py``; its first line lists the features used), no
+``F.ast``.
+
 Exit 0 written, 2 usage or I/O error.
 """
 
@@ -38,6 +43,8 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import proc_profile
 
 # --- the tree -------------------------------------------------------------------------------
 
@@ -2303,14 +2310,30 @@ def render(seed: int, fname: str, mutated: bool = False) -> Generated:
     return Generated(out.text(), dump_unit(items, fname), "")
 
 
+def write_proc(seed: int, out: Path) -> int:
+    """``--proc``: the proc profile's module for seed into out."""
+    try:
+        out.write_text(proc_profile.generate(seed).text, encoding="utf-8")
+    except OSError as exc:
+        print(f"verilog_gen: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--out", required=True, help="the Verilog file to write (F.v)")
     parser.add_argument("--mutate", action="store_true", help="mutate one token, no F.ast")
     parser.add_argument("--no-ast", action="store_true", help="do not write F.ast")
+    parser.add_argument("--proc", action="store_true",
+                        help="the proc profile (always blocks, resets, latches, memories)")
     args = parser.parse_args(argv)
     out = Path(args.out)
+    if args.proc:
+        if args.mutate:
+            parser.error("--proc and --mutate cannot be combined")
+        return write_proc(args.seed, out)
     result = render(args.seed, out.name, args.mutate)
     try:
         out.write_text(result.text, encoding="utf-8")

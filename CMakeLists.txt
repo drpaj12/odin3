@@ -1735,6 +1735,63 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --odin3 $<TARGET_FILE:odin3> --with-frontend --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
         set_tests_properties(project_corpus_frontend PROPERTIES LABELS tools)
+        # 2E Task 12: test_proc_gen_diff parses the --proc profile with this Yosys.
+        set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT
+                     "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+
+        # 2E Task 12 (spec 18.6, plan point (p)): the proc sweeps. Every one is an elab-sweep run
+        # (smallest first, one child per file under memcap, expected failures with needles) whose
+        # child is proc-diff (--proc-diff) or the bridge (--equiv --pass proc). Two 3G jobs fit the
+        # heavy slice's 6G; --trio auto feeds the input after the pre-proc passes once `opt` runs
+        # (2F-5) and --no-trio before that. Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^proc_'.
+        set(_proc_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+            --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+            --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --trio auto --jobs 2 --mem-cap 3G)
+        set(_proc_bridge --equiv --pass proc
+            --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
+        set(_micro_dir ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
+        set(_micro_expect --expect-fail ${PROJECT_SOURCE_DIR}/tests/proc/micro_expect_fail.txt
+            --root ${_micro_dir})
+        odin3_add_sweep_test(proc_diff_micro LABEL sweep
+            COMMAND ${_proc_sweep} --proc-diff ${_micro_expect} ${_micro_dir})
+        odin3_add_sweep_test(proc_bridge_micro LABEL sweep
+            COMMAND ${_proc_sweep} ${_proc_bridge} ${_micro_expect} ${_micro_dir})
+        # The three Parmys rejects that 2E lowers, and the typo-fixed boundtop standing in for
+        # the 2D reject (tests/proc/paj_boundtop_typo_fixed.v), lower and are identical in both
+        # input modes (--also-no-trio).
+        odin3_add_sweep_test(proc_diff_micro_lowers LABEL sweep
+            COMMAND ${_proc_sweep} --proc-diff --also-no-trio
+                    ${_micro_dir}/large/paj_framebuftop_hierarchy_no_mem.v
+                    ${_micro_dir}/large/paj_raygentop_hierarchy_no_mem.v
+                    ${_micro_dir}/syntax/diffeq_f_systemC.v
+                    ${PROJECT_SOURCE_DIR}/tests/proc/paj_boundtop_typo_fixed.v)
+        # The generator (200 seeds; nightly runs 5,000): proc-diff in both latch modes and the
+        # bridge in --nolatches. A difference fails with its seed and file kept under the build
+        # directory.
+        odin3_add_sweep_test(proc_gen_vs_yosys LABEL sweep
+            COMMAND ${Python3_EXECUTABLE}
+                    ${PROJECT_SOURCE_DIR}/tools/proc-check/proc_gen_diff.py
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --seeds 1..200 --mem-cap 3G --work ${PROJECT_BINARY_DIR}/proc_gen_work)
+        # The 31 VTR and 33 Koios benchmarks as one set by size, when VTR_ROOT is set at
+        # configure time (also label nightly). lenet.v is listed `xl` in vtr_expect_fail.txt: the
+        # 6G sweeps skip it, and the sweep-xl CTests run exactly it, alone, 8 GiB per child.
+        if(_vtr_benchmarks)
+            set(_vtr_expect --expect-fail ${PROJECT_SOURCE_DIR}/tests/proc/vtr_expect_fail.txt
+                --root ${_vtr_verilog})
+            set(_vtr_xl --xl --cap-for koios/lenet.v=8G --jobs 1)
+            odin3_add_sweep_test(proc_diff_vtr LABEL sweep
+                COMMAND ${_proc_sweep} --proc-diff ${_vtr_expect} ${_vtr_benchmarks})
+            odin3_add_sweep_test(proc_bridge_vtr LABEL sweep
+                COMMAND ${_proc_sweep} ${_proc_bridge} ${_vtr_expect} ${_vtr_benchmarks})
+            odin3_add_sweep_test(proc_diff_vtr_xl LABEL sweep-xl
+                COMMAND ${_proc_sweep} --proc-diff ${_vtr_xl} ${_vtr_expect} ${_vtr_benchmarks})
+            odin3_add_sweep_test(proc_bridge_vtr_xl LABEL sweep-xl
+                COMMAND ${_proc_sweep} ${_proc_bridge} ${_vtr_xl} ${_vtr_expect}
+                        ${_vtr_benchmarks})
+            set_tests_properties(proc_diff_vtr proc_bridge_vtr PROPERTIES LABELS "sweep;nightly")
+        endif()
     endif()
 
     # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys
