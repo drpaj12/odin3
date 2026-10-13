@@ -817,6 +817,26 @@ static odin3_node_spec prepare_node_oom(void) {
     return spec;
 }
 
+/* Review M1: node_create_connected and node_replace bump the journal's mutation count themselves,
+ * so a node with no connected pin is not missed. */
+static void test_journal_gen_unconnected_nodes(void) {
+    odin3_module_journal_begin(module);
+    odin3_value width = odin3_value_int(1);
+    odin3_node_spec spec = {type_id("test_t3_mixed"), 0, {0}, &width, 1};
+    odin3_node_id first = node_named("test_t3_mixed", intern("u1"), &width);
+    uint64_t gen = odin3_module_journal_gen(module);
+    odin3_net_id none[3] = {{0}, {0}, {0}};
+    const odin3_netvec ports[4] = {{none, 1}, {none, 0}, {none, 3}, {none, 1}};
+    odin3_node_id second = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, &second));
+    TEST_ASSERT_TRUE(odin3_module_journal_gen(module) > gen);
+    gen = odin3_module_journal_gen(module);
+    odin3_node_pair pair = {first, second};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_replace(module, pair));
+    TEST_ASSERT_TRUE(odin3_module_journal_gen(module) > gen);
+    odin3_module_journal_end(module);
+}
+
 /* Each failure point is hit from a fresh module, so earlier allocations are not kept. */
 static void test_node_create_oom_sweep(void) {
     odin3_node_spec spec = {0};
@@ -975,6 +995,7 @@ int main(void) {
     RUN_TEST(test_pinpool_classes);
     RUN_TEST(test_pinpool_reuses_blocks);
     RUN_TEST(test_node_create_oom_sweep);
+    RUN_TEST(test_journal_gen_unconnected_nodes);
     RUN_TEST(test_pin_connect_oom_sweep);
     RUN_TEST(test_net_create_oom_sweep);
     RUN_TEST(test_module_create_oom_sweep);

@@ -326,6 +326,7 @@ odin3_status odin3_node_create_connected(odin3_module *module, const odin3_node_
         plan_free(&plan);
         return st;
     }
+    odin3_journal_touch(module); /* a node made counts even if no pin is connected */
     odin3_node_id id = node_commit(module, spec, &plan);
     plan_free(&plan);
     st = connect_ports(module, id, ports);
@@ -427,6 +428,7 @@ odin3_status odin3_node_replace(odin3_module *module, odin3_node_pair pair) {
     if (st != ODIN3_OK) {
         return st;
     }
+    odin3_journal_touch(module); /* the old node dies even if none of its pins is connected */
     for (uint32_t i = 0; i < old_rec->pin_count; i++) {
         odin3_pin_rec *from = odin3_pin_rec_at(module, (odin3_pin_id){old_rec->first_pin.v + i});
         if (odin3_net_valid(from->net)) {
