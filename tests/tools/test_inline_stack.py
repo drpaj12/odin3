@@ -3,7 +3,9 @@
 A chain of 1000 functions, each called by the one before it inside an expression, elaborates under
 a 2 MiB stack (``ulimit -s 2048``) with the default caps: the calls are inlined from an explicit
 frame stack (src/frontends/elab/pg_call.c), not by C recursion. A function that calls itself is
-still refused, with its located error. CTest ``python_tools`` runs this with ODIN3_CLI set to the
+still refused, with its located error. A call nested in a call's arguments in a continuous
+``assign`` still nests by C stack (PR 2D-7b review M9); it is capped at 128 levels with a located
+error, so it can never overflow the stack. CTest ``python_tools`` runs this with ODIN3_CLI set to the
 odin3 executable; without it the tests are skipped.
 """
 
@@ -19,6 +21,7 @@ from pathlib import Path
 ODIN3 = os.environ.get("ODIN3_CLI", "")
 STACK_BYTES = 2048 * 1024
 CHAIN = 1000
+NEST_OK = 120
 
 
 def _limit_stack() -> None:
@@ -33,6 +36,19 @@ def _chain(length: int) -> str:
     lines.append("  always @* y = f1(a);")
     lines.append("endmodule")
     return "\n".join(lines) + "\n"
+
+
+def _assign_nest(depth: int) -> str:
+    """``assign y = f(f(...f(a)...))`` with ``depth`` calls in the arguments of one another."""
+    call = "a"
+    for _ in range(depth):
+        call = f"f({call})"
+    return (
+        "module t(input [7:0] a, output [7:0] y);\n"
+        "  function [7:0] f(input [7:0] x); f = x + 1; endfunction\n"
+        f"  assign y = {call};\n"
+        "endmodule\n"
+    )
 
 
 def _run(source: str) -> subprocess.CompletedProcess[str]:
@@ -52,6 +68,16 @@ def _run(source: str) -> subprocess.CompletedProcess[str]:
 class InlineStackTests(unittest.TestCase):
     def test_thousand_deep_chain_elaborates_on_a_small_stack(self) -> None:
         run = _run(_chain(CHAIN))
+        self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+        self.assertNotIn("error", run.stderr)
+
+    def test_assign_nest_over_the_cap_is_a_located_error(self) -> None:
+        run = _run(_assign_nest(CHAIN))
+        self.assertGreater(run.returncode, 0, f"killed by signal {-run.returncode}")
+        self.assertRegex(run.stderr, r"t\.v:3:\d+: .*function call nesting deeper than 128 at 'f'")
+
+    def test_assign_nest_within_the_cap_elaborates_on_a_small_stack(self) -> None:
+        run = _run(_assign_nest(NEST_OK))
         self.assertEqual(run.returncode, 0, run.stderr[-2000:])
         self.assertNotIn("error", run.stderr)
 
