@@ -484,6 +484,32 @@ static void test_blocking_and_nonblocking_other_shapes(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_warnings_with(T9_DIFFER), et_log(&pt_rs));
 }
 
+/* Review I2 (probes t9i, t9f): a same-path pair after an exclusive first pair is still found. The
+ * plain warning comes from the first pair, the differ warning from the later one. */
+static void test_blocking_and_nonblocking_later_pair(void) {
+    pt_read_src("module t(input c, input [1:0] s, input [3:0] d, output reg [3:0] q);\n"
+                "  always @(posedge c) begin\n    case (s)\n      2'd0: q = d;\n"
+                "      2'd1: q <= d + 4'd1;\n"
+                "      default: begin q = d + 4'd2; q <= d ^ 4'd9; end\n"
+                "    endcase\n  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_warnings_with(T9_DIFFER), et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, pt_soft_warnings(), et_log(&pt_rs));
+    pt_expect_warning((at_loc){6, 36}, "'q' is assigned with both '=' and '<=' " T9_SAME_PATH
+                                       " (also at t.v:6:22); " T9_DIFFER);
+    et_free(&pt_rs);
+    memset(&pt_rs, 0, sizeof pt_rs);
+    /* the nonblocking first, then a blocking one after an exclusive arm pair (t9f) */
+    pt_read_src("module t(input c, input [1:0] s, input [3:0] d, output reg [3:0] q);\n"
+                "  always @(posedge c) begin\n    case (s)\n      2'd0: q = d;\n"
+                "      2'd1: q <= d + 4'd1;\n"
+                "      2'd2: begin q <= d; q = d + 4'd2; end\n"
+                "      default: q <= 4'd7;\n    endcase\n  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_warnings_with(T9_DIFFER), et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, pt_soft_warnings(), et_log(&pt_rs));
+}
+
 /* Two blocks on one bit stay T10's error (the T9 warning is given first). */
 static void test_blocking_and_nonblocking_two_blocks(void) {
     pt_read_failing("module t(input c, a, b, output reg [1:0] r);\n"
@@ -1115,6 +1141,7 @@ static void test_oom_sweep(void) {
     X(test_blocking_and_nonblocking_same_path)                                                     \
     X(test_blocking_and_nonblocking_exclusive_arms)                                                \
     X(test_blocking_and_nonblocking_other_shapes)                                                  \
+    X(test_blocking_and_nonblocking_later_pair)                                                    \
     X(test_blocking_and_nonblocking_two_blocks)                                                    \
     X(test_same_kind_is_fine)                                                                      \
     X(test_conflict_drops_only_the_conflicting_chunk)                                              \

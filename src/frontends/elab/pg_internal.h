@@ -146,6 +146,14 @@ typedef struct pg_late {
 /* The result of folding a statement: none, or the child to run + 1 (PG_FOLD_NONE: nothing runs). */
 #define PG_FOLD_NONE UINT32_MAX
 
+/* One assignment of a kind to a net beyond the first, on a path no earlier one had (T9, review I2):
+ * where it is (block number << 32 | case), its statement, and the next older record + 1 (0: none).
+ */
+typedef struct pg_kind_rec {
+    uint64_t at;
+    uint32_t stmt, next;
+} pg_kind_rec;
+
 struct odin3_pg {
     odin3_elab2 *e2;
     /* the block */
@@ -219,7 +227,10 @@ struct odin3_pg {
     odin3_u64map *kinds;      /* net << 1 | blocking -> the net's first assignment of that kind */
     odin3_u64map *kind_at;    /* the same key -> block number << 32 | the case of that assignment */
     odin3_u64map *mixed_seen; /* T9 warnings given: wire (or net) << 1 | same control path */
-    uint32_t block_no;        /* the blocks begun so far (pg_block_reset counts them) */
+    odin3_u64map
+        *kind_head; /* the same key -> 1 + the index in kind_more of its latest further record */
+    odin3_vec kind_more; /* pg_kind_rec: the further assignments of that kind, on other paths */
+    uint32_t block_no;   /* the blocks begun so far (pg_block_reset counts them) */
 };
 
 /* --- pg.c: the builder ------------------------------------------------------------------------ */

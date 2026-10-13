@@ -2079,8 +2079,10 @@ is attached (EL-28), with both locations from the symbol table's assignment list
   '=' and '<=' on one control path (also at f.v:20:5); simulation and synthesis may differ"
   (simulation applies a nonblocking update after the blocking ones, Yosys's last action wins:
   `q <= b; q = a;` is `q = b` in a simulator and `q = a` in the netlist). Both warnings may come
-  once per variable. The comparison is with the first `=` and the first `<=` assignment to the
-  bit, so a later one on a shared path after an exclusive first one gets the plain warning. Two
+  once per variable. Each new assignment is compared with every recorded assignment of the
+  other kind to the bit in the block (one record per distinct control path, so the cost is bounded
+  by the block's structure), so a same-path pair after an exclusive first pair also gets the
+  "simulation and synthesis may differ" warning. Two
   blocks assigning one bit remain T10's error.
 - **A4**: EL-28. A bit driven by a process and by a continuous assignment, gate or instance is A4.
 - Loop variables (EL-35) and function and task locals are exempt: they are not outputs.

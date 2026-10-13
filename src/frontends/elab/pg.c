@@ -102,6 +102,8 @@ void odin3_pg_destroy(odin3_pg *pg) {
     odin3_u64map_destroy(pg->kinds);
     odin3_u64map_destroy(pg->kind_at);
     odin3_u64map_destroy(pg->mixed_seen);
+    odin3_u64map_destroy(pg->kind_head);
+    odin3_vec_free(&pg->kind_more);
     odin3_u64map_destroy(pg->loopout);
     odin3_u64map_destroy(pg->tvis);
     vecs_free(pg);
@@ -168,9 +170,12 @@ odin3_status odin3_pg_create(odin3_elab2 *e2, odin3_pg **out) {
     pg->kinds = odin3_u64map_create(0);
     pg->kind_at = odin3_u64map_create(0);
     pg->mixed_seen = odin3_u64map_create(0);
-    odin3_status st = pg->kinds != NULL && pg->kind_at != NULL && pg->mixed_seen != NULL
-                          ? pg_block_reset(pg)
-                          : ODIN3_ERR_NO_MEMORY;
+    pg->kind_head = odin3_u64map_create(0);
+    odin3_vec_init(&pg->kind_more, sizeof(pg_kind_rec));
+    odin3_status st =
+        pg->kinds != NULL && pg->kind_at != NULL && pg->mixed_seen != NULL && pg->kind_head != NULL
+            ? pg_block_reset(pg)
+            : ODIN3_ERR_NO_MEMORY;
     if (st != ODIN3_OK) {
         odin3_pg_destroy(pg);
         return st;
@@ -715,30 +720,100 @@ static odin3_status mixed_record(odin3_pg *pg, const pg_asg *asg, uint64_t key) 
     return st != ODIN3_OK ? st : odin3_u64map_put(pg->kind_at, (odin3_kv){key, at});
 }
 
+/* Whether an assignment of the kind key at `at` is already recorded: the first, or in the list of
+ * further ones. The list holds one record per distinct path, so it is bounded by the block's
+ * control structure and not by the number of assignments. */
+static bool mixed_known(const odin3_pg *pg, uint64_t key, uint64_t at) {
+    uint64_t first = 0;
+    uint64_t head = 0;
+    if (odin3_u64map_get(pg->kind_at, key, &first) && first == at) {
+        return true;
+    }
+    (void)odin3_u64map_get(pg->kind_head, key, &head);
+    for (; head != 0;
+         head = ((const pg_kind_rec *)odin3_vec_cat(&pg->kind_more, head - 1U))->next) {
+        if (((const pg_kind_rec *)odin3_vec_cat(&pg->kind_more, head - 1U))->at == at) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Records the assignment under key: the first one in the maps, a later one on a new path in the
+ * list. */
+static odin3_status mixed_remember(odin3_pg *pg, const pg_asg *asg, uint64_t key) {
+    uint64_t unused = 0;
+    if (!odin3_u64map_get(pg->kinds, key, &unused)) {
+        return mixed_record(pg, asg, key);
+    }
+    uint64_t at = ((uint64_t)pg->block_no << GROUP_SHIFT) | pg->cur;
+    if (mixed_known(pg, key, at)) {
+        return ODIN3_OK;
+    }
+    uint64_t head = 0;
+    (void)odin3_u64map_get(pg->kind_head, key, &head);
+    pg_kind_rec *rec = odin3_vec_push(&pg->kind_more);
+    if (rec == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *rec = (pg_kind_rec){at, asg->stmt.v, (uint32_t)head};
+    return odin3_u64map_put(pg->kind_head, (odin3_kv){key, (uint64_t)pg->kind_more.len});
+}
+
+/* A recorded assignment of the other kind that can run in the same evaluation as the one being
+ * made: its statement in *stmt. The first one is tried by the caller. */
+static bool mixed_later_pair(const odin3_pg *pg, uint64_t other_key, uint32_t *stmt) {
+    uint64_t head = 0;
+    (void)odin3_u64map_get(pg->kind_head, other_key, &head);
+    for (; head != 0;
+         head = ((const pg_kind_rec *)odin3_vec_cat(&pg->kind_more, head - 1U))->next) {
+        const pg_kind_rec *rec = odin3_vec_cat(&pg->kind_more, head - 1U);
+        if (one_control_path(pg, rec->at)) {
+            *stmt = rec->stmt;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The warnings for one bit against the other kind's record: the first assignment of that kind, and
+ * when that one is on an exclusive path, the later ones (each warning is once per variable). */
+typedef struct mixed_bit {
+    uint32_t bit;
+    uint64_t other_key;
+} mixed_bit;
+
+static odin3_status mixed_check_bit(odin3_pg *pg, const pg_asg *asg, mixed_bit mb) {
+    uint32_t bit = mb.bit;
+    uint64_t other_key = mb.other_key;
+    uint64_t other = 0;
+    uint64_t where = 0;
+    if (!odin3_u64map_get(pg->kinds, other_key, &other) ||
+        !odin3_u64map_get(pg->kind_at, other_key, &where)) {
+        return ODIN3_OK;
+    }
+    bool same = one_control_path(pg, where);
+    odin3_status st = mixed_warn(pg, asg, bit, (odin3_ast_id){(uint32_t)other}, same);
+    uint32_t later = 0;
+    if (st == ODIN3_OK && !same && mixed_later_pair(pg, other_key, &later)) {
+        st = mixed_warn(pg, asg, bit, (odin3_ast_id){later}, true);
+    }
+    return st;
+}
+
 /* T9 (EL-41, accepted): a bit assigned with both `=` and `<=`, in one block or several, follows
  * Yosys's semantics (every assignment is an action; the last one on a path wins) with a warning.
- * The first assignment of each kind to a bit is remembered for the module. */
+ * The assignments of each kind to a bit are remembered for the module, one per distinct path. */
 odin3_status pg_check_mixed(odin3_pg *pg, const pg_asg *asg) {
     uint64_t mine = asg->blocking ? 1U : 0U;
     for (uint32_t i = 0; i < asg->lv->nets.len; i++) {
         odin3_net_id net = *(const odin3_net_id *)odin3_vec_cat(&asg->lv->nets, i);
         uint64_t mine_key = ((uint64_t)net.v << 1) | mine;
-        uint64_t other_key = mine_key ^ 1U;
-        uint64_t other = 0;
-        uint64_t where = 0;
-        uint64_t unused = 0;
         if (net.v == 0) {
             continue;
         }
-        odin3_status st = ODIN3_OK;
-        if (!odin3_u64map_get(pg->kinds, mine_key, &unused)) {
-            st = mixed_record(pg, asg, mine_key);
-        }
-        if (st == ODIN3_OK && odin3_u64map_get(pg->kinds, other_key, &other) &&
-            odin3_u64map_get(pg->kind_at, other_key, &where)) {
-            st = mixed_warn(pg, asg, i, (odin3_ast_id){(uint32_t)other},
-                            one_control_path(pg, where));
-        }
+        odin3_status st = mixed_remember(pg, asg, mine_key);
+        st = st != ODIN3_OK ? st : mixed_check_bit(pg, asg, (mixed_bit){i, mine_key ^ 1U});
         if (st != ODIN3_OK) {
             return st;
         }
