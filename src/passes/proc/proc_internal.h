@@ -510,8 +510,10 @@ void odin3_proc_hook_step(const odin3_proc_mctx *mctx, int step, bool begin);
  * (logged "proc: internal: ...") for what step A or the latch step rules out: an ALWAYS sync with
  * an action, a group without an edge sync or with two, a register output on a constant net;
  * ODIN3_ERR_NO_MEMORY and E6 (ODIN3_ERR_PARSE, odin3_proc_add_cell) stop at once with valid IR;
- * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument. O(groups x sync actions x width), Yosys's
- * bound.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument. O(groups x sync actions) for the scan of the
+ * actions plus O(groups x syncs x width x log) for find_any_lvalue: the (net, sync) pairs of the
+ * action left sides are sorted once, not each sync's left side once per group (Yosys's bound is
+ * higher; the groups, their bits and the output are the same).
  */
 odin3_status odin3_proc_ffs(odin3_proc_mctx *mctx, odin3_pw *pw);
 

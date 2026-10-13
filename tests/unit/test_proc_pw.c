@@ -700,6 +700,31 @@ static void test_sig_replace_remove2_extract(void) {
     odin3_pw_free(&pw);
 }
 
+/* The meets answers of an open pattern {a, 1, c}, as a bit mask over five probes. */
+static unsigned meets_mask(odin3_pw *pw, const sig_nets *sn) {
+    const odin3_pw_sig probe[] = {SIG(pw, sn->b, sn->c), SIG(pw, sn->a), SIG(pw, sn->b, sn->p),
+                                  SIG(pw, ODIN3_PW_S1), (odin3_pw_sig){0, 0}};
+    unsigned mask = 0;
+    for (unsigned i = 0; i < sizeof probe / sizeof probe[0]; i++) {
+        mask |= odin3_pw_pattern_meets(&mctx, pw, probe[i]) ? 1U << i : 0U;
+    }
+    return mask;
+}
+
+/* One open pattern answers many tests; close leaves the index empty; constants never meet. */
+static void test_pattern_open_meets_close(void) {
+    sig_nets sn = sig_wires();
+    odin3_pw pw;
+    pw_empty(&pw);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pw_pattern_open(&mctx, &pw, SIG(&pw, sn.a, ODIN3_PW_S1, sn.c)));
+    TEST_ASSERT_EQUAL_UINT(0x3U, meets_mask(&pw, &sn));
+    odin3_pw_pattern_close(&mctx);
+    TEST_ASSERT_EQUAL_UINT32(0, mctx.touched.len);
+    TEST_ASSERT_EQUAL_UINT(0U, meets_mask(&pw, &sn));
+    odin3_pw_free(&pw);
+}
+
 /* Constants in the pattern match nothing; constants in sig are never removed; widths checked. */
 static void test_sig_constants_and_widths(void) {
     sig_nets sn = sig_wires();
@@ -1522,6 +1547,7 @@ int main(void) {
     RUN_TEST(test_encode_keeps_attrs);
     RUN_TEST(test_encode_after_edit);
     RUN_TEST(test_sig_replace_remove2_extract);
+    RUN_TEST(test_pattern_open_meets_close);
     RUN_TEST(test_sig_constants_and_widths);
     RUN_TEST(test_sig_predicates);
     RUN_TEST(test_sig_equal);
