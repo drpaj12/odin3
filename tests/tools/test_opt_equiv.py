@@ -93,19 +93,19 @@ class PureTest(unittest.TestCase):
     def test_script_default_lowering(self) -> None:
         self.assertEqual(
             oe.refinement_script("g.il", "h.il"),
-            "read_rtlil g.il; read_rtlil h.il; async2sync; techmap; equiv_make gold gate eq; "
+            "read_rtlil g.il; read_rtlil h.il; clk2fflogic; techmap; equiv_make gold gate eq; "
             "hierarchy -top eq; flatten; equiv_simple -undef -seq 4; equiv_induct -undef; "
             "equiv_status -assert")
 
     def test_script_variants(self) -> None:
         plain = oe.refinement_script("g.il", "h.il", lowering=())
-        self.assertNotIn("async2sync", plain)
+        self.assertNotIn("clk2fflogic", plain)
         self.assertNotIn("proc", plain)
         self.assertIn("read_rtlil h.il; equiv_make gold gate eq", plain)
         procs = oe.refinement_script("g.il", "h.il", procs=True, lowering=oe.LOWERINGS[0])
-        self.assertIn("read_rtlil h.il; proc; async2sync; equiv_make", procs)
+        self.assertIn("read_rtlil h.il; proc; clk2fflogic; equiv_make", procs)
         self.assertNotIn("techmap", procs)
-        self.assertIn("memory; async2sync; techmap; equiv_make",
+        self.assertIn("memory; clk2fflogic; techmap; equiv_make",
                       oe.refinement_script("g.il", "h.il", lowering=oe.LOWERINGS[2]))
 
     def test_phase2_commands_and_stats(self) -> None:
@@ -203,7 +203,7 @@ class MainTest(unittest.TestCase):
     def test_lowering_flags_reach_yosys(self) -> None:
         self.fakes.spec(self.pair("0001", "opt_expr"))
         self.fakes.main("--no-lower")
-        self.assertNotIn("async2sync", self.fakes.log("yosys.log")[0])
+        self.assertNotIn("clk2fflogic", self.fakes.log("yosys.log")[0])
 
     def test_unpaired_snapshot_is_ignored(self) -> None:
         self.fakes.spec({"0001-opt_expr-before.il": IL_GOOD, "README": "x"})
@@ -266,6 +266,59 @@ end
 """
 
 
+def _port(kind: str, name: str, index: int) -> str:
+    return f"  wire {kind} {index} \\{name}\n"
+
+
+AND_CELL = ("  cell $and \\c1\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+            "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"
+            "    connect \\A \\a\n    connect \\B \\b\n    connect \\Y \\y\n  end\n")
+
+
+def mutant_module(body: str, with_q: bool = True) -> str:
+    """The clock-mutant family: ports clk a b rst, outputs y (a & b) and q (a flip-flop)."""
+    ports = [_port("input", n, i) for i, n in enumerate(("clk", "a", "b", "rst"), 1)]
+    ports.append(_port("output", "y", 5))
+    if with_q:
+        ports.append(_port("output", "q", 6))
+    return "attribute \\top 1\nmodule \\t\n" + "".join(ports) + body + "end\n"
+
+
+def adff_cell(clk_pol: int = 1, rst_pol: int = 1, value: int = 0, d: str = "\\a",
+              clk: str = "\\clk") -> str:
+    return ("  cell $adff \\f\n    parameter \\WIDTH 1\n"
+            f"    parameter \\CLK_POLARITY {clk_pol}\n    parameter \\ARST_POLARITY {rst_pol}\n"
+            f"    parameter \\ARST_VALUE 1'{value}\n    connect \\CLK {clk}\n"
+            f"    connect \\ARST \\rst\n    connect \\D {d}\n    connect \\Q \\q\n  end\n")
+
+
+DFF_CELL = ("  cell $dff \\f\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+            "    connect \\CLK \\clk\n    connect \\D \\a\n    connect \\Q \\q\n  end\n")
+SDFF_CELL = ("  cell $sdff \\f\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+             "    parameter \\SRST_POLARITY 1\n    parameter \\SRST_VALUE 0\n"
+             "    connect \\CLK \\clk\n    connect \\SRST \\rst\n    connect \\D \\a\n"
+             "    connect \\Q \\q\n  end\n")
+RENAMED_Y = AND_CELL.replace("\\Y \\y", "\\Y \\yy").replace(
+    "  cell $and", "  wire \\yy\n  cell $and")
+CLOCK_GOLD = mutant_module(AND_CELL + adff_cell())
+# The review's mutants (C1): every one must fail the check; the posedge-to-negedge and the clock-net
+# mutants passed all three lowerings of the async2sync flow.
+CLOCK_MUTANTS = {
+    "negedge": mutant_module(AND_CELL + adff_cell(clk_pol=0)),
+    "clock_net": mutant_module(AND_CELL + adff_cell(clk="\\b")),
+    "wrong_function": mutant_module(AND_CELL.replace("$and", "$or") + adff_cell()),
+    "arst_value": mutant_module(AND_CELL + adff_cell(value=1)),
+    "arst_polarity": mutant_module(AND_CELL + adff_cell(rst_pol=0)),
+    "no_reset": mutant_module(AND_CELL + DFF_CELL),
+    "sync_reset_for_async": mutant_module(AND_CELL + SDFF_CELL),
+    "d_source": mutant_module(AND_CELL + adff_cell(d="\\b")),
+    "q_tied_0": mutant_module(AND_CELL + "  connect \\q 1'0\n"),
+    "q_port_missing": mutant_module(AND_CELL, with_q=False),
+    "y_tied_0": mutant_module("  connect \\y 1'0\n" + adff_cell()),
+    "y_renamed": mutant_module(RENAMED_Y + adff_cell()),
+}
+
+
 @unittest.skipUnless(YOSYS and Path(YOSYS).exists(), "Yosys 0.55 (ODIN3_YOSYS055) not found")
 class ProbeTest(unittest.TestCase):
     """Spec 20.2's probe: s ? a : x -> a passes; the reverse and a wrong enable fail."""
@@ -292,6 +345,20 @@ class ProbeTest(unittest.TestCase):
     def test_a_wrong_enable_fails(self) -> None:
         self.assertTrue(self.refines(dffe("\\en"), dffe("\\en")))
         self.assertFalse(self.refines(dffe("\\en"), dffe("\\ne")))
+
+    def test_the_identical_clocked_module_refines(self) -> None:
+        self.assertTrue(self.refines(CLOCK_GOLD, CLOCK_GOLD))
+
+    def test_clock_mutants_all_fail(self) -> None:
+        """Review C1: a flipped clock edge and a wrong clock net are no longer accepted."""
+        for name, text in CLOCK_MUTANTS.items():
+            with self.subTest(mutant=name):
+                self.assertFalse(self.refines(CLOCK_GOLD, text))
+
+    def test_no_lowering_of_the_chain_hides_the_clock(self) -> None:
+        for lowering in oe.LOWERINGS:
+            self.assertIn("clk2fflogic", lowering)
+            self.assertNotIn("async2sync", lowering)
 
 
 if __name__ == "__main__":

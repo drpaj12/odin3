@@ -2,7 +2,7 @@
 #
 #   <sub>/<rule> <reason>
 #
-# opt-rules runs every row's in.il/out.il through the refinement check (Yosys async2sync; techmap;
+# opt-rules runs every row's in.il/out.il through the refinement check (Yosys clk2fflogic; techmap;
 # equiv_make; equiv_simple -undef; equiv_induct -undef) and still runs a listed row: a listed row
 # that refines is a stale entry and fails.
 expr/fold_pow no SAT model for $pow in Yosys's equiv flow; checked by hand (3**2 = 8'b00001001)

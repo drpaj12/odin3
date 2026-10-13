@@ -28,12 +28,13 @@ Yosys side (``$pos`` ignored; the pass, ``opt_clean``, the pass), any other row'
 is reported, not failed. A ``pending`` row is listed and not run.
 
 With ``--yosys`` every row also gets the refinement check of ``opt-equiv`` (spec 20.2, Task 17;
-Yosys ``async2sync``, then ``techmap`` as a second try; ``equiv_make; equiv_simple -undef;
-equiv_induct -undef``) on its ``in.il`` and ``out.il``: the golden is Odin III's own output, so only
-this check tells a wrong rewrite from a right one. ``refine_skip.txt`` beside the rules
-(``--refine-skip F``; ``<sub>/<rule> <reason>``) lists the documented skips: a listed row is still
-run and must fail the check, else the entry is stale and the row fails. The run ends with
-``refinement: N proved, M documented skips, K failed``; ``--no-refine`` leaves the check out.
+Yosys ``clk2fflogic``, so the clock edge and net are checked, then ``techmap`` as a second try;
+``equiv_make; equiv_simple -undef; equiv_induct -undef``) on its ``in.il`` and ``out.il``: the
+golden is Odin III's own output, so only this check tells a wrong rewrite from a right one.
+``refine_skip.txt`` beside the rules (``--refine-skip F``; ``<sub>/<rule> <reason>``) lists the
+documented skips: a listed row is still run and must fail the check, else the entry is stale and the
+row fails. The run ends with ``refinement: N proved, M documented skips, K failed``; ``--no-refine``
+leaves the check out.
 
 ``--write`` (which needs ``--yosys``) writes the ``.il`` goldens only when every row passes every
 check; on any failure nothing is written. Every child runs through ``memcap.run`` (one at a time).

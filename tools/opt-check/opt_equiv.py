@@ -10,18 +10,23 @@ Odin III runs ``read_verilog --nolatches FILE...; hierarchy; <the Phase 2 script
 ``-after.il`` for every sub-pass call that changed something. Per pair, in sequence order, Yosys
 0.55 runs the refinement check of ``refinement_script``::
 
-    read_rtlil gold.il; read_rtlil gate.il; [proc;] [async2sync; [techmap;]]
+    read_rtlil gold.il; read_rtlil gate.il; [proc;] [clk2fflogic; [techmap;]]
     equiv_make gold gate eq; hierarchy -top eq; flatten; equiv_simple -undef -seq 4;
     equiv_induct -undef; equiv_status -assert
 
 The modules of the two files are renamed ``gold``/``gate`` first (a submodule becomes ``gold.m`` or
 ``gate.m``), so one Yosys design holds both. An x in the gold is a don't-care: ``s ? a : 4'bx``
 to ``a`` passes, the reverse and a wrong enable fail. A pair with ``process`` blocks (the
-pre-``proc`` calls) gets Yosys ``proc`` first. Spec 20.2's flow alone cannot prove the async
-flip-flops, so the check tries ``async2sync`` first, then ``async2sync; techmap`` (techmap loses
-the proof of a division by zero and of a ``$pmux``, which the first try gives), then ``memory;
-async2sync; techmap`` (the memories); a pass in any is a proof. A proof that takes past 60 s is
-"inconclusive" and fails. ``--no-lower`` runs the plain flow, ``--no-techmap`` the first try only.
+pre-``proc`` calls) gets Yosys ``proc`` first. Every lowering holds ``clk2fflogic``: the clock
+becomes an ordinary sampled signal and the asynchronous controls become logic, so a flipped clock
+edge or a wrong clock net is a counterexample (Yosys's ``async2sync`` alone puts every flip-flop on
+one implicit clock and accepted both; review C1). The check tries ``clk2fflogic`` first, then
+``clk2fflogic; techmap`` (techmap loses the proof of a division by zero and of a ``$pmux``, which
+the first try gives), then ``memory; clk2fflogic; techmap`` (the memories); a pass in any is a
+proof. A proof that takes past 60 s is "inconclusive" and fails (a failing pair costs up to 3 x 60
+s, each lowering has its own limit; a timeout stops the pair). The Yosys child runs in
+its own process group and a timeout kills the group. ``--no-lower`` runs the plain flow (the clock
+is not checked), ``--no-techmap`` the first try only.
 
 A failing pair prints ``opt-equiv: <NNNN>-<sub>: not a refinement`` with the rule counters of the
 run (Odin III's ``--opt-stats`` lines, which cover the whole run). A work directory this tool
@@ -171,7 +176,11 @@ def rename_modules(text: str, side: str, top: str) -> str:
     return re.sub(r"^(\s*)cell (\\\S+) ", cell, out, flags=re.M)
 
 
-LOWERINGS = (("async2sync",), ("async2sync", "techmap"), ("memory", "async2sync", "techmap"))
+# Every lowering has ``clk2fflogic``: it turns each clock edge into an explicit sampled clock
+# and the asynchronous controls into logic, so the clock net and its polarity are part of the
+# proof. ``async2sync`` (the old first step) models every flip-flop on one implicit clock and
+# accepted a posedge flip-flop for a negedge one (review C1), so it is not used.
+LOWERINGS = (("clk2fflogic",), ("clk2fflogic", "techmap"), ("memory", "clk2fflogic", "techmap"))
 
 
 def refinement_script(gold: str, gate: str, procs: bool = False,
@@ -240,8 +249,9 @@ class Checker:
 
     def flows(self) -> list[Sequence[str]]:
         """The lowerings tried in order; a pass in any one is a proof (each lowers both sides
-        alike). ``async2sync`` makes the async flip-flops provable; ``techmap`` makes more cells
-        provable and loses a division by zero and a ``$pmux``; ``memory`` maps the memories."""
+        alike). ``clk2fflogic`` makes the clock and the async flip-flops visible and provable;
+        ``techmap`` makes more cells provable and loses a division by zero and a ``$pmux``;
+        ``memory`` maps the memories."""
         if not self.lower:
             return [()]
         return [LOWERINGS[0]] if not self.techmap else list(LOWERINGS)
@@ -323,8 +333,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--top", help="the top module (odin3 --top and hierarchy --top)")
     ap.add_argument("--script", type=Path, default=PHASE2, help="the script (default Phase 2's)")
     ap.add_argument("--techlib", help="read this tech library (.o3lib) first: the hard blocks")
-    ap.add_argument("--no-lower", action="store_true", help="no async2sync and techmap")
-    ap.add_argument("--no-techmap", action="store_true", help="async2sync only")
+    ap.add_argument("--no-lower", action="store_true",
+                    help="no clk2fflogic and techmap (the clock is NOT checked)")
+    ap.add_argument("--no-techmap", action="store_true", help="clk2fflogic only")
     ap.add_argument("--mem-cap", type=parse_size, default=DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 2G)")
     ap.add_argument("--work", type=Path, help="the work directory (kept)")
