@@ -46,3 +46,4 @@ err_second_root_if comb=0 err=1
 err_reset_untested comb=0 err=1
 err_dual_edge comb=0 err=1
 err_nonconst_reset comb=0 err=1
+parallel_case_nonconst_append comb=1 err=0

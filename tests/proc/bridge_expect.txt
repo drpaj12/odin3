@@ -5,3 +5,4 @@
 self_clocked|is clocked by internal net a|equiv-check reads no latch clocked by an internal net
 two_clocks_module|more than one clock domain|equiv-check reads one clock domain
 arst_rename_wire|Multiple edge sensitive events found for this signal|Yosys 0.55's own read_verilog + proc rejects a reset seen through a plain wire (check_signal does not follow aliases; the 4 micros Parmys rejects, §20 #1); 2E, on 2D's merged nets, accepts it and proc-diff shows Yosys's proc identical on that RTLIL
+parallel_case_nonconst_append|ctrl_sig.size() == 1|Yosys 0.55 asserts on the empty parallel_case select (§20 #17), so there is no B side; proc_diff_rows recognises the assert

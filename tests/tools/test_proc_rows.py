@@ -22,7 +22,7 @@ ROWS = PROC / "rows"
 
 ERROR_ROWS = {"err_two_clocks", "err_second_root_if", "err_reset_untested", "err_dual_edge",
               "err_nonconst_reset"}
-ROW_COUNT = 48
+ROW_COUNT = 49
 YOSYS_V_RE = re.compile(r"^// yosys -V: Yosys 0\.55 \(")
 
 
@@ -31,7 +31,7 @@ def _rows() -> list[proc_rows.Row]:
 
 
 class RowsShapeTest(unittest.TestCase):
-    def test_rows_txt_lists_the_48_slugs_once_each(self) -> None:
+    def test_rows_txt_lists_the_49_slugs_once_each(self) -> None:
         slugs = [r.slug for r in _rows()]
         self.assertEqual(len(slugs), ROW_COUNT)
         self.assertEqual(len(set(slugs)), ROW_COUNT)
@@ -84,9 +84,11 @@ class RowsShapeTest(unittest.TestCase):
             line, col = int(match[1]), int(match[2])
             self.assertTrue(source[line - 1][col - 1:].startswith("always"), slug)
 
-    def test_diff_expect_has_no_entries(self) -> None:
+    def test_diff_expect_has_only_the_17_row(self) -> None:
         lines = (PROC / "diff_expect.txt").read_text(encoding="utf-8").splitlines()
-        self.assertEqual([x for x in lines if x.strip() and not x.startswith("#")], [])
+        entries = [x for x in lines if x.strip() and not x.startswith("#")]
+        self.assertEqual(len(entries), 1)
+        self.assertTrue(entries[0].startswith("parallel_case_nonconst_append.v §20 #17"))
 
     def test_case_default_golden_has_one_pmux_of_width_8(self) -> None:
         text = (ROWS / "case_default.il").read_text(encoding="utf-8")

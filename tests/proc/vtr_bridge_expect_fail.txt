@@ -1,6 +1,6 @@
 # tests/proc/vtr_bridge_expect_fail.txt: VTR/Koios files that proc_bridge_vtr cannot check with
 # equiv-check, in addition to tests/proc/vtr_expect_fail.txt (several clock domains: equiv-check
 # reads one). They stay covered by proc_diff_vtr.
-multiclock_separate_and_latch.v [equiv-check failed] equiv-check reads one clock domain (two clocks)
-multiclock_output_and_latch.v [equiv-check failed] equiv-check reads one clock domain (two clocks)
-multiclock_reader_writer.v [equiv-check failed] equiv-check reads one clock domain (two clocks)
+multiclock_separate_and_latch.v [more than one clock domain] equiv-check reads one clock domain (two clocks)
+multiclock_output_and_latch.v [more than one clock domain] equiv-check reads one clock domain (two clocks)
+multiclock_reader_writer.v [more than one clock domain] equiv-check reads one clock domain (two clocks)

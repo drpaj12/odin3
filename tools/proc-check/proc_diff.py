@@ -99,6 +99,7 @@ SHUFFLE_TRIES = 8  # netlist-compare reruns on a reordered copy of side A before
 CELL_STARTS = (".subckt", ".names", ".latch", ".gate", ".mlatch")
 
 EXIT_SAME, EXIT_DIFFER, EXIT_ERROR, EXIT_TIE = 0, 1, 2, 3
+SIGNAL_EXIT = 128  # a shell-style 128+N exit for a signal N
 
 TRIO = ("opt_expr", "opt_clean", "opt -nodffe -nosdff")
 BISECT_PHASES = ("clean", "rmdead", "prune", "arst")
@@ -436,8 +437,10 @@ def _failed_step(step: str, tool: str, child: Child) -> Outcome:
     if step == "B" and YOSYS_ASSERT_17 in output:
         return Outcome(EXIT_DIFFER, OUT_ASSERT, DIVERGENCES[17][1], known=17)
     kind = OUT_E3 if step == "A" and ODIN3_E3 in output else "error"
-    return Outcome(EXIT_ERROR, kind, f"{tool} exited {child.code} (step {step})",
-                   lines=_tail(child))
+    how = f"{tool} exited {child.code}"
+    if child.code < 0 or child.code >= SIGNAL_EXIT:  # a cap kill or crash: elab-sweep reads it
+        how = f"{tool} crashed (signal {-child.code if child.code < 0 else child.code - SIGNAL_EXIT})"
+    return Outcome(EXIT_ERROR, kind, f"{how} (step {step})", lines=_tail(child))
 
 
 def _compare(runner: Runner, argv: list[str], ints: frozenset[str]) -> Child:
