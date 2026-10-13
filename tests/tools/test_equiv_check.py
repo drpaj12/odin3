@@ -225,15 +225,15 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         code, out, err = check(a, b)
         self.assertEqual(code, 2, out)
         self.assertIn("cannot be matched one-to-one", err)
-        self.assertIn("only in A: single_port_ram out[0]=q (a.blif:4)", err)
-        self.assertIn("only in B: single_port_ram out[0]=r (b.blif:4)", err)
+        self.assertIn("only in A: single_port_ram out=q (a.blif:4)", err)
+        self.assertIn("only in B: single_port_ram out=r (b.blif:4)", err)
 
     def test_instance_in_one_file_only_exit_2(self) -> None:
         a = self.write("a.blif", BB_HEAD + RAM_Q + BB_TAIL)
         b = self.write("b.blif", BB_HEAD + ".names a q\n1 1\n" + BB_TAIL)
         code, _, err = check(a, b)
         self.assertEqual(code, 2)
-        self.assertIn("only in A: single_port_ram out[0]=q", err)
+        self.assertIn("only in A: single_port_ram out=q", err)
 
     def test_width_mismatch_exit_2(self) -> None:
         wide = RAM_Q.replace("out[0]=q", "out[0]=q out[1]=q1").replace(
@@ -286,12 +286,25 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         equiv_check.match_blackboxes(flats)
         self.assertEqual([len(f.blackboxes) for f in flats], [1, 1])
 
+    def test_one_bit_port_spellings_match(self) -> None:
+        """Yosys writes a one-bit port ``out``, Parmys and Odin II ``out[0]``."""
+        text = (".model t\n.inputs a\n.outputs y\n{} we{}=a out{}=u\n.names u y\n1 1\n.end\n")
+        sub = text.format(".subckt single_port_ram", "[0]", "[0]") + (
+            ".model single_port_ram\n.inputs we[0]\n.outputs out[0]\n.blackbox\n.end\n")
+        gate = text.format(".gate single_port_ram", "", "")
+        flats = [equiv_check.flatten(blif.parse_text(sub)),
+                 equiv_check.flatten(blif.parse_text(gate, gates=True))]
+        equiv_check.match_blackboxes(flats)
+        self.assertEqual({f.blackboxes[0].key for f in flats}, {"out=u"})
+        self.assertEqual(flats[0].inputs, flats[1].inputs)
+        self.assertEqual(flats[0].outputs, flats[1].outputs)
+
     def test_cut_points_become_ports(self) -> None:
         flat = equiv_check.flatten(blif.parse_text(BB_HEAD + RAM_Q + BB_TAIL, gates=True))
-        self.assertIn("bbout:single_port_ram:out[0]=q:out[0]", flat.inputs)
-        for formal in ("addr[0]", "clk", "data[0]", "we"):
-            self.assertIn(f"bbin:single_port_ram:out[0]=q:{formal}", flat.outputs)
-        self.assertNotIn("bbin:single_port_ram:out[0]=q:out[0]", flat.outputs)
+        self.assertIn("bbout:single_port_ram:out=q:out", flat.inputs)
+        for formal in ("addr", "clk", "data", "we"):
+            self.assertIn(f"bbin:single_port_ram:out=q:{formal}", flat.outputs)
+        self.assertNotIn("bbin:single_port_ram:out=q:out", flat.outputs)
 
     def test_unnameable_instance_exit_2(self) -> None:
         text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$auto$7")

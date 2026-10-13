@@ -27,7 +27,8 @@ cut out of the logic:
 
 Instances are matched across the files by instance name: the ``.cname`` if the instance has
 one, else the first output pin (lowest port, lowest bit) whose net has a stable name (not
-``$``-prefixed), as ``out[0]=memtroll.str_out[0]``; the name is normalized like a primary I/O
+``$``-prefixed), as ``out=memtroll.str_out[0]`` (a one-bit port is ``p`` whether written
+``p`` or ``p[0]``); the name is normalized like a primary I/O
 name.  Matching is exact and never guessed: instances that exist on one side only, two
 instances with one name, an instance with no usable name, a different cell type or different
 port widths all exit 2 with a message listing them.  The cut makes two netlists equivalent
@@ -226,6 +227,14 @@ def _formal_order(formal: str) -> tuple[str, int]:
     return (match.group(1), int(match.group(2))) if match else (formal, 0)
 
 
+def _canonical_formals(formals: list[str]) -> dict[str, str]:
+    """Pin name -> name used for matching: a one-bit port is ``p`` whether it is spelled
+    ``p`` (Yosys) or ``p[0]`` (Parmys, Odin II); ports of several bits keep their indices."""
+    wide = {blif.port_base(f) for f in formals if _formal_order(f)[1] > 0}
+    return {f: (blif.port_base(f) if f == blif.port_base(f) + "[0]"
+                and blif.port_base(f) not in wide else f) for f in formals}
+
+
 def _gate_adder_model(cell: blif.Subckt) -> blif.Model:
     """The ``adder`` model a model-less ``.gate adder`` stands for, from its connections."""
     formals = [f for f, _ in cell.conns]
@@ -328,12 +337,13 @@ class _Flattener:
         if not self.cut:
             raise EquivError(f"{self.netlist.path}:{cell.line}: unsupported black box "
                              f"{cell.model}")
+        names = _canonical_formals([f for f, _ in cell.conns])
         if sub is None:
-            is_out = {f: blif.gate_port_is_output(cell.model, f) for f, _ in cell.conns}
+            is_out = {names[f]: blif.gate_port_is_output(cell.model, f) for f, _ in cell.conns}
         else:
-            is_out = {f: f in sub.outputs for f, _ in cell.conns}
-        ordered = sorted(cell.conns, key=lambda c: _formal_order(c[0]))
-        pins = {f: frame.resolve(a) for f, a in ordered}
+            is_out = {names[f]: f in sub.outputs for f, _ in cell.conns}
+        ordered = sorted(cell.conns, key=lambda c: _formal_order(names[c[0]]))
+        pins = {names[f]: frame.resolve(a) for f, a in ordered}
         box = BlackBox(cell.model, self.instance_key(cell, frame, pins, is_out), cell.line,
                        {f: n for f, n in pins.items() if not is_out[f]},
                        {f: n for f, n in pins.items() if is_out[f]})
@@ -364,7 +374,8 @@ class _Flattener:
                 return "/".join([*frame.path[1:], norm(value)])
         for formal, net in pins.items():
             if is_out[formal] and _SEP not in net and not net.startswith("$"):
-                return f"{formal}={norm(net)}"
+                base, bit = _formal_order(formal)  # width-independent: out[0] and out agree
+                return f"{base}{f'[{bit}]' if bit else ''}={norm(net)}"
         raise EquivError(f"{self.netlist.path}:{cell.line}: cannot name black box "
                          f"{cell.model}: no .cname and no named output net to match it by")
 
