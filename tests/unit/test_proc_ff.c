@@ -915,12 +915,15 @@ static void test_ff_invalid(void) {
 /* --- out of memory ------------------------------------------------------------------------- */
 
 /* ff_oom.il: one module with every register kind: q ($adff) and u (self reset) in one process,
- * s ($dffsr with W4), l ($aldff with W3) and w (8-bit $dff) in others. */
+ * s ($dffsr with W4), l ($aldff with W3) and w (8-bit $dff) in others; n is test_ff_group_narrowed's
+ * register ($adff n[0], $dff n[1..2]); at WIDTH 3 the narrowing grows pw->bits, so the sweep fails
+ * ff_narrow's run allocation too (checked with a breakpoint on its error return). */
 static const char *const k_oom =
     "module \\m\n  wire input 1 \\clk\n  wire input 2 \\rst\n  wire input 3 \\d\n"
     "  wire input 4 \\e\n  wire input 5 \\r2\n  wire input 6 \\a\n  wire width 8 input 7 \\dw\n"
     "  wire output 8 \\q\n  wire output 9 \\u\n  wire output 10 \\s\n  wire output 11 \\l\n"
-    "  wire width 8 output 12 \\w\n  wire \\t0\n  wire \\u0\n  wire \\s0\n  wire \\l0\n"
+    "  wire width 8 output 12 \\w\n  wire input 13 \\r3\n  wire width 3 input 14 \\dn\n"
+    "  wire width 3 output 15 \\n\n  wire \\t0\n  wire \\u0\n  wire \\s0\n  wire \\l0\n"
     "  wire width 8 \\w0\n  wire \\nr2\n"
     "  cell $logic_not $c1\n" UNARY_PARAMS "    connect \\A \\r2\n    connect \\Y \\nr2\n  end\n"
     "  process $p1\n    assign \\u0 \\u\n    switch \\rst\n"
@@ -939,6 +942,8 @@ static const char *const k_oom =
     "    sync posedge \\clk\n      update \\l \\l0\n"
     "    sync posedge \\rst\n      update \\l \\l0\n  end\n"
     "  process $p4\n    assign \\w0 \\dw\n    sync negedge \\clk\n      update \\w \\w0\n  end\n"
+    "  process $p5\n    sync high \\r3\n      update \\n [0] 1'0\n"
+    "    sync posedge \\clk\n      update \\n \\dn\n  end\n"
     "end\n";
 
 static char oom_want[MAX_CELLS][DESC_TEXT];
@@ -994,8 +999,8 @@ static void test_ff_oom(void) {
     fx_open(&fx, k_oom);
     fx_lower(&fx);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, fx_ff(&fx));
-    TEST_ASSERT_EQUAL_UINT32(2, fx.stats.cells[ODIN3_PROC_K_DFF]);
-    TEST_ASSERT_EQUAL_UINT32(1, fx.stats.cells[ODIN3_PROC_K_ADFF]);
+    TEST_ASSERT_EQUAL_UINT32(3, fx.stats.cells[ODIN3_PROC_K_DFF]);
+    TEST_ASSERT_EQUAL_UINT32(2, fx.stats.cells[ODIN3_PROC_K_ADFF]);
     TEST_ASSERT_EQUAL_UINT32(1, fx.stats.cells[ODIN3_PROC_K_ALDFF]);
     TEST_ASSERT_EQUAL_UINT32(1, fx.stats.cells[ODIN3_PROC_K_DFFSR]);
     TEST_ASSERT_EQUAL_UINT32(1, fx.stats.warnings[ODIN3_PROC_W3]);
