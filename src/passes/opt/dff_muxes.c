@@ -7,8 +7,10 @@
  * - Caps (agent default, spec §17 #34): a bit's pattern search gives up, finding no pattern and
  *   marking nothing, when a path holds more than ODIN3_DFF_MAX_PATH selects or the search takes
  *   more than ODIN3_DFF_MAX_FRAMES steps; a walk down muxes stops after as many steps as the
- *   module has mux bits (a mux loop would run forever in Yosys). A bit that gives up keeps the
- *   controls it has: a missed rewrite, never a wrong one.
+ *   module has mux bits (a mux loop cannot run forever here). The search also gives up on a mux
+ *   with a constant x or z select (spec §17 #38: Yosys reads it as two independent values). A bit
+ *   that gives up keeps the controls it has: a missed rewrite, never a wrong one. Rule 10's walk
+ *   reads each select once (as SRST), so an x select there is a refinement and needs no guard.
  */
 #include "ir/celltype.h"
 #include "ir/design.h"
@@ -506,6 +508,18 @@ static odin3_status expand_open(search *sr, frame fr, const mux_view *view) {
                : st;
 }
 
+/* True when a select of the mux is a constant x or z: it would be read twice (in the pattern and
+ * in the mux) as two independent values (spec §17 #38). 0 and 1 are one value everywhere. */
+static bool undefined_select(const search *sr, const mux_view *view) {
+    for (uint32_t i = 0; i < view->s.count; i++) {
+        odin3_const val = odin3_dff_net_const(sr->ds, pin_at(sr->ds, view->s, i));
+        if (val == ODIN3_CONST_X || val == ODIN3_CONST_Z) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* One frame of find_muxtree_feedback_patterns. */
 static odin3_status expand(search *sr, frame fr) {
     mux_view view;
@@ -513,6 +527,10 @@ static odin3_status expand(search *sr, frame fr) {
         return record_pattern(sr, fr);
     }
     if (!mux_of(sr->ds, (odin3_net_id){fr.net}, &view) || view.mb->users > 1) {
+        return ODIN3_OK;
+    }
+    if (undefined_select(sr, &view)) {
+        sr->aborted = true; /* the bit keeps the enables it has (as past the path cap, #34) */
         return ODIN3_OK;
     }
     odin3_status st = odin3_kit_push_u64(&sr->seen, view.mb->node);

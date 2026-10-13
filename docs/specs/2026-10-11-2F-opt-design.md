@@ -494,7 +494,7 @@ Each FF from a work list (initially every FF in ID order; FFs emitted by a rule 
     then `find_muxtree_feedback_patterns` (iterative) collects the select patterns under which a
     deeper mux tree feeds Q back, **replacing those Q feedback inputs of the muxes by x**; groups
     by (patterns, controls) become sliced FFs with `EN` = `$reduce_and` of `$ne(pattern)`s and
-    controls.
+    controls. A mux with a constant x or z select ends the search for that bit (§17 #38).
 12. a changed FF is re-emitted.
 
 Then **constbits** (`run_constbits`, no `-sat`): per bit, `combine_const` (x yields unless
@@ -727,6 +727,7 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 35 | the FFs a merge makes are appended to the work list and visited in order of creation; a merge's groups are made in the order of their first bit | Yosys pops `dff_cells` from the back (LIFO) and iterates the groups in `std::map` order of (patterns, controls) | OP-14 determinism (no hash or pointer order reaching the IR); the final cells are the same, only their IDs and the order of equal rewrites differ. The `mux` data case (all five flag variants) matches Yosys cell for cell |
 | 36 | an empty feedback pattern (a bit whose D is Q after the enable muxes) makes the enable's `$ne` input a constant 0, not a zero-width `$ne` | `addNe` on empty signals (a width-0 cell) | the registry rejects width 0; the value is the same (an empty pattern never enables) |
 | 37 | a merge's new FFs are built on the old FF's Q nets (a second driver) before the old node is shrunk with those Q nets handed on (`keep == drop` ties, init kept), so a NO_MEMORY before the shrink deletes them again and leaves the IR as it was | creates the cells and `module->remove(cell)` | OP-2 build before destroy; the group's gates stay as dead cells on a failure (opt_clean) |
+| 38 | the feedback search gives up (the bit keeps the enables it has, as in #34) on a mux whose select is a constant x or z; 0 and 1 selects are searched as before | Yosys 0.55 searches through it, and the select is then read twice (in the `$ne` pattern and in the surviving mux) as two independent x values: `q <= b ? d : mux(S=1'x, A=1'1, B=q)` becomes a `$dffe` whose output differs from the input for x_sel=1, x_B=0, x_en=0 (q drops from 1 to 0), also under `-keepdc`; `async2sync; miter -equiv; sat -seq 2` fails on Yosys's own output (reviewer's 4 of 1,500 random cases, all with an x select; 0 failures in 12,000 runs without) | OP-13: soundness outranks parity; a missed enable is only an optimisation lost. Test `test_dff_feedback_x_select` |
 
 ## 18. Files, interfaces and data structures (OP-17)
 

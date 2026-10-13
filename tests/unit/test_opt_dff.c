@@ -1838,6 +1838,22 @@ static void test_dff_feedback_patterns(void) {
     expect_action("adding EN", "$dff", "f");
 }
 
+/* I1 (spec §17 #38): q <= r ? mux(S=1'x, A=1, B=q) : d. The x select would be read twice (in the
+ * pattern and in the mux), each time as its own value; the search gives up instead. */
+#define XSEL_TEXT                                                                                  \
+    MOD(W_STD W_MID MUX1("m7", "1'1", "\\q", "1'x", "\\m1")                                        \
+            MUX1("m0", "\\m1", "\\d", "\\r", "\\m2") FF_ON("\\m2"))
+
+static void test_dff_feedback_x_select(void) {
+    build(XSEL_TEXT);
+    run_dff();
+    expect_ff("$dff");
+    TEST_ASSERT_EQUAL_UINT32(0, count_of("$ne"));
+    odin3_node_id inner = node_named("m7");
+    TEST_ASSERT_EQUAL_UINT32(wnet("q", 0).v, pin_net_of(inner, "B", 0).v); /* no x mark */
+    TEST_ASSERT_EQUAL_INT(ODIN3_CONST_X, odin3_net_const_value(fx.module, pin_net_of(inner, "S", 0)));
+}
+
 static void test_dff_feedback_two_paths(void) {
     /* Q under two selects in different arms: both paths are patterns, ANDed by $reduce_and */
     build(MOD(W_STD W_MID "  wire \\m3\n" MUX1("m_a", "\\d", "\\q", "\\r", "\\m1")
@@ -2430,6 +2446,7 @@ static void run_merge_tests(void) {
     RUN_TEST(test_dff_single_user);
     RUN_TEST(test_dff_no_aload_srst);
     RUN_TEST(test_dff_feedback_patterns);
+    RUN_TEST(test_dff_feedback_x_select);
     RUN_TEST(test_dff_feedback_two_paths);
     RUN_TEST(test_dff_slices);
     RUN_TEST(test_dff_groups_by_control);
