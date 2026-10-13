@@ -143,6 +143,13 @@ static iw_side identity_of(const odin3_expr_ctx *ec, bool *negative) {
     default:
         break;
     }
+    /* -1 only when both operands are signed: on a mixed cell the registry evaluator reads it
+     * unsigned (1'1 is +1) and the 2D fold reads each operand by its own sign, so no rewrite is
+     * right (§17 #30) */
+    if (*negative && !odin3_expr_both_signed(ec)) {
+        *negative = false;
+        return IW_NONE;
+    }
     if (wrt_a) {
         return IW_A;
     }

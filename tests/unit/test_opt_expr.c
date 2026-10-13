@@ -2237,6 +2237,51 @@ static void test_div_minus_one(void) {
     }
 }
 
+/* A $div or $mul by a constant 1'1 (B for $div, A for $mul is the 4-bit variable "a"). */
+static void build_by_one_bit(const char *type, int a_signed, uint32_t a_width, uint32_t y_width) {
+    char il[768];
+    int len = snprintf(il, sizeof il,
+                       "module \\m\n  wire width %u input 1 \\a\n  wire width %u output 2 \\y\n"
+                       "  cell %s \\c\n    parameter \\A_SIGNED %d\n    parameter \\A_WIDTH %u\n"
+                       "    parameter \\B_SIGNED 1\n    parameter \\B_WIDTH 1\n"
+                       "    parameter \\Y_WIDTH %u\n    connect \\A \\a\n    connect \\B 1'1\n"
+                       "    connect \\Y \\y\n  end\nend\n",
+                       a_width, y_width, type, a_signed, a_width, y_width);
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof il);
+    build_run(il);
+}
+
+/* A mixed-sign $div or $mul (A unsigned, B signed 1'1) is left alone: the registry evaluator reads
+ * it unsigned (1'1 is +1) and the 2D fold reads B signed (-1), so no rewrite is right (§17 #30). */
+static void test_minus_one_mixed_sign_unchanged(void) {
+    build_by_one_bit("$div", 0, 4, 4);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$div"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$neg"));
+    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_IDENTWRT_A));
+    build_by_one_bit("$mul", 0, 4, 4);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$mul"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$neg"));
+    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_IDENTWRT_A));
+}
+
+/* All signed: still a $neg; with Y wider than A, A_SIGNED makes the $neg sign-extend A */
+static void test_minus_one_all_signed_neg(void) {
+    const char *types[] = {"$div", "$mul"};
+    for (size_t i = 0; i < 2; i++) {
+        build_by_one_bit(types[i], 1, 4, 4);
+        TEST_ASSERT_EQUAL_UINT32(0, count_type(types[i]));
+        odin3_node_id neg = need_type("$neg");
+        TEST_ASSERT_EQUAL_INT64(1, pparam(neg, "A_SIGNED"));
+        TEST_ASSERT_EQUAL_INT64(4, pparam(neg, "Y_WIDTH"));
+        build_by_one_bit(types[i], 1, 4, 8);
+        TEST_ASSERT_EQUAL_UINT32(0, count_type(types[i]));
+        neg = need_type("$neg");
+        TEST_ASSERT_EQUAL_INT64(1, pparam(neg, "A_SIGNED"));
+        TEST_ASSERT_EQUAL_INT64(8, pparam(neg, "Y_WIDTH"));
+        TEST_ASSERT_EQUAL_INT64(4, pparam(neg, "A_WIDTH")); /* A_SIGNED extends it to Y */
+    }
+}
+
 /* yosys -p "read_rtlil div_shift_mod_mask.il; opt_expr": a $sshr by 2 and an $and with 2'b11,
  * which fold to wiring */
 static void test_div_shift_mod_mask(void) {
@@ -4140,6 +4185,8 @@ static void run_arith_tests(void) {
     RUN_TEST(test_mul_low_zeros_attrs);
     RUN_TEST(test_divmod_zero);
     RUN_TEST(test_div_minus_one);
+    RUN_TEST(test_minus_one_mixed_sign_unchanged);
+    RUN_TEST(test_minus_one_all_signed_neg);
     RUN_TEST(test_div_shift_mod_mask);
     RUN_TEST(test_const_fold);
     RUN_TEST(test_div_shift_signed_structure);
