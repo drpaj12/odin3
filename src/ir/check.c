@@ -339,9 +339,17 @@ static bool bus_driver(const check_ctx *ctx, odin3_pin_id pin) {
     return def != NULL && (def->flags & ODIN3_CT_TRISTATE) != 0;
 }
 
+/* Whether the net is a bit of a named wire: a declared signal. Yosys keeps one that nothing reads
+ * or drives (an unused reg, a loop's integer) until opt_clean, so it is no leak. */
+static bool declared_signal(const check_ctx *ctx, const odin3_net_rec *rec) {
+    return rec->wire.v != 0 && odin3_wire_rec_cat(ctx->module, rec->wire)->name != 0;
+}
+
 static void net_drivers(check_ctx *ctx, odin3_net_id id, const odin3_net_rec *rec) {
     if (rec->count == 0) {
-        violation(ctx, R4_W, "net %u (%s) has no pins", id.v, net_label(ctx, id));
+        if (!declared_signal(ctx, rec)) {
+            violation(ctx, R4_W, "net %u (%s) has no pins", id.v, net_label(ctx, id));
+        }
         return;
     }
     if (rec->driver_count == 0) {

@@ -123,6 +123,12 @@ typedef struct pg_callrec {
     uint32_t fsyms_mark;
 } pg_callrec;
 
+/* An unnamed wire a call frame made for one of the callee's variables, and its module. */
+typedef struct pg_fwire {
+    odin3_module_id mod;
+    odin3_wire_id wire;
+} pg_fwire;
+
 /* What runs when a PG_F_GEN frame's expression is generated (its value is in pg->gen_sig). */
 enum { PG_G_ASSIGN = 1, PG_G_IF = 2, PG_G_ARG = 3 };
 
@@ -240,11 +246,12 @@ struct odin3_pg {
     odin3_elab2_reads hooks; /* the walker's hooks over this generator (pg_reads) */
     odin3_elab2_lvalue slv;  /* a synthetic target: a switch's exit, a select write's case */
     /* loops and calls (Task 23) */
-    odin3_vec loops;        /* pg_loop, innermost last */
-    odin3_vec calls;        /* pg_callrec, innermost last */
-    odin3_vec walks;        /* odin3_elab2_walk: the PG_F_GEN frames' expressions, innermost last */
-    odin3_vec cruns;        /* pg_crun *: the PG_F_CALL frames' records, innermost last */
-    odin3_sig gen_sig;      /* the value of the expression a PG_F_GEN frame generated */
+    odin3_vec loops;   /* pg_loop, innermost last */
+    odin3_vec calls;   /* pg_callrec, innermost last */
+    odin3_vec walks;   /* odin3_elab2_walk: the PG_F_GEN frames' expressions, innermost last */
+    odin3_vec cruns;   /* pg_crun *: the PG_F_CALL frames' records, innermost last */
+    odin3_vec fwires;  /* pg_fwire: the wires call frames made in the module (kept across blocks) */
+    odin3_sig gen_sig; /* the value of the expression a PG_F_GEN frame generated */
     odin3_sig call_sig;     /* the value of the function call a PG_F_CALL frame inlined */
     uint32_t cdepth;        /* calls inlined by C recursion (an index or selector holds them) */
     odin3_vec fsyms;        /* uint32_t: the symbols whose ir_wire a call frame set */

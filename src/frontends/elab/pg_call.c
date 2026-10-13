@@ -184,6 +184,16 @@ static odin3_status frame_note(odin3_pg *pg, odin3_sym_id id) {
     return ODIN3_OK;
 }
 
+/* The wire is noted, so the module's end can delete it when nothing used it. */
+static odin3_status fwire_note(odin3_pg *pg, odin3_wire_id wire) {
+    pg_fwire *rec = odin3_vec_push(&pg->fwires);
+    if (rec == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *rec = (pg_fwire){pg->e2->mod_id, wire};
+    return ODIN3_OK;
+}
+
 /* The unnamed wire of one symbol of the callee. */
 static odin3_status frame_wire(odin3_pg *pg, odin3_sym_id id) {
     odin3_elab2 *e2 = pg->e2;
@@ -201,6 +211,7 @@ static odin3_status frame_wire(odin3_pg *pg, odin3_sym_id id) {
     odin3_status st = odin3_elab2_reserve_nets(e2, width, odin3_ast_loc(e2->elab, req.node));
     st = st != ODIN3_OK ? st : odin3_elab2_prov(e2, &req, &spec.prov);
     st = st != ODIN3_OK ? st : odin3_wire_create(e2->mod, &spec, NULL, &wire);
+    st = st != ODIN3_OK ? st : fwire_note(pg, wire);
     st = st != ODIN3_OK ? st : frame_note(pg, id);
     odin3_elab2_counts made = {0, 0, width, 1};
     st = st != ODIN3_OK ? st : odin3_symbol_set_ir(e2->st, id, e2->mod_id, wire);
@@ -436,6 +447,50 @@ static odin3_status call_value(pg_crun *cr, odin3_sig *out) {
         return ODIN3_ERR_CHECK;
     }
     return read_wire(cr->pg, res->ir_wire, (res->flags & ODIN3_SYM_F_SIGNED) != 0, out);
+}
+
+/* --- the frame wires nothing used ------------------------------------------------------------- */
+
+/* Whether no net of the wire has a pin. */
+static bool wire_pinless(const odin3_module *mod, odin3_wire_id wire) {
+    uint32_t width = odin3_wire_width(mod, wire);
+    for (uint32_t bit = 0; bit < width; bit++) {
+        odin3_net_id net = odin3_wire_net(mod, wire, bit);
+        if (odin3_net_driver_count(mod, net) != 0 || odin3_net_sinks(mod, net).count != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The wire and its nets are deleted. */
+static odin3_status wire_drop(odin3_module *mod, odin3_wire_id wire) {
+    uint32_t width = odin3_wire_width(mod, wire);
+    odin3_status st = odin3_wire_delete(mod, wire);
+    for (uint32_t bit = 0; st == ODIN3_OK && bit < width; bit++) {
+        st = odin3_net_delete(mod, odin3_wire_net(mod, wire, bit));
+    }
+    return st;
+}
+
+/* A callee variable nothing assigns or reads (an unused local) leaves its frame wire pinless; the
+ * wire is no declared signal of the design but an internal temporary, so it is deleted when the
+ * module is done (PR 2D-7: a leaked net, `rule 4: net has no pins`). Named wires are never touched.
+ */
+odin3_status odin3_elab2_sweep_frames(odin3_elab2 *e2) {
+    odin3_pg *pg = e2->pg;
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; pg != NULL && st == ODIN3_OK && i < pg->fwires.len; i++) {
+        const pg_fwire *rec = odin3_vec_cat(&pg->fwires, i);
+        if (rec->mod.v == e2->mod_id.v && odin3_wire_live(e2->mod, rec->wire) &&
+            wire_pinless(e2->mod, rec->wire)) {
+            st = wire_drop(e2->mod, rec->wire);
+        }
+    }
+    if (pg != NULL) {
+        odin3_vec_clear(&pg->fwires);
+    }
+    return st;
 }
 
 /* --- a call in a process: the PG_F_CALL frame --------------------------------------------------

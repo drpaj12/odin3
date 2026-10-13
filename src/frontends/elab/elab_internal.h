@@ -795,6 +795,10 @@ odin3_status odin3_elab2_wired(odin3_elab2 *e2, odin3_ast_id module_node);
  */
 odin3_status odin3_elab2_undriven(odin3_elab2 *e2);
 
+/* Deletes the unnamed wires that call frames made and nothing used (an unused local of a callee),
+ * after the module's processes are emitted. */
+odin3_status odin3_elab2_sweep_frames(odin3_elab2 *e2);
+
 /* Forgets the driver tables (a new module starts); frees them when e2 is destroyed. */
 void odin3_elab2_drive_reset(odin3_elab2 *e2);
 void odin3_elab2_drive_free(odin3_elab2 *e2);

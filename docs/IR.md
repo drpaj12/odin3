@@ -614,7 +614,7 @@ reports through `util/log` and returns `ODIN3_OK` or `ODIN3_ERR_CHECK` (new stat
 3. **E** Partition: the first `driver_count` entries of a net's array are exactly its driver
    pins (`out`, `inout`, tristate-type outputs) and the rest are sinks.
 4. **E** Two or more drivers that are neither `inout` nor of a `tristate` type (`inout` and
-   tristate drivers are a bus: **W** when a bus net also has one ordinary driver). **W** a net with sinks and no driver (undriven); **W** a live net with no pins.
+   tristate drivers are a bus: **W** when a bus net also has one ordinary driver). **W** a net with sinks and no driver (undriven); **W** a live net with no pins, unless it is a bit of a named wire (a declared signal that nothing reads or drives, such as an unused `reg` or a loop's `integer`: Yosys keeps it until `opt_clean`; PR 2D-7, Peter's ruling of 2026-10-12 (PHASE2 #6); a pinless net of an unnamed wire or of no wire is still a leak and warns).
 5. **E** A node's pin count equals the sum of its type's port widths for its parameters, and
    `verify` (if any) accepts it.
 6. **E** Names are unique per kind per module, the name maps agree with the objects, and no dead

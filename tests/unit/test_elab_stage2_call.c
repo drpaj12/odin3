@@ -413,6 +413,26 @@ static void test_nesting_depth(void) {
     pt_expect_error((at_loc){3, 42}, "function call nesting deeper than 4 at 'f1'");
 }
 
+/* PR 2D-7: a callee's local that nothing uses (in a call met in a process and in one met outside
+ * one) leaves a frame wire with no pin; the frame wires are swept at the end of the module, so
+ * the IR check has no `rule 4: net has no pins`. A declared, unused reg of the module is no leak.
+ */
+static void test_unused_callee_local_leaves_no_pinless_net(void) {
+    pt_read_src("module t(input [3:0] a, b, output [3:0] c, output reg [3:0] y);\n"
+                "  reg [7:0] declared_but_unused;\n"
+                "  function [3:0] f(input [3:0] x, input [3:0] z);\n"
+                "    reg [3:0] unused_local;\n"
+                "    f = x ^ z;\n"
+                "  endfunction\n"
+                "  assign c = f(a, b);\n"
+                "  always @* y = f(b, a);\n"
+                "endmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_ir_ok();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, et_count_with(&pt_rs, ODIN3_LOG_WARN, "has no pins"),
+                                     et_log(&pt_rs));
+}
+
 /* PR 2D-7 (review I6 fixed): a call inside a call is inlined from the frame stack, not by C
  * recursion, so a chain of 300 functions, each calling the next in an expression, elaborates (the
  * 256 cap of the interim guard is gone; tools/ test_inline_stack.py runs 1000 under a 2 MiB
@@ -966,6 +986,7 @@ static void test_call_in_edge_expression_is_error(void) {
     X(test_inlined_provenance)                                                                     \
     X(test_recursion_not_constant)                                                                 \
     X(test_nesting_depth)                                                                          \
+    X(test_unused_callee_local_leaves_no_pinless_net)                                              \
     X(test_inline_nesting_is_not_limited_by_the_stack)                                             \
     X(test_endless_unsigned_countdown_is_found_by_its_cycle)                                       \
     X(test_endless_loop_with_a_second_variable_hits_the_object_budget)                             \

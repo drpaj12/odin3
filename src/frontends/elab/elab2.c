@@ -722,7 +722,8 @@ static odin3_status emissions(odin3_elab2 *e2, odin3_ast_id module_node) {
 
 static odin3_status steps_after_wires(odin3_elab2 *e2, odin3_ast_id module_node) {
     odin3_status st = prescans(e2, module_node);
-    return st != ODIN3_OK || e2->stopped ? st : emissions(e2, module_node);
+    st = st != ODIN3_OK || e2->stopped ? st : emissions(e2, module_node);
+    return st != ODIN3_OK || e2->stopped ? st : odin3_elab2_sweep_frames(e2);
 }
 
 odin3_status odin3_elab2_module(odin3_elab2 *e2, odin3_ast_id module_node) {

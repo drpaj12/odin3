@@ -370,6 +370,22 @@ static void test_undriven_and_empty_nets_warn_only(void) {
     TEST_ASSERT_TRUE_MESSAGE(log_has("(empty)"), log_text);
 }
 
+/* PR 2D-7: a pinless net of a named wire is a declared, unused signal (no warning); one of an
+ * unnamed wire or of no wire is a leak (still warns). */
+static void test_pinless_net_of_a_named_wire_does_not_warn(void) {
+    odin3_wire_spec named = {intern("unused_reg"), 3, 0, false, prov};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(module, &named, NULL, NULL));
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, full(module));
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, errors_logged + warnings_logged, log_text);
+    odin3_wire_spec unnamed = {0, 1, 0, false, prov};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(module, &unnamed, NULL, NULL));
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, full(module));
+    TEST_ASSERT_TRUE_MESSAGE(logged_rule("W", "top", 4), log_text);
+    TEST_ASSERT_TRUE_MESSAGE(log_has("has no pins"), log_text);
+}
+
 static void add_tribuf(odin3_net_id bus) {
     (void)gate(module, "$tribuf", NULL, (odin3_net_id[]){net_a, net_b, bus});
 }
@@ -623,6 +639,7 @@ int main(void) {
     RUN_TEST(test_fault_view);
     RUN_TEST(test_corrupt_rejects_bad_targets);
     RUN_TEST(test_undriven_and_empty_nets_warn_only);
+    RUN_TEST(test_pinless_net_of_a_named_wire_does_not_warn);
     RUN_TEST(test_two_tribufs_are_a_bus);
     RUN_TEST(test_bus_with_one_ordinary_driver_warns);
     RUN_TEST(test_two_constants_on_one_net_fail);
