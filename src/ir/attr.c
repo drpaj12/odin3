@@ -127,6 +127,19 @@ static odin3_status attr_append(odin3_module *module, odin3_objref obj, uint32_t
     return ODIN3_OK;
 }
 
+/* Journal (module.h): an attribute of a wire changed, so every net of its bits did (ffinit reads
+ * `init` through the wire memberships). */
+static void journal_attr(odin3_module *module, odin3_objref obj) {
+    odin3_journal_touch(module); /* an attribute of any object (`keep`, `init`, ...) */
+    if (!module->journal.on || obj.kind != ODIN3_OBJ_WIRE) {
+        return;
+    }
+    const odin3_wire_rec *wire = odin3_wire_rec_cat(module, (odin3_wire_id){obj.id});
+    for (uint32_t k = 0; wire != NULL && k < wire->width; k++) {
+        odin3_module_journal_add(module, ODIN3_JOURNAL_DRIVE, wire->nets[k].v);
+    }
+}
+
 odin3_status odin3_attr_set(odin3_module *module, odin3_objref obj, uint32_t key_str,
                             const odin3_value *value) {
     const char *err = set_error(module, obj, key_str, value);
@@ -139,6 +152,7 @@ odin3_status odin3_attr_set(odin3_module *module, odin3_objref obj, uint32_t key
     if (copy == NULL || odin3_value_copy(module->arena, value, copy) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
+    journal_attr(module, obj);
     uint32_t idx = find_attr(module, obj, key_str, NULL);
     if (idx != 0) {
         ((odin3_attr_rec *)odin3_vec_at(&module->attrs, idx))->value = copy;
@@ -154,6 +168,7 @@ odin3_status odin3_attr_remove(odin3_module *module, odin3_objref obj, uint32_t 
                   key_str, err);
         return ODIN3_ERR_INVALID_ARG;
     }
+    journal_attr(module, obj);
     uint64_t head = 0;
     uint64_t map_key = odin3_attr_key(obj);
     if (!odin3_u64map_get(module->attr_heads, map_key, &head)) {

@@ -811,6 +811,19 @@ collide with a dirty one. All are O(pins) per call (on lenet.v Yosys spends 29 s
 `opt_share` together). The Debug option `--opt-full-rescan` runs `opt_expr` as a full sweep too
 and asserts the same result.
 
+**Journal-driven skipping (PHASE2 #22; IR-18a).** Two of the full sweeps shrink without changing
+a result, through the IR change journal. `opt_dff`, after its first sweep of a module, loads and
+runs the rules only on the flip-flops whose inputs may have changed: those a journal entry reaches,
+directly or through the single-user mux cone below `D` (rules 10 and 11), plus the flip-flops it
+makes itself; a skipped flip-flop would change nothing, and still counts as an operation, so the
+provenance numbers are those of a full sweep. `opt_clean` skips a module whose last sweep (in the
+same `opt` invocation) changed nothing while the journal's mutation count is unchanged, the keep
+flags of all modules (including those spread from instantiated modules) are unchanged and `-purge`
+is the same; anything unclear sweeps. Overflow, an allocation failure or a module not yet swept
+is a full sweep. The journal's bytes count in the budget check and its cap is 16 MB. Debug builds
+visit every flip-flop `opt_dff` skipped, at its own position in the sweep, and sweep the modules
+`opt_clean` skipped, and abort when any of them changes anything.
+
 **Memory.** Rebuilds and FF re-emission leave a dead node per rewrite until the script's
 `compact` after `opt` (IR-6 unchanged; PHASE2 #19); mcml.v's 31 iterations re-emit constant-register pipelines each
 round. `bench_opt` reports dead objects at the peak; if the RSS target below slips, the remedy is

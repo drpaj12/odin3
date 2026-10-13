@@ -12,6 +12,7 @@
 #include "odin3/odin3.h"
 #include "passes/budget.h"
 #include "passes/manager.h"
+#include "passes/opt/kit.h"
 #include "passes/opt/opt.h"
 #include "passes/opt/opt_test.h"
 #include "proc_build.h"
@@ -1141,6 +1142,137 @@ static void test_opt_oom(void) {
     TEST_ASSERT_TRUE(failures > OOM_MIN_POINTS);
 }
 
+#ifndef NDEBUG
+/* Skips the first FF visit only: a sweep with the journal not active, where the old after-the-sweep
+ * check did not look, and the FF is visited in full by the next sweep as if nothing had happened.
+ */
+static uint32_t skip_asked;
+
+static bool skip_every_ff(uint32_t node) {
+    (void)node;
+    return skip_asked++ >= 2;
+}
+
+/* Review I1: opt_dff's Debug check visits every FF it skipped, wherever the skip came from. A skip
+ * injected on an FF that would change (dff_srst_merge) is found; the honest run finds nothing. */
+static void test_dff_skip_check_catches(void) {
+    uint32_t violations = 0;
+    odin3_opt_test_dff_skip(NULL, &violations);
+    char *honest = run_case("dff_constbits_one_stage", "");
+    free(honest);
+    TEST_ASSERT_EQUAL_UINT32(0, violations);
+    skip_asked = 0;
+    odin3_opt_test_dff_skip(skip_every_ff, &violations);
+    char *wrong = run_case("dff_constbits_one_stage", "");
+    free(wrong);
+    odin3_opt_test_dff_skip(NULL, NULL);
+    TEST_ASSERT_TRUE(violations > 0);
+}
+#endif
+
+/*
+ * The incremental session's own allocations (the IR change journal's growth, opt_dff's dirty marks
+ * and walk arrays, opt_clean's keep-flag copy) fall back to a full sweep: a run that fails at one
+ * of them still finishes OK, with the IR valid and the text byte-identical to the run that fails
+ * nowhere. Every other failing point ends NO_MEMORY with a valid IR, as test_opt_oom has it. The
+ * sweep goes past the first success: a point that is absorbed gives an OK run before the end.
+ */
+enum { OOM_TAIL = 64 };
+
+/* A module whose second opt_dff call walks a mux: f1 becomes constant in the first call, the mux
+ * that reads its Q stays, and the FF f2 below it is reached through the mux. */
+#define OOM_MUX_TEXT                                                                               \
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\a\n  wire input 3 \\s\n"                   \
+    "  wire output 4 \\q\n  wire output 5 \\q1\n  wire \\mo\n"                                     \
+    "  cell $dff \\f1\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D 1'0\n    connect \\Q \\q1\n  end\n"                  \
+    "  cell $mux \\mx\n    parameter \\WIDTH 1\n    connect \\A \\q1\n    connect \\B \\a\n"       \
+    "    connect \\S \\s\n    connect \\Y \\mo\n  end\n"                                           \
+    "  cell $dff \\f2\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D \\mo\n    connect \\Q \\q\n  end\nend\n"
+
+/* One run of `opt` on text with the allocation fail-th failing: the status; the text of the result
+ * (malloc'd) in *out when it is OK. The IR is valid either way. */
+static odin3_status oom_run_at(const char *text, long fail, char **out) {
+    pb_free(&res);
+    build(text);
+    n_lines = 0;
+    odin3_util_set_alloc_fail_after(fail);
+    odin3_status st = odin3_design_run_pass(res.design, "opt", "");
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+    check_full();
+    *out = st == ODIN3_OK ? design_text() : NULL;
+    return st;
+}
+
+typedef struct oom_points {
+    long absorbed, failed, quiet;
+} oom_points;
+
+/* The run failing at allocation `fail`: an OK run must give want's text. */
+static void oom_point(const char *text, long fail, const char *want, oom_points *pts) {
+    char *got = NULL;
+    bool ok = oom_run_at(text, fail, &got) == ODIN3_OK;
+    if (ok) {
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(want, got, "an absorbed failure changed the output");
+    }
+    free(got);
+    pts->absorbed += ok ? 1 : 0;
+    pts->failed += ok ? 0 : 1;
+    pts->quiet = ok ? pts->quiet + 1 : 0;
+}
+
+static void oom_fallback_sweep(const char *text) {
+    char *want = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, oom_run_at(text, -1, &want));
+    oom_points pts = {0, 0, 0};
+    for (long fail = 0; fail < OOM_LIMIT && pts.quiet < OOM_TAIL; fail++) {
+        oom_point(text, fail, want, &pts);
+    }
+    long absorbed = pts.absorbed;
+    long failed = pts.failed;
+    free(want);
+    printf("opt OOM fallback: %ld failing points, %ld absorbed (full sweep, same output)\n", failed,
+           absorbed);
+    TEST_ASSERT_TRUE(failed > OOM_MIN_POINTS);
+    TEST_ASSERT_TRUE(absorbed > OOM_TAIL); /* some points before the tail were absorbed */
+}
+
+/* The change journal's bytes count in the budget: once opt_dff has started the journal, a limit
+ * that the design and its side arrays fit under, but not the journal too, ends the next call. */
+static uint64_t journal_seen;
+
+static void on_squeeze(void *user, const char *sub) {
+    (void)user;
+    (void)sub;
+    uint64_t bytes = odin3_opt_journal_bytes();
+    if (journal_seen == 0 && bytes > 0) {
+        journal_seen = bytes;
+        uint64_t base = odin3_design_bytes_reserved(res.design);
+        odin3_budget_test_set_limit(base + base / 2U + bytes / 2U);
+    }
+}
+
+static void test_budget_journal(void) {
+    build(OOM_MUX_TEXT);
+    odin3_opt_test_hooks hooks = {on_squeeze, NULL, NULL};
+    odin3_opt_test_set_hooks(&hooks);
+    journal_seen = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_pass("opt", ""));
+    odin3_budget_test_set_limit(0);
+    TEST_ASSERT_TRUE(journal_seen > 0);
+    TEST_ASSERT_TRUE(journal_seen <=
+                     (uint64_t)ODIN3_JOURNAL_MAX * sizeof(uint64_t)); /* 16 MB cap */
+    TEST_ASSERT_EQUAL_UINT32(1, count_prefix("opt needs more than"));
+    check_full();
+}
+
+static void test_opt_oom_fallback(void) {
+    oom_fallback_sweep(OOM_TEXT);
+    oom_fallback_sweep(OOM_MUX_TEXT);
+}
+
 /* Two runs, byte-identical write_rtlil; and the reverse creation order of the nodes gives the
  * same netlist (compared as a sorted list of the cells' types, a stand-in for netlist-compare). */
 static void test_determinism(void) {
@@ -1178,6 +1310,9 @@ int main(void) {
     RUN_TEST(test_loop_fast_pipeline);
     RUN_TEST(test_loop_cap_modules);
     RUN_TEST(test_dirty_vs_full_rescan);
+#ifndef NDEBUG
+    RUN_TEST(test_dff_skip_check_catches);
+#endif
     RUN_TEST(test_dirty_chain);
     RUN_TEST(test_dirty_tie);
     RUN_TEST(test_compact_after_opt);
@@ -1187,6 +1322,8 @@ int main(void) {
     RUN_TEST(test_budget_opt);
     RUN_TEST(test_opt_stats_driver);
     RUN_TEST(test_opt_oom);
+    RUN_TEST(test_opt_oom_fallback);
+    RUN_TEST(test_budget_journal);
     RUN_TEST(test_determinism);
     return UNITY_END();
 }

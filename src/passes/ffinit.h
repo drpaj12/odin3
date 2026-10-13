@@ -44,4 +44,13 @@ odin3_status odin3_ffinit_remove(odin3_module *module, odin3_net_id net, odin3_w
  */
 odin3_bit odin3_ffinit_get(const odin3_module *module, odin3_net_id net);
 
+/*
+ * The split form of odin3_ffinit_get for a loop over many nets: odin3_ffinit_key finds the `init`
+ * key once (false when it was never interned, so every net reads x); odin3_ffinit_get_key is then
+ * odin3_ffinit_get without the per-net lookup. The key stays valid for the module's design; a
+ * caller that may intern `init` itself (odin3_ffinit_set) must not cache a false.
+ */
+bool odin3_ffinit_key(const odin3_module *module, uint32_t *key);
+odin3_bit odin3_ffinit_get_key(const odin3_module *module, odin3_net_id net, uint32_t key);
+
 #endif

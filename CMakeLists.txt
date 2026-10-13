@@ -126,6 +126,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/share.c
     src/passes/opt/dff.c
     src/passes/opt/dff_state.c
+    src/passes/opt/dff_dirty.c
     src/passes/opt/dff_gates.c
     src/passes/opt/dff_rules.c
     src/passes/opt/dff_constbits.c
