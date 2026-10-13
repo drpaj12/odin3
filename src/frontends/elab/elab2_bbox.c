@@ -38,11 +38,6 @@ enum { BB_BUCKETS = 64 };
 
 static const char k_blackbox[] = "blackbox";
 
-static const char *str_of(const odin3_elab2 *e2, uint32_t id) {
-    const char *str = odin3_strtab_get(odin3_design_strtab(e2->design), id);
-    return str != NULL ? str : "";
-}
-
 /* --- the table of parameter sets ----------------------------------------------------------------
  */
 
@@ -183,12 +178,11 @@ static odin3_status bbox_ports(odin3_elab2 *e2, odin3_ast_id module_node, bbox_d
         if (rec == NULL) {
             return ODIN3_ERR_CHECK;
         }
-        int64_t span = (int64_t)rec->packed.msb - (int64_t)rec->packed.lsb;
-        odin3_port_def def = {.name = str_of(e2, rec->name),
-                              .dir = bbox_dir(odin3_ast_sub(e2->elab, ports.ids[i])),
-                              .scalar = !rec->has_packed,
-                              .width =
-                                  rec->has_packed ? (uint32_t)(span < 0 ? -span : span) + 1U : 1U};
+        odin3_port_def def = {
+            .name = odin3_elab2_str_of(e2, rec->name),
+            .dir = bbox_dir(odin3_ast_sub(e2->elab, ports.ids[i])),
+            .scalar = !rec->has_packed,
+            .width = rec->has_packed ? (uint32_t)odin3_elab2_dim_size(&rec->packed) : 1U};
         bd->fixed[i] = def;
     }
     return ODIN3_OK;
@@ -513,7 +507,7 @@ static odin3_status bbox_rules(odin3_elab2 *e2, odin3_ast_id module_node, bbox_d
         return ODIN3_OK;
     }
     uint32_t name = odin3_ast_name(e2->elab, module_node);
-    bb_gather ga = {e2, bd, str_of(e2, name), NULL, NULL};
+    bb_gather ga = {e2, bd, odin3_elab2_str_of(e2, name), NULL, NULL};
     bb_entry *own = gather_entry(&ga, module_node, bd);
     if (own == NULL) {
         return ODIN3_ERR_NO_MEMORY;
@@ -546,7 +540,7 @@ odin3_status odin3_elab2_blackbox(odin3_elab2 *e2, odin3_ast_id module_node) {
     } else if (st == ODIN3_OK) {
         st = bbox_rules(e2, module_node, &bd);
     }
-    odin3_celltype_def def = {.name = str_of(e2, name),
+    odin3_celltype_def def = {.name = odin3_elab2_str_of(e2, name),
                               .gran = ODIN3_GRAN_BLACKBOX,
                               .ports = bd.fixed,
                               .n_ports = bd.n_ports,

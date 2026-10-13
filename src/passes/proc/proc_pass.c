@@ -18,6 +18,7 @@
 #include "passes/proc/proc_internal.h"
 #include "passes/proc/proc_test.h"
 #include "passes/proc/pw.h"
+#include "util/clock.h"
 #include "util/log.h"
 #include "util/str.h"
 #include "util/vec.h"
@@ -28,9 +29,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
-enum { MS_PER_S = 1000, NS_PER_MS = 1000000, OPT_PART_LEN = 48 };
+enum { OPT_PART_LEN = 48 };
 
 /* --- caps and test hooks (proc_test.h) ----------------------------------------------------- */
 
@@ -89,12 +89,6 @@ typedef struct proc_run {
     uint32_t kept; /* --stop-after: processes re-encoded */
     double start;  /* ms, for the info line */
 } proc_run;
-
-static double now_ms(void) {
-    struct timespec ts = {0};
-    (void)clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * MS_PER_S + (double)ts.tv_nsec / NS_PER_MS;
-}
 
 /* --- phases --------------------------------------------------------------------------------- */
 
@@ -410,7 +404,7 @@ static void log_summary(const proc_run *run, odin3_status st) {
                   stats->cells[ODIN3_PROC_K_ADFF], stats->cells[ODIN3_PROC_K_ALDFF],
                   stats->cells[ODIN3_PROC_K_DFFSR], stats->cells[ODIN3_PROC_K_DLATCH],
                   stats->cells[ODIN3_PROC_K_MUX], stats->cells[ODIN3_PROC_K_PMUX], opt,
-                  now_ms() - run->start);
+                  odin3_now_ms() - run->start);
     }
 }
 
@@ -443,7 +437,7 @@ odin3_status odin3_proc_run(odin3_pass_ctx *ctx, odin3_design *design, const odi
     odin3_proc_stats local;
     proc_run run;
     memset(&run, 0, sizeof run);
-    run.start = now_ms();
+    run.start = odin3_now_ms();
     run.ctx = ctx;
     run.design = design;
     run.stats = stats != NULL ? stats : &local;

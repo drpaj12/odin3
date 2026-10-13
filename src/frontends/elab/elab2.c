@@ -4,7 +4,8 @@
  * (l)'s pending report, the byte budget, the module loop (bind, ports of every module, then every
  * body in EL-28's order: wires, the pre-scan, instances and gates, assignments, wired nets and the
  * end-of-module warnings), the top and the summary line. Ports, wires, provenance and attributes
- * are elab2_wires.c; drivers are elab2_drive.c, instances and gates elab2_inst.c.
+ * are elab2_wires.c; drivers are elab2_claim.c, elab2_wired.c, elab2_prescan.c, elab2_warn.c and
+ * elab2_tri.c, instances and gates elab2_inst.c.
  */
 #include "ast/ast.h"
 #include "ast/kinds.h"
@@ -14,11 +15,13 @@
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_internal.h"
 #include "frontends/elab/elab_test.h"
+#include "frontends/elab/pg.h"
 #include "ir/design.h"
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "util/alloc.h"
+#include "util/clock.h"
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/u64map.h"
@@ -32,7 +35,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 /* EL-46's per-object estimate of the IR (bytes) and how often the budget is looked at (objects). */
 enum {
@@ -41,8 +43,6 @@ enum {
     E2_BYTES_PER_NET = 48,
     E2_BYTES_PER_WIRE = 64,
     E2_BUDGET_EVERY = 1 << 16,
-    E2_MS_PER_S = 1000,
-    E2_NS_PER_MS = 1000000,
     E2_HASH_DIGITS = 16 /* the hex digits of a hashed module name (EL-9) */
 };
 
@@ -88,10 +88,18 @@ static const char *const k_type_names[ODIN3_E2T_COUNT] = {
     [ODIN3_E2T_CONSTZ] = "$_CONSTZ_",
 };
 
-static double now_ms(void) {
-    struct timespec ts;
-    (void)clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * E2_MS_PER_S + (double)ts.tv_nsec / E2_NS_PER_MS;
+const char *odin3_elab2_str_of(const odin3_elab2 *e2, uint32_t id) {
+    const char *str = odin3_strtab_get(odin3_design_strtab(e2->design), id);
+    return str != NULL ? str : "";
+}
+
+odin3_status odin3_elab2_pins_cap(odin3_elab2 *e2, odin3_loc loc, uint64_t pins) {
+    if (pins <= e2->limits->max_cell_pins) {
+        return ODIN3_OK;
+    }
+    odin3_elab2_fatal(e2, loc, "cell of %" PRIu64 " pins exceeds the limit of %" PRIu32 " pins",
+                      pins, e2->limits->max_cell_pins);
+    return ODIN3_ERR_PARSE;
 }
 
 /* --- the context ----------------------------------------------------------------------------- */
@@ -151,6 +159,7 @@ odin3_status odin3_elab2_create(odin3_pass_ctx *ctx, odin3_ast *elab, const odin
     e2->opts = opts != NULL ? *opts : (odin3_elab_opts){0};
     e2->limits = odin3_elab_limits_get();
     e2->fatal = ODIN3_OK;
+    e2->iterations = e2->opts.gen_iters;
     e2->next_check = E2_BUDGET_EVERY;
     odin3_strbuf_init(&e2->text);
     odin3_vec_init(&e2->built, sizeof(odin3_module_id));
@@ -181,6 +190,7 @@ void odin3_elab2_destroy(odin3_elab2 *e2) {
     odin3_elab_binding_free(&e2->bind);
     odin3_elab2_drive_free(e2);
     odin3_elab2_mem_free(e2);
+    odin3_elab2_pg_free(e2);
     odin3_u64map_destroy(e2->bboxes);
     odin3_u64map_destroy(e2->modules);
     odin3_u64map_destroy(e2->warned);
@@ -191,6 +201,8 @@ void odin3_elab2_destroy(odin3_elab2 *e2) {
     odin3_vec_free(&e2->frames);
     odin3_vec_free(&e2->vals);
     odin3_ctype_destroy(e2->ty);
+    odin3_ceval_destroy(e2->ev);
+    odin3_u64map_destroy(e2->bound);
     odin3_strbuf_free(&e2->text);
     odin3_util_free(e2);
 }
@@ -234,6 +246,7 @@ odin3_status odin3_elab2_enter(odin3_elab2 *e2, odin3_ast_id module_node) {
     memset(e2->const_net, 0, sizeof e2->const_net);
     odin3_elab2_drive_reset(e2);
     odin3_elab2_mem_reset(e2);
+    odin3_elab2_pg_free(e2);
     return ODIN3_OK;
 }
 
@@ -425,8 +438,8 @@ odin3_status odin3_elab2_account(odin3_elab2 *e2, const odin3_elab2_counts *made
 
 /* Pushes the items of GEN_BLOCK or MODULE node (its tail after nslots slots), in the scope they
  * are in, so the first pops first. */
-static odin3_status push_items(odin3_elab2 *e2, odin3_ast_id node, uint32_t nslots,
-                               odin3_scope_id scope) {
+odin3_status odin3_elab2_push_items(odin3_elab2 *e2, odin3_ast_id node, uint32_t nslots,
+                                    odin3_scope_id scope) {
     odin3_ast_span kids = odin3_ast_children(e2->elab, node);
     for (uint32_t i = kids.n; i > nslots; i--) {
         odin3_elab2_item *slot = odin3_vec_push(&e2->stack);
@@ -454,14 +467,17 @@ static odin3_status assign_one(odin3_elab2 *e2, odin3_ast_id node) {
     return carry_on(e2, odin3_ast_loc(e2->elab, node), odin3_elab2_assign(e2, node));
 }
 
-/* One declarator's initialiser: a net's is a continuous assignment (Task 18), a variable's an
- * initial block (Task 24, pending until it lands). The symbol says which. */
+/* One declarator's initialiser: a net's is a continuous assignment (Task 18); a variable's is an
+ * initial value (Task 24), which odin3_elab2_initials runs in its own step. The symbol says
+ * which. */
 static odin3_status declarator_initialiser(odin3_elab2 *e2, odin3_ast_id declarator) {
     const odin3_symbol *rec = odin3_symbol_get(e2->st, odin3_elab_sym_of(&e2->bind, declarator));
-    uint32_t feature = rec != NULL && rec->kind == ODIN3_SYM_VAR ? (uint32_t)ODIN3_AST_INITIAL
-                                                                 : (uint32_t)ODIN3_AST_NET_ASSIGN;
-    if (odin3_elab_pending(ODIN3_ELAB_STAGE2, feature)) {
-        odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, declarator), feature);
+    if (rec != NULL && rec->kind == ODIN3_SYM_VAR) {
+        return ODIN3_OK;
+    }
+    if (odin3_elab_pending(ODIN3_ELAB_STAGE2, (uint32_t)ODIN3_AST_NET_ASSIGN)) {
+        odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, declarator),
+                                 (uint32_t)ODIN3_AST_NET_ASSIGN);
         return ODIN3_OK;
     }
     return assign_one(e2, declarator);
@@ -511,7 +527,7 @@ static odin3_status emit_one(odin3_elab2 *e2, odin3_ast_id item,
 
 /* The two walks over the items, in EL-28's order: (4) instances and gates, then (5) the continuous
  * assignments (net declaration assignments included), with the kinds not landed yet. */
-enum { PHASE_INSTANCES = 1, PHASE_ASSIGNS = 2 };
+enum { PHASE_INSTANCES = 1, PHASE_ASSIGNS = 2, PHASE_PROCESSES = 3 };
 
 /* One module item of the instance walk (4): generate blocks are descended, instances and gates
  * emitted; everything else waits for the assignment walk. */
@@ -520,7 +536,7 @@ static odin3_status instance_step(odin3_elab2 *e2, odin3_ast_id item) {
     case ODIN3_AST_GEN_BLOCK:
         return odin3_elab2_pending(e2, item)
                    ? ODIN3_OK
-                   : push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
+                   : odin3_elab2_push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
     case ODIN3_AST_INSTANTIATION:
         return emit_one(e2, item, odin3_elab2_instance);
     case ODIN3_AST_GATE_DECL:
@@ -530,27 +546,42 @@ static odin3_status instance_step(odin3_elab2 *e2, odin3_ast_id item) {
     }
 }
 
+/* The kinds the assignment walk leaves to another step: instances and gates (step (4)), `always`
+ * blocks (6), initial blocks (odin3_elab2_initials, after this walk), and the declarations that
+ * only need their pending check. */
+static bool assign_leaves(odin3_elab2 *e2, odin3_ast_id item) {
+    switch (odin3_ast_kind_of(e2->elab, item)) {
+    case ODIN3_AST_INSTANTIATION:
+    case ODIN3_AST_GATE_DECL:
+    case ODIN3_AST_ALWAYS:
+        return true;
+    case ODIN3_AST_INITIAL:
+    case ODIN3_AST_PARAM_DECL:
+    case ODIN3_AST_FUNCTION_DECL:
+    case ODIN3_AST_TASK_DECL:
+        (void)odin3_elab2_pending(e2, item); /* a test may force one */
+        return true;
+    default:
+        return false;
+    }
+}
+
 /* One module item of the assignment walk (5): net declaration assignments and continuous
  * assignments are emitted and every other kind that is still pending is reported. */
 static odin3_status assign_step(odin3_elab2 *e2, odin3_ast_id item) {
+    if (assign_leaves(e2, item)) {
+        return ODIN3_OK;
+    }
     switch (odin3_ast_kind_of(e2->elab, item)) {
     case ODIN3_AST_GEN_BLOCK:
         return odin3_elab2_pending(e2, item)
                    ? ODIN3_OK
-                   : push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
-    case ODIN3_AST_INSTANTIATION:
-    case ODIN3_AST_GATE_DECL:
-        return ODIN3_OK; /* step (4) did them */
+                   : odin3_elab2_push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
     case ODIN3_AST_NET_DECL:
     case ODIN3_AST_VAR_DECL:
         return odin3_elab2_pending(e2, item) ? ODIN3_OK : declaration_initialisers(e2, item);
     case ODIN3_AST_CONT_ASSIGN:
         return odin3_elab2_pending(e2, item) ? ODIN3_OK : cont_assign(e2, item);
-    case ODIN3_AST_PARAM_DECL:
-    case ODIN3_AST_FUNCTION_DECL:
-    case ODIN3_AST_TASK_DECL:
-        (void)odin3_elab2_pending(e2, item);
-        return ODIN3_OK;
     default:
         if (!odin3_elab2_pending(e2, item)) {
             unhandled(e2, item);
@@ -559,38 +590,110 @@ static odin3_status assign_step(odin3_elab2 *e2, odin3_ast_id item) {
     }
 }
 
+odin3_status odin3_elab2_pg_get(odin3_elab2 *e2, struct odin3_pg **out) {
+    if (e2->pg == NULL) {
+        odin3_status st = odin3_pg_create(e2, &e2->pg);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    *out = e2->pg;
+    return ODIN3_OK;
+}
+
+bool odin3_elab2_is_bound(const odin3_elab2 *e2, odin3_sym_id sym) {
+    return e2->bound != NULL && sym.v != 0 && odin3_u64map_get(e2->bound, sym.v, NULL);
+}
+
+/* One `always` block through the process generator, made on the first one of the module. */
+static odin3_status always_step(odin3_elab2 *e2, odin3_ast_id always) {
+    odin3_pg *pg = NULL;
+    odin3_status st = odin3_elab2_pg_get(e2, &pg);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    return carry_on(e2, odin3_ast_loc(e2->elab, always), odin3_pg_always(e2->pg, always));
+}
+
+/* One module item of the process walk (6): generate blocks are descended, `always` blocks built. */
+static odin3_status process_step(odin3_elab2 *e2, odin3_ast_id item) {
+    switch (odin3_ast_kind_of(e2->elab, item)) {
+    case ODIN3_AST_GEN_BLOCK:
+        return odin3_elab2_pending(e2, item)
+                   ? ODIN3_OK
+                   : odin3_elab2_push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
+    case ODIN3_AST_ALWAYS:
+        return always_step(e2, item);
+    default:
+        return ODIN3_OK;
+    }
+}
+
+/* One module item of the walk of the given phase. */
+static odin3_status phase_step(odin3_elab2 *e2, unsigned phase, odin3_ast_id item) {
+    switch (phase) {
+    case PHASE_INSTANCES:
+        return instance_step(e2, item);
+    case PHASE_PROCESSES:
+        return process_step(e2, item);
+    default:
+        return assign_step(e2, item);
+    }
+}
+
 /* One walk over the module's items. */
 static odin3_status items_walk(odin3_elab2 *e2, odin3_ast_id module_node, unsigned phase) {
     odin3_vec_clear(&e2->stack);
     e2->scope = (odin3_scope_id){0};
     odin3_status st = phase == PHASE_ASSIGNS ? port_initialisers(e2, module_node) : ODIN3_OK;
-    st = st != ODIN3_OK ? st
-                        : push_items(e2, module_node, odin3_ast_slot_count(ODIN3_AST_MODULE),
-                                     (odin3_scope_id){0});
+    st = st != ODIN3_OK
+             ? st
+             : odin3_elab2_push_items(e2, module_node, odin3_ast_slot_count(ODIN3_AST_MODULE),
+                                      (odin3_scope_id){0});
     while (st == ODIN3_OK && e2->stack.len > 0 && !e2->stopped) {
         odin3_elab2_item item = *(odin3_elab2_item *)odin3_vec_at(&e2->stack, e2->stack.len - 1);
         odin3_vec_pop(&e2->stack);
         e2->scope = item.scope;
-        st = phase == PHASE_INSTANCES ? instance_step(e2, item.node) : assign_step(e2, item.node);
+        st = phase_step(e2, phase, item.node);
     }
     e2->scope = (odin3_scope_id){0};
     return st != ODIN3_OK ? st : e2->fatal;
 }
 
-/* Steps (2) to (8) so far: the pre-scan and the mem2reg decision, the instances and gates, the
- * assignments, the wired nets, the `$mem` cells and the end-of-module warnings. */
-static odin3_status steps_after_wires(odin3_elab2 *e2, odin3_ast_id module_node) {
+/* Step (3) of EL-28 (EL-40), run after the assignments walk of step (5) so that the drivers of a
+ * net are known (the spec's order puts it first; the results are the same). */
+static odin3_status initial_values(odin3_elab2 *e2, odin3_ast_id module_node) {
+    return carry_on(e2, odin3_ast_loc(e2->elab, module_node),
+                    odin3_elab2_initials(e2, module_node));
+}
+
+/* Step (2): the pre-scan, the mem2reg decision and the words it made, then the test hook. */
+static odin3_status prescans(odin3_elab2 *e2, odin3_ast_id module_node) {
     odin3_status st = odin3_elab2_prescan(e2, module_node);
     st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_mem_decide(e2, module_node);
+    st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_prescan_words(e2, module_node);
     const odin3_elab_test_hooks *hooks = odin3_elab_test_hooks_get();
     if (st == ODIN3_OK && hooks->after_prescan != NULL) {
         hooks->after_prescan(hooks->user, e2, module_node);
     }
-    st = st != ODIN3_OK || e2->stopped ? st : items_walk(e2, module_node, PHASE_INSTANCES);
+    return st;
+}
+
+/* Steps (4) to (8) and the end-of-module warnings: the instances and gates, the assignments, the
+ * processes, the wired nets, the `$mem` cells. */
+static odin3_status emissions(odin3_elab2 *e2, odin3_ast_id module_node) {
+    odin3_status st = items_walk(e2, module_node, PHASE_INSTANCES);
     st = st != ODIN3_OK || e2->stopped ? st : items_walk(e2, module_node, PHASE_ASSIGNS);
+    st = st != ODIN3_OK || e2->stopped ? st : initial_values(e2, module_node);
+    st = st != ODIN3_OK || e2->stopped ? st : items_walk(e2, module_node, PHASE_PROCESSES);
     st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_wired(e2, module_node);
     st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_mem_emit(e2);
     return st != ODIN3_OK || e2->stopped ? st : odin3_elab2_undriven(e2);
+}
+
+static odin3_status steps_after_wires(odin3_elab2 *e2, odin3_ast_id module_node) {
+    odin3_status st = prescans(e2, module_node);
+    return st != ODIN3_OK || e2->stopped ? st : emissions(e2, module_node);
 }
 
 odin3_status odin3_elab2_module(odin3_elab2 *e2, odin3_ast_id module_node) {
@@ -731,7 +834,7 @@ static odin3_status finish(odin3_elab2 *e2, double started) {
                   " specializations), %" PRIu32 " processes, %" PRIu32 " cells, %" PRIu32
                   " nets, %.3f + %.3f ms",
                   odin3_ast_name_str(e2->elab, unit), sum.modules, sum.specializations,
-                  sum.processes, sum.cells, sum.nets, e2->opts.stage1_ms, now_ms() - started);
+                  sum.processes, sum.cells, sum.nets, e2->opts.stage1_ms, odin3_now_ms() - started);
     }
     return st;
 }
@@ -745,7 +848,7 @@ static odin3_status end_status(const odin3_elab2 *e2) {
 }
 
 odin3_status odin3_elab_stage2(odin3_pass_ctx *ctx, odin3_ast *elab, const odin3_elab_opts *opts) {
-    double started = now_ms();
+    double started = odin3_now_ms();
     odin3_elab2 *e2 = NULL;
     odin3_status st = odin3_elab2_create(ctx, elab, opts, &e2);
     st = st != ODIN3_OK ? st : run_steps(e2);

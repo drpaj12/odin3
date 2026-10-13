@@ -7,9 +7,9 @@
  * third (Task 18) is expressions: signals to word cells, selects and continuous assignments
  * (elab2_expr.c, elab2_select.c, elab2_assign.c). The fourth (Task 19) is drivers, instances and
  * gates: the driver table and claims, wired nets, tri-state, the lvalue an output takes apart
- * (elab2_drive.c, elab2_assign.c), instances and gates (elab2_inst.c), black-box cell types
- * (elab2_bbox.c). The fifth is memories (elab2_mem.c, elab2_memscan.c, elab2_memport.c). Later
- * tasks add processes to it.
+ * (elab2_claim.c, elab2_wired.c, elab2_assign.c), instances and gates (elab2_inst.c), black-box
+ * cell types (elab2_bbox.c). The fifth is memories (elab2_mem.c, elab2_memscan.c, elab2_memport.c).
+ * Later tasks add processes to it.
  */
 #ifndef ODIN3_FRONTENDS_ELAB_ELAB_INTERNAL_H
 #define ODIN3_FRONTENDS_ELAB_ELAB_INTERNAL_H
@@ -185,7 +185,12 @@ struct odin3_elab2 {
     odin3_vec vals;        /* the expression walk's value stack: odin3_sig (Task 18) */
     odin3_u64map *bboxes;  /* black-box MODULE node ID -> its cell type ID (Task 19, EL-11) */
     struct odin3_elab2_drive *drive; /* the driver tables of the module being emitted (Task 19) */
-    odin3_vec mems; /* odin3_elab_mem of the module being emitted, by symbol (Task 20) */
+    odin3_vec mems;      /* odin3_elab_mem of the module being emitted, by symbol (Task 20) */
+    struct odin3_pg *pg; /* the process generator of the module being emitted (Task 21) */
+    odin3_ceval *ev;     /* the interpreter of user function calls (Task 23, EL-17), made on use */
+    odin3_ast_id call; /* the CALL or TASK_CALL being inlined: the second loc of EL-45 (Task 23) */
+    odin3_u64map *bound; /* symbols of the loops being unrolled: constants to the AST test (T23) */
+    uint64_t iterations; /* loop iterations unrolled so far in the run, generate loops included */
     /* the module being emitted */
     odin3_module *mod;
     odin3_module_id mod_id;
@@ -325,6 +330,23 @@ void odin3_elab2_fatal(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...) ODI
 void odin3_elab2_warn(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...) ODIN3_PRINTF(3, 4);
 
 /*
+ * The string table's text for id; "" for an ID with none. The result belongs to the design.
+ */
+const char *odin3_elab2_str_of(const odin3_elab2 *e2, uint32_t id);
+
+/*
+ * The one cap on a cell's pins (ODIN3_ELAB_MAX_CELL_PINS in force): ODIN3_OK when pins is within
+ * it, else the fatal `cell of N pins exceeds the limit of M pins` at loc and ODIN3_ERR_PARSE.
+ */
+odin3_status odin3_elab2_pins_cap(odin3_elab2 *e2, odin3_loc loc, uint64_t pins);
+
+/*
+ * The number of indices of a dimension, |msb - lsb| + 1 (a packed range's width, an unpacked
+ * dimension's size). Defined in elab2_mem.c.
+ */
+uint64_t odin3_elab2_dim_size(const odin3_dim *dim);
+
+/*
  * The safety net of an ODIN3_ERR_PARSE ("counted, go on"): a producer that returned it without
  * raising any error would let the read succeed with the construct missing (end_status looks at
  * the error count). This counts one located internal error at loc when no error is counted yet
@@ -400,9 +422,23 @@ odin3_status odin3_elab2_sig_new(odin3_elab2 *e2, uint32_t width, odin3_sig *out
  * The `rv` substitution hook of the process generator (Task 21): inside a process the current value
  * of a net replaces the net, bit by bit. NULL outside processes (and in every Task 18 call).
  */
+typedef struct odin3_elab2_regs_rd {
+    odin3_ast_id select;  /* the word SELECT */
+    uint32_t mem;         /* the register array's table index */
+    const odin3_sig *idx; /* the index of the one dimension, generated */
+} odin3_elab2_regs_rd;
+
+/*
+ * The hooks a process gives the expression walker (Task 23): call yields the value of a user
+ * function CALL by inlining it in the process (EL-38; NULL: a continuous context, which makes a
+ * combinational process of its own), word the value of a register-array word with a variable index
+ * as a case inline in the process (EL-27; NULL: likewise a process of its own). Both may be NULL.
+ */
 typedef struct odin3_elab2_reads {
     odin3_status (*bit)(void *user, odin3_net_id net, odin3_sigbit *out);
     void *user;
+    odin3_status (*call)(void *user, odin3_ast_id call, odin3_sig *out);
+    odin3_status (*word)(void *user, const odin3_elab2_regs_rd *rd, odin3_sig *out);
 } odin3_elab2_reads;
 
 /*
@@ -438,6 +474,24 @@ typedef struct odin3_elab2_expr_req {
  * expression that failed before its last cell; cells made earlier stay (valid, unused).
  */
 odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);
+
+/*
+ * The self-determined type of an expression (EL-13): its width and sign, typed without generating
+ * anything (no cell, no net). The typer's located errors and warnings are given as for
+ * odin3_elab2_expr (ODIN3_ERR_PARSE after an error); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG
+ * (logged) for a node that is no expression.
+ */
+odin3_status odin3_elab2_self_type(odin3_elab2 *e2, odin3_ast_id expr, odin3_etype *out);
+
+/*
+ * Whether expr is constant by the AST alone: its leaves are literals and parameters (a localparam,
+ * a genvar), and its calls are $signed, $unsigned or $clog2 of such. No variable, net, memory word
+ * or user call; nothing is generated. This is the test of the process generator's folding of
+ * `if`/`case` and of its non-constant lvalue selects (Yosys folds an AST constant only); a
+ * variable that merely holds a constant at that point (rv) is not constant here. Iterative.
+ * ODIN3_ERR_NO_MEMORY (*out unchanged).
+ */
+odin3_status odin3_elab2_expr_is_const(const odin3_elab2 *e2, odin3_ast_id expr, bool *out);
 
 /*
  * odin3_elab2_expr for a SELECT node (EL-32 reads): constant selects (the bits at the declared
@@ -538,6 +592,15 @@ odin3_status odin3_elab2_sel_range(odin3_elab2 *e2, odin3_ast_id select,
                                    const odin3_elab2_selobj *obj, const odin3_sig *index,
                                    odin3_elab2_selrange *range);
 
+/*
+ * The indices a [b +: w] (plus) or [b -: w] select covers when its base is the known value base,
+ * oriented as the declaration of obj: range->width is w on entry, left and right are set (a bit
+ * select is plus with w = 1). A base far outside the object is clamped to a band that stays
+ * outside it. Wiring only: no diagnostics.
+ */
+void odin3_elab2_sel_orient(const odin3_elab2_selobj *obj, bool plus, int64_t base,
+                            odin3_elab2_selrange *range);
+
 /* What the walk hands a SELECT's emission: its operands already emitted, and the lhs nets the
  * root may drive by construction (dest, dest_width of them; NULL when this is not the root). */
 typedef struct odin3_elab2_selargs {
@@ -607,7 +670,8 @@ typedef struct odin3_drv {
     odin3_ast_id node;
 } odin3_drv;
 
-/* The tables of one module's drivers (elab2_drive.c); opaque to everything else. */
+/* The tables of one module's drivers (elab2_claim.c; elab2_drive.h shares it); opaque to everything
+ * else. */
 struct odin3_elab2_drive;
 
 /*
@@ -644,6 +708,13 @@ typedef struct odin3_elab2_claim_req {
  * enum, or no module being emitted.
  */
 odin3_status odin3_elab2_claim(odin3_elab2 *e2, const odin3_elab2_claim_req *req, bool *granted);
+
+/*
+ * What drives bit `wb` of a wire of the module being emitted, as the tables know it so far: the
+ * claim recorded on the wire bit (an assignment, an instance output, a gate), else the driver of
+ * its net (an input port, a constant, a cell); kind ODIN3_DRV_NONE when nothing does.
+ */
+odin3_drv odin3_elab2_bit_driver(const odin3_elab2 *e2, odin3_wirebit wb);
 
 /*
  * Step (2) of EL-28 for the module being emitted: starts the driver tables (input ports are
@@ -699,6 +770,59 @@ typedef struct odin3_elab2_lvbit {
     bool whole;
 } odin3_elab2_lvbit;
 
+/* One position a non-constant select can take: the declared index value the base holds there and
+ * the part of the select inside the object: its bits first .. first + count - 1 (bit 0 is the
+ * right end), of which bit first sits at wire position pos (LSB first) and bit j at pos + j -
+ * first. A slice that straddles an end of the object has count < the select's width. */
+typedef struct odin3_elab2_varcand {
+    int64_t value;
+    uint32_t pos;
+    uint32_t first;
+    uint32_t count;
+} odin3_elab2_varcand;
+
+/* A non-constant select that is a whole procedural target (`y[s]`, `y[b +: w]`: EL-32's case
+ * method, Task 22). node is 0 when the lvalue has none. cands are the positions at which the select
+ * lies at least partly inside the object and its base can hold the value (the index's
+ * self-determined width and sign limit them), by ascending value; lv->nets then holds every bit
+ * some position writes. */
+typedef struct odin3_elab2_varsel {
+    odin3_ast_id node;  /* the SELECT */
+    odin3_ast_id index; /* its base index expression, not generated */
+    odin3_wire_id wire; /* the wire selected from */
+    odin3_elab2_selobj obj;
+    uint32_t width;       /* bits written at a position */
+    uint32_t index_width; /* the index's self-determined width ... */
+    bool index_signed;    /* ... and sign */
+    odin3_vec cands;      /* odin3_elab2_varcand */
+} odin3_elab2_varsel;
+
+/*
+ * Fills vs->width, index_width, index_signed and cands from vs->node (a bit, [b +: w] or [b -: w]
+ * SELECT), obj and index, which the caller set. A width that is not positive or too large and the
+ * typer's errors are located and counted, ODIN3_ERR_PARSE; the positions times the width over
+ * the width cap is `width N exceeds the limit of M bits` at the select. ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab2_varsel_make(odin3_elab2 *e2, odin3_elab2_varsel *vs);
+
+/* A word of a register array with a non-constant index as the whole procedural target (`m[s] <=
+ * d`, EL-27's case over the words, Task 23). node is 0 when the lvalue has none; lv->nets then
+ * holds the bits of every word, word 0 first. */
+typedef struct odin3_elab2_regsel {
+    odin3_ast_id node;  /* the word SELECT */
+    odin3_ast_id index; /* its index expression, not generated */
+    uint32_t mem;       /* the table index of the array */
+} odin3_elab2_regsel;
+
+/* A word of a memory (not registers) as the whole procedural target, or a constant bit or part
+ * select of it (EL-39, Task 24): the write port the process generator makes. word is the word
+ * SELECT, mem its table index; node is 0 when the lvalue has none. lv->nets then holds, for result
+ * bit i (LSB first), the position in the word it writes plus one (0: outside the word). */
+typedef struct odin3_elab2_memsel {
+    odin3_ast_id node;
+    uint32_t mem;
+} odin3_elab2_memsel;
+
 /* An lvalue taken apart: nets[i] and bits[i] for result bit i (LSB first); net 0 and wire 0 for a
  * bit outside its net. */
 typedef struct odin3_elab2_lvalue {
@@ -706,6 +830,19 @@ typedef struct odin3_elab2_lvalue {
     odin3_vec bits; /* odin3_elab2_lvbit */
     odin3_vec work; /* odin3_ast_id: the nodes still to take apart */
     bool dropped;   /* some bit lies outside its net */
+    /* An assignment target inside a process (Task 21), set by the caller after init: a memory word
+     * is a write port of its memory, a non-constant select the case method (Task 22; var), and the
+     * messages do not speak of continuous assignments. */
+    bool procedural;
+    odin3_ast_id top;       /* the lhs being taken apart (set by odin3_elab2_lvalue_make) */
+    odin3_elab2_varsel var; /* procedural only: the non-constant select that is the target */
+    odin3_elab2_regsel
+        regs; /* procedural only: the word of a register array with a variable index */
+    odin3_elab2_memsel memw; /* procedural only: a word of a memory (nets: positions + 1) */
+    bool scan_only; /* procedural only: names of a callee's variables are not resolved (the scan) */
+    bool scan_calls; /* procedural only: the scan; an index with a call in it is not generated */
+    const odin3_elab2_reads
+        *reads; /* procedural only: the hooks the index expressions are read through */
 } odin3_elab2_lvalue;
 
 void odin3_elab2_lvalue_init(odin3_elab2_lvalue *lv);
@@ -717,7 +854,15 @@ void odin3_elab2_lvalue_free(odin3_elab2_lvalue *lv);
  * variable`, a memory, `continuous assignment to 'y' with a non-constant index is not supported`,
  * bits outside the net warned and dropped) are counted and ODIN3_ERR_PARSE. A `reg` target warns
  * `'r' is a variable assigned by a continuous assignment; treated as a net` when as_assign.
- * ODIN3_ERR_NO_MEMORY.
+ * A procedural lvalue (lv->procedural) may be a select whose index is not constant by the AST
+ * (odin3_elab2_expr_is_const), alone: lv->var is then filled (the index is not generated) and
+ * lv->nets holds every bit some position writes, or none when the index can select nothing inside
+ * the object (`assignment to bits outside 'y' [3:0] is ignored`, the bits dropped); inside a
+ * concatenation it is `non-constant index into 'y' is not supported in a concatenation target`.
+ * A word of a register array with a non-constant index is lv->regs; a word of a memory (or a
+ * constant bit or part select of one) is lv->memw, alone only (in a concatenation it is `memory
+ * word of 'm' in a concatenation target is not supported`: the process generator splits a
+ * concatenation target that holds one before it gets here, as Yosys does). ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_elab2_lvalue_make(odin3_elab2 *e2, odin3_ast_id lhs, odin3_elab2_lvalue *lv);
 
@@ -839,6 +984,51 @@ odin3_status odin3_elab2_blackbox(odin3_elab2 *e2, odin3_ast_id module_node);
 odin3_status odin3_elab2_param_value(odin3_elab2 *e2, const odin3_param_def *pdef,
                                      odin3_ast_id node, odin3_value *out);
 
+/*
+ * Pushes the items of GEN_BLOCK or MODULE node (its tail after nslots slots) on e2->stack, in the
+ * scope they are in, so the first pops first. ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab2_push_items(odin3_elab2 *e2, odin3_ast_id node, uint32_t nslots,
+                                    odin3_scope_id scope);
+
+/* --- stage 2: initial values (Task 24; EL-40) ------------------------------------------------- */
+
+/*
+ * EL-40 for the module being emitted (EL-28, after the instances and the continuous assignments,
+ * so the drivers of a net are known): every `initial` block and variable initialiser (a `reg r =
+ * v;` or a port's) in source order through the interpreter, with a store of the bits they write.
+ * An `initial` is run statement by statement; a statement that is not constant (it reads an input,
+ * a net driven by logic, or calls what is not constant) is ignored with `initial statement is not
+ * constant and is ignored` (once per statement) and leaves its targets as they were. Loops, `if`,
+ * `case` and constant function calls work as in EL-17; a memory word takes constant indices.
+ * `$readmemh`/`$readmemb` as a statement of the block is odin3_elab2_readmem. The results, per bit
+ * or word with a known (0, 1 or z) value: an output of an `always` block gets the `init` attribute
+ * of its wire (x where unknown), a memory kept as a `$mem` its `INIT`; a variable nothing else
+ * drives has its net merged onto the shared constant net; a net driven by a continuous assignment,
+ * an instance, a gate or an input port keeps its value out: `initial value of 'w' is ignored: 'w'
+ * is driven by a continuous assignment` (`an instance`, `a gate`, `an input port`), once per wire.
+ * The init-bits cap of point (aa) is `initial values need more than N bits` at the statement.
+ * Status as odin3_elab2_module (ODIN3_OK after located errors, which are counted).
+ * ODIN3_ERR_INVALID_ARG (logged) for a module that is not the one being emitted.
+ */
+odin3_status odin3_elab2_initials(odin3_elab2 *e2, odin3_ast_id module_node);
+
+/*
+ * `$readmemh("f", m [, start [, finish]])` / `$readmemb` (S4) as a statement of an `initial`:
+ * parsed as Yosys 0.55's readmem does (blank-separated tokens, `//` and a block comment, `@hex`
+ * addresses, each word a sized literal of the memory's width in base 16 or 2), filling the
+ * one-dimensional array m from start (default: its lowest index) toward finish (default: its
+ * highest), into the state of the initial run store->user belongs to (a store handed out by
+ * odin3_elab2_initials). A relative path is resolved against the directory of the source file
+ * holding the call (point (y); an absolute one is used as given). Located errors at the call,
+ * counted, ODIN3_ERR_PARSE: `cannot open 'f' for $readmemh`, `bad address '@zz' in 'f' line N`,
+ * `bad word 'g' in 'f' line N`, `'f' is larger than N bytes (the $readmem limit)` (point (aa)),
+ * and the shape errors of the arguments. ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG (logged) for a
+ * NULL argument or a node that is not a system TASK_CALL.
+ */
+odin3_status odin3_elab2_readmem(const odin3_elab2 *e2, odin3_ast_id call,
+                                 const odin3_ceval_store *store);
+
 /* --- stage 2: memories (Task 20; EL-27, EL-39 reads) ---------------------------------------- */
 
 /* One asynchronous read port of a memory, in source order. */
@@ -848,7 +1038,7 @@ typedef struct odin3_elab_mem_rd_port {
     odin3_ast_id node;        /* the word select that read it */
 } odin3_elab_mem_rd_port;
 
-/* One clocked write port of a memory, in source order (Task 24 adds them). */
+/* One clocked write port of a memory, in source order (pg_memw.c adds them). */
 typedef struct odin3_elab_mem_wr_port {
     odin3_sig addr, data, en; /* addr at its own width; data and en one bit per word bit */
     odin3_net_id clk;
@@ -949,9 +1139,24 @@ typedef struct odin3_elab2_mem_rd {
  */
 odin3_status odin3_elab2_mem_read(odin3_elab2 *e2, const odin3_elab2_mem_rd *rd, odin3_sig *data);
 
+/*
+ * The address of the word rd names (rd->select and the index signals): the raw index of a
+ * one-dimensional array, a flattened one's row-major address (cells for non-constant indices,
+ * folded constants), as odin3_elab2_mem_read puts on a read port. The memory is a `$mem` (not
+ * registers). ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG (logged) for a wrong index count.
+ */
+odin3_status odin3_elab2_mem_addr(odin3_elab2 *e2, const odin3_elab2_mem_rd *rd, odin3_sig *out);
+
+/*
+ * The word position (row-major, from 0) of the declared indices values[0 .. n_dims) of the array at
+ * table index mem, or -1 outside the array (or for a mem outside the table). Registers or memory.
+ */
+int64_t odin3_elab2_mem_pos(const odin3_elab2 *e2, uint32_t mem, const int64_t *values);
+
 /* What a word of an array that became registers is. */
 typedef enum odin3_elab2_word_kind {
-    ODIN3_WORD_WIRE, /* the word's wire */
+    ODIN3_WORD_WIRE,   /* the word's wire */
+    ODIN3_WORD_MEMORY, /* a word of a memory in a procedural target: a write port (Task 24) */
     ODIN3_WORD_X, /* outside the array, or an index with an x or z bit: reads x, writes nothing */
     ODIN3_WORD_VARIABLE /* an index that is not constant */
 } odin3_elab2_word_kind;
@@ -973,7 +1178,7 @@ odin3_status odin3_elab2_mem_word(odin3_elab2 *e2, const odin3_elab2_mem_rd *rd,
                                   odin3_elab2_word *out);
 
 /*
- * One clocked write port (EL-39; Task 24 adds them from processes, in source order): the word at
+ * One clocked write port (EL-39; pg_memw.c adds them from processes, in source order): the word at
  * addr (a signal at its own width, constant or not; no temporary is needed for a constant index
  * or a full-word value) takes data where en is 1, on the clk edge (posedge: rising, else falling).
  * addr, data and en are copied; data and en are as wide as the word. ABITS becomes the widest
@@ -1004,5 +1209,79 @@ odin3_status odin3_elab2_mem_emit(odin3_elab2 *e2);
 /* Forgets the memory table (a new module starts); frees it when e2 is destroyed. */
 void odin3_elab2_mem_reset(odin3_elab2 *e2);
 void odin3_elab2_mem_free(odin3_elab2 *e2);
+
+/* --- stage 2: processes (Task 21; EL-28 step (6), EL-33, EL-34, EL-35; the generator is pg.h) ---
+ */
+
+/* True when net is a bit of a wired net (`wand`, `wor`, `triand`, `trior`) whose drivers the
+ * module collects (EL-26); a process cannot drive one (the pre-scan reported it). */
+bool odin3_elab2_net_is_wired(const odin3_elab2 *e2, odin3_net_id net);
+
+/*
+ * EL-28 step (2), second half: the always-assigned bits of the word wires that the mem2reg decision
+ * made after the pre-scan (EL-27): scans the module's `always` blocks again, and for each
+ * assignment to a word of a register array (a bit or part select of the word too) marks the bits
+ * of that word's wire, or of every word's wire when an index is not a NUMBER (a conservative
+ * superset). ODIN3_OK even after located errors; ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG for a
+ * module that is not the one being emitted.
+ */
+odin3_status odin3_elab2_prescan_words(odin3_elab2 *e2, odin3_ast_id module_node);
+
+/* True when an always block assigns bit `bit` of the wire of a register-array word (false before
+ * odin3_elab2_prescan_words, and for any wire that is not one). */
+bool odin3_elab2_always_assigned_word(const odin3_elab2 *e2, odin3_wire_id wire, uint32_t bit);
+
+/* Frees the process generator (a new module starts); frees it when e2 is destroyed. */
+void odin3_elab2_pg_free(odin3_elab2 *e2);
+
+/* --- user function and task calls (Task 23; EL-17, EL-38; elab2_call.c, pg_call.c) ---------------
+ */
+
+/*
+ * The type of a user function CALL as the typer asks for it: the function's result variable (its
+ * return range, 32 bits for `integer`, 1 bit by default; signed per `signed`/`integer`). A call
+ * of an undeclared or non-function name, or of a system function, is a located error and
+ * ODIN3_ERR_PARSE.
+ */
+odin3_status odin3_elab2_call_type(odin3_elab2 *e2, odin3_ast_id call, odin3_etype *out);
+
+/* The FUNCTION_DECL (a CALL) or TASK_DECL (a TASK_CALL) a call names; a located error and
+ * ODIN3_ERR_PARSE for an undeclared name, a name of the other kind or a system function. */
+odin3_status odin3_elab2_callee(odin3_elab2 *e2, odin3_ast_id call, odin3_ast_id *decl);
+
+/* The result variable of the FUNCTION_DECL decl (its symbol in *sym); NULL when it has none. */
+const odin3_symbol *odin3_elab2_fn_result(const odin3_elab2 *e2, odin3_ast_id decl,
+                                          odin3_sym_id *sym);
+
+/* The interpreter of the module's constants (EL-17, EL-40), made on first use over the elaborated
+ * store. ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab2_ceval_get(odin3_elab2 *e2, odin3_ceval **out);
+
+/*
+ * Tries the interpreter (EL-17) on a user function CALL: *is_const is true and *out holds the value
+ * (the result's own width, in the scratch arena) when the call is constant (constant arguments and
+ * a constant body); otherwise OK with *is_const false and nothing logged. A located error of the
+ * call itself (`function 'f' has 1 inputs; 2 arguments given`) or a cap is reported and
+ * ODIN3_ERR_PARSE. ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab2_call_try(odin3_elab2 *e2, odin3_ast_id call, odin3_cval *out,
+                                  bool *is_const);
+
+/*
+ * A user function call, or a register-array word with a variable index, met outside a process (a
+ * continuous assignment, a port connection, a net declaration assignment): a combinational `$proc`
+ * of its own (one ALWAYS sync) computes it into the nets of *out (pg_call.c; odin3_pg_comb_call and
+ * odin3_pg_comb_mem_read are these on a generator). The arguments and the index are generated
+ * first, in the caller's context. The located errors of the call, ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab2_comb_call(odin3_elab2 *e2, odin3_ast_id call, odin3_sig *out);
+odin3_status odin3_elab2_comb_word(odin3_elab2 *e2, const odin3_elab2_regs_rd *rd, odin3_sig *out);
+
+/* The process generator of the module being emitted, made on first use (Task 21). */
+odin3_status odin3_elab2_pg_get(odin3_elab2 *e2, struct odin3_pg **out);
+
+/* Whether a symbol is a loop variable being unrolled: the AST constant test takes it as a constant
+ * (EL-37). */
+bool odin3_elab2_is_bound(const odin3_elab2 *e2, odin3_sym_id sym);
 
 #endif

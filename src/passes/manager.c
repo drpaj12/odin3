@@ -8,6 +8,7 @@
 #include "ir/proc.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
+#include "util/clock.h"
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -18,7 +19,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 /* Debug builds check around every pass whatever the options say (CLAUDE.md rule 3). */
 #ifdef NDEBUG
@@ -28,7 +28,7 @@ enum { ALWAYS_CHECK = 1 };
 #endif
 
 /* A location is part of one log message, so it never needs more than a message's bytes. */
-enum { MS_PER_S = 1000, NS_PER_MS = 1000000, LOC_BUF = ODIN3_LOG_BUF, READ_CHUNK = 4096 };
+enum { LOC_BUF = ODIN3_LOG_BUF, READ_CHUNK = 4096 };
 
 /* Lowest and highest characters of a pass name (printable ASCII, no blank). */
 enum { NAME_CHAR_MIN = '!', NAME_CHAR_MAX = '~' };
@@ -123,12 +123,6 @@ odin3_pass_options odin3_pass_get_options(void) {
 
 /* --- pass runs ------------------------------------------------------------------------------ */
 
-static double now_ms(void) {
-    struct timespec ts = {0};
-    (void)clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * MS_PER_S + (double)ts.tv_nsec / NS_PER_MS;
-}
-
 /*
  * The design check before or after a pass. The check before reports errors only (its warnings are
  * counted, not delivered): the check after the previous pass already showed them, so a warning is
@@ -204,7 +198,7 @@ static void raise_keep(odin3_design *design, const odin3_pass_def *def) {
 }
 
 static odin3_status run_def(odin3_design *design, const odin3_pass_def *def, odin3_bytes args) {
-    double start = now_ms();
+    double start = odin3_now_ms();
     odin3_design_set_diag_paths(design, g_options.diag_paths); /* PRJ-18 --diag-paths */
     /* 2D EL-33: a REFUSE pass never meets a process; refused before its pass run opens. */
     odin3_status st = def->processes == ODIN3_PASS_PROCESSES_OK
@@ -224,7 +218,7 @@ static odin3_status run_def(odin3_design *design, const odin3_pass_def *def, odi
     if (st == ODIN3_OK) {
         st = run_checked(&ctx, def, args);
     }
-    odin3_log(ODIN3_LOG_INFO, "pass %s: %.3f ms", def->name, now_ms() - start);
+    odin3_log(ODIN3_LOG_INFO, "pass %s: %.3f ms", def->name, odin3_now_ms() - start);
     return st;
 }
 

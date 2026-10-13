@@ -253,7 +253,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
       - Task 22 lands `IF` and `CASE`;
       - Task 23 lands `FOR`, `REPEAT`, `TASK_CALL`, calls in processes and the two read features;
       - Task 24 lands `INITIAL` (variable initialisers included) and `ODIN3_PEND_MEM_WRITE`.
-  - Reaching a pending kind or feature logs, once per kind per run, `file:line:col: error: elaboration is not available yet (2D): '<KIND>'`. `<KIND>` is the dump's kind name, or `continuous-context call` / `variable index into a register array` / `memory write`. It counts as an error.
+  - Reaching a pending kind or feature logs, once per kind per run, `file:line:col: error: elaboration is not available yet (2D): '<KIND>'`. `<KIND>` is the dump's kind name, or `continuous-context call` / `variable index into a register array` / `memory write` / `variable index in a procedural assignment target` (Task 21; Task 22 lands it). It counts as an error.
   - A stage-1 error destroys the elaborated store, so rule 7 never sees an unhandled kind. A stage-2 error skips the construct, so the IR stays valid.
   - Until Task 17, `odin3_elab_stage2` is the stub `src/frontends/elab/elab2_stub.c`, which logs 2C's exact unlocated text `elaboration is not available yet (2D)` and returns `PARSE`.
   - Task 10 makes `run-reject --elaborate` judge per case. An expected line found → **pass**. Else a line containing `elaboration is not available yet (2D)` → **pending** (listed, not failed). Else → **fail**. Exit 1 on any fail, 77 when every case is pending.
@@ -337,6 +337,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   - C17 with the `-Werror` flag set.
   - Functions ≤ 60 lines, CCN ≤ 15, ≤ 5 parameters, no adjacent convertible parameters (use request structs).
   - **No recursion in `src/`**: the typer, evaluator, interpreter, generate expansion, hierarchy walk, binder, emitter and process generator all use explicit stacks or worklists. Tests may recurse in reference models.
+    - **Known deviation (PR 2D-6 review I6, recorded for 2D-7).** A call in an expression is inlined by C recursion (`pg_run` → `exec_node` → `assign_value` → `odin3_elab2_expr` → `pg_call_hook` → `odin3_pg_call` → `call_inline` → `pg_run`). Interim guard: `ODIN3_ELAB_MAX_INLINE_DEPTH` (256) gives a located error, so the stack cannot overflow (spec §17 #74). 2D-7: run the call after the expression walk (the walker hands back a placeholder) and drop the cap.
   - No VLA; no `goto` but `cleanup:`; `abort` only in IR check.
   - No `NOLINT`; no `.clang-tidy` or lizard change; never `--no-verify`.
   - `odin3_` snake_case, with `elab1_*`/`elab2_*`/`pg_*`/`cval_*` for file-static helpers.
@@ -361,6 +362,8 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   | `ODIN3_ELAB_MAX_TOTAL_ITERATIONS` | 2^24 |
   | `ODIN3_ELAB_MAX_EVAL_STEPS` | 2^26 |
   | `ODIN3_ELAB_MAX_CALL_DEPTH` | 1024 |
+  | `ODIN3_ELAB_MAX_INLINE_DEPTH` | 256 |
+  | `ODIN3_ELAB_MAX_LOOP_OBJECTS` | 2^21 |
   | `ODIN3_ELAB_MAX_HIER_DEPTH` | 1024 |
   | `ODIN3_ELAB_MAX_SPECIALIZATIONS` | 2^16 |
   | `ODIN3_ELAB_MAX_INSTANCES` | 2^24 |

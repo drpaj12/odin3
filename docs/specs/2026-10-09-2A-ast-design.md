@@ -619,8 +619,8 @@ operator's `UNARY`/`BINARY`/`TERNARY` node.
 (Yosys's rule). The lexer records the comment and the metacomment; the parser makes the `ATTR`
 nodes flagged `METACOMMENT` at the `CASE` reduction (2C §2.6, §9 amendment (d)) and attaches them
 to the `CASE` whose header they **immediately follow, before its first item** (so a nested case's metacomment never reaches the outer one; elsewhere they are plain
-comments), merged with that case's `(* *)` attributes into its single attach (§5). 2E emits
-D1's per-use warning when it honours one. The
+comments), merged with that case's `(* *)` attributes into its single attach (§5). 2D emits
+D1's per-use warning (EL-36; 2D spec §19) when it builds a switch from one; 2E does not. The
 printer writes a `METACOMMENT` attribute back as the metacomment after the header, so the
 round trip holds.
 

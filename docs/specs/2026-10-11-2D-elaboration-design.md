@@ -272,6 +272,122 @@ is left out (its instances get "value of parameter … is not an integer"). (3) 
 parameters: `black box 'bb': port 'p' has different widths in parameter sets with equal values`,
 at the definition. (4) Remaining divergences are in §17 #46.
 
+v4.20 (2026-10-12; 2D Task 21, agent defaults). (1) EL-35 step 7: the driver claims are made a chunk
+at a time (the output chunks of step 1), so a chunk with a conflicting bit is refused whole and the
+actions of all its bits leave the body (an error path: the stage fails either way); a bit of a
+wired net is left out of the claim and its actions dropped (the pre-scan reported it). (2) EL-28
+step (2): the second half of the pre-scan runs after the mem2reg decision and marks the word wires
+of a register array that an `always` assigns (`odin3_elab2_prescan_words`: a NUMBER index marks that
+word's wire, any other index every word's, a part select of a word the whole wire), because those
+wires do not exist when the first half runs. (3) EL-41: T10 and T9 are reported by the process
+generator in Task 21 (T10 is the driver claim of a process against a process, T9 a per-net record
+of how each bit was first assigned, kept for the module), so the handover cases T9 and T10 pass
+for real; Task 24 adds the memory and task-output cases. (4) `variable index in a procedural
+assignment target` is a new point (l) feature, pending until Task 22 (the case method of EL-32); a
+memory word write is `memory write` until Task 24. (5) EL-34: T3's analysis records the nets a
+level-list block reads that no assignment of the block supplied; the warning is located at the
+`always`.
+
+v4.21 (2026-10-12; 2D Task 22, agent defaults). (1) EL-36 folding is by the AST alone: a condition
+or selector and items that are literals and parameters (no variable, not even one holding a
+constant) fold to the branch they take, and the scan applies it before the outputs are collected, so
+a dead branch writes nothing and its outputs are not outputs, as in Yosys, which simplifies it
+away first; a constant with an x or z bit that no wildcard covers is not folded (C9). Yosys keeps a
+`switch` on the constant, so §17 #56. (2) EL-36: the added default case exists only when the
+branches assign something by `=` (it holds the case temporaries), an item is `default`, or the
+switch has `full_case` (v4.24, review C1); Yosys adds an empty one always, §17 #57. (3) D1's two warnings are located at the attribute (`(* *)` or the
+metacomment) and given when the switch is built, not when a folded case drops it. (4) EL-32 writes:
+the position temporary `p` is assigned the index in the **root** case (a conditional write must not
+leave it unassigned: a latch), the switch on `p` has a case for every declared index value the
+index expression's own width and sign can hold at which the slice lies at least partly inside the
+target, and a case writes the bits of the slice that are inside it (v4.22), §17 #54; a select that can
+reach nothing is the located warning `assignment to bits outside 'y' [7:4] is ignored`. A
+non-constant select inside a concatenation target is an error, §17 #55. (5) Point (l): `if`,
+`case` and the case method for a bit or part select landed; the feature `variable index in a
+procedural assignment target` is renamed `variable index into a register array in a procedural
+assignment target` and stays pending for a register array's word until Task 23 (EL-27's case over
+the words). (6) The API: the statement entries are `odin3_pg_if` and `odin3_pg_case_stmt` (the
+name `odin3_pg_case` is Task 21's primitive); a switch's blocking targets are collected once by the
+scan (a sorted unique list per `if`/`case`), not once per nesting level.
+
+v4.22 (2026-10-12 and 2026-10-13; 2D Task 23, agent defaults, items 1-4; 2D Task 22 fix round 1, controller
+rulings, items 5-6). (1) EL-37: an unrolled loop's variable is bound for the
+AST constant test while the loop runs, so a branch that reads it folds in every iteration at
+generation (Task 22's carry); the scan still counts the outputs of every branch (§17 #62). The variable
+is an output of the block only when the module reads it outside the loops it is the variable of
+(EL-35, divergence 5; a read after the loop in the same block counts, as in Yosys). The loop frames
+count on from the generate loops stage 1 unrolled (`odin3_elab_opts.gen_iters`, point (k)). Messages
+added to §9.1: `for-loop initialisation is not constant (it reads 'x')`, `for-loop step is not
+constant (it reads 'x')`, `task 't' has N arguments; M given`, `non-constant index into the
+multi-dimensional register array 'm' is not supported`. (2) EL-38: a call frame gives the callee's
+ports, locals and result unnamed IR wires for the call's duration (the symbols' `ir_wire` is set and
+reset), so the walker and the lvalue code see them like variables; the frame's nets are plain
+process-local temporaries (`O` pins with no sync action), not Yosys's `$0` temporaries with a sync
+action that updates the wire to x (§17 #59). The interpreter is tried first; a call that stays is
+inlined above the caller's frames (the walker, the statement stack and the lvalue scratch are
+re-entrant). (3) EL-27: the words of a register array with a variable index are a case over the
+words, inline in a process or a `$proc` of its own outside one; mem2reg rules 2 to 5 scan the bodies
+of called functions and tasks, and `m[f(1)]` is a constant index when the interpreter folds the call
+(Yosys, verified on 0.55). (4) The brief's `odin3_pg_comb_call`/`odin3_pg_comb_mem_read` take the
+generator; the walker reaches them through `odin3_elab2_comb_call`/`odin3_elab2_comb_word`. (5) EL-32 writes: a part select
+that straddles an end of the target writes the bits inside it (IEEE 1364-2005 4.2.1), at either end,
+for `+:` and `-:`, in both declared directions and for a signed base (`y[s +: 2]`, s = -1, writes
+`y[0]`): the switch has a case for every declared index value at which some bit of the slice lies in
+the target, and a case writes only those bits. Yosys 0.55 agrees except for `-:` with an unsigned
+base below the width minus one (§17 #54). (6) A constant index with an x or z bit as a procedural
+target writes nothing, with the warning of any write outside the object (`assignment to bits
+outside 'y' [3:0] is ignored`), §17 #58.
+
+v4.23 (2026-10-13; 2D Task 24, agent defaults). (1) EL-39: the write port is built where the write
+statement is executed (a loop or a call makes one set of `addr`/`data`/`en` per execution, which the scan
+of the block cannot count), so the three variables of a statement join every `if`/`case` switch that is
+open when it is built: each level gets case temporaries of its own, the entry action `t1 = x` (`en`: `0`)
+in every case of the switch (the cases already built get it first in their lists, the cases to come get it
+as they open, an added default is opened when a variable joined), and the exit action after the switch;
+the root's `addr = x`, `data = x`, `en = 0` go to the front of the root, a later statement's before an
+earlier one's, as Yosys inserts them (`current_top_block->children.insert(begin, defNode)`). The result is
+the body a variable the scan had listed would have (§17 #64). The ports are added in the order the
+statements are built (source order within a block, blocks in source order; two `always` blocks writing one
+word in one cycle are a race, §17 #66). A constant index is kept at its self-determined width
+(`m[2]` is a 32-bit integer: `ABITS` 32, as Yosys); an `addr` variable is the wider of the index and the
+smallest address width that numbers the words. (2) EL-39: a write in a block that has not exactly one edge
+event to an array that stayed a memory (`(* nomem2reg *)` exempts it from the mem2reg rules) is the
+located error `array 'm' cannot be a memory (it is written in a block without exactly one edge) and (* nomem2reg *)
+is set`, at the statement (Task 20's carry). A concatenation target with a word of a memory is split into one
+write per part, the least significant first, the value taken once at the target's width (Yosys's
+`$splitcmplxassign`); a word in a nested concatenation, and a non-constant bit or part select of a word
+(`m[i][b] <= x`; Yosys shifts the data and the enable) are located errors (§17 #65). Messages added to
+§9.1: `memory word of 'm' in a concatenation target is not supported`, `array 'm' cannot be a memory (it is
+written in a block without exactly one edge) and (* nomem2reg *) is set`. (3) EL-40: the initial values are run after
+the instances and the continuous assignments (end of emission step 5, still a step that may merge nets), not
+at step 3, because the classification of a result needs the driver tables of those steps; the results are the
+same. An `initial` block without locals is run statement by statement, so one statement that is not constant
+does not take its neighbours with it; `$readmemh/b` is a statement of the block (inside an `if` or a loop it
+is the located error `$readmemh is supported only as a statement of an initial block`, §17 #67). `$readmem`
+reads as Yosys's `readmem` does (comments, `@hex`, words as sized literals, the default range the array's own);
+a word past the array (an `@` address or a count) is not stored and the call warns once (§17 #68, fix round 1; a word wider than the memory is truncated with one warning, #73). The memory's `INIT` is a BITS value of
+SIZE x WIDTH bits (word `k` at bit `k x WIDTH`), x where nothing was written. Messages added to §9.1: the
+D2 warnings are as §8.8 says; the shape errors of `$readmem`'s arguments (`the second argument of $readmemh
+must be a memory`, `$readmemh needs a one-dimensional array; 'm' has N dimensions`, `$readmemh takes 2 to 4
+arguments; N given`, `the first argument of $readmemh must be a string`, `an address argument of $readmemh is
+not constant`) and `assignment to a word outside array 'm' is ignored` (an `initial` write past the array).
+(4) The pending feature `memory write` and the kind `INITIAL` are gone from the point (l) tables, which are
+empty; `elab-equiv` gains `--unmap-enables` (`dffunmap` and `opt -nodffe -nosdff`: `memory_map` makes enabled
+flip-flops, which `equiv-check` cannot read).
+
+v4.24 (2026-10-13; PR 2D-6 fix round, agent defaults). (1) EL-36: under `full_case` (attribute or metacomment)
+the empty default case is added even when no branch assigns by `=`, as Yosys does, so the unlisted values of
+`<=` arms hold instead of becoming x (review C1; §17 #57 corrected). (2) EL-35: an output no action assigns
+is dropped at emit (no hold, no sync update, no claim), so `y[i] = a[i]` in a loop over a half of `y` neither
+latches the other half nor conflicts with a second block writing it (review I2; §17 #62). (3) The pre-scan
+marks the actuals of a task's output and inout formals as assigned (review I1). (4) EL-40: a `$readmem`
+address is hex digits only and at most 2^40, a located error otherwise (`bad address`, `address out of range`);
+an over-wide word is truncated with one warning per call (§17 #73; reviews I3, I4). (5) Caps: the inline call
+nesting cap 256 (`ODIN3_ELAB_MAX_INLINE_DEPTH`, §17 #74, review I6 interim) and, for endless unrolled loops, a
+cycle check and an IR object budget per loop (`ODIN3_ELAB_MAX_LOOP_OBJECTS`, §17 #75, review M3). (6)
+Documentation: §17 #70 states what Yosys does with `initial tk(7)`, rows 71 and 72 (reviews M1, M2), the
+warnings of Task 24 are in §9.2, the duplicate v4.22 entry is merged. Messages added to §9.1: see §9.1.
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -1297,7 +1413,7 @@ in `check`, and 2D warns once per wire that has sinks and no driver: "'w' is nev
 
 **Order of emission per module** (each step completes before the next):
 (1) ports and wires; (2) the mem2reg decision and the always-assigned bit set (a pre-scan of
-every `always` block's lvalues); (3) initial values (EL-40), whose constant drivers merge nets;
+every `always` block's lvalues); (3) initial values (EL-40), whose constant drivers merge nets (run after steps (4) and (5), v4.23);
 (4) instances and gates; (5) continuous assignments; (6) processes (EL-35); (7) wired-net
 gates (EL-26); (8) `$mem` cells (EL-27). Steps 3–5 may merge nets; steps 6–8 never do.
 
@@ -1414,11 +1530,17 @@ lowering for `$pow` and `$shiftx` — stays in Appendix A for reference (§20 it
   bit select's cells match Yosys's.
 - **Non-constant writes** in a process (`y[s] = d`, `y[b +: 4] <= d`) are rewritten to a `case`
   over the position with one item per in-range position, each assigning that constant slice,
-  no default (an out-of-range write changes nothing): Yosys's case method (`nowrshmsk`), chosen
+  no default (an out-of-range write changes nothing; a slice that straddles an end of the target
+  writes the bits inside it): Yosys's case method (`nowrshmsk`), chosen
   over its default mask-and-shift method because it needs no `$shift` cell (none is registered, EL-31) and maps to
-  the same mux structure after `proc`; equivalent in every case (§17 #4). The position is a
-  temporary assigned once before the case. Outside processes, a non-constant select target is
-  EL-28's error.
+  the same mux structure after `proc`; equivalent in every case but two (§17 #4, #54). The position
+  is a temporary assigned once, in the root case, before the switch (v4.21). The positions are the
+  declared index values the index expression, at its own width and sign, can hold (a signed 2-bit
+  index takes -2 to 1, as Yosys's items do) at which some bit of the slice lies in the target
+  (v4.22); a blocking write has the case temporaries of EL-36 beside, so its switch also has the
+  default case that holds them. Outside processes, a non-constant select target is EL-28's error;
+  inside a concatenation it is `non-constant index into 'y' is not supported in a concatenation
+  target` (§17 #55).
 - **Memory words**: EL-27.
 
 ## 8. Processes
@@ -1699,8 +1821,10 @@ Cost: O(statements × lvalue bits) plus the removals; the generator's memory is 
   Patterns: in `casez` every `z`/`?` bit of a constant item becomes `ANY`; in `casex` every `x`
   and `z` bit; in `case` x and z bits stay as written (C9: Yosys's behaviour; `proc` decides what
   they match). Several expressions per item (C4) are several compares of one case. `default`
-  (anywhere, C6) becomes the last case (Yosys). A constant switch signal with no x/z folds the
-  switch away when every item is constant (Yosys `simplify`).
+  (anywhere, C6) becomes the last case (Yosys). A switch whose selector and items are all constant
+  by the AST (literals and parameters; v4.21) and known (no x or z) folds to the first item that
+  matches, else the default item, else nothing runs; it makes no switch, and the dead items'
+  assignments are not outputs (§17 #56).
 - **Case temporaries** (Yosys's `this_case_eq_ltemp`): for a switch, the bits its branches can
   assign by *blocking* assignment get fresh temporaries `t1`; each case of the switch starts with
   `t1 = rv(bits)` and runs with `lv(bits) = t1`, saving and restoring `lv`/`rv` around each case;
@@ -1712,14 +1836,16 @@ Cost: O(statements × lvalue bits) plus the removals; the generator's memory is 
   the exit `lv(bits) = t1` and the added default below are each one action per chunk
   (`addChunkActions`). An 8-bit `q` assigned in a `case` gives one 8-bit action per case, so
   `proc` builds one 8-bit `$pmux`, not eight 1-bit ones.
-- **Default**: when the case has no `default` item, a default case is added that assigns
-  `t1 = rv(bits)` (unchanged); with `full_case` and no `default`, it assigns x instead (Yosys);
-  one action per chunk either way (v4.2).
+- **Default**: when the case has no `default` item and the branches assign something by `=`, a
+  default case is added that assigns `t1 = rv(bits)` (unchanged); with `full_case` and no
+  `default`, it assigns x instead (Yosys); one action per chunk either way (v4.2). With nothing to
+  assign no default is added (§17 #57), except under `full_case`: the empty default case is still
+  opened so the unlisted values hold (`<=` arms), as in Yosys (v4.24, review C1).
 - **`full_case` and `parallel_case`** (C10, D1), from `(* *)` attributes or `// synopsys`
   metacomments on the `CASE` (2A §7, 2C §2.6): they set the switch flags `FULL_CASE` and
   `PARALLEL_CASE` and are honoured as Yosys honours them (the x default above; `proc` builds
-  `$pmux` and prunes per the flags). 2D emits D1's per-use warning, since it is the stage that
-  reads the attribute: "'full_case' is honoured: case values no item lists assign x" and
+  `$pmux` and prunes per the flags). 2D emits D1's per-use warning, located at the attribute, since
+  it is the stage that reads the attribute: "'full_case' is honoured: case values no item lists assign x" and
   "'parallel_case' is honoured: case items are not prioritised" (amends 2A §7, which gave the
   warning to 2E).
 
@@ -1764,7 +1890,10 @@ Non-constant calls are **inlined** (K1–K11), as Yosys's `simplify` does:
   constant is "function 'f' can be called only with constant arguments (it uses 'while')".
 - **Recursion** without constant arguments cannot be inlined: "recursive call of 'f' cannot be
   inlined (its arguments are not constant)". Inlining depth is capped at
-  `ODIN3_ELAB_MAX_CALL_DEPTH`.
+  `ODIN3_ELAB_MAX_INLINE_DEPTH` (256, v4.24; or `ODIN3_ELAB_MAX_CALL_DEPTH` if lower): a call in an
+  expression is inlined by C recursion (the walker reaches it through `pg_call_hook`, which runs the
+  body with a nested `pg_run`), so the cap bounds the C stack; the hoist that removes the recursion is
+  2D-7's (§17 #74).
 - `automatic` (K8) changes nothing for inlining (every call gets fresh variables anyway).
 - K12 (a timing control or a non-blocking assignment in a function) is stage 1's error. Argument
   count must match ("function 'f' has 2 inputs; 3 arguments given"); a task enable without
@@ -1936,7 +2065,8 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   in the port list`; `port 'q' is declared with ranges [3:0] and [7:0]`; `port 'q' has a value in both of its declarations`; `'w' is a wired net (wand)
   and cannot be assigned in an always block`; `'u' is a uwire and has a second driver (first at
   f.v:L:C)`; `memory 'm' of N bits exceeds the limit of 1073741824 bits`; `'m' is a memory; select
-  a word`; `continuous assignment to 'y' with a non-constant index is not supported`; `tri-state
+  a word`; `continuous assignment to 'y' with a non-constant index is not supported`; `non-constant index
+  into 'y' is not supported in a concatenation target`; `tri-state
   driver on 'x' is supported only on a top-level output or inout port (D3)`; `net 'x' is driven by
   inout port 'p' of instance 'u' and by logic at f.v:L:C; internal tri-state nets are not
   supported (D3)`; `array 'w' cannot be a memory (it is written in a combinational block) and
@@ -1947,11 +2077,11 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
 - **Processes (EL-34–EL-40)**: `posedge on 'x', which is N bits; a 1-bit signal is needed` (and
   `negedge`); `edge and level events in one event list are not supported`; `for-loop condition is
   not constant (it reads 'x')`; `for-loop initialisation and step must assign the same variable`;
-  `loop variable 'i' is assigned in the loop body`; `loop exceeds 1048576 iterations`;
+  `loop variable 'i' is assigned in the loop body`; `loop exceeds 1048576 iterations`; `for-loop never ends: 'k' takes the value 7 again`; `loop creates more than 2097152 IR objects (is it endless?)`; `function call nesting deeper than 256 at 'f'`;
   `unrolled loops exceed 16777216 iterations in this design`; `function 'f' can be called only
   with constant arguments (it uses 'while')`; `recursive call of 'f' cannot be inlined (its
   arguments are not constant)`; `output argument N of task 't' must be a variable`; `cannot open
-  'f' for $readmemh`; `bad address '@zz' in 'f' line N`; `bad word 'g' in 'f' line N`;
+  'f' for $readmemh`; `bad address '@zz' in 'f' line N`; `address out of range (beyond 2^40) '@...' in 'f' line N`; `an address argument of $readmemh is out of range (beyond 2^40)`; `bad word 'g' in 'f' line N`;
   `$readmemh is supported only in an initial block`.
 - **Passes and budget**: `pass 'flatten': module 'm' has processes; run proc first` (the pass
   manager, EL-33; `ODIN3_ERR_INVALID_ARG`); `elaboration needs more than N bytes (the budget is
@@ -1976,7 +2106,7 @@ specialized twice — warns once, keyed by its parsed node):
 | S1 | the `SPECIFY_BLOCK` | `specify block is ignored` |
 | S3 | the `TASK_CALL` | `system task '$display' is ignored` (any system task but `$readmemh`/`$readmemb`) |
 
-Other warnings: D1's two (EL-36); D2's two (EL-40); D5/M12 (EL-24); M10 `'x' is implicitly
+Other warnings: D1's two (EL-36), at the attribute; D2's two (EL-40); D5/M12 (EL-24); M10 `'x' is implicitly
 declared`; T3 (EL-34); E9's two (EL-30: `'===' is treated as '==' (synthesis has no x or z)`,
 `'===' compares against x/z bits; they match any value`); E12's `unsized constant in a
 concatenation is taken as N bits` (EL-13); `'a' and 'b' are connected only to each other and are
@@ -1987,7 +2117,7 @@ is ignored`; `'r' is a variable assigned by a continuous assignment; treated as 
 net assigned in an always block; treated as a variable`; `declaration in an unnamed block is a
 SystemVerilog extension; the block is named '$unnamed_block$1'`; `` `default_nettype inside a
 module takes effect at the next module ``; `assignment to bits outside 'y' [7:0] is ignored`;
-`'w' is never driven`; 2A's literal truncation warning. Infos: the top choice, the modules not
+`'w' is never driven`; 2A's literal truncation warning; the `$readmem` and initial-value warnings of Task 24 (EL-39, EL-40): `$readmemh of 'f' dropped N words outside the array (the first at address A)` (§17 #68), `$readmemh of 'f' truncated N words wider than the memory's W bits (the first, 'w', at line L)` (§17 #73), `task call in an initial block is not applied and is ignored` (§17 #70), `assignment to a word outside array 'm' is ignored`, `assignment to word N outside array 'm' is ignored`, and `initial value of 'x' is ignored: 'x' is driven by <driver>`. Infos: the top choice, the modules not
 elaborated, a module found in several libraries, a black-box body ignored, an implicit black box,
 the final summary line (EL-2).
 
@@ -2057,6 +2187,8 @@ guards, reported as a located `ODIN3_ERR_PARSE` naming the cap, and lowered in t
 | `ODIN3_ELAB_MAX_TOTAL_ITERATIONS` | 2^24 | all unrolled loop iterations of a run; nested loops multiply, and this stops a 2^20 × 2^20 bomb long before memory does |
 | `ODIN3_ELAB_MAX_EVAL_STEPS` | 2^26 | statements plus expression nodes per top-level constant evaluation (a `while (1)` in a constant function) |
 | `ODIN3_ELAB_MAX_CALL_DEPTH` | 1024 | constant-function recursion and inline nesting; real recursive constant functions are < 64 deep |
+| `ODIN3_ELAB_MAX_INLINE_DEPTH` | 256 | calls inlined inside one another in an expression (C recursion, v4.24); the lower of this and `ODIN3_ELAB_MAX_CALL_DEPTH` applies; the located error is `function call nesting deeper than 256 at 'f'` |
+| `ODIN3_ELAB_MAX_LOOP_OBJECTS` | 2^21 | IR objects (nodes, pins, nets, wires) one unrolled procedural loop may create before it is called endless (v4.24); the cycle check of a loop whose test and step read only its variable stops the classic unsigned countdown first |
 | `ODIN3_ELAB_MAX_REENTRY_DEPTH` | 256 | constant evaluations nested in C (typer callbacks, host re-entries; v4.6): each takes 4–6 KiB of C stack under ASan, where a function frame takes none |
 | `ODIN3_ELAB_MAX_HIER_DEPTH` | 1024 | instance nesting below the top; real designs ≈ 10 (mcml: 7) |
 | `ODIN3_ELAB_MAX_SPECIALIZATIONS` | 2^16 | modules made; lenet makes 138 |
@@ -2086,7 +2218,7 @@ allocation (`odin3_util_set_alloc_fail_after`) and assert the status, no leak an
 | `src/frontends/elab/elab.h`, `elab_internal.h`, `elab_test.h` | the stage APIs, `odin3_elab_opts`, caps, test hooks |
 | `src/frontends/elab/cval.c`, `cval_arith.c`, `ceval.c`, `ceval_interp.c`, `ctype.c` | values, operators, expression evaluation, the interpreter, typing (EL-12–EL-18) |
 | `src/frontends/elab/bind.c` | the binder (EL-5) |
-| `src/frontends/elab/elab2.c`, `elab2_wires.c`, `elab2_inst.c`, `elab2_assign.c`, `elab2_expr.c`, `elab2_select.c`, `elab2_mem.c`, `elab2_drive.c` | stage 2 module emission (EL-23–EL-32) |
+| `src/frontends/elab/elab2.c`, `elab2_wires.c`, `elab2_inst.c`, `elab2_assign.c`, `elab2_expr.c`, `elab2_select.c`, `elab2_mem.c`, `elab2_claim.c`, `elab2_wired.c`, `elab2_prescan.c`, `elab2_warn.c`, `elab2_tri.c` | stage 2 module emission (EL-23–EL-32) |
 | `src/frontends/elab/pg.c`, `pg_case.c`, `pg_loop.c`, `pg_call.c`, `pg_init.c` | the process generator and initial values (EL-35–EL-40) |
 | `src/ir/cells/proc.c`, `src/ir/proc.[ch]` (body types, `verify`, body text), `src/ir/value.[ch]` (`ODIN3_VAL_PROC`), `src/ir/node.c` (the process counter), `src/passes/manager.[ch]` (the `processes` flag) | IR change B |
 | `src/ir/cells/arith.c`, `logic.c`, `reduce.c`, `shift.c`, `builtin.c` | IR change A (nine cells) |
@@ -2552,7 +2684,7 @@ and reported, never relaxed (2A's rule).
 | 37 | a port declaration and the net or variable declaration merged into it that both carry a value (`module m(input a, output wire w = a); wire w = ~a;`, `output reg q = 1'b0; reg q = 1'b1;`) are the error "port 'w' has a value in both of its declarations" at the second declaration | accepted: two drivers of `w` (`connect \w \a` and `connect \w $not…`), or two init processes for `q` (verified on 0.55, the PR 2D-4 final review's fixes) | a net is declared once with at most one declaration assignment; a variable has one initial value | the declaration assignment of a port is one value in the port's `DECLARATOR` (EL-4, v4.15); a second would have to be dropped or resolved, and both readings are silent wrong answers |
 | 38 | a path into a named procedural block whose member does not exist (`blk.nope`) is the binder's error "'blk.nope' is not declared" | warning "Identifier `\blk.nope' is implicitly declared" and a new one-bit wire `blk.nope` (verified on 0.55, the PR 2D-4 final review's fixes) | an undeclared name is an error | Yosys treats the dotted path as one identifier and declares it implicitly (v4.15) |
 | 39 | a generate block's or named block's name read as a value (`assign o = gb;`) is the binder-bound error `'gb' is not a net, variable or parameter` | an implicit one-bit net `gb`, with the warning "Identifier `\gb' is implicitly declared" (verified on 0.55: `connect \o \gb`) | an undeclared name is an error | the symbol table cannot hold a net beside the block of one name; the case is a typo in practice (Task 18, Task 13's carry m1) |
-| 40 | a constant select index with an x or z bit (`w[1'bx]`) reads x bits; as an lhs it is the non-constant error | the index is read with x as 0 (verified on 0.55: `a[1'bx]` is `a[0]`, `y[1'bx] = c` drives `y[0]`) | an x or z index reads x (IEEE 1364-2005 4.2.1) | E17: the don't-care resolution of Parmys's `$shiftx` for variable indices; a constant x is the same case (Task 18) |
+| 40 | a constant select index with an x or z bit (`w[1'bx]`) reads x bits; as an lhs it is the non-constant error (in a process the write is dropped with a warning, #58) | the index is read with x as 0 (verified on 0.55: `a[1'bx]` is `a[0]`, `y[1'bx] = c` drives `y[0]`) | an x or z index reads x (IEEE 1364-2005 4.2.1) | E17: the don't-care resolution of Parmys's `$shiftx` for variable indices; a constant x is the same case (Task 18) |
 | 41 | a plain decimal (`1`, `5`) keeps its 32 bits in any context; the apostrophe forms (`'d1`, `'h3`, `33'd1`) are widened to it. The AST does not record the apostrophe, so a signed unsized decimal is taken as plain: `'sd5` is (wrongly) kept at 32 bits too | same, except `'sd5`, which Yosys widens (verified on 0.55: `y64 = a + 1` is `$add` with `B_WIDTH` 32, `a + 'd1` 64; `c ? a : 5` a 32-bit `$mux`) | an unsized literal is context-determined | matches Yosys's cells for every form but `'sd` (Task 18 fix round 1) |
 | 42 | a non-constant `x[b -: w]` is one `$sub(b, w − 1)` on the index as generated, `x[b +: w]` has no cell for the base; `B_SIGNED` follows the index | `-:`: `$add(zext32(b), 1)`, `$sub(_, w)`, then a 32-bit signed `$shiftx`; `+:`: `$add(zext32(b), 0)` and the same `$shiftx` (verified on 0.55) | — | the plan mandates `b − (w − 1)`; the values are equal modulo 2^32 and the `$shiftx` reads the same bits (Task 18 fix round 1) |
 | 43 | in a self-determined position (the operand of a reduction, `!`, `&&`, `||`, a ternary condition or a concatenation) an inner unary `~`, `-` or `+` over a signed name (`!(-s)`, `{~s, a}`) keeps `A_SIGNED` 1 on its cell | the inner cell has `A_SIGNED` 0: genrtlil passes no sign hint down a unary operator (verified on 0.55) | — | parameter only, the values are identical; deferred (Task 18 fix round 2) |
@@ -2566,6 +2698,28 @@ and reported, never relaxed (2A's rule).
 | 51 | an array with no read port, write port or initial value makes no `$mem` | a `memory` record stays until `opt_clean` (verified on 0.55: `memory width 8 size 4 \unused`) | — | the IR has no memory record (row 15), and a cell without ports is dead logic (Task 20) |
 | 52 | the `replacing memory` warning is located at the array's declarator and names each place by the line of the node that makes it, a place inside a concatenation lvalue included | an unlocated warning; a place inside a concatenation lvalue has line 0 (verified on 0.55: `See c1.v:0` for `always @(*) {m[0], t} = {x, c};` with `reg [1:0] m [0:1]`; v4.18: a concatenation lvalue no longer forces registers by itself, so the line-0 place comes from the other rules) | — | diagnostics are located (§9); a line-0 place helps no reader (Task 20) |
 | 53 | a constant-folded reduction or logical result (`&4'b1111`, `!1'b0`, `1'b1 && 1'b1`) keeps the context width of the expression it sits in (its value in the low bit, the rest zero) | Yosys keeps 1 bit there (verified on 0.55: `assign y = a + &4'b1111;` with an 8-bit `a` has `B_WIDTH 1` and `connect \B 1'1`, ours `B_WIDTH 8`, `8'00000001`; 6 of 450 random expressions of the review's differential differ, all this case) | — | the values are identical, only the width of an intermediate constant differs; the `$eq`/`$mux` cells around it see the same bits (PR 2D-5 review) |
+| 54 | a non-constant `y[b -: w] = d` or `<= d` with an unsigned base `b` below `w - 1` whose slice straddles the bottom of `y` (`y[b -: 3]` of `[3:0]`, 3-bit `b` = 0 or 1) writes the bits of the slice inside `y` (v4.22) | writes nothing: the case method's offset `b - (w - 1)` is computed unsigned and wraps (verified on 0.55, `elab-equiv` reports `y[s -: 3]` with a 3-bit unsigned `s` as not equivalent: s = 0 and s = 1 leave `y` unchanged; the same for `[0:3]`, `[4:1]`, `[5:2]`; a signed base, `+:`, and the top end of `-:` are equivalent) | writes the in-range bits (IEEE 1364-2005 4.2.1) | Yosys drops data here; the straddling top end, the low end of `+:` and a signed base agree and are covered by `tests/verilog/case-bridge/select_straddle_*.v` (Task 22 fix round 1) |
+| 55 | a non-constant select inside a concatenation target (`{y[s], z} <= d`) is the located error `non-constant index into 'y' is not supported in a concatenation target`; a word of a register array with a non-constant index stays pending until Task 23 | accepted, and silently wrong: the select is read as a `$shiftx` whose output wire is then assigned, so the write to `y` is lost (verified on 0.55: `{y[s], z} <= d2` leaves `y` undriven by the process and `$shiftx` output assigned) | an lvalue concatenation may hold a variable select | fail-closed: no silent wrong answer (Task 22) |
+| 56 | an `if` or `case` whose condition or selector and items are literals and parameters folds to the branch it takes: no switch, and an output assigned only in a dead branch is no output of the block | `switch` on the constant with the matched item and an added default that holds the case temporaries (`switch 1'1 / case 1'1 / assign $1\y \a / case / assign $1\y \y`, verified on 0.55); the items after a match, and the items that cannot match, are removed before the outputs are collected (an all-dead `case` leaves an empty process), so a dead-only output is not an output there either | — | the same logic after `opt`; `elab-equiv` on `tests/verilog/case-bridge/const_fold.v` (Task 22) |
+| 57 | a switch whose branches assign nothing by `=` and that has no `default` item has no default case (`if (e) q <= d;` is one case) | an empty default case (`case` with no action) on every `if` and `case` (verified on 0.55: `if (e) q <= d` ends in an empty `case `) | — | an empty case changes nothing **without `full_case`**; the IR body is smaller (Task 22). With `full_case` (attribute or metacomment) the empty default case is added as in Yosys, since a `proc_mux` reads an unlisted value of a switch with `FULL_CASE` and no default as x: `<=` arms hold (v4.24; `case-bridge/full_case_nonblocking_*.v`) |
+| 58 | a constant index with an x or z bit as the target of a procedural select (`y[1'bx] = d;`, `y[1'bz] <= d;`) writes nothing, with the warning `assignment to bits outside 'y' [3:0] is ignored` | writes bit 0 (the index is read with x as 0; verified on 0.55: `y = 4'd0; y[1'bx] = d;` is `connect \y { 3'000 \d }`, `elab-equiv` reports NOT equivalent for x and for z) | an x or z index selects nothing (IEEE 1364-2005 4.2.1); the same rule as a read, #40 | silent in Yosys; the warning is EL-43's "every write outside the object warns" (Task 22 fix round 1) |
+| 59 | a call frame's variables are plain process-local temporaries: `O` pins assigned in the case tree and by no sync action | Yosys makes `$0\f$func$…` temporaries for them and a sync action `update \f$func$…v 4'x` that drives the wire to x (verified on 0.55: `yosys -p "read_verilog f.v; write_rtlil"` on `q <= inc(d)`) | — | the sync action is a dead register after `opt`; EL-38's "no flip-flop for `v` or `inc`" |
+| 60 | the actual of an input is read directly by the body (`$add` reads `d`, not the frame's `v`) | Yosys 0.55 does the same: `connect \A \d` (blocking assignment updates `rv`) | — | none: the brief's "reading the frame temporary of `v`" is the net the process also drives |
+| 61 | a continuous-context call is a `$proc` whose output is the result variable's own wire; the expression reads that wire | Yosys wraps the call in `always @*` over `\f$func$…$result` and `connect`s the lhs to it | — | none |
+| 62 | outputs of an `if`/`case` inside an unrolled loop are counted over every iteration's branches by the scan; the generator folds the taken branch per iteration | Yosys unrolls first, so a branch dead in every iteration writes nothing and its target is no output | scan-time unrolling (cost: the body scanned once per iteration) | none since v4.24 (review I2): emit drops every output no action assigns (its hold, sync update and driver claim), so the variable-indexed loop write `y[i] = a[i]` of a half of `y` holds and claims only that half, a branch dead in every iteration leaves its target unheld, and two blocks writing disjoint halves are no conflict; a real overlap is still `'y[3]' is assigned in two always blocks` (`call-bridge/loops_disjoint_halves.v`); **open (2D-7, PR 2D-6 re-review N1):** a loop write under a runtime `if`/`case` (`if (a[i]) w[i] = b[i]; else w[i] = 0;`) still claims the whole of `w`, because the switch's exit action covers the whole object, so two blocks writing disjoint halves that way get a false `'w[0]' is assigned in two always blocks`. Yosys accepts it. The design is rejected loudly, never miscompiled. |
+| 63 | a register-array word with a variable index is supported for one-dimensional arrays only; a multi-dimensional one is the located error `non-constant index into the multi-dimensional register array 'm' is not supported` | Yosys's `mem2reg_as_needed_pass2` handles every dimension | the row-major address as a case selector | rare; the flattened address needs `$mul`/`$add` cells before the switch |
+| 64 | the variables of a memory write join the open switches when the statement is built, and the root's start-of-block actions go in then | Yosys inserts `addr = x; data = x; en = 0` at the start of the top block when it simplifies the statement, before any process is generated | the scan listing them (it cannot count the writes of an unrolled loop or a call) | none in the body: the same cases, actions and temporaries a listed variable would give (bridge `mem-bridge`) |
+| 65 | a word of a memory inside a nested concatenation target, and a non-constant bit or part select of a word, are located errors | Yosys splits the outer concatenation only (a nested one is not split) and shifts the data and the enable for a variable select | — | rare; both are refused loudly, never mis-written |
+| 66 | two `always` blocks writing one word in one cycle: the later block's port wins (the priority is `$mem` v1's implicit later-port-wins; no `WR_PRIORITY_MASK` is emitted) | Yosys gives a port priority over the ports of its own process only (`current_memwr_visible`); across processes the result is undefined | IEEE 1364-2005 11: a race | `elab-equiv` reports NOT equivalent on a source that enables both (the bridge sources keep the enables exclusive) |
+| 67 | `$readmemh/b` inside an `if` or a loop of an `initial` is a located error | Yosys reads it when the condition is constant or the loop unrolls | — | rare; the statement-level `$readmem` is the supported form |
+| 68 | `$readmemh/b` loads the words that fit and warns once per call (`$readmemh of 'f' dropped N words outside the array (the first at address A)`) when the file has words past the last array word or after an `@addr` outside the array | Yosys drops those words silently | IEEE 1364-2005 17.2.8: an address outside the range is an error and the load ends | a write is never dropped silently; the in-range words are kept |
+| 69 | a register array read with a variable index past its end (`m[ra]`, 3-bit `ra`, 4 words) reads x | Yosys's mem2reg truncates the address to `ceil_log2(size)` bits, so `ra` = 4..7 aliases words 0..3 | IEEE 1364-2005 7.4.1: an out-of-range read is x | `elab-equiv` reports NOT equivalent on such a source (the bridge sources keep the index in range); #50 covers constant indices |
+| 70 | a task call as a statement of an `initial` block is not applied: `task call in an initial block is not applied and is ignored` | Yosys applies the call (verified on 0.55): when an `always` block also assigns the register, `initial tk(7);` gives it the `init` attribute 7; when none does, it drives the register constant (`connect \r 4'0111`) | — | rare; assign in the `initial` block itself |
+| 71 | a signed `case` with a negative sized literal item beside a wider unsigned item (`case (sa) -4'sd1: ...; 8'd15: ...`, `sa` a `reg signed [3:0]`) takes the first item as the 8-bit `8'hFF` (the unary minus is context-determined to the case width, IEEE 1364-2005 5.5.1), so for `sa = -1` (zero-extended to `8'h0F` beside the unsigned `8'd15`) the second item matches | Yosys 0.55 gives the first item `8'h0F` (verified by `elab-equiv`: for `sa = -1` Yosys takes the first item, `y0 = 1`, Odin the second, `y0 = 3`; `sa == -4'sd1` agrees, only the case path differs) | IEEE 1364-2005 5.5.1 | Yosys evaluates the item without the case width. The bridge sources keep the items of one signedness |
+| 72 | a function with a side effect on a variable `r`, called in an lvalue index while the right-hand side reads `r` (`y0[fi(a)] = r[0]`): the target is generated first, so the call's side effect is applied before the right-hand side reads `r` | Yosys 0.55 orders the call and the right-hand side's read of `r` otherwise (verified: `elab-equiv` reports NOT equivalent) | IEEE 1364-2005 leaves the order open (11.4) | a race by the standard; the bridge sources have no side effect in an index |
+| 73 | `$readmemh/b` truncates a word with non-zero digits beyond the memory's width and warns once per call (`$readmemh of 'f' truncated N words wider than the memory's W bits (the first, 'w', at line L)`); leading zeros are no loss and no warning | Yosys 0.55 warns per word (`Literal has a width of 8 bit, but value requires 9 bit`) and truncates | IEEE 1364-2005 17.2.8: the file's word is sized to the memory | a write is never dropped silently; one warning per call as #68 (review I4) |
+| 74 | a call in an expression is inlined by C recursion (`pg_run` to the walker to `pg_call_hook` to `pg_run`); the nesting is capped at 256 (`function call nesting deeper than 256 at 'f'`), so a deep chain of non-recursive functions is a located error, not a stack overflow | Yosys inlines by AST rewriting to any depth | running the call after the expression walk (the walker hands back a placeholder) | the hoist is 2D-7's (plan constraint ledger: "No recursion in `src/`", deviation recorded); the cap is far above real designs (chains of 3 to 10) |
+| 75 | an unrolled `for` that never ends (`reg [3:0] k; for (k = 7; k >= 0; k = k - 1)`) is the located error `for-loop never ends: 'k' takes the value 7 again` when its test and step read only the variable (Brent's cycle check), else `loop creates more than 2097152 IR objects (is it endless?)` (`ODIN3_ELAB_MAX_LOOP_OBJECTS`) or the iteration cap `loop exceeds 1048576 iterations` | Yosys 0.55 has no limit: it unrolls until it runs out of memory | the caps of EL-37 | review M3: the cap used to fire only after 5.7 GB of cells |
 
 ## 18. Implementation split (EL-51)
 

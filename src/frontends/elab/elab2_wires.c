@@ -119,7 +119,11 @@ odin3_status odin3_elab2_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req,
         odin3_log(ODIN3_LOG_ERROR, "odin3_elab2_prov: no module is being emitted");
         return ODIN3_ERR_INVALID_ARG;
     }
-    return prov_for(e2, e2->mod_name, req, out);
+    odin3_elab2_prov_req inlined = *req;
+    if (inlined.call.v == 0) { /* inside a call being inlined: the second loc of EL-45 */
+        inlined.call = e2->call;
+    }
+    return prov_for(e2, e2->mod_name, &inlined, out);
 }
 
 /* --- attributes (2A §7) ---------------------------------------------------------------------- */
@@ -209,8 +213,7 @@ static uint32_t symbol_width(const odin3_symbol *rec) {
     if (!rec->has_packed) {
         return 1;
     }
-    int64_t span = (int64_t)rec->packed.msb - (int64_t)rec->packed.lsb;
-    return (uint32_t)(span < 0 ? -span : span) + 1U;
+    return (uint32_t)odin3_elab2_dim_size(&rec->packed);
 }
 
 /* The IR name of rec: its scope path ('.'-joined) and its own name, interned. */
