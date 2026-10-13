@@ -216,10 +216,18 @@ static odin3_ast_id bw_params(e1b_writer *bw, const odin3_elab1_spec *spec, odin
     return bw_make(bw, &list, mark, from);
 }
 
-/* The `blackbox` ATTR without a value (synthesized: the source's stays a pending kind). */
-static odin3_ast_id bw_attr(e1b_writer *bw, odin3_ast_id from) {
+/* A STRING node holding the name base, at from (a carrier's `blackbox` value). */
+static odin3_ast_id bw_string(e1b_writer *bw, uint32_t base, odin3_ast_id from) {
+    odin3_ast_spec spec = bw_spec(bw, ODIN3_AST_STRING, from);
+    spec.name = base;
+    return bw_make(bw, &spec, odin3_ast_mark(bw->e1->elab), from);
+}
+
+/* The `blackbox` ATTR (synthesized: the source's stays a pending kind): without a value for a
+ * definition's own MODULE, with the definition's name as a STRING for a carrier (base != 0). */
+static odin3_ast_id bw_attr(e1b_writer *bw, uint32_t base, odin3_ast_id from) {
     odin3_ast_spec spec = bw_spec(bw, ODIN3_AST_ATTR, from);
-    const odin3_ast_id none = {0};
+    odin3_ast_id value = base != 0 ? bw_string(bw, base, from) : (odin3_ast_id){0};
     odin3_ast_id attr = {0};
     if (bw->st == ODIN3_OK && !odin3_elab1_node_room(bw->e1, from)) {
         bw->st = ODIN3_ERR_PARSE;
@@ -227,7 +235,7 @@ static odin3_ast_id bw_attr(e1b_writer *bw, odin3_ast_id from) {
     bw->st = bw->st != ODIN3_OK
                  ? bw->st
                  : odin3_ast_intern(bw->e1->elab, odin3_bytes_cstr(k_blackbox), &spec.name);
-    bw->st = bw->st != ODIN3_OK ? bw->st : odin3_ast_make(bw->e1->elab, &spec, &none, 1, &attr);
+    bw->st = bw->st != ODIN3_OK ? bw->st : odin3_ast_make(bw->e1->elab, &spec, &value, 1, &attr);
     return attr;
 }
 
@@ -241,11 +249,11 @@ static odin3_status bw_module(odin3_elab1 *e1, uint32_t idx, odin3_ast_id from) 
     const odin3_elab1_spec *spec = box->implicit ? NULL : odin3_elab1_spec_at(e1, box->spec);
     uint32_t mark = odin3_ast_mark(e1->elab);
     bw_push(&bw, spec != NULL ? bw_params(&bw, spec, from) : (odin3_ast_id){0});
-    bw_push(&bw, bw_ports(&bw, odin3_elab1_bbox_at(e1, idx), from));
+    bw_push(&bw, bw_ports(&bw, box, from));
     odin3_ast_spec mspec = bw_spec(&bw, ODIN3_AST_MODULE, from);
-    mspec.name = odin3_elab1_bbox_at(e1, idx)->name;
+    mspec.name = box->name;
     odin3_ast_id module = bw_make(&bw, &mspec, mark, from);
-    odin3_ast_id attr = bw_attr(&bw, from);
+    odin3_ast_id attr = bw_attr(&bw, box->base, from);
     bw.st = bw.st != ODIN3_OK ? bw.st : odin3_ast_attach(e1->elab, module, &attr, 1);
     bw_push(&bw, module);
     odin3_arena_destroy(bw.arena);
@@ -305,6 +313,39 @@ odin3_status odin3_elab1_blackbox(odin3_elab1 *e1, uint32_t spec) {
         st = ports[k].name != 0 ? bbport_add(e1, box, &ports[k], def->node) : ODIN3_OK;
     }
     return st == ODIN3_OK && building(e1) ? bw_module(e1, box, def->node) : st;
+}
+
+/* --- carriers: the other parameter sets of a `(* blackbox *)` definition (v4.18) ----------------
+ */
+
+/* Specialization spec's carrier MODULE: its ports under the set's values (the connection check's
+ * own, quiet), in the black-box table and written on the store's pending stack. */
+static odin3_status write_carrier(odin3_elab1 *e1, uint32_t spec) {
+    const odin3_elab1_spec *rec = odin3_elab1_spec_at(e1, spec);
+    odin3_ast_id node = odin3_elab1_def(e1, rec->def)->node;
+    uint32_t count = 0;
+    const odin3_elab1_port *ports = odin3_elab1_spec_ports(e1, spec, &count);
+    if (ports == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_elab1_bbox proto = {.name = rec->carrier, .base = rec->name, .spec = spec, .at = node};
+    uint32_t box = 0;
+    odin3_status st = bbox_new(e1, E1_SPEC_KEY | spec, &proto, &box);
+    for (uint32_t k = 0; st == ODIN3_OK && k < count; k++) {
+        st = ports[k].name != 0 ? bbport_add(e1, box, &ports[k], node) : ODIN3_OK;
+    }
+    return st == ODIN3_OK ? bw_module(e1, box, node) : st;
+}
+
+odin3_status odin3_elab1_write_carriers(odin3_elab1 *e1) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t spec = 0; st == ODIN3_OK && building(e1) && spec < e1->specs.len; spec++) {
+        const odin3_elab1_spec *rec = odin3_elab1_spec_at(e1, spec);
+        bool skip =
+            rec->carrier == 0 || odin3_elab1_pending(e1, odin3_elab1_def(e1, rec->def)->node);
+        st = skip ? ODIN3_OK : write_carrier(e1, spec);
+    }
+    return st;
 }
 
 /* --- implicit black boxes (--auto-blackbox) ------------------------------------------------- */

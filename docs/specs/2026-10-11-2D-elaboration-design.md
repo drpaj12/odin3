@@ -225,15 +225,11 @@ at the later part (§17 #44); `'r' is a variable assigned by a continuous assign
 net` is located at the lvalue. (3) EL-10: the resize warning is located at the `CONNECTION`, names
 the module as the `INSTANTIATION` does (`sub`, `sub$W=8`), and is "extended" when the connection is
 narrower than the port and "truncated" when wider, for outputs too (Yosys: "Resizing cell port
-… from W bits to P bits"). (4) EL-11: the elaborated form does not carry a black box's
-per-instance port widths, so a source black box's cell type has the default specialization's
-widths and is never parametric, and stage 2 fails closed (fix round 1 of Task 19): an instance that
-gives a parameter (other than a string) a value other than its default is the located error `width
-of port 'p' of black-box instance 'u' (module 'bb') cannot be determined: parameter 'W' is
-overridden and the port has a range`, naming the first port with a range; a port without a range
-cannot depend on a parameter, so such instances (and all-default ones) are built exactly. A
-registered type of the name is matched by port name and reused, its widths inferred (IR-7b). The
-exact answer (a specialization table written by stage 1) is Peter's (§17 #46). (5) EL-11:
+… from W bits to P bits"). (4) EL-11 (superseded by v4.19 (1)): Task 19 first failed closed on an
+instance that gave a non-string parameter a value other than its default when a port had a range,
+because the elaborated form carried only the default specialization's ports; v4.19 replaces that
+error with exact widths. A registered type of the name is matched by port name and reused, its
+widths inferred (IR-7b). (5) EL-11:
 `parameter:<NAME>` is written for every parameter of a module instance's params LIST (the
 elaborated form does not say which were overridden). (6) EL-26: a bit with one driver is merged
 into the wire's net in step (7) (pin-based, IR-15) because the driver's net is only known then;
@@ -248,6 +244,32 @@ v4.18 (2026-10-12; 2D Task 20 fix round 1, controller ruling I1). EL-27 rule 4 n
 array inside a concatenation lvalue as a complex lvalue: Yosys 0.55 splits concatenation lvalues
 before mem2reg, so `{m[wa], t} <= {a, a};` with `assign y = m[ra];` keeps one memory and prints no
 `replacing memory` warning (verified: `yosys -p "read_verilog t.v; proc; stat"`).
+v4.19 (2026-10-12; Peter decision 3: exact black-box port widths per parameter set). (1) EL-11,
+EL-4, EL-9: stage 1 writes, besides a `(* blackbox *)` definition's one ports-only `MODULE` (its
+default specialization's ports and values, v4.10), a **carrier** `MODULE` for each other
+parameter set an instance uses: a ports-only black-box `MODULE` named as a module's specialization
+is (`bb$W=16`, `$2`.. when taken), whose `ATTR` `blackbox` holds the definition's name as a
+`STRING` (the definition's own has none), with the ports evaluated under that set and one bare
+`PARAM_DECL` per parameter holding the set's final values. An `INSTANTIATION` still names the
+definition (v4.10): the carrier is named by nothing and only carries data. No carrier is written
+for a definition whose name is a registered cell type (stage 2 reuses the type, IR-7b). Carriers
+come after every specialization, before the implicit black boxes, in queue order. (2) Stage 2
+(`elab2_bbox.c`): the definition's `MODULE` declares the one cell type under the base name (as
+before, with the default widths in the declaration) and reads its carriers; each port whose width
+differs in some set gets a **width expression** (`celltype.h`'s fourth width rule, produced here
+as the tech library produces its own) that finds the cell's parameter values in a table with one
+entry per set and returns the port's width there. The cell keeps its source parameters (no hidden
+parameter, no per-cell type), so a cell takes the exact widths of its set as Yosys 0.55 gives its
+connections (`hierarchy` derives the module, checks and resizes the connections against it and
+drops it; `write_rtlil` shows `cell \bb \u1` with `parameter signed \W 16` and 16-bit `connect`s
+beside `module \bb` with the defaults' widths); I4's resize and its warning apply to the exact
+width. The `width of port … cannot be determined` error of v4.17 (4) is deleted. A string
+parameter that no range reads changes nothing; a set whose values do not fit the parameter's kind
+is left out (its instances get "value of parameter … is not an integer"). (3) New located error
+(agent default): two sets whose values are equal as IR integers but whose literals differ in size
+(`4'd8`, `5'd8`) and give a port two widths (`[(~W)>>2:0]`) cannot be told apart by the cell's
+parameters: `black box 'bb': port 'p' has different widths in parameter sets with equal values`,
+at the definition. (4) Remaining divergences are in §17 #46.
 
 ## 1. Purpose and scope (EL-1)
 
@@ -367,7 +389,7 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | Kind | In the elaborated form |
 |---|---|
 | `UNIT` | exactly one; name = the top specialization's name; tail = `MODULE`s, the top first, then every other specialization in the order a breadth-first walk of instances (in source order) first reaches it |
-| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from it (EL-11), never an IR module |
+| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), then the **carriers** (v4.18: one more such `MODULE` per other parameter set an instance uses, named as a module's specialization, its `ATTR` `blackbox` valued with the definition's name as a `STRING`, its ports and `PARAM_DECL` values those of the set; none when the definition's name is a registered cell type), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from the definition's (EL-11; the carriers give it its per-set widths), never an IR module |
 | `PORT_DECL` | only in the port LIST, `IN_HEADER` set, exactly one `DECLARATOR`, in port order; direction sub; `DT` = `reg`, `integer` or none; `NET` field = 1 + the net kind for a net port (never 0: an untyped port is `wire`, EL-24); `SIGNED`; `RANGE` with `NUMBER` bounds or absent (scalar); merged from the non-ANSI declarations (EL-24): the `DECLARATOR`'s `E?` is the value of the port's own declaration or of the merged `wire w = e` / `reg q = v` (v4.15: a net port's `E?` is its net declaration assignment, which the binder queues as `CONTINUOUS` and stage 2 drives the port's net with; a `reg`/`integer` port's is its initial value, as for an ANSI `output reg q = 1'b1`; a value on both declarations is an error), and the `PORT_DECL`'s attributes are those of both declarations (the later declaration wins a name both give) |
 | `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type), except on a black-box `MODULE`, whose `PARAM_DECL`s are bare: no `RANGE`, `SIGNED` or `DT`, the value's `NUMBER` carrying the width and sign (v4.9) |
 | `NET_DECL` | sub ∈ `wire tri wand wor triand trior uwire supply0 supply1`; no `STRENGTH`, no `DELAY`, no `VECTORED`/`SCALARED`; `RANGE`/unpacked `RANGE`s with `NUMBER` bounds; a declarator's `E?` is a net declaration assignment (N7) |
@@ -738,9 +760,10 @@ and makes one specialization per level.
   its final values in its params LIST (EL-4: the cell's parameters). Stage 2 (Task 19) registers one
   black-box cell type per such `MODULE` (IR-7b; granularity `blackbox`, the definition's name, its
   ports in port order) instead of creating an IR module; each cell takes its `INSTANTIATION`'s
-  values as cell parameters. Its port widths are the default specialization's: an instance that
-  overrides a (non-string) parameter of a module with a ranged port is an error, since the width
-  cannot be determined from the elaborated form (v4.17, §17 #46). `write_blif --vtr` (3E) therefore writes
+  values as cell parameters. Its declared port widths are the default specialization's, and each
+  port that differs in another parameter set the instances use has a width expression over the
+  cell's parameter values, so every cell has the exact widths of its own set (v4.19, §17 #46):
+  stage 1 writes the other sets as carrier `MODULE`s for it (EL-4). `write_blif --vtr` (3E) therefore writes
   `.subckt <base name>`, which an architecture model of that name matches; no `$`-suffixed black-box
   name reaches a writer. When a cell type of that name is already registered (a tech library's
   `single_port_ram`), IR-7b's compatibility check by port name applies and the registered type is
@@ -2194,7 +2217,8 @@ bullets above differ from it, this note and `writer.h` win. The eight difference
    type (declared models first, then the other instantiated types; `$` names excepted), as Yosys
    0.55's `read_verilog` makes a `(* blackbox *)` module: `attribute \blackbox 1`, `attribute
    \dynports 1` when a port's width depends on a parameter, the parameters with their defaults
-   and the ports at the default widths (`src/backends/rtlil/writer.h`). `hierarchy -check`
+   and the ports at the default widths (`src/backends/rtlil/writer.h`; a cell of the type has the
+   widths of its own parameter set since v4.19, as Yosys's cells do, §17 #46). `hierarchy -check`
    accepts every parameterisation through one stub (with `dynports` it neither resizes nor
    derives the instances). `Cell::known()` is now true for these instances, so Yosys counts only
    their input connections as users, and `opt_clean` *removes* a black-box instance whose
@@ -2532,7 +2556,7 @@ and reported, never relaxed (2A's rule).
 | 43 | in a self-determined position (the operand of a reduction, `!`, `&&`, `||` or a ternary condition) an inner unary `~`, `-` or `+` over a signed name (`!(-s)`) keeps `A_SIGNED` 1 on its cell | the inner cell has `A_SIGNED` 0: genrtlil passes no sign hint down a unary operator (verified on 0.55) | — | parameter only, the values are identical; deferred (Task 18 fix round 2) |
 | 44 | one lvalue naming a net twice (`assign {n4[0], n4[0]} = c4[1:0] + 2'd1;`) is A4's error at the second part | accepted: one `$add` with two `Y` pins on `n4[0]`; the later `check` warns "multiple conflicting drivers" (verified on 0.55: `yosys -p "read_verilog t.v; proc; opt; check"`) | legal but multiply driven | an invalid IR otherwise (rule 4); the review carried it from Task 18 (Task 19) |
 | 45 | a ternary with an all-`z` branch and `bufif`/`notif` become one `$tribuf` on a top-level output or inout port, and are D3's error anywhere else | a `$mux` with a `z` input (and "Yosys has only limited support for tri-state logic"), `$tribuf` only after `tribuf` | tri-state nets | D3: the IR allows tristate drivers only on a bus that reaches a top port (Task 19) |
-| 46 | an instance of a source `(* blackbox *)` module that overrides a non-string parameter is an error when the module has a port with a range (`width of port 'p' of black-box instance 'u' (module 'bb') cannot be determined: parameter 'W' is overridden and the port has a range`); the cell type has the default specialization's port widths | the cell's ports have the widths of its own specialization; Yosys 0.55 leaves the black box underived and connects the expressions as written (`connect \a \x`, a parameter override kept as `parameter signed \W 16`; one port resized against the default module's width, verified with `hierarchy -top top; write_rtlil`) | — | the elaborated form (EL-4) keeps only the default specialization's ports, so no width can be tied to an override exactly: guessing changed correct connections (review of Task 19), so it fails closed; the exact solution (stage 1 writing a specialization table) is Peter's decision |
+| 46 | the port widths of a source `(* blackbox *)` instance are exact for its parameter set (v4.19), as Yosys 0.55's connections are: a width expression over the cell's parameters, one table entry per set; two sets with equal IR integer values but literals of different sizes and a port width that depends on the size (`$bits`-like ranges, `~W`) are a located error; the cell's parameters are all of the set's (see #30) | the cell's connections have the widths of its own set (`hierarchy` derives the module for the check and drops it; verified on 0.55: `bb #(.W(16))` beside a default `bb` in one module, ranges `[W-1:0]`, `[W:0]`, `[2*W-1:0]`, a fixed `[7:0]` port, two parameters with one default, a string override; `module \bb` keeps the defaults' widths); an **instance array** is sliced by the *default* module's port width (`bb #(.W(16)) v[1:0] (.a(x2))` with a 16-bit `x2` is accepted, the elements extended to 16 bits; with a 32-bit one it is an error "Array cell … has invalid port vs. signal size") | — | 2D checks and slices an overridden array by its own set's widths (EL-10), so it accepts `x2` of 2 x 16 bits (Yosys refuses) and reads a 16-bit one as EL-10 does, not as Yosys's default-width slices; the `$bits`-like clash above has no Yosys counterpart (Yosys never names the set); `write_rtlil` stubs show `attribute \dynports 1` when a port width varies between sets, where Yosys sets it for any parameter-dependent range |
 | 47 | in step (7) a wired bit with one driver is that driver's net merged into the wire's | no gate for one driver, the driver connected to the wire | — | the driver's net is only known after the assignments; the merge is pin-based (Task 19) |
 | 48 | `(* nomem2reg *)` on an array exempts it from rules 2-6 only: a net array is still registers (rule 1), and a module's `(* nomem2reg *)` exempts every array of the module from rules 2-6 | `(* nomem2reg *)` skips the array, rule 1 included (a module's skips the whole mem2reg block): `(* nomem2reg *) wire [3:0] w [0:3]` stays a memory (verified on 0.55: `yosys -p "read_verilog t.v; write_rtlil"` shows `memory width 4 size 4 \w`) | — | the words of a net array are driven by `assign`, which no `$mem` write port can take; EL-27 already says rules 2-6 (Task 20) |
 | 49 | the words of an array that became registers are wires named by the declared index (`w[1]` .. `w[4]` for `[1:4]`), a flattened array's by its row-major position | wires `w[0]` .. `w[size-1]`, and an implicit wire for any other declared index (verified on 0.55: `wire [3:0] w [1:4]` with `assign w[4] = a` gives wires `w[0]` .. `w[4]`) | — | one wire per word, no stray `w[0]` (Task 20) |

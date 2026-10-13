@@ -204,6 +204,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_mem.c
     src/frontends/elab/elab2_memport.c
     src/frontends/elab/elab2_memscan.c
+    src/frontends/elab/elab2_bbox.c
     src/frontends/elab/elab2_inst.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c

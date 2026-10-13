@@ -253,6 +253,23 @@ static odin3_ast_id expect_blackbox(const char *name, uint32_t n_ports) {
     return module;
 }
 
+/* A carrier MODULE of the `(* blackbox *)` definition `pb` (spec v4.18): a black-box MODULE whose
+ * `blackbox` ATTR holds the definition's name as a STRING. */
+static odin3_ast_id expect_carrier(const char *name, uint32_t n_ports) {
+    odin3_ast_id module = find(ODIN3_AST_MODULE, name);
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, module.v, name);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_ast_nchild(rs.elab, module));
+    odin3_ast_span attrs = odin3_ast_attrs(rs.elab, module);
+    TEST_ASSERT_EQUAL_UINT32(1, attrs.n);
+    TEST_ASSERT_EQUAL_STRING("blackbox", name_of(attrs.ids[0]));
+    odin3_ast_id value = odin3_ast_child(rs.elab, attrs.ids[0], 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_STRING, odin3_ast_kind_of(rs.elab, value));
+    TEST_ASSERT_EQUAL_STRING("pb", name_of(value));
+    TEST_ASSERT_EQUAL_UINT32(n_ports,
+                             odin3_ast_nchild(rs.elab, odin3_ast_child(rs.elab, module, 1)));
+    return module;
+}
+
 /* Port pos of module as "name dir [msb:lsb]" (no range when scalar); a wire, IN_HEADER. */
 static void expect_port(odin3_ast_id module, uint32_t pos, const char *want) {
     odin3_ast_id port = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, module, 1), pos);
@@ -581,9 +598,12 @@ static odin3_ast_id nth_instantiation(const char *name, uint32_t n) {
 }
 
 /* A parameterized `(* blackbox *)` definition keeps its name, as Yosys 0.55's module and cells
- * do (PR 2D-3 final review I2, EL-9/EL-11 v5.0): one ports-only MODULE with the defaults' ports
+ * do (PR 2D-3 final review I2, EL-9/EL-11 v5.0): the MODULE named after it has the defaults' ports
  * and values, written even when no instance uses the defaults; each INSTANTIATION names it and
- * carries its final values; connections are checked against the instance's own widths. */
+ * carries its final values; connections are checked against the instance's own widths. Spec v4.18
+ * (Peter decision 3): each other parameter set an instance uses is also a ports-only carrier
+ * MODULE, named as a module's specialization (`pb$W=2`), whose `blackbox` ATTR holds the
+ * definition's name and whose ports and values are that set's. */
 static void test_blackbox_specializations(void) {
     run_one("(* blackbox *) module pb #(parameter W = 4) (input [W-1:0] a);\nendmodule\n"
             "module top; wire [1:0] x2; wire [2:0] x3; wire [7:0] x8;\n"
@@ -592,7 +612,7 @@ static void test_blackbox_specializations(void) {
     expect_clean();
     TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_INFO, "black box"));
     TEST_ASSERT_EQUAL_UINT32(0, find(ODIN3_AST_INSTANTIATION, "pb$W=2").v);
-    TEST_ASSERT_EQUAL_STRING("top,pb", module_names());
+    TEST_ASSERT_EQUAL_STRING("top,pb,pb$W=2,pb$W=3", module_names());
     odin3_ast_id module = expect_blackbox("pb", 1);
     expect_port(module, 0, "a input [3:0]");
     odin3_ast_id params = odin3_ast_child(rs.elab, module, 0);
@@ -600,6 +620,8 @@ static void test_blackbox_specializations(void) {
     odin3_ast_id decl = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, params, 0), 1);
     TEST_ASSERT_EQUAL_STRING("W", name_of(decl));
     TEST_ASSERT_EQUAL_INT64(4, number_int(odin3_ast_child(rs.elab, decl, 0)));
+    expect_port(expect_carrier("pb$W=2", 1), 0, "a input [1:0]");
+    expect_port(expect_carrier("pb$W=3", 1), 0, "a input [2:0]");
     static const int64_t widths[] = {2, 3, 2};
     for (uint32_t i = 0; i < 3; i++) {
         odin3_ast_id holder = nth_instantiation("pb", i);
@@ -610,6 +632,23 @@ static void test_blackbox_specializations(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(0, nth_instantiation("pb", 3).v);
     expect_conn(instance("u3[0]"), 0, "a", "x8[1:0]");
+}
+
+/* A set used twice has one carrier; the defaults have none (their MODULE is the definition's). */
+static void test_blackbox_carriers_per_set(void) {
+    run_one("(* blackbox *) module pb #(parameter W = 4) (input [W-1:0] a);\nendmodule\n"
+            "module top; wire [3:0] x4; wire [1:0] x2;\n"
+            "  pb u1 (.a(x4));\n  pb #(.W(4)) u2 (.a(x4));\n"
+            "  pb #(.W(2)) u3 (.a(x2));\n  pb #(.W(2)) u4 (.a(x2));\nendmodule\n");
+    expect_clean();
+    TEST_ASSERT_EQUAL_STRING("top,pb,pb$W=2", module_names());
+}
+
+static void test_blackbox_defaults_only_no_carrier(void) {
+    run_one("(* blackbox *) module pb #(parameter W = 4) (input [W-1:0] a);\nendmodule\n"
+            "module top; wire [3:0] x4;\n  pb u1 (.a(x4));\nendmodule\n");
+    expect_clean();
+    TEST_ASSERT_EQUAL_STRING("top,pb", module_names());
 }
 
 /* An instance's connection width is checked against its own specialization's ports. */
@@ -931,6 +970,8 @@ int main(void) {
     RUN_TEST(test_output_lvalues);
     RUN_TEST(test_blackbox_module);
     RUN_TEST(test_blackbox_specializations);
+    RUN_TEST(test_blackbox_carriers_per_set);
+    RUN_TEST(test_blackbox_defaults_only_no_carrier);
     RUN_TEST(test_blackbox_specialization_widths);
     RUN_TEST(test_blackbox_param_keeps_celltype_name);
     RUN_TEST(test_celltype_named);
