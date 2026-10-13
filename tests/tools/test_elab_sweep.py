@@ -265,15 +265,13 @@ class LimitsTest(SweepTestCase):
         live = [0]
         at_start: dict[int, int] = {}
         lock = threading.Lock()
-        real = memcap.run
-
         def spy(argv: list[str], cap: int, *a: object, **k: object) -> object:
             with lock:
                 live[0] += 1
                 at_start[cap] = max(at_start.get(cap, 0), live[0])
             time.sleep(0.05)
-            try:
-                return real(argv, cap, *a, **k)  # type: ignore[arg-type]
+            try:  # no real child: under load a real one can fail and hide the scheduling check
+                return subprocess.CompletedProcess(argv, 0, "", "")
             finally:
                 with lock:
                     live[0] -= 1
