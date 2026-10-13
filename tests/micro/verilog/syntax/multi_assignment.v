@@ -12,3 +12,4 @@ assign data = (s == 3) ? bus3 : 4'hz;
 // net declaration with continuous assignment
 assign busout = enable ? data : 4'hf;
 endmodule
+// elab-check: --yosys-tribuf

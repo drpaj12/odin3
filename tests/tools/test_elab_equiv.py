@@ -350,6 +350,16 @@ class BridgeTest(unittest.TestCase):
         self.assertIn("proc; flatten; tribuf -logic; opt;", tri)
         self.assertEqual(plain, tri.replace("tribuf -logic; ", ""))
 
+    def test_in_file_directive_asks_for_tribuf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            on = Path(tmp) / "on.v"
+            off = Path(tmp) / "off.v"
+            on.write_text("module m;\nendmodule\n// elab-check: --yosys-tribuf\n")
+            off.write_text("// elab-check: --yosys-tribuf\nmodule m;\nendmodule\n")  # line 1 only
+            self.assertTrue(elab_equiv.wants_yosys_tribuf(on))
+            self.assertFalse(elab_equiv.wants_yosys_tribuf(off))
+            self.assertFalse(elab_equiv.wants_auto_blackbox(on))
+
     # -- the cap ---------------------------------------------------------------------------
 
     def test_every_child_goes_through_memcap(self) -> None:

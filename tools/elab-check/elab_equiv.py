@@ -129,17 +129,28 @@ class Options:
     yosys_tribuf: bool = False
 
 
-def wants_auto_blackbox(source: Path) -> bool:
-    """True when the file's head holds the ``// elab-check: ... --auto-blackbox`` directive, the
-    same in-file spelling elab-check honours (a line after line 1, within the first 1024 bytes)."""
+def wants_directive(source: Path, flag: str) -> bool:
+    """True when the file's head holds a ``// elab-check: ... <flag>`` directive, the same in-file
+    spelling elab-check honours (a line after line 1, within the first 1024 bytes)."""
     try:
         head = source.read_bytes()[:1024].decode("utf-8", errors="replace")
     except OSError:
         return False
     return any(
-        line.startswith("// elab-check:") and "--auto-blackbox" in line
+        line.startswith("// elab-check:") and flag in line.split()
         for line in head.split("\n")[1:]
     )
+
+
+def wants_auto_blackbox(source: Path) -> bool:
+    """True when the file asks for ``--auto-blackbox`` (side A reads it that way)."""
+    return wants_directive(source, "--auto-blackbox")
+
+
+def wants_yosys_tribuf(source: Path) -> bool:
+    """True when the file asks for ``--yosys-tribuf``: its side B runs ``tribuf -logic`` (a file whose
+    tri-state buses odin3 turns into logic, 2D-7b review I3)."""
+    return wants_directive(source, "--yosys-tribuf")
 
 
 def yosys_script(read: str, top: str | None, blif: str, unmap: bool = False,
@@ -217,7 +228,7 @@ class Bridge:
 
     def side_b(self) -> None:
         read = f"read_verilog -sv -nolatches {self.opts.source}"
-        self.blif("side B", read, "b.blif", oracle=True, tribuf=self.opts.yosys_tribuf)
+        self.blif("side B", read, "b.blif", oracle=True, tribuf=self.opts.yosys_tribuf or wants_yosys_tribuf(self.opts.source))
 
     def probe_oracle(self, rejected: EquivError) -> None:
         """odin3 rejected the file: if Yosys dies of a signal on the same source, that is an
