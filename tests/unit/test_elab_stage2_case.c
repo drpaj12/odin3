@@ -315,6 +315,49 @@ static void test_full_case_attribute(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_soft_warnings(), et_log(&pt_rs));
 }
 
+/* C1 (PR 2D-6 review): `full_case` over `<=` arms. Yosys always adds the empty default case when
+ * the flag is set, so an unlisted selector value holds; without the case it is x. The body must
+ * have the added (empty) default case C2. */
+static void test_full_case_over_nonblocking_arms_keeps_the_empty_default(void) {
+    pt_read_src("module t(input clk, input s, a, output reg y);\n"
+                "  always @(posedge clk) (* full_case *) case (s) 1'b0: y <= a; endcase\n"
+                "endmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_ir_ok();
+    pt_expect_dump(0, "I4 O2\n"
+                      "C0 [O1<-O0] sw0+1\n"
+                      "C1 cmp(I3) [O1<-I2]\n"
+                      "C2 []\n"
+                      "W0 (I1) f1 C1+2\n"
+                      "S posedge I0 [O0<-O1]\n");
+}
+
+/* The synopsys metacomment form of the same. */
+static void test_synopsys_full_case_over_nonblocking_arms(void) {
+    pt_read_src("module t(input clk, input s, a, output reg y);\n"
+                "  always @(posedge clk) case (s) // synopsys full_case\n"
+                "    1'b0: y <= a;\n  endcase\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_ir_ok();
+    pt_expect_dump(0, "I4 O2\n"
+                      "C0 [O1<-O0] sw0+1\n"
+                      "C1 cmp(I3) [O1<-I2]\n"
+                      "C2 []\n"
+                      "W0 (I1) f1 C1+2\n"
+                      "S posedge I0 [O0<-O1]\n");
+}
+
+/* Without the flag, `<=` arms add no default case: nothing to hold (Yosys proc_mux: same). */
+static void test_plain_case_over_nonblocking_arms_adds_no_default(void) {
+    pt_read_clean("module t(input clk, input s, a, output reg y);\n"
+                  "  always @(posedge clk) case (s) 1'b0: y <= a; endcase\nendmodule\n");
+    pt_expect_dump(0, "I4 O2\n"
+                      "C0 [O1<-O0] sw0+1\n"
+                      "C1 cmp(I3) [O1<-I2]\n"
+                      "W0 (I1) f0 C1+1\n"
+                      "S posedge I0 [O0<-O1]\n");
+}
+
 /* The metacomment form: both flags, both warnings. */
 static void test_synopsys_metacomment_both_flags(void) {
     pt_read_src("module t(input s, a, output reg y);\n"
@@ -951,6 +994,9 @@ static void test_public_entry_points_refuse_misuse(void) {
     X(test_nested_if)                                                                              \
     X(test_read_after_switch_sees_t1)                                                              \
     X(test_full_case_attribute)                                                                    \
+    X(test_full_case_over_nonblocking_arms_keeps_the_empty_default)                                \
+    X(test_synopsys_full_case_over_nonblocking_arms)                                               \
+    X(test_plain_case_over_nonblocking_arms_adds_no_default)                                       \
     X(test_synopsys_metacomment_both_flags)                                                        \
     X(test_parallel_case_and_false_attribute)                                                      \
     X(test_constant_if_folds)                                                                      \

@@ -1597,9 +1597,10 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             LABELS differential SKIP_RETURN_CODE 77)
         # 2D Task 22 (spec 14.3): elab-equiv on every source of tests/verilog/case-bridge: if,
         # case, casez/casex wildcards, nesting with blocking temporaries, full_case, folding, item
-        # expressions and the case method for variable selects. Exit 77 (skip) as above.
+        # expressions and the case method for variable selects (--unmap-enables: a held register is an
+        # enabled flip-flop on the Yosys side). Exit 77 (skip) as above.
         add_test(NAME elab_case_bridge
-            COMMAND sh -c "for f in \"$4\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t \"$f\" || exit $?; done"
+            COMMAND sh -c "for f in \"$4\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t --unmap-enables \"$f\" || exit $?; done"
                     ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
                     $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
                     ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check

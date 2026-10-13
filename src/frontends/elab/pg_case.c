@@ -703,11 +703,13 @@ static odin3_status open_item(odin3_pg *pg, const item_ref *ref) {
 }
 
 /* The default case: the default item's, or the added one holding the targets (x under full_case)
- * when the branches assign by `=`. */
+ * when the branches assign by `=`, or an empty one under full_case (the `<=` arms hold). */
 static odin3_status open_default(odin3_pg *pg, uint32_t frame_at) {
     pg_frame frame = *(const pg_frame *)odin3_vec_cat(&pg->frames, frame_at);
     const pg_swctx *ctx = sw_top(pg);
-    if (frame.dflt == 0 && ctx->n == 0 && pg_late_count(pg) == 0) {
+    /* Yosys opens the (possibly empty) default case whenever full_case is set: the unlisted
+     * values then hold; without the case a proc_mux reads them as x (PR 2D-6 review C1). */
+    if (frame.dflt == 0 && !ctx->full_case && ctx->n == 0 && pg_late_count(pg) == 0) {
         return ODIN3_OK;
     }
     odin3_ast_id stmt =
