@@ -751,7 +751,7 @@ static odin3_status ex_word(ex_run *run, const ex_frame *frame, const odin3_elab
         idx[k] = ex_operand(e2, frame, k);
     }
     const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, ref->mem);
-    odin3_elab2_mem_rd rd = {ref->mem, frame->node, idx, ref->n, run->req->reads};
+    odin3_elab2_mem_rd rd = {ref->mem, frame->node, idx, ref->n};
     if (!mem->to_regs) {
         return odin3_elab2_mem_read(e2, &rd, out);
     }

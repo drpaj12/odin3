@@ -15,12 +15,11 @@
 
 /* The flags of Yosys's MEM2REG_FL_*, and this file's own for a continuous write. */
 enum {
-    MEM_FL_FORCED = 1U << 0,    /* a net array, (* mem2reg *) on the array or the module */
     MEM_FL_EQ2 = 1U << 1,       /* read after a blocking write in the same block */
     MEM_FL_SET_ASYNC = 1U << 2, /* written in a block without exactly one edge event */
     MEM_FL_SET_INIT = 1U << 3,  /* written in an initial block */
     MEM_FL_SET_ELSE = 1U << 4,  /* written anywhere else */
-    MEM_FL_CMPLX_LHS = 1U << 5, /* inside an lvalue's index or in a concatenation lvalue */
+    MEM_FL_CMPLX_LHS = 1U << 5, /* inside an lvalue's index */
     MEM_FL_CONST_LHS = 1U << 6, /* a write with constant indices */
     MEM_FL_VAR_LHS = 1U << 7,   /* a write with a variable index */
     MEM_FL_CONT = 1U << 8       /* written by a continuous assignment */

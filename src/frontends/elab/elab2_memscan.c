@@ -7,10 +7,9 @@
  * places and the proc-local blocking-write flag are Yosys's, so the places come out the same.
  *
  * Differences, deliberate: a function's or task's body is not scanned (its statements run where it
- * is called, Task 23); an array identifier inside a concatenation lvalue is placed at its own
- * line (Yosys's concatenation has line 0); a constant index is a NUMBER, a localparam, an
- * operator over them or the variable of a `for` that Yosys unrolls before this point (Yosys has
- * folded and unrolled by then).
+ * is called, Task 23); a concatenation lvalue is split into its parts first, as Yosys does; a
+ * constant index is a NUMBER, a localparam, an operator over them or the variable of a `for` that
+ * Yosys unrolls before this point (Yosys has folded and unrolled by then).
  */
 #include "ast/ast.h"
 #include "ast/kinds.h"
@@ -36,6 +35,7 @@ typedef struct ms_run {
     odin3_elab2 *e2;
     odin3_vec *facts;
     odin3_vec work;      /* odin3_ast_id: the nodes of a region still to visit */
+    odin3_vec parts;     /* odin3_ast_id: the parts of a concatenation lvalue still to judge */
     odin3_vec constwork; /* odin3_ast_id: the nodes of a constant test still to visit */
     odin3_vec chain;     /* odin3_ast_id: the selects of the lvalue being looked at */
     odin3_vec loops;     /* ms_loop: the for statements being scanned, innermost last */
@@ -156,16 +156,10 @@ static odin3_ast_id ms_chain(ms_run *run, odin3_ast_id lhs, odin3_status *st) {
     return node;
 }
 
-/* The expressions of an lvalue that are not its name: the index expressions of its selects, or a
- * whole concatenation (which Yosys marks but never reads). */
+/* The expressions of an lvalue part that are not its name: the index expressions of its selects. */
 static odin3_status ms_lhs_walk(ms_run *run, odin3_ast_id lhs, ms_mode mode) {
     odin3_status st;
-    odin3_ast_id name = ms_chain(run, lhs, &st);
-    odin3_ast_kind kind = odin3_ast_kind_of(run->e2->elab, name);
-    if (st == ODIN3_OK && kind != ODIN3_AST_IDENT && kind != ODIN3_AST_HIER_NAME &&
-        mode == MS_MARK) {
-        st = ms_idents(run, name, mode); /* a concatenation lvalue: all of it is complex */
-    }
+    (void)ms_chain(run, lhs, &st);
     /* run->chain is walked outside in; the index expressions are visited from the name out */
     for (size_t i = run->chain.len; st == ODIN3_OK && i > 0; i--) {
         odin3_ast_id sel = *(const odin3_ast_id *)odin3_vec_cat(&run->chain, i - 1);
@@ -304,10 +298,10 @@ static odin3_status ms_write(ms_run *run, const ms_asg *as) {
     return st;
 }
 
-/* One assignment: the complex-lvalue marks, the write flags of an array target, then the reads of
- * the target's index expressions (the walk skips the target itself). */
-static odin3_status ms_assign(ms_run *run, odin3_ast_id node, bool blocking, bool procedural) {
-    odin3_ast_id lhs = odin3_ast_child(run->e2->elab, node, 0);
+/* One part of an lvalue (not a concatenation): the complex-lvalue marks, the write flags of an
+ * array target, then the reads of the target's index expressions. */
+static odin3_status ms_assign_part(ms_run *run, odin3_ast_id node, odin3_ast_id lhs, bool blocking,
+                                   bool procedural) {
     odin3_status st = ms_lhs_walk(run, lhs, MS_MARK);
     odin3_ast_id name = ms_chain(run, lhs, &st);
     uint32_t mem = st == ODIN3_OK ? ms_array_of(run, name) : MEM_NONE;
@@ -315,8 +309,29 @@ static odin3_status ms_assign(ms_run *run, odin3_ast_id node, bool blocking, boo
         ms_asg as = {node, mem, blocking, procedural};
         st = ms_write(run, &as);
     }
-    run->lhs = lhs;
     return st != ODIN3_OK ? st : ms_lhs_walk(run, lhs, MS_READ);
+}
+
+/* One assignment. A concatenation lvalue is split into its parts first, as Yosys does, and each
+ * part is judged on its own (an array in a concatenation is no complex lvalue). */
+static odin3_status ms_assign(ms_run *run, odin3_ast_id node, bool blocking, bool procedural) {
+    const odin3_ast *ast = run->e2->elab;
+    odin3_ast_id lhs = odin3_ast_child(ast, node, 0);
+    odin3_vec_clear(&run->parts);
+    odin3_status st = ms_push(&run->parts, lhs);
+    while (st == ODIN3_OK && run->parts.len > 0) {
+        odin3_ast_id part = ms_pop(&run->parts);
+        if (odin3_ast_kind_of(ast, part) != ODIN3_AST_CONCAT) {
+            st = ms_assign_part(run, node, part, blocking, procedural);
+            continue;
+        }
+        /* pushed last to first, so the parts are judged in source order */
+        for (uint32_t k = odin3_ast_nchild(ast, part); st == ODIN3_OK && k > 0; k--) {
+            st = ms_push(&run->parts, odin3_ast_child(ast, part, k - 1));
+        }
+    }
+    run->lhs = lhs;
+    return st;
 }
 
 /* --- blocks and the walk ---------------------------------------------------------------------- */
@@ -428,6 +443,7 @@ static odin3_status ms_enter(ms_run *run, odin3_ast_cursor *cur, odin3_ast_id no
 odin3_status odin3_elab2_mem_scan(odin3_elab2 *e2, odin3_ast_id module_node, odin3_vec *facts) {
     ms_run run = {.e2 = e2, .facts = facts};
     odin3_vec_init(&run.work, sizeof(odin3_ast_id));
+    odin3_vec_init(&run.parts, sizeof(odin3_ast_id));
     odin3_vec_init(&run.constwork, sizeof(odin3_ast_id));
     odin3_vec_init(&run.chain, sizeof(odin3_ast_id));
     odin3_vec_init(&run.loops, sizeof(ms_loop));
@@ -452,6 +468,7 @@ odin3_status odin3_elab2_mem_scan(odin3_elab2 *e2, odin3_ast_id module_node, odi
     odin3_ast_cursor_free(&cur);
     odin3_vec_free(&run.work);
     odin3_vec_free(&run.constwork);
+    odin3_vec_free(&run.parts);
     odin3_vec_free(&run.chain);
     odin3_vec_free(&run.loops);
     return st;

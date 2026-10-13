@@ -901,15 +901,13 @@ odin3_ast_id odin3_elab2_mem_word_index(const odin3_elab2 *e2, odin3_ast_id node
 /*
  * One read of a word. select is the word SELECT (provenance, the located messages); idx are the
  * index signals of its dimensions, as generated at their self-determined width and sign (n_idx of
- * them, the array's dimensions); reads is the process generator's substitution hook the indices
- * were generated with (the signals already carry it: informational).
+ * them, the array's dimensions).
  */
 typedef struct odin3_elab2_mem_rd {
     uint32_t mem;
     odin3_ast_id select;
     const odin3_sig *idx;
     uint32_t n_idx;
-    const odin3_elab2_reads *reads;
 } odin3_elab2_mem_rd;
 
 /*

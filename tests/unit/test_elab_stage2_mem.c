@@ -461,12 +461,14 @@ static void test_rule4_nested_index(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, find_wire("m[1]").v);
 }
 
-/* Rule 4: the array in a concatenation lvalue. */
+/* An array in a concatenation lvalue is no complex lvalue: Yosys splits the concatenation first,
+ * so the part is judged as any write. Verified on 0.55:
+ *   yosys -p "read_verilog t.v; proc; stat"  with  {m[wa], t} <= {a, a};  and  assign y = m[ra];
+ * keeps one memory and prints no "replacing memory" warning. */
 static void test_rule4_concat_lvalue(void) {
     read_failing("  reg [7:0] m [0:3];\n  reg [7:0] t;\n  always @(posedge c)\n"
                  "    {m[wa], t} <= {a, a};\n");
-    expect_warning((at_loc){1, 13}, replacing("m", place(4)));
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, find_wire("m[1]").v);
+    TEST_ASSERT_EQUAL_UINT32(0, warnings_with("replacing memory"));
 }
 
 /* Rule 5: every write outside initial blocks has a constant index. */
@@ -964,6 +966,7 @@ static const char k_sweep[] =
     "module top (input [3:0] ra, input [1:0] s2, input c, input [3:0] a4,\n"
     "            output [7:0] y, output [7:0] y1, output [3:0] y4);\n"
     "  reg [7:0] m [1:4];\n  reg [7:0] m2 [0:3][1:2];\n  wire [3:0] w [0:2];\n"
+    "  reg [3:0] m3 [0:1];\n  assign m3[1] = a4;\n"
     "  assign w[1] = a4;\n  assign y = m[ra];\n  assign y1 = m2[s2][c];\n  assign y4 = w[1];\n"
     "endmodule\n";
 
