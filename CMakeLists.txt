@@ -1291,6 +1291,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # ODIN3_BENCH_PROC: test_bench_proc_report's check that a Debug bench_proc refuses to run.
     list(APPEND _tools_env "ODIN3_BENCH_PROC=$<TARGET_FILE:bench_proc>")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
+    # 2F Task 16 (spec 20.1, plan points (f), (g)): one tiny source per opt rule (tests/opt/rules/
+    # <sub>/<rule>.v or .blif, with its golden .il and the row in rules.txt). Odin III runs
+    # `read_verilog --nolatches; proc --noopt; <sub-pass> --opt-stats` on each, smallest first: the
+    # rule's counter must be at least 1 and out.il must equal the golden. Needs no Yosys; the
+    # Yosys 0.55 half is opt_rules_yosys (below). Exit 77 (skip) when an ASan child cannot be
+    # capped.
+    add_test(NAME opt_rules
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-rules
+                --odin3 $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/opt/rules)
+    set_tests_properties(opt_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77 TIMEOUT 600)
     # 2E Task 13 (spec 19): bench_proc prints the columns the targets are judged from. A Debug or
     # sanitized build refuses to run (tests/bench/bench_guard.h, exit 2: its times are not the
     # targets'); a Release build's smoke runs `--one` on two micros (a case under a combinational
@@ -1795,6 +1805,14 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --odin3 $<TARGET_FILE:odin3> --with-frontend --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
         set_tests_properties(project_corpus_frontend PROPERTIES LABELS tools)
+        # 2F Task 16 (spec 20.1): opt_rules plus Yosys 0.55 on the same in.il: its cover point (or
+        # log line) for the rule must fire and its per-module cell histogram must equal Odin III's.
+        # 139 small files, not a sweep. Rows marked dev=N are the documented spec 17 divergences.
+        add_test(NAME opt_rules_yosys
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-rules
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tests/opt/rules)
+        set_tests_properties(opt_rules_yosys PROPERTIES LABELS opt SKIP_RETURN_CODE 77 TIMEOUT 900)
         # 2E Task 12: test_proc_gen_diff parses the --proc profile with this Yosys.
         set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT
                      "ODIN3_YOSYS055=${ODIN3_YOSYS055}")

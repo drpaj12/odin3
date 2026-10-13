@@ -1,0 +1,8 @@
+# expr/gate_mux: $_MUX_ with constant select 1 -> the B input
+.model t
+.inputs a b
+.outputs y
+.names one
+1
+.subckt $_MUX_ A=a B=b S=one Y=y
+.end

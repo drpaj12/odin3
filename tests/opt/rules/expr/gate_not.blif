@@ -1,0 +1,8 @@
+# expr/gate_not: $_NOT_ of constant 1 -> constant 0
+.model t
+.inputs a
+.outputs y
+.names one
+1
+.subckt $_NOT_ A=one Y=y
+.end

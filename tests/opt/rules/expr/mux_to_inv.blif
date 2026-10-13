@@ -1,0 +1,9 @@
+# expr/mux_to_inv: $_MUX_ with A = 1, B = 0 -> $_NOT_ of S
+.model t
+.inputs s
+.outputs y
+.names one
+1
+.names zero
+.subckt $_MUX_ A=one B=zero S=s Y=y
+.end

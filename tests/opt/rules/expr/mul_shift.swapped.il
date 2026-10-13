@@ -1,0 +1,8 @@
+attribute \top 1
+module \t
+  wire width 4 input 1 \a
+  wire width 4 output 2 \y
+  wire width 4 \k
+  connect \y { \a [1:0] 2'00 }
+  connect \k 4'0100
+end
