@@ -415,7 +415,11 @@ accepted (§8.2, §9.2, §17 #76): an `always` with no event control is `always 
 warning. The T6 row leaves §9.1. (2) T9 is accepted (§8.9, §9.2, §17 #77): `=` and `<=` on one
 bit follow Yosys (every assignment is an action, the last on a path wins) with a warning that
 names the variable, and on one control path adds that simulation and synthesis may differ. T10
-stays an error. The T9 row leaves §9.1; `reject-2d` holds 23 cases and `ignore-2d` 12.
+stays an error. The T9 row leaves §9.1; `reject-2d` holds 23 cases and `ignore-2d` 12. (3) The hard `adder`'s positional width
+(`adder #(W)`) stays a located error that now says why (§17 #78): the library cell is the 1-bit hard block;
+Parmys's n-bit `adder` is a soft module. (4) D3 (internal tri-state nets to mux logic, as `tribuf -logic`:
+a `$pmux` of the data by the enables over an x default) is ruled accepted but not yet implemented; EL-29
+and §17 #45 still describe the error until it lands.
 
 ## 1. Purpose and scope (EL-1)
 
@@ -2776,6 +2780,7 @@ and reported, never relaxed (2A's rule).
 | 75 | an unrolled `for` that never ends (`reg [3:0] k; for (k = 7; k >= 0; k = k - 1)`) is the located error `for-loop never ends: 'k' takes the value 7 again` when its test and step read only the variable (Brent's cycle check), else `loop creates more than 2097152 IR objects (is it endless?)` (`ODIN3_ELAB_MAX_LOOP_OBJECTS`) or the iteration cap `loop exceeds 1048576 iterations` | Yosys 0.55 has no limit: it unrolls until it runs out of memory | the caps of EL-37 | review M3: the cap used to fire only after 5.7 GB of cells |
 | 76 | an `always` with no event control (`always x = a;`, `always #5 clk = ~clk;`) is `always @*`, with the warning "always without an event control treated as always @*" (T6; Peter 2026-10-13, PHASE2 #20) | Yosys 0.55 reads it the same way: the process has no sync rule, so it is combinational (verified: micros `task_endtask/{inside_port,outside_port,task_call_function,task_call_task}` are `elab-equiv`-equivalent) | an `always` with no timing runs forever in simulation (a zero-delay loop hangs) | accepted for Parmys compatibility; the warning names the risky construct |
 | 77 | a bit assigned by both `=` and `<=` is accepted with a warning (T9; Peter 2026-10-13, PHASE2 #20); on one control path the warning says that simulation and synthesis may differ | Yosys 0.55 accepts it without a word: each assignment is an action and the last on a path wins (verified: `elab-equiv` equivalent for `q = a; q <= b;`, `q <= b; q = a;`, if/case arms, `full/matmul`; `syntax/multi_clock_reader_writer` equals Yosys's netlist under a merged-clock abstraction, `equiv-check` being single-clock) | a simulator applies the nonblocking update after the blocking ones, so `q <= b; q = a;` ends as `b` there and `a` in the netlist | Parmys compatibility; the warning marks the case where the netlist and a simulation disagree |
+| 78 | `adder #(W) u (...)` (a positional or named width, bus connections) on the library's hard `adder` is the located error "too many parameter values for cell type 'adder' (1 given, 0 parameters); the library cell has fixed port widths (an n-bit adder is a soft module Parmys supplies, not modelled: spec 17 #78)"; micros `micro/adder_hard_block` and `micro/hard_adder_cin_propagation` stay in `micro_expect_fail.txt` (2D-7b ruling) | Parmys reads `vtr_primitives.v`, whose `adder #(WIDTH=1)` is a soft module (`assign {cout, sumout} = a + b + cin`, buses a, b, sumout, 1-bit cin and cout) that its adder pass maps to a chain of 1-bit hard adders (the goldens' `adder_hard_block` netlist) | — | `lib/vtr.o3lib` declares `adder` as the 1-bit hard block the BLIF goldens instantiate (ports a, b, cin, cout, sumout; no parameter), and the writers, the BLIF reader's IR-7b check and the simulator rely on that; binding `#(W)` to a parameter would need a W-bit hard adder with no BLIF form (VPR reads 1-bit adders only) or the soft module and the chain mapping, which are 3E/Phase 4's. Bit-exact: nothing is dropped, the elaboration fails |
 
 ## 18. Implementation split (EL-51)
 

@@ -779,3 +779,23 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       A's netlist as `a.blif` with Parmys's `write_blif -gates -undef + unconn` convention for
       comparison with the goldens. The 2H table has four outcomes per design: identical,
       equivalent, equivalent outside x-cones, differs (#13's exit-bar ruling).
+
+20. **Peter 2026-10-13: accept T6/D3/T9 with warnings** (2D-7b carry; Peter: "accept all 3").
+    Parmys accepts the seven micros that use them, so 2D accepts the constructs with a located
+    warning each (spec §8.2, §8.9, §9.2, §17 #76-#78):
+    - **T6**: an `always` with no event control is `always @*` ("always without an event control
+      treated as always @*"). Micros `keywords/task_endtask/{inside_port,outside_port,
+      task_call_function,task_call_task}` are `elab-equiv` equivalent to Yosys 0.55.
+    - **T9**: `=` and `<=` on one bit follow Yosys (every assignment is an action, the last one on
+      a path wins) and warn, naming the variable; on one control path the warning also says that
+      simulation and synthesis may differ. `full/matmul` is equivalent; `syntax/
+      multi_clock_reader_writer` is equivalent under a merged-clock abstraction (`equiv-check` is
+      single-clock). T10 (two blocks, one bit) stays an error.
+    - **D3**: an internal tri-state net becomes mux logic as `tribuf -logic` does (`$pmux` of the
+      data by the enables, x when none is enabled); top-level output and inout tri-states keep
+      their handling. Ruled; not yet implemented (micro `syntax/multi_assignment`), see the 2D-7b
+      report. Yosys 0.55's own flow does not mux that micro (it shorts the four drivers' data), so
+      its equivalence is judged against `tribuf -logic`, not the plain Parmys flow.
+    - **Adder**: `adder #(W)` on the hard `adder` stays an error, now explained (§17 #78): the
+      library cell is the 1-bit hard block; Parmys's n-bit adder is a soft module of
+      `vtr_primitives.v` mapped to a chain of 1-bit hard adders (3E/Phase 4).

@@ -629,11 +629,17 @@ static odin3_status place_of(const odin3_pg *pg, odin3_ast_id node, odin3_strbuf
                                                 odin3_design_diag_paths(pg->e2->design));
 }
 
-/* Whether case a is in the same switch as case b, as an earlier or a later arm (0-based ids). */
-static bool same_switch(const odin3_pg *pg, uint32_t a, uint32_t b) {
-    for (uint32_t at = ((const pg_case *)odin3_vec_cat(&pg->cases, a))->next; at != 0;
+/* Two cases of one block (0-based ids). */
+typedef struct pg_case_pair {
+    uint32_t early, late;
+} pg_case_pair;
+
+/* Whether case pair.late follows case pair.early in the same switch (the arms are linked in
+ * order, 1-based). */
+static bool same_switch(const odin3_pg *pg, pg_case_pair pair) {
+    for (uint32_t at = ((const pg_case *)odin3_vec_cat(&pg->cases, pair.early))->next; at != 0;
          at = ((const pg_case *)odin3_vec_cat(&pg->cases, at - 1U))->next) {
-        if (at - 1U == b) {
+        if (at - 1U == pair.late) {
             return true;
         }
     }
@@ -643,15 +649,13 @@ static bool same_switch(const odin3_pg *pg, uint32_t a, uint32_t b) {
 /* Whether two cases of one block lie in different arms of one switch, so that at most one of the
  * assignments in them runs per evaluation (arms of an if or case); anything else can run in the
  * same evaluation (the root, an arm and what follows its switch, arms of different switches). */
-static bool paths_exclusive(const odin3_pg *pg, uint32_t a, uint32_t b) {
-    for (uint32_t x = a; x != PG_ROOT;
-         x = ((const pg_case *)odin3_vec_cat(&pg->cases, x))->parent) {
-        for (uint32_t y = b; y != PG_ROOT;
-             y = ((const pg_case *)odin3_vec_cat(&pg->cases, y))->parent) {
-            if (x != y && same_switch(pg, x, y)) {
-                return true;
-            }
-            if (x != y && same_switch(pg, y, x)) {
+static bool paths_exclusive(const odin3_pg *pg, pg_case_pair paths) {
+    for (uint32_t i = paths.early; i != PG_ROOT;
+         i = ((const pg_case *)odin3_vec_cat(&pg->cases, i))->parent) {
+        for (uint32_t j = paths.late; j != PG_ROOT;
+             j = ((const pg_case *)odin3_vec_cat(&pg->cases, j))->parent) {
+            if (i != j &&
+                (same_switch(pg, (pg_case_pair){i, j}) || same_switch(pg, (pg_case_pair){j, i}))) {
                 return true;
             }
         }
@@ -664,7 +668,7 @@ static bool paths_exclusive(const odin3_pg *pg, uint32_t a, uint32_t b) {
 static bool one_control_path(const odin3_pg *pg, uint64_t where) {
     uint32_t block = (uint32_t)(where >> GROUP_SHIFT);
     uint32_t then = (uint32_t)(where & UINT32_MAX);
-    return block == pg->block_no && !paths_exclusive(pg, then, pg->cur);
+    return block == pg->block_no && !paths_exclusive(pg, (pg_case_pair){then, pg->cur});
 }
 
 /* The T9 warning, once per variable and kind of warning: `'r' is assigned with both '=' and '<='
@@ -674,9 +678,9 @@ static odin3_status mixed_warn(odin3_pg *pg, const pg_asg *asg, uint32_t bit, od
     odin3_elab2 *e2 = pg->e2;
     odin3_wirebit wb = ((const odin3_elab2_lvbit *)odin3_vec_cat(&asg->lv->bits, bit))->wb;
     odin3_net_id net = *(const odin3_net_id *)odin3_vec_cat(&asg->lv->nets, bit);
-    uint64_t key = ((wb.wire.v != 0 ? (uint64_t)wb.wire.v : ((uint64_t)1 << GROUP_SHIFT) | net.v)
-                    << 1) |
-                   (same_path ? 1U : 0U);
+    uint64_t key =
+        ((wb.wire.v != 0 ? (uint64_t)wb.wire.v : ((uint64_t)1 << GROUP_SHIFT) | net.v) << 1) |
+        (same_path ? 1U : 0U);
     uint64_t seen = 0;
     if (odin3_u64map_get(pg->mixed_seen, key, &seen)) {
         return ODIN3_OK;
@@ -692,11 +696,10 @@ static odin3_status mixed_warn(odin3_pg *pg, const pg_asg *asg, uint32_t bit, od
                                       : "net";
     st = st != ODIN3_OK
              ? st
-             : odin3_strbuf_appendf(&text,
-                                    "'%s' is assigned with both '=' and '<='%s (also at %s)%s", name,
-                                    same_path ? " on one control path" : "",
-                                    place.data != NULL ? place.data : "?",
-                                    same_path ? "; simulation and synthesis may differ" : "");
+             : odin3_strbuf_appendf(
+                   &text, "'%s' is assigned with both '=' and '<='%s (also at %s)%s", name,
+                   same_path ? " on one control path" : "", place.data != NULL ? place.data : "?",
+                   same_path ? "; simulation and synthesis may differ" : "");
     if (st == ODIN3_OK) {
         odin3_elab2_warn_msg(e2, odin3_ast_loc(e2->elab, asg->stmt), text.data);
     }

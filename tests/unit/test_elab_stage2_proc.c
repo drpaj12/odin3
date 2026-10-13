@@ -1112,10 +1112,10 @@ static void test_oom_sweep(void) {
     X(test_process_after_assign)                                                                   \
     X(test_two_processes_one_bit)                                                                  \
     X(test_two_processes_one_bit_of_a_vector)                                                      \
-    X(test_blocking_and_nonblocking_same_path)                                                \
+    X(test_blocking_and_nonblocking_same_path)                                                     \
     X(test_blocking_and_nonblocking_exclusive_arms)                                                \
-    X(test_blocking_and_nonblocking_other_shapes)                                                \
-    X(test_blocking_and_nonblocking_two_blocks)                                                \
+    X(test_blocking_and_nonblocking_other_shapes)                                                  \
+    X(test_blocking_and_nonblocking_two_blocks)                                                    \
     X(test_same_kind_is_fine)                                                                      \
     X(test_conflict_drops_only_the_conflicting_chunk)                                              \
     X(test_wired_net_is_not_driven)                                                                \
