@@ -104,7 +104,8 @@ class ProcGenDiffTest(unittest.TestCase):
         self.log = self.dir / "argv.log"
         python = sys.executable
         self.proc_diff = _exe(self.dir / "proc-diff", FAKE_TOOL.replace("{python}", python)
-                              .replace("{name!r}", "'proc-diff'").replace("{var!r}", "'FAKE_PD_RC'"))
+                              .replace("{name!r}", "'proc-diff'")
+                              .replace("{var!r}", "'FAKE_PD_RC'"))
         self.elab_equiv = _exe(self.dir / "elab-equiv", FAKE_TOOL.replace("{python}", python)
                                .replace("{name!r}", "'elab-equiv'")
                                .replace("{var!r}", "'FAKE_EE_RC'"))

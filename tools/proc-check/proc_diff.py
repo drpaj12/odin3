@@ -94,6 +94,7 @@ GIB = 1 << 30
 DEFAULT_CAP = 4 * GIB  # 2E plan point (p): 4 GiB per child by default
 INT_PARAM_BITS = 32  # Yosys writes an INT parameter as 32 bits
 STDERR_TAIL = 20  # lines of a failing child's output shown
+STDERR_ERRORS = 10  # and the first error lines of all of it
 SHUFFLE_TRIES = 8  # netlist-compare reruns on a reordered copy of side A before "differs" stands
 CELL_STARTS = (".subckt", ".names", ".latch", ".gate", ".mlatch")
 
@@ -421,7 +422,13 @@ class Outcome:
 
 
 def _tail(child: Child) -> list[str]:
-    return (child.stdout + child.stderr).splitlines()[-STDERR_TAIL:]
+    """The first ``STDERR_ERRORS`` error lines, then the last ``STDERR_TAIL`` lines: a failing
+    child's errors come before its warnings and its summary, and an expect-fail needle (elab-sweep)
+    is matched against what is printed."""
+    lines = (child.stdout + child.stderr).splitlines()
+    errors = [line for line in lines if "error" in line.lower()][:STDERR_ERRORS]
+    tail = lines[-STDERR_TAIL:]
+    return errors + [line for line in tail if line not in errors]
 
 
 def _failed_step(step: str, tool: str, child: Child) -> Outcome:
@@ -672,7 +679,8 @@ def check_version(runner: Runner, yosys: str, allow: str | None) -> None:
     child = runner.run([yosys, "-V"])
     version = child.stdout.strip()
     if child.code != 0:
-        raise ProcDiffError(f"cannot run {yosys} -V: {child.stderr.strip() or f'exit {child.code}'}")
+        why = child.stderr.strip() or f"exit {child.code}"
+        raise ProcDiffError(f"cannot run {yosys} -V: {why}")
     if not yosys_phase.version_ok(version, allow):
         raise ProcDiffError(f"{yosys} is '{version}', not Yosys 0.55 "
                             "(--allow-version accepts another)")

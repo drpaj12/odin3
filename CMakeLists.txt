@@ -1755,7 +1755,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         odin3_add_sweep_test(proc_diff_micro LABEL sweep
             COMMAND ${_proc_sweep} --proc-diff ${_micro_expect} ${_micro_dir})
         odin3_add_sweep_test(proc_bridge_micro LABEL sweep
-            COMMAND ${_proc_sweep} ${_proc_bridge} ${_micro_expect} ${_micro_dir})
+            COMMAND ${_proc_sweep} ${_proc_bridge} ${_micro_expect}
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/proc/micro_bridge_expect_fail.txt
+                    ${_micro_dir})
         # The three Parmys rejects that 2E lowers, and the typo-fixed boundtop standing in for
         # the 2D reject (tests/proc/paj_boundtop_typo_fixed.v), lower and are identical in both
         # input modes (--also-no-trio).
@@ -1783,13 +1785,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             set(_vtr_xl --xl --cap-for koios/lenet.v=8G --jobs 1)
             odin3_add_sweep_test(proc_diff_vtr LABEL sweep
                 COMMAND ${_proc_sweep} --proc-diff ${_vtr_expect} ${_vtr_benchmarks})
+            set(_vtr_bridge_expect
+                --expect-fail ${PROJECT_SOURCE_DIR}/tests/proc/vtr_bridge_expect_fail.txt)
             odin3_add_sweep_test(proc_bridge_vtr LABEL sweep
-                COMMAND ${_proc_sweep} ${_proc_bridge} ${_vtr_expect} ${_vtr_benchmarks})
+                COMMAND ${_proc_sweep} ${_proc_bridge} ${_vtr_expect} ${_vtr_bridge_expect}
+                        ${_vtr_benchmarks})
             odin3_add_sweep_test(proc_diff_vtr_xl LABEL sweep-xl
                 COMMAND ${_proc_sweep} --proc-diff ${_vtr_xl} ${_vtr_expect} ${_vtr_benchmarks})
             odin3_add_sweep_test(proc_bridge_vtr_xl LABEL sweep-xl
                 COMMAND ${_proc_sweep} ${_proc_bridge} ${_vtr_xl} ${_vtr_expect}
-                        ${_vtr_benchmarks})
+                        ${_vtr_bridge_expect} ${_vtr_benchmarks})
             set_tests_properties(proc_diff_vtr proc_bridge_vtr PROPERTIES LABELS "sweep;nightly")
         endif()
     endif()

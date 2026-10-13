@@ -5,3 +5,8 @@
 # (proc_diff_vtr_xl, proc_bridge_vtr_xl) run exactly such files with 8 GiB per child (elab-sweep
 # --xl --cap-for), each of which must pass.
 koios/lenet.v xl: Yosys side ≈ 5–7 GB (proc-diff and bridge)
+# The three Koios `*_include.v` files hold one `define each and no module: odin3 has nothing to
+# lower (2D's parse sweep reads them; they are in the 33 Koios files).
+koios/hard_mem_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
+koios/complex_dsp_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
+koios/hard_block_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
