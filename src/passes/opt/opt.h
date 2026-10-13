@@ -54,6 +54,9 @@ enum {
     ODIN3_OPT_BUDGET_PINS = 1 << 16
 };
 
+/* The foldable types (spec §4's `const.$<type>` list; fold.h): one counter each. */
+enum { ODIN3_OPT_FOLD_TYPES = 32 };
+
 /*
  * Every sub-pass's counters in one aggregate (plan point (b)): opt_expr's frozen counts, then one
  * counter per §16 info line and opt_dff's per-action counters (indexed by odin3_opt_dff_action).
@@ -72,6 +75,12 @@ typedef struct odin3_opt_counts {
      * buffers, and constants have no Yosys counterpart); the loop reads this one.
      */
     uint32_t clean_changes;
+    /*
+     * 2F Task 5: folds by cell type (fold.h's odin3_opt_fold_name: "const.$<type>"), the 32
+     * foldable types in the order of fold.c's table. Beyond the briefed fields: Task 6's rule
+     * names print them.
+     */
+    uint32_t fold_type[ODIN3_OPT_FOLD_TYPES];
 } odin3_opt_counts;
 
 /* --- 2F Task 3: opt_clean (OP-10) ----------------------------------------------------------- */

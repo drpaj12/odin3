@@ -203,7 +203,6 @@ static void test_parse_unknown(void) {
 /* One line per pass that is still a stub: each later task removes its own. */
 static const char *const k_stub_passes[] = {
     "opt",
-    "opt_expr",
     "opt_share",
     "opt_dff",
 };
@@ -508,6 +507,41 @@ static void test_stats(void) {
     TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_ERROR, "opt_clean: unknown argument '-sat'"));
 }
 
+/*
+ * opt_expr --opt-stats: one "opt: rule <name> N" line per non-zero counter, sorted by name, with
+ * the rules' cover names and the folds' "const.$<type>" (2F plan ruling R3). The module has a
+ * folded $not, a const_and, a const_or, an xor_buffer, an and_or_buffer and a reduce_xnor_not.
+ */
+static void test_stats_expr(void) {
+    build(
+        "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire output 3 \\y1\n"
+        "  wire output 4 \\y2\n  wire output 5 \\y3\n  wire output 6 \\y4\n"
+        "  wire output 7 \\y5\n  wire output 8 \\y6\n"
+        "  cell $and \\c1\n    connect \\A \\a\n    connect \\B 1'0\n    connect \\Y \\y1\n  end\n"
+        "  cell $or \\c2\n    connect \\A \\a\n    connect \\B 1'1\n    connect \\Y \\y2\n  end\n"
+        "  cell $xor \\c3\n    connect \\A \\a\n    connect \\B 1'1\n    connect \\Y \\y3\n  end\n"
+        "  cell $reduce_and \\c4\n    connect \\A \\b\n    connect \\Y \\y4\n  end\n"
+        "  cell $reduce_xnor \\c5\n    connect \\A \\b\n    connect \\Y \\y5\n  end\n"
+        "  cell $not \\c6\n    connect \\A 1'0\n    connect \\Y \\y6\n  end\nend\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_expr", "--opt-stats"));
+    static const char *const k_want[] = {"opt: rule and_or_buffer 1",   "opt: rule const.$not 1",
+                                         "opt: rule const_and 1",       "opt: rule const_or 1",
+                                         "opt: rule reduce_xnor_not 1", "opt: rule xor_buffer 1"};
+    uint32_t seen = 0;
+    for (uint32_t i = 0; i < n_lines; i++) {
+        if (strncmp(lines[i].text, "opt: rule", strlen("opt: rule")) == 0) {
+            TEST_ASSERT_TRUE(seen < sizeof k_want / sizeof k_want[0]);
+            TEST_ASSERT_EQUAL_STRING(k_want[seen], lines[i].text);
+            TEST_ASSERT_EQUAL_INT(ODIN3_LOG_INFO, lines[i].level);
+            seen++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(sizeof k_want / sizeof k_want[0], seen);
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_INFO, "opt_expr: 3 cells rewritten, 3 cells folded to constants"));
+    check_full();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parse_opts);
@@ -523,5 +557,6 @@ int main(void) {
     RUN_TEST(test_budget);
     RUN_TEST(test_processes_flag);
     RUN_TEST(test_stats);
+    RUN_TEST(test_stats_expr);
     return UNITY_END();
 }

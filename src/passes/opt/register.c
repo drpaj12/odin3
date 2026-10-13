@@ -10,6 +10,8 @@
 #include "passes/budget.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
+#include "passes/opt/expr.h"
+#include "passes/opt/fold.h"
 #include "passes/opt/opt.h"
 #include "passes/opt/opt_test.h"
 #include "util/attr.h"
@@ -45,12 +47,11 @@ static const char *const k_sub_names[ODIN3_OPT_N_SUBS] = {
     "opt_expr", "opt_merge", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff", "opt_clean"};
 
 /*
- * Point (e): the passes that are still stubs. Each later task removes its own line (opt_expr: Task
- * 6; opt_merge: 8; opt_reduce: 9; opt_muxtree: 10; opt_dff: 11 and 12; opt: 13; opt_share: 14).
+ * Point (e): the passes that are still stubs. Each later task removes its own line (opt_dff: Task
+ * 11 and 12; opt: 13; opt_share: 14).
  */
 static const char *const k_stubs[] = {
     "opt",
-    "opt_expr",
     "opt_share",
     "opt_dff",
 };
@@ -209,9 +210,8 @@ typedef odin3_status (*sub_run_fn)(odin3_pass_ctx *ctx, odin3_design *design,
 
 /* The sub-pass bodies; NULL while a sub-pass is a stub (the odin3_opt_<sub>_run of its task). */
 static const sub_run_fn k_sub_run[ODIN3_OPT_N_SUBS] = {
-    [ODIN3_OPT_SUB_MERGE] = odin3_opt_merge_run,
-    [ODIN3_OPT_SUB_MUXTREE] = odin3_opt_muxtree_run,
-    [ODIN3_OPT_SUB_REDUCE] = odin3_opt_reduce_run,
+    [ODIN3_OPT_SUB_EXPR] = odin3_opt_expr_design,    [ODIN3_OPT_SUB_MERGE] = odin3_opt_merge_run,
+    [ODIN3_OPT_SUB_MUXTREE] = odin3_opt_muxtree_run, [ODIN3_OPT_SUB_REDUCE] = odin3_opt_reduce_run,
     [ODIN3_OPT_SUB_CLEAN] = odin3_opt_clean_run,
 };
 
@@ -338,10 +338,10 @@ odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed) {
 /* --- --opt-stats (point (j)) ----------------------------------------------------------------- */
 
 /*
- * The counter names: odin3_opt_rule's cover names (Task 6 fills them in, index = rule) and
- * odin3_opt_dff_action's (Task 11, printed as "opt_dff.<name>"). A NULL name has no output.
+ * The counter names: odin3_opt_rule's cover names (odin3_opt_rule_name), the folds' "const.$<type>"
+ * (odin3_opt_fold_name) and odin3_opt_dff_action's (Task 11, printed as "opt_dff.<name>"). A NULL
+ * name has no output.
  */
-static const char *const k_rule_names[ODIN3_OPT_EXPR_MAX_RULES];
 static const char *const k_dff_names[ODIN3_OPT_DFF_MAX_ACTIONS];
 
 enum { STAT_NAME_LEN = 96 };
@@ -351,14 +351,24 @@ typedef struct stat_line {
     uint32_t count;
 } stat_line;
 
-enum { STAT_LINES_MAX = ODIN3_OPT_EXPR_MAX_RULES + ODIN3_OPT_DFF_MAX_ACTIONS };
+enum {
+    STAT_LINES_MAX = ODIN3_OPT_EXPR_MAX_RULES + ODIN3_OPT_FOLD_TYPES + ODIN3_OPT_DFF_MAX_ACTIONS
+};
 
 static uint32_t collect_stats(const odin3_opt_counts *counts, stat_line *lines) {
     uint32_t total = 0;
     for (uint32_t i = 0; i < ODIN3_OPT_EXPR_MAX_RULES; i++) {
-        if (counts->expr.rule[i] != 0 && k_rule_names[i] != NULL) {
-            (void)snprintf(lines[total].name, sizeof lines[total].name, "%s", k_rule_names[i]);
+        const char *name = odin3_opt_rule_name((odin3_opt_rule)i);
+        if (counts->expr.rule[i] != 0 && name != NULL) {
+            (void)snprintf(lines[total].name, sizeof lines[total].name, "%s", name);
             lines[total++].count = counts->expr.rule[i];
+        }
+    }
+    for (uint32_t i = 0; i < ODIN3_OPT_FOLD_TYPES; i++) {
+        if (counts->fold_type[i] != 0 && odin3_opt_fold_name(i) != NULL) {
+            (void)snprintf(lines[total].name, sizeof lines[total].name, "%s",
+                           odin3_opt_fold_name(i));
+            lines[total++].count = counts->fold_type[i];
         }
     }
     for (uint32_t i = 0; i < ODIN3_OPT_DFF_MAX_ACTIONS; i++) {

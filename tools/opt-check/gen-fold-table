@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# gen-fold-table: the Yosys 0.55 fold table for 2F's opt_expr folding. See gen_fold_table.py.
+# Exit codes: 0 success, 1 Yosys failed, 2 usage error or a Yosys that is not 0.55.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/gen_fold_table.py" "$@"

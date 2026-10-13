@@ -155,14 +155,18 @@ void odin3_kit_sort_unify(odin3_vec *vec, size_t from) {
     odin3_kit_truncate(vec, from + kept);
 }
 
-void odin3_kit_node_label(const odin3_opt_ctx *oc, odin3_node_id node, char *out, size_t size) {
-    uint32_t name = odin3_node_name(oc->module, node);
+void odin3_kit_name_label(const odin3_opt_ctx *oc, uint32_t name, odin3_node_id node, char *out,
+                          size_t size) {
     const char *text = name == 0 ? NULL : odin3_strtab_get(odin3_design_strtab(oc->design), name);
     if (text != NULL) {
         (void)snprintf(out, size, "%s", text);
     } else {
         (void)snprintf(out, size, "$c%" PRIu32, node.v);
     }
+}
+
+void odin3_kit_node_label(const odin3_opt_ctx *oc, odin3_node_id node, char *out, size_t size) {
+    odin3_kit_name_label(oc, odin3_node_name(oc->module, node), node, out, size);
 }
 
 /* The net on bit 0 of port `port` of node, none when the port is empty or unconnected. */
@@ -992,8 +996,8 @@ odin3_net_id odin3_kit_inverse(const odin3_opt_ctx *oc, odin3_net_id net) {
 
 /* --- topological order ---------------------------------------------------------------------- */
 
-/* Yosys 0.55's evaluable cells (CellTypes::setup_internals_eval, setup_stdcells_eval) that the
- * registry has. */
+/* Yosys 0.55's evaluable cells (CellTypes::setup_internals_eval and setup_stdcells_eval, and the
+ * VTR build's `$tribuf`, whose setup_type has is_evaluable true) that the registry has. */
 static const char *const k_evaluable[] = {
     "$not",         "$neg",       "$reduce_and", "$reduce_or", "$reduce_xor", "$reduce_xnor",
     "$reduce_bool", "$logic_not", "$lut",        "$sop",       "$and",        "$or",
@@ -1002,7 +1006,7 @@ static const char *const k_evaluable[] = {
     "$add",         "$sub",       "$mul",        "$div",       "$mod",        "$pow",
     "$logic_and",   "$logic_or",  "$mux",        "$pmux",      "$_BUF_",      "$_NOT_",
     "$_AND_",       "$_NAND_",    "$_OR_",       "$_NOR_",     "$_XOR_",      "$_XNOR_",
-    "$_MUX_"};
+    "$_MUX_",       "$tribuf"};
 
 enum { N_EVALUABLE = sizeof k_evaluable / sizeof k_evaluable[0] };
 

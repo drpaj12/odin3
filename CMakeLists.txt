@@ -105,6 +105,16 @@ add_library(odin3_core OBJECT
     src/passes/ffinit.c
     src/passes/opt/kit.c
     src/passes/opt/ff.c
+    src/passes/opt/fold.c
+    src/passes/opt/expr.c
+    src/passes/opt/expr_util.c
+    src/passes/opt/expr_logic.c
+    src/passes/opt/expr_cmp.c
+    src/passes/opt/expr_arith.c
+    src/passes/opt/expr_mux.c
+    src/passes/opt/expr_undriven.c
+    src/passes/opt/expr_ffpol.c
+    src/passes/opt/expr_fine.c
     src/passes/opt/clean.c
     src/passes/opt/merge.c
     src/passes/opt/muxtree.c
@@ -574,6 +584,14 @@ if(BUILD_TESTING)
     target_sources(test_opt_muxtree PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_opt_muxtree PRIVATE
         ODIN3_MUXTREE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/muxtree")
+    # 2F Task 5: folding on 2D's evaluator, replayed against the Yosys 0.55 fold table.
+    odin3_add_unit_test(test_opt_fold)
+    target_sources(test_opt_fold PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_fold PRIVATE
+        ODIN3_OPT_DATA="${PROJECT_SOURCE_DIR}/tests/opt")
+    # 2F Task 6: opt_expr (the driver, the rules of spec 4.2-4.3, replace_undriven).
+    odin3_add_unit_test(test_opt_expr)
+    target_sources(test_opt_expr PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
