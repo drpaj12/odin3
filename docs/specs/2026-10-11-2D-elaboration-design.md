@@ -1871,7 +1871,7 @@ layout changes. `hierarchy` in the `OK` list is the 1D built-in (`src/passes/bui
 **ABI.** The `$proc` node is visible through the existing node accessors (type `$proc`, ports
 `I`/`O`, `I_WIDTH`/`O_WIDTH`); `odin3_node_get_param_text` prints `BODY` as RTLIL `process` text
 (EL-48), so the Python walk and plugins can see it; structured body accessors are deferred
-(2E §23).
+(2E §24 item 8).
 
 **Alternatives considered.** (a) v1's process objects over pinless nets (rejected by the review,
 F1: a second connectivity mechanism, broken driver queries, O(process) merges, `opt` unsafe);
