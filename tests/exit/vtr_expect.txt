@@ -5,3 +5,11 @@
 # `equivalent outside x-cones` design counts only when its excluded outputs were reviewed and are
 # recorded here); a crash, a cap kill and a timeout are never listed. The list must shrink, never
 # rot.
+#
+# --- tool limits of equiv-check found by the first VTR run (2H): the result is an `error`, so the
+# design is UNPROVEN, neither equivalent nor different. netlist-compare did not call them
+# identical, and equiv-check cannot decide them. Each entry goes when the limit is lifted. ---
+multiclock_reader_writer.v [more than one clock domain] equiv-check (ABC dsec) models one clock: the golden has two ('clock_reader_head', 'clock_writer_head'); unproven, not identical
+stereovision3.v [more than one clock domain] equiv-check models one clock: the golden has two ('tm3_clk_v0', 'tm3_clk_v2'); unproven, not identical
+stereovision2.v [cannot be matched one-to-one] equiv-check cuts the 468 hard `multiply` blocks and matches them by instance name; Parmys writes no .cname, the names are its `$mul~N` counter, and 57 of N differ between the golden and the spliced run; unproven, not identical
+spree.v [cannot be matched one-to-one] the same limit: the hard `multiply` blocks' `$mul~N` names are numbered differently in the golden and the spliced run; unproven, not identical

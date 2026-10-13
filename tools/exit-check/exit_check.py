@@ -23,7 +23,8 @@ each design:
    ``basic_odin_config_split.xml``, filled per design by ``write_parmys_config``: a fixed hard
    ``multiply``, memories split to the arch's address width, min multiplier size 3, adder
    threshold 1); it caps its own children at ``--mem-cap``;
-3. ``netlist-compare`` golden vs output: exit 0 is ``identical``;
+3. ``netlist-compare --implicit-models`` golden vs output (Parmys leaves a ``$pow`` and the like
+   as a ``.subckt`` with no model): exit 0 is ``identical``;
 4. else ``equiv-check --x-report --match-dollar`` (Parmys writes no ``.cname`` for a hard
    multiplier and names its outputs ``$mul~14[0]``, which the black-box matching needs) golden vs
    output: exit 0 is ``equivalent``, exit 3
@@ -333,7 +334,7 @@ def run_equiv(cfg: Config, golden: Path, out: Path, cap: int, log: list[str]) ->
 def classify(cfg: Config, golden: Path, out: Path, cap: int, log: list[str]) -> Result:
     """netlist-compare, then equiv-check --x-report. A netlist-compare error is logged and the
     equivalence check decides."""
-    got = run_capped([cfg.netlist_compare, str(golden), str(out)], cap, log)
+    got = run_capped([cfg.netlist_compare, "--implicit-models", str(golden), str(out)], cap, log)
     if isinstance(got, Result):
         return got
     log.append(clip((got.stdout or "") + (got.stderr or "")))

@@ -55,7 +55,7 @@ import json, os, signal, sys
 argv = sys.argv[1:]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(["netlist-compare", *argv]) + "\\n")
-text = open(argv[1]).read()
+text = open(argv[-1]).read()
 if "NCKILL" in text:
     os.kill(os.getpid(), signal.SIGKILL)
 if "NCERR" in text:
@@ -234,9 +234,10 @@ class ArgvTest(ExitCheckCase):
         self.assertEqual(a[a.index("--odin3") + 1], str(self.odin3))
         self.assertEqual(a[a.index("--yosys") + 1], str(self.yosys))
         self.assertTrue(a[a.index("--keep") + 1].startswith(str(self.work)))
-        compare = next(c for c in self.calls("netlist-compare") if "/a/" in c[1])
-        self.assertTrue(compare[1].endswith("g/a/a.parmys.blif"))
-        self.assertTrue(compare[2].endswith("out.blif"))
+        compare = next(c for c in self.calls("netlist-compare") if "/a/" in c[2])
+        self.assertEqual(compare[1], "--implicit-models")
+        self.assertTrue(compare[2].endswith("g/a/a.parmys.blif"))
+        self.assertTrue(compare[3].endswith("out.blif"))
         equiv = self.calls("equiv-check")[0]  # only the design netlist-compare did not settle
         self.assertEqual(equiv[1:3], ["--x-report", "--match-dollar"])
         self.assertTrue(equiv[-2].endswith("g/b/b.parmys.blif"))
