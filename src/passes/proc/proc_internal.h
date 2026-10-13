@@ -119,6 +119,10 @@ odin3_status odin3_proc_connect(odin3_proc_mctx *mctx, odin3_pw_bit lhs, odin3_p
  * The key a process's raw (decoded) bit sorts by where Yosys sorts the names it was written with
  * (proc_dff's find_any_lvalue): odin3_proc_bit_key, except that a net a merge of this module's
  * lowering dropped (now dead, its wire bit an alias of the kept net) keeps the key it had then.
+ * It is a total order over nets (no two distinct nets tie), which the flip-flop phase's index and
+ * ff_narrow rely on: live nets differ by primary wire bit (or by net ID without a primary); a
+ * dropped net's frozen key is its primary's, and a merge makes the dropped primary an alias of the
+ * kept net while the kept net's primary is unchanged, so it never equals a live net's key.
  */
 uint64_t odin3_proc_raw_key(const odin3_proc_mctx *mctx, odin3_pw_bit bit);
 

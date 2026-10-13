@@ -915,9 +915,10 @@ static void test_ff_invalid(void) {
 /* --- out of memory ------------------------------------------------------------------------- */
 
 /* ff_oom.il: one module with every register kind: q ($adff) and u (self reset) in one process,
- * s ($dffsr with W4), l ($aldff with W3) and w (8-bit $dff) in others; n is test_ff_group_narrowed's
- * register ($adff n[0], $dff n[1..2]); at WIDTH 3 the narrowing grows pw->bits, so the sweep fails
- * ff_narrow's run allocation too (checked with a breakpoint on its error return). */
+ * s ($dffsr with W4), l ($aldff with W3) and w (8-bit $dff) in others; n is
+ * test_ff_group_narrowed's register ($adff n[0], $dff n[1..2]); at WIDTH 3 the narrowing grows
+ * pw->bits, so the sweep fails ff_narrow's run allocation too (checked with a breakpoint on its
+ * error return). */
 static const char *const k_oom =
     "module \\m\n  wire input 1 \\clk\n  wire input 2 \\rst\n  wire input 3 \\d\n"
     "  wire input 4 \\e\n  wire input 5 \\r2\n  wire input 6 \\a\n  wire width 8 input 7 \\dw\n"

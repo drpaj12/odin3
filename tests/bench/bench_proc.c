@@ -203,7 +203,11 @@ static int prepare(const bench_args *args, odin3_design **design, bench_result *
         odin3_pass_run(*design, "read_techlib", odin3_bytes_cstr(args->techlib)) != ODIN3_OK) {
         return 1;
     }
-    (void)snprintf(pass_args, sizeof pass_args, "--nolatches %s", args->file);
+    if (snprintf(pass_args, sizeof pass_args, "--nolatches %s", args->file) >=
+        (int)sizeof pass_args) {
+        (void)fprintf(stderr, "bench_proc: %s: path too long\n", args->file);
+        return 1;
+    }
     double start = odin3_now_ms();
     int rc = odin3_pass_run(*design, "read_verilog", odin3_bytes_cstr(pass_args)) != ODIN3_OK;
     res->read_ms = odin3_now_ms() - start;

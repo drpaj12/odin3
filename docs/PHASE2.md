@@ -719,7 +719,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       LOG` prints §19's targets from the sweep's output and exits 1 on a MISSED one, with the
       estimate terms and step times of the files it names. A file or set missing from the log, or a
       row short of a column, is MISSED unless the expect file lists it: partial data never passes.
-      `noopt_ms` equals `proc --noopt` run alone to within 0.1% (mcml.v, diffeq1).
+      The slice margin is nil (`--jobs 2 --mem-cap 3G` is the 6G slice, as 2D's). `noopt_ms` equals `proc --noopt` run alone to within 0.1% (mcml.v, diffeq1).
       `proc_diff_micro_lowers --also-no-trio` runs one mode only, vacuous until 2F-5.
       The full bench, from a Release build, on an idle machine (the controller):
       `ODIN3_HEAVY_OK=1 tools/heavy-run tools/elab-check/elab-sweep --odin3 build/release/odin3

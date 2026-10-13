@@ -10,7 +10,8 @@ line each prints after the file's verdict as ``bench: <line>``. Two forms read t
 ``report`` prints the targets (:func:`report`); a MISSED target makes it exit 1, followed by the
 estimate terms and step times of the files it names: a miss is investigated and reported, never
 relaxed. A file or set the run lacks, or a row short of a column, is MISSED unless ``--expect-fail
-F`` (the sweep's list) names the file, so a partial run never passes. ``smoke`` runs ``B --one FILE`` on each file under memcap and fails (exit 1) when a run
+F`` (the sweep's list) names the file, so a partial run never passes.
+``smoke`` runs ``B --one FILE`` on each file under memcap and fails (exit 1) when a run
 fails or a line lacks a column of :data:`PROC_COLUMNS`. Exit codes: 0 pass; 1 a failure; 2 usage;
 77 skipped (no memory cap possible).
 
