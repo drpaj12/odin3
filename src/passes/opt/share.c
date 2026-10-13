@@ -643,14 +643,13 @@ static odin3_status group_prov(sh_state *ss, odin3_prov_id *prov) {
 
 /* --- the destructive part --------------------------------------------------------------------- */
 
-static bool any_member_gone(const sh_state *ss) {
+static uint32_t members_gone(const sh_state *ss) {
     const odin3_node_id *ids = ss->byid.data;
+    uint32_t gone = 0;
     for (size_t i = 0; i < ss->byid.len; i++) {
-        if (!odin3_node_live(ss->m, ids[i])) {
-            return true;
-        }
+        gone += odin3_node_live(ss->m, ids[i]) ? 0U : 1U;
     }
-    return false;
+    return gone;
 }
 
 /* Deletes the members, merging each one's Y nets into the new cell's; the new cell takes the
@@ -667,7 +666,7 @@ static odin3_status commit(sh_state *ss, odin3_node_id op) {
     if (st == ODIN3_OK && name != 0) {
         st = odin3_node_rename(ss->m, op, name);
     }
-    if (st != ODIN3_OK && !any_member_gone(ss)) {
+    if (st != ODIN3_OK && members_gone(ss) == 0) {
         return rolled_back(ss, st);
     }
     return st == ODIN3_OK ? st : odin3_kit_half_done(ss->oc, st);
@@ -691,7 +690,8 @@ static odin3_status apply_group(sh_state *ss) {
         return rolled_back(ss, st);
     }
     st = commit(ss, op);
-    ss->merged += st == ODIN3_OK ? (uint32_t)ss->byid.len : 0U;
+    /* a half-done rewrite counts the members it already deleted */
+    ss->merged += st == ODIN3_OK ? (uint32_t)ss->byid.len : members_gone(ss);
     return st;
 }
 

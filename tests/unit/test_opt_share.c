@@ -982,6 +982,27 @@ static void count_half_done(void) {
     }
 }
 
+/* True when a net of node's output pins has a reading pin. */
+static bool node_read(odin3_node_id node, const odin3_celltype_def *def) {
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        odin3_pinslice ps = odin3_node_port(fx.module, node, port);
+        for (uint32_t bit = 0; bit < ps.count; bit++) {
+            odin3_pin_id pin = {ps.first.v + bit};
+            odin3_net_id net = odin3_pin_net(fx.module, pin);
+            if (odin3_pin_reads(fx.module, pin) || !odin3_net_valid(net)) {
+                continue;
+            }
+            odin3_pinlist pl = odin3_net_pins(fx.module, net);
+            for (uint32_t i = 0; i < pl.count; i++) {
+                if (odin3_pin_reads(fx.module, pl.pins[i])) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 /* Live non-port nodes none of whose output nets has a reading pin: logic left unread. */
 static uint32_t dead_cells(void) {
     uint32_t dead = 0;
@@ -989,32 +1010,24 @@ static uint32_t dead_cells(void) {
         odin3_node_id node = {id};
         const odin3_celltype_def *def =
             odin3_celltype_get(fx.res.design, odin3_node_type(fx.module, node));
-        if (!odin3_node_live(fx.module, node) || def->gran == ODIN3_GRAN_PORT) {
-            continue;
+        if (odin3_node_live(fx.module, node) && def->gran != ODIN3_GRAN_PORT) {
+            dead += node_read(node, def) ? 0U : 1U;
         }
-        bool read = false;
-        for (uint32_t port = 0; port < def->n_ports; port++) {
-            odin3_pinslice ps = odin3_node_port(fx.module, node, port);
-            for (uint32_t bit = 0; bit < ps.count; bit++) {
-                odin3_pin_id pin = {ps.first.v + bit};
-                odin3_net_id net = odin3_pin_net(fx.module, pin);
-                if (odin3_pin_reads(fx.module, pin) || !odin3_net_valid(net)) {
-                    continue;
-                }
-                odin3_pinlist pl = odin3_net_pins(fx.module, net);
-                for (uint32_t i = 0; i < pl.count; i++) {
-                    read = read || odin3_pin_reads(fx.module, pl.pins[i]);
-                }
-            }
-        }
-        dead += read ? 0U : 1U;
     }
     return dead;
 }
 
+/* After an undone failure: no dead cell, and the cell count of the groups done. */
+static void check_undone(uint32_t cells) {
+    const uint32_t merged = fx.counts.share_merged;
+    TEST_ASSERT_EQUAL_UINT32(0, dead_cells());
+    /* a $neg per add/sub and $pmux group (net +1 each), the x constant node once */
+    const uint32_t want = cells + (merged >= 4U ? 1U : 0U) + (merged >= 7U ? 1U : 0U);
+    TEST_ASSERT_TRUE(count_live() == want || count_live() == want + 1U);
+}
+
 /* One run with the fail-th allocation failing (sticky: every one from the fail-th on); the IR is
- * valid, and a failure is either undone completely (no dead cell, the cell count of the groups
- * done) or reported by the discard line. */
+ * valid, and a failure is either undone completely or reported by the discard line. */
 static void oom_run_once(long fail, bool sticky, bool *done) {
     pb_free(&fx.res);
     memset(&fx.counts, 0, sizeof fx.counts);
@@ -1035,11 +1048,7 @@ static void oom_run_once(long fail, bool sticky, bool *done) {
     TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
     check_full();
     if (st != ODIN3_OK && g_half_done == half_before) {
-        const uint32_t merged = fx.counts.share_merged;
-        TEST_ASSERT_EQUAL_UINT32(0, dead_cells());
-        /* a $neg per add/sub and $pmux group (net +1 each), the x constant node once */
-        const uint32_t want = cells + (merged >= 4U ? 1U : 0U) + (merged >= 7U ? 1U : 0U);
-        TEST_ASSERT_TRUE(count_live() == want || count_live() == want + 1U);
+        check_undone(cells);
     }
 }
 
