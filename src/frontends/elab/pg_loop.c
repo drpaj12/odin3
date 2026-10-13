@@ -287,10 +287,11 @@ odin3_status pg_loop_step(odin3_pg *pg) {
 /* --- is the variable an output of the block? ------------------------------------------------- */
 
 /* The parts of a select or concatenation lvalue onto the worklist. */
-static odin3_status lhs_push_parts(odin3_pg *pg, odin3_ast_id node, odin3_ast_kind kind) {
+static odin3_status lhs_push_parts(const odin3_pg *pg, odin3_vec *work, odin3_ast_id node,
+                                   odin3_ast_kind kind) {
     uint32_t count = kind == ODIN3_AST_SELECT ? 1U : odin3_ast_nchild(pg->e2->elab, node);
     for (uint32_t part = 0; part < count; part++) {
-        odin3_ast_id *slot = odin3_vec_push(&pg->work);
+        odin3_ast_id *slot = odin3_vec_push(work);
         if (slot == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
@@ -299,23 +300,25 @@ static odin3_status lhs_push_parts(odin3_pg *pg, odin3_ast_id node, odin3_ast_ki
     return ODIN3_OK;
 }
 
-/* The names an lvalue assigns (through selects and concatenations) onto set. */
-static odin3_status lhs_bases(odin3_pg *pg, odin3_ast_id lhs, odin3_u64map *set) {
-    odin3_vec_clear(&pg->work);
-    odin3_ast_id *slot = odin3_vec_push(&pg->work);
+/* The names an lvalue assigns (through selects and concatenations) onto set. work is this walk's
+ * own list: pg->work is the live worklist of the scan that asked for the walk. */
+static odin3_status lhs_bases(const odin3_pg *pg, odin3_vec *work, odin3_ast_id lhs,
+                              odin3_u64map *set) {
+    odin3_vec_clear(work);
+    odin3_ast_id *slot = odin3_vec_push(work);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     *slot = lhs;
     odin3_status st = ODIN3_OK;
-    while (st == ODIN3_OK && pg->work.len > 0) {
-        odin3_ast_id node = *(const odin3_ast_id *)odin3_vec_cat(&pg->work, pg->work.len - 1);
-        odin3_vec_pop(&pg->work);
+    while (st == ODIN3_OK && work->len > 0) {
+        odin3_ast_id node = *(const odin3_ast_id *)odin3_vec_cat(work, work->len - 1);
+        odin3_vec_pop(work);
         odin3_ast_kind kind = odin3_ast_kind_of(pg->e2->elab, node);
         if (kind == ODIN3_AST_IDENT || kind == ODIN3_AST_HIER_NAME) {
             st = odin3_u64map_put(set, (odin3_kv){node.v, 1});
         } else if (kind == ODIN3_AST_SELECT || kind == ODIN3_AST_CONCAT) {
-            st = lhs_push_parts(pg, node, kind);
+            st = lhs_push_parts(pg, work, node, kind);
         }
     }
     return st;
@@ -325,6 +328,7 @@ static odin3_status lhs_bases(odin3_pg *pg, odin3_ast_id lhs, odin3_u64map *set)
 typedef struct lv_walk {
     odin3_vec stack; /* uint32_t: the loop variables of the for statements being walked */
     odin3_u64map *bases;
+    odin3_vec parts; /* odin3_ast_id: the parts of the lvalue being taken apart */
 } lv_walk;
 
 static bool in_stack(const lv_walk *walk, uint32_t sym) {
@@ -350,7 +354,7 @@ static odin3_status walk_enter(odin3_pg *pg, lv_walk *walk, odin3_ast_id node) {
     case ODIN3_AST_BLOCKING_ASSIGN:
     case ODIN3_AST_NONBLOCKING_ASSIGN:
     case ODIN3_AST_NET_ASSIGN:
-        return lhs_bases(pg, odin3_ast_child(ast, node, 0), walk->bases);
+        return lhs_bases(pg, &walk->parts, odin3_ast_child(ast, node, 0), walk->bases);
     case ODIN3_AST_IDENT:
     case ODIN3_AST_HIER_NAME: {
         odin3_sym_id sym = odin3_elab_sym_of(&pg->e2->bind, node);
@@ -366,8 +370,9 @@ static odin3_status walk_enter(odin3_pg *pg, lv_walk *walk, odin3_ast_id node) {
 
 /* Every name of the module the loops of its variable do not read, once per module. */
 static odin3_status build_loopout(odin3_pg *pg) {
-    lv_walk walk = {{0}, NULL};
+    lv_walk walk = {{0}, NULL, {0}};
     odin3_vec_init(&walk.stack, sizeof(uint32_t));
+    odin3_vec_init(&walk.parts, sizeof(odin3_ast_id));
     walk.bases = odin3_u64map_create(0);
     pg->loopout = pg->loopout != NULL ? pg->loopout : odin3_u64map_create(0);
     odin3_ast_cursor cur;
@@ -388,6 +393,7 @@ static odin3_status build_loopout(odin3_pg *pg) {
     }
     odin3_u64map_destroy(walk.bases);
     odin3_vec_free(&walk.stack);
+    odin3_vec_free(&walk.parts);
     pg->loopout_ready = st == ODIN3_OK;
     return st;
 }

@@ -132,6 +132,7 @@ odin3_status pg_block_reset(odin3_pg *pg) {
     pg->track_reads = false;
     pg->failed = false;
     pg->scan_frame = false;
+    pg->scanning = false;
     pg->groups = 0;
     odin3_u64map_destroy(pg->e2->bound);
     pg->e2->bound = NULL;
@@ -665,6 +666,7 @@ odin3_status pg_take_target_of(odin3_pg *pg, odin3_ast_id lhs) {
     pg->hooks = pg_reads(pg);
     lv->reads = &pg->hooks;
     lv->scan_only = pg->scan_local;
+    lv->scan_calls = pg->scanning;
     return odin3_elab2_lvalue_make(pg->e2, lhs, lv);
 }
 

@@ -324,6 +324,7 @@ void odin3_elab2_lvalue_init(odin3_elab2_lvalue *lv) {
     lv->regs.node = (odin3_ast_id){0};
     lv->reads = NULL;
     lv->scan_only = false;
+    lv->scan_calls = false;
 }
 
 void odin3_elab2_lvalue_free(odin3_elab2_lvalue *lv) {
@@ -565,6 +566,23 @@ static odin3_status lv_select_range(odin3_elab2 *e2, odin3_elab2_lvalue *lv, con
 
 /* --- words of arrays (EL-27) ------------------------------------------------------------------ */
 
+/* Whether an expression holds a call to a user function. */
+static bool lv_has_call(const odin3_elab2 *e2, odin3_ast_id expr) {
+    odin3_ast_cursor cur;
+    bool found = false;
+    if (odin3_ast_cursor_init(&cur, e2->elab, expr) != ODIN3_OK) {
+        return false;
+    }
+    odin3_ast_event ev;
+    odin3_ast_id node;
+    while (!found && odin3_ast_cursor_next(&cur, &ev, &node)) {
+        found = ev == ODIN3_AST_ENTER && odin3_ast_kind_of(e2->elab, node) == ODIN3_AST_CALL &&
+                (odin3_ast_flags(e2->elab, node) & ODIN3_AST_F_CALL_SYSTEM) == 0;
+    }
+    odin3_ast_cursor_free(&cur);
+    return found;
+}
+
 /* Whether the scan of a callee's body (lv->scan_only) meets an index it cannot generate: one that
  * reads the callee's variables, which have no wires until the call. */
 static bool lv_word_deferred(const odin3_elab2 *e2, const odin3_elab2_lvalue *lv, odin3_ast_id word,
@@ -572,6 +590,10 @@ static bool lv_word_deferred(const odin3_elab2 *e2, const odin3_elab2_lvalue *lv
     bool constant = true;
     for (uint32_t k = 0; lv->scan_only && constant && k < ref->n; k++) {
         (void)odin3_elab2_expr_is_const(e2, odin3_elab2_mem_word_index(e2, word, k), &constant);
+    }
+    /* the scan of a block does not run a call in an index: it runs where the target is written */
+    for (uint32_t k = 0; lv->scan_calls && constant && k < ref->n; k++) {
+        constant = !lv_has_call(e2, odin3_elab2_mem_word_index(e2, word, k));
     }
     return !constant;
 }

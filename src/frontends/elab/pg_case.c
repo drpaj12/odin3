@@ -99,14 +99,17 @@ static odin3_sigbit wild_bit(uint8_t wild, odin3_sigbit bit) {
 static odin3_status gen_compare(odin3_pg *pg, odin3_ast_id expr, const pg_swctx *ctx,
                                 odin3_sig *out) {
     odin3_sig sig;
+    /* ctx points into a vector of the builder that a call in expr grows: its fields are taken first
+     */
+    const uint8_t wild = ctx->wild;
     odin3_status st = gen_at(pg, expr, (odin3_etype){ctx->width, ctx->is_signed, false}, &sig);
-    if (st != ODIN3_OK || ctx->wild == PG_WILD_NONE) {
+    if (st != ODIN3_OK || wild == PG_WILD_NONE) {
         *out = sig;
         return st;
     }
     st = odin3_elab2_sig_new(pg->e2, sig.width, out);
     for (uint32_t i = 0; st == ODIN3_OK && i < sig.width; i++) {
-        out->bits[i] = wild_bit(ctx->wild, sig.bits[i]);
+        out->bits[i] = wild_bit(wild, sig.bits[i]);
     }
     out->is_signed = sig.is_signed;
     return st;
@@ -547,6 +550,8 @@ odin3_status pg_if_open(odin3_pg *pg, odin3_ast_id node) {
     return st != ODIN3_OK ? st : switch_frame(pg, &req, &frame);
 }
 
+static odin3_status case_compares_push(odin3_pg *pg, odin3_ast_id node, const pg_swctx *ctx);
+
 odin3_status pg_case_open(odin3_pg *pg, odin3_ast_id node) {
     uint64_t fold = 0;
     if (odin3_u64map_get(pg->folds, node.v, &fold)) {
@@ -563,6 +568,9 @@ odin3_status pg_case_open(odin3_pg *pg, odin3_ast_id node) {
     pg_sw_req req = {node, &sel, NULL, 0, 0, 0, false, case_wild(pg, node)};
     odin3_status st = case_type(pg, node, &type);
     st = st != ODIN3_OK ? st : gen_at(pg, odin3_ast_child(ast, node, 0), type, &sel);
+    /* the item expressions' calls may scan bodies (growing the pool stmt_targets points into) */
+    pg_swctx cctx = {.width = type.width, .is_signed = type.is_signed, .wild = req.wild};
+    st = st != ODIN3_OK ? st : case_compares_push(pg, node, &cctx);
     st = st != ODIN3_OK ? st : case_flags(pg, node, &req.flags);
     st = st != ODIN3_OK ? st : stmt_targets(pg, node, &req);
     req.width = type.width;
@@ -584,37 +592,77 @@ static odin3_ast_id item_body(const odin3_pg *pg, const pg_frame *frame, uint32_
                                                                : odin3_ast_child(ast, child, 0);
 }
 
-/* Adds a compare to the case being opened. */
-static odin3_status compare_push(odin3_pg *pg, const odin3_sig *sig) {
-    odin3_sig *slot = odin3_vec_push(&pg->cmp_sigs);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
+/* The compares of every item of a case, made before its switch is opened and pushed on the stack
+ * of the builder, the last item's first: a call in an item expression inlines the callee's
+ * `if`/`case` statements into the current case, where they must come before this switch, and
+ * they make compares of their own. The items are opened in order, each taking its compares from
+ * the top. */
+/* The compares of one item pushed in order. */
+static odin3_status item_push(odin3_pg *pg, odin3_ast_id item, const pg_swctx *ctx) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t j = 1; st == ODIN3_OK && j < odin3_ast_nchild(pg->e2->elab, item); j++) {
+        odin3_sig cmp;
+        st = gen_compare(pg, odin3_ast_child(pg->e2->elab, item, j), ctx, &cmp);
+        odin3_sig *slot = st == ODIN3_OK ? odin3_vec_push(&pg->cmp_sigs) : NULL;
+        st = st != ODIN3_OK || slot != NULL ? st : ODIN3_ERR_NO_MEMORY;
+        if (slot != NULL) {
+            *slot = cmp;
+        }
     }
-    *slot = *sig;
-    return ODIN3_OK;
+    return st;
 }
 
-/* The compares of item idx: an if's `1'1`, a case item's expressions. */
-static odin3_status item_compares(odin3_pg *pg, const pg_frame *frame, uint32_t idx) {
+static void cmps_reverse(odin3_pg *pg, size_t base) {
+    odin3_sig *run = (odin3_sig *)pg->cmp_sigs.data + base;
+    for (size_t lo = 0, hi = pg->cmp_sigs.len - base; lo + 1 < hi; lo++, hi--) {
+        odin3_sig tmp = run[lo];
+        run[lo] = run[hi - 1];
+        run[hi - 1] = tmp;
+    }
+}
+
+static odin3_status case_compares_push(odin3_pg *pg, odin3_ast_id node, const pg_swctx *ctx) {
+    size_t base = pg->cmp_sigs.len;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_ast_nchild(pg->e2->elab, node); i++) {
+        odin3_ast_id item = odin3_ast_child(pg->e2->elab, node, i);
+        st = is_default_item(pg, item) ? ODIN3_OK : item_push(pg, item, ctx);
+    }
+    if (st == ODIN3_OK) {
+        cmps_reverse(pg, base); /* the first item's first compare on top */
+    }
+    return st;
+}
+
+/* The compares of one item: an if's `1'1`, or the case item's, taken off the stack. They live in
+ * the scratch arena (the stack shrinks and moves as cases open and close). */
+typedef struct item_cmps {
+    odin3_sig *sigs;
+    uint32_t count;
+} item_cmps;
+
+static odin3_status item_compares(odin3_pg *pg, const pg_frame *frame, uint32_t idx,
+                                  item_cmps *out) {
     const odin3_ast *ast = pg->e2->elab;
-    odin3_vec_clear(&pg->cmp_sigs);
-    if (odin3_ast_kind_of(ast, frame->node) == ODIN3_AST_IF) {
-        odin3_sig one;
-        odin3_status st = odin3_elab2_sig_new(pg->e2, 1, &one);
+    bool is_if = odin3_ast_kind_of(ast, frame->node) == ODIN3_AST_IF;
+    uint32_t want = is_if ? 1U : odin3_ast_nchild(ast, odin3_ast_child(ast, frame->node, idx)) - 1U;
+    out->count = 0;
+    out->sigs = odin3_arena_alloc(pg->e2->scratch, ((size_t)want + 1U) * sizeof *out->sigs);
+    if (out->sigs == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    if (is_if) {
+        odin3_status st = odin3_elab2_sig_new(pg->e2, 1, &out->sigs[0]);
         if (st == ODIN3_OK) {
-            one.bits[0] = odin3_sb_of_bit(ODIN3_BIT_1);
-            st = compare_push(pg, &one);
+            out->sigs[0].bits[0] = odin3_sb_of_bit(ODIN3_BIT_1);
+            out->count = 1;
         }
         return st;
     }
-    odin3_ast_id item = odin3_ast_child(ast, frame->node, idx);
-    for (uint32_t j = 1; j < odin3_ast_nchild(ast, item); j++) {
-        odin3_sig cmp;
-        odin3_status st = gen_compare(pg, odin3_ast_child(ast, item, j), sw_top(pg), &cmp);
-        st = st != ODIN3_OK ? st : compare_push(pg, &cmp);
-        if (st != ODIN3_OK) {
-            return st;
-        }
+    for (; out->count < want && pg->cmp_sigs.len > 0; out->count++) {
+        out->sigs[out->count] =
+            *(const odin3_sig *)odin3_vec_cat(&pg->cmp_sigs, pg->cmp_sigs.len - 1);
+        odin3_vec_pop(&pg->cmp_sigs);
     }
     return ODIN3_OK;
 }
@@ -629,11 +677,12 @@ static odin3_status open_item(odin3_pg *pg, const item_ref *ref) {
     uint32_t frame_at = ref->frame;
     uint32_t idx = ref->idx;
     pg_frame frame = *(const pg_frame *)odin3_vec_cat(&pg->frames, frame_at);
-    odin3_status st = item_compares(pg, &frame, idx);
+    item_cmps cmps = {NULL, 0};
+    odin3_status st = item_compares(pg, &frame, idx, &cmps);
     odin3_ast_id stmt = odin3_ast_kind_of(pg->e2->elab, frame.node) == ODIN3_AST_IF
                             ? frame.node
                             : odin3_ast_child(pg->e2->elab, frame.node, idx);
-    odin3_pg_case_req req = {stmt, pg->cmp_sigs.data, (uint32_t)pg->cmp_sigs.len};
+    odin3_pg_case_req req = {stmt, cmps.sigs, cmps.count};
     st = st != ODIN3_OK ? st : pg_sw_case(pg, &req, false);
     if (st != ODIN3_OK) {
         return st;

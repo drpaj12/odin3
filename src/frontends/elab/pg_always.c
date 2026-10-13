@@ -157,11 +157,38 @@ static odin3_status sync_add(odin3_pg *pg, uint8_t type, odin3_sigbit signal) {
     return sync_actions(pg, (uint32_t)pg->syncs.len - 1U);
 }
 
+/* The first call to a user function in an expression, or 0. */
+static odin3_ast_id first_user_call(const odin3_elab2 *e2, odin3_ast_id expr) {
+    odin3_ast_cursor cur;
+    odin3_ast_id found = {0};
+    if (odin3_ast_cursor_init(&cur, e2->elab, expr) != ODIN3_OK) {
+        return found;
+    }
+    odin3_ast_event ev;
+    odin3_ast_id node;
+    while (found.v == 0 && odin3_ast_cursor_next(&cur, &ev, &node)) {
+        if (ev == ODIN3_AST_ENTER && odin3_ast_kind_of(e2->elab, node) == ODIN3_AST_CALL &&
+            (odin3_ast_flags(e2->elab, node) & ODIN3_AST_F_CALL_SYSTEM) == 0) {
+            found = node;
+        }
+    }
+    odin3_ast_cursor_free(&cur);
+    return found;
+}
+
 /* The sync of one edge event: its expression generated as cells (it may be any 1-bit expression)
- * and one bit wide. */
+ * and one bit wide. A function call in it is an error: the call would be inlined into the block
+ * that the event itself opens. */
 static odin3_status sync_edge(odin3_pg *pg, odin3_ast_id event) {
     odin3_elab2 *e2 = pg->e2;
     odin3_ast_id expr = odin3_ast_child(e2->elab, event, 0);
+    odin3_ast_id call = first_user_call(e2, expr);
+    if (call.v != 0) {
+        odin3_elab2_error(e2, odin3_ast_loc(e2->elab, call),
+                          "call of function '%s' in an edge expression is not supported",
+                          odin3_ast_name_str(e2->elab, call));
+        return ODIN3_ERR_PARSE;
+    }
     odin3_elab2_expr_req req = {expr, {0, false, false}, NULL, NULL};
     odin3_sig sig;
     odin3_status st = odin3_elab2_expr(e2, &req, &sig);

@@ -539,6 +539,9 @@ static odin3_status comb_run(call_run *cr, odin3_sig *result) {
     odin3_pg *pg = cr->pg;
     odin3_elab2 *e2 = pg->e2;
     odin3_status st = comb_block(pg, cr->info.call);
+    /* the variables of the module the function assigns are outputs of the block, with the result
+     * (found before the frame gives the function's own variables wires: those are not) */
+    st = st != ODIN3_OK || cr->info.body.v == 0 ? st : pg_scan(pg, cr->info.body);
     st = st != ODIN3_OK ? st : frame_enter(cr);
     odin3_sym_id sym = {0};
     const odin3_symbol *res =

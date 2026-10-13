@@ -162,16 +162,16 @@ struct odin3_pg {
     uint32_t cur;            /* the current case */
     odin3_vec frames;        /* pg_frame */
     /* switches (Task 22) */
-    odin3_u64map *swl;       /* if/case node -> (first in sw_pool << 32) | count: its targets */
-    odin3_u64map *folds;     /* if/case node -> the child to run + 1 (PG_FOLD_NONE: none) */
-    odin3_vec blk;           /* uint32_t: nets assigned by `=` so far in the open switches (scan) */
-    odin3_vec blk_marks;     /* uint32_t: where each open switch's nets begin in blk */
-    odin3_vec sw_pool;       /* uint32_t: the targets of every switch, sorted and unique */
-    odin3_vec sw_ctx;        /* pg_swctx */
-    odin3_vec sw_nets;       /* odin3_sigbit: targets of the switches being built */
-    odin3_vec sw_t1;         /* odin3_sigbit: their case temporaries */
-    odin3_vec sw_rv;         /* odin3_sigbit: their values at the switch's start */
-    odin3_vec cmp_sigs;      /* odin3_sig: the compares of the case being opened */
+    odin3_u64map *swl;   /* if/case node -> (first in sw_pool << 32) | count: its targets */
+    odin3_u64map *folds; /* if/case node -> the child to run + 1 (PG_FOLD_NONE: none) */
+    odin3_vec blk;       /* uint32_t: nets assigned by `=` so far in the open switches (scan) */
+    odin3_vec blk_marks; /* uint32_t: where each open switch's nets begin in blk */
+    odin3_vec sw_pool;   /* uint32_t: the targets of every switch, sorted and unique */
+    odin3_vec sw_ctx;    /* pg_swctx */
+    odin3_vec sw_nets;   /* odin3_sigbit: targets of the switches being built */
+    odin3_vec sw_t1;     /* odin3_sigbit: their case temporaries */
+    odin3_vec sw_rv;     /* odin3_sigbit: their values at the switch's start */
+    odin3_vec cmp_sigs;  /* odin3_sig: the compares of the items of the open cases not yet opened */
     odin3_elab2_reads hooks; /* the walker's hooks over this generator (pg_reads) */
     odin3_elab2_lvalue slv;  /* a synthetic target: a switch's exit, a select write's case */
     /* loops and calls (Task 23) */
@@ -184,6 +184,7 @@ struct odin3_pg {
     bool loopout_ready;    /* loopout is built for the module */
     bool scan_frame;       /* the scan is of a call's body: no new outputs */
     bool scan_local;       /* the target being scanned names a callee's variable in an index */
+    bool scanning;         /* pg_scan is under way: an index with a call in it is not generated */
     /* T3 */
     odin3_u64map *reads;  /* net -> 1: read, not supplied by an assignment of the block */
     odin3_u64map *listed; /* net -> 1: a bit of a signal the level list names */

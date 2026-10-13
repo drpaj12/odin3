@@ -823,6 +823,7 @@ typedef struct odin3_elab2_lvalue {
     odin3_elab2_regsel
         regs;       /* procedural only: the word of a register array with a variable index */
     bool scan_only; /* procedural only: names of a callee's variables are not resolved (the scan) */
+    bool scan_calls; /* procedural only: the scan; an index with a call in it is not generated */
     const odin3_elab2_reads
         *reads; /* procedural only: the hooks the index expressions are read through */
 } odin3_elab2_lvalue;

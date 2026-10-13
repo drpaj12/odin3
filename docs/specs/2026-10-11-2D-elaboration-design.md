@@ -2653,8 +2653,6 @@ and reported, never relaxed (2A's rule).
 | 61 | a continuous-context call is a `$proc` whose output is the result variable's own wire; the expression reads that wire | Yosys wraps the call in `always @*` over `\f$func$…$result` and `connect`s the lhs to it | — | none |
 | 62 | outputs of an `if`/`case` inside an unrolled loop are counted over every iteration's branches by the scan; the generator folds the taken branch per iteration | Yosys unrolls first, so a branch dead in every iteration writes nothing and its target is no output | scan-time unrolling (cost: the body scanned once per iteration) | the difference needs a branch that is dead in every iteration; its target would be an output held by a latch or flip-flop |
 | 63 | a register-array word with a variable index is supported for one-dimensional arrays only; a multi-dimensional one is the located error `non-constant index into the multi-dimensional register array 'm' is not supported` | Yosys's `mem2reg_as_needed_pass2` handles every dimension | the row-major address as a case selector | rare; the flattened address needs `$mul`/`$add` cells before the switch |
-| 64 | a call inside a case item expression may disturb the compares of the case being opened (`cmp_sigs` is shared) | — | a per-call stack | calls in case item expressions are unusual |
-| 65 | a write to a module variable inside a function (not a task) is dropped silently: only a task's targets are outputs of the block | Yosys inlines the function body, so the write is the block's | scan function bodies for module-level targets | synthesizable functions have no side effects (IEEE 1364 §10.3) |
 
 ## 18. Implementation split (EL-51)
 

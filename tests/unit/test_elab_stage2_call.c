@@ -610,6 +610,203 @@ static void test_constant_call_index_is_constant(void) {
     pt_expect_ir_ok();
 }
 
+/* --- fix round 1: scan worklists, function side effects, per-case compares ---------------------
+ * Each source is also a bridge source of tests/verilog/call-bridge (elab-equiv against Yosys). */
+
+/* The statements after a `for` are scanned: z is an output of the block (the scan's worklist was
+ * cleared by the first loop's loop-variable analysis). */
+static void test_statement_after_loop_is_kept(void) {
+    pt_read_clean(
+        "module t(input [3:0] a, output reg [3:0] y, output reg [3:0] z);\n"
+        "  integer i;\n  always @* begin\n"
+        "    for (i = 0; i < 4; i = i + 1) y[i] = a[3 - i];\n    z = a;\n  end\nendmodule\n");
+    pt_expect_dump(0, "I4 O16\n"
+                      "C0 [O8<-I3 O9<-I2 O10<-I1 O11<-I0 O12..O15<-I0..I3]\n"
+                      "S always [O0..O3<-O8..O11 O4..O7<-O12..O15]\n");
+}
+
+static void test_statements_around_two_loops_are_kept(void) {
+    pt_read_clean("module t(input [3:0] a, output reg [3:0] y, output reg [3:0] z, "
+                  "output reg [3:0] w);\n  integer i, j;\n  always @* begin\n    z = a;\n"
+                  "    for (i = 0; i < 4; i = i + 1) y[i] = a[3 - i];\n"
+                  "    for (j = 0; j < 2; j = j + 1) w[j] = a[j];\n    w[3:2] = 0;\n"
+                  "  end\nendmodule\n");
+    pt_expect_dump(
+        0, "I5 O24\n"
+           "C0 [O16..O19<-I0..I3 O12<-I3 O13<-I2 O14<-I1 O15<-I0 O20<-I0 O21<-I1 O22..O23<-I4,I4]\n"
+           "S always [O0..O3<-O12..O15 O4..O7<-O16..O19 O8..O11<-O20..O23]\n");
+}
+
+/* A function that assigns a variable of the module: the write is the block's (Yosys inlines the
+ * body), and the variable is an output of the block. */
+static const char k_fn_writes[] =
+    "module t(input [3:0] d, output reg [3:0] q, output reg [3:0] g);\n"
+    "  function [3:0] f(input [3:0] v);\n    begin g = v + 1; f = v; end\n  endfunction\n"
+    "  always @* q = f(d);\nendmodule\n";
+
+static void test_function_writes_module_variable(void) {
+    pt_read_clean(k_fn_writes);
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$add"));
+    pt_expect_dump(0, "I8 O24\n"
+                      "C0 [O20..O23<-I0..I3 O12..O15<-I4..I7 O16..O19<-I0..I3 O8..O11<-I0..I3]\n"
+                      "S always [O0..O3<-O8..O11 O4..O7<-O12..O15]\n");
+}
+
+/* The same with constant arguments: the interpreter does not fold a body that assigns a
+ * non-local, so the write is not lost. */
+static void test_function_writes_module_variable_constant_call(void) {
+    pt_read_clean("module t(input [3:0] d, output reg [3:0] q, output reg [3:0] g);\n"
+                  "  function [3:0] f(input [3:0] v);\n    begin g = v + 1; f = v; end\n"
+                  "  endfunction\n  always @* q = f(4'd3);\nendmodule\n");
+    pt_expect_dump(0, "I2 O24\n"
+                      "C0 [O20..O23<-I0,I0..I1,I1 O12..O15<-I1,I1,I0..I1 O16..O19<-I0,I0..I1,I1 "
+                      "O8..O11<-I0,I0..I1,I1]\n"
+                      "S always [O0..O3<-O8..O11 O4..O7<-O12..O15]\n");
+}
+
+/* The write is seen by the statements after the call. */
+static void test_function_write_is_read_after(void) {
+    pt_read_clean("module t(input [3:0] d, output reg [3:0] q);\n  reg [3:0] g;\n"
+                  "  function [3:0] f(input [3:0] v);\n    begin g = v + 1; f = v; end\n"
+                  "  endfunction\n  always @* q = f(d) ^ g;\nendmodule\n");
+    pt_expect_dump(0, "I12 O24\n"
+                      "C0 [O20..O23<-I0..I3 O12..O15<-I4..I7 O16..O19<-I0..I3 O8..O11<-I8..I11]\n"
+                      "S always [O0..O3<-O8..O11 O4..O7<-O12..O15]\n");
+}
+
+/* A call in a continuous assignment whose function assigns a module variable: the block drives it
+ * with the result. */
+static void test_function_write_in_continuous_call(void) {
+    pt_read_clean("module t(input [3:0] d, output [3:0] q, output reg [3:0] g);\n"
+                  "  function [3:0] f(input [3:0] v);\n    begin g = v + 1; f = v; end\n"
+                  "  endfunction\n  assign q = f(d);\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
+    pt_expect_dump(0, "I8 O20\n"
+                      "C0 [O8..O11<-I0..I3 O12..O15<-I4..I7 O16..O19<-I0..I3]\n"
+                      "S always [O0..O3<-O12..O15 O4..O7<-O16..O19]\n");
+}
+
+/* A function reached through another function, and a conditional write. */
+static void test_function_write_nested_and_conditional(void) {
+    pt_read_clean("module t(input [3:0] d, input c, output reg [3:0] q, output reg [3:0] g, "
+                  "output reg [1:0] h);\n"
+                  "  function [3:0] inner(input [3:0] v);\n    begin g = v + 1; inner = v; end\n"
+                  "  endfunction\n  function [3:0] outer(input [3:0] v);\n    begin\n"
+                  "      if (c) h[1] = 1'b1; else h[0] = v[0];\n      outer = inner(v) ^ 4'd3;\n"
+                  "    end\n  endfunction\n  always @* begin\n    h = 2'b00;\n    q = outer(d);\n"
+                  "  end\nendmodule\n");
+    pt_expect_dump(0, "I15 O38\n"
+                      "C0 [O24..O27<-I0..I3 O18..O19<-O28..O29 O34..O37<-I0..I3 O14..O17<-I7..I10 "
+                      "O30..O33<-I0..I3 O20..O23<-I11..I14 O10..O13<-I11..I14] sw0+1\n"
+                      "C1 cmp(I5) [O28<-I6 O29<-I5]\n"
+                      "C2 [O29<-I6 O28<-I0]\n"
+                      "W0 (I4) f0 C1+2\n"
+                      "S always [O0..O3<-O10..O13 O4..O7<-O14..O17 O8..O9<-O18..O19]\n");
+}
+
+/* A function that writes a word of a register array makes the array registers and the write the
+ * block's. */
+static void test_function_writes_array_word(void) {
+    pt_read_src("module t(input clk, input [3:0] d, input [1:0] s, output [3:0] q);\n"
+                "  reg [3:0] m [0:3];\n"
+                "  function [3:0] f(input [3:0] v); begin m[1] = v; f = v; end endfunction\n"
+                "  reg [3:0] r;\n  always @* r = f(d);\n  assign q = m[s];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_warning((at_loc){2, 13}, "replacing memory 'm' with list of registers; see t.v:3");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$mem"));
+    pt_expect_ir_ok();
+}
+
+/* A call in the index of a register-array word target runs where the word is written: the
+ * statements after it are still scanned. */
+static void test_call_in_word_index_keeps_later_statements(void) {
+    pt_read_src("module t(input [1:0] s, input [3:0] d, output reg [3:0] q, output reg [3:0] z);\n"
+                "  reg [3:0] m [0:3];\n"
+                "  function [1:0] f(input [1:0] v); f = v + 1; endfunction\n"
+                "  always @* begin\n    m[0] = d; m[1] = d; m[2] = d; m[3] = d;\n"
+                "    m[f(s)] = ~d;\n    z = d;\n    q = m[s];\n  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
+    pt_expect_dump(
+        0,
+        "I17 O80\n"
+        "C0 [O50..O51<-I0..I1 O48..O49<-I8..I9 O54..O55<-I0..I1 O52..O53<-I14..I15 "
+        "O44..O47<-O68..O71 O40..O43<-O64..O67 O36..O39<-O60..O63 O32..O35<-O56..O59 "
+        "O28..O31<-I2..I5 O72..O75<-O76..O79 O24..O27<-O76..O79] sw0+2\n"
+        "C1 cmp(I7,I7) [O60..O63<-I2..I5 O64..O67<-I2..I5 O68..O71<-I2..I5 O56..O59<-I10..I13]\n"
+        "C2 cmp(I6..I7) [O56..O59<-I2..I5 O64..O67<-I2..I5 O68..O71<-I2..I5 O60..O63<-I10..I13]\n"
+        "C3 cmp(I7,I6) [O56..O59<-I2..I5 O60..O63<-I2..I5 O68..O71<-I2..I5 O64..O67<-I10..I13]\n"
+        "C4 cmp(I6,I6) [O56..O59<-I2..I5 O60..O63<-I2..I5 O64..O67<-I2..I5 O68..O71<-I10..I13]\n"
+        "C5 [O56..O59<-I2..I5 O60..O63<-I2..I5 O64..O67<-I2..I5 O68..O71<-I2..I5]\n"
+        "C6 cmp(I7,I7) [O79<-O59 O78<-O58 O77<-O57 O76<-O56]\n"
+        "C7 cmp(I6..I7) [O79<-O63 O78<-O62 O77<-O61 O76<-O60]\n"
+        "C8 cmp(I7,I6) [O79<-O67 O78<-O66 O77<-O65 O76<-O64]\n"
+        "C9 cmp(I6,I6) [O79<-O71 O78<-O70 O77<-O69 O76<-O68]\n"
+        "C10 [O79<-I16 O78<-I16 O77<-I16 O76<-I16]\n"
+        "W0 (I14..I15) f0 C1+5\n"
+        "W1 (I0..I1) f0 C6+5\n"
+        "S always [O0..O3<-O24..O27 O4..O7<-O28..O31 O8..O11<-O32..O35 O12..O15<-O36..O39 "
+        "O16..O19<-O40..O43 O20..O23<-O44..O47]\n");
+}
+
+/* A case item that calls a function with its own case or if: the item's compares are made before
+ * the case's switch opens, and the callee's compares do not disturb them. */
+static const char k_item_case[] =
+    "module t(input [1:0] s, input [1:0] a, b, output reg [3:0] y);\n"
+    "  function [1:0] sw(input [1:0] v);\n    begin\n      case (v)\n"
+    "        2'd0: sw = 2'd3;\n        2'd1: sw = 2'd2;\n        default: sw = v;\n"
+    "      endcase\n    end\n  endfunction\n  always @* begin\n    case (s)\n"
+    "      sw(a): y = 4'd1;\n      sw(b): y = 4'd2;\n      2'd3: y = 4'd3;\n"
+    "      default: y = 4'd9;\n    endcase\n  end\nendmodule\n";
+
+static void test_case_item_calls_function_with_case(void) {
+    pt_read_clean(k_item_case);
+    pt_expect_dump(0, "I8 O24\n"
+                      "C0 [O10..O11<-I2..I3 O8..O9<-O12..O13 O16..O17<-I4..I5 O14..O15<-O18..O19 "
+                      "O4..O7<-O20..O23] sw0+3\n"
+                      "C1 cmp(I6,I6) [O13<-I7 O12<-I7]\n"
+                      "C2 cmp(I7,I6) [O13<-I7 O12<-I6]\n"
+                      "C3 [O13<-I3 O12<-I2]\n"
+                      "C4 cmp(I6,I6) [O19<-I7 O18<-I7]\n"
+                      "C5 cmp(I7,I6) [O19<-I7 O18<-I6]\n"
+                      "C6 [O19<-I5 O18<-I4]\n"
+                      "C7 cmp(O12..O13) [O20..O23<-I7,I6,I6,I6]\n"
+                      "C8 cmp(O18..O19) [O20..O23<-I6..I7,I6,I6]\n"
+                      "C9 cmp(I7,I7) [O20..O23<-I7,I7,I6,I6]\n"
+                      "C10 [O20..O23<-I7,I6,I6..I7]\n"
+                      "W0 (I2..I3) f0 C1+3\n"
+                      "W1 (I4..I5) f0 C4+3\n"
+                      "W2 (I0..I1) f0 C7+4\n"
+                      "S always [O0..O3<-O4..O7]\n");
+}
+
+static void test_case_item_calls_function_with_if(void) {
+    pt_read_clean(
+        "module t(input [1:0] s, input [1:0] a, output reg [3:0] y);\n"
+        "  function [1:0] sw(input [1:0] v);\n    begin\n"
+        "      if (v == 2'd0) sw = 2'd3; else sw = v;\n    end\n  endfunction\n"
+        "  always @* begin\n    case (s)\n      sw(a): y = 4'd1;\n"
+        "      2'd2: y = 4'd2;\n      default: y = 4'd9;\n    endcase\n  end\nendmodule\n");
+    pt_expect_dump(0, "I7 O18\n"
+                      "C0 [O10..O11<-I2..I3 O8..O9<-O12..O13 O4..O7<-O14..O17] sw0+2\n"
+                      "C1 cmp(I6) [O13<-I6 O12<-I6]\n"
+                      "C2 [O13<-I3 O12<-I2]\n"
+                      "C3 cmp(O12..O13) [O14..O17<-I6,I4,I4,I4]\n"
+                      "C4 cmp(I4,I6) [O14..O17<-I4,I6,I4,I4]\n"
+                      "C5 [O14..O17<-I6,I4,I4,I6]\n"
+                      "W0 (I5) f0 C1+2\n"
+                      "W1 (I0..I1) f0 C3+3\n"
+                      "S always [O0..O3<-O4..O7]\n");
+}
+
+/* A call in an edge expression is not inlined (M6). */
+static void test_call_in_edge_expression_is_error(void) {
+    pt_read_failing("module t(input clk, input x, output reg q);\n"
+                    "  function f(input v); f = ~v; endfunction\n"
+                    "  always @(posedge f(x)) q <= x;\nendmodule\n");
+    pt_expect_error((at_loc){3, 20}, "call of function 'f' in an edge expression is not supported");
+}
+
 #define ALL_TESTS(X)                                                                               \
     X(test_for_unrolled)                                                                           \
     X(test_for_variable_read_outside)                                                              \
@@ -644,7 +841,19 @@ static void test_constant_call_index_is_constant(void) {
     X(test_memory_write_in_loop_and_task_is_pending)                                               \
     X(test_oom_sweep_calls)                                                                        \
     X(test_oom_sweep_primitives_and_misuse)                                                        \
-    X(test_constant_call_index_is_constant)
+    X(test_constant_call_index_is_constant)                                                        \
+    X(test_statement_after_loop_is_kept)                                                           \
+    X(test_statements_around_two_loops_are_kept)                                                   \
+    X(test_function_writes_module_variable)                                                        \
+    X(test_function_writes_module_variable_constant_call)                                          \
+    X(test_function_write_is_read_after)                                                           \
+    X(test_function_write_in_continuous_call)                                                      \
+    X(test_function_write_nested_and_conditional)                                                  \
+    X(test_function_writes_array_word)                                                             \
+    X(test_call_in_word_index_keeps_later_statements)                                              \
+    X(test_case_item_calls_function_with_case)                                                     \
+    X(test_case_item_calls_function_with_if)                                                       \
+    X(test_call_in_edge_expression_is_error)
 
 #define RUN_ONE(name) RUN_TEST(name);
 
