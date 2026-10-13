@@ -125,6 +125,32 @@ class GateTest(unittest.TestCase):
             with self.subTest(cell_type=cell_type, formal=formal):
                 self.assertEqual(blif.gate_port_is_output(cell_type, formal), expected)
 
+    # An inout port is in .inputs and .outputs (Yosys's write_blif, ours): the outside drives it and
+    # the model may drive it too, once. Ordinary nets keep the one-driver rule (2H).
+    INOUT = (".model t\n.inputs a en io\n.outputs io\n"
+             ".names a en io\n11 1\n.end\n")
+
+    def test_inout_may_have_one_internal_driver(self) -> None:
+        blif.parse_text(self.INOUT, "io.blif")
+        blif.parse_text(".model t\n.inputs a io\n.outputs io\n.names a io\n1 1\n.end\n")
+
+    def test_inout_second_internal_driver_is_an_error(self) -> None:
+        text = self.INOUT.replace(".end\n", ".names a io\n1 1\n.end\n")
+        with self.assertRaises(blif.BlifError) as ctx:
+            blif.parse_text(text, "io.blif")
+        self.assertIn("more than one driver", str(ctx.exception))
+
+    def test_plain_input_driven_internally_is_still_an_error(self) -> None:
+        text = ".model t\n.inputs a en\n.outputs y\n.names a en\n1 1\n.names a y\n1 1\n.end\n"
+        with self.assertRaises(blif.BlifError) as ctx:
+            blif.parse_text(text, "in.blif")
+        self.assertIn("more than one driver", str(ctx.exception))
+
+    def test_output_only_net_is_not_an_inout(self) -> None:
+        text = ".model t\n.inputs a\n.outputs y\n.names a y\n1 1\n.names a y\n0 1\n.end\n"
+        with self.assertRaises(blif.BlifError):
+            blif.parse_text(text, "o.blif")
+
     def test_gate_drivers_are_checked(self) -> None:
         text = (".model t\n.inputs a\n.outputs y\n"
                 ".gate single_port_ram clk=a out[0]=y\n.names a y\n1 1\n.end\n")
