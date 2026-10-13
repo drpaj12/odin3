@@ -1886,7 +1886,7 @@ CTest `elab_proc_bridge_smoke`: `elab-equiv` on the T7, T8 and `q + 1` sources â
 3. compare `odin3_ast_dump(elab)` with `<row>.elab` (`--write` refuses a `# hand-written` file);
 4. unless `--stage1`, compare `odin3_rtlil_text` with `<row>.il`, or with `<row>.nolatches.il` under `--nolatches`.
 
-Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_equiv` runs `elab-equiv` per row, smallest first.
+Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab-equiv` itself exits 0 equivalent, 1 not equivalent, 2 error, 3 oracle crash (Yosys died of a signal, e.g. 0.55 on recursive instantiation), 77 skipped; `run-rows-equiv` reports 3 distinctly as an oracle crash and never as an expected failure, and `elab-sweep --equiv` counts it as `crash` (2D Task 26 review). `elab_coverage_equiv` runs `elab-equiv` per row, smallest first.
 
 **Tests:**
 - `test_elab_rows.py`:
