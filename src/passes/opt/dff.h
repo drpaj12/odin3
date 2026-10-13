@@ -36,6 +36,16 @@ typedef struct odin3_dff_muxes {
 } odin3_dff_muxes;
 
 /*
+ * opt_dff's dirty set of one module call (dff_dirty.c). Inactive: every FF is visited. Active:
+ * only the FFs marked dirty, and every node ID from first_new on (made during this call).
+ */
+typedef struct odin3_dff_dirty {
+    uint8_t *marks; /* one byte per node ID up to n_marks */
+    uint32_t n_marks, first_new;
+    bool active;
+} odin3_dff_dirty;
+
+/*
  * The state of one FF's visit.
  * - ff: the FF as the rules have left it (Yosys `ff`); cell: the node it was loaded from (Yosys
  *   `cell`), live until the commit; width0: the width of that node's Q.
@@ -43,6 +53,7 @@ typedef struct odin3_dff_muxes {
  * - changed, gone: the FF changed / its node is gone (a rule removed it).
  * - n_changed, n_bits: this call's totals.
  * - counted: a commit already made this visit's changes (rules 10 and 11 re-emit the FF at once).
+ * - dirty: which FFs this call visits (dff_dirty.c).
  * - muxes, queue: the mux snapshot of the module, and the work list (node IDs) the groups of
  *   rules 10 and 11 push the FFs they make on.
  */
@@ -56,12 +67,32 @@ typedef struct odin3_dff_state {
     odin3_vec pend;
     odin3_prov_id prov;
     bool prov_ready, changed, gone, counted;
+    bool checking; /* Debug: a skipped FF is being visited as a check (dff.c) */
     uint32_t n_changed, n_bits;
     odin3_dff_muxes muxes;
     odin3_vec *queue;
+    odin3_dff_dirty dirty;
 } odin3_dff_state;
 
 typedef odin3_status (*odin3_dff_rule_fn)(odin3_dff_state *ds);
+
+/* --- dff_dirty.c ------------------------------------------------------------------------------ */
+
+void odin3_dff_dirty_init(odin3_dff_dirty *dd);
+void odin3_dff_dirty_free(odin3_dff_dirty *dd);
+
+/*
+ * Starts a module call: the first call in an incremental session (or one after a journal overflow)
+ * sweeps in full and starts the IR journal; later calls take the FFs the journal says may have
+ * changed since the previous call began. Never fails for want of memory (it sweeps in full).
+ */
+odin3_status odin3_dff_dirty_begin(odin3_dff_state *ds);
+
+/* True when the FF node is to be visited in this call. */
+bool odin3_dff_dirty_visit(const odin3_dff_state *ds, odin3_node_id node);
+
+/* Before the constant-bits sweep: adds what the rules sweep itself changed. */
+odin3_status odin3_dff_dirty_extend(odin3_dff_state *ds);
 
 /* --- dff_state.c ------------------------------------------------------------------------------ */
 

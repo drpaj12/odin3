@@ -171,11 +171,13 @@ static odin3_bit membership_init(const odin3_module *module, uint32_t key, odin3
     return bit == ODIN3_BIT_0 || bit == ODIN3_BIT_1 ? bit : ODIN3_BIT_X;
 }
 
-odin3_bit odin3_ffinit_get(const odin3_module *module, odin3_net_id net) {
-    uint32_t key = 0;
-    if (module == NULL || !odin3_net_live(module, net) ||
-        !odin3_strtab_find(odin3_design_strtab(odin3_module_design(module)),
-                           odin3_bytes_cstr(k_init), &key)) {
+bool odin3_ffinit_key(const odin3_module *module, uint32_t *key) {
+    return module != NULL && odin3_strtab_find(odin3_design_strtab(odin3_module_design(module)),
+                                               odin3_bytes_cstr(k_init), key);
+}
+
+odin3_bit odin3_ffinit_get_key(const odin3_module *module, odin3_net_id net, uint32_t key) {
+    if (module == NULL || !odin3_net_live(module, net)) {
         return ODIN3_BIT_X;
     }
     odin3_bit bit = membership_init(module, key, odin3_net_primary(module, net));
@@ -185,4 +187,12 @@ odin3_bit odin3_ffinit_get(const odin3_module *module, odin3_net_id net) {
         bit = membership_init(module, key, alias.wb);
     }
     return bit;
+}
+
+odin3_bit odin3_ffinit_get(const odin3_module *module, odin3_net_id net) {
+    uint32_t key = 0;
+    if (!odin3_ffinit_key(module, &key)) {
+        return ODIN3_BIT_X;
+    }
+    return odin3_ffinit_get_key(module, net, key);
 }

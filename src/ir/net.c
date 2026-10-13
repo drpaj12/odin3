@@ -50,6 +50,13 @@ static odin3_status net_room(odin3_module *module, odin3_net_rec *net) {
     return net_fit(module, net, (uint64_t)net->count + 1);
 }
 
+/* Journal (module.h): pin changed on net_id, which it drives (DRIVE) or reads (SINK). */
+static void journal_pin(odin3_module *module, odin3_net_id net_id, const odin3_pin_rec *pin) {
+    odin3_journal_note(module, ODIN3_JOURNAL_NODE, pin->node.v);
+    odin3_journal_note(module, pin->dir != ODIN3_DIR_IN ? ODIN3_JOURNAL_DRIVE : ODIN3_JOURNAL_SINK,
+                       net_id.v);
+}
+
 /* Appends pin to the net (room reserved): a driver goes to the end of the driver partition. */
 static void attach(odin3_module *module, odin3_net_id net_id, odin3_pin_id pin_id) {
     odin3_net_rec *net = odin3_net_rec_at(module, net_id);
@@ -66,12 +73,15 @@ static void attach(odin3_module *module, odin3_net_id net_id, odin3_pin_id pin_i
     }
     net->count++;
     pin->net = net_id;
+    journal_pin(module, net_id, pin);
 }
 
 void odin3_net_handover(odin3_module *module, odin3_pin_rec *from, odin3_pin_id to) {
     odin3_net_rec *net = odin3_net_rec_at(module, from->net);
     odin3_pin_rec *dst = odin3_pin_rec_at(module, to);
     assert(net != NULL && dst != NULL && !odin3_net_valid(dst->net) && dst->dir == from->dir);
+    journal_pin(module, from->net, from);
+    journal_pin(module, from->net, dst);
     put_at(module, net, from->slot, to);
     dst->net = from->net;
     from->net = (odin3_net_id){0};
@@ -82,6 +92,7 @@ void odin3_net_detach(odin3_module *module, odin3_pin_rec *pin) {
     odin3_net_rec *net = odin3_net_rec_at(module, pin->net);
     assert(net != NULL && net->count > 0 && pin->slot < net->count);
     uint32_t hole = pin->slot;
+    journal_pin(module, pin->net, pin);
     if (hole < net->driver_count) { /* last driver fills the hole; the boundary moves down */
         uint32_t last_driver = net->driver_count - 1;
         if (hole != last_driver) {
@@ -141,6 +152,7 @@ odin3_status odin3_pin_disconnect(odin3_module *module, odin3_pin_id pin) {
 
 odin3_status odin3_net_create(odin3_module *module, uint32_t name_str, odin3_prov_id prov,
                               odin3_net_id *out) {
+    odin3_journal_touch(module);
     odin3_net_id id = {odin3_module_net_end(module)};
     odin3_name_change name = {module->net_names, "net_create", id.v, 0, name_str};
     if (!odin3_names_available(module, &name)) {
@@ -164,6 +176,7 @@ odin3_status odin3_net_create(odin3_module *module, uint32_t name_str, odin3_pro
 }
 
 odin3_status odin3_net_delete(odin3_module *module, odin3_net_id net) {
+    odin3_journal_touch(module);
     odin3_net_rec *rec = odin3_net_live_rec(module, net, "net_delete");
     if (rec == NULL) {
         return ODIN3_ERR_INVALID_ARG;
@@ -181,6 +194,7 @@ odin3_status odin3_net_delete(odin3_module *module, odin3_net_id net) {
 }
 
 odin3_status odin3_net_rename(odin3_module *module, odin3_net_id net, uint32_t name_str) {
+    odin3_journal_touch(module);
     odin3_net_rec *rec = odin3_net_live_rec(module, net, "net_rename");
     if (rec == NULL) {
         return ODIN3_ERR_INVALID_ARG;
@@ -225,6 +239,8 @@ odin3_status odin3_net_merge(odin3_module *module, odin3_net_pair pair) {
         attach(module, pair.keep, pin);
     }
     odin3_alias_absorb(module, pair.keep, pair.drop);
+    odin3_journal_note(module, ODIN3_JOURNAL_DRIVE, pair.keep.v);
+    odin3_journal_note(module, ODIN3_JOURNAL_DRIVE, pair.drop.v);
     drop->dead = true;
     return ODIN3_OK;
 }
