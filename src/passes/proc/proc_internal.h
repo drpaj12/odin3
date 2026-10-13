@@ -482,6 +482,10 @@ bool odin3_proc_ldb_latch(const odin3_proc_mctx *mctx, uint32_t index, odin3_nod
 /* Calls the test hook on_expand (proc_test.h), if one is installed (proc_pass.c owns the hooks). */
 void odin3_proc_hook_expand(odin3_net_id net, bool set_undef);
 
+/* Calls the test hook on_step (proc_test.h) for step (a value of odin3_proc_step), if one is
+ * installed. */
+void odin3_proc_hook_step(const odin3_proc_mctx *mctx, int step, bool begin);
+
 /* --- step D: flip-flops (§9, PR-15; proc_ff.c) --------------------------------------------- */
 
 /*
