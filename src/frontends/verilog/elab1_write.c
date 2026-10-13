@@ -358,6 +358,21 @@ static uint32_t w_unit_attrs(e1w *wr, const w_attrs_of *at, odin3_ast_id *ids) {
     return count;
 }
 
+/* A user attribute named like the markers of a --lib unit (`odin3_lib*`) would pick the flags stage
+ * 2 elaborates a module under (PR 2D-7b review M1): dropped, with a warning. */
+static bool w_reserved_attr(e1w *wr, odin3_ast_id attr) {
+    const char *name = odin3_elab1_str(wr->env->e1, odin3_ast_name(wr->ast, attr));
+    static const char k_prefix[] = "odin3_lib";
+    if (strncmp(name, k_prefix, sizeof k_prefix - 1U) != 0) {
+        return false;
+    }
+    char text[160];
+    (void)snprintf(text, sizeof text, "attribute '%s' is reserved for library reads; ignored",
+                   name);
+    odin3_elab1_report(wr->env->e1, ODIN3_LOG_WARN, odin3_ast_loc(wr->ast, attr), text);
+    return true;
+}
+
 /* The attributes of the parsed node from (then those of at->then, which win a name both give),
  * evaluated and attached to the elaborated node made, then the unit-flag attributes. */
 /* The attributes of first and second (the later wins a name both give) evaluated into ids;
@@ -367,6 +382,9 @@ static uint32_t w_copy_attrs(e1w *wr, const w_attrs_of *at, odin3_ast_span first
     uint32_t count = 0;
     for (uint32_t i = 0; i < first.n + second.n && live(wr); i++) {
         odin3_ast_id attr = i < first.n ? first.ids[i] : second.ids[i - first.n];
+        if (w_reserved_attr(wr, attr)) {
+            continue;
+        }
         if (i < first.n && w_has_attr(wr, at->then, odin3_ast_name(wr->ast, attr))) {
             continue; /* the later declaration's value wins */
         }

@@ -51,6 +51,7 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -672,8 +673,14 @@ static odin3_status gen_done(odin3_pg *pg, const pg_frame *frame) {
 }
 
 odin3_status pg_gen_step(odin3_pg *pg) {
+    /* `walk` points into pg->walks across the run. That is safe only because nothing reached from
+     * inside a walk pushes a walk: a call suspends it and the word hook takes indices computed
+     * beforehand (review M4). */
     odin3_elab2_walk *walk = odin3_vec_at(&pg->walks, pg->walks.len - 1);
+    size_t walks = pg->walks.len;
+    (void)walks; /* only the assert reads it */
     odin3_status st = odin3_elab2_walk_run(pg->e2, walk);
+    assert(pg->walks.len == walks);
     if (st != ODIN3_OK) {
         return st;
     }

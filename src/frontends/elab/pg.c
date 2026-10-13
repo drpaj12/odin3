@@ -20,6 +20,7 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -128,6 +129,10 @@ void odin3_elab2_pg_free(odin3_elab2 *e2) {
 
 odin3_status pg_block_reset(odin3_pg *pg) {
     pg_frames_unwind(pg);
+    /* every driver aborts above its base, so no call run or walk is left to leak its saved lvalue
+     * or to skip restoring pg->lvs (review M6): a future mistake is a crash here, not corrupt state
+     */
+    assert(pg->cruns.len == 0 && pg->walks.len == 0);
     odin3_vec *const lists[] = {
         &pg->outs,  &pg->chunks,    &pg->undo,    &pg->pool,   &pg->dead,    &pg->cmps,
         &pg->acts,  &pg->cases,     &pg->sws,     &pg->syncs,  &pg->slots,   &pg->frames,

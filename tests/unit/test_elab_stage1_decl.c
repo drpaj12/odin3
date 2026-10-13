@@ -526,6 +526,18 @@ static void test_port_with_unpacked_dimensions(void) {
     run_clean("module m(q);\n  output [3:0] q;\n  reg [3:0] q;\nendmodule\n");
 }
 
+/* M1 (PR 2D-7b review): a user attribute named like the --lib markers would make stage 2 elaborate
+ * the module under flags the read never had; stage 1 drops it with a warning. */
+static void test_reserved_lib_attrs_are_dropped(void) {
+    run_clean("(* odin3_lib, odin3_lib_nomem2reg, keep *) module m(input a, output y);\n"
+              "  assign y = a;\nendmodule\n");
+    expect_warn("t.v:1:4: warning: attribute 'odin3_lib' is reserved for library reads; ignored");
+    expect_warn("t.v:1:15: warning: attribute 'odin3_lib_nomem2reg' is reserved for library "
+                "reads; ignored");
+    expect_absent("ATTR:odin3_lib");
+    EXPECT_SEQ("(MODULE:m", "(ATTR:keep");
+}
+
 /* Every statement kind of the elaborated form, written and checked (FULL, binder). */
 static void test_statement_kinds(void) {
     run_clean(
@@ -730,6 +742,7 @@ int main(void) {
     RUN_TEST(test_genvar_read);
     RUN_TEST(test_m11);
     RUN_TEST(test_port_with_unpacked_dimensions);
+    RUN_TEST(test_reserved_lib_attrs_are_dropped);
     RUN_TEST(test_statement_kinds);
     RUN_TEST(test_readmem);
     RUN_TEST(test_local_params);
