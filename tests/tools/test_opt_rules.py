@@ -48,8 +48,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 spec = json.loads((HERE / "fake.json").read_text())
+script = sys.argv[sys.argv.index("-p") + 1]
 with open(HERE / "yosys.log", "a") as log:
-    log.write(sys.argv[sys.argv.index("-p") + 1] + "\n")
+    log.write(script + "\n")
+if "equiv_make" in script:
+    sys.exit(spec.get("refine_rc", 0))
 (Path(os.environ["YOSYS_COVER_DIR"]) / "cover.txt").write_text(spec["cover"])
 sys.stdout.write(spec["ystat"])
 """
@@ -107,10 +110,12 @@ class Tree:
         with open(self.rules, "a", encoding="utf-8") as handle:
             handle.write(row + "\n")
 
-    def run(self, *extra: str, yosys: bool = True) -> tuple[int, str, str]:
+    def run(self, *extra: str, yosys: bool = True, refine: bool = False
+            ) -> tuple[int, str, str]:
         argv = ["--odin3", str(self.bin / "odin3"), "--rules", str(self.rules),
                 "--work", str(self.root / "work"), *(["--yosys", str(self.bin / "yosys")]
-                                                     if yosys else []), *extra,
+                                                     if yosys else []),
+                *([] if refine else ["--no-refine"]), *extra,
                 str(self.root / "rules" / "expr")]
         with mock.patch.object(memcap, "run", fake_run):
             return helpers.run_main(orr.main, argv)
@@ -284,6 +289,53 @@ class OptRulesTest(unittest.TestCase):
         self.assertEqual(orr.counter_value(orr.Rule("dff/a", "dff.constbits", "-"), log), 5)
         self.assertEqual(orr.counter_value(orr.Rule("dff/a", "opt_dff.d_eq_q", "-"),
                                            "odin3: info: opt: rule opt_dff.d_eq_q 4\n"), 4)
+
+    def refining(self, skips: str = "", **spec: Any) -> None:
+        """A good row with valid RTLIL in/out (the refinement check reads their modules)."""
+        il = "attribute \\top 1\nmodule \\t\nend\n"
+        self.good()
+        self.tree.set_spec(**{"in": il, "out": il, **spec})
+        (self.tree.root / "rules" / "expr" / "const_and.il").write_text(il)
+        if skips:
+            (self.tree.root / "rules" / "refine_skip.txt").write_text(skips)
+
+    def test_refinement_proved(self) -> None:
+        self.refining()
+        code, out, _ = self.tree.run(refine=True)
+        self.assertEqual(code, 0, out)
+        self.assertIn("refinement: 1 proved, 0 documented skips, 0 failed", out)
+        script = [x for x in self.tree.log("yosys.log") if "equiv_make" in x][0]
+        self.assertIn("async2sync", script)
+        self.assertIn("equiv_induct -undef; equiv_status -assert", script)
+
+    def test_not_a_refinement_fails_the_row(self) -> None:
+        self.refining(refine_rc=1)
+        code, out, _ = self.tree.run(refine=True)
+        self.assertEqual(code, 1)
+        self.assertIn("expr/const_and: FAIL: not a refinement", out)
+        self.assertIn("refinement: 0 proved, 0 documented skips, 1 failed", out)
+
+    def test_documented_skip_is_run_and_must_fail(self) -> None:
+        self.refining(skips="expr/const_and no model for it\n", refine_rc=1)
+        code, out, _ = self.tree.run(refine=True)
+        self.assertEqual(code, 0, out)
+        self.assertIn("refinement skipped: no model for it", out)
+        self.assertIn("refinement: 0 proved, 1 documented skips, 0 failed", out)
+
+    def test_documented_skip_that_refines_is_stale(self) -> None:
+        self.refining(skips="expr/const_and no model for it\n", refine_rc=0)
+        code, out, _ = self.tree.run(refine=True)
+        self.assertEqual(code, 1)
+        self.assertIn("but it refines: remove the entry", out)
+
+    def test_skip_list_errors(self) -> None:
+        self.refining(skips="expr/nope some reason\n")
+        code, _, err = self.tree.run(refine=True)
+        self.assertEqual(code, 2)
+        self.assertIn("'expr/nope' is not a row", err)
+        with self.assertRaises(orr.UsageError):
+            orr.parse_skips("expr/a\n")
+        self.assertEqual(orr.parse_skips("# c\nexpr/a why not  # x\n"), {"expr/a": "why not"})
 
     def test_orphan_source_is_listed(self) -> None:
         self.good()

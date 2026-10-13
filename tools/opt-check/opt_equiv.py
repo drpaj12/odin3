@@ -1,0 +1,368 @@
+"""opt-equiv: refinement after every opt sub-pass call (2F spec 20.2; plan Task 17, point (m)).
+
+Usage::
+
+    opt-equiv --odin3 O --yosys Y [--top T] [--script F] [--no-lower] [--no-techmap]
+              [--mem-cap C] [--work DIR] FILE...
+
+Odin III runs ``read_verilog --nolatches FILE...; hierarchy; <the Phase 2 script>`` (``F``, default
+``phase2.script`` beside this tool) with ``--opt-snapshot DIR``: ``NNNN-<sub>-before.il`` and
+``-after.il`` for every sub-pass call that changed something. Per pair, in sequence order, Yosys
+0.55 runs the refinement check of ``refinement_script``::
+
+    read_rtlil gold.il; read_rtlil gate.il; [proc;] [async2sync; [techmap;]]
+    equiv_make gold gate eq; hierarchy -top eq; flatten; equiv_simple -undef -seq 4;
+    equiv_induct -undef; equiv_status -assert
+
+The modules of the two files are renamed ``gold``/``gate`` first (a submodule becomes ``gold.m`` or
+``gate.m``), so one Yosys design holds both. An x in the gold is a don't-care: ``s ? a : 4'bx``
+to ``a`` passes, the reverse and a wrong enable fail. A pair with ``process`` blocks (the
+pre-``proc`` calls) gets Yosys ``proc`` first. Spec 20.2's flow alone cannot prove the async
+flip-flops, so the check tries ``async2sync`` first and then ``async2sync; techmap`` (techmap loses the proof of a
+division by zero and of a ``$pmux``, which the first try gives); a pass in either is a proof.
+``--no-lower`` runs the plain flow, ``--no-techmap`` the first try only.
+
+A failing pair prints ``opt-equiv: <NNNN>-<sub>: not a refinement`` with the rule counters of the
+run (Odin III's ``--opt-stats`` lines, which cover the whole run). A work directory this tool
+made is removed after a clean run; a failing run, and ``--work DIR``, keep it.
+
+Exit codes: 0 every pair refines; 1 a pair does not; 2 usage, Odin III or a tool error; 77 skipped
+(an ASan child and no systemd-run).
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import memcap
+
+TOOL = "opt-equiv"
+HERE = Path(__file__).resolve().parent
+PHASE2 = HERE / "phase2.script"
+EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
+DEFAULT_CAP = 2 << 30
+TIMEOUT_SECONDS = 600.0
+TAIL_LINES = 6
+PAIR_NAME = re.compile(r"^(\d{4})-(opt_[a-z]+)-before\.il$")
+STAT_LINE = re.compile(r"opt: rule (\S+) (\d+)\s*$", re.M)
+MODULE_LINE = re.compile(r"^module (\\\S+)\s*$", re.M)
+TOP_ATTR = re.compile(r"^attribute \\top 1\s*\n", re.M)
+PROCESS_LINE = re.compile(r"^\s*process\s", re.M)
+OPT_WORD = re.compile(r"^opt(_[a-z]+)?(\s|$)")
+
+
+class ToolError(Exception):
+    """A bad argument or an unusable tool (exit 2)."""
+
+
+@dataclass
+class Pair:
+    """One sub-pass call's snapshot files."""
+
+    seq: str
+    sub: str
+    before: Path
+    after: Path
+
+    @property
+    def name(self) -> str:
+        return f"{self.seq}-{self.sub}"
+
+
+@dataclass
+class Verdict:
+    """What one pair's check found; ``tail`` is Yosys's last log lines on a failure."""
+
+    pair: Pair
+    ok: bool
+    tail: str = ""
+
+
+@dataclass
+class Run:
+    """The Odin III side of one design: its pairs and its rule counters."""
+
+    pairs: list[Pair] = field(default_factory=list)
+    counters: dict[str, int] = field(default_factory=dict)
+    log: str = ""
+
+
+def phase2_commands(path: Path = PHASE2) -> list[str]:
+    """The commands of a script file: one per line, ``#`` comments and blank lines dropped."""
+    found: list[str] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            found.append(line)
+    return found
+
+
+def with_stats(commands: Sequence[str]) -> list[str]:
+    """Each opt command with ``--opt-stats`` appended: the counters of the run."""
+    return [f"{c} --opt-stats" if OPT_WORD.match(c) else c for c in commands]
+
+
+def read_commands(files: Sequence[str], top: str | None, nolatches: bool) -> list[str]:
+    """The front of every Odin III run: ``read_verilog [--nolatches] FILE...; hierarchy``."""
+    flag = " --nolatches" if nolatches else ""
+    return [f"read_verilog{flag} {' '.join(quote(f) for f in files)}",
+            f"hierarchy --top {top}" if top else "hierarchy -auto"]
+
+
+def quote(word: str) -> str:
+    """A word of an Odin III script: bare unless it holds a blank, ';', '#' or a quote."""
+    if re.fullmatch(r"[^\s;#\"]+", word):
+        return word
+    if '"' in word:
+        raise ToolError(f"cannot quote {word!r} in an Odin III script")
+    return f'"{word}"'
+
+
+def has_processes(text: str) -> bool:
+    """True when an RTLIL text holds a ``process`` block."""
+    return PROCESS_LINE.search(text) is not None
+
+
+def module_names(text: str) -> list[str]:
+    return MODULE_LINE.findall(text)
+
+
+def top_module(text: str, wanted: str | None = None) -> str:
+    """The top of an RTLIL text: the one after ``attribute \\top 1``, else ``wanted``, else the
+    sole module; ``ToolError`` when none is clear."""
+    names = module_names(text)
+    marked: list[str] = re.findall(r"^attribute \\top 1\s*\nmodule (\\\S+)", text, re.M)
+    if marked:
+        return marked[0]
+    named = "\\" + (wanted or "").lstrip("\\")
+    if wanted and named in names:
+        return named
+    if len(names) == 1:
+        return names[0]
+    raise ToolError("no top module: several modules and no `attribute \\top 1`")
+
+
+def rename_modules(text: str, side: str, top: str) -> str:
+    """The text with its top module renamed ``\\<side>``, the other modules ``\\<side>.<name>``, and
+    the instances of them following, so two files can share one Yosys design."""
+    names = module_names(text)
+    new = {n: (f"\\{side}" if n == top else f"\\{side}.{n[1:]}") for n in names}
+    out = TOP_ATTR.sub("", text)
+    out = MODULE_LINE.sub(lambda m: f"module {new[m.group(1)]}", out)
+
+    def cell(match: re.Match[str]) -> str:
+        kind = match.group(2)
+        return f"{match.group(1)}cell {new.get(kind, kind)} "
+
+    return re.sub(r"^(\s*)cell (\\\S+) ", cell, out, flags=re.M)
+
+
+def refinement_script(gold: str, gate: str, procs: bool = False, lower: bool = True,
+                      techmap: bool = True) -> str:
+    """Spec 20.2's Yosys script for two RTLIL files that ``rename_modules`` already made
+    ``gold``/``gate``; ``procs`` adds ``proc``, ``lower`` adds ``async2sync`` and ``techmap``."""
+    steps = [f"read_rtlil {gold}", f"read_rtlil {gate}"]
+    if procs:
+        steps.append("proc")
+    if lower:
+        steps.append("async2sync")
+        if techmap:
+            steps.append("techmap")
+    steps += ["equiv_make gold gate eq", "hierarchy -top eq", "flatten",
+              "equiv_simple -undef -seq 4", "equiv_induct -undef", "equiv_status -assert"]
+    return "; ".join(steps)
+
+
+def tail(text: str, lines: int = TAIL_LINES) -> str:
+    return " | ".join(text.strip().splitlines()[-lines:])
+
+
+def exe(name: str) -> str:
+    return str(Path(name).resolve()) if "/" in name else name
+
+
+class Checker:
+    """Runs the refinement check of RTLIL files through Yosys, every child under memcap."""
+
+    def __init__(self, yosys: str, work: Path, cap: int, lower: bool = True,
+                 techmap: bool = True, top: str | None = None) -> None:
+        self.yosys = exe(yosys)
+        self.work = work
+        self.cap = cap
+        self.lower = lower
+        self.techmap = techmap
+        self.top = top
+
+    def child(self, argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return memcap.run(list(argv), self.cap, capture_output=True, cwd=self.work,
+                          timeout=TIMEOUT_SECONDS)
+
+    def refines(self, gold: Path, gate: Path, tag: str) -> tuple[bool, str]:
+        """(True, '') when ``gate`` refines ``gold``; else (False, Yosys's last lines)."""
+        gold_text = gold.read_text(encoding="utf-8")
+        gate_text = gate.read_text(encoding="utf-8")
+        gold_out = self.work / f"{tag}.gold.il"
+        gate_out = self.work / f"{tag}.gate.il"
+        gold_out.write_text(rename_modules(gold_text, "gold", top_module(gold_text, self.top)),
+                            encoding="utf-8")
+        gate_out.write_text(rename_modules(gate_text, "gate", top_module(gate_text, self.top)),
+                            encoding="utf-8")
+        procs = has_processes(gold_text) or has_processes(gate_text)
+        why = ""
+        for lower, techmap in self.flows():
+            script = refinement_script(str(gold_out), str(gate_out), procs, lower, techmap)
+            try:
+                done = self.child([self.yosys, "-p", script])
+            except subprocess.TimeoutExpired:
+                return False, f"timed out after {TIMEOUT_SECONDS:.0f} s"
+            if done.returncode == 0:
+                return True, ""
+            why = tail((done.stdout or "") + (done.stderr or ""))
+        return False, why
+
+    def flows(self) -> list[tuple[bool, bool]]:
+        """The (async2sync, techmap) variants tried in order; a pass in any one is a proof (each
+        variant lowers both sides alike). Techmap makes the async flip-flops and some cells
+        provable, and others (divisions by zero, a ``$pmux``) not, so it is a second try."""
+        if not self.lower:
+            return [(False, False)]
+        return [(True, False)] if not self.techmap else [(True, False), (True, True)]
+
+
+def collect_pairs(snap: Path) -> list[Pair]:
+    """The before/after pairs of a snapshot directory, in sequence order."""
+    pairs: list[Pair] = []
+    for before in sorted(snap.iterdir()):
+        found = PAIR_NAME.match(before.name)
+        if found is None:
+            continue
+        after = before.with_name(before.name.replace("-before.il", "-after.il"))
+        if after.is_file():
+            pairs.append(Pair(found.group(1), found.group(2), before, after))
+    return pairs
+
+
+def parse_counters(log: str) -> dict[str, int]:
+    """The ``opt: rule NAME N`` lines of an Odin III log, summed by name."""
+    counters: dict[str, int] = {}
+    for name, count in STAT_LINE.findall(log):
+        counters[name] = counters.get(name, 0) + int(count)
+    return counters
+
+
+def counter_text(counters: dict[str, int]) -> str:
+    return ", ".join(f"{n} {c}" for n, c in sorted(counters.items())) or "none"
+
+
+def run_odin(odin3: str, args: Sequence[str], script: str, work: Path, cap: int
+             ) -> subprocess.CompletedProcess[str]:
+    return memcap.run([exe(odin3), *args, "-p", script], cap, capture_output=True, cwd=work,
+                      timeout=TIMEOUT_SECONDS)
+
+
+def snapshot_run(odin3: str, files: Sequence[str], top: str | None, script: Sequence[str],
+                 nolatches: bool, work: Path, cap: int) -> Run:
+    """Odin III with ``--opt-snapshot``: the pairs it wrote and its counters. ``ToolError`` when
+    it fails."""
+    snap = work / "snap"
+    snap.mkdir(exist_ok=True)
+    commands = [*read_commands(files, top, nolatches), *with_stats(script)]
+    argv = [*(["--top", top] if top else []), "--opt-snapshot", str(snap)]
+    done = run_odin(odin3, argv, "; ".join(commands), work, cap)
+    log = (done.stdout or "") + (done.stderr or "")
+    if done.returncode != 0:
+        raise ToolError(f"odin3 exit {done.returncode}: {tail(log)}")
+    return Run(collect_pairs(snap), parse_counters(log), log)
+
+
+def check_all(run: Run, checker: Checker) -> list[Verdict]:
+    verdicts: list[Verdict] = []
+    for pair in run.pairs:
+        ok, why = checker.refines(pair.before, pair.after, pair.name)
+        verdicts.append(Verdict(pair, ok, why))
+    return verdicts
+
+
+def report(verdicts: Sequence[Verdict], counters: dict[str, int]) -> list[str]:
+    """The output lines: one per pair, the failures with the counters, then the summary."""
+    lines: list[str] = []
+    for v in verdicts:
+        if v.ok:
+            lines.append(f"{TOOL}: {v.pair.name}: ok")
+        else:
+            lines.append(f"{TOOL}: {v.pair.name}: not a refinement (rules: "
+                         f"{counter_text(counters)}): {v.tail}")
+    bad = sum(1 for v in verdicts if not v.ok)
+    lines.append(f"{TOOL}: {len(verdicts)} calls changed something: "
+                 f"{len(verdicts) - bad} refine, {bad} do not")
+    return lines
+
+
+def parse(argv: Sequence[str] | None) -> argparse.Namespace:
+    ap = argparse.ArgumentParser(prog=TOOL, description=(__doc__ or "").split("\n\n")[0])
+    ap.add_argument("--odin3", required=True, help="the odin3 binary")
+    ap.add_argument("--yosys", required=True, help="the Yosys 0.55 binary")
+    ap.add_argument("--top", help="the top module (odin3 --top and hierarchy --top)")
+    ap.add_argument("--script", type=Path, default=PHASE2, help="the script (default Phase 2's)")
+    ap.add_argument("--nolatches", action="store_true", default=True, help=argparse.SUPPRESS)
+    ap.add_argument("--no-lower", action="store_true", help="no async2sync and techmap")
+    ap.add_argument("--no-techmap", action="store_true", help="async2sync only")
+    ap.add_argument("--mem-cap", type=_size, default=DEFAULT_CAP, metavar="SIZE",
+                    help="per child (default 2G)")
+    ap.add_argument("--work", type=Path, help="the work directory (kept)")
+    ap.add_argument("files", nargs="+", help="the Verilog files of one design")
+    return ap.parse_args(argv)
+
+
+def _size(text: str) -> int:
+    units = {"k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
+    scale = units.get(text[-1:].lower(), 1)
+    digits = text[:-1] if text[-1:].lower() in units else text
+    if not digits.isdigit():
+        raise argparse.ArgumentTypeError(f"bad size '{text}'")
+    return int(digits) * scale
+
+
+def execute(args: argparse.Namespace, work: Path) -> int:
+    files = [str(Path(f).resolve()) for f in args.files]
+    run = snapshot_run(args.odin3, files, args.top, phase2_commands(args.script), args.nolatches,
+                       work, args.mem_cap)
+    checker = Checker(args.yosys, work, args.mem_cap, not args.no_lower, not args.no_techmap,
+                      args.top)
+    verdicts = check_all(run, checker)
+    for line in report(verdicts, run.counters):
+        print(line, flush=True)
+    return EXIT_FAIL if any(not v.ok for v in verdicts) else EXIT_OK
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse(argv)
+    made = args.work is None
+    work = Path(tempfile.mkdtemp(prefix="opt-equiv-")) if made else args.work
+    work.mkdir(parents=True, exist_ok=True)
+    work = work.resolve()
+    code = EXIT_ERROR
+    try:
+        code = execute(args, work)
+    except (OSError, ToolError, ValueError) as exc:
+        print(f"{TOOL}: error: {exc}", file=sys.stderr)
+    except memcap.CapUnavailable as exc:
+        print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
+        code = EXIT_SKIP
+    if made and code == EXIT_OK:
+        shutil.rmtree(work, ignore_errors=True)  # the directory this run made, and only it
+    elif made:
+        print(f"{TOOL}: work directory kept: {work}", file=sys.stderr)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

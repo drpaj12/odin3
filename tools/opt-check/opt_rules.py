@@ -25,8 +25,15 @@ cover file must count the row's cover id (``opt.opt_expr.const_and``; Yosys has 
 cell-type histogram must equal Odin III's ``stats`` (without ``$port_*`` and constants). A row
 ``dev=N`` is a documented divergence (spec 17 row N): rows 2 and 24 are checked against an adjusted
 Yosys side (``$pos`` ignored; the pass, ``opt_clean``, the pass), any other row's Yosys difference
-is reported, not failed. A ``pending`` row is listed and not run. The refinement check of
-Task 17 is not run here.
+is reported, not failed. A ``pending`` row is listed and not run.
+
+With ``--yosys`` every row also gets the refinement check of ``opt-equiv`` (spec 20.2, Task 17;
+Yosys ``async2sync``, then ``techmap`` as a second try; ``equiv_make; equiv_simple -undef;
+equiv_induct -undef``) on its ``in.il`` and ``out.il``: the golden is Odin III's own output, so only
+this check tells a wrong rewrite from a right one. ``refine_skip.txt`` beside the rules
+(``--refine-skip F``; ``<sub>/<rule> <reason>``) lists the documented skips: a listed row is still
+run and must fail the check, else the entry is stale and the row fails. The run ends with
+``refinement: N proved, M documented skips, K failed``; ``--no-refine`` leaves the check out.
 
 ``--write`` (which needs ``--yosys``) writes the ``.il`` goldens only when every row passes every
 check; on any failure nothing is written. Every child runs through ``memcap.run`` (one at a time).
@@ -38,7 +45,9 @@ ASan odin3 and no ``systemd-run``).
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -47,11 +56,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import memcap
+import opt_equiv
 
 TOOL = "opt-rules"
 EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
 SUBS = ("expr", "merge", "muxtree", "reduce", "share", "dff", "clean")
 SOURCE_SUFFIXES = (".v", ".blif")
+SKIP_FILE = "refine_skip.txt"
 NO_YOSYS_ID = "-"
 LOG_PREFIX = "log:"
 COVER_PREFIX = "opt."
@@ -129,10 +140,25 @@ class Outcome:
     notes: list[str] = field(default_factory=list)
     out_il: str = ""
     skipped: bool = False
+    refine: str = ""  # "", "proved", "skip" or "fail"
 
     @property
     def ok(self) -> bool:
         return not self.failures
+
+
+def parse_skips(text: str) -> dict[str, str]:
+    """``<sub>/<rule> <reason>`` lines of a refinement skip list (``#`` comments, blank lines)."""
+    skips: dict[str, str] = {}
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        name, _, reason = line.partition(" ")
+        if "/" not in name or not reason.strip():
+            raise UsageError(f"skip line {number}: want '<sub>/<rule> <reason>', got '{raw}'")
+        skips[name] = reason.strip()
+    return skips
 
 
 def parse_rules(text: str) -> list[Rule]:
@@ -298,8 +324,17 @@ class Runner:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.cap: int = args.mem_cap
+        self.made = not args.work  # a work directory this run made is removed after a clean run
         self.work = Path(args.work) if args.work else Path(tempfile.mkdtemp(prefix="opt-rules-"))
         self.work.mkdir(parents=True, exist_ok=True)
+        self.skips: dict[str, str] = {}
+
+    def cleanup(self, clean: bool) -> None:
+        """Removes the work directory this run made (and only that one) after a clean run."""
+        if self.made and clean:
+            shutil.rmtree(self.work, ignore_errors=True)
+        elif self.made:
+            print(f"{TOOL}: work directory kept: {self.work}", file=sys.stderr)
 
     def child(self, argv: Sequence[str], env: dict[str, str] | None = None
               ) -> subprocess.CompletedProcess[str]:
@@ -326,7 +361,7 @@ class Runner:
                   outcome: Outcome) -> None:
         cover = run_dir / "cover"
         cover.mkdir(exist_ok=True)
-        env = {**_environment(), "YOSYS_COVER_DIR": str(cover)}
+        env = {**os.environ, "YOSYS_COVER_DIR": str(cover)}
         script = yosys_script(rule, options, run_dir / "in.il")
         done = self.child([exe(self.args.yosys), "-p", script], env=env)
         log = (done.stdout or "") + (done.stderr or "")
@@ -341,6 +376,27 @@ class Runner:
         else:
             outcome.failures.extend(findings)
 
+    def refine(self, rule: Rule, run_dir: Path, outcome: Outcome) -> None:
+        """The refinement check of ``out.il`` against ``in.il`` (spec 20.2). A documented skip is
+        still run: it must fail, else the entry is stale and the row fails."""
+        checker = opt_equiv.Checker(self.args.yosys, run_dir, self.cap)
+        try:
+            ok, why = checker.refines(run_dir / "in.il", run_dir / "out.il", "refine")
+        except opt_equiv.ToolError as exc:
+            ok, why = False, str(exc)
+        reason = self.skips.get(rule.name)
+        if reason is None:
+            outcome.refine = "proved" if ok else "fail"
+            if not ok:
+                outcome.failures.append(f"not a refinement: {why}")
+        elif ok:
+            outcome.refine = "fail"
+            outcome.failures.append(f"listed in the refinement skip list ({reason}) but it "
+                                    "refines: remove the entry")
+        else:
+            outcome.refine = "skip"
+            outcome.notes.append(f"refinement skipped: {reason}")
+
     def one(self, rule: Rule, source: Path) -> Outcome:
         outcome = Outcome(rule)
         if rule.pending:
@@ -354,6 +410,8 @@ class Runner:
             log = self.run_odin(rule, source, options, run_dir, outcome)
             if log is not None and self.args.yosys:
                 self.run_yosys(rule, options, run_dir, log, outcome)
+                if not self.args.no_refine:
+                    self.refine(rule, run_dir, outcome)
         except subprocess.TimeoutExpired:
             outcome.failures.append(f"timed out after {TIMEOUT_SECONDS:.0f} s")
         golden = golden_path(source)
@@ -363,12 +421,6 @@ class Runner:
             elif golden.read_text(encoding="utf-8") != outcome.out_il:
                 outcome.failures.append(f"out.il differs from {golden.name} ({run_dir / 'out.il'})")
         return outcome
-
-
-def _environment() -> dict[str, str]:
-    import os
-
-    return dict(os.environ)
 
 
 def collect(rules: Sequence[Rule], inputs: Sequence[str], rules_root: Path
@@ -411,6 +463,20 @@ def report(outcome: Outcome) -> str:
     return f"{TOOL}: {name}: FAIL: {'; '.join(outcome.failures)}"
 
 
+def load_skips(args: argparse.Namespace, rules: Sequence[Rule]) -> dict[str, str]:
+    """The refinement skip list: ``--refine-skip F``, else ``refine_skip.txt`` beside the rules."""
+    path = Path(args.refine_skip) if args.refine_skip else Path(args.rules).with_name(SKIP_FILE)
+    if not path.is_file():
+        if args.refine_skip:
+            raise UsageError(f"{path}: no such file")
+        return {}
+    skips = parse_skips(path.read_text(encoding="utf-8"))
+    known = {rule.name for rule in rules}
+    for name in sorted(set(skips) - known):
+        raise UsageError(f"{path.name}: '{name}' is not a row of the rules table")
+    return skips
+
+
 def run(args: argparse.Namespace) -> int:
     rules_path = Path(args.rules)
     rules_root = Path(args.root) if args.root else rules_path.parent
@@ -421,6 +487,7 @@ def run(args: argparse.Namespace) -> int:
     if not selected:
         raise UsageError("no rule matches the inputs")
     runner = Runner(args)
+    runner.skips = load_skips(args, rules)
     outcomes: list[Outcome] = []
     for rule, source in selected:
         if not rule.pending and not source.is_file():
@@ -435,6 +502,12 @@ def run(args: argparse.Namespace) -> int:
     pending = [o for o in outcomes if o.skipped]
     print(f"{TOOL}: {len(outcomes)} rules: {len(outcomes) - len(failed) - len(pending)} ok, "
           f"{len(pending)} pending, {len(failed)} failed")
+    if args.yosys and not args.no_refine:
+        by = {kind: sum(1 for o in outcomes if o.refine == kind)
+              for kind in ("proved", "skip", "fail")}
+        print(f"{TOOL}: refinement: {by['proved']} proved, {by['skip']} documented skips, "
+              f"{by['fail']} failed")
+    runner.cleanup(not failed and not args.write)
     if args.write:
         if failed:
             print(f"{TOOL}: --write refused: {len(failed)} rules failed; nothing written")
@@ -460,6 +533,10 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--mem-cap", type=_size, default=DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 2G)")
     ap.add_argument("--work", metavar="DIR", help="the work directory (kept)")
+    ap.add_argument("--no-refine", action="store_true", help="leave the refinement check out")
+    ap.add_argument("--refine-skip", metavar="F",
+                    help="the documented refinement skips (default: refine_skip.txt "
+                         "beside the rules)")
     ap.add_argument("inputs", nargs="+", help="rule directories, or rule source files")
     return ap.parse_args(argv)
 
