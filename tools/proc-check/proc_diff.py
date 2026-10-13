@@ -346,14 +346,23 @@ def load_module(name: str, path: Path) -> ModuleType | None:
     """Imports the Python file at path as module name; None when it is missing or unloadable."""
     if not path.is_file():
         return None
+    loaded = sys.modules.get(name)
+    loaded_file = getattr(loaded, "__file__", None)
+    if loaded_file is not None and Path(loaded_file).resolve() == path.resolve():
+        return loaded  # one module object per file: tests patch it, sp_splice shares it
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         return None
     if str(path.parent) not in sys.path:  # its sibling imports (elab_sweep imports memcap)
         sys.path.insert(0, str(path.parent))
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module  # @dataclass looks its module up in sys.modules
-    spec.loader.exec_module(module)
+    previous = sys.modules.get(name)
+    sys.modules[name] = module  # @dataclass looks its module up in sys.modules while it runs
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if previous is not None:  # another file's module of that name stays the one imported
+            sys.modules[name] = previous
     return module
 
 

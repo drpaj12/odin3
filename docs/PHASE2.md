@@ -636,6 +636,10 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
     a lookup of the cell's parameter values (docs/IR.md IR-8, IR-7b; `src/ir/celltype.h`). Merged
     with 2D-5 (#86).
 
+19. **IR-6 unchanged** (Peter, 2026-10-13: "do recommended"). `opt` does not compact; scripts run
+    `compact` after `opt` (the Phase 2 script is `opt; compact`). This withdraws the 2F Task 13
+    IR-6 amendment (spec 2F §17 #39). The sub-passes never compact either.
+
 21. **2E `proc`: what landed, the agent defaults and the bench** (2E Task 13, 2026-10-13; spec §19,
     §20, §23; plan points (a)–(u)). Landed as PRs 2E-1 to 2E-4 (the last as 2E-4b). Peter reviews the IR items below;
     everything else is an agent default (reversible, logged here per the plan).

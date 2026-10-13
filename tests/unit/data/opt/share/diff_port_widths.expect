@@ -1,0 +1,11 @@
+# yosys 0.55 (VTR build): ulimit -v 3000000; yosys -q -p 'read_rtlil diff_port_widths.il; opt_share; write_rtlil'
+cell $add A_WIDTH=16 B_WIDTH=16 Y_WIDTH=11
+cell $neg A_WIDTH=16 Y_WIDTH=16
+cell $pmux WIDTH=11 S_WIDTH=3
+cell $pmux WIDTH=16 S_WIDTH=3
+# diverges (spec 17 #44): the first two sums are 16 bits wide and the port reads 11 of them; Odin III
+# merges only a cell whose whole Y is the port, so nothing is merged
+odin3 cell $add A_WIDTH=16 B_WIDTH=16 Y_WIDTH=16
+odin3 cell $add A_WIDTH=16 B_WIDTH=16 Y_WIDTH=16
+odin3 cell $pmux WIDTH=11 S_WIDTH=3
+odin3 cell $sub A_WIDTH=16 B_WIDTH=16 Y_WIDTH=11

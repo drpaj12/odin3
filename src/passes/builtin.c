@@ -357,11 +357,9 @@ static void remap_symtabs(const odin3_design *design, odin3_module_id module,
     }
 }
 
-static odin3_status compact_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
-                                void *user) {
-    (void)user;
+odin3_status odin3_design_compact(odin3_pass_ctx *ctx, odin3_design *design) {
     (void)ctx;
-    odin3_status st = no_args("compact", args);
+    odin3_status st = ODIN3_OK;
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {
         odin3_module_id id = {i};
         odin3_compact_map map = {0};
@@ -372,6 +370,13 @@ static odin3_status compact_run(odin3_pass_ctx *ctx, odin3_design *design, odin3
         odin3_compact_map_free(&map);
     }
     return st;
+}
+
+static odin3_status compact_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                                void *user) {
+    (void)user;
+    odin3_status st = no_args("compact", args);
+    return st == ODIN3_OK ? odin3_design_compact(ctx, design) : st;
 }
 
 /* --- stats ----------------------------------------------------------------------------------- */

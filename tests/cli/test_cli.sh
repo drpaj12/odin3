@@ -31,7 +31,8 @@
 # "linked ABC <40 hex> (adapters/abc/NOTICE)" line), abc_unavailable_warning (ODIN3 is the test
 # CLI whose adapter cannot register: it warns "odin3: warning: linked ABC unavailable: <status>",
 # runs stats anyway, and --version names no linked ABC), opt_snapshot (--opt-snapshot DIR writes
-# 0001-opt_clean-before.il and -after.il when opt_clean removes a cell; a missing DIR exits 2).
+# 0001-opt_clean-before.il and -after.il when opt_clean removes a cell; a missing DIR exits 2),
+# opt_determinism (two opt runs are byte-identical; the gates in reverse order compare identical).
 # The project cases run from the project's directory (tests/cli/project), so the paths given are
 # relative.
 set -euo pipefail
@@ -440,6 +441,56 @@ BLIF
     rc=$?
     set -e
     [[ $rc -eq 2 ]] || fail "--opt-snapshot nope: exit code $rc, expected 2"
+    ;;
+opt_determinism)
+    # OP-14: two opt runs write byte-identical BLIF, and the same gates listed in the reverse
+    # order (so created in the reverse order) give a netlist-compare-identical result.
+    # t1 and t2 are identical (opt_merge keeps the earlier), `dead` is read by nothing
+    cat >"$work/fwd.blif" <<'BLIF'
+.model top
+.inputs a b c
+.outputs y w
+.names a b t1
+11 1
+.names a b t2
+11 1
+.names t1 y
+0 1
+.names t2 c w
+1- 1
+-1 1
+.names c c dead
+10 1
+01 1
+.end
+BLIF
+    cat >"$work/rev.blif" <<'BLIF'
+.model top
+.inputs a b c
+.outputs y w
+.names c c dead
+10 1
+01 1
+.names t2 c w
+1- 1
+-1 1
+.names t1 y
+0 1
+.names a b t2
+11 1
+.names a b t1
+11 1
+.end
+BLIF
+    for run in fwd1 fwd2 rev; do
+        src=$work/fwd.blif
+        [[ $run == rev ]] && src=$work/rev.blif
+        "$odin3" -p "read_blif $src; opt; write_blif $work/$run.out.blif" \
+            >"$work/out" 2>"$work/err" || fail "opt run $run failed"
+    done
+    cmp -s "$work/fwd1.out.blif" "$work/fwd2.out.blif" || fail "two runs differ"
+    "$compare" "$work/fwd1.out.blif" "$work/rev.out.blif" ||
+        fail "netlist-compare: reordered input differs"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

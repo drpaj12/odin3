@@ -42,7 +42,8 @@ enum { ODIN3_OPT_N_CONST = 4 };
  * One sub-pass call on one module. counts is set by the caller after init. changed is Yosys's
  * did_something: every mutating kit call sets it. const_net[b] caches the canonical constant net
  * of odin3_bit b (0: not looked up yet). invert holds one odin3_net_id per net ID, 0 for none
- * (odin3_kit_invert_map). dirty is Task 13's (opt_expr's dirty set; uint32_t elements until then).
+ * (odin3_kit_invert_map). mod is the opt session's state of this module (dirty.h; NULL outside a
+ * session): the kit notes every rewrite in it (odin3_kit_note_*), opt_expr drains it.
  * pins_created counts the pins kit_new_cell and kit_rebuild_node created (the budget check).
  * ties and defer_ties are opt_dff's (Task 11): see odin3_kit_connect and odin3_kit_flush_ties.
  */
@@ -55,11 +56,13 @@ typedef struct odin3_opt_ctx {
     bool changed;
     odin3_net_id const_net[ODIN3_OPT_N_CONST];
     odin3_vec invert;
-    odin3_vec dirty;
+    struct odin3_opt_modstate *mod;
     uint64_t pins_created;
     odin3_vec ties;
     bool defer_ties;
 } odin3_opt_ctx;
+
+struct odin3_opt_modstate;
 
 /* Zeroes *oc and fills it; allocates nothing. INVALID_ARG (logged) for a NULL argument. */
 odin3_status odin3_opt_ctx_init(odin3_opt_ctx *oc, odin3_pass_ctx *pass, odin3_module *module,
@@ -280,5 +283,45 @@ bool odin3_kit_keep(const odin3_opt_ctx *oc, odin3_objref obj);
 
 /* The pins that read net: its sinks and its inout pins. */
 uint32_t odin3_kit_readers(const odin3_opt_ctx *oc, odin3_net_id net);
+
+/* --- the dirty set (Task 13; dirty.c) ---------------------------------------------------- */
+
+/*
+ * Notes for opt_expr's incremental mode. They never fail and do nothing outside an opt session
+ * (oc->mod NULL). Every rewrite of the kit makes its own; a sub-pass that changes the IR by its
+ * own calls (a direct node delete, a pin moved, a net merge) calls them itself.
+ * - note_change: the module changed (the iteration's per-module flag; no marks).
+ * - note_node: node was built, or had its pins moved; it and the readers of its outputs get
+ *   marked (call it when the node's output nets are in place).
+ * - note_net: net is about to be merged into another or re-driven; its readers, and the readers
+ *   of theirs, get marked (call it before the merge, while the readers are on net).
+ */
+void odin3_kit_note_change(odin3_opt_ctx *oc);
+void odin3_kit_note_node(odin3_opt_ctx *oc, odin3_node_id node);
+void odin3_kit_note_net(odin3_opt_ctx *oc, odin3_net_id net);
+/* note_net on every output net of node (call it before the node is deleted). */
+void odin3_kit_note_outputs(odin3_opt_ctx *oc, odin3_node_id node);
+
+/* The session state of module (NULL outside a session); odin3_opt_ctx_init calls it. */
+struct odin3_opt_modstate *odin3_opt_modstate_of(const odin3_design *design,
+                                                 const odin3_module *module);
+
+/*
+ * opt_expr's reads, per round kind (x_round: the round that consumes x bits). incremental: the
+ * session keeps marks and the module has been swept once, so only marked nodes need a visit.
+ * pending: some node is marked for the round (always true when not incremental). take: true when
+ * node is to be visited in the round, clearing its mark for it (always true when not
+ * incremental); peek is take without clearing. settle: opt_expr reached its fixed point on the
+ * module, so no node is dirty any more.
+ */
+bool odin3_opt_dirty_incremental(const odin3_opt_ctx *oc);
+bool odin3_opt_dirty_pending(const odin3_opt_ctx *oc, bool x_round);
+bool odin3_opt_dirty_take(odin3_opt_ctx *oc, odin3_node_id node, bool x_round);
+bool odin3_opt_dirty_peek(const odin3_opt_ctx *oc, odin3_node_id node, bool x_round);
+void odin3_opt_dirty_settle(odin3_opt_ctx *oc);
+/* Marks module as needing a full sweep again (the verification pass of Debug builds). */
+void odin3_opt_dirty_sweep_all(odin3_opt_ctx *oc);
+/* The bytes the module's marks hold (the budget check's side arrays). */
+uint64_t odin3_opt_dirty_bytes(const odin3_opt_ctx *oc);
 
 #endif

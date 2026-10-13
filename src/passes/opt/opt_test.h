@@ -6,6 +6,7 @@
 #ifndef ODIN3_PASSES_OPT_OPT_TEST_H
 #define ODIN3_PASSES_OPT_OPT_TEST_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -23,10 +24,14 @@ odin3_opt_limits odin3_opt_limits_now(void);
 /*
  * on_call: called with the sub-pass's name ("opt_expr", "opt_merge", ...) at each sub-pass call of
  * the opt driver (Task 13). May be NULL.
+ * on_expr_setup: called with begin = true before, and false after, opt_expr's per-round setup (the
+ * invert map, the FF-polarity scan and the global topological sort; O(N) per non-empty round, spec
+ * section 19), which bench_opt times apart from the rule visits (Task 15). May be NULL.
  */
 typedef struct odin3_opt_test_hooks {
     void (*on_call)(void *user, const char *sub);
     void *user;
+    void (*on_expr_setup)(void *user, bool begin);
 } odin3_opt_test_hooks;
 
 /* Installs the hooks (copied; NULL clears them). */

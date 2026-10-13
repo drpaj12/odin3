@@ -1,0 +1,8 @@
+# yosys 0.55 (VTR build): ulimit -v 3000000; yosys -q -p 'read_rtlil bitwise_signed_widths.il; opt_share; write_rtlil'
+cell $and A_WIDTH=4 B_WIDTH=3 Y_WIDTH=4
+cell $mux WIDTH=3
+cell $mux WIDTH=4
+# same cells as Yosys, not the same function (spec 17 #47): Yosys zero-extends the 2-bit signed
+# operand to 3 bits ("eval -set a 15 -set b 2 -set c 0 -set s 0 -show y" gives y = 4'1110 before
+# opt_share and 4'0010 after; equiv_opt -assert opt_share fails); Odin III extends it by its sign.
+# test_share_function_kept simulates this file's design before and after.

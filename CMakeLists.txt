@@ -106,6 +106,8 @@ add_library(odin3_core OBJECT
     src/passes/budget.c
     src/passes/ffinit.c
     src/passes/opt/kit.c
+    src/passes/opt/dirty.c
+    src/passes/opt/opt_loop.c
     src/passes/opt/ff.c
     src/passes/opt/fold.c
     src/passes/opt/expr.c
@@ -121,6 +123,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/merge.c
     src/passes/opt/muxtree.c
     src/passes/opt/reduce.c
+    src/passes/opt/share.c
     src/passes/opt/dff.c
     src/passes/opt/dff_state.c
     src/passes/opt/dff_gates.c
@@ -520,6 +523,20 @@ target_link_libraries(bench_proc PRIVATE odin3_core odin3_flags)
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
     target_compile_definitions(bench_proc PRIVATE ODIN3_BENCH_RELEASE)
 endif()
+# 2F Task 15: bench_opt (Release; `bench_opt --one FILE`, the interface of elab-sweep --bench). Its
+# measuring core (bench_opt.c without main) is also linked into the gate test
+# test_bench_opt_columns below; bench_opt_smoke is registered by Task 19.
+add_executable(bench_opt tests/bench/bench_opt.c)
+target_include_directories(bench_opt PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/tests/bench)
+target_link_libraries(bench_opt PRIVATE odin3_core odin3_flags)
+# tests/bench/bench_guard.h (shared with bench_elab, 2D) refuses a Debug or sanitized binary.
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
+    target_compile_definitions(bench_opt PRIVATE ODIN3_BENCH_RELEASE)
+else()
+    add_test(NAME bench_opt_refuses_debug COMMAND bench_opt --one /dev/null)
+    set_tests_properties(bench_opt_refuses_debug PROPERTIES
+        PASS_REGULAR_EXPRESSION "needs a Release build")
+endif()
 
 # --- Fuzzers (ODIN3_FUZZ) ---------------------------------------------------------------
 if(ODIN3_FUZZ)
@@ -619,9 +636,17 @@ if(BUILD_TESTING)
     # 2F Task 3: opt_clean.
     odin3_add_unit_test(test_opt_clean)
     target_sources(test_opt_clean PRIVATE tests/unit/proc_build.c)
-    # 2F Task 4: the opt pass registrations, options, the call wrapper (Task 13 extends it).
+    # 2F Task 4: the opt pass registrations, options, the call wrapper; Task 13: the opt driver.
     odin3_add_unit_test(test_opt_loop)
     target_sources(test_opt_loop PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_loop PRIVATE
+        ODIN3_LOOP_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/loop")
+    # 2F Task 15: bench_opt prints every column (its measuring core, built without main).
+    odin3_add_unit_test(test_bench_opt_columns)
+    target_sources(test_bench_opt_columns PRIVATE tests/bench/bench_opt.c tests/unit/proc_build.c)
+    target_include_directories(test_bench_opt_columns PRIVATE ${PROJECT_SOURCE_DIR}/tests/bench)
+    target_compile_definitions(test_bench_opt_columns PRIVATE BENCH_OPT_NO_MAIN
+        ODIN3_BENCH_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/bench")
     # 2F Task 8: opt_merge.
     odin3_add_unit_test(test_opt_cse)
     target_sources(test_opt_cse PRIVATE tests/unit/proc_build.c)
@@ -632,6 +657,11 @@ if(BUILD_TESTING)
     target_sources(test_opt_reduce PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_opt_reduce PRIVATE
         ODIN3_REDUCE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/reduce")
+    # 2F Task 14: opt_share.
+    odin3_add_unit_test(test_opt_share)
+    target_sources(test_opt_share PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_share PRIVATE
+        ODIN3_SHARE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/share")
     # 2F Task 10: opt_muxtree.
     odin3_add_unit_test(test_opt_muxtree)
     target_sources(test_opt_muxtree PRIVATE tests/unit/proc_build.c)
@@ -1208,7 +1238,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                            help_runs_nothing check_flag usage techlib plugin writers sim keep_ast
                            project_dump project_top project_revision project_diag_paths
                            project_preprocess parse_only parse_only_with_script elab_only
-                           elab_only_with_script abc_script_missing abc_script_project opt_snapshot)
+                           elab_only_with_script abc_script_missing abc_script_project opt_snapshot opt_determinism)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare

@@ -174,6 +174,30 @@ odin3_status odin3_opt_reduce_run(odin3_pass_ctx *ctx, odin3_design *design,
 odin3_status odin3_opt_muxtree_run(odin3_pass_ctx *ctx, odin3_design *design,
                                    const odin3_opt_opts *opts, odin3_opt_counts *counts);
 
+/* --- 2F Task 14: opt_share (OP-11) ---------------------------------------------------------- */
+
+/*
+ * opt_share (2F spec §11, Yosys opt_share.cc) over every module of design, in creation order. Per
+ * $mux and $pmux (node-ID order, the nodes the call starts with): a data port is a candidate when
+ * one binary word cell (the $add/$sub class, $mul, $div, $mod, $and, $or, $xor, $xnor, the shifts,
+ * the comparisons, $logic_and, $logic_or) drives all of it, bit for bit, with its whole Y, nothing
+ * else reads those Y nets (no other pin, no port, no `keep` wire) and the cell has no `keep`. The
+ * candidates are visited in port order (B slices, then A); from the first one still open, each of
+ * its two operands is tried (the one with the lower net-ID vector first), and the open candidates
+ * whose cell has the same operand on the same port and the same parameters apart from the other
+ * operand's width (an $add and a $sub also mix, on port A) form a group of two or more. A group
+ * becomes one new cell of the lowest-ID member's type on the shared operand, fed by a new
+ * $mux/$pmux over the other operands (an $add/$sub mix negates the $sub operands with a $neg; a
+ * narrower operand is extended by its sign flag), and the old cells are deleted with their Y nets
+ * merged into the new cell's; the old mux stays (its group ports now read one net). The new cell,
+ * the mux and the $neg cells share one DERIVED record whose parents are the old cells in ID order,
+ * then the old mux. Adds the cells merged to counts->share_merged; logs INFO "opt_share: merged N
+ * cells". INVALID_ARG (logged) for a NULL argument; NO_MEMORY, possibly after some rewrites (the
+ * IR stays valid; each rewrite builds before its first destructive step).
+ */
+odin3_status odin3_opt_share_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                 const odin3_opt_opts *opts, odin3_opt_counts *counts);
+
 /* --- 2F Task 11: opt_dff (OP-9) ------------------------------------------------------------- */
 
 /*
@@ -277,10 +301,26 @@ typedef struct odin3_opt_call_req {
  * than N bytes (...)", the pass being ctx's, and gives ODIN3_ERR_PARSE), the "before" snapshot when
  * a snapshot directory is set, the sub-pass, in Debug odin3_check_design FAST, and the snapshot
  * files when the call changed anything. *changed is set to whether it did (the growth of the
- * sub-pass's counters in counts). A sub-pass that is still a stub logs "<sub>: not available yet
- * (2F)" and gives ODIN3_ERR_INVALID_ARG. ODIN3_ERR_INVALID_ARG (logged) for a NULL argument.
+ * sub-pass's counters in counts). ODIN3_ERR_INVALID_ARG (logged) for a NULL argument.
  */
 odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed);
+
+/*
+ * The `opt` driver (2F spec §3, §12; plan Task 13), Yosys 0.55's loop through odin3_opt_call:
+ * default mode runs `opt_expr X; opt_merge -nomux M`, then `do { opt_muxtree; opt_reduce R;
+ * opt_merge M; [opt_share if -full]; [opt_dff D unless -noff]; opt_clean C; opt_expr X } while
+ * (anything changed)`; -fast runs `do { opt_expr X; opt_merge M; [opt_dff D unless -noff]; if
+ * (opt_dff changed nothing) break; opt_clean C }; opt_clean C`. After the first opt_expr call
+ * opt_expr visits only the nodes the kit marked since (dirty.h), unless args->full_rescan.
+ * At ODIN3_OPT_MAX_ITERATIONS (odin3_opt_limits_now) the loop stops with WARN "opt: module 'm': no
+ * fixed point after K iterations; stopping" per module the last iteration changed, and the call
+ * is still ODIN3_OK. INFO "opt: fixed point after K iterations" or "opt: -fast: done after K
+ * iterations"; counts->iterations gets K. opt never compacts (IR-6 unchanged, PHASE2 #19): the
+ * dead objects stay until a script runs `compact`. A failing sub-pass ends the run with its
+ * status (the IR valid). INVALID_ARG (logged) for a NULL argument.
+ */
+odin3_status odin3_opt_run(odin3_pass_ctx *ctx, odin3_design *design, const odin3_opt_args *args,
+                           odin3_opt_counts *counts);
 
 /* odin3_pass_set_opt_snapshot is public (odin3.h); register.c defines it. */
 

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# sp-splice: the 2H splice S-P of 2F spec section 3 (Odin III through proc, Yosys 0.55 the rest of
+# Parmys's script). See sp_splice.py.
+# Exit codes: 0 ok (the out.blif path on stdout), 2 a child failed or a usage error or a refused
+# Yosys version, 77 skipped (no memory cap possible).
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/sp_splice.py" "$@"

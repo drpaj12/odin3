@@ -826,7 +826,7 @@ A wire with some live and some pinless bits keeps them, and `check` warns, as af
 
 **Cost:** O(new objects + their pins + moved pins + old cells). A failure in run *k* leaves the runs
 before *k* applied and the IR valid and equivalent. The pass manager compacts after `abc` (IR-6),
-using 2F-5's hook for `opt`.
+using 2F-5's hook for `opt`. **[Superseded 2026-10-13, PHASE2 #19: `opt` has no compact hook. `abc` ends with `odin3_design_compact` itself, as its own last step.]**
 
 ## 7. The `abc` pass
 
