@@ -514,6 +514,18 @@ static void test_m11(void) {
               "t.v:3:3: error: 'f' is already declared (first at t.v:2:8)");
 }
 
+/* M10 (PR 2D-7b review): a non-ANSI port merged with a reg that has unpacked dimensions used to
+ * drop them in silence; either order of the two declarations is a located error. */
+static void test_port_with_unpacked_dimensions(void) {
+    run_error("module m(q);\n  output q;\n  reg [3:0] q [0:1];\nendmodule\n",
+              "t.v:3:13: error: 'q' is a port and its declaration has unpacked dimensions; a port "
+              "cannot be an array");
+    run_error("module m(q);\n  reg [3:0] q [0:1];\n  output q;\nendmodule\n",
+              "t.v:2:13: error: 'q' is a port and its declaration has unpacked dimensions; a port "
+              "cannot be an array");
+    run_clean("module m(q);\n  output [3:0] q;\n  reg [3:0] q;\nendmodule\n");
+}
+
 /* Every statement kind of the elaborated form, written and checked (FULL, binder). */
 static void test_statement_kinds(void) {
     run_clean(
@@ -717,6 +729,7 @@ int main(void) {
     RUN_TEST(test_attrs);
     RUN_TEST(test_genvar_read);
     RUN_TEST(test_m11);
+    RUN_TEST(test_port_with_unpacked_dimensions);
     RUN_TEST(test_statement_kinds);
     RUN_TEST(test_readmem);
     RUN_TEST(test_local_params);
