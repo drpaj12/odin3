@@ -119,4 +119,3 @@ syntax/preprocessor_define_with_comment.v [Parmys rejected the design] Parmys re
 syntax/top_and.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `\and_primitive' referenced in module `\top_and' in cell `\and4' is not part of the design.
 #
 # --- a splice hand-over gap, not a Parmys rejection (it HAS a golden): an error, the design is UNPROVEN ---
-micro/multiply_hard_block.v [does not have a parameter named 'B_WIDTH'] Odin III's hard cell multiply (lib/vtr.o3lib) has A_WIDTH/B_WIDTH, Parmys's vtr_primitives.v multiply has WIDTH, so Yosys rejects the instance in sp-splice's hand-over (as the RAMs' ADDR_WIDTH/DATA_WIDTH names were matched); needs the lib or the writer to use WIDTH for equal widths (2D-7b)

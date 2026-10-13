@@ -4,8 +4,8 @@
 # Port names follow the goldens' `.model … .blackbox` stanzas, which both oracles write with the
 # same names. Port order is Odin II's (it never varies); Yosys+Parmys declares the same ports in
 # varying orders, which IR-7b accepts because ports match by name. The declared widths give the
-# parameters (36-bit multiplier inputs, 15 address bits and 1 data bit in every golden): the
-# defaults are those widths.
+# parameters (36-bit multiplier inputs, 15 address bits and 1 data bit in every golden). The
+# memories' defaults are those widths; `multiply` copies VTR's declaration, default included.
 library vtr
 
 cell adder hard
@@ -18,12 +18,13 @@ cell adder hard
   fn  cout   = (a & b) | (a & cin) | (b & cin)
 end
 
+# multiply is VTR's `multiply #(parameter WIDTH = 1) (a[WIDTH-1:0], b[WIDTH-1:0], out[2*WIDTH-1:0])`
+# (vtr_flow/primitives.v and Parmys's vtr_primitives.v): one square-multiplier parameter, default 1.
 cell multiply hard
-  param A_WIDTH int 36
-  param B_WIDTH int 36
-  in  a A_WIDTH
-  in  b B_WIDTH
-  out out A_WIDTH + B_WIDTH
+  param WIDTH int 1
+  in  a WIDTH
+  in  b WIDTH
+  out out 2 * WIDTH
   fn  out = a * b                    # unsigned
 end
 

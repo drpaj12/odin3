@@ -182,12 +182,16 @@ static void test_vtr_ports(void) {
 static void test_vtr_parameters(void) {
     load(VTR);
     const odin3_celltype_def *mul = def_of("multiply");
-    TEST_ASSERT_EQUAL_UINT32(2, mul->n_params);
-    TEST_ASSERT_EQUAL_STRING("A_WIDTH", mul->params[0].name);
-    TEST_ASSERT_EQUAL_INT64(36, mul->params[0].dflt.i);
-    TEST_ASSERT_EQUAL_INT64(36, mul->params[1].dflt.i);
-    const odin3_value dflt[2] = {mul->params[0].dflt, mul->params[1].dflt};
-    TEST_ASSERT_EQUAL_UINT32(72, odin3_celltype_port_width(g_design, type_of("multiply"), dflt, 2));
+    /* VTR's declaration: `multiply #(parameter WIDTH = 1)`, a and b WIDTH bits, out 2*WIDTH */
+    TEST_ASSERT_EQUAL_UINT32(1, mul->n_params);
+    TEST_ASSERT_EQUAL_STRING("WIDTH", mul->params[0].name);
+    TEST_ASSERT_EQUAL_INT64(1, mul->params[0].dflt.i);
+    const odin3_value dflt[1] = {mul->params[0].dflt};
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_celltype_port_width(g_design, type_of("multiply"), dflt, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_celltype_port_width(g_design, type_of("multiply"), dflt, 1));
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_celltype_port_width(g_design, type_of("multiply"), dflt, 2));
+    const odin3_value w36[1] = {odin3_value_int(36)};
+    TEST_ASSERT_EQUAL_UINT32(72, odin3_celltype_port_width(g_design, type_of("multiply"), w36, 2));
     TEST_ASSERT_EQUAL_STRING("ADDR_WIDTH", def_of("dual_port_ram")->params[0].name);
     TEST_ASSERT_EQUAL_INT64(15, def_of("dual_port_ram")->params[0].dflt.i);
     TEST_ASSERT_EQUAL_INT64(1, def_of("dual_port_ram")->params[1].dflt.i);
@@ -226,7 +230,7 @@ static void test_vtr_reads_pair_with_outputs(void) {
 
 /* The parameters every golden declaration implies, by model. */
 static const int64_t *want_params(const char *model) {
-    static const int64_t mul[] = {36, 36};
+    static const int64_t mul[] = {36};
     static const int64_t ram[] = {15, 1};
     if (strcmp(model, "multiply") == 0) {
         return mul;
@@ -304,25 +308,25 @@ static void test_every_golden_stanza_resolves(void) {
     TEST_ASSERT_EQUAL_size_t(49, count); /* the distinct stanzas of the 2026-10-09 goldens */
 }
 
-/* Review Focus 1: `.model multiply` declared with 18-bit `a`, 9-bit `b` and 27-bit `out`
- * resolves to the library cell with A_WIDTH=18, B_WIDTH=9; the instance gets them; the writer
- * prints the same formals and the same declaration. */
+/* Review Focus 1: `.model multiply` declared with 18-bit `a` and `b` and a 36-bit `out` resolves
+ * to the library cell with WIDTH=18; the instance gets it; the writer prints the same formals and
+ * the same declaration. */
 static void test_multiply_parameters_from_declaration(void) {
     load(VTR);
     static char text[TEXT_MAX];
     static char out[TEXT_MAX];
     int at = snprintf(text, sizeof text,
                       ".model top\n.inputs x y\n.outputs z\n"
-                      ".subckt multiply b[8]=y a[17]=x out[26]=z\n.end\n\n"
+                      ".subckt multiply b[17]=y a[17]=x out[35]=z\n.end\n\n"
                       ".model multiply\n.inputs");
-    for (int k = 0; k < 9; k++) {
+    for (int k = 0; k < 18; k++) {
         at += snprintf(text + at, sizeof text - (size_t)at, " b[%d]", k);
     }
     for (int k = 0; k < 18; k++) {
         at += snprintf(text + at, sizeof text - (size_t)at, " a[%d]", k);
     }
     at += snprintf(text + at, sizeof text - (size_t)at, "\n.outputs");
-    for (int k = 0; k < 27; k++) {
+    for (int k = 0; k < 36; k++) {
         at += snprintf(text + at, sizeof text - (size_t)at, " out[%d]", k);
     }
     (void)snprintf(text + at, sizeof text - (size_t)at, "\n.blackbox\n.end\n");
@@ -330,12 +334,10 @@ static void test_multiply_parameters_from_declaration(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read(g_design, IN_PATH), g_msg);
     const odin3_value *params = odin3_design_declared_model_params(g_design, 0);
     TEST_ASSERT_EQUAL_INT64(18, params[0].i);
-    TEST_ASSERT_EQUAL_INT64(9, params[1].i);
     odin3_module *top = odin3_module_get(g_design, (odin3_module_id){1});
     odin3_node_id node = {odin3_module_port_count(top) + 1};
     TEST_ASSERT_EQUAL_INT64(18, odin3_node_param(top, node, 0)->i);
-    TEST_ASSERT_EQUAL_INT64(9, odin3_node_param(top, node, 1)->i);
-    TEST_ASSERT_EQUAL_UINT32(27, odin3_node_port(top, node, 2).count);
+    TEST_ASSERT_EQUAL_UINT32(36, odin3_node_port(top, node, 2).count);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_write(g_design, OUT_PATH), g_msg);
     /* the writer wraps lines at 100 columns: compare with continuations joined */
     const char *got = slurp(OUT_PATH, out);
@@ -415,24 +417,23 @@ static void test_implicit_and_inferred_with_library(void) {
     fresh_design();
     load(VTR);
     write_input(".model top\n.inputs x y\n.outputs z\n"
-                ".subckt multiply a[3]=x b[1]=y out[5]=z\n.end\n");
+                ".subckt multiply a[3]=x b[3]=y out[7]=z\n.end\n");
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read(g_design, IN_PATH), g_msg);
     odin3_module *top = odin3_module_get(g_design, (odin3_module_id){1});
     odin3_node_id node = {odin3_module_port_count(top) + 1};
     TEST_ASSERT_EQUAL_INT64(4, odin3_node_param(top, node, 0)->i);
-    TEST_ASSERT_EQUAL_INT64(2, odin3_node_param(top, node, 1)->i);
-    TEST_ASSERT_EQUAL_UINT32(6, odin3_node_port(top, node, 2).count);
+    TEST_ASSERT_EQUAL_UINT32(8, odin3_node_port(top, node, 2).count);
     expect_check_clean();
     static char out[TEXT_MAX];
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_write(g_design, OUT_PATH), g_msg);
     TEST_ASSERT_EQUAL_STRING(".model top\n.inputs x y\n.outputs z\n"
-                             ".subckt multiply a[3]=x b[1]=y out[5]=z\n.end\n",
+                             ".subckt multiply a[3]=x b[3]=y out[7]=z\n.end\n",
                              slurp(OUT_PATH, out));
     fresh_design();
     load(VTR);
-    write_input(".model top\n.inputs x\n.subckt multiply a[3]=x b[1]=x out[6]=x\n.end\n");
+    write_input(".model top\n.inputs x\n.subckt multiply a[3]=x b[3]=x out[8]=x\n.end\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_blif_read(g_design, IN_PATH));
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(g_msg, "no port 'out[6]'"), g_msg);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(g_msg, "no port 'out[8]'"), g_msg);
 }
 
 /* Inferred parameters whose width expression exceeds the cap (out = 2^20 + 2^20 bits) are a

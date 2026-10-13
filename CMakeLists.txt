@@ -1941,7 +1941,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # then equiv-check --x-report; identical / equivalent / equivalent outside x-cones /
         # differs / error, smallest first, one design at a time, every child under memcap (3G; the
         # four biggest files 5G, alone, in the 6G slice). Exceptions: tests/exit/micro_expect.txt
-        # (the 104 micros Parmys rejects) and tests/exit/vtr_expect.txt; a `differs` is listed
+        # (the 103 micros Parmys rejects) and tests/exit/vtr_expect.txt; a `differs` is listed
         # only with a proven reason. exit_vtr runs the 31 files directly under
         # benchmarks/verilog (the Koios designs have no k6_frac golden). Run as
         # `ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^exit_'` from a Release build.

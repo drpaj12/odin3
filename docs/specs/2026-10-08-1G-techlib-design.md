@@ -22,7 +22,7 @@ gives the BLIF reader real types for the goldens' `adder`, `multiply`, `single_p
    (c) the matcher patterns of Phase 4 (spec §7's open DSL, §13 #1: patterns are IR fragments —
    D5). Sequential cells use `seq`; memories use `memory` (semantics in Phase 4).
 3. **Widths may be parametric.** A port width is an integer expression over the cell's integer
-   parameters (`A_WIDTH`, `A_WIDTH+B_WIDTH`). When a netlist declares the cell as a black box
+   parameters (`WIDTH`, `2 * WIDTH`; `ADDR_WIDTH`). When a netlist declares the cell as a black box
    (`.model multiply .blackbox` with 36-bit `a`), the reader infers the parameters from the
    declared widths and checks the rest (IR-7b's compatibility check, widened to parametric
    ports).
@@ -44,11 +44,10 @@ cell adder hard
   fn  cout   = (a & b) | (a & cin) | (b & cin)
 end
 cell multiply hard
-  param A_WIDTH int 36
-  param B_WIDTH int 36
-  in  a A_WIDTH
-  in  b B_WIDTH
-  out out A_WIDTH + B_WIDTH
+  param WIDTH int 1                     # VTR's `multiply #(parameter WIDTH = 1)`, exactly
+  in  a WIDTH
+  in  b WIDTH
+  out out 2 * WIDTH
   fn  out = a * b                       # unsigned unless `signed` follows the port width
 end
 cell AND2 gate area 1
