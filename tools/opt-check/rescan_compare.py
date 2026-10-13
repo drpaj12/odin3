@@ -3,8 +3,8 @@ Task 13 review M7).
 
 Usage::
 
-    rescan-compare --odin3 O [--mem-cap C] [--work DIR] [--tops F] [--golden-root D] [--root R]
-                   [--script S] <dir or file>...
+    rescan-compare --odin3 O [--mem-cap C] [--work DIR] [--tops F] [--golden-root D]
+                   [--techlib L] [--root R] [--script S] <dir or file>...
 
 A Release build has no dirty-set guard (``settle`` asserts only in Debug), so the incremental
 ``opt_expr`` is checked against the full sweep here. For each file, smallest first, two children:
@@ -45,7 +45,7 @@ TAIL_LINES = 5
 
 
 def script_commands(text: str) -> list[str]:
-    """The commands of a script file: '#' comments and blank lines dropped, ';' and newline split."""
+    """A script file's commands: '#' comments and blank lines dropped, ';' and newline split."""
     commands: list[str] = []
     for line in text.splitlines():
         commands.extend(part.strip() for part in line.split("#", 1)[0].split(";") if part.strip())
@@ -58,8 +58,15 @@ def with_rescan(commands: Sequence[str]) -> list[str]:
             for command in commands]
 
 
-def pass_script(source: Path, commands: Sequence[str], out: str) -> str:
-    return "; ".join([f"read_verilog --nolatches {source}", *commands, f"write_rtlil {out}"])
+def pass_script(source: Path, commands: Sequence[str], out: str, techlib: str | None = None) -> str:
+    read = [f"read_techlib {techlib}"] if techlib else []
+    return "; ".join([*read, f"read_verilog --nolatches {source}", *commands, f"write_rtlil {out}"])
+
+
+def exe(name: str) -> str:
+    """The executable as an absolute path (the children run in the work directory); a bare name
+    stays one, for PATH."""
+    return str(Path(name).resolve()) if "/" in name else name
 
 
 def tail(text: str) -> str:
@@ -81,8 +88,8 @@ class Comparison:
     def variant(self, item: elab_sweep.Item, commands: Sequence[str], out: str) -> str | None:
         """Runs one variant; None on success, else why it failed."""
         top = elab_sweep.top_for(item, self.tops, self.golden)
-        argv = [self.args.odin3, *(["--top", top] if top else []), "-p",
-                pass_script(item.path, commands, out)]
+        argv = [exe(self.args.odin3), *(["--top", top] if top else []), "-p",
+                pass_script(item.path, commands, out, self.args.techlib)]
         try:
             done = memcap.run(argv, self.cap, capture_output=True, cwd=self.work)
         except (OSError, ValueError) as exc:
@@ -122,6 +129,8 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--work", metavar="DIR", help="the work directory (kept)")
     ap.add_argument("--tops", metavar="F", help="<file> <top> lines, as elab-sweep --tops")
     ap.add_argument("--golden-root", metavar="D", help="Parmys goldens, as elab-sweep")
+    ap.add_argument("--techlib", metavar="F", type=lambda t: str(Path(t).resolve()),
+                    help="read this tech library first (the hard blocks)")
     ap.add_argument("--root", metavar="R", help="paths are shown relative to R")
     ap.add_argument("--script", type=Path, default=DEFAULT_SCRIPT, help="the opt script")
     ap.add_argument("inputs", nargs="+", help="directories or files")

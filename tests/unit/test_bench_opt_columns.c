@@ -40,17 +40,64 @@ static char *slurp(const char *path) {
 }
 
 /* Every key of the line, in order. Each is followed by '=' and a value. */
-static const char *const k_keys[] = {
-    "bench_opt file=", " cells0=", " nets0=", " pins0=", " cells1=", " nets1=", " pins1=",
-    " iters=", " t_total=", " t_expr=", " t_merge=", " t_muxtree=", " t_reduce=", " t_share=",
-    " t_dff=", " t_clean=", " t_setup=", " setup_rounds=", " rw_rewritten=", " rw_folded=",
-    " rw_merge=", " rw_muxtree=", " rw_reduce=", " rw_share=", " rw_dff=", " rw_dff_bits=",
-    " rw_clean=", " rules=", " t_compact=", " dead_nodes=", " dead_nets=", " dead_wires=",
-    " full_iters=", " full_t_total=", " full_t_expr=", " full_t_merge=", " full_t_muxtree=",
-    " full_t_reduce=", " full_t_share=", " full_t_dff=", " full_t_clean=", " full_t_setup=",
-    " full_setup_rounds=", " full_rw_rewritten=", " full_rw_folded=", " full_rw_merge=",
-    " full_rw_muxtree=", " full_rw_reduce=", " full_rw_share=", " full_rw_dff=",
-    " full_rw_dff_bits=", " full_rw_clean=", " full_rules=", " rss_proc_kib=", " rss_peak_kib="};
+static const char *const k_keys[] = {"bench_opt file=",
+                                     " cells0=",
+                                     " nets0=",
+                                     " pins0=",
+                                     " cellsp=",
+                                     " netsp=",
+                                     " pinsp=",
+                                     " cells1=",
+                                     " nets1=",
+                                     " pins1=",
+                                     " iters=",
+                                     " t_total=",
+                                     " t_expr=",
+                                     " t_merge=",
+                                     " t_muxtree=",
+                                     " t_reduce=",
+                                     " t_share=",
+                                     " t_dff=",
+                                     " t_clean=",
+                                     " t_setup=",
+                                     " setup_rounds=",
+                                     " rw_rewritten=",
+                                     " rw_folded=",
+                                     " rw_merge=",
+                                     " rw_muxtree=",
+                                     " rw_reduce=",
+                                     " rw_share=",
+                                     " rw_dff=",
+                                     " rw_dff_bits=",
+                                     " rw_clean=",
+                                     " rules=",
+                                     " t_compact=",
+                                     " dead_nodes=",
+                                     " dead_nets=",
+                                     " dead_wires=",
+                                     " full_iters=",
+                                     " full_t_total=",
+                                     " full_t_expr=",
+                                     " full_t_merge=",
+                                     " full_t_muxtree=",
+                                     " full_t_reduce=",
+                                     " full_t_share=",
+                                     " full_t_dff=",
+                                     " full_t_clean=",
+                                     " full_t_setup=",
+                                     " full_setup_rounds=",
+                                     " full_rw_rewritten=",
+                                     " full_rw_folded=",
+                                     " full_rw_merge=",
+                                     " full_rw_muxtree=",
+                                     " full_rw_reduce=",
+                                     " full_rw_share=",
+                                     " full_rw_dff=",
+                                     " full_rw_dff_bits=",
+                                     " full_rw_clean=",
+                                     " full_rules=",
+                                     " rss_proc_kib=",
+                                     " rss_peak_kib="};
 
 /* The value text of `key` (up to the next blank) into out. */
 static void value_of(const char *line, const char *key, char *out, size_t cap) {
@@ -63,13 +110,18 @@ static void value_of(const char *line, const char *key, char *out, size_t cap) {
     out[len] = '\0';
 }
 
+/* key occurs in text after `from`, and once only; returns its place. */
+static const char *find_once(const char *from, const char *key) {
+    const char *at = strstr(from, key);
+    TEST_ASSERT_NOT_NULL_MESSAGE(at, key);
+    TEST_ASSERT_NULL_MESSAGE(strstr(at + 1, key), key);
+    return at;
+}
+
 static void assert_columns(const char *line) {
     const char *from = line;
     for (size_t i = 0; i < sizeof k_keys / sizeof k_keys[0]; i++) {
-        const char *at = strstr(from, k_keys[i]);
-        TEST_ASSERT_NOT_NULL_MESSAGE(at, k_keys[i]);
-        TEST_ASSERT_NULL_MESSAGE(strstr(at + 1, k_keys[i]), k_keys[i]); /* once only */
-        from = at;
+        from = find_once(from, k_keys[i]);
     }
     TEST_ASSERT_NULL(strchr(line, '\n'));
 }
@@ -83,24 +135,39 @@ static unsigned long number(const char *line, const char *key) {
     return value;
 }
 
-static void test_bench_opt_columns(void) {
+/* Builds tiny.il (an AND with a constant 0, and a dead NOT) into res. */
+static void build_tiny(void) {
     char path[PATH_LEN];
     TEST_ASSERT_TRUE(snprintf(path, sizeof path, "%s/tiny.il", ODIN3_BENCH_DATA) > 0);
     char *text = slurp(path);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(text, &res));
     free(text);
+}
+
+/* The values of the line of tiny.il. Before: the two cells and the constant nodes; the AND folds to
+ * a constant and the dead NOT goes; compact then drops their slots, and the peak (before compact)
+ * still holds them. */
+static void assert_at_least(const char *line, const char *key, unsigned long least) {
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32((uint32_t)least, (uint32_t)number(line, key));
+}
+
+static void assert_tiny_values(const char *line) {
+    assert_at_least(line, " cells0=", 2);
+    assert_at_least(line, " dead_nodes=", 1);
+    assert_at_least(line, " iters=", 1);
+    assert_at_least(line, " setup_rounds=", 1);
+    assert_at_least(line, " rss_peak_kib=", number(line, " rss_proc_kib="));
+    TEST_ASSERT_LESS_THAN_UINT32((uint32_t)number(line, " cells0="),
+                                 (uint32_t)number(line, " cells1="));
+}
+
+static void test_bench_opt_columns(void) {
+    build_tiny();
     char line[BENCH_OPT_LINE];
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, bench_opt_design(res.design, "tiny.il", line, sizeof line));
     assert_columns(line);
     TEST_ASSERT_NOT_NULL(strstr(line, "bench_opt file=tiny.il "));
-    /* before: the two cells and the constant nodes; the AND folds to a constant and the dead NOT goes; compact then drops
-     * their slots, and the peak (before compact) still holds them. */
-    TEST_ASSERT_TRUE(number(line, " cells0=") >= 2);
-    TEST_ASSERT_TRUE(number(line, " cells1=") < number(line, " cells0="));
-    TEST_ASSERT_TRUE(number(line, " dead_nodes=") >= 1);
-    TEST_ASSERT_TRUE(number(line, " iters=") >= 1);
-    TEST_ASSERT_TRUE(number(line, " setup_rounds=") >= 1);
-    TEST_ASSERT_TRUE(number(line, " rss_peak_kib=") >= number(line, " rss_proc_kib="));
+    assert_tiny_values(line);
     TEST_ASSERT_NOT_NULL(strstr(line, " rules=const:"));
     TEST_ASSERT_NULL(strstr(line, "nan"));
     odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
@@ -108,11 +175,7 @@ static void test_bench_opt_columns(void) {
 }
 
 static void test_bench_opt_small_buffer(void) {
-    char path[PATH_LEN];
-    TEST_ASSERT_TRUE(snprintf(path, sizeof path, "%s/tiny.il", ODIN3_BENCH_DATA) > 0);
-    char *text = slurp(path);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(text, &res));
-    free(text);
+    build_tiny();
     char line[64];
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           bench_opt_design(res.design, "tiny.il", line, sizeof line));

@@ -3,7 +3,8 @@
 Usage::
 
     sp-splice --odin3 O --yosys Y --arch A --top T [--config C] [--keep DIR] [--primitives P]
-              [--mem-cap BYTES] [--allow-version V] [--scc-precheck] FILE...
+              [--mem-cap BYTES] [--allow-version V] [--scc-precheck]
+              [--odin3-pre CMD]... [--no-primitives] FILE...
 
 Phase 2 has no ``fsm``, ``wreduce``, ``memory``, ``flatten``, ``techmap`` or hard-block mapping,
 so the exit comparison runs Parmys's script in two halves, verbatim from ``synthesis.tcl`` apart
@@ -13,10 +14,17 @@ from point (i)'s Odin III spellings (``--nolatches``, ``--nomem2reg``, ``--top``
   T; opt_expr; opt_clean; opt -nodffe -nosdff; proc; write_rtlil a.il"``. ``P`` is Parmys's
   ``vtr_primitives.v`` (``--primitives``, else under ``$VTR_ROOT``).
 - Yosys 0.55, from ``plugin -i parmys`` to ``write_blif -true + vcc -false + gnd -undef + unconn
-  -blackbox out.blif``, reading ``a.il``.
+  -blackbox out.blif``, reading ``a.il``. It is one line in ``yosys.tcl`` after
+  synthesis.tcl's own first line, ``yosys -import``, run as ``Y -c yosys.tcl``: the ``yosys
+  -import`` inside the half exists only in Yosys's Tcl mode.
 
 ``--top`` stays on the Odin III side: 2D elaborates only the modules under the top, so Yosys's
 ``hierarchy -check -auto-top -purge_lib`` then picks the same one (spec section 3).
+``--odin3-pre CMD`` (repeatable) puts a command at the front of the Odin III half, e.g.
+``read_techlib lib/vtr.o3lib`` (the arch's hard blocks); ``--no-primitives`` leaves the
+``vtr_primitives.v`` read out. With main today a read of that file alone stops at 2D's
+``ambiguous_top``, and the hard blocks come from the tech library instead (agent default; the
+spelling of that read is 2H's to settle).
 ``--scc-precheck`` first runs the Parmys precondition on the source in Yosys (``read_verilog
 -nomem2reg P; read_verilog -sv -nolatches FILE...; scc -select; select -assert-none %``): a
 combinational loop is a Parmys rejection and ends the run with exit 2.
@@ -50,6 +58,8 @@ MEMCAP_PY = HERE.parent / "elab-check" / "memcap.py"
 GIB = 1 << 30
 DEFAULT_CAP = 4 * GIB
 EXIT_OK, EXIT_FAIL, EXIT_SKIP = 0, 2, 77
+YOSYS_TCL = "yosys.tcl"  # the Yosys half as a Tcl script: `yosys -import` exists only in Tcl mode
+TCL_PROLOGUE = "yosys -import"  # as synthesis.tcl's first line: makes `plugin` a Tcl command
 TAIL_LINES = 20
 _ORACLE_RE = re.compile(r"\bYosys 0\.55(?:[^0-9]|$)")
 _PLAIN_RE = re.compile(r"[^\s;#\"]+")
@@ -58,7 +68,8 @@ PRIMITIVES_UNDER_VTR = (
     "parmys/parmys-plugin/techlibs/vtr_primitives.v",
 )
 
-# Odin III half: Parmys lines 1-4 (opt_expr; opt_clean; opt -nodffe -nosdff; proc), then the hand-over.
+# Odin III half: Parmys lines 1-4 (opt_expr; opt_clean; opt -nodffe -nosdff; proc), then the
+# hand-over.
 ODIN3_HALF = (
     "read_verilog --nomem2reg {primitives}",
     "read_verilog --nolatches {files}",
@@ -126,10 +137,12 @@ class Options:
     top: str
     config: str | None
     keep: Path | None
-    primitives: str
+    primitives: str | None
     cap: int
     allow_version: str | None
     scc_precheck: bool
+    pre: tuple[str, ...]
+    no_primitives: bool
     files: tuple[Path, ...]
 
 
@@ -146,10 +159,14 @@ def _fill(commands: Sequence[str], **fields: str) -> str:
     return "; ".join(command.format(**fields) for command in commands)
 
 
-def odin3_script(primitives: str, files: Sequence[str], top: str) -> str:
-    """The Odin III half, one ``-p`` script."""
-    return _fill(ODIN3_HALF, primitives=quote(primitives),
-                 files=" ".join(quote(name) for name in files), top=top)
+def odin3_script(primitives: str | None, files: Sequence[str], top: str,
+                 pre: Sequence[str] = ()) -> str:
+    """The Odin III half, one ``-p`` script: ``pre`` first, the ``vtr_primitives.v`` read unless
+    ``primitives`` is None."""
+    commands = ODIN3_HALF if primitives is not None else ODIN3_HALF[1:]
+    fields = {"primitives": quote(primitives or ""), "top": top,
+              "files": " ".join(quote(name) for name in files)}
+    return "; ".join([*pre, _fill(commands, **fields)])
 
 
 def yosys_script(arch: str, config: str | None) -> str:
@@ -165,6 +182,18 @@ def precheck_script(primitives: str, files: Sequence[str]) -> str:
 def version_ok(version: str, allow: str | None) -> bool:
     """True for Yosys 0.55, or for a ``-V`` line that names ``allow``."""
     return bool(_ORACLE_RE.search(version)) or (allow is not None and allow in version)
+
+
+def exe(name: str) -> str:
+    """The executable as an absolute path (the children run in the work directory); a bare name
+    stays one, for PATH."""
+    return str(Path(name).resolve()) if "/" in name else name
+
+
+def absolute(name: str | None) -> str | None:
+    """A path argument made absolute when it names an existing file (the children run in the work
+    directory); anything else is kept as given."""
+    return str(Path(name).resolve()) if name and Path(name).exists() else name
 
 
 def tail(text: str) -> str:
@@ -206,7 +235,9 @@ class Splice:
 
     def child(self, argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
         try:
-            return self.memcap.run(list(argv), self.opts.cap, capture_output=True, cwd=self.work)
+            done: subprocess.CompletedProcess[str] = self.memcap.run(
+                list(argv), self.opts.cap, capture_output=True, cwd=self.work)
+            return done
         except OSError as exc:
             raise SpliceError(f"cannot run {argv[0]}: {exc}") from exc
         except ValueError as exc:
@@ -238,12 +269,16 @@ class Splice:
         self.check_version()
         if opts.scc_precheck:
             self.must("the scc precondition (a Parmys rejection)",
-                      [opts.yosys, "-p", precheck_script(primitives, files)])
+                      [opts.yosys, "-p", precheck_script(primitives or "", files)])
         self.must("odin3 (the Odin III half)",
-                  [opts.odin3, "-p", odin3_script(primitives, files, opts.top)])
+                  [opts.odin3, "-p", odin3_script(None if opts.no_primitives else primitives,
+                                                  files, opts.top, opts.pre)])
         if not (self.work / "a.il").is_file():
             raise SpliceError("odin3 (the Odin III half) wrote no a.il")
-        self.must("Yosys (the Yosys half)", [opts.yosys, "-p", yosys_script(opts.arch, opts.config)])
+        tcl = self.work / YOSYS_TCL
+        script = yosys_script(opts.arch, opts.config)
+        tcl.write_text(f"{TCL_PROLOGUE}\n{script}\n", encoding="utf-8")
+        self.must("Yosys (the Yosys half)", [opts.yosys, "-c", YOSYS_TCL])
         out = self.work / "out.blif"
         if not out.is_file():
             raise SpliceError("Yosys (the Yosys half) wrote no out.blif")
@@ -264,14 +299,19 @@ def parse(argv: Sequence[str] | None, vtr_root: str | None = None) -> Options:
     ap.add_argument("--allow-version", metavar="V", help="accept a Yosys whose -V names V")
     ap.add_argument("--scc-precheck", action="store_true",
                     help="first run Parmys's scc precondition on the source")
+    ap.add_argument("--odin3-pre", action="append", default=[], metavar="CMD",
+                    help="a command at the front of the Odin III half (repeatable)")
+    ap.add_argument("--no-primitives", action="store_true",
+                    help="leave the vtr_primitives.v read out of the Odin III half")
     ap.add_argument("files", nargs="+", type=Path, help="the Verilog files")
     args = ap.parse_args(argv)
     primitives = args.primitives
-    if primitives is None:
+    if primitives is None and (args.scc_precheck or not args.no_primitives):
         primitives = find_primitives(vtr_root)
-    return Options(args.odin3, args.yosys, args.arch, args.top, args.config, args.keep,
-                   primitives, args.mem_cap, args.allow_version, args.scc_precheck,
-                   tuple(path.resolve() for path in args.files))
+    return Options(exe(args.odin3), exe(args.yosys), absolute(args.arch) or args.arch, args.top,
+                   absolute(args.config), args.keep, absolute(primitives),
+                   args.mem_cap, args.allow_version, args.scc_precheck, tuple(args.odin3_pre),
+                   args.no_primitives, tuple(path.resolve() for path in args.files))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

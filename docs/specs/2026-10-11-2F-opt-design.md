@@ -117,10 +117,11 @@ default:  opt_expr X; opt_merge -nomux M
 **Odin III's Phase 2 opt script (mode P).** Odin III runs Parmys's lines in Parmys's order:
 
 ```
-opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt
+opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt; compact
 ```
 
-(`proc` ends with `opt_expr -keepdc`, §4.8.) The opt passes therefore accept modules with
+(`proc` ends with `opt_expr -keepdc`, §4.8. `compact` is not a Parmys line: `opt` never compacts, IR-6
+being unchanged, so the script does, #49.) The opt passes therefore accept modules with
 processes as Yosys's do (2D EL-33 as amended in v4.2, ruling T2): `opt_expr`, `opt_merge`,
 `opt_reduce`, `opt_share` and `opt_dff` treat every `$proc` node as **opaque** (never evaluated,
 merged or deleted; `O` pins drive unknown values, `I` pins read), and `opt_muxtree` and
@@ -170,6 +171,8 @@ parmys -a <arch> -nopass -c <config> <args>; opt -full; techmap; opt -fast
 dffunmap; opt -fast -noff; stat; hierarchy -check -auto-top -purge_lib
 write_blif -true + vcc -false + gnd -undef + unconn -blackbox out.blif
 ```
+
+`tools/opt-check/sp-splice` runs the two halves (§17 #50, #51 for its Tcl spelling and options).
 
 **Why `--top` on one side and `-auto-top` on the other.** 2D elaborates only the modules
 reachable from the top (2D decision 12), and its own automatic top rule differs from Yosys's
@@ -746,6 +749,10 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 46 | merges under a `$pmux` with several selects set change what the 2-state simulator shows (it ORs the selected slices, `pmux_sim`) | the same | OP-13: with several selects set Yosys's `$pmux` is x, so the merge is a refinement under RTLIL semantics (the output goes from partly x to all x: `a + (x x)` spreads x upward, as in Yosys); the simulation test skips such vectors (`test_share_function_kept`). A constant x/z select is never merged; at run time an x select turns a defined bit x as in Yosys |
 | 47 | bitwise cells with signed operands of different widths: the narrower operand is extended by its sign, as the cell does | `opt_share` zero-extends it (`decode_port_signed` says bitwise cells are unsigned) | OP-13: Yosys 0.55 changes the function: `yosys -p "read_rtlil bitwise_signed_widths.il; eval -set a 15 -set b 2 -set c 0 -set s 0 -show y top; opt_share; eval -set a 15 -set b 2 -set c 0 -set s 0 -show y top"` prints `y = 4'1110`, then `4'0010`, and `equiv_opt -assert opt_share` fails (`bitwise_signed_widths.il`, `test_share_function_kept`) |
 | 48 | the group becomes a new node of the lowest-ID member's type (name and attributes copied), the members' `Y` nets are merged into its `Y`, so their wire names follow it | keeps the member of the first mux port, moves it to a fresh wire and leaves the old `Y` wires undriven | names only; a net with a `keep` wire is not merged. Which of two equal candidates leads can differ (§17 #4) |
+| 49 | `opt` never compacts; the Phase 2 script is `opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt; compact` (`tools/opt-check/phase2.script`) | Yosys has no IDs to renumber | IR-6 unchanged (Peter, 2026-10-13, PHASE2 #19); withdraws #39 |
+| 50 | `sp-splice` writes the Yosys half to `yosys.tcl`, after synthesis.tcl's own first line `yosys -import`, and runs `yosys -c yosys.tcl` | `yosys -p` would do | `yosys -import`, which the half contains, exists only in Yosys's Tcl mode; without the first import `plugin` is no Tcl command |
+| 51 | `sp-splice` takes `--odin3-pre CMD` (repeatable) and `--no-primitives`; its `--scc-precheck` runs §3's lines 2a/2b in Yosys spelling (`-nolatches`) | — | with main today, `read_verilog --nomem2reg vtr_primitives.v` alone stops at 2D's `ambiguous_top`, so the hard blocks come from `read_techlib`; how 2H spells that read is for 2H to settle |
+| 52 | `bench_opt` reads its counts from the INFO lines the passes log under `--opt-stats` and groups the rules into families by name prefix (`dff`, `fold`, `eqneq`, ...); `opt_expr`'s per-round setup is timed through the `on_expr_setup` hook of `opt_test.h`; `ODIN3_BENCH_TECHLIB` names the tech library | — | no counters leave a pass call; the hooks and the log are the existing seams |
 
 ## 18. Files, interfaces and data structures (OP-17)
 

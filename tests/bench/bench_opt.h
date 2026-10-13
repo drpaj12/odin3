@@ -22,7 +22,8 @@ enum { BENCH_OPT_LINE = 4096 };
  */
 odin3_status bench_opt_design(odin3_design *design, const char *name, char *buf, size_t cap);
 
-/* Reads one Verilog file (read_verilog --nolatches, untimed) into a fresh design and measures it. */
+/* Reads one Verilog file (read_verilog --nolatches, untimed) into a fresh design and measures it.
+ */
 odin3_status bench_opt_one(const char *path, char *buf, size_t cap);
 
 #endif

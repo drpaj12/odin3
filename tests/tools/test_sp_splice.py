@@ -57,20 +57,23 @@ if "write_rtlil a.il" in sys.argv[-1]:
     open("a.il", "w").write("module \\\\t\\nend\\n")
 """
 
-# The fake yosys logs its argv, answers -V, fails a script that holds FAKE_YOSYS_FAIL_ON, and
+# The fake yosys (-p SCRIPT, or -c FILE: the file's text is logged last) logs its argv, answers
+# -V, fails a script that holds FAKE_YOSYS_FAIL_ON, and
 # writes out.blif for the script that holds write_blif.
 FAKE_YOSYS = """#!{python}
 import json, os, sys
+script = open(sys.argv[2]).read() if sys.argv[1:2] == ["-c"] else sys.argv[-1]
 with open(os.environ["FAKE_LOG"], "a") as log:
-    log.write(json.dumps(["yosys"] + sys.argv[1:]) + "\\n")
+    log.write(json.dumps(["yosys"] + sys.argv[1:] + ([script] if sys.argv[1:2] == ["-c"] else []))
+              + "\\n")
 if sys.argv[1:] == ["-V"]:
     print(os.environ.get("FAKE_YOSYS_VERSION", "{oracle}"))
     sys.exit(0)
 bad = os.environ.get("FAKE_YOSYS_FAIL_ON")
-if bad and bad in sys.argv[-1]:
+if bad and bad in script:
     print("ERROR: yosys boom", file=sys.stderr)
     sys.exit(1)
-if "out.blif" in sys.argv[-1] and os.environ.get("FAKE_NO_BLIF") is None:
+if "out.blif" in script and os.environ.get("FAKE_NO_BLIF") is None:
     open("out.blif", "w").write(".model top\\n.end\\n")
 """
 
@@ -119,7 +122,7 @@ class SpSpliceTest(unittest.TestCase):
 
     def scripts(self) -> list[tuple[str, str]]:
         """(tool, -p script) of every child that ran a script."""
-        return [(c[0], c[-1]) for c in self.calls() if "-p" in c]
+        return [(c[0], c[-1]) for c in self.calls() if "-p" in c or "-c" in c]
 
     def expected_odin3(self) -> str:
         return ODIN3_SCRIPT.replace("/src/a.v", str(self.a)).replace("/src/b.v", str(self.b))
@@ -130,7 +133,8 @@ class SpSpliceTest(unittest.TestCase):
         code, out, err = self.run_tool("--config", "/cfg/c.xml")
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(self.scripts(), [("odin3", self.expected_odin3()),
-                                          ("yosys", YOSYS_SCRIPT)])
+                                          ("yosys", "yosys -import\n" + YOSYS_SCRIPT + "\n")])
+        self.assertEqual(self.calls()[-1][:3], ["yosys", "-c", "yosys.tcl"])
         self.assertEqual(out.strip(), str(self.keep / "out.blif"))
         self.assertTrue((self.keep / "a.il").is_file())
 
@@ -149,6 +153,14 @@ class SpSpliceTest(unittest.TestCase):
         self.assertNotIn("hierarchy --top", yosys)
         self.assertNotIn("hierarchy -top", yosys)
         self.assertIn("hierarchy -check -auto-top -purge_lib", yosys)
+
+    def test_pre_commands_and_no_primitives(self) -> None:
+        code, _, _ = self.run_tool("--odin3-pre", "read_techlib /lib/vtr.o3lib", "--no-primitives",
+                                   "--primitives", "")
+        self.assertEqual(code, 0)
+        expected = ODIN3_SCRIPT.replace("/src/a.v", str(self.a)).replace("/src/b.v", str(self.b))
+        expected = expected.replace("read_verilog --nomem2reg /vtr/prim.v; ", "")
+        self.assertEqual(self.scripts()[0][1], "read_techlib /lib/vtr.o3lib; " + expected)
 
     def test_no_config_leaves_parmys_without_c(self) -> None:
         self.run_tool()

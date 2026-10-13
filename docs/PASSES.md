@@ -48,3 +48,18 @@ values, its `I` pins read); `opt_muxtree` and `opt_clean` skip a module that sti
 The writers `odin3_blif_write`, `odin3_json_write`, `odin3_verilog_write` and `odin3_dot_write`
 also refuse such a design themselves, for callers that bypass the pass manager: `module '<m>' has
 processes; run proc first`, before the path is opened.
+
+**Phase 2 script and S-P** (2F OP-3, spec 2F section 3; `tools/opt-check/`). Odin III's Phase 2 opt
+script is `phase2.script`: `opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt; compact`, Parmys's
+lines 1-4 and 6 in Parmys's order (`proc` ends with `opt_expr -keepdc`, step F). `opt` never
+compacts (IR-6 unchanged, PHASE2 #19): the script's `compact` ends it. `sp-splice` is the 2H splice
+S-P: Odin III runs lines 1-4 and writes RTLIL (`read_verilog --nomem2reg <vtr_primitives.v>;
+read_verilog --nolatches <files>; hierarchy --top <T>; opt_expr; opt_clean; opt -nodffe -nosdff;
+proc; write_rtlil a.il`), then Yosys 0.55 runs the rest of `synthesis.tcl` (`yosys.tcl`, from
+`plugin -i parmys` to `write_blif ... out.blif`) and the path of `out.blif` is printed. Every child
+runs through `memcap.run`; a Yosys other than 0.55 is refused. `rescan-compare` byte-compares
+`opt` with `opt --opt-full-rescan` over the Phase 2 script on a corpus (Release has no dirty-set
+guard, Task 13 review M7). `bench_opt --one FILE` (`tests/bench/bench_opt.c`, Release) prints one
+line of timings, sizes, rewrites and dead objects for the script's opt passes and for `opt -full`,
+and times `opt_expr`'s per-round setup apart; `elab-sweep --bench` drives it. `bench_opt_smoke` is
+registered by 2F Task 19.

@@ -4,10 +4,12 @@
  * compact` (tools/opt-check/phase2.script), then `opt -full` on the result.
  *
  * Usage: bench_opt --one FILE    (elab-sweep --bench passes exactly this, 2D-7a's interface)
+ * A file that instantiates hard blocks (single_port_ram, adder, ...) needs the arch's tech library:
+ * set ODIN3_BENCH_TECHLIB to its .o3lib (elab-sweep --bench does not forward --techlib).
  *
  * It prints ONE line of key=value columns, in 2D's bench_elab style:
- *   - the read and `proc` are untimed; cells, nets and pins (live) after the read (0) and after
- *     the script (1);
+ *   - the read and `proc` are untimed; cells, nets and pins (live) after the read (suffix 0),
+ *     after `proc` (p, the main `opt`'s input) and after the script (1);
  *   - for the script's opt passes (the trio, then the main `opt`; `compact` apart) and, with the
  *     prefix `full_`, for `opt -full`: iterations, the time in total and per sub-pass (`t_expr`
  *     ... `t_clean`), opt_expr's per-round setup (`t_setup`: the invert map, the FF-polarity scan
@@ -38,10 +40,10 @@
 
 enum { N_SUBS = 7, MAX_FAMILIES = 24, FAMILY_LEN = 24, RULE_NAME_LEN = 96, ARGS_LEN = 1100 };
 
-static const char *const k_subs[N_SUBS] = {"opt_expr",   "opt_merge", "opt_muxtree", "opt_reduce",
-                                           "opt_share",  "opt_dff",   "opt_clean"};
-static const char *const k_short[N_SUBS] = {"expr",   "merge", "muxtree", "reduce",
-                                            "share",  "dff",   "clean"};
+static const char *const k_subs[N_SUBS] = {"opt_expr",  "opt_merge", "opt_muxtree", "opt_reduce",
+                                           "opt_share", "opt_dff",   "opt_clean"};
+static const char *const k_short[N_SUBS] = {"expr",  "merge", "muxtree", "reduce",
+                                            "share", "dff",   "clean"};
 
 /* The Phase 2 script's commands, as tools/opt-check/phase2.script (test_sp_splice checks this). */
 static const char *const k_pre[] = {"opt_expr", "opt_clean", "opt -nodffe -nosdff"};
@@ -71,7 +73,7 @@ typedef struct ir_size {
 } ir_size;
 
 typedef struct bench_row {
-    ir_size before, after, peak;
+    ir_size before, proc, after, peak;
     phase script, full;
     double t_compact;
     long rss_proc_kib, rss_peak_kib;
@@ -275,6 +277,7 @@ static odin3_status run_script(odin3_design *design, bench_row *row) {
     }
     st = st == ODIN3_OK ? run_script_pass(design, NULL, k_proc) : st;
     row->rss_proc_kib = max_rss_kib();
+    measure_size(design, &row->proc);
     st = st == ODIN3_OK ? run_script_pass(design, &row->script, k_main) : st;
     measure_size(design, &row->peak);
     double start = now_seconds();
@@ -338,6 +341,7 @@ static bool format_row(const bench_row *row, const char *name, char *buf, size_t
     out_buf out = {buf, cap, 0, false};
     put(&out, "bench_opt file=%s", name);
     put_size(&out, "0", &row->before);
+    put_size(&out, "p", &row->proc);
     put_size(&out, "1", &row->after);
     put_phase(&out, "", &row->script);
     put(&out, " t_compact=%.3f", row->t_compact);
@@ -376,13 +380,18 @@ odin3_status bench_opt_one(const char *path, char *buf, size_t cap) {
         return ODIN3_ERR_NO_MEMORY;
     }
     char args[ARGS_LEN];
+    const char *techlib = getenv("ODIN3_BENCH_TECHLIB"); /* the arch's hard blocks, as elab-sweep */
+    odin3_status st = ODIN3_OK;
+    if (techlib != NULL && techlib[0] != '\0') {
+        st = odin3_design_run_pass(design, "read_techlib", techlib);
+    }
     (void)snprintf(args, sizeof args, "--nolatches %s", path);
-    odin3_status st = odin3_design_run_pass(design, "read_verilog", args);
+    st = st == ODIN3_OK ? odin3_design_run_pass(design, "read_verilog", args) : st;
     if (st == ODIN3_OK) {
         const char *base = strrchr(path, '/');
         st = bench_opt_design(design, base != NULL ? base + 1 : path, buf, cap);
     } else {
-        (void)fprintf(stderr, "bench_opt: read_verilog %s failed: %d\n", path, (int)st);
+        (void)fprintf(stderr, "bench_opt: reading %s failed: %d\n", path, (int)st);
     }
     odin3_design_destroy(design);
     return st;

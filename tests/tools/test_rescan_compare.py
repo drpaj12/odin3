@@ -105,6 +105,13 @@ class RescanCompareTest(unittest.TestCase):
                          ["opt_clean", "opt --opt-full-rescan", "opt_expr -full --opt-full-rescan",
                           "proc"])
 
+    def test_techlib_is_read_first(self) -> None:
+        argv = ["--odin3", str(self.odin3), "--work", str(self.work), "--techlib", "/nolib/v.o3lib",
+                str(self.corpus / "small.v")]
+        self.assertEqual(helpers.run_main(rescan_compare.main, argv)[0], 0)
+        self.assertTrue(all(s.startswith("read_techlib /nolib/v.o3lib; read_verilog --nolatches ")
+                            for s in self.scripts()))
+
     def test_default_script_is_phase2_script(self) -> None:
         text = rescan_compare.DEFAULT_SCRIPT.read_text(encoding="utf-8")
         self.assertEqual("; ".join(rescan_compare.script_commands(text)), SCRIPT)
