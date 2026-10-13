@@ -556,6 +556,12 @@ if(ODIN3_FUZZ)
     target_include_directories(fuzz_abc_script PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(fuzz_abc_script PRIVATE odin3_core odin3_flags)
     target_link_options(fuzz_abc_script PRIVATE -fsanitize=fuzzer)
+    # tests/fuzz/fuzz_opt.c: the opt family's crash fuzzer (2F §20.4, plan Task 18). It builds
+    # word-cell designs through the unit tests' RTLIL reader (proc_build.c).
+    add_executable(fuzz_opt tests/fuzz/fuzz_opt.c tests/unit/proc_build.c)
+    target_include_directories(fuzz_opt PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_opt PRIVATE odin3_core odin3_flags)
+    target_link_options(fuzz_opt PRIVATE -fsanitize=fuzzer)
 endif()
 
 # --- Tests ----------------------------------------------------------------------
@@ -1461,6 +1467,30 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             set_tests_properties(fuzz_abc_script_seed_inputs fuzz_abc_script_smoke PROPERTIES
                                  ENVIRONMENT "${_fuzz_env}")
         endif()
+        # 2F §20.4 (plan Task 18): the opt family. The seeds (opt_fuzz_seeds.py: builder records
+        # of every cell type and the small golden BLIFs, each after a mode byte) run once;
+        # fuzz_opt_smoke fuzzes 10 s with inputs up to 512 bytes (a gate test, not a sweep).
+        set(_fo_seeds ${PROJECT_BINARY_DIR}/fuzz_opt_seeds)
+        set(_fo_corpus ${PROJECT_BINARY_DIR}/fuzz_opt_corpus)
+        file(MAKE_DIRECTORY ${_fo_corpus})
+        add_test(NAME fuzz_opt_seeds
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/opt-check/opt_fuzz_seeds.py
+                    ${_fo_seeds} ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+        set_tests_properties(fuzz_opt_seeds PROPERTIES FIXTURES_SETUP fuzz_opt_seeds LABELS fuzz)
+        add_test(NAME fuzz_opt_seed_inputs
+            COMMAND $<TARGET_FILE:fuzz_opt> -runs=0 -timeout=60 -rss_limit_mb=2048
+                    -print_funcs=0 ${_fo_seeds})
+        add_test(NAME fuzz_opt_smoke
+            COMMAND $<TARGET_FILE:fuzz_opt> -seed=1 -max_total_time=10 -timeout=10
+                    -rss_limit_mb=2048 -max_len=512 -print_funcs=0 -print_final_stats=1
+                    ${_fo_corpus} ${_fo_seeds})
+        set_tests_properties(fuzz_opt_seed_inputs fuzz_opt_smoke PROPERTIES
+                             FIXTURES_REQUIRED fuzz_opt_seeds LABELS fuzz TIMEOUT 600)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_opt_seed_inputs fuzz_opt_smoke PROPERTIES
+                                 ENVIRONMENT "${_fuzz_env}")
+        endif()
+
         odin3_add_sweep_test(fuzz_abc_script_long LABEL sweep
             COMMAND timeout 3h $<TARGET_FILE:fuzz_abc_script> -max_total_time=3600 -timeout=10
                     -rss_limit_mb=2048 -max_len=70000 -print_funcs=0 -print_final_stats=1
