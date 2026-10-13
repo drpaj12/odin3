@@ -25,7 +25,8 @@ MEMINFO_32G = "MemTotal:       33554432 kB\nMemFree:        1000 kB\n"
 PHASE2_SCRIPT = helpers.REPO_ROOT / "tools" / "opt-check" / "phase2.script"
 
 ODIN3_SCRIPT = (
-    "read_techlib /lib/vtr.o3lib; read_verilog --lib --nomem2reg /vtr/prim.v; read_verilog --nolatches /src/a.v /src/b.v; "
+    "read_techlib /lib/vtr.o3lib; read_verilog --lib --nomem2reg /vtr/prim.v; "
+    "read_verilog --nolatches /src/a.v /src/b.v; "
     "hierarchy --top top; opt_expr; opt_clean; opt -nodffe -nosdff; proc; write_rtlil a.il"
 )
 YOSYS_SCRIPT = (
