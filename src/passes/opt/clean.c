@@ -220,6 +220,7 @@ typedef struct clean_state {
 
 static void note_change(clean_state *cs) {
     cs->oc->changed = true;
+    odin3_kit_note_change(cs->oc);
     cs->oc->counts->clean_changes++;
 }
 

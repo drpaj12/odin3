@@ -106,6 +106,8 @@ add_library(odin3_core OBJECT
     src/passes/budget.c
     src/passes/ffinit.c
     src/passes/opt/kit.c
+    src/passes/opt/dirty.c
+    src/passes/opt/opt_loop.c
     src/passes/opt/ff.c
     src/passes/opt/fold.c
     src/passes/opt/expr.c

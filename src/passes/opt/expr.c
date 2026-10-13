@@ -24,6 +24,7 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -418,9 +419,12 @@ static odin3_status visit(odin3_expr_ctx *ec, odin3_node_id node) {
  * order. */
 static odin3_status round_once(odin3_expr_ctx *ec, bool consume_x, bool *loop_logged) {
     ec->consume_x = consume_x;
+    if (!odin3_opt_dirty_pending(ec->oc, consume_x)) {
+        return ODIN3_OK; /* incremental: nothing to look at (nothing changes, nothing is built) */
+    }
     odin3_status st = odin3_kit_invert_map(ec->oc);
     if (st == ODIN3_OK && !ec->oc->opts->noclkinv) {
-        st = odin3_opt_expr_ffpol(ec->oc);
+        st = odin3_opt_expr_ffpol(ec->oc, consume_x);
     }
     odin3_vec order;
     odin3_vec_init(&order, sizeof(odin3_node_id));
@@ -434,7 +438,8 @@ static odin3_status round_once(odin3_expr_ctx *ec, bool consume_x, bool *loop_lo
                   name_text(ec, odin3_module_name(ec->module)));
     }
     for (size_t i = 0; st == ODIN3_OK && i < order.len; i++) {
-        st = visit(ec, *(const odin3_node_id *)odin3_vec_cat(&order, i));
+        odin3_node_id node = *(const odin3_node_id *)odin3_vec_cat(&order, i);
+        st = odin3_opt_dirty_take(ec->oc, node, consume_x) ? visit(ec, node) : st;
     }
     odin3_vec_free(&order);
     return st;
@@ -457,6 +462,29 @@ static odin3_status run_rounds(odin3_expr_ctx *ec) {
             break;
         }
     }
+    return st;
+}
+
+/*
+ * The call reached its fixed point: no node is dirty any more. In a Debug build an incremental
+ * module is first swept in full once, in both kinds of round, and must not change (the dirty set
+ * is exact, spec section 19): a rewrite the incremental rounds missed aborts here, where the
+ * full-rescan comparison of the tests would only show a different result.
+ */
+static odin3_status settle(odin3_expr_ctx *ec) {
+    odin3_status st = ODIN3_OK;
+#ifndef NDEBUG
+    if (odin3_opt_dirty_incremental(ec->oc)) {
+        bool logged = true;
+        odin3_opt_dirty_sweep_all(ec->oc);
+        for (uint32_t phase = 0; st == ODIN3_OK && phase < (ec->keepdc ? 1U : 2U); phase++) {
+            ec->oc->changed = false;
+            st = round_once(ec, phase == 1U, &logged);
+            assert(!ec->oc->changed && "opt_expr: the dirty set missed a rewrite");
+        }
+    }
+#endif
+    odin3_opt_dirty_settle(ec->oc);
     return st;
 }
 
@@ -500,6 +528,7 @@ odin3_status odin3_opt_expr_module(odin3_pass_ctx *ctx, odin3_module *module,
         st = odin3_expr_replace_undriven(&ec);
     }
     st = st == ODIN3_OK ? run_rounds(&ec) : st;
+    st = st == ODIN3_OK ? settle(&ec) : st;
     odin3_arena_destroy(ec.arena);
     odin3_vec_free(&ec.marks);
     odin3_opt_ctx_free(&oc);

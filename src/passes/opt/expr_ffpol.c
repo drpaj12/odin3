@@ -347,7 +347,7 @@ static odin3_status fold_node(odin3_opt_ctx *oc, const pol_type *type, odin3_nod
     return st;
 }
 
-odin3_status odin3_opt_expr_ffpol(odin3_opt_ctx *oc) {
+odin3_status odin3_opt_expr_ffpol(odin3_opt_ctx *oc, bool x_round) {
     pol_table tab;
     table_init(oc->design, &tab);
     odin3_status st = ODIN3_OK;
@@ -358,7 +358,8 @@ odin3_status odin3_opt_expr_ffpol(odin3_opt_ctx *oc) {
         if (odin3_node_live(oc->module, node)) {
             type = table_find(&tab, odin3_node_type(oc->module, node));
         }
-        st = type != NULL ? fold_node(oc, type, node) : ODIN3_OK;
+        st = type != NULL && odin3_opt_dirty_take(oc, node, x_round) ? fold_node(oc, type, node)
+                                                                          : ODIN3_OK;
     }
     return st;
 }

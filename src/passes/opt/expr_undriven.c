@@ -88,6 +88,7 @@ static odin3_status replace_net(odin3_expr_ctx *ec, odin3_net_id net) {
     if (st == ODIN3_OK && init != ODIN3_BIT_X) {
         st = odin3_ffinit_remove(ec->module, net, NULL);
     }
+    odin3_kit_note_net(ec->oc, net);
     st = st == ODIN3_OK ? odin3_net_merge(ec->module, (odin3_net_pair){value, net}) : st;
     if (st == ODIN3_OK) {
         ec->oc->changed = true;

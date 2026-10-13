@@ -47,11 +47,10 @@ static const char *const k_sub_names[ODIN3_OPT_N_SUBS] = {
     "opt_expr", "opt_merge", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff", "opt_clean"};
 
 /*
- * Point (e): the passes that are still stubs. Each later task removes its own line (opt: 13;
- * opt_share: 14).
+ * Point (e): the passes that are still stubs. Each later task removes its own line (opt_share:
+ * 14).
  */
 static const char *const k_stubs[] = {
-    "opt",
     "opt_share",
 };
 
@@ -303,13 +302,13 @@ odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed) {
         return ODIN3_ERR_INVALID_ARG;
     }
     *changed = false;
-    const sub_run_fn run = k_sub_run[req->sub];
-    if (run == NULL) {
-        return stub_status(k_sub_names[req->sub]);
-    }
     const odin3_opt_test_hooks *hooks = odin3_opt_test_hooks_now();
     if (hooks->on_call != NULL) {
         hooks->on_call(hooks->user, k_sub_names[req->sub]);
+    }
+    const sub_run_fn run = k_sub_run[req->sub];
+    if (run == NULL) {
+        return stub_status(k_sub_names[req->sub]);
     }
     odin3_status st = budget_gate(req);
     odin3_strbuf before;
@@ -427,7 +426,7 @@ void odin3_opt_print_stats(const odin3_opt_counts *counts) {
 
 typedef struct pass_desc {
     opt_pass pass;
-    odin3_opt_sub sub; /* ODIN3_OPT_N_SUBS for opt itself (Task 13) */
+    odin3_opt_sub sub; /* ODIN3_OPT_N_SUBS for opt itself (odin3_opt_run) */
 } pass_desc;
 
 static const pass_desc g_desc[P_COUNT] = {
@@ -442,7 +441,7 @@ static odin3_status opt_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin
                                  void *user) {
     const pass_desc *desc = user;
     const char *name = k_pass_names[desc->pass];
-    if (is_stub(name) || desc->sub == ODIN3_OPT_N_SUBS) {
+    if (is_stub(name)) {
         return stub_status(name);
     }
     odin3_opt_args parsed;
@@ -452,9 +451,13 @@ static odin3_status opt_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin
     }
     odin3_opt_counts counts;
     memset(&counts, 0, sizeof counts);
-    bool changed = false;
-    odin3_opt_call_req req = {ctx, design, desc->sub, &parsed.opts, &counts};
-    st = odin3_opt_call(&req, &changed);
+    if (desc->sub == ODIN3_OPT_N_SUBS) { /* opt itself */
+        st = odin3_opt_run(ctx, design, &parsed, &counts);
+    } else {
+        bool changed = false;
+        odin3_opt_call_req req = {ctx, design, desc->sub, &parsed.opts, &counts};
+        st = odin3_opt_call(&req, &changed);
+    }
     if (st == ODIN3_OK && parsed.stats) {
         odin3_opt_print_stats(&counts);
     }

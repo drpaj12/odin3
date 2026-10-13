@@ -282,6 +282,23 @@ typedef struct odin3_opt_call_req {
  */
 odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed);
 
+/*
+ * The `opt` driver (2F spec §3, §12; plan Task 13), Yosys 0.55's loop through odin3_opt_call:
+ * default mode runs `opt_expr X; opt_merge -nomux M`, then `do { opt_muxtree; opt_reduce R;
+ * opt_merge M; [opt_share if -full]; [opt_dff D unless -noff]; opt_clean C; opt_expr X } while
+ * (anything changed)`; -fast runs `do { opt_expr X; opt_merge M; [opt_dff D unless -noff]; if
+ * (opt_dff changed nothing) break; opt_clean C }; opt_clean C`. After the first opt_expr call
+ * opt_expr visits only the nodes the kit marked since (dirty.h), unless args->full_rescan.
+ * At ODIN3_OPT_MAX_ITERATIONS (odin3_opt_limits_now) the loop stops with WARN "opt: module 'm': no
+ * fixed point after K iterations; stopping" per module the last iteration changed, and the call
+ * is still ODIN3_OK. INFO "opt: fixed point after K iterations" or "opt: -fast: done after K
+ * iterations"; counts->iterations gets K. A top-level opt ends with odin3_design_compact (IR-6),
+ * which invalidates module-local IDs held outside the IR. A failing sub-pass ends the run with its
+ * status (the IR valid, no compact). INVALID_ARG (logged) for a NULL argument.
+ */
+odin3_status odin3_opt_run(odin3_pass_ctx *ctx, odin3_design *design, const odin3_opt_args *args,
+                           odin3_opt_counts *counts);
+
 /* odin3_pass_set_opt_snapshot is public (odin3.h); register.c defines it. */
 
 /* --opt-stats: INFO "opt: rule <name> N" per non-zero rule or opt_dff action counter, by name. */
