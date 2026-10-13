@@ -41,8 +41,7 @@ enum {
     OOM_LIMIT = 4000,
     MERGE_OOM_LIMIT = 16000,
     N_WORD = 15,
-    PERSISTENT_STRIDE = 1,
-    SILENT_FF_C = 2
+    PERSISTENT_STRIDE = 1
 };
 
 static char last_error[LOG_TEXT];
@@ -2500,11 +2499,9 @@ static void test_dff_persistent_oom(void) {
     /* a short burst: the undo's own delete fails, later allocations succeed */
     oom_tally tal_w = persistent_sweep(&cfg_w);
     TEST_ASSERT_TRUE(tal_w.failures > 100);
-    /* The silent points are ff.c's shrink_build/shrink_commit, whose cleanup deletes are still
-     * (void) (merged code, outside rules 10-11: left for the owner of ff.c). dff_merge.c's undo
-     * had 27 of them before it reported its own failure. */
-    TEST_ASSERT_TRUE_MESSAGE(tal_w.silent <= SILENT_FF_C,
-                             "a rollback failed without the discard line");
+    /* dff_merge.c's undo had 27 silent points before it reported its own failure; ff.c's
+     * shrink_build/shrink_commit had the last 2. */
+    TEST_ASSERT_TRUE_MESSAGE(tal_w.silent == 0, "a rollback failed without the discard line");
     printf("opt_dff persistent OOM: %ld+%ld failing points (stride %ld), %u+%u invalid IR, all "
            "with the discard line\n",
            tal_a.failures, tal_b.failures, (long)PERSISTENT_STRIDE, tal_a.invalid, tal_b.invalid);

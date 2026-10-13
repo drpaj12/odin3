@@ -1016,8 +1016,11 @@ static odin3_status shrink_build(odin3_opt_ctx *oc, odin3_ffdata *ff, shrink_job
     ff->node = job->old;
     st = st == ODIN3_OK ? odin3_kit_copy_attrs(oc->module, job->old, job->made) : st;
     if (st != ODIN3_OK && odin3_node_valid(job->made) && odin3_node_live(oc->module, job->made)) {
-        (void)odin3_node_delete(oc->module, job->made);
+        odin3_status del = odin3_node_delete(oc->module, job->made);
         job->made = (odin3_node_id){0};
+        if (del != ODIN3_OK) { /* the second driver stays: the design no longer matches */
+            return odin3_kit_half_done(oc, del);
+        }
     }
     return st;
 }
@@ -1028,7 +1031,10 @@ static odin3_status shrink_commit(odin3_opt_ctx *oc, shrink_job *job) {
     odin3_status st = odin3_node_delete(oc->module, job->old);
     if (st != ODIN3_OK) {
         if (odin3_node_valid(job->made) && odin3_node_live(oc->module, job->made)) {
-            (void)odin3_node_delete(oc->module, job->made);
+            odin3_status del = odin3_node_delete(oc->module, job->made);
+            if (del != ODIN3_OK) { /* the second driver stays: the design no longer matches */
+                return odin3_kit_half_done(oc, del);
+            }
         }
         return st;
     }
