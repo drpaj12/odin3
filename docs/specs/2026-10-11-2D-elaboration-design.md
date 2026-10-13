@@ -756,6 +756,9 @@ black boxes): a library unit has a body and is fully elaborated where it is inst
   text the `--lib` read's own defines, macros (a macro an earlier file of that read defined included)
   and include directories produced, never under the later read's (a `` `ifdef `` in a library file
   is decided once, by the read that kept it; PR 2D-7b review I1); a kept unit costs only that parse.
+  **Limitation (re-review):** only a `--lib` read's design files are kept as streams; units it
+  resolves through its own `-v`/`-y` library files are not, and are preprocessed again under the
+  later read's macros. Pass such files to `--lib` directly when their `` `ifdef ``s matter.
 - **Per-unit flags.** The flags of the *supplying* read replace, never add to, the design read's:
   a module defined by a `--lib` read elaborates under that read's `--nolatches` and `--nomem2reg`
   whatever the reading design says, and the design read's flags do not reach it. Stage 1 writes the

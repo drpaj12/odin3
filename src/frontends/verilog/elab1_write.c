@@ -408,7 +408,7 @@ static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
     }
     uint32_t count = w_copy_attrs(wr, at, first, second, ids);
     count += w_unit_attrs(wr, at, ids + count);
-    if (!live(wr)) {
+    if (!live(wr) || count == 0) { /* every attribute was a dropped reserved odin3_lib* one */
         return;
     }
     odin3_status st = odin3_ast_attach(wr->out, at->made, ids, count);
