@@ -110,6 +110,7 @@ static bool mark_room(struct odin3_opt_modstate *mod, const odin3_module *module
         return true;
     }
     size_t want = (size_t)odin3_module_node_end(module) + GROW_SLACK;
+    want = want > 2U * mod->n_bits ? want : 2U * mod->n_bits; /* geometric: few reallocs */
     want = want > (size_t)node.v + 1U ? want : (size_t)node.v + 1U;
     uint8_t *grown = odin3_util_realloc(mod->bits, want);
     if (grown == NULL) {

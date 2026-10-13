@@ -89,28 +89,34 @@ static odin3_status run_steps(loop *lp, const step *steps, size_t n, bool *any) 
     return st;
 }
 
+/* One cap WARN line for a module. */
+static void warn_one(const loop *lp, const odin3_module *module, uint32_t iterations) {
+    odin3_log(
+        ODIN3_LOG_WARN, "opt: module '%s': no fixed point after %" PRIu32 " iterations; stopping",
+        odin3_strtab_get(odin3_design_strtab(lp->design), odin3_module_name(module)), iterations);
+}
+
 /* WARN "opt: module 'm': no fixed point after K iterations; stopping", for each module that the
- * last iteration changed (the last module when the session noticed none). */
+ * last iteration changed (the top module when the session noticed none, else the first). */
 static void warn_cap(const loop *lp, uint32_t iterations) {
     uint32_t end = odin3_design_module_end(lp->design);
     uint32_t warned = 0;
     for (uint32_t id = 1; id < end; id++) {
         const odin3_module *module = odin3_module_get(lp->design, (odin3_module_id){id});
-        if (module == NULL || !odin3_opt_session_module_changed((odin3_module_id){id})) {
-            continue;
+        if (module != NULL && odin3_opt_session_module_changed((odin3_module_id){id})) {
+            warn_one(lp, module, iterations);
+            warned++;
         }
-        odin3_log(ODIN3_LOG_WARN,
-                  "opt: module '%s': no fixed point after %" PRIu32 " iterations; stopping",
-                  odin3_strtab_get(odin3_design_strtab(lp->design), odin3_module_name(module)),
-                  iterations);
-        warned++;
     }
-    if (warned == 0 && end > 1) {
-        const odin3_module *module = odin3_module_get(lp->design, (odin3_module_id){end - 1U});
-        odin3_log(ODIN3_LOG_WARN,
-                  "opt: module '%s': no fixed point after %" PRIu32 " iterations; stopping",
-                  odin3_strtab_get(odin3_design_strtab(lp->design), odin3_module_name(module)),
-                  iterations);
+    if (warned == 0) {
+        odin3_module_id top = odin3_design_top(lp->design);
+        for (uint32_t id = top.v != 0 ? top.v : 1U; id < end && warned == 0; id++) {
+            const odin3_module *module = odin3_module_get(lp->design, (odin3_module_id){id});
+            if (module != NULL) {
+                warn_one(lp, module, iterations);
+                warned++;
+            }
+        }
     }
 }
 

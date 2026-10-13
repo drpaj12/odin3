@@ -598,8 +598,9 @@ static void test_stats_dff(void) {
     "    connect \\S \\s\n    connect \\Y \\y\n  end\nend\n"
 
 /* A constant 3-stage register pipeline: one stage becomes constant per opt_dff call. */
-#define PIPELINE_TEXT                                                                              \
-    "module \\m\n  wire input 1 \\clk\n  wire output 2 \\q1\n  wire output 3 \\q2\n"               \
+#define PIPELINE_TEXT "module \\m\n" PIPELINE_BODY
+#define PIPELINE_BODY                                                                              \
+    "  wire input 1 \\clk\n  wire output 2 \\q1\n  wire output 3 \\q2\n"                           \
     "  wire output 4 \\q3\n"                                                                       \
     "  cell $dff \\f1\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
     "    connect \\CLK \\clk\n    connect \\D 1'0\n    connect \\Q \\q1\n  end\n"                  \
@@ -716,6 +717,35 @@ static void test_loop_pipeline_iterations(void) {
     check_full();
 }
 
+/* Review M4(a): -fast keeps looping while opt_dff changes something (one stage per round). */
+static void test_loop_fast_pipeline(void) {
+    build(PIPELINE_TEXT);
+    record_calls();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-fast"));
+    TEST_ASSERT_EQUAL_STRING(
+        "opt_expr opt_merge opt_dff opt_clean opt_expr opt_merge opt_dff opt_clean"
+        " opt_expr opt_merge opt_dff opt_clean opt_expr opt_merge opt_dff opt_clean",
+        seq);
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: -fast: done after 4 iterations"));
+    expect_pipeline_constant();
+    check_full();
+}
+
+/* Review M4(b): the cap warns once per module that the last iteration changed. */
+static void test_loop_cap_modules(void) {
+    build("module \\m\n" PIPELINE_BODY "module \\n\n" PIPELINE_BODY);
+    odin3_opt_limits limits = {2, ODIN3_OPT_MUXTREE_MAX_EVALS};
+    odin3_opt_test_set_limits(&limits);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_WARN,
+                       "opt: module 'm': no fixed point after 2 iterations; stopping"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_WARN,
+                       "opt: module 'n': no fixed point after 2 iterations; stopping"));
+    check_full();
+}
+
 static void test_loop_cap(void) {
     build(PIPELINE_TEXT);
     odin3_opt_limits limits = {2, ODIN3_OPT_MUXTREE_MAX_EVALS};
@@ -829,6 +859,32 @@ static void test_dirty_chain(void) {
     char *rescan = design_text();
     TEST_ASSERT_NULL(strstr(rescan, "cell $mux"));
     free(rescan);
+}
+
+/*
+ * Review M3: a net merge without a rebuilt survivor. opt_dff ties the Q net of a constant-D
+ * flip-flop to the constant, so the $and that reads q only sees a changed input net; the
+ * incremental opt_expr must still fold it (only odin3_kit_note_net marks the reader). With the
+ * hook disabled this aborts at the settle() cross-check in Debug.
+ */
+#define TIE_TEXT                                                                                   \
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\b\n  wire output 3 \\y\n"                  \
+    "  wire \\q\n"                                                                                 \
+    "  cell $dff \\f1\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D 1'0\n    connect \\Q \\q\n  end\n"                   \
+    "  cell $and \\g\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"                    \
+    "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"            \
+    "    connect \\A \\q\n    connect \\B \\b\n    connect \\Y \\y\n  end\nend\n"
+
+static void test_dirty_tie(void) {
+    build(TIE_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    char *text = design_text();
+    expect_text(text, "cell $dff", false);
+    expect_text(text, "cell $and", false);
+    expect_text(text, "connect \\y 1'0", true);
+    free(text);
+    check_full();
 }
 
 /* The live nodes of the module `m`, and its node-ID end. */
@@ -1083,8 +1139,11 @@ int main(void) {
     RUN_TEST(test_loop_sequences_fast);
     RUN_TEST(test_loop_pipeline_iterations);
     RUN_TEST(test_loop_cap);
+    RUN_TEST(test_loop_fast_pipeline);
+    RUN_TEST(test_loop_cap_modules);
     RUN_TEST(test_dirty_vs_full_rescan);
     RUN_TEST(test_dirty_chain);
+    RUN_TEST(test_dirty_tie);
     RUN_TEST(test_compact_after_opt);
     RUN_TEST(test_opacity_mode_p);
     RUN_TEST(test_opt_after_failed_proc);
