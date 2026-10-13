@@ -161,9 +161,9 @@ def _topo_order(g: _Graph) -> tuple[list[int], list[int], dict[str, int]]:
         order.append(idx)
         lvl = 1 + max((level.get(n, 0) for n in g.cell_ins[idx]), default=-1)
         for net in g.cell_outs[idx]:
-            level[net] = lvl
             if net in g.primary:
-                continue
+                continue  # a source at level 0 whatever order its driver is visited in
+            level[net] = lvl
             for consumer in g.fanout.get(net, []):
                 if _is_comb(cells[consumer]):
                     pending[consumer] -= 1

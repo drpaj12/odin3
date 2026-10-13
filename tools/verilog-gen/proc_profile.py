@@ -47,8 +47,12 @@ class Profile:
 class _Module:
     """One module under construction: ports, regs, processes and the features counted."""
 
-    def __init__(self, seed: int) -> None:
+    def __init__(self, seed: int, twins: bool = False) -> None:
         self.rng = random.Random(seed)
+        # twins: no redraws, so repeated compares and operators (twin cells) stay in (hidden).
+        self.twins = twins
+        self.cond_redraws, self.expr_redraws, self.label_redraws = (
+            (0, 0, 1) if twins else (COND_REDRAWS, EXPR_REDRAWS, LABEL_REDRAWS))
         self.features: set[str] = set()
         self.edge = "negedge" if self.rng.random() < 0.3 else "posedge"
         self.latchy = self.rng.random() < 0.25
@@ -98,7 +102,7 @@ class _Module:
         """An expression whose operator applications are new to the module (equal ones are twin
         cells on both sides; see ``cond``): a repeated one is drawn again, a few times."""
         text = self.draw_expr(depth)
-        for _ in range(EXPR_REDRAWS):
+        for _ in range(self.expr_redraws):
             if text[0] not in "(~" or text not in self.exprs:
                 break
             text = self.draw_expr(depth)
@@ -119,7 +123,7 @@ class _Module:
         """A condition not used before in the module: a repeated compare is a twin cell on both
         sides, and netlist-compare's canonical labelling can tie twins (see ``case_stmt``)."""
         text = self.draw_cond()
-        for _ in range(COND_REDRAWS):
+        for _ in range(self.cond_redraws):
             key = self.compare_key(text)
             if key not in self.compares:
                 self.compares.add(key)
@@ -177,10 +181,10 @@ class _Module:
 
     def fresh_label(self, kind: str) -> str | None:
         """A case item whose compare the module has not used (None after a few redraws)."""
-        for _ in range(LABEL_REDRAWS):
+        for _ in range(self.label_redraws):
             label = self.pattern(kind)
             key = self.label_key(label, kind)
-            if key not in self.compares:
+            if self.twins or key not in self.compares:
                 self.compares.add(key)
                 return label
         return None
@@ -368,8 +372,9 @@ class _Module:
                           *self.mem_decls, *self.body, "endmodule", ""])
 
 
-def generate(seed: int) -> Profile:
-    """The module for seed: its text and the features it used."""
-    module = _Module(seed)
+def generate(seed: int, twins: bool = False) -> Profile:
+    """The module for seed: its text and the features it used.  ``twins`` (a test hook) turns
+    the twin-cell avoidance off."""
+    module = _Module(seed, twins)
     text = module.build()
     return Profile(text, frozenset(module.features))
