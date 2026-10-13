@@ -1,0 +1,5 @@
+# yosys 0.55 (VTR build): read_rtlil aload_always_arst.il; opt_dff -keepdc; write_rtlil
+# input: hand-written (aload_always_arst.il), read unedited by Yosys and by proc_build
+# flags: -keepdc
+cell $mux WIDTH=2
+cell $mux WIDTH=2

@@ -103,4 +103,31 @@ odin3_status odin3_ff_slice(const odin3_ffdata *ff, odin3_ff_bits bits, odin3_ff
  */
 odin3_status odin3_ff_emit(odin3_opt_ctx *oc, odin3_ffdata *ff, odin3_node_id *out);
 
+/*
+ * Yosys ff.remove() + module->connect(Q, src): the live FF node goes, the init of its Q nets with
+ * it, and its Q net k is tied to src[k] (kit_connect: the Q net merged into src[k]; queued
+ * instead under oc->defer_ties). n is the width of its Q port. INVALID_ARG (logged) for a node
+ * that is not a live FF or another n; NO_MEMORY before the delete leaves the IR as it was (the
+ * removed inits written back); kit_connect's half-done failures otherwise.
+ */
+odin3_status odin3_ff_remove_tie(odin3_opt_ctx *oc, odin3_node_id node, const odin3_net_id *src,
+                                 uint32_t n);
+
+/*
+ * Yosys `ff = ff.slice(keep); ff.cell = cell; ff.emit()` plus the `module->connect(q_i, src)` of
+ * the bits it dropped: ff->node is a live FF whose Q nets are sig_q (the bits kept) and the
+ * drops of ties[0 .. n_ties) (the others, once each); ties[i].drop is a Q net given up and
+ * ties[i].keep the net it is tied to (module->connect). The cell ff now describes is made on the
+ * kept Q nets, with the old node's attributes, then the old node goes, the given-up bits have
+ * their init removed and are tied, and the new node takes the old name; *out = the new node, and
+ * ff->node = it. With width 0 left the whole node goes (every Q net tied); with no control left
+ * (see odin3_ff_emit) nothing is made, the kept Q nets are tied to val_init too, and *out = 0.
+ * The new node is built before the old one is touched (a NO_MEMORY up to the old node's delete
+ * leaves the IR as it was, inits written back); under oc->defer_ties the ties are queued. Then
+ * the init writes of odin3_ff_emit. INVALID_ARG (logged "opt: ff_emit_shrunk: ...") for Q nets
+ * that do not split as above.
+ */
+odin3_status odin3_ff_emit_shrunk(odin3_opt_ctx *oc, odin3_ffdata *ff, const odin3_net_pair *ties,
+                                  uint32_t n_ties, odin3_node_id *out);
+
 #endif

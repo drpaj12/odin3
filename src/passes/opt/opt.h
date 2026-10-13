@@ -174,6 +174,67 @@ odin3_status odin3_opt_reduce_run(odin3_pass_ctx *ctx, odin3_design *design,
 odin3_status odin3_opt_muxtree_run(odin3_pass_ctx *ctx, odin3_design *design,
                                    const odin3_opt_opts *opts, odin3_opt_counts *counts);
 
+/* --- 2F Task 11: opt_dff (OP-9) ------------------------------------------------------------- */
+
+/*
+ * opt_dff's per-action counters (plan point (k)), indexed into odin3_opt_counts.dff_action and
+ * named for --opt-stats (register.c's k_dff_names: "opt_dff.<name>"). The first seven families
+ * are spec section 16's <action> patterns with one counter per port; the conversions and the AD = Q
+ * rule have no pattern there and carry their own text (agent default). ADD_SRST and ADD_EN are
+ * Task 12's (rules 10 and 11); the three CONST_BIT counters are constbits' "setting constant <v>
+ * at bit K", one per value.
+ */
+typedef enum odin3_opt_dff_action {
+    ODIN3_OPT_DFF_NEVER_CLR,
+    ODIN3_OPT_DFF_NEVER_SET,
+    ODIN3_OPT_DFF_ALWAYS_CLR,
+    ODIN3_OPT_DFF_ALWAYS_SET,
+    ODIN3_OPT_DFF_CLR_SET_TO_ARST,
+    ODIN3_OPT_DFF_NEVER_ALOAD,
+    ODIN3_OPT_DFF_ALWAYS_ALOAD,
+    ODIN3_OPT_DFF_ALOAD_TO_ARST,
+    ODIN3_OPT_DFF_NEVER_ARST,
+    ODIN3_OPT_DFF_ALWAYS_ARST,
+    ODIN3_OPT_DFF_NEVER_SRST,
+    ODIN3_OPT_DFF_ALWAYS_SRST,
+    ODIN3_OPT_DFF_NEVER_EN,
+    ODIN3_OPT_DFF_ALWAYS_EN,
+    ODIN3_OPT_DFF_CONST_CLK,
+    ODIN3_OPT_DFF_D_EQ_Q,
+    ODIN3_OPT_DFF_AD_EQ_Q,
+    ODIN3_OPT_DFF_ADD_SRST,
+    ODIN3_OPT_DFF_ADD_EN,
+    ODIN3_OPT_DFF_CONST_BIT_0,
+    ODIN3_OPT_DFF_CONST_BIT_1,
+    ODIN3_OPT_DFF_CONST_BIT_X,
+    ODIN3_OPT_DFF_CONST_BIT_Z,
+    ODIN3_OPT_DFF_N_ACTIONS
+} odin3_opt_dff_action;
+
+_Static_assert((uint32_t)ODIN3_OPT_DFF_N_ACTIONS <= (uint32_t)ODIN3_OPT_DFF_MAX_ACTIONS,
+               "every opt_dff action has a counter in odin3_opt_counts");
+
+/*
+ * opt_dff (2F spec section 9.3, Yosys 0.55 opt_dff.cc) over every module of design, in creation
+ * order: a work list of the module's FFs in ID order (rules 10 and 11 of Task 12 push the FFs they
+ * make), rules 1-9 and 12 per FF (width 0; SET/CLR; ALOAD; ARST; SRST; EN; a constant CLK; D =
+ * Q; AD = Q; a changed FF is re-emitted), then constbits (run_constbits without -sat): per bit,
+ * the init, the reset values, the SR constants and a constant D or AD, combined as Yosys's
+ * combine_const (x yields unless opts->keepdc), tie the Q bit to the constant and slice the bit
+ * off. A pin an FF leaves open makes it no candidate (its nets are not known). Q ties are queued
+ * and made at the end of the module's pass, so no rule and no constbits sees a tie of the same
+ * call (plan point (l): Yosys's SigMap is built once per worker; a constant register pipeline
+ * collapses one stage per call). Slices and rebuilds keep the FF's name and attributes. Adds the
+ * changed FFs to counts->dff_changed, the constant bits to counts->dff_const_bits and the
+ * actions to counts->dff_action; logs INFO "opt_dff: N flip-flops changed, M constant bits"
+ * (this call's totals) and a DEBUG line "opt_dff: module 'm': <action> on <type> '<cell>'" per
+ * change. Modules with live $proc nodes are optimised around them. INVALID_ARG (logged) for a
+ * NULL argument; NO_MEMORY, possibly after some FFs were rewritten (the IR stays valid; each
+ * rewrite builds before its first destructive step).
+ */
+odin3_status odin3_opt_dff_run(odin3_pass_ctx *ctx, odin3_design *design,
+                               const odin3_opt_opts *opts, odin3_opt_counts *counts);
+
 /* --- 2F Task 4: registrations, options, the sub-pass call wrapper (OP-12, OP-16) ------------ */
 
 /* A pass's parsed arguments (plan point (c)). */

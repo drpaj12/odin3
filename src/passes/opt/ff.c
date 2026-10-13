@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* --- the FF types ----------------------------------------------------------------------------- */
@@ -544,67 +545,124 @@ static odin3_status emit_check(const odin3_opt_ctx *oc, const odin3_ffdata *ff) 
 
 /* --- ff_emit: Q tied to init ------------------------------------------------------------------ */
 
-/* Writes saved init bits back on the Q nets still live (after a failed tie). */
-static void restore_inits(odin3_opt_ctx *oc, const odin3_ffdata *ff, const odin3_bit *saved) {
-    for (uint32_t i = 0; i < ff->width; i++) {
-        odin3_net_id qnet = net_at(&ff->sig_q, i);
-        if (saved[i] != ODIN3_BIT_X && odin3_net_live(oc->module, qnet)) {
-            (void)odin3_ffinit_set(oc->module, qnet, saved[i]);
+/* Writes saved init bits back on the nets still live (after a failed tie). */
+static void inits_put(odin3_opt_ctx *oc, const odin3_net_id *nets, uint32_t n,
+                      const odin3_bit *saved) {
+    for (uint32_t i = 0; i < n; i++) {
+        if (saved[i] != ODIN3_BIT_X && odin3_net_valid(nets[i]) &&
+            odin3_net_live(oc->module, nets[i])) {
+            (void)odin3_ffinit_set(oc->module, nets[i], saved[i]);
         }
     }
 }
 
-/* A new FF's Q nets merged into the constant nets (Yosys module->connect(sig_q, val_init)). */
-static odin3_status tie_new(odin3_opt_ctx *oc, const odin3_ffdata *ff, const odin3_net_id *src) {
-    for (uint32_t i = 0; i < ff->width; i++) {
-        odin3_net_id qnet = net_at(&ff->sig_q, i);
-        if (!odin3_net_valid(qnet) || !odin3_net_live(oc->module, qnet) || qnet.v == src[i].v) {
-            continue;
-        }
-        odin3_status st = odin3_net_merge(oc->module, (odin3_net_pair){src[i], qnet});
-        if (st != ODIN3_OK) {
-            return st;
-        }
-        oc->changed = true;
-    }
-    return ODIN3_OK;
-}
-
-/* The constant nets of val_init, the inits saved, then removed (Yosys remove()). */
-static odin3_status tie_prepare(odin3_opt_ctx *oc, const odin3_ffdata *ff, odin3_net_id *src,
-                                odin3_bit *saved) {
+/* The inits of nets[0 .. n) saved, then removed (Yosys remove_init). */
+static odin3_status inits_take(odin3_opt_ctx *oc, const odin3_net_id *nets, uint32_t n,
+                               odin3_bit *saved) {
     odin3_status st = ODIN3_OK;
-    for (uint32_t i = 0; st == ODIN3_OK && i < ff->width; i++) {
-        odin3_net_id qnet = net_at(&ff->sig_q, i);
-        saved[i] = odin3_net_valid(qnet) ? odin3_ffinit_get(oc->module, qnet) : ODIN3_BIT_X;
-        st = odin3_opt_const_net(oc, bit_at(&ff->val_init, i), &src[i]);
+    for (uint32_t i = 0; i < n; i++) {
+        saved[i] = odin3_net_valid(nets[i]) ? odin3_ffinit_get(oc->module, nets[i]) : ODIN3_BIT_X;
     }
-    for (uint32_t i = 0; st == ODIN3_OK && i < ff->width; i++) {
-        odin3_net_id qnet = net_at(&ff->sig_q, i);
-        st = odin3_net_valid(qnet) ? odin3_ffinit_remove(oc->module, qnet, NULL) : ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < n; i++) {
+        st = odin3_net_valid(nets[i]) ? odin3_ffinit_remove(oc->module, nets[i], NULL) : ODIN3_OK;
     }
     return st;
 }
 
+/* Nets[k] merged into src[k] (Yosys module->connect(sig_q, src)); queued under defer_ties, whose
+ * room the caller has reserved. */
+static odin3_status tie_nets(odin3_opt_ctx *oc, const odin3_net_id *nets, const odin3_net_id *src,
+                             uint32_t n) {
+    for (uint32_t i = 0; i < n; i++) {
+        if (!odin3_net_valid(nets[i]) || !odin3_net_live(oc->module, nets[i]) ||
+            nets[i].v == src[i].v) {
+            continue;
+        }
+        oc->changed = true;
+        if (oc->defer_ties) {
+            odin3_kit_defer_tie(oc, src[i], nets[i]);
+            continue;
+        }
+        odin3_status st = odin3_net_merge(oc->module, (odin3_net_pair){src[i], nets[i]});
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
+/* The nets of port `port` of node, in a new array of n entries (NULL on NO_MEMORY). */
+static odin3_net_id *port_nets_of(const odin3_opt_ctx *oc, odin3_node_id node, uint32_t port,
+                                  uint32_t *n) {
+    odin3_pinslice pins = odin3_node_port(oc->module, node, port);
+    odin3_net_id *nets = odin3_util_calloc(sizeof *nets * ((size_t)pins.count + 1));
+    *n = pins.count;
+    for (uint32_t k = 0; nets != NULL && k < pins.count; k++) {
+        nets[k] = odin3_pin_net(oc->module, (odin3_pin_id){pins.first.v + k});
+    }
+    return nets;
+}
+
+odin3_status odin3_ff_remove_tie(odin3_opt_ctx *oc, odin3_node_id node, const odin3_net_id *src,
+                                 uint32_t n) {
+    if (oc == NULL || src == NULL || !odin3_node_live(oc->module, node) ||
+        kind_of(oc->design, odin3_node_type(oc->module, node)) == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "opt: ff_remove_tie: no context, sources or live FF");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    uint32_t port = q_port(oc, node);
+    uint32_t width = 0;
+    odin3_net_id *qnets = port_nets_of(oc, node, port, &width);
+    odin3_bit *saved = odin3_util_malloc(sizeof *saved * ((size_t)width + 1));
+    odin3_status st = qnets != NULL && saved != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    if (st == ODIN3_OK && width != n) {
+        odin3_log(ODIN3_LOG_ERROR, "opt: ff_remove_tie: %u sources for %u Q bits", n, width);
+        st = ODIN3_ERR_INVALID_ARG;
+    }
+    st = st == ODIN3_OK ? inits_take(oc, qnets, width, saved) : st;
+    if (st == ODIN3_OK) {
+        odin3_kit_conn conn = {node, port, src, width};
+        st = odin3_kit_connect(oc, &conn);
+    }
+    if (st != ODIN3_OK && qnets != NULL && saved != NULL) {
+        inits_put(oc, qnets, width, saved);
+    }
+    odin3_util_free(qnets);
+    odin3_util_free(saved);
+    return st;
+}
+
+/* A model with no node: its inits removed, its Q nets tied to src (Yosys's new FF, never made). */
+static odin3_status tie_new(odin3_opt_ctx *oc, const odin3_net_id *nets, const odin3_net_id *src,
+                            uint32_t n) {
+    odin3_bit *saved = odin3_util_malloc(sizeof *saved * ((size_t)n + 1));
+    odin3_status st = saved != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    st = st == ODIN3_OK && oc->defer_ties ? odin3_kit_reserve_ties(oc, n) : st;
+    st = st == ODIN3_OK ? inits_take(oc, nets, n, saved) : st;
+    st = st == ODIN3_OK ? tie_nets(oc, nets, src, n) : st;
+    if (st != ODIN3_OK && saved != NULL) {
+        inits_put(oc, nets, n, saved);
+    }
+    odin3_util_free(saved);
+    return st;
+}
+
+/* Yosys emit() with nothing left to build: Q is val_init (x included) on the constant nets. */
 static odin3_status emit_tie(odin3_opt_ctx *oc, odin3_ffdata *ff) {
     odin3_net_id *src = odin3_util_calloc(sizeof *src * ((size_t)ff->width + 1));
-    odin3_bit *saved = odin3_util_malloc(sizeof *saved * ((size_t)ff->width + 1));
-    odin3_status st = src != NULL && saved != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-    st = st == ODIN3_OK ? tie_prepare(oc, ff, src, saved) : st;
-    if (st == ODIN3_OK && ff->node.v != 0) {
-        odin3_kit_conn conn = {ff->node, q_port(oc, ff->node), src, ff->width};
-        st = odin3_kit_connect(oc, &conn);
-    } else if (st == ODIN3_OK) {
-        st = tie_new(oc, ff, src);
+    odin3_status st = src != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    for (uint32_t i = 0; st == ODIN3_OK && i < ff->width; i++) {
+        st = odin3_opt_const_net(oc, bit_at(&ff->val_init, i), &src[i]);
     }
-    if (st != ODIN3_OK && saved != NULL && src != NULL) {
-        restore_inits(oc, ff, saved);
+    if (st == ODIN3_OK && ff->node.v != 0) {
+        st = odin3_ff_remove_tie(oc, ff->node, src, ff->width);
+    } else if (st == ODIN3_OK) {
+        st = tie_new(oc, ff->sig_q.data, src, ff->width);
     }
     if (st == ODIN3_OK) {
         ff->node = (odin3_node_id){0};
     }
     odin3_util_free(src);
-    odin3_util_free(saved);
     return st;
 }
 
@@ -758,6 +816,12 @@ static odin3_status write_inits(odin3_opt_ctx *oc, const odin3_ffdata *ff) {
     return ODIN3_OK;
 }
 
+/* True when nothing is left of ff that makes a cell: no clock, load or set/reset (an async reset
+ * is turned into a load first). */
+static bool no_control(const odin3_ffdata *ff) {
+    return !ff->has_aload && !ff->has_clk && !ff->has_gclk && !ff->has_sr;
+}
+
 odin3_status odin3_ff_emit(odin3_opt_ctx *oc, odin3_ffdata *ff, odin3_node_id *out) {
     if (oc == NULL || ff == NULL || out == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "opt: ff_emit: no context, FF or output");
@@ -768,7 +832,7 @@ odin3_status odin3_ff_emit(odin3_opt_ctx *oc, odin3_ffdata *ff, odin3_node_id *o
     if (st != ODIN3_OK || ff->width == 0) {
         return st;
     }
-    if (!ff->has_aload && !ff->has_clk && !ff->has_gclk && !ff->has_sr) {
+    if (no_control(ff)) {
         if (!ff->has_arst) {
             return emit_tie(oc, ff);
         }
@@ -781,5 +845,242 @@ odin3_status odin3_ff_emit(odin3_opt_ctx *oc, odin3_ffdata *ff, odin3_node_id *o
         ff->node = *out;
         st = write_inits(oc, ff);
     }
+    return st;
+}
+
+/* --- ff_emit_shrunk --------------------------------------------------------------------------- */
+
+/* One emit_shrunk: the old node and its name, and what is tied at the commit (the nets, their
+ * sources, their saved inits), then the new node. */
+typedef struct shrink_job {
+    odin3_node_id old, made;
+    uint32_t name, n_tie;
+    odin3_net_id *nets, *src;
+    odin3_bit *saved;
+    const odin3_net_pair *ties; /* the ties given, n_ties of them */
+    uint32_t n_ties;
+} shrink_job;
+
+static void shrink_free(shrink_job *job) {
+    odin3_util_free(job->nets);
+    odin3_util_free(job->src);
+    odin3_util_free(job->saved);
+}
+
+/* The tie lookup keys are (drop net << NET_KEY_SHIFT | tie index). */
+enum { NET_KEY_SHIFT = 32 };
+
+/* Sorts the uint64 keys of vec ascending (qsort needs a non-NULL base, vec's data may be NULL). */
+static void sort_keys(odin3_vec *keys) {
+    if (keys->len > 1) {
+        qsort(keys->data, keys->len, sizeof(uint64_t), odin3_kit_cmp_u64);
+    }
+}
+
+/* keys = the nets of vec (as ff's sig_q) and of the ties' drops, as sorted uint64 keys. */
+static odin3_status split_keys(const odin3_ffdata *ff, const odin3_net_pair *ties, uint32_t n_ties,
+                               odin3_vec *keys) {
+    odin3_status st = odin3_vec_reserve(keys, (size_t)ff->width + n_ties);
+    for (uint32_t i = 0; st == ODIN3_OK && i < ff->width; i++) {
+        st = odin3_kit_push_u64(keys, net_at(&ff->sig_q, i).v);
+    }
+    for (uint32_t i = 0; st == ODIN3_OK && i < n_ties; i++) {
+        st = odin3_kit_push_u64(keys, ties[i].drop.v);
+    }
+    sort_keys(keys);
+    return st;
+}
+
+/* Every sig_q net is one of node's Q nets and the ties' nets are the others, once each. */
+static odin3_status shrink_partition(const odin3_opt_ctx *oc, const odin3_ffdata *ff,
+                                     const odin3_net_pair *ties, uint32_t n_ties, bool *ok) {
+    uint32_t width = 0;
+    odin3_net_id *qnets = port_nets_of(oc, ff->node, q_port(oc, ff->node), &width);
+    odin3_vec have;
+    odin3_vec want;
+    odin3_vec_init(&have, sizeof(uint64_t));
+    odin3_vec_init(&want, sizeof(uint64_t));
+    odin3_status st = qnets != NULL ? split_keys(ff, ties, n_ties, &have) : ODIN3_ERR_NO_MEMORY;
+    st = st == ODIN3_OK ? odin3_vec_reserve(&want, width) : st;
+    for (uint32_t j = 0; st == ODIN3_OK && j < width; j++) {
+        st = odin3_kit_push_u64(&want, qnets[j].v);
+    }
+    *ok = st == ODIN3_OK && want.len == have.len;
+    if (*ok) {
+        sort_keys(&want);
+    }
+    for (size_t k = 0; *ok && k < want.len; k++) {
+        const uint64_t net = *(const uint64_t *)odin3_vec_cat(&want, k);
+        *ok = net != 0 && net == *(const uint64_t *)odin3_vec_cat(&have, k) &&
+              (k == 0 || net != *(const uint64_t *)odin3_vec_cat(&want, k - 1));
+    }
+    odin3_vec_free(&have);
+    odin3_vec_free(&want);
+    odin3_util_free(qnets);
+    return st;
+}
+
+/* The index of the tie whose drop is net in keys (sorted (drop << 32 | index)), UINT32_MAX if none.
+ */
+static uint32_t find_tie(const odin3_vec *keys, uint32_t net) {
+    size_t lo = 0;
+    size_t hi = keys->len;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2U;
+        uint64_t key = *(const uint64_t *)odin3_vec_cat(keys, mid);
+        if ((key >> NET_KEY_SHIFT) < net) {
+            lo = mid + 1U;
+        } else {
+            hi = mid;
+        }
+    }
+    uint64_t key = lo < keys->len ? *(const uint64_t *)odin3_vec_cat(keys, lo) : 0;
+    return lo < keys->len && (key >> NET_KEY_SHIFT) == net ? (uint32_t)(key & UINT32_MAX)
+                                                           : UINT32_MAX;
+}
+
+/* Width 0 left: the whole node goes, each Q net tied to its source in the ties. */
+static odin3_status shrink_remove(odin3_opt_ctx *oc, const odin3_ffdata *ff,
+                                  const odin3_net_pair *ties, uint32_t n_ties) {
+    uint32_t width = 0;
+    odin3_net_id *qnets = port_nets_of(oc, ff->node, q_port(oc, ff->node), &width);
+    odin3_net_id *src = odin3_util_calloc(sizeof *src * ((size_t)width + 1));
+    odin3_vec keys;
+    odin3_vec_init(&keys, sizeof(uint64_t));
+    odin3_status st =
+        qnets != NULL && src != NULL ? odin3_vec_reserve(&keys, n_ties) : ODIN3_ERR_NO_MEMORY;
+    for (uint32_t i = 0; st == ODIN3_OK && i < n_ties; i++) {
+        st = odin3_kit_push_u64(&keys, ((uint64_t)ties[i].drop.v << NET_KEY_SHIFT) | i);
+    }
+    sort_keys(&keys);
+    for (uint32_t j = 0; st == ODIN3_OK && j < width; j++) {
+        uint32_t at = find_tie(&keys, qnets[j].v);
+        src[j] = at != UINT32_MAX ? ties[at].keep : src[j];
+    }
+    st = st == ODIN3_OK ? odin3_ff_remove_tie(oc, ff->node, src, width) : st;
+    odin3_vec_free(&keys);
+    odin3_util_free(qnets);
+    odin3_util_free(src);
+    return st;
+}
+
+/* The tie list: the ties given, then (when nothing is left to build) sig_q on the constant nets of
+ * val_init. */
+static odin3_status shrink_ties(odin3_opt_ctx *oc, const odin3_ffdata *ff, bool cellless,
+                                shrink_job *job) {
+    uint32_t total = job->n_ties + (cellless ? ff->width : 0);
+    job->nets = odin3_util_calloc(sizeof *job->nets * ((size_t)total + 1));
+    job->src = odin3_util_calloc(sizeof *job->src * ((size_t)total + 1));
+    job->saved = odin3_util_malloc(sizeof *job->saved * ((size_t)total + 1));
+    if (job->nets == NULL || job->src == NULL || job->saved == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t i = 0; i < job->n_ties; i++) {
+        job->nets[i] = job->ties[i].drop;
+        job->src[i] = job->ties[i].keep;
+    }
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && cellless && i < ff->width; i++) {
+        job->nets[job->n_ties + i] = net_at(&ff->sig_q, i);
+        st = odin3_opt_const_net(oc, bit_at(&ff->val_init, i), &job->src[job->n_ties + i]);
+    }
+    job->n_tie = total;
+    return st;
+}
+
+/* The new cell for ff's remaining bits, built on its Q nets while the old node still drives them
+ * (a second driver only until the commit; a failure here removes the cell again). */
+static odin3_status shrink_build(odin3_opt_ctx *oc, odin3_ffdata *ff, shrink_job *job) {
+    odin3_celltype_id type = {0};
+    odin3_status st = emit_type(oc, ff, &type);
+    ff->node = (odin3_node_id){0};
+    st = st == ODIN3_OK ? emit_cell(oc, ff, type, &job->made) : st;
+    ff->node = job->old;
+    st = st == ODIN3_OK ? odin3_kit_copy_attrs(oc->module, job->old, job->made) : st;
+    if (st != ODIN3_OK && odin3_node_valid(job->made) && odin3_node_live(oc->module, job->made)) {
+        (void)odin3_node_delete(oc->module, job->made);
+        job->made = (odin3_node_id){0};
+    }
+    return st;
+}
+
+/* The destructive steps: the old node goes (the one atomic step), the ties are made and the name
+ * moves over. A failure of the first leaves the old node and removes the new one. */
+static odin3_status shrink_commit(odin3_opt_ctx *oc, shrink_job *job) {
+    odin3_status st = odin3_node_delete(oc->module, job->old);
+    if (st != ODIN3_OK) {
+        if (odin3_node_valid(job->made) && odin3_node_live(oc->module, job->made)) {
+            (void)odin3_node_delete(oc->module, job->made);
+        }
+        return st;
+    }
+    oc->changed = true;
+    st = tie_nets(oc, job->nets, job->src, job->n_tie);
+    st = st == ODIN3_OK && job->made.v != 0 && job->name != 0
+             ? odin3_node_rename(oc->module, job->made, job->name)
+             : st;
+    return odin3_kit_half_done(oc, st);
+}
+
+/* INVALID_ARG (logged) unless ff is a live FF node's model whose Q nets split as above. */
+static odin3_status shrink_check(const odin3_opt_ctx *oc, const odin3_ffdata *ff,
+                                 const odin3_net_pair *ties, uint32_t n_ties) {
+    bool ok = oc != NULL && ff != NULL && (n_ties == 0 || ties != NULL) && vectors_ok(ff) &&
+              odin3_node_live(oc->module, ff->node) &&
+              kind_of(oc->design, odin3_node_type(oc->module, ff->node)) != NULL;
+    odin3_status st = ok ? shrink_partition(oc, ff, ties, n_ties, &ok) : ODIN3_OK;
+    if (st == ODIN3_OK && !ok) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "opt: ff_emit_shrunk: bad arguments or Q nets that do not split");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return st;
+}
+
+/* Everything up to the build: the async reset made a load, the tie list, its room, the inits
+ * taken. *cellless: nothing is left that makes a cell. */
+static odin3_status shrink_prepare(odin3_opt_ctx *oc, odin3_ffdata *ff, shrink_job *job,
+                                   bool *cellless) {
+    odin3_status st = ODIN3_OK;
+    if (no_control(ff) && ff->has_arst) {
+        st = arst_to_aload(oc, ff);
+    }
+    *cellless = st == ODIN3_OK && no_control(ff);
+    st = st == ODIN3_OK ? shrink_ties(oc, ff, *cellless, job) : st;
+    st = st == ODIN3_OK && oc->defer_ties ? odin3_kit_reserve_ties(oc, job->n_tie) : st;
+    return st == ODIN3_OK ? inits_take(oc, job->nets, job->n_tie, job->saved) : st;
+}
+
+odin3_status odin3_ff_emit_shrunk(odin3_opt_ctx *oc, odin3_ffdata *ff, const odin3_net_pair *ties,
+                                  uint32_t n_ties, odin3_node_id *out) {
+    if (out != NULL) {
+        *out = (odin3_node_id){0};
+    }
+    odin3_status st = out != NULL ? shrink_check(oc, ff, ties, n_ties) : ODIN3_ERR_INVALID_ARG;
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (ff->width == 0) {
+        return shrink_remove(oc, ff, ties, n_ties);
+    }
+    shrink_job job;
+    memset(&job, 0, sizeof job);
+    job.old = ff->node;
+    job.name = odin3_node_name(oc->module, ff->node);
+    job.ties = ties;
+    job.n_ties = n_ties;
+    bool cellless = false;
+    st = shrink_prepare(oc, ff, &job, &cellless);
+    st = st == ODIN3_OK && !cellless ? shrink_build(oc, ff, &job) : st;
+    st = st == ODIN3_OK ? shrink_commit(oc, &job) : st;
+    if (st != ODIN3_OK && job.saved != NULL && odin3_node_live(oc->module, job.old)) {
+        inits_put(oc, job.nets, job.n_tie, job.saved);
+    }
+    if (st == ODIN3_OK) {
+        ff->node = job.made;
+        *out = job.made;
+        st = job.made.v != 0 ? write_inits(oc, ff) : ODIN3_OK;
+    }
+    shrink_free(&job);
     return st;
 }

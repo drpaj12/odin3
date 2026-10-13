@@ -205,6 +205,7 @@ odin3_status odin3_opt_ctx_init(odin3_opt_ctx *oc, odin3_pass_ctx *pass, odin3_m
     oc->opts = opts;
     odin3_vec_init(&oc->invert, sizeof(odin3_net_id));
     odin3_vec_init(&oc->dirty, sizeof(uint32_t));
+    odin3_vec_init(&oc->ties, sizeof(odin3_net_pair));
     return ODIN3_OK;
 }
 
@@ -214,6 +215,7 @@ void odin3_opt_ctx_free(odin3_opt_ctx *oc) {
     }
     odin3_vec_free(&oc->invert);
     odin3_vec_free(&oc->dirty);
+    odin3_vec_free(&oc->ties);
 }
 
 /* A failure after a rewrite's destructive step: the IR stays valid but may no longer compute what
@@ -228,6 +230,10 @@ static odin3_status half_done(const odin3_opt_ctx *oc, odin3_status st) {
                   odin3_strtab_get(tab, odin3_module_name(oc->module)));
     }
     return st;
+}
+
+odin3_status odin3_kit_half_done(const odin3_opt_ctx *oc, odin3_status st) {
+    return half_done(oc, st);
 }
 
 /* --- constants (OP-2) ----------------------------------------------------------------------- */
@@ -430,6 +436,64 @@ static odin3_status merge_outputs(odin3_opt_ctx *oc, const odin3_kit_conn *conn,
     return ODIN3_OK;
 }
 
+/* --- deferred ties (opt_dff) ------------------------------------------------------------- */
+
+odin3_status odin3_kit_reserve_ties(odin3_opt_ctx *oc, size_t extra) {
+    return odin3_vec_reserve(&oc->ties, oc->ties.len + extra);
+}
+
+void odin3_kit_defer_tie(odin3_opt_ctx *oc, odin3_net_id keep, odin3_net_id drop) {
+    odin3_net_pair *slot = oc->ties.len < oc->ties.cap ? odin3_vec_push(&oc->ties) : NULL;
+    if (slot != NULL) {
+        *slot = (odin3_net_pair){keep, drop};
+    }
+}
+
+/* One queued pair of a flush: merged (recorded in `merged`), or skipped when it merges nothing. */
+static odin3_status flush_one(odin3_opt_ctx *oc, odin3_vec *merged, odin3_net_pair pair) {
+    odin3_net_id drop = resolve(oc->module, merged, pair.drop);
+    odin3_net_id keep = resolve(oc->module, merged, pair.keep);
+    if (!odin3_net_valid(drop) || !odin3_net_valid(keep) || drop.v == keep.v) {
+        return ODIN3_OK;
+    }
+    odin3_status st = odin3_net_merge(oc->module, (odin3_net_pair){keep, drop});
+    odin3_net_pair *slot = st == ODIN3_OK ? odin3_vec_push(merged) : NULL; /* reserved */
+    if (slot != NULL) {
+        *slot = (odin3_net_pair){keep, drop};
+    }
+    return st;
+}
+
+odin3_status odin3_kit_flush_ties(odin3_opt_ctx *oc) {
+    odin3_vec merged;
+    odin3_vec_init(&merged, sizeof(odin3_net_pair));
+    odin3_status st = odin3_vec_reserve(&merged, oc->ties.len + 1);
+    size_t done = 0;
+    while (st == ODIN3_OK && done < oc->ties.len) {
+        st = flush_one(oc, &merged, *(const odin3_net_pair *)odin3_vec_cat(&oc->ties, done));
+        done += st == ODIN3_OK ? 1U : 0U;
+    }
+    odin3_vec_free(&merged);
+    oc->changed = oc->changed || done > 0;
+    size_t left = oc->ties.len - done; /* the failing pair and those after it stay queued */
+    if (done > 0 && left > 0) {
+        memmove(oc->ties.data, (const char *)oc->ties.data + done * sizeof(odin3_net_pair),
+                left * sizeof(odin3_net_pair));
+    }
+    oc->ties.len = left;
+    return st;
+}
+
+/* kit_connect's queueing path: the pairs (src[k], the output net) after the delete. */
+static void defer_outputs(odin3_opt_ctx *oc, const odin3_kit_conn *conn,
+                          const odin3_net_id *ynets) {
+    for (uint32_t k = 0; k < conn->width; k++) {
+        if (odin3_net_valid(ynets[k])) {
+            odin3_kit_defer_tie(oc, conn->src[k], ynets[k]);
+        }
+    }
+}
+
 odin3_status odin3_kit_connect(odin3_opt_ctx *oc, const odin3_kit_conn *conn) {
     if (oc == NULL || conn == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "opt: kit_connect: no context or request");
@@ -444,11 +508,15 @@ odin3_status odin3_kit_connect(odin3_opt_ctx *oc, const odin3_kit_conn *conn) {
     odin3_vec merged;
     odin3_vec_init(&merged, sizeof(odin3_net_pair));
     st = ynets != NULL ? odin3_vec_reserve(&merged, (size_t)conn->width + 1) : ODIN3_ERR_NO_MEMORY;
+    st = st == ODIN3_OK && oc->defer_ties ? odin3_kit_reserve_ties(oc, conn->width) : st;
     for (uint32_t k = 0; st == ODIN3_OK && k < conn->width; k++) {
         ynets[k] = odin3_pin_net(oc->module, (odin3_pin_id){pins.first.v + k});
     }
     st = st == ODIN3_OK ? odin3_node_delete(oc->module, conn->node) : st;
-    if (st == ODIN3_OK) {
+    if (st == ODIN3_OK && oc->defer_ties) {
+        oc->changed = true;
+        defer_outputs(oc, conn, ynets);
+    } else if (st == ODIN3_OK) {
         oc->changed = true;
         st = half_done(oc, merge_outputs(oc, conn, ynets, &merged));
     }

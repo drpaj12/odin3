@@ -1,0 +1,9 @@
+# yosys 0.55 (VTR build): read_rtlil aload_always_sr.il; opt_dff -keepdc; write_rtlil
+# input: hand-written (aload_always_sr.il), read unedited by Yosys and by proc_build
+# flags: -keepdc
+cell $and A_SIGNED=0 A_WIDTH=2 B_SIGNED=0 B_WIDTH=2 Y_WIDTH=2
+cell $and A_SIGNED=0 A_WIDTH=2 B_SIGNED=0 B_WIDTH=2 Y_WIDTH=2
+cell $not A_SIGNED=0 A_WIDTH=2 Y_WIDTH=2
+cell $not A_SIGNED=0 A_WIDTH=2 Y_WIDTH=2
+cell $or A_SIGNED=0 A_WIDTH=2 B_SIGNED=0 B_WIDTH=2 Y_WIDTH=2
+cell $or A_SIGNED=0 A_WIDTH=2 B_SIGNED=0 B_WIDTH=2 Y_WIDTH=2
