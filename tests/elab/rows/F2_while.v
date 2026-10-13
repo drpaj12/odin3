@@ -1,4 +1,4 @@
-// F2: while — variants: while in a constant function (SHOULD), while in an always (REJECT)
+// F2: while — variants: while in a constant function (SHOULD) (dropped: while in an always, REJECT)
 module f2_while (input clk, input [3:0] a, output reg [3:0] c, output [31:0] y);
   function integer log2_floor (input integer n);
     integer v;

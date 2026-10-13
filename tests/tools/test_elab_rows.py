@@ -217,7 +217,8 @@ class ElabCheckTest(unittest.TestCase):
         plain.write_text(text, encoding="utf-8")
         self.assertEqual(run_check("--write", str(plain)).returncode, 1)
         marked = self.dir / "Z4_bb.v"
-        marked.write_text("// Z4: row header\n// elab-check: --auto-blackbox\n" + text, encoding="utf-8")
+        head = "// Z4: row header\n// elab-check: --auto-blackbox\n"
+        marked.write_text(head + text, encoding="utf-8")
         self.assertEqual(run_check("--write", str(marked)).returncode, 0)
         self.assertEqual(run_check(str(marked)).returncode, 0)
 

@@ -1,5 +1,5 @@
 # hand-written
-# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+# seeded by elab-check --write; regression lock; Yosys-equivalent; key fields hand-checked 2026-10-13
 (UNIT:t18_block_decls @T18_block_declarations.v:2:1
   (MODULE:t18_block_decls @T18_block_declarations.v:2:1
     _

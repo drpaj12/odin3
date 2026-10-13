@@ -1,5 +1,5 @@
 # hand-written
-# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+# seeded by elab-check --write; regression lock; Yosys-equivalent
 (UNIT:k10_task_no_args @K10_task_without_arguments.v:2:1
   (MODULE:k10_task_no_args @K10_task_without_arguments.v:2:1
     _

@@ -1,5 +1,5 @@
 # hand-written
-# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+# seeded by elab-check --write; regression lock; Yosys-equivalent
 (UNIT:n10_scalar_array @N10_scalar_arrays.v:2:1
   (MODULE:n10_scalar_array @N10_scalar_arrays.v:2:1
     _

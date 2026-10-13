@@ -2,8 +2,9 @@
 
 Each row of rows.txt runs through the bridge (spec 14.3) with the same Yosys 0.55 on both sides,
 except the rows with more than one clock, which rely on their goldens (spec 14.2), and the rows
-listed in equiv_expect_fail.txt (`<row> [needle] <reason>`), which must still fail with the needle in the bridge's output: a
-listed row that now passes is reported as stale, one that fails differently as unexpected. Exit 0 every row as expected, 1 an unexpected result, 2 a usage or I/O
+listed in equiv_expect_fail.txt (`<row> [needle] <reason>`), which must still fail with the needle
+in the bridge's output: a listed row that now passes is reported as stale, one that fails
+differently as unexpected. Exit 0 every row as expected, 1 an unexpected result, 2 a usage or I/O
 error, 77 the bridge skipped (no memory cap possible).
 """
 

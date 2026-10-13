@@ -1870,6 +1870,7 @@ CTest `elab_proc_bridge_smoke`: `elab-equiv` on the T7, T8 and `q + 1` sources �
 - Create `tests/elab/rows/<row>_<slug>.v` for the 125 MUST and SHOULD rows, each starting `// <row>: <construct> — variants: …` and derived from 2C's coverage file minus its parse-only variants.
 - Create `tests/elab/rows/<row>.elab`:
   - The 54 rows of §14.2's list (point (z)) are hand-written, first line `# hand-written`: M1, M2, M12, P1–P6, P8, N2, N7–N13, E8, E9, E12, E15, E16, E22, E23, G1–G7, C4–C9, T7, T18, F1, K1–K11, I3, I6.
+  - Controller ruling (Task 25 review I2, 2026-10-13): the 54 goldens stay seeded from `--write` and are accepted as regression locks, not independent derivations. Line 2 reads `# seeded by elab-check --write; regression lock; Yosys-equivalent[; key fields hand-checked <date>]`; the 19 PARAM_DECL/GEN_BLOCK rows were hand-checked (`task-25-golden-check.md`). Full independent derivation of the stage-1 content stays owed (Task 28 / PR 2D-7 close). Peter may override.
   - Drafts written while 2D-3 is in review are provisional. Each is re-derived once against point (bb) and Task 15's tests after 2D-4 merges, and frozen in its own commit (review I8).
   - The rest are generated with `--write` and reviewed once in the diff.
 - Create `tests/elab/rows/<row>.il` (default mode) and `<row>.nolatches.il` for every `comb=1` row.

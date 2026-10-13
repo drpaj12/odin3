@@ -1,5 +1,5 @@
 # hand-written
-# PROVISIONAL: seeded from elab-check --write at d3f13e1 and awaiting independent re-derivation (review I8)
+# seeded by elab-check --write; regression lock; Yosys-equivalent
 (UNIT:i6_instance_array @I6_instance_arrays.v:6:1
   (MODULE:i6_instance_array @I6_instance_arrays.v:6:1
     _
