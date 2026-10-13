@@ -2109,6 +2109,14 @@ def compare_format(binary: str, case_dir: Path, fmt: str, exp: dict[str, Any],
 ELAB_CHECK_DIR = REPO_ROOT / "tools" / "elab-check"
 BRIDGE_CAP = 4 << 30  # plan point (n): 4 GiB per child by default
 EQUIV_TIMEOUT = 10  # seconds of ABC per comparison: a multiplier's cec does not finish
+# Cases whose comparison is known to run into EQUIV_TIMEOUT (a multiplier ABC cannot decide): the
+# bridge skips them up front with this reason instead of waiting EQUIV_TIMEOUT s each (2D Task 26
+# review M5). Their front end is still checked by the non-bridge compare.
+ABC_LIMIT_CASES = {
+    "odin2_arch": "multiplier netlist beyond the ABC limit",
+    "qsf_mapping": "multiplier netlist beyond the ABC limit",
+    "o3proj_arch_rules": "multiplier netlist beyond the ABC limit",
+}
 
 
 @dataclass(frozen=True)
@@ -2201,6 +2209,9 @@ def frontend_equiv(binary: str, case_dir: Path, fmt: str, exp: dict[str, Any],
                    bridge: Bridge) -> tuple[str, list[str]]:
     """("ok" | "FAIL" | "drift" | "crash" | "skip", problems) for one format of one positive case:
     odin3's elaboration of the project, through the shared Yosys back end, against ref.blif."""
+    if case_dir.name in ABC_LIMIT_CASES:
+        return "skip", [f"known beyond the ABC limit ({ABC_LIMIT_CASES[case_dir.name]}); "
+                        "not compared"]
     elab_equiv, memcap = elab_tools()
     entry = os.path.abspath(entry_of(case_dir, fmt, exp))
     top = str(exp["resolved"]["top"]).split(".")[-1]

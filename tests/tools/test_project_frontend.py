@@ -159,6 +159,15 @@ class FrontendBridgeTest(unittest.TestCase):
         self.assertIn("equiv-check timed out after 30 s", out)
         self.assertIn("bridge 0 ok, 0 failed, 0 oracle drift, 0 oracle crash, 1 skipped", out)
 
+    def test_a_listed_abc_limit_case_is_skipped_without_running_anything(self) -> None:
+        with mock.patch.dict(pf.ABC_LIMIT_CASES, {"pos": "a big multiplier"}):
+            code, out = self.compare(env={"FAKE_EQUIV_TIMEOUT": "1", "FAKE_A_BLIF": "OTHER"})
+        self.assertEqual(code, 0, out)
+        self.assertIn("skip   pos o3proj (bridge)", out)
+        self.assertIn("known beyond the ABC limit (a big multiplier)", out)
+        self.assertNotIn("timed out", out)
+        self.assertIn("bridge 0 ok, 0 failed, 0 oracle drift, 0 oracle crash, 1 skipped", out)
+
     def test_a_front_end_negative_of_a_later_phase_is_skipped(self) -> None:
         neg = self.root / "neg_cycle"
         neg.mkdir()
