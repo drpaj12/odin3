@@ -3,7 +3,8 @@
 Usage::
 
     opt-diff --odin3 O --yosys Y [--top T] [--script S]... [--expect F] [--root R] [--techlib L]
-             [--netlist-compare N] [--mem-cap C] [--work DIR] [--verbose] FILE...
+             [--netlist-compare N] [--mem-cap C] [--work DIR] [--no-refine]
+             [--refine-timeout S] [--verbose] FILE...
 
 For each ``S`` (default ``phase2``; ``phase2``, ``phase3`` (Phase 2's lines then ``wreduce;
 opt_clean; opt -full``), ``wreduce``, ``opt -full``, ``opt -fast``, ``opt -fast -noff``,
@@ -229,10 +230,11 @@ class Diff:
                 (run_dir / "yosys.il").read_text(encoding="utf-8"), opt_rules.WORD_ARITH_TYPES)
             if widths:
                 result.differences["widths"] = widths
-        ok, reason = self.checker.refines(run_dir / "yosys.il", run_dir / "odin.il",
-                                          f"{result.script.slug}.refine")
-        if not ok:
-            result.differences["refine"] = reason
+        if not self.args.no_refine:  # --no-refine: the SAT step times out on the big designs
+            ok, reason = self.checker.refines(run_dir / "yosys.il", run_dir / "odin.il",
+                                              f"{result.script.slug}.refine")
+            if not ok:
+                result.differences["refine"] = reason
         ident = self.identity(run_dir)
         if ident:
             result.differences["identity"] = ident
@@ -320,6 +322,10 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--mem-cap", type=opt_equiv.parse_size, default=DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 2G)")
     ap.add_argument("--work", type=Path, help="the work directory (kept)")
+    ap.add_argument("--no-refine", action="store_true",
+                    help="leave the refinement step out (it times out on the large designs)")
+    ap.add_argument("--refine-timeout", type=float, default=opt_equiv.REFINE_TIMEOUT_SECONDS,
+                    metavar="S", help="seconds for one refinement proof (default 60)")
     ap.add_argument("--verbose", action="store_true", help="print the counters of every design")
     ap.add_argument("files", nargs="+", help="the Verilog files of one design")
     return ap.parse_args(argv)
@@ -340,6 +346,7 @@ def execute(args: argparse.Namespace, work: Path) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
+    opt_equiv.REFINE_TIMEOUT_SECONDS = args.refine_timeout
     made = args.work is None
     work = Path(tempfile.mkdtemp(prefix="opt-diff-")) if made else args.work
     work.mkdir(parents=True, exist_ok=True)

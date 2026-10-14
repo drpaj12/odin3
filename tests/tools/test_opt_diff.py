@@ -246,6 +246,11 @@ class RunTest(unittest.TestCase):
         self.assertIn("-p read_techlib ", self.tree.log("odin.log")[0])
         self.assertIn("x.o3lib; read_verilog --nolatches ", self.tree.log("odin.log")[0])
 
+    def test_no_refine_leaves_the_proof_out(self) -> None:
+        code, out, _ = self.tree.run("--no-refine")
+        self.assertEqual(code, 0, out)
+        self.assertFalse(any("equiv_make" in line for line in self.tree.log("yosys.log")))
+
     def test_default_script_is_phase2(self) -> None:
         code, out, _ = self.tree.run()
         self.assertEqual(code, 0)
