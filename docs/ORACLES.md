@@ -53,6 +53,8 @@ Recorded 2026-10-08 (Phase 0 §4).
   (`:`-separated, relative to `$VTR_ROOT`) and `defines=` (space-separated), and writes neither line when
   the option is absent. Only use a value from the design's own parent file or its VTR task config; for
   the `.generic` templates, which only `.vh` wrappers instantiate, there is none (`tests/exit/micro_nogolden.txt`).
+  `exit-check` reads `defines=` from a golden's `.prov` and gives Odin III the same macros (a `+define+` file
+  list through `sp-splice --odin3-pre`); a header beside the design needs nothing there.
 - **The VTR pin check.** `tools/vtr-qor/vtr-qor doctor` checks that `$VTR_ROOT` is at the commit
   in the table above and has no modified tracked files
   (`git status --porcelain --untracked-files=no`). `vtr-qor run` refuses either case (E-QH2),
