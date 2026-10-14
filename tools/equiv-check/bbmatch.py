@@ -285,17 +285,19 @@ def refine(covers: Sequence[_Cover], order: Sequence[_Cover], latches: Sequence[
 
 def signatures(names: Sequence[blif.Names], latches: Sequence[blif.Latch],
                inputs: Sequence[str], boxes: Sequence[BoxSpec],
-               pi_key: Callable[[str], str]) -> list[Signature]:
+               pi_key: Callable[[str], str], structure: bool = True) -> list[Signature]:
     """The signature of each of ``boxes``, from simulating the flat netlist ``names``/``latches``.
 
     ``inputs`` are the flat primary inputs (the boxes' free output nets included); ``pi_key``
-    names a primary input in the way both netlists share.  Raises SimError on a loop."""
+    names a primary input in the way both netlists share.  ``structure`` False skips the colour
+    refinement (every ``Signature.struct`` is 0).  Raises SimError on a loop."""
     covers = [_compile(c) for c in names]
     free = {net for box in boxes for _, net in box.outputs}
     pis = [n for n in inputs if n not in free]
     order = _topological(covers, set(pis) | free | {lat.output for lat in latches})
     digests = _digests(covers, order, latches, pis, boxes, pi_key)
-    colours = refine(covers, order, latches, pis, boxes, pi_key)
+    colours = (refine(covers, order, latches, pis, boxes, pi_key) if structure
+               else [0] * len(boxes))
     canon = canonical_drivers(names)
     return [Signature(d, tuple(canon(net) for _, net in box.inputs), c)
             for box, d, c in zip(boxes, digests, colours, strict=True)]

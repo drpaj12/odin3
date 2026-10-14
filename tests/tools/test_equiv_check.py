@@ -464,6 +464,79 @@ class BlackBoxCutAbcTest(unittest.TestCase):
         self.assertIn("(abc dsec)", out)
 
 
+@needs_abc
+class DualPortOrientTest(unittest.TestCase):
+    """--match-unnamed turns every unnamed dual_port_ram to one port order: Parmys lists the two
+    ports in hash-table order, so the same memory can come out with ports 1 and 2 exchanged
+    (micros common/2r2w and syntax/inferred_DPram, 2H sweep of 2026-10-14)."""
+
+    HEAD = ".model t\n.inputs clk a b da db wa wb\n.outputs qa qb\n"
+
+    def ram(self, swap: bool = False, cross_data: bool = False, invert: bool = False) -> str:
+        """Port 1 = (a, da, wa), port 2 = (b, db, wb); ``swap`` lists them the other way round
+        (and reads the outputs the other way round); ``cross_data`` and ``invert`` are different
+        designs."""
+        ports = [("a", "da", "wa"), ("b", "db", "wb")]
+        if cross_data:
+            ports = [("a", "db", "wa"), ("b", "da", "wb")]
+        if swap:
+            ports.reverse()
+        (a1, d1, w1), (a2, d2, w2) = ports
+        return (self.HEAD
+                + f".gate dual_port_ram addr1[0]={a1} addr2[0]={a2} clk=clk data1[0]={d1} "
+                f"data2[0]={d2} out1[0]=dual_port_ram^MEM~1-0^out1~0 "
+                f"out2[0]=dual_port_ram^MEM~1-0^out2~1 we1={w1} we2={w2}\n"
+                + f".names dual_port_ram^MEM~1-0^out1~0 {'qb' if swap else 'qa'}\n"
+                f"{'0' if invert else '1'} 1\n"
+                f".names dual_port_ram^MEM~1-0^out2~1 {'qa' if swap else 'qb'}\n1 1\n"
+                + ".end\n")
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def run_check(self, text_a: str, text_b: str, *flags: str) -> tuple[int, str, str]:
+        assert ABC is not None
+        paths = []
+        for name, text in (("a.blif", text_a), ("b.blif", text_b)):
+            path = Path(self.tmp.name) / name
+            path.write_text(text, encoding="utf-8")
+            paths.append(str(path))
+        return check("--match-unnamed", "--abc", ABC, *flags, *paths)
+
+    def test_swap_pin_exchanges_the_ports_and_keeps_the_clock(self) -> None:
+        self.assertEqual(equiv_check._swap_pin("addr1[3]"), "addr2[3]")
+        self.assertEqual(equiv_check._swap_pin("out2"), "out1")
+        self.assertEqual(equiv_check._swap_pin("we1"), "we2")
+        self.assertEqual(equiv_check._swap_pin("clk"), "clk")
+
+    def test_the_same_memory_with_its_ports_exchanged_is_equivalent(self) -> None:
+        code, out, err = self.run_check(self.ram(), self.ram(swap=True))
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("dual_port_ram instance(s) turned", err)
+
+    def test_the_same_orientation_needs_no_turn(self) -> None:
+        code, out, err = self.run_check(self.ram(), self.ram())
+        self.assertEqual(code, 0, out + err)
+
+    def test_exchanged_ports_do_not_pair_without_the_orientation(self) -> None:
+        code, _, err = self.run_check(self.ram(), self.ram(swap=True), "--no-dual-orient")
+        self.assertEqual(code, 2, err)
+        self.assertIn("cannot be matched one-to-one", err)
+
+    def test_data_crossed_between_the_ports_is_never_equivalent(self) -> None:
+        """Turning the ports must not hide a real difference: B writes port 1's data to port 2's
+        address.  The RAM then has no partner (its input functions differ): exit 2."""
+        code, out, err = self.run_check(self.ram(), self.ram(swap=True, cross_data=True))
+        self.assertNotEqual(code, 0, out + err)
+        self.assertNotIn("equivalent (abc", out)
+
+    def test_a_difference_behind_a_turned_ram_is_not_equivalent(self) -> None:
+        code, out, err = self.run_check(self.ram(), self.ram(swap=True, invert=True))
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("NOT equivalent", out)
+
+
 X_HEAD = ".model t\n.inputs a b\n.outputs o p\n"
 X_P = ".names a b p\n11 1\n.end\n"
 

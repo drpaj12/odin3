@@ -97,6 +97,14 @@ guess may be at fault, so the result is "inconclusive" (exit 4, unproven) and no
 (a failure outside the guesses, an x-cone result and an equivalence are all still verdicts).  As
 before, a box's internal behaviour is assumed, not checked (RAM contents, initial state).
 
+Dual-port RAMs (2H, micro sweep of 2026-10-14).  Parmys numbers the ports of a ``dual_port_ram`` in
+a hash-table order, so the same memory can come out with ports 1 and 2 exchanged.  Before any
+pairing, ``--match-unnamed`` turns every unnamed ``dual_port_ram`` of both netlists to one
+canonical orientation (``orient_dual_ports``: the port whose address, data and write-enable
+history is smaller becomes port 1).  The two ports are taken as interchangeable, the same kind of
+assumption as the RAM contents: a design that differs only in which port wins a same-address
+write is called equivalent (``--no-dual-orient`` turns this off).
+
 ABC models every latch as a flip-flop on one implicit clock, so each file must use a single
 (edge type, clock) pair -- the clock being a primary input, possibly through buffers -- and
 both files must use the same pair (else exit 1).  Level-sensitive (ah/al) and asynchronous
@@ -744,6 +752,111 @@ def pair_unnamed(flats: Sequence[Flat], normalize: bool = True) -> tuple[int, in
     return len(match.pairs), match.guessed
 
 
+# --------------------------------------------------------------------------- dual-port orientation
+
+DUAL_PORT_RAM = "dual_port_ram"
+_DPR_PIN = re.compile(r"(addr|data|we|out)([12])((?:\[\d+\])?)")
+
+
+def _swap_pin(formal: str) -> str:
+    """``addr1[3]`` -> ``addr2[3]`` and back; any other pin (``clk``) is its own partner."""
+    match = _DPR_PIN.fullmatch(formal)
+    if match is None:
+        return formal
+    return f"{match.group(1)}{3 - int(match.group(2))}{match.group(3)}"
+
+
+def _port_spec(box: BlackBox, port: int) -> bbmatch.BoxSpec:
+    """One port of a dual-port RAM as a box with no outputs: the input pins of that port under
+    port-neutral names, so that the history digests of port 1 and of port 2 compare."""
+    pins: list[tuple[str, str]] = []
+    for formal, net in box.inputs.items():
+        match = _DPR_PIN.fullmatch(formal)
+        if match is not None and match.group(2) == str(port):
+            pins.append((match.group(1) + match.group(3), net))
+    pins.sort(key=lambda pin: _formal_order(pin[0]))
+    return bbmatch.BoxSpec(f"{box.cell_type}-port", (), None, tuple(pins), ())
+
+
+def _swap_ports(flat: Flat, box: BlackBox) -> None:
+    """Exchange ports 1 and 2 of a dual-port RAM cut box: every pin takes its partner's name, and
+    the free output and probe nets, which are named after the pin, are renamed with it."""
+    nets: dict[str, str] = {}
+    for table, prefix in ((box.free, "bbout"), (box.probes, "bbin")):
+        for formal, net in table.items():
+            nets[net] = f"{prefix}:{box.cell_type}:{box.key}:{_swap_pin(formal)}"
+    box.inputs = {_swap_pin(f): n for f, n in box.inputs.items()}
+    box.outputs = {_swap_pin(f): n for f, n in box.outputs.items()}
+    box.free = {_swap_pin(f): nets[n] for f, n in box.free.items()}
+    box.probes = {_swap_pin(f): nets[n] for f, n in box.probes.items()}
+    _rename_nets(flat, nets)
+
+
+def _orient_specs(flat: Flat, boxes: Sequence[BlackBox]) -> list[bbmatch.BoxSpec]:
+    """The simulator's view for orienting: every cut box drives its outputs with a vector that
+    depends on its cell type and the *neutral* name of the pin only (``out1`` and ``out2`` of a
+    dual-port RAM get one vector), never on its inputs or its port order, so that a swap of one
+    RAM changes nothing the simulation sees; then each port of ``boxes`` as a box of its own."""
+    specs = []
+    for box in flat.blackboxes:
+        pins = tuple((_DPR_PIN.sub(r"\1\3", f) if box.cell_type == DUAL_PORT_RAM else f, n)
+                     for f, n in sorted(box.free.items(), key=lambda kv: _formal_order(kv[0])))
+        specs.append(bbmatch.BoxSpec(box.cell_type, (), "orient", (), pins))
+    return specs + [_port_spec(b, port) for b in boxes for port in (1, 2)]
+
+
+def _orient_flat(flat: Flat, normalize: bool) -> int:
+    """Orient the unnamed dual-port RAMs of ``flat``: every one whose port-1 history digest is
+    above its port-2 digest is swapped; returns how many."""
+    boxes = [b for b in flat.blackboxes if b.anon and b.cell_type == DUAL_PORT_RAM]
+    if not boxes:
+        return 0
+
+    def pi_key(net: str) -> str:
+        return normalize_io_name(net, flat.top) if normalize else net
+
+    specs = _orient_specs(flat, boxes)
+    try:
+        sigs = bbmatch.signatures(flat.names, flat.latches, flat.inputs, specs, pi_key,
+                                  structure=False)
+    except bbmatch.SimError as exc:
+        raise EquivError(f"{flat.path}: cannot simulate the netlist to orient dual-port RAMs: "
+                         f"{exc}") from exc
+    base = len(flat.blackboxes)
+    swap = [box for k, box in enumerate(boxes)
+            if sigs[base + 2 * k].digest > sigs[base + 2 * k + 1].digest]
+    for box in swap:
+        _swap_ports(flat, box)
+    return len(swap)
+
+
+def orient_dual_ports(flats: Sequence[Flat], normalize: bool = True) -> int:
+    """Give every unnamed Parmys ``dual_port_ram`` of both flats one canonical orientation;
+    returns the number of boxes swapped.
+
+    Parmys numbers the two ports of a dual-port RAM in the order Yosys's ``memory`` pass lists
+    the read ports, an order of hash-table iteration: the same memory with the same two accesses
+    can come out with port 1 and port 2 exchanged (``common/2r2w``, ``syntax/inferred_DPram``).
+    The two ports are interchangeable apart from a same-address write in one cycle, a race
+    IEEE 1364-2005 leaves undefined (2D spec section 17 #66), so the netlists are the same
+    design.  Without a canonical orientation the boxes would not pair (their input functions
+    differ pin by pin).
+
+    The orientation is a function of what each port is fed: a port's *history digest* is that of
+    ``bbmatch`` over its address, data and write-enable pins (port-neutral pin names), and the
+    port with the smaller digest becomes port 1.  The simulation that gives the digests drives
+    every cut box's outputs with a vector of its cell type alone (a RAM's two read ports get the
+    same vector), so the digests do not depend on any RAM's orientation and one pass is the
+    fixed point; the price is that two ports fed only by different RAMs' data look alike, and
+    ports with equal digests stay as they are.
+
+    Soundness: this is an assumption of the check, of the kind "RAM contents are not modelled":
+    a paired RAM is a cut point and ABC proves every input pin of it equal; the swap only chooses
+    which pins are compared with which.  Ports 1 and 2 are taken as symmetric, so a design whose
+    behaviour differs only in which port wins a same-address write is called equivalent."""
+    return sum(_orient_flat(f, normalize) for f in flats)
+
+
 # --------------------------------------------------------------------------- RAM groups
 
 RAM_PROBE_TIMEOUT = 40  # seconds per ABC probe of pair_ram_groups
@@ -1290,6 +1403,11 @@ def _check(args: argparse.Namespace) -> int:
                      not args.no_io_normalize, check=False, match_unnamed=args.match_unnamed)
              for n in nets]
     ram_paired = ram_probed = ram_tied = 0
+    if args.match_unnamed and not args.no_dual_orient:
+        oriented = orient_dual_ports(flats, not args.no_io_normalize)
+        if oriented:
+            notice(f"{oriented} dual_port_ram instance(s) turned so that port 1 is the port with "
+                   "the smaller input history (the two ports are taken as interchangeable)")
     if args.match_unnamed and not args.no_ram_pairing:
         ram_paired, ram_probed, ram_tied = pair_ram_groups(
             flats, not args.no_io_normalize,
@@ -1374,6 +1492,9 @@ def _parser() -> argparse.ArgumentParser:
                     "since a paired box must have equal input functions, so a wrong pairing is "
                     "a false 'not equivalent' (or exit 2), never a false 'equivalent' "
                     "(--match-dollar is the old spelling)")
+    ap.add_argument("--no-dual-orient", action="store_true",
+                    help="with --match-unnamed: do not turn unnamed dual_port_ram instances to a "
+                    "canonical port order first (ports 1 and 2 are then not interchangeable)")
     ap.add_argument("--no-ram-pairing", action="store_true",
                     help="with --match-unnamed: do not pair Parmys RAM slices by memory group and "
                     "bit first (pair every unnamed box by signature)")

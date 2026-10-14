@@ -89,8 +89,10 @@ The run also fails when fewer than ``--min-checked N`` designs (default 1) were 
 Assumptions the exit statement carries (equiv-check's, unchanged here): a latch init of 2 or 3
 (don't care, unknown) is read as 0, so an Odin III init 0 against a Parmys init 2 is accepted; RAM
 contents and initial state are not modelled (a paired RAM is a cut point whose input pins are
-compared); ``--odin3-pre``/``--scc-precheck`` are off, so a design with a combinational loop that
-Odin III accepts and Parmys rejects has a ``failed`` golden and is a listed-reject, not an error;
+compared) and the two ports of a ``dual_port_ram`` are interchangeable (Parmys numbers them in a
+hash-table order, so a same-address write race may go either way); ``--odin3-pre``/
+``--scc-precheck`` are off, so a design with a combinational loop that Odin III accepts and
+Parmys rejects has a ``failed`` golden and is a listed-reject, not an error;
 "identical" is identical under Odin III's ``--vtr-compat``.
 
 Output: one line per design as it finishes, then a summary table, every cause that is not a pass,
@@ -770,7 +772,7 @@ def summary_lines(state: Sweep, total: int, stale: Sequence[str], secs: float,
                  f"{nogolden} no-golden; {state.failures()} failing, {len(stale)} stale; "
                  f"{secs:.1f} s")
     lines.append(f"{TOOL}: assumptions: latch init 2/3 read as 0; RAM contents and init not "
-                 "modelled; --vtr-compat")
+                 "modelled; dual_port_ram ports 1 and 2 interchangeable; --vtr-compat")
     if state.proven() < min_checked:
         lines.append(f"{TOOL}: FAIL: only {state.proven()} design(s) proven, --min-checked is "
                      f"{min_checked} (a wrong or empty golden tree reports nothing)")
