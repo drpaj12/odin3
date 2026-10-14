@@ -1,0 +1,10 @@
+# The micros that equiv-check cannot decide: the `unproven` class (see tests/exit/vtr_unproven.txt for
+# the rules). They are NOT proven identical or equivalent to Parmys and count as passing nowhere:
+# exit-check prints them in their own UNPROVEN bucket. One that is not listed fails the run, one that
+# now passes (XPASS) fails the run, the needle must appear in the design's log. Each entry goes when
+# the limit is lifted.
+#
+# <path relative to tests/micro/verilog> [needle] <one-line reason>
+
+full/stereovision3.v [more than one clock domain] equiv-check (ABC dsec) models one clock: the golden has two, 82 latches on tm3_clk_v0 and 39 on tm3_clk_v2 (stereovision3, as the exit_vtr entry); a tool limit, unproven, not identical
+large/sv_chip3_hierarchy_no_mem.v [more than one clock domain] equiv-check (ABC dsec) models one clock: the golden has two, 82 latches on tm3_clk_v0 and 39 on tm3_clk_v2 (the same module as stereovision3); a tool limit, unproven, not identical

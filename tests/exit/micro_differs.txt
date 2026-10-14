@@ -1,0 +1,10 @@
+# Micros whose Parmys golden is itself WRONG, so that Odin III is (correctly) not equivalent to it:
+# the `known differs` bucket of exit-check (--expect-differs). It is not a pass and never in a pass
+# count; it exists so that the exit statement can name each such design with its evidence instead of
+# carrying an unexplained FAIL. Every entry needs an independent reference (not Odin III's say-so)
+# that shows the Parmys side is the wrong one. exit-check fails an entry that now passes (XPASS), one
+# whose needle is not in the design's log, and one that names no micro.
+#
+# <path relative to tests/micro/verilog> [needle] <one-line reason>
+
+syntax/multi_assignment.v [NOT equivalent] Parmys shorts four tri-state drivers: Yosys 0.55 read_verilog warns "multiple conflicting drivers" on `data` and the Parmys netlist is busout = enable ? bus0 : 1 (no dependence on s; the golden has s~0/s~1 as unused inputs), where IEEE 1364-2005 net resolution of the four `s == k ? busk : 4'hz` drivers gives bus[s]. Odin III resolves them as `tribuf -logic` does (2D spec 6.7, 9.2, 17 #79; PHASE2 #18 D3) and is elab-equiv --yosys-tribuf equivalent to that reference; Odin II's own BLIF also keeps the dependence on s (an s-decoded mux per driver into a wired OR)

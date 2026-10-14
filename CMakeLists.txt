@@ -2215,8 +2215,10 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # netlist-compare, then equiv-check --x-report. Classes: identical, equivalent (pass); eq-x
         # (passes only with a reviewed record, tests/exit/*_eqx.txt); listed-reject (Parmys itself
         # rejects it, tests/exit/micro_expect.txt); unproven (equiv-check's tool limits,
-        # tests/exit/vtr_unproven.txt: their own bucket, never a pass); no-golden (no golden, or an
-        # oracle harness gap, tests/exit/micro_nogolden.txt: never counted); differs, error, hard
+        # tests/exit/{micro,vtr}_unproven.txt: their own bucket, never a pass); known differs (the
+        # Parmys golden is itself wrong, tests/exit/micro_differs.txt: own bucket, never a pass);
+        # no-golden (no golden, an oracle harness gap or an oracle killed at its memory cap,
+        # tests/exit/micro_nogolden.txt: never counted); differs, error, hard
         # (fail; hard exits 3). Smallest first, one design at a time, every child, sp-splice
         # included, under memcap (3G; the four biggest files 5G, alone, in the 6G slice). The run
         # fails when fewer than --min-checked designs were proven, so a wrong golden tree cannot
@@ -2235,6 +2237,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 COMMAND ${_exit_check}
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/exit/micro_expect.txt
                         --expect-no-golden ${PROJECT_SOURCE_DIR}/tests/exit/micro_nogolden.txt
+                        --expect-differs ${PROJECT_SOURCE_DIR}/tests/exit/micro_differs.txt
+                        --expect-unproven ${PROJECT_SOURCE_DIR}/tests/exit/micro_unproven.txt
                         --eqx-record ${PROJECT_SOURCE_DIR}/tests/exit/micro_eqx.txt
                         --min-checked 400 --work ${CMAKE_BINARY_DIR}/exit-work/micro
                         --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
