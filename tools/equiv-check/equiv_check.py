@@ -974,7 +974,8 @@ def _probe_equal(cones: tuple[Flat, Flat], abc: str, normalize: bool, timeout: i
 
 def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Group]],
                    classes: Sequence[tuple[list[int], list[int]]], abc: str, normalize: bool,
-                   limits: tuple[float, int]) -> list[tuple[int, int]]:
+                   limits: tuple[float, int],
+                   sigs: Sequence[Sequence[bbmatch.Signature]] = ()) -> list[tuple[int, int]]:
     """Pair the groups of each ambiguous class (several groups that simulation cannot tell
     apart) by what they are.  ABC compares the input pins of a first and a last slice of an A
     group with those of the B groups, one B group at a time, as cones with the other unpaired
@@ -984,7 +985,9 @@ def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Grou
     longer than a proof of equality, so ``limits`` is (deadline on ``time.monotonic``, seconds per
     probe); a probe that times out counts as not equal.  When one A and one B group are left
     over in a class they are paired without a probe (every group has a partner or the final
-    proof fails)."""
+    proof fails).  A proof that two cones differ is the slow case, so the candidates of B are
+    tried in the order of ``sigs``' structure colour: the ones whose input cones look like the
+    A group's first."""
     deadline, per_probe = limits
     nets = [_class_nets(f, g) for f, g in zip(flats, groups, strict=True)]
 
@@ -1005,7 +1008,8 @@ def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Grou
             continue
         left_a, left_b = list(ids_a), list(ids_b)
         for i in ids_a:
-            for j in left_b:
+            gaps = {g: _colour_gap(groups, sigs, (i, g)) for g in left_b}
+            for j in sorted(left_b, key=gaps.__getitem__):
                 if time.monotonic() > deadline:
                     return found
                 cones = (_probe_flat(flats[0], roots(0, groups[0][i], pins), nets[0]),
@@ -1025,6 +1029,16 @@ def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Grou
         if len(left_a) == len(left_b) == 1:
             found.append((left_a[0], left_b[0]))
     return found
+
+
+def _colour_gap(groups: Sequence[Sequence[rampair.Group]],
+                sigs: Sequence[Sequence[bbmatch.Signature]], pair: tuple[int, int]) -> int:
+    """0 when the input-cone colours of the first slices of A group ``pair[0]`` and B group
+    ``pair[1]`` are equal (or ``sigs`` is empty), else 1: the order the probes try candidates in."""
+    if not sigs:
+        return 0
+    a, b = (groups[side][g] for side, g in enumerate(pair))
+    return int(sigs[0][a.slices[a.bits[0]]].struct != sigs[1][b.slices[b.bits[0]]].struct)
 
 
 def _assert_unique_keys(flat: Flat) -> None:
@@ -1086,7 +1100,8 @@ def _name_pairs(flats: Sequence[Flat], pairs: Sequence[Sequence[rampair.Group]],
 
 def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
                     find_probe_abc: Callable[[], str] | None = None,
-                    probe_limits: tuple[int, int] = (RAM_PROBE_BUDGET, RAM_PROBE_TIMEOUT)
+                    probe_limits: tuple[int, int] = (RAM_PROBE_BUDGET, RAM_PROBE_TIMEOUT),
+                    box_limits: tuple[int, int] = (SINGLE_PROBE_BUDGET, SINGLE_PROBE_TIMEOUT)
                     ) -> RamPairing:
     """Pair the unnamed Parmys RAM slices of the two flats by memory group and slice index, and
     the other unnamed boxes that simulation can tell apart or an ABC probe can; returns a
@@ -1137,7 +1152,7 @@ def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
     while any(box.key.startswith(prefix) for f in flats for box in f.blackboxes):
         prefix = "_" + prefix
     deadline = time.monotonic() + probe_limits[0]
-    single_deadline = time.monotonic() + SINGLE_PROBE_BUDGET
+    single_deadline = time.monotonic() + box_limits[0]
     for _ in range(MATCH_ROUNDS):
         sigs = [_signatures(f, normalize, {}) for f in flats]
         keys = [[_group_key(groups[s][g], sigs[s]) for g in free[s]] for s in (0, 1)]
@@ -1148,9 +1163,10 @@ def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
             amb = [([free[0][i] for i in a], [free[1][j] for j in b]) for a, b in cls.ambiguous]
             new = []
             for singles, limits in ((False, (deadline, probe_limits[1])),
-                                    (True, (single_deadline, SINGLE_PROBE_TIMEOUT))):
+                                    (True, (single_deadline, box_limits[1]))):
                 part = [c for c in amb if groups[0][c[0][0]].mem.startswith(SINGLE) == singles]
-                new += _probe_classes(flats, groups, part, find_probe_abc(), normalize, limits)
+                new += _probe_classes(flats, groups, part, find_probe_abc(), normalize, limits,
+                                      sigs)
             by_probe = True
         if not new:
             break
@@ -1478,7 +1494,8 @@ def _pair_boxes(flats: Sequence[Flat], args: argparse.Namespace) -> tuple[int, i
     if not args.no_ram_pairing:
         ram = pair_ram_groups(flats, normalize,
                               None if args.no_ram_probe else lambda: find_abc(args.abc),
-                              (args.ram_probe_budget, args.ram_probe_timeout))
+                              (args.ram_probe_budget, args.ram_probe_timeout),
+                              (args.box_probe_budget, args.box_probe_timeout))
     paired, guessed = pair_unnamed(flats, normalize)
     if ram.slices:
         notice(f"{ram.slices} RAM slice(s) paired by memory group and bit"
@@ -1574,6 +1591,11 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--no-dual-orient", action="store_true",
                     help="with --match-unnamed: do not turn unnamed dual_port_ram instances to a "
                     "canonical port order first (ports 1 and 2 are then not interchangeable)")
+    ap.add_argument("--box-probe-budget", type=int, default=SINGLE_PROBE_BUDGET, metavar="SECONDS",
+                    help="with --match-unnamed: seconds for all the ABC probes that tell unnamed "
+                    "boxes of no memory (multipliers) apart (default %(default)s)")
+    ap.add_argument("--box-probe-timeout", type=int, default=SINGLE_PROBE_TIMEOUT,
+                    metavar="SECONDS", help="seconds for one such probe (default %(default)s)")
     ap.add_argument("--no-ram-pairing", action="store_true",
                     help="with --match-unnamed: do not pair Parmys RAM slices by memory group and "
                     "bit first (pair every unnamed box by signature)")
