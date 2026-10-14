@@ -234,8 +234,9 @@ class Diff:
             return ""
         if done.returncode == 1:
             return "netlist-compare: not identical"
-        return ("netlist-compare cannot compare them (exit "
-                f"{done.returncode}): {opt_equiv.why((done.stdout or '') + (done.stderr or ''))}")
+        raise opt_equiv.ToolError(  # not a verdict about the netlists: never an identity difference
+            f"netlist-compare cannot compare them (exit {done.returncode}): "
+            f"{opt_equiv.why((done.stdout or '') + (done.stderr or ''))}")
 
 
 def yosys_cover(cover: Path) -> dict[str, int]:

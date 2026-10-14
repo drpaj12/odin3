@@ -139,7 +139,7 @@ def oracle_trouble(exc: opt_equiv.ToolError) -> bool:
     """True only for a crash, kill or timeout of the oracle itself: Yosys running on the ``in.il``
     that Odin III wrote (step 2, ``what == "yosys"``). Yosys rejecting a file, and any failure of
     Odin III, netlist-compare or a Yosys check of our own files, are ours (review I2)."""
-    return isinstance(exc, opt_equiv.CrashError) and exc.what == "yosys"
+    return isinstance(exc, opt_equiv.CrashError) and exc.what == "yosys"  # not "yosys-refine"
 
 
 def classify(diff: opt_diff.Diff, result: opt_diff.Result, run_dir: Path) -> Pair:
@@ -162,6 +162,8 @@ def run_pair(args: argparse.Namespace, files: Sequence[str], seed_dir: Path,
     diff = make_diff(args, args.yosys, seed_dir)
     try:
         result = diff.run(script, files)
+    except opt_equiv.RefineAbort:
+        raise  # our own check aborted: exit 2, never a failed seed
     except opt_equiv.ToolError as exc:
         pair = Pair(script.slug)
         if oracle_trouble(exc):
@@ -171,8 +173,10 @@ def run_pair(args: argparse.Namespace, files: Sequence[str], seed_dir: Path,
         return pair
     try:
         pair = classify(diff, result, seed_dir / script.slug)
-    except opt_equiv.ToolError as exc:  # the reverse refinement died: a failure of ours
-        return Pair(script.slug, error=str(exc), hard=isinstance(exc, opt_equiv.CrashError))
+    except opt_equiv.CrashError as exc:  # the reverse refinement died: hard
+        return Pair(script.slug, error=str(exc), hard=True)
+    # any other ToolError of the reverse refinement (a Yosys ERROR) is not "refines only": it
+    # propagates and ends the sweep with exit 2
     if args.yosys_069:
         pair.drift = drift_against(args, files, seed_dir, script, pair.steps)
     return pair
@@ -186,6 +190,8 @@ def drift_against(args: argparse.Namespace, files: Sequence[str], seed_dir: Path
     diff = make_diff(args, args.yosys_069, folder)
     try:
         result = diff.run(script, files)
+    except opt_equiv.RefineAbort:
+        raise  # our own check aborted: exit 2, never a failed seed
     except opt_equiv.ToolError as exc:
         return f"0.69 did not run: {str(exc)[:120]}"
     other = tuple(sorted(result.differences))
@@ -272,6 +278,8 @@ def sweep(args: argparse.Namespace, seeds: range, work: Path) -> int:
         for key in sorted(k for k in expected if k[0] in seeds and k not in seen):
             print(f"{TOOL}: stale: seed {key[0]} [{key[1]}] {key[2]} is listed but no longer "
                   f"structural")
+    if totals["hard"]:
+        return EXIT_CRASH
     if totals["crash"] > MAX_CRASH * totals["pairs"]:
         print(f"{TOOL}: FAIL: {totals['crash']} of {totals['pairs']} runs had a Yosys crash "
               f"(the limit is {MAX_CRASH:.0%})")
@@ -280,8 +288,6 @@ def sweep(args: argparse.Namespace, seeds: range, work: Path) -> int:
         print(f"{TOOL}: FAIL: {totals['unproved']} of {totals['pairs']} runs are structural and "
               f"not proved both ways (the limit is {MAX_UNPROVED:.0%})")
         return EXIT_FAIL
-    if totals["hard"]:
-        return EXIT_CRASH
     return EXIT_FAIL if totals["failed"] else EXIT_OK
 
 

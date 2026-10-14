@@ -387,12 +387,8 @@ class Runner:
         """The refinement check of ``out.il`` against ``in.il`` (spec 20.2). A documented skip is
         still run: it must fail, else the entry is stale and the row fails."""
         checker = opt_equiv.Checker(self.args.yosys, run_dir, self.cap)
-        try:
-            ok, why = checker.refines(run_dir / "in.il", run_dir / "out.il", "refine")
-        except opt_equiv.CrashError:
-            raise  # a dying Yosys is no refutation: it satisfies no documented skip
-        except opt_equiv.ToolError as exc:
-            ok, why = False, str(exc)
+        # a CrashError (exit 3) or ToolError (exit 2) is no refutation: no documented skip takes it
+        ok, why = checker.refines(run_dir / "in.il", run_dir / "out.il", "refine")
         reason = self.skips.get(rule.name)
         if reason is None:
             outcome.refine = "proved" if ok else "fail"
@@ -505,6 +501,11 @@ def run(args: argparse.Namespace) -> int:
                 print(f"{TOOL}: {rule.name}: HARD: {exc}", flush=True)
                 runner.cleanup(False)
                 return EXIT_CRASH
+            except opt_equiv.RefineAbort as exc:
+                print(f"{TOOL}: {rule.name}: error: {exc}", flush=True)
+                print(f"{TOOL}: error: {exc}", file=sys.stderr)
+                runner.cleanup(False)
+                return EXIT_ERROR
         outcomes.append(outcome)
         print(report(outcome), flush=True)
     for name in orphan_sources(rules, rules_root):

@@ -57,6 +57,7 @@ with open(HERE / "yosys.log", "a") as log:
 if "equiv_make" in script:
     if spec.get("refine_signal"):
         os.kill(os.getpid(), spec["refine_signal"])
+    sys.stdout.write(spec.get("refine_out", "ERROR: Found 1 unproven $equiv cells in 'equiv_status -assert'.\n") if spec.get("refine_rc", 0) else "")
     sys.exit(spec.get("refine_rc", 0))
 (Path(os.environ["YOSYS_COVER_DIR"]) / "cover.txt").write_text(spec["cover"])
 sys.stdout.write(spec["ystat"])
@@ -334,6 +335,14 @@ class OptRulesTest(unittest.TestCase):
         self.assertEqual(code, 3, out + err)
         self.assertNotIn("refinement skipped", out)
         self.assertIn("HARD", out + err)
+
+    def test_a_yosys_error_abort_is_a_tool_error_no_skip_absorbs_it(self) -> None:
+        """Review I3: an ERROR that is not the failed proof is exit 2, never `refinement skipped`."""
+        self.refining(skips="expr/const_and no model for it\n", refine_rc=1,
+                      refine_out="ERROR: Parser error in line 3: syntax error\n")
+        code, out, err = self.tree.run(refine=True)
+        self.assertEqual(code, 2, out + err)
+        self.assertNotIn("refinement skipped", out)
 
     def test_an_odin3_crash_or_timeout_is_hard(self) -> None:
         self.good()

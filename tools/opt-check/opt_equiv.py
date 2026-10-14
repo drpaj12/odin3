@@ -84,6 +84,10 @@ class ToolError(Exception):
     """A bad argument or an unusable tool (exit 2)."""
 
 
+class RefineAbort(ToolError):
+    """Yosys aborted the refinement script with an ``ERROR`` that is not the failed proof (exit 2)."""
+
+
 class CrashError(ToolError):
     """A child crashed, was killed (signal, memory cap) or timed out (exit 3, hard). ``what`` names
     the step (``odin3``, ``yosys``, ``netlist-compare``...)."""
@@ -245,6 +249,11 @@ def refinement_script(gold: str, gate: str, procs: bool = False,
     return "; ".join(steps)
 
 
+# Yosys 0.55 ``equiv_status -assert``: ``log_error("Found %d unproven $equiv cells in
+# 'equiv_status -assert'.")``: the only way the refinement script says the proof failed.
+PROOF_FAILED = re.compile(r"ERROR: Found \d+ unproven \$equiv cells in 'equiv_status -assert'")
+
+
 class Checker:
     """Runs the refinement check of RTLIL files through Yosys, every child under memcap."""
 
@@ -258,12 +267,15 @@ class Checker:
         self.top = top
 
     def child(self, argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
-        return capped("yosys", argv, self.cap, cwd=self.work, timeout=REFINE_TIMEOUT_SECONDS)
+        return capped("yosys-refine", argv, self.cap, cwd=self.work,
+                      timeout=REFINE_TIMEOUT_SECONDS)
 
     def refines(self, gold: Path, gate: Path, tag: str) -> tuple[bool, str]:
         """(True, '') when ``gate`` refines ``gold``; else (False, Yosys's last lines) after an
-        exit that is Yosys's own verdict (an unproven pair, an ``ERROR``). A Yosys crash, signal,
-        memory-cap kill or timeout is a ``CrashError``, never "not a refinement" (review I3)."""
+        exit whose output is the failed proof itself (``PROOF_FAILED``). A Yosys crash, signal,
+        memory-cap kill or timeout is a ``CrashError`` (exit 3); any other non-zero exit (a parser
+        ``ERROR``, a port mismatch, a missing module) is a ``ToolError`` (exit 2): neither is "not a
+        refinement" and no expect or skip list may absorb it (review I3)."""
         gold_text = gold.read_text(encoding="utf-8")
         gate_text = gate.read_text(encoding="utf-8")
         gold_out = self.work / f"{tag}.gold.il"
@@ -286,7 +298,10 @@ class Checker:
                 continue
             if done.returncode == 0:
                 return True, ""
-            last = tail((done.stdout or "") + (done.stderr or ""))
+            output = (done.stdout or "") + (done.stderr or "")
+            if not PROOF_FAILED.search(output):  # an ERROR that is not the failed proof
+                raise RefineAbort(f"yosys-refine exit {done.returncode}: {why(output)}")
+            last = tail(output)
         if crashed is not None:  # no proof, and a lowering died: not a verdict
             raise crashed
         return False, last

@@ -51,7 +51,7 @@ with open(HERE / "yosys.log", "a") as log:
     log.write(script + "\n")
 gate = re.findall(r"read_rtlil ([^;\s]+)", script)[1]
 if "BAD" in Path(gate).read_text():
-    sys.stdout.write("ERROR: Found 1 unproven $equiv cells in module eq\n")
+    sys.stdout.write("ERROR: Found 1 unproven $equiv cells in 'equiv_status -assert'.\n")
     sys.exit(1)
 """
 
@@ -252,6 +252,28 @@ class MainTest(unittest.TestCase):
                 self.assertEqual(code, 3, err)
                 self.assertIn("odin3", err)
 
+    def test_a_refinement_crash_is_named_yosys_refine_not_yosys(self) -> None:
+        """Review N1: opt-gen-diff must tell our check's crash from the oracle's."""
+        self.fakes.spec(self.pair("0001", "opt_expr"))
+        code, out, err = self.run_with(yosys_exits(-11))
+        self.assertEqual(code, 3, out + err)
+        self.assertIn("yosys-refine", err)
+
+    def test_a_yosys_error_abort_is_a_tool_error_not_a_refutation(self) -> None:
+        """Review I3: an ERROR that is not the failed proof (parser, port, missing module)."""
+        self.fakes.spec(self.pair("0001", "opt_expr"))
+        for text in ("ERROR: Parser error in line 1: syntax error", "ERROR: Can't find gate module x.",
+                     "ERROR: Can't match gate port y"):
+            def abort(argv: Sequence[str], cap: int, _t: str = text, **kw: Any
+                      ) -> subprocess.CompletedProcess[str]:
+                if "equiv_make" in " ".join(argv):
+                    return subprocess.CompletedProcess(list(argv), 1, _t + "\n", "")
+                return fake_run(argv, cap, **kw)
+            with self.subTest(text=text):
+                code, out, err = self.run_with(abort)
+                self.assertEqual(code, 2, out + err)
+                self.assertNotIn("not a refinement", out + err)
+
     def test_a_yosys_crash_or_timeout_is_hard_not_a_refutation(self) -> None:
         """Review I3: rc -9 or a timeout of the proof is not `not a refinement`."""
         self.fakes.spec(self.pair("0001", "opt_expr"))
@@ -439,7 +461,7 @@ class ProbeTest(unittest.TestCase):
         """True when the check proves the pair; a hard Yosys death (CrashError) is not a proof."""
         try:
             return self.refines(gold, gate)
-        except oe.CrashError:
+        except oe.ToolError:  # a Yosys abort (crash or ERROR) is no proof either
             return False
 
     def test_x_in_the_gold_is_a_dont_care(self) -> None:
@@ -461,12 +483,26 @@ class ProbeTest(unittest.TestCase):
             with self.subTest(mutant=name):
                 self.assertFalse(self.accepts(CLOCK_GOLD, text))
 
-    def test_a_yosys_abort_is_hard_not_a_refutation(self) -> None:
-        """The async2sync lowering aborts (ezSAT assertion) on an $sdff against an $adff; the later
-        lowering refutes, but a pair whose first lowering died has no verdict: CrashError."""
-        with self.assertRaises(oe.CrashError):
+    def test_a_yosys_abort_is_a_tool_error_not_a_refutation(self) -> None:
+        """An `$sdff` against an `$adff` makes Yosys abort with an internal-cell ERROR: no verdict
+        (a RefineAbort, exit 2), neither True nor "not a refinement"."""
+        with self.assertRaises(oe.RefineAbort):
             self.refines(CLOCK_GOLD, CLOCK_MUTANTS["sync_reset_for_async"])
 
+    def test_a_real_proof_failure_is_false_and_a_real_error_abort_is_a_tool_error(self) -> None:
+        ok, why = self.checker.refines(*self.pair_files(PLAIN_A, MUX_X), "q")
+        self.assertFalse(ok)
+        self.assertIn("unproven $equiv", why)
+        (self.work / "junk.il").write_text("this is not rtlil\n")
+        for bad in ("junk.il",):
+            with self.assertRaises(oe.ToolError) as ctx:
+                self.checker.refines(self.work / bad, self.work / bad, "e")
+            self.assertNotIsInstance(ctx.exception, oe.CrashError)
+
+    def pair_files(self, gold: str, gate: str) -> tuple[Path, Path]:
+        (self.work / "g2.il").write_text(gold)
+        (self.work / "h2.il").write_text(gate)
+        return self.work / "g2.il", self.work / "h2.il"
 
     def test_a_top_rewrite_over_a_sequential_submodule_refines(self) -> None:
         """Review I4: the 0001-opt_expr call of micro/bm_if_collapse.v (an `$eq` of the top to a

@@ -87,8 +87,10 @@ class FakeChecker:
 
     def refines(self, gold: Path, gate: Path, tag: str) -> tuple[bool, str]:
         self.calls.append(f"{gold.name}:{gate.name}:{tag}")
+        if FakeDiff.back_abort:
+            raise opt_equiv.RefineAbort("yosys-refine exit 1: ERROR: Parser error")
         if self.crash:
-            raise opt_equiv.CrashError("yosys", "killed (exit -9): boom")
+            raise opt_equiv.CrashError("yosys-refine", "killed (exit -9): boom")
         return self.back, ""
 
 
@@ -99,6 +101,7 @@ class FakeDiff:
     plan: dict[tuple[str, str], object] = {}
     back = True
     crash_back = False
+    back_abort = False
     checkers: list[FakeChecker] = []
 
     def __init__(self, yosys: str) -> None:
@@ -125,6 +128,7 @@ class GenDiffTest(unittest.TestCase):
         FakeDiff.plan = {}
         FakeDiff.back = True
         FakeDiff.crash_back = False
+        FakeDiff.back_abort = False
         FakeDiff.checkers = []
         patch = mock.patch.object(opt_gen_diff, "make_diff",
                                   lambda args, yosys, work: FakeDiff(Path(yosys).name))
@@ -216,7 +220,7 @@ class GenDiffTest(unittest.TestCase):
         FakeDiff.crash_back = True
         code, out, _ = self.run_tool("--seeds", "1..2", "--script", "phase2")
         self.assertEqual(code, 3, out)
-        self.assertIn("seed 1 [phase2]: FAIL error: yosys: killed", out)
+        self.assertIn("seed 1 [phase2]: FAIL error: yosys-refine: killed", out)
         self.assertIn("seed 2 [phase2]: FAIL error", out)
 
     def test_every_yosys_child_crashing_fails(self) -> None:
@@ -226,6 +230,34 @@ class GenDiffTest(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("0 seeds failed", out)
         self.assertIn("6 of 6 runs had a Yosys crash (the limit is 10%)", out)
+
+    def test_a_crash_of_our_own_refinement_check_is_hard_not_an_oracle_crash(self) -> None:
+        """Review N1: only Yosys dying on the source it should accept is an oracle crash."""
+        FakeDiff.plan = {("yosys55", "phase2"): opt_equiv.CrashError("yosys-refine", "killed")}
+        code, out, _ = self.run_tool("--seeds", "1..1", "--script", "phase2",
+                                     *("--script", "opt -full") * 39)
+        self.assertEqual(code, 3, out)
+        self.assertIn("0 oracle crashes", out)
+        self.assertFalse(opt_gen_diff.oracle_trouble(opt_equiv.CrashError("yosys-refine", "x")))
+
+    def test_hard_wins_over_the_crash_and_unproved_limits(self) -> None:
+        """Review N2: exit 3 is never lost to an exit-1 gate."""
+        FakeDiff.plan = {("yosys55", "phase2"): opt_equiv.CrashError("yosys", "killed"),
+                         ("yosys55", "full"): opt_equiv.CrashError("odin3", "killed")}
+        code, out, _ = self.run_tool("--seeds", "1..1")
+        self.assertEqual(code, 3, out)
+        FakeDiff.back = False
+        FakeDiff.plan = {("yosys55", "phase2"): ("identity",),
+                         ("yosys55", "full"): opt_equiv.CrashError("odin3", "killed")}
+        self.assertEqual(self.run_tool("--seeds", "1..1")[0], 3)
+
+    def test_a_yosys_error_abort_of_our_refinement_check_is_exit_2(self) -> None:
+        """Review I3: the forward check and the back-proof share the rule."""
+        FakeDiff.plan = {("yosys55", "phase2"): opt_equiv.RefineAbort("yosys-refine exit 1: x")}
+        self.assertEqual(self.run_tool("--seeds", "1..1")[0], 2)
+        FakeDiff.plan = {("yosys55", "phase2"): ("identity",)}
+        FakeDiff.back_abort = True
+        self.assertEqual(self.run_tool("--seeds", "1..1")[0], 2)
 
     def test_a_few_crashes_under_the_limit_pass(self) -> None:
         FakeDiff.plan = {("yosys55", "phase2"): opt_equiv.CrashError("yosys", "timed out")}

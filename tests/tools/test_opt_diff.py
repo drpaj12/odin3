@@ -58,6 +58,7 @@ with open(HERE / "yosys.log", "a") as log:
 if "equiv_make" in script:
     if spec.get("refine_signal"):
         os.kill(os.getpid(), spec["refine_signal"])
+    sys.stdout.write(spec.get("refine_out", "ERROR: Found 1 unproven $equiv cells in 'equiv_status -assert'.\n") if spec.get("refine_rc", 0) else "")
     sys.exit(spec.get("refine_rc", 0))
 if spec.get("yosys_signal") and "write_blif" not in script:
     os.kill(os.getpid(), spec["yosys_signal"])
@@ -247,6 +248,14 @@ class RunTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("[phase2]: refine: DIFFERS", out)
 
+    def test_a_yosys_error_abort_in_the_refinement_is_exit_2_not_absorbed(self) -> None:
+        """Review I3: `refine anything goes` must not absorb a parser ERROR."""
+        self.tree.set_spec(refine_rc=1, refine_out="ERROR: Can't match gate port y\n")
+        extra = self.tree.expect("d.v phase2 refine anything goes\n")
+        code, out, err = self.tree.run(*extra)
+        self.assertEqual(code, 2, out + err)
+        self.assertNotIn("differs as listed", out)
+
     def test_identity_failure_and_error(self) -> None:
         self.tree.set_spec(compare_rc=1)
         code, out, _ = self.tree.run()
@@ -254,8 +263,8 @@ class RunTest(unittest.TestCase):
         self.assertIn("identity: DIFFERS: netlist-compare: not identical", out)
         self.tree.set_spec(compare_rc=2)
         code, out, _ = self.tree.run()
-        self.assertEqual(code, 1)
-        self.assertIn("identity: DIFFERS: netlist-compare cannot compare them (exit 2)", out)
+        self.assertEqual(code, 2)
+        self.assertNotIn("DIFFERS", out)
 
     def test_tool_failures_are_errors(self) -> None:
         self.tree.set_spec(odin_rc=1, odin_log="odin3: error: bad thing\n")
