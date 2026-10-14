@@ -32,7 +32,7 @@
 - [ ] **Step 1: Write failing tests** (hand-built IR through `pb_build`/`read_blif`-free builders, FULL `check` after each):
   - pre-step: `$eq` with `Y_WIDTH 8` → 1 bit, Y[1..7] on 0; `$div` unsigned A with three top zeros trimmed, signed A keeps one zero; `$pow` reads each flag separately; `$mem` `SIZE 10 OFFSET 0 ABITS 32` → `ABITS 4`, with `-memx` unchanged;
   - `$add` 32-bit of two 8-bit zero-extended operands into an unused-top 32-bit Y → `A 8, B 8, Y 9`, Y[9..31] on 0;
-  - the signed rewrite: `sx_add`'s cell (`{x[8],x[8],x} + {y[8],y[8],y}`, 11 bits) → `A_SIGNED=B_SIGNED=1`, A 9, B 9, Y 11 (rule 2 then 3; the pad of rule 6 is Y[10]);
+  - the signed rewrite: `sx_add`'s cell (`{x[8],x[8],x} + {y[8],y[8],y}`, 11 bits) → `A_SIGNED=B_SIGNED=1`, A 9, B 9, Y 10 (rule 2 then 3; the pad of rule 6 is Y[10]);
   - `$mul` free choice by product cost; `$sub` pad is the top Y bit even when unsigned;
   - rule 4: both-signed cell with zero tops → unsigned; unary `$neg` signed with zero top → unsigned;
   - rule 5: unused top Y bits removed, except a signed-A `$shr`; `keep` and output-port bits stay;

@@ -219,10 +219,40 @@ static ff_kind ff_classify(const wr_state *ws, const ff_view *fv, uint32_t bit) 
 
 typedef struct ff_scan {
     uint32_t removed, zero, sign, unused;
+    bool have_zero; /* `zero` below is made on the first ZERO bit, so a no-op leaves no cell */
+    odin3_net_id zero_net;
 } ff_scan;
 
+/* Bit i of Q becomes const 0 in the ysrc list; the const-0 net is made on the first such bit. */
+static odin3_status ff_mark_zero(wr_state *ws, ff_scan *sc, uint32_t bit) {
+    if (!sc->have_zero) {
+        const odin3_status st = odin3_opt_const_net(ws->oc, ODIN3_BIT_0, &sc->zero_net);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+        sc->have_zero = true;
+    }
+    *(odin3_net_id *)odin3_vec_at(&ws->ysrc, bit) = sc->zero_net;
+    return ODIN3_OK;
+}
+
+static void ff_tally(ff_scan *sc, ff_kind kind) {
+    sc->removed++;
+    sc->zero += kind == FF_ZERO ? 1U : 0U;
+    sc->sign += kind == FF_SIGN ? 1U : 0U;
+    sc->unused += kind == FF_UNUSED ? 1U : 0U;
+}
+
+/* The state the next (lower) bit sees after this one went. */
+static void ff_after_bit(ff_view *fv, ff_kind kind) {
+    fv->blocked = kind == FF_SIGN;
+    if (kind == FF_UNUSED) {
+        fv->zero_ext = fv->sign_ext = false;
+    }
+}
+
 /* Scans from the top: ysrc and the init list get one entry per removed bit. */
-static odin3_status ff_scan_bits(wr_state *ws, ff_view *fv, ff_scan *sc, odin3_net_id zero) {
+static odin3_status ff_scan_bits(wr_state *ws, ff_view *fv, ff_scan *sc) {
     memset(sc, 0, sizeof *sc);
     odin3_vec_clear(&ws->init);
     for (uint32_t i = fv->w; i-- > 0;) {
@@ -234,27 +264,25 @@ static odin3_status ff_scan_bits(wr_state *ws, ff_view *fv, ff_scan *sc, odin3_n
         if (st != ODIN3_OK) {
             return st;
         }
-        sc->removed++;
-        sc->zero += kind == FF_ZERO ? 1U : 0U;
-        sc->sign += kind == FF_SIGN ? 1U : 0U;
-        sc->unused += kind == FF_UNUSED ? 1U : 0U;
-        if (kind == FF_ZERO) {
-            *(odin3_net_id *)odin3_vec_at(&ws->ysrc, i) = zero;
+        ff_tally(sc, kind);
+        st = kind == FF_ZERO ? ff_mark_zero(ws, sc, i) : ODIN3_OK;
+        if (st != ODIN3_OK) {
+            return st;
         }
-        fv->blocked = kind == FF_SIGN;
-        if (kind == FF_UNUSED) {
-            fv->zero_ext = fv->sign_ext = false;
-        }
+        ff_after_bit(fv, kind);
     }
     return ODIN3_OK;
 }
 
-static void ff_view_init(wr_state *ws, odin3_node_id node, ff_view *fv) {
+static bool ff_view_init(wr_state *ws, odin3_node_id node, ff_view *fv) {
     const odin3_celltype_def *def =
         odin3_celltype_get(ws->oc->design, odin3_node_type(ws->m, node));
     fv->d_port = odin3_kit_port_index(def, "D");
     fv->q_port = odin3_kit_port_index(def, "Q");
     fv->w = odin3_node_port(ws->m, node, fv->q_port).count;
+    if (fv->w == 0) {
+        return false;
+    }
     uint32_t at = 0;
     fv->d = fv->q = NULL;
     for (uint32_t i = 0; i < def->n_ports; i++) {
@@ -276,6 +304,7 @@ static void ff_view_init(wr_state *ws, odin3_node_id node, ff_view *fv) {
     fv->zero_ext = wr_is_const(ws, fv->d[fv->w - 1U], ODIN3_CONST_0);
     fv->sign_ext = !fv->zero_ext;
     fv->blocked = false;
+    return true;
 }
 
 /* The ports of the narrowed FF: D cut to `keep` bits, Q fresh, the others as they are. */
@@ -367,15 +396,12 @@ odin3_status wr_run_ff(wr_state *ws, odin3_node_id node) {
         return st;
     }
     ff_view fv;
-    ff_view_init(ws, node, &fv);
-    if (fv.w == 0) {
+    if (!ff_view_init(ws, node, &fv)) {
         return ODIN3_OK;
     }
-    odin3_net_id zero = {0};
-    st = odin3_opt_const_net(ws->oc, ODIN3_BIT_0, &zero);
-    st = st == ODIN3_OK ? wr_ysrc_reset(ws, node, fv.q_port) : st;
+    st = wr_ysrc_reset(ws, node, fv.q_port);
     ff_scan sc;
-    st = st == ODIN3_OK ? ff_scan_bits(ws, &fv, &sc, zero) : st;
+    st = st == ODIN3_OK ? ff_scan_bits(ws, &fv, &sc) : st;
     if (st != ODIN3_OK || sc.removed == 0) {
         odin3_vec_clear(&ws->init);
         return st;

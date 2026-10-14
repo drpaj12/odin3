@@ -16,6 +16,7 @@ module \to_signed_sx_add
   wire $n96
   wire $n97
   wire $n98
+  wire $n99
   wire $n100
   wire $n101
   wire $n102
@@ -25,7 +26,6 @@ module \to_signed_sx_add
   wire $n106
   wire $n107
   wire $n108
-  wire $n109
   cell $dff $c8
     parameter \WIDTH 9
     parameter \CLK_POLARITY 1
@@ -50,12 +50,12 @@ module \to_signed_sx_add
     connect \B \rb
     connect \Y { $n98 $n97 $n96 $n95 $n94 $n93 $n92 $n91 $n90 $n89 }
   end
-  cell $dff $c12
+  cell $dff $c11
     parameter \WIDTH 10
     parameter \CLK_POLARITY 1
     connect \CLK \clk
     connect \D { $n98 $n97 $n96 $n95 $n94 $n93 $n92 $n91 $n90 $n89 }
-    connect \Q { $n109 $n108 $n107 $n106 $n105 $n104 $n103 $n102 $n101 $n100 }
+    connect \Q { $n108 $n107 $n106 $n105 $n104 $n103 $n102 $n101 $n100 $n99 }
   end
-  connect \y { $n109 $n109 $n108 $n107 $n106 $n105 $n104 $n103 $n102 $n101 $n100 }
+  connect \y { $n108 $n108 $n107 $n106 $n105 $n104 $n103 $n102 $n101 $n100 $n99 }
 end

@@ -10,6 +10,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/prov.h"
 #include "passes/ffinit.h"
 #include "passes/opt/kit.h"
 #include "passes/opt/opt.h"
@@ -416,6 +417,31 @@ static void test_signed_rewrite_sx_add(void) {
                        "signed, 0 cells made unsigned"));
 }
 
+/* A rebuilt cell keeps its name and attributes, and its provenance record derives from the old
+ * cell's (Peter's reverse-engineering use: the result still points at its source). */
+static void test_rebuilt_cell_keeps_name_attrs_and_prov(void) {
+    build(SX_HEAD "  attribute \\note 7\n  attribute \\src \"t.v:3.1\"\n" BINW(
+        "$add", "add", "0", "0", "11", "11", "11", "{ \\x [8] \\x [8] \\x }",
+        "{ \\v [8] \\v [8] \\v }", "\\s") "end\n");
+    const odin3_prov_id old_prov = odin3_node_prov(fx.module, node_named("add"));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, old_prov.v);
+    run_wreduce();
+    expect_bin("add", 1, 1, 9, 9, 10);
+    odin3_node_id add = node_named("add");
+    const odin3_value *note =
+        odin3_attr_get(fx.module, (odin3_objref){ODIN3_OBJ_NODE, add.v}, intern("note"));
+    TEST_ASSERT_NOT_NULL(note);
+    TEST_ASSERT_EQUAL_INT64(7, note->i);
+    const odin3_prov_record *rec = odin3_prov_get(fx.res.design, odin3_node_prov(fx.module, add));
+    TEST_ASSERT_NOT_NULL(rec);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
+    bool from_old = false;
+    for (uint32_t i = 0; i < rec->parents.count; i++) {
+        from_old = from_old || rec->parents.ids[i].v == old_prov.v;
+    }
+    TEST_ASSERT_TRUE(from_old);
+}
+
 static void test_mul_signed_choice(void) {
     build(HEAD8 BINW("$mul", "mul", "0", "0", "8", "8", "8",
                      "{ \\a [3] \\a [3] \\a [3] \\a [3] "
@@ -756,6 +782,27 @@ static void test_dff_zero_extended_keepdc_and_init(void) {
     TEST_ASSERT_EQUAL_INT64(8, pint(node_named("f"), FF_WIDTH));
 }
 
+/* Nothing to narrow: a plain register and a wide add leave the IR exactly as it was (no stray
+ * constant cell), and the pass says so. */
+static void test_nothing_to_narrow_changes_nothing(void) {
+    build(FFHEAD("") DFF("f", "\\d") "end\n");
+    const uint32_t nodes = odin3_module_node_end(fx.module);
+    const uint32_t nets = odin3_module_net_end(fx.module);
+    char *before = rtlil_text();
+    run_wreduce();
+    TEST_ASSERT_EQUAL_UINT32(nodes, odin3_module_node_end(fx.module));
+    TEST_ASSERT_EQUAL_UINT32(nets, odin3_module_net_end(fx.module));
+    char *after = rtlil_text();
+    TEST_ASSERT_EQUAL_STRING(before, after);
+    free(before);
+    free(after);
+    TEST_ASSERT_EQUAL_UINT32(0, fx.counts.wreduce.narrowed);
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_INFO,
+                       "wreduce: 0 cells narrowed, 0 bits removed, 0 cells removed, 0 cells made "
+                       "signed, 0 cells made unsigned"));
+}
+
 static void test_dff_sign_extended(void) {
     build(FFHEAD("") DFF("f", "{ \\d [3] \\d [3] \\d [3] \\d [3] \\d [3:0] }") "end\n");
     run_wreduce();
@@ -891,6 +938,30 @@ static void test_two_runs_are_identical(void) {
     free(second);
 }
 
+/* A mux, an FF and an operator chain together: two runs give the same text. */
+#define MIXED                                                                                      \
+    "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"                         \
+    "  wire input 3 \\c\n  wire input 4 \\s\n  wire input 5 \\clk\n"                               \
+    "  wire width 4 output 6 \\y\n  wire width 8 output 7 \\q\n  wire width 8 \\t\n"               \
+    "  wire width 8 \\u\n" MUX4("m1", "{ \\c \\a [2:0] }", "{ \\c \\b [2:0] }", "\\s", "\\y")      \
+        BINW("$add", "ad", "0", "0", "8", "8", "8", "{ 4'0000 \\a }", "{ 4'0000 \\b }", "\\t")     \
+            BINW("$add", "ad2", "0", "0", "8", "8", "8", "\\t", "{ 4'0000 \\b }", "\\u")           \
+                DFF("f", "\\u") "end\n"
+
+static void test_two_runs_are_identical_mixed(void) {
+    build(MIXED);
+    run_wreduce();
+    TEST_ASSERT_TRUE(fx.counts.wreduce.narrowed > 0);
+    char *first = rtlil_text();
+    reset();
+    build(MIXED);
+    run_wreduce();
+    char *second = rtlil_text();
+    TEST_ASSERT_EQUAL_STRING(first, second);
+    free(first);
+    free(second);
+}
+
 /* A cell's line without its name, to compare the cells of two orders as a multiset. */
 static int cmp_str(const void *lhs, const void *rhs) {
     return strcmp(*(const char *const *)lhs, *(const char *const *)rhs);
@@ -992,6 +1063,7 @@ int main(void) {
     RUN_TEST(test_mem_one_word_abits_zero);
     RUN_TEST(test_add_zero_extended_narrows);
     RUN_TEST(test_signed_rewrite_sx_add);
+    RUN_TEST(test_rebuilt_cell_keeps_name_attrs_and_prov);
     RUN_TEST(test_mul_signed_choice);
     RUN_TEST(test_mul_stays_unsigned_when_cheaper);
     RUN_TEST(test_sub_pad_is_top_bit_even_unsigned);
@@ -1016,6 +1088,7 @@ int main(void) {
     RUN_TEST(test_pmux_narrows);
     RUN_TEST(test_dff_zero_extended);
     RUN_TEST(test_dff_zero_extended_keepdc_and_init);
+    RUN_TEST(test_nothing_to_narrow_changes_nothing);
     RUN_TEST(test_dff_sign_extended);
     RUN_TEST(test_dff_sign_extension_needs_equal_init);
     RUN_TEST(test_sdff_reset_value_truncated);
@@ -1025,6 +1098,7 @@ int main(void) {
     RUN_TEST(test_cascade_needs_rounds);
     RUN_TEST(test_round_cap_warns_and_stays_valid);
     RUN_TEST(test_two_runs_are_identical);
+    RUN_TEST(test_two_runs_are_identical_mixed);
     RUN_TEST(test_reversed_creation_gives_the_same_cells);
     RUN_TEST(test_wreduce_then_opt_rescan_agree);
     RUN_TEST(test_ff_and_mux_oom);
