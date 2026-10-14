@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# flatten-vtr: 3A spec 14.6, the 19 VTR designs through flatten. See flatten_vtr.py.
+# Exit codes: 0 all rows ok, 1 a row failed, 2 error or usage, 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../elab-check:$here/../opt-check${PYTHONPATH:+:$PYTHONPATH}"
+cd "$here/../.."
+exec python3 "$here/flatten_vtr.py" "$@"

@@ -29,6 +29,7 @@ for _sub in (
     "tools/token-cost",
     "tools/elab-check",
     "tools/opt-check",
+    "tools/flatten-check",
     "tools/exit-check",
     "tools/proc-check",
     "tools/vtr-qor",

@@ -486,7 +486,7 @@ once, via `util/idindex`). A record holds:
 specialization's IR name), then each generate or named-block scope with its loop indices
 (`top/g_stage[2]`, `sub$W=8/genblk1`). An IR module is shared by every instance of its
 specialization, so the instance path is not a property of its objects; `flatten` adds it through its
-`DERIVED` records. The example `top/u1/gen[3]` above is such a flattened path. No field changes.
+`DERIVED` records (`odin3_prov_derive_hier`, 3A). The example `top/u1/gen[3]` above is such a flattened path. No field changes.
 
 **Why `run` and `op`:** without them, 100 `$add`s elaborated from one line of a `generate` loop
 would share a record, and the 5,000 gates their lowering produces would be indistinguishable.
@@ -702,7 +702,11 @@ of connectivity changes, off by default; IR-6, IR-18 and check rule 4 are unchan
 Under PHASE3 #9 and #14 (3D spec): the `$lut` cell, the pass-run table's arguments and run
 information, and provenance across ABC (IR-12).
 
+Under PHASE3 #30 (3A spec, the one IR addition Peter approved): `odin3_prov_derive_hier` (IR-12),
+`odin3_prov_derive` with a caller-chosen `hier` string, which `flatten` uses to record the instance
+path. Additive: no field, rule, ABI export or check rule changes.
+
 ## 12. Out of scope for Phase 1
 
-`flatten`, memories (`$mem*` types are registered but checked only for widths), the AST
+memories (`$mem*` types are registered but checked only for widths), the AST
 (Phase 2), multi-threading, persistence of the IR to disk (BLIF/JSON writers serve).

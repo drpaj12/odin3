@@ -105,6 +105,17 @@ typedef struct odin3_prov_list {
 odin3_status odin3_prov_derive(const odin3_pass_ctx *ctx, odin3_prov_list parents,
                                odin3_prov_id *out);
 
+/*
+ * As odin3_prov_derive, with the record's `hier` set to `hier_str`, a string ID of the design
+ * (0 = none) naming the hierarchical instance path of the derived object (IR-12). Identity
+ * includes `hier`: the same parents and operation with another path make another record.
+ * odin3_prov_derive is this function with `hier_str` 0. The record is owned by the design.
+ * INVALID_ARG for everything odin3_prov_derive rejects, and for a `hier_str` that is not a string
+ * of the design (nothing is added then); NO_MEMORY leaves the store unchanged.
+ */
+odin3_status odin3_prov_derive_hier(const odin3_pass_ctx *ctx, odin3_prov_list parents,
+                                    uint32_t hier_str, odin3_prov_id *out);
+
 /* A record as stored; arrays are owned by the design and never change. */
 typedef struct odin3_prov_record {
     odin3_prov_kind kind;

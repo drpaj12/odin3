@@ -622,14 +622,19 @@ static odin3_status parents_unique(odin3_prov_store *store, odin3_prov_list pare
     return ODIN3_OK;
 }
 
-odin3_status odin3_prov_derive(const odin3_pass_ctx *ctx, odin3_prov_list parents,
-                               odin3_prov_id *out) {
-    odin3_prov_store *store = ctx_store(ctx, "odin3_prov_derive");
+odin3_status odin3_prov_derive_hier(const odin3_pass_ctx *ctx, odin3_prov_list parents,
+                                    uint32_t hier_str, odin3_prov_id *out) {
+    odin3_prov_store *store = ctx_store(ctx, "odin3_prov_derive_hier");
     if (store == NULL) {
         return ODIN3_ERR_INVALID_ARG;
     }
     if (ctx->op == 0) {
-        odin3_log(ODIN3_LOG_ERROR, "odin3_prov_derive: no operation begun (odin3_prov_begin_op)");
+        odin3_log(ODIN3_LOG_ERROR,
+                  "odin3_prov_derive_hier: no operation begun (odin3_prov_begin_op)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (!is_str(ctx->design, hier_str)) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_prov_derive_hier: hier %u is not a string ID", hier_str);
         return ODIN3_ERR_INVALID_ARG;
     }
     if (!parents_valid(store, parents)) {
@@ -639,8 +644,13 @@ odin3_status odin3_prov_derive(const odin3_pass_ctx *ctx, odin3_prov_list parent
     if (parents.count > 1 && parents_unique(store, parents, &unique) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    odin3_prov_record probe = {ODIN3_PROV_DERIVED, ctx->run, ctx->op, NULL, 0, 0, 0, unique};
+    odin3_prov_record probe = {ODIN3_PROV_DERIVED, ctx->run, ctx->op, NULL, 0, 0, hier_str, unique};
     return record_intern(store, &probe, out);
+}
+
+odin3_status odin3_prov_derive(const odin3_pass_ctx *ctx, odin3_prov_list parents,
+                               odin3_prov_id *out) {
+    return odin3_prov_derive_hier(ctx, parents, 0, out);
 }
 
 /* --- tombstones ---------------------------------------------------------------------------- */

@@ -1,0 +1,8 @@
+.model top
+.inputs x[0] x[1] x[2] z[0] z[1] z[2]
+.outputs o[0] o[1] o[2] c
+.subckt $xor A[0]=x[0] B[0]=z[2] Y[0]=c
+.subckt $xor A[0]=x[0] B[0]=z[0] Y[0]=o[0]
+.subckt $xor A[0]=x[1] B[0]=z[1] Y[0]=o[1]
+.subckt $xor A[0]=x[2] B[0]=z[2] Y[0]=o[2]
+.end
