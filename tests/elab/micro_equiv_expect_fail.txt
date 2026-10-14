@@ -18,3 +18,7 @@ syntax/multi_clock_reader_writer.v [more than one clock domain] equiv-check cann
 # addr2 with different data (spec 17 #66). Parmys wires both ports of one dual_port_ram, no priority.
 common/2r2w.v [Networks are NOT EQUIVALENT after simulation] two always blocks write one word (addr1 == addr2): later port wins here, no priority in Yosys 0.55; a race by IEEE 1364-2005 11, spec 17 #66
 common/1r2w.v [Networks are NOT EQUIVALENT after simulation] two always blocks write one word (en1, en2, addr1 == addr2): later port wins here, no priority in Yosys 0.55; a race by IEEE 1364-2005 11, spec 17 #66
+
+# Yosys 0.55's read_verilog has no `macromodule` keyword (an IEEE 1364 synonym of `module`), so side
+# B rejects the source; Odin III accepts it.
+operators/macromudule_test.v [syntax error, unexpected TOK_ID] Yosys 0.55 rejects `macromodule` (side B syntax error); Odin III elaborates it as a module
