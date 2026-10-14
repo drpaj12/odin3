@@ -1184,13 +1184,16 @@ class SingleProbeTest(unittest.TestCase):
         lines.append(f".names {' '.join(mids)} w{prefix}\n{'1' * len(mids)} 1\n")
         return "".join(lines)
 
-    def netlist(self, block: int, swap: bool) -> str:
+    def netlist(self, block: int, swap: bool, xcone: bool = False) -> str:
         ins = " ".join(f"{p}{i}" for p in "xy" for i in range(self.WIDTH))
-        text = (f".model t\n.inputs clk d0 {ins}\n.outputs ox oy\n"
-                + self.tree("x", block) + self.tree("y", block))
+        text = f".model t\n.inputs clk d0 {ins}\n.outputs ox oy\n.names unconn\n"
+        text += self.tree("x", block) + self.tree("y", block)
+        if xcone:  # every compared pin of a box is in the x-cone
+            text += ".names wx unconn wxu\n11 1\n.names wy unconn wyu\n11 1\n"
         mults = [("x", "ox"), ("y", "oy")]
         for name, out in (reversed(mults) if swap else mults):
-            text += (f".gate multiply a[0]=w{name} b[0]=d0 out[0]=mul{name}~0\n"
+            pin = f"w{name}{'u' if xcone else ''}"
+            text += (f".gate multiply a[0]={pin} b[0]=d0 out[0]=mul{name}~0\n"
                      f".names mul{name}~0 {out}\n1 1\n")
         return text + ".end\n"
 
@@ -1198,11 +1201,11 @@ class SingleProbeTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
-    def run_check(self, *flags: str) -> tuple[int, str, str]:
+    def run_check(self, *flags: str, xcone: bool = False) -> tuple[int, str, str]:
         assert ABC is not None
         paths = []
-        for name, text in (("a.blif", self.netlist(10, False)),
-                           ("b.blif", self.netlist(8, True))):
+        for name, text in (("a.blif", self.netlist(10, False, xcone)),
+                           ("b.blif", self.netlist(8, True, xcone))):
             path = Path(self.tmp.name) / name
             path.write_text(text, encoding="utf-8")
             paths.append(str(path))
@@ -1219,6 +1222,17 @@ class SingleProbeTest(unittest.TestCase):
         code, out, err = self.run_check("--no-ram-probe")
         self.assertEqual(code, 4, out + err)
         self.assertIn("inconclusive", err)
+
+
+    @needs_abc
+    def test_an_x_cone_result_over_guessed_pairs_is_inconclusive_not_eq_x(self) -> None:
+        """Every compared pin of both boxes is behind ``unconn``, so the x-report would call a
+        wrong guess "equivalent outside the x-cones" (exit 3): with guessed pairs it is exit 4."""
+        code, out, err = self.run_check("--no-ram-probe", "--x-report", xcone=True)
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("equivalent outside the x-cones", err)
+        code, out, err = self.run_check("--x-report", xcone=True)  # paired by probe: a verdict
+        self.assertIn(code, (0, 3), out + err)
 
 
 class CongruenceTest(unittest.TestCase):

@@ -96,7 +96,8 @@ equivalent.  A wrong pairing (boxes of the same type whose inputs differ) makes 
 pin fail, so the verdict is never "equivalent"; sampling can only lose a match, not create a
 false one.  The converse is not claimed: when guessed pairs exist and the check fails, the
 guess may be at fault, so the result is "inconclusive" (exit 4, unproven) and not "not equivalent"
-(a failure outside the guesses, an x-cone result and an equivalence are all still verdicts).  As
+(a failure outside the guesses and an equivalence are still verdicts; an x-cone result is not: the
+cones swallow every pin of a box fed by ``unconn``, so a wrong guess is hidden in them).  As
 before, a box's internal behaviour is assumed, not checked (RAM contents, initial state).
 
 Dual-port RAMs (2H, micro sweep of 2026-10-14).  Parmys numbers the ports of a ``dual_port_ram`` in
@@ -1460,12 +1461,13 @@ def x_report(flats: Sequence[Flat], maps: Sequence[dict[str, str]], abc: str,
     return EXIT_XCONE
 
 
-def _pair_boxes(flats: Sequence[Flat], args: argparse.Namespace) -> tuple[int, int]:
+def _pair_boxes(flats: Sequence[Flat], args: argparse.Namespace) -> tuple[int, int, int]:
     """The ``--match-unnamed`` steps in order: turn dual-port RAMs to one port order, pair the RAM
     slices by memory group and the unnamed boxes that simulation or a probe can tell apart, pair
-    the rest by signature.  Returns (unnamed boxes paired, of them guessed or found by a probe)."""
+    the rest by signature.  Returns (unnamed boxes paired, of them guessed or found by a probe, of
+    them found by a probe)."""
     if not args.match_unnamed:
-        return 0, 0
+        return 0, 0, 0
     normalize = not args.no_io_normalize
     ram = RamPairing()
     if not args.no_dual_orient:
@@ -1482,8 +1484,8 @@ def _pair_boxes(flats: Sequence[Flat], args: argparse.Namespace) -> tuple[int, i
         notice(f"{ram.slices} RAM slice(s) paired by memory group and bit"
                + (f" ({ram.probed} of them in groups told apart by ABC probes)" if ram.probed
                   else ""))
-    return (paired + ram.boxes,
-            guessed + ram.probed + ram.tied + ram.boxes_probed)
+    probed = ram.probed + ram.boxes_probed
+    return paired + ram.boxes, guessed + probed + ram.tied, probed
 
 
 def _check(args: argparse.Namespace) -> int:
@@ -1491,7 +1493,7 @@ def _check(args: argparse.Namespace) -> int:
     flats = [flatten(n, args.strict_init, args.allow_undriven, not args.no_cut,
                      not args.no_io_normalize, check=False, match_unnamed=args.match_unnamed)
              for n in nets]
-    paired, guessed = _pair_boxes(flats, args)
+    paired, guessed, probed = _pair_boxes(flats, args)
     match_blackboxes(flats)
     for flat in flats:
         check_undriven(flat, args.allow_undriven)
@@ -1523,10 +1525,15 @@ def _check(args: argparse.Namespace) -> int:
         return 0
     print(output.rstrip())
     code = x_report(flats, maps, abc, args) if args.x_report else 1
-    if code == 1 and guessed:
-        print(f"{TOOL}: inconclusive: {guessed} unnamed black-box pair(s) were guessed or are "
+    weak = guessed if code == 1 else guessed - probed if code == EXIT_XCONE else 0
+    if weak > 0:  # a pair found by a probe is a proof of equal input cones, not a guess
+        what = ("\"not equivalent\" may only mean a wrong guess" if code == 1 else
+                "the x-cones, which hold every pin of a box fed by unconn, hide what a wrong "
+                "guess breaks, so \"equivalent outside the x-cones\" says nothing about the "
+                "boxes")
+        print(f"{TOOL}: inconclusive: {weak} unnamed black-box pair(s) were guessed or are "
               "interchangeable (equal signatures, split by structure, file order or slice "
-              "index), so \"not equivalent\" may only mean a wrong guess", file=sys.stderr)
+              f"index), so {what}", file=sys.stderr)
         return EXIT_UNPROVEN
     return code
 
