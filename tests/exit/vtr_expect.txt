@@ -6,9 +6,11 @@
 # recorded here); a crash, a cap kill and a timeout are never listed. The list must shrink, never
 # rot.
 #
-# --- tool limits of equiv-check found by the first VTR run (2H): the result is an `error`, so the
+# --- tool limits of equiv-check found by the VTR runs (2H): the result is an `error`, so the
 # design is UNPROVEN, neither equivalent nor different. netlist-compare did not call them
 # identical, and equiv-check cannot decide them. Each entry goes when the limit is lifted. ---
 multiclock_reader_writer.v [more than one clock domain] equiv-check (ABC dsec) models one clock: the golden has two ('clock_reader_head', 'clock_writer_head'); unproven, not identical
 stereovision3.v [more than one clock domain] equiv-check models one clock: the golden has two ('tm3_clk_v0', 'tm3_clk_v2'); unproven, not identical
-stereovision2.v [cannot be matched one-to-one] equiv-check cuts the 468 hard `multiply` blocks and matches them by instance name; Parmys writes no .cname, the names are its `$mul~N` counter, and 57 of N differ between the golden and the spliced run; unproven, not identical
+LU32PEEng.v [timed out after 600 seconds] ABC dsec on the 5283 cut hard blocks and 19695 latches does not finish within equiv-check's 600 s timeout (pairing is exact: 4 guessed pairs); unproven, not identical
+LU64PEEng.v [timed out after 600 seconds] ABC dsec does not finish within equiv-check's 600 s timeout on this size of netlist (the largest LU design); unproven, not identical
+mcml.v [timed out after 600 seconds] ABC dsec does not finish within equiv-check's 600 s timeout (51597 latches); and 296 of its 375 unnamed hard blocks are paired by guess (copies of one RAM/multiplier whose pins simulation leaves constant, e.g. the write enables), so a finished run could only be inconclusive; unproven, not identical

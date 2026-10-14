@@ -66,6 +66,26 @@ BB_TAIL = ".names q a y\n11 1\n.end\n"
 RAM_Q = ".gate single_port_ram addr[0]=a clk=clk data[0]=b out[0]=q we=c\n"
 
 
+class FindAbcTest(unittest.TestCase):
+    def test_release_build_comes_before_a_sanitizer_build(self) -> None:
+        """A sanitizer ABC (clangdbg) sorts first by name and is several times slower on dsec."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for preset in ("clangdbg", "debug", "release"):
+                exe = Path(tmp) / "build" / preset / "third_party" / "abc" / "abc"
+                exe.parent.mkdir(parents=True)
+                exe.write_text("#!/bin/sh\n", encoding="utf-8")
+                exe.chmod(0o755)
+            saved = (equiv_check.REPO_ROOT, os.environ.pop("ODIN3_ABC", None))
+            equiv_check.REPO_ROOT = Path(tmp)
+            try:
+                want = Path(tmp, "build", "release", "third_party", "abc", "abc")
+                self.assertEqual(equiv_check.find_abc(), str(want))
+            finally:
+                equiv_check.REPO_ROOT = saved[0]
+                if saved[1] is not None:
+                    os.environ["ODIN3_ABC"] = saved[1]
+
+
 class NormalizeTest(unittest.TestCase):
     def test_normalize_io_name(self) -> None:
         cases = {

@@ -100,7 +100,9 @@ error (``--allow-undriven`` ties it to 0); a non-black-box model with ports but 
 an error ("mark it .blackbox").
 
 ABC lookup order: ``--abc PATH``, ``$ODIN3_ABC``, ``build/*/third_party/abc/abc`` in the
-repository, ``$VTR_ROOT/build/abc/abc``, ``abc`` on ``PATH``.
+repository (``build/release`` first: a sanitizer build such as ``clangdbg`` runs dsec on the
+VTR designs several times slower, and sorting by name used to pick it),
+``$VTR_ROOT/build/abc/abc``, ``abc`` on ``PATH``.
 """
 
 from __future__ import annotations
@@ -172,7 +174,9 @@ def find_abc(explicit: str | None = None) -> str:
         if not _is_exe(env):
             raise EquivError(f"ODIN3_ABC={env}: not an executable file")
         return env
-    for cand in sorted(REPO_ROOT.glob("build/*/third_party/abc/abc")):
+    found = sorted(REPO_ROOT.glob("build/*/third_party/abc/abc"),
+                   key=lambda path: (path.parent.parent.parent.name != "release", str(path)))
+    for cand in found:
         if _is_exe(cand):
             return str(cand)
     vtr = os.environ.get("VTR_ROOT")
@@ -738,10 +742,9 @@ def _is_buffer(cell: blif.Names) -> bool:
     return not value("0") and value("1")
 
 
-def _clock_source(flat: Flat, net: str) -> str | None:
-    """Follow single-input buffers back from ``net``; the primary input reached, or None."""
-    buffers = {n.output: n.inputs[0] for n in flat.names if _is_buffer(n)}
-    inputs = set(flat.inputs)
+def _clock_source(net: str, buffers: dict[str, str], inputs: set[str]) -> str | None:
+    """Follow single-input buffers (output net -> input net) back from ``net``; the primary
+    input reached, or None."""
     seen: set[str] = set()
     while net not in inputs and net in buffers and net not in seen:
         seen.add(net)
@@ -758,6 +761,9 @@ def clock_domain(flat: Flat, ports: dict[str, str]) -> tuple[str, str] | None:
     type/control form their own domain ("untyped", "-").
     """
     domains: set[tuple[str, str]] = set()
+    buffers = {n.output: n.inputs[0] for n in flat.names if _is_buffer(n)}  # once, not per latch
+    inputs = set(flat.inputs)
+    sources: dict[str, str | None] = {}
     for latch in flat.latches:
         if latch.ltype is None:
             domains.add(("untyped", "-"))
@@ -769,7 +775,9 @@ def clock_domain(flat: Flat, ports: dict[str, str]) -> tuple[str, str] | None:
         if latch.control is None or latch.control == blif.NO_CONTROL:
             domains.add((latch.ltype, blif.NO_CONTROL))
             continue
-        source = _clock_source(flat, latch.control)
+        if latch.control not in sources:
+            sources[latch.control] = _clock_source(latch.control, buffers, inputs)
+        source = sources[latch.control]
         if source is None:
             raise EquivError(f"{flat.path}:{latch.line}: unsupported: latch "
                              f"{show(latch.output)} is clocked by internal net "
