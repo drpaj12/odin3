@@ -11,8 +11,9 @@ so the exit comparison runs Parmys's script in two halves, verbatim from ``synth
 from point (i)'s Odin III spellings (``--nolatches``, ``--nomem2reg``, ``--top``, and
 ``--vtr-compat``, the VTR setting):
 
-- Odin III: ``O -p "read_techlib L; read_verilog --lib --nomem2reg P; read_verilog --nolatches --vtr-compat
-  FILE...; hierarchy --top T; opt_expr; opt_clean; opt -nodffe -nosdff; proc; write_rtlil a.il"``.
+- Odin III: ``O -p "read_techlib L; read_verilog --lib --nomem2reg P; read_verilog --nolatches
+  --vtr-compat FILE...; hierarchy --top T; opt_expr; opt_clean; opt -nodffe -nosdff; proc;
+  write_rtlil a.il"``.
   ``P`` is Parmys's ``vtr_primitives.v`` (``--primitives``, else under ``$VTR_ROOT``); ``L`` is
   ``lib/vtr.o3lib`` (``--techlib``).
 - Yosys 0.55, from ``plugin -i parmys`` to ``write_blif -true + vcc -false + gnd -undef + unconn
