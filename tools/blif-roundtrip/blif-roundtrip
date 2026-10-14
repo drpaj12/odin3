@@ -296,6 +296,12 @@ report() {
 # listed as intended refusals").
 VTR_ALLOWED=" E1 E1b E3b E5 E6 E7 E8 E12 "
 
+# Golden designs whose compare is known to hit the address-space cap or the timeout (the file stem).
+# Evidence: the 3E-4 golden sweep (2026-10-14), 947 files: one memlimit, LargeRam.odin.blif. Such a
+# file is reported "capped (listed)" (unverified, never "pass"); any other timeout/memlimit fails.
+# --fixtures runs have no list: there both fail.
+VTR_CAPPED=" LargeRam "
+
 # Facts about an original in one pass over its normalized text:
 # fe=<falling-edge latch> wide=<widest .names> clocks=<distinct latch clocks> hard=<RAM/multiply>.
 vtr_facts() {
@@ -387,7 +393,7 @@ vtr_equiv() {
 # Worker for --vtr: one line "id<TAB>path". Writes $BRT_RES/id.tsv (the report row and seconds).
 worker_vtr() {
     local id path rel tool dir w1 w2 e1 facts rc=0 w2rc=0 state classes="" renamed=0 word
-    local idem="-" cmpw="-" eqv="-" verdict=pass t0 flag=""
+    local idem="-" cmpw="-" eqv="-" verdict=pass t0 flag="" stem
     IFS=$'\t' read -r id path <<<"$1"
     rel=${path#"$BRT_ROOT"/}
     case $path in
@@ -439,7 +445,15 @@ worker_vtr() {
             cmpw=$(vtr_compare "$tool" "$renamed" "$path" "$w1" "$dir/cmp.nc")
             case $cmpw in
             identical | normalized) ;;
-            timeout | memlimit) if [ "$BRT_STRICT" = 1 ] && [ "$verdict" = pass ]; then verdict="fail:compare-$cmpw"; fi ;;
+            timeout | memlimit)
+                if [ "$verdict" = pass ]; then
+                    stem=$(basename "$path"); stem=${stem%%.*}
+                    if [ "$BRT_STRICT" != 1 ] && [[ $VTR_CAPPED == *" $stem "* ]]; then
+                        verdict="capped (listed)"
+                    else
+                        verdict="fail:compare-$cmpw"
+                    fi
+                fi ;;
             *) if [ "$verdict" = pass ]; then verdict="fail:compare-$cmpw"; fi ;;
             esac
         fi
@@ -458,7 +472,7 @@ worker_vtr() {
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$rel" "$tool" "$state" "${classes:--}" "$idem" \
         "$cmpw" "$eqv" "$verdict" "$(echo "$(now) $t0" | awk '{printf "%.1f", $1 - $2}')" \
         >"$BRT_RES/$id.tsv"
-    if [ "$verdict" = pass ] && [ "$BRT_KEEP" != 1 ]; then
+    if { [ "$verdict" = pass ] || [ "$verdict" = "capped (listed)" ]; } && [ "$BRT_KEEP" != 1 ]; then
         rm -f "$w1" "$w2" "$e1" "$dir/w2.err" "$dir/idem.nc" "$dir/cmp.nc" "$dir/equiv.log"
         rmdir "$dir" 2>/dev/null || true
     fi
@@ -504,7 +518,8 @@ report_vtr() {
         if ($3 == "written") idem[$5]++
         if ($6 != "-") cmp[$2 SUBSEP $6]++
         if ($7 != "-") eqv[$7]++
-        if ($8 != "pass") { fail++; failed = failed "\n  " $1 ": " $8 }
+        if ($8 == "capped (listed)") capped++
+        else if ($8 != "pass") { fail++; failed = failed "\n  " $1 ": " $8 }
     }
     END {
         printf "files: %d\n", n
@@ -513,8 +528,9 @@ report_vtr() {
         for (k in idem) printf "idempotent %s: %d\n", k, idem[k]
         for (k in cmp) { split(k, a, SUBSEP); printf "compare %s %s: %d\n", a[1], a[2], cmp[k] }
         for (k in eqv) printf "equiv %s: %d\n", k, eqv[k]
+        if (capped) printf "capped (listed), unverified: %d\n", capped
         if (fail) print "FAILING:" failed
-        print (fail ? "RESULT: FAIL (" fail " failing items)" : "RESULT: PASS")
+        print (fail ? "RESULT: FAIL (" fail " failing items)" : capped ? "RESULT: PASS (" capped " unverified)" : "RESULT: PASS")
         exit(fail ? 1 : 0)
     }' "$report"
 }
@@ -600,7 +616,7 @@ main() {
     export BRT_STRICT=$([ -n "$fixtures" ] && echo 1 || echo 0)
     export -f normalize stubs is_multi_driver now struct_gate worker worker_vtr vtr_facts vtr_classes
     export -f vtr_refusal_verdict vtr_must_refuse vtr_equiv vtr_compare
-    export VTR_ALLOWED
+    export VTR_ALLOWED VTR_CAPPED
 
     local list=$out/list.tsv
     if [ "$vtr" = 1 ]; then

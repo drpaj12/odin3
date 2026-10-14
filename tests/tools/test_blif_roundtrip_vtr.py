@@ -83,6 +83,11 @@ echo "$*" >> "$FAKE_NC_LOG"
 exec "{NC}" "$@"
 """
 
+MEMLIMIT_NC = """#!/usr/bin/env bash
+echo "MemoryError" >&2
+exit 1
+"""
+
 FAKE_QOR_HEAVY = r"""#!/usr/bin/env python3
 import os, sys
 with open(os.environ["FAKE_HEAVY_LOG"], "a") as fh:
@@ -398,6 +403,31 @@ class HeavyGateTest(RoundTripVtrBase):
                 "--out", str(self.tmp / "out"), str(self.root)]
         return subprocess.run(args, capture_output=True, text=True, check=False, env=env,
                               timeout=300)
+
+    def run_memlimit(self, name: str) -> subprocess.CompletedProcess[str]:
+        """A golden-mode run whose netlist-compare hits the memory limit on the odin file `name`."""
+        self.add("a.parmys.blif", blif(), ok=False)  # not a golden: setUp's file stays out
+        self.add(name, blif())
+        nc = make_exec(self.tmp / "memlimit-nc", MEMLIMIT_NC)
+        env = dict(os.environ, FAKE_HEAVY_LOG=str(self.log), FAKE_REQUIRE_RC="0",
+                   FAKE_RT_LOG=str(self.rt_log))
+        args = [str(self.script), "--vtr", "--rt", str(self.rt), "--nc", str(nc), "--no-equiv",
+                "--out", str(self.tmp / "out"), str(self.root)]
+        return subprocess.run(args, capture_output=True, text=True, check=False, env=env,
+                              timeout=300)
+
+    def test_a_listed_memlimit_is_capped_not_pass(self) -> None:
+        result = self.run_memlimit("LargeRam.odin.blif")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        row = next(r for r in self.rows() if r[0] == "LargeRam.odin.blif")
+        self.assertEqual(row[5:], ["memlimit", "-", "capped (listed)"])
+        self.assertIn("RESULT: PASS (1 unverified)", result.stdout)
+
+    def test_an_unlisted_memlimit_fails(self) -> None:
+        result = self.run_memlimit("Other.odin.blif")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        row = next(r for r in self.rows() if r[0] == "Other.odin.blif")
+        self.assertEqual(row[7], "fail:compare-memlimit")
 
     def test_inside_a_heavy_run_it_runs(self) -> None:
         result = self.run_golden(0, ok=False)
