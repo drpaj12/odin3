@@ -129,6 +129,24 @@ static void build_run(const char *text) {
     run_expr();
 }
 
+/* The refinement oracle of the mixed-sign ruling: builds text, records the registry evaluator's
+ * outputs (--opt-simcheck's simulator: 64 cycles on each of 3 seeds), runs opt_expr, records them
+ * again and demands the same trace. Unlike the structural checks above it is independent of which
+ * reading a rule takes of A_SIGNED / B_SIGNED. */
+static void expect_sim_equal_after_expr(const char *text) {
+    memset(&fx.counts, 0, sizeof fx.counts);
+    build(text);
+    odin3_opt_simcheck *before = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_simcheck_before(fx.res.design, &before));
+    run_expr();
+    odin3_status st = odin3_opt_simcheck_after(fx.res.design, before, "opt_expr");
+    odin3_opt_simcheck_free(before);
+    for (uint32_t i = 0; st != ODIN3_OK && i < n_lines; i++) {
+        (void)fprintf(stderr, "  log: %s\n", lines[i].text);
+    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, "the registry evaluator differs after opt_expr");
+}
+
 /* --- reading the result ----------------------------------------------------------------------- */
 
 static odin3_node_id named_node(const char *name) {
@@ -1987,25 +2005,25 @@ static void test_identwrt(void) {
     }
 }
 
-/* §17 #55: a mixed-sign A - 0 is left alone: Yosys 0.55 (a `$pos` with A's own flag) and the
- * registry evaluator (mixed is unsigned) extend A differently, and no rewrite is right under both
- * (#30) */
-static void test_identwrt_leaves_a_mixed_sign_cell(void) {
-    build_run(K_IDENTWRT_MIXED);
-    TEST_ASSERT_EQUAL_UINT32(1, count_type("$sub"));
-    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_IDENTWRT_A));
+/* The mixed-sign ruling (Peter, 2026-10-13; §17 #55, #57): a cell is signed only when BOTH flags are
+ * set, otherwise both operands are zero-extended (Yosys simlib, the registry evaluator). A signed
+ * 3-bit A - 0 (B unsigned) therefore reaches the 7-bit Y zero-extended: wiring, and the registry
+ * evaluator (the --opt-simcheck simulation) agrees before and after. */
+static void test_identwrt_mixed_sign_zero_extends(void) {
+    expect_sim_equal_after_expr(K_IDENTWRT_MIXED);
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$sub"));
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_IDENTWRT_A));
+    expect_wire("y", 7, "0000???"); /* a's 3 bits, then zeros: zero-extended, not sign-extended */
 }
 
-/* §17 #55 (M2): a mixed-sign $add of 0 is left alone too (the $or case is I1's, still open), and so
- * is fine.addsub's $sub with a signed constant B. */
-static void test_mixed_sign_add_or_and_fine_addsub_unchanged(void) {
-    build_run(K_MIXED_ADD);
-    TEST_ASSERT_EQUAL_UINT32(1, count_type("$add"));
-    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_IDENTWRT_A));
+/* the same for $add (A signed + 0), and fine.addsub's $sub of a signed constant B (A unsigned) */
+static void test_mixed_sign_add_and_fine_addsub_rewrite(void) {
+    expect_sim_equal_after_expr(K_MIXED_ADD);
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$add"));
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_IDENTWRT_A));
     fx.opts.fine = true;
-    build_run(K_FINE_MIXED_SUB);
-    TEST_ASSERT_EQUAL_UINT32(1, count_type("$sub"));
-    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_FINE_ADDSUB));
+    expect_sim_equal_after_expr(K_FINE_MIXED_SUB);
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_FINE_ADDSUB));
 }
 
 /* -keepdc has no consume_x round: a + 0 stays (identwrt is consume_x only) */
@@ -2321,17 +2339,27 @@ static void build_by_one_bit(const char *type, int a_signed, uint32_t a_width, u
     build_run(il);
 }
 
-/* A mixed-sign $div or $mul (A unsigned, B signed 1'1) is left alone: the registry evaluator reads
- * it unsigned (1'1 is +1) and the 2D fold reads B signed (-1), so no rewrite is right (§17 #30). */
-static void test_minus_one_mixed_sign_unchanged(void) {
-    build_by_one_bit("$div", 0, 4, 4);
-    TEST_ASSERT_EQUAL_UINT32(1, count_type("$div"));
-    TEST_ASSERT_EQUAL_UINT32(0, count_type("$neg"));
-    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_IDENTWRT_A));
-    build_by_one_bit("$mul", 0, 4, 4);
-    TEST_ASSERT_EQUAL_UINT32(1, count_type("$mul"));
-    TEST_ASSERT_EQUAL_UINT32(0, count_type("$neg"));
-    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_IDENTWRT_A));
+/* A mixed-sign $div or $mul (A unsigned, B signed 1'1): under the both-signed ruling (§17 #57) the
+ * cell is unsigned, so 1'1 is +1, the identity: A is wired (zero-extended), no $neg. The registry
+ * evaluator agrees before and after. */
+static void test_minus_one_mixed_sign_is_identity(void) {
+    const char *types[] = {"$div", "$mul"};
+    for (size_t i = 0; i < 2; i++) {
+        char il[768];
+        int len = snprintf(il, sizeof il,
+                           "module \\m\n  wire width 4 input 1 \\a\n  wire width 6 output 2 \\y\n"
+                           "  cell %s \\c\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 4\n"
+                           "    parameter \\B_SIGNED 1\n    parameter \\B_WIDTH 1\n"
+                           "    parameter \\Y_WIDTH 6\n    connect \\A \\a\n    connect \\B 1'1\n"
+                           "    connect \\Y \\y\n  end\nend\n",
+                           types[i]);
+        TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof il);
+        expect_sim_equal_after_expr(il);
+        TEST_ASSERT_EQUAL_UINT32(0, count_type(types[i]));
+        TEST_ASSERT_EQUAL_UINT32(0, count_type("$neg"));
+        TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_IDENTWRT_A));
+        expect_wire("y", 6, "00????");
+    }
 }
 
 /* All signed: still a $neg; with Y wider than A, A_SIGNED makes the $neg sign-extend A */
@@ -4207,6 +4235,178 @@ static void run_fine_tests(void) {
     RUN_TEST(test_fine_oom);
 }
 
+/* --- the mixed-sign ruling (Peter, 2026-10-13; §17 #57) ------------------------------------------
+ * A cell with A_SIGNED != B_SIGNED is signed only when BOTH are set, else both operands are
+ * zero-extended. Each rule that used to extend an operand by its own flag has a case where the two
+ * readings give different values, checked against the registry evaluator (expect_sim_equal_after_expr
+ * is the arbiter, not the expected structure). */
+
+typedef struct bin_case {
+    const char *type;
+    int a_signed, b_signed;
+    uint32_t a_width, b_width, y_width;
+    const char *a_conn, *b_conn; /* "\\a" / "\\b" (the input wires) or a constant */
+} bin_case;
+
+static void build_bin_text(const bin_case *bc, char *il, size_t cap) {
+    int len = snprintf(il, cap,
+                       "module \\m\n  wire width %u input 1 \\a\n  wire width %u input 2 \\b\n"
+                       "  wire width %u output 3 \\y\n  cell %s \\c\n"
+                       "    parameter \\A_SIGNED %d\n    parameter \\B_SIGNED %d\n"
+                       "    parameter \\A_WIDTH %u\n    parameter \\B_WIDTH %u\n"
+                       "    parameter \\Y_WIDTH %u\n    connect \\A %s\n    connect \\B %s\n"
+                       "    connect \\Y \\y\n  end\nend\n",
+                       bc->a_width, bc->b_width, bc->y_width, bc->type, bc->a_signed, bc->b_signed,
+                       bc->a_width, bc->b_width, bc->y_width, bc->a_conn, bc->b_conn);
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < cap);
+}
+
+/* Rewrites bc under opt_expr (fine when asked), demands the registry evaluator's trace unchanged. */
+static void bin_equal(const bin_case *bc, bool fine) {
+    char il[1024];
+    build_bin_text(bc, il, sizeof il);
+    fx.opts.fine = fine;
+    expect_sim_equal_after_expr(il);
+}
+
+/* bitwise_logic_one_const: a signed variable OR an unsigned constant 3'100 (and the swapped
+ * order); an unsigned variable XOR a signed constant (its sign bit must not extend). */
+static void test_mixed_bitwise_one_const(void) {
+    const bin_case cases[] = {
+        {"$or", 1, 0, 3, 3, 6, "\\a", "3'100"},  {"$or", 0, 1, 3, 3, 6, "3'100", "\\b"},
+        {"$xor", 0, 1, 3, 3, 6, "\\a", "3'100"}, {"$xor", 1, 0, 3, 3, 6, "3'100", "\\b"},
+        {"$and", 1, 0, 3, 3, 6, "\\a", "3'111"}, {"$xnor", 0, 1, 3, 3, 6, "\\a", "3'100"}};
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        bin_equal(&cases[i], false);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rule(ODIN3_OPT_RULE_BITWISE_LOGIC_ONE_CONST),
+                                         cases[i].type);
+    }
+}
+
+/* fine.group: signed A against unsigned B, Y wider: the extension bits are pairs of copies */
+static void test_mixed_fine_group(void) {
+    const bin_case cases[] = {{"$xor", 1, 0, 3, 3, 6, "\\a", "\\b"},
+                              {"$or", 0, 1, 3, 3, 6, "\\a", "\\b"},
+                              {"$and", 1, 0, 3, 2, 6, "\\a", "\\b"},
+                              {"$xnor", 0, 1, 2, 3, 6, "\\a", "\\b"}};
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        bin_equal(&cases[i], true);
+        TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, rule(ODIN3_OPT_RULE_FINE_GROUP), cases[i].type);
+    }
+}
+
+/* mul_to_shift: the shift of the variable takes the cell's signedness (zero-extension on a mixed
+ * cell), and a constant whose one bit is its sign bit is +2^k when the cell is unsigned */
+static void test_mixed_mul_to_shift(void) {
+    const bin_case cases[] = {{"$mul", 1, 0, 3, 3, 6, "\\a", "3'010"},
+                              {"$mul", 0, 1, 3, 3, 6, "3'010", "\\b"},
+                              {"$mul", 0, 1, 4, 3, 6, "\\a", "3'100"},
+                              {"$mul", 1, 0, 3, 4, 6, "4'1000", "\\b"}};
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        bin_equal(&cases[i], false);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, count_type("$mul"), "mul_to_shift fires");
+        TEST_ASSERT_EQUAL_UINT32(1, count_type("$shl"));
+    }
+}
+
+/* $div and $mod have no simulate hook in the registry, so the arbiter here is the ruling itself
+ * (simlib: both operands zero-extended unless both flags are set): the cell is rewritten, A is held
+ * at each value, the rewrite folds, and Y is compared with C's unsigned division. */
+static uint32_t div_mod_y(const bin_case *bc, uint32_t value) {
+    char il[1024];
+    build_bin_text(bc, il, sizeof il);
+    memset(&fx.counts, 0, sizeof fx.counts);
+    build_run(il);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, count_type(bc->type), "div/mod_to_shift fires");
+    hold_input("a", value);
+    n_lines = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_expr_run(&fx.ctx, fx.res.module, &fx.opts, &fx.counts));
+    return wire_value("y");
+}
+
+static void test_mixed_div_mod_by_power_of_two(void) {
+    /* {type, A_SIGNED, B_SIGNED, B constant, its value} over an 8-bit A and Y */
+    const struct {
+        bin_case bc;
+        uint32_t divisor;
+    } cases[] = {{{"$div", 1, 0, 8, 3, 8, "\\a", "3'010"}, 2},
+                 {{"$div", 0, 1, 8, 3, 8, "\\a", "3'100"}, 4},
+                 {{"$mod", 1, 0, 8, 3, 8, "\\a", "3'010"}, 2},
+                 {{"$mod", 1, 0, 8, 3, 8, "\\a", "3'100"}, 4},
+                 {{"$mod", 0, 1, 8, 3, 8, "\\a", "3'100"}, 4}};
+    static const uint32_t values[] = {0, 1, 3, 5, 127, 128, 129, 200, 255};
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        for (size_t v = 0; v < sizeof values / sizeof values[0]; v++) {
+            bool is_div = cases[i].bc.type[1] == 'd';
+            uint32_t want = is_div ? values[v] / cases[i].divisor : values[v] % cases[i].divisor;
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(want, div_mod_y(&cases[i].bc, values[v]),
+                                             cases[i].bc.type);
+        }
+    }
+}
+
+/* identwrt on every mixed type: the kept operand is wired, zero-extended */
+static void test_mixed_identwrt_all_types(void) {
+    const char *types[] = {"$add", "$or", "$xor", "$sub"};
+    for (size_t i = 0; i < 4; i++) {
+        const bin_case a_kept = {types[i], 1, 0, 3, 3, 7, "\\a", "3'000"};
+        bin_equal(&a_kept, false);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rule(ODIN3_OPT_RULE_IDENTWRT_A), types[i]);
+        if (i == 3) {
+            continue; /* $sub keeps only A */
+        }
+        const bin_case b_kept = {types[i], 0, 1, 3, 3, 7, "3'000", "\\b"};
+        bin_equal(&b_kept, false);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rule(ODIN3_OPT_RULE_IDENTWRT_B), types[i]);
+    }
+    const bin_case mul_one = {"$mul", 1, 0, 3, 3, 7, "\\a", "3'001"};
+    bin_equal(&mul_one, false);
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$mul"));
+}
+
+/* fine.addsub on mixed cells, both orders of the flags, with Y wider than the operands */
+static void test_mixed_fine_addsub(void) {
+    const bin_case cases[] = {{"$sub", 0, 1, 4, 4, 6, "\\a", "4'1010"},
+                              {"$sub", 1, 0, 4, 4, 6, "\\a", "4'1010"},
+                              {"$add", 1, 0, 4, 4, 6, "\\a", "4'1010"},
+                              {"$add", 0, 1, 4, 4, 6, "4'0110", "\\b"}};
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        bin_equal(&cases[i], true);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rule(ODIN3_OPT_RULE_FINE_ADDSUB), cases[i].type);
+    }
+}
+
+/* The constant fold (fold.c) of a mixed cell: both operands zero-extended, whatever the flags.
+ * $div and $mod have no simulate hook, so their Y is compared with C's unsigned arithmetic. */
+static void test_mixed_fold_constants(void) {
+    const char *types[] = {"$add", "$sub", "$mul", "$div", "$mod", "$and", "$or",  "$xor",
+                           "$xnor", "$lt",  "$le",  "$gt",  "$ge",  "$eq",  "$ne"};
+    const struct {
+        const char *a, *b;
+        uint32_t a_val, b_val;
+    } consts[] = {{"3'111", "3'001", 7, 1}, {"3'101", "3'110", 5, 6}, {"3'011", "3'100", 3, 4}};
+    for (size_t t = 0; t < sizeof types / sizeof types[0]; t++) {
+        bool cmp = types[t][1] == 'l' || types[t][1] == 'g' || types[t][1] == 'e' ||
+                   types[t][1] == 'n';
+        bool is_mod = strcmp(types[t], "$mod") == 0;
+        bool div_mod = is_mod || strcmp(types[t], "$div") == 0;
+        for (size_t c = 0; c < 3; c++) {
+            for (int flags = 1; flags <= 2; flags++) {
+                bin_case bc = {types[t],        flags == 1 ? 1 : 0,       flags == 2 ? 1 : 0,
+                               3,               3,                        cmp ? 1U : (div_mod ? 8U : 6U),
+                               consts[c].a,     consts[c].b};
+                bin_equal(&bc, false);
+                TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, count_type(types[t]), types[t]);
+                if (div_mod) {
+                    uint32_t want = is_mod ? consts[c].a_val % consts[c].b_val
+                                           : consts[c].a_val / consts[c].b_val;
+                    TEST_ASSERT_EQUAL_UINT32_MESSAGE(want, wire_value("y"), types[t]);
+                }
+            }
+        }
+    }
+}
+
 static void run_logic_tests(void) {
     RUN_TEST(test_const_and);
     RUN_TEST(test_and_bit_inverse);
@@ -4246,8 +4446,8 @@ static void run_arith_tests(void) {
     RUN_TEST(test_shiftx_trim);
     RUN_TEST(test_identwrt);
     RUN_TEST(test_identwrt_needs_consume_x);
-    RUN_TEST(test_identwrt_leaves_a_mixed_sign_cell);
-    RUN_TEST(test_mixed_sign_add_or_and_fine_addsub_unchanged);
+    RUN_TEST(test_identwrt_mixed_sign_zero_extends);
+    RUN_TEST(test_mixed_sign_add_and_fine_addsub_rewrite);
     RUN_TEST(test_pow_shift_two);
     RUN_TEST(test_pow_shift_eight);
     RUN_TEST(test_pow_overflow);
@@ -4257,7 +4457,7 @@ static void run_arith_tests(void) {
     RUN_TEST(test_mul_low_zeros_attrs);
     RUN_TEST(test_divmod_zero);
     RUN_TEST(test_div_minus_one);
-    RUN_TEST(test_minus_one_mixed_sign_unchanged);
+    RUN_TEST(test_minus_one_mixed_sign_is_identity);
     RUN_TEST(test_minus_one_all_signed_neg);
     RUN_TEST(test_div_shift_mod_mask);
     RUN_TEST(test_const_fold);
@@ -4294,8 +4494,19 @@ static void run_mux_and_driver_tests(void) {
     RUN_TEST(test_expr_oom);
 }
 
+static void run_mixed_sign_tests(void) {
+    RUN_TEST(test_mixed_bitwise_one_const);
+    RUN_TEST(test_mixed_fine_group);
+    RUN_TEST(test_mixed_mul_to_shift);
+    RUN_TEST(test_mixed_div_mod_by_power_of_two);
+    RUN_TEST(test_mixed_identwrt_all_types);
+    RUN_TEST(test_mixed_fine_addsub);
+    RUN_TEST(test_mixed_fold_constants);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    run_mixed_sign_tests();
     run_logic_tests();
     run_arith_tests();
     run_mux_and_driver_tests();
