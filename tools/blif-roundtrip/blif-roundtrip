@@ -17,6 +17,26 @@
 #   multi-driver originals (decision #15): netlist-compare refuses them, check errors allowed;
 #   timeouts and memory-limit stops (failures in --fixtures mode): the structural gate hit the per-file time or memory cap.
 # Exit: 0 all gates pass, 1 any failure, 2 usage. See docs/PHASE1.md (1C) for the policy.
+#
+# --vtr (3E spec 16.3, plan Task 10) checks `write_blif --vtr` instead (odin3-blif-rt --vtr), per
+# file, smallest first, one at a time (-j 1):
+#   1. W1 = rt --vtr G, W2 = rt --vtr W1. A write that legalised no name (no "names legalised"
+#      info line) needs W1 == W2 byte for byte; otherwise netlist-compare --vtr-normalize W1 W2
+#      must be identical and the file is listed "decoded" (VB-10 escapes its own `%` again).
+#   2. Parmys (*.parmys.blif): netlist-compare G W1 identical; a file the writer's rewrites
+#      change is compared with --vtr-normalize and listed "normalized".
+#   3. Odin II (*.odin.blif): netlist-compare --vtr-normalize G W1 identical.
+#   4. Odin II, written, no multiply/single_port_ram/dual_port_ram and at most one clock:
+#      equiv-check --allow-undriven --timeout 600 G W1 (a timeout is listed; several clocks:
+#      "multiclock"; --allow-undriven because the writer ties an undriven net to gnd, spec 9.2).
+#   Other files (fixtures such as hand_*.blif) get oracle 1 only. A refused file passes when its
+#   error class is one a golden may have (E1 E1b E3b E5 E6 E7 E8 E12) and the file is not one that
+#   must be refused: a falling-edge latch gives E1, a .names wider than 6 inputs gives E7, a
+#   multi-driver original gives E12. The report is TSV:
+#   golden tool written|refused class idempotent compare equiv verdict (plus times.tsv).
+# On a golden root (not --fixtures) the run must be inside tools/heavy-run: outside one, with
+# ODIN3_HEAVY_OK=1 it re-runs itself through heavy-run, else it exits 2 (point (a); no 3E tool
+# sets ODIN3_HEAVY_OK).
 set -euo pipefail
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
@@ -26,8 +46,9 @@ export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
 
 usage() {
     cat >&2 <<'USAGE'
-usage: blif-roundtrip [-j N] [-t SECONDS] [-m GB] [--largest-first] [--techlib LIB]... [--rt PATH]
-                      [--nc PATH] [--out DIR] [--keep] [--fixtures DIR | GOLDEN_ROOT]
+usage: blif-roundtrip [--vtr] [-j N] [-t SECONDS] [-m GB] [--largest-first] [--techlib LIB]...
+                      [--rt PATH] [--nc PATH] [--equiv PATH | --no-equiv] [--report FILE]
+                      [--out DIR] [--keep] [--fixtures DIR | GOLDEN_ROOT]
   GOLDEN_ROOT   default ~/odin3-ws/golden; only BLIFs whose sibling .prov has status=ok
   --fixtures D  every *.blif under D (no .prov needed)
   -j N          parallel jobs (default 2; LargeRam needs about 2.5 GB per job)
@@ -38,6 +59,10 @@ usage: blif-roundtrip [-j N] [-t SECONDS] [-m GB] [--largest-first] [--techlib L
   --rt PATH     odin3-blif-rt binary (default build/release/odin3-blif-rt in the repo)
   --nc PATH     netlist-compare (default tools/netlist-compare/netlist-compare)
   --out DIR     work/results directory (default: a new temp dir); --keep keeps the outputs
+  --vtr         check write_blif --vtr (see the header; -j defaults to 1, -m to 5)
+  --equiv PATH  equiv-check for the Odin II files (default tools/equiv-check/equiv-check on a golden
+                root; with --fixtures only when given); --no-equiv leaves it out
+  --report FILE the --vtr TSV report (default OUT/report.tsv)
 USAGE
     exit 2
 }
@@ -142,9 +167,9 @@ is_multi_driver() {
 
 now() { date +%s.%N; }
 
-# Runs netlist-compare on $1 $2 (output into $3); prints the gate result word.
+# Runs netlist-compare on $1 $2 (output into $3, optional flag $4); prints the gate result word.
 struct_gate() {
-    local a=$1 b=$2 log=$3 stub rc=0
+    local a=$1 b=$2 log=$3 flag=${4:-} stub rc=0
     stub=$(normalize <"$a" | stubs)
     if [ -n "$stub" ]; then
         # Stub copies live next to the log under $BRT_TMP, never next to the inputs.
@@ -157,7 +182,7 @@ struct_gate() {
     # "memlimit"), never an out-of-memory kill of the machine.
     (ulimit -v "$BRT_NC_MEM_KB"
      exec timeout -k 10 "$BRT_TIMEOUT" /usr/bin/time -f '%M' -o "$log.rss" \
-         "$BRT_NC" "$a" "$b") >"$log" 2>&1 || rc=$?
+         "$BRT_NC" ${flag:+"$flag"} "$a" "$b") >"$log" 2>&1 || rc=$?
     if [ -n "$stub" ]; then rm -f "$a" "$b"; fi
     case $rc in
     0) if [ -n "$stub" ]; then echo "identical+stubs"; else echo "identical"; fi ;;
@@ -264,20 +289,287 @@ report() {
     function dupn(   r, d) { for (r = 1; r <= NR; r++) if (substr(st[r], 1, 1) == "=") d++; return d + 0 }'
 }
 
+
+# ---- --vtr mode (3E-4) ------------------------------------------------------------------------
+
+# The errors a golden may be refused with (spec 16.3/16.4; E3b and E8 are "accepted by VPR,
+# listed as intended refusals").
+VTR_ALLOWED=" E1 E1b E3b E5 E6 E7 E8 E12 "
+
+# Golden designs whose compare is known to hit the address-space cap or the timeout (the file stem).
+# Evidence: the 3E-4 golden sweep (2026-10-14), 947 files: one memlimit, LargeRam.odin.blif. Such a
+# file is reported "capped (listed)" (unverified, never "pass"); any other timeout/memlimit fails.
+# --fixtures runs have no list: there both fail.
+VTR_CAPPED=" LargeRam "
+
+# Facts about an original in one pass over its normalized text:
+# fe=<falling-edge latch> wide=<widest .names> clocks=<distinct latch clocks> hard=<RAM/multiply>.
+vtr_facts() {
+    normalize <"$1" | LC_ALL=C awk '
+    $1 == ".names" { if (NF - 2 > wide) wide = NF - 2 }
+    $1 == ".latch" && NF >= 5 { if ($4 == "fe") fe = 1; if ($5 != "NIL") clk[$5] = 1 }
+    $1 == ".subckt" && ($2 == "multiply" || $2 == "single_port_ram" || $2 == "dual_port_ram") { hard = 1 }
+    END { n = 0; for (c in clk) n++; printf "fe=%d wide=%d clocks=%d hard=%d\n", fe + 0, wide + 0, n, hard + 0 }'
+}
+
+# The error classes of a refused write's log (file $1), first appearance order, joined with `+`.
+vtr_classes() {
+    LC_ALL=C awk '
+    /^odin3: error: write_blif: --vtr: / {
+        if (/more errors not shown/) next
+        if (/falling-edge flip-flop/) c = "E1"
+        else if (/asynchronous set\/reset flip-flop/) c = "E1b"
+        else if (/level-sensitive latch/) c = "E2"
+        else if (/flip-flop without a clock/) c = "E3"
+        else if (/clock input .* is unconnected or x/) c = "E3b"
+        else if (/tri-state cell/) c = "E4"
+        else if (/not a netlist cell/) c = "E5"
+        else if (/is not a hard cell of a loaded tech library/) c = "E6"
+        else if (/ inputs exceed K=/) c = "E7"
+        else if (/cover mixes on-set and off-set rows/) c = "E8"
+        else if (/inout port/) c = "E9"
+        else if (/hierarchy not flattened/) c = "E10"
+        else if (/cannot be recovered from BLIF formals/) c = "E11"
+        else if (/ has [0-9]+ drivers \(/) c = "E12"
+        else if (/no top module/) c = "E13"
+        else c = "E?"
+        if (!(c in seen)) { seen[c] = 1; out = out (out == "" ? "" : "+") c }
+    }
+    END { print out }' "$1"
+}
+
+# The verdict for a refused file: prints "pass" or "fail:<why>". $1 classes, $2 facts, $3 log,
+# $4 path, $5 tool. A golden may be refused only with the classes of VTR_ALLOWED; other files (the
+# hand-written fixtures) with any.
+vtr_refusal_verdict() {
+    local classes=$1 facts=$2 log=$3 path=$4 tool=$5 c wide
+    if [ -z "$classes" ]; then echo "fail:refused-without-an-error-line"; return; fi
+    for c in ${classes//+/ }; do
+        [ "$tool" != other ] || break
+        case $VTR_ALLOWED in *" $c "*) ;; *) echo "fail:unexpected-$c"; return ;; esac
+    done
+    # A class is also satisfied by the "N more errors not shown" line: the first 20 only are listed.
+    local more=0
+    if grep -q 'more errors not shown' "$log"; then more=1; fi
+    case $facts in *" fe=1 "*)
+        case "+$classes+" in *"+E1+"*) ;; *) [ "$more" = 1 ] || { echo "fail:fe-without-E1"; return; } ;; esac ;;
+    esac
+    wide=${facts#* wide=}
+    wide=${wide%% *}
+    if [ "$wide" -gt 6 ]; then
+        case "+$classes+" in *"+E7+"*) ;; *) [ "$more" = 1 ] || { echo "fail:wide-without-E7"; return; } ;; esac
+    fi
+    if is_multi_driver "$path"; then
+        case "+$classes+" in *"+E12+"*) ;; *) echo "fail:multidriver-without-E12"; return ;; esac
+    fi
+    echo pass
+}
+
+# The verdict for a written file that the facts say must have been refused; prints the reason
+# or nothing. $1 facts (padded with spaces), $2 path.
+vtr_must_refuse() {
+    local facts=$1 path=$2 wide
+    case $facts in *" fe=1 "*) echo "fe-written"; return ;; esac
+    wide=${facts#* wide=}
+    wide=${wide%% *}
+    if [ "$wide" -gt 6 ]; then echo "wide-written"; return; fi
+    if is_multi_driver "$path"; then echo "multidriver-written"; fi
+}
+
+# equiv-check word for $1 (original) and $2 (W1): equivalent, NOTEQ, timeout, unproven, error.
+vtr_equiv() {
+    local a=$1 b=$2 log=$3 rc=0
+    (ulimit -v "$BRT_NC_MEM_KB"
+     exec timeout -k 10 "$((BRT_EQUIV_TIMEOUT + 300))" "$BRT_EQUIV" --allow-undriven --timeout "$BRT_EQUIV_TIMEOUT" \
+         "$a" "$b") >"$log" 2>&1 || rc=$?
+    case $rc in
+    0) echo equivalent ;;
+    1) echo NOTEQ ;;
+    4 | 124 | 137) echo timeout ;;
+    *) echo error ;;
+    esac
+}
+
+# Worker for --vtr: one line "id<TAB>path". Writes $BRT_RES/id.tsv (the report row and seconds).
+worker_vtr() {
+    local id path rel tool dir w1 w2 e1 facts rc=0 w2rc=0 state classes="" renamed=0 word
+    local idem="-" cmpw="-" eqv="-" verdict=pass t0 flag="" stem
+    IFS=$'\t' read -r id path <<<"$1"
+    rel=${path#"$BRT_ROOT"/}
+    case $path in
+    *.parmys.blif) tool=parmys ;;
+    *.odin.blif) tool=odin ;;
+    *) tool=other ;;
+    esac
+    dir=$BRT_TMP/$id
+    mkdir -p "$dir"
+    w1=$dir/w1.blif
+    w2=$dir/w2.blif
+    e1=$dir/w1.err
+    t0=$(now)
+    local -a libs=()
+    while IFS= read -r lib; do
+        if [ -n "$lib" ]; then libs+=(--techlib "$lib"); fi
+    done <<<"$BRT_TECHLIBS"
+    facts=" $(vtr_facts "$path") "
+    "$BRT_RT" "${libs[@]}" --vtr "$path" "$w1" 2>"$e1" || rc=$?
+    case $rc in
+    0) state=written ;;
+    1) state=refused ;;
+    *) state=failed ;;
+    esac
+    if [ "$state" = refused ]; then
+        classes=$(vtr_classes "$e1")
+        verdict=$(vtr_refusal_verdict "$classes" "$facts" "$e1" "$path" "$tool")
+    elif [ "$state" = failed ]; then
+        verdict="fail:io"
+        classes=$(tail -n 1 "$e1" | tr '\t' ' ')
+    else
+        word=$(vtr_must_refuse "$facts" "$path")
+        if [ -n "$word" ]; then verdict="fail:$word"; fi
+        # Oracle 1: W2 = write --vtr (read W1).
+        "$BRT_RT" "${libs[@]}" --vtr "$w1" "$w2" 2>"$dir/w2.err" || w2rc=$?
+        renamed=$(sed -n 's/.*--vtr: \([0-9][0-9]*\) names legalised.*/\1/p' "$e1" | head -n 1)
+        renamed=${renamed:-0}
+        if [ "$w2rc" -ne 0 ]; then
+            idem=FAIL
+        elif [ "$renamed" -eq 0 ]; then
+            if cmp -s "$w1" "$w2"; then idem=bytes; else idem=FAIL; fi
+        else
+            word=$(struct_gate "$w1" "$w2" "$dir/idem.nc" --vtr-normalize)
+            case $word in identical*) idem=decoded ;; *) idem=FAIL ;; esac
+        fi
+        if [ "$idem" = FAIL ] && [ "$verdict" = pass ]; then verdict="fail:idempotent"; fi
+        # Oracles 2 and 3.
+        if [ "$tool" != other ]; then
+            cmpw=$(vtr_compare "$tool" "$renamed" "$path" "$w1" "$dir/cmp.nc")
+            case $cmpw in
+            identical | normalized) ;;
+            timeout | memlimit)
+                if [ "$verdict" = pass ]; then
+                    stem=$(basename "$path"); stem=${stem%%.*}
+                    if [ "$BRT_STRICT" != 1 ] && [[ $VTR_CAPPED == *" $stem "* ]]; then
+                        verdict="capped (listed)"
+                    else
+                        verdict="fail:compare-$cmpw"
+                    fi
+                fi ;;
+            *) if [ "$verdict" = pass ]; then verdict="fail:compare-$cmpw"; fi ;;
+            esac
+        fi
+        # Oracle 4.
+        if [ "$tool" = odin ] && [ -n "$BRT_EQUIV" ]; then
+            case $facts in
+            *" hard=1 "*) eqv=skipped ;;
+            *" clocks=0 "* | *" clocks=1 "*) eqv=$(vtr_equiv "$path" "$w1" "$dir/equiv.log") ;;
+            *) eqv=multiclock ;;
+            esac
+            case $eqv in
+            NOTEQ | error) if [ "$verdict" = pass ]; then verdict="fail:equiv-$eqv"; fi ;;
+            esac
+        fi
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$rel" "$tool" "$state" "${classes:--}" "$idem" \
+        "$cmpw" "$eqv" "$verdict" "$(echo "$(now) $t0" | awk '{printf "%.1f", $1 - $2}')" \
+        >"$BRT_RES/$id.tsv"
+    if { [ "$verdict" = pass ] || [ "$verdict" = "capped (listed)" ]; } && [ "$BRT_KEEP" != 1 ]; then
+        rm -f "$w1" "$w2" "$e1" "$dir/w2.err" "$dir/idem.nc" "$dir/cmp.nc" "$dir/equiv.log"
+        rmdir "$dir" 2>/dev/null || true
+    fi
+}
+
+# Oracles 2 and 3 for one written file: prints identical, normalized, different, timeout,
+# memlimit or error. $1 tool, $2 names renamed by the write, $3 original, $4 W1, $5 log base.
+vtr_compare() {
+    local tool=$1 renamed=$2 g=$3 w1=$4 log=$5 word
+    if [ "$tool" = parmys ] && [ "$renamed" -eq 0 ]; then
+        word=$(struct_gate "$g" "$w1" "$log")
+        case $word in
+        identical*) echo identical; return ;;
+        different) ;;
+        *) echo "$word"; return ;;
+        esac
+    fi
+    word=$(struct_gate "$g" "$w1" "$log" --vtr-normalize)
+    case $word in
+    identical*) echo normalized ;;
+    *) echo "$word" ;;
+    esac
+}
+
+# Prints the --vtr report (TSV with header) from the per-file rows in the list order, writes it
+# to $2 and the times to $3, and prints the summary. Returns 1 on any failing verdict.
+report_vtr() {
+    local res=$1 report=$2 times=$3 list=$4 id
+    {
+        printf 'golden\ttool\twritten|refused\terror class\tidempotent\tcompare\tequiv\tverdict\n'
+        while IFS=$'\t' read -r id _; do cut -f1-8 "$res/$id.tsv"; done <"$list"
+    } >"$report"
+    {
+        printf 'golden\tseconds\n'
+        while IFS=$'\t' read -r id _; do cut -f1,9 "$res/$id.tsv"; done <"$list"
+    } >"$times"
+    LC_ALL=C awk -F '\t' '
+    NR == 1 { next }
+    {
+        n++; tool[$2]++; st[$2 SUBSEP $3]++
+        if ($3 == "refused") cls[$4]++
+        if ($3 == "refused") clst[$2 SUBSEP $4]++
+        if ($3 == "written") idem[$5]++
+        if ($6 != "-") cmp[$2 SUBSEP $6]++
+        if ($7 != "-") eqv[$7]++
+        if ($8 == "capped (listed)") capped++
+        else if ($8 != "pass") { fail++; failed = failed "\n  " $1 ": " $8 }
+    }
+    END {
+        printf "files: %d\n", n
+        for (t in tool) printf "%s: %d written, %d refused\n", t, st[t SUBSEP "written"], st[t SUBSEP "refused"]
+        for (k in clst) { split(k, a, SUBSEP); printf "refused %s %s: %d\n", a[1], a[2], clst[k] }
+        for (k in idem) printf "idempotent %s: %d\n", k, idem[k]
+        for (k in cmp) { split(k, a, SUBSEP); printf "compare %s %s: %d\n", a[1], a[2], cmp[k] }
+        for (k in eqv) printf "equiv %s: %d\n", k, eqv[k]
+        if (capped) printf "capped (listed), unverified: %d\n", capped
+        if (fail) print "FAILING:" failed
+        print (fail ? "RESULT: FAIL (" fail " failing items)" : capped ? "RESULT: PASS (" capped " unverified)" : "RESULT: PASS")
+        exit(fail ? 1 : 0)
+    }' "$report"
+}
+
+# The heavy-run gate of a golden-root --vtr run (point (a)).
+require_heavy() {
+    local repo=$1 self=$2 rc=0
+    shift 2
+    python3 -I "$repo/tools/vtr-qor/qor_heavy.py" require-heavy || rc=$?
+    case $rc in
+    0) return 0 ;;
+    3)
+        if [ "${ODIN3_HEAVY_OK:-}" = 1 ]; then exec "$repo/tools/heavy-run" "$self" "$@"; fi
+        echo "vtr-qor: heavy runs are the controller's: set ODIN3_HEAVY_OK=1" >&2
+        exit 2 ;;
+    *) exit 2 ;;
+    esac
+}
+
 main() {
-    local jobs=2 root="" fixtures="" out="" keep=0 order=n repo techlibs=
+    local jobs="" root="" fixtures="" out="" keep=0 order=n repo techlibs= vtr=0 report="" equiv=""
+    local no_equiv=0 mem_gb=""
+    local -a orig=("$@")
     repo=$(dirname "$(dirname "$HERE")")
     BRT_RT=$repo/build/release/odin3-blif-rt
     BRT_NC=$HERE/../netlist-compare/netlist-compare
     BRT_TIMEOUT=600
-    BRT_NC_MEM_KB=$((6 * 1024 * 1024))
+    BRT_EQUIV_TIMEOUT=600
     while [ $# -gt 0 ]; do
         case $1 in
         -j) jobs=${2:?}; shift 2 ;;
         -t) BRT_TIMEOUT=${2:?}; shift 2 ;;
-        -m) BRT_NC_MEM_KB=$((${2:?} * 1024 * 1024)); shift 2 ;;
+        -m) mem_gb=${2:?}; shift 2 ;;
         --rt) BRT_RT=${2:?}; shift 2 ;;
         --nc) BRT_NC=${2:?}; shift 2 ;;
+        --equiv) equiv=${2:?}; shift 2 ;;
+        --no-equiv) no_equiv=1; shift ;;
+        --report) report=${2:?}; shift 2 ;;
+        --vtr) vtr=1; shift ;;
         --out) out=${2:?}; shift 2 ;;
         --keep) keep=1; shift ;;
         --largest-first) order=nr; shift ;;
@@ -290,41 +582,86 @@ main() {
         *) [ -z "$root" ] || usage; root=$1; shift ;;
         esac
     done
+    if [ "$vtr" = 1 ]; then
+        jobs=${jobs:-1}
+        mem_gb=${mem_gb:-5}
+    else
+        jobs=${jobs:-2}
+        mem_gb=${mem_gb:-6}
+        { [ -z "$equiv" ] && [ -z "$report" ] && [ "$no_equiv" = 0 ]; } || usage
+    fi
+    BRT_NC_MEM_KB=$((mem_gb * 1024 * 1024))
     [ -x /usr/bin/time ] || { echo "blif-roundtrip: needs GNU time at /usr/bin/time (apt install time)" >&2; exit 2; }
     [ -x "$BRT_RT" ] || { echo "blif-roundtrip: no driver at $BRT_RT (build odin3-blif-rt)" >&2; exit 2; }
     [ -z "$fixtures" ] || [ -z "$root" ] || usage
     if [ -n "$fixtures" ]; then root=$fixtures; else root=${root:-$HOME/odin3-ws/golden}; fi
     [ -d "$root" ] || { echo "blif-roundtrip: not a directory: $root" >&2; exit 2; }
+    if [ "$vtr" = 1 ]; then
+        root=$(readlink -f "$root")
+        # A golden root is a sweep: it runs inside tools/heavy-run (point (a)).
+        if [ -z "$fixtures" ]; then require_heavy "$repo" "$SELF" "${orig[@]}"; fi
+        if [ -n "$equiv" ]; then
+            [ -x "$equiv" ] || { echo "blif-roundtrip: no equiv-check at $equiv" >&2; exit 2; }
+        elif [ -z "$fixtures" ] && [ "$no_equiv" = 0 ]; then
+            equiv=$HERE/../equiv-check/equiv-check
+        fi
+        [ "$no_equiv" = 0 ] || equiv=""
+    fi
     [ -n "$out" ] || out=$(mktemp -d "${TMPDIR:-/tmp}/blif-roundtrip.XXXXXX")
+    out=$(readlink -f "$out")
     mkdir -p "$out/res" "$out/tmp"
     rm -f "$out"/res/* 2>/dev/null || true
     export BRT_RT BRT_NC BRT_TIMEOUT BRT_NC_MEM_KB BRT_KEEP=$keep BRT_RES=$out/res BRT_TMP=$out/tmp
-    export BRT_TECHLIBS=$techlibs
-    export -f normalize stubs is_multi_driver now struct_gate worker
+    export BRT_TECHLIBS=$techlibs BRT_ROOT=$root BRT_EQUIV=$equiv BRT_EQUIV_TIMEOUT
+    export BRT_STRICT=$([ -n "$fixtures" ] && echo 1 || echo 0)
+    export -f normalize stubs is_multi_driver now struct_gate worker worker_vtr vtr_facts vtr_classes
+    export -f vtr_refusal_verdict vtr_must_refuse vtr_equiv vtr_compare
+    export VTR_ALLOWED VTR_CAPPED
 
-    # Work list: by size (see --largest-first), one representative per content sha256, duplicates after.
     local list=$out/list.tsv
-    find "$root" -name '*.blif' -printf '%s\t%p\n' | LC_ALL=C sort -t "$(printf '\t')" -k1,1$order -k2,2 |
-        while IFS=$'\t' read -r _ path; do
-            if [ -z "$fixtures" ]; then
-                grep -qx 'status=ok' "${path%.blif}.prov" 2>/dev/null || continue
-            fi
-            printf '%s\t%s\n' "$(sha256sum "$path" | cut -d' ' -f1)" "$path"
-        done | awk -F '\t' '
-            { id = NR; sha[id] = $1; path[id] = $2; if (!($1 in first)) first[$1] = id }
-            END {
-                for (i = 1; i <= NR; i++) if (first[sha[i]] == i) print i "\t" path[i] "\t-"
-                for (i = 1; i <= NR; i++) if (first[sha[i]] != i) print i "\t" path[i] "\t" first[sha[i]]
-            }' >"$list"
+    if [ "$vtr" = 1 ]; then
+        # Work list: by size (see --largest-first), ties by path; no content de-duplication.
+        find "$root" -name '*.blif' -printf '%s\t%p\n' | LC_ALL=C sort -t "$(printf '\t')" -k1,1$order -k2,2 |
+            while IFS=$'\t' read -r _ path; do
+                if [ -z "$fixtures" ]; then
+                    grep -qx 'status=ok' "${path%.blif}.prov" 2>/dev/null || continue
+                fi
+                printf '%s\n' "$path"
+            done | awk '{ print NR "\t" $0 }' >"$list"
+    else
+        # Work list: by size (see --largest-first), one representative per content sha256, duplicates after.
+        find "$root" -name '*.blif' -printf '%s\t%p\n' | LC_ALL=C sort -t "$(printf '\t')" -k1,1$order -k2,2 |
+            while IFS=$'\t' read -r _ path; do
+                if [ -z "$fixtures" ]; then
+                    grep -qx 'status=ok' "${path%.blif}.prov" 2>/dev/null || continue
+                fi
+                printf '%s\t%s\n' "$(sha256sum "$path" | cut -d' ' -f1)" "$path"
+            done | awk -F '\t' '
+                { id = NR; sha[id] = $1; path[id] = $2; if (!($1 in first)) first[$1] = id }
+                END {
+                    for (i = 1; i <= NR; i++) if (first[sha[i]] == i) print i "\t" path[i] "\t-"
+                    for (i = 1; i <= NR; i++) if (first[sha[i]] != i) print i "\t" path[i] "\t" first[sha[i]]
+                }' >"$list"
+    fi
     if [ ! -s "$list" ]; then echo "blif-roundtrip: no BLIF files under $root" >&2; exit 2; fi
     echo "blif-roundtrip: $(wc -l <"$list") files, -j $jobs, nc timeout ${BRT_TIMEOUT}s, work dir $out" >&2
     if [ -n "$techlibs" ]; then echo "blif-roundtrip: tech libraries: $(echo "$techlibs" | xargs)" >&2; fi
-    xargs -d '\n' -P "$jobs" -n 1 bash -c 'worker "$1"' _ <"$list"
     local rc=0
-    set +e
-    STRICT=$([ -n "$fixtures" ] && echo 1 || echo 0) report "$out/res" "$root" | tee "$out/report.txt"
-    rc=${PIPESTATUS[0]}
-    set -e
+    if [ "$vtr" = 1 ]; then
+        echo "blif-roundtrip: --vtr, equiv-check: ${equiv:-off}" >&2
+        xargs -d '\n' -P "$jobs" -n 1 bash -c 'worker_vtr "$1"' _ <"$list"
+        set +e
+        report_vtr "$out/res" "${report:-$out/report.tsv}" "$out/times.tsv" "$list" | tee "$out/report.txt"
+        rc=${PIPESTATUS[0]}
+        set -e
+        echo "blif-roundtrip: report ${report:-$out/report.tsv}, times $out/times.tsv" >&2
+    else
+        xargs -d '\n' -P "$jobs" -n 1 bash -c 'worker "$1"' _ <"$list"
+        set +e
+        STRICT=$([ -n "$fixtures" ] && echo 1 || echo 0) report "$out/res" "$root" | tee "$out/report.txt"
+        rc=${PIPESTATUS[0]}
+        set -e
+    fi
     [ "$keep" = 1 ] || rm -rf "$out/tmp"
     return "$rc"
 }

@@ -13,7 +13,7 @@ src = ["tools/blif", "tools/netlist-compare", "tools/equiv-check", "tools/golden
        "tools/golden-blackboxes", "tools/token-cost",
        "tools/project-fixtures", "tools/pp-fuzz", "tools/pp-diff", "plugins/python", "tools/parse-check", "tools/elab-check", "tools/opt-check", "tools/exit-check", "tools/proc-check", "tools/blif-vtr-check",
        "tools/vtr-models",
-       "tools/vtr-qor",
+       "tools/vtr-qor", "tools/vtr-read-check",
        "tools/verilog-gen"]
 extend-exclude = ["third_party", "build"]
 
@@ -28,7 +28,7 @@ max-complexity = 15
 strict = true
 python_version = "3.10"
 # The tools are stand-alone scripts that add these directories to sys.path at run time.
-mypy_path = "tools/blif:tools/netlist-compare:tools/equiv-check:tools/golden-sample:tools/golden-blackboxes:tools/token-cost:tools/project-fixtures:tools/pp-fuzz:tools/pp-diff:tools/parse-check:tools/elab-check:tools/opt-check:tools/exit-check:tools/proc-check:tools/blif-vtr-check:tools/vtr-models:tools/vtr-qor:tools/verilog-gen"
+mypy_path = "tools/blif:tools/netlist-compare:tools/equiv-check:tools/golden-sample:tools/golden-blackboxes:tools/token-cost:tools/project-fixtures:tools/pp-fuzz:tools/pp-diff:tools/parse-check:tools/elab-check:tools/opt-check:tools/exit-check:tools/proc-check:tools/blif-vtr-check:tools/vtr-models:tools/vtr-qor:tools/vtr-read-check:tools/verilog-gen"
 exclude = ["^third_party/", "^build/"]
 
 [[tool.mypy.overrides]]
