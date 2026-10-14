@@ -703,6 +703,19 @@ then the options considered.
         square, one `WIDTH`; a stub is at the largest `WIDTH` used), decision 17's `-j3`, and the
         Order-of-work status note.
 
+31. **3G `wreduce` spec and plan, and 3C `hardmap` spec, approved** (Peter, 2026-10-14: "All 10
+    yes"; `docs/specs/2026-10-14-3G-wreduce-design.md`, `docs/plans/2026-10-14-3G-wreduce-plan.md`,
+    `docs/specs/2026-10-14-3C-hardmap-design.md`). 3G: a faithful Yosys 0.55 `wreduce` placed
+    before `flatten` (`opt; wreduce; opt_clean; opt -full; flatten; opt -full; hardmap`), `$mem`
+    ABITS 0 allowed. 3C, the ten rulings: (1) Parmys's own multiplier test, not decision 4's
+    "both ≥3" wording; (2) `multiply` WIDTH fixed at 36, (2a) padded with `unconn`; (3) a 2×2
+    `$mul` stays soft; (4) signed `$mul` operands sign-extended; (5) a correct `$sub` top stage,
+    any Parmys difference declared; (6) the depth-split select bit registered, if the micro probe
+    confirms Parmys selects on the live address bit; (7) replicas or soft logic instead of Parmys's
+    multiplexed RAM modes; (8) async RAM reads stay soft; (9) two live write ports mapped without
+    priority logic (the IEEE race, 2D §17 #66), exempt from the functional check; (10) the 3C plan
+    as about 7 tasks in 3 PRs.
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this

@@ -1,6 +1,6 @@
 # 3C — `hardmap`: design (spec only, for Peter's review)
 
-Status: v1 (2026-10-14). **Spec only.** 3C is a mapping algorithm, which Peter reviews (DESIGN §12,
+Status: v1 (2026-10-14), **approved by Peter 2026-10-14** ("All 10 yes"; PHASE3 #31). **Spec only.** 3C is a mapping algorithm, which Peter reviews (DESIGN §12,
 CLAUDE.md rule 10). The plan follows his approval. Each rule has an ID (**M-n** multipliers, **A-n**
 adders, **R-n** memories, **S-n** soft, **H-n** general) so that it can be approved or changed line by
 line. The questions are in §12.
@@ -449,6 +449,8 @@ Each soft decision except S-1 logs one WARN line per cell. S-1 is the default an
 - `docs/PASSES.md`: the `hardmap` row.
 
 ## 12. Questions for Peter (each with a recommendation)
+
+**Ruled 2026-10-14 (Peter: "All 10 yes"):** every recommendation below is approved; question 6 (register the depth-split select bit) applies if the micro probe confirms Parmys selects on the live address bit (`.superpowers/sdd/3C-probes/`).
 
 1. **Multiplier threshold.** Should a `$mul` go hard on Parmys's test (hard unless 2×2; M-2) or on
    decision 4's text ("both widths ≥ 3")? **Recommend Parmys's test.** The golden maps

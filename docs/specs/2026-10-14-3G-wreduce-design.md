@@ -1,6 +1,6 @@
 # 3G — `wreduce`: design
 
-Status: v1 (2026-10-14), for Peter's approval with the plan
+Status: v1 (2026-10-14), **approved by Peter 2026-10-14** with the plan (PHASE3 #31; `$mem` ABITS 0 allowed)
 (`docs/plans/2026-10-14-3G-wreduce-plan.md`). Phase 3, sub-project 3G (PHASE3 decision 7 = (b);
 light review; Opus `high`). Spec: `docs/DESIGN.md` §5, §6 step 4. Inputs: `docs/IR.md` (IR-2, IR-6,
 IR-8 and the mixed-sign rule, IR-12/13); PHASE2 #19 (no compaction inside a pass), #25 (mixed-sign
