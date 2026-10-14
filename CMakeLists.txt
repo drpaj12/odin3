@@ -771,6 +771,16 @@ if(BUILD_TESTING)
                 "read_blif ${PROJECT_SOURCE_DIR}/tests/golden/blif/hand_body.blif; flatten; check")
     set_tests_properties(cli_flatten PROPERTIES LABELS flatten
         PASS_REGULAR_EXPRESSION "flatten: 1 instances expanded \\(0 kept\\) in 1 roots")
+    # cli_flatten_multidriver (non-Debug builds only: Debug runs `check` after read_blif, which
+    # already rejects the multiply-driven net): two instances drive one net and `flatten` itself
+    # must refuse it, not only the `check` after it (review C1).
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_test(NAME cli_flatten_multidriver
+            COMMAND $<TARGET_FILE:odin3> -p
+                    "read_blif ${PROJECT_SOURCE_DIR}/tests/flatten/multidriver.blif; flatten")
+        set_tests_properties(cli_flatten_multidriver PROPERTIES LABELS flatten
+            PASS_REGULAR_EXPRESSION "net 'z' has 2 drivers after joining port 'o'")
+    endif()
     # 3A Task 5 (spec 14.5): 2,000 random hierarchies of `verilog-gen --flatten` through
     # flatten + check (Debug runs check around the pass) and sim before = after (a design the
     # simulator cannot run is counted skipped, never a pass). A failing case is written to

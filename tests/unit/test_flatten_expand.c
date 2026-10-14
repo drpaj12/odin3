@@ -23,7 +23,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { LOG_TEXT = 8192, OOM_LIMIT = 6000, NAME_BUF = 32 };
+enum { LOG_TEXT = 8192, OOM_LIMIT = 6000, NAME_BUF = 32, PAD_NETS = 7 };
 
 static ff fix;
 static char log_text[LOG_TEXT];
@@ -278,6 +278,42 @@ static void test_flat_const_output_error(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_net_merge(sub, (odin3_net_pair){ff_wnet(&fix, sub, "y", 0), one}));
     odin3_module *top = ff_module(&fix, "top");
+    (void)ff_port(&fix, top, "z", ODIN3_DIR_OUT, 1);
+    odin3_net_id zz = ff_wnet(&fix, top, "z", 0);
+    (void)ff_inst(&fix, (ff_pair){top, sub}, "u1", &zz);
+    odin3_net_id gate_nets[2] = {ff_net(&fix, top, NULL), zz};
+    (void)ff_gate(&fix, top, (ff_cell){"$_NOT_", "other"}, gate_nets);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, flatten_top(top));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "which is driven by a constant"));
+}
+
+/* The child's net IDs (1..3) cannot coincide with the root's z (padding nets come first): the
+ * join check must map the child net to the root net (review C1). */
+static void test_flat_multidriver_ids_differ(void) {
+    odin3_module *sub = make_sub("sub", (odin3_prov_id){0});
+    odin3_module *top = ff_module(&fix, "top");
+    for (int i = 0; i < PAD_NETS; i++) {
+        (void)ff_net(&fix, top, NULL);
+    }
+    (void)ff_port(&fix, top, "x", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, top, "z", ODIN3_DIR_OUT, 1);
+    TEST_ASSERT_TRUE(ff_wnet(&fix, top, "z", 0).v > (uint32_t)PAD_NETS);
+    (void)inst_xz(top, sub, "u1");
+    (void)inst_xz(top, sub, "u2");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, flatten_top(top));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "has 2 drivers after joining port 'y'"));
+}
+
+static void test_flat_const_output_ids_differ(void) {
+    odin3_module *sub = ff_module(&fix, "sub");
+    (void)ff_port(&fix, sub, "y", ODIN3_DIR_OUT, 1);
+    odin3_net_id one = ff_const(&fix, sub, 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_net_merge(sub, (odin3_net_pair){ff_wnet(&fix, sub, "y", 0), one}));
+    odin3_module *top = ff_module(&fix, "top");
+    for (int i = 0; i < PAD_NETS; i++) {
+        (void)ff_net(&fix, top, NULL);
+    }
     (void)ff_port(&fix, top, "z", ODIN3_DIR_OUT, 1);
     odin3_net_id zz = ff_wnet(&fix, top, "z", 0);
     (void)ff_inst(&fix, (ff_pair){top, sub}, "u1", &zz);
@@ -940,6 +976,8 @@ int main(void) {
     RUN_TEST(test_flat_constants);
     RUN_TEST(test_flat_multidriver_error);
     RUN_TEST(test_flat_const_output_error);
+    RUN_TEST(test_flat_multidriver_ids_differ);
+    RUN_TEST(test_flat_const_output_ids_differ);
     RUN_TEST(test_flat_feedthrough);
     RUN_TEST(test_flat_keep_hierarchy_inst);
     RUN_TEST(test_flat_keep_hierarchy_module);

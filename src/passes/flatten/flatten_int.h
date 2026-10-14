@@ -26,7 +26,8 @@ typedef struct flat_work {
     odin3_prov_id prov;
 } flat_work;
 
-/* A net of the root that a port bit joined, for the checks of spec §3.7. */
+/* A net of the child (mapped to the root by odin3_flatten_mapped) that a port bit joined, for the
+ * checks of spec §3.7. */
 typedef struct flat_joined {
     uint32_t net;
     uint32_t port;

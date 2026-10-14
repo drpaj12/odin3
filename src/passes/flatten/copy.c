@@ -268,7 +268,7 @@ static odin3_status join_error(const odin3_flatten_ctx *fc, flat_joined bit, odi
 odin3_status odin3_flatten_check_joins(odin3_flatten_ctx *fc) {
     const flat_joined *bits = fc->bits.data;
     for (size_t i = 0; i < fc->bits.len; i++) {
-        odin3_net_id net = odin3_flatten_resolve(fc, (odin3_net_id){bits[i].net});
+        odin3_net_id net = odin3_flatten_mapped(fc, (odin3_net_id){bits[i].net});
         bool constant = false;
         uint32_t drivers = hard_drivers(fc, net, &constant);
         if (drivers > 1) {
