@@ -82,6 +82,15 @@ struct odin3_abc_run {
 odin3_status odin3_abc_run_create(odin3_pass_ctx *ctx, const odin3_abc_opts *opts,
                                   odin3_abc_run **out);
 
+/*
+ * Start-up (spec §7.1's order, before any IR change or engine call): parses args, then chooses the
+ * exchange and the script and checks it, finds the engine, decides the route, checks the views,
+ * opens --log and creates a given --via-blif directory, and logs the first INFO line. *out is a
+ * run ready for the module loop (run->module and the rest unset); odin3_abc_pass_run is this, the
+ * loop, compaction and odin3_abc_run_destroy. Errors as odin3_abc_pass_run's.
+ */
+odin3_status odin3_abc_run_start(odin3_pass_ctx *ctx, odin3_bytes args, odin3_abc_run **out);
+
 /* Frees everything the run holds, closes its log, and frees *run. NULL is a no-op. */
 void odin3_abc_run_destroy(odin3_abc_run *run);
 

@@ -759,6 +759,19 @@ if(BUILD_TESTING)
         target_compile_definitions(test_abc_route PRIVATE ODIN3_HAVE_ABC_EXE)
         add_dependencies(test_abc_route odin3_abc_exe)
     endif()
+    # 3D Tasks 14 to 16: the abc pass up to the exchange, on the fake engine (tests/unit/
+    # abc_fake_engine.c, which never links ABC). Each test writes its files under abc_tests/<name>.
+    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/abc_tests)
+    foreach(_abc_test test_abc_args test_abc_region test_abc_result test_abc_xblif
+                      test_abc_exchange)
+        odin3_add_unit_test(${_abc_test})
+        target_compile_definitions(${_abc_test} PRIVATE
+            ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/${_abc_test}"
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+        if(NOT _abc_test STREQUAL "test_abc_result")
+            target_sources(${_abc_test} PRIVATE tests/unit/abc_fake_engine.c)
+        endif()
+    endforeach()
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)

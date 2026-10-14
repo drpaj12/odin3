@@ -29,7 +29,6 @@
 #include <unistd.h>
 
 enum {
-    ARG_ARENA_BYTES = 4096,
     FILE_NAME_BYTES = 32,
     DIR_PERMISSIONS = 0777,
     DOMAIN_TEXT_BYTES = 160,
@@ -380,25 +379,31 @@ static odin3_status run_all(odin3_abc_run *run) {
 
 /* --- the pass ------------------------------------------------------------------------------ */
 
+odin3_status odin3_abc_run_start(odin3_pass_ctx *ctx, odin3_bytes args, odin3_abc_run **out) {
+    const odin3_abc_opts none = {0};
+    odin3_abc_run *run = NULL;
+    odin3_status st = odin3_abc_run_create(ctx, &none, &run);
+    st = st == ODIN3_OK ? odin3_abc_parse_args(args, run->arena, &run->opts) : st;
+    st = st == ODIN3_OK ? startup_checks(run) : st;
+    if (st != ODIN3_OK) {
+        odin3_abc_run_destroy(run);
+        return st;
+    }
+    *out = run;
+    return ODIN3_OK;
+}
+
 odin3_status odin3_abc_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                 void *user) {
     (void)user;
     (void)design;
-    odin3_arena *arg_arena = odin3_arena_create(ARG_ARENA_BYTES);
-    if (arg_arena == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    odin3_abc_opts opts;
     odin3_abc_run *run = NULL;
-    odin3_status st = odin3_abc_parse_args(args, arg_arena, &opts);
-    st = st == ODIN3_OK ? odin3_abc_run_create(ctx, &opts, &run) : st;
-    st = st == ODIN3_OK ? startup_checks(run) : st;
+    odin3_status st = odin3_abc_run_start(ctx, args, &run);
     st = st == ODIN3_OK ? run_all(run) : st;
     if (st == ODIN3_OK) {
         st = odin3_design_compact(ctx, ctx->design);
     }
     odin3_abc_run_destroy(run);
-    odin3_arena_destroy(arg_arena);
     return st;
 }
 
