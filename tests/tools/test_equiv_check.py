@@ -958,10 +958,6 @@ class RamIdentityTest(unittest.TestCase):
         self.assertEqual([(g.mem, g.bits, g.slices) for g in groups],
                          [("7", (0, 1), {1: 0, 0: 1}), ("9", (0,), {0: 3})])
 
-    def test_two_slices_with_one_identity_are_an_error(self) -> None:
-        with self.assertRaises(rampair.RamError):
-            rampair.build_groups([("single_port_ram", ("7", 0)), ("single_port_ram", ("7", 0))])
-
     def test_shapes_must_agree_where_both_sides_name_them(self) -> None:
         small = rampair.Group("single_port_ram", "1", {0: 0})
         big = rampair.Group("single_port_ram", "2", {0: 0, 1: 1})

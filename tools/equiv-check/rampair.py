@@ -28,7 +28,7 @@ _SLICE_RE = re.compile(r"MEM~([^\s^]+)-(\d+)\^out")
 
 
 class RamError(Exception):
-    """Two slices with one identity, or memory groups of different shapes (exit 2)."""
+    """Memory groups of different shapes (exit 2)."""
 
 
 def slice_identity(nets: Iterable[str]) -> tuple[str, int] | None:
@@ -58,17 +58,20 @@ class Group:
 def build_groups(idents: Sequence[tuple[str, tuple[str, int] | None]]) -> list[Group]:
     """Group boxes (``idents[i]`` is box i's (cell type, identity or None)) by (type, memory id).
 
-    Two boxes with one (type, id, bit) cannot be told apart by name: RamError."""
+    Two boxes with one (type, id, bit) cannot be told apart by name (a sub-model instantiated
+    twice names its memory the same in both instances): the whole (type, id) is dropped, as if
+    its slices carried no identity, and they are left to the signature pairing."""
     groups: dict[tuple[str, str], Group] = {}
+    clash: set[tuple[str, str]] = set()
     for index, (cell_type, ident) in enumerate(idents):
         if ident is None:
             continue
         mem, bit = ident
         group = groups.setdefault((cell_type, mem), Group(cell_type, mem))
         if bit in group.slices:
-            raise RamError(f"two {cell_type} slices carry the identity MEM~{mem}-{bit}")
+            clash.add((cell_type, mem))
         group.slices[bit] = index
-    return list(groups.values())
+    return [g for key, g in groups.items() if key not in clash]
 
 
 def check_shapes(groups_a: Sequence[Group], groups_b: Sequence[Group]) -> None:
