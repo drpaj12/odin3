@@ -820,6 +820,58 @@ static void test_flat_keep_hierarchy_value_kinds(void) {
                               (const char *const[]){"e_int.t", NULL}});
 }
 
+/* --- the pre-flight estimate (plan Task 5 calibration) --------------------------------------- */
+
+enum { FAN = 6, EST_LEAVES = FAN * FAN };
+
+/* mid: a -> y[FAN], FAN leaves; top: x -> z[FAN*FAN], FAN mids. 36 leaf instances, 42 in all. */
+static odin3_module *make_wide_tree(void) {
+    odin3_module *leaf = make_sub("leaf", (odin3_prov_id){0});
+    odin3_module *mid = ff_module(&fix, "mid");
+    (void)ff_port(&fix, mid, "a", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, mid, "y", ODIN3_DIR_OUT, FAN);
+    for (uint32_t i = 0; i < FAN; i++) {
+        odin3_net_id io[2] = {ff_wnet(&fix, mid, "a", 0), ff_wnet(&fix, mid, "y", i)};
+        char name[NAME_BUF];
+        (void)snprintf(name, sizeof name, "l%u", i);
+        (void)ff_inst(&fix, (ff_pair){mid, leaf}, name, io);
+    }
+    odin3_module *top = ff_module(&fix, "top");
+    (void)ff_port(&fix, top, "x", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, top, "z", ODIN3_DIR_OUT, EST_LEAVES);
+    for (uint32_t i = 0; i < FAN; i++) {
+        odin3_net_id x_net = ff_wnet(&fix, top, "x", 0);
+        odin3_net_id z_nets[FAN];
+        for (uint32_t bit = 0; bit < FAN; bit++) {
+            z_nets[bit] = ff_wnet(&fix, top, "z", i * FAN + bit);
+        }
+        odin3_netvec ports[2] = {{&x_net, 1}, {z_nets, FAN}};
+        char name[NAME_BUF];
+        (void)snprintf(name, sizeof name, "m%u", i);
+        (void)ff_inst_bus(&fix, (ff_pair){top, mid}, name, ports);
+    }
+    return top;
+}
+
+/* The estimate is never below what the run reserves (spec §12: it rounds up). */
+static void test_estimate_not_below_actual(void) {
+    odin3_module *top = make_wide_tree();
+    set_top(top);
+    odin3_flatten_graph *graph = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_flatten_graph_build(fix.design, odin3_module_id_of(top), &graph));
+    uint64_t estimate = odin3_flatten_graph_estimate(graph);
+    odin3_flatten_graph_free(graph);
+    uint64_t before = odin3_design_bytes_reserved(fix.design);
+    flatten_ok(top);
+    uint64_t grew = odin3_design_bytes_reserved(fix.design) - before;
+    TEST_ASSERT_EQUAL_UINT32(0, count_instances(top));
+    TEST_ASSERT_EQUAL_UINT32(EST_LEAVES * 2, count_type(top, "$_NOT_"));
+    printf("flatten estimate %llu bytes, reserved %llu\n", (unsigned long long)estimate,
+           (unsigned long long)grew);
+    TEST_ASSERT_TRUE(estimate >= grew);
+}
+
 /* The sorted names of the live nodes and wires of mod and the alias lists of its port nets. */
 static void name_set(const odin3_module *mod, char *out, size_t size) {
     const odin3_strtab *tab = odin3_design_strtab(fix.design);
@@ -910,5 +962,6 @@ int main(void) {
     RUN_TEST(test_flat_caps);
     RUN_TEST(test_flat_keep_hierarchy_value_kinds);
     RUN_TEST(test_flat_determinism_reversed);
+    RUN_TEST(test_estimate_not_below_actual);
     return UNITY_END();
 }

@@ -37,6 +37,14 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(mod.wires["$tmp"], 1)
         self.assertEqual(mod.cells, [("$and", "u1.add"), ("$xor", "$c1")])
 
+    def test_base_type_names_the_module(self) -> None:
+        paramod = "$paramod\\m1_0\\W=s32'00000000000000000000000000000100"
+        self.assertEqual(fc.base_type(paramod), "m1_0")
+        self.assertEqual(fc.base_type("$paramod$0c55\\single_port_ram"), "single_port_ram")
+        self.assertEqual(fc.base_type("m1_0$W=2"), "m1_0")
+        self.assertEqual(fc.base_type("$and"), "$and")
+        self.assertEqual(fc.base_type("memory_controller"), "memory_controller")
+
     def test_same(self) -> None:
         self.assertEqual(fd.compare(top(A), top(B_SAME)), [])
 

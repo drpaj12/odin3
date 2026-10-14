@@ -17,10 +17,11 @@ that is not Peter's is marked **agent default (Peter may override)**; §18 lists
 `flatten` turns a design whose top module instantiates other modules into a design whose top
 module holds all their logic. After it, the top module has no live node whose cell type has
 granularity `module`, except an instance Yosys would also keep (`keep_hierarchy`, §7). It is the
-step between `opt` and `hardmap`/`lower` in the Phase 3 script (PHASE3 exit test, item 3):
+step between `opt` and `hardmap`/`lower` in the Phase 3 script (PHASE3 exit test, item 3; with 3G,
+`wreduce; opt_clean; opt -full` come before `flatten`, PHASE3 #31):
 
 ```
-read_verilog --nolatches; proc; opt; flatten; [wreduce;] hardmap; lower; abc; write_blif --vtr
+read_verilog --nolatches; proc; opt; flatten; opt -full; hardmap; lower; abc; write_blif --vtr
 ```
 
 3E's `--vtr` writer already refuses a hierarchical top (E10: "hierarchy not flattened (run

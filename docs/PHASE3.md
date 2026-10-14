@@ -25,8 +25,11 @@ decisions 2–3 and 16 below):
    `dual_port_ram`. VTR's own readers give LUT K = 6 (the largest `.names` pb_type) and a RAM
    address width of 15.
 3. **Through P&R**: Odin III alone produces each netlist. The script is `read_verilog
-   --nolatches; proc; opt; flatten; [wreduce;] hardmap; lower; abc; write_blif --vtr`
-   (`wreduce` per decision 7). Then
+   --nolatches; proc; opt; flatten; opt -full; hardmap; lower; abc; write_blif --vtr`
+   (decision 30: `opt -full` after `flatten`, as Parmys runs it), and once 3G lands
+   `read_verilog --nolatches; proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full;
+   hardmap; lower; abc; write_blif --vtr` (decisions 7 and 31: `wreduce` before `flatten`).
+   Both forms are one script; the second only adds the 3G passes. Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
    -crit_path_router_iterations 100` (the `vtr_reg_qor_chain` options) must end with
    `vpr_status=success`. That means VPR packs and places, finds the minimum channel width by
@@ -109,7 +112,8 @@ which PRs remain.
   (decision 29, ruling 2): it is delivered by 3H-3 and 3H-4 (the `tests/vtr/tasks` configs and the
   `run_vtr_task.py` check), not by a separate 3F spec and plan; the box is ticked as folded, and
   the 3H-4 merge is its evidence
-- [ ] 3A `flatten`
+- [ ] 3A `flatten` (implemented on `feat/3A-flatten`: pass, unit/golden/fuzz tests, `flatten-diff`
+  against Yosys 0.55 and the 19-design sweep, decision 34; ticked when the PR merges)
 - [ ] 3B `lower` (simulator-equal before/after on hand-built and micro designs)
 - [ ] 3G `wreduce` (decision 7 = b; a faithful Yosys 0.55 `wreduce`, signed rewrite included)
 - [ ] 3C `hardmap` (Peter reviews; spec first, Peter approves the mapping rules before any code;
@@ -707,7 +711,8 @@ then the options considered.
     `docs/specs/2026-10-14-3A-flatten-design.md`, `docs/plans/2026-10-14-3A-flatten-plan.md`):
     (1) the IR addition `odin3_prov_derive_hier` is approved; (2) modules left unused after
     `flatten` stay in the design (no module-retire IR change); (3) the Phase 3 script becomes
-    `proc; opt; flatten; opt` (as Parmys runs `opt -full` after `flatten`), which updates the exit
+    `proc; opt; flatten; opt` (as Parmys runs `opt -full` after `flatten`; the second `opt` is
+    `opt -full`, as #31 writes it, and `wreduce` joins before `flatten` with 3G), which updates the exit
     item and the 3H script strings; (4) DESIGN §13 #6, 3A side: dotted instance-path names, the
     slash path in provenance.
 31. **3G `wreduce` spec and plan, and 3C `hardmap` spec, approved** (Peter, 2026-10-14: "All 10
@@ -784,7 +789,8 @@ then the options considered.
 now. Lane 1 is the back end: 3E-4, the subprocess tasks 9a..9c, 3D-5, 3H-3 to M1, 3D-7, 3D-8.
 Lane 2 is 3A, then 3B. Lane 3 is 3G, then 3C (spec first), then 3H-4. 3F is folded into 3H.
 The 3D lane did not need Phase 2, but 3A is no longer developed on hand-built IR alone: `flatten`
-is not built, and the Phase 2 script `proc; opt; compact` runs hierarchically until it is.*
+is built on `feat/3A-flatten` (decision 34), and until it merges the Phase 2 script `proc; opt; compact`
+runs hierarchically.*
 
 **Now, with no Phase 2 dependency:**
 
@@ -794,7 +800,9 @@ is not built, and the Phase 2 script `proc; opt; compact` runs hierarchically un
 - **3D**: the adapter, then `abc` with BLIF exchange (decision 9), on the Parmys goldens:
   `read_blif; abc; write_blif --vtr`, then VPR. This is the P′ leg and **M1**: the back half
   of Phase 3 proven on real VTR netlists before 2E/2F land.
-- **3A** on the hierarchical BLIF goldens (multi-model Odin II micros); **3B** on hand-built
+- **3A** on hand-written hierarchical fixtures (`tests/flatten`) and Odin III's own elaboration of
+  Verilog (the Odin II goldens hold no multi-model hierarchy: no `.blif` among the 1,894 under
+  `~/odin3-ws/golden` has more than one `.model` with a body, scanned 2026-10-14); **3B** on hand-built
   word IR, before/after checked by 1E's simulator on random vectors (the 2D cells join when
   2D-1 lands); **3C** on hand-built `$mul`/`$add`/`$mem` (EL-27/39 fix the `$mem` form).
 

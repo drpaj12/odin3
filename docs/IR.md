@@ -702,7 +702,11 @@ of connectivity changes, off by default; IR-6, IR-18 and check rule 4 are unchan
 Under PHASE3 #9 and #14 (3D spec): the `$lut` cell, the pass-run table's arguments and run
 information, and provenance across ABC (IR-12).
 
+Under PHASE3 #30 (3A spec, the one IR addition Peter approved): `odin3_prov_derive_hier` (IR-12),
+`odin3_prov_derive` with a caller-chosen `hier` string, which `flatten` uses to record the instance
+path. Additive: no field, rule, ABI export or check rule changes.
+
 ## 12. Out of scope for Phase 1
 
-`flatten`, memories (`$mem*` types are registered but checked only for widths), the AST
+memories (`$mem*` types are registered but checked only for widths), the AST
 (Phase 2), multi-threading, persistence of the IR to disk (BLIF/JSON writers serve).

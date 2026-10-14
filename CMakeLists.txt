@@ -771,6 +771,15 @@ if(BUILD_TESTING)
                 "read_blif ${PROJECT_SOURCE_DIR}/tests/golden/blif/hand_body.blif; flatten; check")
     set_tests_properties(cli_flatten PROPERTIES LABELS flatten
         PASS_REGULAR_EXPRESSION "flatten: 1 instances expanded \\(0 kept\\) in 1 roots")
+    # 3A Task 5 (spec 14.5): 2,000 random hierarchies of `verilog-gen --flatten` through
+    # flatten + check (Debug runs check around the pass) and sim before = after (a design the
+    # simulator cannot run is counted skipped, never a pass). A failing case is written to
+    # ${PROJECT_BINARY_DIR}/fuzz_flatten as a reproducer.
+    add_test(NAME fuzz_flatten_quick
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/fuzz_flatten --cases 2000 --seed 1
+                --odin3 $<TARGET_FILE:odin3> --repro-dir ${PROJECT_BINARY_DIR}/fuzz_flatten)
+    set_tests_properties(fuzz_flatten_quick PROPERTIES LABELS "flatten;fuzz" SKIP_RETURN_CODE 77
+                         TIMEOUT 3600)
     # hand_ports has no instance: flatten expands nothing and leaves the design as read.
     add_test(NAME cli_flatten_hand_ports
         COMMAND $<TARGET_FILE:odin3> -p
@@ -1942,6 +1951,14 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_flat_dir}/feed.v ${_flat_dir}/keep.v ${_flat_dir}/bb.v ${_flat_dir}/mem.v)
         set_tests_properties(flatten_diff_fixtures PROPERTIES LABELS flatten SKIP_RETURN_CODE 77
                              TIMEOUT 600)
+        # The same generator against Yosys 0.55: names, widths and cell types (the equivalence
+        # proof is the heavy leg: fuzz_flatten --yosys --equiv, 3A Task 5).
+        add_test(NAME fuzz_flatten_yosys_quick
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/fuzz_flatten --cases 300 --seed 5001
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --repro-dir ${PROJECT_BINARY_DIR}/fuzz_flatten)
+        set_tests_properties(fuzz_flatten_yosys_quick PROPERTIES LABELS "flatten;fuzz"
+                             SKIP_RETURN_CODE 77 TIMEOUT 3600)
         # 2D §13/§14.3: Yosys 0.55 reads every write_rtlil fixture of test_rtlil_writer back
         # (read_rtlil; write_rtlil) and lowers it (read_rtlil; proc; opt; write_blif), smallest
         # first.
@@ -2297,6 +2314,23 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/vtr_expect_fail.txt
                         --root ${_vtr_verilog} --cap-for koios/lenet.v=5G ${_vtr_benchmarks})
             set_tests_properties(opt_vtr PROPERTIES LABELS "sweep;nightly")
+            # 3A Task 5 (spec 14.6): the 19 VTR designs of the exit test through flatten, smallest
+            # first, one child at a time: wall, peak RSS, flat sizes, kept (must be 0), the node
+            # counts against the instance tree, bytes per object, and flatten-diff against Yosys
+            # 0.55 (names, widths, cell types by module; tests/flatten/vtr_expect.txt lists known
+            # differences with reasons). The Markdown table is written to
+            # ${PROJECT_BINARY_DIR}/flatten_vtr_table.md. Run: ODIN3_HEAVY_OK=1 ctest --preset
+            # sweep -R '^flatten_vtr_sweep$' from a Release build (the peak RSS needs one).
+            set(_flatten_vtr ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-vtr
+                --odin3 $<TARGET_FILE:odin3> --root ${_vtr_verilog}
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --mem-cap 3G
+                --cap-for mcml.v=5G --cap-for LU32PEEng.v=5G --cap-for bgm.v=5G
+                --expect ${PROJECT_SOURCE_DIR}/tests/flatten/vtr_expect.txt
+                --table ${PROJECT_BINARY_DIR}/flatten_vtr_table.md)
+            if(ODIN3_YOSYS055_OK)
+                list(APPEND _flatten_vtr --yosys ${ODIN3_YOSYS055})
+            endif()
+            odin3_add_sweep_test(flatten_vtr_sweep LABEL sweep COMMAND ${_flatten_vtr})
             # 2F Task 20 (spec 20.2, 20.3, ruling I9): the nightly VTR legs of opt-equiv and
             # opt-diff, run by hand (Peter runs no nightly): tools/opt-check/opt-nightly, one
             # tool run at a time under memcap, smallest file first. opt_equiv_vtr and

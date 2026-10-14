@@ -71,7 +71,7 @@ def parse_rtlil(text: str) -> dict[str, RtlilModule]:
     return modules
 
 
-_YOSYS_PARAMOD = re.compile(r"^\$paramod(?:\$[0-9a-f]+)?\\([^\\]+)\\")
+_YOSYS_PARAMOD = re.compile(r"^\$paramod(?:\$[0-9a-f]+)?\\([^\\]+)(?:\\|$)")
 _ODIN_SPECIALIZED = re.compile(r"^([^$][^$]*)\$[A-Za-z_]\w*=")
 
 

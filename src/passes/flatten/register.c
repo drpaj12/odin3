@@ -5,6 +5,7 @@
  */
 #include "ir/design.h"
 #include "ir/module.h"
+#include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/flatten/flatten.h"
@@ -84,6 +85,24 @@ static odin3_status expand_roots(odin3_flatten_ctx *fc, const odin3_flatten_grap
     return ODIN3_OK;
 }
 
+/* What the run cost, for the estimate's calibration (plan Task 5): the design's reserved bytes and
+ * provenance records before and after, the pre-flight's flat totals and its estimate. */
+typedef struct flatten_before {
+    uint64_t bytes;
+    uint32_t records;
+} flatten_before;
+
+static void log_cost(const odin3_flatten_ctx *fc, const odin3_flatten_totals *tot,
+                     const flatten_before *before, uint64_t estimate) {
+    odin3_log(ODIN3_LOG_INFO,
+              "flatten: cost: bytes %" PRIu64 " -> %" PRIu64 ", provenance records %" PRIu32
+              " -> %" PRIu32 "; flat nodes %" PRIu64 " pins %" PRIu64 " nets %" PRIu64
+              " wires %" PRIu64 "; estimate %" PRIu64 "; renamed %" PRIu64,
+              before->bytes, odin3_design_bytes_reserved(fc->design), before->records,
+              odin3_prov_end(fc->design), tot->nodes, tot->pins, tot->nets, tot->wires, estimate,
+              fc->renamed);
+}
+
 static void report(odin3_flatten_ctx *fc, const odin3_flatten_totals *tot) {
     odin3_log(ODIN3_LOG_INFO,
               "flatten: %" PRIu64 " instances expanded (%" PRIu64 " kept) in %" PRIu32
@@ -118,12 +137,15 @@ odin3_status odin3_flatten_run(odin3_pass_ctx *ctx, odin3_design *design,
         return st;
     }
     odin3_flatten_totals tot = odin3_flatten_graph_totals(graph);
+    flatten_before before = {odin3_design_bytes_reserved(design), odin3_prov_end(design)};
+    uint64_t estimate = odin3_flatten_graph_estimate(graph);
     odin3_log(ODIN3_LOG_INFO, "flatten: %" PRIu64 " instances to expand", tot.instances);
     odin3_flatten_ctx fc;
     st = odin3_flatten_ctx_init(&fc, ctx, graph, opts != NULL ? opts->separator : NULL);
     st = st == ODIN3_OK ? expand_roots(&fc, graph, design) : st;
     if (st == ODIN3_OK) {
         report(&fc, &tot);
+        log_cost(&fc, &tot, &before, estimate);
         odin3_flatten_graph_log_unused(graph);
     }
     odin3_flatten_ctx_free(&fc);
