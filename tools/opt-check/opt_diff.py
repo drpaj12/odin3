@@ -32,8 +32,12 @@ full fast fast-noff nodffe-nosdff`` or ``*``, ``step`` ``histogram``, ``refine``
 listed difference that does not occur fails too (a stale entry). The work directory this tool made
 is removed after a clean run; ``--work DIR`` and a failing run keep it.
 
-Exit codes: 0 no unexpected difference; 1 a difference, or a stale entry; 2 usage, Odin III or Yosys
-failed; 77 skipped (an ASan child and no systemd-run).
+Exit codes (one convention across the opt tools): 0 no unexpected difference; 1 a difference, or a
+stale entry; 2 usage, or Odin III or Yosys exited with an error; 3 hard: a child (Odin III, Yosys or
+netlist-compare) crashed, was killed by a signal or its memory cap, or timed out (never an expected
+difference: no expect line absorbs it); 77 skipped (an ASan child and no systemd-run). The work
+directory this tool made (under ``$TMPDIR``) is removed after a clean run and after an error; a
+failure (1 or 3) keeps it.
 """
 
 from __future__ import annotations
@@ -55,14 +59,14 @@ import opt_rules
 TOOL = "opt-diff"
 HERE = Path(__file__).resolve().parent
 NETLIST_COMPARE = HERE.parent / "netlist-compare" / "netlist-compare"
-EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
+EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
 STEPS = ("histogram", "refine", "identity")
 ODIN_FRONT = "proc", "opt_expr -keepdc"
 LOWERING = ("hierarchy -auto-top", "flatten", "memory", "techmap", "opt -fast", "dffunmap",
             "opt -fast -noff", "opt_clean -purge",
             "write_blif -true + vcc -false + gnd -undef + unconn -blackbox")
 DEFAULT_CAP = 2 << 30
-TIMEOUT_SECONDS = 600.0
+TIMEOUT_SECONDS = opt_equiv.TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True)
@@ -166,12 +170,9 @@ class Diff:
 
     def child(self, what: str, argv: Sequence[str], env: dict[str, str] | None = None
               ) -> subprocess.CompletedProcess[str]:
-        try:
-            done = memcap.run(list(argv), self.cap, capture_output=True, cwd=self.work, env=env,
-                              timeout=TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired as exc:
-            raise opt_equiv.ToolError(f"{what}: timed out after {TIMEOUT_SECONDS:.0f} s") from exc
-        return done
+        """The child under memcap; a timeout, signal or cap kill is a ``CrashError`` naming
+        ``what`` (exit 3)."""
+        return opt_equiv.capped(what, argv, self.cap, cwd=self.work, env=env)
 
     def must(self, what: str, argv: Sequence[str], env: dict[str, str] | None = None) -> str:
         done = self.child(what, argv, env)
@@ -201,14 +202,18 @@ class Diff:
         return result
 
     def compare(self, result: Result, run_dir: Path, logs: tuple[str, str]) -> None:
-        diff = opt_rules.histogram_diff(opt_rules.odin_histogram(logs[0]),
-                                        opt_rules.yosys_histogram(logs[1]))
+        odin_hist = opt_rules.odin_histogram(logs[0])
+        yosys_hist = opt_rules.yosys_histogram(logs[1])
+        if not odin_hist or not yosys_hist:  # two empty histograms compare equal: no verdict
+            side = "odin3" if not odin_hist else "yosys"
+            raise opt_equiv.ToolError(f"no module found in the {side} statistics output")
+        diff = opt_rules.histogram_diff(odin_hist, yosys_hist)
         if diff:
             result.differences["histogram"] = diff
-        ok, why = self.checker.refines(run_dir / "yosys.il", run_dir / "odin.il",
-                                       f"{result.script.slug}.refine")
+        ok, reason = self.checker.refines(run_dir / "yosys.il", run_dir / "odin.il",
+                                          f"{result.script.slug}.refine")
         if not ok:
-            result.differences["refine"] = why
+            result.differences["refine"] = reason
         ident = self.identity(run_dir)
         if ident:
             result.differences["identity"] = ident
@@ -322,12 +327,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     code = EXIT_ERROR
     try:
         code = execute(args, work)
+    except opt_equiv.CrashError as exc:
+        print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
+        code = EXIT_CRASH
     except (OSError, opt_equiv.ToolError, ValueError) as exc:
         print(f"{TOOL}: error: {exc}", file=sys.stderr)
     except memcap.CapUnavailable as exc:
         print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
         code = EXIT_SKIP
-    if made and code == EXIT_OK:
+    if made and code in (EXIT_OK, EXIT_ERROR, EXIT_SKIP):
         shutil.rmtree(work, ignore_errors=True)  # the directory this run made, and only it
     elif made:
         print(f"{TOOL}: work directory kept: {work}", file=sys.stderr)

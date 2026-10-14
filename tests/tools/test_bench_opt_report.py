@@ -163,6 +163,16 @@ class SmokeTest(unittest.TestCase):
     def test_a_failed_child_fails(self) -> None:
         self.assertEqual(self.run_smoke(1, ""), 1)
 
+    def test_a_timeout_fails_without_a_traceback(self) -> None:
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                memcap, "run", side_effect=subprocess.TimeoutExpired(["bench_opt"], 600.0)))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            err = io.StringIO()
+            stack.enter_context(contextlib.redirect_stderr(err))
+            self.assertEqual(bor.smoke("bench_opt", ["a.v"], None, 1 << 30), 1)
+        self.assertIn("timed out", err.getvalue())
+
     def test_a_short_line_fails(self) -> None:
         self.assertEqual(self.run_smoke(0, "bench_opt file=a.v t_total=1\n"), 1)
 

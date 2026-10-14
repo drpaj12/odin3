@@ -25,12 +25,15 @@ from . import helpers
 
 FAKE_ODIN = r"""#!/usr/bin/env python3
 import json
+import os
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 spec = json.loads((HERE / "fake.json").read_text())
 script = sys.argv[sys.argv.index("-p") + 1]
+if spec.get("odin_signal"):
+    os.kill(os.getpid(), spec["odin_signal"])
 with open(HERE / "odin.log", "a") as log:
     log.write(script + "\n")
 paths = [c.split()[1] for c in script.split("; ") if c.startswith("write_rtlil")]
@@ -52,6 +55,8 @@ script = sys.argv[sys.argv.index("-p") + 1]
 with open(HERE / "yosys.log", "a") as log:
     log.write(script + "\n")
 if "equiv_make" in script:
+    if spec.get("refine_signal"):
+        os.kill(os.getpid(), spec["refine_signal"])
     sys.exit(spec.get("refine_rc", 0))
 (Path(os.environ["YOSYS_COVER_DIR"]) / "cover.txt").write_text(spec["cover"])
 sys.stdout.write(spec["ystat"])
@@ -321,6 +326,40 @@ class OptRulesTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("refinement skipped: no model for it", out)
         self.assertIn("refinement: 0 proved, 1 documented skips, 0 failed", out)
+
+    def test_a_yosys_crash_is_hard_and_no_documented_skip_absorbs_it(self) -> None:
+        """Review I3: a Yosys that dies on the check is not `fails the check`."""
+        self.refining(skips="expr/const_and no model for it\n", refine_signal=9)
+        code, out, err = self.tree.run(refine=True)
+        self.assertEqual(code, 3, out + err)
+        self.assertNotIn("refinement skipped", out)
+        self.assertIn("HARD", out + err)
+
+    def test_an_odin3_crash_or_timeout_is_hard(self) -> None:
+        self.good()
+        self.tree.set_spec(odin_signal=11)
+        code, out, err = self.tree.run()
+        self.assertEqual(code, 3, out + err)
+        self.tree.set_spec()
+        with mock.patch.object(memcap, "run",
+                               side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)):
+            argv = ["--odin3", str(self.tree.bin / "odin3"), "--rules", str(self.tree.rules),
+                    "--work", str(self.tree.root / "work2"), "--no-refine",
+                    str(self.tree.root / "rules" / "expr")]
+            code, out, err = helpers.run_main(orr.main, argv)
+        self.assertEqual(code, 3, out + err)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_cap_above_the_limit_is_a_usage_error_not_a_traceback(self) -> None:
+        self.good()
+        argv = ["--odin3", str(self.tree.bin / "odin3"), "--rules", str(self.tree.rules),
+                "--work", str(self.tree.root / "work"), "--no-refine",
+                str(self.tree.root / "rules" / "expr")]
+        with mock.patch.object(memcap, "run",
+                               side_effect=ValueError("cap 9 bytes exceeds 60% of MemTotal")):
+            code, _, err = helpers.run_main(orr.main, argv)
+        self.assertEqual(code, 2)
+        self.assertIn("exceeds", err)
 
     def test_documented_skip_that_refines_is_stale(self) -> None:
         self.refining(skips="expr/const_and no model for it\n", refine_rc=0)

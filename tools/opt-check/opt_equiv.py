@@ -36,7 +36,15 @@ A failing pair prints ``opt-equiv: <NNNN>-<sub>: not a refinement`` with the rul
 run (Odin III's ``--opt-stats`` lines, which cover the whole run). A work directory this tool
 made is removed after a clean run; a failing run, and ``--work DIR``, keep it.
 
-Exit codes: 0 every pair refines; 1 a pair does not; 2 usage, Odin III or a tool error; 77 skipped
+``--min-changed N`` fails (exit 1) a run in which fewer than N calls changed something: a rule
+source is built to make a rule fire, so ``--min-changed 1`` tells a broken or empty
+``--opt-snapshot`` from "nothing to improve". A run with no changing call and no ``N`` prints a
+``NOTE``. An empty snapshot file is an error. The work directory this tool made (under
+``$TMPDIR``) is removed after a clean run and after an error (exit 2); a failure (1 or 3) keeps it.
+
+Exit codes (one convention across the opt tools): 0 every pair refines; 1 a pair does not; 2 usage,
+Odin III or a tool error; 3 hard: a child (Odin III or Yosys) crashed, was killed by a signal or
+its memory cap, or timed out (elab-sweep marks it ``hard``: never an expected failure); 77 skipped
 (an ASan child and no systemd-run).
 """
 
@@ -54,16 +62,15 @@ from pathlib import Path
 
 import clock_sig
 import memcap
+import toolutil
 
 TOOL = "opt-equiv"
 HERE = Path(__file__).resolve().parent
 PHASE2 = HERE / "phase2.script"
-EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
+EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
 DEFAULT_CAP = 2 << 30
 TIMEOUT_SECONDS = 600.0
 REFINE_TIMEOUT_SECONDS = 60.0  # one equivalence proof; past it the answer is "inconclusive"
-TAIL_LINES = 6
-ERROR_LINES = 3
 PAIR_NAME = re.compile(r"^(\d{4})-(opt_[a-z]+)-before\.il$")
 STAT_LINE = re.compile(r"opt: rule (\S+) (\d+)\s*$", re.M)
 MODULE_LINE = re.compile(r"^module (\\\S+)\s*$", re.M)
@@ -74,6 +81,37 @@ OPT_WORD = re.compile(r"^opt(_[a-z]+)?(\s|$)")
 
 class ToolError(Exception):
     """A bad argument or an unusable tool (exit 2)."""
+
+
+class CrashError(ToolError):
+    """A child crashed, was killed (signal, memory cap) or timed out (exit 3, hard). ``what`` names
+    the step (``odin3``, ``yosys``, ``netlist-compare``...)."""
+
+    def __init__(self, what: str, message: str, timed_out: bool = False) -> None:
+        super().__init__(f"{what}: {message}")
+        self.what = what
+        self.timed_out = timed_out
+
+
+exe = toolutil.exe
+tail = toolutil.tail
+why = toolutil.why
+parse_size = toolutil.parse_size
+
+
+def capped(what: str, argv: Sequence[str], cap: int, *, cwd: Path,
+           env: dict[str, str] | None = None, timeout: float = TIMEOUT_SECONDS
+           ) -> subprocess.CompletedProcess[str]:
+    """``memcap.run`` of a child; a timeout is a ``CrashError``, as is an exit that is a signal or
+    a cap kill (any other exit code is the child's own verdict, for the caller to judge)."""
+    try:
+        done = memcap.run(list(argv), cap, capture_output=True, cwd=cwd, env=env, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise CrashError(what, f"timed out after {timeout:.0f} s", True) from exc
+    if toolutil.is_crash(done.returncode):
+        log = (done.stdout or "") + (done.stderr or "")
+        raise CrashError(what, f"killed (exit {done.returncode}): {why(log)}")
+    return done
 
 
 @dataclass
@@ -197,25 +235,13 @@ def refinement_script(gold: str, gate: str, procs: bool = False,
                       lowering: Sequence[str] = LOWERINGS[1]) -> str:
     """Spec 20.2's Yosys script for two RTLIL files that ``rename_modules`` already made
     ``gold``/``gate``; ``procs`` adds ``proc``, ``lowering`` the commands that run on both sides
-    before the miter."""
-    steps = [f"read_rtlil {gold}", f"read_rtlil {gate}", *(["proc"] if procs else []), *lowering]
+    before the miter. Each side is flattened first: ``equiv_make`` matches only the two tops, so a
+    submodule's flip-flops would otherwise keep independent x initial values (review I4)."""
+    steps = [f"read_rtlil {gold}", f"read_rtlil {gate}", *(["proc"] if procs else []), "flatten",
+             *lowering]
     steps += ["equiv_make gold gate eq", "hierarchy -top eq", "flatten",
               "equiv_simple -undef -seq 4", "equiv_induct -undef", "equiv_status -assert"]
     return "; ".join(steps)
-
-
-def tail(text: str, lines: int = TAIL_LINES) -> str:
-    return " | ".join(text.strip().splitlines()[-lines:])
-
-
-def why(text: str) -> str:
-    """A child's failure in one line: its first error lines, else the last lines of its output."""
-    errors = [line.strip() for line in text.splitlines() if "error" in line.lower()]
-    return " | ".join(errors[:ERROR_LINES]) if errors else tail(text)
-
-
-def exe(name: str) -> str:
-    return str(Path(name).resolve()) if "/" in name else name
 
 
 class Checker:
@@ -231,11 +257,12 @@ class Checker:
         self.top = top
 
     def child(self, argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
-        return memcap.run(list(argv), self.cap, capture_output=True, cwd=self.work,
-                          timeout=REFINE_TIMEOUT_SECONDS)
+        return capped("yosys", argv, self.cap, cwd=self.work, timeout=REFINE_TIMEOUT_SECONDS)
 
     def refines(self, gold: Path, gate: Path, tag: str) -> tuple[bool, str]:
-        """(True, '') when ``gate`` refines ``gold``; else (False, Yosys's last lines)."""
+        """(True, '') when ``gate`` refines ``gold``; else (False, Yosys's last lines) after an
+        exit that is Yosys's own verdict (an unproven pair, an ``ERROR``). A Yosys crash, signal,
+        memory-cap kill or timeout is a ``CrashError``, never "not a refinement" (review I3)."""
         gold_text = gold.read_text(encoding="utf-8")
         gate_text = gate.read_text(encoding="utf-8")
         gold_out = self.work / f"{tag}.gold.il"
@@ -246,15 +273,21 @@ class Checker:
                             encoding="utf-8")
         procs = has_processes(gold_text) or has_processes(gate_text)
         last = ""
+        crashed: CrashError | None = None
         for lowering in self.flows(clock_sig.same_clocks(gold_text, gate_text)):
             script = refinement_script(str(gold_out), str(gate_out), procs, lowering)
             try:
                 done = self.child([self.yosys, "-p", script])
-            except subprocess.TimeoutExpired:
-                return False, f"inconclusive: timed out after {REFINE_TIMEOUT_SECONDS:.0f} s"
+            except CrashError as exc:
+                if exc.timed_out:  # a timeout stops the pair
+                    raise
+                crashed = crashed or exc  # a lowering that aborts proves nothing: try the next
+                continue
             if done.returncode == 0:
                 return True, ""
             last = tail((done.stdout or "") + (done.stderr or ""))
+        if crashed is not None:  # no proof, and a lowering died: not a verdict
+            raise crashed
         return False, last
 
     def flows(self, one_clock: bool = False) -> list[Sequence[str]]:
@@ -295,14 +328,13 @@ def counter_text(counters: dict[str, int]) -> str:
 
 def run_odin(odin3: str, args: Sequence[str], script: str, work: Path, cap: int
              ) -> subprocess.CompletedProcess[str]:
-    return memcap.run([exe(odin3), *args, "-p", script], cap, capture_output=True, cwd=work,
-                      timeout=TIMEOUT_SECONDS)
+    return capped("odin3", [exe(odin3), *args, "-p", script], cap, cwd=work)
 
 
 def snapshot_run(odin3: str, files: Sequence[str], top: str | None, script: Sequence[str],
                  work: Path, cap: int, techlib: str | None = None) -> Run:
     """Odin III with ``--opt-snapshot``: the pairs it wrote and its counters. ``ToolError`` when
-    it fails."""
+    it fails (``CrashError`` when it crashed or timed out) or wrote an empty snapshot file."""
     snap = work / "snap"
     snap.mkdir(exist_ok=True)
     commands = [*read_commands(files, top, True, techlib), *with_stats(script)]
@@ -311,14 +343,19 @@ def snapshot_run(odin3: str, files: Sequence[str], top: str | None, script: Sequ
     log = (done.stdout or "") + (done.stderr or "")
     if done.returncode != 0:
         raise ToolError(f"odin3 exit {done.returncode}: {why(log)}")
-    return Run(collect_pairs(snap), parse_counters(log), log)
+    pairs = collect_pairs(snap)
+    for pair in pairs:
+        for path in (pair.before, pair.after):
+            if not path.read_text(encoding="utf-8").strip():
+                raise ToolError(f"empty snapshot file {path.name}: --opt-snapshot is broken")
+    return Run(pairs, parse_counters(log), log)
 
 
 def check_all(run: Run, checker: Checker) -> list[Verdict]:
     verdicts: list[Verdict] = []
     for pair in run.pairs:
-        ok, why = checker.refines(pair.before, pair.after, pair.name)
-        verdicts.append(Verdict(pair, ok, why))
+        ok, reason = checker.refines(pair.before, pair.after, pair.name)
+        verdicts.append(Verdict(pair, ok, reason))
     return verdicts
 
 
@@ -334,6 +371,8 @@ def report(verdicts: Sequence[Verdict], counters: dict[str, int]) -> list[str]:
     bad = sum(1 for v in verdicts if not v.ok)
     lines.append(f"{TOOL}: {len(verdicts)} calls changed something: "
                  f"{len(verdicts) - bad} refine, {bad} do not")
+    if not verdicts:
+        lines.append(f"{TOOL}: NOTE: 0 calls changed anything: nothing was checked")
     return lines
 
 
@@ -350,17 +389,10 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--mem-cap", type=parse_size, default=DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 2G)")
     ap.add_argument("--work", type=Path, help="the work directory (kept)")
+    ap.add_argument("--min-changed", type=int, default=0, metavar="N",
+                    help="fail (exit 1) unless at least N calls changed something")
     ap.add_argument("files", nargs="+", help="the Verilog files of one design")
     return ap.parse_args(argv)
-
-
-def parse_size(text: str) -> int:
-    units = {"k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
-    scale = units.get(text[-1:].lower(), 1)
-    digits = text[:-1] if text[-1:].lower() in units else text
-    if not digits.isdigit():
-        raise argparse.ArgumentTypeError(f"bad size '{text}'")
-    return int(digits) * scale
 
 
 def execute(args: argparse.Namespace, work: Path) -> int:
@@ -373,6 +405,10 @@ def execute(args: argparse.Namespace, work: Path) -> int:
     verdicts = check_all(run, checker)
     for line in report(verdicts, run.counters):
         print(line, flush=True)
+    if len(verdicts) < args.min_changed:
+        print(f"{TOOL}: {len(verdicts)} calls changed something, want at least "
+              f"{args.min_changed}", flush=True)
+        return EXIT_FAIL
     return EXIT_FAIL if any(not v.ok for v in verdicts) else EXIT_OK
 
 
@@ -385,12 +421,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     code = EXIT_ERROR
     try:
         code = execute(args, work)
+    except CrashError as exc:
+        print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
+        code = EXIT_CRASH
     except (OSError, ToolError, ValueError) as exc:
         print(f"{TOOL}: error: {exc}", file=sys.stderr)
     except memcap.CapUnavailable as exc:
         print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
         code = EXIT_SKIP
-    if made and code == EXIT_OK:
+    if made and code in (EXIT_OK, EXIT_ERROR, EXIT_SKIP):
         shutil.rmtree(work, ignore_errors=True)  # the directory this run made, and only it
     elif made:
         print(f"{TOOL}: work directory kept: {work}", file=sys.stderr)

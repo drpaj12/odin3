@@ -88,7 +88,7 @@ from run_rows_equiv import parse_expect_line
 
 TOOL = "elab-sweep"
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_SKIP = 0, 1, 2, 77
-OPT_CRASH = 3  # opt-run: its child crashed, was cap-killed or timed out
+OPT_CRASH = 3  # opt-equiv, opt-diff, opt-run: a child crashed, was cap-killed or timed out (hard)
 TIMEOUT_S = 3600  # a file past an hour is that file's failure
 TAIL_LINES = 3
 SUFFIX = ".v"
@@ -474,8 +474,8 @@ def run_proc_diff(cfg: Config, item: Item, cap: int) -> Outcome:
 
 
 def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
-    """opt-equiv, opt-diff or opt-run on the file: exit 0 passes, 1 is a difference, and 3
-    (opt-run) a crash or timeout: hard."""
+    """opt-equiv, opt-diff or opt-run on the file: exit 0 passes, 1 is a difference, 2 an error,
+    and 3 (the one convention of the opt tools) a crash, cap kill or timeout of a child: hard."""
     start = time.monotonic()
     assert cfg.yosys is not None or cfg.opt_tool == "opt-run"
     top = top_for(item, cfg.tops, cfg.golden_root)
@@ -499,8 +499,7 @@ def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
         return Outcome("skip", secs, "cannot be capped")
     why = "NOT ok: " if done.returncode == 1 else ""
     return Outcome("fail", secs, why + (first_error(text) or f"exit {done.returncode}"), text,
-                   hard=done.returncode < 0
-                   or done.returncode == OPT_CRASH)
+                   hard=done.returncode < 0 or done.returncode == OPT_CRASH)
 
 
 def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:

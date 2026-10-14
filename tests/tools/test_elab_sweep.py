@@ -95,7 +95,7 @@ argv = sys.argv[1:]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(["opt-tool", os.path.basename(sys.argv[0]), *argv]) + "\\n")
 text = open(argv[-1]).read()
-for code in (1, 2):
+for code in (1, 2, 3):
     if f"OT{code}" in text:
         print(f"opt-tool: message for exit {code}")
         sys.exit(code)
@@ -567,6 +567,20 @@ class OptModesTest(SweepTestCase):
             self.assertEqual(argv[argv.index("--top") + 1], "cpu")
             self.assertEqual(argv[argv.index("--yosys") + 1].split("/")[-1], "Y")
             self.assertIn("--script=phase2", argv)
+
+    def test_exit_3_is_hard_in_both_modes_even_with_an_expect_fail_needle(self) -> None:
+        """Review I1: a crash, kill or timeout inside opt-equiv/opt-diff is never listed away."""
+        fake = _exe(self.bin / "fake_opt_tool.py", FAKE_OPT_TOOL)
+        self.write("m/c.v", "OT3\n")
+        expect = self.expect("c.v [message for exit 3] listed\n")
+        for mode, name in (("--opt-equiv", "opt-equiv"), ("--opt-diff", "opt-diff")):
+            tools = dict(elab_sweep.OPT_TOOLS, **{name: fake})
+            with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+                code, out, _ = self.run_tool(mode, "--yosys", "Y", "--expect-fail", str(expect),
+                                             str(self.dir / "m"))
+            self.assertEqual(code, 1, out)
+            self.assertIn("FAIL  c.v", out)
+            self.assertNotIn("xfail", out)
 
     def test_modes_need_yosys_and_exclude_each_other(self) -> None:
         self.write("m/a.v", "x\n")

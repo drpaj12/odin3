@@ -66,6 +66,15 @@ def fake_run(argv: Sequence[str], cap: int, **kwargs: Any) -> subprocess.Complet
                           cwd=kwargs.get("cwd"), env=kwargs.get("env"))
 
 
+def yosys_exits(status: int) -> Any:
+    """A memcap.run stand-in: the refinement check's Yosys exits with ``status``."""
+    def effect(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+        if "equiv_make" in " ".join(argv):
+            return subprocess.CompletedProcess(list(argv), status, "", "")
+        return fake_run(argv, cap, **kw)
+    return effect
+
+
 class Fakes:
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -94,19 +103,20 @@ class PureTest(unittest.TestCase):
     def test_script_default_lowering(self) -> None:
         self.assertEqual(
             oe.refinement_script("g.il", "h.il"),
-            "read_rtlil g.il; read_rtlil h.il; clk2fflogic; opt_merge; opt_clean; techmap; "
-            "equiv_make gold gate eq; hierarchy -top eq; flatten; equiv_simple -undef -seq 4; "
-            "equiv_induct -undef; equiv_status -assert")
+            "read_rtlil g.il; read_rtlil h.il; flatten; clk2fflogic; opt_merge; opt_clean; "
+            "techmap; equiv_make gold gate eq; hierarchy -top eq; flatten; "
+            "equiv_simple -undef -seq 4; equiv_induct -undef; equiv_status -assert")
 
     def test_script_variants(self) -> None:
         plain = oe.refinement_script("g.il", "h.il", lowering=())
         self.assertNotIn("clk2fflogic", plain)
         self.assertNotIn("proc", plain)
-        self.assertIn("read_rtlil h.il; equiv_make gold gate eq", plain)
+        self.assertIn("read_rtlil h.il; flatten; equiv_make gold gate eq", plain)
         procs = oe.refinement_script("g.il", "h.il", procs=True, lowering=oe.ONE_CLOCK[0])
-        self.assertIn("read_rtlil h.il; proc; async2sync; equiv_make", procs)
+        self.assertIn("read_rtlil h.il; proc; flatten; async2sync; equiv_make", procs)
         self.assertNotIn("techmap", procs)
-        self.assertIn("memory; clk2fflogic; opt_merge; opt_clean; techmap; equiv_make",
+        self.assertIn("flatten; memory; clk2fflogic; opt_merge; opt_clean; techmap; "
+                      "equiv_make",
                       oe.refinement_script("g.il", "h.il", lowering=oe.LOWERINGS[2]))
 
     def test_flows_follow_the_clocks(self) -> None:
@@ -220,6 +230,78 @@ class MainTest(unittest.TestCase):
         code, out, _ = self.fakes.main()
         self.assertEqual(code, 0)
         self.assertIn("0 calls changed something", out)
+
+    def run_with(self, side_effect: Any, *extra: str) -> tuple[int, str, str]:
+        argv = ["--odin3", str(self.fakes.bin / "odin3"), "--yosys", str(self.fakes.bin / "yosys"),
+                "--work", str(self.fakes.root / "work"), *extra, str(self.fakes.root / "d.v")]
+        with mock.patch.object(memcap, "run", side_effect=side_effect):
+            return helpers.run_main(oe.main, argv)
+
+    def test_an_odin3_timeout_is_hard_exit_3(self) -> None:
+        """Review I1: an uncaught TimeoutExpired was a traceback with exit 1."""
+        code, _, err = self.run_with(subprocess.TimeoutExpired(["odin3"], 1.0))
+        self.assertEqual(code, 3, err)
+        self.assertIn("timed out", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_an_odin3_crash_is_hard_exit_3(self) -> None:
+        for status in (-11, -9, 137):
+            with self.subTest(status=status):
+                done = subprocess.CompletedProcess(["odin3"], status, "", "boom")
+                code, _, err = self.run_with(lambda *a, _d=done, **k: _d)
+                self.assertEqual(code, 3, err)
+                self.assertIn("odin3", err)
+
+    def test_a_yosys_crash_or_timeout_is_hard_not_a_refutation(self) -> None:
+        """Review I3: rc -9 or a timeout of the proof is not `not a refinement`."""
+        self.fakes.spec(self.pair("0001", "opt_expr"))
+        for status in (-9, -11, 137):
+            with self.subTest(status=status):
+                code, out, err = self.run_with(yosys_exits(status))
+                self.assertEqual(code, 3, out + err)
+                self.assertNotIn("not a refinement", out + err)
+
+        def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if "equiv_make" in " ".join(argv):
+                raise subprocess.TimeoutExpired(list(argv), 60.0)
+            return fake_run(argv, cap, **kw)
+        code, out, err = self.run_with(hang)
+        self.assertEqual(code, 3, out + err)
+        self.assertNotIn("not a refinement", out + err)
+
+    def test_zero_changing_calls_are_reported_and_min_changed_fails_them(self) -> None:
+        """Review I5."""
+        self.fakes.spec({})
+        code, out, _ = self.fakes.main()
+        self.assertEqual(code, 0)
+        self.assertIn("0 calls changed something", out)
+        self.assertIn("NOTE: 0 calls changed anything", out)
+        code, out, err = self.fakes.main("--min-changed", "1")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("0 calls changed something, want at least 1", out + err)
+        self.fakes.spec(self.pair("0001", "opt_expr"))
+        self.assertEqual(self.fakes.main("--min-changed", "1")[0], 0)
+        code, out, _ = self.fakes.main("--min-changed", "2")
+        self.assertEqual(code, 1, out)
+
+    def test_an_empty_snapshot_file_is_an_error_not_a_pass(self) -> None:
+        self.fakes.spec({"0001-opt_expr-before.il": "", "0001-opt_expr-after.il": ""})
+        code, _, err = self.fakes.main()
+        self.assertEqual(code, 2)
+        self.assertIn("empty snapshot", err)
+
+    def test_work_dir_follows_tmpdir_and_is_removed_after_ok_and_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            argv = ["--odin3", str(self.fakes.bin / "odin3"), "--yosys",
+                    str(self.fakes.bin / "yosys"), str(self.fakes.root / "d.v")]
+            self.fakes.spec(self.pair("0001", "opt_expr"))
+            with mock.patch.dict(os.environ, {"TMPDIR": tmpdir}), \
+                    mock.patch.object(memcap, "run", fake_run):
+                self.assertEqual(helpers.run_main(oe.main, argv)[0], 0)
+                self.assertEqual(list(Path(tmpdir).iterdir()), [])
+                self.fakes.spec({}, exit=1)
+                self.assertEqual(helpers.run_main(oe.main, argv)[0], 2)
+                self.assertEqual(list(Path(tmpdir).iterdir()), [])
 
 
 YOSYS = os.environ.get("ODIN3_YOSYS055", "")
@@ -346,6 +428,13 @@ class ProbeTest(unittest.TestCase):
         (self.work / "h.il").write_text(gate)
         return self.checker.refines(self.work / "g.il", self.work / "h.il", "p")[0]
 
+    def accepts(self, gold: str, gate: str) -> bool:
+        """True when the check proves the pair; a hard Yosys death (CrashError) is not a proof."""
+        try:
+            return self.refines(gold, gate)
+        except oe.CrashError:
+            return False
+
     def test_x_in_the_gold_is_a_dont_care(self) -> None:
         self.assertTrue(self.refines(MUX_X, PLAIN_A))
 
@@ -363,7 +452,35 @@ class ProbeTest(unittest.TestCase):
         """Review C1: a flipped clock edge and a wrong clock net are no longer accepted."""
         for name, text in CLOCK_MUTANTS.items():
             with self.subTest(mutant=name):
-                self.assertFalse(self.refines(CLOCK_GOLD, text))
+                self.assertFalse(self.accepts(CLOCK_GOLD, text))
+
+    def test_a_yosys_abort_is_hard_not_a_refutation(self) -> None:
+        """The async2sync lowering aborts (ezSAT assertion) on an $sdff against an $adff; the later
+        lowering refutes, but a pair whose first lowering died has no verdict: CrashError."""
+        with self.assertRaises(oe.CrashError):
+            self.refines(CLOCK_GOLD, CLOCK_MUTANTS["sync_reset_for_async"])
+
+
+    def test_a_top_rewrite_over_a_sequential_submodule_refines(self) -> None:
+        """Review I4: the 0001-opt_expr call of micro/bm_if_collapse.v (an `$eq` of the top to a
+        `$not`, with a submodule of x-init flops). equiv_make matches only the two tops, so the
+        submodule outputs were `unproven`; flatten before equiv_make proves the pair."""
+        self.assertTrue(self.refines(
+            (helpers.FIXTURES / "opt_equiv_hier_before.il").read_text(encoding="utf-8"),
+            (helpers.FIXTURES / "opt_equiv_hier_after.il").read_text(encoding="utf-8")))
+
+    def test_the_unflattened_script_cannot_prove_it(self) -> None:
+        """The control: without `flatten` the same pair is `unproven` (the I4 false negative)."""
+        for side in ("before", "after"):
+            text = (helpers.FIXTURES / f"opt_equiv_hier_{side}.il").read_text(encoding="utf-8")
+            (self.work / f"{side}.il").write_text(
+                oe.rename_modules(text, "gold" if side == "before" else "gate", "\\bm_if_collapse"))
+        script = oe.refinement_script(str(self.work / "before.il"), str(self.work / "after.il"),
+                                      True, oe.ONE_CLOCK[0]).replace("proc; flatten;", "proc;", 1)
+        done = subprocess.run([YOSYS, "-q", "-p", script], capture_output=True, text=True,
+                              check=False)
+        self.assertEqual(done.returncode, 1, done.stderr[-300:])
+        self.assertIn("unproven", done.stdout + done.stderr)
 
     def test_same_clock_pairs_take_the_one_clock_family(self) -> None:
         self.assertTrue(clock_sig.same_clocks(CLOCK_GOLD, CLOCK_GOLD))

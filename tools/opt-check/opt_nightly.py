@@ -46,6 +46,8 @@ from pathlib import Path
 
 import elab_sweep
 import memcap
+import opt_equiv
+import toolutil
 from elab_equiv import format_cap
 
 TOOL = "opt-nightly"
@@ -189,7 +191,8 @@ def run_unit(cfg: Config, unit: Unit, item: elab_sweep.Item, cap: int) -> Result
     except OSError as exc:
         return Result(1, time.monotonic() - start, f"cannot run {unit.tool.name}: {exc}", True)
     text = (done.stdout or "") + (done.stderr or "")
-    hard = done.returncode < 0 or any(mark in text for mark in HARD_MARKS)
+    hard = (toolutil.is_crash(done.returncode) or done.returncode == opt_equiv.EXIT_CRASH
+            or any(mark in text for mark in HARD_MARKS))
     return Result(done.returncode, time.monotonic() - start, text, hard)
 
 
@@ -258,6 +261,8 @@ def execute(args: argparse.Namespace, runner: Runner = run_unit,
     expect = elab_sweep.merge_expect(args.expect_fail or list(DEFAULT_EXPECT))
     items = collect_set(root, args.set)
     run, _ = select(items, expect, args.xl, args.limit)
+    if not run:
+        raise UsageError("no file selected (an empty set, --limit 0, or --xl with no xl file)")
     cfg = Config(args.odin3, args.yosys, root, args.mem_cap, parse_caps(args.cap_for),
                  elab_sweep.read_tops(args.tops) if args.tops else {}, args.techlib,
                  args.diff_expect, args.keep, args.timeout, args.leg)

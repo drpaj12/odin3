@@ -145,6 +145,16 @@ class UnitsTest(unittest.TestCase):
         self.assertEqual(run.call_args.args[1], 3 << 30)
         self.assertEqual(run.call_args.kwargs["timeout"], 9.0)
 
+    def test_exit_3_of_a_tool_is_hard(self) -> None:
+        """Review I1: opt-equiv/opt-diff exit 3 for a crash, kill or timeout of a child."""
+        cfg = nightly.Config("O", "Y", Path("/r"), 3 << 30, {}, {}, None, Path("de"), None, 9.0)
+        item = elab_sweep.Item(Path("/r/a.v"), "a.v", 1)
+        for code, hard in ((3, True), (-9, True), (1, False), (2, False)):
+            done = mock.Mock(returncode=code, stdout="a message\n", stderr="")
+            with mock.patch.object(memcap, "run", return_value=done):
+                res = nightly.run_unit(cfg, nightly.units()[0], item, 3 << 30)
+            self.assertEqual(res.hard, hard, code)
+
 
 class RunTest(Base):
     def test_every_file_runs_six_units_smallest_first_and_prints_a_line_each(self) -> None:
@@ -166,6 +176,10 @@ class RunTest(Base):
         self.assertEqual(code, 0)
         self.assertEqual([c[0] for c in runs.calls[::6]], ["b.v", "c.v", "a.v"])
         self.assertIn("3 files (1 skipped", lines[-1])
+
+    def test_limit_0_selects_nothing_and_is_a_usage_error_not_a_pass(self) -> None:
+        with self.assertRaises(nightly.UsageError):
+            self.execute(Runs(), limit=0)
 
     def test_cap_for_raises_one_files_cap(self) -> None:
         runs = Runs()

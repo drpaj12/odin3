@@ -39,8 +39,10 @@ leaves the check out.
 ``--write`` (which needs ``--yosys``) writes the ``.il`` goldens only when every row passes every
 check; on any failure nothing is written. Every child runs through ``memcap.run`` (one at a time).
 
-Exit codes: 0 every row passed; 1 a row failed; 2 a usage error or an unusable tool; 77 skipped (an
-ASan odin3 and no ``systemd-run``).
+Exit codes (one convention across the opt tools): 0 every row passed; 1 a row failed; 2 a usage
+error or an unusable tool; 3 hard: a child (Odin III or Yosys) crashed, was killed by a signal or
+its memory cap, or timed out (the run stops at that row; no refinement skip absorbs it); 77 skipped
+(an ASan odin3 and no ``systemd-run``).
 """
 
 from __future__ import annotations
@@ -58,9 +60,10 @@ from pathlib import Path
 
 import memcap
 import opt_equiv
+import toolutil
 
 TOOL = "opt-rules"
-EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
+EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
 SUBS = ("expr", "merge", "muxtree", "reduce", "share", "dff", "clean")
 SOURCE_SUFFIXES = (".v", ".blif")
 SKIP_FILE = "refine_skip.txt"
@@ -71,7 +74,6 @@ PENDING = "pending"
 DEV_PREFIX = "dev="
 DEFAULT_CAP = 2 << 30
 TIMEOUT_SECONDS = 120.0
-TAIL_LINES = 6
 
 # Pseudo-counters: the INFO line of a sub-pass call carries the count in group 1.
 INFO_COUNTERS = {
@@ -315,12 +317,9 @@ def yosys_checks(rule: Rule, log: str, cover_text: str, odin: Histogram) -> list
     return found
 
 
-def tail(text: str) -> str:
-    return " | ".join(text.strip().splitlines()[-TAIL_LINES:])
-
-
-def exe(name: str) -> str:
-    return str(Path(name).resolve()) if "/" in name else name
+tail = toolutil.tail
+exe = toolutil.exe
+_size = toolutil.parse_size
 
 
 class Runner:
@@ -341,10 +340,11 @@ class Runner:
         elif self.made:
             print(f"{TOOL}: work directory kept: {self.work}", file=sys.stderr)
 
-    def child(self, argv: Sequence[str], env: dict[str, str] | None = None
+    def child(self, what: str, argv: Sequence[str], env: dict[str, str] | None = None
               ) -> subprocess.CompletedProcess[str]:
-        return memcap.run(list(argv), self.cap, capture_output=True, cwd=self.work, env=env,
-                          timeout=TIMEOUT_SECONDS)
+        """The child under memcap; a timeout, signal or cap kill is a ``CrashError`` (exit 3)."""
+        return opt_equiv.capped(what, argv, self.cap, cwd=self.work, env=env,
+                                timeout=TIMEOUT_SECONDS)
 
     def run_odin(self, rule: Rule, source: Path, options: list[str], run_dir: Path,
                  outcome: Outcome) -> str | None:
@@ -352,7 +352,7 @@ class Runner:
         prepass = source_prepass(source.read_text(encoding="utf-8"))
         script = odin_script(rule, source, options, run_dir / "in.il", run_dir / "out.il", prepass,
                              self.args.simcheck_min > 0)
-        done = self.child([exe(self.args.odin3), "-p", script])
+        done = self.child("odin3", [exe(self.args.odin3), "-p", script])
         log = (done.stdout or "") + (done.stderr or "")
         if done.returncode != 0:
             outcome.failures.append(f"odin3 exit {done.returncode}: {tail(log)}")
@@ -370,7 +370,7 @@ class Runner:
         cover.mkdir(exist_ok=True)
         env = {**os.environ, "YOSYS_COVER_DIR": str(cover)}
         script = yosys_script(rule, options, run_dir / "in.il")
-        done = self.child([exe(self.args.yosys), "-p", script], env=env)
+        done = self.child("yosys", [exe(self.args.yosys), "-p", script], env=env)
         log = (done.stdout or "") + (done.stderr or "")
         if done.returncode != 0:
             outcome.failures.append(f"yosys exit {done.returncode}: {tail(log)}")
@@ -389,6 +389,8 @@ class Runner:
         checker = opt_equiv.Checker(self.args.yosys, run_dir, self.cap)
         try:
             ok, why = checker.refines(run_dir / "in.il", run_dir / "out.il", "refine")
+        except opt_equiv.CrashError:
+            raise  # a dying Yosys is no refutation: it satisfies no documented skip
         except opt_equiv.ToolError as exc:
             ok, why = False, str(exc)
         reason = self.skips.get(rule.name)
@@ -413,14 +415,11 @@ class Runner:
         options = source_options(source.read_text(encoding="utf-8"))
         run_dir = (self.work / rule.name.replace("/", "_")).resolve()
         run_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            log = self.run_odin(rule, source, options, run_dir, outcome)
-            if log is not None and self.args.yosys:
-                self.run_yosys(rule, options, run_dir, log, outcome)
-                if not self.args.no_refine:
-                    self.refine(rule, run_dir, outcome)
-        except subprocess.TimeoutExpired:
-            outcome.failures.append(f"timed out after {TIMEOUT_SECONDS:.0f} s")
+        log = self.run_odin(rule, source, options, run_dir, outcome)
+        if log is not None and self.args.yosys:
+            self.run_yosys(rule, options, run_dir, log, outcome)
+            if not self.args.no_refine:
+                self.refine(rule, run_dir, outcome)
         golden = golden_path(source)
         if outcome.out_il and not self.args.write:
             if not golden.is_file():
@@ -500,7 +499,12 @@ def run(args: argparse.Namespace) -> int:
         if not rule.pending and not source.is_file():
             outcome = Outcome(rule, ["no source file"])
         else:
-            outcome = runner.one(rule, source)
+            try:
+                outcome = runner.one(rule, source)
+            except opt_equiv.CrashError as exc:
+                print(f"{TOOL}: {rule.name}: HARD: {exc}", flush=True)
+                runner.cleanup(False)
+                return EXIT_CRASH
         outcomes.append(outcome)
         print(report(outcome), flush=True)
     for name in orphan_sources(rules, rules_root):
@@ -560,20 +564,11 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
-def _size(text: str) -> int:
-    units = {"k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
-    scale = units.get(text[-1:].lower(), 1)
-    digits = text[:-1] if text[-1:].lower() in units else text
-    if not digits.isdigit():
-        raise argparse.ArgumentTypeError(f"bad size '{text}'")
-    return int(digits) * scale
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
     try:
         return run(args)
-    except (OSError, UsageError) as exc:
+    except (OSError, UsageError, ValueError) as exc:
         print(f"{TOOL}: error: {exc}", file=sys.stderr)
         return EXIT_ERROR
     except memcap.CapUnavailable as exc:

@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -181,7 +182,12 @@ def smoke(bench: str, files: Sequence[str], techlib: str | None, cap: int) -> in
     failed = 0
     for path in files:
         argv = [bench, "--one", path, *(["--techlib", techlib] if techlib else [])]
-        done = memcap.run(argv, cap, capture_output=True, timeout=600)
+        try:
+            done = memcap.run(argv, cap, capture_output=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            print(f"{TOOL}: {path}: timed out after 600 s", file=sys.stderr)
+            failed += 1
+            continue
         if done.returncode != 0:
             print(f"{TOOL}: {path}: exit {done.returncode}: {(done.stderr or '').strip()}",
                   file=sys.stderr)
