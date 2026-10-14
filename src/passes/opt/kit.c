@@ -207,6 +207,7 @@ odin3_status odin3_opt_ctx_init(odin3_opt_ctx *oc, odin3_pass_ctx *pass, odin3_m
     odin3_vec_init(&oc->invert, sizeof(odin3_net_id));
     oc->mod = odin3_opt_modstate_of(oc->design, module);
     odin3_vec_init(&oc->ties, sizeof(odin3_net_pair));
+    odin3_vec_init(&oc->warned, sizeof(uint32_t));
     return ODIN3_OK;
 }
 
@@ -216,6 +217,68 @@ void odin3_opt_ctx_free(odin3_opt_ctx *oc) {
     }
     odin3_vec_free(&oc->invert);
     odin3_vec_free(&oc->ties);
+    odin3_vec_free(&oc->warned);
+}
+
+/* --- the mixed-sign ruling ------------------------------------------------------------------ */
+
+enum { PARAM_A_SIGNED = 0, PARAM_B_SIGNED = 1, KIT_LABEL_MAX = 256 };
+static const uint32_t UNNAMED_KEY = 0x80000000U; /* a node ID with this bit stands for an unnamed cell */
+
+static bool flag_set(const odin3_module *module, odin3_node_id node, uint32_t index) {
+    const odin3_value *val = odin3_node_param(module, node, index);
+    return val != NULL && val->i != 0;
+}
+
+bool odin3_opt_both_signed(const odin3_module *module, odin3_node_id node) {
+    return flag_set(module, node, PARAM_A_SIGNED) && flag_set(module, node, PARAM_B_SIGNED);
+}
+
+/* True when key is in the sorted set already; else inserts it (false). A failed insert reports
+ * "seen": a lost warning is no reason to fail a rewrite. */
+static bool warned_seen(odin3_vec *set, uint32_t key) {
+    size_t lo = 0;
+    size_t hi = set->len;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        uint32_t at = *(const uint32_t *)odin3_vec_cat(set, mid);
+        if (at == key) {
+            return true;
+        }
+        if (at < key) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if (odin3_vec_push(set) == NULL) {
+        return true;
+    }
+    uint32_t *base = odin3_vec_at(set, 0);
+    memmove(base + lo + 1, base + lo, (set->len - 1 - lo) * sizeof *base);
+    base[lo] = key;
+    return false;
+}
+
+void odin3_opt_warn_mixed_sign(odin3_opt_ctx *oc, odin3_node_id node, const char *type_name) {
+    if (flag_set(oc->module, node, PARAM_A_SIGNED) == flag_set(oc->module, node, PARAM_B_SIGNED)) {
+        return;
+    }
+    uint32_t name = odin3_node_name(oc->module, node);
+    odin3_vec *set = odin3_opt_modstate_warned(oc->mod);
+    if (set == NULL) {
+        set = &oc->warned;
+    }
+    if (warned_seen(set, name != 0 ? name : UNNAMED_KEY | node.v)) {
+        return;
+    }
+    char label[KIT_LABEL_MAX];
+    odin3_kit_name_label(oc, name, node, label, sizeof label);
+    odin3_log(ODIN3_LOG_WARN,
+              "opt: module '%s': cell '%s' '%s' has A_SIGNED != B_SIGNED: treated as unsigned "
+              "(both-signed rule, Yosys simlib; PHASE2 #25)",
+              odin3_strtab_get(odin3_design_strtab(oc->design), odin3_module_name(oc->module)),
+              type_name, label);
 }
 
 /* A failure after a rewrite's destructive step: the IR stays valid but may no longer compute what

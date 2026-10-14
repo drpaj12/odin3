@@ -291,14 +291,9 @@ static odin3_status bw_load(odin3_expr_ctx *ec, bool a_const, bw_state *st) {
     res = res == ODIN3_OK ? odin3_expr_read(ec, PORT_B, &rhs) : res;
     odin3_expr_sig lhs_ext;
     odin3_expr_sig rhs_ext;
-    res = res == ODIN3_OK
-              ? odin3_expr_extend(ec, &lhs, st->y_width,
-                                  odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) != 0, &lhs_ext)
-              : res;
-    res = res == ODIN3_OK
-              ? odin3_expr_extend(ec, &rhs, st->y_width,
-                                  odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED) != 0, &rhs_ext)
-              : res;
+    bool is_signed = odin3_expr_both_signed(ec); /* a mixed-sign cell zero-extends both */
+    res = res == ODIN3_OK ? odin3_expr_extend(ec, &lhs, st->y_width, is_signed, &lhs_ext) : res;
+    res = res == ODIN3_OK ? odin3_expr_extend(ec, &rhs, st->y_width, is_signed, &rhs_ext) : res;
     st->cst = a_const ? lhs_ext : rhs_ext;
     st->var = a_const ? rhs_ext : lhs_ext;
     res = res == ODIN3_OK ? odin3_expr_read(ec, y_port, &st->dest) : res; /* open bits: Y itself */

@@ -61,6 +61,7 @@ typedef struct odin3_opt_ctx {
     uint64_t pins_created;
     odin3_vec ties;
     bool defer_ties;
+    odin3_vec warned; /* uint32_t keys, sorted: the mixed-sign cells of this call already warned of */
 } odin3_opt_ctx;
 
 struct odin3_opt_modstate;
@@ -303,9 +304,28 @@ void odin3_kit_note_net(odin3_opt_ctx *oc, odin3_net_id net);
 /* note_net on every output net of node (call it before the node is deleted). */
 void odin3_kit_note_outputs(odin3_opt_ctx *oc, odin3_node_id node);
 
+/*
+ * The mixed-sign ruling (Peter, 2026-10-13; spec 17 #57, PHASE2 #25). A binary word cell whose
+ * A_SIGNED differs from B_SIGNED reads both operands zero-extended: it is signed only when BOTH
+ * flags are set (Yosys simlib, the registry evaluator, Verilog's own rule). Every rule and the fold
+ * take the signedness of such a cell from here instead of from a single flag.
+ * both_signed: node's parameters 0 (A_SIGNED) and 1 (B_SIGNED) are both set; false for a node
+ * without them. warn_mixed_sign: when node's A_SIGNED != B_SIGNED, logs once per cell (per opt
+ * session when one is open, else per call) WARN "opt: module 'm': cell '<type>' '<cell>' has
+ * A_SIGNED != B_SIGNED: treated as unsigned (both-signed rule, Yosys simlib; PHASE2 #25)"; the
+ * cell is identified by its name (a rewritten cell keeps its name and warns no second time),
+ * else by $c<ID>. Out of memory only loses the once-only guard.
+ */
+bool odin3_opt_both_signed(const odin3_module *module, odin3_node_id node);
+void odin3_opt_warn_mixed_sign(odin3_opt_ctx *oc, odin3_node_id node, const char *type_name);
+
 /* The session state of module (NULL outside a session); odin3_opt_ctx_init calls it. */
 struct odin3_opt_modstate *odin3_opt_modstate_of(const odin3_design *design,
                                                  const odin3_module *module);
+
+/* The session's set of mixed-sign cells already warned of (see odin3_opt_warn_mixed_sign); NULL for
+ * no state. */
+odin3_vec *odin3_opt_modstate_warned(struct odin3_opt_modstate *mod);
 
 /*
  * opt_expr's reads, per round kind (x_round: the round that consumes x bits). incremental: the

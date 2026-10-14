@@ -126,30 +126,23 @@ static iw_side identity_of(const odin3_expr_ctx *ec, bool *negative) {
         wrt_a = const_false(ec, PORT_B);
         break;
     case ODIN3_EXPR_T_MUL:
-        if (one_or_minus_one(ec, PORT_A, odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) != 0,
-                             negative)) {
+        /* a constant is -1 only when the cell is signed (both flags: odin3_expr_both_signed) */
+        if (one_or_minus_one(ec, PORT_A, odin3_expr_both_signed(ec), negative)) {
             wrt_b = true;
         } else {
-            wrt_a = one_or_minus_one(ec, PORT_B,
-                                     odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED) != 0, negative);
+            wrt_a = one_or_minus_one(ec, PORT_B, odin3_expr_both_signed(ec), negative);
         }
         break;
     case ODIN3_EXPR_T_DIV:
         wrt_a = is_int_one(ec, PORT_B);
         /* a 1-bit signed 1 is -1 (Yosys's `as_int` reads it as +1: §17 #30) */
-        *negative = wrt_a && odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED) != 0 &&
-                    odin3_expr_width(ec, PORT_B) == 1;
+        *negative = wrt_a && odin3_expr_both_signed(ec) && odin3_expr_width(ec, PORT_B) == 1;
         break;
     default:
         break;
     }
-    /* -1 only when both operands are signed: on a mixed cell the registry evaluator reads it
-     * unsigned (1'1 is +1) and the 2D fold reads each operand by its own sign, so no rewrite is
-     * right (§17 #30) */
-    if (*negative && !odin3_expr_both_signed(ec)) {
-        *negative = false;
-        return IW_NONE;
-    }
+    /* -1 only when both operands are signed (§17 #30); on a mixed cell 1'1 is +1, as simlib, the
+     * registry evaluator and the fold read it (§17 #57), so `negative` is never set there */
     if (wrt_a) {
         return IW_A;
     }
@@ -167,14 +160,10 @@ odin3_status odin3_expr_rule_identwrt(odin3_expr_ctx *ec) {
         return ODIN3_OK;
     }
     odin3_expr_port port = side == IW_A ? PORT_A : PORT_B;
-    bool is_signed = odin3_expr_param(ec, side == IW_A ? ODIN3_EXPR_P_BIN_ASIGNED
-                                                       : ODIN3_EXPR_P_BIN_BSIGNED) != 0;
-    /* A mixed-sign cell whose kept operand is signed: Yosys 0.55 sign-extends it (a `$pos` with its
-     * own flag) but the registry evaluator reads the cell unsigned and zero-extends it, so no
-     * rewrite is right under both and the cell stays (§17 #30, #55; found by fuzz_opt). */
-    if (is_signed && !odin3_expr_both_signed(ec)) {
-        return ODIN3_OK;
-    }
+    /* The kept operand reaches Y extended as the cell extends it: by sign only when both operands
+     * are signed. Yosys 0.55 uses the operand's own flag (a `$pos` with it); the ruling of §17 #57
+     * is simlib's, so a mixed-sign A - 0 with A signed zero-extends A. */
+    bool is_signed = odin3_expr_both_signed(ec);
     odin3_opt_rule rule = side == IW_A ? ODIN3_OPT_RULE_IDENTWRT_A : ODIN3_OPT_RULE_IDENTWRT_B;
     uint32_t y_width = odin3_expr_y_width(ec);
     odin3_expr_sig operand;
@@ -268,8 +257,8 @@ static odin3_status mul_to_shift(odin3_expr_ctx *ec, odin3_expr_port var_port, b
     st = st == ODIN3_OK ? const_value(ec, (number){exp, SHIFT_AMOUNT_BITS}, &amount) : st;
     odin3_expr_cell spec = {
         .type = ODIN3_EXPR_T_SHL, .n_params = N_BIN_PARAMS, .in = {&operand, &amount}};
-    spec.params[ODIN3_EXPR_P_BIN_ASIGNED] = odin3_expr_param(
-        ec, var_port.v == PORT_A.v ? ODIN3_EXPR_P_BIN_ASIGNED : ODIN3_EXPR_P_BIN_BSIGNED);
+    /* the variable is sign-extended only when the cell is signed (both flags) */
+    spec.params[ODIN3_EXPR_P_BIN_ASIGNED] = odin3_expr_both_signed(ec) ? 1 : 0;
     spec.params[ODIN3_EXPR_P_BIN_AW] = operand.n;
     spec.params[ODIN3_EXPR_P_BIN_BW] = SHIFT_AMOUNT_BITS;
     spec.params[ODIN3_EXPR_P_BIN_YW] = odin3_expr_y_width(ec);
@@ -306,8 +295,9 @@ static odin3_status mul_low_zeros(odin3_expr_ctx *ec) {
     odin3_expr_sig rhs_rest = odin3_expr_slice(&rhs, b_zeros, b_width - b_zeros);
     odin3_expr_cell spec = {
         .type = ODIN3_EXPR_T_MUL, .n_params = N_BIN_PARAMS, .in = {&lhs_rest, &rhs_rest}};
-    spec.params[ODIN3_EXPR_P_BIN_ASIGNED] = odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED);
-    spec.params[ODIN3_EXPR_P_BIN_BSIGNED] = odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED);
+    /* equal flags, the cell's own signedness (a mixed-sign cell is unsigned: §17 #57) */
+    spec.params[ODIN3_EXPR_P_BIN_ASIGNED] = odin3_expr_both_signed(ec) ? 1 : 0;
+    spec.params[ODIN3_EXPR_P_BIN_BSIGNED] = odin3_expr_both_signed(ec) ? 1 : 0;
     spec.params[ODIN3_EXPR_P_BIN_AW] = lhs_rest.n;
     spec.params[ODIN3_EXPR_P_BIN_BW] = rhs_rest.n;
     spec.params[ODIN3_EXPR_P_BIN_YW] = y_width - y_zeros;
@@ -334,8 +324,8 @@ odin3_status odin3_expr_rule_mul(odin3_expr_ctx *ec) {
         odin3_status st = odin3_expr_fill(ec, ODIN3_BIT_0, odin3_expr_y_width(ec), &zeros);
         return st == ODIN3_OK ? odin3_expr_wire(ec, ODIN3_OPT_RULE_MUL_SHIFT_ZERO, &zeros) : st;
     }
-    bool cst_signed =
-        odin3_expr_param(ec, swapped ? ODIN3_EXPR_P_BIN_BSIGNED : ODIN3_EXPR_P_BIN_ASIGNED) != 0;
+    /* a one bit that is the constant's sign bit is negative only when the cell is signed */
+    bool cst_signed = odin3_expr_both_signed(ec);
     if (odin3_expr_fully_def(census) && onehot(ec, cst_port, &exp) &&
         !(cst_signed && exp == census.n - 1)) {
         return mul_to_shift(ec, var_port, swapped, exp);
@@ -363,7 +353,7 @@ static odin3_status trunc_fix(odin3_expr_ctx *ec, uint32_t exp, const odin3_expr
 
 /* $div by 2^exp: an arithmetic shift right; signed and truncating, plus the fix on the flooring. */
 static odin3_status div_to_shift(odin3_expr_ctx *ec, uint32_t exp) {
-    bool a_signed = odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) != 0;
+    bool a_signed = odin3_expr_both_signed(ec); /* a mixed-sign division is unsigned (logical shift) */
     uint32_t y_width = odin3_expr_y_width(ec);
     odin3_expr_sig dividend;
     odin3_expr_sig amount;
@@ -413,14 +403,14 @@ static odin3_status mod_signed(odin3_expr_ctx *ec, uint32_t exp) {
 
 /* $mod by 2^exp otherwise: an $and with the mask of exp ones (and a 0 above when B is signed). */
 static odin3_status mod_to_mask(odin3_expr_ctx *ec, uint32_t exp) {
-    bool b_signed = odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED) != 0;
-    uint32_t mask_width = exp + (b_signed || exp == 0 ? 1U : 0U);
+    bool both = odin3_expr_both_signed(ec);
+    uint32_t mask_width = exp + (both || exp == 0 ? 1U : 0U);
     odin3_expr_sig mask;
     odin3_status st = ones_mask(ec, exp, mask_width, &mask);
     odin3_expr_cell spec = {
         .type = ODIN3_EXPR_T_AND, .n_params = N_BIN_PARAMS, .in = {NULL, &mask}};
-    spec.params[ODIN3_EXPR_P_BIN_ASIGNED] = odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED);
-    spec.params[ODIN3_EXPR_P_BIN_BSIGNED] = b_signed ? 1 : 0;
+    spec.params[ODIN3_EXPR_P_BIN_ASIGNED] = both ? 1 : 0;
+    spec.params[ODIN3_EXPR_P_BIN_BSIGNED] = both ? 1 : 0;
     spec.params[ODIN3_EXPR_P_BIN_AW] = odin3_expr_width(ec, PORT_A);
     spec.params[ODIN3_EXPR_P_BIN_BW] = mask_width;
     spec.params[ODIN3_EXPR_P_BIN_YW] = odin3_expr_y_width(ec);
@@ -441,13 +431,12 @@ odin3_status odin3_expr_rule_divmod(odin3_expr_ctx *ec) {
         return st == ODIN3_OK ? odin3_expr_wire(ec, ODIN3_OPT_RULE_DIVMOD_ZERO, &unknown) : st;
     }
     uint32_t exp = 0;
-    bool b_signed = odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED) != 0;
-    if (ec->keepdc || !onehot(ec, PORT_B, &exp) || (b_signed && exp == census.n - 1)) {
+    bool is_signed = odin3_expr_both_signed(ec);
+    if (ec->keepdc || !onehot(ec, PORT_B, &exp) || (is_signed && exp == census.n - 1)) {
         return ODIN3_OK;
     }
     if (ec->kind == ODIN3_EXPR_T_DIV) {
         return div_to_shift(ec, exp);
     }
-    bool a_signed = odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) != 0;
-    return a_signed && exp != 0 ? mod_signed(ec, exp) : mod_to_mask(ec, exp);
+    return is_signed && exp != 0 ? mod_signed(ec, exp) : mod_to_mask(ec, exp);
 }

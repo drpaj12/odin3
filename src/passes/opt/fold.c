@@ -415,6 +415,12 @@ static bool job_init(fold_job *job, uint32_t row) {
     job->a_signed = !is_mux && param_set(oc, job->node, PARAM_A_SIGNED);
     job->b_signed =
         job->row->shape != SHAPE_UNARY && !is_mux && param_set(oc, job->node, PARAM_B_SIGNED);
+    /* A binary operator reads both operands signed only when both flags are set (the mixed-sign
+     * ruling, spec 17 #57: simlib and the registry evaluator); the shifts and $pow keep B's flag
+     * as the amount's own */
+    if (job->row->shape == SHAPE_BINARY && job->row->op != ODIN3_COP_POW) {
+        job->a_signed = job->b_signed = odin3_opt_both_signed(oc->module, job->node);
+    }
     /* NUMERIC adds a bit: keep every width below the evaluator's cap */
     return job->y_width >= 1 && job->y_width < ODIN3_ELAB_MAX_WIDTH;
 }

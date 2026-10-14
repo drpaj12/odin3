@@ -2357,7 +2357,6 @@ static void test_minus_one_mixed_sign_is_identity(void) {
         expect_sim_equal_after_expr(il);
         TEST_ASSERT_EQUAL_UINT32(0, count_type(types[i]));
         TEST_ASSERT_EQUAL_UINT32(0, count_type("$neg"));
-        TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_IDENTWRT_A));
         expect_wire("y", 6, "00????");
     }
 }
@@ -4301,11 +4300,12 @@ static void test_mixed_mul_to_shift(void) {
     const bin_case cases[] = {{"$mul", 1, 0, 3, 3, 6, "\\a", "3'010"},
                               {"$mul", 0, 1, 3, 3, 6, "3'010", "\\b"},
                               {"$mul", 0, 1, 4, 3, 6, "\\a", "3'100"},
-                              {"$mul", 1, 0, 3, 4, 6, "4'1000", "\\b"}};
+                              {"$mul", 1, 0, 4, 3, 6, "4'1000", "\\b"}};
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         bin_equal(&cases[i], false);
         TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, count_type("$mul"), "mul_to_shift fires");
-        TEST_ASSERT_EQUAL_UINT32(1, count_type("$shl"));
+        TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_MUL_SHIFT_SWAPPED) +
+                                        rule(ODIN3_OPT_RULE_MUL_SHIFT_UNSWAPPED));
     }
 }
 
@@ -4351,13 +4351,14 @@ static void test_mixed_identwrt_all_types(void) {
     for (size_t i = 0; i < 4; i++) {
         const bin_case a_kept = {types[i], 1, 0, 3, 3, 7, "\\a", "3'000"};
         bin_equal(&a_kept, false);
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rule(ODIN3_OPT_RULE_IDENTWRT_A), types[i]);
+        /* $or and $xor of 0 meet the bitwise rule first; either way the cell goes */
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, count_type(types[i]), types[i]);
         if (i == 3) {
             continue; /* $sub keeps only A */
         }
         const bin_case b_kept = {types[i], 0, 1, 3, 3, 7, "3'000", "\\b"};
         bin_equal(&b_kept, false);
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rule(ODIN3_OPT_RULE_IDENTWRT_B), types[i]);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, count_type(types[i]), types[i]);
     }
     const bin_case mul_one = {"$mul", 1, 0, 3, 3, 7, "\\a", "3'001"};
     bin_equal(&mul_one, false);
@@ -4405,6 +4406,41 @@ static void test_mixed_fold_constants(void) {
             }
         }
     }
+}
+
+#define MIXED_WARNING(type, cell)                                                                  \
+    "opt: module 'm': cell '" type "' '" cell                                                      \
+    "' has A_SIGNED != B_SIGNED: treated as unsigned (both-signed rule, Yosys simlib; PHASE2 #25)"
+
+/* The ruling's warning: once per mixed cell, on the first visit (here a call; in an opt session the
+ * once-only guard spans the sub-passes: test_opt_loop.c), naming the type and the cell, WARN. A
+ * cell with equal flags, and a shift whose B flag is the amount's own, say nothing. */
+static void test_mixed_sign_warns_once(void) {
+    const bin_case mixed = {"$add", 1, 0, 3, 3, 4, "\\a", "\\b"};
+    char il[1024];
+    build_bin_text(&mixed, il, sizeof il);
+    build(il);
+    n_lines = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_opt_expr_run(&fx.ctx, fx.res.module, &fx.opts, &fx.counts));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_WARN, MIXED_WARNING("$add", "c")));
+    const bin_case both = {"$add", 1, 1, 3, 3, 4, "\\a", "\\b"};
+    build_bin_text(&both, il, sizeof il);
+    build_run(il);
+    for (uint32_t i = 0; i < n_lines; i++) {
+        TEST_ASSERT_NOT_EQUAL_INT(ODIN3_LOG_WARN, lines[i].level);
+    }
+    const bin_case shift = {"$shl", 1, 0, 3, 3, 4, "\\a", "\\b"};
+    build_bin_text(&shift, il, sizeof il);
+    build_run(il);
+    for (uint32_t i = 0; i < n_lines; i++) {
+        TEST_ASSERT_NOT_EQUAL_INT(ODIN3_LOG_WARN, lines[i].level);
+    }
+    /* a comparison warns too */
+    const bin_case lt = {"$lt", 0, 1, 3, 3, 1, "\\a", "\\b"};
+    build_bin_text(&lt, il, sizeof il);
+    build_run(il);
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_WARN, MIXED_WARNING("$lt", "c")));
 }
 
 static void run_logic_tests(void) {
@@ -4502,6 +4538,7 @@ static void run_mixed_sign_tests(void) {
     RUN_TEST(test_mixed_identwrt_all_types);
     RUN_TEST(test_mixed_fine_addsub);
     RUN_TEST(test_mixed_fold_constants);
+    RUN_TEST(test_mixed_sign_warns_once);
 }
 
 int main(void) {

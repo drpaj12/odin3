@@ -1057,15 +1057,36 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `vtr_primitives.v` as a library unit with per-read flags (`--nomem2reg`); 2D-7b's
       `read_verilog --lib` is that mode, and 2H checks it carries them.
     - **For Peter:**
-      1. *Open, Peter:* the mixed-sign cell semantics (2F Task 18 review I1 and I2). A cell with
-         `A_SIGNED != B_SIGNED` is read per operand by `calc.cc`, `fold.c` and several opt rules
-         (`bitwise_logic_one_const`, `fine.group`, `mul_to_shift`, `div_to_shift`, `divmod`), and
-         as unsigned by Yosys's `simlib.v`, the registry evaluator, `merge.c` and `share.c`. Only
-         `identwrt` and `fine.addsub` are made conservative (§17 #55); `fuzz_opt` therefore emits
-         alike flags and no longer explores mixed cells. Options: (a) both-signed-only everywhere
-         (recommended: matches simlib, the LRM and the evaluator `--opt-simcheck` uses; `fold.c`
-         changes), or (b) `odin3_check_design` rejects mixed cells, as Yosys's `check` does. The
-         rules are unchanged until Peter rules.
+      1. *Decided, #25:* the mixed-sign cell semantics (2F Task 18 review I1 and I2): Peter ruled
+         "2a" on 2026-10-13, both-signed-only everywhere, with a warning.
       2. lenet.v's Yosys-side runs exist only as `sweep-xl` jobs on an idle machine (rulings C1 and
          I10 applied).
       3. The IR-6 amendment for a compact at the end of `opt` (point (h)) is withdrawn (#19).
+
+25. **Mixed-sign cells: signed only when both flags are set** (Peter, 2026-10-13, ruling "2a" plus a
+    warning; 2F Task 18 review I1 and I2; spec 2F §17 #57, supersedes #55; branch
+    `feat/2F-mixed-sign`). A word cell with `A_SIGNED != B_SIGNED` is signed only when BOTH flags are
+    set, else both operands are zero-extended: Yosys `simlib.v`, the registry evaluator, `merge.c`,
+    `share.c` and Verilog's own rule. Yosys's `calc.cc` and some of its `opt_expr` rules extend
+    each operand by its own flag; Odin III no longer does anywhere.
+    - **Rules changed** (one helper, `odin3_opt_both_signed` in the opt kit; `odin3_expr_both_signed`
+      for the rules): `bitwise_logic_one_const`, `fine.group` (`$not` keeps its one flag),
+      `mul_to_shift` (the shift extends by the cell's signedness; a one bit that is a constant's sign
+      bit is a power of two when the cell is unsigned), `mul` low zeros, `div_to_shift` (logical shift
+      on a mixed cell), `divmod` (`$mod` mask and signed forms), `identwrt` (positive wiring and the
+      -1 forms), `fine.addsub`, and the constant fold (`fold.c`, every binary operator but `$pow`).
+      `identwrt` and `fine.addsub`, made conservative in §17 #55, rewrite again. Cells the rules
+      build carry equal flags. Shifts, `$shiftx` and `$pow` are untouched (B's flag is the amount's).
+    - **Warning** (WARN, spec 2F §16): `opt: module 'm': cell '$sub' 'c' has A_SIGNED != B_SIGNED:
+      treated as unsigned (both-signed rule, Yosys simlib; PHASE2 #25)`. It fires at the first
+      `opt_expr` visit of the cell, once per cell per `opt` run (per call outside the loop). There is
+      no `read_rtlil` and BLIF has no word cells, so there is no read-time point; `opt_merge` and
+      `opt_share` only keep mixed cells apart and say nothing.
+    - **Evidence.** RED first: `test_mixed_*` in `tests/unit/test_opt_expr.c` fail on the old rules
+      (the registry evaluator's trace differs after `opt_expr` for the bitwise, group, mul and fold
+      cases, `$div`/`$mod` give a sign-extended Y, and the identwrt / addsub cases stay); GREEN after.
+      `$div`, `$mod` and `$pow` have no simulate hook, so there the ruling itself is the arbiter
+      (Y against C's unsigned division). `fuzz_opt` draws A_SIGNED and B_SIGNED apart again; the two
+      mixed-sign repros stay in `tests/fuzz/fuzz_opt_regress`. The Phase 2 script's output on 20
+      micros and mcml is byte-identical before and after: the front end unifies the flags, so no
+      mixed cell reaches `opt`.
