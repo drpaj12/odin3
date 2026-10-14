@@ -72,7 +72,9 @@ skipped (an ASan child and no ``systemd-run``: it cannot be capped); 4 unproven:
 oracle reading the source itself, was killed by its memory cap, so there is no netlist to compare
 (``unproven: Yosys side B exceeded its memory cap (4G)``): the oracle's size limit, no verdict on
 odin3 (2H: LU32PEEng, LU64PEEng, full/stereovision0 at the default 4G cap; the sweep lists them
-with the measured peak). Exit 4 is also equiv-check (the checker) killed by its cap (``unproven: equiv-check exceeded its memory cap (4G)``, 2H: arm_core); a host OOM-kill reads the same. Exit 4 is also ``--budget SECONDS`` running out: the wall time of all the
+with the measured peak). Exit 4 is also equiv-check (the checker) killed by its cap
+(``unproven: equiv-check exceeded its memory cap (4G)``, 2H: arm_core); a host OOM-kill reads
+the same. Exit 4 is also ``--budget SECONDS`` running out: the wall time of all the
 Yosys and equiv-check runs together (never odin3's) is capped, a child still running at the end is
 killed, and the file is ``unproven: budget of 1800 s ran out (in Yosys side B)`` (2H: arm_core,
 whose two Yosys back ends take about 9 min each on a 167 MB netlist). Any other child killed by
