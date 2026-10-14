@@ -217,8 +217,12 @@ def version_ok(version: str, allow: str | None) -> bool:
 
 
 def tail(text: str) -> str:
+    """The last TAIL_LINES lines, preceded by up to 3 earlier ``error`` lines: odin3 prints its
+    warnings after the diagnostic, which would otherwise push the error out of the tail."""
     lines = text.strip().splitlines()
-    return "\n".join(lines[-TAIL_LINES:])
+    shown = lines[-TAIL_LINES:]
+    earlier = [ln for ln in lines[:-TAIL_LINES] if "error" in ln.lower()][:3]
+    return "\n".join(earlier + shown)
 
 
 class Bridge:
