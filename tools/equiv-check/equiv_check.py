@@ -904,9 +904,14 @@ def _assert_unique_keys(flat: Flat) -> None:
 def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
                     find_probe_abc: Callable[[], str] | None = None,
                     probe_limits: tuple[int, int] = (RAM_PROBE_BUDGET, RAM_PROBE_TIMEOUT)
-                    ) -> tuple[int, int]:
+                    ) -> tuple[int, int, int]:
     """Pair the unnamed Parmys RAM slices of the two flats by memory group and slice index; returns
-    (slices paired, slices paired by an ABC probe).
+    (slices paired, slices paired by an ABC probe, slices paired by bit in a group that holds
+    interchangeable slices).
+
+    A group whose slices have equal signatures (the same input pins, tied constants) can be
+    paired by bit in a way that crosses interchangeable slices; a failed proof after such a
+    pairing may only mean the crossing, so the caller counts those slices as guessed.
 
     A slice's name carries (memory id, bit) (``rampair``).  The id is a counter of one Parmys run
     and differs between runs, so the groups are paired first and the slices of two paired groups
@@ -926,14 +931,14 @@ def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
     fa, fb = flats
     groups = [_ram_groups(fa), _ram_groups(fb)]
     if not groups[0] or not groups[1]:
-        return 0, 0
+        return 0, 0, 0
     try:
         rampair.check_shapes(*groups)
     except rampair.RamError as exc:
         head, _, rest = str(exc).partition("\n")
         raise EquivError(head, rest) from exc
     free = [list(range(len(g))) for g in groups]
-    paired = probed = count = 0
+    paired = probed = tied = count = 0
     # Generated keys live in a namespace no existing key (a ``.cname``) starts with.
     prefix = "ram@"
     while any(box.key.startswith(prefix) for f in flats for box in f.blackboxes):
@@ -955,6 +960,11 @@ def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
         names: list[dict[str, str]] = [{}, {}]
         for ga, gb in new:
             count += 1
+            for side, group in ((0, groups[0][ga]), (1, groups[1][gb])):
+                digests = [sigs[side][group.slices[b]].digest for b in group.bits]
+                if len(set(digests)) < len(digests):  # two slices a swap could cross
+                    tied += len(digests)
+                    break
             for bit, ia in groups[0][ga].slices.items():
                 key = f"{prefix}{count}/{bit}"
                 box_a, box_b = fa.blackboxes[ia], fb.blackboxes[groups[1][gb].slices[bit]]
@@ -969,7 +979,7 @@ def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
             _assert_unique_keys(flat)
         for side, taken in ((0, {a for a, _ in new}), (1, {b for _, b in new})):
             free[side] = [g for g in free[side] if g not in taken]
-    return paired, probed
+    return paired, probed, tied
 
 
 def match_blackboxes(flats: Sequence[Flat]) -> None:
@@ -1274,9 +1284,9 @@ def _check(args: argparse.Namespace) -> int:
     flats = [flatten(n, args.strict_init, args.allow_undriven, not args.no_cut,
                      not args.no_io_normalize, check=False, match_unnamed=args.match_unnamed)
              for n in nets]
-    ram_paired = ram_probed = 0
+    ram_paired = ram_probed = ram_tied = 0
     if args.match_unnamed and not args.no_ram_pairing:
-        ram_paired, ram_probed = pair_ram_groups(
+        ram_paired, ram_probed, ram_tied = pair_ram_groups(
             flats, not args.no_io_normalize,
             None if args.no_ram_probe else lambda: find_abc(args.abc),
             (args.ram_probe_budget, args.ram_probe_timeout))
@@ -1286,7 +1296,7 @@ def _check(args: argparse.Namespace) -> int:
         notice(f"{ram_paired} RAM slice(s) paired by memory group and bit"
                + (f" ({ram_probed} of them in groups told apart by ABC probes)" if ram_probed
                   else ""))
-    guessed += ram_probed
+    guessed += ram_probed + ram_tied
     match_blackboxes(flats)
     for flat in flats:
         check_undriven(flat, args.allow_undriven)
@@ -1319,9 +1329,9 @@ def _check(args: argparse.Namespace) -> int:
     print(output.rstrip())
     code = x_report(flats, maps, abc, args) if args.x_report else 1
     if code == 1 and guessed:
-        print(f"{TOOL}: inconclusive: {guessed} unnamed black-box pair(s) were guessed (equal "
-              "signatures, different input nets, split by structure and file order), so \"not "
-              "equivalent\" may only mean a wrong guess", file=sys.stderr)
+        print(f"{TOOL}: inconclusive: {guessed} unnamed black-box pair(s) were guessed or are "
+              "interchangeable (equal signatures, split by structure, file order or slice "
+              "index), so \"not equivalent\" may only mean a wrong guess", file=sys.stderr)
         return EXIT_UNPROVEN
     return code
 
