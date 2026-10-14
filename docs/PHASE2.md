@@ -1140,8 +1140,9 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       cones hold every pin of a box fed by `unconn`, so they hide what a wrong pairing breaks (the
       arm_core lesson).
     - **Parmys defects, listed.** `syntax/multi_assignment`: Parmys keeps one of four tri-state drivers;
-      Peter ruled that Odin III will follow Parmys's resolution with a warning (a separate elaboration
-      change), so it is not listed (`differs` stays never listable) and fails until that lands. `large/sv_chip0_hierarchy_no_mem`: the signed-adder `unconn`
+      Peter ruled that Odin III will follow Parmys's resolution with a warning (decision 27, landed:
+      the micro is `identical` to its golden under exit-check), so it is not listed (`differs` stays
+      never listable). `large/sv_chip0_hierarchy_no_mem`: the signed-adder `unconn`
       padding of the exit_vtr stereovision0 record, reviewed and recorded in `tests/exit/micro_eqx.txt`
       (golden equals Yosys `read_verilog` through the Parmys script; the splice equals it with `wreduce`
       removed; 218 against 197 `unconn` uses with it, 50 on both sides without).
@@ -1150,3 +1151,57 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `large/sv_chip3_hierarchy_no_mem` (two clock domains), `full/stereovision0` (dsec UNDECIDED, with
       the RAM of the micro), `large/LU32PEEng` and `LU64PEEng` (dsec 600 s with every pair exact)
       in `tests/exit/micro_unproven.txt`.
+
+27. **Peter, 2026-10-14: "go with the parmys method and throw a warning in these cases; default to
+    the parmys way for the most part (throwing WARNINGs) such that odin III works with vtr".**
+    The general policy: where Odin III and Parmys disagree, `--vtr-compat` (decision 24's switch,
+    the mode of the VTR flow and the exit sweeps) follows Parmys and prints a WARNING that names the
+    legacy behaviour; without the flag the IEEE / `tribuf -logic` reading stays. First case, the
+    micro `syntax/multi_assignment` (decision 26's "separate elaboration change"; agent defaults
+    Peter may override; 2D spec v4.31, EL-29 / §6.7, §17 #79; code `elab2_trivtr.c`):
+    - **What Parmys does, and why (read from Yosys 0.55 and probed).** It does not pick a driver.
+      `opt_expr -mux_undef` (in `opt -full`) replaces `en ? x : 'bz` by `x`: every enable goes, and
+      each driver is the plain connection `data = x`. `opt_clean` (`rmunused_module_signals`) then
+      puts `data` and every `x` into one class and keeps the one `compare_signals` ranks first; the
+      others are shorted to it. With input ports as the `x` the net is the winner and the other
+      inputs are unused: the golden `busout = enable ? bus0 : 1`, `s` unused. The ranking for input
+      port bits: (1) a bit another cell reads (`connected_signals`; the `$tribuf`/mux itself is
+      already gone) beats one nothing reads; (2) the lowest wire name (`strcmp`); (3) of equal
+      wires (two bits of one vector) the highest bit. The order of the assigns plays no part:
+      `bus0` wins because it is the lowest name, not because it is first.
+    - **Evidence (`tools/run-oracle.sh --tool parmys` on 21 small designs).** Four
+      drivers (the micro, `bus0` wins); inputs named `zz, mm, aa` in the order `zz, mm, aa`:
+      `aa`; `a`/`b` bare assigns `d = a; d = b;` in either order: `a`; `aa, bb, cc` with
+      `assign p = ~bb` elsewhere: `bb`, not `aa` (reads beat names); `d = e0 ? x[0]; d = e1 ?
+      x[1]` in either order: `x[1]`; `assign o = d; assign o = 1'b1` beside tri-states: the
+      constant (constants rank first). Drivers that are cell outputs (`a & b` against `a | b`, three
+      drivers, a module output against an `assign`, partial overlap, `en ? (a & b) : 'bz` beside
+      `en ? (a | b) : 'bz`): Parmys keeps **all** the drivers as several `.names` on one net (the
+      BLIF has two drivers; `equiv-check` rejects it, and so would VTR); a cell against an input
+      drives the input port itself. There is no "keep one" rule for those.
+    - **The rule implemented.** Under `--vtr-compat`, a group of two or more tri-state drivers on an
+      internal net (spec §6.7: the nets the conversion to `$pmux` applies to) whose data bits are
+      all bits of input ports of the module is resolved as Parmys does: the enables are ignored,
+      for each bit the winner above is kept, the other drivers' data is dropped, and the net is
+      merged into the winner. Warning (D3, located at the first driver): `net 'data' has 4 drivers;
+      --vtr-compat keeps only the data of 'bus0' as Parmys does (the input Yosys keeps as the net's
+      representative: one other logic reads, else the lowest name), ignores every enable and drops
+      'bus1', 'bus2', 'bus3' (IEEE resolution would be a bus selected by the enables: the data of
+      the driver that is enabled, undefined for several)`. Not changed: without the flag; one
+      driver (both readings give the same netlist); nets on a top-level port (they keep the
+      `$tribuf`; Parmys drops that enable too, a divergence still to be ruled on); and any group
+      with a driver whose data is not an input bit (a cell output, a constant, a child instance
+      output), which keeps the `$pmux` and the old warning because Parmys's own result there is
+      several drivers on one net, which the IR cannot hold (an IR invariant: not changed).
+    - **Limits, listed.** `compare_signals` also weighs wire attributes (`keep` and the like: more
+      attributes win) and a wire driven by a register; neither is modelled, and neither applies to
+      an input port without attributes. An input port with an `(* attribute *)` could win in
+      Parmys where it loses here.
+    - **The elab_equiv_micro sweep.** Its side B for this micro is Yosys's `tribuf -logic` (the
+      file's `// elab-check: --yosys-tribuf`), the IEEE bus, and the sweep runs `--vtr-compat`, so
+      the micro is now an expected "NOT EQUIVALENT" in `tests/elab/micro_equiv_expect_fail.txt`
+      (plain Yosys cannot be side B: its writer drives the input `bus1`).
+    - **Evidence of the change.** `tests/unit/test_elab_vtr_multidriver.c` (both modes, the
+      warning text, order, name, reads-beat-names, same-wire highest bit, per-bit winners, the
+      fallbacks). Exit-check on `syntax/multi_assignment` and the other micros with a
+      multiply-driven net: `.superpowers/sdd/2H-micro-triage.md`, "Multi-driver (decision 27)".

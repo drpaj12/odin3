@@ -72,3 +72,10 @@ preprocessor/default_net.v [Unsupported default nettype: tri] Yosys 0.55 side B 
 keywords/integer/integer_outside.v [Incompatible re-declaration of wire] Yosys 0.55 side B rejects the non-ANSI `output integer c; integer c;` re-declaration (coverage row M3)
 keywords/macromodule/macromodules_modules.v [syntax error, unexpected TOK_ID] Yosys 0.55 side B rejects `macromodule` (as operators/macromudule_test.v, coverage row M8); Odin III elaborates it as a module
 keywords/macromodule/multiple_macromodules.v [syntax error, unexpected TOK_ID] Yosys 0.55 side B rejects `macromodule` (as operators/macromudule_test.v, coverage row M8); Odin III elaborates it as a module
+
+# 2H-triage (PHASE2 #27, Peter 2026-10-14): under --vtr-compat (this sweep's setting) Odin III resolves
+# the four tri-state drivers of `data` as Parmys does (data = bus0, the enables dropped; the exit-check
+# golden compare is `identical`), while the micro's `// elab-check: --yosys-tribuf` side B is Yosys's
+# `tribuf -logic` bus (IEEE reading). Plain Yosys cannot be side B either: its opt_clean shorts the
+# inputs and the BLIF writer then drives input bus1 ('more than one driver').
+syntax/multi_assignment.v [Networks are NOT EQUIVALENT] --vtr-compat follows Parmys (data = bus0, enables dropped; PHASE2 #27); side B is the tribuf -logic bus; exit-check proves it identical to the Parmys golden
