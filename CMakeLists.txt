@@ -134,6 +134,8 @@ add_library(odin3_core OBJECT
     src/passes/opt/dff_muxes.c
     src/passes/opt/register.c
     src/passes/opt/simcheck.c
+    src/passes/flatten/graph.c
+    src/passes/flatten/register.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -710,6 +712,11 @@ if(BUILD_TESTING)
     # 2F Task 6: opt_expr (the driver, the rules of spec 4.2-4.3, replace_undriven).
     odin3_add_unit_test(test_opt_expr)
     target_sources(test_opt_expr PRIVATE tests/unit/proc_build.c)
+    # 3A Task 2: flatten's pre-flight graph; every test_flatten_* links the fixture helper.
+    odin3_add_unit_test(test_flatten_graph)
+    target_sources(test_flatten_graph PRIVATE tests/unit/flatten_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_flatten_graph PRIVATE
+        ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
