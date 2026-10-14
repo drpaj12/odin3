@@ -1150,6 +1150,13 @@ if(BUILD_TESTING)
                      --rt $<TARGET_FILE:odin3-blif-rt> --fixtures
                      ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(blif_roundtrip_fixtures PROPERTIES LABELS unit)
+    # 3E §16.3 step 5 (CI): write_blif --vtr over the fixtures: W1 == W2 (or the VB-10 decode),
+    # the Parmys samples identical to their W1, dffsre and pow refused (E1b, E5).
+    add_test(NAME blif_roundtrip_vtr_fixtures
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip --vtr
+                     --rt $<TARGET_FILE:odin3-blif-rt> --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                     --fixtures ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(blif_roundtrip_vtr_fixtures PROPERTIES LABELS unit)
     # Negative check: a deliberately corrupted output must make the gate fail.
     add_test(NAME blif_roundtrip_detects_corruption
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
