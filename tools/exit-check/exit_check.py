@@ -894,6 +894,9 @@ def vtr_state(root: Path) -> tuple[str, int]:
 
 
 def build_config(args: argparse.Namespace) -> Config:
+    # Usage errors first (the executables), then anything that depends on the environment.
+    exes = {name: need_exe(getattr(args, name))
+            for name in ("odin3", "yosys", "sp_splice", "netlist_compare", "equiv_check")}
     caps: dict[str, int] = {}
     for spec in args.cap_for:
         suffix, _, size = spec.partition("=")
@@ -915,9 +918,9 @@ def build_config(args: argparse.Namespace) -> Config:
         raise UsageError(f"{vtr_root}: {dirty} modified file(s); the goldens come from a clean "
                          "VTR tree")
     return Config(
-        odin3=need_exe(args.odin3), yosys=need_exe(args.yosys), arch=str(arch.resolve()),
-        sp_splice=need_exe(args.sp_splice), netlist_compare=need_exe(args.netlist_compare),
-        equiv_check=need_exe(args.equiv_check), golden_root=Path(golden).resolve(),
+        odin3=exes["odin3"], yosys=exes["yosys"], arch=str(arch.resolve()),
+        sp_splice=exes["sp_splice"], netlist_compare=exes["netlist_compare"],
+        equiv_check=exes["equiv_check"], golden_root=Path(golden).resolve(),
         work=work_dir(args.work), cap=elab_sweep.parse_size(args.mem_cap), caps=caps,
         techlib=args.techlib, primitives=args.primitives, config=args.config,
         config_template=template, min_mult=args.min_hard_mult_size,
