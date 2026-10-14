@@ -1,8 +1,8 @@
-# 3B `lower` — Implementation Plan (v1)
+# 3B `lower` — Implementation Plan (v1, approved by Peter 2026-10-14, PHASE3 #32)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-v1 (2026-10-14), for Peter's approval (CLAUDE.md rule 2): **no code before he approves** this plan and
+v1 (2026-10-14), approved by Peter 2026-10-14 (PHASE3 #32), with
 `docs/specs/2026-10-14-3B-lower-design.md` (the spec; its LW-n and § numbers are binding here).
 
 **Goal:** a pass `lower` that turns every word cell of every module into bit cells (`$_AND_`,

@@ -1,6 +1,6 @@
 # 3B — `lower`: design
 
-Status: v1 (2026-10-14), for Peter's approval (CLAUDE.md rule 2). Phase 3, sub-project 3B (PHASE3
+Status: v1 (2026-10-14), **approved by Peter 2026-10-14** (all recommendations; PHASE3 #32). Phase 3, sub-project 3B (PHASE3
 sub-projects table; light review, with Peter on decision 19; Opus `xhigh` → `high`). Written by
 the lane-2 agent. Spec: `docs/DESIGN.md` §5.2 (cell sets), §5.4 (views), §6 step 9, §12 (Phase 3
 exit). Inputs: `docs/IR.md` IR-1, IR-2, IR-4, IR-6, IR-8, IR-9, IR-12, IR-13, IR-15, IR-16, IR-18,
@@ -710,6 +710,8 @@ provenance primitives.
    Not an error; `opt` has the same stance (2F §17 #16).
 
 ## 18. Decisions for Peter
+
+**Ruled 2026-10-14 (Peter: general yes, "as close to the flow"):** every recommendation below is approved.
 
 Each has a recommendation. 1 changes a semantic Peter ruled on (decision 19), 2 edits the exit
 script text, 3 and 4 fix what is lowered and how, 5 confirms the evidence form.
