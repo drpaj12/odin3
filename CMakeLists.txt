@@ -2040,7 +2040,10 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # of the Phase 2 script, not a sweep). Every source is built to make a rule fire, so
         # `--min-changed 1` fails a file in which no call changed anything (a broken snapshot);
         # the 19 sources whose rule the Phase 2 script does not run are in
-        # tests/opt/rules_equiv_expect_fail.txt. Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R
+        # tests/opt/rules_equiv_expect_fail.txt. The sweep reads `.v` sources only: the 5 `.blif`
+        # sources (expr/mux_to_inv, gate_and, gate_or, gate_mux, gate_not) are out of scope,
+        # since opt-equiv's front is `read_verilog`; opt-rules' per-row refinement checks them
+        # (it runs `read_blif`). Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R
         # '^opt_(equiv|diff)_micro$'.
         set(_opt_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
             --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
@@ -2054,10 +2057,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         set_tests_properties(opt_equiv_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
                              TIMEOUT 1800)
         odin3_add_sweep_test(opt_equiv_micro LABEL sweep
-            COMMAND ${_opt_sweep} --opt-equiv ${_micro_expect}
+            COMMAND ${_opt_sweep} --opt-equiv --min-changed-total 200 ${_micro_expect}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
                     ${_micro_dir})
+        # --min-changed-total 200: the 441 micros under 1100 B alone have 266 changing calls, so
+        # a do-nothing odin3 (0 on every design) fails (2F-6 re-review N3).
         set_tests_properties(opt_equiv_micro PROPERTIES LABELS "sweep;opt_equiv")
         # opt_diff_micro: every micro with the Phase 2 script and `opt -full`; a difference fails
         # unless tests/opt/diff_expect.txt lists it with a reason.
@@ -2185,12 +2190,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/vtr_nightly_xl.txt
                 --diff-expect ${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt)
             odin3_add_sweep_test(opt_equiv_vtr LABEL sweep
-                COMMAND ${_opt_nightly} --set vtr31 --leg equiv --mem-cap 3G)
+                COMMAND ${_opt_nightly} --set vtr31 --leg equiv --min-changed-total 1 --mem-cap 3G)
             odin3_add_sweep_test(opt_diff_vtr LABEL sweep
                 COMMAND ${_opt_nightly} --set vtr31 --leg diff --mem-cap 3G)
             set_tests_properties(opt_equiv_vtr opt_diff_vtr PROPERTIES LABELS "sweep;nightly")
             odin3_add_sweep_test(opt_equiv_vtr_xl LABEL sweep-xl
-                COMMAND ${_opt_nightly} --set all64 --xl --leg equiv --mem-cap 8G)
+                COMMAND ${_opt_nightly} --set all64 --xl --leg equiv --min-changed-total 1 --mem-cap 8G)
             odin3_add_sweep_test(opt_diff_vtr_xl LABEL sweep-xl
                 COMMAND ${_opt_nightly} --set all64 --xl --leg diff --mem-cap 8G)
         endif()

@@ -85,7 +85,7 @@ class ToolError(Exception):
 
 
 class RefineAbort(ToolError):
-    """Yosys aborted the refinement script with an ``ERROR`` that is not the failed proof (exit 2)."""
+    """Yosys aborted the refinement script with an ``ERROR`` other than the failed proof."""
 
 
 class CrashError(ToolError):
@@ -250,8 +250,11 @@ def refinement_script(gold: str, gate: str, procs: bool = False,
 
 
 # Yosys 0.55 ``equiv_status -assert``: ``log_error("Found %d unproven $equiv cells in
-# 'equiv_status -assert'.")``: the only way the refinement script says the proof failed.
-PROOF_FAILED = re.compile(r"ERROR: Found \d+ unproven \$equiv cells in 'equiv_status -assert'")
+# 'equiv_status -assert'.")``: the refinement script saying the proof failed. The second is the
+# documented limit of the SAT flow (``$pow`` has no model, spec 20.2): no proof, so not a
+# refinement either. Any other ``ERROR`` (parser, port, missing module) is no verdict.
+PROOF_FAILED = re.compile(r"ERROR: (?:Found \d+ unproven \$equiv cells in 'equiv_status -assert'"
+                          r"|No SAT model available for cell )")
 
 
 class Checker:

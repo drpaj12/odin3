@@ -262,8 +262,8 @@ class MainTest(unittest.TestCase):
     def test_a_yosys_error_abort_is_a_tool_error_not_a_refutation(self) -> None:
         """Review I3: an ERROR that is not the failed proof (parser, port, missing module)."""
         self.fakes.spec(self.pair("0001", "opt_expr"))
-        for text in ("ERROR: Parser error in line 1: syntax error", "ERROR: Can't find gate module x.",
-                     "ERROR: Can't match gate port y"):
+        for text in ("ERROR: Parser error in line 1: syntax error",
+                     "ERROR: Can't find gate module x.", "ERROR: Can't match gate port y"):
             def abort(argv: Sequence[str], cap: int, _t: str = text, **kw: Any
                       ) -> subprocess.CompletedProcess[str]:
                 if "equiv_make" in " ".join(argv):
@@ -273,6 +273,18 @@ class MainTest(unittest.TestCase):
                 code, out, err = self.run_with(abort)
                 self.assertEqual(code, 2, out + err)
                 self.assertNotIn("not a refinement", out + err)
+
+    def test_no_sat_model_is_the_documented_no_proof_not_a_tool_error(self) -> None:
+        self.fakes.spec(self.pair("0001", "opt_expr"))
+
+        def nomodel(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if "equiv_make" in " ".join(argv):
+                return subprocess.CompletedProcess(
+                    list(argv), 1, "ERROR: No SAT model available for cell $c5 ($pow).\n", "")
+            return fake_run(argv, cap, **kw)
+        code, out, err = self.run_with(nomodel)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("not a refinement", out)
 
     def test_a_yosys_crash_or_timeout_is_hard_not_a_refutation(self) -> None:
         """Review I3: rc -9 or a timeout of the proof is not `not a refinement`."""

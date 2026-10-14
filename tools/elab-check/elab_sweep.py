@@ -99,6 +99,10 @@ OPT_TOOLS = {"opt-equiv": Path(__file__).resolve().parents[1] / "opt-check" / "o
              "opt-diff": Path(__file__).resolve().parents[1] / "opt-check" / "opt_diff.py",
              "opt-run": Path(__file__).resolve().parents[1] / "opt-check" / "opt_run.py"}
 TRIO_PROBE = "opt -nodffe -nosdff"  # the trio's own flags; fails until `opt` exists (2F-5)
+# opt-equiv's summary line; the sweeps sum it (``--min-changed-total``)
+OPT_CHANGED_CALLS = re.compile(r"^opt-equiv: (\d+) calls changed something", re.M)
+# Exit 2 of an opt tool that is our own check failing, not the design: never an expected failure
+OPT_TOOL_ABORT = ("yosys-refine exit", "netlist-compare cannot compare")
 OPT_RUN_ITERATIONS = re.compile(r"iterations max=(\d+)")
 _XL_REASON = re.compile(r"xl\b:?\s*")
 _SIZE = re.compile(r"(\d+)([KMG]?)", re.IGNORECASE)
@@ -499,7 +503,8 @@ def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
         return Outcome("skip", secs, "cannot be capped")
     why = "NOT ok: " if done.returncode == 1 else ""
     return Outcome("fail", secs, why + (first_error(text) or f"exit {done.returncode}"), text,
-                   hard=done.returncode < 0 or done.returncode == OPT_CRASH)
+                   hard=done.returncode < 0 or done.returncode == OPT_CRASH
+                   or any(mark in text for mark in OPT_TOOL_ABORT))
 
 
 def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
@@ -593,6 +598,7 @@ class Sweep:
         self.counts = {"ok": 0, "xfail": 0, "FAIL": 0, "XPASS": 0, "crash": 0, "skip": 0}
         self.skipped_run = False
         self.bench_rows: dict[str, dict[str, str]] = {}
+        self.changed_total = 0  # opt-equiv: the calls that changed something, over the ok files
         self.max_iterations = (0, "")  # opt-run: the largest `opt` iteration count and its file
 
     def note_iterations(self, item: Item, output: str) -> None:
@@ -606,6 +612,8 @@ class Sweep:
         if outcome.kind == "ok" and self.cfg.mode() == "bench" and outcome.output:
             print(f"bench: {outcome.output}", flush=True)
             self.bench_rows[item.rel] = parse_bench(outcome.output)
+        if outcome.kind == "ok" and self.cfg.opt_tool == "opt-equiv":
+            self.changed_total += sum(int(n) for n in OPT_CHANGED_CALLS.findall(outcome.output))
         if outcome.kind == "ok" and self.cfg.opt_tool == "opt-run":
             self.note_iterations(item, outcome.output)
         self.counts[cls] += 1
@@ -660,12 +668,16 @@ def sweep(cfg: Config, args: argparse.Namespace, items: list[Item],
               f"({state.max_iterations[1] or 'none'}; the cap is 10000)")
     if state.skipped_run and not counts["ok"] + counts["xfail"]:
         return EXIT_SKIP
+    short = cfg.opt_tool == "opt-equiv" and state.changed_total < args.min_changed_total
+    if short:  # an odin3 that does nothing passes every per-file check (2F-6 re-review N3)
+        print(f"{TOOL}: FAIL: opt-equiv: {state.changed_total} changing calls in total, want at "
+              f"least {args.min_changed_total}")
     missed = False
     if cfg.bench_report:
         lines, missed = bench_report.report(cfg.bench_report, state.bench_rows,
                                             frozenset(expect))
         print("\n".join(lines))
-    return EXIT_FAIL if counts["FAIL"] or counts["XPASS"] or stale or missed else EXIT_OK
+    return EXIT_FAIL if counts["FAIL"] or counts["XPASS"] or stale or missed or short else EXIT_OK
 
 
 # ---- arguments --------------------------------------------------------------------------------
@@ -691,6 +703,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                     help="run opt-run (Phase 2 script, ODIN3_OK, check, iteration cap) per file")
     ap.add_argument("--opt-arg", action="append", default=[], metavar="ARG",
                     help="--opt-equiv/--opt-diff: an argument for the child (use --opt-arg=ARG)")
+    ap.add_argument("--min-changed-total", type=int, default=0, metavar="N",
+                    help="--opt-equiv: fail (exit 1) unless at least N calls changed something "
+                         "over the whole sweep (a do-nothing odin3 passes every file)")
     ap.add_argument("--pass", choices=("elab", "proc"), default="elab", dest="stop_pass",
                     help="--equiv: side A stops after elaboration (default) or after proc")
     ap.add_argument("--trio", choices=("auto", "on", "off"), default="auto",
@@ -728,6 +743,8 @@ def build_config(args: argparse.Namespace) -> Config:
     if sum(bool(m) for m in modes) > 1:
         raise UsageError("--equiv, --bench, --proc-diff, --opt-equiv, --opt-diff and --opt-run "
                          "cannot be combined")
+    if args.min_changed_total and not args.opt_equiv:
+        raise UsageError("--min-changed-total needs --opt-equiv")
     if (args.opt_equiv or args.opt_diff) and not args.yosys:
         raise UsageError("--opt-equiv and --opt-diff need --yosys")
     if args.bench_report and not args.bench:

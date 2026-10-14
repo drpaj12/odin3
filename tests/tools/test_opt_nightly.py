@@ -69,7 +69,7 @@ class Base(unittest.TestCase):
             odin3="odin3", yosys="yosys", set="vtr31", xl=False, keep=None,
             expect_fail=[self.expect_file], diff_expect=Path("diff.txt"), root=self.root,
             tops=None, techlib=None, leg="both", mem_cap=3 << 30, cap_for=[], limit=None,
-            timeout=60.0)
+            timeout=60.0, min_changed_total=0)
         base.update(kw)
         return argparse.Namespace(**base)
 
@@ -77,6 +77,21 @@ class Base(unittest.TestCase):
         lines: list[str] = []
         code = nightly.execute(self.args(**kw), runner, lines.append)
         return code, lines
+
+
+class MinChangedTest(Base):
+    def test_a_leg_in_which_odin3_changes_nothing_fails_the_minimum(self) -> None:
+        """Review N3: a do-nothing odin3 passed the equiv leg."""
+        silent = Runs(lambda rel, label: nightly.Result(
+            0, 0.1, "opt-equiv: 0 calls changed something: 0 refine, 0 do not\n", False))
+        self.assertEqual(self.execute(silent)[0], 0)
+        code, lines = self.execute(silent, min_changed_total=1, leg="equiv")
+        self.assertEqual(code, 1)
+        self.assertTrue(any("0 changing calls in total, want at least 1" in x for x in lines))
+        busy = Runs(lambda rel, label: nightly.Result(
+            0, 0.1, "opt-equiv: 5 calls changed something: 5 refine, 0 do not\n", False))
+        self.assertEqual(self.execute(busy, min_changed_total=20, leg="equiv")[0], 0)
+        self.assertEqual(self.execute(busy, min_changed_total=21, leg="equiv")[0], 1)
 
 
 class OrderTest(Base):

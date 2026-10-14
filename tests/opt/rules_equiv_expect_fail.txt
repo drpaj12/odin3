@@ -1,5 +1,8 @@
 # tests/opt/rules_equiv_expect_fail.txt: the per-rule sources opt_equiv_rules expects to fail (2F
 # Task 17). Paths are relative to tests/opt/rules; format `<path> [needle] <reason>`.
+# Scope (2F-6 re-review): opt_equiv_rules reads the 136 `.v` sources. The 5 `.blif` sources (expr/mux_to_inv,
+# gate_and, gate_or, gate_mux, gate_not) are NOT swept: opt-equiv reads Verilog only; opt-rules' per-row
+# refinement covers them (it reads BLIF).
 # These seven write a constant asynchronous control that opt-rules runs through `proc --noopt`
 # (per-row refinement covers them there); the full proc of the Phase 2 script rejects it.
 dff/always_active_aload.v [a second edge event must be an asynchronous reset] proc rejects a constant async control; covered by opt-rules' per-row refinement

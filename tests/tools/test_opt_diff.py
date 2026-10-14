@@ -58,7 +58,8 @@ with open(HERE / "yosys.log", "a") as log:
 if "equiv_make" in script:
     if spec.get("refine_signal"):
         os.kill(os.getpid(), spec["refine_signal"])
-    sys.stdout.write(spec.get("refine_out", "ERROR: Found 1 unproven $equiv cells in 'equiv_status -assert'.\n") if spec.get("refine_rc", 0) else "")
+    msg = "ERROR: Found 1 unproven $equiv cells in 'equiv_status -assert'.\n"
+    sys.stdout.write(spec.get("refine_out", msg) if spec.get("refine_rc", 0) else "")
     sys.exit(spec.get("refine_rc", 0))
 if spec.get("yosys_signal") and "write_blif" not in script:
     os.kill(os.getpid(), spec["yosys_signal"])

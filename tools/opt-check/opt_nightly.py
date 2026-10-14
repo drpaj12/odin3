@@ -192,7 +192,8 @@ def run_unit(cfg: Config, unit: Unit, item: elab_sweep.Item, cap: int) -> Result
         return Result(1, time.monotonic() - start, f"cannot run {unit.tool.name}: {exc}", True)
     text = (done.stdout or "") + (done.stderr or "")
     hard = (toolutil.is_crash(done.returncode) or done.returncode == opt_equiv.EXIT_CRASH
-            or any(mark in text for mark in HARD_MARKS))
+            or any(mark in text for mark in HARD_MARKS)
+            or any(mark in text for mark in elab_sweep.OPT_TOOL_ABORT))
     return Result(done.returncode, time.monotonic() - start, text, hard)
 
 
@@ -207,6 +208,7 @@ class Tally:
     listed: int = 0
     bad: int = 0  # unexpected failures, hard failures, stale entries
     units: int = 0
+    changed: int = 0  # opt-equiv: the calls that changed something, over the ok runs
 
 
 def finish_line(text: str) -> str:
@@ -225,6 +227,9 @@ def run_file(cfg: Config, item: elab_sweep.Item, entry: elab_sweep.Expect | None
         if res.code == EXIT_SKIP:
             raise SkipRun
         if res.code == 0:
+            if unit.label == "opt-equiv":
+                tally.changed += sum(int(n) for n in
+                                     elab_sweep.OPT_CHANGED_CALLS.findall(res.text))
             out(f"{tag}: ok ({res.secs:.1f} s, cap {format_cap(cap)})")
             tally.ok += 1
             continue
@@ -271,7 +276,11 @@ def execute(args: argparse.Namespace, runner: Runner = run_unit,
         entry = expect.get(item.rel)  # an `xl` entry only selects the file: it must pass
         run_file(cfg, item, None if entry is not None and entry.xl else entry, tally, runner, out)
     out(summary(tally, args.set, args.xl))
-    return EXIT_FAIL if tally.bad else EXIT_OK
+    short = cfg.leg != "diff" and tally.changed < args.min_changed_total
+    if short:  # a do-nothing odin3 passes every file (2F-6 re-review N3)
+        out(f"{TOOL}: FAIL: opt-equiv: {tally.changed} changing calls in total, want at least "
+            f"{args.min_changed_total}")
+    return EXIT_FAIL if tally.bad or short else EXIT_OK
 
 
 def parse(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -292,6 +301,8 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--mem-cap", type=elab_sweep.parse_size, default=DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 3G)")
     ap.add_argument("--cap-for", action="append", default=[], metavar="SUFFIX=SIZE")
+    ap.add_argument("--min-changed-total", type=int, default=0, metavar="N",
+                    help="fail (exit 1) unless opt-equiv saw at least N changing calls in total")
     ap.add_argument("--limit", type=int, metavar="N", help="only the first N files (a smoke run)")
     ap.add_argument("--timeout", type=float, default=TIMEOUT_S, metavar="S",
                     help="per tool run (default 3600)")

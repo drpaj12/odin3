@@ -118,6 +118,15 @@ if "CRASH" in text:
 print("opt-run: ok: iterations max=" + re.search(r"IT(\\d+)", text).group(1) + " opt-runs=2")
 """
 
+# The opt-equiv stand-in (2F-6 N3): reports as many changing calls as the file says (`CH<n>`).
+FAKE_OPT_EQUIV = """#!{python}
+import re, sys
+n = int(re.search(r"CH(\\d+)", open(sys.argv[-1]).read()).group(1))
+print("opt-equiv: %d calls changed something: %d refine, 0 do not" % (n, n))
+if n == 0:
+    print("opt-equiv: NOTE: 0 calls changed anything: nothing was checked")
+"""
+
 # An odin3 on which `opt` exists: every run succeeds (the trio probe included).
 FAKE_ODIN3_OPT = """#!{python}
 import json, os, sys
@@ -618,6 +627,45 @@ class OptModesTest(SweepTestCase):
                                          str(self.dir / "m"))
         self.assertEqual(code, 1)
         self.assertIn("FAIL  c.v", out)
+
+    def test_min_changed_total_fails_a_sweep_in_which_odin3_does_nothing(self) -> None:
+        """Review N3: 0 changing calls on every design passed every per-file check."""
+        fake = _exe(self.bin / "fake_opt_equiv.py", FAKE_OPT_EQUIV)
+        self.write("m/a.v", "CH0\n")
+        self.write("m/bb.v", "CH0 pad\n")
+        tools = dict(elab_sweep.OPT_TOOLS, **{"opt-equiv": fake})
+        with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+            args = ("--opt-equiv", "--yosys", "Y", str(self.dir / "m"))
+            self.assertEqual(self.run_tool(*args)[0], 0)  # no minimum: as before
+            code, out, _ = self.run_tool("--min-changed-total", "1", *args)
+            self.assertEqual(code, 1, out)
+            self.assertIn("0 changing calls in total, want at least 1", out)
+            self.write("m/c.v", "CH2 padding to sort last\n")
+            code, out, _ = self.run_tool("--min-changed-total", "2", *args)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(self.run_tool("--min-changed-total", "3", *args)[0], 1)
+
+    def test_an_aborted_refinement_check_is_hard_even_when_listed(self) -> None:
+        """Review I3: exit 2 from our own Yosys check is never an expected failure."""
+        fake = _exe(self.bin / "fake_opt_equiv.py", FAKE_OPT_EQUIV.replace(
+            'n = int', 'if "ABORT" in open(sys.argv[-1]).read():\n'
+            '    print("opt-equiv: error: yosys-refine exit 1: ERROR: Parser error")\n'
+            '    sys.exit(2)\nn = int'))
+        self.write("m/a.v", "ABORT CH1\n")
+        expect = self.expect("a.v [Parser error] listed\n")
+        tools = dict(elab_sweep.OPT_TOOLS, **{"opt-equiv": fake})
+        with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+            code, out, _ = self.run_tool("--opt-equiv", "--yosys", "Y", "--expect-fail", expect,
+                                         str(self.dir / "m"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  a.v", out)
+        self.assertIn("never an expected failure", out)
+
+    def test_min_changed_total_needs_opt_equiv(self) -> None:
+        self.write("m/a.v", "x\n")
+        code, _, err = self.run_tool("--min-changed-total", "1", str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("--min-changed-total needs --opt-equiv", err)
 
     def test_opt_run_excludes_the_other_modes(self) -> None:
         self.write("m/a.v", "x\n")
