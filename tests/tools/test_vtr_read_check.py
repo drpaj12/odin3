@@ -75,6 +75,8 @@ for line in text.splitlines():
     if line.startswith("# vpr-fake: reject "):
         print("Error 1: \nType: Blif file\nMessage: " + line[len("# vpr-fake: reject "):])
         sys.exit(1)
+    if line.startswith("# vpr-fake: kill"):
+        os.kill(os.getpid(), 9)
     if line.startswith("# vpr-fake: assert"):
         print("/x/netlist.tpp:1951 f: Assertion 'a == b' failed (Must be no existing net driver).",
               file=sys.stderr)
@@ -185,9 +187,11 @@ class PairingTest(unittest.TestCase):
             "E7": "BLIF .names input size (7) greater than .names model input size (6)",
             "E10": "Found multiple models with primitives. Only one model can contain primitives",
             "E12": "x.tpp:1951 f: Assertion 'a == b' failed (Must be no existing net driver).",
+            "E12 ": "Inconsistent block data sizes",
             "E13": "No non-blackbox models found in the BLIF",
         }
         for refusal, message in cases.items():
+            refusal = refusal.strip()
             self.assertTrue(vrc.pairing_ok(refusal, message), refusal)
             self.assertFalse(vrc.pairing_ok(refusal, ""), refusal)
             self.assertFalse(vrc.pairing_ok(refusal, "something else"), refusal)
@@ -314,6 +318,14 @@ class SweepTest(ReadCheckBase):
         code, out, err = self.run_main()
         self.assertEqual(code, 0, out + err)
         self.assertEqual(self.rows()[0][3:6], ["E12", "-", "crash"])
+
+    def test_a_step_the_cap_kills_is_capped_not_failed(self) -> None:
+        self.add("big/big.parmys.blif", netlist("# vpr-fake: kill"))
+        code, out, err = self.run_main()
+        self.assertEqual(code, 0, out + err)
+        row = self.rows()[0]
+        self.assertEqual((row[4], row[5], row[8]), ("oom", "oom", "capped"))
+        self.assertIn("  verdict capped: 1", out)
 
     def test_an_odin3_failure_fails(self) -> None:
         self.add("x/x.parmys.blif", netlist("# fake: crash"))

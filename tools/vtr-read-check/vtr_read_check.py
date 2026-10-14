@@ -25,6 +25,10 @@ reader at a fraction of a route's cost. The verdict of a file is spec §16.4's:
   ``listed``;
 - the checker's verdict on G equals VPR's.
 
+A step the 6 GiB cap kills (SIGKILL: VPR or the checker on the largest designs) is ``oom``, and
+the file's verdict ``capped``: unverified, not failed. It is listed and does not change the exit
+code; ``--xl`` (9 GiB, the controller's) is the way to run it. (Agent default.)
+
 ``--bad-corpus DIR`` runs VPR and the checker on each ``*.blif`` under DIR (``tests/vtr/blif-bad``)
 instead: VPR must reject exactly the files the checker rejects, and the message in a file's
 ``# vpr:`` first line must occur (as a substring) in VPR's output, which is searched on stdout and
@@ -86,7 +90,9 @@ FAIL = "fail"
 NA = "-"
 PASS = "pass"
 LISTED = "listed"
-SIGNAL_EXIT = 128
+CAPPED = "capped"
+OOM = "oom"
+SIGKILL_EXITS = (-9, 137)  # the memory cap kills a step (heavy-run's scope: OOMPolicy=continue)
 
 # The refusal lines of `write_blif --vtr` (spec §11): the text that tells the class.
 CLASS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -120,7 +126,10 @@ PAIRING: dict[str, tuple[str, ...]] = {
     "E6": ("Subckt instantiates model", "Blackbox BLIF model"),
     "E7": ("BLIF .names input size",),
     "E10": ("Found multiple models with primitives",),
-    "E12": ("Assertion",),
+    # Spec: the R16 assertion. Measured on the two Odin II multi-driver goldens (2026-10-14): VPR's
+    # netlist consistency check throws "Inconsistent block data sizes" instead; both are VPR
+    # refusing a multi-driver net, so both pair.
+    "E12": ("Assertion", "Inconsistent block data sizes"),
     "E13": ("No non-blackbox models found",),
 }
 # VPR accepts G (an open pin, an undefined function): an intended refusal.
@@ -255,9 +264,12 @@ def run_step(argv: Sequence[str], cwd: Path, timeout: int) -> Step:
 
 def vpr_verdict(step: Step) -> VprRun:
     """VPR's verdict from a finished run: exit 0 ok; exit 1 fail with its ``Message:``; a signal
-    (an assertion aborts) or any other exit a crash, with the assertion's text when it has one."""
+    (an assertion aborts) or any other exit a crash, with the assertion's text when it has one;
+    SIGKILL is ``oom``, the memory cap's kill (the file is then unverified, not failed)."""
     if step.timed_out:
         return VprRun("timeout", "timed out")
+    if step.returncode in SIGKILL_EXITS:
+        return VprRun(OOM, "killed (memory cap)")
     if step.returncode == 0:
         return VprRun(OK, "")
     assertion = VPR_ASSERTION.search(step.output)
@@ -280,9 +292,12 @@ def run_vpr(ctx: ReadCtx, netlist: Path, where: Path) -> VprRun:
 
 
 def checker_verdict(step: Step) -> str:
-    """ok (exit 0), fail (exit 1: violations) or error (exit 2, a crash or a timeout)."""
+    """ok (exit 0), fail (exit 1: violations), oom (killed by the memory cap) or error (exit 2, a
+    crash or a timeout)."""
     if step.timed_out:
         return "timeout"
+    if step.returncode in SIGKILL_EXITS:
+        return OOM
     return {0: OK, 1: FAIL}.get(step.returncode, "error")
 
 
@@ -306,9 +321,9 @@ def write_netlist(ctx: ReadCtx, golden: Path, out: Path, where: Path) -> Step:
 def judge_written(vpr_w: VprRun, checker_w: str) -> str:
     """The reason a written W fails, "" when it passes."""
     reasons = []
-    if not vpr_w.accepted:
+    if not vpr_w.accepted and vpr_w.status != OOM:
         reasons.append(f"VPR rejects W ({vpr_w.status}: {vpr_w.message})")
-    if checker_w != OK:
+    if checker_w not in (OK, OOM):
         reasons.append(f"blif-vtr-check --strict W: {checker_w}")
     return "; ".join(reasons)
 
@@ -318,6 +333,8 @@ def judge_refused(classes: list[str], vpr_g: VprRun) -> tuple[str, str]:
     message = vpr_g.message if not vpr_g.accepted else ""
     if vpr_g.status == "timeout":
         return FAIL, "VPR timed out on G"
+    if vpr_g.status == OOM:
+        return PASS, ""  # unverified: the row is capped (run_one)
     if not any(pairing_ok(cls, message) for cls in classes):
         shown = message or "accepted"
         return FAIL, f"refusal {'+'.join(classes)} does not pair with VPR on G ({shown})"
@@ -332,6 +349,8 @@ def judge_agreement(vpr_g: VprRun, checker_g: str) -> str:
         return f"blif-vtr-check G: {checker_g}"
     if vpr_g.status == "timeout":
         return "VPR timed out on G"
+    if OOM in (vpr_g.status, checker_g):
+        return ""
     if vpr_g.accepted != (checker_g == OK):
         return f"checker and VPR disagree on G (VPR {vpr_g.status}, checker {checker_g})"
     return ""
@@ -376,7 +395,8 @@ def run_one(g: Path, ctx: ReadCtx) -> Row:
         reasons.append(f"odin3 failed: {last[0]}")
     reasons.append(judge_agreement(vpr_g, row.checker_g))
     row.reason = "; ".join(r for r in reasons if r)
-    row.verdict = FAIL if row.reason else verdict
+    capped = OOM in (row.vpr_g, row.vpr_w, row.checker_g, row.checker_w)
+    row.verdict = FAIL if row.reason else CAPPED if capped else verdict
     row.seconds = time.monotonic() - start
     if row.verdict != FAIL:
         remove_run(where, ctx.work)
@@ -499,7 +519,7 @@ def summarize(rows: list[Row], report: Path) -> None:
     print(f"{PROG}: {len(rows)} goldens")
     for (tool, what), n in sorted(counts.items()):
         print(f"  {tool}: {what}: {n}")
-    for verdict in (PASS, LISTED, FAIL):
+    for verdict in (PASS, LISTED, CAPPED, FAIL):
         print(f"  verdict {verdict}: {sum(1 for r in rows if r.verdict == verdict)}")
     print(f"  total {sum(r.seconds for r in rows):.0f} s; report {report}")
 
