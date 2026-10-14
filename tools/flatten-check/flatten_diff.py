@@ -20,7 +20,7 @@ import argparse
 import os
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,8 +29,11 @@ import memcap
 import opt_equiv
 
 
-def compare(odin: fc.RtlilModule, yosys: fc.RtlilModule) -> list[str]:
-    """The differences between Odin III's flat module and Yosys's (empty: same)."""
+def compare(
+    odin: fc.RtlilModule, yosys: fc.RtlilModule, fold: Mapping[str, str] | None = None
+) -> list[str]:
+    """The differences between Odin III's flat module and Yosys's (empty: same). ``fold`` renames
+    cell types before they are counted."""
     problems: list[str] = []
     pub_a = {n: w for n, w in odin.wires.items() if not n.startswith("$")}
     pub_b = {n: w for n, w in yosys.wires.items() if not n.startswith("$")}
@@ -41,7 +44,7 @@ def compare(odin: fc.RtlilModule, yosys: fc.RtlilModule) -> list[str]:
     names_b = sorted(n for _, n in yosys.cells if not n.startswith("$"))
     if names_a != names_b:
         problems.append(f"public cell names: odin3 {names_a} yosys {names_b}")
-    types_a, types_b = fc.cell_types(odin), fc.cell_types(yosys)
+    types_a, types_b = fc.cell_types(odin, fold), fc.cell_types(yosys, fold)
     for kind in sorted(types_a.keys() | types_b.keys()):
         if types_a[kind] != types_b[kind]:
             problems.append(f"cell type {kind}: odin3 {types_a[kind]} yosys {types_b[kind]}")
@@ -133,43 +136,47 @@ def judge(problems: Sequence[str], entry: Expected | None) -> tuple[list[str], b
     return unexpected, stale
 
 
-def scripts(source: Path, top: str, out_a: Path, out_b: Path) -> tuple[str, str]:
+def scripts(
+    source: Path, top: str, tools: fc.Tools, outs: tuple[Path, Path]
+) -> tuple[str, str]:
     """The Odin III and the Yosys script (spec 14.3)."""
+    compat = " --vtr-compat" if tools.vtr_compat else ""
+    lib_a = f"read_techlib {tools.techlib}; " if tools.techlib else ""
+    lib_b = f"read_verilog -nolatches {tools.yosys_lib}; " if tools.yosys_lib else ""
     script_a = (
-        f"read_verilog --nolatches {source}; hierarchy --top {top}; proc; flatten; "
-        f"write_rtlil {out_a}"
+        f"{lib_a}read_verilog{compat} --nolatches {source}; hierarchy --top {top}; proc; "
+        f"flatten; write_rtlil {outs[0]}"
     )
     script_b = (
-        f"read_verilog -nolatches {source}; hierarchy -top {top}; proc; "
-        f"flatten -noscopeinfo; write_rtlil {out_b}"
+        f"{lib_b}read_verilog -nolatches {source}; hierarchy -top {top}; proc; "
+        f"flatten -noscopeinfo; write_rtlil {outs[1]}"
     )
     return script_a, script_b
 
 
-def diff_in(work: Path, source: Path, top: str, tools: tuple[str, str], equiv: bool
-            ) -> list[str] | str:
+def diff_in(work: Path, source: Path, top: str, tools: fc.Tools, equiv: bool,
+            fold: Mapping[str, str] | None = None) -> list[str] | str:
     """The differences of one file, run in the directory ``work``; an error string on failure."""
-    odin3, yosys = tools
     out_a, out_b = work / "a.il", work / "b.il"
-    script_a, script_b = scripts(source, top, out_a, out_b)
-    run_a = fc.run_capped([odin3, "-p", script_a])
-    run_b = fc.run_capped([yosys, "-q", "-p", script_b])
+    script_a, script_b = scripts(source, top, tools, (out_a, out_b))
+    run_a = fc.run_capped([tools.odin3, "--top", top, "-p", script_a])
+    run_b = fc.run_capped([tools.yosys, "-q", "-p", script_b])
     if run_a.returncode != 0 or run_b.returncode != 0:
         return f"odin3 exit {run_a.returncode}, yosys exit {run_b.returncode}"
     mods_a, mods_b = fc.parse_rtlil(out_a.read_text()), fc.parse_rtlil(out_b.read_text())
     if top not in mods_a or top not in mods_b:
         return f"module {top} missing in an output"
-    problems = compare(mods_a[top], mods_b[top])
+    problems = compare(mods_a[top], mods_b[top], fold)
     if equiv:
-        problems += equivalence(out_a, out_b, top, yosys, work)
+        problems += equivalence(out_a, out_b, top, tools.yosys, work)
     return problems
 
 
 def run_one(
-    source: Path, top: str, tools: tuple[str, str], keep: Path | None, equiv: bool = True
+    source: Path, top: str, tools: fc.Tools, keep: Path | None, equiv: bool = True
 ) -> list[str] | str:
-    """The differences for one file, or an error string. ``tools`` is (odin3, yosys); with
-    ``keep`` the RTLIL files stay in a new directory under it."""
+    """The differences for one file, or an error string. With ``keep`` the RTLIL files stay in a
+    new directory under it."""
     if keep is not None:
         return diff_in(Path(tempfile.mkdtemp(dir=keep)), source, top, tools, equiv)
     with tempfile.TemporaryDirectory() as tmp:
@@ -202,15 +209,19 @@ def main(argv: Sequence[str]) -> int:
     parser.add_argument("--expect", type=Path, help="file[kinds]: reason lines")
     parser.add_argument("--keep", type=Path, help="directory for the RTLIL files (kept)")
     parser.add_argument("--no-equiv", action="store_true", help="skip the equivalence leg")
+    parser.add_argument("--techlib", help="Odin III reads this .o3lib first (the hard blocks)")
+    parser.add_argument("--yosys-lib", help="Yosys reads this Verilog file first (primitives.v)")
+    parser.add_argument("--vtr-compat", action="store_true", help="read_verilog --vtr-compat")
     parser.add_argument("files", nargs="+", type=Path)
     args = parser.parse_args(argv)
     expect = load_expect(args.expect)
     worst = fc.EXIT_SAME
     for source in args.files:
         try:
-            result = run_one(
-                source, args.top, (args.odin3, args.yosys), args.keep, not args.no_equiv
+            tools = fc.Tools(
+                args.odin3, args.yosys, args.techlib, args.yosys_lib, args.vtr_compat
             )
+            result = run_one(source, args.top, tools, args.keep, not args.no_equiv)
         except memcap.CapUnavailable as exc:
             print(f"flatten-diff: skipped: {exc}")
             return fc.EXIT_SKIP

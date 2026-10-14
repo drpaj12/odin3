@@ -6,6 +6,8 @@ Usage::
     verilog_gen.py --seed N --out F.v [--mutate] [--no-ast]
     verilog_gen.py --proc --seed N --out F.v
     verilog_gen.py --elab --seed N --out F.v
+    verilog_gen.py --opt --seed N --out F.v
+    verilog_gen.py --flatten --seed N --out F.v
 
 writes ``F.v``, one compilation unit of one to four modules generated from seed N over the MUST
 and SHOULD coverage rows, weighted toward the common forms: ANSI and non-ANSI headers, parameter
@@ -40,6 +42,12 @@ power-of-two multiplies; no ``F.ast``.
 differential (``tools/elab-check/elab-diff``; ``elab_profile.py``; its first line lists the
 counted traps it used), no ``F.ast``.
 
+``--flatten`` (3A Task 5) is the profile for the ``flatten`` fuzz (``tools/flatten-check/
+fuzz_flatten``; ``flatten_profile.py``; its first line lists the features used): a random module
+hierarchy of up to six levels with parameterized children, generate loops of instances,
+feed-through and constant-tied outputs, an unconnected port, an ``inout`` bus and
+``keep_hierarchy``; the top is ``top``; no ``F.ast``.
+
 Exit 0 written, 2 usage or I/O error.
 """
 
@@ -55,6 +63,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import elab_profile
+import flatten_profile
 import opt_profile
 import proc_profile
 
@@ -2352,6 +2361,16 @@ def write_elab(seed: int, out: Path) -> int:
     return 0
 
 
+def write_flatten(seed: int, out: Path) -> int:
+    """``--flatten``: the flatten profile's hierarchy for seed into out."""
+    try:
+        out.write_text(flatten_profile.generate(seed).text, encoding="utf-8")
+    except OSError as exc:
+        print(f"verilog_gen: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--seed", type=int, required=True)
@@ -2364,11 +2383,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="the opt profile (constants, x, case, enables, resets, shifts)")
     parser.add_argument("--elab", action="store_true",
                         help="the elaboration profile (expression trees, parameters, generate)")
+    parser.add_argument("--flatten", action="store_true",
+                        help="the flatten profile (module hierarchy, generate, inout, keep)")
     args = parser.parse_args(argv)
     out = Path(args.out)
-    if args.proc or args.elab or args.opt:
-        if args.mutate or (args.proc + args.elab + args.opt) > 1:
-            parser.error("--proc, --elab, --opt and --mutate cannot be combined")
+    if args.proc or args.elab or args.opt or args.flatten:
+        if args.mutate or (args.proc + args.elab + args.opt + args.flatten) > 1:
+            parser.error("--proc, --elab, --opt, --flatten and --mutate cannot be combined")
+        if args.flatten:
+            return write_flatten(args.seed, out)
         if args.opt:
             return write_opt(args.seed, out)
         return write_proc(args.seed, out) if args.proc else write_elab(args.seed, out)
