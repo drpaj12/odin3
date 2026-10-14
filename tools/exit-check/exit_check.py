@@ -85,6 +85,13 @@ The run also fails when fewer than ``--min-checked N`` designs (default 1) were 
 (identical + equivalent + recorded eq-x): a wrong or empty golden tree cannot report green. A
 ``--golden-root`` that is not a directory is a usage error.
 
+Assumptions the exit statement carries (equiv-check's, unchanged here): a latch init of 2 or 3
+(don't care, unknown) is read as 0, so an Odin III init 0 against a Parmys init 2 is accepted; RAM
+contents and initial state are not modelled (a paired RAM is a cut point whose input pins are
+compared); ``--odin3-pre``/``--scc-precheck`` are off, so a design with a combinational loop that
+Odin III accepts and Parmys rejects has a ``failed`` golden and is a listed-reject, not an error;
+"identical" is identical under Odin III's ``--vtr-compat``.
+
 Output: one line per design as it finishes, then a summary table, every cause that is not a pass,
 and a totals line. ``--work DIR`` (else a fresh temporary directory, printed and left in place)
 holds ``NNNN-<design>/exit-check.log`` per design with every child's output, beside the splice's
@@ -101,6 +108,7 @@ skipped (an ASan odin3 and no way to cap it).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import hashlib
 import os
@@ -443,6 +451,8 @@ def run_equiv(cfg: Config, golden: Path, out: Path, cap: int, log: list[str]) ->
         return Result(EQUIVALENT)
     if code == EQUIV_EXIT_XCONE:
         cones = cone_names(text)
+        with contextlib.suppress(OSError):  # every excluded output, for the eq-x review
+            (out.parent / "x-cones.txt").write_text("\n".join(cones) + "\n", encoding="utf-8")
         return Result(EQ_X, why=f"{len(cones)} output(s) in x-cones: " + one_line(
             ", ".join(cones)), cones=cones)
     if code == 1 and _VERDICT_LINE.search(text):
@@ -744,6 +754,8 @@ def summary_lines(state: Sweep, total: int, stale: Sequence[str], secs: float,
                  f"NOT PROVEN {state.count(CLS_UNPROVEN_OK)} unproven (listed); NOT CHECKED "
                  f"{nogolden} no-golden; {state.failures()} failing, {len(stale)} stale; "
                  f"{secs:.1f} s")
+    lines.append(f"{TOOL}: assumptions: latch init 2/3 read as 0; RAM contents and init not "
+                 "modelled; --vtr-compat")
     if state.proven() < min_checked:
         lines.append(f"{TOOL}: FAIL: only {state.proven()} design(s) proven, --min-checked is "
                      f"{min_checked} (a wrong or empty golden tree reports nothing)")

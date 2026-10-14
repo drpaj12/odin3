@@ -301,6 +301,8 @@ class EqxTest(ExitCheckCase):
         self.assertIn("eq-x (rec) g/x.v", out)
         self.assertIn("2 outputs as reviewed: reviewed: reads an x memory bit", out)
         self.assertIn("PROVEN 1 (0 identical, 0 equivalent, 1 eq-x with a reviewed record)", out)
+        cones = (self.work / "0000-g_x.v" / "x-cones.txt").read_text()
+        self.assertEqual(cones.split(), ["o[3]", "o[4]"])  # every excluded output is kept
 
     def test_a_record_that_differs_from_the_observed_outputs_fails(self) -> None:
         self.micro("g", "x", "XCONE\n")

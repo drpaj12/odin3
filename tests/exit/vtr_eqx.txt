@@ -1,1 +1,17 @@
-# placeholder, filled below
+# The reviewed eq-x record of the VTR benchmarks (decision 13): a design whose equivalence to Parmys
+# holds only outside the x-cones (equiv-check --x-report exit 3) passes only when it is recorded here
+# with EXACTLY the outputs equiv-check excluded. Syntax:
+#   design <path relative to benchmarks/verilog> <count> <sha256 of the sorted output names> <reason>
+#   bus <path> <output name without its [index]> <count>      (the counts add up to <count>)
+# exit-check compares the observed outputs (count, hash and per-bus counts) with the record: an
+# eq-x design that is not recorded, one whose excluded outputs differ, a record whose design now
+# passes (XPASS) and a record that names no design (stale) all fail the run. Every excluded output is
+# also written to <work>/<NNNN-design>/x-cones.txt for the review.
+#
+# A record needs a REASON that explains why the excluded outputs are x. "x" here is Parmys's `unconn`
+# net (a constant 0 to ABC). The cone is removed whole, so it also hides any real difference behind
+# it: a design is recorded only when the review shows that every difference inside the cone is the
+# resolution of an `unconn` and nothing else (an uninitialised RAM word, an unconnected input).
+#
+# EMPTY ON PURPOSE (2H review I7). arm_core and stereovision0 are eq-x and NOT recorded: see
+# 2H-splice-report.md, "eq-x analysis". exit_vtr is red at those two designs until a human reviews them.
