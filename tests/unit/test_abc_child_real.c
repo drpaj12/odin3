@@ -477,7 +477,47 @@ static void test_failing_command_exits_zero_with_a_diagnostic(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(g_log, "rror"), g_log);
 }
 
-static const char *const k_scripts[] = {"foreign.sh", "orphan.sh"};
+static const char *const k_scripts[] = {"foreign.sh",  "orphan.sh", "pin_ok.sh", "pin39.sh",
+                                        "pin41.sh",    "pinjunk.sh", "pinupper.sh"};
+
+/* A program whose only output is the line (and, for the last case, a following ok one). */
+static void make_pin_script(const char *name, const char *line, char *path, size_t cap) {
+    (void)snprintf(path, cap, "%s/%s", g_tool_dir, name);
+    FILE *file = fopen(path, "w");
+    TEST_ASSERT_NOT_NULL(file);
+    (void)fprintf(file, "#!/bin/sh\necho '%s'\n", line);
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    TEST_ASSERT_EQUAL_INT(0, chmod(path, 0755));
+}
+
+/* The pin line is exactly the prefix and 40 lower-case hex digits: a script that prints the right
+ * commit with a digit missing or added, with junk after it or in upper case is refused. */
+static void test_pin_line_is_parsed_exactly(void) {
+    static const char *const names[] = {"pin_ok.sh", "pin39.sh", "pin41.sh", "pinjunk.sh",
+                                        "pinupper.sh"};
+    const char *pin = odin3_abc_child_pin();
+    char lines[5][100];
+    (void)snprintf(lines[0], sizeof lines[0], "odin3-abc: commit %s", pin);
+    (void)snprintf(lines[1], sizeof lines[1], "odin3-abc: commit %.39s", pin);
+    (void)snprintf(lines[2], sizeof lines[2], "odin3-abc: commit %s0", pin);
+    (void)snprintf(lines[3], sizeof lines[3], "odin3-abc: commit %s JUNK", pin);
+    (void)snprintf(lines[4], sizeof lines[4], "odin3-abc: commit %s", pin);
+    for (char *cur = lines[4]; *cur != '\0'; cur++) {
+        *cur = (char)(*cur >= 'a' && *cur <= 'f' && cur > lines[4] + 17 ? *cur - 'a' + 'A' : *cur);
+    }
+    for (size_t i = 0; i < 5; i++) {
+        char script[PATH_CAP];
+        make_pin_script(names[i], lines[i], script, sizeof script);
+        odin3_abc_child_res res = {0};
+        odin3_status st = odin3_abc_child_check_pin(script, &res);
+        if (i == 0) {
+            TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, lines[i]);
+        } else {
+            TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_ENGINE, st, lines[i]);
+            TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ABC_CHILD_PIN, res.kind, lines[i]);
+        }
+    }
+}
 
 /* A script standing in for the wrapper: the real program with ODIN3_ABC_PARENT set as given
  * (pid 1, or the script's own pid) and, for "own", in the background and its own process group so
@@ -565,6 +605,7 @@ int main(void) {
     RUN_TEST(test_failing_command_exits_zero_with_a_diagnostic);
     RUN_TEST(test_child_refuses_a_foreign_parent);
     RUN_TEST(test_child_dies_with_its_parent);
+    RUN_TEST(test_pin_line_is_parsed_exactly);
     char wrapper[PATH_CAP];
     (void)snprintf(wrapper, sizeof wrapper, "%s/limited.sh", g_tool_dir);
     (void)unlink(wrapper);

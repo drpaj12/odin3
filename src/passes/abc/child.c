@@ -534,16 +534,30 @@ typedef struct pin_scan {
     bool seen;
 } pin_scan;
 
+/* True when text is exactly COMMIT_HEX lower-case hex digits. */
+static bool is_commit_hex(const char *text) {
+    size_t len = 0;
+    while ((text[len] >= '0' && text[len] <= '9') || (text[len] >= 'a' && text[len] <= 'f')) {
+        len++;
+    }
+    return len == COMMIT_HEX && text[len] == '\0';
+}
+
+/* The first line that starts with the prefix is the program's claim; it counts only when it is
+ * the prefix, 40 lower-case hex digits and nothing else (the runner has cut the line end). */
 static void scan_pin_line(void *user, const char *line) {
     pin_scan *scan = user;
     size_t prefix = sizeof PIN_PREFIX - 1;
     if (!scan->seen && strncmp(line, PIN_PREFIX, prefix) == 0) {
-        (void)snprintf(scan->commit, sizeof scan->commit, "%s", line + prefix);
         scan->seen = true;
+        if (is_commit_hex(line + prefix)) {
+            (void)snprintf(scan->commit, sizeof scan->commit, "%s", line + prefix);
+        }
     }
 }
 
-/* The last program that passed (once per process, spec §7.9). */
+/* The last program that passed (once per process, spec §7.9). It is the path that is remembered,
+ * not the file, and it is not synchronised: a replaced file keeps passing, as with the linked path. */
 static char g_pinned_program[ODIN3_ABC_CHILD_PATH_BYTES];
 
 static odin3_status pin_mismatch(const pin_scan *scan, odin3_abc_child_res *res) {
