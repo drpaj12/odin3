@@ -310,15 +310,21 @@ void odin3_kit_note_outputs(odin3_opt_ctx *oc, odin3_node_id node);
  * A_SIGNED differs from B_SIGNED reads both operands zero-extended: it is signed only when BOTH
  * flags are set (Yosys simlib, the registry evaluator, Verilog's own rule). Every rule and the fold
  * take the signedness of such a cell from here instead of from a single flag.
- * both_signed: node's parameters 0 (A_SIGNED) and 1 (B_SIGNED) are both set; false for a node
- * without them. warn_mixed_sign: when node's A_SIGNED != B_SIGNED, logs once per cell (per opt
- * session when one is open, else per call) WARN "opt: module 'm': cell '<type>' '<cell>' has
- * A_SIGNED != B_SIGNED: treated as unsigned (both-signed rule, Yosys simlib; PHASE2 #25)"; the
- * cell is identified by its name (a rewritten cell keeps its name and warns no second time),
- * else by $c<ID>. Out of memory only loses the once-only guard.
+ * both_signed: node's parameters 0 (A_SIGNED) and 1 (B_SIGNED) are both set; false unless the
+ * cell type's parameters 0 and 1 are named A_SIGNED and B_SIGNED ($pmux, $dff, a unary cell).
+ * warn_mixed_sign: when node's A_SIGNED != B_SIGNED, logs once per cell (per opt session when one
+ * is open, else per call) WARN "opt: module 'm': cell '<type>' '<cell>' has A_SIGNED != B_SIGNED:
+ * treated as unsigned (both-signed rule, Yosys simlib; PHASE2 #25)"; the cell is identified by its
+ * name (a rewritten cell keeps its name and warns no second time), else by $c<ID>. Out of memory
+ * only loses the once-only guard.
  */
 bool odin3_opt_both_signed(const odin3_module *module, odin3_node_id node);
 void odin3_opt_warn_mixed_sign(odin3_opt_ctx *oc, odin3_node_id node, const char *type_name);
+/* At most 20 mixed-sign cells are named per module (per session, else per call); the rest are
+ * counted in the warned set and reported by one WARN "... N more mixed-sign cells", logged by
+ * odin3_opt_ctx_free (no session) and odin3_opt_session_end. NULL warned or at most 20: silent. */
+void odin3_opt_warn_mixed_more(const odin3_design *design, const odin3_module *module,
+                               const odin3_vec *warned);
 
 /* The session state of module (NULL outside a session); odin3_opt_ctx_init calls it. */
 struct odin3_opt_modstate *odin3_opt_modstate_of(const odin3_design *design,

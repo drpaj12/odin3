@@ -215,6 +215,7 @@ void odin3_opt_ctx_free(odin3_opt_ctx *oc) {
     if (oc == NULL) {
         return;
     }
+    odin3_opt_warn_mixed_more(oc->design, oc->module, &oc->warned);
     odin3_vec_free(&oc->invert);
     odin3_vec_free(&oc->ties);
     odin3_vec_free(&oc->warned);
@@ -222,16 +223,24 @@ void odin3_opt_ctx_free(odin3_opt_ctx *oc) {
 
 /* --- the mixed-sign ruling ------------------------------------------------------------------ */
 
-enum { PARAM_A_SIGNED = 0, PARAM_B_SIGNED = 1, KIT_LABEL_MAX = 256 };
+enum { PARAM_A_SIGNED = 0, PARAM_B_SIGNED = 1, KIT_LABEL_MAX = 256, MIXED_WARN_MAX = 20 };
 static const uint32_t UNNAMED_KEY =
     0x80000000U; /* a node ID with this bit stands for an unnamed cell */
 
+/* The mixed-sign warning's per-module cap is MIXED_WARN_MAX lines. */
 static bool flag_set(const odin3_module *module, odin3_node_id node, uint32_t index) {
     const odin3_value *val = odin3_node_param(module, node, index);
     return val != NULL && val->i != 0;
 }
 
 bool odin3_opt_both_signed(const odin3_module *module, odin3_node_id node) {
+    const odin3_celltype_def *def =
+        odin3_celltype_get(odin3_module_design(module), odin3_node_type(module, node));
+    if (def == NULL || def->n_params <= PARAM_B_SIGNED ||
+        strcmp(def->params[PARAM_A_SIGNED].name, "A_SIGNED") != 0 ||
+        strcmp(def->params[PARAM_B_SIGNED].name, "B_SIGNED") != 0) {
+        return false; /* not a cell with two signed operands: $pmux, $dff, a unary cell */
+    }
     return flag_set(module, node, PARAM_A_SIGNED) && flag_set(module, node, PARAM_B_SIGNED);
 }
 
@@ -273,6 +282,9 @@ void odin3_opt_warn_mixed_sign(odin3_opt_ctx *oc, odin3_node_id node, const char
     if (warned_seen(set, name != 0 ? name : UNNAMED_KEY | node.v)) {
         return;
     }
+    if (set->len > MIXED_WARN_MAX) {
+        return; /* counted in the set; odin3_opt_warn_mixed_more reports them at the end */
+    }
     char label[KIT_LABEL_MAX];
     odin3_kit_name_label(oc, name, node, label, sizeof label);
     odin3_log(ODIN3_LOG_WARN,
@@ -280,6 +292,15 @@ void odin3_opt_warn_mixed_sign(odin3_opt_ctx *oc, odin3_node_id node, const char
               "(both-signed rule, Yosys simlib; PHASE2 #25)",
               odin3_strtab_get(odin3_design_strtab(oc->design), odin3_module_name(oc->module)),
               type_name, label);
+}
+
+void odin3_opt_warn_mixed_more(const odin3_design *design, const odin3_module *module,
+                               const odin3_vec *warned) {
+    if (warned != NULL && warned->len > MIXED_WARN_MAX) {
+        odin3_log(ODIN3_LOG_WARN, "opt: module '%s': ... %zu more mixed-sign cells",
+                  odin3_strtab_get(odin3_design_strtab(design), odin3_module_name(module)),
+                  warned->len - MIXED_WARN_MAX);
+    }
 }
 
 /* A failure after a rewrite's destructive step: the IR stays valid but may no longer compute what

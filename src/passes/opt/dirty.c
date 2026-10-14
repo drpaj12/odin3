@@ -92,6 +92,9 @@ void odin3_opt_session_end(void) {
     for (uint32_t i = 0; g_sess.mods != NULL && i <= g_sess.n_mods; i++) {
         odin3_util_free(g_sess.mods[i].bits);
         if (g_sess.mods[i].warned_init) {
+            odin3_opt_warn_mixed_more(g_sess.design,
+                                      odin3_module_get(g_sess.design, (odin3_module_id){i}),
+                                      &g_sess.mods[i].warned);
             odin3_vec_free(&g_sess.mods[i].warned);
         }
     }

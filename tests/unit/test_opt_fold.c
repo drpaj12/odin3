@@ -242,40 +242,38 @@ static bool fold_table_fields(const table_fields *tf, char *out, bool *folded) {
     return *folded;
 }
 
-/* A mixed-sign table line (see table_line): its fold agrees with the same line, both flags clear.
- */
-static bool mixed_line_agrees(const table_fields *tf, const char *line, const char *got_bits,
-                              bool folded) {
-    table_fields unsigned_tf = *tf;
-    (void)snprintf(unsigned_tf.a_signed, sizeof unsigned_tf.a_signed, "0");
-    (void)snprintf(unsigned_tf.b_signed, sizeof unsigned_tf.b_signed, "0");
-    char want_bits[FIELD];
-    bool want_folded = false;
-    (void)fold_table_fields(&unsigned_tf, want_bits, &want_folded);
-    mixed_lines++;
-    bool agree = folded == want_folded && (!folded || strcmp(got_bits, want_bits) == 0);
-    if (!agree) {
-        printf("MIXED %s: got %s, unsigned %s\n", line, folded ? got_bits : "(not folded)",
-               want_folded ? want_bits : "(not folded)");
-    }
-    return agree;
+/* The twin of a mixed-sign line is the next line: the same fields with both flags clear and the
+ * same result, which is Yosys 0.55's value for it (tools/opt-check/gen_fold_table.py). */
+static bool is_twin_of(const table_fields *mixed, const table_fields *next) {
+    return strcmp(next->a_signed, "0") == 0 && strcmp(next->b_signed, "0") == 0 &&
+           strcmp(next->type, mixed->type) == 0 && strcmp(next->y_width, mixed->y_width) == 0 &&
+           strcmp(next->op_a, mixed->op_a) == 0 && strcmp(next->op_b, mixed->op_b) == 0 &&
+           strcmp(next->result, mixed->result) == 0;
 }
 
 /* One table line: true on a match. The table is Yosys 0.55's, whose constant evaluation extends
  * each operand of a mixed-sign cell by its own flag; the mixed-sign ruling (spec 17 #57; PHASE2
- * #25) reads such a cell unsigned, so a mixed line is checked against the same line with both
- * flags clear (whose own table lines hold Yosys's value) instead of against Yosys's result. */
+ * #25) reads such a cell unsigned, so a mixed line of the ruled types carries the Yosys value of
+ * its twin (both flags clear), and the next line must be that twin. */
 static bool table_line(const char *line) {
     static table_fields tf;
+    static table_fields mixed;
+    static bool twin_due;
     int got = sscanf(line, "%1023s %1023s %1023s %1023s %1023s %1023s %1023s %1023s", tf.type,
                      tf.a_signed, tf.b_signed, tf.y_width, tf.op_a, tf.op_b, tf.op_s, tf.result);
     TEST_ASSERT_EQUAL_INT_MESSAGE(8, got, line);
+    if (twin_due) {
+        twin_due = false;
+        TEST_ASSERT_TRUE_MESSAGE(is_twin_of(&mixed, &tf), line);
+    }
+    if (both_signed_type(tf.type) && strcmp(tf.a_signed, tf.b_signed) != 0) {
+        mixed = tf;
+        twin_due = true;
+        mixed_lines++;
+    }
     char got_bits[FIELD];
     bool folded = false;
     (void)fold_table_fields(&tf, got_bits, &folded);
-    if (both_signed_type(tf.type) && strcmp(tf.a_signed, tf.b_signed) != 0) {
-        return mixed_line_agrees(&tf, line, got_bits, folded);
-    }
     bool same = folded && strcmp(got_bits, tf.result) == 0;
     if (!same) {
         printf("MISMATCH %s: got %s\n", line, folded ? got_bits : "(not folded)");

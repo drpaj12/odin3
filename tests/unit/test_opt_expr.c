@@ -4327,15 +4327,26 @@ static uint32_t div_mod_y(const bin_case *bc, uint32_t value) {
 }
 
 static void test_mixed_div_mod_by_power_of_two(void) {
-    /* {type, A_SIGNED, B_SIGNED, B constant, its value} over an 8-bit A and Y */
+    /* {type, A_SIGNED, B_SIGNED, A/B/Y widths, A, B constant}, its value; Y is 8 bits and then 12,
+     * so a wrong zero- or sign-extension into a wider Y shows (checked with simlib.v over A in
+     * 0..255, B in 1..7: flags (1,0) and (0,1) equal (0,0)) */
     const struct {
         bin_case bc;
         uint32_t divisor;
     } cases[] = {{{"$div", 1, 0, 8, 3, 8, "\\a", "3'010"}, 2},
                  {{"$div", 0, 1, 8, 3, 8, "\\a", "3'100"}, 4},
+                 {{"$div", 1, 0, 8, 3, 8, "\\a", "3'100"}, 4},
                  {{"$mod", 1, 0, 8, 3, 8, "\\a", "3'010"}, 2},
                  {{"$mod", 1, 0, 8, 3, 8, "\\a", "3'100"}, 4},
-                 {{"$mod", 0, 1, 8, 3, 8, "\\a", "3'100"}, 4}};
+                 {{"$mod", 0, 1, 8, 3, 8, "\\a", "3'100"}, 4},
+                 {{"$mod", 0, 1, 8, 3, 8, "\\a", "3'010"}, 2},
+                 {{"$div", 1, 0, 8, 3, 12, "\\a", "3'010"}, 2},
+                 {{"$div", 0, 1, 8, 3, 12, "\\a", "3'100"}, 4},
+                 {{"$div", 1, 0, 8, 3, 12, "\\a", "3'100"}, 4},
+                 {{"$mod", 1, 0, 8, 3, 12, "\\a", "3'010"}, 2},
+                 {{"$mod", 1, 0, 8, 3, 12, "\\a", "3'100"}, 4},
+                 {{"$mod", 0, 1, 8, 3, 12, "\\a", "3'100"}, 4},
+                 {{"$mod", 0, 1, 8, 3, 12, "\\a", "3'010"}, 2}};
     static const uint32_t values[] = {0, 1, 3, 5, 127, 128, 129, 200, 255};
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         for (size_t at = 0; at < sizeof values / sizeof values[0]; at++) {
@@ -4470,6 +4481,65 @@ static void test_mixed_sign_warns_once(void) {
     }
 }
 
+/* odin3_opt_both_signed: true only for a cell whose parameters 0 and 1 are A_SIGNED and B_SIGNED,
+ * both set; a mixed cell, a unary cell ($not: parameter 1 is the nonzero A_WIDTH) and a $pmux
+ * (WIDTH, S_WIDTH) give false */
+static bool both_signed_of(const char *il) {
+    build(il);
+    return odin3_opt_both_signed(fx.res.module, odin3_module_find_node(fx.res.module, intern("c")));
+}
+
+static void test_both_signed_helper(void) {
+    char il[1024];
+    bin_case bc = {"$add", 1, 1, 3, 3, 4, "\\a", "\\b"};
+    build_bin_text(&bc, il, sizeof il);
+    TEST_ASSERT_TRUE(both_signed_of(il));
+    bc.b_signed = 0;
+    build_bin_text(&bc, il, sizeof il);
+    TEST_ASSERT_FALSE(both_signed_of(il));
+}
+
+static void test_both_signed_non_binary(void) {
+    TEST_ASSERT_FALSE(both_signed_of(
+        "module \\m\n  wire width 3 input 1 \\a\n  wire width 3 output 2 \\y\n  cell $not \\c\n"
+        "    parameter \\A_SIGNED 1\n    parameter \\A_WIDTH 3\n    parameter \\Y_WIDTH 3\n"
+        "    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n"));
+    TEST_ASSERT_FALSE(both_signed_of(
+        "module \\m\n  wire width 2 input 1 \\a\n  wire width 4 input 2 \\b\n"
+        "  wire width 2 input 3 \\s\n  wire width 2 output 4 \\y\n  cell $pmux \\c\n"
+        "    parameter \\WIDTH 2\n    parameter \\S_WIDTH 2\n    connect \\A \\a\n"
+        "    connect \\B \\b\n    connect \\S \\s\n    connect \\Y \\y\n  end\nend\n"));
+}
+
+/* At most 20 mixed-sign cells are named per module; one line then counts the rest */
+static void test_mixed_sign_warning_cap(void) {
+    enum { CELLS = 26, NAMED = 20 };
+    static char il[CELLS * 400];
+    int len = snprintf(il, sizeof il,
+                       "module \\m\n  wire width 3 input 1 \\a\n"
+                       "  wire width 3 input 2 \\b\n");
+    for (int i = 0; i < CELLS; i++) {
+        len += snprintf(il + len, sizeof il - (size_t)len,
+                        "  wire width 4 output %d \\y%d\n  cell $add \\c%d\n"
+                        "    parameter \\A_SIGNED 1\n    parameter \\B_SIGNED 0\n"
+                        "    parameter \\A_WIDTH 3\n    parameter \\B_WIDTH 3\n"
+                        "    parameter \\Y_WIDTH 4\n    connect \\A \\a\n    connect \\B \\b\n"
+                        "    connect \\Y \\y%d\n  end\n",
+                        i + 3, i, i, i);
+    }
+    (void)snprintf(il + len, sizeof il - (size_t)len, "end\n");
+    build_run(il);
+    uint32_t warns = 0;
+    uint32_t more = 0;
+    for (uint32_t i = 0; i < n_lines; i++) {
+        warns += lines[i].level == ODIN3_LOG_WARN ? 1U : 0U;
+        more +=
+            strcmp(lines[i].text, "opt: module 'm': ... 6 more mixed-sign cells") == 0 ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_UINT32(NAMED + 1U, warns);
+    TEST_ASSERT_EQUAL_UINT32(1, more);
+}
+
 static void run_logic_tests(void) {
     RUN_TEST(test_const_and);
     RUN_TEST(test_and_bit_inverse);
@@ -4566,6 +4636,9 @@ static void run_mixed_sign_tests(void) {
     RUN_TEST(test_mixed_fine_addsub);
     RUN_TEST(test_mixed_fold_constants);
     RUN_TEST(test_mixed_sign_warns_once);
+    RUN_TEST(test_both_signed_helper);
+    RUN_TEST(test_both_signed_non_binary);
+    RUN_TEST(test_mixed_sign_warning_cap);
 }
 
 int main(void) {

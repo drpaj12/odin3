@@ -19,7 +19,9 @@
 #define PORT_B ODIN3_EXPR_PORT_B
 #define PORT_S ODIN3_EXPR_PORT_S
 
-/* A 1-bit unsigned binary cell (Yosys: GetSize(A) == 1 && GetSize(B) == 1 && !A_SIGNED). */
+/* A 1-bit unsigned binary cell (Yosys: GetSize(A) == 1 && GetSize(B) == 1 && !A_SIGNED). It reads
+ * A_SIGNED alone, as Yosys does: a 1-bit cell with A 1, B 0 is unsigned under the both-signed
+ * rule too, but is skipped here (a missed rewrite, never a wrong one; kept for Yosys parity). */
 static bool one_bit_unsigned(const odin3_expr_ctx *ec) {
     return odin3_expr_width(ec, PORT_A) == 1 && odin3_expr_width(ec, PORT_B) == 1 &&
            odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) == 0;
