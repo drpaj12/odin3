@@ -223,7 +223,8 @@ void odin3_opt_ctx_free(odin3_opt_ctx *oc) {
 /* --- the mixed-sign ruling ------------------------------------------------------------------ */
 
 enum { PARAM_A_SIGNED = 0, PARAM_B_SIGNED = 1, KIT_LABEL_MAX = 256 };
-static const uint32_t UNNAMED_KEY = 0x80000000U; /* a node ID with this bit stands for an unnamed cell */
+static const uint32_t UNNAMED_KEY =
+    0x80000000U; /* a node ID with this bit stands for an unnamed cell */
 
 static bool flag_set(const odin3_module *module, odin3_node_id node, uint32_t index) {
     const odin3_value *val = odin3_node_param(module, node, index);

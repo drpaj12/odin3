@@ -218,9 +218,9 @@ static uint32_t mixed_lines; /* table lines checked against the unsigned reading
 
 /* The binary operators whose two flags are one flag under the mixed-sign ruling (spec 17 #57). */
 static bool both_signed_type(const char *type) {
-    static const char *const k_types[] = {"$and", "$or", "$xor", "$xnor", "$lt",  "$le",  "$gt",
-                                          "$ge",  "$eq", "$ne",  "$add",  "$sub", "$mul", "$div",
-                                          "$mod"};
+    static const char *const k_types[] = {"$and", "$or",  "$xor", "$xnor", "$lt",
+                                          "$le",  "$gt",  "$ge",  "$eq",   "$ne",
+                                          "$add", "$sub", "$mul", "$div",  "$mod"};
     for (size_t i = 0; i < sizeof k_types / sizeof k_types[0]; i++) {
         if (strcmp(type, k_types[i]) == 0) {
             return true;
@@ -242,6 +242,25 @@ static bool fold_table_fields(const table_fields *tf, char *out, bool *folded) {
     return *folded;
 }
 
+/* A mixed-sign table line (see table_line): its fold agrees with the same line, both flags clear.
+ */
+static bool mixed_line_agrees(const table_fields *tf, const char *line, const char *got_bits,
+                              bool folded) {
+    table_fields unsigned_tf = *tf;
+    (void)snprintf(unsigned_tf.a_signed, sizeof unsigned_tf.a_signed, "0");
+    (void)snprintf(unsigned_tf.b_signed, sizeof unsigned_tf.b_signed, "0");
+    char want_bits[FIELD];
+    bool want_folded = false;
+    (void)fold_table_fields(&unsigned_tf, want_bits, &want_folded);
+    mixed_lines++;
+    bool agree = folded == want_folded && (!folded || strcmp(got_bits, want_bits) == 0);
+    if (!agree) {
+        printf("MIXED %s: got %s, unsigned %s\n", line, folded ? got_bits : "(not folded)",
+               want_folded ? want_bits : "(not folded)");
+    }
+    return agree;
+}
+
 /* One table line: true on a match. The table is Yosys 0.55's, whose constant evaluation extends
  * each operand of a mixed-sign cell by its own flag; the mixed-sign ruling (spec 17 #57; PHASE2
  * #25) reads such a cell unsigned, so a mixed line is checked against the same line with both
@@ -254,21 +273,8 @@ static bool table_line(const char *line) {
     char got_bits[FIELD];
     bool folded = false;
     (void)fold_table_fields(&tf, got_bits, &folded);
-    bool mixed = both_signed_type(tf.type) && strcmp(tf.a_signed, tf.b_signed) != 0;
-    if (mixed) {
-        table_fields unsigned_tf = tf;
-        (void)snprintf(unsigned_tf.a_signed, sizeof unsigned_tf.a_signed, "0");
-        (void)snprintf(unsigned_tf.b_signed, sizeof unsigned_tf.b_signed, "0");
-        char want_bits[FIELD];
-        bool want_folded = false;
-        (void)fold_table_fields(&unsigned_tf, want_bits, &want_folded);
-        mixed_lines++;
-        bool agree = folded == want_folded && (!folded || strcmp(got_bits, want_bits) == 0);
-        if (!agree) {
-            printf("MIXED %s: got %s, unsigned %s\n", line, folded ? got_bits : "(not folded)",
-                   want_folded ? want_bits : "(not folded)");
-        }
-        return agree;
+    if (both_signed_type(tf.type) && strcmp(tf.a_signed, tf.b_signed) != 0) {
+        return mixed_line_agrees(&tf, line, got_bits, folded);
     }
     bool same = folded && strcmp(got_bits, tf.result) == 0;
     if (!same) {

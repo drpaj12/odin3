@@ -404,8 +404,8 @@ static odin3_status group_load(odin3_expr_ctx *ec, group_job *job) {
     bool is_not = ec->kind == ODIN3_EXPR_T_NOT;
     /* $not has the one flag (parameter 0); a binary cell is signed only when both are set, and a
      * mixed-sign cell zero-extends both operands (the ruling of odin3_expr_both_signed) */
-    bool is_signed = is_not ? odin3_expr_param(ec, ODIN3_EXPR_P_UN_SIGNED) != 0
-                            : odin3_expr_both_signed(ec);
+    bool is_signed =
+        is_not ? odin3_expr_param(ec, ODIN3_EXPR_P_UN_SIGNED) != 0 : odin3_expr_both_signed(ec);
     odin3_status st = odin3_expr_read(ec, PORT_A, &raw_a);
     st = st == ODIN3_OK ? odin3_expr_read(ec, is_not ? PORT_A : PORT_B, &raw_b) : st;
     st = st == ODIN3_OK ? odin3_expr_extend(ec, &raw_a, job->n, is_signed, &ext_a) : st;

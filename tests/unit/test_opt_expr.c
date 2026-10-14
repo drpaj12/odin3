@@ -2005,10 +2005,10 @@ static void test_identwrt(void) {
     }
 }
 
-/* The mixed-sign ruling (Peter, 2026-10-13; §17 #55, #57): a cell is signed only when BOTH flags are
- * set, otherwise both operands are zero-extended (Yosys simlib, the registry evaluator). A signed
- * 3-bit A - 0 (B unsigned) therefore reaches the 7-bit Y zero-extended: wiring, and the registry
- * evaluator (the --opt-simcheck simulation) agrees before and after. */
+/* The mixed-sign ruling (Peter, 2026-10-13; §17 #55, #57): a cell is signed only when BOTH flags
+ * are set, otherwise both operands are zero-extended (Yosys simlib, the registry evaluator). A
+ * signed 3-bit A - 0 (B unsigned) therefore reaches the 7-bit Y zero-extended: wiring, and the
+ * registry evaluator (the --opt-simcheck simulation) agrees before and after. */
 static void test_identwrt_mixed_sign_zero_extends(void) {
     expect_sim_equal_after_expr(K_IDENTWRT_MIXED);
     TEST_ASSERT_EQUAL_UINT32(0, count_type("$sub"));
@@ -4237,8 +4237,8 @@ static void run_fine_tests(void) {
 /* --- the mixed-sign ruling (Peter, 2026-10-13; §17 #57) ------------------------------------------
  * A cell with A_SIGNED != B_SIGNED is signed only when BOTH are set, else both operands are
  * zero-extended. Each rule that used to extend an operand by its own flag has a case where the two
- * readings give different values, checked against the registry evaluator (expect_sim_equal_after_expr
- * is the arbiter, not the expected structure). */
+ * readings give different values, checked against the registry evaluator
+ * (expect_sim_equal_after_expr is the arbiter, not the expected structure). */
 
 typedef struct bin_case {
     const char *type;
@@ -4260,7 +4260,8 @@ static void build_bin_text(const bin_case *bc, char *il, size_t cap) {
     TEST_ASSERT_TRUE(len > 0 && (size_t)len < cap);
 }
 
-/* Rewrites bc under opt_expr (fine when asked), demands the registry evaluator's trace unchanged. */
+/* Rewrites bc under opt_expr (fine when asked), demands the registry evaluator's trace unchanged.
+ */
 static void bin_equal(const bin_case *bc, bool fine) {
     char il[1024];
     build_bin_text(bc, il, sizeof il);
@@ -4320,7 +4321,8 @@ static uint32_t div_mod_y(const bin_case *bc, uint32_t value) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, count_type(bc->type), "div/mod_to_shift fires");
     hold_input("a", value);
     n_lines = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_expr_run(&fx.ctx, fx.res.module, &fx.opts, &fx.counts));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_opt_expr_run(&fx.ctx, fx.res.module, &fx.opts, &fx.counts));
     return wire_value("y");
 }
 
@@ -4336,10 +4338,10 @@ static void test_mixed_div_mod_by_power_of_two(void) {
                  {{"$mod", 0, 1, 8, 3, 8, "\\a", "3'100"}, 4}};
     static const uint32_t values[] = {0, 1, 3, 5, 127, 128, 129, 200, 255};
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
-        for (size_t v = 0; v < sizeof values / sizeof values[0]; v++) {
+        for (size_t at = 0; at < sizeof values / sizeof values[0]; at++) {
             bool is_div = cases[i].bc.type[1] == 'd';
-            uint32_t want = is_div ? values[v] / cases[i].divisor : values[v] % cases[i].divisor;
-            TEST_ASSERT_EQUAL_UINT32_MESSAGE(want, div_mod_y(&cases[i].bc, values[v]),
+            uint32_t want = is_div ? values[at] / cases[i].divisor : values[at] % cases[i].divisor;
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(want, div_mod_y(&cases[i].bc, values[at]),
                                              cases[i].bc.type);
         }
     }
@@ -4377,33 +4379,51 @@ static void test_mixed_fine_addsub(void) {
     }
 }
 
-/* The constant fold (fold.c) of a mixed cell: both operands zero-extended, whatever the flags.
- * $div and $mod have no simulate hook, so their Y is compared with C's unsigned arithmetic. */
+/* One mixed-sign constant cell through opt_expr's fold, both flag orders: the registry evaluator's
+ * trace is unchanged, the cell is gone, and for $div and $mod (no simulate hook) Y is C's unsigned
+ * arithmetic on the two 3-bit values. */
+typedef struct fold_case {
+    const char *type;
+    uint32_t y_width;
+    const char *a_conn, *b_conn;
+    uint32_t a_val, b_val;
+} fold_case;
+
+static void check_mixed_fold(const fold_case *fc) {
+    bool is_mod = strcmp(fc->type, "$mod") == 0;
+    bool div_mod = is_mod || strcmp(fc->type, "$div") == 0;
+    for (int signed_a = 0; signed_a <= 1; signed_a++) {
+        bin_case bc = {fc->type, signed_a, 1 - signed_a, 3, 3, fc->y_width, fc->a_conn, fc->b_conn};
+        bin_equal(&bc, false);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, count_type(fc->type), fc->type);
+        if (div_mod) {
+            uint32_t want = is_mod ? fc->a_val % fc->b_val : fc->a_val / fc->b_val;
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(want, wire_value("y"), fc->type);
+        }
+    }
+}
+
 static void test_mixed_fold_constants(void) {
-    const char *types[] = {"$add", "$sub", "$mul", "$div", "$mod", "$and", "$or",  "$xor",
-                           "$xnor", "$lt",  "$le",  "$gt",  "$ge",  "$eq",  "$ne"};
-    const struct {
-        const char *a, *b;
+    static const char *const types[] = {"$add", "$sub", "$mul", "$div",  "$mod",
+                                        "$and", "$or",  "$xor", "$xnor", "$lt",
+                                        "$le",  "$gt",  "$ge",  "$eq",   "$ne"};
+    static const struct {
+        const char *a_conn, *b_conn;
         uint32_t a_val, b_val;
     } consts[] = {{"3'111", "3'001", 7, 1}, {"3'101", "3'110", 5, 6}, {"3'011", "3'100", 3, 4}};
-    for (size_t t = 0; t < sizeof types / sizeof types[0]; t++) {
-        bool cmp = types[t][1] == 'l' || types[t][1] == 'g' || types[t][1] == 'e' ||
-                   types[t][1] == 'n';
-        bool is_mod = strcmp(types[t], "$mod") == 0;
-        bool div_mod = is_mod || strcmp(types[t], "$div") == 0;
-        for (size_t c = 0; c < 3; c++) {
-            for (int flags = 1; flags <= 2; flags++) {
-                bin_case bc = {types[t],        flags == 1 ? 1 : 0,       flags == 2 ? 1 : 0,
-                               3,               3,                        cmp ? 1U : (div_mod ? 8U : 6U),
-                               consts[c].a,     consts[c].b};
-                bin_equal(&bc, false);
-                TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, count_type(types[t]), types[t]);
-                if (div_mod) {
-                    uint32_t want = is_mod ? consts[c].a_val % consts[c].b_val
-                                           : consts[c].a_val / consts[c].b_val;
-                    TEST_ASSERT_EQUAL_UINT32_MESSAGE(want, wire_value("y"), types[t]);
-                }
-            }
+    for (size_t type_at = 0; type_at < sizeof types / sizeof types[0]; type_at++) {
+        const char *name = types[type_at];
+        bool compare = strchr("lgen", name[1]) != NULL;
+        uint32_t y_width = compare ? 1U : 6U;
+        y_width = strcmp(name, "$div") == 0 || strcmp(name, "$mod") == 0 ? 8U : y_width;
+        for (size_t const_at = 0; const_at < 3; const_at++) {
+            const fold_case fc = {name,
+                                  y_width,
+                                  consts[const_at].a_conn,
+                                  consts[const_at].b_conn,
+                                  consts[const_at].a_val,
+                                  consts[const_at].b_val};
+            check_mixed_fold(&fc);
         }
     }
 }
@@ -4436,11 +4456,18 @@ static void test_mixed_sign_warns_once(void) {
     for (uint32_t i = 0; i < n_lines; i++) {
         TEST_ASSERT_NOT_EQUAL_INT(ODIN3_LOG_WARN, lines[i].level);
     }
-    /* a comparison warns too */
-    const bin_case lt = {"$lt", 0, 1, 3, 3, 1, "\\a", "\\b"};
-    build_bin_text(&lt, il, sizeof il);
-    build_run(il);
-    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_WARN, MIXED_WARNING("$lt", "c")));
+    /* every type the ruling covers warns, once, naming itself */
+    static const char *const types[] = {"$and", "$or",  "$xor", "$xnor", "$lt",
+                                        "$le",  "$gt",  "$ge",  "$eq",   "$ne",
+                                        "$add", "$sub", "$mul", "$div",  "$mod"};
+    for (size_t type_at = 0; type_at < sizeof types / sizeof types[0]; type_at++) {
+        const bin_case each = {types[type_at], 0, 1, 3, 3, 1, "\\a", "\\b"};
+        char want[LINE_MAX_LEN];
+        (void)snprintf(want, sizeof want, MIXED_WARNING("%s", "c"), types[type_at]);
+        build_bin_text(&each, il, sizeof il);
+        build_run(il);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, count_lines(ODIN3_LOG_WARN, want), types[type_at]);
+    }
 }
 
 static void run_logic_tests(void) {

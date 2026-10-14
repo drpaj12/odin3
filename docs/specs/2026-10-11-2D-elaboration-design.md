@@ -2311,6 +2311,10 @@ module takes effect at the next module ``; `assignment to bits outside 'y' [7:0]
 elaborated, a module found in several libraries, a black-box body ignored, an implicit black box,
 the final summary line (EL-2).
 
+Not a 2D warning (PHASE2 #25, 2F §17 #57): 2D unifies `A_SIGNED` and `B_SIGNED` of every word cell it
+builds, so no mixed-sign cell leaves it. One that arrives otherwise is signed only when both flags are
+set, and `opt_expr` warns of it once (2F §16).
+
 ### 9.3 Error cap and what stops elaboration (EL-44)
 
 - Errors are counted per `read_verilog` run; at `ODIN3_ELAB_MAX_ERRORS` (20, as 2C's cap) the

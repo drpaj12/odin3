@@ -353,7 +353,8 @@ static odin3_status trunc_fix(odin3_expr_ctx *ec, uint32_t exp, const odin3_expr
 
 /* $div by 2^exp: an arithmetic shift right; signed and truncating, plus the fix on the flooring. */
 static odin3_status div_to_shift(odin3_expr_ctx *ec, uint32_t exp) {
-    bool a_signed = odin3_expr_both_signed(ec); /* a mixed-sign division is unsigned (logical shift) */
+    bool a_signed =
+        odin3_expr_both_signed(ec); /* a mixed-sign division is unsigned (logical shift) */
     uint32_t y_width = odin3_expr_y_width(ec);
     odin3_expr_sig dividend;
     odin3_expr_sig amount;

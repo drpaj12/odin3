@@ -385,26 +385,10 @@ static size_t resume_visit(odin3_expr_ctx *ec, odin3_expr_rule_fn fn) {
 /* The binary types that read A_SIGNED and B_SIGNED together (the shifts and $pow take B's flag as
  * the amount's own, and are not mixed in this sense). */
 static bool mixed_sign_kind(odin3_expr_type kind) {
-    switch (kind) {
-    case ODIN3_EXPR_T_AND:
-    case ODIN3_EXPR_T_OR:
-    case ODIN3_EXPR_T_XOR:
-    case ODIN3_EXPR_T_XNOR:
-    case ODIN3_EXPR_T_LT:
-    case ODIN3_EXPR_T_LE:
-    case ODIN3_EXPR_T_GT:
-    case ODIN3_EXPR_T_GE:
-    case ODIN3_EXPR_T_EQ:
-    case ODIN3_EXPR_T_NE:
-    case ODIN3_EXPR_T_ADD:
-    case ODIN3_EXPR_T_SUB:
-    case ODIN3_EXPR_T_MUL:
-    case ODIN3_EXPR_T_DIV:
-    case ODIN3_EXPR_T_MOD:
-        return true;
-    default:
-        return false;
-    }
+    /* $and $or $xor $xnor, then $lt $le $gt $ge $eq $ne $add $sub $mul $div $mod: two runs of
+     * odin3_expr_type (test_mixed_sign_warns_once checks every type) */
+    return (kind >= ODIN3_EXPR_T_AND && kind <= ODIN3_EXPR_T_XNOR) ||
+           (kind >= ODIN3_EXPR_T_LT && kind <= ODIN3_EXPR_T_MOD);
 }
 
 /* Applies to the node the first rule of its type's list that fires (and any it resumes into). */

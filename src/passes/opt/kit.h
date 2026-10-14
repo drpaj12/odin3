@@ -61,7 +61,8 @@ typedef struct odin3_opt_ctx {
     uint64_t pins_created;
     odin3_vec ties;
     bool defer_ties;
-    odin3_vec warned; /* uint32_t keys, sorted: the mixed-sign cells of this call already warned of */
+    odin3_vec
+        warned; /* uint32_t keys, sorted: the mixed-sign cells of this call already warned of */
 } odin3_opt_ctx;
 
 struct odin3_opt_modstate;
