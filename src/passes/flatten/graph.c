@@ -314,6 +314,9 @@ static odin3_status scan_modules(odin3_flatten_graph *graph) {
 
 static const flat_edge *edges_of(const odin3_flatten_graph *graph, uint32_t mod, uint32_t *n) {
     *n = graph->first[mod + 1] - graph->first[mod];
+    if (*n == 0) {
+        return NULL; /* edges.data may be NULL; NULL + 0 is UB */
+    }
     return (const flat_edge *)graph->edges.data + graph->first[mod];
 }
 
