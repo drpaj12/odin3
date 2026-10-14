@@ -327,6 +327,8 @@ static bool params_equal(const sh_state *ss, odin3_node_id lhs, odin3_node_id rh
     return true;
 }
 
+/* Conservative (spec 17 #45): a mixed-sign cell is unsigned (#57), but a group still needs equal
+ * flags. */
 static bool signs_equal(const sh_state *ss, odin3_node_id op) {
     return param_int(ss, op, PRM_A_SIGNED) == param_int(ss, op, PRM_B_SIGNED);
 }

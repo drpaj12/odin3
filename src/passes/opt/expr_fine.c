@@ -262,8 +262,9 @@ static odin3_status strip_rest(odin3_expr_ctx *ec, strip_job *job, uint32_t skip
     }
     odin3_expr_cell spec = {
         .type = ec->kind, .n_params = ODIN3_EXPR_P_BIN_YW + 1, .in = {&ra, &rb}};
-    spec.params[ODIN3_EXPR_P_BIN_ASIGNED] = odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED);
-    spec.params[ODIN3_EXPR_P_BIN_BSIGNED] = odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED);
+    /* equal flags, the cell's own signedness (a mixed-sign cell is unsigned: §17 #57) */
+    spec.params[ODIN3_EXPR_P_BIN_ASIGNED] = odin3_expr_both_signed(ec) ? 1 : 0;
+    spec.params[ODIN3_EXPR_P_BIN_BSIGNED] = odin3_expr_both_signed(ec) ? 1 : 0;
     spec.params[ODIN3_EXPR_P_BIN_AW] = ra.n;
     spec.params[ODIN3_EXPR_P_BIN_BW] = rb.n;
     spec.params[ODIN3_EXPR_P_BIN_YW] = job->y.n - skip;
@@ -284,12 +285,6 @@ static odin3_status strip_rest(odin3_expr_ctx *ec, strip_job *job, uint32_t skip
 
 odin3_status odin3_expr_rule_fine_addsub(odin3_expr_ctx *ec) {
     if (!ec->fine || (ec->kind != ODIN3_EXPR_T_ADD && ec->kind != ODIN3_EXPR_T_SUB)) {
-        return ODIN3_OK;
-    }
-    /* A mixed-sign cell stays: the stripped rest would extend its operands by their own flags
-     * (Yosys 0.55 does), the registry evaluator reads the cell unsigned (§17 #30, #55). */
-    if (odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) !=
-        odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED)) {
         return ODIN3_OK;
     }
     strip_job job = {.sub = ec->kind == ODIN3_EXPR_T_SUB};
@@ -407,12 +402,14 @@ static odin3_status group_load(odin3_expr_ctx *ec, group_job *job) {
     odin3_expr_sig ext_b = {NULL, 0};
     job->n = odin3_expr_y_width(ec);
     bool is_not = ec->kind == ODIN3_EXPR_T_NOT;
-    bool a_signed = odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) != 0; /* parameter 0 of both */
-    bool b_signed = is_not ? a_signed : odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED) != 0;
+    /* $not has the one flag (parameter 0); a binary cell is signed only when both are set, and a
+     * mixed-sign cell zero-extends both operands (the ruling of odin3_expr_both_signed) */
+    bool is_signed =
+        is_not ? odin3_expr_param(ec, ODIN3_EXPR_P_UN_SIGNED) != 0 : odin3_expr_both_signed(ec);
     odin3_status st = odin3_expr_read(ec, PORT_A, &raw_a);
     st = st == ODIN3_OK ? odin3_expr_read(ec, is_not ? PORT_A : PORT_B, &raw_b) : st;
-    st = st == ODIN3_OK ? odin3_expr_extend(ec, &raw_a, job->n, a_signed, &ext_a) : st;
-    st = st == ODIN3_OK ? odin3_expr_extend(ec, &raw_b, job->n, b_signed, &ext_b) : st;
+    st = st == ODIN3_OK ? odin3_expr_extend(ec, &raw_a, job->n, is_signed, &ext_a) : st;
+    st = st == ODIN3_OK ? odin3_expr_extend(ec, &raw_b, job->n, is_signed, &ext_b) : st;
     st = st == ODIN3_OK ? odin3_opt_const_net(ec->oc, ODIN3_BIT_0, &job->zero) : st;
     st = st == ODIN3_OK ? odin3_opt_const_net(ec->oc, ODIN3_BIT_1, &job->one) : st;
     job->bits = st == ODIN3_OK ? odin3_expr_alloc(ec, sizeof *job->bits * job->n) : NULL;

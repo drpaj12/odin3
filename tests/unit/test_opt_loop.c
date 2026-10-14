@@ -1099,6 +1099,29 @@ static void test_opt_stats_driver(void) {
     }
 }
 
+/* The mixed-sign ruling's warning (spec 16, PHASE2 #25) is once per cell per opt run: the loop
+ * visits the mixed $add in every iteration of a full rescan, and says it once. */
+static void test_mixed_sign_warning_once_per_run(void) {
+    build("module \\m\n  wire width 3 input 1 \\a\n  wire width 3 input 2 \\b\n"
+          "  wire width 4 output 3 \\y\n  wire width 7 output 4 \\z\n"
+          "  cell $add \\c\n    parameter \\A_SIGNED 1\n    parameter \\B_SIGNED 0\n"
+          "    parameter \\A_WIDTH 3\n    parameter \\B_WIDTH 3\n    parameter \\Y_WIDTH 4\n"
+          "    connect \\A \\a\n    connect \\B \\b\n    connect \\Y \\y\n  end\n"
+          "  cell $sub \\d\n    parameter \\A_SIGNED 1\n    parameter \\B_SIGNED 0\n"
+          "    parameter \\A_WIDTH 3\n    parameter \\B_WIDTH 3\n    parameter \\Y_WIDTH 7\n"
+          "    connect \\A \\a\n    connect \\B 3'000\n    connect \\Y \\z\n  end\nend\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "--opt-full-rescan"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_prefix("opt: fixed point after"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_WARN,
+                       "opt: module 'm': cell '$add' 'c' has A_SIGNED != B_SIGNED: treated as "
+                       "unsigned (both-signed rule, Yosys simlib; PHASE2 #25)"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_WARN,
+                       "opt: module 'm': cell '$sub' 'd' has A_SIGNED != B_SIGNED: treated as "
+                       "unsigned (both-signed rule, Yosys simlib; PHASE2 #25)"));
+}
+
 /* --- --opt-simcheck (Task 17, point (m)) ---------------------------------------------------- */
 
 /* y = ~a beside a dead gate on b; the hook below deletes the gate on y. */
@@ -1532,5 +1555,6 @@ int main(void) {
     RUN_TEST(test_opt_oom_fallback);
     RUN_TEST(test_budget_journal);
     RUN_TEST(test_determinism);
+    RUN_TEST(test_mixed_sign_warning_once_per_run);
     return UNITY_END();
 }

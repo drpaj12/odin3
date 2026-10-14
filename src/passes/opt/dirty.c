@@ -13,6 +13,7 @@
 #include "passes/opt/kit.h"
 #include "util/alloc.h"
 #include "util/log.h"
+#include "util/vec.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -48,6 +49,8 @@ struct odin3_opt_modstate {
     bool clean_valid, clean_purge;
     uint64_t clean_gen;
     uint32_t clean_epoch;
+    odin3_vec warned; /* mixed-sign cells warned of this session (kit.c); sized lazily */
+    bool warned_init;
 };
 
 static struct {
@@ -88,6 +91,12 @@ void odin3_opt_session_end(void) {
     }
     for (uint32_t i = 0; g_sess.mods != NULL && i <= g_sess.n_mods; i++) {
         odin3_util_free(g_sess.mods[i].bits);
+        if (g_sess.mods[i].warned_init) {
+            odin3_opt_warn_mixed_more(g_sess.design,
+                                      odin3_module_get(g_sess.design, (odin3_module_id){i}),
+                                      &g_sess.mods[i].warned);
+            odin3_vec_free(&g_sess.mods[i].warned);
+        }
     }
     odin3_util_free(g_sess.mods);
     odin3_util_free(g_sess.keep_prev);
@@ -115,6 +124,17 @@ struct odin3_opt_modstate *odin3_opt_modstate_of(const odin3_design *design,
     }
     odin3_module_id id = odin3_module_id_of(module);
     return id.v <= g_sess.n_mods ? &g_sess.mods[id.v] : NULL;
+}
+
+odin3_vec *odin3_opt_modstate_warned(struct odin3_opt_modstate *mod) {
+    if (mod == NULL) {
+        return NULL;
+    }
+    if (!mod->warned_init) {
+        odin3_vec_init(&mod->warned, sizeof(uint32_t));
+        mod->warned_init = true;
+    }
+    return &mod->warned;
 }
 
 /* --- marks ----------------------------------------------------------------------------------- */

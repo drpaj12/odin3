@@ -214,22 +214,66 @@ static void table_cell(const table_fields *tf, text *params, text *ports) {
     put(params, "    parameter \\Y_WIDTH %u\n", width);
 }
 
-/* One table line: true on a match. */
-static bool table_line(const char *line) {
-    static table_fields tf;
+static uint32_t mixed_lines; /* table lines checked against the unsigned reading */
+
+/* The binary operators whose two flags are one flag under the mixed-sign ruling (spec 17 #57). */
+static bool both_signed_type(const char *type) {
+    static const char *const k_types[] = {"$and", "$or",  "$xor", "$xnor", "$lt",
+                                          "$le",  "$gt",  "$ge",  "$eq",   "$ne",
+                                          "$add", "$sub", "$mul", "$div",  "$mod"};
+    for (size_t i = 0; i < sizeof k_types / sizeof k_types[0]; i++) {
+        if (strcmp(type, k_types[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool fold_table_fields(const table_fields *tf, char *out, bool *folded) {
     static text params;
     static text ports;
-    int got = sscanf(line, "%1023s %1023s %1023s %1023s %1023s %1023s %1023s %1023s", tf.type,
-                     tf.a_signed, tf.b_signed, tf.y_width, tf.op_a, tf.op_b, tf.op_s, tf.result);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(8, got, line);
     params.len = 0;
     ports.len = 0;
     params.buf[0] = '\0';
     ports.buf[0] = '\0';
-    table_cell(&tf, &params, &ports);
-    cell_case cc = {tf.type, params.buf, ports.buf, "", (uint32_t)strtoul(tf.y_width, NULL, 10)};
+    table_cell(tf, &params, &ports);
+    cell_case cc = {tf->type, params.buf, ports.buf, "", (uint32_t)strtoul(tf->y_width, NULL, 10)};
+    *folded = fold_cell(&cc, out);
+    return *folded;
+}
+
+/* The twin of a mixed-sign line is the next line: the same fields with both flags clear and the
+ * same result, which is Yosys 0.55's value for it (tools/opt-check/gen_fold_table.py). */
+static bool is_twin_of(const table_fields *mixed, const table_fields *next) {
+    return strcmp(next->a_signed, "0") == 0 && strcmp(next->b_signed, "0") == 0 &&
+           strcmp(next->type, mixed->type) == 0 && strcmp(next->y_width, mixed->y_width) == 0 &&
+           strcmp(next->op_a, mixed->op_a) == 0 && strcmp(next->op_b, mixed->op_b) == 0 &&
+           strcmp(next->result, mixed->result) == 0;
+}
+
+/* One table line: true on a match. The table is Yosys 0.55's, whose constant evaluation extends
+ * each operand of a mixed-sign cell by its own flag; the mixed-sign ruling (spec 17 #57; PHASE2
+ * #25) reads such a cell unsigned, so a mixed line of the ruled types carries the Yosys value of
+ * its twin (both flags clear), and the next line must be that twin. */
+static bool table_line(const char *line) {
+    static table_fields tf;
+    static table_fields mixed;
+    static bool twin_due;
+    int got = sscanf(line, "%1023s %1023s %1023s %1023s %1023s %1023s %1023s %1023s", tf.type,
+                     tf.a_signed, tf.b_signed, tf.y_width, tf.op_a, tf.op_b, tf.op_s, tf.result);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(8, got, line);
+    if (twin_due) {
+        twin_due = false;
+        TEST_ASSERT_TRUE_MESSAGE(is_twin_of(&mixed, &tf), line);
+    }
+    if (both_signed_type(tf.type) && strcmp(tf.a_signed, tf.b_signed) != 0) {
+        mixed = tf;
+        twin_due = true;
+        mixed_lines++;
+    }
     char got_bits[FIELD];
-    bool folded = fold_cell(&cc, got_bits);
+    bool folded = false;
+    (void)fold_table_fields(&tf, got_bits, &folded);
     bool same = folded && strcmp(got_bits, tf.result) == 0;
     if (!same) {
         printf("MISMATCH %s: got %s\n", line, folded ? got_bits : "(not folded)");
@@ -261,7 +305,9 @@ static uint32_t replay(const char *path) {
 }
 
 static void test_fold_table(void) {
+    mixed_lines = 0;
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(MIN_TABLE, replay(ODIN3_OPT_DATA "/fold_table.txt"));
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, mixed_lines, "the table has mixed-sign lines");
 }
 
 /* --- corner cases ------------------------------------------------------------------------- */

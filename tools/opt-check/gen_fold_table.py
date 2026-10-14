@@ -20,6 +20,12 @@ lengths. A one-bit operand of a ``$reduce_*`` never holds z: opt_expr's rule for
 connects Y to A (z stays z), a rewrite and no fold. ``test_opt_fold`` replays every line
 through ``odin3_opt_fold``.
 
+A mixed-sign line (A_SIGNED != B_SIGNED) of the 15 binary types in ``BOTH_SIGNED`` is signed only
+when both flags are set (PHASE2 #25, spec 17 #57), which Yosys 0.55 does not do, and its
+``read_rtlil`` refuses a mixed ``$add``, ``$div`` or ``$mod``. So Yosys is run on the twin of the
+case, the same operands with both flags clear; the mixed line carries the twin's Yosys value as its
+result and is followed by the twin line itself (flags 0 0, the same value).
+
 Exit 0 on success, 1 when Yosys fails, 2 on a usage error or a refused Yosys.
 """
 
@@ -32,10 +38,11 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 BATCH = 256
+NO_XZ = str.maketrans("xz", "01")
 WIDTHS = (1, 7, 64, 65, 200)
 # 200-bit lines are long, so they come half as often as the others (the repository's 500 KB file
 # limit, the check-added-large-files hook).
@@ -56,6 +63,9 @@ MUXES = ("$mux", "$pmux")
 # Every foldable type, in the order cases cycle through them.
 TYPES = UNARY + BINARY + MUXES
 SHIFTS = frozenset({"$shl", "$shr", "$sshr", "$shiftx"})
+# The binary types a mixed-sign cell reads unsigned (the both-signed rule; not $pow or the shifts).
+BOTH_SIGNED = frozenset({"$and", "$or", "$xor", "$xnor", "$lt", "$le", "$gt", "$ge", "$eq", "$ne",
+                         "$add", "$sub", "$mul", "$div", "$mod"})
 
 
 class GenError(Exception):
@@ -151,8 +161,14 @@ def make_case(rng: random.Random, name: str) -> Case:
             a = a.replace("z", "x")  # opt_expr's 1-bit reduce rule aliases Y to A, keeping z
         return Case(name, a_signed, False, y_width, a, None, None)
     b_width = rng.choice((1, 2, 3, 7, 8)) if name in SHIFTS else _width(rng)
-    return Case(name, a_signed, rng.random() < 0.5, y_width, _operand(rng, _width(rng)),
-                _operand(rng, b_width, _kind(name)), None)
+    b_signed = rng.random() < 0.5
+    a = _operand(rng, _width(rng))
+    b = _operand(rng, b_width, _kind(name))
+    if name == "$xnor" and len(a) == 1 and len(b) == 1:
+        # opt_expr's xnor_buffer rule rewrites a one-bit unsigned $xnor with an x/z bit (its upper
+        # Y bits become 1), which is no fold; an x/z there would split Yosys from the fold
+        a, b = a.translate(NO_XZ), b.translate(NO_XZ)
+    return Case(name, a_signed, b_signed, y_width, a, b, None)
 
 
 def make_cases(seed: int, count: int) -> list[Case]:
@@ -303,9 +319,23 @@ def case_line(case: Case, result: str) -> str:
             f"{case.b or '-'} {case.s or '-'} {result}")
 
 
+def is_mixed(case: Case) -> bool:
+    """A mixed-sign case of a type the both-signed rule covers."""
+    return case.type in BOTH_SIGNED and case.a_signed != case.b_signed
+
+
+def twin(case: Case) -> Case:
+    """The case with both flags clear (what Yosys computes for a mixed line)."""
+    return replace(case, a_signed=False, b_signed=False)
+
+
 def table_text(header: Sequence[str], cases: Sequence[Case], results: Sequence[str]) -> str:
+    """The table; a mixed line is followed by its twin, both holding the twin's Yosys value."""
     lines = list(header)
-    lines += [case_line(case, result) for case, result in zip(cases, results, strict=True)]
+    for case, result in zip(cases, results, strict=True):
+        lines.append(case_line(case, result))
+        if is_mixed(case):
+            lines.append(case_line(twin(case), result))
     return "\n".join(lines) + "\n"
 
 
@@ -315,7 +345,8 @@ def generate(yosys: str, seed: int, count: int) -> str:
     results: list[str] = []
     with tempfile.TemporaryDirectory(prefix="gen-fold-table-") as tmp:
         for start in range(0, len(cases), BATCH):
-            results += run_batch(yosys, cases[start:start + BATCH], Path(tmp))
+            batch = [twin(c) if is_mixed(c) else c for c in cases[start:start + BATCH]]
+            results += run_batch(yosys, batch, Path(tmp))
     header = [f"# gen-fold-table seed {seed} count {count}", f"# yosys: {version}",
               "# <type> <a_signed> <b_signed> <y_width> <a> <b> <s> <result>: MSB first in",
               "# 0 1 x z, '-' for an operand the type lacks; $pmux's b is B, S_WIDTH slices"]

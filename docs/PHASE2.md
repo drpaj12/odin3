@@ -953,7 +953,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
     - **Divergences from Yosys 0.55** are spec 2F §17 (rows 1-56), by reference, each with its
       reason and the file or seed that shows it. The ones the evidence added in 2F-6: #53
       (`bm_stmt_compare_padding.v`, an `$sdff` merge Odin III misses), #54 (`bm_sfifo_rtl.v`, a
-      `mux_invert` and a `const.$neg` Yosys fires), #55 (mixed-sign cells, below) and #56 (`--opt`
+      `mux_invert` and a `const.$neg` Yosys fires), #55 (mixed-sign cells, below; superseded by #57 / PHASE2 #25) and #56 (`--opt`
       seeds 100 and 153, a `$sdff` on one side only). Sound fixes of Yosys miscompiles (#47 and
       others, bitwise-only) are listed there too.
     - **Agent defaults, plan points (a)-(s)** (`docs/plans/2026-10-11-2F-opt-plan.md`, "Spec
@@ -988,7 +988,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `opt_micro` (490 micros: 409 ok, 81 xfail, 0 unexpected, at most 3 iterations),
       `opt_gen_vs_yosys` (the `--opt` generator, 200 seeds, 0 failures, structural cases listed in
       `tests/opt/gen_structural_expect.txt`), `fuzz_opt` (CI; it found two real bugs, mixed-sign
-      `identwrt` and `fine.addsub`, now conservative, §17 #55). These are the implementers'
+      `identwrt` and `fine.addsub`, fixed under the both-signed rule; #55 is superseded by §17 #57 / PHASE2 #25). These are the implementers'
       smoke numbers; the sweeps' own summaries are in the Results block, to be filled.
       **Exit codes of the opt tools (one convention):** 0 pass, 1 a real negative result, 2 usage
       or tool error, 3 hard (a crash, signal, memory-cap kill or timeout of a child; `opt-equiv`,
@@ -1057,15 +1057,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `vtr_primitives.v` as a library unit with per-read flags (`--nomem2reg`); 2D-7b's
       `read_verilog --lib` is that mode, and 2H checks it carries them.
     - **For Peter:**
-      1. *Open, Peter:* the mixed-sign cell semantics (2F Task 18 review I1 and I2). A cell with
-         `A_SIGNED != B_SIGNED` is read per operand by `calc.cc`, `fold.c` and several opt rules
-         (`bitwise_logic_one_const`, `fine.group`, `mul_to_shift`, `div_to_shift`, `divmod`), and
-         as unsigned by Yosys's `simlib.v`, the registry evaluator, `merge.c` and `share.c`. Only
-         `identwrt` and `fine.addsub` are made conservative (§17 #55); `fuzz_opt` therefore emits
-         alike flags and no longer explores mixed cells. Options: (a) both-signed-only everywhere
-         (recommended: matches simlib, the LRM and the evaluator `--opt-simcheck` uses; `fold.c`
-         changes), or (b) `odin3_check_design` rejects mixed cells, as Yosys's `check` does. The
-         rules are unchanged until Peter rules.
+      1. *Decided, #25:* the mixed-sign cell semantics (2F Task 18 review I1 and I2): Peter ruled
+         "2a" on 2026-10-13, both-signed-only everywhere, with a warning.
       2. lenet.v's Yosys-side runs exist only as `sweep-xl` jobs on an idle machine (rulings C1 and
          I10 applied).
       3. The IR-6 amendment for a compact at the end of `opt` (point (h)) is withdrawn (#19).
@@ -1098,3 +1091,31 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       option (`out2`: 0 against Yosys's `in`) and equivalent with it; the Phase 2 script's BLIF
       with the option is equivalent (`equiv-check`) to the Parmys golden. `initial_multiple_blocks.v`
       (`initial out1 = in1;` and `out2 = in2;`) is the same case and is fixed the same way.
+
+25. **Mixed-sign cells: signed only when both flags are set** (Peter, 2026-10-13, ruling "2a" plus a
+    warning; 2F Task 18 review I1 and I2; spec 2F §17 #57, supersedes #55; branch
+    `feat/2F-mixed-sign`). A word cell with `A_SIGNED != B_SIGNED` is signed only when BOTH flags are
+    set, else both operands are zero-extended: Yosys `simlib.v`, the registry evaluator, `merge.c`,
+    `share.c` and Verilog's own rule. Yosys's `calc.cc` and some of its `opt_expr` rules extend
+    each operand by its own flag; Odin III no longer does anywhere.
+    - **Rules changed** (one helper, `odin3_opt_both_signed` in the opt kit; `odin3_expr_both_signed`
+      for the rules): `bitwise_logic_one_const`, `fine.group` (`$not` keeps its one flag),
+      `mul_to_shift` (the shift extends by the cell's signedness; a one bit that is a constant's sign
+      bit is a power of two when the cell is unsigned), `mul` low zeros, `div_to_shift` (logical shift
+      on a mixed cell), `divmod` (`$mod` mask and signed forms), `identwrt` (positive wiring and the
+      -1 forms), `fine.addsub`, and the constant fold (`fold.c`, every binary operator but `$pow`).
+      `identwrt` and `fine.addsub`, made conservative in §17 #55, rewrite again. Cells the rules
+      build carry equal flags. Shifts, `$shiftx` and `$pow` are untouched (B's flag is the amount's).
+    - **Warning** (WARN, spec 2F §16): `opt: module 'm': cell '$sub' 'c' has A_SIGNED != B_SIGNED:
+      treated as unsigned (both-signed rule, Yosys simlib; PHASE2 #25)`. It fires at the first
+      `opt_expr` visit of the cell, once per cell per `opt` run (per call outside the loop). There is
+      no `read_rtlil` and BLIF has no word cells, so there is no read-time point; `opt_merge` and
+      `opt_share` only keep mixed cells apart and say nothing.
+    - **Evidence.** RED first: `test_mixed_*` in `tests/unit/test_opt_expr.c` fail on the old rules
+      (the registry evaluator's trace differs after `opt_expr` for the bitwise, group, mul and fold
+      cases, `$div`/`$mod` give a sign-extended Y, and the identwrt / addsub cases stay); GREEN after.
+      `$div`, `$mod` and `$pow` have no simulate hook, so there the ruling itself is the arbiter
+      (Y against C's unsigned division). `fuzz_opt` draws A_SIGNED and B_SIGNED apart again; the two
+      mixed-sign repros stay in `tests/fuzz/fuzz_opt_regress`. The Phase 2 script's output on 20
+      micros and mcml is byte-identical before and after: the front end unifies the flags, so no
+      mixed cell reaches `opt`.

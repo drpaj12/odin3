@@ -148,7 +148,20 @@ class GenFoldTableTest(unittest.TestCase):
         self.assertEqual(lines[0], f"# gen-fold-table seed 5 count {count}")
         self.assertEqual(lines[1], f"# yosys: {VERSION_055}")
         body = [line for line in lines if not line.startswith("#")]
-        self.assertEqual(len(body), count)
+        cases = gft.make_cases(5, count)
+        self.assertEqual(len(body), count + sum(1 for c in cases if gft.is_mixed(c)))
+        picked: list[str] = []
+        pos = 0
+        for case in cases:
+            picked.append(body[pos])
+            pos += 1
+            if gft.is_mixed(case):  # its twin follows: flags clear, the same value
+                fields = body[pos].split()
+                self.assertEqual(fields[1:3], ["0", "0"])
+                self.assertEqual(fields[3:], body[pos - 1].split()[3:])
+                pos += 1
+        self.assertEqual(pos, len(body))
+        body = picked
         runs = (self.root / "runs.log").read_text().splitlines()
         self.assertEqual(len(runs), 3)
         self.assertEqual(runs[0], "-q -p read_rtlil b.il; opt_expr; write_rtlil o.il")
@@ -159,6 +172,18 @@ class GenFoldTableTest(unittest.TestCase):
             self.assertEqual(fields[4:7], [case.a, case.b or "-", case.s or "-"])
             want = "x" * case.y_width if (i % gft.BATCH) % 5 == 0 else "0" * case.y_width
             self.assertEqual(fields[7], want, line)
+
+    def test_mixed_line_is_followed_by_its_twin(self) -> None:
+        mixed = gft.Case("$add", True, False, 3, "011", "101", None)
+        clear = gft.Case("$add", False, False, 3, "011", "101", None)
+        shift = gft.Case("$sshr", True, False, 3, "011", "1", None)
+        text = gft.table_text([], [mixed, shift, clear], ["110", "011", "110"])
+        self.assertEqual(text.splitlines(), [
+            "$add 1 0 3 011 101 - 110", "$add 0 0 3 011 101 - 110",
+            "$sshr 1 0 3 011 1 - 011", "$add 0 0 3 011 101 - 110"])
+        self.assertTrue(gft.is_mixed(mixed))
+        self.assertFalse(gft.is_mixed(shift))
+        self.assertFalse(gft.is_mixed(clear))
 
     def test_same_seed_same_table(self) -> None:
         _, _, first = self._run(VERSION_055, "--seed", "9", "--count", "300")

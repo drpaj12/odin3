@@ -233,7 +233,14 @@ spec §5.2. An entry declares:
   for the undefined case;
   (amended 2026-10-12, 2D black-box widths; approved by Peter 2026-10-13)
 - parameters: name, kind, default. Signedness of word-level operands is a parameter
-  (`A_SIGNED`, `B_SIGNED`), as in Yosys;
+  (`A_SIGNED`, `B_SIGNED`), as in Yosys. A binary word cell (`$add $sub $mul $div $mod $and $or
+  $xor $xnor $lt $le $gt $ge $eq $ne`) with `A_SIGNED != B_SIGNED` (a "mixed-sign" cell) is signed
+  only when BOTH flags are set; otherwise both operands are zero-extended (Yosys `simlib.v`, the
+  registry evaluator `operation_signed`, Verilog's own rule; Peter's ruling of 2026-10-13, PHASE2
+  #25). Every consumer follows it: the simulator, the `opt` rules and the constant fold, which warn
+  once per mixed cell. `$pow`, `$shiftx` and `$shift` read B_SIGNED as the exponent's (amount's) own flag, independent of
+  A_SIGNED; `$shl $shr $sshr` ignore it (the amount is unsigned). The Verilog front end unifies the flags
+  of the 15 ruled types, so it never emits a mixed cell of those; `$pow` and the shifts can carry 1/0;
 - hooks, each may be NULL: `verify` (consistency beyond widths), `const_value` (IR-4),
   `simulate` (1E), writer hooks (1C/1F).
 - per type, a local type may carry opaque tech-library data (1G: `odin3_celltype_set_lib`; the

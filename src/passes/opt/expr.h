@@ -251,9 +251,11 @@ odin3_expr_port odin3_expr_y_port(const odin3_expr_ctx *ec);
 /* Same net, or the same constant value (Yosys SigBit equality, x and z included). */
 bool odin3_expr_same(const odin3_expr_ctx *ec, odin3_net_id lhs, odin3_net_id rhs);
 bool odin3_expr_is_undef(const odin3_expr_ctx *ec, odin3_net_id net); /* constant x or z */
-/* A_SIGNED and B_SIGNED both set: the one case where a binary cell's operands are signed
- * (Yosys's cells with mixed signs are invalid; its const_div and const_mod take a sign per
- * operand, while our registry evaluator reads a mixed cell as unsigned). */
+/* A_SIGNED and B_SIGNED both set: the one case where a binary cell's operands are signed. The
+ * mixed-sign ruling (Peter, 2026-10-13; spec 17 #57): on a cell with A_SIGNED != B_SIGNED BOTH
+ * operands are zero-extended (simlib, the registry evaluator), so every rule that extends an
+ * operand, and the fold, takes its signedness from here rather than from one flag (Yosys's
+ * calc.cc extends each operand by its own flag, which no rule here follows). Binary cells only. */
 bool odin3_expr_both_signed(const odin3_expr_ctx *ec);
 
 odin3_expr_census odin3_expr_port_census(const odin3_expr_ctx *ec, odin3_expr_port port);

@@ -37,7 +37,9 @@ typedef enum fold_shape {
  * How an operator reads its operands (Yosys 0.55's CellTypes::eval on constants, probed with
  * opt_expr): AS_IS uses them whole at max(Y, A) bits (the shifts read B as an unsigned amount);
  * BITWISE extends each to Y by its own sign; NUMERIC reads each as the number its own sign gives
- * (so A signed and B unsigned mix) and truncates the exact result to Y.
+ * (so A signed and B unsigned mix) and truncates the exact result to Y. That is Yosys's rule; for
+ * every binary operator but $pow, job_init overrides both flags with the both-signed flag (spec
+ * 17 #57), so a mixed cell is unsigned.
  */
 typedef enum fold_sign { SIGN_AS_IS, SIGN_BITWISE, SIGN_NUMERIC } fold_sign;
 
@@ -415,6 +417,12 @@ static bool job_init(fold_job *job, uint32_t row) {
     job->a_signed = !is_mux && param_set(oc, job->node, PARAM_A_SIGNED);
     job->b_signed =
         job->row->shape != SHAPE_UNARY && !is_mux && param_set(oc, job->node, PARAM_B_SIGNED);
+    /* A binary operator reads both operands signed only when both flags are set (the mixed-sign
+     * ruling, spec 17 #57: simlib and the registry evaluator); the shifts and $pow keep B's flag
+     * as the amount's own */
+    if (job->row->shape == SHAPE_BINARY && job->row->op != ODIN3_COP_POW) {
+        job->a_signed = job->b_signed = odin3_opt_both_signed(oc->module, job->node);
+    }
     /* NUMERIC adds a bit: keep every width below the evaluator's cap */
     return job->y_width >= 1 && job->y_width < ODIN3_ELAB_MAX_WIDTH;
 }
