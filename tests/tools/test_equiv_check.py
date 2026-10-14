@@ -1083,3 +1083,110 @@ class RamPairingTest(unittest.TestCase):
                                       "--no-ram-pairing")
         self.assertIn(code, (0, 4), err)
         self.assertNotIn("RAM slice", err)
+
+
+def _stuck_we(name: str, first: int = 0) -> tuple[list[str], str]:
+    """(.inputs, cover text) of a write enable that random simulation never raises (a 64-input
+    AND), as in the adversarial repros."""
+    ins = [f"{name}{i}" for i in range(first, first + 64)]
+    lines = []
+    for k in range(0, 64, 8):
+        lines.append(f".names {' '.join(ins[k:k + 8])} m{name}{k}\n11111111 1\n")
+    lines.append(f".names {' '.join(f'm{name}{k}' for k in range(0, 64, 8))} w{name}\n"
+                 + "1" * 8 + " 1\n")
+    return ins, "".join(lines)
+
+
+class RamReviewFixTest(unittest.TestCase):
+    """Fixes for the adversarial review of the RAM pairing (e1, a4, c1, b1)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def run_pair(self, text_a: str, text_b: str, *flags: str) -> tuple[int, str, str]:
+        paths = []
+        for name, text in (("a.blif", text_a), ("b.blif", text_b)):
+            path = Path(self.tmp.name) / name
+            path.write_text(text, encoding="utf-8")
+            paths.append(str(path))
+        abc = ["--abc", ABC] if ABC is not None else []
+        return check("--match-unnamed", *abc, *flags, *paths)
+
+    def test_one_formal_bit_connected_twice_is_exit_2(self) -> None:
+        """e1: ``data[0]=d0 data=d1`` is one pin of a one-bit port connected twice."""
+        head = ".model t\n.inputs clk ad d0 d1 we\n.outputs o\n"
+        tail = ".names single_port_ram^MEM~3-0^out~0 o\n1 1\n.end\n"
+        gate = ".gate single_port_ram addr[0]=ad clk=clk {} out[0]=single_port_ram^MEM~3-0^out~0 we=we\n"
+        a = head + gate.format("data[0]=d0 data=d1") + tail
+        b = head + gate.format("data[0]=d1") + tail
+        for flags in ((), ("--no-ram-pairing",)):
+            code, _, err = self.run_pair(a, b, *flags)
+            self.assertEqual(code, 2, err)
+            self.assertIn("connected twice", err)
+            code, _, err = self.run_pair(b, a, *flags)
+            self.assertEqual(code, 2, err)
+
+    def test_same_formal_twice_on_a_gate_adder_is_exit_2(self) -> None:
+        head = ".model t\n.inputs a b c\n.outputs s co\n"
+        gate = (".gate adder a[0]=a b[0]=b cin=c {}sumout[0]=s cout=co\n.end\n")
+        code, _, err = self.run_pair(head + gate.format("a[0]=b "), head + gate.format(""))
+        self.assertEqual(code, 2, err)
+        self.assertIn("connected twice", err)
+
+    def a4(self, swapped: bool) -> str:
+        ins, cover = _stuck_we("x")
+        q0, q1 = [f"single_port_ram^MEM~5-{k}^out~0" for k in (0, 1)]
+        outs = (q1, q0) if swapped else (q0, q1)
+        ram = ".gate single_port_ram addr[0]=ad clk=clk data[0]=d0 out[0]={} we=wx\n"
+        return (f".model t\n.inputs clk ad d0 {' '.join(ins)}\n.outputs o0 o1\n" + cover
+                + ram.format(q0) + ram.format(q1)
+                + f".names {outs[0]} o0\n1 1\n.names {outs[1]} o1\n1 1\n.end\n")
+
+    @needs_abc
+    def test_interchangeable_slices_with_swapped_reads_are_never_exit_1(self) -> None:
+        """a4: the two slices have the same input pins, so swapping their reads is a no-op in
+        truth.  Exit 1 would be a false 'differs'; 0 or 4 are allowed (never 1)."""
+        code, out, err = self.run_pair(self.a4(False), self.a4(True))
+        self.assertIn(code, (0, 4), out + err)
+
+    def c1(self) -> str:
+        return (".model t\n.inputs clk ad d0 d1 we0 we1\n.outputs o0 o1\n"
+                ".subckt sub clk=clk a=ad d=d0 we=we0 q=o0\n"
+                ".subckt sub clk=clk a=ad d=d1 we=we1 q=o1\n.end\n"
+                ".model sub\n.inputs clk a d we\n.outputs q\n"
+                ".gate single_port_ram addr[0]=a clk=clk data[0]=d "
+                "out[0]=single_port_ram^MEM~3-0^out~0 we=we\n"
+                ".names single_port_ram^MEM~3-0^out~0 q\n1 1\n.end\n")
+
+    @needs_abc
+    def test_a_submodel_instantiated_twice_falls_back_to_signatures(self) -> None:
+        code, out, err = self.run_pair(self.c1(), self.c1())
+        self.assertEqual(code, 0, out + err)
+
+    def test_two_slices_with_one_identity_are_ungrouped_not_an_error(self) -> None:
+        groups = rampair.build_groups([("single_port_ram", ("7", 0)),
+                                       ("single_port_ram", ("7", 0)),
+                                       ("single_port_ram", ("7", 1)),
+                                       ("single_port_ram", ("8", 0))])
+        self.assertEqual([(g.mem, g.slices) for g in groups], [("8", {0: 3})])
+
+    def b1(self, ids: tuple[str, str]) -> str:
+        ins_x, cov_x = _stuck_we("x")
+        ins_y, cov_y = _stuck_we("y")
+        ram = (".subckt single_port_ram addr[0]=ad clk=clk data[0]={} "
+               "out[0]=single_port_ram^MEM~{}-0^out~0 we={}\n")
+        return (f".model t\n.inputs clk ad d0 d1 {' '.join(ins_x + ins_y)}\n.outputs o0 o1\n"
+                + cov_x + cov_y + ram.format("d0", ids[0], "wx") + ram.format("d1", "77", "wy")
+                + ".cname ram@1/0\n"
+                + ".names single_port_ram^MEM~%s-0^out~0 o0\n1 1\n" % ids[0]
+                + ".names single_port_ram^MEM~77-0^out~0 o1\n1 1\n.end\n"
+                + ".model single_port_ram\n.inputs addr[0] clk data[0] we\n.outputs out[0]\n"
+                ".blackbox\n.end\n")
+
+    @needs_abc
+    def test_a_cname_like_a_generated_key_does_not_collide(self) -> None:
+        """b1: the user's ``.cname ram@1/0`` must not merge with a generated key."""
+        code, out, err = self.run_pair(self.b1(("5", "77")), self.b1(("9", "77")))
+        self.assertIn(code, (1, 4), out + err)
+        self.assertNotIn("loop", err)

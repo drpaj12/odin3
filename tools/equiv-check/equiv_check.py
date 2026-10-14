@@ -397,6 +397,7 @@ class _Flattener:
 
     def add_subckt(self, cell: blif.Subckt, frame: _Frame, stack: list[_Frame]) -> None:
         sub = self.models.get(cell.model)
+        self.check_pins_once(cell, [f for f, _ in cell.conns])
         conns = {f: frame.resolve(a) for f, a in cell.conns}
         if sub is None and cell.model == "adder":
             sub = _gate_adder_model(cell)
@@ -420,12 +421,24 @@ class _Flattener:
                 child.netmap[port] = self.const0()
         stack.append(child)
 
+    def check_pins_once(self, cell: blif.Subckt, pins: list[str]) -> None:
+        """A formal pin connected twice (``data[0]=a data=b`` is one pin of a one-bit port) is a
+        malformed instance: the pin tables are keyed by pin, so the first connection would be
+        silently lost and never compared.  EquivError (exit 2)."""
+        seen: set[str] = set()
+        for pin in pins:
+            if pin in seen:
+                raise EquivError(f"{self.netlist.path}:{cell.line}: malformed: pin {pin!r} of "
+                                 f"{cell.model!r} connected twice")
+            seen.add(pin)
+
     def add_blackbox(self, cell: blif.Subckt, sub: blif.Model | None, frame: _Frame) -> None:
         """Cut a black-box instance: outputs become inputs, inputs become outputs."""
         if not self.cut:
             raise EquivError(f"{self.netlist.path}:{cell.line}: unsupported black box "
                              f"{cell.model}")
         names = _canonical_formals([f for f, _ in cell.conns])
+        self.check_pins_once(cell, [names[f] for f, _ in cell.conns])
         if sub is None:
             is_out = {names[f]: blif.gate_port_is_output(cell.model, f) for f, _ in cell.conns}
         else:
