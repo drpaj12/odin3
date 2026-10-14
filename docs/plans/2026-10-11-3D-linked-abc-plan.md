@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+*Amended 2026-10-14 (PHASE3 #29 ruling 6):* PR 3D-5a, Tasks 9a to 9c, added before 3D-5 for decision 28's subprocess path (spec §7.9, AB-33). No existing task was renumbered or changed except by the hand-over notes inside Tasks 14, 16, 19 and 22.
+
 v1 was the agent draft, written with the 3E and 3H plans against one shared contract (PR order, the heavy-run convention, the `$lut`, ISOP and run-information hand-overs).
 
 v2 applies the pre-flight review `3-plans-review` (3D: 0 critical, 6 important, 13 minor; every finding applied, no minor rejected) and the controller's rulings I3–I10; each change cites its finding or ruling where it lands. The main ones: 2E Task 1's cells land before `$lut` (I5, conflict note 2); one budget message (I6, point (i)); only the clean `ODIN3_ERR_ENGINE` return ships and 3D-2 waits for Peter (I7, point (a)); word-cell BLIFs leave the `abc` inputs (I8, point (j)); `abc-equiv --step` (I9); 3H's nightly runs the 3D sweeps (I10, point (m)); no tool sets `ODIN3_HEAVY_OK`, and every heavy run waits for 2E-1 (I3, I4).
@@ -11,11 +13,12 @@ v2 applies the pre-flight review `3-plans-review` (3D: 0 critical, 6 important, 
 - the adapter `libodin3_abc.so` with its engine ABI (3D-2);
 - pass-run arguments and run information, the IR-12 amendment (3D-3);
 - the script checker (3D-4) and the project/CLI `abc_script` (3D-6);
-- the pass on the BLIF exchange, which with 3E and 3F gives **M1** (3D-5);
+- the subprocess path for non-default scripts, Tasks 9a to 9c (3D-5a, PHASE3 #28 and #29), before 3D-5;
+- the pass on the BLIF exchange, which with 3E and 3H-3 gives **M1** (3D-5);
 - the in-memory MiniAIG/MiniLUT exchange after the spike (3D-7);
 - the evidence: determinism, `bench_abc`, the large-design schedule (3D-8).
 
-No `lower`, no `hardmap`, no `write_blif --vtr` (3E), no VTR wrapper (3F), no subprocess engine, no retiming.
+No `lower`, no `hardmap`, no `write_blif --vtr` (3E), no VTR wrapper (3F, folded into 3H), no subprocess *engine* (the subprocess path for non-default scripts is PR 3D-5a, below), no retiming.
 
 **Architecture:** Three layers, each with one owner of its state.
 - `adapters/abc/` (C17, `libodin3_abc.so`) is the only code that touches ABC.
@@ -771,7 +774,63 @@ The rows are §7.5's, and each command name is verified at the pin.
   - `cli_abc_script_project`: `odin3 --abc-script cli.abc --project p.o3proj -p dump_project` → the dump's `"abc_script"` is `cli.abc`'s resolved path, and the replacement info line is on stderr;
   - `--help` shows the usage line.
 
-## PR 3D-5 — the `abc` pass on the BLIF exchange (M1 with 3E and 3F)
+## PR 3D-5a — the subprocess path (PHASE3 #28 and #29 ruling 6; lands before 3D-5)
+
+Added 2026-10-14. Tasks 9a to 9c are lettered so that Tasks 1 to 22 keep their numbers; they sit
+between Task 13 (3D-6) and Task 9 (the first task of 3D-5), and they land first. Spec §7.9 (AB-33)
+owns the rules. They need Task 11 (the script checker and its SHA-256 identity) and Task 3 (the PIC
+`odin3_abc_exe`), nothing from 3D-5.
+
+### Task 9a: The child runner (AB-33: spawn, pipe, wall clock, output cap, group kill)
+**Files:** Create `src/passes/abc/child.h`, `src/passes/abc/child.c`, `tests/unit/test_abc_child.c` and the fixtures `tests/unit/data/abc/child/{ok,exit3,segv,sleep,flood,noout}.sh`. Modify `src/passes/abc/abc_test.h` (`odin3_abc_test_set_child_limits(seconds, output_bytes)`) and `CMakeLists.txt`.
+
+**Interfaces:**
+- Produces `odin3_abc_child_run(const odin3_abc_child_req *req, odin3_abc_child_res *res)`. The request holds the program path, the command file, the run directory, the limits, the run number and the text callback (a request struct, no adjacent convertible parameters). The result holds the kind (`OK`, `SPAWN`, `EXIT`, `SIGNAL`, `TIMEOUT`, `OUTPUT`), the code and the output byte count.
+- `ODIN3_ABC_CHILD_SECONDS` 3,600 and `ODIN3_ABC_CHILD_OUTPUT_BYTES` 64 MiB, in `abc.h`.
+- No recursion, no VLA, functions of at most 60 lines: the poll loop is split into start, pump, reap and kill.
+
+**Tests (`test_abc_child.c`, the fixtures stand in for `odin3-abc`):**
+- `ok.sh` prints two lines and exits 0 → `OK`, both lines reach the callback in order, and a last line without a newline arrives whole.
+- `exit3.sh` → `EXIT` with code 3. `segv.sh` (`kill -SEGV $$`) → `SIGNAL` 11.
+- `sleep.sh` under a 1 s limit → `TIMEOUT` within 3 s, and a grandchild the script started (`sleep 60 &`) is gone afterwards (process-group kill; the test checks `kill(pid, 0)`).
+- `flood.sh` under a 4 KiB cap → `OUTPUT`, killed, no zombie.
+- A missing program → `SPAWN` with `ENOENT` in the code.
+- The child's environment holds only `PATH`, `HOME`, `TMPDIR` and `LC_ALL` (the fixture prints `env`), its stdin is `/dev/null`, and a core file is not written.
+- An OOM sweep (`odin3_util_set_alloc_fail_after`) over `odin3_abc_child_run`: `NO_MEMORY`, no leak, no live child.
+
+### Task 9b: The `odin3-abc` program, its lookup, the route and the diagnostics (AB-33)
+**Files:** Modify `CMakeLists.txt` (install `odin3_abc_exe` as `odin3-abc` beside `odin3`; copy it next to the build's `odin3` so the lookup works in the build tree), `src/passes/abc/child.[ch]` (lookup, version check, the six texts), `src/passes/abc/abc.h` (`odin3_abc_route`), `src/passes/abc/abc_test.h` (`odin3_abc_test_set_route`) and `docs/ORACLES.md`. Create `tests/unit/test_abc_route.c`.
+
+**Interfaces:**
+- `odin3_abc_child_program(char *path, size_t cap)` resolves `ODIN3_ABC_EXE`, else `<dirname of /proc/self/exe>/odin3-abc`.
+- `odin3_abc_child_check_pin(const char *path, odin3_abc_child_res *res)` runs `-c "version"` through Task 9a's runner once per process and compares it with `ODIN3_ABC_COMMIT_STR`.
+- `odin3_abc_route(const unsigned char sha256[32])` is `CHILD` unless the digest equals the embedded default's (Task 11's `odin3_abc_default_sha256`), by content and not by path.
+- `odin3_abc_child_message(const odin3_abc_child_res *, char *out, size_t cap)` renders exactly the six texts of spec §7.9; the run number is the caller's.
+
+**Tests (`test_abc_route.c`):**
+- The default script's bytes → `LINKED`; the same bytes under another path → `LINKED`; one byte changed → `CHILD`; an empty script → `CHILD`.
+- `odin3_abc_test_set_route(always_child)` and `always_linked` override it, and `auto` restores it.
+- Each of the six messages, asserted whole, for a `SPAWN` (`ENOENT`), a pin mismatch (a fixture printing a wrong `version`), `EXIT` 3, `SIGNAL` 11, `TIMEOUT` and `OUTPUT`.
+- `ODIN3_ABC_EXE` set to a fixture wins over the sibling program; unset, the lookup finds the build's `odin3-abc`.
+
+### Task 9c: The real child (AB-33; the exit gate of 3D-5a)
+**Files:** Create `tests/unit/test_abc_child_real.c` (CTest `abc_child_real`, only under `ODIN3_WITH_ABC`) and the fixtures `tests/unit/data/abc/child/{two_gates.blif,exits.abc,loops.abc}`. Modify `CMakeLists.txt`.
+
+**Tests:**
+- Real `odin3-abc -f` on a `read; strash; if -K 6; write_hie` command file over `two_gates.blif` → `OK`, and the output BLIF is byte-identical to the linked engine's BLIF exchange for the same file and commands (the test calls the engine through its seam; skipped when `ODIN3_HAVE_ABC` is off).
+- A command file whose last line is a command that makes ABC call `exit()` (`exits.abc`) → `EXIT`, and the test process continues: the linked engine is still usable afterwards (a second `OK` run).
+- `loops.abc` under a 2 s limit → `TIMEOUT`, no process left in the group.
+- The run directory holds `abc<r>.cmd`, and nothing but the files of §6.2.
+- The pin check passes on the build's own `odin3-abc`, and fails with the exact text when `ODIN3_ABC_EXE` names a fixture printing another commit.
+- `tools/heavy-run` is not needed: nothing here is a sweep.
+
+**Hand-over to 3D-5 (edits to Tasks 14, 16 and 19 below; the numbers are unchanged).**
+- Task 14 calls `odin3_abc_route` after the checker, once per pass run, and the INFO start line names the exchange `blif` when the route is `CHILD`.
+- Task 16 runs the BLIF exchange through `odin3_abc_child_run` when the route is `CHILD`, and the read-back of §6.2 is unchanged.
+- Task 19 repeats the unconn, init-1 and `abc_equiv_micro` fixtures with `odin3_abc_test_set_route(always_child)`, and adds `cli_abc_script_crash` (a user script that makes ABC `exit()`: one `ENGINE` error, `write_blif` before and after identical, `odin3` exits 1 and not by a signal).
+- Task 22 adds the child's rows to the determinism suite: two processes and A, B, A with a non-default script.
+
+## PR 3D-5 — the `abc` pass on the BLIF exchange (M1 with 3E and 3H-3; 3F is folded into 3H)
 
 ### Task 9: `$lut` in the Verilog writer (§2, point (q))
 **In PR 3D-5** (finding 12), which already waits for 3E-5 (`odin3_blif_isop`).
@@ -791,6 +850,8 @@ The rows are §7.5's, and each command name is verified at the pin.
 - CTest `lut_verilog_icarus`: the unit test writes `build/<preset>/lut/luts.v` (one module, 16 random `$lut`s per width 1–6, `odin3_prng` seed `0x3D9`) and `luts_tb.v`. The testbench drives all 2^k inputs of each LUT and compares with its table. `iverilog` + `vvp` print `PASS` and exit 0.
 
 ### Task 14: Arguments, script precedence, start-up checks, the budget and the pass row (AB-19, AB-20, AB-24, AB-28)
+**Amendment (3D-5a):** after the checker it calls `odin3_abc_route` (Task 9b) once per run; see Task 9c's hand-over.
+
 **Files:**
 - Create `src/passes/abc/args.c`, `src/passes/abc/run.h`, `src/passes/abc/run.c` and `tests/unit/test_abc_args.c`.
 - Create `tests/unit/abc_fake_engine.h` and `.c`: `open`, `close` and an `exec` that records lines. Task 16 completes it.
@@ -896,6 +957,8 @@ The rows are §7.5's, and each command name is verified at the pin.
 - OOM sweep over `region_build`.
 
 ### Task 16: The fake engine, `abc_result` and the BLIF exchange (AB-14, AB-15, AB-13 encoding)
+**Amendment (3D-5a):** it runs the BLIF exchange through `odin3_abc_child_run` (Task 9a) when `odin3_abc_route` says `CHILD`; the read-back is unchanged.
+
 **Files:**
 - Create `src/passes/abc/result.[ch]`, `src/passes/abc/xblif.[ch]`, `tests/unit/test_abc_result.c` and `tests/unit/test_abc_xblif.c`.
 - Complete `tests/unit/abc_fake_engine.[ch]` (point (t)).
@@ -1039,6 +1102,8 @@ The rows are §7.5's, and each command name is verified at the pin.
 - OOM sweep over `records`.
 
 ### Task 19: Real-engine integration, `equiv-check --blackbox`, `abc-equiv`, the splice fuzzer and DESIGN §6 (AB-30 §13.3–§13.4, §13.6–§13.7; 3E §14.1)
+**Amendment (3D-5a):** it repeats its fixtures with `odin3_abc_test_set_route(always_child)` and adds `cli_abc_script_crash` (Task 9c's hand-over).
+
 **Files:**
 - Create `tests/unit/test_abc_unconn.c`, `tests/unit/test_abc_init1.c`, `tests/unit/test_abc_pass.c`, `tests/unit/data/abc/{toggle_init1,scorr_merge_init1,derived_clock,ram_unconn,two_ports,loop,keep_net}.blif`, `tests/fuzz/fuzz_abc_splice.c`, `tools/abc-check/abc-equiv`, `tools/abc-check/abc_equiv.py`, `tests/tools/test_abc_equiv.py` and `tests/abc/equiv_expect_fail.txt`.
 - Modify `tools/equiv-check/equiv_check.py` (`--blackbox`, its docstring) and `tests/tools/test_equiv_check.py`.
@@ -1162,6 +1227,8 @@ The rows are §7.5's, and each command name is verified at the pin.
 ## PR 3D-8 — evidence
 
 ### Task 22: Determinism, `bench_abc`, calibration, the H1–H6 schedule and the PHASE3 entry (AB-26, AB-29, AB-30 §13.8–§13.9)
+**Amendment (3D-5a):** it adds the child's rows (non-default script) to the determinism suite (Task 9c's hand-over).
+
 **Files:**
 - Create `tests/bench/bench_abc.c` (Release; point (v)), `tools/abc-check/abc-determinism` (shell) and `tests/tools/test_abc_determinism.py`.
 - Modify `CMakeLists.txt`:
