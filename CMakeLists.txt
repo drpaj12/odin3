@@ -2166,6 +2166,29 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/vtr_expect_fail.txt
                         --root ${_vtr_verilog} --cap-for koios/lenet.v=5G ${_vtr_benchmarks})
             set_tests_properties(opt_vtr PROPERTIES LABELS "sweep;nightly")
+            # 2F Task 20 (spec 20.2, 20.3, ruling I9): the nightly VTR legs of opt-equiv and
+            # opt-diff, run by hand (Peter runs no nightly): tools/opt-check/opt-nightly, one
+            # tool run at a time under memcap, smallest file first. opt_equiv_vtr and
+            # opt_diff_vtr (opt-diff with all five scripts) run the 31 verilog/*.v files, mcml.v
+            # last. The _xl pair runs koios/lenet.v alone (tests/opt/vtr_nightly_xl.txt; fails
+            # when the xl selection is empty), 8G per child in the 9G slice (ODIN3_HEAVY_XL_OK=1,
+            # an idle machine only). Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R
+            # '^opt_(equiv|diff)_vtr$'. Not in CI.
+            set(_opt_nightly ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-nightly
+                --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --root ${_vtr_verilog}
+                --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/vtr_expect_fail.txt
+                --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/vtr_nightly_xl.txt
+                --diff-expect ${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt)
+            odin3_add_sweep_test(opt_equiv_vtr LABEL sweep
+                COMMAND ${_opt_nightly} --set vtr31 --leg equiv --mem-cap 3G)
+            odin3_add_sweep_test(opt_diff_vtr LABEL sweep
+                COMMAND ${_opt_nightly} --set vtr31 --leg diff --mem-cap 3G)
+            set_tests_properties(opt_equiv_vtr opt_diff_vtr PROPERTIES LABELS "sweep;nightly")
+            odin3_add_sweep_test(opt_equiv_vtr_xl LABEL sweep-xl
+                COMMAND ${_opt_nightly} --set all64 --xl --leg equiv --mem-cap 8G)
+            odin3_add_sweep_test(opt_diff_vtr_xl LABEL sweep-xl
+                COMMAND ${_opt_nightly} --set all64 --xl --leg diff --mem-cap 8G)
         endif()
     endif()
 

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# opt-nightly: the nightly VTR legs of opt-equiv and opt-diff, by hand (2F spec 20.2, 20.3). See
+# opt_nightly.py. Exit codes: 0 pass, 1 an unexpected result, 2 error or usage, 77 skipped.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here/../elab-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/opt_nightly.py" "$@"
