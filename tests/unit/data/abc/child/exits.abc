@@ -1,0 +1,5 @@
+read_lib @DATA@/exits.lib
+read_blif @DATA@/two_gates.blif
+strash
+map
+stime -c

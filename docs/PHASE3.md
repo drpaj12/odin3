@@ -737,6 +737,12 @@ then the options considered.
     logged here; Peter is asked only for IR/invariant changes, irreversible or outward-facing steps,
     and anything touching the reverse-engineering use (structural Verilog input, names, hierarchy,
     provenance, Verilog output).
+33. **3C `hardmap` plan approved** (Peter, 2026-10-14: "looks good";
+    `docs/plans/2026-10-14-3C-hardmap-plan.md`): 7 tasks in 3 PRs, no IR change. Its agent default
+    (b) on names is approved explicitly, since it touches the reverse-engineering use: a source cell's
+    first mapped node keeps the cell's name, the others take `<cell>.<role>`, every created node
+    carries `hardmap` = `<kind>:<role>`, and the source is reached through the DERIVED provenance
+    record. The other defaults (a, c–i) follow #32; Task 7 logs them.
 
 33. **3E-4 round-trip and VPR-read evidence: figures and agent defaults** (2026-10-14; plan
     Tasks 10 and 11, spec 3E §16.3-§16.6). Both sweeps ran through `tools/heavy-run` from a release
