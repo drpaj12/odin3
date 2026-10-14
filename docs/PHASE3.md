@@ -823,8 +823,8 @@ then the options considered.
     expanded parents first (the roots list is in module-ID order); a constant net of a child maps to
     the root's shared constant net; a join that leaves two non-bus drivers, or a constant and a
     driver, is an error at `flatten`; the failure state after the first mutation is "partially
-    flattened" (weaker than 2F's OP-13); `--separator` (default `.`), no `--no-prov`; `$c<ID>` labels
-    for an unnamed instance; unnamed objects stay unnamed; no net attributes; `blif_name` is not
+    flattened" (weaker than 2F's OP-13); `--separator` (default `.`), no `--no-prov`; an unnamed
+    instance labels its children `<parent prefix>$c<ID>` (so `ua.$c7.inv`, review I3); unnamed objects stay unnamed; no net attributes; `blif_name` is not
     copied; the `_N` uniqueness rule is per kind. Writers (checked on the fixtures): `write_verilog`
     prints every alias as `assign <alias> = <net>;` with the dotted names, `write_rtlil` prints
     `connect` lines, `write_blif` prints the net's primary name and `.cname` with the dotted node
@@ -841,10 +841,12 @@ then the options considered.
     CTest, no failure; 300 against Yosys in CTest; a 300-case run with the equivalence proof found
     none, two proofs timed out and are counted unproven, not passed). The estimate counts only the
     objects `flatten` adds (the roots' own are not charged) with measured constants (448 bytes per
-    node, 24 per pin, 8 per net, 16 per wire, 96 per record, 32 per name; `graph.c`), 1.16x to 2.2x
-    the bytes reserved on the 19 and never below. The sweep (`flatten-vtr`: `read_verilog
+    node, 24 per pin, 8 per net, 16 per wire, 96 per record, 32 per name, and since the review 64 per
+    alias wire bit and 256 per bare alias; `graph.c`), 1.18x to 2.22x the bytes reserved on the 19
+    and never below; alias-heavy feed-through probes in `test_flatten_expand` hold it too, and the
+    in-run budget check ticks on nets and wires as well as nodes. The sweep (`flatten-vtr`: `read_verilog
     --vtr-compat --nolatches; proc; opt; flatten; check`, Release build, smallest source first, one
-    process at a time, `tools/heavy-run`, 2026-10-14; wall and peak RSS from GNU time; records and
+    process at a time, `tools/heavy-run`, 2026-10-14, re-run after the review fixes; wall and peak RSS from GNU time; records and
     bytes/object are what the pass added; estimate/actual is the pre-flight estimate over the bytes
     reserved; yosys is `flatten-diff` without the proof) gave `kept` 0 on all 19, the flat top's
     count of every cell type equal to the sum over the instance tree, and no difference from Yosys in
@@ -855,25 +857,25 @@ then the options considered.
 
     | design | wall s | peak MiB | instances | kept | renamed | flat nodes | flat nets | flat wires | records | bytes/object | estimate/actual | yosys | ok |
     |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-    | diffeq1 | 0.00 | 11 | 0 | 0 | 0 | 42 | 845 | 15 | 0 | - | - | same | yes |
-    | diffeq2 | 0.00 | 11 | 0 | 0 | 0 | 22 | 453 | 8 | 0 | - | - | same | yes |
-    | ch_intrinsics | 0.00 | 11 | 1 | 0 | 0 | 75 | 567 | 33 | 21 | 79 | 2.22 | same | yes |
-    | stereovision3 | 0.01 | 11 | 0 | 0 | 0 | 216 | 565 | 32 | 0 | - | - | same | yes |
-    | sha | 0.10 | 16 | 0 | 0 | 0 | 256 | 3295 | 48 | 0 | - | - | same | yes |
-    | mkPktMerge | 0.01 | 12 | 6 | 0 | 0 | 299 | 1774 | 196 | 411 | 123 | 1.41 | same | yes |
-    | blob_merge | 0.06 | 15 | 2 | 0 | 0 | 1781 | 8119 | 161 | 126 | 154 | 1.33 | same | yes |
-    | stereovision2 | 0.06 | 21 | 145 | 0 | 0 | 2350 | 46387 | 1969 | 3888 | 122 | 1.38 | expected | yes |
-    | bgm | 0.14 | 39 | 201 | 0 | 0 | 18648 | 52638 | 6303 | 23295 | 261 | 1.16 | expected | yes |
-    | boundtop | 0.08 | 18 | 15 | 0 | 0 | 1350 | 8642 | 710 | 1583 | 147 | 1.43 | expected | yes |
-    | raygentop | 0.08 | 20 | 15 | 0 | 0 | 791 | 6509 | 534 | 971 | 136 | 1.44 | same | yes |
-    | stereovision1 | 0.07 | 19 | 232 | 0 | 0 | 2732 | 26297 | 3241 | 5547 | 127 | 1.34 | expected | yes |
-    | stereovision0 | 0.08 | 19 | 297 | 0 | 0 | 2416 | 21511 | 3389 | 5052 | 132 | 1.34 | same | yes |
-    | or1200 | 0.06 | 16 | 15 | 0 | 0 | 954 | 7408 | 549 | 1177 | 147 | 1.38 | expected | yes |
-    | mkSMAdapter4B | 0.05 | 14 | 10 | 0 | 0 | 925 | 4030 | 807 | 417 | 170 | 1.30 | same | yes |
-    | LU8PEEng | 0.19 | 35 | 119 | 0 | 0 | 4268 | 51775 | 2116 | 5044 | 158 | 1.25 | expected | yes |
-    | LU32PEEng | 0.58 | 75 | 431 | 0 | 0 | 13770 | 181851 | 6484 | 15608 | 160 | 1.24 | expected | yes |
-    | mkDelayWorker32B | 0.10 | 19 | 18 | 0 | 0 | 1350 | 12564 | 1157 | 961 | 92 | 1.98 | same | yes |
-    | mcml | 1.54 | 117 | 225 | 0 | 0 | 5368 | 172262 | 10484 | 15508 | 108 | 1.32 | same | yes |
+    | diffeq1 | 0.01 | 9 | 0 | 0 | 0 | 42 | 845 | 15 | 0 | - | - | same | yes |
+    | diffeq2 | 0.00 | 9 | 0 | 0 | 0 | 22 | 453 | 8 | 0 | - | - | same | yes |
+    | ch_intrinsics | 0.00 | 9 | 1 | 0 | 0 | 75 | 567 | 33 | 21 | 79 | 2.22 | same | yes |
+    | stereovision3 | 0.01 | 9 | 0 | 0 | 0 | 216 | 565 | 32 | 0 | - | - | same | yes |
+    | sha | 0.08 | 14 | 0 | 0 | 0 | 256 | 3295 | 48 | 0 | - | - | same | yes |
+    | mkPktMerge | 0.01 | 10 | 6 | 0 | 0 | 299 | 1774 | 196 | 413 | 123 | 1.56 | same | yes |
+    | blob_merge | 0.05 | 13 | 2 | 0 | 0 | 1781 | 8119 | 161 | 126 | 154 | 1.68 | same | yes |
+    | stereovision2 | 0.05 | 19 | 145 | 0 | 0 | 2350 | 46387 | 1969 | 3888 | 122 | 1.39 | expected | yes |
+    | bgm | 0.26 | 37 | 201 | 0 | 0 | 18648 | 52638 | 6303 | 23297 | 261 | 1.18 | expected | yes |
+    | boundtop | 0.06 | 16 | 15 | 0 | 0 | 1350 | 8642 | 710 | 1584 | 147 | 1.44 | expected | yes |
+    | raygentop | 0.07 | 18 | 15 | 0 | 0 | 791 | 6509 | 534 | 972 | 136 | 1.47 | same | yes |
+    | stereovision1 | 0.06 | 17 | 232 | 0 | 0 | 2732 | 26297 | 3241 | 5547 | 127 | 1.35 | expected | yes |
+    | stereovision0 | 0.08 | 18 | 297 | 0 | 0 | 2416 | 21511 | 3389 | 5052 | 132 | 1.36 | same | yes |
+    | or1200 | 0.05 | 14 | 15 | 0 | 0 | 954 | 7408 | 549 | 1178 | 147 | 1.40 | expected | yes |
+    | mkSMAdapter4B | 0.04 | 12 | 10 | 0 | 0 | 925 | 4030 | 807 | 418 | 170 | 1.34 | same | yes |
+    | LU8PEEng | 0.16 | 33 | 119 | 0 | 0 | 4268 | 51775 | 2116 | 5045 | 158 | 1.31 | expected | yes |
+    | LU32PEEng | 0.43 | 73 | 431 | 0 | 0 | 13770 | 181851 | 6484 | 15609 | 160 | 1.30 | expected | yes |
+    | mkDelayWorker32B | 0.09 | 17 | 18 | 0 | 0 | 1350 | 12564 | 1157 | 961 | 92 | 2.08 | same | yes |
+    | mcml | 1.36 | 115 | 225 | 0 | 0 | 5368 | 172262 | 10484 | 15508 | 108 | 1.42 | same | yes |
 
 ## Risks
 
