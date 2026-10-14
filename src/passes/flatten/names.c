@@ -96,5 +96,7 @@ odin3_status odin3_flatten_set_prefix(odin3_flatten_ctx *fc, flat_label label) {
         const char *text = odin3_strtab_get(odin3_design_strtab(fc->design), label.name);
         return odin3_strbuf_appendf(&fc->prefix, "%s%s", text, fc->sep);
     }
-    return odin3_strbuf_appendf(&fc->prefix, "$c%" PRIu32 "%s", label.node, fc->sep);
+    const char *parent =
+        label.parent != 0 ? odin3_strtab_get(odin3_design_strtab(fc->design), label.parent) : "";
+    return odin3_strbuf_appendf(&fc->prefix, "%s$c%" PRIu32 "%s", parent, label.node, fc->sep);
 }

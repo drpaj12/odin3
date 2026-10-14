@@ -415,6 +415,28 @@ static void test_flat_unnamed_instance(void) {
     TEST_ASSERT_TRUE(has_node(top, want));
 }
 
+/* top -> ua (named, mid) -> an unnamed instance of leaf: the names keep `ua.` (review I3). */
+static void test_flat_unnamed_nested(void) {
+    odin3_module *leaf = make_sub("leaf", (odin3_prov_id){0});
+    odin3_module *mid = ff_module(&fix, "mid");
+    (void)ff_port(&fix, mid, "x", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, mid, "z", ODIN3_DIR_OUT, 1);
+    (void)inst_xz(mid, leaf, NULL);
+    odin3_module *top = make_top();
+    (void)inst_xz(top, mid, "ua");
+    flatten_ok(top);
+    uint32_t found = 0;
+    for (uint32_t nid = 1; nid < odin3_module_node_end(top); nid++) {
+        odin3_node_id node = {nid};
+        const char *name =
+            odin3_node_live(top, node)
+                ? odin3_strtab_get(odin3_design_strtab(fix.design), odin3_node_name(top, node))
+                : "";
+        found += strncmp(name, "ua.$c", 5) == 0 && strstr(name, ".n1") != NULL ? 1 : 0;
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, found);
+}
+
 /* --- provenance ----------------------------------------------------------------------------- */
 
 static const char *hier_text(odin3_prov_id id) {
@@ -1004,6 +1026,7 @@ int main(void) {
     RUN_TEST(test_flat_attrs);
     RUN_TEST(test_flat_names_unique);
     RUN_TEST(test_flat_unnamed_instance);
+    RUN_TEST(test_flat_unnamed_nested);
     RUN_TEST(test_flat_prov);
     RUN_TEST(test_flat_prov_distinct_instances);
     RUN_TEST(test_flat_prov_nested);

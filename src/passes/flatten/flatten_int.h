@@ -18,12 +18,14 @@
 enum { FLAT_N_CONST = 4, FLAT_BUDGET_EVERY = 1 << 16, FLAT_KEEP_LOG_CAP = 20 };
 
 /* One instance node of the root waiting for expansion: the string ID of its parent's path, the
- * instance's own IR name in the module that held it (0 = unnamed) and its original record. */
+ * instance's own IR name in the module that held it (0 = unnamed), its original record and, for an
+ * unnamed instance, the string ID of the name prefix its parent's children carry (0: none). */
 typedef struct flat_work {
     uint32_t node;
     uint32_t parent_path;
     uint32_t orig_name;
     odin3_prov_id prov;
+    uint32_t parent_prefix;
 } flat_work;
 
 /* A net of the child (mapped to the root by odin3_flatten_mapped) that a port bit joined, for the
@@ -41,10 +43,12 @@ typedef struct flat_key {
     uint32_t str;
 } flat_key;
 
-/* The label of an instance for its children's prefix: its flat name (0: unnamed) and node ID. */
+/* The label of an instance for its children's prefix: its flat name (0: unnamed), its node ID and,
+ * when unnamed, the prefix its parent's children carry (the label is then `<parent>$c<node>`). */
 typedef struct flat_label {
     uint32_t name;
     uint32_t node;
+    uint32_t parent;
 } flat_label;
 
 typedef struct odin3_flatten_ctx {
@@ -87,7 +91,8 @@ odin3_status odin3_flatten_name(odin3_flatten_ctx *fc, flat_key key, uint32_t *o
 /* The MEMID rewritten the same way against the root's MEMID set (which it extends). Once per
  * (instance, original MEMID): $mem, $memrd and $memwr cells sharing a MEMID keep sharing it. */
 odin3_status odin3_flatten_memid(odin3_flatten_ctx *fc, uint32_t orig, uint32_t *out);
-/* "<text><sep>" as the prefix of the children of an instance named str (0: "$c<node>"). */
+/* "<text><sep>" as the prefix of the children of an instance named str (0: the parent's prefix
+ * and "$c<node>", so an unnamed instance keeps the path of the instances above it). */
 odin3_status odin3_flatten_set_prefix(odin3_flatten_ctx *fc, flat_label label);
 /* Interns the NUL-terminated text of fc->scratch. */
 odin3_status odin3_flatten_intern_scratch(odin3_flatten_ctx *fc, uint32_t *out);

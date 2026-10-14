@@ -316,7 +316,8 @@ static odin3_status expand_one(odin3_flatten_ctx *fc, const flat_work *item) {
     fc->cache_to = 0;
     odin3_status st = odin3_flatten_path(fc, item);
     st = st == ODIN3_OK
-             ? odin3_flatten_set_prefix(fc, (flat_label){odin3_node_name(fc->root, inst), inst.v})
+             ? odin3_flatten_set_prefix(
+                   fc, (flat_label){odin3_node_name(fc->root, inst), inst.v, item->parent_prefix})
              : st;
     st = st == ODIN3_OK ? capture_pins(fc, inst) : st;
     st = st == ODIN3_OK ? odin3_node_delete(fc->root, inst) : st;
@@ -346,7 +347,7 @@ static odin3_status queue_root_instance(odin3_flatten_ctx *fc, odin3_node_id nod
         return ODIN3_ERR_NO_MEMORY;
     }
     *item = (flat_work){node.v, fc->root_name, odin3_node_name(fc->root, node),
-                        odin3_node_prov(fc->root, node)};
+                        odin3_node_prov(fc->root, node), 0};
     return ODIN3_OK;
 }
 

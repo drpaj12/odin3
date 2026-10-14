@@ -120,9 +120,15 @@ static odin3_status queue_instance(odin3_flatten_ctx *fc, odin3_node_id copy, od
     if (item == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *item = (flat_work){copy.v, fc->path_str, odin3_node_name(fc->child, orig),
-                        odin3_node_prov(fc->child, orig)};
-    return ODIN3_OK;
+    *item = (flat_work){copy.v,
+                        fc->path_str,
+                        odin3_node_name(fc->child, orig),
+                        odin3_node_prov(fc->child, orig),
+                        0};
+    if (item->orig_name != 0 || fc->prefix.len == 0) {
+        return ODIN3_OK; /* a named instance's flat name already holds the prefix */
+    }
+    return odin3_design_intern(fc->design, odin3_bytes_cstr(fc->prefix.data), &item->parent_prefix);
 }
 
 static odin3_status copy_node(odin3_flatten_ctx *fc, odin3_node_id node) {
