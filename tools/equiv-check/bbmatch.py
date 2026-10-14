@@ -343,13 +343,18 @@ def signatures(names: Sequence[blif.Names], latches: Sequence[blif.Latch],
     digests = _digests(covers, order, latches, pis, boxes, pi_key)
     colours = (refine(covers, order, latches, pis, boxes, pi_key) if structure
                else [0] * len(boxes))
-    canon = canonical_classes(names, latches, boxes)
+    canon = canonical_drivers(names)
     return [Signature(d, tuple(canon(net) for _, net in box.inputs), c)
             for box, d, c in zip(boxes, digests, colours, strict=True)]
 
 
-def pair(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature]) -> Pairing:
-    """Pair two lists of signatures (see the module docstring for the rules)."""
+def pair(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature],
+         classes: tuple[Callable[[str], str] | None, Callable[[str], str] | None] = (None, None)
+         ) -> Pairing:
+    """Pair two lists of signatures (see the module docstring for the rules).  ``classes`` are the
+    two sides' ``canonical_classes``-style functions (or None): boxes whose input nets differ but
+    fall in the same class on every pin are interchangeable too.  They are called only for a
+    group that simulation ties, so a lazy function costs nothing when nothing ties."""
     groups: dict[bytes, tuple[list[int], list[int]]] = {}
     for side, sigs in enumerate((sigs_a, sigs_b)):
         for index, sig in enumerate(sigs):
@@ -359,8 +364,8 @@ def pair(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature]) -> Pairing:
         if len(list_a) != len(list_b):
             result.only_a += list_a
             result.only_b += list_b
-        elif len(list_a) == 1 or (_interchangeable(sigs_a, list_a)
-                                  and _interchangeable(sigs_b, list_b)):
+        elif len(list_a) == 1 or (_interchangeable(sigs_a, list_a, classes[0])
+                                  and _interchangeable(sigs_b, list_b, classes[1])):
             result.pairs += zip(list_a, list_b, strict=True)
             if len(list_a) > 1:
                 result.twins.append((list_a, list_b))
@@ -392,5 +397,12 @@ def _split_by_structure(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature]
         result.guessed += len(list_a)
 
 
-def _interchangeable(sigs: Sequence[Signature], group: Sequence[int]) -> bool:
-    return all(sigs[i].identity == sigs[group[0]].identity for i in group)
+def _interchangeable(sigs: Sequence[Signature], group: Sequence[int],
+                     classes: Callable[[str], str] | None) -> bool:
+    first = sigs[group[0]].identity
+    if all(sigs[i].identity == first for i in group):
+        return True
+    if classes is None:
+        return False
+    mapped = tuple(classes(n) for n in first)
+    return all(tuple(classes(n) for n in sigs[i].identity) == mapped for i in group)

@@ -698,6 +698,20 @@ class _Matching:
     guessed: int
 
 
+def _lazy_classes(flat: Flat) -> Callable[[str], str]:
+    """``bbmatch.canonical_classes`` of ``flat``, computed at the first call (a congruence closure
+    over every cover is costly and only a tied group needs it)."""
+    built: list[Callable[[str], str]] = []
+
+    def classes(net: str) -> str:
+        if not built:
+            built.append(bbmatch.canonical_classes(
+                flat.names, flat.latches, [_spec(b) for b in flat.blackboxes]))
+        return built[0](net)
+
+    return classes
+
+
 def _match_rounds(flats: Sequence[Flat], normalize: bool) -> _Matching:
     """Simulate and pair, round after round.  The boxes whose signature is unique on both sides
     are anchored -- from the next round on they are driven by a shared name, as if they had a
@@ -709,7 +723,8 @@ def _match_rounds(flats: Sequence[Flat], normalize: bool) -> _Matching:
     for rnd in range(MATCH_ROUNDS):
         sigs = [_signatures(f, normalize, a) for f, a in zip(flats, anchors, strict=True)]
         free = [[i for i in ids if i not in a] for ids, a in zip(anon, anchors, strict=True)]
-        result = bbmatch.pair([sigs[0][i] for i in free[0]], [sigs[1][i] for i in free[1]])
+        result = bbmatch.pair([sigs[0][i] for i in free[0]], [sigs[1][i] for i in free[1]],
+                              (_lazy_classes(flats[0]), _lazy_classes(flats[1])))
         if not result.exact or rnd == MATCH_ROUNDS - 1:
             break
         for i, j in result.exact:
@@ -781,9 +796,10 @@ def _port_spec(box: BlackBox, port: int) -> bbmatch.BoxSpec:
     return bbmatch.BoxSpec(f"{box.cell_type}-port", (), None, tuple(pins), ())
 
 
-def _swap_ports(flat: Flat, box: BlackBox) -> None:
-    """Exchange ports 1 and 2 of a dual-port RAM cut box: every pin takes its partner's name, and
-    the free output and probe nets, which are named after the pin, are renamed with it."""
+def _swap_ports(box: BlackBox) -> dict[str, str]:
+    """Exchange ports 1 and 2 of a dual-port RAM cut box: every pin takes its partner's name.
+    Returns the renaming of the free output and probe nets, which are named after the pin (the
+    caller applies the renamings of all the boxes it turns in one ``_rename_nets``)."""
     nets: dict[str, str] = {}
     for table, prefix in ((box.free, "bbout"), (box.probes, "bbin")):
         for formal, net in table.items():
@@ -792,7 +808,7 @@ def _swap_ports(flat: Flat, box: BlackBox) -> None:
     box.outputs = {_swap_pin(f): n for f, n in box.outputs.items()}
     box.free = {_swap_pin(f): nets[n] for f, n in box.free.items()}
     box.probes = {_swap_pin(f): nets[n] for f, n in box.probes.items()}
-    _rename_nets(flat, nets)
+    return nets
 
 
 def _orient_specs(flat: Flat, boxes: Sequence[BlackBox]) -> list[bbmatch.BoxSpec]:
@@ -828,8 +844,11 @@ def _orient_flat(flat: Flat, normalize: bool) -> int:
     base = len(flat.blackboxes)
     swap = [box for k, box in enumerate(boxes)
             if sigs[base + 2 * k].digest > sigs[base + 2 * k + 1].digest]
+    renames: dict[str, str] = {}
     for box in swap:
-        _swap_ports(flat, box)
+        renames.update(_swap_ports(box))
+    if renames:
+        _rename_nets(flat, renames)
     return len(swap)
 
 
