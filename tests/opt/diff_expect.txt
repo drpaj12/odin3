@@ -13,6 +13,10 @@
 # diffeq_paj_convert is NOT FINISHED. The five whose BLIF in~odin check did not finish (bm_tester,
 # bm_stmt_all_mod, bm_stmt_compare_padding, sign_extend_nomem, diffeq_paj_convert) say so on their line.
 #
+# A crash, signal, cap kill or timeout of a child (Odin III, Yosys, netlist-compare) is exit 3, hard:
+# no line here absorbs it, whatever its step (2F-6 review I3). A `refine` line therefore describes a
+# Yosys result that is unproven, or an ERROR such as `No SAT model`, never a crash.
+#
 # Soundness is the refinement of each Odin III sub-pass call (opt-equiv), not this list: a `refine`
 # line here says only that Yosys's own result is not provably refined by Odin III's, e.g. Yosys picked
 # a defined value for an x, or the flow has no model.

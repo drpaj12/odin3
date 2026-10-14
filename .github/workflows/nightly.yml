@@ -102,9 +102,8 @@ jobs:
   #     # The corpus sweeps: the Phase 2 script on the micros and the 64 VTR/Koios files (VTR_ROOT
   #     # set at configure time registers opt_vtr, lenet.v last), and opt-diff on the micros.
   #     - run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_(micro|vtr|diff_micro)$'
-  #     # 2F Task 20: the nightly VTR legs of opt-equiv and opt-diff (five scripts); by hand only
-  #     # (tools/opt-check/opt-nightly, ruling I9), the _xl pair on an idle machine.
-  #     - run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_(equiv|diff)_vtr$'
-  #     # - run: ODIN3_HEAVY_OK=1 ODIN3_HEAVY_XL_OK=1 ctest --preset sweep-xl -R '^opt_(equiv|diff)_vtr_xl$'
+  #     # 2F Task 20: the nightly VTR legs of opt-equiv and opt-diff (five scripts) are NOT a CI
+  #     # step: by hand only (tools/opt-check/opt-nightly, ruling I9), the _xl pair on an idle
+  #     # machine. The commands are in docs/PHASE2.md item 23.
   #     # The crash fuzzer for an hour (a clang build with -DODIN3_FUZZ=ON).
   #     - run: build/fuzz/fuzz_opt -max_total_time=3600 -timeout=10 -rss_limit_mb=2048 -max_len=512 -print_funcs=0 build/fuzz/fuzz_opt_corpus build/fuzz/fuzz_opt_seeds

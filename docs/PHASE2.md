@@ -975,17 +975,27 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       iteration; `opt_dff` and `opt_clean` skip what the journal shows unchanged. Byte-identical to
       the full sweeps (82 files, 41 designs, `rescan-compare`).
     - **Evidence tools** (all Yosys 0.55 oracle; 0.69 only in the nightly legs): `opt_rules_yosys`
-      (141 rule files; 136 match Yosys's cover point or log line and cell histogram, 3 are
-      documented §17 rows), `opt_equiv_rules` and `opt-equiv` (per-row mutual refinement through
-      equiv-check, clock-aware: 138 proved, 3 documented skips, 0 failed; 12 mutants fail),
+      (141 rule files; 138 match Yosys's cover point or log line and cell histogram, 3 are
+      documented §17 rows), `opt_equiv_rules` and `opt-equiv` (per-row refinement, one direction:
+      the after-state refines the before-state; it is Yosys `equiv_make`/`equiv_simple`/
+      `equiv_induct` run by `opt_equiv.Checker` on both sides flattened, not `equiv-check`, and
+      not a mutual check; clock-aware: 138 proved, 3 documented skips, 0 failed; 12 mutants fail),
       `opt-diff` / `opt_diff_micro` (Phase 2 script and `opt -full` against Yosys; on 487 micros
-      up to 5.9 KB 367 ok, 81 expected failures, 39 differences listed by class in
-      `tests/opt/diff_expect.txt`, none an opt soundness bug), `opt_simcheck_rules`,
+      up to 5.9 KB 367 ok, 81 expected failures, 38 designs listed by class in
+      `tests/opt/diff_expect.txt`: 28 proved, 2 proved for the Phase 2 script only, 8 structural
+      only (no tool verdict; diffeq_paj_convert did not finish); no opt soundness bug found, but
+      those 8 and the 2 partial ones are not proved), `opt_simcheck_rules`,
       `opt_micro` (490 micros: 409 ok, 81 xfail, 0 unexpected, at most 3 iterations),
       `opt_gen_vs_yosys` (the `--opt` generator, 200 seeds, 0 failures, structural cases listed in
       `tests/opt/gen_structural_expect.txt`), `fuzz_opt` (CI; it found two real bugs, mixed-sign
       `identwrt` and `fine.addsub`, now conservative, §17 #55). These are the implementers'
       smoke numbers; the sweeps' own summaries are in the Results block, to be filled.
+      **Exit codes of the opt tools (one convention):** 0 pass, 1 a real negative result, 2 usage
+      or tool error, 3 hard (a crash, signal, memory-cap kill or timeout of a child; `opt-equiv`,
+      `opt-diff`, `opt-rules`, `opt-run`, `opt-gen-diff`), which elab-sweep and opt-nightly treat
+      as hard: no expect-fail line absorbs it. `opt-equiv --min-changed N` fails a run in which
+      fewer than N sub-pass calls changed something (CTest `opt_equiv_rules` passes 1; 19 sources
+      whose rule Phase 2 does not run are listed in `rules_equiv_expect_fail.txt`).
     - **The bench** (`tests/bench/bench_opt.c`, Release only: `bench_guard.h` refuses a Debug or
       sanitized build with exit 2). `bench_opt --one F [--techlib T]` prints one `key=value` line:
       cells, nets and pins after the read (0), after `proc` (p) and after the script (1); for the
@@ -1029,8 +1039,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       here.** Each file runs `opt-equiv` and `opt-diff` with all five scripts (spec 20.3), one tool
       at a time under memcap, smallest first (`mcml.v` last). After `tools/build-locked --preset
       release -j6`, with no other heavy job and no agent running a build:
-      - `ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_(equiv|diff)_vtr$'` (31 files, `--jobs 1`
-        in effect, `--mem-cap 3G`); or by hand:
+      - `ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_(equiv|diff)_vtr$'` (31 files, one tool
+        child at a time, `--mem-cap 3G`); or by hand:
         `ODIN3_HEAVY_OK=1 tools/heavy-run tools/opt-check/opt-nightly --odin3 build/release/odin3
         --yosys $VTR_ROOT/build/bin/yosys --techlib lib/vtr.o3lib --set vtr31 --mem-cap 3G
         [--leg equiv|diff] [--keep DIR]` (add `--cap-for mcml.v=5G` if mcml.v meets its cap).

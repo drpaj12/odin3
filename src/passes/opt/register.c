@@ -246,10 +246,15 @@ static odin3_status debug_check(odin3_design *design) {
 #endif
 }
 
-/* --opt-simcheck runs in Debug builds only (spec 20.2, point (m)). */
+/* --opt-simcheck runs in Debug builds only (spec 20.2, point (m)). A Release build says so once,
+ * so the option is never silently a no-op (2F-6 review M5). */
 static bool simcheck_on(const odin3_opt_call_req *req) {
 #ifdef NDEBUG
-    (void)req;
+    static bool warned;
+    if (req->simcheck && !warned) {
+        warned = true;
+        odin3_log(ODIN3_LOG_WARN, "opt: --opt-simcheck is ignored in a Release (NDEBUG) build");
+    }
     return false;
 #else
     return req->simcheck;
