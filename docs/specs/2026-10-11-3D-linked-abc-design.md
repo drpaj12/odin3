@@ -1,6 +1,6 @@
 # 3D — Linked ABC: design
 
-Status: v2 (2026-10-11), Peter's review for the IR and ABI pieces: `$lut` (§2), IR-12 (§8.5), the
+Status: v2 (2026-10-11; amended 2026-10-14: §7.9 / AB-33, the subprocess path for non-default scripts, PHASE3 #28 and #29), Peter's review for the IR and ABI pieces: `$lut` (§2), IR-12 (§8.5), the
 engine ABI (§4.3) and the adapter build (§4.1–4.2); light review otherwise. Phase 3, sub-project
 3D; Opus `xhigh` → `high`.
 
@@ -73,7 +73,8 @@ exact provenance and byte-identical reruns. ABC's `exit()` calls and global symb
 - the VTR wrapper and K (3F passes `--lut`);
 - `lower` and `hardmap` (3B, 3C);
 - retiming (P3-12 b);
-- ABC as a subprocess (PHASE3 risk 1's fallback, as a second engine, AB-7);
+- ABC as a second registered engine (AB-7). A subprocess **is** in 3D for every non-default
+  script (§7.9, AB-33, added 2026-10-14 for PHASE3 #28);
 - an `equiv` pass.
 
 **Success:**
@@ -291,7 +292,7 @@ public ABI.
 P3-8's wording instead has the adapter register the pass and write the IR through about 30 new
 ABI functions, outside `src/` and fault injection. The seam keeps IR writes under IR-15, `check`,
 ASan and OOM injection, keeps P3-8's intent (ABC symbols and `exit()` outside `libodin3`, gate
-unchanged, the slang adapter's shape), and hosts risk 1's subprocess fallback and the test double.
+unchanged, the slang adapter's shape), and hosts the test double. Risk 1's subprocess fallback is not an engine: for non-default scripts the core runs a child `abc` process (§7.9, AB-33).
 The internal `odin3_abc_test_set_engine` is the only way past "final".
 
 **No ABI version bump** (Q4, confirmed). ABI v4 has had no release and every consumer is in-tree.
@@ -1272,6 +1273,81 @@ term is:
 **OOM in the core.** Any allocation can return `NO_MEMORY`. The pass frees what it holds and returns
 a valid, equivalent IR (AB-18). Tests inject a failure at every allocation.
 
+### 7.9 Non-default scripts run in a subprocess (AB-33; PHASE3 #28, #29 ruling 6)
+
+Peter's ruling of 2026-10-12 (PHASE3 #28) moves the fallback of risk 1 into the design for every
+script but the vetted default. The default script (`builtin:lib/abc/vtr.abc`, AB-23) is the only
+script fuzzed and benchmarked against the pin; any other can reach an ABC command that calls
+`exit()`, aborts or loops. The linked engine contains those, but it then disables itself for the
+process (AB-6); a child process costs `odin3` nothing but that run.
+
+**Routing** (decided once per pass run, after the checker).
+
+- *In process (linked engine):* the script bytes that were read have the SHA-256 of the embedded
+  default. This is by content, so `--script lib/abc/vtr.abc` is still in process.
+- *Subprocess:* every other script, from `abc --script`, `--abc-script` or the project's
+  `abc_script`.
+- No new pass option and no project key. `odin3_abc_test_set_route(always_child|always_linked|auto)`
+  is the test hook; it lets the differential tests run the default script in the child.
+- The AB-21 checker, the allow-list, the alias table, the caps of §7.8 and the SHA-256 identity of
+  §7.2 apply unchanged, before routing. A rejected script reaches neither engine.
+
+**Exchange.** The subprocess always uses the BLIF exchange (§6.2): it is VTR's own stage and needs
+no shared memory. The in-memory exchange (3D-7) is therefore the default for the default script
+only. Provenance of a child run is by cone (`--prov fine` degrades to `cone`, with the INFO `abc:
+module '<m>', <domain>: no name map (subprocess); provenance uses cut cones`). Splice, latch
+restore and every IR rule are those of the BLIF exchange; the splice never learns which engine ran.
+
+**The child.** `odin3_abc_child_run(const odin3_abc_child_req *req, odin3_abc_child_res *res)` in
+`src/passes/abc/child.[ch]` (core; it spawns, it never links ABC):
+
+- *Program.* `odin3-abc`, the PIC `odin3_abc_exe` of §4.1 installed next to the `odin3` executable,
+  found as `<dirname of /proc/self/exe>/odin3-abc`; `ODIN3_ABC_EXE` overrides it (Python hosts and
+  tests). Missing or unrunnable: `abc: ABC subprocess '<path>' cannot start: <strerror>`. Its
+  commit must be the pin: the first child run of a process asks `-c "version"` and compares it
+  with `ODIN3_ABC_COMMIT_STR`; a mismatch is refused.
+- *Command.* `odin3-abc -f <abs abc<r>.cmd>` with the run directory as working directory; the
+  `.cmd` file is the one AB-22 builds for the BLIF exchange. `posix_spawn`, a new process group,
+  stdin from `/dev/null`, stdout and stderr merged on one pipe, an environment of only `PATH`,
+  `HOME`, `TMPDIR` and `LC_ALL=C`, `RLIMIT_CORE` 0.
+- *Wall-clock limit.* `ODIN3_ABC_CHILD_SECONDS`, 3,600 s per run (an agent default; 3D-8's
+  calibration raises it if the largest design needs it). At the limit the whole process group gets
+  SIGKILL and the run fails.
+- *Output cap.* `ODIN3_ABC_CHILD_OUTPUT_BYTES`, 64 MiB of merged output per run. Lines are forwarded
+  to the `text` path (the INFO/DEBUG rules of §11, `--log`) as they arrive; past the cap the group
+  is killed and the run fails.
+- *Memory.* Counted by the §7.8 budget, which covers the cgroup the child inherits. No separate
+  `RLIMIT_AS` (ABC's address space is large and sparse).
+- *Result.* Exit status `0` is followed by §6.2's read-back and checks exactly as for the linked
+  engine. Anything else is `ODIN3_ERR_ENGINE`; `odin3` is untouched, runs 0 … *k*−1 stay applied
+  (AB-18), and no engine is disabled.
+- *Cleanup.* Run files follow §6.2 (kept in a `--via-blif` directory, removed with the `mkdtemp`
+  one). The child never outlives the call: on every path it is killed and reaped.
+
+**Diagnostics** (added to §11, ERROR, status `ENGINE`):
+
+| Exact text | When |
+|---|---|
+| `abc: ABC subprocess '<path>' cannot start: <strerror>` | spawn or exec fails |
+| `abc: ABC subprocess '<path>' is <12 hex>, expected <12 hex>` | pin mismatch |
+| `abc: ABC subprocess exited with status <n> during run <r>` | non-zero exit |
+| `abc: ABC subprocess killed by signal <n> during run <r>` | crash |
+| `abc: ABC subprocess exceeded <s> s wall clock during run <r>` | limit |
+| `abc: ABC subprocess wrote more than <b> bytes during run <r>` | output cap |
+
+A child that exits `0` but leaves no readable `abc<r>.out.blif` reports §11's `RESULT` text for a
+malformed network.
+
+**Not changed:** the linked engine, the engine ABI (no new function, no version change), the symbol
+gate, `odin3.h`. The subprocess is not an `odin3_abc_engine`: the core owns it, so §4.3's
+one-engine registry is not widened.
+
+**Tests** (plan tasks 9a to 9c): a fake `odin3-abc` shell script for each failure (exit 3, a
+signal, a sleep past a lowered limit, a flood past a lowered cap, no output file); the real
+`odin3-abc` on the default script in the child against the same run through the linked BLIF
+exchange (byte-identical read-back); a script that makes real ABC `exit()`; and `odin3` surviving
+all of them.
+
 ## 8. Provenance (AB-25)
 
 ### 8.1 The pass-run record
@@ -1526,6 +1602,7 @@ flip-flops`. `<file>` is the script path as given.
 | ERROR | `abc: ABC called exit(<code>) during '<cmd>'; linked ABC is disabled until odin3 restarts`; likewise `ABC aborted during …` and `ABC assertion failed during '<cmd>': <text>; …` | `ENGINE`, `EXIT`/`ABORT`/`ASSERT` |
 | ERROR | `abc: linked ABC is disabled by an earlier failure in this process`; `abc: linked ABC is busy (another session is open)` | `ENGINE`, `DISABLED`/`BUSY` |
 | ERROR | `abc: ABC returned a malformed network: <why>`, `<why>` ∈ `N primary inputs, expected M`; `N outputs, expected M`; `N registers, more than the M it was given`; `register J carries no input register's name`; `a latch with init <v> (all were sent at 0)`; `a LUT with N inputs (at most 16)`; `a LUT with N inputs exceeds --lut K`; `an unknown output '<name>'`; `a .subckt`; `no mapping in the & space` | `ENGINE`, `RESULT` |
+| ERROR | the six `abc: ABC subprocess …` texts of §7.9 | `ENGINE` |
 | FATAL (stderr, then trap) | `odin3: linked ABC called <exit\|abort\|assert> outside its session thread; stopping` | AB-6 |
 
 The FATAL row's stop is the trap (Peter's ruling (a), PHASE3 #28, 2026-10-12; §4.1).
@@ -1733,6 +1810,7 @@ LU32PEEng, in roughly ten solo slots. A failed run is repeated only after a fix.
 | `script.[ch]`, `alias.c`, `allow.c`, `default_script.c` (generated) | `odin3_abc_script_parse(const odin3_abc_script_src *src, uint32_t lut_k, uint32_t exchange, odin3_abc_script *out)`, `odin3_abc_script_free`, `odin3_abc_script_cmd`; the alias table; allow-list, classes, file options |
 | `args.c`, `run.c`, `engine.c`, `region.[ch]`, `aig.[ch]`, `xblif.[ch]`, `result.[ch]`, `splice.[ch]`, `prov.[ch]`, `depth.c` | AB-10 to AB-25 |
 | `src/frontends/project/*`, `src/cli/main.c` | AB-27 |
+| `src/passes/abc/child.[ch]`, `CMakeLists.txt` (`odin3-abc` install) | §7.9 (AB-33) |
 | `adapters/abc/{adapter,session,guard,capture,bridge}.c`, `bridge.h`, `guard.h`, `odin3_abc.h`, `exports.map`, `lsan.supp`, `NOTICE`, `README.md` | AB-5 to AB-9 |
 | `cmake/abc_pin.cmake`, `CMakeLists.txt`, `tools/check-symbols.sh`, `tools/check_rules.py` | AB-5, AB-6 |
 | `tools/equiv-check/equiv_check.py` | `--blackbox` (I9) |
@@ -1743,7 +1821,7 @@ no recursion.
 
 ## 15. Implementation split (AB-32)
 
-Nine PRs, each tests-first, passing `/lint`, with a read-only critique (PHASE0 §A.1).
+Ten PRs (3D-5a added 2026-10-14), each tests-first, passing `/lint`, with a read-only critique (PHASE0 §A.1).
 
 | PR | Content | Depends on | Review | Model / effort |
 |---|---|---|---|---|
@@ -1752,6 +1830,7 @@ Nine PRs, each tests-first, passing `/lint`, with a read-only critique (PHASE0 �
 | **3D-2** adapter | CMake (`libabc-pic`, pin, `-O2`, `ABC_NO_HISTORY`, PIC `abc` tool); `adapters/abc` (bridge, session, guard and thread check, capture, exports, NOTICE, licence scan, adapter assert rule); engine ABI, `ODIN3_ERR_ENGINE` (ABI v4 line), CLI init; symbol and adapter tests | — | **Peter** (adapter build, ABI) | Opus `high` |
 | **3D-3** run records | pass-run args and info, accessors, IR-12 text; `sha256`; Verilog `$lut` | 3D-1; 3E-5 for Verilog | **Peter** (IR, ABI) | Opus `high` |
 | **3D-4** script | checker, caps, alias table, allow-list with file options, embedded default, `fuzz_abc_script` | 3D-3 (sha256) | light | Opus `high` |
+| **3D-5a** subprocess path (PHASE3 #29 ruling 6; before 3D-5) | `child.[ch]` (spawn, pipe, wall clock, output cap, group kill), the `odin3-abc` install and lookup, the route, the six diagnostics, fake-child and real-child tests; plan tasks 9a to 9c | 3D-4 (script identity) | light | Opus `high`; Sonnet for the fake-child fixtures |
 | **3D-5** pass, BLIF exchange | args and precedence; region, constants per pin, domains as FF sets; exchange writer with the init encoding, read-back; `abc_result` with folding; splice with special nets; restore; cone provenance with register-input anchors; depth; run loop, logs, budget (cgroup), compact; fake engine; `abc-equiv`; `equiv-check --blackbox`; `test_abc_unconn`/`_init1`; `fuzz_abc_splice`; PASSES row; DESIGN §6 | 3D-2, 3D-3, 3D-4, 3E-5 | light | Opus `xhigh` → `high` once the splice settles |
 | **3D-6** project and CLI | `abc_script`, `--abc-script`, request, dump, reference parser, DESIGN §4.0, fixtures (bulk `null`), precedence test | 3D-4 | light (P3-1) | Opus `high`; Sonnet `medium` for the bulk |
 | **3D-7** in-memory exchange | AIG builder; names through `ci_from` (observation outputs only if the spike says so); MiniLUT result; aligned MiniLUT and name map; `abc-diff` on the 19 (H1, H4), then the default flips | 3D-5, the 3D-0 go | light; **Peter** if P3-9 (c) or observation outputs | Opus `xhigh` → `high` |
@@ -1762,7 +1841,7 @@ Nine PRs, each tests-first, passing `/lint`, with a read-only critique (PHASE0 �
 - 3D-1 first, once this spec merges (it unblocks 3E-5).
 - 3D-0 and 3D-2 in parallel with it.
 - Then 3D-3 and 3D-4.
-- Then 3D-5, which gives **M1** with 3E and 3F.
+- Then 3D-5a (the subprocess path), then 3D-5, which gives **M1** with 3E and 3H-3 (3F is folded into 3H).
 - 3D-6 after 3D-4.
 - 3D-7 after the spike.
 - 3D-8 alongside.
@@ -1779,6 +1858,7 @@ Nine PRs, each tests-first, passing `/lint`, with a read-only critique (PHASE0 �
 | DESIGN | §5.2 (`$lut`) in 3D-1; §6 step 10 in 3D-5; §4.0 in 3D-6 (§10.1) | 3D-1, 3D-5, 3D-6 |
 | PHASE3 | P3-8: "registers the ABC engine (3D AB-7)"; P3-9 (a): correspondence by ABC's names plus the name map on an aligned MiniLUT, entered through `&` + `&put` (AB-16); P3-11's reason for refusing `quit` corrected (it returns −1, `cmd.c:386`; still refused as process control); the checklist gains "spike (3D-0)" | with this spec |
 | `odin3.h` | the ABI v4 changelog line lists the engine section, `ODIN3_ERR_ENGINE` and the accessors (no bump) | 3D-2, 3D-3 |
+| PASSES.md (the `abc` row's Notes: non-default scripts run in a subprocess), DESIGN §6 step 10 | the routing | 3D-5 |
 | PASSES.md, ORACLES.md, CLAUDE.md | the `abc` row; the `abc` tool built from `libabc-pic`; Layout `adapters/{slang,abc}` (C; ABC's C++ stays in `third_party/`) | 3D-5, 3D-2 |
 | `tools/equiv-check` docstring | `--blackbox` | 3D-5 |
 | corpus README | key row, key order, four matrix rows | 3D-6 |
@@ -1787,7 +1867,7 @@ Nine PRs, each tests-first, passing `/lint`, with a read-only critique (PHASE0 �
 ## 17. Risks
 
 1. **ABC kills the process**: unchecked `ABC_ALLOC` (SIGSEGV), `std::terminate`, glibc fatals, a
-   worker-thread escape (AB-6). The fallback is a subprocess engine.
+   worker-thread escape (AB-6). The linked engine contains it for the default script; any other script runs in a subprocess (§7.9), so a crash there costs one run, not the process.
 2. **The spike fails**: AB-17's fallbacks. M1 runs on the BLIF exchange either way.
 3. **The entry path biases QoR** (I8): `abc-diff` measures it before the flip; 3H names the
    exchange.
