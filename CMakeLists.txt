@@ -138,6 +138,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/allow.c
     src/passes/abc/script.c
     src/passes/abc/engine.c
+    src/passes/abc/child.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -314,6 +315,9 @@ string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," ODIN3_ABC_DEFAULT_SCRIPT_BYTE
 configure_file(cmake/abc_default_script.c.in
                ${PROJECT_BINARY_DIR}/generated/abc/default_script.c @ONLY)
 target_sources(odin3_core PRIVATE ${PROJECT_BINARY_DIR}/generated/abc/default_script.c)
+# The child runner (3D spec §7.9, AB-33) uses glibc's posix_spawn_file_actions_addchdir_np and
+# _addclosefrom_np, which need _DEFAULT_SOURCE on top of odin3_flags' _POSIX_C_SOURCE.
+set_source_files_properties(src/passes/abc/child.c PROPERTIES COMPILE_DEFINITIONS _DEFAULT_SOURCE)
 
 # --- The Verilog parser: Bison and Flex generated into the build tree (2C spec §6) ----------
 find_package(BISON 3.8 REQUIRED)        # parse.error detailed, parse.lac, %precedence, -Wcex
@@ -399,8 +403,9 @@ if(ODIN3_WITH_ABC)
         add_subdirectory(third_party/abc EXCLUDE_FROM_ALL)
         # No abc.history in the working directory (ABC's cmd/cmdHist.c).
         set_property(TARGET libabc-pic APPEND PROPERTY COMPILE_DEFINITIONS ABC_NO_HISTORY)
-        # ABC's main.c, created here so it keeps ABC's GNU C settings, not C17 (finding 19).
-        add_executable(odin3_abc_exe third_party/abc/src/base/main/main.c)
+        # ABC's main(), plus the commit line of the pin query, in adapters/abc/child_main.c;
+        # created here so it keeps ABC's GNU C settings, not C17 (finding 19).
+        add_executable(odin3_abc_exe adapters/abc/child_main.c)
         target_link_libraries(odin3_abc_exe PRIVATE libabc-pic)
         set_target_properties(odin3_abc_exe PROPERTIES
             OUTPUT_NAME abc
@@ -437,6 +442,17 @@ if(ODIN3_WITH_ABC)
     # ODIN3_ADAPTER_ASSERT's text does not depend on where the tree is checked out.
     set(_abc_adapter_copts -fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=)
     set(_abc_adapter_defs ODIN3_ABC_COMMIT_STR="${ODIN3_ABC_COMMIT}")
+    target_compile_definitions(odin3_abc_exe PRIVATE ${_abc_adapter_defs})
+    # The core's pin check (src/passes/abc/child.c) compares the program's commit with this one.
+    set_property(SOURCE src/passes/abc/child.c APPEND PROPERTY COMPILE_DEFINITIONS
+                 ${_abc_adapter_defs})
+    # AB-33: the subprocess path runs `odin3-abc` beside the `odin3` executable: a copy next to
+    # it in the build tree, an install rule beside it in an installed tree.
+    add_custom_command(TARGET odin3_abc_exe POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:odin3_abc_exe>
+                ${PROJECT_BINARY_DIR}/odin3-abc
+        COMMENT "odin3-abc beside odin3")
+    install(PROGRAMS $<TARGET_FILE:odin3_abc_exe> DESTINATION bin RENAME odin3-abc)
     # §4.2's wraps: exit, _exit, abort and __assert_fail escape through the guard; the process
     # control and code loading calls are refused (adapters/abc/guard.c): execl (base/sn's child)
     # and dlopen (Libs_Init loads every libabc_*.so of the cwd or $ABC_LIB_PATH at frame creation;
@@ -720,6 +736,19 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_abc_default_script)
     target_compile_definitions(test_abc_default_script PRIVATE
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 3D Task 9a: the child runner (AB-33), on shell fixtures that stand in for odin3-abc.
+    odin3_add_unit_test(test_abc_child)
+    target_compile_definitions(test_abc_child PRIVATE
+        ODIN3_CHILD_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/abc/child")
+    # 3D Task 9b: the route, the program lookup, the pin check and the six texts. With ABC the
+    # build's own odin3-abc must exist beside the test (it is copied there after odin3_abc_exe).
+    odin3_add_unit_test(test_abc_route)
+    target_compile_definitions(test_abc_route PRIVATE
+        ODIN3_CHILD_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/abc/child")
+    if(ODIN3_WITH_ABC)
+        target_compile_definitions(test_abc_route PRIVATE ODIN3_HAVE_ABC_EXE)
+        add_dependencies(test_abc_route odin3_abc_exe)
+    endif()
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)
@@ -1138,6 +1167,24 @@ if(BUILD_TESTING)
             ODIN3_ABC_PLANTED_DIR="${PROJECT_BINARY_DIR}/abc_planted")
         add_test(NAME test_abc_adapter COMMAND test_abc_adapter)
         set_tests_properties(test_abc_adapter PROPERTIES LABELS unit
+            ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
+        # 3D Task 9c: the real odin3-abc as the child, beside the linked engine in this process
+        # (the adapter's sources again, as above; the child runs under prlimit --as=2 GiB through
+        # a wrapper script the test writes, because this ASan process cannot).
+        add_executable(test_abc_child_real tests/unit/test_abc_child_real.c)
+        target_include_directories(test_abc_child_real PRIVATE ${PROJECT_SOURCE_DIR}/adapters/abc
+                                                               ${PROJECT_SOURCE_DIR}/src)
+        target_compile_definitions(test_abc_child_real PRIVATE ODIN3_ABC_TEST_HOOKS=1
+            ODIN3_CHILD_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/abc/child")
+        target_link_libraries(test_abc_child_real PRIVATE odin3_abc_testlib odin3_core unity
+                                                          odin3_flags $<LINK_ONLY:libabc-pic>)
+        # The test build of bridge.c counts pthread_create (as test_abc_adapter's link does).
+        target_link_options(test_abc_child_real PRIVATE ${ODIN3_ABC_WRAPS}
+                                                         -Wl,--wrap=pthread_create)
+        set_target_properties(test_abc_child_real PROPERTIES LINKER_LANGUAGE CXX)
+        add_dependencies(test_abc_child_real odin3_abc_exe)
+        add_test(NAME abc_child_real COMMAND test_abc_child_real)
+        set_tests_properties(abc_child_real PROPERTIES LABELS unit
             ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
     endif()
     odin3_add_unit_test(test_abi_core)
