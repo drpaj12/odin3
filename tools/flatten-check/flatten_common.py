@@ -22,6 +22,7 @@ class RtlilModule:
 
     wires: dict[str, int] = field(default_factory=dict)
     cells: list[tuple[str, str]] = field(default_factory=list)  # (type, name)
+    memids: list[str] = field(default_factory=list)  # MEMID parameters of the cells, in order
 
 
 def run_capped(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -52,6 +53,8 @@ def parse_rtlil(text: str) -> dict[str, RtlilModule]:
             current.wires[words[-1].lstrip("\\")] = width
         elif current is not None and words[0] == "cell" and len(words) >= 3:
             current.cells.append((words[1].lstrip("\\"), words[2].lstrip("\\")))
+        elif current is not None and words[:2] == ["parameter", "\\MEMID"] and len(words) >= 3:
+            current.memids.append(words[2].strip('"').lstrip("\\"))
     return modules
 
 

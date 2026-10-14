@@ -1,1 +1,5 @@
-# flatten-diff expected differences: "file: reason" (3A spec 14.3). None yet.
+# flatten-diff expected differences (3A spec 14.3): "file [kinds]: reason"; kinds are wire, names,
+# cell-type, memid, equiv (none given: any). A listed kind that no longer differs fails (stale).
+mem.v [cell-type]: 2D elaborates a RAM to one $mem; Yosys read_verilog gives $memrd/$memwr_v2 cells and no $mem before memory_collect (the MEMIDs and the connectivity are compared and agree)
+keep.v [equiv]: the kept instances are of modules renamed gold.<m> and gate.<m> by the refinement script, so equiv_make sees two different black boxes (the names, types and kept instances are compared and agree)
+bb.v [equiv]: black boxes have no function to prove: gold.bbox and gate.bbox are two unknown cells (the names, types and instances are compared and agree)

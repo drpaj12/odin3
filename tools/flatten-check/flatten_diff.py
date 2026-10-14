@@ -2,10 +2,16 @@
 
 Both tools read the file, elaborate it with the top given, run ``proc; flatten`` and write RTLIL.
 Module ``T`` of the two outputs is compared: (1) the public wire names and widths; (2) the public
-cell names and the multiset of cell types; (3) the instances that remain (cells whose type is a
-module). A difference not listed in the expect file (``file: reason`` lines) fails; a listed file
-that no longer differs fails too (a stale entry). Exit 0 / 1 / 2 as netlist-compare, 77 when no
-memory cap is available.
+cell names and the multiset of cell types (the instances that remain are cells whose type is a
+module); (3) the MEMIDs of the memory cells; (4) connectivity: Yosys 0.55 proves Odin III's flat
+module (gold) and its own (gate) equivalent with 2F's refinement script (``opt-equiv``'s
+``Checker``: ``equiv_make``, ``equiv_simple -undef -seq 4``, ``equiv_induct``). ``--no-equiv`` skips
+(4).
+
+The expect file lists known differences, ``file: reason`` or ``file [kind,kind]: reason`` with the
+kinds ``wire``, ``names``, ``cell-type``, ``memid``, ``equiv`` (no brackets: any kind). A difference
+of another kind, or one in a file not listed, fails; a listed kind that no longer differs fails
+too (a stale entry). Exit 0 / 1 / 2 as netlist-compare, 77 when no memory cap is available.
 """
 
 from __future__ import annotations
@@ -15,10 +21,12 @@ import os
 import sys
 import tempfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import flatten_common as fc
 import memcap
+import opt_equiv
 
 
 def compare(odin: fc.RtlilModule, yosys: fc.RtlilModule) -> list[str]:
@@ -37,42 +45,153 @@ def compare(odin: fc.RtlilModule, yosys: fc.RtlilModule) -> list[str]:
     for kind in sorted(types_a.keys() | types_b.keys()):
         if types_a[kind] != types_b[kind]:
             problems.append(f"cell type {kind}: odin3 {types_a[kind]} yosys {types_b[kind]}")
+    if set(odin.memids) != set(yosys.memids):
+        mine, theirs = sorted(set(odin.memids)), sorted(set(yosys.memids))
+        problems.append(f"memid: odin3 {mine} yosys {theirs}")
     return problems
 
 
-def load_expect(path: Path | None) -> dict[str, str]:
-    """``file: reason`` lines of the expect file (comments with #)."""
-    expect: dict[str, str] = {}
+KINDS = ("wire", "names", "cell-type", "memid", "equiv")
+_PREFIX_KIND = (
+    ("wire ", "wire"),
+    ("public cell names", "names"),
+    ("cell type ", "cell-type"),
+    ("memid", "memid"),
+    ("equiv", "equiv"),
+)
+
+
+def kind_of(problem: str) -> str:
+    """The kind of a problem line (for the expect file)."""
+    for prefix, kind in _PREFIX_KIND:
+        if problem.startswith(prefix):
+            return kind
+    return "other"
+
+
+class MemoryChecker(opt_equiv.Checker):
+    """The refinement check for files with memories: the last (``memory`` first) lowering only,
+    since the others abort on a design that still holds a ``$mem``."""
+
+    def flows(self, one_clock: bool = False) -> list[Sequence[str]]:
+        return super().flows(one_clock)[-1:]
+
+
+def has_memories(*paths: Path) -> bool:
+    return any(" $mem" in path.read_text() for path in paths)
+
+
+def equivalence(odin_il: Path, yosys_il: Path, top: str, yosys: str, work: Path) -> list[str]:
+    """Problems of the equivalence leg: empty when Yosys proves Odin III's flat module equivalent
+    to its own; otherwise one ``equiv: <class>`` line (``differs`` or ``unproven``)."""
+    kind = MemoryChecker if has_memories(odin_il, yosys_il) else opt_equiv.Checker
+    checker = kind(yosys, work, fc.CAP_BYTES, top=top)
+    try:
+        ok, tail = checker.refines(odin_il, yosys_il, "flatten")
+    except opt_equiv.CrashError as exc:
+        if not exc.timed_out:
+            raise
+        return ["equiv: unproven (timeout)"]
+    except opt_equiv.RefineAbort as exc:
+        return [f"equiv: unproven ({str(exc).splitlines()[0]})"]
+    return [] if ok else [f"equiv: differs: {tail.splitlines()[-1] if tail else ''}"]
+
+
+@dataclass
+class Expected:
+    """An expect-file entry: the kinds of difference it covers (empty: all) and why."""
+
+    kinds: tuple[str, ...]
+    reason: str
+
+    def covers(self, problem: str) -> bool:
+        return not self.kinds or kind_of(problem) in self.kinds
+
+
+def load_expect(path: Path | None) -> dict[str, Expected]:
+    """``file: reason`` and ``file [kind,kind]: reason`` lines of the expect file (# comments)."""
+    expect: dict[str, Expected] = {}
     if path is None:
         return expect
     for raw in path.read_text().splitlines():
         line = raw.split("#", 1)[0].strip()
-        if ":" in line:
-            name, reason = line.split(":", 1)
-            expect[name.strip()] = reason.strip()
+        if ":" not in line:
+            continue
+        head, reason = line.split(":", 1)
+        name, _, kinds = head.partition("[")
+        wanted = tuple(k.strip() for k in kinds.rstrip("] ").split(",") if k.strip())
+        expect[name.strip()] = Expected(wanted, reason.strip())
     return expect
 
 
-def run_one(source: Path, top: str, odin3: str, yosys: str, keep: Path | None) -> list[str] | str:
-    """The differences for one file, or an error string."""
-    with tempfile.TemporaryDirectory(dir=keep) as tmp:
-        out_a, out_b = Path(tmp) / "a.il", Path(tmp) / "b.il"
-        script_a = (
-            f"read_verilog --nolatches {source}; hierarchy --top {top}; proc; flatten; "
-            f"write_rtlil {out_a}"
-        )
-        script_b = (
-            f"read_verilog -nolatches {source}; hierarchy -top {top}; proc; "
-            f"flatten -noscopeinfo; write_rtlil {out_b}"
-        )
-        run_a = fc.run_capped([odin3, "-p", script_a])
-        run_b = fc.run_capped([yosys, "-q", "-p", script_b])
-        if run_a.returncode != 0 or run_b.returncode != 0:
-            return f"odin3 exit {run_a.returncode}, yosys exit {run_b.returncode}"
-        mods_a, mods_b = fc.parse_rtlil(out_a.read_text()), fc.parse_rtlil(out_b.read_text())
-        if top not in mods_a or top not in mods_b:
-            return f"module {top} missing in an output"
-        return compare(mods_a[top], mods_b[top])
+def judge(problems: Sequence[str], entry: Expected | None) -> tuple[list[str], bool]:
+    """(the unexpected problems, whether the entry is stale: it covers nothing that differs)."""
+    if entry is None:
+        return list(problems), False
+    unexpected = [p for p in problems if not entry.covers(p)]
+    stale = not any(entry.covers(p) for p in problems)
+    return unexpected, stale
+
+
+def scripts(source: Path, top: str, out_a: Path, out_b: Path) -> tuple[str, str]:
+    """The Odin III and the Yosys script (spec 14.3)."""
+    script_a = (
+        f"read_verilog --nolatches {source}; hierarchy --top {top}; proc; flatten; "
+        f"write_rtlil {out_a}"
+    )
+    script_b = (
+        f"read_verilog -nolatches {source}; hierarchy -top {top}; proc; "
+        f"flatten -noscopeinfo; write_rtlil {out_b}"
+    )
+    return script_a, script_b
+
+
+def diff_in(work: Path, source: Path, top: str, tools: tuple[str, str], equiv: bool
+            ) -> list[str] | str:
+    """The differences of one file, run in the directory ``work``; an error string on failure."""
+    odin3, yosys = tools
+    out_a, out_b = work / "a.il", work / "b.il"
+    script_a, script_b = scripts(source, top, out_a, out_b)
+    run_a = fc.run_capped([odin3, "-p", script_a])
+    run_b = fc.run_capped([yosys, "-q", "-p", script_b])
+    if run_a.returncode != 0 or run_b.returncode != 0:
+        return f"odin3 exit {run_a.returncode}, yosys exit {run_b.returncode}"
+    mods_a, mods_b = fc.parse_rtlil(out_a.read_text()), fc.parse_rtlil(out_b.read_text())
+    if top not in mods_a or top not in mods_b:
+        return f"module {top} missing in an output"
+    problems = compare(mods_a[top], mods_b[top])
+    if equiv:
+        problems += equivalence(out_a, out_b, top, yosys, work)
+    return problems
+
+
+def run_one(
+    source: Path, top: str, tools: tuple[str, str], keep: Path | None, equiv: bool = True
+) -> list[str] | str:
+    """The differences for one file, or an error string. ``tools`` is (odin3, yosys); with
+    ``keep`` the RTLIL files stay in a new directory under it."""
+    if keep is not None:
+        return diff_in(Path(tempfile.mkdtemp(dir=keep)), source, top, tools, equiv)
+    with tempfile.TemporaryDirectory() as tmp:
+        return diff_in(Path(tmp), source, top, tools, equiv)
+
+
+def report(name: str, result: list[str] | str, entry: Expected | None) -> int:
+    """Prints the verdict of one file; returns its exit code."""
+    if isinstance(result, str):
+        print(f"{name}: error: {result}")
+        return fc.EXIT_ERROR
+    unexpected, stale = judge(result, entry)
+    if unexpected:
+        print(f"{name}: DIFFERS")
+        for problem in unexpected:
+            print(f"  {problem}")
+        return fc.EXIT_DIFF
+    if entry is not None and stale:
+        print(f"{name}: stale expect entry ({entry.reason})")
+        return fc.EXIT_DIFF
+    print(f"{name}: {'expected difference' if entry is not None else 'same'}")
+    return fc.EXIT_SAME
 
 
 def main(argv: Sequence[str]) -> int:
@@ -80,32 +199,24 @@ def main(argv: Sequence[str]) -> int:
     parser.add_argument("--top", default="top")
     parser.add_argument("--yosys", default=os.environ.get("ODIN3_YOSYS055", "yosys"))
     parser.add_argument("--odin3", default="build/debug/odin3")
-    parser.add_argument("--expect", type=Path, help="file: reason lines of known differences")
+    parser.add_argument("--expect", type=Path, help="file[kinds]: reason lines")
     parser.add_argument("--keep", type=Path, help="directory for the RTLIL files (kept)")
+    parser.add_argument("--no-equiv", action="store_true", help="skip the equivalence leg")
     parser.add_argument("files", nargs="+", type=Path)
     args = parser.parse_args(argv)
     expect = load_expect(args.expect)
     worst = fc.EXIT_SAME
     for source in args.files:
         try:
-            result = run_one(source, args.top, args.odin3, args.yosys, args.keep)
+            result = run_one(
+                source, args.top, (args.odin3, args.yosys), args.keep, not args.no_equiv
+            )
         except memcap.CapUnavailable as exc:
             print(f"flatten-diff: skipped: {exc}")
             return fc.EXIT_SKIP
-        listed = source.name in expect
-        if isinstance(result, str):
-            print(f"{source.name}: error: {result}")
-            worst = max(worst, fc.EXIT_ERROR)
-        elif result and not listed:
-            print(f"{source.name}: DIFFERS")
-            for problem in result:
-                print(f"  {problem}")
-            worst = max(worst, fc.EXIT_DIFF)
-        elif not result and listed:
-            print(f"{source.name}: stale expect entry ({expect[source.name]})")
-            worst = max(worst, fc.EXIT_DIFF)
-        else:
-            print(f"{source.name}: {'expected difference' if listed else 'same'}")
+        except opt_equiv.ToolError as exc:
+            result = str(exc)
+        worst = max(worst, report(source.name, result, expect.get(source.name)))
     return worst
 
 

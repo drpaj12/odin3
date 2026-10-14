@@ -13,6 +13,7 @@ import flatten_common as fc
 import flatten_diff as fd
 import flatten_sim as fs
 import memcap
+import opt_equiv
 
 A = """module \\t
   wire width 4 input 1 \\x
@@ -55,8 +56,72 @@ class CompareTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "expect.txt"
             path.write_text("# comment\na.v: private names differ\n")
-            self.assertEqual(fd.load_expect(path), {"a.v": "private names differ"})
+            self.assertEqual(
+                fd.load_expect(path), {"a.v": fd.Expected((), "private names differ")}
+            )
         self.assertEqual(fd.load_expect(None), {})
+
+    def test_expect_kinds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "expect.txt"
+            path.write_text("m.v [cell-type, memid]: why: not this\\n".replace("\\n", "\n"))
+            entry = fd.load_expect(path)["m.v"]
+        self.assertEqual(entry.kinds, ("cell-type", "memid"))
+        self.assertEqual(entry.reason, "why: not this")
+        self.assertTrue(entry.covers("cell type $dff: odin3 2 yosys 8"))
+        self.assertFalse(entry.covers("wire x: odin3 1 yosys None"))
+        self.assertFalse(entry.covers("equiv: differs: x"))
+
+    def test_judge_kinds(self) -> None:
+        entry = fd.Expected(("equiv",), "r")
+        self.assertEqual(fd.judge(["equiv: differs: x"], entry), ([], False))
+        wire = "wire a: odin3 1 yosys 2"
+        self.assertEqual(fd.judge([wire], entry), ([wire], True))
+        self.assertEqual(fd.judge([], entry), ([], True))
+        self.assertEqual(fd.judge(["wire a"], None), (["wire a"], False))
+
+    def test_memids_compared_as_sets(self) -> None:
+        text = 'module \\t\n  cell $mem \\m\n    parameter \\MEMID "\\\\u1.mem"\n  end\nend\n'
+        a = fc.parse_rtlil(text)["t"]
+        self.assertEqual(a.memids, ["u1.mem"])
+        b = fc.RtlilModule(memids=["u1.mem", "u1.mem"])
+        c = fc.RtlilModule(memids=["u2.mem"])
+        self.assertEqual([p for p in fd.compare(a, b) if p.startswith("memid")], [])
+        self.assertTrue(any(p.startswith("memid") for p in fd.compare(a, c)))
+
+    def _equiv(self, result: object) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "x.il"
+            path.write_text("module \\t\nend\n")
+            side = (
+                mock.patch.object(opt_equiv.Checker, "refines", side_effect=result)
+                if isinstance(result, BaseException)
+                else mock.patch.object(opt_equiv.Checker, "refines", return_value=result)
+            )
+            with side:
+                return fd.equivalence(path, path, "t", "yosys", Path(tmp))
+
+    def test_equivalence_classes(self) -> None:
+        self.assertEqual(self._equiv((True, "")), [])
+        differs = self._equiv((False, "a\nERROR: Found 2 unproven"))
+        self.assertTrue(differs[0].startswith("equiv: differs"))
+        timeout = self._equiv(opt_equiv.CrashError("yosys-refine", "slow", True))
+        self.assertEqual(timeout, ["equiv: unproven (timeout)"])
+        abort = self._equiv(opt_equiv.RefineAbort("yosys-refine exit 1: boom"))
+        self.assertTrue(abort[0].startswith("equiv: unproven"))
+        with self.assertRaises(opt_equiv.CrashError):
+            self._equiv(opt_equiv.CrashError("yosys-refine", "killed"))
+
+    def test_memory_files_use_the_memory_lowering(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plain, mem = Path(tmp) / "p.il", Path(tmp) / "m.il"
+            plain.write_text("module \\t\n  cell $and \\a\nend\n")
+            mem.write_text("module \\t\n  cell $mem_v2 \\a\nend\n")
+            self.assertFalse(fd.has_memories(plain))
+            self.assertTrue(fd.has_memories(plain, mem))
+        checker = fd.MemoryChecker("yosys", Path("."), 1)
+        self.assertEqual(len(checker.flows(True)), 1)
+        self.assertIn("memory", checker.flows(True)[0])
 
     def _main(self, results: dict[str, list[str] | str], expect: str) -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as tmp:
@@ -103,7 +168,7 @@ out.write_text("v2\\n" if flat and mode == "differ" else "v1\\n")
 
 
 class SimTests(unittest.TestCase):
-    def _classify(self, mode: str) -> str:
+    def _classify(self, mode: str, roundtrip: bool = False) -> str:
         with tempfile.TemporaryDirectory() as tmp:
             fake = Path(tmp) / "odin3"
             fake.write_text(FAKE_ODIN)
@@ -116,13 +181,21 @@ class SimTests(unittest.TestCase):
                     argv, capture_output=True, text=True, check=False
                 ),
             ):
-                return fs.classify(Path("a.v"), "top", str(fake), 4, 1)
+                return fs.classify(Path("a.v"), "top", str(fake), (4, 1), roundtrip)
 
     def test_equal(self) -> None:
         self.assertEqual(self._classify("same"), "equal")
 
     def test_differs(self) -> None:
         self.assertEqual(self._classify("differ"), "differs")
+
+    def test_roundtrip_writes_then_reads_back(self) -> None:
+        self.assertEqual(self._classify("same", roundtrip=True), "equal")
+        self.assertTrue(self._classify("fail", roundtrip=True).startswith("skipped"))
+
+    def test_read_steps(self) -> None:
+        self.assertIn("proc", fs.read_steps(Path("a.v"), "t"))
+        self.assertEqual(fs.read_steps(Path("a.blif"), "t"), "read_blif a.blif; ")
 
     def test_skipped_is_not_a_pass(self) -> None:
         self.assertTrue(self._classify("fail").startswith("skipped"))

@@ -724,13 +724,30 @@ if(BUILD_TESTING)
     # 3A Task 3: the expansion.
     odin3_add_unit_test(test_flatten_expand)
     target_sources(test_flatten_expand PRIVATE tests/unit/flatten_fixture.c)
-    # 3A Task 4: flatten-sim (no Yosys) and flatten-diff (Yosys 0.55, in the block below) over
-    # the fixtures of tests/flatten; exit 77 skips when an ASan child cannot be capped.
+    target_compile_definitions(test_flatten_expand PRIVATE
+        ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    # 3A Task 4: flatten-sim (no Yosys), flatten-golden and flatten-diff (Yosys 0.55, in the block
+    # below) over the fixtures of tests/flatten; exit 77 skips when an ASan child cannot be capped.
+    # The sim leg leaves out mem.v (1E has no $mem) and bb.v (a black box has no semantics); the
+    # golden leg compares the flat top module's write_rtlil, write_blif and write_verilog text
+    # with tests/flatten/expected (spec 14.2) and checks two runs byte-identical.
+    set(_flat_dir ${PROJECT_SOURCE_DIR}/tests/flatten)
+    set(_flat_sim ${_flat_dir}/hier.v ${_flat_dir}/params.v ${_flat_dir}/gen.v ${_flat_dir}/feed.v
+                  ${_flat_dir}/keep.v ${_flat_dir}/nested.blif)
     add_test(NAME flatten_sim_fixtures
         COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-sim
-                --odin3 $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/flatten/hier.v)
-    set_tests_properties(flatten_sim_fixtures PROPERTIES LABELS flatten SKIP_RETURN_CODE 77
-                         TIMEOUT 600)
+                --odin3 $<TARGET_FILE:odin3> ${_flat_sim})
+    add_test(NAME flatten_sim_roundtrip
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-sim --roundtrip
+                --odin3 $<TARGET_FILE:odin3> ${_flat_sim})
+    add_test(NAME flatten_golden
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-golden
+                --odin3 $<TARGET_FILE:odin3>
+                tests/flatten/hier.v tests/flatten/params.v tests/flatten/gen.v
+                tests/flatten/feed.v tests/flatten/keep.v tests/flatten/bb.v tests/flatten/mem.v
+                tests/flatten/nested.blif)
+    set_tests_properties(flatten_sim_fixtures flatten_sim_roundtrip flatten_golden PROPERTIES
+                         LABELS flatten SKIP_RETURN_CODE 77 TIMEOUT 600)
     # cli_flatten: the CLI runs read_blif; flatten; check on a hierarchical BLIF (hand_body: sub is
     # expanded, bb is a black box and stays).
     add_test(NAME cli_flatten
@@ -738,6 +755,18 @@ if(BUILD_TESTING)
                 "read_blif ${PROJECT_SOURCE_DIR}/tests/golden/blif/hand_body.blif; flatten; check")
     set_tests_properties(cli_flatten PROPERTIES LABELS flatten
         PASS_REGULAR_EXPRESSION "flatten: 1 instances expanded \\(0 kept\\) in 1 roots")
+    # hand_ports has no instance: flatten expands nothing and leaves the design as read.
+    add_test(NAME cli_flatten_hand_ports
+        COMMAND $<TARGET_FILE:odin3> -p
+                "read_blif ${PROJECT_SOURCE_DIR}/tests/golden/blif/hand_ports.blif; flatten; check")
+    set_tests_properties(cli_flatten_hand_ports PROPERTIES LABELS flatten
+        PASS_REGULAR_EXPRESSION "flatten: 0 instances expanded \\(0 kept\\) in 1 roots")
+    # nested.blif: three levels, 7 instances (two of them unnamed), all expanded.
+    add_test(NAME cli_flatten_nested
+        COMMAND $<TARGET_FILE:odin3> -p
+                "read_blif ${PROJECT_SOURCE_DIR}/tests/flatten/nested.blif; flatten; check")
+    set_tests_properties(cli_flatten_nested PROPERTIES LABELS flatten
+        PASS_REGULAR_EXPRESSION "flatten: 7 instances expanded \\(0 kept\\) in 1 roots")
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
@@ -1862,7 +1891,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-diff
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
                     --expect ${PROJECT_SOURCE_DIR}/tests/flatten/diff_expect.txt
-                    ${PROJECT_SOURCE_DIR}/tests/flatten/hier.v)
+                    ${_flat_dir}/hier.v ${_flat_dir}/params.v ${_flat_dir}/gen.v
+                    ${_flat_dir}/feed.v ${_flat_dir}/keep.v ${_flat_dir}/bb.v ${_flat_dir}/mem.v)
         set_tests_properties(flatten_diff_fixtures PROPERTIES LABELS flatten SKIP_RETURN_CODE 77
                              TIMEOUT 600)
         # 2D §13/§14.3: Yosys 0.55 reads every write_rtlil fixture of test_rtlil_writer back

@@ -11,6 +11,8 @@
 #include "ir/value.h"
 #include "odin3/odin3.h"
 #include "passes/flatten/flatten.h"
+#include "passes/flatten/flatten_test.h"
+#include "passes/manager.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/log.h"
@@ -43,6 +45,7 @@ void setUp(void) {
 }
 
 void tearDown(void) {
+    odin3_flatten_test_set_limits(NULL);
     odin3_util_set_alloc_fail_after(-1);
     odin3_log_set_sink(NULL, NULL);
     (void)odin3_log_set_level(ODIN3_LOG_INFO);
@@ -519,6 +522,362 @@ static void test_flat_oom(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
 }
 
+/* --- the rest of spec 14.1: buses, memories, parameters, names, hand-written BLIF ---------------
+ */
+
+/* The first index of the parameter called name in def; asserts it exists. */
+static uint32_t param_index(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        if (strcmp(def->params[i].name, name) == 0) {
+            return i;
+        }
+    }
+    TEST_FAIL_MESSAGE(name);
+    return 0;
+}
+
+enum { MAX_WORD_NETS = 64, MAX_WORD_PORTS = 16 };
+
+typedef struct word_spec {
+    const char *type;
+    const char *name;
+    const char *memid; /* NULL: the type has no MEMID */
+    const char *const *int_names;
+    const int64_t *int_values;
+    uint32_t n_ints;
+} word_spec;
+
+/* The parameters of the spec: defaults, then its INTs and MEMID. */
+static void word_params(const odin3_celltype_def *def, const word_spec *spec, odin3_value *params) {
+    TEST_ASSERT_TRUE(def->n_params <= MAX_WORD_PORTS * 2);
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        params[i] = def->params[i].dflt;
+    }
+    for (uint32_t i = 0; i < spec->n_ints; i++) {
+        params[param_index(def, spec->int_names[i])] = odin3_value_int(spec->int_values[i]);
+    }
+    if (spec->memid != NULL) {
+        odin3_value *memid = &params[param_index(def, "MEMID")];
+        memid->kind = ODIN3_VAL_STRING;
+        memid->str = str(spec->memid);
+    }
+}
+
+typedef struct word_ports {
+    odin3_net_id nets[MAX_WORD_NETS];
+    odin3_netvec ports[MAX_WORD_PORTS];
+} word_ports;
+
+/* Every pin of the type, with the given parameters, on a fresh unnamed net of mod. */
+static void word_nets(odin3_module *mod, odin3_celltype_id tid, const odin3_value *params,
+                      word_ports *out) {
+    const odin3_celltype_def *def = odin3_celltype_get(fix.design, tid);
+    uint32_t used = 0;
+    TEST_ASSERT_TRUE(def->n_ports <= MAX_WORD_PORTS);
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        uint32_t width = odin3_celltype_port_width(fix.design, tid, params, port);
+        TEST_ASSERT_TRUE(used + width <= MAX_WORD_NETS);
+        for (uint32_t bit = 0; bit < width; bit++) {
+            out->nets[used + bit] = ff_net(&fix, mod, NULL);
+        }
+        out->ports[port] = (odin3_netvec){&out->nets[used], width};
+        used += width;
+    }
+}
+
+/* A word-level node of a built-in type in mod with the given INT parameters (the rest defaults)
+ * and every pin on a fresh unnamed net. */
+static odin3_node_id make_word(odin3_module *mod, const word_spec *spec) {
+    odin3_celltype_id tid = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(fix.design, str(spec->type), &tid));
+    const odin3_celltype_def *def = odin3_celltype_get(fix.design, tid);
+    odin3_value params[MAX_WORD_PORTS * 2];
+    word_params(def, spec, params);
+    word_ports conn;
+    word_nets(mod, tid, params, &conn);
+    odin3_node_spec node = {tid, spec->name != NULL ? str(spec->name) : 0, fix.prov, params,
+                            def->n_params};
+    fix.prov = (odin3_prov_id){0};
+    odin3_node_id out = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(mod, &node, conn.ports, &out));
+    return out;
+}
+
+/* The MEMID text of the $mem node `name` of mod. */
+static const char *memid_of(const odin3_module *mod, const char *name) {
+    odin3_node_id node = odin3_module_find_node(mod, str(name));
+    TEST_ASSERT_TRUE_MESSAGE(odin3_node_valid(node), name);
+    const odin3_celltype_def *def = odin3_celltype_get(fix.design, odin3_node_type(mod, node));
+    uint32_t at = param_index(def, "MEMID");
+    return odin3_strtab_get(odin3_design_strtab(fix.design), odin3_node_param(mod, node, at)->str);
+}
+
+/* The two-sided bus: sub drives `io` (inout) through a $tribuf; top drives the same bus through
+ * its own $tribuf and through the instance. */
+static void test_flat_bus(void) {
+    odin3_module *sub = ff_module(&fix, "drv");
+    (void)ff_port(&fix, sub, "d", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, sub, "en", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, sub, "io", ODIN3_DIR_INOUT, 1);
+    odin3_net_id sub_nets[3] = {ff_wnet(&fix, sub, "d", 0), ff_wnet(&fix, sub, "en", 0),
+                                ff_wnet(&fix, sub, "io", 0)};
+    (void)ff_gate(&fix, sub, (ff_cell){"$tribuf", "t"}, sub_nets);
+    odin3_module *top = ff_module(&fix, "top");
+    (void)ff_port(&fix, top, "d", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, top, "en", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, top, "bus", ODIN3_DIR_INOUT, 1);
+    odin3_net_id top_nets[3] = {ff_wnet(&fix, top, "d", 0), ff_wnet(&fix, top, "en", 0),
+                                ff_wnet(&fix, top, "bus", 0)};
+    (void)ff_gate(&fix, top, (ff_cell){"$tribuf", "own"}, top_nets);
+    (void)ff_inst(&fix, (ff_pair){top, sub}, "u1", top_nets);
+    (void)ff_inst(&fix, (ff_pair){top, sub}, "u2", top_nets);
+    flatten_ok(top);
+    TEST_ASSERT_EQUAL_UINT32(0, count_instances(top));
+    TEST_ASSERT_EQUAL_UINT32(3, count_type(top, "$tribuf"));
+    TEST_ASSERT_TRUE(has_node(top, "u1.t"));
+    TEST_ASSERT_TRUE(has_node(top, "u2.t"));
+    TEST_ASSERT_EQUAL_UINT32(ff_wnet(&fix, top, "bus", 0).v,
+                             odin3_wire_net(top, odin3_module_find_wire(top, str("u2.io")), 0).v);
+    /* three tristate drivers and the inout port node's own pin */
+    TEST_ASSERT_EQUAL_UINT32(4, odin3_net_driver_count(top, ff_wnet(&fix, top, "bus", 0)));
+}
+
+/* A $mem in `sub`, instantiated twice; the parent already holds a memory whose MEMID is u1.mem. */
+static void test_flat_mem_memid(void) {
+    odin3_module *sub = ff_module(&fix, "sub");
+    (void)make_word(sub, &(word_spec){"$mem", "mem", "mem", NULL, NULL, 0});
+    odin3_module *top = ff_module(&fix, "top");
+    (void)make_word(top, &(word_spec){"$mem", "own", "u1.mem", NULL, NULL, 0});
+    (void)ff_inst_bus(&fix, (ff_pair){top, sub}, "u1", NULL);
+    (void)ff_inst_bus(&fix, (ff_pair){top, sub}, "u2", NULL);
+    flatten_ok(top);
+    TEST_ASSERT_EQUAL_UINT32(3, count_type(top, "$mem"));
+    TEST_ASSERT_EQUAL_STRING("u1.mem", memid_of(top, "own"));
+    TEST_ASSERT_EQUAL_STRING("u1.mem_1", memid_of(top, "u1.mem"));
+    TEST_ASSERT_EQUAL_STRING("u2.mem", memid_of(top, "u2.mem"));
+    TEST_ASSERT_EQUAL_STRING("mem", memid_of(sub, "mem")); /* the child is untouched */
+}
+
+/* The widths and signedness of a word cell reach the copy unchanged. */
+static void test_flat_params_copied(void) {
+    odin3_module *sub = ff_module(&fix, "sub");
+    const char *const names[] = {"A_WIDTH", "B_WIDTH", "Y_WIDTH", "A_SIGNED"};
+    const int64_t values[] = {3, 2, 4, 1};
+    (void)make_word(sub, &(word_spec){"$add", "add", NULL, names, values, 4});
+    odin3_module *top = ff_module(&fix, "top");
+    (void)ff_inst_bus(&fix, (ff_pair){top, sub}, "u1", NULL);
+    flatten_ok(top);
+    odin3_node_id orig = odin3_module_find_node(sub, str("add"));
+    odin3_node_id copy = odin3_module_find_node(top, str("u1.add"));
+    TEST_ASSERT_TRUE(odin3_node_valid(copy));
+    const odin3_celltype_def *def = odin3_celltype_get(fix.design, odin3_node_type(top, copy));
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        TEST_ASSERT_TRUE_MESSAGE(
+            odin3_value_equal(odin3_node_param(sub, orig, i), odin3_node_param(top, copy, i)),
+            def->params[i].name);
+    }
+    TEST_ASSERT_EQUAL_INT64(4, odin3_node_param(top, copy, param_index(def, "Y_WIDTH"))->i);
+}
+
+/* A BLIF-style net name (a net with a name and no wire) becomes `u1.n~19`, a bare net name. */
+static void test_flat_net_names(void) {
+    odin3_module *sub = make_sub("sub", (odin3_prov_id){0});
+    odin3_net_id bare = ff_net(&fix, sub, "n~19");
+    odin3_net_id gate_nets[2] = {ff_wnet(&fix, sub, "a", 0), bare};
+    (void)ff_gate(&fix, sub, (ff_cell){"$_NOT_", "n3"}, gate_nets);
+    odin3_module *top = make_top();
+    (void)inst_xz(top, sub, "u1");
+    flatten_ok(top);
+    odin3_net_id net = odin3_module_find_net(top, str("u1.n~19"));
+    TEST_ASSERT_TRUE(odin3_net_valid(net));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_net_driver_count(top, net));
+}
+
+/* Generate-block names keep their brackets and nest under the instance path (`a.g[1].u2`). */
+static void test_flat_generate_names(void) {
+    odin3_module *leaf = ff_module(&fix, "leaf");
+    (void)ff_port(&fix, leaf, "a", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, leaf, "y", ODIN3_DIR_OUT, 1);
+    odin3_net_id inner = ff_wire(&fix, leaf, "g[1].t", 1);
+    odin3_net_id first[2] = {ff_wnet(&fix, leaf, "a", 0), inner};
+    odin3_net_id second[2] = {inner, ff_wnet(&fix, leaf, "y", 0)};
+    (void)ff_gate(&fix, leaf, (ff_cell){"$_NOT_", "g[1].u2"}, first);
+    (void)ff_gate(&fix, leaf, (ff_cell){"$_NOT_", "g[2].u3"}, second);
+    odin3_module *mid = ff_module(&fix, "mid");
+    (void)ff_port(&fix, mid, "a", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, mid, "y", ODIN3_DIR_OUT, 1);
+    odin3_net_id io[2] = {ff_wnet(&fix, mid, "a", 0), ff_wnet(&fix, mid, "y", 0)};
+    (void)ff_inst(&fix, (ff_pair){mid, leaf}, "h[0].l", io);
+    odin3_module *top = make_top();
+    (void)inst_xz(top, mid, "m");
+    flatten_ok(top);
+    assert_names(top,
+                 (name_lists){(const char *const[]){"m.h[0].l.g[1].u2", "m.h[0].l.g[2].u3", NULL},
+                              (const char *const[]){"m.h[0].l.g[1].t", NULL}});
+}
+
+/* Hand-written BLIF (hand_body): `sub` is expanded, `bb` stays a black-box instance. */
+static void read_blif_ok(const char *file) {
+    char path[256];
+    (void)snprintf(path, sizeof path, "%s/%s", ODIN3_BLIF_DIR, file);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pass_run(fix.design, "read_blif", odin3_bytes_cstr(path)));
+}
+
+static void test_flat_hand_body(void) {
+    read_blif_ok("hand_body.blif");
+    odin3_module *top = odin3_module_get(fix.design, odin3_design_top(fix.design));
+    TEST_ASSERT_TRUE(has_node(top, "u_sub"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_instances(top)); /* sub; the bb stub is a black box */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_flatten_run(&fix.ctx, fix.design, NULL),
+                                  log_text);
+    check_full();
+    TEST_ASSERT_FALSE(has_node(top, "u_sub"));
+    uint32_t boxes = 0;
+    for (uint32_t nid = 1; nid < odin3_module_node_end(top); nid++) {
+        odin3_node_id node = {nid};
+        boxes += odin3_node_live(top, node) &&
+                         odin3_celltype_get(fix.design, odin3_node_type(top, node))->gran ==
+                             ODIN3_GRAN_BLACKBOX
+                     ? 1
+                     : 0;
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, boxes);
+}
+
+/* hand_ports has no instance: nothing is expanded, nothing changes. */
+static void test_flat_hand_ports(void) {
+    read_blif_ok("hand_ports.blif");
+    odin3_module *top = odin3_module_get(fix.design, odin3_design_top(fix.design));
+    uint32_t nodes = odin3_module_node_end(top);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_flatten_run(&fix.ctx, fix.design, NULL));
+    check_full();
+    TEST_ASSERT_EQUAL_UINT32(nodes, odin3_module_node_end(top));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "flatten: 0 instances expanded (0 kept)"));
+}
+
+/* Recursion through odin3_flatten_run: the text names the cycle, the design is untouched. */
+static void test_flat_recursion(void) {
+    odin3_module *aa = ff_module(&fix, "a");
+    odin3_module *bb = ff_module(&fix, "b");
+    (void)ff_inst_bus(&fix, (ff_pair){aa, bb}, "ub", NULL);
+    (void)ff_inst_bus(&fix, (ff_pair){bb, aa}, "ua", NULL);
+    uint32_t nodes_a = odin3_module_node_end(aa);
+    uint32_t nodes_b = odin3_module_node_end(bb);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, flatten_top(aa));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "flatten: recursive instantiation: a -> b -> a"));
+    TEST_ASSERT_EQUAL_UINT32(nodes_a, odin3_module_node_end(aa));
+    TEST_ASSERT_EQUAL_UINT32(nodes_b, odin3_module_node_end(bb));
+}
+
+/* A cap hit through the run: the pre-flight error, the module untouched. */
+static void test_flat_caps(void) {
+    odin3_module *sub = make_sub("sub", (odin3_prov_id){0});
+    odin3_module *top = make_top();
+    (void)inst_xz(top, sub, "u1");
+    odin3_flatten_limits tiny = {1, 0, 0, 0, 0};
+    odin3_flatten_test_set_limits(&tiny);
+    uint32_t live = ff_live_nodes(top);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, flatten_top(top));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "(cap 1)"));
+    TEST_ASSERT_EQUAL_UINT32(live, ff_live_nodes(top));
+    TEST_ASSERT_EQUAL_UINT32(1, count_instances(top));
+}
+
+/* Sets attribute keep_hierarchy of the instance to a STRING (the empty string when text is 0). */
+static void keep_string(odin3_module *mod, odin3_node_id inst, uint32_t text) {
+    odin3_value val = {ODIN3_VAL_STRING, 0, NULL, 0, text, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(mod, (odin3_objref){ODIN3_OBJ_NODE, inst.v},
+                                                   str("keep_hierarchy"), &val));
+}
+
+/* Four instances of sub in top: keep_hierarchy INT 1, STRING "yes", INT 0, STRING "". */
+static void add_four_instances(odin3_module *sub, odin3_module *top) {
+    const char *names[4] = {"k_int", "k_str", "e_int", "e_str"};
+    odin3_node_id inst[4];
+    for (uint32_t i = 0; i < 4; i++) {
+        odin3_net_id io[2] = {ff_wnet(&fix, top, "x", 0), ff_wnet(&fix, top, "z", i)};
+        inst[i] = ff_inst(&fix, (ff_pair){top, sub}, names[i], io);
+    }
+    ff_attr_int(&fix, top, (odin3_objref){ODIN3_OBJ_NODE, inst[0].v}, "keep_hierarchy", 1);
+    ff_attr_int(&fix, top, (odin3_objref){ODIN3_OBJ_NODE, inst[2].v}, "keep_hierarchy", 0);
+    keep_string(top, inst[1], str("yes"));
+    keep_string(top, inst[3], 0);
+}
+
+/* The keep_hierarchy value kinds at expansion time: INT 1 and a non-empty STRING keep the
+ * instance, INT 0 and the empty string expand it. */
+static void test_flat_keep_hierarchy_value_kinds(void) {
+    odin3_module *sub = make_sub("sub", (odin3_prov_id){0});
+    odin3_module *top = ff_module(&fix, "top");
+    (void)ff_port(&fix, top, "x", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, top, "z", ODIN3_DIR_OUT, 4);
+    add_four_instances(sub, top);
+    flatten_ok(top);
+    TEST_ASSERT_EQUAL_UINT32(2, count_instances(top));
+    assert_names(top,
+                 (name_lists){(const char *const[]){"k_int", "k_str", "e_int.n1", "e_str.n1", NULL},
+                              (const char *const[]){"e_int.t", NULL}});
+}
+
+/* The sorted names of the live nodes and wires of mod and the alias lists of its port nets. */
+static void name_set(const odin3_module *mod, char *out, size_t size) {
+    const odin3_strtab *tab = odin3_design_strtab(fix.design);
+    char parts[32][NAME_BUF];
+    uint32_t n_parts = 0;
+    for (uint32_t nid = 1; nid < odin3_module_node_end(mod) && n_parts < 32; nid++) {
+        odin3_node_id node = {nid};
+        if (odin3_node_live(mod, node) && odin3_node_name(mod, node) != 0) {
+            (void)snprintf(parts[n_parts++], NAME_BUF, "n:%s:%s",
+                           odin3_strtab_get(tab, odin3_node_name(mod, node)),
+                           odin3_celltype_get(fix.design, odin3_node_type(mod, node))->name);
+        }
+    }
+    for (uint32_t wid = 1; wid < odin3_module_wire_end(mod) && n_parts < 32; wid++) {
+        if (odin3_wire_live(mod, (odin3_wire_id){wid})) {
+            (void)snprintf(parts[n_parts++], NAME_BUF, "w:%s",
+                           odin3_strtab_get(tab, odin3_wire_name(mod, (odin3_wire_id){wid})));
+        }
+    }
+    for (uint32_t i = 0; i < n_parts; i++) { /* insertion sort: tiny */
+        for (uint32_t j = i; j > 0 && strcmp(parts[j - 1], parts[j]) > 0; j--) {
+            char swap[NAME_BUF];
+            memcpy(swap, parts[j], NAME_BUF);
+            memcpy(parts[j], parts[j - 1], NAME_BUF);
+            memcpy(parts[j - 1], swap, NAME_BUF);
+        }
+    }
+    out[0] = '\0';
+    for (uint32_t i = 0; i < n_parts; i++) {
+        size_t used = strlen(out);
+        (void)snprintf(out + used, size - used, "%s,", parts[i]);
+    }
+    char list[NAME_BUF * 2];
+    aliases_of(mod, ff_wnet(&fix, (odin3_module *)mod, "x", 0), list, sizeof list);
+    size_t used = strlen(out);
+    (void)snprintf(out + used, size - used, "x=%s;", list);
+}
+
+/* Modules created in the reverse order give the same names, cell types and aliases. */
+static void test_flat_determinism_reversed(void) {
+    char forward[LOG_TEXT / 2];
+    char reversed[LOG_TEXT / 2];
+    odin3_module *sub = make_sub("sub", (odin3_prov_id){0});
+    odin3_module *top = make_top();
+    (void)inst_xz(top, sub, "u1");
+    flatten_ok(top);
+    name_set(top, forward, sizeof forward);
+    ff_end(&fix);
+    ff_begin(&fix);
+    top = make_top();
+    sub = make_sub("sub", (odin3_prov_id){0});
+    (void)inst_xz(top, sub, "u1");
+    flatten_ok(top);
+    name_set(top, reversed, sizeof reversed);
+    TEST_ASSERT_EQUAL_STRING(forward, reversed);
+    TEST_ASSERT_NOT_NULL(strstr(forward, "w:u1.t,"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_flat_simple);
@@ -540,5 +899,16 @@ int main(void) {
     RUN_TEST(test_flat_prov_nested);
     RUN_TEST(test_flat_determinism);
     RUN_TEST(test_flat_oom);
+    RUN_TEST(test_flat_bus);
+    RUN_TEST(test_flat_mem_memid);
+    RUN_TEST(test_flat_params_copied);
+    RUN_TEST(test_flat_net_names);
+    RUN_TEST(test_flat_generate_names);
+    RUN_TEST(test_flat_hand_body);
+    RUN_TEST(test_flat_hand_ports);
+    RUN_TEST(test_flat_recursion);
+    RUN_TEST(test_flat_caps);
+    RUN_TEST(test_flat_keep_hierarchy_value_kinds);
+    RUN_TEST(test_flat_determinism_reversed);
     return UNITY_END();
 }
