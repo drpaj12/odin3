@@ -785,10 +785,11 @@ if(BUILD_TESTING)
     # flatten + check (Debug runs check around the pass) and sim before = after (a design the
     # simulator cannot run is counted skipped, never a pass). A failing case is written to
     # ${PROJECT_BINARY_DIR}/fuzz_flatten as a reproducer.
+    # Labelled `flatten`, not `fuzz`: the CI fuzz-smoke build has no odin3 binary to drive.
     add_test(NAME fuzz_flatten_quick
         COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/fuzz_flatten --cases 2000 --seed 1
                 --odin3 $<TARGET_FILE:odin3> --repro-dir ${PROJECT_BINARY_DIR}/fuzz_flatten)
-    set_tests_properties(fuzz_flatten_quick PROPERTIES LABELS "flatten;fuzz" SKIP_RETURN_CODE 77
+    set_tests_properties(fuzz_flatten_quick PROPERTIES LABELS flatten SKIP_RETURN_CODE 77
                          TIMEOUT 3600)
     # hand_ports has no instance: flatten expands nothing and leaves the design as read.
     add_test(NAME cli_flatten_hand_ports
@@ -2010,7 +2011,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/fuzz_flatten --cases 300 --seed 5001
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
                     --repro-dir ${PROJECT_BINARY_DIR}/fuzz_flatten)
-        set_tests_properties(fuzz_flatten_yosys_quick PROPERTIES LABELS "flatten;fuzz"
+        set_tests_properties(fuzz_flatten_yosys_quick PROPERTIES LABELS flatten
                              SKIP_RETURN_CODE 77 TIMEOUT 3600)
         # 2D §13/§14.3: Yosys 0.55 reads every write_rtlil fixture of test_rtlil_writer back
         # (read_rtlil; write_rtlil) and lowers it (read_rtlil; proc; opt; write_blif), smallest
