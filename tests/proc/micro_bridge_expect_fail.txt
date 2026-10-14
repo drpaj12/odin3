@@ -4,3 +4,6 @@
 # proc_diff_micro (Yosys's proc on the same RTLIL). Empty until the first full proc_bridge_micro
 # run (the implementer ran only the 10 smallest micros: heavy-run, smoke); the controller lists
 # the files that exit 2 with `equiv-check failed` here, as proc_bridge_vtr_expect_fail does.
+keywords/inout/inout_failure.v [black-box instances cannot be matched one-to-one] equiv-check tool limit: an inout driven by an enable keeps a $_TBUF_ on side A that plain read_verilog; proc on side B shorts (2D spec D3, --yosys-tribuf); equiv-check cannot read a tri-state output; covered by proc_diff_micro
+keywords/inout/simple_inout.v [black-box instances cannot be matched one-to-one] equiv-check tool limit: an inout driven by an enable keeps a $_TBUF_ on side A that plain read_verilog; proc on side B shorts (2D spec D3, --yosys-tribuf); equiv-check cannot read a tri-state output; covered by proc_diff_micro
+syntax/multi_clock_reader_writer.v [more than one clock domain] equiv-check tool limit: unproven, two clocks (clock_reader_head, clock_writer_head); covered by proc_diff_micro
