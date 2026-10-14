@@ -55,6 +55,7 @@ typedef struct tri_groups {
     odin3_vec next;      /* uint32_t per record */
     odin3_u64map *owner; /* net -> group index + 1 */
     odin3_vec buf;       /* odin3_net_id: the nets of the $pmux being made */
+    odin3_u64map *shared; /* net -> 1: the data net of more than one group (`--vtr-compat`) */
 } tri_groups;
 
 static odin3_pinslice tri_port(const odin3_elab2 *e2, odin3_elab2_tri_rec rec, uint32_t port) {
@@ -378,13 +379,50 @@ static odin3_status try_vtr(odin3_elab2 *e2, const tri_groups *tg, const tri_gro
     for (uint32_t i = grp->head; i != NO_NEXT; i = ((const uint32_t *)tg->next.data)[i]) {
         ordered[--at] = recs[i];
     }
-    odin3_elab2_tri_vtr_req req = {ordered, tg->owner, grp->count};
+    odin3_elab2_tri_vtr_req req = {ordered, tg->owner, tg->shared, grp->count};
     return odin3_elab2_tri_vtr(e2, &req, done);
+}
+
+/* Notes the data nets of one group: seen holds net -> group + 1, tg->shared the nets two groups
+ * have. */
+static odin3_status note_data(const odin3_elab2 *e2, tri_groups *tg, odin3_u64map *seen,
+                              const tri_group *grp, uint32_t gno) {
+    const odin3_elab2_tri_rec *recs = tri_recs(e2->drive);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = grp->head; st == ODIN3_OK && i != NO_NEXT;
+         i = ((const uint32_t *)tg->next.data)[i]) {
+        odin3_pinslice data = tri_port(e2, recs[i], TRI_A);
+        for (uint32_t bit = 0; st == ODIN3_OK && bit < data.count; bit++) {
+            uint64_t net = tri_net(e2, data, bit).v;
+            uint64_t prev = 0;
+            if (!odin3_u64map_get(seen, net, &prev)) {
+                st = odin3_u64map_put(seen, (odin3_kv){net, (uint64_t)gno + 1U});
+            } else if (prev != (uint64_t)gno + 1U) {
+                st = odin3_u64map_put(tg->shared, (odin3_kv){net, 1});
+            }
+        }
+    }
+    return st;
+}
+
+/* `--vtr-compat`, top module: the nets that are the data of drivers of two groups or more. */
+static odin3_status find_shared(const odin3_elab2 *e2, tri_groups *tg) {
+    odin3_u64map *seen = odin3_u64map_create(0);
+    if (seen == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = ODIN3_OK;
+    for (size_t gno = 0; st == ODIN3_OK && gno < tg->groups.len; gno++) {
+        const tri_group grp = ((const tri_group *)tg->groups.data)[gno];
+        st = grp.count >= 2U ? note_data(e2, tg, seen, &grp, (uint32_t)gno) : ODIN3_OK;
+    }
+    odin3_u64map_destroy(seen);
+    return st;
 }
 
 /* One group: the cap, the nets, the $pmux and the warning. */
 static odin3_status convert_group(odin3_elab2 *e2, tri_groups *tg, const tri_group *grp) {
-    if (e2->mod_vtr_compat && grp->count >= 2U) {
+    if (e2->mod_vtr_compat && grp->count >= 2U) { /* below the top it declines, with a warning */
         bool done = false;
         odin3_status vst = try_vtr(e2, tg, grp, &done);
         if (vst != ODIN3_OK || done) {
@@ -406,6 +444,7 @@ static void groups_free(tri_groups *tg) {
     odin3_vec_free(&tg->next);
     odin3_vec_free(&tg->buf);
     odin3_u64map_destroy(tg->owner);
+    odin3_u64map_destroy(tg->shared);
 }
 
 odin3_status odin3_elab2_tri_logic(odin3_elab2 *e2) {
@@ -413,11 +452,11 @@ odin3_status odin3_elab2_tri_logic(odin3_elab2 *e2) {
     if (dr == NULL || dr->tribufs.len == 0) {
         return ODIN3_OK;
     }
-    tri_groups tg = {.owner = odin3_u64map_create(0)};
+    tri_groups tg = {.owner = odin3_u64map_create(0), .shared = odin3_u64map_create(0)};
     odin3_vec_init(&tg.groups, sizeof(tri_group));
     odin3_vec_init(&tg.next, sizeof(uint32_t));
     odin3_vec_init(&tg.buf, sizeof(odin3_net_id));
-    odin3_status st = tg.owner != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    odin3_status st = tg.owner != NULL && tg.shared != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
     for (uint32_t i = 0; st == ODIN3_OK && i < dr->tribufs.len; i++) {
         uint32_t *link = odin3_vec_push(&tg.next);
         st = link != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
@@ -427,6 +466,7 @@ odin3_status odin3_elab2_tri_logic(odin3_elab2 *e2) {
             st = convert && st == ODIN3_OK ? file_record(e2, &tg, i) : st;
         }
     }
+    st = st == ODIN3_OK && e2->mod_vtr_compat && dr->is_top ? find_shared(e2, &tg) : st;
     for (size_t gno = 0; st == ODIN3_OK && gno < tg.groups.len; gno++) {
         const tri_group grp = ((const tri_group *)tg.groups.data)[gno];
         st = convert_group(e2, &tg, &grp);

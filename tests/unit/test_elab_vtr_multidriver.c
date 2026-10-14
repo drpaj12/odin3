@@ -207,6 +207,50 @@ static void test_vtr_output_port_keeps_tribuf(void) {
     TEST_ASSERT_EQUAL_UINT32(2, pt_count_of("$tribuf"));
 }
 
+/* Probe h1: Parmys flattens first, so below the top its choice ranks the parent's wires. The rule
+ * is for the top module only; a submodule keeps the IEEE bus and a warning says Parmys may differ.
+ */
+static void test_vtr_submodule_keeps_the_bus(void) {
+    read_ok_with(k_vtr, "module sub(bus0, bus1, e0, e1, o);\ninput bus0, bus1, e0, e1;\n"
+                        "output o;\nwire d;\nassign d = e0 ? bus0 : 1'bz;\n"
+                        "assign d = e1 ? bus1 : 1'bz;\nassign o = ~d;\nendmodule\n"
+                        "module t(zz, aa, e0, e1, o);\ninput zz, aa, e0, e1;\noutput o;\n"
+                        "sub u(.bus0(zz), .bus1(aa), .e0(e0), .e1(e1), .o(o));\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with("--vtr-compat keeps"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_warnings_with("net 'd' is multiply driven"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_warnings_with("Parmys's result may differ"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_warnings_with("converted to logic"));
+}
+
+/* Probe t1: two candidates (bb, cc) that other logic reads. Parmys shorts the loser to the winner
+ * everywhere; we do not model that, so the rule declines: IEEE bus and a warning. */
+static void test_vtr_second_read_candidate_declines(void) {
+    read_ok_with(k_vtr, "module t(aa, bb, cc, e0, e1, e2, o, p, r);\n"
+                        "input aa, bb, cc, e0, e1, e2;\noutput o, p, r;\nwire d;\n"
+                        "assign d = e0 ? aa : 1'bz;\nassign d = e1 ? bb : 1'bz;\n"
+                        "assign d = e2 ? cc : 1'bz;\nassign o = ~d;\nassign p = bb & e0;\n"
+                        "assign r = cc | e1;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with("--vtr-compat keeps"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_warnings_with("net 'd' is multiply driven"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_warnings_with("Parmys's result may differ"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$pmux"));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$tribuf"));
+}
+
+/* Probe s1: input aa is a candidate of two groups; Parmys puts both groups in one class. Both
+ * groups decline (the first is not converted before the second is seen). */
+static void test_vtr_shared_candidate_declines(void) {
+    read_ok_with(k_vtr, "module t(aa, bb, cc, e0, e1, e2, e3, o, p, q);\n"
+                        "input aa, bb, cc, e0, e1, e2, e3;\noutput o, p, q;\nwire d1, d2;\n"
+                        "assign d1 = e0 ? aa : 1'bz;\nassign d1 = e1 ? bb : 1'bz;\n"
+                        "assign d2 = e2 ? aa : 1'bz;\nassign d2 = e3 ? cc : 1'bz;\n"
+                        "assign o = ~d1;\nassign p = ~d2;\nassign q = ~bb;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with("--vtr-compat keeps"));
+    TEST_ASSERT_EQUAL_UINT32(2, pt_warnings_with("is multiply driven"));
+    TEST_ASSERT_EQUAL_UINT32(2, pt_count_of("$pmux"));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$tribuf"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_vtr_micro);
@@ -220,5 +264,8 @@ int main(void) {
     RUN_TEST(test_vtr_cell_data_keeps_the_bus);
     RUN_TEST(test_vtr_single_driver_unchanged);
     RUN_TEST(test_vtr_output_port_keeps_tribuf);
+    RUN_TEST(test_vtr_submodule_keeps_the_bus);
+    RUN_TEST(test_vtr_second_read_candidate_declines);
+    RUN_TEST(test_vtr_shared_candidate_declines);
     return UNITY_END();
 }

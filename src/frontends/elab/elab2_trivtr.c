@@ -53,6 +53,8 @@ typedef struct vtr_run {
     odin3_elab2 *e2;
     const odin3_elab2_tri_rec *recs;
     const odin3_u64map *y_owner; /* the nets that are the Y of a group of $tribuf cells */
+    const odin3_u64map *shared;  /* the nets that are data of more than one group */
+    const char *why;             /* why the rule declined; NULL when it did not */
     uint32_t count, width;
     vtr_cand *rep;       /* the winner of each bit */
     odin3_vec cands;     /* vtr_cand: every distinct candidate of every bit */
@@ -157,6 +159,12 @@ static odin3_status pick_bit(vtr_run *run, uint32_t bit, bool *ok) {
         if (!*ok) {
             return ODIN3_OK;
         }
+        if (odin3_u64map_get(run->shared, cand.net.v, NULL)) {
+            run->why = "an input is also the data of another group of drivers, which Parmys puts "
+                       "in the same class";
+            *ok = false;
+            return ODIN3_OK;
+        }
         odin3_status st = remember(run, &cand);
         if (st != ODIN3_OK) {
             return st;
@@ -230,6 +238,47 @@ static odin3_status say(const vtr_run *run) {
     return st;
 }
 
+/* --- declining ------------------------------------------------------------------------------- */
+
+/* True when the candidate wins a bit. */
+static bool is_winner(const vtr_run *run, const vtr_cand *cand) {
+    for (uint32_t bit = 0; bit < run->width; bit++) {
+        if (run->rep[bit].net.v == cand->net.v) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Sets why when an input that does not win is read by other logic: Yosys shorts it to the winner,
+ * which this rule does not model. */
+static void check_readers(vtr_run *run) {
+    const vtr_cand *all = run->cands.data;
+    for (size_t i = 0; run->why == NULL && i < run->cands.len; i++) {
+        if (all[i].read && !is_winner(run, &all[i])) {
+            run->why = "an input that is not kept is read by other logic, which Parmys shorts to "
+                       "the kept one";
+        }
+    }
+}
+
+/* The warning of a group the rule left to the IEEE resolution. */
+static odin3_status decline(odin3_elab2 *e2, const odin3_elab2_tri_rec *recs, uint32_t count,
+                            const char *why) {
+    odin3_strbuf net;
+    odin3_strbuf_init(&net);
+    odin3_status st = odin3_elab2_tri_bus_label(e2, recs[0], &net);
+    if (st == ODIN3_OK) {
+        odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, recs[0].at),
+                         "net '%s' is multiply driven (%u drivers); --vtr-compat does not apply "
+                         "Parmys's rule here (%s), so the IEEE resolution is used and Parmys's "
+                         "result may differ",
+                         net.data != NULL ? net.data : "net", (unsigned)count, why);
+    }
+    odin3_strbuf_free(&net);
+    return st;
+}
+
 /* --- the change ------------------------------------------------------------------------------ */
 
 /* Deletes the $tribuf cells and shorts every Y net into its winner. */
@@ -254,9 +303,15 @@ static odin3_status short_nets(vtr_run *run) {
 
 odin3_status odin3_elab2_tri_vtr(odin3_elab2 *e2, const odin3_elab2_tri_vtr_req *req, bool *done) {
     *done = false;
+    if (!e2->drive->is_top) {
+        return decline(e2, req->recs, req->count,
+                       "Parmys flattens first, so below the top module it ranks the parent's "
+                       "wires, not this module's ports");
+    }
     vtr_run run = {.e2 = e2,
                    .recs = req->recs,
                    .y_owner = req->y_owner,
+                   .shared = req->shared,
                    .count = req->count,
                    .width = odin3_node_port(e2->mod, req->recs[0].node, VT_Y).count};
     odin3_vec_init(&run.cands, sizeof(vtr_cand));
@@ -268,6 +323,11 @@ odin3_status odin3_elab2_tri_vtr(odin3_elab2 *e2, const odin3_elab2_tri_vtr_req 
         st = pick_bit(&run, bit, &ok);
     }
     if (st == ODIN3_OK && ok) {
+        check_readers(&run);
+    }
+    if (st == ODIN3_OK && run.why != NULL) {
+        st = decline(e2, req->recs, req->count, run.why);
+    } else if (st == ODIN3_OK && ok) {
         st = say(&run);
         st = st != ODIN3_OK ? st : short_nets(&run);
         *done = st == ODIN3_OK;

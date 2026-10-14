@@ -66,6 +66,7 @@ odin3_status odin3_elab2_tri_bus_label(const odin3_elab2 *e2, odin3_elab2_tri_re
 typedef struct odin3_elab2_tri_vtr_req {
     const odin3_elab2_tri_rec *recs;
     const odin3_u64map *y_owner;
+    const odin3_u64map *shared; /* net -> 1: a data net of more than one group */
     uint32_t count;
 } odin3_elab2_tri_vtr_req;
 
@@ -73,7 +74,10 @@ typedef struct odin3_elab2_tri_vtr_req {
  * driver is an input port bit of the module: the enables are ignored, the data bits are shorted
  * to one winner per bit, the $tribuf cells are deleted, the Y nets merged into the winners and a
  * warning names the net, the winner and the drivers dropped. *done tells whether it did; false
- * leaves the group untouched for the IEEE resolution. */
+ * leaves the group untouched for the IEEE resolution and (declined) says why in a warning. It
+ * declines below the top module (Parmys flattens first), when an input other than the winner is
+ * read by other logic (Parmys shorts it to the winner, which is not modelled) and when an input is
+ * a candidate of more than one group (Parmys puts the groups in one class). */
 odin3_status odin3_elab2_tri_vtr(odin3_elab2 *e2, const odin3_elab2_tri_vtr_req *req, bool *done);
 
 /* What a net with a tri-state driver is, once the module's nets are all merged (D3). */
