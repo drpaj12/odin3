@@ -442,6 +442,20 @@ of cell type" error, and an instance resolves to the unit or to the hard cell by
 #80 added (the structural gap to the Parmys goldens). (5) `elab-equiv` and `elab-sweep` take `--lib FILE`;
 `tests/elab/lib/vtr_primitives.v` is a copy of Parmys's file (trailing blanks stripped) for the micro sweeps.
 
+v4.30 (2026-10-13; Peter's ruling on `initial x = <non-constant>`, PHASE2 #23). (1) EL-3 gains
+`read_verilog --vtr-compat` (`odin3_elab_opts.vtr_compat`; a `--lib` read's units carry it as the
+`MODULE` attribute `odin3_lib_vtr_compat`, `ODIN3_UNIT_VTR_COMPAT`). (2) EL-40: with the option, a
+statement of an `initial` that is not constant and is a plain `=` or `<=` assignment to a variable
+(or a constant bit or part select of one), after an optional delay, is `assign x = e;` when nothing
+else drives the target bits; the warning is `initial value of 'x' is not constant: treated as a
+continuous assign (VTR/Parmys compatibility)`. A target that an `always` block assigns, or a
+continuous assignment, an instance, a gate or an input port drives, keeps the ignore, with `initial
+value of 'x' is not constant and is ignored: 'x' is <also assigned in an always block | driven by
+...> (VTR/Parmys compatibility does not apply)`. Without the option nothing changes. (3) §9.2 lists
+both warnings; §17 #85 is the divergence from IEEE 1364-2005 (which leaves the variable at x until
+the statement runs, at time 0, in simulation). (4) `elab-equiv`, `elab-sweep` (`--equiv`),
+`sp-splice` and the `vtr-qor` odin3 legs pass `--vtr-compat`; the `elab_equiv_micro` sweep runs with it.
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -517,11 +531,12 @@ typedef struct odin3_elab_opts {
     bool nolatches;      /* Yosys -nolatches: unassigned paths of combinational blocks are x (EL-35) */
     bool nomem2reg;      /* never replace a memory by registers except where forced (EL-27) */
     bool auto_blackbox;  /* an undefined module becomes a black box, not unresolved_module (EL-11) */
+    bool vtr_compat;     /* `initial x = <non-constant>` is `assign x = ...` (EL-40, §17 #85) */
 } odin3_elab_opts;
 ```
 
 `read_verilog` gains `--nolatches`, `--nomem2reg` and `--auto-blackbox` (all off by default) and
-`--lib` (§3.1a: keep the modules as library units, elaborate nothing);
+`--lib` (§3.1a: keep the modules as library units, elaborate nothing) and `--vtr-compat` (below);
 `--top` is the 1D pass option (`odin3_pass_get_options().top`), which replaces the project top
 (PHASE2 #9). Project parameters (`param top[.inst…].name value`, PRJ records) are read from the
 design's project record by stage 1 (EL-8). The ABI mirror `odin3_elab_options` has the same
@@ -530,6 +545,18 @@ fields plus `uint8_t reserved_pad` (the byte after the three flags, no hidden pa
 
 The 2H exit harness passes `--nolatches` because Parmys does (`read_verilog -sv -nolatches`);
 see Decisions for Peter, item 4.
+
+**The VTR setting (`--vtr-compat`; Peter 2026-10-13, PHASE2 #23).** Nothing in the project record or
+the passes said that a run targets the VTR flow: `flow` is a script path that is stored and never
+executed (2B PRJ-16), `arch` names a tech library or XML, and `write_blif --vtr` only chooses the
+output dialect, after elaboration. The setting that changes how Verilog is *read* is therefore an
+option of `read_verilog`, beside `--nolatches`, which the VTR flow's scripts set: the Phase 2
+scripts of `tools/opt-check/sp-splice` (Parmys's script in two halves), `elab-equiv --vtr-compat`
+(and `elab-sweep --equiv --vtr-compat`, which the micro sweep uses), and the odin3 legs of
+`tools/vtr-qor` (`read_verilog --nolatches --vtr-compat F; proc; ...; write_blif --vtr`). A
+`.o3proj` that names a `flow` script puts the option on that script's `read_verilog`. The ABI
+`odin3_elab_options` is unchanged (its `reserved` words stay zero): `odin3_ast_elaborate` has no
+VTR setting. The option changes one behavior, EL-40's non-constant initial value.
 
 ### 2.3 Failure, lifetime and atomicity (EL-2, continued)
 
@@ -562,7 +589,7 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | Kind | In the elaborated form |
 |---|---|
 | `UNIT` | exactly one; name = the top specialization's name; tail = `MODULE`s, the top first, then every other specialization in the order a breadth-first walk of instances (in source order) first reaches it |
-| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept (a specialization of a `read_verilog --lib` unit also carries the synthesized value-less `ATTR`s `odin3_lib` and, when its read had the flag, `odin3_lib_nolatches` / `odin3_lib_nomem2reg`: stage 2 uses them for that module instead of the run's options, v4.29, §3.1a); ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), then the **carriers** (v4.19: one more such `MODULE` per other parameter set an instance uses, named as a module's specialization, its `ATTR` `blackbox` valued with the definition's name as a `STRING`, its ports and `PARAM_DECL` values those of the set; none when the definition's name is a registered cell type), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from the definition's (EL-11; the carriers give it its per-set widths), never an IR module |
+| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept (a specialization of a `read_verilog --lib` unit also carries the synthesized value-less `ATTR`s `odin3_lib` and, when its read had the flag, `odin3_lib_nolatches` / `odin3_lib_nomem2reg` / `odin3_lib_vtr_compat`: stage 2 uses them for that module instead of the run's options, v4.29, §3.1a); ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), then the **carriers** (v4.19: one more such `MODULE` per other parameter set an instance uses, named as a module's specialization, its `ATTR` `blackbox` valued with the definition's name as a `STRING`, its ports and `PARAM_DECL` values those of the set; none when the definition's name is a registered cell type), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from the definition's (EL-11; the carriers give it its per-set widths), never an IR module |
 | `PORT_DECL` | only in the port LIST, `IN_HEADER` set, exactly one `DECLARATOR`, in port order; direction sub; `DT` = `reg`, `integer` or none; `NET` field = 1 + the net kind for a net port (never 0: an untyped port is `wire`, EL-24); `SIGNED`; `RANGE` with `NUMBER` bounds or absent (scalar); merged from the non-ANSI declarations (EL-24): the `DECLARATOR`'s `E?` is the value of the port's own declaration or of the merged `wire w = e` / `reg q = v` (v4.15: a net port's `E?` is its net declaration assignment, which the binder queues as `CONTINUOUS` and stage 2 drives the port's net with; a `reg`/`integer` port's is its initial value, as for an ANSI `output reg q = 1'b1`; a value on both declarations is an error), and the `PORT_DECL`'s attributes are those of both declarations (the later declaration wins a name both give) |
 | `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type), except on a black-box `MODULE`, whose `PARAM_DECL`s are bare: no `RANGE`, `SIGNED` or `DT`, the value's `NUMBER` carrying the width and sign (v4.9) |
 | `NET_DECL` | sub ∈ `wire tri wand wor triand trior uwire supply0 supply1`; no `STRENGTH`, no `DELAY`, no `VECTORED`/`SCALARED`; `RANGE`/unpacked `RANGE`s with `NUMBER` bounds; a declarator's `E?` is a net declaration assignment (N7) |
@@ -760,10 +787,10 @@ black boxes): a library unit has a body and is fully elaborated where it is inst
   resolves through its own `-v`/`-y` library files are not, and are preprocessed again under the
   later read's macros. Pass such files to `--lib` directly when their `` `ifdef ``s matter.
 - **Per-unit flags.** The flags of the *supplying* read replace, never add to, the design read's:
-  a module defined by a `--lib` read elaborates under that read's `--nolatches` and `--nomem2reg`
+  a module defined by a `--lib` read elaborates under that read's `--nolatches`, `--nomem2reg` and `--vtr-compat`
   whatever the reading design says, and the design read's flags do not reach it. Stage 1 writes the
   elaborated `MODULE` of such a unit with the value-less attributes `odin3_lib` (the marker) and
-  `odin3_lib_nolatches` / `odin3_lib_nomem2reg` when set; stage 2 (`odin3_elab2_enter`) reads them
+  `odin3_lib_nolatches` / `odin3_lib_nomem2reg` / `odin3_lib_vtr_compat` when set; stage 2 (`odin3_elab2_enter`) reads them
   and uses them for that module in place of the run's options. `--auto-blackbox` is a design-read
   option and stays the run's. The attributes are not copied to the IR.
 - **Unused units.** A library unit nothing instantiates is dropped without a message (the "not
@@ -2131,6 +2158,25 @@ order:
   - a net driven by anything else (a continuous assignment, an instance, an input port) → the
     value is ignored with "initial value of 'x' is ignored: 'x' is driven by a continuous
     assignment" (or `an instance`, `an input port`).
+- **A non-constant statement under `--vtr-compat`** (Peter 2026-10-13; §17 #85). Yosys 0.55 reads
+  an `initial` block as a process without a sync rule, so `initial y = in;` leaves `connect \y
+  \in` (verified on the 0.55 of VTR; Parmys writes `.names in y`), and a variable that an `always`
+  block also assigns is its error `Failed to get a constant init value for \y: \in`. With the
+  option, a statement that the interpreter finds not constant, that is a `=` or `<=` assignment
+  (an optional delay is ignored, as Yosys ignores it) to a variable, or to a constant bit or part
+  select of one, and whose target bits no `always` block assigns and nothing else drives, is the
+  continuous assignment `assign x = e;` (made through EL-28's assignment, so its width rules and
+  net merges are those), with the warning "initial value of 'x' is not constant: treated as a
+  continuous assign (VTR/Parmys compatibility)" at the statement. Any bit of the target that an
+  `always` block assigns, or that a continuous assignment, an instance, a gate or an input port
+  drives, makes the statement keep the ignore, with "initial value of 'x' is not constant and is
+  ignored: 'x' is also assigned in an always block (VTR/Parmys compatibility does not apply)" (or
+  `driven by a continuous assignment`, `an instance`, `a gate`, `an input port`): Yosys stops
+  there, Odin III warns and goes on. Other statements (an `if`, a loop, a concatenation or
+  memory-word target, a variable select) and variable initialisers (`reg r = in;`) keep the
+  ignore with D2's warning. The statements are taken in source order, so `y = a; y = 1;` (value
+  first not constant, then constant) is the assignment, and the constant is then reported ignored
+  ("driven by a continuous assignment"); Yosys keeps the last. Without the option, nothing changes.
 - `$display`, `$finish` and friends in `initial` were removed with S3's warning.
 
 ### 8.9 Per-bit assignment rules (EL-41)
@@ -2296,7 +2342,11 @@ specialized twice — warns once, keyed by its parsed node):
 | D3 | the first tri-state driver of the net | `tri-state drivers on internal net 'data' converted to logic (no driver enabled: x; several enabled: undefined)` (accepted: §6.7; once per net) |
 | T9 | the later assignment | `'r' is assigned with both '=' and '<=' (also at f.v:L:C)`, or `... on one control path (also at f.v:L:C); simulation and synthesis may differ` (accepted: §8.9) |
 
-Other warnings: D1's two (EL-36), at the attribute; D2's two (EL-40); D5/M12 (EL-24); M10 `'x' is implicitly
+Other warnings: D1's two (EL-36), at the attribute; D2's two (EL-40) and, under `--vtr-compat`, its
+two more (`initial value of 'x' is not constant: treated as a continuous assign (VTR/Parmys
+compatibility)`; `initial value of 'x' is not constant and is ignored: 'x' is <also assigned in an
+always block | driven by a continuous assignment | ...> (VTR/Parmys compatibility does not apply)`,
+at the statement, once per statement; §8.8, §17 #85); D5/M12 (EL-24); M10 `'x' is implicitly
 declared`; T3 (EL-34); E9's two (EL-30: `'===' is treated as '==' (synthesis has no x or z)`,
 `'===' compares against x/z bits; they match any value`); E12's `unsized constant in a
 concatenation is taken as N bits` (EL-13); `'a' and 'b' are connected only to each other and are
@@ -2409,7 +2459,7 @@ allocation (`odin3_util_set_alloc_fail_after`) and assert the status, no leak an
 | `src/frontends/elab/cval.c`, `cval_arith.c`, `ceval.c`, `ceval_interp.c`, `ctype.c` | values, operators, expression evaluation, the interpreter, typing (EL-12–EL-18) |
 | `src/frontends/elab/bind.c` | the binder (EL-5) |
 | `src/frontends/elab/elab2.c`, `elab2_wires.c`, `elab2_inst.c`, `elab2_assign.c`, `elab2_expr.c`, `elab2_select.c`, `elab2_mem.c`, `elab2_claim.c`, `elab2_wired.c`, `elab2_prescan.c`, `elab2_warn.c`, `elab2_tri.c` | stage 2 module emission (EL-23–EL-32) |
-| `src/frontends/elab/pg.c`, `pg_case.c`, `pg_loop.c`, `pg_call.c`, `pg_init.c` | the process generator and initial values (EL-35–EL-40) |
+| `src/frontends/elab/pg.c`, `pg_case.c`, `pg_loop.c`, `pg_call.c`, `pg_init.c`, `pg_init_vtr.c` | the process generator and initial values (EL-35–EL-40) |
 | `src/ir/cells/proc.c`, `src/ir/proc.[ch]` (body types, `verify`, body text), `src/ir/value.[ch]` (`ODIN3_VAL_PROC`), `src/ir/node.c` (the process counter), `src/passes/manager.[ch]` (the `processes` flag) | IR change B |
 | `src/ir/cells/arith.c`, `logic.c`, `reduce.c`, `shift.c`, `builtin.c` | IR change A (nine cells) |
 | `src/ir/module.[ch]` | IR change C |
@@ -2927,6 +2977,8 @@ and reported, never relaxed (2A's rule).
 | 82 | a variable-offset select write (`y[{1'b1,s} +: 2] = a;`, the case method of EL-32) followed in the same block by a `case`/`casez`/`casex` with two arms that write the same values (two empty `?` arms and a default; two arms with equal bodies) is emitted as written: the write's temporaries feed both arms' case temporaries, so one mux output feeds two slices of one `$pmux` | Yosys 0.55 `opt` (`opt_muxtree`) loses the write when `proc` is followed by `opt`: the first slice's select knowledge is written into the data pins of the mux the two slices share (the same bug as 2F's OP-13, §17 row 20 of the 2F spec: `n = $pmux(...)` feeding `$pmux(B = {n n}, S = {a1 !a1})` gives `y = 0` after `opt_muxtree` and `y = 2'b10` before; a hand-written `case (s)` source shows it on Yosys's own front end; Yosys 0.69 fixes it) | — | not a 2D miscompile (Task 28's seed 23 report said so; the root-cause check: `eval` of the RTLIL before opt, 2E `proc` + 2F `opt` and Yosys 0.69 agree, 0.55 does not). `elab-equiv` against 0.55 says NOT equivalent for the five sources of `tests/verilog/oracle-bug/`; `elab_oracle_muxtree_bug` pins both verdicts (0.69 equivalent, 0.55 not) and goes stale when 0.55 is fixed. 2D keeps Yosys's per-case temporaries (EL-36) rather than emit a different shape for one oracle's bug |
 | 83 | `mem[i][p:q] <= d;` and `mem[i][b +: w] <= d;` (a bit or part select of a word of a register array whose index is a variable, in a process, including a `for` loop variable) is the located error `non-constant index into 'mem' is not supported here` | accepted (verified on 0.55: `mem[i0][2:0] <= a[2:0]` in a `for` loop) | — | the whole-word case of EL-27 writes every word's bits through one case over the words; a sub-word write needs a per-word bit range in the lvalue and in `pg_regs_apply` (reads and writes, blocking and non-blocking). Fail-closed and rare (Task 28 seed 134); the fuzz generator avoids it (`elab_profile.mem_index`). |
 | 84 | a non-ANSI port merged with a `reg` or net that has unpacked dimensions (`output q; reg [3:0] q [0:1];`, either order) is the located error `'q' is a port and its declaration has unpacked dimensions; a port cannot be an array` at the declarator with the dimensions (PR 2D-7b review M10; it was dropped in silence) | Yosys 0.55 accepts it: the one-bit port `q` stays undriven and the array `q` is a separate memory (or registers `q[0]`, `q[1]`), so a design that writes `q[0]` does not drive the port | keeping the port and the array apart as Yosys does: nothing in a real design relies on it, and it needs a second symbol of one name in stage 2 | `test_port_with_unpacked_dimensions` (both orders; the legal merge stays clean); Yosys 0.55 probe |
+
+| 85 | with `read_verilog --vtr-compat` (the VTR flow's setting), a non-constant `initial x = e;` (or `<=`, after an optional delay; a variable or a constant select of one) is `assign x = e;` when no `always` block assigns the bits and nothing else drives them, with the warning "initial value of 'x' is not constant: treated as a continuous assign (VTR/Parmys compatibility)"; otherwise, and without the option, the statement is ignored (x) with a warning (Peter 2026-10-13, PHASE2 #23) | Yosys 0.55 and Parmys read it as the combinational assignment (`connect \x \e`); a variable also assigned in an `always` block is Yosys's error `Failed to get a constant init value` | `initial` runs once at time 0: x holds `e` as it was then, and keeps it | the exit bar is Parmys, so the VTR flow follows it; the general case stays IEEE-sound (a value that changes with the input is not an initial value) |
 
 ## 18. Implementation split (EL-51)
 

@@ -82,6 +82,14 @@ static void test_vtr_single_statement_forms(void) {
     TEST_ASSERT_TRUE(same_net("y", 1, "a", 0));
 }
 
+/* A delay in front of the statement is ignored, as Yosys ignores it. */
+static void test_vtr_delayed_statement(void) {
+    read_ok_with(k_vtr, "module t(input a, output reg y);\n  initial #5 y = a;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_warnings_with("treated as a continuous assign"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_warnings_with("delay is ignored"));
+    TEST_ASSERT_TRUE(same_net("y", 0, "a", 0));
+}
+
 /* An expression, not only a wire. */
 static void test_vtr_expression(void) {
     read_ok_with(k_vtr, "module t(input a, b, output reg y);\n  initial y = a & b;\nendmodule\n");
@@ -152,6 +160,7 @@ int main(void) {
     RUN_TEST(test_vtr_micro_shape);
     RUN_TEST(test_vtr_single_statement_forms);
     RUN_TEST(test_vtr_expression);
+    RUN_TEST(test_vtr_delayed_statement);
     RUN_TEST(test_plain_ignores);
     RUN_TEST(test_vtr_always_driven_is_ignored);
     RUN_TEST(test_vtr_partly_always_driven_is_ignored);

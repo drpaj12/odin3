@@ -1878,7 +1878,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
                     --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
-                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --vtr-compat
                     --lib ${PROJECT_SOURCE_DIR}/tests/elab/lib/vtr_primitives.v
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_equiv_expect_fail.txt

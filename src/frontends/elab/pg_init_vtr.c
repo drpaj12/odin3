@@ -80,17 +80,29 @@ static const char *driver_text(uint8_t kind) {
     }
 }
 
+/* The variable a statement of an initial assigns when it is a plain blocking or non-blocking
+ * assignment to one, possibly after a delay (which Yosys ignores too): *lhs and *rhs are its
+ * nodes; NULL otherwise. */
+static const odin3_symbol *candidate(const odin3_elab2 *e2, odin3_ast_id stmt, odin3_ast_id *lhs,
+                                     odin3_ast_id *rhs, odin3_sym_id *sym) {
+    odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, stmt);
+    if (kind != ODIN3_AST_BLOCKING_ASSIGN && kind != ODIN3_AST_NONBLOCKING_ASSIGN) {
+        return NULL;
+    }
+    odin3_ast_id timing = odin3_ast_child(e2->elab, stmt, 1);
+    *lhs = odin3_ast_child(e2->elab, stmt, 0);
+    *rhs = odin3_ast_child(e2->elab, stmt, 2);
+    bool plain = timing.v == 0 || odin3_ast_kind_of(e2->elab, timing) == ODIN3_AST_DELAY;
+    return plain && rhs->v != 0 ? target_symbol(e2, *lhs, sym) : NULL;
+}
+
 odin3_status odin3_elab2_initial_assign(odin3_elab2 *e2, odin3_ast_id stmt, bool *handled) {
     *handled = false;
-    odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, stmt);
-    bool assign = kind == ODIN3_AST_BLOCKING_ASSIGN || kind == ODIN3_AST_NONBLOCKING_ASSIGN;
-    odin3_ast_id lhs = assign ? odin3_ast_child(e2->elab, stmt, 0) : (odin3_ast_id){0};
-    odin3_ast_id rhs = assign ? odin3_ast_child(e2->elab, stmt, 2) : (odin3_ast_id){0};
+    odin3_ast_id lhs = {0};
+    odin3_ast_id rhs = {0};
     odin3_sym_id sym = {0};
-    const odin3_symbol *rec = assign && rhs.v != 0 && odin3_ast_child(e2->elab, stmt, 1).v == 0
-                                  ? target_symbol(e2, lhs, &sym)
-                                  : NULL;
-    if (!e2->mod_vtr_compat || rec == NULL) {
+    const odin3_symbol *rec = e2->mod_vtr_compat ? candidate(e2, stmt, &lhs, &rhs, &sym) : NULL;
+    if (rec == NULL) {
         return ODIN3_OK;
     }
     odin3_elab2_lvalue lv;
