@@ -466,6 +466,21 @@ static void test_flat_prov(void) {
     TEST_ASSERT_EQUAL_UINT32(inst_src.v, rr->parents.ids[1].v);
 }
 
+/* A specialization name holding a '/' (`sub$F="dir/x.hex"`, a string parameter) must not cut the
+ * scope path at the wrong place (review M1). */
+static void test_flat_prov_slash_in_module_name(void) {
+    const char *name = "sub$F=\"dir/x.hex\"";
+    odin3_prov_id gate_src = ff_source(&fix, "sub.v", 3, "sub$F=\"dir/x.hex\"/g[0]");
+    odin3_prov_id inst_src = ff_source(&fix, "top.v", 7, "top");
+    odin3_module *sub = make_sub(name, gate_src);
+    odin3_module *top = make_top();
+    fix.prov = inst_src;
+    (void)inst_xz(top, sub, "u1");
+    flatten_ok(top);
+    odin3_prov_id rec = odin3_node_prov(top, odin3_module_find_node(top, str("u1.n1")));
+    TEST_ASSERT_EQUAL_STRING("top/u1/g[0]", hier_text(rec));
+}
+
 static void test_flat_prov_distinct_instances(void) {
     odin3_prov_id gate_src = ff_source(&fix, "sub.v", 3, "sub");
     odin3_prov_id inst_src = ff_source(&fix, "top.v", 7, "top");
@@ -1029,6 +1044,7 @@ int main(void) {
     RUN_TEST(test_flat_unnamed_nested);
     RUN_TEST(test_flat_prov);
     RUN_TEST(test_flat_prov_distinct_instances);
+    RUN_TEST(test_flat_prov_slash_in_module_name);
     RUN_TEST(test_flat_prov_nested);
     RUN_TEST(test_flat_determinism);
     RUN_TEST(test_flat_oom);

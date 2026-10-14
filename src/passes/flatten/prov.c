@@ -26,8 +26,24 @@ odin3_status odin3_flatten_path(odin3_flatten_ctx *fc, const flat_work *item) {
     return st == ODIN3_OK ? odin3_flatten_intern_scratch(fc, &fc->path_str) : st;
 }
 
-/* The derived hier string for an original hier: path + "/" + the original minus its first
- * component (nothing appended when that is empty). */
+/* The part of an original hier to append to the instance path: everything after the child's module
+ * name (which may itself hold a '/', e.g. a string parameter `sub$F="dir/x.hex"`), else after its
+ * first component. Empty when nothing follows. */
+static const char *hier_scope(const odin3_flatten_ctx *fc, const char *orig) {
+    const char *module = odin3_strtab_get(odin3_design_strtab(fc->design),
+                                          odin3_module_name(fc->child));
+    size_t len = strlen(module);
+    const char *slash = NULL;
+    if (len > 0 && strncmp(orig, module, len) == 0 && (orig[len] == '/' || orig[len] == '\0')) {
+        slash = orig + len;
+    } else {
+        slash = strchr(orig, '/');
+    }
+    return slash != NULL && slash[0] == '/' && slash[1] != '\0' ? slash : "";
+}
+
+/* The derived hier string for an original hier: path + the original minus the child's module name
+ * (nothing appended when that is empty). */
 static odin3_status hier_for(odin3_flatten_ctx *fc, uint32_t orig_hier, uint32_t *out) {
     if (orig_hier == fc->cache_from && fc->cache_to != 0) {
         *out = fc->cache_to;
@@ -37,10 +53,7 @@ static odin3_status hier_for(odin3_flatten_ctx *fc, uint32_t orig_hier, uint32_t
     odin3_strbuf_clear(&fc->scratch);
     odin3_status st = odin3_strbuf_appendf(&fc->scratch, "%s", odin3_strtab_get(tab, fc->path_str));
     const char *orig = orig_hier != 0 ? odin3_strtab_get(tab, orig_hier) : "";
-    const char *slash = strchr(orig, '/');
-    if (st == ODIN3_OK && slash != NULL && slash[1] != '\0') {
-        st = odin3_strbuf_appendf(&fc->scratch, "%s", slash);
-    }
+    st = st == ODIN3_OK ? odin3_strbuf_appendf(&fc->scratch, "%s", hier_scope(fc, orig)) : st;
     st = st == ODIN3_OK ? odin3_flatten_intern_scratch(fc, out) : st;
     if (st == ODIN3_OK) {
         fc->cache_from = orig_hier;
