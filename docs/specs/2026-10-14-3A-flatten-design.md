@@ -1,6 +1,6 @@
 # 3A — `flatten`: design
 
-Status: v1 (2026-10-14), for Peter's approval (CLAUDE.md rule 2). Phase 3, sub-project 3A (PHASE3
+Status: v1 (2026-10-14), **approved by Peter 2026-10-14** ("3A: all recommended"; PHASE3 #30). Phase 3, sub-project 3A (PHASE3
 sub-projects table; light review; Opus `high`). Written by the lane-2 agent. Spec: `docs/DESIGN.md`
 §5.1 ("hierarchy kept until an explicit `flatten` pass"), §6 steps 2 and 9, §12 (Phase 3 exit), §13
 #6 (name style). Inputs: `docs/IR.md` IR-2, IR-3, IR-6, IR-7, IR-7b, IR-10, IR-12, IR-13, IR-15,
@@ -692,6 +692,8 @@ are explicit. No `malloc` of IR objects: scratch uses `util/vec`, `u64map`, `str
 - 3E spec/plan: E10's text is unchanged; a cross-reference to 3A is added to §13.
 
 ## 18. Decisions for Peter
+
+**Ruled 2026-10-14 (Peter: "3A: all recommended"):** 1 yes, 2 leave unused modules, 3 yes, 4 yes.
 
 Each has a recommendation; 1–3 change a rule or a document Peter owns, 4 confirms a policy.
 
