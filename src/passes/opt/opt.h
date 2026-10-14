@@ -265,6 +265,7 @@ odin3_status odin3_opt_dff_run(odin3_pass_ctx *ctx, odin3_design *design,
 typedef struct odin3_opt_args {
     odin3_opt_opts opts;
     bool stats, full_rescan; /* --opt-stats, --opt-full-rescan */
+    bool simcheck;           /* --opt-simcheck (Debug builds; Task 17) */
 } odin3_opt_args;
 
 /*
@@ -294,6 +295,7 @@ typedef struct odin3_opt_call_req {
     odin3_opt_sub sub;
     const odin3_opt_opts *opts;
     odin3_opt_counts *counts;
+    bool simcheck; /* run the simulation check around the call (Debug builds only) */
 } odin3_opt_call_req;
 
 /*
@@ -321,6 +323,20 @@ odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed);
  */
 odin3_status odin3_opt_run(odin3_pass_ctx *ctx, odin3_design *design, const odin3_opt_args *args,
                            odin3_opt_counts *counts);
+
+/*
+ * --opt-simcheck (Task 17; simcheck.c has the predicate and the rest of the contract). before
+ * records the outputs of every simulable module on 64 cycles x seeds 1, 2, 3 (*out is owned by the
+ * caller: odin3_opt_simcheck_free); after repeats the runs and compares: a module whose outputs
+ * differ logs ERROR "opt: <sub>: simulation differs on module 'm' at cycle K" and gives
+ * ODIN3_ERR_CHECK. A module that became unsimulable is skipped. INVALID_ARG (logged) for a NULL
+ * argument; NO_MEMORY. free accepts NULL.
+ */
+typedef struct odin3_opt_simcheck odin3_opt_simcheck;
+odin3_status odin3_opt_simcheck_before(odin3_design *design, odin3_opt_simcheck **out);
+odin3_status odin3_opt_simcheck_after(odin3_design *design, const odin3_opt_simcheck *before,
+                                      const char *sub);
+void odin3_opt_simcheck_free(odin3_opt_simcheck *check);
 
 /* odin3_pass_set_opt_snapshot is public (odin3.h); register.c defines it. */
 

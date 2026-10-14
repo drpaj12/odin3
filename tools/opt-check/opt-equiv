@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# opt-equiv: refinement after every opt sub-pass call (2F spec 20.2, plan Task 17). See opt_equiv.py.
+# Exit codes: 0 every pair refines, 1 a pair does not, 2 error or usage, 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here/../elab-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/opt_equiv.py" "$@"

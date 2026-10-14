@@ -1,0 +1,7 @@
+# expr/gate_or: $_OR_ of two zeros -> constant 0
+.model t
+.inputs a
+.outputs y
+.names zero
+.subckt $_OR_ A=zero B=zero Y=y
+.end

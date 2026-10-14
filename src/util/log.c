@@ -13,6 +13,7 @@ static odin3_log_sink g_sink = NULL;
 static void *g_user = NULL;
 static size_t g_counts[ODIN3_LOG_LEVEL_COUNT];
 static bool g_in_sink = false;
+static size_t g_mute = 0;
 
 static const char *const level_names[ODIN3_LOG_LEVEL_COUNT] = {"error", "warning", "info", "debug"};
 
@@ -64,8 +65,16 @@ static void deliver(odin3_log_level level, const char *msg) {
     g_in_sink = false;
 }
 
+void odin3_log_mute(bool on) {
+    if (on) {
+        g_mute++;
+    } else if (g_mute > 0) {
+        g_mute--;
+    }
+}
+
 void odin3_log(odin3_log_level level, const char *fmt, ...) {
-    if ((int)level < 0 || level >= ODIN3_LOG_LEVEL_COUNT) {
+    if ((int)level < 0 || level >= ODIN3_LOG_LEVEL_COUNT || g_mute > 0) {
         return;
     }
     g_counts[level]++;

@@ -1,0 +1,168 @@
+# tests/opt/rules/rules.txt: the per-rule goldens of the opt sub-passes (2F spec 20.1; plan Task 16).
+#
+#   <sub>/<rule> <counter> <yosys id> [pending|dev=N]
+#
+# <sub>/<rule> names <rule>.v (or <rule>.blif for the bit gates) and its golden <rule>.il. <counter>
+# is an `--opt-stats` name (`const_and`, `opt_dff.d_eq_q`) or, for the passes without rule counters,
+# an INFO count (`merge.removed`, `muxtree.ports`, `reduce.changes`, `share.merged`, `clean.cells`,
+# `clean.wires`). <yosys id> is the `opt.opt_expr.*` cover point (Yosys 0.55 has cover points in
+# opt_expr only) or `log:<regex>` for a line of Yosys's log (run under `debug`). `dev=N` is spec 17
+# row N. Run: tools/opt-check/opt-rules --odin3 O [--yosys Y] tests/opt/rules/<sub>.
+#
+# The <yosys id> of several rows is shared (all merge rows `is identical to cell`, all muxtree rows
+# `dead port`, most reduce rows `New input vector`, all share rows `Found cells that share an
+# operand`), so a Yosys log line does not tell sibling rules apart and the Odin III counters of these
+# passes are INFO totals. What does separate them is the golden diff plus the refinement check
+# `opt-rules` runs on every row (tests/opt/rules/refine_skip.txt lists the documented skips). The
+# `action_<line>` cover ids are line numbers of Yosys 0.55's opt_expr.cc and break on any other build.
+#
+# Reachable only from RTLIL, not from Verilog or BLIF through `proc --noopt` plus at most a
+# `// prepass:` of opt_expr/opt_dff; the unit data cases of tests/unit/data/opt/ cover them against
+# Yosys 0.55 (the .expect files record the commands):
+#   expr:  gate_xor (xor_buffer fires first on every $_XOR_ with a constant), const.$eq and $ne
+#          (eqneq.isneq, .empty and .resize fire first), const.$shl $shr $sshr $shiftx (constshift
+#          fires first), tribuf_en1 and tribuf_en0 (no Verilog or BLIF construct makes $tribuf)
+#   muxtree: a dead $pmux port (Odin III's proc makes the muxes of the tests/unit cases)
+#   dff:   always_active_set, ad_eq_q, clr_set_to_arst
+
+expr/and_or_buffer and_or_buffer opt.opt_expr.and_or_buffer
+expr/bitwise_logic_one_const bitwise_logic_one_const opt.opt_expr.bitwise_logic_one_const
+expr/clkinv clkinv log:Inverting\sCLK\sof\s\$dff
+expr/const_and const_and opt.opt_expr.const_and
+expr/const_or const_or opt.opt_expr.const_or
+expr/const_xnor const_xnor opt.opt_expr.const_xnor
+expr/const_xor const_xor opt.opt_expr.const_xor
+expr/constshift constshift opt.opt_expr.constshift
+expr/div_shift div_shift opt.opt_expr.div_shift
+expr/divmod_zero divmod_zero opt.opt_expr.divmod_zero
+expr/eqneq.buffer eqneq.buffer opt.opt_expr.action_1274
+expr/eqneq.cmpzero eqneq.cmpzero opt.opt_expr.eqneq.cmpzero
+expr/eqneq.empty eqneq.empty opt.opt_expr.eqneq.empty
+expr/eqneq.isneq eqneq.isneq opt.opt_expr.eqneq.isneq
+expr/eqneq.isnot eqneq.isnot opt.opt_expr.eqneq.isnot
+expr/eqneq.resize eqneq.resize opt.opt_expr.eqneq.resize
+expr/eqneq.swapconst eqneq.swapconst opt.opt_expr.eqneq.swapconst
+expr/eqneq.undef eqneq.undef opt.opt_expr.action_1270
+expr/fine fine opt.opt_expr.fine
+expr/fine.A fine.A opt.opt_expr.fine.A
+expr/fine.B fine.B opt.opt_expr.fine.B
+expr/fine.cmp fine.cmp log:implementing\sunsigned\sX<0
+expr/fine.eqne fine.eqne log:Replacing\scell\s.*with\sconstant\sdriver\s1'0
+expr/fine.group fine.group opt.opt_expr.fine.group
+expr/fine.neutral_A fine.neutral_A opt.opt_expr.fine.neutral_A
+expr/fine.neutral_B fine.neutral_B opt.opt_expr.fine.neutral_B
+expr/fine.reduce_and fine.$reduce_and opt.opt_expr.fine.$reduce_and
+expr/fold_add const.$add opt.opt_expr.const.$add
+expr/fold_and const.$and opt.opt_expr.const.$and
+expr/fold_div const.$div opt.opt_expr.const.$div
+expr/fold_ge const.$ge opt.opt_expr.const.$ge
+expr/fold_gt const.$gt opt.opt_expr.const.$gt
+expr/fold_le const.$le opt.opt_expr.const.$le
+expr/fold_logic_and const.$logic_and opt.opt_expr.const.$logic_and
+expr/fold_logic_not const.$logic_not opt.opt_expr.const.$logic_not
+expr/fold_logic_or const.$logic_or opt.opt_expr.const.$logic_or
+expr/fold_lt const.$lt opt.opt_expr.const.$lt
+expr/fold_mod const.$mod opt.opt_expr.const.$mod
+expr/fold_mul const.$mul opt.opt_expr.const.$mul
+expr/fold_mux const.$mux opt.opt_expr.const.$mux
+expr/fold_neg const.$neg opt.opt_expr.const.$neg
+expr/fold_not const.$not opt.opt_expr.const.$not
+expr/fold_or const.$or opt.opt_expr.const.$or
+expr/fold_pmux const.$pmux opt.opt_expr.const.$pmux
+expr/fold_pow const.$pow opt.opt_expr.const.$pow
+expr/fold_reduce_and const.$reduce_and opt.opt_expr.const.$reduce_and
+expr/fold_reduce_bool const.$reduce_bool opt.opt_expr.const.$reduce_bool
+expr/fold_reduce_or const.$reduce_or opt.opt_expr.const.$reduce_or
+expr/fold_reduce_xnor const.$reduce_xnor opt.opt_expr.const.$reduce_xnor
+expr/fold_reduce_xor const.$reduce_xor opt.opt_expr.const.$reduce_xor
+expr/fold_sub const.$sub opt.opt_expr.const.$sub
+expr/fold_xnor const.$xnor opt.opt_expr.const.$xnor
+expr/fold_xor const.$xor opt.opt_expr.const.$xor
+expr/gate_and gate_and opt.opt_expr.action_1115
+expr/gate_mux gate_mux opt.opt_expr.action_1170
+expr/gate_not gate_not opt.opt_expr.action_1103
+expr/gate_or gate_or opt.opt_expr.action_1134
+expr/identwrt.a identwrt.a opt.opt_expr.identwrt.a dev=2
+expr/identwrt.b identwrt.b opt.opt_expr.identwrt.b dev=2
+expr/invert.double invert.double opt.opt_expr.invert.double
+expr/invert.muxsel invert.muxsel opt.opt_expr.invert.muxsel
+expr/mod_mask mod_mask opt.opt_expr.mod_mask
+expr/mul_low_zeros mul_low_zeros opt.opt_expr.mul_low_zeros
+expr/mul_shift.swapped mul_shift.swapped opt.opt_expr.mul_shift.swapped
+expr/mul_shift.unswapped mul_shift.unswapped opt.opt_expr.mul_shift.unswapped
+expr/mul_shift.zero mul_shift.zero opt.opt_expr.mul_shift.zero
+expr/mux_and mux_and opt.opt_expr.mux_and
+expr/mux_bool mux_bool opt.opt_expr.mux_bool
+expr/mux_const_sel mux_const_sel opt.opt_expr.action_1709
+expr/mux_empty mux_empty opt.opt_expr.mux_empty
+expr/mux_invert mux_invert opt.opt_expr.mux_invert
+expr/mux_or mux_or opt.opt_expr.mux_or
+expr/mux_reduce mux_reduce opt.opt_expr.mux_reduce dev=24
+expr/mux_same mux_same opt.opt_expr.action_1711
+expr/mux_sel01 mux_sel01 opt.opt_expr.mux_sel01
+expr/mux_to_inv mux_to_inv opt.opt_expr.mux_to_inv
+expr/mux_undef mux_undef opt.opt_expr.mux_undef
+expr/pow_shift pow_shift log:Replacing\spow\scell
+expr/reduce_xnor_not reduce_xnor_not opt.opt_expr.reduce_xnor_not
+expr/trim trim opt.opt_expr.trim
+expr/unary_buffer unary_buffer opt.opt_expr.unary_buffer
+expr/undriven undriven log:Setting\sundriven\ssignal
+expr/xbit xbit opt.opt_expr.xbit
+expr/xnor_buffer xnor_buffer opt.opt_expr.xnor_buffer
+expr/xor_buffer xor_buffer opt.opt_expr.xor_buffer
+merge/cascade merge.removed log:is\sidentical\sto\scell
+merge/commutative merge.removed log:is\sidentical\sto\scell
+merge/dff merge.removed log:is\sidentical\sto\scell
+merge/dff_init merge.removed log:is\sidentical\sto\scell
+merge/identical merge.removed log:is\sidentical\sto\scell
+merge/mux merge.removed log:is\sidentical\sto\scell
+merge/nomux merge.removed log:is\sidentical\sto\scell
+merge/pmux_pairs merge.removed log:is\sidentical\sto\scell
+merge/reduce_multiset merge.removed log:is\sidentical\sto\scell
+merge/reduce_set merge.removed log:is\sidentical\sto\scell
+muxtree/chain muxtree.ports log:dead\sport\s
+muxtree/const_s0 muxtree.ports log:dead\sport\s
+muxtree/const_s1 muxtree.ports log:dead\sport\s
+muxtree/known_active muxtree.ports log:dead\sport\s
+muxtree/known_inactive muxtree.ports log:dead\sport\s
+reduce/and_const0 reduce.changes log:New\sinput\svector
+reduce/and_dup reduce.changes log:New\sinput\svector
+reduce/and_inline reduce.changes log:New\sinput\svector
+reduce/and_neutral reduce.changes log:New\sinput\svector
+reduce/mux_bits reduce.changes log:Consolidated\sidentical\sinput\sbits
+reduce/or_const1 reduce.changes log:New\sinput\svector
+reduce/or_dup reduce.changes log:New\sinput\svector
+reduce/or_inline reduce.changes log:New\sinput\svector
+reduce/or_neutral reduce.changes log:New\sinput\svector
+reduce/pmux_equal_slices reduce.changes log:New\sctrl\svector
+share/add_first share.merged log:Found\scells\sthat\sshare\san\soperand
+share/add_second share.merged log:Found\scells\sthat\sshare\san\soperand
+share/and share.merged log:Found\scells\sthat\sshare\san\soperand
+share/eq share.merged log:Found\scells\sthat\sshare\san\soperand
+share/pmux share.merged log:Found\scells\sthat\sshare\san\soperand
+share/shift share.merged log:Found\scells\sthat\sshare\san\soperand
+dff/add_en opt_dff.add_en log:Adding\sEN\ssignal
+dff/add_srst opt_dff.add_srst log:Adding\sSRST\ssignal
+dff/aload_to_arst opt_dff.aload_to_arst log:Changing\sconst-value\sasync\sload
+dff/always_active_aload opt_dff.always_active_aload log:Handling\salways-active\sasync\sload
+dff/always_active_arst opt_dff.always_active_arst log:Handling\salways-active\sARST
+dff/always_active_clr opt_dff.always_active_clr log:Handling\salways-active\sCLR
+dff/always_active_en opt_dff.always_active_en log:Removing\salways-active\sEN
+dff/always_active_srst opt_dff.always_active_srst log:Handling\salways-active\sSRST
+dff/const_bit_0 opt_dff.const_bit_0 log:Setting\sconstant\s0-bit
+dff/const_bit_1 opt_dff.const_bit_1 log:Setting\sconstant\s1-bit
+dff/const_bit_x opt_dff.const_bit_x log:Setting\sconstant\s1-bit
+dff/const_bit_z opt_dff.const_bit_z log:Setting\sconstant\s1-bit
+dff/const_clk opt_dff.const_clk log:Handling\sconst\sCLK
+dff/d_eq_q opt_dff.d_eq_q log:Handling\sD\s=\sQ
+dff/never_active_aload opt_dff.never_active_aload log:Removing\snever-active\sasync\sload
+dff/never_active_arst opt_dff.never_active_arst log:Removing\snever-active\sARST
+dff/never_active_clr opt_dff.never_active_clr log:Removing\snever-active\sCLR
+dff/never_active_en opt_dff.never_active_en log:Handling\snever-active\sEN
+dff/never_active_set opt_dff.never_active_set log:Removing\snever-active\sSET
+dff/never_active_srst opt_dff.never_active_srst log:Removing\snever-active\sSRST
+clean/dead_chain clean.cells log:removing\sunused\s`\$not'\scell
+clean/dead_ff clean.cells log:removing\sunused\s`\$dff'\scell
+clean/purge_wire clean.wires log:removing\sunused\snon-port\swire
+clean/unused_cell clean.cells log:removing\sunused\s`\$and'\scell
+clean/unused_wire clean.wires log:removing\sunused\snon-port\swire

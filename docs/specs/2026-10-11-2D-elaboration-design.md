@@ -442,7 +442,7 @@ of cell type" error, and an instance resolves to the unit or to the hard cell by
 #80 added (the structural gap to the Parmys goldens). (5) `elab-equiv` and `elab-sweep` take `--lib FILE`;
 `tests/elab/lib/vtr_primitives.v` is a copy of Parmys's file (trailing blanks stripped) for the micro sweeps.
 
-v4.30 (2026-10-13; Peter's ruling on `initial x = <non-constant>`, PHASE2 #23). (1) EL-3 gains
+v4.30 (2026-10-13; Peter's ruling on `initial x = <non-constant>`, PHASE2 #24). (1) EL-3 gains
 `read_verilog --vtr-compat` (`odin3_elab_opts.vtr_compat`; a `--lib` read's units carry it as the
 `MODULE` attribute `odin3_lib_vtr_compat`, `ODIN3_UNIT_VTR_COMPAT`). (2) EL-40: with the option, a
 statement of an `initial` that is not constant and is a plain `=` or `<=` assignment to a variable
@@ -546,7 +546,7 @@ fields plus `uint8_t reserved_pad` (the byte after the three flags, no hidden pa
 The 2H exit harness passes `--nolatches` because Parmys does (`read_verilog -sv -nolatches`);
 see Decisions for Peter, item 4.
 
-**The VTR setting (`--vtr-compat`; Peter 2026-10-13, PHASE2 #23).** Nothing in the project record or
+**The VTR setting (`--vtr-compat`; Peter 2026-10-13, PHASE2 #24).** Nothing in the project record or
 the passes said that a run targets the VTR flow: `flow` is a script path that is stored and never
 executed (2B PRJ-16), `arch` names a tech library or XML, and `write_blif --vtr` only chooses the
 output dialect, after elaboration. The setting that changes how Verilog is *read* is therefore an
@@ -1898,7 +1898,7 @@ layout changes. `hierarchy` in the `OK` list is the 1D built-in (`src/passes/bui
 **ABI.** The `$proc` node is visible through the existing node accessors (type `$proc`, ports
 `I`/`O`, `I_WIDTH`/`O_WIDTH`); `odin3_node_get_param_text` prints `BODY` as RTLIL `process` text
 (EL-48), so the Python walk and plugins can see it; structured body accessors are deferred
-(2E §23).
+(2E §24 item 8).
 
 **Alternatives considered.** (a) v1's process objects over pinless nets (rejected by the review,
 F1: a second connectivity mechanism, broken driver queries, O(process) merges, `opt` unsafe);
@@ -2978,7 +2978,7 @@ and reported, never relaxed (2A's rule).
 | 83 | `mem[i][p:q] <= d;` and `mem[i][b +: w] <= d;` (a bit or part select of a word of a register array whose index is a variable, in a process, including a `for` loop variable) is the located error `non-constant index into 'mem' is not supported here` | accepted (verified on 0.55: `mem[i0][2:0] <= a[2:0]` in a `for` loop) | — | the whole-word case of EL-27 writes every word's bits through one case over the words; a sub-word write needs a per-word bit range in the lvalue and in `pg_regs_apply` (reads and writes, blocking and non-blocking). Fail-closed and rare (Task 28 seed 134); the fuzz generator avoids it (`elab_profile.mem_index`). |
 | 84 | a non-ANSI port merged with a `reg` or net that has unpacked dimensions (`output q; reg [3:0] q [0:1];`, either order) is the located error `'q' is a port and its declaration has unpacked dimensions; a port cannot be an array` at the declarator with the dimensions (PR 2D-7b review M10; it was dropped in silence) | Yosys 0.55 accepts it: the one-bit port `q` stays undriven and the array `q` is a separate memory (or registers `q[0]`, `q[1]`), so a design that writes `q[0]` does not drive the port | keeping the port and the array apart as Yosys does: nothing in a real design relies on it, and it needs a second symbol of one name in stage 2 | `test_port_with_unpacked_dimensions` (both orders; the legal merge stays clean); Yosys 0.55 probe |
 
-| 85 | with `read_verilog --vtr-compat` (the VTR flow's setting), a non-constant `initial x = e;` (or `<=`, after an optional delay; a variable or a constant select of one) is `assign x = e;` when no `always` block assigns the bits and nothing else drives them, with the warning "initial value of 'x' is not constant: treated as a continuous assign (VTR/Parmys compatibility)"; otherwise, and without the option, the statement is ignored (x) with a warning (Peter 2026-10-13, PHASE2 #23) | Yosys 0.55 and Parmys read it as the combinational assignment (`connect \x \e`); a variable also assigned in an `always` block is Yosys's error `Failed to get a constant init value` | `initial` runs once at time 0: x holds `e` as it was then, and keeps it | the exit bar is Parmys, so the VTR flow follows it; the general case stays IEEE-sound (a value that changes with the input is not an initial value) |
+| 85 | with `read_verilog --vtr-compat` (the VTR flow's setting), a non-constant `initial x = e;` (or `<=`, after an optional delay; a variable or a constant select of one) is `assign x = e;` when no `always` block assigns the bits and nothing else drives them, with the warning "initial value of 'x' is not constant: treated as a continuous assign (VTR/Parmys compatibility)"; otherwise, and without the option, the statement is ignored (x) with a warning (Peter 2026-10-13, PHASE2 #24) | Yosys 0.55 and Parmys read it as the combinational assignment (`connect \x \e`); a variable also assigned in an `always` block is Yosys's error `Failed to get a constant init value` | `initial` runs once at time 0: x holds `e` as it was then, and keeps it | the exit bar is Parmys, so the VTR flow follows it; the general case stays IEEE-sound (a value that changes with the input is not an initial value) |
 
 ## 18. Implementation split (EL-51)
 

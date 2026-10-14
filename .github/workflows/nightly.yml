@@ -85,3 +85,25 @@ jobs:
   #     - run: tools/heavy-run tools/proc-check/proc-gen-diff --odin3 build/release/odin3 --yosys "$YOSYS_055" --yosys-069 "$YOSYS_069" --equiv-check tools/equiv-check/equiv-check --seeds 1..5000 --work "$RUNNER_TEMP/proc-gen-069"
   #     # The micro and VTR/Koios sweeps (VTR_ROOT set at configure time registers the _vtr ones).
   #     - run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^proc_(diff|bridge)_(micro|vtr)$'
+
+  # 2F spec 20.4 (plan Task 18): placeholders until the nightly has Yosys 0.55 (VTR's build), a
+  # cached VTR checkout and a Yosys 0.69. opt_gen_vs_yosys runs 200 seeds in CTest; nightly runs
+  # 5,000, and the same files again against Yosys 0.69 (a 0.55/0.69 disagreement is `oracle
+  # drift`, reported and never a failure).
+  # opt-evidence:
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: cmake --preset release && cmake --build --preset release -j4
+  #     # 5,000 seeds of the --opt generator through opt-diff's steps 3-5.
+  #     - run: tools/heavy-run tools/opt-check/opt-gen-diff --odin3 build/release/odin3 --yosys "$YOSYS_055" --seeds 1..5000 --jobs 1 --mem-cap 3G --work "$RUNNER_TEMP/opt-gen"
+  #     # Oracle drift: every seed again under Yosys 0.69.
+  #     - run: tools/heavy-run tools/opt-check/opt-gen-diff --odin3 build/release/odin3 --yosys "$YOSYS_055" --yosys-069 "$YOSYS_069" --seeds 1..5000 --jobs 1 --mem-cap 3G --work "$RUNNER_TEMP/opt-gen-069"
+  #     # The corpus sweeps: the Phase 2 script on the micros and the 64 VTR/Koios files (VTR_ROOT
+  #     # set at configure time registers opt_vtr, lenet.v last), and opt-diff on the micros.
+  #     - run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_(micro|vtr|diff_micro)$'
+  #     # 2F Task 20: the nightly VTR legs of opt-equiv and opt-diff (five scripts) are NOT a CI
+  #     # step: by hand only (tools/opt-check/opt-nightly, ruling I9), the _xl pair on an idle
+  #     # machine. The commands are in docs/PHASE2.md item 23.
+  #     # The crash fuzzer for an hour (a clang build with -DODIN3_FUZZ=ON).
+  #     - run: build/fuzz/fuzz_opt -max_total_time=3600 -timeout=10 -rss_limit_mb=2048 -max_len=512 -print_funcs=0 build/fuzz/fuzz_opt_corpus build/fuzz/fuzz_opt_seeds

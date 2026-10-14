@@ -286,6 +286,12 @@ odin3_status odin3_expr_rule_fine_addsub(odin3_expr_ctx *ec) {
     if (!ec->fine || (ec->kind != ODIN3_EXPR_T_ADD && ec->kind != ODIN3_EXPR_T_SUB)) {
         return ODIN3_OK;
     }
+    /* A mixed-sign cell stays: the stripped rest would extend its operands by their own flags
+     * (Yosys 0.55 does), the registry evaluator reads the cell unsigned (§17 #30, #55). */
+    if (odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) !=
+        odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED)) {
+        return ODIN3_OK;
+    }
     strip_job job = {.sub = ec->kind == ODIN3_EXPR_T_SUB};
     odin3_status st = odin3_expr_read(ec, PORT_A, &job.a);
     st = st == ODIN3_OK ? odin3_expr_read(ec, PORT_B, &job.b) : st;

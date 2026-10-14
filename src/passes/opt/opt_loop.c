@@ -67,7 +67,7 @@ static bool step_applies(const loop *lp, step_when when) {
 
 /* One sub-pass call; *any is set when it changed anything. */
 static odin3_status call_sub(loop *lp, odin3_opt_sub sub, const odin3_opt_opts *opts, bool *any) {
-    odin3_opt_call_req req = {lp->ctx, lp->design, sub, opts, lp->counts};
+    odin3_opt_call_req req = {lp->ctx, lp->design, sub, opts, lp->counts, lp->args->simcheck};
     bool changed = false;
     odin3_status st = odin3_opt_call(&req, &changed);
     *any = *any || changed;

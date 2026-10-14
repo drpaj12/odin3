@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# bench-opt-report: the bench_opt line, the 2F spec 19 targets and the smoke check. See bench_opt_report.py.
+# Exit codes: 0 pass, 1 a failure or a missed target, 2 usage error, 77 skipped (no memory cap possible).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+PYTHONPATH="$here/../elab-check:$here/../proc-check${PYTHONPATH:+:$PYTHONPATH}" exec python3 "$here/bench_opt_report.py" "$@"
