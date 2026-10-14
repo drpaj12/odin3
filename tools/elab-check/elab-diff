@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# elab-diff: seeds of the --elab generator through elab-equiv. See elab_diff.py.
+# Exit codes: 0 every seed ok (drift and oracle crashes are reported, not failed), 1 a seed failed
+# (its file is kept), 2 usage or setup error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/elab_diff.py" "$@"

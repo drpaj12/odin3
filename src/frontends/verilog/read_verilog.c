@@ -167,6 +167,23 @@ static bool at_cap(odin3_rv *rv, odin3_loc at) {
     return true;
 }
 
+/* Parses one preprocessed stream into the store: a UNIT, or the stream's located errors. */
+static odin3_status parse_text(odin3_rv *rv, odin3_bytes text, odin3_srcbuf_id buffer,
+                               uint32_t given) {
+    odin3_vp_stream vs = {text, buffer, given};
+    odin3_ast_id unit = {0};
+    odin3_status st = odin3_verilog_parse_stream(&rv->vl, rv->ast, &vs, &unit);
+    return st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
+}
+
+odin3_status odin3_rv_parse_kept(odin3_rv *rv, const odin3_ast_stream *kept) {
+    if (at_cap(rv, (odin3_loc){0})) {
+        return ODIN3_OK;
+    }
+    rv->bytes += kept->text.len;
+    return parse_text(rv, kept->text, kept->buffer, kept->given);
+}
+
 odin3_status odin3_rv_read(odin3_rv *rv, const odin3_pp_source *src) {
     if (at_cap(rv, src->at)) {
         return ODIN3_OK;
@@ -182,10 +199,16 @@ odin3_status odin3_rv_read(odin3_rv *rv, const odin3_pp_source *src) {
         return st;
     }
     rv->bytes += stream.text.len;
-    odin3_vp_stream vs = {stream.text, stream.stream, src->given};
-    odin3_ast_id unit = {0};
-    st = odin3_verilog_parse_stream(&rv->vl, rv->ast, &vs, &unit);
-    return st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
+    if (rv->keep) {
+        odin3_ast_stream kept = {src->given, src->resolved, src->library, stream.stream,
+                                 stream.text};
+        st = odin3_ast_keep_stream(rv->ast, &kept);
+        if (st != ODIN3_OK) {
+            rv->vl.stop = true;
+            return st;
+        }
+    }
+    return parse_text(rv, stream.text, stream.stream, src->given);
 }
 
 /* --- steps 4 and 5 ------------------------------------------------------------------------- */
@@ -302,9 +325,11 @@ static odin3_status seal(odin3_rv *rv, double start) {
 /* Steps 2–6 after the run is open: the files, the libraries, the two checks, the verdict. */
 static odin3_status read_all(odin3_rv *rv, const odin3_rv_opts *opts) {
     odin3_status st = ODIN3_OK;
+    rv->keep = opts->keep_streams;
     for (uint32_t i = 0; st == ODIN3_OK && i < opts->nfiles && !rv->vl.stop; i++) {
         st = odin3_rv_read(rv, &opts->files[i]);
     }
+    rv->keep = false;
     rv->ndesign = odin3_ast_root_count(rv->ast);
     st = st != ODIN3_OK ? st : odin3_rv_resolve_libraries(rv);
     st = st != ODIN3_OK ? st : check_duplicates(rv);
@@ -555,7 +580,7 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     st = st != ODIN3_OK ? st : collect_sources(design, &parsed, &srcs);
     odin3_ast *ast = NULL;
     if (st == ODIN3_OK) {
-        odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL};
+        odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL, parsed.lib};
         st = odin3_read_verilog_files(design, &opts, &ast);
     }
     st = st != ODIN3_OK ? st : hand_over(ctx, ast, &parsed);

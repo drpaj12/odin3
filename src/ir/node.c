@@ -231,6 +231,7 @@ odin3_status odin3_node_create(odin3_module *module, const odin3_node_spec *spec
 
 odin3_status odin3_node_create_any(odin3_module *module, const odin3_node_spec *spec,
                                    odin3_node_id *out) {
+    odin3_journal_touch(module);
     node_plan plan = {0};
     odin3_status st = plan_node(module, spec, &plan);
     if (st == ODIN3_OK) {
@@ -325,6 +326,7 @@ odin3_status odin3_node_create_connected(odin3_module *module, const odin3_node_
         plan_free(&plan);
         return st;
     }
+    odin3_journal_touch(module); /* a node made counts even if no pin is connected */
     odin3_node_id id = node_commit(module, spec, &plan);
     plan_free(&plan);
     st = connect_ports(module, id, ports);
@@ -426,6 +428,7 @@ odin3_status odin3_node_replace(odin3_module *module, odin3_node_pair pair) {
     if (st != ODIN3_OK) {
         return st;
     }
+    odin3_journal_touch(module); /* the old node dies even if none of its pins is connected */
     for (uint32_t i = 0; i < old_rec->pin_count; i++) {
         odin3_pin_rec *from = odin3_pin_rec_at(module, (odin3_pin_id){old_rec->first_pin.v + i});
         if (odin3_net_valid(from->net)) {
@@ -437,6 +440,7 @@ odin3_status odin3_node_replace(odin3_module *module, odin3_node_pair pair) {
 }
 
 odin3_status odin3_node_delete(odin3_module *module, odin3_node_id node) {
+    odin3_journal_touch(module);
     odin3_node_rec *rec = odin3_node_live_rec(module, node, "node_delete");
     if (rec == NULL) {
         return ODIN3_ERR_INVALID_ARG;
@@ -455,6 +459,7 @@ odin3_status odin3_node_delete(odin3_module *module, odin3_node_id node) {
 }
 
 odin3_status odin3_node_rename(odin3_module *module, odin3_node_id node, uint32_t name_str) {
+    odin3_journal_touch(module);
     odin3_node_rec *rec = odin3_node_live_rec(module, node, "node_rename");
     if (rec == NULL) {
         return ODIN3_ERR_INVALID_ARG;

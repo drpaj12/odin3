@@ -126,6 +126,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/share.c
     src/passes/opt/dff.c
     src/passes/opt/dff_state.c
+    src/passes/opt/dff_dirty.c
     src/passes/opt/dff_gates.c
     src/passes/opt/dff_rules.c
     src/passes/opt/dff_constbits.c
@@ -495,6 +496,12 @@ add_executable(elab-check tools/elab-check/elab-check.c)
 target_include_directories(elab-check PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(elab-check PRIVATE odin3_core odin3_flags)
 
+# 2D Task 28 (spec 14.5): const-replay, the tiny driver of const-diff (a constant table through
+# odin3_cval_op).
+add_executable(const-replay tools/elab-check/const-replay.c)
+target_include_directories(const-replay PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(const-replay PRIVATE odin3_core odin3_flags)
+
 # --- odin3-sim-vectors: the simulator's random-vector driver (tools/sim-check, 1E) --------------
 add_executable(odin3-sim-vectors tools/sim-check/odin3-sim-vectors.c)
 target_include_directories(odin3-sim-vectors PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -570,6 +577,11 @@ if(ODIN3_FUZZ)
     target_include_directories(fuzz_abc_script PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(fuzz_abc_script PRIVATE odin3_core odin3_flags)
     target_link_options(fuzz_abc_script PRIVATE -fsanitize=fuzzer)
+    # tests/fuzz/fuzz_elab.c: the elaborator's crash fuzzer (2D §14.5, plan Task 28).
+    add_executable(fuzz_elab tests/fuzz/fuzz_elab.c)
+    target_include_directories(fuzz_elab PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_elab PRIVATE odin3_core odin3_flags)
+    target_link_options(fuzz_elab PRIVATE -fsanitize=fuzzer)
 endif()
 
 # --- Tests ----------------------------------------------------------------------
@@ -896,6 +908,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test_rtlil_writer PRIVATE
         ODIN3_RTLIL_OUT="${PROJECT_BINARY_DIR}/rtlil")
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP rtlil_fixtures)
+    # 2D Task 28 (review M18): odin3_cval_op against the word cells' simulate hooks.
+    odin3_add_unit_test(test_elab_cellsim)
     odin3_add_unit_test(test_elab_cval)
     target_compile_definitions(test_elab_cval PRIVATE
         ODIN3_ELAB_DATA="${PROJECT_SOURCE_DIR}/tests/elab")
@@ -1439,6 +1453,34 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                                  ENVIRONMENT "${_fuzz_env}")
         endif()
 
+        # 2D §14.5 (plan Task 28): the elaborator's seeds (`elab_fuzz_seeds.py`): every
+        # tests/elab/rows file and the micros' common/ directory, smallest first, and ten
+        # generated modules (verilog_gen.py --elab), each after a mode byte (--nolatches on).
+        # fuzz_elab_seed_inputs runs each once; fuzz_elab_smoke fuzzes 10 s (-max_len 4096, the
+        # caps lowered by the harness). One worker, 2 GB RSS; long runs are local.
+        set(_fe_seeds ${PROJECT_BINARY_DIR}/fuzz_elab_seeds)
+        set(_fe_corpus ${PROJECT_BINARY_DIR}/fuzz_elab_corpus)
+        file(MAKE_DIRECTORY ${_fe_corpus})
+        add_test(NAME fuzz_elab_seeds
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/elab-check/elab_fuzz_seeds.py
+                    ${_fe_seeds} ${PROJECT_SOURCE_DIR}/tests/elab/rows
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/common --generated 10)
+        set_tests_properties(fuzz_elab_seeds PROPERTIES FIXTURES_SETUP fuzz_elab_seeds
+                             LABELS fuzz)
+        add_test(NAME fuzz_elab_seed_inputs
+            COMMAND $<TARGET_FILE:fuzz_elab> -runs=0 -timeout=60 -rss_limit_mb=2048
+                    -print_funcs=0 ${_fe_seeds})
+        add_test(NAME fuzz_elab_smoke
+            COMMAND $<TARGET_FILE:fuzz_elab> -seed=1 -max_total_time=10 -timeout=10
+                    -rss_limit_mb=2048 -max_len=4096 -print_funcs=0 -print_final_stats=1
+                    ${_fe_corpus} ${_fe_seeds})
+        set_tests_properties(fuzz_elab_seed_inputs fuzz_elab_smoke PROPERTIES
+                             FIXTURES_REQUIRED fuzz_elab_seeds LABELS fuzz TIMEOUT 600)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_elab_seed_inputs fuzz_elab_smoke PROPERTIES
+                                 ENVIRONMENT "${_fuzz_env}")
+        endif()
+
         # 3D §13.7 (plan Task 11): the ABC script checker (no ABC runs). The seeds
         # (tests/fuzz/abc_script_seeds: a K byte, then lib/abc/vtr.abc, VTR's whole stage, one
         # script per abc.rc alias and one per refused example of test_abc_script) run once;
@@ -1875,6 +1917,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # test_hard_cell_widths runs write_rtlil's black-box stubs through it and the bridge.
         set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT
                      "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+        # 2D Task 28: test_elab_diff runs const-diff against this Yosys and the replay driver.
+        set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT
+                     "ODIN3_CONST_REPLAY=$<TARGET_FILE:const-replay>")
 
         # 2E Task 12 (spec 18.6, plan point (p)): the proc sweeps. Every one is an elab-sweep run
         # (smallest first, one child per file under memcap, expected failures with needles) whose
@@ -1913,6 +1958,58 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
                     --seeds 1..200 --mem-cap 3G --work ${PROJECT_BINARY_DIR}/proc_gen_work)
+        # 2D Task 28 (spec 14.5, review M24): the --elab generator's modules through the bridge
+        # (elab-diff, 200 seeds) and 500 random constant expressions, odin3_cval_op against Yosys
+        # 0.55's folds (const-diff). The nightly runs are the *_long tests: 5,000 seeds, 10,000
+        # expressions, and the 0.69 drift (a file where 0.55 and 0.69 disagree is `oracle drift`,
+        # not a failure). A failing seed keeps its file under the build directory.
+        odin3_add_sweep_test(elab_gen_vs_yosys LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --seeds 1..200 --mem-cap 2G
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/gen_expect_fail.txt
+                    --work ${PROJECT_BINARY_DIR}/elab_gen_work)
+        odin3_add_sweep_test(elab_const_diff LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/const-diff
+                    --yosys ${ODIN3_YOSYS055} --replay $<TARGET_FILE:const-replay>
+                    --count 500 --seed 1)
+        odin3_add_sweep_test(elab_gen_vs_yosys_long LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --seeds 1..5000 --mem-cap 2G
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/gen_expect_fail.txt
+                    --work ${PROJECT_BINARY_DIR}/elab_gen_long_work)
+        odin3_add_sweep_test(elab_const_diff_long LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/const-diff
+                    --yosys ${ODIN3_YOSYS055} --replay $<TARGET_FILE:const-replay>
+                    --count 10000 --seed 2)
+        set_tests_properties(elab_gen_vs_yosys_long elab_const_diff_long
+                             PROPERTIES LABELS "sweep;nightly")
+        if(ODIN3_YOSYS)
+            odin3_add_sweep_test(elab_gen_drift LABEL sweep
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-diff
+                        --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --seeds 1..200 --mem-cap 2G --yosys-069 ${ODIN3_YOSYS}
+                        --work ${PROJECT_BINARY_DIR}/elab_gen_drift_work)
+            set_tests_properties(elab_gen_drift PROPERTIES LABELS "sweep;nightly")
+            # 2D Task 28 follow-up (spec 17 #82): the sources of tests/verilog/oracle-bug lose a
+            # select write in Yosys 0.55's opt_muxtree (2F OP-13) though 2D's RTLIL is right:
+            # elab-equiv is equivalent on Yosys 0.69 and NOT equivalent (exit 1) on 0.55. A 0.55
+            # that passes makes the test fail (stale: move the sources to case-bridge). Exit 77
+            # (skip) as above.
+            add_test(NAME elab_oracle_muxtree_bug
+                COMMAND sh -c "for f in \"$5\"/*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --allow-version 0.69 --equiv-check \"$3\" --top gtop \"$f\" || exit $?; \"$0\" --odin3 \"$1\" --yosys \"$4\" --equiv-check \"$3\" --top gtop \"$f\"; rc=$?; [ $rc -eq 77 ] && exit 77; [ $rc -eq 1 ] || { echo \"$f: Yosys 0.55 no longer loses the write (exit $rc)\"; exit 1; }; done"
+                        ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                        $<TARGET_FILE:odin3> ${ODIN3_YOSYS}
+                        ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        ${ODIN3_YOSYS055}
+                        ${PROJECT_SOURCE_DIR}/tests/verilog/oracle-bug)
+            set_tests_properties(elab_oracle_muxtree_bug PROPERTIES
+                LABELS differential SKIP_RETURN_CODE 77)
+        endif()
         # The 31 VTR and 33 Koios benchmarks as one set by size, when VTR_ROOT is set at
         # configure time (also label nightly). lenet.v is listed `xl` in vtr_expect_fail.txt: the
         # 6G sweeps skip it, and the sweep-xl CTests run exactly it, alone, 8 GiB per child.

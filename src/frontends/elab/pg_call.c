@@ -26,7 +26,9 @@
  * What still runs a call by C recursion (odin3_pg_call: pg_call_hook from a plain
  * odin3_elab2_expr) is an expression the statement code needs whole before it can go on: a case
  * selector or item, an index of a select, a memory word or a register-array word, the lvalue of a
- * copy-out. Those nest by C stack, so they are capped at PG_SYNC_NEST_MAX levels (a located error).
+ * copy-out, and the actuals of a call in a continuous context (odin3_pg_comb_call: `assign y =
+ * f(f(a))`, review M9). Those nest by C stack, so they are capped at PG_SYNC_NEST_MAX levels (a
+ * located error).
  * The call nesting as a whole (ODIN3_ELAB_MAX_INLINE_DEPTH, ODIN3_ELAB_MAX_CALL_DEPTH) is a
  * resource cap on the heap records, not on the stack. Recursion is rejected.
  *
@@ -49,6 +51,7 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -670,8 +673,14 @@ static odin3_status gen_done(odin3_pg *pg, const pg_frame *frame) {
 }
 
 odin3_status pg_gen_step(odin3_pg *pg) {
+    /* `walk` points into pg->walks across the run. That is safe only because nothing reached from
+     * inside a walk pushes a walk: a call suspends it and the word hook takes indices computed
+     * beforehand (review M4). */
     odin3_elab2_walk *walk = odin3_vec_at(&pg->walks, pg->walks.len - 1);
+    size_t walks = pg->walks.len;
+    (void)walks; /* only the assert reads it */
     odin3_status st = odin3_elab2_walk_run(pg->e2, walk);
+    assert(pg->walks.len == walks);
     if (st != ODIN3_OK) {
         return st;
     }
@@ -697,17 +706,27 @@ void pg_frame_abort(odin3_pg *pg, const pg_frame *frame) {
 /* --- the entries --------------------------------------------------------------------------------
  */
 
-/* A call run whole before it returns, by a nested frame loop (C recursion, capped). */
-static odin3_status call_sync(odin3_pg *pg, odin3_ast_id call, odin3_sig *result) {
+/* One more level of C-recursive call nesting (a nested frame loop, or a call in a call's actuals
+ * in a continuous context), or the located resource error at the cap; sync_leave undoes it. */
+static odin3_status sync_enter(odin3_pg *pg, odin3_ast_id call) {
     if (pg->cdepth >= PG_SYNC_NEST_MAX) {
         odin3_elab2_fatal(pg->e2, odin3_ast_loc(pg->e2->elab, call),
                           "function call nesting deeper than %u at '%s'",
                           (unsigned)PG_SYNC_NEST_MAX, odin3_ast_name_str(pg->e2->elab, call));
         return ODIN3_ERR_PARSE;
     }
-    size_t base = pg->frames.len;
     pg->cdepth++;
-    odin3_status st = call_push(pg, call, false);
+    return ODIN3_OK;
+}
+
+/* A call run whole before it returns, by a nested frame loop (C recursion, capped). */
+static odin3_status call_sync(odin3_pg *pg, odin3_ast_id call, odin3_sig *result) {
+    odin3_status st = sync_enter(pg, call);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    size_t base = pg->frames.len;
+    st = call_push(pg, call, false);
     st = st != ODIN3_OK ? st : pg_drive(pg, base);
     pg->cdepth--;
     if (st == ODIN3_OK && result != NULL) {
@@ -826,7 +845,12 @@ odin3_status odin3_pg_comb_call(odin3_pg *pg, odin3_ast_id call, odin3_sig *resu
     odin3_status st = info_make(pg, call, &cr.info);
     st = st != ODIN3_OK ? st : info_check(pg, &cr.info);
     st = st != ODIN3_OK ? st : formals_make(&cr);
-    st = st != ODIN3_OK ? st : call_args(&cr, NULL);
+    st = st != ODIN3_OK ? st : sync_enter(pg, call); /* the actuals nest calls by C stack (M9) */
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    st = call_args(&cr, NULL);
+    pg->cdepth--;
     return st != ODIN3_OK ? st : comb_nested(&cr, result);
 }
 
@@ -985,7 +1009,9 @@ odin3_status pg_regs_apply(odin3_pg *pg, const odin3_pg_assign_req *req) {
     odin3_elab2_reads reads = pg_reads(pg);
     odin3_elab2_expr_req ireq = {regs.index, {0, false, false}, NULL, &reads};
     odin3_sig idx;
+    pg_mem_ref wref = {regs.mem, NULL, req->stmt, req->blocking};
     odin3_status st = pg_check_mixed(pg, &mixed);
+    st = st != ODIN3_OK ? st : pg_mem_check_mixed(pg, &wref);
     st = st != ODIN3_OK ? st : odin3_elab2_expr(pg->e2, &ireq, &idx);
     size_t count = pg->lvs.nets.len;
     odin3_sigbit *targets =

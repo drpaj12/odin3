@@ -176,7 +176,7 @@ static int read_file(const bench_args *args, odin3_pass_ctx *ctx, odin3_ast **pa
     }
     res->bytes = (uint64_t)info.st_size;
     double start = odin3_now_ms();
-    odin3_rv_opts opts = {&src, 1, ctx->run, NULL};
+    odin3_rv_opts opts = {&src, 1, ctx->run, NULL, false};
     int rc = odin3_read_verilog_files(ctx->design, &opts, parsed) != ODIN3_OK;
     res->parse_ms = odin3_now_ms() - start;
     if (rc != 0) {

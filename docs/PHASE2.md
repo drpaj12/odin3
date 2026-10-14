@@ -925,3 +925,18 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       <= 8 s in total. A miss is investigated with the printed terms and reported, never relaxed.
     - **Sweeps' summaries and `sweep-xl` (lenet.v, Yosys side, 9G slice): not yet run (needs an
       idle machine).**
+
+22. **IR change journal approved** (Peter, 2026-10-13, option 1a; IR-18a in `docs/IR.md`; spec 2F
+    §19). `opt_dff` and `opt_clean` skip work that the IR's change journal shows cannot have
+    changed: after its first sweep of a module in an `opt` invocation, `opt_dff` visits only the
+    flip-flops whose cone the journal touched; `opt_clean` skips a module's sweep when its last
+    sweep changed nothing and the journal's mutation count, the design's keep-module flags and
+    `-purge` are all as then. Conditions Peter set: every new allocation (the journal's growth,
+    the dirty marks, the walk arrays, the keep-flag copy) is reached by an OOM sweep and falls
+    back to a full sweep with the IR valid and the output byte-identical (`test_opt_oom_fallback`);
+    the journal's bytes count in `opt`'s budget, its 16 MB cap kept (`test_budget_journal`); Debug
+    builds sweep the modules `opt_clean` would skip and abort if one changes anything, and visit
+    every flip-flop `opt_dff` skipped, each at its own position in the sweep, likewise (a skipped
+    flip-flop that the sweep itself dirtied is covered). Nothing outside `opt` may depend on the journal.
+    The output is byte-identical to the full sweeps (82 files in 41 designs; `rescan-compare`; the mcml.v `opt` time of 0.87 s is
+    `bench_opt`'s median on an idle machine, 1.0 s under load).

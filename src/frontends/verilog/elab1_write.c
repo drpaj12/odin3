@@ -329,7 +329,7 @@ static const struct {
 } k_unit_attrs[] = {{"odin3_lib", ODIN3_UNIT_LIB},
                     {"odin3_lib_nolatches", ODIN3_UNIT_NOLATCHES},
                     {"odin3_lib_nomem2reg", ODIN3_UNIT_NOMEM2REG}};
-enum { W_UNIT_ATTRS = 3 };
+enum { W_UNIT_ATTRS = 3, W_ATTR_MSG = 160 };
 
 /* A value-less ATTR named text on made. */
 static odin3_ast_id w_flag_attr(e1w *wr, odin3_ast_id made, const char *text) {
@@ -358,6 +358,21 @@ static uint32_t w_unit_attrs(e1w *wr, const w_attrs_of *at, odin3_ast_id *ids) {
     return count;
 }
 
+/* A user attribute named like the markers of a --lib unit (`odin3_lib*`) would pick the flags stage
+ * 2 elaborates a module under (PR 2D-7b review M1): dropped, with a warning. */
+static bool w_reserved_attr(e1w *wr, odin3_ast_id attr) {
+    const char *name = odin3_elab1_str(wr->env->e1, odin3_ast_name(wr->ast, attr));
+    static const char k_prefix[] = "odin3_lib";
+    if (strncmp(name, k_prefix, sizeof k_prefix - 1U) != 0) {
+        return false;
+    }
+    char text[W_ATTR_MSG];
+    (void)snprintf(text, sizeof text, "attribute '%s' is reserved for library reads; ignored",
+                   name);
+    odin3_elab1_report(wr->env->e1, ODIN3_LOG_WARN, odin3_ast_loc(wr->ast, attr), text);
+    return true;
+}
+
 /* The attributes of the parsed node from (then those of at->then, which win a name both give),
  * evaluated and attached to the elaborated node made, then the unit-flag attributes. */
 /* The attributes of first and second (the later wins a name both give) evaluated into ids;
@@ -367,6 +382,9 @@ static uint32_t w_copy_attrs(e1w *wr, const w_attrs_of *at, odin3_ast_span first
     uint32_t count = 0;
     for (uint32_t i = 0; i < first.n + second.n && live(wr); i++) {
         odin3_ast_id attr = i < first.n ? first.ids[i] : second.ids[i - first.n];
+        if (w_reserved_attr(wr, attr)) {
+            continue;
+        }
         if (i < first.n && w_has_attr(wr, at->then, odin3_ast_name(wr->ast, attr))) {
             continue; /* the later declaration's value wins */
         }
@@ -390,7 +408,7 @@ static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
     }
     uint32_t count = w_copy_attrs(wr, at, first, second, ids);
     count += w_unit_attrs(wr, at, ids + count);
-    if (!live(wr)) {
+    if (!live(wr) || count == 0) { /* every attribute was a dropped reserved odin3_lib* one */
         return;
     }
     odin3_status st = odin3_ast_attach(wr->out, at->made, ids, count);

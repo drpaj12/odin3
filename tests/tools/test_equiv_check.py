@@ -230,6 +230,25 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         self.assertIn("only in A: single_port_ram out=q (a.blif:4)", err)
         self.assertIn("only in B: single_port_ram out=r (b.blif:4)", err)
 
+    def test_param_mismatch_exit_2(self) -> None:
+        """I2 (PR 2D-7b review): matched boxes with different ``.param`` lists are not the same
+        function; the cut must not call them equivalent (``.gate`` and ``.subckt`` forms)."""
+        gate = ".model top\n.inputs a b\n.outputs y\n.gate mybox x=a w=b out=y\n{}.end\n"
+        sub = (".model top\n.inputs a b\n.outputs y\n.subckt mybox x=a w=b out=y\n{}.end\n"
+               ".model mybox\n.inputs x w\n.outputs out\n.blackbox\n.end\n")
+        for name, form in (("gate", gate), ("subckt", sub)):
+            a = self.write(f"{name}_a.blif", form.format(".param MODE 01\n"))
+            b = self.write(f"{name}_b.blif", form.format(".param MODE 10\n"))
+            code, out, err = check(a, b)
+            self.assertEqual(code, 2, f"{name}: {out}{err}")
+            self.assertIn("MODE", err)
+            self.assertIn("parameters differ", err)
+            self.assertIn("mybox", err)
+            none = self.write(f"{name}_none.blif", form.format(""))
+            code, _, err = check(a, none)  # a parameter on one side only differs too
+            self.assertEqual(code, 2, name)
+            self.assertIn("parameters differ", err)
+
     def test_instance_in_one_file_only_exit_2(self) -> None:
         a = self.write("a.blif", BB_HEAD + RAM_Q + BB_TAIL)
         b = self.write("b.blif", BB_HEAD + ".names a q\n1 1\n" + BB_TAIL)
@@ -315,6 +334,15 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         code, _, err = check(a, a)
         self.assertEqual(code, 2)
         self.assertIn("no .cname and no named output net", err)
+
+    def test_match_unnamed_compares_params_of_every_pair(self) -> None:
+        """A box with a different ``.param`` list never pairs, named or by signature: exit 2."""
+        for cname in ("", ".cname ram\n"):
+            a = self.write("a.blif", BB_HEAD + RAM_Q + ".param MODE 01\n" + cname + BB_TAIL)
+            b = self.write("b.blif", BB_HEAD + RAM_Q + ".param MODE 10\n" + cname + BB_TAIL)
+            code, _, err = check("--match-unnamed", a, b)
+            self.assertEqual(code, 2, f"{cname!r}: {err}")
+            self.assertIn("MODE" if cname else "single_port_ram", err)
 
     def test_match_unnamed_ignores_output_net_names(self) -> None:
         """Without a .cname a box is anonymous with --match-unnamed, whatever its nets are called;

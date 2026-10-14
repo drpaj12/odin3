@@ -329,6 +329,41 @@ static void test_no_lib_read_keeps_error(void) {
     TEST_ASSERT_TRUE(et_count_with(&rs, ODIN3_LOG_ERROR, "too many parameter values") > 0);
 }
 
+/* I1 (PR 2D-7b review): a library unit is preprocessed under the macros of the read that made
+ * it. The design file defines WIDE before it instantiates `sub`; the --lib read never saw WIDE,
+ * so the unit it kept is the #else one (named `sub`), not the #ifdef one (`sub_wide`). */
+static void test_lib_unit_keeps_its_own_macros(void) {
+    et_src srcs[] = {{"p.vl", "`ifdef WIDE\nmodule sub_wide (input a, output y);\n"
+                              "  assign y = ~a;\nendmodule\n`else\n"
+                              "module sub (input a, output y);\n  assign y = a;\nendmodule\n"
+                              "`endif\n"},
+                     {"t.v", "`define WIDE\nmodule top (input a, output y);\n"
+                             "  sub u (.a(a), .y(y));\nendmodule\n"}};
+    setup_files(srcs, 2, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--lib p.vl"), et_log(&rs));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "t.v"), et_log(&rs));
+    TEST_ASSERT_NOT_NULL_MESSAGE(module_like("sub"), et_log(&rs));
+    TEST_ASSERT_NULL(module_like("sub_wide"));
+}
+
+/* The same, with the macro defined by an earlier file of the --lib read that holds no module (it
+ * has no UNIT of its own to be found again), and a macro the later read would leak the other way.
+ */
+static void test_lib_unit_sees_macro_of_unitless_lib_file(void) {
+    et_src srcs[] = {{"d.vl", "`define WIDE\n"},
+                     {"p.vl", "`ifdef WIDE\nmodule sub (input a, output y);\n"
+                              "  assign y = ~a;\nendmodule\n`else\n"
+                              "module sub_narrow (input a, output y);\n  assign y = a;\n"
+                              "endmodule\n`endif\n"},
+                     {"t.v", "module top (input a, output y);\n"
+                             "  sub u (.a(a), .y(y));\nendmodule\n"}};
+    setup_files(srcs, 3, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--lib d.vl p.vl"), et_log(&rs));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "t.v"), et_log(&rs));
+    TEST_ASSERT_NOT_NULL_MESSAGE(module_like("sub"), et_log(&rs));
+    TEST_ASSERT_NULL(module_like("sub_narrow"));
+}
+
 #define ALL_TESTS(X)                                                                               \
     X(test_lib_read_alone)                                                                         \
     X(test_lib_unit_elaborated_where_used)                                                         \
@@ -344,7 +379,9 @@ static void test_no_lib_read_keeps_error(void) {
     X(test_lib_unit_over_hard_cell_when_params_do_not_fit)                                         \
     X(test_hard_cell_kept_when_params_fit)                                                         \
     X(test_named_parameter_not_on_hard_cell)                                                       \
-    X(test_no_lib_read_keeps_error)
+    X(test_no_lib_read_keeps_error)                                                                \
+    X(test_lib_unit_keeps_its_own_macros)                                                          \
+    X(test_lib_unit_sees_macro_of_unitless_lib_file)
 
 #define RUN_ONE(name) RUN_TEST(name);
 

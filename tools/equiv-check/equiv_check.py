@@ -43,8 +43,9 @@ one, else the first output pin (lowest port, lowest bit) whose net has a stable 
 ``$``-prefixed), as ``out=memtroll.str_out[0]`` (a one-bit port is ``p`` whether written
 ``p`` or ``p[0]``); the name is normalized like a primary I/O
 name.  Matching is exact and never guessed: instances that exist on one side only, two
-instances with one name, an instance with no usable name, a different cell type or different
-port widths all exit 2 with a message listing them.  The cut makes two netlists equivalent
+instances with one name, an instance with no usable name, a different cell type, different
+port widths or different ``.param`` lists (a RAM mode, an INIT value: a box's configuration is
+part of what it is) all exit 2 with a message listing them.  The cut makes two netlists equivalent
 only when everything around the black boxes is equivalent and each box's inputs and outputs
 connect identically; a box's behaviour is assumed equal, never checked.  A black box clocked
 by a primary clock is fine (its outputs are free inputs), but a clocked black box's internal
@@ -542,6 +543,16 @@ def _describe(box: BlackBox, flat: Flat) -> str:
     return f"{box.cell_type} {box.key} ({Path(flat.path).name}:{box.line})"
 
 
+def _param_map(box: BlackBox) -> dict[str, str]:
+    """The ``.param NAME VALUE`` lines of a black box (a repeated name: the last wins)."""
+    params: dict[str, str] = {}
+    for attr, value in box.params:
+        if attr == ".param":
+            name, _, rest = value.partition(" ")
+            params[name] = rest.strip()
+    return params
+
+
 def _compare_boxes(key: str, box_a: BlackBox, box_b: BlackBox) -> list[str]:
     if box_a.cell_type != box_b.cell_type:
         return [f"cell types differ for instance {key!r}: {box_a.cell_type} in A, "
@@ -556,6 +567,11 @@ def _compare_boxes(key: str, box_a: BlackBox, box_b: BlackBox) -> list[str]:
     if pa != pb or set(box_a.outputs) != set(box_b.outputs):
         return [f"ports differ for {box_a.cell_type} instance {key!r}: only in A: "
                 f"{sorted(pa - pb)}; only in B: {sorted(pb - pa)}"]
+    ma, mb = _param_map(box_a), _param_map(box_b)
+    if ma != mb:  # a box's configuration (a RAM mode, an INIT value) is part of what it is
+        diffs = ", ".join(f"{n}: {ma.get(n, '(none)')} in A, {mb.get(n, '(none)')} in B"
+                          for n in sorted(set(ma) | set(mb)) if ma.get(n) != mb.get(n))
+        return [f"parameters differ for {box_a.cell_type} instance {key!r}: {diffs}"]
     return []
 
 
@@ -699,8 +715,8 @@ def match_blackboxes(flats: Sequence[Flat]) -> None:
                          "instance name, never guessed)", "\n".join(lines))
     problems = [p for key, box in boxes_a.items() for p in _compare_boxes(key, box, boxes_b[key])]
     if problems:
-        raise EquivError("matched black-box instances do not have the same cell type and "
-                         "port widths", "\n".join(f"  {p}" for p in problems))
+        raise EquivError("matched black-box instances do not have the same cell type, "
+                         "port widths and parameters", "\n".join(f"  {p}" for p in problems))
 
 
 # --------------------------------------------------------------------------- clocking

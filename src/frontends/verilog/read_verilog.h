@@ -23,14 +23,17 @@
 
 /*
  * One read: the design files in order (borrowed; given, resolved and library names, and the loc
- * that named each), the pass run the store belongs to, and NULL or a caller-owned vec of
- * odin3_vp_loc the lexer appends every token's location to (the location oracle, parser.h).
+ * that named each), the pass run the store belongs to, NULL or a caller-owned vec of
+ * odin3_vp_loc the lexer appends every token's location to (the location oracle, parser.h), and
+ * keep_streams (`read_verilog --lib`, 2D-7b): each design file's preprocessed text is kept in the
+ * store (odin3_ast_keep_stream) for later reads.
  */
 typedef struct odin3_rv_opts {
     const odin3_pp_source *files;
     uint32_t nfiles;
     odin3_passrun_id run;
     odin3_vec *tokens;
+    bool keep_streams; /* --lib: keep each design file's preprocessed stream in the store */
 } odin3_rv_opts;
 
 /*
@@ -85,6 +88,7 @@ typedef struct odin3_rv {
     uint64_t bytes;
     uint32_t ndesign;
     bool libfiles_read;
+    bool keep; /* odin3_rv_read keeps each preprocessed stream in rv->ast (design files of --lib) */
 } odin3_rv;
 
 /*
@@ -94,6 +98,10 @@ typedef struct odin3_rv {
  * CHECK from the preprocessor's Debug check, INVALID_ARG) stop the run and are returned.
  */
 odin3_status odin3_rv_read(odin3_rv *rv, const odin3_pp_source *src);
+
+/* Parses one kept stream (odin3_ast_stream_at of a --lib store) into rv's store; the same
+ * statuses as odin3_rv_read. */
+odin3_status odin3_rv_parse_kept(odin3_rv *rv, const odin3_ast_stream *kept);
 
 /*
  * Step 3 (DESIGN §4.0; read_verilog_lib.c): records the module and UDP names defined and the

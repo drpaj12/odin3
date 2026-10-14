@@ -127,6 +127,21 @@ static bool port_pair(const odin3_elab1_env *env, const odin3_elab1_slot *first,
     return (lhs_port && rhs_obj) || (lhs_obj && rhs_port);
 }
 
+/* A port merged with a reg or net that has unpacked dimensions (PR 2D-7b review M10): Yosys 0.55
+ * accepts `output q; reg [3:0] q [0:1];` and keeps the one-bit port and the array apart (the port
+ * stays undriven); the merged object here would drop the dimension without a word, so it is a
+ * located error at the declarator that has them (spec 17 #84). */
+static void unpacked_port(const odin3_elab1_env *env, const odin3_elab1_slot *first,
+                          const odin3_elab1_slot *proto) {
+    const odin3_elab1_slot *arr = proto->n_unpacked != 0 ? proto : first;
+    if (arr->n_unpacked != 0) {
+        env_error(env, arr->entry.decl,
+                  "'%s' is a port and its declaration has unpacked dimensions; a port cannot be an "
+                  "array",
+                  odin3_elab1_str(env->e1, arr->name));
+    }
+}
+
 odin3_status odin3_elab1_env_add(odin3_elab1_env *env, const odin3_elab1_slot *proto) {
     uint64_t key = (uint64_t)proto->scope << E1_SCOPE_SHIFT | proto->name;
     uint64_t at = 0;
@@ -137,6 +152,7 @@ odin3_status odin3_elab1_env_add(odin3_elab1_env *env, const odin3_elab1_slot *p
             return ODIN3_OK; /* the branches of one construct may share a block name */
         }
         if (port_pair(env, first, proto)) {
+            unpacked_port(env, first, proto);
             first->group2 = proto->group;
             first->decl2 = proto->entry.decl;
             return ODIN3_OK;
