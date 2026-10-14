@@ -14,16 +14,18 @@
 #error "ODIN3_ABC_COMMIT_STR (the pinned ABC commit) comes from CMakeLists.txt"
 #endif
 
+static const char *const k_commit = ODIN3_ABC_COMMIT_STR;
+
 int Abc_RealMain(int argc, char *argv[]);
 
-static int is_version_query(int argc, char *argv[]) {
+static int is_version_query(int argc, const char *const argv[]) {
     return argc == 3 && strcmp(argv[1], "-c") == 0 && strcmp(argv[2], "version") == 0;
 }
 
 int main(int argc, char *argv[]) {
     (void)setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
-    if (is_version_query(argc, argv)) {
-        (void)printf("odin3-abc: commit %s\n", ODIN3_ABC_COMMIT_STR);
+    if (is_version_query(argc, (const char *const *)argv)) {
+        (void)fprintf(stdout, "odin3-abc: commit %s\n", k_commit);
         (void)fflush(stdout);
     }
     return Abc_RealMain(argc, argv);
