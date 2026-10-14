@@ -447,6 +447,34 @@ class CompareTest(unittest.TestCase):
         gnd_q = buffered.replace(".end", ".names gnd\n.names gnd q\n1 1\n.end")
         self.assertEqual(self.both(buffered, gnd_q, "--vtr-normalize"), 0)
 
+    def test_vtr_normalize_undriven_ties_have_negative_cases(self) -> None:
+        """An undriven net is only x: a vcc, a wrong input or a real driver all differ."""
+        base = (".model top\n.inputs a b\n.outputs y\n.names a u y\n11 1\n{extra}.end\n")
+        undriven = base.format(extra="")
+        vcc = base.format(extra=".names u\n1\n")
+        wired = base.format(extra=".names b u\n1 1\n")
+        gnd = base.format(extra=".names u\n")
+        for other in (vcc, wired):
+            self.assertEqual(self.both(undriven, other, "--vtr-normalize"), 1)
+        self.assertEqual(self.both(undriven, gnd, "--vtr-normalize"), 0)  # driven low = tied low
+        out = ".model top\n.inputs a\n.outputs y q\n.names a y\n1 1\n{extra}.end\n"
+        self.assertEqual(self.both(out.format(extra=""), out.format(extra=".names a q\n1 1\n"),
+                                   "--vtr-normalize"), 1)  # an output gaining a real driver
+        self.assertEqual(self.both(out.format(extra=""), out.format(extra=".names q\n1\n"),
+                                   "--vtr-normalize"), 1)  # an output tied high
+
+    def test_vtr_normalize_tells_a_tied_low_net_from_an_open_pin(self) -> None:
+        """A writer regression from `unconn` to `gnd` on a hard-block input is caught."""
+        stub = ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n"
+        top = (".model top\n.inputs a\n.outputs o\n{gen}"
+               ".subckt multiply a[0]={pin} b[0]=a out[0]=o\n.end\n")
+        golden = top.format(gen="", pin="u") + stub  # u undriven: written as unconn
+        opened = top.format(gen=".names unconn\n", pin="unconn") + stub
+        tied = top.format(gen=".names gnd\n", pin="gnd") + stub
+        self.assertEqual(self.both(golden, opened, "--vtr-normalize"), 0)
+        self.assertEqual(self.both(golden, tied, "--vtr-normalize"), 1)
+        self.assertEqual(self.both(opened, tied, "--vtr-normalize"), 1)
+
     def test_vtr_normalize_drops_unused_stubs_only(self) -> None:
         stub = ".model adder\n.inputs a[0]\n.outputs sumout[0]\n.blackbox\n.end\n"
         top = ".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n"

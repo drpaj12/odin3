@@ -818,7 +818,21 @@ def vtr_normalize(model: blif.Model, models: dict[str, blif.Model] | None = None
     if filled:
         _ensure_generator(model, UNCONN, models)
     _tie_undriven(model, models or {})
+    _mark_open_generator(model)
     return model
+
+
+OPEN_MARK = (".param", "open")
+
+
+def _mark_open_generator(model: blif.Model) -> None:
+    """Marks the constant-0 generator of the net `unconn` (an open pin) so that it hashes and
+    renders differently from `gnd` (a tied-low net): VPR treats the two differently on a hard
+    block's input, and a bare `.names unconn` equals `.names gnd` otherwise."""
+    for cell in model.cells:
+        if (isinstance(cell, blif.Names) and cell.output == UNCONN and not cell.inputs
+                and not cell.rows and OPEN_MARK not in cell.attrs):
+            cell.attrs.append(OPEN_MARK)
 
 
 GND = "gnd"
