@@ -1988,6 +1988,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # 0.55), smallest first. The micros that fail before the bridge are in
         # micro_expect_fail.txt; the ones the bridge finds not equivalent in
         # micro_equiv_expect_fail.txt. A Yosys crash is an `oracle crash`, not a failure.
+        # large/mkDelayWorker32B.v runs alone at a 6G cap (Yosys side B peaks at 4.8 GB, 2H).
         odin3_add_sweep_test(elab_equiv_micro LABEL sweep
             COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
                     --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
@@ -1997,6 +1998,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_equiv_expect_fail.txt
                     --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
+                    --cap-for large/mkDelayWorker32B.v=6G
                     ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
         # 2D Task 27 (spec 14.5): the 64 VTR and Koios files through the bridge (Yosys 0.55), one
         # set, smallest first; koios/lenet.v's Yosys side (~7 GB) is an `xl` entry of
