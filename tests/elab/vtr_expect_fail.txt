@@ -11,3 +11,7 @@
 koios/hard_mem_include.v [no_top: no top given and no module is defined] a `define-only include file (config.txt: include_list_add=...), no module; no koios design includes it by name
 koios/complex_dsp_include.v [no_top: no top given and no module is defined] a `define-only include file (config.txt: include_list_add=...), no module; no koios design includes it by name
 koios/hard_block_include.v [no_top: no top given and no module is defined] a `define-only include file (config.txt: include_list_add=...), no module; no koios design includes it by name
+#
+# --- no automatic top: DESIGN's top rule (the single module no other module instantiates) is an error for several candidates; Parmys's hierarchy -auto-top takes the deepest (2D spec 7 "Parmys differs") ---
+koios/bwave_like.fixed.small.v [ambiguous_top: no top given and several modules are not instantiated: 'work.NPU', 'work.sp_ram'] 'sp_ram' is defined but never instantiated next to the real top NPU; DESIGN's rule is ambiguous_top, Parmys's -auto-top silently picks NPU (2D spec "Parmys differs", Decisions item 6)
+koios/bwave_like.fixed.large.v [ambiguous_top: no top given and several modules are not instantiated: 'work.NPU', 'work.sp_ram'] 'sp_ram' is defined but never instantiated next to the real top NPU; DESIGN's rule is ambiguous_top, Parmys's -auto-top silently picks NPU (2D spec "Parmys differs", Decisions item 6)
