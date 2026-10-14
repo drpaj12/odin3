@@ -465,10 +465,12 @@ No depth cap is needed: the Kahn sort rejects cycles, and the module count bound
 
 **Pre-flight estimate and the budget.** The estimate is the sum over roots of
 `nodes·B_node + pins·B_pin + nets·B_net + wires·B_wire + (records)·B_rec + string bytes of the new
-names` with constants **measured** in Task 2 (a fixture's `odin3_design_bytes_reserved` delta per
+names + alias_bits·B_alias_bit + bare·B_bare` (the last two: wire bits that join a net as an alias
+and bare alias names, each a temporary net and an interned name; review I1: structural netlists
+are full of them) with constants **measured** in Task 2 (a fixture's `odin3_design_bytes_reserved` delta per
 object, rounded up), plus the worklist and the net map. `odin3_budget_check(ctx, design, estimate)`
 (60% of physical memory, shared with `proc` and the opt family, 2E §16) runs before the first
-mutation and again every 2^16 created nodes (O(modules)), against the real `bytes_reserved`.
+mutation and again every 2^16 created nodes, nets and wires (O(modules)), against the real `bytes_reserved`.
 Failure: `ODIN3_ERR_PARSE` (the budget's status) with `odin3_budget_message`; the pre-flight failure
 changes nothing.
 

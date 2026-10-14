@@ -70,6 +70,8 @@ const uint32_t *odin3_flatten_graph_roots(const odin3_flatten_graph *graph, uint
 /* The flat size of module `mod` (module ID) when all its non-kept instances are expanded. */
 typedef struct odin3_flatten_size {
     uint64_t nodes, pins, nets, wires, instances, kept;
+    uint64_t alias_bits; /* wire bits that are aliases of a net (not its primary) */
+    uint64_t bare;       /* bare alias names, and the names of port-joined nets: one net each */
 } odin3_flatten_size;
 odin3_flatten_size odin3_flatten_graph_size(const odin3_flatten_graph *graph, uint32_t mod);
 

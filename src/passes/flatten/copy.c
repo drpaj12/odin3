@@ -98,7 +98,7 @@ static odin3_status gather_ports(odin3_flatten_ctx *fc, odin3_node_id node,
     return ODIN3_OK;
 }
 
-static odin3_status budget_tick(odin3_flatten_ctx *fc) {
+odin3_status odin3_flatten_tick(odin3_flatten_ctx *fc) {
     if (++fc->created % FLAT_BUDGET_EVERY != 0) {
         return ODIN3_OK;
     }
@@ -152,7 +152,7 @@ static odin3_status copy_node(odin3_flatten_ctx *fc, odin3_node_id node) {
         st = queue_instance(fc, copy, node);
     }
     fc->nodes++;
-    return st == ODIN3_OK ? budget_tick(fc) : st;
+    return st == ODIN3_OK ? odin3_flatten_tick(fc) : st;
 }
 
 odin3_status odin3_flatten_copy_nodes(odin3_flatten_ctx *fc) {
@@ -195,9 +195,10 @@ static odin3_status copy_wire(odin3_flatten_ctx *fc, odin3_wire_id wire) {
                         : st;
     odin3_wire_id copy = {0};
     st = st == ODIN3_OK ? odin3_wire_create(fc->root, &spec, fc->tmp_nets.data, &copy) : st;
-    return st == ODIN3_OK
-               ? copy_attrs(fc, (attr_move){{ODIN3_OBJ_WIRE, wire.v}, {ODIN3_OBJ_WIRE, copy.v}})
-               : st;
+    st = st == ODIN3_OK
+             ? copy_attrs(fc, (attr_move){{ODIN3_OBJ_WIRE, wire.v}, {ODIN3_OBJ_WIRE, copy.v}})
+             : st;
+    return st == ODIN3_OK ? odin3_flatten_tick(fc) : st;
 }
 
 odin3_status odin3_flatten_copy_wires(odin3_flatten_ctx *fc) {

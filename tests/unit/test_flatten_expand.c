@@ -946,9 +946,8 @@ static odin3_module *make_wide_tree(void) {
     return top;
 }
 
-/* The estimate is never below what the run reserves (spec §12: it rounds up). */
-static void test_estimate_not_below_actual(void) {
-    odin3_module *top = make_wide_tree();
+/* The estimate must cover the bytes the run reserves, and the run must expand everything. */
+static void assert_estimate_covers(odin3_module *top, uint32_t leaves) {
     set_top(top);
     odin3_flatten_graph *graph = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
@@ -959,10 +958,107 @@ static void test_estimate_not_below_actual(void) {
     flatten_ok(top);
     uint64_t grew = odin3_design_bytes_reserved(fix.design) - before;
     TEST_ASSERT_EQUAL_UINT32(0, count_instances(top));
-    TEST_ASSERT_EQUAL_UINT32(EST_LEAVES * 2, count_type(top, "$_NOT_"));
+    (void)leaves;
+    /* the budget ticks count nets and wires too, not only nodes (a cell-free design has none) */
+    TEST_ASSERT_TRUE(odin3_flatten_test_created() >= odin3_module_wire_end(top) / 2);
     printf("flatten estimate %llu bytes, reserved %llu\n", (unsigned long long)estimate,
            (unsigned long long)grew);
     TEST_ASSERT_TRUE(estimate >= grew);
+}
+
+/* The estimate is never below what the run reserves (spec §12: it rounds up). */
+static void test_estimate_not_below_actual(void) {
+    odin3_module *top = make_wide_tree();
+    assert_estimate_covers(top, EST_LEAVES);
+    TEST_ASSERT_EQUAL_UINT32(EST_LEAVES * 2, count_type(top, "$_NOT_"));
+}
+
+enum { FT_WIDTH = 32, FT_MIDS = 40, FT_PER_MID = 4, FT_ALIASES = 4 };
+
+/* ft: a[FT_WIDTH] feeds through to y[FT_WIDTH] (no cell), with `wires` alias wires over the same
+ * nets and `bare` named nets merged into them (the shape of structural netlists: review I1). */
+static odin3_module *make_feedthrough(uint32_t wires, uint32_t bare) {
+    odin3_module *ft = ff_module(&fix, "ft");
+    (void)ff_port(&fix, ft, "a", ODIN3_DIR_IN, FT_WIDTH);
+    (void)ff_port(&fix, ft, "y", ODIN3_DIR_OUT, FT_WIDTH);
+    odin3_net_id nets[FT_WIDTH];
+    for (uint32_t bit = 0; bit < FT_WIDTH; bit++) {
+        nets[bit] = ff_wnet(&fix, ft, "a", bit);
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_OK,
+            odin3_net_merge(ft, (odin3_net_pair){nets[bit], ff_wnet(&fix, ft, "y", bit)}));
+    }
+    for (uint32_t i = 0; i < wires; i++) {
+        char name[NAME_BUF];
+        (void)snprintf(name, sizeof name, "al%u", i);
+        odin3_wire_spec spec = {str(name), FT_WIDTH - 1, 0, false, {0}};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(ft, &spec, nets, NULL));
+    }
+    for (uint32_t i = 0; i < bare; i++) {
+        for (uint32_t bit = 0; bit < FT_WIDTH; bit++) {
+            char name[NAME_BUF];
+            (void)snprintf(name, sizeof name, "bare%u_%u", i, bit);
+            TEST_ASSERT_EQUAL_INT(
+                ODIN3_OK, odin3_net_merge(ft, (odin3_net_pair){nets[bit], ff_net(&fix, ft, name)}));
+        }
+    }
+    return ft;
+}
+
+/* top: FT_MIDS instances of mid, each a chain of FT_PER_MID ft instances; all feed-through. */
+static odin3_module *make_alias_tree(uint32_t wires, uint32_t bare) {
+    odin3_module *ft = make_feedthrough(wires, bare);
+    odin3_module *mid = ff_module(&fix, "mid");
+    (void)ff_port(&fix, mid, "i", ODIN3_DIR_IN, FT_WIDTH);
+    (void)ff_port(&fix, mid, "o", ODIN3_DIR_OUT, FT_WIDTH);
+    odin3_net_id in[FT_WIDTH];
+    odin3_net_id out[FT_WIDTH];
+    odin3_net_id mid_nets[FT_PER_MID][FT_WIDTH];
+    for (uint32_t bit = 0; bit < FT_WIDTH; bit++) {
+        in[bit] = ff_wnet(&fix, mid, "i", bit);
+        out[bit] = ff_wnet(&fix, mid, "o", bit);
+        for (uint32_t k = 0; k + 1 < FT_PER_MID; k++) {
+            mid_nets[k][bit] = ff_net(&fix, mid, NULL);
+        }
+    }
+    for (uint32_t k = 0; k < FT_PER_MID; k++) {
+        char name[NAME_BUF];
+        (void)snprintf(name, sizeof name, "f%u", k);
+        odin3_netvec ports[2] = {{k == 0 ? in : mid_nets[k - 1], FT_WIDTH},
+                                 {k + 1 == FT_PER_MID ? out : mid_nets[k], FT_WIDTH}};
+        (void)ff_inst_bus(&fix, (ff_pair){mid, ft}, name, ports);
+    }
+    odin3_module *top = ff_module(&fix, "top");
+    (void)ff_port(&fix, top, "x", ODIN3_DIR_IN, FT_WIDTH);
+    (void)ff_port(&fix, top, "z", ODIN3_DIR_OUT, FT_WIDTH * FT_MIDS);
+    for (uint32_t m = 0; m < FT_MIDS; m++) {
+        odin3_net_id x_nets[FT_WIDTH];
+        odin3_net_id z_nets[FT_WIDTH];
+        for (uint32_t bit = 0; bit < FT_WIDTH; bit++) {
+            x_nets[bit] = ff_wnet(&fix, top, "x", bit);
+            z_nets[bit] = ff_wnet(&fix, top, "z", m * FT_WIDTH + bit);
+        }
+        char name[NAME_BUF];
+        (void)snprintf(name, sizeof name, "m%u", m);
+        odin3_netvec ports[2] = {{x_nets, FT_WIDTH}, {z_nets, FT_WIDTH}};
+        (void)ff_inst_bus(&fix, (ff_pair){top, mid}, name, ports);
+    }
+    return top;
+}
+
+/* Feed-throughs with no cells: nothing but nets and wires is added (review I1). */
+static void test_estimate_feedthrough(void) {
+    assert_estimate_covers(make_alias_tree(0, 0), 0);
+}
+
+/* The same with four alias wires per ft: every wire bit joins a net as an alias. */
+static void test_estimate_alias_wires(void) {
+    assert_estimate_covers(make_alias_tree(FT_ALIASES, 0), 0);
+}
+
+/* The same with bare named nets merged into the port nets (aliases without a wire). */
+static void test_estimate_bare_aliases(void) {
+    assert_estimate_covers(make_alias_tree(0, FT_ALIASES), 0);
 }
 
 /* The sorted names of the live nodes and wires of mod and the alias lists of its port nets. */
@@ -1061,5 +1157,8 @@ int main(void) {
     RUN_TEST(test_flat_keep_hierarchy_value_kinds);
     RUN_TEST(test_flat_determinism_reversed);
     RUN_TEST(test_estimate_not_below_actual);
+    RUN_TEST(test_estimate_feedthrough);
+    RUN_TEST(test_estimate_alias_wires);
+    RUN_TEST(test_estimate_bare_aliases);
     return UNITY_END();
 }

@@ -17,6 +17,11 @@ typedef struct odin3_flatten_limits {
 /* Sets the caps (NULL restores the defaults). */
 void odin3_flatten_test_set_limits(const odin3_flatten_limits *limits);
 
+/* The objects (nodes, nets, wires) the last run counted towards its budget checks; the run notes
+ * it when its context is freed (review I1: nets count, not only nodes). */
+uint64_t odin3_flatten_test_created(void);
+void odin3_flatten_test_note_created(uint64_t created);
+
 /* The caps in force. */
 odin3_flatten_limits odin3_flatten_limits_now(void);
 

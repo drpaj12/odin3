@@ -25,7 +25,10 @@
  * reserved (`odin3_design_bytes_reserved` delta) on the objects it added gave about 570 bytes per
  * node, 21 per pin and 76 per net (wires and records are collinear with them; bgm is the tightest
  * design at 260 bytes per node+net+wire). Rounded up so that the estimate is 1.16x (bgm) to 2.2x
- * the measured growth on all 19 and never below it. */
+ * the measured growth on all 19 and never below it. The alias terms came later (review I1): the 19
+ * designs have almost none, so they only add to those estimates; B_ALIAS_BIT and B_BARE are the
+ * upper envelope of the unit-test probes (feed-throughs with alias wires, and with bare names:
+ * about 56 and 190 bytes each, up to twice that while the paged arrays double). */
 enum {
     B_NODE = 448,
     B_PIN = 24,
@@ -33,6 +36,8 @@ enum {
     B_WIRE = 16,
     B_REC = 96,
     B_NAME = 32,
+    B_ALIAS_BIT = 64,  /* a wire bit that joins a net as an alias */
+    B_BARE = 256,      /* a bare alias: a temporary net, its interned name, the alias entry */
     N_CONST_TYPES = 4,
     MAX_CYCLE_NAMES = 16,
     MAX_UNUSED_NAMES = 8
@@ -83,6 +88,16 @@ void odin3_flatten_test_set_limits(const odin3_flatten_limits *limits) {
     g_limits.max_nets = clamp_cap(limits->max_nets, ODIN3_FLATTEN_MAX_NETS);
     g_limits.max_wires = clamp_cap(limits->max_wires, ODIN3_FLATTEN_MAX_WIRES);
     g_limits.max_roots = (uint32_t)clamp_cap(limits->max_roots, ODIN3_FLATTEN_MAX_ROOTS);
+}
+
+static uint64_t g_created;
+
+void odin3_flatten_test_note_created(uint64_t created) {
+    g_created = created;
+}
+
+uint64_t odin3_flatten_test_created(void) {
+    return g_created;
 }
 
 odin3_flatten_limits odin3_flatten_limits_now(void) {
@@ -239,11 +254,39 @@ static odin3_status scan_node(odin3_flatten_graph *graph, const odin3_module *mo
     return ODIN3_OK;
 }
 
-/* The live nets and wires of module mod. */
+/* The aliases of one live net: its wire-bit aliases and its bare names. */
+static void count_aliases(odin3_flatten_size *own, const odin3_module *module, odin3_net_id net) {
+    uint32_t cursor = 0;
+    odin3_net_alias alias;
+    while (odin3_net_alias_next(module, net, &cursor, &alias)) {
+        if (alias.wb.wire.v != 0) {
+            own->alias_bits = sat_add(own->alias_bits, 1);
+        } else if (alias.name != 0) {
+            own->bare = sat_add(own->bare, 1);
+        }
+    }
+}
+
+/* A named net on a port bit keeps its name as a bare alias when the instance joins it. */
+static void count_port_names(odin3_flatten_size *own, const odin3_module *module) {
+    for (uint32_t port = 0; port < odin3_module_port_count(module); port++) {
+        odin3_pinslice pins = odin3_node_pins(module, odin3_module_port(module, port));
+        for (uint32_t bit = 0; bit < pins.count; bit++) {
+            odin3_net_id net = odin3_pin_net(module, (odin3_pin_id){pins.first.v + bit});
+            own->bare = sat_add(own->bare, net.v != 0 && odin3_net_name(module, net) != 0 ? 1 : 0);
+        }
+    }
+}
+
+/* The live nets (with their aliases) and wires of module mod. */
 static void count_objects(odin3_flatten_graph *graph, const odin3_module *module, uint32_t mod) {
     for (uint32_t net = 1; net < odin3_module_net_end(module); net++) {
-        graph->own[mod].nets += odin3_net_live(module, (odin3_net_id){net}) ? 1 : 0;
+        if (odin3_net_live(module, (odin3_net_id){net})) {
+            graph->own[mod].nets += 1;
+            count_aliases(&graph->own[mod], module, (odin3_net_id){net});
+        }
     }
+    count_port_names(&graph->own[mod], module);
     for (uint32_t wire = 1; wire < odin3_module_wire_end(module); wire++) {
         graph->own[mod].wires += odin3_wire_live(module, (odin3_wire_id){wire}) ? 1 : 0;
     }
@@ -480,6 +523,8 @@ static void compute_sizes(odin3_flatten_graph *graph) {
             size.pins = sat_add(size.pins, sub->pins);
             size.nets = sat_add(size.nets, sub->nets);
             size.wires = sat_add(size.wires, sub->wires);
+            size.alias_bits = sat_add(size.alias_bits, sub->alias_bits);
+            size.bare = sat_add(size.bare, sub->bare);
             size.instances = sat_add(size.instances, sat_add(1, sub->instances));
             size.kept = sat_add(size.kept, sub->kept);
         }
@@ -577,7 +622,7 @@ static uint64_t sat_sub(uint64_t lhs, uint64_t rhs) {
 }
 
 odin3_flatten_size odin3_flatten_graph_added(const odin3_flatten_graph *graph) {
-    odin3_flatten_size added = {0, 0, 0, 0, 0, 0};
+    odin3_flatten_size added = {0, 0, 0, 0, 0, 0, 0, 0};
     for (uint32_t i = 0; i < graph->n_roots; i++) {
         const odin3_flatten_size *flat = &graph->flat[graph->roots[i]];
         const odin3_flatten_size *own = &graph->own[graph->roots[i]];
@@ -585,6 +630,8 @@ odin3_flatten_size odin3_flatten_graph_added(const odin3_flatten_graph *graph) {
         added.pins = sat_add(added.pins, sat_sub(flat->pins, own->pins));
         added.nets = sat_add(added.nets, sat_sub(flat->nets, own->nets));
         added.wires = sat_add(added.wires, sat_sub(flat->wires, own->wires));
+        added.alias_bits = sat_add(added.alias_bits, sat_sub(flat->alias_bits, own->alias_bits));
+        added.bare = sat_add(added.bare, sat_sub(flat->bare, own->bare));
     }
     return added;
 }
@@ -595,6 +642,8 @@ uint64_t odin3_flatten_graph_estimate(const odin3_flatten_graph *graph) {
     bytes = sat_add(bytes, sat_mul(add.pins, B_PIN));
     bytes = sat_add(bytes, sat_mul(add.nets, B_NET));
     bytes = sat_add(bytes, sat_mul(add.wires, B_WIRE + B_NAME));
+    bytes = sat_add(bytes, sat_mul(add.alias_bits, B_ALIAS_BIT));
+    bytes = sat_add(bytes, sat_mul(add.bare, B_BARE));
     return sat_add(bytes, sat_mul(sat_add(add.nodes, sat_add(add.nets, add.wires)), B_REC));
 }
 

@@ -97,10 +97,11 @@ static void log_cost(const odin3_flatten_ctx *fc, const odin3_flatten_size *add,
     odin3_log(ODIN3_LOG_INFO,
               "flatten: cost: bytes %" PRIu64 " -> %" PRIu64 ", provenance records %" PRIu32
               " -> %" PRIu32 "; added nodes %" PRIu64 " pins %" PRIu64 " nets %" PRIu64
-              " wires %" PRIu64 "; estimate %" PRIu64 "; renamed %" PRIu64,
+              " wires %" PRIu64 "; estimate %" PRIu64 "; renamed %" PRIu64 "; alias bits %" PRIu64
+              " bare %" PRIu64,
               before->bytes, odin3_design_bytes_reserved(fc->design), before->records,
               odin3_prov_end(fc->design), add->nodes, add->pins, add->nets, add->wires, estimate,
-              fc->renamed);
+              fc->renamed, add->alias_bits, add->bare);
 }
 
 static void report(odin3_flatten_ctx *fc, const odin3_flatten_totals *tot) {

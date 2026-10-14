@@ -120,6 +120,9 @@ odin3_net_id odin3_flatten_resolve(const odin3_flatten_ctx *fc, odin3_net_id net
 odin3_net_id odin3_flatten_mapped(const odin3_flatten_ctx *fc, odin3_net_id net);
 
 /* copy.c */
+/* Counts one created object (node, net or wire) and checks the design's budget every
+ * FLAT_BUDGET_EVERY of them; logs and returns the budget's status when it is exceeded. */
+odin3_status odin3_flatten_tick(odin3_flatten_ctx *fc);
 odin3_status odin3_flatten_copy_nodes(odin3_flatten_ctx *fc);
 odin3_status odin3_flatten_copy_wires(odin3_flatten_ctx *fc);
 odin3_status odin3_flatten_check_joins(odin3_flatten_ctx *fc);

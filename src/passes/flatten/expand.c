@@ -7,6 +7,7 @@
 #include "ir/celltype.h"
 #include "ir/module.h"
 #include "util/alloc.h"
+#include "passes/flatten/flatten_test.h"
 #include "util/log.h"
 
 #include <assert.h>
@@ -46,6 +47,7 @@ odin3_status odin3_flatten_ctx_init(odin3_flatten_ctx *fc, odin3_pass_ctx *pass,
 }
 
 void odin3_flatten_ctx_free(odin3_flatten_ctx *fc) {
+    odin3_flatten_test_note_created(fc->created);
     odin3_vec_free(&fc->work);
     odin3_vec_free(&fc->pnets);
     odin3_vec_free(&fc->map);
@@ -105,7 +107,8 @@ static odin3_status fresh_net(odin3_flatten_ctx *fc, odin3_net_id cn, odin3_net_
     odin3_status st =
         odin3_flatten_name(fc, (flat_key){FLAT_NET, odin3_net_name(fc->child, cn)}, &name);
     st = st == ODIN3_OK ? odin3_flatten_derive(fc, odin3_net_prov(fc->child, cn), &prov) : st;
-    return st == ODIN3_OK ? odin3_net_create(fc->root, name, prov, out) : st;
+    st = st == ODIN3_OK ? odin3_net_create(fc->root, name, prov, out) : st;
+    return st == ODIN3_OK ? odin3_flatten_tick(fc) : st;
 }
 
 /* The root's shared constant net of kind k (found or created once per root, IR-4). */
@@ -222,6 +225,7 @@ static odin3_status add_alias(odin3_flatten_ctx *fc, odin3_net_id target, uint32
     uint32_t name = 0;
     odin3_status st = odin3_flatten_name(fc, (flat_key){FLAT_NET, orig}, &name);
     st = st == ODIN3_OK ? odin3_net_create(fc->root, name, (odin3_prov_id){0}, &temp) : st;
+    st = st == ODIN3_OK ? odin3_flatten_tick(fc) : st;
     return st == ODIN3_OK ? merge_nets(fc, odin3_flatten_resolve(fc, target), temp) : st;
 }
 
