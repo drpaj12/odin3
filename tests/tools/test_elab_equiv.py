@@ -53,6 +53,9 @@ if argv == ["-V"]:
     print(os.environ.get("FAKE_YOSYS_VERSION", "{oracle}"))
     sys.exit(0)
 script = argv[argv.index("-p") + 1]
+if os.environ.get("FAKE_YOSYS_SLEEP_ON", "@never@") in script:
+    import time
+    time.sleep(float(os.environ["FAKE_YOSYS_SLEEP"]))
 sig = os.environ.get("FAKE_YOSYS_SIGNAL")
 if sig and os.environ.get("FAKE_YOSYS_SIGNAL_ON", "") in script:
     os.kill(os.getpid(), int(sig))
@@ -370,6 +373,28 @@ class BridgeTest(unittest.TestCase):
                                             "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"})
         self.assertEqual(code, 2, err)
         self.assertIn("odin3 (side A) failed", err)
+
+    def test_a_budget_that_runs_out_in_yosys_is_unproven(self) -> None:
+        """2H (arm_core): --budget bounds the Yosys and equiv-check runs together; the child still
+        running at the end is killed and the file is exit 4, before equiv-check starts."""
+        slow = {"FAKE_YOSYS_SLEEP": "60", "FAKE_YOSYS_SLEEP_ON": "read_verilog -sv"}
+        started = time.monotonic()
+        code, out, err = self.run_tool("--budget", "1", extra=slow)
+        self.assertEqual(code, 4, err)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertIn("elab-equiv: unproven: budget of 1 s ran out (in Yosys side B)", out)
+        self.assertNotIn("out of memory", out + err)
+        self.assertNotIn("equiv-check", self.names())
+        code, out, err = self.run_tool("--budget", "100", extra={})
+        self.assertEqual(code, 0, out + err)
+
+    def test_the_budget_never_applies_to_odin3(self) -> None:
+        """odin3 (side A) is not bounded by it: a slow odin3 is the tool's own failure."""
+        bridge = elab_equiv.Bridge(elab_equiv.Options(
+            odin3="/x/odin3", yosys="y", equiv_check="e", source=self.src, top=None,
+            cap=GIB, keep=None, allow_version=None, a_only=False, budget=0.5))
+        self.assertIsNone(bridge.remaining(["/x/odin3", "-p", "x"], "odin3 (side A)"))
+        self.assertLessEqual(bridge.remaining(["y", "-p", "x"], "Yosys side A") or 0, 0.5)
 
     def test_yosys_failures_are_errors(self) -> None:
         for fail, what in (("read_rtlil a.il; hierarchy", "Yosys side A"),

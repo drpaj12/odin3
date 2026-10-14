@@ -29,6 +29,11 @@ runs it alone). A child killed by its cap is reported ``out of memory (cap 4G)``
   ``--bench-report P`` then prints the targets of profile ``P`` from those lines
   (``bench_report.py``: ``elab`` is spec §15's table, ``proc`` is 2E's spec §19) and fails the run
   when one is MISSED.
+- ``--equiv-budget SECONDS`` (with ``--equiv``): ``elab-equiv --budget SECONDS``. The Yosys and
+  equiv-check runs of one file get that many wall seconds together (odin3's are not bounded); when
+  they run out the file is ``unproven`` (elab-equiv exit 4, ``budget of N s ran out``), a failure
+  an expect-fail entry can list, where the sweep's own hour (``TIMEOUT_S``) is a hard timeout that
+  cannot (2H: ``large/arm_core.v``).
 - ``--vtr-compat`` (with ``--equiv``): ``elab-equiv --vtr-compat`` (a non-constant ``initial x =
   e;`` is ``assign x = e;``, as in Yosys 0.55 and Parmys; the micros are the VTR flow's).
 - ``--proc-diff`` (needs ``--yosys``; 2E Task 12): ``proc-diff`` on the file (Odin III's ``proc``
@@ -359,6 +364,7 @@ class Config:
     also_no_trio: bool = False
     nolatches: bool = False
     vtr_compat: bool = False  # --equiv: elab-equiv --vtr-compat
+    equiv_budget: float | None = None  # --equiv: elab-equiv --budget (wall seconds)
 
     def cap_of(self, item: Item) -> int:
         for suffix, cap in self.caps.items():
@@ -520,7 +526,9 @@ def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
             *(["--top", top] if top else []), *(["--techlib", cfg.techlib] if cfg.techlib else []),
             *[arg for lib in cfg.libs for arg in ("--lib", lib)],
             *(["--lib-nomem2reg"] if cfg.libs else []),
-            *(["--vtr-compat"] if cfg.vtr_compat else []), *proc_flags(cfg), str(item.path)]
+            *(["--vtr-compat"] if cfg.vtr_compat else []),
+            *(["--budget", f"{cfg.equiv_budget:g}"] if cfg.equiv_budget else []),
+            *proc_flags(cfg), str(item.path)]
     try:  # elab-equiv caps each of its own children
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
                               timeout=TIMEOUT_S, check=False, pass_fds=lock_fds())
@@ -719,6 +727,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                     help="--proc-diff: run each file again without the pre-proc passes")
     ap.add_argument("--vtr-compat", action="store_true",
                     help="--equiv: elab-equiv --vtr-compat (the VTR flow's setting)")
+    ap.add_argument("--equiv-budget", type=float, metavar="SECONDS",
+                    help="--equiv: elab-equiv --budget (the Yosys and equiv-check wall time of a "
+                         "file; past it the file is unproven, which an entry may list)")
     ap.add_argument("--nolatches", action="store_true",
                     help="--proc-diff: read_verilog --nolatches")
     ap.add_argument("--expect-fail", type=Path, action="append", default=[],
@@ -763,6 +774,8 @@ def build_config(args: argparse.Namespace) -> Config:
         raise UsageError("--equiv needs --yosys and --equiv-check")
     if args.proc_diff and not args.yosys:
         raise UsageError("--proc-diff needs --yosys")
+    if args.equiv_budget is not None and not args.equiv:
+        raise UsageError("--equiv-budget needs --equiv")
     if args.stop_pass == "proc" and not args.equiv:
         raise UsageError("--pass proc needs --equiv")
     caps: dict[str, int] = {}
@@ -792,7 +805,8 @@ def build_config(args: argparse.Namespace) -> Config:
         else "opt-run" if args.opt_run else "",
         opt_args=tuple(args.opt_arg), pass_proc=args.stop_pass == "proc",
         no_trio=args.trio == "off", also_no_trio=bool(args.also_no_trio),
-        nolatches=bool(args.nolatches), vtr_compat=bool(args.vtr_compat))
+        nolatches=bool(args.nolatches), vtr_compat=bool(args.vtr_compat),
+        equiv_budget=args.equiv_budget)
 
 
 def _abs(tool: str | None) -> str | None:
