@@ -138,6 +138,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/allow.c
     src/passes/abc/script.c
     src/passes/abc/engine.c
+    src/passes/abc/child.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -314,6 +315,9 @@ string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," ODIN3_ABC_DEFAULT_SCRIPT_BYTE
 configure_file(cmake/abc_default_script.c.in
                ${PROJECT_BINARY_DIR}/generated/abc/default_script.c @ONLY)
 target_sources(odin3_core PRIVATE ${PROJECT_BINARY_DIR}/generated/abc/default_script.c)
+# The child runner (3D spec §7.9, AB-33) uses glibc's posix_spawn_file_actions_addchdir_np and
+# _addclosefrom_np, which need _DEFAULT_SOURCE on top of odin3_flags' _POSIX_C_SOURCE.
+set_source_files_properties(src/passes/abc/child.c PROPERTIES COMPILE_DEFINITIONS _DEFAULT_SOURCE)
 
 # --- The Verilog parser: Bison and Flex generated into the build tree (2C spec §6) ----------
 find_package(BISON 3.8 REQUIRED)        # parse.error detailed, parse.lac, %precedence, -Wcex
@@ -720,6 +724,10 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_abc_default_script)
     target_compile_definitions(test_abc_default_script PRIVATE
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 3D Task 9a: the child runner (AB-33), on shell fixtures that stand in for odin3-abc.
+    odin3_add_unit_test(test_abc_child)
+    target_compile_definitions(test_abc_child PRIVATE
+        ODIN3_CHILD_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/abc/child")
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)

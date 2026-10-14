@@ -37,6 +37,18 @@ typedef struct odin3_abc_limits {
     uint32_t alias_depth;
 } odin3_abc_limits;
 
+/* The subprocess path's limits (§7.9, AB-33; an agent default, 3D-8 calibrates the time). */
+enum {
+    ODIN3_ABC_CHILD_SECONDS = 3600,                 /* wall clock per child run */
+    ODIN3_ABC_CHILD_OUTPUT_BYTES = 64 * 1024 * 1024 /* merged output per child run */
+};
+
+/* The child runner's limits (abc_test.h's odin3_abc_test_set_child_limits lowers them in tests). */
+typedef struct odin3_abc_child_limits {
+    uint32_t seconds;
+    uint64_t output_bytes;
+} odin3_abc_child_limits;
+
 /* How the network reaches ABC (§6): in memory (MiniAIG in, MiniLUT out) or through BLIF files. */
 enum odin3_abc_exchange { ODIN3_ABC_EXCHANGE_AIG = 0, ODIN3_ABC_EXCHANGE_BLIF = 1 };
 

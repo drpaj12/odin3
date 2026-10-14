@@ -33,4 +33,11 @@ void odin3_abc_test_set_limits(const odin3_abc_limits *limits);
  */
 void odin3_abc_test_set_engine(const odin3_abc_engine *engine);
 
+/*
+ * Lowers the child runner's limits (§7.9, AB-33): a non-zero seconds or output_bytes replaces a
+ * higher limit of every later odin3_abc_child_run (a test may only lower them). NULL, or a zero
+ * field, lifts that override. Never fails, never logs.
+ */
+void odin3_abc_test_set_child_limits(const odin3_abc_child_limits *limits);
+
 #endif
