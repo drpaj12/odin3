@@ -485,6 +485,14 @@ class ArgvTest(ExitCheckCase):
         self.assertTrue(equiv[-2].endswith("g/b/b.parmys.blif"))
         self.assertEqual(len(self.calls("equiv-check")), 1)
 
+    def test_equiv_box_budget_is_passed_to_equiv_check_only_when_given(self) -> None:
+        self.micro("g", "b", "EQV\n")
+        self.assertEqual(self.run_tool()[0], 0)
+        self.assertNotIn("--box-probe-budget", self.calls("equiv-check")[0])
+        self.assertEqual(self.run_tool("--equiv-box-budget", "900")[0], 0)
+        equiv = self.calls("equiv-check")[-1]
+        self.assertEqual(equiv[equiv.index("--box-probe-budget") + 1], "900")
+
     def test_every_child_including_sp_splice_runs_through_memcap(self) -> None:
         self.micro("g", "a", "EQV\n")
         with mock.patch.object(memcap, "run", wraps=memcap.run) as run:

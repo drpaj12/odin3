@@ -2240,6 +2240,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --expect-differs ${PROJECT_SOURCE_DIR}/tests/exit/micro_differs.txt
                         --expect-unproven ${PROJECT_SOURCE_DIR}/tests/exit/micro_unproven.txt
                         --eqx-record ${PROJECT_SOURCE_DIR}/tests/exit/micro_eqx.txt
+                        --equiv-box-budget 900
                         --min-checked 400 --work ${CMAKE_BINARY_DIR}/exit-work/micro
                         --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
                         ${PROJECT_SOURCE_DIR}/tests/micro/verilog)

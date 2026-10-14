@@ -9,7 +9,8 @@ Usage::
                [--expect-differs F]...
                [--eqx-record F]... [--min-checked N] [--vtr-root V] [--jobs J] [--mem-cap C]
                [--cap-for SUFFIX=C]...
-               [--equiv-timeout S] [--work DIR] [--root R] [--limit N] [--partial]
+               [--equiv-timeout S] [--equiv-box-budget S] [--work DIR] [--root R] [--limit N]
+               [--partial]
                <dir or file>...
 
 Every ``.v`` under the directories (and the files) given is one design, run **smallest first** (all
@@ -207,6 +208,7 @@ class Config:
     min_mult: int = 3
     min_adder: int = 1
     equiv_timeout: int = 600
+    equiv_box_budget: int | None = None  # equiv-check --box-probe-budget (None: its default)
 
     def cap_of(self, item: elab_sweep.Item) -> int:
         for suffix, cap in self.caps.items():
@@ -468,8 +470,10 @@ def cone_names(text: str) -> tuple[str, ...]:
 
 def run_equiv(cfg: Config, golden: Path, out: Path, cap: int, log: list[str]) -> Result:
     """``equiv-check --x-report golden out`` classified."""
+    budget = [] if cfg.equiv_box_budget is None else ["--box-probe-budget",
+                                                      str(cfg.equiv_box_budget)]
     got = run_capped([cfg.equiv_check, "--x-report", "--match-unnamed", "--timeout",
-                      str(cfg.equiv_timeout), str(golden), str(out)], cap, log)
+                      str(cfg.equiv_timeout), *budget, str(golden), str(out)], cap, log)
     if isinstance(got, Result):
         return got
     text = (got.stdout or "") + (got.stderr or "")
@@ -875,6 +879,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--mem-cap", default="4G", help="per child (default 4G)")
     ap.add_argument("--cap-for", action="append", default=[], metavar="SUFFIX=CAP",
                     help="a larger cap for one design, which then runs alone")
+    ap.add_argument("--equiv-box-budget", type=int, metavar="S",
+                    help="equiv-check's --box-probe-budget: seconds for the ABC probes that pair "
+                    "multipliers the simulation cannot tell apart (default: equiv-check's 120)")
     ap.add_argument("--equiv-timeout", type=int, default=600, metavar="S",
                     help="equiv-check's ABC timeout in seconds (default 600)")
     ap.add_argument("--work", type=Path, help="the work directory (default: a fresh temp dir)")
@@ -965,6 +972,7 @@ def build_config(args: argparse.Namespace) -> Config:
         techlib=args.techlib, primitives=args.primitives, config=args.config,
         config_template=template, min_mult=args.min_hard_mult_size,
         min_adder=args.min_hard_adder_size, equiv_timeout=args.equiv_timeout,
+        equiv_box_budget=args.equiv_box_budget,
         vtr_root=vtr_root, vtr_commit=commit, arch_sha256=sha256_file(arch),
         min_checked=args.min_checked)
 
