@@ -59,7 +59,9 @@ write: latch init ``3`` becomes ``2``; an input formal bit a ``.subckt`` omits (
 ``.inputs`` (VPR reads both alike, ``--vtr`` writes no ``.clock``); VB-10 names are decoded to a
 fixed point (``%XX`` with upper-case hex is the byte, a leading ``%`` followed by anything else is
 dropped); a constant cover becomes a zero-input generator and a non-constant 1-input cover one
-row (§6).
+row (§6); a net with readers and no driver reads `gnd` on a `.names` input, a latch D and a
+primary output (a buffer from `gnd` drives it) and `unconn` on a `.subckt` input (§9.2: x or
+undriven); a `.blackbox` model no `.subckt` uses is dropped (§8.3: used stubs only).
 
 Everything is iterative (explicit worklists, no recursion).
 """
@@ -813,10 +815,54 @@ def vtr_normalize(model: blif.Model, models: dict[str, blif.Model] | None = None
             _normalize_latch(cell)
         elif models is not None:
             filled = _fill_omitted(cell, models) or filled
-    driven = {out for cell in model.cells for out in blif.cell_io(cell, models or {})[1]}
-    if filled and UNCONN not in driven and UNCONN not in model.inputs:
-        model.cells.append(blif.Names(inputs=[], output=UNCONN, rows=[]))
+    if filled:
+        _ensure_generator(model, UNCONN, models)
+    _tie_undriven(model, models or {})
     return model
+
+
+GND = "gnd"
+
+
+def _driven_nets(model: blif.Model, models: dict[str, blif.Model]) -> set[str]:
+    driven = set(model.inputs) | set(model.clocks)
+    for cell in model.cells:
+        driven.update(blif.cell_io(cell, models)[1])
+    return driven
+
+
+def _ensure_generator(
+    model: blif.Model, name: str, models: dict[str, blif.Model] | None
+) -> None:
+    """Adds `.names <name>` (a constant 0) when nothing drives the net."""
+    if name not in _driven_nets(model, models or {}):
+        model.cells.append(blif.Names(inputs=[], output=name, rows=[]))
+
+
+def _tie_undriven(model: blif.Model, models: dict[str, blif.Model]) -> None:
+    """§9.2: a net that has readers and no driver is x, which `--vtr` writes as `gnd` on logic and
+    primary outputs and as `unconn` on a hard block's input. Done on the model as read, before the
+    generators it names are added."""
+    if model.blackbox:
+        return
+    driven = _driven_nets(model, models)
+    for cell in model.cells:
+        if isinstance(cell, blif.Names):
+            cell.inputs = [GND if n not in driven else n for n in cell.inputs]
+        elif isinstance(cell, blif.Latch):
+            cell.input = GND if cell.input not in driven else cell.input
+        else:
+            sub = models.get(cell.model)
+            ins = set(sub.inputs) if sub is not None else set()
+            cell.conns = [(f, UNCONN if f in ins and a not in driven else a)
+                          for f, a in cell.conns]
+    for out in model.outputs:
+        if out not in driven:
+            model.cells.append(blif.Names(inputs=[GND], output=out, rows=[("1", "1")]))
+    reads = {n for cell in model.cells for n in blif.cell_io(cell, models)[0]}
+    for name in (GND, UNCONN):
+        if name in reads:
+            _ensure_generator(model, name, models)
 
 
 def vtr_normalize_netlist(netlist: blif.Netlist) -> blif.Netlist:
@@ -828,6 +874,9 @@ def vtr_normalize_netlist(netlist: blif.Netlist) -> blif.Netlist:
     models = {m.name: m for m in netlist.models}
     for model in netlist.models:
         vtr_normalize(model, models)
+    used = {c.model for m in netlist.models for c in m.cells if isinstance(c, blif.Subckt)}
+    netlist.models = [m for i, m in enumerate(netlist.models)
+                      if i == 0 or not m.blackbox or m.name in used]
     return netlist
 
 

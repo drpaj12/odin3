@@ -431,6 +431,33 @@ class CompareTest(unittest.TestCase):
         nand = template.format(cell=".names a b y\n11 0\n")
         self.assertEqual(self.both(nand, nand, "--vtr-normalize"), 0)  # not constant: kept
 
+    def test_vtr_normalize_undriven_nets_read_gnd_or_unconn(self) -> None:
+        """§9.2: an undriven net is x: `gnd` on logic and outputs, `unconn` on a hard block."""
+        undriven = (".model top\n.inputs a\n.outputs y z o\n.names a u y\n11 1\n"
+                    ".latch u z re a 2\n.subckt multiply a[0]=u b[0]=a out[0]=o\n.end\n"
+                    ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n")
+        tied = (".model top\n.inputs a\n.outputs y z o\n.names gnd\n.names unconn\n"
+                ".names a gnd y\n11 1\n.latch gnd z re a 2\n"
+                ".subckt multiply a[0]=unconn b[0]=a out[0]=o\n.end\n"
+                ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n")
+        self.assertEqual(self.both(undriven, tied, "--vtr-normalize"), 0)
+        self.assertEqual(self.both(undriven, tied), 1)
+        out = (".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n")
+        buffered = out.replace(".outputs y\n", ".outputs y q\n")
+        gnd_q = buffered.replace(".end", ".names gnd\n.names gnd q\n1 1\n.end")
+        self.assertEqual(self.both(buffered, gnd_q, "--vtr-normalize"), 0)
+
+    def test_vtr_normalize_drops_unused_stubs_only(self) -> None:
+        stub = ".model adder\n.inputs a[0]\n.outputs sumout[0]\n.blackbox\n.end\n"
+        top = ".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n"
+        self.assertEqual(self.both(top + stub, top, "--vtr-normalize"), 0)
+        self.assertEqual(self.both(top + stub, top), 1)
+        used = (".model top\n.inputs a\n.outputs y\n.subckt adder a[0]=a sumout[0]=y\n.end\n"
+                + stub)
+        self.assertEqual(self.both(used, used + stub.replace("adder", "other"),
+                                   "--vtr-normalize"), 0)
+        self.assertEqual(self.both(used, top + stub, "--vtr-normalize"), 1)
+
     def test_wrapper_script(self) -> None:
         wrapper = helpers.REPO_ROOT / "tools" / "netlist-compare" / "netlist-compare"
         a, b = helpers.fixture("comb_parmys.blif"), helpers.fixture("comb_flipped.blif")

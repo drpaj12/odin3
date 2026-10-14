@@ -27,7 +27,8 @@
 #      change is compared with --vtr-normalize and listed "normalized".
 #   3. Odin II (*.odin.blif): netlist-compare --vtr-normalize G W1 identical.
 #   4. Odin II, written, no multiply/single_port_ram/dual_port_ram and at most one clock:
-#      equiv-check --timeout 600 G W1 (a timeout is listed; several clocks: "multiclock").
+#      equiv-check --allow-undriven --timeout 600 G W1 (a timeout is listed; several clocks:
+#      "multiclock"; --allow-undriven because the writer ties an undriven net to gnd, spec 9.2).
 #   Other files (fixtures such as hand_*.blif) get oracle 1 only. A refused file passes when its
 #   error class is one a golden may have (E1 E1b E3b E5 E6 E7 E8 E12) and the file is not one that
 #   must be refused: a falling-edge latch gives E1, a .names wider than 6 inputs gives E7, a
@@ -373,7 +374,7 @@ vtr_must_refuse() {
 vtr_equiv() {
     local a=$1 b=$2 log=$3 rc=0
     (ulimit -v "$BRT_NC_MEM_KB"
-     exec timeout -k 10 "$((BRT_EQUIV_TIMEOUT + 300))" "$BRT_EQUIV" --timeout "$BRT_EQUIV_TIMEOUT" \
+     exec timeout -k 10 "$((BRT_EQUIV_TIMEOUT + 300))" "$BRT_EQUIV" --allow-undriven --timeout "$BRT_EQUIV_TIMEOUT" \
          "$a" "$b") >"$log" 2>&1 || rc=$?
     case $rc in
     0) echo equivalent ;;

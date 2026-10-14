@@ -348,7 +348,7 @@ class EquivTest(RoundTripVtrBase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = self.equiv_log.read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(calls), 1)
-        self.assertTrue(calls[0].startswith("--timeout 600 "), calls)
+        self.assertTrue(calls[0].startswith("--allow-undriven --timeout 600 "), calls)
         self.assertIn("a.odin.blif", calls[0])
         self.assertEqual([row[6] for row in self.rows()], ["equivalent", "-"])
 
