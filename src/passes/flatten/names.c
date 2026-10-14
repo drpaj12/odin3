@@ -74,9 +74,20 @@ odin3_status odin3_flatten_name(odin3_flatten_ctx *fc, flat_key key, uint32_t *o
 }
 
 odin3_status odin3_flatten_memid(odin3_flatten_ctx *fc, uint32_t orig, uint32_t *out) {
+    const char *text = odin3_strtab_get(odin3_design_strtab(fc->design), orig);
+    uint64_t known = 0;
+    if (orig == 0 || text[0] == '\0') {
+        *out = orig; /* no memory name to prefix (review M9) */
+        return ODIN3_OK;
+    }
+    if (odin3_u64map_get(fc->memmap, orig, &known)) {
+        *out = (uint32_t)known; /* every cell of this memory in this instance: one new MEMID */
+        return ODIN3_OK;
+    }
     odin3_status st = build_name(fc, orig);
     st = st == ODIN3_OK ? uniquify(fc, FLAT_NODE, true, out) : st;
-    return st == ODIN3_OK ? odin3_u64map_put(fc->memids, (odin3_kv){*out, 1}) : st;
+    st = st == ODIN3_OK ? odin3_u64map_put(fc->memids, (odin3_kv){*out, 1}) : st;
+    return st == ODIN3_OK ? odin3_u64map_put(fc->memmap, (odin3_kv){orig, *out}) : st;
 }
 
 odin3_status odin3_flatten_set_prefix(odin3_flatten_ctx *fc, flat_label label) {

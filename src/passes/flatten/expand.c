@@ -58,8 +58,10 @@ void odin3_flatten_ctx_free(odin3_flatten_ctx *fc) {
     odin3_strbuf_free(&fc->scratch);
     odin3_u64map_destroy(fc->redirect);
     odin3_u64map_destroy(fc->memids);
+    odin3_u64map_destroy(fc->memmap);
     fc->redirect = NULL;
     fc->memids = NULL;
+    fc->memmap = NULL;
 }
 
 /* --- the net map ----------------------------------------------------------------------------- */
@@ -305,6 +307,11 @@ static odin3_status expand_one(odin3_flatten_ctx *fc, const flat_work *item) {
         return ODIN3_OK;
     }
     odin3_prov_begin_op(fc->pass);
+    odin3_u64map_destroy(fc->memmap);
+    fc->memmap = odin3_u64map_create(0);
+    if (fc->memmap == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
     fc->inst_prov = item->prov;
     fc->cache_to = 0;
     odin3_status st = odin3_flatten_path(fc, item);
@@ -317,7 +324,7 @@ static odin3_status expand_one(odin3_flatten_ctx *fc, const flat_work *item) {
     st = st == ODIN3_OK ? odin3_flatten_copy_nodes(fc) : st;
     st = st == ODIN3_OK ? odin3_flatten_copy_wires(fc) : st;
     st = st == ODIN3_OK ? odin3_flatten_check_joins(fc) : st;
-    fc->instances++;
+    fc->instances += st == ODIN3_OK ? 1 : 0;
     return st;
 }
 

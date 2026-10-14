@@ -694,6 +694,26 @@ static void test_flat_mem_memid(void) {
     TEST_ASSERT_EQUAL_STRING("mem", memid_of(sub, "mem")); /* the child is untouched */
 }
 
+/* A $mem, a $memrd and a $memwr that share MEMID "mem" in `sub`: after flatten the three cells of
+ * each instance still share one MEMID, and two instances get two (review I2). */
+static void test_flat_memid_shared_by_cells(void) {
+    odin3_module *sub = ff_module(&fix, "sub");
+    (void)make_word(sub, &(word_spec){"$mem", "m", "mem", NULL, NULL, 0});
+    (void)make_word(sub, &(word_spec){"$memrd", "rd", "mem", NULL, NULL, 0});
+    (void)make_word(sub, &(word_spec){"$memwr", "wr", "mem", NULL, NULL, 0});
+    odin3_module *top = ff_module(&fix, "top");
+    (void)ff_inst_bus(&fix, (ff_pair){top, sub}, "u1", NULL);
+    (void)ff_inst_bus(&fix, (ff_pair){top, sub}, "u2", NULL);
+    flatten_ok(top);
+    TEST_ASSERT_EQUAL_STRING("u1.mem", memid_of(top, "u1.m"));
+    TEST_ASSERT_EQUAL_STRING("u1.mem", memid_of(top, "u1.rd"));
+    TEST_ASSERT_EQUAL_STRING("u1.mem", memid_of(top, "u1.wr"));
+    TEST_ASSERT_EQUAL_STRING("u2.mem", memid_of(top, "u2.m"));
+    TEST_ASSERT_EQUAL_STRING("u2.mem", memid_of(top, "u2.rd"));
+    TEST_ASSERT_EQUAL_STRING("u2.mem", memid_of(top, "u2.wr"));
+    TEST_ASSERT_EQUAL_STRING("mem", memid_of(sub, "rd")); /* the child is untouched */
+}
+
 /* The widths and signedness of a word cell reach the copy unchanged. */
 static void test_flat_params_copied(void) {
     odin3_module *sub = ff_module(&fix, "sub");
@@ -991,6 +1011,7 @@ int main(void) {
     RUN_TEST(test_flat_oom);
     RUN_TEST(test_flat_bus);
     RUN_TEST(test_flat_mem_memid);
+    RUN_TEST(test_flat_memid_shared_by_cells);
     RUN_TEST(test_flat_params_copied);
     RUN_TEST(test_flat_net_names);
     RUN_TEST(test_flat_generate_names);

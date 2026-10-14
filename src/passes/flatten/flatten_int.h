@@ -60,6 +60,7 @@ typedef struct odin3_flatten_ctx {
     size_t head;
     odin3_u64map *redirect; /* dead root net -> kept root net */
     odin3_u64map *memids;   /* strtab IDs of the root's MEMIDs */
+    odin3_u64map *memmap;   /* this instance: the child's MEMID -> its new MEMID (one per memory) */
     /* the instance being expanded */
     const odin3_module *child;
     uint32_t child_id;
@@ -83,7 +84,8 @@ typedef struct odin3_flatten_ctx {
 /* prefix + name (the prefix already ends with the separator), made unique in the root for the
  * kind (`_1`, `_2`, ...). orig 0 gives 0 (unnamed objects stay unnamed). */
 odin3_status odin3_flatten_name(odin3_flatten_ctx *fc, flat_key key, uint32_t *out);
-/* The MEMID rewritten the same way against the root's MEMID set (which it extends). */
+/* The MEMID rewritten the same way against the root's MEMID set (which it extends). Once per
+ * (instance, original MEMID): $mem, $memrd and $memwr cells sharing a MEMID keep sharing it. */
 odin3_status odin3_flatten_memid(odin3_flatten_ctx *fc, uint32_t orig, uint32_t *out);
 /* "<text><sep>" as the prefix of the children of an instance named str (0: "$c<node>"). */
 odin3_status odin3_flatten_set_prefix(odin3_flatten_ctx *fc, flat_label label);
