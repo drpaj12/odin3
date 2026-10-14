@@ -22,16 +22,23 @@ common lowering (``opt_diff.Diff``; the step numbers are §20.3's). Every seed's
   seed by itself. With ``--expect-structural FILE`` (``tests/opt/gen_structural_expect.txt``: one
   ``SEED SCRIPT STEP | reason`` line per structural pair) a structural pair that is not listed
   fails the run, and a listed pair that no longer differs is reported as stale. Without the file
-  (a long run over many seeds, for which no list is kept) the run fails when more than
-  ``MAX_STRUCTURAL`` (15%, about 1.25 times the 9-16% seen on seeds 1..200) of its pairs are
-  structural.
-- A Yosys child that crashes or times out is an ``oracle crash``: counted and shown, and the run
-  fails when more than ``MAX_CRASH`` (10%) of its pairs crash (so one where every Yosys child
-  crashes fails); an Odin III child that fails is a failure.
+  (a long run over many seeds, for which no list is kept) every structural difference must still
+  be proved, and the run fails when more than ``MAX_UNPROVED`` (5%) of its pairs differ without
+  that proof (``refines only``: Odin III resolved an x that Yosys kept, or the reverse direction is
+  not provable). A ``structural`` pair is proved in both directions by construction. Seeds 1..200
+  and 1001..1050 gave 0 unproved pairs in 600, while the proved ones are 9-16% of the pairs and no
+  soundness question, so they are reported but not gated.
+- Only a crash of the oracle itself is an ``oracle crash``: Yosys dying (a signal, a cap kill or a
+  timeout) on the ``in.il`` that Odin III wrote. It is counted and shown, and the run fails when
+  more than ``MAX_CRASH`` (10%) of its pairs crash (so one where every Yosys child crashes fails).
+  Everything else is a failure of ours or of the tools and fails the seed: a crash or timeout of
+  Odin III, netlist-compare or a Yosys check of our own files exits 3; Yosys rejecting ``in.il`` or
+  ``odin.il``, or Odin III exiting with an error, exits 1.
 - ``--yosys-069 Y2`` (the nightly drift job): every (seed, script) also runs against Yosys 0.69; a
   different set of differing steps is ``oracle drift``, reported and counted, never a failure.
 
-Exit 0 every seed ok, 1 a seed failed or too many are structural, 2 usage or setup error.
+Exit 0 every seed ok, 1 a seed failed or too many differ unproved, 2 usage or setup error, 3 hard (a
+non-oracle child crashed, was killed or timed out), 77 skipped.
 """
 
 from __future__ import annotations
@@ -52,12 +59,12 @@ import opt_equiv
 TOOL = "opt-gen-diff"
 HERE = Path(__file__).resolve().parent
 PROFILE_PY = HERE.parent / "verilog-gen" / "opt_profile.py"
-EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_SKIP = 0, 1, 2, 77
+EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
 GIB = 1 << 30
 DEFAULT_CAP = 2 * GIB
 TOP = "t"
 DEFAULT_SCRIPTS = ("phase2", "opt -full")
-MAX_STRUCTURAL = 0.15  # of the (seed, script) pairs, when no expected list is given
+MAX_UNPROVED = 0.05  # of the (seed, script) pairs, when no expected list is given
 MAX_CRASH = 0.10  # of the (seed, script) pairs: Yosys children that crashed or timed out
 _RANGE = re.compile(r"(\d+)\.\.(\d+)")
 
@@ -100,6 +107,7 @@ class Pair:
     drift: str = ""
     crash: str = ""
     error: str = ""
+    hard: bool = False  # the error is a crash, kill or timeout of a child other than the oracle
     counters: str = ""
 
 
@@ -127,9 +135,11 @@ def make_diff(args: argparse.Namespace, yosys: str, work: Path) -> opt_diff.Diff
     return opt_diff.Diff(ns, work)
 
 
-def oracle_trouble(message: str) -> bool:
-    """True when an ``opt_diff`` ToolError names the Yosys child (an oracle crash or timeout)."""
-    return message.startswith("yosys") or "timed out" in message
+def oracle_trouble(exc: opt_equiv.ToolError) -> bool:
+    """True only for a crash, kill or timeout of the oracle itself: Yosys running on the ``in.il``
+    that Odin III wrote (step 2, ``what == "yosys"``). Yosys rejecting a file, and any failure of
+    Odin III, netlist-compare or a Yosys check of our own files, are ours (review I2)."""
+    return isinstance(exc, opt_equiv.CrashError) and exc.what == "yosys"
 
 
 def classify(diff: opt_diff.Diff, result: opt_diff.Result, run_dir: Path) -> Pair:
@@ -154,12 +164,15 @@ def run_pair(args: argparse.Namespace, files: Sequence[str], seed_dir: Path,
         result = diff.run(script, files)
     except opt_equiv.ToolError as exc:
         pair = Pair(script.slug)
-        if oracle_trouble(str(exc)):
+        if oracle_trouble(exc):
             pair.crash = str(exc)
         else:
-            pair.error = str(exc)
+            pair.error, pair.hard = str(exc), isinstance(exc, opt_equiv.CrashError)
         return pair
-    pair = classify(diff, result, seed_dir / script.slug)
+    try:
+        pair = classify(diff, result, seed_dir / script.slug)
+    except opt_equiv.ToolError as exc:  # the reverse refinement died: a failure of ours
+        return Pair(script.slug, error=str(exc), hard=isinstance(exc, opt_equiv.CrashError))
     if args.yosys_069:
         pair.drift = drift_against(args, files, seed_dir, script, pair.steps)
     return pair
@@ -235,7 +248,8 @@ def sweep(args: argparse.Namespace, seeds: range, work: Path) -> int:
     scripts = [opt_diff.script_named(n) for n in (args.script or list(DEFAULT_SCRIPTS))]
     expected = load_expected(args.expect_structural) if args.expect_structural else None
     seen: set[tuple[int, str, str]] = set()
-    totals = {"failed": 0, "pairs": 0, "structural": 0, "drift": 0, "crash": 0}
+    totals = {"failed": 0, "pairs": 0, "structural": 0, "unproved": 0, "drift": 0, "crash": 0,
+              "hard": 0}
     for seed in seeds:
         seed_dir = work / f"seed{seed}"
         seed_dir.mkdir(parents=True, exist_ok=True)
@@ -246,10 +260,13 @@ def sweep(args: argparse.Namespace, seeds: range, work: Path) -> int:
         seen |= {(seed, p.script, step) for p in pairs for step in p.structural}
         totals["pairs"] += len(pairs)
         totals["structural"] += sum(bool(p.structural) for p in pairs)
+        totals["unproved"] += sum("refines only" in p.structural.values() for p in pairs)
+        totals["hard"] += sum(p.hard for p in pairs)
         totals["drift"] += sum(bool(p.drift) for p in pairs)
         totals["crash"] += sum(bool(p.crash) for p in pairs)
     print(f"{TOOL}: {len(seeds)} seeds, {totals['pairs']} runs, {totals['failed']} seeds failed, "
-          f"{totals['structural']} structural, {totals['drift']} oracle drift, "
+          f"{totals['structural']} structural ({totals['structural'] - totals['unproved']} proved "
+          f"both ways, {totals['unproved']} not), {totals['drift']} oracle drift, "
           f"{totals['crash']} oracle crashes")
     if expected is not None:
         for key in sorted(k for k in expected if k[0] in seeds and k not in seen):
@@ -259,10 +276,12 @@ def sweep(args: argparse.Namespace, seeds: range, work: Path) -> int:
         print(f"{TOOL}: FAIL: {totals['crash']} of {totals['pairs']} runs had a Yosys crash "
               f"(the limit is {MAX_CRASH:.0%})")
         return EXIT_FAIL
-    if expected is None and totals["structural"] > MAX_STRUCTURAL * totals["pairs"]:
-        print(f"{TOOL}: FAIL: {totals['structural']} of {totals['pairs']} runs structural "
-              f"(the limit is {MAX_STRUCTURAL:.0%})")
+    if expected is None and totals["unproved"] > MAX_UNPROVED * totals["pairs"]:
+        print(f"{TOOL}: FAIL: {totals['unproved']} of {totals['pairs']} runs are structural and "
+              f"not proved both ways (the limit is {MAX_UNPROVED:.0%})")
         return EXIT_FAIL
+    if totals["hard"]:
+        return EXIT_CRASH
     return EXIT_FAIL if totals["failed"] else EXIT_OK
 
 
