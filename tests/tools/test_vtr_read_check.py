@@ -76,6 +76,9 @@ for line in text.splitlines():
         print("Error 1: \nType: Blif file\nMessage: " + line[len("# vpr-fake: reject "):])
         sys.exit(1)
     if line.startswith("# vpr-fake: kill"):
+        if line.strip() == "# vpr-fake: kill":  # the cap kills it: the cgroup counts it
+            with open(os.environ["FAKE_EVENTS"], "a") as ev:
+                ev.write("x")
         os.kill(os.getpid(), 9)
     if line.startswith("# vpr-fake: assert"):
         print("/x/netlist.tpp:1951 f: Assertion 'a == b' failed (Must be no existing net driver).",
@@ -124,10 +127,22 @@ class ReadCheckBase(unittest.TestCase):
         self.work = self.tmp / "work"
         self.env = mock.patch.dict(os.environ, {"FAKE_LOG": str(self.log)})
         self.env.start()
-        self.inside = mock.patch.object(qor_heavy, "reexec_under_lock")
+        self.scope_dir = self.tmp / "scope"
+        self.scope_dir.mkdir()
+        self.events = self.tmp / "events"
+        self.events.write_text("", encoding="utf-8")
+        self.env_events = mock.patch.dict(os.environ, {"FAKE_EVENTS": str(self.events)})
+        self.env_events.start()
+        self.scope = qor_heavy.ScopeInfo(self.scope_dir, self.scope_dir, 6 * 1024**3, True)
+        self.inside = mock.patch.object(qor_heavy, "reexec_under_lock", return_value=self.scope)
         self.reexec = self.inside.start()
+        self.kills = mock.patch.object(
+            qor_heavy, "oom_kills", side_effect=lambda _s: len(self.events.read_text()))
+        self.kills.start()
 
     def tearDown(self) -> None:
+        self.kills.stop()
+        self.env_events.stop()
         self.inside.stop()
         self.env.stop()
         self._tmp.cleanup()
@@ -319,13 +334,36 @@ class SweepTest(ReadCheckBase):
         self.assertEqual(code, 0, out + err)
         self.assertEqual(self.rows()[0][3:6], ["E12", "-", "crash"])
 
-    def test_a_step_the_cap_kills_is_capped_not_failed(self) -> None:
-        self.add("big/big.parmys.blif", netlist("# vpr-fake: kill"))
+    def test_a_listed_step_the_cap_kills_is_capped_listed_not_pass(self) -> None:
+        self.add("bgm/bgm.parmys.blif", netlist("# vpr-fake: kill"))
         code, out, err = self.run_main()
         self.assertEqual(code, 0, out + err)
         row = self.rows()[0]
-        self.assertEqual((row[4], row[5], row[8]), ("oom", "oom", "capped"))
-        self.assertIn("  verdict capped: 1", out)
+        self.assertEqual((row[4], row[5], row[8]), ("oom", "oom", "capped (listed)"))
+        self.assertIn("  verdict capped (listed): 1", out)
+        self.assertIn("  verdict pass: 0", out)
+        self.assertIn("memory cap 6 GiB", out)
+
+    def test_an_unlisted_capped_file_fails(self) -> None:
+        self.add("big/big.parmys.blif", netlist("# vpr-fake: kill"))
+        code, out, _ = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn("not in EXPECTED_CAPPED (big)", out)
+        self.assertEqual(self.rows()[0][8], "fail")
+
+    def test_a_listed_file_that_reads_fine_is_a_stale_entry(self) -> None:
+        self.add("LargeRam/LargeRam.odin.blif", netlist())
+        code, out, _ = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn("listed in EXPECTED_CAPPED but read fine", out)
+
+    def test_a_sigkill_the_cap_did_not_make_is_a_crash_not_capped(self) -> None:
+        self.add("bgm/bgm.parmys.blif", netlist("# vpr-fake: kill-outside"))
+        code, out, _ = self.run_main()
+        self.assertEqual(code, 1)
+        row = self.rows()[0]
+        self.assertEqual((row[5], row[8]), ("crash", "fail"))
+        self.assertIn("SIGKILL without an oom_kill", out)
 
     def test_an_odin3_failure_fails(self) -> None:
         self.add("x/x.parmys.blif", netlist("# fake: crash"))

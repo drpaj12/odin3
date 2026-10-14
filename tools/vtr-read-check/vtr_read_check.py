@@ -25,9 +25,13 @@ reader at a fraction of a route's cost. The verdict of a file is spec §16.4's:
   ``listed``;
 - the checker's verdict on G equals VPR's.
 
-A step the 6 GiB cap kills (SIGKILL: VPR or the checker on the largest designs) is ``oom``, and
-the file's verdict ``capped``: unverified, not failed. It is listed and does not change the exit
-code; ``--xl`` (9 GiB, the controller's) is the way to run it. (Agent default.)
+A step the memory cap kills (VPR or the checker on the largest designs) is ``oom``, and the
+file's verdict ``capped (listed)``: unverified, never ``pass``. A SIGKILL counts as the cap's only
+when the capping cgroup's ``oom_kill`` counter moved during the step (read before and after);
+otherwise (an outside ``kill -9``) the step is a crash and the file fails. The cap is printed in
+GiB. A capped file must be in ``EXPECTED_CAPPED`` (with its evidence): an unlisted capped file
+fails, and so does a listed file that no longer caps (a stale entry). ``--xl`` (9 GiB, the
+controller's) is the way to read the listed files. (Agent default.)
 
 ``--bad-corpus DIR`` runs VPR and the checker on each ``*.blif`` under DIR (``tests/vtr/blif-bad``)
 instead: VPR must reject exactly the files the checker rejects, and the message in a file's
@@ -60,7 +64,7 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -90,9 +94,15 @@ FAIL = "fail"
 NA = "-"
 PASS = "pass"
 LISTED = "listed"
-CAPPED = "capped"
+CAPPED_LISTED = "capped (listed)"
 OOM = "oom"
-SIGKILL_EXITS = (-9, 137)  # the memory cap kills a step (heavy-run's scope: OOMPolicy=continue)
+SIGKILL_EXITS = (-9, 137)  # a SIGKILLed step: the cap's only when oom_kill moved (Step.oom_kills)
+GIB = 1024**3
+# Designs the 6 GiB cap is known to kill (the golden file's stem; every tool and tree). Evidence:
+# the 3E-4 sweep (release build, tools/heavy-run, 2026-10-14) had VPR SIGKILLed with the cgroup's
+# oom_kill counter moving, on both G and W, for all seven files of these four designs (the
+# checker alone holds about 3 GB on LU64PEEng). An unlisted capped file is a failure.
+EXPECTED_CAPPED = frozenset({"bgm", "LU32PEEng", "LU64PEEng", "LargeRam"})
 
 # The refusal lines of `write_blif --vtr` (spec §11): the text that tells the class.
 CLASS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -181,6 +191,7 @@ class Step:
     stderr: str
     seconds: float
     timed_out: bool = False
+    oom_kills: int = 0  # the capping cgroup's oom_kill counter moved by this much during the step
 
 
 @dataclass
@@ -230,6 +241,12 @@ class ReadCtx:
     timeout: int = DEFAULT_TIMEOUT
     techlib: Path = TECHLIB
     counter: int = field(default=0)
+    kills: Callable[[], int] | None = None  # the capping cgroup's oom_kill counter, if verified
+    cap_gib: float | None = None
+
+    def step(self, argv: Sequence[str], cwd: Path) -> Step:
+        """``run_step`` with the oom_kill delta recorded."""
+        return run_step(argv, cwd, self.timeout, self.kills)
 
     def fresh_dir(self) -> Path:
         """A new, empty ``<work>/<n>`` (``<n>.<k>`` when an earlier failed run left ``<n>``)."""
@@ -243,8 +260,19 @@ class ReadCtx:
         return path
 
 
-def run_step(argv: Sequence[str], cwd: Path, timeout: int) -> Step:
-    """Run argv in cwd with the caller's environment, capturing its output; a timeout is a step."""
+def run_step(
+    argv: Sequence[str], cwd: Path, timeout: int, kills: Callable[[], int] | None = None
+) -> Step:
+    """Run argv in cwd with the caller's environment, capturing its output; a timeout is a step.
+    ``kills`` reads the cap's oom_kill counter: its delta over the step is ``Step.oom_kills``."""
+    before = kills() if kills is not None else 0
+    step = _run_step(argv, cwd, timeout)
+    if kills is not None:
+        step.oom_kills = max(0, kills() - before)
+    return step
+
+
+def _run_step(argv: Sequence[str], cwd: Path, timeout: int) -> Step:
     start = time.monotonic()
     try:
         proc = subprocess.run(
@@ -265,11 +293,14 @@ def run_step(argv: Sequence[str], cwd: Path, timeout: int) -> Step:
 def vpr_verdict(step: Step) -> VprRun:
     """VPR's verdict from a finished run: exit 0 ok; exit 1 fail with its ``Message:``; a signal
     (an assertion aborts) or any other exit a crash, with the assertion's text when it has one;
-    SIGKILL is ``oom``, the memory cap's kill (the file is then unverified, not failed)."""
+    SIGKILL is ``oom`` only when the cap's oom_kill counter moved (the file is then unverified,
+    not failed); any other SIGKILL is a crash."""
     if step.timed_out:
         return VprRun("timeout", "timed out")
     if step.returncode in SIGKILL_EXITS:
-        return VprRun(OOM, "killed (memory cap)")
+        if step.oom_kills > 0:
+            return VprRun(OOM, "killed (memory cap)")
+        return VprRun("crash", "SIGKILL without an oom_kill (not the memory cap)")
     if step.returncode == 0:
         return VprRun(OK, "")
     assertion = VPR_ASSERTION.search(step.output)
@@ -288,22 +319,22 @@ def run_vpr(ctx: ReadCtx, netlist: Path, where: Path) -> VprRun:
     where.mkdir(parents=True, exist_ok=True)
     argv = [str(ctx.vpr), str(ctx.arch), str(netlist), "--circuit_format", "blif",
             "--exit_before_pack", "on"]
-    return vpr_verdict(run_step(argv, where, ctx.timeout))
+    return vpr_verdict(ctx.step(argv, where))
 
 
 def checker_verdict(step: Step) -> str:
     """ok (exit 0), fail (exit 1: violations), oom (killed by the memory cap) or error (exit 2, a
-    crash or a timeout)."""
+    crash, a timeout or a SIGKILL the cap did not make)."""
     if step.timed_out:
         return "timeout"
     if step.returncode in SIGKILL_EXITS:
-        return OOM
+        return OOM if step.oom_kills > 0 else "error"
     return {0: OK, 1: FAIL}.get(step.returncode, "error")
 
 
 def run_checker(ctx: ReadCtx, netlist: Path, extra: Sequence[str] = ()) -> str:
     argv = [str(ctx.checker), *extra, str(netlist)]
-    return checker_verdict(run_step(argv, netlist.parent, ctx.timeout))
+    return checker_verdict(ctx.step(argv, netlist.parent))
 
 
 def tool_of(golden: Path) -> str:
@@ -315,7 +346,7 @@ def tool_of(golden: Path) -> str:
 def write_netlist(ctx: ReadCtx, golden: Path, out: Path, where: Path) -> Step:
     """``odin3 -p "read_techlib …; read_blif G; write_blif --vtr W"`` in ``where``."""
     script = f'read_techlib "{ctx.techlib}"; read_blif "{golden}"; write_blif --vtr "{out}"'
-    return run_step([str(ctx.odin3), "-p", script], where, ctx.timeout)
+    return ctx.step([str(ctx.odin3), "-p", script], where)
 
 
 def judge_written(vpr_w: VprRun, checker_w: str) -> str:
@@ -394,9 +425,14 @@ def run_one(g: Path, ctx: ReadCtx) -> Row:
         last = write.stderr.strip().splitlines()[-1:] or [f"exit {write.returncode}"]
         reasons.append(f"odin3 failed: {last[0]}")
     reasons.append(judge_agreement(vpr_g, row.checker_g))
-    row.reason = "; ".join(r for r in reasons if r)
     capped = OOM in (row.vpr_g, row.vpr_w, row.checker_g, row.checker_w)
-    row.verdict = FAIL if row.reason else CAPPED if capped else verdict
+    stem = g.name.split(".")[0]
+    if capped and stem not in EXPECTED_CAPPED:
+        reasons.append(f"capped by the memory cap but not in EXPECTED_CAPPED ({stem})")
+    elif not capped and stem in EXPECTED_CAPPED:
+        reasons.append(f"listed in EXPECTED_CAPPED but read fine ({stem}): a stale entry")
+    row.reason = "; ".join(r for r in reasons if r)
+    row.verdict = FAIL if row.reason else CAPPED_LISTED if capped else verdict
     row.seconds = time.monotonic() - start
     if row.verdict != FAIL:
         remove_run(where, ctx.work)
@@ -433,8 +469,8 @@ def bad_corpus(corpus: Path, ctx: ReadCtx) -> int:
     for path in sorted(corpus.rglob("*.blif")):
         expected = vpr_line(path)
         where = ctx.fresh_dir()
-        step = run_step([str(ctx.vpr), str(ctx.arch), str(path), "--circuit_format", "blif",
-                         "--exit_before_pack", "on"], where, ctx.timeout)
+        step = ctx.step([str(ctx.vpr), str(ctx.arch), str(path), "--circuit_format", "blif",
+                         "--exit_before_pack", "on"], where)
         checker = run_checker(ctx, path)
         rejected = step.returncode != 0
         problems = []
@@ -510,7 +546,7 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def summarize(rows: list[Row], report: Path) -> None:
+def summarize(rows: list[Row], report: Path, ctx_cap: float | None = None) -> None:
     """The counts: written and refused per tool and class, verdicts, run times."""
     counts: dict[tuple[str, str], int] = {}
     for row in rows:
@@ -519,8 +555,10 @@ def summarize(rows: list[Row], report: Path) -> None:
     print(f"{PROG}: {len(rows)} goldens")
     for (tool, what), n in sorted(counts.items()):
         print(f"  {tool}: {what}: {n}")
-    for verdict in (PASS, LISTED, CAPPED, FAIL):
+    for verdict in (PASS, LISTED, CAPPED_LISTED, FAIL):
         print(f"  verdict {verdict}: {sum(1 for r in rows if r.verdict == verdict)}")
+    if ctx_cap is not None:
+        print(f"  memory cap {ctx_cap:g} GiB: capped (listed) files were not read by VPR")
     print(f"  total {sum(r.seconds for r in rows):.0f} s; report {report}")
 
 
@@ -543,7 +581,7 @@ def sweep(args: argparse.Namespace, ctx: ReadCtx) -> int:
             out.flush()
             if row.verdict == FAIL:
                 print(f"{PROG}: FAIL {row.golden}: {row.reason}", flush=True)
-    summarize(rows, report)
+    summarize(rows, report, ctx.cap_gib)
     return 1 if any(row.verdict == FAIL for row in rows) else 0
 
 
@@ -568,10 +606,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         ctx.work.mkdir(parents=True, exist_ok=True)
         return bad_corpus(absolute(args.bad_corpus), ctx)
     try:
-        qor_heavy.reexec_under_lock(given, script=SCRIPT, lock=qor_heavy.HEAVY_LOCK)
+        scope = qor_heavy.reexec_under_lock(given, script=SCRIPT, lock=qor_heavy.HEAVY_LOCK)
     except HeavyError as exc:
         print(f"{PREFIX}{exc.message}", file=sys.stderr)
         return exc.code
+    if isinstance(scope, qor_heavy.ScopeInfo):
+        ctx.kills = lambda: qor_heavy.oom_kills(scope)
+        ctx.cap_gib = scope.memory_max / GIB
     return sweep(args, ctx)
 
 
