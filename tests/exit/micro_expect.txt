@@ -1,0 +1,82 @@
+# The `listed-reject` class (PHASE2 #4's exceptions; 2H): micros of tests/micro/verilog that have no
+# Parmys golden because Parmys ITSELF rejected the design. It counts as passing, so every entry needs
+# a needle. One line per micro: `<path relative to tests/micro/verilog> [needle] <one-line reason>`,
+# the same syntax and matching as elab-sweep's lists. `exit-check` classifies a golden whose recorded
+# status is `failed` as a `reject` (a failure unless listed here), and the needle must appear in its
+# log: `[Parmys rejected the design]` is exit-check's own message. The reason is the first error line
+# of the oracle's log (golden/<arch>/regression/verilog/<group>/<leaf>/<leaf>.parmys.log), which
+# `golden/` keeps. Rejections that are oracle-HARNESS gaps (a missing include or -D) are not here:
+# they are `no-golden` (tests/exit/micro_nogolden.txt, 40 micros), which never counts as a pass.
+# A micro whose golden run was CAPPED (large/LargeRam.v) is NOT listed: a cap kill is no verdict on
+# the design, so it stays an unexpected `error` until its golden is regenerated with a larger
+# ODIN3_ORACLE_MEM_MB. A `differs`, an `error` and a `hard` failure are never listable.
+#
+# The list must shrink, never rot: exit-check fails on a listed micro that now passes and on an
+# entry that names no micro.
+
+common/nrnw.v [Parmys rejected the design] Parmys rejects it: Yosys aborts (exit 134): block_memory.cc:1040 create_nrmw_dual_port_ram: Assertion num_wr_ports > 1 failed
+keywords/.generic/wire_test.v [Parmys rejected the design] Parmys rejects it: ERROR: Duplicate definition of module dual_port_ram!
+keywords/always/always_posedge_negedge.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+keywords/automatic/recursive_function.v [Parmys rejected the design] Parmys rejects it: Parmys fails on the recursive function (see the golden log)
+keywords/automatic/recursive_task.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_INTEGER, expecting TOK_ID
+keywords/default/multiple_defaults_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+keywords/defparam/defparam.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't find object for defparam `simple_op.m1.width`!
+keywords/defparam/defparam_depth_1_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `assg' referenced in module `simple_op' in cell `m2' does not have a parameter named 'width'.
+keywords/defparam/defparam_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't find object for defparam `simple_op.m1.width`!
+keywords/defparam/defparam_simple_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't find object for defparam `simple_op.m1.width`!
+keywords/defparam/defparam_string.v [Parmys rejected the design] Parmys rejects it: ERROR: Can't find object for defparam `simple_op.msg`!
+keywords/function_endfunction/function_input_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+keywords/function_endfunction/time_control_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+keywords/inout/double_assign_inout.v [Parmys rejected the design] Parmys rejects it: ERROR: Assertion failed: selection is not empty: %
+keywords/inout/inout_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: BUF_NODE
+keywords/inout/simple_inout.v [Parmys rejected the design] Parmys rejects it: ERROR: BUF_NODE
+keywords/input/input_port_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Module port `\a' is not declared in module header.
+keywords/integer/integer_outside.v [Parmys rejected the design] Parmys rejects it: ERROR: Incompatible re-declaration of wire \c.
+keywords/macromodule/macromodules_modules.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+keywords/macromodule/missing_endmodule_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+keywords/macromodule/multiple_macromodules.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+keywords/macromodule/multiple_topmodules.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+keywords/macromodule/repeated_macromodule_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+keywords/module_endmodule/missing_endmodule_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected end of file
+keywords/module_endmodule/repeated_module_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Re-definition of module `\simple_op'!
+keywords/output/output_port_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: Module port `\b' is not declared in module header.
+keywords/specparam/specparam_failure.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_SPECPARAM
+keywords/while/while_loop.v [Parmys rejected the design] Parmys rejects it: ERROR: While loops are only allowed in constant functions!
+large/paj_boundtop_hierarchy_no_mem.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+large/paj_framebuftop_hierarchy_no_mem.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+large/paj_raygentop_hierarchy_no_mem.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+large/paj_top_hierarchy_no_mem.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+operators/macromudule_test.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+preprocessor/default_net.v [Parmys rejected the design] Parmys rejects it: ERROR: Unsupported default nettype: tri
+preprocessor/elsif_both_defined.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+preprocessor/ifdef_undefined.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+preprocessor/ifndef_defined.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+preprocessor/nested_operation_define.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+preprocessor/undef.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+syntax/basic_expression_in_function_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/basic_expression_in_task_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/bitwise_op_expression_in_function_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/bitwise_op_expression_in_task_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/bm_function_1.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+syntax/bm_function_2.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+syntax/conditional_expression_in_function_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/conditional_expression_in_task_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/deassign.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ASSIGN
+syntax/diffeq_f_systemC.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+syntax/fir_scu_rtl_restructured_for_cmm_exp.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+syntax/instantiated_by_name_function_invalid.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiated_by_name_function_invalid_1.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiated_by_name_function_valid.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiated_by_name_task_invalid.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiated_by_name_task_invalid_1.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiated_by_name_task_valid.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/instantiating_by_name_invalid.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `and2' referenced in module `top' in cell `a1' does not have a port named 'in3'.
+syntax/instantiating_by_name_invalid_1.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `and2' referenced in module `top' in cell `a1' does not have a port named 'in3'.
+syntax/instantiating_by_name_invalid_mix_ports.v [Parmys rejected the design] Parmys rejects it: ERROR: Mix of positional and named cell ports.
+syntax/instantiating_by_name_valid.v [Parmys rejected the design] Parmys rejects it: ERROR: Module port `\in3' is not declared in module header.
+syntax/matrix_multiplication.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
+syntax/mix_expression_in_function_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/mix_expression_in_task_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/top_and.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `\and_primitive' referenced in module `\top_and' in cell `\and4' is not part of the design.
+#
+# --- a splice hand-over gap, not a Parmys rejection (it HAS a golden): an error, the design is UNPROVEN ---

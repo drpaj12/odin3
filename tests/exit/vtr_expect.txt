@@ -1,0 +1,7 @@
+# The VTR benchmarks (paths relative to $VTR_ROOT/vtr_flow/benchmarks/verilog) that exit-check may
+# report as a listed rejection (Parmys itself rejects the design: the `listed-reject` class, which
+# counts as passing, one per line: `<path> [needle] <one-line reason>`, elab-sweep's syntax). There are
+# none: every VTR benchmark with a golden has a Parmys netlist. A `differs`, an `error` and a `hard`
+# failure (a crash, a cap kill, a timeout) are never listable. Designs equiv-check cannot decide are
+# in vtr_unproven.txt (their own bucket, never a pass); eq-x designs are in vtr_eqx.txt (the reviewed
+# record of the excluded outputs). The list must shrink, never rot.

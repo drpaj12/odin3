@@ -25,15 +25,17 @@ MEMINFO_32G = "MemTotal:       33554432 kB\nMemFree:        1000 kB\n"
 PHASE2_SCRIPT = helpers.REPO_ROOT / "tools" / "opt-check" / "phase2.script"
 
 ODIN3_SCRIPT = (
-    "read_verilog --nomem2reg /vtr/prim.v; "
+    "read_techlib /lib/vtr.o3lib; read_verilog --lib --nomem2reg /vtr/prim.v; "
     "read_verilog --nolatches --vtr-compat /src/a.v /src/b.v; "
     "hierarchy --top top; opt_expr; opt_clean; opt -nodffe -nosdff; proc; write_rtlil a.il"
 )
 YOSYS_SCRIPT = (
-    "plugin -i parmys; yosys -import; parmys_arch -a /arch/k6.xml; read_rtlil a.il; "
+    "plugin -i parmys; yosys -import; parmys_arch -a /arch/k6.xml; "
+    "read_verilog -nomem2reg /vtr/prim.v; "
     "setattr -mod -set keep_hierarchy 1 single_port_ram; "
     "setattr -mod -set keep_hierarchy 1 dual_port_ram; "
-    "hierarchy -check -auto-top -purge_lib; "
+    "read_rtlil -nooverwrite a.il; "
+    "hierarchy -check -auto-top -purge_lib; procs -norom; "
     "fsm; opt; wreduce; peepopt; opt_clean; share; opt -full; memory -nomap; flatten; opt -full; "
     "techmap -map +/parmys/adff2dff.v; techmap -map +/parmys/adffe2dff.v; "
     "techmap -map +/parmys/aldff2dff.v; techmap -map +/parmys/aldffe2dff.v; opt -full; "
@@ -119,7 +121,8 @@ class SpSpliceTest(unittest.TestCase):
     def run_tool(self, *args: str, extra: dict[str, str] | None = None,
                  files: list[Path] | None = None) -> tuple[int, str, str]:
         argv = ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--arch", "/arch/k6.xml",
-                "--top", "top", "--primitives", "/vtr/prim.v", "--keep", str(self.keep), *args,
+                "--top", "top", "--primitives", "/vtr/prim.v", "--techlib", "/lib/vtr.o3lib",
+                "--keep", str(self.keep), *args,
                 *map(str, files or [self.a, self.b])]
         with mock.patch.dict(os.environ, extra or {}):
             return helpers.run_main(sp_splice.main, argv)
@@ -150,7 +153,7 @@ class SpSpliceTest(unittest.TestCase):
     def test_odin3_half_spellings(self) -> None:
         self.run_tool()
         script = self.scripts()[0][1]
-        self.assertIn("read_verilog --nomem2reg /vtr/prim.v;", script)
+        self.assertIn("read_verilog --lib --nomem2reg /vtr/prim.v;", script)
         self.assertIn("read_verilog --nolatches --vtr-compat ", script)
         self.assertIn("hierarchy --top top;", script)
         self.assertNotIn("-sv", script)
@@ -165,6 +168,25 @@ class SpSpliceTest(unittest.TestCase):
         self.assertEqual(odin3[:4], ["odin3", "--top", "top", "-p"])
         self.assertIn("hierarchy --top top;", odin3[4])
 
+    def test_yosys_half_matches_vtr_state_at_hierarchy(self) -> None:
+        """2H: synthesis.tcl's steps 1 to 4 in order: the primitives, keep_hierarchy on the two
+        RAMs, our design (a.il; a stub of the same name does not replace the real module), then
+        hierarchy; the library modules' processes are lowered as VTR's `procs -norom` does."""
+        self.run_tool()
+        yosys = self.scripts()[1][1].split("; ")
+        start = yosys.index("read_verilog -nomem2reg /vtr/prim.v")
+        self.assertEqual(yosys[start:start + 6], [
+            "read_verilog -nomem2reg /vtr/prim.v",
+            "setattr -mod -set keep_hierarchy 1 single_port_ram",
+            "setattr -mod -set keep_hierarchy 1 dual_port_ram",
+            "read_rtlil -nooverwrite a.il",
+            "hierarchy -check -auto-top -purge_lib",
+            "procs -norom"])
+
+    def test_default_techlib_is_the_repo_one(self) -> None:
+        self.assertEqual(sp_splice.DEFAULT_TECHLIB, helpers.REPO_ROOT / "lib" / "vtr.o3lib")
+        self.assertTrue(sp_splice.DEFAULT_TECHLIB.is_file())
+
     def test_top_stays_on_the_odin3_side(self) -> None:
         self.run_tool()
         odin3, yosys = (script for _, script in self.scripts())
@@ -174,12 +196,15 @@ class SpSpliceTest(unittest.TestCase):
         self.assertIn("hierarchy -check -auto-top -purge_lib", yosys)
 
     def test_pre_commands_and_no_primitives(self) -> None:
-        code, _, _ = self.run_tool("--odin3-pre", "read_techlib /lib/vtr.o3lib", "--no-primitives",
-                                   "--primitives", "")
+        code, _, _ = self.run_tool("--odin3-pre", "read_techlib /lib/other.o3lib", "--no-techlib",
+                                   "--no-primitives", "--primitives", "")
         self.assertEqual(code, 0)
         expected = ODIN3_SCRIPT.replace("/src/a.v", str(self.a)).replace("/src/b.v", str(self.b))
-        expected = expected.replace("read_verilog --nomem2reg /vtr/prim.v; ", "")
-        self.assertEqual(self.scripts()[0][1], "read_techlib /lib/vtr.o3lib; " + expected)
+        expected = expected.replace("read_techlib /lib/vtr.o3lib; ", "")
+        expected = expected.replace("read_verilog --lib --nomem2reg /vtr/prim.v; ", "")
+        self.assertEqual(self.scripts()[0][1], "read_techlib /lib/other.o3lib; " + expected)
+        # The Yosys half still reads VTR's own spelling of the primitives (synthesis.tcl step 1).
+        self.assertIn("read_verilog -nomem2reg +/parmys/vtr_primitives.v; ", self.scripts()[1][1])
 
     def test_no_config_leaves_parmys_without_c(self) -> None:
         self.run_tool()
@@ -189,7 +214,7 @@ class SpSpliceTest(unittest.TestCase):
         commands = phase2_commands()
         script = self.expected_odin3().replace("/vtr/prim.v", "P")
         halves = script.split("; ")
-        self.assertEqual(halves[3:8], commands[:4] + ["write_rtlil a.il"])
+        self.assertEqual(halves[4:9], commands[:4] + ["write_rtlil a.il"])
 
     def test_scc_precheck_runs_first_in_yosys_spelling(self) -> None:
         code, _, _ = self.run_tool("--scc-precheck")

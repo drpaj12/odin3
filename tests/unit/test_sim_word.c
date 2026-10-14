@@ -1149,7 +1149,8 @@ static bits bits_of(const big *val, uint32_t width) {
     return out;
 }
 
-/* One multiply cell (params NULL: the 36x36 defaults); every pattern pair plus random vectors. */
+/* One multiply cell (WIDTH in params; NULL is VTR's default 1); every pattern pair plus random
+ * vectors. */
 static void check_multiply(const odin3_value *params, binary_widths wid) {
     odin3_module *top = new_module();
     bus port[3];
@@ -1183,11 +1184,12 @@ static const char *const k_mul_names[3] = {"a", "b", "out"};
 
 static void test_multiply_36x36(void) {
     read_vtr_lib();
-    check_multiply(NULL, (binary_widths){36, 36, 72});
+    const odin3_value w36[1] = {odin3_value_int(36)};
+    check_multiply(w36, (binary_widths){36, 36, 72});
     /* the largest product: (2^36 - 1)^2 = 2^72 - 2^37 + 1 */
     static const uint32_t k_w36[3] = {36, 36, 72};
     const cell_ports cp = {k_mul_names, k_w36, 2, 3};
-    odin3_sim *sim = build_cell("multiply", NULL, &cp);
+    odin3_sim *sim = build_cell("multiply", w36, &cp);
     bits ones = pattern((sized){1, 36});
     set_port(sim, 0, &ones);
     set_port(sim, 1, &ones);
@@ -1203,11 +1205,8 @@ static void test_multiply_36x36(void) {
 static void test_multiply_param_widths(void) {
     read_vtr_lib();
     for (uint32_t i = 0; i < N_WIDTHS; i++) {
-        for (uint32_t j = 0; j < N_WIDTHS; j++) {
-            const odin3_value params[2] = {odin3_value_int(k_widths[i]),
-                                           odin3_value_int(k_widths[j])};
-            check_multiply(params, (binary_widths){k_widths[i], k_widths[j], 0});
-        }
+        const odin3_value params[1] = {odin3_value_int(k_widths[i])};
+        check_multiply(params, (binary_widths){k_widths[i], k_widths[i], 0});
     }
 }
 
@@ -1639,7 +1638,7 @@ static void test_fn_hook_does_not_allocate(void) {
     read_vtr_lib();
     static const uint32_t k_w65[3] = {65, 65, 130};
     const cell_ports cp = {k_mul_names, k_w65, 2, 3};
-    const odin3_value params[2] = {odin3_value_int(65), odin3_value_int(65)};
+    const odin3_value params[1] = {odin3_value_int(65)};
     odin3_sim *sim = build_cell("multiply", params, &cp);
     bits a_val = pattern((sized){4, 65});
     bits b_val = pattern((sized){5, 65});
@@ -1666,7 +1665,8 @@ static void test_build_oom_sweep(void) {
     in_bus(top, "b", 36, &port[1]);
     out_bus(top, "out", 72, &port[2]);
     const bus *const buses[3] = {&port[0], &port[1], &port[2]};
-    add_cell(top, type_id("multiply"), NULL, buses);
+    const odin3_value w36[1] = {odin3_value_int(36)};
+    add_cell(top, type_id("multiply"), w36, buses);
     odin3_status st = ODIN3_ERR_NO_MEMORY;
     long fails = 0;
     for (; st == ODIN3_ERR_NO_MEMORY; fails++) {

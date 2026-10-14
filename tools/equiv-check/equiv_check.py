@@ -3,11 +3,30 @@
 Usage::
 
     equiv-check A.blif B.blif [--abc PATH] [--keep-temp] [--strict-init] [--no-io-normalize]
-                [--no-cut]
+                [--no-cut] [--match-unnamed] [--x-report]
 
 Exit 0 equivalent, 1 not equivalent (including mismatched primary I/O sets and black-box
-cut-point inputs that are wired differently), 2 usage, input, unsupported-construct or ABC
-error, and black-box instances that cannot be matched one-to-one.
+cut-point inputs that are wired differently; the output then holds a line that starts
+``equiv-check: NOT equivalent``, and exit 1 means nothing else), 2 usage, input,
+unsupported-construct or ABC error, an uncaught internal error, and black-box instances that
+cannot be matched one-to-one; 3 only with ``--x-report``: not equivalent, but equivalent outside
+the x-cones (below); 4 *unproven*: no verdict either way, a tool limit and not a crash (ABC
+timed out, several clock domains, or the check failed only where black-box pairs were
+guessed); 5 *hard*: ABC was killed by a signal, or this process ran out of memory.
+
+``--x-report`` (2H, 2D spec 14.6 item 4): when the two netlists are not equivalent, recompute
+with every output in an x-cone removed and print the removed outputs by name.  Parmys writes a
+surviving don't-care x as the net ``unconn`` (``.names unconn`` with no rows: constant 0).  The
+x-cone of a netlist is everything the net ``unconn`` reaches going forward, through covers and
+through latches (so a latch whose D input is in the cone puts its Q, and the outputs behind it,
+in the cone).  An output is removed when it is in the x-cone of *either* netlist; a black box's
+probed inputs are outputs like any other.  If the netlists are equivalent on the remaining
+outputs the exit code is 3 and ``x-cone: NAME`` lines list the removed ones.  If no output is
+in an x-cone, or none is left, or the remainder still differs, the verdict stays "not
+equivalent" (exit 1).  The removal is coarse: an output that depends on x for one input vector
+only is removed whole.  The cone follows x through a cut black box: when any input pin of a
+box is in the cone, every output pin of that box is, so the outputs behind it are removed and
+listed as well (a RAM whose address is x has an x read data, whatever the other netlist reads).
 
 Each netlist is flattened in Python into one model (``.subckt`` of models defined in the
 same file are inlined; the VTR ``adder`` hard block is replaced by logic; other black boxes
@@ -40,17 +59,57 @@ state is not modelled: only its connections are compared.  The cut is on wheneve
 boxes are present; ``--no-cut`` restores the old behaviour of rejecting them (exit 2, and
 ``.gate`` is rejected as an unsupported directive).
 
+``--match-unnamed`` (2H; spelled ``--match-dollar`` before) matches every black box that has no
+``.cname`` by *simulation signature* instead of by a name: Parmys writes no ``.cname`` for its hard
+blocks and numbers their output nets with counters (``$mul~14[0]``,
+``dual_port_ram^MEM~0-30^out1[0]``) that differ between two runs.  The signature of a box is its
+cell type, its parameters, its port widths and the function of each of its input bits.  Both
+netlists are simulated on the same random vectors (biased, primary inputs by normalised name,
+latches from their init values, cut boxes as free outputs driven by a pseudo-random function of
+their type and input history, see ``bbmatch``), so an input bit's response vector identifies the
+function that drives it, even through latches whose names differ.  Boxes are then paired, in
+rounds: the boxes whose signature is unique on both sides are anchored (driven by a shared name
+from then on, as if they had a ``.cname``) and the simulation repeats, which separates logic that
+a stuck cone had made look alike.  When a round anchors nothing more:
+
+- one box with a signature on each side: paired;
+- several with one signature on each side whose input nets are the same on every pin (constants
+  and buffers looked through) are interchangeable: paired in file order, and their outputs are
+  one shared free variable per pin;
+- several with one signature but different input nets (copies of one register, say) are split
+  by the structure of their input cones (colour refinement) and paired in file order inside a
+  part: these are *guesses*;
+- no partner, or a different count: exit 2, listing the boxes.  A genuine difference upstream of
+  a box shows as exit 2 here, not as "not equivalent".
+
+Soundness: the signature only *proposes* a pairing; it is never trusted.  After pairing, each
+pair is an ordinary named cut point and the normal ABC check runs: the outputs of paired boxes are
+one shared free input, and the input pins of paired boxes are compared as primary outputs.  The
+two netlists are called equivalent only if every pair has the same cell type, parameters and port
+widths and provably the same function on every input pin, and everything else is equivalent for
+any values of the free outputs; since a (deterministic) box with the same inputs has the same
+outputs, and the proof held for every value the shared outputs could take, the netlists are
+equivalent.  A wrong pairing (boxes of the same type whose inputs differ) makes the proof of some
+pin fail, so the verdict is never "equivalent"; sampling can only lose a match, not create a
+false one.  The converse is not claimed: when guessed pairs exist and the check fails, the
+guess may be at fault, so the result is "inconclusive" (exit 4, unproven) and not "not equivalent"
+(a failure outside the guesses, an x-cone result and an equivalence are all still verdicts).  As
+before, a box's internal behaviour is assumed, not checked (RAM contents, initial state).
+
 ABC models every latch as a flip-flop on one implicit clock, so each file must use a single
 (edge type, clock) pair -- the clock being a primary input, possibly through buffers -- and
 both files must use the same pair (else exit 1).  Level-sensitive (ah/al) and asynchronous
-(as) latches, internal clocks and several clock domains are rejected (exit 2).  Latch init
+(as) latches and internal clocks are rejected (exit 2), several clock domains are unproven (exit 4,
+a tool limit).  Latch init
 2/3 (don't care/unknown) or a missing init is treated as 0 with a notice (``--strict-init``
 makes it an error).  An undriven net that reaches a primary output or a latch input is an
 error (``--allow-undriven`` ties it to 0); a non-black-box model with ports but no cells is
 an error ("mark it .blackbox").
 
 ABC lookup order: ``--abc PATH``, ``$ODIN3_ABC``, ``build/*/third_party/abc/abc`` in the
-repository, ``$VTR_ROOT/build/abc/abc``, ``abc`` on ``PATH``.
+repository (``build/release`` first: a sanitizer build such as ``clangdbg`` runs dsec on the
+VTR designs several times slower, and sorting by name used to pick it),
+``$VTR_ROOT/build/abc/abc``, ``abc`` on ``PATH``.
 """
 
 from __future__ import annotations
@@ -62,16 +121,19 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blif"))
+import bbmatch  # noqa: E402
 import blif  # noqa: E402
 
 TOOL = "equiv-check"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TIMEOUT = 600
+MATCH_ROUNDS = 12  # most simulate-and-anchor rounds of pair_unnamed
 
 # Verdict strings printed by ABC (see third_party/abc/src):
 #   cec  -> Abc_NtkCecFraig, base/abci/abcVerify.c:207,210,233,237 (and :174,:185 strash)
@@ -93,9 +155,23 @@ _MAX_DEPTH = 1000
 class EquivError(Exception):
     """Usage, input or ABC error (exit code 2).  ``detail`` is extra multi-line output."""
 
+    exit_code = 2
+
     def __init__(self, message: str, detail: str = "") -> None:
         super().__init__(message)
         self.detail = detail
+
+
+class UnprovenError(EquivError):
+    """No verdict, a tool limit and not a crash: ABC timed out (exit code 4)."""
+
+    exit_code = 4
+
+
+class HardError(EquivError):
+    """ABC was killed by a signal (a crash or the memory cap): never a verdict (exit code 5)."""
+
+    exit_code = 5
 
 
 def notice(msg: str) -> None:
@@ -120,7 +196,9 @@ def find_abc(explicit: str | None = None) -> str:
         if not _is_exe(env):
             raise EquivError(f"ODIN3_ABC={env}: not an executable file")
         return env
-    for cand in sorted(REPO_ROOT.glob("build/*/third_party/abc/abc")):
+    found = sorted(REPO_ROOT.glob("build/*/third_party/abc/abc"),
+                   key=lambda path: (path.parent.parent.parent.name != "release", str(path)))
+    for cand in found:
         if _is_exe(cand):
             return str(cand)
     vtr = os.environ.get("VTR_ROOT")
@@ -167,7 +245,10 @@ class BlackBox:
     line: int
     inputs: dict[str, str]
     outputs: dict[str, str]
-    params: dict[str, str] = field(default_factory=dict)  # the cell's ``.param NAME VALUE`` lines
+    anon: bool = False  # no name: matched by simulation signature (``--match-unnamed``)
+    params: tuple[tuple[str, str], ...] = ()
+    free: dict[str, str] = field(default_factory=dict)  # output pin -> its free input net
+    probes: dict[str, str] = field(default_factory=dict)  # input pin -> its probe output net
 
 
 @dataclass
@@ -248,10 +329,12 @@ def _gate_adder_model(cell: blif.Subckt) -> blif.Model:
 
 class _Flattener:
     def __init__(self, netlist: blif.Netlist, strict_init: bool, cut: bool,
-                 normalize: bool) -> None:
+                 normalize: bool, match_unnamed: bool = False) -> None:
         self.netlist = netlist
         self.cut = cut
         self.normalize = normalize
+        self.match_unnamed = match_unnamed
+        self.anon_count = 0
         self.instances: dict[str, BlackBox] = {}
         self.models = netlist.by_name()
         self.strict_init = strict_init
@@ -346,9 +429,15 @@ class _Flattener:
             is_out = {names[f]: f in sub.outputs for f, _ in cell.conns}
         ordered = sorted(cell.conns, key=lambda c: _formal_order(names[c[0]]))
         pins = {names[f]: frame.resolve(a) for f, a in ordered}
-        box = BlackBox(cell.model, self.instance_key(cell, frame, pins, is_out), cell.line,
+        key = self.instance_key(cell, frame, pins, is_out)
+        anon = key is None
+        if key is None:  # a provisional key: it must be a legal BLIF net name, and unique
+            self.anon_count += 1
+            key = f"?anon{self.anon_count}"
+        box = BlackBox(cell.model, key, cell.line,
                        {f: n for f, n in pins.items() if not is_out[f]},
-                       {f: n for f, n in pins.items() if is_out[f]}, _box_params(cell))
+                       {f: n for f, n in pins.items() if is_out[f]}, anon=anon,
+                       params=tuple(sorted(a for a in cell.attrs if a[0] != ".cname")))
         other = self.instances.get(box.key)
         if other is not None:
             raise EquivError(f"{self.netlist.path}:{cell.line}: two black-box instances named "
@@ -357,16 +446,19 @@ class _Flattener:
         self.flat.blackboxes.append(box)
         for formal, net in box.outputs.items():
             free = f"bbout:{box.cell_type}:{box.key}:{formal}"
+            box.free[formal] = free
             self.flat.inputs.append(free)
             self.flat.names.append(blif.Names(inputs=[free], output=net, rows=[("1", "1")]))
         for formal, net in box.inputs.items():
             probe = f"bbin:{box.cell_type}:{box.key}:{formal}"
+            box.probes[formal] = probe
             self.flat.outputs.append(probe)
             self.flat.names.append(blif.Names(inputs=[net], output=probe, rows=[("1", "1")]))
 
     def instance_key(self, cell: blif.Subckt, frame: _Frame, pins: dict[str, str],
-                     is_out: dict[str, bool]) -> str:
-        """The instance name used to match black boxes across the two files."""
+                     is_out: dict[str, bool]) -> str | None:
+        """The instance name used to match black boxes across the two files; None for an
+        instance that ``--match-unnamed`` leaves to the signature matching (no ``.cname``)."""
         def norm(name: str) -> str:
             name = normalize_io_name(name, self.flat.top) if self.normalize else name
             return name.replace(" ", "_")
@@ -374,6 +466,8 @@ class _Flattener:
         for attr, value in cell.attrs:
             if attr == ".cname" and value:
                 return "/".join([*frame.path[1:], norm(value)])
+        if self.match_unnamed:
+            return None
         for formal, net in pins.items():
             if is_out[formal] and _SEP not in net and not net.startswith("$"):
                 base, bit = _formal_order(formal)  # width-independent: out[0] and out agree
@@ -447,25 +541,16 @@ def show(net: str) -> str:
 
 
 def flatten(netlist: blif.Netlist, strict_init: bool = False, allow_undriven: bool = False,
-            cut: bool = True, normalize: bool = True, check: bool = True) -> Flat:
+            cut: bool = True, normalize: bool = True, check: bool = True,
+            match_unnamed: bool = False) -> Flat:
     """Flatten ``netlist`` into one model; black boxes are cut (``cut``) or rejected.
 
     ``check=False`` leaves the undriven-net check to the caller (``check_undriven``), so that
     black-box mismatches between the two files are reported first."""
-    flat = _Flattener(netlist, strict_init, cut, normalize).run()
+    flat = _Flattener(netlist, strict_init, cut, normalize, match_unnamed).run()
     if check:
         check_undriven(flat, allow_undriven)
     return flat
-
-
-def _box_params(cell: blif.Subckt) -> dict[str, str]:
-    """The ``.param NAME VALUE`` lines of a black-box cell (a repeated name: the last wins)."""
-    params: dict[str, str] = {}
-    for attr, value in cell.attrs:
-        if attr == ".param":
-            name, _, rest = value.partition(" ")
-            params[name] = rest.strip()
-    return params
 
 
 def _widths(box: BlackBox) -> dict[str, int]:
@@ -477,7 +562,21 @@ def _widths(box: BlackBox) -> dict[str, int]:
 
 
 def _describe(box: BlackBox, flat: Flat) -> str:
+    if box.anon:
+        first = next(iter(box.outputs.items()), ("", ""))
+        return (f"{box.cell_type} unnamed, {first[0]}={show(first[1])} "
+                f"({Path(flat.path).name}:{box.line})")
     return f"{box.cell_type} {box.key} ({Path(flat.path).name}:{box.line})"
+
+
+def _param_map(box: BlackBox) -> dict[str, str]:
+    """The ``.param NAME VALUE`` lines of a black box (a repeated name: the last wins)."""
+    params: dict[str, str] = {}
+    for attr, value in box.params:
+        if attr == ".param":
+            name, _, rest = value.partition(" ")
+            params[name] = rest.strip()
+    return params
 
 
 def _compare_boxes(key: str, box_a: BlackBox, box_b: BlackBox) -> list[str]:
@@ -494,13 +593,136 @@ def _compare_boxes(key: str, box_a: BlackBox, box_b: BlackBox) -> list[str]:
     if pa != pb or set(box_a.outputs) != set(box_b.outputs):
         return [f"ports differ for {box_a.cell_type} instance {key!r}: only in A: "
                 f"{sorted(pa - pb)}; only in B: {sorted(pb - pa)}"]
-    if box_a.params != box_b.params:
-        names = sorted(set(box_a.params) | set(box_b.params))
-        diffs = ", ".join(f"{n}: {box_a.params.get(n, '(none)')} in A, "
-                          f"{box_b.params.get(n, '(none)')} in B"
-                          for n in names if box_a.params.get(n) != box_b.params.get(n))
+    ma, mb = _param_map(box_a), _param_map(box_b)
+    if ma != mb:  # a box's configuration (a RAM mode, an INIT value) is part of what it is
+        diffs = ", ".join(f"{n}: {ma.get(n, '(none)')} in A, {mb.get(n, '(none)')} in B"
+                          for n in sorted(set(ma) | set(mb)) if ma.get(n) != mb.get(n))
         return [f"parameters differ for {box_a.cell_type} instance {key!r}: {diffs}"]
     return []
+
+
+def _spec(box: BlackBox, anchor: str | None = None) -> bbmatch.BoxSpec:
+    """The simulator's view of a cut box: pins in port order, named (or anchored) boxes seeded by
+    their name."""
+    def ordered(pins: dict[str, str]) -> tuple[tuple[str, str], ...]:
+        return tuple(sorted(pins.items(), key=lambda kv: _formal_order(kv[0])))
+
+    return bbmatch.BoxSpec(box.cell_type, box.params, anchor or (None if box.anon else box.key),
+                           ordered(box.inputs), ordered(box.free))
+
+
+def _rename_nets(flat: Flat, nets: dict[str, str]) -> None:
+    """Apply old net -> new net to the ports and covers of ``flat`` (an input listed twice by
+    a merge is kept once)."""
+    flat.inputs = list(dict.fromkeys(nets.get(n, n) for n in flat.inputs))
+    flat.outputs = [nets.get(n, n) for n in flat.outputs]
+    for cell in flat.names:
+        cell.output = nets.get(cell.output, cell.output)
+        cell.inputs = [nets.get(n, n) for n in cell.inputs]
+
+
+def _rekey(flat: Flat, renames: dict[str, str]) -> None:
+    """Rename black boxes of ``flat`` (old key -> new key) everywhere their keys appear: the
+    instance key, the free output inputs and the probe outputs."""
+    nets: dict[str, str] = {}
+    for box in flat.blackboxes:
+        new = renames.get(box.key)
+        if new is None:
+            continue
+        for table, prefix in ((box.free, "bbout"), (box.probes, "bbin")):
+            for formal, old_net in table.items():
+                table[formal] = nets[old_net] = f"{prefix}:{box.cell_type}:{new}:{formal}"
+        box.key = new
+    _rename_nets(flat, nets)
+
+
+def _merge_outputs(flat: Flat, group: Sequence[BlackBox]) -> None:
+    """Make the boxes of ``group`` (same type, same inputs) share one free output per pin."""
+    nets = {box.free[pin]: group[0].free[pin] for box in group[1:] for pin in box.free}
+    _rename_nets(flat, nets)
+    for box in group[1:]:
+        box.free = {pin: group[0].free[pin] for pin in box.free}
+
+
+def _signatures(flat: Flat, normalize: bool, anchors: dict[int, str]) -> list[bbmatch.Signature]:
+    """Signatures of all boxes of ``flat``; ``anchors`` (box index -> pair name) seeds boxes that
+    are already paired like named ones."""
+    def pi_key(net: str) -> str:
+        return normalize_io_name(net, flat.top) if normalize else net
+
+    specs = [_spec(b, anchors.get(i)) for i, b in enumerate(flat.blackboxes)]
+    try:
+        return bbmatch.signatures(flat.names, flat.latches, flat.inputs, specs, pi_key)
+    except bbmatch.SimError as exc:
+        raise EquivError(f"{flat.path}: cannot simulate the netlist to match unnamed black "
+                         f"boxes: {exc}") from exc
+
+
+@dataclass
+class _Matching:
+    """The outcome of ``_match_rounds`` in black-box indices of the two flats."""
+
+    pairs: list[tuple[int, int]]
+    twins: list[tuple[list[int], list[int]]]
+    only: tuple[list[int], list[int]]
+    guessed: int
+
+
+def _match_rounds(flats: Sequence[Flat], normalize: bool) -> _Matching:
+    """Simulate and pair, round after round.  The boxes whose signature is unique on both sides
+    are anchored -- from the next round on they are driven by a shared name, as if they had a
+    ``.cname`` -- so that logic behind them, which a stuck cone had made look alike, becomes
+    distinguishable.  Stops when a round anchors nothing new (or after ``MATCH_ROUNDS``)."""
+    anon = [[i for i, b in enumerate(f.blackboxes) if b.anon] for f in flats]
+    anchors: list[dict[int, str]] = [{}, {}]
+    anchored: list[tuple[int, int]] = []
+    for rnd in range(MATCH_ROUNDS):
+        sigs = [_signatures(f, normalize, a) for f, a in zip(flats, anchors, strict=True)]
+        free = [[i for i in ids if i not in a] for ids, a in zip(anon, anchors, strict=True)]
+        result = bbmatch.pair([sigs[0][i] for i in free[0]], [sigs[1][i] for i in free[1]])
+        if not result.exact or rnd == MATCH_ROUNDS - 1:
+            break
+        for i, j in result.exact:
+            name = f"@{len(anchored)}"
+            anchors[0][free[0][i]] = anchors[1][free[1][j]] = name
+            anchored.append((free[0][i], free[1][j]))
+
+    def box(side: int, group: list[int]) -> list[int]:
+        return [free[side][i] for i in group]
+
+    return _Matching(
+        anchored + [(free[0][i], free[1][j]) for i, j in result.pairs],
+        [(box(0, a), box(1, b)) for a, b in result.twins],
+        (box(0, result.only_a), box(1, result.only_b)), result.guessed)
+
+
+def pair_unnamed(flats: Sequence[Flat], normalize: bool = True) -> tuple[int, int]:
+    """Pair the unnamed black boxes (``anon``) of the two flats by simulation signature (see
+    ``bbmatch``) and give each pair one key in both; returns (pairs, guessed).
+
+    A box is paired when its signature -- type, parameters, ports and the response of each input
+    bit -- is the only one of its kind on both sides, or when several have it and they are
+    interchangeable (the same input net on every pin).  Boxes with one signature but different
+    input nets (copies of one register, say) are split by the structure of their input cones and
+    paired in file order inside a part: ``guessed`` counts those pairs, and a "not equivalent"
+    verdict is then no verdict (see ``_check``).  Boxes with no partner raise EquivError
+    (exit 2), listing them."""
+    fa, fb = flats
+    if not any(b.anon for f in flats for b in f.blackboxes):
+        return 0, 0
+    match = _match_rounds(flats, normalize)
+    lines = [f"  only in A: {_describe(fa.blackboxes[i], fa)}" for i in match.only[0]]
+    lines += [f"  only in B: {_describe(fb.blackboxes[i], fb)}" for i in match.only[1]]
+    if lines:
+        raise EquivError("unnamed black-box instances cannot be matched one-to-one (matched "
+                         "by simulation signature: type, parameters, ports and input functions; "
+                         "an instance whose inputs differ between the files is left over)",
+                         "\n".join(lines))
+    _rekey(fb, {fb.blackboxes[j].key: fa.blackboxes[i].key for i, j in match.pairs})
+    for group_a, group_b in match.twins:
+        _merge_outputs(fa, [fa.blackboxes[i] for i in group_a])
+        _merge_outputs(fb, [fb.blackboxes[j] for j in group_b])
+    return len(match.pairs), match.guessed
 
 
 def match_blackboxes(flats: Sequence[Flat]) -> None:
@@ -542,10 +764,9 @@ def _is_buffer(cell: blif.Names) -> bool:
     return not value("0") and value("1")
 
 
-def _clock_source(flat: Flat, net: str) -> str | None:
-    """Follow single-input buffers back from ``net``; the primary input reached, or None."""
-    buffers = {n.output: n.inputs[0] for n in flat.names if _is_buffer(n)}
-    inputs = set(flat.inputs)
+def _clock_source(net: str, buffers: dict[str, str], inputs: set[str]) -> str | None:
+    """Follow single-input buffers (output net -> input net) back from ``net``; the primary
+    input reached, or None."""
     seen: set[str] = set()
     while net not in inputs and net in buffers and net not in seen:
         seen.add(net)
@@ -562,6 +783,9 @@ def clock_domain(flat: Flat, ports: dict[str, str]) -> tuple[str, str] | None:
     type/control form their own domain ("untyped", "-").
     """
     domains: set[tuple[str, str]] = set()
+    buffers = {n.output: n.inputs[0] for n in flat.names if _is_buffer(n)}  # once, not per latch
+    inputs = set(flat.inputs)
+    sources: dict[str, str | None] = {}
     for latch in flat.latches:
         if latch.ltype is None:
             domains.add(("untyped", "-"))
@@ -573,15 +797,17 @@ def clock_domain(flat: Flat, ports: dict[str, str]) -> tuple[str, str] | None:
         if latch.control is None or latch.control == blif.NO_CONTROL:
             domains.add((latch.ltype, blif.NO_CONTROL))
             continue
-        source = _clock_source(flat, latch.control)
+        if latch.control not in sources:
+            sources[latch.control] = _clock_source(latch.control, buffers, inputs)
+        source = sources[latch.control]
         if source is None:
             raise EquivError(f"{flat.path}:{latch.line}: unsupported: latch "
                              f"{show(latch.output)} is clocked by internal net "
                              f"{show(latch.control)}")
         domains.add((latch.ltype, ports[source]))
     if len(domains) > 1:
-        raise EquivError(f"{flat.path}: unsupported: more than one clock domain "
-                         f"(type, clock): {sorted(domains)}")
+        raise UnprovenError(f"unproven: {flat.path}: unsupported: more than one clock domain "
+                            f"(type, clock): {sorted(domains)}")
     return next(iter(domains), None)
 
 
@@ -686,9 +912,14 @@ def run_abc(abc: str, command: str, cwd: Path, timeout: int) -> str:
     try:
         proc = subprocess.run([abc, "-q", command], cwd=cwd, capture_output=True, text=True,
                               timeout=timeout, check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        raise UnprovenError(f"unproven: ABC {command.split()[0]} timed out after {timeout} "
+                            "seconds") from exc
+    except OSError as exc:
         raise EquivError(f"running ABC failed: {exc}") from exc
     output = proc.stdout + proc.stderr
+    if proc.returncode < 0:
+        raise HardError(f"ABC killed by signal {-proc.returncode}", output)
     if proc.returncode != 0:
         raise EquivError(f"ABC exited with status {proc.returncode}", output)
     return output
@@ -703,13 +934,105 @@ def _io_mismatch(a: tuple[set[str], set[str]], b: tuple[set[str], set[str]]) -> 
     return report
 
 
+XCONE_NET = "unconn"  # Parmys's don't-care net: `.names unconn`, no rows (constant 0)
+EXIT_XCONE = 3
+EXIT_UNPROVEN = 4
+EXIT_HARD = 5
+
+
+def x_sources(flat: Flat) -> set[str]:
+    """The flat nets that are ``unconn`` (a constant cover with no inputs and no rows, named
+    ``unconn`` in its model)."""
+    return {n.output for n in flat.names
+            if not n.inputs and not n.rows and n.output.rsplit(_SEP, 1)[-1] == XCONE_NET}
+
+
+def x_cone_outputs(flat: Flat) -> set[str]:
+    """The primary outputs (original names) of ``flat`` that the x sources reach going forward,
+    through covers and latches."""
+    fanout: dict[str, list[str]] = {}
+    for names in flat.names:
+        for net in names.inputs:
+            fanout.setdefault(net, []).append(names.output)
+    for latch in flat.latches:
+        fanout.setdefault(latch.input, []).append(latch.output)
+    for box in flat.blackboxes:  # x on any input pin of a cut box taints all its output pins
+        for net in box.inputs.values():
+            fanout.setdefault(net, []).extend(box.outputs.values())
+    reached = set(x_sources(flat))
+    work = list(reached)
+    while work:
+        for nxt in fanout.get(work.pop(), []):
+            if nxt not in reached:
+                reached.add(nxt)
+                work.append(nxt)
+    return {out for out in flat.outputs if out in reached}
+
+
+def prove(flats: Sequence[Flat], maps: Sequence[dict[str, str]], abc: str,
+          args: argparse.Namespace) -> tuple[bool, str, str]:
+    """(equivalent, ABC command, ABC output) for the two flats on their current outputs."""
+    verb = "dsec" if any(f.latches for f in flats) else "cec"
+    if verb == "dsec":
+        for flat in flats:
+            if not flat.latches:
+                add_dangling_latch(flat)
+    tmp = Path(tempfile.mkdtemp(prefix="equiv-check-"))
+    try:
+        write_flat(flats[0], maps[0], tmp / "a.blif")
+        write_flat(flats[1], maps[1], tmp / "b.blif")
+        output = run_abc(abc, f"{verb} a.blif b.blif", tmp, args.timeout)
+    finally:
+        if args.keep_temp:
+            notice(f"temporary files kept in {tmp}")
+        else:
+            shutil.rmtree(tmp, ignore_errors=True)
+    verdict = parse_verdict(output)
+    if verdict is None:
+        raise EquivError(f"could not find a verdict in ABC {verb} output", output)
+    return verdict, verb, output
+
+
+def x_report(flats: Sequence[Flat], maps: Sequence[dict[str, str]], abc: str,
+             args: argparse.Namespace) -> int:
+    """The ``--x-report`` rerun after a failed check: exit 3 when the netlists agree outside the
+    x-cones, else 1 (nothing in a cone, nothing left, or still different)."""
+    removed = {m[o] for f, m in zip(flats, maps, strict=True) for o in x_cone_outputs(f)}
+    if not removed:
+        print(f"{TOOL}: x-report: no output is in an x-cone ({XCONE_NET} reaches none)")
+        return 1
+    total = len(flats[0].outputs)
+    print(f"{TOOL}: x-report: {len(removed)} of {total} outputs are in an x-cone "
+          f"({XCONE_NET} reaches them in A or B)")
+    if len(removed) >= total:
+        print(f"{TOOL}: NOT equivalent outside x-cones: no output is left to compare")
+        return 1
+    for flat, ports in zip(flats, maps, strict=True):
+        flat.outputs = [o for o in flat.outputs if ports[o] not in removed]
+    verdict, verb, output = prove(flats, maps, abc, args)
+    if not verdict:
+        print(f"{TOOL}: NOT equivalent outside x-cones (abc {verb})")
+        print(output.rstrip())
+        return 1
+    print(f"{TOOL}: equivalent outside x-cones (abc {verb})")
+    for name in sorted(removed):
+        print(f"x-cone: {name}")
+    return EXIT_XCONE
+
+
 def _check(args: argparse.Namespace) -> int:
     nets = [blif.parse_file(f, gates=not args.no_cut) for f in args.files]
     flats = [flatten(n, args.strict_init, args.allow_undriven, not args.no_cut,
-                     not args.no_io_normalize, check=False) for n in nets]
+                     not args.no_io_normalize, check=False, match_unnamed=args.match_unnamed)
+             for n in nets]
+    paired, guessed = (pair_unnamed(flats, not args.no_io_normalize) if args.match_unnamed
+                       else (0, 0))
     match_blackboxes(flats)
     for flat in flats:
         check_undriven(flat, args.allow_undriven)
+    if paired:
+        notice(f"{paired} unnamed black-box instance(s) paired by simulation signature"
+               + (f" ({guessed} of them guessed by structure)" if guessed else ""))
     cuts = sum(len(f.blackboxes) for f in flats)
     if cuts:
         notice(f"{cuts // 2} black-box instance(s) cut: outputs are free inputs shared by both "
@@ -729,35 +1052,26 @@ def _check(args: argparse.Namespace) -> int:
               f"B is {domains[1]} (type, clock)")
         return 1
     abc = find_abc(args.abc)
-    verb = "dsec" if any(f.latches for f in flats) else "cec"
-    if verb == "dsec":
-        for flat in flats:
-            if not flat.latches:
-                add_dangling_latch(flat)
-    tmp = Path(tempfile.mkdtemp(prefix="equiv-check-"))
-    try:
-        write_flat(flats[0], maps[0], tmp / "a.blif")
-        write_flat(flats[1], maps[1], tmp / "b.blif")
-        output = run_abc(abc, f"{verb} a.blif b.blif", tmp, args.timeout)
-    finally:
-        if args.keep_temp:
-            notice(f"temporary files kept in {tmp}")
-        else:
-            shutil.rmtree(tmp, ignore_errors=True)
-    verdict = parse_verdict(output)
-    if verdict is None:
-        raise EquivError(f"could not find a verdict in ABC {verb} output", output)
+    verdict, verb, output = prove(flats, maps, abc, args)
     print(f"{TOOL}: {'equivalent' if verdict else 'NOT equivalent'} (abc {verb})")
-    if not verdict:
-        print(output.rstrip())
-    return 0 if verdict else 1
+    if verdict:
+        return 0
+    print(output.rstrip())
+    code = x_report(flats, maps, abc, args) if args.x_report else 1
+    if code == 1 and guessed:
+        print(f"{TOOL}: inconclusive: {guessed} unnamed black-box pair(s) were guessed (equal "
+              "signatures, different input nets, split by structure and file order), so \"not "
+              "equivalent\" may only mean a wrong guess", file=sys.stderr)
+        return EXIT_UNPROVEN
+    return code
 
 
 def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog=TOOL,
         description="Prove two BLIF netlists functionally equivalent with ABC cec/dsec. "
-        "Exit 0 equivalent, 1 not equivalent, 2 usage/input/ABC error.",
+        "Exit 0 equivalent, 1 not equivalent, 2 usage/input/ABC error, 3 (--x-report) "
+        "equivalent outside the x-cones.",
         epilog="Latches with init 2 (don't care) or 3 (unknown) are treated as starting at 0; "
         "use --strict-init to reject them. Each file must clock all its latches with one "
         "(edge type, primary-input clock) pair, the same in both files.",
@@ -777,6 +1091,17 @@ def _parser() -> argparse.ArgumentParser:
                     "out as free outputs / compared inputs matched by instance name")
     ap.add_argument("--no-io-normalize", action="store_true",
                     help="match primary I/O names verbatim")
+    ap.add_argument("--match-unnamed", "--match-dollar", dest="match_unnamed",
+                    action="store_true",
+                    help="match every black box without a .cname by simulation signature (type, "
+                    "parameters, ports and the response of each input bit) instead of by its "
+                    "output net names, which Parmys numbers with counters ($mul~14); sound, "
+                    "since a paired box must have equal input functions, so a wrong pairing is "
+                    "a false 'not equivalent' (or exit 2), never a false 'equivalent' "
+                    "(--match-dollar is the old spelling)")
+    ap.add_argument("--x-report", action="store_true",
+                    help="when not equivalent, rerun without the outputs in an x-cone (reached "
+                    "by `unconn`) and list them; exit 3 if equivalent outside them")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                     help="ABC timeout in seconds (default %(default)s)")
     return ap
@@ -793,6 +1118,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{TOOL}: {exc}", file=sys.stderr)
         if exc.detail:
             print(exc.detail.rstrip(), file=sys.stderr)
+        return exc.exit_code
+    except MemoryError:
+        print(f"{TOOL}: out of memory", file=sys.stderr)
+        return EXIT_HARD
+    except Exception as exc:  # noqa: BLE001  (exit 2: exit 1 is only ever 'not equivalent')
+        traceback.print_exc()
+        print(f"{TOOL}: internal error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
 
 

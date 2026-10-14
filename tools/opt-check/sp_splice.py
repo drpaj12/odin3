@@ -3,7 +3,7 @@
 Usage::
 
     sp-splice --odin3 O --yosys Y --arch A --top T [--config C] [--keep DIR] [--primitives P]
-              [--mem-cap BYTES] [--allow-version V] [--scc-precheck]
+              [--mem-cap BYTES] [--allow-version V] [--scc-precheck] [--techlib L | --no-techlib]
               [--odin3-pre CMD]... [--no-primitives] FILE...
 
 Phase 2 has no ``fsm``, ``wreduce``, ``memory``, ``flatten``, ``techmap`` or hard-block mapping,
@@ -11,21 +11,32 @@ so the exit comparison runs Parmys's script in two halves, verbatim from ``synth
 from point (i)'s Odin III spellings (``--nolatches``, ``--nomem2reg``, ``--top``, and
 ``--vtr-compat``, the VTR setting):
 
-- Odin III: ``O -p "read_verilog --nomem2reg P; read_verilog --nolatches --vtr-compat FILE...;
-  hierarchy --top T; opt_expr; opt_clean; opt -nodffe -nosdff; proc; write_rtlil a.il"``. ``P`` is
-  Parmys's ``vtr_primitives.v`` (``--primitives``, else under ``$VTR_ROOT``).
+- Odin III: ``O -p "read_techlib L; read_verilog --lib --nomem2reg P; read_verilog --nolatches
+  --vtr-compat FILE...; hierarchy --top T; opt_expr; opt_clean; opt -nodffe -nosdff; proc;
+  write_rtlil a.il"``.
+  ``P`` is Parmys's ``vtr_primitives.v`` (``--primitives``, else under ``$VTR_ROOT``); ``L`` is
+  ``lib/vtr.o3lib`` (``--techlib``).
 - Yosys 0.55, from ``plugin -i parmys`` to ``write_blif -true + vcc -false + gnd -undef + unconn
-  -blackbox out.blif``, reading ``a.il``. It is one line in ``yosys.tcl`` after
-  synthesis.tcl's own first line, ``yosys -import``, run as ``Y -c yosys.tcl``: the ``yosys
-  -import`` inside the half exists only in Yosys's Tcl mode.
+  -blackbox out.blif``. It is one line in ``yosys.tcl`` after synthesis.tcl's own first line,
+  ``yosys -import``, run as ``Y -c yosys.tcl``: the ``yosys -import`` inside the half exists only
+  in Yosys's Tcl mode.
+
+The hand-over (2H): at ``hierarchy -check`` Yosys must hold what ``synthesis.tcl`` holds after its
+steps 1 to 3. So the half reads ``vtr_primitives.v`` itself, sets ``keep_hierarchy`` on the two
+RAMs, then reads ``a.il`` with ``read_rtlil -nooverwrite``. Odin III leaves a RAM, adder or
+multiplier instance a hard cell of the tech library, with ``vtr_primitives.v``'s parameter names
+(``ADDR_WIDTH``, ``DATA_WIDTH``, ``WIDTH``), and ``a.il`` carries the library's black-box stub of
+the same name; ``-nooverwrite`` keeps Yosys's own module, so the instance resolves to the
+``$paramod$...\\single_port_ram`` that Parmys's mapping recognises, and the stub conflicts with
+nothing. ``procs -norom`` follows ``hierarchy`` for the library modules Yosys just read (Odin III
+has already lowered every process of the design).
 
 ``--top`` stays on the Odin III side: 2D elaborates only the modules under the top, so Yosys's
 ``hierarchy -check -auto-top -purge_lib`` then picks the same one (spec section 3).
-``--odin3-pre CMD`` (repeatable) puts a command at the front of the Odin III half, e.g.
-``read_techlib lib/vtr.o3lib`` (the arch's hard blocks); ``--no-primitives`` leaves the
-``vtr_primitives.v`` read out. With main today a read of that file alone stops at 2D's
-``ambiguous_top``, and the hard blocks come from the tech library instead (agent default; the
-spelling of that read is 2H's to settle).
+``--odin3-pre CMD`` (repeatable) puts a command after the tech library read; ``--no-techlib``
+leaves that read out and ``--no-primitives`` leaves the ``vtr_primitives.v`` read out of the
+Odin III half. A soft RAM from ``--lib`` alone (no tech library) is a differently named module
+and does not hand over.
 ``--scc-precheck`` first runs the Parmys precondition on the source in Yosys (``read_verilog
 -nomem2reg P; read_verilog -sv -nolatches FILE...; scc -select; select -assert-none %``): a
 combinational loop is a Parmys rejection and ends the run with exit 2.
@@ -58,9 +69,11 @@ HERE = Path(__file__).resolve().parent
 MEMCAP_PY = HERE.parent / "elab-check" / "memcap.py"
 GIB = 1 << 30
 DEFAULT_CAP = 4 * GIB
+DEFAULT_TECHLIB = HERE.parent.parent / "lib" / "vtr.o3lib"
 EXIT_OK, EXIT_FAIL, EXIT_SKIP = 0, 2, 77
 YOSYS_TCL = "yosys.tcl"  # the Yosys half as a Tcl script: `yosys -import` exists only in Tcl mode
 TCL_PROLOGUE = "yosys -import"  # as synthesis.tcl's first line: makes `plugin` a Tcl command
+YOSYS_PRIMITIVES = "+/parmys/vtr_primitives.v"  # synthesis.tcl's spelling (Yosys's share directory)
 TAIL_LINES = 20
 _ORACLE_RE = re.compile(r"\bYosys 0\.55(?:[^0-9]|$)")
 _PLAIN_RE = re.compile(r"[^\s;#\"]+")
@@ -72,7 +85,7 @@ PRIMITIVES_UNDER_VTR = (
 # Odin III half: Parmys lines 1-4 (opt_expr; opt_clean; opt -nodffe -nosdff; proc), then the
 # hand-over.
 ODIN3_HALF = (
-    "read_verilog --nomem2reg {primitives}",
+    "read_verilog --lib --nomem2reg {primitives}",
     "read_verilog --nolatches --vtr-compat {files}",
     "hierarchy --top {top}",
     "opt_expr",
@@ -87,10 +100,12 @@ YOSYS_HALF = (
     "plugin -i parmys",
     "yosys -import",
     "parmys_arch -a {arch}",
-    "read_rtlil a.il",
+    "read_verilog -nomem2reg {primitives}",
     "setattr -mod -set keep_hierarchy 1 single_port_ram",
     "setattr -mod -set keep_hierarchy 1 dual_port_ram",
+    "read_rtlil -nooverwrite a.il",
     "hierarchy -check -auto-top -purge_lib",
+    "procs -norom",
     "fsm",
     "opt",
     "wreduce",
@@ -143,6 +158,7 @@ class Options:
     allow_version: str | None
     scc_precheck: bool
     pre: tuple[str, ...]
+    techlib: str | None
     no_primitives: bool
     files: tuple[Path, ...]
 
@@ -170,9 +186,11 @@ def odin3_script(primitives: str | None, files: Sequence[str], top: str,
     return "; ".join([*pre, _fill(commands, **fields)])
 
 
-def yosys_script(arch: str, config: str | None) -> str:
-    """The Yosys 0.55 half, one ``-p`` script."""
-    return _fill(YOSYS_HALF, arch=arch, config=f" -c {config}" if config else "")
+def yosys_script(arch: str, config: str | None, primitives: str | None = None) -> str:
+    """The Yosys 0.55 half, one ``-p`` script. ``primitives`` is the ``vtr_primitives.v`` it reads
+    (VTR's own spelling, ``+/parmys/vtr_primitives.v``, when None)."""
+    return _fill(YOSYS_HALF, arch=arch, config=f" -c {config}" if config else "",
+                 primitives=quote(primitives or YOSYS_PRIMITIVES))
 
 
 def precheck_script(primitives: str, files: Sequence[str]) -> str:
@@ -252,6 +270,11 @@ class Splice:
         output = tail((done.stdout or "") + (done.stderr or ""))
         raise SpliceError(f"{what} failed (exit {done.returncode}):\n{output}")
 
+    def pre(self) -> list[str]:
+        """The commands before the Odin III half: the tech library read, then ``--odin3-pre``."""
+        techlib = [f"read_techlib {quote(self.opts.techlib)}"] if self.opts.techlib else []
+        return [*techlib, *self.opts.pre]
+
     def check_version(self) -> None:
         done = self.child([self.opts.yosys, "-V"])
         version = (done.stdout or "").strip()
@@ -277,11 +300,11 @@ class Splice:
                   # in the script comes too late for a file with several roots.
                   [opts.odin3, "--top", opts.top, "-p",
                    odin3_script(None if opts.no_primitives else primitives, files, opts.top,
-                                opts.pre)])
+                                self.pre())])
         if not (self.work / "a.il").is_file():
             raise SpliceError("odin3 (the Odin III half) wrote no a.il")
         tcl = self.work / YOSYS_TCL
-        script = yosys_script(opts.arch, opts.config)
+        script = yosys_script(opts.arch, opts.config, primitives)
         tcl.write_text(f"{TCL_PROLOGUE}\n{script}\n", encoding="utf-8")
         self.must("Yosys (the Yosys half)", [opts.yosys, "-c", YOSYS_TCL])
         out = self.work / "out.blif"
@@ -306,6 +329,10 @@ def parse(argv: Sequence[str] | None, vtr_root: str | None = None) -> Options:
                     help="first run Parmys's scc precondition on the source")
     ap.add_argument("--odin3-pre", action="append", default=[], metavar="CMD",
                     help="a command at the front of the Odin III half (repeatable)")
+    ap.add_argument("--techlib", default=str(DEFAULT_TECHLIB), metavar="FILE",
+                    help="the tech library read first (default lib/vtr.o3lib: the RAMs and adders "
+                         "stay hard cells with vtr_primitives.v's parameter names)")
+    ap.add_argument("--no-techlib", action="store_true", help="read no tech library")
     ap.add_argument("--no-primitives", action="store_true",
                     help="leave the vtr_primitives.v read out of the Odin III half")
     ap.add_argument("files", nargs="+", type=Path, help="the Verilog files")
@@ -318,6 +345,7 @@ def parse(argv: Sequence[str] | None, vtr_root: str | None = None) -> Options:
         top=args.top, config=absolute(args.config), keep=args.keep,
         primitives=absolute(primitives), cap=args.mem_cap, allow_version=args.allow_version,
         scc_precheck=args.scc_precheck, pre=tuple(args.odin3_pre),
+        techlib=None if args.no_techlib else absolute(args.techlib),
         no_primitives=args.no_primitives, files=tuple(path.resolve() for path in args.files))
 
 

@@ -1,0 +1,11 @@
+# The reviewed eq-x record of the micros (decision 13): a micro whose equivalence to Parmys holds only
+# outside the x-cones (equiv-check --x-report exit 3) passes only when it is recorded here with
+# EXACTLY the outputs equiv-check excluded. Syntax (see tests/exit/vtr_eqx.txt):
+#   design <path relative to tests/micro/verilog> <count> <sha256 of the sorted output names> <reason>
+#   bus <path> <output name without its [index]> <count>      (the counts add up to <count>)
+# exit-check fails an eq-x micro that is not recorded, one whose excluded outputs differ from the
+# record, and a record whose design now passes (XPASS) or names no micro (stale).
+#
+# No micro has been recorded: the full 434-micro run has not produced an eq-x result yet. Anything the
+# run reports as eq-x needs its excluded outputs analysed (why are they x: an uninitialised RAM, an
+# unconnected input, a floating net) before a record is added here.

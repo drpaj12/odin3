@@ -265,6 +265,19 @@ class CompareTest(unittest.TestCase):
                 self.assertEqual(code, 2)
                 self.assertIn("more than one driver", err)
 
+    def test_inout_driven_internally_compares(self) -> None:
+        """2H: Yosys lists an inout in .inputs and .outputs and a $tribuf drives it; that is
+        one primary-input net plus one internal driver, not a clash (simple_inout.v)."""
+        text = (".model simple_op\n.inputs in in_out1 in_out2 en\n.outputs in_out1 in_out2 out\n"
+                ".subckt $tribuf A=in EN=en Y=in_out1\n.param WIDTH 1\n"
+                ".names in_out2 out\n1 1\n.end\n")
+        a, b = self.write("a.blif", text), self.write("b.blif", text)
+        self.assertEqual(compare("--implicit-models", a, b)[0], 0)
+        clash = self.write("c.blif", text.replace(".end\n", ".names en in_out1\n1 1\n.end\n"))
+        code, _, err = compare("--implicit-models", clash, clash)
+        self.assertEqual(code, 2)
+        self.assertIn("more than one driver", err)
+
     def test_implicit_models_per_model_outputs(self) -> None:
         """DATA is $memrd's output but $memwr's input; CTRL_OUT is $fsm's output."""
         text = (".model top\n.inputs c a d\n.outputs y z\n"

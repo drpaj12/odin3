@@ -1555,8 +1555,8 @@ static void test_e10_hierarchy(void) {
 }
 
 /* A top and the declared model multiply (a[0..35], b[0..35], out[0..71]), after lib/vtr.o3lib;
- * then a hand node of multiply with A_WIDTH a_width and B_WIDTH b_width; its node. */
-static odin3_node_id multiply_node(int64_t a_width, int64_t b_width) {
+ * then a hand node of multiply with WIDTH `width`; its node. */
+static odin3_node_id multiply_node(int64_t width) {
     odin3_strbuf text;
     odin3_strbuf_init(&text);
     TEST_ASSERT_EQUAL_INT(
@@ -1575,19 +1575,14 @@ static odin3_node_id multiply_node(int64_t a_width, int64_t b_width) {
                           odin3_strbuf_append(&text, odin3_bytes_cstr("\n.blackbox\n.end\n")));
     read_ok(text.data, true);
     odin3_strbuf_free(&text);
-    odin3_value params[2] = {odin3_value_int(a_width), odin3_value_int(b_width)};
-    return hand_cell(top_of(), "multiply", params, 2);
+    odin3_value params[1] = {odin3_value_int(width)};
+    return hand_cell(top_of(), "multiply", params, 1);
 }
 
 static void test_e11_params(void) {
-    odin3_node_id mul = multiply_node(8, 36);
-    expect_vtr_refused(line_of("write_blif: --vtr: top: multiply '$c%u': parameters 'A_WIDTH' "
+    odin3_node_id mul = multiply_node(8);
+    expect_vtr_refused(line_of("write_blif: --vtr: top: multiply '$c%u': parameters 'WIDTH' "
                                "cannot be recovered from BLIF formals",
-                               mul.v));
-    bvt_free(&tc);
-    mul = multiply_node(8, 9);
-    expect_vtr_refused(line_of("write_blif: --vtr: top: multiply '$c%u': parameters 'A_WIDTH', "
-                               "'B_WIDTH' cannot be recovered from BLIF formals",
                                mul.v));
 }
 
@@ -1891,7 +1886,7 @@ static void test_out_of_memory_preflight(void) {
     read_golden_with("adder_hard_block.parmys", true);
     preflight_oom_sweep(ODIN3_OK);
     bvt_free(&tc);
-    (void)multiply_node(8, 9); /* E11's list */
+    (void)multiply_node(8); /* E11's list */
     odin3_module *top = top_of();
     odin3_net_id n_net = net_named("o");
     (void)hand_buffer(top, net_named("i"), n_net); /* E12 */
@@ -2647,8 +2642,9 @@ static void multiply_line(odin3_strbuf *text, uint32_t a_width, uint32_t b_width
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(text, " out[0]=%s\n", out_net));
 }
 
-/* Two multiply nodes with a widths 8 and 12 (b 8 and 4): the stub has each port at its widest,
- * a[0] … a[11], b[0] … b[7], out[0] … out[15], in library order (a b out). */
+/* Two multiply nodes with a widths 8 and 12 (b 8 and 4; WIDTH is the larger of a and b, so 8 and
+ * 12): the stub has each port at its widest, a[0] … a[11], b[0] … b[11], out[0] … out[23], in
+ * library order (a b out). */
 static void test_stub_width_max(void) {
     odin3_strbuf text;
     odin3_strbuf want;
@@ -2664,9 +2660,9 @@ static void test_stub_width_max(void) {
     put(&want, "\n.end\n\n.model multiply\n"
                ".inputs");
     bits_of(&want, "a", 12);
-    bits_of(&want, "b", 8);
+    bits_of(&want, "b", 12);
     put(&want, "\n.outputs");
-    bits_of(&want, "out", 16);
+    bits_of(&want, "out", 24);
     put(&want, "\n.blackbox\n.end\n");
     TEST_ASSERT_TRUE_MESSAGE(ends_with(body, want.data), body);
     TEST_ASSERT_EQUAL_UINT32(1, count_of(body, ".blackbox"));

@@ -390,7 +390,7 @@ Effort cues:
 - E8: rows `1 1` and `0 0` in one cover → `… $sop '…': cover mixes on-set and off-set rows`.
 - E9 (hand IR): `inout p` → `top: port 'p': inout port; VPR has no bidirectional pins`.
 - E10: two models, the top instantiating `sub` → `t.blif:<n>: instance '$c<ID>' of module 'sub': hierarchy not flattened (run flatten); VPR reads one model`.
-- E11: a declared `multiply` model (`a[0..35]`, `b[0..35]`, `out[0..71]`) and a hand-IR node of it with `A_WIDTH` 8, `B_WIDTH` 36 → `top: multiply '$c<ID>': parameters 'A_WIDTH' cannot be recovered from BLIF formals` (point (w)).
+- E11: a declared `multiply` model (`a[0..35]`, `b[0..35]`, `out[0..71]`) and a hand-IR node of it with `WIDTH` 8 (the library declares `multiply` as VTR does: one `WIDTH`, `a`/`b` of `WIDTH` bits, `out` of `2*WIDTH`) → `top: multiply '$c<ID>': parameters 'WIDTH' cannot be recovered from BLIF formals` (point (w)).
 - E12: two `.names` driving `n` → `top: net 'n' has 2 drivers ('<a>', '<b>')`; three drivers → `… ('<a>', '<b>', …)` (point (h)).
 - **Cap:** 21 `fe` latches → exactly 20 E1 lines, then `error: write_blif: --vtr: 1 more errors not shown`; `report.errors` 21.
 - **`classes_by_pin_kind`** (Review Focus 2):
@@ -501,7 +501,7 @@ Effort cues:
   - `ram_one_bit_slice_scalar`: a 1-bit data slice → `data=` and `out=`.
   - `subckt_unconnected_outputs_named`: an `adder` with `cout` unconnected → `cout=$p<pin ID>`. Two such adders get distinct names.
   - `ram_clock_constant`: `clk` on `$_CONST0_` → written `clk=gnd` with `warning: write_blif: --vtr: top: single_port_ram '<cell>': clock input 'clk' is the constant 0; VPR will never clock it`.
-  - `stub_width_max`: two `multiply` nodes with `a` widths 8 and 12 → a stub with `a[0] … a[11]`, in library order (`a b out`).
+  - `stub_width_max`: two `multiply` nodes with `WIDTH` 8 and 12 (a and b of one width) → a stub with `a[0] … a[11]`, `b[0] … b[11]`, `out[0] … out[23]`, in library order (`a b out`).
   - `stub_declared_order_kept`: a declared `multiply` model with ports `b a out` → that order in the stub.
   - `stub_unused_dropped`: a declared `adder` model with no live node → no `adder` stub.
 - **CTest `blif_vtr_fixtures`** (`vtr-fixtures --odin3 $<TARGET_FILE:odin3> --dir tests/golden/blif-vtr --checker tools/blif-vtr-check/blif-vtr-check`; label `unit`; the `--checker` argument is added by whichever of 3E-1 and 3E-2 lands second, and without it the driver skips the checker step with a printed note):
@@ -722,7 +722,7 @@ Effort cues:
 - `test_netlist_compare.py`:
   - **`vtr_normalize_decodes_names`** (Review Focus 3): `%fe` ↔ `fe`, `%FE` ↔ byte 0xFE, `a%23b` ↔ `a#b`, `%2Eend` ↔ `.end`;
   - a latch init 3 against 2 → equal only with the flag;
-  - a `.subckt multiply a[0]=x` against one with `a[1..35]=unconn` → equal with the flag;
+  - a `.subckt multiply a[0]=x b[0]=y` against one with `a[1..35]=unconn b[1..35]=unconn` added → equal with the flag (`a` and `b` always have the same width);
   - a 1-input cover with two `1 1` rows against one row → equal with the flag;
   - `$2%5Cbuffer` against `$2%255Cbuffer` (a primary output, so the name is kept) → equal with the flag, different without.
 - `test_blif_roundtrip_vtr.py`, over a fake `odin3-blif-rt`:

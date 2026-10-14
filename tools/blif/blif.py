@@ -356,14 +356,20 @@ def _check_subckt(path: str, cell: Subckt, models: dict[str, Model]) -> None:
 def _check_model(path: str, model: Model, models: dict[str, Model]) -> None:
     if model.blackbox and model.cells:
         raise _err(path, model.line, f"black-box model {model.name!r} contains cells")
-    drivers: dict[str, int] = {n: model.line for n in model.inputs + model.clocks}
+    # A primary input is a driver of its net. An inout port is listed in both .inputs and
+    # .outputs (Yosys's write_blif and ours write it so): the outside drives it as an input and
+    # the model may drive it too (a tri-state), so one internal driver is allowed on exactly
+    # those nets. Any other net, and a second internal driver of an inout, is still an error.
+    inouts = set(model.inputs) & set(model.outputs)
+    ports = set(model.inputs + model.clocks)
+    driven: set[str] = set()
     for cell in model.cells:
         if isinstance(cell, Subckt):
             _check_subckt(path, cell, models)
         for net in cell_io(cell, models)[1]:
-            if net in drivers:
+            if net in driven or (net in ports and net not in inouts):
                 raise _err(path, cell.line, f"net {net!r} has more than one driver")
-            drivers[net] = cell.line
+            driven.add(net)
 
 
 def validate(netlist: Netlist) -> None:

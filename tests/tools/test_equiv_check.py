@@ -8,6 +8,7 @@ errors, interface or clocking mismatches) always run.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import os
@@ -16,7 +17,9 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import bbmatch
 import blif
 import equiv_check
 
@@ -62,6 +65,26 @@ BB_HEAD = ".model t\n.inputs clk a b c\n.outputs y\n"
 BB_TAIL = ".names q a y\n11 1\n.end\n"
 # A Yosys write_blif -gates hard block: a ``.gate`` with no model and no instance name.
 RAM_Q = ".gate single_port_ram addr[0]=a clk=clk data[0]=b out[0]=q we=c\n"
+
+
+class FindAbcTest(unittest.TestCase):
+    def test_release_build_comes_before_a_sanitizer_build(self) -> None:
+        """A sanitizer ABC (clangdbg) sorts first by name and is several times slower on dsec."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for preset in ("clangdbg", "debug", "release"):
+                exe = Path(tmp) / "build" / preset / "third_party" / "abc" / "abc"
+                exe.parent.mkdir(parents=True)
+                exe.write_text("#!/bin/sh\n", encoding="utf-8")
+                exe.chmod(0o755)
+            saved = (equiv_check.REPO_ROOT, os.environ.pop("ODIN3_ABC", None))
+            equiv_check.REPO_ROOT = Path(tmp)
+            try:
+                want = Path(tmp, "build", "release", "third_party", "abc", "abc")
+                self.assertEqual(equiv_check.find_abc(), str(want))
+            finally:
+                equiv_check.REPO_ROOT = saved[0]
+                if saved[1] is not None:
+                    os.environ["ODIN3_ABC"] = saved[1]
 
 
 class NormalizeTest(unittest.TestCase):
@@ -169,14 +192,17 @@ class EquivCheckNoAbcTest(unittest.TestCase):
         self.assertIn("('untyped', '-')", out)
 
     def test_unsupported_clocking(self) -> None:
-        cases = {"l_ah.blif": "level-sensitive latch type 'ah'",
-                 "clk_internal.blif": "clocked by internal net",
-                 "clk_two_domains.blif": "more than one clock domain"}
-        for name, message in cases.items():
+        cases = {"l_ah.blif": ("level-sensitive latch type 'ah'", 2),
+                 "clk_internal.blif": ("clocked by internal net", 2),
+                 # a tool limit, not a bad input: exit 4 (unproven)
+                 "clk_two_domains.blif": ("unproven: ", 4)}
+        for name, (message, want) in cases.items():
             with self.subTest(name):
                 code, _, err = check(cx("l_re.blif"), cx(name))
-                self.assertEqual(code, 2)
+                self.assertEqual(code, want)
                 self.assertIn(message, err)
+        self.assertIn("more than one clock domain", check(cx("l_re.blif"),
+                                                          cx("clk_two_domains.blif"))[2])
 
     def test_empty_non_blackbox_model(self) -> None:
         code, _, err = check(cx("bb_a.blif"), cx("bb_b.blif"))
@@ -333,6 +359,43 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("no .cname and no named output net", err)
 
+    def test_match_unnamed_compares_params_of_every_pair(self) -> None:
+        """A box with a different ``.param`` list never pairs, named or by signature: exit 2."""
+        for cname in ("", ".cname ram\n"):
+            a = self.write("a.blif", BB_HEAD + RAM_Q + ".param MODE 01\n" + cname + BB_TAIL)
+            b = self.write("b.blif", BB_HEAD + RAM_Q + ".param MODE 10\n" + cname + BB_TAIL)
+            code, _, err = check("--match-unnamed", a, b)
+            self.assertEqual(code, 2, f"{cname!r}: {err}")
+            self.assertIn("MODE" if cname else "single_port_ram", err)
+
+    def test_match_unnamed_ignores_output_net_names(self) -> None:
+        """Without a .cname a box is anonymous with --match-unnamed, whatever its nets are called;
+        the same netlist twice pairs with itself."""
+        text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$mul~7")
+                + ".names $mul~7 a y\n11 1\n.end\n")
+        a = self.write("a.blif", text)
+        code, _, err = check("--match-unnamed", a, a)
+        self.assertEqual(code, 0 if ABC else 2, err)
+        flats = [equiv_check.flatten(blif.parse_file(a, gates=True), match_unnamed=True)
+                 for _ in range(2)]
+        self.assertTrue(all(f.blackboxes[0].anon for f in flats))
+        self.assertEqual(equiv_check.pair_unnamed(flats), (1, 0))
+        equiv_check.match_blackboxes(flats)
+        self.assertEqual(flats[0].blackboxes[0].key, flats[1].blackboxes[0].key)
+
+    def test_match_dollar_is_the_old_spelling(self) -> None:
+        text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$mul~7")
+                + ".names $mul~7 a y\n11 1\n.end\n")
+        a = self.write("a.blif", text)
+        code, _, err = check("--match-dollar", a, a)
+        self.assertEqual(code, 0 if ABC else 2, err)
+
+    def test_cname_still_names_an_instance_with_match_unnamed(self) -> None:
+        flat = equiv_check.flatten(blif.parse_text(BB_HEAD + RAM_Q + ".cname ram\n" + BB_TAIL,
+                                                   gates=True), match_unnamed=True)
+        self.assertFalse(flat.blackboxes[0].anon)
+        self.assertEqual(flat.blackboxes[0].key, "ram")
+
     def test_duplicate_cname_exit_2(self) -> None:
         text = (BB_HEAD + RAM_Q + ".cname ram\n" + RAM_Q.replace("q", "r") + ".cname ram\n"
                 + BB_TAIL)
@@ -400,7 +463,180 @@ class BlackBoxCutAbcTest(unittest.TestCase):
         self.assertIn("(abc dsec)", out)
 
 
+X_HEAD = ".model t\n.inputs a b\n.outputs o p\n"
+X_P = ".names a b p\n11 1\n.end\n"
+
+
 @needs_abc
+class XReportTest(unittest.TestCase):
+    """--x-report: outputs in the forward cone of ``unconn`` are removed from the comparison."""
+
+    def setUp(self) -> None:
+        if ABC is None:
+            self.fail(f"ODIN3_REQUIRE_ABC=1 but no usable ABC: {ABC_PROBLEM}")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def x_pair(self, p_b: str = X_P) -> tuple[str, str]:
+        """A: o = a & unconn (x kept as 0). B: o = a (x resolved to 1)."""
+        a = self.write("a.blif", X_HEAD + ".names unconn\n.names a unconn o\n11 1\n" + X_P)
+        b = self.write("b.blif", X_HEAD + ".names a o\n1 1\n" + p_b)
+        return a, b
+
+    def test_equivalent_outside_x_cone_exit_3(self) -> None:
+        a, b = self.x_pair()
+        self.assertEqual(check(a, b)[0], 1)
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 3, out + err)
+        self.assertIn("equivalent outside x-cones (abc cec)", out)
+        self.assertIn("x-report: 1 of 2 outputs are in an x-cone", out)
+        self.assertEqual([line for line in out.splitlines() if line.startswith("x-cone:")],
+                         ["x-cone: o"])
+
+    def test_difference_outside_the_cone_is_still_not_equivalent(self) -> None:
+        a, b = self.x_pair(".names a b p\n1- 1\n.end\n")
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("NOT equivalent outside x-cones", out)
+        self.assertNotIn("x-cone: o", out)
+
+    def test_no_unconn_means_no_cone(self) -> None:
+        a = self.write("a.blif", X_HEAD + ".names a o\n1 1\n" + X_P)
+        b = self.write("b.blif", X_HEAD + ".names a o\n0 1\n" + X_P)
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("no output is in an x-cone", out)
+
+    def test_equivalent_stays_exit_0_without_cone_lines(self) -> None:
+        a = self.write("a.blif", X_HEAD + ".names a o\n1 1\n" + X_P)
+        code, out, err = check("--x-report", a, a)
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("x-cone", out)
+
+    def test_every_output_in_a_cone_compares_nothing(self) -> None:
+        a = self.write("a.blif", ".model t\n.inputs a\n.outputs o\n.names unconn\n"
+                       ".names a unconn o\n11 1\n.end\n")
+        b = self.write("b.blif", ".model t\n.inputs a\n.outputs o\n.names a o\n1 1\n.end\n")
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("no output is left to compare", out)
+
+    def test_x_cone_passes_through_a_latch(self) -> None:
+        """unconn -> cover -> latch D: the latch's Q, and the output behind it, are removed."""
+        head = ".model t\n.inputs clk a\n.outputs q r\n"
+        tail = ".names a r\n1 1\n.end\n"
+        a = self.write("a.blif", head + ".names unconn\n.names a unconn d\n11 1\n"
+                       ".latch d q re clk 0\n" + tail)
+        b = self.write("b.blif", head + ".names a d\n1 1\n.latch d q re clk 0\n" + tail)
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 3, out + err)
+        self.assertIn("(abc dsec)", out)
+        self.assertIn("x-cone: q", out)
+        self.assertNotIn("x-cone: r", out)
+
+    def test_x_follows_a_black_box_to_its_outputs(self) -> None:
+        """x on a RAM's address (A) and a real signal (B): the RAM's read data, and the output
+        behind it, depend on the x, so both are removed and listed (review I6)."""
+        head = ".model t\n.inputs clk a b c\n.outputs y p\n"
+        tail = ".names q a y\n11 1\n.names a b p\n11 1\n.end\n"
+        ram = ".gate single_port_ram addr[0]={} clk=clk data[0]=b out[0]=q we=c\n"
+        a = self.write("a.blif", head + ".names unconn\n.names a unconn ax\n11 1\n"
+                       + ram.format("ax") + tail)
+        b = self.write("b.blif", head + ram.format("a") + tail)
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 3, out + err)
+        cones = [line for line in out.splitlines() if line.startswith("x-cone:")]
+        self.assertIn("x-cone: y", cones)
+        self.assertTrue(any(":addr" in line for line in cones), cones)
+        self.assertNotIn("x-cone: p", cones)
+        self.assertIn("2 of 6 outputs are in an x-cone", out)
+
+    def test_x_through_a_black_box_hides_nothing_outside_the_cone(self) -> None:
+        """A difference outside the black box's cone is still found."""
+        head = ".model t\n.inputs clk a b c\n.outputs y p\n"
+        ram = ".gate single_port_ram addr[0]={} clk=clk data[0]=b out[0]=q we=c\n"
+        a = self.write("a.blif", head + ".names unconn\n.names a unconn ax\n11 1\n"
+                       + ram.format("ax") + ".names q a y\n11 1\n.names a b p\n11 1\n.end\n")
+        b = self.write("b.blif", head + ram.format("a")
+                       + ".names q a y\n11 1\n.names a b p\n10 1\n.end\n")
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("NOT equivalent outside x-cones", out)
+
+    def test_x_in_the_other_netlist_counts_too(self) -> None:
+        a, b = self.x_pair()
+        code, out, err = check("--x-report", b, a)
+        self.assertEqual(code, 3, out + err)
+        self.assertIn("x-cone: o", out)
+
+    def test_help_documents_the_flag(self) -> None:
+        code, out, _ = check("--help")
+        self.assertEqual(code, 0)
+        self.assertIn("--x-report", out)
+
+
+@needs_abc
+class FaultInjectionTest(unittest.TestCase):
+    """Exit codes 2, 4 and 5 (review I3, I4): a fake ABC that hangs or dies of SIGSEGV, and an
+    uncaught exception inside the tool. None of them is exit 1 ('not equivalent')."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        text = ".model t\n.inputs a\n.outputs o\n.names a o\n1 1\n.end\n"
+        self.a = self.write("a.blif", text)
+        self.b = self.write("b.blif", text.replace(".names a o\n1 1",
+                                                   ".names a t\n1 1\n.names t o\n1 1"))
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def fake_abc(self, body: str) -> str:
+        path = self.write("abc", "#!/bin/sh\n" + body + "\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def test_abc_timeout_is_unproven_exit_4(self) -> None:
+        abc = self.fake_abc("exec sleep 30")
+        code, out, err = check("--abc", abc, "--timeout", "1", self.a, self.b)
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("unproven: ABC cec timed out after 1 seconds", err)
+        self.assertNotIn("NOT equivalent", out)
+
+    def test_abc_killed_by_a_signal_is_hard_exit_5(self) -> None:
+        abc = self.fake_abc("kill -SEGV $$")
+        code, out, err = check("--abc", abc, self.a, self.b)
+        self.assertEqual(code, 5, out + err)
+        self.assertIn("ABC killed by signal 11", err)
+        self.assertNotIn("NOT equivalent", out)
+
+    def test_abc_ordinary_failure_stays_exit_2(self) -> None:
+        abc = self.fake_abc("echo broken; exit 3")
+        code, out, err = check("--abc", abc, self.a, self.b)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("ABC exited with status 3", err)
+
+    def test_an_uncaught_exception_is_exit_2_not_1(self) -> None:
+        with mock.patch.object(equiv_check, "_check", side_effect=KeyError("boom")):
+            code, out, err = check(self.a, self.b)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("internal error: KeyError", err)
+        self.assertNotIn("NOT equivalent", out)
+
+    def test_out_of_memory_is_hard_exit_5(self) -> None:
+        with mock.patch.object(equiv_check, "_check", side_effect=MemoryError()):
+            code, out, err = check(self.a, self.b)
+        self.assertEqual(code, 5, out + err)
+        self.assertIn("out of memory", err)
+
+
 class EquivCheckAbcTest(unittest.TestCase):
     def setUp(self) -> None:
         if ABC is None:
@@ -489,6 +725,207 @@ class EquivCheckAbcTest(unittest.TestCase):
         result = subprocess.run([str(wrapper), fx("add2_parmys.blif"), fx("add2_logic.blif")],
                                 capture_output=True, text=True, check=False, env=env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class UnnamedBlackBoxTest(unittest.TestCase):
+    """--match-unnamed: boxes without a .cname are paired by simulation signature."""
+
+    HEAD = ".model t\n.inputs clk a b c\n.outputs y z\n"
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    @staticmethod
+    def ram(out: str, addr: str = "a", data: str = "b", we: str = "c") -> str:
+        return (f".gate single_port_ram addr[0]={addr} clk=clk data[0]={data} out[0]={out} "
+                f"we={we}\n")
+
+    def flats(self, text_a: str, text_b: str) -> list[equiv_check.Flat]:
+        return [equiv_check.flatten(blif.parse_text(t, gates=True), match_unnamed=True,
+                                    check=False) for t in (text_a, text_b)]
+
+    def two_boxes(self, first: str, second: str, swap: bool = False) -> str:
+        """Two boxes of different inputs, each read by one output; ``swap`` lists them in the
+        other order."""
+        boxes = [self.ram(first, "a", "b"), self.ram(second, "b", "a")]
+        return (self.HEAD + "".join(boxes[::-1] if swap else boxes)
+                + f".names {first} c y\n11 1\n.names {second} c z\n10 1\n.end\n")
+
+    def test_unique_signatures_pair_whatever_the_names_and_order(self) -> None:
+        flats = self.flats(self.two_boxes("$m~1", "$m~2"),
+                           self.two_boxes("$m~9", "$m~4", swap=True))
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 0))
+        equiv_check.match_blackboxes(flats)
+        by_inputs = [{(b.inputs["addr"], b.inputs["data"]): b.key for b in f.blackboxes}
+                     for f in flats]
+        self.assertEqual(by_inputs[0], by_inputs[1])
+        self.assertEqual(len(set(by_inputs[0].values())), 2)
+        self.assertEqual(sorted(flats[0].inputs), sorted(flats[1].inputs))
+
+    def test_interchangeable_twins_pair_in_order_and_share_outputs(self) -> None:
+        def twins(first: str, second: str, y_from: str, z_from: str) -> str:
+            return (self.HEAD + self.ram(first) + self.ram(second)
+                    + f".names {y_from} c y\n11 1\n.names {z_from} z\n1 1\n.end\n")
+
+        flats = self.flats(twins("$t~1", "$t~2", "$t~1", "$t~2"),
+                           twins("$t~9", "$t~4", "$t~4", "$t~9"))
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 0))
+        equiv_check.match_blackboxes(flats)
+        for flat in flats:
+            self.assertEqual([n for n in flat.inputs if n.startswith("bbout:")],
+                             ["bbout:single_port_ram:?anon1:out"])
+        self.assertEqual(sorted(flats[0].inputs), sorted(flats[1].inputs))
+        self.assertEqual(sorted(flats[0].outputs), sorted(flats[1].outputs))
+
+    def test_equivalent_with_twins_swapped_exit_0(self) -> None:
+        if ABC is None and not REQUIRE_ABC:
+            self.skipTest("no ABC")
+        a = self.write("a.blif", self.HEAD + self.ram("$t~1") + self.ram("$t~2")
+                       + ".names $t~1 c y\n11 1\n.names $t~2 z\n1 1\n.end\n")
+        b = self.write("b.blif", self.HEAD + self.ram("$t~9") + self.ram("$t~4")
+                       + ".names $t~4 c y\n11 1\n.names $t~9 z\n1 1\n.end\n")
+        code, out, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 0, out + err)
+
+    def copies(self, first: str, second: str, y_from: str, z_from: str) -> str:
+        """Two registers computing one function (r1, r2), each addressing a box: the boxes have
+        one signature and different input nets."""
+        return (self.HEAD + ".names a b d\n11 1\n.latch d r1 re clk 0\n.latch d r2 re clk 0\n"
+                + self.ram(first, "r1") + self.ram(second, "r2")
+                + f".names {y_from} c y\n11 1\n.names {z_from} z\n1 1\n.end\n")
+
+    def test_copies_are_paired_in_order_and_proved(self) -> None:
+        flats = self.flats(self.copies("$m~1", "$m~2", "$m~1", "$m~2"),
+                           self.copies("$m~7", "$m~8", "$m~7", "$m~8"))
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 2))
+        if ABC is None and not REQUIRE_ABC:
+            return
+        a = self.write("a.blif", self.copies("$m~1", "$m~2", "$m~1", "$m~2"))
+        b = self.write("b.blif", self.copies("$m~7", "$m~8", "$m~7", "$m~8"))
+        code, out, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 0, out + err)
+
+    @needs_abc
+    def test_a_guessed_pairing_that_fails_is_inconclusive_exit_4(self) -> None:
+        """The same copies read the other way round: the file-order guess is wrong, and 'not
+        equivalent' would be a false verdict (the netlists are equivalent)."""
+        a = self.write("a.blif", self.copies("$m~1", "$m~2", "$m~1", "$m~2"))
+        b = self.write("b.blif", self.copies("$m~7", "$m~8", "$m~8", "$m~7"))
+        code, out, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("inconclusive: 2 unnamed black-box pair(s) were guessed", err)
+
+    def test_box_whose_inputs_differ_is_left_over_exit_2(self) -> None:
+        a = self.write("a.blif", self.HEAD + self.ram("$m~1", "a") + self.ram("$m~2", "b")
+                       + ".names $m~1 $m~2 y\n11 1\n.names c z\n1 1\n.end\n")
+        b = self.write("b.blif", self.HEAD + self.ram("$m~1", "a") + self.ram("$m~2", "c")
+                       + ".names $m~1 $m~2 y\n11 1\n.names c z\n1 1\n.end\n")
+        code, _, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 2, err)
+        self.assertIn("cannot be matched one-to-one", err)
+        self.assertIn("only in A: single_port_ram unnamed, out=$m~2 (a.blif:5)", err)
+        self.assertIn("only in B: single_port_ram unnamed, out=$m~2 (b.blif:5)", err)
+
+    def test_different_counts_exit_2(self) -> None:
+        a = self.write("a.blif", self.HEAD + self.ram("$m~1") + self.ram("$m~2")
+                       + ".names $m~1 $m~2 y\n11 1\n.names c z\n1 1\n.end\n")
+        b = self.write("b.blif", self.HEAD + self.ram("$m~1")
+                       + ".names $m~1 c y\n11 1\n.names c z\n1 1\n.end\n")
+        code, _, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 2, err)
+        self.assertIn("only in A", err)
+
+    def test_named_boxes_stay_named_and_are_not_paired(self) -> None:
+        text = (self.HEAD + self.ram("$m~1") + ".cname named\n" + self.ram("$m~2", "b", "a")
+                + ".names $m~1 $m~2 y\n11 1\n.names c z\n1 1\n.end\n")
+        flats = self.flats(text, text)
+        self.assertEqual([b.anon for b in flats[0].blackboxes], [False, True])
+        self.assertEqual(equiv_check.pair_unnamed(flats), (1, 0))
+        equiv_check.match_blackboxes(flats)
+
+    def test_pairs_through_latches_with_other_names(self) -> None:
+        """Box 2 reads a latch that box 1 feeds; the latches and nets are named differently."""
+        def text(m1: str, m2: str, latch: str) -> str:
+            return (self.HEAD + self.ram(m1) + f".latch {m1} {latch} re clk 0\n"
+                    + self.ram(m2, latch, "b") + f".names {m2} c y\n11 1\n"
+                    f".names {latch} z\n1 1\n.end\n")
+
+        flats = self.flats(text("$m~1", "$m~2", "$dff~3^Q~0"), text("$m~5", "$m~6", "q"))
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 0))
+        if ABC is None and not REQUIRE_ABC:
+            return
+        code, out, err = check("--match-unnamed", self.write("a.blif", text("$m~1", "$m~2", "x")),
+                               self.write("b.blif", text("$m~5", "$m~6", "q")))
+        self.assertEqual(code, 0, out + err)
+
+    @needs_abc
+    def test_a_wrong_pairing_is_never_equivalent(self) -> None:
+        """Cross the pairing by hand: the check on the paired cut points must reject it."""
+        flats = self.flats(self.two_boxes("$m~1", "$m~2"), self.two_boxes("$m~1", "$m~2"))
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 0))
+        args = argparse.Namespace(timeout=60, keep_temp=False)
+        assert ABC is not None
+
+        def verdict() -> bool:
+            equiv_check.match_blackboxes(flats)
+            for flat in flats:
+                equiv_check.check_undriven(flat, False)
+            maps = [equiv_check.io_map(f, True) for f in flats]
+            return equiv_check.prove(flats, maps, ABC, args)[0]
+
+        self.assertTrue(verdict())
+        first, second = (b.key for b in flats[1].blackboxes)
+        equiv_check._rekey(flats[1], {first: second, second: first})
+        self.assertFalse(verdict())
+
+    @needs_abc
+    def test_wrong_pairing_of_twins_with_other_logic_is_rejected(self) -> None:
+        """Boxes with equal signatures whose inputs the netlists wire differently: not
+        equivalent (exit 1) or left over (exit 2), never 0."""
+        a = self.write("a.blif", self.two_boxes("$m~1", "$m~2"))
+        b = self.write("b.blif", self.two_boxes("$m~1", "$m~2").replace(
+            ".names $m~1 c y\n11 1\n.names $m~2 c z\n10 1", ".names $m~2 c y\n11 1\n"
+            ".names $m~1 c z\n10 1"))
+        code, out, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 1, out + err)
+
+
+class BbmatchTest(unittest.TestCase):
+    def sig(self, digest: bytes, *identity: str) -> bbmatch.Signature:
+        return bbmatch.Signature(digest, identity)
+
+    def test_unique_and_twins(self) -> None:
+        a = [self.sig(b"1", "x"), self.sig(b"2", "y"), self.sig(b"2", "y")]
+        b = [self.sig(b"2", "u"), self.sig(b"2", "u"), self.sig(b"1", "w")]
+        result = bbmatch.pair(a, b)
+        self.assertEqual(result.pairs, [(0, 2), (1, 0), (2, 1)])
+        self.assertEqual(result.twins, [([1, 2], [0, 1])])
+        self.assertFalse(result.only_a or result.only_b or result.guessed)
+
+    def test_not_interchangeable_is_split_by_structure_then_guessed(self) -> None:
+        a = [bbmatch.Signature(b"1", ("x",), 5), bbmatch.Signature(b"1", ("y",), 6)]
+        b = [bbmatch.Signature(b"1", ("u",), 6), bbmatch.Signature(b"1", ("w",), 5)]
+        result = bbmatch.pair(a, b)
+        self.assertEqual((result.pairs, result.guessed, result.exact), ([(0, 1), (1, 0)], 2, []))
+        same = [bbmatch.Signature(b"1", ("x",), 5), bbmatch.Signature(b"1", ("y",), 5)]
+        result = bbmatch.pair(same, b)
+        self.assertEqual((result.pairs, result.guessed), ([(0, 0), (1, 1)], 2))
+
+    def test_counts_must_agree(self) -> None:
+        result = bbmatch.pair([self.sig(b"1", "x"), self.sig(b"1", "x")], [self.sig(b"1", "x")])
+        self.assertEqual((result.pairs, result.only_a, result.only_b), ([], [0, 1], [0]))
+
+    def test_combinational_loop_is_a_sim_error(self) -> None:
+        loop = [blif.Names(inputs=["q"], output="p", rows=[("1", "1")]),
+                blif.Names(inputs=["p"], output="q", rows=[("1", "1")])]
+        with self.assertRaises(bbmatch.SimError):
+            bbmatch.signatures(loop, [], [], [], lambda n: n)
 
 
 if __name__ == "__main__":
