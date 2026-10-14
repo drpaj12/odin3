@@ -316,6 +316,7 @@ class RunTest(unittest.TestCase):
                 str(self.tree.root / "micro" / "d.v")]
         with tempfile.TemporaryDirectory() as tmpdir, \
                 mock.patch.dict(os.environ, {"TMPDIR": tmpdir}), \
+                mock.patch.object(tempfile, "tempdir", None), \
                 mock.patch.object(memcap, "run", fake_run):
             self.assertEqual(helpers.run_main(od.main, argv)[0], 0)
             self.assertEqual(list(Path(tmpdir).iterdir()), [])

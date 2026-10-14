@@ -296,12 +296,19 @@ class MainTest(unittest.TestCase):
                     str(self.fakes.bin / "yosys"), str(self.fakes.root / "d.v")]
             self.fakes.spec(self.pair("0001", "opt_expr"))
             with mock.patch.dict(os.environ, {"TMPDIR": tmpdir}), \
+                    mock.patch.object(tempfile, "tempdir", None), \
                     mock.patch.object(memcap, "run", fake_run):
                 self.assertEqual(helpers.run_main(oe.main, argv)[0], 0)
                 self.assertEqual(list(Path(tmpdir).iterdir()), [])
                 self.fakes.spec({}, exit=1)
                 self.assertEqual(helpers.run_main(oe.main, argv)[0], 2)
                 self.assertEqual(list(Path(tmpdir).iterdir()), [])
+                self.fakes.spec({})  # a --min-changed shortfall: nothing to debug
+                self.assertEqual(helpers.run_main(oe.main, [*argv, "--min-changed", "1"])[0], 1)
+                self.assertEqual(list(Path(tmpdir).iterdir()), [])
+                self.fakes.spec(self.pair("0001", "opt_expr", IL_BAD))  # a failing pair: kept
+                self.assertEqual(helpers.run_main(oe.main, argv)[0], 1)
+                self.assertEqual(len(list(Path(tmpdir).iterdir())), 1)
 
 
 YOSYS = os.environ.get("ODIN3_YOSYS055", "")

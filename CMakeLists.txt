@@ -2037,14 +2037,18 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # elab-sweep's --opt-equiv / --opt-diff modes (one tool child per file, smallest first,
         # under memcap; the micros that 2D or proc reject are tests/proc/micro_expect_fail.txt).
         # opt_equiv_rules: opt-equiv on every per-rule source (the refinement of each sub-pass call
-        # of the Phase 2 script, not a sweep). Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R
+        # of the Phase 2 script, not a sweep). Every source is built to make a rule fire, so
+        # `--min-changed 1` fails a file in which no call changed anything (a broken snapshot);
+        # the 19 sources whose rule the Phase 2 script does not run are in
+        # tests/opt/rules_equiv_expect_fail.txt. Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R
         # '^opt_(equiv|diff)_micro$'.
         set(_opt_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
             --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
             --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 2 --mem-cap 2G)
         # --jobs 1: outside tools/heavy-run, fd 9 of a threaded elab-sweep is Python's own.
         add_test(NAME opt_equiv_rules
-            COMMAND ${_opt_sweep} --jobs 1 --opt-equiv --root ${PROJECT_SOURCE_DIR}/tests/opt/rules
+            COMMAND ${_opt_sweep} --jobs 1 --opt-equiv --opt-arg=--min-changed=1
+                    --root ${PROJECT_SOURCE_DIR}/tests/opt/rules
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/rules_equiv_expect_fail.txt
                     ${PROJECT_SOURCE_DIR}/tests/opt/rules)
         set_tests_properties(opt_equiv_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77

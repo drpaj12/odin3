@@ -26,7 +26,7 @@ common lowering (``opt_diff.Diff``; the step numbers are §20.3's). Every seed's
   be proved, and the run fails when more than ``MAX_UNPROVED`` (5%) of its pairs differ without
   that proof (``refines only``: Odin III resolved an x that Yosys kept, or the reverse direction is
   not provable). A ``structural`` pair is proved in both directions by construction. Seeds 1..200
-  and 1001..1050 gave 0 unproved pairs in 600, while the proved ones are 9-16% of the pairs and no
+  and 1001..1050 gave 0 unproved pairs in 500, while the proved ones are 9-16% of the pairs and no
   soundness question, so they are reported but not gated.
 - Only a crash of the oracle itself is an ``oracle crash``: Yosys dying (a signal, a cap kill or a
   timeout) on the ``in.il`` that Odin III wrote. It is counted and shown, and the run fails when

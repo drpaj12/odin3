@@ -40,7 +40,8 @@ made is removed after a clean run; a failing run, and ``--work DIR``, keep it.
 source is built to make a rule fire, so ``--min-changed 1`` tells a broken or empty
 ``--opt-snapshot`` from "nothing to improve". A run with no changing call and no ``N`` prints a
 ``NOTE``. An empty snapshot file is an error. The work directory this tool made (under
-``$TMPDIR``) is removed after a clean run and after an error (exit 2); a failure (1 or 3) keeps it.
+``$TMPDIR``) is removed after a clean run, after an error (exit 2) and after a ``--min-changed``
+shortfall; a pair that does not refine, and a crash (exit 3), keep it.
 
 Exit codes (one convention across the opt tools): 0 every pair refines; 1 a pair does not; 2 usage,
 Odin III or a tool error; 3 hard: a child (Odin III or Yosys) crashed, was killed by a signal or
@@ -395,7 +396,8 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
-def execute(args: argparse.Namespace, work: Path) -> int:
+def execute(args: argparse.Namespace, work: Path) -> tuple[int, bool]:
+    """(exit code, whether the work directory is worth keeping: a pair failed)."""
     files = [str(Path(f).resolve()) for f in args.files]
     techlib = str(Path(args.techlib).resolve()) if args.techlib else None
     run = snapshot_run(args.odin3, files, args.top, phase2_commands(args.script), work,
@@ -408,8 +410,9 @@ def execute(args: argparse.Namespace, work: Path) -> int:
     if len(verdicts) < args.min_changed:
         print(f"{TOOL}: {len(verdicts)} calls changed something, want at least "
               f"{args.min_changed}", flush=True)
-        return EXIT_FAIL
-    return EXIT_FAIL if any(not v.ok for v in verdicts) else EXIT_OK
+        return EXIT_FAIL, False
+    bad = any(not v.ok for v in verdicts)
+    return (EXIT_FAIL if bad else EXIT_OK), bad
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -418,9 +421,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     work = Path(tempfile.mkdtemp(prefix="opt-equiv-")) if made else args.work
     work.mkdir(parents=True, exist_ok=True)
     work = work.resolve()
-    code = EXIT_ERROR
+    code, keep = EXIT_ERROR, False
     try:
-        code = execute(args, work)
+        code, keep = execute(args, work)
     except CrashError as exc:
         print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
         code = EXIT_CRASH
@@ -429,7 +432,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except memcap.CapUnavailable as exc:
         print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
         code = EXIT_SKIP
-    if made and code in (EXIT_OK, EXIT_ERROR, EXIT_SKIP):
+    if made and code != EXIT_CRASH and not keep:
         shutil.rmtree(work, ignore_errors=True)  # the directory this run made, and only it
     elif made:
         print(f"{TOOL}: work directory kept: {work}", file=sys.stderr)

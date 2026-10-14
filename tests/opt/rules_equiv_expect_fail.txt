@@ -12,3 +12,26 @@ dff/never_active_set.v [a second edge event must be an asynchronous reset] proc 
 # $pow has no SAT model in Yosys's equiv flow (opt-rules lists the same two in refine_skip.txt).
 expr/fold_pow.v [No SAT model available] no SAT model for $pow; checked by hand (3**2 = 9)
 expr/pow_shift.v [No SAT model available] no SAT model for $pow; checked by hand (2**b = 1 << b)
+# These 19 sources need an option or a pass that the Phase 2 script does not run (`opt_expr`, `opt_clean`,
+# `opt -nodffe -nosdff`, `proc`, `opt`): opt-equiv has no call that changed something, and the CTest
+# runs it with `--min-changed 1` (review I5: 0 calls must never read as a pass). opt-rules' per-row
+# refinement covers each one with its own options.
+expr/mux_bool.v [want at least 1] Phase 2 does not run opt_expr -mux_bool; covered by opt-rules' per-row refinement
+expr/mux_or.v [want at least 1] Phase 2 does not run opt_expr -mux_bool; covered by opt-rules' per-row refinement
+expr/mux_and.v [want at least 1] Phase 2 does not run opt_expr -mux_bool; covered by opt-rules' per-row refinement
+expr/mux_invert.v [want at least 1] Phase 2 does not run opt_expr -mux_bool; covered by opt-rules' per-row refinement
+expr/mux_sel01.v [want at least 1] Phase 2 does not run opt_expr -mux_undef; covered by opt-rules' per-row refinement
+expr/fine.v [want at least 1] Phase 2 does not run opt_expr -fine; covered by opt-rules' per-row refinement
+expr/fine.B.v [want at least 1] Phase 2 does not run opt_expr -fine; covered by opt-rules' per-row refinement
+expr/fine.cmp.v [want at least 1] Phase 2 does not run opt_expr -fine; covered by opt-rules' per-row refinement
+expr/fine.eqne.v [want at least 1] Phase 2 does not run opt_expr -fine; covered by opt-rules' per-row refinement
+expr/fine.group.v [want at least 1] Phase 2 does not run opt_expr -fine; covered by opt-rules' per-row refinement
+expr/fine.neutral_B.v [want at least 1] Phase 2 does not run opt_expr -fine; covered by opt-rules' per-row refinement
+reduce/mux_bits.v [want at least 1] Phase 2 does not run opt_expr -fine; covered by opt-rules' per-row refinement
+expr/undriven.v [want at least 1] Phase 2 does not run opt_expr -undriven; covered by opt-rules' per-row refinement
+share/add_first.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement
+share/add_second.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement
+share/and.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement
+share/eq.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement
+share/pmux.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement
+share/shift.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement
