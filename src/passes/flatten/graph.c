@@ -18,13 +18,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The estimate constants of spec §12 (plan point (f)): bytes per flat node, pin, net, wire and
- * provenance record. Placeholders until Task 5 replaces them with measured values. */
+/* The estimate constants of spec §12 (plan point (f)): bytes per added node, pin, net, wire, and
+ * per provenance record (charged once per added node, net and wire, an upper bound: records are
+ * hash-consed). Measured 2026-10-14 on the 19 VTR designs of the Phase 3 exit test
+ * (`flatten-vtr --raw`, a Release build): a non-negative least-squares fit of the bytes the pass
+ * reserved (`odin3_design_bytes_reserved` delta) on the objects it added gave about 570 bytes per
+ * node, 21 per pin and 76 per net (wires and records are collinear with them; bgm is the tightest
+ * design at 260 bytes per node+net+wire). Rounded up so that the estimate is 1.16x (bgm) to 2.2x
+ * the measured growth on all 19 and never below it. */
 enum {
-    B_NODE = 160,
-    B_PIN = 32,
-    B_NET = 64,
-    B_WIRE = 96,
+    B_NODE = 448,
+    B_PIN = 24,
+    B_NET = 8,
+    B_WIRE = 16,
     B_REC = 96,
     B_NAME = 32,
     N_CONST_TYPES = 4,
@@ -566,13 +572,30 @@ void odin3_flatten_graph_log_unused(const odin3_flatten_graph *graph) {
 
 /* --- estimate, caps, budget ------------------------------------------------------------------ */
 
+static uint64_t sat_sub(uint64_t lhs, uint64_t rhs) {
+    return lhs > rhs ? lhs - rhs : 0;
+}
+
+odin3_flatten_size odin3_flatten_graph_added(const odin3_flatten_graph *graph) {
+    odin3_flatten_size added = {0, 0, 0, 0, 0, 0};
+    for (uint32_t i = 0; i < graph->n_roots; i++) {
+        const odin3_flatten_size *flat = &graph->flat[graph->roots[i]];
+        const odin3_flatten_size *own = &graph->own[graph->roots[i]];
+        added.nodes = sat_add(added.nodes, sat_sub(flat->nodes, own->nodes));
+        added.pins = sat_add(added.pins, sat_sub(flat->pins, own->pins));
+        added.nets = sat_add(added.nets, sat_sub(flat->nets, own->nets));
+        added.wires = sat_add(added.wires, sat_sub(flat->wires, own->wires));
+    }
+    return added;
+}
+
 uint64_t odin3_flatten_graph_estimate(const odin3_flatten_graph *graph) {
-    const odin3_flatten_totals *tot = &graph->totals;
-    uint64_t bytes = sat_mul(tot->nodes, B_NODE + B_NAME);
-    bytes = sat_add(bytes, sat_mul(tot->pins, B_PIN));
-    bytes = sat_add(bytes, sat_mul(tot->nets, B_NET));
-    bytes = sat_add(bytes, sat_mul(tot->wires, B_WIRE + B_NAME));
-    return sat_add(bytes, sat_mul(sat_add(tot->nodes, sat_add(tot->nets, tot->wires)), B_REC));
+    odin3_flatten_size add = odin3_flatten_graph_added(graph);
+    uint64_t bytes = sat_mul(add.nodes, B_NODE + B_NAME);
+    bytes = sat_add(bytes, sat_mul(add.pins, B_PIN));
+    bytes = sat_add(bytes, sat_mul(add.nets, B_NET));
+    bytes = sat_add(bytes, sat_mul(add.wires, B_WIRE + B_NAME));
+    return sat_add(bytes, sat_mul(sat_add(add.nodes, sat_add(add.nets, add.wires)), B_REC));
 }
 
 static bool over(uint64_t have, uint64_t cap, const char *what) {

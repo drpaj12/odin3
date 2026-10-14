@@ -98,6 +98,18 @@ class MiscTests(unittest.TestCase):
             order = [p.stem for p in fv.ordered(Path(tmp), ["sha", "boundtop", "bgm"])]
         self.assertEqual(order, ["boundtop", "bgm", "sha"])
 
+    def test_raw_lines(self) -> None:
+        row = fv.Row("sha", "sha1")
+        row.cost = (1000, 4300, 5, 25, 100, 400, 200, 30, 6600, 2)
+        text = fv.raw_lines([row, fv.Row("none", "n")])
+        self.assertEqual(
+            text.splitlines(),
+            [
+                "design,bytes_added,records_added,nodes,pins,nets,wires,estimate",
+                "sha,3300,20,100,400,200,30,6600",
+            ],
+        )
+
     def test_table_row_columns(self) -> None:
         row = fv.Row("sha", "sha1", 1.5, 120.0, 4, 0, 2)
         row.flat = fv.ModuleStats(0, 100, 200, 30)

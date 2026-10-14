@@ -73,6 +73,10 @@ typedef struct odin3_flatten_size {
 } odin3_flatten_size;
 odin3_flatten_size odin3_flatten_graph_size(const odin3_flatten_graph *graph, uint32_t mod);
 
+/* The objects the expansion adds to the roots: the roots' flat sizes less the objects they own
+ * already (the instance and port nodes that go are not counted either way). */
+odin3_flatten_size odin3_flatten_graph_added(const odin3_flatten_graph *graph);
+
 /* The bytes the expansion is estimated to add (spec §12; saturating, rounded up). */
 uint64_t odin3_flatten_graph_estimate(const odin3_flatten_graph *graph);
 

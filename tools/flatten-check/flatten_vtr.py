@@ -62,7 +62,7 @@ EXPANDED = re.compile(
     r"flatten: (\d+) instances expanded \((\d+) kept\) in (\d+) roots; (\d+) modules unused"
 )
 COST = re.compile(
-    r"flatten: cost: bytes (\d+) -> (\d+), provenance records (\d+) -> (\d+); flat nodes (\d+) "
+    r"flatten: cost: bytes (\d+) -> (\d+), provenance records (\d+) -> (\d+); added nodes (\d+) "
     r"pins (\d+) nets (\d+) wires (\d+); estimate (\d+); renamed (\d+)"
 )
 MIB = 1 << 20
@@ -269,6 +269,18 @@ def table_row(row: Row) -> str:
     )
 
 
+def raw_lines(rows: Sequence[Row]) -> str:
+    """``design,bytes_added,records_added,nodes,pins,nets,wires,estimate`` per design (the numbers
+    the estimate constants are fitted to; nodes..wires are the objects the run added)."""
+    lines = ["design,bytes_added,records_added,nodes,pins,nets,wires,estimate"]
+    for row in rows:
+        if row.cost:
+            before, after, rec0, rec1, nodes, pins, nets, wires, estimate, _ = row.cost
+            numbers = (after - before, rec1 - rec0, nodes, pins, nets, wires, estimate)
+            lines.append(f"{row.name}," + ",".join(str(n) for n in numbers))
+    return "\n".join(lines) + "\n"
+
+
 def parse(argv: Sequence[str]) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog="flatten-vtr", description=__doc__)
     ap.add_argument("--odin3", required=True)
@@ -283,6 +295,7 @@ def parse(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--cap-for", action="append", default=[], metavar="NAME.v=CAP")
     ap.add_argument("--expect", type=Path, help="design [kinds]: reason lines for the Yosys leg")
     ap.add_argument("--table", type=Path, help="write the Markdown table here")
+    ap.add_argument("--raw", type=Path, help="write the cost numbers, one CSV line per design")
     ap.add_argument("--only", action="append", default=[], help="run only this design")
     return ap.parse_args(argv)
 
@@ -312,6 +325,8 @@ def main(argv: Sequence[str]) -> int:
     text = table(rows)
     if args.table:
         args.table.write_text(text)
+    if args.raw:
+        args.raw.write_text(raw_lines(rows))
     bad = [r.name for r in rows if r.problems]
     names = f": {' '.join(bad)}" if bad else ""
     print(f"flatten-vtr: {len(rows)} designs, {len(bad)} failed{names}")

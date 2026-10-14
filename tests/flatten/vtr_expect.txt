@@ -7,3 +7,6 @@ boundtop [cell-type]: Yosys read_verilog keeps unary plus as $pos cells, 2D fold
 stereovision1 [cell-type]: Yosys read_verilog keeps unary plus as $pos cells, 2D folds it away
 stereovision2 [cell-type,memid]: Yosys proc_rom turns constant case tables into $memrd_v2/$meminit (and shifts $eq/$pmux/$logic_not counts); 2E proc lowers them to $pmux
 or1200 [cell-type,memid]: Yosys proc_rom turns constant case tables into $memrd_v2/$meminit (and shifts $eq/$mux/$not counts); 2E proc lowers them to $pmux/$mux
+bgm [cell-type,memid]: Yosys proc_rom turns a constant case table into $memrd_v2/$meminit (and shifts $eq/$logic_not/$pmux counts); 2E proc lowers it to $pmux
+LU8PEEng [cell-type,memid]: Yosys proc_rom turns a constant case table into $memrd_v2/$meminit (and shifts $and/$eq/$not counts); 2E proc lowers it to $pmux
+LU32PEEng [cell-type,memid]: Yosys proc_rom turns a constant case table into $memrd_v2/$meminit (and shifts $and/$eq/$not counts); 2E proc lowers it to $pmux
