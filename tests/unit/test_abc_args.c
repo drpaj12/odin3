@@ -54,11 +54,11 @@ static void build_and(void) {
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
     odin3_module *mod = odin3_module_get(design, mid);
-    odin3_net_id a = afx_port(design, mod, "a", ODIN3_DIR_IN);
-    odin3_net_id b = afx_port(design, mod, "b", ODIN3_DIR_IN);
-    odin3_net_id y = afx_port(design, mod, "y", ODIN3_DIR_OUT);
-    odin3_net_id g[3] = {a, b, y};
-    (void)afx_cell(design, mod, "$_AND_", "g", g, 3);
+    odin3_net_id in_a = afx_port(design, mod, "a", ODIN3_DIR_IN);
+    odin3_net_id in_b = afx_port(design, mod, "b", ODIN3_DIR_IN);
+    odin3_net_id out_y = afx_port(design, mod, "y", ODIN3_DIR_OUT);
+    odin3_net_id gate[3] = {in_a, in_b, out_y};
+    (void)AFX_CELL(design, mod, "$_AND_", "g", gate, 3);
     afx_check(design);
 }
 
@@ -126,7 +126,7 @@ static void test_io_errors(void) {
     build_and();
     expect_refused("--script nope.abc", ODIN3_ERR_IO,
                    "abc: nope.abc: cannot read the script: No such file or directory");
-    expect_refused("--log /nonexistent/x", ODIN3_ERR_IO,
+    expect_refused("--lut 6 --log /nonexistent/x", ODIN3_ERR_IO,
                    "abc: /nonexistent/x: cannot open the log: No such file or directory");
     if (geteuid() == 0) {
         TEST_IGNORE_MESSAGE("a read-only directory does not stop root");
@@ -137,7 +137,7 @@ static void test_io_errors(void) {
     TEST_ASSERT_EQUAL_INT(0, chmod(ro, 0555));
     char args[2 * AFX_PATH];
     char line[2 * AFX_PATH];
-    (void)snprintf(args, sizeof args, "--via-blif %s/sub", ro);
+    (void)snprintf(args, sizeof args, "--lut 6 --via-blif %s/sub", ro);
     (void)snprintf(line, sizeof line, "abc: %s/sub: cannot create the directory: Permission denied",
                    ro);
     expect_refused(args, ODIN3_ERR_IO, line);
@@ -222,6 +222,14 @@ static void test_hex_digest(void) {
     TEST_ASSERT_TRUE(odin3_abc_hex_digest(hex, digest));
     TEST_ASSERT_EQUAL_MEMORY(want, digest, sizeof digest);
     TEST_ASSERT_EQUAL_INT(ODIN3_ABC_ROUTE_LINKED, odin3_abc_route(digest));
+}
+
+static void test_hex_digest_refusals(void) {
+    unsigned char digest[ODIN3_SHA256_DIGEST_BYTES];
+    char hex[ODIN3_SHA256_HEX_CHARS];
+    uint8_t want[ODIN3_SHA256_DIGEST_BYTES];
+    odin3_abc_default_sha256(want);
+    odin3_sha256_hex(want, hex);
     TEST_ASSERT_FALSE(odin3_abc_hex_digest("abc", digest));
     hex[3] = 'G';
     TEST_ASSERT_FALSE(odin3_abc_hex_digest(hex, digest));
@@ -235,7 +243,7 @@ static void test_hex_digest(void) {
 static void test_no_engine(void) {
     build_and();
     odin3_abc_test_set_engine(NULL);
-    expect_refused("", ODIN3_ERR_ENGINE,
+    expect_refused("--lut 6", ODIN3_ERR_ENGINE,
                    "abc: linked ABC is not available (no engine registered; build with "
                    "ODIN3_WITH_ABC=ON)");
 }
@@ -248,7 +256,7 @@ static void test_views_error(void) {
     odin3_node_spec spec = {afx_type(design, "$add"), afx_intern(design, "$c3"), (odin3_prov_id){0},
                             NULL, 5};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(mod, &spec, NULL));
-    expect_refused("", ODIN3_ERR_CHECK,
+    expect_refused("--lut 6", ODIN3_ERR_CHECK,
                    "abc: module 'm' is not in the netlist view: $add '$c3'; run lower first");
     TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
 }
@@ -280,10 +288,10 @@ static void test_refused_script(void) {
     build_and();
     char path[AFX_PATH];
     afx_path(path, "bad.abc");
-    afx_write(path, "write_blif x.blif\n");
+    AFX_WRITE(path, "write_blif x.blif\n");
     char args[2 * AFX_PATH];
     char line[2 * AFX_PATH];
-    (void)snprintf(args, sizeof args, "--script %s", path);
+    (void)snprintf(args, sizeof args, "--lut 6 --script %s", path);
     (void)snprintf(line, sizeof line,
                    "abc: %s:1: abc command 'write_blif' is not allowed: abc scripts cannot read or "
                    "write files",
@@ -297,7 +305,7 @@ static void test_budget(void) {
     odin3_budget_test_set_limit(4096);
     char *before = afx_blif_text(design);
     afx_log_reset();
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_abc(""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_abc("--lut 6"));
     TEST_ASSERT_TRUE_MESSAGE(
         afx_has(ODIN3_LOG_ERROR,
                 "abc needs more than 4096 bytes (the design's budget is 4096 bytes: the smaller of "
@@ -346,6 +354,7 @@ int main(void) {
     RUN_TEST(test_precedence);
     RUN_TEST(test_exchange_choice);
     RUN_TEST(test_hex_digest);
+    RUN_TEST(test_hex_digest_refusals);
     RUN_TEST(test_no_engine);
     RUN_TEST(test_views_error);
     RUN_TEST(test_first_info_line);

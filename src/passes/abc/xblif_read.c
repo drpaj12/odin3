@@ -563,9 +563,13 @@ static odin3_status open_scratch(rdctx *rd, const char *path) {
         return ODIN3_ERR_NO_MEMORY;
     }
     odin3_status st = odin3_blif_read(rd->scratch, path);
-    if (st == ODIN3_ERR_PARSE || st == ODIN3_ERR_IO) {
+    if (st == ODIN3_ERR_PARSE) {
         (void)snprintf(rd->why, sizeof rd->why, "the output network cannot be read");
         return ODIN3_ERR_ENGINE;
+    }
+    if (st == ODIN3_ERR_IO) {
+        /* the reader's lexer also reports a failed buffer allocation this way */
+        odin3_log(ODIN3_LOG_ERROR, "abc: %s: cannot read the output network", path);
     }
     if (st == ODIN3_OK) {
         rd->module = odin3_module_get(rd->scratch, odin3_design_top(rd->scratch));

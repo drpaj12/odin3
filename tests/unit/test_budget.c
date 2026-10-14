@@ -148,10 +148,10 @@ static void make_dir(const char *path) {
     TEST_ASSERT_TRUE_MESSAGE(mkdir(path, 0755) == 0 || errno == EEXIST, path);
 }
 
-static void write_text(const char *path, const char *text) {
+static void write_text(const char *path, odin3_bytes text) {
     FILE *file = fopen(path, "w");
     TEST_ASSERT_NOT_NULL_MESSAGE(file, path);
-    TEST_ASSERT_TRUE(fputs(text, file) >= 0);
+    TEST_ASSERT_EQUAL_UINT(text.len, fwrite(text.ptr, 1, text.len, file));
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
 }
 
@@ -166,8 +166,8 @@ static void test_limit_cgroup(void) {
     make_dir(ODIN3_BUDGET_OUT "/tree");
     make_dir(ODIN3_BUDGET_OUT "/tree/a.slice");
     make_dir(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope");
-    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", "max\n");
-    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/memory.max", "6442450944\n");
+    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", odin3_bytes_cstr("max\n"));
+    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/memory.max", odin3_bytes_cstr("6442450944\n"));
     odin3_budget_test_set_cgroup_root(ODIN3_BUDGET_OUT "/tree", "/a.slice/b.scope");
     uint64_t limit = odin3_budget_limit();
     TEST_ASSERT_TRUE(limit <= 6442450944ULL);
@@ -176,14 +176,14 @@ static void test_limit_cgroup(void) {
     uint64_t physical = (uint64_t)pages * (uint64_t)page_size;
     uint64_t share = physical / 100 * 60 + physical % 100 * 60 / 100;
     TEST_ASSERT_EQUAL_UINT64(share < 6442450944ULL ? share : 6442450944ULL, limit);
-    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", "1048576\n");
+    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", odin3_bytes_cstr("1048576\n"));
     TEST_ASSERT_EQUAL_UINT64(1048576, odin3_budget_limit());
-    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", "garbage\n");
+    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", odin3_bytes_cstr("garbage\n"));
     TEST_ASSERT_EQUAL_UINT64(share < 6442450944ULL ? share : 6442450944ULL, odin3_budget_limit());
     odin3_budget_test_set_cgroup_root(ODIN3_BUDGET_OUT "/tree", "/");
     TEST_ASSERT_EQUAL_UINT64(share, odin3_budget_limit());
     /* the message names the smaller bound's number */
-    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", "4096\n");
+    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", odin3_bytes_cstr("4096\n"));
     odin3_budget_test_set_cgroup_root(ODIN3_BUDGET_OUT "/tree", "/a.slice/b.scope");
     odin3_strbuf msg;
     odin3_strbuf_init(&msg);

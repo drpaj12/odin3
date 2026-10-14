@@ -38,11 +38,11 @@ void setUp(void) {
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
     odin3_module *mod = odin3_module_get(design, mid);
-    odin3_net_id a = afx_port(design, mod, "a", ODIN3_DIR_IN);
-    odin3_net_id b = afx_port(design, mod, "b", ODIN3_DIR_IN);
-    odin3_net_id y = afx_port(design, mod, "y", ODIN3_DIR_OUT);
-    odin3_net_id g[3] = {a, b, y};
-    (void)afx_cell(design, mod, "$_AND_", "g", g, 3);
+    odin3_net_id in_a = afx_port(design, mod, "a", ODIN3_DIR_IN);
+    odin3_net_id in_b = afx_port(design, mod, "b", ODIN3_DIR_IN);
+    odin3_net_id out_y = afx_port(design, mod, "y", ODIN3_DIR_OUT);
+    odin3_net_id gate[3] = {in_a, in_b, out_y};
+    (void)AFX_CELL(design, mod, "$_AND_", "g", gate, 3);
 }
 
 void tearDown(void) {
@@ -95,14 +95,31 @@ static void test_files_commands_and_logs(void) {
     char path[AFX_JOIN];
     (void)snprintf(path, sizeof path, "%s/abc0.cmd", dir);
     TEST_ASSERT_EQUAL_STRING(want, afx_slurp(path));
-    /* ABC's lines: DEBUG, except the printing command's, which is INFO */
-    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_DEBUG, "abc| fake: strash"));
-    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO, "abc| fake: print_stats"));
-    (void)snprintf(path, sizeof path, "%s/abc0.log", dir);
-    TEST_ASSERT_NOT_NULL(strstr(afx_slurp(path), "fake: strash\n"));
+}
+
+/* --log starts with the run header and holds ABC's raw lines. */
+static void expect_log_file(const char *log_file) {
     const char *log_text = afx_slurp(log_file);
     TEST_ASSERT_EQUAL_INT(0, strncmp(log_text, "# abc run 0: module 'm', no flip-flops\n", 39));
     TEST_ASSERT_NOT_NULL(strstr(log_text, "fake: if -K 6 -v\n"));
+}
+
+/* ABC's lines: DEBUG, except the printing command's, which is INFO; the run's log file and --log.
+ */
+static void test_abc_lines_in_logs(void) {
+    char dir[AFX_PATH];
+    char log_file[AFX_PATH];
+    char args[3 * AFX_PATH];
+    run_dir(dir, "run3");
+    afx_path(log_file, "abc2.log");
+    (void)snprintf(args, sizeof args, "--via-blif %s --lut 6 --log %s", dir, log_file);
+    (void)run_abc(args);
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_DEBUG, "abc| fake: strash"));
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO, "abc| fake: print_stats"));
+    char path[AFX_JOIN];
+    (void)snprintf(path, sizeof path, "%s/abc0.log", dir);
+    TEST_ASSERT_NOT_NULL(strstr(afx_slurp(path), "fake: strash\n"));
+    expect_log_file(log_file);
 }
 
 /* Without --via-blif the files live in a mkdtemp directory the pass removes. */
@@ -123,12 +140,20 @@ static void test_temp_directory_is_removed(void) {
 
 /* --- failures -------------------------------------------------------------------------------- */
 
-static void expect_engine_failure(const char *args, const char *line) {
+/* The arguments of a failing run and the one `abc:` error it must log. */
+typedef struct failure {
+    const char *args;
+    const char *line;
+} failure;
+
+#define EXPECT_FAILURE(args, line) expect_engine_failure(&(failure){(args), (line)})
+
+static void expect_engine_failure(const failure *want) {
     char *before = afx_blif_text(design);
     afx_log_reset();
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, run_abc(args));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, run_abc(want->args));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, afx_count(ODIN3_LOG_ERROR, "abc:"), afx_errors());
-    TEST_ASSERT_TRUE_MESSAGE(afx_has(ODIN3_LOG_ERROR, line), afx_errors());
+    TEST_ASSERT_TRUE_MESSAGE(afx_has(ODIN3_LOG_ERROR, want->line), afx_errors());
     char *after = afx_blif_text(design);
     TEST_ASSERT_EQUAL_STRING(before, after);
     free(before);
@@ -144,27 +169,26 @@ static void test_failure_texts(void) {
     char args[2 * AFX_PATH];
     char line[4 * AFX_PATH];
     run_dir(dir, "run2");
-    (void)snprintf(args, sizeof args, "--via-blif %s", dir);
+    (void)snprintf(args, sizeof args, "--lut 6 --via-blif %s", dir);
     odin3_abc_fake_fail_on("strash", (odin3_abc_fail){ODIN3_ABC_FAIL_COMMAND, 1, ""});
-    expect_engine_failure(args, "abc: builtin:lib/abc/vtr.abc:5: command 'strash' failed");
+    EXPECT_FAILURE(args, "abc: builtin:lib/abc/vtr.abc:5: command 'strash' failed");
     odin3_abc_fake_fail_on("scorr", (odin3_abc_fail){ODIN3_ABC_FAIL_EXIT, 3, ""});
-    expect_engine_failure(args, "abc: ABC called exit(3) during 'scorr -v'; linked ABC is "
-                                "disabled until odin3 restarts");
+    EXPECT_FAILURE(args, "abc: ABC called exit(3) during 'scorr -v'; linked ABC is "
+                         "disabled until odin3 restarts");
     odin3_abc_fake_fail_on("dc2", (odin3_abc_fail){ODIN3_ABC_FAIL_ABORT, 0, ""});
-    expect_engine_failure(args,
-                          "abc: ABC aborted during 'dc2 -v'; linked ABC is disabled until odin3 "
-                          "restarts");
+    EXPECT_FAILURE(args, "abc: ABC aborted during 'dc2 -v'; linked ABC is disabled until odin3 "
+                         "restarts");
     odin3_abc_fake_fail_on("dch", (odin3_abc_fail){ODIN3_ABC_FAIL_ASSERT, 0, "abc.c:1: x"});
-    expect_engine_failure(args, "abc: ABC assertion failed during 'dch -f': abc.c:1: x; linked ABC "
-                                "is disabled until odin3 restarts");
+    EXPECT_FAILURE(args, "abc: ABC assertion failed during 'dch -f': abc.c:1: x; linked ABC "
+                         "is disabled until odin3 restarts");
     odin3_abc_fake_fail_on("write_hie", (odin3_abc_fail){ODIN3_ABC_FAIL_COMMAND, 1, ""});
     (void)snprintf(line, sizeof line,
                    "abc: internal command 'write_hie \"%s/abc0.in.blif\" "
                    "\"%s/abc0.out.blif\"' failed",
                    dir, dir);
-    expect_engine_failure(args, line);
+    EXPECT_FAILURE(args, line);
     odin3_abc_fake_fail_on("read", (odin3_abc_fail){ODIN3_ABC_FAIL_RESULT, 0, "no network"});
-    expect_engine_failure(args, "abc: ABC returned a malformed network: no network");
+    EXPECT_FAILURE(args, "abc: ABC returned a malformed network: no network");
     expect_file(dir, "abc0.in.blif"); /* a failed run keeps its files in a given directory */
 }
 
@@ -172,15 +196,22 @@ static void test_failure_texts(void) {
  */
 
 /* A shell fixture that answers `-c version` with the pin and runs `body` for -f. */
-static void make_child(const char *name, const char *body, char *path) {
-    afx_path(path, name);
+typedef struct child_fixture {
+    const char *name;
+    const char *body;
+} child_fixture;
+
+#define MAKE_CHILD(name, body, path) make_child(&(child_fixture){(name), (body)}, (path))
+
+static void make_child(const child_fixture *fixture, char *path) {
+    afx_path(path, fixture->name);
     char text[2048];
     (void)snprintf(
         text, sizeof text,
         "#!/bin/sh\nif [ \"$1\" = \"-c\" ]; then\n  echo 'odin3-abc: commit %s'\n  exit 0\n"
         "fi\n%s\n",
-        odin3_abc_child_pin(), body);
-    afx_write(path, text);
+        odin3_abc_child_pin(), fixture->body);
+    AFX_WRITE(path, text);
     TEST_ASSERT_EQUAL_INT(0, chmod(path, 0755));
 }
 
@@ -192,21 +223,21 @@ static void use_child(const char *path) {
 /* Abc_RealMain returns 0 even when a command fails: no output file is the failure. */
 static void test_child_exit_zero_without_output(void) {
     char exe[AFX_PATH];
-    make_child("child_noout.sh", "echo 'Error: boom'\nexit 0", exe);
+    MAKE_CHILD("child_noout.sh", "echo 'Error: boom'\nexit 0", exe);
     use_child(exe);
-    expect_engine_failure("", "abc: ABC returned a malformed network: no output network (last ABC "
+    EXPECT_FAILURE("--lut 6", "abc: ABC returned a malformed network: no output network (last ABC "
                               "line: 'Error: boom')");
     TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
 }
 
 static void test_child_failure_kinds(void) {
     char exe[AFX_PATH];
-    make_child("child_exit3.sh", "exit 3", exe);
+    MAKE_CHILD("child_exit3.sh", "exit 3", exe);
     use_child(exe);
-    expect_engine_failure("", "abc: ABC subprocess exited with status 3 during run 0");
-    make_child("child_segv.sh", "kill -SEGV $$", exe);
+    EXPECT_FAILURE("--lut 6", "abc: ABC subprocess exited with status 3 during run 0");
+    MAKE_CHILD("child_segv.sh", "kill -SEGV $$", exe);
     use_child(exe);
-    expect_engine_failure("", "abc: ABC subprocess killed by signal 11 during run 0");
+    EXPECT_FAILURE("--lut 6", "abc: ABC subprocess killed by signal 11 during run 0");
 }
 
 static void test_child_missing_program(void) {
@@ -218,12 +249,13 @@ static void test_child_missing_program(void) {
                    "abc: ABC subprocess '%s' cannot start: No such file or "
                    "directory",
                    exe);
-    expect_engine_failure("", line);
+    EXPECT_FAILURE("--lut 6", line);
 }
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_files_commands_and_logs);
+    RUN_TEST(test_abc_lines_in_logs);
     RUN_TEST(test_temp_directory_is_removed);
     RUN_TEST(test_failure_texts);
     RUN_TEST(test_child_exit_zero_without_output);

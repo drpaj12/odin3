@@ -58,16 +58,16 @@ static void build_t1(int64_t init) {
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
     mod = odin3_module_get(design, mid);
-    odin3_net_id a = afx_port(design, mod, "a", ODIN3_DIR_IN);
-    odin3_net_id b = afx_port(design, mod, "b", ODIN3_DIR_IN);
+    odin3_net_id in_a = afx_port(design, mod, "a", ODIN3_DIR_IN);
+    odin3_net_id in_b = afx_port(design, mod, "b", ODIN3_DIR_IN);
     odin3_net_id clk = afx_port(design, mod, "clk", ODIN3_DIR_IN);
-    odin3_net_id y = afx_port(design, mod, "y", ODIN3_DIR_OUT);
+    odin3_net_id out_y = afx_port(design, mod, "y", ODIN3_DIR_OUT);
     n_net = afx_net(design, mod, "n");
-    odin3_net_id and_nets[3] = {a, b, n_net};
-    (void)afx_cell(design, mod, "$_AND_", "g", and_nets, 3);
+    odin3_net_id and_nets[3] = {in_a, in_b, n_net};
+    (void)AFX_CELL(design, mod, "$_AND_", "g", and_nets, 3);
     odin3_value params[1] = {odin3_value_int(init)};
-    odin3_net_id dff_nets[3] = {clk, n_net, y};
-    (void)afx_cell_p(design, mod, "$_DFF_P_", params, dff_nets, 3);
+    odin3_net_id dff_nets[3] = {clk, n_net, out_y};
+    (void)AFX_CELL_P(design, mod, "$_DFF_P_", params, dff_nets, 3);
     afx_check(design);
 }
 
@@ -163,60 +163,69 @@ static void test_write_is_deterministic(void) {
 
 /* --- read-back ----------------------------------------------------------------------------- */
 
-/* Reads a crafted output (head + body) and expects the one error line. */
-static void expect_malformed(const char *file_name, const char *text, const char *why) {
+/* One crafted output and the one error it must give. */
+typedef struct malformed_case {
+    const char *file;
+    const char *text;
+    const char *why;
+} malformed_case;
+
+/* Reads a crafted output and expects exactly the one error line. */
+static void expect_malformed(const malformed_case *test) {
     char path[AFX_PATH];
-    afx_path(path, file_name);
-    afx_write(path, text);
+    afx_path(path, test->file);
+    AFX_WRITE(path, test->text);
     odin3_abc_result res;
     afx_log_reset();
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, odin3_abc_xblif_read(run, path, &res));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_ENGINE, odin3_abc_xblif_read(run, path, &res),
+                                  test->why);
     char want[AFX_LINE];
-    (void)snprintf(want, sizeof want, "abc: ABC returned a malformed network: %s", why);
+    (void)snprintf(want, sizeof want, "abc: ABC returned a malformed network: %s", test->why);
     TEST_ASSERT_EQUAL_STRING(want, afx_only(ODIN3_LOG_ERROR, "abc:"));
     odin3_abc_result_free(&res);
 }
 
+#define OUT_HEAD ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n"
+#define MANY_INPUTS "o3ci0 o3ci1 o3ci0 o3ci1 o3ci0 o3ci1 o3ci0 o3ci1 o3ci0 o3ci1 o3ci0 o3ci1 o3ci0"
+
 static void test_readback_errors(void) {
+    static const malformed_case k_cases[] = {
+        {"r1.blif",
+         ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co9\n.names o3ci0 o3co9\n1 1\n.end\n",
+         "an unknown output 'o3co9'"},
+        {"r2.blif", OUT_HEAD ".subckt foo a=o3ci0 y=o3co0\n.end\n", "a .subckt"},
+        {"r3.blif", OUT_HEAD ".latch o3ci0 o3q0 1\n.names o3q0 o3co0\n1 1\n.end\n",
+         "a latch with init 1 (all were sent at 0)"},
+        {"r4.blif",
+         OUT_HEAD ".names " MANY_INPUTS
+                  " o3ci1 o3ci0 o3ci1 o3ci0 o3co0\n11111111111111111 1\n.end\n",
+         "a LUT with 17 inputs (at most 16)"},
+        {"r5.blif", OUT_HEAD ".names o3ci0 o3ci1 o3ci0 o3ci1 o3ci0 o3co0\n11111 1\n.end\n",
+         "a LUT with 5 inputs exceeds --lut 4"},
+        {"r6.blif",
+         OUT_HEAD ".latch o3ci0 o3q0 0\n.latch o3ci1 o3q1 0\n.names o3q0 o3co0\n1 1\n.end\n",
+         "2 registers, more than the 1 it was given"},
+        {"r7.blif", OUT_HEAD ".latch o3ci0 foo 0\n.names foo o3co0\n1 1\n.end\n",
+         "register 0 carries no input register's name"},
+        {"r8.blif",
+         ".model o3abc\n.inputs o3ci0 o3ci1 o3ci2\n.outputs o3co0\n.names o3ci0 o3co0\n1 1\n.end\n",
+         "3 primary inputs, expected 2"},
+        {"r9.blif",
+         ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0 o3co1\n.names o3ci0 o3co0\n1 1\n"
+         ".names o3ci1 o3co1\n1 1\n.end\n",
+         "2 outputs, expected 1"},
+    };
     build_t1(0);
     start_region("--lut 4");
-    expect_malformed("r1.blif",
-                     ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co9\n.names o3ci0 o3co9\n1 "
-                     "1\n.end\n",
-                     "an unknown output 'o3co9'");
-    expect_malformed("r2.blif",
-                     ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n.subckt foo a=o3ci0 "
-                     "y=o3co0\n.end\n",
-                     "a .subckt");
-    expect_malformed("r3.blif",
-                     ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n.latch o3ci0 o3q0 1\n"
-                     ".names o3q0 o3co0\n1 1\n.end\n",
-                     "a latch with init 1 (all were sent at 0)");
-    expect_malformed("r4.blif",
-                     ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n.names o3ci0 o3ci1 o3ci0 "
-                     "o3ci1 o3ci0 o3ci1 o3ci0 o3ci1 o3ci0 o3ci1 o3ci0 o3ci1 o3ci0 o3ci1 o3ci0 "
-                     "o3ci1 o3ci0 o3co0\n11111111111111111 1\n.end\n",
-                     "a LUT with 17 inputs (at most 16)");
-    expect_malformed("r5.blif",
-                     ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n.names o3ci0 o3ci1 o3ci0 "
-                     "o3ci1 o3ci0 o3co0\n11111 1\n.end\n",
-                     "a LUT with 5 inputs exceeds --lut 4");
-    expect_malformed("r6.blif",
-                     ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n.latch o3ci0 o3q0 0\n"
-                     ".latch o3ci1 o3q1 0\n.names o3q0 o3co0\n1 1\n.end\n",
-                     "2 registers, more than the 1 it was given");
-    expect_malformed("r7.blif",
-                     ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n.latch o3ci0 foo 0\n"
-                     ".names foo o3co0\n1 1\n.end\n",
-                     "register 0 carries no input register's name");
-    expect_malformed("r8.blif",
-                     ".model o3abc\n.inputs o3ci0 o3ci1 o3ci2\n.outputs o3co0\n.names o3ci0 "
-                     "o3co0\n1 1\n.end\n",
-                     "3 primary inputs, expected 2");
-    expect_malformed("r9.blif",
-                     ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0 o3co1\n.names o3ci0 "
-                     "o3co0\n1 1\n.names o3ci1 o3co1\n1 1\n.end\n",
-                     "2 outputs, expected 1");
+    for (size_t idx = 0; idx < sizeof k_cases / sizeof k_cases[0]; idx++) {
+        expect_malformed(&k_cases[idx]);
+    }
+}
+
+/* A missing output file is the carry-over of 3D-5a: a diagnosed error, never a success. */
+static void test_readback_missing_file(void) {
+    build_t1(0);
+    start_region("--lut 4");
     char path[AFX_PATH];
     afx_path(path, "does-not-exist.blif");
     odin3_abc_result res;
@@ -232,7 +241,7 @@ static void test_readback_buffer_is_a_connection(void) {
     start_region("--lut 6");
     char path[AFX_PATH];
     afx_path(path, "ok.blif");
-    afx_write(path, ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n.names o3ci0 o3ci1 w\n11 "
+    AFX_WRITE(path, ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n.names o3ci0 o3ci1 w\n11 "
                     "1\n.names w d\n1 1\n.latch d o3q0 0\n.names o3q0 o3co0\n1 1\n.end\n");
     odin3_abc_result res;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_xblif_read(run, path, &res));
@@ -252,6 +261,23 @@ static void test_readback_buffer_is_a_connection(void) {
     odin3_abc_result_free(&res);
 }
 
+/* One write and one read-back with allocation `at` failing; true when both worked. */
+static bool oom_round(long at, const odin3_abc_paths *files) {
+    odin3_abc_result res;
+    odin3_util_set_alloc_fail_after(at);
+    odin3_status st_w = odin3_abc_xblif_write(run, &region, files->in);
+    odin3_status st_r = odin3_abc_xblif_read(run, files->out, &res);
+    odin3_util_set_alloc_fail_after(-1);
+    /* the reader's lexer reports a failed buffer allocation as IO */
+    bool write_ok = st_w == ODIN3_OK || st_w == ODIN3_ERR_NO_MEMORY || st_w == ODIN3_ERR_IO;
+    bool read_ok = st_r == ODIN3_OK || st_r == ODIN3_ERR_NO_MEMORY || st_r == ODIN3_ERR_IO;
+    TEST_ASSERT_TRUE_MESSAGE(write_ok && read_ok, "an injected failure gave another status");
+    if (st_r == ODIN3_OK) {
+        odin3_abc_result_free(&res);
+    }
+    return st_w == ODIN3_OK && st_r == ODIN3_OK;
+}
+
 /* An OOM sweep over the write and the read-back: NO_MEMORY, no leak, a fresh try works. */
 static void test_oom_sweep(void) {
     build_t1(1);
@@ -260,29 +286,16 @@ static void test_oom_sweep(void) {
     char out[AFX_PATH];
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_run_path(run, ODIN3_ABC_FILE_IN, in, sizeof in));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_run_path(run, ODIN3_ABC_FILE_OUT, out, sizeof out));
-    afx_write(out, ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n.names o3ci0 o3ci1 w\n11 "
+    AFX_WRITE(out, ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n.names o3ci0 o3ci1 w\n11 "
                    "1\n.latch w o3q0 0\n.names o3q0 o3co0\n1 1\n.end\n");
     uint32_t failures = 0;
-    for (long at = 0; at < OOM_LIMIT; at++) {
-        odin3_abc_result res;
-        odin3_util_set_alloc_fail_after(at);
-        odin3_status st_w = odin3_abc_xblif_write(run, &region, in);
-        odin3_status st_r = odin3_abc_xblif_read(run, out, &res);
-        odin3_util_set_alloc_fail_after(-1);
-        if (st_w == ODIN3_OK && st_r == ODIN3_OK) {
-            odin3_abc_result_free(&res);
-            break;
-        }
+    long at = 0;
+    while (at < OOM_LIMIT && !oom_round(at, &(odin3_abc_paths){in, out})) {
         failures++;
-        TEST_ASSERT_TRUE(st_w == ODIN3_OK || st_w == ODIN3_ERR_NO_MEMORY || st_w == ODIN3_ERR_IO);
-        char what[64];
-        (void)snprintf(what, sizeof what, "read-back status %d at allocation %ld", (int)st_r, at);
-        TEST_ASSERT_TRUE_MESSAGE(st_r == ODIN3_OK || st_r == ODIN3_ERR_NO_MEMORY, what);
-        if (st_r == ODIN3_OK) {
-            odin3_abc_result_free(&res);
-        }
+        at++;
     }
     TEST_ASSERT_GREATER_THAN_UINT32(0, failures);
+    TEST_ASSERT_TRUE(at < OOM_LIMIT);
     afx_check(design);
 }
 
@@ -293,6 +306,7 @@ int main(void) {
     RUN_TEST(test_command_file);
     RUN_TEST(test_write_is_deterministic);
     RUN_TEST(test_readback_errors);
+    RUN_TEST(test_readback_missing_file);
     RUN_TEST(test_readback_buffer_is_a_connection);
     RUN_TEST(test_oom_sweep);
     return UNITY_END();

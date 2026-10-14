@@ -114,90 +114,102 @@ typedef struct expr_env {
     uint32_t index; /* the input assignment: input j = bit j of it */
 } expr_env;
 
-static bool literal_value(const expr_env *env, const char *lit, size_t len) {
-    bool negate = len > 0 && lit[0] == '~';
-    if (negate) {
-        lit++;
-        len--;
-    }
-    bool value = false;
-    if (len == 4 && strncmp(lit, "1'b1", len) == 0) {
-        value = true;
-    } else if (len == 4 && strncmp(lit, "1'b0", len) == 0) {
-        value = false;
-    } else {
-        bool found = false;
-        for (uint32_t j = 0; j < env->inputs; j++) {
-            if (strlen(env->names[j]) == len && strncmp(env->names[j], lit, len) == 0) {
-                value = ((env->index >> j) & 1U) != 0;
-                found = true;
-            }
+/* A slice of the expression text. */
+typedef struct span {
+    const char *ptr;
+    size_t len;
+} span;
+
+/* The value of an input by name; fails the test for an unknown name. */
+static bool name_value(const expr_env *env, span name) {
+    for (uint32_t j = 0; j < env->inputs; j++) {
+        if (strlen(env->names[j]) == name.len && strncmp(env->names[j], name.ptr, name.len) == 0) {
+            return ((env->index >> j) & 1U) != 0;
         }
-        TEST_ASSERT_TRUE_MESSAGE(found, lit);
     }
+    TEST_FAIL_MESSAGE(name.ptr);
+    return false;
+}
+
+static bool literal_value(const expr_env *env, span lit) {
+    bool negate = lit.len > 0 && lit.ptr[0] == '~';
+    if (negate) {
+        lit.ptr++;
+        lit.len--;
+    }
+    bool value = strncmp(lit.ptr, "1'b1", 4) == 0 ||
+                 (strncmp(lit.ptr, "1'b0", 4) != 0 && name_value(env, lit));
     return negate ? !value : value;
 }
 
+/* The next piece of text before sep (or the rest); advances past the separator. */
+static span next_piece(span *rest, const char *sep) {
+    const char *at = strstr(rest->ptr, sep);
+    size_t len =
+        (at != NULL && (size_t)(at - rest->ptr) < rest->len) ? (size_t)(at - rest->ptr) : rest->len;
+    span piece = {rest->ptr, len};
+    size_t skip = len < rest->len ? len + strlen(sep) : len;
+    rest->ptr += skip;
+    rest->len -= skip;
+    return piece;
+}
+
 /* One cube: literals joined by " & ", optionally in parentheses. */
-static bool cube_value(const expr_env *env, const char *cube, size_t len) {
-    if (len >= 2 && cube[0] == '(' && cube[len - 1] == ')') {
-        cube++;
-        len -= 2;
+static bool cube_value(const expr_env *env, span cube) {
+    if (cube.len >= 2 && cube.ptr[0] == '(' && cube.ptr[cube.len - 1] == ')') {
+        cube.ptr++;
+        cube.len -= 2;
     }
     bool value = true;
-    size_t pos = 0;
-    while (pos < len) {
-        const char *amp = strstr(cube + pos, " & ");
-        size_t end = (amp != NULL && (size_t)(amp - cube) < len) ? (size_t)(amp - cube) : len;
-        value = literal_value(env, cube + pos, end - pos) && value;
-        pos = end < len ? end + 3 : len;
+    while (cube.len > 0) {
+        value = literal_value(env, next_piece(&cube, " & ")) && value;
     }
     return value;
 }
 
 /* The value of `<sum>` or `~(<sum>)`, the sum being cubes joined by " | ". */
-static bool expr_value(const expr_env *env, const char *expr, size_t len) {
-    bool negate = len > 3 && strncmp(expr, "~(", 2) == 0 && expr[len - 1] == ')';
+static bool expr_value(const expr_env *env, span expr) {
+    bool negate = expr.len > 3 && strncmp(expr.ptr, "~(", 2) == 0 && expr.ptr[expr.len - 1] == ')';
     if (negate) {
-        expr += 2;
-        len -= 3;
+        expr.ptr += 2;
+        expr.len -= 3;
     }
     bool value = false;
-    size_t pos = 0;
-    while (pos < len) {
-        const char *bar = strstr(expr + pos, " | ");
-        size_t end = (bar != NULL && (size_t)(bar - expr) < len) ? (size_t)(bar - expr) : len;
-        value = cube_value(env, expr + pos, end - pos) || value;
-        pos = end < len ? end + 3 : len;
+    while (expr.len > 0) {
+        value = cube_value(env, next_piece(&expr, " | ")) || value;
     }
     return negate ? !value : value;
 }
 
-/* The right-hand side of `  assign <out> = <rhs>;` in text, into rhs; its length. */
-static size_t rhs_of(const char *text, const char *out, char *rhs, size_t cap) {
+/* The line `  assign <output> = <rhs>;` of a written file. */
+typedef struct assign_query {
+    const char *text;
+    const char *output;
+} assign_query;
+
+/* The right-hand side of the query's assign, into rhs; its length. */
+static size_t rhs_of(const assign_query *query, char *rhs, size_t cap) {
     char key[NAME_MAX_LEN + 16];
-    int klen = snprintf(key, sizeof key, "\n  assign %s = ", out);
+    int klen = snprintf(key, sizeof key, "\n  assign %s = ", query->output);
     TEST_ASSERT_TRUE(klen > 0 && (size_t)klen < sizeof key);
-    const char *at = strstr(text, key);
+    const char *at = strstr(query->text, key);
     TEST_ASSERT_NOT_NULL_MESSAGE(at, key);
     at += klen;
     const char *semi = strchr(at, ';');
-    TEST_ASSERT_NOT_NULL(semi);
+    TEST_ASSERT_TRUE(semi != NULL && (size_t)(semi - at) < cap);
     size_t len = (size_t)(semi - at);
-    TEST_ASSERT_TRUE(len < cap);
     memcpy(rhs, at, len);
     rhs[len] = '\0';
     return len;
 }
 
 /* Every input assignment of the written expression gives the table's bit. */
-static void expect_function(const char *rhs, size_t len, const char *const *names, uint32_t width,
+static void expect_function(span rhs, const char *const *names, uint32_t width,
                             const uint8_t *bits) {
     expr_env env = {names, width, 0};
     for (uint32_t i = 0; i < (1U << width); i++) {
         env.index = i;
-        bool want = bits[i] == ODIN3_BIT_1;
-        TEST_ASSERT_EQUAL_MESSAGE(want, expr_value(&env, rhs, len), rhs);
+        TEST_ASSERT_EQUAL_MESSAGE(bits[i] == ODIN3_BIT_1, expr_value(&env, rhs), rhs.ptr);
     }
 }
 
@@ -244,15 +256,11 @@ static void test_xor_two_cubes(void) {
     uint8_t bits[4];
     const char *text = write_one(2, "0110", bits);
     char rhs[128];
-    size_t len = rhs_of(text, "y", rhs, sizeof rhs);
+    size_t len = rhs_of(&(assign_query){text, "y"}, rhs, sizeof rhs);
     /* two cubes, each in parentheses, joined by " | " (~?a and ~?b in each) */
-    TEST_ASSERT_EQUAL_CHAR('(', rhs[0]);
-    TEST_ASSERT_NOT_NULL(strstr(rhs, ") | ("));
-    TEST_ASSERT_EQUAL_CHAR(')', rhs[len - 1]);
-    TEST_ASSERT_NOT_NULL(strstr(rhs, "a"));
-    TEST_ASSERT_NOT_NULL(strstr(rhs, "b"));
-    TEST_ASSERT_NULL(strstr(rhs, "c"));
-    expect_function(rhs, len, k_abc, 2, bits);
+    TEST_ASSERT_TRUE(rhs[0] == '(' && rhs[len - 1] == ')' && strstr(rhs, ") | (") != NULL);
+    TEST_ASSERT_TRUE(strstr(rhs, "c") == NULL);
+    expect_function((span){rhs, len}, k_abc, 2, bits);
 }
 
 static void test_or3_off_set(void) {
@@ -301,7 +309,11 @@ static void testbench_line(odin3_strbuf *tb, uint32_t width, uint32_t num, const
                              name, (unsigned long long)word, (unsigned)width - 1U, name));
 }
 
-static void test_random_tables_text_and_icarus(void) {
+/* The random tables: [width][number][bit]. */
+static uint8_t tables[MAX_IN + 1][TABLES_PER_WIDTH][1U << MAX_IN];
+
+/* Module luts: inputs i0 .. i5 and 16 random $luts per width 1..6; the testbench lines go to tb. */
+static void build_random_luts(odin3_strbuf *tb) {
     odin3_module_id mid = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_module_create(design, intern("luts"), (odin3_prov_id){0}, &mid));
@@ -312,9 +324,6 @@ static void test_random_tables_text_and_icarus(void) {
     }
     odin3_prng prng;
     odin3_prng_seed(&prng, SEED);
-    static uint8_t tables[MAX_IN + 1][TABLES_PER_WIDTH][1U << MAX_IN];
-    odin3_strbuf tb;
-    odin3_strbuf_init(&tb);
     for (uint32_t width = 1; width <= MAX_IN; width++) {
         for (uint32_t num = 0; num < TABLES_PER_WIDTH; num++) {
             char name[NAME_MAX_LEN];
@@ -322,23 +331,39 @@ static void test_random_tables_text_and_icarus(void) {
             odin3_net_id out = add_scalar_port(mod, name, ODIN3_DIR_OUT);
             random_table(&prng, width, tables[width][num]);
             add_lut(mod, width, tables[width][num], in, out);
-            testbench_line(&tb, width, num, tables[width][num]);
+            testbench_line(tb, width, num, tables[width][num]);
         }
     }
     check_full_ok();
-    char path[PATH_MAX_LEN];
-    out_path(path, "luts.v");
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, path, NULL));
-    const char *text = slurp(path);
+}
+
+/* Every written expression is the table (evaluated here, in C). */
+static void check_written_text(const char *text) {
     for (uint32_t width = 1; width <= MAX_IN; width++) {
         for (uint32_t num = 0; num < TABLES_PER_WIDTH; num++) {
             char name[NAME_MAX_LEN];
             char rhs[2048];
             out_name(name, width, num);
-            size_t len = rhs_of(text, name, rhs, sizeof rhs);
-            expect_function(rhs, len, k_names, width, tables[width][num]);
+            size_t len = rhs_of(&(assign_query){text, name}, rhs, sizeof rhs);
+            expect_function((span){rhs, len}, k_names, width, tables[width][num]);
         }
     }
+}
+
+/* One `wire <out>;` per output, or one `, .<out>(<out>)` per output when connect is set. */
+static void put_outputs(odin3_strbuf *bench, bool connect) {
+    for (uint32_t width = 1; width <= MAX_IN; width++) {
+        for (uint32_t num = 0; num < TABLES_PER_WIDTH; num++) {
+            char name[NAME_MAX_LEN];
+            out_name(name, width, num);
+            odin3_status st = connect ? odin3_strbuf_appendf(bench, ", .%s(%s)", name, name)
+                                      : odin3_strbuf_appendf(bench, "  wire %s;\n", name);
+            TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+        }
+    }
+}
+
+static void write_bench(const odin3_strbuf *tb) {
     odin3_strbuf bench;
     odin3_strbuf_init(&bench);
     TEST_ASSERT_EQUAL_INT(
@@ -349,38 +374,38 @@ static void test_random_tables_text_and_icarus(void) {
             "  wire i0 = idx[0], i1 = idx[1], i2 = idx[2], i3 = idx[3], i4 = idx[4], i5 = idx[5];\n"
             "  function t(input [63:0] table, input [5:0] at);\n    t = table[at];\n  "
             "endfunction\n"));
-    for (uint32_t width = 1; width <= MAX_IN; width++) {
-        for (uint32_t num = 0; num < TABLES_PER_WIDTH; num++) {
-            char name[NAME_MAX_LEN];
-            out_name(name, width, num);
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&bench, "  wire %s;\n", name));
-        }
-    }
+    put_outputs(&bench, false);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&bench, "  luts dut(.i0(i0), .i1(i1), "
                                                                  ".i2(i2), .i3(i3), .i4(i4), "
                                                                  ".i5(i5)"));
-    for (uint32_t width = 1; width <= MAX_IN; width++) {
-        for (uint32_t num = 0; num < TABLES_PER_WIDTH; num++) {
-            char name[NAME_MAX_LEN];
-            out_name(name, width, num);
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&bench, ", .%s(%s)", name, name));
-        }
-    }
+    put_outputs(&bench, true);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_strbuf_appendf(&bench, ");\n  initial begin\n    errors = 0;\n"
                                                        "    for (n = 0; n < 64; n = n + 1) begin\n"
                                                        "      idx = n;\n      #1;\n"));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&bench, (odin3_bytes){tb.data, tb.len}));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&bench, (odin3_bytes){tb->data, tb->len}));
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_strbuf_appendf(&bench, "    end\n    if (errors == 0) $display(\"PASS\");\n"
                                                "    else $display(\"FAIL %%0d\", errors);\n"
                                                "    $finish;\n  end\nendmodule\n"));
+    char path[PATH_MAX_LEN];
     out_path(path, "luts_tb.v");
     FILE *file = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL_MESSAGE(file, path);
     TEST_ASSERT_EQUAL_UINT(bench.len, fwrite(bench.data, 1, bench.len, file));
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
     odin3_strbuf_free(&bench);
+}
+
+static void test_random_tables_text_and_icarus(void) {
+    odin3_strbuf tb;
+    odin3_strbuf_init(&tb);
+    build_random_luts(&tb);
+    char path[PATH_MAX_LEN];
+    out_path(path, "luts.v");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, path, NULL));
+    check_written_text(slurp(path));
+    write_bench(&tb);
     odin3_strbuf_free(&tb);
 }
 

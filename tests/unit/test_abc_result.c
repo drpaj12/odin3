@@ -27,19 +27,26 @@ static void push32(odin3_vec *vec, uint32_t value) {
     *slot = value;
 }
 
-/* Appends a LUT (fanins, table word 0) to res; returns its object number. */
-static uint32_t add_lut(odin3_abc_result *res, const uint32_t *fanins, uint32_t k, uint64_t table) {
+/* A LUT to add: its fanin objects, their number and the first table word. */
+typedef struct lut_spec {
+    const uint32_t *fanins;
+    uint32_t inputs;
+    uint64_t table;
+} lut_spec;
+
+/* Appends a LUT to res; returns its object number. */
+static uint32_t add_lut(odin3_abc_result *res, const lut_spec *lut) {
     if (res->fanin_start.len == 0) {
         push32(&res->fanin_start, 0);
         push32(&res->truth_start, 0);
     }
-    for (uint32_t v = 0; v < k; v++) {
-        push32(&res->fanins, fanins[v]);
+    for (uint32_t var = 0; var < lut->inputs; var++) {
+        push32(&res->fanins, lut->fanins[var]);
     }
-    push32(&res->lut_k, k);
+    push32(&res->lut_k, lut->inputs);
     uint64_t *word = odin3_vec_push(&res->truth);
     TEST_ASSERT_NOT_NULL(word);
-    *word = table;
+    *word = lut->table;
     push32(&res->fanin_start, (uint32_t)res->fanins.len);
     push32(&res->truth_start, (uint32_t)res->truth.len);
     return odin3_abc_result_first_lut(res) + res->n_luts++;
@@ -60,9 +67,10 @@ static void test_fold_constant_one_reader(void) {
     odin3_abc_result res;
     init_two_cis(&res);
     uint32_t in_one[1] = {2};
-    uint32_t one = add_lut(&res, in_one, 1, 0x3); /* both table bits 1: constant 1 over 2^1 bits */
+    uint32_t one = add_lut(
+        &res, &(lut_spec){in_one, 1, 0x3}); /* both table bits 1: constant 1 over 2^1 bits */
     uint32_t in_and[2] = {one, 3};
-    uint32_t and_obj = add_lut(&res, in_and, 2, 0x8);
+    uint32_t and_obj = add_lut(&res, &(lut_spec){in_and, 2, 0x8});
     res.n_cos = 1;
     push32(&res.co_driver, and_obj);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_result_fold(&res));
@@ -80,9 +88,10 @@ static void test_fold_constant_zero_and_cascade(void) {
     odin3_abc_result res;
     init_two_cis(&res);
     uint32_t in0[2] = {2, 3};
-    uint32_t zero = add_lut(&res, in0, 2, 0x0);
+    uint32_t zero = add_lut(&res, &(lut_spec){in0, 2, 0x0});
     uint32_t in_and[2] = {zero, 3};
-    uint32_t and_obj = add_lut(&res, in_and, 2, 0x8); /* 0 & x: constant 0 after the cofactor */
+    uint32_t and_obj =
+        add_lut(&res, &(lut_spec){in_and, 2, 0x8}); /* 0 & x: constant 0 after the cofactor */
     res.n_cos = 2;
     push32(&res.co_driver, zero);
     push32(&res.co_driver, and_obj);
@@ -134,7 +143,7 @@ static void test_check_texts(void) {
     for (uint32_t i = 0; i < 17; i++) {
         fan[i] = 2;
     }
-    (void)add_lut(&res, fan, 5, 0x1);
+    (void)add_lut(&res, &(lut_spec){fan, 5, 0x1});
     exp = (odin3_abc_result_expect){2, 1, 0, 4};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, check_text(&res, &exp, text, sizeof text));
     TEST_ASSERT_EQUAL_STRING("a LUT with 5 inputs exceeds --lut 4", text);
@@ -153,10 +162,10 @@ static void test_fold_chain_is_linear(void) {
     odin3_abc_result res;
     init_two_cis(&res);
     uint32_t in_one[1] = {2};
-    uint32_t prev = add_lut(&res, in_one, 1, 0x3);
+    uint32_t prev = add_lut(&res, &(lut_spec){in_one, 1, 0x3});
     for (uint32_t i = 0; i < CHAIN; i++) {
         uint32_t fan[2] = {prev, 3};
-        prev = add_lut(&res, fan, 2, 0x8);
+        prev = add_lut(&res, &(lut_spec){fan, 2, 0x8});
     }
     res.n_cos = 1;
     push32(&res.co_driver, prev);
@@ -172,9 +181,9 @@ static void test_fold_oom_sweep(void) {
         odin3_abc_result res;
         init_two_cis(&res);
         uint32_t in_one[1] = {2};
-        uint32_t one = add_lut(&res, in_one, 1, 0x3);
+        uint32_t one = add_lut(&res, &(lut_spec){in_one, 1, 0x3});
         uint32_t fan[2] = {one, 3};
-        uint32_t reader = add_lut(&res, fan, 2, 0x8);
+        uint32_t reader = add_lut(&res, &(lut_spec){fan, 2, 0x8});
         res.n_cos = 1;
         push32(&res.co_driver, reader);
         odin3_util_set_alloc_fail_after(at);
