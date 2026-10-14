@@ -1007,9 +1007,9 @@ def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Grou
     over in a class they are paired without a probe (every group has a partner or the final
     proof fails): that pair, and every pair whose probe was vacuous (all the compared pins of
     both groups are behind ``unconn``, so any two groups look equal), is *weak*, a guess.  Returns
-    (the pairs, the weak ones among them).  A proof that two cones differ is the slow case, so the candidates of B are
-    tried in the order of ``sigs``' structure colour: the ones whose input cones look like the
-    A group's first."""
+    (the pairs, the weak ones among them).  A proof that two cones differ is the slow case, so
+    the candidates of B are tried in the order of ``sigs``' structure colour: the ones whose input
+    cones look like the A group's first."""
     deadline, per_probe = limits
     nets = [_class_nets(f, g) for f, g in zip(flats, groups, strict=True)]
 
