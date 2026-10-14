@@ -136,10 +136,16 @@ PAIRING: dict[str, tuple[str, ...]] = {
     "E6": ("Subckt instantiates model", "Blackbox BLIF model"),
     "E7": ("BLIF .names input size",),
     "E10": ("Found multiple models with primitives",),
-    # Spec: the R16 assertion. Measured on the two Odin II multi-driver goldens (2026-10-14): VPR's
-    # netlist consistency check throws "Inconsistent block data sizes" instead; both are VPR
-    # refusing a multi-driver net, so both pair.
-    "E12": ("Assertion", "Inconsistent block data sizes"),
+    # Spec: the R16 assertion (its text is the one tests/vtr/blif-bad/c7_twice.blif pins; a bare
+    # "Assertion" would pair any VPR assertion). Measured on the two Odin II multi-driver goldens
+    # (elsif_both_defined.odin.blif, multi_assignment.odin.blif; 2026-10-14 sweep): VPR's netlist
+    # consistency check throws "Inconsistent block data sizes" instead; both are VPR refusing a
+    # multi-driver net, so both pair.
+    "E12": (
+        "Assertion 'pin_net(pin_id) == net_id' failed",
+        "Must be no existing net driver",
+        "Inconsistent block data sizes",
+    ),
     "E13": ("No non-blackbox models found",),
 }
 # VPR accepts G (an open pin, an undefined function): an intended refusal.

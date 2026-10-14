@@ -211,6 +211,11 @@ class PairingTest(unittest.TestCase):
             self.assertFalse(vrc.pairing_ok(refusal, ""), refusal)
             self.assertFalse(vrc.pairing_ok(refusal, "something else"), refusal)
 
+    def test_e12_does_not_pair_with_an_unrelated_assertion(self) -> None:
+        self.assertFalse(vrc.pairing_ok("E12", "x.cpp:9 f: Assertion 'clk_pin' failed"))
+        r16 = "n.cpp:1 f: Assertion 'pin_net(pin_id) == net_id' failed"
+        self.assertTrue(vrc.pairing_ok("E12", r16))
+
     def test_accepted_and_depends(self) -> None:
         for refusal in ("E3b", "E8"):  # VPR accepts G: an intended refusal
             self.assertTrue(vrc.pairing_ok(refusal, ""))
