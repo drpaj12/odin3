@@ -940,3 +940,132 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
     flip-flop that the sweep itself dirtied is covered). Nothing outside `opt` may depend on the journal.
     The output is byte-identical to the full sweeps (82 files in 41 designs; `rescan-compare`; the mcml.v `opt` time of 0.87 s is
     `bench_opt`'s median on an idle machine, 1.0 s under load).
+
+23. **2F `opt`: what landed, the agent defaults, the evidence and the bench** (2F Task 19,
+    2026-10-13; spec §17, §19, §20, §23; plan points (a)-(s)). Landed as PRs 2F-1 to 2F-5, the
+    2F-perf PR (#93, #22) and 2F-6 (this branch, `feat/2F-evidence`). Peter reviews the items under
+    "For Peter" below; everything else is an agent default (reversible, logged here per the plan).
+    - **`opt`** (`src/passes/opt/`, docs/PASSES.md, eight rows, all `processes = OK`, mode P: every
+      `$proc` is opaque): Yosys 0.55's `opt` family as a fixed-point loop (`opt_expr`, `opt_merge`,
+      `opt_muxtree`, `opt_reduce`, `opt_share`, `opt_dff`, `opt_clean`), capped at 10,000
+      iterations. `opt` never compacts (#19). DESIGN §6 step 4 now says so; the 2D spec's EL-33
+      sentence on structured body accessors reads "deferred (2E §24 item 8)".
+    - **Divergences from Yosys 0.55** are spec 2F §17 (rows 1-56), by reference, each with its
+      reason and the file or seed that shows it. The ones the evidence added in 2F-6: #53
+      (`bm_stmt_compare_padding.v`, an `$sdff` merge Odin III misses), #54 (`bm_sfifo_rtl.v`, a
+      `mux_invert` and a `const.$neg` Yosys fires), #55 (mixed-sign cells, below) and #56 (`--opt`
+      seeds 100 and 153, a `$sdff` on one side only). Sound fixes of Yosys miscompiles (#47 and
+      others, bitwise-only) are listed there too.
+    - **Agent defaults, plan points (a)-(s)** (`docs/plans/2026-10-11-2F-opt-plan.md`, "Spec
+      points made exact here"): (a) entry-point names, `odin3_opt_expr_run` fixed by 2E-1;
+      (b) one `odin3_opt_counts` aggregate; (c) options, Yosys spellings plus `--` spellings,
+      `-share_all` and `-sat` refused; (d) the budget message names the running pass; (e) pending
+      sub-passes were stubs (all removed by 2F-5); (f) per-rule goldens from Verilog moved to
+      2F-6 Task 16 (`opt_rules`); (g) `opt-rules` uses `read_verilog --nolatches; proc --noopt` as
+      its input; (h) the compact point, **superseded by #19**; (i) the Phase 2 script
+      `tools/opt-check/phase2.script` and S-P; (j) rule counters under Yosys's cover names; (k)
+      `opt_dff` action counters; (l) constbits sees no tie made in the same call (mcml.v: 31
+      iterations); (m) the in-process 1E check (`--opt-simcheck`) judges only what it can
+      simulate; (n) Yosys-side lenet.v runs are `sweep-xl`; (o) `order-probe.sh` is evidence only;
+      (p) CSE survivors are rebuilt in place; (q) the loop-cap warning names a module; (r)
+      `opt_muxtree`'s budget counts `eval_mux` calls; (s) the init-conflict warning quotes the net.
+    - **Step F** (2E point (f), `opt_expr -keepdc` inside `proc`) was wired by 2E itself in PR
+      2E-3 (`proc_step_f`), as `odin3_opt_expr_run` came from 2E-1; 2F-2 made the function real.
+    - **Performance** (spec §19; IR change journal, #22): `opt_expr` is incremental after its first
+      iteration; `opt_dff` and `opt_clean` skip what the journal shows unchanged. Byte-identical to
+      the full sweeps (82 files, 41 designs, `rescan-compare`).
+    - **Evidence tools** (all Yosys 0.55 oracle; 0.69 only in the nightly legs): `opt_rules_yosys`
+      (141 rule files; 138 match Yosys's cover point or log line and cell histogram, 3 are
+      documented §17 rows), `opt_equiv_rules` and `opt-equiv` (per-row refinement, one direction:
+      the after-state refines the before-state; it is Yosys `equiv_make`/`equiv_simple`/
+      `equiv_induct` run by `opt_equiv.Checker` on both sides flattened, not `equiv-check`, and
+      not a mutual check; clock-aware: 138 proved, 3 documented skips, 0 failed; 12 mutants fail),
+      `opt-diff` / `opt_diff_micro` (Phase 2 script and `opt -full` against Yosys; on 487 micros
+      up to 5.9 KB 367 ok, 81 expected failures, 38 designs listed by class in
+      `tests/opt/diff_expect.txt`: 28 proved, 2 proved for the Phase 2 script only, 8 structural
+      only (no tool verdict; diffeq_paj_convert did not finish); no opt soundness bug found, but
+      those 8 and the 2 partial ones are not proved), `opt_simcheck_rules`,
+      `opt_micro` (490 micros: 409 ok, 81 xfail, 0 unexpected, at most 3 iterations),
+      `opt_gen_vs_yosys` (the `--opt` generator, 200 seeds, 0 failures, structural cases listed in
+      `tests/opt/gen_structural_expect.txt`), `fuzz_opt` (CI; it found two real bugs, mixed-sign
+      `identwrt` and `fine.addsub`, now conservative, §17 #55). These are the implementers'
+      smoke numbers; the sweeps' own summaries are in the Results block, to be filled.
+      **Exit codes of the opt tools (one convention):** 0 pass, 1 a real negative result, 2 usage
+      or tool error, 3 hard (a crash, signal, memory-cap kill or timeout of a child; `opt-equiv`,
+      `opt-diff`, `opt-rules`, `opt-run`, `opt-gen-diff`), which elab-sweep and opt-nightly treat
+      as hard: no expect-fail line absorbs it. `opt-equiv --min-changed N` fails a run in which
+      fewer than N sub-pass calls changed something (CTest `opt_equiv_rules` passes 1; 19 sources
+      whose rule Phase 2 does not run are listed in `rules_equiv_expect_fail.txt`).
+    - **The bench** (`tests/bench/bench_opt.c`, Release only: `bench_guard.h` refuses a Debug or
+      sanitized build with exit 2). `bench_opt --one F [--techlib T]` prints one `key=value` line:
+      cells, nets and pins after the read (0), after `proc` (p) and after the script (1); for the
+      script's opt passes and for `opt -full` (prefix `full_`) the iterations, `t_total`, the time
+      per sub-pass and `t_setup`, the rewrites per sub-pass and per rule family, the dead objects
+      at the peak, `t_compact`, and per-phase RSS (`VmHWM`, `rss_src=hwm`). The target column for
+      lenet.v is `rss_opt_growth_pct`. `--techlib` is new in Task 19 (the sweep passes it; before,
+      only `ODIN3_BENCH_TECHLIB` worked). `tools/opt-check/bench-opt-report report --expect-fail
+      tests/opt/bench_expect_fail.txt LOG` prints §19's targets from the sweep's output and exits 1
+      on a MISSED one, with the times and memory columns of the files it names; a file or set the
+      run lacks, or a row short of a column, is MISSED unless the expect file lists it. The
+      expect file is the same five files as `tests/proc/bench_expect_fail.txt` (three macro-only
+      Koios includes, the two ambiguous-top `bwave_like.fixed.*`; `bench_opt` has no `--top`).
+      CTest `bench_opt_smoke` (label `sweep`, Release) runs `--one` on two micros and checks every
+      column.
+      The full bench, from a Release build, on an idle machine (the controller):
+      `ODIN3_HEAVY_OK=1 tools/heavy-run tools/elab-check/elab-sweep --odin3 build/release/odin3
+      --bench build/release/bench_opt --techlib lib/vtr.o3lib --mem-cap 6G --jobs 1 --expect-fail
+      tests/opt/bench_expect_fail.txt --root $VTR_ROOT/vtr_flow/benchmarks/verilog
+      $VTR_ROOT/vtr_flow/benchmarks/verilog/*.v $VTR_ROOT/vtr_flow/benchmarks/verilog/koios/*.v
+      | tee LOG` under `set -o pipefail`, then `tools/opt-check/bench-opt-report report
+      --expect-fail tests/opt/bench_expect_fail.txt LOG`.
+      Smoke (Release, 2026-10-13, one at a time through `heavy-run`, 4G cap; the host was shared
+      with another lane's equiv-check, so times are an upper bound): diffeq1.v opt 0.002 s;
+      ch_intrinsics.v 0.002 s; sha.v 0.024 s, RSS growth 9.8%; mcml.v 0.753 s (target <= 1.0 s,
+      32 iterations in all, t_expr 0.107, t_merge 0.183,
+      t_muxtree 0.096, t_reduce 0.049, t_dff 0.181, t_clean 0.138, t_setup 0.079) and
+      `opt -full` 0.102 s (target <= 0.3 s). mcml.v's RSS growth over the post-proc IR is 28.9%
+      (75,136 to 96,820 KiB; 9,796 dead nodes and 313,599 dead nets at the peak). The 25% target
+      is for lenet.v, but mcml.v is over it: if lenet.v slips, the escalation (a compact per `opt`
+      iteration) is an IR-6 amendment and goes to Peter, never a relaxed target.
+    - **Results (§19 targets): NOT YET FILLED; the controller records the full run here, verbatim
+      (the sweeps' summaries and `opt_order_probe`'s table too). `lenet.v` time and RSS are
+      unmeasured; only the four-file smoke above exists.**
+      mcml.v Phase 2 opt passes <= 1.0 s; mcml.v `opt -full` <= 0.3 s; lenet.v Phase 2 opt passes
+      <= 15 s; lenet.v RSS growth <= 25%; the 31 VTR files <= 3 s in total. A miss is investigated
+      with the printed columns and reported, never relaxed.
+    - **Sweeps' summaries and Task 20's nightly legs (`tools/opt-check/opt-nightly`;
+      `opt_equiv_vtr`, `opt_diff_vtr`, `opt_equiv_vtr_xl`, `opt_diff_vtr_xl`): not yet run in full;
+      the controller runs them by hand (Peter runs no nightly) and records the summary lines
+      here.** Each file runs `opt-equiv` and `opt-diff` with all five scripts (spec 20.3), one tool
+      at a time under memcap, smallest first (`mcml.v` last). After `tools/build-locked --preset
+      release -j6`, with no other heavy job and no agent running a build:
+      - `ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_(equiv|diff)_vtr$'` (31 files, one tool
+        child at a time, `--mem-cap 3G`); or by hand:
+        `ODIN3_HEAVY_OK=1 tools/heavy-run tools/opt-check/opt-nightly --odin3 build/release/odin3
+        --yosys $VTR_ROOT/build/bin/yosys --techlib lib/vtr.o3lib --set vtr31 --mem-cap 3G
+        [--leg equiv|diff] [--keep DIR]` (add `--cap-for mcml.v=5G` if mcml.v meets its cap).
+      - lenet.v's Yosys side, an idle machine only: `ODIN3_HEAVY_OK=1 ODIN3_HEAVY_XL_OK=1 ctest
+        --preset sweep-xl -R '^opt_(equiv|diff)_vtr_xl$'`, i.e. `--set all64 --xl --mem-cap 8G`
+        (`tests/opt/vtr_nightly_xl.txt` lists `koios/lenet.v xl`; `--cap-for koios/lenet.v=8G` is
+        the same cap spelled per file).
+      - Smoke only so far (Task 20): the 3 smallest VTR files (`single_wire.v`, `single_ff.v`,
+        `and_latch.v`), 18 runs, 18 ok, 0 unexpected, 3G cap. The five-script `opt-diff` of the
+        31 files has no `tests/opt/diff_expect.txt` lines yet: the full run adds them (or fails).
+    - **Hand-off to 2H:** S-P (`tools/opt-check/sp-splice`, Odin III against Yosys through the
+      Phase 2 script) is the exit table's `opt` row; S-D is information only. lenet.v's S-P needs
+      about 7 GB (Yosys's side), so 2H runs it only as a `sweep-xl` job. The Odin III half reads
+      `vtr_primitives.v` as a library unit with per-read flags (`--nomem2reg`); 2D-7b's
+      `read_verilog --lib` is that mode, and 2H checks it carries them.
+    - **For Peter:**
+      1. *Open, Peter:* the mixed-sign cell semantics (2F Task 18 review I1 and I2). A cell with
+         `A_SIGNED != B_SIGNED` is read per operand by `calc.cc`, `fold.c` and several opt rules
+         (`bitwise_logic_one_const`, `fine.group`, `mul_to_shift`, `div_to_shift`, `divmod`), and
+         as unsigned by Yosys's `simlib.v`, the registry evaluator, `merge.c` and `share.c`. Only
+         `identwrt` and `fine.addsub` are made conservative (§17 #55); `fuzz_opt` therefore emits
+         alike flags and no longer explores mixed cells. Options: (a) both-signed-only everywhere
+         (recommended: matches simlib, the LRM and the evaluator `--opt-simcheck` uses; `fold.c`
+         changes), or (b) `odin3_check_design` rejects mixed cells, as Yosys's `check` does. The
+         rules are unchanged until Peter rules.
+      2. lenet.v's Yosys-side runs exist only as `sweep-xl` jobs on an idle machine (rulings C1 and
+         I10 applied).
+      3. The IR-6 amendment for a compact at the end of `opt` (point (h)) is withdrawn (#19).

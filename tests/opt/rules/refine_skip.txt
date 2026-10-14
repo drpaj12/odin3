@@ -1,0 +1,15 @@
+# tests/opt/rules/refine_skip.txt: the rows opt-rules cannot prove refine (2F Task 17; spec 20.2).
+#
+#   <sub>/<rule> <reason>
+#
+# opt-rules runs every row's in.il/out.il through the refinement check (Yosys clk2fflogic; techmap;
+# equiv_make; equiv_simple -undef; equiv_induct -undef) and still runs a listed row: a listed row
+# that refines is a stale entry and fails.
+# A row must fail the check cleanly (an unproven pair, or a Yosys ERROR such as `No SAT model`): a Yosys
+# crash, signal, cap kill or timeout is hard (opt-rules exit 3) and satisfies no entry (2F-6 review I3).
+# All three entries below fail cleanly (opt-rules run on the 141 rows: 138 proved, 3 skipped).
+expr/fold_pow no SAT model for $pow in Yosys's equiv flow; checked by hand (3**2 = 8'b00001001)
+expr/pow_shift no SAT model for $pow in Yosys's equiv flow; checked by hand (2**b = 1 << b, unsigned)
+dff/never_active_en x-refinement: gold is a $dffe with EN=0 and no init (q is x forever), the gate is q = 1'x; valid, not provable by the flow
+# dff/never_active_en, hand check: gold is `$dffe` with EN tied 0 and no init, so Q is x for ever; the gate
+# is `q = 1'x`. Any value of the gold's x init is a legal choice of the gate's x, so the gate refines the gold.

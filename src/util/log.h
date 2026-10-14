@@ -7,6 +7,7 @@
 #include "odin3/odin3.h"
 #include "util/attr.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 
 /* Size of the stack buffer a message is formatted into, including the NUL. */
@@ -29,5 +30,12 @@ void odin3_log(odin3_log_level level, const char *fmt, ...) ODIN3_PRINTF(2, 3);
 size_t odin3_log_count(odin3_log_level level);
 
 void odin3_log_reset_counts(void);
+
+/*
+ * Mutes odin3_log: while a mute is on, a message is dropped (not counted, not delivered). Calls
+ * nest: odin3_log_mute(true) n times needs n odin3_log_mute(false) calls (an extra false is
+ * ignored). For a caller that tries an operation whose failure it handles itself.
+ */
+void odin3_log_mute(bool on);
 
 #endif

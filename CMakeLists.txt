@@ -133,6 +133,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/dff_merge.c
     src/passes/opt/dff_muxes.c
     src/passes/opt/register.c
+    src/passes/opt/simcheck.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -547,7 +548,7 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
 endif()
 # 2F Task 15: bench_opt (Release; `bench_opt --one FILE`, the interface of elab-sweep --bench). Its
 # measuring core (bench_opt.c without main) is also linked into the gate test
-# test_bench_opt_columns below; bench_opt_smoke is registered by Task 19.
+# test_bench_opt_columns below; bench_opt_smoke is registered with the Python tools (Task 19).
 add_executable(bench_opt tests/bench/bench_opt.c)
 target_include_directories(bench_opt PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/tests/bench)
 target_link_libraries(bench_opt PRIVATE odin3_core odin3_flags)
@@ -577,6 +578,12 @@ if(ODIN3_FUZZ)
     target_include_directories(fuzz_abc_script PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(fuzz_abc_script PRIVATE odin3_core odin3_flags)
     target_link_options(fuzz_abc_script PRIVATE -fsanitize=fuzzer)
+    # tests/fuzz/fuzz_opt.c: the opt family's crash fuzzer (2F §20.4, plan Task 18). It builds
+    # word-cell designs through the unit tests' RTLIL reader (proc_build.c).
+    add_executable(fuzz_opt tests/fuzz/fuzz_opt.c tests/unit/proc_build.c)
+    target_include_directories(fuzz_opt PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_opt PRIVATE odin3_core odin3_flags)
+    target_link_options(fuzz_opt PRIVATE -fsanitize=fuzzer)
     # tests/fuzz/fuzz_elab.c: the elaborator's crash fuzzer (2D §14.5, plan Task 28).
     add_executable(fuzz_elab tests/fuzz/fuzz_elab.c)
     target_include_directories(fuzz_elab PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -1327,6 +1334,27 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # ODIN3_BENCH_PROC: test_bench_proc_report's check that a Debug bench_proc refuses to run.
     list(APPEND _tools_env "ODIN3_BENCH_PROC=$<TARGET_FILE:bench_proc>")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
+    # 2F Task 16 (spec 20.1, plan points (f), (g)): one tiny source per opt rule (tests/opt/rules/
+    # <sub>/<rule>.v or .blif, with its golden .il and the row in rules.txt). Odin III runs
+    # `read_verilog --nolatches; proc --noopt; <sub-pass> --opt-stats` on each, smallest first: the
+    # rule's counter must be at least 1 and out.il must equal the golden. Needs no Yosys; the
+    # Yosys 0.55 half is opt_rules_yosys (below). Exit 77 (skip) when an ASan child cannot be
+    # capped.
+    add_test(NAME opt_rules
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-rules
+                --odin3 $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/opt/rules)
+    set_tests_properties(opt_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77 TIMEOUT 600)
+    # opt_simcheck_rules (review I2): the same 141 rows with --opt-simcheck (Debug builds), the
+    # in-process 1E simulation check around every sub-pass call; it fails unless at least 90
+    # modules were judged (95 at the time of writing), so a silent no-op cannot pass.
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR ODIN3_SANITIZE)
+        add_test(NAME opt_simcheck_rules
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-rules
+                    --odin3 $<TARGET_FILE:odin3> --simcheck-min 90
+                    ${PROJECT_SOURCE_DIR}/tests/opt/rules)
+        set_tests_properties(opt_simcheck_rules PROPERTIES LABELS opt
+                             SKIP_RETURN_CODE 77 TIMEOUT 600)
+    endif()
     # 2E Task 13 (spec 19): bench_proc prints the columns the targets are judged from. A Debug or
     # sanitized build refuses to run (tests/bench/bench_guard.h, exit 2: its times are not the
     # targets'); a Release build's smoke runs `--one` on two micros (a case under a combinational
@@ -1342,6 +1370,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         odin3_add_sweep_test(bench_proc_smoke LABEL sweep
             COMMAND ${PROJECT_SOURCE_DIR}/tools/proc-check/bench-proc-report smoke
                     --bench $<TARGET_FILE:bench_proc>
+                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/keywords/always/case_default.v
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax/inferred_SPram.v)
+    endif()
+    # 2F Task 19 (spec 19): bench_opt prints the columns the targets are judged from. A Debug or
+    # sanitized build refuses to run (bench_opt_refuses_debug); a Release build's smoke runs `--one`
+    # on two micros (a case under a combinational block; a memory under a clocked process) and
+    # checks every column. The full bench is `elab-sweep --bench build/release/bench_opt`
+    # (tools/opt-check/bench-opt-report report --expect-fail tests/opt/bench_expect_fail.txt LOG
+    # prints the targets).
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
+        odin3_add_sweep_test(bench_opt_smoke LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/bench-opt-report smoke
+                    --bench $<TARGET_FILE:bench_opt>
                     --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
                     ${PROJECT_SOURCE_DIR}/tests/micro/verilog/keywords/always/case_default.v
                     ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax/inferred_SPram.v)
@@ -1503,6 +1545,31 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             set_tests_properties(fuzz_abc_script_seed_inputs fuzz_abc_script_smoke PROPERTIES
                                  ENVIRONMENT "${_fuzz_env}")
         endif()
+        # 2F §20.4 (plan Task 18): the opt family. The seeds (opt_fuzz_seeds.py: builder records
+        # of every cell type and the small golden BLIFs, each after a mode byte) run once;
+        # fuzz_opt_smoke fuzzes 10 s with inputs up to 512 bytes (a gate test, not a sweep).
+        set(_fo_seeds ${PROJECT_BINARY_DIR}/fuzz_opt_seeds)
+        set(_fo_corpus ${PROJECT_BINARY_DIR}/fuzz_opt_corpus)
+        file(MAKE_DIRECTORY ${_fo_corpus})
+        add_test(NAME fuzz_opt_seeds
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/opt-check/opt_fuzz_seeds.py
+                    ${_fo_seeds} --regress ${PROJECT_SOURCE_DIR}/tests/fuzz/fuzz_opt_regress
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+        set_tests_properties(fuzz_opt_seeds PROPERTIES FIXTURES_SETUP fuzz_opt_seeds LABELS fuzz)
+        add_test(NAME fuzz_opt_seed_inputs
+            COMMAND $<TARGET_FILE:fuzz_opt> -runs=0 -timeout=60 -rss_limit_mb=2048
+                    -print_funcs=0 ${_fo_seeds})
+        add_test(NAME fuzz_opt_smoke
+            COMMAND $<TARGET_FILE:fuzz_opt> -seed=1 -max_total_time=10 -timeout=10
+                    -rss_limit_mb=2048 -max_len=512 -print_funcs=0 -print_final_stats=1
+                    ${_fo_corpus} ${_fo_seeds})
+        set_tests_properties(fuzz_opt_seed_inputs fuzz_opt_smoke PROPERTIES
+                             FIXTURES_REQUIRED fuzz_opt_seeds LABELS fuzz TIMEOUT 600)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_opt_seed_inputs fuzz_opt_smoke PROPERTIES
+                                 ENVIRONMENT "${_fuzz_env}")
+        endif()
+
         odin3_add_sweep_test(fuzz_abc_script_long LABEL sweep
             COMMAND timeout 3h $<TARGET_FILE:fuzz_abc_script> -max_total_time=3600 -timeout=10
                     -rss_limit_mb=2048 -max_len=70000 -print_funcs=0 -print_final_stats=1
@@ -1913,6 +1980,14 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --odin3 $<TARGET_FILE:odin3> --with-frontend --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
         set_tests_properties(project_corpus_frontend PROPERTIES LABELS tools)
+        # 2F Task 16 (spec 20.1): opt_rules plus Yosys 0.55 on the same in.il: its cover point (or
+        # log line) for the rule must fire and its per-module cell histogram must equal Odin III's.
+        # 141 small files, not a sweep. Rows marked dev=N are the documented spec 17 divergences.
+        add_test(NAME opt_rules_yosys
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-rules
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tests/opt/rules)
+        set_tests_properties(opt_rules_yosys PROPERTIES LABELS opt SKIP_RETURN_CODE 77 TIMEOUT 900)
         # 2E Task 12: test_proc_gen_diff parses the --proc profile with this Yosys; 2D-7b:
         # test_hard_cell_widths runs write_rtlil's black-box stubs through it and the bridge.
         set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT
@@ -1958,6 +2033,68 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
                     --seeds 1..200 --mem-cap 3G --work ${PROJECT_BINARY_DIR}/proc_gen_work)
+        # 2F Task 17 (spec 20.2, 20.3, point (m), (o)): the opt evidence tools, through
+        # elab-sweep's --opt-equiv / --opt-diff modes (one tool child per file, smallest first,
+        # under memcap; the micros that 2D or proc reject are tests/proc/micro_expect_fail.txt).
+        # opt_equiv_rules: opt-equiv on every per-rule source (the refinement of each sub-pass call
+        # of the Phase 2 script, not a sweep). Every source is built to make a rule fire, so
+        # `--min-changed 1` fails a file in which no call changed anything (a broken snapshot);
+        # the 19 sources whose rule the Phase 2 script does not run are in
+        # tests/opt/rules_equiv_expect_fail.txt. The sweep reads `.v` sources only: the 5 `.blif`
+        # sources (expr/mux_to_inv, gate_and, gate_or, gate_mux, gate_not) are out of scope,
+        # since opt-equiv's front is `read_verilog`; opt-rules' per-row refinement checks them
+        # (it runs `read_blif`). Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R
+        # '^opt_(equiv|diff)_micro$'.
+        set(_opt_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+            --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+            --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 2 --mem-cap 2G)
+        # --jobs 1: outside tools/heavy-run, fd 9 of a threaded elab-sweep is Python's own.
+        add_test(NAME opt_equiv_rules
+            COMMAND ${_opt_sweep} --jobs 1 --opt-equiv --opt-arg=--min-changed=1
+                    --root ${PROJECT_SOURCE_DIR}/tests/opt/rules
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/rules_equiv_expect_fail.txt
+                    ${PROJECT_SOURCE_DIR}/tests/opt/rules)
+        set_tests_properties(opt_equiv_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 1800)
+        odin3_add_sweep_test(opt_equiv_micro LABEL sweep
+            COMMAND ${_opt_sweep} --opt-equiv --min-changed-total 200 ${_micro_expect}
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
+                    ${_micro_dir})
+        # --min-changed-total 200: the 441 micros under 1100 B alone have 266 changing calls, so
+        # a do-nothing odin3 (0 on every design) fails (2F-6 re-review N3).
+        set_tests_properties(opt_equiv_micro PROPERTIES LABELS "sweep;opt_equiv")
+        # opt_diff_micro: every micro with the Phase 2 script and `opt -full`; a difference fails
+        # unless tests/opt/diff_expect.txt lists it with a reason.
+        odin3_add_sweep_test(opt_diff_micro LABEL sweep
+            COMMAND ${_opt_sweep} --opt-diff ${_micro_expect}
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
+                    --opt-arg=--script=phase2 "--opt-arg=--script=opt -full"
+                    --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
+                    --opt-arg=--root=${_micro_dir} ${_micro_dir})
+        # opt_order_probe: spec 3's pass-order evidence (point (o)); evidence only, always exit 0.
+        odin3_add_sweep_test(opt_order_probe LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/order-probe.sh --yosys ${ODIN3_YOSYS055}
+                    --limit 60 ${_micro_dir})
+        set_tests_properties(opt_order_probe PROPERTIES LABELS "sweep;nightly")
+        # 2F Task 18 (spec 20.4): the corpus sweeps. opt_micro: the Phase 2 script on every micro,
+        # Odin III only (ODIN3_OK, check FULL, iterations below the cap; the largest count is
+        # printed). The micros that 2D or proc reject are tests/proc/micro_expect_fail.txt. One
+        # child at a time under 3G. Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_micro$'.
+        set(_opt_run_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+            --odin3 $<TARGET_FILE:odin3> --opt-run
+            --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 1 --mem-cap 3G)
+        odin3_add_sweep_test(opt_micro LABEL sweep
+            COMMAND ${_opt_run_sweep} ${_micro_expect} ${_micro_dir})
+        # opt_gen_vs_yosys: 200 seeds of the --opt generator through opt-diff's steps 3-5 (the
+        # Phase 2 script and `opt -full`); nightly runs 5,000 and the same files against Yosys
+        # 0.69 (--yosys-069: a disagreement is `oracle drift`, reported, never a failure).
+        odin3_add_sweep_test(opt_gen_vs_yosys LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-gen-diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --seeds 1..200 --jobs 1 --mem-cap 3G
+                    --expect-structural ${PROJECT_SOURCE_DIR}/tests/opt/gen_structural_expect.txt
+                    --work ${PROJECT_BINARY_DIR}/opt_gen_work)
         # 2D Task 28 (spec 14.5, review M24): the --elab generator's modules through the bridge
         # (elab-diff, 200 seeds) and 500 random constant expressions, odin3_cval_op against Yosys
         # 0.55's folds (const-diff). The nightly runs are the *_long tests: 5,000 seeds, 10,000
@@ -2030,6 +2167,37 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 COMMAND ${_proc_sweep} ${_proc_bridge} ${_vtr_xl} ${_vtr_expect}
                         ${_vtr_bridge_expect} ${_vtr_benchmarks})
             set_tests_properties(proc_diff_vtr proc_bridge_vtr PROPERTIES LABELS "sweep;nightly")
+            # 2F Task 18: the Phase 2 script on the 64 files as one set by size, Odin III only
+            # (also nightly). lenet.v runs last, in the 6G slice, under a 5G child cap: unlike the
+            # proc differentials there is no Yosys side to push it to sweep-xl.
+            odin3_add_sweep_test(opt_vtr LABEL sweep
+                COMMAND ${_opt_run_sweep}
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/vtr_expect_fail.txt
+                        --root ${_vtr_verilog} --cap-for koios/lenet.v=5G ${_vtr_benchmarks})
+            set_tests_properties(opt_vtr PROPERTIES LABELS "sweep;nightly")
+            # 2F Task 20 (spec 20.2, 20.3, ruling I9): the nightly VTR legs of opt-equiv and
+            # opt-diff, run by hand (Peter runs no nightly): tools/opt-check/opt-nightly, one
+            # tool run at a time under memcap, smallest file first. opt_equiv_vtr and
+            # opt_diff_vtr (opt-diff with all five scripts) run the 31 verilog/*.v files, mcml.v
+            # last. The _xl pair runs koios/lenet.v alone (tests/opt/vtr_nightly_xl.txt; fails
+            # when the xl selection is empty), 8G per child in the 9G slice (ODIN3_HEAVY_XL_OK=1,
+            # an idle machine only). Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R
+            # '^opt_(equiv|diff)_vtr$'. Not in CI.
+            set(_opt_nightly ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-nightly
+                --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --root ${_vtr_verilog}
+                --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/vtr_expect_fail.txt
+                --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/vtr_nightly_xl.txt
+                --diff-expect ${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt)
+            odin3_add_sweep_test(opt_equiv_vtr LABEL sweep
+                COMMAND ${_opt_nightly} --set vtr31 --leg equiv --min-changed-total 1 --mem-cap 3G)
+            odin3_add_sweep_test(opt_diff_vtr LABEL sweep
+                COMMAND ${_opt_nightly} --set vtr31 --leg diff --mem-cap 3G)
+            set_tests_properties(opt_equiv_vtr opt_diff_vtr PROPERTIES LABELS "sweep;nightly")
+            odin3_add_sweep_test(opt_equiv_vtr_xl LABEL sweep-xl
+                COMMAND ${_opt_nightly} --set all64 --xl --leg equiv --min-changed-total 1 --mem-cap 8G)
+            odin3_add_sweep_test(opt_diff_vtr_xl LABEL sweep-xl
+                COMMAND ${_opt_nightly} --set all64 --xl --leg diff --mem-cap 8G)
         endif()
     endif()
 

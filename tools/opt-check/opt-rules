@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# opt-rules: the per-rule goldens of the opt sub-passes against Odin III and Yosys 0.55
+# (2F spec 20.1, plan Task 16). See opt_rules.py.
+# Exit codes: 0 all rows pass, 1 a row fails, 2 error or usage, 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here/../elab-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/opt_rules.py" "$@"

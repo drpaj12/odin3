@@ -1,0 +1,8 @@
+# expr/gate_and: $_AND_ of two ones -> constant 1
+.model t
+.inputs a
+.outputs y
+.names one
+1
+.subckt $_AND_ A=one B=one Y=y
+.end

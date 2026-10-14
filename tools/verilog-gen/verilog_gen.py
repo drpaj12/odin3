@@ -31,7 +31,12 @@ parser's code; the tree shapes are the 2A slot table (``docs/specs/2026-10-09-2A
 for the ``proc`` differential (``proc_profile.py``; its first line lists the features used), no
 ``F.ast``.
 
-``--elab`` (2D Task 28) is the third profile: one synthesisable module for the elaboration
+``--opt`` (2F Task 18) is the profile for the ``opt`` differential (``opt_profile.py``; the first
+line lists the features used, each a counted production): constants and ``x`` in operands, ``case``
+with and without ``default``, repeated sub-expressions, enable and reset nests, constant shifts and
+power-of-two multiplies; no ``F.ast``.
+
+``--elab`` (2D Task 28) is another profile: one synthesisable module for the elaboration
 differential (``tools/elab-check/elab-diff``; ``elab_profile.py``; its first line lists the
 counted traps it used), no ``F.ast``.
 
@@ -50,6 +55,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import elab_profile
+import opt_profile
 import proc_profile
 
 # --- the tree -------------------------------------------------------------------------------
@@ -2326,6 +2332,16 @@ def write_proc(seed: int, out: Path) -> int:
     return 0
 
 
+def write_opt(seed: int, out: Path) -> int:
+    """``--opt``: the opt profile's module for seed into out."""
+    try:
+        out.write_text(opt_profile.generate(seed).text, encoding="utf-8")
+    except OSError as exc:
+        print(f"verilog_gen: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def write_elab(seed: int, out: Path) -> int:
     """``--elab``: the elaboration profile's module for seed into out."""
     try:
@@ -2344,13 +2360,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--no-ast", action="store_true", help="do not write F.ast")
     parser.add_argument("--proc", action="store_true",
                         help="the proc profile (always blocks, resets, latches, memories)")
+    parser.add_argument("--opt", action="store_true",
+                        help="the opt profile (constants, x, case, enables, resets, shifts)")
     parser.add_argument("--elab", action="store_true",
                         help="the elaboration profile (expression trees, parameters, generate)")
     args = parser.parse_args(argv)
     out = Path(args.out)
-    if args.proc or args.elab:
-        if args.mutate or (args.proc and args.elab):
-            parser.error("--proc, --elab and --mutate cannot be combined")
+    if args.proc or args.elab or args.opt:
+        if args.mutate or (args.proc + args.elab + args.opt) > 1:
+            parser.error("--proc, --elab, --opt and --mutate cannot be combined")
+        if args.opt:
+            return write_opt(args.seed, out)
         return write_proc(args.seed, out) if args.proc else write_elab(args.seed, out)
     result = render(args.seed, out.name, args.mutate)
     try:

@@ -16,6 +16,7 @@
 #include "passes/opt/opt.h"
 #include "passes/opt/opt_test.h"
 #include "proc_build.h"
+#include "sim/prng.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/log.h"
@@ -29,7 +30,14 @@
 #include <string.h>
 #include <unistd.h>
 
-enum { LINE_MAX_LEN = 256, LINES_MAX = 64, NETS_MANY = 10000, BUDGET_LIMIT = 4096, PATH_LEN = 128 };
+enum {
+    LINE_MAX_LEN = 256,
+    LINES_MAX = 64,
+    NETS_MANY = 10000,
+    BUDGET_LIMIT = 4096,
+    PATH_LEN = 128,
+    SIMCHECK_CYCLES = 64 /* simcheck.c */
+};
 
 typedef struct log_line {
     odin3_log_level level;
@@ -212,7 +220,7 @@ static void test_call_invalid(void) {
     memset(&opts, 0, sizeof opts);
     odin3_opt_counts counts;
     memset(&counts, 0, sizeof counts);
-    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_SHARE, &opts, &counts};
+    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_SHARE, &opts, &counts, false};
     bool changed = true;
     n_lines = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_call(&req, &changed));
@@ -240,8 +248,8 @@ static void test_call_changed_and_hook(void) {
     memset(&opts, 0, sizeof opts);
     odin3_opt_counts counts;
     memset(&counts, 0, sizeof counts);
-    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_CLEAN, &opts, &counts};
-    odin3_opt_test_hooks hooks = {on_call, NULL, NULL};
+    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_CLEAN, &opts, &counts, false};
+    odin3_opt_test_hooks hooks = {on_call, NULL, NULL, NULL};
     odin3_opt_test_set_hooks(&hooks);
     hook_calls = 0;
     bool changed = false;
@@ -268,7 +276,7 @@ static void test_call_muxtree(void) {
     memset(&opts, 0, sizeof opts);
     odin3_opt_counts counts;
     memset(&counts, 0, sizeof counts);
-    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_MUXTREE, &opts, &counts};
+    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_MUXTREE, &opts, &counts, false};
     bool changed = false;
     n_lines = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_call(&req, &changed));
@@ -294,7 +302,7 @@ static void test_changed_measure(void) {
     build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n  wire \\t\n"
           "  cell $_BUF_ \\b\n    connect \\A \\a\n    connect \\Y \\t\n  end\n"
           "  cell $_NOT_ \\n\n    connect \\A \\t\n    connect \\Y \\y\n  end\nend\n");
-    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_CLEAN, &opts, &counts};
+    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_CLEAN, &opts, &counts, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_call(&req, &changed));
     TEST_ASSERT_TRUE(changed);
     TEST_ASSERT_EQUAL_UINT32(0, counts.clean_cells); /* only the buffer wiring changed */
@@ -598,7 +606,7 @@ static void on_seq(void *user, const char *sub) {
 
 static void record_calls(void) {
     seq[0] = '\0';
-    odin3_opt_test_hooks hooks = {on_seq, NULL, NULL};
+    odin3_opt_test_hooks hooks = {on_seq, NULL, NULL, NULL};
     odin3_opt_test_set_hooks(&hooks);
 }
 
@@ -1091,6 +1099,199 @@ static void test_opt_stats_driver(void) {
     }
 }
 
+/* --- --opt-simcheck (Task 17, point (m)) ---------------------------------------------------- */
+
+/* y = ~a beside a dead gate on b; the hook below deletes the gate on y. */
+#define SIMCHECK_TEXT                                                                              \
+    "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire output 3 \\y\n"                    \
+    "  wire \\t\n"                                                                                 \
+    "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\n"                         \
+    "  cell $_NOT_ \\dead\n    connect \\A \\b\n    connect \\Y \\t\n  end\nend\n"
+#define SIMCHECK_CONST_X "  wire \\u\n  cell $_CONSTX_ \\cx\n    connect \\Y \\u\n  end\n"
+#define SIMCHECK_PMUX                                                                              \
+    "  wire width 2 \\s2\n  wire \\pv\n"                                                           \
+    "  cell $pmux \\pm\n    parameter \\WIDTH 1\n    parameter \\S_WIDTH 2\n"                      \
+    "    connect \\A \\a\n    connect \\B 2'11\n    connect \\S \\s2\n"                            \
+    "    connect \\Y \\pv\n  end\n"
+
+/* The deliberately wrong rewrite: opt_clean "also" removes the live gate, so y is never driven. */
+static void wrong_rewrite(void *user, const char *sub, odin3_design *design) {
+    (void)user;
+    if (strcmp(sub, "opt_clean") != 0) {
+        return;
+    }
+    uint32_t name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("n"), &name));
+    odin3_node_id gate = odin3_module_find_node(res.module, name);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(res.module, gate));
+}
+
+/* The first cycle of seed 1 on which input a is 0 (y = ~a is 1 before, 0 after): the simulator
+ * draws a then b each cycle, in port order. */
+static uint32_t first_cycle_with_a_zero(void) {
+    odin3_prng prng;
+    odin3_prng_seed(&prng, 1);
+    for (uint32_t cycle = 0; cycle < SIMCHECK_CYCLES; cycle++) {
+        bool in_a = odin3_prng_bit(&prng);
+        (void)odin3_prng_bit(&prng);
+        if (!in_a) {
+            return cycle;
+        }
+    }
+    TEST_FAIL_MESSAGE("seed 1 never draws a 0 for input a");
+    return 0;
+}
+
+static void install_wrong_rewrite(void) {
+    odin3_opt_test_hooks hooks = {NULL, NULL, NULL, wrong_rewrite};
+    odin3_opt_test_set_hooks(&hooks);
+}
+
+static uint32_t count_errors(void) {
+    uint32_t hits = 0;
+    for (uint32_t i = 0; i < n_lines; i++) {
+        hits += lines[i].level == ODIN3_LOG_ERROR ? 1U : 0U;
+    }
+    return hits;
+}
+
+static void test_simcheck_catches_a_wrong_rewrite(void) {
+#ifdef NDEBUG
+    TEST_IGNORE_MESSAGE("--opt-simcheck is a Debug option");
+#endif
+    build(SIMCHECK_TEXT);
+    install_wrong_rewrite();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, run_pass("opt_clean", "--opt-simcheck"));
+    char want[LINE_MAX_LEN];
+    int len =
+        snprintf(want, sizeof want, "opt: opt_clean: simulation differs on module 'm' at cycle %u",
+                 (unsigned)first_cycle_with_a_zero());
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_ERROR, want));
+    /* without the option the same rewrite goes unseen */
+    pb_free(&res);
+    build(SIMCHECK_TEXT);
+    install_wrong_rewrite();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", ""));
+}
+
+static void test_simcheck_passes_a_correct_run(void) {
+    build(SIMCHECK_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", "--opt-simcheck"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_errors());
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "--opt-simcheck"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_errors());
+    check_full();
+}
+
+/* A module the 2-state simulator cannot judge is skipped, so the same wrong rewrite passes. */
+static void expect_skipped(const char *text) {
+    build(text);
+    install_wrong_rewrite();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", "--opt-simcheck"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_errors());
+    pb_free(&res);
+}
+
+static void test_simcheck_skips_what_it_cannot_judge(void) {
+    /* an x constant: x in the input is a don't-care */
+    expect_skipped("module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire output 3 \\y\n"
+                   "  wire \\t\n" SIMCHECK_CONST_X
+                   "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\n"
+                   "  cell $_NOT_ \\dead\n    connect \\A \\b\n    connect \\Y \\t\n  end\nend\n");
+    /* a $pmux whose selects are not provably exclusive (spec 17 #46) */
+    expect_skipped("module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire output 3 \\y\n"
+                   "  wire \\t\n" SIMCHECK_PMUX
+                   "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\n"
+                   "  cell $_NOT_ \\dead\n    connect \\A \\b\n    connect \\Y \\t\n  end\nend\n");
+    /* a word-level cell with no simulate hook ($shiftx) */
+    expect_skipped("module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire output 3 \\y\n"
+                   "  wire \\t\n  wire \\sx\n"
+                   "  cell $shiftx \\sh\n    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n"
+                   "    parameter \\Y_WIDTH 1\n    connect \\A \\a\n    connect \\B \\b\n"
+                   "    connect \\Y \\sx\n  end\n"
+                   "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\n"
+                   "  cell $_NOT_ \\dead\n    connect \\A \\b\n    connect \\Y \\t\n  end\nend\n");
+}
+
+/* A flip-flop with the default INIT (3, x) no longer takes its module out of the check. */
+#define SIMCHECK_XINIT_TEXT                                                                        \
+    "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire output 3 \\y\n"                    \
+    "  wire input 4 \\clk\n  wire output 5 \\q\n  wire \\t\n"                                      \
+    "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\n"                         \
+    "  cell $_NOT_ \\dead\n    connect \\A \\b\n    connect \\Y \\t\n  end\n"                      \
+    "  cell $_DFF_P_ \\f\n    connect \\C \\clk\n    connect \\D \\b\n    connect \\Q \\q\n  "     \
+    "end\nend\n"
+
+static void test_simcheck_judges_an_x_init_flip_flop(void) {
+#ifdef NDEBUG
+    TEST_IGNORE_MESSAGE("--opt-simcheck is a Debug option");
+#endif
+    build(SIMCHECK_XINIT_TEXT);
+    install_wrong_rewrite();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, run_pass("opt_clean", "--opt-simcheck"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_prefix("opt: opt_clean: simulation differs on module 'm' at cycle"));
+    pb_free(&res);
+    odin3_opt_test_set_hooks(NULL);
+    build(SIMCHECK_XINIT_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", "--opt-simcheck"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO,
+                                            "opt: opt_clean: simcheck: 1 modules checked (1 with x "
+                                            "init), 0 skipped before, 0 skipped after"));
+}
+
+/* The call moves the flip-flop's clock to a net a gate drives: the IR stays valid, the module
+ * built before and does not build after (a clock that is no primary input). */
+static void clock_from_a_gate(void *user, const char *sub, odin3_design *design) {
+    (void)user;
+    if (strcmp(sub, "opt_clean") != 0) {
+        return;
+    }
+    uint32_t f_name = 0;
+    uint32_t t_name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("f"), &f_name));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("t"), &t_name));
+    odin3_pinslice clock =
+        odin3_node_port(res.module, odin3_module_find_node(res.module, f_name), 0);
+    odin3_net_id gate_net =
+        odin3_wire_net(res.module, odin3_module_find_wire(res.module, t_name), 0);
+    TEST_ASSERT_EQUAL_UINT32(1, clock.count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(res.module, clock.first));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(res.module, clock.first, gate_net));
+}
+
+static void test_simcheck_unsimulable_after_is_an_error(void) {
+#ifdef NDEBUG
+    TEST_IGNORE_MESSAGE("--opt-simcheck is a Debug option");
+#endif
+    build("module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire input 3 \\clk\n"
+          "  wire output 4 \\q\n  wire output 5 \\t\n"
+          "  cell $_NOT_ \\n\n    connect \\A \\b\n    connect \\Y \\t\n  end\n"
+          "  cell $_DFF_P_ \\f\n    connect \\C \\clk\n    connect \\D \\a\n    connect \\Q \\q\n"
+          "  end\nend\n");
+    odin3_opt_test_hooks hooks = {NULL, NULL, NULL, clock_from_a_gate};
+    odin3_opt_test_set_hooks(&hooks);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, run_pass("opt_clean", "--opt-simcheck"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_ERROR, "opt: opt_clean: module 'm' can no longer be simulated"));
+}
+
+/* A module the simulator cannot build (a clock that is no primary input) is skipped, quietly. */
+static void test_simcheck_build_failure_is_quiet(void) {
+    build("module \\m\n  wire input 1 \\a\n  wire input 2 \\d\n  wire output 3 \\q\n"
+          "  wire \\ck\n"
+          "  cell $_NOT_ \\c\n    connect \\A \\a\n    connect \\Y \\ck\n  end\n"
+          "  cell $_DFF_P_ \\f\n    connect \\C \\ck\n    connect \\D \\d\n    connect \\Q \\q\n"
+          "  end\nend\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", "--opt-simcheck"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_errors());
+    TEST_ASSERT_EQUAL_UINT32(0, count_prefix("sim"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_INFO,
+                       "opt_clean: removed 0 unused cells, 0 unused nets and 0 unused wires"));
+}
+
 /* A module for the OOM sweep: a dead mux port, a duplicate gate, a constant pipeline. */
 #define OOM_TEXT                                                                                   \
     "module \\m\n  wire input 1 \\clk\n  wire input 2 \\a\n  wire input 3 \\b\n"                   \
@@ -1256,7 +1457,7 @@ static void on_squeeze(void *user, const char *sub) {
 
 static void test_budget_journal(void) {
     build(OOM_MUX_TEXT);
-    odin3_opt_test_hooks hooks = {on_squeeze, NULL, NULL};
+    odin3_opt_test_hooks hooks = {on_squeeze, NULL, NULL, NULL};
     odin3_opt_test_set_hooks(&hooks);
     journal_seen = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_pass("opt", ""));
@@ -1322,6 +1523,12 @@ int main(void) {
     RUN_TEST(test_budget_opt);
     RUN_TEST(test_opt_stats_driver);
     RUN_TEST(test_opt_oom);
+    RUN_TEST(test_simcheck_catches_a_wrong_rewrite);
+    RUN_TEST(test_simcheck_passes_a_correct_run);
+    RUN_TEST(test_simcheck_skips_what_it_cannot_judge);
+    RUN_TEST(test_simcheck_judges_an_x_init_flip_flop);
+    RUN_TEST(test_simcheck_unsimulable_after_is_an_error);
+    RUN_TEST(test_simcheck_build_failure_is_quiet);
     RUN_TEST(test_opt_oom_fallback);
     RUN_TEST(test_budget_journal);
     RUN_TEST(test_determinism);

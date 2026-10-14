@@ -22,13 +22,19 @@ How a child is capped:
 ``cwd`` and ``env`` go to the child. When file descriptor 9 is open (the lock ``tools/heavy-run``
 and ``tools/build-locked`` hold), it is passed on to the child (``pass_fds=(9,)``); otherwise a
 nested ``tools/heavy-run`` would exit 2.
+
+With ``timeout`` the child starts in its own session (process group) and a timeout kills the whole
+group with SIGKILL before ``subprocess.TimeoutExpired`` is raised: a tool such as ``equiv-check``
+that starts ABC children leaves none behind (2F Task 17 review M2).
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import resource
 import shutil
+import signal
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -144,4 +150,33 @@ def run(argv: Sequence[str], cap_bytes: int, capture_output: bool = False, *,
                               "pass_fds": lock_fds()}
     if preexec is not None:
         kwargs["preexec_fn"] = preexec
-    return subprocess.run(cmd, **kwargs)  # noqa: S603
+    if timeout is None:
+        return subprocess.run(cmd, **kwargs)  # noqa: S603
+    return _run_in_group(cmd, kwargs)
+
+
+def _run_in_group(cmd: list[str], kwargs: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+    """``subprocess.run`` with a timeout, the child in its own process group: on a timeout the
+    whole group is killed (the child's own children too), then ``TimeoutExpired`` is raised."""
+    timeout = kwargs.pop("timeout")
+    capture = kwargs.pop("capture_output")
+    kwargs.pop("check")
+    pipe = subprocess.PIPE if capture else None
+    with subprocess.Popen(cmd, stdout=pipe, stderr=pipe, start_new_session=True,  # noqa: S603
+                          **kwargs) as proc:
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            kill_group(proc.pid)
+            out, err = proc.communicate()
+            raise subprocess.TimeoutExpired(cmd, timeout, output=out, stderr=err) from exc
+        except BaseException:
+            kill_group(proc.pid)
+            raise
+        return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
+def kill_group(pid: int) -> None:
+    """SIGKILL to the process group led by ``pid`` (the group is gone: nothing to do)."""
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(pid, signal.SIGKILL)
