@@ -6,6 +6,7 @@ Usage::
                [--equiv-check E] [--golden-root D] [--techlib L] [--primitives P]
                [--vtr-config-template X | --config C | --no-config]
                [--expect-fail F]... [--expect-unproven F]... [--expect-no-golden F]...
+               [--expect-differs F]...
                [--eqx-record F]... [--min-checked N] [--vtr-root V] [--jobs J] [--mem-cap C]
                [--cap-for SUFFIX=C]...
                [--equiv-timeout S] [--work DIR] [--root R] [--limit N] [--partial]
@@ -67,8 +68,11 @@ listed-reject   yes     Parmys itself rejects the design (``--expect-fail`` + ne
 unproven        no      ABC/SAT timeout or an inconclusive guess; exit 0 only when every such
                         design is in ``--expect-unproven`` (printed in its own bucket)
 no-golden       no      no golden, or an oracle failure that is a harness gap (missing include
-                        or ``-D``; ``--expect-no-golden`` + needle); own bucket, never counted
-differs         no      equiv-check's NOT-equivalent verdict
+                        or ``-D``) or a size limit (the Parmys run killed at its memory cap,
+                        ``--expect-no-golden`` + needle); own bucket, never counted
+differs         no      equiv-check's NOT-equivalent verdict; exit 0 only for a design in
+                        ``--expect-differs`` (KNOWN DIFFERS: the Parmys netlist is itself wrong,
+                        reviewed; own bucket, never a pass)
 error           no      a tool or usage error
 hard            no      a crash, a signal, a memory-cap kill or our own timeout; never listable
 =============== ======= ===============================================================
@@ -79,8 +83,9 @@ elab-sweep's list: ``<relative path> [needle] <reason>``; the path is relative t
 ``--eqx-record`` takes the eq-x record (``design <path> <count> <sha256> <reason>`` and
 ``bus <path> <name> <count>`` lines, see ``tests/exit``). An entry whose design now passes
 (XPASS), a needle that does not match, an eq-x whose outputs differ from the record, and
-(without ``--partial``) an entry that names no design fail the run. ``differs``, ``error`` and
-``hard`` are never listable.
+(without ``--partial``) an entry that names no design fail the run. ``error`` and ``hard`` are
+never listable; ``differs`` only by ``--expect-differs``, whose every entry must carry the
+evidence that the Parmys golden is the wrong side (an independent reference, not Odin III's say-so).
 
 The run also fails when fewer than ``--min-checked N`` designs (default 1) were proven
 (identical + equivalent + recorded eq-x): a wrong or empty golden tree cannot report green. A
@@ -137,13 +142,14 @@ TOOL = "exit-check"
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_HARD, EXIT_SKIP = 0, 1, 2, 3, 77
 IDENTICAL, EQUIVALENT, EQ_X, DIFFERS, ERROR, SKIP, NO_GOLDEN = (
     "identical", "equivalent", "eq-x", "differs", "error", "skip", "no-golden")
-UNPROVEN, REJECT = "unproven", "reject"
+UNPROVEN, REJECT, CAPPED = "unproven", "reject", "capped"
 PASSING = (IDENTICAL, EQUIVALENT)
 # Verdict classes (see verdict()): the passing ones, the two buckets that are neither pass nor
 # failure, and every cause that fails the run.
 CLS_EQX_OK, CLS_REJECT_OK = "eqx-recorded", "listed-reject"
 CLS_UNPROVEN_OK, CLS_NOGOLDEN, CLS_NOGOLDEN_OK = "unproven-listed", "nogolden", "nogolden-listed"
-FAIL_CLASSES = (EQ_X, "eqx-mismatch", DIFFERS, ERROR, "hard", UNPROVEN, REJECT, "XPASS",
+CLS_DEFECT_OK = "differs-listed"
+FAIL_CLASSES = (EQ_X, "eqx-mismatch", DIFFERS, ERROR, "hard", UNPROVEN, REJECT, CAPPED, "XPASS",
                 "needle")
 TIMEOUT_S = elab_sweep.TIMEOUT_S
 EQUIV_EXIT_XCONE = 3  # equiv-check --x-report: equivalent outside the x-cones
@@ -170,7 +176,7 @@ class UsageError(elab_sweep.UsageError):
 
 @dataclass(frozen=True)
 class Result:
-    kind: str  # identical, equivalent, eq-x, differs, error or skip
+    kind: str  # identical, equivalent, eq-x, differs, error, skip, reject, capped or unproven
     secs: float = 0.0
     why: str = ""
     output: str = ""  # the design's log: the needle of an expect-fail entry must appear in it
@@ -331,13 +337,18 @@ def prov_problem(cfg: Config, item: elab_sweep.Item, golden: Path, prov: dict[st
 
 def golden_status(golden: Path, prov: dict[str, str]) -> Result | None:
     """The Result of a golden that cannot be compared with, None when it can: ``failed`` is a
-    Parmys rejection (a REJECT), any other status without a BLIF an error."""
+    Parmys rejection (a REJECT), ``capped`` an oracle run killed at its memory cap (CAPPED: no
+    verdict on the design; a size limit that ``--expect-no-golden`` may list), any other status
+    without a BLIF an error."""
     status = prov.get("status", "")
     if status == "ok" and golden.is_file():
         return None
     if status == "failed":
         return Result(REJECT, why=f"no Parmys golden: Parmys rejected the design "
                       f"(status={status})")
+    if status == "capped":
+        return Result(CAPPED, why="no Parmys golden: the Parmys run was killed at its memory cap "
+                      "(no verdict on the design) (status=capped)")
     if status == "ok":
         return Result(ERROR, why=f"no Parmys golden: {golden} does not exist (status=ok)")
     return Result(ERROR, why=f"no Parmys golden: Parmys run {status or 'unknown'} (no verdict) "
@@ -622,16 +633,17 @@ class Lists:
     nogolden: dict[str, elab_sweep.Expect] = dataclasses.field(default_factory=dict)
     unproven: dict[str, elab_sweep.Expect] = dataclasses.field(default_factory=dict)
     eqx: dict[str, EqxRecord] = dataclasses.field(default_factory=dict)
+    defect: dict[str, elab_sweep.Expect] = dataclasses.field(default_factory=dict)
 
     def paths(self) -> set[str]:
-        return {*self.reject, *self.nogolden, *self.unproven, *self.eqx}
+        return {*self.reject, *self.nogolden, *self.unproven, *self.eqx, *self.defect}
 
     def listed(self, rel: str) -> bool:
         return rel in self.paths()
 
     def check_disjoint(self) -> None:
         seen: set[str] = set()
-        for table in (self.reject, self.nogolden, self.unproven, self.eqx):
+        for table in (self.reject, self.nogolden, self.unproven, self.eqx, self.defect):
             for rel in table:
                 if rel in seen:
                     raise UsageError(f"'{rel}' is in more than one exception list")
@@ -643,6 +655,7 @@ def read_lists(args: argparse.Namespace) -> Lists:
         reject=elab_sweep.merge_expect(args.expect_fail),
         nogolden=elab_sweep.merge_expect(args.expect_no_golden),
         unproven=elab_sweep.merge_expect(args.expect_unproven),
+        defect=elab_sweep.merge_expect(args.expect_differs),
         eqx={rel: rec for path in args.eqx_record for rel, rec in read_eqx(path).items()})
     lists.check_disjoint()
     return lists
@@ -684,7 +697,9 @@ def verdict(item: elab_sweep.Item, result: Result, lists: Lists) -> tuple[str, s
     if kind == EQ_X:
         return eqx_verdict(head, lists.eqx.get(rel), result)
     table, ok_class = {REJECT: (lists.reject, CLS_REJECT_OK),
-                       UNPROVEN: (lists.unproven, CLS_UNPROVEN_OK)}.get(kind, ({}, ""))
+                       UNPROVEN: (lists.unproven, CLS_UNPROVEN_OK),
+                       CAPPED: (lists.nogolden, CLS_NOGOLDEN_OK),
+                       DIFFERS: (lists.defect, CLS_DEFECT_OK)}.get(kind, ({}, ""))
     entry = table.get(rel)
     if kind == REJECT and entry is None and rel in lists.nogolden:
         entry, ok_class = lists.nogolden[rel], CLS_NOGOLDEN_OK
@@ -694,8 +709,8 @@ def verdict(item: elab_sweep.Item, result: Result, lists: Lists) -> tuple[str, s
     if _needle_problem(entry, result):
         return "needle", (f"{kind:<10} {head}: fails differently from the listing: expected "
                           f"[{entry.needle}], got {result.why}")
-    label = {CLS_REJECT_OK: "listed", CLS_UNPROVEN_OK: "unproven",
-             CLS_NOGOLDEN_OK: "no-golden"}[ok_class]
+    label = {CLS_REJECT_OK: "listed", CLS_UNPROVEN_OK: "unproven", CLS_NOGOLDEN_OK: "no-golden",
+             CLS_DEFECT_OK: "known-diff"}[ok_class]
     return ok_class, f"{label:<10} {head}: {entry.reason}"
 
 
@@ -747,11 +762,13 @@ SUMMARY_ROWS = (
     (IDENTICAL, "identical"), (EQUIVALENT, "equivalent"),
     (CLS_EQX_OK, "eq-x, reviewed record"), (CLS_REJECT_OK, "listed-reject (Parmys rejects)"),
     (CLS_UNPROVEN_OK, "UNPROVEN (listed; not proven)"),
+    (CLS_DEFECT_OK, "KNOWN DIFFERS (Parmys defect, listed)"),
     (CLS_NOGOLDEN, "no-golden (never ran)"), (CLS_NOGOLDEN_OK, "no-golden (harness gap, listed)"),
     ("skip", "skipped (cannot cap)"),
     (EQ_X, "FAIL eq-x, no record"), ("eqx-mismatch", "FAIL eq-x, record differs"),
     (DIFFERS, "FAIL differs"), (ERROR, "FAIL error"), ("hard", "FAIL hard (crash/kill/timeout)"),
     (UNPROVEN, "FAIL unproven, not listed"), (REJECT, "FAIL reject, not listed"),
+    (CAPPED, "FAIL oracle capped, not listed"),
     ("XPASS", "FAIL listed but passing"), ("needle", "FAIL listed, wrong needle"))
 
 
@@ -765,10 +782,12 @@ def summary_lines(state: Sweep, total: int, stale: Sequence[str], secs: float,
         lines.append(f"  {'FAIL stale list entries':<34}{len(stale):>8}")
     lines += [f"  {line}" for line in state.causes[:200]] if state.causes else []
     nogolden = state.count(CLS_NOGOLDEN, CLS_NOGOLDEN_OK)
+    known = state.count(CLS_DEFECT_OK)
     lines.append(f"{TOOL}: {total} designs: PROVEN {state.proven()} ({counts.get(IDENTICAL, 0)} "
                  f"identical, {counts.get(EQUIVALENT, 0)} equivalent, {counts.get(CLS_EQX_OK, 0)} "
                  f"eq-x with a reviewed record), {counts.get(CLS_REJECT_OK, 0)} listed-reject; "
-                 f"NOT PROVEN {state.count(CLS_UNPROVEN_OK)} unproven (listed); NOT CHECKED "
+                 f"NOT PROVEN {state.count(CLS_UNPROVEN_OK)} unproven (listed)"
+                 + (f", {known} known differs (listed)" if known else "") + "; NOT CHECKED "
                  f"{nogolden} no-golden; {state.failures()} failing, {len(stale)} stale; "
                  f"{secs:.1f} s")
     lines.append(f"{TOOL}: assumptions: latch init 2/3 read as 0; RAM contents and init not "
@@ -839,6 +858,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--expect-no-golden", type=Path, action="append", default=[],
                     help="designs whose oracle run failed for a harness reason (missing include "
                     "or -D): same syntax; they are counted as no-golden, never as passing")
+    ap.add_argument("--expect-differs", type=Path, action="append", default=[],
+                    help="designs equiv-check proves NOT equivalent to a Parmys netlist that is "
+                    "itself wrong (a reviewed Parmys defect): same syntax; a separate KNOWN "
+                    "DIFFERS bucket, never a pass")
     ap.add_argument("--expect-unproven", type=Path, action="append", default=[],
                     help="designs equiv-check cannot decide (timeout, guessed pairs): same "
                     "syntax; a separate unproven bucket, never a pass")

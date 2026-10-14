@@ -787,15 +787,42 @@ class ListedTest(ExitCheckCase):
         self.assertEqual(code, 1)
         self.assertIn("fails differently from the listing", out)
 
-    def test_a_capped_golden_is_an_error_not_listable(self) -> None:
-        path = self.micro("g", "big", "x\n", top=None)
-        blif = self.golden / "regression" / "verilog" / "g" / "big" / "big.parmys.blif"
+    def capped(self, leaf: str = "big") -> Path:
+        """A micro whose Parmys golden run was killed at its memory cap, with the oracle's log."""
+        path = self.micro("g", leaf, "x\n", top=None)
+        blif = self.golden / "regression" / "verilog" / "g" / leaf / f"{leaf}.parmys.blif"
         blif.parent.mkdir(parents=True)
         self.prov(blif, path, status="capped")
-        listing = self.expect("g/big.v [capped] x\n")
-        code, out, _ = self.run_tool("--expect-fail", listing)
+        blif.with_suffix(".log").write_text("run-oracle: killed at the 16824 MB memory cap\n",
+                                            encoding="utf-8")
+        return path
+
+    def test_an_unlisted_capped_golden_fails(self) -> None:
+        self.capped()
+        code, out, _ = self.run_tool()
         self.assertEqual(code, 1)
-        self.assertIn("Parmys run capped (no verdict)", out)
+        self.assertIn("killed at its memory cap (no verdict on the design)", out)
+        self.assertIn("FAIL oracle capped, not listed", out)
+
+    def test_a_capped_golden_is_listed_as_no_golden_never_a_pass(self) -> None:
+        """A cap kill of the oracle is a size limit, no verdict on the design: it can be listed in
+        the no-golden file (needle in the oracle's log), is counted there and never as a pass."""
+        self.capped()
+        self.micro("g", "ok", "IDENT\n")
+        listing = self.expect("g/big.v [memory cap] 524288 RAM slices: the oracle needs > 16 GB\n")
+        code, out, err = self.run_tool("--expect-no-golden", listing)
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("no-golden  g/big.v", out)
+        self.assertIn("NOT CHECKED 1 no-golden", out)
+        self.assertIn("PROVEN 1 (1 identical", out)
+        code, out, _ = self.run_tool("--expect-no-golden", self.expect("g/big.v [other] x\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("fails differently from the listing", out)
+
+    def test_a_capped_golden_is_not_a_listed_reject(self) -> None:
+        self.capped()
+        code, out, _ = self.run_tool("--expect-fail", self.expect("g/big.v [memory cap] x\n"))
+        self.assertEqual(code, 1)
         self.assertIn("(listed, but not for this result)", out)
 
     def test_a_listed_design_that_passes_is_xpass(self) -> None:
@@ -813,6 +840,27 @@ class ListedTest(ExitCheckCase):
         code, out, _ = self.run_tool("--expect-fail", listing)
         self.assertEqual(code, 1)
         self.assertEqual(out.count("(listed, but not for this result)"), 2)
+
+    def test_a_reviewed_parmys_defect_is_known_differs_never_a_pass(self) -> None:
+        self.micro("g", "d", "nothing\n")
+        self.micro("g", "ok", "IDENT\n")
+        listing = self.expect("g/d.v [NOT equivalent outside] Parmys shorts the drivers: x\n")
+        code, out, err = self.run_tool("--expect-differs", listing)
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("known-diff g/d.v", out)
+        self.assertIn("KNOWN DIFFERS (Parmys defect, listed)", out)
+        self.assertIn("PROVEN 1 (1 identical, 0 equivalent, 0 eq-x with a reviewed record), "
+                      "0 listed-reject; NOT PROVEN 0 unproven (listed), 1 known differs (listed)",
+                      out)
+        code, out, _ = self.run_tool("--expect-differs", self.expect("g/d.v [other] x\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("fails differently from the listing", out)
+
+    def test_a_known_differs_entry_that_now_passes_is_xpass(self) -> None:
+        self.micro("g", "a", "IDENT\n")
+        code, out, _ = self.run_tool("--expect-differs", self.expect("g/a.v [x] was wrong\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("XPASS      g/a.v", out)
 
     def test_a_signal_or_cap_kill_is_never_expected(self) -> None:
         self.micro("g", "oom", "SPLICEKILL\n")
@@ -868,7 +916,8 @@ class LogTest(ExitCheckCase):
     def test_help_and_usage_errors(self) -> None:
         code, out, _ = helpers.run_main(exit_check.main, ["--help"])
         self.assertEqual(code, 0)
-        for flag in ("--expect-fail", "--expect-unproven", "--expect-no-golden", "--eqx-record",
+        for flag in ("--expect-fail", "--expect-unproven", "--expect-no-golden", "--expect-differs",
+                     "--eqx-record",
                      "--min-checked", "--vtr-root"):
             self.assertIn(flag, out)
         code, _, err = helpers.run_main(exit_check.main, [
