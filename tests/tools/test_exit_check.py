@@ -859,7 +859,7 @@ class LogTest(ExitCheckCase):
             self.assertIn(flag, out)
         code, _, err = helpers.run_main(exit_check.main, [
             "--odin3", str(self.odin3), "--yosys", "no-such-yosys", "--arch", str(self.arch),
-            "--golden-root", str(self.golden), str(self.micros)])
+            "--golden-root", str(self.golden), "--no-config", str(self.micros)])
         self.assertEqual(code, 2)
         self.assertIn("no-such-yosys is not an executable file", err)
 
