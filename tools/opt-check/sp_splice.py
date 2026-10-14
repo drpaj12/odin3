@@ -8,9 +8,10 @@ Usage::
 
 Phase 2 has no ``fsm``, ``wreduce``, ``memory``, ``flatten``, ``techmap`` or hard-block mapping,
 so the exit comparison runs Parmys's script in two halves, verbatim from ``synthesis.tcl`` apart
-from point (i)'s Odin III spellings (``--nolatches``, ``--nomem2reg``, ``--top``):
+from point (i)'s Odin III spellings (``--nolatches``, ``--nomem2reg``, ``--top``, and
+``--vtr-compat``, the VTR setting):
 
-- Odin III: ``O -p "read_techlib L; read_verilog --lib --nomem2reg P; read_verilog --nolatches
+- Odin III: ``O -p "read_techlib L; read_verilog --lib --nomem2reg P; read_verilog --nolatches --vtr-compat
   FILE...; hierarchy --top T; opt_expr; opt_clean; opt -nodffe -nosdff; proc; write_rtlil a.il"``.
   ``P`` is Parmys's ``vtr_primitives.v`` (``--primitives``, else under ``$VTR_ROOT``); ``L`` is
   ``lib/vtr.o3lib`` (``--techlib``).
@@ -84,7 +85,7 @@ PRIMITIVES_UNDER_VTR = (
 # hand-over.
 ODIN3_HALF = (
     "read_verilog --lib --nomem2reg {primitives}",
-    "read_verilog --nolatches {files}",
+    "read_verilog --nolatches --vtr-compat {files}",
     "hierarchy --top {top}",
     "opt_expr",
     "opt_clean",

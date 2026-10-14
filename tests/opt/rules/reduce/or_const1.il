@@ -1,0 +1,13 @@
+attribute \top 1
+module \t
+  wire input 1 \a
+  wire input 2 \b
+  wire output 3 \y
+  cell $reduce_or $c6
+    parameter \A_SIGNED 0
+    parameter \A_WIDTH 1
+    parameter \Y_WIDTH 1
+    connect \A 1'1
+    connect \Y \y
+  end
+end

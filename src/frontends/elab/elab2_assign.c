@@ -986,6 +986,26 @@ static odin3_status asg_tribuf(asg_run *ar, bool *handled) {
     return odin3_elab2_tribuf(e2, &tri);
 }
 
+/* The claim and the connection of ar (its lvalue made, its nodes set), the lvalue freed. */
+static odin3_status asg_finish(asg_run *ar, odin3_status st) {
+    odin3_elab2 *e2 = ar->e2;
+    bool handled = false;
+    if (st == ODIN3_OK) {
+        st = asg_tribuf(ar, &handled);
+    }
+    bool granted = false;
+    odin3_elab2_lvclaim claim = {&ar->lv, ODIN3_DRV_ASSIGN, ar->lhs, false, NULL, NULL};
+    st = st != ODIN3_OK || handled ? st : odin3_elab2_lvalue_claim(e2, &claim, &granted);
+    if (st == ODIN3_OK && !handled && !granted) {
+        st = ODIN3_ERR_PARSE;
+    }
+    if (st == ODIN3_OK && !handled && !asg_all_dropped(ar)) {
+        st = asg_rhs(ar);
+    }
+    odin3_elab2_lvalue_free(&ar->lv);
+    return st;
+}
+
 odin3_status odin3_elab2_assign(odin3_elab2 *e2, odin3_ast_id net_assign) {
     odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, net_assign);
     if (e2->mod == NULL || (kind != ODIN3_AST_NET_ASSIGN && kind != ODIN3_AST_DECLARATOR)) {
@@ -996,20 +1016,18 @@ odin3_status odin3_elab2_assign(odin3_elab2 *e2, odin3_ast_id net_assign) {
     asg_run ar = {.e2 = e2};
     odin3_elab2_lvalue_init(&ar.lv);
     odin3_status st = asg_parts(&ar, net_assign);
-    bool handled = false;
     if (st == ODIN3_OK) {
         asg_warn_variables(&ar);
-        st = asg_tribuf(&ar, &handled);
     }
-    bool granted = false;
-    odin3_elab2_lvclaim claim = {&ar.lv, ODIN3_DRV_ASSIGN, ar.lhs, false, NULL, NULL};
-    st = st != ODIN3_OK || handled ? st : odin3_elab2_lvalue_claim(e2, &claim, &granted);
-    if (st == ODIN3_OK && !handled && !granted) {
-        st = ODIN3_ERR_PARSE;
+    return asg_finish(&ar, st);
+}
+
+odin3_status odin3_elab2_assign_nodes(odin3_elab2 *e2, odin3_ast_id lhs, odin3_ast_id rhs) {
+    if (e2->mod == NULL || lhs.v == 0 || rhs.v == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_elab2_assign_nodes: no lhs, no rhs or no module");
+        return ODIN3_ERR_INVALID_ARG;
     }
-    if (st == ODIN3_OK && !handled && !asg_all_dropped(&ar)) {
-        st = asg_rhs(&ar);
-    }
-    odin3_elab2_lvalue_free(&ar.lv);
-    return st;
+    asg_run ar = {.e2 = e2, .lhs = lhs, .rhs = rhs};
+    odin3_elab2_lvalue_init(&ar.lv);
+    return asg_finish(&ar, odin3_elab2_lvalue_make(e2, lhs, &ar.lv));
 }

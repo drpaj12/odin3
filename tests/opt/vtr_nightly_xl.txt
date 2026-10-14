@@ -1,0 +1,6 @@
+# tests/opt/vtr_nightly_xl.txt: the oversized file of the nightly opt-equiv and opt-diff legs
+# (2F plan Task 20, point (n)). Read by opt-nightly next to vtr_expect_fail.txt (a path is in one
+# file only). It is a separate file because opt_vtr (Odin III only, tools/opt-check/opt-run) shares
+# vtr_expect_fail.txt and runs koios/lenet.v last in the 6G slice under a 5G cap; here the Yosys
+# side adds ~7 GB, so the file waits for opt_equiv_vtr_xl / opt_diff_vtr_xl (sweep-xl, 9G slice).
+koios/lenet.v xl: Yosys side ~7 GB; run alone by the sweep-xl legs

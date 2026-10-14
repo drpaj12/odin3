@@ -7,10 +7,12 @@ import contextlib
 import json
 import os
 import resource
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -257,6 +259,15 @@ class BridgeTest(unittest.TestCase):
         scripts = [c[2] for c in self.calls() if c[0] in ("odin3", "yosys") and "-p" in c]
         self.assertTrue(all("-nolatches" in s or "read_rtlil" in s for s in scripts))
         self.assertEqual(sum("--nolatches" in s or "-sv -nolatches" in s for s in scripts), 2)
+
+    def test_vtr_compat_reaches_side_a_only(self) -> None:
+        code, out, err = self.run_tool("--vtr-compat")
+        self.assertEqual(code, 0, out + err)
+        f = str(self.src)
+        calls = self.calls()
+        self.assertEqual(calls[1][2], f"read_verilog --nolatches --vtr-compat {f}; "
+                         "write_rtlil a.il")
+        self.assertNotIn("vtr-compat", calls[3][2])  # side B (Yosys) is unchanged
 
     def test_files_are_kept(self) -> None:
         self.run_tool("--top", "t")
@@ -540,6 +551,31 @@ class MemcapTest(unittest.TestCase):
         code = "import resource; print(resource.getrlimit(resource.RLIMIT_AS))"
         done = memcap.run([sys.executable, "-c", code], 4 * GIB, capture_output=True)
         self.assertEqual(done.stdout.strip(), f"({4 * GIB}, {4 * GIB})")
+
+    def test_a_timeout_kills_the_whole_process_group(self) -> None:
+        """Review M2: the child's own children (ABC under equiv-check) die with it."""
+        pid_file = self.dir / "grandchild.pid"
+        code = ("import subprocess, sys, time\n"
+                "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                f"open({str(pid_file)!r}, 'w').write(str(g.pid))\n"
+                "time.sleep(60)\n")
+        with self.assertRaises(subprocess.TimeoutExpired):
+            memcap.run([sys.executable, "-c", code], 4 * GIB, capture_output=True, timeout=2)
+        grandchild = int(pid_file.read_text())
+        for _ in range(50):  # SIGKILL is delivered at once; the zombie goes with its parent
+            try:
+                os.kill(grandchild, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            os.kill(grandchild, signal.SIGKILL)  # a test failure must not leave it behind
+            self.fail("the grandchild survived the timeout")
+
+    def test_timeout_run_returns_output_and_code(self) -> None:
+        done = memcap.run([sys.executable, "-c", "import sys; print('x'); sys.exit(3)"], GIB,
+                          capture_output=True, timeout=30)
+        self.assertEqual((done.returncode, done.stdout), (3, "x\n"))
 
     def test_asan_child_without_systemd_run(self) -> None:
         fake = _exe(self.dir / "asan-child", "#!{python}\n# __asan_init\nprint('x')\n")

@@ -52,6 +52,16 @@ typedef struct odin3_init {
     odin3_ceval_store store;
 } odin3_init;
 
+/*
+ * `read_verilog --vtr-compat` (pg_init_vtr.c): the statement of an `initial`, found not constant,
+ * as the continuous assignment Parmys reads it as. *handled is true when the statement was
+ * decided (assigned with the ruling's warning, or kept ignored with a warning that says why), false
+ * when the option is off or the statement is not a plain assignment to a variable: the caller
+ * then ignores it as before. Status as odin3_elab2_assign (a counted ERR_PARSE after a located
+ * error from the lvalue).
+ */
+odin3_status odin3_elab2_initial_assign(odin3_elab2 *e2, odin3_ast_id stmt, bool *handled);
+
 /* A word of a memory: the table index and the position (row-major, from 0). */
 typedef struct odin3_init_wordref {
     uint32_t mem, pos;

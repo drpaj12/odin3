@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# opt-gen-diff: seeds of the --opt generator through opt-diff's steps 3-5. See opt_gen_diff.py.
+# Exit codes: 0 every seed ok (structural differences, drift and oracle crashes are reported),
+# 1 a seed failed or too many are structural, 2 usage or setup error, 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here/../elab-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/opt_gen_diff.py" "$@"

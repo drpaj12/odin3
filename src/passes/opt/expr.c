@@ -382,6 +382,15 @@ static size_t resume_visit(odin3_expr_ctx *ec, odin3_expr_rule_fn fn) {
     return position_of(ec->kind, fn);
 }
 
+/* The binary types that read A_SIGNED and B_SIGNED together (the shifts and $pow take B's flag as
+ * the amount's own, and are not mixed in this sense). */
+static bool mixed_sign_kind(odin3_expr_type kind) {
+    /* $and $or $xor $xnor, then $lt $le $gt $ge $eq $ne $add $sub $mul $div $mod: two runs of
+     * odin3_expr_type (test_mixed_sign_warns_once checks every type) */
+    return (kind >= ODIN3_EXPR_T_AND && kind <= ODIN3_EXPR_T_XNOR) ||
+           (kind >= ODIN3_EXPR_T_LT && kind <= ODIN3_EXPR_T_MOD);
+}
+
 /* Applies to the node the first rule of its type's list that fires (and any it resumes into). */
 static odin3_status visit(odin3_expr_ctx *ec, odin3_node_id node) {
     if (!odin3_node_live(ec->module, node)) {
@@ -393,6 +402,9 @@ static odin3_status visit(odin3_expr_ctx *ec, odin3_node_id node) {
         return ODIN3_OK;
     }
     ec->def = odin3_celltype_get(ec->oc->design, odin3_node_type(ec->module, node));
+    if (mixed_sign_kind(ec->kind)) {
+        odin3_opt_warn_mixed_sign(ec->oc, node, ec->def->name);
+    }
     uint32_t name_str = odin3_node_name(ec->module, node);
     odin3_status st = ODIN3_OK;
     for (size_t at = 0; st == ODIN3_OK && k_rules[ec->kind][at] != NULL; at++) {

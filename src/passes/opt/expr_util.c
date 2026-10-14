@@ -91,8 +91,7 @@ static void census_add(odin3_expr_census *census, odin3_const value) {
 }
 
 bool odin3_expr_both_signed(const odin3_expr_ctx *ec) {
-    return odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) != 0 &&
-           odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED) != 0;
+    return odin3_opt_both_signed(ec->module, ec->node);
 }
 
 odin3_expr_census odin3_expr_port_census(const odin3_expr_ctx *ec, odin3_expr_port port) {

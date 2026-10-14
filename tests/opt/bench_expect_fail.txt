@@ -1,0 +1,9 @@
+# tests/opt/bench_expect_fail.txt: the files the full `bench_opt` set (the 31 VTR and 33 Koios
+# benchmarks, one set by size, `elab-sweep --bench build/release/bench_opt`) does not time (2F plan
+# Task 19). The same files as tests/proc/bench_expect_fail.txt: bench_opt has no --top either, and
+# reads the file the way bench_proc does. Format as vtr_expect_fail.txt.
+koios/hard_mem_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
+koios/complex_dsp_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
+koios/hard_block_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
+koios/bwave_like.fixed.small.v [ambiguous_top: no top given and several modules are not instantiated: 'work.NPU', 'work.sp_ram'] needs --top; elab-sweep --bench passes none (2D follow-up)
+koios/bwave_like.fixed.large.v [ambiguous_top: no top given and several modules are not instantiated: 'work.NPU', 'work.sp_ram'] needs --top; elab-sweep --bench passes none (2D follow-up)

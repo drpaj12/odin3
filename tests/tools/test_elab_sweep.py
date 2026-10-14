@@ -88,6 +88,45 @@ for code in (1, 2, 3):
 print("proc-diff: identical")
 """
 
+# The opt-equiv / opt-diff stand-in (2F Task 17): exit 0 passes, 1 is a difference.
+FAKE_OPT_TOOL = """#!{python}
+import json, os, sys
+argv = sys.argv[1:]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(json.dumps(["opt-tool", os.path.basename(sys.argv[0]), *argv]) + "\\n")
+text = open(argv[-1]).read()
+for code in (1, 2, 3):
+    if f"OT{code}" in text:
+        print(f"opt-tool: message for exit {code}")
+        sys.exit(code)
+print("opt-tool: ok")
+"""
+
+# The opt-run stand-in (2F Task 18): prints the iteration count the file names (`IT<n>`).
+FAKE_OPT_RUN = """#!{python}
+import json, os, re, sys
+argv = sys.argv[1:]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(json.dumps(["opt-tool", os.path.basename(sys.argv[0]), *argv]) + "\\n")
+text = open(argv[-1]).read()
+if "BAD" in text:
+    print("opt-run: FAIL: no fixed point after 3 iterations (the cap)")
+    sys.exit(1)
+if "CRASH" in text:
+    print("opt-run: CRASH: odin3 killed by signal 11")
+    sys.exit(3)
+print("opt-run: ok: iterations max=" + re.search(r"IT(\\d+)", text).group(1) + " opt-runs=2")
+"""
+
+# The opt-equiv stand-in (2F-6 N3): reports as many changing calls as the file says (`CH<n>`).
+FAKE_OPT_EQUIV = """#!{python}
+import re, sys
+n = int(re.search(r"CH(\\d+)", open(sys.argv[-1]).read()).group(1))
+print("opt-equiv: %d calls changed something: %d refine, 0 do not" % (n, n))
+if n == 0:
+    print("opt-equiv: NOTE: 0 calls changed anything: nothing was checked")
+"""
+
 # An odin3 on which `opt` exists: every run succeeds (the trio probe included).
 FAKE_ODIN3_OPT = """#!{python}
 import json, os, sys
@@ -510,6 +549,132 @@ class ModeTest(SweepTestCase):
         self.assertEqual(code, 77)
 
 
+class OptModesTest(SweepTestCase):
+    """2F Task 17: --opt-equiv and --opt-diff run their tool per file."""
+
+    def tool_calls(self) -> list[list[str]]:
+        return [c[1:] for c in self.calls() if c[0] == "opt-tool"]
+
+    def test_both_modes_pass_the_options_on_and_map_the_exit_codes(self) -> None:
+        fake = _exe(self.bin / "fake_opt_tool.py", FAKE_OPT_TOOL)
+        self.write("m/ok.v", "x\n")
+        self.write("m/diff.v", "OT1\n")
+        self.write("m/err.v", "OT2\n")
+        tops = self.write("tops.txt", "ok.v cpu\n")
+        for mode, name in (("--opt-equiv", "opt-equiv"), ("--opt-diff", "opt-diff")):
+            self.log.write_text("", encoding="utf-8")
+            tools = dict(elab_sweep.OPT_TOOLS, **{name: fake})
+            with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+                code, out, _ = self.run_tool(mode, "--yosys", "Y", "--opt-arg=--script=phase2",
+                                             "--tops", str(tops), str(self.dir / "m"))
+            self.assertEqual(code, 1)
+            self.assertIn("FAIL  diff.v", out)
+            self.assertIn("NOT ok: opt-tool: message for exit 1", out)
+            self.assertIn("FAIL  err.v", out)
+            self.assertIn("1 passed", out)
+            argv = next(c for c in self.tool_calls() if c[-1].endswith("ok.v"))[1:]
+            self.assertEqual(argv[argv.index("--top") + 1], "cpu")
+            self.assertEqual(argv[argv.index("--yosys") + 1].split("/")[-1], "Y")
+            self.assertIn("--script=phase2", argv)
+
+    def test_exit_3_is_hard_in_both_modes_even_with_an_expect_fail_needle(self) -> None:
+        """Review I1: a crash, kill or timeout inside opt-equiv/opt-diff is never listed away."""
+        fake = _exe(self.bin / "fake_opt_tool.py", FAKE_OPT_TOOL)
+        self.write("m/c.v", "OT3\n")
+        expect = self.expect("c.v [message for exit 3] listed\n")
+        for mode, name in (("--opt-equiv", "opt-equiv"), ("--opt-diff", "opt-diff")):
+            tools = dict(elab_sweep.OPT_TOOLS, **{name: fake})
+            with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+                code, out, _ = self.run_tool(mode, "--yosys", "Y", "--expect-fail", str(expect),
+                                             str(self.dir / "m"))
+            self.assertEqual(code, 1, out)
+            self.assertIn("FAIL  c.v", out)
+            self.assertNotIn("xfail", out)
+
+    def test_modes_need_yosys_and_exclude_each_other(self) -> None:
+        self.write("m/a.v", "x\n")
+        self.assertEqual(self.run_tool("--opt-diff", str(self.dir / "m"))[0], 2)
+        code, _, err = self.run_tool("--opt-diff", "--opt-equiv", "--yosys", "Y",
+                                     str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("cannot be combined", err)
+
+
+    def test_opt_run_needs_no_yosys_and_reports_the_largest_iteration_count(self) -> None:
+        fake = _exe(self.bin / "fake_opt_run.py", FAKE_OPT_RUN)
+        self.write("m/a.v", "IT3\n")
+        self.write("m/bb.v", "IT12 and padding\n")
+        self.write("m/c.v", "IT5 more padding to sort it last\n" * 4)
+        self.write("m/bad.v", "BAD\n")
+        tools = dict(elab_sweep.OPT_TOOLS, **{"opt-run": fake})
+        with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+            code, out, _ = self.run_tool("--opt-run", "--techlib", "L.o3lib", str(self.dir / "m"))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  bad.v", out)
+        self.assertIn("NOT ok: opt-run: FAIL: no fixed point after 3 iterations", out)
+        self.assertIn("opt-run: maximum opt iterations 12 (bb.v; the cap is 10000)", out)
+        argv = next(c for c in self.tool_calls() if c[-1].endswith("a.v"))[1:]
+        self.assertNotIn("--yosys", argv)
+        self.assertEqual(argv[argv.index("--techlib") + 1].split("/")[-1], "L.o3lib")
+
+    def test_an_opt_run_crash_is_hard_even_with_an_expect_fail_needle(self) -> None:
+        fake = _exe(self.bin / "fake_opt_run.py", FAKE_OPT_RUN)
+        self.write("m/c.v", "CRASH IT1\n")
+        expect = self.expect("c.v [CRASH] listed\n")
+        tools = dict(elab_sweep.OPT_TOOLS, **{"opt-run": fake})
+        with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+            code, out, _ = self.run_tool("--opt-run", "--expect-fail", str(expect),
+                                         str(self.dir / "m"))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  c.v", out)
+
+    def test_min_changed_total_fails_a_sweep_in_which_odin3_does_nothing(self) -> None:
+        """Review N3: 0 changing calls on every design passed every per-file check."""
+        fake = _exe(self.bin / "fake_opt_equiv.py", FAKE_OPT_EQUIV)
+        self.write("m/a.v", "CH0\n")
+        self.write("m/bb.v", "CH0 pad\n")
+        tools = dict(elab_sweep.OPT_TOOLS, **{"opt-equiv": fake})
+        with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+            args = ("--opt-equiv", "--yosys", "Y", str(self.dir / "m"))
+            self.assertEqual(self.run_tool(*args)[0], 0)  # no minimum: as before
+            code, out, _ = self.run_tool("--min-changed-total", "1", *args)
+            self.assertEqual(code, 1, out)
+            self.assertIn("0 changing calls in total, want at least 1", out)
+            self.write("m/c.v", "CH2 padding to sort last\n")
+            code, out, _ = self.run_tool("--min-changed-total", "2", *args)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(self.run_tool("--min-changed-total", "3", *args)[0], 1)
+
+    def test_an_aborted_refinement_check_is_hard_even_when_listed(self) -> None:
+        """Review I3: exit 2 from our own Yosys check is never an expected failure."""
+        fake = _exe(self.bin / "fake_opt_equiv.py", FAKE_OPT_EQUIV.replace(
+            'n = int', 'if "ABORT" in open(sys.argv[-1]).read():\n'
+            '    print("opt-equiv: error: yosys-refine exit 1: ERROR: Parser error")\n'
+            '    sys.exit(2)\nn = int'))
+        self.write("m/a.v", "ABORT CH1\n")
+        expect = self.expect("a.v [Parser error] listed\n")
+        tools = dict(elab_sweep.OPT_TOOLS, **{"opt-equiv": fake})
+        with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+            code, out, _ = self.run_tool("--opt-equiv", "--yosys", "Y", "--expect-fail", expect,
+                                         str(self.dir / "m"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  a.v", out)
+        self.assertIn("never an expected failure", out)
+
+    def test_min_changed_total_needs_opt_equiv(self) -> None:
+        self.write("m/a.v", "x\n")
+        code, _, err = self.run_tool("--min-changed-total", "1", str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("--min-changed-total needs --opt-equiv", err)
+
+    def test_opt_run_excludes_the_other_modes(self) -> None:
+        self.write("m/a.v", "x\n")
+        code, _, err = self.run_tool("--opt-run", "--opt-diff", "--yosys", "Y",
+                                     str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("cannot be combined", err)
+
+
 class ProcModesTest(SweepTestCase):
     """2E Task 12: --proc-diff, and the bridge with --pass proc."""
 
@@ -589,6 +754,16 @@ class ProcModesTest(SweepTestCase):
         self.assertIn("--async2sync", argv)
         self.assertIn("--unmap-enables", argv)
         self.assertIn("--no-trio", argv)  # --trio off
+
+    def test_vtr_compat_reaches_the_bridge_only_when_asked(self) -> None:
+        self.write("m/a.v", "x\n")
+        base = ["--equiv", "--yosys", "Y", "--equiv-check", "E", str(self.dir / "m")]
+        code, out, _ = self.run_tool(*base)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("--vtr-compat", next(c for c in self.calls() if c[0] == "elab-equiv"))
+        code, out, _ = self.run_tool("--vtr-compat", *base)
+        self.assertEqual(code, 0, out)
+        self.assertIn("--vtr-compat", [c for c in self.calls() if c[0] == "elab-equiv"][-1])
 
     def test_pass_proc_needs_the_bridge_and_proc_diff_needs_yosys(self) -> None:
         self.write("m/a.v", "x\n")

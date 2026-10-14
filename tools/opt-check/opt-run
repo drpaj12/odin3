@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# opt-run: the Phase 2 script on one design with the corpus checks (2F spec 20.4). See opt_run.py.
+# Exit codes: 0 ok, 1 a check failed, 2 error or usage, 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here/../elab-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/opt_run.py" "$@"

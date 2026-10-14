@@ -19,7 +19,9 @@
 #define PORT_B ODIN3_EXPR_PORT_B
 #define PORT_S ODIN3_EXPR_PORT_S
 
-/* A 1-bit unsigned binary cell (Yosys: GetSize(A) == 1 && GetSize(B) == 1 && !A_SIGNED). */
+/* A 1-bit unsigned binary cell (Yosys: GetSize(A) == 1 && GetSize(B) == 1 && !A_SIGNED). It reads
+ * A_SIGNED alone, as Yosys does: a 1-bit cell with A 1, B 0 is unsigned under the both-signed
+ * rule too, but is skipped here (a missed rewrite, never a wrong one; kept for Yosys parity). */
 static bool one_bit_unsigned(const odin3_expr_ctx *ec) {
     return odin3_expr_width(ec, PORT_A) == 1 && odin3_expr_width(ec, PORT_B) == 1 &&
            odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) == 0;
@@ -291,14 +293,9 @@ static odin3_status bw_load(odin3_expr_ctx *ec, bool a_const, bw_state *st) {
     res = res == ODIN3_OK ? odin3_expr_read(ec, PORT_B, &rhs) : res;
     odin3_expr_sig lhs_ext;
     odin3_expr_sig rhs_ext;
-    res = res == ODIN3_OK
-              ? odin3_expr_extend(ec, &lhs, st->y_width,
-                                  odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) != 0, &lhs_ext)
-              : res;
-    res = res == ODIN3_OK
-              ? odin3_expr_extend(ec, &rhs, st->y_width,
-                                  odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED) != 0, &rhs_ext)
-              : res;
+    bool is_signed = odin3_expr_both_signed(ec); /* a mixed-sign cell zero-extends both */
+    res = res == ODIN3_OK ? odin3_expr_extend(ec, &lhs, st->y_width, is_signed, &lhs_ext) : res;
+    res = res == ODIN3_OK ? odin3_expr_extend(ec, &rhs, st->y_width, is_signed, &rhs_ext) : res;
     st->cst = a_const ? lhs_ext : rhs_ext;
     st->var = a_const ? rhs_ext : lhs_ext;
     res = res == ODIN3_OK ? odin3_expr_read(ec, y_port, &st->dest) : res; /* open bits: Y itself */

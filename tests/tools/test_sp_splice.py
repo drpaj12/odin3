@@ -26,7 +26,7 @@ PHASE2_SCRIPT = helpers.REPO_ROOT / "tools" / "opt-check" / "phase2.script"
 
 ODIN3_SCRIPT = (
     "read_techlib /lib/vtr.o3lib; read_verilog --lib --nomem2reg /vtr/prim.v; "
-    "read_verilog --nolatches /src/a.v /src/b.v; "
+    "read_verilog --nolatches --vtr-compat /src/a.v /src/b.v; "
     "hierarchy --top top; opt_expr; opt_clean; opt -nodffe -nosdff; proc; write_rtlil a.il"
 )
 YOSYS_SCRIPT = (
@@ -154,7 +154,7 @@ class SpSpliceTest(unittest.TestCase):
         self.run_tool()
         script = self.scripts()[0][1]
         self.assertIn("read_verilog --lib --nomem2reg /vtr/prim.v;", script)
-        self.assertIn("read_verilog --nolatches ", script)
+        self.assertIn("read_verilog --nolatches --vtr-compat ", script)
         self.assertIn("hierarchy --top top;", script)
         self.assertNotIn("-sv", script)
 
@@ -234,7 +234,7 @@ class SpSpliceTest(unittest.TestCase):
         spaced = self.dir / "has blank.v"
         spaced.write_text("module t; endmodule\n", encoding="utf-8")
         self.run_tool(files=[spaced])
-        self.assertIn(f'read_verilog --nolatches "{spaced}";', self.scripts()[0][1])
+        self.assertIn(f'read_verilog --nolatches --vtr-compat "{spaced}";', self.scripts()[0][1])
 
     # --- exit mapping -----------------------------------------------------------------------
 
