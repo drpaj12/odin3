@@ -10,3 +10,11 @@
 # 2D-7b review I3: T9 accepted `=` and `<=` mixed across two clocks. equiv-check is single-clock; the
 # 33-latch design is equal to Yosys's netlist under a merged-clock abstraction only (spec 17 #77).
 syntax/multi_clock_reader_writer.v [more than one clock domain] equiv-check cannot read a netlist with two clocks (tool limit; 'unsupported: more than one clock domain'); equal to Yosys's netlist under a merged-clock abstraction (33 latches, single-clock check), spec 17 #77
+
+# 2D-8 (fix/multiport-mem): two always blocks that write one memory at the same address in the same
+# cycle. 2D emits a v1 `$mem` (the later block's port wins, WR_PRIORITY_MASK 4'0100 once Yosys reads
+# it); Yosys 0.55's read_verilog gives the two ports no priority (mask 4'0000, memory_map takes its own
+# last port) and iverilog takes the first block. A race by IEEE 1364-2005 11; counterexample addr1 ==
+# addr2 with different data (spec 17 #66). Parmys wires both ports of one dual_port_ram, no priority.
+common/2r2w.v [Networks are NOT EQUIVALENT after simulation] two always blocks write one word (addr1 == addr2): later port wins here, no priority in Yosys 0.55; a race by IEEE 1364-2005 11, spec 17 #66
+common/1r2w.v [Networks are NOT EQUIVALENT after simulation] two always blocks write one word (en1, en2, addr1 == addr2): later port wins here, no priority in Yosys 0.55; a race by IEEE 1364-2005 11, spec 17 #66
