@@ -1,0 +1,9 @@
+.model top
+.inputs x z
+.outputs o p q
+.subckt kmod a=x b=z y=o
+.cname k
+.subckt leaf a=x b=z y=p
+.cname ki
+.subckt $or A[0]=x B[0]=z Y[0]=q
+.end

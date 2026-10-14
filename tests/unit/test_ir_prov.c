@@ -1148,6 +1148,128 @@ static void test_index_oom_sweep(void) {
     odin3_prov_index_destroy(ix);
 }
 
+/* --- odin3_prov_derive_hier (3A FL-10) ----------------------------------------------------- */
+
+static odin3_status derive_hier_status(odin3_pass_ctx *ctx, odin3_prov_list list, uint32_t hier,
+                                       odin3_prov_id *out) {
+    return odin3_prov_derive_hier(ctx, list, hier, out);
+}
+
+static odin3_prov_id derive_hier1(odin3_pass_ctx *ctx, odin3_prov_id parent, uint32_t hier) {
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          derive_hier_status(ctx, (odin3_prov_list){&parent, 1}, hier, &id));
+    TEST_ASSERT_TRUE(odin3_prov_valid(id));
+    return id;
+}
+
+static void test_derive_hier_sets_hier(void) {
+    odin3_pass_ctx rd = run_named("read_verilog");
+    odin3_prov_id src = source_at(&rd, loc_at("a.v", 1, 1), 0);
+    odin3_pass_ctx flat = run_named("flatten");
+    odin3_prov_begin_op(&flat);
+    uint32_t path = intern("top/u1/gen[3]");
+    odin3_prov_id id = derive_hier1(&flat, src, path);
+    const odin3_prov_record *rec = odin3_prov_get(design, id);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
+    TEST_ASSERT_EQUAL_UINT32(path, rec->hier);
+    TEST_ASSERT_EQUAL_UINT32(flat.run.v, rec->run.v);
+    TEST_ASSERT_EQUAL_UINT32(1, rec->op);
+    TEST_ASSERT_EQUAL_UINT32(1, rec->parents.count);
+    TEST_ASSERT_EQUAL_UINT32(src.v, rec->parents.ids[0].v);
+}
+
+static void test_derive_hier_identity(void) {
+    odin3_pass_ctx rd = run_named("read_verilog");
+    odin3_prov_id src = source_at(&rd, loc_at("a.v", 1, 1), 0);
+    odin3_pass_ctx flat = run_named("flatten");
+    odin3_prov_begin_op(&flat);
+    odin3_prov_id a1 = derive_hier1(&flat, src, intern("top/u1"));
+    odin3_prov_id a2 = derive_hier1(&flat, src, intern("top/u1"));
+    odin3_prov_id other = derive_hier1(&flat, src, intern("top/u2"));
+    TEST_ASSERT_EQUAL_UINT32(a1.v, a2.v);
+    TEST_ASSERT_NOT_EQUAL(a1.v, other.v);
+    TEST_ASSERT_EQUAL_UINT32(4, odin3_prov_end(design)); /* slot 0, src, a, b */
+}
+
+static void test_derive_hier_zero_is_derive(void) {
+    odin3_pass_ctx rd = run_named("read_verilog");
+    odin3_prov_id src = source_at(&rd, loc_at("a.v", 1, 1), 0);
+    odin3_pass_ctx flat = run_named("flatten");
+    odin3_prov_begin_op(&flat);
+    odin3_prov_id plain = derive1(&flat, src);
+    TEST_ASSERT_EQUAL_UINT32(plain.v, derive_hier1(&flat, src, 0).v);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_prov_get(design, plain)->hier);
+    TEST_ASSERT_NOT_EQUAL(plain.v, derive_hier1(&flat, src, intern("x")).v);
+}
+
+static void test_derive_hier_bad_args(void) {
+    odin3_pass_ctx rd = run_named("read_verilog");
+    odin3_prov_id src = source_at(&rd, loc_at("a.v", 1, 1), 0);
+    odin3_pass_ctx flat = run_named("flatten");
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          derive_hier_status(&flat, (odin3_prov_list){&src, 1}, 0, &id)); /* op 0 */
+    odin3_prov_begin_op(&flat);
+    uint32_t end = odin3_prov_end(design);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_ERR_INVALID_ARG,
+        derive_hier_status(&flat, (odin3_prov_list){&src, 1}, UINT32_MAX, &id)); /* not a string */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          derive_hier_status(&flat, (odin3_prov_list){&src, 0}, 0, &id));
+    odin3_prov_id missing = {UINT32_MAX};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          derive_hier_status(&flat, (odin3_prov_list){&missing, 1}, 0, &id));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          derive_hier_status(NULL, (odin3_prov_list){&src, 1}, 0, &id));
+    TEST_ASSERT_EQUAL_UINT32(end, odin3_prov_end(design)); /* nothing added */
+}
+
+static void test_derive_hier_dag(void) {
+    odin3_pass_ctx rd = run_named("read_verilog");
+    odin3_prov_id src = source_at(&rd, loc_at("a.v", 1, 1), 0);
+    odin3_pass_ctx flat = run_named("flatten");
+    odin3_prov_begin_op(&flat);
+    odin3_prov_id inst = derive_hier1(&flat, src, intern("top"));
+    odin3_prov_id parents[2] = {src, inst};
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, derive_hier_status(&flat, (odin3_prov_list){parents, 2}, intern("top/u1"), &id));
+    const odin3_prov_record *rec = odin3_prov_get(design, id);
+    TEST_ASSERT_EQUAL_UINT32(2, rec->parents.count);
+    for (uint32_t i = 0; i < rec->parents.count; i++) {
+        TEST_ASSERT_TRUE(rec->parents.ids[i].v < id.v); /* check rule 7: parents precede */
+    }
+}
+
+/* Out of memory: the store is unchanged by a failure, and the retry gives the record. */
+static void test_derive_hier_oom_sweep(void) {
+    odin3_prov_id id = {0};
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    uint32_t path = 0;
+    uint32_t failures = 0;
+    for (long fail_at = 0; fail_at < OOM_LIMIT && st != ODIN3_OK; fail_at++) {
+        fresh_design();
+        (void)fill_record_page();
+        odin3_pass_ctx flat = run_named("flatten");
+        odin3_prov_begin_op(&flat);
+        path = intern("top/u1");
+        exhaust_prov_arena(sizeof(odin3_prov_id));
+        odin3_prov_id parent = {1};
+        odin3_util_set_alloc_fail_after(fail_at);
+        st = derive_hier_status(&flat, (odin3_prov_list){&parent, 1}, path, &id);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st != ODIN3_OK) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+            TEST_ASSERT_EQUAL_UINT32(PROV_PAGE, odin3_prov_end(design));
+            failures++;
+        }
+    }
+    TEST_ASSERT_TRUE(failures > 0);
+    TEST_ASSERT_EQUAL_UINT32(PROV_PAGE, id.v);
+    TEST_ASSERT_EQUAL_UINT32(path, odin3_prov_get(design, id)->hier);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_pass_runs);
@@ -1178,5 +1300,11 @@ int main(void) {
     RUN_TEST(test_tombstone_arrays_oom);
     RUN_TEST(test_sources_oom_sweep);
     RUN_TEST(test_index_oom_sweep);
+    RUN_TEST(test_derive_hier_sets_hier);
+    RUN_TEST(test_derive_hier_identity);
+    RUN_TEST(test_derive_hier_zero_is_derive);
+    RUN_TEST(test_derive_hier_bad_args);
+    RUN_TEST(test_derive_hier_dag);
+    RUN_TEST(test_derive_hier_oom_sweep);
     return UNITY_END();
 }

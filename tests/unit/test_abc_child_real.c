@@ -171,10 +171,11 @@ static void write_blif_command_file(uint32_t run, char *cmd_path) {
     char cmds[N_COMMANDS][CMD_CAP];
     blif_commands(run, cmds);
     char text[N_COMMANDS * CMD_CAP];
-    text[0] = '\0';
+    size_t used = 0;
     for (size_t i = 0; i < N_COMMANDS; i++) {
-        strncat(text, cmds[i], sizeof text - strlen(text) - 1);
-        strncat(text, "\n", sizeof text - strlen(text) - 1);
+        int len = snprintf(text + used, sizeof text - used, "%s\n", cmds[i]);
+        TEST_ASSERT_TRUE(len >= 0 && (size_t)len < sizeof text - used);
+        used += (size_t)len;
     }
     run_path(run, "cmd", cmd_path, PATH_CAP);
     write_file(&(file_text){cmd_path, text});

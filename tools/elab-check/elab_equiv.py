@@ -5,7 +5,7 @@ Usage::
     elab-equiv --odin3 O --yosys Y --equiv-check E [--top T] [--mem-cap BYTES] [--keep DIR]
                [--allow-version V] [--a-only] [--unmap-enables] [--yosys-tribuf] [--techlib T]
                [--vtr-compat] [--lib FILE]... [--lib-nomem2reg] [--pass elab|proc] [--no-trio]
-               [--async2sync] FILE
+               [--async2sync] [--budget SECONDS] FILE
 
 Side A is Odin III's elaboration and side B Yosys's own, both through one Yosys back end, so x is
 resolved by the same ``opt`` on both and a difference is 2D's (or a documented divergence):
@@ -68,8 +68,18 @@ traceback or a ``systemd-run`` that cannot find the program), a bad argument; 3 
 (Task 26: Yosys died of a signal other than the cap's SIGKILL on side B, the Yosys read of the
 source, or while odin3 itself rejected the file: Yosys 0.55 segfaults on recursive instantiation,
 where 2D reports "recursive instantiation of 'top'"; neither a mismatch nor a 2D failure); 77
-skipped (an ASan child and no ``systemd-run``: it cannot be capped). A child killed by its cap is
-reported ``out of memory (cap 4G)``. A driver that gates on "differs" tests for exit 1 only.
+skipped (an ASan child and no ``systemd-run``: it cannot be capped); 4 unproven: Yosys side B, the
+oracle reading the source itself, was killed by its memory cap, so there is no netlist to compare
+(``unproven: Yosys side B exceeded its memory cap (4G)``): the oracle's size limit, no verdict on
+odin3 (2H: LU32PEEng, LU64PEEng, full/stereovision0 at the default 4G cap; the sweep lists them
+with the measured peak). Exit 4 is also equiv-check (the checker) killed by its cap
+(``unproven: equiv-check exceeded its memory cap (4G)``, 2H: arm_core); a host OOM-kill reads
+the same. Exit 4 is also ``--budget SECONDS`` running out: the wall time of all the
+Yosys and equiv-check runs together (never odin3's) is capped, a child still running at the end is
+killed, and the file is ``unproven: budget of 1800 s ran out (in Yosys side B)`` (2H: arm_core,
+whose two Yosys back ends take about 9 min each on a 167 MB netlist). Any other child killed by
+its cap (odin3, Yosys on side A or the RTLIL round trip) is exit 2, ``out of memory (cap 4G)``,
+and is never listable. A driver that gates on "differs" tests for exit 1 only.
 """
 
 from __future__ import annotations
@@ -80,6 +90,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,7 +100,8 @@ import memcap
 TOOL = "elab-equiv"
 GIB, MIB = 1 << 30, 1 << 20
 DEFAULT_CAP = 4 * GIB  # plan point (n): 4 GiB per child by default
-EXIT_EQUAL, EXIT_DIFFER, EXIT_ERROR, EXIT_ORACLE_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
+EXIT_EQUAL, EXIT_DIFFER, EXIT_ERROR, EXIT_ORACLE_CRASH = 0, 1, 2, 3
+EXIT_UNPROVEN, EXIT_SKIP = 4, 77
 SIGKILL = 9  # how a cgroup's MemoryMax ends a child
 CRASH_SIGNALS = (4, 6, 7, 8, 11)  # SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV
 SHELL_SIGNAL = 128  # a shell reports a signal as 128 + n
@@ -126,6 +138,11 @@ class EquivError(Exception):
     """A usage error or a failing child (exit code 2)."""
 
 
+class Unproven(EquivError):
+    """No verdict because a tool of the bridge is too big for its limit (exit code 4): Yosys side B
+    hit the memory cap, or the ``--budget`` ran out in a Yosys or equiv-check run."""
+
+
 class OracleCrash(Exception):
     """Yosys died of a signal (exit code 3): the oracle's bug, not a verdict on 2D."""
 
@@ -145,6 +162,8 @@ def signal_of(code: int) -> int | None:
 
 
 def killed_by_cap(code: int) -> bool:
+    """SIGKILL is the only cap signal, so a host OOM-kill or a manual kill of a child looks the
+    same: on Yosys side B (listable as unproven) that is indistinguishable from a cap kill."""
     return signal_of(code) == SIGKILL
 
 
@@ -172,6 +191,7 @@ class Options:
     async2sync: bool = False
     no_trio: bool = False
     vtr_compat: bool = False
+    budget: float | None = None
 
 
 def wants_directive(source: Path, flag: str) -> bool:
@@ -231,26 +251,50 @@ class Bridge:
     def __init__(self, opts: Options) -> None:
         self.opts = opts
         self.work = Path()
+        self.spent = 0.0  # wall seconds of the children the --budget bounds (never odin3's)
 
-    def child(self, argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
-        """Runs one child in the work directory under the cap; OSError is an error."""
+    def remaining(self, argv: Sequence[str], what: str) -> float | None:
+        """Seconds the ``--budget`` leaves for this child: none for odin3 (its own slowness is a
+        failure, never unproven) or without a budget. Unproven when nothing is left."""
+        budget = self.opts.budget
+        if budget is None or argv[0] == self.opts.odin3:
+            return None
+        left = budget - self.spent
+        if left <= 0:
+            raise Unproven(f"budget of {budget:g} s ran out (before {what})")
+        return left
+
+    def child(self, argv: Sequence[str], what: str = "") -> subprocess.CompletedProcess[str]:
+        """Runs one child in the work directory under the cap and the budget; OSError is an
+        error. A child still running when the ``--budget`` ends is killed: unproven."""
+        what = what or Path(argv[0]).name
+        timeout = self.remaining(argv, what)
+        began = time.monotonic()
         try:
-            return memcap.run(list(argv), self.opts.cap, capture_output=True, cwd=self.work)
+            return memcap.run(list(argv), self.opts.cap, capture_output=True, cwd=self.work,
+                              timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise Unproven(f"budget of {self.opts.budget:g} s ran out (in {what})") from exc
         except OSError as exc:
             raise EquivError(f"cannot run {argv[0]}: {exc}") from exc
         except ValueError as exc:
             raise EquivError(f"memcap refused {argv[0]}: {exc}") from exc
+        finally:
+            if timeout is not None:  # a budgeted child: odin3's time is never charged
+                self.spent += time.monotonic() - began
 
     def must(self, what: str, argv: Sequence[str], oracle: bool = False) -> None:
         """A child that has to exit 0. ``oracle``: it is Yosys reading the source itself, so a
         crash is the oracle's (OracleCrash)."""
-        done = self.child(argv)
+        done = self.child(argv, what)
         code = done.returncode
         if code == 0:
             return
         if oracle and crashed(code):
             raise OracleCrash(f"{what} crashed (signal {signal_of(code)})")
         if killed_by_cap(code):
+            if oracle:  # side B is the oracle reading the source: its size limit, not odin3's
+                raise Unproven(f"{what} exceeded its memory cap ({format_cap(self.opts.cap)})")
             raise EquivError(f"{what} failed: out of memory (cap {format_cap(self.opts.cap)})")
         raise EquivError(f"{what} failed (exit {code}):\n"
                          f"{tail((done.stdout or '') + (done.stderr or ''))}")
@@ -318,11 +362,13 @@ class Bridge:
                   [self.opts.yosys, "-p", "read_rtlil a.il; write_rtlil b.il"])
 
     def equivalence(self) -> int:
-        done = self.child([self.opts.equiv_check, "a.blif", "b.blif"])
+        done = self.child([self.opts.equiv_check, "a.blif", "b.blif"], "equiv-check")
         name = self.opts.source.name
         if done.returncode == 0:
             print(f"{TOOL}: {name}: equivalent")
             return EXIT_EQUAL
+        if killed_by_cap(done.returncode):  # the checker's size limit, like an ABC dsec timeout
+            raise Unproven(f"equiv-check exceeded its memory cap ({format_cap(self.opts.cap)})")
         output = tail((done.stdout or "") + (done.stderr or ""))
         if done.returncode == 1 and NOT_EQUIVALENT_RE.search(done.stdout or ""):
             print(f"{TOOL}: {name}: NOT equivalent\n{output}")
@@ -396,6 +442,9 @@ def parse(argv: Sequence[str] | None) -> Options:
     ap.add_argument("--vtr-compat", action="store_true",
                     help="side A reads with --vtr-compat (the VTR flow's setting: a non-constant "
                          "initial is an assign, as in Yosys/Parmys)")
+    ap.add_argument("--budget", type=float, metavar="SECONDS",
+                    help="wall seconds for all Yosys and equiv-check runs together (not odin3's): "
+                         "when they run out the file is unproven, exit 4 (default: none)")
     ap.add_argument("--pass", dest="pass_name", choices=("elab", "proc"), default="elab",
                     help="side A stops after elaboration (elab, default) or after proc")
     ap.add_argument("--no-trio", action="store_true",
@@ -409,7 +458,7 @@ def parse(argv: Sequence[str] | None) -> Options:
         techlib=str(Path(args.techlib).resolve()) if args.techlib else None,
         yosys_tribuf=args.yosys_tribuf, libs=tuple(str(Path(lib).resolve()) for lib in args.lib),
         lib_nomem2reg=args.lib_nomem2reg, pass_name=args.pass_name, async2sync=args.async2sync,
-        no_trio=args.no_trio, vtr_compat=args.vtr_compat)
+        no_trio=args.no_trio, vtr_compat=args.vtr_compat, budget=args.budget)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -422,6 +471,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OracleCrash as exc:
         print(f"{TOOL}: oracle crash: {exc}")
         return EXIT_ORACLE_CRASH
+    except Unproven as exc:
+        print(f"{TOOL}: unproven: {exc}")
+        return EXIT_UNPROVEN
     except EquivError as exc:
         print(f"{TOOL}: error: {exc}", file=sys.stderr)
         return EXIT_ERROR

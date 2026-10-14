@@ -2110,23 +2110,28 @@ static void test_latch_const_clock(void) {
                                       "the constant 1; VPR will never clock it\n",
                                       dff.v)),
         tc.log.data);
-    bvt_free(&tc); /* a Parmys gnd (constant 0) and unconn (point (j)) as clocks */
-    read_ok(".model top\n.inputs d\n.outputs q p\n.names gnd\n.names unconn\n"
-            ".latch d q re gnd 2\n.latch d p re unconn 2\n.end\n",
-            false);
-    TEST_ASSERT_EQUAL_STRING(".inputs d\n.outputs q p\n.names gnd\n.names unconn\n"
-                             ".latch d q re gnd 2\n.latch d p re unconn 2\n.end\n",
+    bvt_free(&tc); /* a Parmys gnd (constant 0) as the clock */
+    read_ok(".model top\n.inputs d\n.outputs q\n.names gnd\n.latch d q re gnd 2\n.end\n", false);
+    TEST_ASSERT_EQUAL_STRING(".inputs d\n.outputs q\n.names gnd\n.latch d q re gnd 2\n.end\n",
                              write_vtr());
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data, "warn: write_blif: --vtr: t.blif:6: $_DFF_P_ "
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data, "warn: write_blif: --vtr: t.blif:5: $_DFF_P_ "
                                                      "'$c"),
                                  tc.log.data);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1,
                                      count_of(tc.log.data, "': clock is the constant 0; VPR "
                                                            "will never clock it\n"),
                                      tc.log.data);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
-        1, count_of(tc.log.data, "': clock is 'unconn'; VPR will never clock it\n"), tc.log.data);
     TEST_ASSERT_EQUAL_UINT32(0, count_of(tc.log.data, "feeds")); /* a clock is no logic pin */
+}
+
+/* A latch clocked from `unconn` (class U) is E3b: VPR reads it but its full flow aborts on
+ * `clk_pin` (3E-4 finding), so a written file could never be routed. */
+static void test_e3b_latch_clock_unconn(void) {
+    read_ok(".model top\n.inputs d\n.outputs p\n.names unconn\n.latch d p re unconn 2\n.end\n",
+            false);
+    expect_vtr_refused(line_of("write_blif: --vtr: t.blif:5: $_DFF_P_ '$c%u': clock input 'C' is "
+                               "unconnected or x",
+                               node_of("$_DFF_P_")));
 }
 
 /* Pin `port` (bit 0) of node onto net. */
@@ -2156,7 +2161,8 @@ static void test_unconnected_pins(void) {
     TEST_ASSERT_EQUAL_UINT32(1, vtr_report().x_to_gnd);
 }
 
-/* Point (j) on a hard cell's clock input: a constant (written gnd) and Parmys's unconn. */
+/* Point (j) on a hard cell's clock input: a constant is written gnd with a warning; Parmys's
+ * `unconn` is E3b (3E-4: VPR's full flow aborts on it). */
 static void test_hard_clock_warnings(void) {
     read_ok(RAM4, true);
     uint32_t ram = node_of("single_port_ram");
@@ -2174,14 +2180,9 @@ static void test_hard_clock_warnings(void) {
     read_ok(".model top\n.inputs d a w\n.outputs o\n.names unconn\n"
             ".subckt single_port_ram clk=unconn data[0]=d addr[0]=a we=w out[0]=o\n.end\n",
             true);
-    write_vtr();
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, " clk=unconn "), out.data);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
-        1,
-        count_of(tc.log.data, line_of("warn: write_blif: --vtr: t.blif:5: single_port_ram '$c%u': "
-                                      "clock is 'unconn'; VPR will never clock it\n",
-                                      node_of("single_port_ram"))),
-        tc.log.data);
+    expect_vtr_refused(line_of("write_blif: --vtr: t.blif:5: single_port_ram '$c%u': clock input "
+                               "'clk' is unconnected or x",
+                               node_of("single_port_ram")));
 }
 
 /* One 1-input .names on a with the rows given (blank-separated lines) written as want. */
@@ -3110,6 +3111,7 @@ static void run_task_3_and_more(void) {
     RUN_TEST(test_e3_no_clock);
     RUN_TEST(test_e3b_ram_clock_x);
     RUN_TEST(test_e3b_ram_clock_open);
+    RUN_TEST(test_e3b_latch_clock_unconn);
     RUN_TEST(test_e4_tristate);
     RUN_TEST(test_e5_word_cell);
     RUN_TEST(test_e6_not_hard);

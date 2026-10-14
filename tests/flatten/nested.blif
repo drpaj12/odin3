@@ -1,0 +1,30 @@
+# nested.blif - 3A flatten fixture: three levels (top -> mid -> leaf), two instances of mid, an
+# unnamed instance (.subckt without .cname), a named and an unnamed leaf cover.
+.model top
+.inputs a b
+.outputs y z w
+.subckt mid i=a o=y
+.cname ua
+.subckt mid i=b o=z
+.cname ub
+.subckt leaf p=a q=w
+.end
+
+.model mid
+.inputs i
+.outputs o
+.subckt leaf p=i q=t1
+.cname l1
+.subckt leaf p=t1 q=o
+.cname l2
+.end
+
+.model leaf
+.inputs p
+.outputs q
+.names p n1
+0 1
+.cname inv
+.names n1 q
+1 1
+.end

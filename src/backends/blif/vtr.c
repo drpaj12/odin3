@@ -556,6 +556,12 @@ static bool is_x(odin3_blif_src_class cls) {
     return cls == ODIN3_BLIF_SRC_X || cls == ODIN3_BLIF_SRC_UNDRIVEN;
 }
 
+/* A clock net VPR cannot use: x, undriven or `unconn` (class U). A constant clock is accepted (a
+ * warning); an `unconn` one is read by VPR but aborts its full flow (`clk_pin` assertion, 3E-4). */
+static bool is_open_clock(odin3_blif_src_class cls) {
+    return is_x(cls) || cls == ODIN3_BLIF_SRC_U;
+}
+
 /* Counts a logic input (a .names input or a .latch D) of class cls (§9.2). */
 static void count_logic_pin(vtr_walk *walk, odin3_blif_src_class cls) {
     if (is_x(cls)) {
@@ -565,10 +571,16 @@ static void count_logic_pin(vtr_walk *walk, odin3_blif_src_class cls) {
     }
 }
 
-/* E3 for a C that is unconnected, undriven or x; else one .latch. */
+static odin3_status refuse_clock(vtr_walk *walk, odin3_node_id node, uint32_t port);
+
+/* E3 for a C that is unconnected, undriven or x; E3b for a C on `unconn`; else one .latch. */
 static odin3_status check_latch(vtr_walk *walk, odin3_node_id node) {
-    if (is_x(pin_class(walk, node, LATCH_C))) {
+    odin3_blif_src_class clock = pin_class(walk, node, LATCH_C);
+    if (is_x(clock)) {
         return refuse_cell(walk, node, E3_TEXT);
+    }
+    if (is_open_clock(clock)) {
+        return refuse_clock(walk, node, LATCH_C);
     }
     walk->report->latches++;
     count_logic_pin(walk, pin_class(walk, node, LATCH_D));
@@ -681,13 +693,16 @@ static odin3_status check_params(vtr_walk *walk, odin3_node_id node, bool *refus
     return st;
 }
 
-/* True when a pin of port `port` of node has class X or UNDRIVEN; *count adds each such pin. */
-static bool port_has_x(const vtr_walk *walk, odin3_node_id node, uint32_t port, uint32_t *count) {
+/* True when a pin of port `port` of node has class X or UNDRIVEN (also U when `clock`); *count adds
+ * each such pin. */
+static bool port_has_x(const vtr_walk *walk, odin3_node_id node, uint32_t port, bool clock,
+                       uint32_t *count) {
     odin3_pinslice pins = odin3_node_port(walk->top, node, port);
     bool any = false;
     for (uint32_t k = 0; k < pins.count; k++) {
         odin3_net_id net = odin3_pin_net(walk->top, (odin3_pin_id){pins.first.v + k});
-        if (is_x(odin3_blif_vtr_net_class(walk->top, net))) {
+        odin3_blif_src_class cls = odin3_blif_vtr_net_class(walk->top, net);
+        if (clock ? is_open_clock(cls) : is_x(cls)) {
             any = true;
             (*count)++;
         }
@@ -695,13 +710,8 @@ static bool port_has_x(const vtr_walk *walk, odin3_node_id node, uint32_t port, 
     return any;
 }
 
-/* E3b for a clock input (§8.2) that is unconnected, undriven or x; *refused when it applies. */
-static odin3_status check_clock(vtr_walk *walk, odin3_node_id node, uint32_t port, bool *refused) {
-    uint32_t bad = 0;
-    if (!port_has_x(walk, node, port, &bad)) {
-        return ODIN3_OK;
-    }
-    *refused = true;
+/* E3b for port `port` of node (logged below the cap). */
+static odin3_status refuse_clock(vtr_walk *walk, odin3_node_id node, uint32_t port) {
     if (!refusal_logged(walk)) {
         return ODIN3_OK;
     }
@@ -711,6 +721,17 @@ static odin3_status check_clock(vtr_walk *walk, odin3_node_id node, uint32_t por
     odin3_status st = odin3_strbuf_appendf(&walk->text, "clock input '%s' is unconnected or x",
                                            def->ports[port].name);
     return st == ODIN3_OK ? log_cell(walk, node, walk->text.data) : st;
+}
+
+/* E3b for a clock input (§8.2) that is unconnected, undriven, x or `unconn` (3E-4: VPR's full flow
+ * aborts on an `unconn` clock); *refused when it applies. */
+static odin3_status check_clock(vtr_walk *walk, odin3_node_id node, uint32_t port, bool *refused) {
+    uint32_t bad = 0;
+    if (!port_has_x(walk, node, port, true, &bad)) {
+        return ODIN3_OK;
+    }
+    *refused = true;
+    return refuse_clock(walk, node, port);
 }
 
 /* A hard cell of a loaded library: E11, then E3b per clock input; else one .subckt, whose x,
@@ -729,7 +750,7 @@ static odin3_status check_hard(vtr_walk *walk, odin3_node_id node, const odin3_t
         if (lib->ports[i].clock) {
             st = check_clock(walk, node, i, &refused);
         } else {
-            (void)port_has_x(walk, node, i, &x_inputs);
+            (void)port_has_x(walk, node, i, false, &x_inputs);
         }
     }
     if (st == ODIN3_OK && !refused) {
@@ -968,10 +989,10 @@ static odin3_blif_src_class clock_class(const vtr_walk *walk, odin3_node_id node
 }
 
 /* The warning for a clock pin (a $_DFF_P_'s C, or bit 0 of a hard cell's clock input `port`,
- * NULL for the latch) of class cls: a constant (§7 item 3) or `unconn` (point (j)). */
+ * NULL for the latch) of class cls: a constant (§7 item 3). An `unconn` clock is E3b. */
 static odin3_status warn_clock(vtr_walk *walk, odin3_node_id node, const char *port,
                                odin3_blif_src_class cls) {
-    if (cls != ODIN3_BLIF_SRC_0 && cls != ODIN3_BLIF_SRC_1 && cls != ODIN3_BLIF_SRC_U) {
+    if (cls != ODIN3_BLIF_SRC_0 && cls != ODIN3_BLIF_SRC_1) {
         return ODIN3_OK;
     }
     odin3_status st = cell_head(walk, node);
@@ -979,10 +1000,7 @@ static odin3_status warn_clock(vtr_walk *walk, odin3_node_id node, const char *p
         return st;
     }
     char value = cls == ODIN3_BLIF_SRC_1 ? '1' : '0';
-    if (cls == ODIN3_BLIF_SRC_U) {
-        odin3_log(ODIN3_LOG_WARN, VTR_PREFIX "%s: clock is 'unconn'%s", walk->head.data,
-                  NEVER_CLOCKED);
-    } else if (port == NULL) {
+    if (port == NULL) {
         odin3_log(ODIN3_LOG_WARN, VTR_PREFIX "%s: clock is the constant %c%s", walk->head.data,
                   value, NEVER_CLOCKED);
     } else {
