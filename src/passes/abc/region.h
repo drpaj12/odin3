@@ -21,10 +21,11 @@ typedef struct odin3_abc_run odin3_abc_run;
 
 /* What a node is to ABC (§5.1). */
 typedef enum odin3_abc_role {
-    ODIN3_ABC_ROLE_CUT = 0, /* never changed: its outputs are CIs, its inputs COs when soft drives them */
-    ODIN3_ABC_ROLE_SOFT,    /* logic ABC maps: $sop, $lut, parameterless gates */
-    ODIN3_ABC_ROLE_REG,     /* a flip-flop of the run's domain */
-    ODIN3_ABC_ROLE_CONST    /* a constant generator (const_value 0, 1, x or z) */
+    ODIN3_ABC_ROLE_CUT =
+        0, /* never changed: its outputs are CIs, its inputs COs when soft drives them */
+    ODIN3_ABC_ROLE_SOFT, /* logic ABC maps: $sop, $lut, parameterless gates */
+    ODIN3_ABC_ROLE_REG,  /* a flip-flop of the run's domain */
+    ODIN3_ABC_ROLE_CONST /* a constant generator (const_value 0, 1, x or z) */
 } odin3_abc_role;
 
 /* A clock domain (§5.3). */
@@ -89,7 +90,7 @@ void odin3_abc_domains_free(odin3_vec *domains);
  * NONE. More than the cap (odin3_abc_run_limits_get()->domains) is `abc: module '<m>' has <N> clock
  * domains; at most <cap>` (PARSE, logged, domains left empty). NO_MEMORY (not logged).
  */
-odin3_status odin3_abc_domains(odin3_abc_run *run, odin3_module *module, odin3_vec *domains);
+odin3_status odin3_abc_domains(odin3_abc_run *run, const odin3_module *module, odin3_vec *domains);
 
 /*
  * The text of a domain as the INFO lines show it: `clock '<net>' posedge|negedge`, `global clock`

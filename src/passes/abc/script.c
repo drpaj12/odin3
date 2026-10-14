@@ -163,10 +163,10 @@ static uint32_t lowered(uint32_t value, uint32_t cap) {
 }
 
 /* The pass-level caps (Task 14). */
-static const odin3_abc_run_limits k_run_default_limits = {
-    .domains = ODIN3_ABC_MAX_DOMAINS,
-    .aig_objs = ODIN3_ABC_MAX_AIG_OBJS,
-    .namemap_objs = ODIN3_ABC_NAMEMAP_MAX_OBJS};
+static const odin3_abc_run_limits k_run_default_limits = {.domains = ODIN3_ABC_MAX_DOMAINS,
+                                                          .aig_objs = ODIN3_ABC_MAX_AIG_OBJS,
+                                                          .namemap_objs =
+                                                              ODIN3_ABC_NAMEMAP_MAX_OBJS};
 static odin3_abc_run_limits run_limits = {.domains = ODIN3_ABC_MAX_DOMAINS,
                                           .aig_objs = ODIN3_ABC_MAX_AIG_OBJS,
                                           .namemap_objs = ODIN3_ABC_NAMEMAP_MAX_OBJS};

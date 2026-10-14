@@ -15,9 +15,9 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stddef.h>
-#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -129,7 +129,8 @@ static void test_check_and_message(void) {
     odin3_strbuf_free(&msg);
 }
 
-/* Without the hooks the limit is 60% of the physical memory sysconf reports (an empty fake tree). */
+/* Without the hooks the limit is 60% of the physical memory sysconf reports (an empty fake tree).
+ */
 static void test_limit_default(void) {
     odin3_budget_test_set_limit(0);
     odin3_budget_test_set_cgroup_root(ODIN3_BUDGET_OUT "/empty", "/a.slice/b.scope");

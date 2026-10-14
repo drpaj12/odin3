@@ -32,6 +32,10 @@ enum {
     FILE_NAME_BYTES = 32,
     DIR_PERMISSIONS = 0777,
     DOMAIN_TEXT_BYTES = 160,
+    CELL_TEXT_BYTES = 192,
+    K_TEXT_BYTES = 16,
+    FIRST_PRINTABLE = 0x20, /* below it, a byte is a control character */
+    DEL_BYTE = 0x7F,
     SHA_SHOWN = 16,
     COMMIT_SHOWN = 12,
     AIG_OBJ_WORD_BYTES = 8 /* the exchange arrays: one 8-byte entry per AIG object (point (r)) */
@@ -78,10 +82,10 @@ odin3_status odin3_abc_run_path(const odin3_abc_run *run, uint32_t file_kind, ch
 
 /* Removes the files a mkdtemp directory holds, then the directory (the pass made them all). */
 static void remove_temp_dir(const odin3_abc_run *run) {
-    for (uint32_t r = 0; r < run->run_no; r++) {
+    for (uint32_t number = 0; number < run->run_no; number++) {
         for (uint32_t kind = ODIN3_ABC_FILE_IN; kind <= ODIN3_ABC_FILE_OUT; kind++) {
             char path[ODIN3_ABC_DIR_BYTES + FILE_NAME_BYTES];
-            (void)snprintf(path, sizeof path, "%s/abc%" PRIu32 ".%s", run->dir, r,
+            (void)snprintf(path, sizeof path, "%s/abc%" PRIu32 ".%s", run->dir, number,
                            k_file_suffix[kind]);
             (void)unlink(path);
         }
@@ -114,8 +118,8 @@ void odin3_abc_run_destroy(odin3_abc_run *run) {
 
 odin3_status odin3_abc_check_views(const odin3_design *design) {
     odin3_design *mut = (odin3_design *)design;
-    for (uint32_t m = 1; m < odin3_design_module_end(design); m++) {
-        const odin3_module *module = odin3_module_get(mut, (odin3_module_id){m});
+    for (uint32_t mod_id = 1; mod_id < odin3_design_module_end(design); mod_id++) {
+        const odin3_module *module = odin3_module_get(mut, (odin3_module_id){mod_id});
         for (uint32_t id = 1; id < odin3_module_node_end(module); id++) {
             odin3_node_id node = {id};
             const odin3_celltype_def *def =
@@ -123,7 +127,7 @@ odin3_status odin3_abc_check_views(const odin3_design *design) {
                     ? odin3_celltype_get(design, odin3_node_type(module, node))
                     : NULL;
             if (def != NULL && def->gran == ODIN3_GRAN_WORD) {
-                char cell[192];
+                char cell[CELL_TEXT_BYTES];
                 odin3_abc_node_text(module, node, cell, sizeof cell);
                 odin3_log(ODIN3_LOG_ERROR,
                           "abc: module '%s' is not in the netlist view: %s '%s'; run lower first",
@@ -140,8 +144,9 @@ odin3_status odin3_abc_check_views(const odin3_design *design) {
 
 /* True when path holds a byte the BLIF exchange cannot carry (I12). */
 static bool dir_has_bad_byte(const char *path) {
-    for (const unsigned char *c = (const unsigned char *)path; *c != '\0'; c++) {
-        if (*c < 0x20U || *c == 0x7FU || *c == '"' || *c == '\'' || *c == ';' || *c == '#') {
+    for (const unsigned char *cur = (const unsigned char *)path; *cur != '\0'; cur++) {
+        if (*cur < FIRST_PRINTABLE || *cur == DEL_BYTE || *cur == '"' || *cur == '\'' ||
+            *cur == ';' || *cur == '#') {
             return true;
         }
     }
@@ -234,7 +239,7 @@ static odin3_status make_given_dir(odin3_abc_run *run) {
 }
 
 static void log_start(const odin3_abc_run *run) {
-    char k_text[16];
+    char k_text[K_TEXT_BYTES];
     if (run->opts.lut_k != 0) {
         (void)snprintf(k_text, sizeof k_text, "%u", (unsigned)run->opts.lut_k);
     } else {
@@ -249,7 +254,8 @@ static void log_start(const odin3_abc_run *run) {
 
 /* Steps 3 to 7 of the start-up order; step 1 and 2 are in odin3_abc_pass_run. */
 static odin3_status startup_checks(odin3_abc_run *run) {
-    odin3_status st = odin3_abc_exchange_choice(&run->opts, &run->exchange);
+    odin3_status st = run->opts.via_blif != NULL ? choose_dir(run) : ODIN3_OK; /* I12 */
+    st = st == ODIN3_OK ? odin3_abc_exchange_choice(&run->opts, &run->exchange) : st;
     st = st == ODIN3_OK ? odin3_abc_choose_script(run->design, &run->opts, run->arena, &run->choice)
                         : st;
     st = st == ODIN3_OK ? load_script(run) : st;
@@ -304,9 +310,10 @@ static void log_module_info(const odin3_abc_run *run, const odin3_abc_region *re
 }
 
 /* The byte budget and the AIG cap, before the engine opens (point (r), §7.8). */
-static odin3_status check_caps(odin3_abc_run *run, const odin3_abc_region *region) {
+static odin3_status check_caps(const odin3_abc_run *run, const odin3_abc_region *region) {
     uint64_t per_obj = ODIN3_ABC_BYTES_PER_AIG_OBJ + AIG_OBJ_WORD_BYTES;
-    uint64_t extra = region->objs_est > UINT64_MAX / per_obj ? UINT64_MAX : region->objs_est * per_obj;
+    uint64_t extra =
+        region->objs_est > UINT64_MAX / per_obj ? UINT64_MAX : region->objs_est * per_obj;
     uint32_t cap = odin3_abc_run_limits_get()->aig_objs;
     if (region->objs_est > cap) {
         char domain[DOMAIN_TEXT_BYTES];
@@ -362,8 +369,8 @@ static odin3_status run_module(odin3_abc_run *run, uint32_t id) {
     run->module = odin3_module_get(run->design, run->module_id);
     odin3_vec domains;
     odin3_status st = odin3_abc_domains(run, run->module, &domains);
-    for (size_t d = 0; st == ODIN3_OK && d < domains.len; d++) {
-        st = run_domain(run, odin3_vec_at(&domains, d), d == 0);
+    for (size_t dom = 0; st == ODIN3_OK && dom < domains.len; dom++) {
+        st = run_domain(run, odin3_vec_at(&domains, dom), dom == 0);
     }
     odin3_abc_domains_free(&domains);
     return st;

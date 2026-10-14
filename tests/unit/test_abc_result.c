@@ -14,7 +14,8 @@
 
 enum { CHAIN = 100000, OOM_LIMIT = 2000 };
 
-void setUp(void) {}
+void setUp(void) {
+}
 
 void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
@@ -67,7 +68,7 @@ static void test_fold_constant_one_reader(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_result_fold(&res));
     TEST_ASSERT_EQUAL_UINT32(1, res.n_luts);
     TEST_ASSERT_EQUAL_UINT32(1, u32(&res.lut_k, 0));
-    TEST_ASSERT_EQUAL_UINT32(3, u32(&res.fanins, 0)); /* the other input */
+    TEST_ASSERT_EQUAL_UINT32(3, u32(&res.fanins, 0));                    /* the other input */
     TEST_ASSERT_EQUAL_HEX64(0x2, ((const uint64_t *)res.truth.data)[0]); /* identity */
     TEST_ASSERT_EQUAL_UINT32(odin3_abc_result_first_lut(&res), u32(&res.co_driver, 0));
     odin3_abc_result_free(&res);
@@ -161,8 +162,7 @@ static void test_fold_chain_is_linear(void) {
     push32(&res.co_driver, prev);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_result_fold(&res));
     TEST_ASSERT_EQUAL_UINT32(CHAIN, res.n_luts);
-    TEST_ASSERT_EQUAL_UINT32(odin3_abc_result_first_lut(&res) + CHAIN - 1U,
-                             u32(&res.co_driver, 0));
+    TEST_ASSERT_EQUAL_UINT32(odin3_abc_result_first_lut(&res) + CHAIN - 1U, u32(&res.co_driver, 0));
     odin3_abc_result_free(&res);
 }
 

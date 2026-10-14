@@ -41,16 +41,16 @@ static void t_sim(const odin3_sim_cell *cell) {
 
 static const odin3_port_def k_t1_ports[] = {{"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
                                             {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false}};
-static const odin3_param_def k_t_params[] = {{"P", ODIN3_VAL_INT, {ODIN3_VAL_INT, 0, NULL, 0, 0, 0}}};
-static const odin3_port_def k_t7_ports[] = {
-    {"A0", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
-    {"A1", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
-    {"A2", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
-    {"A3", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
-    {"A4", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
-    {"A5", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
-    {"A6", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
-    {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false}};
+static const odin3_param_def k_t_params[] = {
+    {"P", ODIN3_VAL_INT, {ODIN3_VAL_INT, 0, NULL, 0, 0, 0}}};
+static const odin3_port_def k_t7_ports[] = {{"A0", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+                                            {"A1", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+                                            {"A2", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+                                            {"A3", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+                                            {"A4", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+                                            {"A5", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+                                            {"A6", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+                                            {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false}};
 static const odin3_celltype_def k_param_gate = {
     "$t_param", ODIN3_GRAN_BIT, 0, k_t1_ports, 2, k_t_params, 1, NULL, NULL, t_sim, NULL};
 static const odin3_celltype_def k_wide_gate = {
@@ -84,8 +84,8 @@ void tearDown(void) {
 
 static void new_module(const char *name) {
     odin3_module_id mid = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, afx_intern(design, name),
-                                                        (odin3_prov_id){0}, &mid));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_create(design, afx_intern(design, name), (odin3_prov_id){0}, &mid));
     mod = odin3_module_get(design, mid);
 }
 
@@ -143,7 +143,7 @@ static bool name_in(const char *name, const char *const *list, size_t n) {
 
 /* Every registry type: the role follows §5.1's rule. */
 static void test_every_registry_type(void) {
-    static const char *const k_soft[] = {"$lut",   "$_BUF_",  "$_NOT_", "$_AND_", "$_OR_",
+    static const char *const k_soft[] = {"$lut",   "$_BUF_",  "$_NOT_", "$_AND_",  "$_OR_",
                                          "$_XOR_", "$_NAND_", "$_NOR_", "$_XNOR_", "$_MUX_"};
     static const char *const k_const[] = {"$_CONST0_", "$_CONST1_", "$_CONSTX_", "$_CONSTZ_",
                                           "$sop"};
@@ -165,8 +165,7 @@ static void test_every_registry_type(void) {
     start();
     build(0);
     for (uint32_t i = 0; i < count; i++) {
-        const char *name =
-            odin3_celltype_get(design, odin3_node_type(mod, nodes[i]))->name;
+        const char *name = odin3_celltype_get(design, odin3_node_type(mod, nodes[i]))->name;
         uint32_t want = ODIN3_ABC_ROLE_CUT;
         if (name_in(name, k_soft, sizeof k_soft / sizeof k_soft[0])) {
             want = ODIN3_ABC_ROLE_SOFT;
@@ -465,21 +464,21 @@ static void test_cut_counts(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "read_techlib", odin3_bytes_cstr(lib)));
     char path[AFX_PATH];
     afx_path(path, "cuts.blif");
-    afx_write(path,
-              ".model m\n.inputs a b clk\n.outputs y\n"
-              ".subckt multiply a[0]=a b[0]=b out[0]=m0\n"
-              ".subckt sub x=a y=s0\n"
-              ".latch a l0 ah clk 0\n"
-              ".names a b k0\n11 1\n"
-              ".names m0 s0 l0 k0 y\n1111 1\n.end\n"
-              ".model sub\n.inputs x\n.outputs y\n.names x y\n1 1\n.end\n");
+    afx_write(path, ".model m\n.inputs a b clk\n.outputs y\n"
+                    ".subckt multiply a[0]=a b[0]=b out[0]=m0\n"
+                    ".subckt sub x=a y=s0\n"
+                    ".latch a l0 ah clk 0\n"
+                    ".names a b k0\n11 1\n"
+                    ".names m0 s0 l0 k0 y\n1111 1\n.end\n"
+                    ".model sub\n.inputs x\n.outputs y\n.names x y\n1 1\n.end\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_read(design, path));
     mod = afx_top(design);
     odin3_node_id kept = {0};
     for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
         const odin3_celltype_def *def =
             odin3_celltype_get(design, odin3_node_type(mod, (odin3_node_id){id}));
-        if (strcmp(def->name, "$sop") == 0 && odin3_node_pins(mod, (odin3_node_id){id}).count == 3) {
+        if (strcmp(def->name, "$sop") == 0 &&
+            odin3_node_pins(mod, (odin3_node_id){id}).count == 3) {
             kept = (odin3_node_id){id}; /* the 2-input AND, driving k0 */
         }
     }

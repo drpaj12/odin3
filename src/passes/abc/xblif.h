@@ -15,6 +15,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* The absolute paths of a run's input and output BLIF (what the commands name). */
+typedef struct odin3_abc_paths {
+    const char *in;
+    const char *out;
+} odin3_abc_paths;
+
 /*
  * Writes §6.2's input for the current region of run (run->module, run->region) to path: `.model
  * o3abc`, `.inputs`, `.outputs`, the soft cells in region order (a $sop keeps its rows; gates and
@@ -35,12 +41,12 @@ odin3_status odin3_abc_xblif_write(odin3_abc_run *run, const odin3_abc_region *r
  */
 uint32_t odin3_abc_xblif_command_count(const odin3_abc_run *run);
 odin3_status odin3_abc_xblif_command(const odin3_abc_run *run, uint32_t index,
-                                     const char *in_abs, const char *out_abs, odin3_strbuf *out,
+                                     const odin3_abc_paths *paths, odin3_strbuf *out,
                                      const odin3_abc_cmd **src);
 
 /* All commands, one per line (this is abc<r>.cmd). */
-odin3_status odin3_abc_xblif_commands(const odin3_abc_run *run, const char *in_abs,
-                                      const char *out_abs, odin3_strbuf *out);
+odin3_status odin3_abc_xblif_commands(const odin3_abc_run *run, const odin3_abc_paths *paths,
+                                      odin3_strbuf *out);
 
 /*
  * Reads ABC's output at path with 1C's reader into a scratch design and fills *out (initialised

@@ -35,8 +35,8 @@ void setUp(void) {
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
     odin3_module_id mid = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"),
-                                                        (odin3_prov_id){0}, &mid));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
     odin3_module *mod = odin3_module_get(design, mid);
     odin3_net_id a = afx_port(design, mod, "a", ODIN3_DIR_IN);
     odin3_net_id b = afx_port(design, mod, "b", ODIN3_DIR_IN);
@@ -65,7 +65,7 @@ static void run_dir(char *dir, const char *name) {
 }
 
 static void expect_file(const char *dir, const char *name) {
-    char path[AFX_PATH];
+    char path[AFX_JOIN];
     (void)snprintf(path, sizeof path, "%s/%s", dir, name);
     TEST_ASSERT_TRUE_MESSAGE(afx_exists(path), path);
 }
@@ -84,7 +84,7 @@ static void test_files_commands_and_logs(void) {
     expect_file(dir, "abc0.cmd");
     expect_file(dir, "abc0.log");
     expect_file(dir, "abc0.out.blif");
-    char want[3 * AFX_PATH];
+    char want[4 * AFX_PATH];
     (void)snprintf(want, sizeof want,
                    "read \"%s/abc0.in.blif\"\nstrash\nifraig -v\nscorr -v\ndc2 -v\ndch -f\nif -K 6 "
                    "-v\nmfs2 -v\nprint_stats\nwrite_hie \"%s/abc0.in.blif\" "
@@ -92,7 +92,7 @@ static void test_files_commands_and_logs(void) {
                    dir, dir, dir);
     TEST_ASSERT_EQUAL_STRING(want, odin3_abc_fake_last_commands());
     TEST_ASSERT_EQUAL_UINT32(1, odin3_abc_fake_open_count());
-    char path[AFX_PATH];
+    char path[AFX_JOIN];
     (void)snprintf(path, sizeof path, "%s/abc0.cmd", dir);
     TEST_ASSERT_EQUAL_STRING(want, afx_slurp(path));
     /* ABC's lines: DEBUG, except the printing command's, which is INFO */
@@ -142,7 +142,7 @@ static void expect_engine_failure(const char *args, const char *line) {
 static void test_failure_texts(void) {
     char dir[AFX_PATH];
     char args[2 * AFX_PATH];
-    char line[2 * AFX_PATH];
+    char line[4 * AFX_PATH];
     run_dir(dir, "run2");
     (void)snprintf(args, sizeof args, "--via-blif %s", dir);
     odin3_abc_fake_fail_on("strash", (odin3_abc_fail){ODIN3_ABC_FAIL_COMMAND, 1, ""});
@@ -158,24 +158,28 @@ static void test_failure_texts(void) {
     expect_engine_failure(args, "abc: ABC assertion failed during 'dch -f': abc.c:1: x; linked ABC "
                                 "is disabled until odin3 restarts");
     odin3_abc_fake_fail_on("write_hie", (odin3_abc_fail){ODIN3_ABC_FAIL_COMMAND, 1, ""});
-    (void)snprintf(line, sizeof line, "abc: internal command 'write_hie \"%s/abc0.in.blif\" "
-                                      "\"%s/abc0.out.blif\"' failed", dir, dir);
+    (void)snprintf(line, sizeof line,
+                   "abc: internal command 'write_hie \"%s/abc0.in.blif\" "
+                   "\"%s/abc0.out.blif\"' failed",
+                   dir, dir);
     expect_engine_failure(args, line);
     odin3_abc_fake_fail_on("read", (odin3_abc_fail){ODIN3_ABC_FAIL_RESULT, 0, "no network"});
     expect_engine_failure(args, "abc: ABC returned a malformed network: no network");
     expect_file(dir, "abc0.in.blif"); /* a failed run keeps its files in a given directory */
 }
 
-/* --- the child (3D-5a carry-over) -------------------------------------------------------------- */
+/* --- the child (3D-5a carry-over) --------------------------------------------------------------
+ */
 
 /* A shell fixture that answers `-c version` with the pin and runs `body` for -f. */
 static void make_child(const char *name, const char *body, char *path) {
     afx_path(path, name);
     char text[2048];
-    (void)snprintf(text, sizeof text,
-                   "#!/bin/sh\nif [ \"$1\" = \"-c\" ]; then\n  echo 'odin3-abc: commit %s'\n  exit 0\n"
-                   "fi\n%s\n",
-                   odin3_abc_child_pin(), body);
+    (void)snprintf(
+        text, sizeof text,
+        "#!/bin/sh\nif [ \"$1\" = \"-c\" ]; then\n  echo 'odin3-abc: commit %s'\n  exit 0\n"
+        "fi\n%s\n",
+        odin3_abc_child_pin(), body);
     afx_write(path, text);
     TEST_ASSERT_EQUAL_INT(0, chmod(path, 0755));
 }
@@ -209,9 +213,11 @@ static void test_child_missing_program(void) {
     char exe[AFX_PATH];
     afx_path(exe, "no-such-abc");
     use_child(exe);
-    char line[2 * AFX_PATH];
-    (void)snprintf(line, sizeof line, "abc: ABC subprocess '%s' cannot start: No such file or "
-                                      "directory", exe);
+    char line[4 * AFX_PATH];
+    (void)snprintf(line, sizeof line,
+                   "abc: ABC subprocess '%s' cannot start: No such file or "
+                   "directory",
+                   exe);
     expect_engine_failure("", line);
 }
 

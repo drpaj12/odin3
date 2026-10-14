@@ -51,8 +51,8 @@ void tearDown(void) {
 /* Module m: inputs a b, output y = a & b. */
 static void build_and(void) {
     odin3_module_id mid = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"),
-                                                        (odin3_prov_id){0}, &mid));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
     odin3_module *mod = odin3_module_get(design, mid);
     odin3_net_id a = afx_port(design, mod, "a", ODIN3_DIR_IN);
     odin3_net_id b = afx_port(design, mod, "b", ODIN3_DIR_IN);
@@ -209,7 +209,8 @@ static void test_exchange_choice(void) {
     TEST_ASSERT_EQUAL_INT(0, setenv("ODIN3_ABC_EXCHANGE", "xml", 1));
     afx_log_reset();
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_abc_exchange_choice(&opts, &exchange));
-    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_ERROR, "abc: ODIN3_ABC_EXCHANGE must be aig or blif, not 'xml'"));
+    TEST_ASSERT_TRUE(
+        afx_has(ODIN3_LOG_ERROR, "abc: ODIN3_ABC_EXCHANGE must be aig or blif, not 'xml'"));
 }
 
 static void test_hex_digest(void) {
@@ -228,7 +229,8 @@ static void test_hex_digest(void) {
     TEST_ASSERT_FALSE(odin3_abc_hex_digest(hex, digest));
 }
 
-/* --- start-up checks --------------------------------------------------------------------------- */
+/* --- start-up checks ---------------------------------------------------------------------------
+ */
 
 static void test_no_engine(void) {
     build_and();
@@ -240,8 +242,8 @@ static void test_no_engine(void) {
 
 static void test_views_error(void) {
     odin3_module_id mid = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"),
-                                                        (odin3_prov_id){0}, &mid));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
     odin3_module *mod = odin3_module_get(design, mid);
     odin3_node_spec spec = {afx_type(design, "$add"), afx_intern(design, "$c3"), (odin3_prov_id){0},
                             NULL, 5};
@@ -321,8 +323,8 @@ static void test_pass_table_entry(void) {
 
 static void test_process_is_refused(void) {
     odin3_module_id mid = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"),
-                                                        (odin3_prov_id){0}, &mid));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
     odin3_module *mod = odin3_module_get(design, mid);
     odin3_node_spec spec = {afx_type(design, "$proc"), 0, (odin3_prov_id){0}, NULL, 0};
     const odin3_celltype_def *def = odin3_celltype_get(design, spec.type);
@@ -332,7 +334,8 @@ static void test_process_is_refused(void) {
     }
     afx_log_reset();
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run_abc(""));
-    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_ERROR, "pass 'abc': module 'm' has processes; run proc first"));
+    TEST_ASSERT_TRUE(
+        afx_has(ODIN3_LOG_ERROR, "pass 'abc': module 'm' has processes; run proc first"));
 }
 
 int main(void) {

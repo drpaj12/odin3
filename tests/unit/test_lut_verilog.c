@@ -75,8 +75,8 @@ static uint32_t table_from_msb(const char *msb_first, uint8_t *bits) {
 }
 
 /* One $lut of the given width and table (bits, 2^width of them) from the nets in[0..width). */
-static void add_lut(odin3_module *mod, uint32_t width, const uint8_t *bits,
-                    const odin3_net_id *in, odin3_net_id out) {
+static void add_lut(odin3_module *mod, uint32_t width, const uint8_t *bits, const odin3_net_id *in,
+                    odin3_net_id out) {
     odin3_celltype_id type = {0};
     TEST_ASSERT_TRUE(odin3_celltype_find(design, intern("$lut"), &type));
     odin3_value params[2] = {odin3_value_int(width),
@@ -157,8 +157,7 @@ static bool cube_value(const expr_env *env, const char *cube, size_t len) {
 
 /* The value of `<sum>` or `~(<sum>)`, the sum being cubes joined by " | ". */
 static bool expr_value(const expr_env *env, const char *expr, size_t len) {
-    bool negate = len > 3 && strncmp(expr, "~(", 2) == 0 && expr[len - 1] == ')' &&
-                  strstr(expr + 2, "(") == NULL;
+    bool negate = len > 3 && strncmp(expr, "~(", 2) == 0 && expr[len - 1] == ')';
     if (negate) {
         expr += 2;
         len -= 3;
@@ -206,7 +205,8 @@ static void expect_function(const char *rhs, size_t len, const char *const *name
 
 static const char *const k_abc[3] = {"a", "b", "c"};
 
-/* Module m with inputs a, b, c (the first `width` used) and output y, one $lut; its written text. */
+/* Module m with inputs a, b, c (the first `width` used) and output y, one $lut; its written text.
+ */
 static const char *write_one(uint32_t width, const char *msb_first, uint8_t *bits) {
     odin3_module_id mid = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
@@ -294,10 +294,11 @@ static void testbench_line(odin3_strbuf *tb, uint32_t width, uint32_t num, const
         word |= (uint64_t)(bits[i] == ODIN3_BIT_1 ? 1U : 0U) << i;
     }
     TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_strbuf_appendf(tb,
-                                       "    if (%s !== t(64'h%llx, idx[%u:0])) begin errors = errors "
-                                       "+ 1; $display(\"%s differs at %%0d\", idx); end\n",
-                                       name, (unsigned long long)word, (unsigned)width - 1U, name));
+        ODIN3_OK,
+        odin3_strbuf_appendf(tb,
+                             "    if (%s !== t(64'h%llx, idx[%u:0])) begin errors = errors "
+                             "+ 1; $display(\"%s differs at %%0d\", idx); end\n",
+                             name, (unsigned long long)word, (unsigned)width - 1U, name));
 }
 
 static void test_random_tables_text_and_icarus(void) {
@@ -346,7 +347,8 @@ static void test_random_tables_text_and_icarus(void) {
             &bench,
             "module luts_tb;\n  reg [5:0] idx;\n  integer errors;\n  integer n;\n"
             "  wire i0 = idx[0], i1 = idx[1], i2 = idx[2], i3 = idx[3], i4 = idx[4], i5 = idx[5];\n"
-            "  function t(input [63:0] table, input [5:0] at);\n    t = table[at];\n  endfunction\n"));
+            "  function t(input [63:0] table, input [5:0] at);\n    t = table[at];\n  "
+            "endfunction\n"));
     for (uint32_t width = 1; width <= MAX_IN; width++) {
         for (uint32_t num = 0; num < TABLES_PER_WIDTH; num++) {
             char name[NAME_MAX_LEN];
@@ -361,20 +363,18 @@ static void test_random_tables_text_and_icarus(void) {
         for (uint32_t num = 0; num < TABLES_PER_WIDTH; num++) {
             char name[NAME_MAX_LEN];
             out_name(name, width, num);
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                                  odin3_strbuf_appendf(&bench, ", .%s(%s)", name, name));
+            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&bench, ", .%s(%s)", name, name));
         }
     }
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_strbuf_appendf(&bench, ");\n  initial begin\n    errors = 0;\n"
-                                               "    for (n = 0; n < 64; n = n + 1) begin\n"
-                                               "      idx = n;\n      #1;\n"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_strbuf_appendf(&bench, ");\n  initial begin\n    errors = 0;\n"
+                                                       "    for (n = 0; n < 64; n = n + 1) begin\n"
+                                                       "      idx = n;\n      #1;\n"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&bench, (odin3_bytes){tb.data, tb.len}));
     TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK,
-        odin3_strbuf_appendf(&bench, "    end\n    if (errors == 0) $display(\"PASS\");\n"
-                                     "    else $display(\"FAIL %%0d\", errors);\n"
-                                     "    $finish;\n  end\nendmodule\n"));
+        ODIN3_OK, odin3_strbuf_appendf(&bench, "    end\n    if (errors == 0) $display(\"PASS\");\n"
+                                               "    else $display(\"FAIL %%0d\", errors);\n"
+                                               "    $finish;\n  end\nendmodule\n"));
     out_path(path, "luts_tb.v");
     FILE *file = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL_MESSAGE(file, path);

@@ -24,7 +24,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
-enum { PATH_BYTES = ODIN3_ABC_DIR_BYTES + 64, CMD_WORD_BYTES = 64 };
+enum { PATH_BYTES = ODIN3_ABC_DIR_BYTES + 64, CMD_WORD_BYTES = 64, DOMAIN_TEXT_BYTES = 160 };
 
 /* --- ABC's output lines -------------------------------------------------------------------- */
 
@@ -43,15 +43,17 @@ static bool is_print_command(const char *line) {
 
 /* One output line to the run's log file, --log and the pass log. */
 static void emit_line(odin3_abc_run *run, const char *line) {
-    (void)snprintf(run->last_line, sizeof run->last_line, "%s", line[0] != '\0' ? line : run->last_line);
+    if (line[0] != '\0') {
+        (void)snprintf(run->last_line, sizeof run->last_line, "%s", line);
+    }
     if (run->runlog != NULL) {
         (void)fprintf(run->runlog, "%s\n", line);
     }
     if (run->log != NULL) {
         (void)fprintf(run->log, "%s\n", line);
     }
-    odin3_log(run->cmd_class == ODIN3_ABC_CLASS_PRINT ? ODIN3_LOG_INFO : ODIN3_LOG_DEBUG,
-              "abc| %s", line);
+    odin3_log(run->cmd_class == ODIN3_ABC_CLASS_PRINT ? ODIN3_LOG_INFO : ODIN3_LOG_DEBUG, "abc| %s",
+              line);
 }
 
 /* Logs the buffered lines (the linked engine's call has returned) and clears the buffer. */
@@ -121,9 +123,8 @@ static odin3_status report_fail(const odin3_abc_run *run, const odin3_abc_fail *
         break;
     default:
         if (src != NULL) {
-            odin3_log(ODIN3_LOG_ERROR, "abc: %s:%u: command '%s' failed%s%s%s",
-                      run->choice.given, (unsigned)src->src_line, cmd,
-                      src->alias != NULL ? " (from alias '" : "",
+            odin3_log(ODIN3_LOG_ERROR, "abc: %s:%u: command '%s' failed%s%s%s", run->choice.given,
+                      (unsigned)src->src_line, cmd, src->alias != NULL ? " (from alias '" : "",
                       src->alias != NULL ? src->alias : "", src->alias != NULL ? "')" : "");
         } else {
             odin3_log(ODIN3_LOG_ERROR, "abc: internal command '%s' failed", cmd);
@@ -135,21 +136,29 @@ static odin3_status report_fail(const odin3_abc_run *run, const odin3_abc_fail *
 
 /* --- files --------------------------------------------------------------------------------- */
 
-static odin3_status run_paths(const odin3_abc_run *run, char in[PATH_BYTES], char cmd[PATH_BYTES],
-                              char out[PATH_BYTES]) {
-    odin3_status st = odin3_abc_run_path(run, ODIN3_ABC_FILE_IN, in, PATH_BYTES);
-    st = st == ODIN3_OK ? odin3_abc_run_path(run, ODIN3_ABC_FILE_CMD, cmd, PATH_BYTES) : st;
-    return st == ODIN3_OK ? odin3_abc_run_path(run, ODIN3_ABC_FILE_OUT, out, PATH_BYTES) : st;
+/* The three file names of the current run. */
+typedef struct xfiles {
+    char in[PATH_BYTES];
+    char cmd[PATH_BYTES];
+    char out[PATH_BYTES];
+} xfiles;
+
+static odin3_status run_paths(const odin3_abc_run *run, xfiles *files) {
+    odin3_status st = odin3_abc_run_path(run, ODIN3_ABC_FILE_IN, files->in, PATH_BYTES);
+    st = st == ODIN3_OK ? odin3_abc_run_path(run, ODIN3_ABC_FILE_CMD, files->cmd, PATH_BYTES) : st;
+    return st == ODIN3_OK ? odin3_abc_run_path(run, ODIN3_ABC_FILE_OUT, files->out, PATH_BYTES)
+                          : st;
 }
 
 /* Writes in.blif and the command file. */
-static odin3_status write_inputs(odin3_abc_run *run, const char *in, const char *cmd,
-                                 const char *out) {
-    odin3_status st = odin3_abc_xblif_write(run, run->region, in);
+static odin3_status write_inputs(odin3_abc_run *run, const xfiles *files) {
+    odin3_status st = odin3_abc_xblif_write(run, run->region, files->in);
     odin3_strbuf cmds;
     odin3_strbuf_init(&cmds);
-    st = st == ODIN3_OK ? odin3_abc_xblif_commands(run, in, out, &cmds) : st;
-    st = st == ODIN3_OK ? odin3_pass_write_text(cmd, &cmds) : st;
+    st = st == ODIN3_OK
+             ? odin3_abc_xblif_commands(run, &(odin3_abc_paths){files->in, files->out}, &cmds)
+             : st;
+    st = st == ODIN3_OK ? odin3_pass_write_text(files->cmd, &cmds) : st;
     odin3_strbuf_free(&cmds);
     return st;
 }
@@ -178,8 +187,9 @@ static void close_run_log(odin3_abc_run *run) {
 /* --- the linked engine --------------------------------------------------------------------- */
 
 /* Every command of the run through exec; the first failure is reported. */
-static odin3_status exec_commands(odin3_abc_run *run, const char *in, const char *out) {
+static odin3_status exec_commands(odin3_abc_run *run, const xfiles *files) {
     const odin3_abc_engine *eng = run->engine;
+    const odin3_abc_paths paths = {files->in, files->out};
     odin3_strbuf line;
     odin3_strbuf_init(&line);
     odin3_status st = ODIN3_OK;
@@ -187,7 +197,7 @@ static odin3_status exec_commands(odin3_abc_run *run, const char *in, const char
         const odin3_abc_cmd *src = NULL;
         odin3_abc_fail fail = {0};
         odin3_strbuf_clear(&line);
-        st = odin3_abc_xblif_command(run, i, in, out, &line, &src);
+        st = odin3_abc_xblif_command(run, i, &paths, &line, &src);
         if (st != ODIN3_OK) {
             break;
         }
@@ -203,7 +213,7 @@ static odin3_status exec_commands(odin3_abc_run *run, const char *in, const char
     return st;
 }
 
-static odin3_status run_linked(odin3_abc_run *run, const char *in, const char *out) {
+static odin3_status run_linked(odin3_abc_run *run, const xfiles *files) {
     const odin3_abc_engine *eng = run->engine;
     odin3_abc_fail fail = {0};
     run->streaming = false;
@@ -215,7 +225,7 @@ static odin3_status run_linked(odin3_abc_run *run, const char *in, const char *o
     if (st != ODIN3_OK) {
         return st;
     }
-    st = exec_commands(run, in, out);
+    st = exec_commands(run, files);
     eng->close(eng->self);
     flush_lines(run);
     return st;
@@ -233,8 +243,8 @@ static odin3_status run_child(odin3_abc_run *run, const char *cmd_file) {
         st = odin3_abc_child_check_pin(program, &res);
     }
     if (st == ODIN3_OK) {
-        odin3_abc_child_req req = {program, "-f", cmd_file, run->dir, 0, 0, run->run_no,
-                                   text_callback, run};
+        odin3_abc_child_req req = {program, "-f",        cmd_file,      run->dir, 0,
+                                   0,       run->run_no, text_callback, run};
         run->streaming = true;
         run->cmd_class = ODIN3_ABC_CLASS_OTHER;
         st = odin3_abc_child_run(&req, &res);
@@ -257,21 +267,18 @@ static void log_header(odin3_abc_run *run) {
     if (run->log == NULL) {
         return;
     }
-    char domain[160];
+    char domain[DOMAIN_TEXT_BYTES];
     odin3_abc_domain_text(run->module, run->domain, domain, sizeof domain);
-    (void)fprintf(run->log, "# abc run %u: module '%s', %s\n", (unsigned)run->run_no,
-                  odin3_strtab_get(odin3_design_strtab(run->design),
-                                   odin3_module_name(run->module)),
-                  domain);
+    (void)fprintf(
+        run->log, "# abc run %u: module '%s', %s\n", (unsigned)run->run_no,
+        odin3_strtab_get(odin3_design_strtab(run->design), odin3_module_name(run->module)), domain);
 }
 
 odin3_status odin3_abc_exchange_blif(odin3_abc_run *run, odin3_abc_result *out) {
-    char in[PATH_BYTES];
-    char cmd[PATH_BYTES];
-    char out_path[PATH_BYTES];
+    xfiles files;
     odin3_abc_result_init(out);
     odin3_status st = odin3_abc_run_ensure_dir(run);
-    st = st == ODIN3_OK ? run_paths(run, in, cmd, out_path) : st;
+    st = st == ODIN3_OK ? run_paths(run, &files) : st;
     if (st != ODIN3_OK) {
         return st;
     }
@@ -279,15 +286,15 @@ odin3_status odin3_abc_exchange_blif(odin3_abc_run *run, odin3_abc_result *out) 
     odin3_strbuf_clear(&run->lines);
     st = open_run_log(run);
     log_header(run);
-    st = st == ODIN3_OK ? write_inputs(run, in, cmd, out_path) : st;
+    st = st == ODIN3_OK ? write_inputs(run, &files) : st;
     if (st == ODIN3_OK) {
-        st = run->route == ODIN3_ABC_ROUTE_CHILD ? run_child(run, cmd)
-                                                 : run_linked(run, in, out_path);
+        st = run->route == ODIN3_ABC_ROUTE_CHILD ? run_child(run, files.cmd)
+                                                 : run_linked(run, &files);
     }
     close_run_log(run);
     run->run_no++;
     if (st != ODIN3_OK) {
         return st;
     }
-    return odin3_abc_xblif_read(run, out_path, out);
+    return odin3_abc_xblif_read(run, files.out, out);
 }

@@ -1208,7 +1208,7 @@ static void write_lut(verilog_writer *wr, odin3_node_id node, const vw_builtin *
     odin3_pinslice ins = odin3_node_port(wr->mod.module, node, ODIN3_LUT_PORT_A);
     const odin3_value params[2] = {*odin3_node_param(wr->mod.module, node, ODIN3_LUT_P_WIDTH),
                                    *odin3_node_param(wr->mod.module, node, ODIN3_LUT_P_LUT)};
-    uint64_t words[1U << (ODIN3_LUT_MAX_WIDTH - 6U)];
+    uint64_t words[ODIN3_LUT_MAX_WORDS];
     odin3_strbuf cover;
     odin3_strbuf_init(&cover);
     uint32_t n_rows = 0;
@@ -1334,11 +1334,10 @@ static void write_ff(verilog_writer *wr, odin3_node_id node, const vw_builtin *b
 typedef void (*vw_cell_writer)(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi);
 
 static const vw_cell_writer CELL_WRITERS[FORM_COUNT] = {
-    [FORM_CONST] = write_const,   [FORM_GATE1] = write_gate1, [FORM_GATE2] = write_gate2,
-    [FORM_MUX] = write_mux,       [FORM_SOP] = write_sop,     [FORM_LATCH] = write_latch,
-    [FORM_LUT] = write_lut,
-    [FORM_BINARY] = write_binary, [FORM_UNARY] = write_unary, [FORM_PMUX] = write_pmux,
-    [FORM_TRIBUF] = write_tribuf, [FORM_FF] = write_ff,
+    [FORM_CONST] = write_const, [FORM_GATE1] = write_gate1,   [FORM_GATE2] = write_gate2,
+    [FORM_MUX] = write_mux,     [FORM_SOP] = write_sop,       [FORM_LATCH] = write_latch,
+    [FORM_LUT] = write_lut,     [FORM_BINARY] = write_binary, [FORM_UNARY] = write_unary,
+    [FORM_PMUX] = write_pmux,   [FORM_TRIBUF] = write_tribuf, [FORM_FF] = write_ff,
 };
 
 /* --- parameter values ---------------------------------------------------------------------- */

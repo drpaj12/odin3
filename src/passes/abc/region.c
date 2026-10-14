@@ -28,15 +28,17 @@ enum {
 };
 
 enum {
-    PORT_C = 0,        /* a flip-flop's clock pin, port 0 of $_DFF_P_ and $_DFF_N_ */
-    PORT_D_FF = 1,     /* ... and its D */
-    PORT_Q_DFF = 2,    /* ... and its Q */
-    PORT_D_GCLK = 0,   /* $_FF_'s D */
-    PORT_Q_GCLK = 1,   /* ... and its Q */
+    PORT_C = 0,      /* a flip-flop's clock pin, port 0 of $_DFF_P_ and $_DFF_N_ */
+    PORT_D_FF = 1,   /* ... and its D */
+    PORT_Q_DFF = 2,  /* ... and its Q */
+    PORT_D_GCLK = 0, /* $_FF_'s D */
+    PORT_Q_GCLK = 1, /* ... and its Q */
     MAX_GATE_PORTS = 8,
     TEXT_BYTES = 192,
     LUT_EST_CAP = 1 << 24, /* the AIG estimate of one wide $lut stops here */
-    DOMAIN_KEY_SHIFT = 2
+    DOMAIN_KEY_SHIFT = 2,
+    EDGE_KEY_BASE = 4, /* edge keys start here; the global key is 2 */
+    ROLE_OOM = 0xFF    /* classify ran out of memory (not a role) */
 };
 
 /* --- text ---------------------------------------------------------------------------------- */
@@ -48,6 +50,9 @@ static const char *strtab_text(const odin3_module *module, uint32_t str) {
 /* Own name, else primary wire bit, else "" (the sort key of point (k)). */
 static void net_key(const odin3_module *module, odin3_net_id net, char *out, size_t cap) {
     out[0] = '\0';
+    if (!odin3_net_valid(net)) {
+        return;
+    }
     uint32_t name = odin3_net_name(module, net);
     if (name != 0) {
         (void)snprintf(out, cap, "%s", strtab_text(module, name));
@@ -191,23 +196,27 @@ static bool reads_as_unknown(const odin3_abc_run *run, odin3_net_id net) {
 
 /* --- cell types ---------------------------------------------------------------------------- */
 
+/* The port is one scalar bit (a gate's pins are single bits). */
+static bool port_is_bit(const odin3_port_def *port) {
+    return port->width == 1 && port->width_fn == NULL && port->width_expr == NULL &&
+           port->width_param == NULL && port->dir != ODIN3_DIR_INOUT;
+}
+
 static bool gate_eligible(const odin3_celltype_def *def) {
+    const uint32_t refused_flags =
+        ODIN3_CT_SEQ_EDGE | ODIN3_CT_SEQ_LEVEL | ODIN3_CT_TRISTATE | ODIN3_CT_ANYVIEW;
     if (def->gran != ODIN3_GRAN_BIT || def->n_params != 0 || def->simulate == NULL ||
-        (def->flags & (ODIN3_CT_SEQ_EDGE | ODIN3_CT_SEQ_LEVEL | ODIN3_CT_TRISTATE |
-                       ODIN3_CT_ANYVIEW)) != 0 ||
-        def->n_ports < 2 || def->n_ports > MAX_GATE_PORTS) {
+        (def->flags & refused_flags) != 0 || def->n_ports < 2 || def->n_ports > MAX_GATE_PORTS) {
         return false;
     }
     uint32_t inputs = 0;
     uint32_t outputs = 0;
-    for (uint32_t p = 0; p < def->n_ports; p++) {
-        const odin3_port_def *port = &def->ports[p];
-        if (port->width != 1 || port->width_fn != NULL || port->width_expr != NULL ||
-            port->width_param != NULL || port->dir == ODIN3_DIR_INOUT) {
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        if (!port_is_bit(&def->ports[port])) {
             return false;
         }
-        inputs += port->dir == ODIN3_DIR_IN ? 1U : 0U;
-        outputs += port->dir == ODIN3_DIR_OUT ? 1U : 0U;
+        inputs += def->ports[port].dir == ODIN3_DIR_IN ? 1U : 0U;
+        outputs += def->ports[port].dir == ODIN3_DIR_OUT ? 1U : 0U;
     }
     return outputs == 1 && inputs >= 1 && inputs <= ODIN3_ABC_GATE_MAX_INPUTS;
 }
@@ -219,12 +228,12 @@ static uint64_t gate_truth(const odin3_celltype_def *def, uint32_t n_inputs) {
     odin3_sim_span spans[MAX_GATE_PORTS];
     uint32_t next_in = 0;
     uint32_t out_slot = n_inputs;
-    for (uint32_t p = 0; p < def->n_ports; p++) {
-        index[p] = def->ports[p].dir == ODIN3_DIR_IN ? next_in++ : out_slot;
-        spans[p] = (odin3_sim_span){&index[p], 1};
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        index[port] = def->ports[port].dir == ODIN3_DIR_IN ? next_in++ : out_slot;
+        spans[port] = (odin3_sim_span){&index[port], 1};
     }
-    odin3_sim_cell cell = {values, spans,      def->n_ports,    NULL, NULL, 0,
-                           ODIN3_SIM_COMB, NULL, NULL, 0};
+    odin3_sim_cell cell = {values, spans,          def->n_ports, NULL, NULL,
+                           0,      ODIN3_SIM_COMB, NULL,         NULL, 0};
     uint64_t table = 0;
     for (uint32_t row = 0; row < (1U << n_inputs); row++) {
         for (uint32_t j = 0; j < n_inputs; j++) {
@@ -232,7 +241,7 @@ static uint64_t gate_truth(const odin3_celltype_def *def, uint32_t n_inputs) {
         }
         values[out_slot] = 0;
         def->simulate(&cell);
-        table |= (uint64_t)(values[out_slot] != 0 ? 1U : 0U) << row;
+        table |= (uint64_t)(cell.values[out_slot] != 0 ? 1U : 0U) << row;
     }
     return table;
 }
@@ -241,8 +250,10 @@ static uint8_t type_kind(const odin3_celltype_def *def) {
     static const struct {
         const char *name;
         uint8_t kind;
-    } k_named[] = {{"$sop", ODIN3_ABC_TK_SOP},     {"$lut", ODIN3_ABC_TK_LUT},
-                   {"$_DFF_P_", ODIN3_ABC_TK_DFF_P}, {"$_DFF_N_", ODIN3_ABC_TK_DFF_N},
+    } k_named[] = {{"$sop", ODIN3_ABC_TK_SOP},
+                   {"$lut", ODIN3_ABC_TK_LUT},
+                   {"$_DFF_P_", ODIN3_ABC_TK_DFF_P},
+                   {"$_DFF_N_", ODIN3_ABC_TK_DFF_N},
                    {"$_FF_", ODIN3_ABC_TK_FF}};
     for (size_t i = 0; i < sizeof k_named / sizeof k_named[0]; i++) {
         if (strcmp(def->name, k_named[i].name) == 0) {
@@ -261,8 +272,8 @@ static const odin3_abc_gate *type_entry(odin3_abc_run *run, odin3_celltype_id ty
     const odin3_celltype_def *def = odin3_celltype_get(run->design, type);
     odin3_abc_gate entry = {type.v, def == NULL ? ODIN3_ABC_TK_OTHER : type_kind(def), 0, 0};
     if (entry.kind == ODIN3_ABC_TK_GATE) {
-        for (uint32_t p = 0; p < def->n_ports; p++) {
-            entry.n_inputs += def->ports[p].dir == ODIN3_DIR_IN ? 1U : 0U;
+        for (uint32_t port = 0; port < def->n_ports; port++) {
+            entry.n_inputs += def->ports[port].dir == ODIN3_DIR_IN ? 1U : 0U;
         }
         entry.table = gate_truth(def, entry.n_inputs);
     }
@@ -342,12 +353,14 @@ void odin3_abc_domain_free(odin3_abc_domain *domain) {
 static odin3_net_id flop_q(const odin3_module *module, odin3_node_id node, uint8_t kind) {
     uint32_t port = kind == ODIN3_ABC_TK_FF ? PORT_Q_GCLK : PORT_Q_DFF;
     odin3_pinslice pins = odin3_node_port(module, node, port);
-    return pins.count == 0 ? (odin3_net_id){0} : odin3_pin_net(module, pins.first);
+    odin3_net_id none = {0};
+    return pins.count == 0 ? none : odin3_pin_net(module, pins.first);
 }
 
 static odin3_net_id flop_clock(const odin3_module *module, odin3_node_id node) {
     odin3_pinslice pins = odin3_node_port(module, node, PORT_C);
-    return pins.count == 0 ? (odin3_net_id){0} : odin3_pin_net(module, pins.first);
+    odin3_net_id none = {0};
+    return pins.count == 0 ? none : odin3_pin_net(module, pins.first);
 }
 
 /* A flip-flop that belongs to some domain: no keep, and its Q net has no other driver. */
@@ -356,8 +369,8 @@ static bool flop_in_a_domain(const odin3_module *module, uint32_t keep_key, odin
     if (has_keep(module, keep_key, (odin3_objref){ODIN3_OBJ_NODE, node.v})) {
         return false;
     }
-    odin3_net_id q = flop_q(module, node, kind);
-    return !odin3_net_valid(q) || odin3_net_driver_count(module, q) == 1;
+    odin3_net_id qnet = flop_q(module, node, kind);
+    return !odin3_net_valid(qnet) || odin3_net_driver_count(module, qnet) == 1;
 }
 
 static uint32_t keep_key_of(const odin3_module *module) {
@@ -406,7 +419,10 @@ static int domain_compare(const odin3_module *module, const odin3_abc_domain *lh
     if (lhs->negedge != rhs->negedge) {
         return lhs->negedge ? 1 : -1;
     }
-    return lhs->clock.v == rhs->clock.v ? 0 : (lhs->clock.v < rhs->clock.v ? -1 : 1);
+    if (lhs->clock.v == rhs->clock.v) {
+        return 0;
+    }
+    return lhs->clock.v < rhs->clock.v ? -1 : 1;
 }
 
 static void domains_sort(const odin3_module *module, odin3_vec *domains) {
@@ -439,14 +455,15 @@ static bool domain_add(odin3_vec *domains, odin3_u64map *index, const odin3_modu
         proto.negedge = kind == ODIN3_ABC_TK_DFF_N;
         proto.clock = flop_clock(module, node);
         key = ((uint64_t)proto.clock.v << DOMAIN_KEY_SHIFT) | (proto.negedge ? 1U : 0U);
-        key += 2U * ODIN3_ABC_DOM_GLOBAL; /* never equal to the global key */
+        key += EDGE_KEY_BASE; /* never equal to the global key */
     }
     odin3_abc_domain *group = domain_group(domains, index, &proto, key);
     return group != NULL && vec_push_u32(&group->ffs, node.v) == ODIN3_OK;
 }
 
 /* Groups the module's flip-flops into *domains (unsorted). */
-static odin3_status domains_group(odin3_abc_run *run, odin3_module *module, odin3_vec *domains) {
+static odin3_status domains_group(odin3_abc_run *run, const odin3_module *module,
+                                  odin3_vec *domains) {
     odin3_u64map *index = odin3_u64map_create(0);
     if (index == NULL) {
         return ODIN3_ERR_NO_MEMORY;
@@ -459,11 +476,9 @@ static odin3_status domains_group(odin3_abc_run *run, odin3_module *module, odin
             continue;
         }
         const odin3_abc_gate *entry = type_entry(run, odin3_node_type(module, node));
-        if (entry == NULL) {
-            st = ODIN3_ERR_NO_MEMORY;
-        } else if (entry->kind >= ODIN3_ABC_TK_DFF_P &&
-                   flop_in_a_domain(module, key, node, entry->kind) &&
-                   !domain_add(domains, index, module, node, entry->kind)) {
+        bool grouped = entry != NULL && entry->kind >= ODIN3_ABC_TK_DFF_P &&
+                       flop_in_a_domain(module, key, node, entry->kind);
+        if (entry == NULL || (grouped && !domain_add(domains, index, module, node, entry->kind))) {
             st = ODIN3_ERR_NO_MEMORY;
         }
     }
@@ -471,7 +486,7 @@ static odin3_status domains_group(odin3_abc_run *run, odin3_module *module, odin
     return st;
 }
 
-odin3_status odin3_abc_domains(odin3_abc_run *run, odin3_module *module, odin3_vec *domains) {
+odin3_status odin3_abc_domains(odin3_abc_run *run, const odin3_module *module, odin3_vec *domains) {
     odin3_vec_init(domains, sizeof(odin3_abc_domain));
     odin3_status st = domains_group(run, module, domains);
     uint32_t cap = odin3_abc_run_limits_get()->domains;
@@ -600,7 +615,7 @@ static uint8_t classify(rscan *sc, odin3_node_id node) {
     const odin3_abc_gate *entry = type_entry(sc->run, type);
     const odin3_celltype_def *def = odin3_celltype_get(sc->run->design, type);
     if (entry == NULL || def == NULL) {
-        return 0xFF; /* out of memory */
+        return ROLE_OOM;
     }
     switch (entry->kind) {
     case ODIN3_ABC_TK_SOP:
@@ -637,7 +652,7 @@ static odin3_status classify_all(rscan *sc) {
             continue;
         }
         uint8_t role = classify(sc, node);
-        if (role == 0xFF) {
+        if (role == ROLE_OOM) {
             st = ODIN3_ERR_NO_MEMORY;
             break;
         }
@@ -679,7 +694,7 @@ static void read_pin(rscan *sc, odin3_net_id net) {
 }
 
 /* The upper bound of a soft cell's AIG objects (point (r)). */
-static uint64_t soft_estimate(rscan *sc, odin3_node_id node, const odin3_abc_gate *entry) {
+static uint64_t soft_estimate(const rscan *sc, odin3_node_id node, const odin3_abc_gate *entry) {
     if (entry->kind == ODIN3_ABC_TK_SOP) {
         const odin3_value *cover = odin3_node_param(sc->module, node, 1);
         return cover == NULL ? 0 : cover->len;
@@ -699,8 +714,8 @@ static void add_sat(uint64_t *total, uint64_t more) {
 }
 
 static odin3_status scan_soft_reads(rscan *sc) {
-    for (size_t s = 0; s < sc->region->soft.len; s++) {
-        odin3_node_id node = {vec_get_u32(&sc->region->soft, s)};
+    for (size_t idx = 0; idx < sc->region->soft.len; idx++) {
+        odin3_node_id node = {vec_get_u32(&sc->region->soft, idx)};
         const odin3_abc_gate *entry = type_entry(sc->run, odin3_node_type(sc->module, node));
         if (entry == NULL) {
             return ODIN3_ERR_NO_MEMORY;
@@ -721,12 +736,13 @@ static odin3_net_id reg_d_net(const rscan *sc, odin3_node_id node) {
     const odin3_abc_gate *entry = type_entry(sc->run, odin3_node_type(sc->module, node));
     uint32_t port = entry != NULL && entry->kind == ODIN3_ABC_TK_FF ? PORT_D_GCLK : PORT_D_FF;
     odin3_pinslice pins = odin3_node_port(sc->module, node, port);
-    return pins.count == 0 ? (odin3_net_id){0} : odin3_pin_net(sc->module, pins.first);
+    odin3_net_id none = {0};
+    return pins.count == 0 ? none : odin3_pin_net(sc->module, pins.first);
 }
 
 static odin3_status scan_reg_reads(rscan *sc) {
-    for (size_t r = 0; r < sc->region->regs.len; r++) {
-        odin3_node_id node = {vec_get_u32(&sc->region->regs, r)};
+    for (size_t idx = 0; idx < sc->region->regs.len; idx++) {
+        odin3_node_id node = {vec_get_u32(&sc->region->regs, idx)};
         odin3_net_id dnet = reg_d_net(sc, node);
         odin3_status st = vec_push_u32(&sc->region->reg_d, dnet.v);
         if (st != ODIN3_OK) {
@@ -770,9 +786,8 @@ static odin3_status build_net_lists(rscan *sc) {
             continue;
         }
         uint8_t flags = *nflag_at(sc, id);
-        bool is_co = (flags & NF_DRIVEN) != 0 &&
-                     ((flags & NF_CUT) != 0 || read_by_cut(sc, net) ||
-                      net_keep(sc->module, sc->keep_key, net));
+        bool is_co = (flags & NF_DRIVEN) != 0 && ((flags & NF_CUT) != 0 || read_by_cut(sc, net) ||
+                                                  net_keep(sc->module, sc->keep_key, net));
         if ((flags & NF_CI) != 0) {
             ((uint32_t *)region->ci_of.data)[id] = (uint32_t)region->cis.len + 1;
             st = vec_push_u32(&region->cis, id);
@@ -848,7 +863,7 @@ static uint32_t soft_driver(const rscan *sc, odin3_net_id net) {
 }
 
 /* One edge from a cut or emitted driver to a soft reader pin is gone. */
-static odin3_status release_readers(rscan *sc, kahn *kh, odin3_net_id net) {
+static odin3_status release_readers(const rscan *sc, kahn *kh, odin3_net_id net) {
     odin3_pinlist sinks = odin3_net_sinks(sc->module, net);
     for (uint32_t i = 0; i < sinks.count; i++) {
         uint32_t reader = odin3_pin_node(sc->module, sinks.pins[i]).v;
@@ -857,7 +872,11 @@ static odin3_status release_readers(rscan *sc, kahn *kh, odin3_net_id net) {
         }
         uint32_t idx = soft_index(sc, reader);
         uint32_t *deg = (uint32_t *)kh->indeg.data + idx;
-        if (((uint8_t *)kh->done.data)[idx] == 0 && *deg > 0 && --*deg == 0) {
+        if (((uint8_t *)kh->done.data)[idx] != 0 || *deg == 0) {
+            continue;
+        }
+        *deg -= 1U;
+        if (*deg == 0) {
             odin3_status st = odin3_abc_heap_push(&kh->heap, reader);
             if (st != ODIN3_OK) {
                 return st;
@@ -881,17 +900,19 @@ static odin3_net_id soft_out_net(const rscan *sc, odin3_node_id node) {
 
 static odin3_status kahn_init(rscan *sc, kahn *kh) {
     size_t count = sc->region->soft.len;
-    odin3_status st = vec_zeros(&kh->indeg, sizeof(uint32_t), count);
-    st = st == ODIN3_OK ? vec_zeros(&kh->done, 1, count) : st;
+    odin3_vec_init(&kh->indeg, sizeof(uint32_t));
+    odin3_vec_init(&kh->done, 1);
     odin3_vec_init(&kh->heap, sizeof(uint32_t));
     odin3_vec_init(&kh->order, sizeof(uint32_t));
+    odin3_status st = vec_zeros(&kh->indeg, sizeof(uint32_t), count);
+    st = st == ODIN3_OK ? vec_zeros(&kh->done, 1, count) : st;
     st = st == ODIN3_OK ? vec_zeros(&sc->pos, sizeof(uint32_t), odin3_module_node_end(sc->module))
                         : st;
-    for (size_t s = 0; st == ODIN3_OK && s < count; s++) {
-        ((uint32_t *)sc->pos.data)[vec_get_u32(&sc->region->soft, s)] = (uint32_t)s + 1;
+    for (size_t idx = 0; st == ODIN3_OK && idx < count; idx++) {
+        ((uint32_t *)sc->pos.data)[vec_get_u32(&sc->region->soft, idx)] = (uint32_t)idx + 1;
     }
-    for (size_t s = 0; st == ODIN3_OK && s < count; s++) {
-        odin3_node_id node = {vec_get_u32(&sc->region->soft, s)};
+    for (size_t idx = 0; st == ODIN3_OK && idx < count; idx++) {
+        odin3_node_id node = {vec_get_u32(&sc->region->soft, idx)};
         odin3_pinslice pins = odin3_node_pins(sc->module, node);
         uint32_t deg = 0;
         for (uint32_t i = 0; i < pins.count; i++) {
@@ -901,7 +922,7 @@ static odin3_status kahn_init(rscan *sc, kahn *kh) {
                        ? 1U
                        : 0U;
         }
-        ((uint32_t *)kh->indeg.data)[s] = deg;
+        ((uint32_t *)kh->indeg.data)[idx] = deg;
         st = deg == 0 ? odin3_abc_heap_push(&kh->heap, node.v) : ODIN3_OK;
     }
     return st;
@@ -919,13 +940,13 @@ static odin3_status kahn_emit(rscan *sc, kahn *kh, uint32_t node) {
     ((uint8_t *)kh->done.data)[soft_index(sc, node)] = 1;
     odin3_status st = vec_push_u32(&kh->order, node);
     odin3_net_id out = soft_out_net(sc, (odin3_node_id){node});
-    return st == ODIN3_OK && odin3_net_valid(out) &&
-                   (*nflag_at(sc, out.v) & NF_CUT) == 0
+    return st == ODIN3_OK && odin3_net_valid(out) && (*nflag_at(sc, out.v) & NF_CUT) == 0
                ? release_readers(sc, kh, out)
                : st;
 }
 
-/* Cuts the output net of the lowest-ID cell not yet emitted (§5.2 Loops) and releases its readers. */
+/* Cuts the output net of the lowest-ID cell not yet emitted (§5.2 Loops) and releases its readers.
+ */
 static odin3_status kahn_cut(rscan *sc, kahn *kh, size_t *scan) {
     const uint8_t *done = kh->done.data;
     while (done[*scan] != 0) {
@@ -988,11 +1009,11 @@ static void region_init(odin3_abc_region *region) {
 
 static odin3_status mark_all_driven(rscan *sc) {
     odin3_status st = vec_zeros(&sc->nflag, 1, odin3_module_net_end(sc->module));
-    for (size_t s = 0; st == ODIN3_OK && s < sc->region->soft.len; s++) {
-        mark_driven(sc, (odin3_node_id){vec_get_u32(&sc->region->soft, s)});
+    for (size_t idx = 0; st == ODIN3_OK && idx < sc->region->soft.len; idx++) {
+        mark_driven(sc, (odin3_node_id){vec_get_u32(&sc->region->soft, idx)});
     }
-    for (size_t r = 0; st == ODIN3_OK && r < sc->region->regs.len; r++) {
-        mark_driven(sc, (odin3_node_id){vec_get_u32(&sc->region->regs, r)});
+    for (size_t idx = 0; st == ODIN3_OK && idx < sc->region->regs.len; idx++) {
+        mark_driven(sc, (odin3_node_id){vec_get_u32(&sc->region->regs, idx)});
     }
     return st;
 }
@@ -1004,12 +1025,12 @@ static odin3_status build_steps(rscan *sc) {
     st = st == ODIN3_OK ? scan_soft_reads(sc) : st;
     st = st == ODIN3_OK ? scan_reg_reads(sc) : st;
     st = st == ODIN3_OK ? build_net_lists(sc) : st;
-    for (size_t r = 0; st == ODIN3_OK && r < sc->region->regs.len; r++) {
-        odin3_node_id reg = {vec_get_u32(&sc->region->regs, r)};
+    for (size_t idx = 0; st == ODIN3_OK && idx < sc->region->regs.len; idx++) {
+        odin3_node_id reg = {vec_get_u32(&sc->region->regs, idx)};
         const odin3_abc_gate *entry = type_entry(sc->run, odin3_node_type(sc->module, reg));
-        odin3_net_id q = flop_q(sc->module, reg, entry == NULL ? ODIN3_ABC_TK_FF : entry->kind);
-        if (odin3_net_valid(q)) {
-            ((uint32_t *)sc->region->q_of.data)[q.v] = (uint32_t)r + 1;
+        odin3_net_id qnet = flop_q(sc->module, reg, entry == NULL ? ODIN3_ABC_TK_FF : entry->kind);
+        if (odin3_net_valid(qnet)) {
+            ((uint32_t *)sc->region->q_of.data)[qnet.v] = (uint32_t)idx + 1;
         }
     }
     if (st == ODIN3_OK) {

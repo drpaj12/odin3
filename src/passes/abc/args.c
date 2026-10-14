@@ -19,7 +19,13 @@
 #include <string.h>
 #include <unistd.h>
 
-enum { LUT_DECIMAL_BASE = 10, CWD_BYTES = 4096 };
+enum {
+    LUT_DECIMAL_BASE = 10,
+    LUT_DIGITS_MAX = 3, /* "16" and a little slack for leading zeros */
+    HEX_BASE = 16,
+    HEX_PER_BYTE = 2,
+    CWD_BYTES = 4096
+};
 
 /* --- arguments ------------------------------------------------------------------------------ */
 
@@ -29,7 +35,14 @@ static const char *copy_word(odin3_arena *arena, odin3_bytes word) {
 }
 
 /* Which option a word names, as an index into k_options, or -1. */
-typedef enum abc_option { OPT_SCRIPT, OPT_LUT, OPT_VIA_BLIF, OPT_LOG, OPT_PROV, OPT_COUNT } abc_option;
+typedef enum abc_option {
+    OPT_SCRIPT,
+    OPT_LUT,
+    OPT_VIA_BLIF,
+    OPT_LOG,
+    OPT_PROV,
+    OPT_COUNT
+} abc_option;
 
 static const char *const k_option_names[OPT_COUNT] = {"--script", "--lut", "--via-blif", "--log",
                                                       "--prov"};
@@ -44,18 +57,18 @@ static int option_of(odin3_bytes word) {
 }
 
 /* `--lut`'s value: digits only, 2 .. ODIN3_LUT_MAX_WIDTH. */
-static bool parse_lut(const char *text, uint32_t *k) {
-    if (text[0] == '\0' || strlen(text) > 3) {
+static bool parse_lut(const char *text, uint32_t *lut_k) {
+    if (text[0] == '\0' || strlen(text) > LUT_DIGITS_MAX) {
         return false;
     }
     uint32_t value = 0;
-    for (const char *c = text; *c != '\0'; c++) {
-        if (*c < '0' || *c > '9') {
+    for (const char *cur = text; *cur != '\0'; cur++) {
+        if (*cur < '0' || *cur > '9') {
             return false;
         }
-        value = value * LUT_DECIMAL_BASE + (uint32_t)(*c - '0');
+        value = value * LUT_DECIMAL_BASE + (uint32_t)(*cur - '0');
     }
-    *k = value;
+    *lut_k = value;
     return value >= ODIN3_ABC_LUT_MIN && value <= ODIN3_LUT_MAX_WIDTH;
 }
 
@@ -195,17 +208,17 @@ static int hex_value(char chr) {
 }
 
 bool odin3_abc_hex_digest(const char *hex, unsigned char digest[ODIN3_SHA256_DIGEST_BYTES]) {
-    if (hex == NULL || strlen(hex) != 2U * ODIN3_SHA256_DIGEST_BYTES) {
+    if (hex == NULL || strlen(hex) != (size_t)HEX_PER_BYTE * ODIN3_SHA256_DIGEST_BYTES) {
         return false;
     }
     unsigned char out[ODIN3_SHA256_DIGEST_BYTES];
-    for (uint32_t i = 0; i < ODIN3_SHA256_DIGEST_BYTES; i++) {
-        int hi = hex_value(hex[2U * i]);
-        int lo = hex_value(hex[2U * i + 1U]);
+    for (size_t i = 0; i < ODIN3_SHA256_DIGEST_BYTES; i++) {
+        int hi = hex_value(hex[HEX_PER_BYTE * i]);
+        int lo = hex_value(hex[HEX_PER_BYTE * i + 1U]);
         if (hi < 0 || lo < 0) {
             return false;
         }
-        out[i] = (unsigned char)(hi * 16 + lo);
+        out[i] = (unsigned char)(hi * HEX_BASE + lo);
     }
     memcpy(digest, out, sizeof out);
     return true;

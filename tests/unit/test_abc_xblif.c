@@ -55,8 +55,8 @@ void tearDown(void) {
 /* t1 with the flip-flop's INIT. */
 static void build_t1(int64_t init) {
     odin3_module_id mid = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"),
-                                                        (odin3_prov_id){0}, &mid));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
     mod = odin3_module_get(design, mid);
     odin3_net_id a = afx_port(design, mod, "a", ODIN3_DIR_IN);
     odin3_net_id b = afx_port(design, mod, "b", ODIN3_DIR_IN);
@@ -137,7 +137,8 @@ static void test_command_file(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_run_path(run, ODIN3_ABC_FILE_OUT, out, sizeof out));
     odin3_strbuf cmds;
     odin3_strbuf_init(&cmds);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_xblif_commands(run, in, out, &cmds));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_abc_xblif_commands(run, &(odin3_abc_paths){in, out}, &cmds));
     char want[2048];
     (void)snprintf(want, sizeof want,
                    "read \"%s\"\nstrash\nifraig -v\nscorr -v\ndc2 -v\ndch -f\nif -K 6 -v\nmfs2 -v\n"
@@ -161,8 +162,6 @@ static void test_write_is_deterministic(void) {
 }
 
 /* --- read-back ----------------------------------------------------------------------------- */
-
-static const char *const OUT_HEAD = ".model o3abc\n.inputs o3ci0 o3ci1\n.outputs o3co0\n";
 
 /* Reads a crafted output (head + body) and expects the one error line. */
 static void expect_malformed(const char *file_name, const char *text, const char *why) {
@@ -276,7 +275,9 @@ static void test_oom_sweep(void) {
         }
         failures++;
         TEST_ASSERT_TRUE(st_w == ODIN3_OK || st_w == ODIN3_ERR_NO_MEMORY || st_w == ODIN3_ERR_IO);
-        TEST_ASSERT_TRUE(st_r == ODIN3_OK || st_r == ODIN3_ERR_NO_MEMORY);
+        char what[64];
+        (void)snprintf(what, sizeof what, "read-back status %d at allocation %ld", (int)st_r, at);
+        TEST_ASSERT_TRUE_MESSAGE(st_r == ODIN3_OK || st_r == ODIN3_ERR_NO_MEMORY, what);
         if (st_r == ODIN3_OK) {
             odin3_abc_result_free(&res);
         }

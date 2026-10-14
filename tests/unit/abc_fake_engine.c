@@ -28,8 +28,8 @@ enum { K_CONST = 0, K_PI, K_LATCH, K_AND };
 
 typedef struct fnode {
     uint8_t kind;
-    uint32_t a, b;     /* AND: fanin literals; LATCH: a = the D literal (set after reading) */
-    uint32_t rep;      /* LATCH: replacement literal after scorr, LIT_NONE when kept */
+    uint32_t a, b; /* AND: fanin literals; LATCH: a = the D literal (set after reading) */
+    uint32_t rep;  /* LATCH: replacement literal after scorr, LIT_NONE when kept */
     char name[NAME_BYTES];
 } fnode;
 
@@ -47,7 +47,7 @@ typedef struct fake {
     uint32_t n_pos;
     uint32_t latches[MAX_PORTS]; /* node indices in file order */
     uint32_t n_latches;
-    int32_t const_lut;      /* the LUT (AND index) that `const` makes constant, -1 none */
+    int32_t const_lut; /* the LUT (AND index) that `const` makes constant, -1 none */
     int const_value;
     odin3_abc_text_fn text;
     void *user;
@@ -162,7 +162,8 @@ static bool resolve_sops(const odin3_module *mod, uint32_t *net_lit, bool *done,
         if (!ready) {
             continue;
         }
-        net_lit[pin_net(mod, node, 1, 0).v] = cover_literal(odin3_node_param(mod, node, 1), lits, ins.count);
+        net_lit[pin_net(mod, node, 1, 0).v] =
+            cover_literal(odin3_node_param(mod, node, 1), lits, ins.count);
         done[id] = true;
         progress = true;
     }
@@ -205,8 +206,8 @@ static odin3_status read_blif(const char *path) {
     for (uint32_t i = 0; i < odin3_module_port_count(mod); i++) {
         if (port_is_in(mod, i)) {
             odin3_net_id net = odin3_wire_net(mod, odin3_module_port_wire(mod, i), 0);
-            const char *name = odin3_strtab_get(odin3_design_strtab(design),
-                                                odin3_wire_name(mod, odin3_module_port_wire(mod, i)));
+            const char *name = odin3_strtab_get(
+                odin3_design_strtab(design), odin3_wire_name(mod, odin3_module_port_wire(mod, i)));
             net_lit[net.v] = 2U * new_node(K_PI, name);
             add_port_name(&g.pis[g.n_pis++], name);
         }
@@ -232,8 +233,9 @@ static odin3_status read_blif(const char *path) {
     for (uint32_t i = 0; i < odin3_module_port_count(mod); i++) {
         if (!port_is_in(mod, i)) {
             odin3_net_id net = odin3_wire_net(mod, odin3_module_port_wire(mod, i), 0);
-            add_port_name(&g.pos[g.n_pos], odin3_strtab_get(odin3_design_strtab(design),
-                          odin3_wire_name(mod, odin3_module_port_wire(mod, i))));
+            add_port_name(&g.pos[g.n_pos],
+                          odin3_strtab_get(odin3_design_strtab(design),
+                                           odin3_wire_name(mod, odin3_module_port_wire(mod, i))));
             g.pos[g.n_pos++].lit = net_lit[net.v];
         }
     }
@@ -340,7 +342,8 @@ static void write_lut(FILE *out, uint32_t id, int lut_index) {
     if (constant >= 0) {
         (void)fprintf(out, ".names n%u\n%s", (unsigned)id, constant == 1 ? "1\n" : "");
     } else {
-        (void)fprintf(out, ".names %s %s n%u\n%.*s", an, bn, (unsigned)id, (int)cover.len, cover.data);
+        (void)fprintf(out, ".names %s %s n%u\n%.*s", an, bn, (unsigned)id, (int)cover.len,
+                      cover.data);
     }
     odin3_strbuf_free(&cover);
 }
@@ -450,7 +453,8 @@ static odin3_status do_command(const char *command) {
 
 /* --- the engine table ---------------------------------------------------------------------- */
 
-static odin3_status fake_open(void *self, odin3_abc_text_fn text, void *user, odin3_abc_fail *fail) {
+static odin3_status fake_open(void *self, odin3_abc_text_fn text, void *user,
+                              odin3_abc_fail *fail) {
     (void)self;
     (void)fail;
     g.text = text;

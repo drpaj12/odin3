@@ -26,7 +26,9 @@
 enum {
     PERCENT = 100,
     CGROUP_PATH_BYTES = 4096, /* the longest cgroup path or file name read */
-    CGROUP_LINE_BYTES = 4352  /* a /proc/self/cgroup line: the path and a little more */
+    CGROUP_LINE_BYTES = 4352, /* a /proc/self/cgroup line: the path and a little more */
+    MEMORY_MAX_TEXT = 64,     /* the digits of a memory.max file */
+    DECIMAL = 10
 };
 
 #define CGROUP_ROOT "/sys/fs/cgroup"
@@ -80,12 +82,12 @@ static uint64_t memory_max_of(const char *root, const char *path) {
     if (file == NULL) {
         return UINT64_MAX;
     }
-    char text[64];
+    char text[MEMORY_MAX_TEXT];
     uint64_t value = UINT64_MAX;
     if (fgets(text, sizeof text, file) != NULL && text[0] >= '0' && text[0] <= '9') {
         char *end = NULL;
         errno = 0;
-        unsigned long long parsed = strtoull(text, &end, 10);
+        unsigned long long parsed = strtoull(text, &end, DECIMAL);
         if (errno == 0 && end != text && (*end == '\n' || *end == '\0')) {
             value = (uint64_t)parsed;
         }

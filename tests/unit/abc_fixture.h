@@ -30,7 +30,13 @@
 #error "ODIN3_ABC_TEST_DIR must name this test's output directory"
 #endif
 
-enum { AFX_PATH = 600, AFX_LINES = 64, AFX_LINE = 600, AFX_TEXT = 1 << 16 };
+enum {
+    AFX_PATH = 300,          /* one path under the test directory */
+    AFX_JOIN = 2 * AFX_PATH, /* a path joined with a file name */
+    AFX_LINES = 64,
+    AFX_LINE = 1200,
+    AFX_TEXT = 1 << 16
+};
 
 /* The captured log: level and text of each message, in order. */
 typedef struct afx_log {
@@ -176,7 +182,8 @@ static inline void afx_check(odin3_design *design) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, opts));
 }
 
-/* The design as plain BLIF text (for "the IR is unchanged" assertions); malloc'd, freed by caller. */
+/* The design as plain BLIF text (for "the IR is unchanged" assertions); malloc'd, freed by caller.
+ */
 static inline char *afx_blif_text(odin3_design *design) {
     char path[AFX_PATH];
     afx_path(path, "snapshot.blif");
@@ -187,8 +194,8 @@ static inline char *afx_blif_text(odin3_design *design) {
 /* A scalar input or output port of mod; the port's net. */
 static inline odin3_net_id afx_port(odin3_design *design, odin3_module *mod, const char *name,
                                     odin3_dir dir) {
-    odin3_port_spec spec = {afx_intern(design, name), dir, 1, true, (odin3_prov_id){0},
-                            false, 0, 0, false};
+    odin3_port_spec spec = {
+        afx_intern(design, name), dir, 1, true, (odin3_prov_id){0}, false, 0, 0, false};
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &spec, &node));
     return odin3_pin_net(mod, odin3_node_pins(mod, node).first);
@@ -210,8 +217,7 @@ static inline odin3_celltype_id afx_type(odin3_design *design, const char *name)
 
 /* A bit-level cell of the type with default parameters; nets are one per port, in port order. */
 static inline odin3_node_id afx_cell(odin3_design *design, odin3_module *mod, const char *type,
-                                     const char *name, const odin3_net_id *nets,
-                                     uint32_t n_ports) {
+                                     const char *name, const odin3_net_id *nets, uint32_t n_ports) {
     odin3_netvec ports[8];
     TEST_ASSERT_TRUE(n_ports <= 8);
     for (uint32_t i = 0; i < n_ports; i++) {
@@ -242,8 +248,10 @@ static inline odin3_node_id afx_cell_p(odin3_design *design, odin3_module *mod, 
     return node;
 }
 
-/* A zero-input, zero-row $sop (constant 0) driving net: the `unconn` generator when net is so named. */
-static inline odin3_node_id afx_const_sop(odin3_design *design, odin3_module *mod, odin3_net_id net) {
+/* A zero-input, zero-row $sop (constant 0) driving net: the `unconn` generator when net is so
+ * named. */
+static inline odin3_node_id afx_const_sop(odin3_design *design, odin3_module *mod,
+                                          odin3_net_id net) {
     odin3_net_id none[1] = {{0}};
     odin3_netvec ports[2] = {{none, 0}, {&net, 1}};
     odin3_node_spec spec = {afx_type(design, "$sop"), 0, (odin3_prov_id){0}, NULL, 2};

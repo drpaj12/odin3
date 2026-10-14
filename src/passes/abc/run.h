@@ -23,7 +23,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-enum { ODIN3_ABC_DIR_BYTES = 1024 };
+enum { ODIN3_ABC_DIR_BYTES = 1024, ODIN3_ABC_LAST_LINE_BYTES = 256 };
 
 /* What region.c knows of a cell type, computed once per type and cached in the run. */
 enum {
@@ -48,29 +48,29 @@ struct odin3_abc_run {
     odin3_design *design;
     odin3_abc_opts opts;
     odin3_abc_script_choice choice;
-    odin3_abc_script script;          /* the checked script (odin3_abc_script_free) */
+    odin3_abc_script script; /* the checked script (odin3_abc_script_free) */
     uint8_t digest[ODIN3_SHA256_DIGEST_BYTES];
-    odin3_abc_route_kind route;       /* where the BLIF exchange runs: linked engine or child */
+    odin3_abc_route_kind route; /* where the BLIF exchange runs: linked engine or child */
     const odin3_abc_engine *engine;
-    uint32_t exchange;                /* an odin3_abc_exchange */
-    uint32_t run_no;                  /* r: counts from 0 across the invocation */
-    FILE *log;                        /* --log, or NULL */
-    FILE *runlog;                     /* abc<r>.log while a run is open, or NULL */
-    bool streaming;                   /* the text callback handles lines as they arrive (child) */
-    odin3_arena *arena;               /* per-invocation scratch */
-    odin3_vec gates;                  /* odin3_abc_gate */
-    odin3_u64map *gate_index;         /* cell-type ID -> index into gates */
-    char dir[ODIN3_ABC_DIR_BYTES];    /* the exchange directory (absolute) */
-    bool dir_is_temp;                 /* made by mkdtemp: the pass removes its files */
-    bool dir_made;                    /* the directory exists (made or given) */
-    odin3_module *module;             /* the current module, domain and region */
+    uint32_t exchange;             /* an odin3_abc_exchange */
+    uint32_t run_no;               /* r: counts from 0 across the invocation */
+    FILE *log;                     /* --log, or NULL */
+    FILE *runlog;                  /* abc<r>.log while a run is open, or NULL */
+    bool streaming;                /* the text callback handles lines as they arrive (child) */
+    odin3_arena *arena;            /* per-invocation scratch */
+    odin3_vec gates;               /* odin3_abc_gate */
+    odin3_u64map *gate_index;      /* cell-type ID -> index into gates */
+    char dir[ODIN3_ABC_DIR_BYTES]; /* the exchange directory (absolute) */
+    bool dir_is_temp;              /* made by mkdtemp: the pass removes its files */
+    bool dir_made;                 /* the directory exists (made or given) */
+    odin3_module *module;          /* the current module, domain and region */
     odin3_module_id module_id;
     const odin3_abc_domain *domain;
     odin3_abc_region *region;
-    odin3_strbuf lines;               /* ABC output lines of the call in progress, '\n'-ended */
+    odin3_strbuf lines; /* ABC output lines of the call in progress, '\n'-ended */
     bool lines_overflow;
-    uint32_t cmd_class;               /* the odin3_abc_class of the command in progress */
-    char last_line[256];              /* the last non-empty ABC output line */
+    uint32_t cmd_class;                        /* the odin3_abc_class of the command in progress */
+    char last_line[ODIN3_ABC_LAST_LINE_BYTES]; /* the last non-empty ABC output line */
 };
 
 /*

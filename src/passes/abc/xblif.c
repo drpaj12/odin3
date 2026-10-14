@@ -23,7 +23,8 @@
 enum {
     NAME_BYTES = 24, /* "o3co4294967295" and a NUL */
     WRAP_COLUMN = 100,
-    MAX_ISOP_WORDS = 1U << (ODIN3_LUT_MAX_WIDTH - 6U)
+    ROW_TAIL_BYTES = 3, /* a blank, the output character, a newline */
+    LINE_SLACK = 64     /* the fixed text around the names of a one-line directive */
 };
 
 typedef struct xname {
@@ -130,19 +131,19 @@ typedef struct rows_view {
     bool spaced;
 } rows_view;
 
-/* The first column with the same name as column j (j itself when there is none). */
-static uint32_t first_same(const xname *names, uint32_t j) {
-    for (uint32_t u = 0; u < j; u++) {
-        if (strcmp(names[u].text, names[j].text) == 0) {
-            return u;
+/* The first column with the same name as column col (col itself when there is none). */
+static uint32_t first_same(const xname *names, uint32_t col) {
+    for (uint32_t twin = 0; twin < col; twin++) {
+        if (strcmp(names[twin].text, names[col].text) == 0) {
+            return twin;
         }
     }
-    return j;
+    return col;
 }
 
-static bool has_twins(const xname *names, uint32_t k) {
-    for (uint32_t j = 1; j < k; j++) {
-        if (first_same(names, j) != j) {
+static bool has_twins(const xname *names, uint32_t count) {
+    for (uint32_t col = 1; col < count; col++) {
+        if (first_same(names, col) != col) {
             return true;
         }
     }
@@ -152,18 +153,18 @@ static bool has_twins(const xname *names, uint32_t k) {
 /* One row with duplicate input names merged (a column agrees with its first twin or the row is
  * dropped); false when the row is contradictory. plane gets one character per column, '-' in the
  * columns that a twin took over. */
-static bool merge_row(const xname *names, uint32_t k, const char *row, char *plane) {
-    memcpy(plane, row, k);
-    for (uint32_t j = 0; j < k; j++) {
-        uint32_t u = first_same(names, j);
-        if (u == j || row[j] == '-') {
+static bool merge_row(const xname *names, uint32_t count, const char *row, char *plane) {
+    memcpy(plane, row, count);
+    for (uint32_t col = 0; col < count; col++) {
+        uint32_t twin = first_same(names, col);
+        if (twin == col || row[col] == '-') {
             continue;
         }
-        if (plane[u] != '-' && plane[u] != row[j]) {
+        if (plane[twin] != '-' && plane[twin] != row[col]) {
             return false;
         }
-        plane[u] = row[j];
-        plane[j] = '-';
+        plane[twin] = row[col];
+        plane[col] = '-';
     }
     return true;
 }
@@ -171,27 +172,33 @@ static bool merge_row(const xname *names, uint32_t k, const char *row, char *pla
 /* A row's text: the plane characters of the unique columns, a blank, the output, a newline. */
 static odin3_status put_row(wctx *wc, const char *plane, bool twins, char out_char) {
     const xname *names = wc->names.data;
-    uint32_t k = (uint32_t)wc->names.len;
+    uint32_t count = (uint32_t)wc->names.len;
     odin3_status st = ODIN3_OK;
-    for (uint32_t j = 0; st == ODIN3_OK && j < k; j++) {
-        if (!twins || first_same(names, j) == j) {
-            st = odin3_strbuf_append(&wc->body, (odin3_bytes){&plane[j], 1});
+    for (uint32_t col = 0; st == ODIN3_OK && col < count; col++) {
+        if (!twins || first_same(names, col) == col) {
+            st = odin3_strbuf_append(&wc->body, (odin3_bytes){&plane[col], 1});
         }
     }
-    const char tail[4] = {k > 0 ? ' ' : out_char, k > 0 ? out_char : '\n', k > 0 ? '\n' : 0, 0};
-    return st == ODIN3_OK ? odin3_strbuf_append(&wc->body, odin3_bytes_cstr(tail)) : st;
+    char tail[ROW_TAIL_BYTES];
+    size_t used = 0;
+    if (count > 0) {
+        tail[used++] = ' ';
+    }
+    tail[used++] = out_char;
+    tail[used++] = '\n';
+    return st == ODIN3_OK ? odin3_strbuf_append(&wc->body, (odin3_bytes){tail, used}) : st;
 }
 
 static odin3_status put_rows(wctx *wc, const rows_view *rows, odin3_strbuf *plane) {
-    uint32_t k = (uint32_t)wc->names.len;
-    bool twins = has_twins(wc->names.data, k);
+    uint32_t count = (uint32_t)wc->names.len;
+    bool twins = has_twins(wc->names.data, count);
     odin3_status st = ODIN3_OK;
-    for (uint32_t r = 0; st == ODIN3_OK && r < rows->count; r++) {
-        const char *row = rows->data + (size_t)r * rows->stride;
-        char out_char = row[k + (rows->spaced ? 1U : 0U)];
+    for (uint32_t num = 0; st == ODIN3_OK && num < rows->count; num++) {
+        const char *row = rows->data + (size_t)num * rows->stride;
+        char out_char = row[count + (rows->spaced ? 1U : 0U)];
         if (!twins) {
             st = put_row(wc, row, false, out_char);
-        } else if (merge_row(wc->names.data, k, row, plane->data)) {
+        } else if (merge_row(wc->names.data, count, row, plane->data)) {
             st = put_row(wc, plane->data, true, out_char);
         }
     }
@@ -201,17 +208,17 @@ static odin3_status put_rows(wctx *wc, const rows_view *rows, odin3_strbuf *plan
 
 /* `.names <unique inputs> <out>` and the rows. */
 static odin3_status put_names(wctx *wc, const xname *out, const rows_view *rows) {
-    uint32_t k = (uint32_t)wc->names.len;
+    uint32_t count = (uint32_t)wc->names.len;
     const xname *names = wc->names.data;
     odin3_status st = put_text(wc, ".names");
-    for (uint32_t j = 0; st == ODIN3_OK && j < k; j++) {
-        st = first_same(names, j) == j ? put_word(wc, names[j].text) : st;
+    for (uint32_t col = 0; st == ODIN3_OK && col < count; col++) {
+        st = first_same(names, col) == col ? put_word(wc, names[col].text) : st;
     }
     st = st == ODIN3_OK ? put_word(wc, out->text) : st;
     st = st == ODIN3_OK ? put_text(wc, "\n") : st;
     odin3_strbuf plane;
     odin3_strbuf_init(&plane);
-    st = st == ODIN3_OK ? odin3_strbuf_reserve(&plane, (size_t)k + 1U) : st;
+    st = st == ODIN3_OK ? odin3_strbuf_reserve(&plane, (size_t)count + 1U) : st;
     if (st == ODIN3_OK) {
         st = put_rows(wc, rows, &plane);
     }
@@ -249,10 +256,10 @@ static odin3_status put_table(wctx *wc, const uint64_t *words, const xname *out)
 }
 
 static odin3_status put_lut(wctx *wc, odin3_node_id node, const xname *out) {
-    uint64_t words[MAX_ISOP_WORDS];
+    uint64_t words[ODIN3_LUT_MAX_WORDS];
     odin3_value params[2] = {*odin3_node_param(wc->module, node, ODIN3_LUT_P_WIDTH),
                              *odin3_node_param(wc->module, node, ODIN3_LUT_P_LUT)};
-    if (!odin3_lut_table(params, words, MAX_ISOP_WORDS)) {
+    if (!odin3_lut_table(params, words, ODIN3_LUT_MAX_WORDS)) {
         return ODIN3_ERR_INVALID_ARG;
     }
     return put_table(wc, words, out);
@@ -293,22 +300,22 @@ static odin3_status put_soft(wctx *wc, odin3_node_id node) {
 
 /* --- registers ----------------------------------------------------------------------------- */
 
-static odin3_status put_register(wctx *wc, uint32_t j) {
-    bool inv = ((const uint8_t *)wc->inverted.data)[j] != 0;
-    odin3_net_id dnet = {u32_at(&wc->region->reg_d, j)};
+static odin3_status put_register(wctx *wc, uint32_t reg) {
+    bool inv = ((const uint8_t *)wc->inverted.data)[reg] != 0;
+    odin3_net_id dnet = {u32_at(&wc->region->reg_d, reg)};
     xname dname;
     read_name(wc, dnet, &dname);
-    char line[3 * NAME_BYTES + 64];
+    char line[3 * NAME_BYTES + LINE_SLACK];
     odin3_status st = ODIN3_OK;
     if (inv) {
-        (void)snprintf(line, sizeof line, ".names %s o3d%" PRIu32 "\n0 1\n", dname.text, j);
+        (void)snprintf(line, sizeof line, ".names %s o3d%" PRIu32 "\n0 1\n", dname.text, reg);
         st = put_text(wc, line);
-        (void)snprintf(dname.text, NAME_BYTES, "o3d%" PRIu32, j);
+        (void)snprintf(dname.text, NAME_BYTES, "o3d%" PRIu32, reg);
     }
-    (void)snprintf(line, sizeof line, ".latch %s o3q%" PRIu32 " 0\n", dname.text, j);
+    (void)snprintf(line, sizeof line, ".latch %s o3q%" PRIu32 " 0\n", dname.text, reg);
     st = st == ODIN3_OK ? put_text(wc, line) : st;
     if (inv && st == ODIN3_OK) {
-        (void)snprintf(line, sizeof line, ".names o3q%" PRIu32 " o3r%" PRIu32 "\n0 1\n", j, j);
+        (void)snprintf(line, sizeof line, ".names o3q%" PRIu32 " o3r%" PRIu32 "\n0 1\n", reg, reg);
         st = put_text(wc, line);
     }
     return st;
@@ -324,9 +331,9 @@ static odin3_status put_co_buffers(wctx *wc) {
             continue;
         }
         bool inv = ((const uint8_t *)wc->inverted.data)[reg - 1U] != 0;
-        char line[3 * NAME_BYTES + 32];
-        (void)snprintf(line, sizeof line, ".names o3%c%" PRIu32 " o3co%zu\n1 1\n", inv ? 'r' : 'q',
-                       reg - 1U, i);
+        char line[3 * NAME_BYTES + LINE_SLACK];
+        (void)snprintf(line, sizeof line, ".names o3%c%" PRIu32 " o3co%u\n1 1\n", inv ? 'r' : 'q',
+                       reg - 1U, (unsigned)i);
         st = put_text(wc, line);
     }
     return st;
@@ -348,26 +355,28 @@ static odin3_status init_inverted(wctx *wc) {
 
 /* --- the file ------------------------------------------------------------------------------ */
 
-static odin3_status put_header(wctx *wc, odin3_strbuf *head) {
-    odin3_status st = odin3_strbuf_append(head, odin3_bytes_cstr(".model o3abc\n.inputs"));
-    char word[NAME_BYTES];
+/* One directive's names (` o3ci<i>` or ` o3co<i>`), wrapped when the line is long. */
+static odin3_status put_port_names(odin3_strbuf *head, const char *prefix, size_t count) {
+    odin3_status st = ODIN3_OK;
     size_t col = 0;
-    for (size_t i = 0; st == ODIN3_OK && i < wc->region->cis.len; i++) {
-        (void)snprintf(word, sizeof word, " o3ci%zu", i);
-        st = odin3_strbuf_append(head, odin3_bytes_cstr(col > WRAP_COLUMN ? " \\\n" : ""));
-        col = col > WRAP_COLUMN ? 0 : col;
+    for (size_t idx = 0; st == ODIN3_OK && idx < count; idx++) {
+        char word[NAME_BYTES];
+        (void)snprintf(word, sizeof word, " %s%u", prefix, (unsigned)idx);
+        if (col > WRAP_COLUMN) {
+            st = odin3_strbuf_append(head, odin3_bytes_cstr(" \\\n"));
+            col = 0;
+        }
         st = st == ODIN3_OK ? odin3_strbuf_append(head, odin3_bytes_cstr(word)) : st;
         col += strlen(word);
     }
+    return st;
+}
+
+static odin3_status put_header(const wctx *wc, odin3_strbuf *head) {
+    odin3_status st = odin3_strbuf_append(head, odin3_bytes_cstr(".model o3abc\n.inputs"));
+    st = st == ODIN3_OK ? put_port_names(head, "o3ci", wc->region->cis.len) : st;
     st = st == ODIN3_OK ? odin3_strbuf_append(head, odin3_bytes_cstr("\n.outputs")) : st;
-    col = 0;
-    for (size_t i = 0; st == ODIN3_OK && i < wc->region->cos.len; i++) {
-        (void)snprintf(word, sizeof word, " o3co%zu", i);
-        st = odin3_strbuf_append(head, odin3_bytes_cstr(col > WRAP_COLUMN ? " \\\n" : ""));
-        col = col > WRAP_COLUMN ? 0 : col;
-        st = st == ODIN3_OK ? odin3_strbuf_append(head, odin3_bytes_cstr(word)) : st;
-        col += strlen(word);
-    }
+    st = st == ODIN3_OK ? put_port_names(head, "o3co", wc->region->cos.len) : st;
     st = st == ODIN3_OK ? odin3_strbuf_append(head, odin3_bytes_cstr("\n")) : st;
     if (st == ODIN3_OK && wc->c0_used) {
         st = odin3_strbuf_append(head, odin3_bytes_cstr(".names o3c0\n"));
@@ -380,11 +389,11 @@ static odin3_status put_header(wctx *wc, odin3_strbuf *head) {
 
 static odin3_status write_body(wctx *wc) {
     odin3_status st = init_inverted(wc);
-    for (size_t s = 0; st == ODIN3_OK && s < wc->region->soft.len; s++) {
-        st = put_soft(wc, (odin3_node_id){u32_at(&wc->region->soft, s)});
+    for (size_t idx = 0; st == ODIN3_OK && idx < wc->region->soft.len; idx++) {
+        st = put_soft(wc, (odin3_node_id){u32_at(&wc->region->soft, idx)});
     }
-    for (uint32_t j = 0; st == ODIN3_OK && j < wc->region->regs.len; j++) {
-        st = put_register(wc, j);
+    for (uint32_t reg = 0; st == ODIN3_OK && reg < wc->region->regs.len; reg++) {
+        st = put_register(wc, reg);
     }
     st = st == ODIN3_OK ? put_co_buffers(wc) : st;
     return st == ODIN3_OK ? put_text(wc, ".end\n") : st;
@@ -416,12 +425,12 @@ uint32_t odin3_abc_xblif_command_count(const odin3_abc_run *run) {
 }
 
 odin3_status odin3_abc_xblif_command(const odin3_abc_run *run, uint32_t index,
-                                     const char *in_abs, const char *out_abs, odin3_strbuf *out,
+                                     const odin3_abc_paths *paths, odin3_strbuf *out,
                                      const odin3_abc_cmd **src) {
     *src = NULL;
     uint32_t n_cmds = run->script.n_cmds;
     if (index == 0) {
-        return odin3_strbuf_appendf(out, "read \"%s\"", in_abs);
+        return odin3_strbuf_appendf(out, "read \"%s\"", paths->in);
     }
     if (index <= n_cmds) {
         *src = odin3_abc_script_cmd(&run->script, index - 1U);
@@ -430,15 +439,15 @@ odin3_status odin3_abc_xblif_command(const odin3_abc_run *run, uint32_t index,
     if (run->script.final_space == ODIN3_ABC_SPACE_GIA && index == n_cmds + 1U) {
         return odin3_strbuf_append(out, odin3_bytes_cstr("&put"));
     }
-    return odin3_strbuf_appendf(out, "write_hie \"%s\" \"%s\"", in_abs, out_abs);
+    return odin3_strbuf_appendf(out, "write_hie \"%s\" \"%s\"", paths->in, paths->out);
 }
 
-odin3_status odin3_abc_xblif_commands(const odin3_abc_run *run, const char *in_abs,
-                                      const char *out_abs, odin3_strbuf *out) {
+odin3_status odin3_abc_xblif_commands(const odin3_abc_run *run, const odin3_abc_paths *paths,
+                                      odin3_strbuf *out) {
     const odin3_abc_cmd *src = NULL;
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < odin3_abc_xblif_command_count(run); i++) {
-        st = odin3_abc_xblif_command(run, i, in_abs, out_abs, out, &src);
+        st = odin3_abc_xblif_command(run, i, paths, out, &src);
         st = st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("\n")) : st;
     }
     return st;

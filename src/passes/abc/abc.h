@@ -7,8 +7,8 @@
 #define ODIN3_PASSES_ABC_ABC_H
 
 #include "ir/design.h"
-#include "odin3/odin3.h"
 #include "ir/prov.h"
+#include "odin3/odin3.h"
 #include "util/arena.h"
 #include "util/sha256.h"
 
@@ -34,13 +34,13 @@ enum {
 
 /* The pass-level caps (§7.8, AB-24). */
 enum {
-    ODIN3_ABC_MAX_DOMAINS = 64,                /* clock domains per module */
-    ODIN3_ABC_MAX_AIG_OBJS = 1 << 26,          /* objects of one run's AIG */
-    ODIN3_ABC_NAMEMAP_MAX_OBJS = 1 << 23,      /* name map skipped above this (in-memory only) */
-    ODIN3_ABC_GATE_MAX_INPUTS = 6,             /* wider gate types are cut cells */
-    ODIN3_ABC_BYTES_PER_AIG_OBJ = 512,         /* until bench_abc calibrates it (it only goes up) */
-    ODIN3_ABC_PROV_EDGES_PER_OBJ = 16,         /* provenance edges per old cell and new object */
-    ODIN3_ABC_PROV_EDGES_BASE = 65536          /* ... plus this, per run */
+    ODIN3_ABC_MAX_DOMAINS = 64,           /* clock domains per module */
+    ODIN3_ABC_MAX_AIG_OBJS = 1 << 26,     /* objects of one run's AIG */
+    ODIN3_ABC_NAMEMAP_MAX_OBJS = 1 << 23, /* name map skipped above this (in-memory only) */
+    ODIN3_ABC_GATE_MAX_INPUTS = 6,        /* wider gate types are cut cells */
+    ODIN3_ABC_BYTES_PER_AIG_OBJ = 512,    /* until bench_abc calibrates it (it only goes up) */
+    ODIN3_ABC_PROV_EDGES_PER_OBJ = 16,    /* provenance edges per old cell and new object */
+    ODIN3_ABC_PROV_EDGES_BASE = 65536     /* ... plus this, per run */
 };
 
 /*
