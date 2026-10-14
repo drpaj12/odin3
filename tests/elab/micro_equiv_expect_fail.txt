@@ -80,3 +80,4 @@ keywords/macromodule/multiple_macromodules.v [syntax error, unexpected TOK_ID] Y
 # never listed. The needle pins the 4G cap, so a changed cap makes the entry fail until it is
 # re-measured. Measured with the sweep's own Yosys script under `prlimit --as=6 GiB`.
 full/stereovision0.v [Yosys side B exceeded its memory cap (4G)] size limit of the oracle: Yosys 0.55 side B (the sweep's script) aborts with std::bad_alloc after 55 s at 5.68 GB RSS under a 6 GiB limit, so it needs more than 6 GiB; no netlist, no verdict
+large/LU32PEEng.v [Yosys side B exceeded its memory cap (4G)] size limit of the oracle at the 4G cap: Yosys 0.55 side B (the sweep's script) needs 4.42 GB RSS and 13 min 45 s (it finishes under a 6 GiB limit), more than the 4 GiB cap, so it is killed after 7 min; exit_vtr lists the same design as a dsec size limit (tests/exit/vtr_unproven.txt)
