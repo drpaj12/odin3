@@ -320,6 +320,13 @@ function is internal, like `odin3_prov_derive`).
   instantiated *n* times costs *r·n* records (hash-consing merges equal ones). A record is about 48
   bytes plus its hash-index entry. The pre-flight estimate (§12) counts them. 3H measures it on the
   19 and reports (Task 5).
+- **Instance attributes are not copied.** The instance node is deleted when it is expanded
+  (3A review M7); its attributes (other than `keep_hierarchy`, which decides whether it is expanded
+  at all) are gone, and only its provenance record survives, as the second parent of every record
+  the expansion makes. Yosys's `$scopeinfo` would keep them; a follow-up can copy them onto the
+  `u1` scope if a use turns up.
+- **Constants and aliases carry the instance's record.** The shared constant a flatten creates in a
+  root gets a `DERIVED` record whose parent is the instance that first needed it (review M3).
 - **Nested expansion does not chain.** Contents are copied from the original child, so the parent of a
   copied object is the child's `SOURCE` record, not a `DERIVED` record of an outer flatten step.
 - **Pass-run information** (3D-3's `odin3_passrun_set_info`): `roots=<n> instances=<n> kept=<n>

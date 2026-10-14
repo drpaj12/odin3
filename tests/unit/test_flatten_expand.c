@@ -341,6 +341,50 @@ static void test_flat_feedthrough(void) {
     TEST_ASSERT_NOT_NULL(strstr(list, "u1.y:0"));
 }
 
+/* A feed-through whose input port bit is left open and whose output joins the parent's z: the
+ * parent's named net stays the live one with z as its primary (review M4). */
+static void test_flat_join_after_fresh(void) {
+    odin3_module *sub = ff_module(&fix, "sub");
+    (void)ff_port(&fix, sub, "a", ODIN3_DIR_IN, 1);
+    (void)ff_port(&fix, sub, "y", ODIN3_DIR_OUT, 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_net_merge(sub, (odin3_net_pair){ff_wnet(&fix, sub, "a", 0),
+                                                                ff_wnet(&fix, sub, "y", 0)}));
+    odin3_module *top = make_top();
+    odin3_net_id nets[2] = {(odin3_net_id){0}, ff_wnet(&fix, top, "z", 0)};
+    (void)ff_inst(&fix, (ff_pair){top, sub}, "u1", nets);
+    flatten_ok(top);
+    odin3_wirebit primary = odin3_net_primary(top, ff_wnet(&fix, top, "z", 0));
+    TEST_ASSERT_EQUAL_UINT32(odin3_module_find_wire(top, str("z")).v, primary.wire.v);
+}
+
+/* The shared constants a flatten creates carry a record (the instance's), not provenance 0 (M3). */
+static void test_flat_constant_prov(void) {
+    odin3_prov_id inst_src = ff_source(&fix, "top.v", 7, "top");
+    odin3_module *sub = ff_module(&fix, "sub");
+    (void)ff_port(&fix, sub, "y", ODIN3_DIR_OUT, 1);
+    odin3_net_id one = ff_const(&fix, sub, 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_net_merge(sub, (odin3_net_pair){ff_wnet(&fix, sub, "y", 0), one}));
+    odin3_module *top = ff_module(&fix, "top");
+    (void)ff_port(&fix, top, "z", ODIN3_DIR_OUT, 1);
+    odin3_net_id zz = ff_wnet(&fix, top, "z", 0);
+    fix.prov = inst_src;
+    (void)ff_inst(&fix, (ff_pair){top, sub}, "u1", &zz);
+    flatten_ok(top);
+    odin3_celltype_id tid = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(fix.design, str("$_CONST1_"), &tid));
+    uint32_t seen = 0;
+    for (uint32_t nid = 1; nid < odin3_module_node_end(top); nid++) {
+        odin3_node_id node = {nid};
+        if (odin3_node_live(top, node) && odin3_node_type(top, node).v == tid.v) {
+            TEST_ASSERT_NOT_EQUAL(0, odin3_node_prov(top, node).v);
+            seen++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, seen);
+}
+
 static void test_flat_keep_hierarchy_inst(void) {
     odin3_module *sub = make_sub("sub", (odin3_prov_id){0});
     odin3_module *top = make_top();
@@ -1132,6 +1176,8 @@ int main(void) {
     RUN_TEST(test_flat_multidriver_ids_differ);
     RUN_TEST(test_flat_const_output_ids_differ);
     RUN_TEST(test_flat_feedthrough);
+    RUN_TEST(test_flat_join_after_fresh);
+    RUN_TEST(test_flat_constant_prov);
     RUN_TEST(test_flat_keep_hierarchy_inst);
     RUN_TEST(test_flat_keep_hierarchy_module);
     RUN_TEST(test_flat_attrs);

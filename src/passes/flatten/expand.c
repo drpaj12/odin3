@@ -69,12 +69,18 @@ void odin3_flatten_ctx_free(odin3_flatten_ctx *fc) {
 /* --- the net map ----------------------------------------------------------------------------- */
 
 odin3_net_id odin3_flatten_resolve(const odin3_flatten_ctx *fc, odin3_net_id net) {
+    odin3_net_id start = net;
     uint64_t next = 0;
     size_t guard = odin3_u64map_count(fc->redirect) + 1;
+    size_t hops = 0;
     while (net.v != 0 && guard-- > 0 && odin3_u64map_get(fc->redirect, net.v, &next)) {
         net.v = (uint32_t)next;
+        hops++;
     }
     assert(guard != SIZE_MAX);
+    if (hops > 1) { /* path compression: the next lookup of the first net takes one hop */
+        (void)odin3_u64map_put(fc->redirect, (odin3_kv){start.v, net.v});
+    }
     return net;
 }
 
@@ -115,9 +121,10 @@ static odin3_status fresh_net(odin3_flatten_ctx *fc, odin3_net_id cn, odin3_net_
 static odin3_status const_net_of(odin3_flatten_ctx *fc, uint32_t kind, odin3_net_id *out) {
     odin3_net_id net = odin3_flatten_resolve(fc, fc->const_net[kind]);
     if (net.v == 0) {
-        odin3_status st = odin3_net_create(fc->root, 0, (odin3_prov_id){0}, &net);
-        odin3_netvec port = {&net, 1};
         odin3_node_spec spec = {fc->const_type[kind], 0, {0}, NULL, 0};
+        odin3_status st = odin3_flatten_derive(fc, (odin3_prov_id){0}, &spec.prov);
+        st = st == ODIN3_OK ? odin3_net_create(fc->root, 0, spec.prov, &net) : st;
+        odin3_netvec port = {&net, 1};
         st = st == ODIN3_OK ? odin3_node_create_connected(fc->root, &spec, &port, NULL) : st;
         if (st != ODIN3_OK) {
             return st;
@@ -166,8 +173,13 @@ static odin3_status join_bit(odin3_flatten_ctx *fc, odin3_net_id cn, odin3_net_i
         *slot = to;
         return st;
     }
-    *flag = FLAG_JOINED;
-    return to.v != 0 && to.v != cur.v ? merge_nets(fc, cur, to) : ODIN3_OK;
+    bool was_fresh = *flag == FLAG_FRESH; /* its name is on the net it was created with */
+    *flag = was_fresh ? FLAG_FRESH : FLAG_JOINED;
+    if (to.v == 0 || to.v == cur.v) {
+        return ODIN3_OK;
+    }
+    /* a net the parent never had is the one to drop: the parent's named net stays the live one */
+    return was_fresh ? merge_nets(fc, to, cur) : merge_nets(fc, cur, to);
 }
 
 static odin3_status map_constants(odin3_flatten_ctx *fc) {
