@@ -724,6 +724,20 @@ if(BUILD_TESTING)
     # 3A Task 3: the expansion.
     odin3_add_unit_test(test_flatten_expand)
     target_sources(test_flatten_expand PRIVATE tests/unit/flatten_fixture.c)
+    # 3A Task 4: flatten-sim (no Yosys) and flatten-diff (Yosys 0.55, in the block below) over
+    # the fixtures of tests/flatten; exit 77 skips when an ASan child cannot be capped.
+    add_test(NAME flatten_sim_fixtures
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-sim
+                --odin3 $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/flatten/hier.v)
+    set_tests_properties(flatten_sim_fixtures PROPERTIES LABELS flatten SKIP_RETURN_CODE 77
+                         TIMEOUT 600)
+    # cli_flatten: the CLI runs read_blif; flatten; check on a hierarchical BLIF (hand_body: sub is
+    # expanded, bb is a black box and stays).
+    add_test(NAME cli_flatten
+        COMMAND $<TARGET_FILE:odin3> -p
+                "read_blif ${PROJECT_SOURCE_DIR}/tests/golden/blif/hand_body.blif; flatten; check")
+    set_tests_properties(cli_flatten PROPERTIES LABELS flatten
+        PASS_REGULAR_EXPRESSION "flatten: 1 instances expanded \\(0 kept\\) in 1 roots")
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
@@ -1842,6 +1856,15 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         message(STATUS "Yosys 0.55: not found (VTR build); no Yosys-0.55 tests")
     endif()
     if(ODIN3_YOSYS055_OK)
+        # 3A Task 4 (spec 14.3): flatten against Yosys 0.55 on the fixtures; a difference not
+        # listed in tests/flatten/diff_expect.txt (with a reason) fails.
+        add_test(NAME flatten_diff_fixtures
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --expect ${PROJECT_SOURCE_DIR}/tests/flatten/diff_expect.txt
+                    ${PROJECT_SOURCE_DIR}/tests/flatten/hier.v)
+        set_tests_properties(flatten_diff_fixtures PROPERTIES LABELS flatten SKIP_RETURN_CODE 77
+                             TIMEOUT 600)
         # 2D §13/§14.3: Yosys 0.55 reads every write_rtlil fixture of test_rtlil_writer back
         # (read_rtlil; write_rtlil) and lowers it (read_rtlil; proc; opt; write_blif), smallest
         # first.

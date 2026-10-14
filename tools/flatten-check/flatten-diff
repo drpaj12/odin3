@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# flatten-diff: 3A spec 14.3. See flatten_diff.py.
+# Exit codes: 0 no unexpected difference, 1 a difference, 2 error or usage, 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../elab-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/flatten_diff.py" "$@"
