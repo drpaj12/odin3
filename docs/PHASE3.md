@@ -722,6 +722,20 @@ then the options considered.
     multiplexed RAM modes; (8) async RAM reads stay soft; (9) two live write ports mapped without
     priority logic (the IEEE race, 2D §17 #66), exempt from the functional check; (10) the 3C plan
     as about 7 tasks in 3 PRs.
+32. **3B `lower` spec and plan approved, and a standing rule for Phase 3** (Peter, 2026-10-14: "My
+    general is going to be yes (as all these reasoned well are for partial mapping to vtr) … want it
+    to get as close to the flow; what I plan to use the tool for is an attempt to reverse engineer
+    circuits at the structured netlist in Verilog, so most of these decisions I will just accept").
+    3B, all five recommendations: (1) reset or load wins over the enable (not Parmys's
+    enable-gated reset in `adffe2dff.v`/`aldffe2dff.v`); (2) `opt -fast; compact` after `lower` in
+    the exit script; (3) soft arithmetic follows Yosys `techmap.v`, contract = equivalence plus cell
+    histograms; (4) non-constant `$pow`, `$tribuf`, standalone `$memrd`/`$memwr` and transparent,
+    async-write or multi-clock `$mem` are located errors; (5) word FFs and latches are checked
+    against an independent reference stepper, Yosys's lowering and a formal check. **Standing rule:**
+    Phase 3 VTR-mapping and flow decisions follow the agent's recommendation as an agent default
+    logged here; Peter is asked only for IR/invariant changes, irreversible or outward-facing steps,
+    and anything touching the reverse-engineering use (structural Verilog input, names, hierarchy,
+    provenance, Verilog output).
 
 ## Risks
 
