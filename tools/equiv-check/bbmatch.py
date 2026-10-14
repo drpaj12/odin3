@@ -191,6 +191,51 @@ def canonical_drivers(names: Sequence[blif.Names]) -> Callable[[str], str]:
     return canon
 
 
+CLOSURE_ROUNDS = 20
+
+
+def canonical_classes(names: Sequence[blif.Names], latches: Sequence[blif.Latch],
+                      boxes: Sequence[BoxSpec]) -> Callable[[str], str]:
+    """net -> the representative of its congruence class: nets that are provably the same
+    function of the primary inputs and the cut boxes' free outputs.
+
+    Buffers and constants are looked through (``canonical_drivers``); then covers with the same
+    inputs and rows, latches with the same data input and init (copies of one register), and
+    outputs of cut boxes with the same type, parameters and input nets are merged, round after
+    round from the discrete partition until nothing merges (or ``CLOSURE_ROUNDS``): congruence
+    closure, which only ever merges nets that are equal (a deterministic box has one output per
+    input vector; the cut box assumption is the same as for twins).  Two boxes whose inputs are
+    copies of one register then have equal identities and are interchangeable."""
+    base = canonical_drivers(names)
+    parent: dict[str, str] = {}
+
+    def rep(net: str) -> str:
+        net = base(net)
+        while net in parent:
+            net = parent[net]
+        return net
+
+    nodes = [c for c in names if c.inputs and not (len(c.inputs) == 1 and _is_identity(c))]
+    for _ in range(CLOSURE_ROUNDS):
+        table: dict[tuple[object, ...], str] = {}
+        merged = False
+        keyed: list[tuple[tuple[object, ...], str]] = [
+            (("c", tuple(rep(n) for n in c.inputs), tuple(c.rows)), c.output) for c in nodes]
+        keyed += [(("l", rep(lat.input), lat.init), lat.output) for lat in latches]
+        for box in boxes:
+            ins = tuple(rep(n) for _, n in box.inputs)
+            keyed += [(("b", box.cell_type, box.params, pin, ins), net) for pin, net in box.outputs]
+        for key, out in keyed:
+            first = table.setdefault(key, rep(out))
+            mine = rep(out)
+            if mine != first:
+                parent[mine] = first
+                merged = True
+        if not merged:
+            break
+    return rep
+
+
 def _is_identity(cell: blif.Names) -> bool:
     if not cell.rows:
         return False
@@ -298,7 +343,7 @@ def signatures(names: Sequence[blif.Names], latches: Sequence[blif.Latch],
     digests = _digests(covers, order, latches, pis, boxes, pi_key)
     colours = (refine(covers, order, latches, pis, boxes, pi_key) if structure
                else [0] * len(boxes))
-    canon = canonical_drivers(names)
+    canon = canonical_classes(names, latches, boxes)
     return [Signature(d, tuple(canon(net) for _, net in box.inputs), c)
             for box, d, c in zip(boxes, digests, colours, strict=True)]
 

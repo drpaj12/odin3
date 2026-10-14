@@ -886,9 +886,11 @@ class UnnamedBlackBoxTest(unittest.TestCase):
                 + f".names {y_from} c y\n11 1\n.names {z_from} z\n1 1\n.end\n")
 
     def test_copies_are_paired_in_order_and_proved(self) -> None:
+        """Two boxes fed by two copies of one register are interchangeable (the congruence
+        closure of bbmatch sees r1 and r2 as one function): paired, none of them guessed."""
         flats = self.flats(self.copies("$m~1", "$m~2", "$m~1", "$m~2"),
                            self.copies("$m~7", "$m~8", "$m~7", "$m~8"))
-        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 2))
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 0))
         if ABC is None and not REQUIRE_ABC:
             return
         a = self.write("a.blif", self.copies("$m~1", "$m~2", "$m~1", "$m~2"))
@@ -1163,6 +1165,78 @@ class RamPairingTest(unittest.TestCase):
                                       "--no-ram-pairing")
         self.assertIn(code, (0, 4), err)
         self.assertNotIn("RAM slice", err)
+
+
+class SingleProbeTest(unittest.TestCase):
+    """--match-unnamed also tells apart unnamed boxes that name no memory (multipliers) by ABC
+    probes when simulation cannot: both ``a`` inputs are ANDs of 800 inputs that the biased
+    simulation never raises, and B builds the same functions with another grouping, so neither the
+    signature nor the colour of the input cones pairs them (2H micro sweep, rs_decoder_2)."""
+
+    WIDTH = 800
+
+    def tree(self, prefix: str, block: int) -> str:
+        lines, mids = [], []
+        for k in range(0, self.WIDTH, block):
+            ins = " ".join(f"{prefix}{i}" for i in range(k, min(k + block, self.WIDTH)))
+            lines.append(f".names {ins} m{prefix}{k}\n{'1' * min(block, self.WIDTH - k)} 1\n")
+            mids.append(f"m{prefix}{k}")
+        lines.append(f".names {' '.join(mids)} w{prefix}\n{'1' * len(mids)} 1\n")
+        return "".join(lines)
+
+    def netlist(self, block: int, swap: bool) -> str:
+        ins = " ".join(f"{p}{i}" for p in "xy" for i in range(self.WIDTH))
+        text = (f".model t\n.inputs clk d0 {ins}\n.outputs ox oy\n"
+                + self.tree("x", block) + self.tree("y", block))
+        mults = [("x", "ox"), ("y", "oy")]
+        for name, out in (reversed(mults) if swap else mults):
+            text += (f".gate multiply a[0]=w{name} b[0]=d0 out[0]=mul{name}~0\n"
+                     f".names mul{name}~0 {out}\n1 1\n")
+        return text + ".end\n"
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def run_check(self, *flags: str) -> tuple[int, str, str]:
+        assert ABC is not None
+        paths = []
+        for name, text in (("a.blif", self.netlist(10, False)),
+                           ("b.blif", self.netlist(8, True))):
+            path = Path(self.tmp.name) / name
+            path.write_text(text, encoding="utf-8")
+            paths.append(str(path))
+        return check("--match-unnamed", "--abc", ABC, *flags, *paths)
+
+    @needs_abc
+    def test_boxes_that_simulation_cannot_tell_apart_pair_by_probe(self) -> None:
+        code, out, err = self.run_check()
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("multiply #", err)
+
+    @needs_abc
+    def test_without_probes_the_wrong_guess_is_inconclusive_not_a_difference(self) -> None:
+        code, out, err = self.run_check("--no-ram-probe")
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("inconclusive", err)
+
+
+class CongruenceTest(unittest.TestCase):
+    """bbmatch.canonical_classes: copies of one register and boxes fed by them are one class."""
+
+    def test_copies_of_a_register_are_one_class_and_so_are_the_boxes_they_feed(self) -> None:
+        names = [blif.Names(["a"], "d1", [("1", "1")]), blif.Names(["a", "b"], "d2", [("11", "1")])]
+        latches = [blif.Latch("d2", "q1", init="0"), blif.Latch("d2", "q2", init="0"),
+                   blif.Latch("d2", "q3", init="1")]
+        boxes = [bbmatch.BoxSpec("multiply", (), None, (("a[0]", "q1"),), (("out[0]", "o1"),)),
+                 bbmatch.BoxSpec("multiply", (), None, (("a[0]", "q2"),), (("out[0]", "o2"),)),
+                 bbmatch.BoxSpec("multiply", (), None, (("a[0]", "q3"),), (("out[0]", "o3"),))]
+        canon = bbmatch.canonical_classes(names, latches, boxes)
+        self.assertEqual(canon("q1"), canon("q2"))
+        self.assertNotEqual(canon("q1"), canon("q3"))  # another init: another register
+        self.assertEqual(canon("o1"), canon("o2"))
+        self.assertNotEqual(canon("o1"), canon("o3"))
+        self.assertEqual(canon("d1"), "a")  # a buffer is looked through
 
 
 def _stuck_we(name: str, first: int = 0) -> tuple[list[str], str]:
