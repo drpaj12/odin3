@@ -1023,9 +1023,24 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       mcml.v Phase 2 opt passes <= 1.0 s; mcml.v `opt -full` <= 0.3 s; lenet.v Phase 2 opt passes
       <= 15 s; lenet.v RSS growth <= 25%; the 31 VTR files <= 3 s in total. A miss is investigated
       with the printed columns and reported, never relaxed.
-    - **Sweeps' summaries and Task 20's nightly legs (`opt-nightly`, `opt_equiv_vtr`,
-      `opt_diff_vtr`, `sweep-xl` for lenet.v's Yosys side): not yet run (Task 20 has not landed;
-      the `_xl` legs need an idle machine).**
+    - **Sweeps' summaries and Task 20's nightly legs (`tools/opt-check/opt-nightly`;
+      `opt_equiv_vtr`, `opt_diff_vtr`, `opt_equiv_vtr_xl`, `opt_diff_vtr_xl`): not yet run in full;
+      the controller runs them by hand (Peter runs no nightly) and records the summary lines
+      here.** Each file runs `opt-equiv` and `opt-diff` with all five scripts (spec 20.3), one tool
+      at a time under memcap, smallest first (`mcml.v` last). After `tools/build-locked --preset
+      release -j6`, with no other heavy job and no agent running a build:
+      - `ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_(equiv|diff)_vtr$'` (31 files, `--jobs 1`
+        in effect, `--mem-cap 3G`); or by hand:
+        `ODIN3_HEAVY_OK=1 tools/heavy-run tools/opt-check/opt-nightly --odin3 build/release/odin3
+        --yosys $VTR_ROOT/build/bin/yosys --techlib lib/vtr.o3lib --set vtr31 --mem-cap 3G
+        [--leg equiv|diff] [--keep DIR]` (add `--cap-for mcml.v=5G` if mcml.v meets its cap).
+      - lenet.v's Yosys side, an idle machine only: `ODIN3_HEAVY_OK=1 ODIN3_HEAVY_XL_OK=1 ctest
+        --preset sweep-xl -R '^opt_(equiv|diff)_vtr_xl$'`, i.e. `--set all64 --xl --mem-cap 8G`
+        (`tests/opt/vtr_nightly_xl.txt` lists `koios/lenet.v xl`; `--cap-for koios/lenet.v=8G` is
+        the same cap spelled per file).
+      - Smoke only so far (Task 20): the 3 smallest VTR files (`single_wire.v`, `single_ff.v`,
+        `and_latch.v`), 18 runs, 18 ok, 0 unexpected, 3G cap. The five-script `opt-diff` of the
+        31 files has no `tests/opt/diff_expect.txt` lines yet: the full run adds them (or fails).
     - **Hand-off to 2H:** S-P (`tools/opt-check/sp-splice`, Odin III against Yosys through the
       Phase 2 script) is the exit table's `opt` row; S-D is information only. lenet.v's S-P needs
       about 7 GB (Yosys's side), so 2H runs it only as a `sweep-xl` job. The Odin III half reads
