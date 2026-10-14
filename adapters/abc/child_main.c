@@ -13,6 +13,7 @@
  * without odin3_flags, linked to libabc-pic; it includes no ABC header.
  */
 #include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,13 +35,11 @@ static int is_version_query(int argc, const char *const argv[]) {
     return argc == 3 && strcmp(argv[1], "-c") == 0 && strcmp(argv[2], "version") == 0;
 }
 
-/* Dies with the core: the signal on its death, and an exit now if it is already gone. */
-static void follow_parent(void) {
+/* Dies with the core: the signal on its death; false when it is already gone. */
+static bool follow_parent(void) {
     (void)prctl(PR_SET_PDEATHSIG, SIGKILL);
     const char *want = getenv("ODIN3_ABC_PARENT");
-    if (want != NULL && strtol(want, NULL, 10) != (long)getppid()) {
-        _exit(1);
-    }
+    return want == NULL || strtol(want, NULL, 10) == (long)getppid();
 }
 
 static void no_core_file(void) {
@@ -60,7 +59,9 @@ static void with_no_rc(int argc, char *argv[], char *argv_out[]) {
 }
 
 int main(int argc, char *argv[]) {
-    follow_parent();
+    if (!follow_parent()) {
+        return 1;
+    }
     no_core_file();
     (void)setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
     if (is_version_query(argc, (const char *const *)argv)) {
