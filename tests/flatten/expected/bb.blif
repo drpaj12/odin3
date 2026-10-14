@@ -1,0 +1,8 @@
+.model top
+.inputs x
+.outputs o p
+.subckt bbox a=x y=p
+.cname t
+.subckt bbox a=x y=o
+.cname m.b
+.end

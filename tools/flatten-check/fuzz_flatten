@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# fuzz_flatten: 3A spec 14.5. See fuzz_flatten.py.
+# Exit codes: 0 every case ok, 1 a case failed, 2 error or usage, 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../elab-check:$here/../opt-check:$here/../verilog-gen${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/fuzz_flatten.py" "$@"

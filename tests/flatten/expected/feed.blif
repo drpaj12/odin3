@@ -1,0 +1,12 @@
+.model top
+.inputs x
+.outputs o p q
+.names vcc
+1
+.subckt $not A[0]=x Y[0]=p
+.subckt $not A[0]=x Y[0]=e.y
+.names x o
+1 1
+.names vcc q
+1 1
+.end

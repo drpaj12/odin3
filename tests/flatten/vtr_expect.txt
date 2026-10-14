@@ -1,0 +1,12 @@
+# flatten-vtr (the 19 VTR designs, 3A spec 14.6): known flatten-diff differences against Yosys 0.55,
+# "design [kinds]: reason" (kinds: wire, names, cell-type, memid, equiv; none given: any). A listed
+# kind that no longer differs fails (stale). Wire and cell names are never listed: they are what
+# flatten creates. Every entry below is an elaboration difference that exists before flatten (the
+# flat count is the sum over the instance tree on both sides; flatten-vtr checks that for Odin III).
+boundtop [cell-type]: Yosys read_verilog keeps unary plus as $pos cells, 2D folds it away
+stereovision1 [cell-type]: Yosys read_verilog keeps unary plus as $pos cells, 2D folds it away
+stereovision2 [cell-type,memid]: Yosys proc_rom turns constant case tables into $memrd_v2/$meminit (and shifts $eq/$pmux/$logic_not counts); 2E proc lowers them to $pmux
+or1200 [cell-type,memid]: Yosys proc_rom turns constant case tables into $memrd_v2/$meminit (and shifts $eq/$mux/$not counts); 2E proc lowers them to $pmux/$mux
+bgm [cell-type,memid]: Yosys proc_rom turns a constant case table into $memrd_v2/$meminit (and shifts $eq/$logic_not/$pmux counts); 2E proc lowers it to $pmux
+LU8PEEng [cell-type,memid]: Yosys proc_rom turns a constant case table into $memrd_v2/$meminit (and shifts $and/$eq/$not counts); 2E proc lowers it to $pmux
+LU32PEEng [cell-type,memid]: Yosys proc_rom turns a constant case table into $memrd_v2/$meminit (and shifts $and/$eq/$not counts); 2E proc lowers it to $pmux

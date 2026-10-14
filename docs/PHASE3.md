@@ -25,8 +25,11 @@ decisions 2–3 and 16 below):
    `dual_port_ram`. VTR's own readers give LUT K = 6 (the largest `.names` pb_type) and a RAM
    address width of 15.
 3. **Through P&R**: Odin III alone produces each netlist. The script is `read_verilog
-   --nolatches; proc; opt; flatten; [wreduce;] hardmap; lower; abc; write_blif --vtr`
-   (`wreduce` per decision 7). Then
+   --nolatches; proc; opt; flatten; opt -full; hardmap; lower; abc; write_blif --vtr`
+   (decision 30: `opt -full` after `flatten`, as Parmys runs it), and once 3G lands
+   `read_verilog --nolatches; proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full;
+   hardmap; lower; abc; write_blif --vtr` (decisions 7 and 31: `wreduce` before `flatten`).
+   Both forms are one script; the second only adds the 3G passes. Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
    -crit_path_router_iterations 100` (the `vtr_reg_qor_chain` options) must end with
    `vpr_status=success`. That means VPR packs and places, finds the minimum channel width by
@@ -110,7 +113,8 @@ which PRs remain.
   (decision 29, ruling 2): it is delivered by 3H-3 and 3H-4 (the `tests/vtr/tasks` configs and the
   `run_vtr_task.py` check), not by a separate 3F spec and plan; the box is ticked as folded, and
   the 3H-4 merge is its evidence
-- [ ] 3A `flatten`
+- [ ] 3A `flatten` (implemented on `feat/3A-flatten`: pass, unit/golden/fuzz tests, `flatten-diff`
+  against Yosys 0.55 and the 19-design sweep, decision 35; ticked when the PR merges)
 - [ ] 3B `lower` (simulator-equal before/after on hand-built and micro designs)
 - [ ] 3G `wreduce` (decision 7 = b; a faithful Yosys 0.55 `wreduce`, signed rewrite included)
 - [ ] 3C `hardmap` (Peter reviews; spec first, Peter approves the mapping rules before any code;
@@ -708,7 +712,8 @@ then the options considered.
     `docs/specs/2026-10-14-3A-flatten-design.md`, `docs/plans/2026-10-14-3A-flatten-plan.md`):
     (1) the IR addition `odin3_prov_derive_hier` is approved; (2) modules left unused after
     `flatten` stay in the design (no module-retire IR change); (3) the Phase 3 script becomes
-    `proc; opt; flatten; opt` (as Parmys runs `opt -full` after `flatten`), which updates the exit
+    `proc; opt; flatten; opt` (as Parmys runs `opt -full` after `flatten`; the second `opt` is
+    `opt -full`, as #31 writes it, and `wreduce` joins before `flatten` with 3G), which updates the exit
     item and the 3H script strings; (4) DESIGN §13 #6, 3A side: dotted instance-path names, the
     slash path in provenance.
 31. **3G `wreduce` spec and plan, and 3C `hardmap` spec, approved** (Peter, 2026-10-14: "All 10
@@ -811,6 +816,67 @@ then the options considered.
       passing file (and its `tmp` directory at the end), `vtr-read-check` a passing file's run
       directory through `qor_heavy.safe_rmtree`. A failing file's directory is kept.
 
+35. **3A `flatten` implemented; agent defaults and evidence** (branch `feat/3A-flatten`; spec
+    `docs/specs/2026-10-14-3A-flatten-design.md`, plan `docs/plans/2026-10-14-3A-flatten-plan.md`).
+    Peter's answers (1 yes, 2 leave unused modules, 3 yes, 4 yes) are #30. Agent defaults, all
+    reversible: caps 2^26 nodes, 2^28 pins and nets, 2^26 wires, 2^16 roots; FIFO worklist, roots
+    expanded parents first (the roots list is in module-ID order); a constant net of a child maps to
+    the root's shared constant net; a join that leaves two non-bus drivers, or a constant and a
+    driver, is an error at `flatten`; the failure state after the first mutation is "partially
+    flattened" (weaker than 2F's OP-13); `--separator` (default `.`), no `--no-prov`; an unnamed
+    instance labels its children `<parent prefix>$c<ID>` (so `ua.$c7.inv`, review I3); unnamed objects stay unnamed; no net attributes; `blif_name` is not
+    copied; the `_N` uniqueness rule is per kind. Writers (checked on the fixtures): `write_verilog`
+    prints every alias as `assign <alias> = <net>;` with the dotted names, `write_rtlil` prints
+    `connect` lines, `write_blif` prints the net's primary name and `.cname` with the dotted node
+    name (an alias is not a second BLIF name); no writer drops or duplicates a connection (the
+    flat Verilog reads back and simulates equal, `flatten_sim_roundtrip`). Script text: the exit
+    script now reads `proc; opt; flatten; opt -full` and, with 3G, `opt; wreduce; opt_clean;
+    opt -full` before `flatten` (exit item 3); the 3H spec and plan and `tools/vtr-qor/qor_legs.py`
+    still hold `proc; opt; flatten; wreduce; hardmap` (merged code with tests) and are for the 3H lane
+    to change when 3G lands. Evidence: unit tests (spec 14.1), `flatten_golden` (expected
+    `write_rtlil`/`write_blif`/`write_verilog` text of the flat top module, two runs
+    byte-identical), `flatten-diff` against Yosys 0.55 on the fixtures (names, widths, cell types by
+    module, MEMIDs, `equiv_make` proof; `tests/flatten/diff_expect.txt`), `flatten-sim` before = after
+    (also through the written Verilog), `fuzz_flatten` on `verilog-gen --flatten` (2,000 cases in
+    CTest, no failure; 300 against Yosys in CTest; a 300-case run with the equivalence proof found
+    none, two proofs timed out and are counted unproven, not passed). The estimate counts only the
+    objects `flatten` adds (the roots' own are not charged) with measured constants (448 bytes per
+    node, 24 per pin, 8 per net, 16 per wire, 96 per record, 32 per name, and since the review 64 per
+    alias wire bit and 256 per bare alias; `graph.c`), 1.18x to 2.22x the bytes reserved on the 19
+    and never below; alias-heavy feed-through probes in `test_flatten_expand` hold it too, and the
+    in-run budget check ticks on nets and wires as well as nodes. The sweep (`flatten-vtr`: `read_verilog
+    --vtr-compat --nolatches; proc; opt; flatten; check`, Release build, smallest source first, one
+    process at a time, `tools/heavy-run`, 2026-10-14, re-run after the review fixes; wall and peak RSS from GNU time; records and
+    bytes/object are what the pass added; estimate/actual is the pre-flight estimate over the bytes
+    reserved; yosys is `flatten-diff` without the proof) gave `kept` 0 on all 19, the flat top's
+    count of every cell type equal to the sum over the instance tree, and no difference from Yosys in
+    wire or cell names or widths; `expected` marks the cell-type counts (and MEMIDs) that differ
+    before `flatten` already: `$pos` kept by Yosys and folded by 2D (boundtop, stereovision1), and
+    Yosys `proc_rom` ($memrd_v2/$meminit instead of 2E's $pmux; stereovision2, or1200, bgm, LU8PEEng,
+    LU32PEEng); `tests/flatten/vtr_expect.txt` lists them with reasons.
+
+    | design | wall s | peak MiB | instances | kept | renamed | flat nodes | flat nets | flat wires | records | bytes/object | estimate/actual | yosys | ok |
+    |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+    | diffeq1 | 0.01 | 9 | 0 | 0 | 0 | 42 | 845 | 15 | 0 | - | - | same | yes |
+    | diffeq2 | 0.00 | 9 | 0 | 0 | 0 | 22 | 453 | 8 | 0 | - | - | same | yes |
+    | ch_intrinsics | 0.00 | 9 | 1 | 0 | 0 | 75 | 567 | 33 | 21 | 79 | 2.22 | same | yes |
+    | stereovision3 | 0.01 | 9 | 0 | 0 | 0 | 216 | 565 | 32 | 0 | - | - | same | yes |
+    | sha | 0.08 | 14 | 0 | 0 | 0 | 256 | 3295 | 48 | 0 | - | - | same | yes |
+    | mkPktMerge | 0.01 | 10 | 6 | 0 | 0 | 299 | 1774 | 196 | 413 | 123 | 1.56 | same | yes |
+    | blob_merge | 0.05 | 13 | 2 | 0 | 0 | 1781 | 8119 | 161 | 126 | 154 | 1.68 | same | yes |
+    | stereovision2 | 0.05 | 19 | 145 | 0 | 0 | 2350 | 46387 | 1969 | 3888 | 122 | 1.39 | expected | yes |
+    | bgm | 0.26 | 37 | 201 | 0 | 0 | 18648 | 52638 | 6303 | 23297 | 261 | 1.18 | expected | yes |
+    | boundtop | 0.06 | 16 | 15 | 0 | 0 | 1350 | 8642 | 710 | 1584 | 147 | 1.44 | expected | yes |
+    | raygentop | 0.07 | 18 | 15 | 0 | 0 | 791 | 6509 | 534 | 972 | 136 | 1.47 | same | yes |
+    | stereovision1 | 0.06 | 17 | 232 | 0 | 0 | 2732 | 26297 | 3241 | 5547 | 127 | 1.35 | expected | yes |
+    | stereovision0 | 0.08 | 18 | 297 | 0 | 0 | 2416 | 21511 | 3389 | 5052 | 132 | 1.36 | same | yes |
+    | or1200 | 0.05 | 14 | 15 | 0 | 0 | 954 | 7408 | 549 | 1178 | 147 | 1.40 | expected | yes |
+    | mkSMAdapter4B | 0.04 | 12 | 10 | 0 | 0 | 925 | 4030 | 807 | 418 | 170 | 1.34 | same | yes |
+    | LU8PEEng | 0.16 | 33 | 119 | 0 | 0 | 4268 | 51775 | 2116 | 5045 | 158 | 1.31 | expected | yes |
+    | LU32PEEng | 0.43 | 73 | 431 | 0 | 0 | 13770 | 181851 | 6484 | 15609 | 160 | 1.30 | expected | yes |
+    | mkDelayWorker32B | 0.09 | 17 | 18 | 0 | 0 | 1350 | 12564 | 1157 | 961 | 92 | 2.08 | same | yes |
+    | mcml | 1.36 | 115 | 225 | 0 | 0 | 5368 | 172262 | 10484 | 15508 | 108 | 1.42 | same | yes |
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this
@@ -852,7 +918,8 @@ then the options considered.
 now. Lane 1 is the back end: 3E-4, the subprocess tasks 9a..9c, 3D-5, 3H-3 to M1, 3D-7, 3D-8.
 Lane 2 is 3A, then 3B. Lane 3 is 3G, then 3C (spec first), then 3H-4. 3F is folded into 3H.
 The 3D lane did not need Phase 2, but 3A is no longer developed on hand-built IR alone: `flatten`
-is not built, and the Phase 2 script `proc; opt; compact` runs hierarchically until it is.*
+is built on `feat/3A-flatten` (decision 35), and until it merges the Phase 2 script `proc; opt; compact`
+runs hierarchically.*
 
 **Now, with no Phase 2 dependency:**
 
@@ -862,7 +929,9 @@ is not built, and the Phase 2 script `proc; opt; compact` runs hierarchically un
 - **3D**: the adapter, then `abc` with BLIF exchange (decision 9), on the Parmys goldens:
   `read_blif; abc; write_blif --vtr`, then VPR. This is the P′ leg and **M1**: the back half
   of Phase 3 proven on real VTR netlists before 2E/2F land.
-- **3A** on the hierarchical BLIF goldens (multi-model Odin II micros); **3B** on hand-built
+- **3A** on hand-written hierarchical fixtures (`tests/flatten`) and Odin III's own elaboration of
+  Verilog (the Odin II goldens hold no multi-model hierarchy: no `.blif` among the 1,894 under
+  `~/odin3-ws/golden` has more than one `.model` with a body, scanned 2026-10-14); **3B** on hand-built
   word IR, before/after checked by 1E's simulator on random vectors (the 2D cells join when
   2D-1 lands); **3C** on hand-built `$mul`/`$add`/`$mem` (EL-27/39 fix the `$mem` form).
 
