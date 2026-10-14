@@ -1119,3 +1119,34 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       mixed-sign repros stay in `tests/fuzz/fuzz_opt_regress`. The Phase 2 script's output on 20
       micros and mcml is byte-identical before and after: the front end unifies the flags, so no
       mixed cell reaches `opt`.
+
+26. **2H micro sweep triage: the 14 failures of the exit_micro run of 2026-10-14** (agent defaults;
+    Peter may override; branch `fix/2H-micro-triage`). Root causes, one per design; the table with
+    commits is in `.superpowers/sdd/2H-micro-triage.md`.
+    - **Tool fixes (equiv-check).** (a) `dsec` ending `Networks are UNDECIDED` (its own engine limit,
+      exit status 0) is *unproven*, exit 4, not an error (`full/stereovision0`). (b) Parmys numbers the
+      two ports of a `dual_port_ram` in Yosys's hash-table order, so the same memory can come out with
+      ports 1 and 2 exchanged (`common/2r2w`, `syntax/inferred_DPram`): `--match-unnamed` turns every
+      unnamed `dual_port_ram` to one canonical port order first. The ports are taken as
+      interchangeable, which is a new assumption of the exit statement beside "RAM contents are not
+      modelled": a design that differs only in which port wins a same-address write (an IEEE race,
+      spec 2D §17 #66) is called equivalent. (c) Unnamed boxes that name no memory (multipliers) whose
+      signature simulation ties are told apart by ABC probes on their input cones (candidates tried in
+      cone-colour order; `--box-probe-budget`, default 120 s, `exit_micro` passes 900 s) before
+      structure and file order would guess, and boxes fed by copies of one register are
+      interchangeable (congruence closure). `syntax/rs_decoder_2`, `large/sv_chip1_hierarchy_no_mem`,
+      `full/cf_fft_256_8` and `syntax/cf_fft_1024_16` were guessed multiplier pairings; with the pairs
+      found they are plainly equivalent. (d) An x-cone result over guessed pairs is *unproven*: the
+      cones hold every pin of a box fed by `unconn`, so they hide what a wrong pairing breaks (the
+      arm_core lesson).
+    - **Parmys defects, listed.** `syntax/multi_assignment`: Parmys keeps one of four tri-state drivers
+      (`tests/exit/micro_differs.txt`, the new `--expect-differs` list and KNOWN DIFFERS bucket: not a
+      pass, XPASS when it starts to pass). `large/sv_chip0_hierarchy_no_mem`: the signed-adder `unconn`
+      padding of the exit_vtr stereovision0 record, reviewed and recorded in `tests/exit/micro_eqx.txt`
+      (golden equals Yosys `read_verilog` through the Parmys script; the splice equals it with `wreduce`
+      removed; 218 against 197 `unconn` uses with it, 50 on both sides without).
+    - **Size and tool limits, listed.** `large/LargeRam` (Parmys killed at 16.8 GB: 2^18 RAM slices;
+      `micro_nogolden.txt`; `status=capped` is now a listable no-golden kind), `full/stereovision3` and
+      `large/sv_chip3_hierarchy_no_mem` (two clock domains), `full/stereovision0` (dsec UNDECIDED, with
+      the RAM of the micro), `large/LU32PEEng` and `LU64PEEng` (dsec 600 s with every pair exact)
+      in `tests/exit/micro_unproven.txt`.
