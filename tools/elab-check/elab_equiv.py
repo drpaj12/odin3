@@ -160,6 +160,8 @@ def signal_of(code: int) -> int | None:
 
 
 def killed_by_cap(code: int) -> bool:
+    """SIGKILL is the only cap signal, so a host OOM-kill or a manual kill of a child looks the
+    same: on Yosys side B (listable as unproven) that is indistinguishable from a cap kill."""
     return signal_of(code) == SIGKILL
 
 
@@ -247,7 +249,7 @@ class Bridge:
     def __init__(self, opts: Options) -> None:
         self.opts = opts
         self.work = Path()
-        self.started = time.monotonic()
+        self.spent = 0.0  # wall seconds of the children the --budget bounds (never odin3's)
 
     def remaining(self, argv: Sequence[str], what: str) -> float | None:
         """Seconds the ``--budget`` leaves for this child: none for odin3 (its own slowness is a
@@ -255,7 +257,7 @@ class Bridge:
         budget = self.opts.budget
         if budget is None or argv[0] == self.opts.odin3:
             return None
-        left = budget - (time.monotonic() - self.started)
+        left = budget - self.spent
         if left <= 0:
             raise Unproven(f"budget of {budget:g} s ran out (before {what})")
         return left
@@ -265,6 +267,7 @@ class Bridge:
         error. A child still running when the ``--budget`` ends is killed: unproven."""
         what = what or Path(argv[0]).name
         timeout = self.remaining(argv, what)
+        began = time.monotonic()
         try:
             return memcap.run(list(argv), self.opts.cap, capture_output=True, cwd=self.work,
                               timeout=timeout)
@@ -274,6 +277,9 @@ class Bridge:
             raise EquivError(f"cannot run {argv[0]}: {exc}") from exc
         except ValueError as exc:
             raise EquivError(f"memcap refused {argv[0]}: {exc}") from exc
+        finally:
+            if timeout is not None:  # a budgeted child: odin3's time is never charged
+                self.spent += time.monotonic() - began
 
     def must(self, what: str, argv: Sequence[str], oracle: bool = False) -> None:
         """A child that has to exit 0. ``oracle``: it is Yosys reading the source itself, so a

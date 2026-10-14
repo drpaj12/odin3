@@ -33,6 +33,9 @@ argv = sys.argv[1:]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(["odin3", *argv, os.getcwd()]) + "\\n")
 rc = int(os.environ.get("FAKE_ODIN3_RC", "0"))
+if os.environ.get("FAKE_ODIN3_SLEEP"):
+    import time
+    time.sleep(float(os.environ["FAKE_ODIN3_SLEEP"]))
 if rc:
     print("odin3: error: no", file=sys.stderr)
     sys.exit(rc)
@@ -387,6 +390,12 @@ class BridgeTest(unittest.TestCase):
         self.assertNotIn("equiv-check", self.names())
         code, out, err = self.run_tool("--budget", "100", extra={})
         self.assertEqual(code, 0, out + err)
+
+    def test_a_slow_odin3_does_not_spend_the_budget(self) -> None:
+        """2H fix round: odin3 runs 2 s under a 1.5 s budget; Yosys still has all of it."""
+        code, out, err = self.run_tool("--budget", "1.5", extra={"FAKE_ODIN3_SLEEP": "2"})
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("budget", out + err)
 
     def test_the_budget_never_applies_to_odin3(self) -> None:
         """odin3 (side A) is not bounded by it: a slow odin3 is the tool's own failure."""
