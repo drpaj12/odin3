@@ -1139,7 +1139,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       found they are plainly equivalent. (d) An x-cone result over guessed pairs is *unproven*: the
       cones hold every pin of a box fed by `unconn`, so they hide what a wrong pairing breaks (the
       arm_core lesson).
-    - **Parmys defects, listed.** `syntax/multi_assignment`: Parmys keeps one of four tri-state drivers;
+    - **Parmys defects, listed.** (Not listed: `syntax/multi_assignment`.) Parmys keeps one of four
+      tri-state drivers there;
       Peter ruled that Odin III will follow Parmys's resolution with a warning (decision 27, landed:
       the micro is `identical` to its golden under exit-check), so it is not listed (`differs` stays
       never listable). `large/sv_chip0_hierarchy_no_mem`: the signed-adder `unconn`
@@ -1193,6 +1194,22 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       with a driver whose data is not an input bit (a cell output, a constant, a child instance
       output), which keeps the `$pmux` and the old warning because Parmys's own result there is
       several drivers on one net, which the IR cannot hold (an IR invariant: not changed).
+    - **Scope limits (final-review round, M-I1 / M-I2; probes h1, t1, s1 against Parmys).** The
+      rule is applied only where it matches Parmys, and declines otherwise (the IEEE `$pmux` and
+      its old warning, plus a second WARNING "net 'd' is multiply driven (...); --vtr-compat does
+      not apply Parmys's rule here (why), so the IEEE resolution is used and Parmys's result may
+      differ"): (a) **top module only**: Parmys flattens before its final `opt -full`, so below the
+      top it ranks the parent's wires (h1: Parmys keeps `aa`, a submodule's own names would keep
+      `bus0`); library modules (`odin3_lib_vtr_compat`) are never the top. (b) **a dropped input
+      that other logic reads**: Yosys shorts every input of the class to the representative, so
+      the reader of a loser would read the winner (t1: `r = cc | e1` becomes `bb | e1`); not
+      modelled, so a group with a read input that does not win declines. (c) **an input that is
+      also the data of another group**: Parmys makes one class of both groups (s1); the group and
+      every group sharing the input decline. A faithful version would need a union-find over all
+      groups and a move of the readers of each loser onto the winner; not done (more than a local
+      change, and the readers' fanout then changes, which the IR invariants make worth a review of
+      its own). Also listed: legal one-hot buses of input ports (`D3_bus_one_hot`) lose their
+      enables under `--vtr-compat`, as Parmys does; the warning shows it.
     - **Limits, listed.** `compare_signals` also weighs wire attributes (`keep` and the like: more
       attributes win) and a wire driven by a register; neither is modelled, and neither applies to
       an input port without attributes. An input port with an `(* attribute *)` could win in
@@ -1203,5 +1220,5 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       (plain Yosys cannot be side B: its writer drives the input `bus1`).
     - **Evidence of the change.** `tests/unit/test_elab_vtr_multidriver.c` (both modes, the
       warning text, order, name, reads-beat-names, same-wire highest bit, per-bit winners, the
-      fallbacks). Exit-check on `syntax/multi_assignment` and the other micros with a
+      fallbacks, plus the declines h1 / t1 / s1). Default-mode guard: CTest `elab_tribuf_default_equiv` (`elab-equiv --yosys-tribuf` without `--vtr-compat` on the micro and the `D3_*` accept files). Exit-check on `syntax/multi_assignment` and the other micros with a
       multiply-driven net: `.superpowers/sdd/2H-micro-triage.md`, "Multi-driver (decision 27)".
