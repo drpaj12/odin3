@@ -6,9 +6,13 @@ Usage::
                 [--no-cut] [--match-unnamed] [--x-report]
 
 Exit 0 equivalent, 1 not equivalent (including mismatched primary I/O sets and black-box
-cut-point inputs that are wired differently), 2 usage, input, unsupported-construct or ABC
-error, and black-box instances that cannot be matched one-to-one; 3 only with ``--x-report``:
-not equivalent, but equivalent outside the x-cones (below).
+cut-point inputs that are wired differently; the output then holds a line that starts
+``equiv-check: NOT equivalent``, and exit 1 means nothing else), 2 usage, input,
+unsupported-construct or ABC error, an uncaught internal error, and black-box instances that
+cannot be matched one-to-one; 3 only with ``--x-report``: not equivalent, but equivalent outside
+the x-cones (below); 4 *unproven*: no verdict either way, a tool limit and not a crash (ABC
+timed out, or the check failed only where black-box pairs were guessed); 5 *hard*: ABC was
+killed by a signal, or this process ran out of memory.
 
 ``--x-report`` (2H, 2D spec 14.6 item 4): when the two netlists are not equivalent, recompute
 with every output in an x-cone removed and print the removed outputs by name.  Parmys writes a
@@ -20,7 +24,9 @@ probed inputs are outputs like any other.  If the netlists are equivalent on the
 outputs the exit code is 3 and ``x-cone: NAME`` lines list the removed ones.  If no output is
 in an x-cone, or none is left, or the remainder still differs, the verdict stays "not
 equivalent" (exit 1).  The removal is coarse: an output that depends on x for one input vector
-only is removed whole.
+only is removed whole.  The cone follows x through a cut black box: when any input pin of a
+box is in the cone, every output pin of that box is, so the outputs behind it are removed and
+listed as well (a RAM whose address is x has an x read data, whatever the other netlist reads).
 
 Each netlist is flattened in Python into one model (``.subckt`` of models defined in the
 same file are inlined; the VTR ``adder`` hard block is replaced by logic; other black boxes
@@ -87,7 +93,8 @@ equivalent.  A wrong pairing (boxes of the same type whose inputs differ) makes 
 pin fail, so the verdict is never "equivalent"; sampling can only lose a match, not create a
 false one.  The converse is not claimed: when guessed pairs exist and the check fails, the
 guess may be at fault, so the result is "inconclusive" (exit 2) and not "not equivalent" (a
-failure outside the guesses, an x-cone result and an equivalence are all still verdicts).  As
+failure outside the guesses, an x-cone result and an equivalence are all still verdicts).  The
+"inconclusive" result is exit 4 (unproven).  As
 before, a box's internal behaviour is assumed, not checked (RAM contents, initial state).
 
 ABC models every latch as a flip-flop on one implicit clock, so each file must use a single
@@ -114,6 +121,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -147,9 +155,23 @@ _MAX_DEPTH = 1000
 class EquivError(Exception):
     """Usage, input or ABC error (exit code 2).  ``detail`` is extra multi-line output."""
 
+    exit_code = 2
+
     def __init__(self, message: str, detail: str = "") -> None:
         super().__init__(message)
         self.detail = detail
+
+
+class UnprovenError(EquivError):
+    """No verdict, a tool limit and not a crash: ABC timed out (exit code 4)."""
+
+    exit_code = 4
+
+
+class HardError(EquivError):
+    """ABC was killed by a signal (a crash or the memory cap): never a verdict (exit code 5)."""
+
+    exit_code = 5
 
 
 def notice(msg: str) -> None:
@@ -890,9 +912,14 @@ def run_abc(abc: str, command: str, cwd: Path, timeout: int) -> str:
     try:
         proc = subprocess.run([abc, "-q", command], cwd=cwd, capture_output=True, text=True,
                               timeout=timeout, check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        raise UnprovenError(f"unproven: ABC {command.split()[0]} timed out after {timeout} "
+                            "seconds") from exc
+    except OSError as exc:
         raise EquivError(f"running ABC failed: {exc}") from exc
     output = proc.stdout + proc.stderr
+    if proc.returncode < 0:
+        raise HardError(f"ABC killed by signal {-proc.returncode}", output)
     if proc.returncode != 0:
         raise EquivError(f"ABC exited with status {proc.returncode}", output)
     return output
@@ -909,6 +936,8 @@ def _io_mismatch(a: tuple[set[str], set[str]], b: tuple[set[str], set[str]]) -> 
 
 XCONE_NET = "unconn"  # Parmys's don't-care net: `.names unconn`, no rows (constant 0)
 EXIT_XCONE = 3
+EXIT_UNPROVEN = 4
+EXIT_HARD = 5
 
 
 def x_sources(flat: Flat) -> set[str]:
@@ -927,6 +956,9 @@ def x_cone_outputs(flat: Flat) -> set[str]:
             fanout.setdefault(net, []).append(names.output)
     for latch in flat.latches:
         fanout.setdefault(latch.input, []).append(latch.output)
+    for box in flat.blackboxes:  # x on any input pin of a cut box taints all its output pins
+        for net in box.inputs.values():
+            fanout.setdefault(net, []).extend(box.outputs.values())
     reached = set(x_sources(flat))
     work = list(reached)
     while work:
@@ -1030,7 +1062,7 @@ def _check(args: argparse.Namespace) -> int:
         print(f"{TOOL}: inconclusive: {guessed} unnamed black-box pair(s) were guessed (equal "
               "signatures, different input nets, split by structure and file order), so \"not "
               "equivalent\" may only mean a wrong guess", file=sys.stderr)
-        return 2
+        return EXIT_UNPROVEN
     return code
 
 
@@ -1086,6 +1118,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{TOOL}: {exc}", file=sys.stderr)
         if exc.detail:
             print(exc.detail.rstrip(), file=sys.stderr)
+        return exc.exit_code
+    except MemoryError:
+        print(f"{TOOL}: out of memory", file=sys.stderr)
+        return EXIT_HARD
+    except Exception as exc:  # noqa: BLE001  (exit 2: exit 1 is only ever 'not equivalent')
+        traceback.print_exc()
+        print(f"{TOOL}: internal error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
 
 

@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import bbmatch
 import blif
@@ -535,6 +536,35 @@ class XReportTest(unittest.TestCase):
         self.assertIn("x-cone: q", out)
         self.assertNotIn("x-cone: r", out)
 
+    def test_x_follows_a_black_box_to_its_outputs(self) -> None:
+        """x on a RAM's address (A) and a real signal (B): the RAM's read data, and the output
+        behind it, depend on the x, so both are removed and listed (review I6)."""
+        head = ".model t\n.inputs clk a b c\n.outputs y p\n"
+        tail = ".names q a y\n11 1\n.names a b p\n11 1\n.end\n"
+        ram = ".gate single_port_ram addr[0]={} clk=clk data[0]=b out[0]=q we=c\n"
+        a = self.write("a.blif", head + ".names unconn\n.names a unconn ax\n11 1\n"
+                       + ram.format("ax") + tail)
+        b = self.write("b.blif", head + ram.format("a") + tail)
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 3, out + err)
+        cones = [line for line in out.splitlines() if line.startswith("x-cone:")]
+        self.assertIn("x-cone: y", cones)
+        self.assertTrue(any(":addr" in line for line in cones), cones)
+        self.assertNotIn("x-cone: p", cones)
+        self.assertIn("2 of 6 outputs are in an x-cone", out)
+
+    def test_x_through_a_black_box_hides_nothing_outside_the_cone(self) -> None:
+        """A difference outside the black box's cone is still found."""
+        head = ".model t\n.inputs clk a b c\n.outputs y p\n"
+        ram = ".gate single_port_ram addr[0]={} clk=clk data[0]=b out[0]=q we=c\n"
+        a = self.write("a.blif", head + ".names unconn\n.names a unconn ax\n11 1\n"
+                       + ram.format("ax") + ".names q a y\n11 1\n.names a b p\n11 1\n.end\n")
+        b = self.write("b.blif", head + ram.format("a")
+                       + ".names q a y\n11 1\n.names a b p\n10 1\n.end\n")
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("NOT equivalent outside x-cones", out)
+
     def test_x_in_the_other_netlist_counts_too(self) -> None:
         a, b = self.x_pair()
         code, out, err = check("--x-report", b, a)
@@ -548,6 +578,62 @@ class XReportTest(unittest.TestCase):
 
 
 @needs_abc
+class FaultInjectionTest(unittest.TestCase):
+    """Exit codes 2, 4 and 5 (review I3, I4): a fake ABC that hangs or dies of SIGSEGV, and an
+    uncaught exception inside the tool. None of them is exit 1 ('not equivalent')."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        text = ".model t\n.inputs a\n.outputs o\n.names a o\n1 1\n.end\n"
+        self.a = self.write("a.blif", text)
+        self.b = self.write("b.blif", text.replace(".names a o\n1 1",
+                                                   ".names a t\n1 1\n.names t o\n1 1"))
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def fake_abc(self, body: str) -> str:
+        path = self.write("abc", "#!/bin/sh\n" + body + "\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def test_abc_timeout_is_unproven_exit_4(self) -> None:
+        abc = self.fake_abc("exec sleep 30")
+        code, out, err = check("--abc", abc, "--timeout", "1", self.a, self.b)
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("unproven: ABC cec timed out after 1 seconds", err)
+        self.assertNotIn("NOT equivalent", out)
+
+    def test_abc_killed_by_a_signal_is_hard_exit_5(self) -> None:
+        abc = self.fake_abc("kill -SEGV $$")
+        code, out, err = check("--abc", abc, self.a, self.b)
+        self.assertEqual(code, 5, out + err)
+        self.assertIn("ABC killed by signal 11", err)
+        self.assertNotIn("NOT equivalent", out)
+
+    def test_abc_ordinary_failure_stays_exit_2(self) -> None:
+        abc = self.fake_abc("echo broken; exit 3")
+        code, out, err = check("--abc", abc, self.a, self.b)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("ABC exited with status 3", err)
+
+    def test_an_uncaught_exception_is_exit_2_not_1(self) -> None:
+        with mock.patch.object(equiv_check, "_check", side_effect=KeyError("boom")):
+            code, out, err = check(self.a, self.b)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("internal error: KeyError", err)
+        self.assertNotIn("NOT equivalent", out)
+
+    def test_out_of_memory_is_hard_exit_5(self) -> None:
+        with mock.patch.object(equiv_check, "_check", side_effect=MemoryError()):
+            code, out, err = check(self.a, self.b)
+        self.assertEqual(code, 5, out + err)
+        self.assertIn("out of memory", err)
+
+
 class EquivCheckAbcTest(unittest.TestCase):
     def setUp(self) -> None:
         if ABC is None:
@@ -723,13 +809,13 @@ class UnnamedBlackBoxTest(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
 
     @needs_abc
-    def test_a_guessed_pairing_that_fails_is_inconclusive_exit_2(self) -> None:
+    def test_a_guessed_pairing_that_fails_is_inconclusive_exit_4(self) -> None:
         """The same copies read the other way round: the file-order guess is wrong, and 'not
         equivalent' would be a false verdict (the netlists are equivalent)."""
         a = self.write("a.blif", self.copies("$m~1", "$m~2", "$m~1", "$m~2"))
         b = self.write("b.blif", self.copies("$m~7", "$m~8", "$m~8", "$m~7"))
         code, out, err = check("--match-unnamed", a, b)
-        self.assertEqual(code, 2, out + err)
+        self.assertEqual(code, 4, out + err)
         self.assertIn("inconclusive: 2 unnamed black-box pair(s) were guessed", err)
 
     def test_box_whose_inputs_differ_is_left_over_exit_2(self) -> None:
