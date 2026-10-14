@@ -51,10 +51,10 @@ typedef struct tri_group {
 
 /* The groups of a module's records; next[i] is the record after record i in its group. */
 typedef struct tri_groups {
-    odin3_vec groups;    /* tri_group */
-    odin3_vec next;      /* uint32_t per record */
-    odin3_u64map *owner; /* net -> group index + 1 */
-    odin3_vec buf;       /* odin3_net_id: the nets of the $pmux being made */
+    odin3_vec groups;     /* tri_group */
+    odin3_vec next;       /* uint32_t per record */
+    odin3_u64map *owner;  /* net -> group index + 1 */
+    odin3_vec buf;        /* odin3_net_id: the nets of the $pmux being made */
     odin3_u64map *shared; /* net -> 1: the data net of more than one group (`--vtr-compat`) */
 } tri_groups;
 
@@ -447,6 +447,22 @@ static void groups_free(tri_groups *tg) {
     odin3_u64map_destroy(tg->shared);
 }
 
+/* Files every record that becomes logic into its group. */
+static odin3_status file_records(odin3_elab2 *e2, tri_groups *tg) {
+    const struct odin3_elab2_drive *dr = e2->drive;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < dr->tribufs.len; i++) {
+        uint32_t *link = odin3_vec_push(&tg->next);
+        st = link != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+        if (link != NULL) {
+            *link = NO_NEXT;
+            bool convert = becomes_logic(e2, tri_recs(dr)[i], &st);
+            st = convert && st == ODIN3_OK ? file_record(e2, tg, i) : st;
+        }
+    }
+    return st;
+}
+
 odin3_status odin3_elab2_tri_logic(odin3_elab2 *e2) {
     const struct odin3_elab2_drive *dr = e2->drive;
     if (dr == NULL || dr->tribufs.len == 0) {
@@ -457,15 +473,7 @@ odin3_status odin3_elab2_tri_logic(odin3_elab2 *e2) {
     odin3_vec_init(&tg.next, sizeof(uint32_t));
     odin3_vec_init(&tg.buf, sizeof(odin3_net_id));
     odin3_status st = tg.owner != NULL && tg.shared != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-    for (uint32_t i = 0; st == ODIN3_OK && i < dr->tribufs.len; i++) {
-        uint32_t *link = odin3_vec_push(&tg.next);
-        st = link != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-        if (link != NULL) {
-            *link = NO_NEXT;
-            bool convert = becomes_logic(e2, tri_recs(dr)[i], &st);
-            st = convert && st == ODIN3_OK ? file_record(e2, &tg, i) : st;
-        }
-    }
+    st = st == ODIN3_OK ? file_records(e2, &tg) : st;
     st = st == ODIN3_OK && e2->mod_vtr_compat && dr->is_top ? find_shared(e2, &tg) : st;
     for (size_t gno = 0; st == ODIN3_OK && gno < tg.groups.len; gno++) {
         const tri_group grp = ((const tri_group *)tg.groups.data)[gno];
