@@ -101,7 +101,7 @@ which PRs remain.
   76c485a; decisions 28 and 29)
 - [ ] 3H partial: 3H-1..2 merged; 3H-3 (to M1) and 3H-4 remain, and now carry 3F (below)
 - [ ] 3E `write_blif --vtr`: Parmys goldens round-trip through it and route via `-start abc`
-  (partial: 3E-1..3 and 3E-5 merged; 3E-4's round-trip and VPR-read sweeps are done, decision 33;
+  (partial: 3E-1..3 and 3E-5 merged; 3E-4's round-trip and VPR-read sweeps are done, decision 34;
   ticked when 3H's R leg routes all 19 via `-start abc`)
 - [ ] 3D linked ABC: adapter builds; `abc` pass; script ruling (#1); deterministic; **M1**: P′
   leg routes all 19 (partial: 3D-0..4 and 3D-6 merged; the subprocess tasks 9a..9c of decision 29,
@@ -744,7 +744,7 @@ then the options considered.
     carries `hardmap` = `<kind>:<role>`, and the source is reached through the DERIVED provenance
     record. The other defaults (a, c–i) follow #32; Task 7 logs them.
 
-33. **3E-4 round-trip and VPR-read evidence: figures and agent defaults** (2026-10-14; plan
+34. **3E-4 round-trip and VPR-read evidence: figures and agent defaults** (2026-10-14; plan
     Tasks 10 and 11, spec 3E §16.3-§16.6). Both sweeps ran through `tools/heavy-run` from a release
     build of `feat/3E-4`, smallest file first, one at a time. The golden tree now holds **947**
     `status=ok` files (the plan's 923 was 2026-10-11): 356+100 Odin II and 482+9 Parmys.
