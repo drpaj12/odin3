@@ -235,6 +235,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_warn.c
     src/frontends/elab/elab2_tri.c
     src/frontends/elab/elab2_trilogic.c
+    src/frontends/elab/elab2_trivtr.c
     src/frontends/elab/elab2_mem.c
     src/frontends/elab/elab2_memport.c
     src/frontends/elab/elab2_memscan.c
@@ -1074,6 +1075,14 @@ if(BUILD_TESTING)
     target_include_directories(test_elab_vtr_initial PRIVATE ${_gen})
     add_dependencies(test_elab_vtr_initial verilog_generated)
     target_compile_definitions(test_elab_vtr_initial PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D-VI2: several tri-state drivers of an internal net under read_verilog --vtr-compat
+    # (Peter 2026-10-14; PHASE2 decision 27).
+    odin3_add_unit_test(test_elab_vtr_multidriver)
+    target_sources(test_elab_vtr_multidriver PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_vtr_multidriver PRIVATE ${_gen})
+    add_dependencies(test_elab_vtr_multidriver verilog_generated)
+    target_compile_definitions(test_elab_vtr_multidriver PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)

@@ -27,6 +27,7 @@
 #include "ir/module.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
+#include "util/arena.h"
 #include "util/log.h"
 #include "util/str.h"
 #include "util/u64map.h"
@@ -81,8 +82,8 @@ static bool same_y(const odin3_elab2 *e2, odin3_elab2_tri_rec lhs, odin3_elab2_t
 
 /* --- naming the bus -------------------------------------------------------------------------- */
 
-/* "bus", "bus[3]" or "bus[7:4]": the wire the cell's Y starts in and the bits of it Y covers. */
-static odin3_status bus_label(const odin3_elab2 *e2, odin3_elab2_tri_rec rec, odin3_strbuf *out) {
+odin3_status odin3_elab2_tri_bus_label(const odin3_elab2 *e2, odin3_elab2_tri_rec rec,
+                                       odin3_strbuf *out) {
     const odin3_module *mod = e2->mod;
     odin3_pinslice ys = tri_port(e2, rec, TRI_Y);
     odin3_wirebit lo = odin3_net_primary(mod, tri_net(e2, ys, 0));
@@ -112,7 +113,7 @@ typedef enum tri_msg { MSG_WARN, MSG_OVERLAP, MSG_MIX, MSG_BELOW_TOP, MSG_BELOW_
 static odin3_status bus_say(odin3_elab2 *e2, odin3_elab2_tri_rec rec, tri_msg msg) {
     odin3_strbuf name;
     odin3_strbuf_init(&name);
-    odin3_status st = bus_label(e2, rec, &name);
+    odin3_status st = odin3_elab2_tri_bus_label(e2, rec, &name);
     if (st == ODIN3_OK) {
         const char *text = name.data != NULL ? name.data : "net";
         odin3_loc at = odin3_ast_loc(e2->elab, rec.at);
@@ -161,7 +162,7 @@ static odin3_status child_inout_error(odin3_elab2 *e2, odin3_elab2_tri_rec rec,
     odin3_strbuf place;
     odin3_strbuf_init(&name);
     odin3_strbuf_init(&place);
-    odin3_status st = bus_label(e2, rec, &name);
+    odin3_status st = odin3_elab2_tri_bus_label(e2, rec, &name);
     st = st != ODIN3_OK ? st : odin3_elab2_where(e2, rec.at, &place);
     if (st == ODIN3_OK) {
         odin3_elab2_error(e2, odin3_ast_loc(e2->elab, rec.at),
@@ -364,8 +365,32 @@ static odin3_status make_pmux(odin3_elab2 *e2, tri_groups *tg, const tri_group *
     return st != ODIN3_OK ? st : odin3_elab2_account(e2, &made);
 }
 
+/* `--vtr-compat`, two drivers or more: Parmys's resolution (elab2_trivtr.c); *done when it took
+ * the group. The records go in source order. */
+static odin3_status try_vtr(odin3_elab2 *e2, const tri_groups *tg, const tri_group *grp,
+                            bool *done) {
+    const odin3_elab2_tri_rec *recs = tri_recs(e2->drive);
+    odin3_elab2_tri_rec *ordered = odin3_arena_alloc(e2->scratch, grp->count * sizeof *ordered);
+    if (ordered == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    uint32_t at = grp->count;
+    for (uint32_t i = grp->head; i != NO_NEXT; i = ((const uint32_t *)tg->next.data)[i]) {
+        ordered[--at] = recs[i];
+    }
+    odin3_elab2_tri_vtr_req req = {ordered, tg->owner, grp->count};
+    return odin3_elab2_tri_vtr(e2, &req, done);
+}
+
 /* One group: the cap, the nets, the $pmux and the warning. */
 static odin3_status convert_group(odin3_elab2 *e2, tri_groups *tg, const tri_group *grp) {
+    if (e2->mod_vtr_compat && grp->count >= 2U) {
+        bool done = false;
+        odin3_status vst = try_vtr(e2, tg, grp, &done);
+        if (vst != ODIN3_OK || done) {
+            return vst;
+        }
+    }
     const odin3_elab2_tri_rec *recs = tri_recs(e2->drive);
     odin3_elab2_tri_rec first = recs[grp->first];
     uint64_t width = tri_port(e2, first, TRI_Y).count;
