@@ -994,7 +994,8 @@ def _probe_equal(cones: tuple[Flat, Flat], abc: str, normalize: bool, timeout: i
 def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Group]],
                    classes: Sequence[tuple[list[int], list[int]]], abc: str, normalize: bool,
                    limits: tuple[float, int],
-                   sigs: Sequence[Sequence[bbmatch.Signature]] = ()) -> list[tuple[int, int]]:
+                   sigs: Sequence[Sequence[bbmatch.Signature]] = ()
+                   ) -> tuple[list[tuple[int, int]], set[tuple[int, int]]]:
     """Pair the groups of each ambiguous class (several groups that simulation cannot tell
     apart) by what they are.  ABC compares the input pins of a first and a last slice of an A
     group with those of the B groups, one B group at a time, as cones with the other unpaired
@@ -1004,7 +1005,9 @@ def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Grou
     longer than a proof of equality, so ``limits`` is (deadline on ``time.monotonic``, seconds per
     probe); a probe that times out counts as not equal.  When one A and one B group are left
     over in a class they are paired without a probe (every group has a partner or the final
-    proof fails).  A proof that two cones differ is the slow case, so the candidates of B are
+    proof fails): that pair, and every pair whose probe was vacuous (all the compared pins of
+    both groups are behind ``unconn``, so any two groups look equal), is *weak*, a guess.  Returns
+    (the pairs, the weak ones among them).  A proof that two cones differ is the slow case, so the candidates of B are
     tried in the order of ``sigs``' structure colour: the ones whose input cones look like the
     A group's first."""
     deadline, per_probe = limits
@@ -1018,7 +1021,9 @@ def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Grou
             (group.bits[0], group.bits[-1]))]
         return [box.inputs[pin] for box in boxes for pin in pins]
 
+    reached = [x_reached(f) for f in flats]
     found: list[tuple[int, int]] = []
+    weak: set[tuple[int, int]] = set()
     for ids_a, ids_b in classes:
         pins = sorted(pin for pin in first(0, groups[0][ids_a[0]])
                       if any(len({first(s, groups[s][g])[pin] for g in ids}) > 1
@@ -1030,11 +1035,15 @@ def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Grou
             gaps = {g: _colour_gap(groups, sigs, (i, g)) for g in left_b}
             for j in sorted(left_b, key=gaps.__getitem__):
                 if time.monotonic() > deadline:
-                    return found
+                    return found, weak
                 cones = (_probe_flat(flats[0], roots(0, groups[0][i], pins), nets[0]),
                          _probe_flat(flats[1], roots(1, groups[1][j], pins), nets[1]))
                 if _probe_equal(cones, abc, normalize, per_probe):
                     found.append((i, j))
+                    if all(net in reached[side] for side, grp in ((0, groups[0][i]),
+                                                                   (1, groups[1][j]))
+                           for net in roots(side, grp, pins)):
+                        weak.add((i, j))  # vacuous: every compared pin is behind unconn
                     left_a.remove(i)
                     left_b.remove(j)
                     ga, gb = groups[0][i], groups[1][j]
@@ -1046,8 +1055,9 @@ def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Grou
                                f"in B (ABC), {len(left_b)} left in class")
                     break
         if len(left_a) == len(left_b) == 1:
-            found.append((left_a[0], left_b[0]))
-    return found
+            found.append((left_a[0], left_b[0]))  # no probe: a guess
+            weak.add((left_a[0], left_b[0]))
+    return found, weak
 
 
 def _colour_gap(groups: Sequence[Sequence[rampair.Group]],
@@ -1081,19 +1091,22 @@ class RamPairing:
     tied: int = 0
     boxes: int = 0
     boxes_probed: int = 0
+    weak: int = 0  # paired in a probe round without a trusted probe (leftover or vacuous probe)
     count: int = 0  # the pairs named so far
 
 
 def _name_pairs(flats: Sequence[Flat], pairs: Sequence[Sequence[rampair.Group]],
                 sigs: Sequence[Sequence[bbmatch.Signature]], how: tuple[str, bool],
-                result: RamPairing) -> None:
+                result: RamPairing, weak: Sequence[bool] = ()) -> None:
     """Give each paired group of ``pairs`` (A groups, B groups) one key per slice in both flats,
-    take the boxes out of the unnamed ones and count them in ``result``."""
+    take the boxes out of the unnamed ones and count them in ``result``.  ``weak[k]`` marks pair
+    k of a probe round as not backed by a trusted probe (``RamPairing.weak``)."""
     fa, fb = flats
     prefix, by_probe = how
     names: list[dict[str, str]] = [{}, {}]
-    for group_a, group_b in zip(*pairs, strict=True):
+    for k, (group_a, group_b) in enumerate(zip(*pairs, strict=True)):
         result.count += 1
+        trusted = by_probe and not (k < len(weak) and weak[k])
         single = group_a.mem.startswith(SINGLE)
         for side, group in ((0, group_a), (1, group_b)):
             digests = [sigs[side][group.slices[b]].digest for b in group.bits]
@@ -1105,12 +1118,13 @@ def _name_pairs(flats: Sequence[Flat], pairs: Sequence[Sequence[rampair.Group]],
             box_a, box_b = fa.blackboxes[ia], fb.blackboxes[group_b.slices[bit]]
             names[0][box_a.key], names[1][box_b.key] = key, key
             box_a.anon = box_b.anon = False
+            result.weak += by_probe and not trusted
             if single:
                 result.boxes += 1
-                result.boxes_probed += by_probe
+                result.boxes_probed += trusted
             else:
                 result.slices += 1
-                result.probed += by_probe
+                result.probed += trusted
     _rekey(fa, names[0])
     _rekey(fb, names[1])
     for flat in flats:
@@ -1152,7 +1166,10 @@ def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
     Soundness: as for ``pair_unnamed``, a pairing is only a proposal.  The paired slices become
     named cut points, ABC must prove every one of their input pins equal, and a wrong pairing can
     make the proof fail, never succeed.  Pairs found by a probe are counted as guessed by the
-    caller, so a failure is unproven (exit 4), not 'not equivalent'."""
+    caller, so a failure is unproven (exit 4), not 'not equivalent'.  Of those, only pairs a
+    probe proved on at least one pin outside the x-cone count as probed (a proof for the x-cone
+    verdict, ``RamPairing.probed``); a leftover pair and a vacuous probe (all compared pins
+    behind ``unconn``) are weak: guessed, so an x-cone result over them is exit 4."""
     fa, fb = flats
     groups = [_ram_groups(fa), _ram_groups(fb)]
     if groups[0] and groups[1]:
@@ -1178,19 +1195,22 @@ def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
         cls = rampair.classify(*keys)
         new = [(free[0][i], free[1][j]) for i, j in cls.exact]
         by_probe = False
+        weak: list[bool] = []
         if not new and find_probe_abc is not None and cls.ambiguous:
             amb = [([free[0][i] for i in a], [free[1][j] for j in b]) for a, b in cls.ambiguous]
             new = []
             for singles, limits in ((False, (deadline, probe_limits[1])),
                                     (True, (single_deadline, box_limits[1]))):
                 part = [c for c in amb if groups[0][c[0][0]].mem.startswith(SINGLE) == singles]
-                new += _probe_classes(flats, groups, part, find_probe_abc(), normalize, limits,
-                                      sigs)
+                pairs, soft = _probe_classes(flats, groups, part, find_probe_abc(), normalize,
+                                             limits, sigs)
+                new += pairs
+                weak += [p in soft for p in pairs]
             by_probe = True
         if not new:
             break
         _name_pairs(flats, [[groups[0][ga] for ga, _ in new], [groups[1][gb] for _, gb in new]],
-                    sigs, (prefix, by_probe), result)
+                    sigs, (prefix, by_probe), result, weak)
         for side, taken in ((0, {a for a, _ in new}), (1, {b for _, b in new})):
             free[side] = [g for g in free[side] if g not in taken]
     return result
@@ -1420,16 +1440,16 @@ def x_sources(flat: Flat) -> set[str]:
             if not n.inputs and not n.rows and n.output.rsplit(_SEP, 1)[-1] == XCONE_NET}
 
 
-def x_cone_outputs(flat: Flat) -> set[str]:
-    """The primary outputs (original names) of ``flat`` that the x sources reach going forward,
-    through covers and latches."""
+def x_reached(flat: Flat) -> set[str]:
+    """The flat nets that the x sources reach going forward, through covers, latches and cut
+    boxes (x on any input pin of a cut box taints all its output pins), the sources included."""
     fanout: dict[str, list[str]] = {}
     for names in flat.names:
         for net in names.inputs:
             fanout.setdefault(net, []).append(names.output)
     for latch in flat.latches:
         fanout.setdefault(latch.input, []).append(latch.output)
-    for box in flat.blackboxes:  # x on any input pin of a cut box taints all its output pins
+    for box in flat.blackboxes:
         for net in box.inputs.values():
             fanout.setdefault(net, []).extend(box.outputs.values())
     reached = set(x_sources(flat))
@@ -1439,6 +1459,13 @@ def x_cone_outputs(flat: Flat) -> set[str]:
             if nxt not in reached:
                 reached.add(nxt)
                 work.append(nxt)
+    return reached
+
+
+def x_cone_outputs(flat: Flat) -> set[str]:
+    """The primary outputs (original names) of ``flat`` that the x sources reach going forward,
+    through covers and latches."""
+    reached = x_reached(flat)
     return {out for out in flat.outputs if out in reached}
 
 
@@ -1521,7 +1548,7 @@ def _pair_boxes(flats: Sequence[Flat], args: argparse.Namespace) -> tuple[int, i
                + (f" ({ram.probed} of them in groups told apart by ABC probes)" if ram.probed
                   else ""))
     probed = ram.probed + ram.boxes_probed
-    return paired + ram.boxes, guessed + probed + ram.tied, probed
+    return paired + ram.boxes, guessed + probed + ram.weak + ram.tied, probed
 
 
 def _check(args: argparse.Namespace) -> int:
