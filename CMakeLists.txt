@@ -403,8 +403,9 @@ if(ODIN3_WITH_ABC)
         add_subdirectory(third_party/abc EXCLUDE_FROM_ALL)
         # No abc.history in the working directory (ABC's cmd/cmdHist.c).
         set_property(TARGET libabc-pic APPEND PROPERTY COMPILE_DEFINITIONS ABC_NO_HISTORY)
-        # ABC's main.c, created here so it keeps ABC's GNU C settings, not C17 (finding 19).
-        add_executable(odin3_abc_exe third_party/abc/src/base/main/main.c)
+        # ABC's main(), plus the commit line of the pin query, in adapters/abc/child_main.c;
+        # created here so it keeps ABC's GNU C settings, not C17 (finding 19).
+        add_executable(odin3_abc_exe adapters/abc/child_main.c)
         target_link_libraries(odin3_abc_exe PRIVATE libabc-pic)
         set_target_properties(odin3_abc_exe PROPERTIES
             OUTPUT_NAME abc
@@ -441,6 +442,17 @@ if(ODIN3_WITH_ABC)
     # ODIN3_ADAPTER_ASSERT's text does not depend on where the tree is checked out.
     set(_abc_adapter_copts -fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=)
     set(_abc_adapter_defs ODIN3_ABC_COMMIT_STR="${ODIN3_ABC_COMMIT}")
+    target_compile_definitions(odin3_abc_exe PRIVATE ${_abc_adapter_defs})
+    # The core's pin check (src/passes/abc/child.c) compares the program's commit with this one.
+    set_property(SOURCE src/passes/abc/child.c APPEND PROPERTY COMPILE_DEFINITIONS
+                 ${_abc_adapter_defs})
+    # AB-33: the subprocess path runs `odin3-abc` beside the `odin3` executable: a copy next to
+    # it in the build tree, an install rule beside it in an installed tree.
+    add_custom_command(TARGET odin3_abc_exe POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:odin3_abc_exe>
+                ${PROJECT_BINARY_DIR}/odin3-abc
+        COMMENT "odin3-abc beside odin3")
+    install(PROGRAMS $<TARGET_FILE:odin3_abc_exe> DESTINATION bin RENAME odin3-abc)
     # §4.2's wraps: exit, _exit, abort and __assert_fail escape through the guard; the process
     # control and code loading calls are refused (adapters/abc/guard.c): execl (base/sn's child)
     # and dlopen (Libs_Init loads every libabc_*.so of the cwd or $ABC_LIB_PATH at frame creation;
@@ -728,6 +740,15 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_abc_child)
     target_compile_definitions(test_abc_child PRIVATE
         ODIN3_CHILD_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/abc/child")
+    # 3D Task 9b: the route, the program lookup, the pin check and the six texts. With ABC the
+    # build's own odin3-abc must exist beside the test (it is copied there after odin3_abc_exe).
+    odin3_add_unit_test(test_abc_route)
+    target_compile_definitions(test_abc_route PRIVATE
+        ODIN3_CHILD_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/abc/child")
+    if(ODIN3_WITH_ABC)
+        target_compile_definitions(test_abc_route PRIVATE ODIN3_HAVE_ABC_EXE)
+        add_dependencies(test_abc_route odin3_abc_exe)
+    endif()
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)

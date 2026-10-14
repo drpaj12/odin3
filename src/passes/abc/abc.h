@@ -6,6 +6,8 @@
 #ifndef ODIN3_PASSES_ABC_ABC_H
 #define ODIN3_PASSES_ABC_ABC_H
 
+#include "util/sha256.h"
+
 #include <stdint.h>
 
 /* The script caps (P3-1, AB-24): reaching one is a script error (ODIN3_ERR_PARSE). */
@@ -51,5 +53,20 @@ typedef struct odin3_abc_child_limits {
 
 /* How the network reaches ABC (§6): in memory (MiniAIG in, MiniLUT out) or through BLIF files. */
 enum odin3_abc_exchange { ODIN3_ABC_EXCHANGE_AIG = 0, ODIN3_ABC_EXCHANGE_BLIF = 1 };
+
+/* Which engine runs a script (§7.9): the linked one in process, or the odin3-abc subprocess. */
+typedef enum odin3_abc_route_kind {
+    ODIN3_ABC_ROUTE_LINKED = 0,
+    ODIN3_ABC_ROUTE_CHILD = 1
+} odin3_abc_route_kind;
+
+/*
+ * The route of a script whose bytes have this SHA-256 (odin3_abc_script.sha256 as 32 bytes),
+ * decided once per pass run after the checker: LINKED when the digest is the embedded default
+ * script's (by content, so another path to the same bytes is still LINKED), CHILD for every other
+ * script. odin3_abc_test_set_route (abc_test.h) overrides the answer in tests. Never fails, never
+ * logs.
+ */
+odin3_abc_route_kind odin3_abc_route(const unsigned char sha256[ODIN3_SHA256_DIGEST_BYTES]);
 
 #endif

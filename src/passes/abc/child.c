@@ -18,6 +18,7 @@
 
 #include "passes/abc/abc.h"
 #include "passes/abc/abc_test.h"
+#include "passes/abc/script.h"
 #include "util/alloc.h"
 #include "util/clock.h"
 
@@ -451,4 +452,186 @@ odin3_status odin3_abc_child_run(const odin3_abc_child_req *req, odin3_abc_child
     }
     odin3_util_free(st);
     return status;
+}
+
+/* --- the route (§7.9) ----------------------------------------------------------------------- */
+
+static odin3_abc_test_route g_route_mode = ODIN3_ABC_TEST_ROUTE_AUTO;
+
+void odin3_abc_test_set_route(odin3_abc_test_route mode) {
+    g_route_mode = mode;
+}
+
+odin3_abc_route_kind odin3_abc_route(const unsigned char sha256[ODIN3_SHA256_DIGEST_BYTES]) {
+    if (g_route_mode == ODIN3_ABC_TEST_ROUTE_ALWAYS_CHILD) {
+        return ODIN3_ABC_ROUTE_CHILD;
+    }
+    if (g_route_mode == ODIN3_ABC_TEST_ROUTE_ALWAYS_LINKED) {
+        return ODIN3_ABC_ROUTE_LINKED;
+    }
+    uint8_t embedded[ODIN3_SHA256_DIGEST_BYTES];
+    odin3_abc_default_sha256(embedded);
+    return memcmp(embedded, sha256, sizeof embedded) == 0 ? ODIN3_ABC_ROUTE_LINKED
+                                                          : ODIN3_ABC_ROUTE_CHILD;
+}
+
+/* --- the program and its pin ---------------------------------------------------------------- */
+
+#ifndef ODIN3_ABC_COMMIT_STR
+#define ODIN3_ABC_COMMIT_STR "0000000000000000000000000000000000000000" /* a build without ABC */
+#endif
+
+enum { COMMIT_HEX = 40 };
+
+static const char SIBLING_NAME[] = "odin3-abc";
+static const char PIN_PREFIX[] = "odin3-abc: commit ";
+
+const char *odin3_abc_child_pin(void) {
+    return ODIN3_ABC_COMMIT_STR;
+}
+
+/* path := the program named by the environment, made absolute. */
+static odin3_status program_from_env(const char *value, char *path, size_t cap) {
+    int wrote;
+    if (value[0] == '/') {
+        wrote = snprintf(path, cap, "%s", value);
+    } else {
+        char cwd[ODIN3_ABC_CHILD_PATH_BYTES];
+        if (getcwd(cwd, sizeof cwd) == NULL) {
+            return ODIN3_ERR_IO;
+        }
+        wrote = snprintf(path, cap, "%s/%s", cwd, value);
+    }
+    return (wrote > 0 && (size_t)wrote < cap) ? ODIN3_OK : ODIN3_ERR_INVALID_ARG;
+}
+
+/* path := odin3-abc beside the running executable. */
+static odin3_status program_beside_self(char *path, size_t cap) {
+    ssize_t len = readlink("/proc/self/exe", path, cap - 1);
+    if (len < 0) {
+        return ODIN3_ERR_IO;
+    }
+    path[len] = '\0';
+    char *slash = strrchr(path, '/');
+    if (slash == NULL) {
+        return ODIN3_ERR_IO;
+    }
+    size_t room = cap - (size_t)(slash - path);
+    int wrote = snprintf(slash, room, "/%s", SIBLING_NAME);
+    return (wrote > 0 && (size_t)wrote < room) ? ODIN3_OK : ODIN3_ERR_INVALID_ARG;
+}
+
+odin3_status odin3_abc_child_program(char *path, size_t cap) {
+    if (path == NULL || cap < 2) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    const char *value = getenv("ODIN3_ABC_EXE");
+    if (value != NULL && value[0] != '\0') {
+        return program_from_env(value, path, cap);
+    }
+    return program_beside_self(path, cap);
+}
+
+/* What the pin query's output holds so far. */
+typedef struct pin_scan {
+    char commit[COMMIT_HEX + 1];
+    bool seen;
+} pin_scan;
+
+static void scan_pin_line(void *user, const char *line) {
+    pin_scan *scan = user;
+    size_t prefix = sizeof PIN_PREFIX - 1;
+    if (!scan->seen && strncmp(line, PIN_PREFIX, prefix) == 0) {
+        (void)snprintf(scan->commit, sizeof scan->commit, "%s", line + prefix);
+        scan->seen = true;
+    }
+}
+
+/* The last program that passed (once per process, spec §7.9). */
+static char g_pinned_program[ODIN3_ABC_CHILD_PATH_BYTES];
+
+static odin3_status pin_mismatch(const pin_scan *scan, odin3_abc_child_res *res) {
+    res->kind = ODIN3_ABC_CHILD_PIN;
+    res->code = 0;
+    (void)snprintf(res->found, sizeof res->found, "%.*s", ODIN3_ABC_CHILD_HEX,
+                   scan->seen && scan->commit[0] != '\0' ? scan->commit : "unknown");
+    return ODIN3_ERR_ENGINE;
+}
+
+odin3_status odin3_abc_child_check_pin(const char *path, odin3_abc_child_res *res) {
+    if (!text_ok(path) || path[0] != '/' || res == NULL) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (strcmp(path, g_pinned_program) == 0) {
+        uint32_t run = res->run;
+        memset(res, 0, sizeof *res);
+        res->run = run;
+        (void)snprintf(res->program, sizeof res->program, "%s", path);
+        return ODIN3_OK;
+    }
+    pin_scan scan = {{0}, false};
+    odin3_abc_child_req req = {0};
+    req.program = path;
+    req.option = "-c";
+    req.argument = "version";
+    req.run_dir = "/";
+    req.run = res->run;
+    req.text = scan_pin_line;
+    req.user = &scan;
+    odin3_status status = odin3_abc_child_run(&req, res);
+    if (status != ODIN3_OK) {
+        return status;
+    }
+    if (!scan.seen || strcmp(scan.commit, ODIN3_ABC_COMMIT_STR) != 0) {
+        return pin_mismatch(&scan, res);
+    }
+    (void)snprintf(g_pinned_program, sizeof g_pinned_program, "%s", path);
+    return ODIN3_OK;
+}
+
+/* --- the six texts -------------------------------------------------------------------------- */
+
+static void render_message(const odin3_abc_child_res *res, char *out, size_t cap) {
+    switch (res->kind) {
+    case ODIN3_ABC_CHILD_SPAWN: {
+        char reason[ODIN3_ABC_CHILD_PATH_BYTES];
+        if (strerror_r(res->code, reason, sizeof reason) != 0) {
+            (void)snprintf(reason, sizeof reason, "error %d", res->code);
+        }
+        (void)snprintf(out, cap, "abc: ABC subprocess '%s' cannot start: %s", res->program, reason);
+        break;
+    }
+    case ODIN3_ABC_CHILD_PIN:
+        (void)snprintf(out, cap, "abc: ABC subprocess '%s' is %s, expected %.*s", res->program,
+                       res->found, ODIN3_ABC_CHILD_HEX, ODIN3_ABC_COMMIT_STR);
+        break;
+    case ODIN3_ABC_CHILD_EXIT:
+        (void)snprintf(out, cap, "abc: ABC subprocess exited with status %d during run %u",
+                       res->code, (unsigned)res->run);
+        break;
+    case ODIN3_ABC_CHILD_SIGNAL:
+        (void)snprintf(out, cap, "abc: ABC subprocess killed by signal %d during run %u", res->code,
+                       (unsigned)res->run);
+        break;
+    case ODIN3_ABC_CHILD_TIMEOUT:
+        (void)snprintf(out, cap, "abc: ABC subprocess exceeded %u s wall clock during run %u",
+                       (unsigned)res->seconds, (unsigned)res->run);
+        break;
+    default: /* ODIN3_ABC_CHILD_OUTPUT */
+        (void)snprintf(out, cap, "abc: ABC subprocess wrote more than %llu bytes during run %u",
+                       (unsigned long long)res->output_limit, (unsigned)res->run);
+        break;
+    }
+}
+
+odin3_status odin3_abc_child_message(const odin3_abc_child_res *res, char *out, size_t cap) {
+    if (out == NULL || cap == 0) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    out[0] = '\0';
+    if (res == NULL || res->kind == ODIN3_ABC_CHILD_OK) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    render_message(res, out, cap);
+    return ODIN3_OK;
 }

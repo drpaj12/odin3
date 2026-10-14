@@ -64,7 +64,7 @@ static void collect(void *user, const char *line) {
 }
 
 void setUp(void) {
-    snprintf(g_dir, sizeof g_dir, "/tmp/odin3-abc-child-XXXXXX");
+    (void)snprintf(g_dir, sizeof g_dir, "/tmp/odin3-abc-child-XXXXXX");
     TEST_ASSERT_NOT_NULL(mkdtemp(g_dir));
     g_count = 0;
     g_total = 0;
@@ -74,13 +74,13 @@ void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
     odin3_abc_test_set_child_limits(NULL);
     char pid_file[PATH_CAP];
-    snprintf(pid_file, sizeof pid_file, "%s/grandchild.pid", g_dir);
+    (void)snprintf(pid_file, sizeof pid_file, "%s/grandchild.pid", g_dir);
     (void)unlink(pid_file);
     (void)rmdir(g_dir);
 }
 
 static odin3_abc_child_req request(const char *fixture, char *program, size_t cap) {
-    snprintf(program, cap, "%s/%s", ODIN3_CHILD_DATA, fixture);
+    (void)snprintf(program, cap, "%s/%s", ODIN3_CHILD_DATA, fixture);
     odin3_abc_child_req req = {0};
     req.program = program;
     req.option = "-f";
@@ -110,7 +110,7 @@ static bool process_gone(pid_t pid) {
         return errno == ESRCH;
     }
     char path[64];
-    snprintf(path, sizeof path, "/proc/%ld/stat", (long)pid);
+    (void)snprintf(path, sizeof path, "/proc/%ld/stat", (long)pid);
     FILE *file = fopen(path, "r");
     if (file == NULL) {
         return true;
@@ -179,17 +179,33 @@ static void test_signal(void) {
 /* The grandchild's pid, from the file the fixture wrote in the run directory; -1 if unreadable. */
 static pid_t read_grandchild(void) {
     char path[PATH_CAP];
-    snprintf(path, sizeof path, "%s/grandchild.pid", g_dir);
+    (void)snprintf(path, sizeof path, "%s/grandchild.pid", g_dir);
     FILE *file = fopen(path, "r");
     if (file == NULL) {
         return -1;
     }
+    char text[LINE_CAP];
     long pid = -1;
-    if (fscanf(file, "%ld", &pid) != 1) {
-        pid = -1;
+    if (fgets(text, sizeof text, file) != NULL) {
+        pid = strtol(text, NULL, 10);
     }
     (void)fclose(file);
     return (pid_t)pid;
+}
+
+/* Waits up to GONE_WAIT_MS for pid to be gone. */
+static bool wait_gone(pid_t pid) {
+    for (int waited = 0; waited < GONE_WAIT_MS && !process_gone(pid); waited += POLL_MS) {
+        struct timespec nap = {0, POLL_MS * 1000000L};
+        (void)nanosleep(&nap, NULL);
+    }
+    return process_gone(pid);
+}
+
+static void check_grandchild_gone(void) {
+    pid_t grandchild = read_grandchild();
+    TEST_ASSERT_TRUE(grandchild > 1);
+    TEST_ASSERT_TRUE(wait_gone(grandchild));
 }
 
 static void test_timeout_kills_the_group(void) {
@@ -203,13 +219,7 @@ static void test_timeout_kills_the_group(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ABC_CHILD_TIMEOUT, res.kind);
     TEST_ASSERT_EQUAL_UINT32(ONE_SECOND, res.seconds);
     TEST_ASSERT_TRUE(no_children());
-    pid_t grandchild = read_grandchild();
-    TEST_ASSERT_TRUE(grandchild > 1);
-    for (int waited = 0; waited < GONE_WAIT_MS && !process_gone(grandchild); waited += POLL_MS) {
-        struct timespec nap = {0, POLL_MS * 1000000L};
-        (void)nanosleep(&nap, NULL);
-    }
-    TEST_ASSERT_TRUE(process_gone(grandchild));
+    check_grandchild_gone();
 }
 
 static void test_test_hook_lowers_limits(void) {
@@ -283,7 +293,21 @@ static bool line_is(const char *text) {
     return false;
 }
 
-static void test_environment_stdin_core_cwd(void) {
+/* True when line is one the child may print: its four variables, the shell's PWD and the
+ * fixture's own report lines. */
+static bool line_allowed(const char *line) {
+    static const char *const prefixes[] = {
+        "PATH=", "HOME=", "TMPDIR=", "LC_ALL=", "PWD=", "stdin-", "core:", "pwd:", "args:"};
+    for (size_t i = 0; i < sizeof prefixes / sizeof prefixes[0]; i++) {
+        if (strncmp(line, prefixes[i], strlen(prefixes[i])) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Runs env.sh with this process's core limit raised and a stray variable set, as the host might. */
+static odin3_status run_env_fixture(odin3_abc_child_res *res) {
     struct rlimit core;
     TEST_ASSERT_EQUAL_INT(0, getrlimit(RLIMIT_CORE, &core));
     struct rlimit saved = core;
@@ -292,40 +316,49 @@ static void test_environment_stdin_core_cwd(void) {
         TEST_ASSERT_EQUAL_INT(0, setrlimit(RLIMIT_CORE, &core));
     }
     TEST_ASSERT_EQUAL_INT(0, setenv("ODIN3_CHILD_SECRET", "leak", 1));
-    odin3_abc_child_res res;
-    odin3_status st = run_fixture("env.sh", &res);
+    odin3_status st = run_fixture("env.sh", res);
     (void)unsetenv("ODIN3_CHILD_SECRET");
     struct rlimit after;
     TEST_ASSERT_EQUAL_INT(0, getrlimit(RLIMIT_CORE, &after));
     TEST_ASSERT_EQUAL_UINT64(core.rlim_cur, after.rlim_cur); /* the parent's limit is restored */
     (void)setrlimit(RLIMIT_CORE, &saved);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    return st;
+}
+
+static void assert_line(const char *text) {
+    TEST_ASSERT_TRUE_MESSAGE(line_is(text), text);
+}
+
+/* The variable is set. */
+static void assert_variable(const char *key) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(env_value(key), key);
+}
+
+static void check_environment_lines(void) {
     for (size_t i = 0; i < g_count && i < MAX_LINES; i++) {
-        const char *eq = strchr(g_lines[i], '=');
-        if (eq == NULL) {
-            continue;
-        }
-        size_t key_len = (size_t)(eq - g_lines[i]);
-        bool known = (key_len == 4 && strncmp(g_lines[i], "PATH", 4) == 0) ||
-                     (key_len == 4 && strncmp(g_lines[i], "HOME", 4) == 0) ||
-                     (key_len == 6 && strncmp(g_lines[i], "TMPDIR", 6) == 0) ||
-                     (key_len == 6 && strncmp(g_lines[i], "LC_ALL", 6) == 0) ||
-                     (key_len == 3 && strncmp(g_lines[i], "PWD", 3) == 0); /* the shell's own */
-        if (strncmp(g_lines[i], "args:", 5) == 0 || strncmp(g_lines[i], "pwd:", 4) == 0) {
-            known = true;
-        }
-        TEST_ASSERT_TRUE_MESSAGE(known, g_lines[i]);
+        TEST_ASSERT_TRUE_MESSAGE(line_allowed(g_lines[i]), g_lines[i]);
     }
-    TEST_ASSERT_NOT_NULL(env_value("PATH"));
-    TEST_ASSERT_NOT_NULL(env_value("HOME"));
-    TEST_ASSERT_NOT_NULL(env_value("TMPDIR"));
+    assert_variable("PATH");
+    assert_variable("HOME");
+    assert_variable("TMPDIR");
+    assert_variable("LC_ALL");
     TEST_ASSERT_EQUAL_STRING("C", env_value("LC_ALL"));
-    TEST_ASSERT_TRUE(line_is("stdin-eof"));
-    TEST_ASSERT_TRUE(line_is("core:0"));
+}
+
+static void check_fixture_report(void) {
+    assert_line("stdin-eof");
+    assert_line("core:0");
+    assert_line("args:-f unused.cmd");
     char want[PATH_CAP + 8];
-    snprintf(want, sizeof want, "pwd:%s", g_dir);
-    TEST_ASSERT_TRUE(line_is(want));
-    TEST_ASSERT_TRUE(line_is("args:-f unused.cmd"));
+    (void)snprintf(want, sizeof want, "pwd:%s", g_dir);
+    assert_line(want);
+}
+
+static void test_environment_stdin_core_cwd(void) {
+    odin3_abc_child_res res;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_env_fixture(&res));
+    check_environment_lines();
+    check_fixture_report();
 }
 
 static void test_invalid_requests(void) {
@@ -355,10 +388,10 @@ static void test_invalid_requests(void) {
 /* Every allocation of a run fails once in turn: NO_MEMORY, nothing spawned, nothing leaked. */
 static void test_oom_sweep(void) {
     bool done = false;
-    for (long n = 0; n < OOM_MAX && !done; n++) {
+    for (long after = 0; after < OOM_MAX && !done; after++) {
         odin3_abc_child_res res;
         g_count = 0;
-        odin3_util_set_alloc_fail_after(n);
+        odin3_util_set_alloc_fail_after(after);
         odin3_status st = run_fixture("ok.sh", &res);
         odin3_util_set_alloc_fail_after(-1);
         if (st == ODIN3_OK) {

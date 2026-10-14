@@ -78,4 +78,40 @@ typedef struct odin3_abc_child_res {
  */
 odin3_status odin3_abc_child_run(const odin3_abc_child_req *req, odin3_abc_child_res *res);
 
+/*
+ * The text of a failed run (the six texts of spec §7.9, each exact, lower case after `abc: `, no
+ * final period), rendered into out; the caller logs it at ERROR with status ENGINE. The run number
+ * is res->run. A longer text than cap is cut. ODIN3_ERR_INVALID_ARG for a NULL argument, a cap of
+ * 0 or a res that is OK (there is nothing to say); out then holds "".
+ */
+enum { ODIN3_ABC_CHILD_MESSAGE_BYTES = 1280 }; /* a cap that holds every text whole */
+odin3_status odin3_abc_child_message(const odin3_abc_child_res *res, char *out, size_t cap);
+
+/*
+ * Where the program is: $ODIN3_ABC_EXE when it is set and not empty (a relative one is made
+ * absolute with the current directory), else odin3-abc beside the running executable
+ * (<dirname of /proc/self/exe>/odin3-abc). The file is not looked at: a missing or unrunnable
+ * program is the SPAWN of the first run. ODIN3_ERR_INVALID_ARG for a NULL path, a cap too small
+ * for the result or a path that does not fit; ODIN3_ERR_IO when /proc/self/exe cannot be read.
+ */
+odin3_status odin3_abc_child_program(char *path, size_t cap);
+
+/*
+ * The pinned ABC commit the program must be (40 lower-case hex digits; ODIN3_ABC_COMMIT_STR of
+ * the build, all zeros in a build without ABC). Never NULL.
+ */
+const char *odin3_abc_child_pin(void);
+
+/*
+ * Checks that the program at path (absolute) is the pinned ABC build: runs `<path> -c "version"`
+ * (the first run of a process; later calls with the same path that passed answer OK without
+ * running anything) and compares the commit that odin3-abc prints on a line `odin3-abc: commit
+ * <40 hex>` with odin3_abc_child_pin. ODIN3_OK when they are equal. A program that cannot start,
+ * or exits non-zero, gives that run's kind (SPAWN, EXIT, SIGNAL, TIMEOUT, OUTPUT) and
+ * ODIN3_ERR_ENGINE; one that runs but prints no or another commit gives kind PIN, `found` set,
+ * and ODIN3_ERR_ENGINE. res->run, set by the caller before the call, is kept for the messages.
+ * ODIN3_ERR_INVALID_ARG for a NULL or relative path or a NULL res; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_abc_child_check_pin(const char *path, odin3_abc_child_res *res);
+
 #endif

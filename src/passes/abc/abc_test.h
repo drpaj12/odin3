@@ -40,4 +40,17 @@ void odin3_abc_test_set_engine(const odin3_abc_engine *engine);
  */
 void odin3_abc_test_set_child_limits(const odin3_abc_child_limits *limits);
 
+/* What odin3_abc_test_set_route forces. */
+typedef enum odin3_abc_test_route {
+    ODIN3_ABC_TEST_ROUTE_AUTO = 0, /* the SHA-256 rule of §7.9 */
+    ODIN3_ABC_TEST_ROUTE_ALWAYS_CHILD,
+    ODIN3_ABC_TEST_ROUTE_ALWAYS_LINKED
+} odin3_abc_test_route;
+
+/*
+ * Makes odin3_abc_route answer mode instead of the script's digest (the differential tests run the
+ * default script in the child); AUTO restores the rule. Never fails, never logs.
+ */
+void odin3_abc_test_set_route(odin3_abc_test_route mode);
+
 #endif
