@@ -45,7 +45,9 @@ SIM_CYCLES = 16
 SIM_SEED = 1
 # The known reasons the unflattened design cannot be simulated: a word-level flip-flop or latch
 # (`lower` comes later) or a tristate buffer. Anything else the simulator rejects is a failure.
-SKIP_REASON = re.compile(r"cannot simulate `\$(?:\w*dff\w*|\w*dlatch\w*|\w*latch\w*|tribuf|_TBUF_)`")
+SKIP_REASON = re.compile(
+    r"cannot simulate `\$(?:\w*dff\w*|\w*latch\w*|tribuf|_TBUF_)`"
+)
 
 
 @dataclass

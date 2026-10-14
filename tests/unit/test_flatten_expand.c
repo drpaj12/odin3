@@ -358,6 +358,19 @@ static void test_flat_join_after_fresh(void) {
     TEST_ASSERT_EQUAL_UINT32(odin3_module_find_wire(top, str("z")).v, primary.wire.v);
 }
 
+/* The live nodes of mod of the named type that carry no provenance record. */
+static uint32_t count_without_prov(const odin3_module *mod, const char *type) {
+    odin3_celltype_id tid = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(fix.design, str(type), &tid));
+    uint32_t bare = 0;
+    for (uint32_t nid = 1; nid < odin3_module_node_end(mod); nid++) {
+        odin3_node_id node = {nid};
+        bool match = odin3_node_live(mod, node) && odin3_node_type(mod, node).v == tid.v;
+        bare += match && odin3_node_prov(mod, node).v == 0 ? 1 : 0;
+    }
+    return bare;
+}
+
 /* The shared constants a flatten creates carry a record (the instance's), not provenance 0 (M3). */
 static void test_flat_constant_prov(void) {
     odin3_prov_id inst_src = ff_source(&fix, "top.v", 7, "top");
@@ -372,17 +385,8 @@ static void test_flat_constant_prov(void) {
     fix.prov = inst_src;
     (void)ff_inst(&fix, (ff_pair){top, sub}, "u1", &zz);
     flatten_ok(top);
-    odin3_celltype_id tid = {0};
-    TEST_ASSERT_TRUE(odin3_celltype_find(fix.design, str("$_CONST1_"), &tid));
-    uint32_t seen = 0;
-    for (uint32_t nid = 1; nid < odin3_module_node_end(top); nid++) {
-        odin3_node_id node = {nid};
-        if (odin3_node_live(top, node) && odin3_node_type(top, node).v == tid.v) {
-            TEST_ASSERT_NOT_EQUAL(0, odin3_node_prov(top, node).v);
-            seen++;
-        }
-    }
-    TEST_ASSERT_EQUAL_UINT32(1, seen);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type(top, "$_CONST1_"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_without_prov(top, "$_CONST1_"));
 }
 
 static void test_flat_keep_hierarchy_inst(void) {
@@ -1019,9 +1023,14 @@ static void test_estimate_not_below_actual(void) {
 
 enum { FT_WIDTH = 32, FT_MIDS = 40, FT_PER_MID = 4, FT_ALIASES = 4 };
 
+/* How many alias wires and bare alias names each ft gets. */
+typedef struct alias_mix {
+    uint32_t wires, bare;
+} alias_mix;
+
 /* ft: a[FT_WIDTH] feeds through to y[FT_WIDTH] (no cell), with `wires` alias wires over the same
  * nets and `bare` named nets merged into them (the shape of structural netlists: review I1). */
-static odin3_module *make_feedthrough(uint32_t wires, uint32_t bare) {
+static odin3_module *make_feedthrough(alias_mix mix) {
     odin3_module *ft = ff_module(&fix, "ft");
     (void)ff_port(&fix, ft, "a", ODIN3_DIR_IN, FT_WIDTH);
     (void)ff_port(&fix, ft, "y", ODIN3_DIR_OUT, FT_WIDTH);
@@ -1032,13 +1041,13 @@ static odin3_module *make_feedthrough(uint32_t wires, uint32_t bare) {
             ODIN3_OK,
             odin3_net_merge(ft, (odin3_net_pair){nets[bit], ff_wnet(&fix, ft, "y", bit)}));
     }
-    for (uint32_t i = 0; i < wires; i++) {
+    for (uint32_t i = 0; i < mix.wires; i++) {
         char name[NAME_BUF];
         (void)snprintf(name, sizeof name, "al%u", i);
         odin3_wire_spec spec = {str(name), FT_WIDTH - 1, 0, false, {0}};
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(ft, &spec, nets, NULL));
     }
-    for (uint32_t i = 0; i < bare; i++) {
+    for (uint32_t i = 0; i < mix.bare; i++) {
         for (uint32_t bit = 0; bit < FT_WIDTH; bit++) {
             char name[NAME_BUF];
             (void)snprintf(name, sizeof name, "bare%u_%u", i, bit);
@@ -1050,8 +1059,8 @@ static odin3_module *make_feedthrough(uint32_t wires, uint32_t bare) {
 }
 
 /* top: FT_MIDS instances of mid, each a chain of FT_PER_MID ft instances; all feed-through. */
-static odin3_module *make_alias_tree(uint32_t wires, uint32_t bare) {
-    odin3_module *ft = make_feedthrough(wires, bare);
+static odin3_module *make_alias_tree(alias_mix mix) {
+    odin3_module *ft = make_feedthrough(mix);
     odin3_module *mid = ff_module(&fix, "mid");
     (void)ff_port(&fix, mid, "i", ODIN3_DIR_IN, FT_WIDTH);
     (void)ff_port(&fix, mid, "o", ODIN3_DIR_OUT, FT_WIDTH);
@@ -1075,15 +1084,15 @@ static odin3_module *make_alias_tree(uint32_t wires, uint32_t bare) {
     odin3_module *top = ff_module(&fix, "top");
     (void)ff_port(&fix, top, "x", ODIN3_DIR_IN, FT_WIDTH);
     (void)ff_port(&fix, top, "z", ODIN3_DIR_OUT, FT_WIDTH * FT_MIDS);
-    for (uint32_t m = 0; m < FT_MIDS; m++) {
+    for (uint32_t mid_no = 0; mid_no < FT_MIDS; mid_no++) {
         odin3_net_id x_nets[FT_WIDTH];
         odin3_net_id z_nets[FT_WIDTH];
         for (uint32_t bit = 0; bit < FT_WIDTH; bit++) {
             x_nets[bit] = ff_wnet(&fix, top, "x", bit);
-            z_nets[bit] = ff_wnet(&fix, top, "z", m * FT_WIDTH + bit);
+            z_nets[bit] = ff_wnet(&fix, top, "z", mid_no * FT_WIDTH + bit);
         }
         char name[NAME_BUF];
-        (void)snprintf(name, sizeof name, "m%u", m);
+        (void)snprintf(name, sizeof name, "m%u", mid_no);
         odin3_netvec ports[2] = {{x_nets, FT_WIDTH}, {z_nets, FT_WIDTH}};
         (void)ff_inst_bus(&fix, (ff_pair){top, mid}, name, ports);
     }
@@ -1092,17 +1101,17 @@ static odin3_module *make_alias_tree(uint32_t wires, uint32_t bare) {
 
 /* Feed-throughs with no cells: nothing but nets and wires is added (review I1). */
 static void test_estimate_feedthrough(void) {
-    assert_estimate_covers(make_alias_tree(0, 0), 0);
+    assert_estimate_covers(make_alias_tree((alias_mix){0, 0}), 0);
 }
 
 /* The same with four alias wires per ft: every wire bit joins a net as an alias. */
 static void test_estimate_alias_wires(void) {
-    assert_estimate_covers(make_alias_tree(FT_ALIASES, 0), 0);
+    assert_estimate_covers(make_alias_tree((alias_mix){FT_ALIASES, 0}), 0);
 }
 
 /* The same with bare named nets merged into the port nets (aliases without a wire). */
 static void test_estimate_bare_aliases(void) {
-    assert_estimate_covers(make_alias_tree(0, FT_ALIASES), 0);
+    assert_estimate_covers(make_alias_tree((alias_mix){0, FT_ALIASES}), 0);
 }
 
 /* The sorted names of the live nodes and wires of mod and the alias lists of its port nets. */

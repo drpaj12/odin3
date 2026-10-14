@@ -30,8 +30,8 @@ odin3_status odin3_flatten_path(odin3_flatten_ctx *fc, const flat_work *item) {
  * name (which may itself hold a '/', e.g. a string parameter `sub$F="dir/x.hex"`), else after its
  * first component. Empty when nothing follows. */
 static const char *hier_scope(const odin3_flatten_ctx *fc, const char *orig) {
-    const char *module = odin3_strtab_get(odin3_design_strtab(fc->design),
-                                          odin3_module_name(fc->child));
+    const char *module =
+        odin3_strtab_get(odin3_design_strtab(fc->design), odin3_module_name(fc->child));
     size_t len = strlen(module);
     const char *slash = NULL;
     if (len > 0 && strncmp(orig, module, len) == 0 && (orig[len] == '/' || orig[len] == '\0')) {

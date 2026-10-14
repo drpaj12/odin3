@@ -36,8 +36,8 @@ enum {
     B_WIRE = 16,
     B_REC = 96,
     B_NAME = 32,
-    B_ALIAS_BIT = 64,  /* a wire bit that joins a net as an alias */
-    B_BARE = 256,      /* a bare alias: a temporary net, its interned name, the alias entry */
+    B_ALIAS_BIT = 64, /* a wire bit that joins a net as an alias */
+    B_BARE = 256,     /* a bare alias: a temporary net, its interned name, the alias entry */
     N_CONST_TYPES = 4,
     MAX_CYCLE_NAMES = 16,
     MAX_UNUSED_NAMES = 8

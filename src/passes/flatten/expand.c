@@ -6,8 +6,8 @@
 
 #include "ir/celltype.h"
 #include "ir/module.h"
-#include "util/alloc.h"
 #include "passes/flatten/flatten_test.h"
+#include "util/alloc.h"
 #include "util/log.h"
 
 #include <assert.h>
@@ -331,10 +331,9 @@ static odin3_status expand_one(odin3_flatten_ctx *fc, const flat_work *item) {
     fc->inst_prov = item->prov;
     fc->cache_to = 0;
     odin3_status st = odin3_flatten_path(fc, item);
-    st = st == ODIN3_OK
-             ? odin3_flatten_set_prefix(
-                   fc, (flat_label){odin3_node_name(fc->root, inst), inst.v, item->parent_prefix})
-             : st;
+    st = st == ODIN3_OK ? odin3_flatten_set_prefix(fc, (flat_label){odin3_node_name(fc->root, inst),
+                                                                    inst.v, item->parent_prefix})
+                        : st;
     st = st == ODIN3_OK ? capture_pins(fc, inst) : st;
     st = st == ODIN3_OK ? odin3_node_delete(fc->root, inst) : st;
     st = st == ODIN3_OK ? map_nets(fc) : st;
