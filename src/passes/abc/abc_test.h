@@ -33,4 +33,24 @@ void odin3_abc_test_set_limits(const odin3_abc_limits *limits);
  */
 void odin3_abc_test_set_engine(const odin3_abc_engine *engine);
 
+/*
+ * Lowers the child runner's limits (§7.9, AB-33): a non-zero seconds or output_bytes replaces a
+ * higher limit of every later odin3_abc_child_run (a test may only lower them). NULL, or a zero
+ * field, lifts that override. Never fails, never logs.
+ */
+void odin3_abc_test_set_child_limits(const odin3_abc_child_limits *limits);
+
+/* What odin3_abc_test_set_route forces. */
+typedef enum odin3_abc_test_route {
+    ODIN3_ABC_TEST_ROUTE_AUTO = 0, /* the SHA-256 rule of §7.9 */
+    ODIN3_ABC_TEST_ROUTE_ALWAYS_CHILD,
+    ODIN3_ABC_TEST_ROUTE_ALWAYS_LINKED
+} odin3_abc_test_route;
+
+/*
+ * Makes odin3_abc_route answer mode instead of the script's digest (the differential tests run the
+ * default script in the child); AUTO restores the rule. Never fails, never logs.
+ */
+void odin3_abc_test_set_route(odin3_abc_test_route mode);
+
 #endif

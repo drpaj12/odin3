@@ -1304,8 +1304,11 @@ restore and every IR rule are those of the BLIF exchange; the splice never learn
 - *Program.* `odin3-abc`, the PIC `odin3_abc_exe` of §4.1 installed next to the `odin3` executable,
   found as `<dirname of /proc/self/exe>/odin3-abc`; `ODIN3_ABC_EXE` overrides it (Python hosts and
   tests). Missing or unrunnable: `abc: ABC subprocess '<path>' cannot start: <strerror>`. Its
-  commit must be the pin: the first child run of a process asks `-c "version"` and compares it
-  with `ODIN3_ABC_COMMIT_STR`; a mismatch is refused.
+  commit must be the pin: the first child run of a process asks `-c "version"` and compares the
+  commit it names with `ODIN3_ABC_COMMIT_STR`; a mismatch is refused. ABC's own `version` text has
+  no commit, so `odin3-abc`'s `main()` (`adapters/abc/child_main.c`, ABC's `main.c` plus this)
+  prints `odin3-abc: commit <40 hex>` before running that exact query; a program that prints no
+  such line is a mismatch (`is unknown`). (Amended by 3D-5a.)
 - *Command.* `odin3-abc -f <abs abc<r>.cmd>` with the run directory as working directory; the
   `.cmd` file is the one AB-22 builds for the BLIF exchange. `posix_spawn`, a new process group,
   stdin from `/dev/null`, stdout and stderr merged on one pipe, an environment of only `PATH`,

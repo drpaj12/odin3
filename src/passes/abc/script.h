@@ -164,4 +164,7 @@ const odin3_abc_cmd *odin3_abc_script_cmd(const odin3_abc_script *script, uint32
 extern const unsigned char odin3_abc_default_script[];
 extern const uint32_t odin3_abc_default_script_len;
 
+/* The SHA-256 of the embedded default script's bytes (the route's identity, §7.9). Never fails. */
+void odin3_abc_default_sha256(uint8_t digest[ODIN3_SHA256_DIGEST_BYTES]);
+
 #endif

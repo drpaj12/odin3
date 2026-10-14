@@ -1269,3 +1269,10 @@ const odin3_abc_cmd *odin3_abc_script_cmd(const odin3_abc_script *script, uint32
     }
     return &script->cmds[index];
 }
+
+void odin3_abc_default_sha256(uint8_t digest[ODIN3_SHA256_DIGEST_BYTES]) {
+    odin3_sha256 sha;
+    odin3_sha256_init(&sha);
+    odin3_sha256_update(&sha, odin3_abc_default_script, odin3_abc_default_script_len);
+    odin3_sha256_final(&sha, digest);
+}
