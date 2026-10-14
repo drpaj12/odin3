@@ -72,6 +72,7 @@ EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
 DEFAULT_CAP = 2 << 30
 TIMEOUT_SECONDS = 600.0
 REFINE_TIMEOUT_SECONDS = 60.0  # one equivalence proof; past it the answer is "inconclusive"
+MAX_SAT_TIMEOUTS = 2  # opt-equiv stops trying SAT proofs of a design after this many timeouts
 PAIR_NAME = re.compile(r"^(\d{4})-(opt_[a-z]+|wreduce)-before\.il$")
 STAT_LINE = re.compile(r"opt: rule (\S+) (\d+)\s*$", re.M)
 MODULE_LINE = re.compile(r"^module (\\\S+)\s*$", re.M)
@@ -433,12 +434,17 @@ def check_all(run: Run, checker: Checker) -> list[Verdict]:
     """A pair whose SAT proof times out is "inconclusive" (the run goes on); every other crash
     stays a ``CrashError``."""
     verdicts: list[Verdict] = []
+    timeouts = 0
     for pair in run.pairs:
+        if timeouts >= MAX_SAT_TIMEOUTS:  # the rest of this design is as big: not tried
+            verdicts.append(Verdict(pair, False, f"not tried after {timeouts} SAT timeouts", True))
+            continue
         try:
             ok, reason = checker.refines(pair.before, pair.after, pair.name)
         except CrashError as exc:
             if not exc.timed_out:
                 raise
+            timeouts += 1
             verdicts.append(Verdict(pair, False, str(exc), True))
             continue
         verdicts.append(Verdict(pair, ok, reason))

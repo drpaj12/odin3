@@ -333,6 +333,22 @@ class MainTest(unittest.TestCase):
                 self.assertIn(needle, out)
                 self.assertIn("inconclusive", out)
 
+    def test_sat_is_not_retried_after_two_timeouts(self) -> None:
+        self.fakes.spec({**self.pair("0001", "opt_expr"), **self.pair("0002", "opt_clean"),
+                         **self.pair("0003", "opt_merge"), **self.pair("0004", "opt_dff")})
+        calls: list[str] = []
+
+        def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if "equiv_make" in " ".join(argv):
+                calls.append("x")
+                raise subprocess.TimeoutExpired(list(argv), 60.0)
+            return fake_run(argv, cap, **kw)
+        code, out, _ = self.run_with(hang, "--no-cec")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len(calls), oe.MAX_SAT_TIMEOUTS)
+        self.assertIn("4 inconclusive (SAT timeout)", out)
+        self.assertIn("not tried after 2 SAT timeouts", out)
+
     def test_cec_blif_verdicts(self) -> None:
         """equiv-check exit 0 proves, 1 differs, anything else (4 unproven, 2 unsupported) decides
         nothing."""
