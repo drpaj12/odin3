@@ -703,7 +703,7 @@ then the options considered.
         square, one `WIDTH`; a stub is at the largest `WIDTH` used), decision 17's `-j3`, and the
         Order-of-work status note.
 
-30. **3B `lower` spec and plan approved, and a standing rule for Phase 3** (Peter, 2026-10-14: "My
+32. **3B `lower` spec and plan approved, and a standing rule for Phase 3** (Peter, 2026-10-14: "My
     general is going to be yes (as all these reasoned well are for partial mapping to vtr) … want it
     to get as close to the flow; what I plan to use the tool for is an attempt to reverse engineer
     circuits at the structured netlist in Verilog, so most of these decisions I will just accept").
