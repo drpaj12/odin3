@@ -349,7 +349,8 @@ static bool pump_once(run_state *st, double remaining_ms) {
             got = read_some(st);
         }
         if (got < 0) {
-            st->fd = -1; /* EOF: poll now only sleeps for the slice */
+            (void)close(st->fd); /* EOF: poll now only sleeps for the slice */
+            st->fd = -1;
         }
     }
     return !over_cap(st);

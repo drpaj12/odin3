@@ -11,6 +11,7 @@
 #include "util/alloc.h"
 #include "util/clock.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -406,8 +407,32 @@ static void test_oom_sweep(void) {
     TEST_ASSERT_TRUE(done);
 }
 
+/* The number of descriptors this process holds. */
+static size_t open_fd_count(void) {
+    DIR *dir = opendir("/proc/self/fd");
+    TEST_ASSERT_NOT_NULL(dir);
+    size_t count = 0;
+    while (readdir(dir) != NULL) {
+        count++;
+    }
+    (void)closedir(dir);
+    return count;
+}
+
+/* Runs leave no descriptor behind (the pipe's read end is closed at EOF). */
+static void test_runs_leak_no_descriptor(void) {
+    odin3_abc_child_res res;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_fixture("ok.sh", &res));
+    size_t before = open_fd_count();
+    for (int i = 0; i < 5; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_fixture("ok.sh", &res));
+    }
+    TEST_ASSERT_EQUAL_size_t(before, open_fd_count());
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_runs_leak_no_descriptor);
     RUN_TEST(test_ok_lines_in_order);
     RUN_TEST(test_no_output);
     RUN_TEST(test_null_text_drops_output);
