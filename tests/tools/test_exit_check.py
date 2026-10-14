@@ -519,6 +519,20 @@ class ArgvTest(ExitCheckCase):
         self.assertEqual(a[a.index("--primitives") + 1], "P.v")
         self.assertEqual(a[a.index("--config") + 1], "C.xml")
 
+    def test_the_oracles_defines_reach_the_odin3_half(self) -> None:
+        """A golden made with run-oracle.sh --define records ``defines=``: Odin III reads the
+        same macros, as a ``+define+`` file list before the design; with none nothing is added."""
+        self.micro("g", "a", "IDENT\n", defines="BITS=8 FLAG", include_dirs="x/g")
+        self.micro("g", "b", "IDENT\n")
+        self.assertEqual(self.run_tool()[0], 0)
+        a = next(c for c in self.calls("sp-splice") if c[-1].endswith("/a.v"))
+        b = next(c for c in self.calls("sp-splice") if c[-1].endswith("/b.v"))
+        pre = a[a.index("--odin3-pre") + 1]
+        self.assertTrue(pre.startswith("read_project --format f "), pre)
+        listing = Path(pre.rsplit(" ", 1)[1])
+        self.assertEqual(listing.read_text(), "+define+BITS=8\n+define+FLAG\n")
+        self.assertNotIn("--odin3-pre", b)
+
     def test_vtr_config_is_filled_per_design_as_vtr_fills_it(self) -> None:
         self.arch.write_text(
             "<architecture><pb_type blif_model=\".subckt single_port_ram\">"
