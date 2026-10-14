@@ -231,23 +231,46 @@ class Diff:
             if widths:
                 result.differences["widths"] = widths
         if not self.args.no_refine:  # --no-refine: the SAT step times out on the big designs
-            ok, reason = self.checker.refines(run_dir / "yosys.il", run_dir / "odin.il",
-                                              f"{result.script.slug}.refine")
+            ok, reason = self.refine(run_dir, result.script.slug)
             if not ok:
                 result.differences["refine"] = reason
         ident = self.identity(run_dir)
         if ident:
             result.differences["identity"] = ident
 
-    def identity(self, run_dir: Path) -> str:
-        """Step 5: empty when the two lowered netlists are identical."""
+    def refine(self, run_dir: Path, slug: str) -> tuple[bool, str]:
+        """Step 4. A SAT proof that times out falls back to the BLIF cec of the two lowered
+        netlists (``--no-cec``: it stays a hard timeout). The cec's "no verdict" is a difference,
+        worded ``unproven``, never a pass."""
+        try:
+            return self.checker.refines(run_dir / "yosys.il", run_dir / "odin.il", f"{slug}.refine")
+        except opt_equiv.CrashError as exc:
+            if not exc.timed_out or self.args.no_cec:
+                raise
+        blifs = self.lower(run_dir)
+        verdict, text = opt_equiv.cec_blifs(blifs[0], blifs[1], self.cap, self.work)
+        if verdict == opt_equiv.CEC_PROVED:
+            return True, ""
+        if verdict == opt_equiv.CEC_DIFFERS:
+            return False, text
+        return False, (f"unproven: the SAT proof timed out after "
+                       f"{opt_equiv.REFINE_TIMEOUT_SECONDS:.0f} s; {text}")
+
+    def lower(self, run_dir: Path) -> list[Path]:
+        """Both sides to BLIF (step 5's lowering); made once per run directory."""
         blifs = []
         for side in ("odin", "yosys"):
             blif = run_dir / f"{side}.blif"
-            self.must(f"yosys ({side} lowering)",
-                      [opt_equiv.exe(self.args.yosys), "-p",
-                       lowering_script(run_dir / f"{side}.il", blif)])
+            if not blif.is_file():
+                self.must(f"yosys ({side} lowering)",
+                          [opt_equiv.exe(self.args.yosys), "-p",
+                           lowering_script(run_dir / f"{side}.il", blif)])
             blifs.append(blif)
+        return blifs
+
+    def identity(self, run_dir: Path) -> str:
+        """Step 5: empty when the two lowered netlists are identical."""
+        blifs = self.lower(run_dir)
         done = self.child("netlist-compare",
                           [self.args.netlist_compare, "--quiet", "--implicit-models", str(blifs[0]),
                            str(blifs[1])])
@@ -326,6 +349,8 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
                     help="leave the refinement step out (it times out on the large designs)")
     ap.add_argument("--refine-timeout", type=float, default=opt_equiv.REFINE_TIMEOUT_SECONDS,
                     metavar="S", help="seconds for one refinement proof (default 60)")
+    ap.add_argument("--no-cec", action="store_true",
+                    help="no BLIF cec when the SAT proof times out (the timeout stays hard)")
     ap.add_argument("--verbose", action="store_true", help="print the counters of every design")
     ap.add_argument("files", nargs="+", help="the Verilog files of one design")
     return ap.parse_args(argv)

@@ -104,19 +104,21 @@ class PureTest(unittest.TestCase):
         self.assertEqual(
             oe.refinement_script("g.il", "h.il"),
             "read_rtlil g.il; read_rtlil h.il; flatten; clk2fflogic; opt_merge; opt_clean; "
-            "techmap; equiv_make gold gate eq; hierarchy -top eq; flatten; "
+            "techmap; opt_clean -purge; equiv_make gold gate eq; hierarchy -top eq; flatten; "
             "equiv_simple -undef -seq 4; equiv_induct -undef; equiv_status -assert")
 
     def test_script_variants(self) -> None:
         plain = oe.refinement_script("g.il", "h.il", lowering=())
         self.assertNotIn("clk2fflogic", plain)
         self.assertNotIn("proc", plain)
-        self.assertIn("read_rtlil h.il; flatten; equiv_make gold gate eq", plain)
+        self.assertIn("read_rtlil h.il; flatten; opt_clean -purge; equiv_make gold gate eq",
+                      plain)
         procs = oe.refinement_script("g.il", "h.il", procs=True, lowering=oe.ONE_CLOCK[0])
-        self.assertIn("read_rtlil h.il; proc; flatten; async2sync; equiv_make", procs)
+        self.assertIn("read_rtlil h.il; proc; flatten; async2sync; opt_clean -purge; equiv_make",
+                      procs)
         self.assertNotIn("techmap", procs)
         self.assertIn("flatten; memory; clk2fflogic; opt_merge; opt_clean; techmap; "
-                      "equiv_make",
+                      "opt_clean -purge; equiv_make",
                       oe.refinement_script("g.il", "h.il", lowering=oe.LOWERINGS[2]))
 
     def test_flows_follow_the_clocks(self) -> None:
@@ -307,9 +309,40 @@ class MainTest(unittest.TestCase):
             if "equiv_make" in " ".join(argv):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
-        code, out, err = self.run_with(hang)
-        self.assertEqual(code, 3, out + err)
+        code, out, err = self.run_with(hang, "--no-cec")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("unproven", out)
         self.assertNotIn("not a refinement", out + err)
+
+    def test_a_sat_timeout_falls_back_to_the_blif_cec(self) -> None:
+        """A timed-out proof is inconclusive; the whole script then goes to equiv-check. Only a
+        proof clears it: a cec that decides nothing, or finds a difference, fails the run."""
+        self.fakes.spec(self.pair("0001", "opt_expr"))
+
+        def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if "equiv_make" in " ".join(argv):
+                raise subprocess.TimeoutExpired(list(argv), 60.0)
+            return fake_run(argv, cap, **kw)
+        for verdict, code, needle in ((oe.CEC_PROVED, 0, "proved by the BLIF cec"),
+                                      (oe.CEC_UNPROVEN, 1, "not decided"),
+                                      (oe.CEC_DIFFERS, 1, "NOT equivalent")):
+            with self.subTest(verdict=verdict), mock.patch.object(
+                    oe, "cec_ils", return_value=(verdict, "text")):
+                got, out, err = self.run_with(hang)
+                self.assertEqual(got, code, out + err)
+                self.assertIn(needle, out)
+                self.assertIn("inconclusive", out)
+
+    def test_cec_blif_verdicts(self) -> None:
+        """equiv-check exit 0 proves, 1 differs, anything else (4 unproven, 2 unsupported) decides
+        nothing."""
+        def run(code: int) -> Any:
+            done = subprocess.CompletedProcess([], code, "", "equiv-check: why\n")
+            return mock.patch.object(oe, "capped", return_value=done)
+        for code, want in ((0, oe.CEC_PROVED), (1, oe.CEC_DIFFERS), (4, oe.CEC_UNPROVEN),
+                           (2, oe.CEC_UNPROVEN)):
+            with run(code):
+                self.assertEqual(oe.cec_blifs(Path("a"), Path("b"), 1 << 30, Path("."))[0], want)
 
     def test_zero_changing_calls_are_reported_and_min_changed_fails_them(self) -> None:
         """Review I5."""
@@ -503,11 +536,11 @@ class ProbeTest(unittest.TestCase):
             with self.subTest(mutant=name):
                 self.assertFalse(self.accepts(CLOCK_GOLD, text))
 
-    def test_a_yosys_abort_is_a_tool_error_not_a_refutation(self) -> None:
-        """An `$sdff` against an `$adff` makes Yosys abort with an internal-cell ERROR: no verdict
-        (a RefineAbort, exit 2), neither True nor "not a refinement"."""
-        with self.assertRaises(oe.RefineAbort):
-            self.refines(CLOCK_GOLD, CLOCK_MUTANTS["sync_reset_for_async"])
+    def test_a_lowering_that_aborts_does_not_decide_the_next_one_does(self) -> None:
+        """An `$sdff` against an `$adff` makes Yosys abort with an internal-cell ERROR in the
+        plain lowering: that lowering gives no verdict, the techmap one finds the failed proof
+        (False). Only when every lowering aborts is it a RefineAbort (the junk file below)."""
+        self.assertFalse(self.accepts(CLOCK_GOLD, CLOCK_MUTANTS["sync_reset_for_async"]))
 
     def test_a_real_proof_failure_is_false_and_a_real_error_abort_is_a_tool_error(self) -> None:
         ok, why = self.checker.refines(*self.pair_files(PLAIN_A, MUX_X), "q")

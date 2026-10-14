@@ -1,6 +1,5 @@
 # tests/opt/wreduce_equiv_expect_fail.txt: the wreduce sources opt_equiv_wreduce_rules expects to fail
 # (3G plan Task 3). Paths are relative to tests/opt/rules; format `<path> [needle] <reason>`. The same
-# three rows are documented refinement skips in tests/opt/rules/refine_skip.txt.
+# two rows are documented refinement skips in tests/opt/rules/refine_skip.txt.
 wreduce/divmod_trim_pow.v [No SAT model available] Yosys has no SAT model for $pow (the flow fails on the cell, not on the rewrite)
 wreduce/mem_addr.v [Unproven $equiv] out-of-range accesses alias valid words after the address bits go (Yosys's own rule; wreduce -memx exists for it)
-wreduce/mux_narrow_unused.v [unproven $equiv cells] the unused bits of the public wire t become x; equiv_make pairs t by name and the bits are unobservable

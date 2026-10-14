@@ -283,6 +283,29 @@ class RunTest(unittest.TestCase):
         self.assertEqual(code, 2, out + err)
         self.assertNotIn("differs as listed", out)
 
+    def test_a_sat_timeout_falls_back_to_the_blif_cec(self) -> None:
+        """A timed-out proof goes to equiv-check on the lowered BLIFs: proved is a pass, a cec
+        that decides nothing is the difference `unproven`, --no-cec keeps the hard timeout."""
+        def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if "equiv_make" in " ".join(argv):
+                raise subprocess.TimeoutExpired(list(argv), 60.0)
+            return fake_run(argv, cap, **kw)
+        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
+                "--netlist-compare", str(self.tree.bin / "netlist-compare"),
+                "--work", str(self.tree.root / "work"), str(self.tree.root / "micro" / "d.v")]
+        for verdict, code, needle in ((opt_equiv.CEC_PROVED, 0, "[phase2]: ok"),
+                                      (opt_equiv.CEC_UNPROVEN, 1, "refine: DIFFERS: unproven"),
+                                      (opt_equiv.CEC_DIFFERS, 1, "refine: DIFFERS: text")):
+            with self.subTest(verdict=verdict), mock.patch.object(
+                    memcap, "run", hang), mock.patch.object(
+                    opt_equiv, "cec_blifs", return_value=(verdict, "text")):
+                got, out, err = helpers.run_main(od.main, argv)
+                self.assertEqual(got, code, out + err)
+                self.assertIn(needle, out)
+        with mock.patch.object(memcap, "run", hang):
+            got, _, _ = helpers.run_main(od.main, [*argv[:-1], "--no-cec", argv[-1]])
+            self.assertEqual(got, 3)
+
     def test_identity_failure_and_error(self) -> None:
         self.tree.set_spec(compare_rc=1)
         code, out, _ = self.tree.run()

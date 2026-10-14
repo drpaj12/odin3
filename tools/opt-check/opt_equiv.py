@@ -140,6 +140,7 @@ class Verdict:
     pair: Pair
     ok: bool
     tail: str = ""
+    inconclusive: bool = False  # the SAT proof timed out (neither ok nor a counterexample)
 
 
 @dataclass
@@ -240,11 +241,13 @@ def refinement_script(gold: str, gate: str, procs: bool = False,
                       lowering: Sequence[str] = LOWERINGS[1]) -> str:
     """Spec 20.2's Yosys script for two RTLIL files that ``rename_modules`` already made
     ``gold``/``gate``; ``procs`` adds ``proc``, ``lowering`` the commands that run on both sides
-    before the miter. Each side is flattened first: ``equiv_make`` matches only the two tops, so a
+    before the miter; then ``opt_clean -purge`` drops the wires nothing reads (a public wire whose
+    unused bits wreduce or opt_clean turn into x has no observable value, and ``equiv_make`` would
+    match it by name). Each side is flattened first: ``equiv_make`` matches only the two tops, so a
     submodule's flip-flops would otherwise keep independent x initial values (review I4)."""
     steps = [f"read_rtlil {gold}", f"read_rtlil {gate}", *(["proc"] if procs else []), "flatten",
              *lowering]
-    steps += ["equiv_make gold gate eq", "hierarchy -top eq", "flatten",
+    steps += ["opt_clean -purge", "equiv_make gold gate eq", "hierarchy -top eq", "flatten",
               "equiv_simple -undef -seq 4", "equiv_induct -undef", "equiv_status -assert"]
     return "; ".join(steps)
 
@@ -255,6 +258,56 @@ def refinement_script(gold: str, gate: str, procs: bool = False,
 # refinement either. Any other ``ERROR`` (parser, port, missing module) is no verdict.
 PROOF_FAILED = re.compile(r"ERROR: (?:Found \d+ unproven \$equiv cells in 'equiv_status -assert'"
                           r"|No SAT model available for cell )")
+
+
+EQUIV_CHECK = HERE.parent / "equiv-check" / "equiv-check"
+CEC_TIMEOUT_SECONDS = 900.0
+CEC_PROVED, CEC_DIFFERS, CEC_UNPROVEN = "proved", "differs", "unproven"
+CEC_LOWERING = ("proc", "hierarchy -auto-top", "flatten", "memory", "techmap", "opt -fast",
+                "dffunmap", "opt -fast -noff", "opt_clean -purge",
+                "write_blif -true + vcc -false + gnd -undef + unconn -blackbox")
+
+
+def cec_lowering_script(il: Path, blif: Path) -> str:
+    """One side to a flat BLIF for ``equiv-check``: the lowering of opt-diff's identity step,
+    with ``proc`` first (a snapshot from before ``proc`` holds processes)."""
+    steps = [*CEC_LOWERING[:-1], f"{CEC_LOWERING[-1]} {blif}"]
+    return "; ".join([f"read_rtlil {il}", *steps])
+
+
+def cec_blifs(a: Path, b: Path, cap: int, work: Path) -> tuple[str, str]:
+    """(verdict, text) of ``equiv-check`` on two BLIFs: proved (exit 0), differs (exit 1), else
+    unproven (a tool limit: hard-block models, several clocks, a timeout; the text says which). A
+    timeout or a crash of the checker is "unproven" too, never a pass."""
+    try:
+        done = capped("equiv-check", [exe(str(EQUIV_CHECK)), str(a), str(b)], cap, cwd=work,
+                      timeout=CEC_TIMEOUT_SECONDS)
+    except CrashError as exc:
+        return CEC_UNPROVEN, f"BLIF cec: {exc}"
+    text = why((done.stdout or "") + (done.stderr or ""))
+    if done.returncode == 0:
+        return CEC_PROVED, ""
+    if done.returncode == 1:
+        return CEC_DIFFERS, f"BLIF cec: not equivalent: {text}"
+    return CEC_UNPROVEN, f"BLIF cec: no verdict (exit {done.returncode}): {text}"
+
+
+def cec_ils(yosys: str, gold: Path, gate: Path, cap: int, work: Path, tag: str
+            ) -> tuple[str, str]:
+    """``cec_blifs`` of the lowering of two RTLIL files."""
+    blifs: list[Path] = []
+    for side, il in (("gold", gold), ("gate", gate)):
+        blif = work / f"{tag}.{side}.blif"
+        try:
+            done = capped("yosys (cec lowering)", [exe(yosys), "-p", cec_lowering_script(il, blif)],
+                          cap, cwd=work)
+        except CrashError as exc:
+            return CEC_UNPROVEN, f"BLIF cec: {exc}"
+        if done.returncode != 0:
+            return CEC_UNPROVEN, (f"BLIF cec: the lowering of the {side} side failed: "
+                                  f"{why((done.stdout or '') + (done.stderr or ''))}")
+        blifs.append(blif)
+    return cec_blifs(blifs[0], blifs[1], cap, work)
 
 
 class Checker:
@@ -290,6 +343,7 @@ class Checker:
         procs = has_processes(gold_text) or has_processes(gate_text)
         last = ""
         crashed: CrashError | None = None
+        aborted: RefineAbort | None = None
         for lowering in self.flows(clock_sig.same_clocks(gold_text, gate_text)):
             script = refinement_script(str(gold_out), str(gate_out), procs, lowering)
             try:
@@ -302,11 +356,16 @@ class Checker:
             if done.returncode == 0:
                 return True, ""
             output = (done.stdout or "") + (done.stderr or "")
-            if not PROOF_FAILED.search(output):  # an ERROR that is not the failed proof
-                raise RefineAbort(f"yosys-refine exit {done.returncode}: {why(output)}")
+            if not PROOF_FAILED.search(output):  # an ERROR that is not the failed proof: this
+                # lowering cannot judge the pair (equiv_make refuses memories before `memory`)
+                aborted = aborted or RefineAbort(
+                    f"yosys-refine exit {done.returncode}: {why(output)}")
+                continue
             last = tail(output)
         if crashed is not None:  # no proof, and a lowering died: not a verdict
             raise crashed
+        if aborted is not None and not last:  # no lowering produced a failed proof either
+            raise aborted
         return False, last
 
     def flows(self, one_clock: bool = False) -> list[Sequence[str]]:
@@ -371,25 +430,47 @@ def snapshot_run(odin3: str, files: Sequence[str], top: str | None, script: Sequ
 
 
 def check_all(run: Run, checker: Checker) -> list[Verdict]:
+    """A pair whose SAT proof times out is "inconclusive" (the run goes on); every other crash
+    stays a ``CrashError``."""
     verdicts: list[Verdict] = []
     for pair in run.pairs:
-        ok, reason = checker.refines(pair.before, pair.after, pair.name)
+        try:
+            ok, reason = checker.refines(pair.before, pair.after, pair.name)
+        except CrashError as exc:
+            if not exc.timed_out:
+                raise
+            verdicts.append(Verdict(pair, False, str(exc), True))
+            continue
         verdicts.append(Verdict(pair, ok, reason))
     return verdicts
+
+
+def settle_inconclusive(run: Run, verdicts: Sequence[Verdict], args: argparse.Namespace,
+                        work: Path) -> tuple[str, str]:
+    """When no pair failed but some timed out: the whole script, Odin III's input against its
+    final result, through the BLIF cec. (verdict, text); ``CEC_PROVED`` clears the timeouts."""
+    if not run.pairs:
+        return CEC_UNPROVEN, "no snapshot"
+    return cec_ils(args.yosys, run.pairs[0].before, run.pairs[-1].after, args.mem_cap, work,
+                   "e2e")
 
 
 def report(verdicts: Sequence[Verdict], counters: dict[str, int]) -> list[str]:
     """The output lines: one per pair, the failures with the counters, then the summary."""
     lines: list[str] = []
     for v in verdicts:
-        if v.ok:
+        if v.inconclusive:
+            lines.append(f"{TOOL}: {v.pair.name}: inconclusive ({v.tail})")
+        elif v.ok:
             lines.append(f"{TOOL}: {v.pair.name}: ok")
         else:
             lines.append(f"{TOOL}: {v.pair.name}: not a refinement (rules: "
                          f"{counter_text(counters)}): {v.tail}")
-    bad = sum(1 for v in verdicts if not v.ok)
+    slow = sum(1 for v in verdicts if v.inconclusive)
+    bad = sum(1 for v in verdicts if not v.ok and not v.inconclusive)
     lines.append(f"{TOOL}: {len(verdicts)} calls changed something: "
-                 f"{len(verdicts) - bad} refine, {bad} do not")
+                 f"{len(verdicts) - bad - slow} refine, {bad} do not"
+                 + (f", {slow} inconclusive (SAT timeout)" if slow else ""))
     if not verdicts:
         lines.append(f"{TOOL}: NOTE: 0 calls changed anything: nothing was checked")
     return lines
@@ -408,6 +489,11 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--mem-cap", type=parse_size, default=DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 2G)")
     ap.add_argument("--work", type=Path, help="the work directory (kept)")
+    ap.add_argument("--refine-timeout", type=float, default=REFINE_TIMEOUT_SECONDS, metavar="S",
+                    help="seconds for one SAT proof (default 60); a pair that times out falls "
+                         "back to a BLIF cec of the whole script")
+    ap.add_argument("--no-cec", action="store_true",
+                    help="no BLIF cec fallback: a SAT timeout is unproven")
     ap.add_argument("--min-changed", type=int, default=0, metavar="N",
                     help="fail (exit 1) unless at least N calls changed something")
     ap.add_argument("files", nargs="+", help="the Verilog files of one design")
@@ -425,16 +511,32 @@ def execute(args: argparse.Namespace, work: Path) -> tuple[int, bool]:
     verdicts = check_all(run, checker)
     for line in report(verdicts, run.counters):
         print(line, flush=True)
+    bad = any(not v.ok and not v.inconclusive for v in verdicts)
+    slow = sum(1 for v in verdicts if v.inconclusive)
+    if slow and not bad and not args.no_cec:
+        verdict, text = settle_inconclusive(run, verdicts, args, work)
+        if verdict == CEC_PROVED:
+            print(f"{TOOL}: {slow} calls timed out in SAT; the whole script is proved by the BLIF "
+                  "cec (input against final result)", flush=True)
+            slow = 0
+        else:
+            print(f"{TOOL}: unproven: {slow} calls timed out in SAT and the whole script is "
+                  f"{'NOT equivalent' if verdict == CEC_DIFFERS else 'not decided'} by the BLIF "
+                  f"cec: {text}", flush=True)
+            return EXIT_FAIL, True
+    elif slow and not bad:
+        print(f"{TOOL}: unproven: {slow} calls timed out in SAT", flush=True)
+        return EXIT_FAIL, True
     if len(verdicts) < args.min_changed:
         print(f"{TOOL}: {len(verdicts)} calls changed something, want at least "
               f"{args.min_changed}", flush=True)
         return EXIT_FAIL, False
-    bad = any(not v.ok for v in verdicts)
     return (EXIT_FAIL if bad else EXIT_OK), bad
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
+    globals()["REFINE_TIMEOUT_SECONDS"] = args.refine_timeout
     made = args.work is None
     work = Path(tempfile.mkdtemp(prefix="opt-equiv-")) if made else args.work
     work.mkdir(parents=True, exist_ok=True)
