@@ -46,37 +46,39 @@ static const odin3_net_id k_no_nets[1] = {{0}};
 
 /* --- type classes ---------------------------------------------------------------------------- */
 
-static bool is_unary(wr_type t) {
-    return t == WT_NOT || t == WT_NEG;
+static bool is_unary(wr_type type) {
+    return type == WT_NOT || type == WT_NEG;
 }
 
 /* The 15 types of PHASE2 #25: signed only when both flags are set. */
-#define WT_BIT(t) ((uint64_t)1 << (unsigned)(t))
+#define WT_BIT(type) ((uint64_t)1 << (unsigned)(type))
 static const uint64_t k_ruled_mask =
     WT_BIT(WT_AND) | WT_BIT(WT_OR) | WT_BIT(WT_XOR) | WT_BIT(WT_XNOR) | WT_BIT(WT_LT) |
     WT_BIT(WT_LE) | WT_BIT(WT_EQ) | WT_BIT(WT_NE) | WT_BIT(WT_GE) | WT_BIT(WT_GT) | WT_BIT(WT_ADD) |
     WT_BIT(WT_SUB) | WT_BIT(WT_MUL) | WT_BIT(WT_DIV) | WT_BIT(WT_MOD);
 
-static bool is_ruled(wr_type t) {
-    return (k_ruled_mask & WT_BIT(t)) != 0;
+static bool is_ruled(wr_type type) {
+    return (k_ruled_mask & WT_BIT(type)) != 0;
 }
 
 /* Types whose operands are limited to the width of Y. */
-static bool in_limit_group(wr_type t) {
-    return is_unary(t) || t == WT_AND || t == WT_OR || t == WT_XOR || t == WT_ADD || t == WT_SUB;
+static bool in_limit_group(wr_type type) {
+    return is_unary(type) || type == WT_AND || type == WT_OR || type == WT_XOR || type == WT_ADD ||
+           type == WT_SUB;
 }
 
-static bool in_cap_group(wr_type t) {
-    return t == WT_ADD || t == WT_SUB || t == WT_MUL || t == WT_AND || t == WT_OR || t == WT_XOR;
+static bool in_cap_group(wr_type type) {
+    return type == WT_ADD || type == WT_SUB || type == WT_MUL || type == WT_AND || type == WT_OR ||
+           type == WT_XOR;
 }
 
-static bool is_one_bit_type(wr_type t) {
-    return (t >= WT_LT && t <= WT_GT) || (t >= WT_REDUCE_AND && t <= WT_LOGIC_OR);
+static bool is_one_bit_type(wr_type type) {
+    return (type >= WT_LT && type <= WT_GT) || (type >= WT_REDUCE_AND && type <= WT_LOGIC_OR);
 }
 
 /* Whether port A (port_b false) or port B of a cell with these flags is read as signed. */
-static bool port_signed(wr_type t, bool fa, bool fb, bool port_b) {
-    switch (t) {
+static bool port_signed(wr_type type, bool fa, bool fb, bool port_b) {
+    switch (type) {
     case WT_SHL:
     case WT_SHR:
     case WT_SSHR:
@@ -92,8 +94,8 @@ static bool port_signed(wr_type t, bool fa, bool fb, bool port_b) {
     }
 }
 
-static void warn_mixed(wr_state *ws, odin3_node_id node, wr_type t, bool fa, bool fb) {
-    if (is_ruled(t) && !is_unary(t) && fa != fb) {
+static void warn_mixed(wr_state *ws, odin3_node_id node, wr_type type, bool fa, bool fb) {
+    if (is_ruled(type) && !is_unary(type) && fa != fb) {
         odin3_opt_warn_mixed_sign(ws->oc, node, wr_type_name(ws, node));
     }
 }
@@ -177,6 +179,10 @@ static bool load_op(wr_state *ws, odin3_node_id node, wr_type type, wr_op *op, o
 /* --- the plan ----------------------------------------------------------------------------------
  */
 
+static uint64_t max_u64(uint64_t lhs, uint64_t rhs) {
+    return lhs > rhs ? lhs : rhs;
+}
+
 /* Rule 2: with A, B and Y of one width the signedness is free; the cheaper reading wins. */
 static void plan_free_choice(const wr_state *ws, const wr_op *op, wr_plan *pl, uint32_t ma,
                              uint32_t mb) {
@@ -188,9 +194,8 @@ static void plan_free_choice(const wr_state *ws, const wr_op *op, wr_plan *pl, u
     const uint64_t sb = reduced_opsize(ws, op->b, mb, true);
     const uint64_t ua = reduced_opsize(ws, op->a, ma, false);
     const uint64_t ub = reduced_opsize(ws, op->b, mb, false);
-    const bool mul = op->type == WT_MUL;
-    const uint64_t signed_cost = mul ? sa * sb : (sa > sb ? sa : sb);
-    const uint64_t unsigned_cost = mul ? ua * ub : (ua > ub ? ua : ub);
+    const uint64_t signed_cost = op->type == WT_MUL ? sa * sb : max_u64(sa, sb);
+    const uint64_t unsigned_cost = op->type == WT_MUL ? ua * ub : max_u64(ua, ub);
     if (signed_cost < unsigned_cost) {
         pl->to_signed = !(op->fa && op->fb);
         pl->fa = true;
@@ -327,7 +332,7 @@ typedef struct built {
 } built;
 
 static void build_op(const wr_state *ws, const wr_op *op, const wr_plan *pl, built *out) {
-    const uint32_t n = wr_params(ws, op->node, out->params);
+    const uint32_t count = wr_params(ws, op->node, out->params);
     out->params[PRM_A_SIGNED] = odin3_value_int(pl->fa ? 1 : 0);
     if (op->binary) {
         out->params[PRM_B_SIGNED] = odin3_value_int(pl->fb ? 1 : 0);
@@ -336,13 +341,13 @@ static void build_op(const wr_state *ws, const wr_op *op, const wr_plan *pl, bui
     } else {
         out->params[PRM_UN_A_WIDTH] = odin3_value_int(pl->la);
     }
-    out->params[n - 1U] = odin3_value_int(pl->ly);
+    out->params[count - 1U] = odin3_value_int(pl->ly);
     out->ports[PORT_A] = (odin3_netvec){op->a, pl->la};
     if (op->binary) {
         out->ports[PORT_B] = (odin3_netvec){op->b, pl->lb};
     }
     out->ports[op->binary ? 2 : 1] = (odin3_netvec){NULL, 0};
-    out->cell = (odin3_kit_cell){odin3_node_type(ws->m, op->node), out->params, n, out->ports,
+    out->cell = (odin3_kit_cell){odin3_node_type(ws->m, op->node), out->params, count, out->ports,
                                  (odin3_prov_id){0}};
 }
 
@@ -452,13 +457,13 @@ static odin3_status prestep_one_bit(wr_state *ws, odin3_node_id node) {
     }
     odin3_value params[WR_MAX_PARAMS];
     odin3_netvec ports[N_BIN_PORTS] = {{NULL, 0}, {NULL, 0}, {NULL, 0}};
-    const uint32_t n = wr_params(ws, node, params);
-    params[n - 1U] = odin3_value_int(1);
+    const uint32_t count = wr_params(ws, node, params);
+    params[count - 1U] = odin3_value_int(1);
     uint32_t at = 0;
     for (uint32_t i = 0; i < out; i++) {
-        const uint32_t count = odin3_node_port(ws->m, node, i).count;
-        ports[i] = (odin3_netvec){nets + at, count};
-        at += count;
+        const uint32_t width = odin3_node_port(ws->m, node, i).count;
+        ports[i] = (odin3_netvec){nets + at, width};
+        at += width;
     }
     odin3_net_id zero = {0};
     st = odin3_opt_const_net(ws->oc, ODIN3_BIT_0, &zero);
@@ -466,7 +471,7 @@ static odin3_status prestep_one_bit(wr_state *ws, odin3_node_id node) {
     for (uint32_t k = 1; st == ODIN3_OK && k < ny; k++) {
         *(odin3_net_id *)odin3_vec_at(&ws->ysrc, k) = zero;
     }
-    const odin3_kit_cell cell = {odin3_node_type(ws->m, node), params, n, ports, {0}};
+    const odin3_kit_cell cell = {odin3_node_type(ws->m, node), params, count, ports, {0}};
     wr_rewrite rw = {node, &cell, out, 1, 0, {0}};
     wr_log_removed(ws, node, ny - 1U, ny, "port Y of");
     st = st == ODIN3_OK ? wr_commit(ws, &rw) : st;
@@ -506,11 +511,11 @@ static odin3_status prestep_divmod(wr_state *ws, odin3_node_id node, wr_type typ
         return ODIN3_OK;
     }
     odin3_value params[WR_MAX_PARAMS];
-    const uint32_t n = wr_params(ws, node, params);
+    const uint32_t count = wr_params(ws, node, params);
     params[PRM_A_WIDTH] = odin3_value_int(la);
     params[PRM_B_WIDTH] = odin3_value_int(lb);
     odin3_netvec ports[N_BIN_PORTS] = {{nets, la}, {nets + na, lb}, {NULL, 0}};
-    const odin3_kit_rebuild req = {node, {odin3_node_type(ws->m, node), params, n, ports, {0}}};
+    const odin3_kit_rebuild req = {node, {odin3_node_type(ws->m, node), params, count, ports, {0}}};
     if (la != na) {
         wr_log_removed(ws, node, na - la, na, "port A of");
         wr_count(ws, WR_RULE_DIVMOD_TRIM);
@@ -537,12 +542,15 @@ static uint32_t ceil_log2(uint64_t value) {
 }
 
 /* The low `keep` address bits of each of `ports` addresses of `abits` bits, into out. */
-static odin3_status trim_addrs(const odin3_net_id *addr, uint32_t ports, uint32_t abits,
-                               uint32_t keep, odin3_vec *out) {
+typedef struct addr_shape {
+    uint32_t ports, abits, keep;
+} addr_shape;
+
+static odin3_status trim_addrs(const odin3_net_id *addr, addr_shape shape, odin3_vec *out) {
     odin3_vec_clear(out);
-    for (uint32_t p = 0; p < ports; p++) {
-        for (uint32_t b = 0; b < keep; b++) {
-            odin3_status st = odin3_kit_push_net(out, addr[(size_t)p * abits + b]);
+    for (uint32_t port = 0; port < shape.ports; port++) {
+        for (uint32_t bit = 0; bit < shape.keep; bit++) {
+            odin3_status st = odin3_kit_push_net(out, addr[(size_t)port * shape.abits + bit]);
             if (st != ODIN3_OK) {
                 return st;
             }
@@ -573,13 +581,13 @@ static odin3_status prestep_mem(wr_state *ws, odin3_node_id node) {
         wr_addr = i == MEM_PORT_WR_ADDR ? nets + at : wr_addr;
         at += odin3_node_port(ws->m, node, i).count;
     }
-    st = trim_addrs(rd_addr, rd, abits, keep, &ws->nets2);
-    st = st == ODIN3_OK ? trim_addrs(wr_addr, wr, abits, keep, &ws->ysrc) : st;
+    st = trim_addrs(rd_addr, (addr_shape){rd, abits, keep}, &ws->nets2);
+    st = st == ODIN3_OK ? trim_addrs(wr_addr, (addr_shape){wr, abits, keep}, &ws->ysrc) : st;
     if (st != ODIN3_OK) {
         return st;
     }
     odin3_value params[WR_MAX_PARAMS];
-    const uint32_t n = wr_params(ws, node, params);
+    const uint32_t count = wr_params(ws, node, params);
     params[MEM_PRM_ABITS] = odin3_value_int(keep);
     odin3_netvec ports[MEM_N_PORTS];
     memset(ports, 0, sizeof ports);
@@ -587,7 +595,7 @@ static odin3_status prestep_mem(wr_state *ws, odin3_node_id node) {
         (odin3_netvec){ws->nets2.len > 0 ? ws->nets2.data : k_no_nets, (uint32_t)ws->nets2.len};
     ports[MEM_PORT_WR_ADDR] =
         (odin3_netvec){ws->ysrc.len > 0 ? ws->ysrc.data : k_no_nets, (uint32_t)ws->ysrc.len};
-    const odin3_kit_rebuild req = {node, {odin3_node_type(ws->m, node), params, n, ports, {0}}};
+    const odin3_kit_rebuild req = {node, {odin3_node_type(ws->m, node), params, count, ports, {0}}};
     odin3_node_id made = {0};
     char label[WR_LABEL_MAX];
     wr_label(ws, node, label, sizeof label);

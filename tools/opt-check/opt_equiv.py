@@ -72,12 +72,12 @@ EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
 DEFAULT_CAP = 2 << 30
 TIMEOUT_SECONDS = 600.0
 REFINE_TIMEOUT_SECONDS = 60.0  # one equivalence proof; past it the answer is "inconclusive"
-PAIR_NAME = re.compile(r"^(\d{4})-(opt_[a-z]+)-before\.il$")
+PAIR_NAME = re.compile(r"^(\d{4})-(opt_[a-z]+|wreduce)-before\.il$")
 STAT_LINE = re.compile(r"opt: rule (\S+) (\d+)\s*$", re.M)
 MODULE_LINE = re.compile(r"^module (\\\S+)\s*$", re.M)
 TOP_ATTR = re.compile(r"^attribute \\top 1\s*\n", re.M)
 PROCESS_LINE = re.compile(r"^\s*process\s", re.M)
-OPT_WORD = re.compile(r"^opt(_[a-z]+)?(\s|$)")
+OPT_WORD = re.compile(r"^(opt(_[a-z]+)?|wreduce)(\s|$)")
 
 
 class ToolError(Exception):

@@ -5,7 +5,8 @@ Usage::
     opt-diff --odin3 O --yosys Y [--top T] [--script S]... [--expect F] [--root R] [--techlib L]
              [--netlist-compare N] [--mem-cap C] [--work DIR] [--verbose] FILE...
 
-For each ``S`` (default ``phase2``; ``phase2``, ``opt -full``, ``opt -fast``, ``opt -fast -noff``,
+For each ``S`` (default ``phase2``; ``phase2``, ``phase3`` (Phase 2's lines then ``wreduce;
+opt_clean; opt -full``), ``wreduce``, ``opt -full``, ``opt -fast``, ``opt -fast -noff``,
 ``opt -nodffe -nosdff``), per design (the FILEs together):
 
 1. Odin III: ``read_verilog --nolatches FILE...; hierarchy; proc; opt_expr -keepdc; write_rtlil
@@ -15,7 +16,9 @@ For each ``S`` (default ``phase2``; ``phase2``, ``opt -full``, ``opt -fast``, ``
 2. Yosys 0.55: ``read_rtlil in.il; S; write_rtlil yosys.il; stat`` with ``YOSYS_COVER_DIR``. Its
    ``phase2`` is Parmys's lines without ``compact``: ``opt_expr; opt_clean; opt -nodffe -nosdff;
    proc -norom; opt`` (Parmys's ``procs -norom``);
-3. **histogram**: the per-module cell-type counts of ``stats`` and ``stat`` are equal;
+3. **histogram**: the per-module cell-type counts of ``stats`` and ``stat`` are equal; for the
+   scripts that hold ``wreduce`` also **widths**: the widths and signed flags of every ``$add``,
+   ``$sub`` and ``$mul`` are equal as a multiset;
 4. **refine**: ``yosys.il`` is refined by ``odin.il`` (``opt-equiv``'s check, Yosys's result as
    the gold), so Odin III resolved no x differently where Yosys kept it defined;
 5. **identity**: both through Yosys ``hierarchy -auto-top; flatten; memory; techmap; opt -fast;
@@ -27,10 +30,11 @@ For each ``S`` (default ``phase2``; ``phase2``, ``opt -full``, ``opt -fast``, ``
    gate.
 
 A difference fails unless ``--expect F`` lists it: lines ``<path> <script> <step> <reason>``
-(``#`` comments), ``path`` relative to ``--root`` (else the file name), ``script`` one of ``phase2
-full fast fast-noff nodffe-nosdff`` or ``*``, ``step`` ``histogram``, ``refine`` or ``identity``. A
-listed difference that does not occur fails too (a stale entry). The work directory this tool made
-is removed after a clean run; ``--work DIR`` and a failing run keep it.
+(``#`` comments), ``path`` relative to ``--root`` (else the file name), ``script`` one of
+``phase2 phase3 wreduce full fast fast-noff nodffe-nosdff`` or ``*``, ``step`` ``histogram``,
+``widths``, ``refine`` or ``identity``. A listed difference that does not occur fails too (a
+stale entry). The work directory this tool made is removed after a clean run; ``--work DIR`` and
+a failing run keep it.
 
 Exit codes (one convention across the opt tools): 0 no unexpected difference; 1 a difference, or a
 stale entry; 2 usage, or Odin III or Yosys exited with an error; 3 hard: a child (Odin III, Yosys or
@@ -60,7 +64,9 @@ TOOL = "opt-diff"
 HERE = Path(__file__).resolve().parent
 NETLIST_COMPARE = HERE.parent / "netlist-compare" / "netlist-compare"
 EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
-STEPS = ("histogram", "refine", "identity")
+STEPS = ("histogram", "widths", "refine", "identity")
+PHASE3 = HERE / "phase3.script"
+WIDTH_SCRIPTS = ("wreduce", "phase3")  # the scripts that hold wreduce: widths are compared
 ODIN_FRONT = "proc", "opt_expr -keepdc"
 LOWERING = ("hierarchy -auto-top", "flatten", "memory", "techmap", "opt -fast", "dffunmap",
             "opt -fast -noff", "opt_clean -purge",
@@ -78,14 +84,15 @@ class Script:
     odin: tuple[str, ...]
     yosys: tuple[str, ...]
     trio: bool
+    front: tuple[str, ...] = ODIN_FRONT  # what runs before in.il is written, when not trio
 
 
-def _phase2() -> Script:
-    commands = tuple(opt_equiv.phase2_commands())
+def _phase2(slug: str = "phase2", path: Path = opt_equiv.PHASE2) -> Script:
+    commands = tuple(opt_equiv.phase2_commands(path))
     # Parmys runs `procs -norom` (Yosys's `proc` would also make ROMs: $meminit and $memrd_v2),
     # and `compact` is not a Yosys line.
     yosys = tuple("proc -norom" if c == "proc" else c for c in commands if c != "compact")
-    return Script("phase2", commands, yosys, True)
+    return Script(slug, commands, yosys, True)
 
 
 def _single(slug: str, command: str) -> Script:
@@ -97,10 +104,15 @@ def script_named(name: str) -> Script:
     words = " ".join(name.split())
     if words == "phase2":
         return _phase2()
+    if words == "phase3":  # Phase 2's lines, then wreduce; opt_clean; opt -full (3G WR-9)
+        return _phase2("phase3", PHASE3)
+    if words == "wreduce":  # wreduce alone, on what `proc; opt` made (Parmys's order)
+        return Script("wreduce", ("wreduce",), ("wreduce",), False, (*ODIN_FRONT, "opt"))
     table = {"opt -full": "full", "opt -fast": "fast", "opt -fast -noff": "fast-noff",
              "opt -nodffe -nosdff": "nodffe-nosdff"}
     if words not in table:
-        raise opt_equiv.ToolError(f"unknown script '{name}': phase2 or one of {sorted(table)}")
+        raise opt_equiv.ToolError(
+            f"unknown script '{name}': phase2, phase3, wreduce or one of {sorted(table)}")
     return _single(table[words], words)
 
 
@@ -108,7 +120,7 @@ def odin_script(script: Script, files: Sequence[str], top: str | None, in_il: Pa
                 odin_il: Path, techlib: str | None = None) -> str:
     """Step 1's Odin III ``-p`` script (``read_verilog --nolatches``, ruling I8)."""
     front = opt_equiv.read_commands(files, top, True, techlib)
-    middle = [] if script.trio else list(ODIN_FRONT)
+    middle = [] if script.trio else list(script.front)
     body = opt_equiv.with_stats(script.odin)
     return "; ".join([*front, *middle, f"write_rtlil {in_il}", *body, f"write_rtlil {odin_il}",
                       "stats"])
@@ -134,7 +146,8 @@ def parse_expect(text: str) -> dict[tuple[str, str, str], Expect]:
     """``<path> <script> <step> <reason>`` lines; ``ToolError`` on a malformed one."""
     found: dict[tuple[str, str, str], Expect] = {}
     slugs = {"*", *(script_named(n).slug for n in (
-        "phase2", "opt -full", "opt -fast", "opt -fast -noff", "opt -nodffe -nosdff"))}
+        "phase2", "phase3", "wreduce", "opt -full", "opt -fast", "opt -fast -noff",
+        "opt -nodffe -nosdff"))}
     for number, raw in enumerate(text.splitlines(), 1):
         line = raw.split("#", 1)[0].strip()
         if not line:
@@ -210,6 +223,12 @@ class Diff:
         diff = opt_rules.histogram_diff(odin_hist, yosys_hist)
         if diff:
             result.differences["histogram"] = diff
+        if result.script.slug in WIDTH_SCRIPTS:  # the widths and flags of every $add $sub $mul
+            widths = opt_rules.signature_diff(
+                (run_dir / "odin.il").read_text(encoding="utf-8"),
+                (run_dir / "yosys.il").read_text(encoding="utf-8"), opt_rules.WORD_ARITH_TYPES)
+            if widths:
+                result.differences["widths"] = widths
         ok, reason = self.checker.refines(run_dir / "yosys.il", run_dir / "odin.il",
                                           f"{result.script.slug}.refine")
         if not ok:

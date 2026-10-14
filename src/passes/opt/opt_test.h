@@ -12,12 +12,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/*
- * The caps of opt.h that tests lower: ODIN3_OPT_MAX_ITERATIONS, ODIN3_OPT_MUXTREE_MAX_EVALS and
- * ODIN3_WREDUCE_MAX_ROUNDS.
- */
+/* The caps of opt.h that tests lower: ODIN3_OPT_MAX_ITERATIONS, ODIN3_OPT_MUXTREE_MAX_EVALS. */
 typedef struct odin3_opt_limits {
-    uint32_t max_iterations, muxtree_max_evals, wreduce_max_rounds;
+    uint32_t max_iterations, muxtree_max_evals;
 } odin3_opt_limits;
 
 /* Sets the caps (NULL restores the defaults; each value is clamped to [1, its default]). */
@@ -25,6 +22,11 @@ void odin3_opt_test_set_limits(const odin3_opt_limits *limits);
 
 /* The caps in force (the defaults unless a test lowered them). */
 odin3_opt_limits odin3_opt_limits_now(void);
+
+/* wreduce's round cap (ODIN3_WREDUCE_MAX_ROUNDS): 0 restores the default, else clamped to
+ * [1, default]; odin3_opt_test_set_limits(NULL) restores it too. */
+void odin3_opt_test_set_wreduce_rounds(uint32_t rounds);
+uint32_t odin3_opt_wreduce_rounds_now(void);
 
 /*
  * on_call: called with the sub-pass's name ("opt_expr", "opt_merge", ...) at each sub-pass call of

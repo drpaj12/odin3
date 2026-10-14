@@ -405,6 +405,18 @@ enum {
                      ODIN3_WREDUCE_MAX_RULES
 };
 
+static uint32_t collect_wreduce_stats(const odin3_opt_counts *counts, stat_line *lines,
+                                      uint32_t total) {
+    for (uint32_t i = 0; i < ODIN3_WREDUCE_MAX_RULES; i++) {
+        if (counts->wreduce.rule[i] != 0 && odin3_wr_rule_name(i) != NULL) {
+            (void)snprintf(lines[total].name, sizeof lines[total].name, "wreduce.%s",
+                           odin3_wr_rule_name(i));
+            lines[total++].count = counts->wreduce.rule[i];
+        }
+    }
+    return total;
+}
+
 static uint32_t collect_stats(const odin3_opt_counts *counts, stat_line *lines) {
     uint32_t total = 0;
     for (uint32_t i = 0; i < ODIN3_OPT_EXPR_MAX_RULES; i++) {
@@ -428,13 +440,7 @@ static uint32_t collect_stats(const odin3_opt_counts *counts, stat_line *lines) 
             lines[total++].count = counts->dff_action[i];
         }
     }
-    for (uint32_t i = 0; i < ODIN3_WREDUCE_MAX_RULES; i++) {
-        if (counts->wreduce.rule[i] != 0 && odin3_wr_rule_name(i) != NULL) {
-            (void)snprintf(lines[total].name, sizeof lines[total].name, "wreduce.%s",
-                           odin3_wr_rule_name(i));
-            lines[total++].count = counts->wreduce.rule[i];
-        }
-    }
+    total = collect_wreduce_stats(counts, lines, total);
     return total;
 }
 

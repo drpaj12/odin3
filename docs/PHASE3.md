@@ -25,8 +25,8 @@ decisions 2–3 and 16 below):
    `dual_port_ram`. VTR's own readers give LUT K = 6 (the largest `.names` pb_type) and a RAM
    address width of 15.
 3. **Through P&R**: Odin III alone produces each netlist. The script is `read_verilog
-   --nolatches; proc; opt; flatten; [wreduce;] hardmap; lower; abc; write_blif --vtr`
-   (`wreduce` per decision 7). Then
+   --nolatches; proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full; hardmap; lower; abc;
+   write_blif --vtr` (`wreduce` before `flatten` as Parmys, decision 7 and 3G WR-9). Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
    -crit_path_router_iterations 100` (the `vtr_reg_qor_chain` options) must end with
    `vpr_status=success`. That means VPR packs and places, finds the minimum channel width by

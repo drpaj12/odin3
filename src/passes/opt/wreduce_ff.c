@@ -29,18 +29,18 @@ typedef struct mux_view {
     const odin3_net_id *a, *b, *s, *y;
 } mux_view;
 
-/* The replacement of Y bit i when every data input agrees on it (Yosys's ref loop). */
-static bool mux_agree(const wr_state *ws, const mux_view *mv, uint32_t i, odin3_net_id *out) {
-    odin3_net_id ref = mv->a[i];
+/* The replacement of Y bit `bit` when every data input agrees on it (Yosys's ref loop). */
+static bool mux_agree(const wr_state *ws, const mux_view *mv, uint32_t bit, odin3_net_id *out) {
+    odin3_net_id ref = mv->a[bit];
     const bool strict = ws->opts->keepdc || !ws->opts->mux_undef;
-    for (uint32_t k = 0; k < mv->ns; k++) {
-        const odin3_net_id bit = mv->b[(size_t)k * mv->w + i];
+    for (uint32_t word = 0; word < mv->ns; word++) {
+        const odin3_net_id other = mv->b[(size_t)word * mv->w + bit];
         const bool ref_x = wr_is_const(ws, ref, ODIN3_CONST_X);
-        const bool bit_x = wr_is_const(ws, bit, ODIN3_CONST_X);
-        if ((strict || (!ref_x && !bit_x)) && !wr_same(ws, ref, bit)) {
+        const bool other_x = wr_is_const(ws, other, ODIN3_CONST_X);
+        if ((strict || (!ref_x && !other_x)) && !wr_same(ws, ref, other)) {
             return false;
         }
-        ref = bit_x ? ref : bit;
+        ref = other_x ? ref : other;
     }
     *out = ref;
     return true;
@@ -115,13 +115,13 @@ static odin3_status mux_narrow(wr_state *ws, odin3_node_id node, const mux_view 
         return st;
     }
     odin3_value params[WR_MAX_PARAMS];
-    const uint32_t n = wr_params(ws, node, params);
+    const uint32_t count = wr_params(ws, node, params);
     params[MUX_PRM_WIDTH] = odin3_value_int(keep);
     odin3_netvec ports[4] = {{mv->a, keep},
                              {ws->nets2.len > 0 ? ws->nets2.data : mv->a, (uint32_t)ws->nets2.len},
                              {mv->s, mv->ns},
                              {NULL, 0}};
-    const odin3_kit_cell cell = {odin3_node_type(ws->m, node), params, n, ports, {0}};
+    const odin3_kit_cell cell = {odin3_node_type(ws->m, node), params, count, ports, {0}};
     wr_rewrite rw = {node, &cell, MUX_PORT_Y, keep, 0, {0}};
     char label[WR_LABEL_MAX];
     wr_label(ws, node, label, sizeof label);
@@ -179,8 +179,8 @@ typedef struct ff_view {
     bool have_key, zero_ext, sign_ext, blocked;
 } ff_view;
 
-static odin3_bit init_of(const wr_state *ws, const ff_view *fv, uint32_t i) {
-    return fv->have_key ? odin3_ffinit_get_key(ws->m, fv->q[i], fv->init_key) : ODIN3_BIT_X;
+static odin3_bit init_of(const wr_state *ws, const ff_view *fv, uint32_t bit) {
+    return fv->have_key ? odin3_ffinit_get_key(ws->m, fv->q[bit], fv->init_key) : ODIN3_BIT_X;
 }
 
 /* An init or reset bit that lets a 0 through: 0, or x unless -keepdc. */
@@ -188,32 +188,33 @@ static bool zero_like(const wr_state *ws, uint8_t bit) {
     return bit == ODIN3_BIT_0 || (!ws->opts->keepdc && bit == ODIN3_BIT_X);
 }
 
-static bool ff_zero_ok(const wr_state *ws, const ff_view *fv, uint32_t i) {
-    return fv->zero_ext && wr_is_const(ws, fv->d[i], ODIN3_CONST_0) &&
-           zero_like(ws, (uint8_t)init_of(ws, fv, i)) &&
-           (fv->rst == NULL || i >= fv->rst_len || zero_like(ws, fv->rst[i]));
+static bool ff_zero_ok(const wr_state *ws, const ff_view *fv, uint32_t bit) {
+    return fv->zero_ext && wr_is_const(ws, fv->d[bit], ODIN3_CONST_0) &&
+           zero_like(ws, (uint8_t)init_of(ws, fv, bit)) &&
+           (fv->rst == NULL || bit >= fv->rst_len || zero_like(ws, fv->rst[bit]));
 }
 
-static bool ff_sign_ok(const wr_state *ws, const ff_view *fv, uint32_t i) {
-    if (!fv->sign_ext || i == 0 || !wr_same(ws, fv->d[i], fv->d[i - 1U])) {
+static bool ff_sign_ok(const wr_state *ws, const ff_view *fv, uint32_t bit) {
+    if (!fv->sign_ext || bit == 0 || !wr_same(ws, fv->d[bit], fv->d[bit - 1U])) {
         return false;
     }
-    const odin3_bit init = init_of(ws, fv, i);
-    if (init != init_of(ws, fv, i - 1U) || (ws->opts->keepdc && init == ODIN3_BIT_X)) {
+    const odin3_bit init = init_of(ws, fv, bit);
+    if (init != init_of(ws, fv, bit - 1U) || (ws->opts->keepdc && init == ODIN3_BIT_X)) {
         return false;
     }
-    return fv->rst == NULL || i >= fv->rst_len ||
-           (fv->rst[i] == fv->rst[i - 1U] && (!ws->opts->keepdc || fv->rst[i] != ODIN3_BIT_X));
+    return fv->rst == NULL || bit >= fv->rst_len ||
+           (fv->rst[bit] == fv->rst[bit - 1U] &&
+            (!ws->opts->keepdc || fv->rst[bit] != ODIN3_BIT_X));
 }
 
-static ff_kind ff_classify(const wr_state *ws, const ff_view *fv, uint32_t i) {
-    if (ff_zero_ok(ws, fv, i)) {
+static ff_kind ff_classify(const wr_state *ws, const ff_view *fv, uint32_t bit) {
+    if (ff_zero_ok(ws, fv, bit)) {
         return FF_ZERO;
     }
-    if (ff_sign_ok(ws, fv, i)) {
+    if (ff_sign_ok(ws, fv, bit)) {
         return FF_SIGN;
     }
-    return !fv->blocked && wr_unused(ws, fv->q[i]) ? FF_UNUSED : FF_STOP;
+    return !fv->blocked && wr_unused(ws, fv->q[bit]) ? FF_UNUSED : FF_STOP;
 }
 
 typedef struct ff_scan {
@@ -312,29 +313,37 @@ static void ff_count(wr_state *ws, const ff_scan *sc) {
     ws->cnt->rule[WR_RULE_FF_UNUSED] += sc->unused > 0 ? 1U : 0U;
 }
 
+/* The reset value shrinks with Q: its low `keep` bits go into ws->bits and the parameter. */
+static odin3_status ff_truncate_reset(wr_state *ws, const ff_view *fv, uint32_t keep,
+                                      odin3_value *params) {
+    if (fv->rst == NULL) {
+        return ODIN3_OK;
+    }
+    odin3_vec_clear(&ws->bits);
+    for (uint32_t bit = 0; bit < keep; bit++) {
+        uint8_t *slot = odin3_vec_push(&ws->bits);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = bit < fv->rst_len ? fv->rst[bit] : (uint8_t)ODIN3_BIT_0;
+    }
+    params[fv->rst_param].bits = ws->bits.data;
+    params[fv->rst_param].len = keep;
+    return ODIN3_OK;
+}
+
 static odin3_status ff_narrow(wr_state *ws, odin3_node_id node, const ff_view *fv,
                               const ff_scan *sc) {
     const uint32_t keep = fv->w - sc->removed;
     odin3_status st = wr_mark(ws, fv->d, keep);
     st = st == ODIN3_OK ? wr_mark(ws, fv->q, keep) : st;
     odin3_value params[WR_MAX_PARAMS];
-    const uint32_t n = wr_params(ws, node, params);
+    const uint32_t count = wr_params(ws, node, params);
     params[0] = odin3_value_int(keep);
-    if (st == ODIN3_OK && fv->rst != NULL) { /* the reset value shrinks with Q */
-        odin3_vec_clear(&ws->bits);
-        for (uint32_t i = 0; st == ODIN3_OK && i < keep; i++) {
-            uint8_t *slot = odin3_vec_push(&ws->bits);
-            st = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-            if (slot != NULL) {
-                *slot = i < fv->rst_len ? fv->rst[i] : (uint8_t)ODIN3_BIT_0;
-            }
-        }
-        params[fv->rst_param].bits = ws->bits.data;
-        params[fv->rst_param].len = keep;
-    }
+    st = st == ODIN3_OK ? ff_truncate_reset(ws, fv, keep, params) : st;
     odin3_netvec ports[WR_MAX_PORTS];
     ff_ports(ws, node, fv, keep, ports);
-    const odin3_kit_cell cell = {odin3_node_type(ws->m, node), params, n, ports, {0}};
+    const odin3_kit_cell cell = {odin3_node_type(ws->m, node), params, count, ports, {0}};
     wr_rewrite rw = {node, &cell, fv->q_port, keep, sc->sign, {0}};
     char label[WR_LABEL_MAX];
     wr_label(ws, node, label, sizeof label);

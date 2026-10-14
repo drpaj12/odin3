@@ -27,6 +27,8 @@
 #include <stdint.h>
 #include <string.h>
 
+enum { RANK_SHIFT = 32 };
+
 static const char *const k_type_names[WT_COUNT] = {
     "$not",        "$neg",       "$and",        "$or",          "$xor",         "$xnor",
     "$shl",        "$shr",       "$sshr",       "$shiftx",      "$lt",          "$le",
@@ -142,11 +144,11 @@ void wr_log_removed(const wr_state *ws, odin3_node_id node, uint32_t count, uint
 uint32_t wr_params(const wr_state *ws, odin3_node_id node, odin3_value *out) {
     const odin3_celltype_def *def =
         odin3_celltype_get(ws->oc->design, odin3_node_type(ws->m, node));
-    uint32_t n = def->n_params < WR_MAX_PARAMS ? def->n_params : WR_MAX_PARAMS;
-    for (uint32_t i = 0; i < n; i++) {
+    uint32_t count = def->n_params < WR_MAX_PARAMS ? def->n_params : WR_MAX_PARAMS;
+    for (uint32_t i = 0; i < count; i++) {
         out[i] = *odin3_node_param(ws->m, node, i);
     }
-    return n;
+    return count;
 }
 
 /* --- side tables ------------------------------------------------------------------------------ */
@@ -218,8 +220,8 @@ odin3_status wr_ysrc_reset(wr_state *ws, odin3_node_id node, uint32_t out_port) 
 
 /* --- the rewrite ------------------------------------------------------------------------------ */
 
-static odin3_net_id *ysrc_at(wr_state *ws, uint32_t k) {
-    return odin3_vec_at(&ws->ysrc, k);
+static odin3_net_id *ysrc_at(wr_state *ws, uint32_t idx) {
+    return odin3_vec_at(&ws->ysrc, idx);
 }
 
 /* Undoes commit_build: the new node and its (pinless) fresh nets go again. */
@@ -352,7 +354,7 @@ static odin3_status visit(wr_state *ws, odin3_node_id node) {
 }
 
 static odin3_status push_key(wr_state *ws, odin3_node_id node) {
-    return odin3_kit_push_u64(&ws->work, ((uint64_t)rank_of(ws, node.v) << 32) | node.v);
+    return odin3_kit_push_u64(&ws->work, ((uint64_t)rank_of(ws, node.v) << RANK_SHIFT) | node.v);
 }
 
 /* The first round: every live node. */
@@ -401,7 +403,7 @@ static odin3_status next_work(wr_state *ws) {
 }
 
 static odin3_status rounds(wr_state *ws) {
-    const uint32_t cap = odin3_opt_limits_now().wreduce_max_rounds;
+    const uint32_t cap = odin3_opt_wreduce_rounds_now();
     uint32_t done = 0;
     odin3_status st = initial_work(ws);
     while (st == ODIN3_OK && ws->work.len > 0) {

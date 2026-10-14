@@ -31,10 +31,10 @@
 
 /* --- test hooks (opt_test.h) ---------------------------------------------------------------- */
 
-static const odin3_opt_limits k_default_limits = {
-    ODIN3_OPT_MAX_ITERATIONS, ODIN3_OPT_MUXTREE_MAX_EVALS, ODIN3_WREDUCE_MAX_ROUNDS};
-static odin3_opt_limits g_limits = {ODIN3_OPT_MAX_ITERATIONS, ODIN3_OPT_MUXTREE_MAX_EVALS,
-                                    ODIN3_WREDUCE_MAX_ROUNDS};
+static const odin3_opt_limits k_default_limits = {ODIN3_OPT_MAX_ITERATIONS,
+                                                  ODIN3_OPT_MUXTREE_MAX_EVALS};
+static odin3_opt_limits g_limits = {ODIN3_OPT_MAX_ITERATIONS, ODIN3_OPT_MUXTREE_MAX_EVALS};
+static uint32_t g_wreduce_rounds = ODIN3_WREDUCE_MAX_ROUNDS;
 static odin3_opt_test_hooks g_hooks;
 
 static uint32_t clamp_cap(uint32_t value, uint32_t dflt) {
@@ -47,19 +47,24 @@ static uint32_t clamp_cap(uint32_t value, uint32_t dflt) {
 void odin3_opt_test_set_limits(const odin3_opt_limits *limits) {
     if (limits == NULL) {
         g_limits = k_default_limits;
+        g_wreduce_rounds = ODIN3_WREDUCE_MAX_ROUNDS;
         return;
     }
     g_limits.max_iterations = clamp_cap(limits->max_iterations, ODIN3_OPT_MAX_ITERATIONS);
     g_limits.muxtree_max_evals = clamp_cap(limits->muxtree_max_evals, ODIN3_OPT_MUXTREE_MAX_EVALS);
-    /* 0 (a literal that predates the field) keeps the default */
-    g_limits.wreduce_max_rounds =
-        limits->wreduce_max_rounds == 0
-            ? ODIN3_WREDUCE_MAX_ROUNDS
-            : clamp_cap(limits->wreduce_max_rounds, ODIN3_WREDUCE_MAX_ROUNDS);
 }
 
 odin3_opt_limits odin3_opt_limits_now(void) {
     return g_limits;
+}
+
+void odin3_opt_test_set_wreduce_rounds(uint32_t rounds) {
+    g_wreduce_rounds =
+        rounds == 0 ? ODIN3_WREDUCE_MAX_ROUNDS : clamp_cap(rounds, ODIN3_WREDUCE_MAX_ROUNDS);
+}
+
+uint32_t odin3_opt_wreduce_rounds_now(void) {
+    return g_wreduce_rounds;
 }
 
 void odin3_opt_test_set_hooks(const odin3_opt_test_hooks *hooks) {

@@ -173,6 +173,27 @@ class ScriptTest(unittest.TestCase):
             self.assertEqual(self.yosys(name),
                              f"read_rtlil w/in.il; {name}; write_rtlil w/yosys.il; stat")
 
+    def test_wreduce_and_phase3_scripts(self) -> None:
+        self.assertEqual(od.script_named("wreduce").slug, "wreduce")
+        self.assertEqual(
+            self.odin("wreduce"),
+            "read_verilog --nolatches a.v b.v; hierarchy -auto; proc; opt_expr -keepdc; opt; "
+            "write_rtlil w/in.il; wreduce --opt-stats; write_rtlil w/odin.il; stats")
+        self.assertEqual(self.yosys("wreduce"),
+                         "read_rtlil w/in.il; wreduce; write_rtlil w/yosys.il; stat")
+        # Phase 2's lines, then wreduce; opt_clean; opt -full (3G WR-9); in.il before proc
+        self.assertEqual(
+            self.odin("phase3", "t"),
+            "read_verilog --nolatches a.v b.v; hierarchy --top t; write_rtlil w/in.il; "
+            "opt_expr --opt-stats; opt_clean --opt-stats; opt -nodffe -nosdff --opt-stats; proc; "
+            "opt --opt-stats; wreduce --opt-stats; opt_clean --opt-stats; opt -full --opt-stats; "
+            "compact; write_rtlil w/odin.il; stats")
+        self.assertIn("wreduce; opt_clean; opt -full; write_rtlil", self.yosys("phase3"))
+        self.assertIn("widths", od.STEPS)
+        table = od.parse_expect("a.v wreduce widths structural only: a reason\n"
+                                "a.v phase3 identity structural only: a reason\n")
+        self.assertEqual(len(table), 2)
+
     def test_unknown_script(self) -> None:
         with self.assertRaises(opt_equiv.ToolError):
             od.script_named("opt -mux_undef")

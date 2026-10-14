@@ -86,6 +86,7 @@ void setUp(void) {
 void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
     odin3_opt_test_set_limits(NULL);
+    odin3_opt_test_set_wreduce_rounds(0);
     pb_free(&fx.res);
     memset(&fx, 0, sizeof fx);
     odin3_log_set_level(ODIN3_LOG_INFO);
@@ -158,11 +159,18 @@ static odin3_net_id wbit(const char *name, uint32_t bit) {
     return odin3_wire_net(fx.module, wire, bit);
 }
 
-static odin3_net_id pnet(odin3_node_id node, uint32_t port, uint32_t bit) {
-    odin3_pinslice ps = odin3_node_port(fx.module, node, port);
-    TEST_ASSERT_TRUE(bit < ps.count);
-    return odin3_pin_net(fx.module, (odin3_pin_id){ps.first.v + bit});
+typedef struct pin_ref {
+    odin3_node_id node;
+    uint32_t port, bit;
+} pin_ref;
+
+static odin3_net_id pin_net_at(pin_ref ref) {
+    odin3_pinslice ps = odin3_node_port(fx.module, ref.node, ref.port);
+    TEST_ASSERT_TRUE(ref.bit < ps.count);
+    return odin3_pin_net(fx.module, (odin3_pin_id){ps.first.v + ref.bit});
 }
+
+#define pnet(node, port, bit) pin_net_at((pin_ref){(node), (port), (bit)})
 
 static uint32_t pwidth(odin3_node_id node, uint32_t port) {
     return odin3_node_port(fx.module, node, port).count;
@@ -209,11 +217,18 @@ static void expect_port(odin3_node_id node, uint32_t port, const char *spec) {
 }
 
 /* wire `name`, bits [from, to) all on the constant `what`. */
-static void expect_wire_const(const char *name, uint32_t from, uint32_t to, const char *what) {
-    for (uint32_t k = from; k < to; k++) {
-        TEST_ASSERT_TRUE_MESSAGE(is_net(wbit(name, k), what), name);
+typedef struct bit_range {
+    uint32_t from, to;
+} bit_range;
+
+static void wire_const_range(const char *name, bit_range range, const char *what) {
+    for (uint32_t bit = range.from; bit < range.to; bit++) {
+        TEST_ASSERT_TRUE_MESSAGE(is_net(wbit(name, bit), what), name);
     }
 }
+
+#define expect_wire_const(name, from, to, what)                                                    \
+    wire_const_range((name), (bit_range){(from), (to)}, (what))
 
 /* Binary word cells: ports A B Y; parameters A_SIGNED B_SIGNED A_WIDTH B_WIDTH Y_WIDTH. */
 enum {
@@ -232,19 +247,27 @@ enum {
     PRM_UN_Y_WIDTH = 2
 };
 
-static void expect_bin(const char *name, int64_t sa, int64_t sb, int64_t aw, int64_t bw,
-                       int64_t yw) {
+typedef struct bin_want {
+    int64_t sa, sb, aw, bw, yw;
+} bin_want;
+
+static void check_bin(const char *name, bin_want want) {
     odin3_node_id node = node_named(name);
     TEST_ASSERT_TRUE_MESSAGE(odin3_node_valid(node) && odin3_node_live(fx.module, node), name);
-    TEST_ASSERT_EQUAL_INT64(sa, pint(node, PRM_A_SIGNED));
-    TEST_ASSERT_EQUAL_INT64(sb, pint(node, PRM_B_SIGNED));
-    TEST_ASSERT_EQUAL_INT64(aw, pint(node, PRM_A_WIDTH));
-    TEST_ASSERT_EQUAL_INT64(bw, pint(node, PRM_B_WIDTH));
-    TEST_ASSERT_EQUAL_INT64(yw, pint(node, PRM_Y_WIDTH));
-    TEST_ASSERT_EQUAL_UINT32((uint32_t)aw, pwidth(node, OP_A));
-    TEST_ASSERT_EQUAL_UINT32((uint32_t)bw, pwidth(node, OP_B));
-    TEST_ASSERT_EQUAL_UINT32((uint32_t)yw, pwidth(node, OP_Y));
+    const int64_t have[5] = {pint(node, PRM_A_SIGNED), pint(node, PRM_B_SIGNED),
+                             pint(node, PRM_A_WIDTH), pint(node, PRM_B_WIDTH),
+                             pint(node, PRM_Y_WIDTH)};
+    const int64_t wanted[5] = {want.sa, want.sb, want.aw, want.bw, want.yw};
+    for (size_t k = 0; k < 5; k++) {
+        TEST_ASSERT_EQUAL_INT64_MESSAGE(wanted[k], have[k], name);
+    }
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)want.aw, pwidth(node, OP_A));
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)want.bw, pwidth(node, OP_B));
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)want.yw, pwidth(node, OP_Y));
 }
+
+#define expect_bin(name, sa, sb, aw, bw, yw)                                                       \
+    check_bin((name), (bin_want){(sa), (sb), (aw), (bw), (yw)})
 
 /* --- texts ------------------------------------------------------------------------------------ */
 
@@ -561,29 +584,38 @@ static char *final_text(const char *text) {
     return out;
 }
 
+static void expect_as_before_or_final(const char *before, const char *final) {
+    char *after = rtlil_text();
+    TEST_ASSERT_TRUE(strcmp(before, after) == 0 || strcmp(final, after) == 0);
+    free(after);
+}
+
 /* Every allocation point in turn fails once. A failure leaves a valid IR; with one rewrite
  * (strict) the design is as it was, or the rewrite is complete (the failure came after it), or the
  * kit logged its half-done line. */
+/* One run of the sweep with the allocation `fail` failing; true when the run needed no failure. */
+static bool oom_run_once(const char *text, long fail, bool strict, const char *final) {
+    reset();
+    build(text);
+    char *before = rtlil_text();
+    n_lines = 0;
+    odin3_util_set_alloc_fail_after(fail);
+    odin3_status st = odin3_opt_wreduce_run(&fx.ctx, fx.res.design, &fx.opts, &fx.counts);
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+    check_full();
+    if (strict && st == ODIN3_ERR_NO_MEMORY && count_half_done() == 0) {
+        expect_as_before_or_final(before, final);
+    }
+    free(before);
+    return st == ODIN3_OK;
+}
+
 static void oom_sweep(const char *text, bool strict) {
     bool done = false;
     char *final = final_text(text);
     for (long fail = 0; !done && fail < OOM_LIMIT; fail++) {
-        reset();
-        build(text);
-        char *before = rtlil_text();
-        n_lines = 0;
-        odin3_util_set_alloc_fail_after(fail);
-        odin3_status st = odin3_opt_wreduce_run(&fx.ctx, fx.res.design, &fx.opts, &fx.counts);
-        odin3_util_set_alloc_fail_after(-1);
-        done = st == ODIN3_OK;
-        TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
-        check_full();
-        if (strict && st == ODIN3_ERR_NO_MEMORY && count_half_done() == 0) {
-            char *after = rtlil_text();
-            TEST_ASSERT_TRUE(strcmp(before, after) == 0 || strcmp(final, after) == 0);
-            free(after);
-        }
-        free(before);
+        done = oom_run_once(text, fail, strict, final);
     }
     free(final);
     TEST_ASSERT_TRUE_MESSAGE(done, "the sweep never reached a run that needs no failure");
@@ -835,8 +867,7 @@ static void test_cascade_needs_rounds(void) {
 }
 
 static void test_round_cap_warns_and_stays_valid(void) {
-    odin3_opt_limits limits = {ODIN3_OPT_MAX_ITERATIONS, ODIN3_OPT_MUXTREE_MAX_EVALS, 2};
-    odin3_opt_test_set_limits(&limits);
+    odin3_opt_test_set_wreduce_rounds(2);
     build(CASCADE);
     run_wreduce();
     TEST_ASSERT_EQUAL_UINT32(
@@ -875,8 +906,8 @@ static char *dup_str(const char *text) {
 static char *cell_summary(void) {
     char buf[1024] = "";
     char *lines_out[16];
-    size_t n = 0;
-    for (uint32_t id = 1; id < odin3_module_node_end(fx.module) && n < 16; id++) {
+    size_t count = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(fx.module) && count < 16; id++) {
         odin3_node_id node = {id};
         const odin3_celltype_def *def =
             odin3_celltype_get(fx.res.design, odin3_node_type(fx.module, node));
@@ -890,11 +921,11 @@ static char *cell_summary(void) {
             len += snprintf(one + len, sizeof one - (size_t)len, " %lld",
                             (long long)odin3_node_param(fx.module, node, k)->i);
         }
-        lines_out[n] = dup_str(one);
-        n++;
+        lines_out[count] = dup_str(one);
+        count++;
     }
-    qsort(lines_out, n, sizeof lines_out[0], cmp_str);
-    for (size_t i = 0; i < n; i++) {
+    qsort((void *)lines_out, count, sizeof lines_out[0], cmp_str);
+    for (size_t i = 0; i < count; i++) {
         (void)snprintf(buf + strlen(buf), sizeof buf - strlen(buf), "%s;", lines_out[i]);
         free(lines_out[i]);
     }

@@ -157,6 +157,29 @@ class OptRulesTest(unittest.TestCase):
         self.assertEqual(self.tree.log("yosys.log"),
                          [f"read_rtlil {work}/in.il; debug opt_expr -fine; stat"])
 
+    def test_wreduce_row_commands(self) -> None:
+        rule = orr.Rule("wreduce/port_a", "wreduce.port_a", "log:Removed")
+        script = orr.odin_script(rule, Path("/x/p.v"), ["-memx"], Path("/w/in.il"),
+                                 Path("/w/out.il"))
+        self.assertEqual(script, "read_verilog --nolatches /x/p.v; proc; opt; "
+                                 "write_rtlil /w/in.il; wreduce -memx --opt-stats; stats; "
+                                 "write_rtlil /w/out.il")
+        self.assertEqual(orr.yosys_script(rule, ["-memx"], Path("/w/in.il"), Path("/w/y.il")),
+                         "read_rtlil /w/in.il; debug wreduce -memx; write_rtlil /w/y.il; stat")
+        self.assertEqual(orr.parse_rules("wreduce/a wreduce.port_a -\n")[0].sub, "wreduce")
+
+    def test_cell_signatures_compare_widths_and_flags(self) -> None:
+        def cell(aw: int, sg: int) -> str:
+            return (f"module \\m\n  cell $add \\c1\n    parameter \\A_SIGNED {sg}\n"
+                    f"    parameter signed \\A_WIDTH {aw}\n    parameter \\Y_WIDTH 9\n"
+                    "    connect \\A \\a\n  end\nend\n")
+        self.assertEqual(orr.cell_signatures(cell(8, 0)),
+                         {"m": ["$add A_SIGNED=0 A_WIDTH=8 Y_WIDTH=9"]})
+        self.assertEqual(orr.signature_diff(cell(8, 0), cell(8, 0)), "")
+        self.assertIn("A_WIDTH=9", orr.signature_diff(cell(8, 0), cell(9, 0)))
+        self.assertIn("A_SIGNED=1", orr.signature_diff(cell(8, 0), cell(8, 1)))
+        self.assertEqual(orr.signature_diff(cell(8, 0), cell(9, 1), ("$mul",)), "")
+
     def test_blif_source_command(self) -> None:
         rule = orr.Rule("expr/gate_not", "gate_not", "-")
         script = orr.odin_script(rule, Path("/x/g.blif"), [], Path("/w/in.il"), Path("/w/out.il"))

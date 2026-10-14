@@ -64,7 +64,7 @@ import toolutil
 
 TOOL = "opt-rules"
 EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
-SUBS = ("expr", "merge", "muxtree", "reduce", "share", "dff", "clean")
+SUBS = ("expr", "merge", "muxtree", "reduce", "share", "dff", "clean", "wreduce")
 SOURCE_SUFFIXES = (".v", ".blif")
 SKIP_FILE = "refine_skip.txt"
 NO_YOSYS_ID = "-"
@@ -203,6 +203,11 @@ def source_prepass(source: str) -> list[str]:
     return [c.strip() for c in found.group(1).split(";") if c.strip()] if found else []
 
 
+def pass_name(rule: Rule) -> str:
+    """The pass a row runs: ``opt_<sub>``, and ``wreduce`` (3G) for the ``wreduce`` rows."""
+    return rule.sub if rule.sub == "wreduce" else f"opt_{rule.sub}"
+
+
 def odin_script(rule: Rule, source: Path, options: Sequence[str], in_il: Path, out_il: Path,
                 prepass: Sequence[str] = (), simcheck: bool = False) -> str:
     """Plan point (g)'s Odin III side, ``--nolatches`` on its read. The prepass commands run
@@ -211,18 +216,71 @@ def odin_script(rule: Rule, source: Path, options: Sequence[str], in_il: Path, o
     if source.suffix == ".blif":
         read = [f"read_blif {source}"]
     else:
-        read = [f"read_verilog --nolatches {source}", "proc --noopt"]
-    sub_pass = " ".join([f"opt_{rule.sub}", *options, "--opt-stats",
+        # wreduce runs after `proc; opt` in Parmys (3G spec 9); the opt passes see `proc --noopt`
+        read = [f"read_verilog --nolatches {source}",
+                "proc" if rule.sub == "wreduce" else "proc --noopt",
+                *(["opt"] if rule.sub == "wreduce" else [])]
+    sub_pass = " ".join([pass_name(rule), *options, "--opt-stats",
                          *(["--opt-simcheck"] if simcheck else [])])
     return "; ".join([*read, *prepass, f"write_rtlil {in_il}", sub_pass, "stats",
                       f"write_rtlil {out_il}"])
 
 
-def yosys_script(rule: Rule, options: Sequence[str], in_il: Path) -> str:
-    """Plan point (g)'s Yosys side."""
-    sub_pass = f"debug {' '.join([f'opt_{rule.sub}', *options])}"
+def yosys_script(rule: Rule, options: Sequence[str], in_il: Path,
+                 out_il: Path | None = None) -> str:
+    """Plan point (g)'s Yosys side (``out_il``: also write its result, for the wreduce rows)."""
+    sub_pass = f"debug {' '.join([pass_name(rule), *options])}"
     again = [f"opt_clean; {sub_pass}"] if rule.deviation in DEV_CONVERGED else []
-    return "; ".join([f"read_rtlil {in_il}", sub_pass, *again, "stat"])
+    write = [f"write_rtlil {out_il}"] if out_il is not None else []
+    return "; ".join([f"read_rtlil {in_il}", sub_pass, *again, *write, "stat"])
+
+
+CELL_START = re.compile(r"^\s*cell (\S+) \S+\s*$")
+PARAM_LINE = re.compile(r"^\s*parameter (?:signed )?\\(\w+) (\S+)\s*$")
+MODULE_START = re.compile(r"^module (\S+)\s*$")
+# the parameters that say what a word cell is: widths, flags, reset values, memory address bits
+SIGNATURE_PARAMS = ("A_SIGNED", "B_SIGNED", "A_WIDTH", "B_WIDTH", "Y_WIDTH", "WIDTH", "S_WIDTH",
+                    "ABITS", "ARST_VALUE", "SRST_VALUE")
+WORD_ARITH_TYPES = ("$add", "$sub", "$mul")
+
+
+def cell_signatures(text: str, types: Sequence[str] = ()) -> dict[str, list[str]]:
+    """Per module of an RTLIL text, the sorted ``type param=value ...`` line of every cell (of the
+    given types when any): the multiset of cell types, widths and flags. Names are left out."""
+    sigs: dict[str, list[str]] = {}
+    module = ""
+    current: list[str] | None = None
+    for raw in text.splitlines():
+        found_module = MODULE_START.match(raw)
+        if found_module:
+            module = clean_module(found_module.group(1))
+            sigs.setdefault(module, [])
+            continue
+        start = CELL_START.match(raw)
+        if start:
+            current = [start.group(1)]
+            continue
+        if current is None:
+            continue
+        param = PARAM_LINE.match(raw)
+        if param and param.group(1) in SIGNATURE_PARAMS:
+            current.append(f"{param.group(1)}={param.group(2)}")
+        elif raw.strip() == "end":
+            if not types or current[0] in types:
+                sigs[module].append(" ".join([current[0], *sorted(current[1:])]))
+            current = None
+    return {name: sorted(lines) for name, lines in sigs.items()}
+
+
+def signature_diff(odin_text: str, yosys_text: str, types: Sequence[str] = ()) -> str:
+    """Empty when both RTLIL texts hold the same cells (type, widths, flags), else the first
+    difference."""
+    mine, theirs = cell_signatures(odin_text, types), cell_signatures(yosys_text, types)
+    for module in sorted(set(mine) | set(theirs)):
+        if mine.get(module, []) != theirs.get(module, []):
+            return (f"module '{module}': odin3 {mine.get(module, [])} "
+                    f"vs yosys {theirs.get(module, [])}")
+    return ""
 
 
 def counter_value(rule: Rule, log: str) -> int:
@@ -299,7 +357,8 @@ def histogram_diff(odin: Histogram, yosys: Histogram) -> str:
     return ""
 
 
-def yosys_checks(rule: Rule, log: str, cover_text: str, odin: Histogram) -> list[str]:
+def yosys_checks(rule: Rule, log: str, cover_text: str, odin: Histogram,
+                 signatures: str = "") -> list[str]:
     """The Yosys-side findings (the cover id or log pattern, the histogram), empty when all hold."""
     found: list[str] = []
     if rule.yosys_id.startswith(LOG_PREFIX):
@@ -314,6 +373,8 @@ def yosys_checks(rule: Rule, log: str, cover_text: str, odin: Histogram) -> list
     diff = histogram_diff(odin, yosys_histogram(log, ignored))
     if diff:
         found.append(f"cell histogram differs: {diff}")
+    if signatures:
+        found.append(f"cell widths or flags differ: {signatures}")
     return found
 
 
@@ -369,7 +430,9 @@ class Runner:
         cover = run_dir / "cover"
         cover.mkdir(exist_ok=True)
         env = {**os.environ, "YOSYS_COVER_DIR": str(cover)}
-        script = yosys_script(rule, options, run_dir / "in.il")
+        wreduce = rule.sub == "wreduce"
+        script = yosys_script(rule, options, run_dir / "in.il",
+                              run_dir / "yosys.il" if wreduce else None)
         done = self.child("yosys", [exe(self.args.yosys), "-p", script], env=env)
         log = (done.stdout or "") + (done.stderr or "")
         if done.returncode != 0:
@@ -377,7 +440,11 @@ class Runner:
             return
         cover_text = "".join(path.read_text(encoding="utf-8", errors="replace")
                              for path in sorted(cover.iterdir()))
-        findings = yosys_checks(rule, log, cover_text, odin_histogram(odin_log))
+        signatures = ""
+        if wreduce:  # Yosys has no cover points in wreduce: widths and flags are compared too
+            signatures = signature_diff(outcome.out_il,
+                                        (run_dir / "yosys.il").read_text(encoding="utf-8"))
+        findings = yosys_checks(rule, log, cover_text, odin_histogram(odin_log), signatures)
         if rule.deviation and rule.deviation not in (*DEV_CONVERGED, *DEV_IGNORED_YOSYS_TYPES):
             outcome.notes.extend(f"deviation {rule.deviation}: {item}" for item in findings)
         else:

@@ -102,3 +102,17 @@ full/ch_intrinsics.v full identity structural only: memory plus hard block, equi
 large/iir.v full refine proved (BLIF cec exit 0): Yosys's induction base case fails on the multipliers, ABC proves it
 full/fir_scu_rtl_restructured_for_cmm_exp.v phase2 identity proved (BLIF cec exit 0): cell order differs from Yosys's result
 full/fir_scu_rtl_restructured_for_cmm_exp.v full identity proved (BLIF cec exit 0): cell order differs from Yosys's result
+# 3G wreduce (paths relative to tests/opt/rules; scripts wreduce and phase3). Cells, widths and flags
+# of every $add $sub $mul equal Yosys's in all of these (the widths step); refinement is proved by
+# opt-rules/opt-equiv where the flow has a model.
+wreduce/divmod_trim_pow.v wreduce refine structural only: no SAT model for $pow in Yosys's equiv flow; cells and widths equal Yosys's (opt-rules checks them)
+wreduce/divmod_trim_pow.v phase3 refine structural only: no SAT model for $pow in Yosys's equiv flow; cells and widths equal Yosys's (opt-rules checks them)
+wreduce/mem_addr.v wreduce refine structural only: Yosys wreduce does not narrow a $mem cell (only $memrd/$memwr, spec 17 divergence 4); out-of-range accesses alias after the address bits go
+wreduce/mem_addr.v phase3 refine structural only: Yosys wreduce does not narrow a $mem cell (only $memrd/$memwr, spec 17 divergence 4); out-of-range accesses alias after the address bits go
+wreduce/cascade.v phase3 identity structural only: same cells, widths and flags; refinement proved; the lowered BLIFs differ in constant/buffer structure of the public wires r and t, which Yosys narrows (wreduce wire narrowing, spec WR-8 divergence 3) and Odin III keeps 8 bits wide
+wreduce/cascade.v wreduce identity structural only: same cells, widths and flags; refinement proved; the lowered BLIFs differ in constant/buffer structure of the public wires r and t, which Yosys narrows (wreduce wire narrowing, spec WR-8 divergence 3) and Odin III keeps 8 bits wide
+wreduce/mem_addr.v phase3 identity structural only: Yosys wreduce does not narrow a $mem cell (spec 17 divergence 4): the memories differ in address width
+wreduce/mem_addr.v wreduce identity structural only: Yosys wreduce does not narrow a $mem cell (spec 17 divergence 4): the memories differ in address width
+micro/bm_DL_74381_ALU.v phase3 histogram proved (Yosys refinement both ways; BLIF cec exit 0): opt -full's opt_share merges an $add with a $sub, Yosys the two $sub (spec 17 #6, #45); not wreduce (the wreduce script is ok)
+micro/bm_DL_74381_ALU.v phase3 widths proved (Yosys refinement both ways; BLIF cec exit 0): opt -full's opt_share merges an $add with a $sub, Yosys the two $sub (spec 17 #6, #45); not wreduce (the wreduce script is ok)
+micro/bm_DL_74381_ALU.v phase3 identity proved (Yosys refinement both ways; BLIF cec exit 0): opt -full's opt_share merges an $add with a $sub, Yosys the two $sub (spec 17 #6, #45); not wreduce (the wreduce script is ok)

@@ -138,6 +138,14 @@ class PureTest(unittest.TestCase):
         self.assertIn("proc", stats)  # not an opt word
         self.assertIn("compact", stats)
 
+    def test_phase3_script_and_the_wreduce_call(self) -> None:
+        commands = oe.phase2_commands(oe.HERE / "phase3.script")
+        self.assertEqual(commands[commands.index("wreduce") + 1:commands.index("compact")],
+                         ["opt_clean", "opt -full"])
+        self.assertIn("wreduce --opt-stats", oe.with_stats(commands))
+        self.assertIsNotNone(oe.PAIR_NAME.match("0019-wreduce-before.il"))
+        self.assertIsNotNone(oe.PAIR_NAME.match("0003-opt_expr-before.il"))
+
     def test_read_commands(self) -> None:
         self.assertEqual(oe.read_commands(["a.v", "b c.v"], "t", True),
                          ["read_verilog --nolatches a.v \"b c.v\"", "hierarchy --top t"])
