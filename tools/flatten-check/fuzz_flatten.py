@@ -9,9 +9,11 @@ Legs:
 
 1. ``flatten``: ``read_verilog; hierarchy; proc; flatten; check; write_rtlil`` must succeed (Debug
    builds run ``check`` full around the pass);
-2. ``sim`` (spec 14.4): ``sim`` before and after ``flatten`` in one run on the same vectors must be
-   equal. A design the simulator cannot run (word flip-flops before ``lower``, tristate buffers)
-   is ``skipped``, counted, never a pass;
+2. ``sim`` (spec 14.4): ``sim`` before and after ``flatten`` on the same vectors must be equal.
+   The unflattened design is simulated first; only a design the simulator cannot run for a known
+   reason (word flip-flops before ``lower``, tristate buffers) is ``skipped``, counted, never a
+   pass. Any other failure of that run is a failure, and so is any failure of the ``flatten`` run
+   once the unflattened design simulated (a design that simulated before must simulate after);
 3. ``yosys`` (with ``--yosys``, spec 14.3): the flat module's public wire names and widths, public
    cell names and cell-type multiset against Yosys 0.55's ``flatten`` (``flatten_diff.compare``);
    with ``--equiv`` also Yosys's equivalence proof, except for a case that holds ``keep_hierarchy``
@@ -26,6 +28,7 @@ cap.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -40,7 +43,9 @@ import memcap
 TOP = "top"
 SIM_CYCLES = 16
 SIM_SEED = 1
-SKIP_TEXT = "cannot simulate"
+# The known reasons the unflattened design cannot be simulated: a word-level flip-flop or latch
+# (`lower` comes later) or a tristate buffer. Anything else the simulator rejects is a failure.
+SKIP_REASON = re.compile(r"cannot simulate `\$(?:\w*dff\w*|\w*dlatch\w*|\w*latch\w*|tribuf|_TBUF_)`")
 
 
 @dataclass
@@ -61,30 +66,33 @@ def odin_run(odin3: str, script: str) -> tuple[int, str]:
     return done.returncode, (done.stderr or "") + (done.stdout or "")
 
 
-def leg_flatten(odin3: str, source: Path, work: Path) -> str | None:
-    """None when leg 1 passes, else the failure text."""
+def leg_flatten(odin3: str, source: Path, work: Path, sim_after: Path | None) -> str | None:
+    """None when leg 1 passes, else the failure text. With ``sim_after`` the flat design is also
+    simulated (the vectors go to that file) in the same run, so a design that simulated before
+    flatten and fails to after fails here."""
     script = (
         f"read_verilog --nolatches {source}; hierarchy --top {TOP}; proc; flatten; check; "
         f"write_rtlil {work / 'flat.il'}"
     )
+    if sim_after is not None:
+        script += f"; sim {SIM_CYCLES} {SIM_SEED} {sim_after}"
     code, log = odin_run(odin3, script)
     return None if code == 0 else f"exit {code}: {log.strip()[-300:]}"
 
 
-def leg_sim(odin3: str, source: Path, work: Path) -> str:
-    """``equal``, ``skipped``, or ``FAIL: ...``."""
-    before, after = work / "before.txt", work / "after.txt"
+def leg_sim_before(odin3: str, source: Path, before: Path) -> str:
+    """``ok`` (the vectors are in ``before``), ``skipped`` (a known reason the unflattened design
+    cannot be simulated) or ``FAIL: ...``."""
     script = (
         f"read_verilog --nolatches {source}; hierarchy --top {TOP}; proc; "
-        f"sim {SIM_CYCLES} {SIM_SEED} {before}; flatten; check; "
-        f"sim {SIM_CYCLES} {SIM_SEED} {after}"
+        f"sim {SIM_CYCLES} {SIM_SEED} {before}"
     )
     code, log = odin_run(odin3, script)
-    if code != 0:
-        return "skipped" if SKIP_TEXT in log else f"FAIL: exit {code}: {log.strip()[-300:]}"
-    if before.read_text() != after.read_text():
-        return "FAIL: the simulation differs after flatten"
-    return "equal"
+    if code == 0:
+        return "ok"
+    if SKIP_REASON.search(log):
+        return "skipped"
+    return f"FAIL: the unflattened design failed to simulate (exit {code}): {log.strip()[-300:]}"
 
 
 def leg_yosys(
@@ -114,13 +122,16 @@ def run_case(seed: int, args: argparse.Namespace, work: Path, tally: Tally) -> s
     profile = flatten_profile.generate(seed)
     source = work / f"seed{seed}.v"
     source.write_text(profile.text, encoding="utf-8")
-    failure = leg_flatten(args.odin3, source, work)
-    if failure is not None:
-        return f"flatten: {failure}"
-    verdict = leg_sim(args.odin3, source, work)
+    before, after = work / "before.txt", work / "after.txt"
+    verdict = leg_sim_before(args.odin3, source, before)
     if verdict.startswith("FAIL"):
         return f"sim: {verdict}"
-    tally.sim_equal += verdict == "equal"
+    failure = leg_flatten(args.odin3, source, work, after if verdict == "ok" else None)
+    if failure is not None:
+        return f"flatten: {failure}"
+    if verdict == "ok" and not (after.exists() and before.read_text() == after.read_text()):
+        return "sim: FAIL: the simulation differs after flatten"
+    tally.sim_equal += verdict == "ok"
     tally.sim_skipped += verdict == "skipped"
     if args.yosys:
         # Yosys cannot prove a design equal when it holds kept instances (two renamed black boxes)

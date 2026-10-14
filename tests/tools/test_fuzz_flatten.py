@@ -19,7 +19,8 @@ import fuzz_flatten as ff
 
 class FakeOdin:
     """Stands in for ``fc.run_capped``: scripted by ``mode`` ("good", "break-sim",
-    "break-flatten", "skip-sim")."""
+    "break-flatten", "skip-sim", "skip-tristate", "before-other", "after-cannot-sim"). A script
+    with ``flatten`` and ``sim`` is the "after" run, one with only ``sim`` the "before" run."""
 
     def __init__(self, mode: str) -> None:
         self.mode = mode
@@ -28,16 +29,23 @@ class FakeOdin:
     def __call__(self, argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
         script = argv[argv.index("-p") + 1]
         self.calls.append(script)
-        code, text = 0, ""
-        if "sim " in script:
-            files = re.findall(r"sim \d+ \d+ ([^;\s]+)", script)
-            if self.mode == "skip-sim":
-                return subprocess.CompletedProcess(argv, 1, "", "error: cannot simulate `$dff`")
-            Path(files[0]).write_text("v1\n")
-            Path(files[1]).write_text("v2\n" if self.mode == "break-sim" else "v1\n")
-        elif self.mode == "break-flatten":
-            code, text = 1, "error: flatten: boom"
-        return subprocess.CompletedProcess(argv, code, "", text)
+        later = "flatten" in script
+        if self.mode == "break-flatten" and later:
+            return subprocess.CompletedProcess(argv, 1, "", "error: flatten: boom")
+        if "sim " not in script:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        failing = {
+            "skip-sim": (not later, "error: cannot simulate `$dff` (node `q`): word flip-flop"),
+            "skip-tristate": (not later, "error: cannot simulate `$tribuf` (node `t`): tristate"),
+            "before-other": (not later, "error: cannot simulate: combinational loop through net x"),
+            "after-cannot-sim": (later, "error: cannot simulate `$dff` (node `q`): word flip-flop"),
+        }.get(self.mode)
+        if failing is not None and failing[0]:
+            return subprocess.CompletedProcess(argv, 1, "", failing[1])
+        out = re.findall(r"sim \d+ \d+ ([^;\s]+)", script)[0]
+        text = "v2\n" if self.mode == "break-sim" and later else "v1\n"
+        Path(out).write_text(text)
+        return subprocess.CompletedProcess(argv, 0, "", "")
 
 
 def args(cases: int, repro: Path) -> argparse.Namespace:
@@ -58,7 +66,7 @@ class FuzzTests(unittest.TestCase):
         tally, fake, repro = self._run("good")
         self.assertEqual((tally.cases, tally.failures, tally.sim_equal), (3, [], 3))
         self.assertFalse(repro.exists())
-        self.assertEqual(len(fake.calls), 6)  # two Odin III runs per case
+        self.assertEqual(len(fake.calls), 6)  # two Odin III runs per case (before; flatten + after)
 
     def test_planted_sim_bug_is_reported_and_written(self) -> None:
         tally, _, repro = self._run("break-sim", 2)
@@ -74,11 +82,27 @@ class FuzzTests(unittest.TestCase):
         tally, fake, _ = self._run("break-flatten", 1)
         self.assertEqual(len(tally.failures), 1)
         self.assertIn("flatten: exit 1", tally.failures[0])
-        self.assertEqual(len(fake.calls), 1)  # the sim leg did not run
+        self.assertEqual(len(fake.calls), 2)  # the sim of the unflattened design, then flatten
 
     def test_unsimulable_design_is_skipped_not_passed(self) -> None:
         tally, _, _ = self._run("skip-sim")
         self.assertEqual((tally.sim_equal, tally.sim_skipped, tally.failures), (0, 3, []))
+
+    def test_tristate_design_is_skipped_too(self) -> None:
+        tally, _, _ = self._run("skip-tristate")
+        self.assertEqual((tally.sim_equal, tally.sim_skipped, tally.failures), (0, 3, []))
+
+    def test_unknown_failure_before_flatten_is_a_failure(self) -> None:
+        tally, _, _ = self._run("before-other", 2)
+        self.assertEqual((tally.sim_skipped, len(tally.failures)), (0, 2))
+        self.assertIn("failed to simulate", tally.failures[0])
+
+    def test_cannot_simulate_after_flatten_is_a_failure_not_a_skip(self) -> None:
+        # The unflattened design simulated; flatten's output must too (review I4).
+        tally, _, repro = self._run("after-cannot-sim", 2)
+        self.assertEqual((tally.sim_skipped, tally.sim_equal, len(tally.failures)), (0, 0, 2))
+        self.assertIn("cannot simulate", tally.failures[0])
+        self.assertEqual(len(list(repro.glob("seed*.v"))), 2)
 
     def test_main_exit_codes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, mock.patch("builtins.print"):
