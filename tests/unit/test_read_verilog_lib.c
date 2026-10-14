@@ -264,6 +264,20 @@ static void test_unit_flag_nolatches_recorded(void) {
     TEST_ASSERT_FALSE(module_has_attr(elab, "odin3_lib_nomem2reg"));
 }
 
+/* --vtr-compat on a --lib read is carried by its units like --nolatches (Peter 2026-10-13). */
+static void test_unit_flag_vtr_compat_recorded(void) {
+    et_src srcs[] = {{"p.vl", k_sub}, {"t.v", k_top}};
+    setup_files(srcs, 2, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_set_keep_ast(rs.design, ODIN3_KEEP_AST_ELABORATED));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_verilog", "--lib --vtr-compat p.vl"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "t.v"), et_log(&rs));
+    const odin3_ast *elab = kept_elaborated();
+    TEST_ASSERT_NOT_NULL(elab);
+    TEST_ASSERT_TRUE(module_has_attr(elab, "odin3_lib_vtr_compat"));
+    TEST_ASSERT_FALSE(module_has_attr(elab, "odin3_lib_nolatches"));
+}
+
 /* --- precedence over a techlib hard cell --------------------------------------------------- */
 
 #define TECHLIB "read_techlib " ODIN3_LIB_DIR "/vtr.o3lib"
@@ -376,6 +390,7 @@ static void test_lib_unit_sees_macro_of_unitless_lib_file(void) {
     X(test_unit_flag_not_inherited_from_design_read)                                               \
     X(test_design_flag_applies_to_design_units)                                                    \
     X(test_unit_flag_nolatches_recorded)                                                           \
+    X(test_unit_flag_vtr_compat_recorded)                                                          \
     X(test_lib_unit_over_hard_cell_when_params_do_not_fit)                                         \
     X(test_hard_cell_kept_when_params_fit)                                                         \
     X(test_named_parameter_not_on_hard_cell)                                                       \

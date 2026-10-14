@@ -4,7 +4,8 @@ Usage::
 
     elab-equiv --odin3 O --yosys Y --equiv-check E [--top T] [--mem-cap BYTES] [--keep DIR]
                [--allow-version V] [--a-only] [--unmap-enables] [--yosys-tribuf] [--techlib T]
-               [--lib FILE]... [--lib-nomem2reg] [--pass elab|proc] [--no-trio] [--async2sync] FILE
+               [--vtr-compat] [--lib FILE]... [--lib-nomem2reg] [--pass elab|proc] [--no-trio]
+               [--async2sync] FILE
 
 Side A is Odin III's elaboration and side B Yosys's own, both through one Yosys back end, so x is
 resolved by the same ``opt`` on both and a difference is 2D's (or a documented divergence):
@@ -18,6 +19,10 @@ resolved by the same ``opt`` on both and a difference is 2D's (or a documented d
   Both sides are always ``--nolatches``: equiv-check cannot model latches (PHASE0 #7).
 - ``Y -p "read_rtlil a.il; write_rtlil b.il"`` must exit 0 (write_rtlil's text is valid RTLIL).
 - Then ``E a.blif b.blif`` (tools/equiv-check/equiv-check).
+
+``--vtr-compat`` adds ``--vtr-compat`` to every side-A ``read_verilog`` (the VTR flow's setting,
+2D spec EL-40): a non-constant ``initial x = e;`` is ``assign x = e;`` as in Yosys and Parmys, so
+it is compared instead of being x.
 
 ``--unmap-enables`` keeps enables out of the flip-flops on both sides (``opt -nodffe -nosdff``
 and a ``dffunmap`` before ``techmap``): ``memory_map`` and ``opt_dff`` make enabled flip-flops,
@@ -166,6 +171,7 @@ class Options:
     pass_name: str = "elab"
     async2sync: bool = False
     no_trio: bool = False
+    vtr_compat: bool = False
 
 
 def wants_directive(source: Path, flag: str) -> bool:
@@ -255,9 +261,11 @@ class Bridge:
     def side_a(self) -> None:
         opts = self.opts
         flags = "--nolatches --auto-blackbox" if wants_auto_blackbox(opts.source) else "--nolatches"
+        flags += " --vtr-compat" if opts.vtr_compat else ""
         lib = f"read_techlib {opts.techlib}; " if opts.techlib else ""
         units = "--lib --nomem2reg" if opts.lib_nomem2reg else "--lib"
-        lib += "".join(f"read_verilog {units} --nolatches {path}; " for path in opts.libs)
+        units_flags = f"{units} --nolatches" + (" --vtr-compat" if opts.vtr_compat else "")
+        lib += "".join(f"read_verilog {units_flags} {path}; " for path in opts.libs)
         if opts.pass_name == "proc":
             trio = "" if opts.no_trio else PRE_PROC_TRIO
             script = f"{lib}read_verilog {flags} {opts.source}; {trio}proc; write_rtlil a.il"
@@ -381,6 +389,9 @@ def parse(argv: Sequence[str] | None) -> Options:
     ap.add_argument("--async2sync", action="store_true",
                     help="async2sync before techmap on both sides (equiv-check reads no "
                          "asynchronous flip-flop)")
+    ap.add_argument("--vtr-compat", action="store_true",
+                    help="side A reads with --vtr-compat (the VTR flow's setting: a non-constant "
+                         "initial is an assign, as in Yosys/Parmys)")
     ap.add_argument("--pass", dest="pass_name", choices=("elab", "proc"), default="elab",
                     help="side A stops after elaboration (elab, default) or after proc")
     ap.add_argument("--no-trio", action="store_true",
@@ -394,7 +405,7 @@ def parse(argv: Sequence[str] | None) -> Options:
         techlib=str(Path(args.techlib).resolve()) if args.techlib else None,
         yosys_tribuf=args.yosys_tribuf, libs=tuple(str(Path(lib).resolve()) for lib in args.lib),
         lib_nomem2reg=args.lib_nomem2reg, pass_name=args.pass_name, async2sync=args.async2sync,
-        no_trio=args.no_trio)
+        no_trio=args.no_trio, vtr_compat=args.vtr_compat)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

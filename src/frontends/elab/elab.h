@@ -67,7 +67,9 @@ typedef struct odin3_elab_opts {
     bool nolatches;     /* Yosys -nolatches: unassigned paths of combinational blocks are x */
     bool nomem2reg;     /* never replace a memory by registers except where forced (EL-27) */
     bool auto_blackbox; /* an undefined module becomes a black box, not unresolved_module */
-    double stage1_ms;   /* stage 1's time, for stage 2's summary line (odin3_elab_run fills it) */
+    bool vtr_compat;  /* VTR/Parmys compatibility: `initial x = <non-constant>` is `assign x = ...`
+                         (Peter 2026-10-13; EL-40) */
+    double stage1_ms; /* stage 1's time, for stage 2's summary line (odin3_elab_run fills it) */
     uint64_t gen_iters; /* generate-loop iterations stage 1 unrolled: stage 2's loops count on from
                            it against the run's total cap (point (k); odin3_elab_run fills it) */
     uint64_t *gen_iters_out; /* stage 1 writes its count here when set (odin3_elab_run's) */

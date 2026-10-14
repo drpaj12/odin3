@@ -5,6 +5,7 @@ Usage::
     elab-sweep --odin3 O [--equiv --yosys Y --equiv-check E [--pass proc] | --proc-diff --yosys Y
                | --opt-equiv --yosys Y | --opt-diff --yosys Y [--opt-arg ARG]... | --opt-run
                | --bench B [--bench-report P]] [--trio auto|on|off] [--also-no-trio] [--nolatches]
+               [--vtr-compat]
                [--expect-fail F]...
                [--jobs J] [--mem-cap C] [--cap-for SUFFIX=C]... [--tops F] [--golden-root D]
                [--root R] [--xl] [--skip-over BYTES] [--partial] <dir or file>...
@@ -28,6 +29,8 @@ runs it alone). A child killed by its cap is reported ``out of memory (cap 4G)``
   ``--bench-report P`` then prints the targets of profile ``P`` from those lines
   (``bench_report.py``: ``elab`` is spec §15's table, ``proc`` is 2E's spec §19) and fails the run
   when one is MISSED.
+- ``--vtr-compat`` (with ``--equiv``): ``elab-equiv --vtr-compat`` (a non-constant ``initial x =
+  e;`` is ``assign x = e;``, as in Yosys 0.55 and Parmys; the micros are the VTR flow's).
 - ``--proc-diff`` (needs ``--yosys``; 2E Task 12): ``proc-diff`` on the file (Odin III's ``proc``
   against Yosys 0.55's on the same RTLIL; ``--top`` as in the default mode, ``--techlib`` passed
   on, ``--nolatches`` optional). With ``--equiv``, ``--pass proc`` makes the bridge end after
@@ -355,6 +358,7 @@ class Config:
     no_trio: bool = False
     also_no_trio: bool = False
     nolatches: bool = False
+    vtr_compat: bool = False  # --equiv: elab-equiv --vtr-compat
 
     def cap_of(self, item: Item) -> int:
         for suffix, cap in self.caps.items():
@@ -515,7 +519,8 @@ def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
             "--equiv-check", cfg.equiv_check, "--mem-cap", str(cap), "--unmap-enables",
             *(["--top", top] if top else []), *(["--techlib", cfg.techlib] if cfg.techlib else []),
             *[arg for lib in cfg.libs for arg in ("--lib", lib)],
-            *(["--lib-nomem2reg"] if cfg.libs else []), *proc_flags(cfg), str(item.path)]
+            *(["--lib-nomem2reg"] if cfg.libs else []),
+            *(["--vtr-compat"] if cfg.vtr_compat else []), *proc_flags(cfg), str(item.path)]
     try:  # elab-equiv caps each of its own children
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
                               timeout=TIMEOUT_S, check=False, pass_fds=lock_fds())
@@ -712,6 +717,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                     help="proc modes: the input after the pre-proc passes (auto: once opt exists)")
     ap.add_argument("--also-no-trio", action="store_true",
                     help="--proc-diff: run each file again without the pre-proc passes")
+    ap.add_argument("--vtr-compat", action="store_true",
+                    help="--equiv: elab-equiv --vtr-compat (the VTR flow's setting)")
     ap.add_argument("--nolatches", action="store_true",
                     help="--proc-diff: read_verilog --nolatches")
     ap.add_argument("--expect-fail", type=Path, action="append", default=[],
@@ -785,7 +792,7 @@ def build_config(args: argparse.Namespace) -> Config:
         else "opt-run" if args.opt_run else "",
         opt_args=tuple(args.opt_arg), pass_proc=args.stop_pass == "proc",
         no_trio=args.trio == "off", also_no_trio=bool(args.also_no_trio),
-        nolatches=bool(args.nolatches))
+        nolatches=bool(args.nolatches), vtr_compat=bool(args.vtr_compat))
 
 
 def _abs(tool: str | None) -> str | None:

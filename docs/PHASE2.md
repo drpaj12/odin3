@@ -1069,3 +1069,32 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       2. lenet.v's Yosys-side runs exist only as `sweep-xl` jobs on an idle machine (rulings C1 and
          I10 applied).
       3. The IR-6 amendment for a compact at the end of `opt` (point (h)) is withdrawn (#19).
+
+24. **Peter 2026-10-13: initial non-constant value — Parmys behaviour in VTR mode, ignored with
+    warning otherwise.** `initial x = <non-constant expr>;` (the micro
+    `keywords/initial/initial_multiple_statements.v`, `initial out2 = in;`, which the 2H exit
+    harness reported as "equivalent outside x-cones" against its Parmys golden): when the run
+    targets the VTR flow it is read as `assign x = <expr>;`, with the located warning "initial
+    value of 'x' is not constant: treated as a continuous assign (VTR/Parmys compatibility)";
+    otherwise (the general case) the value is ignored with the existing warning and `x` stays x.
+    Agent defaults he may override (2D spec v4.30, EL-3, EL-40 / §8.8, §9.2, §17 #85):
+    - **The switch** is `read_verilog --vtr-compat`, an option beside `--nolatches`. No existing
+      project or pass field says "targets VTR" (`flow` is a stored script path, `arch` a tech
+      library or XML, `write_blif --vtr` only the output dialect), so the VTR flow's scripts set
+      it: `tools/opt-check/sp-splice`, `elab-equiv --vtr-compat` / `elab-sweep --equiv
+      --vtr-compat` (the micro sweep), and the odin3 legs of `tools/vtr-qor`. A `--lib` read
+      carries it to its units (`odin3_lib_vtr_compat`). `tools/exit-check` (branch
+      feat/2H-splice) is not on main; when it lands, whatever runs its odin3 side must set the
+      option (sp-splice already does). The ABI `odin3_elab_options` is unchanged.
+    - **The assign applies only when `x` has no other driver.** A plain `=` or `<=` assignment (an
+      optional delay is ignored) to a variable or a constant select of one, whose bits no `always`
+      block assigns and no continuous assignment, instance, gate or input port drives. Otherwise
+      the old ignore stays, with a warning that says why ("... is also assigned in an always
+      block (VTR/Parmys compatibility does not apply)"). Yosys 0.55 (and so Parmys) stops with
+      `Failed to get a constant init value` on the always-assigned case; Odin III warns and goes
+      on. `if`/loop statements, concatenation and memory-word targets, and variable
+      initialisers (`reg r = in;`) keep the ignore.
+    - Evidence: `elab-equiv --techlib lib/vtr.o3lib` on the micro is NOT equivalent without the
+      option (`out2`: 0 against Yosys's `in`) and equivalent with it; the Phase 2 script's BLIF
+      with the option is equivalent (`equiv-check`) to the Parmys golden. `initial_multiple_blocks.v`
+      (`initial out1 = in1;` and `out2 = in2;`) is the same case and is fixed the same way.

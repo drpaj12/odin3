@@ -339,8 +339,8 @@ class PlanTest(PlanTestBase):
             p, leg="O", odin3_build=qor_sched.odin3_build_id(self.odin3),
             lib_sha256=sha((self.repo / "lib/vtr.o3lib").read_bytes()).hexdigest(),
             abc_script_sha256=sha((self.repo / "lib/abc/vtr.abc").read_bytes()).hexdigest(),
-            script="read_techlib $LIB; read_verilog --nolatches $IN; proc; opt; flatten; "
-            "wreduce; hardmap; lower; abc --lut 6; write_blif --vtr --lut-k 6 $OUT",
+            script="read_techlib $LIB; read_verilog --nolatches --vtr-compat $IN; proc; opt; "
+            "flatten; wreduce; hardmap; lower; abc --lut 6; write_blif --vtr --lut-k 6 $OUT",
         )
         pprime = dataclasses.replace(
             o, leg="Pprime", source_sha256=g_sha,
