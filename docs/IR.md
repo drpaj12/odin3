@@ -486,7 +486,7 @@ once, via `util/idindex`). A record holds:
 specialization's IR name), then each generate or named-block scope with its loop indices
 (`top/g_stage[2]`, `sub$W=8/genblk1`). An IR module is shared by every instance of its
 specialization, so the instance path is not a property of its objects; `flatten` adds it through its
-`DERIVED` records. The example `top/u1/gen[3]` above is such a flattened path. No field changes.
+`DERIVED` records (`odin3_prov_derive_hier`, 3A). The example `top/u1/gen[3]` above is such a flattened path. No field changes.
 
 **Why `run` and `op`:** without them, 100 `$add`s elaborated from one line of a `generate` loop
 would share a record, and the 5,000 gates their lowering produces would be indistinguishable.
