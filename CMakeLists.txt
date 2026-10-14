@@ -139,6 +139,14 @@ add_library(odin3_core OBJECT
     src/passes/abc/script.c
     src/passes/abc/engine.c
     src/passes/abc/child.c
+    src/passes/abc/args.c
+    src/passes/abc/region.c
+    src/passes/abc/result.c
+    src/passes/abc/xblif.c
+    src/passes/abc/xblif_read.c
+    src/passes/abc/exchange.c
+    src/passes/abc/splice.c
+    src/passes/abc/run.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
