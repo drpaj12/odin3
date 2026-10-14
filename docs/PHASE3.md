@@ -748,6 +748,65 @@ then the options considered.
     carries `hardmap` = `<kind>:<role>`, and the source is reached through the DERIVED provenance
     record. The other defaults (a, c–i) follow #32; Task 7 logs them.
 
+34. **3A `flatten` implemented; agent defaults and evidence** (branch `feat/3A-flatten`; spec
+    `docs/specs/2026-10-14-3A-flatten-design.md`, plan `docs/plans/2026-10-14-3A-flatten-plan.md`).
+    Peter's answers (1 yes, 2 leave unused modules, 3 yes, 4 yes) are #30. Agent defaults, all
+    reversible: caps 2^26 nodes, 2^28 pins and nets, 2^26 wires, 2^16 roots; FIFO worklist, roots
+    expanded parents first (the roots list is in module-ID order); a constant net of a child maps to
+    the root's shared constant net; a join that leaves two non-bus drivers, or a constant and a
+    driver, is an error at `flatten`; the failure state after the first mutation is "partially
+    flattened" (weaker than 2F's OP-13); `--separator` (default `.`), no `--no-prov`; `$c<ID>` labels
+    for an unnamed instance; unnamed objects stay unnamed; no net attributes; `blif_name` is not
+    copied; the `_N` uniqueness rule is per kind. Writers (checked on the fixtures): `write_verilog`
+    prints every alias as `assign <alias> = <net>;` with the dotted names, `write_rtlil` prints
+    `connect` lines, `write_blif` prints the net's primary name and `.cname` with the dotted node
+    name (an alias is not a second BLIF name); no writer drops or duplicates a connection (the
+    flat Verilog reads back and simulates equal, `flatten_sim_roundtrip`). Script text: the exit
+    script now reads `proc; opt; flatten; opt -full` and, with 3G, `opt; wreduce; opt_clean;
+    opt -full` before `flatten` (exit item 3); the 3H spec and plan and `tools/vtr-qor/qor_legs.py`
+    still hold `proc; opt; flatten; wreduce; hardmap` (merged code with tests) and are for the 3H lane
+    to change when 3G lands. Evidence: unit tests (spec 14.1), `flatten_golden` (expected
+    `write_rtlil`/`write_blif`/`write_verilog` text of the flat top module, two runs
+    byte-identical), `flatten-diff` against Yosys 0.55 on the fixtures (names, widths, cell types by
+    module, MEMIDs, `equiv_make` proof; `tests/flatten/diff_expect.txt`), `flatten-sim` before = after
+    (also through the written Verilog), `fuzz_flatten` on `verilog-gen --flatten` (2,000 cases in
+    CTest, no failure; 300 against Yosys in CTest; a 300-case run with the equivalence proof found
+    none, two proofs timed out and are counted unproven, not passed). The estimate counts only the
+    objects `flatten` adds (the roots' own are not charged) with measured constants (448 bytes per
+    node, 24 per pin, 8 per net, 16 per wire, 96 per record, 32 per name; `graph.c`), 1.16x to 2.2x
+    the bytes reserved on the 19 and never below. The sweep (`flatten-vtr`: `read_verilog
+    --vtr-compat --nolatches; proc; opt; flatten; check`, Release build, smallest source first, one
+    process at a time, `tools/heavy-run`, 2026-10-14; wall and peak RSS from GNU time; records and
+    bytes/object are what the pass added; estimate/actual is the pre-flight estimate over the bytes
+    reserved; yosys is `flatten-diff` without the proof) gave `kept` 0 on all 19, the flat top's
+    count of every cell type equal to the sum over the instance tree, and no difference from Yosys in
+    wire or cell names or widths; `expected` marks the cell-type counts (and MEMIDs) that differ
+    before `flatten` already: `$pos` kept by Yosys and folded by 2D (boundtop, stereovision1), and
+    Yosys `proc_rom` ($memrd_v2/$meminit instead of 2E's $pmux; stereovision2, or1200, bgm, LU8PEEng,
+    LU32PEEng); `tests/flatten/vtr_expect.txt` lists them with reasons.
+
+    | design | wall s | peak MiB | instances | kept | renamed | flat nodes | flat nets | flat wires | records | bytes/object | estimate/actual | yosys | ok |
+    |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+    | diffeq1 | 0.00 | 11 | 0 | 0 | 0 | 42 | 845 | 15 | 0 | - | - | same | yes |
+    | diffeq2 | 0.00 | 11 | 0 | 0 | 0 | 22 | 453 | 8 | 0 | - | - | same | yes |
+    | ch_intrinsics | 0.00 | 11 | 1 | 0 | 0 | 75 | 567 | 33 | 21 | 79 | 2.22 | same | yes |
+    | stereovision3 | 0.01 | 11 | 0 | 0 | 0 | 216 | 565 | 32 | 0 | - | - | same | yes |
+    | sha | 0.10 | 16 | 0 | 0 | 0 | 256 | 3295 | 48 | 0 | - | - | same | yes |
+    | mkPktMerge | 0.01 | 12 | 6 | 0 | 0 | 299 | 1774 | 196 | 411 | 123 | 1.41 | same | yes |
+    | blob_merge | 0.06 | 15 | 2 | 0 | 0 | 1781 | 8119 | 161 | 126 | 154 | 1.33 | same | yes |
+    | stereovision2 | 0.06 | 21 | 145 | 0 | 0 | 2350 | 46387 | 1969 | 3888 | 122 | 1.38 | expected | yes |
+    | bgm | 0.14 | 39 | 201 | 0 | 0 | 18648 | 52638 | 6303 | 23295 | 261 | 1.16 | expected | yes |
+    | boundtop | 0.08 | 18 | 15 | 0 | 0 | 1350 | 8642 | 710 | 1583 | 147 | 1.43 | expected | yes |
+    | raygentop | 0.08 | 20 | 15 | 0 | 0 | 791 | 6509 | 534 | 971 | 136 | 1.44 | same | yes |
+    | stereovision1 | 0.07 | 19 | 232 | 0 | 0 | 2732 | 26297 | 3241 | 5547 | 127 | 1.34 | expected | yes |
+    | stereovision0 | 0.08 | 19 | 297 | 0 | 0 | 2416 | 21511 | 3389 | 5052 | 132 | 1.34 | same | yes |
+    | or1200 | 0.06 | 16 | 15 | 0 | 0 | 954 | 7408 | 549 | 1177 | 147 | 1.38 | expected | yes |
+    | mkSMAdapter4B | 0.05 | 14 | 10 | 0 | 0 | 925 | 4030 | 807 | 417 | 170 | 1.30 | same | yes |
+    | LU8PEEng | 0.19 | 35 | 119 | 0 | 0 | 4268 | 51775 | 2116 | 5044 | 158 | 1.25 | expected | yes |
+    | LU32PEEng | 0.58 | 75 | 431 | 0 | 0 | 13770 | 181851 | 6484 | 15608 | 160 | 1.24 | expected | yes |
+    | mkDelayWorker32B | 0.10 | 19 | 18 | 0 | 0 | 1350 | 12564 | 1157 | 961 | 92 | 1.98 | same | yes |
+    | mcml | 1.54 | 117 | 225 | 0 | 0 | 5368 | 172262 | 10484 | 15508 | 108 | 1.32 | same | yes |
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this
