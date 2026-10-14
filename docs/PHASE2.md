@@ -747,6 +747,19 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       never listed as expected (Task 26's rule), so the plan's candidate `out of memory (cap 8G)`
       entry for `koios/lenet.v` is the `xl` run class in `vtr_equiv_expect_fail.txt` instead: the
       `elab_equiv_vtr_xl` run reports the Yosys side's peak RSS or its cap outcome.
+      **2H amendment (agent default, Peter approved 2026-10-14):** the rule stands for odin3 and Yosys
+      side A (a cap kill, signal or timeout there is hard, never listed). Three outcomes that are the
+      oracle's or the checker's size, not odin3's, are `unproven` (`elab-equiv` exit 4) and listable
+      with a needle: Yosys side B killed by its cap (`unproven: Yosys side B exceeded its memory
+      cap (4G)`), equiv-check killed by its cap (`unproven: equiv-check exceeded its memory
+      cap (4G)`, keyed by call site like side B) and `elab-equiv --budget` running out (`elab-sweep --equiv-budget 1800`: the
+      Yosys and equiv-check wall time of one file, odin3's excluded). `micro_equiv_expect_fail.txt`
+      lists `full/stereovision0`, `large/LU32PEEng`, `LU64PEEng` (side B), `large/arm_core`
+      (equiv-check cap, ~1000 s at 4G and 5G) and `cf_fir_3_8_8`, `stereovision2`, `bgm`, `cf_fft_1024_16` (ABC dsec 600 s) with
+      the measured evidence; `large/mkDelayWorker32B` runs at a 6G cap (`--cap-for`) and ends at
+      the `dual_port_ram` pairing limit of its siblings.
+      A host OOM-kill (or manual kill) of side B is indistinguishable from a cap kill: SIGKILL is
+      the only signal `elab-equiv` sees, so either reads `exceeded its memory cap`.
     - **Heavy runs** (controller, Release build, lanes idle; `ODIN3_HEAVY_OK=1`):
       ```
       tools/build-locked --preset release -j6

@@ -33,6 +33,11 @@ argv = sys.argv[1:]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(["odin3", *argv, os.getcwd()]) + "\\n")
 rc = int(os.environ.get("FAKE_ODIN3_RC", "0"))
+if os.environ.get("FAKE_ODIN3_SIGNAL"):
+    os.kill(os.getpid(), int(os.environ["FAKE_ODIN3_SIGNAL"]))
+if os.environ.get("FAKE_ODIN3_SLEEP"):
+    import time
+    time.sleep(float(os.environ["FAKE_ODIN3_SLEEP"]))
 if rc:
     print("odin3: error: no", file=sys.stderr)
     sys.exit(rc)
@@ -53,6 +58,9 @@ if argv == ["-V"]:
     print(os.environ.get("FAKE_YOSYS_VERSION", "{oracle}"))
     sys.exit(0)
 script = argv[argv.index("-p") + 1]
+if os.environ.get("FAKE_YOSYS_SLEEP_ON", "@never@") in script:
+    import time
+    time.sleep(float(os.environ["FAKE_YOSYS_SLEEP"]))
 sig = os.environ.get("FAKE_YOSYS_SIGNAL")
 if sig and os.environ.get("FAKE_YOSYS_SIGNAL_ON", "") in script:
     os.kill(os.getpid(), int(sig))
@@ -74,6 +82,8 @@ import json, os, sys
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(["equiv-check", *sys.argv[1:], os.getcwd()]) + "\\n")
 rc = os.environ.get("FAKE_EQUIV_RC", "0")
+if os.environ.get("FAKE_EQUIV_SIGNAL"):
+    os.kill(os.getpid(), int(os.environ["FAKE_EQUIV_SIGNAL"]))
 if rc == "1" and not os.environ.get("FAKE_EQUIV_NO_VERDICT"):
     print("equiv-check: NOT equivalent (abc cec)")
 else:
@@ -349,10 +359,69 @@ class BridgeTest(unittest.TestCase):
     def test_a_child_killed_by_its_cap_is_out_of_memory(self) -> None:
         code, _, err = self.run_tool("--mem-cap", str(4 * GIB),
                                      extra={"FAKE_YOSYS_SIGNAL": "9",
-                                            "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"})
+                                            "FAKE_YOSYS_SIGNAL_ON": "read_rtlil a.il; hierarchy"})
         self.assertEqual(code, 2)
         self.assertIn("out of memory (cap 4G)", err)
         self.assertEqual(elab_equiv.format_cap(512 << 20), "512M")
+
+    def test_yosys_side_b_killed_by_its_cap_is_unproven_not_an_error(self) -> None:
+        """2H: side B is the oracle reading the source; its size limit is exit 4 (unproven), spelt
+        so that the sweep's `out of memory` mark (a hard failure) is not in it. Only side B: a
+        side A kill (odin3's own netlist) stays an exit 2 error, above."""
+        code, out, err = self.run_tool("--mem-cap", str(4 * GIB),
+                                       extra={"FAKE_YOSYS_SIGNAL": "9",
+                                              "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"})
+        self.assertEqual(code, 4, err)
+        self.assertIn("elab-equiv: unproven: Yosys side B exceeded its memory cap (4G)", out)
+        self.assertNotIn("out of memory", out + err)
+        self.assertNotIn("equiv-check", self.names())
+        # odin3 rejects the file and side B is killed: the rejection stands (exit 2)
+        code, _, err = self.run_tool(extra={"FAKE_ODIN3_RC": "1", "FAKE_YOSYS_SIGNAL": "9",
+                                            "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"})
+        self.assertEqual(code, 2, err)
+        self.assertIn("odin3 (side A) failed", err)
+
+    def test_equiv_check_killed_by_its_cap_is_unproven_but_odin3_and_side_a_stay_hard(self) -> None:
+        """2H: the checker's size limit is exit 4 (listable); odin3 and Yosys side A stay exit 2."""
+        code, out, err = self.run_tool("--mem-cap", str(4 * GIB), extra={"FAKE_EQUIV_SIGNAL": "9"})
+        self.assertEqual(code, 4, err)
+        self.assertIn("elab-equiv: unproven: equiv-check exceeded its memory cap (4G)", out)
+        self.assertNotIn("out of memory", out + err)
+        code, out, err = self.run_tool("--mem-cap", str(4 * GIB), extra={
+            "FAKE_YOSYS_SIGNAL": "9", "FAKE_YOSYS_SIGNAL_ON": "read_rtlil a.il; hierarchy"})
+        self.assertEqual(code, 2, err)
+        self.assertIn("out of memory (cap 4G)", err)
+        code, _, err = self.run_tool("--mem-cap", str(4 * GIB), extra={"FAKE_ODIN3_SIGNAL": "9"})
+        self.assertEqual(code, 2, err)
+        self.assertIn("out of memory (cap 4G)", err)
+
+    def test_a_budget_that_runs_out_in_yosys_is_unproven(self) -> None:
+        """2H (arm_core): --budget bounds the Yosys and equiv-check runs together; the child still
+        running at the end is killed and the file is exit 4, before equiv-check starts."""
+        slow = {"FAKE_YOSYS_SLEEP": "60", "FAKE_YOSYS_SLEEP_ON": "read_verilog -sv"}
+        started = time.monotonic()
+        code, out, err = self.run_tool("--budget", "1", extra=slow)
+        self.assertEqual(code, 4, err)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertIn("elab-equiv: unproven: budget of 1 s ran out (in Yosys side B)", out)
+        self.assertNotIn("out of memory", out + err)
+        self.assertNotIn("equiv-check", self.names())
+        code, out, err = self.run_tool("--budget", "100", extra={})
+        self.assertEqual(code, 0, out + err)
+
+    def test_a_slow_odin3_does_not_spend_the_budget(self) -> None:
+        """2H fix round: odin3 runs 2 s under a 1.5 s budget; Yosys still has all of it."""
+        code, out, err = self.run_tool("--budget", "1.5", extra={"FAKE_ODIN3_SLEEP": "2"})
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("budget", out + err)
+
+    def test_the_budget_never_applies_to_odin3(self) -> None:
+        """odin3 (side A) is not bounded by it: a slow odin3 is the tool's own failure."""
+        bridge = elab_equiv.Bridge(elab_equiv.Options(
+            odin3="/x/odin3", yosys="y", equiv_check="e", source=self.src, top=None,
+            cap=GIB, keep=None, allow_version=None, a_only=False, budget=0.5))
+        self.assertIsNone(bridge.remaining(["/x/odin3", "-p", "x"], "odin3 (side A)"))
+        self.assertLessEqual(bridge.remaining(["y", "-p", "x"], "Yosys side A") or 0, 0.5)
 
     def test_yosys_failures_are_errors(self) -> None:
         for fail, what in (("read_rtlil a.il; hierarchy", "Yosys side A"),

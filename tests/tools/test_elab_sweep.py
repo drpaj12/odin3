@@ -65,7 +65,10 @@ if "EQOOM" in text:
     print("elab-equiv: error: Yosys (side B) failed: out of memory (cap 4G)\\nequiv-check failed",
           file=sys.stderr)
     sys.exit(2)
-for code in (1, 2, 3, 77):
+if "EQBUDGET" in text:
+    print("elab-equiv: unproven: budget of 1800 s ran out (in Yosys side B)")
+    sys.exit(4)
+for code in (1, 2, 3, 4, 77):
     if f"EQ{code}" in text:
         print(f"elab-equiv: message for exit {code}")
         sys.exit(code)
@@ -531,6 +534,32 @@ class ModeTest(SweepTestCase):
         code, out, _ = self.run_tool(*base, "--expect-fail", listed, str(self.dir / "m"))
         self.assertEqual(code, 0, out)
         self.assertIn("xfail crash.v", out)
+
+    def test_equiv_budget_reaches_the_bridge_and_an_unproven_run_is_listable(self) -> None:
+        """2H (arm_core): elab-equiv exit 4 is a failure an entry can list, and only with its
+        needle; --equiv-budget goes to every bridge run and needs --equiv."""
+        self.write("m/slow.v", "EQBUDGET\n")
+        base = ["--equiv", "--yosys", "Y", "--equiv-check", "E"]
+        code, out, _ = self.run_tool(*base, "--equiv-budget", "1800", str(self.dir / "m"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  slow.v", out)
+        argv = next(c for c in self.calls() if c[-1].endswith("slow.v"))
+        self.assertEqual(argv[argv.index("--budget") + 1], "1800")
+        listed = self.expect("slow.v [budget of 1800 s ran out] unproven\n")
+        code, out, _ = self.run_tool(*base, "--expect-fail", listed, str(self.dir / "m"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("xfail slow.v", out)
+        wrong = self.expect("slow.v [budget of 900 s ran out] unproven\n")
+        code, out, _ = self.run_tool(*base, "--expect-fail", wrong, str(self.dir / "m"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("fails differently from the listing", out)
+        code, _, err = self.run_tool("--equiv-budget", "1", str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("--equiv-budget needs --equiv", err)
+        self.log.write_text("", encoding="utf-8")
+        self.run_tool(*base, str(self.dir / "m"))
+        argv = next(c for c in self.calls() if c[-1].endswith("slow.v"))
+        self.assertNotIn("--budget", argv)
 
     def test_equiv_needs_its_tools_and_excludes_bench(self) -> None:
         self.write("m/a.v")
