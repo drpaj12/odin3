@@ -427,7 +427,8 @@ static void test_user_rc_files_are_not_sourced(void) {
 static void test_child_has_no_core_file_limit(void) {
     char text[PATH_CAP];
     char cmd_path[PATH_CAP];
-    (void)snprintf(text, sizeof text, "!grep -h 'core file' /proc/self/limits > %s/core.txt\n", g_dir);
+    (void)snprintf(text, sizeof text, "!grep -h 'core file' /proc/self/limits > %s/core.txt\n",
+                   g_dir);
     write_text_command_file(text, cmd_path);
     odin3_abc_child_res res;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
@@ -438,7 +439,8 @@ static void test_child_has_no_core_file_limit(void) {
     read_file(core_path, got, sizeof got);
     char soft[PATH_CAP];
     char hard[PATH_CAP];
-    TEST_ASSERT_EQUAL_INT_MESSAGE(2, sscanf(got, "Max core file size %511s %511s", soft, hard), got);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(2, sscanf(got, "Max core file size %511s %511s", soft, hard),
+                                  got);
     TEST_ASSERT_EQUAL_STRING("0", soft);
     TEST_ASSERT_EQUAL_STRING("0", hard);
 }
@@ -465,8 +467,8 @@ static void test_output_cap_kills_a_real_child(void) {
 static void test_failing_command_exits_zero_with_a_diagnostic(void) {
     char text[PATH_CAP];
     char cmd_path[PATH_CAP];
-    (void)snprintf(text, sizeof text, "read_blif %s/nonexistent.blif\nwrite_blif %s/abc0.out.blif\n",
-                   g_dir, g_dir);
+    (void)snprintf(text, sizeof text,
+                   "read_blif %s/nonexistent.blif\nwrite_blif %s/abc0.out.blif\n", g_dir, g_dir);
     write_text_command_file(text, cmd_path);
     odin3_abc_child_res res;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
@@ -477,11 +479,13 @@ static void test_failing_command_exits_zero_with_a_diagnostic(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(g_log, "rror"), g_log);
 }
 
-static const char *const k_scripts[] = {"foreign.sh",  "orphan.sh", "pin_ok.sh", "pin39.sh",
-                                        "pin41.sh",    "pinjunk.sh", "pinupper.sh"};
+static const char *const k_scripts[] = {"foreign.sh", "orphan.sh",  "pin_ok.sh",  "pin39.sh",
+                                        "pin41.sh",   "pinjunk.sh", "pinupper.sh"};
 
 /* A program whose only output is the line (and, for the last case, a following ok one). */
-static void make_pin_script(const char *name, const char *line, char *path, size_t cap) {
+static void make_pin_script(const file_text *script, char *path, size_t cap) {
+    const char *name = script->path;
+    const char *line = script->text;
     (void)snprintf(path, cap, "%s/%s", g_tool_dir, name);
     FILE *file = fopen(path, "w");
     TEST_ASSERT_NOT_NULL(file);
@@ -507,7 +511,7 @@ static void test_pin_line_is_parsed_exactly(void) {
     }
     for (size_t i = 0; i < 5; i++) {
         char script[PATH_CAP];
-        make_pin_script(names[i], lines[i], script, sizeof script);
+        make_pin_script(&(file_text){names[i], lines[i]}, script, sizeof script);
         odin3_abc_child_res res = {0};
         odin3_status st = odin3_abc_child_check_pin(script, &res);
         if (i == 0) {

@@ -25,7 +25,10 @@
 #error "ODIN3_ABC_COMMIT_STR (the pinned ABC commit) comes from CMakeLists.txt"
 #endif
 
-enum { MAX_ARGS = 6 }; /* the core passes 3; a hand-made longer line goes to ABC as it is */
+enum {
+    DECIMAL = 10,
+    MAX_ARGS = 6
+}; /* the core passes 3; a hand-made longer line goes to ABC as it is */
 
 static const char *const k_commit = ODIN3_ABC_COMMIT_STR;
 
@@ -39,7 +42,7 @@ static int is_version_query(int argc, const char *const argv[]) {
 static bool follow_parent(void) {
     (void)prctl(PR_SET_PDEATHSIG, SIGKILL);
     const char *want = getenv("ODIN3_ABC_PARENT");
-    return want == NULL || strtol(want, NULL, 10) == (long)getppid();
+    return want == NULL || strtol(want, NULL, DECIMAL) == (long)getppid();
 }
 
 static void no_core_file(void) {

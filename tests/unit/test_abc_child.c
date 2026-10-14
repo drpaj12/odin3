@@ -297,7 +297,8 @@ static bool line_is(const char *text) {
  * fixture's own report lines. */
 static bool line_allowed(const char *line) {
     static const char *const prefixes[] = {
-        "PATH=", "HOME=", "TMPDIR=", "LC_ALL=", "ODIN3_ABC_PARENT=", "PWD=", "stdin-", "core:", "pwd:", "args:"};
+        "PATH=", "HOME=",  "TMPDIR=", "LC_ALL=", "ODIN3_ABC_PARENT=",
+        "PWD=",  "stdin-", "core:",   "pwd:",    "args:"};
     for (size_t i = 0; i < sizeof prefixes / sizeof prefixes[0]; i++) {
         if (strncmp(line, prefixes[i], strlen(prefixes[i])) == 0) {
             return true;

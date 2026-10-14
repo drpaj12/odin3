@@ -557,7 +557,8 @@ static void scan_pin_line(void *user, const char *line) {
 }
 
 /* The last program that passed (once per process, spec §7.9). It is the path that is remembered,
- * not the file, and it is not synchronised: a replaced file keeps passing, as with the linked path. */
+ * not the file, and it is not synchronised: a replaced file keeps passing, as with the linked path.
+ */
 static char g_pinned_program[ODIN3_ABC_CHILD_PATH_BYTES];
 
 static odin3_status pin_mismatch(const pin_scan *scan, odin3_abc_child_res *res) {
