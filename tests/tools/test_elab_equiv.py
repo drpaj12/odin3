@@ -349,10 +349,27 @@ class BridgeTest(unittest.TestCase):
     def test_a_child_killed_by_its_cap_is_out_of_memory(self) -> None:
         code, _, err = self.run_tool("--mem-cap", str(4 * GIB),
                                      extra={"FAKE_YOSYS_SIGNAL": "9",
-                                            "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"})
+                                            "FAKE_YOSYS_SIGNAL_ON": "read_rtlil a.il; hierarchy"})
         self.assertEqual(code, 2)
         self.assertIn("out of memory (cap 4G)", err)
         self.assertEqual(elab_equiv.format_cap(512 << 20), "512M")
+
+    def test_yosys_side_b_killed_by_its_cap_is_unproven_not_an_error(self) -> None:
+        """2H: side B is the oracle reading the source; its size limit is exit 4 (unproven), spelt
+        so that the sweep's `out of memory` mark (a hard failure) is not in it. Only side B: a
+        side A kill (odin3's own netlist) stays an exit 2 error, above."""
+        code, out, err = self.run_tool("--mem-cap", str(4 * GIB),
+                                       extra={"FAKE_YOSYS_SIGNAL": "9",
+                                              "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"})
+        self.assertEqual(code, 4, err)
+        self.assertIn("elab-equiv: unproven: Yosys side B exceeded its memory cap (4G)", out)
+        self.assertNotIn("out of memory", out + err)
+        self.assertNotIn("equiv-check", self.names())
+        # odin3 rejects the file and side B is killed: the rejection stands (exit 2)
+        code, _, err = self.run_tool(extra={"FAKE_ODIN3_RC": "1", "FAKE_YOSYS_SIGNAL": "9",
+                                            "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"})
+        self.assertEqual(code, 2, err)
+        self.assertIn("odin3 (side A) failed", err)
 
     def test_yosys_failures_are_errors(self) -> None:
         for fail, what in (("read_rtlil a.il; hierarchy", "Yosys side A"),

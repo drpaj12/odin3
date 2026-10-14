@@ -68,8 +68,13 @@ traceback or a ``systemd-run`` that cannot find the program), a bad argument; 3 
 (Task 26: Yosys died of a signal other than the cap's SIGKILL on side B, the Yosys read of the
 source, or while odin3 itself rejected the file: Yosys 0.55 segfaults on recursive instantiation,
 where 2D reports "recursive instantiation of 'top'"; neither a mismatch nor a 2D failure); 77
-skipped (an ASan child and no ``systemd-run``: it cannot be capped). A child killed by its cap is
-reported ``out of memory (cap 4G)``. A driver that gates on "differs" tests for exit 1 only.
+skipped (an ASan child and no ``systemd-run``: it cannot be capped); 4 unproven: Yosys side B, the
+oracle reading the source itself, was killed by its memory cap, so there is no netlist to compare
+(``unproven: Yosys side B exceeded its memory cap (4G)``): the oracle's size limit, no verdict on
+odin3 (2H: LU32PEEng, LU64PEEng, full/stereovision0 at the default 4G cap; the sweep lists them
+with the measured peak). Any other child killed by its cap (odin3, Yosys on side A or the RTLIL
+round trip) is exit 2, ``out of memory (cap 4G)``, and is never listable. A driver that gates on
+"differs" tests for exit 1 only.
 """
 
 from __future__ import annotations
@@ -89,7 +94,8 @@ import memcap
 TOOL = "elab-equiv"
 GIB, MIB = 1 << 30, 1 << 20
 DEFAULT_CAP = 4 * GIB  # plan point (n): 4 GiB per child by default
-EXIT_EQUAL, EXIT_DIFFER, EXIT_ERROR, EXIT_ORACLE_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
+EXIT_EQUAL, EXIT_DIFFER, EXIT_ERROR, EXIT_ORACLE_CRASH = 0, 1, 2, 3
+EXIT_UNPROVEN, EXIT_SKIP = 4, 77
 SIGKILL = 9  # how a cgroup's MemoryMax ends a child
 CRASH_SIGNALS = (4, 6, 7, 8, 11)  # SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV
 SHELL_SIGNAL = 128  # a shell reports a signal as 128 + n
@@ -124,6 +130,10 @@ _ORACLE_RE = re.compile(r"\bYosys 0\.55(?:[^0-9]|$)")
 
 class EquivError(Exception):
     """A usage error or a failing child (exit code 2)."""
+
+
+class OracleTooBig(EquivError):
+    """Yosys side B hit the memory cap (exit code 4, unproven): the oracle's size limit."""
 
 
 class OracleCrash(Exception):
@@ -251,6 +261,8 @@ class Bridge:
         if oracle and crashed(code):
             raise OracleCrash(f"{what} crashed (signal {signal_of(code)})")
         if killed_by_cap(code):
+            if oracle:  # side B is the oracle reading the source: its size limit, not odin3's
+                raise OracleTooBig(f"{what} exceeded its memory cap ({format_cap(self.opts.cap)})")
             raise EquivError(f"{what} failed: out of memory (cap {format_cap(self.opts.cap)})")
         raise EquivError(f"{what} failed (exit {code}):\n"
                          f"{tail((done.stdout or '') + (done.stderr or ''))}")
@@ -422,6 +434,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OracleCrash as exc:
         print(f"{TOOL}: oracle crash: {exc}")
         return EXIT_ORACLE_CRASH
+    except OracleTooBig as exc:
+        print(f"{TOOL}: unproven: {exc}")
+        return EXIT_UNPROVEN
     except EquivError as exc:
         print(f"{TOOL}: error: {exc}", file=sys.stderr)
         return EXIT_ERROR

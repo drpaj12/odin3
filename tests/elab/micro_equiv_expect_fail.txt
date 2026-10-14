@@ -73,3 +73,10 @@ preprocessor/default_net.v [Unsupported default nettype: tri] Yosys 0.55 side B 
 keywords/integer/integer_outside.v [Incompatible re-declaration of wire] Yosys 0.55 side B rejects the non-ANSI `output integer c; integer c;` re-declaration (coverage row M3)
 keywords/macromodule/macromodules_modules.v [syntax error, unexpected TOK_ID] Yosys 0.55 side B rejects `macromodule` (as operators/macromudule_test.v, coverage row M8); Odin III elaborates it as a module
 keywords/macromodule/multiple_macromodules.v [syntax error, unexpected TOK_ID] Yosys 0.55 side B rejects `macromodule` (as operators/macromudule_test.v, coverage row M8); Odin III elaborates it as a module
+# --- 2H: Yosys side B is too big for the sweep's 4G cap (elab-equiv exit 4, unproven) ---
+# Side B is the oracle reading the source itself, so a cap kill there is the oracle's size limit and
+# says nothing about odin3: elab-equiv reports `unproven: Yosys side B exceeded its memory cap (4G)`
+# (exit 4), which an entry may list; a cap kill of odin3 or of side A stays a hard failure that is
+# never listed. The needle pins the 4G cap, so a changed cap makes the entry fail until it is
+# re-measured. Measured with the sweep's own Yosys script under `prlimit --as=6 GiB`.
+full/stereovision0.v [Yosys side B exceeded its memory cap (4G)] size limit of the oracle: Yosys 0.55 side B (the sweep's script) aborts with std::bad_alloc after 55 s at 5.68 GB RSS under a 6 GiB limit, so it needs more than 6 GiB; no netlist, no verdict
