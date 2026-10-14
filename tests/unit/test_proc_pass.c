@@ -544,7 +544,8 @@ static void test_budget_e6(void) {
     char errs[4][LOG_TEXT];
     TEST_ASSERT_EQUAL_size_t(1, errors_seen(errs, 4));
     TEST_ASSERT_EQUAL_STRING("odin3: error: proc: module 'm1': proc needs more than 1 bytes (the "
-                             "design's budget is 60% of physical memory)",
+                             "design's budget is 1 bytes: the smaller of 60% of physical memory "
+                             "and the cgroup's memory.max)",
                              errs[0]);
     TEST_ASSERT_EQUAL_UINT32(2, proc_count(&res, "m1"));
     TEST_ASSERT_EQUAL_UINT32(1, proc_count(&res, "m3"));
@@ -895,9 +896,10 @@ static void budget_stop(budget_case bc, const char *at, pb_result *res) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_proc(res, &noopt, NULL));
     char want[LOG_TEXT];
     int len = snprintf(want, sizeof want,
-                       "%s: error: proc needs more than %llu bytes (the design's budget is 60%% of "
-                       "physical memory)",
-                       at, (unsigned long long)limit);
+                       "%s: error: proc needs more than %llu bytes (the design's budget is %llu "
+                       "bytes: the smaller of 60%% of physical memory and the cgroup's "
+                       "memory.max)",
+                       at, (unsigned long long)limit, (unsigned long long)limit);
     TEST_ASSERT_TRUE(len > 0 && len < LOG_TEXT);
     char errs[2][LOG_TEXT];
     TEST_ASSERT_EQUAL_size_t(1, errors_raw(errs, 2));

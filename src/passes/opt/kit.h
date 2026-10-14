@@ -149,7 +149,7 @@ typedef struct odin3_kit_cell {
  * Creates an unnamed node for cell, connected as given (odin3_node_create_connected), *out = the
  * node. Every ODIN3_OPT_BUDGET_PINS created pins (pins_created crossing a multiple), before
  * anything is made, checks the design budget: over it, logs odin3_budget_message's text
- * ("<pass> needs more than N bytes (the design's budget is 60% of physical memory)") as an
+ * ("<pass> needs more than N bytes (the design's budget is N bytes: the smaller of 60% of physical memory and the cgroup's memory.max)") as an
  * unlocated error and returns ODIN3_ERR_PARSE. INVALID_ARG as create_connected (logged); NO_MEMORY
  * with nothing made. Sets changed.
  */

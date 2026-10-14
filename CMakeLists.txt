@@ -675,6 +675,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_proc_ff)
     target_sources(test_proc_ff PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_budget)
+    target_compile_definitions(test_budget PRIVATE
+        ODIN3_BUDGET_OUT="${PROJECT_BINARY_DIR}/budget_tmp")
     odin3_add_unit_test(test_ffinit)
     # 2F Task 1: the opt context and the rewrite kit (every test_opt_* links proc_build.c).
     odin3_add_unit_test(test_opt_kit)
@@ -922,6 +924,20 @@ if(BUILD_TESTING)
                     ${ODIN3_YOSYS_EXE} ${PROJECT_BINARY_DIR}/lut/lut.json)
         set_tests_properties(lut_json_yosys PROPERTIES
             LABELS differential FIXTURES_REQUIRED lut_fixtures)
+    endif()
+    # 3D Task 9: write_verilog's $lut form. test_lut_verilog writes lut/luts.v and luts_tb.v (16
+    # random tables per width 1..6); CTest lut_verilog_icarus simulates them when Icarus is found.
+    odin3_add_unit_test(test_lut_verilog)
+    target_compile_definitions(test_lut_verilog PRIVATE ODIN3_LUT_OUT="${PROJECT_BINARY_DIR}/lut")
+    set_tests_properties(test_lut_verilog PROPERTIES FIXTURES_SETUP lut_verilog_fixtures)
+    find_program(ODIN3_IVERILOG iverilog)
+    find_program(ODIN3_VVP vvp)
+    if(ODIN3_IVERILOG AND ODIN3_VVP)
+        add_test(NAME lut_verilog_icarus
+            COMMAND sh -c "\"$0\" -g2005 -o \"$2/luts.vvp\" \"$2/luts.v\" \"$2/luts_tb.v\" && \"$1\" \"$2/luts.vvp\" | grep -qx PASS"
+                    ${ODIN3_IVERILOG} ${ODIN3_VVP} ${PROJECT_BINARY_DIR}/lut)
+        set_tests_properties(lut_verilog_icarus PROPERTIES
+            LABELS differential FIXTURES_REQUIRED lut_verilog_fixtures)
     endif()
     odin3_add_unit_test(test_pass_outputs)
     target_sources(test_pass_outputs PRIVATE tests/unit/proc_fixture.c

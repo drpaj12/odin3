@@ -1,9 +1,11 @@
 /* writer.c — structural Verilog writer: modules, cells, aliases and black-box stubs. */
 #include "backends/verilog/writer.h"
 
+#include "backends/blif/isop.h"
 #include "backends/common/attrs.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
+#include "ir/lut.h"
 #include "ir/module.h"
 #include "ir/proc.h"
 #include "ir/prov.h"
@@ -39,6 +41,7 @@ typedef enum vw_form {
     FORM_GATE2,  /* Y = A <op> B, or ~(…) */
     FORM_MUX,    /* Y = S ? B : A */
     FORM_SOP,    /* sum of products over the cover */
+    FORM_LUT,    /* sum of products over the table's irredundant cover (3D, point (q)) */
     FORM_LATCH,  /* bit-level flip-flop or latch with INIT */
     FORM_BINARY, /* Y = A' <op> B' */
     FORM_UNARY,  /* Y = <op>A' */
@@ -81,6 +84,7 @@ static const vw_builtin BUILTINS[] = {
     {"$_XNOR_", FORM_GATE2, "^", VB_INVERT},
     {"$_MUX_", FORM_MUX, NULL, 0},
     {"$sop", FORM_SOP, NULL, 0},
+    {"$lut", FORM_LUT, NULL, 0},
     {"$_DFF_P_", FORM_LATCH, NULL, 0},
     {"$_DFF_N_", FORM_LATCH, NULL, VB_NEG},
     {"$_DLATCH_P_", FORM_LATCH, NULL, VB_LEVEL},
@@ -1139,13 +1143,18 @@ static void write_product(verilog_writer *wr, const uint8_t *row, odin3_pinslice
     vw_puts(wr, paren && lits > 1 ? ")" : "");
 }
 
+/* Cover rows: count rows of stride bytes, each starting with one plane character per input. */
+typedef struct vw_rows {
+    const uint8_t *data;
+    size_t stride;
+    uint32_t count;
+} vw_rows;
+
 /* The products of every row joined by |. */
-static void write_sum(verilog_writer *wr, const odin3_value *cover, odin3_pinslice ins) {
-    uint32_t row_len = ins.count + 1;
-    uint32_t rows = cover->len / row_len;
-    for (uint32_t i = 0; i < rows; i++) {
+static void write_sum(verilog_writer *wr, const vw_rows *rows, odin3_pinslice ins) {
+    for (uint32_t i = 0; i < rows->count; i++) {
         vw_puts(wr, i > 0 ? " | " : "");
-        write_product(wr, cover->bits + (size_t)i * row_len, ins, rows > 1);
+        write_product(wr, rows->data + (size_t)i * rows->stride, ins, rows->count > 1);
     }
 }
 
@@ -1180,10 +1189,50 @@ static void write_sop(verilog_writer *wr, odin3_node_id node, const vw_builtin *
         vw_puts(wr, rows > 0 && out == '1' ? "1'b1" : "1'b0");
     } else {
         vw_puts(wr, out == '0' ? "~(" : "");
-        write_sum(wr, cover, ins);
+        vw_rows cover_rows = {cover->bits, row_len, rows};
+        write_sum(wr, &cover_rows, ins);
         vw_puts(wr, out == '0' ? ")" : "");
     }
     end_stmt(wr, node);
+}
+
+/* --- $lut ---------------------------------------------------------------------------------- */
+
+/*
+ * `assign Y = <expr>;` over the irredundant cover of the table (3E's odin3_blif_isop: the shorter
+ * of the on-set and the off-set, the on-set on a tie), inputs A[0] .. A[k-1] in pin order. An
+ * off-set cover is written `~(<sum>)`; a constant table is `1'b0` or `1'b1`.
+ */
+static void write_lut(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi) {
+    (void)bi;
+    odin3_pinslice ins = odin3_node_port(wr->mod.module, node, ODIN3_LUT_PORT_A);
+    const odin3_value params[2] = {*odin3_node_param(wr->mod.module, node, ODIN3_LUT_P_WIDTH),
+                                   *odin3_node_param(wr->mod.module, node, ODIN3_LUT_P_LUT)};
+    uint64_t words[1U << (ODIN3_LUT_MAX_WIDTH - 6U)];
+    odin3_strbuf cover;
+    odin3_strbuf_init(&cover);
+    uint32_t n_rows = 0;
+    int constant = -1;
+    if (!odin3_lut_table(params, words, (uint32_t)(sizeof words / sizeof words[0]))) {
+        char id[NODE_ID_TEXT];
+        (void)vw_refuse(wr, "$lut with invalid parameters in cell", cell_label(wr, node, id));
+    } else if (odin3_blif_isop(words, ins.count, &cover, &n_rows, &constant) != ODIN3_OK) {
+        (void)vw_fail(wr, ODIN3_ERR_NO_MEMORY);
+    } else {
+        begin_assign(wr, node);
+        if (constant >= 0) {
+            vw_puts(wr, constant == 1 ? "1'b1" : "1'b0");
+        } else {
+            /* each row: the k plane characters, a blank, the output character, a newline */
+            vw_rows rows = {(const uint8_t *)cover.data, (size_t)ins.count + 3U, n_rows};
+            bool off_set = cover.data[ins.count + 1U] == '0';
+            vw_puts(wr, off_set ? "~(" : "");
+            write_sum(wr, &rows, ins);
+            vw_puts(wr, off_set ? ")" : "");
+        }
+        end_stmt(wr, node);
+    }
+    odin3_strbuf_free(&cover);
 }
 
 /* --- storage cells ------------------------------------------------------------------------- */
@@ -1287,6 +1336,7 @@ typedef void (*vw_cell_writer)(verilog_writer *wr, odin3_node_id node, const vw_
 static const vw_cell_writer CELL_WRITERS[FORM_COUNT] = {
     [FORM_CONST] = write_const,   [FORM_GATE1] = write_gate1, [FORM_GATE2] = write_gate2,
     [FORM_MUX] = write_mux,       [FORM_SOP] = write_sop,     [FORM_LATCH] = write_latch,
+    [FORM_LUT] = write_lut,
     [FORM_BINARY] = write_binary, [FORM_UNARY] = write_unary, [FORM_PMUX] = write_pmux,
     [FORM_TRIBUF] = write_tribuf, [FORM_FF] = write_ff,
 };
