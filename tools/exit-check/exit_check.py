@@ -779,11 +779,11 @@ SUMMARY_ROWS = (
 def summary_lines(state: Sweep, total: int, stale: Sequence[str], secs: float,
                   min_checked: int) -> list[str]:
     counts = state.counts
-    lines = ["", f"{TOOL}: summary ({total} designs)", f"  {'class':<34}{'designs':>8}",
-             f"  {'-' * 42}"]
-    lines += [f"  {label:<34}{counts[cls]:>8}" for cls, label in SUMMARY_ROWS if counts.get(cls)]
+    lines = ["", f"{TOOL}: summary ({total} designs)", f"  {'class':<40}{'designs':>8}",
+             f"  {'-' * 48}"]
+    lines += [f"  {label:<40}{counts[cls]:>8}" for cls, label in SUMMARY_ROWS if counts.get(cls)]
     if stale:
-        lines.append(f"  {'FAIL stale list entries':<34}{len(stale):>8}")
+        lines.append(f"  {'FAIL stale list entries':<40}{len(stale):>8}")
     lines += [f"  {line}" for line in state.causes[:200]] if state.causes else []
     nogolden = state.count(CLS_NOGOLDEN, CLS_NOGOLDEN_OK)
     known = state.count(CLS_DEFECT_OK)
