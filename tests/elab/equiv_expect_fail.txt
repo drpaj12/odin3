@@ -4,16 +4,16 @@
 # output (a different failure class is unexpected). 14 rows; with T1 (3 clocks) 15 rows have no
 # equivalence evidence and rely on their goldens alone; 110 rows are equivalent.
 E17 [NOT equivalent] IEEE 1364-2005 4.1.14: an out-of-range index reads x; Yosys resolves it differently after opt (spec 17 #40)
-E7 [unsupported directive .gate] the Yosys back end leaves $pow as a .gate line that equiv-check cannot read (tool limit)
-I7 [unsupported directive .gate] the bridge runs odin3 with the in-file --auto-blackbox (side A elaborates; Yosys 0.55 accepts it too), but the black-box cell becomes a .gate line that equiv-check cannot read (tool limit)
+E7 [cannot name black box $pow: no .cname and no named output net to match it by] the Yosys back end leaves $pow as a .gate black box; equiv-check reads .gate now but cannot name or match a black box with no .cname and no named output net (tool limit)
+I7 [cannot name black box black_box_cell: no .cname and no named output net to match it by] the bridge runs odin3 with the in-file --auto-blackbox (side A elaborates; Yosys 0.55 accepts it too), but the black-box cell becomes a .gate line that equiv-check cannot read (tool limit)
 L19 [Unsupported default nettype] Yosys 0.55 rejects `default_nettype tri (and the other net types of the row)
 L22 [begin_keywords] Yosys 0.55 has no `begin_keywords
 M3 [Incompatible re-declaration] Yosys 0.55 rejects the non-ANSI `output integer n; integer n;` re-declaration
-M7 [unsupported directive .gate] the Yosys back end leaves $_TBUF_ as a .gate line that equiv-check cannot read (tool limit)
+M7 [black-box instances cannot be matched one-to-one] the Yosys back end leaves $_TBUF_ as a .gate black box that equiv-check reads now but cannot match (side A keeps the $_TBUF_ that side B does not have; instances are never matched by guess) (tool limit)
 M8 [syntax error] Yosys 0.55 does not parse macromodule
 N15 [syntax error] Yosys 0.55 does not parse a uwire declaration (syntax error at the first one)
 N16 [syntax error] Yosys 0.55 does not parse the ranged supply net of the row (syntax error at line 5)
-Q3 [unsupported directive .gate] the Yosys back end leaves $_TBUF_ as a .gate line that equiv-check cannot read (tool limit)
+Q3 [black-box instances cannot be matched one-to-one] the Yosys back end leaves $_TBUF_ as a .gate black box that equiv-check reads now but cannot match (side A keeps the $_TBUF_ that side B does not have; instances are never matched by guess) (tool limit)
 Q5 [simplify.cc:2755] Yosys 0.55 asserts (simplify.cc:2755) on a gate-primitive array
 T4 [syntax error] Yosys 0.55 rejects an event control without parentheses (IEEE 9.7.2 allows it)
-T5 [unsupported directive .gate] Yosys keeps the $display of the initial block as a $print cell; 2D ignores system tasks with a warning
+T5 [cannot name black box $print: no .cname and no named output net to match it by] Yosys keeps the $display of the initial block as a $print cell; 2D ignores system tasks with a warning

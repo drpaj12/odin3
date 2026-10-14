@@ -76,13 +76,6 @@ preprocessor/nested_operation_define.v [nested_operation_define.v:9:5: error: sy
 preprocessor/undef.v [undef.v:10:5: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (10:5; A.1.4 has no system task item)
 keywords/automatic/recursive_task.v [recursive_task.v:9:17: error: syntax: unexpected integer, expecting identifier] illegal Verilog-2005: `task automatic integer` (a task has no return type, 9:17) closed by `endfunction`
 syntax/fir_scu_rtl_restructured_for_cmm_exp.v [fir_scu_rtl_restructured_for_cmm_exp.v:94:11: error: syntax: unexpected identifier] illegal Verilog-2005: a module instance inside an `always` block (94:11)
-keywords/task_endtask/inside_port.v [inside_port.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
-keywords/task_endtask/outside_port.v [outside_port.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
-keywords/task_endtask/task_call_function.v [task_call_function.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
-keywords/task_endtask/task_call_task.v [task_call_task.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
-syntax/multi_assignment.v [multi_assignment.v:8:8: error: tri-state driver on 'data' is supported only on a top-level output or inout port (D3)] 2D spec 7 D3 (EL-29): a tri-state driver on an internal net is rejected
-full/matmul.v [matmul.v:35:4: error: 'direction_tmp' is assigned with both '=' and '<='] 2D spec 9 T9: a bit assigned by both = and <= is rejected (REJECT, coverage audit B 2.2.4)
-syntax/multi_clock_reader_writer.v [multi_clock_reader_writer.v:77:5: error: 'register' is assigned with both '=' and '<='] 2D spec 9 T9: a bit assigned by both = and <= is rejected (REJECT, coverage audit B 2.2.4)
 micro/adder_hard_block.v [adder_hard_block.v:12:13: error: too many parameter values for cell type 'adder' (1 given, 0 parameters)] GAP (2D-7b): positional width #(W) and bus connections on the hard adder (lib/vtr.o3lib's adder has 1-bit ports, no parameter; Parmys builds a W-bit adder chain)
 micro/hard_adder_cin_propagation.v [hard_adder_cin_propagation.v:10:10: error: too many parameter values for cell type 'adder' (1 given, 0 parameters)] GAP (2D-7b): positional width #(W) and bus connections on the hard adder (lib/vtr.o3lib's adder has 1-bit ports, no parameter; Parmys builds a W-bit adder chain)
 #
