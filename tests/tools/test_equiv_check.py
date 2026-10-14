@@ -472,15 +472,26 @@ class DualPortOrientTest(unittest.TestCase):
 
     HEAD = ".model t\n.inputs clk a b da db wa wb\n.outputs qa qb\n"
 
-    def ram(self, swap: bool = False, cross_data: bool = False, invert: bool = False) -> str:
+    def ram(self, swap: bool = False, cross_data: bool = False, invert: bool = False,
+            keep_consumers: bool = False, cross_we: bool = False, cross_addr: bool = False,
+            tied: bool = False) -> str:
         """Port 1 = (a, da, wa), port 2 = (b, db, wb); ``swap`` lists them the other way round
         (and reads the outputs the other way round); ``cross_data`` and ``invert`` are different
-        designs."""
+        designs; ``keep_consumers`` swaps the ports but not the consumers (a different design);
+        ``cross_we`` / ``cross_addr`` give each port the other's write enable / address;
+        ``tied`` gives both ports the same inputs."""
         ports = [("a", "da", "wa"), ("b", "db", "wb")]
         if cross_data:
             ports = [("a", "db", "wa"), ("b", "da", "wb")]
+        if cross_we:
+            ports = [("a", "da", "wb"), ("b", "db", "wa")]
+        if cross_addr:
+            ports = [("b", "da", "wa"), ("a", "db", "wb")]
+        if tied:
+            ports = [("a", "da", "wa")] * 2
         if swap:
             ports.reverse()
+        swap = swap and not keep_consumers
         (a1, d1, w1), (a2, d2, w2) = ports
         return (self.HEAD
                 + f".gate dual_port_ram addr1[0]={a1} addr2[0]={a2} clk=clk data1[0]={d1} "
@@ -529,12 +540,38 @@ class DualPortOrientTest(unittest.TestCase):
         address.  The RAM then has no partner (its input functions differ): exit 2."""
         code, out, err = self.run_check(self.ram(), self.ram(swap=True, cross_data=True))
         self.assertNotEqual(code, 0, out + err)
-        self.assertNotIn("equivalent (abc", out)
+        self.assertNotIn("equiv-check: equivalent", out)
 
     def test_a_difference_behind_a_turned_ram_is_not_equivalent(self) -> None:
         code, out, err = self.run_check(self.ram(), self.ram(swap=True, invert=True))
         self.assertEqual(code, 1, out + err)
         self.assertIn("NOT equivalent", out)
+
+    def test_ports_swapped_but_consumers_not_is_not_equivalent(self) -> None:
+        code, out, err = self.run_check(self.ram(), self.ram(swap=True, keep_consumers=True))
+        self.assertIn(code, (1, 2), out + err)
+        self.assertNotIn("equiv-check: equivalent", out)
+
+    def test_write_enable_crossed_is_never_equivalent(self) -> None:
+        for swap in (False, True):
+            code, out, err = self.run_check(self.ram(), self.ram(swap=swap, cross_we=True))
+            self.assertIn(code, (1, 2), out + err)
+            self.assertNotIn("equiv-check: equivalent", out)
+
+    def test_address_crossed_is_never_equivalent(self) -> None:
+        for swap in (False, True):
+            code, out, err = self.run_check(self.ram(), self.ram(swap=swap, cross_addr=True))
+            self.assertIn(code, (1, 2), out + err)
+            self.assertNotIn("equiv-check: equivalent", out)
+
+    def test_tied_ports_stay_tied_and_a_difference_behind_them_is_found(self) -> None:
+        """Both ports with the same inputs have equal digests: no turn is chosen, nothing pairs
+        by luck; the same memory is equivalent, an inverted consumer is not."""
+        code, out, err = self.run_check(self.ram(tied=True), self.ram(tied=True))
+        self.assertEqual(code, 0, out + err)
+        code, out, err = self.run_check(self.ram(tied=True), self.ram(tied=True, invert=True))
+        self.assertEqual(code, 1, out + err)
+        self.assertNotIn("equiv-check: equivalent", out)
 
 
 X_HEAD = ".model t\n.inputs a b\n.outputs o p\n"
@@ -1184,7 +1221,8 @@ class SingleProbeTest(unittest.TestCase):
         lines.append(f".names {' '.join(mids)} w{prefix}\n{'1' * len(mids)} 1\n")
         return "".join(lines)
 
-    def netlist(self, block: int, swap: bool, xcone: bool = False) -> str:
+    def netlist(self, block: int, swap: bool, xcone: bool = False, cross: bool = False,
+                bad_in: bool = False) -> str:
         ins = " ".join(f"{p}{i}" for p in "xy" for i in range(self.WIDTH))
         text = f".model t\n.inputs clk d0 {ins}\n.outputs ox oy\n.names unconn\n"
         text += self.tree("x", block) + self.tree("y", block)
@@ -1192,7 +1230,10 @@ class SingleProbeTest(unittest.TestCase):
             text += ".names wx unconn wxu\n11 1\n.names wy unconn wyu\n11 1\n"
         mults = [("x", "ox"), ("y", "oy")]
         for name, out in (reversed(mults) if swap else mults):
-            pin = f"w{name}{'u' if xcone else ''}"
+            src = "x" if bad_in and name == "y" else name  # B's second multiplier: wrong input
+            pin = f"w{src}{'u' if xcone else ''}"
+            if cross:  # the consumers read the other multiplier
+                out = "oy" if out == "ox" else "ox"
             text += (f".gate multiply a[0]={pin} b[0]=d0 out[0]=mul{name}~0\n"
                      f".names mul{name}~0 {out}\n1 1\n")
         return text + ".end\n"
@@ -1201,11 +1242,12 @@ class SingleProbeTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
-    def run_check(self, *flags: str, xcone: bool = False) -> tuple[int, str, str]:
+    def run_check(self, *flags: str, xcone: bool = False, cross: bool = False,
+                  bad_in: bool = False) -> tuple[int, str, str]:
         assert ABC is not None
         paths = []
         for name, text in (("a.blif", self.netlist(10, False, xcone)),
-                           ("b.blif", self.netlist(8, True, xcone))):
+                           ("b.blif", self.netlist(8, True, xcone, cross, bad_in))):
             path = Path(self.tmp.name) / name
             path.write_text(text, encoding="utf-8")
             paths.append(str(path))
@@ -1223,7 +1265,6 @@ class SingleProbeTest(unittest.TestCase):
         self.assertEqual(code, 4, out + err)
         self.assertIn("inconclusive", err)
 
-
     @needs_abc
     def test_an_x_cone_result_over_guessed_pairs_is_inconclusive_not_eq_x(self) -> None:
         """Every compared pin of both boxes is behind ``unconn``, so the x-report would call a
@@ -1231,8 +1272,24 @@ class SingleProbeTest(unittest.TestCase):
         code, out, err = self.run_check("--no-ram-probe", "--x-report", xcone=True)
         self.assertEqual(code, 4, out + err)
         self.assertIn("equivalent outside the x-cones", err)
-        code, out, err = self.run_check("--x-report", xcone=True)  # paired by probe: a verdict
-        self.assertIn(code, (0, 3), out + err)
+        code, out, err = self.run_check("--x-report", xcone=True)
+        # a probe over pins that are all behind unconn proves nothing: still exit 4
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("inconclusive", err)
+
+    @needs_abc
+    def test_a_crossed_multiplier_is_never_equivalent_with_probes_on(self) -> None:
+        for flags in ((), ("--x-report",)):
+            code, out, err = self.run_check(*flags, cross=True)
+            self.assertIn(code, (1, 4), out + err)
+            self.assertNotIn("equiv-check: equivalent", out)
+            self.assertNotIn("equivalent outside", out)
+
+    @needs_abc
+    def test_a_multiplier_with_a_wrong_input_is_not_eq_x_with_probes_on(self) -> None:
+        code, out, err = self.run_check("--x-report", xcone=True, bad_in=True)
+        self.assertIn(code, (1, 4), out + err)  # never 3 (equivalent outside the x-cones)
+        self.assertNotIn("equivalent outside the x-cones (abc", out)
 
 
 class CongruenceTest(unittest.TestCase):
