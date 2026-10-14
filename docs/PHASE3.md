@@ -417,8 +417,8 @@ then the options considered.
         `check`'s lines, since those refuse first; E8 and E12 are pinned by unit tests.
       - E11 (1C's "parameters cannot be recovered from BLIF formals") is kept under `--vtr`,
         although `--vtr` writes every formal bit.
-      - A latch or hard-cell clock on `unconn` (class U) is a warning, not E3; 3E-4 puts one such
-        file through a full VPR run.
+      - A latch or hard-cell clock on `unconn` (class U) was a warning here; 3E-4's full-flow
+        run showed VPR aborts on it, so it is now E3b (see #34).
       - Undeclared hard-cell formals are scalar per type and port (widest width 1), not per node
         (§8.2 erratum), so every instance matches its stub.
       - The top's `.model` name gets VB-10 rules 1 and 2 (not rule 3) and counts as renamed.
@@ -770,8 +770,11 @@ then the options considered.
       `--exit_before_pack`, but the full flow **aborts**: `timing_graph_builder.cpp:546
       create_block_internal_clock_timing_edges: Assertion 'clk_pin' failed` (exit 134), on `ff`
       with its clock changed to `unconn`. A constant-0 clock runs the full flow (`VPR succeeded`).
-      No k6 golden has such a latch. **Recommendation, not done here:** make a latch or hard-cell
-      clock on `unconn` an E3-style refusal, since VPR cannot use it; 3H must not rely on the form.
+      No k6 golden has such a latch. **Done in the 3E-4 fix round (agent default, the reviewer
+      agrees):** a latch C or a hard-cell clock input on `unconn` is an E3b refusal in the `--vtr`
+      writer (text `clock input '<port>' is unconnected or x`; VPR accepts G, so the
+      `vtr-read-check` pairing is `listed`); the `clock is 'unconn'` warning is gone. Spec 3E §7
+      item 3 and §9.1 are amended; C unit tests cover the latch and `single_port_ram clk=unconn`.
     - **Agent defaults** (reversible):
       - `--vtr-normalize` also (a) merges `.clock` lines into `.inputs`; (b) ties an undriven net to
         `gnd` on `.names` inputs, latch D and primary outputs (a buffer) and to `unconn` on a
