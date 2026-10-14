@@ -33,6 +33,8 @@ argv = sys.argv[1:]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(["odin3", *argv, os.getcwd()]) + "\\n")
 rc = int(os.environ.get("FAKE_ODIN3_RC", "0"))
+if os.environ.get("FAKE_ODIN3_SIGNAL"):
+    os.kill(os.getpid(), int(os.environ["FAKE_ODIN3_SIGNAL"]))
 if os.environ.get("FAKE_ODIN3_SLEEP"):
     import time
     time.sleep(float(os.environ["FAKE_ODIN3_SLEEP"]))
@@ -80,6 +82,8 @@ import json, os, sys
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(["equiv-check", *sys.argv[1:], os.getcwd()]) + "\\n")
 rc = os.environ.get("FAKE_EQUIV_RC", "0")
+if os.environ.get("FAKE_EQUIV_SIGNAL"):
+    os.kill(os.getpid(), int(os.environ["FAKE_EQUIV_SIGNAL"]))
 if rc == "1" and not os.environ.get("FAKE_EQUIV_NO_VERDICT"):
     print("equiv-check: NOT equivalent (abc cec)")
 else:
@@ -376,6 +380,20 @@ class BridgeTest(unittest.TestCase):
                                             "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"})
         self.assertEqual(code, 2, err)
         self.assertIn("odin3 (side A) failed", err)
+
+    def test_equiv_check_killed_by_its_cap_is_unproven_but_odin3_and_side_a_stay_hard(self) -> None:
+        """2H: the checker's size limit is exit 4 (listable); odin3 and Yosys side A stay exit 2."""
+        code, out, err = self.run_tool("--mem-cap", str(4 * GIB), extra={"FAKE_EQUIV_SIGNAL": "9"})
+        self.assertEqual(code, 4, err)
+        self.assertIn("elab-equiv: unproven: equiv-check exceeded its memory cap (4G)", out)
+        self.assertNotIn("out of memory", out + err)
+        code, out, err = self.run_tool("--mem-cap", str(4 * GIB), extra={
+            "FAKE_YOSYS_SIGNAL": "9", "FAKE_YOSYS_SIGNAL_ON": "read_rtlil a.il; hierarchy"})
+        self.assertEqual(code, 2, err)
+        self.assertIn("out of memory (cap 4G)", err)
+        code, _, err = self.run_tool("--mem-cap", str(4 * GIB), extra={"FAKE_ODIN3_SIGNAL": "9"})
+        self.assertEqual(code, 2, err)
+        self.assertIn("out of memory (cap 4G)", err)
 
     def test_a_budget_that_runs_out_in_yosys_is_unproven(self) -> None:
         """2H (arm_core): --budget bounds the Yosys and equiv-check runs together; the child still
