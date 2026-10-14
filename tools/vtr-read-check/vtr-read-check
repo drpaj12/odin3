@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# vtr-read-check: VPR reads every golden-equivalent BLIF (spec 3E §16.4). See vtr_read_check.py.
+# Exit codes: 0 every verdict passes, 1 any failure, 2 usage or a failed heavy-run cap check.
+set -euo pipefail
+exec python3 -I "$(dirname "$0")/vtr_read_check.py" "$@"

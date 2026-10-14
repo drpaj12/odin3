@@ -101,7 +101,8 @@ which PRs remain.
   76c485a; decisions 28 and 29)
 - [ ] 3H partial: 3H-1..2 merged; 3H-3 (to M1) and 3H-4 remain, and now carry 3F (below)
 - [ ] 3E `write_blif --vtr`: Parmys goldens round-trip through it and route via `-start abc`
-  (partial: 3E-1..3 and 3E-5 merged; 3E-4, the k6 sweeps on real Parmys output, remains)
+  (partial: 3E-1..3 and 3E-5 merged; 3E-4's round-trip and VPR-read sweeps are done, decision 34;
+  ticked when 3H's R leg routes all 19 via `-start abc`)
 - [ ] 3D linked ABC: adapter builds; `abc` pass; script ruling (#1); deterministic; **M1**: P′
   leg routes all 19 (partial: 3D-0..4 and 3D-6 merged; the subprocess tasks 9a..9c of decision 29,
   then 3D-5, 3D-7, 3D-8 remain)
@@ -416,8 +417,8 @@ then the options considered.
         `check`'s lines, since those refuse first; E8 and E12 are pinned by unit tests.
       - E11 (1C's "parameters cannot be recovered from BLIF formals") is kept under `--vtr`,
         although `--vtr` writes every formal bit.
-      - A latch or hard-cell clock on `unconn` (class U) is a warning, not E3; 3E-4 puts one such
-        file through a full VPR run.
+      - A latch or hard-cell clock on `unconn` (class U) was a warning here; 3E-4's full-flow
+        run showed VPR aborts on it, so it is now E3b (see #34).
       - Undeclared hard-cell formals are scalar per type and port (widest width 1), not per node
         (§8.2 erratum), so every instance matches its stub.
       - The top's `.model` name gets VB-10 rules 1 and 2 (not rule 3) and counts as renamed.
@@ -742,6 +743,73 @@ then the options considered.
     first mapped node keeps the cell's name, the others take `<cell>.<role>`, every created node
     carries `hardmap` = `<kind>:<role>`, and the source is reached through the DERIVED provenance
     record. The other defaults (a, c–i) follow #32; Task 7 logs them.
+
+34. **3E-4 round-trip and VPR-read evidence: figures and agent defaults** (2026-10-14; plan
+    Tasks 10 and 11, spec 3E §16.3-§16.6). Both sweeps ran through `tools/heavy-run` from a release
+    build of `feat/3E-4`, smallest file first, one at a time. The golden tree now holds **947**
+    `status=ok` files (the plan's 923 was 2026-10-11): 356+100 Odin II and 482+9 Parmys.
+    - **Round trip** (`blif_roundtrip_vtr_k6`, `blif-roundtrip --vtr`): PASS on all 947. Written /
+      refused: Parmys 482 / 9 (E1 4, E1b 1, E5 4); Odin II 356 / 100 (E7 92, E1 6, E12 2) as §16.3
+      predicts. Idempotence: 813 byte for byte, 25 `decoded` (the Parmys goldens with a mid-name
+      `\`). Parmys `netlist-compare`: 437 identical, 45 `normalized` (the 25 renamed, plus 20 with
+      an undriven net, below). Odin II under `--vtr-normalize`: 355 identical, 1 `memlimit`
+      (`LargeRam`, the 5 GB `netlist-compare` cap; listed, not a failure). `equiv-check` on Odin II:
+      309 equivalent, 45 skipped (RAM or `multiply`), 2 `multiclock`, 0 timeouts. Time: 1:00 wall
+      including the lock wait, 25 min of work; the slowest file is `LU64PEEng` (304 s).
+    - **VPR read** (`vtr_read_check_k6`): 940 pass and **7 capped, 0 fail**. Every written W is read
+      by VPR (`--exit_before_pack on`) and passes `blif-vtr-check --strict --writer-log`; every
+      refusal pairs with VPR's verdict on G (E1/E1b/E5/E7 with the table's messages, E12 below);
+      the checker agrees with VPR on every G it could check. The 7 capped files are those the 6 GiB
+      cap kills (VPR itself, SIGKILL, on G and W): `bgm` (2 copies), `LU32PEEng` (2), `LU64PEEng` (2)
+      and `LargeRam`. They are `capped`, not failed; the checker accepted W and G of six of them.
+      `--xl` is the controller's. Time: 44 min wall including a lock wait, 16 min of work.
+      `--bad-corpus tests/vtr/blif-bad`: VPR rejects exactly the 18 files the checker rejects, with
+      the `# vpr:` text; the 6 `strict/` files are accepted by both. CTest
+      `vtr_read_check_bad_corpus` (when `$VTR_ROOT` is built).
+    - **Class-U clock (3E-1 review M8), recorded.** A latch whose clock is `unconn` reads under
+      `--exit_before_pack`, but the full flow **aborts**: `timing_graph_builder.cpp:546
+      create_block_internal_clock_timing_edges: Assertion 'clk_pin' failed` (exit 134), on `ff`
+      with its clock changed to `unconn`. A constant-0 clock runs the full flow (`VPR succeeded`).
+      No k6 golden has such a latch. **Done in the 3E-4 fix round (agent default, the reviewer
+      agrees):** a latch C or a hard-cell clock input on `unconn` is an E3b refusal in the `--vtr`
+      writer (text `clock input '<port>' is unconnected or x`; VPR accepts G, so the
+      `vtr-read-check` pairing is `listed`); the `clock is 'unconn'` warning is gone. Spec 3E §7
+      item 3 and §9.1 are amended; C unit tests cover the latch and `single_port_ram clk=unconn`.
+    - **Agent defaults** (reversible):
+      - `--vtr-normalize` also (a) merges `.clock` lines into `.inputs`; (b) ties an undriven net to
+        `gnd` on `.names` inputs, latch D and primary outputs (a buffer) and to `unconn` on a
+        `.subckt` input (§9.2: 20 Parmys goldens and `no_input` carry one); (c) drops a `.blackbox`
+        model no `.subckt` uses (§8.3: used stubs only; `inferred_SPram`, `matrix_multiplication`).
+        `vtr_normalize(model, models=None)` takes the stub models too.
+      - `equiv-check` runs with `--allow-undriven` (the writer's x-is-0). A file listed `timeout`
+        or `multiclock` is not a failure.
+      - `blif-roundtrip --vtr`: files that are neither `*.parmys.blif` nor `*.odin.blif` (the hand
+        fixtures) get oracle 1 only, and may be refused with any class; a golden may be refused only
+        with E1 E1b E3b E5 E6 E7 E8 E12, a falling-edge latch must give E1, a `.names` over 6
+        inputs E7, a known multi-driver original E12. Defaults `-j 1`, `-m 5`; no content
+        de-duplication; `equiv-check` is off with `--fixtures` unless `--equiv` is given.
+        `odin3-blif-rt --vtr`: exit 1 for a refusal, 2 for a read or I/O error.
+      - `vtr-read-check`: options `--vpr` and `--timeout`; the E12 pairing also accepts VPR's
+        `Inconsistent block data sizes`, which is what the two Odin II multi-driver goldens draw
+        (the spec says the R16 assertion); E3b, E8 and E11 are `listed`; a SIGKILLed step is
+        `capped`; `--bad-corpus` is not a heavy run.
+      - The writer's M9 cache and M11 type-ID lookup (decision 24) stay deferred: neither sweep
+        showed a writer hot spot (`netlist-compare` dominates the large files).
+      - The plan's points (a)-(y) stand as written: (a) heavy runs through `tools/heavy-run` and
+        `qor_heavy`; (b) the `--vtr` `$lut` row; (c) `# abc:` header lines; (d) first location; (e)
+        E1b by name; (f) one refusal per node; (g) E7 counts stored inputs; (h) E12's driver list;
+        (i) `<loc>`; (j) class-U clocks warn; (k) warning and info levels; (l) argument parsing;
+        (m) `--name-style provenance` refused until 3E-6; (n) the API's refusals; (o) upper-case-hex
+        escapes; (p) plain-mode generators (decision 23); (q) the `write_blif` row; (r) fixture
+        inputs from the copied goldens; (s) the header pattern; (t) ISOP order; (u) one file at a
+        time in the 6G slice; (v) below; (w) E11's list; (x) §14.1 is answered by 3D's tests; (y)
+        spec §21's four decisions (x is `gnd` on logic, used stubs only, declared-index port bits,
+        `--lut-k` 6).
+    - **(v) The checklist line** "3E: Parmys goldens round-trip through it and route via `-start
+      abc`" is ticked when 3H's R leg (3H-3/3H-4) routes all 19. The round-trip half is shown here.
+    - Both tools delete only their own scratch files: `blif-roundtrip` its W1/W2 and logs of a
+      passing file (and its `tmp` directory at the end), `vtr-read-check` a passing file's run
+      directory through `qor_heavy.safe_rmtree`. A failing file's directory is kept.
 
 ## Risks
 

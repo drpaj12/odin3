@@ -5,6 +5,7 @@ Usage::
     netlist-compare A.blif B.blif     # exit 0 identical, 1 different (unified diff), 2 error
     netlist-compare --canon A.blif    # print the canonical form of A
     netlist-compare --implicit-models A.blif B.blif   # undefined $-models are black boxes
+    netlist-compare --vtr-normalize A.blif B.blif     # undo `write_blif --vtr`'s rewrites first
 
 Canonical form (per model; the first model stays first, the rest are sorted by name):
 
@@ -51,6 +52,17 @@ scalar port ``p`` (no ``p[0]``), an instance pin ``p[0]`` with no other bit of `
 port is 1 bit at the defaults but whose connection is wider (only bit 0 is written, as for every
 black-box pin), so the instance would otherwise name a port the model lacks.
 
+``--vtr-normalize`` (3E §16.3, plan Task 10) applies the rewrites ``write_blif --vtr`` makes to
+both files before canonicalising, so a Parmys or Odin II golden compares equal to its ``--vtr``
+write: latch init ``3`` becomes ``2``; an input formal bit a ``.subckt`` omits (the model, a
+``.blackbox`` stub or the full model, declares it) reads ``=unconn``; ``.clock`` lines become
+``.inputs`` (VPR reads both alike, ``--vtr`` writes no ``.clock``); VB-10 names are decoded to a
+fixed point (``%XX`` with upper-case hex is the byte, a leading ``%`` followed by anything else is
+dropped); a constant cover becomes a zero-input generator and a non-constant 1-input cover one
+row (§6); a net with readers and no driver reads `gnd` on a `.names` input, a latch D and a
+primary output (a buffer from `gnd` drives it) and `unconn` on a `.subckt` input (§9.2: x or
+undriven); a `.blackbox` model no `.subckt` uses is dropped (§8.3: used stubs only).
+
 Everything is iterative (explicit worklists, no recursion).
 """
 
@@ -95,7 +107,8 @@ MAX_TRIALS = 64
 
 def _h(*parts: str) -> str:
     """Content hash used for labels (stable across processes, unlike hash())."""
-    return hashlib.blake2b("\x1f".join(parts).encode(), digest_size=12).hexdigest()
+    data = "\x1f".join(parts).encode("utf-8", "surrogateescape")
+    return hashlib.blake2b(data, digest_size=12).hexdigest()
 
 
 # --------------------------------------------------------------------------- labelling
@@ -681,6 +694,206 @@ def load(path: str, implicit_models: bool) -> blif.Netlist:
     return netlist
 
 
+# --------------------------------------------------------------------------- --vtr-normalize
+
+# VB-10 (plan 3E point (o)): `%` and two upper-case hex digits is a byte.
+_VB10_ESCAPE = re.compile(r"%([0-9A-F]{2})")
+UNCONN = "unconn"
+# Covers with more inputs are not evaluated (the writer's cap on truth tables, K <= 16).
+MAX_EVAL_INPUTS = 16
+LATCH_INIT_UNDEFINED = "3"
+LATCH_INIT_UNKNOWN = "2"
+
+
+def vb10_decode(name: str) -> str:
+    """name with VB-10 undone to a fixed point: a leading `%` that is not an escape dropped, then
+    every `%XX` (upper-case hex) replaced by its byte, until nothing changes. One step inverts
+    one write exactly; the fixed point makes a name written twice (`%255C`) decode like one
+    written once (`%5C`), both to `\\`. Bytes outside UTF-8 stay as surrogate escapes."""
+    while True:
+        step = name[1:] if name.startswith("%") and _VB10_ESCAPE.match(name) is None else name
+        raw = step.encode("utf-8", errors="surrogateescape")
+        raw = re.sub(rb"%([0-9A-F]{2})", lambda m: bytes([int(m[1], 16)]), raw)
+        step = raw.decode("utf-8", errors="surrogateescape")
+        if step == name:
+            return name
+        name = step
+
+
+def _var_masks(k: int, cache: dict[int, list[int]]) -> list[int]:
+    """masks[i] has bit m set iff bit i of the minterm m is 1, for the 2**k minterms."""
+    if k not in cache:
+        width = 1 << k
+        cache[k] = [
+            sum(1 << m for m in range(width) if (m >> i) & 1) for i in range(k)
+        ]
+    return cache[k]
+
+
+def _cover_function(cell: blif.Names, cache: dict[int, list[int]]) -> int:
+    """The truth table of a cover as a bit set over its 2**k minterms (input j is bit j)."""
+    k = len(cell.inputs)
+    full = (1 << (1 << k)) - 1
+    masks = _var_masks(k, cache)
+    hit = 0
+    for plane, _ in cell.rows:
+        term = full
+        for i, ch in enumerate(plane):
+            if ch == "1":
+                term &= masks[i]
+            elif ch == "0":
+                term &= ~masks[i]
+        hit |= term
+    on_set = bool(cell.rows) and cell.rows[0][1] == "1"
+    if cell.rows and not on_set:  # an off-set cover is 1 everywhere it has no row
+        return full & ~hit
+    return hit
+
+
+def _normalize_names(cell: blif.Names, cache: dict[int, list[int]]) -> None:
+    """§6: a constant cover becomes a zero-input generator, a non-constant 1-input cover one row."""
+    k = len(cell.inputs)
+    if k > MAX_EVAL_INPUTS:
+        return
+    table = _cover_function(cell, cache)
+    full = (1 << (1 << k)) - 1
+    if table in (0, full):
+        cell.inputs = []
+        cell.rows = [("", "1")] if table == full else []
+    elif k == 1:
+        cell.rows = [("1", "1")] if table == 0b10 else [("0", "1")]
+
+
+def _normalize_latch(latch: blif.Latch) -> None:
+    if latch.init == LATCH_INIT_UNDEFINED:
+        latch.init = LATCH_INIT_UNKNOWN
+
+
+def _decode_cell(cell: blif.Cell) -> None:
+    if isinstance(cell, blif.Names):
+        cell.inputs = [vb10_decode(n) for n in cell.inputs]
+        cell.output = vb10_decode(cell.output)
+    elif isinstance(cell, blif.Latch):
+        cell.input, cell.output = vb10_decode(cell.input), vb10_decode(cell.output)
+        if cell.control is not None:
+            cell.control = vb10_decode(cell.control)
+    else:
+        cell.model = vb10_decode(cell.model)
+        cell.conns = [(f, vb10_decode(a)) for f, a in cell.conns]
+
+
+def _fill_omitted(cell: blif.Subckt, models: dict[str, blif.Model]) -> bool:
+    """Adds `formal=unconn` for each input formal of the model that the instance omits; true when
+    it added any."""
+    sub = models.get(cell.model)
+    if sub is None:
+        return False
+    given = {f for f, _ in cell.conns}
+    missing = [f for f in sub.inputs if f not in given]
+    cell.conns += [(f, UNCONN) for f in missing]
+    return bool(missing)
+
+
+def vtr_normalize(model: blif.Model, models: dict[str, blif.Model] | None = None) -> blif.Model:
+    """model with the rewrites of `write_blif --vtr` undone (see the module docstring), in place;
+    returns it. `models` (by decoded name; default just this model) gives the stubs that say which
+    input formals a `.subckt` omits."""
+    cache: dict[int, list[int]] = {}
+    model.name = vb10_decode(model.name)
+    model.inputs = [vb10_decode(n) for n in model.inputs]
+    model.outputs = [vb10_decode(n) for n in model.outputs]
+    for clock in (vb10_decode(n) for n in model.clocks):
+        if clock not in model.inputs:
+            model.inputs.append(clock)
+    model.clocks = []
+    filled = False
+    for cell in model.cells:
+        _decode_cell(cell)
+        if isinstance(cell, blif.Names):
+            _normalize_names(cell, cache)
+        elif isinstance(cell, blif.Latch):
+            _normalize_latch(cell)
+        elif models is not None:
+            filled = _fill_omitted(cell, models) or filled
+    if filled:
+        _ensure_generator(model, UNCONN, models)
+    _tie_undriven(model, models or {})
+    _mark_open_generator(model)
+    return model
+
+
+OPEN_MARK = (".param", "open")
+
+
+def _mark_open_generator(model: blif.Model) -> None:
+    """Marks the constant-0 generator of the net `unconn` (an open pin) so that it hashes and
+    renders differently from `gnd` (a tied-low net): VPR treats the two differently on a hard
+    block's input, and a bare `.names unconn` equals `.names gnd` otherwise."""
+    for cell in model.cells:
+        if (isinstance(cell, blif.Names) and cell.output == UNCONN and not cell.inputs
+                and not cell.rows and OPEN_MARK not in cell.attrs):
+            cell.attrs.append(OPEN_MARK)
+
+
+GND = "gnd"
+
+
+def _driven_nets(model: blif.Model, models: dict[str, blif.Model]) -> set[str]:
+    driven = set(model.inputs) | set(model.clocks)
+    for cell in model.cells:
+        driven.update(blif.cell_io(cell, models)[1])
+    return driven
+
+
+def _ensure_generator(
+    model: blif.Model, name: str, models: dict[str, blif.Model] | None
+) -> None:
+    """Adds `.names <name>` (a constant 0) when nothing drives the net."""
+    if name not in _driven_nets(model, models or {}):
+        model.cells.append(blif.Names(inputs=[], output=name, rows=[]))
+
+
+def _tie_undriven(model: blif.Model, models: dict[str, blif.Model]) -> None:
+    """§9.2: a net that has readers and no driver is x, which `--vtr` writes as `gnd` on logic and
+    primary outputs and as `unconn` on a hard block's input. Done on the model as read, before the
+    generators it names are added."""
+    if model.blackbox:
+        return
+    driven = _driven_nets(model, models)
+    for cell in model.cells:
+        if isinstance(cell, blif.Names):
+            cell.inputs = [GND if n not in driven else n for n in cell.inputs]
+        elif isinstance(cell, blif.Latch):
+            cell.input = GND if cell.input not in driven else cell.input
+        else:
+            sub = models.get(cell.model)
+            ins = set(sub.inputs) if sub is not None else set()
+            cell.conns = [(f, UNCONN if f in ins and a not in driven else a)
+                          for f, a in cell.conns]
+    for out in model.outputs:
+        if out not in driven:
+            model.cells.append(blif.Names(inputs=[GND], output=out, rows=[("1", "1")]))
+    reads = {n for cell in model.cells for n in blif.cell_io(cell, models)[0]}
+    for name in (GND, UNCONN):
+        if name in reads:
+            _ensure_generator(model, name, models)
+
+
+def vtr_normalize_netlist(netlist: blif.Netlist) -> blif.Netlist:
+    """Every model of the netlist through vtr_normalize (the stubs decode first, so a `.subckt`
+    finds its model under the decoded name)."""
+    for model in netlist.models:
+        model.name = vb10_decode(model.name)
+        model.inputs = [vb10_decode(n) for n in model.inputs]
+    models = {m.name: m for m in netlist.models}
+    for model in netlist.models:
+        vtr_normalize(model, models)
+    used = {c.model for m in netlist.models for c in m.cells if isinstance(c, blif.Subckt)}
+    netlist.models = [m for i, m in enumerate(netlist.models)
+                      if i == 0 or not m.blackbox or m.name in used]
+    return netlist
+
+
 # --------------------------------------------------------------------------- CLI
 
 
@@ -718,6 +931,8 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--quiet", action="store_true", help="no diff output, exit code only")
     ap.add_argument("--implicit-models", action="store_true",
                     help="an undefined $-model is a black box whose formals are those used")
+    ap.add_argument("--vtr-normalize", action="store_true",
+                    help="undo write_blif --vtr's rewrites on both files before comparing")
     return ap
 
 
@@ -728,7 +943,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if len(files) != (1 if args.canon else 2):
         ap.error("--canon takes one file" if args.canon else "expected two files")
     try:
-        canon = [canonicalize(load(f, args.implicit_models), args.keep_attrs) for f in files]
+        nets = [load(f, args.implicit_models) for f in files]
+        if args.vtr_normalize:
+            nets = [vtr_normalize_netlist(net) for net in nets]
+        canon = [canonicalize(net, args.keep_attrs) for net in nets]
     except blif.BlifError as exc:
         print(f"{TOOL}: {exc}", file=sys.stderr)
         return 2
@@ -738,6 +956,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if canon[0] == canon[1]:
         return 0
     if not args.quiet:
+        if args.vtr_normalize and hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(errors="surrogateescape")  # a decoded 0xFE name may differ
         for line in diff_lines(canon[0], canon[1], files[0], files[1]):
             print(line)
     return 1
