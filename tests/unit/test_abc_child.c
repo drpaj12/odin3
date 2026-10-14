@@ -41,8 +41,7 @@ enum {
     TIMEOUT_SLACK_MS = 3000,
     GONE_WAIT_MS = 3000,
     POLL_MS = 20,
-    OOM_MAX = 64,
-    CORE_SOFT = 1 << 20
+    OOM_MAX = 64
 };
 
 static char g_dir[DIR_CAP];
@@ -298,7 +297,7 @@ static bool line_is(const char *text) {
  * fixture's own report lines. */
 static bool line_allowed(const char *line) {
     static const char *const prefixes[] = {
-        "PATH=", "HOME=", "TMPDIR=", "LC_ALL=", "PWD=", "stdin-", "core:", "pwd:", "args:"};
+        "PATH=", "HOME=", "TMPDIR=", "LC_ALL=", "ODIN3_ABC_PARENT=", "PWD=", "stdin-", "core:", "pwd:", "args:"};
     for (size_t i = 0; i < sizeof prefixes / sizeof prefixes[0]; i++) {
         if (strncmp(line, prefixes[i], strlen(prefixes[i])) == 0) {
             return true;
@@ -307,22 +306,18 @@ static bool line_allowed(const char *line) {
     return false;
 }
 
-/* Runs env.sh with this process's core limit raised and a stray variable set, as the host might. */
+/* Runs env.sh with a stray variable set, as the host might; this process's core limit must be
+ * the same after (it is the child that sets its own, not the core around the spawn). */
 static odin3_status run_env_fixture(odin3_abc_child_res *res) {
-    struct rlimit core;
-    TEST_ASSERT_EQUAL_INT(0, getrlimit(RLIMIT_CORE, &core));
-    struct rlimit saved = core;
-    if (core.rlim_max == RLIM_INFINITY || core.rlim_max >= CORE_SOFT) {
-        core.rlim_cur = CORE_SOFT;
-        TEST_ASSERT_EQUAL_INT(0, setrlimit(RLIMIT_CORE, &core));
-    }
+    struct rlimit before;
+    TEST_ASSERT_EQUAL_INT(0, getrlimit(RLIMIT_CORE, &before));
     TEST_ASSERT_EQUAL_INT(0, setenv("ODIN3_CHILD_SECRET", "leak", 1));
     odin3_status st = run_fixture("env.sh", res);
     (void)unsetenv("ODIN3_CHILD_SECRET");
     struct rlimit after;
     TEST_ASSERT_EQUAL_INT(0, getrlimit(RLIMIT_CORE, &after));
-    TEST_ASSERT_EQUAL_UINT64(core.rlim_cur, after.rlim_cur); /* the parent's limit is restored */
-    (void)setrlimit(RLIMIT_CORE, &saved);
+    TEST_ASSERT_EQUAL_UINT64(before.rlim_cur, after.rlim_cur);
+    TEST_ASSERT_EQUAL_UINT64(before.rlim_max, after.rlim_max);
     return st;
 }
 
@@ -348,7 +343,9 @@ static void check_environment_lines(void) {
 
 static void check_fixture_report(void) {
     assert_line("stdin-eof");
-    assert_line("core:0");
+    char parent[PATH_CAP];
+    (void)snprintf(parent, sizeof parent, "ODIN3_ABC_PARENT=%ld", (long)getpid());
+    assert_line(parent);
     assert_line("args:-f unused.cmd");
     char want[PATH_CAP + 8];
     (void)snprintf(want, sizeof want, "pwd:%s", g_dir);

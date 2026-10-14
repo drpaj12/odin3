@@ -31,7 +31,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -41,8 +40,8 @@ extern char **environ;
 enum {
     READ_BYTES = 65536, /* one read from the pipe */
     LINE_BYTES = 65536, /* the longest line forwarded whole; longer lines go in pieces */
-    ENV_BYTES = 4096,   /* storage of the four environment strings */
-    ENV_SLOTS = 5,      /* PATH, HOME, TMPDIR, LC_ALL and the terminator */
+    ENV_BYTES = 4096,   /* storage of the environment strings */
+    ENV_SLOTS = 6,      /* PATH, HOME, TMPDIR, LC_ALL, ODIN3_ABC_PARENT and the terminator */
     SLICE_MS = 10,      /* the longest wait between two looks at the child */
     MILLIS_PER_SECOND = 1000,
     MIN_FD = 3, /* the pipe lives above stdin, stdout and stderr */
@@ -137,6 +136,12 @@ static void build_env(run_state *st) {
         used += (size_t)wrote + 1;
         st->envp[count++] = slot;
     }
+    /* The child exits at once when this is not its parent (it outlived us before it started). */
+    size_t room = sizeof st->env_store - used;
+    int wrote = snprintf(st->env_store + used, room, "ODIN3_ABC_PARENT=%ld", (long)getpid());
+    if (wrote > 0 && (size_t)wrote < room) {
+        st->envp[count++] = st->env_store + used;
+    }
     st->envp[count] = NULL;
 }
 
@@ -217,8 +222,8 @@ static int set_attributes(posix_spawnattr_t *attr) {
     return err;
 }
 
-/* The posix_spawn call proper, with this process's core limit at 0 for its duration (the child
- * inherits it) and restored after. Returns 0 or an errno. */
+/* The posix_spawn call proper. (The child sets its own core limit; this process's is not touched.)
+ * Returns 0 or an errno. */
 static int spawn_child(run_state *st, int write_fd) {
     const odin3_abc_child_req *req = st->req;
     posix_spawn_file_actions_t actions;
@@ -239,17 +244,7 @@ static int spawn_child(run_state *st, int write_fd) {
     if (err == 0) {
         char *const argv[] = {(char *)req->program, (char *)req->option, (char *)req->argument,
                               NULL};
-        struct rlimit saved;
-        struct rlimit none = {0, 0};
-        bool have = getrlimit(RLIMIT_CORE, &saved) == 0;
-        if (have) {
-            none.rlim_max = saved.rlim_max;
-            (void)setrlimit(RLIMIT_CORE, &none);
-        }
         err = posix_spawn(&st->pid, req->program, &actions, &attr, argv, st->envp);
-        if (have) {
-            (void)setrlimit(RLIMIT_CORE, &saved);
-        }
     }
     (void)posix_spawnattr_destroy(&attr);
     (void)posix_spawn_file_actions_destroy(&actions);

@@ -42,6 +42,8 @@ enum {
     TIMEOUT_SECONDS = 2,
     GONE_WAIT_MS = 3000,
     POLL_MS = 20,
+    SMALL_CAP = 100000,
+    READ_SLACK = 65536,
     EXIT_STATUS = 1,
     CHILD_RUN = 0,
     LINKED_RUN = 1
@@ -54,6 +56,7 @@ static char g_dir[DIR_CAP];
 static char g_tool_dir[DIR_CAP]; /* holds the wrapper script */
 static char g_real[PATH_CAP];    /* the build's odin3-abc */
 static char g_wrapper[PATH_CAP]; /* the 2 GiB wrapper around it */
+static char g_log[FILE_CAP];     /* the child's output, for the tests that read it */
 
 void setUp(void) {
     (void)snprintf(g_dir, sizeof g_dir, "/tmp/odin3-abc-real-XXXXXX");
@@ -77,6 +80,9 @@ static void remove_dir_files(void) {
 void tearDown(void) {
     (void)unsetenv("ODIN3_ABC_EXE");
     odin3_abc_test_set_child_limits(NULL);
+    (void)unsetenv("HOME");
+    (void)setenv("HOME", "/", 1);
+    g_log[0] = '\0';
     remove_dir_files();
     (void)rmdir(g_dir);
 }
@@ -176,7 +182,8 @@ static void write_blif_command_file(uint32_t run, char *cmd_path) {
 
 static void log_line(void *user, const char *line) {
     (void)user;
-    (void)line;
+    size_t used = strlen(g_log);
+    (void)snprintf(g_log + used, sizeof g_log - used, "%s\n", line);
 }
 
 /* One child run of a command file. */
@@ -387,6 +394,141 @@ static void test_pin_check_refuses_another_commit(void) {
     TEST_ASSERT_EQUAL_STRING(want, got);
 }
 
+/* A command file of one text, as run 0's. */
+static void write_text_command_file(const char *text, char *cmd_path) {
+    run_path(CHILD_RUN, "cmd", cmd_path, PATH_CAP);
+    write_file(&(file_text){cmd_path, text});
+}
+
+static bool exists_in_run_dir(const char *name) {
+    char path[PATH_CAP];
+    (void)snprintf(path, sizeof path, "%s/%s", g_dir, name);
+    return access(path, F_OK) == 0;
+}
+
+static void test_user_rc_files_are_not_sourced(void) {
+    char rc[PATH_CAP];
+    char text[PATH_CAP];
+    char cmd_path[PATH_CAP];
+    (void)snprintf(rc, sizeof rc, "%s/.abc.rc", g_dir);
+    (void)snprintf(text, sizeof text, "!touch %s/rc.ran\n", g_dir);
+    write_file(&(file_text){rc, text}); /* HOME's, and the working directory's, both */
+    TEST_ASSERT_EQUAL_INT(0, setenv("HOME", g_dir, 1));
+    write_text_command_file("version\n", cmd_path);
+    odin3_abc_child_res res;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          run_child(&(child_job){g_wrapper, cmd_path, CHILD_RUN, 0}, &res));
+    TEST_ASSERT_FALSE(exists_in_run_dir("rc.ran"));
+    odin3_abc_child_res pin = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_child_check_pin(g_real, &pin));
+    TEST_ASSERT_FALSE(exists_in_run_dir("rc.ran"));
+}
+
+static void test_child_has_no_core_file_limit(void) {
+    char text[PATH_CAP];
+    char cmd_path[PATH_CAP];
+    (void)snprintf(text, sizeof text, "!grep -h 'core file' /proc/self/limits > %s/core.txt\n", g_dir);
+    write_text_command_file(text, cmd_path);
+    odin3_abc_child_res res;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          run_child(&(child_job){g_wrapper, cmd_path, CHILD_RUN, 0}, &res));
+    char core_path[PATH_CAP];
+    char got[PATH_CAP];
+    (void)snprintf(core_path, sizeof core_path, "%s/core.txt", g_dir);
+    read_file(core_path, got, sizeof got);
+    char soft[PATH_CAP];
+    char hard[PATH_CAP];
+    TEST_ASSERT_EQUAL_INT_MESSAGE(2, sscanf(got, "Max core file size %511s %511s", soft, hard), got);
+    TEST_ASSERT_EQUAL_STRING("0", soft);
+    TEST_ASSERT_EQUAL_STRING("0", hard);
+}
+
+/* Output past the cap kills the child and its group; the status says so; nothing is left. */
+static void test_output_cap_kills_a_real_child(void) {
+    char cmd_path[PATH_CAP];
+    write_text_command_file("!yes flood\n", cmd_path);
+    odin3_abc_child_limits lowered = {0, SMALL_CAP};
+    odin3_abc_test_set_child_limits(&lowered);
+    odin3_abc_child_res res;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE,
+                          run_child(&(child_job){g_wrapper, cmd_path, CHILD_RUN, 0}, &res));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ABC_CHILD_OUTPUT, res.kind);
+    TEST_ASSERT_EQUAL_UINT64(SMALL_CAP, res.output_limit);
+    TEST_ASSERT_TRUE(res.output_bytes > SMALL_CAP);
+    TEST_ASSERT_TRUE(res.output_bytes <= SMALL_CAP + READ_SLACK);
+    TEST_ASSERT_TRUE(no_children());
+}
+
+/* A failing command that is not `exit` leaves ABC's exit status 0 (Abc_RealMain returns 0): the
+ * runner says OK and the failure is in the log and in the missing out.blif, which is what the
+ * engine (3D-5) must test for. */
+static void test_failing_command_exits_zero_with_a_diagnostic(void) {
+    char text[PATH_CAP];
+    char cmd_path[PATH_CAP];
+    (void)snprintf(text, sizeof text, "read_blif %s/nonexistent.blif\nwrite_blif %s/abc0.out.blif\n",
+                   g_dir, g_dir);
+    write_text_command_file(text, cmd_path);
+    odin3_abc_child_res res;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          run_child(&(child_job){g_wrapper, cmd_path, CHILD_RUN, 0}, &res));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ABC_CHILD_OK, res.kind);
+    TEST_ASSERT_EQUAL_INT(0, res.code);
+    TEST_ASSERT_FALSE(exists_in_run_dir("abc0.out.blif"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(g_log, "rror"), g_log);
+}
+
+static const char *const k_scripts[] = {"foreign.sh", "orphan.sh"};
+
+/* A script standing in for the wrapper: the real program with ODIN3_ABC_PARENT set as given
+ * (pid 1, or the script's own pid) and, for "own", in the background and its own process group so
+ * the runner's group kill does not reach it; the script then exits at once. */
+static void make_parent_script(const char *name, bool background, char *path, size_t cap) {
+    (void)snprintf(path, cap, "%s/%s", g_tool_dir, name);
+    FILE *file = fopen(path, "w");
+    TEST_ASSERT_NOT_NULL(file);
+    if (background) {
+        (void)fprintf(file,
+                      "#!/bin/sh\nset -m\nODIN3_ABC_PARENT=$$ '%s' \"$@\" >/dev/null 2>&1 &\n"
+                      "echo $! > spin.pid\nsleep 0.3\n",
+                      g_real);
+    } else {
+        (void)fprintf(file, "#!/bin/sh\nODIN3_ABC_PARENT=1 exec '%s' \"$@\"\n", g_real);
+    }
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    TEST_ASSERT_EQUAL_INT(0, chmod(path, 0755));
+}
+
+/* odin3-abc whose named parent is not its parent exits 1 at once. */
+static void test_child_refuses_a_foreign_parent(void) {
+    char script[PATH_CAP];
+    char cmd_path[PATH_CAP];
+    make_parent_script("foreign.sh", false, script, sizeof script);
+    write_text_command_file("version\n", cmd_path);
+    odin3_abc_child_res res;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE,
+                          run_child(&(child_job){script, cmd_path, CHILD_RUN, 0}, &res));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ABC_CHILD_EXIT, res.kind);
+    TEST_ASSERT_EQUAL_INT(1, res.code);
+}
+
+/* The child dies with its parent: the script that started it exits while it sleeps in a long
+ * command. */
+static void test_child_dies_with_its_parent(void) {
+    char script[PATH_CAP];
+    char cmd_path[PATH_CAP];
+    make_parent_script("orphan.sh", true, script, sizeof script);
+    write_text_command_file("!sleep 600\n", cmd_path);
+    odin3_abc_child_res res;
+    (void)run_child(&(child_job){script, cmd_path, CHILD_RUN, 0}, &res);
+    char pid_path[PATH_CAP];
+    char text[PATH_CAP];
+    (void)snprintf(pid_path, sizeof pid_path, "%s/spin.pid", g_dir);
+    read_file(pid_path, text, sizeof text);
+    long orphan = strtol(text, NULL, 10);
+    TEST_ASSERT_TRUE(orphan > 1);
+    TEST_ASSERT_TRUE(wait_gone((pid_t)orphan));
+}
+
 /* The 2 GiB wrapper: prlimit around the real program (the real one itself without prlimit). */
 static void make_wrapper(void) {
     (void)snprintf(g_wrapper, sizeof g_wrapper, "%s", g_real);
@@ -417,9 +559,19 @@ int main(void) {
     RUN_TEST(test_runaway_command_times_out_and_leaves_nothing);
     RUN_TEST(test_pin_check_on_the_builds_own_program);
     RUN_TEST(test_pin_check_refuses_another_commit);
+    RUN_TEST(test_user_rc_files_are_not_sourced);
+    RUN_TEST(test_child_has_no_core_file_limit);
+    RUN_TEST(test_output_cap_kills_a_real_child);
+    RUN_TEST(test_failing_command_exits_zero_with_a_diagnostic);
+    RUN_TEST(test_child_refuses_a_foreign_parent);
+    RUN_TEST(test_child_dies_with_its_parent);
     char wrapper[PATH_CAP];
     (void)snprintf(wrapper, sizeof wrapper, "%s/limited.sh", g_tool_dir);
     (void)unlink(wrapper);
+    for (size_t i = 0; i < sizeof k_scripts / sizeof k_scripts[0]; i++) {
+        (void)snprintf(wrapper, sizeof wrapper, "%s/%s", g_tool_dir, k_scripts[i]);
+        (void)unlink(wrapper);
+    }
     (void)rmdir(g_tool_dir);
     return UNITY_END();
 }
