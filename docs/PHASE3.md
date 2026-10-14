@@ -703,6 +703,13 @@ then the options considered.
         square, one `WIDTH`; a stub is at the largest `WIDTH` used), decision 17's `-j3`, and the
         Order-of-work status note.
 
+30. **3A `flatten` spec and plan approved** (Peter, 2026-10-14: "3A: all recommended";
+    `docs/specs/2026-10-14-3A-flatten-design.md`, `docs/plans/2026-10-14-3A-flatten-plan.md`):
+    (1) the IR addition `odin3_prov_derive_hier` is approved; (2) modules left unused after
+    `flatten` stay in the design (no module-retire IR change); (3) the Phase 3 script becomes
+    `proc; opt; flatten; opt` (as Parmys runs `opt -full` after `flatten`), which updates the exit
+    item and the 3H script strings; (4) DESIGN §13 #6, 3A side: dotted instance-path names, the
+    slash path in provenance.
 31. **3G `wreduce` spec and plan, and 3C `hardmap` spec, approved** (Peter, 2026-10-14: "All 10
     yes"; `docs/specs/2026-10-14-3G-wreduce-design.md`, `docs/plans/2026-10-14-3G-wreduce-plan.md`,
     `docs/specs/2026-10-14-3C-hardmap-design.md`). 3G: a faithful Yosys 0.55 `wreduce` placed
