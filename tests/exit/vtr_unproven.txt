@@ -1,0 +1,17 @@
+# The VTR benchmarks (paths relative to $VTR_ROOT/vtr_flow/benchmarks/verilog) that equiv-check cannot decide:
+# the `unproven` class (2H review I1). They are NOT proven identical or equivalent to Parmys and count
+# as passing nowhere: exit-check prints them in their own UNPROVEN bucket, and the Phase 2 exit
+# statement must say "N of 31 proven, 5 unproven". The exit code is 0 only when every unproven design
+# is listed here; one that is not listed fails the run, one that now passes (XPASS) fails the run. A
+# crash, a signal, a cap kill or our own timeout is `hard` and can never be listed.
+# Syntax: `<path> [needle] <reason>`, elab-sweep's. The needle must appear in the design's log. Each
+# entry goes when the limit is lifted.
+#
+# equiv-check exit 4 = unproven: an ABC timeout (--equiv-timeout, default 600 s), several clock domains,
+# or a failed check where black-box pairs were guessed.
+
+multiclock_reader_writer.v [more than one clock domain] equiv-check (ABC dsec) models one clock: the golden has two ('clock_reader_head', 'clock_writer_head'); unproven, not identical
+stereovision3.v [more than one clock domain] equiv-check models one clock: the golden has two ('tm3_clk_v0', 'tm3_clk_v2'); unproven, not identical
+LU32PEEng.v [timed out after 600 seconds] ABC dsec on the 5283 cut hard blocks and 19695 latches does not finish within equiv-check's 600 s timeout (pairing is exact: 4 guessed pairs); unproven, not identical
+LU64PEEng.v [timed out after 600 seconds] ABC dsec does not finish within equiv-check's 600 s timeout on this size of netlist (the largest LU design); unproven, not identical
+mcml.v [timed out after 600 seconds] ABC dsec does not finish within equiv-check's 600 s timeout (51597 latches); and 296 of its 375 unnamed hard blocks are paired by guess (copies of one RAM/multiplier whose pins simulation leaves constant, e.g. the write enables), so a finished run could only be inconclusive; unproven, not identical

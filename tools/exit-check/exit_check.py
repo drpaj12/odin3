@@ -5,7 +5,9 @@ Usage::
     exit-check --odin3 O --yosys Y --arch A [--sp-splice S] [--netlist-compare N]
                [--equiv-check E] [--golden-root D] [--techlib L] [--primitives P]
                [--vtr-config-template X | --config C | --no-config]
-               [--expect-fail F]... [--jobs J] [--mem-cap C] [--cap-for SUFFIX=C]...
+               [--expect-fail F]... [--expect-unproven F]... [--expect-no-golden F]...
+               [--eqx-record F]... [--min-checked N] [--vtr-root V] [--jobs J] [--mem-cap C]
+               [--cap-for SUFFIX=C]...
                [--equiv-timeout S] [--work DIR] [--root R] [--limit N] [--partial]
                <dir or file>...
 
@@ -18,8 +20,10 @@ each design:
    VTR benchmark under ``benchmarks/verilog``; ``D`` defaults to the k6_frac tree of
    ``micro-top``. A design whose golden does not exist and whose oracle run left no ``.prov`` at
    all (the oracle never ran on it: the 41 Koios designs have no k6_frac golden) is **skipped (no
-   golden)**, counted apart and no failure; one with a ``.prov`` (Parmys rejected it, or it was
-   capped) is an ``error``;
+   golden)**, counted apart (a ``no-golden`` bucket that is never in a pass count) and no failure;
+   one with a ``.prov`` is checked against it (below): status ``failed`` is a **reject** (Parmys
+   itself rejects the design, or an oracle harness gap listed as ``no-golden``), anything else
+   without a golden BLIF is an ``error``;
 2. ``sp-splice`` (Odin III's front end through ``opt`` and ``proc``, then Yosys 0.55 with Parmys
    for the rest of VTR's script) runs with the same ``--arch`` and ``--top`` (the golden's first
    ``.model``) and the same Parmys config as the goldens' run (VTR's
@@ -30,20 +34,56 @@ each design:
    as a ``.subckt`` with no model): exit 0 is ``identical``;
 4. else ``equiv-check --x-report --match-unnamed`` (Parmys writes no ``.cname`` for a hard block
    and numbers its output nets with counters, ``$mul~14[0]``, so equiv-check pairs the blocks by
-   simulation signature, not by name) golden vs output: exit 0 is ``equivalent``, exit 3
-   ``equivalent outside x-cones`` (``eq-x``; the removed outputs are listed), exit 1 ``differs``,
-   anything else ``error``. Each of these children runs under ``memcap.run``.
+   simulation signature, not by name) golden vs output, classified by its exit code: 0
+   ``equivalent``; 3 ``eq-x`` (equivalent outside the x-cones; the removed outputs are listed);
+   1 ``differs``, but only when its output carries the line ``equiv-check: NOT equivalent`` (an
+   exit 1 without it, a Python crash or a failing ``prlimit``, is an ``error``, ``hard`` when it
+   is a traceback); 4 ``unproven`` (ABC timed out, or the check failed only where black-box pairs
+   were guessed: a tool limit); 5 ``hard`` (ABC died of a signal or equiv-check ran out of
+   memory); anything else ``error``. Each of these children runs under ``memcap.run``, and so
+   does sp-splice itself, with the process-group-killing timeout: a timeout leaves no orphaned
+   odin3 or Yosys child.
 
-Decision 13: ``identical`` and ``equivalent`` count toward the exit bar. ``eq-x`` does not unless
-the design is listed (its excluded outputs reviewed and recorded in the exceptions list);
-``differs`` and ``error`` never do unless listed.
+Every golden is first checked against its ``.prov``: ``vtr_commit`` against the VTR checkout
+(``--vtr-root``, else ``$VTR_ROOT``; its tree must be clean and the golden's ``vtr_dirty_files``
+0), ``arch_sha256`` against ``--arch``, ``source_sha256`` against the design (a comment-only
+difference, ``// elab-check:`` lines and trailing blanks, is accepted when the upstream file named
+by ``source=`` still has the recorded hash) and, for a golden BLIF, ``blif_sha256`` against the
+file. A mismatch is an ``error`` that says so: the comparison would be against a golden that is
+not this design's, this arch's or this VTR's.
 
-``--expect-fail F`` (repeatable) is elab-sweep's list, parsed by it: ``<relative path> [needle]
-<reason>``; the path is relative to ``--root`` (else the directory argument, else the file name).
-A listed design must fail to reach ``identical``/``equivalent`` and its log must hold the needle.
-An unlisted ``eq-x``, ``differs`` or ``error``, a listed design that now passes (XPASS), a needle
-that does not match, and (without ``--partial``) a listed path that names no design fail the run.
-A crash, a cap kill (out of memory) and a timeout are **never** expected results, listed or not.
+Result classes (decision 13; the Phase 2 exit claim is "micros + VTR identical/equivalent to
+Parmys"):
+
+=============== ======= ===============================================================
+class           passes  meaning
+=============== ======= ===============================================================
+identical       yes     netlist-compare: the same netlist
+equivalent      yes     equiv-check proved it
+eq-x            record  equivalent outside x-cones; passes only when ``--eqx-record`` lists
+                        the design with exactly the outputs observed (count, hash, buses)
+listed-reject   yes     Parmys itself rejects the design (``--expect-fail`` + needle)
+unproven        no      ABC/SAT timeout or an inconclusive guess; exit 0 only when every such
+                        design is in ``--expect-unproven`` (printed in its own bucket)
+no-golden       no      no golden, or an oracle failure that is a harness gap (missing include
+                        or ``-D``; ``--expect-no-golden`` + needle); own bucket, never counted
+differs         no      equiv-check's NOT-equivalent verdict
+error           no      a tool or usage error
+hard            no      a crash, a signal, a memory-cap kill or our own timeout; never listable
+=============== ======= ===============================================================
+
+``--expect-fail`` (listed-reject), ``--expect-no-golden`` and ``--expect-unproven`` take
+elab-sweep's list: ``<relative path> [needle] <reason>``; the path is relative to ``--root``
+(else the directory argument, else the file name); the needle must appear in the design's log.
+``--eqx-record`` takes the eq-x record (``design <path> <count> <sha256> <reason>`` and
+``bus <path> <name> <count>`` lines, see ``tests/exit``). An entry whose design now passes
+(XPASS), a needle that does not match, an eq-x whose outputs differ from the record, and
+(without ``--partial``) an entry that names no design fail the run. ``differs``, ``error`` and
+``hard`` are never listable.
+
+The run also fails when fewer than ``--min-checked N`` designs (default 1) were proven
+(identical + equivalent + recorded eq-x): a wrong or empty golden tree cannot report green. A
+``--golden-root`` that is not a directory is a usage error.
 
 Output: one line per design as it finishes, then a summary table, every cause that is not a pass,
 and a totals line. ``--work DIR`` (else a fresh temporary directory, printed and left in place)
@@ -52,14 +92,17 @@ own files. Nothing is deleted. ``--jobs J`` runs J designs at once, refused when
 exceeds 60% of MemTotal or the heavy slice; a design with a ``--cap-for`` cap larger than
 ``--mem-cap`` runs alone.
 
-Exit codes: 0 every design identical, equivalent or listed; 1 anything else; 2 usage or input
-error; 77 skipped (an ASan odin3 and no way to cap it).
+Exit codes: 0 every design identical, equivalent, a recorded eq-x, a listed reject, a listed
+unproven or no-golden, and at least ``--min-checked`` proven; 1 anything else; 3 a ``hard``
+failure (a crash, signal, memory-cap kill or timeout) happened; 2 usage or input error; 77
+skipped (an ASan odin3 and no way to cap it).
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
+import hashlib
 import os
 import re
 import shutil
@@ -80,13 +123,21 @@ import memcap  # noqa: E402
 from elab_equiv import format_cap  # noqa: E402
 
 TOOL = "exit-check"
-EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_SKIP = 0, 1, 2, 77
+EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_HARD, EXIT_SKIP = 0, 1, 2, 3, 77
 IDENTICAL, EQUIVALENT, EQ_X, DIFFERS, ERROR, SKIP, NO_GOLDEN = (
     "identical", "equivalent", "eq-x", "differs", "error", "skip", "no-golden")
+UNPROVEN, REJECT = "unproven", "reject"
 PASSING = (IDENTICAL, EQUIVALENT)
-CLASS_ORDER = (IDENTICAL, EQUIVALENT, EQ_X, DIFFERS, ERROR)
+# Verdict classes (see verdict()): the passing ones, the two buckets that are neither pass nor
+# failure, and every cause that fails the run.
+CLS_EQX_OK, CLS_REJECT_OK = "eqx-recorded", "listed-reject"
+CLS_UNPROVEN_OK, CLS_NOGOLDEN, CLS_NOGOLDEN_OK = "unproven-listed", "nogolden", "nogolden-listed"
+FAIL_CLASSES = (EQ_X, "eqx-mismatch", DIFFERS, ERROR, "hard", UNPROVEN, REJECT, "XPASS",
+                "needle")
 TIMEOUT_S = elab_sweep.TIMEOUT_S
 EQUIV_EXIT_XCONE = 3  # equiv-check --x-report: equivalent outside the x-cones
+EQUIV_EXIT_UNPROVEN = 4  # ABC timed out, or only guessed black-box pairs failed: no verdict
+EQUIV_EXIT_HARD = 5  # ABC died of a signal, or equiv-check ran out of memory
 SPLICE_EXIT_SKIP = 77
 LOG_LINES = 60  # lines of one child's output kept in a design's log
 WHY_WIDTH = 160
@@ -97,6 +148,9 @@ _SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 _SIGNALLED = re.compile(r"\(exit (-\d+|137)\)")
 _PATH = re.compile(r"(?:/[^/\s:]+)+/([^/\s:]+)")
 _NOT_EQUIV = re.compile(r"^equiv-check: (NOT equivalent.*|x-report: .*)$", re.MULTILINE)
+_VERDICT_LINE = re.compile(r"^equiv-check: NOT equivalent", re.MULTILINE)
+_BUS_INDEX = re.compile(r"\[\d+\]$")
+ELAB_DIRECTIVE = "// elab-check:"
 
 
 class UsageError(elab_sweep.UsageError):
@@ -125,6 +179,10 @@ class Config:
     work: Path
     cap: int
     caps: dict[str, int]
+    vtr_root: Path
+    vtr_commit: str
+    arch_sha256: str
+    min_checked: int = 1
     techlib: str | None = None
     primitives: str | None = None
     config: str | None = None
@@ -198,19 +256,81 @@ def golden_path(root: Path, source: Path) -> Path:
     return Path(elab_sweep.load_micro_top().golden_path(root, str(source)))
 
 
-def golden_problem(golden: Path) -> str:
-    """Why ``golden`` cannot be used (empty when it can): the oracle's recorded status."""
-    if golden.is_file():
+def read_prov(path: Path) -> dict[str, str]:
+    """The ``key=value`` lines of a golden's ``.prov``."""
+    return dict(line.partition("=")[::2] for line in
+                path.read_text(encoding="utf-8", errors="replace").splitlines() if "=" in line)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def source_key(path: Path) -> str:
+    """A design's text without ``// elab-check:`` directive lines and trailing blanks."""
+    lines = [line.rstrip() for line in path.read_text(encoding="utf-8", errors="replace")
+             .splitlines() if not line.lstrip().startswith(ELAB_DIRECTIVE)]
+    return "\n".join(lines).strip()
+
+
+def source_matches(cfg: Config, path: Path, prov: dict[str, str]) -> bool:
+    """The design is the source the golden was made from: the same bytes, or the same text apart
+    from comment directives and trailing blanks when the upstream file ``source=`` names still has
+    the recorded hash."""
+    recorded = prov.get("source_sha256", "")
+    if sha256_file(path) == recorded:
+        return True
+    upstream = cfg.vtr_root / prov.get("source", "")
+    return (bool(recorded) and upstream.is_file() and sha256_file(upstream) == recorded
+            and source_key(upstream) == source_key(path))
+
+
+def prov_problem(cfg: Config, item: elab_sweep.Item, golden: Path, prov: dict[str, str]) -> str:
+    """Why the golden's provenance is not this run's (empty when it matches): vtr_commit, a clean
+    VTR tree, arch, source and, for a golden BLIF, its own hash."""
+    def short(value: str | None) -> str:
+        return (value or "missing")[:12]
+
+    bad = []
+    if prov.get("vtr_commit") != cfg.vtr_commit:
+        bad.append(f"vtr_commit golden={short(prov.get('vtr_commit'))} "
+                   f"current={short(cfg.vtr_commit)}")
+    if prov.get("vtr_dirty_files") != "0":
+        bad.append(f"the golden was made from a VTR tree with vtr_dirty_files="
+                   f"{prov.get('vtr_dirty_files', 'missing')}")
+    if prov.get("arch_sha256") != cfg.arch_sha256:
+        bad.append(f"arch_sha256 golden={short(prov.get('arch_sha256'))} "
+                   f"current={short(cfg.arch_sha256)}")
+    if not source_matches(cfg, item.path, prov):
+        bad.append(f"source_sha256 golden={short(prov.get('source_sha256'))} "
+                   f"current={short(sha256_file(item.path))}")
+    if prov.get("status") == "ok" and golden.is_file() \
+            and prov.get("blif_sha256") != sha256_file(golden):
+        bad.append(f"blif_sha256 golden={short(prov.get('blif_sha256'))} "
+                   f"current={short(sha256_file(golden))}")
+    if not bad:
         return ""
-    prov = golden.with_suffix(".prov")
-    if prov.is_file():
-        for line in prov.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith("status="):
-                status = line.partition("=")[2]
-                verb = "Parmys rejected the design" if status == "failed" else \
-                    f"Parmys run {status} (no verdict)"
-                return f"no Parmys golden: {verb} (status={status})"
-    return f"no Parmys golden: {golden} does not exist"
+    return ("golden provenance mismatch (regenerate it with tools/run-oracle.sh): "
+            + "; ".join(bad))
+
+
+def golden_status(golden: Path, prov: dict[str, str]) -> Result | None:
+    """The Result of a golden that cannot be compared with, None when it can: ``failed`` is a
+    Parmys rejection (a REJECT), any other status without a BLIF an error."""
+    status = prov.get("status", "")
+    if status == "ok" and golden.is_file():
+        return None
+    if status == "failed":
+        return Result(REJECT, why=f"no Parmys golden: Parmys rejected the design "
+                      f"(status={status})")
+    if status == "ok":
+        return Result(ERROR, why=f"no Parmys golden: {golden} does not exist (status=ok)")
+    return Result(ERROR, why=f"no Parmys golden: Parmys run {status or 'unknown'} (no verdict) "
+                  f"(status={status})")
 
 
 # ---- running the children ---------------------------------------------------------------------
@@ -266,19 +386,15 @@ def splice_argv(cfg: Config, item: elab_sweep.Item, top: str, work: Path,
 def run_splice(cfg: Config, item: elab_sweep.Item, top: str, work: Path,
                log: list[str]) -> Path | Result:
     """sp-splice on the design: the output BLIF, or the Result of its failure. sp-splice caps its
-    own children at the design's cap (it is one Python process and needs none itself)."""
+    own children at the design's cap; it runs under ``memcap.run`` as well, with the timeout, so
+    that a timeout kills its whole process group and leaves no odin3 or Yosys child behind."""
     config = cfg.config
     if cfg.config_template is not None:
         config = str(write_parmys_config(cfg, item.path, work))
     argv = splice_argv(cfg, item, top, work, config)
-    log.append("$ " + " ".join(argv))
-    try:
-        done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
-                              timeout=TIMEOUT_S, check=False, pass_fds=elab_sweep.lock_fds())
-    except subprocess.TimeoutExpired:
-        return Result(ERROR, why=f"timed out after {TIMEOUT_S} s", hard=True)
-    except OSError as exc:
-        return Result(ERROR, why=f"cannot run {argv[0]}: {exc}", hard=True)
+    done = run_capped(argv, cfg.cap_of(item), log)
+    if isinstance(done, Result):
+        return done
     log.append(clip((done.stdout or "") + (done.stderr or "")))
     if done.returncode == SPLICE_EXIT_SKIP:
         return Result(SKIP, why="cannot be capped")
@@ -329,11 +445,18 @@ def run_equiv(cfg: Config, golden: Path, out: Path, cap: int, log: list[str]) ->
         cones = cone_names(text)
         return Result(EQ_X, why=f"{len(cones)} output(s) in x-cones: " + one_line(
             ", ".join(cones)), cones=cones)
-    if code == 1:
+    if code == 1 and _VERDICT_LINE.search(text):
         return Result(DIFFERS, why=differs_why(text))
-    inconclusive = re.search(r"^equiv-check: (inconclusive: .*)$", text, re.MULTILINE)
-    if code == 2 and inconclusive:  # a guessed black-box pairing failed: no verdict either way
-        return Result(ERROR, why=one_line(inconclusive.group(1)))
+    if code == EQUIV_EXIT_UNPROVEN:  # an ABC timeout or a failed guess: a tool limit, no verdict
+        note = re.search(r"^equiv-check: (unproven: .*|inconclusive: .*)$", text, re.MULTILINE)
+        return Result(UNPROVEN, why=one_line(note.group(1) if note else "no verdict"))
+    if code == EQUIV_EXIT_HARD:
+        return Result(ERROR, why="equiv-check: " + one_line(elab_sweep.first_error(text)),
+                      hard=True)
+    if code == 1:  # exit 1 without the verdict line: a crash or a failing prlimit, not "differs"
+        return Result(ERROR, why="equiv-check exited 1 without a NOT-equivalent verdict: "
+                      + one_line(elab_sweep.first_error(text)),
+                      hard="Traceback (most recent call last)" in text)
     return compare_failure(got, cap, "equiv-check")
 
 
@@ -359,11 +482,23 @@ def design_dir(cfg: Config, index: int, item: elab_sweep.Item) -> Path:
 
 def pipeline(cfg: Config, item: elab_sweep.Item, work: Path, log: list[str]) -> Result:
     golden = golden_path(cfg.golden_root, item.path)
-    problem = golden_problem(golden)
+    prov_file = golden.with_suffix(".prov")
+    if not prov_file.is_file():
+        if golden.is_file():
+            return Result(ERROR, why=f"{golden.name} has no provenance record ({prov_file.name}): "
+                          "a golden of unknown origin")
+        return Result(NO_GOLDEN, why=f"{golden.name} does not exist")  # the oracle never ran
+    prov = read_prov(prov_file)
+    problem = prov_problem(cfg, item, golden, prov)
     if problem:
-        if not golden.with_suffix(".prov").is_file():  # the oracle never ran on it
-            return Result(NO_GOLDEN, why=f"{golden.name} does not exist")
         return Result(ERROR, why=problem)
+    unusable = golden_status(golden, prov)
+    if unusable is not None:
+        oracle_log = golden.with_suffix(".log")
+        if oracle_log.is_file():  # the oracle's own error lines: a listing's needle may be there
+            log.append("oracle log: " + clip(oracle_log.read_text(encoding="utf-8",
+                                                                  errors="replace")))
+        return unusable
     try:
         top = str(elab_sweep.load_micro_top().first_model(golden))
     except (OSError, ValueError) as exc:
@@ -392,58 +527,165 @@ def run_design(cfg: Config, item: elab_sweep.Item, index: int) -> Result:
     return dataclasses.replace(result, secs=time.monotonic() - start, output=text)
 
 
+# ---- the lists and the eq-x record -------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EqxRecord:
+    """A reviewed eq-x design: the outputs equiv-check excluded (count, hash of the sorted names,
+    count per bus) and why they are x."""
+
+    count: int
+    sha256: str
+    reason: str
+    buses: dict[str, int]
+
+
+def bus_counts(names: Sequence[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for name in names:
+        bus = _BUS_INDEX.sub("", name)
+        counts[bus] = counts.get(bus, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def cones_digest(names: Sequence[str]) -> str:
+    return hashlib.sha256("\n".join(sorted(names)).encode("utf-8")).hexdigest()
+
+
+def read_eqx(path: Path) -> dict[str, EqxRecord]:
+    """The eq-x record: ``design <path> <count> <sha256> <reason>`` and ``bus <path> <name>
+    <count>`` lines (blank lines and ``#`` comments skipped); the bus counts must add up."""
+    designs: dict[str, tuple[int, str, str]] = {}
+    buses: dict[str, dict[str, int]] = {}
+    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        parts = raw.split(None, 4)
+        if not parts or parts[0].startswith("#"):
+            continue
+        where = f"{path}:{number}"
+        try:
+            if parts[0] == "design" and len(parts) == 5:
+                if parts[1] in designs:
+                    raise UsageError(f"{where}: '{parts[1]}' is recorded twice")
+                designs[parts[1]] = (int(parts[2]), parts[3], parts[4].strip())
+            elif parts[0] == "bus" and len(parts) == 4:
+                buses.setdefault(parts[1], {})[parts[2]] = int(parts[3])
+            else:
+                raise UsageError(f"{where}: expected 'design <path> <count> <sha256> <reason>' "
+                                 "or 'bus <path> <name> <count>'")
+        except ValueError as exc:
+            raise UsageError(f"{where}: {exc}") from exc
+    for rel in buses:
+        if rel not in designs:
+            raise UsageError(f"{path}: bus lines for '{rel}' without a design line")
+    for rel, (count, _, _) in designs.items():
+        if sum(buses.get(rel, {}).values()) != count:
+            raise UsageError(f"{path}: '{rel}': the bus counts add up to "
+                             f"{sum(buses.get(rel, {}).values())}, not {count}")
+    return {rel: EqxRecord(count, sha, reason, dict(sorted(buses[rel].items())))
+            for rel, (count, sha, reason) in designs.items()}
+
+
+@dataclass(frozen=True)
+class Lists:
+    """The reviewed exception lists: Parmys rejections, oracle harness gaps, unproven designs and
+    the eq-x record. A design is in at most one."""
+
+    reject: dict[str, elab_sweep.Expect] = dataclasses.field(default_factory=dict)
+    nogolden: dict[str, elab_sweep.Expect] = dataclasses.field(default_factory=dict)
+    unproven: dict[str, elab_sweep.Expect] = dataclasses.field(default_factory=dict)
+    eqx: dict[str, EqxRecord] = dataclasses.field(default_factory=dict)
+
+    def paths(self) -> set[str]:
+        return {*self.reject, *self.nogolden, *self.unproven, *self.eqx}
+
+    def listed(self, rel: str) -> bool:
+        return rel in self.paths()
+
+    def check_disjoint(self) -> None:
+        seen: set[str] = set()
+        for table in (self.reject, self.nogolden, self.unproven, self.eqx):
+            for rel in table:
+                if rel in seen:
+                    raise UsageError(f"'{rel}' is in more than one exception list")
+                seen.add(rel)
+
+
+def read_lists(args: argparse.Namespace) -> Lists:
+    lists = Lists(
+        reject=elab_sweep.merge_expect(args.expect_fail),
+        nogolden=elab_sweep.merge_expect(args.expect_no_golden),
+        unproven=elab_sweep.merge_expect(args.expect_unproven),
+        eqx={rel: rec for path in args.eqx_record for rel, rec in read_eqx(path).items()})
+    lists.check_disjoint()
+    return lists
+
+
 # ---- verdicts and the summary -----------------------------------------------------------------
 
 
-def verdict(item: elab_sweep.Item, result: Result,
-            expect: dict[str, elab_sweep.Expect]) -> tuple[str, str]:
-    """(class, line): class is a result kind, ``listed``, ``XPASS``, ``FAIL`` or ``skip``."""
+def _needle_problem(entry: elab_sweep.Expect, result: Result) -> bool:
+    return bool(entry.needle) and entry.needle not in result.output
+
+
+def eqx_verdict(head: str, record: EqxRecord | None, result: Result) -> tuple[str, str]:
+    if record is None:
+        return EQ_X, f"eq-x       {head}: {result.why} (no reviewed record: does not count)"
+    count, digest, buses = len(result.cones), cones_digest(result.cones), bus_counts(result.cones)
+    if (count, digest, buses) != (record.count, record.sha256, record.buses):
+        return "eqx-mismatch", (f"eq-x       {head}: the excluded outputs ({count}) are not the "
+                                f"reviewed record's ({record.count}); re-review: {result.why}")
+    return CLS_EQX_OK, f"eq-x (rec) {head}: {count} outputs as reviewed: {record.reason}"
+
+
+def verdict(item: elab_sweep.Item, result: Result, lists: Lists) -> tuple[str, str]:
+    """(class, line): the class is one of the CLS_* names, a result kind or a failure cause."""
     head = f"{item.rel} ({item.size} B, {result.secs:.3f} s)"
-    entry = expect.get(item.rel)
-    if result.kind == SKIP:
+    kind, rel = result.kind, item.rel
+    if kind == SKIP:
         return "skip", f"skip       {head}: {result.why}"
-    if result.kind == NO_GOLDEN:
-        return "nogolden", f"skipped    {head}: no golden: {result.why}"
-    if entry is None:
-        return result.kind, f"{result.kind:<10} {head}" + (f": {result.why}" if result.why
-                                                          else "")
-    if result.kind in PASSING:
-        return "XPASS", (f"XPASS      {head}: listed as an exception ({entry.reason}) but is "
-                         f"{result.kind}")
+    if kind == NO_GOLDEN:
+        return CLS_NOGOLDEN, f"no-golden  {head}: {result.why}"
     if result.hard:  # a crash, cap kill or timeout is never the listed result
-        return "hard", (f"{result.kind:<10} {head}: {result.why} (listed, but a signal, a memory "
-                        "cap or a timeout is never an expected result)")
-    if entry.needle and entry.needle not in result.output:
-        return "needle", (f"{result.kind:<10} {head}: fails differently from the listing: "
-                          f"expected [{entry.needle}], got {result.why}")
-    return "listed", f"listed     {head}: {result.kind}: {entry.reason}"
-
-
-def unexpected(cls: str) -> bool:
-    return cls in (EQ_X, DIFFERS, ERROR, "XPASS", "hard", "needle")
+        note = " (listed, but a signal, a memory cap or a timeout is never an expected result)" \
+            if lists.listed(rel) else ""
+        return "hard", f"hard       {head}: {result.why}{note}"
+    if kind in PASSING:
+        if lists.listed(rel):
+            return "XPASS", (f"XPASS      {head}: listed as an exception but is {kind}")
+        return kind, f"{kind:<10} {head}"
+    if kind == EQ_X:
+        return eqx_verdict(head, lists.eqx.get(rel), result)
+    table, ok_class = {REJECT: (lists.reject, CLS_REJECT_OK),
+                       UNPROVEN: (lists.unproven, CLS_UNPROVEN_OK)}.get(kind, ({}, ""))
+    entry = table.get(rel)
+    if kind == REJECT and entry is None and rel in lists.nogolden:
+        entry, ok_class = lists.nogolden[rel], CLS_NOGOLDEN_OK
+    if entry is None:
+        suffix = " (listed, but not for this result)" if lists.listed(rel) else ""
+        return kind, f"{kind:<10} {head}: {result.why}{suffix}"
+    if _needle_problem(entry, result):
+        return "needle", (f"{kind:<10} {head}: fails differently from the listing: expected "
+                          f"[{entry.needle}], got {result.why}")
+    label = {CLS_REJECT_OK: "listed", CLS_UNPROVEN_OK: "unproven",
+             CLS_NOGOLDEN_OK: "no-golden"}[ok_class]
+    return ok_class, f"{label:<10} {head}: {entry.reason}"
 
 
 class Sweep:
-    def __init__(self, cfg: Config, expect: dict[str, elab_sweep.Expect], jobs: int) -> None:
+    def __init__(self, cfg: Config, lists: Lists, jobs: int) -> None:
         self.cfg = cfg
-        self.expect = expect
+        self.lists = lists
         self.jobs = jobs
         self.counts: dict[str, int] = {}
-        self.listed: dict[str, int] = {}
         self.causes: list[str] = []
-        self.skipped = False
 
     def report(self, item: elab_sweep.Item, result: Result) -> None:
-        cls, line = verdict(item, result, self.expect)
+        cls, line = verdict(item, result, self.lists)
         print(line, flush=True)
         self.counts[cls] = self.counts.get(cls, 0) + 1
-        if cls == "listed":
-            self.listed[result.kind] = self.listed.get(result.kind, 0) + 1
-        if cls == "skip":
-            self.skipped = True
-        if result.kind in (EQ_X, DIFFERS, ERROR) and cls != "skip":
-            self.causes.append(f"{cls if cls != result.kind else 'unlisted'} {result.kind}: "
-                               f"{item.rel}: {result.why}")
+        if cls in FAIL_CLASSES:
+            self.causes.append(f"{cls}: {item.rel}: {result.why}")
 
     def run(self, items: Sequence[elab_sweep.Item]) -> None:
         pending: list[tuple[elab_sweep.Item, Future[Result]]] = []
@@ -462,54 +704,77 @@ class Sweep:
             item, future = pending.pop(0)
             self.report(item, future.result())
 
+    def count(self, *classes: str) -> int:
+        return sum(self.counts.get(cls, 0) for cls in classes)
 
-def summary_lines(state: Sweep, total: int, stale: Sequence[str], secs: float) -> list[str]:
+    def proven(self) -> int:
+        """Designs whose Odin III netlist was proven the Parmys netlist (or equal outside a
+        reviewed x record)."""
+        return self.count(IDENTICAL, EQUIVALENT, CLS_EQX_OK)
+
+    def failures(self) -> int:
+        return self.count(*FAIL_CLASSES)
+
+
+SUMMARY_ROWS = (
+    (IDENTICAL, "identical"), (EQUIVALENT, "equivalent"),
+    (CLS_EQX_OK, "eq-x, reviewed record"), (CLS_REJECT_OK, "listed-reject (Parmys rejects)"),
+    (CLS_UNPROVEN_OK, "UNPROVEN (listed; not proven)"),
+    (CLS_NOGOLDEN, "no-golden (never ran)"), (CLS_NOGOLDEN_OK, "no-golden (harness gap, listed)"),
+    ("skip", "skipped (cannot cap)"),
+    (EQ_X, "FAIL eq-x, no record"), ("eqx-mismatch", "FAIL eq-x, record differs"),
+    (DIFFERS, "FAIL differs"), (ERROR, "FAIL error"), ("hard", "FAIL hard (crash/kill/timeout)"),
+    (UNPROVEN, "FAIL unproven, not listed"), (REJECT, "FAIL reject, not listed"),
+    ("XPASS", "FAIL listed but passing"), ("needle", "FAIL listed, wrong needle"))
+
+
+def summary_lines(state: Sweep, total: int, stale: Sequence[str], secs: float,
+                  min_checked: int) -> list[str]:
     counts = state.counts
-    listed = sum(state.listed.values())
-    lines = ["", f"{TOOL}: summary ({total} designs)",
-             f"  {'class':<24}{'designs':>8}", f"  {'-' * 32}"]
-    names = {IDENTICAL: "identical", EQUIVALENT: "equivalent", EQ_X: "equivalent outside x",
-             DIFFERS: "differs", ERROR: "error"}
-    lines += [f"  {names[kind]:<24}{counts.get(kind, 0):>8}" for kind in CLASS_ORDER]
-    detail = ", ".join(f"{n} {kind}" for kind, n in sorted(state.listed.items()))
-    lines.append(f"  {'listed' + (' (' + detail + ')' if detail else ''):<24}{listed:>8}")
-    for extra, label in (("XPASS", "listed but passing"), ("hard", "listed, hard failure"),
-                         ("needle", "listed, wrong needle"), ("skip", "skipped"),
-                         ("nogolden", "skipped (no golden)")):
-        if counts.get(extra):
-            lines.append(f"  {label:<24}{counts[extra]:>8}")
+    lines = ["", f"{TOOL}: summary ({total} designs)", f"  {'class':<34}{'designs':>8}",
+             f"  {'-' * 42}"]
+    lines += [f"  {label:<34}{counts[cls]:>8}" for cls, label in SUMMARY_ROWS if counts.get(cls)]
     if stale:
-        lines.append(f"  {'stale entries':<24}{len(stale):>8}")
-    lines += [f"  {line}" for line in state.causes] if state.causes else []
-    lines.append(f"{TOOL}: {total} designs: {counts.get(IDENTICAL, 0)} identical, "
-                 f"{counts.get(EQUIVALENT, 0)} equivalent, {counts.get(EQ_X, 0)} equivalent "
-                 f"outside x-cones, {counts.get(DIFFERS, 0)} differs, {counts.get(ERROR, 0)} "
-                 f"error, {listed} listed, {counts.get('XPASS', 0)} listed but passing, "
-                 f"{len(stale)} stale, {counts.get('nogolden', 0)} skipped (no golden), "
+        lines.append(f"  {'FAIL stale list entries':<34}{len(stale):>8}")
+    lines += [f"  {line}" for line in state.causes[:200]] if state.causes else []
+    nogolden = state.count(CLS_NOGOLDEN, CLS_NOGOLDEN_OK)
+    lines.append(f"{TOOL}: {total} designs: PROVEN {state.proven()} ({counts.get(IDENTICAL, 0)} "
+                 f"identical, {counts.get(EQUIVALENT, 0)} equivalent, {counts.get(CLS_EQX_OK, 0)} "
+                 f"eq-x with a reviewed record), {counts.get(CLS_REJECT_OK, 0)} listed-reject; "
+                 f"NOT PROVEN {state.count(CLS_UNPROVEN_OK)} unproven (listed); NOT CHECKED "
+                 f"{nogolden} no-golden; {state.failures()} failing, {len(stale)} stale; "
                  f"{secs:.1f} s")
+    if state.proven() < min_checked:
+        lines.append(f"{TOOL}: FAIL: only {state.proven()} design(s) proven, --min-checked is "
+                     f"{min_checked} (a wrong or empty golden tree reports nothing)")
     return lines
 
 
-def failed(state: Sweep, stale: Sequence[str]) -> bool:
-    return bool(stale) or any(unexpected(cls) and n for cls, n in state.counts.items())
+def exit_code(state: Sweep, stale: Sequence[str], min_checked: int) -> int:
+    ran = sum(n for cls, n in state.counts.items() if cls not in ("skip", CLS_NOGOLDEN))
+    if state.count("skip") and not ran:  # nothing could run: an uncappable ASan odin3
+        return EXIT_SKIP
+    if state.count("hard"):
+        return EXIT_HARD
+    if stale or state.failures() or state.proven() < min_checked:
+        return EXIT_FAIL
+    return EXIT_OK
 
 
-def sweep(cfg: Config, items: list[elab_sweep.Item], expect: dict[str, elab_sweep.Expect],
-          jobs: int, partial: bool) -> int:
-    state = Sweep(cfg, expect, jobs)
+def sweep(cfg: Config, items: list[elab_sweep.Item], lists: Lists, jobs: int,
+          partial: bool) -> int:
+    state = Sweep(cfg, lists, jobs)
     start = time.monotonic()
     print(f"{TOOL}: work directory {cfg.work}", flush=True)
     state.run(items)
     seen = {item.rel for item in items}
-    stale = [] if partial else sorted(rel for rel in expect if rel not in seen)
+    stale = [] if partial else sorted(rel for rel in lists.paths() if rel not in seen)
     for rel in stale:
         print(f"STALE {rel}: listed as an exception but not in the corpus")
-    lines = summary_lines(state, len(items), stale, time.monotonic() - start)
+    lines = summary_lines(state, len(items), stale, time.monotonic() - start, cfg.min_checked)
     print("\n".join(lines))
     (cfg.work / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    if state.skipped and not sum(state.counts.get(k, 0) for k in (*CLASS_ORDER, "listed")):
-        return EXIT_SKIP
-    return EXIT_FAIL if failed(state, stale) else EXIT_OK
+    return exit_code(state, stale, cfg.min_checked)
 
 
 # ---- arguments --------------------------------------------------------------------------------
@@ -540,7 +805,20 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--min-hard-adder-size", type=int, default=1,
                     help="run_vtr_flow's -min_hard_adder_size (default 1, as the goldens)")
     ap.add_argument("--expect-fail", type=Path, action="append", default=[],
-                    help="<relative path> [needle] <reason> lines (repeatable)")
+                    help="listed rejections (Parmys itself rejects the design): <relative path> "
+                    "[needle] <reason> lines (repeatable)")
+    ap.add_argument("--expect-no-golden", type=Path, action="append", default=[],
+                    help="designs whose oracle run failed for a harness reason (missing include "
+                    "or -D): same syntax; they are counted as no-golden, never as passing")
+    ap.add_argument("--expect-unproven", type=Path, action="append", default=[],
+                    help="designs equiv-check cannot decide (timeout, guessed pairs): same "
+                    "syntax; a separate unproven bucket, never a pass")
+    ap.add_argument("--eqx-record", type=Path, action="append", default=[],
+                    help="the reviewed eq-x record (design/bus lines, see tests/exit)")
+    ap.add_argument("--min-checked", type=int, default=1, metavar="N",
+                    help="fail unless at least N designs were proven (default 1)")
+    ap.add_argument("--vtr-root", type=Path, help="the VTR checkout the goldens came from "
+                    "(default $VTR_ROOT): their vtr_commit is checked against it")
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--mem-cap", default="4G", help="per child (default 4G)")
     ap.add_argument("--cap-for", action="append", default=[], metavar="SUFFIX=CAP",
@@ -582,6 +860,27 @@ def config_template(args: argparse.Namespace) -> Path | None:
     return template.resolve()
 
 
+def vtr_root_of(args: argparse.Namespace) -> Path:
+    root = args.vtr_root or os.environ.get("VTR_ROOT")
+    if not root:
+        raise UsageError("the VTR checkout is unknown: pass --vtr-root or set VTR_ROOT (the "
+                         "goldens' vtr_commit is checked against it)")
+    return Path(root).resolve()
+
+
+def vtr_state(root: Path) -> tuple[str, int]:
+    """(HEAD commit, number of modified tracked files) of the VTR checkout ``root``."""
+    def git(*words: str) -> str:
+        done = subprocess.run(["git", "-C", str(root), *words], capture_output=True, text=True,
+                              check=False)
+        if done.returncode != 0:
+            raise UsageError(f"{root}: not a git checkout ({done.stderr.strip()})")
+        return done.stdout
+
+    return (git("rev-parse", "HEAD").strip(),
+            len(git("status", "--porcelain", "--untracked-files=no").splitlines()))
+
+
 def build_config(args: argparse.Namespace) -> Config:
     caps: dict[str, int] = {}
     for spec in args.cap_for:
@@ -589,11 +888,20 @@ def build_config(args: argparse.Namespace) -> Config:
         if not suffix or not size:
             raise UsageError(f"--cap-for {spec!r}: expected SUFFIX=CAP")
         caps[suffix] = elab_sweep.parse_size(size)
-    golden = args.golden_root or elab_sweep.load_micro_top().DEFAULT_ROOT
+    golden = Path(args.golden_root or elab_sweep.load_micro_top().DEFAULT_ROOT)
+    if not golden.is_dir():
+        raise UsageError(f"{golden}: the golden root is not a directory")
     template = config_template(args)
     arch = Path(args.arch)
     if not arch.is_file():
         raise UsageError(f"{args.arch}: no such architecture file")
+    if args.min_checked < 0:
+        raise UsageError(f"--min-checked {args.min_checked} is negative")
+    vtr_root = vtr_root_of(args)
+    commit, dirty = vtr_state(vtr_root)
+    if dirty:
+        raise UsageError(f"{vtr_root}: {dirty} modified file(s); the goldens come from a clean "
+                         "VTR tree")
     return Config(
         odin3=need_exe(args.odin3), yosys=need_exe(args.yosys), arch=str(arch.resolve()),
         sp_splice=need_exe(args.sp_splice), netlist_compare=need_exe(args.netlist_compare),
@@ -601,7 +909,9 @@ def build_config(args: argparse.Namespace) -> Config:
         work=work_dir(args.work), cap=elab_sweep.parse_size(args.mem_cap), caps=caps,
         techlib=args.techlib, primitives=args.primitives, config=args.config,
         config_template=template, min_mult=args.min_hard_mult_size,
-        min_adder=args.min_hard_adder_size, equiv_timeout=args.equiv_timeout)
+        min_adder=args.min_hard_adder_size, equiv_timeout=args.equiv_timeout,
+        vtr_root=vtr_root, vtr_commit=commit, arch_sha256=sha256_file(arch),
+        min_checked=args.min_checked)
 
 
 def limit_items(cfg: Config, items: list[elab_sweep.Item], limit: int | None) \
@@ -622,7 +932,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elab_sweep.check_jobs(args.jobs, cfg.cap, list(cfg.caps.values()))
         memcap.check_cap(max([cfg.cap, *cfg.caps.values()]))
         memcap.wrap([cfg.odin3], cfg.cap)  # an uncappable ASan odin3 skips before any design
-        expect = elab_sweep.merge_expect(args.expect_fail)
+        lists = read_lists(args)
         root = args.root.resolve() if args.root is not None else None
         items = limit_items(cfg, elab_sweep.collect(args.inputs, root), args.limit)
     except memcap.CapUnavailable as exc:
@@ -634,7 +944,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not items:
         print(f"{TOOL}: no input files", file=sys.stderr)
         return EXIT_USAGE
-    return sweep(cfg, items, expect, args.jobs, args.limit is not None or args.partial)
+    return sweep(cfg, items, lists, args.jobs, args.limit is not None or args.partial)
 
 
 if __name__ == "__main__":

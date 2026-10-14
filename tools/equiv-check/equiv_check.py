@@ -11,8 +11,8 @@ cut-point inputs that are wired differently; the output then holds a line that s
 unsupported-construct or ABC error, an uncaught internal error, and black-box instances that
 cannot be matched one-to-one; 3 only with ``--x-report``: not equivalent, but equivalent outside
 the x-cones (below); 4 *unproven*: no verdict either way, a tool limit and not a crash (ABC
-timed out, or the check failed only where black-box pairs were guessed); 5 *hard*: ABC was
-killed by a signal, or this process ran out of memory.
+timed out, several clock domains, or the check failed only where black-box pairs were
+guessed); 5 *hard*: ABC was killed by a signal, or this process ran out of memory.
 
 ``--x-report`` (2H, 2D spec 14.6 item 4): when the two netlists are not equivalent, recompute
 with every output in an x-cone removed and print the removed outputs by name.  Parmys writes a
@@ -92,15 +92,15 @@ outputs, and the proof held for every value the shared outputs could take, the n
 equivalent.  A wrong pairing (boxes of the same type whose inputs differ) makes the proof of some
 pin fail, so the verdict is never "equivalent"; sampling can only lose a match, not create a
 false one.  The converse is not claimed: when guessed pairs exist and the check fails, the
-guess may be at fault, so the result is "inconclusive" (exit 2) and not "not equivalent" (a
-failure outside the guesses, an x-cone result and an equivalence are all still verdicts).  The
-"inconclusive" result is exit 4 (unproven).  As
+guess may be at fault, so the result is "inconclusive" (exit 4, unproven) and not "not equivalent"
+(a failure outside the guesses, an x-cone result and an equivalence are all still verdicts).  As
 before, a box's internal behaviour is assumed, not checked (RAM contents, initial state).
 
 ABC models every latch as a flip-flop on one implicit clock, so each file must use a single
 (edge type, clock) pair -- the clock being a primary input, possibly through buffers -- and
 both files must use the same pair (else exit 1).  Level-sensitive (ah/al) and asynchronous
-(as) latches, internal clocks and several clock domains are rejected (exit 2).  Latch init
+(as) latches and internal clocks are rejected (exit 2), several clock domains are unproven (exit 4,
+a tool limit).  Latch init
 2/3 (don't care/unknown) or a missing init is treated as 0 with a notice (``--strict-init``
 makes it an error).  An undriven net that reaches a primary output or a latch input is an
 error (``--allow-undriven`` ties it to 0); a non-black-box model with ports but no cells is
@@ -806,8 +806,8 @@ def clock_domain(flat: Flat, ports: dict[str, str]) -> tuple[str, str] | None:
                              f"{show(latch.control)}")
         domains.add((latch.ltype, ports[source]))
     if len(domains) > 1:
-        raise EquivError(f"{flat.path}: unsupported: more than one clock domain "
-                         f"(type, clock): {sorted(domains)}")
+        raise UnprovenError(f"unproven: {flat.path}: unsupported: more than one clock domain "
+                            f"(type, clock): {sorted(domains)}")
     return next(iter(domains), None)
 
 

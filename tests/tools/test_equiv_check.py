@@ -192,14 +192,17 @@ class EquivCheckNoAbcTest(unittest.TestCase):
         self.assertIn("('untyped', '-')", out)
 
     def test_unsupported_clocking(self) -> None:
-        cases = {"l_ah.blif": "level-sensitive latch type 'ah'",
-                 "clk_internal.blif": "clocked by internal net",
-                 "clk_two_domains.blif": "more than one clock domain"}
-        for name, message in cases.items():
+        cases = {"l_ah.blif": ("level-sensitive latch type 'ah'", 2),
+                 "clk_internal.blif": ("clocked by internal net", 2),
+                 # a tool limit, not a bad input: exit 4 (unproven)
+                 "clk_two_domains.blif": ("unproven: ", 4)}
+        for name, (message, want) in cases.items():
             with self.subTest(name):
                 code, _, err = check(cx("l_re.blif"), cx(name))
-                self.assertEqual(code, 2)
+                self.assertEqual(code, want)
                 self.assertIn(message, err)
+        self.assertIn("more than one clock domain", check(cx("l_re.blif"),
+                                                          cx("clk_two_domains.blif"))[2])
 
     def test_empty_non_blackbox_model(self) -> None:
         code, _, err = check(cx("bb_a.blif"), cx("bb_b.blif"))
