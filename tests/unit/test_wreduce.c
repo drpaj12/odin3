@@ -551,8 +551,22 @@ static uint32_t count_half_done(void) {
     return count_prefix(ODIN3_LOG_ERROR, "opt: out of memory in the middle of a rewrite");
 }
 
+/* The text a run without a failure ends with. */
+static char *final_text(const char *text) {
+    reset();
+    build(text);
+    run_wreduce();
+    char *out = rtlil_text();
+    reset();
+    return out;
+}
+
+/* Every allocation point in turn fails once. A failure leaves a valid IR; with one rewrite
+ * (strict) the design is as it was, or the rewrite is complete (the failure came after it), or the
+ * kit logged its half-done line. */
 static void oom_sweep(const char *text, bool strict) {
     bool done = false;
+    char *final = final_text(text);
     for (long fail = 0; !done && fail < OOM_LIMIT; fail++) {
         reset();
         build(text);
@@ -566,11 +580,12 @@ static void oom_sweep(const char *text, bool strict) {
         check_full();
         if (strict && st == ODIN3_ERR_NO_MEMORY && count_half_done() == 0) {
             char *after = rtlil_text();
-            TEST_ASSERT_EQUAL_STRING(before, after);
+            TEST_ASSERT_TRUE(strcmp(before, after) == 0 || strcmp(final, after) == 0);
             free(after);
         }
         free(before);
     }
+    free(final);
     TEST_ASSERT_TRUE_MESSAGE(done, "the sweep never reached a run that needs no failure");
 }
 
@@ -586,6 +601,353 @@ static void test_prestep_oom(void) {
                                                    "\\b", "\\y")
             BINW("$div", "d", "0", "0", "8", "8", "8", "{ 3'000 \\a [4:0] }", "\\b", "\\z") "end\n",
         false);
+}
+
+/* --- $mux and $pmux (spec 4.1) -----------------------------------------------------------------
+ */
+
+#define MUXHEAD                                                                                    \
+    "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n  wire input 3 \\c\n"     \
+    "  wire input 4 \\s\n  wire width 4 output 5 \\y\n"
+
+#define MUX4(name, a, b, s, y)                                                                     \
+    "  cell $mux \\" name "\n    parameter \\WIDTH 4\n    connect \\A " a "\n    connect \\B " b   \
+    "\n    connect \\S " s "\n    connect \\Y " y "\n  end\n"
+
+enum { MUX_A = 0, MUX_B = 1, MUX_S = 2, MUX_Y = 3, PRM_MUX_WIDTH = 0 };
+
+static void test_mux_agreeing_top_bit(void) {
+    build(MUXHEAD MUX4("m1", "{ \\c \\a [2:0] }", "{ \\c \\b [2:0] }", "\\s", "\\y") "end\n");
+    run_wreduce();
+    odin3_node_id mux = node_named("m1");
+    TEST_ASSERT_EQUAL_INT64(3, pint(mux, PRM_MUX_WIDTH));
+    expect_port(mux, MUX_A, "a a:1 a:2");
+    expect_port(mux, MUX_B, "b b:1 b:2");
+    TEST_ASSERT_EQUAL_UINT32(wbit("c", 0).v, wbit("y", 3).v);
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG,
+                       "wreduce: module 'm': removed top 1 bits (of 4) from mux cell $mux 'm1'"));
+}
+
+static void test_mux_unused_top_bits_become_x(void) {
+    build("module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n  wire input 3 \\s\n"
+          "  wire width 2 output 4 \\y\n  wire width 4 \\t\n" MUX4(
+              "m1", "\\a", "\\b", "\\s", "\\t") "  connect \\y \\t [1:0]\nend\n");
+    run_wreduce();
+    odin3_node_id mux = node_named("m1");
+    TEST_ASSERT_EQUAL_INT64(2, pint(mux, PRM_MUX_WIDTH));
+    expect_wire_const("t", 2, 4, "x");
+}
+
+static void test_mux_whole_cell_goes(void) {
+    build(MUXHEAD MUX4("m1", "\\a", "\\a", "\\s", "\\y") "end\n");
+    run_wreduce();
+    TEST_ASSERT_TRUE(node_gone("m1"));
+    for (uint32_t k = 0; k < 4; k++) {
+        TEST_ASSERT_EQUAL_UINT32(wbit("a", k).v, wbit("y", k).v);
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, fx.counts.wreduce.removed);
+}
+
+#define MUX_UNDEF_TEXT                                                                             \
+    MUXHEAD MUX4("m1", "{ 1'x \\a [2:0] }", "{ \\c \\b [2:0] }", "\\s", "\\y") "end\n"
+
+static void test_mux_undef_and_keepdc(void) {
+    build(MUX_UNDEF_TEXT);
+    run_wreduce();
+    TEST_ASSERT_EQUAL_INT64(4, pint(node_named("m1"), PRM_MUX_WIDTH)); /* no -mux_undef */
+    reset();
+    build(MUX_UNDEF_TEXT);
+    fx.opts.mux_undef = true;
+    run_wreduce();
+    TEST_ASSERT_EQUAL_INT64(3, pint(node_named("m1"), PRM_MUX_WIDTH));
+    TEST_ASSERT_EQUAL_UINT32(wbit("c", 0).v, wbit("y", 3).v);
+    reset();
+    build(MUX_UNDEF_TEXT);
+    fx.opts.mux_undef = true;
+    fx.opts.keepdc = true;
+    run_wreduce();
+    TEST_ASSERT_EQUAL_INT64(4, pint(node_named("m1"), PRM_MUX_WIDTH));
+}
+
+static void test_pmux_narrows(void) {
+    build("module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n  wire width 4 "
+          "input 3 "
+          "\\c\n  wire width 2 input 4 \\s\n  wire width 4 output 5 \\y\n  wire input 6 \\k\n"
+          "  cell $pmux \\p\n    parameter \\WIDTH 4\n    parameter \\S_WIDTH 2\n"
+          "    connect \\A { \\k \\a [2:0] }\n    connect \\B { \\k \\b [2:0] \\k \\c [2:0] }\n"
+          "    connect \\S \\s\n    connect \\Y \\y\n  end\nend\n");
+    run_wreduce();
+    odin3_node_id pm = node_named("p");
+    TEST_ASSERT_EQUAL_INT64(3, pint(pm, PRM_MUX_WIDTH));
+    expect_port(pm, MUX_B, "c c:1 c:2 b b:1 b:2");
+    TEST_ASSERT_EQUAL_UINT32(wbit("k", 0).v, wbit("y", 3).v);
+}
+
+/* --- flip-flops and latches (spec 4.2) ------------------------------------------------------ */
+
+#define FFHEAD(init)                                                                               \
+    "module \\m\n  wire input 1 \\clk\n  wire width 8 input 2 \\d\n  wire input 4 \\r\n" init      \
+    "  wire width 8 output 3 \\q\n"
+
+#define DFF(name, d)                                                                               \
+    "  cell $dff \\" name "\n    parameter \\WIDTH 8\n    parameter \\CLK_POLARITY 1\n"            \
+    "    connect \\CLK \\clk\n    connect \\D " d "\n    connect \\Q \\q\n  end\n"
+
+enum { FF_WIDTH = 0 };
+
+static void test_dff_zero_extended(void) {
+    build(FFHEAD("") DFF("f", "{ 4'0000 \\d [3:0] }") "end\n");
+    run_wreduce();
+    odin3_node_id ff = node_named("f");
+    TEST_ASSERT_EQUAL_INT64(4, pint(ff, FF_WIDTH));
+    TEST_ASSERT_EQUAL_UINT32(4, pwidth(ff, 1));
+    expect_wire_const("q", 4, 8, "0");
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG,
+                       "wreduce: module 'm': removed top 4 bits (of 8) from FF cell $dff 'f'"));
+}
+
+static void test_dff_zero_extended_keepdc_and_init(void) {
+    build(FFHEAD("") DFF("f", "{ 4'0000 \\d [3:0] }") "end\n");
+    fx.opts.keepdc = true; /* init is x: -keepdc keeps the bits */
+    run_wreduce();
+    TEST_ASSERT_EQUAL_INT64(8, pint(node_named("f"), FF_WIDTH));
+    reset();
+    build(FFHEAD("  attribute \\init 8'00000000\n") DFF("f", "{ 4'0000 \\d [3:0] }") "end\n");
+    fx.opts.keepdc = true; /* init 0 lets a 0 through */
+    run_wreduce();
+    TEST_ASSERT_EQUAL_INT64(4, pint(node_named("f"), FF_WIDTH));
+    reset();
+    build(FFHEAD("  attribute \\init 8'10000000\n") DFF("f", "{ 4'0000 \\d [3:0] }") "end\n");
+    run_wreduce(); /* init 1 on the top bit: it cannot be a 0 */
+    TEST_ASSERT_EQUAL_INT64(8, pint(node_named("f"), FF_WIDTH));
+}
+
+static void test_dff_sign_extended(void) {
+    build(FFHEAD("") DFF("f", "{ \\d [3] \\d [3] \\d [3] \\d [3] \\d [3:0] }") "end\n");
+    run_wreduce();
+    odin3_node_id ff = node_named("f");
+    TEST_ASSERT_EQUAL_INT64(4, pint(ff, FF_WIDTH));
+    for (uint32_t k = 4; k < 8; k++) {
+        TEST_ASSERT_EQUAL_UINT32(wbit("q", 3).v, wbit("q", k).v);
+    }
+}
+
+static void test_dff_sign_extension_needs_equal_init(void) {
+    build(FFHEAD("  attribute \\init 8'01000000\n")
+              DFF("f", "{ \\d [3] \\d [3] \\d [3] \\d [3] \\d [3:0] }") "end\n");
+    run_wreduce(); /* init[7] != init[6]: the top bit stays */
+    TEST_ASSERT_EQUAL_INT64(8, pint(node_named("f"), FF_WIDTH));
+}
+
+#define SDFF_TEXT(value)                                                                           \
+    FFHEAD("")                                                                                     \
+    "  cell $sdff \\f\n    parameter \\WIDTH 8\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    parameter \\SRST_POLARITY 1\n    parameter \\SRST_VALUE 8'" value                         \
+    "\n    connect \\CLK \\clk\n    connect \\SRST \\r\n"                                          \
+    "    connect \\D { 4'0000 \\d [3:0] }\n    connect \\Q \\q\n  end\nend\n"
+
+static void test_sdff_reset_value_truncated(void) {
+    build(SDFF_TEXT("00001010"));
+    run_wreduce();
+    odin3_node_id ff = node_named("f");
+    TEST_ASSERT_EQUAL_INT64(4, pint(ff, FF_WIDTH));
+    const odin3_value *rst = odin3_node_param(fx.module, ff, 3);
+    TEST_ASSERT_EQUAL_UINT32(4, rst->len);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_0, rst->bits[0]);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, rst->bits[1]);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_0, rst->bits[2]);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, rst->bits[3]);
+    reset();
+    build(SDFF_TEXT("10000000")); /* a 1 reset on the top bit stops the zero extension */
+    run_wreduce();
+    TEST_ASSERT_EQUAL_INT64(8, pint(node_named("f"), FF_WIDTH));
+}
+
+static void test_adlatch_and_dlatch(void) {
+    build(FFHEAD("") "  cell $dlatch \\l\n    parameter \\WIDTH 8\n    parameter \\EN_POLARITY 1\n"
+                     "    connect \\EN \\clk\n    connect \\D { 4'0000 \\d [3:0] }\n"
+                     "    connect \\Q \\q\n  end\nend\n");
+    run_wreduce();
+    TEST_ASSERT_EQUAL_INT64(4, pint(node_named("l"), FF_WIDTH));
+    reset();
+    build(FFHEAD("") "  cell $adlatch \\l\n    parameter \\WIDTH 8\n    parameter \\EN_POLARITY 1\n"
+                     "    parameter \\ARST_POLARITY 1\n    parameter \\ARST_VALUE 8'00000000\n"
+                     "    connect \\EN \\clk\n    connect \\ARST \\r\n"
+                     "    connect \\D { 4'0000 \\d [3:0] }\n    connect \\Q \\q\n  end\nend\n");
+    run_wreduce();
+    TEST_ASSERT_EQUAL_INT64(4, pint(node_named("l"), FF_WIDTH));
+}
+
+#define UNUSED_Q_HEAD(init)                                                                        \
+    "module \\m\n  wire input 1 \\clk\n  wire width 4 input 2 \\d\n  wire width 2 output 3 "       \
+    "\\y\n" init "  wire width 4 \\t\n"
+
+#define DFF4(d, q)                                                                                 \
+    "  cell $dff \\f\n    parameter \\WIDTH 4\n    parameter \\CLK_POLARITY 1\n"                   \
+    "    connect \\CLK \\clk\n    connect \\D " d "\n    connect \\Q " q "\n  end\n"
+
+static void test_dff_unused_q_bits_and_init(void) {
+    build(UNUSED_Q_HEAD("") "  attribute \\init 4'0101\n  wire width 4 \\u\n" DFF4(
+        "\\d", "\\u") "  connect \\y \\u [1:0]\nend\n");
+    run_wreduce();
+    odin3_node_id ff = node_named("f");
+    TEST_ASSERT_EQUAL_INT64(2, pint(ff, FF_WIDTH));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wbit("u", 0)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_X, odin3_ffinit_get(fx.module, wbit("u", 2)));
+}
+
+static void test_dff_all_unused_goes(void) {
+    build(UNUSED_Q_HEAD("") DFF4("\\d", "\\t") "  connect \\y 2'00\nend\n");
+    run_wreduce();
+    TEST_ASSERT_TRUE(node_gone("f"));
+    TEST_ASSERT_EQUAL_UINT32(1, fx.counts.wreduce.removed);
+}
+
+/* --- the worker: rounds, order, determinism ----------------------------------------------------
+ */
+
+/* add2 reads the register that add1 feeds. The cells are in this order, so each round only sees
+ * what the earlier rounds exposed: add1 narrows in round 1, the register in round 2, add2 in
+ * round 3. */
+#define CASCADE                                                                                    \
+    "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"                         \
+    "  wire width 4 input 3 \\c\n  wire input 4 \\clk\n  wire width 8 output 5 \\y\n"              \
+    "  wire width 8 \\t\n  wire width 8 \\u\n" BINW(                                               \
+        "$add", "add2", "0", "0", "8", "8", "8", "\\u", "{ 4'0000 \\c }",                          \
+        "\\y") "  cell $dff \\ff\n    parameter \\WIDTH 8\n    parameter \\CLK_POLARITY 1\n"       \
+               "    connect \\CLK \\clk\n    connect \\D \\t\n    connect \\Q \\u\n  end\n" BINW(  \
+                   "$add", "add1", "0", "0", "8", "8", "8", "{ 4'0000 \\a }", "{ 4'0000 \\b }",    \
+                   "\\t") "end\n"
+
+static void expect_cascade_done(void) {
+    expect_bin("add1", 0, 0, 4, 4, 5);
+    TEST_ASSERT_EQUAL_INT64(5, pint(node_named("ff"), FF_WIDTH));
+    expect_bin("add2", 0, 0, 5, 4, 6);
+}
+
+static void test_cascade_needs_rounds(void) {
+    build(CASCADE);
+    run_wreduce();
+    expect_cascade_done();
+    TEST_ASSERT_EQUAL_UINT32(0, count_prefix(ODIN3_LOG_WARN, "wreduce:"));
+}
+
+static void test_round_cap_warns_and_stays_valid(void) {
+    odin3_opt_limits limits = {ODIN3_OPT_MAX_ITERATIONS, ODIN3_OPT_MUXTREE_MAX_EVALS, 2};
+    odin3_opt_test_set_limits(&limits);
+    build(CASCADE);
+    run_wreduce();
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_WARN,
+                       "wreduce: module 'm': no fixed point after 2 rounds; stopping"));
+    expect_bin("add1", 0, 0, 4, 4, 5);
+    TEST_ASSERT_EQUAL_INT64(5, pint(node_named("ff"), FF_WIDTH));
+    TEST_ASSERT_EQUAL_INT64(8, pint(node_named("add2"), PRM_A_WIDTH)); /* round 3 never ran */
+}
+
+static void test_two_runs_are_identical(void) {
+    build(CASCADE);
+    run_wreduce();
+    char *first = rtlil_text();
+    reset();
+    build(CASCADE);
+    run_wreduce();
+    char *second = rtlil_text();
+    TEST_ASSERT_EQUAL_STRING(first, second);
+    free(first);
+    free(second);
+}
+
+/* A cell's line without its name, to compare the cells of two orders as a multiset. */
+static int cmp_str(const void *lhs, const void *rhs) {
+    return strcmp(*(const char *const *)lhs, *(const char *const *)rhs);
+}
+
+static char *dup_str(const char *text) {
+    char *copy = malloc(strlen(text) + 1U);
+    TEST_ASSERT_NOT_NULL(copy);
+    memcpy(copy, text, strlen(text) + 1U);
+    return copy;
+}
+
+static char *cell_summary(void) {
+    char buf[1024] = "";
+    char *lines_out[16];
+    size_t n = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(fx.module) && n < 16; id++) {
+        odin3_node_id node = {id};
+        const odin3_celltype_def *def =
+            odin3_celltype_get(fx.res.design, odin3_node_type(fx.module, node));
+        if (!odin3_node_live(fx.module, node) || def->n_params == 0 ||
+            strncmp(def->name, "$port", 5) == 0) {
+            continue;
+        }
+        char one[128];
+        int len = snprintf(one, sizeof one, "%s", def->name);
+        for (uint32_t k = 0; k < def->n_params && k < 5; k++) {
+            len += snprintf(one + len, sizeof one - (size_t)len, " %lld",
+                            (long long)odin3_node_param(fx.module, node, k)->i);
+        }
+        lines_out[n] = dup_str(one);
+        n++;
+    }
+    qsort(lines_out, n, sizeof lines_out[0], cmp_str);
+    for (size_t i = 0; i < n; i++) {
+        (void)snprintf(buf + strlen(buf), sizeof buf - strlen(buf), "%s;", lines_out[i]);
+        free(lines_out[i]);
+    }
+    return dup_str(buf);
+}
+
+static void test_reversed_creation_gives_the_same_cells(void) {
+    build(CASCADE);
+    run_wreduce();
+    char *first = cell_summary();
+    reset();
+    build("module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"
+          "  wire width 4 input 3 \\c\n  wire input 4 \\clk\n  wire width 8 output 5 \\y\n"
+          "  wire width 8 \\t\n  wire width 8 \\u\n" BINW(
+              "$add", "add1", "0", "0", "8", "8", "8", "{ 4'0000 \\a }", "{ 4'0000 \\b }",
+              "\\t") "  cell $dff \\ff\n    parameter \\WIDTH 8\n    parameter \\CLK_POLARITY 1\n"
+                     "    connect \\CLK \\clk\n    connect \\D \\t\n    connect \\Q \\u\n  "
+                     "end\n" BINW("$add", "add2", "0", "0", "8", "8", "8", "\\u", "{ 4'0000 \\c }",
+                                  "\\y") "end\n");
+    run_wreduce();
+    char *second = cell_summary();
+    TEST_ASSERT_EQUAL_STRING(first, second);
+    free(first);
+    free(second);
+}
+
+/* wreduce then opt: the incremental opt_expr and a full rescan agree. */
+static void test_wreduce_then_opt_rescan_agree(void) {
+    char *texts[2];
+    for (int rescan = 0; rescan < 2; rescan++) {
+        reset();
+        build(CASCADE);
+        run_wreduce();
+        odin3_opt_args args;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_opt_parse_args("opt", odin3_bytes_cstr("-full"), &args));
+        args.full_rescan = rescan == 1;
+        odin3_opt_counts counts;
+        memset(&counts, 0, sizeof counts);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_run(&fx.ctx, fx.res.design, &args, &counts));
+        check_full();
+        texts[rescan] = rtlil_text();
+    }
+    TEST_ASSERT_EQUAL_STRING(texts[0], texts[1]);
+    free(texts[0]);
+    free(texts[1]);
+}
+
+static void test_ff_and_mux_oom(void) {
+    oom_sweep(FFHEAD("") DFF("f", "{ \\d [7] \\d [7] \\d [5:0] }") "end\n", true);
+    oom_sweep(MUXHEAD MUX4("m1", "{ \\c \\a [2:0] }", "{ \\c \\b [2:0] }", "\\s", "\\y") "end\n",
+              true);
+    oom_sweep(CASCADE, false);
 }
 
 int main(void) {
@@ -616,6 +978,25 @@ int main(void) {
     RUN_TEST(test_unknown_pass_args);
     RUN_TEST(test_narrowing_oom);
     RUN_TEST(test_prestep_oom);
+    RUN_TEST(test_mux_agreeing_top_bit);
+    RUN_TEST(test_mux_unused_top_bits_become_x);
+    RUN_TEST(test_mux_whole_cell_goes);
+    RUN_TEST(test_mux_undef_and_keepdc);
+    RUN_TEST(test_pmux_narrows);
+    RUN_TEST(test_dff_zero_extended);
+    RUN_TEST(test_dff_zero_extended_keepdc_and_init);
+    RUN_TEST(test_dff_sign_extended);
+    RUN_TEST(test_dff_sign_extension_needs_equal_init);
+    RUN_TEST(test_sdff_reset_value_truncated);
+    RUN_TEST(test_adlatch_and_dlatch);
+    RUN_TEST(test_dff_unused_q_bits_and_init);
+    RUN_TEST(test_dff_all_unused_goes);
+    RUN_TEST(test_cascade_needs_rounds);
+    RUN_TEST(test_round_cap_warns_and_stays_valid);
+    RUN_TEST(test_two_runs_are_identical);
+    RUN_TEST(test_reversed_creation_gives_the_same_cells);
+    RUN_TEST(test_wreduce_then_opt_rescan_agree);
+    RUN_TEST(test_ff_and_mux_oom);
     (void)node_gone;
     return UNITY_END();
 }
