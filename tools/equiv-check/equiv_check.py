@@ -115,12 +115,15 @@ VTR designs several times slower, and sorting by name used to pick it),
 from __future__ import annotations
 
 import argparse
+import collections
+import hashlib
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -129,6 +132,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blif"))
 import bbmatch  # noqa: E402
 import blif  # noqa: E402
+import rampair  # noqa: E402
 
 TOOL = "equiv-check"
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -394,6 +398,7 @@ class _Flattener:
 
     def add_subckt(self, cell: blif.Subckt, frame: _Frame, stack: list[_Frame]) -> None:
         sub = self.models.get(cell.model)
+        self.check_pins_once(cell, [f for f, _ in cell.conns])
         conns = {f: frame.resolve(a) for f, a in cell.conns}
         if sub is None and cell.model == "adder":
             sub = _gate_adder_model(cell)
@@ -417,12 +422,24 @@ class _Flattener:
                 child.netmap[port] = self.const0()
         stack.append(child)
 
+    def check_pins_once(self, cell: blif.Subckt, pins: list[str]) -> None:
+        """A formal pin connected twice (``data[0]=a data=b`` is one pin of a one-bit port) is a
+        malformed instance: the pin tables are keyed by pin, so the first connection would be
+        silently lost and never compared.  EquivError (exit 2)."""
+        seen: set[str] = set()
+        for pin in pins:
+            if pin in seen:
+                raise EquivError(f"{self.netlist.path}:{cell.line}: malformed: pin {pin!r} of "
+                                 f"{cell.model!r} connected twice")
+            seen.add(pin)
+
     def add_blackbox(self, cell: blif.Subckt, sub: blif.Model | None, frame: _Frame) -> None:
         """Cut a black-box instance: outputs become inputs, inputs become outputs."""
         if not self.cut:
             raise EquivError(f"{self.netlist.path}:{cell.line}: unsupported black box "
                              f"{cell.model}")
         names = _canonical_formals([f for f, _ in cell.conns])
+        self.check_pins_once(cell, [names[f] for f, _ in cell.conns])
         if sub is None:
             is_out = {names[f]: blif.gate_port_is_output(cell.model, f) for f, _ in cell.conns}
         else:
@@ -725,11 +742,253 @@ def pair_unnamed(flats: Sequence[Flat], normalize: bool = True) -> tuple[int, in
     return len(match.pairs), match.guessed
 
 
+# --------------------------------------------------------------------------- RAM groups
+
+RAM_PROBE_TIMEOUT = 40  # seconds per ABC probe of pair_ram_groups
+RAM_PROBE_BUDGET = 1200  # seconds for all the probes of one run
+
+
+def _ram_groups(flat: Flat) -> list[rampair.Group]:
+    idents = [(b.cell_type, rampair.slice_identity(b.outputs.values()) if b.anon else None)
+              for b in flat.blackboxes]
+    try:
+        return rampair.build_groups(idents)
+    except rampair.RamError as exc:
+        raise EquivError(f"{flat.path}: {exc}") from exc
+
+
+def _group_key(group: rampair.Group, sigs: Sequence[bbmatch.Signature]
+               ) -> tuple[str, tuple[int, ...], tuple[bytes, ...]]:
+    return group.cell_type, group.bits, tuple(sigs[group.slices[b]].digest for b in group.bits)
+
+
+def _class_nets(flat: Flat, groups: Sequence[rampair.Group]) -> dict[str, str]:
+    """Free output net -> class net for every unpaired box: the abstraction of a probe.  All boxes
+    of one class (type, parameters, memory size, bit) share one free variable per pin, the same on
+    both sides.  Equal functions stay equal under it when the true pairing keeps classes, so a
+    probe can only lose a candidate that is not one; it can add one that is not (the final proof
+    runs without the abstraction and catches that)."""
+    where: dict[int, tuple[int, int]] = {}
+    for group in groups:
+        for bit, index in group.slices.items():
+            where[index] = (len(group.slices), bit)
+    nets: dict[str, str] = {}
+    for index, box in enumerate(flat.blackboxes):
+        if not box.anon:
+            continue
+        size, bit = where.get(index, (0, 0))
+        tag = hashlib.sha1(repr(box.params).encode()).hexdigest()[:8]
+        for pin, net in box.free.items():
+            nets[net] = f"cls:{box.cell_type}:{tag}:{size}:{bit}:{pin}"
+    return nets
+
+
+def _probe_flat(flat: Flat, roots: Sequence[str], nets: dict[str, str]) -> Flat:
+    """The fan-in cone of ``roots`` (through covers and latches) as a Flat whose outputs are the
+    roots and whose inputs are every undriven net it reads, renamed by ``nets``."""
+    def ren(net: str) -> str:
+        return nets.get(net, net)
+
+    drivers: dict[str, blif.Names | blif.Latch] = {c.output: c for c in flat.names}
+    drivers.update({latch.output: latch for latch in flat.latches})
+    seen: set[str] = set()
+    todo = list(roots)
+    cone = Flat(flat.path, flat.top, [], [])
+    leaves: set[str] = set()
+    while todo:
+        net = todo.pop()
+        if net in seen:
+            continue
+        seen.add(net)
+        cell = drivers.get(net)
+        if cell is None:
+            leaves.add(ren(net))
+        elif isinstance(cell, blif.Names):
+            cone.names.append(blif.Names([ren(n) for n in cell.inputs], cell.output, cell.rows))
+            todo.extend(cell.inputs)
+        else:
+            cone.latches.append(blif.Latch(ren(cell.input), cell.output, init=cell.init))
+            todo.append(cell.input)
+    for k, root in enumerate(roots):
+        out = f"probe:{k}"
+        cone.names.append(blif.Names([ren(root)], out, [("1", "1")]))
+        cone.outputs.append(out)
+    cone.inputs = sorted(leaves)
+    return cone
+
+
+def _probe_equal(cones: tuple[Flat, Flat], abc: str, normalize: bool, timeout: int) -> bool:
+    """True when ABC proves the two cones equal output for output.  Anything else (a
+    difference, a timeout, an ABC error) is False: a probe only proposes."""
+    fa, fb = cones
+    union = sorted({*fa.inputs, *fb.inputs})
+    fa.inputs = fb.inputs = union
+    verb = "dsec" if fa.latches or fb.latches else "cec"
+    if verb == "dsec":
+        for flat in cones:
+            if not flat.latches:
+                add_dangling_latch(flat)
+    tmp = Path(tempfile.mkdtemp(prefix="equiv-ram-"))
+    try:
+        write_flat(fa, io_map(fa, normalize), tmp / "a.blif")
+        write_flat(fb, io_map(fb, normalize), tmp / "b.blif")
+        return parse_verdict(run_abc(abc, f"{verb} a.blif b.blif", tmp, timeout)) is True
+    except HardError:
+        raise
+    except EquivError:
+        return False
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Group]],
+                   classes: Sequence[tuple[list[int], list[int]]], abc: str, normalize: bool,
+                   limits: tuple[float, int]) -> list[tuple[int, int]]:
+    """Pair the groups of each ambiguous class (several groups that simulation cannot tell
+    apart) by what they are.  ABC compares the input pins of a first and a last slice of an A
+    group with those of the B groups, one B group at a time, as cones with the other unpaired
+    boxes abstracted (``_class_nets``); only the pins that differ between the groups of the class
+    are compared (the write enable of one way of a cache, not the address all ways share).  The
+    first B group that ABC proves equal is the partner.  A proof of a difference may take far
+    longer than a proof of equality, so ``limits`` is (deadline on ``time.monotonic``, seconds per
+    probe); a probe that times out counts as not equal.  When one A and one B group are left
+    over in a class they are paired without a probe (every group has a partner or the final
+    proof fails)."""
+    deadline, per_probe = limits
+    nets = [_class_nets(f, g) for f, g in zip(flats, groups, strict=True)]
+
+    def first(side: int, group: rampair.Group) -> dict[str, str]:
+        return flats[side].blackboxes[group.slices[group.bits[0]]].inputs
+
+    def roots(side: int, group: rampair.Group, pins: list[str]) -> list[str]:
+        boxes = [flats[side].blackboxes[group.slices[b]] for b in dict.fromkeys(
+            (group.bits[0], group.bits[-1]))]
+        return [box.inputs[pin] for box in boxes for pin in pins]
+
+    found: list[tuple[int, int]] = []
+    for ids_a, ids_b in classes:
+        pins = sorted(pin for pin in first(0, groups[0][ids_a[0]])
+                      if any(len({first(s, groups[s][g])[pin] for g in ids}) > 1
+                             for s, ids in ((0, ids_a), (1, ids_b))))
+        if not pins:  # every pin of every group is the same net: interchangeable, not probed
+            continue
+        left_a, left_b = list(ids_a), list(ids_b)
+        for i in ids_a:
+            for j in left_b:
+                if time.monotonic() > deadline:
+                    return found
+                cones = (_probe_flat(flats[0], roots(0, groups[0][i], pins), nets[0]),
+                         _probe_flat(flats[1], roots(1, groups[1][j], pins), nets[1]))
+                if _probe_equal(cones, abc, normalize, per_probe):
+                    found.append((i, j))
+                    left_a.remove(i)
+                    left_b.remove(j)
+                    notice(f"RAM group {groups[0][i].mem} ({len(groups[0][i].slices)} slices) "
+                           f"= group {groups[1][j].mem} in B (ABC), {len(left_b)} left in class")
+                    break
+        if len(left_a) == len(left_b) == 1:
+            found.append((left_a[0], left_b[0]))
+    return found
+
+
+def _assert_unique_keys(flat: Flat) -> None:
+    """Every black box of ``flat`` has its own key; two boxes sharing one would share their free
+    and probe nets (EquivError, exit 2, never a silent merge)."""
+    keys = [box.key for box in flat.blackboxes]
+    if len(set(keys)) != len(keys):
+        dup = sorted(k for k, n in collections.Counter(keys).items() if n > 1)
+        raise EquivError(f"{flat.path}: black-box instances share a key after pairing: "
+                         + ", ".join(map(repr, dup)))
+
+
+def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
+                    find_probe_abc: Callable[[], str] | None = None,
+                    probe_limits: tuple[int, int] = (RAM_PROBE_BUDGET, RAM_PROBE_TIMEOUT)
+                    ) -> tuple[int, int, int]:
+    """Pair the unnamed Parmys RAM slices of the two flats by memory group and slice index; returns
+    (slices paired, slices paired by an ABC probe, slices paired by bit in a group that holds
+    interchangeable slices).
+
+    A group whose slices have equal signatures (the same input pins, tied constants) can be
+    paired by bit in a way that crosses interchangeable slices; a failed proof after such a
+    pairing may only mean the crossing, so the caller counts those slices as guessed.
+
+    A slice's name carries (memory id, bit) (``rampair``).  The id is a counter of one Parmys run
+    and differs between runs, so the groups are paired first and the slices of two paired groups
+    pair by bit, exactly.  Groups pair, round after round, when their simulation signature (the
+    response of every input pin of every slice, in bit order) is the only one of its kind on both
+    sides; the pairs are named like ``.cname`` boxes, so the logic behind them becomes
+    distinguishable in the next round.  Groups that stay tied (write enables and data that
+    simulation leaves constant) are compared by ABC on the cones of their input pins, and paired
+    when that forces a pair.  The groups that are still tied, and every slice without an identity,
+    are left to ``pair_unnamed``.  Both sides must hold the same memory shapes where both name
+    them (else EquivError, exit 2).
+
+    Soundness: as for ``pair_unnamed``, a pairing is only a proposal.  The paired slices become
+    named cut points, ABC must prove every one of their input pins equal, and a wrong pairing can
+    make the proof fail, never succeed.  Pairs found by a probe are counted as guessed by the
+    caller, so a failure is unproven (exit 4), not 'not equivalent'."""
+    fa, fb = flats
+    groups = [_ram_groups(fa), _ram_groups(fb)]
+    if not groups[0] or not groups[1]:
+        return 0, 0, 0
+    try:
+        rampair.check_shapes(*groups)
+    except rampair.RamError as exc:
+        head, _, rest = str(exc).partition("\n")
+        raise EquivError(head, rest) from exc
+    free = [list(range(len(g))) for g in groups]
+    paired = probed = tied = count = 0
+    # Generated keys live in a namespace no existing key (a ``.cname``) starts with.
+    prefix = "ram@"
+    while any(box.key.startswith(prefix) for f in flats for box in f.blackboxes):
+        prefix = "_" + prefix
+    deadline = time.monotonic() + probe_limits[0]
+    for _ in range(MATCH_ROUNDS):
+        sigs = [_signatures(f, normalize, {}) for f in flats]
+        keys = [[_group_key(groups[s][g], sigs[s]) for g in free[s]] for s in (0, 1)]
+        cls = rampair.classify(*keys)
+        new = [(free[0][i], free[1][j]) for i, j in cls.exact]
+        by_probe = 0
+        if not new and find_probe_abc is not None and cls.ambiguous:
+            amb = [([free[0][i] for i in a], [free[1][j] for j in b]) for a, b in cls.ambiguous]
+            new = _probe_classes(flats, groups, amb, find_probe_abc(), normalize,
+                                 (deadline, probe_limits[1]))
+            by_probe = len(new)
+        if not new:
+            break
+        names: list[dict[str, str]] = [{}, {}]
+        for ga, gb in new:
+            count += 1
+            for side, group in ((0, groups[0][ga]), (1, groups[1][gb])):
+                digests = [sigs[side][group.slices[b]].digest for b in group.bits]
+                if len(set(digests)) < len(digests):  # two slices a swap could cross
+                    tied += len(digests)
+                    break
+            for bit, ia in groups[0][ga].slices.items():
+                key = f"{prefix}{count}/{bit}"
+                box_a, box_b = fa.blackboxes[ia], fb.blackboxes[groups[1][gb].slices[bit]]
+                names[0][box_a.key], names[1][box_b.key] = key, key
+                box_a.anon = box_b.anon = False
+                paired += 1
+                if by_probe:
+                    probed += 1
+        _rekey(fa, names[0])
+        _rekey(fb, names[1])
+        for flat in flats:
+            _assert_unique_keys(flat)
+        for side, taken in ((0, {a for a, _ in new}), (1, {b for _, b in new})):
+            free[side] = [g for g in free[side] if g not in taken]
+    return paired, probed, tied
+
+
 def match_blackboxes(flats: Sequence[Flat]) -> None:
     """Require the cut black boxes of two flats to match one-to-one by name, type and ports.
 
     Raises EquivError (exit 2) listing every unmatched instance or mismatch."""
     fa, fb = flats
+    for flat in flats:
+        _assert_unique_keys(flat)
     boxes_a = {box.key: box for box in fa.blackboxes}
     boxes_b = {box.key: box for box in fb.blackboxes}
     lines = [f"  only in A: {_describe(box, fa)}" for key, box in boxes_a.items()
@@ -1025,8 +1284,19 @@ def _check(args: argparse.Namespace) -> int:
     flats = [flatten(n, args.strict_init, args.allow_undriven, not args.no_cut,
                      not args.no_io_normalize, check=False, match_unnamed=args.match_unnamed)
              for n in nets]
+    ram_paired = ram_probed = ram_tied = 0
+    if args.match_unnamed and not args.no_ram_pairing:
+        ram_paired, ram_probed, ram_tied = pair_ram_groups(
+            flats, not args.no_io_normalize,
+            None if args.no_ram_probe else lambda: find_abc(args.abc),
+            (args.ram_probe_budget, args.ram_probe_timeout))
     paired, guessed = (pair_unnamed(flats, not args.no_io_normalize) if args.match_unnamed
                        else (0, 0))
+    if ram_paired:
+        notice(f"{ram_paired} RAM slice(s) paired by memory group and bit"
+               + (f" ({ram_probed} of them in groups told apart by ABC probes)" if ram_probed
+                  else ""))
+    guessed += ram_probed + ram_tied
     match_blackboxes(flats)
     for flat in flats:
         check_undriven(flat, args.allow_undriven)
@@ -1059,9 +1329,9 @@ def _check(args: argparse.Namespace) -> int:
     print(output.rstrip())
     code = x_report(flats, maps, abc, args) if args.x_report else 1
     if code == 1 and guessed:
-        print(f"{TOOL}: inconclusive: {guessed} unnamed black-box pair(s) were guessed (equal "
-              "signatures, different input nets, split by structure and file order), so \"not "
-              "equivalent\" may only mean a wrong guess", file=sys.stderr)
+        print(f"{TOOL}: inconclusive: {guessed} unnamed black-box pair(s) were guessed or are "
+              "interchangeable (equal signatures, split by structure, file order or slice "
+              "index), so \"not equivalent\" may only mean a wrong guess", file=sys.stderr)
         return EXIT_UNPROVEN
     return code
 
@@ -1099,6 +1369,18 @@ def _parser() -> argparse.ArgumentParser:
                     "since a paired box must have equal input functions, so a wrong pairing is "
                     "a false 'not equivalent' (or exit 2), never a false 'equivalent' "
                     "(--match-dollar is the old spelling)")
+    ap.add_argument("--no-ram-pairing", action="store_true",
+                    help="with --match-unnamed: do not pair Parmys RAM slices by memory group and "
+                    "bit first (pair every unnamed box by signature)")
+    ap.add_argument("--no-ram-probe", action="store_true",
+                    help="with --match-unnamed: pair RAM groups by simulation only, no ABC probes "
+                    "for the groups it cannot tell apart")
+    ap.add_argument("--ram-probe-budget", type=int, default=RAM_PROBE_BUDGET, metavar="SECONDS",
+                    help="seconds for all the ABC probes that tell RAM groups apart "
+                    "(default %(default)s)")
+    ap.add_argument("--ram-probe-timeout", type=int, default=RAM_PROBE_TIMEOUT, metavar="SECONDS",
+                    help="seconds for one ABC probe (default %(default)s); proving a difference "
+                    "takes longer than that, and a probe that times out counts as 'not equal'")
     ap.add_argument("--x-report", action="store_true",
                     help="when not equivalent, rerun without the outputs in an x-cone (reached "
                     "by `unconn`) and list them; exit 3 if equivalent outside them")

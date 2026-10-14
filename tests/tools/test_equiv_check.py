@@ -22,6 +22,7 @@ from unittest import mock
 import bbmatch
 import blif
 import equiv_check
+import rampair
 
 from . import helpers
 
@@ -930,3 +931,259 @@ class BbmatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RamIdentityTest(unittest.TestCase):
+    """rampair: the memory group and bit that a Parmys RAM slice's output net names."""
+
+    def test_slice_identity_reads_the_group_and_the_bit(self) -> None:
+        for net, want in [("single_port_ram^MEM~47-9^out~0", ("47", 9)),
+                          ("dual_port_ram^MEM~0-30^out1[0]", ("0", 30)),
+                          ("dual_port_ram^MEM~4__S-35^out2~1", ("4__S", 35)),
+                          ("model#1 single_port_ram^MEM~5-12^out", ("5", 12))]:
+            self.assertEqual(rampair.slice_identity([net]), want, net)
+
+    def test_a_net_without_an_identity_gives_none(self) -> None:
+        for net in ("$mul~14[0]", "dual_port_ram^MEM~1__S^lAND~608", "out"):
+            self.assertIsNone(rampair.slice_identity([net]), net)
+
+    def test_nets_that_name_two_identities_give_none(self) -> None:
+        self.assertIsNone(rampair.slice_identity(["x^MEM~1-2^out1", "x^MEM~1-3^out2"]))
+
+    def test_groups_collect_the_bits_of_a_memory(self) -> None:
+        idents: list[tuple[str, tuple[str, int] | None]] = [
+            ("single_port_ram", ("7", 1)), ("single_port_ram", ("7", 0)), ("mult", None),
+            ("single_port_ram", ("9", 0))]
+        groups = rampair.build_groups(idents)
+        self.assertEqual([(g.mem, g.bits, g.slices) for g in groups],
+                         [("7", (0, 1), {1: 0, 0: 1}), ("9", (0,), {0: 3})])
+
+    def test_shapes_must_agree_where_both_sides_name_them(self) -> None:
+        small = rampair.Group("single_port_ram", "1", {0: 0})
+        big = rampair.Group("single_port_ram", "2", {0: 0, 1: 1})
+        rampair.check_shapes([big], [rampair.Group("single_port_ram", "9", {0: 5, 1: 6})])
+        with self.assertRaisesRegex(rampair.RamError, "1 in A, 0 in B"):
+            rampair.check_shapes([small, big],
+                                 [rampair.Group("single_port_ram", "9", {0: 0, 1: 1})])
+        rampair.check_shapes([small], [rampair.Group("dual_port_ram", "3", {0: 0, 1: 1})])
+
+    def test_classify_separates_exact_ambiguous_and_left(self) -> None:
+        result = rampair.classify(["a", "b", "b", "c", "d", "d"], ["b", "b", "a", "e", "d"])
+        self.assertEqual(result.exact, [(0, 2)])
+        self.assertEqual(result.ambiguous, [([1, 2], [0, 1])])
+        self.assertEqual(sorted(result.left_a), [3, 4, 5])
+        self.assertEqual(sorted(result.left_b), [3, 4])
+
+
+class RamPairingTest(unittest.TestCase):
+    """--match-unnamed pairs Parmys RAM slices by memory group and bit.  The write enables are
+    ANDs of 800 inputs, which the biased simulation never sets: simulation cannot tell the two
+    memories apart, so ABC probes must (the memory ids are counters that differ between runs)."""
+
+    WIDTH = 800
+
+    def tree(self, prefix: str) -> str:
+        """``prefix`` AND of WIDTH inputs as covers of at most 10 inputs: net ``w<prefix>``."""
+        lines = []
+        mids = []
+        for k in range(0, self.WIDTH, 10):
+            ins = " ".join(f"{prefix}{i}" for i in range(k, k + 10))
+            lines.append(f".names {ins} m{prefix}{k}\n{'1' * 10} 1\n")
+            mids.append(f"m{prefix}{k}")
+        lines.append(f".names {' '.join(mids)} w{prefix}\n{'1' * len(mids)} 1\n")
+        return "".join(lines)
+
+    def netlist(self, ids: tuple[str, str], bit_swap: bool = False, read_swap: bool = False,
+                drop_bit: bool = False) -> str:
+        """Memory x (write enable wx, address ax) and y: two slices each, named by ``ids``."""
+        ins = " ".join(f"{p}{i}" for p in "xy" for i in range(self.WIDTH))
+        text = (f".model t\n.inputs clk ad d0 d1 {ins}\n.outputs ox0 ox1 oy0 oy1\n"
+                + self.tree("x") + self.tree("y"))
+        outs = {"x": ("ox0", "ox1"), "y": ("oy0", "oy1")}
+        if read_swap:
+            outs = {"x": ("oy0", "oy1"), "y": ("ox0", "ox1")}
+        for mem, ident in zip("xy", ids, strict=True):
+            for bit in (0, 1):
+                if drop_bit and mem == "x" and bit == 1:
+                    text += f".names d1 {outs[mem][bit]}\n1 1\n"
+                    continue
+                wired = 1 - bit if (bit_swap and mem == "x") else bit
+                net = f"single_port_ram^MEM~{ident}-{bit}^out~0"
+                text += (f".gate single_port_ram addr[0]=ad clk=clk data[0]=d{wired} "
+                         f"out[0]={net} we=w{mem}\n.names {net} {outs[mem][bit]}\n1 1\n")
+        return text + ".end\n"
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def run_check(self, text_a: str, text_b: str, *flags: str) -> tuple[int, str, str]:
+        assert ABC is not None
+        return check("--match-unnamed", "--abc", ABC, *flags, self.write("a.blif", text_a),
+                     self.write("b.blif", text_b))
+
+    @needs_abc
+    def test_memory_ids_that_differ_between_runs_pair_by_probe_and_are_equivalent(self) -> None:
+        """B is A with the ids of the two memories exchanged: pairing by id would cross them."""
+        code, out, err = self.run_check(self.netlist(("7", "9")), self.netlist(("9", "7")))
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("4 RAM slice(s) paired by memory group and bit (4 of them in groups told "
+                      "apart by ABC probes)", err)
+
+    @needs_abc
+    def test_identical_ids_pair_and_are_equivalent(self) -> None:
+        code, out, err = self.run_check(self.netlist(("7", "9")), self.netlist(("7", "9")))
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("4 RAM slice(s) paired by memory group and bit", err)
+
+    @needs_abc
+    def test_slices_swapped_by_name_are_never_equivalent(self) -> None:
+        """B wires the data of the slices ``-0`` and ``-1`` of x the other way round (the same
+        names, a different design): the name-and-bit pairing crosses the data pins, ABC sees them
+        differ, and the verdict is a difference."""
+        code, out, err = self.run_check(self.netlist(("7", "9")),
+                                        self.netlist(("7", "9"), bit_swap=True))
+        self.assertIn(code, (1, 4), out + err)
+        self.assertNotEqual(code, 0)
+
+    @needs_abc
+    def test_memories_swapped_by_name_are_never_equivalent(self) -> None:
+        """B reads memory y where A reads x: a different design whichever way the groups pair."""
+        code, out, err = self.run_check(self.netlist(("7", "9")),
+                                        self.netlist(("7", "9"), read_swap=True))
+        self.assertIn(code, (1, 4), out + err)
+        self.assertNotEqual(code, 0)
+
+    @needs_abc
+    def test_ids_exchanged_and_reads_swapped_is_not_equivalent(self) -> None:
+        code, out, err = self.run_check(self.netlist(("7", "9")),
+                                        self.netlist(("9", "7"), read_swap=True))
+        self.assertIn(code, (1, 4), out + err)
+
+    def test_memories_of_different_size_are_exit_2(self) -> None:
+        code, _, err = check("--match-unnamed", "--no-ram-probe",
+                             self.write("a.blif", self.netlist(("7", "9"))),
+                             self.write("b.blif", self.netlist(("7", "9"), drop_bit=True)))
+        self.assertEqual(code, 2, err)
+        self.assertIn("memories differ in size or number", err)
+        self.assertIn("single_port_ram memory with 2 slice(s) (bits 0..1): 2 in A, 1 in B", err)
+
+    @needs_abc
+    def test_no_ram_pairing_leaves_everything_to_the_signatures(self) -> None:
+        code, _, err = self.run_check(self.netlist(("7", "9")), self.netlist(("7", "9")),
+                                      "--no-ram-pairing")
+        self.assertIn(code, (0, 4), err)
+        self.assertNotIn("RAM slice", err)
+
+
+def _stuck_we(name: str, first: int = 0) -> tuple[list[str], str]:
+    """(.inputs, cover text) of a write enable that random simulation never raises (a 64-input
+    AND), as in the adversarial repros."""
+    ins = [f"{name}{i}" for i in range(first, first + 64)]
+    lines = []
+    for k in range(0, 64, 8):
+        lines.append(f".names {' '.join(ins[k:k + 8])} m{name}{k}\n11111111 1\n")
+    lines.append(f".names {' '.join(f'm{name}{k}' for k in range(0, 64, 8))} w{name}\n"
+                 + "1" * 8 + " 1\n")
+    return ins, "".join(lines)
+
+
+class RamReviewFixTest(unittest.TestCase):
+    """Fixes for the adversarial review of the RAM pairing (e1, a4, c1, b1)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def run_pair(self, text_a: str, text_b: str, *flags: str) -> tuple[int, str, str]:
+        paths = []
+        for name, text in (("a.blif", text_a), ("b.blif", text_b)):
+            path = Path(self.tmp.name) / name
+            path.write_text(text, encoding="utf-8")
+            paths.append(str(path))
+        abc = ["--abc", ABC] if ABC is not None else []
+        return check("--match-unnamed", *abc, *flags, *paths)
+
+    def test_one_formal_bit_connected_twice_is_exit_2(self) -> None:
+        """e1: ``data[0]=d0 data=d1`` is one pin of a one-bit port connected twice."""
+        head = ".model t\n.inputs clk ad d0 d1 we\n.outputs o\n"
+        tail = ".names single_port_ram^MEM~3-0^out~0 o\n1 1\n.end\n"
+        gate = (".gate single_port_ram addr[0]=ad clk=clk {} "
+                "out[0]=single_port_ram^MEM~3-0^out~0 we=we\n")
+        a = head + gate.format("data[0]=d0 data=d1") + tail
+        b = head + gate.format("data[0]=d1") + tail
+        for flags in ((), ("--no-ram-pairing",)):
+            code, _, err = self.run_pair(a, b, *flags)
+            self.assertEqual(code, 2, err)
+            self.assertIn("connected twice", err)
+            code, _, err = self.run_pair(b, a, *flags)
+            self.assertEqual(code, 2, err)
+
+    def test_same_formal_twice_on_a_gate_adder_is_exit_2(self) -> None:
+        head = ".model t\n.inputs a b c\n.outputs s co\n"
+        gate = (".gate adder a[0]=a b[0]=b cin=c {}sumout[0]=s cout=co\n.end\n")
+        code, _, err = self.run_pair(head + gate.format("a[0]=b "), head + gate.format(""))
+        self.assertEqual(code, 2, err)
+        self.assertIn("connected twice", err)
+
+    def a4(self, swapped: bool) -> str:
+        ins, cover = _stuck_we("x")
+        q0, q1 = [f"single_port_ram^MEM~5-{k}^out~0" for k in (0, 1)]
+        outs = (q1, q0) if swapped else (q0, q1)
+        ram = ".gate single_port_ram addr[0]=ad clk=clk data[0]=d0 out[0]={} we=wx\n"
+        return (f".model t\n.inputs clk ad d0 {' '.join(ins)}\n.outputs o0 o1\n" + cover
+                + ram.format(q0) + ram.format(q1)
+                + f".names {outs[0]} o0\n1 1\n.names {outs[1]} o1\n1 1\n.end\n")
+
+    @needs_abc
+    def test_interchangeable_slices_with_swapped_reads_are_never_exit_1(self) -> None:
+        """a4: the two slices have the same input pins, so swapping their reads is a no-op in
+        truth.  Exit 1 would be a false 'differs'; 0 or 4 are allowed (never 1)."""
+        code, out, err = self.run_pair(self.a4(False), self.a4(True))
+        self.assertIn(code, (0, 4), out + err)
+
+    def c1(self) -> str:
+        return (".model t\n.inputs clk ad d0 d1 we0 we1\n.outputs o0 o1\n"
+                ".subckt sub clk=clk a=ad d=d0 we=we0 q=o0\n"
+                ".subckt sub clk=clk a=ad d=d1 we=we1 q=o1\n.end\n"
+                ".model sub\n.inputs clk a d we\n.outputs q\n"
+                ".gate single_port_ram addr[0]=a clk=clk data[0]=d "
+                "out[0]=single_port_ram^MEM~3-0^out~0 we=we\n"
+                ".names single_port_ram^MEM~3-0^out~0 q\n1 1\n.end\n")
+
+    @needs_abc
+    def test_a_submodel_instantiated_twice_falls_back_to_signatures(self) -> None:
+        code, out, err = self.run_pair(self.c1(), self.c1())
+        self.assertEqual(code, 0, out + err)
+
+    def test_two_slices_with_one_identity_are_ungrouped_not_an_error(self) -> None:
+        groups = rampair.build_groups([("single_port_ram", ("7", 0)),
+                                       ("single_port_ram", ("7", 0)),
+                                       ("single_port_ram", ("7", 1)),
+                                       ("single_port_ram", ("8", 0))])
+        self.assertEqual([(g.mem, g.slices) for g in groups], [("8", {0: 3})])
+
+    def b1(self, ids: tuple[str, str], swap: bool = False) -> str:
+        ins_x, cov_x = _stuck_we("x")
+        ins_y, cov_y = _stuck_we("y")
+        ram = (".subckt single_port_ram addr[0]=ad clk=clk data[0]={} "
+               "out[0]=single_port_ram^MEM~{}-0^out~0 we={}\n")
+        return (f".model t\n.inputs clk ad d0 d1 {' '.join(ins_x + ins_y)}\n.outputs o0 o1\n"
+                + cov_x + cov_y + ram.format("d0", ids[0], "wx") + ram.format("d1", "77", "wy")
+                + ".cname ram@1/0\n"
+                + f".names single_port_ram^MEM~{ids[0]}-0^out~0 {'o1' if swap else 'o0'}\n1 1\n"
+                + f".names single_port_ram^MEM~77-0^out~0 {'o0' if swap else 'o1'}\n1 1\n.end\n"
+                + ".model single_port_ram\n.inputs addr[0] clk data[0] we\n.outputs out[0]\n"
+                ".blackbox\n.end\n")
+
+    @needs_abc
+    def test_a_cname_like_a_generated_key_does_not_collide(self) -> None:
+        """b1: the user's ``.cname ram@1/0`` must not merge with a generated key."""
+        code, out, err = self.run_pair(self.b1(("5", "77")), self.b1(("9", "77"), swap=True))
+        self.assertIn(code, (1, 4), out + err)
+        self.assertNotIn("loop", err)
