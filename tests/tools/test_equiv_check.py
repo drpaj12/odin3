@@ -611,6 +611,17 @@ class FaultInjectionTest(unittest.TestCase):
         self.assertIn("unproven: ABC cec timed out after 1 seconds", err)
         self.assertNotIn("NOT equivalent", out)
 
+    def test_abc_undecided_is_unproven_exit_4(self) -> None:
+        """dsec can end on its own engine limit ("Reached timeout (60 seconds) in frame 21 ...
+        Networks are UNDECIDED", exit status 0): no verdict, exit 4, never an error (2H micro
+        sweep of 2026-10-14, full/stereovision0)."""
+        abc = self.fake_abc("echo 'Reached timeout (60 seconds) in frame 21.'; "
+                            "echo 'Networks are UNDECIDED.  Time = 105.75 sec'")
+        code, out, err = check("--abc", abc, self.a, self.b)
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("unproven: ABC cec ended UNDECIDED", err)
+        self.assertNotIn("NOT equivalent", out)
+
     def test_abc_killed_by_a_signal_is_hard_exit_5(self) -> None:
         abc = self.fake_abc("kill -SEGV $$")
         code, out, err = check("--abc", abc, self.a, self.b)

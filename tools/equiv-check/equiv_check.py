@@ -11,8 +11,9 @@ cut-point inputs that are wired differently; the output then holds a line that s
 unsupported-construct or ABC error, an uncaught internal error, and black-box instances that
 cannot be matched one-to-one; 3 only with ``--x-report``: not equivalent, but equivalent outside
 the x-cones (below); 4 *unproven*: no verdict either way, a tool limit and not a crash (ABC
-timed out, several clock domains, or the check failed only where black-box pairs were
-guessed); 5 *hard*: ABC was killed by a signal, or this process ran out of memory.
+timed out or ended ``Networks are UNDECIDED`` on its own engine limit, several clock domains,
+or the check failed only where black-box pairs were guessed); 5 *hard*: ABC was killed by a
+signal, or this process ran out of memory.
 
 ``--x-report`` (2H, 2D spec 14.6 item 4): when the two netlists are not equivalent, recompute
 with every output in an x-cone removed and print the removed outputs by name.  Parmys writes a
@@ -146,6 +147,7 @@ MATCH_ROUNDS = 12  # most simulate-and-anchor rounds of pair_unnamed
 # commands use "NOT equivalent", hence the case-insensitive match.
 _NOT_EQUIV_RE = re.compile(r"\bNetworks are NOT EQUIVALENT\b", re.IGNORECASE)
 _EQUIV_RE = re.compile(r"\bNetworks are equivalent\b", re.IGNORECASE)
+_UNDECIDED_RE = re.compile(r"\bNetworks are UNDECIDED\b", re.IGNORECASE)
 
 XOR3 = [("100", "1"), ("010", "1"), ("001", "1"), ("111", "1")]
 MAJ3 = [("11-", "1"), ("1-1", "1"), ("-11", "1")]
@@ -1248,6 +1250,9 @@ def prove(flats: Sequence[Flat], maps: Sequence[dict[str, str]], abc: str,
             shutil.rmtree(tmp, ignore_errors=True)
     verdict = parse_verdict(output)
     if verdict is None:
+        if _UNDECIDED_RE.search(output):  # dsec's own engine limit (a frame's 60 s), no verdict
+            raise UnprovenError(f"unproven: ABC {verb} ended UNDECIDED (its own time or depth "
+                                "limit, not --timeout)", output)
         raise EquivError(f"could not find a verdict in ABC {verb} output", output)
     return verdict, verb, output
 
