@@ -1168,6 +1168,24 @@ if(BUILD_TESTING)
         add_test(NAME test_abc_adapter COMMAND test_abc_adapter)
         set_tests_properties(test_abc_adapter PROPERTIES LABELS unit
             ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
+        # 3D Task 9c: the real odin3-abc as the child, beside the linked engine in this process
+        # (the adapter's sources again, as above; the child runs under prlimit --as=2 GiB through
+        # a wrapper script the test writes, because this ASan process cannot).
+        add_executable(test_abc_child_real tests/unit/test_abc_child_real.c)
+        target_include_directories(test_abc_child_real PRIVATE ${PROJECT_SOURCE_DIR}/adapters/abc
+                                                               ${PROJECT_SOURCE_DIR}/src)
+        target_compile_definitions(test_abc_child_real PRIVATE ODIN3_ABC_TEST_HOOKS=1
+            ODIN3_CHILD_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/abc/child")
+        target_link_libraries(test_abc_child_real PRIVATE odin3_abc_testlib odin3_core unity
+                                                          odin3_flags $<LINK_ONLY:libabc-pic>)
+        # The test build of bridge.c counts pthread_create (as test_abc_adapter's link does).
+        target_link_options(test_abc_child_real PRIVATE ${ODIN3_ABC_WRAPS}
+                                                         -Wl,--wrap=pthread_create)
+        set_target_properties(test_abc_child_real PROPERTIES LINKER_LANGUAGE CXX)
+        add_dependencies(test_abc_child_real odin3_abc_exe)
+        add_test(NAME abc_child_real COMMAND test_abc_child_real)
+        set_tests_properties(abc_child_real PROPERTIES LABELS unit
+            ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
     endif()
     odin3_add_unit_test(test_abi_core)
     target_compile_definitions(test_abi_core PRIVATE

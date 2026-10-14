@@ -40,6 +40,9 @@ void tearDown(void) {
     if (g_made[0] != '\0') {
         (void)unlink(g_made);
     }
+    char pid_file[PATH_CAP];
+    (void)snprintf(pid_file, sizeof pid_file, "%s/grandchild.pid", g_dir); /* sleep.sh's */
+    (void)unlink(pid_file);
     (void)rmdir(g_dir);
 }
 
