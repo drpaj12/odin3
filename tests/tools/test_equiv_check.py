@@ -1113,7 +1113,8 @@ class RamReviewFixTest(unittest.TestCase):
         """e1: ``data[0]=d0 data=d1`` is one pin of a one-bit port connected twice."""
         head = ".model t\n.inputs clk ad d0 d1 we\n.outputs o\n"
         tail = ".names single_port_ram^MEM~3-0^out~0 o\n1 1\n.end\n"
-        gate = ".gate single_port_ram addr[0]=ad clk=clk {} out[0]=single_port_ram^MEM~3-0^out~0 we=we\n"
+        gate = (".gate single_port_ram addr[0]=ad clk=clk {} "
+                "out[0]=single_port_ram^MEM~3-0^out~0 we=we\n")
         a = head + gate.format("data[0]=d0 data=d1") + tail
         b = head + gate.format("data[0]=d1") + tail
         for flags in ((), ("--no-ram-pairing",)):
@@ -1175,8 +1176,8 @@ class RamReviewFixTest(unittest.TestCase):
         return (f".model t\n.inputs clk ad d0 d1 {' '.join(ins_x + ins_y)}\n.outputs o0 o1\n"
                 + cov_x + cov_y + ram.format("d0", ids[0], "wx") + ram.format("d1", "77", "wy")
                 + ".cname ram@1/0\n"
-                + ".names single_port_ram^MEM~%s-0^out~0 %s\n1 1\n" % (ids[0], "o1" if swap else "o0")
-                + ".names single_port_ram^MEM~77-0^out~0 %s\n1 1\n.end\n" % ("o0" if swap else "o1")
+                + f".names single_port_ram^MEM~{ids[0]}-0^out~0 {'o1' if swap else 'o0'}\n1 1\n"
+                + f".names single_port_ram^MEM~77-0^out~0 {'o0' if swap else 'o1'}\n1 1\n.end\n"
                 + ".model single_port_ram\n.inputs addr[0] clk data[0] we\n.outputs out[0]\n"
                 ".blackbox\n.end\n")
 
