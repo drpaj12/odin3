@@ -1167,7 +1167,7 @@ class RamReviewFixTest(unittest.TestCase):
                                        ("single_port_ram", ("8", 0))])
         self.assertEqual([(g.mem, g.slices) for g in groups], [("8", {0: 3})])
 
-    def b1(self, ids: tuple[str, str]) -> str:
+    def b1(self, ids: tuple[str, str], swap: bool = False) -> str:
         ins_x, cov_x = _stuck_we("x")
         ins_y, cov_y = _stuck_we("y")
         ram = (".subckt single_port_ram addr[0]=ad clk=clk data[0]={} "
@@ -1175,14 +1175,14 @@ class RamReviewFixTest(unittest.TestCase):
         return (f".model t\n.inputs clk ad d0 d1 {' '.join(ins_x + ins_y)}\n.outputs o0 o1\n"
                 + cov_x + cov_y + ram.format("d0", ids[0], "wx") + ram.format("d1", "77", "wy")
                 + ".cname ram@1/0\n"
-                + ".names single_port_ram^MEM~%s-0^out~0 o0\n1 1\n" % ids[0]
-                + ".names single_port_ram^MEM~77-0^out~0 o1\n1 1\n.end\n"
+                + ".names single_port_ram^MEM~%s-0^out~0 %s\n1 1\n" % (ids[0], "o1" if swap else "o0")
+                + ".names single_port_ram^MEM~77-0^out~0 %s\n1 1\n.end\n" % ("o0" if swap else "o1")
                 + ".model single_port_ram\n.inputs addr[0] clk data[0] we\n.outputs out[0]\n"
                 ".blackbox\n.end\n")
 
     @needs_abc
     def test_a_cname_like_a_generated_key_does_not_collide(self) -> None:
         """b1: the user's ``.cname ram@1/0`` must not merge with a generated key."""
-        code, out, err = self.run_pair(self.b1(("5", "77")), self.b1(("9", "77")))
+        code, out, err = self.run_pair(self.b1(("5", "77")), self.b1(("9", "77"), swap=True))
         self.assertIn(code, (1, 4), out + err)
         self.assertNotIn("loop", err)

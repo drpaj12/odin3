@@ -115,6 +115,7 @@ VTR designs several times slower, and sorting by name used to pick it),
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import os
 import re
@@ -890,6 +891,16 @@ def _probe_classes(flats: Sequence[Flat], groups: Sequence[Sequence[rampair.Grou
     return found
 
 
+def _assert_unique_keys(flat: Flat) -> None:
+    """Every black box of ``flat`` has its own key; two boxes sharing one would share their free
+    and probe nets (EquivError, exit 2, never a silent merge)."""
+    keys = [box.key for box in flat.blackboxes]
+    if len(set(keys)) != len(keys):
+        dup = sorted(k for k, n in collections.Counter(keys).items() if n > 1)
+        raise EquivError(f"{flat.path}: black-box instances share a key after pairing: "
+                         + ", ".join(map(repr, dup)))
+
+
 def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
                     find_probe_abc: Callable[[], str] | None = None,
                     probe_limits: tuple[int, int] = (RAM_PROBE_BUDGET, RAM_PROBE_TIMEOUT)
@@ -923,6 +934,10 @@ def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
         raise EquivError(head, rest) from exc
     free = [list(range(len(g))) for g in groups]
     paired = probed = count = 0
+    # Generated keys live in a namespace no existing key (a ``.cname``) starts with.
+    prefix = "ram@"
+    while any(box.key.startswith(prefix) for f in flats for box in f.blackboxes):
+        prefix = "_" + prefix
     deadline = time.monotonic() + probe_limits[0]
     for _ in range(MATCH_ROUNDS):
         sigs = [_signatures(f, normalize, {}) for f in flats]
@@ -941,7 +956,7 @@ def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
         for ga, gb in new:
             count += 1
             for bit, ia in groups[0][ga].slices.items():
-                key = f"ram@{count}/{bit}"
+                key = f"{prefix}{count}/{bit}"
                 box_a, box_b = fa.blackboxes[ia], fb.blackboxes[groups[1][gb].slices[bit]]
                 names[0][box_a.key], names[1][box_b.key] = key, key
                 box_a.anon = box_b.anon = False
@@ -950,6 +965,8 @@ def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
                     probed += 1
         _rekey(fa, names[0])
         _rekey(fb, names[1])
+        for flat in flats:
+            _assert_unique_keys(flat)
         for side, taken in ((0, {a for a, _ in new}), (1, {b for _, b in new})):
             free[side] = [g for g in free[side] if g not in taken]
     return paired, probed
@@ -960,6 +977,8 @@ def match_blackboxes(flats: Sequence[Flat]) -> None:
 
     Raises EquivError (exit 2) listing every unmatched instance or mismatch."""
     fa, fb = flats
+    for flat in flats:
+        _assert_unique_keys(flat)
     boxes_a = {box.key: box for box in fa.blackboxes}
     boxes_b = {box.key: box for box in fb.blackboxes}
     lines = [f"  only in A: {_describe(box, fa)}" for key, box in boxes_a.items()
