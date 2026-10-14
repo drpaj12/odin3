@@ -551,7 +551,7 @@ class ArgvTest(ExitCheckCase):
         with mock.patch.dict(os.environ, {"VTR_ROOT": str(self.dir / "none")}):
             code, _, err = helpers.run_main(exit_check.main, [
                 "--odin3", str(self.odin3), "--yosys", str(self.yosys), "--arch", str(self.arch),
-                str(self.micros)])
+                "--golden-root", str(self.golden), str(self.micros)])
         self.assertEqual(code, 2)
         self.assertIn("basic_odin_config_split.xml not found", err)
 
@@ -859,7 +859,7 @@ class LogTest(ExitCheckCase):
             self.assertIn(flag, out)
         code, _, err = helpers.run_main(exit_check.main, [
             "--odin3", str(self.odin3), "--yosys", "no-such-yosys", "--arch", str(self.arch),
-            str(self.micros)])
+            "--golden-root", str(self.golden), str(self.micros)])
         self.assertEqual(code, 2)
         self.assertIn("no-such-yosys is not an executable file", err)
 
