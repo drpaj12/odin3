@@ -13,5 +13,24 @@
 # it: a design is recorded only when the review shows that every difference inside the cone is the
 # resolution of an `unconn` and nothing else (an uninitialised RAM word, an unconnected input).
 #
-# EMPTY ON PURPOSE (2H review I7). arm_core and stereovision0 are eq-x and NOT recorded: see
-# 2H-splice-report.md, "eq-x analysis". exit_vtr is red at those two designs until a human reviews them.
+# stereovision0 is recorded (2H eq-x review, 2026-10-14): Odin III's RTLIL is dsec-equivalent to Yosys's own
+# elaboration of the whole design, and with `wreduce` removed from the shared script the spliced netlist is
+# fully equivalent to Parmys's (no x-cone at all). The 141 outputs are downstream of Parmys's `unconn`
+# padding of signed adders (Parmys ignores A_SIGNED/B_SIGNED and pads the shorter operand with unconn = 0
+# instead of its sign bit), applied to different adders because wreduce's signed rewrite depends on cell
+# order. Both netlists are IEEE-wrong there (a Parmys defect, see 2H-splice-report.md section 17). arm_core is
+# NOT recorded: its eq-x is unexplained (report, "arm_core").
+design stereovision0.v 141 b8945a60d785c88a15c5e3923ec9d921e03ffce7d0002a4e249d494a8a93f0c5 outputs downstream of Parmys unconn padding of signed adders after wreduce (Parmys defect, the spliced netlist equals Parmys without wreduce and Odin III RTLIL equals Yosys elaboration)
+bus stereovision0.v depth_out 8
+bus stereovision0.v offchip_sram_addr 17
+bus stereovision0.v offchip_sram_data_out 64
+bus stereovision0.v offchip_sram_oe 1
+bus stereovision0.v offchip_sram_we 8
+bus stereovision0.v tm3_vidout_blank 1
+bus stereovision0.v tm3_vidout_blue 8
+bus stereovision0.v tm3_vidout_green 8
+bus stereovision0.v tm3_vidout_hsync 1
+bus stereovision0.v tm3_vidout_red 10
+bus stereovision0.v tm3_vidout_vsync 1
+bus stereovision0.v v_d_reg_s4_left_2to0 7
+bus stereovision0.v v_d_reg_s4_right_2to0 7
