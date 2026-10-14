@@ -2361,8 +2361,10 @@ module takes effect at the next module ``; `assignment to bits outside 'y' [7:0]
 elaborated, a module found in several libraries, a black-box body ignored, an implicit black box,
 the final summary line (EL-2).
 
-Not a 2D warning (PHASE2 #25, 2F §17 #57): 2D unifies `A_SIGNED` and `B_SIGNED` of every word cell it
-builds, so no mixed-sign cell leaves it. One that arrives otherwise is signed only when both flags are
+Not a 2D warning (PHASE2 #25, 2F §17 #57): 2D unifies `A_SIGNED` and `B_SIGNED` for the 15 cell types of the
+ruling (`$add $sub $mul $div $mod $and $or $xor $xnor $lt $le $gt $ge $eq $ne`), so none of those leaves it
+mixed. The shifts, `$shiftx` and `$pow` can carry 1/0 flags: their B flag is the amount's (exponent's) own
+(`s ** u` gives `$pow` 1/0, `s >>> u` gives `$sshr` 1/0), and they are not mixed-sign cells. One that arrives otherwise is signed only when both flags are
 set, and `opt_expr` warns of it once (2F §16).
 
 ### 9.3 Error cap and what stops elaboration (EL-44)

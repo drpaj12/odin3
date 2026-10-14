@@ -953,7 +953,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
     - **Divergences from Yosys 0.55** are spec 2F §17 (rows 1-56), by reference, each with its
       reason and the file or seed that shows it. The ones the evidence added in 2F-6: #53
       (`bm_stmt_compare_padding.v`, an `$sdff` merge Odin III misses), #54 (`bm_sfifo_rtl.v`, a
-      `mux_invert` and a `const.$neg` Yosys fires), #55 (mixed-sign cells, below) and #56 (`--opt`
+      `mux_invert` and a `const.$neg` Yosys fires), #55 (mixed-sign cells, below; superseded by #57 / PHASE2 #25) and #56 (`--opt`
       seeds 100 and 153, a `$sdff` on one side only). Sound fixes of Yosys miscompiles (#47 and
       others, bitwise-only) are listed there too.
     - **Agent defaults, plan points (a)-(s)** (`docs/plans/2026-10-11-2F-opt-plan.md`, "Spec
@@ -988,7 +988,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `opt_micro` (490 micros: 409 ok, 81 xfail, 0 unexpected, at most 3 iterations),
       `opt_gen_vs_yosys` (the `--opt` generator, 200 seeds, 0 failures, structural cases listed in
       `tests/opt/gen_structural_expect.txt`), `fuzz_opt` (CI; it found two real bugs, mixed-sign
-      `identwrt` and `fine.addsub`, now conservative, §17 #55). These are the implementers'
+      `identwrt` and `fine.addsub`, fixed under the both-signed rule; #55 is superseded by §17 #57 / PHASE2 #25). These are the implementers'
       smoke numbers; the sweeps' own summaries are in the Results block, to be filled.
       **Exit codes of the opt tools (one convention):** 0 pass, 1 a real negative result, 2 usage
       or tool error, 3 hard (a crash, signal, memory-cap kill or timeout of a child; `opt-equiv`,

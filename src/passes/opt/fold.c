@@ -37,7 +37,9 @@ typedef enum fold_shape {
  * How an operator reads its operands (Yosys 0.55's CellTypes::eval on constants, probed with
  * opt_expr): AS_IS uses them whole at max(Y, A) bits (the shifts read B as an unsigned amount);
  * BITWISE extends each to Y by its own sign; NUMERIC reads each as the number its own sign gives
- * (so A signed and B unsigned mix) and truncates the exact result to Y.
+ * (so A signed and B unsigned mix) and truncates the exact result to Y. That is Yosys's rule; for
+ * every binary operator but $pow, job_init overrides both flags with the both-signed flag (spec
+ * 17 #57), so a mixed cell is unsigned.
  */
 typedef enum fold_sign { SIGN_AS_IS, SIGN_BITWISE, SIGN_NUMERIC } fold_sign;
 

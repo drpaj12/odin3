@@ -16,7 +16,8 @@
  * later of two equal cells, §6 the earlier (a spec choice, row 7). Nodes with no output port, or
  * with more than one, are never candidates, because kit_connect redirects one output port: this
  * misses Yosys's merges of `$memwr` (row 13). The commutative swap applies only when A_SIGNED ==
- * B_SIGNED, where Yosys swaps mixed-sign operands too (row 14, OP-13).
+ * B_SIGNED (row 14): a mixed-sign cell is unsigned (#57), so a swap would be sound, but such
+ * cells are rare and kept apart; Yosys swaps them too.
  * A node with an unconnected input pin is no candidate (row 16), as in opt_reduce.
  *
  * An FF merge never loses an init (OP-2): the dropped Q's init bits are only read before
@@ -292,8 +293,8 @@ static void put_run(merge_state *ms, const odin3_vec *run) {
     }
 }
 
-/* True unless A_SIGNED and B_SIGNED both exist and differ (OP-13: sext(x) + zext(y) is not
- * sext(y) + zext(x), so a mixed-sign cell keeps its operand order). */
+/* True unless A_SIGNED and B_SIGNED both exist and differ (conservative: a mixed-sign
+ * cell is unsigned, so a swap would be sound, but it keeps its operand order). */
 static bool signs_agree(const merge_state *ms, odin3_node_id node, const odin3_celltype_def *def) {
     uint32_t sa = odin3_kit_param_index(def, "A_SIGNED");
     uint32_t sb = odin3_kit_param_index(def, "B_SIGNED");
