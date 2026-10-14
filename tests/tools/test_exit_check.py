@@ -849,27 +849,6 @@ class ListedTest(ExitCheckCase):
         self.assertEqual(code, 1)
         self.assertEqual(out.count("(listed, but not for this result)"), 2)
 
-    def test_a_reviewed_parmys_defect_is_known_differs_never_a_pass(self) -> None:
-        self.micro("g", "d", "nothing\n")
-        self.micro("g", "ok", "IDENT\n")
-        listing = self.expect("g/d.v [NOT equivalent outside] Parmys shorts the drivers: x\n")
-        code, out, err = self.run_tool("--expect-differs", listing)
-        self.assertEqual(code, 0, out + err)
-        self.assertIn("known-diff g/d.v", out)
-        self.assertIn("KNOWN DIFFERS (Parmys defect, listed)", out)
-        self.assertIn("PROVEN 1 (1 identical, 0 equivalent, 0 eq-x with a reviewed record), "
-                      "0 listed-reject; NOT PROVEN 0 unproven (listed), 1 known differs (listed)",
-                      out)
-        code, out, _ = self.run_tool("--expect-differs", self.expect("g/d.v [other] x\n"))
-        self.assertEqual(code, 1)
-        self.assertIn("fails differently from the listing", out)
-
-    def test_a_known_differs_entry_that_now_passes_is_xpass(self) -> None:
-        self.micro("g", "a", "IDENT\n")
-        code, out, _ = self.run_tool("--expect-differs", self.expect("g/a.v [x] was wrong\n"))
-        self.assertEqual(code, 1)
-        self.assertIn("XPASS      g/a.v", out)
-
     def test_a_signal_or_cap_kill_is_never_expected(self) -> None:
         self.micro("g", "oom", "SPLICEKILL\n")
         self.micro("g", "segv", "SPLICESEGV\n")
@@ -924,8 +903,7 @@ class LogTest(ExitCheckCase):
     def test_help_and_usage_errors(self) -> None:
         code, out, _ = helpers.run_main(exit_check.main, ["--help"])
         self.assertEqual(code, 0)
-        for flag in ("--expect-fail", "--expect-unproven", "--expect-no-golden", "--expect-differs",
-                     "--eqx-record",
+        for flag in ("--expect-fail", "--expect-unproven", "--expect-no-golden", "--eqx-record",
                      "--min-checked", "--vtr-root"):
             self.assertIn(flag, out)
         code, _, err = helpers.run_main(exit_check.main, [

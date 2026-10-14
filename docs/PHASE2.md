@@ -1139,9 +1139,9 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       found they are plainly equivalent. (d) An x-cone result over guessed pairs is *unproven*: the
       cones hold every pin of a box fed by `unconn`, so they hide what a wrong pairing breaks (the
       arm_core lesson).
-    - **Parmys defects, listed.** `syntax/multi_assignment`: Parmys keeps one of four tri-state drivers
-      (`tests/exit/micro_differs.txt`, the new `--expect-differs` list and KNOWN DIFFERS bucket: not a
-      pass, XPASS when it starts to pass). `large/sv_chip0_hierarchy_no_mem`: the signed-adder `unconn`
+    - **Parmys defects, listed.** `syntax/multi_assignment`: Parmys keeps one of four tri-state drivers;
+      Peter ruled that Odin III will follow Parmys's resolution with a warning (a separate elaboration
+      change), so it is not listed (`differs` stays never listable) and fails until that lands. `large/sv_chip0_hierarchy_no_mem`: the signed-adder `unconn`
       padding of the exit_vtr stereovision0 record, reviewed and recorded in `tests/exit/micro_eqx.txt`
       (golden equals Yosys `read_verilog` through the Parmys script; the splice equals it with `wreduce`
       removed; 218 against 197 `unconn` uses with it, 50 on both sides without).

@@ -9,8 +9,7 @@
 # they are `no-golden` (tests/exit/micro_nogolden.txt, 4 micros), which never counts as a pass.
 # A micro whose golden run was CAPPED (large/LargeRam.v) is NOT listed here: a cap kill is no verdict
 # on the design (it is a size limit of the oracle, listed in micro_nogolden.txt, never a pass). A
-# `differs` is listed only in micro_differs.txt (a reviewed Parmys defect), an `error` and a `hard`
-# failure are never listable.
+# `differs`, an `error` and a `hard` failure are never listable.
 #
 # The list must shrink, never rot: exit-check fails on a listed micro that now passes and on an
 # entry that names no micro.
