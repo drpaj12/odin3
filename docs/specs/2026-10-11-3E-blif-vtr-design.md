@@ -94,6 +94,14 @@ The arch's `<models>` (k6_frac and EArch alike) and the port sizes R11 derives (
 |---|---|---|---|
 | `adder` | `a` 1, `b` 1, `cin` 1 | `cout` 1, `sumout` 1 | — |
 | `multiply` | `a` 36, `b` 36 | `out` 72 | — |
+
+The `multiply` row is the arch's model (its widest instance). The library cell `lib/vtr.o3lib`
+`multiply` is VTR's square cell: one `WIDTH` parameter, `a`/`b` of `WIDTH` bits, `out` of `2*WIDTH`.
+An instance is written at its own `WIDTH`; only the stub is written at the largest `WIDTH` used
+(PHASE3 decision 29; the "36 bits" wording elsewhere is the arch cap, not a fixed cell). The
+upper-bit `unconn` padding of §9.2 applies only to a `WIDTH`-sized instance whose operands are
+narrower than `WIDTH`.
+
 | `single_port_ram` | `we` 1, `addr` 15, `data` 1, `clk` 1 | `out` 1 | `clk` |
 | `dual_port_ram` | `we1` 1, `we2` 1, `addr1` 15, `addr2` 15, `data1` 1, `data2` 1, `clk` 1 | `out1` 1, `out2` 1 | `clk` |
 
