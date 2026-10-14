@@ -260,6 +260,15 @@ class BridgeTest(unittest.TestCase):
         self.assertTrue(all("-nolatches" in s or "read_rtlil" in s for s in scripts))
         self.assertEqual(sum("--nolatches" in s or "-sv -nolatches" in s for s in scripts), 2)
 
+    def test_vtr_compat_reaches_side_a_only(self) -> None:
+        code, out, err = self.run_tool("--vtr-compat")
+        self.assertEqual(code, 0, out + err)
+        f = str(self.src)
+        calls = self.calls()
+        self.assertEqual(calls[1][2], f"read_verilog --nolatches --vtr-compat {f}; "
+                         "write_rtlil a.il")
+        self.assertNotIn("vtr-compat", calls[3][2])  # side B (Yosys) is unchanged
+
     def test_files_are_kept(self) -> None:
         self.run_tool("--top", "t")
         for name in ("a.il", "a.blif", "b.blif", "b.il"):

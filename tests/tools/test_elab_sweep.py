@@ -755,6 +755,16 @@ class ProcModesTest(SweepTestCase):
         self.assertIn("--unmap-enables", argv)
         self.assertIn("--no-trio", argv)  # --trio off
 
+    def test_vtr_compat_reaches_the_bridge_only_when_asked(self) -> None:
+        self.write("m/a.v", "x\n")
+        base = ["--equiv", "--yosys", "Y", "--equiv-check", "E", str(self.dir / "m")]
+        code, out, _ = self.run_tool(*base)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("--vtr-compat", next(c for c in self.calls() if c[0] == "elab-equiv"))
+        code, out, _ = self.run_tool("--vtr-compat", *base)
+        self.assertEqual(code, 0, out)
+        self.assertIn("--vtr-compat", [c for c in self.calls() if c[0] == "elab-equiv"][-1])
+
     def test_pass_proc_needs_the_bridge_and_proc_diff_needs_yosys(self) -> None:
         self.write("m/a.v", "x\n")
         code, _, err = self.run_tool("--pass", "proc", str(self.dir / "m"))

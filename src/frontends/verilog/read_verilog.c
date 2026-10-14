@@ -387,6 +387,8 @@ static bool set_flag(odin3_bytes word, rv_args *out) {
         out->elab.nomem2reg = true;
     } else if (odin3_pass_arg_is(word, "--auto-blackbox")) {
         out->elab.auto_blackbox = true;
+    } else if (odin3_pass_arg_is(word, "--vtr-compat")) {
+        out->elab.vtr_compat = true;
     } else {
         return false;
     }
@@ -540,6 +542,7 @@ static odin3_status mark_library(odin3_ast *ast, const rv_args *args) {
     unsigned flags = ODIN3_UNIT_LIB;
     flags |= args->elab.nolatches ? ODIN3_UNIT_NOLATCHES : 0U;
     flags |= args->elab.nomem2reg ? ODIN3_UNIT_NOMEM2REG : 0U;
+    flags |= args->elab.vtr_compat ? ODIN3_UNIT_VTR_COMPAT : 0U;
     return odin3_ast_mark_units(ast, 0, odin3_ast_root_count(ast), (uint8_t)flags);
 }
 
@@ -592,14 +595,16 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
 const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog",
     "read_verilog [--parse-only] [--lib] [--nolatches] [--nomem2reg] [--auto-blackbox] "
-    "[<file>...]: "
+    "[--vtr-compat] [<file>...]: "
     "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
     "libraries; --parse-only keeps it (write_verilog_ast prints it), otherwise elaboration (2D) "
     "follows: --nolatches makes unassigned paths of combinational blocks x, --nomem2reg keeps "
-    "memories unless forced, --auto-blackbox makes an undefined module a black box; --lib keeps "
-    "the modules as library units for later reads (elaborated, under this read's --nolatches and "
-    "--nomem2reg, only where a later design instantiates them)",
+    "memories unless forced, --auto-blackbox makes an undefined module a black box, --vtr-compat "
+    "reads a non-constant `initial x = e;` as `assign x = e;` as Parmys does (a warning each); "
+    "--lib keeps "
+    "the modules as library units for later reads (elaborated, under this read's --nolatches, "
+    "--nomem2reg and --vtr-compat, only where a later design instantiates them)",
     read_verilog_run,
     NULL,
     false,

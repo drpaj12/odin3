@@ -249,6 +249,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/pg_scan.c
     src/frontends/elab/pg_memw.c
     src/frontends/elab/pg_init.c
+    src/frontends/elab/pg_init_vtr.c
     src/frontends/elab/pg_readmem.c
     src/frontends/elab/pg_select.c
     src/frontends/elab/elab2_inst.c
@@ -1038,6 +1039,13 @@ if(BUILD_TESTING)
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
         ODIN3_READMEM_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/elab/readmem"
         ODIN3_SINK_V="${PROJECT_SOURCE_DIR}/tests/elab/sink/sink.v")
+    # 2D-VI: `initial x = <non-constant>` under read_verilog --vtr-compat (Peter 2026-10-13).
+    odin3_add_unit_test(test_elab_vtr_initial)
+    target_sources(test_elab_vtr_initial PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_vtr_initial PRIVATE ${_gen})
+    add_dependencies(test_elab_vtr_initial verilog_generated)
+    target_compile_definitions(test_elab_vtr_initial PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
@@ -1937,7 +1945,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
                     --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
-                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --vtr-compat
                     --lib ${PROJECT_SOURCE_DIR}/tests/elab/lib/vtr_primitives.v
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_equiv_expect_fail.txt

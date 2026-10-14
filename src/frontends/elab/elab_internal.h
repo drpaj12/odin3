@@ -172,6 +172,7 @@ struct odin3_elab2 {
     odin3_elab_opts opts;
     bool mod_nolatches; /* the options in force for the module being emitted: the run's, or those */
     bool mod_nomem2reg; /* of the `read_verilog --lib` read that supplied it (2D-7b) */
+    bool mod_vtr_compat;
     const odin3_elab_limits *limits;
     odin3_elab_binding bind;
     odin3_symtab *st;
@@ -692,6 +693,11 @@ int odin3_elab2_sig_i64(const odin3_sig *sig, int64_t *out);
  */
 odin3_status odin3_elab2_assign(odin3_elab2 *e2, odin3_ast_id net_assign);
 
+/* The continuous assignment `assign lhs = rhs` of two expression nodes (a statement of an `initial`
+ * that --vtr-compat reads so, pg_init.c), quietly: the caller says what it did. Status and errors
+ * as odin3_elab2_assign; the nodes are not checked to be assignable (odin3_elab2_lvalue_make's
+ * located error). */
+odin3_status odin3_elab2_assign_nodes(odin3_elab2 *e2, odin3_ast_id lhs, odin3_ast_id rhs);
 /* --- stage 2: drivers, instances, gates, wired nets (Task 19; EL-10, EL-11, EL-26, EL-28, EL-29)
  * -- */
 
