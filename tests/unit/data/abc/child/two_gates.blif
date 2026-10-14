@@ -1,0 +1,9 @@
+.model two_gates
+.inputs a b c
+.outputs y z
+.names a b y
+11 1
+.names b c z
+1- 1
+-1 1
+.end

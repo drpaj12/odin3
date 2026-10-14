@@ -38,6 +38,13 @@ Recorded 2026-10-08 (Phase 0 §4).
   `abc` and `libabc` targets are not built: `--target abc` is ABC's upstream tool (output
   `abc-upstream`, on the non-PIC `libabc`), which compiles all of ABC a second time and does not
   update `third_party/abc/abc`.
+  The tool's `main()` is `adapters/abc/child_main.c` (ABC's `main.c` plus one line, below), and
+  the build copies it to `build/<preset>/odin3-abc` beside `odin3` (an install puts it in `bin/`
+  as `odin3-abc`): that copy is the program of the subprocess path for non-default ABC scripts
+  (3D spec §7.9, AB-33). `ODIN3_ABC_EXE` names another program (Python hosts, tests). The core
+  asks it `-c "version"` once per process; ABC's own version text does not name the commit, so
+  `odin3-abc` prints `odin3-abc: commit <40 hex>` first for that exact query, and the core
+  refuses a program whose commit is not the pin above.
 - **Yosys now builds with CMake** (`cmake -B build -G Ninja && ninja -C build`); its old
   `make -j` instructions no longer apply.
 - Smoke test passed: `run_vtr_flow.py blink.v EArch.xml --route_chan_width 100` → `EArch/blink OK`.
