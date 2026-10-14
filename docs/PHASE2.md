@@ -757,6 +757,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       (budget) and `cf_fir_3_8_8`, `stereovision2`, `bgm`, `cf_fft_1024_16` (ABC dsec 600 s) with
       the measured evidence; `large/mkDelayWorker32B` runs at a 6G cap (`--cap-for`) and ends at
       the `dual_port_ram` pairing limit of its siblings.
+      A host OOM-kill (or manual kill) of side B is indistinguishable from a cap kill: SIGKILL is
+      the only signal `elab-equiv` sees, so either reads `exceeded its memory cap`.
     - **Heavy runs** (controller, Release build, lanes idle; `ODIN3_HEAVY_OK=1`):
       ```
       tools/build-locked --preset release -j6
