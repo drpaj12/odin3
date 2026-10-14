@@ -242,13 +242,16 @@ static bool module_has_attr(const odin3_elab2 *e2, odin3_ast_id module, const ch
 }
 
 /* The options of the module: those of its `--lib` read when it came from one (stage 1 marked it
- * `odin3_lib`, its flags `odin3_lib_nolatches` and `odin3_lib_nomem2reg`), else the run's. */
+ * `odin3_lib`, its flags `odin3_lib_nolatches`, `odin3_lib_nomem2reg` and
+ * `odin3_lib_vtr_compat`), else the run's. */
 static void module_options(odin3_elab2 *e2, odin3_ast_id module) {
     e2->mod_nolatches = e2->opts.nolatches;
     e2->mod_nomem2reg = e2->opts.nomem2reg;
+    e2->mod_vtr_compat = e2->opts.vtr_compat;
     if (module_has_attr(e2, module, "odin3_lib")) {
         e2->mod_nolatches = module_has_attr(e2, module, "odin3_lib_nolatches");
         e2->mod_nomem2reg = module_has_attr(e2, module, "odin3_lib_nomem2reg");
+        e2->mod_vtr_compat = module_has_attr(e2, module, "odin3_lib_vtr_compat");
     }
 }
 

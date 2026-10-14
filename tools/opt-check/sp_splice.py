@@ -8,11 +8,12 @@ Usage::
 
 Phase 2 has no ``fsm``, ``wreduce``, ``memory``, ``flatten``, ``techmap`` or hard-block mapping,
 so the exit comparison runs Parmys's script in two halves, verbatim from ``synthesis.tcl`` apart
-from point (i)'s Odin III spellings (``--nolatches``, ``--nomem2reg``, ``--top``):
+from point (i)'s Odin III spellings (``--nolatches``, ``--nomem2reg``, ``--top``, and
+``--vtr-compat``, the VTR setting):
 
-- Odin III: ``O -p "read_verilog --nomem2reg P; read_verilog --nolatches FILE...; hierarchy --top
-  T; opt_expr; opt_clean; opt -nodffe -nosdff; proc; write_rtlil a.il"``. ``P`` is Parmys's
-  ``vtr_primitives.v`` (``--primitives``, else under ``$VTR_ROOT``).
+- Odin III: ``O -p "read_verilog --nomem2reg P; read_verilog --nolatches --vtr-compat FILE...;
+  hierarchy --top T; opt_expr; opt_clean; opt -nodffe -nosdff; proc; write_rtlil a.il"``. ``P`` is
+  Parmys's ``vtr_primitives.v`` (``--primitives``, else under ``$VTR_ROOT``).
 - Yosys 0.55, from ``plugin -i parmys`` to ``write_blif -true + vcc -false + gnd -undef + unconn
   -blackbox out.blif``, reading ``a.il``. It is one line in ``yosys.tcl`` after
   synthesis.tcl's own first line, ``yosys -import``, run as ``Y -c yosys.tcl``: the ``yosys
@@ -72,7 +73,7 @@ PRIMITIVES_UNDER_VTR = (
 # hand-over.
 ODIN3_HALF = (
     "read_verilog --nomem2reg {primitives}",
-    "read_verilog --nolatches {files}",
+    "read_verilog --nolatches --vtr-compat {files}",
     "hierarchy --top {top}",
     "opt_expr",
     "opt_clean",

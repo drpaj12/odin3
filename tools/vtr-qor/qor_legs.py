@@ -43,7 +43,7 @@ NAME_STYLES = ("short", "provenance")
 QOR_CHAIN_PARAMS = ("-track_memory_usage", "-crit_path_router_iterations", "100")
 
 _READ_VERILOG = (
-    "read_verilog --nolatches {inp}; proc; opt; flatten; wreduce; hardmap; lower; "
+    "read_verilog --nolatches --vtr-compat {inp}; proc; opt; flatten; wreduce; hardmap; lower; "
 )
 _SCRIPT_BODY = {
     "O": _READ_VERILOG + "abc --lut {k}; ",

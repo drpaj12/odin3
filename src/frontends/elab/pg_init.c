@@ -329,6 +329,11 @@ static odin3_status run_exec(odin3_init *run, odin3_ast_id stmt) {
                              "task call in an initial block is not applied and is ignored");
             return ODIN3_OK;
         }
+        bool handled = false;
+        st = odin3_elab2_initial_assign(e2, stmt, &handled);
+        if (st != ODIN3_OK || handled) {
+            return st;
+        }
         odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, stmt),
                          "initial statement is not constant and is ignored");
         return ODIN3_OK;

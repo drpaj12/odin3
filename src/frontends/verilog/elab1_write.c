@@ -328,8 +328,9 @@ static const struct {
     unsigned bit;
 } k_unit_attrs[] = {{"odin3_lib", ODIN3_UNIT_LIB},
                     {"odin3_lib_nolatches", ODIN3_UNIT_NOLATCHES},
-                    {"odin3_lib_nomem2reg", ODIN3_UNIT_NOMEM2REG}};
-enum { W_UNIT_ATTRS = 3, W_ATTR_MSG = 160 };
+                    {"odin3_lib_nomem2reg", ODIN3_UNIT_NOMEM2REG},
+                    {"odin3_lib_vtr_compat", ODIN3_UNIT_VTR_COMPAT}};
+enum { W_UNIT_ATTRS = 4, W_ATTR_MSG = 160 };
 
 /* A value-less ATTR named text on made. */
 static odin3_ast_id w_flag_attr(e1w *wr, odin3_ast_id made, const char *text) {
