@@ -12,9 +12,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* The caps of opt.h that tests lower: ODIN3_OPT_MAX_ITERATIONS, ODIN3_OPT_MUXTREE_MAX_EVALS. */
+/*
+ * The caps of opt.h that tests lower: ODIN3_OPT_MAX_ITERATIONS, ODIN3_OPT_MUXTREE_MAX_EVALS and
+ * ODIN3_WREDUCE_MAX_ROUNDS.
+ */
 typedef struct odin3_opt_limits {
-    uint32_t max_iterations, muxtree_max_evals;
+    uint32_t max_iterations, muxtree_max_evals, wreduce_max_rounds;
 } odin3_opt_limits;
 
 /* Sets the caps (NULL restores the defaults; each value is clamped to [1, its default]). */

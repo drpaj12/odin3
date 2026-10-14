@@ -122,6 +122,9 @@ add_library(odin3_core OBJECT
     src/passes/opt/clean.c
     src/passes/opt/merge.c
     src/passes/opt/muxtree.c
+    src/passes/opt/wreduce.c
+    src/passes/opt/wreduce_op.c
+    src/passes/opt/wreduce_ff.c
     src/passes/opt/reduce.c
     src/passes/opt/share.c
     src/passes/opt/dff.c
@@ -697,6 +700,9 @@ if(BUILD_TESTING)
     target_sources(test_opt_share PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_opt_share PRIVATE
         ODIN3_SHARE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/share")
+    # 3G: wreduce.
+    odin3_add_unit_test(test_wreduce)
+    target_sources(test_wreduce PRIVATE tests/unit/proc_build.c)
     # 2F Task 10: opt_muxtree.
     odin3_add_unit_test(test_opt_muxtree)
     target_sources(test_opt_muxtree PRIVATE tests/unit/proc_build.c)
