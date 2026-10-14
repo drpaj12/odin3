@@ -705,7 +705,8 @@ def verdict(item: elab_sweep.Item, result: Result, lists: Lists) -> tuple[str, s
     if _needle_problem(entry, result):
         return "needle", (f"{kind:<10} {head}: fails differently from the listing: expected "
                           f"[{entry.needle}], got {result.why}")
-    label = {CLS_REJECT_OK: "listed", CLS_UNPROVEN_OK: "unproven", CLS_NOGOLDEN_OK: "no-golden"}[ok_class]
+    label = {CLS_REJECT_OK: "listed", CLS_UNPROVEN_OK: "unproven",
+             CLS_NOGOLDEN_OK: "no-golden"}[ok_class]
     return ok_class, f"{label:<10} {head}: {entry.reason}"
 
 
