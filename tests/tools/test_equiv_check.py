@@ -1291,6 +1291,18 @@ class SingleProbeTest(unittest.TestCase):
         self.assertIn(code, (1, 4), out + err)  # never 3 (equivalent outside the x-cones)
         self.assertNotIn("equivalent outside the x-cones (abc", out)
 
+    @needs_abc
+    def test_a_leftover_pair_with_probes_on_is_a_guess_the_proof_rejects(self) -> None:
+        """B's two multipliers both read x: probes pair x with one of them and the last probe (y)
+        fails, leaving one pair per side, which is paired as a guess (weak). The final proof then
+        finds y's input different: never equivalent, never PROVEN."""
+        for flags in ((), ("--x-report",)):
+            code, out, err = self.run_check(*flags, bad_in=True)
+            self.assertIn(code, (1, 4), out + err)
+            self.assertNotIn("equiv-check: equivalent", out)
+            self.assertNotIn("equivalent outside", out)
+            self.assertIn("multiply #", err)  # the probe round ran and paired the first box
+
 
 class CongruenceTest(unittest.TestCase):
     """bbmatch.canonical_classes: copies of one register and boxes fed by them are one class."""
