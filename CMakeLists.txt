@@ -1946,6 +1946,19 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/verilog/case-bridge)
         set_tests_properties(elab_case_bridge PROPERTIES
             LABELS differential SKIP_RETURN_CODE 77)
+        # 2H-triage (PHASE2 #27, review M-I3): the default (IEEE) reading of several tri-state
+        # drivers on an internal net, without --vtr-compat, against Yosys 0.55 `tribuf -logic`: the
+        # micro multi_assignment and the D3 accept files. The --vtr-compat reading of the micro
+        # differs by design (micro_equiv_expect_fail.txt). Exit 77 (skip) as above.
+        add_test(NAME elab_tribuf_default_equiv
+            COMMAND sh -c "for f in \"$4\"/syntax/multi_assignment.v \"$5\"/D3_*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --yosys-tribuf \"$f\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog
+                    ${PROJECT_SOURCE_DIR}/tests/elab/accept)
+        set_tests_properties(elab_tribuf_default_equiv PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
         # 2D Task 23 (spec 14.3): elab-equiv on every source of tests/verilog/call-bridge: unrolled
         # loops, functions and tasks inlined (in processes and in continuous contexts), nested calls
         # and variable-index reads of net arrays. Exit 77 (skip) as above.

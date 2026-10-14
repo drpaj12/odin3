@@ -78,4 +78,4 @@ keywords/macromodule/multiple_macromodules.v [syntax error, unexpected TOK_ID] Y
 # golden compare is `identical`), while the micro's `// elab-check: --yosys-tribuf` side B is Yosys's
 # `tribuf -logic` bus (IEEE reading). Plain Yosys cannot be side B either: its opt_clean shorts the
 # inputs and the BLIF writer then drives input bus1 ('more than one driver').
-syntax/multi_assignment.v [Networks are NOT EQUIVALENT] --vtr-compat follows Parmys (data = bus0, enables dropped; PHASE2 #27); side B is the tribuf -logic bus; exit-check proves it identical to the Parmys golden
+syntax/multi_assignment.v [busout = 4'hF (a), busout = 4'h7 (b)] --vtr-compat follows Parmys (data = bus0, enables dropped; PHASE2 #27): with s = 2 side A drives bus0 (F), side B (tribuf -logic bus) bus2 (7); side B is the IEEE bus; the guards are exit_micro (proves it identical to the Parmys golden) and elab_tribuf_default_equiv (default mode against Yosys)
