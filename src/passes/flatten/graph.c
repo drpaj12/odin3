@@ -196,6 +196,10 @@ bool odin3_flatten_graph_is_const(const odin3_flatten_graph *graph, odin3_cellty
     return false;
 }
 
+bool odin3_flatten_graph_is_root(const odin3_flatten_graph *graph, uint32_t mod) {
+    return mod < graph->n_mod && graph->is_root[mod] != 0;
+}
+
 uint32_t odin3_flatten_graph_module_of(const odin3_flatten_graph *graph, odin3_celltype_id type) {
     uint64_t mod = 0;
     return odin3_u64map_get(graph->types, type.v, &mod) ? (uint32_t)mod : 0;

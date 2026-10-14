@@ -4,9 +4,11 @@
  * expansion arrives with Task 3).
  */
 #include "ir/design.h"
+#include "ir/module.h"
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/flatten/flatten.h"
+#include "passes/flatten/flatten_int.h"
 #include "passes/manager.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -64,9 +66,45 @@ odin3_status odin3_flatten_parse_args(odin3_bytes args, odin3_strbuf *sep,
 
 /* --- the run ------------------------------------------------------------------------------- */
 
+/* Expands every root, parents before children so that copies come from unflattened modules. */
+static odin3_status expand_roots(odin3_flatten_ctx *fc, const odin3_flatten_graph *graph,
+                                 odin3_design *design) {
+    uint32_t n_order = 0;
+    const uint32_t *order = odin3_flatten_graph_order(graph, &n_order);
+    for (uint32_t i = 0; i < n_order; i++) {
+        if (!odin3_flatten_graph_is_root(graph, order[i])) {
+            continue;
+        }
+        odin3_status st =
+            odin3_flatten_expand_root(fc, odin3_module_get(design, (odin3_module_id){order[i]}));
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
+static void report(odin3_flatten_ctx *fc, const odin3_flatten_totals *tot) {
+    odin3_log(ODIN3_LOG_INFO,
+              "flatten: %" PRIu64 " instances expanded (%" PRIu64 " kept) in %" PRIu32
+              " roots; %" PRIu32 " modules unused",
+              fc->instances, fc->kept, tot->roots, tot->unused);
+    odin3_strbuf info;
+    odin3_strbuf_init(&info);
+    uint32_t str = 0;
+    if (odin3_strbuf_appendf(&info,
+                             "roots=%" PRIu32 " instances=%" PRIu64 " kept=%" PRIu64
+                             " nodes=%" PRIu64 " renamed=%" PRIu64,
+                             tot->roots, fc->instances, fc->kept, fc->nodes,
+                             fc->renamed) == ODIN3_OK &&
+        odin3_design_intern(fc->design, odin3_bytes_cstr(info.data), &str) == ODIN3_OK) {
+        (void)odin3_passrun_set_info(fc->pass, str);
+    }
+    odin3_strbuf_free(&info);
+}
+
 odin3_status odin3_flatten_run(odin3_pass_ctx *ctx, odin3_design *design,
                                const odin3_flatten_opts *opts) {
-    (void)opts;
     odin3_module_id top = odin3_design_top(design);
     if (top.v == 0) {
         odin3_log(ODIN3_LOG_ERROR, "flatten: the design has no top module (run hierarchy)");
@@ -75,12 +113,20 @@ odin3_status odin3_flatten_run(odin3_pass_ctx *ctx, odin3_design *design,
     odin3_flatten_graph *graph = NULL;
     odin3_status st = odin3_flatten_graph_build(design, top, &graph);
     st = st == ODIN3_OK ? odin3_flatten_preflight(ctx, design, graph) : st;
+    if (st != ODIN3_OK) {
+        odin3_flatten_graph_free(graph);
+        return st;
+    }
+    odin3_flatten_totals tot = odin3_flatten_graph_totals(graph);
+    odin3_log(ODIN3_LOG_INFO, "flatten: %" PRIu64 " instances to expand", tot.instances);
+    odin3_flatten_ctx fc;
+    st = odin3_flatten_ctx_init(&fc, ctx, graph, opts != NULL ? opts->separator : NULL);
+    st = st == ODIN3_OK ? expand_roots(&fc, graph, design) : st;
     if (st == ODIN3_OK) {
-        odin3_flatten_totals tot = odin3_flatten_graph_totals(graph);
-        odin3_prov_begin_op(ctx); /* Task 3 begins one operation per expanded instance */
-        odin3_log(ODIN3_LOG_INFO, "flatten: %" PRIu64 " instances to expand", tot.instances);
+        report(&fc, &tot);
         odin3_flatten_graph_log_unused(graph);
     }
+    odin3_flatten_ctx_free(&fc);
     odin3_flatten_graph_free(graph);
     return st;
 }

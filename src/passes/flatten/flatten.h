@@ -79,6 +79,9 @@ uint64_t odin3_flatten_graph_estimate(const odin3_flatten_graph *graph);
 /* The module of cell type `type`, 0 when no module has it. */
 uint32_t odin3_flatten_graph_module_of(const odin3_flatten_graph *graph, odin3_celltype_id type);
 
+/* True when module `mod` is a root (the top, or a module that stays an instance somewhere). */
+bool odin3_flatten_graph_is_root(const odin3_flatten_graph *graph, uint32_t mod);
+
 /* True for the four shared-constant cell types $_CONST0_/1/X/Z_ (IR-4). */
 bool odin3_flatten_graph_is_const(const odin3_flatten_graph *graph, odin3_celltype_id type);
 

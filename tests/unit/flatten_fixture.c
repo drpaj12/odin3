@@ -12,6 +12,7 @@
 enum { MAX_PORTS = 32 };
 
 void ff_begin(ff *fix) {
+    fix->prov = (odin3_prov_id){0};
     fix->design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(fix->design);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
@@ -77,15 +78,18 @@ odin3_node_id ff_gate(ff *fix, odin3_module *mod, ff_cell cell, const odin3_net_
     for (uint32_t i = 0; i < def->n_ports; i++) {
         ports[i] = (odin3_netvec){&nets[i], 1};
     }
-    odin3_node_spec spec = {tid, cell.name != NULL ? ff_str(fix, cell.name) : 0, {0}, NULL, 0};
+    odin3_node_spec spec = {tid, cell.name != NULL ? ff_str(fix, cell.name) : 0, fix->prov, NULL,
+                            0};
+    fix->prov = (odin3_prov_id){0};
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(mod, &spec, ports, &node));
     return node;
 }
 
 odin3_node_id ff_inst_bus(ff *fix, ff_pair link, const char *name, const odin3_netvec *ports) {
-    odin3_node_spec spec = {
-        odin3_module_celltype(link.child), name != NULL ? ff_str(fix, name) : 0, {0}, NULL, 0};
+    odin3_node_spec spec = {odin3_module_celltype(link.child), name != NULL ? ff_str(fix, name) : 0,
+                            fix->prov, NULL, 0};
+    fix->prov = (odin3_prov_id){0};
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(link.parent, &spec, ports, &node));
     return node;
@@ -127,4 +131,15 @@ uint32_t ff_live_nodes(const odin3_module *mod) {
         count += odin3_node_live(mod, (odin3_node_id){nid}) ? 1 : 0;
     }
     return count;
+}
+
+odin3_prov_id ff_source(ff *fix, const char *file, uint32_t line, const char *hier) {
+    odin3_pass_ctx rd = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pass_run_begin(fix->design, ff_str(fix, "read_verilog"), &rd));
+    odin3_srcloc loc = {ff_str(fix, file), line, 1, line, 4, 0};
+    odin3_prov_origin origin = {&loc, 1, 0, hier != NULL ? ff_str(fix, hier) : 0};
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&rd, &origin, &id));
+    return id;
 }

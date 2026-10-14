@@ -17,6 +17,7 @@
 typedef struct ff {
     odin3_design *design;
     odin3_pass_ctx ctx; /* the pass run "flatten", for odin3_flatten_run */
+    odin3_prov_id prov; /* given to the next node ff_gate/ff_inst creates, then cleared */
 } ff;
 
 /* A cell's type name and (optional) instance name; a parent module and the child it instantiates.
@@ -65,6 +66,10 @@ odin3_node_id ff_inst(ff *fix, ff_pair link, const char *name, const odin3_net_i
 
 /* The shared constant net of the value (0 or 1) in mod, created on first use. */
 odin3_net_id ff_const(ff *fix, odin3_module *mod, int value);
+
+/* A SOURCE record at file:line with the hierarchical path hier (NULL = none), made in a pass run
+ * named "read_verilog". */
+odin3_prov_id ff_source(ff *fix, const char *file, uint32_t line, const char *hier);
 
 /* Sets an INT attribute on a node, wire or the module (obj kind/id). */
 void ff_attr_int(ff *fix, odin3_module *mod, odin3_objref obj, const char *key, int64_t value);

@@ -136,6 +136,10 @@ add_library(odin3_core OBJECT
     src/passes/opt/simcheck.c
     src/passes/flatten/graph.c
     src/passes/flatten/register.c
+    src/passes/flatten/expand.c
+    src/passes/flatten/copy.c
+    src/passes/flatten/names.c
+    src/passes/flatten/prov.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -717,6 +721,9 @@ if(BUILD_TESTING)
     target_sources(test_flatten_graph PRIVATE tests/unit/flatten_fixture.c tests/unit/proc_build.c)
     target_compile_definitions(test_flatten_graph PRIVATE
         ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    # 3A Task 3: the expansion.
+    odin3_add_unit_test(test_flatten_expand)
+    target_sources(test_flatten_expand PRIVATE tests/unit/flatten_fixture.c)
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
