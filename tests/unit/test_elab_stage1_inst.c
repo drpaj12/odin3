@@ -903,12 +903,12 @@ static void test_celltype_array(void) {
     expect_conn(instance("r[0]"), 2, "addr", "a10[4:0]");
     et_free(&rs);
     run_req("module top; wire [7:0] a8, b8; wire [15:0] o16;\n"
-            "  multiply #(.A_WIDTH(4), .B_WIDTH(4)) m[1:0] (.a(a8), .b(b8), .out(o16));\n"
-            "  multiply #(.A_WIDTH(4)) n[1:0] (.a(a8), .b(b8), .out(o16));\nendmodule\n",
+            "  multiply #(.WIDTH(4)) m[1:0] (.a(a8), .b(b8), .out(o16));\n"
+            "  multiply n[1:0] (.a(a8), .b(b8), .out(o16));\nendmodule\n",
             NULL, TECHLIB);
     expect_clean();
-    expect_conn(instance("m[1]"), 2, "out", "o16[15:8]"); /* A_WIDTH + B_WIDTH: all given */
-    expect_conn(instance("n[1]"), 2, "out", "o16");       /* B_WIDTH is inferred: whole */
+    expect_conn(instance("m[1]"), 2, "out", "o16[15:8]"); /* 2 * WIDTH: given */
+    expect_conn(instance("n[1]"), 2, "out", "o16");       /* WIDTH is inferred: whole */
 }
 
 /* --- out of memory ------------------------------------------------------------------------- */
