@@ -1,11 +1,14 @@
-# Micros with no Parmys golden because of the ORACLE HARNESS, not because Parmys rejects the design:
-# tools/run-oracle.sh gave Parmys only the `.v`, so a design that `include`s a header that sits beside it
-# (`assign.vh`, ...) or that needs a `-D` macro on the command line (the `.generic` WIDTH tests) failed
-# before synthesis. They are the `no-golden` class: not checked, in their own bucket of the exit
-# statement, and NEVER in a pass count. `exit-check --expect-no-golden` reads this file; the needle must
-# appear in the oracle's log (golden/<arch>/regression/verilog/<group>/<leaf>/<leaf>.parmys.log).
-# They go when the goldens are regenerated with the include directory and defines (Peter's decision):
-# exit-check then fails on a listed micro that has a golden, so the list shrinks, never rots.
+# Micros with no Parmys golden because of the ORACLE HARNESS, not because Parmys rejects the design.
+# Peter's ruling of 2026-10-14 ("2a") regenerated the other 36 of the original 40 with
+# `tools/run-oracle.sh --include-dir/--define` (the include directory and the macros the design's own
+# parent file defines; 24 now have a golden, 12 are Parmys rejections in micro_expect.txt). These 4 are
+# left: the `.generic` templates are never compiled on their own upstream, only through the `.vh`
+# wrappers (`range_and_wide.vh`, ...), each of which defines its own `WIDTH` (3, 32, 256, ...) and the
+# gate `operator`. No single value is the original intent, so none is guessed. They are the `no-golden`
+# class: not checked, in their own bucket of the exit statement, and NEVER in a pass count.
+# `exit-check --expect-no-golden` reads this file; the needle must appear in the oracle's log
+# (golden/<arch>/regression/verilog/<group>/<leaf>/<leaf>.parmys.log). exit-check fails on a listed
+# micro that has a golden, so the list shrinks, never rots.
 #
 # <path relative to tests/micro/verilog> [needle] <one-line reason>
 
@@ -13,39 +16,3 @@ keywords/.generic/range_any_width_binary_test.v [undefined macro] oracle harness
 keywords/.generic/range_any_width_unary_test.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `WIDTH.
 keywords/.generic/replicate_any_width_binary_test.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `WIDTH.
 keywords/.generic/replicate_any_width_unary_test.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `WIDTH.
-keywords/assign/assign_int_wide.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `assign.vh'!
-keywords/assign/assign_ultra_wide.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `assign.vh'!
-keywords/assign/assign_wide.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `assign.vh'!
-keywords/for/generate_for_int.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `generate_for.vh'!
-keywords/for/generate_for_ultra_wide.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `generate_for.vh'!
-keywords/for/generate_for_wide.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `generate_for.vh'!
-keywords/generate_endgenerate/generate_case_00.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `generate_case.vh'!
-keywords/generate_endgenerate/generate_case_01.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `generate_case.vh'!
-keywords/generate_endgenerate/generate_case_10.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `generate_case.vh'!
-keywords/generate_endgenerate/generate_case_11.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `generate_case.vh'!
-keywords/generate_endgenerate/generate_else_if_0.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `generate_else_if.vh'!
-keywords/generate_endgenerate/generate_else_if_1.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `generate_else_if.vh'!
-keywords/generate_endgenerate/generate_if_else_0.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `generate_if_else.vh'!
-keywords/generate_endgenerate/generate_if_else_1.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `generate_if_else.vh'!
-preprocessor/nested_ifdef_alldef.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `nested_ifdef.vh'!
-preprocessor/nested_ifdef_middef.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `nested_ifdef.vh'!
-preprocessor/nested_ifdef_nonedef.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `nested_ifdef.vh'!
-preprocessor/nested_ifdef_outsidedef.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `nested_ifdef.vh'!
-preprocessor/nested_ifdef_twodef.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `nested_ifdef.vh'!
-syntax/function_hdr.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `function_hdr.vh'!
-syntax/ifdef-else-syntax/module_a_and.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `BITS.
-syntax/ifdef-else-syntax/module_a_or.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `BITS.
-syntax/ifdef-else-syntax/module_b.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `BITS.
-syntax/ifdef-else-syntax.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `ifdef-else-syntax/module_a_and.v'!
-syntax/ifndef-else-syntax/module_a_and.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `BITS.
-syntax/ifndef-else-syntax/module_a_or.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `BITS.
-syntax/ifndef-else-syntax/module_b.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `BITS.
-syntax/ifndef-else-syntax.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `ifndef-else-syntax/module_a_or.v'!
-syntax/include-syntax/module_a.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `BITS.
-syntax/include-syntax/module_b.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `BITS.
-syntax/include-syntax.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `include-syntax/module_a.v'!
-syntax/nested-ifdef-syntax/module_b.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `BITS.
-syntax/nested-ifdef-syntax.v [Can't open include file] oracle harness gap (the header beside the design was not given to the oracle): ERROR: Can't open include file `nested-ifdef-syntax/module_b.v'!
-syntax/preprocessor_complex_define.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `ADDITION_num.
-syntax/preprocessor_define.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `ADDITION_num.
-syntax/preprocessor_define_with_comment.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `ADDITION_num.

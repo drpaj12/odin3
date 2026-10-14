@@ -6,7 +6,7 @@
 # log: `[Parmys rejected the design]` is exit-check's own message. The reason is the first error line
 # of the oracle's log (golden/<arch>/regression/verilog/<group>/<leaf>/<leaf>.parmys.log), which
 # `golden/` keeps. Rejections that are oracle-HARNESS gaps (a missing include or -D) are not here:
-# they are `no-golden` (tests/exit/micro_nogolden.txt, 40 micros), which never counts as a pass.
+# they are `no-golden` (tests/exit/micro_nogolden.txt, 4 micros), which never counts as a pass.
 # A micro whose golden run was CAPPED (large/LargeRam.v) is NOT listed: a cap kill is no verdict on
 # the design, so it stays an unexpected `error` until its golden is regenerated with a larger
 # ODIN3_ORACLE_MEM_MB. A `differs`, an `error` and a `hard` failure are never listable.
@@ -51,6 +51,11 @@ preprocessor/default_net.v [Parmys rejected the design] Parmys rejects it: ERROR
 preprocessor/elsif_both_defined.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
 preprocessor/ifdef_undefined.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
 preprocessor/ifndef_defined.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
+preprocessor/nested_ifdef_alldef.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#' (with nested_ifdef.vh found; it has a module-level $display)
+preprocessor/nested_ifdef_middef.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#' (with nested_ifdef.vh found; it has a module-level $display)
+preprocessor/nested_ifdef_nonedef.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#' (with nested_ifdef.vh found; it has a module-level $display)
+preprocessor/nested_ifdef_outsidedef.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#' (with nested_ifdef.vh found; it has a module-level $display)
+preprocessor/nested_ifdef_twodef.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#' (with nested_ifdef.vh found; it has a module-level $display)
 preprocessor/nested_operation_define.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
 preprocessor/undef.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '(', expecting TOK_ID or '#'
 syntax/basic_expression_in_function_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
@@ -64,6 +69,9 @@ syntax/conditional_expression_in_task_port.v [Parmys rejected the design] Parmys
 syntax/deassign.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ASSIGN
 syntax/diffeq_f_systemC.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
 syntax/fir_scu_rtl_restructured_for_cmm_exp.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected TOK_ID
+syntax/ifdef-else-syntax/module_b.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `\a' referenced in module `\b' in cell `\my_a' is not part of the design. (a fragment: module a is defined by a sibling fragment; run with -I and -D BITS=8)
+syntax/ifndef-else-syntax/module_b.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `\a' referenced in module `\b' in cell `\my_a' is not part of the design. (a fragment: module a is defined by a sibling fragment; run with -I and -D BITS=8)
+syntax/include-syntax/module_b.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `\a' referenced in module `\b' in cell `\my_a' is not part of the design. (a fragment: module a is defined by a sibling fragment; run with -I and -D BITS=8)
 syntax/instantiated_by_name_function_invalid.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
 syntax/instantiated_by_name_function_invalid_1.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
 syntax/instantiated_by_name_function_valid.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
@@ -77,6 +85,10 @@ syntax/instantiating_by_name_valid.v [Parmys rejected the design] Parmys rejects
 syntax/matrix_multiplication.v [Parmys rejected the design] Parmys rejects it: ERROR: Multiple edge sensitive events found for this signal!
 syntax/mix_expression_in_function_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
 syntax/mix_expression_in_task_port.v [Parmys rejected the design] Parmys rejects it: ERROR: syntax error, unexpected '.'
+syntax/nested-ifdef-syntax/module_b.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `\a' referenced in module `\b' in cell `\my_a' is not part of the design. (a fragment: module a is defined by a sibling fragment; run with -I and -D BITS=8)
+syntax/preprocessor_complex_define.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `ADDITION_num. (the file uses `ADDITION_num, a macro defined nowhere, so no -D is its intent)
+syntax/preprocessor_define.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `ADDITION_num. (the file uses `ADDITION_num, a macro defined nowhere, so no -D is its intent)
+syntax/preprocessor_define_with_comment.v [Parmys rejected the design] Parmys rejects it: ERROR: Unimplemented compiler directive or undefined macro `ADDITION_num. (the file uses `ADDITION_num, a macro defined nowhere, so no -D is its intent)
 syntax/top_and.v [Parmys rejected the design] Parmys rejects it: ERROR: Module `\and_primitive' referenced in module `\top_and' in cell `\and4' is not part of the design.
 #
 # --- a splice hand-over gap, not a Parmys rejection (it HAS a golden): an error, the design is UNPROVEN ---

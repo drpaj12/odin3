@@ -43,6 +43,18 @@ Recorded 2026-10-08 (Phase 0 §4).
 - Smoke test passed: `run_vtr_flow.py blink.v EArch.xml --route_chan_width 100` → `EArch/blink OK`.
   Odin II on `blink.v` exits 0. `tools/run-oracle.sh` runs each front end alone with
   `run_vtr_flow.py -start <tool> -end <tool>`.
+- **Includes and macros.** VTR's flow copies the design into a scratch directory and has no `-I` or
+  `-D` option, so a design that `include`s a header beside it, or whose macros come from a parent file,
+  fails in Parmys before synthesis. `tools/run-oracle.sh --tool parmys --include-dir DIR --define
+  NAME[=VALUE]` (both repeatable) handle this: the script copies VTR's own `misc/yosys/synthesis.tcl`
+  into the run directory, adds `-I DIR ... -D NAME[=VALUE] ...` to its `read_verilog -sv -nolatches`
+  line, and passes it to `run_vtr_flow.py -yosys_script` (VTR is not modified). The options need
+  `--tool parmys` (Odin II is not run with them). The `.prov` records them as `include_dirs=`
+  (`:`-separated, relative to `$VTR_ROOT`) and `defines=` (space-separated), and writes neither line when
+  the option is absent. Only use a value from the design's own parent file or its VTR task config; for
+  the `.generic` templates, which only `.vh` wrappers instantiate, there is none (`tests/exit/micro_nogolden.txt`).
+  `exit-check` reads `defines=` from a golden's `.prov` and gives Odin III the same macros (a `+define+` file
+  list through `sp-splice --odin3-pre`); a header beside the design needs nothing there.
 - **The VTR pin check.** `tools/vtr-qor/vtr-qor doctor` checks that `$VTR_ROOT` is at the commit
   in the table above and has no modified tracked files
   (`git status --porcelain --untracked-files=no`). `vtr-qor run` refuses either case (E-QH2),

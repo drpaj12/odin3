@@ -29,7 +29,8 @@ each design:
    ``.model``) and the same Parmys config as the goldens' run (VTR's
    ``basic_odin_config_split.xml``, filled per design by ``write_parmys_config``: a fixed hard
    ``multiply``, memories split to the arch's address width, min multiplier size 3, adder
-   threshold 1); it caps its own children at ``--mem-cap``;
+   threshold 1), and the macros the golden's ``.prov`` records as ``defines=`` (``run-oracle.sh
+   --define``); it caps its own children at ``--mem-cap``;
 3. ``netlist-compare --implicit-models`` golden vs output (Parmys leaves a ``$pow`` and the like
    as a ``.subckt`` with no model): exit 0 is ``identical``;
 4. else ``equiv-check --x-report --match-unnamed`` (Parmys writes no ``.cname`` for a hard block
@@ -380,10 +381,24 @@ def splice_why(done: subprocess.CompletedProcess[str], cap: int) -> tuple[str, b
     return f"sp-splice: {message}", hard
 
 
+def define_pre(prov: dict[str, str], work: Path) -> list[str]:
+    """``--odin3-pre`` for the macros the oracle was given with ``run-oracle.sh --define`` (the
+    ``defines=`` line of the golden's ``.prov``): a file list of ``+define+`` lines, read as the
+    project before the design. Odin III finds a header beside the design by itself, so the
+    ``include_dirs=`` line needs nothing here."""
+    defines = prov.get("defines", "").split()
+    if not defines:
+        return []
+    work.mkdir(parents=True, exist_ok=True)
+    flist = work / "defines.f"
+    flist.write_text("".join(f"+define+{d}\n" for d in defines), encoding="utf-8")
+    return ["--odin3-pre", f"read_project --format f {flist}"]
+
+
 def splice_argv(cfg: Config, item: elab_sweep.Item, top: str, work: Path,
-                config: str | None) -> list[str]:
+                config: str | None, pre: Sequence[str] = ()) -> list[str]:
     argv = [cfg.sp_splice, "--odin3", cfg.odin3, "--yosys", cfg.yosys, "--arch", cfg.arch,
-            "--top", top, "--mem-cap", str(cfg.cap_of(item)), "--keep", str(work)]
+            "--top", top, "--mem-cap", str(cfg.cap_of(item)), "--keep", str(work), *pre]
     for flag, value in (("--techlib", cfg.techlib), ("--primitives", cfg.primitives),
                         ("--config", config)):
         if value:
@@ -392,14 +407,14 @@ def splice_argv(cfg: Config, item: elab_sweep.Item, top: str, work: Path,
 
 
 def run_splice(cfg: Config, item: elab_sweep.Item, top: str, work: Path,
-               log: list[str]) -> Path | Result:
+               log: list[str], pre: Sequence[str] = ()) -> Path | Result:
     """sp-splice on the design: the output BLIF, or the Result of its failure. sp-splice caps its
     own children at the design's cap; it runs under ``memcap.run`` as well, with the timeout, so
     that a timeout kills its whole process group and leaves no odin3 or Yosys child behind."""
     config = cfg.config
     if cfg.config_template is not None:
         config = str(write_parmys_config(cfg, item.path, work))
-    argv = splice_argv(cfg, item, top, work, config)
+    argv = splice_argv(cfg, item, top, work, config, pre)
     done = run_capped(argv, cfg.cap_of(item), log)
     if isinstance(done, Result):
         return done
@@ -515,7 +530,7 @@ def pipeline(cfg: Config, item: elab_sweep.Item, work: Path, log: list[str]) -> 
         return Result(ERROR, why=f"golden has no top: {exc}")
     log.append(f"golden {golden}\ntop {top}")
     work.mkdir(parents=True, exist_ok=True)
-    out = run_splice(cfg, item, top, work, log)
+    out = run_splice(cfg, item, top, work, log, define_pre(prov, work))
     if isinstance(out, Result):
         return out
     return classify(cfg, golden, out, cfg.cap_of(item), log)
