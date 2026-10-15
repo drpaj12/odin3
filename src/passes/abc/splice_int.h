@@ -43,10 +43,10 @@ typedef struct splice {
     const odin3_abc_region *region;
     odin3_abc_result *res;
     odin3_abc_splice_stats stats;
-    odin3_vec created;  /* sp_created, in creation order */
-    odin3_vec objnet;   /* uint32_t per result object: the net it drives */
-    odin3_vec objprov;  /* uint32_t per result object: the record of the new object */
-    odin3_vec objnode;  /* uint32_t per result object: the LUT node that implements it, or 0 */
+    odin3_vec created;      /* sp_created, in creation order */
+    odin3_vec objnet;       /* uint32_t per result object: the net it drives */
+    odin3_vec objprov;      /* uint32_t per result object: the record of the new object */
+    odin3_vec objnode;      /* uint32_t per result object: the LUT node that implements it, or 0 */
     odin3_prov_id fallback; /* the coarse record, made when a new object has no record */
     bool fallback_made;
     odin3_vec anchors;  /* odin3_abc_anchor */
@@ -60,7 +60,7 @@ typedef struct splice {
 } splice;
 
 /* The log of creations. NO_MEMORY. */
-odin3_status sp_note(splice *sp, uint8_t kind, uint32_t id);
+odin3_status sp_note(splice *sp, sp_created item);
 
 /* Removes what phase A made, in reverse order (best effort: a failed delete is skipped). */
 void sp_rollback(splice *sp);

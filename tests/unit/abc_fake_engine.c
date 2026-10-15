@@ -458,6 +458,22 @@ static void set_const(const char *args) {
     fk.const_value = end != value_text ? (int)value : 0;
 }
 
+/* The commands that only change the network: `scorr` and `const <i> [value]`. */
+static void run_simple(const char *command, const char *first) {
+    if (strcmp(first, "scorr") == 0) {
+        scorr();
+    } else if (strcmp(first, "const") == 0) {
+        set_const(command + strlen("const"));
+    }
+}
+
+/* The injected extra command (odin3_abc_fake_extra), run just before every write. */
+static void run_extra(void) {
+    char first[NAME_BYTES] = "";
+    (void)sscanf(fk.extra, "%39s", first);
+    run_simple(fk.extra, first);
+}
+
 static odin3_status do_command(const char *command) {
     char first[NAME_BYTES] = "";
     (void)sscanf(command, "%39s", first);
@@ -470,23 +486,12 @@ static odin3_status do_command(const char *command) {
         return read_blif(path);
     }
     if (strcmp(first, "write_hie") == 0) {
-        if (fk.extra[0] != '\0') {
-            char extra[sizeof fk.extra];
-            (void)snprintf(extra, sizeof extra, "%s", fk.extra);
-            odin3_status extra_st = do_command(extra);
-            if (extra_st != ODIN3_OK) {
-                return extra_st;
-            }
-        }
+        run_extra();
         const char *rest = quoted(command, path, sizeof path);
         (void)quoted(rest, path, sizeof path);
         return write_hie(path);
     }
-    if (strcmp(first, "scorr") == 0) {
-        scorr();
-    } else if (strcmp(first, "const") == 0) {
-        set_const(command + strlen("const"));
-    }
+    run_simple(command, first);
     return ODIN3_OK;
 }
 

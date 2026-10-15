@@ -9,6 +9,7 @@
 #include "abc_fixture.h"
 #include "passes/abc/abc.h"
 #include "passes/abc/abc_test.h"
+#include "passes/abc/region.h"
 #include "passes/manager.h"
 #include "util/alloc.h"
 
@@ -89,9 +90,8 @@ static void test_hard_block_pins_stay_open(void) {
     for (uint32_t bit = 0; bit < ADDR_BITS; bit++) {
         before[bit] = addr_net(ram, bit);
     }
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK,
-                                  odin3_pass_run(design, "abc", odin3_bytes_cstr("--lut 6")),
-                                  afx_errors());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_pass_run(design, "abc", odin3_bytes_cstr("--lut 6")), afx_errors());
     afx_check(design);
     ram = ram_node();
     for (uint32_t bit = FIRST_OPEN; bit < ADDR_BITS; bit++) {
@@ -117,22 +117,30 @@ static void test_buffer_of_unconn_ends_on_gnd(void) {
 
 /* No pin of a `.names` or `.latch` line of the written text is on `unconn`; the generator's own
  * one-name `.names unconn` line has no pin besides its output. */
+static void expect_no_unconn_word(char *line) {
+    if (strncmp(line, ".names", 6) != 0 && strncmp(line, ".latch", 6) != 0) {
+        return;
+    }
+    if (strcmp(line, ".names unconn") == 0) {
+        return;
+    }
+    char shown[AFX_LINE];
+    (void)snprintf(shown, sizeof shown, "%s", line);
+    for (char *word = strtok(line, " "); word != NULL; word = strtok(NULL, " ")) {
+        TEST_ASSERT_TRUE_MESSAGE(strcmp(word, "unconn") != 0, shown);
+    }
+}
+
 static void expect_no_unconn_pin(const char *text) {
     const char *line = text;
     while (*line != '\0') {
-        const char *end = strchr(line, '\n');
-        size_t len = end == NULL ? strlen(line) : (size_t)(end - line);
+        size_t len = strcspn(line, "\n");
         char copy[AFX_LINE];
         TEST_ASSERT_TRUE(len < sizeof copy);
         memcpy(copy, line, len);
         copy[len] = '\0';
-        if (strncmp(copy, ".names", 6) == 0 || strncmp(copy, ".latch", 6) == 0) {
-            bool lone = strcmp(copy, ".names unconn") == 0;
-            for (char *word = strtok(copy, " "); word != NULL && !lone; word = strtok(NULL, " ")) {
-                TEST_ASSERT_TRUE_MESSAGE(strcmp(word, "unconn") != 0, line);
-            }
-        }
-        line += len + (end == NULL ? 0 : 1);
+        expect_no_unconn_word(copy);
+        line += len + (line[len] == '\n' ? 1 : 0);
     }
 }
 
@@ -153,9 +161,8 @@ static void test_no_written_pin_on_unconn(void) {
     (void)AFX_CELL(design, mod, "$_FF_", NULL, flop, 2);
     odin3_net_id buffer[2] = {unconn, out_z};
     (void)AFX_CELL(design, mod, "$_BUF_", NULL, buffer, 2);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK,
-                                  odin3_pass_run(design, "abc", odin3_bytes_cstr("--lut 6")),
-                                  afx_errors());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_pass_run(design, "abc", odin3_bytes_cstr("--lut 6")), afx_errors());
     afx_check(design);
     char *text = afx_blif_text(design);
     expect_no_unconn_pin(text);

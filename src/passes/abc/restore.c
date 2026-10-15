@@ -15,10 +15,10 @@
 #include <string.h>
 
 enum {
-    FIRST_OBJ = 2,         /* objects 0 and 1 are the constants */
-    NOT_TABLE = 0x1,       /* a 1-input NOT: bit 0 is 1, bit 1 is 0 */
-    IDENTITY_TABLE = 0x2,  /* a 1-input buffer */
-    INIT_PARAM = 0,        /* a flip-flop's INIT is its first parameter */
+    FIRST_OBJ = 2,        /* objects 0 and 1 are the constants */
+    NOT_TABLE = 0x1,      /* a 1-input NOT: bit 0 is 1, bit 1 is 0 */
+    IDENTITY_TABLE = 0x2, /* a 1-input buffer */
+    INIT_PARAM = 0,       /* a flip-flop's INIT is its first parameter */
     INIT_ONE = 1
 };
 
@@ -34,7 +34,7 @@ typedef struct rst {
     uint32_t objs0;
 } rst;
 
-static uint32_t *u32s(odin3_vec *vec) {
+static uint32_t *u32s(const odin3_vec *vec) {
     return vec->data;
 }
 
@@ -51,10 +51,16 @@ static void table_set(uint64_t *table, uint32_t idx, bool val) {
     }
 }
 
-/* The table of a k-input LUT with variable var inverted: f'(x) = f(x with bit var flipped). */
-static void table_flip_var(uint64_t *table, uint32_t inputs, uint32_t var) {
-    uint32_t bit = 1U << var;
-    for (uint32_t idx = 0; idx < (1U << inputs); idx++) {
+/* A variable of a table: input number var of a table of inputs variables. */
+typedef struct table_var {
+    uint32_t inputs;
+    uint32_t var;
+} table_var;
+
+/* The table with variable tv.var inverted: f'(x) = f(x with bit var flipped). */
+static void table_flip_var(uint64_t *table, table_var tv) {
+    uint32_t bit = 1U << tv.var;
+    for (uint32_t idx = 0; idx < (1U << tv.inputs); idx++) {
         if ((idx & bit) == 0) {
             bool low = table_bit(table, idx);
             table_set(table, idx, table_bit(table, idx | bit));
@@ -149,7 +155,7 @@ static void flip_readers(rst *rs) {
         const uint32_t *fanins = lut_fanins(rs->res, lut);
         for (uint32_t var = 0; var < inputs; var++) {
             if (is_inv_reg(rs, fanins[var])) {
-                table_flip_var(lut_words(rs->res, lut), inputs, var);
+                table_flip_var(lut_words(rs->res, lut), (table_var){inputs, var});
                 ((uint8_t *)rs->flipped.data)[lut] = 1;
             }
         }

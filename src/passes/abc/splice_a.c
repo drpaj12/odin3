@@ -51,7 +51,10 @@ static odin3_status obj_prov(splice *sp, uint32_t obj, odin3_prov_id *out) {
         }
         sp->fallback_made = true;
     }
-    *out = own != 0 ? (odin3_prov_id){own} : sp->fallback;
+    *out = sp->fallback;
+    if (own != 0) {
+        *out = (odin3_prov_id){own};
+    }
     return ODIN3_OK;
 }
 
@@ -70,7 +73,7 @@ static odin3_status new_net(splice *sp, uint32_t obj, uint32_t *out) {
     odin3_prov_id prov = {0};
     odin3_status st = obj_prov(sp, obj, &prov);
     st = st == ODIN3_OK ? odin3_net_create(sp->mod, 0, prov, &net) : st;
-    st = st == ODIN3_OK ? sp_note(sp, SP_NET, net.v) : st;
+    st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NET, net.v}) : st;
     if (st != ODIN3_OK && odin3_net_live(sp->mod, net)) {
         (void)odin3_net_delete(sp->mod, net);
     }
@@ -78,25 +81,32 @@ static odin3_status new_net(splice *sp, uint32_t obj, uint32_t *out) {
     return st;
 }
 
-/* The net of every result object: the constants' canonical nets (when used), the CIs' own nets,
- * a fresh net for each register output and LUT. */
+/* The net of result object obj: a constant's canonical net (when a CO uses it), a CI's own net, a
+ * fresh net for a register output or a LUT. */
+static odin3_status object_net(splice *sp, uint32_t obj, odin3_net_id *net) {
+    const odin3_abc_result *res = sp->res;
+    *net = (odin3_net_id){0};
+    if (obj < FIRST_OBJ) {
+        return uses_constant(res, obj) ? sp_canon(sp, (int)obj, net) : ODIN3_OK;
+    }
+    if (obj < FIRST_OBJ + res->n_cis) {
+        *net = (odin3_net_id){sp_u32(&sp->region->cis, obj - FIRST_OBJ)};
+        return ODIN3_OK;
+    }
+    return new_net(sp, obj, &net->v);
+}
+
+/* The net of every result object, and the empty node and carrier tables beside them. */
 static odin3_status object_nets(splice *sp) {
     const odin3_abc_result *res = sp->res;
     odin3_status st = ODIN3_OK;
     for (uint32_t obj = 0; st == ODIN3_OK && obj < obj_count(res); obj++) {
-        uint32_t net = 0;
-        if (obj < FIRST_OBJ) {
-            odin3_net_id canon = {0};
-            st = uses_constant(res, obj) ? sp_canon(sp, (int)obj, &canon) : ODIN3_OK;
-            net = canon.v;
-        } else if (obj < FIRST_OBJ + res->n_cis) {
-            net = sp_u32(&sp->region->cis, obj - FIRST_OBJ);
-        } else {
-            st = new_net(sp, obj, &net);
-        }
-        st = st == ODIN3_OK ? sp_push(&sp->objnet, net) : st;
+        odin3_net_id net = {0};
+        st = object_net(sp, obj, &net);
+        bool is_ci = obj >= FIRST_OBJ && obj < FIRST_OBJ + res->n_cis;
+        st = st == ODIN3_OK ? sp_push(&sp->objnet, net.v) : st;
         st = st == ODIN3_OK ? sp_push(&sp->objnode, 0) : st;
-        st = st == ODIN3_OK ? sp_push(&sp->carried, obj < FIRST_OBJ + res->n_cis ? net : 0) : st;
+        st = st == ODIN3_OK ? sp_push(&sp->carried, is_ci ? net.v : 0) : st;
     }
     return st;
 }
@@ -120,7 +130,7 @@ static odin3_status make_lut(splice *sp, const lut_req *rq, odin3_node_id *node)
     odin3_node_spec spec = {{odin3_lut_builtin_index()}, 0, rq->prov, params, 2};
     odin3_netvec ports[2] = {{rq->ins, rq->inputs}, {&rq->out, 1}};
     st = odin3_node_create_connected(sp->mod, &spec, ports, node);
-    st = st == ODIN3_OK ? sp_note(sp, SP_NODE, node->v) : st;
+    st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NODE, node->v}) : st;
     if (st != ODIN3_OK && odin3_node_live(sp->mod, *node)) {
         (void)odin3_node_delete(sp->mod, *node);
     }
@@ -131,7 +141,8 @@ static odin3_status create_luts(splice *sp) {
     odin3_abc_result *res = sp->res;
     for (uint32_t lut = 0; lut < res->n_luts; lut++) {
         uint32_t inputs = sp_u32(&res->lut_k, lut);
-        const uint32_t *fanins = (const uint32_t *)res->fanins.data + sp_u32(&res->fanin_start, lut);
+        const uint32_t *fanins =
+            (const uint32_t *)res->fanins.data + sp_u32(&res->fanin_start, lut);
         odin3_net_id ins[ODIN3_LUT_MAX_WIDTH];
         for (uint32_t var = 0; var < inputs; var++) {
             ins[var] = (odin3_net_id){sp_u32(&sp->objnet, fanins[var])};
@@ -162,7 +173,19 @@ static int64_t new_init(const odin3_value *init) {
 /* The net on the first pin of port `port` of node, or none. */
 static odin3_net_id port_net(const odin3_module *mod, odin3_node_id node, uint32_t port) {
     odin3_pinslice pins = odin3_node_port(mod, node, port);
-    return pins.count == 0 ? (odin3_net_id){0} : odin3_pin_net(mod, pins.first);
+    if (pins.count == 0) {
+        return (odin3_net_id){0};
+    }
+    return odin3_pin_net(mod, pins.first);
+}
+
+/* The net on the representative's clock pin (port 0 of a flip-flop with C, D, Q); none for $_FF_.
+ */
+static odin3_net_id rep_clock(const odin3_module *mod, odin3_node_id rep, uint32_t n_ports) {
+    if (n_ports != 3) {
+        return (odin3_net_id){0};
+    }
+    return port_net(mod, rep, 0);
 }
 
 static odin3_status create_ff(splice *sp, uint32_t reg) {
@@ -170,15 +193,13 @@ static odin3_status create_ff(splice *sp, uint32_t reg) {
     odin3_node_id rep = {sp_u32(&sp->region->regs, sp_u32(&res->reg_from, reg))};
     odin3_celltype_id type = odin3_node_type(sp->mod, rep);
     uint32_t obj = FIRST_OBJ + res->n_cis + reg;
-    odin3_net_id data = {sp_u32(&sp->objnet, sp_u32(&res->co_driver, res->n_cos + res->n_obs + reg))};
+    odin3_net_id data = {
+        sp_u32(&sp->objnet, sp_u32(&res->co_driver, res->n_cos + res->n_obs + reg))};
     odin3_net_id qout = {sp_u32(&sp->objnet, obj)};
-    odin3_net_id clock = {0};
-    odin3_netvec ports[3];
     uint32_t n_ports = odin3_celltype_get(sp->run->design, type)->n_ports;
-    if (n_ports == 3) { /* C, D, Q */
-        clock = port_net(sp->mod, rep, 0);
-        ports[0] = (odin3_netvec){&clock, 1};
-    }
+    odin3_net_id clock = rep_clock(sp->mod, rep, n_ports);
+    odin3_netvec ports[3];
+    ports[0] = (odin3_netvec){&clock, 1}; /* C, D, Q; a $_FF_ has D, Q: this slot is then D's */
     ports[n_ports - 2] = (odin3_netvec){&data, 1};
     ports[n_ports - 1] = (odin3_netvec){&qout, 1};
     odin3_value init = odin3_value_int(new_init(odin3_node_param(sp->mod, rep, 0)));
@@ -186,7 +207,7 @@ static odin3_status create_ff(splice *sp, uint32_t reg) {
     odin3_node_id node = {0};
     odin3_status st = obj_prov(sp, obj, &spec.prov);
     st = st == ODIN3_OK ? odin3_node_create_connected(sp->mod, &spec, ports, &node) : st;
-    st = st == ODIN3_OK ? sp_note(sp, SP_NODE, node.v) : st;
+    st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NODE, node.v}) : st;
     st = st == ODIN3_OK ? sp_push(&sp->ffnode, node.v) : st;
     if (st != ODIN3_OK && odin3_node_live(sp->mod, node)) {
         (void)odin3_node_delete(sp->mod, node);

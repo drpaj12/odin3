@@ -110,6 +110,11 @@ typedef struct listed {
     uint32_t count;
 } listed;
 
+/* True for a line of the list that names a design (not a comment or a blank). */
+static bool names_a_design(const char *line) {
+    return line[0] != '#' && line[0] != '\n';
+}
+
 /* The paths of tests/abc/equiv_expect_fail.txt (the first word of each line). */
 static void read_expect_list(listed *out) {
     char path[AFX_JOIN];
@@ -119,13 +124,10 @@ static void read_expect_list(listed *out) {
     char line[AFX_PATH * 2];
     out->count = 0;
     while (fgets(line, sizeof line, file) != NULL) {
-        if (line[0] == '#' || line[0] == '\n') {
+        if (!names_a_design(line)) {
             continue;
         }
-        char *end = strpbrk(line, " \t\n");
-        if (end != NULL) {
-            *end = '\0';
-        }
+        line[strcspn(line, " \t\n")] = '\0';
         TEST_ASSERT_TRUE(out->count < MAX_LISTED);
         (void)snprintf(out->names[out->count++], AFX_PATH, "%s", line);
     }
@@ -148,12 +150,16 @@ typedef struct design_list {
     uint32_t count;
 } design_list;
 
+static bool is_blif_name(const char *name) {
+    size_t len = strlen(name);
+    return len > 5 && strcmp(name + len - 5, ".blif") == 0;
+}
+
 static void add_directory(design_list *out, const char *dir) {
     DIR *handle = opendir(dir);
     TEST_ASSERT_NOT_NULL_MESSAGE(handle, dir);
     for (struct dirent *ent = readdir(handle); ent != NULL; ent = readdir(handle)) {
-        size_t len = strlen(ent->d_name);
-        if (len > 5 && strcmp(ent->d_name + len - 5, ".blif") == 0) {
+        if (is_blif_name(ent->d_name)) {
             TEST_ASSERT_TRUE(out->count < MAX_DESIGNS);
             (void)snprintf(out->paths[out->count++], AFX_JOIN, "%s/%s", dir, ent->d_name);
         }
@@ -242,22 +248,28 @@ static uint32_t left_over_directories(void) {
     return left;
 }
 
+/* Counts the dead slots of a module: nodes, nets and wires. */
+static uint32_t dead_slots(const odin3_module *mod) {
+    uint32_t dead = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
+        dead += odin3_node_live(mod, (odin3_node_id){id}) ? 0U : 1U;
+    }
+    for (uint32_t id = 1; id < odin3_module_net_end(mod); id++) {
+        dead += odin3_net_live(mod, (odin3_net_id){id}) ? 0U : 1U;
+    }
+    for (uint32_t id = 1; id < odin3_module_wire_end(mod); id++) {
+        dead += odin3_wire_live(mod, (odin3_wire_id){id}) ? 0U : 1U;
+    }
+    return dead;
+}
+
 /* Point (y): nothing deleted is left in the module after the pass; point (l): no temporary
  * directory is left without --via-blif. */
 static void test_no_deleted_slots_and_no_temp_directory(void) {
     read_data("derived_clock");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_abc("--lut 6"));
     afx_check(design);
-    const odin3_module *mod = afx_top(design);
-    for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
-        TEST_ASSERT_TRUE_MESSAGE(odin3_node_live(mod, (odin3_node_id){id}), "a deleted node slot");
-    }
-    for (uint32_t id = 1; id < odin3_module_net_end(mod); id++) {
-        TEST_ASSERT_TRUE_MESSAGE(odin3_net_live(mod, (odin3_net_id){id}), "a deleted net slot");
-    }
-    for (uint32_t id = 1; id < odin3_module_wire_end(mod); id++) {
-        TEST_ASSERT_TRUE_MESSAGE(odin3_wire_live(mod, (odin3_wire_id){id}), "a deleted wire slot");
-    }
+    TEST_ASSERT_EQUAL_UINT32(0, dead_slots(afx_top(design)));
     TEST_ASSERT_EQUAL_UINT32(0, left_over_directories());
 }
 
@@ -314,6 +326,11 @@ static void test_real_engine_script_and_second_pass(void) {
 /* Every allocation of the whole pass fails in turn on one design. Statuses allowed: NO_MEMORY, IO
  * (1C's reader reports a failed buffer as IO) and ENGINE (the fake engine reads the exchange file
  * with the same reader); the IR stays valid and simulation equal, and a success ends the sweep. */
+static bool sweep_status_allowed(odin3_status st) {
+    return st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY || st == ODIN3_ERR_IO ||
+           st == ODIN3_ERR_ENGINE;
+}
+
 static void sweep_pass(const char *name) {
     char path[AFX_JOIN];
     data_path(path, sizeof path, name);
@@ -330,9 +347,7 @@ static void sweep_pass(const char *name) {
         odin3_status st = run_abc("--lut 6");
         odin3_util_set_alloc_fail_after(-1);
         succeeded = st == ODIN3_OK;
-        TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY ||
-                                     st == ODIN3_ERR_IO || st == ODIN3_ERR_ENGINE,
-                                 name);
+        TEST_ASSERT_TRUE_MESSAGE(sweep_status_allowed(st), name);
         afx_check(design);
         if (simulated) {
             asim_expect_equal(design, &before);

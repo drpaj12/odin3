@@ -31,13 +31,12 @@ odin3_status sp_push(odin3_vec *vec, uint32_t value) {
     return ODIN3_OK;
 }
 
-odin3_status sp_note(splice *sp, uint8_t kind, uint32_t id) {
+odin3_status sp_note(splice *sp, sp_created item) {
     sp_created *slot = odin3_vec_push(&sp->created);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    slot->kind = kind;
-    slot->id = id;
+    *slot = item;
     return ODIN3_OK;
 }
 
@@ -72,7 +71,7 @@ static odin3_net_id find_const(const odin3_module *mod, int value) {
 static odin3_status make_const(odin3_abc_run *run, int value, odin3_node_id *node_out,
                                odin3_net_id *net_out) {
     odin3_module *mod = run->module;
-    odin3_design *design = run->design;
+    const odin3_design *design = run->design;
     uint32_t name = 0;
     odin3_celltype_id type = {0};
     if (!odin3_strtab_find(odin3_design_strtab(design),
@@ -122,8 +121,8 @@ odin3_status sp_canon(splice *sp, int value, odin3_net_id *out) {
     if (!odin3_net_valid(net)) {
         odin3_node_id node = {0};
         odin3_status st = make_const(sp->run, value, &node, &net);
-        st = st == ODIN3_OK ? sp_note(sp, SP_NODE, node.v) : st;
-        st = st == ODIN3_OK ? sp_note(sp, SP_NET, net.v) : st;
+        st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NODE, node.v}) : st;
+        st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NET, net.v}) : st;
         if (st != ODIN3_OK) {
             if (odin3_node_live(sp->mod, node)) {
                 (void)odin3_node_delete(sp->mod, node);

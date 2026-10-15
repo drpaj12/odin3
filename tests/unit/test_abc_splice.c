@@ -71,13 +71,14 @@ static odin3_net_id wire_net(const char *name) {
     return afx_net(design, mod, name);
 }
 
-static odin3_node_id cell1(const char *type, odin3_net_id a, odin3_net_id y) {
-    odin3_net_id nets[2] = {a, y};
+static odin3_node_id cell1(const char *type, odin3_net_id src, odin3_net_id dst) {
+    odin3_net_id nets[2] = {src, dst};
     return AFX_CELL(design, mod, type, NULL, nets, 2);
 }
 
-static odin3_node_id cell2(const char *type, odin3_net_id a, odin3_net_id b, odin3_net_id y) {
-    odin3_net_id nets[3] = {a, b, y};
+static odin3_node_id cell2(const char *type, odin3_net_id src0, odin3_net_id src1,
+                           odin3_net_id dst) {
+    odin3_net_id nets[3] = {src0, src1, dst};
     return AFX_CELL(design, mod, type, NULL, nets, 3);
 }
 
@@ -102,9 +103,9 @@ static void latch_reader(odin3_net_id enable, odin3_net_id dnet, odin3_net_id qn
     (void)AFX_CELL(design, mod, "$_DLATCH_P_", NULL, nets, 3);
 }
 
-static odin3_net_id const_net(const char *type, const char *name) {
+static odin3_net_id const_net(const char *name, bool one) {
     odin3_net_id net = wire_net(name);
-    (void)AFX_CELL(design, mod, type, NULL, &net, 1);
+    (void)AFX_CELL(design, mod, one ? "$_CONST1_" : "$_CONST0_", NULL, &net, 1);
     return net;
 }
 
@@ -196,29 +197,29 @@ static bool lut_bit(odin3_node_id lut, uint32_t idx) {
 /* --- phase B: both columns of the table ---------------------------------------------------- */
 
 static void test_fresh_net(void) {
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id y = output("y");
-    (void)cell2("$_AND_", a, b, y);
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id out_y = output("y");
+    (void)cell2("$_AND_", in_a, in_b, out_y);
     trace_before();
     expect_clean();
-    TEST_ASSERT_EQUAL_STRING("$lut", driver_type(y));
+    TEST_ASSERT_EQUAL_STRING("$lut", driver_type(out_y));
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$lut"));
     TEST_ASSERT_EQUAL_UINT32(0, count_type("$_AND_"));
-    odin3_node_id lut = driver_node(y);
+    odin3_node_id lut = driver_node(out_y);
     TEST_ASSERT_EQUAL_UINT32(2, lut_width(lut));
     TEST_ASSERT_TRUE(lut_bit(lut, 3));
     TEST_ASSERT_FALSE(lut_bit(lut, 1));
-    TEST_ASSERT_EQUAL_UINT32(y.v, port_wire_net("y").v);
+    TEST_ASSERT_EQUAL_UINT32(out_y.v, port_wire_net("y").v);
 }
 
 static void test_shared_driver(void) {
-    odin3_net_id a = input("a");
+    odin3_net_id in_a = input("a");
     odin3_net_id en = input("en");
     odin3_net_id q1 = wire_net("q1");
     odin3_net_id q2 = wire_net("q2");
-    (void)ff_global("f1", 0, a, q1);
-    (void)ff_global("f2", 0, a, q2);
+    (void)ff_global("f1", 0, in_a, q1);
+    (void)ff_global("f2", 0, in_a, q2);
     latch_reader(en, q1, output("o1"));
     latch_reader(en, q2, output("o2"));
     trace_before();
@@ -231,11 +232,11 @@ static void test_shared_driver(void) {
 }
 
 static void test_special_port_pair_buffered(void) {
-    odin3_net_id a = input("a");
+    odin3_net_id in_a = input("a");
     odin3_net_id o1 = output("o1");
     odin3_net_id o2 = output("o2");
-    (void)ff_global("f1", 0, a, o1);
-    (void)ff_global("f2", 0, a, o2);
+    (void)ff_global("f1", 0, in_a, o1);
+    (void)ff_global("f2", 0, in_a, o2);
     trace_before();
     expect_clean();
     TEST_ASSERT_TRUE(o1.v != o2.v);
@@ -252,38 +253,38 @@ static void test_special_port_pair_buffered(void) {
 }
 
 static void test_ci_ordinary(void) {
-    odin3_net_id a = input("a");
+    odin3_net_id in_a = input("a");
     odin3_net_id en = input("en");
-    odin3_net_id n = wire_net("n");
-    (void)cell2("$_AND_", a, a, n);
-    latch_reader(en, n, output("o"));
+    odin3_net_id net_n = wire_net("n");
+    (void)cell2("$_AND_", in_a, in_a, net_n);
+    latch_reader(en, net_n, output("o"));
     trace_before();
     expect_clean();
     TEST_ASSERT_EQUAL_UINT32(0, count_type("$lut"));
-    TEST_ASSERT_EQUAL_UINT32(a.v, named_net("n").v);
-    TEST_ASSERT_EQUAL_UINT32(a.v, port_net(first_of("$_DLATCH_P_"), 1).v);
+    TEST_ASSERT_EQUAL_UINT32(in_a.v, named_net("n").v);
+    TEST_ASSERT_EQUAL_UINT32(in_a.v, port_net(first_of("$_DLATCH_P_"), 1).v);
 }
 
 static void test_ci_special(void) {
-    odin3_net_id a = input("a");
-    odin3_net_id y = output("y");
-    (void)cell2("$_AND_", a, a, y);
+    odin3_net_id in_a = input("a");
+    odin3_net_id out_y = output("y");
+    (void)cell2("$_AND_", in_a, in_a, out_y);
     trace_before();
     expect_clean();
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$lut"));
-    TEST_ASSERT_EQUAL_UINT32(y.v, port_wire_net("y").v);
-    odin3_node_id buf = driver_node(y);
+    TEST_ASSERT_EQUAL_UINT32(out_y.v, port_wire_net("y").v);
+    odin3_node_id buf = driver_node(out_y);
     TEST_ASSERT_EQUAL_UINT32(1, lut_width(buf));
-    TEST_ASSERT_EQUAL_UINT32(a.v, port_net(buf, ODIN3_LUT_PORT_A).v);
+    TEST_ASSERT_EQUAL_UINT32(in_a.v, port_net(buf, ODIN3_LUT_PORT_A).v);
 }
 
 static void test_const_ordinary(void) {
-    odin3_net_id a = input("a");
+    odin3_net_id in_a = input("a");
     odin3_net_id en = input("en");
-    odin3_net_id one = const_net("$_CONST1_", "one");
-    odin3_net_id n = wire_net("n");
-    (void)cell2("$_OR_", a, one, n);
-    latch_reader(en, n, output("o"));
+    odin3_net_id one = const_net("one", true);
+    odin3_net_id net_n = wire_net("n");
+    (void)cell2("$_OR_", in_a, one, net_n);
+    latch_reader(en, net_n, output("o"));
     trace_before();
     expect_clean();
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$_CONST1_"));
@@ -294,13 +295,13 @@ static void test_const_ordinary(void) {
 
 /* No constant generator in the module: a, !a and OR give constant 1, so a new one is made. */
 static void test_const_ordinary_makes_generator(void) {
-    odin3_net_id a = input("a");
+    odin3_net_id in_a = input("a");
     odin3_net_id en = input("en");
     odin3_net_id na = wire_net("na");
-    odin3_net_id n = wire_net("n");
-    (void)cell1("$_NOT_", a, na);
-    (void)cell2("$_OR_", a, na, n);
-    latch_reader(en, n, output("o"));
+    odin3_net_id net_n = wire_net("n");
+    (void)cell1("$_NOT_", in_a, na);
+    (void)cell2("$_OR_", in_a, na, net_n);
+    latch_reader(en, net_n, output("o"));
     trace_before();
     expect_clean();
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$_CONST1_"));
@@ -308,11 +309,11 @@ static void test_const_ordinary_makes_generator(void) {
 }
 
 static void test_const_port(void) {
-    odin3_net_id a = input("a");
+    odin3_net_id in_a = input("a");
     odin3_net_id na = wire_net("na");
-    odin3_net_id y = output("y");
-    (void)cell1("$_NOT_", a, na);
-    (void)cell2("$_AND_", a, na, y);
+    odin3_net_id out_y = output("y");
+    (void)cell1("$_NOT_", in_a, na);
+    (void)cell2("$_AND_", in_a, na, out_y);
     trace_before();
     expect_clean();
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$_CONST0_"));
@@ -322,13 +323,13 @@ static void test_const_port(void) {
 
 static void test_constant_to_clock_buffered(void) {
     odin3_net_id clk = input("clk");
-    odin3_net_id a = input("a");
+    odin3_net_id in_a = input("a");
     odin3_net_id nclk = wire_net("nclk");
     odin3_net_id clk2 = wire_net("clk2");
-    odin3_net_id y = output("y");
+    odin3_net_id out_y = output("y");
     (void)cell1("$_NOT_", clk, nclk);
     (void)cell2("$_AND_", clk, nclk, clk2);
-    (void)ff_edge("r", 0, clk2, a, y);
+    (void)ff_edge("r", 0, clk2, in_a, out_y);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_abc());
     afx_check(design);
     TEST_ASSERT_TRUE(odin3_net_live(mod, clk2));
@@ -344,12 +345,12 @@ static void test_constant_to_clock_buffered(void) {
 static void test_derived_clock_buffered(void) {
     odin3_net_id clk = input("clk");
     odin3_net_id en = input("en");
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
     odin3_net_id clk2 = wire_net("clk2");
     (void)cell2("$_AND_", clk, en, clk2);
-    (void)ff_edge("r1", 0, clk, a, output("q1"));
-    (void)ff_edge("r2", 0, clk2, b, output("q2"));
+    (void)ff_edge("r1", 0, clk, in_a, output("q1"));
+    (void)ff_edge("r2", 0, clk2, in_b, output("q2"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_abc());
     afx_check(design);
     TEST_ASSERT_EQUAL_UINT32(2, odin3_abc_fake_open_count());
@@ -363,14 +364,16 @@ static void test_derived_clock_buffered(void) {
 
 /* --- flip-flops ---------------------------------------------------------------------------- */
 
-static void expect_new_flop(int64_t init, int64_t want) {
+/* A flip-flop of the given INIT comes out with INIT 2 for 2 and 3, else the same. */
+static void expect_new_flop(int64_t init) {
+    int64_t want = init == 3 ? 2 : init;
     odin3_net_id clk = input("clk");
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id n = wire_net("n");
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id net_n = wire_net("n");
     odin3_net_id qn = wire_net("qn");
-    (void)cell2("$_AND_", a, b, n);
-    (void)ff_edge("r0", init, clk, n, qn);
+    (void)cell2("$_AND_", in_a, in_b, net_n);
+    (void)ff_edge("r0", init, clk, net_n, qn);
     (void)cell1("$_NOT_", qn, output("y"));
     trace_before();
     expect_clean();
@@ -384,24 +387,24 @@ static void expect_new_flop(int64_t init, int64_t want) {
 }
 
 static void test_flop_init_zero(void) {
-    expect_new_flop(0, 0);
+    expect_new_flop(0);
 }
 
 static void test_flop_init_two(void) {
-    expect_new_flop(2, 2);
+    expect_new_flop(2);
 }
 
 static void test_flop_init_three_becomes_two(void) {
-    expect_new_flop(3, 2);
+    expect_new_flop(3);
 }
 
 /* --- folding ------------------------------------------------------------------------------- */
 
 static void test_folding_const_lut(void) {
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id y = output("y");
-    (void)cell2("$_AND_", a, b, y);
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id out_y = output("y");
+    (void)cell2("$_AND_", in_a, in_b, out_y);
     odin3_abc_fake_extra("const 0");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_abc());
     afx_check(design);
@@ -413,44 +416,44 @@ static void test_folding_const_lut(void) {
 /* --- the init-1 restore -------------------------------------------------------------------- */
 
 static void test_restore_flip_reader(void) {
-    odin3_net_id x = input("x");
-    odin3_net_id a = input("a");
-    odin3_net_id q = wire_net("q");
-    odin3_net_id y = output("y");
-    (void)ff_global("r", 1, x, q);
-    (void)cell2("$_AND_", q, a, y);
+    odin3_net_id in_x = input("x");
+    odin3_net_id in_a = input("a");
+    odin3_net_id net_q = wire_net("q");
+    odin3_net_id out_y = output("y");
+    (void)ff_global("r", 1, in_x, net_q);
+    (void)cell2("$_AND_", net_q, in_a, out_y);
     trace_before();
     expect_clean();
     odin3_node_id ff = first_of("$_FF_");
     TEST_ASSERT_EQUAL_INT64(1, init_of(ff));
-    TEST_ASSERT_EQUAL_UINT32(x.v, port_net(ff, 0).v);
+    TEST_ASSERT_EQUAL_UINT32(in_x.v, port_net(ff, 0).v);
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$lut"));
-    TEST_ASSERT_EQUAL_UINT32(2, lut_width(driver_node(y)));
+    TEST_ASSERT_EQUAL_UINT32(2, lut_width(driver_node(out_y)));
 }
 
 static void test_restore_inverter_to_merge(void) {
-    odin3_net_id x = input("x");
-    odin3_net_id y = output("y");
-    (void)ff_global("r", 1, x, y);
+    odin3_net_id in_x = input("x");
+    odin3_net_id out_y = output("y");
+    (void)ff_global("r", 1, in_x, out_y);
     trace_before();
     expect_clean();
     odin3_node_id ff = first_of("$_FF_");
     TEST_ASSERT_EQUAL_INT64(1, init_of(ff));
     TEST_ASSERT_EQUAL_UINT32(0, count_type("$lut"));
-    TEST_ASSERT_EQUAL_UINT32(y.v, port_net(ff, 1).v);
-    TEST_ASSERT_EQUAL_UINT32(x.v, port_net(ff, 0).v);
+    TEST_ASSERT_EQUAL_UINT32(out_y.v, port_net(ff, 1).v);
+    TEST_ASSERT_EQUAL_UINT32(in_x.v, port_net(ff, 0).v);
 }
 
 static void test_restore_direct_reader_not(void) {
-    odin3_net_id x = input("x");
-    odin3_net_id q = wire_net("q");
-    odin3_net_id y = output("y");
-    (void)ff_global("r", 1, x, q);
-    (void)cell1("$_NOT_", q, y);
+    odin3_net_id in_x = input("x");
+    odin3_net_id net_q = wire_net("q");
+    odin3_net_id out_y = output("y");
+    (void)ff_global("r", 1, in_x, net_q);
+    (void)cell1("$_NOT_", net_q, out_y);
     trace_before();
     expect_clean();
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$lut"));
-    odin3_node_id not_lut = driver_node(y);
+    odin3_node_id not_lut = driver_node(out_y);
     TEST_ASSERT_EQUAL_UINT32(1, lut_width(not_lut));
     TEST_ASSERT_TRUE(lut_bit(not_lut, 0));
     TEST_ASSERT_FALSE(lut_bit(not_lut, 1));
@@ -458,13 +461,13 @@ static void test_restore_direct_reader_not(void) {
 }
 
 static void test_restore_shared_d_not(void) {
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id n = output("n");
-    odin3_net_id m = wire_net("m");
-    (void)cell2("$_AND_", a, b, n);
-    (void)cell1("$_NOT_", n, m);
-    (void)ff_global("r", 1, m, output("z"));
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id net_n = output("n");
+    odin3_net_id net_m = wire_net("m");
+    (void)cell2("$_AND_", in_a, in_b, net_n);
+    (void)cell1("$_NOT_", net_n, net_m);
+    (void)ff_global("r", 1, net_m, output("z"));
     trace_before();
     expect_clean();
     odin3_node_id ff = first_of("$_FF_");
@@ -473,15 +476,15 @@ static void test_restore_shared_d_not(void) {
     odin3_node_id not_lut = driver_node(port_net(ff, 0));
     TEST_ASSERT_EQUAL_UINT32(1, lut_width(not_lut));
     TEST_ASSERT_TRUE(lut_bit(not_lut, 0));
-    TEST_ASSERT_EQUAL_UINT32(n.v, port_net(not_lut, ODIN3_LUT_PORT_A).v);
+    TEST_ASSERT_EQUAL_UINT32(net_n.v, port_net(not_lut, ODIN3_LUT_PORT_A).v);
 }
 
 static void test_restore_d_only(void) {
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id d = wire_net("d");
-    (void)cell2("$_AND_", a, b, d);
-    (void)ff_global("r", 1, d, output("z"));
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id net_d = wire_net("d");
+    (void)cell2("$_AND_", in_a, in_b, net_d);
+    (void)ff_global("r", 1, net_d, output("z"));
     trace_before();
     expect_clean();
     odin3_node_id ff = first_of("$_FF_");
@@ -493,7 +496,7 @@ static void test_restore_d_only(void) {
 }
 
 static void test_restore_const_d(void) {
-    odin3_net_id zero = const_net("$_CONST0_", "zero");
+    odin3_net_id zero = const_net("zero", false);
     (void)ff_global("r", 1, zero, output("z"));
     trace_before();
     expect_clean();
@@ -505,11 +508,11 @@ static void test_restore_const_d(void) {
 
 /* Two INIT 1 registers on one D that scorr merges: one flip-flop, INIT 1, both ports driven. */
 static void test_restore_merged_pair(void) {
-    odin3_net_id x = input("x");
+    odin3_net_id in_x = input("x");
     odin3_net_id z1 = output("z1");
     odin3_net_id z2 = output("z2");
-    (void)ff_global("r1", 1, x, z1);
-    (void)ff_global("r2", 1, x, z2);
+    (void)ff_global("r1", 1, in_x, z1);
+    (void)ff_global("r2", 1, in_x, z2);
     trace_before();
     expect_clean();
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$_FF_"));
@@ -522,29 +525,41 @@ static void test_restore_merged_pair(void) {
 /* --- names and cleanup --------------------------------------------------------------------- */
 
 static void test_names_survive(void) {
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id y = output("y");
-    odin3_net_id q = wire_net("q");
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id out_y = output("y");
+    odin3_net_id net_q = wire_net("q");
     odin3_net_id q_alias = wire_net("q_old");
-    (void)cell2("$_AND_", a, b, q);
-    (void)ff_global("r", 0, q, q_alias);
-    (void)cell1("$_BUF_", q_alias, y);
+    (void)cell2("$_AND_", in_a, in_b, net_q);
+    (void)ff_global("r", 0, net_q, q_alias);
+    (void)cell1("$_BUF_", q_alias, out_y);
     trace_before();
     expect_clean();
-    TEST_ASSERT_EQUAL_UINT32(y.v, port_wire_net("y").v);
+    TEST_ASSERT_EQUAL_UINT32(out_y.v, port_wire_net("y").v);
     odin3_node_id ff = first_of("$_FF_");
     TEST_ASSERT_EQUAL_UINT32(afx_intern(design, "r"), odin3_node_name(mod, ff));
 }
 
+/* True when every live net has a pin or belongs to a wire. */
+static bool no_pinless_nets(void) {
+    for (uint32_t id = 1; id < odin3_module_net_end(mod); id++) {
+        odin3_net_id net = {id};
+        if (odin3_net_live(mod, net) && odin3_net_pins(mod, net).count == 0 &&
+            !odin3_wire_valid(odin3_net_primary(mod, net).wire)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void test_cleanup_nets_and_wires(void) {
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id c = input("c");
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id in_c = input("c");
     odin3_net_id mid = wire_net("mid");
-    odin3_net_id y = output("y");
-    (void)cell2("$_AND_", a, b, mid);
-    (void)cell2("$_AND_", mid, c, y);
+    odin3_net_id out_y = output("y");
+    (void)cell2("$_AND_", in_a, in_b, mid);
+    (void)cell2("$_AND_", mid, in_c, out_y);
     odin3_wire_spec spec = {afx_intern(design, "w_mid"), 0, 0, false, (odin3_prov_id){0}};
     odin3_wire_id wire = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(mod, &spec, &mid, &wire));
@@ -552,27 +567,20 @@ static void test_cleanup_nets_and_wires(void) {
     expect_clean();
     TEST_ASSERT_FALSE(odin3_wire_valid(odin3_module_find_wire(mod, afx_intern(design, "w_mid"))));
     TEST_ASSERT_EQUAL_UINT32(2, count_type("$lut"));
-    for (uint32_t id = 1; id < odin3_module_net_end(mod); id++) {
-        odin3_net_id net = {id};
-        if (odin3_net_live(mod, net)) {
-            TEST_ASSERT_TRUE_MESSAGE(odin3_net_pins(mod, net).count > 0 ||
-                                         odin3_wire_valid(odin3_net_primary(mod, net).wire),
-                                     "a pinless net was left behind");
-        }
-    }
+    TEST_ASSERT_TRUE_MESSAGE(no_pinless_nets(), "a pinless net was left behind");
 }
 
 /* --- failures ------------------------------------------------------------------------------ */
 
 static void build_oom_module(void) {
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id n = output("n");
-    odin3_net_id m = wire_net("m");
-    (void)cell2("$_AND_", a, b, n);
-    (void)cell1("$_NOT_", n, m);
-    (void)ff_global("r", 1, m, output("z"));
-    (void)ff_global("r2", 0, a, output("z2"));
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id net_n = output("n");
+    odin3_net_id net_m = wire_net("m");
+    (void)cell2("$_AND_", in_a, in_b, net_n);
+    (void)cell1("$_NOT_", net_n, net_m);
+    (void)ff_global("r", 1, net_m, output("z"));
+    (void)ff_global("r2", 0, in_a, output("z2"));
 }
 
 /* One splice with the n-th allocation failing; returns its status. */

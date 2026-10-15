@@ -345,15 +345,19 @@ static double now_ms(void) {
     return (double)now.tv_sec * MS_PER_SECOND + (double)now.tv_nsec / NS_PER_MS;
 }
 
-/* The widest LUT and the deepest LUT chain of the result. */
-static void result_shape(const odin3_abc_result *res, uint32_t *widest, uint32_t *depth) {
+/* The widest LUT and the deepest LUT chain of a result. */
+typedef struct result_shape {
+    uint32_t widest;
+    uint32_t depth;
+} result_shape;
+
+static result_shape shape_of(const odin3_abc_result *res) {
     uint32_t first = odin3_abc_result_first_lut(res);
+    result_shape shape = {0, 0};
     odin3_vec level;
     odin3_vec_init(&level, sizeof(uint32_t));
-    *widest = 0;
-    *depth = 0;
     if (odin3_vec_reserve(&level, res->n_luts + 1U) != ODIN3_OK) {
-        return;
+        return shape;
     }
     for (uint32_t lut = 0; lut < res->n_luts; lut++) {
         uint32_t inputs = ((const uint32_t *)res->lut_k.data)[lut];
@@ -367,20 +371,19 @@ static void result_shape(const odin3_abc_result *res, uint32_t *widest, uint32_t
         }
         ((uint32_t *)level.data)[lut] = deepest + 1U;
         level.len = lut + 1U;
-        *widest = inputs > *widest ? inputs : *widest;
-        *depth = deepest + 1U > *depth ? deepest + 1U : *depth;
+        shape.widest = inputs > shape.widest ? inputs : shape.widest;
+        shape.depth = deepest + 1U > shape.depth ? deepest + 1U : shape.depth;
     }
     odin3_vec_free(&level);
+    return shape;
 }
 
 /* §8.2's line for runs without a name map, then the run's summary line (§8.3, §11). */
 static void log_run_info(const odin3_abc_run *run, const odin3_abc_result *res,
                          const odin3_abc_splice_stats *stats, double ms) {
     char domain[DOMAIN_TEXT_BYTES];
-    uint32_t widest = 0;
-    uint32_t depth = 0;
     odin3_abc_domain_text(run->module, run->domain, domain, sizeof domain);
-    result_shape(res, &widest, &depth);
+    result_shape shape = shape_of(res);
     odin3_log(ODIN3_LOG_INFO, "abc: module '%s', %s: no name map (%s); provenance uses cut cones",
               module_text(run), domain,
               run->opts.prov == ODIN3_ABC_PROV_CONE ? "--prov cone" : "BLIF exchange");
@@ -388,43 +391,46 @@ static void log_run_info(const odin3_abc_run *run, const odin3_abc_result *res,
               "abc: module '%s', %s: %u cells and %u flip-flops -> %u LUTs (at most %u inputs, "
               "depth %u) and %u flip-flops, %.1f ms in ABC",
               module_text(run), domain, (unsigned)run->region->soft.len,
-              (unsigned)run->region->regs.len, (unsigned)stats->luts, (unsigned)widest,
-              (unsigned)depth, (unsigned)stats->ffs, ms);
+              (unsigned)run->region->regs.len, (unsigned)stats->luts, (unsigned)shape.widest,
+              (unsigned)shape.depth, (unsigned)stats->ffs, ms);
 }
 
-/* One run: the region, the caps, the exchange, folding and the splice. */
-static odin3_status run_domain(odin3_abc_run *run, const odin3_abc_domain *domain, bool first) {
-    odin3_abc_region region;
-    run->domain = domain;
-    odin3_status st = odin3_abc_region_build(run, domain, &region);
-    if (st != ODIN3_OK) {
-        return st;
-    }
-    run->region = &region;
-    if (first) {
-        log_module_info(run, &region);
-    }
-    if (region.soft.len == 0 && region.regs.len == 0) {
-        odin3_log(ODIN3_LOG_DEBUG, "abc: module '%s': nothing to map", module_text(run));
-        run->region = NULL;
-        odin3_abc_region_free(&region);
-        return ODIN3_OK;
-    }
+/* The exchange, folding and the splice of a built region, then the run's INFO lines. */
+static odin3_status map_region(odin3_abc_run *run) {
     odin3_abc_result result;
     odin3_abc_result_init(&result);
     double start = now_ms();
-    st = check_caps(run, &region);
+    odin3_status st = check_caps(run, run->region);
     st = st == ODIN3_OK ? odin3_abc_exchange_blif(run, &result) : st;
     double spent = now_ms() - start;
     st = st == ODIN3_OK ? odin3_abc_result_fold(&result) : st;
     odin3_abc_splice_stats stats = {0};
-    st = st == ODIN3_OK ? odin3_abc_splice(run, &region, &result, &stats) : st;
+    st = st == ODIN3_OK ? odin3_abc_splice(run, run->region, &result, &stats) : st;
     if (st == ODIN3_OK) {
         log_run_info(run, &result, &stats, spent);
     }
     odin3_abc_result_free(&result);
+    return st;
+}
+
+/* One run: the region, the caps, the exchange, folding and the splice. */
+static odin3_status run_domain(odin3_abc_run *run, const odin3_abc_domain *domain, bool first) {
+    run->domain = domain;
+    odin3_status st = odin3_abc_region_build(run, domain, &run->region_own);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    run->region = &run->region_own;
+    if (first) {
+        log_module_info(run, run->region);
+    }
+    if (run->region->soft.len == 0 && run->region->regs.len == 0) {
+        odin3_log(ODIN3_LOG_DEBUG, "abc: module '%s': nothing to map", module_text(run));
+    } else {
+        st = map_region(run);
+    }
     run->region = NULL;
-    odin3_abc_region_free(&region);
+    odin3_abc_region_free(&run->region_own);
     return st;
 }
 

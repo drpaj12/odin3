@@ -337,16 +337,15 @@ static void check_records(const build *bd) {
         if (!odin3_node_live(mod, node)) {
             continue;
         }
-        const odin3_celltype_def *def =
-            odin3_celltype_get(bd->design, odin3_node_type(mod, node));
+        const odin3_celltype_def *def = odin3_celltype_get(bd->design, odin3_node_type(mod, node));
         if (strcmp(def->name, "$lut") != 0 && strcmp(def->name, "$_FF_") != 0 &&
             strcmp(def->name, "$_DFF_P_") != 0) {
             continue;
         }
         uint32_t leaves = 0;
         odin3_prov_id prov = odin3_node_prov(mod, node);
-        if (prov.v == 0 ||
-            odin3_prov_sources(bd->design, prov, count_leaf, &leaves) != ODIN3_OK || leaves == 0) {
+        if (prov.v == 0 || odin3_prov_sources(bd->design, prov, count_leaf, &leaves) != ODIN3_OK ||
+            leaves == 0) {
             die("a new object has no record that reaches a SOURCE");
         }
     }
@@ -384,8 +383,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     }
     odin3_status st = odin3_pass_run(bd.design, "abc", odin3_bytes_cstr(args));
     odin3_util_set_alloc_fail_after(-1);
-    bool tolerated = inject && (st == ODIN3_ERR_NO_MEMORY || st == ODIN3_ERR_IO ||
-                                st == ODIN3_ERR_ENGINE);
+    bool tolerated =
+        inject && (st == ODIN3_ERR_NO_MEMORY || st == ODIN3_ERR_IO || st == ODIN3_ERR_ENGINE);
     if (st != ODIN3_OK && !tolerated) {
         die("an unexpected status");
     }

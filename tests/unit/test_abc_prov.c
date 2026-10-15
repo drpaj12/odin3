@@ -97,13 +97,14 @@ static odin3_node_id cell_at(const char *type, uint32_t line, const odin3_net_id
     return node;
 }
 
-static odin3_node_id and_at(uint32_t line, odin3_net_id a, odin3_net_id b, odin3_net_id y) {
-    odin3_net_id nets[3] = {a, b, y};
+static odin3_node_id and_at(uint32_t line, odin3_net_id in_a, odin3_net_id in_b,
+                            odin3_net_id out_y) {
+    odin3_net_id nets[3] = {in_a, in_b, out_y};
     return cell_at("$_AND_", line, nets, 3);
 }
 
-static odin3_node_id buf_at(uint32_t line, odin3_net_id a, odin3_net_id y) {
-    odin3_net_id nets[2] = {a, y};
+static odin3_node_id buf_at(uint32_t line, odin3_net_id in_a, odin3_net_id out_y) {
+    odin3_net_id nets[2] = {in_a, out_y};
     return cell_at("$_BUF_", line, nets, 2);
 }
 
@@ -167,9 +168,8 @@ static void collect_leaf(void *user, odin3_prov_id leaf) {
 
 static void expect_leaves(odin3_node_id node, const odin3_prov_id *want, uint32_t count) {
     leaves out = {{{0}}, 0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_prov_sources(design, odin3_node_prov(mod, node), collect_leaf,
-                                             &out));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_prov_sources(design, odin3_node_prov(mod, node), collect_leaf, &out));
     TEST_ASSERT_EQUAL_UINT32(count, out.count);
     for (uint32_t i = 0; i < count; i++) {
         TEST_ASSERT_EQUAL_UINT32(want[i].v, out.ids[i].v);
@@ -180,11 +180,11 @@ static uint32_t count_live(const char *type) {
     uint32_t found = 0;
     for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
         odin3_node_id node = {id};
-        found += odin3_node_live(mod, node) &&
-                         strcmp(odin3_celltype_get(design, odin3_node_type(mod, node))->name,
-                                type) == 0
-                     ? 1U
-                     : 0U;
+        found +=
+            odin3_node_live(mod, node) &&
+                    strcmp(odin3_celltype_get(design, odin3_node_type(mod, node))->name, type) == 0
+                ? 1U
+                : 0U;
     }
     return found;
 }
@@ -193,13 +193,13 @@ static uint32_t count_live(const char *type) {
 
 /* y = (a & b) & c: both LUTs sit in y's region, whose old region is both gates, in ID order. */
 static void test_cone_records_in_node_order(void) {
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id c = input("c");
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id in_c = input("c");
     odin3_net_id mid = wire_net("mid");
-    odin3_net_id y = output("y");
-    odin3_prov_id s_in = odin3_node_prov(mod, and_at(10, a, b, mid));
-    odin3_prov_id s_top = odin3_node_prov(mod, and_at(11, mid, c, y));
+    odin3_net_id out_y = output("y");
+    odin3_prov_id s_in = odin3_node_prov(mod, and_at(10, in_a, in_b, mid));
+    odin3_prov_id s_top = odin3_node_prov(mod, and_at(11, mid, in_c, out_y));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6 --prov cone"), afx_errors());
     afx_check(design);
     odin3_node_id top = driver_of(port_net_of("y"));
@@ -215,12 +215,12 @@ static void test_cone_records_in_node_order(void) {
  * has the old flip-flop's. */
 static void test_register_input_and_flop(void) {
     odin3_net_id clk = input("clk");
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id d = wire_net("d");
-    odin3_net_id q = output("q");
-    odin3_prov_id s_and = odin3_node_prov(mod, and_at(20, a, b, d));
-    odin3_prov_id s_ff = odin3_node_prov(mod, ff_at(21, clk, d, q));
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id dat_d = wire_net("d");
+    odin3_net_id out_q = output("q");
+    odin3_prov_id s_and = odin3_node_prov(mod, and_at(20, in_a, in_b, dat_d));
+    odin3_prov_id s_ff = odin3_node_prov(mod, ff_at(21, clk, dat_d, out_q));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6"), afx_errors());
     afx_check(design);
     odin3_node_id flop = driver_of(port_net_of("q"));
@@ -244,16 +244,16 @@ static void test_register_input_and_flop(void) {
 /* p = a & b feeds y1 = p & c and y2 = p & d: p's LUT is in two regions and carries a record whose
  * parents are the two outputs' records, in CO order; the first leaf is the lowest-ID old cell. */
 static void build_shared(odin3_prov_id *s_p, odin3_prov_id *s_1, odin3_prov_id *s_2) {
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id c = input("c");
-    odin3_net_id d = input("d");
-    odin3_net_id p = wire_net("p");
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id in_c = input("c");
+    odin3_net_id dat_d = input("d");
+    odin3_net_id net_p = wire_net("p");
     odin3_net_id y1 = output("y1");
     odin3_net_id y2 = output("y2");
-    *s_p = odin3_node_prov(mod, and_at(30, a, b, p));
-    *s_1 = odin3_node_prov(mod, and_at(31, p, c, y1));
-    *s_2 = odin3_node_prov(mod, and_at(32, p, d, y2));
+    *s_p = odin3_node_prov(mod, and_at(30, in_a, in_b, net_p));
+    *s_1 = odin3_node_prov(mod, and_at(31, net_p, in_c, y1));
+    *s_2 = odin3_node_prov(mod, and_at(32, net_p, dat_d, y2));
 }
 
 static void test_shared_lut_has_an_extra_record(void) {
@@ -302,12 +302,12 @@ static void test_coarse_mode(void) {
 
 /* An old soft cell that reaches no output and no register input dies without children. */
 static void test_dead_logic_has_no_children(void) {
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id y = output("y");
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id out_y = output("y");
     odin3_net_id dead = wire_net("dead");
-    odin3_prov_id s_dead = odin3_node_prov(mod, and_at(40, a, b, dead));
-    (void)buf_at(41, a, y);
+    odin3_prov_id s_dead = odin3_node_prov(mod, and_at(40, in_a, in_b, dead));
+    (void)buf_at(41, in_a, out_y);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6"), afx_errors());
     afx_check(design);
     odin3_prov_index *ix = odin3_prov_index_build(design);
@@ -363,32 +363,38 @@ static void test_depth_without_top(void) {
     odin3_design_destroy(empty);
 }
 
+/* The text of the last INFO message captured. */
+static const char *last_info_message(void) {
+    uint32_t shown = afx_messages.count < AFX_LINES ? afx_messages.count : AFX_LINES;
+    const char *found = "";
+    for (uint32_t i = 0; i < shown; i++) {
+        found = afx_messages.level[i] == ODIN3_LOG_INFO ? afx_messages.text[i] : found;
+    }
+    return found;
+}
+
+static const char *run_info_text(void) {
+    uint32_t info = odin3_passrun_info(design, (odin3_passrun_id){odin3_passrun_end(design) - 1U});
+    return info == 0 ? "" : odin3_strtab_get(odin3_design_strtab(design), info);
+}
+
 /* port -> LUT -> LUT -> LUT -> FF is depth 3, and the last INFO line says so. */
 static void test_final_depth_line(void) {
     odin3_net_id clk = input("clk");
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id c = input("c");
-    odin3_net_id d = input("d");
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id in_c = input("c");
+    odin3_net_id dat_d = input("d");
     odin3_net_id n1 = wire_net("n1");
     odin3_net_id n2 = wire_net("n2");
     odin3_net_id n3 = wire_net("n3");
-    (void)and_at(50, a, b, n1);
-    (void)and_at(51, n1, c, n2);
-    (void)and_at(52, n2, d, n3);
+    (void)and_at(50, in_a, in_b, n1);
+    (void)and_at(51, n1, in_c, n2);
+    (void)and_at(52, n2, dat_d, n3);
     (void)ff_at(53, clk, n3, output("q"));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6"), afx_errors());
-    TEST_ASSERT_TRUE(afx_messages.count > 0);
-    uint32_t last = afx_messages.count < AFX_LINES ? afx_messages.count : AFX_LINES;
-    uint32_t info_at = last;
-    for (uint32_t i = 0; i < last; i++) {
-        info_at = afx_messages.level[i] == ODIN3_LOG_INFO ? i : info_at;
-    }
-    TEST_ASSERT_TRUE(info_at < last);
-    TEST_ASSERT_EQUAL_STRING("abc: final: depth 3", afx_messages.text[info_at]);
-    uint32_t info = odin3_passrun_info(design, (odin3_passrun_id){odin3_passrun_end(design) - 1U});
-    TEST_ASSERT_TRUE(info != 0);
-    TEST_ASSERT_NOT_NULL(strstr(odin3_strtab_get(odin3_design_strtab(design), info), " depth=3"));
+    TEST_ASSERT_EQUAL_STRING("abc: final: depth 3", last_info_message());
+    TEST_ASSERT_NOT_NULL(strstr(run_info_text(), " depth=3"));
 }
 
 /* --- run information ----------------------------------------------------------------------- */
@@ -408,18 +414,18 @@ static void sha256_of_file(const char *path, char *hex) {
 }
 
 static const char *last_info(void) {
-    return odin3_strtab_get(odin3_design_strtab(design),
-                            odin3_passrun_info(design,
-                                               (odin3_passrun_id){odin3_passrun_end(design) - 1U}));
+    return odin3_strtab_get(
+        odin3_design_strtab(design),
+        odin3_passrun_info(design, (odin3_passrun_id){odin3_passrun_end(design) - 1U}));
 }
 
 static void test_run_information_default_script(void) {
     odin3_abc_engine engine = *odin3_abc_fake_engine();
     engine.abc_commit = "a3001b72edc5de22442e942165487fddf150e3d0";
     odin3_abc_test_set_engine(&engine);
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    (void)and_at(60, a, b, output("y"));
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    (void)and_at(60, in_a, in_b, output("y"));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6"), afx_errors());
     char hex[ODIN3_SHA256_DIGEST_BYTES * 2 + 1];
     char path[AFX_JOIN];
@@ -441,9 +447,9 @@ static void test_run_information_quotes_a_path_with_blanks(void) {
     (void)snprintf(script, sizeof script, "%s/s.abc", dir);
     AFX_WRITE(script, "strash\nif -K {K}\n");
     odin3_abc_test_set_route(ODIN3_ABC_TEST_ROUTE_ALWAYS_LINKED);
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    (void)and_at(61, a, b, output("y"));
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    (void)and_at(61, in_a, in_b, output("y"));
     char args[3 * AFX_PATH];
     (void)snprintf(args, sizeof args, "--lut 4 --script \"%s\"", script);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc(args), afx_errors());
@@ -465,17 +471,17 @@ static void test_run_information_without_top(void) {
 
 static void test_run_info_line(void) {
     odin3_net_id clk = input("clk");
-    odin3_net_id a = input("a");
-    odin3_net_id b = input("b");
-    odin3_net_id c = input("c");
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id in_c = input("c");
     odin3_net_id n1 = wire_net("n1");
     odin3_net_id n2 = wire_net("n2");
     odin3_net_id n3 = wire_net("n3");
     odin3_net_id n4 = wire_net("n4");
     odin3_net_id n5 = wire_net("n5");
-    (void)and_at(70, a, b, n1);
-    (void)and_at(71, n1, c, n2);
-    (void)and_at(72, a, c, n3);
+    (void)and_at(70, in_a, in_b, n1);
+    (void)and_at(71, n1, in_c, n2);
+    (void)and_at(72, in_a, in_c, n3);
     (void)buf_at(73, n2, n4);
     (void)buf_at(74, n3, n5);
     (void)ff_at(75, clk, n4, output("q1"));

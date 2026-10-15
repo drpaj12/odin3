@@ -66,8 +66,9 @@ struct odin3_abc_run {
     odin3_module *module;          /* the current module, domain and region */
     odin3_module_id module_id;
     const odin3_abc_domain *domain;
-    odin3_abc_region *region;
-    odin3_strbuf lines; /* ABC output lines of the call in progress, '\n'-ended */
+    odin3_abc_region *region;    /* the region being mapped: &region_own, or a test's */
+    odin3_abc_region region_own; /* the pass's region storage (run_domain) */
+    odin3_strbuf lines;          /* ABC output lines of the call in progress, '\n'-ended */
     bool lines_overflow;
     uint32_t cmd_class;                        /* the odin3_abc_class of the command in progress */
     char last_line[ODIN3_ABC_LAST_LINE_BYTES]; /* the last non-empty ABC output line */

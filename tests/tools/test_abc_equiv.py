@@ -218,7 +218,9 @@ class AbcEquivTest(unittest.TestCase):
         (call,) = self.calls("odin3")
         self.assertEqual(call["env"], {**os.environ, "ODIN3_ABC_EXCHANGE": "aig"})
         (equiv_call,) = self.calls("equiv")
-        self.assertNotIn("ODIN3_ABC_EXCHANGE", equiv_call["env"])  # type: ignore[operator]
+        equiv_env = equiv_call["env"]
+        assert isinstance(equiv_env, dict)
+        self.assertNotIn("ODIN3_ABC_EXCHANGE", equiv_env)
 
     def test_a_golden_path_outside_heavy_run_is_refused(self) -> None:
         golden = self.root / "golden"

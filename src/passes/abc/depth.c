@@ -25,17 +25,17 @@ static uint32_t *at(odin3_vec *vec, uint32_t idx) {
     return (uint32_t *)vec->data + idx;
 }
 
-static bool is_lut(const dp *d, odin3_node_id node) {
-    return odin3_node_live(d->mod, node) && odin3_node_type(d->mod, node).v == d->lut_type;
+static bool is_lut(const dp *dpt, odin3_node_id node) {
+    return odin3_node_live(dpt->mod, node) && odin3_node_type(dpt->mod, node).v == dpt->lut_type;
 }
 
 /* The $lut node driving net, or 0. */
-static uint32_t lut_driver(const dp *d, odin3_net_id net) {
-    if (!odin3_net_valid(net) || odin3_net_driver_count(d->mod, net) != 1) {
+static uint32_t lut_driver(const dp *dpt, odin3_net_id net) {
+    if (!odin3_net_valid(net) || odin3_net_driver_count(dpt->mod, net) != 1) {
         return 0;
     }
-    odin3_node_id node = odin3_pin_node(d->mod, odin3_net_driver(d->mod, net));
-    return is_lut(d, node) ? node.v : 0;
+    odin3_node_id node = odin3_pin_node(dpt->mod, odin3_net_driver(dpt->mod, net));
+    return is_lut(dpt, node) ? node.v : 0;
 }
 
 static odin3_status vec_zeros(odin3_vec *vec, size_t count) {
@@ -58,53 +58,66 @@ static odin3_status push(odin3_vec *vec, uint32_t value) {
 }
 
 /* In-degrees, and the first worklist: the $luts none of whose inputs a $lut drives. */
-static odin3_status dp_start(dp *d) {
-    uint32_t end = odin3_module_node_end(d->mod);
-    odin3_status st = vec_zeros(&d->indeg, end);
-    st = st == ODIN3_OK ? vec_zeros(&d->level, end) : st;
-    odin3_vec_init(&d->ready, sizeof(uint32_t));
+static odin3_status dp_start(dp *dpt) {
+    uint32_t end = odin3_module_node_end(dpt->mod);
+    odin3_status st = vec_zeros(&dpt->indeg, end);
+    st = st == ODIN3_OK ? vec_zeros(&dpt->level, end) : st;
+    odin3_vec_init(&dpt->ready, sizeof(uint32_t));
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
         odin3_node_id node = {id};
-        if (!is_lut(d, node)) {
+        if (!is_lut(dpt, node)) {
             continue;
         }
-        odin3_pinslice pins = odin3_node_pins(d->mod, node);
+        odin3_pinslice pins = odin3_node_pins(dpt->mod, node);
         for (uint32_t i = 0; i < pins.count; i++) {
             odin3_pin_id pin = {pins.first.v + i};
-            *at(&d->indeg, id) += odin3_pin_reads(d->mod, pin) &&
-                                          lut_driver(d, odin3_pin_net(d->mod, pin)) != 0
-                                      ? 1U
-                                      : 0U;
+            *at(&dpt->indeg, id) +=
+                odin3_pin_reads(dpt->mod, pin) && lut_driver(dpt, odin3_pin_net(dpt->mod, pin)) != 0
+                    ? 1U
+                    : 0U;
         }
-        st = *at(&d->indeg, id) == 0 ? push(&d->ready, id) : st;
+        st = *at(&dpt->indeg, id) == 0 ? push(&dpt->ready, id) : st;
     }
     return st;
 }
 
-/* Finishes node: its level is final; every $lut reading its output is one input closer. */
-static odin3_status dp_finish(dp *d, uint32_t node) {
-    uint32_t level = *at(&d->level, node) + 1U;
-    *at(&d->level, node) = level;
-    odin3_pinslice pins = odin3_node_pins(d->mod, (odin3_node_id){node});
+/* The net on the output pin of node (a $lut has one); none when it drives nothing. */
+static odin3_net_id out_net(const odin3_module *mod, odin3_node_id node) {
+    odin3_pinslice pins = odin3_node_pins(mod, node);
     for (uint32_t i = 0; i < pins.count; i++) {
         odin3_pin_id pin = {pins.first.v + i};
-        if (!odin3_pin_drives(d->mod, pin) || !odin3_net_valid(odin3_pin_net(d->mod, pin))) {
-            continue;
+        if (odin3_pin_drives(mod, pin)) {
+            return odin3_pin_net(mod, pin);
         }
-        odin3_pinlist sinks = odin3_net_sinks(d->mod, odin3_pin_net(d->mod, pin));
-        for (uint32_t s = 0; s < sinks.count; s++) {
-            uint32_t reader = odin3_pin_node(d->mod, sinks.pins[s]).v;
-            if (!is_lut(d, (odin3_node_id){reader}) || *at(&d->indeg, reader) == 0) {
-                continue;
-            }
-            *at(&d->level, reader) = *at(&d->level, reader) > level ? *at(&d->level, reader) : level;
-            *at(&d->indeg, reader) -= 1U;
-            if (*at(&d->indeg, reader) == 0) {
-                odin3_status st = push(&d->ready, reader);
-                if (st != ODIN3_OK) {
-                    return st;
-                }
-            }
+    }
+    return (odin3_net_id){0};
+}
+
+/* One reader of a finished node's output: one input closer; ready when it has none left. */
+static odin3_status dp_release(dp *dpt, odin3_node_id node, uint32_t level) {
+    uint32_t reader = node.v;
+    if (!is_lut(dpt, node) || *at(&dpt->indeg, reader) == 0) {
+        return ODIN3_OK;
+    }
+    uint32_t *held = at(&dpt->level, reader);
+    *held = *held > level ? *held : level;
+    *at(&dpt->indeg, reader) -= 1U;
+    return *at(&dpt->indeg, reader) == 0 ? push(&dpt->ready, reader) : ODIN3_OK;
+}
+
+/* Finishes node: its level is final; every $lut reading its output is one input closer. */
+static odin3_status dp_finish(dp *dpt, uint32_t node) {
+    uint32_t level = *at(&dpt->level, node) + 1U;
+    *at(&dpt->level, node) = level;
+    odin3_net_id out = out_net(dpt->mod, (odin3_node_id){node});
+    if (!odin3_net_valid(out)) {
+        return ODIN3_OK;
+    }
+    odin3_pinlist sinks = odin3_net_sinks(dpt->mod, out);
+    for (uint32_t snk = 0; snk < sinks.count; snk++) {
+        odin3_status st = dp_release(dpt, odin3_pin_node(dpt->mod, sinks.pins[snk]), level);
+        if (st != ODIN3_OK) {
+            return st;
         }
     }
     return ODIN3_OK;
@@ -116,18 +129,18 @@ odin3_status odin3_abc_depth(const odin3_design *design, uint32_t *depth) {
     if (top.v == 0) {
         return ODIN3_OK;
     }
-    dp d = {0};
-    d.mod = odin3_module_get((odin3_design *)design, top);
-    d.lut_type = odin3_lut_builtin_index();
-    odin3_status st = dp_start(&d);
-    while (st == ODIN3_OK && d.ready.len > 0) {
-        uint32_t node = *at(&d.ready, (uint32_t)d.ready.len - 1U);
-        odin3_vec_pop(&d.ready);
-        st = dp_finish(&d, node);
-        *depth = *at(&d.level, node) > *depth ? *at(&d.level, node) : *depth;
+    dp dpt = {0};
+    dpt.mod = odin3_module_get((odin3_design *)design, top);
+    dpt.lut_type = odin3_lut_builtin_index();
+    odin3_status st = dp_start(&dpt);
+    while (st == ODIN3_OK && dpt.ready.len > 0) {
+        uint32_t node = *at(&dpt.ready, (uint32_t)dpt.ready.len - 1U);
+        odin3_vec_pop(&dpt.ready);
+        st = dp_finish(&dpt, node);
+        *depth = *at(&dpt.level, node) > *depth ? *at(&dpt.level, node) : *depth;
     }
-    odin3_vec_free(&d.indeg);
-    odin3_vec_free(&d.level);
-    odin3_vec_free(&d.ready);
+    odin3_vec_free(&dpt.indeg);
+    odin3_vec_free(&dpt.level);
+    odin3_vec_free(&dpt.ready);
     return st;
 }
