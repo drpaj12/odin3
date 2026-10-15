@@ -1,0 +1,17 @@
+# multidriver.blif - 3A flatten negative fixture (review C1): two instances of sub drive z, so
+# `flatten` itself must refuse with "has 2 drivers after joining port".
+.model top
+.inputs a
+.outputs z
+.subckt sub i=a o=z
+.cname u1
+.subckt sub i=a o=z
+.cname u2
+.end
+
+.model sub
+.inputs i
+.outputs o
+.names i o
+1 1
+.end

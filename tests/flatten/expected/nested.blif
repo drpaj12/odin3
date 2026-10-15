@@ -1,0 +1,29 @@
+.model top
+.inputs a b
+.outputs y z w
+.names a $c8.n1
+0 1
+.cname $c8.inv
+.names $c8.n1 w
+1 1
+.names a ua.l1.n1
+0 1
+.cname ua.l1.inv
+.names ua.l1.n1 ua.t1
+1 1
+.names ua.t1 ua.l2.n1
+0 1
+.cname ua.l2.inv
+.names ua.l2.n1 y
+1 1
+.names b ub.l1.n1
+0 1
+.cname ub.l1.inv
+.names ub.l1.n1 ub.t1
+1 1
+.names ub.t1 ub.l2.n1
+0 1
+.cname ub.l2.inv
+.names ub.l2.n1 z
+1 1
+.end

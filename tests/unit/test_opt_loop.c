@@ -1264,6 +1264,25 @@ static void test_simcheck_judges_an_x_init_flip_flop(void) {
                                             "init), 0 skipped before, 0 skipped after"));
 }
 
+/* An unused flip-flop is the only user of `clk`: opt_clean removes it, `clk` stops being a clock,
+ * and the simulator after the call drives it like any input. The other inputs must still get the
+ * same stimulus (fuzz finding, PR 114): a and b are drawn at the same PRNG positions. */
+static void test_simcheck_clock_that_becomes_an_input_keeps_the_stimulus(void) {
+#ifdef NDEBUG
+    TEST_IGNORE_MESSAGE("--opt-simcheck is a Debug option");
+#endif
+    build(
+        "module \\m\n  wire input 1 \\clk\n  wire input 2 \\a\n  wire input 3 \\b\n"
+        "  wire output 4 \\y\n  wire \\t\n"
+        "  cell $_XOR_ \\x\n    connect \\A \\a\n    connect \\B \\b\n    connect \\Y \\y\n  end\n"
+        "  cell $_DFF_P_ \\f\n    connect \\C \\clk\n    connect \\D \\a\n    connect \\Q \\t\n"
+        "  end\nend\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", "--opt-simcheck"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_errors());
+    TEST_ASSERT_EQUAL_UINT32(1, count_prefix("opt_clean: removed 1 unused cells"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_prefix("opt: opt_clean: simcheck: 1 modules checked"));
+}
+
 /* The call moves the flip-flop's clock to a net a gate drives: the IR stays valid, the module
  * built before and does not build after (a clock that is no primary input). */
 static void clock_from_a_gate(void *user, const char *sub, odin3_design *design) {
@@ -1550,6 +1569,7 @@ int main(void) {
     RUN_TEST(test_simcheck_passes_a_correct_run);
     RUN_TEST(test_simcheck_skips_what_it_cannot_judge);
     RUN_TEST(test_simcheck_judges_an_x_init_flip_flop);
+    RUN_TEST(test_simcheck_clock_that_becomes_an_input_keeps_the_stimulus);
     RUN_TEST(test_simcheck_unsimulable_after_is_an_error);
     RUN_TEST(test_simcheck_build_failure_is_quiet);
     RUN_TEST(test_opt_oom_fallback);

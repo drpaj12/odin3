@@ -107,3 +107,15 @@ jobs:
   #     # machine. The commands are in docs/PHASE2.md item 23.
   #     # The crash fuzzer for an hour (a clang build with -DODIN3_FUZZ=ON).
   #     - run: build/fuzz/fuzz_opt -max_total_time=3600 -timeout=10 -rss_limit_mb=2048 -max_len=512 -print_funcs=0 build/fuzz/fuzz_opt_corpus build/fuzz/fuzz_opt_seeds
+
+  # 3A spec 14.5, 14.6 (plan Task 5): placeholders; Peter runs no nightly (PHASE3 #28), so the
+  # controller runs these by hand under tools/heavy-run at PR time. fuzz_flatten_quick (2,000
+  # cases) and fuzz_flatten_yosys_quick (300) are in CTest; the long run is 50,000 cases and the
+  # equivalence proof of the Yosys leg; flatten_vtr_sweep is the 19 VTR designs.
+  # flatten-evidence:
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: cmake --preset release && cmake --build --preset release -j4
+  #     - run: tools/heavy-run tools/flatten-check/fuzz_flatten --cases 50000 --seed 100000 --odin3 build/release/odin3 --yosys "$YOSYS_055" --equiv --repro-dir "$RUNNER_TEMP/fuzz-flatten"
+  #     - run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^flatten_vtr_sweep$'

@@ -347,6 +347,145 @@ class CompareTest(unittest.TestCase):
                              self.write("b.blif", narrow))
         self.assertEqual(code, 1)
 
+    # -- --vtr-normalize (3E §16.3, plan Task 10) ---------------------------------------------
+
+    def both(self, a: str, b: str, *flags: str) -> int:
+        return compare(*flags, self.write("a.blif", a), self.write("b.blif", b))[0]
+
+    def test_vtr_normalize_decodes_names(self) -> None:
+        """Review Focus 3: `%fe` is the name fe, `%FE` the byte 0xFE; the decode is exact."""
+        template = ".model top\n.inputs {n}\n.outputs y\n.names {n} y\n1 1\n.end\n"
+        for written, name in (("%fe", "fe"), ("a%23b", "a%2523b"), ("%2Eend", ".end"),
+                              ("%252Eend", ".end"), ("x%5Cy", "x%255Cy")):
+            with self.subTest(written):
+                same = template.format(n=written)
+                plain = template.format(n=name)
+                self.assertEqual(self.both(same, plain, "--vtr-normalize"), 0)
+                self.assertEqual(self.both(same, plain), 1)
+        byte = template.format(n="%FE")
+        self.assertEqual(self.both(byte, template.format(n="fe"), "--vtr-normalize"), 1)
+        self.assertEqual(netlist_compare.vb10_decode("%FE"), "\udcfe")
+        self.assertEqual(netlist_compare.vb10_decode("%fe"), "fe")
+        self.assertEqual(netlist_compare.vb10_decode("%2Eend"), ".end")
+        self.assertEqual(netlist_compare.vb10_decode("%NIL"), "NIL")
+        self.assertEqual(netlist_compare.vb10_decode("%25NIL"), "NIL")
+
+    def test_vtr_normalize_twice_escaped_name(self) -> None:
+        """`$2%5Cbuffer` against `$2%255Cbuffer`, a primary output (the name is kept)."""
+        template = ".model top\n.inputs a\n.outputs {n}\n.names a {n}\n1 1\n.end\n"
+        once, twice = template.format(n="$2%5Cbuffer"), template.format(n="$2%255Cbuffer")
+        self.assertEqual(self.both(once, twice, "--vtr-normalize"), 0)
+        self.assertEqual(self.both(once, twice), 1)
+
+    def test_vtr_normalize_latch_init(self) -> None:
+        text = ".model top\n.inputs d c\n.outputs q\n.latch d q re c {i}\n.end\n"
+        self.assertEqual(self.both(text.format(i="3"), text.format(i="2"), "--vtr-normalize"), 0)
+        self.assertEqual(self.both(text.format(i="3"), text.format(i="2")), 1)
+        self.assertEqual(self.both(text.format(i="1"), text.format(i="2"), "--vtr-normalize"), 1)
+
+    MULTIPLY = (".model top\n.inputs x y\n.outputs o\n{gen}.subckt multiply {pins} out[0]=o\n"
+                ".end\n"
+                ".model multiply\n.inputs a[0] a[1] a[2] b[0] b[1] b[2]\n.outputs out[0]\n"
+                ".blackbox\n.end\n")
+
+    def test_vtr_normalize_omitted_subckt_input_is_unconn(self) -> None:
+        gen = ".names unconn\n"
+        short = self.MULTIPLY.format(gen="", pins="a[0]=x b[0]=y")
+        full = self.MULTIPLY.format(
+            gen=gen, pins="a[0]=x a[1]=unconn a[2]=unconn b[0]=y b[1]=unconn b[2]=unconn")
+        self.assertEqual(self.both(short, full, "--vtr-normalize"), 0)
+        self.assertEqual(self.both(short, full), 1)
+        wrong = self.MULTIPLY.format(
+            gen=gen, pins="a[0]=x a[1]=y a[2]=unconn b[0]=y b[1]=unconn b[2]=unconn")
+        self.assertEqual(self.both(short, wrong, "--vtr-normalize"), 1)
+
+    def test_vtr_normalize_clock_lines_dropped(self) -> None:
+        with_clock = ".model top\n.inputs d\n.clock c\n.outputs q\n.latch d q re c 2\n.end\n"
+        inputs = ".model top\n.inputs d c\n.outputs q\n.latch d q re c 2\n.end\n"
+        self.assertEqual(self.both(with_clock, inputs, "--vtr-normalize"), 0)
+        self.assertEqual(self.both(with_clock, inputs), 1)
+
+    def test_vtr_normalize_one_input_cover_is_one_row(self) -> None:
+        template = ".model top\n.inputs a\n.outputs y\n.names a y\n{rows}.end\n"
+        for rows, one in (("1 1\n1 1\n", "1 1\n"), ("1 0\n", "0 1\n"), ("0 0\n", "1 1\n")):
+            with self.subTest(rows):
+                a, b = template.format(rows=rows), template.format(rows=one)
+                self.assertEqual(self.both(a, b, "--vtr-normalize"), 0)
+        both_rows = template.format(rows="0 1\n1 1\n0 1\n")
+        const1 = ".model top\n.inputs a\n.outputs y\n.names y\n1\n.end\n"
+        self.assertEqual(self.both(both_rows, const1, "--vtr-normalize"), 0)
+        self.assertEqual(self.both(template.format(rows="1 1\n"),
+                                   template.format(rows="0 1\n"), "--vtr-normalize"), 1)
+
+    def test_vtr_normalize_constant_cover_is_a_generator(self) -> None:
+        template = ".model top\n.inputs a b\n.outputs y\n{cell}.end\n"
+        one = template.format(cell=".names y\n1\n")
+        zero = template.format(cell=".names y\n")
+        for cell in (".names a b y\n-- 1\n", ".names a b y\n0- 1\n1- 1\n"):
+            self.assertEqual(self.both(template.format(cell=cell), one, "--vtr-normalize"), 0)
+            self.assertEqual(self.both(template.format(cell=cell), one), 1)
+        self.assertEqual(self.both(template.format(cell=".names a b y\n"), zero,
+                                   "--vtr-normalize"), 0)
+        self.assertEqual(self.both(template.format(cell=".names a b y\n-- 0\n"), one,
+                                   "--vtr-normalize"), 1)
+        nand = template.format(cell=".names a b y\n11 0\n")
+        self.assertEqual(self.both(nand, nand, "--vtr-normalize"), 0)  # not constant: kept
+
+    def test_vtr_normalize_undriven_nets_read_gnd_or_unconn(self) -> None:
+        """§9.2: an undriven net is x: `gnd` on logic and outputs, `unconn` on a hard block."""
+        undriven = (".model top\n.inputs a\n.outputs y z o\n.names a u y\n11 1\n"
+                    ".latch u z re a 2\n.subckt multiply a[0]=u b[0]=a out[0]=o\n.end\n"
+                    ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n")
+        tied = (".model top\n.inputs a\n.outputs y z o\n.names gnd\n.names unconn\n"
+                ".names a gnd y\n11 1\n.latch gnd z re a 2\n"
+                ".subckt multiply a[0]=unconn b[0]=a out[0]=o\n.end\n"
+                ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n")
+        self.assertEqual(self.both(undriven, tied, "--vtr-normalize"), 0)
+        self.assertEqual(self.both(undriven, tied), 1)
+        out = (".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n")
+        buffered = out.replace(".outputs y\n", ".outputs y q\n")
+        gnd_q = buffered.replace(".end", ".names gnd\n.names gnd q\n1 1\n.end")
+        self.assertEqual(self.both(buffered, gnd_q, "--vtr-normalize"), 0)
+
+    def test_vtr_normalize_undriven_ties_have_negative_cases(self) -> None:
+        """An undriven net is only x: a vcc, a wrong input or a real driver all differ."""
+        base = (".model top\n.inputs a b\n.outputs y\n.names a u y\n11 1\n{extra}.end\n")
+        undriven = base.format(extra="")
+        vcc = base.format(extra=".names u\n1\n")
+        wired = base.format(extra=".names b u\n1 1\n")
+        gnd = base.format(extra=".names u\n")
+        for other in (vcc, wired):
+            self.assertEqual(self.both(undriven, other, "--vtr-normalize"), 1)
+        self.assertEqual(self.both(undriven, gnd, "--vtr-normalize"), 0)  # driven low = tied low
+        out = ".model top\n.inputs a\n.outputs y q\n.names a y\n1 1\n{extra}.end\n"
+        self.assertEqual(self.both(out.format(extra=""), out.format(extra=".names a q\n1 1\n"),
+                                   "--vtr-normalize"), 1)  # an output gaining a real driver
+        self.assertEqual(self.both(out.format(extra=""), out.format(extra=".names q\n1\n"),
+                                   "--vtr-normalize"), 1)  # an output tied high
+
+    def test_vtr_normalize_tells_a_tied_low_net_from_an_open_pin(self) -> None:
+        """A writer regression from `unconn` to `gnd` on a hard-block input is caught."""
+        stub = ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n"
+        top = (".model top\n.inputs a\n.outputs o\n{gen}"
+               ".subckt multiply a[0]={pin} b[0]=a out[0]=o\n.end\n")
+        golden = top.format(gen="", pin="u") + stub  # u undriven: written as unconn
+        opened = top.format(gen=".names unconn\n", pin="unconn") + stub
+        tied = top.format(gen=".names gnd\n", pin="gnd") + stub
+        self.assertEqual(self.both(golden, opened, "--vtr-normalize"), 0)
+        self.assertEqual(self.both(golden, tied, "--vtr-normalize"), 1)
+        self.assertEqual(self.both(opened, tied, "--vtr-normalize"), 1)
+
+    def test_vtr_normalize_drops_unused_stubs_only(self) -> None:
+        stub = ".model adder\n.inputs a[0]\n.outputs sumout[0]\n.blackbox\n.end\n"
+        top = ".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n"
+        self.assertEqual(self.both(top + stub, top, "--vtr-normalize"), 0)
+        self.assertEqual(self.both(top + stub, top), 1)
+        used = (".model top\n.inputs a\n.outputs y\n.subckt adder a[0]=a sumout[0]=y\n.end\n"
+                + stub)
+        self.assertEqual(self.both(used, used + stub.replace("adder", "other"),
+                                   "--vtr-normalize"), 0)
+        self.assertEqual(self.both(used, top + stub, "--vtr-normalize"), 1)
+
     def test_wrapper_script(self) -> None:
         wrapper = helpers.REPO_ROOT / "tools" / "netlist-compare" / "netlist-compare"
         a, b = helpers.fixture("comb_parmys.blif"), helpers.fixture("comb_flipped.blif")

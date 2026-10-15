@@ -35,6 +35,8 @@ extern const odin3_pass_def odin3_pass_opt_share;
 extern const odin3_pass_def odin3_pass_opt_dff;
 extern const odin3_pass_def odin3_pass_opt_clean;
 extern const odin3_pass_def odin3_pass_wreduce;
+/* src/passes/flatten/register.c (3A Task 2). */
+extern const odin3_pass_def odin3_pass_flatten;
 /* src/frontends/verilog/read_verilog.c (2C §4). */
 extern const odin3_pass_def odin3_read_verilog_pass;
 

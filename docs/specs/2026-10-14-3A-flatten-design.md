@@ -17,10 +17,11 @@ that is not Peter's is marked **agent default (Peter may override)**; §18 lists
 `flatten` turns a design whose top module instantiates other modules into a design whose top
 module holds all their logic. After it, the top module has no live node whose cell type has
 granularity `module`, except an instance Yosys would also keep (`keep_hierarchy`, §7). It is the
-step between `opt` and `hardmap`/`lower` in the Phase 3 script (PHASE3 exit test, item 3):
+step between `opt` and `hardmap`/`lower` in the Phase 3 script (PHASE3 exit test, item 3; with 3G,
+`wreduce; opt_clean; opt -full` come before `flatten`, PHASE3 #31):
 
 ```
-read_verilog --nolatches; proc; opt; flatten; [wreduce;] hardmap; lower; abc; write_blif --vtr
+read_verilog --nolatches; proc; opt; flatten; opt -full; hardmap; lower; abc; write_blif --vtr
 ```
 
 3E's `--vtr` writer already refuses a hierarchical top (E10: "hierarchy not flattened (run
@@ -229,9 +230,11 @@ So an unnamed cell or net of `C` is an unnamed cell or net in `R`; its lineage a
 are in its provenance (§6), where they cost nothing per name.
 
 **An unnamed instance** (BLIF `.subckt` without `.cname`; the Verilog front end names every
-instance) gives its children the prefix `$c<ID>` with `<ID>` the instance node's ID in `R` at
-expansion time (the form the writers use for unnamed nodes). Deterministic (IDs are creation order,
-FL-14), and no more than a label.
+instance) gives its children the prefix `<parent prefix>$c<ID>`: the prefix its own parent's
+children carry (empty for an instance of the root; `ua.` for an unnamed leaf inside `ua`), then
+`$c<ID>` with `<ID>` the instance node's ID in `R` at expansion time (the form the writers use for
+unnamed nodes). So `ua.$c7.inv` keeps `ua` (review I3: the netlist names are what a reverse
+engineer reads). Deterministic (IDs are creation order, FL-14), and no more than a label.
 
 ### 4.2 Uniqueness
 
@@ -317,6 +320,13 @@ function is internal, like `odin3_prov_derive`).
   instantiated *n* times costs *r·n* records (hash-consing merges equal ones). A record is about 48
   bytes plus its hash-index entry. The pre-flight estimate (§12) counts them. 3H measures it on the
   19 and reports (Task 5).
+- **Instance attributes are not copied.** The instance node is deleted when it is expanded
+  (3A review M7); its attributes (other than `keep_hierarchy`, which decides whether it is expanded
+  at all) are gone, and only its provenance record survives, as the second parent of every record
+  the expansion makes. Yosys's `$scopeinfo` would keep them; a follow-up can copy them onto the
+  `u1` scope if a use turns up.
+- **Constants and aliases carry the instance's record.** The shared constant a flatten creates in a
+  root gets a `DERIVED` record whose parent is the instance that first needed it (review M3).
 - **Nested expansion does not chain.** Contents are copied from the original child, so the parent of a
   copied object is the child's `SOURCE` record, not a `DERIVED` record of an outer flatten step.
 - **Pass-run information** (3D-3's `odin3_passrun_set_info`): `roots=<n> instances=<n> kept=<n>
@@ -462,10 +472,12 @@ No depth cap is needed: the Kahn sort rejects cycles, and the module count bound
 
 **Pre-flight estimate and the budget.** The estimate is the sum over roots of
 `nodes·B_node + pins·B_pin + nets·B_net + wires·B_wire + (records)·B_rec + string bytes of the new
-names` with constants **measured** in Task 2 (a fixture's `odin3_design_bytes_reserved` delta per
+names + alias_bits·B_alias_bit + bare·B_bare` (the last two: wire bits that join a net as an alias
+and bare alias names, each a temporary net and an interned name; review I1: structural netlists
+are full of them) with constants **measured** in Task 2 (a fixture's `odin3_design_bytes_reserved` delta per
 object, rounded up), plus the worklist and the net map. `odin3_budget_check(ctx, design, estimate)`
 (60% of physical memory, shared with `proc` and the opt family, 2E §16) runs before the first
-mutation and again every 2^16 created nodes (O(modules)), against the real `bytes_reserved`.
+mutation and again every 2^16 created nodes, nets and wires (O(modules)), against the real `bytes_reserved`.
 Failure: `ODIN3_ERR_PARSE` (the budget's status) with `odin3_budget_message`; the pre-flight failure
 changes nothing.
 
@@ -504,7 +516,7 @@ Two runs give byte-identical `write_rtlil` and `write_blif` output.
 | 2 | joined port nets are one net with several names (IR-2); no `connect` | `module->connect(...)` per port bit, merged later by `opt_clean`; the wire names stay | the IR's own model (IR-1, IR-2); the same set of public names in both |
 | 3 | no `$scopeinfo` cells; the path and the module are in provenance (`hier`, parents). `parameter:<NAME>` attributes of instances die | `$scopeinfo` per public cell with `cell_*`/`module_*` attributes, `hdlname` on wires and cells, `scopename` with `-scopename` | IR-12 puts hierarchy into `DERIVED` records; `$scopeinfo` is not a registered cell and `opt_clean` removes it anyway |
 | 4 | unnamed objects stay unnamed | private names `$flatten<inst>.<name>` | IR-14: names optional; writers generate names |
-| 5 | an unnamed instance labels its children `$c<ID>` | n/a (RTLIL cells are always named) | BLIF `.subckt` has no name |
+| 5 | an unnamed instance labels its children `<parent prefix>$c<ID>` | n/a (RTLIL cells are always named) | BLIF `.subckt` has no name |
 | 6 | a name clash gets `_1`, `_2`… per kind, and is counted | `Module::uniquify`: the same `%s_%d` | identical rule; per-kind namespaces (IR-14) |
 | 7 | a constant net of a child maps to the parent's shared constant net (IR-4); constant nodes are not copied | constants are bits, no cells | keeps IR-4's one-node-per-value |
 | 8 | a join that leaves two non-bus drivers on a net is an error at `flatten` (§3.7) | only constant-driven bits are an error; others are left for later passes | Release builds do not run `check`; cheap |
@@ -551,7 +563,8 @@ Each is a named test; the plan's tasks list which task adds which.
 - `flat_params_copied`: widths, `LUT`, `INIT` bits byte-identical.
 - `flat_attrs`: `keep`/`init` copied in key order; `blif_name` not.
 - `flat_names_unique`: the `_N` rule for nets, nodes, wires; alias clash.
-- `flat_unnamed_instance`: BLIF `.subckt` without `.cname`: children `$c<ID>.x`.
+- `flat_unnamed_instance`: BLIF `.subckt` without `.cname`: children `$c<ID>.x`; a nested unnamed
+  instance inside `ua` gives `ua.$c<ID>.x` (`flat_unnamed_nested`).
 - `flat_recursion`: a → b → a (BLIF-built); error text; the design untouched.
 - `flat_caps`: tiny caps (hidden hook) → the pre-flight error, design untouched; the budget hook
   (`odin3_budget_test_set_limit`) → the budget message.
@@ -709,9 +722,9 @@ Each has a recommendation; 1–3 change a rule or a document Peter owns, 4 confi
    cross-boundary constants and duplicates, and the QoR bands may be missed on LUT count.
 4. **Name policy for DESIGN §13 #6 as far as 3A goes** (§4): dotted Yosys-style instance paths in the IR
    names (`--separator` can change them), unnamed objects stay unnamed (path in provenance),
-   unnamed instances label as `$c<ID>`. Recommend **yes**; the final answer to §13 #6 (which style a
+   unnamed instances label as `<parent prefix>$c<ID>`. Recommend **yes**; the final answer to §13 #6 (which style a
    writer prints) still waits for 3E-6/3H's measurement.
 
 The remaining defaults (caps, FIFO order, constants sharing, multi-driver error, weak failure state,
-`--separator`, no `--no-prov`, `$c<ID>` labels, no net attributes) are marked "agent default (Peter may
+`--separator`, no `--no-prov`, `<parent prefix>$c<ID>` labels, no net attributes) are marked "agent default (Peter may
 override)" where they occur and logged in PHASE3's decisions by Task 5.

@@ -1,0 +1,12 @@
+.model top
+.inputs x[0] x[1] x[2] x[3] z[0] z[1] z[2] z[3]
+.outputs o[0] o[1] o[2] o[3] p[0] p[1] p[2] p[3]
+.subckt $xor A[0]=m1.u.t[0] A[1]=m1.u.t[1] A[2]=m1.u.t[2] A[3]=m1.u.t[3] B[0]=x[0] B[1]=x[1] \
+  B[2]=x[2] B[3]=x[3] Y[0]=o[0] Y[1]=o[1] Y[2]=o[2] Y[3]=o[3]
+.subckt $and A[0]=x[0] A[1]=x[1] A[2]=x[2] A[3]=x[3] B[0]=z[0] B[1]=z[1] B[2]=z[2] B[3]=z[3] \
+  Y[0]=m1.u.t[0] Y[1]=m1.u.t[1] Y[2]=m1.u.t[2] Y[3]=m1.u.t[3]
+.subckt $xor A[0]=m2.u.t[0] A[1]=m2.u.t[1] A[2]=m2.u.t[2] A[3]=m2.u.t[3] B[0]=z[0] B[1]=z[1] \
+  B[2]=z[2] B[3]=z[3] Y[0]=p[0] Y[1]=p[1] Y[2]=p[2] Y[3]=p[3]
+.subckt $and A[0]=z[0] A[1]=z[1] A[2]=z[2] A[3]=z[3] B[0]=x[0] B[1]=x[1] B[2]=x[2] B[3]=x[3] \
+  Y[0]=m2.u.t[0] Y[1]=m2.u.t[1] Y[2]=m2.u.t[2] Y[3]=m2.u.t[3]
+.end

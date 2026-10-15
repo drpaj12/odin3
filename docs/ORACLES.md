@@ -38,6 +38,13 @@ Recorded 2026-10-08 (Phase 0 §4).
   `abc` and `libabc` targets are not built: `--target abc` is ABC's upstream tool (output
   `abc-upstream`, on the non-PIC `libabc`), which compiles all of ABC a second time and does not
   update `third_party/abc/abc`.
+  The tool's `main()` is `adapters/abc/child_main.c` (ABC's `main.c` plus one line, below), and
+  the build copies it to `build/<preset>/odin3-abc` beside `odin3` (an install puts it in `bin/`
+  as `odin3-abc`): that copy is the program of the subprocess path for non-default ABC scripts
+  (3D spec §7.9, AB-33). `ODIN3_ABC_EXE` names another program (Python hosts, tests). The core
+  asks it `-c "version"` once per process; ABC's own version text does not name the commit, so
+  `odin3-abc` prints `odin3-abc: commit <40 hex>` first for that exact query, and the core
+  refuses a program whose commit is not the pin above.
 - **Yosys now builds with CMake** (`cmake -B build -G Ninja && ninja -C build`); its old
   `make -j` instructions no longer apply.
 - Smoke test passed: `run_vtr_flow.py blink.v EArch.xml --route_chan_width 100` → `EArch/blink OK`.
@@ -55,6 +62,18 @@ Recorded 2026-10-08 (Phase 0 §4).
   the `.generic` templates, which only `.vh` wrappers instantiate, there is none (`tests/exit/micro_nogolden.txt`).
   `exit-check` reads `defines=` from a golden's `.prov` and gives Odin III the same macros (a `+define+` file
   list through `sp-splice --odin3-pre`); a header beside the design needs nothing there.
+- **The VPR-read oracle** (3E §16.4). `$VTR_ROOT/vpr/vpr <arch> <netlist> --circuit_format blif
+  --exit_before_pack on` makes VPR read the BLIF, clean it (R14, R15), verify it and print its
+  netlist statistics, then stop ("Exiting before packing as requested", `VPR succeeded`, exit 0).
+  It is VPR's whole reader at a fraction of a route's cost, and it is what `tools/vtr-read-check`
+  runs on every `status=ok` k6 golden G and on every `write_blif --vtr` file W (arch
+  `vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml`). A rejected netlist exits 1 with
+  `Message: <text>` in stdout (a `vpr_throw`); an assertion failure aborts (exit 134) with
+  ` Assertion '…' failed` on stderr, so the tool searches both streams. It checks reading only:
+  whether a hard block can be packed is 3C's and 3H's to show. It runs only through
+  `tools/heavy-run` (the sweep CTest `vtr_read_check_k6`); the 18-file negative corpus
+  (`vtr-read-check --bad-corpus tests/vtr/blif-bad`, CTest `vtr_read_check_bad_corpus`) is small
+  enough to run anywhere `$VTR_ROOT` is built.
 - **The VTR pin check.** `tools/vtr-qor/vtr-qor doctor` checks that `$VTR_ROOT` is at the commit
   in the table above and has no modified tracked files
   (`git status --porcelain --untracked-files=no`). `vtr-qor run` refuses either case (E-QH2),

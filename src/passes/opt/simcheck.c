@@ -159,13 +159,29 @@ static uint32_t output_bits(const odin3_sim *sim) {
     return total;
 }
 
+/* Drives the inputs of one cycle with one PRNG draw per input bit, clock or not. The draw sits at
+ * the bit's position, not at its rank among the non-clock bits: a call can turn a clock into a
+ * plain input (opt_clean removes the last flip-flop on it), and the module must then still see the
+ * stimulus of the other inputs it saw before. A clock bit's draw is dropped. */
+static void drive_inputs(odin3_sim *sim, odin3_prng *prng) {
+    for (uint32_t port = 0; port < odin3_sim_input_count(sim); port++) {
+        for (uint32_t bit = 0; bit < odin3_sim_input_width(sim, port); bit++) {
+            odin3_sim_bit at = {port, bit};
+            bool value = odin3_prng_bit(prng);
+            if (!odin3_sim_input_is_clock(sim, at)) {
+                (void)odin3_sim_set_input(sim, at, value);
+            }
+        }
+    }
+}
+
 /* One seed: CYCLES cycles of random inputs, the outputs after each into row. */
 static void run_seed(odin3_sim *sim, uint32_t seed, uint8_t *row) {
     odin3_prng prng;
     odin3_prng_seed(&prng, seed);
     uint32_t at = 0;
     for (uint32_t cycle = 0; cycle < SIMCHECK_CYCLES; cycle++) {
-        odin3_sim_drive_random(sim, &prng);
+        drive_inputs(sim, &prng);
         odin3_sim_cycle(sim);
         for (uint32_t port = 0; port < odin3_sim_output_count(sim); port++) {
             for (uint32_t bit = 0; bit < odin3_sim_output_width(sim, port); bit++) {
