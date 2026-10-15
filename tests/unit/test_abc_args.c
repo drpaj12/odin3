@@ -13,6 +13,7 @@
 #include "passes/abc/script.h"
 #include "passes/budget.h"
 #include "passes/manager.h"
+#include "proc_fixture.h"
 #include "util/alloc.h"
 
 #include <regex.h>
@@ -256,8 +257,12 @@ static void test_views_error(void) {
     odin3_node_spec spec = {afx_type(design, "$add"), afx_intern(design, "$c3"), (odin3_prov_id){0},
                             NULL, 5};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(mod, &spec, NULL));
-    expect_refused("--lut 6", ODIN3_ERR_CHECK,
-                   "abc: module 'm' is not in the netlist view: $add '$c3'; run lower first");
+    afx_log_reset();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, run_abc("--lut 6"));
+    TEST_ASSERT_TRUE_MESSAGE(
+        afx_has(ODIN3_LOG_ERROR,
+                "abc: module 'm' is not in the netlist view: $add '$c3'; run lower first"),
+        afx_errors());
     TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
 }
 
@@ -330,20 +335,12 @@ static void test_pass_table_entry(void) {
 }
 
 static void test_process_is_refused(void) {
-    odin3_module_id mid = {0};
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
-    odin3_module *mod = odin3_module_get(design, mid);
-    odin3_node_spec spec = {afx_type(design, "$proc"), 0, (odin3_prov_id){0}, NULL, 0};
-    const odin3_celltype_def *def = odin3_celltype_get(design, spec.type);
-    spec.n_params = def->n_params;
-    if (odin3_node_create(mod, &spec, NULL) != ODIN3_OK) {
-        TEST_IGNORE_MESSAGE("a default $proc node cannot be built");
-    }
+    (void)proc_fixture_design(design);
     afx_log_reset();
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run_abc(""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run_abc("--lut 6"));
     TEST_ASSERT_TRUE(
         afx_has(ODIN3_LOG_ERROR, "pass 'abc': module 'm' has processes; run proc first"));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
 }
 
 int main(void) {

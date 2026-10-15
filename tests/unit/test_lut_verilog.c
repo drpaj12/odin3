@@ -372,7 +372,7 @@ static void write_bench(const odin3_strbuf *tb) {
             &bench,
             "module luts_tb;\n  reg [5:0] idx;\n  integer errors;\n  integer n;\n"
             "  wire i0 = idx[0], i1 = idx[1], i2 = idx[2], i3 = idx[3], i4 = idx[4], i5 = idx[5];\n"
-            "  function t(input [63:0] table, input [5:0] at);\n    t = table[at];\n  "
+            "  function t(input [63:0] bits, input [5:0] at);\n    t = bits[at];\n  "
             "endfunction\n"));
     put_outputs(&bench, false);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&bench, "  luts dut(.i0(i0), .i1(i1), "
