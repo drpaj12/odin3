@@ -239,16 +239,19 @@ LOWERINGS = (CLK, (*CLK, "techmap"), ("memory", *CLK, "techmap"))
 
 
 def refinement_script(gold: str, gate: str, procs: bool = False,
-                      lowering: Sequence[str] = LOWERINGS[1]) -> str:
+                      lowering: Sequence[str] = LOWERINGS[1], purge: bool = False) -> str:
     """Spec 20.2's Yosys script for two RTLIL files that ``rename_modules`` already made
     ``gold``/``gate``; ``procs`` adds ``proc``, ``lowering`` the commands that run on both sides
-    before the miter; then ``opt_clean -purge`` drops the wires nothing reads (a public wire whose
-    unused bits wreduce or opt_clean turn into x has no observable value, and ``equiv_make`` would
-    match it by name). Each side is flattened first: ``equiv_make`` matches only the two tops, so a
+    before the miter; ``purge`` adds ``opt_clean -purge`` after them, which drops the wires nothing
+    reads (a public wire whose unused bits wreduce turns into x has no observable value, and
+    ``equiv_make`` would match it by name). Purging also takes away names that help ``equiv_make``
+    pair registers, so ``Checker.refines`` tries each lowering plain first, then purged. Each side
+    is flattened first: ``equiv_make`` matches only the two tops, so a
     submodule's flip-flops would otherwise keep independent x initial values (review I4)."""
     steps = [f"read_rtlil {gold}", f"read_rtlil {gate}", *(["proc"] if procs else []), "flatten",
              *lowering]
-    steps += ["opt_clean -purge", "equiv_make gold gate eq", "hierarchy -top eq", "flatten",
+    steps += ["opt_clean -purge"] if purge else []
+    steps += ["equiv_make gold gate eq", "hierarchy -top eq", "flatten",
               "equiv_simple -undef -seq 4", "equiv_induct -undef", "equiv_status -assert"]
     return "; ".join(steps)
 
@@ -345,8 +348,11 @@ class Checker:
         last = ""
         crashed: CrashError | None = None
         aborted: RefineAbort | None = None
-        for lowering in self.flows(clock_sig.same_clocks(gold_text, gate_text)):
-            script = refinement_script(str(gold_out), str(gate_out), procs, lowering)
+        attempts = [(lowering, purge)
+                    for purge in (False, True)
+                    for lowering in self.flows(clock_sig.same_clocks(gold_text, gate_text))]
+        for lowering, purge in attempts:
+            script = refinement_script(str(gold_out), str(gate_out), procs, lowering, purge)
             try:
                 done = self.child([self.yosys, "-p", script])
             except CrashError as exc:

@@ -104,22 +104,47 @@ class PureTest(unittest.TestCase):
         self.assertEqual(
             oe.refinement_script("g.il", "h.il"),
             "read_rtlil g.il; read_rtlil h.il; flatten; clk2fflogic; opt_merge; opt_clean; "
-            "techmap; opt_clean -purge; equiv_make gold gate eq; hierarchy -top eq; flatten; "
+            "techmap; equiv_make gold gate eq; hierarchy -top eq; flatten; "
             "equiv_simple -undef -seq 4; equiv_induct -undef; equiv_status -assert")
 
     def test_script_variants(self) -> None:
         plain = oe.refinement_script("g.il", "h.il", lowering=())
         self.assertNotIn("clk2fflogic", plain)
         self.assertNotIn("proc", plain)
-        self.assertIn("read_rtlil h.il; flatten; opt_clean -purge; equiv_make gold gate eq",
+        self.assertIn("read_rtlil h.il; flatten; equiv_make gold gate eq",
                       plain)
         procs = oe.refinement_script("g.il", "h.il", procs=True, lowering=oe.ONE_CLOCK[0])
-        self.assertIn("read_rtlil h.il; proc; flatten; async2sync; opt_clean -purge; equiv_make",
+        self.assertIn("read_rtlil h.il; proc; flatten; async2sync; equiv_make",
                       procs)
         self.assertNotIn("techmap", procs)
         self.assertIn("flatten; memory; clk2fflogic; opt_merge; opt_clean; techmap; "
-                      "opt_clean -purge; equiv_make",
+                      "equiv_make",
                       oe.refinement_script("g.il", "h.il", lowering=oe.LOWERINGS[2]))
+        self.assertIn("techmap; opt_clean -purge; equiv_make",
+                      oe.refinement_script("g.il", "h.il", purge=True))
+
+    def test_a_purged_retry_proves_what_the_plain_script_cannot(self) -> None:
+        """Every lowering is tried plain first, then with `opt_clean -purge`: a proof in either is
+        a proof (purging drops unread wires, and with them names that help equiv_make)."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        work = Path(tmp.name)
+        (work / "g.il").write_text(IL_GOOD)
+        (work / "h.il").write_text(IL_GOOD)
+        seen: list[bool] = []
+
+        def child(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+            purged = "opt_clean -purge" in " ".join(argv)
+            seen.append(purged)
+            out = "" if purged else (
+                "ERROR: Found 1 unproven $equiv cells in 'equiv_status -assert'.")
+            return subprocess.CompletedProcess(list(argv), 0 if purged else 1, out, "")
+        checker = oe.Checker("y", work, 1 << 30)
+        with mock.patch.object(checker, "child", side_effect=child):
+            ok, _ = checker.refines(work / "g.il", work / "h.il", "p")
+        self.assertTrue(ok)
+        self.assertEqual(seen[:len(seen) - 1].count(True), 0)  # plain lowerings first
+        self.assertTrue(seen[-1])
 
     def test_flows_follow_the_clocks(self) -> None:
         checker = oe.Checker("y", Path("."), 1 << 30)
