@@ -146,6 +146,24 @@ class PureTest(unittest.TestCase):
         self.assertEqual(seen[:len(seen) - 1].count(True), 0)  # plain lowerings first
         self.assertTrue(seen[-1])
 
+    def test_a_real_difference_survives_the_purged_retry(self) -> None:
+        """A difference on a used wire or an output is not an unread wire: the plain tries and the
+        purged tries all fail, and the answer stays False."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        work = Path(tmp.name)
+        fakes = Fakes(work)
+        (work / "g.il").write_text(IL_GOOD)
+        (work / "h.il").write_text(IL_BAD)
+        checker = oe.Checker(str(fakes.bin / "yosys"), work, 1 << 30)
+        with mock.patch.object(memcap, "run", fake_run):
+            ok, text = checker.refines(work / "g.il", work / "h.il", "q")
+        self.assertFalse(ok)
+        self.assertIn("unproven $equiv", text)
+        scripts = (fakes.bin / "yosys.log").read_text().splitlines()
+        self.assertTrue(any("opt_clean -purge" in line for line in scripts))
+        self.assertTrue(any("opt_clean -purge" not in line for line in scripts))
+
     def test_flows_follow_the_clocks(self) -> None:
         checker = oe.Checker("y", Path("."), 1 << 30)
         self.assertEqual(checker.flows(True), list(oe.ONE_CLOCK))
@@ -379,6 +397,32 @@ class MainTest(unittest.TestCase):
         self.assertEqual(len(calls), oe.MAX_SAT_TIMEOUTS)
         self.assertIn("4 inconclusive (SAT size limit)", out)
         self.assertIn("not tried after 2 SAT size-limit hits", out)
+
+    def test_refine_timeout_reaches_the_proof(self) -> None:
+        self.fakes.spec(self.pair("0001", "opt_expr"))
+        seen: list[float] = []
+
+        def spy(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if "equiv_make" in " ".join(argv):
+                seen.append(kw["timeout"])
+            return fake_run(argv, cap, **kw)
+        saved = oe.REFINE_TIMEOUT_SECONDS
+        self.addCleanup(setattr, oe, "REFINE_TIMEOUT_SECONDS", saved)
+        code, out, err = self.run_with(spy, "--refine-timeout", "7")
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(set(seen), {7.0})
+
+    def test_a_cec_lowering_crash_stays_unproven(self) -> None:
+        crash = oe.CrashError("yosys (cec lowering)", "killed (exit -9)", cap_killed=True)
+        with mock.patch.object(oe, "capped", side_effect=crash):
+            verdict, text = oe.cec_ils("y", Path("g.il"), Path("h.il"), 1 << 30, Path("."), "t")
+        self.assertEqual(verdict, oe.CEC_UNPROVEN)
+        self.assertIn("BLIF cec:", text)
+        done = subprocess.CompletedProcess([], 1, "", "ERROR: boom")
+        with mock.patch.object(oe, "capped", return_value=done):
+            verdict, text = oe.cec_ils("y", Path("g.il"), Path("h.il"), 1 << 30, Path("."), "t")
+        self.assertEqual(verdict, oe.CEC_UNPROVEN)
+        self.assertIn("lowering of the gold side failed", text)
 
     def test_cec_blif_verdicts(self) -> None:
         """equiv-check exit 0 proves, 1 differs, anything else (4 unproven, 2 unsupported) decides
