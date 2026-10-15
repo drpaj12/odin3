@@ -597,6 +597,14 @@ static odin3_status reset_table(merge_state *ms) {
     return ms->map == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
 }
 
+/* Frees the table and its keys (state_free is safe after it). */
+static void drop_table(merge_state *ms) {
+    odin3_u64map_destroy(ms->map);
+    ms->map = NULL;
+    odin3_vec_free(&ms->store);
+    odin3_vec_free(&ms->ents);
+}
+
 /* --- one merge ----------------------------------------------------------------------------------
  */
 
@@ -974,6 +982,7 @@ static odin3_status merge_module(odin3_opt_ctx *oc, uint32_t *removed) {
     while (st == ODIN3_OK && ms.dirty.len > 0) {
         st = round_of_readers(&ms);
     }
+    drop_table(&ms); /* the keys are not needed to close the classes: do not hold them over it */
     st = st == ODIN3_OK && ms.removed > 0 ? close_all(&ms) : st;
     *removed += ms.removed;
     state_free(&ms);
