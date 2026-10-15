@@ -1,0 +1,290 @@
+/* lower_fixture.c — see lower_fixture.h. */
+#include "lower_fixture.h"
+
+#include "backends/rtlil/writer.h"
+#include "ir/celltype.h"
+#include "sim/prng.h"
+#include "sim/sim.h"
+#include "unity.h"
+
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+enum { MAX_PORTS = 16 };
+
+void lf_begin(lf *fix) {
+    fix->design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(fix->design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pass_run_begin(fix->design, lf_str(fix, "lower"), &fix->ctx));
+}
+
+void lf_end(lf *fix) {
+    odin3_design_destroy(fix->design);
+    fix->design = NULL;
+}
+
+uint32_t lf_str(lf *fix, const char *text) {
+    uint32_t str = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(fix->design, odin3_bytes_cstr(text), &str));
+    return str;
+}
+
+void lf_binary_params(const lf_binary *spec, odin3_value out[5]) {
+    out[0] = odin3_value_int(spec->a_signed ? 1 : 0);
+    out[1] = odin3_value_int(spec->b_signed ? 1 : 0);
+    out[2] = odin3_value_int(spec->a_width);
+    out[3] = odin3_value_int(spec->b_width);
+    out[4] = odin3_value_int(spec->y_width);
+}
+
+void lf_unary_params(const lf_binary *spec, odin3_value out[3]) {
+    out[0] = odin3_value_int(spec->a_signed ? 1 : 0);
+    out[1] = odin3_value_int(spec->a_width);
+    out[2] = odin3_value_int(spec->y_width);
+}
+
+odin3_prov_id lf_source(lf *fix, const char *file, uint32_t line) {
+    odin3_pass_ctx rd = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pass_run_begin(fix->design, lf_str(fix, "read_verilog"), &rd));
+    odin3_srcloc loc = {lf_str(fix, file), line, 1, line, 4, 0};
+    odin3_prov_origin origin = {&loc, 1, 0, 0};
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&rd, &origin, &id));
+    return id;
+}
+
+odin3_module *lf_module(lf *fix, const char *name) {
+    odin3_module_id mid = {0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_create(fix->design, lf_str(fix, name), (odin3_prov_id){0}, &mid));
+    return odin3_module_get(fix->design, mid);
+}
+
+static odin3_celltype_id type_named(lf *fix, const char *type) {
+    odin3_celltype_id tid = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(fix->design, lf_str(fix, type), &tid));
+    return tid;
+}
+
+odin3_net_id lf_wnet(lf *fix, odin3_module *mod, const char *name, uint32_t bit) {
+    odin3_wire_id wire = odin3_module_find_wire(mod, lf_str(fix, name));
+    TEST_ASSERT_TRUE(odin3_wire_valid(wire));
+    return odin3_wire_net(mod, wire, bit);
+}
+
+/* A module port for port `pidx` of the cell type, with the nets of its wire bits in *nets. */
+static uint32_t add_cell_port(lf *fix, odin3_module *mod, const odin3_celltype_def *def,
+                              const odin3_port_query *query, odin3_net_id **nets) {
+    uint32_t width =
+        odin3_celltype_port_width(fix->design, query->type, query->params, query->port);
+    TEST_ASSERT_TRUE(width > 0);
+    const odin3_port_def *pdef = &def->ports[query->port];
+    odin3_dir dir = pdef->dir == ODIN3_DIR_IN ? ODIN3_DIR_IN : ODIN3_DIR_OUT;
+    odin3_port_spec port = {
+        lf_str(fix, pdef->name), dir, width, width == 1, {0}, false, 0, 0, false};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &port, NULL));
+    *nets = calloc(width, sizeof(odin3_net_id));
+    TEST_ASSERT_NOT_NULL(*nets);
+    for (uint32_t bit = 0; bit < width; bit++) {
+        (*nets)[bit] = lf_wnet(fix, mod, pdef->name, bit);
+    }
+    return width;
+}
+
+/* The definition's default parameter values in out (at most MAX_PORTS of them). */
+static const odin3_value *fill_defaults(const odin3_celltype_def *def, odin3_value *out) {
+    TEST_ASSERT_TRUE(def->n_params <= MAX_PORTS);
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        out[i] = def->params[i].dflt;
+    }
+    return out;
+}
+
+odin3_node_id lf_cell(lf *fix, odin3_module *mod, const lf_cell_spec *spec) {
+    odin3_celltype_id tid = type_named(fix, spec->type);
+    const odin3_celltype_def *def = odin3_celltype_get(fix->design, tid);
+    TEST_ASSERT_TRUE(def->n_ports <= MAX_PORTS);
+    odin3_value defaults[MAX_PORTS];
+    const odin3_value *params = spec->params != NULL ? spec->params : fill_defaults(def, defaults);
+    uint32_t n_params = spec->params != NULL ? spec->n_params : def->n_params;
+    TEST_ASSERT_EQUAL_UINT32(def->n_params, n_params);
+    odin3_net_id *nets[MAX_PORTS] = {NULL};
+    odin3_netvec ports[MAX_PORTS];
+    for (uint32_t pidx = 0; pidx < def->n_ports; pidx++) {
+        odin3_port_query query = {tid, params, pidx};
+        uint32_t width = add_cell_port(fix, mod, def, &query, &nets[pidx]);
+        ports[pidx] = (odin3_netvec){nets[pidx], width};
+    }
+    odin3_node_spec nspec = {tid, spec->name != NULL ? lf_str(fix, spec->name) : 0, spec->prov,
+                             params, n_params};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(mod, &nspec, ports, &node));
+    for (uint32_t pidx = 0; pidx < def->n_ports; pidx++) {
+        free(nets[pidx]);
+    }
+    return node;
+}
+
+odin3_node_id lf_one_cell(lf *fix, const lf_cell_spec *spec, odin3_module **mod) {
+    *mod = lf_module(fix, "m");
+    return lf_cell(fix, *mod, spec);
+}
+
+uint32_t lf_count_type(lf *fix, odin3_module *mod, const char *type) {
+    odin3_celltype_id tid = type_named(fix, type);
+    uint32_t count = 0;
+    for (uint32_t nid = 1; nid < odin3_module_node_end(mod); nid++) {
+        odin3_node_id node = {nid};
+        count += odin3_node_live(mod, node) && odin3_node_type(mod, node).v == tid.v ? 1U : 0U;
+    }
+    return count;
+}
+
+uint32_t lf_live_nodes(const odin3_module *mod) {
+    uint32_t count = 0;
+    for (uint32_t nid = 1; nid < odin3_module_node_end(mod); nid++) {
+        count += odin3_node_live(mod, (odin3_node_id){nid}) ? 1U : 0U;
+    }
+    return count;
+}
+
+odin3_status lf_signature(lf *fix, odin3_strbuf *out) {
+    uint32_t modules = odin3_design_module_end(fix->design);
+    for (uint32_t midx = 1; midx < modules; midx++) {
+        odin3_module *mod = odin3_module_get(fix->design, (odin3_module_id){midx});
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(out, "module %u\n", midx));
+        for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
+            odin3_node_id node = {id};
+            if (!odin3_node_live(mod, node)) {
+                continue;
+            }
+            const odin3_celltype_def *def =
+                odin3_celltype_get(fix->design, odin3_node_type(mod, node));
+            TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                                  odin3_strbuf_appendf(out, " %u %s name %u prov %u:", id,
+                                                       def->name, odin3_node_name(mod, node),
+                                                       odin3_node_prov(mod, node).v));
+            odin3_pinslice pins = odin3_node_pins(mod, node);
+            for (uint32_t i = 0; i < pins.count; i++) {
+                odin3_net_id net = odin3_pin_net(mod, (odin3_pin_id){pins.first.v + i});
+                TEST_ASSERT_EQUAL_INT(
+                    ODIN3_OK, odin3_strbuf_appendf(out, " %u/%u", net.v, odin3_net_name(mod, net)));
+            }
+            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(out, "\n"));
+        }
+    }
+    return ODIN3_OK;
+}
+
+odin3_status lf_rtlil(lf *fix, odin3_strbuf *out) {
+    return odin3_rtlil_text(fix->design, out);
+}
+
+/* --- simulation ----------------------------------------------------------------------------- */
+
+static bool shapes_agree(const odin3_sim *sim_a, const odin3_sim *sim_b) {
+    if (odin3_sim_input_count(sim_a) != odin3_sim_input_count(sim_b) ||
+        odin3_sim_output_count(sim_a) != odin3_sim_output_count(sim_b)) {
+        return false;
+    }
+    for (uint32_t pidx = 0; pidx < odin3_sim_input_count(sim_a); pidx++) {
+        if (odin3_sim_input_width(sim_a, pidx) != odin3_sim_input_width(sim_b, pidx)) {
+            return false;
+        }
+    }
+    for (uint32_t pidx = 0; pidx < odin3_sim_output_count(sim_a); pidx++) {
+        if (odin3_sim_output_width(sim_a, pidx) != odin3_sim_output_width(sim_b, pidx)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static uint32_t input_bits(const odin3_sim *sim) {
+    uint32_t total = 0;
+    for (uint32_t pidx = 0; pidx < odin3_sim_input_count(sim); pidx++) {
+        total += odin3_sim_input_width(sim, pidx);
+    }
+    return total;
+}
+
+/* Sets input bit number `idx` (counting port by port, LSB first) of sim to value. */
+static void set_bit(odin3_sim *sim, uint32_t idx, bool value) {
+    for (uint32_t pidx = 0; pidx < odin3_sim_input_count(sim); pidx++) {
+        uint32_t width = odin3_sim_input_width(sim, pidx);
+        if (idx < width) {
+            (void)odin3_sim_set_input(sim, (odin3_sim_bit){pidx, idx}, value);
+            return;
+        }
+        idx -= width;
+    }
+}
+
+/* Drives both sims with vector `vec` (bit i of vec is input bit i) or, if random, from prng. */
+static void drive(odin3_sim *sim_a, odin3_sim *sim_b, uint64_t vec, odin3_prng *prng) {
+    uint32_t total = input_bits(sim_a);
+    for (uint32_t i = 0; i < total; i++) {
+        bool value = prng != NULL ? odin3_prng_bit(prng) : ((vec >> i) & 1U) != 0;
+        set_bit(sim_a, i, value);
+        set_bit(sim_b, i, value);
+    }
+}
+
+static bool compare_outputs(const odin3_sim *sim_a, const odin3_sim *sim_b, lf_sim_result *res) {
+    for (uint32_t pidx = 0; pidx < odin3_sim_output_count(sim_a); pidx++) {
+        for (uint32_t bit = 0; bit < odin3_sim_output_width(sim_a, pidx); bit++) {
+            bool va = false;
+            bool vb = false;
+            (void)odin3_sim_get_output(sim_a, (odin3_sim_bit){pidx, bit}, &va);
+            (void)odin3_sim_get_output(sim_b, (odin3_sim_bit){pidx, bit}, &vb);
+            if (va != vb) {
+                (void)snprintf(res->why, sizeof res->why,
+                               "output %s[%u] differs after %llu vectors: before %d after %d",
+                               odin3_sim_output_name(sim_a, pidx), bit,
+                               (unsigned long long)res->vectors, va ? 1 : 0, vb ? 1 : 0);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static void run_vectors(odin3_sim *sim_a, odin3_sim *sim_b, const lf_sim_opts *opts,
+                        lf_sim_result *res) {
+    uint32_t total = input_bits(sim_a);
+    odin3_prng prng;
+    odin3_prng_seed(&prng, opts->seed);
+    bool all = total <= opts->exhaustive_bits && total < 64;
+    uint64_t count = all ? (uint64_t)1 << total : opts->random_vectors;
+    for (uint64_t vnum = 0; vnum < count && res->equal; vnum++) {
+        drive(sim_a, sim_b, vnum, all ? NULL : &prng);
+        odin3_sim_cycle(sim_a);
+        odin3_sim_cycle(sim_b);
+        res->vectors++;
+        res->equal = compare_outputs(sim_a, sim_b, res);
+    }
+}
+
+lf_sim_result lf_sim_equal(odin3_design *design_a, odin3_module_id top_a, odin3_design *design_b,
+                           odin3_module_id top_b, const lf_sim_opts *opts) {
+    lf_sim_result res = {false, 0, ""};
+    odin3_sim *sim_a = NULL;
+    odin3_sim *sim_b = NULL;
+    if (odin3_sim_build(design_a, top_a, &sim_a) != ODIN3_OK) {
+        (void)snprintf(res.why, sizeof res.why, "the before design does not build");
+    } else if (odin3_sim_build(design_b, top_b, &sim_b) != ODIN3_OK) {
+        (void)snprintf(res.why, sizeof res.why, "the after design does not build");
+    } else if (!shapes_agree(sim_a, sim_b)) {
+        (void)snprintf(res.why, sizeof res.why, "the two designs' ports differ");
+    } else {
+        res.equal = true;
+        run_vectors(sim_a, sim_b, opts, &res);
+    }
+    odin3_sim_destroy(sim_a);
+    odin3_sim_destroy(sim_b);
+    return res;
+}

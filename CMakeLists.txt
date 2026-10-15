@@ -140,6 +140,13 @@ add_library(odin3_core OBJECT
     src/passes/flatten/copy.c
     src/passes/flatten/names.c
     src/passes/flatten/prov.c
+    src/passes/lower/register.c
+    src/passes/lower/lower.c
+    src/passes/lower/kit.c
+    src/passes/lower/connect.c
+    src/passes/lower/size.c
+    src/passes/lower/dispatch.c
+    src/passes/lower/report.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -803,6 +810,14 @@ if(BUILD_TESTING)
                 "read_blif ${PROJECT_SOURCE_DIR}/tests/flatten/nested.blif; flatten; check")
     set_tests_properties(cli_flatten_nested PROPERTIES LABELS flatten
         PASS_REGULAR_EXPRESSION "flatten: 7 instances expanded \\(0 kept\\) in 1 roots")
+    # 3B Task 1: lower's toolkit and pass; every test_lower_* links the fixture helper.
+    odin3_add_unit_test(test_lower_kit)
+    target_sources(test_lower_kit PRIVATE tests/unit/lower_fixture.c)
+    odin3_add_unit_test(test_lower_pass)
+    target_sources(test_lower_pass PRIVATE tests/unit/lower_fixture.c tests/unit/proc_fixture.c
+                   tests/unit/proc_fixture_core.c)
+    target_compile_definitions(test_lower_pass PRIVATE
+        ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
