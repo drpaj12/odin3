@@ -173,7 +173,7 @@ class PureTest(unittest.TestCase):
             ld.yosys_script(Path("w"), [Path("m/a.v"), Path("m/b.v")]),
             "read_rtlil w/in.il; techmap -map m/a.v; techmap -map m/b.v; techmap; dffunmap; "
             "opt_clean -purge; write_rtlil w/yo.il; "
-            "write_blif -true + vcc -false + gnd -undef + unconn w/yo.blif; opt -fast; "
+            "write_blif -icells -true + vcc -false + gnd -undef + unconn w/yo.blif; opt -fast; "
             "write_rtlil w/yo_opt.il")
 
     def test_tiers(self) -> None:
@@ -200,6 +200,13 @@ class PureTest(unittest.TestCase):
     def test_rel_key(self) -> None:
         self.assertEqual(ld.rel_key(["/a/b/c/d.v"], Path("/a/b")), "c/d.v")
         self.assertEqual(ld.rel_key(["/a/b/c/d.v"], Path("/x")), "d.v")
+
+    def test_unused_constant_generators_are_stripped(self) -> None:
+        blif = (".model m\n.inputs a\n.outputs y z\n.names gnd\n.names vcc\n1\n.names unconn\n"
+                ".subckt $_AND_ A=a B=gnd Y=y\n.names z\n1\n.end\n")
+        stripped = lc.strip_unused_constants(blif)
+        self.assertEqual(stripped, ".model m\n.inputs a\n.outputs y z\n.names gnd\n"
+                         ".subckt $_AND_ A=a B=gnd Y=y\n.names z\n1\n.end\n")
 
     def test_histograms_ignore_constants_and_compare_per_module(self) -> None:
         text = "module \\m\n  cell $_AND_ $a\n  cell $_CONST0_ $z\n  cell $_AND_ $b\nend\n"

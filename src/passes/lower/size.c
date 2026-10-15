@@ -43,3 +43,76 @@ odin3_status lw_check_size(const lw_ctx *lw, const lw_cell *cell, uint64_t estim
               cell->def->name, label, total, cap);
     return ODIN3_ERR_INVALID_ARG;
 }
+
+/* --- per-rule formulas (spec §4): the exact gate counts, which are the upper bounds ----------- */
+
+static uint64_t y_width(const lw_cell *cell) {
+    return cell->port[cell->out_port].n;
+}
+
+uint64_t lw_est_not(const lw_cell *cell) {
+    return y_width(cell);
+}
+
+uint64_t lw_est_and(const lw_cell *cell) {
+    return y_width(cell);
+}
+
+uint64_t lw_est_or(const lw_cell *cell) {
+    return y_width(cell);
+}
+
+uint64_t lw_est_xor(const lw_cell *cell) {
+    return y_width(cell);
+}
+
+uint64_t lw_est_xnor(const lw_cell *cell) {
+    return y_width(cell);
+}
+
+uint64_t lw_est_mux(const lw_cell *cell) {
+    return y_width(cell);
+}
+
+/* A pairing tree over n nets has n - 1 gates (none for one net). */
+static uint64_t tree_gates(uint64_t count) {
+    return count - 1;
+}
+
+uint64_t lw_est_reduce_and(const lw_cell *cell) {
+    return tree_gates(cell->port[0].n);
+}
+
+uint64_t lw_est_reduce_or(const lw_cell *cell) {
+    return tree_gates(cell->port[0].n);
+}
+
+uint64_t lw_est_reduce_xor(const lw_cell *cell) {
+    return tree_gates(cell->port[0].n);
+}
+
+uint64_t lw_est_reduce_xnor(const lw_cell *cell) {
+    return tree_gates(cell->port[0].n) + 1;
+}
+
+uint64_t lw_est_logic_not(const lw_cell *cell) {
+    return tree_gates(cell->port[0].n) + 1;
+}
+
+uint64_t lw_est_logic_and(const lw_cell *cell) {
+    return tree_gates(cell->port[0].n) + tree_gates(cell->port[1].n) + 1;
+}
+
+uint64_t lw_est_logic_or(const lw_cell *cell) {
+    return lw_est_logic_and(cell);
+}
+
+/* $ne: W xors and a tree of W - 1 ors; $eq: one more $_NOT_. */
+uint64_t lw_est_ne(const lw_cell *cell) {
+    uint64_t width = cell->port[0].n > cell->port[1].n ? cell->port[0].n : cell->port[1].n;
+    return width + tree_gates(width);
+}
+
+uint64_t lw_est_eq(const lw_cell *cell) {
+    return lw_est_ne(cell) + 1;
+}

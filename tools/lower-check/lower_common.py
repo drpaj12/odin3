@@ -94,3 +94,49 @@ def read_front(files: Sequence[str], top: str | None, techlib: str | None) -> li
 
 def odin_args(top: str | None, extra: Sequence[str] = ()) -> list[str]:
     return [*(["--top", top] if top else []), *extra]
+
+
+def _blif_blocks(text: str) -> list[list[str]]:
+    """The lines of a BLIF text grouped into directive blocks (a ``.names`` with its cover rows)."""
+    blocks: list[list[str]] = []
+    for line in text.splitlines():
+        if line.startswith(".") or not blocks:
+            blocks.append([line])
+        else:
+            blocks[-1].append(line)
+    return blocks
+
+
+def _blif_uses(blocks: list[list[str]]) -> set[str]:
+    """Every net a block reads: ``.names`` inputs, ``.subckt`` and ``.gate`` pins, latch inputs and
+    the model outputs."""
+    used: set[str] = set()
+    for block in blocks:
+        words = block[0].split()
+        if not words:
+            continue
+        if words[0] == ".names":
+            used.update(words[1:-1])
+        elif words[0] in (".subckt", ".gate"):
+            used.update(w.split("=", 1)[1] for w in words[2:] if "=" in w)
+        elif words[0] == ".latch":
+            used.add(words[1])
+        elif words[0] == ".outputs":
+            used.update(words[1:])
+    return used
+
+
+def strip_unused_constants(blif: str) -> str:
+    """The BLIF without its unused constant generators: Yosys's ``write_blif`` always writes
+    ``.names`` drivers for the false, true and undefined nets, used or not, which Odin III does
+    not; ``netlist-compare`` would call that a difference. A zero-input ``.names`` whose net nothing
+    reads (and that is no output) is dropped."""
+    blocks = _blif_blocks(blif)
+    used = _blif_uses(blocks)
+    kept: list[str] = []
+    for block in blocks:
+        words = block[0].split()
+        if len(words) == 2 and words[0] == ".names" and words[1] not in used:
+            continue
+        kept.extend(block)
+    return "\n".join(kept) + ("\n" if blif.endswith("\n") else "")

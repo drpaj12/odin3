@@ -12,8 +12,27 @@
 #include <string.h>
 
 /* The rules, sorted by type name; the last entry is the sentinel. */
+#define LW_RULE(type, name)                                                                        \
+    { type, lw_build_##name, lw_est_##name }
+
 static const lw_rule k_rules[] = {
-    {NULL, NULL, NULL}, /* the first rules arrive with plan Task 3 */
+    LW_RULE("$and", and),
+    LW_RULE("$eq", eq),
+    LW_RULE("$logic_and", logic_and),
+    LW_RULE("$logic_not", logic_not),
+    LW_RULE("$logic_or", logic_or),
+    LW_RULE("$mux", mux),
+    LW_RULE("$ne", ne),
+    LW_RULE("$not", not ),
+    LW_RULE("$or", or),
+    LW_RULE("$reduce_and", reduce_and),
+    LW_RULE("$reduce_bool", reduce_or),
+    LW_RULE("$reduce_or", reduce_or),
+    LW_RULE("$reduce_xnor", reduce_xnor),
+    LW_RULE("$reduce_xor", reduce_xor),
+    LW_RULE("$xnor", xnor),
+    LW_RULE("$xor", xor),
+    {NULL, NULL, NULL},
 };
 
 uint32_t lw_rule_count(void) {
@@ -42,14 +61,10 @@ static const char *const k_no_rule[] = {"$proc", "$tribuf", "$pow", "$memrd", "$
 
 /* Word types whose rule a later task adds (plan Tasks 4 to 8). */
 static const char *const k_pending[] = {
-    "$and",         "$eq",         "$logic_and", "$logic_not",  "$logic_or",    "$mux",
-    "$ne",          "$not",        "$or",        "$reduce_and", "$reduce_bool", "$reduce_or",
-    "$reduce_xnor", "$reduce_xor", "$xnor",      "$xor",        "$pmux",        "$shl",
-    "$shr",         "$sshr",       "$shiftx",    "$add",        "$sub",         "$neg",
-    "$lt",          "$le",         "$gt",        "$ge",         "$mul",         "$div",
-    "$mod",         "$dff",        "$dffe",      "$sdff",       "$sdffe",       "$sdffce",
-    "$adff",        "$adffe",      "$aldff",     "$aldffe",     "$dffsr",       "$dffsre",
-    "$dlatch",      "$adlatch",    "$dlatchsr",  "$sr",         "$mem",
+    "$pmux",  "$shl",    "$shr",    "$sshr",    "$shiftx",   "$add",   "$sub",   "$neg",
+    "$lt",    "$le",     "$gt",     "$ge",      "$mul",      "$div",   "$mod",   "$dff",
+    "$dffe",  "$sdff",   "$sdffe",  "$sdffce",  "$adff",     "$adffe", "$aldff", "$aldffe",
+    "$dffsr", "$dffsre", "$dlatch", "$adlatch", "$dlatchsr", "$sr",    "$mem",
 };
 
 static bool listed(const char *const *names, size_t count, const char *type_name) {

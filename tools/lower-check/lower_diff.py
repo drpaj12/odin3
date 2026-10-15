@@ -13,8 +13,11 @@ Per design (the FILEs together; with ``--each``, every FILE is its own design):
    write_rtlil lo.il; write_blif lo.blif; opt -fast; write_rtlil lo_opt.il`` (``pre`` defaults to
    ``proc; opt``, spec 14.2 step 1; a ``.blif`` FILE is ``read_blif``);
 2. Yosys 0.55, on the same ``in.il``: ``read_rtlil in.il; [techmap -map M]...; techmap; dffunmap;
-   opt_clean -purge; write_rtlil yo.il; write_blif -true + vcc -false + gnd -undef + unconn yo.blif;
-   opt -fast; write_rtlil yo_opt.il`` (``M`` are the declared-reference maps of the family, §6.3);
+   opt_clean -purge; write_rtlil yo.il; write_blif -icells -true + vcc -false + gnd -undef
+   + unconn yo.blif; opt -fast; write_rtlil yo_opt.il`` (``M`` are the declared-reference maps
+   of the family, §6.3);
+   Both BLIFs are compared without their unused constant generators (Yosys writes the false, true
+   and undefined drivers always; ``lo.norm.blif``, ``yo.norm.blif``);
 3. the verdict of the **tier** of the family (``--tier`` overrides it):
 
    - ``S`` (gate for gate; the ``simplemap`` family, the synchronous flip-flops, ``$dlatch``): the
@@ -61,7 +64,7 @@ NETLIST_COMPARE = HERE.parent / "netlist-compare" / "netlist-compare"
 EQUIV_CHECK = HERE.parent / "equiv-check" / "equiv-check"
 STEPS = ("histogram", "identity", "equiv")
 DEFAULT_PRE = ("proc", "opt")
-YOSYS_BLIF = "write_blif -true + vcc -false + gnd -undef + unconn"
+YOSYS_BLIF = "write_blif -icells -true + vcc -false + gnd -undef + unconn"
 EQUIV_OK, EQUIV_DIFFERENT, EQUIV_ERROR, EQUIV_X, EQUIV_UNPROVEN, EQUIV_HARD = 0, 1, 2, 3, 4, 5
 ASYNC_TYPES = frozenset({"$adff", "$adffe", "$aldff", "$aldffe", "$dffsr", "$dffsre",
                          "$adlatch", "$dlatchsr", "$sr", "$mem"})
@@ -220,7 +223,15 @@ class Diff:
         self.judge(result, run_dir)
         return result
 
+    def normalise(self, run_dir: Path) -> None:
+        """lo.blif and yo.blif without unused constant generators, as lo.norm.blif/yo.norm.blif."""
+        for name in ("lo", "yo"):
+            text = (run_dir / f"{name}.blif").read_text(encoding="utf-8")
+            (run_dir / f"{name}.norm.blif").write_text(lc.strip_unused_constants(text),
+                                                       encoding="utf-8")
+
     def judge(self, result: Result, run_dir: Path) -> None:
+        self.normalise(run_dir)
         tier = result.tier
         if tier in ("S", "T"):
             raw = tier == "S"
@@ -236,8 +247,8 @@ class Diff:
 
     def identity(self, result: Result, run_dir: Path) -> None:
         done = self.child("netlist-compare", [self.args.netlist_compare, "--quiet",
-                                              "--implicit-models", str(run_dir / "lo.blif"),
-                                              str(run_dir / "yo.blif")], run_dir)
+                                              "--implicit-models", str(run_dir / "lo.norm.blif"),
+                                              str(run_dir / "yo.norm.blif")], run_dir)
         if done.returncode == 1:
             result.differences["identity"] = "netlist-compare: not identical"
         elif done.returncode != 0:
@@ -245,8 +256,8 @@ class Diff:
                                f"{lc.why((done.stdout or '') + (done.stderr or ''))}")
 
     def equiv(self, result: Result, run_dir: Path) -> None:
-        done = self.child("equiv-check", [self.args.equiv_check, str(run_dir / "lo.blif"),
-                                          str(run_dir / "yo.blif")], run_dir)
+        done = self.child("equiv-check", [self.args.equiv_check, str(run_dir / "lo.norm.blif"),
+                                          str(run_dir / "yo.norm.blif")], run_dir)
         out = (done.stdout or "") + (done.stderr or "")
         if done.returncode == EQUIV_OK:
             return

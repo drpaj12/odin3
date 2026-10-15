@@ -281,6 +281,28 @@ odin3_status lw_check_size(const lw_ctx *lw, const lw_cell *cell, uint64_t estim
 uint64_t lw_sat_add(uint64_t lhs, uint64_t rhs);
 uint64_t lw_sat_mul(uint64_t lhs, uint64_t rhs);
 
+/* --- the rules (bitwise.c; later tasks add the others) --------------------------------------- */
+
+#define LW_DECLARE_BUILDER(name)                                                                   \
+    odin3_status lw_build_##name(lw_ctx *lw, const lw_cell *cell, lw_bits *out);                   \
+    uint64_t lw_est_##name(const lw_cell *cell)
+
+LW_DECLARE_BUILDER(not );
+LW_DECLARE_BUILDER(and);
+LW_DECLARE_BUILDER(or);
+LW_DECLARE_BUILDER(xor);
+LW_DECLARE_BUILDER(xnor);
+LW_DECLARE_BUILDER(mux);
+LW_DECLARE_BUILDER(reduce_and);
+LW_DECLARE_BUILDER(reduce_or);
+LW_DECLARE_BUILDER(reduce_xor);
+LW_DECLARE_BUILDER(reduce_xnor);
+LW_DECLARE_BUILDER(logic_not);
+LW_DECLARE_BUILDER(logic_and);
+LW_DECLARE_BUILDER(logic_or);
+LW_DECLARE_BUILDER(eq);
+LW_DECLARE_BUILDER(ne);
+
 /* --- dispatch (dispatch.c) ---------------------------------------------------------------- */
 
 typedef odin3_status (*lw_build_fn)(lw_ctx *lw, const lw_cell *cell, lw_bits *out);

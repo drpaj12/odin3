@@ -1,0 +1,6 @@
+.model m
+.inputs a b
+.outputs y
+.subckt $_XOR_ A=a B=b Y=$n4
+.subckt $_NOT_ A=$n4 Y=y
+.end

@@ -1,0 +1,6 @@
+.model m
+.inputs a[0] a[1]
+.outputs y[0] y[1]
+.subckt $_NOT_ A=a[0] Y=y[0]
+.subckt $_NOT_ A=a[1] Y=y[1]
+.end
