@@ -480,6 +480,14 @@ class MainTest(unittest.TestCase):
                        "1- 1\n.end\n")
         self.assertFalse(oe.uses_x(plain))
         self.assertTrue(oe.uses_x(xed))
+        longer = work / "longer.blif"  # a net called unconn_q or a.unconn is no x
+        longer.write_text(".model t\n.inputs a\n.outputs y\n.names unconn\n"
+                          ".names a.unconn unconn_q a y\n11- 1\n.end\n")
+        self.assertFalse(oe.uses_x(longer))
+        subckt = work / "subckt.blif"
+        subckt.write_text(".model t\n.inputs a\n.outputs y\n.names unconn\n"
+                          ".subckt m i=unconn o=y\n.end\n")
+        self.assertTrue(oe.uses_x(subckt))
         self.assertFalse(oe.uses_x(work / "missing.blif"))
         done = subprocess.CompletedProcess([], 1, "", "equiv-check: NOT equivalent\n")
         with mock.patch.object(oe, "capped", return_value=done):

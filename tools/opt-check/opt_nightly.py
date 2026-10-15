@@ -5,7 +5,7 @@ Usage::
 
     opt-nightly --odin3 O --yosys Y [--set vtr31|all64] [--leg both|equiv|diff] [--xl] [--keep DIR]
                 [--expect-fail F]... [--diff-expect F] [--root R] [--tops F] [--techlib L]
-                [--mem-cap C] [--cap-for SUFFIX=C]... [--limit N] [--timeout S]
+                [--mem-cap C] [--cap-for SUFFIX=C]... [--limit N] [--only NAME]... [--timeout S]
 
 On each file of the set, smallest first, it runs ``opt-equiv`` (the refinement of every sub-pass
 call of the Phase 2 script) and ``opt-diff`` once for each of the five scripts of spec 20.3 (the
@@ -31,8 +31,10 @@ and a summary line.
   skipped, with ``--xl`` only such files run, each must pass, and an empty selection exits 2.
 - ``--diff-expect F`` (default ``tests/opt/diff_expect.txt``) goes to ``opt-diff --expect``.
 - ``--mem-cap C`` per child (default 3G); ``--cap-for koios/lenet.v=5G`` raises one file's cap.
-- ``--limit N`` runs only the first N files of the selection (a smoke run). ``--keep DIR`` keeps
-  every tool's work directory under DIR.
+- ``--limit N`` runs only the first N files of the selection (a smoke run). ``--only NAME``
+  (repeatable) runs only the files of that name or relative path (``--only ch_intrinsics.v``):
+  the re-run of a few designs after a fix, in the set's size order; a NAME that matches no file of
+  the set exits 2. ``--keep DIR`` keeps every tool's work directory under DIR.
 
 Exit codes: 0 pass; 1 an unexpected result; 2 usage or input error; 77 skipped (cannot cap).
 """
@@ -117,12 +119,19 @@ def collect_set(root: Path, which: str) -> list[elab_sweep.Item]:
 
 
 def select(items: Sequence[elab_sweep.Item], expect: dict[str, elab_sweep.Expect], xl: bool,
-           limit: int | None = None) -> tuple[list[elab_sweep.Item], list[elab_sweep.Item]]:
-    """(to run, skipped): ``elab_sweep.split_xl``; an empty ``--xl`` selection is a usage error."""
+           limit: int | None = None, only: Sequence[str] = ()
+           ) -> tuple[list[elab_sweep.Item], list[elab_sweep.Item]]:
+    """(to run, skipped): ``elab_sweep.split_xl``; an empty ``--xl`` selection is a usage error,
+    as is an ``--only`` name that matches no file."""
     run, skipped = elab_sweep.split_xl(items, expect, xl)
     if xl and not run:
         raise UsageError("--xl selects no file: no collected file is listed `xl` in the "
                          "expect-fail files")
+    for name in only:
+        if not any(i.rel == name or i.path.name == name for i in items):
+            raise UsageError(f"--only {name}: no such file in the set")
+    if only:
+        run = [i for i in run if i.rel in only or i.path.name in only]
     if limit is not None:
         run = run[:limit]
     return run, skipped
@@ -280,7 +289,7 @@ def execute(args: argparse.Namespace, runner: Runner = run_unit,
     root = root.resolve()
     expect = elab_sweep.merge_expect(args.expect_fail or list(DEFAULT_EXPECT))
     items = collect_set(root, args.set)
-    run, _ = select(items, expect, args.xl, args.limit)
+    run, _ = select(items, expect, args.xl, args.limit, getattr(args, "only", None) or ())
     if not run:
         raise UsageError("no file selected (an empty set, --limit 0, or --xl with no xl file)")
     cfg = Config(args.odin3, args.yosys, root, args.mem_cap, parse_caps(args.cap_for),
@@ -319,6 +328,8 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--min-changed-total", type=int, default=0, metavar="N",
                     help="fail (exit 1) unless opt-equiv saw at least N changing calls in total")
     ap.add_argument("--limit", type=int, metavar="N", help="only the first N files (a smoke run)")
+    ap.add_argument("--only", action="append", default=[], metavar="NAME",
+                    help="only this file (name or relative path); repeatable")
     ap.add_argument("--timeout", type=float, default=TIMEOUT_S, metavar="S",
                     help="per tool run (default 3600)")
     return ap.parse_args(argv)

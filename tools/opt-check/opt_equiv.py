@@ -311,7 +311,7 @@ def cec_lowering_script(il: Path, blif: Path) -> str:
     return "; ".join([f"read_rtlil {il}", *steps])
 
 
-X_NET = b"unconn"
+X_NET = re.compile(rb"(?<![^\s=])unconn(?![^\s=])")  # the whole token, never a longer name
 X_NET_DEFINITION = b".names unconn\n"
 
 
@@ -324,7 +324,7 @@ def uses_x(blif: Path) -> bool:
         data = blif.read_bytes()
     except OSError:
         return False
-    return data.count(X_NET) > data.count(X_NET_DEFINITION)
+    return len(X_NET.findall(data)) > data.count(X_NET_DEFINITION)
 
 
 def cec_blifs(a: Path, b: Path, cap: int, work: Path) -> tuple[str, str]:

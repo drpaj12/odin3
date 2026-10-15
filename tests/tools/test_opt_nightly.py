@@ -214,6 +214,15 @@ class RunTest(Base):
         self.assertEqual([c[0] for c in runs.calls[::6]], ["b.v", "c.v", "a.v"])
         self.assertIn("3 files (1 skipped", lines[-1])
 
+    def test_only_runs_the_named_files_in_size_order_and_an_unknown_name_is_an_error(self) -> None:
+        runs = Runs()
+        code, lines = self.execute(runs, only=["a.v", "b.v"])
+        self.assertEqual(code, 0)
+        self.assertEqual([c[0] for c in runs.calls[::6]], ["b.v", "a.v"])
+        self.assertIn("2 files (2 skipped", lines[-1])
+        with self.assertRaises(nightly.UsageError):
+            self.execute(Runs(), only=["nope.v"])
+
     def test_limit_0_selects_nothing_and_is_a_usage_error_not_a_pass(self) -> None:
         with self.assertRaises(nightly.UsageError):
             self.execute(Runs(), limit=0)
