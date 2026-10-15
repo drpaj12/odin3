@@ -1,0 +1,11 @@
+# keep_net.blif - k = a & b feeds y = k & c. The test gives the net k a keep attribute through the
+# IR API (BLIF cannot spell a net attribute): k then stays a net and an output of the region, and
+# soft readers still read it (3D spec 5.2; plan Task 19, test_abc_pass).
+.model keep_net
+.inputs a b c
+.outputs y
+.names a b k
+11 1
+.names k c y
+11 1
+.end

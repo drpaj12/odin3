@@ -1,0 +1,6 @@
+# tests/abc/equiv_expect_fail.txt - designs abc-equiv expects not to come out `equivalent` (3D plan
+# Task 19, point (j)). One `<path> <reason>` per line; the reason `views` passes only when odin3
+# fails with the netlist-view error. The unit test test_abc_pass skips these designs.
+tests/golden/blif/pow.parmys.blif views
+# stereovision3 has two clock domains: equiv-check cannot prove it (multiclock).
+stereovision3.parmys.blif multiclock

@@ -7,6 +7,7 @@
 
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "passes/abc/run.h"
 #include "passes/abc/splice.h"
@@ -46,6 +47,8 @@ typedef struct splice {
     odin3_vec objnet;   /* uint32_t per result object: the net it drives */
     odin3_vec objprov;  /* uint32_t per result object: the record of the new object */
     odin3_vec objnode;  /* uint32_t per result object: the LUT node that implements it, or 0 */
+    odin3_prov_id fallback; /* the coarse record, made when a new object has no record */
+    bool fallback_made;
     odin3_vec anchors;  /* odin3_abc_anchor */
     odin3_vec carried;  /* uint32_t per result object: the net that carries it so far */
     odin3_vec ffnode;   /* uint32_t per result register: the new flip-flop */

@@ -1,0 +1,13 @@
+# loop.blif - a combinational loop through two gates (n1 = a & z, z = n1 | b): ABC sees it cut at
+# one net, and the loop survives the splice (3D spec 5.2, Loops; plan Task 19, test_abc_pass).
+.model loop
+.inputs a b
+.outputs y
+.names a z n1
+11 1
+.names n1 b z
+1- 1
+-1 1
+.names z y
+1 1
+.end

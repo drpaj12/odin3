@@ -1,0 +1,10 @@
+# derived_clock.blif - clk2 = clk & en clocks a second register set: the clk2 net and its domain
+# must survive the pass (3D plan Task 19, Review Focus 3).
+.model derived_clock
+.inputs clk en a b
+.outputs q1 q2
+.names clk en clk2
+11 1
+.latch a q1 re clk 0
+.latch b q2 re clk2 0
+.end

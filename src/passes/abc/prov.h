@@ -7,6 +7,7 @@
 
 #include "ir/design.h"
 #include "ir/ids.h"
+#include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "passes/abc/result.h"
 #include "passes/abc/run.h"
@@ -57,6 +58,14 @@ odin3_status odin3_abc_anchors(odin3_abc_run *run, const odin3_abc_result *res, 
  */
 odin3_status odin3_abc_records(odin3_abc_run *run, const odin3_abc_result *res,
                                const odin3_vec *anchors, odin3_vec *obj_prov);
+
+/*
+ * One DERIVED record, in a new operation of the run, whose parents are the records of every old
+ * soft cell and register of the run's region in node-ID order (the over-budget form; also the
+ * record of a new object that no anchor reaches). *out stays 0 when no old cell has a record.
+ * NO_MEMORY.
+ */
+odin3_status odin3_abc_coarse_record(odin3_abc_run *run, odin3_prov_id *out);
 
 /*
  * The longest path of $lut cells in the top module between its CIs and COs (ports, flip-flops and

@@ -39,8 +39,20 @@ static odin3_status make_records(splice *sp) {
 
 /* --- nets ---------------------------------------------------------------------------------- */
 
-static odin3_prov_id obj_prov(const splice *sp, uint32_t obj) {
-    return (odin3_prov_id){sp_u32(&sp->objprov, obj)};
+/* The record of a new object: its anchor's; an object no anchor reaches (a buffer of an input, a
+ * constant's buffer, restore's NOT of a constant) carries the run's coarse record, made on first
+ * use. */
+static odin3_status obj_prov(splice *sp, uint32_t obj, odin3_prov_id *out) {
+    uint32_t own = sp_u32(&sp->objprov, obj);
+    if (own == 0 && !sp->fallback_made) {
+        odin3_status st = odin3_abc_coarse_record(sp->run, &sp->fallback);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+        sp->fallback_made = true;
+    }
+    *out = own != 0 ? (odin3_prov_id){own} : sp->fallback;
+    return ODIN3_OK;
 }
 
 /* True when a CO or register input is driven by constant 0 or 1. */
@@ -55,7 +67,9 @@ static bool uses_constant(const odin3_abc_result *res, uint32_t value) {
 
 static odin3_status new_net(splice *sp, uint32_t obj, uint32_t *out) {
     odin3_net_id net = {0};
-    odin3_status st = odin3_net_create(sp->mod, 0, obj_prov(sp, obj), &net);
+    odin3_prov_id prov = {0};
+    odin3_status st = obj_prov(sp, obj, &prov);
+    st = st == ODIN3_OK ? odin3_net_create(sp->mod, 0, prov, &net) : st;
     st = st == ODIN3_OK ? sp_note(sp, SP_NET, net.v) : st;
     if (st != ODIN3_OK && odin3_net_live(sp->mod, net)) {
         (void)odin3_net_delete(sp->mod, net);
@@ -127,9 +141,10 @@ static odin3_status create_luts(splice *sp) {
                       (const uint64_t *)res->truth.data + sp_u32(&res->truth_start, lut),
                       ins,
                       {sp_u32(&sp->objnet, obj)},
-                      obj_prov(sp, obj)};
+                      {0}};
         odin3_node_id node = {0};
-        odin3_status st = make_lut(sp, &rq, &node);
+        odin3_status st = obj_prov(sp, obj, &rq.prov);
+        st = st == ODIN3_OK ? make_lut(sp, &rq, &node) : st;
         if (st != ODIN3_OK) {
             return st;
         }
@@ -167,9 +182,10 @@ static odin3_status create_ff(splice *sp, uint32_t reg) {
     ports[n_ports - 2] = (odin3_netvec){&data, 1};
     ports[n_ports - 1] = (odin3_netvec){&qout, 1};
     odin3_value init = odin3_value_int(new_init(odin3_node_param(sp->mod, rep, 0)));
-    odin3_node_spec spec = {type, 0, obj_prov(sp, obj), &init, 1};
+    odin3_node_spec spec = {type, 0, {0}, &init, 1};
     odin3_node_id node = {0};
-    odin3_status st = odin3_node_create_connected(sp->mod, &spec, ports, &node);
+    odin3_status st = obj_prov(sp, obj, &spec.prov);
+    st = st == ODIN3_OK ? odin3_node_create_connected(sp->mod, &spec, ports, &node) : st;
     st = st == ODIN3_OK ? sp_note(sp, SP_NODE, node.v) : st;
     st = st == ODIN3_OK ? sp_push(&sp->ffnode, node.v) : st;
     if (st != ODIN3_OK && odin3_node_live(sp->mod, node)) {
@@ -231,9 +247,10 @@ static bool co_special(const splice *sp, odin3_net_id net) {
 static odin3_status make_buffer(splice *sp, uint32_t obj, sp_step *step) {
     odin3_net_id in = {sp_u32(&sp->objnet, obj)};
     static const uint64_t k_identity = IDENTITY_TABLE;
-    lut_req rq = {1, &k_identity, &in, {0}, obj_prov(sp, obj)};
+    lut_req rq = {1, &k_identity, &in, {0}, {0}};
     odin3_node_id node = {0};
-    odin3_status st = make_lut(sp, &rq, &node);
+    odin3_status st = obj_prov(sp, obj, &rq.prov);
+    st = st == ODIN3_OK ? make_lut(sp, &rq, &node) : st;
     step->act = SP_BUFFER;
     step->buffer = node.v;
     return st;

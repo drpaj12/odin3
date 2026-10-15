@@ -348,6 +348,19 @@ static uint64_t edge_budget(const odin3_abc_run *run, const odin3_abc_result *re
     return ODIN3_ABC_PROV_EDGES_PER_OBJ * (old_cells + new_objs) + ODIN3_ABC_PROV_EDGES_BASE;
 }
 
+odin3_status odin3_abc_coarse_record(odin3_abc_run *run, odin3_prov_id *out) {
+    odin3_vec cells;
+    uint32_t rec = 0;
+    odin3_status st = all_old_cells(run, &cells);
+    if (st == ODIN3_OK) {
+        odin3_prov_begin_op(run->ctx);
+        st = derive_from_nodes(run, cells.data, cells.len, &rec);
+    }
+    odin3_vec_free(&cells);
+    *out = (odin3_prov_id){rec};
+    return st;
+}
+
 /* The over-budget form: one record for every new object. */
 static odin3_status coarse_records(odin3_abc_run *run, const odin3_abc_result *res,
                                    uint64_t edges, odin3_vec *obj_prov) {
@@ -357,17 +370,11 @@ static odin3_status coarse_records(odin3_abc_run *run, const odin3_abc_result *r
               "abc: module '%s', %s: provenance needs %" PRIu64 " parent edges (budget %" PRIu64
               "); the run's LUTs share one record",
               module_text(run), domain, edges, edge_budget(run, res));
-    odin3_vec cells;
-    odin3_status st = all_old_cells(run, &cells);
-    uint32_t rec = 0;
-    if (st == ODIN3_OK) {
-        odin3_prov_begin_op(run->ctx);
-        st = derive_from_nodes(run, cells.data, cells.len, &rec);
-    }
-    odin3_vec_free(&cells);
+    odin3_prov_id rec = {0};
+    odin3_status st = odin3_abc_coarse_record(run, &rec);
     uint32_t first_new = FIRST_OBJ + res->n_cis;
     for (uint32_t obj = 0; st == ODIN3_OK && obj < obj_total(res); obj++) {
-        st = push_u32(obj_prov, obj >= first_new ? rec : 0);
+        st = push_u32(obj_prov, obj >= first_new ? rec.v : 0);
     }
     return st;
 }

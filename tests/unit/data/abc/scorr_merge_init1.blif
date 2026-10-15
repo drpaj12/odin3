@@ -1,0 +1,8 @@
+# scorr_merge_init1.blif - two INIT 1 registers on the same D: scorr merges them into one, which
+# must still start at 1 (3D plan Task 19, test_abc_init1).
+.model scorr_merge_init1
+.inputs clk x
+.outputs q1 q2
+.latch x q1 re clk 1
+.latch x q2 re clk 1
+.end

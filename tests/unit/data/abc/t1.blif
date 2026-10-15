@@ -1,0 +1,8 @@
+# t1.blif - the fixture of test_abc_xblif: n = a & b feeding a register q (clock clk) that drives y.
+.model t1
+.inputs a b clk
+.outputs y
+.names a b n
+11 1
+.latch n y re clk 0
+.end

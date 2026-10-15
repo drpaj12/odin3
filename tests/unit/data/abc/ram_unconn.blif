@@ -1,0 +1,14 @@
+# ram_unconn.blif - a single_port_ram whose address bits 5..14 stay on Parmys's undefined net
+# unconn, whose bit 3 is read through a buffer of unconn (which VTR's ABC turns into gnd), and
+# whose bit 4 is on xaddr, a net the test drives with a $_CONSTX_ generator (hand-built; BLIF
+# cannot spell x). gnd is the module's constant 0. Needs lib/vtr.o3lib (3D plan Task 19,
+# test_abc_unconn, Review Focus 1).
+.model ram_unconn
+.inputs clk we a0 a1 a2 d0
+.outputs o
+.names gnd
+.names unconn
+.names unconn b3
+1 1
+.subckt single_port_ram clk=clk we=we data[0]=d0 addr[0]=a0 addr[1]=a1 addr[2]=a2 addr[3]=b3 addr[4]=xaddr addr[5]=unconn addr[6]=unconn addr[7]=unconn addr[8]=unconn addr[9]=unconn addr[10]=unconn addr[11]=unconn addr[12]=unconn addr[13]=unconn addr[14]=unconn out[0]=o
+.end

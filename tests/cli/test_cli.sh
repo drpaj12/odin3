@@ -492,6 +492,163 @@ BLIF
     "$compare" "$work/fwd1.out.blif" "$work/rev.out.blif" ||
         fail "netlist-compare: reordered input differs"
     ;;
+abc)
+    # cli_abc: the abc pass from the command line (3D Task 19): exit 0, the first INFO line, and
+    # the mapped cells are $lut.
+    cat >"$work/t.blif" <<'BLIF'
+.model top
+.inputs a b c
+.outputs y
+.names a b n
+11 1
+.names n c y
+1- 1
+-1 1
+.end
+BLIF
+    "$odin3" -p "read_blif $work/t.blif; abc --lut 4; stats" >"$work/out" 2>"$work/err" ||
+        fail "odin3 abc failed"
+    grep -qF '$lut' "$work/out" || fail "stats lists no \$lut"
+    first=$(grep -m1 '^info: abc: ' "$work/err" || true)
+    re='^info: abc: script builtin:lib/abc/vtr\.abc \(embedded\), sha256 [0-9a-f]{16}.*, K=4, '
+    re+='exchange blif, ABC [0-9a-f]{12}$'
+    [[ $first =~ $re ]] || fail "the first INFO line is '$first'"
+    ;;
+abc_bad_script)
+    # cli_abc_bad_script: a file command in a script is refused before ABC starts, at its line.
+    cat >"$work/t.blif" <<'BLIF'
+.model top
+.inputs a b
+.outputs y
+.names a b y
+11 1
+.end
+BLIF
+    printf 'write_blif x.blif\n' >"$work/bad.abc"
+    cd "$work"
+    set +e
+    "$odin3" -p "read_blif t.blif; abc --script bad.abc --lut 4" >"$work/out" 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 1 ]] || fail "exit code $rc, expected 1"
+    grep -qF "abc: bad.abc:1: abc command 'write_blif' is not allowed: abc scripts cannot read or write files" \
+        "$work/err" || fail "stderr lacks the located error"
+    [[ ! -e "$work/x.blif" ]] || fail "x.blif was written"
+    ;;
+abc_script_precedence)
+    # cli_abc_script_precedence (3D point (e)): for every combination of abc --script, --abc-script
+    # and a project abc_script, the logged hash prefix is that of the script AB-20 picks.
+    mkdir "$work/p"
+    cd "$work/p"
+    cat >t.blif <<'BLIF'
+.model top
+.inputs a b c
+.outputs y
+.names a b n
+11 1
+.names n c y
+1- 1
+-1 1
+.end
+BLIF
+    for i in 1 2 3 4; do
+        printf 'strash\nif -K {K}\n# script %s\n' "$i" >"s$i.abc"
+    done
+    printf 'top top\nabc_script s3.abc\n' >p.o3proj
+    for pass_opt in none s1; do
+        for cli_opt in none s2; do
+            for proj_opt in none s3; do
+                [[ $pass_opt == none && $cli_opt == none && $proj_opt == none ]] && continue
+                args=(--lut 4)
+                opts=()
+                want=s3
+                [[ $proj_opt == s3 ]] && opts+=(--project p.o3proj)
+                if [[ $cli_opt == s2 ]]; then
+                    opts+=(--abc-script s2.abc)
+                    want=s2
+                fi
+                if [[ $pass_opt == s1 ]]; then
+                    args+=(--script s1.abc)
+                    want=s1
+                fi
+                "$odin3" "${opts[@]}" -p "read_blif t.blif; abc ${args[*]}" >"$work/out" \
+                    2>"$work/err" || fail "odin3 failed for $pass_opt/$cli_opt/$proj_opt"
+                prefix=$(sha256sum "$want.abc" | cut -c1-16)
+                grep -qE "^info: abc: script .*, sha256 $prefix" "$work/err" ||
+                    fail "$pass_opt/$cli_opt/$proj_opt: the hash prefix is not $want's ($prefix)"
+                if [[ $cli_opt == s2 && $proj_opt == s3 ]]; then
+                    grep -qF "info: p.o3proj: --abc-script s2.abc replaces the project abc_script s3.abc" \
+                        "$work/err" || fail "no replacement info line"
+                fi
+            done
+        done
+    done
+    ;;
+abc_script_crash)
+    # cli_abc_script_crash (3D-5a hand-over): a user script runs in the subprocess; a program that
+    # exits 3 gives one ENGINE error, no output, and odin3 exits 1, not by a signal.
+    cat >"$work/t.blif" <<'BLIF'
+.model top
+.inputs a b
+.outputs y
+.names a b y
+11 1
+.end
+BLIF
+    printf 'strash\nif -K {K}\n' >"$work/crash.abc"
+    commit=$("$odin3" --version | sed -n 's/^linked ABC \([0-9a-f]\{40\}\) .*/\1/p')
+    [[ -n $commit ]] || fail "no linked ABC commit in --version"
+    cat >"$work/odin3-abc-crash" <<SH
+#!/bin/sh
+if [ "\$1" = "-c" ]; then
+    echo "odin3-abc: commit $commit"
+    exit 0
+fi
+exit 3
+SH
+    chmod +x "$work/odin3-abc-crash"
+    set +e
+    ODIN3_ABC_EXE="$work/odin3-abc-crash" "$odin3" -p \
+        "read_blif $work/t.blif; write_blif $work/before.blif; abc --script $work/crash.abc --lut 4; write_blif $work/after.blif" \
+        >"$work/out" 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 1 ]] || fail "exit code $rc, expected 1 (not a signal)"
+    [[ $(grep -c '^error: abc: ' "$work/err") -eq 1 ]] || fail "not exactly one abc error line"
+    grep -qF "abc: ABC subprocess exited with status 3 during run 0" "$work/err" ||
+        fail "stderr lacks the subprocess text"
+    [[ -f "$work/before.blif" && ! -e "$work/after.blif" ]] || fail "the files written are wrong"
+    ;;
+abc_unconn_ch_intrinsics)
+    # abc_unconn_ch_intrinsics (3D Review Focus 1): every hard-block pin on unconn before the pass
+    # is still on unconn after it, in write_blif --vtr's text. Skipped (77) without the golden or
+    # without write_blif --vtr.
+    golden=$HOME/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/vtr/ch_intrinsics/ch_intrinsics.parmys.blif
+    [[ -f $golden ]] || { echo "test_cli $case_name: SKIP: no $golden"; exit 77; }
+    repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+    if ! "$odin3" -p "read_blif $fixture; write_blif --vtr $work/probe.blif" >/dev/null 2>&1; then
+        echo "test_cli $case_name: SKIP: write_blif --vtr is not available"
+        exit 77
+    fi
+    "$odin3" -p "read_techlib $repo/lib/vtr.o3lib; read_blif $golden; abc --lut 6; write_blif --vtr $work/W.blif" \
+        >"$work/out" 2>"$work/err" || fail "odin3 abc on ch_intrinsics failed"
+    python3 -I - "$repo" "$work/W.blif" "$golden" <<'PY' || fail "the unconn pins changed"
+import sys
+from pathlib import Path
+repo = Path(sys.argv[1])
+for sub in ("tools/blif", "tools/vtr-qor", "tools/abc-check"):
+    sys.path.insert(0, str(repo / sub))
+import abc_equiv
+after = abc_equiv.unconn_pins(Path(sys.argv[2]))
+before = abc_equiv.unconn_pins(Path(sys.argv[3]))
+need = {("single_port_ram", n, f"addr[{b}]") for n in {k[1] for k in before if k[0] == "single_port_ram"}
+        for b in range(5, 15)}
+if not need <= after:
+    sys.exit(f"single_port_ram address pins left unconn: {sorted(need - after)[:5]}")
+if after != before:
+    sys.exit(f"unconn sets differ: lost {sorted(before - after)[:5]}, gained {sorted(after - before)[:5]}")
+PY
+    ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2
     exit 2

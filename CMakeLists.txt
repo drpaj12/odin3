@@ -616,6 +616,11 @@ if(ODIN3_FUZZ)
     target_include_directories(fuzz_abc_script PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(fuzz_abc_script PRIVATE odin3_core odin3_flags)
     target_link_options(fuzz_abc_script PRIVATE -fsanitize=fuzzer)
+    # tests/fuzz/fuzz_abc_splice.c: the abc pass's splice, on the fake engine (3D §13.7, Task 19).
+    add_executable(fuzz_abc_splice tests/fuzz/fuzz_abc_splice.c tests/unit/abc_fake_engine.c)
+    target_include_directories(fuzz_abc_splice PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_abc_splice PRIVATE odin3_core odin3_flags)
+    target_link_options(fuzz_abc_splice PRIVATE -fsanitize=fuzzer)
     # tests/fuzz/fuzz_opt.c: the opt family's crash fuzzer (2F §20.4, plan Task 18). It builds
     # word-cell designs through the unit tests' RTLIL reader (proc_build.c).
     add_executable(fuzz_opt tests/fuzz/fuzz_opt.c tests/unit/proc_build.c)
@@ -857,6 +862,28 @@ if(BUILD_TESTING)
         endif()
     endforeach()
     target_sources(test_abc_args PRIVATE tests/unit/proc_fixture.c tests/unit/proc_fixture_core.c)
+    # 3D Task 19: the splice's end-to-end checks. test_abc_unconn and test_abc_pass run the fake
+    # engine in process; with ABC, test_abc_pass and test_abc_init1 also drive the odin3 binary
+    # (real ABC) and tools/equiv-check, whose ABC is the build's own.
+    foreach(_abc_test test_abc_unconn test_abc_init1 test_abc_pass)
+        odin3_add_unit_test(${_abc_test})
+        target_compile_definitions(${_abc_test} PRIVATE
+            ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/${_abc_test}"
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+            ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+        if(NOT _abc_test STREQUAL "test_abc_init1")
+            target_sources(${_abc_test} PRIVATE tests/unit/abc_fake_engine.c)
+        endif()
+        if(ODIN3_WITH_ABC AND NOT _abc_test STREQUAL "test_abc_unconn")
+            target_compile_definitions(${_abc_test} PRIVATE ODIN3_HAVE_REAL_ABC
+                ODIN3_BIN="$<TARGET_FILE:odin3>"
+                ODIN3_EQUIV_CHECK="${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check")
+            add_dependencies(${_abc_test} odin3 odin3_abc_exe)
+            set_tests_properties(${_abc_test} PROPERTIES
+                ENVIRONMENT "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>;ODIN3_REQUIRE_ABC=1")
+        endif()
+        set_tests_properties(${_abc_test} PROPERTIES TIMEOUT 1800)
+    endforeach()
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)
@@ -1467,6 +1494,49 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             set_tests_properties(cli_${_case} PROPERTIES LABELS unit)
         endforeach()
     endif()
+    if(ODIN3_WITH_ABC)
+        # 3D Task 19: the abc pass from the command line (real ABC), the unconn gate and the
+        # equivalence gate (abc-equiv over the goldens and the abc data BLIFs).
+        foreach(_case IN ITEMS abc abc_bad_script abc_script_precedence abc_script_crash
+                               abc_unconn_ch_intrinsics)
+            add_test(NAME cli_${_case}
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
+                        ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                        ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+            set_tests_properties(cli_${_case} PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                TIMEOUT 900)
+        endforeach()
+        set_tests_properties(cli_abc_unconn_ch_intrinsics PROPERTIES LABELS gate)
+        find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
+        add_test(NAME abc_equiv_micro
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_equiv.py
+                    --odin3 $<TARGET_FILE:odin3>
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --lut 6 --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif
+                    ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(abc_equiv_micro PROPERTIES LABELS gate TIMEOUT 3600)
+        # 3D Task 19 (deferred to the controller, point (m)): every k6 Parmys golden of the VTR set
+        # except mcml and LU32PEEng, smallest first (abc-equiv sorts), stereovision3 listed as
+        # multiclock; the run log's summary is quoted in the PR.
+        set(_k6_golden $ENV{HOME}/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm)
+        if(EXISTS ${_k6_golden}/vtr AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+            file(GLOB _abc_goldens ${_k6_golden}/vtr/*/*.parmys.blif)
+            list(FILTER _abc_goldens EXCLUDE REGEX "/(mcml|LU32PEEng)/")
+            odin3_add_sweep_test(abc_equiv_golden LABEL sweep
+                COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                        ODIN3_REQUIRE_ABC=1
+                        ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_equiv.py
+                        --odin3 $<TARGET_FILE:odin3>
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --lut 6 --timeout 3000
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                        --keep $ENV{HOME}/odin3-ws/work/abc-equiv-golden ${_abc_goldens})
+        endif()
+    endif()
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
     foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
                            unknown_pass_later_script top top_written_first top_unapplied quoted
@@ -1760,6 +1830,26 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         if(_fuzz_env)
             set_tests_properties(fuzz_opt_seed_inputs fuzz_opt_smoke PROPERTIES
                                  ENVIRONMENT "${_fuzz_env}")
+        endif()
+
+        # 3D §13.7 (Task 19): 2,000 runs of the splice fuzzer in the smoke (no odin3 binary needed,
+        # so the fuzz label is right); the long run is a sweep.
+        set(_fs_corpus ${PROJECT_BINARY_DIR}/fuzz_abc_splice_corpus)
+        file(MAKE_DIRECTORY ${_fs_corpus})
+        add_test(NAME fuzz_abc_splice_smoke
+            COMMAND $<TARGET_FILE:fuzz_abc_splice> -runs=2000 -seed=1 -timeout=60
+                    -rss_limit_mb=2048 -max_len=128 -print_funcs=0 -print_final_stats=1
+                    ${_fs_corpus})
+        set_tests_properties(fuzz_abc_splice_smoke PROPERTIES LABELS fuzz TIMEOUT 600)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_abc_splice_smoke PROPERTIES ENVIRONMENT "${_fuzz_env}")
+        endif()
+        odin3_add_sweep_test(fuzz_abc_splice_long LABEL sweep
+            COMMAND timeout 3h $<TARGET_FILE:fuzz_abc_splice> -max_total_time=3600 -timeout=60
+                    -rss_limit_mb=2048 -max_len=128 -print_funcs=0 -print_final_stats=1
+                    ${_fs_corpus})
+        if(_fuzz_env)
+            set_tests_properties(fuzz_abc_splice_long PROPERTIES ENVIRONMENT "${_fuzz_env}")
         endif()
 
         odin3_add_sweep_test(fuzz_abc_script_long LABEL sweep
