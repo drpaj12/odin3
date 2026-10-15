@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# abc-equiv: Odin III's abc pass against equiv-check, design by design, smallest first (3D Task 19).
+# See abc_equiv.py. Exit codes: 0 every design passes, 1 a design fails, 2 usage error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/abc_equiv.py" "$@"
