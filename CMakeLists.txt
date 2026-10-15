@@ -2028,6 +2028,33 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --repro-dir ${PROJECT_BINARY_DIR}/fuzz_flatten)
         set_tests_properties(fuzz_flatten_yosys_quick PROPERTIES LABELS flatten
                              SKIP_RETURN_CODE 77 TIMEOUT 3600)
+        # 3C Task 1 (spec 9.2): the Parmys probes. probe-leg runs Parmys on a micro of
+        # tests/hardmap/probes into a scratch golden root under the build tree, then parmys-probe
+        # against the source (iverilog); the leg passes when the probe exits as the README records
+        # (1 = the Parmys defect of R-7 / A-8 / R-8 reproduces, 0 = the control matches). Needs
+        # VTR_ROOT and iverilog; each leg is a few seconds, so it is a sweep only by label.
+        if(DEFINED ENV{VTR_ROOT} AND ODIN3_IVERILOG)
+            set(_probe_legs
+                "ramsplit_defect|ramsplit|1|--cycles,2000,--warm,16,--mask,addr=0x000f"
+                "ramsplit_control|ramsplit|0|--cycles,2000,--warm,16,--mask,addr=0x000e"
+                "subeq_control|subeq|0|--cycles,3000"
+                "subwide_defect|subwide|1|--cycles,3000"
+                "subprobe2_defect|subprobe2|1|--cycles,3000"
+                "addrmerge_defect|addrmerge|1|--cycles,2000,--warm,16"
+                "addrmerge_control|addrmerge|0|--cycles,2000,--warm,16,--mask,we=0x0")
+            foreach(_leg IN LISTS _probe_legs)
+                string(REPLACE "|" ";" _f "${_leg}")
+                list(GET _f 0 _leg_name)
+                list(GET _f 1 _leg_micro)
+                list(GET _f 2 _leg_expect)
+                list(GET _f 3 _leg_opts)
+                string(REPLACE "," ";" _leg_opts "${_leg_opts}")
+                odin3_add_sweep_test(parmys_probe_${_leg_name} LABEL sweep
+                    COMMAND ${PROJECT_SOURCE_DIR}/tools/hardmap-check/probe-leg
+                            ${PROJECT_BINARY_DIR}/parmys_probe/${_leg_micro}
+                            ${_leg_micro} ${_leg_expect} ${_leg_opts})
+            endforeach()
+        endif()
         # 2D §13/§14.3: Yosys 0.55 reads every write_rtlil fixture of test_rtlil_writer back
         # (read_rtlil; write_rtlil) and lowers it (read_rtlil; proc; opt; write_blif), smallest
         # first.
