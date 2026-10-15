@@ -244,6 +244,9 @@ static odin3_status restore_input(rst *rs, uint32_t reg) {
                src - odin3_abc_result_first_lut(res) < rs->luts0) {
         uint32_t lut = src - odin3_abc_result_first_lut(res);
         table_complement(lut_words(res, lut), u32s(&res->lut_k)[lut]);
+        if (u32s(&res->lut_k)[lut] == 1 && lut_words(res, lut)[0] == IDENTITY_TABLE) {
+            u32s(&res->co_driver)[slot] = lut_fanins(res, lut)[0]; /* ¬¬x: no cell at all */
+        }
     } else {
         uint32_t not_obj = 0;
         odin3_status st = append_not(rs, src, &not_obj);

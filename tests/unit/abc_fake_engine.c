@@ -51,6 +51,7 @@ typedef struct fake {
     char commands[CMD_BYTES];
     char fail_word[NAME_BYTES];
     bool fail_set;
+    char extra[NAME_BYTES * 2]; /* a command run just before every write_hie */
     odin3_abc_fail fail;
     bool open;
 } fake;
@@ -469,6 +470,14 @@ static odin3_status do_command(const char *command) {
         return read_blif(path);
     }
     if (strcmp(first, "write_hie") == 0) {
+        if (fk.extra[0] != '\0') {
+            char extra[sizeof fk.extra];
+            (void)snprintf(extra, sizeof extra, "%s", fk.extra);
+            odin3_status extra_st = do_command(extra);
+            if (extra_st != ODIN3_OK) {
+                return extra_st;
+            }
+        }
         const char *rest = quoted(command, path, sizeof path);
         (void)quoted(rest, path, sizeof path);
         return write_hie(path);
@@ -582,4 +591,8 @@ void odin3_abc_fake_fail_on(const char *word, odin3_abc_fail fail) {
         (void)snprintf(fk.fail_word, NAME_BYTES, "%s", word);
         fk.fail = fail;
     }
+}
+
+void odin3_abc_fake_extra(const char *command) {
+    (void)snprintf(fk.extra, sizeof fk.extra, "%s", command == NULL ? "" : command);
 }

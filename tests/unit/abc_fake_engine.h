@@ -38,4 +38,11 @@ const char *odin3_abc_fake_last_commands(void);
  */
 void odin3_abc_fake_fail_on(const char *word, odin3_abc_fail fail);
 
+/*
+ * Runs `command` (`const <i> [1]` or `scorr`) just before every write_hie, outside the script, so
+ * a test can make a LUT constant although the script checker does not allow `const`. NULL or ""
+ * clears it. odin3_abc_fake_reset clears it too.
+ */
+void odin3_abc_fake_extra(const char *command);
+
 #endif
