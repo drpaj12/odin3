@@ -18,6 +18,11 @@ and a summary line.
 - ``--set vtr31`` (the default) is the 31 ``verilog/*.v`` files, ``mcml.v`` last. ``--set all64`` is
   those and the 33 ``verilog/koios/*.v`` files as one set by size, ``koios/lenet.v`` last. The set
   is read from ``--root`` (default ``$VTR_ROOT/vtr_flow/benchmarks/verilog``).
+- opt-equiv exit 4 (``unproven``: the checker hit a size limit on a proof and the whole-script
+  cec decided nothing) is a failure an expect-fail line lists as ``untested for now (size
+  limit)``, never hard (the timeout and kill words in its lines are the checker's); an unlisted one
+  is printed ``UNPROVEN`` and fails the run like any unlisted failure. Odin III's own cap kill is
+  exit 3, hard.
 - ``--expect-fail F`` (repeatable; default ``tests/opt/vtr_expect_fail.txt`` and
   ``tests/opt/vtr_nightly_xl.txt``) lists ``<path> [needle] <reason>`` lines. A listed file must
   fail (a tool exits non-zero; the needle must appear in the output); an unlisted failure, a
@@ -63,6 +68,7 @@ SETS = ("vtr31", "all64")
 LAST = {"vtr31": "mcml.v", "all64": "koios/lenet.v"}
 DEFAULT_CAP = 3 << 30
 TIMEOUT_S = 3600.0
+CAP_KILLED = (-9, 137)  # SIGKILL: the cap of a child, seen as -9 or as 128 + 9
 HARD_MARKS = ("out of memory (cap ", "timed out", "killed by signal")
 _SLUG = re.compile(r"[^A-Za-z0-9]+")
 
@@ -177,6 +183,7 @@ class Result:
     secs: float
     text: str
     hard: bool  # a cap kill or a timeout: never an expected failure
+    unproven: bool = False  # opt-equiv exit 4: a size limit of the checker, listable
 
 
 def run_unit(cfg: Config, unit: Unit, item: elab_sweep.Item, cap: int) -> Result:
@@ -191,10 +198,18 @@ def run_unit(cfg: Config, unit: Unit, item: elab_sweep.Item, cap: int) -> Result
     except OSError as exc:
         return Result(1, time.monotonic() - start, f"cannot run {unit.tool.name}: {exc}", True)
     text = (done.stdout or "") + (done.stderr or "")
-    hard = (toolutil.is_crash(done.returncode) or done.returncode == opt_equiv.EXIT_CRASH
-            or any(mark in text for mark in HARD_MARKS)
-            or any(mark in text for mark in elab_sweep.OPT_TOOL_ABORT))
-    return Result(done.returncode, time.monotonic() - start, text, hard)
+    # opt-equiv exit 4: only the checker hit a size limit (a proof timeout or the checker's cap
+    # kill: its lines say "timed out" or "killed"); Odin III's own cap kill or crash is exit 3.
+    killed = unit.tool == OPT_EQUIV and done.returncode in CAP_KILLED
+    if killed:  # opt-equiv itself (its Python, not Odin III: that child's kill is its exit 3)
+        text += (f"opt-equiv: unproven: opt-equiv itself was killed by its memory cap "
+                 f"({format_cap(cap)}); the snapshot is too big for the checker\n")
+    unproven = unit.tool == OPT_EQUIV and (done.returncode == opt_equiv.EXIT_UNPROVEN or killed)
+    hard = not unproven and (
+        toolutil.is_crash(done.returncode) or done.returncode == opt_equiv.EXIT_CRASH
+        or any(mark in text for mark in HARD_MARKS)
+        or any(mark in text for mark in elab_sweep.OPT_TOOL_ABORT))
+    return Result(done.returncode, time.monotonic() - start, text, hard, unproven)
 
 
 Runner = Callable[[Config, Unit, elab_sweep.Item, int], Result]
@@ -239,7 +254,7 @@ def run_file(cfg: Config, item: elab_sweep.Item, entry: elab_sweep.Expect | None
             out(f"{tag}: fails as listed ({entry.reason}): {why}")
             tally.listed += 1
         else:
-            kind = "HARD FAIL" if res.hard else "FAIL"
+            kind = "HARD FAIL" if res.hard else "UNPROVEN" if res.unproven else "FAIL"
             extra = ""
             if entry is not None and not res.hard:
                 extra = f" (listed, but the needle '{entry.needle}' is missing)"

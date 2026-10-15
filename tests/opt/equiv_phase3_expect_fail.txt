@@ -1,0 +1,12 @@
+# tests/opt/equiv_phase3_expect_fail.txt: the micros opt_equiv_micro_phase3 (the Phase 3 script, 3G)
+# expects to fail beyond the lists opt_equiv_micro reads too. Format: `<path> [needle] <reason>`.
+#
+# 2F VTR triage (2026-10-15). The one pair of ch_intrinsics.v is a limit of the checker, not of opt:
+# 0039-opt_expr is `opt -full`'s opt_expr (-mux_undef -mux_bool -fine) on the memory controller's
+# x-leg muxes (`$mux A=addr B=5'bx`, a `$pmux` with an x default) and equiv_make's induction leaves
+# the 6 pins of the single_port_ram (addr[4:0], data[0]) unproven. Evidence: (1) the snapshot pair
+# differs only by those x-leg removals; (2) Yosys 0.55's own `opt_expr -mux_undef -mux_bool -fine`
+# on the same before-state fails the same check with the same 6 cells (167 proved); (3) a bounded
+# check, `miter -equiv -ignore_gold_x` + `sat -prove-asserts -seq 6 -set-init-zero`, finds no
+# counterexample, and opt-diff's phase3 refine step proves Odin III's final result refines Yosys's.
+full/ch_intrinsics.v [not a refinement] 0039-opt_expr (opt -full's x-leg mux removals): Yosys 0.55's own opt_expr -mux_undef -mux_bool -fine fails the same 6 hard-block pins in the same check; a 6-step bounded miter finds no counterexample

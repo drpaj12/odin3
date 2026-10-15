@@ -47,10 +47,14 @@ source is built to make a rule fire, so ``--min-changed 1`` tells a broken or em
 ``$TMPDIR``) is removed after a clean run, after an error (exit 2) and after a ``--min-changed``
 shortfall; a pair that does not refine, and a crash (exit 3), keep it.
 
-Exit codes (one convention across the opt tools): 0 every pair refines; 1 a pair does not; 2 usage,
-Odin III or a tool error; 3 hard: a child (Odin III or Yosys) crashed, was killed by a signal or
-its memory cap, or timed out (elab-sweep marks it ``hard``: never an expected failure); 77 skipped
-(an ASan child and no systemd-run).
+Exit codes (one convention across the opt tools): 0 every pair refines; 1 a pair does not (or the
+whole-script cec says the netlists differ); 2 usage, Odin III or a tool error; 3 hard: Odin III or
+a Yosys proof child crashed or was killed by a signal; 4 unproven: no pair failed, but some proofs
+hit the SAT size limit (a timeout, or the checker's memory-cap kill) and the BLIF cec of the whole
+script gave no verdict either; a tool limit, not a crash and no verdict on Odin III (the
+elab-equiv rule: a cap kill of the checker is unproven, a cap kill of Odin III stays hard; a sweep
+may list a design with this exit as ``untested for now (size limit)``); 77 skipped (an ASan child
+and no systemd-run).
 """
 
 from __future__ import annotations
@@ -72,7 +76,7 @@ import toolutil
 TOOL = "opt-equiv"
 HERE = Path(__file__).resolve().parent
 PHASE2 = HERE / "phase2.script"
-EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
+EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_UNPROVEN, EXIT_SKIP = 0, 1, 2, 3, 4, 77
 DEFAULT_CAP = 2 << 30
 TIMEOUT_SECONDS = 600.0
 REFINE_TIMEOUT_SECONDS = 60.0  # one equivalence proof; past it the answer is "inconclusive"
@@ -284,6 +288,10 @@ def refinement_script(gold: str, gate: str, procs: bool = False,
 # 'equiv_status -assert'.")``: the refinement script saying the proof failed. The second is the
 # documented limit of the SAT flow (``$pow`` has no model, spec 20.2): no proof, so not a
 # refinement either. Any other ``ERROR`` (parser, port, missing module) is no verdict.
+# ``equiv_make`` refuses a design with memories or processes: the plain and the techmap lowering
+# do so for every design with a memory (it is why the third lowering runs ``memory`` first), so that
+# refusal is not a tool error and must not hide what the lowering that can judge did (a timeout).
+NEEDS_MEMORY = re.compile(r"ERROR: Gold module contains memories or processes")
 PROOF_FAILED = re.compile(r"ERROR: (?:Found \d+ unproven \$equiv cells in 'equiv_status -assert'"
                           r"|No SAT model available for cell )")
 
@@ -303,6 +311,22 @@ def cec_lowering_script(il: Path, blif: Path) -> str:
     return "; ".join([f"read_rtlil {il}", *steps])
 
 
+X_NET = b"unconn"
+X_NET_DEFINITION = b".names unconn\n"
+
+
+def uses_x(blif: Path) -> bool:
+    """True when a BLIF written by Yosys reads the net ``unconn`` (an x: Yosys's ``write_blif
+    -undef unconn``), apart from its own empty cover. equiv-check ties it to 0 on both sides, so
+    a "not equivalent" of a design with x is a resolution of the x, not a refutation (spec 20.2:
+    an x in the gold is a don't care; stereovision0 and 2 are 'equivalent outside the x-cones')."""
+    try:
+        data = blif.read_bytes()
+    except OSError:
+        return False
+    return data.count(X_NET) > data.count(X_NET_DEFINITION)
+
+
 def cec_blifs(a: Path, b: Path, cap: int, work: Path) -> tuple[str, str]:
     """(verdict, text) of ``equiv-check`` on two BLIFs: proved (exit 0), differs (exit 1), else
     unproven (a tool limit: hard-block models, several clocks, a timeout; the text says which). A
@@ -315,6 +339,10 @@ def cec_blifs(a: Path, b: Path, cap: int, work: Path) -> tuple[str, str]:
     text = why((done.stdout or "") + (done.stderr or ""))
     if done.returncode == 0:
         return CEC_PROVED, ""
+    if done.returncode == 1 and (uses_x(a) or uses_x(b)):
+        return CEC_UNPROVEN, ("BLIF cec: not equivalent with the x nets (unconn) tied to 0, which "
+                              "cannot express that an x in the gold is a don't care (the pair "
+                              f"checks do): no verdict either way: {text}")
     if done.returncode == 1:
         return CEC_DIFFERS, f"BLIF cec: not equivalent: {text}"
     return CEC_UNPROVEN, f"BLIF cec: no verdict (exit {done.returncode}): {text}"
@@ -372,6 +400,7 @@ class Checker:
         last = ""
         crashed: CrashError | None = None
         aborted: RefineAbort | None = None
+        refused: RefineAbort | None = None  # a lowering that cannot take memories (NEEDS_MEMORY)
         attempts = [(lowering, purge)
                     for purge in (False, True)
                     for lowering in self.flows(clock_sig.same_clocks(gold_text, gate_text))]
@@ -391,14 +420,18 @@ class Checker:
             output = (done.stdout or "") + (done.stderr or "")
             if not PROOF_FAILED.search(output):  # an ERROR that is not the failed proof: this
                 # lowering cannot judge the pair (equiv_make refuses memories before `memory`)
-                aborted = aborted or RefineAbort(
-                    f"yosys-refine exit {done.returncode}: {why(output)}")
+                abort = RefineAbort(f"yosys-refine exit {done.returncode}: {why(output)}")
+                if NEEDS_MEMORY.search(output):
+                    refused = refused or abort
+                else:
+                    aborted = aborted or abort
                 continue
             last = tail(output)
         if crashed is not None:  # no proof, and a lowering died: not a verdict
             raise crashed
-        if aborted is not None and not last:  # no lowering produced a failed proof either
-            raise aborted
+        pending = aborted or refused
+        if pending is not None and not last:  # no lowering produced a failed proof either
+            raise pending
         return False, last
 
     def flows(self, one_clock: bool = False) -> list[Sequence[str]]:
@@ -563,11 +596,11 @@ def execute(args: argparse.Namespace, work: Path) -> tuple[int, bool]:
                   f"and the whole script is "
                   f"{'NOT equivalent' if verdict == CEC_DIFFERS else 'not decided'} by the BLIF "
                   f"cec: {text}", flush=True)
-            return EXIT_FAIL, True
+            return (EXIT_FAIL if verdict == CEC_DIFFERS else EXIT_UNPROVEN), True
     elif slow and not bad:
         print(f"{TOOL}: unproven: {slow} calls hit the SAT size limit (timeout or cap kill)",
               flush=True)
-        return EXIT_FAIL, True
+        return EXIT_UNPROVEN, True
     if len(verdicts) < args.min_changed:
         print(f"{TOOL}: {len(verdicts)} calls changed something, want at least "
               f"{args.min_changed}", flush=True)

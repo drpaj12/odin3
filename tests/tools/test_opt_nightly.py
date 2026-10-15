@@ -164,11 +164,33 @@ class UnitsTest(unittest.TestCase):
         """Review I1: opt-equiv/opt-diff exit 3 for a crash, kill or timeout of a child."""
         cfg = nightly.Config("O", "Y", Path("/r"), 3 << 30, {}, {}, None, Path("de"), None, 9.0)
         item = elab_sweep.Item(Path("/r/a.v"), "a.v", 1)
-        for code, hard in ((3, True), (-9, True), (1, False), (2, False)):
+        for code, hard in ((3, True), (-11, True), (1, False), (2, False)):
             done = mock.Mock(returncode=code, stdout="a message\n", stderr="")
             with mock.patch.object(memcap, "run", return_value=done):
                 res = nightly.run_unit(cfg, nightly.units()[0], item, 3 << 30)
             self.assertEqual(res.hard, hard, code)
+        # opt-diff has no unproven class: a cap kill of it stays hard
+        done = mock.Mock(returncode=-9, stdout="", stderr="")
+        with mock.patch.object(memcap, "run", return_value=done):
+            res = nightly.run_unit(cfg, nightly.units("diff")[0], item, 3 << 30)
+        self.assertTrue(res.hard)
+        self.assertFalse(res.unproven)
+
+    def test_opt_equiv_exit_4_and_a_cap_kill_of_the_tool_are_unproven_not_hard(self) -> None:
+        """2F VTR triage: a proof that timed out says "timed out" in its lines (a HARD_MARK) but
+        is the checker's size limit; opt-equiv killed by its own cap is the checker's too (Odin
+        III's cap kill is the tool's exit 3). Both are listable."""
+        cfg = nightly.Config("O", "Y", Path("/r"), 3 << 30, {}, {}, None, Path("de"), None, 9.0)
+        item = elab_sweep.Item(Path("/r/a.v"), "a.v", 1)
+        lines = ("opt-equiv: 0001-opt_expr: inconclusive (yosys-refine: timed out after 60 s)\n"
+                 "opt-equiv: unproven: 2 calls hit the SAT size limit (timeout or cap kill)\n")
+        for code in (4, -9, 137):
+            done = mock.Mock(returncode=code, stdout=lines, stderr="")
+            with mock.patch.object(memcap, "run", return_value=done):
+                res = nightly.run_unit(cfg, nightly.units()[0], item, 3 << 30)
+            self.assertTrue(res.unproven, code)
+            self.assertFalse(res.hard, code)
+            self.assertIn("unproven", res.text, code)
 
 
 class RunTest(Base):
@@ -216,6 +238,20 @@ class RunTest(Base):
                                         if f == "a.v" else ok()))
         self.assertEqual(code, 1)
         self.assertTrue(any("HARD FAIL" in line for line in lines))
+
+    def test_an_unproven_file_is_listable_and_unlisted_it_is_named_unproven(self) -> None:
+        unproven = nightly.Result(4, 0.1, "opt-equiv: unproven: 2 calls hit the SAT size limit",
+                                  False, True)
+        answer = Runs(lambda f, label: unproven if (f, label) == ("a.v", "opt-equiv") else ok())
+        code, lines = self.execute(answer)
+        self.assertEqual(code, 1)
+        self.assertTrue(any("a.v [opt-equiv]: UNPROVEN:" in line for line in lines))
+        self.expect_file.write_text("a.v [unproven:] untested for now (size limit): 60 s timeout\n",
+                                    encoding="utf-8")
+        code, lines = self.execute(answer)
+        self.assertEqual(code, 0, lines)
+        self.assertTrue(any("a.v [opt-equiv]: fails as listed (untested for now" in line
+                            for line in lines))
 
     def test_a_listed_failure_passes_and_a_listed_pass_is_stale(self) -> None:
         self.expect_file.write_text("a.v [boom] a known reason\nb.v a known reason\n",

@@ -148,6 +148,34 @@ class PureTest(unittest.TestCase):
         self.assertEqual(seen[:len(seen) - 1].count(True), 0)  # plain lowerings first
         self.assertTrue(seen[-1])
 
+    def test_a_memory_refusal_does_not_hide_the_timeout_of_the_lowering_that_ran(self) -> None:
+        """or1200.v (2F VTR triage): `equiv_make` refuses memories in the plain and the techmap
+        lowering ("Gold module contains memories or processes"), the third lowering runs `memory`
+        first and its proof (a 32x32 multiplier) hits the timeout. That is a size limit, not the
+        tool error of the refusals; when every lowering refuses it stays a RefineAbort."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        work = Path(tmp.name)
+        (work / "g.il").write_text(IL_GOOD)
+        (work / "h.il").write_text(IL_GOOD)
+        refuse = "ERROR: Gold module contains memories or processes. Run 'memory' or 'proc'."
+
+        def child(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+            if "memory;" in " ".join(argv):
+                raise oe.CrashError("yosys-refine", "timed out after 60 s", True)
+            return subprocess.CompletedProcess(list(argv), 1, refuse, "")
+        checker = oe.Checker("y", work, 1 << 30)
+        with mock.patch.object(checker, "child", side_effect=child), \
+                self.assertRaises(oe.CrashError) as ctx:
+            checker.refines(work / "g.il", work / "h.il", "p")
+        self.assertTrue(ctx.exception.size_limit)
+
+        def refuses(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(list(argv), 1, refuse, "")
+        with mock.patch.object(checker, "child", side_effect=refuses), \
+                self.assertRaises(oe.RefineAbort):
+            checker.refines(work / "g.il", work / "h.il", "p")
+
     def test_a_real_difference_survives_the_purged_retry(self) -> None:
         """A difference on a used wire or an output is not an unread wire: the plain tries and the
         purged tries all fail, and the answer stays False."""
@@ -352,7 +380,7 @@ class MainTest(unittest.TestCase):
         for status in (-9, 137):  # SIGKILL = the memory cap: a size limit, unproven, never a pass
             with self.subTest(status=status):
                 code, out, err = self.run_with(yosys_exits(status), "--no-cec")
-                self.assertEqual(code, 1, out + err)
+                self.assertEqual(code, oe.EXIT_UNPROVEN, out + err)
                 self.assertIn("unproven", out)
                 self.assertNotIn("not a refinement", out + err)
 
@@ -361,7 +389,7 @@ class MainTest(unittest.TestCase):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
         code, out, err = self.run_with(hang, "--no-cec")
-        self.assertEqual(code, 1, out + err)
+        self.assertEqual(code, oe.EXIT_UNPROVEN, out + err)
         self.assertIn("unproven", out)
         self.assertNotIn("not a refinement", out + err)
 
@@ -375,8 +403,8 @@ class MainTest(unittest.TestCase):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
         for verdict, code, needle in ((oe.CEC_PROVED, 0, "proved by the BLIF cec"),
-                                      (oe.CEC_UNPROVEN, 1, "not decided"),
-                                      (oe.CEC_DIFFERS, 1, "NOT equivalent")):
+                                      (oe.CEC_UNPROVEN, oe.EXIT_UNPROVEN, "not decided"),
+                                      (oe.CEC_DIFFERS, oe.EXIT_FAIL, "NOT equivalent")):
             with self.subTest(verdict=verdict), mock.patch.object(
                     oe, "cec_ils", return_value=(verdict, "text")):
                 got, out, err = self.run_with(hang)
@@ -395,7 +423,7 @@ class MainTest(unittest.TestCase):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
         code, out, _ = self.run_with(hang, "--no-cec")
-        self.assertEqual(code, 1, out)
+        self.assertEqual(code, oe.EXIT_UNPROVEN, out)
         self.assertEqual(len(calls), oe.MAX_SAT_TIMEOUTS)
         self.assertIn("4 inconclusive (SAT size limit)", out)
         self.assertIn("not tried after 2 SAT size-limit hits", out)
@@ -436,6 +464,30 @@ class MainTest(unittest.TestCase):
                            (2, oe.CEC_UNPROVEN)):
             with run(code):
                 self.assertEqual(oe.cec_blifs(Path("a"), Path("b"), 1 << 30, Path("."))[0], want)
+
+    def test_a_cec_difference_with_x_nets_is_unproven_not_a_difference(self) -> None:
+        """2F VTR triage (stereovision0 and 2): equiv-check ties the x net `unconn` to 0 on both
+        sides, so a design with an x (an opt_dff of a flop that is never written, a mux with an x
+        leg) differs from its own refinement; that is no verdict. Without an x it stays a
+        difference."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        work = Path(tmp.name)
+        plain = work / "plain.blif"
+        plain.write_text(".model t\n.inputs a\n.outputs y\n.names unconn\n.names a y\n1 1\n.end\n")
+        xed = work / "x.blif"
+        xed.write_text(".model t\n.inputs a\n.outputs y\n.names unconn\n.names unconn a y\n"
+                       "1- 1\n.end\n")
+        self.assertFalse(oe.uses_x(plain))
+        self.assertTrue(oe.uses_x(xed))
+        self.assertFalse(oe.uses_x(work / "missing.blif"))
+        done = subprocess.CompletedProcess([], 1, "", "equiv-check: NOT equivalent\n")
+        with mock.patch.object(oe, "capped", return_value=done):
+            self.assertEqual(oe.cec_blifs(plain, plain, 1 << 30, work)[0], oe.CEC_DIFFERS)
+            verdict, text = oe.cec_blifs(plain, xed, 1 << 30, work)
+            self.assertEqual(oe.cec_blifs(xed, plain, 1 << 30, work)[0], oe.CEC_UNPROVEN)
+        self.assertEqual(verdict, oe.CEC_UNPROVEN)
+        self.assertIn("unconn", text)
 
     def test_zero_changing_calls_are_reported_and_min_changed_fails_them(self) -> None:
         """Review I5."""
