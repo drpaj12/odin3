@@ -23,6 +23,7 @@ typedef struct odin3_opt_opts {
     bool purge;                                                       /* opt_clean */
     bool nomux;                                                       /* opt_merge */
     bool fast, noff;                                                  /* opt */
+    bool memx;                                                        /* wreduce (3G) */
 } odin3_opt_opts;
 
 enum { ODIN3_OPT_EXPR_MAX_RULES = 128 };
@@ -54,6 +55,15 @@ enum {
     ODIN3_OPT_BUDGET_PINS = 1 << 16
 };
 
+/* 3G wreduce: at most this many odin3_wreduce_rule counters (wreduce.h has the rules). */
+enum { ODIN3_WREDUCE_MAX_RULES = 32 };
+
+/* wreduce's counts (3G WR-11): the INFO line's totals and one counter per rule. */
+typedef struct odin3_wreduce_counts {
+    uint32_t narrowed, bits, removed, to_signed, to_unsigned;
+    uint32_t rule[ODIN3_WREDUCE_MAX_RULES];
+} odin3_wreduce_counts;
+
 /* The foldable types (spec §4's `const.$<type>` list; fold.h): one counter each. */
 enum { ODIN3_OPT_FOLD_TYPES = 32 };
 
@@ -81,6 +91,7 @@ typedef struct odin3_opt_counts {
      * names print them.
      */
     uint32_t fold_type[ODIN3_OPT_FOLD_TYPES];
+    odin3_wreduce_counts wreduce; /* 3G */
 } odin3_opt_counts;
 
 /* --- 2F Task 3: opt_clean (OP-10) ----------------------------------------------------------- */
@@ -259,6 +270,27 @@ _Static_assert((uint32_t)ODIN3_OPT_DFF_N_ACTIONS <= (uint32_t)ODIN3_OPT_DFF_MAX_
 odin3_status odin3_opt_dff_run(odin3_pass_ctx *ctx, odin3_design *design,
                                const odin3_opt_opts *opts, odin3_opt_counts *counts);
 
+/* --- 3G: wreduce (WR-1..WR-12) -------------------------------------------------------------- */
+
+/*
+ * wreduce (3G spec, Yosys 0.55 passes/opt/wreduce.cc) over every module of design, in creation
+ * order, except those with live $proc nodes (INFO "wreduce: module 'm' has processes; skipped").
+ * Per module: the pre-step (one-bit results, $div/$mod/$pow operand trimming, $mem address bits
+ * unless opts->memx), then the worker: rounds over the cells with a pin on a net that the last
+ * round changed (the first round: every node), in Yosys's cell order, narrowing $mux/$pmux, the
+ * flip-flops and latches, and the operators to the widths and signedness their operands and
+ * readers need (spec 4.1-4.3). opts->keepdc and opts->mux_undef as Yosys. Mixed-sign cells
+ * (A_SIGNED != B_SIGNED on the 15 ruled types) read the both-signed flag everywhere (WR-6).
+ * Adds into counts->wreduce; logs INFO "wreduce: N cells narrowed, M bits removed, K cells
+ * removed, S cells made signed, U cells made unsigned" and DEBUG lines per rewrite. At
+ * ODIN3_WREDUCE_MAX_ROUNDS a module stops with a WARN and the call is still ODIN3_OK. INVALID_ARG
+ * (logged) for a NULL argument; NO_MEMORY, possibly after some rewrites (the IR stays valid; each
+ * rewrite builds before its first destructive step).
+ */
+enum { ODIN3_WREDUCE_MAX_ROUNDS = 1000000 };
+odin3_status odin3_opt_wreduce_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                   const odin3_opt_opts *opts, odin3_opt_counts *counts);
+
 /* --- 2F Task 4: registrations, options, the sub-pass call wrapper (OP-12, OP-16) ------------ */
 
 /* A pass's parsed arguments (plan point (c)). */
@@ -286,6 +318,7 @@ typedef enum odin3_opt_sub {
     ODIN3_OPT_SUB_SHARE,
     ODIN3_OPT_SUB_DFF,
     ODIN3_OPT_SUB_CLEAN,
+    ODIN3_OPT_SUB_WREDUCE,
     ODIN3_OPT_N_SUBS
 } odin3_opt_sub;
 

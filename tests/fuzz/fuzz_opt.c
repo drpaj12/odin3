@@ -546,6 +546,18 @@ static void lower_caps(unsigned mode) {
     odin3_opt_test_set_limits(&lim);
 }
 
+/* 3G: wreduce before opt (as the Phase 3 script), with and without -keepdc, on the inputs whose
+ * spelling index is 4 or more; the design must stay valid. */
+static void run_wreduce_first(odin3_design *design, unsigned mode) {
+    const char *args = (mode & 1U) != 0 ? "-keepdc -mux_undef -memx" : "-mux_undef";
+    odin3_status st = odin3_pass_run(design, "wreduce", odin3_bytes_cstr(args));
+    odin3_util_set_alloc_fail_after(-1);
+    if (st != ODIN3_OK) {
+        fail("wreduce returned an error");
+    }
+    check_full(design, "odin3_check_design FULL failed after wreduce");
+}
+
 /* `opt <spelling>` with the invariants of the header; --opt-simcheck in a Debug build, unless a
  * failure is injected (a failed sub-pass is not compared). */
 static void run_opt(odin3_design *design, unsigned mode) {
@@ -559,6 +571,9 @@ static void run_opt(odin3_design *design, unsigned mode) {
     int len = snprintf(args, sizeof args, "%s%s", k_spellings[mode & MODE_SPELLING_MASK], sim);
     if (len < 0 || (size_t)len >= sizeof args) {
         fail("the argument string does not fit");
+    }
+    if (nth == 0 && (mode & MODE_SPELLING_MASK) >= 4U) {
+        run_wreduce_first(design, mode);
     }
     lower_caps(mode);
     if (nth != 0) {

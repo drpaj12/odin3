@@ -833,7 +833,9 @@ static odin3_status cell_port_nets(pb_state *st, uint32_t port, uint32_t width, 
             return pb_fail(st, "port \\%s is %u bits, connected to %zu",
                            cell_def(st)->ports[port].name, width, conn->nets.len);
         }
-        memcpy(nets, conn->nets.data, width * sizeof *nets);
+        if (width > 0) { /* a `{ }` port has no data pointer */
+            memcpy(nets, conn->nets.data, width * sizeof *nets);
+        }
     }
     return ODIN3_OK;
 }

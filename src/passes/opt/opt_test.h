@@ -23,6 +23,11 @@ void odin3_opt_test_set_limits(const odin3_opt_limits *limits);
 /* The caps in force (the defaults unless a test lowered them). */
 odin3_opt_limits odin3_opt_limits_now(void);
 
+/* wreduce's round cap (ODIN3_WREDUCE_MAX_ROUNDS): 0 restores the default, else clamped to
+ * [1, default]; odin3_opt_test_set_limits(NULL) restores it too. */
+void odin3_opt_test_set_wreduce_rounds(uint32_t rounds);
+uint32_t odin3_opt_wreduce_rounds_now(void);
+
 /*
  * on_call: called with the sub-pass's name ("opt_expr", "opt_merge", ...) at each sub-pass call of
  * the opt driver (Task 13). May be NULL.

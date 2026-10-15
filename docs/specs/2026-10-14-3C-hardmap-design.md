@@ -347,6 +347,9 @@ item 1). `hardmap` legalises it to the arch's shape, as Parmys's `iterate_memori
   | 2, 2 | DP `2r2w` | DP: each port pairs a write with the read of identical address; otherwise soft (R-11). Two live write ports: R-6 |
   | > 2, ≥ 1 or ≥ 1, > 2 | DP with multiplexed ports (`create_nrmw_dual_port_ram`) | one DP replica per read port when w = 1; otherwise soft (R-11; question 7) |
 
+  `wreduce` (3G) may leave a one-word `$mem` with `ABITS` 0 and empty address ports; R-1 pads that
+  address to the RAM's minimum address width (zeros) like any other short address.
+
   Every hard mapping is then sliced and padded by R-1 … R-4 (`ABITS` as the address width, `WIDTH`
   as the data width). The read-enable `RD_EN` has no pin on the arch's RAMs:
   - Parmys drops it;

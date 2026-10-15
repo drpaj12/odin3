@@ -122,6 +122,9 @@ add_library(odin3_core OBJECT
     src/passes/opt/clean.c
     src/passes/opt/merge.c
     src/passes/opt/muxtree.c
+    src/passes/opt/wreduce.c
+    src/passes/opt/wreduce_op.c
+    src/passes/opt/wreduce_ff.c
     src/passes/opt/reduce.c
     src/passes/opt/share.c
     src/passes/opt/dff.c
@@ -720,6 +723,9 @@ if(BUILD_TESTING)
     target_sources(test_opt_share PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_opt_share PRIVATE
         ODIN3_SHARE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/share")
+    # 3G: wreduce.
+    odin3_add_unit_test(test_wreduce)
+    target_sources(test_wreduce PRIVATE tests/unit/proc_build.c)
     # 2F Task 10: opt_muxtree.
     odin3_add_unit_test(test_opt_muxtree)
     target_sources(test_opt_muxtree PRIVATE tests/unit/proc_build.c)
@@ -2270,12 +2276,35 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
             --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 2 --mem-cap 2G)
         # --jobs 1: outside tools/heavy-run, fd 9 of a threaded elab-sweep is Python's own.
+        set(_opt_rules_dir ${PROJECT_SOURCE_DIR}/tests/opt/rules)
         add_test(NAME opt_equiv_rules
             COMMAND ${_opt_sweep} --jobs 1 --opt-equiv --opt-arg=--min-changed=1
-                    --root ${PROJECT_SOURCE_DIR}/tests/opt/rules
+                    --root ${_opt_rules_dir}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/rules_equiv_expect_fail.txt
-                    ${PROJECT_SOURCE_DIR}/tests/opt/rules)
+                    ${_opt_rules_dir}/clean ${_opt_rules_dir}/dff ${_opt_rules_dir}/expr
+                    ${_opt_rules_dir}/merge ${_opt_rules_dir}/muxtree ${_opt_rules_dir}/reduce
+                    ${_opt_rules_dir}/share)
         set_tests_properties(opt_equiv_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 1800)
+        # 3G (plan Task 3 step 3): the same on the wreduce sources with the Phase 3 script, which
+        # runs wreduce; every call that changes something is checked (clock-aware) in turn.
+        add_test(NAME opt_equiv_wreduce_rules
+            COMMAND ${_opt_sweep} --jobs 1 --opt-equiv --opt-arg=--min-changed=1
+                    --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
+                    --root ${_opt_rules_dir}
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/wreduce_equiv_expect_fail.txt
+                    ${_opt_rules_dir}/wreduce)
+        set_tests_properties(opt_equiv_wreduce_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 1800)
+        # 3G (plan Task 3 step 4): Odin III's wreduce and Phase 3 script against Yosys's on the
+        # same input: cells, widths and flags of every $add $sub $mul, refinement, identity.
+        add_test(NAME opt_diff_wreduce_rules
+            COMMAND ${_opt_sweep} --jobs 1 --opt-diff
+                    --opt-arg=--script=wreduce --opt-arg=--script=phase3
+                    --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
+                    --opt-arg=--root=${_opt_rules_dir} --root ${_opt_rules_dir}
+                    ${_opt_rules_dir}/wreduce)
+        set_tests_properties(opt_diff_wreduce_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
                              TIMEOUT 1800)
         odin3_add_sweep_test(opt_equiv_micro LABEL sweep
             COMMAND ${_opt_sweep} --opt-equiv --min-changed-total 200 ${_micro_expect}
@@ -2291,6 +2320,21 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND ${_opt_sweep} --opt-diff ${_micro_expect}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --opt-arg=--script=phase2 "--opt-arg=--script=opt -full"
+                    --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
+                    --opt-arg=--root=${_micro_dir} ${_micro_dir})
+        # 3G: every micro with the Phase 3 script (opt-equiv: every call that changes something is
+        # checked, wreduce included) and with `wreduce` and the Phase 3 script against Yosys.
+        odin3_add_sweep_test(opt_equiv_micro_phase3 LABEL sweep
+            COMMAND ${_opt_sweep} --opt-equiv --min-changed-total 200 ${_micro_expect}
+                    --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
+                    ${_micro_dir})
+        set_tests_properties(opt_equiv_micro_phase3 PROPERTIES LABELS "sweep;opt_equiv")
+        odin3_add_sweep_test(opt_diff_micro_wreduce LABEL sweep
+            COMMAND ${_opt_sweep} --opt-diff ${_micro_expect}
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
+                    --opt-arg=--script=wreduce --opt-arg=--script=phase3
                     --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
                     --opt-arg=--root=${_micro_dir} ${_micro_dir})
         # opt_order_probe: spec 3's pass-order evidence (point (o)); evidence only, always exit 0.
