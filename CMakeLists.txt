@@ -874,6 +874,11 @@ if(BUILD_TESTING)
         if(NOT _abc_test STREQUAL "test_abc_init1")
             target_sources(${_abc_test} PRIVATE tests/unit/abc_fake_engine.c)
         endif()
+        if(ODIN3_WITH_ABC AND _abc_test STREQUAL "test_abc_unconn")
+            target_compile_definitions(${_abc_test} PRIVATE
+                ODIN3_ABC_EXE_PATH="$<TARGET_FILE:odin3_abc_exe>")
+            add_dependencies(${_abc_test} odin3_abc_exe)
+        endif()
         if(ODIN3_WITH_ABC AND NOT _abc_test STREQUAL "test_abc_unconn")
             target_compile_definitions(${_abc_test} PRIVATE ODIN3_HAVE_REAL_ABC
                 ODIN3_BIN="$<TARGET_FILE:odin3>"
@@ -1499,14 +1504,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # equivalence gate (abc-equiv over the goldens and the abc data BLIFs).
         foreach(_case IN ITEMS abc abc_bad_script abc_script_precedence abc_script_crash
                                abc_unconn_ch_intrinsics)
-            add_test(NAME cli_${_case}
+            set(_name cli_${_case})
+            if(_case STREQUAL "abc_unconn_ch_intrinsics")
+                set(_name ${_case})
+            endif()
+            add_test(NAME ${_name}
                 COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                         ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                         ${PROJECT_SOURCE_DIR}/tests/golden/blif)
-            set_tests_properties(cli_${_case} PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+            set_tests_properties(${_name} PROPERTIES LABELS unit SKIP_RETURN_CODE 77
                 TIMEOUT 900)
         endforeach()
-        set_tests_properties(cli_abc_unconn_ch_intrinsics PROPERTIES LABELS gate)
         find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
         add_test(NAME abc_equiv_micro
             COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
@@ -1518,7 +1526,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/golden/blif
                     ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-        set_tests_properties(abc_equiv_micro PROPERTIES LABELS gate TIMEOUT 3600)
+        set_tests_properties(abc_equiv_micro PROPERTIES LABELS tools TIMEOUT 3600)
         # 3D Task 19 (deferred to the controller, point (m)): every k6 Parmys golden of the VTR set
         # except mcml and LU32PEEng, smallest first (abc-equiv sorts), stereovision3 listed as
         # multiclock; the run log's summary is quoted in the PR.

@@ -40,6 +40,8 @@ void setUp(void) {
 void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
     odin3_abc_test_set_engine(NULL);
+    odin3_abc_test_set_route(ODIN3_ABC_TEST_ROUTE_AUTO);
+    (void)unsetenv("ODIN3_ABC_EXE");
     odin3_log_set_sink(NULL, NULL);
     odin3_design_destroy(design);
 }
@@ -160,10 +162,39 @@ static void test_no_written_pin_on_unconn(void) {
     free(text);
 }
 
+/* The same fixtures with every run in the odin3-abc subprocess (3D-5a hand-over): the real ABC
+ * answers, the splice is the same. Needs ODIN3_ABC_EXE_PATH (the build's odin3-abc). */
+static void use_child(void) {
+#ifdef ODIN3_ABC_EXE_PATH
+    TEST_ASSERT_EQUAL_INT(0, setenv("ODIN3_ABC_EXE", ODIN3_ABC_EXE_PATH, 1));
+    odin3_abc_test_set_route(ODIN3_ABC_TEST_ROUTE_ALWAYS_CHILD);
+#else
+    TEST_IGNORE_MESSAGE("built without ODIN3_WITH_ABC");
+#endif
+}
+
+static void test_hard_block_pins_stay_open_child(void) {
+    use_child();
+    test_hard_block_pins_stay_open();
+}
+
+static void test_buffer_of_unconn_ends_on_gnd_child(void) {
+    use_child();
+    test_buffer_of_unconn_ends_on_gnd();
+}
+
+static void test_no_written_pin_on_unconn_child(void) {
+    use_child();
+    test_no_written_pin_on_unconn();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_hard_block_pins_stay_open);
     RUN_TEST(test_buffer_of_unconn_ends_on_gnd);
     RUN_TEST(test_no_written_pin_on_unconn);
+    RUN_TEST(test_hard_block_pins_stay_open_child);
+    RUN_TEST(test_buffer_of_unconn_ends_on_gnd_child);
+    RUN_TEST(test_no_written_pin_on_unconn_child);
     return UNITY_END();
 }

@@ -45,8 +45,19 @@ static flops count_flops(const odin3_module *mod) {
     return found;
 }
 
-/* Maps data/<name>.blif with the real ABC and checks the result. */
-static void expect_one_flop_at_one(const char *name, uint32_t want_flops) {
+/* The default script plus a comment: another digest, so the pass runs it in the odin3-abc
+ * subprocess (AB-33) with the same commands. */
+static void write_child_script(char *path) {
+    char lib[AFX_JOIN];
+    (void)snprintf(lib, sizeof lib, "%s/abc/vtr.abc", ODIN3_LIB_DIR);
+    char text[AFX_TEXT];
+    (void)snprintf(text, sizeof text, "%s# run in the subprocess\n", afx_slurp(lib));
+    afx_path(path, "child.abc");
+    AFX_WRITE(path, text);
+}
+
+/* Maps data/<name>.blif with the real ABC and checks the result; child: through the subprocess. */
+static void expect_one_flop_at_one(const char *name, uint32_t want_flops, bool child) {
     char data[AFX_JOIN];
     char before[AFX_PATH];
     char after[AFX_PATH];
@@ -57,11 +68,18 @@ static void expect_one_flop_at_one(const char *name, uint32_t want_flops) {
     (void)snprintf(file, sizeof file, "%s_after.blif", name);
     afx_path(after, file);
     char script[4 * AFX_PATH];
+    char child_script[AFX_PATH];
+    char option[AFX_PATH + 16] = "";
+    if (child) {
+        write_child_script(child_script);
+        (void)snprintf(option, sizeof option, " --script %s", child_script);
+    }
     (void)snprintf(script, sizeof script,
-                   "read_techlib %s/vtr.o3lib; read_blif %s; write_blif %s; abc --lut 6; "
+                   "read_techlib %s/vtr.o3lib; read_blif %s; write_blif %s; abc --lut 6%s; "
                    "write_blif %s",
-                   ODIN3_LIB_DIR, data, before, after);
+                   ODIN3_LIB_DIR, data, before, option, after);
     TEST_ASSERT_EQUAL_INT(0, afx_run_odin3(script));
+    odin3_design_destroy(design);
     design = odin3_design_create();
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_read(design, after));
     afx_check(design);
@@ -73,7 +91,7 @@ static void expect_one_flop_at_one(const char *name, uint32_t want_flops) {
 
 static void test_toggle_init1(void) {
 #ifdef ODIN3_HAVE_REAL_ABC
-    expect_one_flop_at_one("toggle_init1", 1);
+    expect_one_flop_at_one("toggle_init1", 1, false);
 #else
     TEST_IGNORE_MESSAGE("built without ODIN3_WITH_ABC");
 #endif
@@ -81,7 +99,24 @@ static void test_toggle_init1(void) {
 
 static void test_scorr_merge_init1(void) {
 #ifdef ODIN3_HAVE_REAL_ABC
-    expect_one_flop_at_one("scorr_merge_init1", 1);
+    expect_one_flop_at_one("scorr_merge_init1", 1, false);
+#else
+    TEST_IGNORE_MESSAGE("built without ODIN3_WITH_ABC");
+#endif
+}
+
+/* The same two through the odin3-abc subprocess (3D-5a hand-over). */
+static void test_toggle_init1_child(void) {
+#ifdef ODIN3_HAVE_REAL_ABC
+    expect_one_flop_at_one("toggle_init1", 1, true);
+#else
+    TEST_IGNORE_MESSAGE("built without ODIN3_WITH_ABC");
+#endif
+}
+
+static void test_scorr_merge_init1_child(void) {
+#ifdef ODIN3_HAVE_REAL_ABC
+    expect_one_flop_at_one("scorr_merge_init1", 1, true);
 #else
     TEST_IGNORE_MESSAGE("built without ODIN3_WITH_ABC");
 #endif
@@ -91,5 +126,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_toggle_init1);
     RUN_TEST(test_scorr_merge_init1);
+    RUN_TEST(test_toggle_init1_child);
+    RUN_TEST(test_scorr_merge_init1_child);
     return UNITY_END();
 }
