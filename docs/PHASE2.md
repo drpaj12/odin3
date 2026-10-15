@@ -1006,7 +1006,10 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       **Exit codes of the opt tools (one convention):** 0 pass, 1 a real negative result, 2 usage
       or tool error, 3 hard (a crash, signal, memory-cap kill or timeout of a child; `opt-equiv`,
       `opt-diff`, `opt-rules`, `opt-run`, `opt-gen-diff`), which elab-sweep and opt-nightly treat
-      as hard: no expect-fail line absorbs it. `opt-equiv --min-changed N` fails a run in which
+      as hard: no expect-fail line absorbs it; 4 unproven (`opt-equiv` only, 2F VTR triage: no pair
+      failed, the SAT proofs hit their size limit and the whole-script BLIF cec decided nothing; a
+      cap kill of the checker is unproven, Odin III's stays 3), which an expect-fail line lists as
+      `untested for now (size limit)`. `opt-equiv --min-changed N` fails a run in which
       fewer than N sub-pass calls changed something (CTest `opt_equiv_rules` passes 1; 19 sources
       whose rule Phase 2 does not run are listed in `rules_equiv_expect_fail.txt`).
     - **The bench** (`tests/bench/bench_opt.c`, Release only: `bench_guard.h` refuses a Debug or
@@ -1064,6 +1067,29 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       - Smoke only so far (Task 20): the 3 smallest VTR files (`single_wire.v`, `single_ff.v`,
         `and_latch.v`), 18 runs, 18 ok, 0 unexpected, 3G cap. The five-script `opt-diff` of the
         31 files has no `tests/opt/diff_expect.txt` lines yet: the full run adds them (or fails).
+    - **VTR leg triage (2026-10-15, branch `fix/2F-vtr-equiv-triage`).** The first full
+      `opt_equiv_vtr` run (main 967e1da, Release, 3G cap, 31 files, 6491 s) had 11 ok and 20 not.
+      Findings, each with its test: (1) `ch_intrinsics`, `ch_intrinsics_nolatches` and `mkPktMerge`
+      were a **checker artefact**, not an `opt` bug: `rename_modules` makes the two sides' copies of
+      a hard block (a black-box module) two modules, so `equiv_make` paired the output wires of the
+      two instances and could never prove them equal, whatever the rewrite (8, 6 and 5 calls
+      unproven). `Checker.refines` now cuts every black-box instance at its ports
+      (`expose -evert`, `EVERT_BLACKBOXES`): the sides share its outputs and the check compares
+      what drives its inputs; the three prove call by call, and so do the micro designs the old
+      listings blamed on it (`tests/opt/equiv_expect_fail.txt` 6 lines and `diff_expect.txt` 42
+      `refine` lines were stale and are gone). 3G also saw `mkPktMerge` fail at `opt_merge`: the
+      same artefact. The one Phase 3 pair left, `ch_intrinsics` 0039-opt_expr (`opt -full`'s
+      x-leg mux removals), is a limit of `equiv_make`'s induction: Yosys 0.55's own `opt_expr
+      -mux_undef -mux_bool -fine` fails it with the same 6 cells (`equiv_phase3_expect_fail.txt`).
+      (2) `or1200`: the "Gold module contains memories or processes" abort of the plain and the
+      techmap lowering hid the 60 s timeout of the `memory` lowering (a 32x32 multiplier); it is a
+      size limit now. (3) A BLIF cec "not equivalent" of a design with x nets (`unconn`, tied to 0 on
+      both sides) is no verdict: `stereovision0` and `2` are "equivalent outside the x-cones"
+      (`equiv-check --x-report`). (4) The 17 designs that hit the SAT size limit (stereovision0, 1,
+      2, spree, bgm, boundtop(+_nolatches), raygentop(+_nolatches), or1200, mkSMAdapter4B,
+      LU8/32/64PEEng, mkDelayWorker32B, arm_core, mcml) are `opt-equiv` exit 4 and listed in
+      `tests/opt/vtr_expect_fail.txt` as untested for now (size limit), with the measured
+      evidence; `opt-nightly --only NAME` re-runs a few files.
     - **Hand-off to 2H:** S-P (`tools/opt-check/sp-splice`, Odin III against Yosys through the
       Phase 2 script) is the exit table's `opt` row; S-D is information only. lenet.v's S-P needs
       about 7 GB (Yosys's side), so 2H runs it only as a `sweep-xl` job. The Odin III half reads
