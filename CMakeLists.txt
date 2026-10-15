@@ -134,6 +134,12 @@ add_library(odin3_core OBJECT
     src/passes/opt/dff_muxes.c
     src/passes/opt/register.c
     src/passes/opt/simcheck.c
+    src/passes/flatten/graph.c
+    src/passes/flatten/register.c
+    src/passes/flatten/expand.c
+    src/passes/flatten/copy.c
+    src/passes/flatten/names.c
+    src/passes/flatten/prov.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -243,6 +249,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_warn.c
     src/frontends/elab/elab2_tri.c
     src/frontends/elab/elab2_trilogic.c
+    src/frontends/elab/elab2_trivtr.c
     src/frontends/elab/elab2_mem.c
     src/frontends/elab/elab2_memport.c
     src/frontends/elab/elab2_memscan.c
@@ -736,6 +743,77 @@ if(BUILD_TESTING)
     # 2F Task 6: opt_expr (the driver, the rules of spec 4.2-4.3, replace_undriven).
     odin3_add_unit_test(test_opt_expr)
     target_sources(test_opt_expr PRIVATE tests/unit/proc_build.c)
+    # 3A Task 2: flatten's pre-flight graph; every test_flatten_* links the fixture helper.
+    odin3_add_unit_test(test_flatten_graph)
+    target_sources(test_flatten_graph PRIVATE tests/unit/flatten_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_flatten_graph PRIVATE
+        ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    # 3A Task 3: the expansion.
+    odin3_add_unit_test(test_flatten_expand)
+    target_sources(test_flatten_expand PRIVATE tests/unit/flatten_fixture.c)
+    target_compile_definitions(test_flatten_expand PRIVATE
+        ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    # 3A Task 4: flatten-sim (no Yosys), flatten-golden and flatten-diff (Yosys 0.55, in the block
+    # below) over the fixtures of tests/flatten; exit 77 skips when an ASan child cannot be capped.
+    # The sim leg leaves out mem.v (1E has no $mem) and bb.v (a black box has no semantics); the
+    # golden leg compares the flat top module's write_rtlil, write_blif and write_verilog text
+    # with tests/flatten/expected (spec 14.2) and checks two runs byte-identical.
+    set(_flat_dir ${PROJECT_SOURCE_DIR}/tests/flatten)
+    set(_flat_sim ${_flat_dir}/hier.v ${_flat_dir}/params.v ${_flat_dir}/gen.v ${_flat_dir}/feed.v
+                  ${_flat_dir}/keep.v ${_flat_dir}/nested.blif)
+    add_test(NAME flatten_sim_fixtures
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-sim
+                --odin3 $<TARGET_FILE:odin3> ${_flat_sim})
+    add_test(NAME flatten_sim_roundtrip
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-sim --roundtrip
+                --odin3 $<TARGET_FILE:odin3> ${_flat_sim})
+    add_test(NAME flatten_golden
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-golden
+                --odin3 $<TARGET_FILE:odin3>
+                tests/flatten/hier.v tests/flatten/params.v tests/flatten/gen.v
+                tests/flatten/feed.v tests/flatten/keep.v tests/flatten/bb.v tests/flatten/mem.v
+                tests/flatten/nested.blif)
+    set_tests_properties(flatten_sim_fixtures flatten_sim_roundtrip flatten_golden PROPERTIES
+                         LABELS flatten SKIP_RETURN_CODE 77 TIMEOUT 600)
+    # cli_flatten: the CLI runs read_blif; flatten; check on a hierarchical BLIF (hand_body: sub is
+    # expanded, bb is a black box and stays).
+    add_test(NAME cli_flatten
+        COMMAND $<TARGET_FILE:odin3> -p
+                "read_blif ${PROJECT_SOURCE_DIR}/tests/golden/blif/hand_body.blif; flatten; check")
+    set_tests_properties(cli_flatten PROPERTIES LABELS flatten
+        PASS_REGULAR_EXPRESSION "flatten: 1 instances expanded \\(0 kept\\) in 1 roots")
+    # cli_flatten_multidriver (non-Debug builds only: Debug runs `check` after read_blif, which
+    # already rejects the multiply-driven net): two instances drive one net and `flatten` itself
+    # must refuse it, not only the `check` after it (review C1).
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_test(NAME cli_flatten_multidriver
+            COMMAND $<TARGET_FILE:odin3> -p
+                    "read_blif ${PROJECT_SOURCE_DIR}/tests/flatten/multidriver.blif; flatten")
+        set_tests_properties(cli_flatten_multidriver PROPERTIES LABELS flatten
+            PASS_REGULAR_EXPRESSION "net 'z' has 2 drivers after joining port 'o'")
+    endif()
+    # 3A Task 5 (spec 14.5): 2,000 random hierarchies of `verilog-gen --flatten` through
+    # flatten + check (Debug runs check around the pass) and sim before = after (a design the
+    # simulator cannot run is counted skipped, never a pass). A failing case is written to
+    # ${PROJECT_BINARY_DIR}/fuzz_flatten as a reproducer.
+    # Labelled `flatten`, not `fuzz`: the CI fuzz-smoke build has no odin3 binary to drive.
+    add_test(NAME fuzz_flatten_quick
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/fuzz_flatten --cases 2000 --seed 1
+                --odin3 $<TARGET_FILE:odin3> --repro-dir ${PROJECT_BINARY_DIR}/fuzz_flatten)
+    set_tests_properties(fuzz_flatten_quick PROPERTIES LABELS flatten SKIP_RETURN_CODE 77
+                         TIMEOUT 3600)
+    # hand_ports has no instance: flatten expands nothing and leaves the design as read.
+    add_test(NAME cli_flatten_hand_ports
+        COMMAND $<TARGET_FILE:odin3> -p
+                "read_blif ${PROJECT_SOURCE_DIR}/tests/golden/blif/hand_ports.blif; flatten; check")
+    set_tests_properties(cli_flatten_hand_ports PROPERTIES LABELS flatten
+        PASS_REGULAR_EXPRESSION "flatten: 0 instances expanded \\(0 kept\\) in 1 roots")
+    # nested.blif: three levels, 7 instances (two of them unnamed), all expanded.
+    add_test(NAME cli_flatten_nested
+        COMMAND $<TARGET_FILE:odin3> -p
+                "read_blif ${PROJECT_SOURCE_DIR}/tests/flatten/nested.blif; flatten; check")
+    set_tests_properties(cli_flatten_nested PROPERTIES LABELS flatten
+        PASS_REGULAR_EXPRESSION "flatten: 7 instances expanded \\(0 kept\\) in 1 roots")
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
@@ -1113,6 +1191,14 @@ if(BUILD_TESTING)
     add_dependencies(test_elab_vtr_initial verilog_generated)
     target_compile_definitions(test_elab_vtr_initial PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D-VI2: several tri-state drivers of an internal net under read_verilog --vtr-compat
+    # (Peter 2026-10-14; PHASE2 decision 27).
+    odin3_add_unit_test(test_elab_vtr_multidriver)
+    target_sources(test_elab_vtr_multidriver PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_vtr_multidriver PRIVATE ${_gen})
+    add_dependencies(test_elab_vtr_multidriver verilog_generated)
+    target_compile_definitions(test_elab_vtr_multidriver PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
@@ -1235,6 +1321,13 @@ if(BUILD_TESTING)
                      --rt $<TARGET_FILE:odin3-blif-rt> --fixtures
                      ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(blif_roundtrip_fixtures PROPERTIES LABELS unit)
+    # 3E §16.3 step 5 (CI): write_blif --vtr over the fixtures: W1 == W2 (or the VB-10 decode),
+    # the Parmys samples identical to their W1, dffsre and pow refused (E1b, E5).
+    add_test(NAME blif_roundtrip_vtr_fixtures
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip --vtr
+                     --rt $<TARGET_FILE:odin3-blif-rt> --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                     --fixtures ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(blif_roundtrip_vtr_fixtures PROPERTIES LABELS unit)
     # Negative check: a deliberately corrupted output must make the gate fail.
     add_test(NAME blif_roundtrip_detects_corruption
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
@@ -1808,6 +1901,42 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/vtr_expect_fail.txt
                     --root ${_vtr_verilog} ${_vtr_benchmarks})
     endif()
+    # 3E-4 (spec 3E §16.3, §16.4): write_blif --vtr over every status=ok k6_frac golden, in two
+    # sweeps, each one file at a time, smallest first, under tools/heavy-run (skip 77 without
+    # ODIN3_HEAVY_OK=1). Run as `ODIN3_HEAVY_OK=1 ctest --preset sweep -R
+    # 'blif_roundtrip_vtr_k6|vtr_read_check_k6'` from a Release build; the first run records the
+    # times. Registered only when VTR_ROOT is set and the golden tree exists.
+    #   blif_roundtrip_vtr_k6: W1 == W2 (or the VB-10 decode), Parmys netlist-compare identical,
+    #     Odin II identical under --vtr-normalize, equiv-check where it applies.
+    #   vtr_read_check_k6: VPR `--exit_before_pack on` reads every W; refusals pair with VPR's
+    #     verdict on G; blif-vtr-check agrees with VPR on every G and W.
+    set(_k6_golden $ENV{HOME}/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm)
+    if(DEFINED ENV{VTR_ROOT} AND EXISTS ${_k6_golden}
+       AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
+        odin3_add_sweep_test(blif_roundtrip_vtr_k6 LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip --vtr
+                    --rt $<TARGET_FILE:odin3-blif-rt>
+                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                    --out $ENV{HOME}/odin3-ws/work/blif-roundtrip-vtr ${_k6_golden})
+        odin3_add_sweep_test(vtr_read_check_k6 LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/vtr-read-check/vtr-read-check
+                    --odin3 $<TARGET_FILE:odin3> --golden-root ${_k6_golden}
+                    --arch $ENV{VTR_ROOT}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
+                    --vpr $ENV{VTR_ROOT}/vpr/vpr
+                    --work $ENV{HOME}/odin3-ws/work/vtr-read-check)
+    endif()
+    # The negative corpus against VPR itself (18 tiny files, not a heavy run): VPR rejects exactly
+    # the files the checker does, with the message in each file's `# vpr:` line. Registered when
+    # VTR_ROOT points at a built VTR.
+    if(DEFINED ENV{VTR_ROOT} AND EXISTS $ENV{VTR_ROOT}/vpr/vpr)
+        add_test(NAME vtr_read_check_bad_corpus
+                 COMMAND ${PROJECT_SOURCE_DIR}/tools/vtr-read-check/vtr-read-check
+                         --bad-corpus ${PROJECT_SOURCE_DIR}/tests/vtr/blif-bad
+                         --arch $ENV{VTR_ROOT}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
+                         --vpr $ENV{VTR_ROOT}/vpr/vpr
+                         --work $ENV{HOME}/odin3-ws/work/vtr-read-check)
+        set_tests_properties(vtr_read_check_bad_corpus PROPERTIES LABELS tools)
+    endif()
     # 2D Task 27 (spec 15): bench_elab prints the columns the targets are judged from. The smoke
     # runs `--one` on two micros (a plain assign; a memory under a clocked process) and checks
     # every column.
@@ -1913,6 +2042,24 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         message(STATUS "Yosys 0.55: not found (VTR build); no Yosys-0.55 tests")
     endif()
     if(ODIN3_YOSYS055_OK)
+        # 3A Task 4 (spec 14.3): flatten against Yosys 0.55 on the fixtures; a difference not
+        # listed in tests/flatten/diff_expect.txt (with a reason) fails.
+        add_test(NAME flatten_diff_fixtures
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --expect ${PROJECT_SOURCE_DIR}/tests/flatten/diff_expect.txt
+                    ${_flat_dir}/hier.v ${_flat_dir}/params.v ${_flat_dir}/gen.v
+                    ${_flat_dir}/feed.v ${_flat_dir}/keep.v ${_flat_dir}/bb.v ${_flat_dir}/mem.v)
+        set_tests_properties(flatten_diff_fixtures PROPERTIES LABELS flatten SKIP_RETURN_CODE 77
+                             TIMEOUT 600)
+        # The same generator against Yosys 0.55: names, widths and cell types (the equivalence
+        # proof is the heavy leg: fuzz_flatten --yosys --equiv, 3A Task 5).
+        add_test(NAME fuzz_flatten_yosys_quick
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/fuzz_flatten --cases 300 --seed 5001
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --repro-dir ${PROJECT_BINARY_DIR}/fuzz_flatten)
+        set_tests_properties(fuzz_flatten_yosys_quick PROPERTIES LABELS flatten
+                             SKIP_RETURN_CODE 77 TIMEOUT 3600)
         # 2D §13/§14.3: Yosys 0.55 reads every write_rtlil fixture of test_rtlil_writer back
         # (read_rtlil; write_rtlil) and lowers it (read_rtlil; proc; opt; write_blif), smallest
         # first.
@@ -1975,6 +2122,19 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/verilog/case-bridge)
         set_tests_properties(elab_case_bridge PROPERTIES
             LABELS differential SKIP_RETURN_CODE 77)
+        # 2H-triage (PHASE2 #27, review M-I3): the default (IEEE) reading of several tri-state
+        # drivers on an internal net, without --vtr-compat, against Yosys 0.55 `tribuf -logic`: the
+        # micro multi_assignment and the D3 accept files. The --vtr-compat reading of the micro
+        # differs by design (micro_equiv_expect_fail.txt). Exit 77 (skip) as above.
+        add_test(NAME elab_tribuf_default_equiv
+            COMMAND sh -c "for f in \"$4\"/syntax/multi_assignment.v \"$5\"/D3_*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --yosys-tribuf \"$f\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog
+                    ${PROJECT_SOURCE_DIR}/tests/elab/accept)
+        set_tests_properties(elab_tribuf_default_equiv PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
         # 2D Task 23 (spec 14.3): elab-equiv on every source of tests/verilog/call-bridge: unrolled
         # loops, functions and tasks inlined (in processes and in continuous contexts), nested calls
         # and variable-index reads of net arrays. Exit 77 (skip) as above.
@@ -2026,6 +2186,10 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # 0.55), smallest first. The micros that fail before the bridge are in
         # micro_expect_fail.txt; the ones the bridge finds not equivalent in
         # micro_equiv_expect_fail.txt. A Yosys crash is an `oracle crash`, not a failure.
+        # large/mkDelayWorker32B.v runs alone at a 6G cap (Yosys side B peaks at 4.8 GB, 2H).
+        # --equiv-budget 1800: the Yosys and equiv-check runs of one file get 1800 s together, then
+        # it is `unproven` (elab-equiv exit 4), listable, where the sweep's hour is a hard timeout (2H,
+        # large/arm_core.v).
         odin3_add_sweep_test(elab_equiv_micro LABEL sweep
             COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
                     --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
@@ -2035,6 +2199,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_equiv_expect_fail.txt
                     --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
+                    --cap-for large/mkDelayWorker32B.v=6G
+                    --equiv-budget 1800
                     ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
         # 2D Task 27 (spec 14.5): the 64 VTR and Koios files through the bridge (Yosys 0.55), one
         # set, smallest first; koios/lenet.v's Yosys side (~7 GB) is an `xl` entry of
@@ -2268,6 +2434,23 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/vtr_expect_fail.txt
                         --root ${_vtr_verilog} --cap-for koios/lenet.v=5G ${_vtr_benchmarks})
             set_tests_properties(opt_vtr PROPERTIES LABELS "sweep;nightly")
+            # 3A Task 5 (spec 14.6): the 19 VTR designs of the exit test through flatten, smallest
+            # first, one child at a time: wall, peak RSS, flat sizes, kept (must be 0), the node
+            # counts against the instance tree, bytes per object, and flatten-diff against Yosys
+            # 0.55 (names, widths, cell types by module; tests/flatten/vtr_expect.txt lists known
+            # differences with reasons). The Markdown table is written to
+            # ${PROJECT_BINARY_DIR}/flatten_vtr_table.md. Run: ODIN3_HEAVY_OK=1 ctest --preset
+            # sweep -R '^flatten_vtr_sweep$' from a Release build (the peak RSS needs one).
+            set(_flatten_vtr ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-vtr
+                --odin3 $<TARGET_FILE:odin3> --root ${_vtr_verilog}
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --mem-cap 3G
+                --cap-for mcml.v=5G --cap-for LU32PEEng.v=5G --cap-for bgm.v=5G
+                --expect ${PROJECT_SOURCE_DIR}/tests/flatten/vtr_expect.txt
+                --table ${PROJECT_BINARY_DIR}/flatten_vtr_table.md)
+            if(ODIN3_YOSYS055_OK)
+                list(APPEND _flatten_vtr --yosys ${ODIN3_YOSYS055})
+            endif()
+            odin3_add_sweep_test(flatten_vtr_sweep LABEL sweep COMMAND ${_flatten_vtr})
             # 2F Task 20 (spec 20.2, 20.3, ruling I9): the nightly VTR legs of opt-equiv and
             # opt-diff, run by hand (Peter runs no nightly): tools/opt-check/opt-nightly, one
             # tool run at a time under memcap, smallest file first. opt_equiv_vtr and
@@ -2300,8 +2483,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # netlist-compare, then equiv-check --x-report. Classes: identical, equivalent (pass); eq-x
         # (passes only with a reviewed record, tests/exit/*_eqx.txt); listed-reject (Parmys itself
         # rejects it, tests/exit/micro_expect.txt); unproven (equiv-check's tool limits,
-        # tests/exit/vtr_unproven.txt: their own bucket, never a pass); no-golden (no golden, or an
-        # oracle harness gap, tests/exit/micro_nogolden.txt: never counted); differs, error, hard
+        # tests/exit/{micro,vtr}_unproven.txt: their own bucket, never a pass); no-golden (no
+        # golden, an oracle harness gap or an oracle killed at its memory cap,
+        # tests/exit/micro_nogolden.txt: never counted); differs, error, hard
         # (fail; hard exits 3). Smallest first, one design at a time, every child, sp-splice
         # included, under memcap (3G; the four biggest files 5G, alone, in the 6G slice). The run
         # fails when fewer than --min-checked designs were proven, so a wrong golden tree cannot
@@ -2320,7 +2504,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 COMMAND ${_exit_check}
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/exit/micro_expect.txt
                         --expect-no-golden ${PROJECT_SOURCE_DIR}/tests/exit/micro_nogolden.txt
+                        --expect-unproven ${PROJECT_SOURCE_DIR}/tests/exit/micro_unproven.txt
                         --eqx-record ${PROJECT_SOURCE_DIR}/tests/exit/micro_eqx.txt
+                        --equiv-box-budget 900
                         --min-checked 400 --work ${CMAKE_BINARY_DIR}/exit-work/micro
                         --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
                         ${PROJECT_SOURCE_DIR}/tests/micro/verilog)

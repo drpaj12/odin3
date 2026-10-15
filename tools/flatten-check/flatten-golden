@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# flatten-golden: 3A spec 14.2. See flatten_golden.py. Run from the repo root (the source paths in
+# the written Verilog are relative to it).
+# Exit codes: 0 equal, 1 a file differs, 2 error or usage, 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../elab-check${PYTHONPATH:+:$PYTHONPATH}"
+cd "$here/../.."
+exec python3 "$here/flatten_golden.py" "$@"

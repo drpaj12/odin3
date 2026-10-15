@@ -361,12 +361,13 @@ generator. `abc` never produces one, so this is noted, not changed (3E-1 final r
 3. **Clock**: the `C` pin's net. Unconnected or undriven C is E3 (VPR "Latch must have a clock").
    A constant C (`$_CONST*_` or a constant `$sop`) is written (VPR accepts it) with the warning
    `write_blif: --vtr: <loc>: $_DFF_P_ '<cell>': clock is the constant <0|1|x>; VPR will never
-   clock it`. A C on `unconn` (class U, §9.1) is written `re unconn` with the warning `<loc>:
-   <type> '<cell>': clock is 'unconn'; VPR will never clock it` (plan point (j); agent default,
-   not E3). VPR's `latch()` accepts it and `process_circuit` then removes the `unconn` net (R14),
-   leaving a latch with no clock net, which `--exit_before_pack` never looks at again. **3E-4
-   (Task 11) puts one such file through a full VPR run** (pack, place, route) before 3H relies on
-   it (3E-1 final review M8).
+   clock it`. A C on `unconn` (class U, §9.1) is **E3b** (amended in 3E-4, PHASE3 #34; it was a warning
+   with `re unconn` under plan point (j)). VPR's `latch()` accepts it and `process_circuit`
+   removes the `unconn` net (R14), so `--exit_before_pack` reads it, but the full flow (pack,
+   place, route) aborts: `timing_graph_builder.cpp:546 … Assertion 'clk_pin' failed` (exit 134),
+   as it does for a hard block with `clk=unconn`. A written file could never be routed, so the
+   writer refuses it with the E3b text (`clock input 'C' is unconnected or x`). VPR accepts G at
+   read time, so the refusal is `listed` in §16.4.
 4. **D**: an x, unconnected or undriven D is written as `gnd` (counted in `x_to_gnd`), the value
    ABC assigns it (decision 12: "DC treated as 0").
 5. **Q**: an unconnected Q gets its own net (`$p<pin ID>`-style generated name, VB-10), since a
@@ -406,7 +407,7 @@ node's parameters give):
 - an **output** bit's actual is its net's name; an unconnected output pin gets a fresh generated
   net, so every output bit is written (Parmys's form, and the block's VPR name is stable: R12);
 - a **clock** input (a port with the `.o3lib` `clock` flag, e.g. the RAMs' `clk`) follows the
-  latch C rule of §7 item 3, not the hard-block input rule: x, unconnected or undriven is E3b, a
+  latch C rule of §7 item 3, not the hard-block input rule: x, unconnected, undriven or `unconn` is E3b, a
   constant is written with the §7 warning (a sequential block with an open clock would be
   meaningless).
 
@@ -458,7 +459,7 @@ buffers, so Parmys's `.names vcc d` / `1 1` stays a buffer and is not rewritten 
 | 0 | `gnd` | `gnd` + warning (§7) | `gnd` | buffer `.names gnd <port bit>` / `1 1` |
 | 1 | `vcc` | `vcc` + warning | `vcc` | buffer from `vcc` |
 | x | `gnd` (`x_to_gnd`) | E3 | `unconn` (`x_to_unconn`); a clock input: E3b | buffer from `gnd` (`x_to_gnd`) |
-| U | `unconn` as read, counted in `unconn_logic`, one warning (below) | `unconn` + warning | `unconn` | buffer from `unconn` as read |
+| U | `unconn` as read, counted in `unconn_logic`, one warning (below) | E3b (3E-4) | `unconn` (a clock input: E3b) | buffer from `unconn` as read |
 | signal | its name | its name | its name | 1C's port-bit naming |
 
 An output-port bit whose net is itself driven by a constant `$sop` or a normalised constant cell
@@ -567,7 +568,7 @@ node's name or `$c<ID>`; `<type>` the registry or library type name.
 | E1b | `<loc>: <type> '<cell>': asynchronous set/reset flip-flop; VPR has none (lower makes it synchronous, decision 19)` | `$_DFFSR_*`, async word FFs |
 | E2 | `<loc>: <type> '<cell>': level-sensitive latch; VPR accepts only rising-edge latches` | `$_DLATCH_P_`/`_N_` |
 | E3 | `<loc>: <type> '<cell>': flip-flop without a clock; VPR requires a clock on every latch` | `$_FF_`, or `$_DFF_P_` with C unconnected, undriven or x |
-| E3b | `<loc>: <type> '<cell>': clock input '<port>' is unconnected or x` | a hard cell's `clock`-flagged input (§8.2) |
+| E3b | `<loc>: <type> '<cell>': clock input '<port>' is unconnected or x` | a hard cell's `clock`-flagged input (§8.2) that is unconnected, undriven, x or `unconn`; a `$_DFF_P_` whose C is `unconn` (`<port>` is `C`) |
 | E4 | `<loc>: <type> '<cell>': tri-state cell; VPR has no tri-state` | `$tribuf` and z-capable cells |
 | E5 | `<loc>: <type> '<cell>': not a netlist cell (run lower)` | any other registry word cell |
 | E6 | `<loc>: <type> '<cell>': '<type>' is not a hard cell of a loaded tech library (read_techlib lib/vtr.o3lib)` | gate-kind library cell, implicit or undeclared black box |
@@ -678,7 +679,8 @@ blif-vtr-check [--models FILE] [--lut-k K] [--strict] [--eblif] [--max-errors N]
   are dropped when their pin count equals the N of the writer's `net 'unconn' feeds N
   .names/.latch pins` warning (0 when absent), and those on `.latch` controls when the `.latch`
   and hard-block clock pins on `unconn` number exactly the writer's `clock is 'unconn'` warnings
-  (one per such pin, §7 item 3, plan point (j)). A count that differs keeps every C-S2 line of
+  (one per such pin, §7 item 3, plan point (j); since 3E-4 the writer refuses such a clock
+  instead, so a W with one always differs from the count 0 and is flagged). A count that differs keeps every C-S2 line of
   its kind and adds `net 'unconn' feeds <M> .names inputs and .latch D pins, but the writer warned
   of <N>` (or `… <M> clock pins …`) on line 1. Every other rule stays as `--strict` has it. The
   pairing is by count, since the writer's §9.2 warning is one count per write.

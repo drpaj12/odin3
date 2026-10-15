@@ -7,9 +7,9 @@
 # of the oracle's log (golden/<arch>/regression/verilog/<group>/<leaf>/<leaf>.parmys.log), which
 # `golden/` keeps. Rejections that are oracle-HARNESS gaps (a missing include or -D) are not here:
 # they are `no-golden` (tests/exit/micro_nogolden.txt, 4 micros), which never counts as a pass.
-# A micro whose golden run was CAPPED (large/LargeRam.v) is NOT listed: a cap kill is no verdict on
-# the design, so it stays an unexpected `error` until its golden is regenerated with a larger
-# ODIN3_ORACLE_MEM_MB. A `differs`, an `error` and a `hard` failure are never listable.
+# A micro whose golden run was CAPPED (large/LargeRam.v) is NOT listed here: a cap kill is no verdict
+# on the design (it is a size limit of the oracle, listed in micro_nogolden.txt, never a pass). A
+# `differs`, an `error` and a `hard` failure are never listable.
 #
 # The list must shrink, never rot: exit-check fails on a listed micro that now passes and on an
 # entry that names no micro.
