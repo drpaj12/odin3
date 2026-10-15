@@ -32,6 +32,10 @@ fails (a failing pair costs up to 3 x 60 s, each lowering has its own limit; a t
 pair). The Yosys child runs in its own process group and a timeout kills the group. ``--no-lower``
 runs the plain flow (the clock is not checked), ``--no-techmap`` the first try of the family only.
 
+A hard block (a black box module such as ``single_port_ram``) is cut at its ports before the
+lowering (``EVERT_BLACKBOXES``): its outputs become shared inputs, the nets on its inputs become
+outputs the check compares.
+
 A failing pair prints ``opt-equiv: <NNNN>-<sub>: not a refinement`` with the rule counters of the
 run (Odin III's ``--opt-stats`` lines, which cover the whole run). A work directory this tool
 made is removed after a clean run; a failing run, and ``--work DIR``, keep it.
@@ -246,6 +250,18 @@ CLK = ("clk2fflogic", "opt_merge", "opt_clean")
 LOWERINGS = (CLK, (*CLK, "techmap"), ("memory", *CLK, "techmap"))
 
 
+# A hard block (``single_port_ram``, ``dual_port_ram``, a multiplier: a black box module) has no
+# model, and ``rename_modules`` makes the two sides' copies of it two different modules, so
+# ``equiv_make`` pairs the output wires of the two instances and can never prove them equal (every
+# VTR design with a memory failed this way, however small the rewrite: ch_intrinsics, mkPktMerge).
+# ``expose -evert`` over the cells that are not internal ($-) cells removes each instance and turns
+# its input ports into extra outputs and its output ports into extra inputs, named by the
+# instance, so the two sides share the black box's outputs and the check compares what drives its
+# inputs. Sound: equal inputs to one deterministic block give equal outputs; an opt call that
+# changed an input of the block is a counterexample. With no black box the selection is empty.
+EVERT_BLACKBOXES = "expose -evert c:* t:$* %d"
+
+
 def refinement_script(gold: str, gate: str, procs: bool = False,
                       lowering: Sequence[str] = LOWERINGS[1], purge: bool = False) -> str:
     """Spec 20.2's Yosys script for two RTLIL files that ``rename_modules`` already made
@@ -257,7 +273,7 @@ def refinement_script(gold: str, gate: str, procs: bool = False,
     is flattened first: ``equiv_make`` matches only the two tops, so a
     submodule's flip-flops would otherwise keep independent x initial values (review I4)."""
     steps = [f"read_rtlil {gold}", f"read_rtlil {gate}", *(["proc"] if procs else []), "flatten",
-             *lowering]
+             EVERT_BLACKBOXES, *lowering]
     steps += ["opt_clean -purge"] if purge else []
     steps += ["equiv_make gold gate eq", "hierarchy -top eq", "flatten",
               "equiv_simple -undef -seq 4", "equiv_induct -undef", "equiv_status -assert"]
