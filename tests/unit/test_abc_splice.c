@@ -8,6 +8,7 @@
 #include "abc_fake_engine.h"
 #include "abc_fixture.h"
 #include "abc_sim.h"
+#include "abc_stage.h"
 #include "ir/lut.h"
 #include "passes/abc/abc.h"
 #include "passes/abc/abc_test.h"
@@ -563,15 +564,6 @@ static void test_cleanup_nets_and_wires(void) {
 
 /* --- failures ------------------------------------------------------------------------------ */
 
-/* Everything the run needs up to the splice, for the direct calls below. */
-typedef struct staged {
-    odin3_pass_ctx ctx;
-    odin3_abc_run *run;
-    odin3_vec domains;
-    odin3_abc_region region;
-    odin3_abc_result result;
-} staged;
-
 static void build_oom_module(void) {
     odin3_net_id a = input("a");
     odin3_net_id b = input("b");
@@ -583,42 +575,17 @@ static void build_oom_module(void) {
     (void)ff_global("r2", 0, a, output("z2"));
 }
 
-static void stage(staged *st) {
-    *st = (staged){0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_pass_run_begin(design, afx_intern(design, "abc"), &st->ctx));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_abc_run_start(&st->ctx, odin3_bytes_cstr("--lut 6"), &st->run));
-    st->run->module = mod;
-    st->run->module_id = odin3_design_top(design);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_domains(st->run, mod, &st->domains));
-    st->run->domain = st->domains.data;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_abc_region_build(st->run, st->run->domain, &st->region));
-    st->run->region = &st->region;
-    odin3_abc_result_init(&st->result);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_exchange_blif(st->run, &st->result));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_result_fold(&st->result));
-}
-
-static void unstage(staged *st) {
-    odin3_abc_result_free(&st->result);
-    odin3_abc_region_free(&st->region);
-    odin3_abc_domains_free(&st->domains);
-    odin3_abc_run_destroy(st->run);
-}
-
 /* One splice with the n-th allocation failing; returns its status. */
 static odin3_status splice_failing_at(long nth, char **text_before) {
-    staged st;
+    afx_staged st;
     build_oom_module();
-    stage(&st);
+    afx_stage(design, mod, &st);
     *text_before = afx_blif_text(design);
     odin3_abc_splice_stats stats;
     odin3_util_set_alloc_fail_after(nth);
     odin3_status res = odin3_abc_splice(st.run, &st.region, &st.result, &stats);
     odin3_util_set_alloc_fail_after(-1);
-    unstage(&st);
+    afx_unstage(&st);
     return res;
 }
 

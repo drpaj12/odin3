@@ -8,6 +8,7 @@
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/module.h"
+#include "passes/abc/prov.h"
 #include "passes/abc/run.h"
 #include "passes/abc/splice_int.h"
 #include "util/log.h"
@@ -201,6 +202,8 @@ static void sp_init(splice *sp, odin3_abc_run *run, const odin3_abc_region *regi
     odin3_vec_init(&sp->created, sizeof(sp_created));
     odin3_vec_init(&sp->objnet, sizeof(uint32_t));
     odin3_vec_init(&sp->objprov, sizeof(uint32_t));
+    odin3_vec_init(&sp->objnode, sizeof(uint32_t));
+    odin3_vec_init(&sp->anchors, sizeof(odin3_abc_anchor));
     odin3_vec_init(&sp->carried, sizeof(uint32_t));
     odin3_vec_init(&sp->ffnode, sizeof(uint32_t));
     odin3_vec_init(&sp->oldq, sizeof(uint32_t));
@@ -213,6 +216,8 @@ static void sp_free(splice *sp) {
     odin3_vec_free(&sp->created);
     odin3_vec_free(&sp->objnet);
     odin3_vec_free(&sp->objprov);
+    odin3_vec_free(&sp->objnode);
+    odin3_vec_free(&sp->anchors);
     odin3_vec_free(&sp->carried);
     odin3_vec_free(&sp->ffnode);
     odin3_vec_free(&sp->oldq);

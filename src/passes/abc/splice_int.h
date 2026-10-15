@@ -45,6 +45,8 @@ typedef struct splice {
     odin3_vec created;  /* sp_created, in creation order */
     odin3_vec objnet;   /* uint32_t per result object: the net it drives */
     odin3_vec objprov;  /* uint32_t per result object: the record of the new object */
+    odin3_vec objnode;  /* uint32_t per result object: the LUT node that implements it, or 0 */
+    odin3_vec anchors;  /* odin3_abc_anchor */
     odin3_vec carried;  /* uint32_t per result object: the net that carries it so far */
     odin3_vec ffnode;   /* uint32_t per result register: the new flip-flop */
     odin3_vec oldq;     /* uint32_t per result register: its representative's old Q net */
@@ -52,7 +54,6 @@ typedef struct splice {
     odin3_vec steps;    /* sp_step per real CO */
     odin3_vec old_nets; /* uint32_t: the output nets of the old cells */
     odin3_net_id canon[2];
-    odin3_prov_id prov; /* the coarse record (Task 18 replaces it with objprov) */
 } splice;
 
 /* The log of creations. NO_MEMORY. */

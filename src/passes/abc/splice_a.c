@@ -7,6 +7,7 @@
 #include "ir/lut.h"
 #include "ir/module.h"
 #include "ir/prov.h"
+#include "passes/abc/prov.h"
 #include "passes/abc/region.h"
 #include "passes/abc/run.h"
 #include "passes/abc/splice_int.h"
@@ -28,38 +29,12 @@ static uint32_t obj_count(const odin3_abc_result *res) {
     return odin3_abc_result_first_lut(res) + res->n_luts;
 }
 
-/* --- the record ---------------------------------------------------------------------------- */
+/* --- the records --------------------------------------------------------------------------- */
 
-/* Until Task 18: one DERIVED record whose parents are every old cell's record, in node-ID order;
- * every new object carries it. Without any parent record (nodes made without provenance) the new
- * objects carry none. */
-static odin3_status coarse_record(splice *sp) {
-    odin3_vec parents;
-    odin3_vec_init(&parents, sizeof(odin3_prov_id));
-    const uint8_t *role = sp->region->role.data;
-    odin3_status st = ODIN3_OK;
-    for (uint32_t id = 1; st == ODIN3_OK && id < sp->region->role.len; id++) {
-        if ((role[id] == ODIN3_ABC_ROLE_SOFT || role[id] == ODIN3_ABC_ROLE_REG) &&
-            odin3_node_live(sp->mod, (odin3_node_id){id})) {
-            odin3_prov_id prov = odin3_node_prov(sp->mod, (odin3_node_id){id});
-            odin3_prov_id *slot = prov.v != 0 ? odin3_vec_push(&parents) : NULL;
-            if (prov.v != 0 && slot == NULL) {
-                st = ODIN3_ERR_NO_MEMORY;
-            } else if (slot != NULL) {
-                *slot = prov;
-            }
-        }
-    }
-    if (st == ODIN3_OK && parents.len > 0) {
-        odin3_prov_begin_op(sp->run->ctx);
-        st = odin3_prov_derive(sp->run->ctx, (odin3_prov_list){parents.data, (uint32_t)parents.len},
-                               &sp->prov);
-    }
-    odin3_vec_free(&parents);
-    for (uint32_t obj = 0; st == ODIN3_OK && obj < obj_count(sp->res); obj++) {
-        st = sp_push(&sp->objprov, sp->prov.v);
-    }
-    return st;
+/* Anchors and the record of every new object (§8; prov.c). Records come before objects. */
+static odin3_status make_records(splice *sp) {
+    odin3_status st = odin3_abc_anchors(sp->run, sp->res, &sp->anchors);
+    return st == ODIN3_OK ? odin3_abc_records(sp->run, sp->res, &sp->anchors, &sp->objprov) : st;
 }
 
 /* --- nets ---------------------------------------------------------------------------------- */
@@ -106,6 +81,7 @@ static odin3_status object_nets(splice *sp) {
             st = new_net(sp, obj, &net);
         }
         st = st == ODIN3_OK ? sp_push(&sp->objnet, net) : st;
+        st = st == ODIN3_OK ? sp_push(&sp->objnode, 0) : st;
         st = st == ODIN3_OK ? sp_push(&sp->carried, obj < FIRST_OBJ + res->n_cis ? net : 0) : st;
     }
     return st;
@@ -157,6 +133,7 @@ static odin3_status create_luts(splice *sp) {
         if (st != ODIN3_OK) {
             return st;
         }
+        ((uint32_t *)sp->objnode.data)[obj] = node.v;
     }
     return ODIN3_OK;
 }
@@ -315,7 +292,7 @@ static odin3_status plan_all(splice *sp) {
 }
 
 odin3_status sp_phase_a(splice *sp) {
-    odin3_status st = coarse_record(sp);
+    odin3_status st = make_records(sp);
     st = st == ODIN3_OK ? object_nets(sp) : st;
     st = st == ODIN3_OK ? create_luts(sp) : st;
     st = st == ODIN3_OK ? create_ffs(sp) : st;

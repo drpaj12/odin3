@@ -5,12 +5,13 @@
  */
 #include "ir/celltype.h"
 #include "ir/module.h"
+#include "passes/abc/prov.h"
 #include "passes/abc/splice_int.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 
-enum { PORT_Y = 1 /* the Y port of a $lut */ };
+enum { PORT_Y = 1, /* the Y port of a $lut */ FIRST_OBJ = 2 };
 
 /* --- phase B ------------------------------------------------------------------------------- */
 
@@ -118,10 +119,52 @@ static odin3_status move_register(splice *sp, uint32_t reg) {
     return st;
 }
 
+/* The net object obj drives now: a LUT's output, a flip-flop's Q, or the net of a CI or constant.
+ */
+static odin3_net_id object_net_now(const splice *sp, uint32_t obj) {
+    uint32_t base = FIRST_OBJ + sp->res->n_cis;
+    if (obj >= odin3_abc_result_first_lut(sp->res)) {
+        return drive_net(sp->mod, (odin3_node_id){sp_u32(&sp->objnode, obj)});
+    }
+    if (obj >= base) {
+        return drive_net(sp->mod, (odin3_node_id){sp_u32(&sp->ffnode, obj - base)});
+    }
+    return (odin3_net_id){sp_u32(&sp->objnet, obj)};
+}
+
+/* An old internal net (pinless now, neither a CI nor a CO) that is a register input's net: merged
+ * into the net its anchor's object drives, so its names and wire memberships survive (§6.5). */
+static bool movable(const splice *sp, odin3_net_id old) {
+    return odin3_net_valid(old) && odin3_net_live(sp->mod, old) &&
+           sp_u32(&sp->region->co_of, old.v) == 0 && sp_u32(&sp->region->ci_of, old.v) == 0 &&
+           odin3_net_driver_count(sp->mod, old) == 0;
+}
+
+static odin3_status move_anchored_nets(splice *sp) {
+    odin3_status first = ODIN3_OK;
+    for (size_t at = 0; at < sp->anchors.len; at++) {
+        const odin3_abc_anchor *an = odin3_vec_cat(&sp->anchors, at);
+        if (an->kind != ODIN3_ABC_ANCHOR_REG_IN || an->complemented || !movable(sp, an->old_net)) {
+            continue;
+        }
+        odin3_net_id target = object_net_now(sp, an->obj);
+        if (!odin3_net_valid(target) || target.v == an->old_net.v ||
+            !odin3_net_live(sp->mod, target)) {
+            continue;
+        }
+        odin3_status st = odin3_net_merge(sp->mod, (odin3_net_pair){target, an->old_net});
+        sp->stats.merges += st == ODIN3_OK ? 1U : 0U;
+        first = first == ODIN3_OK ? st : first;
+    }
+    return first;
+}
+
 odin3_status sp_phase_c(splice *sp) {
     odin3_status st = delete_old(sp);
+    odin3_status moved = move_anchored_nets(sp);
+    st = st == ODIN3_OK ? moved : st;
     for (uint32_t reg = 0; reg < sp->res->n_regs_out; reg++) {
-        odin3_status moved = move_register(sp, reg);
+        moved = move_register(sp, reg);
         st = st == ODIN3_OK ? moved : st;
     }
     return st;

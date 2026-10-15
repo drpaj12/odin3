@@ -7,6 +7,7 @@
 #include "passes/abc/abc.h"
 #include "passes/abc/engine.h"
 #include "passes/abc/exchange.h"
+#include "passes/abc/prov.h"
 #include "passes/abc/region.h"
 #include "passes/abc/result.h"
 #include "passes/abc/script.h"
@@ -26,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 enum {
@@ -38,7 +40,10 @@ enum {
     DEL_BYTE = 0x7F,
     SHA_SHOWN = 16,
     COMMIT_SHOWN = 12,
-    AIG_OBJ_WORD_BYTES = 8 /* the exchange arrays: one 8-byte entry per AIG object (point (r)) */
+    AIG_OBJ_WORD_BYTES = 8, /* the exchange arrays: one 8-byte entry per AIG object (point (r)) */
+    MS_PER_SECOND = 1000,
+    NS_PER_MS = 1000000,
+    DEPTH_TEXT_BYTES = 16
 };
 
 static const char *const k_file_suffix[] = {"in.blif", "cmd", "log", "out.blif"};
@@ -334,6 +339,59 @@ static odin3_status check_caps(const odin3_abc_run *run, const odin3_abc_region 
     return st;
 }
 
+static double now_ms(void) {
+    struct timespec now;
+    (void)clock_gettime(CLOCK_MONOTONIC, &now);
+    return (double)now.tv_sec * MS_PER_SECOND + (double)now.tv_nsec / NS_PER_MS;
+}
+
+/* The widest LUT and the deepest LUT chain of the result. */
+static void result_shape(const odin3_abc_result *res, uint32_t *widest, uint32_t *depth) {
+    uint32_t first = odin3_abc_result_first_lut(res);
+    odin3_vec level;
+    odin3_vec_init(&level, sizeof(uint32_t));
+    *widest = 0;
+    *depth = 0;
+    if (odin3_vec_reserve(&level, res->n_luts + 1U) != ODIN3_OK) {
+        return;
+    }
+    for (uint32_t lut = 0; lut < res->n_luts; lut++) {
+        uint32_t inputs = ((const uint32_t *)res->lut_k.data)[lut];
+        const uint32_t *fanins =
+            (const uint32_t *)res->fanins.data + ((const uint32_t *)res->fanin_start.data)[lut];
+        uint32_t deepest = 0;
+        for (uint32_t var = 0; var < inputs; var++) {
+            uint32_t from = fanins[var];
+            uint32_t lvl = from >= first ? ((const uint32_t *)level.data)[from - first] : 0;
+            deepest = lvl > deepest ? lvl : deepest;
+        }
+        ((uint32_t *)level.data)[lut] = deepest + 1U;
+        level.len = lut + 1U;
+        *widest = inputs > *widest ? inputs : *widest;
+        *depth = deepest + 1U > *depth ? deepest + 1U : *depth;
+    }
+    odin3_vec_free(&level);
+}
+
+/* §8.2's line for runs without a name map, then the run's summary line (§8.3, §11). */
+static void log_run_info(const odin3_abc_run *run, const odin3_abc_result *res,
+                         const odin3_abc_splice_stats *stats, double ms) {
+    char domain[DOMAIN_TEXT_BYTES];
+    uint32_t widest = 0;
+    uint32_t depth = 0;
+    odin3_abc_domain_text(run->module, run->domain, domain, sizeof domain);
+    result_shape(res, &widest, &depth);
+    odin3_log(ODIN3_LOG_INFO, "abc: module '%s', %s: no name map (%s); provenance uses cut cones",
+              module_text(run), domain,
+              run->opts.prov == ODIN3_ABC_PROV_CONE ? "--prov cone" : "BLIF exchange");
+    odin3_log(ODIN3_LOG_INFO,
+              "abc: module '%s', %s: %u cells and %u flip-flops -> %u LUTs (at most %u inputs, "
+              "depth %u) and %u flip-flops, %.1f ms in ABC",
+              module_text(run), domain, (unsigned)run->region->soft.len,
+              (unsigned)run->region->regs.len, (unsigned)stats->luts, (unsigned)widest,
+              (unsigned)depth, (unsigned)stats->ffs, ms);
+}
+
 /* One run: the region, the caps, the exchange, folding and the splice. */
 static odin3_status run_domain(odin3_abc_run *run, const odin3_abc_domain *domain, bool first) {
     odin3_abc_region region;
@@ -354,11 +412,16 @@ static odin3_status run_domain(odin3_abc_run *run, const odin3_abc_domain *domai
     }
     odin3_abc_result result;
     odin3_abc_result_init(&result);
+    double start = now_ms();
     st = check_caps(run, &region);
     st = st == ODIN3_OK ? odin3_abc_exchange_blif(run, &result) : st;
+    double spent = now_ms() - start;
     st = st == ODIN3_OK ? odin3_abc_result_fold(&result) : st;
     odin3_abc_splice_stats stats = {0};
     st = st == ODIN3_OK ? odin3_abc_splice(run, &region, &result, &stats) : st;
+    if (st == ODIN3_OK) {
+        log_run_info(run, &result, &stats, spent);
+    }
     odin3_abc_result_free(&result);
     run->region = NULL;
     odin3_abc_region_free(&region);
@@ -401,6 +464,39 @@ odin3_status odin3_abc_run_start(odin3_pass_ctx *ctx, odin3_bytes args, odin3_ab
     return ODIN3_OK;
 }
 
+/* The run information (§8.1, point (d)) and the last INFO line, once the pass is done. */
+static odin3_status finish_info(odin3_abc_run *run) {
+    uint32_t depth = 0;
+    odin3_status st = odin3_abc_depth(run->design, &depth);
+    odin3_strbuf info;
+    odin3_strbuf_init(&info);
+    char number[DEPTH_TEXT_BYTES];
+    (void)snprintf(number, sizeof number, "%u", (unsigned)run->opts.lut_k);
+    const char *k_text = run->opts.lut_k != 0 ? number : "none";
+    char depth_text[DEPTH_TEXT_BYTES];
+    (void)snprintf(depth_text, sizeof depth_text, "%u", (unsigned)depth);
+    const struct {
+        const char *key;
+        const char *value;
+    } words[] = {{"script", run->choice.given},
+                 {"sha256", run->script.sha256_hex},
+                 {"abc", run->engine->abc_commit},
+                 {"K", k_text},
+                 {"exchange", run->exchange == ODIN3_ABC_EXCHANGE_AIG ? "aig" : "blif"},
+                 {"depth", depth_text}};
+    for (size_t i = 0; st == ODIN3_OK && i < sizeof words / sizeof words[0]; i++) {
+        st = odin3_passrun_info_append(&info, words[i].key, odin3_bytes_cstr(words[i].value));
+    }
+    uint32_t str = 0;
+    st = st == ODIN3_OK ? odin3_design_intern(run->design, odin3_bytes_cstr(info.data), &str) : st;
+    st = st == ODIN3_OK ? odin3_passrun_set_info(run->ctx, str) : st;
+    odin3_strbuf_free(&info);
+    if (st == ODIN3_OK) {
+        odin3_log(ODIN3_LOG_INFO, "abc: final: depth %u", (unsigned)depth);
+    }
+    return st;
+}
+
 odin3_status odin3_abc_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                 void *user) {
     (void)user;
@@ -411,6 +507,7 @@ odin3_status odin3_abc_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin3
     if (st == ODIN3_OK) {
         st = odin3_design_compact(ctx, ctx->design);
     }
+    st = st == ODIN3_OK ? finish_info(run) : st;
     odin3_abc_run_destroy(run);
     return st;
 }
