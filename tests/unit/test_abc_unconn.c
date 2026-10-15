@@ -81,27 +81,37 @@ static odin3_net_id addr_net(odin3_node_id ram, uint32_t bit) {
     return odin3_pin_net(mod, (odin3_pin_id){pins.first.v + bit});
 }
 
-/* The addr[5..14] bits keep their nets (the `unconn` net, still driven by its zero-row $sop), and
- * addr[4] keeps its $_CONSTX_ net, alive. */
+/* How many live nodes of the module have the cell type. */
+static uint32_t count_cells(const char *type) {
+    uint32_t found = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
+        odin3_node_id node = {id};
+        found +=
+            odin3_node_live(mod, node) &&
+                    strcmp(odin3_celltype_get(design, odin3_node_type(mod, node))->name, type) == 0
+                ? 1U
+                : 0U;
+    }
+    return found;
+}
+
+/* The addr[5..14] bits stay on the one `unconn` net (named so, driven by its zero-row $sop) and
+ * addr[4] on its $_CONSTX_ net, whose generator is alive: the pass renumbers nets when it
+ * compacts, so the nets are recognised by what they are, not by their IDs. */
 static void test_hard_block_pins_stay_open(void) {
     odin3_node_id gen = load_ram();
-    odin3_node_id ram = ram_node();
-    odin3_net_id before[ADDR_BITS];
-    for (uint32_t bit = 0; bit < ADDR_BITS; bit++) {
-        before[bit] = addr_net(ram, bit);
-    }
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         ODIN3_OK, odin3_pass_run(design, "abc", odin3_bytes_cstr("--lut 6")), afx_errors());
     afx_check(design);
-    ram = ram_node();
+    odin3_node_id ram = ram_node();
+    odin3_net_id first = addr_net(ram, FIRST_OPEN);
+    TEST_ASSERT_TRUE(odin3_abc_net_undefined(mod, first));
     for (uint32_t bit = FIRST_OPEN; bit < ADDR_BITS; bit++) {
-        odin3_net_id net = addr_net(ram, bit);
-        TEST_ASSERT_EQUAL_UINT32(before[bit].v, net.v);
-        TEST_ASSERT_TRUE(odin3_abc_net_undefined(mod, net));
+        TEST_ASSERT_EQUAL_UINT32(first.v, addr_net(ram, bit).v);
     }
-    TEST_ASSERT_EQUAL_UINT32(before[X_BIT].v, addr_net(ram, X_BIT).v);
-    TEST_ASSERT_TRUE(odin3_node_live(mod, gen));
     TEST_ASSERT_EQUAL_INT(ODIN3_CONST_X, odin3_net_const_value(mod, addr_net(ram, X_BIT)));
+    TEST_ASSERT_EQUAL_UINT32(1, count_cells("$_CONSTX_"));
+    (void)gen;
 }
 
 /* A soft path from `unconn` into a RAM pin ends on the canonical constant 0 (like VTR). */
@@ -112,6 +122,8 @@ static void test_buffer_of_unconn_ends_on_gnd(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(gnd.v, addr_net(ram_node(), BUFFERED_BIT).v);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "abc", odin3_bytes_cstr("--lut 6")));
     afx_check(design);
+    gnd = odin3_module_find_net(mod, afx_intern(design, "gnd"));
+    TEST_ASSERT_TRUE(odin3_net_valid(gnd));
     TEST_ASSERT_EQUAL_UINT32(gnd.v, addr_net(ram_node(), BUFFERED_BIT).v);
 }
 
@@ -148,6 +160,7 @@ static void test_no_written_pin_on_unconn(void) {
     odin3_module_id mid = {0};
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, mid));
     mod = odin3_module_get(design, mid);
     odin3_net_id in_a = afx_port(design, mod, "a", ODIN3_DIR_IN);
     odin3_net_id out_y = afx_port(design, mod, "y", ODIN3_DIR_OUT);

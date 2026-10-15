@@ -44,6 +44,7 @@ void setUp(void) {
     odin3_module_id mid = {0};
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, mid));
     mod = odin3_module_get(design, mid);
     lut_arena = odin3_arena_create(0);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,

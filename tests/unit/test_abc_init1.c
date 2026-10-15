@@ -67,7 +67,7 @@ static void expect_one_flop_at_one(const char *name, uint32_t want_flops, bool c
     afx_path(before, file);
     (void)snprintf(file, sizeof file, "%s_after.blif", name);
     afx_path(after, file);
-    char script[4 * AFX_PATH];
+    char script[AFX_CMD_TEXT];
     char child_script[AFX_PATH];
     char option[AFX_PATH + 16] = "";
     if (child) {

@@ -246,7 +246,7 @@ static odin3_status old_region(pv *pw, uint32_t anc, odin3_vec *cells, uint64_t 
     odin3_vec_clear(&pw->stack);
     odin3_status st = old_seed(pw, anchor_at(pw, anc));
     st = st == ODIN3_OK ? old_walk(pw, anc, cells, edges) : st;
-    if (st == ODIN3_OK && cells != NULL) {
+    if (st == ODIN3_OK && cells != NULL && cells->len - start > 1) {
         qsort((uint32_t *)cells->data + start, cells->len - start, sizeof(uint32_t), cmp_u32);
     }
     return st;

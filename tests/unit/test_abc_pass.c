@@ -308,7 +308,7 @@ static void test_real_engine_script_and_second_pass(void) {
     afx_path(base, "real0.blif");
     afx_path(one, "real1.blif");
     afx_path(two, "real2.blif");
-    char cmd[4 * AFX_PATH];
+    char cmd[AFX_CMD_TEXT];
     (void)snprintf(cmd, sizeof cmd,
                    "read_techlib %s/vtr.o3lib; read_blif %s; write_blif %s; abc --script %s; "
                    "write_blif %s; abc --script %s; write_blif %s",
