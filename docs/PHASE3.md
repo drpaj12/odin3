@@ -722,6 +722,15 @@ then the options considered.
     multiplexed RAM modes; (8) async RAM reads stay soft; (9) two live write ports mapped without
     priority logic (the IEEE race, 2D §17 #66), exempt from the functional check; (10) the 3C plan
     as about 7 tasks in 3 PRs.
+    **3G sweep rulings (controller, agent defaults under #32, 2026-10-14):** (1) `wreduce` stays a
+    faithful single Yosys 0.55 run with its queueing rule, no fixpoint loop: Yosys's own run is not a
+    fixpoint either (38 of 46 micro diffs have cells equal to Yosys `wreduce` repeated until stable;
+    Odin III follows the same queueing rule and stops a little short of that on a few designs). (2) The
+    refinement checker tries each lowering plain, then with `opt_clean -purge` (unread wires), a SAT
+    timeout or cap kill falls back to a BLIF cec of the whole script, and a design still undecided is
+    listed as "untested for now (size limit)" with its time, keyed narrowly, never counted as a pass
+    (Peter: smaller benchmarks suggest it works). (3) The `read_blif` multi-driver net that `check`
+    rejects (fuzz seed `blif003`) is a separate Phase 2 fix.
 32. **3B `lower` spec and plan approved, and a standing rule for Phase 3** (Peter, 2026-10-14: "My
     general is going to be yes (as all these reasoned well are for partial mapping to vtr) … want it
     to get as close to the flow; what I plan to use the tool for is an attempt to reverse engineer
