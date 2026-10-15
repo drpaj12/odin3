@@ -357,7 +357,8 @@ static odin3_status run_domain(odin3_abc_run *run, const odin3_abc_domain *domai
     st = check_caps(run, &region);
     st = st == ODIN3_OK ? odin3_abc_exchange_blif(run, &result) : st;
     st = st == ODIN3_OK ? odin3_abc_result_fold(&result) : st;
-    st = st == ODIN3_OK ? odin3_abc_splice(run, &region, &result) : st;
+    odin3_abc_splice_stats stats = {0};
+    st = st == ODIN3_OK ? odin3_abc_splice(run, &region, &result, &stats) : st;
     odin3_abc_result_free(&result);
     run->region = NULL;
     odin3_abc_region_free(&region);

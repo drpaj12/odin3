@@ -129,6 +129,9 @@ int odin3_abc_pin_literal(const odin3_abc_run *run, odin3_net_id net);
 /* True for a net named `unconn` driven by a zero-input, zero-row $sop (Parmys's undefined net). */
 bool odin3_abc_net_undefined(const odin3_module *module, odin3_net_id net);
 
+/* True when the net, or a wire that holds it, has a non-zero `keep` attribute (Yosys's rule). */
+bool odin3_abc_net_keep(const odin3_module *module, odin3_net_id net);
+
 /* The text of a net in messages: its own name, else its primary wire bit, else `$n<ID>`. */
 void odin3_abc_net_text(const odin3_module *module, odin3_net_id net, char *out, size_t cap);
 

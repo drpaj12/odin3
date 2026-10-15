@@ -152,6 +152,10 @@ add_library(odin3_core OBJECT
     src/passes/abc/xblif_read.c
     src/passes/abc/exchange.c
     src/passes/abc/splice.c
+    src/passes/abc/splice_a.c
+    src/passes/abc/splice_bc.c
+    src/passes/abc/splice_d.c
+    src/passes/abc/restore.c
     src/passes/abc/run.c
     src/ir/value.c
     src/ir/design.c

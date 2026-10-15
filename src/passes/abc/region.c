@@ -379,6 +379,10 @@ static uint32_t keep_key_of(const odin3_module *module) {
     return odin3_strtab_find(tab, odin3_bytes_cstr("keep"), &key) ? key : 0;
 }
 
+bool odin3_abc_net_keep(const odin3_module *module, odin3_net_id net) {
+    return net_keep(module, keep_key_of(module), net);
+}
+
 /* The group of key in domains (made when missing; the map holds key -> index). */
 static odin3_abc_domain *domain_group(odin3_vec *domains, odin3_u64map *index,
                                       const odin3_abc_domain *proto, uint64_t key) {
