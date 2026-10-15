@@ -877,6 +877,13 @@ then the options considered.
     | mkDelayWorker32B | 0.09 | 17 | 18 | 0 | 0 | 1350 | 12564 | 1157 | 961 | 92 | 2.08 | same | yes |
     | mcml | 1.36 | 115 | 225 | 0 | 0 | 5368 | 172262 | 10484 | 15508 | 108 | 1.42 | same | yes |
 
+36. **3B `lower`: bit nodes are named after their word cell** (Peter, 2026-10-15: "yes do that
+    naming"). Each bit node a word cell lowers to is named `<cell>.<op><i>` (e.g. `u_add.xor3`),
+    made unique by the IR's `_N` rule, in the style of 3C's hardmap names (#33); a word cell with no
+    name leaves its bit nodes unnamed. Replaces the spec's "bit nodes are unnamed" agent default
+    (spec 3B §11), so a lowered netlist stays readable for reverse engineering; provenance is
+    unchanged. 3B Tasks 1–3 (paused) predate this and are updated when 3B resumes.
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this

@@ -405,9 +405,10 @@ the rule creates shares one DERIVED record whose single parent is the word cell'
 `odin3_prov_index_by_loc` on `foo.v:42` reaches the dead `$add` (slot or tombstone, IR-6) and every
 gate made from it, and a provenance name leads with the word cell's source. Merged nets
 (`lower_connect`) are rewiring (IR-15): they keep their records. Memory nodes get the `$mem`'s
-record; the clock inverter of §6.1 gets the FF's. Bit nodes are **unnamed**; the output nets keep
-their names and wires (agent default; naming each bit node `<name>[i]` costs memory for nothing
-the writers use, and DESIGN §13 #6 is open).
+record; the clock inverter of §6.1 gets the FF's. Bit nodes are **named** `<cell>.<op><i>` after the
+word cell (e.g. `u_add.xor3`; a name the cell lacks is left unnamed), made unique by the IR's `_N`
+rule, as 3C's hardmap names (PHASE3 #33); the output nets keep their names and wires (Peter,
+2026-10-15, PHASE3 #36: lowered netlists stay readable for reverse engineering).
 
 **Attributes.** Only `keep` is copied from the word cell to every node it creates (so `opt_clean`
 still honours it). `src`-style attributes live in provenance.
