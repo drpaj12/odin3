@@ -6,6 +6,24 @@
 # exit-check fails an eq-x micro that is not recorded, one whose excluded outputs differ from the
 # record, and a record whose design now passes (XPASS) or names no micro (stale).
 #
-# No micro has been recorded: the full 434-micro run has not produced an eq-x result yet. Anything the
-# run reports as eq-x needs its excluded outputs analysed (why are they x: an uninitialised RAM, an
-# unconnected input, a floating net) before a record is added here.
+# Recorded (2H micro triage, 2026-10-14): large/sv_chip0_hierarchy_no_mem.v, the Parmys signed-adder
+# unconn padding that tests/exit/vtr_eqx.txt describes for stereovision0. Anything else the run reports
+# as eq-x needs its excluded outputs analysed (why are they x: an uninitialised RAM, an unconnected
+# input, a floating net) before a record is added here. An eq-x result over guessed black-box pairs
+# is not an eq-x: equiv-check reports it as unproven (the cones hide what a wrong pairing breaks).
+design large/sv_chip0_hierarchy_no_mem.v 157 a6d01bc11dd13baa6a2bf258ad16d4a59085e0958724161db45bdfa305ef03ac outputs downstream of Parmys unconn padding of signed adders after wreduce (2H micro triage 2026-10-14): the Parmys golden is equivalent (dsec, no x-cone) to Yosys read_verilog through the same Parmys script, and with wreduce removed from the shared script the Odin III splice is equivalent to that too; with wreduce 191 (golden) vs 170 (splice) adder pins are padded with unconn (218 vs 197 unconn uses, 50 on both sides without wreduce) because wreduce signed rewrite depends on cell order: the Parmys defect of the exit_vtr stereovision0 record, same submodules
+bus large/sv_chip0_hierarchy_no_mem.v depth_out 8
+bus large/sv_chip0_hierarchy_no_mem.v tm3_sram_addr 17
+bus large/sv_chip0_hierarchy_no_mem.v tm3_sram_data_out 64
+bus large/sv_chip0_hierarchy_no_mem.v tm3_sram_oe 1
+bus large/sv_chip0_hierarchy_no_mem.v tm3_sram_we 8
+bus large/sv_chip0_hierarchy_no_mem.v tm3_vidout_blank 1
+bus large/sv_chip0_hierarchy_no_mem.v tm3_vidout_blue 8
+bus large/sv_chip0_hierarchy_no_mem.v tm3_vidout_green 8
+bus large/sv_chip0_hierarchy_no_mem.v tm3_vidout_hsync 1
+bus large/sv_chip0_hierarchy_no_mem.v tm3_vidout_red 10
+bus large/sv_chip0_hierarchy_no_mem.v tm3_vidout_vsync 1
+bus large/sv_chip0_hierarchy_no_mem.v v_d_reg_s1_left_2to0 8
+bus large/sv_chip0_hierarchy_no_mem.v v_d_reg_s1_right_2to0 8
+bus large/sv_chip0_hierarchy_no_mem.v v_d_reg_s4_left_2to0 7
+bus large/sv_chip0_hierarchy_no_mem.v v_d_reg_s4_right_2to0 7

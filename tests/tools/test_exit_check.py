@@ -485,6 +485,14 @@ class ArgvTest(ExitCheckCase):
         self.assertTrue(equiv[-2].endswith("g/b/b.parmys.blif"))
         self.assertEqual(len(self.calls("equiv-check")), 1)
 
+    def test_equiv_box_budget_is_passed_to_equiv_check_only_when_given(self) -> None:
+        self.micro("g", "b", "EQV\n")
+        self.assertEqual(self.run_tool()[0], 0)
+        self.assertNotIn("--box-probe-budget", self.calls("equiv-check")[0])
+        self.assertEqual(self.run_tool("--equiv-box-budget", "900")[0], 0)
+        equiv = self.calls("equiv-check")[-1]
+        self.assertEqual(equiv[equiv.index("--box-probe-budget") + 1], "900")
+
     def test_every_child_including_sp_splice_runs_through_memcap(self) -> None:
         self.micro("g", "a", "EQV\n")
         with mock.patch.object(memcap, "run", wraps=memcap.run) as run:
@@ -787,15 +795,42 @@ class ListedTest(ExitCheckCase):
         self.assertEqual(code, 1)
         self.assertIn("fails differently from the listing", out)
 
-    def test_a_capped_golden_is_an_error_not_listable(self) -> None:
-        path = self.micro("g", "big", "x\n", top=None)
-        blif = self.golden / "regression" / "verilog" / "g" / "big" / "big.parmys.blif"
+    def capped(self, leaf: str = "big") -> Path:
+        """A micro whose Parmys golden run was killed at its memory cap, with the oracle's log."""
+        path = self.micro("g", leaf, "x\n", top=None)
+        blif = self.golden / "regression" / "verilog" / "g" / leaf / f"{leaf}.parmys.blif"
         blif.parent.mkdir(parents=True)
         self.prov(blif, path, status="capped")
-        listing = self.expect("g/big.v [capped] x\n")
-        code, out, _ = self.run_tool("--expect-fail", listing)
+        blif.with_suffix(".log").write_text("run-oracle: killed at the 16824 MB memory cap\n",
+                                            encoding="utf-8")
+        return path
+
+    def test_an_unlisted_capped_golden_fails(self) -> None:
+        self.capped()
+        code, out, _ = self.run_tool()
         self.assertEqual(code, 1)
-        self.assertIn("Parmys run capped (no verdict)", out)
+        self.assertIn("killed at its memory cap (no verdict on the design)", out)
+        self.assertIn("FAIL oracle capped, not listed", out)
+
+    def test_a_capped_golden_is_listed_as_no_golden_never_a_pass(self) -> None:
+        """A cap kill of the oracle is a size limit, no verdict on the design: it can be listed in
+        the no-golden file (needle in the oracle's log), is counted there and never as a pass."""
+        self.capped()
+        self.micro("g", "ok", "IDENT\n")
+        listing = self.expect("g/big.v [memory cap] 524288 RAM slices: the oracle needs > 16 GB\n")
+        code, out, err = self.run_tool("--expect-no-golden", listing)
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("no-golden  g/big.v", out)
+        self.assertIn("NOT CHECKED 1 no-golden", out)
+        self.assertIn("PROVEN 1 (1 identical", out)
+        code, out, _ = self.run_tool("--expect-no-golden", self.expect("g/big.v [other] x\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("fails differently from the listing", out)
+
+    def test_a_capped_golden_is_not_a_listed_reject(self) -> None:
+        self.capped()
+        code, out, _ = self.run_tool("--expect-fail", self.expect("g/big.v [memory cap] x\n"))
+        self.assertEqual(code, 1)
         self.assertIn("(listed, but not for this result)", out)
 
     def test_a_listed_design_that_passes_is_xpass(self) -> None:

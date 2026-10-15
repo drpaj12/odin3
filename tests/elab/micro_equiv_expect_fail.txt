@@ -73,6 +73,13 @@ preprocessor/default_net.v [Unsupported default nettype: tri] Yosys 0.55 side B 
 keywords/integer/integer_outside.v [Incompatible re-declaration of wire] Yosys 0.55 side B rejects the non-ANSI `output integer c; integer c;` re-declaration (coverage row M3)
 keywords/macromodule/macromodules_modules.v [syntax error, unexpected TOK_ID] Yosys 0.55 side B rejects `macromodule` (as operators/macromudule_test.v, coverage row M8); Odin III elaborates it as a module
 keywords/macromodule/multiple_macromodules.v [syntax error, unexpected TOK_ID] Yosys 0.55 side B rejects `macromodule` (as operators/macromudule_test.v, coverage row M8); Odin III elaborates it as a module
+
+# 2H-triage (PHASE2 #27, Peter 2026-10-14): under --vtr-compat (this sweep's setting) Odin III resolves
+# the four tri-state drivers of `data` as Parmys does (data = bus0, the enables dropped; the exit-check
+# golden compare is `identical`), while the micro's `// elab-check: --yosys-tribuf` side B is Yosys's
+# `tribuf -logic` bus (IEEE reading). Plain Yosys cannot be side B either: its opt_clean shorts the
+# inputs and the BLIF writer then drives input bus1 ('more than one driver').
+syntax/multi_assignment.v [busout = 4'hF (a), busout = 4'h7 (b)] --vtr-compat follows Parmys (data = bus0, enables dropped; PHASE2 #27): with s = 2 side A drives bus0 (F), side B (tribuf -logic bus) bus2 (7); side B is the IEEE bus; the guards are exit_micro (proves it identical to the Parmys golden) and elab_tribuf_default_equiv (default mode against Yosys)
 # --- 2H: Yosys side B is too big for the sweep's 4G cap (elab-equiv exit 4, unproven) ---
 # Side B is the oracle reading the source itself, so a cap kill there is the oracle's size limit and
 # says nothing about odin3: elab-equiv reports `unproven: Yosys side B exceeded its memory cap (4G)`

@@ -1,7 +1,8 @@
-# Micros with no Parmys golden because of the ORACLE HARNESS, not because Parmys rejects the design.
+# Micros with no Parmys golden because of the ORACLE HARNESS (or an oracle SIZE LIMIT: a run killed at its
+# memory cap, status=capped), not because Parmys rejects the design.
 # Peter's ruling of 2026-10-14 ("2a") regenerated the other 36 of the original 40 with
 # `tools/run-oracle.sh --include-dir/--define` (the include directory and the macros the design's own
-# parent file defines; 24 now have a golden, 12 are Parmys rejections in micro_expect.txt). These 4 are
+# parent file defines; 24 now have a golden, 12 are Parmys rejections in micro_expect.txt). These 4 harness-gap micros are
 # left: the `.generic` templates are never compiled on their own upstream, only through the `.vh`
 # wrappers (`range_and_wide.vh`, ...), each of which defines its own `WIDTH` (3, 32, 256, ...) and the
 # gate `operator`. No single value is the original intent, so none is guessed. They are the `no-golden`
@@ -16,3 +17,4 @@ keywords/.generic/range_any_width_binary_test.v [undefined macro] oracle harness
 keywords/.generic/range_any_width_unary_test.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `WIDTH.
 keywords/.generic/replicate_any_width_binary_test.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `WIDTH.
 keywords/.generic/replicate_any_width_unary_test.v [undefined macro] oracle harness gap (a generic test that needs -D on the command line): ERROR: Unimplemented compiler directive or undefined macro `WIDTH.
+large/LargeRam.v [memory cap] oracle size limit, not a verdict on the design: `single_port_ram` with ADDR_WIDTH 33 and DATA_WIDTH 2 is split to the arch's 15-bit address, 2^18 memories x 2 bits = 524288 RAM slices (Odin II's own BLIF has 524288 single_port_ram and is 915 MB); the Parmys run was killed at its 16824 MB cap (golden .prov status=capped) and the same Yosys/Parmys half is killed at 3 GiB after Odin III's front end has written a.il (sp-splice probe 2026-10-14), so no larger cap that fits this machine gives a golden

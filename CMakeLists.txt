@@ -241,6 +241,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_warn.c
     src/frontends/elab/elab2_tri.c
     src/frontends/elab/elab2_trilogic.c
+    src/frontends/elab/elab2_trivtr.c
     src/frontends/elab/elab2_mem.c
     src/frontends/elab/elab2_memport.c
     src/frontends/elab/elab2_memscan.c
@@ -1151,6 +1152,14 @@ if(BUILD_TESTING)
     target_include_directories(test_elab_vtr_initial PRIVATE ${_gen})
     add_dependencies(test_elab_vtr_initial verilog_generated)
     target_compile_definitions(test_elab_vtr_initial PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D-VI2: several tri-state drivers of an internal net under read_verilog --vtr-compat
+    # (Peter 2026-10-14; PHASE2 decision 27).
+    odin3_add_unit_test(test_elab_vtr_multidriver)
+    target_sources(test_elab_vtr_multidriver PRIVATE tests/unit/proc_test.c)
+    target_include_directories(test_elab_vtr_multidriver PRIVATE ${_gen})
+    add_dependencies(test_elab_vtr_multidriver verilog_generated)
+    target_compile_definitions(test_elab_vtr_multidriver PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)
@@ -2075,6 +2084,19 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/verilog/case-bridge)
         set_tests_properties(elab_case_bridge PROPERTIES
             LABELS differential SKIP_RETURN_CODE 77)
+        # 2H-triage (PHASE2 #27, review M-I3): the default (IEEE) reading of several tri-state
+        # drivers on an internal net, without --vtr-compat, against Yosys 0.55 `tribuf -logic`: the
+        # micro multi_assignment and the D3 accept files. The --vtr-compat reading of the micro
+        # differs by design (micro_equiv_expect_fail.txt). Exit 77 (skip) as above.
+        add_test(NAME elab_tribuf_default_equiv
+            COMMAND sh -c "for f in \"$4\"/syntax/multi_assignment.v \"$5\"/D3_*.v; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --yosys-tribuf \"$f\" || exit $?; done"
+                    ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog
+                    ${PROJECT_SOURCE_DIR}/tests/elab/accept)
+        set_tests_properties(elab_tribuf_default_equiv PROPERTIES
+            LABELS differential SKIP_RETURN_CODE 77)
         # 2D Task 23 (spec 14.3): elab-equiv on every source of tests/verilog/call-bridge: unrolled
         # loops, functions and tasks inlined (in processes and in continuous contexts), nested calls
         # and variable-index reads of net arrays. Exit 77 (skip) as above.
@@ -2423,8 +2445,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # netlist-compare, then equiv-check --x-report. Classes: identical, equivalent (pass); eq-x
         # (passes only with a reviewed record, tests/exit/*_eqx.txt); listed-reject (Parmys itself
         # rejects it, tests/exit/micro_expect.txt); unproven (equiv-check's tool limits,
-        # tests/exit/vtr_unproven.txt: their own bucket, never a pass); no-golden (no golden, or an
-        # oracle harness gap, tests/exit/micro_nogolden.txt: never counted); differs, error, hard
+        # tests/exit/{micro,vtr}_unproven.txt: their own bucket, never a pass); no-golden (no
+        # golden, an oracle harness gap or an oracle killed at its memory cap,
+        # tests/exit/micro_nogolden.txt: never counted); differs, error, hard
         # (fail; hard exits 3). Smallest first, one design at a time, every child, sp-splice
         # included, under memcap (3G; the four biggest files 5G, alone, in the 6G slice). The run
         # fails when fewer than --min-checked designs were proven, so a wrong golden tree cannot
@@ -2443,7 +2466,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 COMMAND ${_exit_check}
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/exit/micro_expect.txt
                         --expect-no-golden ${PROJECT_SOURCE_DIR}/tests/exit/micro_nogolden.txt
+                        --expect-unproven ${PROJECT_SOURCE_DIR}/tests/exit/micro_unproven.txt
                         --eqx-record ${PROJECT_SOURCE_DIR}/tests/exit/micro_eqx.txt
+                        --equiv-box-budget 900
                         --min-checked 400 --work ${CMAKE_BINARY_DIR}/exit-work/micro
                         --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
                         ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
