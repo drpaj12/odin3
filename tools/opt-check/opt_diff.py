@@ -242,19 +242,20 @@ class Diff:
         """Step 4. A SAT proof that times out falls back to the BLIF cec of the two lowered
         netlists (``--no-cec``: it stays a hard timeout). The cec's "no verdict" is a difference,
         worded ``unproven``, never a pass."""
+        limit = ""
         try:
             return self.checker.refines(run_dir / "yosys.il", run_dir / "odin.il", f"{slug}.refine")
         except opt_equiv.CrashError as exc:
-            if not exc.timed_out or self.args.no_cec:
+            if not exc.size_limit or self.args.no_cec:
                 raise
+            limit = str(exc)
         blifs = self.lower(run_dir)
         verdict, text = opt_equiv.cec_blifs(blifs[0], blifs[1], self.cap, self.work)
         if verdict == opt_equiv.CEC_PROVED:
             return True, ""
         if verdict == opt_equiv.CEC_DIFFERS:
             return False, text
-        return False, (f"unproven: the SAT proof timed out after "
-                       f"{opt_equiv.REFINE_TIMEOUT_SECONDS:.0f} s; {text}")
+        return False, (f"unproven: the SAT proof hit its size limit ({limit}); {text}")
 
     def lower(self, run_dir: Path) -> list[Path]:
         """Both sides to BLIF (step 5's lowering); made once per run directory."""

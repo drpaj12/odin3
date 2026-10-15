@@ -93,10 +93,17 @@ class CrashError(ToolError):
     """A child crashed, was killed (signal, memory cap) or timed out (exit 3, hard). ``what`` names
     the step (``odin3``, ``yosys``, ``netlist-compare``...)."""
 
-    def __init__(self, what: str, message: str, timed_out: bool = False) -> None:
+    def __init__(self, what: str, message: str, timed_out: bool = False,
+                 cap_killed: bool = False) -> None:
         super().__init__(f"{what}: {message}")
         self.what = what
         self.timed_out = timed_out
+        self.cap_killed = cap_killed  # SIGKILL: the memory cap (or the OOM killer)
+
+    @property
+    def size_limit(self) -> bool:
+        """A timeout or a cap kill of a proof: the design is too big for the check, not broken."""
+        return self.timed_out or self.cap_killed
 
 
 exe = toolutil.exe
@@ -116,7 +123,8 @@ def capped(what: str, argv: Sequence[str], cap: int, *, cwd: Path,
         raise CrashError(what, f"timed out after {timeout:.0f} s", True) from exc
     if toolutil.is_crash(done.returncode):
         log = (done.stdout or "") + (done.stderr or "")
-        raise CrashError(what, f"killed (exit {done.returncode}): {why(log)}")
+        raise CrashError(what, f"killed (exit {done.returncode}): {why(log)}",
+                         cap_killed=done.returncode in (-9, 137))
     return done
 
 
@@ -356,7 +364,9 @@ class Checker:
             try:
                 done = self.child([self.yosys, "-p", script])
             except CrashError as exc:
-                if exc.timed_out:  # a timeout stops the pair
+                if exc.size_limit:  # a timeout or a cap kill stops the pair
+                    if aborted is not None and exc.timed_out:  # (a lowering already said no)
+                        raise aborted from exc
                     raise
                 crashed = crashed or exc  # a lowering that aborts proves nothing: try the next
                 continue
@@ -443,12 +453,13 @@ def check_all(run: Run, checker: Checker) -> list[Verdict]:
     timeouts = 0
     for pair in run.pairs:
         if timeouts >= MAX_SAT_TIMEOUTS:  # the rest of this design is as big: not tried
-            verdicts.append(Verdict(pair, False, f"not tried after {timeouts} SAT timeouts", True))
+            verdicts.append(Verdict(pair, False, f"not tried after {timeouts} SAT size-limit hits",
+                                    True))
             continue
         try:
             ok, reason = checker.refines(pair.before, pair.after, pair.name)
         except CrashError as exc:
-            if not exc.timed_out:
+            if not exc.size_limit:
                 raise
             timeouts += 1
             verdicts.append(Verdict(pair, False, str(exc), True))
@@ -482,7 +493,7 @@ def report(verdicts: Sequence[Verdict], counters: dict[str, int]) -> list[str]:
     bad = sum(1 for v in verdicts if not v.ok and not v.inconclusive)
     lines.append(f"{TOOL}: {len(verdicts)} calls changed something: "
                  f"{len(verdicts) - bad - slow} refine, {bad} do not"
-                 + (f", {slow} inconclusive (SAT timeout)" if slow else ""))
+                 + (f", {slow} inconclusive (SAT size limit)" if slow else ""))
     if not verdicts:
         lines.append(f"{TOOL}: NOTE: 0 calls changed anything: nothing was checked")
     return lines
@@ -528,16 +539,18 @@ def execute(args: argparse.Namespace, work: Path) -> tuple[int, bool]:
     if slow and not bad and not args.no_cec:
         verdict, text = settle_inconclusive(run, verdicts, args, work)
         if verdict == CEC_PROVED:
-            print(f"{TOOL}: {slow} calls timed out in SAT; the whole script is proved by the BLIF "
-                  "cec (input against final result)", flush=True)
+            print(f"{TOOL}: {slow} calls hit the SAT size limit (timeout or cap kill); the whole "
+                  "script is proved by the BLIF cec (input against final result)", flush=True)
             slow = 0
         else:
-            print(f"{TOOL}: unproven: {slow} calls timed out in SAT and the whole script is "
+            print(f"{TOOL}: unproven: {slow} calls hit the SAT size limit (timeout or cap kill) "
+                  f"and the whole script is "
                   f"{'NOT equivalent' if verdict == CEC_DIFFERS else 'not decided'} by the BLIF "
                   f"cec: {text}", flush=True)
             return EXIT_FAIL, True
     elif slow and not bad:
-        print(f"{TOOL}: unproven: {slow} calls timed out in SAT", flush=True)
+        print(f"{TOOL}: unproven: {slow} calls hit the SAT size limit (timeout or cap kill)",
+              flush=True)
         return EXIT_FAIL, True
     if len(verdicts) < args.min_changed:
         print(f"{TOOL}: {len(verdicts)} calls changed something, want at least "

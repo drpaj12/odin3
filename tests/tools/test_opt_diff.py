@@ -349,11 +349,25 @@ class RunTest(unittest.TestCase):
 
     def test_a_refinement_crash_is_hard_not_a_refine_difference(self) -> None:
         """Review I3: a dying Yosys is not `refine: DIFFERS`, and no needle-less line absorbs it."""
-        self.tree.set_spec(refine_signal=9)
+        self.tree.set_spec(refine_signal=11)
         extra = self.tree.expect("d.v phase2 refine anything goes\n")
         code, out, err = self.tree.run(*extra)
         self.assertEqual(code, 3, out + err)
         self.assertNotIn("differs as listed", out)
+
+    def test_a_cap_kill_of_the_refinement_is_a_size_limit_not_a_crash(self) -> None:
+        """SIGKILL (the memory cap) takes the BLIF cec fallback like a timeout: unproven there is a
+        difference a narrow expect line may list, never a pass."""
+        self.tree.set_spec(refine_signal=9)
+        with mock.patch.object(opt_equiv, "cec_blifs",
+                               return_value=(opt_equiv.CEC_UNPROVEN, "BLIF cec: no verdict")):
+            code, out, err = self.tree.run()
+            self.assertEqual(code, 1, out + err)
+            self.assertIn("refine: DIFFERS: unproven: the SAT proof hit its size limit", out)
+            extra = self.tree.expect("d.v phase2 refine untested for now (size limit)\n")
+            code, out, err = self.tree.run(*extra)
+            self.assertEqual(code, 0, out + err)
+            self.assertIn("differs as listed (untested for now (size limit))", out)
 
     def test_a_netlist_compare_crash_is_hard_not_an_identity_difference(self) -> None:
         self.tree.set_spec(compare_signal=11)

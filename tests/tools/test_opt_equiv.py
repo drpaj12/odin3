@@ -324,10 +324,16 @@ class MainTest(unittest.TestCase):
     def test_a_yosys_crash_or_timeout_is_hard_not_a_refutation(self) -> None:
         """Review I3: rc -9 or a timeout of the proof is not `not a refinement`."""
         self.fakes.spec(self.pair("0001", "opt_expr"))
-        for status in (-9, -11, 137):
+        for status in (-11, -6):
             with self.subTest(status=status):
                 code, out, err = self.run_with(yosys_exits(status))
                 self.assertEqual(code, 3, out + err)
+                self.assertNotIn("not a refinement", out + err)
+        for status in (-9, 137):  # SIGKILL = the memory cap: a size limit, unproven, never a pass
+            with self.subTest(status=status):
+                code, out, err = self.run_with(yosys_exits(status), "--no-cec")
+                self.assertEqual(code, 1, out + err)
+                self.assertIn("unproven", out)
                 self.assertNotIn("not a refinement", out + err)
 
         def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
@@ -371,8 +377,8 @@ class MainTest(unittest.TestCase):
         code, out, _ = self.run_with(hang, "--no-cec")
         self.assertEqual(code, 1, out)
         self.assertEqual(len(calls), oe.MAX_SAT_TIMEOUTS)
-        self.assertIn("4 inconclusive (SAT timeout)", out)
-        self.assertIn("not tried after 2 SAT timeouts", out)
+        self.assertIn("4 inconclusive (SAT size limit)", out)
+        self.assertIn("not tried after 2 SAT size-limit hits", out)
 
     def test_cec_blif_verdicts(self) -> None:
         """equiv-check exit 0 proves, 1 differs, anything else (4 unproven, 2 unsupported) decides
