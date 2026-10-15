@@ -44,7 +44,8 @@ static bool is_print_command(const char *line) {
 /* One output line to the run's log file, --log and the pass log. */
 static void emit_line(odin3_abc_run *run, const char *line) {
     if (line[0] != '\0') {
-        (void)snprintf(run->last_line, sizeof run->last_line, "%s", line);
+        (void)snprintf(run->last_line, sizeof run->last_line, "%.*s",
+                       (int)sizeof run->last_line - 1, line);
     }
     if (run->runlog != NULL) {
         (void)fprintf(run->runlog, "%s\n", line);
