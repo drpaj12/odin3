@@ -30,6 +30,7 @@ for _sub in (
     "tools/elab-check",
     "tools/opt-check",
     "tools/flatten-check",
+    "tools/lower-check",
     "tools/exit-check",
     "tools/proc-check",
     "tools/vtr-qor",
