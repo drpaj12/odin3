@@ -1,0 +1,10 @@
+# two_ports.blif - two output ports with the same function: they must stay two distinct nets
+# (3D plan Task 19, Review Focus 3; spec 6.5 phase B).
+.model two_ports
+.inputs a b
+.outputs y1 y2
+.names a b y1
+11 1
+.names a b y2
+11 1
+.end

@@ -17,6 +17,13 @@
 /* The widest $lut: WIDTH is 1 .. ODIN3_LUT_MAX_WIDTH, so LUT has at most 65,536 bits. */
 enum { ODIN3_LUT_MAX_WIDTH = 16 };
 
+/* A table is stored in 64-bit words (see odin3_lut_words); the most a $lut's table holds. */
+enum {
+    ODIN3_LUT_WORD_BITS = 64,
+    ODIN3_LUT_WORD_SHIFT = 6, /* log2(ODIN3_LUT_WORD_BITS) */
+    ODIN3_LUT_MAX_WORDS = 1 << (ODIN3_LUT_MAX_WIDTH - ODIN3_LUT_WORD_SHIFT)
+};
+
 /* Parameter indices (definition order) and port indices of $lut. */
 enum { ODIN3_LUT_P_WIDTH = 0, ODIN3_LUT_P_LUT = 1 };
 enum { ODIN3_LUT_PORT_A = 0, ODIN3_LUT_PORT_Y = 1 };

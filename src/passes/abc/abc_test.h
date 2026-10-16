@@ -27,6 +27,13 @@ void odin3_abc_test_set_aliases(const odin3_abc_alias *table, uint32_t n);
 void odin3_abc_test_set_limits(const odin3_abc_limits *limits);
 
 /*
+ * Lowers the pass-level caps (clock domains, AIG objects, name-map objects, the provenance edge
+ * budget; abc.h): a non-zero field replaces a higher cap (a test may only lower them), 0 keeps the
+ * default. NULL restores the defaults.
+ */
+void odin3_abc_test_set_run_limits(const odin3_abc_run_limits *limits);
+
+/*
  * Makes a copy of *engine (not validated; its strings and self must outlive its use) what
  * odin3_abc_engine_get returns, ahead of the registered engine; NULL clears the override, so get
  * returns the registered engine (or NULL) again. Never fails, never logs.

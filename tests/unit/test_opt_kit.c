@@ -523,7 +523,9 @@ static void test_new_cell_budget(void) {
     uint32_t nodes = odin3_module_node_end(fx.module);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_kit_new_cell(&fx.oc, &wide, &node));
     TEST_ASSERT_EQUAL_STRING(
-        "opt needs more than 1 bytes (the design's budget is 60% of physical memory)", last_error);
+        "opt needs more than 1 bytes (the design's budget is 1 bytes: the smaller of 60% of "
+        "physical memory and the cgroup's memory.max)",
+        last_error);
     TEST_ASSERT_EQUAL_UINT32(nets, odin3_module_net_end(fx.module));
     TEST_ASSERT_EQUAL_UINT32(nodes, odin3_module_node_end(fx.module));
     check_full();

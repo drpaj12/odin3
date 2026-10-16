@@ -3,7 +3,7 @@
 Usage::
 
     equiv-check A.blif B.blif [--abc PATH] [--keep-temp] [--strict-init] [--no-io-normalize]
-                [--no-cut] [--match-unnamed] [--x-report]
+                [--no-cut] [--match-unnamed] [--x-report] [--blackbox M[,M...]]
 
 Exit 0 equivalent, 1 not equivalent (including mismatched primary I/O sets and black-box
 cut-point inputs that are wired differently; the output then holds a line that starts
@@ -59,6 +59,14 @@ by a primary clock is fine (its outputs are free inputs), but a clocked black bo
 state is not modelled: only its connections are compared.  The cut is on whenever black
 boxes are present; ``--no-cut`` restores the old behaviour of rejecting them (exit 2, and
 ``.gate`` is rejected as an unsupported directive).
+
+``--blackbox M[,M...]`` (3D Task 19; the ``abc`` pass changes net names but not its hard blocks):
+the instances of the named models (``adder`` included, which is then cut instead of expanded) are
+cut as above and paired across the files by ``.cname`` when both have one, else by occurrence order
+per model (file order, which ``write_blif`` keeps).  Their outputs become shared primary inputs,
+their inputs compared outputs.  A model with a different number of instances in the two files is
+exit 2: ``equiv-check: --blackbox: model '<m>' has <x> instances in <A> and <y> in <B>``.  Several
+clocks stay unsupported (exit 2) as before.
 
 ``--match-unnamed`` (2H; spelled ``--match-dollar`` before) matches every black box that has no
 ``.cname`` by *simulation signature* instead of by a name: Parmys writes no ``.cname`` for its hard
@@ -149,6 +157,7 @@ import rampair  # noqa: E402
 TOOL = "equiv-check"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TIMEOUT = 600
+LISTED_PREFIX = "?bb:"  # provisional key of an instance of a --blackbox model without a .cname
 MATCH_ROUNDS = 12  # most simulate-and-anchor rounds of pair_unnamed
 
 # Verdict strings printed by ABC (see third_party/abc/src):
@@ -346,8 +355,11 @@ def _gate_adder_model(cell: blif.Subckt) -> blif.Model:
 
 class _Flattener:
     def __init__(self, netlist: blif.Netlist, strict_init: bool, cut: bool,
-                 normalize: bool, match_unnamed: bool = False) -> None:
+                 normalize: bool, match_unnamed: bool = False,
+                 blackbox: frozenset[str] = frozenset()) -> None:
         self.netlist = netlist
+        self.blackbox = blackbox  # models cut and paired by .cname or occurrence (--blackbox)
+        self.occurrence: dict[str, int] = {}
         self.cut = cut
         self.normalize = normalize
         self.match_unnamed = match_unnamed
@@ -415,7 +427,7 @@ class _Flattener:
         conns = {f: frame.resolve(a) for f, a in cell.conns}
         if sub is None and cell.model == "adder":
             sub = _gate_adder_model(cell)
-        if sub is None or (sub.blackbox and sub.name != "adder"):
+        if sub is None or (sub.blackbox and sub.name != "adder") or cell.model in self.blackbox:
             self.add_blackbox(cell, sub, frame)
             return
         if sub.blackbox:
@@ -496,6 +508,9 @@ class _Flattener:
         for attr, value in cell.attrs:
             if attr == ".cname" and value:
                 return "/".join([*frame.path[1:], norm(value)])
+        if cell.model in self.blackbox:  # --blackbox: the n-th instance of the model
+            self.occurrence[cell.model] = self.occurrence.get(cell.model, 0) + 1
+            return f"{LISTED_PREFIX}{cell.model}:{self.occurrence[cell.model]}"
         if self.match_unnamed:
             return None
         for formal, net in pins.items():
@@ -572,12 +587,12 @@ def show(net: str) -> str:
 
 def flatten(netlist: blif.Netlist, strict_init: bool = False, allow_undriven: bool = False,
             cut: bool = True, normalize: bool = True, check: bool = True,
-            match_unnamed: bool = False) -> Flat:
+            match_unnamed: bool = False, blackbox: frozenset[str] = frozenset()) -> Flat:
     """Flatten ``netlist`` into one model; black boxes are cut (``cut``) or rejected.
 
     ``check=False`` leaves the undriven-net check to the caller (``check_undriven``), so that
     black-box mismatches between the two files are reported first."""
-    flat = _Flattener(netlist, strict_init, cut, normalize, match_unnamed).run()
+    flat = _Flattener(netlist, strict_init, cut, normalize, match_unnamed, blackbox).run()
     if check:
         check_undriven(flat, allow_undriven)
     return flat
@@ -1216,6 +1231,28 @@ def pair_ram_groups(flats: Sequence[Flat], normalize: bool = True,
     return result
 
 
+def pair_listed(flats: Sequence[Flat], models: frozenset[str]) -> int:
+    """Pair the instances of the ``--blackbox`` models across the two flats and give each pair one
+    key in both; returns the number of pairs.  Instances with the same ``.cname`` pair by it; the
+    rest of a model pair by occurrence (file order).  A model with a different number of
+    instances in the two files is EquivError (exit 2)."""
+    fa, fb = flats
+    pairs = 0
+    for model in sorted(models):
+        boxes_a = [b for b in fa.blackboxes if b.cell_type == model]
+        boxes_b = [b for b in fb.blackboxes if b.cell_type == model]
+        if len(boxes_a) != len(boxes_b):
+            raise EquivError(f"--blackbox: model '{model}' has {len(boxes_a)} instances in "
+                             f"{fa.path} and {len(boxes_b)} in {fb.path}")
+        named_b = {b.key for b in boxes_b if not b.key.startswith(LISTED_PREFIX)}
+        named_both = {b.key for b in boxes_a if b.key in named_b}
+        left_a = [b for b in boxes_a if b.key not in named_both]
+        left_b = [b for b in boxes_b if b.key not in named_both]
+        _rekey(fb, {y.key: x.key for x, y in zip(left_a, left_b, strict=True)})
+        pairs += len(boxes_a)
+    return pairs
+
+
 def match_blackboxes(flats: Sequence[Flat]) -> None:
     """Require the cut black boxes of two flats to match one-to-one by name, type and ports.
 
@@ -1553,9 +1590,13 @@ def _pair_boxes(flats: Sequence[Flat], args: argparse.Namespace) -> tuple[int, i
 
 def _check(args: argparse.Namespace) -> int:
     nets = [blif.parse_file(f, gates=not args.no_cut) for f in args.files]
+    listed = frozenset(m for m in args.blackbox.split(",") if m) if args.blackbox else frozenset()
     flats = [flatten(n, args.strict_init, args.allow_undriven, not args.no_cut,
-                     not args.no_io_normalize, check=False, match_unnamed=args.match_unnamed)
+                     not args.no_io_normalize, check=False, match_unnamed=args.match_unnamed,
+                     blackbox=listed)
              for n in nets]
+    if listed:
+        pair_listed(flats, listed)
     paired, guessed, probed = _pair_boxes(flats, args)
     match_blackboxes(flats)
     for flat in flats:
@@ -1621,6 +1662,13 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--allow-undriven", action="store_true",
                     help="tie undriven nets that reach an output or latch to 0 instead of "
                     "failing (exit 2)")
+    ap.add_argument("--blackbox", metavar="M[,M...]", default="",
+                    help="cut the instances of these models (for example "
+                    "adder,multiply,single_port_ram,dual_port_ram) and pair them across the "
+                    "files by .cname when both have one, else by occurrence order per model; "
+                    "their outputs become shared primary inputs and their inputs are compared "
+                    "outputs; a model with a different number of instances in the two files "
+                    "is an error (exit 2)")
     ap.add_argument("--no-cut", action="store_true",
                     help="reject black boxes other than adder (exit 2) instead of cutting them "
                     "out as free outputs / compared inputs matched by instance name")

@@ -349,12 +349,11 @@ and `LUT[i]` is bit *i* of the parameter counted from its least significant bit:
 semantics (text forms write `LUT` MSB first). Its `const_value` is 0 or 1 when every `LUT` bit
 is, and it simulates (1E). The writers today: `write_json` and `write_rtlil` write it as Yosys
 `$lut` (`LUT` MSB first; RTLIL spells the output of a constant one as the constant),
-`write_verilog` as a generic instance `\$lut #(.WIDTH(…), .LUT(…))` (`LUT` MSB first),
-`write_dot` as a node labelled `$lut`, and `write_blif` (3E-5, both dialects) as a BLIF
+`write_verilog` (3D Task 9) as `assign Y = <expr>;` over the same cover, a sum of products
+(`~(…)` for an off-set cover, `1'b0`/`1'b1` for a constant one), `write_dot` as a node labelled `$lut`, and `write_blif` (3E-5, both dialects) as a BLIF
 `.names A[0] … A[WIDTH−1] Y` with an irredundant cover (3E's `odin3_blif_isop`: the shorter of
 the on-set and off-set ISOP, the on-set on a tie), a constant one as the zero-input `.names Y`,
-so a BLIF round trip turns it into the `$sop` with that cover. 3D Task 9 makes `write_verilog`
-print that cover as a sum of products. `abc` is its only producer in Phase 3 and never makes a
+so a BLIF round trip turns it into the `$sop` with that cover. `abc` is its only producer in Phase 3 and never makes a
 constant one.
 
 **IR-11 Registration.** Built-in and plugin cell-type *definitions* live in a process-global

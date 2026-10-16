@@ -1,0 +1,19 @@
+# tests/abc/equiv_expect_fail.txt - designs abc-equiv expects not to come out `equivalent` (3D plan
+# Task 19, point (j)). One `<path> <status> <reason>` per line. A listed design passes only when its
+# outcome is exactly <status>; any other outcome (differs, unconn-changed, timeout, a crash) is
+# UNEXPECTED. Statuses: views (odin3 fails with the netlist-view error), multiclock, error (the
+# equiv-check step fails), odin3-error (the odin3 step fails). The unit test test_abc_pass skips
+# `views` and `odin3-error` entries (each has its own test); the others run through the pass there.
+tests/golden/blif/pow.parmys.blif views
+# stereovision3 has two clock domains: equiv-check cannot prove it (multiclock).
+stereovision3.parmys.blif multiclock two clock domains
+# Designs equiv-check cannot prove (status `error`), found by the first abc_equiv_micro run;
+# test_abc_pass runs each through the pass and `check`.
+tests/unit/data/abc/derived_clock.blif error equiv-check cannot model a latch clocked by an internal net
+tests/unit/data/abc/loop.blif error a combinational loop: equiv-check's ABC cannot read the network
+tests/unit/data/abc/ram_unconn.blif error plain write_blif does not declare the single_port_ram model
+tests/golden/blif/dffsre.parmys.blif error blackbox: $_DFFSR_PPP_ is not declared in the file
+tests/golden/blif/hand_ports.blif error undriven output bits (equiv-check needs --allow-undriven)
+tests/golden/blif/hand_writers.blif error undriven net reaches an output (equiv-check needs --allow-undriven)
+tests/golden/blif/hand_body.blif error unnamed black box that equiv-check cannot pair
+tests/golden/blif/elsif_both_defined.odin.blif odin3-error two drivers on one net: read_blif fails the check

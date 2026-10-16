@@ -324,7 +324,7 @@ Every node, net and wire carries a provenance ID (pins inherit their node's) int
 7. `read_arch` — `.o3lib` tech libraries (target-agnostic: gates first, then FPGA hard cells; `docs/specs/2026-10-08-1G-techlib-design.md`) → hard/gate set; VPR XML `<model>`s and the Altera device via importers into the same form
 8. `partial_map` (§7)
 9. `lower` — word → bit; hard/blackbox nodes untouched
-10. `abc` — linked ABC on the soft-logic cone, black boxes preserved, results read back and re-stitched
+10. `abc`: linked ABC (`adapters/abc`, an engine behind the C ABI) maps each module's soft logic to `$lut` cells, one ABC run per clock domain, with hard cells, black boxes, instances and other domains' flip-flops as cut points (hard-block inputs on `unconn`, x or a constant pass unchanged; soft logic reads them as 0); the script is `abc --script`, else `--abc-script`, else the project's `abc_script`, else `lib/abc/vtr.abc`; results are re-stitched with provenance from ABC's correspondence (3D spec)
 11. `write_*`
 
 ## 7. Partial mapping
