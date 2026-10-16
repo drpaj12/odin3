@@ -110,15 +110,18 @@ typedef struct listed {
     uint32_t count;
 } listed;
 
-/* True for a line of the list that names a design (not a comment or a blank). */
-static bool names_a_design(const char *line) {
-    return line[0] != '#' && line[0] != '\n';
+/* True for a list line `<path> <status> ...` whose status the pass refuses: copies the path. */
+static bool refused_entry(const char *line, char *name) {
+    char status[AFX_PATH];
+    if (line[0] == '#' || sscanf(line, "%255s %255s", name, status) != 2) {
+        return false;
+    }
+    return strcmp(status, "views") == 0 || strcmp(status, "odin3-error") == 0;
 }
 
-/* The paths of the `views` and `odin3-error` entries of tests/abc/equiv_expect_fail.txt (first word
- * of a line whose second word is one of those): the only designs the pass refuses, each with its
- * own test below. The other entries are designs equiv-check cannot prove; they still run through
- * the pass here. */
+/* The paths of the `views` and `odin3-error` entries of tests/abc/equiv_expect_fail.txt: the only
+ * designs the pass refuses, each with its own test below. The other entries are designs
+ * equiv-check cannot prove; they still run through the pass here. */
 static void read_expect_list(listed *out) {
     char path[AFX_JOIN];
     (void)snprintf(path, sizeof path, "%s/tests/abc/equiv_expect_fail.txt", ODIN3_SOURCE_DIR);
@@ -126,21 +129,12 @@ static void read_expect_list(listed *out) {
     TEST_ASSERT_NOT_NULL_MESSAGE(file, path);
     char line[AFX_PATH];
     out->count = 0;
+    char name[AFX_PATH];
     while (fgets(line, sizeof line, file) != NULL) {
-        if (!names_a_design(line)) {
-            continue;
+        if (refused_entry(line, name)) {
+            TEST_ASSERT_TRUE(out->count < MAX_LISTED);
+            (void)snprintf(out->names[out->count++], AFX_PATH, "%s", name);
         }
-        char name[AFX_PATH];
-        char status[AFX_PATH];
-        if (sscanf(line, "%255s %255s", name, status) != 2) {
-            continue;
-        }
-        bool refused = strcmp(status, "views") == 0 || strcmp(status, "odin3-error") == 0;
-        if (!refused) {
-            continue;
-        }
-        TEST_ASSERT_TRUE(out->count < MAX_LISTED);
-        (void)snprintf(out->names[out->count++], AFX_PATH, "%s", name);
     }
     (void)fclose(file);
 }
