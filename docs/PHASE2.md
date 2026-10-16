@@ -1084,8 +1084,10 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       (2) `or1200`: the "Gold module contains memories or processes" abort of the plain and the
       techmap lowering hid the 60 s timeout of the `memory` lowering (a 32x32 multiplier); it is a
       size limit now. (3) A BLIF cec "not equivalent" of a design with x nets (`unconn`, tied to 0 on
-      both sides) is no verdict: `stereovision0` and `2` are "equivalent outside the x-cones"
-      (`equiv-check --x-report`). (4) The 17 designs that hit the SAT size limit (stereovision0, 1,
+      both sides) is no verdict: `stereovision2` is "equivalent outside the x-cones"
+      (`equiv-check --x-report`); `stereovision0` is unproven, not examined (the BLIF check said
+      not equivalent, the x-net rule makes it unproven, `--x-report` was not run). (4) The 16
+      other designs that hit the SAT size limit (stereovision1,
       2, spree, bgm, boundtop(+_nolatches), raygentop(+_nolatches), or1200, mkSMAdapter4B,
       LU8/32/64PEEng, mkDelayWorker32B, arm_core, mcml) are `opt-equiv` exit 4 and listed in
       `tests/opt/vtr_expect_fail.txt` as untested for now (size limit), with the measured
@@ -1095,6 +1097,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       about 7 GB (Yosys's side), so 2H runs it only as a `sweep-xl` job. The Odin III half reads
       `vtr_primitives.v` as a library unit with per-read flags (`--nomem2reg`); 2D-7b's
       `read_verilog --lib` is that mode, and 2H checks it carries them.
+    - **2F follow-ups:** opt-equiv hard-block cut compares ports only, not instance presence or
+      parameters (review 2026-10-16); follow-up.
     - **For Peter:**
       1. *Decided, #25:* the mixed-sign cell semantics (2F Task 18 review I1 and I2): Peter ruled
          "2a" on 2026-10-13, both-signed-only everywhere, with a warning.

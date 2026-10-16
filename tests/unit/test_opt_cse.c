@@ -803,6 +803,33 @@ static void test_cse_provenance(void) {
     expect_index(surv, second);
 }
 
+/* A lower-ID node reaches the entry in a later round: `lo` reads f, which only becomes w when the
+ * sweep merges f's driver into w's; `hi` (higher ID) read w from the start and owns the key. The
+ * round's lookup displaces hi: lo survives, as the old full sweep would have chosen. */
+static void test_cse_late_lower_id_displaces_owner(void) {
+    build("module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire output 3 \\y\n"
+          "  wire output 4 \\z\n  wire \\w\n  wire \\f\n"
+          "  attribute \\src \"t.v:7.1\"\n  cell $not \\lo\n    connect \\A \\f\n    connect \\Y "
+          "\\y\n  end\n"
+          "  attribute \\src \"t.v:8.1\"\n  cell $not \\hi\n    connect \\A \\w\n    connect \\Y "
+          "\\z\n  end\n"
+          "  cell $and \\w1\n" AB "    connect \\Y \\w\n  end\n"
+          "  cell $and \\f1\n" AB "    connect \\Y \\f\n  end\n"
+          "end\n");
+    odin3_prov_id lo_rec = odin3_node_prov(fx.module, node_named("lo"));
+    odin3_prov_id hi_rec = odin3_node_prov(fx.module, node_named("hi"));
+    TEST_ASSERT_TRUE(lo_rec.v != 0 && hi_rec.v != 0 && lo_rec.v != hi_rec.v);
+    TEST_ASSERT_TRUE(node_named("lo").v < node_named("hi").v);
+    run_merge();
+    TEST_ASSERT_TRUE(merged_pair());
+    expect_removed(2);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$not"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$and"));
+    expect_alive("lo", true); /* the lower ID survives, not the earlier owner */
+    expect_alive("hi", false);
+    expect_derived(node_named("lo"), lo_rec, hi_rec);
+}
+
 /* --- out of memory ------------------------------------------------------------------------------
  */
 
@@ -884,6 +911,7 @@ int main(void) {
     RUN_TEST(test_cse_never);
     RUN_TEST(test_merge_yosys_cases);
     RUN_TEST(test_cse_provenance);
+    RUN_TEST(test_cse_late_lower_id_displaces_owner);
     RUN_TEST(test_cse_oom);
     return UNITY_END();
 }
