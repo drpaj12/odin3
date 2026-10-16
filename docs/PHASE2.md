@@ -27,13 +27,33 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
 
 ## Checklist
 
-- [ ] 2A AST + symbol table spec approved, implemented, merged
+- [x] 2A AST + symbol table spec approved, implemented, merged (#33)
 - [x] 2B project readers pass the corpus (Phase 2 formats); preprocessor
-- [ ] 2C parser covers the synthesizable Verilog-2005 subset (coverage table, #3)
-- [ ] 2D elaboration to word-level IR
-- [ ] 2E `proc`
-- [ ] 2F `opt`
-- [ ] 2H micros + VTR benchmark set identical/equivalent to Parmys
+- [x] 2C parser covers the synthesizable Verilog-2005 subset (coverage table, #3) (#49, #67)
+- [x] 2D elaboration to word-level IR (#94)
+- [x] 2E `proc` (#92)
+- [x] 2F `opt` (#95)
+- [ ] 2H micros + VTR benchmark set identical/equivalent to Parmys (#98, #113, #114)
+  Open: 5 VTR and 5 micro designs unproven (size limit: mcml.v, LU32PEEng.v, LU64PEEng.v; two clock domains: stereovision3.v, multiclock_reader_writer.v); opt_equiv_vtr failed (20 UNEXPECTED); reruns of opt_diff_vtr, opt_equiv_micro_phase3 and opt_diff_micro_wreduce pending; lenet.v xl legs untested; lenet.v opt time target MISSED (fix pending).
+
+## Exit statement
+
+Phase 2 is complete except the items still open (2H, and the lenet.v opt time target).
+Exit sweeps of 2026-10-15: exit_micro 0 failing, 453 PROVEN of 539; exit_vtr 0 failing, 26 of 31 PROVEN, 5 unproven.
+Big designs that could not be checked are untested for now (size limit): mcml.v, LU32PEEng.v, LU64PEEng.v (VTR set); LU32PEEng.v and LU64PEEng.v (micro set).
+Two more VTR designs are unproven by a tool limit, not size: stereovision3.v and multiclock_reader_writer.v (equiv-check models one clock; both have two).
+The lenet xl legs are untested: the Yosys-side runs (opt_equiv_vtr_xl, opt_diff_vtr_xl, sweep-xl S-P) need an idle machine.
+The opt_equiv_vtr leg failed on main (20 UNEXPECTED); its rerun and three other reruns are PENDING rerun (2026-10-16).
+2H stays open until these close.
+
+Sweep lines, verbatim from `results/exit-sweeps-2026-10-15.txt`:
+
+```text
+274: exit-check: 539 designs: PROVEN 453 (408 identical, 44 equivalent, 1 eq-x with a reviewed record), 76 listed-reject; NOT PROVEN 5 unproven (listed); NOT CHECKED 5 no-golden; 0 failing, 0 stale; 4139.5 s
+275: exit-check: 31 designs: PROVEN 26 (8 identical, 17 equivalent, 1 eq-x with a reviewed record), 0 listed-reject; NOT PROVEN 5 unproven (listed); NOT CHECKED 0 no-golden; 0 failing, 0 stale; 4709.3 s
+```
+
+## Decisions log
 
 ## Decisions log
 
@@ -930,9 +950,20 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       | tee LOG` under `set -o pipefail` (elab-sweep has no `--log`; without it the sweep's exit
       code is lost to `tee`), and then `tools/proc-check/bench-proc-report report --expect-fail
       tests/proc/bench_expect_fail.txt LOG` .
-    - **Results (§19 targets): NOT YET FILLED; the controller records the full run here, verbatim (the
-      sweeps' summaries and the tie count too). `lenet.v` time and RSS are unmeasured; only a
-      3G-capped smoke on seven small files exists.**
+    - **Results (§19 targets, from `results/proc-report.txt`, verbatim): all 5 targets met.**
+
+      ```text
+      bench targets (spec 19):
+        ok     mcml.v proc --noopt: 0.123 s (target <= 0.2 s)
+        ok     lenet.v proc --noopt: 2.137 s (target <= 5 s)
+        ok     lenet.v, through proc, peak RSS: 1.290 GB (target <= 3 GB)
+        ok     the 31 VTR files, total proc --noopt: 0.303 s (target <= 0.5 s)
+        ok     the 33 Koios files, total proc --noopt: 4.351 s (target <= 8 s)
+        steps of koios/lenet.v: a_ms=122.575 b_ms=1449.138 c_ms=522.056 d_ms=38.144 e_ms=5.182 f_ms=1824.541 noopt_ms=2137.096 proc_ms=3977.020 budget_ms=69.881 budget_calls=26534 modules=137 procs=7007
+        estimate terms of koios/lenet.v: est_mux_pins_B=655520975 est_nets_B=277501824 est_nodes_B=28715808 est_pw_B=30015120 est_total_B=991753727 ir_B=1213714824 rss_read_kib=1250852 rss_kib=1259476
+        largest byte-budget share of noopt_ms: koios/tdarknet_like.large.v 75.2%
+      ```
+
       mcml.v `proc --noopt` <= 0.2 s; lenet.v `proc --noopt` <= 5 s; lenet.v through the Phase 2
       script to `proc`, peak RSS <= 3.0 GB; the 31 VTR files <= 0.5 s in total; the 33 Koios files
       <= 8 s in total. A miss is investigated with the printed terms and reported, never relaxed.
@@ -1040,9 +1071,24 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       (75,136 to 96,820 KiB; 9,796 dead nodes and 313,599 dead nets at the peak). The 25% target
       is for lenet.v, but mcml.v is over it: if lenet.v slips, the escalation (a compact per `opt`
       iteration) is an IR-6 amendment and goes to Peter, never a relaxed target.
-    - **Results (§19 targets): NOT YET FILLED; the controller records the full run here, verbatim
-      (the sweeps' summaries and `opt_order_probe`'s table too). `lenet.v` time and RSS are
-      unmeasured; only the four-file smoke above exists.**
+    - **Results (§19 targets, from `results/opt-report.txt`, verbatim):**
+
+      ```text
+      bench targets (spec 19):
+        ok     mcml.v, Phase 2 opt passes: 0.800 s (target <= 1 s)
+        ok     mcml.v, opt -full: 0.112 s (target <= 0.3 s)
+        MISSED lenet.v, Phase 2 opt passes: 46.288 s (target <= 15 s)
+        ok     lenet.v, peak RSS growth over the post-proc IR: 22.500 % (target <= 25 %)
+        ok     the 31 VTR files, total Phase 2 opt passes: 1.764 s (target <= 3 s)
+        times of mcml.v: iters=32 t_total=0.800 t_expr=0.117 t_setup=0.085 t_merge=0.198 t_muxtree=0.101 t_reduce=0.053 t_share=0.000 t_dff=0.188 t_clean=0.143 t_compact=0.022 full_iters=3 full_t_total=0.112
+        memory of mcml.v: rss_proc_cur_kib=75308 rss_opt_kib=96956 rss_opt_growth_pct=28.7 rss_compact_kib=105296 rss_full_kib=105492 dead_nodes=9796 dead_nets=313599 rss_src=hwm
+        times of koios/lenet.v: iters=4 t_total=46.288 t_expr=4.069 t_setup=2.213 t_merge=37.615 t_muxtree=1.181 t_reduce=0.934 t_share=0.000 t_dff=2.116 t_clean=0.373 t_compact=0.394 full_iters=5 full_t_total=6.437
+        memory of koios/lenet.v: rss_proc_cur_kib=1251040 rss_opt_kib=1532768 rss_opt_growth_pct=22.5 rss_compact_kib=1873396 rss_full_kib=1968432 dead_nodes=770647 dead_nets=6249122 rss_src=hwm
+        slowest file: koios/lenet.v 46.288 s
+      ```
+
+      lenet.v Phase 2 opt passes MISSED on main (46.288 s against 15 s). fix in PR fix/2F-vtr-equiv-triage: opt_merge t_merge 35 s to 2.5 s; re-measure pending.
+
       mcml.v Phase 2 opt passes <= 1.0 s; mcml.v `opt -full` <= 0.3 s; lenet.v Phase 2 opt passes
       <= 15 s; lenet.v RSS growth <= 25%; the 31 VTR files <= 3 s in total. A miss is investigated
       with the printed columns and reported, never relaxed.
@@ -1052,6 +1098,10 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       here.** Each file runs `opt-equiv` and `opt-diff` with all five scripts (spec 20.3), one tool
       at a time under memcap, smallest first (`mcml.v` last). After `tools/build-locked --preset
       release -j6`, with no other heavy job and no agent running a build:
+      - Recorded 2026-10-16 (`results/opt_equiv_vtr.log`): `opt_equiv_vtr` FAILED (6490.69 sec). Summary: `set vtr31: 31 files (0 skipped as xl or unselected), 31 runs: 11 ok, 0 fail as listed, 20 UNEXPECTED`. The 20 unexpected: ch_intrinsics, ch_intrinsics_nolatches, mkPktMerge, stereovision0, stereovision1, stereovision2, boundtop, boundtop_nolatches, raygentop, raygentop_nolatches, spree, bgm, or1200, mkSMAdapter4B, LU8PEEng, LU32PEEng, LU64PEEng, mkDelayWorker32B, arm_core, mcml.v.
+      - `opt_diff_vtr`: PENDING rerun (2026-10-16)
+      - `opt_equiv_micro_phase3`: PENDING rerun (2026-10-16)
+      - `opt_diff_micro_wreduce`: PENDING rerun (2026-10-16)
       - `ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_(equiv|diff)_vtr$'` (31 files, one tool
         child at a time, `--mem-cap 3G`); or by hand:
         `ODIN3_HEAVY_OK=1 tools/heavy-run tools/opt-check/opt-nightly --odin3 build/release/odin3
