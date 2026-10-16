@@ -508,9 +508,9 @@ abc)
 BLIF
     "$odin3" -p "read_blif $work/t.blif; abc --lut 4; stats" >"$work/out" 2>"$work/err" ||
         fail "odin3 abc failed"
-    grep -qF '$lut' "$work/out" || fail "stats lists no \$lut"
-    first=$(grep -m1 '^info: abc: ' "$work/err" || true)
-    re='^info: abc: script builtin:lib/abc/vtr\.abc \(embedded\), sha256 [0-9a-f]{16}.*, K=4, '
+    grep -qF '$lut' "$work/err" || fail "stats lists no \$lut"
+    first=$(grep -m1 '^odin3: info: abc: ' "$work/err" || true)
+    re='^odin3: info: abc: script builtin:lib/abc/vtr\.abc \(embedded\), sha256 [0-9a-f]{16}.*, K=4, '
     re+='exchange blif, ABC [0-9a-f]{12}$'
     [[ $first =~ $re ]] || fail "the first INFO line is '$first'"
     ;;
@@ -574,7 +574,7 @@ BLIF
                 "$odin3" "${opts[@]}" -p "read_blif t.blif; abc ${args[*]}" >"$work/out" \
                     2>"$work/err" || fail "odin3 failed for $pass_opt/$cli_opt/$proj_opt"
                 prefix=$(sha256sum "$want.abc" | cut -c1-16)
-                grep -qE "^info: abc: script .*, sha256 $prefix" "$work/err" ||
+                grep -qE "^odin3: info: abc: script .*, sha256 $prefix" "$work/err" ||
                     fail "$pass_opt/$cli_opt/$proj_opt: the hash prefix is not $want's ($prefix)"
                 if [[ $cli_opt == s2 && $proj_opt == s3 ]]; then
                     grep -qF "info: p.o3proj: --abc-script s2.abc replaces the project abc_script s3.abc" \
@@ -614,7 +614,7 @@ SH
     rc=$?
     set -e
     [[ $rc -eq 1 ]] || fail "exit code $rc, expected 1 (not a signal)"
-    [[ $(grep -c '^error: abc: ' "$work/err") -eq 1 ]] || fail "not exactly one abc error line"
+    [[ $(grep -c '^odin3: error: abc: ' "$work/err") -eq 1 ]] || fail "not exactly one abc error line"
     grep -qF "abc: ABC subprocess exited with status 3 during run 0" "$work/err" ||
         fail "stderr lacks the subprocess text"
     [[ -f "$work/before.blif" && ! -e "$work/after.blif" ]] || fail "the files written are wrong"
