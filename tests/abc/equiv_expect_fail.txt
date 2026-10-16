@@ -4,3 +4,13 @@
 tests/golden/blif/pow.parmys.blif views
 # stereovision3 has two clock domains: equiv-check cannot prove it (multiclock).
 stereovision3.parmys.blif multiclock
+# Designs equiv-check cannot prove (status `error`), found by the first abc_equiv_micro run; each
+# has its own unit tests elsewhere, and test_abc_pass skips them.
+tests/unit/data/abc/derived_clock.blif equiv-check cannot model a latch clocked by an internal net
+tests/unit/data/abc/loop.blif a combinational loop: equiv-check's ABC cannot read the network
+tests/unit/data/abc/ram_unconn.blif plain write_blif does not declare the single_port_ram model
+tests/golden/blif/dffsre.parmys.blif blackbox: $_DFFSR_PPP_ is not declared in the file
+tests/golden/blif/hand_ports.blif undriven output bits (equiv-check needs --allow-undriven)
+tests/golden/blif/hand_writers.blif undriven net reaches an output (equiv-check needs --allow-undriven)
+tests/golden/blif/hand_body.blif unnamed black box that equiv-check cannot pair
+tests/golden/blif/elsif_both_defined.odin.blif two drivers on one net: read_blif fails the check

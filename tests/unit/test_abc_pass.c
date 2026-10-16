@@ -191,7 +191,10 @@ static void expect_identity_mapping(const char *path) {
         asim_record(design, &before);
     }
     afx_log_reset();
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6"), path);
+    odin3_status st = run_abc("--lut 6");
+    char why[AFX_PATH + AFX_TEXT];
+    (void)snprintf(why, sizeof why, "%s: %s", path, afx_errors());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, why);
     afx_check(design);
     if (simulated) {
         asim_expect_equal(design, &before);
