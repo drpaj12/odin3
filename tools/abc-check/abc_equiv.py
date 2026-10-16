@@ -67,6 +67,9 @@ DEFAULT_LUT = 6
 DEFAULT_TIMEOUT = 600
 EQUIV_SLACK = 120  # seconds beyond equiv-check's own --timeout before this tool gives up
 PASSING = ("equivalent", "mapped")
+# The outcome a listed design must have: ``error`` is a failure of the equiv-check step,
+# ``odin3-error`` one of the odin3 step (a read or a check failure).
+PINNED = ("views", "multiclock", "error", "odin3-error")
 VIEWS_TEXT = "is not in the netlist view"
 MULTICLOCK_TEXT = "more than one clock domain"
 UNCONN = "unconn"
@@ -113,7 +116,8 @@ def collect(paths: Sequence[str]) -> list[Path]:
 
 
 def read_expect(path: str | None) -> dict[str, str]:
-    """``<path> <reason>`` lines of ``--expect-fail`` (``#`` comments and blank lines skipped)."""
+    """``<path> <status> <reason>`` lines of ``--expect-fail`` (``#`` comments and blank lines
+    skipped); the value is ``<status> <reason>``, the status one of PINNED."""
     entries: dict[str, str] = {}
     if path is None:
         return entries
@@ -126,8 +130,10 @@ def read_expect(path: str | None) -> dict[str, str]:
         if not line or line.startswith("#"):
             continue
         name, _, reason = line.partition(" ")
-        if not reason.strip():
-            raise UsageError(f"{path}:{number}: expected '<path> <reason>'")
+        status = reason.split()[0] if reason.strip() else ""
+        if status not in PINNED:
+            raise UsageError(f"{path}:{number}: expected '<path> <status> <reason>' with status "
+                             f"one of {', '.join(PINNED)}")
         entries[name] = reason.strip()
     return entries
 
@@ -247,6 +253,8 @@ def run_design(cfg: Config, index: int, design: Path) -> Outcome:
     if cfg.step == "equiv":
         return run_equiv(cfg, out)
     mapped = run_odin3(cfg, design, out)
+    if mapped.status == "error":
+        return Outcome("odin3-error", mapped.secs, mapped.detail)
     if cfg.step == "abc" or mapped.status != "mapped":
         return mapped
     result = run_equiv(cfg, out)
@@ -254,14 +262,15 @@ def run_design(cfg: Config, index: int, design: Path) -> Outcome:
 
 
 def judge(outcome: Outcome, reason: str | None) -> tuple[bool, str]:
-    """(passes, note): a listed design passes when it fails (a ``views`` entry only with the views
-    error); an unlisted one passes when it is equivalent (or mapped)."""
+    """(passes, note): a listed design passes only when its outcome is the pinned status (the first
+    word of reason); an unlisted one passes when it is equivalent (or mapped)."""
     if reason is None:
         return outcome.status in PASSING, ""
     if outcome.status in PASSING:
         return False, f"XPASS: listed ({reason}) but {outcome.status}"
-    if reason == "views" and outcome.status != "views":
-        return False, f"listed as views but {outcome.status}"
+    pinned = reason.split()[0]
+    if outcome.status != pinned:
+        return False, f"UNEXPECTED: listed as {pinned} but {outcome.status}"
     return True, f"listed: {reason}"
 
 

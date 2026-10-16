@@ -149,15 +149,38 @@ class AbcEquivTest(unittest.TestCase):
         broken = self.blif("broken.blif", design_text(pad=1))
         diff = self.blif("diff.blif", design_text("# differs\n", pad=2))
         fine = self.blif("fine.blif", design_text(pad=3))
-        expect = self.blif("expect.txt", "views.blif views\nbroken.blif views\nfine.blif other\n")
+        expect = self.blif("expect.txt",
+                           "views.blif views x\nbroken.blif views x\nfine.blif error x\n")
         code, out, err = self.run_tool("--expect-fail", expect, views, broken, diff, fine)
         self.assertEqual(code, 1, out + err)
         self.assertRegex(out, r"views\.blif views [0-9.]+ s \(listed: views")
-        self.assertRegex(out, r"broken\.blif error [0-9.]+ s \(listed as views but error")
+        self.assertRegex(out, r"broken\.blif odin3-error [0-9.]+ s \(UNEXPECTED: listed as views")
         self.assertRegex(out, r"diff\.blif differs")
-        self.assertRegex(out, r"fine\.blif equivalent [0-9.]+ s \(XPASS: listed \(other\)")
+        self.assertRegex(out, r"fine\.blif equivalent [0-9.]+ s \(XPASS: listed \(error x\)")
         self.assertIn("abc-equiv: 4 designs: 1 passed, 3 failed (differs 1, equivalent 1, "
-                      "error 1, views 1)", out)
+                      "odin3-error 1, views 1)", out)
+
+    def test_a_listed_design_passes_only_with_its_pinned_status(self) -> None:
+        multi = self.blif("multi.blif", design_text("# multiclock\n"))
+        expect = self.blif("expect.txt", "multi.blif multiclock x\n")
+        code, out, err = self.run_tool("--expect-fail", expect, multi)
+        self.assertEqual(code, 0, out + err)
+        wrong = self.blif("expect2.txt", "multi.blif error x\n")
+        code, out, err = self.run_tool("--expect-fail", wrong, multi)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("UNEXPECTED: listed as error but multiclock", out)
+        diff = self.blif("diff.blif", design_text("# differs\n"))
+        both = self.blif("expect3.txt", "diff.blif error x\n")
+        code, out, err = self.run_tool("--expect-fail", both, diff)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("UNEXPECTED: listed as error but differs", out)
+
+    def test_an_expect_line_needs_a_known_status(self) -> None:
+        design = self.blif("d.blif", design_text())
+        expect = self.blif("expect.txt", "d.blif because\n")
+        code, _, err = self.run_tool("--expect-fail", expect, design)
+        self.assertEqual(code, 2)
+        self.assertIn("status", err)
 
     def test_the_summary_line(self) -> None:
         a = self.blif("a.blif", design_text())
@@ -169,7 +192,7 @@ class AbcEquivTest(unittest.TestCase):
 
     def test_a_listed_multiclock_design_passes(self) -> None:
         multi = self.blif("multi.blif", design_text("# multiclock\n"))
-        expect = self.blif("expect.txt", "multi.blif multiclock\n")
+        expect = self.blif("expect.txt", "multi.blif multiclock x\n")
         code, out, err = self.run_tool("--expect-fail", expect, multi)
         self.assertEqual(code, 0, out + err)
         self.assertRegex(out, r"multi\.blif multiclock")
