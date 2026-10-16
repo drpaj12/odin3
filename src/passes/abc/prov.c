@@ -23,6 +23,16 @@ enum {
     COUNT_CAP = 1 << 28 /* the edge sum stops here: a message, not an answer, needs it exact */
 };
 
+odin3_celltype_id odin3_abc_lut_type(const odin3_design *design) {
+    uint32_t name = 0;
+    odin3_celltype_id type = {0};
+    if (!odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr("$lut"), &name) ||
+        !odin3_celltype_find(design, name, &type)) {
+        return (odin3_celltype_id){0};
+    }
+    return type;
+}
+
 static uint32_t u32_at(const odin3_vec *vec, size_t idx) {
     return ((const uint32_t *)vec->data)[idx];
 }

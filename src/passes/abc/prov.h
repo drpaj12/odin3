@@ -5,6 +5,7 @@
 #ifndef ODIN3_PASSES_ABC_PROV_H
 #define ODIN3_PASSES_ABC_PROV_H
 
+#include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/prov.h"
@@ -15,6 +16,12 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+
+/*
+ * The design's `$lut` cell type (a design's slot 0 is reserved, so this is not the built-in
+ * index). A design always has it; the result is the zero ID only if the registry is damaged.
+ */
+odin3_celltype_id odin3_abc_lut_type(const odin3_design *design);
 
 /* §8.3's order: COs, register inputs, registers, the rest. */
 typedef enum odin3_abc_anchor_kind {

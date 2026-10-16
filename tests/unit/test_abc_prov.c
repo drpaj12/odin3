@@ -330,7 +330,7 @@ static odin3_node_id lut_cell(odin3_net_id in, odin3_net_id out) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_lut_params(lut_arena, 1, &k_buffer, params));
     odin3_net_id nets[2] = {in, out};
     odin3_netvec ports[2] = {{&nets[0], 1}, {&nets[1], 1}};
-    odin3_node_spec spec = {{odin3_lut_builtin_index()}, 0, (odin3_prov_id){0}, params, 2};
+    odin3_node_spec spec = {odin3_abc_lut_type(design), 0, (odin3_prov_id){0}, params, 2};
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(mod, &spec, ports, &node));
     return node;

@@ -5,7 +5,6 @@
  */
 #include "ir/celltype.h"
 #include "ir/design.h"
-#include "ir/lut.h"
 #include "ir/module.h"
 #include "passes/abc/prov.h"
 
@@ -131,7 +130,7 @@ odin3_status odin3_abc_depth(const odin3_design *design, uint32_t *depth) {
     }
     dp dpt = {0};
     dpt.mod = odin3_module_get((odin3_design *)design, top);
-    dpt.lut_type = odin3_lut_builtin_index();
+    dpt.lut_type = odin3_abc_lut_type(design).v;
     odin3_status st = dp_start(&dpt);
     while (st == ODIN3_OK && dpt.ready.len > 0) {
         uint32_t node = *at(&dpt.ready, (uint32_t)dpt.ready.len - 1U);

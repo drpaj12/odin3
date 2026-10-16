@@ -127,7 +127,7 @@ static odin3_status make_lut(splice *sp, const lut_req *rq, odin3_node_id *node)
     if (st != ODIN3_OK) {
         return st;
     }
-    odin3_node_spec spec = {{odin3_lut_builtin_index()}, 0, rq->prov, params, 2};
+    odin3_node_spec spec = {odin3_abc_lut_type(sp->run->design), 0, rq->prov, params, 2};
     odin3_netvec ports[2] = {{rq->ins, rq->inputs}, {&rq->out, 1}};
     st = odin3_node_create_connected(sp->mod, &spec, ports, node);
     st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NODE, node->v}) : st;
