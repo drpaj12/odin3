@@ -333,6 +333,7 @@ static void test_constant_to_clock_buffered(void) {
     (void)ff_edge("r", 0, clk2, in_a, out_y);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_abc());
     afx_check(design);
+    clk2 = named_net("clk2"); /* net IDs change when the pass compacts */
     TEST_ASSERT_TRUE(odin3_net_live(mod, clk2));
     TEST_ASSERT_EQUAL_STRING("$lut", driver_type(clk2));
     odin3_node_id buf = driver_node(clk2);
@@ -355,6 +356,7 @@ static void test_derived_clock_buffered(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_abc());
     afx_check(design);
     TEST_ASSERT_EQUAL_UINT32(2, odin3_abc_fake_open_count());
+    clk2 = named_net("clk2"); /* net IDs change when the pass compacts */
     TEST_ASSERT_TRUE(odin3_net_live(mod, clk2));
     TEST_ASSERT_EQUAL_STRING("$lut", driver_type(clk2));
     TEST_ASSERT_EQUAL_UINT32(2, count_type("$_DFF_P_"));
@@ -429,7 +431,7 @@ static void test_restore_flip_reader(void) {
     TEST_ASSERT_EQUAL_INT64(1, init_of(ff));
     TEST_ASSERT_EQUAL_UINT32(in_x.v, port_net(ff, 0).v);
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$lut"));
-    TEST_ASSERT_EQUAL_UINT32(2, lut_width(driver_node(out_y)));
+    TEST_ASSERT_EQUAL_UINT32(2, lut_width(driver_node(port_wire_net("y"))));
 }
 
 static void test_restore_inverter_to_merge(void) {
@@ -454,7 +456,7 @@ static void test_restore_direct_reader_not(void) {
     trace_before();
     expect_clean();
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$lut"));
-    odin3_node_id not_lut = driver_node(out_y);
+    odin3_node_id not_lut = driver_node(port_wire_net("y"));
     TEST_ASSERT_EQUAL_UINT32(1, lut_width(not_lut));
     TEST_ASSERT_TRUE(lut_bit(not_lut, 0));
     TEST_ASSERT_FALSE(lut_bit(not_lut, 1));
