@@ -137,6 +137,23 @@ static odin3_net_id input_net(odin3_node_id node, uint32_t port) {
     return odin3_pin_net(mod, pins.first);
 }
 
+/* The $lut driving one of node's inputs (the engine orders the fanins, so the test cannot name
+ * the pin); fails when no input has a LUT driver. */
+static odin3_node_id lut_feeder(odin3_node_id node) {
+    odin3_pinslice pins = odin3_node_port(mod, node, ODIN3_LUT_PORT_A);
+    for (uint32_t i = 0; i < pins.count; i++) {
+        odin3_net_id net = odin3_pin_net(mod, (odin3_pin_id){pins.first.v + i});
+        if (odin3_net_valid(net) && odin3_net_driver_count(mod, net) == 1) {
+            odin3_node_id drv = odin3_pin_node(mod, odin3_net_driver(mod, net));
+            if (odin3_node_type(mod, drv).v == odin3_abc_lut_type(design).v) {
+                return drv;
+            }
+        }
+    }
+    TEST_FAIL_MESSAGE("no input of the node is driven by a LUT");
+    return (odin3_node_id){0};
+}
+
 static const odin3_prov_record *record_of(odin3_node_id node) {
     odin3_prov_id prov = odin3_node_prov(mod, node);
     TEST_ASSERT_TRUE(prov.v != 0);
@@ -204,7 +221,7 @@ static void test_cone_records_in_node_order(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6 --prov cone"), afx_errors());
     afx_check(design);
     odin3_node_id top = driver_of(port_net_of("y"));
-    odin3_node_id inner = driver_of(input_net(top, ODIN3_LUT_PORT_A));
+    odin3_node_id inner = lut_feeder(top);
     const odin3_prov_id want[2] = {s_in, s_top};
     expect_parents(top, want, 2);
     TEST_ASSERT_EQUAL_UINT32(odin3_node_prov(mod, top).v, odin3_node_prov(mod, inner).v);
@@ -266,8 +283,8 @@ static void test_shared_lut_has_an_extra_record(void) {
     afx_check(design);
     odin3_node_id l1 = driver_of(port_net_of("y1"));
     odin3_node_id l2 = driver_of(port_net_of("y2"));
-    odin3_node_id shared = driver_of(input_net(l1, ODIN3_LUT_PORT_A));
-    TEST_ASSERT_EQUAL_UINT32(shared.v, driver_of(input_net(l2, ODIN3_LUT_PORT_A)).v);
+    odin3_node_id shared = lut_feeder(l1);
+    TEST_ASSERT_EQUAL_UINT32(shared.v, lut_feeder(l2).v);
     const odin3_prov_id own1[2] = {s_p, s_1};
     expect_parents(l1, own1, 2);
     const odin3_prov_id both[2] = {odin3_node_prov(mod, l1), odin3_node_prov(mod, l2)};
@@ -294,7 +311,7 @@ static void test_coarse_mode(void) {
                              "(budget 1); the run's LUTs share one record"));
     odin3_node_id l1 = driver_of(port_net_of("y1"));
     odin3_node_id l2 = driver_of(port_net_of("y2"));
-    odin3_node_id shared = driver_of(input_net(l1, ODIN3_LUT_PORT_A));
+    odin3_node_id shared = lut_feeder(l1);
     const odin3_prov_id all[3] = {s_p, s_1, s_2};
     expect_parents(l1, all, 3);
     TEST_ASSERT_EQUAL_UINT32(odin3_node_prov(mod, l1).v, odin3_node_prov(mod, l2).v);
@@ -305,10 +322,11 @@ static void test_coarse_mode(void) {
 static void test_dead_logic_has_no_children(void) {
     odin3_net_id in_a = input("a");
     odin3_net_id in_b = input("b");
+    odin3_net_id in_c = input("c");
     odin3_net_id out_y = output("y");
     odin3_net_id dead = wire_net("dead");
     odin3_prov_id s_dead = odin3_node_prov(mod, and_at(40, in_a, in_b, dead));
-    (void)buf_at(41, in_a, out_y);
+    (void)and_at(41, in_a, in_c, out_y); /* a buffer of an input would carry the coarse record */
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6"), afx_errors());
     afx_check(design);
     odin3_prov_index *ix = odin3_prov_index_build(design);
@@ -364,16 +382,6 @@ static void test_depth_without_top(void) {
     odin3_design_destroy(empty);
 }
 
-/* The text of the last INFO message captured. */
-static const char *last_info_message(void) {
-    uint32_t shown = afx_messages.count < AFX_LINES ? afx_messages.count : AFX_LINES;
-    const char *found = "";
-    for (uint32_t i = 0; i < shown; i++) {
-        found = afx_messages.level[i] == ODIN3_LOG_INFO ? afx_messages.text[i] : found;
-    }
-    return found;
-}
-
 static const char *run_info_text(void) {
     uint32_t info = odin3_passrun_info(design, (odin3_passrun_id){odin3_passrun_end(design) - 1U});
     return info == 0 ? "" : odin3_strtab_get(odin3_design_strtab(design), info);
@@ -394,7 +402,7 @@ static void test_final_depth_line(void) {
     (void)and_at(52, n2, dat_d, n3);
     (void)ff_at(53, clk, n3, output("q"));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6"), afx_errors());
-    TEST_ASSERT_EQUAL_STRING("abc: final: depth 3", last_info_message());
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO, "abc: final: depth 3"));
     TEST_ASSERT_NOT_NULL(strstr(run_info_text(), " depth=3"));
 }
 
