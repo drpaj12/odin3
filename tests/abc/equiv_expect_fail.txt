@@ -3,7 +3,7 @@
 # outcome is exactly <status>; any other outcome (differs, unconn-changed, timeout, a crash) is
 # UNEXPECTED. Statuses: views (odin3 fails with the netlist-view error), multiclock, error (the
 # equiv-check step fails), odin3-error (the odin3 step fails). The unit test test_abc_pass skips
-# only the `views` entry; the others run through the pass there.
+# `views` and `odin3-error` entries (each has its own test); the others run through the pass there.
 tests/golden/blif/pow.parmys.blif views
 # stereovision3 has two clock domains: equiv-check cannot prove it (multiclock).
 stereovision3.parmys.blif multiclock two clock domains

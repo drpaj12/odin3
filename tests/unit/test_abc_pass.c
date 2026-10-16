@@ -115,9 +115,10 @@ static bool names_a_design(const char *line) {
     return line[0] != '#' && line[0] != '\n';
 }
 
-/* The paths of the `views` entries of tests/abc/equiv_expect_fail.txt (first word of a line whose
- * second word is `views`): the only designs the pass refuses. The other entries are designs
- * equiv-check cannot prove; they still run through the pass here. */
+/* The paths of the `views` and `odin3-error` entries of tests/abc/equiv_expect_fail.txt (first word
+ * of a line whose second word is one of those): the only designs the pass refuses, each with its
+ * own test below. The other entries are designs equiv-check cannot prove; they still run through
+ * the pass here. */
 static void read_expect_list(listed *out) {
     char path[AFX_JOIN];
     (void)snprintf(path, sizeof path, "%s/tests/abc/equiv_expect_fail.txt", ODIN3_SOURCE_DIR);
@@ -131,7 +132,11 @@ static void read_expect_list(listed *out) {
         }
         char name[AFX_PATH];
         char status[AFX_PATH];
-        if (sscanf(line, "%255s %255s", name, status) != 2 || strcmp(status, "views") != 0) {
+        if (sscanf(line, "%255s %255s", name, status) != 2) {
+            continue;
+        }
+        bool refused = strcmp(status, "views") == 0 || strcmp(status, "odin3-error") == 0;
+        if (!refused) {
             continue;
         }
         TEST_ASSERT_TRUE(out->count < MAX_LISTED);
@@ -239,6 +244,20 @@ static void test_views_refusal_on_pow(void) {
     TEST_ASSERT_EQUAL_STRING(before, after);
     free(before);
     free(after);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
+}
+
+/* elsif_both_defined.odin.blif reads, but has two drivers on one net: check fails before the pass
+ * (listed `odin3-error`), and the design is left unchanged. */
+static void test_two_drivers_refuse_before_the_pass(void) {
+    char path[AFX_JOIN];
+    (void)snprintf(path, sizeof path, "%s/tests/golden/blif/elsif_both_defined.odin.blif",
+                   ODIN3_SOURCE_DIR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_design(path));
+    afx_log_reset();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, run_abc("--lut 6"));
+    const char *line = afx_only(ODIN3_LOG_ERROR, "check: simple_op: rule 4: net ");
+    TEST_ASSERT_NOT_NULL(strstr(line, "has 2 drivers that are neither inout nor tristate"));
     TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
 }
 
@@ -445,6 +464,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_every_design_maps_to_an_equal_netlist);
     RUN_TEST(test_views_refusal_on_pow);
+    RUN_TEST(test_two_drivers_refuse_before_the_pass);
     RUN_TEST(test_no_deleted_slots_and_no_temp_directory);
     RUN_TEST(test_lut_round_trip);
     RUN_TEST(test_real_engine_script_and_second_pass);
