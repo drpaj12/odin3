@@ -557,7 +557,7 @@ The rules have three **tiers**, which set what "equal to Yosys" means:
   pass): exhaustive over all input sequences of length ≤ 5 at `W = 1`, random for `W > 1`.
 - `test_lower_mem.c`: every §7 row, writing then reading all addresses with the 1E simulator on the
   lowered netlist against a C array model; overlapping write ports (later wins); `OFFSET` ≠ 0;
-  `ABITS` larger and smaller than `clog2(SIZE)`; out-of-range reads give x; the cap and every error.
+  `ABITS` larger and smaller than `clog2(SIZE)`; out-of-range reads give x; the cap and every error. `ABITS` 0 (a one-word `$mem` after `wreduce`, 3G): the write decode is constant 1 (empty AND-tree), the read mux tree has no levels, `a = k + OFFSET mod 2^0 = 0`.
 - `test_lower_order.c` (O2): the Phase 3 script on a hand-built design that has a `multiply`, an
   `adder`, a `single_port_ram` (hard cells), plus a soft `$mul`, `$add` and `$mem`: the hard ones survive, the
   soft ones go, the INFO counts are right.

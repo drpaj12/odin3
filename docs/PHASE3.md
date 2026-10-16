@@ -25,11 +25,9 @@ decisions 2–3 and 16 below):
    `dual_port_ram`. VTR's own readers give LUT K = 6 (the largest `.names` pb_type) and a RAM
    address width of 15.
 3. **Through P&R**: Odin III alone produces each netlist. The script is `read_verilog
-   --nolatches; proc; opt; flatten; opt -full; hardmap; lower; abc; write_blif --vtr`
-   (decision 30: `opt -full` after `flatten`, as Parmys runs it), and once 3G lands
-   `read_verilog --nolatches; proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full;
-   hardmap; lower; abc; write_blif --vtr` (decisions 7 and 31: `wreduce` before `flatten`).
-   Both forms are one script; the second only adds the 3G passes. Then
+   --nolatches; proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full; hardmap; lower; abc;
+   write_blif --vtr` (`wreduce` before `flatten` as Parmys, decisions 7 and 31 and 3G WR-9; `opt -full`
+   after `flatten` as Parmys runs it, decision 30). Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
    -crit_path_router_iterations 100` (the `vtr_reg_qor_chain` options) must end with
    `vpr_status=success`. That means VPR packs and places, finds the minimum channel width by
@@ -728,6 +726,15 @@ then the options considered.
     multiplexed RAM modes; (8) async RAM reads stay soft; (9) two live write ports mapped without
     priority logic (the IEEE race, 2D §17 #66), exempt from the functional check; (10) the 3C plan
     as about 7 tasks in 3 PRs.
+    **3G sweep rulings (controller, agent defaults under #32, 2026-10-14):** (1) `wreduce` stays a
+    faithful single Yosys 0.55 run with its queueing rule, no fixpoint loop: Yosys's own run is not a
+    fixpoint either (38 of 46 micro diffs have cells equal to Yosys `wreduce` repeated until stable;
+    Odin III follows the same queueing rule and stops a little short of that on a few designs). (2) The
+    refinement checker tries each lowering plain, then with `opt_clean -purge` (unread wires), a SAT
+    timeout or cap kill falls back to a BLIF cec of the whole script, and a design still undecided is
+    listed as "untested for now (size limit)" with its time, keyed narrowly, never counted as a pass
+    (Peter: smaller benchmarks suggest it works). (3) The `read_blif` multi-driver net that `check`
+    rejects (fuzz seed `blif003`) is a separate Phase 2 fix.
 32. **3B `lower` spec and plan approved, and a standing rule for Phase 3** (Peter, 2026-10-14: "My
     general is going to be yes (as all these reasoned well are for partial mapping to vtr) … want it
     to get as close to the flow; what I plan to use the tool for is an attempt to reverse engineer

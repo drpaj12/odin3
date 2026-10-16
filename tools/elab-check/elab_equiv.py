@@ -245,6 +245,16 @@ def tail(text: str) -> str:
     return "\n".join(earlier + shown)
 
 
+def unproven_line(output: str) -> str:
+    """equiv-check's own ``unproven: ...`` line (its exit-4 reason), else the output's last line."""
+    lines = output.strip().splitlines()
+    for line in lines:
+        at = line.find("unproven:")
+        if at >= 0:
+            return line[at:].strip()
+    return lines[-1].strip() if lines else "unproven (no reason given)"
+
+
 class Bridge:
     """One file through steps A, B, the RTLIL round trip and equiv-check."""
 
@@ -373,6 +383,8 @@ class Bridge:
         if done.returncode == 1 and NOT_EQUIVALENT_RE.search(done.stdout or ""):
             print(f"{TOOL}: {name}: NOT equivalent\n{output}")
             return EXIT_DIFFER
+        if done.returncode == EXIT_UNPROVEN:  # equiv-check's own no-verdict (a tool limit)
+            raise Unproven(f"equiv-check: {unproven_line(output)}")
         raise EquivError(f"equiv-check failed (exit {done.returncode}, no verdict line):\n{output}")
 
     def check_tools(self) -> None:

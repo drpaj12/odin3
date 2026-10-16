@@ -84,7 +84,9 @@ with open(os.environ["FAKE_LOG"], "a") as log:
 rc = os.environ.get("FAKE_EQUIV_RC", "0")
 if os.environ.get("FAKE_EQUIV_SIGNAL"):
     os.kill(os.getpid(), int(os.environ["FAKE_EQUIV_SIGNAL"]))
-if rc == "1" and not os.environ.get("FAKE_EQUIV_NO_VERDICT"):
+if os.environ.get("FAKE_EQUIV_TEXT"):
+    print(os.environ["FAKE_EQUIV_TEXT"])
+elif rc == "1" and not os.environ.get("FAKE_EQUIV_NO_VERDICT"):
     print("equiv-check: NOT equivalent (abc cec)")
 else:
     print("equiv-check says", rc)
@@ -295,11 +297,22 @@ class BridgeTest(unittest.TestCase):
     # -- exit codes ------------------------------------------------------------------------
 
     def test_exit_code_mapping(self) -> None:
-        for rc, want in ((0, 0), (1, 1), (2, 2), (3, 2)):
+        for rc, want in ((0, 0), (1, 1), (2, 2), (3, 2), (4, 4)):
             self.log.unlink(missing_ok=True)
             code, out, err = self.run_tool(extra={"FAKE_EQUIV_RC": str(rc)})
             self.assertEqual(code, want, out + err)
         self.assertIn("NOT equivalent", self.run_tool(extra={"FAKE_EQUIV_RC": "1"})[1])
+
+    def test_equiv_check_unproven_is_unproven(self) -> None:
+        """equiv-check's own exit 4 (dsec UNDECIDED, a timeout, two clocks) is a tool limit: exit
+        4 with equiv-check's reason line, never an error and never equivalent."""
+        line = "equiv-check: unproven: ABC dsec ended UNDECIDED (its own time or depth limit)"
+        code, out, err = self.run_tool(extra={"FAKE_EQUIV_RC": "4", "FAKE_EQUIV_TEXT": line})
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("elab-equiv: unproven: equiv-check: unproven: ABC dsec ended UNDECIDED", out)
+        self.assertNotIn("equivalent\n", out)
+        self.assertEqual(elab_equiv.unproven_line(""), "unproven (no reason given)")
+        self.assertEqual(elab_equiv.unproven_line("a\nlast"), "last")
 
     def test_exit_one_without_the_verdict_line_is_an_error(self) -> None:
         """A crash of equiv-check (a traceback exits 1) is not "NOT equivalent" (review I5)."""

@@ -166,3 +166,36 @@ clean/dead_ff clean.cells log:removing\sunused\s`\$dff'\scell
 clean/purge_wire clean.wires log:removing\sunused\snon-port\swire
 clean/unused_cell clean.cells log:removing\sunused\s`\$and'\scell
 clean/unused_wire clean.wires log:removing\sunused\snon-port\swire
+
+# 3G wreduce (Yosys 0.55 wreduce has no cover points: the <yosys id> is a log line or `-`, and
+# opt-rules also compares the type, widths and signed flags of every cell of Yosys's result with
+# Odin III's). Reachable only from RTLIL (covered by tests/unit/test_wreduce.c against the same
+# rules): op_removed (opt_clean removes a cell with no reader first), mux_removed, mixed-sign cells
+# (the front end never makes them), shl_b_unsigned.
+wreduce/one_bit_eq wreduce.one_bit -
+wreduce/one_bit_logic wreduce.one_bit -
+wreduce/divmod_trim_div wreduce.divmod_trim log:Removed\stop\s\d+\sbits\s\(of\s\d+\)\sfrom\sport\sA\sof\scell\s\S+\s\(\$div\)
+wreduce/divmod_trim_mod_signed wreduce.divmod_trim log:Removed\stop\s\d+\sbits\s\(of\s\d+\)\sfrom\sport\sA\sof\scell\s\S+\s\(\$mod\)
+wreduce/divmod_trim_pow wreduce.divmod_trim log:Removed\stop\s\d+\sbits\s\(of\s\d+\)\sfrom\sport\sB\sof\scell\s\S+\s\(\$pow\)
+wreduce/mem_addr wreduce.mem_addr log:Removed\stop\s\d+\saddress\sbits\s\(of\s\d+\)\sfrom\smemory dev=4
+wreduce/port_a wreduce.port_a log:Removed\stop\s\d+\sbits\s\(of\s\d+\)\sfrom\sport\sA\sof\scell\s\S+\s\(\$add\)
+wreduce/port_b wreduce.port_b log:Removed\stop\s\d+\sbits\s\(of\s\d+\)\sfrom\sport\sB\sof\scell\s\S+\s\(\$xor\)
+wreduce/y_cap_add wreduce.y_cap log:Removed\stop\s\d+\sbits\s\(of\s32\)\sfrom\sport\sY\sof\scell\s\S+\s\(\$add\)
+wreduce/y_cap_sub wreduce.y_cap log:Removed\stop\s\d+\sbits\s\(of\s16\)\sfrom\sport\sY\sof\scell\s\S+\s\(\$sub\)
+wreduce/y_cap_mul wreduce.y_cap log:Removed\stop\s\d+\sbits\s\(of\s16\)\sfrom\sport\sY\sof\scell\s\S+\s\(\$mul\)
+wreduce/y_unused wreduce.y_unused log:Removed\stop\s\d+\sbits\s\(of\s8\)\sfrom\sport\sY\sof\scell\s\S+\s\(\$and\)
+wreduce/sum_chain wreduce.y_cap log:Removed\stop\s\d+\sbits\s\(of\s\d+\)\sfrom\sport\sY
+wreduce/to_signed_sx_add wreduce.to_signed log:Converting\scell\s\S+\s\(\$add\)\sfrom\sunsigned\sto\ssigned
+wreduce/to_signed_mul wreduce.to_signed log:Converting\scell\s\S+\s\(\$mul\)\sfrom\sunsigned\sto\ssigned
+wreduce/to_unsigned wreduce.to_unsigned log:Converting\scell\s\S+\s\(\$add\)\sfrom\ssigned\sto\sunsigned
+wreduce/to_unsigned_neg wreduce.to_unsigned log:Converting\scell\s\S+\s\(\$neg\)\sfrom\ssigned\sto\sunsigned
+wreduce/mux_narrow_agree wreduce.mux_narrow log:Removed\stop\s\d+\sbits\s\(of\s4\)\sfrom\smux\scell
+wreduce/mux_narrow_unused wreduce.mux_narrow log:Removed\stop\s\d+\sbits\s\(of\s4\)\sfrom\smux\scell
+wreduce/ff_zero_ext wreduce.ff_zero_ext log:Removed\stop\s\d+\sbits\s\(of\s8\)\sfrom\sFF\scell
+wreduce/ff_sign_ext wreduce.ff_sign_ext log:Removed\stop\s\d+\sbits\s\(of\s8\)\sfrom\sFF\scell
+wreduce/ff_unused wreduce.ff_unused log:Removed\stop\s\d+\sbits\s\(of\s8\)\sfrom\sFF\scell
+wreduce/ff_adff wreduce.ff_zero_ext log:Removed\stop\s\d+\sbits\s\(of\s8\)\sfrom\sFF\scell\s\S+\s\(\$adff\)
+wreduce/ff_sdff wreduce.ff_zero_ext log:Removed\stop\s\d+\sbits\s\(of\s8\)\sfrom\sFF\scell
+wreduce/ff_dffe wreduce.ff_zero_ext log:Removed\stop\s\d+\sbits\s\(of\s8\)\sfrom\sFF\scell
+wreduce/cascade wreduce.ff_zero_ext log:Removed\stop\s\d+\sbits\s\(of\s8\)\sfrom\sFF\scell
+wreduce/sx_add wreduce.to_signed log:Converting\scell\s\S+\s\(\$add\)\sfrom\sunsigned\sto\ssigned

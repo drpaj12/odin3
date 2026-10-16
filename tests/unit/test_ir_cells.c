@@ -443,6 +443,18 @@ static void test_verify_rejects_more_types(void) {
     reject_int(&(int_case){"$pmux", "S_WIDTH", 0});
 }
 
+/* wreduce narrows a one-word $mem's address to 0 bits, so $mem accepts ABITS 0 (and not less). */
+static void test_mem_abits_zero_accepted(void) {
+    const odin3_celltype_def *def = get_def("$mem");
+    odin3_value params[MAX_PARAMS];
+    defaults_of(def, params);
+    set_int(def, params, "ABITS", 0);
+    TEST_ASSERT_EQUAL(ODIN3_OK, def->verify(params));
+    TEST_ASSERT_EQUAL_UINT32(
+        0, odin3_celltype_port_width(design, find_type("$mem"), params, 2)); /* RD_ADDR */
+    reject_int(&(int_case){"$mem", "ABITS", -1});
+}
+
 static void test_port_width_overflow_is_rejected(void) {
     const odin3_celltype_def *def = get_def("$mem");
     odin3_value params[MAX_PARAMS];
@@ -848,6 +860,7 @@ int main(void) {
     RUN_TEST(test_sample_widths);
     RUN_TEST(test_pmux_b_width_is_width_times_s_width);
     RUN_TEST(test_mem_port_widths);
+    RUN_TEST(test_mem_abits_zero_accepted);
     RUN_TEST(test_verify_rejects_bad_parameters);
     RUN_TEST(test_sop_verify);
     RUN_TEST(test_sop_const_value);
