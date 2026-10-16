@@ -115,7 +115,9 @@ static bool names_a_design(const char *line) {
     return line[0] != '#' && line[0] != '\n';
 }
 
-/* The paths of tests/abc/equiv_expect_fail.txt (the first word of each line). */
+/* The paths of the `views` entries of tests/abc/equiv_expect_fail.txt (first word of a line whose
+ * second word is `views`): the only designs the pass refuses. The other entries are designs
+ * equiv-check cannot prove; they still run through the pass here. */
 static void read_expect_list(listed *out) {
     char path[AFX_JOIN];
     (void)snprintf(path, sizeof path, "%s/tests/abc/equiv_expect_fail.txt", ODIN3_SOURCE_DIR);
@@ -127,9 +129,13 @@ static void read_expect_list(listed *out) {
         if (!names_a_design(line)) {
             continue;
         }
-        line[strcspn(line, " \t\n")] = '\0';
+        char name[AFX_PATH];
+        char status[AFX_PATH];
+        if (sscanf(line, "%255s %255s", name, status) != 2 || strcmp(status, "views") != 0) {
+            continue;
+        }
         TEST_ASSERT_TRUE(out->count < MAX_LISTED);
-        (void)snprintf(out->names[out->count++], AFX_PATH, "%s", line);
+        (void)snprintf(out->names[out->count++], AFX_PATH, "%s", name);
     }
     (void)fclose(file);
 }
