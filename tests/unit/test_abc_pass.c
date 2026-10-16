@@ -121,7 +121,7 @@ static void read_expect_list(listed *out) {
     (void)snprintf(path, sizeof path, "%s/tests/abc/equiv_expect_fail.txt", ODIN3_SOURCE_DIR);
     FILE *file = fopen(path, "r");
     TEST_ASSERT_NOT_NULL_MESSAGE(file, path);
-    char line[AFX_PATH * 2];
+    char line[AFX_PATH];
     out->count = 0;
     while (fgets(line, sizeof line, file) != NULL) {
         if (!names_a_design(line)) {
