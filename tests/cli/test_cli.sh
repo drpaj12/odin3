@@ -626,7 +626,7 @@ abc_unconn_ch_intrinsics)
     golden=$HOME/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/vtr/ch_intrinsics/ch_intrinsics.parmys.blif
     [[ -f $golden ]] || { echo "test_cli $case_name: SKIP: no $golden"; exit 77; }
     repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-    if ! "$odin3" -p "read_blif $fixture; write_blif --vtr $work/probe.blif" >/dev/null 2>&1; then
+    if ! "$odin3" -p "read_techlib $repo/lib/vtr.o3lib; read_blif $golden; write_blif --vtr $work/probe.blif" >/dev/null 2>&1; then
         echo "test_cli $case_name: SKIP: write_blif --vtr is not available"
         exit 77
     fi
