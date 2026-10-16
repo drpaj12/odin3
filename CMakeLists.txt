@@ -2471,6 +2471,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_phase3_expect_fail.txt
                     ${_micro_dir})
         set_tests_properties(opt_equiv_micro_phase3 PROPERTIES LABELS "sweep;opt_equiv")
         odin3_add_sweep_test(opt_diff_micro_wreduce LABEL sweep

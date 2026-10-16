@@ -5,7 +5,7 @@ Usage::
 
     opt-nightly --odin3 O --yosys Y [--set vtr31|all64] [--leg both|equiv|diff] [--xl] [--keep DIR]
                 [--expect-fail F]... [--diff-expect F] [--root R] [--tops F] [--techlib L]
-                [--mem-cap C] [--cap-for SUFFIX=C]... [--limit N] [--timeout S]
+                [--mem-cap C] [--cap-for SUFFIX=C]... [--limit N] [--only NAME]... [--timeout S]
 
 On each file of the set, smallest first, it runs ``opt-equiv`` (the refinement of every sub-pass
 call of the Phase 2 script) and ``opt-diff`` once for each of the five scripts of spec 20.3 (the
@@ -18,6 +18,11 @@ and a summary line.
 - ``--set vtr31`` (the default) is the 31 ``verilog/*.v`` files, ``mcml.v`` last. ``--set all64`` is
   those and the 33 ``verilog/koios/*.v`` files as one set by size, ``koios/lenet.v`` last. The set
   is read from ``--root`` (default ``$VTR_ROOT/vtr_flow/benchmarks/verilog``).
+- opt-equiv exit 4 (``unproven``: the checker hit a size limit on a proof and the whole-script
+  cec decided nothing) is a failure an expect-fail line lists as ``untested for now (size
+  limit)``, never hard (the timeout and kill words in its lines are the checker's); an unlisted one
+  is printed ``UNPROVEN`` and fails the run like any unlisted failure. Odin III's own cap kill is
+  exit 3, hard.
 - ``--expect-fail F`` (repeatable; default ``tests/opt/vtr_expect_fail.txt`` and
   ``tests/opt/vtr_nightly_xl.txt``) lists ``<path> [needle] <reason>`` lines. A listed file must
   fail (a tool exits non-zero; the needle must appear in the output); an unlisted failure, a
@@ -26,8 +31,10 @@ and a summary line.
   skipped, with ``--xl`` only such files run, each must pass, and an empty selection exits 2.
 - ``--diff-expect F`` (default ``tests/opt/diff_expect.txt``) goes to ``opt-diff --expect``.
 - ``--mem-cap C`` per child (default 3G); ``--cap-for koios/lenet.v=5G`` raises one file's cap.
-- ``--limit N`` runs only the first N files of the selection (a smoke run). ``--keep DIR`` keeps
-  every tool's work directory under DIR.
+- ``--limit N`` runs only the first N files of the selection (a smoke run). ``--only NAME``
+  (repeatable) runs only the files of that name or relative path (``--only ch_intrinsics.v``):
+  the re-run of a few designs after a fix, in the set's size order; a NAME that matches no file of
+  the set exits 2. ``--keep DIR`` keeps every tool's work directory under DIR.
 
 Exit codes: 0 pass; 1 an unexpected result; 2 usage or input error; 77 skipped (cannot cap).
 """
@@ -63,6 +70,7 @@ SETS = ("vtr31", "all64")
 LAST = {"vtr31": "mcml.v", "all64": "koios/lenet.v"}
 DEFAULT_CAP = 3 << 30
 TIMEOUT_S = 3600.0
+CAP_KILLED = (-9, 137)  # SIGKILL: the cap of a child, seen as -9 or as 128 + 9
 HARD_MARKS = ("out of memory (cap ", "timed out", "killed by signal")
 _SLUG = re.compile(r"[^A-Za-z0-9]+")
 
@@ -111,12 +119,19 @@ def collect_set(root: Path, which: str) -> list[elab_sweep.Item]:
 
 
 def select(items: Sequence[elab_sweep.Item], expect: dict[str, elab_sweep.Expect], xl: bool,
-           limit: int | None = None) -> tuple[list[elab_sweep.Item], list[elab_sweep.Item]]:
-    """(to run, skipped): ``elab_sweep.split_xl``; an empty ``--xl`` selection is a usage error."""
+           limit: int | None = None, only: Sequence[str] = ()
+           ) -> tuple[list[elab_sweep.Item], list[elab_sweep.Item]]:
+    """(to run, skipped): ``elab_sweep.split_xl``; an empty ``--xl`` selection is a usage error,
+    as is an ``--only`` name that matches no file."""
     run, skipped = elab_sweep.split_xl(items, expect, xl)
     if xl and not run:
         raise UsageError("--xl selects no file: no collected file is listed `xl` in the "
                          "expect-fail files")
+    for name in only:
+        if not any(i.rel == name or i.path.name == name for i in items):
+            raise UsageError(f"--only {name}: no such file in the set")
+    if only:
+        run = [i for i in run if i.rel in only or i.path.name in only]
     if limit is not None:
         run = run[:limit]
     return run, skipped
@@ -177,6 +192,7 @@ class Result:
     secs: float
     text: str
     hard: bool  # a cap kill or a timeout: never an expected failure
+    unproven: bool = False  # opt-equiv exit 4: a size limit of the checker, listable
 
 
 def run_unit(cfg: Config, unit: Unit, item: elab_sweep.Item, cap: int) -> Result:
@@ -191,10 +207,18 @@ def run_unit(cfg: Config, unit: Unit, item: elab_sweep.Item, cap: int) -> Result
     except OSError as exc:
         return Result(1, time.monotonic() - start, f"cannot run {unit.tool.name}: {exc}", True)
     text = (done.stdout or "") + (done.stderr or "")
-    hard = (toolutil.is_crash(done.returncode) or done.returncode == opt_equiv.EXIT_CRASH
-            or any(mark in text for mark in HARD_MARKS)
-            or any(mark in text for mark in elab_sweep.OPT_TOOL_ABORT))
-    return Result(done.returncode, time.monotonic() - start, text, hard)
+    # opt-equiv exit 4: only the checker hit a size limit (a proof timeout or the checker's cap
+    # kill: its lines say "timed out" or "killed"); Odin III's own cap kill or crash is exit 3.
+    killed = unit.tool == OPT_EQUIV and done.returncode in CAP_KILLED
+    if killed:  # opt-equiv itself (its Python, not Odin III: that child's kill is its exit 3)
+        text += (f"opt-equiv: unproven: opt-equiv itself was killed by its memory cap "
+                 f"({format_cap(cap)}); the snapshot is too big for the checker\n")
+    unproven = unit.tool == OPT_EQUIV and (done.returncode == opt_equiv.EXIT_UNPROVEN or killed)
+    hard = not unproven and (
+        toolutil.is_crash(done.returncode) or done.returncode == opt_equiv.EXIT_CRASH
+        or any(mark in text for mark in HARD_MARKS)
+        or any(mark in text for mark in elab_sweep.OPT_TOOL_ABORT))
+    return Result(done.returncode, time.monotonic() - start, text, hard, unproven)
 
 
 Runner = Callable[[Config, Unit, elab_sweep.Item, int], Result]
@@ -239,7 +263,7 @@ def run_file(cfg: Config, item: elab_sweep.Item, entry: elab_sweep.Expect | None
             out(f"{tag}: fails as listed ({entry.reason}): {why}")
             tally.listed += 1
         else:
-            kind = "HARD FAIL" if res.hard else "FAIL"
+            kind = "HARD FAIL" if res.hard else "UNPROVEN" if res.unproven else "FAIL"
             extra = ""
             if entry is not None and not res.hard:
                 extra = f" (listed, but the needle '{entry.needle}' is missing)"
@@ -265,7 +289,7 @@ def execute(args: argparse.Namespace, runner: Runner = run_unit,
     root = root.resolve()
     expect = elab_sweep.merge_expect(args.expect_fail or list(DEFAULT_EXPECT))
     items = collect_set(root, args.set)
-    run, _ = select(items, expect, args.xl, args.limit)
+    run, _ = select(items, expect, args.xl, args.limit, getattr(args, "only", None) or ())
     if not run:
         raise UsageError("no file selected (an empty set, --limit 0, or --xl with no xl file)")
     cfg = Config(args.odin3, args.yosys, root, args.mem_cap, parse_caps(args.cap_for),
@@ -304,6 +328,8 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--min-changed-total", type=int, default=0, metavar="N",
                     help="fail (exit 1) unless opt-equiv saw at least N changing calls in total")
     ap.add_argument("--limit", type=int, metavar="N", help="only the first N files (a smoke run)")
+    ap.add_argument("--only", action="append", default=[], metavar="NAME",
+                    help="only this file (name or relative path); repeatable")
     ap.add_argument("--timeout", type=float, default=TIMEOUT_S, metavar="S",
                     help="per tool run (default 3600)")
     return ap.parse_args(argv)
