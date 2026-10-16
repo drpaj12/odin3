@@ -471,14 +471,14 @@ static uint64_t counting_hash(const void *key, size_t len) {
     return odin3_hash_bytes((odin3_bytes){key, len}, ODIN3_HASH_SEED);
 }
 
-/* The net chain `chain` leaves gate i on: the output port after the last gate. */
-static void chain_net(char *out, size_t size, int chain, int i) {
-    if (i == CHAIN_LEN - 1) {
+/* The net chain `chain` leaves gate `gate` on: the output port after the last gate. */
+static void chain_net(char *out, size_t size, int chain, int gate) {
+    if (gate == CHAIN_LEN - 1) {
         (void)snprintf(out, size, "%s", chain == 1 ? "\\y" : "\\z");
-    } else if (i < 0) {
+    } else if (gate < 0) {
         (void)snprintf(out, size, "\\a");
     } else {
-        (void)snprintf(out, size, "\\c%d_%d", chain, i);
+        (void)snprintf(out, size, "\\c%d_%d", chain, gate);
     }
 }
 
@@ -507,14 +507,18 @@ static size_t chain_text(char *out, size_t size) {
     return at;
 }
 
-static void test_cse_deep_cascade_is_linear(void) {
+static void build_chain(void) {
     char *text = odin3_util_malloc(CHAIN_TEXT);
     TEST_ASSERT_NOT_NULL(text);
     TEST_ASSERT_TRUE(chain_text(text, CHAIN_TEXT) < CHAIN_TEXT);
-    hash_calls = 0;
-    odin3_opt_merge_test_set_key_hash(counting_hash);
     build(text);
     odin3_util_free(text);
+}
+
+static void test_cse_deep_cascade_is_linear(void) {
+    hash_calls = 0;
+    odin3_opt_merge_test_set_key_hash(counting_hash);
+    build_chain();
     odin3_log_set_level(ODIN3_LOG_INFO); /* not a debug line per merge: the sink keeps 64 lines */
     run_merge();
     TEST_ASSERT_TRUE(merged_pair());
