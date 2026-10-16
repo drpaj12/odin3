@@ -26,6 +26,7 @@ void tearDown(void) {
     odin3_design_destroy(design);
 }
 
+#ifdef ODIN3_HAVE_REAL_ABC
 typedef struct flops {
     uint32_t count;
     int64_t init;
@@ -88,6 +89,7 @@ static void expect_one_flop_at_one(const char *name, uint32_t want_flops, bool c
     TEST_ASSERT_EQUAL_INT64(1, found.init);
     TEST_ASSERT_EQUAL_INT(0, afx_run_equiv(before, after, "--strict-init"));
 }
+#endif
 
 static void test_toggle_init1(void) {
 #ifdef ODIN3_HAVE_REAL_ABC

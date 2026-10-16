@@ -320,6 +320,8 @@ static void test_real_engine_script_and_second_pass(void) {
     TEST_ASSERT_EQUAL_INT(0, afx_run_equiv(base, one, ""));
     TEST_ASSERT_EQUAL_INT(0, afx_run_equiv(base, two, ""));
 #else
+    odin3_design_destroy(design); /* Unity skips tearDown for an ignored test */
+    design = NULL;
     TEST_IGNORE_MESSAGE("built without ODIN3_WITH_ABC");
 #endif
 }
