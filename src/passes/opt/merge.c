@@ -7,10 +7,16 @@
  * for an FF. A 64-bit hash of the words indexes a u64map whose value heads a chain of entries;
  * equality compares the words, so a collision costs time and never correctness.
  *
- * Sweeps visit the nodes in ID order; a node whose key is already in the table is dropped into the
- * earlier one (the later one when only it has `keep`), and the sweeps repeat until one drops
- * nothing. Then each class is closed with one rebuild of its survivor whose DERIVED record has the
- * parents [survivor, drops in ID order] (plan point (p), spec §25 item 4).
+ * One sweep visits the nodes in ID order; a node whose key is already in the table is dropped into
+ * the earlier one (the later one when only it has `keep`). A merge changes the key of every reader
+ * of the dropped node's outputs, so those readers that the sweep had already passed are looked up
+ * again, in ID order, in rounds, until no merge is left: the table is kept, a reader's old entry
+ * stays as garbage (its key names a net that no pin reads any more, so no node can match it), and
+ * of two equal nodes the lower ID survives, as in the sweep. The cost is the pins of the merged
+ * nets, not the nodes times the depth of the longest cascade of duplicates that the IDs list
+ * readers-first (lenet.v: about 200 full sweeps, 39 s of a 46 s opt; PHASE2 #23). Then each class
+ * is closed with one rebuild of its survivor whose DERIVED record has the parents [survivor, drops
+ * in ID order] (plan point (p), spec §25 item 4).
  *
  * Differences from Yosys (spec §17): Yosys walks its cell dictionary newest first and so keeps the
  * later of two equal cells, §6 the earlier (a spec choice, row 7). Nodes with no output port, or
@@ -174,8 +180,11 @@ typedef struct merge_state {
     odin3_vec idx, idx2, bits; /* uint32_t (pmux pair order and its merge buffer); odin3_bit */
     odin3_vec store, ents;     /* uint64_t key words of every entry; entry */
     odin3_vec srcs;            /* odin3_net_id: the survivor's output nets */
+    odin3_vec dirty;           /* uint64_t: nodes to look up again (readers of a dropped output) */
     odin3_u64map *map;
-    uint32_t *into; /* per node: the node it was dropped into (0: not dropped) */
+    uint32_t *into;  /* per node: the node it was dropped into (0: not dropped) */
+    uint8_t *queued; /* per node: 1 while the node is in dirty */
+    uint32_t reach;  /* nodes up to this ID were visited in this sweep (all, once it is over) */
     odin3_prov_id *dprov;
 } merge_state;
 
@@ -588,6 +597,14 @@ static odin3_status reset_table(merge_state *ms) {
     return ms->map == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
 }
 
+/* Frees the table and its keys (state_free is safe after it). */
+static void drop_table(merge_state *ms) {
+    odin3_u64map_destroy(ms->map);
+    ms->map = NULL;
+    odin3_vec_free(&ms->store);
+    odin3_vec_free(&ms->ents);
+}
+
 /* --- one merge ----------------------------------------------------------------------------------
  */
 
@@ -614,6 +631,41 @@ static odin3_status survivor_nets(merge_state *ms, odin3_node_id surv, uint32_t 
         *slot = net;
     }
     return ODIN3_OK;
+}
+
+/* Queues a reader of a dropped output for a second look. A node the sweep has not reached yet is
+ * looked up when it comes. */
+static void queue_reader(merge_state *ms, uint32_t id) {
+    if (id >= ms->node_end || id > ms->reach || ms->queued[id] != 0) {
+        return;
+    }
+    uint64_t *slot = odin3_vec_push(&ms->dirty);
+    if (slot == NULL) {
+        ms->oom = true;
+        return;
+    }
+    *slot = id;
+    ms->queued[id] = 1;
+}
+
+/* Queues the readers of drop's output nets (port) except drop itself; call before the merge, while
+ * they are on the nets. */
+static odin3_status queue_readers(merge_state *ms, odin3_node_id drop, uint32_t port) {
+    odin3_pinslice ps = odin3_node_port(ms->m, drop, port);
+    for (uint32_t k = 0; k < ps.count; k++) {
+        odin3_net_id net = odin3_pin_net(ms->m, (odin3_pin_id){ps.first.v + k});
+        if (!odin3_net_valid(net)) {
+            continue;
+        }
+        odin3_pinlist sinks = odin3_net_sinks(ms->m, net);
+        for (uint32_t i = 0; i < sinks.count; i++) {
+            uint32_t id = odin3_pin_node(ms->m, sinks.pins[i]).v;
+            if (id != drop.v) {
+                queue_reader(ms, id);
+            }
+        }
+    }
+    return ms->oom ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
 }
 
 /* The dropped FF's Q init bits into ms->bits (x for an unconnected pin). Reads only. */
@@ -668,6 +720,7 @@ static odin3_status merge_pair(merge_state *ms, odin3_node_id surv, odin3_node_i
     uint32_t port = out_port(def);
     odin3_status st = survivor_nets(ms, surv, port);
     st = st == ODIN3_OK && is_ff ? read_drop_inits(ms, drop, port) : st;
+    st = st == ODIN3_OK ? queue_readers(ms, drop, port) : st;
     if (st != ODIN3_OK) {
         return st;
     }
@@ -690,8 +743,9 @@ static odin3_status merge_pair(merge_state *ms, odin3_node_id surv, odin3_node_i
 /* --- the sweeps ---------------------------------------------------------------------------------
  */
 
-/* Looks node up; on a hit merges the pair (the later node survives only when it alone has keep). */
-static odin3_status visit(merge_state *ms, odin3_node_id node, uint32_t *merged) {
+/* Looks node up; on a hit merges the pair. The lower ID survives (the sweep meets it first), except
+ * that a node with `keep` survives against one without, and two with `keep` stay apart. */
+static odin3_status visit(merge_state *ms, odin3_node_id node) {
     const odin3_celltype_def *def = NULL;
     uint8_t cls = candidate(ms, node, &def);
     if (cls == CLS_SKIP) {
@@ -707,26 +761,48 @@ static odin3_status visit(merge_state *ms, odin3_node_id node, uint32_t *merged)
     }
     entry *ent = odin3_vec_at(&ms->ents, at - 1U);
     odin3_node_id other = {ent->node};
+    if (other.v == node.v) {
+        return ODIN3_OK; /* looked up again with the key it already has */
+    }
     odin3_objref cur_ref = {ODIN3_OBJ_NODE, node.v};
     odin3_objref other_ref = {ODIN3_OBJ_NODE, other.v};
     bool cur_keep = odin3_kit_keep(ms->oc, cur_ref);
-    if (cur_keep && odin3_kit_keep(ms->oc, other_ref)) {
+    bool other_keep = odin3_kit_keep(ms->oc, other_ref);
+    if (cur_keep && other_keep) {
         return ODIN3_OK;
     }
-    if (cur_keep) {
-        ent->node = node.v; /* the entry now stands for the later node */
+    bool take_cur = cur_keep || (!other_keep && node.v < other.v);
+    if (take_cur) {
+        ent->node = node.v; /* the entry now stands for the survivor */
     }
-    (*merged)++;
-    return cur_keep ? merge_pair(ms, node, other, (cls & CLS_FF) != 0)
+    return take_cur ? merge_pair(ms, node, other, (cls & CLS_FF) != 0)
                     : merge_pair(ms, other, node, (cls & CLS_FF) != 0);
 }
 
-static odin3_status sweep(merge_state *ms, uint32_t *merged) {
-    *merged = 0;
+/* The first sweep: a new table, every node in ID order. */
+static odin3_status sweep(merge_state *ms) {
     odin3_status st = reset_table(ms);
     for (uint32_t id = 1; st == ODIN3_OK && id < ms->node_end; id++) {
-        st = visit(ms, (odin3_node_id){id}, merged);
+        ms->reach = id;
+        st = visit(ms, (odin3_node_id){id});
     }
+    ms->reach = UINT32_MAX;
+    return st;
+}
+
+/* One round: the queued nodes, in ID order, looked up again in the kept table. Merges queue the
+ * next round. */
+static odin3_status round_of_readers(merge_state *ms) {
+    odin3_vec batch = ms->dirty; /* the visits below queue the next round in a fresh vector */
+    odin3_vec_init(&ms->dirty, sizeof(uint64_t));
+    sort_words(&batch);
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < batch.len; i++) {
+        uint32_t id = (uint32_t)words(&batch)[i];
+        ms->queued[id] = 0;
+        st = visit(ms, (odin3_node_id){id});
+    }
+    odin3_vec_free(&batch);
     return st;
 }
 
@@ -866,8 +942,10 @@ static void state_free(merge_state *ms) {
     odin3_vec_free(&ms->store);
     odin3_vec_free(&ms->ents);
     odin3_vec_free(&ms->srcs);
+    odin3_vec_free(&ms->dirty);
     odin3_u64map_destroy(ms->map);
     odin3_util_free(ms->into);
+    odin3_util_free(ms->queued);
     odin3_util_free(ms->dprov);
 }
 
@@ -886,20 +964,25 @@ static void state_init(merge_state *ms, odin3_opt_ctx *oc) {
     odin3_vec_init(&ms->store, sizeof(uint64_t));
     odin3_vec_init(&ms->ents, sizeof(entry));
     odin3_vec_init(&ms->srcs, sizeof(odin3_net_id));
+    odin3_vec_init(&ms->dirty, sizeof(uint64_t));
+    ms->queued = odin3_util_calloc(sizeof *ms->queued * ((size_t)ms->node_end + 1U));
     ms->into = odin3_util_calloc(sizeof *ms->into * ((size_t)ms->node_end + 1U));
     ms->dprov = odin3_util_calloc(sizeof *ms->dprov * ((size_t)ms->node_end + 1U));
 }
 
-/* Sweeps to a fixed point, then closes the classes. Adds the drops into *removed. */
+/* One sweep, then rounds over the readers of what it merged until nothing merges, then closes the
+ * classes. Adds the drops into *removed. */
 static odin3_status merge_module(odin3_opt_ctx *oc, uint32_t *removed) {
     merge_state ms;
     state_init(&ms, oc);
-    odin3_status st = ms.into == NULL || ms.dprov == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
+    odin3_status st =
+        ms.into == NULL || ms.dprov == NULL || ms.queued == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
     st = st == ODIN3_OK ? odin3_opt_canon_consts(oc) : st;
-    uint32_t merged = 1;
-    while (st == ODIN3_OK && merged > 0) {
-        st = sweep(&ms, &merged);
+    st = st == ODIN3_OK ? sweep(&ms) : st;
+    while (st == ODIN3_OK && ms.dirty.len > 0) {
+        st = round_of_readers(&ms);
     }
+    drop_table(&ms); /* the keys are not needed to close the classes: do not hold them over it */
     st = st == ODIN3_OK && ms.removed > 0 ? close_all(&ms) : st;
     *removed += ms.removed;
     state_free(&ms);
