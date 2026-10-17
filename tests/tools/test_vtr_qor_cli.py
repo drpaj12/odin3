@@ -36,10 +36,11 @@ import qor_heavy
 import qor_legs
 import qor_parse
 import qor_sched
+import qor_table
 import vtr_qor
 from qor_heavy import HEAVY_DIR
 
-from .helpers import REPO_ROOT, run_main
+from .helpers import REPO_ROOT, run_main, write_golden
 
 K6 = "k6_frac_N10_frac_chain_mem32K_40nm"
 SETS = qor_sched.load_sets()
@@ -115,6 +116,28 @@ print("\\t".join(fields) + "\\t")
 print("\\t".join(fields.values()) + "\\t")
 """
 
+FAKE_RANDOM_CHECK = """
+import sys
+from pathlib import Path
+args = sys.argv[1:]
+root = Path(__file__).resolve().parents[2]
+with (root / "fcheck-calls.log").open("a") as log:
+    log.write(" ".join(args) + "\\n")
+Path(args[args.index("--work-dir") + 1]).mkdir(parents=True, exist_ok=True)
+mode = root / "fcheck-exit"
+sys.exit(int(mode.read_text()) if mode.exists() else 0)
+"""
+
+FAKE_TASK = """
+import sys
+from pathlib import Path
+args = sys.argv[1:]
+root = Path(__file__).resolve().parents[2]
+run = Path(args[args.index("-temp_dir") + 1]) / "run001"
+run.mkdir(parents=True, exist_ok=True)
+(run / "parse_results.txt").write_text((root / "task-results").read_text())
+"""
+
 FAKE_PATHS = """
 import pathlib
 root_path = pathlib.Path(__file__).absolute().parent.parent.parent.parent.parent
@@ -132,7 +155,9 @@ if sys.argv[1:] == ["--help"]:
 if Path(__file__).with_name("fail").exists():
     sys.exit(1)
 script = sys.argv[sys.argv.index("-p") + 1]
-Path(script.split()[-1]).write_text({ABC_LINE + BLIF!r})
+header = Path(__file__).with_name("abc_line.txt")  # a test's own # abc: line ("" for none)
+text = header.read_text() + {BLIF!r} if header.exists() else {ABC_LINE + BLIF!r}
+Path(script.split()[-1]).write_text(text)
 """
 
 FAKE_TIME = f"""
@@ -237,6 +262,8 @@ class CliTestBase(unittest.TestCase):
             (verilog / f"{design}.v").write_text(f"module {design}(); endmodule\n")
         scripts = v / "vtr_flow" / "scripts"
         _script(scripts / "run_vtr_flow.py", FAKE_FLOW)
+        _script(scripts / "run_vtr_task.py", FAKE_TASK)
+        _script(v / "mosaic" / "verilator_check" / "run_random_check.py", FAKE_RANDOM_CHECK)
         libs = scripts / "python_libs" / "vtr"
         _script(libs / "parse_vtr_flow.py", FAKE_PARSE)
         (libs / "__init__.py").write_text("")
@@ -865,6 +892,262 @@ class RunTest(CliTestBase):
         self.assertEqual(vtr_qor.odin3_commit(("O",), inside), f"{head}-dirty")
         self.assertIsNone(vtr_qor.odin3_commit(("O",), self.odin3))  # built elsewhere
         self.assertIsNone(vtr_qor.odin3_commit(("P",), inside))
+
+
+class ControlLegTest(CliTestBase):
+    """Plan Task 10: P' and R read the verified Parmys golden; point (e) and (o)."""
+
+    def golden_for(self, design: str, **prov: str) -> Path:
+        return write_golden(self.golden / K6, design, BLIF, **prov)
+
+    def odin3_commands(self, job_dir: Path) -> list[list[str]]:
+        record = self.load(job_dir / "job.json")
+        return [c["argv"] for c in record["commands"]]
+
+    def test_pprime_skipped(self) -> None:
+        """A bad golden: status skipped, metrics.json says why (E-QH6), exit 1, nothing runs."""
+        golden = self.golden_for("ch_intrinsics", status="failed")
+        code, _, err = self.cli("run", "--leg", "P'", "--designs", "ch_intrinsics")
+        text = f"ch_intrinsics: Parmys golden {golden}: status=failed"
+        self.assertEqual(code, 1, err)
+        self.assertIn(f"vtr-qor: {text}\n", err)
+        (job,) = self.job_dirs("Pprime", "ch_intrinsics")
+        self.assertEqual((job / "status").read_text(), "skipped\n")
+        metrics = self.load(job / "metrics.json")
+        self.assertEqual((metrics["status"], metrics["error"]), ("skipped", text))
+        self.assertEqual(self.calls(), [])
+        self.assertIn("1 skipped", self.harness_lines()[-1])
+        # No golden at all is `missing`; the same for R; a good golden runs.
+        code, _, err = self.cli("run", "--leg", "R", "--designs", "stereovision3")
+        self.assertEqual(code, 1, err)
+        missing = qor_legs.golden_blif(K6, "stereovision3")
+        self.assertIn(f"stereovision3: Parmys golden {missing}: missing", err)
+        code, out, _ = self.cli("run", "--leg", "P',R", "--designs", "ch_intrinsics",
+                                "--dry-run")
+        self.assertEqual((code, [line.split()[-1] for line in out.splitlines()]),
+                         (0, ["skipped", "skipped"]))
+        self.golden_for("ch_intrinsics")
+        code, _, err = self.cli("run", "--leg", "P'", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls(), ["ch_intrinsics vpr"])
+
+    def test_pprime_commands(self) -> None:
+        """P' reads the golden, abc runs in odin3, VTR starts at vpr; R starts at abc and its
+        script has no abc; both key on the golden's SHA-256."""
+        golden = self.golden_for("ch_intrinsics")
+        code, _, err = self.cli("run", "--leg", "P',R", "--designs", "ch_intrinsics",
+                                "--keep-netlists")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(sorted(self.calls()), ["ch_intrinsics abc", "ch_intrinsics vpr"])
+        (pj,) = self.job_dirs("Pprime", "ch_intrinsics")
+        (rj,) = self.job_dirs("R", "ch_intrinsics")
+        p_front, p_vtr, *_ = self.odin3_commands(pj)
+        r_front, r_vtr, *_ = self.odin3_commands(rj)
+        self.assertIn(f"read_blif {golden}; abc --lut 6; write_blif --vtr --lut-k 6",
+                      p_front[-1])
+        self.assertIn(f"read_blif {golden}; write_blif --vtr --lut-k 6", r_front[-1])
+        self.assertNotIn("abc --lut", r_front[-1])
+        self.assertEqual((p_vtr[p_vtr.index("-start") + 1], r_vtr[r_vtr.index("-start") + 1]),
+                         ("vpr", "abc"))
+        sha = hashlib.sha256(golden.read_bytes()).hexdigest()
+        for job in (pj, rj):
+            self.assertEqual(self.load(job / "job.json")["key_inputs"]["source_sha256"], sha)
+
+    def test_abc_header_metrics(self) -> None:
+        """P': the # abc: line gives abc_depth and the exchange; without it both are null."""
+        self.golden_for("ch_intrinsics")
+        line = ABC_LINE.replace("exchange=aig depth=2", "exchange=blif depth=5")
+        (self.bin / "abc_line.txt").write_text(line)
+        code, _, err = self.cli("run", "--leg", "Pprime", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        (job,) = self.job_dirs("Pprime", "ch_intrinsics")
+        netlist = self.load(job / "metrics.json")["netlist"]
+        self.assertEqual((netlist["abc_depth"], netlist["abc_exchange"]), (5, "blif"))
+        (self.bin / "abc_line.txt").write_text("")
+        code, _, err = self.cli("run", "--leg", "Pprime", "--designs", "ch_intrinsics",
+                                "--rerun")
+        self.assertEqual(code, 0, err)
+        netlist = self.load(self.job_dirs("Pprime", "ch_intrinsics")[0] / "metrics.json")[
+            "netlist"]
+        self.assertEqual((netlist["abc_depth"], netlist["abc_exchange"]), (None, None))
+
+    def test_pprime_parmys_part(self) -> None:
+        """Point (o): the Parmys stage cost comes from the latest P job's parmys.out; without a P
+        job the cell is starred with the exact warning, and frontend_wall_s is frontend.time."""
+        self.golden_for("ch_intrinsics")
+        self.golden_for("stereovision3")
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
+        code, _, err = self.cli("run", "--leg", "Pprime", "--designs",
+                                "ch_intrinsics,stereovision3")
+        self.assertEqual(code, 0, err)
+        self.assertIn("vtr-qor: Pprime stereovision3: no P job for the Parmys stage cost", err)
+        (with_p,) = self.job_dirs("Pprime", "ch_intrinsics")
+        (without,) = self.job_dirs("Pprime", "stereovision3")
+        job = self.load(with_p / "job.json")
+        self.assertEqual((job["parmys_stage_wall_s"], job["cost_warnings"]), (0.5, []))
+        self.assertEqual(self.load(with_p / "metrics.json")["cost"]["frontend_wall_s"], 0.5)
+        job = self.load(without / "job.json")
+        self.assertIsNone(job["parmys_stage_wall_s"])
+        self.assertEqual(job["cost_warnings"],
+                         ["Pprime stereovision3: no P job for the Parmys stage cost"])
+
+
+class FcheckCliTest(CliTestBase):
+    """Plan Task 11: ``fcheck`` and ``run --fcheck``."""
+
+    def fcheck_calls(self) -> list[str]:
+        log = self.vtr / "fcheck-calls.log"
+        return log.read_text().splitlines() if log.exists() else []
+
+    def verdict(self, leg: str, design: str) -> str:
+        (job,) = self.job_dirs(leg, design)
+        return str(self.load(job / "metrics.json")["verdicts"]["fcheck"])
+
+    def test_fcheck_existing_jobs(self) -> None:
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics,sha")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.fcheck_calls(), [])
+        self.assertEqual(self.verdict("P", "sha"), "skipped")
+        code, _, err = self.cli("fcheck", "--leg", "P", "--designs", "ch_intrinsics,sha")
+        self.assertEqual(code, 0, err)
+        calls = self.fcheck_calls()
+        self.assertEqual(len(calls), 2)
+        self.assertIn(f"--rtl {self.vtr}/vtr_flow/benchmarks/verilog/ch_intrinsics.v", calls[0])
+        self.assertTrue(all(c.endswith("--vectors 50000 --seed 1 --verilator-j 2") for c in calls))
+        self.assertEqual((self.verdict("P", "sha"), self.verdict("P", "ch_intrinsics")),
+                         ("pass", "pass"))
+        (job,) = self.job_dirs("P", "sha")
+        self.assertFalse((job / "fcheck").exists())
+        self.assertTrue((job / "fcheck.log").is_file())
+        self.assertIn("vtr-qor: fcheck done: 2 pass", self.harness_lines()[-1])
+        (self.vtr / "fcheck-exit").write_text("1")
+        code, _, err = self.cli("fcheck", "--leg", "P", "--designs", "sha")
+        self.assertEqual(code, 1, err)
+        self.assertEqual(self.verdict("P", "sha"), "fail")
+        self.assertTrue((job / "fcheck").is_dir())
+
+    def test_fcheck_missing_job_and_options(self) -> None:
+        code, _, err = self.cli("fcheck", "--leg", "P", "--designs", "spree")
+        self.assertEqual(code, 1)
+        self.assertIn("vtr-qor: fcheck: P spree: no ok job; run it first\n", err)
+        code, _, err = self.cli("fcheck", "--leg", "P", "--set", "smoke", "--xl")
+        self.assertEqual(code, 2)
+        self.assertIn("--xl is only for run --designs", err)
+        code, _, err = self.cli("fcheck", "--leg", "P")
+        self.assertEqual((code, err), (2, "vtr-qor: run needs --set or --designs\n"))
+
+    def test_run_with_fcheck(self) -> None:
+        code, _, err = self.cli("run", "--leg", "P,O", "--designs", "ch_intrinsics", "--fcheck",
+                                "--keep-netlists")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self.fcheck_calls()), 2)
+        self.assertEqual((self.verdict("P", "ch_intrinsics"), self.verdict("O", "ch_intrinsics")),
+                         ("pass", "pass"))
+        # O without --keep-netlists has nothing to check: error, and the run exits 1 (review M4).
+        code, _, err = self.cli("run", "--leg", "O", "--designs", "sha", "--fcheck")
+        self.assertEqual(code, 1, err)
+        self.assertEqual(self.verdict("O", "sha"), "error")
+        self.assertIn("vtr-qor: fcheck: O sha: no kept netlist (run with --keep-netlists)", err)
+
+    def test_run_fcheck_mismatch_is_the_exit_code(self) -> None:
+        """Review M4: ``run --fcheck`` exits 1 for a mismatch (fail), 0 for a pass."""
+        (self.vtr / "fcheck-exit").write_text("1")
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--fcheck")
+        self.assertEqual(code, 1, err)
+        self.assertEqual(self.verdict("P", "ch_intrinsics"), "fail")
+        (self.vtr / "fcheck-exit").write_text("0")
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--fcheck")
+        self.assertEqual(code, 1, err)  # the cached job keeps its recorded verdict: still exit 1
+        self.assertEqual(self.verdict("P", "ch_intrinsics"), "fail")
+
+    def test_run_fcheck_on_a_cached_job_without_one(self) -> None:
+        """Review M4: a job first run without ``--fcheck`` gets its fcheck on the next
+        ``run --fcheck`` instead of a silent no-op."""
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.fcheck_calls(), [])
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--fcheck")
+        self.assertEqual(code, 0, err)
+        self.assertIn("cached", err)
+        self.assertEqual(len(self.fcheck_calls()), 1)
+        self.assertEqual(self.verdict("P", "ch_intrinsics"), "pass")
+
+
+class CommittedInputsTest(unittest.TestCase):
+    """The committed gate inputs under tests/vtr/qor."""
+
+    def test_equiv_exceptions_file(self) -> None:
+        rows = qor_table.load_tsv(REPO_ROOT / "tests" / "vtr" / "qor" / "equiv-exceptions.tsv")
+        self.assertEqual([r[0] for r in rows], ["stereovision3", "diffeq1", "diffeq2",
+                                                "stereovision1", "stereovision2", "bgm"])
+        self.assertEqual(rows[0][1:], ("multiclock", "two clocks (tm3_clk_v0, tm3_clk_v2): the "
+                                                     "Verilator check stands in"))
+        counts = {"diffeq1": 5, "diffeq2": 5, "stereovision1": 152, "stereovision2": 468,
+                  "bgm": 11}
+        for design, cls, text in rows[1:]:
+            self.assertEqual(cls, "multiplier")
+            self.assertEqual(text, f"{counts[design]} multiply, inlined by equiv-check as "
+                                   "36x36 logic: the Verilator check stands in")
+        for design, _, _ in rows:
+            self.assertIn(design, SETS.gate)
+        for absent in ("sha", "stereovision0", "blob_merge"):
+            self.assertNotIn(absent, [r[0] for r in rows])
+
+    def test_divergences_rows(self) -> None:
+        rows = qor_table.load_tsv(REPO_ROOT / "tests" / "vtr" / "qor" / "divergences.tsv")
+        self.assertEqual(rows[0], ("ch_intrinsics", "mem-init-dropped",
+                                   "decision 6 step 5: hardmap drops RAM initial values (3C)"))
+        classes = {"mem-init-dropped", "async-reset-made-sync", "baseline-fails"}
+        for design, cls, text in rows:
+            self.assertIn(design, SETS.designs)
+            self.assertIn(cls, classes)
+            if cls == "baseline-fails":
+                self.assertIn("fcheck.log", text)  # each such row cites P's log
+
+
+class EquivCliTest(CliTestBase):
+    """Plan Task 12: ``equiv`` on O' and O jobs kept with --keep-netlists."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tool = _script(self.repo / "tools" / "equiv-check" / "equiv-check", (
+            "import sys\nfrom pathlib import Path\nhere = Path(__file__).parent\n"
+            "(here / 'calls').open('a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "mode = here / 'mode'\nsys.exit(int(mode.read_text()) if mode.exists() else 0)\n"))
+
+    def verdict(self, design: str) -> str:
+        (job,) = self.job_dirs("O", design)
+        return str(self.load(job / "metrics.json")["verdicts"]["equiv"])
+
+    def test_equiv_command_line(self) -> None:
+        code, _, err = self.cli("run", "--leg", "O,Oprime", "--designs", "ch_intrinsics,sha",
+                                "--keep-netlists")
+        self.assertEqual(code, 0, err)
+        code, _, err = self.cli("equiv", "--designs", "ch_intrinsics,sha")
+        self.assertEqual(code, 0, err)
+        calls = (self.tool.parent / "calls").read_text().splitlines()
+        self.assertEqual(len(calls), 2)
+        (o_job,) = self.job_dirs("O", "sha")
+        (p_job,) = self.job_dirs("Oprime", "sha")
+        self.assertEqual(calls[1], f"--timeout 600 {p_job}/sha.blif {o_job}/sha.blif")
+        self.assertEqual((self.verdict("sha"), self.verdict("ch_intrinsics")),
+                         ("equivalent", "equivalent"))
+        self.assertIn("vtr-qor: equiv done: 2 equivalent", self.harness_lines()[-1])
+        (self.tool.parent / "mode").write_text("1")
+        code, _, err = self.cli("equiv", "--designs", "sha")
+        self.assertEqual(code, 1, err)
+        self.assertEqual(self.verdict("sha"), "differs")
+        (self.tool.parent / "mode").write_text("4")
+        self.assertEqual(self.cli("equiv", "--designs", "sha")[0], 3)
+
+    def test_equiv_missing_jobs(self) -> None:
+        code, _, err = self.cli("run", "--leg", "O", "--designs", "sha", "--keep-netlists")
+        self.assertEqual(code, 0, err)
+        code, _, err = self.cli("equiv", "--designs", "sha")
+        self.assertEqual(code, 1)
+        self.assertIn("vtr-qor: equiv: Oprime sha: no ok job; run it first\n", err)
+        self.assertIn("vtr-qor: equiv: O sha: no ok O' job to compare with\n", err)
+        self.assertFalse((self.tool.parent / "calls").exists())
 
 
 class StatusCleanTest(CliTestBase):

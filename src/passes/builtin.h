@@ -41,6 +41,8 @@ extern const odin3_pass_def odin3_pass_wreduce;
 extern const odin3_pass_def odin3_pass_flatten;
 /* src/passes/lower/register.c (3B Task 1). */
 extern const odin3_pass_def odin3_pass_lower;
+/* src/passes/hardmap/register.c (3C Task 2). */
+extern const odin3_pass_def odin3_pass_hardmap;
 /* src/frontends/verilog/read_verilog.c (2C §4). */
 extern const odin3_pass_def odin3_read_verilog_pass;
 

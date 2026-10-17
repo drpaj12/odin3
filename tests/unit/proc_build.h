@@ -51,6 +51,17 @@ typedef struct pb_result {
  */
 odin3_status pb_build(const char *rtlil, pb_result *out);
 
+/*
+ * pb_build, with the tech library at lib_path (`read_techlib`) read into the design first, so the
+ * text may use its hard cell types (`cell \multiply \u`). lib_path NULL is
+ * pb_build. A library that does not read is its status, logged; *out is empty then.
+ */
+typedef struct pb_source {
+    const char *rtlil;
+    const char *lib_path; /* NULL: no tech library */
+} pb_source;
+odin3_status pb_build_lib(pb_source src, pb_result *out);
+
 /* Destroys the design and empties *res; NULL is a no-op. */
 void pb_free(pb_result *res);
 

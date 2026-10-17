@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import random
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import blif
+import qor_legs
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -16,6 +18,23 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def fixture(name: str) -> str:
     return str(FIXTURES / name)
+
+
+def write_golden(arch_dir: Path, design: str, text: str, **prov: str) -> Path:
+    """A verified Parmys golden under ``arch_dir``/vtr/<d>/ (3H spec §3.4): the BLIF and a
+    ``.prov`` that passes ``qor_legs.verify_golden``. ``prov`` overrides or adds fields; a value
+   ."""
+    blif_path = arch_dir / "vtr" / design / f"{design}.parmys.blif"
+    blif_path.parent.mkdir(parents=True, exist_ok=True)
+    blif_path.write_text(text)
+    fields = {
+        "vtr_commit": qor_legs.VTR_PIN, "arch": f"vtr_flow/arch/timing/{arch_dir.name}.xml",
+        "tool": "parmys", "status": "ok",
+        "blif_sha256": hashlib.sha256(text.encode()).hexdigest(),
+    }
+    fields.update(prov)
+    blif_path.with_suffix(".prov").write_text("".join(f"{k}={v}\n" for k, v in fields.items()))
+    return blif_path
 
 
 def run_main(main: Callable[[Sequence[str]], int], argv: Sequence[str]) -> tuple[int, str, str]:

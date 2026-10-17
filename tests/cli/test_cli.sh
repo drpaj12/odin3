@@ -33,6 +33,7 @@
 # runs stats anyway, and --version names no linked ABC), opt_snapshot (--opt-snapshot DIR writes
 # 0001-opt_clean-before.il and -after.il when opt_clean removes a cell; a missing DIR exits 2),
 # opt_determinism (two opt runs are byte-identical; the gates in reverse order compare identical).
+# hardmap_mul (3C-1: hardmap maps an 8x7 `$mul` to one `multiply`; write_blif --vtr equals tests/hardmap/expected/mul_8x7.blif).
 # The project cases run from the project's directory (tests/cli/project), so the paths given are
 # relative.
 set -euo pipefail
@@ -648,6 +649,18 @@ if not need <= after:
 if after != before:
     sys.exit(f"unconn sets differ: lost {sorted(before - after)[:5]}, gained {sorted(after - before)[:5]}")
 PY
+    ;;
+hardmap_mul)
+    # cli_hardmap_mul: read_techlib, read_verilog --vtr-compat, proc, opt, hardmap, write_blif --vtr
+    # on an 8x7 multiply (3C-1): one `multiply`, the 57 pad pins written as unconn, equal to the
+    # committed BLIF (the '#' header line carries the version and is not compared).
+    hm=$fixtures/../../hardmap
+    "$odin3" -p "read_techlib $fixtures/../../../lib/vtr.o3lib; read_verilog --vtr-compat $hm/mul_8x7.v; proc; opt; hardmap; write_blif --vtr $work/out.blif" \
+        >"$work/out" 2>"$work/err" || fail "odin3 hardmap script failed"
+    grep -qF 'hardmap: 1 multiply, 0 adder in 0 chains' "$work/err" || fail "no hardmap INFO line"
+    diff <(grep -v '^#' "$hm/expected/mul_8x7.blif") <(grep -v '^#' "$work/out.blif") >/dev/null ||
+        fail "write_blif differs from tests/hardmap/expected/mul_8x7.blif"
+    "$compare" "$hm/expected/mul_8x7.blif" "$work/out.blif" || fail "netlist-compare: not identical"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

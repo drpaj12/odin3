@@ -1,0 +1,9 @@
+# A library whose `multiply` is a plain gate, for hardmap's H-3 "not a hard block" error.
+library nothard
+
+cell multiply gate
+  in  a 1
+  in  b 1
+  out out 1
+  fn  out = a & b
+end

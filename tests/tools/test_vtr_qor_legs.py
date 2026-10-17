@@ -6,7 +6,9 @@ Python under /tmp/claude-1000.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import pwd
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +17,8 @@ import qor_legs
 import qor_sched
 from qor_heavy import HEAVY_DIR, HeavyError
 from qor_legs import LegContext
+
+from .helpers import write_golden
 
 V = Path("/v")
 PY = V / ".venv" / "bin" / "python"
@@ -171,6 +175,65 @@ class LegTest(unittest.TestCase):
                 qor_legs.lut_size(V, fake, ARCH)
             self.assertEqual(caught.exception.message,
                              f"cannot read the LUT size of {ARCH}: boom")
+
+
+K6 = "k6_frac_N10_frac_chain_mem32K_40nm"
+ARCH_REL = f"vtr_flow/arch/timing/{K6}.xml"
+
+
+class GoldenTest(unittest.TestCase):
+    def setUp(self) -> None:
+        HEAVY_DIR.mkdir(parents=True, exist_ok=True)
+        self._tmp = tempfile.TemporaryDirectory(dir=HEAVY_DIR, prefix="qor-golden-test-")
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name) / K6
+
+    def test_golden_path(self) -> None:
+        self.assertEqual(qor_legs.golden_path(K6, "sha", Path("/home/u")),
+                         Path(f"/home/u/odin3-ws/golden/{K6}/vtr/sha/sha.parmys.blif"))
+
+    def test_verify_golden(self) -> None:
+        """One bad ``.prov`` per reason, each giving its exact text; a good one gives None."""
+        pin = qor_legs.VTR_PIN
+        blif = write_golden(self.root, "sha", ".model sha\n.end\n")
+        self.assertIsNone(qor_legs.verify_golden(blif, ARCH_REL))
+        self.assertIsNone(qor_legs.verify_golden(blif, ARCH_REL, hashlib.sha256(
+            blif.read_bytes()).hexdigest()))
+        cases = {
+            "status=failed": {"status": "failed"},
+            f"vtr_commit {'a' * 40} is not the pin {pin}": {"vtr_commit": "a" * 40},
+            f"arch vtr_flow/arch/timing/EArch.xml is not {ARCH_REL}":
+                {"arch": "vtr_flow/arch/timing/EArch.xml"},
+            "blif_sha256 does not match": {"blif_sha256": "0" * 64},
+        }
+        for reason, fields in cases.items():
+            bad = write_golden(self.root, "diffeq1", ".model d\n.end\n", **fields)
+            self.assertEqual(qor_legs.verify_golden(bad, ARCH_REL), reason)
+        stale = write_golden(self.root, "spree", ".model s\n.end\n")
+        stale.write_text(".model s\n# edited after the prov\n.end\n")
+        self.assertEqual(qor_legs.verify_golden(stale, ARCH_REL), "blif_sha256 does not match")
+        self.assertEqual(qor_legs.verify_golden(blif, "vtr_flow/arch/timing/other.xml"),
+                         "arch " + ARCH_REL + " is not vtr_flow/arch/timing/other.xml")
+
+    def test_verify_golden_missing(self) -> None:
+        blif = write_golden(self.root, "sha", ".model sha\n.end\n")
+        blif.with_suffix(".prov").write_text("")  # no status line: not ok
+        self.assertEqual(qor_legs.verify_golden(blif, ARCH_REL), "status=")
+        absent = self.root / "vtr" / "none" / "none.parmys.blif"
+        self.assertEqual(qor_legs.verify_golden(absent, ARCH_REL), "missing")
+        bare = self.root / "vtr" / "bare" / "bare.parmys.blif"  # a BLIF with no .prov
+        bare.parent.mkdir(parents=True)
+        bare.write_text(".model bare\n.end\n")
+        self.assertEqual(qor_legs.verify_golden(bare, ARCH_REL), "missing")
+        self.assertEqual(qor_legs.golden_error("sha", blif, "missing"),
+                         f"sha: Parmys golden {blif}: missing")
+
+    def test_real_golden(self) -> None:
+        """The committed ch_intrinsics golden (read only) is usable; skipped when absent."""
+        blif = qor_legs.golden_path(K6, "ch_intrinsics", Path(pwd.getpwuid(os.getuid()).pw_dir))
+        if not blif.is_file():
+            self.skipTest(f"no golden at {blif}")
+        self.assertIsNone(qor_legs.verify_golden(blif, ARCH_REL))
 
 
 class SetsTest(unittest.TestCase):

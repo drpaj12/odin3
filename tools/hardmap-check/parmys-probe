@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# parmys-probe: does a Parmys netlist compute what its source computes? (3C spec 9.2)
+# Exit codes: 0 no mismatch, 1 a mismatch, 2 usage or tool error, 77 no iverilog. See parmys_probe.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec python3 -I "$here/parmys_probe.py" "$@"

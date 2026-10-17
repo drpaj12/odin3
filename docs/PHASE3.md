@@ -101,6 +101,9 @@ which PRs remain.
 - [x] 3H: P-baseline table published to odin3-golden `qor/3c9a4d23b27d/P-baseline/` (golden commit
   76c485a; decisions 28 and 29)
 - [ ] 3H partial: 3H-1..2 merged; 3H-3 (to M1) and 3H-4 remain, and now carry 3F (below)
+  (3H-3 code: P' and R golden check, `fcheck`, `equiv`, `nightly`, `check-lib`, `crosscheck`
+  on `feat/3H-legs`; the M1 run and the group B measurements are the controller's and not yet
+  done, so nothing here is ticked)
 - [ ] 3E `write_blif --vtr`: Parmys goldens round-trip through it and route via `-start abc`
   (partial: 3E-1..3 and 3E-5 merged; 3E-4's round-trip and VPR-read sweeps are done, decision 34;
   ticked when 3H's R leg routes all 19 via `-start abc`)
@@ -913,6 +916,16 @@ then the options considered.
     writes no such invariant, so a shape rule would need Peter's decision first. FAST is unchanged
     (rule 7 is FULL only). New fault `ODIN3_IR_TEST_BAD_HIER` and two tests in `test_ir_check`
     (a flatten-style path passes; a `hier` one past the table fails).
+39. **3C-1 `hardmap` review fixes: explicit `multiply` and wide-Y `$mul`** (2026-10-17, branch
+    `feat/3C-hardmap-mul`; agent default under Peter's Parmys-default rule, he may override).
+    (a) An explicit `multiply` instance is treated like the equivalent `$mul`, as Parmys resolves
+    the primitive: `WIDTH` 2 becomes a `$mul` for `lower`, other `WIDTH` below 36 are padded to 36
+    exactly as a `$mul`, 36 is unchanged, above 36 stays the located error; a WARNING names each
+    instance treated. `--vtr-compat` does not reach passes, so the rule is not gated by it. The
+    spec M-6 and D7 text are amended. This is what lets `micro/multiply_hard_block.v` match its
+    Parmys golden. (b) An unsigned `$mul` with `Y_WIDTH > A_WIDTH + B_WIDTH` stays soft with a
+    warning (new D7b; moot after 3G `wreduce`): the gnd merges would allocate after the delete and
+    break H-9. (c) A failed mapping also removes the constant node it created.
 
 38. **3B `lower`: bit nodes are named after their word cell** (Peter, 2026-10-15: "yes do that
     naming"). Each bit node a word cell lowers to is named `<cell>.<op><i>` (e.g. `u_add.xor3`),
