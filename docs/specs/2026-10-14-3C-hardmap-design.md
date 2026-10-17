@@ -261,6 +261,9 @@ DESIGN §7; Phase 4's `partial_map` replaces it.
   - adder pins carry the sign bit, or its `$not` for `$sub`, instead of `unconn`;
   - the adder count does not change.
 - **A-7 Y wider than the chain** (only without 3G, which caps Y at `n + 1`).
+  - **Amended 2026-10-17 (PHASE3 #39 (d), agent default):** a cell with `Y_WIDTH > n + 1` stays
+    soft with a WARNING ("run wreduce first"); padding the extra Y bits would allocate after the
+    delete and break H-9. The pad rule below applies only if that restriction is lifted.
   - Extra Y bits get the sign of the result (`Y[n]`) when `s` or the cell is a `$sub`, else gnd.
     This is Yosys's own pad rule (3G WR-4 §4.3 step 6).
   - Parmys gives gnd for `$add` (`check_missing_ports`) and `unconn` for `$sub`
