@@ -36,17 +36,14 @@ HAND_BODY = REPO_ROOT / "tests" / "golden" / "blif" / "hand_body.blif"
 HAND_TOP_LINE = 2  # `.model top`
 HAND_N1_LINE = 5  # `.names a b n1`
 HAND_SUB_LINE = 18  # `.subckt sub ...` (u_sub)
-# Originals that drive one net from several cells (PHASE1 decision #15): the check after
-# read_blif fails in a Debug library, so these are compared only against a Release library.
-# c9_two_drivers is 3E's VPR negative corpus (tests/vtr/blif-bad, C9); multidriver.blif is 3A's
-# flatten negative fixture (tests/flatten).
-MULTI_DRIVER = {"elsif_both_defined.odin.blif", "neg_e12_multidriver.in.blif",
-                "c9_two_drivers.blif", "multidriver.blif"}
-# Negative fixtures that read_blif rejects by design (3E preflight E8: a cover mixing on-set and
-# off-set rows; and the files of 3E's VPR negative corpus, tests/vtr/blif-bad, that our reader
-# refuses as VPR does); they test a refusal, not the walk.
-READ_REJECTS = {"neg_e8_mixed.in.blif", "c5_row_width.blif", "c6_init4.blif", "c7_no_port.blif",
-                "c7_twice.blif", "c7_wide_port.blif", "c7_ram_data_bit.blif"}
+# Negative fixtures that read_blif rejects by design: 3E preflight E8 (a cover mixing on-set and
+# off-set rows), the multi-driver nets (elsif_both_defined, the Odin II original and fuzz seed
+# blif003; 3E's neg_e12 and C9; 3A's flatten fixture), and the files of 3E's VPR negative corpus,
+# tests/vtr/blif-bad, that our reader refuses as VPR does. They test a refusal, not the walk.
+READ_REJECTS = {
+    "neg_e8_mixed.in.blif", "elsif_both_defined.odin.blif", "neg_e12_multidriver.in.blif",
+    "c9_two_drivers.blif", "multidriver.blif", "c5_row_width.blif", "c6_init4.blif",
+    "c7_no_port.blif", "c7_twice.blif", "c7_wide_port.blif", "c7_ram_data_bit.blif"}
 
 try:
     import cffi  # noqa: F401
@@ -107,25 +104,17 @@ class PythonWalkTest(unittest.TestCase):
         self.assertGreater(len(paths), 100)
         compared = 0
         for path in paths:
-            with self.subTest(fixture=str(path.relative_to(REPO_ROOT))):
-                try:
-                    design = self.read(path)
-                except Odin3Error as err:
-                    if path.name in MULTI_DRIVER and err.status == self.odin3.lib.ODIN3_ERR_CHECK:
-                        continue  # a Debug library checks after read_blif
-                    raise
-                with design:
-                    from_stats = walk.stats_lines(design)
-                    self.assertGreater(len(from_stats), 1)
-                    self.assertEqual(walk.walk_lines(design), from_stats)
-                    compared += 1
-        self.assertGreaterEqual(compared, len(paths) - len(MULTI_DRIVER))
+            with (self.subTest(fixture=str(path.relative_to(REPO_ROOT))),
+                  self.read(path) as design):
+                from_stats = walk.stats_lines(design)
+                self.assertGreater(len(from_stats), 1)
+                self.assertEqual(walk.walk_lines(design), from_stats)
+                compared += 1
+        self.assertEqual(compared, len(paths))
         print(f"python_walk: {compared}/{len(paths)} fixtures, walk == stats")
 
     def test_pins_and_nets_agree_on_every_fixture(self) -> None:
         for path in fixtures():
-            if path.name in MULTI_DRIVER:
-                continue
             with self.subTest(fixture=path.name), self.read(path) as design:
                 for module in design.modules():
                     self.check_module_connectivity(module)

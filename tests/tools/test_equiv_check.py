@@ -464,6 +464,98 @@ class BlackBoxCutAbcTest(unittest.TestCase):
         self.assertIn("(abc dsec)", out)
 
 
+MUL_MODEL = ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n"
+
+
+def mul_netlist(boxes: int, feed: str = "a", tail: str = ".names p0 y\n1 1\n") -> str:
+    """A top model with ``boxes`` multiply instances (no .cname, outputs numbered like Parmys's)
+    whose first input is ``feed``; ``tail`` is the logic after them."""
+    head = ".model t\n.inputs a b\n.outputs y\n"
+    cells = "".join(f".subckt multiply a[0]={feed if i == 0 else 'b'} b[0]=b out[0]=p{i}\n"
+                    for i in range(boxes))
+    return head + cells + tail + ".end\n" + MUL_MODEL
+
+
+class BlackboxOptionTest(unittest.TestCase):
+    """``--blackbox M[,M...]`` (3D Task 19): pairing by .cname or occurrence order."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def test_unequal_counts_exit_2_with_the_exact_text(self) -> None:
+        a = self.write("a.blif", mul_netlist(3))
+        b = self.write("b.blif", mul_netlist(2))
+        code, out, err = check("--blackbox", "multiply", a, b)
+        self.assertEqual(code, 2, out)
+        self.assertIn(f"equiv-check: --blackbox: model 'multiply' has 3 instances in {a} and 2 in "
+                      f"{b}", err)
+
+    def test_occurrence_order_pairs_unnamed_instances(self) -> None:
+        a = equiv_check.flatten(blif.parse_file(self.write("a.blif", mul_netlist(2)), gates=True),
+                                blackbox=frozenset({"multiply"}))
+        b = equiv_check.flatten(blif.parse_file(self.write("b.blif", mul_netlist(2)), gates=True),
+                                blackbox=frozenset({"multiply"}))
+        self.assertEqual(equiv_check.pair_listed([a, b], frozenset({"multiply"})), 2)
+        self.assertEqual([x.key for x in a.blackboxes], [x.key for x in b.blackboxes])
+        equiv_check.match_blackboxes([a, b])
+
+    def test_cname_pairs_before_occurrence(self) -> None:
+        text = mul_netlist(2).replace("out[0]=p0\n", "out[0]=p0\n.cname mulA\n", 1)
+        swapped = text.replace(".subckt multiply a[0]=a b[0]=b out[0]=p0\n.cname mulA\n"
+                               ".subckt multiply a[0]=b b[0]=b out[0]=p1\n",
+                               ".subckt multiply a[0]=b b[0]=b out[0]=p1\n"
+                               ".subckt multiply a[0]=a b[0]=b out[0]=p0\n.cname mulA\n")
+        self.assertNotEqual(text, swapped)
+        a = equiv_check.flatten(blif.parse_file(self.write("a.blif", text), gates=True),
+                                blackbox=frozenset({"multiply"}))
+        b = equiv_check.flatten(blif.parse_file(self.write("b.blif", swapped), gates=True),
+                                blackbox=frozenset({"multiply"}))
+        equiv_check.pair_listed([a, b], frozenset({"multiply"}))
+        equiv_check.match_blackboxes([a, b])
+        by_a = {x.key: x.inputs["a"] for x in a.blackboxes}
+        by_b = {x.key: x.inputs["a"] for x in b.blackboxes}
+        self.assertEqual(by_a, by_b)
+
+    def test_help_documents_blackbox(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit):
+            equiv_check.main(["--help"])
+        self.assertIn("--blackbox", buf.getvalue())
+
+
+@needs_abc
+class BlackboxOptionAbcTest(unittest.TestCase):
+    def setUp(self) -> None:
+        if ABC is None:
+            self.fail(f"ODIN3_REQUIRE_ABC=1 but no usable ABC: {ABC_PROBLEM}")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def test_differing_only_in_soft_logic_is_equivalent(self) -> None:
+        a = self.write("a.blif", mul_netlist(1))
+        b = self.write("b.blif", mul_netlist(1, tail=".names p0 t\n1 1\n.names t y\n1 1\n"))
+        code, out, err = check("--blackbox", "multiply", a, b)
+        self.assertEqual(code, 0, out + err)
+
+    def test_a_change_in_what_feeds_a_box_input_is_not_equivalent(self) -> None:
+        a = self.write("a.blif", mul_netlist(1))
+        b = self.write("b.blif", mul_netlist(1, feed="b"))
+        code, out, err = check("--blackbox", "multiply", a, b)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("NOT equivalent", out)
+
+
 @needs_abc
 class DualPortOrientTest(unittest.TestCase):
     """--match-unnamed turns every unnamed dual_port_ram to one port order: Parmys lists the two

@@ -123,6 +123,14 @@ CLASS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("E13", re.compile(r"no top module")),
 )
 REFUSAL_LINE = re.compile(r"^odin3: error: write_blif: --vtr: (.*)$")
+# `read_blif` itself refuses a multiply-driven net (PHASE3 #36): "<file>:<line>: net 'x' is driven
+# by N cell outputs (one allowed)". It is class E12, but only for the Odin II goldens PHASE1 #15
+# listed (the same list as tools/blif-roundtrip and tools/writer-check): any other read failure
+# stays a failure.
+READ_MULTI_DRIVER = re.compile(
+    r"^odin3: error: \S.*:\d+: net '.*' is driven by \d+ cell outputs \(one allowed\)$"
+)
+MULTI_DRIVER_GOLDENS = frozenset({"elsif_both_defined.odin.blif", "multi_assignment.odin.blif"})
 MORE_ERRORS = re.compile(r"\d+ more errors not shown")
 
 # §16.4's pairing table: the refusal class -> what VPR says about G (substrings of its message).
@@ -175,10 +183,15 @@ def pairing_ok(refusal: str, vpr_g_message: str) -> bool:
     return any(needle in vpr_g_message for needle in needles)
 
 
-def refusal_classes(stderr: str) -> list[str]:
-    """The error classes of a refused write's log, in order of first appearance."""
+def refusal_classes(stderr: str, golden: Path | None = None) -> list[str]:
+    """The error classes of a refused write's log, in order of first appearance. With a golden
+    named in MULTI_DRIVER_GOLDENS, a `read_blif` multi-driver refusal counts as E12."""
     found: list[str] = []
+    read_gate = golden is not None and golden.name in MULTI_DRIVER_GOLDENS
     for line in stderr.splitlines():
+        if read_gate and READ_MULTI_DRIVER.match(line) and "E12" not in found:
+            found.append("E12")
+            continue
         match = REFUSAL_LINE.match(line)
         if match is None or MORE_ERRORS.match(match[1]):
             continue
@@ -411,7 +424,7 @@ def run_one(g: Path, ctx: ReadCtx) -> Row:
     w_path = where / W_NAME
     write = write_netlist(ctx, g, w_path, where)
     (where / WRITE_LOG).write_text(write.stderr, encoding="utf-8", errors="replace")
-    classes = refusal_classes(write.stderr)
+    classes = refusal_classes(write.stderr, g)
     if write.returncode == 0 and w_path.is_file():
         row.written = "written"
     elif classes and not w_path.exists():

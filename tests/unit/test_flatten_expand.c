@@ -271,6 +271,28 @@ static void test_flat_multidriver_error(void) {
     TEST_ASSERT_NOT_NULL(strstr(log_text, "has 2 drivers after joining port 'y'"));
 }
 
+/* Two legal reads plus one hand-made instance: tests/flatten/multidriver_hier.blif reads (one
+ * instance u1 of sub drives z; read_blif refuses a second one, PHASE3 #36), a second instance u2
+ * is added through the IR API, and `flatten` itself must refuse the joined net. */
+static void test_flat_multidriver_from_blif(void) {
+    char path[256];
+    (void)snprintf(path, sizeof path, "%s/multidriver_hier.blif", ODIN3_FLATTEN_DIR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pass_run(fix.design, "read_blif", odin3_bytes_cstr(path)));
+    odin3_module *top = odin3_module_get(fix.design, odin3_design_top(fix.design));
+    odin3_module *sub = NULL;
+    for (uint32_t id = 1; id < odin3_design_module_end(fix.design); id++) {
+        odin3_module *mod = odin3_module_get(fix.design, (odin3_module_id){id});
+        sub = odin3_module_name(mod) == str("sub") ? mod : sub;
+    }
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_TRUE(has_node(top, "u1"));
+    odin3_net_id nets[2] = {ff_wnet(&fix, top, "a", 0), ff_wnet(&fix, top, "z", 0)};
+    (void)ff_inst(&fix, (ff_pair){top, sub}, "u2", nets);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_flatten_run(&fix.ctx, fix.design, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "has 2 drivers after joining port 'o'"));
+}
+
 static void test_flat_const_output_error(void) {
     odin3_module *sub = ff_module(&fix, "sub");
     (void)ff_port(&fix, sub, "y", ODIN3_DIR_OUT, 1);
@@ -1181,6 +1203,7 @@ int main(void) {
     RUN_TEST(test_flat_unconnected);
     RUN_TEST(test_flat_constants);
     RUN_TEST(test_flat_multidriver_error);
+    RUN_TEST(test_flat_multidriver_from_blif);
     RUN_TEST(test_flat_const_output_error);
     RUN_TEST(test_flat_multidriver_ids_differ);
     RUN_TEST(test_flat_const_output_ids_differ);

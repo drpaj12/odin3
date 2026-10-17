@@ -198,8 +198,8 @@ static void test_vtr_single_driver_unchanged(void) {
     TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$pmux"));
 }
 
-/* A bus on a top-level output keeps its $tribuf under the option: the ruling covers internal nets.
- */
+/* Two drivers on one top-level output keep their $tribuf cells under the option: decision 27 is for
+ * internal nets and decision 28 for a lone driver. */
 static void test_vtr_output_port_keeps_tribuf(void) {
     read_ok_with(k_vtr, "module t(a, b, e0, e1, o);\ninput a, b, e0, e1;\noutput o;\n"
                         "assign o = e0 ? a : 1'bz;\nassign o = e1 ? b : 1'bz;\nendmodule\n");
@@ -251,6 +251,95 @@ static void test_vtr_shared_candidate_declines(void) {
     TEST_ASSERT_EQUAL_UINT32(0, pt_count_of("$tribuf"));
 }
 
+/* Decision 28: a lone tri-state driver of a top-level output loses its enable under the option,
+ * as Parmys does (`opt_expr -mux_undef`: `q = en ? d : 'bz` is `q = d`, `en` unused). */
+#define OUT_WARN                                                                                   \
+    "tri-state driver of output port 'q': --vtr-compat drops the enable and wires the output to "  \
+    "the data as Parmys does (without the option the output is z while the enable is off)"
+
+static void test_vtr_output_drops_enable(void) {
+    read_ok_with(k_vtr, "module t(d, en, q);\ninput [3:0] d;\ninput en;\noutput [3:0] q;\n"
+                        "assign q = en ? d : 4'bz;\nendmodule\n");
+    pt_expect_warning((at_loc){5, 8}, OUT_WARN);
+    TEST_ASSERT_EQUAL_UINT32(1, pt_soft_warnings());
+    expect_no_bus();
+    for (uint32_t bit = 0; bit < 4; bit++) {
+        TEST_ASSERT_TRUE(same_net("q", bit, "d", bit));
+    }
+    TEST_ASSERT_FALSE(same_net("q", 0, "en", 0));
+}
+
+/* Without the option the output stays a $tribuf and nothing is said. */
+static void test_plain_output_keeps_tribuf(void) {
+    read_ok_with(k_plain, "module t(d, en, q);\ninput [3:0] d;\ninput en;\noutput [3:0] q;\n"
+                          "assign q = en ? d : 4'bz;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with("--vtr-compat"));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_soft_warnings());
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$tribuf"));
+    TEST_ASSERT_FALSE(same_net("q", 0, "d", 0));
+}
+
+/* bufif1, notif1 and the swapped branches are the same cell. The data of a notif is inverted, so
+ * the output is wired to the inverter, not to the input. */
+static void test_vtr_output_gates_and_swapped(void) {
+    read_ok_with(k_vtr, "module t(a, b, c, e, p, q, r);\ninput a, b, c, e;\noutput p, q, r;\n"
+                        "bufif1 (p, a, e);\nnotif1 (q, b, e);\nassign r = e ? 1'bz : c;\n"
+                        "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(3, pt_warnings_with("--vtr-compat drops the enable"));
+    expect_no_bus();
+    TEST_ASSERT_TRUE(same_net("p", 0, "a", 0));
+    TEST_ASSERT_FALSE(same_net("q", 0, "b", 0));
+    TEST_ASSERT_EQUAL_UINT32(2, pt_count_of("$not")); /* b, and the enable of the swapped r */
+}
+
+/* The port is named once for a bus and the bits that are dangling are skipped; a partial driver
+ * of a bus keeps working. */
+static void test_vtr_output_partial_bus(void) {
+    read_ok_with(k_vtr, "module t(d, en, q);\ninput [1:0] d;\ninput en;\noutput [3:0] q;\n"
+                        "assign q[1:0] = en ? d : 2'bz;\nassign q[3:2] = d;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_warnings_with("output port 'q': --vtr-compat drops"));
+    expect_no_bus();
+    TEST_ASSERT_TRUE(same_net("q", 1, "d", 1));
+    TEST_ASSERT_TRUE(same_net("q", 3, "d", 1));
+}
+
+/* A constant 0 enable stays a $tribuf: the output is z for good. */
+static void test_vtr_output_constant_enable_declines(void) {
+    read_ok_with(k_vtr, "module t(d, q);\ninput d;\noutput q;\nassign q = 1'b0 ? d : 1'bz;\n"
+                        "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with("--vtr-compat drops the enable"));
+}
+
+/* An inout port keeps its $tribuf: the ruling is for outputs. */
+static void test_vtr_inout_keeps_tribuf(void) {
+    read_ok_with(k_vtr, "module t(d, en, io);\ninput d, en;\ninout io;\n"
+                        "assign io = en ? d : 1'bz;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with("--vtr-compat drops the enable"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$tribuf"));
+}
+
+/* A child's inout pin on the output net is a second driver: the $tribuf stays, nothing is said. */
+static void test_vtr_child_inout_keeps_tribuf(void) {
+    read_ok_with(k_vtr, "module sub(io);\ninout io;\nendmodule\n"
+                        "module t(d, en, q);\ninput d, en;\noutput q;\n"
+                        "assign q = en ? d : 1'bz;\nsub u(.io(q));\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with("--vtr-compat"));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_soft_warnings());
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$tribuf"));
+    TEST_ASSERT_FALSE(same_net("q", 0, "d", 0));
+}
+
+/* Below the top the output may reach a top-level port, where z must stay: the existing error. */
+static void test_vtr_submodule_output_still_errors(void) {
+    pass_src src = {k_vtr, "module sub(d, en, q);\ninput d, en;\noutput q;\n"
+                           "assign q = en ? d : 1'bz;\nendmodule\n"
+                           "module t(d, en, q);\ninput d, en;\noutput q;\n"
+                           "sub u(.d(d), .en(en), .q(q));\nendmodule\n"};
+    pt_read_with(&src);
+    TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, pt_rs.status);
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with("--vtr-compat drops the enable"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_vtr_micro);
@@ -267,5 +356,13 @@ int main(void) {
     RUN_TEST(test_vtr_submodule_keeps_the_bus);
     RUN_TEST(test_vtr_second_read_candidate_declines);
     RUN_TEST(test_vtr_shared_candidate_declines);
+    RUN_TEST(test_vtr_output_drops_enable);
+    RUN_TEST(test_plain_output_keeps_tribuf);
+    RUN_TEST(test_vtr_output_gates_and_swapped);
+    RUN_TEST(test_vtr_output_partial_bus);
+    RUN_TEST(test_vtr_output_constant_enable_declines);
+    RUN_TEST(test_vtr_inout_keeps_tribuf);
+    RUN_TEST(test_vtr_child_inout_keeps_tribuf);
+    RUN_TEST(test_vtr_submodule_output_still_errors);
     return UNITY_END();
 }

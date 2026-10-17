@@ -1,0 +1,16 @@
+# multidriver_hier.blif - one instance of sub drives z: every module reads legally.
+# test_flat_multidriver_from_blif adds a second instance (u2) by hand, which is what the reader
+# refuses in multidriver.blif, and runs `flatten` on it.
+.model top
+.inputs a
+.outputs z
+.subckt sub i=a o=z
+.cname u1
+.end
+
+.model sub
+.inputs i
+.outputs o
+.names i o
+1 1
+.end

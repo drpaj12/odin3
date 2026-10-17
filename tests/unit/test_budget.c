@@ -15,11 +15,17 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
+#ifndef ODIN3_BUDGET_OUT
+#error "ODIN3_BUDGET_OUT must name a writable directory for the fake cgroup trees"
+#endif
 
 enum { NETS = 100000, NET_GROWTH = 400000, FRESH_MIN = 64 * 1024, EXTRA = 4096, MSG_MAX = 256 };
 
@@ -51,6 +57,7 @@ void setUp(void) {
 void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
     odin3_budget_test_set_limit(0);
+    odin3_budget_test_set_cgroup_root(NULL, NULL);
     odin3_log_set_sink(NULL, NULL);
     odin3_design_destroy(design);
     design = NULL;
@@ -99,9 +106,10 @@ static void test_check_and_message(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_budget_message(&ctx, &msg));
     char want[MSG_MAX];
     int len = snprintf(want, sizeof want,
-                       "proc needs more than %" PRIu64
-                       " bytes (the design's budget is 60%% of physical memory)",
-                       reserved + EXTRA);
+                       "proc needs more than %" PRIu64 " bytes (the design's budget is %" PRIu64
+                       " bytes: the smaller of 60%% of physical memory and the cgroup's "
+                       "memory.max)",
+                       reserved + EXTRA, reserved + EXTRA);
     TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
     TEST_ASSERT_EQUAL_STRING(want, msg.data);
     TEST_ASSERT_EQUAL_size_t(0, n_logged);
@@ -121,9 +129,11 @@ static void test_check_and_message(void) {
     odin3_strbuf_free(&msg);
 }
 
-/* Without the hook the limit is 60% of the physical memory sysconf reports. */
+/* Without the hooks the limit is 60% of the physical memory sysconf reports (an empty fake tree).
+ */
 static void test_limit_default(void) {
     odin3_budget_test_set_limit(0);
+    odin3_budget_test_set_cgroup_root(ODIN3_BUDGET_OUT "/empty", "/a.slice/b.scope");
     long pages = sysconf(_SC_PHYS_PAGES);
     long page_size = sysconf(_SC_PAGESIZE);
     TEST_ASSERT_TRUE(pages > 0 && page_size > 0);
@@ -134,10 +144,61 @@ static void test_limit_default(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_budget_check(&ctx, design, 0));
 }
 
+static void make_dir(const char *path) {
+    TEST_ASSERT_TRUE_MESSAGE(mkdir(path, 0755) == 0 || errno == EEXIST, path);
+}
+
+static void write_text(const char *path, odin3_bytes text) {
+    FILE *file = fopen(path, "w");
+    TEST_ASSERT_NOT_NULL_MESSAGE(file, path);
+    TEST_ASSERT_EQUAL_UINT(text.len, fwrite(text.ptr, 1, text.len, file));
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+}
+
+/*
+ * A fake tree: the scope's memory.max is `max` and its parent slice's is 6442450944 (what
+ * tools/heavy-run sets up); the limit is the smaller of that and 60% of physical memory. A tighter
+ * scope wins; a non-number is ignored; an own cgroup of "/" reads only the root.
+ */
+static void test_limit_cgroup(void) {
+    odin3_budget_test_set_limit(0);
+    make_dir(ODIN3_BUDGET_OUT);
+    make_dir(ODIN3_BUDGET_OUT "/tree");
+    make_dir(ODIN3_BUDGET_OUT "/tree/a.slice");
+    make_dir(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope");
+    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", odin3_bytes_cstr("max\n"));
+    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/memory.max", odin3_bytes_cstr("6442450944\n"));
+    odin3_budget_test_set_cgroup_root(ODIN3_BUDGET_OUT "/tree", "/a.slice/b.scope");
+    uint64_t limit = odin3_budget_limit();
+    TEST_ASSERT_TRUE(limit <= 6442450944ULL);
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long page_size = sysconf(_SC_PAGESIZE);
+    uint64_t physical = (uint64_t)pages * (uint64_t)page_size;
+    uint64_t share = physical / 100 * 60 + physical % 100 * 60 / 100;
+    TEST_ASSERT_EQUAL_UINT64(share < 6442450944ULL ? share : 6442450944ULL, limit);
+    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", odin3_bytes_cstr("1048576\n"));
+    TEST_ASSERT_EQUAL_UINT64(1048576, odin3_budget_limit());
+    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", odin3_bytes_cstr("garbage\n"));
+    TEST_ASSERT_EQUAL_UINT64(share < 6442450944ULL ? share : 6442450944ULL, odin3_budget_limit());
+    odin3_budget_test_set_cgroup_root(ODIN3_BUDGET_OUT "/tree", "/");
+    TEST_ASSERT_EQUAL_UINT64(share, odin3_budget_limit());
+    /* the message names the smaller bound's number */
+    write_text(ODIN3_BUDGET_OUT "/tree/a.slice/b.scope/memory.max", odin3_bytes_cstr("4096\n"));
+    odin3_budget_test_set_cgroup_root(ODIN3_BUDGET_OUT "/tree", "/a.slice/b.scope");
+    odin3_strbuf msg;
+    odin3_strbuf_init(&msg);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_budget_message(&ctx, &msg));
+    TEST_ASSERT_EQUAL_STRING("proc needs more than 4096 bytes (the design's budget is 4096 bytes: "
+                             "the smaller of 60% of physical memory and the cgroup's memory.max)",
+                             msg.data);
+    odin3_strbuf_free(&msg);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_bytes_reserved_grows);
     RUN_TEST(test_check_and_message);
     RUN_TEST(test_limit_default);
+    RUN_TEST(test_limit_cgroup);
     return UNITY_END();
 }

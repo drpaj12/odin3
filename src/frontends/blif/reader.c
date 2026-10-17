@@ -851,7 +851,54 @@ typedef struct blif_cell {
     uint32_t line, end_col;
 } blif_cell;
 
-/* Creates the cell, connected, with its IMPORTED record; it becomes the previous cell. */
+/* An inout pin or an output of a TRISTATE type: may share a net with other such drivers (as in
+ * check rule 4). */
+static bool is_bus_driver(const blif_reader *rd, odin3_pin_id pin) {
+    if (odin3_pin_dir(rd->module, pin) == ODIN3_DIR_INOUT) {
+        return true;
+    }
+    odin3_celltype_id type = odin3_node_type(rd->module, odin3_pin_node(rd->module, pin));
+    const odin3_celltype_def *def = odin3_celltype_get(rd->design, type);
+    return def != NULL && (def->flags & ODIN3_CT_TRISTATE) != 0;
+}
+
+/* The drivers of `net` that are neither inout nor tristate. */
+static uint32_t ordinary_drivers(const blif_reader *rd, odin3_net_id net) {
+    odin3_pinlist pins = odin3_net_pins(rd->module, net);
+    uint32_t drivers = odin3_net_driver_count(rd->module, net);
+    uint32_t ordinary = 0;
+    for (uint32_t i = 0; i < drivers && i < pins.count; i++) {
+        ordinary += is_bus_driver(rd, pins.pins[i]) ? 0U : 1U;
+    }
+    return ordinary;
+}
+
+/* Check rule 4 at the source: the cell just made must not give a net a second ordinary driver.
+ * On a violation the cell is deleted (the IR stays valid) and the error is logged at the
+ * directive's line: "file:line: net 'x' is driven by N cell outputs (one allowed)". */
+static odin3_status check_drivers(blif_reader *rd, odin3_node_id node, uint32_t line) {
+    odin3_pinslice pins = odin3_node_pins(rd->module, node);
+    for (uint32_t i = 0; i < pins.count; i++) {
+        odin3_pin_id pin = {pins.first.v + i};
+        odin3_net_id net = odin3_pin_net(rd->module, pin);
+        if (!odin3_pin_drives(rd->module, pin) || is_bus_driver(rd, pin) || !odin3_net_valid(net)) {
+            continue;
+        }
+        uint32_t count = ordinary_drivers(rd, net);
+        if (count >= 2) {
+            odin3_status st =
+                rd_error(rd, line, "net '%s' is driven by %u cell outputs (one allowed)",
+                         rd_str(rd, odin3_net_name(rd->module, net)), (unsigned)count);
+            (void)odin3_node_delete(rd->module, node);
+            rd->last = (odin3_node_id){0};
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
+/* Creates the cell, connected, with its IMPORTED record; it becomes the previous cell. A net the
+ * cell would drive a second time is an error at the cell's line. */
 static odin3_status make_cell(blif_reader *rd, const blif_cell *cell) {
     rd->line = cell->line;
     odin3_node_spec spec = {.type = cell->type, .params = cell->params, .n_params = cell->n_params};
@@ -863,6 +910,7 @@ static odin3_status make_cell(blif_reader *rd, const blif_cell *cell) {
     }
     if (st == ODIN3_OK) {
         rd->last = node;
+        return check_drivers(rd, node, cell->line);
     }
     return rd_fail(rd, st);
 }

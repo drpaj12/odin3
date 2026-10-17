@@ -148,6 +148,20 @@ add_library(odin3_core OBJECT
     src/passes/abc/script.c
     src/passes/abc/engine.c
     src/passes/abc/child.c
+    src/passes/abc/args.c
+    src/passes/abc/region.c
+    src/passes/abc/result.c
+    src/passes/abc/xblif.c
+    src/passes/abc/xblif_read.c
+    src/passes/abc/exchange.c
+    src/passes/abc/splice.c
+    src/passes/abc/splice_a.c
+    src/passes/abc/splice_bc.c
+    src/passes/abc/splice_d.c
+    src/passes/abc/restore.c
+    src/passes/abc/prov.c
+    src/passes/abc/depth.c
+    src/passes/abc/run.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -245,6 +259,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_tri.c
     src/frontends/elab/elab2_trilogic.c
     src/frontends/elab/elab2_trivtr.c
+    src/frontends/elab/elab2_trivtr_out.c
     src/frontends/elab/elab2_mem.c
     src/frontends/elab/elab2_memport.c
     src/frontends/elab/elab2_memscan.c
@@ -605,6 +620,11 @@ if(ODIN3_FUZZ)
     target_include_directories(fuzz_abc_script PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(fuzz_abc_script PRIVATE odin3_core odin3_flags)
     target_link_options(fuzz_abc_script PRIVATE -fsanitize=fuzzer)
+    # tests/fuzz/fuzz_abc_splice.c: the abc pass's splice, on the fake engine (3D §13.7, Task 19).
+    add_executable(fuzz_abc_splice tests/fuzz/fuzz_abc_splice.c tests/unit/abc_fake_engine.c)
+    target_include_directories(fuzz_abc_splice PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_abc_splice PRIVATE odin3_core odin3_flags)
+    target_link_options(fuzz_abc_splice PRIVATE -fsanitize=fuzzer)
     # tests/fuzz/fuzz_opt.c: the opt family's crash fuzzer (2F §20.4, plan Task 18). It builds
     # word-cell designs through the unit tests' RTLIL reader (proc_build.c).
     add_executable(fuzz_opt tests/fuzz/fuzz_opt.c tests/unit/proc_build.c)
@@ -685,6 +705,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_proc_ff)
     target_sources(test_proc_ff PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_budget)
+    target_compile_definitions(test_budget PRIVATE
+        ODIN3_BUDGET_OUT="${PROJECT_BINARY_DIR}/budget_tmp")
     odin3_add_unit_test(test_ffinit)
     # 2F Task 1: the opt context and the rewrite kit (every test_opt_* links proc_build.c).
     odin3_add_unit_test(test_opt_kit)
@@ -748,7 +770,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_flatten_expand)
     target_sources(test_flatten_expand PRIVATE tests/unit/flatten_fixture.c)
     target_compile_definitions(test_flatten_expand PRIVATE
-        ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+        ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif"
+        ODIN3_FLATTEN_DIR="${PROJECT_SOURCE_DIR}/tests/flatten")
     # 3A Task 4: flatten-sim (no Yosys), flatten-golden and flatten-diff (Yosys 0.55, in the block
     # below) over the fixtures of tests/flatten; exit 77 skips when an ASan child cannot be capped.
     # The sim leg leaves out mem.v (1E has no $mem) and bb.v (a black box has no semantics); the
@@ -778,16 +801,17 @@ if(BUILD_TESTING)
                 "read_blif ${PROJECT_SOURCE_DIR}/tests/golden/blif/hand_body.blif; flatten; check")
     set_tests_properties(cli_flatten PROPERTIES LABELS flatten
         PASS_REGULAR_EXPRESSION "flatten: 1 instances expanded \\(0 kept\\) in 1 roots")
-    # cli_flatten_multidriver (non-Debug builds only: Debug runs `check` after read_blif, which
-    # already rejects the multiply-driven net): two instances drive one net and `flatten` itself
-    # must refuse it, not only the `check` after it (review C1).
-    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_test(NAME cli_flatten_multidriver
-            COMMAND $<TARGET_FILE:odin3> -p
-                    "read_blif ${PROJECT_SOURCE_DIR}/tests/flatten/multidriver.blif; flatten")
-        set_tests_properties(cli_flatten_multidriver PROPERTIES LABELS flatten
-            PASS_REGULAR_EXPRESSION "net 'z' has 2 drivers after joining port 'o'")
-    endif()
+    # cli_flatten_multidriver: two instances of sub drive z. No legal read can reach flatten with
+    # that net (read_blif refuses it, PHASE3 #36; so does read_verilog), so the CLI test pins the
+    # located read error, in every build type. What `flatten` itself does with a net it joins to a
+    # second driver is covered by test_flatten_expand (test_flat_multidriver_*, hand IR; and
+    # test_flat_multidriver_from_blif, two legal reads plus a second instance added by hand).
+    add_test(NAME cli_flatten_multidriver
+        COMMAND $<TARGET_FILE:odin3> -p
+                "read_blif ${PROJECT_SOURCE_DIR}/tests/flatten/multidriver.blif; flatten")
+    set_tests_properties(cli_flatten_multidriver PROPERTIES LABELS flatten
+        PASS_REGULAR_EXPRESSION
+        "multidriver\\.blif:8: .*net 'z' is driven by 2 cell outputs \\(one allowed\\)")
     # 3A Task 5 (spec 14.5): 2,000 random hierarchies of `verilog-gen --flatten` through
     # flatten + check (Debug runs check around the pass) and sim before = after (a design the
     # simulator cannot run is counted skipped, never a pass). A failing case is written to
@@ -833,6 +857,47 @@ if(BUILD_TESTING)
         target_compile_definitions(test_abc_route PRIVATE ODIN3_HAVE_ABC_EXE)
         add_dependencies(test_abc_route odin3_abc_exe)
     endif()
+    # 3D Tasks 14 to 16: the abc pass up to the exchange, on the fake engine (tests/unit/
+    # abc_fake_engine.c, which never links ABC). Each test writes its files under abc_tests/<name>.
+    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/abc_tests)
+    foreach(_abc_test test_abc_args test_abc_region test_abc_result test_abc_xblif
+                      test_abc_exchange test_abc_splice test_abc_prov)
+        odin3_add_unit_test(${_abc_test})
+        target_compile_definitions(${_abc_test} PRIVATE
+            ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/${_abc_test}"
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+        if(NOT _abc_test STREQUAL "test_abc_result")
+            target_sources(${_abc_test} PRIVATE tests/unit/abc_fake_engine.c)
+        endif()
+    endforeach()
+    target_sources(test_abc_args PRIVATE tests/unit/proc_fixture.c tests/unit/proc_fixture_core.c)
+    # 3D Task 19: the splice's end-to-end checks. test_abc_unconn and test_abc_pass run the fake
+    # engine in process; with ABC, test_abc_pass and test_abc_init1 also drive the odin3 binary
+    # (real ABC) and tools/equiv-check, whose ABC is the build's own.
+    foreach(_abc_test test_abc_unconn test_abc_init1 test_abc_pass)
+        odin3_add_unit_test(${_abc_test})
+        target_compile_definitions(${_abc_test} PRIVATE
+            ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/${_abc_test}"
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+            ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+        if(NOT _abc_test STREQUAL "test_abc_init1")
+            target_sources(${_abc_test} PRIVATE tests/unit/abc_fake_engine.c)
+        endif()
+        if(ODIN3_WITH_ABC AND _abc_test STREQUAL "test_abc_unconn")
+            target_compile_definitions(${_abc_test} PRIVATE
+                ODIN3_ABC_EXE_PATH="$<TARGET_FILE:odin3_abc_exe>")
+            add_dependencies(${_abc_test} odin3_abc_exe)
+        endif()
+        if(ODIN3_WITH_ABC AND NOT _abc_test STREQUAL "test_abc_unconn")
+            target_compile_definitions(${_abc_test} PRIVATE ODIN3_HAVE_REAL_ABC
+                ODIN3_BIN="$<TARGET_FILE:odin3>"
+                ODIN3_EQUIV_CHECK="${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check")
+            add_dependencies(${_abc_test} odin3 odin3_abc_exe)
+            set_tests_properties(${_abc_test} PROPERTIES
+                ENVIRONMENT "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>;ODIN3_REQUIRE_ABC=1")
+        endif()
+        set_tests_properties(${_abc_test} PROPERTIES TIMEOUT 1800)
+    endforeach()
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)
@@ -1006,6 +1071,20 @@ if(BUILD_TESTING)
                     ${ODIN3_YOSYS_EXE} ${PROJECT_BINARY_DIR}/lut/lut.json)
         set_tests_properties(lut_json_yosys PROPERTIES
             LABELS differential FIXTURES_REQUIRED lut_fixtures)
+    endif()
+    # 3D Task 9: write_verilog's $lut form. test_lut_verilog writes lut/luts.v and luts_tb.v (16
+    # random tables per width 1..6); CTest lut_verilog_icarus simulates them when Icarus is found.
+    odin3_add_unit_test(test_lut_verilog)
+    target_compile_definitions(test_lut_verilog PRIVATE ODIN3_LUT_OUT="${PROJECT_BINARY_DIR}/lut")
+    set_tests_properties(test_lut_verilog PROPERTIES FIXTURES_SETUP lut_verilog_fixtures)
+    find_program(ODIN3_IVERILOG iverilog)
+    find_program(ODIN3_VVP vvp)
+    if(ODIN3_IVERILOG AND ODIN3_VVP)
+        add_test(NAME lut_verilog_icarus
+            COMMAND sh -c "\"$0\" -g2005 -o \"$2/luts.vvp\" \"$2/luts.v\" \"$2/luts_tb.v\" && \"$1\" \"$2/luts.vvp\" | grep -qx PASS"
+                    ${ODIN3_IVERILOG} ${ODIN3_VVP} ${PROJECT_BINARY_DIR}/lut)
+        set_tests_properties(lut_verilog_icarus PROPERTIES
+            LABELS differential FIXTURES_REQUIRED lut_verilog_fixtures)
     endif()
     odin3_add_unit_test(test_pass_outputs)
     target_sources(test_pass_outputs PRIVATE tests/unit/proc_fixture.c
@@ -1429,6 +1508,52 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             set_tests_properties(cli_${_case} PROPERTIES LABELS unit)
         endforeach()
     endif()
+    if(ODIN3_WITH_ABC)
+        # 3D Task 19: the abc pass from the command line (real ABC), the unconn gate and the
+        # equivalence gate (abc-equiv over the goldens and the abc data BLIFs).
+        foreach(_case IN ITEMS abc abc_bad_script abc_script_precedence abc_script_crash
+                               abc_unconn_ch_intrinsics)
+            set(_name cli_${_case})
+            if(_case STREQUAL "abc_unconn_ch_intrinsics")
+                set(_name ${_case})
+            endif()
+            add_test(NAME ${_name}
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
+                        ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                        ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+            set_tests_properties(${_name} PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                TIMEOUT 900)
+        endforeach()
+        find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
+        add_test(NAME abc_equiv_micro
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_equiv.py
+                    --odin3 $<TARGET_FILE:odin3>
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --lut 6 --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif
+                    ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(abc_equiv_micro PROPERTIES LABELS tools TIMEOUT 3600)
+        # 3D Task 19 (deferred to the controller, point (m)): every k6 Parmys golden of the VTR set
+        # except mcml and LU32PEEng, smallest first (abc-equiv sorts), stereovision3 listed as
+        # multiclock; the run log's summary is quoted in the PR.
+        set(_k6_golden $ENV{HOME}/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm)
+        if(EXISTS ${_k6_golden}/vtr AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+            file(GLOB _abc_goldens ${_k6_golden}/vtr/*/*.parmys.blif)
+            list(FILTER _abc_goldens EXCLUDE REGEX "/(mcml|LU32PEEng)/")
+            odin3_add_sweep_test(abc_equiv_golden LABEL sweep
+                COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                        ODIN3_REQUIRE_ABC=1
+                        ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_equiv.py
+                        --odin3 $<TARGET_FILE:odin3>
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --lut 6 --timeout 3000
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                        --keep $ENV{HOME}/odin3-ws/work/abc-equiv-golden ${_abc_goldens})
+        endif()
+    endif()
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
     foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
                            unknown_pass_later_script top top_written_first top_unapplied quoted
@@ -1722,6 +1847,26 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         if(_fuzz_env)
             set_tests_properties(fuzz_opt_seed_inputs fuzz_opt_smoke PROPERTIES
                                  ENVIRONMENT "${_fuzz_env}")
+        endif()
+
+        # 3D §13.7 (Task 19): 2,000 runs of the splice fuzzer in the smoke (no odin3 binary needed,
+        # so the fuzz label is right); the long run is a sweep.
+        set(_fs_corpus ${PROJECT_BINARY_DIR}/fuzz_abc_splice_corpus)
+        file(MAKE_DIRECTORY ${_fs_corpus})
+        add_test(NAME fuzz_abc_splice_smoke
+            COMMAND $<TARGET_FILE:fuzz_abc_splice> -runs=2000 -seed=1 -timeout=60
+                    -rss_limit_mb=2048 -max_len=128 -print_funcs=0 -print_final_stats=1
+                    ${_fs_corpus})
+        set_tests_properties(fuzz_abc_splice_smoke PROPERTIES LABELS fuzz TIMEOUT 600)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_abc_splice_smoke PROPERTIES ENVIRONMENT "${_fuzz_env}")
+        endif()
+        odin3_add_sweep_test(fuzz_abc_splice_long LABEL sweep
+            COMMAND timeout 3h $<TARGET_FILE:fuzz_abc_splice> -max_total_time=3600 -timeout=60
+                    -rss_limit_mb=2048 -max_len=128 -print_funcs=0 -print_final_stats=1
+                    ${_fs_corpus})
+        if(_fuzz_env)
+            set_tests_properties(fuzz_abc_splice_long PROPERTIES ENVIRONMENT "${_fuzz_env}")
         endif()
 
         odin3_add_sweep_test(fuzz_abc_script_long LABEL sweep
@@ -2103,6 +2248,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/elab/accept)
         set_tests_properties(elab_tribuf_default_equiv PROPERTIES
             LABELS differential SKIP_RETURN_CODE 77)
+        # PHASE2 decision 28: a lone tri-state driver of a top-level output loses its enable
+        # under --vtr-compat as in Parmys: the WARNING, and the sp-splice netlist identical to the
+        # Parmys golden (tests/golden/vtr_tristate). Exit 77 (skip) as above.
+        if(DEFINED ENV{VTR_ROOT})
+            add_test(NAME vtr_tristate_out
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/golden/vtr_tristate/check.sh
+                        $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                        ${PROJECT_SOURCE_DIR}/tools/opt-check/sp-splice
+                        ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                        $ENV{VTR_ROOT}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
+                        ${PROJECT_SOURCE_DIR}/tests/golden/vtr_tristate)
+            set_tests_properties(vtr_tristate_out PROPERTIES
+                LABELS differential SKIP_RETURN_CODE 77)
+        endif()
         # 2D Task 23 (spec 14.3): elab-equiv on every source of tests/verilog/call-bridge: unrolled
         # loops, functions and tasks inlined (in processes and in continuous contexts), nested calls
         # and variable-index reads of net arrays. Exit 77 (skip) as above.
@@ -2329,6 +2488,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_phase3_expect_fail.txt
                     ${_micro_dir})
         set_tests_properties(opt_equiv_micro_phase3 PROPERTIES LABELS "sweep;opt_equiv")
         odin3_add_sweep_test(opt_diff_micro_wreduce LABEL sweep

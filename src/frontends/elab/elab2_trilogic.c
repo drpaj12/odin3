@@ -474,6 +474,7 @@ odin3_status odin3_elab2_tri_logic(odin3_elab2 *e2) {
     odin3_vec_init(&tg.buf, sizeof(odin3_net_id));
     odin3_status st = tg.owner != NULL && tg.shared != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
     st = st == ODIN3_OK ? file_records(e2, &tg) : st;
+    st = st == ODIN3_OK && e2->mod_vtr_compat && dr->is_top ? odin3_elab2_tri_vtr_outputs(e2) : st;
     st = st == ODIN3_OK && e2->mod_vtr_compat && dr->is_top ? find_shared(e2, &tg) : st;
     for (size_t gno = 0; st == ODIN3_OK && gno < tg.groups.len; gno++) {
         const tri_group grp = ((const tri_group *)tg.groups.data)[gno];

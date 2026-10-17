@@ -884,6 +884,36 @@ then the options considered.
     | mkDelayWorker32B | 0.09 | 17 | 18 | 0 | 0 | 1350 | 12564 | 1157 | 961 | 92 | 2.08 | same | yes |
     | mcml | 1.36 | 115 | 225 | 0 | 0 | 5368 | 172262 | 10484 | 15508 | 108 | 1.42 | same | yes |
 
+36. **`read_blif` refuses a multiply-driven net** (the Phase 2 small fix of #31(3); fuzz seed
+    `blif003`, 2026-10-16, branch `fix/2H-blif-multidriver-hier`; overrides PHASE1 #15's "read as
+    written"). The reader now checks, after each cell it makes, that none of the cell's driver pins
+    gives a net a second driver that is neither `inout` nor of a `tristate` type (check rule 4's
+    own test). A hit is a located error, `<file>:<line>: net '<name>' is driven by N cell outputs
+    (one allowed)`, at the line of the second driver's directive; the status is `PARSE`; the cell
+    is removed again, so the IR left behind passes `check`. `check` rule 4 is unchanged. The four
+    Odin II goldens PHASE1 #15 listed (`elsif_both_defined` and `multi_assignment`, both arches)
+    are now read refusals: the round-trip, writer and sim scripts count them as "refused at read".
+    Fixture `elsif_both_defined.odin.blif` moved to `tests/golden/blif-multidriver/` (no sweep
+    reads that directory); `blif003` is pinned in `tests/fuzz/fuzz_opt_regress`, and
+    `test_abc_pass` pins the new located error where it pinned check rule 4. The `write_blif
+    --vtr` E12 refusal stays for IR built by other means (hand IR, a later pass).
+    Tools: `vtr-read-check` and `blif-roundtrip --vtr` class the reader's refusal as E12 for those
+    four basenames only (any other read failure still fails); `sim-check` excludes a reader
+    refusal only for the same list, with ABC refusing the file too. `cli_flatten_multidriver` now
+    pins the located read error (no legal read reaches `flatten` with such a net);
+    `test_flat_multidriver_from_blif` keeps the join check covered from two legal reads.
+
+37. **`check` validates provenance `hier`** (Peter approved the check change; the Phase 2 small fix of
+    #31(3), 2026-10-16, branch `fix/2H-blif-multidriver-hier`; milestone M2 is the O' leg of
+    "Order of work", not a spec). Rule 7 gains one test per record: `hier` is 0 or a string-table ID
+    of the design (the test `odin3_prov_derive_hier` and `odin3_prov_source` already apply on the
+    way in); a larger value is an error `check: design: rule 7: record N has hier H, which is not a
+    string of the design`. The test covers what IR.md states for the field (a strtab ID, 0 = none).
+    It does not test the path's shape (module-relative first component, instance names): IR-12
+    writes no such invariant, so a shape rule would need Peter's decision first. FAST is unchanged
+    (rule 7 is FULL only). New fault `ODIN3_IR_TEST_BAD_HIER` and two tests in `test_ir_check`
+    (a flatten-style path passes; a `hier` one past the table fails).
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this
