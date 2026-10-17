@@ -160,6 +160,11 @@ void hm_label(const hm_ctx *hc, odin3_node_id node, char *out, size_t size);
 /* The `$mul` rule (mul.c, M-1..M-7): maps src or leaves it soft with a warning. */
 odin3_status hm_map_mul(hm_ctx *hc, odin3_node_id src);
 
+/* The `$add` / `$sub` rule (adder.c, A-1..A-9): maps src to an `adder` chain or leaves it soft with
+ * a warning (Y_WIDTH above max(A_WIDTH, B_WIDTH) + 1); a cell with both operand widths 0 is left
+ * alone. */
+odin3_status hm_map_adder(hm_ctx *hc, odin3_node_id src);
+
 /* The explicit-instance check of M-6 for node (a `multiply`): the type's shape (H-3), then WIDTH
  * above 36: OK, or the located error. */
 odin3_status hm_check_multiply(hm_ctx *hc, odin3_node_id node);
