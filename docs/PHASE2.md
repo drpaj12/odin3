@@ -1285,7 +1285,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       pin is a different shape; not ruled on). Several drivers on one output bit: Parmys keeps all
       the drivers or shorts the data as decision 27 describes, and the IR cannot hold several drivers,
       so the `$tribuf` cells stay as before (no new warning). A constant 0, x or z enable (the output
-      is z or undefined for good). A driver whose data is another such driver's output. A module
+      is z or undefined for good). A driver whose data is another such driver's output. An output net that also has an `inout` pin
+      of a child instance on it (the child may drive it, so the tri-state is not a lone driver). A module
       below the top (still the located error: the instance may drive a top-level port, where z must
       stay).
     - **Evidence.** `tests/unit/test_elab_vtr_multidriver.c` (the new `test_vtr_output_*` and

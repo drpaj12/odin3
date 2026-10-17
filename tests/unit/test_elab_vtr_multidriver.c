@@ -318,6 +318,17 @@ static void test_vtr_inout_keeps_tribuf(void) {
     TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$tribuf"));
 }
 
+/* A child's inout pin on the output net is a second driver: the $tribuf stays, nothing is said. */
+static void test_vtr_child_inout_keeps_tribuf(void) {
+    read_ok_with(k_vtr, "module sub(io);\ninout io;\nendmodule\n"
+                        "module t(d, en, q);\ninput d, en;\noutput q;\n"
+                        "assign q = en ? d : 1'bz;\nsub u(.io(q));\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with("--vtr-compat"));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_soft_warnings());
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$tribuf"));
+    TEST_ASSERT_FALSE(same_net("q", 0, "d", 0));
+}
+
 /* Below the top the output may reach a top-level port, where z must stay: the existing error. */
 static void test_vtr_submodule_output_still_errors(void) {
     pass_src src = {k_vtr, "module sub(d, en, q);\ninput d, en;\noutput q;\n"
@@ -351,6 +362,7 @@ int main(void) {
     RUN_TEST(test_vtr_output_partial_bus);
     RUN_TEST(test_vtr_output_constant_enable_declines);
     RUN_TEST(test_vtr_inout_keeps_tribuf);
+    RUN_TEST(test_vtr_child_inout_keeps_tribuf);
     RUN_TEST(test_vtr_submodule_output_still_errors);
     return UNITY_END();
 }

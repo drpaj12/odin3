@@ -8,7 +8,8 @@
  * The default (IEEE) reading keeps the `$tribuf`, so the output is z while the enable is off.
  *
  * The rule applies to a driver that is the only one on its output bits. Several drivers of one
- * output, a driver on an inout port, a constant 0, x or z enable and a driver whose data is the
+ * output (an inout pin of a child instance on the net counts as a driver), a driver on an inout
+ * port, a constant 0, x or z enable and a driver whose data is the
  * output of another such driver keep the `$tribuf`.
  */
 #include "ast/ast.h"
@@ -90,6 +91,24 @@ static bool enable_is_dead(const odin3_elab2 *e2, odin3_elab2_tri_rec rec) {
            type.v == e2->types[ODIN3_E2T_CONSTZ].v;
 }
 
+/* True when a child instance has an inout pin on the net: the tri-state is then not a lone driver
+ * (the child may drive the net too). */
+static bool has_child_inout(const odin3_elab2 *e2, odin3_net_id net) {
+    odin3_pinlist pins = odin3_net_pins(e2->mod, net);
+    for (uint32_t i = 0; i < pins.count; i++) {
+        if (odin3_pin_dir(e2->mod, pins.pins[i]) != ODIN3_DIR_INOUT) {
+            continue;
+        }
+        odin3_node_id node = odin3_pin_node(e2->mod, pins.pins[i]);
+        const odin3_celltype_def *def =
+            odin3_celltype_get(e2->design, odin3_node_type(e2->mod, node));
+        if (def != NULL && def->gran != ODIN3_GRAN_PORT) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* True when every live Y bit of the cell is on a top-level output port that only this cell
  * drives, and one at least is; *outputs says how many bits that is. */
 static bool drives_only_outputs(const odin3_elab2 *e2, const odin3_u64map *counts,
@@ -102,7 +121,7 @@ static bool drives_only_outputs(const odin3_elab2 *e2, const odin3_u64map *count
             continue;
         }
         (void)odin3_u64map_get(counts, net.v, &drivers);
-        if (!odin3_elab2_net_on_top_output(e2, net) || drivers != 1U) {
+        if (!odin3_elab2_net_on_top_output(e2, net) || drivers != 1U || has_child_inout(e2, net)) {
             return false;
         }
         (*outputs)++;
