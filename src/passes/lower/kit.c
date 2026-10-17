@@ -60,6 +60,9 @@ lw_span lw_bits_span(const lw_bits *bits) {
 static const char *const k_gate_names[LW_G_COUNT] = {
     "$_NOT_", "$_AND_",   "$_OR_",    "$_XOR_",      "$_XNOR_",
     "$_MUX_", "$_DFF_P_", "$_DFF_N_", "$_DLATCH_P_", "$_DLATCH_N_"};
+/* The <op> of a bit node's name (PHASE3 #38): the gate type without "$_" and the trailing "_". */
+static const char *const k_op_names[LW_G_COUNT] = {"not", "and",   "or",    "xor",      "xnor",
+                                                   "mux", "dff_p", "dff_n", "dlatch_p", "dlatch_n"};
 static const char *const k_const_names[LW_N_CONST] = {"$_CONST0_", "$_CONST1_", "$_CONSTX_"};
 static const odin3_const k_const_values[LW_N_CONST] = {ODIN3_CONST_0, ODIN3_CONST_1, ODIN3_CONST_X};
 
@@ -86,6 +89,7 @@ odin3_status lw_ctx_init(lw_ctx *lw, odin3_pass_ctx *pass, odin3_design *design,
     for (uint32_t i = 0; i < LW_REP_COUNT; i++) {
         odin3_strbuf_init(&lw->report[i]);
     }
+    odin3_strbuf_init(&lw->namebuf);
     for (uint32_t i = 0; i < LW_G_COUNT; i++) {
         lw->gate[i] = type_named(design, k_gate_names[i]);
         if (!odin3_celltype_valid(lw->gate[i])) {
@@ -113,6 +117,7 @@ void lw_ctx_free(lw_ctx *lw) {
     odin3_vec_free(&lw->created_nets);
     odin3_vec_free(&lw->portnets);
     odin3_vec_free(&lw->merged);
+    odin3_strbuf_free(&lw->namebuf);
     for (uint32_t i = 0; i < LW_REP_COUNT; i++) {
         odin3_strbuf_free(&lw->report[i]);
     }
@@ -207,10 +212,38 @@ static odin3_status copy_keep(lw_ctx *lw, odin3_node_id node) {
     return odin3_attr_set(lw->module, obj, lw->keep_key, lw->keep_value);
 }
 
-/* Creates the node of `type` on nets[0 .. n) (input ports then the output), appends it. */
-static odin3_status make_node(lw_ctx *lw, odin3_celltype_id type, const odin3_value *params,
-                              const odin3_netvec *ports) {
-    odin3_node_spec spec = {type, 0, lw->prov, params, params != NULL ? 1U : 0U};
+/*
+ * The name of the next gate of the open cell (PHASE3 #38): "<cell>.<op><i>", i counting the cell's
+ * gates from 0, then "_1", "_2", ... until no node of the module has it. 0 (unnamed) when the word
+ * cell has no name.
+ */
+static odin3_status gate_name(lw_ctx *lw, lw_kind kind, uint32_t *out) {
+    *out = 0;
+    uint32_t cell_name = odin3_node_name(lw->module, lw->cur);
+    if (cell_name == 0) {
+        return ODIN3_OK;
+    }
+    odin3_strbuf_clear(&lw->namebuf);
+    odin3_status st = odin3_strbuf_appendf(
+        &lw->namebuf, "%s.%s%" PRIu64, odin3_strtab_get(odin3_design_strtab(lw->design), cell_name),
+        k_op_names[kind], lw->gates);
+    size_t base_len = lw->namebuf.len;
+    for (uint32_t tries = 1; st == ODIN3_OK; tries++) {
+        st = odin3_design_intern(lw->design, odin3_bytes_cstr(lw->namebuf.data), out);
+        if (st != ODIN3_OK || !odin3_node_valid(odin3_module_find_node(lw->module, *out))) {
+            break;
+        }
+        lw->namebuf.len = base_len;
+        lw->namebuf.data[base_len] = '\0';
+        st = odin3_strbuf_appendf(&lw->namebuf, "_%" PRIu32, tries);
+    }
+    return st;
+}
+
+/* Creates the node of `type` named `name` (0: unnamed) on `ports` (inputs then the output). */
+static odin3_status make_node(lw_ctx *lw, odin3_celltype_id type, uint32_t name,
+                              const odin3_value *params, const odin3_netvec *ports) {
+    odin3_node_spec spec = {type, name, lw->prov, params, params != NULL ? 1U : 0U};
     odin3_node_id node = {0};
     odin3_status st = odin3_node_create_connected(lw->module, &spec, ports, &node);
     if (st != ODIN3_OK) {
@@ -249,7 +282,9 @@ odin3_status lw_gate(lw_ctx *lw, lw_kind kind, const odin3_net_id *in, uint32_t 
     for (uint32_t i = 0; i <= n_in; i++) {
         ports[i] = (odin3_netvec){&nets[i], 1};
     }
-    st = make_node(lw, lw->gate[kind], NULL, ports);
+    uint32_t name = 0;
+    st = gate_name(lw, kind, &name);
+    st = st == ODIN3_OK ? make_node(lw, lw->gate[kind], name, NULL, ports) : st;
     if (st != ODIN3_OK) {
         return st;
     }
@@ -306,7 +341,7 @@ odin3_status lw_const(lw_ctx *lw, odin3_bit bit, odin3_net_id *out) {
         return st;
     }
     odin3_netvec port = {&net, 1};
-    st = make_node(lw, lw->constant[idx], NULL, &port);
+    st = make_node(lw, lw->constant[idx], 0, NULL, &port);
     if (st != ODIN3_OK) {
         return st;
     }

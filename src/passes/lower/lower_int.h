@@ -153,6 +153,7 @@ typedef struct lw_ctx {
     uint64_t next_budget;          /* total_created at which the budget is checked next */
     uint64_t live_nodes;           /* live nodes of the module (kept up to date) */
     lw_totals totals;
+    odin3_strbuf namebuf;              /* scratch: a bit node's name being built */
     odin3_node_id cur;                 /* the open cell's word node */
     odin3_strbuf report[LW_REP_COUNT]; /* JSON array bodies, only filled when a path is given */
     uint32_t report_count[LW_REP_COUNT];

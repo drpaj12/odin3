@@ -592,6 +592,90 @@ static void test_output_nets_keep_their_names_and_wire_membership(void) {
     lf_end(&fix);
 }
 
+/* Name of live node `id` of mod ("" when unnamed). */
+static const char *node_text(lf *fix, odin3_module *mod, uint32_t id) {
+    uint32_t name = odin3_node_name(mod, (odin3_node_id){id});
+    return name != 0 ? odin3_strtab_get(odin3_design_strtab(fix->design), name) : "";
+}
+
+/* Number of live bit nodes of mod named exactly `text`. */
+static uint32_t gates_named(lf *fix, odin3_module *mod, const char *text) {
+    uint32_t found = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
+        found +=
+            odin3_node_live(mod, (odin3_node_id){id}) && strcmp(node_text(fix, mod, id), text) == 0
+                ? 1U
+                : 0U;
+    }
+    return found;
+}
+
+static void test_bit_nodes_are_named_cell_dot_op_index(void) {
+    lf fix;
+    odin3_module *mod = NULL;
+    bw_case cs = {"$and", SH_BINARY, 3, 3, 3, false, false};
+    lower_and_check(&fix, &cs, &mod);
+    const char *want[3] = {"dut.and0", "dut.and1", "dut.and2"};
+    for (uint32_t i = 0; i < 3; i++) {
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, gates_named(&fix, mod, want[i]), want[i]);
+    }
+    lf_end(&fix);
+}
+
+static void test_eq_names_use_each_gates_own_op(void) {
+    lf fix;
+    odin3_module *mod = NULL;
+    bw_case cs = {"$eq", SH_CMP, 2, 2, 1, false, false};
+    lower_and_check(&fix, &cs, &mod);
+    /* two xors, one or, one not: gate index counts every gate of the cell in creation order */
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "dut.xor0"));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "dut.xor1"));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "dut.or2"));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "dut.not3"));
+    lf_end(&fix);
+}
+
+static void test_an_unnamed_word_cell_leaves_its_bit_nodes_unnamed(void) {
+    lf fix;
+    lf_begin(&fix);
+    odin3_value params[5];
+    lf_binary spec = {false, false, 2, 2, 2};
+    lf_binary_params(&spec, params);
+    lf_cell_spec cell = {"$or", params, 5, NULL, {0}};
+    odin3_module *mod = NULL;
+    (void)lf_one_cell(&fix, &cell, &mod);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_lower(&fix));
+    for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
+        odin3_node_id node = {id};
+        if (odin3_node_live(mod, node) &&
+            odin3_celltype_get(fix.design, odin3_node_type(mod, node))->gran == ODIN3_GRAN_BIT) {
+            TEST_ASSERT_EQUAL_UINT32(0, odin3_node_name(mod, node));
+        }
+    }
+    lf_end(&fix);
+}
+
+static void test_a_taken_bit_node_name_gets_the_underscore_n_suffix(void) {
+    lf fix;
+    lf_begin(&fix);
+    odin3_value params[5];
+    lf_binary spec = {false, false, 2, 2, 2};
+    lf_binary_params(&spec, params);
+    lf_cell_spec cell = {"$and", params, 5, "dut", {0}};
+    odin3_module *mod = NULL;
+    (void)lf_one_cell(&fix, &cell, &mod);
+    odin3_celltype_id tid = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(fix.design, lf_str(&fix, "$_CONST0_"), &tid));
+    odin3_node_spec taken = {tid, lf_str(&fix, "dut.and0"), {0}, NULL, 0};
+    odin3_node_id squatter = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(mod, &taken, &squatter));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_lower(&fix));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "dut.and0"));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "dut.and0_1"));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "dut.and1"));
+    lf_end(&fix);
+}
+
 /* Every live bit node of mod has a DERIVED record whose only parent is src; returns how many. */
 static uint32_t count_derived_gates(lf *fix, odin3_module *mod, odin3_prov_id src) {
     uint32_t seen = 0;
@@ -901,6 +985,10 @@ int main(void) {
     RUN_TEST(test_a_mixed_sign_cell_is_lowered_as_unsigned_and_warns_once);
     RUN_TEST(test_same_sign_cells_do_not_warn);
     RUN_TEST(test_output_nets_keep_their_names_and_wire_membership);
+    RUN_TEST(test_bit_nodes_are_named_cell_dot_op_index);
+    RUN_TEST(test_eq_names_use_each_gates_own_op);
+    RUN_TEST(test_an_unnamed_word_cell_leaves_its_bit_nodes_unnamed);
+    RUN_TEST(test_a_taken_bit_node_name_gets_the_underscore_n_suffix);
     RUN_TEST(test_every_created_node_has_a_derived_record_of_the_word_cell);
     RUN_TEST(test_each_lowered_cell_gets_its_own_provenance_operation);
     RUN_TEST(test_keep_reaches_every_created_node);
