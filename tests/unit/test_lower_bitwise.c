@@ -1087,6 +1087,10 @@ static void test_the_cell_cap_is_inclusive(void) {
     (void)build(&fix, &cs, &mod);
     lower_with_caps(&fix, (odin3_lower_limits){10, 0, 0}, ODIN3_ERR_INVALID_ARG);
     TEST_ASSERT_EQUAL_UINT32(1, word_nodes(&fix, mod));
+    /* a cell exactly at its cap still counts against the module cap */
+    lower_with_caps(&fix, (odin3_lower_limits){11, lf_live_nodes(mod) + 10, 0},
+                    ODIN3_ERR_INVALID_ARG);
+    TEST_ASSERT_EQUAL_UINT32(1, word_nodes(&fix, mod));
     lower_with_caps(&fix, (odin3_lower_limits){11, 0, 0}, ODIN3_OK);
     TEST_ASSERT_EQUAL_UINT32(0, word_nodes(&fix, mod));
     lf_end(&fix);
