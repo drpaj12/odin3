@@ -447,6 +447,16 @@ def _parmys_fields(job: Job) -> dict[str, object]:
     return {"parmys_blif_sha256": mine, "parmys_equals_golden": equal}
 
 
+def parmys_stage_wall(job: Job) -> float | None:
+    """Point (o): the wall seconds of ``parmys.out`` in the latest P job of the same VTR commit,
+    arch and design (``<vtr12>/<arch>/P/latest``); None when there is none."""
+    p_leg = job.job_dir.parents[1].parent / "P"
+    key12 = read_latest(p_leg)
+    if key12 is None:
+        return None
+    return qor_parse.read_time_v(p_leg / key12 / job.design / "run" / "parmys.out").wall_s
+
+
 def _warn(ctx: RunContext, lines: Sequence[str]) -> None:
     for line in lines:
         if ctx.opts.log is not None:
@@ -472,6 +482,9 @@ def finish_job(job: Job, attempt_start: float, *, ctx: RunContext) -> dict[str, 
     vtr = qor_parse.metrics_from_parse(parse, qor)
     netlist = _netlist(job, parse, attempt_start)
     wall, peak, warnings = _frontend_cost(job)
+    parmys_wall = parmys_stage_wall(job) if job.leg == "Pprime" else None
+    if job.leg == "Pprime" and parmys_wall is None:
+        warnings.append(f"{PREFIX}Pprime {job.design}: no P job for the Parmys stage cost")
     _warn(ctx, warnings)
     inputs = job.inputs
     odin3 = job.leg != "P"
@@ -494,6 +507,8 @@ def finish_job(job: Job, attempt_start: float, *, ctx: RunContext) -> dict[str, 
                                                           for w in warnings])
     if job.leg == "P":
         record.update(_parmys_fields(job))
+    if job.leg == "Pprime":
+        record["parmys_stage_wall_s"] = None if parmys_wall is None else round(parmys_wall, 2)
     _write_json(job.job_dir / "job.json", record)
     return metrics
 
@@ -635,9 +650,11 @@ def odin3_commit(legs: Sequence[str], odin3: Path) -> str | None:
 
 
 def _plan_lines(jobs: Sequence[Job]) -> list[str]:
-    return [f"{job.leg} {job.design} {job.key12} "
-            f"{'cached' if job.cached and qor_sched.job_complete(job) else 'run'}"
-            for job in jobs]
+    def state(job: Job) -> str:
+        if job.skip_reason is not None:
+            return "skipped"
+        return "cached" if job.cached and qor_sched.job_complete(job) else "run"
+    return [f"{job.leg} {job.design} {job.key12} {state(job)}" for job in jobs]
 
 
 def cmd_run(args: argparse.Namespace, argv: Sequence[str]) -> int:

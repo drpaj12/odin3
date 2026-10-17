@@ -39,7 +39,7 @@ import qor_sched
 import vtr_qor
 from qor_heavy import HEAVY_DIR
 
-from .helpers import REPO_ROOT, run_main
+from .helpers import REPO_ROOT, run_main, write_golden
 
 K6 = "k6_frac_N10_frac_chain_mem32K_40nm"
 SETS = qor_sched.load_sets()
@@ -132,7 +132,9 @@ if sys.argv[1:] == ["--help"]:
 if Path(__file__).with_name("fail").exists():
     sys.exit(1)
 script = sys.argv[sys.argv.index("-p") + 1]
-Path(script.split()[-1]).write_text({ABC_LINE + BLIF!r})
+header = Path(__file__).with_name("abc_line.txt")  # a test's own # abc: line ("" for none)
+text = header.read_text() + {BLIF!r} if header.exists() else {ABC_LINE + BLIF!r}
+Path(script.split()[-1]).write_text(text)
 """
 
 FAKE_TIME = f"""
@@ -865,6 +867,104 @@ class RunTest(CliTestBase):
         self.assertEqual(vtr_qor.odin3_commit(("O",), inside), f"{head}-dirty")
         self.assertIsNone(vtr_qor.odin3_commit(("O",), self.odin3))  # built elsewhere
         self.assertIsNone(vtr_qor.odin3_commit(("P",), inside))
+
+
+class ControlLegTest(CliTestBase):
+    """Plan Task 10: P' and R read the verified Parmys golden; point (e) and (o)."""
+
+    def golden_for(self, design: str, **prov: str) -> Path:
+        return write_golden(self.golden / K6, design, BLIF, **prov)
+
+    def odin3_commands(self, job_dir: Path) -> list[list[str]]:
+        record = self.load(job_dir / "job.json")
+        return [c["argv"] for c in record["commands"]]
+
+    def test_pprime_skipped(self) -> None:
+        """A bad golden: status skipped, metrics.json says why (E-QH6), exit 1, nothing runs."""
+        golden = self.golden_for("ch_intrinsics", status="failed")
+        code, _, err = self.cli("run", "--leg", "P'", "--designs", "ch_intrinsics")
+        text = f"ch_intrinsics: Parmys golden {golden}: status=failed"
+        self.assertEqual(code, 1, err)
+        self.assertIn(f"vtr-qor: {text}\n", err)
+        (job,) = self.job_dirs("Pprime", "ch_intrinsics")
+        self.assertEqual((job / "status").read_text(), "skipped\n")
+        metrics = self.load(job / "metrics.json")
+        self.assertEqual((metrics["status"], metrics["error"]), ("skipped", text))
+        self.assertEqual(self.calls(), [])
+        self.assertIn("1 skipped", self.harness_lines()[-1])
+        # No golden at all is `missing`; the same for R; a good golden runs.
+        code, _, err = self.cli("run", "--leg", "R", "--designs", "stereovision3")
+        self.assertEqual(code, 1, err)
+        missing = qor_legs.golden_blif(K6, "stereovision3")
+        self.assertIn(f"stereovision3: Parmys golden {missing}: missing", err)
+        code, out, _ = self.cli("run", "--leg", "P',R", "--designs", "ch_intrinsics",
+                                "--dry-run")
+        self.assertEqual((code, [line.split()[-1] for line in out.splitlines()]),
+                         (0, ["skipped", "skipped"]))
+        self.golden_for("ch_intrinsics")
+        code, _, err = self.cli("run", "--leg", "P'", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls(), ["ch_intrinsics vpr"])
+
+    def test_pprime_commands(self) -> None:
+        """P' reads the golden, abc runs in odin3, VTR starts at vpr; R starts at abc and its
+        script has no abc; both key on the golden's SHA-256."""
+        golden = self.golden_for("ch_intrinsics")
+        code, _, err = self.cli("run", "--leg", "P',R", "--designs", "ch_intrinsics",
+                                "--keep-netlists")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(sorted(self.calls()), ["ch_intrinsics abc", "ch_intrinsics vpr"])
+        (pj,) = self.job_dirs("Pprime", "ch_intrinsics")
+        (rj,) = self.job_dirs("R", "ch_intrinsics")
+        p_front, p_vtr, *_ = self.odin3_commands(pj)
+        r_front, r_vtr, *_ = self.odin3_commands(rj)
+        self.assertIn(f"read_blif {golden}; abc --lut 6; write_blif --vtr --lut-k 6",
+                      p_front[-1])
+        self.assertIn(f"read_blif {golden}; write_blif --vtr --lut-k 6", r_front[-1])
+        self.assertNotIn("abc --lut", r_front[-1])
+        self.assertEqual((p_vtr[p_vtr.index("-start") + 1], r_vtr[r_vtr.index("-start") + 1]),
+                         ("vpr", "abc"))
+        sha = hashlib.sha256(golden.read_bytes()).hexdigest()
+        for job in (pj, rj):
+            self.assertEqual(self.load(job / "job.json")["key_inputs"]["source_sha256"], sha)
+
+    def test_abc_header_metrics(self) -> None:
+        """P': the # abc: line gives abc_depth and the exchange; without it both are null."""
+        self.golden_for("ch_intrinsics")
+        line = ABC_LINE.replace("exchange=aig depth=2", "exchange=blif depth=5")
+        (self.bin / "abc_line.txt").write_text(line)
+        code, _, err = self.cli("run", "--leg", "Pprime", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        (job,) = self.job_dirs("Pprime", "ch_intrinsics")
+        netlist = self.load(job / "metrics.json")["netlist"]
+        self.assertEqual((netlist["abc_depth"], netlist["abc_exchange"]), (5, "blif"))
+        (self.bin / "abc_line.txt").write_text("")
+        code, _, err = self.cli("run", "--leg", "Pprime", "--designs", "ch_intrinsics",
+                                "--rerun")
+        self.assertEqual(code, 0, err)
+        netlist = self.load(self.job_dirs("Pprime", "ch_intrinsics")[0] / "metrics.json")[
+            "netlist"]
+        self.assertEqual((netlist["abc_depth"], netlist["abc_exchange"]), (None, None))
+
+    def test_pprime_parmys_part(self) -> None:
+        """Point (o): the Parmys stage cost comes from the latest P job's parmys.out; without a P
+        job the cell is starred with the exact warning, and frontend_wall_s is frontend.time."""
+        self.golden_for("ch_intrinsics")
+        self.golden_for("stereovision3")
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
+        code, _, err = self.cli("run", "--leg", "Pprime", "--designs",
+                                "ch_intrinsics,stereovision3")
+        self.assertEqual(code, 0, err)
+        self.assertIn("vtr-qor: Pprime stereovision3: no P job for the Parmys stage cost", err)
+        (with_p,) = self.job_dirs("Pprime", "ch_intrinsics")
+        (without,) = self.job_dirs("Pprime", "stereovision3")
+        job = self.load(with_p / "job.json")
+        self.assertEqual((job["parmys_stage_wall_s"], job["cost_warnings"]), (0.5, []))
+        self.assertEqual(self.load(with_p / "metrics.json")["cost"]["frontend_wall_s"], 0.5)
+        job = self.load(without / "job.json")
+        self.assertIsNone(job["parmys_stage_wall_s"])
+        self.assertEqual(job["cost_warnings"],
+                         ["Pprime stereovision3: no P job for the Parmys stage cost"])
 
 
 class StatusCleanTest(CliTestBase):

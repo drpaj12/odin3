@@ -331,7 +331,8 @@ class Job:
     """One (leg, design) job. ``key`` is the job key, ``key12`` the leg key's first 12 hex
     digits (the directory); ``job_dir`` is ``<out>/<vtr12>/<arch base>/<leg>/<key12>/<d>``.
     ``inputs`` are the key inputs the planner hashed (``job.json`` records them); None only for
-    jobs built by hand."""
+    jobs built by hand. ``skip_reason`` is E-QH6's text for a P' or R job whose Parmys golden
+    failed ``qor_legs.verify_golden``: the runner records it ``skipped`` and runs nothing."""
 
     leg: str
     design: str
@@ -344,6 +345,7 @@ class Job:
     commands: tuple[Command, ...]
     cached: bool
     inputs: KeyInputs | None = None
+    skip_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -373,6 +375,7 @@ class _Common:
     lib_sha256: str | None
     abc_script_sha256: str | None
     hashes: dict[Path, str] = dataclasses.field(default_factory=dict)
+    golden_reasons: dict[Path, str | None] = dataclasses.field(default_factory=dict)
 
 
 def _ordered_legs(legs: Iterable[str]) -> tuple[str, ...]:
@@ -432,10 +435,23 @@ def _source_sha256(path: Path, com: _Common, *, may_miss: bool) -> str:
     return com.hashes[path]
 
 
+def _golden_skip(golden: Path, design: str, source_sha: str, com: _Common) -> str | None:
+    """E-QH6's text when the golden fails verification (spec §3.4), else None; checked once per
+    golden per plan (Pprime and R share it), reusing the hash the key already holds."""
+    if golden not in com.golden_reasons:
+        sha = None if source_sha == GOLDEN_MISSING else source_sha
+        com.golden_reasons[golden] = qor_legs.verify_golden(
+            golden, qor_legs.arch_xml_rel(com.arch), sha)
+    reason = com.golden_reasons[golden]
+    return None if reason is None else qor_legs.golden_error(design, golden, reason)
+
+
 def _plan_job(leg: str, design: str, req: PlanRequest, sets: Sets, com: _Common) -> Job:
     golden = qor_legs.golden_blif(com.arch, design) if leg in GOLDEN_LEGS else None
+    skip = None
     if golden is not None:
         source_sha = _source_sha256(golden, com, may_miss=True)
+        skip = _golden_skip(golden, design, source_sha, com)
     else:
         source_sha = _source_sha256(qor_legs.design_verilog(req.vtr_root, design), com,
                                     may_miss=False)
@@ -452,7 +468,8 @@ def _plan_job(leg: str, design: str, req: PlanRequest, sets: Sets, com: _Common)
         gating=com.arch == qor_legs.ARCH_BASES["k6"] and design in sets.gate,
         key=key, key12=key12, job_dir=job_dir,
         commands=tuple(qor_legs.build_commands(leg, design, ctx)),
-        cached=not req.rerun and is_cached(job_dir, key), inputs=inputs,
+        cached=skip is None and not req.rerun and is_cached(job_dir, key), inputs=inputs,
+        skip_reason=skip,
     )
 
 
@@ -1152,6 +1169,21 @@ def _prepare(job: Job, opts: RunOptions, attempt_start: float) -> str:
     return ""
 
 
+def skip_job(job: Job) -> JobResult:
+    """A job whose Parmys golden failed verification (E-QH6): nothing runs. Its directory is
+    emptied, then ``status`` and a minimal ``metrics.json`` (status ``skipped``, ``error`` the
+    E-QH6 text) are written, so a table shows the design as skipped rather than missing."""
+    error = job.skip_reason or ""
+    root = job_out_root(job)
+    qor_heavy.safe_rmtree(job.job_dir, root)
+    job.job_dir.mkdir(parents=True)
+    _write_status(job, SKIPPED)
+    record = {"schema": SCHEMA, "leg": job.leg, "design": job.design, "arch": job.arch,
+              "key": job.key, "status": SKIPPED, "gating": job.gating, "error": error}
+    _write_atomic(job.job_dir / "metrics.json", json.dumps(record, sort_keys=True, indent=1) + "\n")
+    return JobResult(job, SKIPPED, 0.0, error)
+
+
 def run_one(job: Job, opts: RunOptions, finish: Finish) -> JobResult:
     """Run one job alone from a fresh attempt, inside the verified heavy run (spec §7.4). An ok
     job is cleaned up (spec §7.5) before its ``metrics.json`` is written. When the job cgroup
@@ -1602,6 +1634,12 @@ def _stop_for_pause(run: _Run, index: int) -> None:
 def _step(run: _Run, index: int) -> bool:
     """Run ``run.jobs[index]``; False when the run stops."""
     job, n = run.jobs[index], len(run.jobs)
+    if job.skip_reason is not None:
+        result = skip_job(job)
+        run.log.emit(result.error)
+        run.results.append(result)
+        run.log.job(index + 1, n, result)
+        return True
     if job.cached and job_complete(job):
         run.results.append(JobResult(job, OK, 0.0, ""))
         run.log.emit(f"[{index + 1}/{n}] {job.leg} {job.design} cached")
@@ -1634,12 +1672,14 @@ def _step(run: _Run, index: int) -> bool:
 
 
 def _exit_code(results: Sequence[JobResult], stop_code: int) -> int:
-    """Plan, Global Constraints: 5 stopped for disk (or the stopping error's code), 1 a failure,
-    3 capped or timeout without a failure, else 0."""
+    """Plan, Global Constraints: 5 stopped for disk (or the stopping error's code), 1 a failure
+    (a job skipped for its Parmys golden, E-QH6, counts), 3 capped or timeout without a
+    failure, else 0."""
     if stop_code != EXIT_OK:
         return stop_code
     statuses = {result.status for result in results}
-    if FAILED in statuses or ABORTED in statuses:
+    golden_skipped = any(r.status == SKIPPED and r.job.skip_reason for r in results)
+    if FAILED in statuses or ABORTED in statuses or golden_skipped:
         return EXIT_FAILED
     if CAPPED in statuses or TIMEOUT in statuses:
         return EXIT_INCOMPLETE

@@ -37,6 +37,8 @@ import qor_sched
 from qor_heavy import HEAVY_DIR, HeavyError
 from qor_sched import Job, KeyInputs, PlanRequest
 
+from .helpers import write_golden
+
 PIN = qor_legs.VTR_PIN
 K6 = "k6_frac_N10_frac_chain_mem32K_40nm"
 SETS = qor_sched.load_sets(qor_legs.REPO_ROOT / "tests" / "vtr" / "qor" / "sets.json")
@@ -142,9 +144,7 @@ class PlanTestBase(unittest.TestCase):
         (self.repo / "lib" / "abc" / "vtr.abc").write_text("strash; dch -f; if -K 6; mfs2\n")
         self.golden = tmp / "golden"
         for design in ("sha", "ch_intrinsics"):
-            blif = self.golden / K6 / "vtr" / design / f"{design}.parmys.blif"
-            blif.parent.mkdir(parents=True)
-            blif.write_text(f".model {design}\n.end\n")
+            write_golden(self.golden / K6, design, f".model {design}\n.end\n")
         self.odin3, self.libs = self._build()
         self.out = tmp / "out"
         stack = ExitStack()
@@ -392,7 +392,7 @@ class PlanTest(PlanTestBase):
         after = self.keys(legs)
         for (leg, design), key in after.items():
             self.assertEqual(key == before[(leg, design)], leg == "P", (leg, design))
-        _bump(self.golden / K6 / "vtr" / "sha" / "sha.parmys.blif")
+        write_golden(self.golden / K6, "sha", ".model sha\n# regenerated\n.end\n")
         golden = self.keys(legs)
         changed = {lk for lk, key in golden.items() if key != after[lk]}
         self.assertEqual(changed, {("Pprime", "sha")})

@@ -839,6 +839,18 @@ class WriterTest(unittest.TestCase):
         self.assertIn("- gate: FAIL: num_clb geomean O/P 1.2004 > 1.20", md)
         self.assertIn("| sha | 100 | 120.04 | 1.2004 |", md)
 
+    def test_cost_pprime_shows_both_front_end_parts(self) -> None:
+        """Point (o): a P' row's front-end cell is frontend.time plus the Parmys stage."""
+        runs = table(legs=("P", "Pprime"))
+        runs = [Run(r.leg, r.design, r.arch, r.key12, r.status, r.gating,
+                    {**r.metrics, "cost": {"frontend_wall_s": 3.0, "vpr_time_s": 1.0}},
+                    {"parmys_stage_wall_s": 12.5} if r.leg == "Pprime" else {})
+                for r in runs]
+        qor_table.write_md(runs, None, header(runs), self.dir / "qor.md", golden=None)
+        md = (self.dir / "qor.md").read_text(encoding="utf-8")
+        self.assertIn("| sha | P' | 3.0 + 12.5 Parmys |", md)
+        self.assertIn("| sha | P | 3.0 |", md)
+
     def test_header_from_newest_job(self) -> None:
         def with_job(r: Run, ended: str, cpu: str) -> Run:
             return Run(r.leg, r.design, r.arch, r.key12, r.status, r.gating, r.metrics,

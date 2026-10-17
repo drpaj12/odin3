@@ -1257,6 +1257,9 @@ def _md_cost(layout: _Layout) -> list[str]:
         for name in COST_COLUMNS:
             text = fmt_value(name, metric(run, name) if ok else None)
             out.append(f"{text}*" if text and warned and name in FRONTEND_COST else text)
+        parmys = run.job.get("parmys_stage_wall_s")  # P' (point (o)): both front-end parts
+        if ok and run.leg == "Pprime" and isinstance(parmys, float) and out[0]:
+            out[0] = f"{out[0]} + {fmt_value('frontend_wall_s', parmys)} Parmys"
         return [*out, "xl" if run.job.get("slice") == XL_SLICE else ""]
     head = ["design", "leg", "front-end wall (s)", "front-end peak (MiB)", "VPR time (s)",
             "VPR mem (MiB)", "slice"]
