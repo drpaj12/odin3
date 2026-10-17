@@ -18,6 +18,7 @@
 static const lw_rule k_rules[] = {
     LW_RULE("$add", add),
     LW_RULE("$and", and),
+    LW_RULE("$div", div),
     LW_RULE("$eq", eq),
     LW_RULE("$ge", ge),
     LW_RULE("$gt", gt),
@@ -26,6 +27,7 @@ static const lw_rule k_rules[] = {
     LW_RULE("$logic_not", logic_not),
     LW_RULE("$logic_or", logic_or),
     LW_RULE("$lt", lt),
+    LW_RULE("$mod", mod),
     LW_RULE("$mul", mul),
     LW_RULE("$mux", mux),
     LW_RULE("$ne", ne),
@@ -74,8 +76,8 @@ static const char *const k_no_rule[] = {"$proc", "$tribuf", "$pow", "$memrd", "$
 
 /* Word types whose rule a later task adds (plan Tasks 4 to 8). */
 static const char *const k_pending[] = {
-    "$div",   "$mod",    "$dff",   "$dffe",   "$sdff",   "$sdffe",   "$sdffce",   "$adff", "$adffe",
-    "$aldff", "$aldffe", "$dffsr", "$dffsre", "$dlatch", "$adlatch", "$dlatchsr", "$sr",   "$mem",
+    "$dff",    "$dffe",  "$sdff",   "$sdffe",  "$sdffce",  "$adff",     "$adffe", "$aldff",
+    "$aldffe", "$dffsr", "$dffsre", "$dlatch", "$adlatch", "$dlatchsr", "$sr",    "$mem",
 };
 
 static bool listed(const char *const *names, size_t count, const char *type_name) {

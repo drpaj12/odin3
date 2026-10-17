@@ -431,6 +431,35 @@ odin3_status lw_fa(lw_ctx *lw, const odin3_net_id in[3], odin3_net_id out[2]);
 
 LW_DECLARE_BUILDER(mul);
 
+/* --- div.c: the restoring divider, $div, $mod (spec §5.6) ---------------------------------------
+ */
+
+/* The outputs of lw_divmod_u: W quotient bits and, when asked for, W remainder bits. */
+typedef struct lw_divmod_out {
+    lw_bits quot;
+    lw_bits rem;
+} lw_divmod_out;
+
+void lw_divmod_out_init(lw_divmod_out *res);
+void lw_divmod_out_free(lw_divmod_out *res);
+
+/*
+ * techmap.v `$__div_mod_u`: A / B and A % B for unsigned operands of the same width W >= 1, W
+ * stages. Stage i compares the running remainder with {B, W-1-i zeros}, sets quotient bit W-1-i to
+ * the result and keeps the difference when it is set. B = 0 gives quotient all ones and remainder
+ * A. Without `want_rem` the last stage's difference is not built. Gates: lw_divmod_u_gates.
+ */
+typedef struct lw_divmod_args {
+    lw_span dividend;
+    lw_span divisor;
+    bool want_rem;
+} lw_divmod_args;
+odin3_status lw_divmod_u(lw_ctx *lw, const lw_divmod_args *args, lw_divmod_out *res);
+uint64_t lw_divmod_u_gates(uint64_t width, bool want_rem);
+
+LW_DECLARE_BUILDER(div);
+LW_DECLARE_BUILDER(mod);
+
 /* --- dispatch (dispatch.c) ---------------------------------------------------------------- */
 
 typedef odin3_status (*lw_build_fn)(lw_ctx *lw, const lw_cell *cell, lw_bits *out);
