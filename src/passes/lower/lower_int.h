@@ -131,6 +131,8 @@ typedef struct lw_totals {
     uint64_t nodes;           /* bit nodes created (constants included) */
     uint64_t modules;         /* modules with at least one word cell */
     uint64_t mixed_sign;      /* cells warned of for A_SIGNED != B_SIGNED */
+    uint64_t async_bits;      /* flip-flop bits whose async control was made synchronous */
+    uint64_t async_cells;     /* the cells those bits belong to */
     uint64_t soft[LW_N_SOFT]; /* cells of $add, $mem, $mul, $sub (the soft-logic INFO line) */
 } lw_totals;
 
@@ -200,6 +202,20 @@ odin3_status lw_const(lw_ctx *lw, odin3_bit bit, odin3_net_id *out);
  * *out_net. */
 odin3_status lw_gate(lw_ctx *lw, lw_kind kind, const odin3_net_id *in, uint32_t n_in,
                      odin3_net_id *out_net);
+
+/* A gate to create on the net `out_net` (made by lw_net): `kind` on `in[0 .. n_in)` (input ports in
+ * order), with the node parameters `params` (one value: the INIT of a storage cell; NULL: the
+ * defaults). */
+typedef struct lw_gate_spec {
+    lw_kind kind;
+    const odin3_net_id *in;
+    uint32_t n_in;
+    const odin3_value *params;
+} lw_gate_spec;
+
+/* The gate of `spec` driving the existing net out_net (a storage cell's Q is read before it is
+ * built, so its net is made first). Same failure modes as lw_gate. */
+odin3_status lw_gate_on(lw_ctx *lw, const lw_gate_spec *spec, odin3_net_id out_net);
 
 odin3_status lw_not(lw_ctx *lw, odin3_net_id src, odin3_net_id *out_net);
 odin3_status lw_and(lw_ctx *lw, odin3_net_id lhs, odin3_net_id rhs, odin3_net_id *out_net);
@@ -461,6 +477,28 @@ uint64_t lw_divmod_u_gates(uint64_t width, bool want_rem);
 
 LW_DECLARE_BUILDER(div);
 LW_DECLARE_BUILDER(mod);
+
+/* --- ff.c: the eleven word flip-flops (spec §6.1; PHASE3 decision 19) ----------------------------
+ */
+
+LW_DECLARE_BUILDER(dff);
+LW_DECLARE_BUILDER(dffe);
+LW_DECLARE_BUILDER(sdff);
+LW_DECLARE_BUILDER(sdffe);
+LW_DECLARE_BUILDER(sdffce);
+LW_DECLARE_BUILDER(adff);
+LW_DECLARE_BUILDER(adffe);
+LW_DECLARE_BUILDER(aldff);
+LW_DECLARE_BUILDER(aldffe);
+LW_DECLARE_BUILDER(dffsr);
+LW_DECLARE_BUILDER(dffsre);
+
+/* True for the FF types whose asynchronous set, reset or load `lower` makes synchronous. */
+bool lw_ff_is_async(const char *type_name);
+
+/* With `--async error` and an async FF type: logs `lower: module 'm': asynchronous control on
+ * '<type>' '<cell>'` and returns true (the pre-scan of the run; nothing has been changed yet). */
+bool lw_ff_async_refused(const lw_ctx *lw, odin3_node_id node, const char *type_name);
 
 /* --- dispatch (dispatch.c) ---------------------------------------------------------------- */
 

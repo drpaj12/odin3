@@ -82,6 +82,8 @@ static odin3_status apply_option(const char *name, const char *value, odin3_strb
     return ODIN3_OK;
 }
 
+static const char k_enable_first[] = "--async-enable-first";
+
 static bool is_option(const char *word) {
     static const char *const k_options[] = {"--neg-edge", "--async", "--report", "--max-mem-bits"};
     for (size_t i = 0; i < sizeof k_options / sizeof k_options[0]; i++) {
@@ -102,6 +104,10 @@ odin3_status odin3_lower_parse_args(odin3_bytes args, odin3_strbuf *report,
     odin3_status st = ODIN3_OK;
     for (const char *word = next_word(&args, &word_buf, &st); word != NULL;
          word = next_word(&args, &word_buf, &st)) {
+        if (strcmp(word, k_enable_first) == 0) { /* hidden, test-only: a flag without a value */
+            opts->async_enable_first = true;
+            continue;
+        }
         if (!is_option(word)) {
             odin3_log(ODIN3_LOG_ERROR,
                       "lower: unknown argument '%s' (options: --neg-edge invert|keep, --async "

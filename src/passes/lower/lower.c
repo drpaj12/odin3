@@ -233,6 +233,14 @@ static void report_run(lw_ctx *lw) {
         return;
     }
     log_soft(lw);
+    if (lw->totals.async_bits > 0) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "lower: asynchronous reset/set/load made synchronous on %" PRIu64
+                  " flip-flop bits in %" PRIu64
+                  " cells (PHASE3 decision 19); the netlist differs from the RTL on reset timing; "
+                  "see --report",
+                  lw->totals.async_bits, lw->totals.async_cells);
+    }
     odin3_strbuf info;
     odin3_strbuf_init(&info);
     uint32_t str = 0;
@@ -244,8 +252,8 @@ static void report_run(lw_ctx *lw) {
     odin3_strbuf_free(&info);
 }
 
-/* True when module holds a live word cell without a rule; logs every such cell (spec 12.2: the
- * knowable failure comes before any change). */
+/* True when module holds a live word cell without a rule, or one `--async error` refuses; logs
+ * every such cell (spec 12.2: the knowable failure comes before any change). */
 static bool module_has_ruleless(lw_ctx *lw, const lw_rules *rules, odin3_module *module) {
     lw_ctx_enter(lw, module);
     bool found = false;
@@ -253,12 +261,17 @@ static bool module_has_ruleless(lw_ctx *lw, const lw_rules *rules, odin3_module 
     for (uint32_t id = 1; id < end; id++) {
         odin3_node_id node = {id};
         bool is_word = false;
-        if (!odin3_node_live(module, node) || rule_of(lw, rules, node, &is_word) != NULL ||
-            !is_word) {
+        const lw_rule *rule =
+            odin3_node_live(module, node) ? rule_of(lw, rules, node, &is_word) : NULL;
+        if (!is_word) {
             continue;
         }
         const odin3_celltype_def *def =
             odin3_celltype_get(lw->design, odin3_node_type(module, node));
+        if (rule != NULL) {
+            found = lw_ff_async_refused(lw, node, def->name) || found;
+            continue;
+        }
         lw_log_no_rule(lw, node, def->name);
         found = true;
     }
@@ -282,7 +295,7 @@ odin3_status odin3_lower_run(odin3_pass_ctx *ctx, odin3_design *design,
         odin3_log(ODIN3_LOG_ERROR, "lower: no pass context or design");
         return ODIN3_ERR_INVALID_ARG;
     }
-    static const odin3_lower_opts k_none = {false, false, 0, NULL};
+    static const odin3_lower_opts k_none = {false, false, 0, NULL, false};
     lw_ctx lw;
     lw_rules rules = {NULL, 0};
     odin3_status st = lw_ctx_init(&lw, ctx, design, opts != NULL ? opts : &k_none);
