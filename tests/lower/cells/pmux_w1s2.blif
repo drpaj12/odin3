@@ -1,0 +1,9 @@
+.model m
+.inputs a b0 b1 s[0] s[1]
+.outputs y
+.subckt $_OR_ A=s[1] B=s[0] Y=$n13
+.subckt $_AND_ A=b1 B=s[1] Y=$n14
+.subckt $_AND_ A=b0 B=s[0] Y=$n15
+.subckt $_OR_ A=$n14 B=$n15 Y=$n16
+.subckt $_MUX_ A=a B=$n16 S=$n13 Y=y
+.end

@@ -18,6 +18,13 @@ class GridTest(unittest.TestCase):
         self.assertEqual(len(stems), len(set(stems)))
         self.assertGreater(len(cells), 100)
 
+    def test_a_pmux_fixture_is_a_parallel_case_with_one_item_per_select(self) -> None:
+        cell = gc.pmux_cell(2, 3)
+        self.assertEqual(cell.stem, "pmux_w2s3")
+        self.assertIn("(* parallel_case *) case (1'b1)", cell.text)
+        self.assertEqual(cell.text.count("y = b"), 3)
+        self.assertIn("input [2:0] s", cell.text)
+
     def test_module_text_of_a_mixed_sign_binary_cell(self) -> None:
         by_stem = {c.stem: c for c in gc.generate(["bitwise"])}
         self.assertEqual(

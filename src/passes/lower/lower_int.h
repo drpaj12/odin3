@@ -282,6 +282,9 @@ odin3_status lw_check_size(const lw_ctx *lw, const lw_cell *cell, uint64_t estim
 uint64_t lw_sat_add(uint64_t lhs, uint64_t rhs);
 uint64_t lw_sat_mul(uint64_t lhs, uint64_t rhs);
 
+/* Yosys's $clog2: the smallest n with 2^n >= value (0 for 0 and 1). */
+uint32_t lw_clog2(uint64_t value);
+
 /* --- the rules (bitwise.c; later tasks add the others) --------------------------------------- */
 
 #define LW_DECLARE_BUILDER(name)                                                                   \
@@ -303,6 +306,10 @@ LW_DECLARE_BUILDER(logic_and);
 LW_DECLARE_BUILDER(logic_or);
 LW_DECLARE_BUILDER(eq);
 LW_DECLARE_BUILDER(ne);
+
+/* --- pmux_shift.c: $pmux, $shl $shr $sshr, $shiftx (spec §5.1 to §5.3) ------------------------ */
+
+LW_DECLARE_BUILDER(pmux);
 
 /* --- dispatch (dispatch.c) ---------------------------------------------------------------- */
 

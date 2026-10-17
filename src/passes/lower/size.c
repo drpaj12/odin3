@@ -20,6 +20,17 @@ uint64_t lw_sat_mul(uint64_t lhs, uint64_t rhs) {
     return rhs != 0 && lhs > UINT64_MAX / rhs ? UINT64_MAX : lhs * rhs;
 }
 
+/* The width of the integer lw_clog2 works on. */
+enum { LW_U64_BITS = 64 };
+
+uint32_t lw_clog2(uint64_t value) {
+    uint32_t bits = 0;
+    while (bits < LW_U64_BITS && ((uint64_t)1 << bits) < value) {
+        bits++;
+    }
+    return bits;
+}
+
 /* The canonical constants a cell may add to a module: $_CONST0_, $_CONST1_, $_CONSTX_. */
 enum { CONST_SLACK = 3 };
 

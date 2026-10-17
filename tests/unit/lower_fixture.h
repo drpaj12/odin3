@@ -112,4 +112,37 @@ typedef struct lf_sim_result {
 lf_sim_result lf_sim_equal(odin3_design *design_a, odin3_module_id top_a, odin3_design *design_b,
                            odin3_module_id top_b, const lf_sim_opts *opts);
 
+/*
+ * The size estimate (lw_est_*) of the rule for cell type `type` on a cell with these parameters
+ * and port widths (in the definition's port order, the output last).
+ */
+uint64_t lf_estimate(const char *type, const odin3_value *params, const uint32_t *widths,
+                     uint32_t n_ports);
+
+/* Live bit nodes of mod that are not constants (the gates), and live word nodes. */
+uint32_t lf_gate_nodes(lf *fix, odin3_module *mod);
+uint32_t lf_word_nodes(lf *fix, odin3_module *mod);
+
+/* Most input or output bits of a module lf_sim_model drives. */
+enum { LF_MODEL_BITS = 1024 };
+
+/*
+ * A reference model written in the test (for the cells with no simulate hook): `in` holds the
+ * module's input bits, port by port, LSB first (0 or 1); the model writes the output bits likewise
+ * into `out` and sets care[k] = 0 for a bit it leaves open (an x of the cell).
+ */
+typedef struct lf_model_io {
+    const uint8_t *in;
+    uint8_t *out;
+    uint8_t *care;
+} lf_model_io;
+typedef void (*lf_model_fn)(const lf_model_io *io, const void *user);
+
+/*
+ * Simulates module `top` of the design on the vectors of `opts` (as lf_sim_equal) and compares
+ * every output bit the model cares about with the model's.
+ */
+lf_sim_result lf_sim_model(odin3_design *design, odin3_module_id top, lf_model_fn model,
+                           const void *user, const lf_sim_opts *opts);
+
 #endif

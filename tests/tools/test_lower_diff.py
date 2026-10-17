@@ -365,5 +365,13 @@ class RealCompareTest(unittest.TestCase):
         self.assertIn("identity: DIFFERS: netlist-compare: not identical", out)
 
 
+class GateModelsTest(unittest.TestCase):
+    def test_every_gate_spelled_as_a_subckt_has_a_model(self) -> None:
+        text = lc.with_gate_models(".model m\n.end\n")
+        for gate in ("NOT", "AND", "OR", "XOR", "XNOR", "MUX"):
+            self.assertIn(f".model $_{gate}_\n", text)
+        self.assertTrue(text.startswith(".model m\n.end\n"))
+
+
 if __name__ == "__main__":
     unittest.main()

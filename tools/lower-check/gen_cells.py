@@ -119,7 +119,26 @@ def bitwise_cells() -> list[Cell]:
     return cells
 
 
-FAMILY_GENERATORS = {"bitwise": bitwise_cells}
+PMUX_WIDTHS = (1, 2, 5, 8)
+PMUX_SELECTS = (2, 3, 4)
+
+
+def pmux_cell(width: int, selects: int) -> Cell:
+    """A one-hot priority-free case (``parallel_case``), which ``proc`` turns into one ``$pmux``."""
+    ports = [_decl("input", "a", width, False)]
+    ports += [_decl("input", f"b{i}", width, False) for i in range(selects)]
+    ports += [_decl("input", "s", selects, False), _decl("output reg", "y", width, False)]
+    items = "\n".join(f"      s[{i}]: y = b{i};" for i in range(selects))
+    body = ("always @* begin\n    y = a;\n    (* parallel_case *) case (1'b1)\n"
+            f"{items}\n    endcase\n  end")
+    return Cell(f"pmux_w{width}s{selects}", _module(ports, body), "pmux")
+
+
+def pmux_cells() -> list[Cell]:
+    return [pmux_cell(w, n) for w in PMUX_WIDTHS for n in PMUX_SELECTS]
+
+
+FAMILY_GENERATORS = {"bitwise": bitwise_cells, "pmux": pmux_cells}
 
 
 def generate(families: Sequence[str]) -> list[Cell]:

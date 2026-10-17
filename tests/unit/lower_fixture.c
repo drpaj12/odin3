@@ -3,6 +3,7 @@
 
 #include "backends/rtlil/writer.h"
 #include "ir/celltype.h"
+#include "passes/lower/lower_int.h"
 #include "sim/prng.h"
 #include "sim/sim.h"
 #include "unity.h"
@@ -287,4 +288,120 @@ lf_sim_result lf_sim_equal(odin3_design *design_a, odin3_module_id top_a, odin3_
     odin3_sim_destroy(sim_a);
     odin3_sim_destroy(sim_b);
     return res;
+}
+
+/* --- counts and the reference-model simulation ----------------------------------------------- */
+
+uint32_t lf_gate_nodes(lf *fix, odin3_module *mod) {
+    uint32_t count = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
+        odin3_node_id node = {id};
+        if (!odin3_node_live(mod, node)) {
+            continue;
+        }
+        const odin3_celltype_def *def = odin3_celltype_get(fix->design, odin3_node_type(mod, node));
+        count += def->gran == ODIN3_GRAN_BIT && strncmp(def->name, "$_CONST", 7) != 0 ? 1U : 0U;
+    }
+    return count;
+}
+
+uint32_t lf_word_nodes(lf *fix, odin3_module *mod) {
+    uint32_t count = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
+        odin3_node_id node = {id};
+        count += odin3_node_live(mod, node) &&
+                         odin3_celltype_get(fix->design, odin3_node_type(mod, node))->gran ==
+                             ODIN3_GRAN_WORD
+                     ? 1U
+                     : 0U;
+    }
+    return count;
+}
+
+static uint32_t output_bits(const odin3_sim *sim) {
+    uint32_t total = 0;
+    for (uint32_t pidx = 0; pidx < odin3_sim_output_count(sim); pidx++) {
+        total += odin3_sim_output_width(sim, pidx);
+    }
+    return total;
+}
+
+/* Compares the simulator's outputs with the model's wanted bits where care is set. */
+static bool compare_model(const odin3_sim *sim, const uint8_t *want, const uint8_t *care,
+                          lf_sim_result *res) {
+    uint32_t idx = 0;
+    for (uint32_t pidx = 0; pidx < odin3_sim_output_count(sim); pidx++) {
+        for (uint32_t bit = 0; bit < odin3_sim_output_width(sim, pidx); bit++, idx++) {
+            bool got = false;
+            (void)odin3_sim_get_output(sim, (odin3_sim_bit){pidx, bit}, &got);
+            if (care[idx] != 0 && (got ? 1 : 0) != want[idx]) {
+                (void)snprintf(res->why, sizeof res->why,
+                               "output %s[%u] differs after %llu vectors: model %d simulator %d",
+                               odin3_sim_output_name(sim, pidx), bit,
+                               (unsigned long long)res->vectors, want[idx], got ? 1 : 0);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static void model_vectors(odin3_sim *sim, lf_model_fn model, const void *user,
+                          const lf_sim_opts *opts, lf_sim_result *res) {
+    uint32_t total = input_bits(sim);
+    odin3_prng prng;
+    odin3_prng_seed(&prng, opts->seed);
+    bool all = total <= opts->exhaustive_bits && total < 64;
+    uint64_t count = all ? (uint64_t)1 << total : opts->random_vectors;
+    uint8_t in[LF_MODEL_BITS];
+    uint8_t want[LF_MODEL_BITS];
+    uint8_t care[LF_MODEL_BITS];
+    for (uint64_t vnum = 0; vnum < count && res->equal; vnum++) {
+        for (uint32_t i = 0; i < total; i++) {
+            bool value = all ? ((vnum >> i) & 1U) != 0 : odin3_prng_bit(&prng);
+            in[i] = value ? 1U : 0U;
+            set_bit(sim, i, value);
+        }
+        memset(want, 0, sizeof want);
+        memset(care, 1, sizeof care);
+        lf_model_io io = {in, want, care};
+        model(&io, user);
+        odin3_sim_cycle(sim);
+        res->vectors++;
+        res->equal = compare_model(sim, want, care, res);
+    }
+}
+
+lf_sim_result lf_sim_model(odin3_design *design, odin3_module_id top, lf_model_fn model,
+                           const void *user, const lf_sim_opts *opts) {
+    lf_sim_result res = {false, 0, ""};
+    odin3_sim *sim = NULL;
+    if (odin3_sim_build(design, top, &sim) != ODIN3_OK) {
+        (void)snprintf(res.why, sizeof res.why, "the design does not build");
+    } else if (input_bits(sim) > LF_MODEL_BITS || output_bits(sim) > LF_MODEL_BITS) {
+        (void)snprintf(res.why, sizeof res.why, "the module is wider than LF_MODEL_BITS");
+    } else {
+        res.equal = true;
+        model_vectors(sim, model, user, opts, &res);
+    }
+    odin3_sim_destroy(sim);
+    return res;
+}
+
+uint64_t lf_estimate(const char *type, const odin3_value *params, const uint32_t *widths,
+                     uint32_t n_ports) {
+    enum { MAX_NETS = 4096 };
+    static const odin3_net_id none[MAX_NETS];
+    lw_cell cell;
+    memset(&cell, 0, sizeof cell);
+    cell.params = params;
+    for (uint32_t pidx = 0; pidx < n_ports; pidx++) {
+        TEST_ASSERT_TRUE(widths[pidx] <= MAX_NETS);
+        cell.port[pidx] = (lw_span){none, widths[pidx]};
+    }
+    cell.n_ports = n_ports;
+    cell.out_port = n_ports - 1;
+    const lw_rule *rule = lw_rule_find(type);
+    TEST_ASSERT_NOT_NULL_MESSAGE(rule, type);
+    return rule->estimate(&cell);
 }
