@@ -1233,7 +1233,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       'bus1', 'bus2', 'bus3' (IEEE resolution would be a bus selected by the enables: the data of
       the driver that is enabled, undefined for several)`. Not changed: without the flag; one
       driver (both readings give the same netlist); nets on a top-level port (they keep the
-      `$tribuf`; Parmys drops that enable too, a divergence still to be ruled on); and any group
+      `$tribuf`; Parmys drops that enable too: decision 28 follows it for a lone driver of an output); and any group
       with a driver whose data is not an input bit (a cell output, a constant, a child instance
       output), which keeps the `$pmux` and the old warning because Parmys's own result there is
       several drivers on one net, which the IR cannot hold (an IR invariant: not changed).
@@ -1265,3 +1265,32 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       warning text, order, name, reads-beat-names, same-wire highest bit, per-bit winners, the
       fallbacks, plus the declines h1 / t1 / s1). Default-mode guard: CTest `elab_tribuf_default_equiv` (`elab-equiv --yosys-tribuf` without `--vtr-compat` on the micro and the `D3_*` accept files). Exit-check on `syntax/multi_assignment` and the other micros with a
       multiply-driven net: `.superpowers/sdd/2H-micro-triage.md`, "Multi-driver (decision 27)".
+
+28. **`--vtr-compat`: a tri-state on a top-level output drops its enable, as Parmys does** (agent
+    default under decision 27's Parmys-default rule; Peter approved the change 2026-10-16; branch
+    `fix/2H-vtrcompat-tristate`; code `elab2_trivtr_out.c`; closes decision 27's "a divergence still
+    to be ruled on"). Peter may override.
+    - **What Parmys does (probed with `tools/run-oracle.sh --tool parmys` on `module t(input [3:0]
+      d, input en, output [3:0] q); assign q = en ? d : 4'bz;`, k6_frac).** `opt_expr -mux_undef`
+      turns `en ? d : 'bz` into `d` before anything else, so the golden is four buffers `.names
+      d~i q~i`, with `en` an unused input. Odin III without the option keeps the `$tribuf` (z while
+      the enable is off), which is the IEEE reading and what `tribuf -logic` keeps on a port.
+    - **The rule.** Under `--vtr-compat`, in the top module, a `$tribuf` (a `c ? d : 'bz`
+      assign, `bufif0/1`, `notif0/1`) that is the only driver of the top-level `output` bits it
+      drives is deleted and its Y nets are merged into the data nets. One WARNING per cell, located at
+      the driver: `tri-state driver of output port 'q': --vtr-compat drops the enable and wires the
+      output to the data as Parmys does (without the option the output is z while the enable is
+      off)`. The default mode is unchanged.
+    - **Not changed (listed).** An `inout` port (Parmys also drops the enable there, but a bidirectional
+      pin is a different shape; not ruled on). Several drivers on one output bit: Parmys keeps all
+      the drivers or shorts the data as decision 27 describes, and the IR cannot hold several drivers,
+      so the `$tribuf` cells stay as before (no new warning). A constant 0, x or z enable (the output
+      is z or undefined for good). A driver whose data is another such driver's output. An output net that also has an `inout` pin
+      of a child instance on it (the child may drive it, so the tri-state is not a lone driver). A module
+      below the top (still the located error: the instance may drive a top-level port, where z must
+      stay).
+    - **Evidence.** `tests/unit/test_elab_vtr_multidriver.c` (the new `test_vtr_output_*` and
+      `test_plain_output_keeps_tribuf`); CTest `cli_vtr_tristate_out` runs `read_verilog
+      --vtr-compat` on `tests/golden/vtr_tristate/tri_out.v` and compares the netlist with the
+      Parmys golden shape (`tests/golden/vtr_tristate/tri_out.parmys.blif`, a copy of the oracle's
+      output) and checks the WARNING.

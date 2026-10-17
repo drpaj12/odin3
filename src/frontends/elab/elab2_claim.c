@@ -300,6 +300,10 @@ odin3_tri_net odin3_elab2_tri_net(const odin3_elab2 *e2, odin3_net_id net,
     return child_inout(e2, net, pin) ? ODIN3_TRI_NET_CHILD_INOUT : ODIN3_TRI_NET_INTERNAL;
 }
 
+bool odin3_elab2_net_on_top_output(const odin3_elab2 *e2, odin3_net_id net) {
+    return e2->drive->is_top && port_class(e2, net) == 1;
+}
+
 /* What a previous driver of a bit means for the new one (CC_OK: they share). */
 static claim_code against(const claim_run *run, odin3_drv prev, odin3_wirebit wb,
                           odin3_net_id net) {
