@@ -106,7 +106,8 @@ static void fill_operand(const hm_ctx *hc, odin3_pinslice pins, const mul_shape 
  * unconnected stays open (it is a source bit), so the pad marks come from the fill's limit. */
 static void fill_pad(const mul_shape *sh, uint32_t width, odin3_net_id pad, odin3_net_id *dst) {
     uint32_t limit = sh->is_signed ? sh->y : ODIN3_HARDMAP_MUL_WIDTH;
-    uint32_t used = sh->is_signed ? limit : (width < limit ? width : limit);
+    uint32_t used = width < limit ? width : limit;
+    used = sh->is_signed ? limit : used;
     for (uint32_t i = used; i < MUL_PINS; i++) {
         dst[i] = pad;
     }
@@ -193,7 +194,7 @@ odin3_status hm_map_mul(hm_ctx *hc, odin3_node_id src) {
     return st;
 }
 
-odin3_status hm_check_multiply(hm_ctx *hc, odin3_node_id node) {
+odin3_status hm_check_multiply(const hm_ctx *hc, odin3_node_id node) {
     const odin3_value *width = odin3_node_param(hc->module, node, 0);
     if (width == NULL || width->i <= (int64_t)ODIN3_HARDMAP_MUL_WIDTH) {
         return ODIN3_OK;
@@ -201,7 +202,8 @@ odin3_status hm_check_multiply(hm_ctx *hc, odin3_node_id node) {
     char label[ODIN3_LOG_BUF / 4];
     hm_label(hc, node, label, sizeof label);
     hm_diag(hc, ODIN3_LOG_ERROR, node,
-            "hardmap: 'multiply' instance '%s' has WIDTH %" PRId64 "; the arch's multiplier is 36 wide",
+            "hardmap: 'multiply' instance '%s' has WIDTH %" PRId64
+            "; the arch's multiplier is 36 wide",
             label, width->i);
     return ODIN3_ERR_INVALID_ARG;
 }

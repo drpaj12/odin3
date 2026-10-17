@@ -57,16 +57,16 @@ typedef struct hm_ctx {
     odin3_celltype_id hard[HM_N_HARD];   /* found by hm_need; {0} until then */
     odin3_celltype_id glue[HM_N_GLUE];   /* found on first use */
     odin3_celltype_id konst[HM_N_CONST]; /* $_CONST0_, $_CONST1_, $_CONSTX_ */
-    odin3_net_id consts[HM_N_CONST];     /* the canonical nets of the current module; {0}: unknown */
-    odin3_node_id src;                   /* the cell of the transaction */
-    odin3_prov_id prov;                  /* its DERIVED record (0 when the source has none) */
-    odin3_node_id first;                 /* the first node the transaction made */
-    uint32_t src_name;                   /* the source's name (strtab ID, 0: unnamed) */
-    uint64_t pins_created;               /* the budget's counter (H-9) */
-    odin3_vec made_nodes;                /* odin3_node_id: undone by hm_abort */
-    odin3_vec made_nets;                 /* odin3_net_id: the fresh nets, likewise */
-    odin3_vec merged;                    /* odin3_net_pair: the merges of a commit */
-    odin3_strbuf text;                   /* scratch for names and attribute values */
+    odin3_net_id consts[HM_N_CONST]; /* the canonical nets of the current module; {0}: unknown */
+    odin3_node_id src;               /* the cell of the transaction */
+    odin3_prov_id prov;              /* its DERIVED record (0 when the source has none) */
+    odin3_node_id first;             /* the first node the transaction made */
+    uint32_t src_name;               /* the source's name (strtab ID, 0: unnamed) */
+    uint64_t pins_created;           /* the budget's counter (H-9) */
+    odin3_vec made_nodes;            /* odin3_node_id: undone by hm_abort */
+    odin3_vec made_nets;             /* odin3_net_id: the fresh nets, likewise */
+    odin3_vec merged;                /* odin3_net_pair: the merges of a commit */
+    odin3_strbuf text;               /* scratch for names and attribute values */
 } hm_ctx;
 
 /* The request of hm_new_node: type, parameters (NULL: the defaults), one netvec per port and
@@ -118,10 +118,10 @@ odin3_status hm_fresh_nets(hm_ctx *hc, uint32_t n, odin3_net_id *out);
 odin3_status hm_new_node(hm_ctx *hc, const hm_node_req *req, odin3_node_id *out);
 
 /*
- * The canonical net of constant v in the current module: the net of the lowest-ID live constant
- * node of that value, else a new constant node (with the module's record). NO_MEMORY.
+ * The canonical net of constant `which` in the current module: the net of the lowest-ID live
+ * constant node of that value, else a new constant node (with the module's record). NO_MEMORY.
  */
-odin3_status hm_const(hm_ctx *hc, hm_bit v, odin3_net_id *out);
+odin3_status hm_const(hm_ctx *hc, hm_bit which, odin3_net_id *out);
 
 /* Glue cells of width 1 (H-6) on fresh nets; *out is the output net. role as hm_new_node's. */
 odin3_status hm_not(hm_ctx *hc, const char *role, odin3_net_id in, odin3_net_id *out);
@@ -161,6 +161,6 @@ void hm_label(const hm_ctx *hc, odin3_node_id node, char *out, size_t size);
 odin3_status hm_map_mul(hm_ctx *hc, odin3_node_id src);
 
 /* The explicit-instance check of M-6 for node (a `multiply`): OK, or the located error. */
-odin3_status hm_check_multiply(hm_ctx *hc, odin3_node_id node);
+odin3_status hm_check_multiply(const hm_ctx *hc, odin3_node_id node);
 
 #endif

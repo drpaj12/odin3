@@ -45,8 +45,7 @@ static const hm_shape k_shapes[HM_N_HARD] = {
 
 static const char *const k_glue_names[HM_N_GLUE] = {"$and", "$not", "$mux", "$dff"};
 static const char *const k_const_names[HM_N_CONST] = {"$_CONST0_", "$_CONST1_", "$_CONSTX_"};
-static const odin3_const k_const_values[HM_N_CONST] = {ODIN3_CONST_0, ODIN3_CONST_1,
-                                                       ODIN3_CONST_X};
+static const odin3_const k_const_values[HM_N_CONST] = {ODIN3_CONST_0, ODIN3_CONST_1, ODIN3_CONST_X};
 
 /* --- context ------------------------------------------------------------------------------- */
 
@@ -241,9 +240,9 @@ static odin3_status set_hardmap_attr(hm_ctx *hc, odin3_node_id node, const char 
                         : st;
     st = st == ODIN3_OK ? odin3_design_intern(hc->design, odin3_bytes_cstr("hardmap"), &key) : st;
     odin3_value value = {ODIN3_VAL_STRING, 0, NULL, 0, val, 0};
-    return st == ODIN3_OK ? odin3_attr_set(hc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key,
-                                           &value)
-                          : st;
+    return st == ODIN3_OK
+               ? odin3_attr_set(hc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key, &value)
+               : st;
 }
 
 /* The name of a non-first node: `<source name>.<role>`, then `_1`, `_2` ... while taken; 0 for the
@@ -254,10 +253,9 @@ static odin3_status node_name(hm_ctx *hc, const char *role, uint32_t *out) {
         return ODIN3_OK;
     }
     odin3_strbuf_clear(&hc->text);
-    odin3_status st =
-        hc->src_name != 0
-            ? odin3_strbuf_appendf(&hc->text, "%s.%s", str_of(hc, hc->src_name), role)
-            : odin3_strbuf_appendf(&hc->text, "$c%" PRIu32 ".%s", hc->src.v, role);
+    odin3_status st = hc->src_name != 0
+                          ? odin3_strbuf_appendf(&hc->text, "%s.%s", str_of(hc, hc->src_name), role)
+                          : odin3_strbuf_appendf(&hc->text, "$c%" PRIu32 ".%s", hc->src.v, role);
     size_t base = hc->text.len;
     for (uint32_t tries = 0; st == ODIN3_OK && tries < HM_MAX_NAME_TRIES; tries++) {
         st = tries > 0 ? odin3_strbuf_appendf(&hc->text, "_%" PRIu32, tries) : st;
@@ -395,23 +393,24 @@ odin3_status hm_commit(hm_ctx *hc, const hm_tie *ties, size_t n_ties) {
 
 /* --- constants (H-5) ----------------------------------------------------------------------- */
 
-static bool const_type_known(hm_ctx *hc, hm_bit v) {
-    return hc->konst[v].v != 0 || hm_find_type(hc->design, k_const_names[v], &hc->konst[v]);
+static bool const_type_known(hm_ctx *hc, hm_bit which) {
+    return hc->konst[which].v != 0 ||
+           hm_find_type(hc->design, k_const_names[which], &hc->konst[which]);
 }
 
-/* The Y net of live node when it is a constant node of value v with a net, else none. */
-static odin3_net_id const_net_of(const hm_ctx *hc, odin3_node_id node, hm_bit v) {
+/* The Y net of live node when it is a constant node of the given value with a net, else none. */
+static odin3_net_id const_net_of(const hm_ctx *hc, odin3_node_id node, hm_bit which) {
     if (!odin3_node_live(hc->module, node) ||
-        odin3_node_type(hc->module, node).v != hc->konst[v].v) {
+        odin3_node_type(hc->module, node).v != hc->konst[which].v) {
         return (odin3_net_id){0};
     }
     odin3_pinslice pins = odin3_node_pins(hc->module, node);
     return pins.count == 1 ? odin3_pin_net(hc->module, pins.first) : (odin3_net_id){0};
 }
 
-static odin3_net_id scan_const(const hm_ctx *hc, hm_bit v) {
+static odin3_net_id scan_const(const hm_ctx *hc, hm_bit which) {
     for (uint32_t i = 1; i < odin3_module_node_end(hc->module); i++) {
-        odin3_net_id net = const_net_of(hc, (odin3_node_id){i}, v);
+        odin3_net_id net = const_net_of(hc, (odin3_node_id){i}, which);
         if (odin3_net_valid(net)) {
             return net;
         }
@@ -419,12 +418,12 @@ static odin3_net_id scan_const(const hm_ctx *hc, hm_bit v) {
     return (odin3_net_id){0};
 }
 
-static odin3_status make_const(hm_ctx *hc, hm_bit v, odin3_net_id *out) {
+static odin3_status make_const(hm_ctx *hc, hm_bit which, odin3_net_id *out) {
     odin3_prov_id prov = odin3_module_prov(hc->module);
     odin3_net_id net = {0};
     odin3_status st = odin3_net_create(hc->module, 0, prov, &net);
     odin3_netvec port = {&net, 1};
-    odin3_node_spec spec = {hc->konst[v], 0, prov, NULL, 0};
+    odin3_node_spec spec = {hc->konst[which], 0, prov, NULL, 0};
     odin3_node_id node = {0};
     st = st == ODIN3_OK ? odin3_node_create_connected(hc->module, &spec, &port, &node) : st;
     if (st != ODIN3_OK && odin3_net_valid(net)) {
@@ -435,20 +434,21 @@ static odin3_status make_const(hm_ctx *hc, hm_bit v, odin3_net_id *out) {
     return st;
 }
 
-odin3_status hm_const(hm_ctx *hc, hm_bit v, odin3_net_id *out) {
-    if (odin3_net_valid(hc->consts[v]) && odin3_net_live(hc->module, hc->consts[v]) &&
-        odin3_net_const_value(hc->module, hc->consts[v]) == k_const_values[v]) {
-        *out = hc->consts[v];
+odin3_status hm_const(hm_ctx *hc, hm_bit which, odin3_net_id *out) {
+    if (odin3_net_valid(hc->consts[which]) && odin3_net_live(hc->module, hc->consts[which]) &&
+        odin3_net_const_value(hc->module, hc->consts[which]) == k_const_values[which]) {
+        *out = hc->consts[which];
         return ODIN3_OK;
     }
-    if (!const_type_known(hc, v)) {
-        odin3_log(ODIN3_LOG_ERROR, "hardmap: built-in cell type '%s' is missing", k_const_names[v]);
+    if (!const_type_known(hc, which)) {
+        odin3_log(ODIN3_LOG_ERROR, "hardmap: built-in cell type '%s' is missing",
+                  k_const_names[which]);
         return ODIN3_ERR_INVALID_ARG;
     }
-    odin3_net_id net = scan_const(hc, v);
-    odin3_status st = odin3_net_valid(net) ? ODIN3_OK : make_const(hc, v, &net);
+    odin3_net_id net = scan_const(hc, which);
+    odin3_status st = odin3_net_valid(net) ? ODIN3_OK : make_const(hc, which, &net);
     if (st == ODIN3_OK) {
-        hc->consts[v] = net;
+        hc->consts[which] = net;
         *out = net;
     }
     return st;
@@ -457,7 +457,8 @@ odin3_status hm_const(hm_ctx *hc, hm_bit v, odin3_net_id *out) {
 /* --- glue (H-6) ---------------------------------------------------------------------------- */
 
 static odin3_status glue_type(hm_ctx *hc, hm_glue which, odin3_celltype_id *out) {
-    if (hc->glue[which].v == 0 && !hm_find_type(hc->design, k_glue_names[which], &hc->glue[which])) {
+    if (hc->glue[which].v == 0 &&
+        !hm_find_type(hc->design, k_glue_names[which], &hc->glue[which])) {
         odin3_log(ODIN3_LOG_ERROR, "hardmap: built-in cell type '%s' is missing",
                   k_glue_names[which]);
         return ODIN3_ERR_INVALID_ARG;
@@ -467,8 +468,8 @@ static odin3_status glue_type(hm_ctx *hc, hm_glue which, odin3_celltype_id *out)
 }
 
 /* A width-1 glue node with the input nets given (one per port but the last), a fresh output. */
-static odin3_status glue_node(hm_ctx *hc, hm_glue which, const char *role,
-                              const odin3_net_id *in, odin3_net_id *out) {
+static odin3_status glue_node(hm_ctx *hc, hm_glue which, const char *role, const odin3_net_id *in,
+                              odin3_net_id *out) {
     static const uint32_t k_n_in[HM_N_GLUE] = {2, 1, 3, 2};
     odin3_celltype_id type = {0};
     odin3_net_id fresh = {0};

@@ -143,6 +143,10 @@ add_library(odin3_core OBJECT
     src/passes/flatten/copy.c
     src/passes/flatten/names.c
     src/passes/flatten/prov.c
+    src/passes/hardmap/register.c
+    src/passes/hardmap/hardmap.c
+    src/passes/hardmap/hm_kit.c
+    src/passes/hardmap/mul.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
