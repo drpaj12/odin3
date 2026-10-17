@@ -2,7 +2,7 @@
  * test_hardmap_ram.c — hardmap, PR 3C-3: explicit RAM instances (3C spec R-1..R-7, H-4, H-7, H-9;
  * plan Task 5 Step 1). Every case is flat RTLIL with lib/vtr.o3lib read (pb_build_lib); hm_run
  * checks the IR (FULL) before and after. The 1E simulator has no model of a hard RAM, so the
- * value-preserving cases use hardmap_ramsim.c (a write-first, registered-read model) on the IR
+ * value-preserving cases use hardmap_ramsim.c (a read-first, registered-read model) on the IR
  * before and after the pass.
  */
 #include "hardmap_fixture.h"

@@ -56,6 +56,7 @@ void hm_init(hm_ctx *hc, odin3_pass_ctx *pass, odin3_design *design) {
     odin3_vec_init(&hc->made_nodes, sizeof(odin3_node_id));
     odin3_vec_init(&hc->made_nets, sizeof(odin3_net_id));
     odin3_vec_init(&hc->merged, sizeof(odin3_net_pair));
+    odin3_vec_init(&hc->doomed, sizeof(odin3_node_id));
     odin3_strbuf_init(&hc->text);
 }
 
@@ -63,6 +64,7 @@ void hm_free(hm_ctx *hc) {
     odin3_vec_free(&hc->made_nodes);
     odin3_vec_free(&hc->made_nets);
     odin3_vec_free(&hc->merged);
+    odin3_vec_free(&hc->doomed);
     odin3_strbuf_free(&hc->text);
 }
 
@@ -209,12 +211,22 @@ odin3_status hm_begin_cell(hm_ctx *hc, odin3_node_id src) {
     hc->prov = (odin3_prov_id){0};
     odin3_vec_clear(&hc->made_nodes);
     odin3_vec_clear(&hc->made_nets);
+    odin3_vec_clear(&hc->doomed);
     odin3_prov_begin_op(hc->pass);
     odin3_prov_id parent = odin3_node_prov(hc->module, src);
     if (parent.v == 0) {
         return ODIN3_OK;
     }
     return odin3_prov_derive(hc->pass, (odin3_prov_list){&parent, 1}, &hc->prov);
+}
+
+odin3_status hm_doom(hm_ctx *hc, odin3_node_id node) {
+    odin3_node_id *slot = odin3_vec_push(&hc->doomed);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = node;
+    return ODIN3_OK;
 }
 
 odin3_status hm_fresh_nets(hm_ctx *hc, uint32_t n, odin3_net_id *out) {
@@ -388,20 +400,41 @@ static odin3_status finish_commit(hm_ctx *hc, const hm_tie *ties, size_t n_ties)
     return st == ODIN3_OK ? make_ties(hc, ties, n_ties) : st;
 }
 
+static void log_discard(const hm_ctx *hc) {
+    odin3_log(ODIN3_LOG_ERROR,
+              "hardmap: out of memory in the middle of a mapping in module '%s': the design "
+              "no longer matches its input; discard it",
+              str_of(hc, odin3_module_name(hc->module)));
+}
+
+/* The nodes hm_doom listed (the flip-flops R-8 merges). They go before the source, so that a
+ * failure leaves the source cell intact (H-9); *done counts the ones already gone. */
+static odin3_status delete_doomed(hm_ctx *hc, size_t *done) {
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < hc->doomed.len; i++) {
+        const odin3_node_id *node = odin3_vec_cat(&hc->doomed, i);
+        st = odin3_node_live(hc->module, *node) ? odin3_node_delete(hc->module, *node) : st;
+        *done += st == ODIN3_OK ? 1U : 0U;
+    }
+    return st;
+}
+
 odin3_status hm_commit(hm_ctx *hc, const hm_tie *ties, size_t n_ties) {
     odin3_vec_clear(&hc->merged);
+    size_t gone = 0;
     odin3_status st = odin3_vec_reserve(&hc->merged, n_ties);
+    st = st == ODIN3_OK ? delete_doomed(hc, &gone) : st;
     st = st == ODIN3_OK ? odin3_node_delete(hc->module, hc->src) : st;
     if (st != ODIN3_OK) {
         hm_abort(hc);
+        if (gone > 0) {
+            log_discard(hc);
+        }
         return st;
     }
     st = finish_commit(hc, ties, n_ties);
     if (st != ODIN3_OK) {
-        odin3_log(ODIN3_LOG_ERROR,
-                  "hardmap: out of memory in the middle of a mapping in module '%s': the design "
-                  "no longer matches its input; discard it",
-                  str_of(hc, odin3_module_name(hc->module)));
+        log_discard(hc);
     }
     odin3_vec_clear(&hc->made_nodes);
     odin3_vec_clear(&hc->made_nets);

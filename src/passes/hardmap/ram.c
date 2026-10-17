@@ -22,6 +22,10 @@ static const ram_layout k_sp_layout = {HM_SP_RAM, 1,      5,      0,       {1, 0
 static const ram_layout k_dp_layout = {HM_DP_RAM, 2,      9,      0,         {2, 1},
                                        {4, 3},    {6, 5}, {8, 7}, {"1", "2"}};
 
+const ram_layout *ram_layout_of(hm_hard kind) {
+    return kind == HM_SP_RAM ? &k_sp_layout : &k_dp_layout;
+}
+
 /* The layout of the RAM type of node, NULL when it is neither. */
 static const ram_layout *layout_of(const hm_ctx *hc, odin3_node_id node) {
     const odin3_celltype_def *def =
@@ -70,6 +74,7 @@ static void ctx_init(ram_ctx *rc, hm_ctx *hc, odin3_node_id src, odin3_vec *ties
     for (uint32_t rwp = 0; rwp < RAM_MAX_PORTS; rwp++) {
         odin3_vec_init(&rc->port[rwp].we, sizeof(odin3_net_id));
         odin3_vec_init(&rc->port[rwp].out, sizeof(odin3_net_id));
+        rc->read[rwp] = true;
     }
     rc->hc = hc;
     rc->src = src;
@@ -82,6 +87,20 @@ static void ctx_init(ram_ctx *rc, hm_ctx *hc, odin3_node_id src, odin3_vec *ties
     rc->data_bits = pin_count(hc, src, rc->lay->data[0]);
     rc->levels =
         rc->addr_bits > ODIN3_HARDMAP_RAM_ADDR ? rc->addr_bits - ODIN3_HARDMAP_RAM_ADDR : 0;
+}
+
+/* The context of a described RAM (no instance behind it). */
+static void ctx_init_desc(ram_ctx *rc, hm_ctx *hc, const hm_ram_desc *desc, odin3_vec *ties) {
+    ctx_init(rc, hc, hc->src, ties);
+    rc->desc = desc;
+    rc->lay = ram_layout_of(desc->kind);
+    rc->addr_bits = desc->addr_bits;
+    rc->data_bits = desc->data_bits;
+    rc->levels =
+        rc->addr_bits > ODIN3_HARDMAP_RAM_ADDR ? rc->addr_bits - ODIN3_HARDMAP_RAM_ADDR : 0;
+    for (uint32_t rwp = 0; rwp < RAM_MAX_PORTS; rwp++) {
+        rc->read[rwp] = desc->read[rwp];
+    }
 }
 
 static void ctx_free(ram_ctx *rc) {
@@ -114,7 +133,10 @@ static odin3_status make_slice(ram_ctx *rc, ram_at at) {
     odin3_net_id data[RAM_MAX_PORTS] = {{0}, {0}};
     odin3_net_id fresh[RAM_MAX_PORTS] = {{0}, {0}};
     odin3_netvec ports[RAM_MAX_PINS];
-    odin3_status st = hm_fresh_nets(rc->hc, lay->n_ports, fresh);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t rwp = 0; st == ODIN3_OK && rwp < lay->n_ports; rwp++) {
+        st = rc->read[rwp] ? hm_fresh_nets(rc->hc, 1, &fresh[rwp]) : st;
+    }
     if (st != ODIN3_OK) {
         return st;
     }
@@ -135,7 +157,9 @@ static odin3_status make_slice(ram_ctx *rc, ram_at at) {
     odin3_node_id node = {0};
     st = hm_new_node(rc->hc, &(hm_node_req){rc->type, params, RAM_PARAMS, ports, role}, &node);
     for (uint32_t rwp = 0; st == ODIN3_OK && rwp < lay->n_ports; rwp++) {
-        *(odin3_net_id *)odin3_vec_push(&rc->port[rwp].out) = fresh[rwp]; /* reserved: never NULL */
+        if (rc->read[rwp]) {
+            *(odin3_net_id *)odin3_vec_push(&rc->port[rwp].out) = fresh[rwp]; /* reserved */
+        }
     }
     return st;
 }
@@ -151,8 +175,8 @@ static odin3_status build_bit(ram_ctx *rc, uint32_t bit) {
     }
     for (uint32_t rwp = 0; st == ODIN3_OK && rwp < rc->lay->n_ports; rwp++) {
         odin3_net_id root = {0};
-        st = ram_mux_tree(rc, (ram_at){rwp, bit, 0, 0}, &root);
-        if (st == ODIN3_OK) {
+        st = rc->read[rwp] ? ram_mux_tree(rc, (ram_at){rwp, bit, 0, 0}, &root) : st;
+        if (st == ODIN3_OK && rc->read[rwp]) {
             hm_tie *tie = odin3_vec_push(rc->ties); /* reserved by build: never NULL */
             *tie = (hm_tie){ram_src_net(rc, (ram_pin){rc->lay->out[rwp], bit}), root};
         }
@@ -160,12 +184,12 @@ static odin3_status build_bit(ram_ctx *rc, uint32_t bit) {
     return st;
 }
 
-/* Builds everything on fresh nets and the ties; nothing of the source changes. */
-static odin3_status build(ram_ctx *rc) {
+/* The slices of everything in rc on fresh nets, and the ties; nothing of the source changes. */
+static odin3_status build_body(ram_ctx *rc) {
     odin3_status st = hm_need(rc->hc, rc->lay->kind, rc->src, &rc->type);
-    st = st == ODIN3_OK ? hm_begin_cell(rc->hc, rc->src) : st;
-    st =
-        st == ODIN3_OK ? odin3_vec_reserve(rc->ties, (size_t)rc->data_bits * rc->lay->n_ports) : st;
+    st = st == ODIN3_OK
+             ? odin3_vec_reserve(rc->ties, rc->ties->len + (size_t)rc->data_bits * rc->lay->n_ports)
+             : st;
     for (uint32_t rwp = 0; st == ODIN3_OK && rwp < rc->lay->n_ports; rwp++) {
         st = setup_addr(rc, rwp);
         st = st == ODIN3_OK ? ram_split_glue(rc, rwp) : st;
@@ -174,6 +198,26 @@ static odin3_status build(ram_ctx *rc) {
         st = build_bit(rc, bit);
     }
     return st;
+}
+
+/* The number of RAMs rc builds: 2^levels leaves per data bit. */
+static uint64_t slice_count(const ram_ctx *rc) {
+    return ((uint64_t)1 << rc->levels) * rc->data_bits;
+}
+
+odin3_status hm_build_ram(hm_ctx *hc, const hm_ram_desc *desc, odin3_vec *ties, uint64_t *slices) {
+    ram_ctx rc;
+    ctx_init_desc(&rc, hc, desc, ties);
+    odin3_status st = build_body(&rc);
+    *slices += st == ODIN3_OK ? slice_count(&rc) : 0;
+    ctx_free(&rc);
+    return st;
+}
+
+/* Builds everything on fresh nets and the ties; nothing of the source changes. */
+static odin3_status build(ram_ctx *rc) {
+    odin3_status st = hm_begin_cell(rc->hc, rc->src);
+    return st == ODIN3_OK ? build_body(rc) : st;
 }
 
 /* One transaction for src: check, build on fresh nets, then commit; the undo on failure. */
@@ -187,7 +231,7 @@ static odin3_status transact(ram_ctx *rc) {
     }
     st = hm_commit(hc, odin3_vec_cat(rc->ties, 0), rc->ties->len);
     if (st == ODIN3_OK) {
-        uint64_t slices = ((uint64_t)1 << rc->levels) * rc->data_bits;
+        uint64_t slices = slice_count(rc);
         uint64_t *count = rc->lay->kind == HM_SP_RAM ? &hc->stats.sp_slices : &hc->stats.dp_slices;
         *count += slices;
     }

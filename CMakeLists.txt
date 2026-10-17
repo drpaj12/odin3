@@ -150,6 +150,9 @@ add_library(odin3_core OBJECT
     src/passes/hardmap/adder.c
     src/passes/hardmap/ram.c
     src/passes/hardmap/ram_split.c
+    src/passes/hardmap/mem.c
+    src/passes/hardmap/mem_merge.c
+    src/passes/hardmap/mem_plan.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -795,6 +798,13 @@ if(BUILD_TESTING)
     target_sources(test_hardmap_ram PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c
         tests/unit/hardmap_ramsim.c)
     target_compile_definitions(test_hardmap_ram PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 3C Task 6: hardmap's inferred `$mem` (FF merge, port patterns) on hand-built flat IR.
+    odin3_add_unit_test(test_hardmap_mem)
+    target_sources(test_hardmap_mem PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c
+        tests/unit/hardmap_ramsim.c)
+    target_compile_definitions(test_hardmap_mem PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     # 3A Task 2: flatten's pre-flight graph; every test_flatten_* links the fixture helper.

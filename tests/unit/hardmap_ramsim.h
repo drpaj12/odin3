@@ -2,10 +2,11 @@
  * hardmap_ramsim.h — a small test-only cycle simulator over the IR for the RAM tests of 3C (plan
  * Task 5). The 1E simulator has no model of a hard RAM, so this one evaluates the cells a RAM
  * mapping leaves behind: constants, `$and`, `$not`, `$mux`, `$dff`, `single_port_ram` and
- * `dual_port_ram`. A RAM writes first (the word read after a write is the new one) and registers
- * its read; the pad (`$_CONSTX_`) reads 0. Both ports of a `dual_port_ram` write before either
- * reads; a same-address dual write is outside the model (R-6). Nets that nothing drives and the
- * test does not randomise stay 0.
+ * `dual_port_ram`, plus (3C Task 6) `$dff`, `$dffe` of any width and `$mem` (rising edge only,
+ * OFFSET 0, unwritten words 0). A RAM registers its read of the old word, then writes (the
+ * primitives' "old data read-first behaviour"); the pad (`$_CONSTX_`) reads 0. Both ports of a
+ * `dual_port_ram` read the old word; a same-address dual write is outside the model (R-6). Nets
+ * that nothing drives and the test does not randomise stay 0.
  */
 #ifndef ODIN3_TESTS_UNIT_HARDMAP_RAMSIM_H
 #define ODIN3_TESTS_UNIT_HARDMAP_RAMSIM_H

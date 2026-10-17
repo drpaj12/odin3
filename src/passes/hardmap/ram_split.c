@@ -20,6 +20,10 @@ void ram_path(char *out, size_t size, ram_choices choices) {
 }
 
 odin3_net_id ram_src_net(const ram_ctx *rc, ram_pin pin) {
+    if (rc->desc != NULL) {
+        const odin3_netvec *vec = &rc->desc->pin[pin.port];
+        return pin.bit < vec->count ? vec->nets[pin.bit] : (odin3_net_id){0};
+    }
     const odin3_module *mod = rc->hc->module;
     odin3_pinslice pins = odin3_node_port(mod, rc->src, pin.port);
     if (pin.bit >= pins.count) {
@@ -50,7 +54,7 @@ static odin3_status build_select(ram_ctx *rc, uint32_t rwp) {
         const odin3_net_id bit = ram_src_net(rc, (ram_pin){rc->lay->addr[rwp], lvl});
         const odin3_net_id dff_in[2] = {clk, bit};
         (void)snprintf(role, sizeof role, "sel%s.l%" PRIu32, tag, lvl);
-        st = hm_dff(rc->hc, role, dff_in, &rp->sel[lvl]);
+        st = rc->read[rwp] ? hm_dff(rc->hc, role, dff_in, &rp->sel[lvl]) : st;
         (void)snprintf(role, sizeof role, "nad%s.l%" PRIu32, tag, lvl);
         st = st == ODIN3_OK ? hm_not(rc->hc, role, bit, &rp->inv[lvl]) : st;
     }
