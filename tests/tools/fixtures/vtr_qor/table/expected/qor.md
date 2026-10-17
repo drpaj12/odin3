@@ -481,7 +481,9 @@ ABC exchange (3D I8; runs per exchange): P' aig 21; O aig 20, blif 1
 
 ## Declared divergences
 
-None.
+| design | class | text |
+|---|---|---|
+| ch_intrinsics | mem-init-dropped | decision 6 step 5: hardmap drops RAM initial values (3C) |
 
 ## Cross-check against VTR's golden
 
