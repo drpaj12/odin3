@@ -8,6 +8,7 @@
 # Yosys 0.55 rejects the RTLIL process that Odin III accepts (the same error as
 # syntax/diffeq_f_systemC.v in micro_expect_fail.txt; Parmys rejects both too: tests/exit/micro_expect.txt).
 # Pre-existing: both are above 5.9 KB and were never run for opt-diff (triage 2026-10-17, G3).
+syntax/diffeq_f_systemC.v [Multiple edge sensitive events] Yosys 0.55 rejects the RTLIL process (Parmys rejects it too: proc-diff's `lowers` list); opt-diff's Yosys side stops at the error (so the Phase 2/3 scripts have no Yosys result to compare); moved here from micro_expect_fail.txt in 2H
 large/paj_framebuftop_hierarchy_no_mem.v [Multiple edge sensitive events] Yosys 0.55 rejects the RTLIL process (Parmys rejects it too); opt-diff's Yosys side stops with ERROR: Multiple edge sensitive events found for this signal
 large/paj_raygentop_hierarchy_no_mem.v [Multiple edge sensitive events] Yosys 0.55 rejects the RTLIL process (Parmys rejects it too); opt-diff's Yosys side stops with ERROR: Multiple edge sensitive events found for this signal
 #
