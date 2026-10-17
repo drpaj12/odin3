@@ -1099,6 +1099,9 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `read_verilog --lib` is that mode, and 2H checks it carries them.
     - **2F follow-ups:** opt-equiv hard-block cut compares ports only, not instance presence or
       parameters (review 2026-10-16); follow-up.
+    - **3G follow-ups:** 20 big micro designs differ from Yosys on phase3 identity and cannot be
+      proven equivalent (size limit); listed untested for now, 2026-10-17
+      (`tests/opt/diff_expect.txt`).
     - **For Peter:**
       1. *Decided, #25:* the mixed-sign cell semantics (2F Task 18 review I1 and I2): Peter ruled
          "2a" on 2026-10-13, both-signed-only everywhere, with a warning.
