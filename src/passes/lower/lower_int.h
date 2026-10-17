@@ -310,6 +310,10 @@ LW_DECLARE_BUILDER(ne);
 /* --- pmux_shift.c: $pmux, $shl $shr $sshr, $shiftx (spec §5.1 to §5.3) ------------------------ */
 
 LW_DECLARE_BUILDER(pmux);
+LW_DECLARE_BUILDER(shl);
+LW_DECLARE_BUILDER(shr);
+LW_DECLARE_BUILDER(sshr);
+LW_DECLARE_BUILDER(shiftx);
 
 /* --- dispatch (dispatch.c) ---------------------------------------------------------------- */
 

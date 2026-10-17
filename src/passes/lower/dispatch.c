@@ -31,6 +31,10 @@ static const lw_rule k_rules[] = {
     LW_RULE("$reduce_or", reduce_or),
     LW_RULE("$reduce_xnor", reduce_xnor),
     LW_RULE("$reduce_xor", reduce_xor),
+    LW_RULE("$shiftx", shiftx),
+    LW_RULE("$shl", shl),
+    LW_RULE("$shr", shr),
+    LW_RULE("$sshr", sshr),
     LW_RULE("$xnor", xnor),
     LW_RULE("$xor", xor),
     {NULL, NULL, NULL},
@@ -62,10 +66,9 @@ static const char *const k_no_rule[] = {"$proc", "$tribuf", "$pow", "$memrd", "$
 
 /* Word types whose rule a later task adds (plan Tasks 4 to 8). */
 static const char *const k_pending[] = {
-    "$shl",    "$shr",    "$sshr",    "$shiftx",   "$add",   "$sub",   "$neg",    "$lt",
-    "$le",     "$gt",     "$ge",      "$mul",      "$div",   "$mod",   "$dff",    "$dffe",
-    "$sdff",   "$sdffe",  "$sdffce",  "$adff",     "$adffe", "$aldff", "$aldffe", "$dffsr",
-    "$dffsre", "$dlatch", "$adlatch", "$dlatchsr", "$sr",    "$mem",
+    "$add",    "$sub",   "$neg",    "$lt",     "$le",      "$gt",       "$ge",   "$mul",   "$div",
+    "$mod",    "$dff",   "$dffe",   "$sdff",   "$sdffe",   "$sdffce",   "$adff", "$adffe", "$aldff",
+    "$aldffe", "$dffsr", "$dffsre", "$dlatch", "$adlatch", "$dlatchsr", "$sr",   "$mem",
 };
 
 static bool listed(const char *const *names, size_t count, const char *type_name) {

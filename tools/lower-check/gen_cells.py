@@ -138,7 +138,45 @@ def pmux_cells() -> list[Cell]:
     return [pmux_cell(w, n) for w in PMUX_WIDTHS for n in PMUX_SELECTS]
 
 
-FAMILY_GENERATORS = {"bitwise": bitwise_cells, "pmux": pmux_cells}
+SHIFT_OPS = (("shl", "<<"), ("shr", ">>"), ("sshr", ">>>"))
+SHIFT_A = (3, 8)
+SHIFT_B = (2, 3, 5)
+SHIFT_WIDE_Y = ((3, 2, 6), (8, 3, 5))  # (A width, B width, Y width) with a Y other than A's
+SHIFTX_A = (4, 8)
+SHIFTX_B = (2, 3, 4)
+
+
+def shift_cell(name: str, op: str, widths: tuple[int, int], signed: bool, y_width: int) -> Cell:
+    """``y = a <op> b``; ``a`` is signed for the ``_s`` variant (``$sshr`` needs it to sign-fill);
+    ``b`` is the shift amount, always unsigned."""
+    wa, wb = widths
+    ports = [_decl("input", "a", wa, signed), _decl("input", "b", wb, False),
+             _decl("output", "y", y_width, False)]
+    stem = f"{name}_w{wa}b{wb}{'_s' if signed else ''}{_suffix('', y_width, wa)}"
+    return Cell(stem, _module(ports, f"assign y = a {op} b;"), "shift")
+
+
+def shiftx_cell(wa: int, wb: int, signed: bool, y_width: int) -> Cell:
+    """``y = a[b +: Y]``: a variable part select, which elaboration makes a ``$shiftx``."""
+    ports = [_decl("input", "a", wa, False), _decl("input", "b", wb, signed),
+             _decl("output", "y", y_width, False)]
+    stem = f"shiftx_w{wa}b{wb}{'_s' if signed else ''}_y{y_width}"
+    return Cell(stem, _module(ports, f"assign y = a[b +: {y_width}];"), "shift")
+
+
+def shift_cells() -> list[Cell]:
+    cells: list[Cell] = []
+    for name, op in SHIFT_OPS:
+        for signed in (False, True):
+            cells += [shift_cell(name, op, (wa, wb), signed, wa)
+                      for wa in SHIFT_A for wb in SHIFT_B]
+            cells += [shift_cell(name, op, (wa, wb), signed, wy) for wa, wb, wy in SHIFT_WIDE_Y]
+    for signed in (False, True):
+        cells += [shiftx_cell(wa, wb, signed, 2) for wa in SHIFTX_A for wb in SHIFTX_B]
+    return cells
+
+
+FAMILY_GENERATORS = {"bitwise": bitwise_cells, "pmux": pmux_cells, "shift": shift_cells}
 
 
 def generate(families: Sequence[str]) -> list[Cell]:

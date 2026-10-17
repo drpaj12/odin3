@@ -1,0 +1,14 @@
+.model m
+.inputs a[0] a[1] a[2] b[0] b[1]
+.outputs y[0] y[1] y[2]
+.names gnd
+.subckt $_MUX_ A=a[0] B=gnd S=gnd Y=$n10
+.subckt $_MUX_ A=a[1] B=gnd S=gnd Y=$n11
+.subckt $_MUX_ A=a[2] B=gnd S=gnd Y=$n12
+.subckt $_MUX_ A=$n10 B=gnd S=b[0] Y=$n13
+.subckt $_MUX_ A=$n11 B=$n10 S=b[0] Y=$n14
+.subckt $_MUX_ A=$n12 B=$n11 S=b[0] Y=$n15
+.subckt $_MUX_ A=$n13 B=gnd S=b[1] Y=y[0]
+.subckt $_MUX_ A=$n14 B=gnd S=b[1] Y=y[1]
+.subckt $_MUX_ A=$n15 B=$n13 S=b[1] Y=y[2]
+.end

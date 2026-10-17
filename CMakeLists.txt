@@ -2228,7 +2228,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 add_test(NAME lower_cells_yosys_${_family}
                     COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-diff
                             --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
-                            --family ${_family} --pre proc --each ${_family_files})
+                            --family ${_family} --pre proc
+                            --expect ${PROJECT_SOURCE_DIR}/tests/lower/diff_expect.txt
+                            --each ${_family_files})
                 set_tests_properties(lower_cells_yosys_${_family} PROPERTIES LABELS lower
                                      SKIP_RETURN_CODE 77 TIMEOUT 1800)
             endif()

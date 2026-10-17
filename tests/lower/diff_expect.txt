@@ -1,0 +1,18 @@
+# Differences between `lower` and Yosys 0.55's `techmap` that tests/lower/cells/*.v show, each with
+# its reason (3B spec 14.2). Format: <file name> <family> <step> <reason>. A listed difference that
+# no longer occurs fails the test (a stale entry).
+#
+# $shiftx writes x for every bit outside A (spec 5.3). Yosys's map runs `opt_expr -mux_undef`
+# inside itself, which resolves each mux with an x input to the other input (any value is a legal
+# refinement of x); `lower` keeps the x constant (written as unconn, which reads 0), and `opt
+# -fast` does not treat x as a free choice. So the outputs differ only on bits the cell leaves
+# open, and the netlist keeps the muxes Yosys removed. Three of the twelve $shiftx fixtures show it.
+shiftx_w4b3_y2.v shift histogram x outputs: Yosys resolves the x input of a mux (mux_undef inside the map), lower keeps the x constant
+shiftx_w4b3_y2.v shift equiv open (x) output bits resolved to 1 by Yosys and to 0 by lower
+shiftx_w4b4_y2.v shift histogram x outputs: Yosys resolves the x input of a mux (mux_undef inside the map), lower keeps the x constant
+shiftx_w4b4_y2.v shift equiv open (x) output bits resolved to 1 by Yosys and to 0 by lower
+shiftx_w8b4_y2.v shift histogram x outputs: Yosys resolves the x input of a mux (mux_undef inside the map), lower keeps the x constant
+shiftx_w8b4_y2.v shift equiv open (x) output bits resolved to 1 by Yosys and to 0 by lower
+# A mux with a constant-0 data input and a free select: Yosys's map runs `opt_expr -mux_bool -fine`
+# inside itself, which turns it into an AND; `opt -fast` here leaves the mux (spec 16 row 10).
+shl_w3b2_y6.v shift histogram mux_bool inside Yosys's shift map makes one AND where lower keeps a $_MUX_ with a constant input
