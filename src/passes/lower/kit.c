@@ -51,6 +51,10 @@ odin3_net_id lw_bits_at(const lw_bits *bits, uint32_t idx) {
     return *(const odin3_net_id *)odin3_vec_cat(&bits->v, idx);
 }
 
+void lw_bits_set(lw_bits *bits, uint32_t idx, odin3_net_id net) {
+    ((odin3_net_id *)bits->v.data)[idx] = net;
+}
+
 lw_span lw_bits_span(const lw_bits *bits) {
     return (lw_span){(const odin3_net_id *)bits->v.data, (uint32_t)bits->v.len};
 }

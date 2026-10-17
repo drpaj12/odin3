@@ -25,6 +25,12 @@ class GridTest(unittest.TestCase):
         self.assertEqual(cell.text.count("y = b"), 3)
         self.assertIn("input [2:0] s", cell.text)
 
+    def test_the_arith_family_has_add_sub_and_neg_and_no_duplicate_stems(self) -> None:
+        stems = [c.stem for c in gc.generate(["arith"])]
+        self.assertEqual(len(stems), len(set(stems)))
+        for prefix in ("add_", "sub_", "neg_"):
+            self.assertTrue(any(s.startswith(prefix) for s in stems), prefix)
+
     def test_module_text_of_a_mixed_sign_binary_cell(self) -> None:
         by_stem = {c.stem: c for c in gc.generate(["bitwise"])}
         self.assertEqual(

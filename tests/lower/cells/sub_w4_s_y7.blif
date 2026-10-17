@@ -1,0 +1,60 @@
+.model m
+.inputs a[0] a[1] a[2] a[3] b[0] b[1] b[2] b[3]
+.outputs y[0] y[1] y[2] y[3] y[4] y[5] y[6]
+.names vcc
+1
+.subckt $_NOT_ A=b[0] Y=$n17
+.subckt $_NOT_ A=b[1] Y=$n18
+.subckt $_NOT_ A=b[2] Y=$n19
+.subckt $_NOT_ A=b[3] Y=$n20
+.subckt $_NOT_ A=b[3] Y=$n21
+.subckt $_NOT_ A=b[3] Y=$n22
+.subckt $_NOT_ A=b[3] Y=$n23
+.subckt $_XOR_ A=a[0] B=$n17 Y=$n24
+.subckt $_AND_ A=a[0] B=$n17 Y=$n25
+.subckt $_XOR_ A=a[1] B=$n18 Y=$n26
+.subckt $_AND_ A=a[1] B=$n18 Y=$n27
+.subckt $_XOR_ A=a[2] B=$n19 Y=$n28
+.subckt $_AND_ A=a[2] B=$n19 Y=$n29
+.subckt $_XOR_ A=a[3] B=$n20 Y=$n30
+.subckt $_AND_ A=a[3] B=$n20 Y=$n31
+.subckt $_XOR_ A=a[3] B=$n21 Y=$n32
+.subckt $_AND_ A=a[3] B=$n21 Y=$n33
+.subckt $_XOR_ A=a[3] B=$n22 Y=$n34
+.subckt $_AND_ A=a[3] B=$n22 Y=$n35
+.subckt $_XOR_ A=a[3] B=$n23 Y=$n36
+.subckt $_AND_ A=a[3] B=$n23 Y=$n37
+.subckt $_AND_ A=$n24 B=vcc Y=$n38
+.subckt $_OR_ A=$n25 B=$n38 Y=$n39
+.subckt $_AND_ A=$n26 B=$n39 Y=$n40
+.subckt $_OR_ A=$n27 B=$n40 Y=$n41
+.subckt $_AND_ A=$n26 B=$n24 Y=$n42
+.subckt $_AND_ A=$n30 B=$n29 Y=$n43
+.subckt $_OR_ A=$n31 B=$n43 Y=$n44
+.subckt $_AND_ A=$n30 B=$n28 Y=$n45
+.subckt $_AND_ A=$n34 B=$n33 Y=$n46
+.subckt $_OR_ A=$n35 B=$n46 Y=$n47
+.subckt $_AND_ A=$n34 B=$n32 Y=$n48
+.subckt $_AND_ A=$n45 B=$n41 Y=$n49
+.subckt $_OR_ A=$n44 B=$n49 Y=$n50
+.subckt $_AND_ A=$n45 B=$n42 Y=$n51
+.subckt $_AND_ A=$n48 B=$n50 Y=$n52
+.subckt $_OR_ A=$n47 B=$n52 Y=$n53
+.subckt $_AND_ A=$n48 B=$n51 Y=$n54
+.subckt $_AND_ A=$n28 B=$n41 Y=$n55
+.subckt $_OR_ A=$n29 B=$n55 Y=$n56
+.subckt $_AND_ A=$n28 B=$n42 Y=$n57
+.subckt $_AND_ A=$n32 B=$n50 Y=$n58
+.subckt $_OR_ A=$n33 B=$n58 Y=$n59
+.subckt $_AND_ A=$n32 B=$n51 Y=$n60
+.subckt $_AND_ A=$n36 B=$n53 Y=$n61
+.subckt $_OR_ A=$n37 B=$n61 Y=$n62
+.subckt $_AND_ A=$n36 B=$n54 Y=$n63
+.subckt $_XOR_ A=$n24 B=vcc Y=y[0]
+.subckt $_XOR_ A=$n26 B=$n39 Y=y[1]
+.subckt $_XOR_ A=$n28 B=$n41 Y=y[2]
+.subckt $_XOR_ A=$n30 B=$n56 Y=y[3]
+.subckt $_XOR_ A=$n32 B=$n50 Y=y[4]
+.subckt $_XOR_ A=$n34 B=$n59 Y=y[5]
+.subckt $_XOR_ A=$n36 B=$n53 Y=y[6]
+.end

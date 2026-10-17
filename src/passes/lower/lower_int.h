@@ -51,6 +51,8 @@ void lw_bits_clear(lw_bits *bits);
 /* NO_MEMORY leaves the vector unchanged. */
 odin3_status lw_bits_push(lw_bits *bits, odin3_net_id net);
 uint32_t lw_bits_len(const lw_bits *bits);
+/* Replaces bit `idx` (< lw_bits_len). */
+void lw_bits_set(lw_bits *bits, uint32_t idx, odin3_net_id net);
 odin3_net_id lw_bits_at(const lw_bits *bits, uint32_t idx);
 lw_span lw_bits_span(const lw_bits *bits);
 
@@ -314,6 +316,50 @@ LW_DECLARE_BUILDER(shl);
 LW_DECLARE_BUILDER(shr);
 LW_DECLARE_BUILDER(sshr);
 LW_DECLARE_BUILDER(shiftx);
+
+/* --- alu.c: the carry-lookahead unit, the adder, $add $sub $neg (spec §5.4) ------------------- */
+
+/*
+ * techmap.v `_90_lcu_brent_kung`: the carries CO[0 .. W) of the propagate bits `prop` and generate
+ * bits `gen` (W bits each, W >= 1) and the carry-in: g[0] |= p[0] & CI, the main tree for
+ * i = 1 .. clog2(W) at j = 2^i - 1 step 2^i, then the inverse tree for i = clog2(W) .. 1 at
+ * j = 2^i + 2^(i-1) - 1 step 2^i. *out is cleared first. Gates: lw_lcu_gates(W).
+ */
+odin3_status lw_lcu(lw_ctx *lw, lw_span prop, lw_span gen, odin3_net_id carry_in, lw_bits *out);
+uint64_t lw_lcu_gates(uint64_t width);
+
+/* The inputs of lw_alu: A + (BI ? ~B : B) + CI at `width` bits, each operand extended to it. */
+typedef struct lw_alu_args {
+    lw_span a;
+    lw_span b;
+    odin3_net_id carry_in;
+    bool invert_b; /* BI: B is inverted (a $_NOT_ row) */
+    bool is_signed;
+    bool need_sum; /* false: the sum bits are not built (the comparisons do not read them) */
+    uint32_t width;
+} lw_alu_args;
+
+/* The outputs of lw_alu, `width` bits each (sum: none unless need_sum): Y, X (P = AA ^ BB), CO. */
+typedef struct lw_alu_out {
+    lw_bits sum;
+    lw_bits prop;
+    lw_bits carry;
+} lw_alu_out;
+
+void lw_alu_out_init(lw_alu_out *res);
+void lw_alu_out_free(lw_alu_out *res);
+
+/* techmap.v `_90_alu` (P = AA ^ BB, G = AA & BB, CO = lcu, Y = P ^ {CO, CI}). Previous contents of
+ * *res are dropped. */
+odin3_status lw_alu(lw_ctx *lw, const lw_alu_args *args, lw_alu_out *res);
+uint64_t lw_alu_gates(uint64_t width, bool invert_b, bool need_sum);
+
+/* Y[0] = root, Y[k > 0] = the constant-0 net: the result shape of a one-bit cell. */
+odin3_status lw_finish_flag(lw_ctx *lw, const lw_cell *cell, odin3_net_id root, lw_bits *out);
+
+LW_DECLARE_BUILDER(add);
+LW_DECLARE_BUILDER(sub);
+LW_DECLARE_BUILDER(neg);
 
 /* --- dispatch (dispatch.c) ---------------------------------------------------------------- */
 

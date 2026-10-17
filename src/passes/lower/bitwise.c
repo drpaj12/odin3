@@ -28,7 +28,7 @@ static odin3_status pad_zero(lw_ctx *lw, lw_bits *out, uint32_t width) {
 }
 
 /* Y[0] = root, Y[k > 0] = 0: the result shape of every one-bit cell (reductions, logic, eq/ne). */
-static odin3_status finish_flag(lw_ctx *lw, const lw_cell *cell, odin3_net_id root, lw_bits *out) {
+odin3_status lw_finish_flag(lw_ctx *lw, const lw_cell *cell, odin3_net_id root, lw_bits *out) {
     lw_bits_clear(out);
     odin3_status st = lw_bits_push(out, root);
     return st == ODIN3_OK ? pad_zero(lw, out, cell->port[cell->out_port].n) : st;
@@ -119,7 +119,7 @@ static odin3_status reduce(lw_ctx *lw, const lw_cell *cell, lw_kind kind, bool i
     odin3_net_id root = {0};
     odin3_status st = lw_tree(lw, kind, cell->port[PORT_A], &root);
     st = st == ODIN3_OK && invert ? lw_not(lw, root, &root) : st;
-    return st == ODIN3_OK ? finish_flag(lw, cell, root, out) : st;
+    return st == ODIN3_OK ? lw_finish_flag(lw, cell, root, out) : st;
 }
 
 odin3_status lw_build_reduce_and(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
@@ -143,7 +143,7 @@ odin3_status lw_build_logic_not(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
     odin3_net_id root = {0};
     odin3_status st = lw_tree(lw, LW_G_OR, cell->port[PORT_A], &root);
     st = st == ODIN3_OK ? lw_not(lw, root, &root) : st;
-    return st == ODIN3_OK ? finish_flag(lw, cell, root, out) : st;
+    return st == ODIN3_OK ? lw_finish_flag(lw, cell, root, out) : st;
 }
 
 /* $logic_and / $logic_or: the $_OR_ tree of each operand, then the gate of the cell. */
@@ -155,7 +155,7 @@ static odin3_status logic_bin(lw_ctx *lw, const lw_cell *cell, lw_kind kind, lw_
     odin3_net_id root = {0};
     const odin3_net_id in[2] = {lhs, rhs};
     st = st == ODIN3_OK ? lw_gate(lw, kind, in, 2, &root) : st;
-    return st == ODIN3_OK ? finish_flag(lw, cell, root, out) : st;
+    return st == ODIN3_OK ? lw_finish_flag(lw, cell, root, out) : st;
 }
 
 odin3_status lw_build_logic_and(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
@@ -181,7 +181,7 @@ static odin3_status eqne(lw_ctx *lw, const lw_cell *cell, bool invert, lw_bits *
     st = st == ODIN3_OK ? lw_tree(lw, LW_G_OR, lw_bits_span(&diff), &root) : st;
     st = st == ODIN3_OK && invert ? lw_not(lw, root, &root) : st;
     lw_bits_free(&diff);
-    return st == ODIN3_OK ? finish_flag(lw, cell, root, out) : st;
+    return st == ODIN3_OK ? lw_finish_flag(lw, cell, root, out) : st;
 }
 
 odin3_status lw_build_eq(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {

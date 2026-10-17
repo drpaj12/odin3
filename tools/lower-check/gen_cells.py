@@ -176,7 +176,24 @@ def shift_cells() -> list[Cell]:
     return cells
 
 
-FAMILY_GENERATORS = {"bitwise": bitwise_cells, "pmux": pmux_cells, "shift": shift_cells}
+ARITH_WIDTHS = (1, 3, 8, 17)
+ARITH_PAIRS = ((3, 5), (5, 3))
+
+
+def arith_cells() -> list[Cell]:
+    """``$add``, ``$sub`` and ``$neg`` (the ``$alu`` structures)."""
+    cells: list[Cell] = []
+    for name, op in (("add", "+"), ("sub", "-")):
+        cells += [binary(name, op, (w, w), "", w) for w in ARITH_WIDTHS]
+        cells += [binary(name, op, p, sign, max(p)) for p in ARITH_PAIRS for sign in SIGN_VARIANTS]
+        cells += [binary(name, op, (4, 4), "s", 7), binary(name, op, (8, 8), "", 5)]
+    cells += [unary("neg", "-", w, sign, y)
+              for w in ARITH_WIDTHS for sign in ("", "s") for y in (w, w + 3)]
+    return cells
+
+
+FAMILY_GENERATORS = {"bitwise": bitwise_cells, "pmux": pmux_cells, "shift": shift_cells,
+                     "arith": arith_cells}
 
 
 def generate(families: Sequence[str]) -> list[Cell]:
