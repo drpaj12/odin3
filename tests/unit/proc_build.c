@@ -14,6 +14,7 @@
 #include "ir/prov.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
+#include "passes/manager.h"
 #include "passes/proc/proc_internal.h"
 #include "passes/proc/pw.h"
 #include "util/arena.h"
@@ -1287,7 +1288,7 @@ static void state_free(pb_state *st) {
     odin3_arena_destroy(st->arena);
 }
 
-static odin3_status state_open(pb_state *st, pb_result *out) {
+static odin3_status state_open(pb_state *st, pb_result *out, const char *lib_path) {
     memset(st, 0, sizeof *st);
     st->res = out;
     odin3_vec_init(&st->toks, sizeof(pb_tok));
@@ -1302,6 +1303,12 @@ static odin3_status state_open(pb_state *st, pb_result *out) {
     if (st->arena == NULL || out->design == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
+    if (lib_path != NULL) {
+        odin3_status lib = odin3_pass_run(out->design, "read_techlib", odin3_bytes_cstr(lib_path));
+        if (lib != ODIN3_OK) {
+            return lib;
+        }
+    }
     uint32_t run = 0;
     odin3_status res = intern_text(st, "pb_build", strlen("pb_build"), &run);
     res = res == ODIN3_OK ? odin3_pass_run_begin(out->design, run, &out->ctx) : res;
@@ -1309,11 +1316,11 @@ static odin3_status state_open(pb_state *st, pb_result *out) {
     return res == ODIN3_OK ? odin3_prov_source(&out->ctx, &origin, &st->prov) : res;
 }
 
-odin3_status pb_build(const char *rtlil, pb_result *out) {
+odin3_status pb_build_lib(pb_source src, pb_result *out) {
     memset(out, 0, sizeof *out);
     pb_state st;
-    odin3_status res = state_open(&st, out);
-    const char *line = rtlil;
+    odin3_status res = state_open(&st, out, src.lib_path);
+    const char *line = src.rtlil;
     while (res == ODIN3_OK && line != NULL && *line != '\0') {
         const char *nl = strchr(line, '\n');
         size_t len = nl != NULL ? (size_t)(nl - line) : strlen(line);
@@ -1332,6 +1339,10 @@ odin3_status pb_build(const char *rtlil, pb_result *out) {
         pb_free(out);
     }
     return res;
+}
+
+odin3_status pb_build(const char *rtlil, pb_result *out) {
+    return pb_build_lib((pb_source){rtlil, NULL}, out);
 }
 
 void pb_free(pb_result *res) {

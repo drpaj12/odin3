@@ -765,6 +765,17 @@ if(BUILD_TESTING)
     # 2F Task 6: opt_expr (the driver, the rules of spec 4.2-4.3, replace_undriven).
     odin3_add_unit_test(test_opt_expr)
     target_sources(test_opt_expr PRIVATE tests/unit/proc_build.c)
+    # 3C Task 2: hardmap's $mul rule on hand-built flat IR (lib/vtr.o3lib read by pb_build_lib).
+    odin3_add_unit_test(test_hardmap_mul)
+    target_sources(test_hardmap_mul PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_hardmap_mul PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME cli_hardmap_mul
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh hardmap_mul $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_hardmap_mul PROPERTIES LABELS unit)
     # 3A Task 2: flatten's pre-flight graph; every test_flatten_* links the fixture helper.
     odin3_add_unit_test(test_flatten_graph)
     target_sources(test_flatten_graph PRIVATE tests/unit/flatten_fixture.c tests/unit/proc_build.c)
