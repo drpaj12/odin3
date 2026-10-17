@@ -259,6 +259,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_tri.c
     src/frontends/elab/elab2_trilogic.c
     src/frontends/elab/elab2_trivtr.c
+    src/frontends/elab/elab2_trivtr_out.c
     src/frontends/elab/elab2_mem.c
     src/frontends/elab/elab2_memport.c
     src/frontends/elab/elab2_memscan.c
@@ -2247,6 +2248,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/elab/accept)
         set_tests_properties(elab_tribuf_default_equiv PROPERTIES
             LABELS differential SKIP_RETURN_CODE 77)
+        # PHASE2 decision 28: a lone tri-state driver of a top-level output loses its enable
+        # under --vtr-compat as in Parmys: the WARNING, and the sp-splice netlist identical to the
+        # Parmys golden (tests/golden/vtr_tristate). Exit 77 (skip) as above.
+        if(DEFINED ENV{VTR_ROOT})
+            add_test(NAME vtr_tristate_out
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/golden/vtr_tristate/check.sh
+                        $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
+                        ${PROJECT_SOURCE_DIR}/tools/opt-check/sp-splice
+                        ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                        $ENV{VTR_ROOT}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
+                        ${PROJECT_SOURCE_DIR}/tests/golden/vtr_tristate)
+            set_tests_properties(vtr_tristate_out PROPERTIES
+                LABELS differential SKIP_RETURN_CODE 77)
+        endif()
         # 2D Task 23 (spec 14.3): elab-equiv on every source of tests/verilog/call-bridge: unrolled
         # loops, functions and tasks inlined (in processes and in continuous contexts), nested calls
         # and variable-index reads of net arrays. Exit 77 (skip) as above.
