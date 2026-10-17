@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# lower-sim: Odin III's simulator before and after lower on the same random vectors (3B spec 14.3).
+# See lower_sim.py. Exit codes: 0 no difference (skips are listed, never counted as passes), 1 a
+# difference, 2 error or usage, 3 hard (a child crashed or timed out), 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../elab-check:$here/../opt-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/lower_sim.py" "$@"
