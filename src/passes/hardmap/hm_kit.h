@@ -11,8 +11,9 @@
  * the IR valid and the source cell intact (H-9). A failure after it (a merge that needs an alias
  * record) logs "out of memory in the middle of a mapping ... discard it" and leaves the IR valid.
  *
- * Naming (agent default (b), approved in PHASE3 #33): the first node a transaction creates takes
- * the source's name and attributes at commit; every other node is named `<cell>.<role>` (`$c<ID>`
+ * Naming (agent default (b), approved in PHASE3 #33): the first node a transaction creates that is
+ * not glue (the namesake) takes the source's name and attributes at commit; every other node is
+ * named `<cell>.<role>` (`$c<ID>`
  * for an unnamed source), made unique by `_1`, `_2` ...; every node carries the string attribute
  * `hardmap` = `<cell type>:<role>`. The source is reached through the DERIVED record.
  */
@@ -172,5 +173,14 @@ odin3_status hm_check_multiply(hm_ctx *hc, odin3_node_id node);
 /* The explicit `multiply` rule (M-6 as amended): treat src like the equivalent `$mul`, with a
  * warning; WIDTH 36 is left as it is. */
 odin3_status hm_map_explicit(hm_ctx *hc, odin3_node_id src);
+
+/* The explicit RAM rule (ram.c, R-1..R-7): legalises a `single_port_ram` / `dual_port_ram`
+ * instance to ADDR_WIDTH 15 and DATA_WIDTH 1 slices (depth split, width split, address padding)
+ * or leaves it when it already has that shape. Any other node is left alone. */
+odin3_status hm_map_ram(hm_ctx *hc, odin3_node_id src);
+
+/* The pre-check of a RAM instance: the type's shape (H-3), then ADDR_WIDTH within what hardmap
+ * splits (at most 31): OK, or the located error. */
+odin3_status hm_check_ram(hm_ctx *hc, odin3_node_id node);
 
 #endif

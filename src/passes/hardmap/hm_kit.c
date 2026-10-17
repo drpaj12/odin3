@@ -245,11 +245,26 @@ static odin3_status set_hardmap_attr(hm_ctx *hc, odin3_node_id node, const char 
                : st;
 }
 
-/* The name of a non-first node: `<source name>.<role>`, then `_1`, `_2` ... while taken; 0 for the
- * first node of the transaction (it takes the source's name at commit). */
-static odin3_status node_name(hm_ctx *hc, const char *role, uint32_t *out) {
+static bool is_glue_type(const hm_ctx *hc, odin3_celltype_id type) {
+    for (uint32_t i = 0; i < HM_N_GLUE; i++) {
+        if (hc->glue[i].v == type.v) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The namesake of a transaction is the first node it makes that is not glue: it takes the
+ * source's name and attributes at commit. Glue made before it is named like any other node. */
+static bool is_namesake(const hm_ctx *hc, odin3_celltype_id type) {
+    return hc->first.v == 0 && !is_glue_type(hc, type);
+}
+
+/* The name of a node other than the namesake: `<source name>.<role>`, then `_1`, `_2` ... while
+ * taken; 0 for the namesake (it takes the source's name at commit). */
+static odin3_status node_name(hm_ctx *hc, const char *role, bool namesake, uint32_t *out) {
     *out = 0;
-    if (hc->first.v == 0) {
+    if (namesake) {
         return ODIN3_OK;
     }
     odin3_strbuf_clear(&hc->text);
@@ -280,10 +295,11 @@ static uint64_t request_pins(const hm_ctx *hc, const hm_node_req *req) {
     return pins;
 }
 
-/* The attributes of a new node: the source's (first node only) and `hardmap`. */
-static odin3_status node_attrs(hm_ctx *hc, odin3_node_id node, const hm_node_req *req) {
+/* The attributes of a new node: the source's (the namesake only) and `hardmap`. */
+static odin3_status node_attrs(hm_ctx *hc, odin3_node_id node, const hm_node_req *req,
+                               bool namesake) {
     odin3_status st = ODIN3_OK;
-    if (hc->first.v == 0) {
+    if (namesake) {
         st = odin3_kit_copy_attrs(hc->module, hc->src, node);
     }
     const odin3_celltype_def *def = odin3_celltype_get(hc->design, req->type);
@@ -292,9 +308,10 @@ static odin3_status node_attrs(hm_ctx *hc, odin3_node_id node, const hm_node_req
 
 odin3_status hm_new_node(hm_ctx *hc, const hm_node_req *req, odin3_node_id *out) {
     uint32_t name = 0;
+    bool namesake = is_namesake(hc, req->type);
     odin3_status st = budget_tick(hc, request_pins(hc, req));
     st = st == ODIN3_OK ? odin3_vec_reserve(&hc->made_nodes, hc->made_nodes.len + 1) : st;
-    st = st == ODIN3_OK ? node_name(hc, req->role, &name) : st;
+    st = st == ODIN3_OK ? node_name(hc, req->role, namesake, &name) : st;
     odin3_node_spec spec = {req->type, name, hc->prov, req->params, req->n_params};
     odin3_node_id node = {0};
     st = st == ODIN3_OK ? odin3_node_create_connected(hc->module, &spec, req->ports, &node) : st;
@@ -303,11 +320,11 @@ odin3_status hm_new_node(hm_ctx *hc, const hm_node_req *req, odin3_node_id *out)
     }
     odin3_node_id *slot = odin3_vec_push(&hc->made_nodes);
     *slot = node; /* reserved above: never NULL */
-    st = node_attrs(hc, node, req);
+    st = node_attrs(hc, node, req, namesake);
     if (st != ODIN3_OK) {
         return st; /* hm_abort deletes the node: it is in made_nodes */
     }
-    if (hc->first.v == 0) {
+    if (namesake) {
         hc->first = node;
     }
     *out = node;
