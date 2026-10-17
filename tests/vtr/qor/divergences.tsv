@@ -1,0 +1,2 @@
+# design	class	text (3H spec 8.1; class: mem-init-dropped, async-reset-made-sync, baseline-fails)
+ch_intrinsics	mem-init-dropped	decision 6 step 5: hardmap drops RAM initial values (3C)

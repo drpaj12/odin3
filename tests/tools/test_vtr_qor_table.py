@@ -364,6 +364,49 @@ class GateTest(unittest.TestCase):
         skipped = replace(table(), run("O", "stereovision3", override={"equiv": "skipped"}))
         self.assertEqual(verdict(skipped, exceptions=listed).state, "PASS")
 
+    def test_gate_equiv_scope(self) -> None:
+        """PHASE3 #16: equivalence gates only the small set. A big design's missing, timed-out,
+        errored or capped equiv neither fails nor holds the gate; ``differs`` still fails."""
+        for design in ("mcml", "LU8PEEng", "bgm"):
+            for word in ("skipped", "timeout", "error", "capped", "multiclock"):
+                runs = replace(table(), run("O", design, override={"equiv": word}))
+                self.assertEqual(verdict(runs).state, "PASS", (design, word))
+            absent = replace(table(), run("O", design, override={"equiv": None}))
+            self.assertEqual(verdict(absent), Verdict(state="PASS", violations=()))
+        timed = verdict(replace(table(), run("O", "mcml", override={"equiv": "timeout"})))
+        self.assertEqual(timed.notes, (
+            "gate: note: mcml equiv timeout; not required (PHASE3 #16)",))
+        differs = replace(table(), run("O", "mcml", override={"equiv": "differs"}))
+        self.assertEqual(verdict(differs).state, "FAIL")
+        # ... and a small-set design is still held to it.
+        small = replace(table(), run("O", "sha", override={"equiv": "timeout"}))
+        self.assertEqual(verdict(small).state, "FAIL")
+        self.assertEqual(len(qor_sched.EQUIV_REQUIRED), 14)
+        self.assertTrue({"single_wire", "blob_merge", "stereovision3"}
+                        <= qor_sched.EQUIV_REQUIRED)
+
+    def test_gate_equiv_capped_is_incomplete(self) -> None:
+        """Review M2: ABC killed by the memory cap on a required design is unmeasured."""
+        capped = replace(table(), run("O", "sha", override={"equiv": "capped"}))
+        self.assertEqual(verdict(capped), Verdict(state="INCOMPLETE", violations=(
+            "gate: INCOMPLETE: sha O equiv capped; rerun it",)))
+
+    def test_gate_fcheck_on_big_designs(self) -> None:
+        """PHASE3 #16: a capped or timed-out fcheck on a big design is a note; a mismatch fails;
+        the same on a small design still holds or fails the gate."""
+        for word in ("capped", "timeout"):
+            runs = replace(table(), run("O", "mcml", override={"fcheck": word}))
+            got = verdict(runs)
+            self.assertEqual((got.state, len(got.notes)), ("PASS", 1), word)
+            p_side = replace(table(), run("P", "mcml", override={"fcheck": word}))
+            self.assertEqual(verdict(p_side).state, "PASS", word)
+        fail = replace(table(), run("O", "mcml", override={"fcheck": "fail"}))
+        self.assertEqual(verdict(fail).state, "FAIL")
+        capped = replace(table(), run("O", "sha", override={"fcheck": "capped"}))
+        self.assertEqual(verdict(capped).state, "FAIL")
+        p_timeout = replace(table(), run("P", "sha", override={"fcheck": "timeout"}))
+        self.assertEqual(verdict(p_timeout).state, "INCOMPLETE")
+
     def test_gate_rerun_and_status(self) -> None:
         rerun = replace(table(), run("O", "sha", override={"rerun": "differs"}))
         self.assertEqual(verdict(rerun), Verdict(state="FAIL", violations=(
@@ -594,6 +637,19 @@ class TableCliTest(unittest.TestCase):
                              (EXPECTED / name).read_text(encoding="utf-8"), name)
             self.assertEqual((table_dir / name).read_bytes(), (EXPECTED / name).read_bytes(),
                              name)
+
+    def test_equiv_cell_says_not_required(self) -> None:
+        """PHASE3 #16: a design outside the small set with no equiv verdict reads ``not
+        required``, one inside the set stays blank."""
+        for design in ("spree", "sha"):
+            path = self.job("O", design) / "metrics.json"
+            record = json.loads(path.read_text(encoding="utf-8"))
+            record["verdicts"].pop("equiv", None)
+            path.write_text(json.dumps(record), encoding="utf-8")
+        text = (self.made() / "qor.md").read_text(encoding="utf-8")
+        self.assertEqual(text.count("not required (PHASE3 #16)"), 1)
+        (line,) = [row for row in text.splitlines() if "not required (PHASE3 #16)" in row]
+        self.assertIn("| spree |", line)
 
     def test_table_twice_identical(self) -> None:
         """T7: identical bytes with every file's mtime and the clock changed."""
@@ -838,6 +894,18 @@ class WriterTest(unittest.TestCase):
         self.assertIn("## Gate (decision 3): FAIL", md)
         self.assertIn("- gate: FAIL: num_clb geomean O/P 1.2004 > 1.20", md)
         self.assertIn("| sha | 100 | 120.04 | 1.2004 |", md)
+
+    def test_cost_pprime_shows_both_front_end_parts(self) -> None:
+        """Point (o): a P' row's front-end cell is frontend.time plus the Parmys stage."""
+        runs = table(legs=("P", "Pprime"))
+        runs = [Run(r.leg, r.design, r.arch, r.key12, r.status, r.gating,
+                    {**r.metrics, "cost": {"frontend_wall_s": 3.0, "vpr_time_s": 1.0}},
+                    {"parmys_stage_wall_s": 12.5} if r.leg == "Pprime" else {})
+                for r in runs]
+        qor_table.write_md(runs, None, header(runs), self.dir / "qor.md", golden=None)
+        md = (self.dir / "qor.md").read_text(encoding="utf-8")
+        self.assertIn("| sha | P' | 3.0 + 12.5 Parmys |", md)
+        self.assertIn("| sha | P | 3.0 |", md)
 
     def test_header_from_newest_job(self) -> None:
         def with_job(r: Run, ended: str, cpu: str) -> Run:
