@@ -913,6 +913,16 @@ then the options considered.
     writes no such invariant, so a shape rule would need Peter's decision first. FAST is unchanged
     (rule 7 is FULL only). New fault `ODIN3_IR_TEST_BAD_HIER` and two tests in `test_ir_check`
     (a flatten-style path passes; a `hier` one past the table fails).
+38. **3C-1 `hardmap` review fixes: explicit `multiply` and wide-Y `$mul`** (2026-10-17, branch
+    `feat/3C-hardmap-mul`; agent default under Peter's Parmys-default rule, he may override).
+    (a) An explicit `multiply` instance is treated like the equivalent `$mul`, as Parmys resolves
+    the primitive: `WIDTH` 2 becomes a `$mul` for `lower`, other `WIDTH` below 36 are padded to 36
+    exactly as a `$mul`, 36 is unchanged, above 36 stays the located error; a WARNING names each
+    instance treated. `--vtr-compat` does not reach passes, so the rule is not gated by it. The
+    spec M-6 and D7 text are amended. This is what lets `micro/multiply_hard_block.v` match its
+    Parmys golden. (b) An unsigned `$mul` with `Y_WIDTH > A_WIDTH + B_WIDTH` stays soft with a
+    warning (new D7b; moot after 3G `wreduce`): the gnd merges would allocate after the delete and
+    break H-9. (c) A failed mapping also removes the constant node it created.
 
 ## Risks
 

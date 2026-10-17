@@ -173,7 +173,7 @@ static bool shape_matches(const odin3_celltype_def *def, const hm_shape *shape) 
     return true;
 }
 
-odin3_status hm_need(hm_ctx *hc, hm_hard which, odin3_celltype_id *out) {
+odin3_status hm_need(hm_ctx *hc, hm_hard which, odin3_node_id at, odin3_celltype_id *out) {
     if (hc->hard[which].v != 0) {
         *out = hc->hard[which];
         return ODIN3_OK;
@@ -191,8 +191,8 @@ odin3_status hm_need(hm_ctx *hc, hm_hard which, odin3_celltype_id *out) {
         why = "does not have the expected ports and parameters";
     }
     if (why != NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "hardmap: cell type '%s' %s; read_techlib lib/vtr.o3lib first",
-                  shape->type, why);
+        hm_diag(hc, ODIN3_LOG_ERROR, at,
+                "hardmap: cell type '%s' %s; read_techlib lib/vtr.o3lib first", shape->type, why);
         return ODIN3_ERR_INVALID_ARG;
     }
     hc->hard[which] = id;
@@ -418,20 +418,30 @@ static odin3_net_id scan_const(const hm_ctx *hc, hm_bit which) {
     return (odin3_net_id){0};
 }
 
+/* A new constant node and net. They join the transaction's made lists, so hm_abort undoes them; a
+ * commit keeps them. */
 static odin3_status make_const(hm_ctx *hc, hm_bit which, odin3_net_id *out) {
     odin3_prov_id prov = odin3_module_prov(hc->module);
     odin3_net_id net = {0};
-    odin3_status st = odin3_net_create(hc->module, 0, prov, &net);
+    odin3_status st = odin3_vec_reserve(&hc->made_nets, hc->made_nets.len + 1);
+    st = st == ODIN3_OK ? odin3_vec_reserve(&hc->made_nodes, hc->made_nodes.len + 1) : st;
+    st = st == ODIN3_OK ? odin3_net_create(hc->module, 0, prov, &net) : st;
     odin3_netvec port = {&net, 1};
     odin3_node_spec spec = {hc->konst[which], 0, prov, NULL, 0};
     odin3_node_id node = {0};
     st = st == ODIN3_OK ? odin3_node_create_connected(hc->module, &spec, &port, &node) : st;
-    if (st != ODIN3_OK && odin3_net_valid(net)) {
-        (void)odin3_net_delete(hc->module, net);
+    if (st != ODIN3_OK) {
+        if (odin3_net_valid(net)) {
+            (void)odin3_net_delete(hc->module, net);
+        }
         return st;
     }
+    odin3_net_id *net_slot = odin3_vec_push(&hc->made_nets);    /* reserved: never NULL */
+    odin3_node_id *node_slot = odin3_vec_push(&hc->made_nodes); /* likewise */
+    *net_slot = net;
+    *node_slot = node;
     *out = net;
-    return st;
+    return ODIN3_OK;
 }
 
 odin3_status hm_const(hm_ctx *hc, hm_bit which, odin3_net_id *out) {

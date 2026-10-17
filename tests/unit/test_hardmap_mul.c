@@ -26,7 +26,15 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { LOG_TEXT = 16384, MUL_PINS = 36, OUT_PINS = 72, OOM_LIMIT = 4000, MAX_CELLS = 8 };
+enum {
+    LOG_TEXT = 16384,
+    MUL_PINS = 36,
+    OUT_PINS = 72,
+    OOM_LIMIT = 4000,
+    OOM_QUIET = 4,
+    MAX_CELLS = 8,
+    EXPLICIT_WIDTH = 8
+};
 
 #ifndef ODIN3_SOURCE_DIR
 #error "ODIN3_SOURCE_DIR must name the source tree"
@@ -66,9 +74,9 @@ typedef struct mulcase {
     const char *b_const; /* NULL: B is the input wire */
 } mulcase;
 
-/* The module `m` with cells u0 .. u<n-1>, each on its own wires a<i>, b<i>, y<i>. */
-static void mul_rtlil(odin3_strbuf *out, const mulcase *cases, size_t count) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(out, "module \\m\n"));
+/* The module `name` with cells u0 .. u<n-1>, each on its own wires a<i>, b<i>, y<i>. */
+static void mul_module(odin3_strbuf *out, const char *name, const mulcase *cases, size_t count) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(out, "module \\%s\n", name));
     uint32_t port = 1;
     for (size_t i = 0; i < count; i++) {
         const mulcase *mc = &cases[i];
@@ -103,6 +111,10 @@ static void mul_rtlil(odin3_strbuf *out, const mulcase *cases, size_t count) {
                           mc->y_width, i, mc->b_const ? mc->b_const : bsig, i));
     }
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(out, "end\n"));
+}
+
+static void mul_rtlil(odin3_strbuf *out, const mulcase *cases, size_t count) {
+    mul_module(out, "m", cases, count);
 }
 
 static void build_cases(const mulcase *cases, size_t count, pb_result *res) {
@@ -191,6 +203,53 @@ static void test_h3_not_hard(void) {
     pb_free(&res);
 }
 
+static void explicit_text(odin3_strbuf *out, uint32_t width, bool with_mul);
+
+static void test_h3_bad_shape(void) {
+    pb_result res;
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    mulcase mc = {4, 4, 8, false, false, NULL};
+    mul_rtlil(&text, &mc, 1);
+    pb_source src = {text.data, ODIN3_SOURCE_DIR "/tests/unit/data/hardmap/bad_shape.o3lib"};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build_lib(src, &res));
+    odin3_strbuf before;
+    odin3_strbuf_init(&before);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_rtlil(&res, &before));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hardmap_run(&res.ctx, res.design, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(
+        log_text, "hardmap: cell type 'multiply' does not have the expected ports and parameters"));
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mul"));
+    assert_rtlil_equal(&res, &before);
+    odin3_strbuf_free(&before);
+    odin3_strbuf_free(&text);
+    pb_free(&res);
+}
+
+/* Every module is visited, not only the first: m1 has a 2x2 (soft), m2 a 4x4, m3 an explicit
+ * WIDTH 8 instance. */
+static void test_m4_two_modules(void) {
+    pb_result res;
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    const mulcase soft = {2, 2, 4, false, false, NULL};
+    const mulcase hard = {4, 4, 8, false, false, NULL};
+    mul_module(&text, "m1", &soft, 1);
+    mul_module(&text, "m2", &hard, 1);
+    explicit_text(&text, 8, false);
+    hm_build_ok(text.data, &res);
+    odin3_hardmap_stats stats;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, &stats));
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(pb_module(&res, "m1"), "$mul"));
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(pb_module(&res, "m2"), "$mul"));
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(pb_module(&res, "m2"), "multiply"));
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(pb_module(&res, "m"), "multiply"));
+    TEST_ASSERT_EQUAL_UINT64(2, stats.multiply);
+    TEST_ASSERT_EQUAL_UINT64(1, stats.soft);
+    odin3_strbuf_free(&text);
+    pb_free(&res);
+}
+
 /* --- M-2, M-5: which cells go hard --------------------------------------------------------- */
 
 typedef enum verdict { HARD, SOFT_WARN } verdict;
@@ -213,6 +272,8 @@ static const threshold_row k_rows[] = {
     {{18, 18, 36, true, true, NULL}, HARD, NULL},
     {{18, 18, 37, true, true, NULL}, SOFT_WARN, "has Y_WIDTH 37 above 36"},
     {{4, 4, 8, true, false, NULL}, HARD, NULL}, /* mixed signs: the unsigned path (PHASE2 #25) */
+    {{4, 4, 12, false, false, NULL}, SOFT_WARN, "above A_WIDTH + B_WIDTH (8)"},
+    {{4, 4, 12, true, true, NULL}, HARD, NULL}, /* signed: every Y bit is driven */
 };
 
 static void check_counts(const pb_result *res, bool hard) {
@@ -298,18 +359,19 @@ static void test_m3_shape_8x7(void) {
     pb_free(&res);
 }
 
+/* M-3 as amended: Y_WIDTH above the product stays soft (a gnd merge after the delete would
+ * allocate, H-9); the cell and its text are untouched. */
 static void test_m3_y_wider(void) {
     pb_result res;
     build_one((mulcase){4, 4, 12, false, false, NULL}, &res);
+    odin3_strbuf before;
+    odin3_strbuf_init(&before);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_rtlil(&res, &before));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, NULL));
-    odin3_node_id mul = hm_nth(res.module, "multiply", 0);
-    for (uint32_t i = 0; i < 8; i++) {
-        TEST_ASSERT_EQUAL_UINT32(wire_net(&res, "y0", i).v, pin_net(&res, mul, (pin_at){2, i}).v);
-    }
-    for (uint32_t i = 8; i < 12; i++) {
-        TEST_ASSERT_EQUAL_INT(ODIN3_CONST_0,
-                              odin3_net_const_value(res.module, wire_net(&res, "y0", i)));
-    }
+    check_counts(&res, false);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "run wreduce first"));
+    assert_rtlil_equal(&res, &before);
+    odin3_strbuf_free(&before);
     pb_free(&res);
 }
 
@@ -350,6 +412,15 @@ static odin3_status build_s4x4_y6(pb_result *out) {
 static odin3_status build_s2x5_y9(pb_result *out) {
     return build_mc(out, (mulcase){2, 5, 9, true, true, NULL});
 }
+static odin3_status build_mixed_su(pb_result *out) {
+    return build_mc(out, (mulcase){4, 4, 8, true, false, NULL});
+}
+static odin3_status build_mixed_us(pb_result *out) {
+    return build_mc(out, (mulcase){4, 4, 8, false, true, NULL});
+}
+static odin3_status build_mixed_su_y6(pb_result *out) {
+    return build_mc(out, (mulcase){3, 5, 6, true, false, NULL});
+}
 static odin3_status build_u4x4(pb_result *out) {
     return build_mc(out, (mulcase){4, 4, 8, false, false, NULL});
 }
@@ -369,6 +440,13 @@ static odin3_status build_u1x1(pb_result *out) {
 static void test_m5_signed_sim(void) {
     TEST_ASSERT_TRUE(hm_sim_exhaustive(build_s3x3));
     TEST_ASSERT_TRUE(hm_sim_exhaustive(build_s4x4));
+}
+
+/* Mixed signs are unsigned (PHASE2 #25): a sign-extending mapping would get these wrong. */
+static void test_m5_mixed_sim(void) {
+    TEST_ASSERT_TRUE(hm_sim_exhaustive(build_mixed_su));
+    TEST_ASSERT_TRUE(hm_sim_exhaustive(build_mixed_us));
+    TEST_ASSERT_TRUE(hm_sim_exhaustive(build_mixed_su_y6));
 }
 
 static void test_m5_signed_sim_trunc_ext(void) {
@@ -448,22 +526,110 @@ static void explicit_text(odin3_strbuf *out, uint32_t width, bool with_mul) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(out, "end\n"));
 }
 
-static void test_m6_explicit_multiply(void) {
-    static const uint32_t k_ok[] = {36, 8};
-    for (size_t i = 0; i < 2; i++) {
-        pb_result res;
-        odin3_strbuf text;
-        odin3_strbuf_init(&text);
-        explicit_text(&text, k_ok[i], false);
-        hm_build_ok(text.data, &res);
-        odin3_node_id before = hm_nth(res.module, "multiply", 0);
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, NULL));
-        TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "multiply"));
-        TEST_ASSERT_EQUAL_UINT32(before.v, hm_nth(res.module, "multiply", 0).v);
-        TEST_ASSERT_NULL(strstr(log_text, "error"));
-        odin3_strbuf_free(&text);
-        pb_free(&res);
+static void run_explicit(uint32_t width, pb_result *res, odin3_hardmap_stats *stats) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    explicit_text(&text, width, false);
+    hm_build_ok(text.data, res);
+    odin3_strbuf_free(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(res, stats));
+}
+
+/* WIDTH 36 is already the arch's multiplier: untouched, no warning. */
+static void test_m6_width_36_untouched(void) {
+    pb_result res;
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    explicit_text(&text, 36, false);
+    hm_build_ok(text.data, &res);
+    odin3_node_id before = hm_nth(res.module, "multiply", 0);
+    odin3_hardmap_stats stats;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, &stats));
+    TEST_ASSERT_EQUAL_UINT32(before.v, hm_nth(res.module, "multiply", 0).v);
+    TEST_ASSERT_NULL(strstr(log_text, "treated as"));
+    TEST_ASSERT_EQUAL_UINT64(0, stats.multiply);
+    odin3_strbuf_free(&text);
+    pb_free(&res);
+}
+
+/* WIDTH 2 is a 2x2: the `$mul` for lower, as Parmys resolves the primitive to `$mul`. */
+static void test_m6_width_2_is_mul(void) {
+    pb_result res;
+    odin3_hardmap_stats stats;
+    run_explicit(2, &res, &stats);
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "multiply"));
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mul"));
+    TEST_ASSERT_EQUAL_UINT64(1, stats.soft);
+    TEST_ASSERT_NOT_NULL(strstr(
+        log_text, "hardmap: explicit 'multiply' instance 'u' (WIDTH 2) treated as '$mul' as Parmys "
+                  "does"));
+    TEST_ASSERT_EQUAL_STRING("u", node_name_of(&res, hm_nth(res.module, "$mul", 0)));
+    pb_free(&res);
+}
+
+/* Pin i of operand `port` of mul is wire[i] below used, else the pad. */
+static void check_padded(const pb_result *res, odin3_node_id mul, uint32_t port, const char *wire) {
+    for (uint32_t i = 0; i < MUL_PINS; i++) {
+        odin3_net_id net = pin_net(res, mul, (pin_at){port, i});
+        if (i < EXPLICIT_WIDTH) {
+            TEST_ASSERT_EQUAL_UINT32(wire_net(res, wire, i).v, net.v);
+        } else {
+            TEST_ASSERT_TRUE(is_pad(res, net));
+        }
     }
+}
+
+/* WIDTH 8 is padded to 36 exactly as a `$mul` of that shape. */
+static void test_m6_width_8_padded(void) {
+    pb_result res;
+    odin3_hardmap_stats stats;
+    run_explicit(EXPLICIT_WIDTH, &res, &stats);
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "multiply"));
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$mul"));
+    TEST_ASSERT_EQUAL_UINT64(1, stats.multiply);
+    odin3_node_id mul = hm_nth(res.module, "multiply", 0);
+    TEST_ASSERT_EQUAL_INT64(MUL_PINS, odin3_node_param(res.module, mul, 0)->i);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "instance 'u' (WIDTH 8) treated as '$mul'"));
+    check_padded(&res, mul, 0, "a");
+    check_padded(&res, mul, 1, "b");
+    for (uint32_t i = 0; i < 2 * EXPLICIT_WIDTH; i++) {
+        TEST_ASSERT_EQUAL_UINT32(wire_net(&res, "o", i).v, pin_net(&res, mul, (pin_at){2, i}).v);
+    }
+    pb_free(&res);
+}
+
+static odin3_status build_explicit_1(pb_result *out) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    explicit_text(&text, 1, false);
+    odin3_status st = hm_build(text.data, out);
+    odin3_strbuf_free(&text);
+    return st == ODIN3_OK ? odin3_design_set_top(out->design, odin3_module_id_of(out->module)) : st;
+}
+static odin3_status build_explicit_2(pb_result *out) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    explicit_text(&text, 2, false);
+    odin3_status st = hm_build(text.data, out);
+    odin3_strbuf_free(&text);
+    return st == ODIN3_OK ? odin3_design_set_top(out->design, odin3_module_id_of(out->module)) : st;
+}
+static odin3_status build_explicit_5(pb_result *out) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    explicit_text(&text, 5, false);
+    odin3_status st = hm_build(text.data, out);
+    odin3_strbuf_free(&text);
+    return st == ODIN3_OK ? odin3_design_set_top(out->design, odin3_module_id_of(out->module)) : st;
+}
+
+static void test_m6_explicit_sim(void) {
+    TEST_ASSERT_TRUE(hm_sim_exhaustive(build_explicit_1));
+    TEST_ASSERT_TRUE(hm_sim_exhaustive(build_explicit_2));
+    TEST_ASSERT_TRUE(hm_sim_exhaustive(build_explicit_5));
+}
+
+static void test_m6_over_36_error(void) {
     pb_result res;
     odin3_strbuf text;
     odin3_strbuf_init(&text);
@@ -591,34 +757,129 @@ static void test_hardmap_twice(void) {
 
 /* --- H-9: out of memory -------------------------------------------------------------------- */
 
-/* One mapping with the allocation failing after fail_at; true when it was injected. */
-static bool oom_try(long fail_at) {
+/* What a failed run must not change: the text, and the live nodes and nets (the text does not show
+ * unnamed nets or constant nodes). */
+typedef struct snapshot {
+    odin3_strbuf text;
+    uint32_t nodes;
+    uint32_t nets;
+} snapshot;
+
+static void snap_take(const pb_result *res, snapshot *snap) {
+    odin3_strbuf_init(&snap->text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_rtlil(res, &snap->text));
+    snap->nodes = 0;
+    snap->nets = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(res->module); id++) {
+        snap->nodes += odin3_node_live(res->module, (odin3_node_id){id}) ? 1U : 0U;
+    }
+    for (uint32_t id = 1; id < odin3_module_net_end(res->module); id++) {
+        snap->nets += odin3_net_live(res->module, (odin3_net_id){id}) ? 1U : 0U;
+    }
+}
+
+static void snap_expect(const pb_result *res, const snapshot *want) {
+    snapshot now;
+    snap_take(res, &now);
+    TEST_ASSERT_EQUAL_STRING(want->text.data, now.text.data);
+    TEST_ASSERT_EQUAL_UINT32(want->nodes, now.nodes);
+    TEST_ASSERT_EQUAL_UINT32(want->nets, now.nets);
+    odin3_strbuf_free(&now.text);
+}
+
+/* One mapping with the allocation failing after fail_at; true when it was injected. `mapped` is
+ * the cell type the finished run leaves; `source` the one a failed run leaves. */
+typedef struct oom_case {
+    const char *rtlil;
+    const char *source;
+    const char *mapped;
+} oom_case;
+
+static bool oom_try(const oom_case *oc, long fail_at) {
     pb_result res;
-    build_one((mulcase){8, 7, 15, false, false, NULL}, &res);
+    snapshot before;
+    hm_build_ok(oc->rtlil, &res);
+    snap_take(&res, &before);
     odin3_util_set_alloc_fail_after(fail_at);
     odin3_status st = odin3_hardmap_run(&res.ctx, res.design, NULL);
     odin3_util_set_alloc_fail_after(-1);
     bool injected = st != ODIN3_OK;
     if (injected) {
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
-        TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mul")); /* the source is intact */
-        TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "multiply"));
+        TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, oc->source)); /* the source is intact */
+        if (strcmp(oc->source, oc->mapped) != 0) {
+            TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, oc->mapped));
+        }
+        snap_expect(&res, &before); /* and nothing else changed: no fresh net, no constant */
     } else {
-        TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "multiply"));
+        TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, oc->mapped));
+        const odin3_value *width =
+            odin3_node_param(res.module, hm_nth(res.module, "multiply", 0), 0);
+        TEST_ASSERT_TRUE(width != NULL && width->i == MUL_PINS); /* mapped, not just left alone */
     }
     odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(res.design, opts));
+    odin3_strbuf_free(&before.text);
     pb_free(&res);
     return injected;
 }
 
-static void test_h9_oom(void) {
-    long fail_at = 0;
-    while (fail_at < OOM_LIMIT && oom_try(fail_at)) {
-        fail_at++;
+/* Fails the n-th allocation for n = 0, 1 ... until OOM_QUIET runs in a row succeed (a failure
+ * inside a diagnostic is swallowed on purpose, so a success can come early); returns the number of
+ * runs that were failed by injection. */
+static long oom_sweep(const oom_case *oc) {
+    long failed = 0;
+    long quiet = 0;
+    for (long fail_at = 0; fail_at < OOM_LIMIT && quiet < OOM_QUIET; fail_at++) {
+        bool injected = oom_try(oc, fail_at);
+        failed += injected ? 1 : 0;
+        quiet = injected ? 0 : quiet + 1;
     }
-    TEST_ASSERT_TRUE(fail_at > 1);
-    TEST_ASSERT_TRUE(fail_at < OOM_LIMIT);
+    TEST_ASSERT_TRUE(quiet == OOM_QUIET);
+    return failed;
+}
+
+static void test_h9_oom(void) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    mul_rtlil(&text, &(mulcase){8, 7, 15, false, false, NULL}, 1);
+    TEST_ASSERT_TRUE(oom_sweep(&(oom_case){text.data, "$mul", "multiply"}) > 1);
+    odin3_strbuf_free(&text);
+}
+
+/* 4x4 into Y 12: the cell stays soft, so no allocation fails the run (M-2 of the review). */
+static void test_h9_oom_y_wider(void) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    mul_rtlil(&text, &(mulcase){4, 4, 12, false, false, NULL}, 1);
+    pb_result res;
+    snapshot before;
+    hm_build_ok(text.data, &res);
+    snap_take(&res, &before);
+    for (long fail_at = 0; fail_at < MAX_CELLS; fail_at++) {
+        odin3_util_set_alloc_fail_after(fail_at);
+        odin3_status st = odin3_hardmap_run(&res.ctx, res.design, NULL);
+        odin3_util_set_alloc_fail_after(-1);
+        TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+        TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mul"));
+        snap_expect(&res, &before);
+    }
+    odin3_strbuf_free(&before.text);
+    odin3_strbuf_free(&text);
+    pb_free(&res);
+}
+
+/* The signed cell and the explicit instances go through the same transaction. */
+static void test_h9_oom_variants(void) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    mul_rtlil(&text, &(mulcase){3, 3, 6, true, true, NULL}, 1);
+    TEST_ASSERT_TRUE(oom_sweep(&(oom_case){text.data, "$mul", "multiply"}) > 1);
+    odin3_strbuf_free(&text);
+    odin3_strbuf_init(&text);
+    explicit_text(&text, 8, false);
+    TEST_ASSERT_TRUE(oom_sweep(&(oom_case){text.data, "multiply", "multiply"}) > 1);
+    odin3_strbuf_free(&text);
 }
 
 /* --- the pass ------------------------------------------------------------------------------- */
@@ -657,17 +918,26 @@ int main(void) {
     RUN_TEST(test_m4_pad_is_x);
     RUN_TEST(test_m5_signed_sim);
     RUN_TEST(test_m5_signed_sim_trunc_ext);
+    RUN_TEST(test_m5_mixed_sim);
     RUN_TEST(test_m5_signed_pins);
     RUN_TEST(test_unsigned_sim);
     RUN_TEST(test_unsigned_sim_edges);
     RUN_TEST(test_m1_const_operand);
-    RUN_TEST(test_m6_explicit_multiply);
+    RUN_TEST(test_m6_width_36_untouched);
+    RUN_TEST(test_m6_width_2_is_mul);
+    RUN_TEST(test_m6_width_8_padded);
+    RUN_TEST(test_m6_explicit_sim);
+    RUN_TEST(test_m6_over_36_error);
+    RUN_TEST(test_m4_two_modules);
+    RUN_TEST(test_h3_bad_shape);
     RUN_TEST(test_m7_order_naming);
     RUN_TEST(test_h7_prov);
     RUN_TEST(test_h8_determinism);
     RUN_TEST(test_h10_info);
     RUN_TEST(test_hardmap_twice);
     RUN_TEST(test_h9_oom);
+    RUN_TEST(test_h9_oom_y_wider);
+    RUN_TEST(test_h9_oom_variants);
     RUN_TEST(test_pass_runs_and_takes_no_arguments);
     RUN_TEST(test_refuse_processes);
     return UNITY_END();

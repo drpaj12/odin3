@@ -94,9 +94,9 @@ void hm_set_module(hm_ctx *hc, odin3_module *module);
  * of granularity HARD, with the ports and parameters hardmap indexes by position. Otherwise the
  * error "hardmap: cell type 'multiply' is not registered; read_techlib lib/vtr.o3lib first" (or
  * "... is not a hard block ..." / "... does not have the expected ports ...") is logged and
- * ODIN3_ERR_INVALID_ARG returned, nothing changed.
+ * ODIN3_ERR_INVALID_ARG returned, nothing changed. The error is located at node `at` (none: bare).
  */
-odin3_status hm_need(hm_ctx *hc, hm_hard which, odin3_celltype_id *out);
+odin3_status hm_need(hm_ctx *hc, hm_hard which, odin3_node_id at, odin3_celltype_id *out);
 
 /*
  * Starts the transaction for source cell `src` (live, in the current module): begins one
@@ -160,7 +160,12 @@ void hm_label(const hm_ctx *hc, odin3_node_id node, char *out, size_t size);
 /* The `$mul` rule (mul.c, M-1..M-7): maps src or leaves it soft with a warning. */
 odin3_status hm_map_mul(hm_ctx *hc, odin3_node_id src);
 
-/* The explicit-instance check of M-6 for node (a `multiply`): OK, or the located error. */
-odin3_status hm_check_multiply(const hm_ctx *hc, odin3_node_id node);
+/* The explicit-instance check of M-6 for node (a `multiply`): the type's shape (H-3), then WIDTH
+ * above 36: OK, or the located error. */
+odin3_status hm_check_multiply(hm_ctx *hc, odin3_node_id node);
+
+/* The explicit `multiply` rule (M-6 as amended): treat src like the equivalent `$mul`, with a
+ * warning; WIDTH 36 is left as it is. */
+odin3_status hm_map_explicit(hm_ctx *hc, odin3_node_id src);
 
 #endif

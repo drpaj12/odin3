@@ -1,7 +1,8 @@
 /*
  * hardmap.c — the driver of the `hardmap` pass (3C spec H-8, H-9, H-10): the explicit-instance
  * pre-check over the whole design (M-6), then, module by module in creation order and cell by
- * cell in node-ID order, the `$mul` phase. PR 3C-2 adds `$add`/`$sub` and PR 3C-3 the memories
+ * cell in node-ID order, the `$mul` phase and the explicit `multiply` phase. PR 3C-2 adds
+ * `$add`/`$sub` and PR 3C-3 the memories
  * as further phases in spec order (H-8).
  */
 #include "passes/hardmap/hardmap.h"
@@ -22,7 +23,8 @@ static odin3_module *module_at(odin3_design *design, uint32_t index) {
     return odin3_module_get(design, (odin3_module_id){index});
 }
 
-/* M-6: no explicit `multiply` wider than the arch's, in any module; nothing is changed. */
+/* M-6: no explicit `multiply` wider than the arch's (and of the shape hardmap indexes by position)
+ * in any module; nothing is changed. */
 static odin3_status precheck_multiply(hm_ctx *hc) {
     odin3_celltype_id type = {0};
     if (!hm_find_type(hc->design, "multiply", &type)) {
@@ -66,15 +68,36 @@ static odin3_status mul_phase(hm_ctx *hc, odin3_module *mod, odin3_celltype_id m
     return st;
 }
 
+/* The explicit `multiply` instances of one module, live at the start (M-6 as amended): after the
+ * `$mul` phase, so a `$mul` made from a WIDTH 2 instance is not visited again. */
+static odin3_status explicit_phase(hm_ctx *hc, odin3_module *mod, odin3_celltype_id type) {
+    uint32_t end = odin3_module_node_end(mod);
+    hm_set_module(hc, mod);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
+        odin3_node_id node = {id};
+        if (odin3_node_live(mod, node) && odin3_node_type(mod, node).v == type.v) {
+            st = hm_map_explicit(hc, node);
+        }
+    }
+    return st;
+}
+
 static odin3_status all_mul_phases(hm_ctx *hc) {
     odin3_celltype_id mul = {0};
-    if (!hm_find_type(hc->design, "$mul", &mul)) {
-        return ODIN3_OK;
-    }
+    odin3_celltype_id multiply = {0};
+    bool have_mul = hm_find_type(hc->design, "$mul", &mul);
+    bool have_multiply = hm_find_type(hc->design, "multiply", &multiply);
     odin3_status st = ODIN3_OK;
-    for (uint32_t mi = 1; st == ODIN3_OK && mi < odin3_design_module_end(hc->design); mi++) {
+    for (uint32_t mi = 1; have_mul && st == ODIN3_OK && mi < odin3_design_module_end(hc->design);
+         mi++) {
         odin3_module *mod = module_at(hc->design, mi);
         st = mod != NULL ? mul_phase(hc, mod, mul) : st;
+    }
+    for (uint32_t mi = 1;
+         have_multiply && st == ODIN3_OK && mi < odin3_design_module_end(hc->design); mi++) {
+        odin3_module *mod = module_at(hc->design, mi);
+        st = mod != NULL ? explicit_phase(hc, mod, multiply) : st;
     }
     return st;
 }
