@@ -897,6 +897,11 @@ then the options considered.
     reads that directory); `blif003` is pinned in `tests/fuzz/fuzz_opt_regress`, and
     `test_abc_pass` pins the new located error where it pinned check rule 4. The `write_blif
     --vtr` E12 refusal stays for IR built by other means (hand IR, a later pass).
+    Tools: `vtr-read-check` and `blif-roundtrip --vtr` class the reader's refusal as E12 for those
+    four basenames only (any other read failure still fails); `sim-check` excludes a reader
+    refusal only for the same list, with ABC refusing the file too. `cli_flatten_multidriver` now
+    pins the located read error (no legal read reaches `flatten` with such a net);
+    `test_flat_multidriver_from_blif` keeps the join check covered from two legal reads.
 
 37. **`check` validates provenance `hier`** (Peter approved the check change; the Phase 2 small fix of
     #31(3), 2026-10-16, branch `fix/2H-blif-multidriver-hier`; milestone M2 is the O' leg of

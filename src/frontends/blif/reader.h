@@ -69,7 +69,11 @@
  *   formals used with it in the file, in order of first use, each scalar, width 1 and INOUT (the
  *   file gives no directions);
  * - `.cname`, `.attr`, `.param` apply to the previous cell of the model (see above).
- * Several drivers on one net are read as written (odin3_check_design reports them, rule 4).
+ * A net with a second driver is refused (PHASE3 #36): after each cell, a net that has two drivers
+ * that are neither inout pins nor outputs of a tristate type (check rule 4's own test; the pins
+ * of an implicit black box are inout) is a located error at the second driver's directive, and
+ * the cell is removed again. An input port, a `.names`, a `.latch` and a `.subckt` output all
+ * drive.
  * Provenance: every cell and every net created in pass 2 gets its own IMPORTED record, a cell
  * {line of its directive, col 1, end_col = its token count}, a net {line, col = end_col = index
  * of its token}.
@@ -81,7 +85,8 @@
  * the first model, a black box that repeats a port name, an unknown directive, a cover row that
  * does not fit its `.names` or mixes on-set and off-set rows, an unsupported latch type (`as`) or
  * init, a `.subckt` of its own model or of a port cell type, an unknown formal, a formal connected
- * twice, a duplicate `.cname`, `.cname`/`.attr`/`.param` without a previous cell, a file that
+ * twice, a duplicate `.cname`, `.cname`/`.attr`/`.param` without a previous cell, a net with a
+ * second ordinary driver ("net 'x' is driven by N cell outputs (one allowed)"), a file that
  * changed between the passes); ODIN3_ERR_IO when the file cannot be read; ODIN3_ERR_NO_MEMORY on
  * out of memory; ODIN3_ERR_INVALID_ARG (logged) for a NULL argument or a design that already has
  * modules. Reading stops at the first error; the design may then hold part of the file, so the

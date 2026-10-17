@@ -22,8 +22,8 @@
 # says so, and the driver's clock bits must be the BLIF's latch clock nets.
 # Excluded, listed and not failures: RAM instances (Phase 4), implicit black boxes (a .subckt
 # with no .model: $pow, $_DFFSR_PPP_), other black boxes without a model, and multi-driver
-# netlists (PHASE1 #15) when the simulator rejects a net with two drivers and ABC refuses the
-# file too.
+# netlists (PHASE1 #15 list only) when read_blif refuses the net with two drivers (PHASE3 #36)
+# and ABC refuses the file too.
 # Order: ascending file size (smallest first); with --largest-first, descending. Files with
 # identical content run once; the others reuse that result.
 # Exit: 0 all pass, 1 any failure, 2 usage. Our simulator failing in any way (an error, a
@@ -33,6 +33,9 @@ set -euo pipefail
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 HERE=$(dirname "$SELF")
+# Basenames whose original netlist drives one net from several cells (PHASE1 #15; the same list
+# as blif-roundtrip and writer-check). Only these may be excluded for a reader refusal.
+export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
 
 usage() {
     cat >&2 <<'USAGE'
@@ -106,6 +109,15 @@ zero_init() {
         else if (NF == 3 || NF == 5) $0 = $0 " 0"
     }
     { print }' "$1" >"$2"
+}
+
+# Whether $1 is one of the multi-driver originals of the PHASE1 #15 list.
+is_multi_driver() {
+    local base=${1##*/} name
+    for name in $MULTI_DRIVER; do
+        [ "$base" = "$name" ] && return 0
+    done
+    return 1
 }
 
 # Whether ABC refuses BLIF $2 for a signal defined more than once (work files in $1).
@@ -265,7 +277,11 @@ worker() {
         if [ "$out" != ok ]; then
             # Any failure of the simulator under test fails the gate, timeouts and OOM included.
             status=sim-error note="$out: $(last_words "$dir/ours.log")"
-            if [ "${out%% *}" = error ] && grep -q 'cell outputs (one allowed)' "$dir/ours.log.err"; then
+            # Excluded only for the #15 list, with the reader's message, and when ABC refuses the
+            # file too: any other refusal is a failure of the simulator under test.
+            if [ "${out%% *}" = error ] && is_multi_driver "$path" &&
+                grep -q 'cell outputs (one allowed)' "$dir/ours.log.err" &&
+                abc_refuses_multi_driver "$dir" "$path"; then
                 status=excluded flavor=- note="multi-driver netlist (PHASE1 #15): read_blif refuses it"
             fi
         fi
@@ -404,7 +420,7 @@ main() {
     rm -rf "$out"/res/* 2>/dev/null || true
     export SC_DRIVER SC_ABC SC_YOSYS SC_IVERILOG SC_VVP SC_TIMEOUT SC_MEM_KB SC_SEEDS SC_CYCLES
     export SC_KEEP=$keep SC_RES=$out/res SC_TMP=$out/tmp SC_TECHLIBS=$techlibs SC_MODELS HERE
-    export -f classify zero_init abc_refuses_multi_driver now run_capped last_words max_rss \
+    export -f classify zero_init is_multi_driver abc_refuses_multi_driver now run_capped last_words max_rss \
         build_reference run_ours cycle_count_note compare_all worker
 
     # Candidates as "size<TAB>path", filtered to status=ok unless they are fixtures.

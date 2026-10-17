@@ -675,11 +675,48 @@ static void test_multiple_drivers_are_refused(void) {
 static void test_multiple_drivers_port_and_latch(void) {
     expect_parse_error(".model top\n.inputs a\n.outputs y\n.names a a\n1 1\n.end\n", 4,
                        "net 'a' is driven by 2 cell outputs");
+    expect_check_clean();
     odin3_design_destroy(design);
     design = odin3_design_create();
     expect_parse_error(
         ".model top\n.inputs a b clk\n.outputs y\n.names a y\n1 1\n.latch b y re clk 0\n.end\n", 6,
         "net 'y' is driven by 2 cell outputs");
+    expect_check_clean();
+}
+
+/* A model's output pins are drivers too: two instances of `sub` on one net, and one instance
+ * with two outputs on one net, are refused at the second driver; check stays clean. */
+static void test_multiple_drivers_subckt_outputs(void) {
+    static const char sub[] = ".model sub\n.inputs i\n.outputs o p\n.names i o\n1 1\n"
+                              ".names i p\n1 1\n.end\n";
+    char text[MSG_MAX];
+    (void)snprintf(text, sizeof text,
+                   ".model top\n.inputs a\n.outputs z\n.subckt sub i=a o=z\n"
+                   ".subckt sub i=a o=z\n.end\n%s",
+                   sub);
+    expect_parse_error(text, 5, "net 'z' is driven by 2 cell outputs (one allowed)");
+    expect_check_clean();
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    (void)snprintf(text, sizeof text,
+                   ".model top\n.inputs a\n.outputs z\n.subckt sub i=a o=z p=z\n.end\n%s", sub);
+    expect_parse_error(text, 4, "net 'z' is driven by 2 cell outputs (one allowed)");
+    expect_check_clean();
+}
+
+/* The bus exemption (check rule 4): the pins of an implicit black box are INOUT and a $tribuf
+ * output is tristate, so either may share a net with one ordinary driver. */
+static void test_multiple_drivers_bus_exemption(void) {
+    write_str(".model top\n.inputs a\n.outputs n\n.subckt mystery Y=n\n.subckt mystery Y=n\n"
+              ".names a n\n1 1\n.end\n");
+    read_ok(PATH);
+    expect_check_clean();
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    write_str(".model top\n.inputs a e\n.outputs n\n.subckt $tribuf A[0]=a EN=e Y[0]=n\n"
+              ".names a n\n1 1\n.end\n");
+    read_ok(PATH);
+    expect_check_clean();
 }
 
 /* --- pass 2 errors ------------------------------------------------------------------------- */
@@ -1298,6 +1335,8 @@ static void run_pass2_and_golden_tests(void) {
     RUN_TEST(test_subckt_formal_matches_scalar_bit_named_port);
     RUN_TEST(test_multiple_drivers_are_refused);
     RUN_TEST(test_multiple_drivers_port_and_latch);
+    RUN_TEST(test_multiple_drivers_subckt_outputs);
+    RUN_TEST(test_multiple_drivers_bus_exemption);
     RUN_TEST(test_cover_row_width_mismatch);
     RUN_TEST(test_cover_row_bad_characters);
     RUN_TEST(test_cover_row_outside_names);
