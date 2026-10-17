@@ -94,6 +94,18 @@ typedef enum odin3_tri_net {
 odin3_tri_net odin3_elab2_tri_net(const odin3_elab2 *e2, odin3_net_id net,
                                   odin3_elab2_inout_pin *pin);
 
+/* True when the net is on a `$port_out` of the top module being emitted and on no `$port_inout`. */
+bool odin3_elab2_net_on_top_output(const odin3_elab2 *e2, odin3_net_id net);
+
+/* `--vtr-compat`, top module (elab2_trivtr_out.c, PHASE2 decision 28): a `$tribuf` that is the
+ * only driver of top-level output bits loses its enable as in Parmys (`opt_expr -mux_undef`
+ * turns `en ? d : 'bz` into `d`): the cell is deleted, the output nets are merged into the data
+ * nets, and one warning names the port, located at the driver. Cells on an inout port, with
+ * several drivers on an output bit, with a constant 0, x or z enable, or whose data is another
+ * cell's output are left to the default handling. Run after the cells of internal nets are
+ * filed (odin3_elab2_tri_logic). */
+odin3_status odin3_elab2_tri_vtr_outputs(odin3_elab2 *e2);
+
 struct odin3_elab2_drive {
     odin3_vec drv;         /* odin3_drv per net ID, as far as a net was claimed */
     odin3_vec info;        /* odin3_elab2_net_info per net ID */

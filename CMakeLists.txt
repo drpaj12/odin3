@@ -259,6 +259,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab2_tri.c
     src/frontends/elab/elab2_trilogic.c
     src/frontends/elab/elab2_trivtr.c
+    src/frontends/elab/elab2_trivtr_out.c
     src/frontends/elab/elab2_mem.c
     src/frontends/elab/elab2_memport.c
     src/frontends/elab/elab2_memscan.c
