@@ -67,6 +67,10 @@ typedef struct lf_cell_spec {
  */
 odin3_node_id lf_cell(lf *fix, odin3_module *mod, const lf_cell_spec *spec);
 
+/* lf_cell with `prefix` put before every port wire name, so several cells can share a module. */
+odin3_node_id lf_cell_prefixed(lf *fix, odin3_module *mod, const lf_cell_spec *spec,
+                               const char *prefix);
+
 /* A one-module design with one cell, the common case: module "m" in a new fixture. */
 odin3_node_id lf_one_cell(lf *fix, const lf_cell_spec *spec, odin3_module **mod);
 

@@ -185,8 +185,10 @@ DESIGN §7; Phase 4's `partial_map` replaces it.
   - `out[i]` drives `Y[i]` for `i < Y_WIDTH`;
   - `out[Y_WIDTH..71]` drive fresh unread nets (Parmys's `unconnected_multiplier_output~N`).
 
-  After 3G, `Y_WIDTH <= a + b`. A `Y_WIDTH` above `a + b`, possible without 3G, gets gnd on the
-  extra Y bits, as Parmys's `check_multiplier_port_size` gives.
+  After 3G, `Y_WIDTH <= a + b`. An unsigned `$mul` with a `Y_WIDTH` above `a + b`, possible without
+  3G, stays soft with a warning ("run wreduce first"): the gnd merges Parmys's
+  `check_multiplier_port_size` gives would allocate after the source is deleted, which H-9 forbids.
+  (Amended 2026-10-17, review finding M-2; agent default.)
 - **M-4 Padding.** For an unsigned cell, the pad is x (`unconn`), as Parmys's `mult_padding = -1`.
   `multiply` is an unsigned primitive (`fn out = a * b`), and VPR leaves an `unconn` pin open. ABC
   sees `.names unconn` with no rows as 0, and the functional check's hard-block model reads an open
@@ -201,9 +203,15 @@ DESIGN §7; Phase 4's `partial_map` replaces it.
   Parmys pads with `unconn` whatever the sign, which is wrong for a negative operand. This is
   divergence D3, consistent with the adder ruling. None of the 19 has a signed `$mul`.
 - **M-6 Explicit `multiply` instances** (a design that instantiates the hard cell, 2D §3.1a)
-  are untouched when `WIDTH <= 36`. Above 36 they are a located error: `hardmap: 'multiply' instance
-  'u' has WIDTH 40; the arch's multiplier is 36 wide`. Parmys would split it, which is Phase 4.
-  None of the 19 has such an instance.
+  are treated like the equivalent `$mul`, as Parmys resolves the primitive to `$mul`: `WIDTH = 2`
+  becomes a `$mul` cell for `lower` (the 2×2 rule, M-2), any other `WIDTH < 36` is padded to a
+  36-wide `multiply` exactly as a `$mul` of that shape (M-3, M-4), `WIDTH = 36` is left as it is.
+  Each instance so treated gets a warning: `hardmap: explicit 'multiply' instance 'u' (WIDTH 2)
+  treated as '$mul' as Parmys does`. Above 36 they are a located error: `hardmap: 'multiply'
+  instance 'u' has WIDTH 40; the arch's multiplier is 36 wide`. Parmys would split it, which is
+  Phase 4. None of the 19 has such an instance. Amended 2026-10-17, agent default under Peter's
+  Parmys-default rule (it replaces "untouched when `WIDTH <= 36`"; the setting `--vtr-compat` does
+  not reach passes, so the rule applies always).
 - **M-7 Order and naming.** `$mul` cells are mapped in node-ID order. Each new node's name is the
   source cell's name. Its output net names follow 3E's short or provenance style.
 
@@ -437,6 +445,7 @@ Each soft decision except S-1 logs one WARN line per cell. S-1 is the default an
 | D5 | an inferred `$mem` with an asynchronous read stays soft (R-9) | mapped as synchronous | none (no inferred memory) |
 | D6 | `2×2` `$mul` soft (M-2) | AND gates + hard adders | none |
 | D7 | `$mul` wider than 36 soft, with a warning (M-2); explicit `multiply` above 36 is an error (M-6) | split into 36-bit pieces + adders | none |
+| D7b | unsigned `$mul` with `Y_WIDTH > A_WIDTH + B_WIDTH` soft, with a warning (M-3) | hard, gnd on the extra Y bits | none after 3G |
 | D8 | inferred `$mem` with more than two ports, or ports that cannot share a RAM port: replicas or soft (R-10, R-11) | multiplexed port modes | none |
 | D9 | `RD_EN` mapped only when constant 1, else soft (R-10) | dropped | none |
 | D10 | INIT dropped with a warning (R-12) | dropped silently | none |

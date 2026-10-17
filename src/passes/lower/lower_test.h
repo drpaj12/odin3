@@ -16,6 +16,12 @@ typedef struct odin3_lower_limits {
 /* Sets the caps (NULL restores the defaults). */
 void odin3_lower_test_set_limits(const odin3_lower_limits *limits);
 
+struct lw_rule;
+
+/* Makes `rule` the rule of its type name until called again with NULL (the table entry is shadowed;
+ * the completeness test walks the table, not the override). */
+void odin3_lower_test_override_rule(const struct lw_rule *rule);
+
 /* The caps in force. */
 odin3_lower_limits odin3_lower_limits_now(void);
 

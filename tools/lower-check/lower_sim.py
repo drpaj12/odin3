@@ -17,10 +17,12 @@ pass.** A design is skipped, and every type in it listed as skipped, when it hol
 simulate hook (``$shl $shr $sshr $shiftx $div $mod $pow $tribuf``, ``$mem $memrd $memwr``, the word
 flip-flops and latches); those are covered by ``lower-diff`` and ``lower-equiv``, by the reference
 stepper of the unit tests and by the C array model (3B spec 14.3 table). A ``.blif`` FILE is
-``read_blif``.
+``read_blif``. A design with no word cell (``opt`` folded it away, or only bit cells) compared
+nothing: it prints ``NOTHING TO COMPARE`` and exits 1 unless ``--allow-empty`` is given.
 
 Exit codes (one convention across the opt tools): 0 no difference (skips are listed); 1 a
-difference (the after run's vectors differ, or the lowered design does not simulate); 2 usage or a
+difference (the after run's vectors differ, or the lowered design does not simulate) or nothing
+to compare; 2 usage or a
 tool error (Odin III exited with an error, or the before run cannot be simulated for a reason that
 is not a known skip); 3 hard: a child crashed, was killed by a signal or its memory cap, or timed
 out; 77 skipped (an ASan child and no systemd-run). The work directory is made under
@@ -163,14 +165,20 @@ def first_difference(before: str, after: str) -> str:
 
 
 def classify(sim: Sim, files: Sequence[str], run_dir: Path) -> tuple[list[str], str]:
-    """(the output lines of one design, its class: ``equal``, ``differs`` or ``skipped``)."""
+    """(the output lines of one design, its class: ``equal``, ``differs``, ``skipped`` or ``empty``:
+    no word cell, so nothing was compared)."""
     name = Path(files[0]).name
     types, before = sim.before(files, run_dir)
     skipped = sorted(types & SKIP_REASONS.keys())
     if before is None:
         lines = [f"{TOOL}: {name}: {t}: skipped ({SKIP_REASONS.get(t, 'design skipped')})"
                  for t in sorted(types)]
-        return lines or [f"{TOOL}: {name}: no cell: nothing to judge"], "skipped"
+        if lines:
+            return lines, "skipped"
+        return [f"{TOOL}: {name}: NOTHING TO COMPARE: no cell to judge"], "empty"
+    if not any(t.startswith("$") and not t.startswith("$_") for t in types):
+        return [f"{TOOL}: {name}: NOTHING TO COMPARE: no word cell left after "
+                f"'{'; '.join(sim.args.pre or DEFAULT_PRE)}' (folded away?)"], "empty"
     try:
         after = sim.after(files, run_dir)
     except AfterError as exc:
@@ -198,6 +206,8 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
                     help="per child (default 3G)")
     ap.add_argument("--work", type=Path, help="the work directory")
     ap.add_argument("--mutant", choices=MUTANTS, help=argparse.SUPPRESS)
+    ap.add_argument("--allow-empty", action="store_true",
+                    help="a design with no word cell to compare is not a failure")
     ap.add_argument("--each", action="store_true", help="every FILE is its own design")
     ap.add_argument("files", nargs="+", help="the Verilog (or BLIF) files")
     return ap.parse_args(argv)
@@ -214,7 +224,8 @@ def execute(args: argparse.Namespace, work: Path) -> int:
         lines, kind = classify(sim, design, run_dir)
         for line in lines:
             print(line, flush=True)
-        worst = lc.EXIT_FAIL if kind == "differs" else worst
+        empty_fails = kind == "empty" and not args.allow_empty
+        worst = lc.EXIT_FAIL if kind == "differs" or empty_fails else worst
     return worst
 
 

@@ -74,6 +74,15 @@ Recorded 2026-10-08 (Phase 0 §4).
   `tools/heavy-run` (the sweep CTest `vtr_read_check_k6`); the 18-file negative corpus
   (`vtr-read-check --bad-corpus tests/vtr/blif-bad`, CTest `vtr_read_check_bad_corpus`) is small
   enough to run anywhere `$VTR_ROOT` is built.
+- **The functional oracle** (3H §8.1, decision 16a). `$VTR_ROOT/mosaic/verilator_check/run_random_check.py
+  --rtl <design>.v --post-synth-blif <netlist> --work-dir <dir> --vectors 50000 --seed 1
+  --verilator-j <n>` simulates the RTL and the post-synthesis BLIF with Verilator on random vectors
+  and compares the outputs: exit 0 pass, 1 mismatch, 2 error (it cannot parse a port, or Yosys or
+  Verilator is missing or fails to build). It finds Yosys at `$VTR_ROOT/build/bin/yosys`. `vtr-qor
+  fcheck` and `vtr-qor run --fcheck` run it read-only from VTR's tree with `--work-dir` under the
+  job directory, on `<J>/run/<d>.pre-vpr.blif` (P: the kept gzip, decompressed). A mismatch on
+  the O leg passes the QoR gate only with a row in `tests/vtr/qor/divergences.tsv` (class
+  `mem-init-dropped`, `async-reset-made-sync`, or `baseline-fails` when P's own check fails too).
 - **The VTR pin check.** `tools/vtr-qor/vtr-qor doctor` checks that `$VTR_ROOT` is at the commit
   in the table above and has no modified tracked files
   (`git status --porcelain --untracked-files=no`). `vtr-qor run` refuses either case (E-QH2),

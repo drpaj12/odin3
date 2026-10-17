@@ -1,0 +1,10 @@
+# A library whose `multiply` is hard but has no WIDTH parameter and one-bit ports, for hardmap's H-3
+# "does not have the expected ports and parameters" error.
+library badshape
+
+cell multiply hard
+  in  a 1
+  in  b 1
+  out out 1
+  fn  out = a & b
+end

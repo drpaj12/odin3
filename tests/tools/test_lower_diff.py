@@ -208,6 +208,11 @@ class PureTest(unittest.TestCase):
         self.assertEqual(stripped, ".model m\n.inputs a\n.outputs y z\n.names gnd\n"
                          ".subckt $_AND_ A=a B=gnd Y=y\n.names z\n1\n.end\n")
 
+    def test_a_net_read_only_on_a_continuation_line_keeps_its_constant(self) -> None:
+        blif = (".model m\n.inputs a\n.outputs y\n.names one\n1\n"
+                ".subckt $_AND_ A=a \\\n B=one Y=y\n.end\n")
+        self.assertIn(".names one", lc.strip_unused_constants(blif))
+
     def test_histograms_ignore_constants_and_compare_per_module(self) -> None:
         text = "module \\m\n  cell $_AND_ $a\n  cell $_CONST0_ $z\n  cell $_AND_ $b\nend\n"
         self.assertEqual(dict(lc.histogram(text)["m"]), {"$_AND_": 2})
@@ -264,13 +269,50 @@ class RunTest(unittest.TestCase):
         self.assertIn("equiv: DIFFERS: equiv-check: NOT equivalent", out)
         self.tree.set_spec(**{"equiv-check_rc": 4, "equiv-check_out": "ABC timed out\n"})
         code, out, _ = self.tree.run("--family", "arith")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 1)
         self.assertIn("equiv: UNPROVEN: ABC timed out", out)
+        self.assertNotIn(": ok", out)
+        listed = self.tree.expect("and_2.v arith equiv timeout, known\n")
+        code, out, _ = self.tree.run("--family", "arith", *listed)
+        self.assertEqual(code, 0)
+        self.assertIn("equiv: differs as listed (timeout, known)", out)
         self.assertNotIn(": ok", out)
         self.tree.set_spec(**{"equiv-check_rc": 5})
         self.assertEqual(self.tree.run("--family", "arith")[0], 3)
         self.tree.set_spec(**{"equiv-check_rc": 2})
         self.assertEqual(self.tree.run("--family", "arith")[0], 2)
+
+    def test_a_design_with_no_word_cell_compared_nothing_and_fails(self) -> None:
+        folded = "module \\m\nend\n"  # opt folded the cell away: nothing in, nothing out
+        self.tree.set_spec(rtlil={"in.il": folded, "lo.il": folded, "lo_opt.il": folded},
+                           yosys_rtlil={"yo.il": folded, "yo_opt.il": folded})
+        code, out, _ = self.tree.run()
+        self.assertEqual(code, 1)
+        self.assertIn("[bitwise/S]: compared: NOTHING TO COMPARE", out)
+        self.assertNotIn(": ok", out)
+        code, out, _ = self.tree.run("--family", "arith")
+        self.assertEqual(code, 1)
+        self.assertIn("[arith/T]: compared: NOTHING TO COMPARE", out)
+
+    def test_an_expect_line_may_list_an_empty_comparison_until_cells_return(self) -> None:
+        folded = "module \\m\nend\n"
+        self.tree.set_spec(rtlil={"in.il": folded, "lo.il": folded, "lo_opt.il": folded},
+                           yosys_rtlil={"yo.il": folded, "yo_opt.il": folded})
+        extra = self.tree.expect("and_2.v * compared folded by opt\n")
+        code, out, _ = self.tree.run(*extra)
+        self.assertEqual(code, 0)
+        self.assertIn("compared: differs as listed (folded by opt)", out)
+        self.tree.set_spec()
+        code, out, _ = self.tree.run(*extra)
+        self.assertEqual(code, 1)
+        self.assertIn("compared: stale entry in the expect list", out)
+
+    def test_ok_says_how_many_word_cells_were_compared(self) -> None:
+        self.tree.set_spec(rtlil={"in.il": "module \\m\n  cell $and $a\n  cell $or $b\n"
+                                  "  cell $_AND_ $g\nend\n", "lo.il": LO_IL, "lo_opt.il": LO_IL})
+        code, out, _ = self.tree.run()
+        self.assertEqual(code, 0, out)
+        self.assertIn("[bitwise/S]: ok (2 cells)", out)
 
     def test_tier_d_compares_with_the_declared_maps(self) -> None:
         self.tree.set_spec(rtlil={"in.il": "module \\m\n  cell $adffe $c\nend\n", "lo.il": LO_IL,
