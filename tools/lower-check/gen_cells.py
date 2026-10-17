@@ -176,12 +176,15 @@ def shift_cells() -> list[Cell]:
     return cells
 
 
+COMPARE_OPS = (("lt", "<"), ("le", "<="), ("gt", ">"), ("ge", ">="))
+COMPARE_WIDTHS = (1, 2, 5, 8)
+COMPARE_SIGNED_WIDTHS = (1, 3, 8)
 ARITH_WIDTHS = (1, 3, 8, 17)
 ARITH_PAIRS = ((3, 5), (5, 3))
 
 
 def arith_cells() -> list[Cell]:
-    """``$add``, ``$sub`` and ``$neg`` (the ``$alu`` structures)."""
+    """``$add``, ``$sub``, ``$neg`` and the comparisons (the ``$alu`` structures)."""
     cells: list[Cell] = []
     for name, op in (("add", "+"), ("sub", "-")):
         cells += [binary(name, op, (w, w), "", w) for w in ARITH_WIDTHS]
@@ -189,6 +192,10 @@ def arith_cells() -> list[Cell]:
         cells += [binary(name, op, (4, 4), "s", 7), binary(name, op, (8, 8), "", 5)]
     cells += [unary("neg", "-", w, sign, y)
               for w in ARITH_WIDTHS for sign in ("", "s") for y in (w, w + 3)]
+    for name, op in COMPARE_OPS:
+        cells += [binary(name, op, (w, w), "", 1, 1) for w in COMPARE_WIDTHS]
+        cells += [binary(name, op, (w, w), "s", 1, 1) for w in COMPARE_SIGNED_WIDTHS]
+        cells += [binary(name, op, p, sign, 1, 1) for p in ARITH_PAIRS for sign in SIGN_VARIANTS]
     return cells
 
 

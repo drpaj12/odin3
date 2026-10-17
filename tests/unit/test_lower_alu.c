@@ -518,6 +518,13 @@ static void test_neg_matches_the_closed_form_and_the_hook(void) {
     }
 }
 
+static void test_the_comparisons_match_the_closed_form_and_the_hook(void) {
+    static const char *const k_types[] = {"$lt", "$le", "$gt", "$ge"};
+    for (size_t ti = 0; ti < 4; ti++) {
+        binary_sweep(k_types[ti], true);
+    }
+}
+
 static void test_node_counts_are_pinned_for_small_widths(void) {
     static const struct {
         ar_case cs;
@@ -528,6 +535,9 @@ static void test_node_counts_are_pinned_for_small_widths(void) {
         {{"$add", 4, 4, 4, false, false}, 26}, /* 12 + 14 */
         {{"$sub", 4, 4, 4, false, false}, 30}, /* 16 + 14 */
         {{"$neg", 2, 0, 2, false, false}, 13}, /* 8 + 5 */
+        {{"$lt", 1, 1, 1, false, false}, 6},   /* 3 + 2 + not */
+        {{"$lt", 1, 1, 1, true, true}, 8},     /* 3 + 2 + of, sf, lt */
+        {{"$ge", 2, 2, 1, false, false}, 16},  /* 6 + 5 + not + eq 1 + or, not, or */
     };
     for (size_t i = 0; i < sizeof k_pins / sizeof k_pins[0]; i++) {
         TEST_ASSERT_EQUAL_UINT64(k_pins[i].gates, cell_gates(&k_pins[i].cs));
@@ -542,10 +552,10 @@ static void test_node_counts_are_pinned_for_small_widths(void) {
 }
 
 static void test_a_mixed_sign_cell_is_lowered_as_unsigned_and_warns_once(void) {
-    static const char *const k_types[] = {"$add", "$sub"};
+    static const char *const k_types[] = {"$add", "$sub", "$lt", "$le", "$gt", "$ge"};
     for (size_t i = 0; i < sizeof k_types / sizeof k_types[0]; i++) {
         log_text[0] = '\0';
-        ar_case cs = {k_types[i], 5, 3, 5U, true, false};
+        ar_case cs = {k_types[i], 5, 3, i < 2 ? 5U : 1U, true, false};
         run_cell_case(&cs);
         const char *first = strstr(log_text, "has A_SIGNED != B_SIGNED");
         TEST_ASSERT_NOT_NULL_MESSAGE(first, k_types[i]);
@@ -562,6 +572,7 @@ int main(void) {
     RUN_TEST(test_add_matches_the_closed_form_and_the_hook);
     RUN_TEST(test_sub_matches_the_closed_form_and_the_hook);
     RUN_TEST(test_neg_matches_the_closed_form_and_the_hook);
+    RUN_TEST(test_the_comparisons_match_the_closed_form_and_the_hook);
     RUN_TEST(test_node_counts_are_pinned_for_small_widths);
     RUN_TEST(test_a_mixed_sign_cell_is_lowered_as_unsigned_and_warns_once);
     return UNITY_END();

@@ -153,6 +153,7 @@ add_library(odin3_core OBJECT
     src/passes/lower/bitwise.c
     src/passes/lower/pmux_shift.c
     src/passes/lower/alu.c
+    src/passes/lower/cmp.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c

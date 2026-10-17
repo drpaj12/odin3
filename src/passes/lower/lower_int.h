@@ -361,6 +361,14 @@ LW_DECLARE_BUILDER(add);
 LW_DECLARE_BUILDER(sub);
 LW_DECLARE_BUILDER(neg);
 
+/* --- cmp.c: $lt $le $gt $ge (spec §5.4) ---------------------------------------------------------
+ */
+
+LW_DECLARE_BUILDER(lt);
+LW_DECLARE_BUILDER(le);
+LW_DECLARE_BUILDER(gt);
+LW_DECLARE_BUILDER(ge);
+
 /* --- dispatch (dispatch.c) ---------------------------------------------------------------- */
 
 typedef odin3_status (*lw_build_fn)(lw_ctx *lw, const lw_cell *cell, lw_bits *out);
