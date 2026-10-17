@@ -1043,11 +1043,34 @@ class FcheckCliTest(CliTestBase):
         self.assertEqual(len(self.fcheck_calls()), 2)
         self.assertEqual((self.verdict("P", "ch_intrinsics"), self.verdict("O", "ch_intrinsics")),
                          ("pass", "pass"))
-        # O without --keep-netlists has nothing to check: error, and the run still succeeds.
+        # O without --keep-netlists has nothing to check: error, and the run exits 1 (review M4).
         code, _, err = self.cli("run", "--leg", "O", "--designs", "sha", "--fcheck")
-        self.assertEqual(code, 0, err)
+        self.assertEqual(code, 1, err)
         self.assertEqual(self.verdict("O", "sha"), "error")
         self.assertIn("vtr-qor: fcheck: O sha: no kept netlist (run with --keep-netlists)", err)
+
+    def test_run_fcheck_mismatch_is_the_exit_code(self) -> None:
+        """Review M4: ``run --fcheck`` exits 1 for a mismatch (fail), 0 for a pass."""
+        (self.vtr / "fcheck-exit").write_text("1")
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--fcheck")
+        self.assertEqual(code, 1, err)
+        self.assertEqual(self.verdict("P", "ch_intrinsics"), "fail")
+        (self.vtr / "fcheck-exit").write_text("0")
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--fcheck")
+        self.assertEqual(code, 1, err)  # the cached job keeps its recorded verdict: still exit 1
+        self.assertEqual(self.verdict("P", "ch_intrinsics"), "fail")
+
+    def test_run_fcheck_on_a_cached_job_without_one(self) -> None:
+        """Review M4: a job first run without ``--fcheck`` gets its fcheck on the next
+        ``run --fcheck`` instead of a silent no-op."""
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.fcheck_calls(), [])
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--fcheck")
+        self.assertEqual(code, 0, err)
+        self.assertIn("cached", err)
+        self.assertEqual(len(self.fcheck_calls()), 1)
+        self.assertEqual(self.verdict("P", "ch_intrinsics"), "pass")
 
 
 class CommittedInputsTest(unittest.TestCase):

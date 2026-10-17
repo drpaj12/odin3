@@ -1263,6 +1263,17 @@ def admit(opts: RunOptions, *, running: int) -> str:
     return GO
 
 
+def capped_deadline(opts: RunOptions, limit_s: float) -> float:
+    """``limit_s`` from now on ``opts.clock``, but never past the night's deadline (review H3)."""
+    end = opts.clock() + limit_s
+    return end if opts.deadline is None else min(end, opts.deadline)
+
+
+def past_deadline(opts: RunOptions) -> bool:
+    """True once ``opts.clock`` has reached the night's deadline: no check starts then."""
+    return opts.deadline is not None and opts.clock() >= opts.deadline
+
+
 def _fits_deadline(job: Job, opts: RunOptions) -> bool:
     if opts.deadline is None:
         return True
@@ -1599,13 +1610,16 @@ def record_verdict(job: Job, name: str, verdict: str) -> None:
 
 def _fcheck_outcome(job: Job, cmd: Command, opts: RunOptions, scope: ScopeInfo) -> str:
     oom_before = qor_heavy.oom_kills(scope)
-    outcome = run_command(cmd, opts, deadline=opts.clock() + opts.job_timeout_s[job.group])
+    outcome = run_command(cmd, opts, deadline=capped_deadline(opts, opts.job_timeout_s[job.group]))
     if outcome.kind == ABORTED:
         _emit(opts, outcome.error)
     elif outcome.kind == TIMEOUT:
-        _emit(opts, f"{_label(job)}: fcheck timeout after {opts.job_timeout_s[job.group]} s")
+        _emit(opts, f"{_label(job)}: fcheck timeout (job limit {opts.job_timeout_s[job.group]} s "
+                    "or the night's deadline)")
     elif outcome.kind == "error":
         _emit(opts, f"{_label(job)}: fcheck {outcome.error}")
+    if outcome.kind == TIMEOUT:
+        return "timeout"
     if outcome.returncode is None:
         return "error"
     capped = outcome.returncode != 0 and qor_heavy.oom_kills(scope) > oom_before
@@ -1615,7 +1629,8 @@ def _fcheck_outcome(job: Job, cmd: Command, opts: RunOptions, scope: ScopeInfo) 
 def run_fcheck(job: Job, opts: RunOptions, verilator_j: int) -> str:
     """The Verilator random check of one finished ``ok`` job (spec §8.1, decision 16a), inside
     the verified heavy run and the job cgroup. Its verdict (``pass``, ``fail``, ``error``,
-    ``capped``) goes to ``metrics.json`` ``verdicts.fcheck``. ``<J>/fcheck`` is removed on
+    ``capped``, ``timeout``) goes to ``metrics.json`` ``verdicts.fcheck``. ``<J>/fcheck`` is
+    removed on
     ``pass`` and kept otherwise; ``<J>/fcheck.log`` stays."""
     scope = _heavy_scope(opts)
     if job.ctx is None:
@@ -1635,13 +1650,23 @@ def run_fcheck(job: Job, opts: RunOptions, verilator_j: int) -> str:
     return verdict
 
 
+# PHASE3 #16 (Peter, 2026-10-17; PHASE2 #29): equivalence is required only on the micros and these
+# 14 small VTR designs. A bigger design needs P&R success and QoR within decision 3's bands, and
+# its equiv verdict is informational ("not required (PHASE3 #16)"). The nightly runs ``equiv``
+# only on the gate designs inside this set; the Verilator fcheck stays on every design.
+EQUIV_REQUIRED = frozenset({
+    "single_wire", "single_ff", "and_latch", "multiclock_output_and_latch",
+    "multiclock_separate_and_latch", "multiclock_reader_writer", "ch_intrinsics",
+    "ch_intrinsics_nolatches", "diffeq1", "diffeq2", "mkPktMerge", "sha", "blob_merge",
+    "stereovision3"})
+EQUIV_NOT_REQUIRED = "not required (PHASE3 #16)"
 EQUIV_TIMEOUT_S = 600
 EQUIV_WALL_S = 660  # the harness's own cap on the child: equiv-check's 600 s plus its start-up
 EQUIV_TOOL = Path("tools") / "equiv-check" / "equiv-check"
 EQUIV_LOG = "equiv.log"
 EQUIV_ERR = "equiv.err"
 _MULTICLOCK = "unsupported: more than one clock domain"
-EXIT_EQUIV, EXIT_DIFFERS, EXIT_UNPROVEN = 0, 1, 4
+EXIT_EQUIV, EXIT_DIFFERS, EXIT_UNPROVEN, EXIT_HARD = 0, 1, 4, 5
 
 
 def equiv_command(repo: Path, before: Path, after: Path) -> list[str]:
@@ -1654,13 +1679,16 @@ def equiv_verdict(returncode: int | None, stderr: str) -> str:
     """Plan point (v), widened for ``equiv-check``'s current exit codes: 0 ``equivalent``, 1
     ``differs``; the multi-clock message (exit 2, or 4 *unproven*) ``multiclock``; ABC timing out
     (exit 2 ``running ABC failed:`` with ``timed out``, or any other exit 4, a tool limit) and the
-    harness's own wall cap (``None``) ``timeout``; anything else ``error``."""
+    harness's own wall cap (``None``) ``timeout``; exit 5 (ABC killed, the memory cap) ``capped``;
+    anything else ``error``."""
     if returncode is None:
         return "timeout"
     if returncode == EXIT_EQUIV:
         return "equivalent"
     if returncode == EXIT_DIFFERS:
         return "differs"
+    if returncode == EXIT_HARD:  # ABC killed by a signal: the memory cap (review M2)
+        return "capped"
     if _MULTICLOCK in stderr:
         return "multiclock"
     abc_timed_out = "running ABC failed:" in stderr and "timed out" in stderr
@@ -1689,7 +1717,7 @@ def _equiv_outcome(o_job: Job, before: Path, after: Path, opts: RunOptions) -> s
     repo = o_job.ctx.repo if o_job.ctx is not None else qor_legs.REPO_ROOT
     cmd = Command(tuple(equiv_command(repo, before, after)), o_job.job_dir,
                   o_job.job_dir / EQUIV_LOG, (), o_job.job_dir / EQUIV_ERR)
-    outcome = run_command(cmd, opts, deadline=opts.clock() + EQUIV_WALL_S)
+    outcome = run_command(cmd, opts, deadline=capped_deadline(opts, EQUIV_WALL_S))
     if outcome.kind == ABORTED:
         _emit(opts, outcome.error)
     elif outcome.kind == "error":
@@ -1727,13 +1755,18 @@ def run_checks(jobs: Sequence[Job], opts: RunOptions, step: Callable[[Job], str]
     """Run ``step`` (a check on one finished job: ``run_fcheck``, ``run_equiv``) over ``jobs``
     one at a time, in the order given, each admitted first (spec §7.3), inside the verified heavy
     run; SIGTERM and SIGHUP stop it as in ``run_jobs``. Returns the verdicts and the exit code
-    (5 when admission stopped the run, else 0)."""
+    (5 when admission stopped the run, 3 when the night's deadline passed with checks not
+    started, else 0)."""
     _heavy_scope(opts)
     log = HarnessLog(opts.out)
     opts.log = log
     verdicts: list[str] = []
     with _signals_as_exit():
         for index, job in enumerate(jobs):
+            if past_deadline(opts):
+                log.emit(f"nightly: {len(jobs) - index} checks not started before the deadline "
+                         f"{opts.deadline_text}")
+                return verdicts, EXIT_INCOMPLETE
             if _admit_loop(job, opts, deadline=False) == STOP:
                 for line in _pause_lines(opts, len(jobs) - index):
                     log.emit(line)
@@ -1780,6 +1813,7 @@ class _Run:
     finish: Finish
     log: HarnessLog
     results: list[JobResult] = field(default_factory=list)
+    fchecks: list[str] = field(default_factory=list)
     stop_code: int = EXIT_OK
 
     def stop(self, code: int, start: int) -> None:
@@ -1799,9 +1833,39 @@ def _after_ok(run: _Run, job: Job) -> bool:
     stopped the run."""
     if not run.opts.fcheck:
         return True
+    if past_deadline(run.opts):
+        run.log.emit(f"nightly: {_label(job)}: fcheck not started before the deadline "
+                     f"{run.opts.deadline_text}")
+        run.fchecks.append("timeout")
+        return True
     if _admit_loop(job, run.opts, deadline=False) == STOP:
         return False
-    run_fcheck(job, run.opts, FCHECK_J[job.group])
+    run.fchecks.append(run_fcheck(job, run.opts, FCHECK_J[job.group]))
+    return True
+
+
+def _recorded_fcheck(job: Job) -> str | None:
+    """The fcheck verdict held in ``metrics.json``; None when there is none or it is
+    ``skipped`` (the job ran without ``--fcheck``)."""
+    try:
+        record = json.loads((job.job_dir / "metrics.json").read_text(encoding="utf-8"))
+        verdict = record["verdicts"]["fcheck"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return verdict if isinstance(verdict, str) and verdict != "skipped" else None
+
+
+def _cached_fcheck(run: _Run, job: Job, index: int) -> bool:
+    """Review M4: a cached job gets the fcheck it lacks; one that has a verdict counts it in
+    the run's exit code. False when admission stopped the run."""
+    if not run.opts.fcheck:
+        return True
+    held = _recorded_fcheck(job)
+    if held is not None:
+        run.fchecks.append(held)
+    elif not _after_ok(run, job):
+        _stop_for_pause(run, index + 1)
+        return False
     return True
 
 
@@ -1834,7 +1898,7 @@ def _step(run: _Run, index: int) -> bool:
     if job.cached and job_complete(job):
         run.results.append(JobResult(job, OK, 0.0, ""))
         run.log.emit(f"[{index + 1}/{n}] {job.leg} {job.design} cached")
-        return True
+        return _cached_fcheck(run, job, index)
     gate = _admit_loop(job, run.opts, deadline=True)
     if gate == SKIPPED:
         run.log.emit(_deadline_line(job, run.opts))
@@ -1862,17 +1926,22 @@ def _step(run: _Run, index: int) -> bool:
     return True
 
 
-def _exit_code(results: Sequence[JobResult], stop_code: int) -> int:
+def _exit_code(results: Sequence[JobResult], stop_code: int,
+               fchecks: Sequence[str] = ()) -> int:
     """Plan, Global Constraints: 5 stopped for disk (or the stopping error's code), 1 a failure
     (a job skipped for its Parmys golden, E-QH6, counts), 3 capped or timeout without a
-    failure, else 0."""
+    failure, else 0. A failing ``--fcheck`` (``fail``, ``error``) counts as a failure and a
+    ``capped`` or ``timeout`` one as incomplete (review M4)."""
     if stop_code != EXIT_OK:
         return stop_code
     statuses = {result.status for result in results}
+    if any(v in ("fail", "error") for v in fchecks):
+        return EXIT_FAILED
     golden_skipped = any(r.status == SKIPPED and r.job.skip_reason for r in results)
     if FAILED in statuses or ABORTED in statuses or golden_skipped:
         return EXIT_FAILED
-    if CAPPED in statuses or TIMEOUT in statuses:
+    if CAPPED in statuses or TIMEOUT in statuses or any(v in ("capped", "timeout")
+                                                        for v in fchecks):
         return EXIT_INCOMPLETE
     return EXIT_OK
 
@@ -1937,4 +2006,4 @@ def run_jobs(jobs: Sequence[Job], opts: RunOptions, finish: Finish) -> RunSummar
     _after_run(opts, run.results)
     log.done(run.results, opts.clock() - began)
     return RunSummary(tuple(run.results), run.stop_code == EXIT_DISK,
-                      _exit_code(run.results, run.stop_code))
+                      _exit_code(run.results, run.stop_code, run.fchecks))

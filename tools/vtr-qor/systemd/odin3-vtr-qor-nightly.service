@@ -9,4 +9,6 @@ Description=vtr-qor nightly QoR run (heavy; holds the heavy lock until about 06:
 [Service]
 Type=exec
 Environment=ODIN3_HEAVY_OK=1
+# Hard stop (5 h budget + 30 min grace): a hung tool must not hold the heavy lock past the night.
+RuntimeMaxSec=19800
 ExecStart=%h/odin3-ws/odin3/tools/heavy-run %h/odin3-ws/odin3/tools/vtr-qor/vtr-qor nightly

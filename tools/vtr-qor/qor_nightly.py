@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 from collections.abc import Callable, Collection, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -31,19 +33,22 @@ from qor_sched import Job, Sets
 from qor_table import Run
 
 DEADLINE_HOUR = 6
-BUDGET_H = 5.0  # plan point (c) and Task 13: the default budget is 5 h
+NIGHTLY_BUDGET_H = 5.0  # plan point (c) and Task 13: the default budget is 5 h
 SECONDS_PER_MINUTE = 60.0
 SECONDS_PER_HOUR = 3600.0
 FLOW_TIME_FACTOR = 1.5  # VTR's runner times x 1.5 (spec §2)
 SATURDAY, SUNDAY = 5, 6
 STARVED_NIGHTS = 2
 MOVE_LIMIT = 0.02
+VERDICT_FIELDS = ("fcheck", "equiv")  # a changed verdict is listed like a moved metric
 SWEEP_3E_PATHS = ("src/backends/blif", "src/frontends/blif")
 SWEEP_3D_PATHS = ("src/passes/abc", "adapters/abc")
 BIG_DESIGNS = frozenset({"mcml", "LU32PEEng"})
+EQUIV_REQUIRED = qor_sched.EQUIV_REQUIRED
 PRIME = "′"
 STATE_FILE = "rotation.json"
 GIT_TIMEOUT_S = 60
+EXIT_DISK = qor_sched.EXIT_DISK
 
 
 @dataclass(frozen=True)
@@ -60,7 +65,7 @@ class Slot:
 # Spec §13 step 4 / plan Task 13: the eight (design, legs) slots of the 8-night cycle.
 ROTATION = (
     Slot(1, "LU8PEEng", ("O", "Oprime", "Pprime"), fcheck=True),
-    Slot(2, "bgm", ("O", "Oprime", "Pprime"), fcheck=True, equiv=True),
+    Slot(2, "bgm", ("O", "Oprime", "Pprime"), fcheck=True),  # no equiv: PHASE3 #16 (bgm is big)
     Slot(3, "mcml", ("O",)),
     Slot(4, "mcml", ("Oprime",)),
     Slot(5, "mcml", ("Pprime",)),
@@ -241,53 +246,97 @@ def plan_night(state: Mapping[str, object], repo: Path, today: date) -> NightPla
 LOCK_FD = 9
 
 
-def run_tool(argv: Sequence[str], *, cwd: Path | None = None) -> int:
+TOOL_KILL_GRACE_S = 30.0
+EXIT_TOOL_TIMEOUT = 3  # a tool stopped at the night's deadline is incomplete (exit 3)
+
+
+def _stop_group(proc: subprocess.Popen[bytes]) -> None:
+    """SIGTERM to the tool's process group, SIGKILL to it after ``TOOL_KILL_GRACE_S``."""
+    for sig, wait in ((signal.SIGTERM, TOOL_KILL_GRACE_S), (signal.SIGKILL, TOOL_KILL_GRACE_S)):
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, sig)
+        try:
+            proc.wait(timeout=wait)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def run_tool(argv: Sequence[str], *, cwd: Path | None = None,
+             timeout_s: float | None = None) -> int:
     """A heavy child tool, started with descriptor 9 (the held lock) passed, so it is inside the
-    run and does not re-execute (plan Task 13)."""
+    run and does not re-execute (plan Task 13). It runs in its own process group; after
+    ``timeout_s`` (the night's deadline, review H3) the group gets SIGTERM, then SIGKILL, and the
+    result is ``EXIT_TOOL_TIMEOUT``."""
     fds = qor_sched.lock_fds()
-    proc = subprocess.run(list(argv), cwd=cwd, stdin=subprocess.DEVNULL, pass_fds=fds,
-                          check=False)
-    return proc.returncode
+    with subprocess.Popen(list(argv), cwd=cwd, stdin=subprocess.DEVNULL, pass_fds=fds,
+                          start_new_session=True) as proc:
+        try:
+            return proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            _stop_group(proc)
+            return EXIT_TOOL_TIMEOUT
 
 
-def sweep_3e_commands(repo: Path, golden_k6: Path) -> list[list[str]]:
-    """3E-4's sweeps on the k6 golden tree: ``blif-roundtrip --vtr`` and ``vtr-read-check``."""
+def sweep_3e_commands(repo: Path, odin3: Path, vtr_root: Path, golden_k6: Path, work: Path
+                      ) -> list[list[str]]:
+    """3E-4's sweeps on the k6 golden tree, as its CTest runs them but with the harness's own
+    ``--odin3`` and ``--vtr-root`` (review M5): ``blif-roundtrip --vtr`` and ``vtr-read-check``,
+    their reports under ``work``."""
     return [
         [str(repo / "tools" / "blif-roundtrip" / "blif-roundtrip"), "--vtr",
-         "--techlib", str(repo / qor_legs.LIB_REL), str(golden_k6)],
+         "--rt", str(odin3.parent / "odin3-blif-rt"), "--techlib", str(repo / qor_legs.LIB_REL),
+         "--out", str(work / "blif-roundtrip-vtr"), str(golden_k6)],
         [str(repo / "tools" / "vtr-read-check" / "vtr-read-check"),
-         "--golden-root", str(golden_k6)],
+         "--odin3", str(odin3), "--golden-root", str(golden_k6),
+         "--arch", str(qor_legs.arch_xml_path(vtr_root, "k6")),
+         "--vpr", str(vtr_root / "vpr" / "vpr"), "--work", str(work / "vtr-read-check")],
     ]
 
 
-def sweep_3d_commands(repo: Path, odin3: Path, golden_k6: Path, sets: Sets) -> list[list[str]]:
-    """3D's sweeps in order (3D §13.4, §13.5, §13.8): ``abc-equiv``, ``abc-diff``,
-    ``abc-determinism --mode a`` and ``--mode c`` on the k6 goldens except ``mcml`` and
-    ``LU32PEEng`` (smallest first), then ``--mode d`` (Debug against Release) on the micros only:
-    the committed BLIFs and the k6 ``regression/`` goldens. The options are the ones
-    ``abc-equiv`` takes; ``abc-diff`` and ``abc-determinism`` follow when 3D-5/3D-7 land."""
+ABC_LUT = "6"
+ABC_TIMEOUT_S = "3000"
+DEBUG_ODIN3_REL = Path("build") / "debug" / "odin3"
+EXPECT_FAIL_REL = Path("tests") / "abc" / "equiv_expect_fail.txt"
+
+
+def sweep_3d_commands(repo: Path, odin3: Path, golden_k6: Path, sets: Sets, work: Path
+                      ) -> list[list[str]]:
+    """3D's sweeps in order (3D §13.4, §13.5, §13.8), with the options of the CTest sweep
+    ``abc_equiv_golden`` and the 3D plan's signatures (review H2): ``abc-equiv`` and ``abc-diff``
+    with ``--equiv-check``, ``--lut 6``, ``--timeout 3000`` and ``--expect-fail``; ``abc-equiv``
+    keeps its files under ``work``; ``abc-determinism --mode a`` and ``--mode c`` on the k6
+    goldens except ``mcml`` and ``LU32PEEng`` (smallest first), then ``--mode d`` (Debug against
+    Release, ``--odin3-debug``) on the micros only: the committed BLIFs and the k6
+    ``regression/`` goldens."""
     tools = repo / "tools" / "abc-check"
     files = [str(golden_k6 / "vtr" / d / f"{d}.parmys.blif") for d in sets.order
              if d in sets.gate and d not in BIG_DESIGNS
              and (golden_k6 / "vtr" / d / f"{d}.parmys.blif").is_file()]
     base = ["--odin3", str(odin3)]
+    equiv = ["--equiv-check", str(repo / "tools" / "equiv-check" / "equiv-check"),
+             "--lut", ABC_LUT, "--timeout", ABC_TIMEOUT_S,
+             "--expect-fail", str(repo / EXPECT_FAIL_REL)]
     micros = [str(repo / "tests" / "golden" / "blif"), str(golden_k6 / "regression")]
-    debug = repo / "build" / "debug" / "src" / "cli" / "odin3"
+    debug = repo / DEBUG_ODIN3_REL
     return [
-        [str(tools / "abc-equiv"), *base, "--equiv-check",
-         str(repo / "tools" / "equiv-check" / "equiv-check"), *files],
-        [str(tools / "abc-diff"), *base, *files],
-        [str(tools / "abc-determinism"), "--mode", "a", *base, *files],
-        [str(tools / "abc-determinism"), "--mode", "c", *base, *files],
-        [str(tools / "abc-determinism"), "--mode", "d", "--debug-odin3", str(debug),
-         "--release-odin3", str(odin3), *micros],
+        [str(tools / "abc-equiv"), *base, *equiv, "--keep", str(work / "abc-equiv-golden"),
+         *files],
+        [str(tools / "abc-diff"), *base, *equiv, *files],
+        [str(tools / "abc-determinism"), *base, "--mode", "a", *files],
+        [str(tools / "abc-determinism"), *base, "--mode", "c", *files],
+        [str(tools / "abc-determinism"), *base, "--odin3-debug", str(debug), "--mode", "d",
+         *micros],
     ]
 
 
 def run_sweeps(commands: Sequence[Sequence[str]], emit: Callable[[str], None], what: str,
-               runner: Callable[..., int] | None = None) -> list[str]:
+               runner: Callable[..., int] | None = None,
+               remaining: Callable[[], float | None] | None = None) -> list[str]:
     """Run each command in order; a tool that is not installed is skipped with the line
-    ``vtr-qor: nightly: <what> skipped (<tool> absent)``. Returns the summary line of each."""
+    ``vtr-qor: nightly: <what> skipped (<tool> absent)``. ``remaining`` is the seconds left to
+    the night's deadline: a command is not started when none is left (``not started``), and one
+    that runs is stopped at the deadline (review H3). Returns the summary line of each."""
     run = runner or run_tool
     lines = []
     for argv in commands:
@@ -296,10 +345,20 @@ def run_sweeps(commands: Sequence[Sequence[str]], emit: Callable[[str], None], w
             emit(f"nightly: {what} skipped ({tool.parent.name}/{tool.name} absent)")
             lines.append(f"{tool.name}: skipped (absent)")
             continue
-        code = run(argv)
+        left = None if remaining is None else remaining()
+        if left is not None and left <= 0:
+            emit(f"nightly: {what}: {tool.name} not started before the deadline")
+            lines.append(f"{tool.name}: not started (deadline)")
+            continue
+        code = run(argv) if left is None else run(argv, timeout_s=left)
         lines.append(f"{tool.name}: exit {code}")
         emit(f"nightly: {what}: {tool.name} exit {code}")
     return lines
+
+
+def sweep_ran(lines: Sequence[str]) -> bool:
+    """True when at least one tool of a sweep ran (not all skipped absent or not started)."""
+    return any(": exit " in line for line in lines)
 
 
 # -- the summary -------------------------------------------------------------------------------
@@ -332,6 +391,11 @@ def diff_runs(previous: Sequence[Run], current: Sequence[Run], metrics: Sequence
         label = f"{display_leg(run.leg)} {run.design}"
         if old.status != run.status:
             lines.append(f"{label}: status {old.status} -> {run.status}")
+        for verdict in VERDICT_FIELDS:
+            before_v, after_v = qor_table.text_field(old, verdict), qor_table.text_field(
+                run, verdict)
+            if before_v != after_v:
+                lines.append(f"{label}: {verdict} {before_v} -> {after_v}")
         for name in metrics:
             a, b = qor_table.metric(old, name), qor_table.metric(run, name)
             if a is None or b is None or abs(_pct(a, b)) <= MOVE_LIMIT:
@@ -348,8 +412,11 @@ def previous_table(tables: Path, label_prefix: str, current: Path) -> Path | Non
 
 
 def summary_text(starved: Sequence[str], steps: Sequence[str], moved: Sequence[str]) -> str:
-    """``summary.md``: the starved line first when there is one, the steps, then the movers."""
-    parts = [*starved, "# vtr-qor nightly", "", "## Steps", "", *[f"- {s}" for s in steps], "",
+    """``summary.md``: the starved line first when there is one, then every skipped or
+    not-started step (L3), the steps, then the movers."""
+    skipped = [f"vtr-qor: nightly: {s}" for s in steps if "skipped" in s or "not started" in s]
+    parts = [*starved, *skipped, "# vtr-qor nightly", "", "## Steps", "",
+             *[f"- {s}" for s in steps], "",
              "## Moved more than 2 % or changed status", ""]
     parts += [f"- {m}" for m in moved] if moved else ["None."]
     return "\n".join(parts) + "\n"
@@ -432,6 +499,7 @@ class NightContext:
     run_inner: Callable[[Sequence[str]], int]
     emit: Callable[[str], None]
     refused: Callable[[], int]
+    remaining: Callable[[], float | None] | None = None  # seconds to the deadline (None: no cap)
 
 
 def _legs_arg(legs: Sequence[str]) -> str:
@@ -439,24 +507,43 @@ def _legs_arg(legs: Sequence[str]) -> str:
 
 
 class Night:
-    """One night's steps; ``results`` collects ``(step, exit code)``."""
+    """One night's steps; ``results`` collects ``(step, exit code)``. After a step exits 5 (the
+    disk floor, review M3) no later step or sweep runs; the night writes its summary and exits 5.
+    ``swept`` says which sweeps ran at least one tool (L2)."""
 
     def __init__(self, ctx: NightContext) -> None:
         self.ctx = ctx
         self.results: list[tuple[str, int]] = []
+        self.disk_stop = False
+        self.swept = {"3e": False, "3d": False}
+
+    def _stopped(self, name: str) -> bool:
+        if self.disk_stop:
+            self.results.append((f"{name} (skipped: disk floor)", 0))
+        return self.disk_stop
 
     def inner(self, name: str, argv: Sequence[str]) -> int:
+        if self._stopped(name):
+            return EXIT_DISK
         code = self.ctx.run_inner(argv)
         self.results.append((name, code))
+        self.disk_stop = code == EXIT_DISK
         return code
 
     def tool(self, name: str, argv: Sequence[str]) -> int:
         tool = Path(argv[0])
+        if self._stopped(name):
+            return EXIT_DISK
         if not tool.is_file():
             self.ctx.emit(f"nightly: {name} skipped ({tool.parent.name}/{tool.name} absent)")
             self.results.append((name + " (skipped, absent)", 0))
             return 0
-        code = run_tool(argv)
+        left = None if self.ctx.remaining is None else self.ctx.remaining()
+        if left is not None and left <= 0:
+            self.ctx.emit(f"nightly: {name} not started before the deadline")
+            self.results.append((name + " (not started: deadline)", EXIT_TOOL_TIMEOUT))
+            return EXIT_TOOL_TIMEOUT
+        code = run_tool(argv, timeout_s=left)
         self.results.append((name, code))
         return code
 
@@ -476,7 +563,8 @@ class Night:
 
     def step3(self, *, checks: bool) -> None:
         ctx = self.ctx
-        designs = ",".join(d for d in ctx.sets.order if ctx.sets.designs[d].group == "A")
+        group_a = [d for d in ctx.sets.order if ctx.sets.designs[d].group == "A"]
+        designs = ",".join(group_a)
         plain = [leg for leg in ctx.legs if leg not in ("O", "Oprime")]
         run = ["run", *ctx.common, "--designs", designs]
         self.inner("3 group A", [*run, "--leg", _legs_arg(plain)])
@@ -485,7 +573,8 @@ class Night:
         if "O" in ctx.legs:
             self.inner("3 group A O", [*run, "--leg", "O", "--keep-netlists", "--fcheck"])
         if checks:
-            self.inner("3 equiv", ["equiv", *ctx.common, "--designs", designs])
+            small = ",".join(d for d in group_a if d in EQUIV_REQUIRED and d in ctx.sets.gate)
+            self.inner("3 equiv", ["equiv", *ctx.common, "--designs", small])
             ctx.emit("nightly: rerun-check skipped (lands with plan Task 14)")
 
     def step4(self, slot: Slot) -> bool:
@@ -507,16 +596,26 @@ class Night:
 
     def sweeps(self, plan: NightPlan, sets: Sets) -> list[str]:
         ctx, lines = self.ctx, []
+        work = ctx.out / "nightly" / f"{ctx.today:%Y%m%d}"
+        if self.disk_stop:
+            return ["sweeps: skipped (disk floor)"] if plan.sweep_3e or plan.sweep_3d else []
         if plan.sweep_3e:
-            lines += run_sweeps(sweep_3e_commands(ctx.repo, ctx.golden_k6), ctx.emit,
-                                "3E sweeps")
+            got = run_sweeps(sweep_3e_commands(ctx.repo, ctx.odin3, ctx.vtr_root, ctx.golden_k6,
+                                               work), ctx.emit, "3E sweeps",
+                             remaining=ctx.remaining)
+            self.swept["3e"] = sweep_ran(got)
+            lines += got
         if plan.sweep_3d:
-            lines += run_sweeps(sweep_3d_commands(ctx.repo, ctx.odin3, ctx.golden_k6, sets),
-                                ctx.emit, "3D sweeps")
+            got = run_sweeps(sweep_3d_commands(ctx.repo, ctx.odin3, ctx.golden_k6, sets, work),
+                             ctx.emit, "3D sweeps", remaining=ctx.remaining)
+            self.swept["3d"] = sweep_ran(got)
+            lines += got
         return lines
 
     def exit_code(self) -> int:
         codes = {code for _, code in self.results}
+        if self.disk_stop:
+            return EXIT_DISK
         if codes - {0, 3}:
             return 1
         return 3 if 3 in codes else 0

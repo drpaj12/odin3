@@ -806,6 +806,65 @@ class RunOrderTest(RunnerTestBase):
             "restore_latch*.out", "report_clocks.abc.out", "parse_results.err",
             "qor_results.err"))
 
+    def fcheck_exit(self, verdicts: list[str], jobs: list[Job], **kwargs: Any
+                    ) -> qor_sched.RunSummary:
+        queue = iter(verdicts)
+
+        def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
+            return next(queue)
+
+        with mock.patch.object(qor_sched, "run_fcheck", fake_fcheck):
+            return self.run_jobs(jobs, self.opts(fcheck=True, **kwargs))[0]
+
+    def test_failing_fcheck_shows_in_exit_code(self) -> None:
+        """Review M4: a run whose jobs are ok but whose fcheck failed exits 1; capped or
+        timed-out, 3; a pass, 0."""
+        jobs = [self.job("sha", [{}])]
+        self.assertEqual(self.fcheck_exit(["pass"], jobs).exit_code, 0)
+        self.assertEqual(self.fcheck_exit(["fail"], jobs).exit_code, 1)
+        self.assertEqual(self.fcheck_exit(["error"], jobs).exit_code, 1)
+        self.assertEqual(self.fcheck_exit(["capped"], jobs).exit_code, 3)
+        self.assertEqual(self.fcheck_exit(["timeout"], jobs).exit_code, 3)
+
+    def test_cached_job_gets_its_missing_fcheck(self) -> None:
+        """Review M4: ``--fcheck`` over a cached job with no fcheck verdict runs the check; a
+        cached job that has one is left alone."""
+        job = self.job("sha", [{}], cached=True)
+        job.job_dir.mkdir(parents=True)
+        (job.job_dir / "status").write_text("ok\n")
+        record = {"status": "ok", "key": job.key, "verdicts": {"fcheck": "pass"}}
+        (job.job_dir / "metrics.json").write_text(json.dumps({**record, "verdicts": {
+            "fcheck": "skipped"}}))
+        calls: list[str] = []
+
+        def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
+            calls.append(job.design)
+            return "fail"
+
+        with mock.patch.object(qor_sched, "run_fcheck", fake_fcheck):
+            summary, _ = self.run_jobs([job], self.opts(fcheck=True))
+            self.assertEqual((calls, summary.exit_code, self.starts()), (["sha"], 1, []))
+            (job.job_dir / "metrics.json").write_text(json.dumps(record))
+            self.run_jobs([job], self.opts(fcheck=True))
+        self.assertEqual(calls, ["sha"])  # the second pass found a verdict already
+
+    def test_fcheck_not_started_after_deadline(self) -> None:
+        """Review H3: the job's own fcheck does not start once the night's deadline passed."""
+        calls: list[str] = []
+
+        def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
+            calls.append(job.design)
+            return "pass"
+
+        job = self.job("sha", [{}])
+        opts = self.opts(clock=lambda: 10.0, fcheck=True, deadline=10.0, deadline_text="06:00")
+        run = qor_sched._Run([job], opts, finish_ok, qor_sched.HarnessLog(self.out))
+        with mock.patch.object(qor_sched, "run_fcheck", fake_fcheck), \
+                redirect_stderr(io.StringIO()):
+            self.assertTrue(qor_sched._after_ok(run, job))
+        self.assertEqual(calls, [])
+        self.assertEqual(qor_sched._exit_code([], 0, run.fchecks), 3)
+
     def test_cached_job_not_run(self) -> None:
         """A cached job is not started; one whose metrics.json key is not the planned key is."""
         job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}], cached=True)
@@ -920,6 +979,28 @@ class FcheckTest(RunnerTestBase):
         job = self.finished("sha")
         self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "capped")
         self.assertEqual(self.verdict(job), "capped")
+
+    def test_fcheck_timeout_is_not_error(self) -> None:
+        """Review M2: a Verilator check stopped at the job limit is ``timeout``, not ``error``."""
+        self.mode({"exit": 0, "sleep": 60})
+        job = self.finished("sha")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            verdict = qor_sched.run_fcheck(
+                job, self.opts(clock=time.monotonic, job_timeout_s={"A": 0.5, "B": 0.5}), 2)
+        self.assertEqual((verdict, self.verdict(job)), ("timeout", "timeout"))
+
+    def test_fcheck_stopped_at_the_night_deadline(self) -> None:
+        """Review H3: the check is capped by the night's deadline, not only the job limit."""
+        self.mode({"exit": 0, "sleep": 60})
+        job = self.finished("sha")
+        opts = self.opts(clock=time.monotonic, job_timeout_s={"A": 600, "B": 600},
+                         deadline=time.monotonic() + 0.5, deadline_text="06:00")
+        started = time.monotonic()
+        with redirect_stderr(io.StringIO()):
+            verdict = qor_sched.run_fcheck(job, opts, 2)
+        self.assertEqual(verdict, "timeout")
+        self.assertLess(time.monotonic() - started, 30)
 
     def test_fcheck_p_from_gz(self) -> None:
         job = self.finished("sha", netlist=".model sha\n.names a b\n11 1\n.end\n")
@@ -1054,7 +1135,7 @@ class EquivTest(RunnerTestBase):
             (None, "", "timeout"),
             (2, "equiv-check: cannot read a.blif", "error"),
             (2, "running ABC failed: no such file", "error"),
-            (5, "ABC killed by signal 9", "error"), (3, "", "error"),
+            (5, "ABC killed by signal 9", "capped"), (3, "", "error"),
         ]
         for code, err, expected in cases:
             self.assertEqual(qor_sched.equiv_verdict(code, err), expected, (code, err))
@@ -1073,6 +1154,44 @@ class EquivTest(RunnerTestBase):
         self.assertEqual(self.calls()[-1], [
             "--timeout", "600", str(self.job_dir("sha", "Oprime") / "sha.blif"),
             str(self.job_dir("sha", "O") / "sha.blif")])
+
+    def test_equiv_stopped_at_the_night_deadline(self) -> None:
+        """Review H3: ``equiv-check`` is killed at the night's deadline, well before its own
+        wall cap."""
+        o_job, prime = self.pair("sha")
+        self.mode({"exit": 0, "sleep": 60})
+        opts = self.opts(clock=time.monotonic, deadline=time.monotonic() + 0.5,
+                         deadline_text="06:00")
+        started = time.monotonic()
+        with redirect_stderr(io.StringIO()):
+            verdict = qor_sched.run_equiv("sha", o_job, prime, opts)
+        self.assertEqual(verdict, "timeout")
+        self.assertLess(time.monotonic() - started, 30)
+
+    def test_checks_not_started_after_deadline(self) -> None:
+        """Review H3: past the deadline ``run_checks`` starts nothing and says so (exit 3)."""
+        o_job, _ = self.pair("sha")
+        ran: list[str] = []
+
+        def step(job: Job) -> str:
+            ran.append(job.design)
+            return "equivalent"
+
+        err = io.StringIO()
+        opts = self.opts(clock=lambda: 10.0, deadline=10.0, deadline_text="06:00")
+        with redirect_stderr(err):
+            verdicts, code = qor_sched.run_checks([o_job], opts, step)
+        self.assertEqual((verdicts, code, ran), ([], 3, []))
+        self.assertIn("1 checks not started before the deadline 06:00", err.getvalue())
+
+    def test_capped_deadline(self) -> None:
+        opts = self.opts(clock=lambda: 100.0)
+        self.assertEqual(qor_sched.capped_deadline(opts, 60), 160.0)
+        opts.deadline = 130.0
+        self.assertEqual(qor_sched.capped_deadline(opts, 60), 130.0)
+        self.assertFalse(qor_sched.past_deadline(opts))
+        opts.deadline = 100.0
+        self.assertTrue(qor_sched.past_deadline(opts))
 
     def test_equiv_ram_skipped(self) -> None:
         o_job, prime = self.pair("diffeq1", ram=4)

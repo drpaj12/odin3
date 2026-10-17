@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from datetime import date, datetime
 from pathlib import Path
@@ -20,6 +23,7 @@ from typing import Any
 from unittest import mock
 
 import qor_heavy
+import qor_legs
 import qor_nightly
 import qor_sched
 import vtr_qor
@@ -137,29 +141,107 @@ class PlanTest(unittest.TestCase):
             path = golden / "vtr" / design / f"{design}.parmys.blif"
             path.parent.mkdir(parents=True)
             path.write_text("")
-        commands = qor_nightly.sweep_3d_commands(self.repo, Path("/o/odin3"), golden, SETS)
+        work = Path("/w/nightly/20261019")
+        commands = qor_nightly.sweep_3d_commands(self.repo, Path("/o/odin3"), golden, SETS, work)
         self.assertEqual([Path(c[0]).name for c in commands],
                          ["abc-equiv", "abc-diff", "abc-determinism", "abc-determinism",
                           "abc-determinism"])
+        files = [str(golden / "vtr" / d / f"{d}.parmys.blif") for d in ("ch_intrinsics", "sha")]
+        equiv_check = str(self.repo / "tools" / "equiv-check" / "equiv-check")
+        expect = str(self.repo / "tests" / "abc" / "equiv_expect_fail.txt")
+        common = ["--odin3", "/o/odin3", "--equiv-check", equiv_check, "--lut", "6",
+                  "--timeout", "3000", "--expect-fail", expect]
+        # Review H2: the options of the CTest sweep abc_equiv_golden, kept files under <work>.
+        self.assertEqual(commands[0][1:], [*common, "--keep",
+                                           "/w/nightly/20261019/abc-equiv-golden", *files])
+        self.assertEqual(commands[1][1:], [*common, *files])
+        self.assertEqual(commands[2][1:3], ["--odin3", "/o/odin3"])
         self.assertEqual([c[c.index("--mode") + 1] for c in commands[2:]], ["a", "c", "d"])
+        self.assertNotIn("--equiv-check", commands[2])  # abc-determinism has no such option
+        debug = commands[4]
+        self.assertEqual(debug[debug.index("--odin3-debug") + 1],
+                         str(self.repo / "build" / "debug" / "odin3"))
+        self.assertNotIn("--debug-odin3", debug)
         big = " ".join(" ".join(c) for c in commands[:4])
         self.assertIn("ch_intrinsics.parmys.blif", big)
         self.assertNotIn("mcml", big)  # the large designs are the controller's (3D §13.9)
         self.assertNotIn("LU32PEEng", big)
         self.assertNotIn("/vtr/", " ".join(commands[4]))  # --mode d: the micros only
+        self.assert_abc_equiv_accepts(commands[0])
         seen: list[tuple[list[str], tuple[int, ...]]] = []
 
-        def fake_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-            seen.append((argv, kwargs["pass_fds"]))
-            return subprocess.CompletedProcess(argv, 0)
+        class FakeProc:
+            def __init__(self, argv: list[str], **kwargs: Any) -> None:
+                seen.append((argv, kwargs["pass_fds"]))
+
+            def __enter__(self) -> FakeProc:
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+            def wait(self, timeout: float | None = None) -> int:
+                return 0
 
         lines: list[str] = []
         with mock.patch.object(qor_sched, "lock_fds", return_value=(9,)), \
-                mock.patch.object(subprocess, "run", fake_run):
+                mock.patch.object(subprocess, "Popen", FakeProc):
             summary = qor_nightly.run_sweeps(commands, lines.append, "3D sweeps")
         self.assertEqual([argv for argv, _ in seen], commands)
         self.assertEqual({fds for _, fds in seen}, {(9,)})
         self.assertEqual(summary[0], "abc-equiv: exit 0")
+
+    def assert_abc_equiv_accepts(self, argv: list[str]) -> None:
+        """The present ``abc-equiv``'s own parser accepts the argv (no guessed option)."""
+        spec = importlib.util.spec_from_file_location(
+            "abc_equiv", REPO_ROOT / "tools" / "abc-check" / "abc_equiv.py")
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["abc_equiv"] = module
+        spec.loader.exec_module(module)
+        args = module._parser().parse_args(argv[1:])  # exits on an option it does not know
+        self.assertEqual(str(args.expect_fail), argv[argv.index("--expect-fail") + 1])
+
+    def test_run_tool_kills_the_group_at_the_deadline(self) -> None:
+        """Review H3: a tool that outlives its timeout is stopped with its children."""
+        script = Path(self._tmp.name) / "hang.sh"
+        pidfile = Path(self._tmp.name) / "child.pid"
+        script.write_text(f"#!/bin/sh\nsleep 300 &\necho $! > {pidfile}\nwait\n")
+        script.chmod(0o755)
+        started = time.monotonic()
+        with mock.patch.object(qor_sched, "lock_fds", return_value=()):
+            code = qor_nightly.run_tool([str(script)], timeout_s=1.0)
+        self.assertEqual(code, qor_nightly.EXIT_TOOL_TIMEOUT)
+        self.assertLess(time.monotonic() - started, 60)
+        child = int(pidfile.read_text())
+        with self.assertRaises(ProcessLookupError):
+            for _ in range(50):  # the child is reaped by init once its group is gone
+                os.kill(child, 0)
+                time.sleep(0.1)
+            os.kill(child, 9)
+            os.kill(child, 0)
+
+    def test_sweeps_stop_at_the_deadline(self) -> None:
+        tools = self.repo / "tools" / "abc-check"
+        tools.mkdir(parents=True)
+        (tools / "abc-equiv").write_text("#!/bin/sh\n")
+        lines: list[str] = []
+        calls: list[dict[str, Any]] = []
+
+        def runner(argv: list[str], **kwargs: Any) -> int:
+            calls.append(kwargs)
+            return 0
+
+        out = qor_nightly.run_sweeps([[str(tools / "abc-equiv")]], lines.append, "3D sweeps",
+                                     runner, remaining=lambda: 12.5)
+        self.assertEqual((out, calls), (["abc-equiv: exit 0"], [{"timeout_s": 12.5}]))
+        out = qor_nightly.run_sweeps([[str(tools / "abc-equiv")]], lines.append, "3D sweeps",
+                                     runner, remaining=lambda: 0.0)
+        self.assertEqual(out, ["abc-equiv: not started (deadline)"])
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(qor_nightly.sweep_ran(out))
+        self.assertFalse(qor_nightly.sweep_ran(["abc-equiv: skipped (absent)"]))
+        self.assertTrue(qor_nightly.sweep_ran(["abc-equiv: exit 1"]))
 
     def test_absent_tools_are_skipped(self) -> None:
         lines: list[str] = []
@@ -189,10 +271,21 @@ class PlanTest(unittest.TestCase):
         sunday = qor_nightly.plan_night(self.state(), self.repo, SUNDAY)
         self.assertEqual((sunday.sweep_3d, sunday.slot), (True, None))
         golden = Path("/g") / K6
-        commands = qor_nightly.sweep_3e_commands(self.repo, golden)
+        work = Path("/w/n")
+        commands = qor_nightly.sweep_3e_commands(self.repo, Path("/b/release/odin3"),
+                                                 Path("/vtr"), golden, work)
         self.assertEqual([Path(c[0]).name for c in commands], ["blif-roundtrip",
                                                                "vtr-read-check"])
         self.assertEqual(commands[0][1], "--vtr")
+        # Review M5: the harness's own odin3 and VTR, and reports kept under <work>.
+        roundtrip, read_check = commands
+        self.assertEqual(roundtrip[roundtrip.index("--rt") + 1], "/b/release/odin3-blif-rt")
+        self.assertEqual(roundtrip[roundtrip.index("--out") + 1], "/w/n/blif-roundtrip-vtr")
+        self.assertEqual(read_check[read_check.index("--odin3") + 1], "/b/release/odin3")
+        self.assertEqual(read_check[read_check.index("--vpr") + 1], "/vtr/vpr/vpr")
+        self.assertEqual(read_check[read_check.index("--arch") + 1],
+                         str(qor_legs.arch_xml_path(Path("/vtr"), "k6")))
+        self.assertEqual(read_check[read_check.index("--work") + 1], "/w/n/vtr-read-check")
 
     def test_no_recorded_commit_is_no_change(self) -> None:
         plan = qor_nightly.plan_night(qor_nightly.default_state(), self.repo, MONDAY)
@@ -268,6 +361,12 @@ class SummaryTest(unittest.TestCase):
 
 
 class UnitFileTest(unittest.TestCase):
+    def test_service_is_bounded(self) -> None:
+        """Review H3: the unit stops the run itself, so a hung tool cannot hold the lock."""
+        service = (REPO_ROOT / "tools" / "vtr-qor" / "systemd"
+                   / "odin3-vtr-qor-nightly.service").read_text().splitlines()
+        self.assertTrue(any(line.startswith("RuntimeMaxSec=") for line in service))
+
     def test_unit_files(self) -> None:
         directory = REPO_ROOT / "tools" / "vtr-qor" / "systemd"
         service = (directory / "odin3-vtr-qor-nightly.service").read_text().splitlines()
@@ -298,6 +397,42 @@ class CliTest(CliTestBase):
             code, _, err = self.cli("nightly")
         self.assertEqual((code, err), (2, f"vtr-qor: {qor_heavy.MSG_NOT_INSIDE}\n"))
         self.assertEqual(ran, [])
+
+    def test_default_odin3_is_the_real_target_path(self) -> None:
+        """Review H1: ``add_executable(odin3 ...)`` lands in ``build/<preset>/odin3``."""
+        self.assertEqual(vtr_qor.ODIN3_REL, Path("build/release/odin3"))
+        self.assertEqual(qor_nightly.DEBUG_ODIN3_REL, Path("build/debug/odin3"))
+        binary = self.repo / "build" / "release" / "odin3"
+        binary.parent.mkdir(parents=True)
+        binary.write_text("")
+        self.assertEqual(vtr_qor._odin3(argparse.Namespace(odin3=None)), binary)
+        self.assertTrue((REPO_ROOT / "CMakeLists.txt").read_text().count(
+            "add_executable(odin3 src/cli/main.c)") == 1)
+
+    def test_nightly_without_odin3_fails_loudly(self) -> None:
+        """Review H1: a missing binary is exit 2 and a clear line, not a quiet P-only night."""
+        ran: list[list[str]] = []
+
+        def record(argv: Any) -> int:
+            ran.append(list(argv))
+            return 0
+
+        with mock.patch.object(vtr_qor, "run_inner", record):
+            code, _, err = self.cli("nightly", "--odin3", str(self.tmp / "build" / "release"
+                                                              / "odin3"), common=False)
+        self.assertEqual(code, 2)
+        self.assertIn("nightly: odin3 binary not found: ", err)
+        self.assertEqual(ran, [])
+
+    def test_admission_deadline_does_not_slide(self) -> None:
+        """Review H3: every step of the night sees the same deadline."""
+        clock = [100.0]
+        with mock.patch.object(time, "monotonic", lambda: clock[0]):
+            admission = vtr_qor.Admission(50.0, "06:00", lambda job: 0.0)
+            first = admission.start()[0]
+            clock[0] = 130.0
+            self.assertEqual((admission.start()[0], first, admission.remaining()),
+                             (150.0, 150.0, 20.0))
 
     def test_check_lib_argv(self) -> None:
         argv = qor_nightly.check_lib_command(Path("/r"), Path("/v"))
@@ -402,6 +537,71 @@ class NightRunTest(CliTestBase):
         self.assertEqual(code, 0)
         self.assertFalse(any(c[0] == "equiv" for c in self.calls_made))
         self.assertEqual((state["next_slot"], state["starved"]), (5, {}))
+
+    def test_equiv_only_on_the_small_set(self) -> None:
+        """Review M1 (PHASE3 #16): the nightly's equiv runs on gate designs inside the small
+        set only, and the bgm slot runs none."""
+        state = qor_nightly.default_state()
+        plan = qor_nightly.NightPlan(ROTATION[1], False, False, False, 0)
+        self.night(state, plan)
+        (equiv,) = [c for c in self.calls_made if c[0] == "equiv" and "bgm" not in c]
+        designs = set(equiv[equiv.index("--designs") + 1].split(","))
+        self.assertTrue({"ch_intrinsics", "sha", "diffeq1", "blob_merge"} <= designs)
+        self.assertTrue(designs <= qor_sched.EQUIV_REQUIRED)
+        self.assertFalse({"raygentop", "LU8PEEng", "bgm", "mcml"} & designs)
+        self.assertFalse(any(c[0] == "equiv" and "bgm" in c for c in self.calls_made))
+        self.assertEqual(len(qor_sched.EQUIV_REQUIRED), 14)
+        self.assertFalse(ROTATION[1].equiv)
+
+    def test_disk_stop_ends_the_night(self) -> None:
+        """Review M3: a step that exits 5 stops every later step and sweep; the summary is
+        written, the rotation does not move, no sweep commit is recorded, exit 5."""
+        state = qor_nightly.default_state()
+        state.update(next_slot=3, last_sweep_commit="", last_3d_commit="")
+        plan = qor_nightly.NightPlan(None, False, True, True, 0)
+        seen = {"n": 0}
+
+        def stop_on_third(argv: Any) -> int:
+            seen["n"] += 1
+            self.calls_made.append(list(argv))
+            return 5 if seen["n"] == 3 else 0
+
+        self.inner = stop_on_third  # type: ignore[method-assign]
+        with mock.patch.object(qor_nightly, "run_sweeps") as sweeps:
+            code, summary = self.night(state, plan)
+        self.assertEqual(code, 5)
+        sweeps.assert_not_called()
+        self.assertEqual(len(self.calls_made), 3)
+        self.assertEqual(state["next_slot"], 3)
+        self.assertFalse(state["last_sweep_commit"] and plan.sweep_3e)
+        text = summary.read_text()
+        self.assertIn("skipped: disk floor", text)
+        self.assertIn("vtr-qor: nightly: ", text.splitlines()[0])  # skips listed first (L3)
+
+    def test_sweep_commit_recorded_only_when_a_tool_ran(self) -> None:
+        """Review L2: all tools absent or not started leaves the recorded commit alone."""
+        state = qor_nightly.default_state()
+        state.update(last_sweep_commit="a" * 40, last_3d_commit="b" * 40)
+        plan = qor_nightly.NightPlan(None, False, True, True, 0)
+        with mock.patch.object(qor_nightly, "run_sweeps",
+                               return_value=["abc-equiv: skipped (absent)"]):
+            self.night(state, plan)
+        self.assertEqual((state["last_sweep_commit"], state["last_3d_commit"]),
+                         ("a" * 40, "b" * 40))
+        with mock.patch.object(qor_nightly, "run_sweeps", return_value=["abc-equiv: exit 0"]):
+            self.night(state, plan)
+        self.assertNotEqual(state["last_sweep_commit"], "a" * 40)
+        self.assertNotEqual(state["last_3d_commit"], "b" * 40)
+
+    def test_summary_lists_verdict_changes(self) -> None:
+        """Review M4: a changed fcheck or equiv verdict is listed like a moved metric."""
+        def run(fcheck: str) -> Run:
+            return Run(leg="O", design="sha", arch="k6", key12="a" * 12, status="ok",
+                       gating=True, metrics={"verdicts": {"fcheck": fcheck, "equiv": "equivalent"}})
+
+        lines = qor_nightly.diff_runs([run("pass")], [run("fail")], [])
+        self.assertEqual(lines, ["O sha: fcheck pass -> fail"])
+        self.assertEqual(qor_nightly.diff_runs([run("pass")], [run("pass")], []), [])
 
     def test_sweep_night_skips_step_4(self) -> None:
         state = qor_nightly.default_state()

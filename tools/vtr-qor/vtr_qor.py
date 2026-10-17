@@ -3,7 +3,7 @@
 Subcommands here: ``doctor``, ``run``, ``fcheck``, ``status``, ``clean``, ``table``, ``gate`` and
 ``publish``; Tasks 12-15 add the rest of spec §9. The common options are §9's: ``--vtr-root``
 (default ``$VTR_ROOT``, else ``~/odin3-ws/external/vtr-verilog-to-routing``), ``--odin3`` (default
-``<repo>/build/release/src/cli/odin3``), ``--out`` (default ``$ODIN3_QOR_DIR``, else
+``<repo>/build/release/odin3``), ``--out`` (default ``$ODIN3_QOR_DIR``, else
 ``~/odin3-ws/work/vtr-qor``; it must lie under ``~/odin3-ws/work`` or ``/tmp/claude-1000``, point
 (m)), ``--arch k6|earch``, ``--no-wait``, ``--allow-vtr-drift`` and ``-v``.
 
@@ -25,11 +25,12 @@ Subcommands here: ``doctor``, ``run``, ``fcheck``, ``status``, ``clean``, ``tabl
   (spec §8.1) on existing ``ok`` jobs of the current keys, one at a time with ``--verilator-j``
   2 in group A and 1 in group B, and writes ``metrics.json`` ``verdicts.fcheck``; ``run --fcheck``
   does the same right after each job. A missing job is named and makes the exit 1; exit 1 for a
-  ``fail`` or ``error``, 3 for ``capped``.
+  ``fail`` or ``error`` (also from ``run --fcheck``), 3 for ``capped`` or ``timeout``.
 - ``equiv (--set S | --designs D)`` (heavy) runs ``tools/equiv-check`` on the O' job's and the O
   job's kept ``<d>.blif`` (spec §8.2) and writes the O job's ``verdicts.equiv`` (``equivalent``,
-  ``differs``, ``ram``, ``multiclock``, ``timeout``, ``error``). Exit 1 for ``differs`` or
-  ``error`` or a missing job, 3 for ``timeout``.
+  ``differs``, ``ram``, ``multiclock``, ``timeout``, ``capped``, ``error``). Exit 1 for
+  ``differs`` or
+  ``error`` or a missing job, 3 for ``timeout`` or ``capped``.
 - ``status`` prints one line per (arch, leg) of the current VTR commit:
   ``<arch> <leg> latest <key12|-> ok <n> failed <m> age <d>d``.
 - ``clean [--keep N]`` runs retention (spec §5.4, ``qor_sched.prune``) over every
@@ -80,7 +81,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
@@ -104,7 +105,8 @@ SCRIPT = Path(__file__).resolve()
 SCHEMA = 1
 DEFAULT_VTR_REL = Path("odin3-ws") / "external" / "vtr-verilog-to-routing"
 DEFAULT_OUT_REL = Path("odin3-ws") / "work" / "vtr-qor"
-ODIN3_REL = Path("build") / "release" / "src" / "cli" / "odin3"
+# add_executable(odin3 ...) puts the binary in build/<preset>/
+ODIN3_REL = Path("build") / "release" / "odin3"
 VTR_PATHS_REL = Path("vtr_flow") / "scripts" / "python_libs" / "vtr" / "paths.py"
 ARCHES = ("k6", "earch")
 EARCH = "earch"
@@ -669,12 +671,25 @@ class Admission:
     seconds: float
     text: str
     expected_s: Callable[[Job], float]
+    begun: float = field(default_factory=lambda: time.monotonic())
 
     def start(self) -> tuple[float, str, Callable[[Job], float]]:
-        return time.monotonic() + self.seconds, self.text, self.expected_s
+        """The one deadline of the night: fixed when the admission is made, so each later step
+        gets the same end, not a fresh ``seconds`` from its own start (review H3)."""
+        return self.begun + self.seconds, self.text, self.expected_s
+
+    def remaining(self) -> float:
+        """Seconds to the deadline (negative once it has passed): the cap of a non-job step."""
+        return self.begun + self.seconds - time.monotonic()
 
 
 ADMISSION: Admission | None = None  # set by cmd_nightly only (a module seam, never the environment)
+
+
+def _apply_admission(opts: RunOptions) -> None:
+    """The nightly's deadline (plan Task 13) on a run or a check; every non-job step honours it."""
+    if ADMISSION is not None:
+        opts.deadline, opts.deadline_text, opts.expected_s = ADMISSION.start()
 
 
 def run_inner(argv: Sequence[str]) -> int:
@@ -720,8 +735,7 @@ def cmd_run(args: argparse.Namespace, argv: Sequence[str]) -> int:
             print(f"{PREFIX}plan: {line}", file=sys.stderr)
     opts.keep_netlists = frozenset(legs) if args.keep_netlists else frozenset()
     opts.retain_planned = True
-    if ADMISSION is not None:  # the nightly's deadline (plan Task 13)
-        opts.deadline, opts.deadline_text, opts.expected_s = ADMISSION.start()
+    _apply_admission(opts)
     ctx = RunContext(vtr_root=vtr_root, arch_xml=qor_legs.arch_xml_path(vtr_root, args.arch),
                      vtr_commit=commit, vtr_drift=drift, odin3_commit=odin3_commit(legs, odin3),
                      opts=opts)
@@ -776,6 +790,7 @@ def cmd_fcheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
     jobs, missing, _ = _plan_existing(args, _legs(args.leg), "fcheck")
     opts.scope = qor_heavy.reexec_under_lock(list(argv), script=SCRIPT, xl=args.xl,
                                              no_wait=args.no_wait, lock=qor_heavy.HEAVY_LOCK)
+    _apply_admission(opts)
 
     def step(job: Job) -> str:
         return qor_sched.run_fcheck(job, opts, qor_sched.FCHECK_J[job.group])
@@ -783,7 +798,7 @@ def cmd_fcheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
     verdicts, stop = qor_sched.run_checks(jobs, opts, step)
     counts = ", ".join(f"{verdicts.count(v)} {v}" for v in sorted(set(verdicts)))
     _warn_log(opts, f"fcheck done: {counts or 'nothing to check'}")
-    return _checks_exit(verdicts, missing, stop, FCHECK_BAD, frozenset({"capped"}))
+    return _checks_exit(verdicts, missing, stop, FCHECK_BAD, frozenset({"capped", "timeout"}))
 
 
 EQUIV_BAD = frozenset({"differs", "error"})
@@ -792,7 +807,8 @@ EQUIV_BAD = frozenset({"differs", "error"})
 def cmd_equiv(args: argparse.Namespace, argv: Sequence[str]) -> int:
     """``equiv (--set S | --designs D)``: spec §8.2 on existing O and O' jobs (both kept with
     ``--keep-netlists``): ``equiv-check`` before and after ``abc``. Always heavy, as it runs
-    ABC's ``dsec``. Exit 1 for ``differs`` or ``error`` or a missing job, 3 for ``timeout``."""
+    ABC's ``dsec``. Exit 1 for ``differs`` or ``error`` or a missing job, 3 for ``timeout`` or
+    ``capped``."""
     opts = RunOptions(out=_out(args), meminfo=MEMINFO)
     jobs, missing, _ = _plan_existing(args, ("O", "Oprime"), "equiv")
     primes = {job.design: job for job in jobs if job.leg == "Oprime"}
@@ -807,6 +823,7 @@ def cmd_equiv(args: argparse.Namespace, argv: Sequence[str]) -> int:
             missing += 1
     opts.scope = qor_heavy.reexec_under_lock(list(argv), script=SCRIPT, no_wait=args.no_wait,
                                              lock=qor_heavy.HEAVY_LOCK)
+    _apply_admission(opts)
     by_o = {id(o): prime for o, prime in pairs}
 
     def step(job: Job) -> str:
@@ -815,7 +832,8 @@ def cmd_equiv(args: argparse.Namespace, argv: Sequence[str]) -> int:
     verdicts, stop = qor_sched.run_checks([o for o, _ in pairs], opts, step)
     counts = ", ".join(f"{verdicts.count(v)} {v}" for v in sorted(set(verdicts)))
     _warn_log(opts, f"equiv done: {counts or 'nothing to check'}")
-    return _checks_exit(verdicts, missing, stop, EQUIV_BAD, frozenset({"timeout"}))
+    return _checks_exit(verdicts, missing, stop, EQUIV_BAD,
+                        frozenset({"timeout", "capped"}))
 
 
 def _warn_log(opts: RunOptions, message: str) -> None:
@@ -949,13 +967,17 @@ def _run_night(args: argparse.Namespace, ctx: qor_nightly.NightContext,
         slot_ran = night.step4(slot)
     sweeps = night.sweeps(plan, qor_sched.load_sets())
     full = qor_nightly.ROTATION[args.slot - 1] if args.slot else plan.slot
-    if full is not None:  # a slot with no available leg advances; a refused one counts a night
+    if full is not None and not night.disk_stop:
+        # a slot with no available leg advances; a refused one counts a night; a night the disk
+        # floor stopped settles nothing (review M3)
         qor_nightly.settle_slot(state, full, ran=slot_ran is not False, today=ctx.today)
     head = qor_nightly.head_commit(ctx.repo)
-    if plan.sweep_3e or not state["last_sweep_commit"]:
-        state.update(last_sweep_commit=head, last_sweep_date=ctx.today.isoformat())
-    if plan.sweep_3d or not state["last_3d_commit"]:
-        state["last_3d_commit"] = head
+    if not night.disk_stop:
+        # a sweep's commit is recorded only when a tool of it ran (review L2)
+        if (plan.sweep_3e and night.swept["3e"]) or not state["last_sweep_commit"]:
+            state.update(last_sweep_commit=head, last_sweep_date=ctx.today.isoformat())
+        if (plan.sweep_3d and night.swept["3d"]) or not state["last_3d_commit"]:
+            state["last_3d_commit"] = head
     qor_nightly.save_state(ctx.out / "nightly" / qor_nightly.STATE_FILE, state)
     table = _nightly_table(args, ctx, [leg for leg in ctx.legs if leg != "Oprov"])
     nights = plan.starved_nights + (slot_ran is False)
@@ -975,6 +997,9 @@ def cmd_nightly(args: argparse.Namespace, argv: Sequence[str]) -> int:
     global ADMISSION  # noqa: PLW0603 (the module seam read by cmd_run)
     qor_heavy.require_heavy()
     out, odin3, vtr_root = _out(args), _odin3(args), _vtr_root(args)
+    if not odin3.is_file():  # the nightly's purpose is the O, O' and P' legs (review H1)
+        raise HeavyError(EXIT_USAGE, f"nightly: odin3 binary not found: {odin3} "
+                                     "(build it, or pass --odin3)")
     now = datetime.now().astimezone()
     deadline = qor_nightly.nightly_deadline(now, args.budget)
     sets = qor_sched.load_sets()
@@ -985,7 +1010,8 @@ def cmd_nightly(args: argparse.Namespace, argv: Sequence[str]) -> int:
         golden_k6=qor_legs.GOLDEN_ROOT / qor_legs.ARCH_BASES["k6"], sets=sets,
         legs=_available_legs(odin3), common=tuple(common), today=now.date(),
         run_inner=run_inner, emit=lambda m: _warn_log(RunOptions(out=out), m),
-        refused=_refused_counter(out))
+        refused=_refused_counter(out), remaining=lambda: ADMISSION.remaining()
+        if ADMISSION is not None else None)
     state = qor_nightly.load_state(out / "nightly" / qor_nightly.STATE_FILE)
     plan = qor_nightly.plan_night(state, ctx.repo, ctx.today)
     ADMISSION = Admission((deadline - now).total_seconds(), deadline.strftime("%H:%M"),
@@ -1213,6 +1239,9 @@ def cmd_gate(args: argparse.Namespace, argv: Sequence[str]) -> int:
     print(f"{qor_table.gate_title(arch if isinstance(arch, str) else '')}: {state}")
     violations = gate_object.get("violations")
     for line in violations if isinstance(violations, list) else []:
+        print(line)
+    notes = gate_object.get("notes")
+    for line in notes if isinstance(notes, list) else []:
         print(line)
     return GATE_EXIT[state]
 
@@ -1525,7 +1554,7 @@ def _parser() -> argparse.ArgumentParser:
     common.add_argument("--vtr-root", type=Path, metavar="DIR",
                         help="VTR (default $VTR_ROOT, else ~/odin3-ws/external/vtr-...)")
     common.add_argument("--odin3", type=Path, metavar="PATH",
-                        help="the odin3 binary (default <repo>/build/release/src/cli/odin3)")
+                        help="the odin3 binary (default <repo>/build/release/odin3)")
     common.add_argument("--out", type=Path, metavar="DIR",
                         help="the work tree (default $ODIN3_QOR_DIR, else ~/odin3-ws/work/vtr-qor)")
     common.add_argument("--arch", choices=ARCHES, default="k6")
@@ -1570,7 +1599,7 @@ def _parser() -> argparse.ArgumentParser:
     equiv.add_argument("--designs", default="", metavar="D[,D...]")
     nightly = sub.add_parser("nightly", parents=[common],
                              help="the unattended night's steps (started inside heavy-run)")
-    nightly.add_argument("--budget", type=float, default=qor_nightly.BUDGET_H, metavar="H",
+    nightly.add_argument("--budget", type=float, default=qor_nightly.NIGHTLY_BUDGET_H, metavar="H",
                          help="hours; the deadline is the earlier of 06:00 and the start + H")
     nightly.add_argument("--slot", type=int, choices=range(1, len(qor_nightly.ROTATION) + 1),
                          metavar="N", help="run group B slot N instead of the rotation's next")
