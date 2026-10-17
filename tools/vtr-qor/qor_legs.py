@@ -303,6 +303,32 @@ def build_commands(leg: str, design: str, ctx: LegContext) -> list[Command]:
     ]
 
 
+FCHECK_VECTORS = 50000
+FCHECK_SEED = 1
+FCHECK_VERDICTS = {0: "pass", 1: "fail", 2: "error"}
+
+
+def fcheck_command(ctx: LegContext, design: str, netlist: Path, verilator_j: int) -> Command:
+    """Spec §8.1: VTR's ``run_random_check.py`` on the design's RTL and ``netlist``, its work
+    directory ``<J>/fcheck`` (the script's default would write into the working directory),
+    ``cwd`` ``<J>``, output to ``<J>/fcheck.log``, VTR's venv first on ``PATH``."""
+    script = ctx.vtr_root / "mosaic" / "verilator_check" / "run_random_check.py"
+    argv = (str(ctx.python), str(script), "--rtl", str(design_verilog(ctx.vtr_root, design)),
+            "--post-synth-blif", str(netlist), "--work-dir", str(ctx.job_dir / "fcheck"),
+            "--vectors", str(FCHECK_VECTORS), "--seed", str(FCHECK_SEED),
+            "--verilator-j", str(verilator_j))
+    path = f"{ctx.vtr_root / '.venv' / 'bin'}:{os.environ.get('PATH', os.defpath)}"
+    return Command(argv, ctx.job_dir, ctx.job_dir / "fcheck.log", (("PATH", path),))
+
+
+def fcheck_verdict(returncode: int, capped: bool) -> str:
+    """Spec §8.1 (review H6): the script's exit 0 is ``pass``, 1 ``fail`` (vectors mismatch), 2
+    ``error``; a kill by the memory cap is ``capped``; anything else is ``error``."""
+    if capped:
+        return "capped"
+    return FCHECK_VERDICTS.get(returncode, "error")
+
+
 def registered_passes(odin3_help: str) -> frozenset[str]:
     """The passes ``odin3 --help`` lists (point (t)): lines ``  <name>`` followed by a blank, a
     colon or the end; option lines (``  --…``) never match."""

@@ -332,7 +332,8 @@ class Job:
     digits (the directory); ``job_dir`` is ``<out>/<vtr12>/<arch base>/<leg>/<key12>/<d>``.
     ``inputs`` are the key inputs the planner hashed (``job.json`` records them); None only for
     jobs built by hand. ``skip_reason`` is E-QH6's text for a P' or R job whose Parmys golden
-    failed ``qor_legs.verify_golden``: the runner records it ``skipped`` and runs nothing."""
+    failed ``qor_legs.verify_golden``: the runner records it ``skipped`` and runs nothing. ``ctx``
+    is the ``LegContext`` its commands were built from (``fcheck`` needs VTR's root and Python)."""
 
     leg: str
     design: str
@@ -346,6 +347,7 @@ class Job:
     cached: bool
     inputs: KeyInputs | None = None
     skip_reason: str | None = None
+    ctx: LegContext | None = None
 
 
 @dataclass(frozen=True)
@@ -469,7 +471,7 @@ def _plan_job(leg: str, design: str, req: PlanRequest, sets: Sets, com: _Common)
         key=key, key12=key12, job_dir=job_dir,
         commands=tuple(qor_legs.build_commands(leg, design, ctx)),
         cached=skip is None and not req.rerun and is_cached(job_dir, key), inputs=inputs,
-        skip_reason=skip,
+        skip_reason=skip, ctx=ctx,
     )
 
 
@@ -1548,10 +1550,105 @@ def _prune_after(jobs: Sequence[Job], opts: RunOptions) -> None:
 # -- the run -----------------------------------------------------------------------------------
 
 
+def _gunzip(src: Path, dst: Path) -> None:
+    """Decompress ``src`` into ``dst`` (written by atomic rename)."""
+    tmp = dst.with_name(f".{dst.name}.tmp")
+    with gzip.open(src, "rb") as fin, tmp.open("wb") as fout:
+        shutil.copyfileobj(fin, fout, _CHUNK)
+    os.replace(tmp, dst)
+
+
+def _fcheck_netlist(job: Job) -> Path | str:
+    """The netlist the check reads: P's kept ``.gz`` decompressed into ``<J>/fcheck/``, another
+    leg's kept ``run/<d>.pre-vpr.blif``; else E-QH10-style text saying why there is none."""
+    name = f"{job.design}.pre-vpr.blif"
+    if job.leg == "P":
+        gz = job.job_dir / "run" / (name + ".gz")
+        if not _regular(gz):
+            return f"fcheck: {_label(job)}: no kept netlist ({gz.name} is missing)"
+        work = job.job_dir / "fcheck"
+        work.mkdir(exist_ok=True)
+        _gunzip(gz, work / name)
+        return work / name
+    kept = job.job_dir / "run" / name
+    if not _regular(kept):
+        return f"fcheck: {_label(job)}: no kept netlist (run with --keep-netlists)"
+    return kept
+
+
+def record_verdict(job: Job, name: str, verdict: str) -> None:
+    """Rewrite ``metrics.json`` ``verdicts.<name>`` atomically. A job with no ``ok`` record of
+    this key has no verdict to hold (HeavyError)."""
+    path = job.job_dir / "metrics.json"
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HeavyError(EXIT_FAILED, f"{_label(job)}: no metrics.json to hold the {name} "
+                                      f"verdict ({exc})") from exc
+    if not isinstance(record, dict) or record.get("key") != job.key:
+        raise HeavyError(EXIT_FAILED, f"{_label(job)}: metrics.json is not this job's record; "
+                                      f"{name} verdict not recorded")
+    verdicts = record.get("verdicts")
+    record["verdicts"] = {**(verdicts if isinstance(verdicts, dict) else {}), name: verdict}
+    _write_atomic(path, json.dumps(record, sort_keys=True, indent=1) + "\n")
+
+
+def _fcheck_outcome(job: Job, cmd: Command, opts: RunOptions, scope: ScopeInfo) -> str:
+    oom_before = qor_heavy.oom_kills(scope)
+    outcome = run_command(cmd, opts, deadline=opts.clock() + opts.job_timeout_s[job.group])
+    if outcome.kind == ABORTED:
+        _emit(opts, outcome.error)
+    elif outcome.kind == TIMEOUT:
+        _emit(opts, f"{_label(job)}: fcheck timeout after {opts.job_timeout_s[job.group]} s")
+    elif outcome.kind == "error":
+        _emit(opts, f"{_label(job)}: fcheck {outcome.error}")
+    if outcome.returncode is None:
+        return "error"
+    capped = outcome.returncode != 0 and qor_heavy.oom_kills(scope) > oom_before
+    return qor_legs.fcheck_verdict(outcome.returncode, capped)
+
+
 def run_fcheck(job: Job, opts: RunOptions, verilator_j: int) -> str:
-    """The Verilator random check of one finished job (plan Task 11 implements it here); until
-    then every verdict is ``skipped``."""
-    return SKIPPED
+    """The Verilator random check of one finished ``ok`` job (spec §8.1, decision 16a), inside
+    the verified heavy run and the job cgroup. Its verdict (``pass``, ``fail``, ``error``,
+    ``capped``) goes to ``metrics.json`` ``verdicts.fcheck``. ``<J>/fcheck`` is removed on
+    ``pass`` and kept otherwise; ``<J>/fcheck.log`` stays."""
+    scope = _heavy_scope(opts)
+    if job.ctx is None:
+        raise HeavyError(EXIT_USAGE, f"{_label(job)}: fcheck needs a planned job")
+    work = job.job_dir / "fcheck"
+    netlist = _fcheck_netlist(job)
+    if isinstance(netlist, str):
+        _emit(opts, netlist)
+        verdict = "error"
+    else:
+        cmd = qor_legs.fcheck_command(job.ctx, job.design, netlist, verilator_j)
+        verdict = _fcheck_outcome(job, cmd, opts, scope)
+    record_verdict(job, "fcheck", verdict)
+    if verdict == "pass":
+        qor_heavy.safe_rmtree(work, job_out_root(job))
+    _emit(opts, f"fcheck {_label(job)}: {verdict}")
+    return verdict
+
+
+def run_checks(jobs: Sequence[Job], opts: RunOptions, step: Callable[[Job], str]
+               ) -> tuple[list[str], int]:
+    """Run ``step`` (a check on one finished job: ``run_fcheck``, ``run_equiv``) over ``jobs``
+    one at a time, in the order given, each admitted first (spec §7.3), inside the verified heavy
+    run; SIGTERM and SIGHUP stop it as in ``run_jobs``. Returns the verdicts and the exit code
+    (5 when admission stopped the run, else 0)."""
+    _heavy_scope(opts)
+    log = HarnessLog(opts.out)
+    opts.log = log
+    verdicts: list[str] = []
+    with _signals_as_exit():
+        for index, job in enumerate(jobs):
+            if _admit_loop(job, opts, deadline=False) == STOP:
+                for line in _pause_lines(opts, len(jobs) - index):
+                    log.emit(line)
+                return verdicts, EXIT_DISK
+            verdicts.append(step(job))
+    return verdicts, EXIT_OK
 
 
 def _grouped(jobs: Sequence[Job]) -> list[Job]:
@@ -1617,17 +1714,20 @@ def _after_ok(run: _Run, job: Job) -> bool:
     return True
 
 
-def _stop_for_pause(run: _Run, index: int) -> None:
-    """E-QH11 (or its memory twin): admission waited ``PAUSE_LIMIT_S``; exit 5."""
+def _pause_lines(opts: RunOptions, left: int) -> list[str]:
+    """E-QH11 (or its memory twin): admission waited ``PAUSE_LIMIT_S``."""
     hours = PAUSE_LIMIT_S // SECONDS_PER_HOUR
-    left = run.not_started(index)
-    if run.opts.admission.stop_reason == "memory":
-        run.log.emit(f"MemAvailable stayed below {MIN_MEM_AVAILABLE_GIB} GiB for {hours} h; "
-                     f"stopping ({left} jobs not started)")
-    else:
-        run.log.emit(f"C: stayed below {MIN_DISK_FREE_GIB} GiB free for {hours} h; stopping "
-                     f"({left} jobs not started)")
-        run.log.emit(HINT_COMPACT)
+    if opts.admission.stop_reason == "memory":
+        return [f"MemAvailable stayed below {MIN_MEM_AVAILABLE_GIB} GiB for {hours} h; "
+                f"stopping ({left} jobs not started)"]
+    return [f"C: stayed below {MIN_DISK_FREE_GIB} GiB free for {hours} h; stopping "
+            f"({left} jobs not started)", HINT_COMPACT]
+
+
+def _stop_for_pause(run: _Run, index: int) -> None:
+    """Admission waited ``PAUSE_LIMIT_S``; exit 5."""
+    for line in _pause_lines(run.opts, run.not_started(index)):
+        run.log.emit(line)
     run.stop(EXIT_DISK, index)
 
 

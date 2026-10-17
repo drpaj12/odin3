@@ -822,6 +822,168 @@ class RunOrderTest(RunnerTestBase):
         self.assertTrue(qor_sched.job_complete(job))
 
 
+FAKE_RANDOM_CHECK = """
+import json, sys, time
+from pathlib import Path
+here = Path(__file__).resolve().parent
+mode = json.loads((here / "mode.json").read_text())
+args = sys.argv[1:]
+net = Path(args[args.index("--post-synth-blif") + 1])
+work = Path(args[args.index("--work-dir") + 1])
+work.mkdir(parents=True, exist_ok=True)
+(work / "marker.txt").write_text("work\\n")
+with (here / "calls.jsonl").open("a") as log:
+    log.write(json.dumps({"argv": args, "netlist": net.read_text(), "t0": time.time()}) + "\\n")
+if "oom" in mode:
+    events = Path(mode["oom"])
+    events.write_text(events.read_text().replace("oom_kill 0", "oom_kill 1"))
+if "sleep" in mode:
+    time.sleep(mode["sleep"])
+with (here / "calls.jsonl").open("a") as log:
+    log.write(json.dumps({"end": args[args.index("--rtl") + 1], "t1": time.time()}) + "\\n")
+sys.exit(mode.get("exit", 0))
+"""
+
+
+class FcheckTest(RunnerTestBase):
+    """Plan Task 11: the Verilator random check of a finished job."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.vtr = self.tmp / "vtr"
+        self.script = self.vtr / "mosaic" / "verilator_check" / "run_random_check.py"
+        self.script.parent.mkdir(parents=True)
+        self.script.write_text(FAKE_RANDOM_CHECK)
+        self.mode({})
+
+    def mode(self, mode: dict[str, Any]) -> None:
+        (self.script.parent / "mode.json").write_text(json.dumps(mode))
+
+    def calls(self) -> list[dict[str, Any]]:
+        log = self.script.parent / "calls.jsonl"
+        lines = log.read_text().splitlines() if log.exists() else []
+        return [c for c in map(json.loads, lines) if "argv" in c]
+
+    def ends(self) -> list[dict[str, Any]]:
+        log = self.script.parent / "calls.jsonl"
+        lines = log.read_text().splitlines() if log.exists() else []
+        return [c for c in map(json.loads, lines) if "end" in c]
+
+    def legctx(self, design: str, leg: str, group: str) -> qor_legs.LegContext:
+        return qor_legs.LegContext(
+            vtr_root=self.vtr, python=Path(sys.executable), arch_xml=self.vtr / "arch.xml",
+            odin3=self.tmp / "odin3", repo=self.tmp / "repo", job_dir=self.job_dir(design, leg),
+            k=6, group=group)
+
+    def finished(self, design: str, *, leg: str = "P", group: str = "A", gz: bool = True,
+                 netlist: str = ".model m\n.end\n") -> Job:
+        """An ok job on disk (metrics.json, and the kept netlist as the runner leaves it)."""
+        job = dataclasses.replace(self.job(design, [{}], leg=leg, group=group),
+                                  ctx=self.legctx(design, leg, group))
+        run = job.job_dir / "run"
+        run.mkdir(parents=True, exist_ok=True)
+        pre = run / f"{design}.pre-vpr.blif"
+        if gz:
+            with gzip.open(run / (pre.name + ".gz"), "wt") as handle:
+                handle.write(netlist)
+        else:
+            pre.write_text(netlist)
+        (job.job_dir / "metrics.json").write_text(json.dumps(
+            {"schema": 1, "key": job.key, "status": "ok", "verdicts": {"fcheck": "skipped"}}))
+        return job
+
+    def verdict(self, job: Job) -> str:
+        return str(json.loads((job.job_dir / "metrics.json").read_text())["verdicts"]["fcheck"])
+
+    def test_fcheck_command(self) -> None:
+        ctx = self.legctx("sha", "P", "A")
+        netlist = ctx.job_dir / "fcheck" / "sha.pre-vpr.blif"
+        cmd = qor_legs.fcheck_command(ctx, "sha", netlist, 2)
+        self.assertEqual(list(cmd.argv), [
+            sys.executable, f"{self.vtr}/mosaic/verilator_check/run_random_check.py",
+            "--rtl", f"{self.vtr}/vtr_flow/benchmarks/verilog/sha.v",
+            "--post-synth-blif", str(netlist), "--work-dir", f"{ctx.job_dir}/fcheck",
+            "--vectors", "50000", "--seed", "1", "--verilator-j", "2"])
+        self.assertEqual((cmd.cwd, cmd.stdout), (ctx.job_dir, ctx.job_dir / "fcheck.log"))
+        self.assertEqual(dict(cmd.env)["PATH"].split(":")[0], f"{self.vtr}/.venv/bin")
+
+    def test_fcheck_exit_mapping(self) -> None:
+        for code, verdict in ((0, "pass"), (1, "fail"), (2, "error"), (3, "error"),
+                              (137, "error")):
+            self.mode({"exit": code})
+            job = self.finished("sha")
+            self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), verdict, code)
+            self.assertEqual(self.verdict(job), verdict)
+        self.assertEqual(qor_legs.fcheck_verdict(137, True), "capped")
+        self.assertEqual(qor_legs.fcheck_verdict(0, False), "pass")
+        self.mode({"exit": 137, "oom": str(self.events)})
+        job = self.finished("sha")
+        self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "capped")
+        self.assertEqual(self.verdict(job), "capped")
+
+    def test_fcheck_p_from_gz(self) -> None:
+        job = self.finished("sha", netlist=".model sha\n.names a b\n11 1\n.end\n")
+        self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "pass")
+        (call,) = self.calls()
+        argv = call["argv"]
+        self.assertEqual(argv[argv.index("--post-synth-blif") + 1],
+                         str(job.job_dir / "fcheck" / "sha.pre-vpr.blif"))
+        self.assertEqual(call["netlist"], ".model sha\n.names a b\n11 1\n.end\n")
+
+    def test_fcheck_other_leg_needs_kept_netlist(self) -> None:
+        job = self.finished("sha", leg="O", gz=False)
+        self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "pass")
+        (call,) = self.calls()
+        self.assertEqual(call["argv"][call["argv"].index("--post-synth-blif") + 1],
+                         str(job.job_dir / "run" / "sha.pre-vpr.blif"))
+        gone = self.finished("stereovision3", leg="O", gz=True)  # only a .gz: not a kept pre-vpr
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(qor_sched.run_fcheck(gone, self.opts(), 2), "error")
+        self.assertIn("vtr-qor: fcheck: O stereovision3: no kept netlist (run with "
+                      "--keep-netlists)", err.getvalue())
+        self.assertEqual(self.verdict(gone), "error")
+        self.assertEqual(len(self.calls()), 1)  # none for stereovision3
+
+    def test_fcheck_dir_kept_on_fail(self) -> None:
+        passed = self.finished("sha")
+        qor_sched.run_fcheck(passed, self.opts(), 2)
+        self.assertFalse((passed.job_dir / "fcheck").exists())
+        self.mode({"exit": 1})
+        failed = self.finished("diffeq1")
+        qor_sched.run_fcheck(failed, self.opts(), 2)
+        self.assertTrue((failed.job_dir / "fcheck" / "marker.txt").is_file())
+
+    def test_fcheck_refused_outside_heavy_run(self) -> None:
+        job = self.finished("sha")
+        with self.assertRaises(HeavyError):
+            qor_sched.run_fcheck(job, self.opts(scope=None), 2)
+
+    def test_fcheck_after_own_job(self) -> None:
+        """Each fcheck starts after its own VPR job ends and ends before the next job starts;
+        group B gets --verilator-j 1, group A 2."""
+        specs = {d: {"stamp": str(self.stamps), "name": d,
+                     "write": [{"path": str(self.job_dir(d, "O") / "run" / f"{d}.pre-vpr.blif"),
+                                "text": ".model m\n.end\n"}]}
+                 for d in ("sha", "mkPktMerge", "bgm")}
+        self.mode({"sleep": 0.05})
+        jobs = [dataclasses.replace(self.job(d, [specs[d]], leg="O", group=g),
+                                    ctx=self.legctx(d, "O", g))
+                for d, g in (("sha", "A"), ("mkPktMerge", "A"), ("bgm", "B"))]
+        summary, _ = self.run_jobs(jobs, self.opts(fcheck=True, keep_netlists=frozenset({"O"})))
+        self.assertEqual([r.status for r in summary.results], ["ok"] * 3)
+        stamps = {(f[0], f[1]): float(f[2]) for f in self.stamp_lines()}
+        starts, ends = self.calls(), self.ends()
+        self.assertEqual([c["argv"][c["argv"].index("--verilator-j") + 1] for c in starts],
+                         ["2", "2", "1"])
+        order = ["sha", "mkPktMerge", "bgm"]
+        for i, design in enumerate(order):
+            self.assertGreater(starts[i]["t0"], stamps[("end", design)])
+            self.assertLess(ends[i]["t1"], stamps.get(("start", order[i + 1]), 1e18)
+                            if i + 1 < len(order) else 1e18)
+        self.assertEqual([self.verdict(j) for j in jobs], ["pass"] * 3)
+
+
 class HeavyGuardTest(RunnerTestBase):
     """Nothing starts unless the real nesting evidence and the cap hold (standing rules)."""
 

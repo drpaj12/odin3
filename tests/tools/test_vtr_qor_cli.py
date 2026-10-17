@@ -36,6 +36,7 @@ import qor_heavy
 import qor_legs
 import qor_parse
 import qor_sched
+import qor_table
 import vtr_qor
 from qor_heavy import HEAVY_DIR
 
@@ -113,6 +114,18 @@ if "qor_standard" in sys.argv[2]:
     fields = {{"total_runtime": "0.75"}}
 print("\\t".join(fields) + "\\t")
 print("\\t".join(fields.values()) + "\\t")
+"""
+
+FAKE_RANDOM_CHECK = """
+import sys
+from pathlib import Path
+args = sys.argv[1:]
+root = Path(__file__).resolve().parents[2]
+with (root / "fcheck-calls.log").open("a") as log:
+    log.write(" ".join(args) + "\\n")
+Path(args[args.index("--work-dir") + 1]).mkdir(parents=True, exist_ok=True)
+mode = root / "fcheck-exit"
+sys.exit(int(mode.read_text()) if mode.exists() else 0)
 """
 
 FAKE_PATHS = """
@@ -239,6 +252,7 @@ class CliTestBase(unittest.TestCase):
             (verilog / f"{design}.v").write_text(f"module {design}(); endmodule\n")
         scripts = v / "vtr_flow" / "scripts"
         _script(scripts / "run_vtr_flow.py", FAKE_FLOW)
+        _script(v / "mosaic" / "verilator_check" / "run_random_check.py", FAKE_RANDOM_CHECK)
         libs = scripts / "python_libs" / "vtr"
         _script(libs / "parse_vtr_flow.py", FAKE_PARSE)
         (libs / "__init__.py").write_text("")
@@ -965,6 +979,79 @@ class ControlLegTest(CliTestBase):
         self.assertIsNone(job["parmys_stage_wall_s"])
         self.assertEqual(job["cost_warnings"],
                          ["Pprime stereovision3: no P job for the Parmys stage cost"])
+
+
+class FcheckCliTest(CliTestBase):
+    """Plan Task 11: ``fcheck`` and ``run --fcheck``."""
+
+    def fcheck_calls(self) -> list[str]:
+        log = self.vtr / "fcheck-calls.log"
+        return log.read_text().splitlines() if log.exists() else []
+
+    def verdict(self, leg: str, design: str) -> str:
+        (job,) = self.job_dirs(leg, design)
+        return str(self.load(job / "metrics.json")["verdicts"]["fcheck"])
+
+    def test_fcheck_existing_jobs(self) -> None:
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics,sha")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.fcheck_calls(), [])
+        self.assertEqual(self.verdict("P", "sha"), "skipped")
+        code, _, err = self.cli("fcheck", "--leg", "P", "--designs", "ch_intrinsics,sha")
+        self.assertEqual(code, 0, err)
+        calls = self.fcheck_calls()
+        self.assertEqual(len(calls), 2)
+        self.assertIn(f"--rtl {self.vtr}/vtr_flow/benchmarks/verilog/ch_intrinsics.v", calls[0])
+        self.assertTrue(all(c.endswith("--vectors 50000 --seed 1 --verilator-j 2") for c in calls))
+        self.assertEqual((self.verdict("P", "sha"), self.verdict("P", "ch_intrinsics")),
+                         ("pass", "pass"))
+        (job,) = self.job_dirs("P", "sha")
+        self.assertFalse((job / "fcheck").exists())
+        self.assertTrue((job / "fcheck.log").is_file())
+        self.assertIn("vtr-qor: fcheck done: 2 pass", self.harness_lines()[-1])
+        (self.vtr / "fcheck-exit").write_text("1")
+        code, _, err = self.cli("fcheck", "--leg", "P", "--designs", "sha")
+        self.assertEqual(code, 1, err)
+        self.assertEqual(self.verdict("P", "sha"), "fail")
+        self.assertTrue((job / "fcheck").is_dir())
+
+    def test_fcheck_missing_job_and_options(self) -> None:
+        code, _, err = self.cli("fcheck", "--leg", "P", "--designs", "spree")
+        self.assertEqual(code, 1)
+        self.assertIn("vtr-qor: fcheck: P spree: no ok job; run it first\n", err)
+        code, _, err = self.cli("fcheck", "--leg", "P", "--set", "smoke", "--xl")
+        self.assertEqual(code, 2)
+        self.assertIn("--xl is only for run --designs", err)
+        code, _, err = self.cli("fcheck", "--leg", "P")
+        self.assertEqual((code, err), (2, "vtr-qor: run needs --set or --designs\n"))
+
+    def test_run_with_fcheck(self) -> None:
+        code, _, err = self.cli("run", "--leg", "P,O", "--designs", "ch_intrinsics", "--fcheck",
+                                "--keep-netlists")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self.fcheck_calls()), 2)
+        self.assertEqual((self.verdict("P", "ch_intrinsics"), self.verdict("O", "ch_intrinsics")),
+                         ("pass", "pass"))
+        # O without --keep-netlists has nothing to check: error, and the run still succeeds.
+        code, _, err = self.cli("run", "--leg", "O", "--designs", "sha", "--fcheck")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.verdict("O", "sha"), "error")
+        self.assertIn("vtr-qor: fcheck: O sha: no kept netlist (run with --keep-netlists)", err)
+
+
+class CommittedInputsTest(unittest.TestCase):
+    """The committed gate inputs under tests/vtr/qor."""
+
+    def test_divergences_rows(self) -> None:
+        rows = qor_table.load_tsv(REPO_ROOT / "tests" / "vtr" / "qor" / "divergences.tsv")
+        self.assertEqual(rows[0], ("ch_intrinsics", "mem-init-dropped",
+                                   "decision 6 step 5: hardmap drops RAM initial values (3C)"))
+        classes = {"mem-init-dropped", "async-reset-made-sync", "baseline-fails"}
+        for design, cls, text in rows:
+            self.assertIn(design, SETS.designs)
+            self.assertIn(cls, classes)
+            if cls == "baseline-fails":
+                self.assertIn("fcheck.log", text)  # each such row cites P's log
 
 
 class StatusCleanTest(CliTestBase):

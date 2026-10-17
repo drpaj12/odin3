@@ -1,8 +1,8 @@
 """vtr-qor: the command line of the 3H QoR harness (3H spec QH-9, §5.2, §6, §12; plan Tasks 6, 9).
 
-Subcommands here: ``doctor``, ``run``, ``status``, ``clean``, ``table``, ``gate`` and ``publish``;
-Tasks 10-15 add the rest of spec §9. The common options are §9's: ``--vtr-root`` (default
-``$VTR_ROOT``, else ``~/odin3-ws/external/vtr-verilog-to-routing``), ``--odin3`` (default
+Subcommands here: ``doctor``, ``run``, ``fcheck``, ``status``, ``clean``, ``table``, ``gate`` and
+``publish``; Tasks 12-15 add the rest of spec §9. The common options are §9's: ``--vtr-root``
+(default ``$VTR_ROOT``, else ``~/odin3-ws/external/vtr-verilog-to-routing``), ``--odin3`` (default
 ``<repo>/build/release/src/cli/odin3``), ``--out`` (default ``$ODIN3_QOR_DIR``, else
 ``~/odin3-ws/work/vtr-qor``; it must lie under ``~/odin3-ws/work`` or ``/tmp/claude-1000``, point
 (m)), ``--arch k6|earch``, ``--no-wait``, ``--allow-vtr-drift`` and ``-v``.
@@ -21,6 +21,11 @@ Tasks 10-15 add the rest of spec §9. The common options are §9's: ``--vtr-root
   complete; it is retracted when this run's key is no longer complete. ``--allow-vtr-drift``
   waives only a VTR at another commit (report-only: its own ``<vtr12>``, never ``latest``); a
   modified tracked tree is always refused.
+- ``fcheck --leg L[,L...] (--set S | --designs D)`` (heavy) runs the Verilator random check
+  (spec §8.1) on existing ``ok`` jobs of the current keys, one at a time with ``--verilator-j``
+  2 in group A and 1 in group B, and writes ``metrics.json`` ``verdicts.fcheck``; ``run --fcheck``
+  does the same right after each job. A missing job is named and makes the exit 1; exit 1 for a
+  ``fail`` or ``error``, 3 for ``capped``.
 - ``status`` prints one line per (arch, leg) of the current VTR commit:
   ``<arch> <leg> latest <key12|-> ok <n> failed <m> age <d>d``.
 - ``clean [--keep N]`` runs retention (spec §5.4, ``qor_sched.prune``) over every
@@ -696,6 +701,68 @@ def cmd_run(args: argparse.Namespace, argv: Sequence[str]) -> int:
     return summary.exit_code
 
 
+# -- checks on existing jobs: fcheck ------------------------------------------------------------
+
+FCHECK_BAD = frozenset({"fail", "error"})
+
+
+def _plan_existing(args: argparse.Namespace, legs: tuple[str, ...], what: str
+                   ) -> tuple[list[Job], int, Path]:
+    """The jobs of ``legs`` on the chosen designs under the current keys that finished ``ok``,
+    in plan order, plus how many are missing (each named on stderr): the checks run on
+    existing jobs and never start one. Returns the ok jobs, the missing count and ``--out``."""
+    out = _out(args)
+    vtr_root = _vtr_root(args)
+    _check_vtr(vtr_root, args.allow_vtr_drift)
+    sets = qor_sched.load_sets()
+    req = PlanRequest(legs=legs, designs=_select(sets, args), arch=args.arch, out=out,
+                      vtr_root=vtr_root, odin3=_odin3(args), rerun=False)
+    found, missing = [], 0
+    for job in qor_sched.plan_jobs(req, sets):
+        if qor_sched.job_complete(job):
+            found.append(job)
+        else:
+            missing += 1
+            print(f"{PREFIX}{what}: {_label(job)}: no ok job; run it first", file=sys.stderr)
+    return found, missing, out
+
+
+def _checks_exit(verdicts: Sequence[str], missing: int, stop: int, bad: frozenset[str],
+                 incomplete: frozenset[str]) -> int:
+    """0 when every verdict is good; 1 for a ``bad`` verdict or a missing job; 3 for an
+    ``incomplete`` one (capped or timeout) without a failure; ``stop`` (5) first."""
+    if stop != EXIT_OK:
+        return stop
+    if missing or any(v in bad for v in verdicts):
+        return EXIT_FAIL
+    return EXIT_INCOMPLETE if any(v in incomplete for v in verdicts) else EXIT_OK
+
+
+def cmd_fcheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
+    """``fcheck --leg L[,L...] --set|--designs``: spec §8.1 on existing jobs, one at a time,
+    ``--verilator-j`` 2 in group A and 1 in group B (heavy)."""
+    opts = RunOptions(out=_out(args), meminfo=MEMINFO)
+    _check_run_options(args, opts)
+    jobs, missing, _ = _plan_existing(args, _legs(args.leg), "fcheck")
+    opts.scope = qor_heavy.reexec_under_lock(list(argv), script=SCRIPT, xl=args.xl,
+                                             no_wait=args.no_wait, lock=qor_heavy.HEAVY_LOCK)
+
+    def step(job: Job) -> str:
+        return qor_sched.run_fcheck(job, opts, qor_sched.FCHECK_J[job.group])
+
+    verdicts, stop = qor_sched.run_checks(jobs, opts, step)
+    counts = ", ".join(f"{verdicts.count(v)} {v}" for v in sorted(set(verdicts)))
+    _warn_log(opts, f"fcheck done: {counts or 'nothing to check'}")
+    return _checks_exit(verdicts, missing, stop, FCHECK_BAD, frozenset({"capped"}))
+
+
+def _warn_log(opts: RunOptions, message: str) -> None:
+    if opts.log is not None:
+        opts.log.emit(message)
+    else:
+        print(f"{PREFIX}{message}", file=sys.stderr, flush=True)
+
+
 # -- status and clean --------------------------------------------------------------------------
 
 
@@ -1254,6 +1321,15 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true", help="print the jobs; run nothing")
     run.add_argument("--xl", action="store_true",
                      help="the 9 GiB slice, for capped --designs only (the controller's)")
+    fcheck = sub.add_parser("fcheck", parents=[common],
+                            help="the Verilator random check of existing jobs (heavy)")
+    fcheck.add_argument("--leg", required=True, metavar="L[,L...]",
+                        help="P, O, Oprime (O'), Pprime (P'), R, Oprov")
+    fcheck.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
+                        help="gate, extra, smoke")
+    fcheck.add_argument("--designs", default="", metavar="D[,D...]")
+    fcheck.add_argument("--xl", action="store_true",
+                        help="the 9 GiB slice, for capped --designs only (the controller's)")
     sub.add_parser("status", parents=[common], help="latest key and counts per arch and leg")
     clean = sub.add_parser("clean", parents=[common], help="retention (spec §5.4)")
     clean.add_argument("--keep", type=_positive, default=qor_sched.KEEP_KEYS, metavar="N",
@@ -1276,8 +1352,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 COMMANDS: dict[str, Callable[[argparse.Namespace, Sequence[str]], int]] = {
-    "doctor": cmd_doctor, "run": cmd_run, "status": cmd_status, "clean": cmd_clean,
-    "table": cmd_table, "gate": cmd_gate, "publish": cmd_publish,
+    "doctor": cmd_doctor, "run": cmd_run, "fcheck": cmd_fcheck, "status": cmd_status,
+    "clean": cmd_clean, "table": cmd_table, "gate": cmd_gate, "publish": cmd_publish,
 }
 
 
