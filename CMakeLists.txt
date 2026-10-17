@@ -143,6 +143,10 @@ add_library(odin3_core OBJECT
     src/passes/flatten/copy.c
     src/passes/flatten/names.c
     src/passes/flatten/prov.c
+    src/passes/hardmap/register.c
+    src/passes/hardmap/hardmap.c
+    src/passes/hardmap/hm_kit.c
+    src/passes/hardmap/mul.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -761,6 +765,17 @@ if(BUILD_TESTING)
     # 2F Task 6: opt_expr (the driver, the rules of spec 4.2-4.3, replace_undriven).
     odin3_add_unit_test(test_opt_expr)
     target_sources(test_opt_expr PRIVATE tests/unit/proc_build.c)
+    # 3C Task 2: hardmap's $mul rule on hand-built flat IR (lib/vtr.o3lib read by pb_build_lib).
+    odin3_add_unit_test(test_hardmap_mul)
+    target_sources(test_hardmap_mul PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_hardmap_mul PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME cli_hardmap_mul
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh hardmap_mul $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_hardmap_mul PROPERTIES LABELS unit)
     # 3A Task 2: flatten's pre-flight graph; every test_flatten_* links the fixture helper.
     odin3_add_unit_test(test_flatten_graph)
     target_sources(test_flatten_graph PRIVATE tests/unit/flatten_fixture.c tests/unit/proc_build.c)
@@ -2173,6 +2188,33 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --repro-dir ${PROJECT_BINARY_DIR}/fuzz_flatten)
         set_tests_properties(fuzz_flatten_yosys_quick PROPERTIES LABELS flatten
                              SKIP_RETURN_CODE 77 TIMEOUT 3600)
+        # 3C Task 1 (spec 9.2): the Parmys probes. probe-leg runs Parmys on a micro of
+        # tests/hardmap/probes into a scratch golden root under the build tree, then parmys-probe
+        # against the source (iverilog); the leg passes when the probe exits as the README records
+        # (1 = the Parmys defect of R-7 / A-8 / R-8 reproduces, 0 = the control matches). Needs
+        # VTR_ROOT and iverilog; each leg is a few seconds, so it is a sweep only by label.
+        if(DEFINED ENV{VTR_ROOT} AND ODIN3_IVERILOG)
+            set(_probe_legs
+                "ramsplit_defect|ramsplit|1|--cycles,2000,--warm,16,--mask,addr=0x000f"
+                "ramsplit_control|ramsplit|0|--cycles,2000,--warm,16,--mask,addr=0x000e"
+                "subeq_control|subeq|0|--cycles,3000"
+                "subwide_defect|subwide|1|--cycles,3000"
+                "subprobe2_defect|subprobe2|1|--cycles,3000"
+                "addrmerge_defect|addrmerge|1|--cycles,2000,--warm,16"
+                "addrmerge_control|addrmerge|0|--cycles,2000,--warm,16,--mask,we=0x0")
+            foreach(_leg IN LISTS _probe_legs)
+                string(REPLACE "|" ";" _f "${_leg}")
+                list(GET _f 0 _leg_name)
+                list(GET _f 1 _leg_micro)
+                list(GET _f 2 _leg_expect)
+                list(GET _f 3 _leg_opts)
+                string(REPLACE "," ";" _leg_opts "${_leg_opts}")
+                odin3_add_sweep_test(parmys_probe_${_leg_name} LABEL sweep
+                    COMMAND ${PROJECT_SOURCE_DIR}/tools/hardmap-check/probe-leg
+                            ${PROJECT_BINARY_DIR}/parmys_probe/${_leg_micro}
+                            ${_leg_micro} ${_leg_expect} ${_leg_opts})
+            endforeach()
+        endif()
         # 2D §13/§14.3: Yosys 0.55 reads every write_rtlil fixture of test_rtlil_writer back
         # (read_rtlil; write_rtlil) and lowers it (read_rtlil; proc; opt; write_blif), smallest
         # first.
