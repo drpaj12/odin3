@@ -377,6 +377,45 @@ odin3_status lw_mux(lw_ctx *lw, odin3_net_id lhs, odin3_net_id rhs, odin3_net_id
     return lw_gate(lw, LW_G_MUX, in, 3, out_net);
 }
 
+odin3_status lw_pick(lw_ctx *lw, lw_sel sel, odin3_net_id then_net, odin3_net_id else_net,
+                     odin3_net_id *out_net) {
+    return sel.high ? lw_mux(lw, else_net, then_net, sel.net, out_net)
+                    : lw_mux(lw, then_net, else_net, sel.net, out_net);
+}
+
+static uint32_t port_index(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; name != NULL && i < def->n_ports; i++) {
+        if (strcmp(def->ports[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
+}
+
+static uint32_t param_index(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; name != NULL && i < def->n_params; i++) {
+        if (strcmp(def->params[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
+}
+
+lw_span lw_cell_span(const lw_cell *cell, const char *name) {
+    uint32_t idx = port_index(cell->def, name);
+    return idx == UINT32_MAX ? (lw_span){NULL, 0} : cell->port[idx];
+}
+
+const odin3_value *lw_cell_param(const lw_cell *cell, const char *name) {
+    uint32_t idx = param_index(cell->def, name);
+    return idx == UINT32_MAX ? NULL : &cell->params[idx];
+}
+
+bool lw_cell_polarity(const lw_cell *cell, const char *name) {
+    const odin3_value *param = lw_cell_param(cell, name);
+    return param == NULL || param->i != 0;
+}
+
 odin3_status lw_const(lw_ctx *lw, odin3_bit bit, odin3_net_id *out) {
     uint32_t idx = (uint32_t)bit;
     if (idx >= LW_N_CONST) {

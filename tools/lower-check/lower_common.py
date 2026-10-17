@@ -131,12 +131,14 @@ def histogram_diff(odin: dict[str, Counter[str]], yosys: dict[str, Counter[str]]
     return "; ".join(lines)
 
 
-def read_front(files: Sequence[str], top: str | None, techlib: str | None) -> list[str]:
+def read_front(files: Sequence[str], top: str | None, techlib: str | None,
+               nolatches: bool = True) -> list[str]:
     """Odin III's front of every run: ``[read_techlib L;] read_verilog --nolatches FILE...;
-    hierarchy`` (a ``.blif`` file is ``read_blif`` instead, and needs no hierarchy)."""
+    hierarchy`` (a ``.blif`` file is ``read_blif`` instead, and needs no hierarchy). The latch
+    fixtures pass ``nolatches=False``: the flag turns an inferred latch into a feedback mux."""
     if len(files) == 1 and files[0].endswith(".blif"):
         return [f"read_blif {quote(files[0])}"]
-    return opt_equiv.read_commands(files, top, True, techlib)
+    return opt_equiv.read_commands(files, top, nolatches, techlib)
 
 
 def odin_args(top: str | None, extra: Sequence[str] = ()) -> list[str]:

@@ -311,8 +311,28 @@ def ff_cells() -> list[Cell]:
     return cells
 
 
+LATCH_WIDTHS = (1, 4, 8)
+
+
+def dlatch_cell(width: int, low: bool) -> Cell:
+    """One ``$dlatch`` module: a level-sensitive ``always @*`` latch, transparent while ``en`` is
+    high (``low``: while it is low, ``EN_POLARITY`` 0). The other latch cells ($adlatch, $dlatchsr,
+    $sr) have no Verilog form that ``proc; opt`` turns into them (Yosys has none either), so they
+    are covered by ``test_lower_latch`` alone."""
+    vec = f"[{width - 1}:0] " if width > 1 else ""
+    ports = ["input en", f"input {vec}d", f"output reg {vec}q"]
+    body = f"always @* if ({_active('en', low)}) q = d;"
+    return Cell(f"dlatch_w{width}{'_lo' if low else ''}", _module(ports, body), "latch")
+
+
+def latch_cells() -> list[Cell]:
+    """The ``$dlatch`` fixtures: widths 1, 4, 8, then the active-low enable at width 4."""
+    return [*(dlatch_cell(width, False) for width in LATCH_WIDTHS), dlatch_cell(4, True)]
+
+
 FAMILY_GENERATORS = {"bitwise": bitwise_cells, "pmux": pmux_cells, "shift": shift_cells,
-                     "arith": arith_cells, "mul": mul_cells, "div": div_cells, "ff": ff_cells}
+                     "arith": arith_cells, "mul": mul_cells, "div": div_cells, "ff": ff_cells,
+                     "latch": latch_cells}
 
 
 

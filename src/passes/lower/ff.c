@@ -38,9 +38,6 @@
 /* WIDTH and CLK_POLARITY are parameters 0 and 1 of every clocked family cell (ff.c of the IR). */
 enum { FF_P_WIDTH = 0, FF_P_CLK_POLARITY = 1, FF_INIT_UNKNOWN = 3 };
 
-/* No such port or parameter in the cell type. */
-static const uint32_t FF_NO_INDEX = UINT32_MAX;
-
 /* What a cell does besides D, EN and the clock. */
 typedef enum ff_ctl_kind { FF_CTL_NONE, FF_CTL_RESET, FF_CTL_LOAD, FF_CTL_SETCLR } ff_ctl_kind;
 
@@ -87,12 +84,6 @@ static const ff_shape k_shapes[FF_COUNT] = {
     {"$dffsre", FF_CTL_SETCLR, NULL, NULL, NULL, "SET,CLR", true, true, false, 3},
 };
 
-/* A control net with its polarity (high: active when 1). */
-typedef struct ff_sel {
-    odin3_net_id net;
-    bool high;
-} ff_sel;
-
 /* The cell being lowered, by role. */
 typedef struct ff_view {
     const ff_shape *shape;
@@ -100,8 +91,8 @@ typedef struct ff_view {
     bool clk_high; /* CLK_POLARITY */
     bool en_outer; /* the enable is over the reset/load */
     odin3_net_id clk;
-    ff_sel en;
-    ff_sel ctl; /* ARST, SRST or ALOAD */
+    lw_sel en;
+    lw_sel ctl; /* ARST, SRST or ALOAD */
     bool set_high;
     bool clr_high;
     lw_span data;
@@ -112,47 +103,16 @@ typedef struct ff_view {
     const odin3_value *value;
 } ff_view;
 
-/* --- lookups by name -------------------------------------------------------------------------- */
-
-static uint32_t port_index(const odin3_celltype_def *def, const char *name) {
-    for (uint32_t i = 0; name != NULL && i < def->n_ports; i++) {
-        if (strcmp(def->ports[i].name, name) == 0) {
-            return i;
-        }
-    }
-    return FF_NO_INDEX;
-}
-
-static uint32_t param_index(const odin3_celltype_def *def, const char *name) {
-    for (uint32_t i = 0; name != NULL && i < def->n_params; i++) {
-        if (strcmp(def->params[i].name, name) == 0) {
-            return i;
-        }
-    }
-    return FF_NO_INDEX;
-}
-
-static lw_span span_of(const lw_cell *cell, const char *name) {
-    uint32_t idx = port_index(cell->def, name);
-    return idx == FF_NO_INDEX ? (lw_span){NULL, 0} : cell->port[idx];
-}
-
 /* The names of a control: its port and its polarity parameter. */
 typedef struct ff_names {
     const char *port;
     const char *polarity;
 } ff_names;
 
-static ff_sel sel_of(const lw_cell *cell, const ff_names *names) {
-    lw_span span = span_of(cell, names->port);
-    uint32_t idx = param_index(cell->def, names->polarity);
-    bool high = idx == FF_NO_INDEX || cell->params[idx].i != 0;
-    return (ff_sel){span.n > 0 ? span.nets[0] : (odin3_net_id){0}, high};
-}
-
-static bool polarity_of(const lw_cell *cell, const char *name) {
-    uint32_t idx = param_index(cell->def, name);
-    return idx == FF_NO_INDEX || cell->params[idx].i != 0;
+static lw_sel sel_of(const lw_cell *cell, const ff_names *names) {
+    lw_span span = lw_cell_span(cell, names->port);
+    return (lw_sel){span.n > 0 ? span.nets[0] : (odin3_net_id){0},
+                    lw_cell_polarity(cell, names->polarity)};
 }
 
 static const ff_shape *shape_named(const char *type) {
@@ -174,18 +134,17 @@ static void view_load(const lw_ctx *lw, const lw_cell *cell, const ff_shape *sha
     view->shape = shape;
     view->width = cell->port[cell->out_port].n;
     view->clk_high = cell->params[FF_P_CLK_POLARITY].i != 0;
-    view->clk = span_of(cell, "CLK").nets[0];
+    view->clk = lw_cell_span(cell, "CLK").nets[0];
     view->en = sel_of(cell, &(ff_names){shape->has_en ? "EN" : NULL, "EN_POLARITY"});
     view->ctl = sel_of(cell, &(ff_names){shape->ctl_port, shape->ctl_polarity});
-    view->set_high = polarity_of(cell, "SET_POLARITY");
-    view->clr_high = polarity_of(cell, "CLR_POLARITY");
-    view->data = span_of(cell, "D");
-    view->load = span_of(cell, "AD");
-    view->set = span_of(cell, "SET");
-    view->clr = span_of(cell, "CLR");
+    view->set_high = lw_cell_polarity(cell, "SET_POLARITY");
+    view->clr_high = lw_cell_polarity(cell, "CLR_POLARITY");
+    view->data = lw_cell_span(cell, "D");
+    view->load = lw_cell_span(cell, "AD");
+    view->set = lw_cell_span(cell, "SET");
+    view->clr = lw_cell_span(cell, "CLR");
     view->out = cell->port[cell->out_port];
-    uint32_t vidx = param_index(cell->def, shape->value_name);
-    view->value = vidx == FF_NO_INDEX ? NULL : &cell->params[vidx];
+    view->value = lw_cell_param(cell, shape->value_name);
     view->en_outer = shape->has_en &&
                      (shape->en_outer ||
                       (lw->opts->async_enable_first && shape->async && shape->ctl != FF_CTL_NONE));
@@ -194,14 +153,6 @@ static void view_load(const lw_ctx *lw, const lw_cell *cell, const ff_shape *sha
 /* --- the next-state function (spec §6.1's table) ------------------------------------------------
  */
 
-/* `then_net` when sel is active, else `else_net`: one $_MUX_, the arms swapped for an active-low
- * control. */
-static odin3_status pick(lw_ctx *lw, ff_sel sel, odin3_net_id then_net, odin3_net_id else_net,
-                         odin3_net_id *out) {
-    return sel.high ? lw_mux(lw, else_net, then_net, sel.net, out)
-                    : lw_mux(lw, then_net, else_net, sel.net, out);
-}
-
 /* EN ? net : q. */
 static odin3_status enable_step(lw_ctx *lw, const ff_view *view, odin3_net_id net,
                                 odin3_net_id qnet, odin3_net_id *out) {
@@ -209,7 +160,7 @@ static odin3_status enable_step(lw_ctx *lw, const ff_view *view, odin3_net_id ne
         *out = net;
         return ODIN3_OK;
     }
-    return pick(lw, view->en, net, qnet, out);
+    return lw_pick(lw, view->en, net, qnet, out);
 }
 
 /* The constant net of bit `bit` of a *_VALUE (x and z give the x constant). */
@@ -225,10 +176,10 @@ static odin3_status setclr_step(lw_ctx *lw, const ff_view *view, uint32_t bit, o
     odin3_net_id one = {0};
     odin3_status st = lw_const(lw, ODIN3_BIT_0, &zero);
     st = st == ODIN3_OK ? lw_const(lw, ODIN3_BIT_1, &one) : st;
-    ff_sel set = {view->set.nets[bit], view->set_high};
-    ff_sel clr = {view->clr.nets[bit], view->clr_high};
-    st = st == ODIN3_OK ? pick(lw, set, one, net, &net) : st;
-    return st == ODIN3_OK ? pick(lw, clr, zero, net, out) : st;
+    lw_sel set = {view->set.nets[bit], view->set_high};
+    lw_sel clr = {view->clr.nets[bit], view->clr_high};
+    st = st == ODIN3_OK ? lw_pick(lw, set, one, net, &net) : st;
+    return st == ODIN3_OK ? lw_pick(lw, clr, zero, net, out) : st;
 }
 
 /* The reset, load or set/clear step over `net`. */
@@ -239,9 +190,9 @@ static odin3_status control_step(lw_ctx *lw, const ff_view *view, uint32_t bit, 
     switch (view->shape->ctl) {
     case FF_CTL_RESET:
         st = value_net(lw, view, bit, &arm);
-        return st == ODIN3_OK ? pick(lw, view->ctl, arm, net, out) : st;
+        return st == ODIN3_OK ? lw_pick(lw, view->ctl, arm, net, out) : st;
     case FF_CTL_LOAD:
-        return pick(lw, view->ctl, view->load.nets[bit], net, out);
+        return lw_pick(lw, view->ctl, view->load.nets[bit], net, out);
     case FF_CTL_SETCLR:
         return setclr_step(lw, view, bit, net, out);
     case FF_CTL_NONE:

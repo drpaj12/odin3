@@ -69,6 +69,9 @@ NETLIST_COMPARE = HERE.parent / "netlist-compare" / "netlist-compare"
 EQUIV_CHECK = HERE.parent / "equiv-check" / "equiv-check"
 STEPS = ("histogram", "identity", "equiv", "compared")
 DEFAULT_PRE = ("proc", "opt")
+# The latch fixtures: `opt` folds an active-low enable into the latch last and leaves the dead
+# inverter cells of the condition; `opt_clean` removes them (Yosys's opt does both).
+LATCH_PRE = ("proc", "opt", "opt_clean")
 YOSYS_BLIF = "write_blif -icells -true + vcc -false + gnd -undef + unconn"
 EQUIV_OK, EQUIV_DIFFERENT, EQUIV_ERROR, EQUIV_X, EQUIV_UNPROVEN, EQUIV_HARD = 0, 1, 2, 3, 4, 5
 ASYNC_TYPES = frozenset({"$adff", "$adffe", "$aldff", "$aldffe", "$dffsr", "$dffsre",
@@ -124,6 +127,10 @@ def tier_of(family: Family, forced: str | None, in_il: str) -> str:
     return "D" if lc.cell_types(in_il) & ASYNC_TYPES else "S"
 
 
+def default_pre(family: Family) -> tuple[str, ...]:
+    return LATCH_PRE if family.name == "latch" else DEFAULT_PRE
+
+
 def resolve_map(name: str, parmys_dir: Path | None) -> Path:
     """The path of a map: ``maps/<name>`` of this tool, else ``<parmys-techlibs>/<name>``."""
     own = MAPS / name
@@ -145,11 +152,12 @@ class Plan:
     lower_args: str
     techlib: str | None
     rtlil_out: bool = True
+    nolatches: bool = True  # False for the latch family: the fixtures need the inferred latches
 
 
 def odin_script(plan: Plan, work: Path) -> str:
     """Step 1's Odin III ``-p`` script."""
-    front = lc.read_front(plan.files, plan.top, plan.techlib)
+    front = lc.read_front(plan.files, plan.top, plan.techlib, plan.nolatches)
     lower = f"lower {plan.lower_args}".strip()
     if not plan.rtlil_out:  # the storage bit cells have no RTLIL form (1F): BLIF only
         return "; ".join([*front, *plan.pre, f"write_rtlil {work / 'in.il'}", lower,
@@ -229,8 +237,9 @@ class Diff:
     def run(self, files: Sequence[str], run_dir: Path) -> Result:
         args = self.args
         family = family_named(args.family)
-        plan = Plan(tuple(files), args.top, tuple(args.pre or DEFAULT_PRE), args.lower_args or "",
-                    self.techlib, family.name not in BLIF_ONLY_FAMILIES)
+        plan = Plan(tuple(files), args.top, tuple(args.pre or default_pre(family)),
+                    args.lower_args or "", self.techlib, family.name not in BLIF_ONLY_FAMILIES,
+                    family.name != "latch")
         self.must("odin3", [lc.exe(args.odin3), *lc.odin_args(args.top), "-p",
                             odin_script(plan, run_dir)], run_dir)
         in_il = (run_dir / "in.il").read_text(encoding="utf-8")

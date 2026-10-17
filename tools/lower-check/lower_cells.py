@@ -44,11 +44,15 @@ FF_STEMS = frozenset({"dff", "dffe", "sdff", "sdffe", "sdffce", "adff", "adffe",
 def pre_of(source: Path) -> str:
     """The Odin III commands between ``hierarchy`` and ``lower``: ``proc``, plus ``opt`` for a
     flip-flop."""
-    return "proc; opt" if source.stem.split("_")[0] in FF_STEMS else "proc"
+    stem = source.stem.split("_")[0]
+    if stem == "dlatch":  # `opt` leaves the dead inverters of an active-low enable
+        return "proc; opt; opt_clean"
+    return "proc; opt" if stem in FF_STEMS else "proc"
 
 
 def odin_script(source: Path, work: Path) -> str:
-    return "; ".join([f"read_verilog --nolatches {lc.quote(str(source))}", "hierarchy",
+    flag = "" if source.stem.split("_")[0] == "dlatch" else "--nolatches "
+    return "; ".join([f"read_verilog {flag}{lc.quote(str(source))}", "hierarchy",
                       pre_of(source),
                       f"write_rtlil {work / 'in.il'}", "lower", f"write_blif {work / 'out.blif'}"])
 

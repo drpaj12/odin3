@@ -157,6 +157,7 @@ add_library(odin3_core OBJECT
     src/passes/lower/mul.c
     src/passes/lower/div.c
     src/passes/lower/ff.c
+    src/passes/lower/latch.c
     src/passes/hardmap/register.c
     src/passes/hardmap/hardmap.c
     src/passes/hardmap/hm_kit.c
@@ -878,6 +879,8 @@ if(BUILD_TESTING)
     target_sources(test_lower_div PRIVATE tests/unit/lower_fixture.c)
     odin3_add_unit_test(test_lower_ff)
     target_sources(test_lower_ff PRIVATE tests/unit/lower_fixture.c tests/unit/lower_ffref.c)
+    odin3_add_unit_test(test_lower_latch)
+    target_sources(test_lower_latch PRIVATE tests/unit/lower_fixture.c tests/unit/lower_latchref.c)
     odin3_add_unit_test(test_lower_pass)
     target_sources(test_lower_pass PRIVATE tests/unit/lower_fixture.c tests/unit/proc_fixture.c
                    tests/unit/proc_fixture_core.c)
@@ -2238,7 +2241,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # for the techmap.v family. Fixtures are told apart by their file-name prefix.
         file(GLOB _lower_cells CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/lower/cells/*.v)
         set(_lower_prefixes pmux shl shr sshr shiftx neg add sub lt le gt ge mul div mod
-            dff dffe sdff sdffe sdffce adff adffe aldff aldffe dffsr dffsre)
+            dff dffe sdff sdffe sdffce adff adffe aldff aldffe dffsr dffsre dlatch)
         set(_lower_family_bitwise "")
         set(_lower_family_pmux "pmux")
         set(_lower_family_shift "shl;shr;sshr;shiftx")
@@ -2314,6 +2317,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             set_tests_properties(lower_cells_yosys_ff_sync lower_cells_yosys_ff_async
                 lower_cells_yosys_ff_neg lower_cells_yosys_ff_parmys
                 PROPERTIES LABELS lower SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        endif()
+        # 3B Task 7 (spec 6.2, 14.2): the latches. $dlatch is tier S (netlist-compare exit 0). The
+        # fixtures cover $dlatch only: $adlatch, $dlatchsr and $sr have no Verilog form (proc and
+        # opt infer one $dlatch per bit, in Yosys as in Odin III), so they are covered by
+        # test_lower_latch.
+        set(_latch_files ${_lower_cells})
+        list(FILTER _latch_files INCLUDE REGEX "/cells/dlatch_[^/]*$")
+        if(_latch_files)
+            add_test(NAME lower_cells_yosys_latch
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-diff
+                        --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                        --family latch --tier S --each ${_latch_files})
+            set_tests_properties(lower_cells_yosys_latch PROPERTIES LABELS lower
+                                 SKIP_RETURN_CODE 77 TIMEOUT 1800)
         endif()
         add_test(NAME flatten_diff_fixtures
             COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-diff

@@ -13,6 +13,10 @@ Layout (3B spec 14.1, 14.2; plan Task 2):
   the `.blif` is the lowered netlist (`.latch`); `lower-diff --family ff` reads the Odin III side as
   BLIF only (the storage bit cells have no RTLIL form). `diff_expect_parmys.txt` lists the cells on
   which Parmys's unmodified `adffe2dff.v` / `aldffe2dff.v` differ (spec 16 row 4).
+- `cells/dlatch_*` (Task 7): the `$dlatch` fixtures (widths 1, 4, 8 and the active-low enable at width 4), read
+  without `--nolatches` (the flag turns an inferred latch into a feedback mux) and run `proc; opt; opt_clean`; tier S
+  against Yosys (`lower-diff --family latch`). `$adlatch`, `$dlatchsr` and `$sr` have no Verilog form (neither
+  Yosys nor Odin III infers them from `proc; opt`), so they have no fixture; `test_lower_latch` covers them.
 - `hand/` — hand-built designs for `lower-sim`: `and_mux.v` (a design every cell of which has a
   simulate hook) and `shiftx.v` (a `$shiftx`, which has none: reported `skipped`); `pow.v` is a surviving `$pow` (CTest `cli_lower_pow`: the located error of
   spec 5.7; no golden exists).

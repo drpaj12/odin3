@@ -226,6 +226,24 @@ odin3_status lw_xnor(lw_ctx *lw, odin3_net_id lhs, odin3_net_id rhs, odin3_net_i
 odin3_status lw_mux(lw_ctx *lw, odin3_net_id lhs, odin3_net_id rhs, odin3_net_id sel,
                     odin3_net_id *out_net);
 
+/* A control net with its polarity (high: active when 1). */
+typedef struct lw_sel {
+    odin3_net_id net;
+    bool high;
+} lw_sel;
+
+/* `then_net` when `sel` is active, else `else_net`: one `$_MUX_`, the arms swapped for an
+ * active-low control (no inverter node). */
+odin3_status lw_pick(lw_ctx *lw, lw_sel sel, odin3_net_id then_net, odin3_net_id else_net,
+                     odin3_net_id *out_net);
+
+/* A cell's port nets by port name ({NULL, 0}: the type has no such port), a parameter by name
+ * (NULL: none) and a polarity parameter (true: active high, also when the type has no such
+ * parameter). */
+lw_span lw_cell_span(const lw_cell *cell, const char *name);
+const odin3_value *lw_cell_param(const lw_cell *cell, const char *name);
+bool lw_cell_polarity(const lw_cell *cell, const char *name);
+
 /*
  * The signedness `lower` extends a cell's operands by (spec §3.3, PHASE2 #25): A_SIGNED alone for a
  * unary cell, A_SIGNED && B_SIGNED for a binary one. A mixed cell (A_SIGNED != B_SIGNED) is read
@@ -492,6 +510,14 @@ LW_DECLARE_BUILDER(aldff);
 LW_DECLARE_BUILDER(aldffe);
 LW_DECLARE_BUILDER(dffsr);
 LW_DECLARE_BUILDER(dffsre);
+
+/* --- latch.c: $dlatch $adlatch $dlatchsr $sr (spec §6.2, LW-8) ----------------------------------
+ */
+
+LW_DECLARE_BUILDER(dlatch);
+LW_DECLARE_BUILDER(adlatch);
+LW_DECLARE_BUILDER(dlatchsr);
+LW_DECLARE_BUILDER(sr);
 
 /* True for the FF types whose asynchronous set, reset or load `lower` makes synchronous. */
 bool lw_ff_is_async(const char *type_name);

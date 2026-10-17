@@ -20,6 +20,7 @@ static const lw_rule k_rules[] = {
     LW_RULE("$add", add),
     LW_RULE("$adff", adff),
     LW_RULE("$adffe", adffe),
+    LW_RULE("$adlatch", adlatch),
     LW_RULE("$aldff", aldff),
     LW_RULE("$aldffe", aldffe),
     LW_RULE("$and", and),
@@ -28,6 +29,8 @@ static const lw_rule k_rules[] = {
     LW_RULE("$dffsr", dffsr),
     LW_RULE("$dffsre", dffsre),
     LW_RULE("$div", div),
+    LW_RULE("$dlatch", dlatch),
+    LW_RULE("$dlatchsr", dlatchsr),
     LW_RULE("$eq", eq),
     LW_RULE("$ge", ge),
     LW_RULE("$gt", gt),
@@ -55,6 +58,7 @@ static const lw_rule k_rules[] = {
     LW_RULE("$shiftx", shiftx),
     LW_RULE("$shl", shl),
     LW_RULE("$shr", shr),
+    LW_RULE("$sr", sr),
     LW_RULE("$sshr", sshr),
     LW_RULE("$sub", sub),
     LW_RULE("$xnor", xnor),
@@ -96,8 +100,8 @@ const lw_rule *lw_rule_find(const char *type_name) {
 /* Word types with no bit form, by design (spec §5.7, §7, §8, Peter's ruling 4 of PHASE3 #32). */
 static const char *const k_no_rule[] = {"$proc", "$tribuf", "$pow", "$memrd", "$memwr"};
 
-/* Word types whose rule a later task adds (plan Tasks 4 to 8). */
-static const char *const k_pending[] = {"$dlatch", "$adlatch", "$dlatchsr", "$sr", "$mem"};
+/* Word types whose rule a later task adds (plan Task 8). */
+static const char *const k_pending[] = {"$mem"};
 
 static bool listed(const char *const *names, size_t count, const char *type_name) {
     for (size_t i = 0; i < count; i++) {
