@@ -339,6 +339,7 @@ then the options considered.
       reset made synchronous (decision 19).
     - (b) `equiv-check` only.
     - (c) P&R success only.
+    - **Amended 2026-10-17 (PHASE2 #29):** equiv-check before and after abc runs on the micros and the 14 small VTR designs only; the big designs need P&R success and QoR within the bands (decision 3). VTR's Verilator random check stays on every design as a cheap sanity check (agent default).
 17. **Runtime and memory on the WSL VM** (24 GB, 12 threads; PHASE0 #29). Recommend (a). It
     keeps the parallel total at or below 60% of RAM, and the four largest designs carry most
     of the risk (VTR's golden `max_vpr_mem`: `LU32PEEng` 2.3 GB, `mcml` 2.2 GB; `LU32PEEng`

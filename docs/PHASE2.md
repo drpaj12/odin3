@@ -34,7 +34,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
 - [x] 2E `proc` (#92)
 - [x] 2F `opt` (#95)
 - [ ] 2H micros + VTR benchmark set identical/equivalent to Parmys (#98, #113, #114)
-  Open: 5 VTR and 5 micro designs unproven (size limit: mcml.v, LU32PEEng.v, LU64PEEng.v; two clock domains: stereovision3.v, multiclock_reader_writer.v); opt_equiv_vtr failed (20 UNEXPECTED); reruns of opt_diff_vtr, opt_equiv_micro_phase3 and opt_diff_micro_wreduce pending; lenet.v xl legs untested; lenet.v opt time target MISSED (fix pending).
+  Open: 5 VTR and 5 micro designs unproven (size limit: mcml.v, LU32PEEng.v, LU64PEEng.v; two clock domains: stereovision3.v, multiclock_reader_writer.v); VTR opt legs rescoped to the 14-design evidence set (#29), reruns PENDING; reruns of opt_diff_vtr, opt_equiv_micro_phase3 and opt_diff_micro_wreduce pending; lenet.v xl legs untested; lenet.v opt time target MISSED (fix pending).
 
 ## Exit statement
 
@@ -43,7 +43,7 @@ Exit sweeps of 2026-10-15: exit_micro 0 failing, 453 PROVEN of 539; exit_vtr 0 f
 Big designs that could not be checked are untested for now (size limit): mcml.v, LU32PEEng.v, LU64PEEng.v (VTR set); LU32PEEng.v and LU64PEEng.v (micro set).
 Two more VTR designs are unproven by a tool limit, not size: stereovision3.v and multiclock_reader_writer.v (equiv-check models one clock; both have two).
 The lenet xl legs are untested: the Yosys-side runs (opt_equiv_vtr_xl, opt_diff_vtr_xl, sweep-xl S-P) need an idle machine.
-The opt_equiv_vtr leg failed on main (20 UNEXPECTED); its rerun and three other reruns are PENDING rerun (2026-10-16).
+The VTR opt legs are scoped to the 14-design evidence set (decision #29). The opt_equiv_vtr leg failed on main (20 UNEXPECTED) under the old scope; its rerun and three other reruns are PENDING rerun (2026-10-16). Results of the 2026-10-17 reruns are PENDING; the controller fills them.
 2H stays open until these close.
 
 Sweep lines, verbatim from `results/exit-sweeps-2026-10-15.txt`:
@@ -1344,3 +1344,8 @@ Sweep lines, verbatim from `results/exit-sweeps-2026-10-15.txt`:
       --vtr-compat` on `tests/golden/vtr_tristate/tri_out.v` and compares the netlist with the
       Parmys golden shape (`tests/golden/vtr_tristate/tri_out.parmys.blif`, a copy of the oracle's
       output) and checks the WARNING.
+29. **Equivalence scope for the Phase 2 exit** (Peter, 2026-10-17). Quote him exactly: "I'm not super interested in having all of them, and we can just put the ones that don't pass (as long as some do) to later testing on a bigger machine." and "let's get the smaller micros equivalent and some of the smaller benchmarks equivalent and then for the bigger ones worry about do they get into the flow and are the final numbers reported by VTR metrics similar".
+    - **Rule.** Equivalence (`opt-equiv`, `opt-diff`, `equiv-check`) is required for the micros and for 14 small VTR designs: single_wire, single_ff, and_latch, multiclock_output_and_latch, multiclock_separate_and_latch, multiclock_reader_writer, ch_intrinsics, ch_intrinsics_nolatches, diffeq1, diffeq2, mkPktMerge, sha, blob_merge, stereovision3. This is the Phase 2 evidence set. Phase 3 proves itself on the same set.
+    - **VTR opt legs.** They run `tools/opt-check/opt-nightly --only <each of the 14>`.
+    - **Big VTR designs.** A big VTR design counts for Phase 2 when the Odin III front end completes on it (exit_vtr 2026-10-15: 31 designs, 0 failing). Designs that cannot be proven are deferred to a bigger machine. Their VTR-flow and QoR check is the Phase 3 exit (3H, `tools/vtr-qor`).
+    - **Counterexamples.** A real counterexample (not a size limit) is still a bug and is reported.
