@@ -2478,6 +2478,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         odin3_add_sweep_test(opt_diff_micro LABEL sweep
             COMMAND ${_opt_sweep} --opt-diff ${_micro_expect}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_expect_fail.txt
                     --opt-arg=--script=phase2 "--opt-arg=--script=opt -full"
                     --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
                     --opt-arg=--root=${_micro_dir} ${_micro_dir})
@@ -2494,6 +2495,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         odin3_add_sweep_test(opt_diff_micro_wreduce LABEL sweep
             COMMAND ${_opt_sweep} --opt-diff ${_micro_expect}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_expect_fail.txt
                     --opt-arg=--script=wreduce --opt-arg=--script=phase3
                     --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
                     --opt-arg=--root=${_micro_dir} ${_micro_dir})
