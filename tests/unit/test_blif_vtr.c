@@ -333,10 +333,6 @@ static void slurp_into(const char *path, odin3_strbuf *buf) {
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
 }
 
-/* The one golden of tests/golden/blif that fails check (Odin II's multi-driver net), so the pass
- * (which Debug checks first) is not compared on it. */
-static const char *const UNCHECKED = "elsif_both_defined.odin.blif";
-
 static bool ends_with(const char *text, const char *suffix) {
     size_t len = strlen(text);
     return len >= strlen(suffix) && strcmp(text + len - strlen(suffix), suffix) == 0;
@@ -344,7 +340,8 @@ static bool ends_with(const char *text, const char *suffix) {
 
 /* For one golden (read without the pass manager, as test_blif_writer does): `write_blif out.blif`
  * writes what odin3_blif_write_with(NULL) writes, in status and bytes (the pass wiring; the bytes
- * themselves are pinned by test_plain_bytes_pinned). Only UNCHECKED fails check and is skipped. */
+ * themselves are pinned by test_plain_bytes_pinned). Every golden here passes check (the
+ * multi-driver original is in tests/golden/blif-multidriver, which read_blif refuses). */
 static void plain_same(const char *golden) {
     odin3_strbuf api;
     odin3_strbuf_init(&api);
@@ -355,13 +352,12 @@ static void plain_same(const char *golden) {
     path_in_dir("api.blif", path);
     odin3_status with = odin3_blif_write_with(tc.design, path, NULL);
     slurp_into(with == ODIN3_OK ? path : NULL, &api);
-    bool checked = odin3_check_design(tc.design, (odin3_check_opts){ODIN3_CHECK_FULL,
-                                                                    ODIN3_VIEW_NONE}) == ODIN3_OK;
-    TEST_ASSERT_TRUE_MESSAGE(checked != ends_with(golden, UNCHECKED), golden);
-    if (checked) {
-        TEST_ASSERT_EQUAL_INT_MESSAGE(with, bvt_write(&tc, "out.blif", &out), golden);
-        TEST_ASSERT_EQUAL_STRING_MESSAGE(text_of(&api), text_of(&out), golden);
-    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK,
+        odin3_check_design(tc.design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}),
+        golden);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(with, bvt_write(&tc, "out.blif", &out), golden);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(text_of(&api), text_of(&out), golden);
     odin3_strbuf_free(&api);
     bvt_free(&tc);
 }
@@ -1613,9 +1609,9 @@ static void test_e12_drivers(void) {
         line_of("write_blif: --vtr: top: net 'a' has 2 drivers ('a', '$c%u')", second.v));
 }
 
-/* One cell driving the net twice (review I1): listed twice, no crash. Read with odin3_blif_read
- * (the read_blif pass's Debug check refuses the net) and refused by the API write, the path with
- * no check before it. */
+/* One cell driving the net twice (review I1): listed twice, no crash. read_blif refuses a net
+ * with two drivers, so the cell is read with two nets and the nets are merged; the API write is
+ * the path with no check before it. */
 static void test_e12_one_cell_twice(void) {
     char path[PATH_BUF];
     read_ok(TWO_MODELS, false); /* the directory and the sink */
@@ -1626,10 +1622,18 @@ static void test_e12_one_cell_twice(void) {
     FILE *file = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(file);
     TEST_ASSERT_TRUE(fputs(".model top\n.inputs x y z\n.outputs n\n"
-                           ".subckt adder a=x b=y cin=z cout=n sumout=n\n.end\n",
+                           ".subckt adder a=x b=y cin=z cout=n sumout=m\n.end\n",
                            file) >= 0);
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read(tc.design, path), tc.log.data);
+    odin3_module *top = top_of();
+    uint32_t keep = 0;
+    uint32_t drop = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(tc.design, odin3_bytes_cstr("n"), &keep));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(tc.design, odin3_bytes_cstr("m"), &drop));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_net_merge(top, (odin3_net_pair){odin3_module_find_net(top, keep),
+                                                                odin3_module_find_net(top, drop)}));
     uint32_t adder = node_of("adder");
     const char *want =
         line_of("write_blif: --vtr: top: net 'n' has 2 drivers ('$c%u', '$c%u')", adder, adder);

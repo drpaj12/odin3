@@ -1,0 +1,9 @@
+# toggle_init1.blif - a register that starts at 1 and toggles (3D plan Task 19, test_abc_init1):
+# ABC holds the inverse (init 0), so the splice must restore INIT 1.
+.model toggle_init1
+.inputs clk
+.outputs q
+.latch d q re clk 1
+.names q d
+0 1
+.end

@@ -65,17 +65,17 @@ without `.blif`.
 | `neg_e7_wide` | `.err` | E7: a 7-input `.names` (K = 6). |
 | `neg_e8_mixed` | `.err` | A cover that mixes on-set and off-set rows. **The BLIF reader refuses it first**, so the line is the reader's. E8 itself needs hand IR and is pinned by `test_blif_vtr` (`test_e8_mixed_cover`). |
 | `neg_e10_hier` | `.err` | E10: the top instantiates another model. |
-| `neg_e12_multidriver` | `.err`, `.debug.err` | E12: two `.names` drive `y`. A Debug build checks the IR after every pass (CLAUDE.md rule 3), so `check` refuses the input at `read_blif` before the writer sees it. The driver therefore also accepts `<name>.debug.err`, which holds that `check` line. CI's CTest runs the Debug build; the Release CLI gives the E12 line. |
+| `neg_e12_multidriver` | `.err` | E12: two `.names` drive `y`. **The BLIF reader refuses it first** (PHASE3 #36), so the line is the reader's, in every build. E12 itself needs hand IR and is pinned by `test_blif_vtr` (`test_e12_one_cell_twice`). |
 
 Four E-classes have no fixture, and `test_blif_vtr` pins each: E4 (no BLIF form: a tri-state
 cell), E9 (an inout port: BLIF has none), E11 (a hard cell whose parameters its formals do not
 give back: `read_blif` infers them from the formals, so only hand IR makes one) and E13 (no top:
 `read_blif` always sets one, and the driver runs no `.o3` scripts on hand IR).
 
-`<name>.debug.err` is written by hand; `--write` never writes it. It exists only for this case.
-When it is the file that matches, the driver prints a `note` line saying so. In the Debug CTest,
-two cases never reach the writer, and their E-classes are pinned by `test_blif_vtr` instead:
-`neg_e8_mixed` (the reader refuses it) and `neg_e12_multidriver` (`check` refuses it).
+`<name>.debug.err` is written by hand; `--write` never writes it. No fixture has one now. When it
+is the file that matches, the driver prints a `note` line saying so. Two cases never reach the
+writer, and their E-classes are pinned by `test_blif_vtr` instead: `neg_e8_mixed` and
+`neg_e12_multidriver` (the reader refuses both).
 
 The driver's own negative test is `tests/golden/blif-vtr-corrupt/`, run by CTest
 `blif_vtr_fixtures_detects_corruption`.

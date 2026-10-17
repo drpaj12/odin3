@@ -13,3 +13,5 @@ expr/pow_shift no SAT model for $pow in Yosys's equiv flow; checked by hand (2**
 dff/never_active_en x-refinement: gold is a $dffe with EN=0 and no init (q is x forever), the gate is q = 1'x; valid, not provable by the flow
 # dff/never_active_en, hand check: gold is `$dffe` with EN tied 0 and no init, so Q is x for ever; the gate
 # is `q = 1'x`. Any value of the gold's x init is a legal choice of the gate's x, so the gate refines the gold.
+wreduce/mem_addr out-of-range accesses alias valid words after the address bits go: Yosys's own rule (wreduce -memx exists for it), not a refinement
+wreduce/divmod_trim_pow Yosys has no SAT model for $pow (equiv_simple fails on the cell, not on the rewrite)

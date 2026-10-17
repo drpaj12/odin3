@@ -91,7 +91,7 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 15. 1C exit test: every `ok` golden reads, round-trips identical under `netlist-compare` with
     names and order kept; `check` errors are allowed only on the four Odin II goldens whose
     netlists drive one net from several cells (`elsif_both_defined`, `multi_assignment`, both
-    arches), listed explicitly in the round-trip script.
+    arches), listed explicitly in the round-trip script (superseded at read by PHASE3 #36).
 16. Undeclared, unregistered `.subckt` cells (Yosys `$pow`, `$_DFFSR_PPP_`) become implicit
     black boxes with ports from the file (scalar, width 1, inout); no `.model` is written for them.
 17. Order after 1C: 1G, then 1E, 1F, 1D. The full golden round trip runs locally (CI has no

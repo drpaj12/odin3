@@ -536,14 +536,20 @@ static void check_wires_full(check_ctx *ctx) {
     check_map_size(ctx, ctx->module->wire_names, "wire", owned);
 }
 
-/* Rule 7 on the design's records: runs exist; DERIVED records have earlier parents. */
+/* Rule 7 on the design's records: runs exist; hier is 0 or a string of the design; DERIVED records
+ * have earlier parents. */
 static void check_records(check_ctx *ctx) {
     uint32_t end = odin3_prov_end(ctx->design);
     uint32_t runs = odin3_passrun_end(ctx->design);
+    size_t strings = odin3_strtab_count(odin3_design_strtab(ctx->design));
     for (uint32_t i = 1; i < end; i++) {
         const odin3_prov_record *rec = odin3_prov_get(ctx->design, (odin3_prov_id){i});
         if (rec->run.v == 0 || rec->run.v >= runs) {
             violation(ctx, R7, "record %u names run %u, which does not exist", i, rec->run.v);
+        }
+        if (rec->hier >= strings) {
+            violation(ctx, R7, "record %u has hier %u, which is not a string of the design", i,
+                      rec->hier);
         }
         if (rec->kind == ODIN3_PROV_DERIVED && rec->parents.count == 0) {
             violation(ctx, R7, "derived record %u has no parent", i);

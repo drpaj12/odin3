@@ -747,6 +747,19 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       never listed as expected (Task 26's rule), so the plan's candidate `out of memory (cap 8G)`
       entry for `koios/lenet.v` is the `xl` run class in `vtr_equiv_expect_fail.txt` instead: the
       `elab_equiv_vtr_xl` run reports the Yosys side's peak RSS or its cap outcome.
+      **2H amendment (agent default, Peter approved 2026-10-14):** the rule stands for odin3 and Yosys
+      side A (a cap kill, signal or timeout there is hard, never listed). Three outcomes that are the
+      oracle's or the checker's size, not odin3's, are `unproven` (`elab-equiv` exit 4) and listable
+      with a needle: Yosys side B killed by its cap (`unproven: Yosys side B exceeded its memory
+      cap (4G)`), equiv-check killed by its cap (`unproven: equiv-check exceeded its memory
+      cap (4G)`, keyed by call site like side B) and `elab-equiv --budget` running out (`elab-sweep --equiv-budget 1800`: the
+      Yosys and equiv-check wall time of one file, odin3's excluded). `micro_equiv_expect_fail.txt`
+      lists `full/stereovision0`, `large/LU32PEEng`, `LU64PEEng` (side B), `large/arm_core`
+      (equiv-check cap, ~1000 s at 4G and 5G) and `cf_fir_3_8_8`, `stereovision2`, `bgm`, `cf_fft_1024_16` (ABC dsec 600 s) with
+      the measured evidence; `large/mkDelayWorker32B` runs at a 6G cap (`--cap-for`) and ends at
+      the `dual_port_ram` pairing limit of its siblings.
+      A host OOM-kill (or manual kill) of side B is indistinguishable from a cap kill: SIGKILL is
+      the only signal `elab-equiv` sees, so either reads `exceeded its memory cap`.
     - **Heavy runs** (controller, Release build, lanes idle; `ODIN3_HEAVY_OK=1`):
       ```
       tools/build-locked --preset release -j6
@@ -993,7 +1006,10 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       **Exit codes of the opt tools (one convention):** 0 pass, 1 a real negative result, 2 usage
       or tool error, 3 hard (a crash, signal, memory-cap kill or timeout of a child; `opt-equiv`,
       `opt-diff`, `opt-rules`, `opt-run`, `opt-gen-diff`), which elab-sweep and opt-nightly treat
-      as hard: no expect-fail line absorbs it. `opt-equiv --min-changed N` fails a run in which
+      as hard: no expect-fail line absorbs it; 4 unproven (`opt-equiv` only, 2F VTR triage: no pair
+      failed, the SAT proofs hit their size limit and the whole-script BLIF cec decided nothing; a
+      cap kill of the checker is unproven, Odin III's stays 3), which an expect-fail line lists as
+      `untested for now (size limit)`. `opt-equiv --min-changed N` fails a run in which
       fewer than N sub-pass calls changed something (CTest `opt_equiv_rules` passes 1; 19 sources
       whose rule Phase 2 does not run are listed in `rules_equiv_expect_fail.txt`).
     - **The bench** (`tests/bench/bench_opt.c`, Release only: `bench_guard.h` refuses a Debug or
@@ -1051,11 +1067,38 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       - Smoke only so far (Task 20): the 3 smallest VTR files (`single_wire.v`, `single_ff.v`,
         `and_latch.v`), 18 runs, 18 ok, 0 unexpected, 3G cap. The five-script `opt-diff` of the
         31 files has no `tests/opt/diff_expect.txt` lines yet: the full run adds them (or fails).
+    - **VTR leg triage (2026-10-15, branch `fix/2F-vtr-equiv-triage`).** The first full
+      `opt_equiv_vtr` run (main 967e1da, Release, 3G cap, 31 files, 6491 s) had 11 ok and 20 not.
+      Findings, each with its test: (1) `ch_intrinsics`, `ch_intrinsics_nolatches` and `mkPktMerge`
+      were a **checker artefact**, not an `opt` bug: `rename_modules` makes the two sides' copies of
+      a hard block (a black-box module) two modules, so `equiv_make` paired the output wires of the
+      two instances and could never prove them equal, whatever the rewrite (8, 6 and 5 calls
+      unproven). `Checker.refines` now cuts every black-box instance at its ports
+      (`expose -evert`, `EVERT_BLACKBOXES`): the sides share its outputs and the check compares
+      what drives its inputs; the three prove call by call, and so do the micro designs the old
+      listings blamed on it (`tests/opt/equiv_expect_fail.txt` 6 lines and `diff_expect.txt` 42
+      `refine` lines were stale and are gone). 3G also saw `mkPktMerge` fail at `opt_merge`: the
+      same artefact. The one Phase 3 pair left, `ch_intrinsics` 0039-opt_expr (`opt -full`'s
+      x-leg mux removals), is a limit of `equiv_make`'s induction: Yosys 0.55's own `opt_expr
+      -mux_undef -mux_bool -fine` fails it with the same 6 cells (`equiv_phase3_expect_fail.txt`).
+      (2) `or1200`: the "Gold module contains memories or processes" abort of the plain and the
+      techmap lowering hid the 60 s timeout of the `memory` lowering (a 32x32 multiplier); it is a
+      size limit now. (3) A BLIF cec "not equivalent" of a design with x nets (`unconn`, tied to 0 on
+      both sides) is no verdict: `stereovision2` is "equivalent outside the x-cones"
+      (`equiv-check --x-report`); `stereovision0` is unproven, not examined (the BLIF check said
+      not equivalent, the x-net rule makes it unproven, `--x-report` was not run). (4) The 16
+      other designs that hit the SAT size limit (stereovision1,
+      2, spree, bgm, boundtop(+_nolatches), raygentop(+_nolatches), or1200, mkSMAdapter4B,
+      LU8/32/64PEEng, mkDelayWorker32B, arm_core, mcml) are `opt-equiv` exit 4 and listed in
+      `tests/opt/vtr_expect_fail.txt` as untested for now (size limit), with the measured
+      evidence; `opt-nightly --only NAME` re-runs a few files.
     - **Hand-off to 2H:** S-P (`tools/opt-check/sp-splice`, Odin III against Yosys through the
       Phase 2 script) is the exit table's `opt` row; S-D is information only. lenet.v's S-P needs
       about 7 GB (Yosys's side), so 2H runs it only as a `sweep-xl` job. The Odin III half reads
       `vtr_primitives.v` as a library unit with per-read flags (`--nomem2reg`); 2D-7b's
       `read_verilog --lib` is that mode, and 2H checks it carries them.
+    - **2F follow-ups:** opt-equiv hard-block cut compares ports only, not instance presence or
+      parameters (review 2026-10-16); follow-up.
     - **For Peter:**
       1. *Decided, #25:* the mixed-sign cell semantics (2F Task 18 review I1 and I2): Peter ruled
          "2a" on 2026-10-13, both-signed-only everywhere, with a warning.
@@ -1119,3 +1162,135 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       mixed-sign repros stay in `tests/fuzz/fuzz_opt_regress`. The Phase 2 script's output on 20
       micros and mcml is byte-identical before and after: the front end unifies the flags, so no
       mixed cell reaches `opt`.
+
+26. **2H micro sweep triage: the 14 failures of the exit_micro run of 2026-10-14** (agent defaults;
+    Peter may override; branch `fix/2H-micro-triage`). Root causes, one per design; the table with
+    commits is in `.superpowers/sdd/2H-micro-triage.md`.
+    - **Tool fixes (equiv-check).** (a) `dsec` ending `Networks are UNDECIDED` (its own engine limit,
+      exit status 0) is *unproven*, exit 4, not an error (`full/stereovision0`). (b) Parmys numbers the
+      two ports of a `dual_port_ram` in Yosys's hash-table order, so the same memory can come out with
+      ports 1 and 2 exchanged (`common/2r2w`, `syntax/inferred_DPram`): `--match-unnamed` turns every
+      unnamed `dual_port_ram` to one canonical port order first. The ports are taken as
+      interchangeable, which is a new assumption of the exit statement beside "RAM contents are not
+      modelled": a design that differs only in which port wins a same-address write (an IEEE race,
+      spec 2D §17 #66) is called equivalent. (c) Unnamed boxes that name no memory (multipliers) whose
+      signature simulation ties are told apart by ABC probes on their input cones (candidates tried in
+      cone-colour order; `--box-probe-budget`, default 120 s, `exit_micro` passes 900 s) before
+      structure and file order would guess, and boxes fed by copies of one register are
+      interchangeable (congruence closure). `syntax/rs_decoder_2`, `large/sv_chip1_hierarchy_no_mem`,
+      `full/cf_fft_256_8` and `syntax/cf_fft_1024_16` were guessed multiplier pairings; with the pairs
+      found they are plainly equivalent. (d) An x-cone result over guessed pairs is *unproven*: the
+      cones hold every pin of a box fed by `unconn`, so they hide what a wrong pairing breaks (the
+      arm_core lesson).
+    - **Parmys defects, listed.** (Not listed: `syntax/multi_assignment`.) Parmys keeps one of four
+      tri-state drivers there;
+      Peter ruled that Odin III will follow Parmys's resolution with a warning (decision 27, landed:
+      the micro is `identical` to its golden under exit-check), so it is not listed (`differs` stays
+      never listable). `large/sv_chip0_hierarchy_no_mem`: the signed-adder `unconn`
+      padding of the exit_vtr stereovision0 record, reviewed and recorded in `tests/exit/micro_eqx.txt`
+      (golden equals Yosys `read_verilog` through the Parmys script; the splice equals it with `wreduce`
+      removed; 218 against 197 `unconn` uses with it, 50 on both sides without).
+    - **Size and tool limits, listed.** `large/LargeRam` (Parmys killed at 16.8 GB: 2^18 RAM slices;
+      `micro_nogolden.txt`; `status=capped` is now a listable no-golden kind), `full/stereovision3` and
+      `large/sv_chip3_hierarchy_no_mem` (two clock domains), `full/stereovision0` (dsec UNDECIDED, with
+      the RAM of the micro), `large/LU32PEEng` and `LU64PEEng` (dsec 600 s with every pair exact)
+      in `tests/exit/micro_unproven.txt`.
+
+27. **Peter, 2026-10-14: "go with the parmys method and throw a warning in these cases; default to
+    the parmys way for the most part (throwing WARNINGs) such that odin III works with vtr".**
+    The general policy: where Odin III and Parmys disagree, `--vtr-compat` (decision 24's switch,
+    the mode of the VTR flow and the exit sweeps) follows Parmys and prints a WARNING that names the
+    legacy behaviour; without the flag the IEEE / `tribuf -logic` reading stays. First case, the
+    micro `syntax/multi_assignment` (decision 26's "separate elaboration change"; agent defaults
+    Peter may override; 2D spec v4.31, EL-29 / §6.7, §17 #79; code `elab2_trivtr.c`):
+    - **What Parmys does, and why (read from Yosys 0.55 and probed).** It does not pick a driver.
+      `opt_expr -mux_undef` (in `opt -full`) replaces `en ? x : 'bz` by `x`: every enable goes, and
+      each driver is the plain connection `data = x`. `opt_clean` (`rmunused_module_signals`) then
+      puts `data` and every `x` into one class and keeps the one `compare_signals` ranks first; the
+      others are shorted to it. With input ports as the `x` the net is the winner and the other
+      inputs are unused: the golden `busout = enable ? bus0 : 1`, `s` unused. The ranking for input
+      port bits: (1) a bit another cell reads (`connected_signals`; the `$tribuf`/mux itself is
+      already gone) beats one nothing reads; (2) the lowest wire name (`strcmp`); (3) of equal
+      wires (two bits of one vector) the highest bit. The order of the assigns plays no part:
+      `bus0` wins because it is the lowest name, not because it is first.
+    - **Evidence (`tools/run-oracle.sh --tool parmys` on 21 small designs).** Four
+      drivers (the micro, `bus0` wins); inputs named `zz, mm, aa` in the order `zz, mm, aa`:
+      `aa`; `a`/`b` bare assigns `d = a; d = b;` in either order: `a`; `aa, bb, cc` with
+      `assign p = ~bb` elsewhere: `bb`, not `aa` (reads beat names); `d = e0 ? x[0]; d = e1 ?
+      x[1]` in either order: `x[1]`; `assign o = d; assign o = 1'b1` beside tri-states: the
+      constant (constants rank first). Drivers that are cell outputs (`a & b` against `a | b`, three
+      drivers, a module output against an `assign`, partial overlap, `en ? (a & b) : 'bz` beside
+      `en ? (a | b) : 'bz`): Parmys keeps **all** the drivers as several `.names` on one net (the
+      BLIF has two drivers; `equiv-check` rejects it, and so would VTR); a cell against an input
+      drives the input port itself. There is no "keep one" rule for those.
+    - **The rule implemented.** Under `--vtr-compat`, a group of two or more tri-state drivers on an
+      internal net (spec §6.7: the nets the conversion to `$pmux` applies to) whose data bits are
+      all bits of input ports of the module is resolved as Parmys does: the enables are ignored,
+      for each bit the winner above is kept, the other drivers' data is dropped, and the net is
+      merged into the winner. Warning (D3, located at the first driver): `net 'data' has 4 drivers;
+      --vtr-compat keeps only the data of 'bus0' as Parmys does (the input Yosys keeps as the net's
+      representative: one other logic reads, else the lowest name), ignores every enable and drops
+      'bus1', 'bus2', 'bus3' (IEEE resolution would be a bus selected by the enables: the data of
+      the driver that is enabled, undefined for several)`. Not changed: without the flag; one
+      driver (both readings give the same netlist); nets on a top-level port (they keep the
+      `$tribuf`; Parmys drops that enable too: decision 28 follows it for a lone driver of an output); and any group
+      with a driver whose data is not an input bit (a cell output, a constant, a child instance
+      output), which keeps the `$pmux` and the old warning because Parmys's own result there is
+      several drivers on one net, which the IR cannot hold (an IR invariant: not changed).
+    - **Scope limits (final-review round, M-I1 / M-I2; probes h1, t1, s1 against Parmys).** The
+      rule is applied only where it matches Parmys, and declines otherwise (the IEEE `$pmux` and
+      its old warning, plus a second WARNING "net 'd' is multiply driven (...); --vtr-compat does
+      not apply Parmys's rule here (why), so the IEEE resolution is used and Parmys's result may
+      differ"): (a) **top module only**: Parmys flattens before its final `opt -full`, so below the
+      top it ranks the parent's wires (h1: Parmys keeps `aa`, a submodule's own names would keep
+      `bus0`); library modules (`odin3_lib_vtr_compat`) are never the top. (b) **a dropped input
+      that other logic reads**: Yosys shorts every input of the class to the representative, so
+      the reader of a loser would read the winner (t1: `r = cc | e1` becomes `bb | e1`); not
+      modelled, so a group with a read input that does not win declines. (c) **an input that is
+      also the data of another group**: Parmys makes one class of both groups (s1); the group and
+      every group sharing the input decline. A faithful version would need a union-find over all
+      groups and a move of the readers of each loser onto the winner; not done (more than a local
+      change, and the readers' fanout then changes, which the IR invariants make worth a review of
+      its own). Also listed: legal one-hot buses of input ports (`D3_bus_one_hot`) lose their
+      enables under `--vtr-compat`, as Parmys does; the warning shows it.
+    - **Limits, listed.** `compare_signals` also weighs wire attributes (`keep` and the like: more
+      attributes win) and a wire driven by a register; neither is modelled, and neither applies to
+      an input port without attributes. An input port with an `(* attribute *)` could win in
+      Parmys where it loses here.
+    - **The elab_equiv_micro sweep.** Its side B for this micro is Yosys's `tribuf -logic` (the
+      file's `// elab-check: --yosys-tribuf`), the IEEE bus, and the sweep runs `--vtr-compat`, so
+      the micro is now an expected "NOT EQUIVALENT" in `tests/elab/micro_equiv_expect_fail.txt`
+      (plain Yosys cannot be side B: its writer drives the input `bus1`).
+    - **Evidence of the change.** `tests/unit/test_elab_vtr_multidriver.c` (both modes, the
+      warning text, order, name, reads-beat-names, same-wire highest bit, per-bit winners, the
+      fallbacks, plus the declines h1 / t1 / s1). Default-mode guard: CTest `elab_tribuf_default_equiv` (`elab-equiv --yosys-tribuf` without `--vtr-compat` on the micro and the `D3_*` accept files). Exit-check on `syntax/multi_assignment` and the other micros with a
+      multiply-driven net: `.superpowers/sdd/2H-micro-triage.md`, "Multi-driver (decision 27)".
+
+28. **`--vtr-compat`: a tri-state on a top-level output drops its enable, as Parmys does** (agent
+    default under decision 27's Parmys-default rule; Peter approved the change 2026-10-16; branch
+    `fix/2H-vtrcompat-tristate`; code `elab2_trivtr_out.c`; closes decision 27's "a divergence still
+    to be ruled on"). Peter may override.
+    - **What Parmys does (probed with `tools/run-oracle.sh --tool parmys` on `module t(input [3:0]
+      d, input en, output [3:0] q); assign q = en ? d : 4'bz;`, k6_frac).** `opt_expr -mux_undef`
+      turns `en ? d : 'bz` into `d` before anything else, so the golden is four buffers `.names
+      d~i q~i`, with `en` an unused input. Odin III without the option keeps the `$tribuf` (z while
+      the enable is off), which is the IEEE reading and what `tribuf -logic` keeps on a port.
+    - **The rule.** Under `--vtr-compat`, in the top module, a `$tribuf` (a `c ? d : 'bz`
+      assign, `bufif0/1`, `notif0/1`) that is the only driver of the top-level `output` bits it
+      drives is deleted and its Y nets are merged into the data nets. One WARNING per cell, located at
+      the driver: `tri-state driver of output port 'q': --vtr-compat drops the enable and wires the
+      output to the data as Parmys does (without the option the output is z while the enable is
+      off)`. The default mode is unchanged.
+    - **Not changed (listed).** An `inout` port (Parmys also drops the enable there, but a bidirectional
+      pin is a different shape; not ruled on). Several drivers on one output bit: Parmys keeps all
+      the drivers or shorts the data as decision 27 describes, and the IR cannot hold several drivers,
+      so the `$tribuf` cells stay as before (no new warning). A constant 0, x or z enable (the output
+      is z or undefined for good). A driver whose data is another such driver's output. An output net that also has an `inout` pin
+      of a child instance on it (the child may drive it, so the tri-state is not a lone driver). A module
+      below the top (still the located error: the instance may drive a top-level port, where z must
+      stay).
+    - **Evidence.** `tests/unit/test_elab_vtr_multidriver.c` (the new `test_vtr_output_*` and
+      `test_plain_output_keeps_tribuf`); CTest `cli_vtr_tristate_out` runs `read_verilog
+      --vtr-compat` on `tests/golden/vtr_tristate/tri_out.v` and compares the netlist with the
+      Parmys golden shape (`tests/golden/vtr_tristate/tri_out.parmys.blif`, a copy of the oracle's
+      output) and checks the WARNING.

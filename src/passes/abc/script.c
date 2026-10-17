@@ -162,6 +162,35 @@ static uint32_t lowered(uint32_t value, uint32_t cap) {
     return value < cap ? value : cap;
 }
 
+/* The pass-level caps (Task 14). */
+static const odin3_abc_run_limits k_run_default_limits = {.domains = ODIN3_ABC_MAX_DOMAINS,
+                                                          .aig_objs = ODIN3_ABC_MAX_AIG_OBJS,
+                                                          .namemap_objs =
+                                                              ODIN3_ABC_NAMEMAP_MAX_OBJS};
+static odin3_abc_run_limits run_limits = {.domains = ODIN3_ABC_MAX_DOMAINS,
+                                          .aig_objs = ODIN3_ABC_MAX_AIG_OBJS,
+                                          .namemap_objs = ODIN3_ABC_NAMEMAP_MAX_OBJS};
+
+const odin3_abc_run_limits *odin3_abc_run_limits_get(void) {
+    return &run_limits;
+}
+
+/* A pass-level cap: 0 keeps the default, else the value clamped to it. */
+static uint32_t pass_cap(uint32_t value, uint32_t dflt) {
+    return value == 0 ? dflt : lowered(value, dflt);
+}
+
+void odin3_abc_test_set_run_limits(const odin3_abc_run_limits *limits) {
+    if (limits == NULL) {
+        run_limits = k_run_default_limits;
+        return;
+    }
+    run_limits.domains = pass_cap(limits->domains, k_run_default_limits.domains);
+    run_limits.aig_objs = pass_cap(limits->aig_objs, k_run_default_limits.aig_objs);
+    run_limits.namemap_objs = pass_cap(limits->namemap_objs, k_run_default_limits.namemap_objs);
+    run_limits.prov_edges = limits->prov_edges;
+}
+
 void odin3_abc_test_set_limits(const odin3_abc_limits *limits) {
     if (limits == NULL) {
         abc_limits = k_abc_default_limits;

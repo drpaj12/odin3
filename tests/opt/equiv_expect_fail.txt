@@ -2,12 +2,48 @@
 # tests/proc/micro_expect_fail.txt and tests/opt/micro_expect_fail.txt (the CTest line reads all three) (2F Task 17). Format:
 # `<path> [needle] <reason>`.
 #
-# TEMPORARY (review I3): the hard-block listing below goes when opt-equiv handles black boxes. The
-# failure is Yosys `equiv_make` (a black-box instance's outputs get a different $equiv source on each
-# side), not tools/equiv-check; the cut-point mode of equiv_check.py is BLIF/ABC and opt-equiv does not
-# use it. Removal is tied to the I1 fix (a Yosys-level cut-point step in Checker.refines: replace each
-# matched black-box instance's outputs by a shared free input and compare its inputs), not to 2D-7b.
-# Other hard-block micros whose opt changes something fail the same way when Task 20 runs them all.
+# The hard-block listing that stood here (review I3) is gone: since the 2F VTR triage (2026-10-15)
+# `Checker.refines` cuts every black-box instance at its ports (`EVERT_BLACKBOXES`, `expose -evert`):
+# the two sides share its outputs and the check compares what drives its inputs. constant_module_inst,
+# spram_big, memlooptesting, memory_combinational, ch_intrinsics and mkPktMerge prove under the Phase 2
+# and the Phase 3 script (ch_intrinsics' one Phase 3 pair is in equiv_phase3_expect_fail.txt).
 # `[not a refinement]` matches only a pair Yosys left unproven (re-audited in 2F-6: a Yosys crash or
-# timeout is exit 3, hard, and no needle matches it). After the flatten fix this is the only entry.
-syntax/constant_module_inst.v [not a refinement] opt-equiv harness: the design instantiates the single_port_ram hard block, which equiv_make cannot match (the same file against itself fails); the rewrite itself ($eq(1-bit, 32'd1) to the bit) is correct
+# timeout is exit 3, hard, and no needle matches it). `[unproven:]` is opt-equiv exit 4: the SAT proofs
+# hit their size limit and the BLIF cec of the whole script decided nothing.
+
+# 3G (wreduce), Phase 3 script. Peter's rule: a design too big for the check is listed as untested for now (size limit), with the measured time, and never counts as a pass.
+# The first group is wreduce evidence that does not exist for these designs: the SAT proof hit its 60 s timeout or the 2 GiB cap, and the BLIF cec of the whole script gave no verdict (or a cap kill).
+operators/eightbit_arithmetic_power.v [No SAT model] $pow has no SAT model in Yosys's equiv flow (a model limit, nothing is proved either way)
+operators/twobits_arithmetic_power.v [No SAT model] $pow has no SAT model in Yosys's equiv flow (a model limit, nothing is proved either way)
+common/pow_const.v [No SAT model] $pow has no SAT model in Yosys's equiv flow (a model limit, nothing is proved either way)
+syntax/bm_simple_memory.v [not a refinement] wreduce.mem_addr: the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
+syntax/multi_edge_reader_writer.v [not a refinement] wreduce.mem_addr: the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
+common/bram.v [not a refinement] wreduce.mem_addr: the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
+full/matmul.v [not a refinement] wreduce.mem_addr: the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
+full/diffeq1.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 1409 B source, sweep time 421 s
+syntax/diffeq_paj_convert.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 1409 B source, sweep time 418 s
+full/iir1.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 16216 B source, sweep time 342 s
+full/cf_cordic_v_8_8_8.v [not a refinement] not caused by wreduce: opt_share fails the same way with the Phase 3 script minus wreduce (probe)
+full/stereovision3.v [not a refinement] not caused by wreduce: opt_dff fails the same way under the Phase 2 script (probe)
+large/sv_chip3_hierarchy_no_mem.v [not a refinement] not caused by wreduce: opt_dff fails the same way under the Phase 2 script (probe)
+full/stereovision2.v [unproven:] untested for now (size limit): Yosys killed at the 2 GiB cap; 63133 B source, sweep time 32 s
+full/oc54_cpu.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 65857 B source, sweep time 188 s
+large/sv_chip2_hierarchy_no_mem.v [unproven:] untested for now (size limit): Yosys killed at the 2 GiB cap; 66245 B source, sweep time 32 s
+large/spree.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 68378 B source, sweep time 188 s
+large/bgm.v [unproven:] untested for now (size limit): Yosys killed at the 2 GiB cap; 71513 B source, sweep time 48 s
+large/boundtop.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 72115 B source, sweep time 173 s
+large/raygentop.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 84884 B source, sweep time 172 s
+large/paj_raygentop_hierarchy_no_mem.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 85025 B source, sweep time 282 s
+large/sv_chip1_hierarchy_no_mem.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 101811 B source, sweep time 288 s
+full/stereovision1.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 103022 B source, sweep time 725 s
+full/cf_fft_256_8.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 122569 B source, sweep time 676 s
+large/sv_chip0_hierarchy_no_mem.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 131178 B source, sweep time 190 s
+full/stereovision0.v [unproven:] untested for now (size limit): Yosys killed at the 2 GiB cap; 132421 B source, sweep time 287 s
+large/or1200.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 136931 B source, sweep time 127 s
+full/LU8PEEng.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 141390 B source, sweep time 308 s
+large/mkSMAdapter4B.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 141554 B source, sweep time 274 s
+large/LU32PEEng.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 157618 B source, sweep time 218 s
+large/LU64PEEng.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 178350 B source, sweep time 284 s
+large/mkDelayWorker32B.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 207980 B source, sweep time 194 s
+syntax/cf_fft_1024_16.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 236934 B source, sweep time 781 s
+large/arm_core.v [unproven:] untested for now (size limit): Yosys killed at the 2 GiB cap; 345328 B source, sweep time 33 s

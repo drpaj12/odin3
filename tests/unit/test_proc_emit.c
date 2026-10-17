@@ -342,7 +342,8 @@ static void test_add_cell_budget(void) {
     TEST_ASSERT_EQUAL_size_t(1, n_lines);
     TEST_ASSERT_EQUAL_INT(ODIN3_LOG_ERROR, levels[0]);
     TEST_ASSERT_EQUAL_STRING("t.v:3:1: error: proc needs more than 1 bytes (the design's budget "
-                             "is 60% of physical memory)",
+                             "is 1 bytes: the smaller of 60% of physical memory and the "
+                             "cgroup's memory.max)",
                              lines[0]);
     TEST_ASSERT_TRUE(fx.mctx.stopped);
     TEST_ASSERT_EQUAL_UINT32(1, fx.stats.errors);

@@ -212,7 +212,12 @@ worker() {
     warns=$(sed -n 's/.*check FULL: \([0-9]*\) errors, \([0-9]*\) warnings.*/\2/p' "$errf" | head -n 1)
     errs=${errs:--}
     warns=${warns:--}
-    if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -ne 0 ] && is_multi_driver "$path" && grep -q 'cell outputs (one allowed)' "$errf"; then
+        # read_blif refuses a net with two drivers (a located error); expected for the #15 list.
+        text="refused"
+        struct="refused"
+        note=$(tail -n 1 "$errf" | tr '\t' ' ')
+    elif [ "$rc" -ne 0 ]; then
         text="RTFAIL"
         struct="-"
         note=$(tail -n 1 "$errf" | tr '\t' ' ')
@@ -261,7 +266,7 @@ report() {
             b = path[r]; sub(/.*\//, "", b)
             printf "%-8s %-16s %-6s %-6s %7s  %s\n", text[r], s, er[r], wr[r], secs[r], p
             tot++
-            if (text[r] == "ok") tx_ok++; else if (text[r] == "RTFAIL") rtfail++; else tx_fail++
+            if (text[r] == "ok") tx_ok++; else if (text[r] == "refused") tx_ref++; else if (text[r] == "RTFAIL") rtfail++; else tx_fail++
             cnt[base]++
             if (er[r] != "-" && er[r] + 0 > 0) { if (b in multi) chk_exc++; else chk_bad++ }
             rttot += rts[r]
@@ -274,7 +279,7 @@ report() {
         print ""
         print "SUMMARY"
         printf "files: %d (structural gate run on %d distinct contents)\n", tot, tot - dupn()
-        printf "text gate: %d ok, %d FAIL, %d read/write failures\n", tx_ok, tx_fail, rtfail
+        printf "text gate: %d ok, %d FAIL, %d read/write failures, %d refused at read (multi-driver original)\n", tx_ok, tx_fail, rtfail, tx_ref
         printf "structural gate: identical %d, identical+stubs %d, refused (multi-driver original) %d, timeout %d, memlimit %d, different %d, error %d, not run %d\n",
             cnt["identical"], cnt["identical+stubs"], cnt["refused"], cnt["timeout"], cnt["memlimit"], cnt["different"], cnt["error"], cnt["-"]
         printf "check FULL errors: %d files outside the multi-driver list, %d inside it\n", chk_bad, chk_exc
@@ -393,7 +398,7 @@ vtr_equiv() {
 # Worker for --vtr: one line "id<TAB>path". Writes $BRT_RES/id.tsv (the report row and seconds).
 worker_vtr() {
     local id path rel tool dir w1 w2 e1 facts rc=0 w2rc=0 state classes="" renamed=0 word
-    local idem="-" cmpw="-" eqv="-" verdict=pass t0 flag="" stem
+    local idem="-" cmpw="-" eqv="-" verdict=pass t0 flag="" stem read_refused=0
     IFS=$'\t' read -r id path <<<"$1"
     rel=${path#"$BRT_ROOT"/}
     case $path in
@@ -418,8 +423,14 @@ worker_vtr() {
     1) state=refused ;;
     *) state=failed ;;
     esac
+    # read_blif itself refuses a net with two drivers (a located error, PHASE3 #36): E12, but only
+    # for the #15 list and only with that message; any other read failure stays `failed`.
+    if [ "$rc" -ne 0 ] && is_multi_driver "$path" && grep -q 'cell outputs (one allowed)' "$e1"; then
+        state=refused
+        read_refused=1
+    fi
     if [ "$state" = refused ]; then
-        classes=$(vtr_classes "$e1")
+        if [ "$read_refused" = 1 ]; then classes=E12; else classes=$(vtr_classes "$e1"); fi
         verdict=$(vtr_refusal_verdict "$classes" "$facts" "$e1" "$path" "$tool")
     elif [ "$state" = failed ]; then
         verdict="fail:io"

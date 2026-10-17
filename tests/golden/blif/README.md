@@ -18,7 +18,7 @@ Verbatim oracle outputs from `~/odin3-ws/golden` (written by `tools/run-oracle.s
 | `ansiportlist_2.parmys.blif` | Yosys+Parmys | `EArch/regression/verilog/full/ansiportlist_2` | `408311c4…58dba` |
 | `pow.parmys.blif` | Yosys+Parmys | `EArch/regression/verilog/common/pow` | `0447944d…4a3b719` |
 | `dffsre.parmys.blif` | Yosys+Parmys | `EArch/regression/verilog/common/dffsre` | `d9bf07c5…b83b40b` |
-| `elsif_both_defined.odin.blif` | Odin II | `EArch/regression/verilog/preprocessor/elsif_both_defined` | `0ca5a20b…ffa620b` |
+| `../blif-multidriver/elsif_both_defined.odin.blif` | Odin II | `EArch/regression/verilog/preprocessor/elsif_both_defined` | `0ca5a20b…ffa620b` |
 
 `ansiportlist_2.parmys.blif` has three models: the top and the `.blackbox` models `adder`
 (scalar formals) and `multiply` (vector formals `b[0..35]`, `a[0..35]`, `out[0..71]`).
@@ -30,8 +30,8 @@ generic `\$pow #(…)` instance, which writer-check's iverilog step resolves thr
 (`-l`). Known limitation: BLIF carries no parameters, so a BLIF-read `$pow` (like any word cell)
 is unsigned — `a ** -1` written by Yosys as a 32-bit all-ones `B` reads as the exponent 2^32 − 1,
 not simlib's `A ** $signed(B)`. Nothing evaluates `$pow` yet (no hook); a future lowering must not
-trust the signedness of a BLIF-read `$pow`. `elsif_both_defined.odin.blif`
-drives one net from two `.names` (read as written; `check` reports rule 4).
+trust the signedness of a BLIF-read `$pow`. `elsif_both_defined.odin.blif` drives one net from
+two `.names`; `read_blif` refuses it (PHASE3 #36), so it lives in `../blif-multidriver/`.
 
 ## Hand-written fixtures
 
@@ -71,5 +71,5 @@ Each Yosys-side normalization of the JSON step has a fixture that fails without 
 
 CTest `blif_roundtrip_fixtures` runs `tools/blif-roundtrip/blif-roundtrip --fixtures` over every
 `*.blif` here (read, check FULL, write; normalized text identity; `netlist-compare`). No fixtures
-were added for it; `elsif_both_defined.odin.blif` is on the script's multi-driver list. The full
+were added for it. The full
 golden run is `tools/blif-roundtrip/blif-roundtrip` with no arguments (see `docs/PHASE1.md`, 1C).

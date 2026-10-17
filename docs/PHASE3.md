@@ -25,11 +25,9 @@ decisions 2–3 and 16 below):
    `dual_port_ram`. VTR's own readers give LUT K = 6 (the largest `.names` pb_type) and a RAM
    address width of 15.
 3. **Through P&R**: Odin III alone produces each netlist. The script is `read_verilog
-   --nolatches; proc; opt; flatten; opt -full; hardmap; lower; abc; write_blif --vtr`
-   (decision 30: `opt -full` after `flatten`, as Parmys runs it), and once 3G lands
-   `read_verilog --nolatches; proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full;
-   hardmap; lower; abc; write_blif --vtr` (decisions 7 and 31: `wreduce` before `flatten`).
-   Both forms are one script; the second only adds the 3G passes. Then
+   --nolatches; proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full; hardmap; lower; abc;
+   write_blif --vtr` (`wreduce` before `flatten` as Parmys, decisions 7 and 31 and 3G WR-9; `opt -full`
+   after `flatten` as Parmys runs it, decision 30). Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
    -crit_path_router_iterations 100` (the `vtr_reg_qor_chain` options) must end with
    `vpr_status=success`. That means VPR packs and places, finds the minimum channel width by
@@ -728,6 +726,15 @@ then the options considered.
     multiplexed RAM modes; (8) async RAM reads stay soft; (9) two live write ports mapped without
     priority logic (the IEEE race, 2D §17 #66), exempt from the functional check; (10) the 3C plan
     as about 7 tasks in 3 PRs.
+    **3G sweep rulings (controller, agent defaults under #32, 2026-10-14):** (1) `wreduce` stays a
+    faithful single Yosys 0.55 run with its queueing rule, no fixpoint loop: Yosys's own run is not a
+    fixpoint either (38 of 46 micro diffs have cells equal to Yosys `wreduce` repeated until stable;
+    Odin III follows the same queueing rule and stops a little short of that on a few designs). (2) The
+    refinement checker tries each lowering plain, then with `opt_clean -purge` (unread wires), a SAT
+    timeout or cap kill falls back to a BLIF cec of the whole script, and a design still undecided is
+    listed as "untested for now (size limit)" with its time, keyed narrowly, never counted as a pass
+    (Peter: smaller benchmarks suggest it works). (3) The `read_blif` multi-driver net that `check`
+    rejects (fuzz seed `blif003`) is a separate Phase 2 fix.
 32. **3B `lower` spec and plan approved, and a standing rule for Phase 3** (Peter, 2026-10-14: "My
     general is going to be yes (as all these reasoned well are for partial mapping to vtr) … want it
     to get as close to the flow; what I plan to use the tool for is an attempt to reverse engineer
@@ -877,7 +884,37 @@ then the options considered.
     | mkDelayWorker32B | 0.09 | 17 | 18 | 0 | 0 | 1350 | 12564 | 1157 | 961 | 92 | 2.08 | same | yes |
     | mcml | 1.36 | 115 | 225 | 0 | 0 | 5368 | 172262 | 10484 | 15508 | 108 | 1.42 | same | yes |
 
-36. **3B `lower`: bit nodes are named after their word cell** (Peter, 2026-10-15: "yes do that
+36. **`read_blif` refuses a multiply-driven net** (the Phase 2 small fix of #31(3); fuzz seed
+    `blif003`, 2026-10-16, branch `fix/2H-blif-multidriver-hier`; overrides PHASE1 #15's "read as
+    written"). The reader now checks, after each cell it makes, that none of the cell's driver pins
+    gives a net a second driver that is neither `inout` nor of a `tristate` type (check rule 4's
+    own test). A hit is a located error, `<file>:<line>: net '<name>' is driven by N cell outputs
+    (one allowed)`, at the line of the second driver's directive; the status is `PARSE`; the cell
+    is removed again, so the IR left behind passes `check`. `check` rule 4 is unchanged. The four
+    Odin II goldens PHASE1 #15 listed (`elsif_both_defined` and `multi_assignment`, both arches)
+    are now read refusals: the round-trip, writer and sim scripts count them as "refused at read".
+    Fixture `elsif_both_defined.odin.blif` moved to `tests/golden/blif-multidriver/` (no sweep
+    reads that directory); `blif003` is pinned in `tests/fuzz/fuzz_opt_regress`, and
+    `test_abc_pass` pins the new located error where it pinned check rule 4. The `write_blif
+    --vtr` E12 refusal stays for IR built by other means (hand IR, a later pass).
+    Tools: `vtr-read-check` and `blif-roundtrip --vtr` class the reader's refusal as E12 for those
+    four basenames only (any other read failure still fails); `sim-check` excludes a reader
+    refusal only for the same list, with ABC refusing the file too. `cli_flatten_multidriver` now
+    pins the located read error (no legal read reaches `flatten` with such a net);
+    `test_flat_multidriver_from_blif` keeps the join check covered from two legal reads.
+
+37. **`check` validates provenance `hier`** (Peter approved the check change; the Phase 2 small fix of
+    #31(3), 2026-10-16, branch `fix/2H-blif-multidriver-hier`; milestone M2 is the O' leg of
+    "Order of work", not a spec). Rule 7 gains one test per record: `hier` is 0 or a string-table ID
+    of the design (the test `odin3_prov_derive_hier` and `odin3_prov_source` already apply on the
+    way in); a larger value is an error `check: design: rule 7: record N has hier H, which is not a
+    string of the design`. The test covers what IR.md states for the field (a strtab ID, 0 = none).
+    It does not test the path's shape (module-relative first component, instance names): IR-12
+    writes no such invariant, so a shape rule would need Peter's decision first. FAST is unchanged
+    (rule 7 is FULL only). New fault `ODIN3_IR_TEST_BAD_HIER` and two tests in `test_ir_check`
+    (a flatten-style path passes; a `hier` one past the table fails).
+
+38. **3B `lower`: bit nodes are named after their word cell** (Peter, 2026-10-15: "yes do that
     naming"). Each bit node a word cell lowers to is named `<cell>.<op><i>` (e.g. `u_add.xor3`),
     made unique by the IR's `_N` rule, in the style of 3C's hardmap names (#33); a word cell with no
     name leaves its bit nodes unnamed. Replaces the spec's "bit nodes are unnamed" agent default

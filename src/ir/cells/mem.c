@@ -81,7 +81,7 @@ static const odin3_port_def k_mem_ports[MEM_N_PORTS] = {
 
 static odin3_status mem_verify_ints(const odin3_value *params) {
     static const odin3_int_range k_ranges[] = {
-        {"SIZE", 1, UINT32_MAX},  {"OFFSET", INT32_MIN, INT32_MAX}, {"ABITS", 1, UINT32_MAX},
+        {"SIZE", 1, UINT32_MAX},  {"OFFSET", INT32_MIN, INT32_MAX}, {"ABITS", 0, UINT32_MAX},
         {"WIDTH", 1, UINT32_MAX}, {"RD_PORTS", 0, UINT32_MAX},      {"WR_PORTS", 0, UINT32_MAX},
     };
     return odin3_cells_check_ints(&params[MEM_SIZE], k_ranges, ODIN3_NELEM(k_ranges));
@@ -139,6 +139,7 @@ static odin3_status memrd_verify(const odin3_value *params) {
     return odin3_cells_check_ints(&params[1], k_ranges, ODIN3_NELEM(k_ranges));
 }
 
+/* $memrd/$memwr keep ABITS >= 1 (wreduce narrows only $mem, whose ABITS may reach 0). */
 const odin3_celltype_def odin3_cell_memrd = {
     "$memrd", ODIN3_GRAN_WORD, 0,    k_memrd_ports, 4,   k_memrd_params,
     6,        memrd_verify,    NULL, NULL,          NULL};

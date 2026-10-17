@@ -322,6 +322,9 @@ def render(scan: Scan, idle: timedelta, sources: Sequence[Path]) -> str:
         "**Not counted:** design chats on claude.ai (the spec's origin), any advisor-model calls "
         "outside a request's own usage, and sessions run outside this workspace.",
         "",
+        "**Token-saving measures:** each attempt and its date is logged in `docs/PHASE0.md` "
+        "§9.1; compare the by-day table before and after each date to judge it.",
+        "",
         "## By model",
         "",
         *model_table(scan),

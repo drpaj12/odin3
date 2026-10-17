@@ -15,6 +15,7 @@
 #include "passes/opt/kit.h"
 #include "passes/opt/opt.h"
 #include "passes/opt/opt_test.h"
+#include "passes/opt/wreduce.h"
 #include "util/attr.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -36,16 +37,18 @@ typedef enum opt_pass {
     P_SHARE,
     P_DFF,
     P_CLEAN,
+    P_WREDUCE,
     P_COUNT
 } opt_pass;
 
 static const char *const k_pass_names[P_COUNT] = {"opt",         "opt_expr",   "opt_merge",
                                                   "opt_muxtree", "opt_reduce", "opt_share",
-                                                  "opt_dff",     "opt_clean"};
+                                                  "opt_dff",     "opt_clean",  "wreduce"};
 
 /* The pass name of each sub-pass (they are the same words). */
-static const char *const k_sub_names[ODIN3_OPT_N_SUBS] = {
-    "opt_expr", "opt_merge", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff", "opt_clean"};
+static const char *const k_sub_names[ODIN3_OPT_N_SUBS] = {"opt_expr",   "opt_merge", "opt_muxtree",
+                                                          "opt_reduce", "opt_share", "opt_dff",
+                                                          "opt_clean",  "wreduce"};
 
 /* --- options (point (c)) --------------------------------------------------------------------- */
 
@@ -62,13 +65,15 @@ typedef struct opt_word {
 #define OPTS_AT(field) offsetof(odin3_opt_args, opts.field)
 
 static const opt_word k_words[] = {
-    {"mux_undef", OPTS_AT(mux_undef), ONLY(P_OPT) | ONLY(P_EXPR), false},
+    {"mux_undef", OPTS_AT(mux_undef), ONLY(P_OPT) | ONLY(P_EXPR) | ONLY(P_WREDUCE), false},
     {"mux_bool", OPTS_AT(mux_bool), ONLY(P_OPT) | ONLY(P_EXPR), false},
     {"undriven", OPTS_AT(undriven), ONLY(P_OPT) | ONLY(P_EXPR), false},
     {"noclkinv", OPTS_AT(noclkinv), ONLY(P_OPT) | ONLY(P_EXPR), false},
     {"fine", OPTS_AT(fine), ONLY(P_OPT) | ONLY(P_EXPR) | ONLY(P_REDUCE), false},
     {"full", OPTS_AT(full), ONLY(P_OPT) | ONLY(P_EXPR) | ONLY(P_REDUCE), false},
-    {"keepdc", OPTS_AT(keepdc), ONLY(P_OPT) | ONLY(P_EXPR) | ONLY(P_MERGE) | ONLY(P_DFF), false},
+    {"keepdc", OPTS_AT(keepdc),
+     ONLY(P_OPT) | ONLY(P_EXPR) | ONLY(P_MERGE) | ONLY(P_DFF) | ONLY(P_WREDUCE), false},
+    {"memx", OPTS_AT(memx), ONLY(P_WREDUCE), false},
     {"nodffe", OPTS_AT(nodffe), ONLY(P_OPT) | ONLY(P_DFF), false},
     {"nosdff", OPTS_AT(nosdff), ONLY(P_OPT) | ONLY(P_DFF), false},
     {"purge", OPTS_AT(purge), ONLY(P_OPT) | ONLY(P_CLEAN), false},
@@ -188,10 +193,14 @@ typedef odin3_status (*sub_run_fn)(odin3_pass_ctx *ctx, odin3_design *design,
 
 /* The sub-pass bodies (the odin3_opt_<sub>_run of each task). */
 static const sub_run_fn k_sub_run[ODIN3_OPT_N_SUBS] = {
-    [ODIN3_OPT_SUB_EXPR] = odin3_opt_expr_design,    [ODIN3_OPT_SUB_MERGE] = odin3_opt_merge_run,
-    [ODIN3_OPT_SUB_MUXTREE] = odin3_opt_muxtree_run, [ODIN3_OPT_SUB_REDUCE] = odin3_opt_reduce_run,
-    [ODIN3_OPT_SUB_SHARE] = odin3_opt_share_run,     [ODIN3_OPT_SUB_DFF] = odin3_opt_dff_run,
+    [ODIN3_OPT_SUB_EXPR] = odin3_opt_expr_design,
+    [ODIN3_OPT_SUB_MERGE] = odin3_opt_merge_run,
+    [ODIN3_OPT_SUB_MUXTREE] = odin3_opt_muxtree_run,
+    [ODIN3_OPT_SUB_REDUCE] = odin3_opt_reduce_run,
+    [ODIN3_OPT_SUB_SHARE] = odin3_opt_share_run,
+    [ODIN3_OPT_SUB_DFF] = odin3_opt_dff_run,
     [ODIN3_OPT_SUB_CLEAN] = odin3_opt_clean_run,
+    [ODIN3_OPT_SUB_WREDUCE] = odin3_opt_wreduce_run,
 };
 
 /* How much the sub-pass changed so far: the sum of its counters (a change is growth). */
@@ -209,6 +218,11 @@ static uint64_t change_measure(const odin3_opt_counts *counts, odin3_opt_sub sub
         return counts->share_merged;
     case ODIN3_OPT_SUB_DFF:
         return (uint64_t)counts->dff_changed + counts->dff_const_bits;
+    case ODIN3_OPT_SUB_WREDUCE:
+        return (uint64_t)counts->wreduce.narrowed + counts->wreduce.removed +
+               counts->wreduce.to_signed + counts->wreduce.to_unsigned +
+               counts->wreduce.rule[WR_RULE_MEM_ADDR] + counts->wreduce.rule[WR_RULE_ONE_BIT] +
+               counts->wreduce.rule[WR_RULE_DIVMOD_TRIM];
     case ODIN3_OPT_SUB_CLEAN:
     case ODIN3_OPT_N_SUBS:
         break;
@@ -387,8 +401,21 @@ typedef struct stat_line {
 } stat_line;
 
 enum {
-    STAT_LINES_MAX = ODIN3_OPT_EXPR_MAX_RULES + ODIN3_OPT_FOLD_TYPES + ODIN3_OPT_DFF_MAX_ACTIONS
+    STAT_LINES_MAX = ODIN3_OPT_EXPR_MAX_RULES + ODIN3_OPT_FOLD_TYPES + ODIN3_OPT_DFF_MAX_ACTIONS +
+                     ODIN3_WREDUCE_MAX_RULES
 };
+
+static uint32_t collect_wreduce_stats(const odin3_opt_counts *counts, stat_line *lines,
+                                      uint32_t total) {
+    for (uint32_t i = 0; i < ODIN3_WREDUCE_MAX_RULES; i++) {
+        if (counts->wreduce.rule[i] != 0 && odin3_wr_rule_name(i) != NULL) {
+            (void)snprintf(lines[total].name, sizeof lines[total].name, "wreduce.%s",
+                           odin3_wr_rule_name(i));
+            lines[total++].count = counts->wreduce.rule[i];
+        }
+    }
+    return total;
+}
 
 static uint32_t collect_stats(const odin3_opt_counts *counts, stat_line *lines) {
     uint32_t total = 0;
@@ -413,6 +440,7 @@ static uint32_t collect_stats(const odin3_opt_counts *counts, stat_line *lines) 
             lines[total++].count = counts->dff_action[i];
         }
     }
+    total = collect_wreduce_stats(counts, lines, total);
     return total;
 }
 
@@ -443,10 +471,11 @@ typedef struct pass_desc {
 } pass_desc;
 
 static const pass_desc g_desc[P_COUNT] = {
-    {P_OPT, ODIN3_OPT_N_SUBS},        {P_EXPR, ODIN3_OPT_SUB_EXPR},
-    {P_MERGE, ODIN3_OPT_SUB_MERGE},   {P_MUXTREE, ODIN3_OPT_SUB_MUXTREE},
-    {P_REDUCE, ODIN3_OPT_SUB_REDUCE}, {P_SHARE, ODIN3_OPT_SUB_SHARE},
-    {P_DFF, ODIN3_OPT_SUB_DFF},       {P_CLEAN, ODIN3_OPT_SUB_CLEAN},
+    {P_OPT, ODIN3_OPT_N_SUBS},          {P_EXPR, ODIN3_OPT_SUB_EXPR},
+    {P_MERGE, ODIN3_OPT_SUB_MERGE},     {P_MUXTREE, ODIN3_OPT_SUB_MUXTREE},
+    {P_REDUCE, ODIN3_OPT_SUB_REDUCE},   {P_SHARE, ODIN3_OPT_SUB_SHARE},
+    {P_DFF, ODIN3_OPT_SUB_DFF},         {P_CLEAN, ODIN3_OPT_SUB_CLEAN},
+    {P_WREDUCE, ODIN3_OPT_SUB_WREDUCE},
 };
 
 /* A standalone sub-pass: parse, zero the counts, one call, --opt-stats. */
@@ -502,3 +531,6 @@ OPT_DEF(odin3_pass_opt_dff, P_DFF,
         "synchronous resets)");
 OPT_DEF(odin3_pass_opt_clean, P_CLEAN,
         "opt_clean [-purge] [--opt-stats]: remove unused cells and wires");
+OPT_DEF(odin3_pass_wreduce, P_WREDUCE,
+        "wreduce [-memx] [-keepdc] [-mux_undef] [--opt-stats]: reduce the word size of operations "
+        "where the operands or the readers need fewer bits (Yosys wreduce)");

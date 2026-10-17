@@ -191,6 +191,51 @@ def canonical_drivers(names: Sequence[blif.Names]) -> Callable[[str], str]:
     return canon
 
 
+CLOSURE_ROUNDS = 20
+
+
+def canonical_classes(names: Sequence[blif.Names], latches: Sequence[blif.Latch],
+                      boxes: Sequence[BoxSpec]) -> Callable[[str], str]:
+    """net -> the representative of its congruence class: nets that are provably the same
+    function of the primary inputs and the cut boxes' free outputs.
+
+    Buffers and constants are looked through (``canonical_drivers``); then covers with the same
+    inputs and rows, latches with the same data input and init (copies of one register), and
+    outputs of cut boxes with the same type, parameters and input nets are merged, round after
+    round from the discrete partition until nothing merges (or ``CLOSURE_ROUNDS``): congruence
+    closure, which only ever merges nets that are equal (a deterministic box has one output per
+    input vector; the cut box assumption is the same as for twins).  Two boxes whose inputs are
+    copies of one register then have equal identities and are interchangeable."""
+    base = canonical_drivers(names)
+    parent: dict[str, str] = {}
+
+    def rep(net: str) -> str:
+        net = base(net)
+        while net in parent:
+            net = parent[net]
+        return net
+
+    nodes = [c for c in names if c.inputs and not (len(c.inputs) == 1 and _is_identity(c))]
+    for _ in range(CLOSURE_ROUNDS):
+        table: dict[tuple[object, ...], str] = {}
+        merged = False
+        keyed: list[tuple[tuple[object, ...], str]] = [
+            (("c", tuple(rep(n) for n in c.inputs), tuple(c.rows)), c.output) for c in nodes]
+        keyed += [(("l", rep(lat.input), lat.init), lat.output) for lat in latches]
+        for box in boxes:
+            ins = tuple(rep(n) for _, n in box.inputs)
+            keyed += [(("b", box.cell_type, box.params, pin, ins), net) for pin, net in box.outputs]
+        for key, out in keyed:
+            first = table.setdefault(key, rep(out))
+            mine = rep(out)
+            if mine != first:
+                parent[mine] = first
+                merged = True
+        if not merged:
+            break
+    return rep
+
+
 def _is_identity(cell: blif.Names) -> bool:
     if not cell.rows:
         return False
@@ -285,24 +330,31 @@ def refine(covers: Sequence[_Cover], order: Sequence[_Cover], latches: Sequence[
 
 def signatures(names: Sequence[blif.Names], latches: Sequence[blif.Latch],
                inputs: Sequence[str], boxes: Sequence[BoxSpec],
-               pi_key: Callable[[str], str]) -> list[Signature]:
+               pi_key: Callable[[str], str], structure: bool = True) -> list[Signature]:
     """The signature of each of ``boxes``, from simulating the flat netlist ``names``/``latches``.
 
     ``inputs`` are the flat primary inputs (the boxes' free output nets included); ``pi_key``
-    names a primary input in the way both netlists share.  Raises SimError on a loop."""
+    names a primary input in the way both netlists share.  ``structure`` False skips the colour
+    refinement (every ``Signature.struct`` is 0).  Raises SimError on a loop."""
     covers = [_compile(c) for c in names]
     free = {net for box in boxes for _, net in box.outputs}
     pis = [n for n in inputs if n not in free]
     order = _topological(covers, set(pis) | free | {lat.output for lat in latches})
     digests = _digests(covers, order, latches, pis, boxes, pi_key)
-    colours = refine(covers, order, latches, pis, boxes, pi_key)
+    colours = (refine(covers, order, latches, pis, boxes, pi_key) if structure
+               else [0] * len(boxes))
     canon = canonical_drivers(names)
     return [Signature(d, tuple(canon(net) for _, net in box.inputs), c)
             for box, d, c in zip(boxes, digests, colours, strict=True)]
 
 
-def pair(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature]) -> Pairing:
-    """Pair two lists of signatures (see the module docstring for the rules)."""
+def pair(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature],
+         classes: tuple[Callable[[str], str] | None, Callable[[str], str] | None] = (None, None)
+         ) -> Pairing:
+    """Pair two lists of signatures (see the module docstring for the rules).  ``classes`` are the
+    two sides' ``canonical_classes``-style functions (or None): boxes whose input nets differ but
+    fall in the same class on every pin are interchangeable too.  They are called only for a
+    group that simulation ties, so a lazy function costs nothing when nothing ties."""
     groups: dict[bytes, tuple[list[int], list[int]]] = {}
     for side, sigs in enumerate((sigs_a, sigs_b)):
         for index, sig in enumerate(sigs):
@@ -312,8 +364,8 @@ def pair(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature]) -> Pairing:
         if len(list_a) != len(list_b):
             result.only_a += list_a
             result.only_b += list_b
-        elif len(list_a) == 1 or (_interchangeable(sigs_a, list_a)
-                                  and _interchangeable(sigs_b, list_b)):
+        elif len(list_a) == 1 or (_interchangeable(sigs_a, list_a, classes[0])
+                                  and _interchangeable(sigs_b, list_b, classes[1])):
             result.pairs += zip(list_a, list_b, strict=True)
             if len(list_a) > 1:
                 result.twins.append((list_a, list_b))
@@ -345,5 +397,12 @@ def _split_by_structure(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature]
         result.guessed += len(list_a)
 
 
-def _interchangeable(sigs: Sequence[Signature], group: Sequence[int]) -> bool:
-    return all(sigs[i].identity == sigs[group[0]].identity for i in group)
+def _interchangeable(sigs: Sequence[Signature], group: Sequence[int],
+                     classes: Callable[[str], str] | None) -> bool:
+    first = sigs[group[0]].identity
+    if all(sigs[i].identity == first for i in group):
+        return True
+    if classes is None:
+        return False
+    mapped = tuple(classes(n) for n in first)
+    return all(tuple(classes(n) for n in sigs[i].identity) == mapped for i in group)

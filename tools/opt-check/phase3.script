@@ -1,0 +1,12 @@
+# Odin III's Phase 3 opt script (3G spec WR-9, Parmys synthesis.tcl lines 1-4, 6, 7 and 9 without
+# peepopt and share: Phase 4; flatten, memory -nomap and hardmap are other passes). `wreduce` runs
+# before `flatten` as in Parmys. `opt` never compacts (IR-6 unchanged): the script compacts last.
+opt_expr
+opt_clean
+opt -nodffe -nosdff
+proc
+opt
+wreduce
+opt_clean
+opt -full
+compact

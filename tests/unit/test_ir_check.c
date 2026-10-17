@@ -276,6 +276,32 @@ static void test_fault_bad_prov(void) {
     expect_fault((odin3_ir_test_target){ODIN3_IR_TEST_BAD_PROV, g_and.v}, 7, false);
 }
 
+/* Rule 7 on a record's hier: a derived record whose hier is a string of the design (a flatten-style
+ * instance path) passes; a hier past the string table is an error from the design-level check. */
+static void test_hier_valid_passes(void) {
+    odin3_prov_begin_op(&run_ctx);
+    odin3_prov_id derived = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive_hier(&run_ctx, (odin3_prov_list){&prov, 1},
+                                                           intern("top/u1/gen[3]"), &derived));
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, opts(ODIN3_CHECK_FULL, 0)));
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, errors_logged, log_text);
+}
+
+static void test_fault_bad_hier(void) {
+    odin3_prov_begin_op(&run_ctx);
+    odin3_prov_id derived = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive_hier(&run_ctx, (odin3_prov_list){&prov, 1},
+                                                           intern("top/u1"), &derived));
+    corrupt(ODIN3_IR_TEST_BAD_HIER, derived.v);
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, odin3_check_design(design, opts(ODIN3_CHECK_FULL, 0)));
+    TEST_ASSERT_TRUE_MESSAGE(logged_rule("E", "design", 7), log_text);
+    TEST_ASSERT_TRUE_MESSAGE(log_has("has hier "), log_text);
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, opts(ODIN3_CHECK_FAST, 0)));
+}
+
 static void test_fault_wire_backref(void) {
     expect_fault((odin3_ir_test_target){ODIN3_IR_TEST_WIRE_BACKREF, wire_w.v}, 8, false);
 }
@@ -629,6 +655,8 @@ int main(void) {
     RUN_TEST(test_fault_pin_count);
     RUN_TEST(test_fault_dup_name_passes_fast);
     RUN_TEST(test_fault_bad_prov);
+    RUN_TEST(test_hier_valid_passes);
+    RUN_TEST(test_fault_bad_hier);
     RUN_TEST(test_fault_wire_backref);
     RUN_TEST(test_fault_port_list);
     RUN_TEST(test_fault_port_wire_mismatch);

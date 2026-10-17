@@ -8,7 +8,8 @@ Usage::
                [--expect-fail F]... [--expect-unproven F]... [--expect-no-golden F]...
                [--eqx-record F]... [--min-checked N] [--vtr-root V] [--jobs J] [--mem-cap C]
                [--cap-for SUFFIX=C]...
-               [--equiv-timeout S] [--work DIR] [--root R] [--limit N] [--partial]
+               [--equiv-timeout S] [--equiv-box-budget S] [--work DIR] [--root R] [--limit N]
+               [--partial]
                <dir or file>...
 
 Every ``.v`` under the directories (and the files) given is one design, run **smallest first** (all
@@ -67,7 +68,8 @@ listed-reject   yes     Parmys itself rejects the design (``--expect-fail`` + ne
 unproven        no      ABC/SAT timeout or an inconclusive guess; exit 0 only when every such
                         design is in ``--expect-unproven`` (printed in its own bucket)
 no-golden       no      no golden, or an oracle failure that is a harness gap (missing include
-                        or ``-D``; ``--expect-no-golden`` + needle); own bucket, never counted
+                        or ``-D``) or a size limit (the Parmys run killed at its memory cap,
+                        ``--expect-no-golden`` + needle); own bucket, never counted
 differs         no      equiv-check's NOT-equivalent verdict
 error           no      a tool or usage error
 hard            no      a crash, a signal, a memory-cap kill or our own timeout; never listable
@@ -89,8 +91,10 @@ The run also fails when fewer than ``--min-checked N`` designs (default 1) were 
 Assumptions the exit statement carries (equiv-check's, unchanged here): a latch init of 2 or 3
 (don't care, unknown) is read as 0, so an Odin III init 0 against a Parmys init 2 is accepted; RAM
 contents and initial state are not modelled (a paired RAM is a cut point whose input pins are
-compared); ``--odin3-pre``/``--scc-precheck`` are off, so a design with a combinational loop that
-Odin III accepts and Parmys rejects has a ``failed`` golden and is a listed-reject, not an error;
+compared) and the two ports of a ``dual_port_ram`` are interchangeable (Parmys numbers them in a
+hash-table order, so a same-address write race may go either way); ``--odin3-pre``/
+``--scc-precheck`` are off, so a design with a combinational loop that Odin III accepts and
+Parmys rejects has a ``failed`` golden and is a listed-reject, not an error;
 "identical" is identical under Odin III's ``--vtr-compat``.
 
 Output: one line per design as it finishes, then a summary table, every cause that is not a pass,
@@ -135,13 +139,13 @@ TOOL = "exit-check"
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_HARD, EXIT_SKIP = 0, 1, 2, 3, 77
 IDENTICAL, EQUIVALENT, EQ_X, DIFFERS, ERROR, SKIP, NO_GOLDEN = (
     "identical", "equivalent", "eq-x", "differs", "error", "skip", "no-golden")
-UNPROVEN, REJECT = "unproven", "reject"
+UNPROVEN, REJECT, CAPPED = "unproven", "reject", "capped"
 PASSING = (IDENTICAL, EQUIVALENT)
 # Verdict classes (see verdict()): the passing ones, the two buckets that are neither pass nor
 # failure, and every cause that fails the run.
 CLS_EQX_OK, CLS_REJECT_OK = "eqx-recorded", "listed-reject"
 CLS_UNPROVEN_OK, CLS_NOGOLDEN, CLS_NOGOLDEN_OK = "unproven-listed", "nogolden", "nogolden-listed"
-FAIL_CLASSES = (EQ_X, "eqx-mismatch", DIFFERS, ERROR, "hard", UNPROVEN, REJECT, "XPASS",
+FAIL_CLASSES = (EQ_X, "eqx-mismatch", DIFFERS, ERROR, "hard", UNPROVEN, REJECT, CAPPED, "XPASS",
                 "needle")
 TIMEOUT_S = elab_sweep.TIMEOUT_S
 EQUIV_EXIT_XCONE = 3  # equiv-check --x-report: equivalent outside the x-cones
@@ -168,7 +172,7 @@ class UsageError(elab_sweep.UsageError):
 
 @dataclass(frozen=True)
 class Result:
-    kind: str  # identical, equivalent, eq-x, differs, error or skip
+    kind: str  # identical, equivalent, eq-x, differs, error, skip, reject, capped or unproven
     secs: float = 0.0
     why: str = ""
     output: str = ""  # the design's log: the needle of an expect-fail entry must appear in it
@@ -199,6 +203,7 @@ class Config:
     min_mult: int = 3
     min_adder: int = 1
     equiv_timeout: int = 600
+    equiv_box_budget: int | None = None  # equiv-check --box-probe-budget (None: its default)
 
     def cap_of(self, item: elab_sweep.Item) -> int:
         for suffix, cap in self.caps.items():
@@ -329,13 +334,18 @@ def prov_problem(cfg: Config, item: elab_sweep.Item, golden: Path, prov: dict[st
 
 def golden_status(golden: Path, prov: dict[str, str]) -> Result | None:
     """The Result of a golden that cannot be compared with, None when it can: ``failed`` is a
-    Parmys rejection (a REJECT), any other status without a BLIF an error."""
+    Parmys rejection (a REJECT), ``capped`` an oracle run killed at its memory cap (CAPPED: no
+    verdict on the design; a size limit that ``--expect-no-golden`` may list), any other status
+    without a BLIF an error."""
     status = prov.get("status", "")
     if status == "ok" and golden.is_file():
         return None
     if status == "failed":
         return Result(REJECT, why=f"no Parmys golden: Parmys rejected the design "
                       f"(status={status})")
+    if status == "capped":
+        return Result(CAPPED, why="no Parmys golden: the Parmys run was killed at its memory cap "
+                      "(no verdict on the design) (status=capped)")
     if status == "ok":
         return Result(ERROR, why=f"no Parmys golden: {golden} does not exist (status=ok)")
     return Result(ERROR, why=f"no Parmys golden: Parmys run {status or 'unknown'} (no verdict) "
@@ -455,8 +465,10 @@ def cone_names(text: str) -> tuple[str, ...]:
 
 def run_equiv(cfg: Config, golden: Path, out: Path, cap: int, log: list[str]) -> Result:
     """``equiv-check --x-report golden out`` classified."""
+    budget = [] if cfg.equiv_box_budget is None else ["--box-probe-budget",
+                                                      str(cfg.equiv_box_budget)]
     got = run_capped([cfg.equiv_check, "--x-report", "--match-unnamed", "--timeout",
-                      str(cfg.equiv_timeout), str(golden), str(out)], cap, log)
+                      str(cfg.equiv_timeout), *budget, str(golden), str(out)], cap, log)
     if isinstance(got, Result):
         return got
     text = (got.stdout or "") + (got.stderr or "")
@@ -682,7 +694,8 @@ def verdict(item: elab_sweep.Item, result: Result, lists: Lists) -> tuple[str, s
     if kind == EQ_X:
         return eqx_verdict(head, lists.eqx.get(rel), result)
     table, ok_class = {REJECT: (lists.reject, CLS_REJECT_OK),
-                       UNPROVEN: (lists.unproven, CLS_UNPROVEN_OK)}.get(kind, ({}, ""))
+                       UNPROVEN: (lists.unproven, CLS_UNPROVEN_OK),
+                       CAPPED: (lists.nogolden, CLS_NOGOLDEN_OK)}.get(kind, ({}, ""))
     entry = table.get(rel)
     if kind == REJECT and entry is None and rel in lists.nogolden:
         entry, ok_class = lists.nogolden[rel], CLS_NOGOLDEN_OK
@@ -750,17 +763,18 @@ SUMMARY_ROWS = (
     (EQ_X, "FAIL eq-x, no record"), ("eqx-mismatch", "FAIL eq-x, record differs"),
     (DIFFERS, "FAIL differs"), (ERROR, "FAIL error"), ("hard", "FAIL hard (crash/kill/timeout)"),
     (UNPROVEN, "FAIL unproven, not listed"), (REJECT, "FAIL reject, not listed"),
+    (CAPPED, "FAIL oracle capped, not listed"),
     ("XPASS", "FAIL listed but passing"), ("needle", "FAIL listed, wrong needle"))
 
 
 def summary_lines(state: Sweep, total: int, stale: Sequence[str], secs: float,
                   min_checked: int) -> list[str]:
     counts = state.counts
-    lines = ["", f"{TOOL}: summary ({total} designs)", f"  {'class':<34}{'designs':>8}",
-             f"  {'-' * 42}"]
-    lines += [f"  {label:<34}{counts[cls]:>8}" for cls, label in SUMMARY_ROWS if counts.get(cls)]
+    lines = ["", f"{TOOL}: summary ({total} designs)", f"  {'class':<40}{'designs':>8}",
+             f"  {'-' * 48}"]
+    lines += [f"  {label:<40}{counts[cls]:>8}" for cls, label in SUMMARY_ROWS if counts.get(cls)]
     if stale:
-        lines.append(f"  {'FAIL stale list entries':<34}{len(stale):>8}")
+        lines.append(f"  {'FAIL stale list entries':<40}{len(stale):>8}")
     lines += [f"  {line}" for line in state.causes[:200]] if state.causes else []
     nogolden = state.count(CLS_NOGOLDEN, CLS_NOGOLDEN_OK)
     lines.append(f"{TOOL}: {total} designs: PROVEN {state.proven()} ({counts.get(IDENTICAL, 0)} "
@@ -770,7 +784,7 @@ def summary_lines(state: Sweep, total: int, stale: Sequence[str], secs: float,
                  f"{nogolden} no-golden; {state.failures()} failing, {len(stale)} stale; "
                  f"{secs:.1f} s")
     lines.append(f"{TOOL}: assumptions: latch init 2/3 read as 0; RAM contents and init not "
-                 "modelled; --vtr-compat")
+                 "modelled; dual_port_ram ports 1 and 2 interchangeable; --vtr-compat")
     if state.proven() < min_checked:
         lines.append(f"{TOOL}: FAIL: only {state.proven()} design(s) proven, --min-checked is "
                      f"{min_checked} (a wrong or empty golden tree reports nothing)")
@@ -850,6 +864,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--mem-cap", default="4G", help="per child (default 4G)")
     ap.add_argument("--cap-for", action="append", default=[], metavar="SUFFIX=CAP",
                     help="a larger cap for one design, which then runs alone")
+    ap.add_argument("--equiv-box-budget", type=int, metavar="S",
+                    help="equiv-check's --box-probe-budget: seconds for the ABC probes that pair "
+                    "multipliers the simulation cannot tell apart (default: equiv-check's 120)")
     ap.add_argument("--equiv-timeout", type=int, default=600, metavar="S",
                     help="equiv-check's ABC timeout in seconds (default 600)")
     ap.add_argument("--work", type=Path, help="the work directory (default: a fresh temp dir)")
@@ -940,6 +957,7 @@ def build_config(args: argparse.Namespace) -> Config:
         techlib=args.techlib, primitives=args.primitives, config=args.config,
         config_template=template, min_mult=args.min_hard_mult_size,
         min_adder=args.min_hard_adder_size, equiv_timeout=args.equiv_timeout,
+        equiv_box_budget=args.equiv_box_budget,
         vtr_root=vtr_root, vtr_commit=commit, arch_sha256=sha256_file(arch),
         min_checked=args.min_checked)
 

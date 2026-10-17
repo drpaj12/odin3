@@ -173,6 +173,27 @@ class ScriptTest(unittest.TestCase):
             self.assertEqual(self.yosys(name),
                              f"read_rtlil w/in.il; {name}; write_rtlil w/yosys.il; stat")
 
+    def test_wreduce_and_phase3_scripts(self) -> None:
+        self.assertEqual(od.script_named("wreduce").slug, "wreduce")
+        self.assertEqual(
+            self.odin("wreduce"),
+            "read_verilog --nolatches a.v b.v; hierarchy -auto; proc; opt_expr -keepdc; opt; "
+            "write_rtlil w/in.il; wreduce --opt-stats; write_rtlil w/odin.il; stats")
+        self.assertEqual(self.yosys("wreduce"),
+                         "read_rtlil w/in.il; wreduce; write_rtlil w/yosys.il; stat")
+        # Phase 2's lines, then wreduce; opt_clean; opt -full (3G WR-9); in.il before proc
+        self.assertEqual(
+            self.odin("phase3", "t"),
+            "read_verilog --nolatches a.v b.v; hierarchy --top t; write_rtlil w/in.il; "
+            "opt_expr --opt-stats; opt_clean --opt-stats; opt -nodffe -nosdff --opt-stats; proc; "
+            "opt --opt-stats; wreduce --opt-stats; opt_clean --opt-stats; opt -full --opt-stats; "
+            "compact; write_rtlil w/odin.il; stats")
+        self.assertIn("wreduce; opt_clean; opt -full; write_rtlil", self.yosys("phase3"))
+        self.assertIn("widths", od.STEPS)
+        table = od.parse_expect("a.v wreduce widths structural only: a reason\n"
+                                "a.v phase3 identity structural only: a reason\n")
+        self.assertEqual(len(table), 2)
+
     def test_unknown_script(self) -> None:
         with self.assertRaises(opt_equiv.ToolError):
             od.script_named("opt -mux_undef")
@@ -225,6 +246,11 @@ class RunTest(unittest.TestCase):
         self.assertIn("-p read_techlib ", self.tree.log("odin.log")[0])
         self.assertIn("x.o3lib; read_verilog --nolatches ", self.tree.log("odin.log")[0])
 
+    def test_no_refine_leaves_the_proof_out(self) -> None:
+        code, out, _ = self.tree.run("--no-refine")
+        self.assertEqual(code, 0, out)
+        self.assertFalse(any("equiv_make" in line for line in self.tree.log("yosys.log")))
+
     def test_default_script_is_phase2(self) -> None:
         code, out, _ = self.tree.run()
         self.assertEqual(code, 0)
@@ -256,6 +282,29 @@ class RunTest(unittest.TestCase):
         code, out, err = self.tree.run(*extra)
         self.assertEqual(code, 2, out + err)
         self.assertNotIn("differs as listed", out)
+
+    def test_a_sat_timeout_falls_back_to_the_blif_cec(self) -> None:
+        """A timed-out proof goes to equiv-check on the lowered BLIFs: proved is a pass, a cec
+        that decides nothing is the difference `unproven`, --no-cec keeps the hard timeout."""
+        def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if "equiv_make" in " ".join(argv):
+                raise subprocess.TimeoutExpired(list(argv), 60.0)
+            return fake_run(argv, cap, **kw)
+        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
+                "--netlist-compare", str(self.tree.bin / "netlist-compare"),
+                "--work", str(self.tree.root / "work"), str(self.tree.root / "micro" / "d.v")]
+        for verdict, code, needle in ((opt_equiv.CEC_PROVED, 0, "[phase2]: ok"),
+                                      (opt_equiv.CEC_UNPROVEN, 1, "refine: DIFFERS: unproven"),
+                                      (opt_equiv.CEC_DIFFERS, 1, "refine: DIFFERS: text")):
+            with self.subTest(verdict=verdict), mock.patch.object(
+                    memcap, "run", hang), mock.patch.object(
+                    opt_equiv, "cec_blifs", return_value=(verdict, "text")):
+                got, out, err = helpers.run_main(od.main, argv)
+                self.assertEqual(got, code, out + err)
+                self.assertIn(needle, out)
+        with mock.patch.object(memcap, "run", hang):
+            got, _, _ = helpers.run_main(od.main, [*argv[:-1], "--no-cec", argv[-1]])
+            self.assertEqual(got, 3)
 
     def test_identity_failure_and_error(self) -> None:
         self.tree.set_spec(compare_rc=1)
@@ -300,11 +349,25 @@ class RunTest(unittest.TestCase):
 
     def test_a_refinement_crash_is_hard_not_a_refine_difference(self) -> None:
         """Review I3: a dying Yosys is not `refine: DIFFERS`, and no needle-less line absorbs it."""
-        self.tree.set_spec(refine_signal=9)
+        self.tree.set_spec(refine_signal=11)
         extra = self.tree.expect("d.v phase2 refine anything goes\n")
         code, out, err = self.tree.run(*extra)
         self.assertEqual(code, 3, out + err)
         self.assertNotIn("differs as listed", out)
+
+    def test_a_cap_kill_of_the_refinement_is_a_size_limit_not_a_crash(self) -> None:
+        """SIGKILL (the memory cap) takes the BLIF cec fallback like a timeout: unproven there is a
+        difference a narrow expect line may list, never a pass."""
+        self.tree.set_spec(refine_signal=9)
+        with mock.patch.object(opt_equiv, "cec_blifs",
+                               return_value=(opt_equiv.CEC_UNPROVEN, "BLIF cec: no verdict")):
+            code, out, err = self.tree.run()
+            self.assertEqual(code, 1, out + err)
+            self.assertIn("refine: DIFFERS: unproven: the SAT proof hit its size limit", out)
+            extra = self.tree.expect("d.v phase2 refine untested for now (size limit)\n")
+            code, out, err = self.tree.run(*extra)
+            self.assertEqual(code, 0, out + err)
+            self.assertIn("differs as listed (untested for now (size limit))", out)
 
     def test_a_netlist_compare_crash_is_hard_not_an_identity_difference(self) -> None:
         self.tree.set_spec(compare_signal=11)

@@ -11,6 +11,7 @@
 #include "frontends/elab/elab_internal.h"
 #include "ir/ids.h"
 #include "odin3/odin3.h"
+#include "util/str.h"
 #include "util/u64map.h"
 #include "util/vec.h"
 
@@ -56,6 +57,29 @@ typedef struct odin3_elab2_inout_pin {
     const char *port, *instance;
 } odin3_elab2_inout_pin;
 
+/* "bus", "bus[3]" or "bus[7:4]": the wire the cell's Y starts in and the bits of it Y covers. */
+odin3_status odin3_elab2_tri_bus_label(const odin3_elab2 *e2, odin3_elab2_tri_rec rec,
+                                       odin3_strbuf *out);
+
+/* A group of $tribuf cells on one internal net for odin3_elab2_tri_vtr: the cells in source order
+ * and the nets that are the Y of a group (they cannot be a driver's data). */
+typedef struct odin3_elab2_tri_vtr_req {
+    const odin3_elab2_tri_rec *recs;
+    const odin3_u64map *y_owner;
+    const odin3_u64map *shared; /* net -> 1: a data net of more than one group */
+    uint32_t count;
+} odin3_elab2_tri_vtr_req;
+
+/* `--vtr-compat`: resolves the group as Parmys does (PHASE2 decision 27), when the data of every
+ * driver is an input port bit of the module: the enables are ignored, the data bits are shorted
+ * to one winner per bit, the $tribuf cells are deleted, the Y nets merged into the winners and a
+ * warning names the net, the winner and the drivers dropped. *done tells whether it did; false
+ * leaves the group untouched for the IEEE resolution and (declined) says why in a warning. It
+ * declines below the top module (Parmys flattens first), when an input other than the winner is
+ * read by other logic (Parmys shorts it to the winner, which is not modelled) and when an input is
+ * a candidate of more than one group (Parmys puts the groups in one class). */
+odin3_status odin3_elab2_tri_vtr(odin3_elab2 *e2, const odin3_elab2_tri_vtr_req *req, bool *done);
+
 /* What a net with a tri-state driver is, once the module's nets are all merged (D3). */
 typedef enum odin3_tri_net {
     ODIN3_TRI_NET_INTERNAL,        /* no port of the module */
@@ -69,6 +93,18 @@ typedef enum odin3_tri_net {
  * ODIN3_TRI_NET_CHILD_INOUT. */
 odin3_tri_net odin3_elab2_tri_net(const odin3_elab2 *e2, odin3_net_id net,
                                   odin3_elab2_inout_pin *pin);
+
+/* True when the net is on a `$port_out` of the top module being emitted and on no `$port_inout`. */
+bool odin3_elab2_net_on_top_output(const odin3_elab2 *e2, odin3_net_id net);
+
+/* `--vtr-compat`, top module (elab2_trivtr_out.c, PHASE2 decision 28): a `$tribuf` that is the
+ * only driver of top-level output bits loses its enable as in Parmys (`opt_expr -mux_undef`
+ * turns `en ? d : 'bz` into `d`): the cell is deleted, the output nets are merged into the data
+ * nets, and one warning names the port, located at the driver. Cells on an inout port, with
+ * several drivers on an output bit, with a constant 0, x or z enable, or whose data is another
+ * cell's output are left to the default handling. Run after the cells of internal nets are
+ * filed (odin3_elab2_tri_logic). */
+odin3_status odin3_elab2_tri_vtr_outputs(odin3_elab2 *e2);
 
 struct odin3_elab2_drive {
     odin3_vec drv;         /* odin3_drv per net ID, as far as a net was claimed */

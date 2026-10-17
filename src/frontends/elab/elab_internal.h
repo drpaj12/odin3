@@ -987,6 +987,11 @@ odin3_status odin3_elab2_tribuf(odin3_elab2 *e2, const odin3_elab2_tri_req *req)
  * several enabled: undefined)`. Located errors, the cell left alone: Y lists that overlap without
  * being the same, a Y with both top-level port and internal nets, an inout port of a module below
  * the top, an inout pin of a child instance on the net. Status as odin3_elab2_module.
+ *
+ * With e2->mod_vtr_compat, a group of two or more drivers whose data is all input-port bits of the
+ * module is resolved as Parmys does instead (elab2_trivtr.c, PHASE2 #27): no `$pmux`, the enables
+ * dropped, the nets merged into the input Yosys keeps, and a warning that names the net, the data
+ * kept and the data dropped.
  */
 odin3_status odin3_elab2_tri_logic(odin3_elab2 *e2);
 

@@ -464,6 +464,208 @@ class BlackBoxCutAbcTest(unittest.TestCase):
         self.assertIn("(abc dsec)", out)
 
 
+MUL_MODEL = ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n"
+
+
+def mul_netlist(boxes: int, feed: str = "a", tail: str = ".names p0 y\n1 1\n") -> str:
+    """A top model with ``boxes`` multiply instances (no .cname, outputs numbered like Parmys's)
+    whose first input is ``feed``; ``tail`` is the logic after them."""
+    head = ".model t\n.inputs a b\n.outputs y\n"
+    cells = "".join(f".subckt multiply a[0]={feed if i == 0 else 'b'} b[0]=b out[0]=p{i}\n"
+                    for i in range(boxes))
+    return head + cells + tail + ".end\n" + MUL_MODEL
+
+
+class BlackboxOptionTest(unittest.TestCase):
+    """``--blackbox M[,M...]`` (3D Task 19): pairing by .cname or occurrence order."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def test_unequal_counts_exit_2_with_the_exact_text(self) -> None:
+        a = self.write("a.blif", mul_netlist(3))
+        b = self.write("b.blif", mul_netlist(2))
+        code, out, err = check("--blackbox", "multiply", a, b)
+        self.assertEqual(code, 2, out)
+        self.assertIn(f"equiv-check: --blackbox: model 'multiply' has 3 instances in {a} and 2 in "
+                      f"{b}", err)
+
+    def test_occurrence_order_pairs_unnamed_instances(self) -> None:
+        a = equiv_check.flatten(blif.parse_file(self.write("a.blif", mul_netlist(2)), gates=True),
+                                blackbox=frozenset({"multiply"}))
+        b = equiv_check.flatten(blif.parse_file(self.write("b.blif", mul_netlist(2)), gates=True),
+                                blackbox=frozenset({"multiply"}))
+        self.assertEqual(equiv_check.pair_listed([a, b], frozenset({"multiply"})), 2)
+        self.assertEqual([x.key for x in a.blackboxes], [x.key for x in b.blackboxes])
+        equiv_check.match_blackboxes([a, b])
+
+    def test_cname_pairs_before_occurrence(self) -> None:
+        text = mul_netlist(2).replace("out[0]=p0\n", "out[0]=p0\n.cname mulA\n", 1)
+        swapped = text.replace(".subckt multiply a[0]=a b[0]=b out[0]=p0\n.cname mulA\n"
+                               ".subckt multiply a[0]=b b[0]=b out[0]=p1\n",
+                               ".subckt multiply a[0]=b b[0]=b out[0]=p1\n"
+                               ".subckt multiply a[0]=a b[0]=b out[0]=p0\n.cname mulA\n")
+        self.assertNotEqual(text, swapped)
+        a = equiv_check.flatten(blif.parse_file(self.write("a.blif", text), gates=True),
+                                blackbox=frozenset({"multiply"}))
+        b = equiv_check.flatten(blif.parse_file(self.write("b.blif", swapped), gates=True),
+                                blackbox=frozenset({"multiply"}))
+        equiv_check.pair_listed([a, b], frozenset({"multiply"}))
+        equiv_check.match_blackboxes([a, b])
+        by_a = {x.key: x.inputs["a"] for x in a.blackboxes}
+        by_b = {x.key: x.inputs["a"] for x in b.blackboxes}
+        self.assertEqual(by_a, by_b)
+
+    def test_help_documents_blackbox(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit):
+            equiv_check.main(["--help"])
+        self.assertIn("--blackbox", buf.getvalue())
+
+
+@needs_abc
+class BlackboxOptionAbcTest(unittest.TestCase):
+    def setUp(self) -> None:
+        if ABC is None:
+            self.fail(f"ODIN3_REQUIRE_ABC=1 but no usable ABC: {ABC_PROBLEM}")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def test_differing_only_in_soft_logic_is_equivalent(self) -> None:
+        a = self.write("a.blif", mul_netlist(1))
+        b = self.write("b.blif", mul_netlist(1, tail=".names p0 t\n1 1\n.names t y\n1 1\n"))
+        code, out, err = check("--blackbox", "multiply", a, b)
+        self.assertEqual(code, 0, out + err)
+
+    def test_a_change_in_what_feeds_a_box_input_is_not_equivalent(self) -> None:
+        a = self.write("a.blif", mul_netlist(1))
+        b = self.write("b.blif", mul_netlist(1, feed="b"))
+        code, out, err = check("--blackbox", "multiply", a, b)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("NOT equivalent", out)
+
+
+@needs_abc
+class DualPortOrientTest(unittest.TestCase):
+    """--match-unnamed turns every unnamed dual_port_ram to one port order: Parmys lists the two
+    ports in hash-table order, so the same memory can come out with ports 1 and 2 exchanged
+    (micros common/2r2w and syntax/inferred_DPram, 2H sweep of 2026-10-14)."""
+
+    HEAD = ".model t\n.inputs clk a b da db wa wb\n.outputs qa qb\n"
+
+    def ram(self, swap: bool = False, cross_data: bool = False, invert: bool = False,
+            keep_consumers: bool = False, cross_we: bool = False, cross_addr: bool = False,
+            tied: bool = False) -> str:
+        """Port 1 = (a, da, wa), port 2 = (b, db, wb); ``swap`` lists them the other way round
+        (and reads the outputs the other way round); ``cross_data`` and ``invert`` are different
+        designs; ``keep_consumers`` swaps the ports but not the consumers (a different design);
+        ``cross_we`` / ``cross_addr`` give each port the other's write enable / address;
+        ``tied`` gives both ports the same inputs."""
+        ports = [("a", "da", "wa"), ("b", "db", "wb")]
+        if cross_data:
+            ports = [("a", "db", "wa"), ("b", "da", "wb")]
+        if cross_we:
+            ports = [("a", "da", "wb"), ("b", "db", "wa")]
+        if cross_addr:
+            ports = [("b", "da", "wa"), ("a", "db", "wb")]
+        if tied:
+            ports = [("a", "da", "wa")] * 2
+        if swap:
+            ports.reverse()
+        swap = swap and not keep_consumers
+        (a1, d1, w1), (a2, d2, w2) = ports
+        return (self.HEAD
+                + f".gate dual_port_ram addr1[0]={a1} addr2[0]={a2} clk=clk data1[0]={d1} "
+                f"data2[0]={d2} out1[0]=dual_port_ram^MEM~1-0^out1~0 "
+                f"out2[0]=dual_port_ram^MEM~1-0^out2~1 we1={w1} we2={w2}\n"
+                + f".names dual_port_ram^MEM~1-0^out1~0 {'qb' if swap else 'qa'}\n"
+                f"{'0' if invert else '1'} 1\n"
+                f".names dual_port_ram^MEM~1-0^out2~1 {'qa' if swap else 'qb'}\n1 1\n"
+                + ".end\n")
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def run_check(self, text_a: str, text_b: str, *flags: str) -> tuple[int, str, str]:
+        assert ABC is not None
+        paths = []
+        for name, text in (("a.blif", text_a), ("b.blif", text_b)):
+            path = Path(self.tmp.name) / name
+            path.write_text(text, encoding="utf-8")
+            paths.append(str(path))
+        return check("--match-unnamed", "--abc", ABC, *flags, *paths)
+
+    def test_swap_pin_exchanges_the_ports_and_keeps_the_clock(self) -> None:
+        self.assertEqual(equiv_check._swap_pin("addr1[3]"), "addr2[3]")
+        self.assertEqual(equiv_check._swap_pin("out2"), "out1")
+        self.assertEqual(equiv_check._swap_pin("we1"), "we2")
+        self.assertEqual(equiv_check._swap_pin("clk"), "clk")
+
+    def test_the_same_memory_with_its_ports_exchanged_is_equivalent(self) -> None:
+        code, out, err = self.run_check(self.ram(), self.ram(swap=True))
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("dual_port_ram instance(s) turned", err)
+
+    def test_the_same_orientation_needs_no_turn(self) -> None:
+        code, out, err = self.run_check(self.ram(), self.ram())
+        self.assertEqual(code, 0, out + err)
+
+    def test_exchanged_ports_do_not_pair_without_the_orientation(self) -> None:
+        code, _, err = self.run_check(self.ram(), self.ram(swap=True), "--no-dual-orient")
+        self.assertEqual(code, 2, err)
+        self.assertIn("cannot be matched one-to-one", err)
+
+    def test_data_crossed_between_the_ports_is_never_equivalent(self) -> None:
+        """Turning the ports must not hide a real difference: B writes port 1's data to port 2's
+        address.  The RAM then has no partner (its input functions differ): exit 2."""
+        code, out, err = self.run_check(self.ram(), self.ram(swap=True, cross_data=True))
+        self.assertNotEqual(code, 0, out + err)
+        self.assertNotIn("equiv-check: equivalent", out)
+
+    def test_a_difference_behind_a_turned_ram_is_not_equivalent(self) -> None:
+        code, out, err = self.run_check(self.ram(), self.ram(swap=True, invert=True))
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("NOT equivalent", out)
+
+    def test_ports_swapped_but_consumers_not_is_not_equivalent(self) -> None:
+        code, out, err = self.run_check(self.ram(), self.ram(swap=True, keep_consumers=True))
+        self.assertIn(code, (1, 2), out + err)
+        self.assertNotIn("equiv-check: equivalent", out)
+
+    def test_write_enable_crossed_is_never_equivalent(self) -> None:
+        for swap in (False, True):
+            code, out, err = self.run_check(self.ram(), self.ram(swap=swap, cross_we=True))
+            self.assertIn(code, (1, 2), out + err)
+            self.assertNotIn("equiv-check: equivalent", out)
+
+    def test_address_crossed_is_never_equivalent(self) -> None:
+        for swap in (False, True):
+            code, out, err = self.run_check(self.ram(), self.ram(swap=swap, cross_addr=True))
+            self.assertIn(code, (1, 2), out + err)
+            self.assertNotIn("equiv-check: equivalent", out)
+
+    def test_tied_ports_stay_tied_and_a_difference_behind_them_is_found(self) -> None:
+        """Both ports with the same inputs have equal digests: no turn is chosen, nothing pairs
+        by luck; the same memory is equivalent, an inverted consumer is not."""
+        code, out, err = self.run_check(self.ram(tied=True), self.ram(tied=True))
+        self.assertEqual(code, 0, out + err)
+        code, out, err = self.run_check(self.ram(tied=True), self.ram(tied=True, invert=True))
+        self.assertEqual(code, 1, out + err)
+        self.assertNotIn("equiv-check: equivalent", out)
+
+
 X_HEAD = ".model t\n.inputs a b\n.outputs o p\n"
 X_P = ".names a b p\n11 1\n.end\n"
 
@@ -609,6 +811,17 @@ class FaultInjectionTest(unittest.TestCase):
         code, out, err = check("--abc", abc, "--timeout", "1", self.a, self.b)
         self.assertEqual(code, 4, out + err)
         self.assertIn("unproven: ABC cec timed out after 1 seconds", err)
+        self.assertNotIn("NOT equivalent", out)
+
+    def test_abc_undecided_is_unproven_exit_4(self) -> None:
+        """dsec can end on its own engine limit ("Reached timeout (60 seconds) in frame 21 ...
+        Networks are UNDECIDED", exit status 0): no verdict, exit 4, never an error (2H micro
+        sweep of 2026-10-14, full/stereovision0)."""
+        abc = self.fake_abc("echo 'Reached timeout (60 seconds) in frame 21.'; "
+                            "echo 'Networks are UNDECIDED.  Time = 105.75 sec'")
+        code, out, err = check("--abc", abc, self.a, self.b)
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("unproven: ABC cec ended UNDECIDED", err)
         self.assertNotIn("NOT equivalent", out)
 
     def test_abc_killed_by_a_signal_is_hard_exit_5(self) -> None:
@@ -802,9 +1015,11 @@ class UnnamedBlackBoxTest(unittest.TestCase):
                 + f".names {y_from} c y\n11 1\n.names {z_from} z\n1 1\n.end\n")
 
     def test_copies_are_paired_in_order_and_proved(self) -> None:
+        """Two boxes fed by two copies of one register are interchangeable (the congruence
+        closure of bbmatch sees r1 and r2 as one function): paired, none of them guessed."""
         flats = self.flats(self.copies("$m~1", "$m~2", "$m~1", "$m~2"),
                            self.copies("$m~7", "$m~8", "$m~7", "$m~8"))
-        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 2))
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 0))
         if ABC is None and not REQUIRE_ABC:
             return
         a = self.write("a.blif", self.copies("$m~1", "$m~2", "$m~1", "$m~2"))
@@ -1079,6 +1294,124 @@ class RamPairingTest(unittest.TestCase):
                                       "--no-ram-pairing")
         self.assertIn(code, (0, 4), err)
         self.assertNotIn("RAM slice", err)
+
+
+class SingleProbeTest(unittest.TestCase):
+    """--match-unnamed also tells apart unnamed boxes that name no memory (multipliers) by ABC
+    probes when simulation cannot: both ``a`` inputs are ANDs of 800 inputs that the biased
+    simulation never raises, and B builds the same functions with another grouping, so neither the
+    signature nor the colour of the input cones pairs them (2H micro sweep, rs_decoder_2)."""
+
+    WIDTH = 800
+
+    def tree(self, prefix: str, block: int) -> str:
+        lines, mids = [], []
+        for k in range(0, self.WIDTH, block):
+            ins = " ".join(f"{prefix}{i}" for i in range(k, min(k + block, self.WIDTH)))
+            lines.append(f".names {ins} m{prefix}{k}\n{'1' * min(block, self.WIDTH - k)} 1\n")
+            mids.append(f"m{prefix}{k}")
+        lines.append(f".names {' '.join(mids)} w{prefix}\n{'1' * len(mids)} 1\n")
+        return "".join(lines)
+
+    def netlist(self, block: int, swap: bool, xcone: bool = False, cross: bool = False,
+                bad_in: bool = False) -> str:
+        ins = " ".join(f"{p}{i}" for p in "xy" for i in range(self.WIDTH))
+        text = f".model t\n.inputs clk d0 {ins}\n.outputs ox oy\n.names unconn\n"
+        text += self.tree("x", block) + self.tree("y", block)
+        if xcone:  # every compared pin of a box is in the x-cone
+            text += ".names wx unconn wxu\n11 1\n.names wy unconn wyu\n11 1\n"
+        mults = [("x", "ox"), ("y", "oy")]
+        for name, out in (reversed(mults) if swap else mults):
+            src = "x" if bad_in and name == "y" else name  # B's second multiplier: wrong input
+            pin = f"w{src}{'u' if xcone else ''}"
+            if cross:  # the consumers read the other multiplier
+                out = "oy" if out == "ox" else "ox"
+            text += (f".gate multiply a[0]={pin} b[0]=d0 out[0]=mul{name}~0\n"
+                     f".names mul{name}~0 {out}\n1 1\n")
+        return text + ".end\n"
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def run_check(self, *flags: str, xcone: bool = False, cross: bool = False,
+                  bad_in: bool = False) -> tuple[int, str, str]:
+        assert ABC is not None
+        paths = []
+        for name, text in (("a.blif", self.netlist(10, False, xcone)),
+                           ("b.blif", self.netlist(8, True, xcone, cross, bad_in))):
+            path = Path(self.tmp.name) / name
+            path.write_text(text, encoding="utf-8")
+            paths.append(str(path))
+        return check("--match-unnamed", "--abc", ABC, *flags, *paths)
+
+    @needs_abc
+    def test_boxes_that_simulation_cannot_tell_apart_pair_by_probe(self) -> None:
+        code, out, err = self.run_check()
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("multiply #", err)
+
+    @needs_abc
+    def test_without_probes_the_wrong_guess_is_inconclusive_not_a_difference(self) -> None:
+        code, out, err = self.run_check("--no-ram-probe")
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("inconclusive", err)
+
+    @needs_abc
+    def test_an_x_cone_result_over_guessed_pairs_is_inconclusive_not_eq_x(self) -> None:
+        """Every compared pin of both boxes is behind ``unconn``, so the x-report would call a
+        wrong guess "equivalent outside the x-cones" (exit 3): with guessed pairs it is exit 4."""
+        code, out, err = self.run_check("--no-ram-probe", "--x-report", xcone=True)
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("equivalent outside the x-cones", err)
+        code, out, err = self.run_check("--x-report", xcone=True)
+        # a probe over pins that are all behind unconn proves nothing: still exit 4
+        self.assertEqual(code, 4, out + err)
+        self.assertIn("inconclusive", err)
+
+    @needs_abc
+    def test_a_crossed_multiplier_is_never_equivalent_with_probes_on(self) -> None:
+        for flags in ((), ("--x-report",)):
+            code, out, err = self.run_check(*flags, cross=True)
+            self.assertIn(code, (1, 4), out + err)
+            self.assertNotIn("equiv-check: equivalent", out)
+            self.assertNotIn("equivalent outside", out)
+
+    @needs_abc
+    def test_a_multiplier_with_a_wrong_input_is_not_eq_x_with_probes_on(self) -> None:
+        code, out, err = self.run_check("--x-report", xcone=True, bad_in=True)
+        self.assertIn(code, (1, 4), out + err)  # never 3 (equivalent outside the x-cones)
+        self.assertNotIn("equivalent outside the x-cones (abc", out)
+
+    @needs_abc
+    def test_a_leftover_pair_with_probes_on_is_a_guess_the_proof_rejects(self) -> None:
+        """B's two multipliers both read x: probes pair x with one of them and the last probe (y)
+        fails, leaving one pair per side, which is paired as a guess (weak). The final proof then
+        finds y's input different: never equivalent, never PROVEN."""
+        for flags in ((), ("--x-report",)):
+            code, out, err = self.run_check(*flags, bad_in=True)
+            self.assertIn(code, (1, 4), out + err)
+            self.assertNotIn("equiv-check: equivalent", out)
+            self.assertNotIn("equivalent outside", out)
+            self.assertIn("multiply #", err)  # the probe round ran and paired the first box
+
+
+class CongruenceTest(unittest.TestCase):
+    """bbmatch.canonical_classes: copies of one register and boxes fed by them are one class."""
+
+    def test_copies_of_a_register_are_one_class_and_so_are_the_boxes_they_feed(self) -> None:
+        names = [blif.Names(["a"], "d1", [("1", "1")]), blif.Names(["a", "b"], "d2", [("11", "1")])]
+        latches = [blif.Latch("d2", "q1", init="0"), blif.Latch("d2", "q2", init="0"),
+                   blif.Latch("d2", "q3", init="1")]
+        boxes = [bbmatch.BoxSpec("multiply", (), None, (("a[0]", "q1"),), (("out[0]", "o1"),)),
+                 bbmatch.BoxSpec("multiply", (), None, (("a[0]", "q2"),), (("out[0]", "o2"),)),
+                 bbmatch.BoxSpec("multiply", (), None, (("a[0]", "q3"),), (("out[0]", "o3"),))]
+        canon = bbmatch.canonical_classes(names, latches, boxes)
+        self.assertEqual(canon("q1"), canon("q2"))
+        self.assertNotEqual(canon("q1"), canon("q3"))  # another init: another register
+        self.assertEqual(canon("o1"), canon("o2"))
+        self.assertNotEqual(canon("o1"), canon("o3"))
+        self.assertEqual(canon("d1"), "a")  # a buffer is looked through
 
 
 def _stuck_we(name: str, first: int = 0) -> tuple[list[str], str]:
