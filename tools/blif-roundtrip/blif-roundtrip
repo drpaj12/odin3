@@ -398,7 +398,7 @@ vtr_equiv() {
 # Worker for --vtr: one line "id<TAB>path". Writes $BRT_RES/id.tsv (the report row and seconds).
 worker_vtr() {
     local id path rel tool dir w1 w2 e1 facts rc=0 w2rc=0 state classes="" renamed=0 word
-    local idem="-" cmpw="-" eqv="-" verdict=pass t0 flag="" stem
+    local idem="-" cmpw="-" eqv="-" verdict=pass t0 flag="" stem read_refused=0
     IFS=$'\t' read -r id path <<<"$1"
     rel=${path#"$BRT_ROOT"/}
     case $path in
@@ -423,8 +423,14 @@ worker_vtr() {
     1) state=refused ;;
     *) state=failed ;;
     esac
+    # read_blif itself refuses a net with two drivers (a located error, PHASE3 #36): E12, but only
+    # for the #15 list and only with that message; any other read failure stays `failed`.
+    if [ "$rc" -ne 0 ] && is_multi_driver "$path" && grep -q 'cell outputs (one allowed)' "$e1"; then
+        state=refused
+        read_refused=1
+    fi
     if [ "$state" = refused ]; then
-        classes=$(vtr_classes "$e1")
+        if [ "$read_refused" = 1 ]; then classes=E12; else classes=$(vtr_classes "$e1"); fi
         verdict=$(vtr_refusal_verdict "$classes" "$facts" "$e1" "$path" "$tool")
     elif [ "$state" = failed ]; then
         verdict="fail:io"
