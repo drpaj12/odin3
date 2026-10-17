@@ -31,6 +31,17 @@ class GridTest(unittest.TestCase):
         for prefix in ("add_", "sub_", "neg_"):
             self.assertTrue(any(s.startswith(prefix) for s in stems), prefix)
 
+    def test_the_mul_and_div_families_cover_the_operators_and_their_shapes(self) -> None:
+        by_stem = {c.stem: c for c in gc.generate(["mul", "div"])}
+        self.assertEqual(len(by_stem), len(gc.generate(["mul", "div"])))
+        self.assertIn("assign y = a * b;", by_stem["mul_w3x5"].text)
+        self.assertIn("assign y = a / b;", by_stem["div_w4_s"].text)
+        self.assertIn("assign y = a % b;", by_stem["mod_w5x3_ms"].text)
+        self.assertIn("module m(input signed [3:0] a, input signed [3:0] b, output [2:0] y);",
+                      by_stem["mul_w4_s_y3"].text)
+        for prefix in ("mul_", "div_", "mod_"):
+            self.assertTrue(any(s.startswith(prefix) for s in by_stem), prefix)
+
     def test_module_text_of_a_mixed_sign_binary_cell(self) -> None:
         by_stem = {c.stem: c for c in gc.generate(["bitwise"])}
         self.assertEqual(

@@ -13,8 +13,6 @@
 /* Port positions: A B Y. */
 enum { PORT_A = 0, PORT_B = 1 };
 
-typedef enum cmp_kind { CMP_LT, CMP_LE, CMP_GT, CMP_GE } cmp_kind;
-
 /*
  * The "less than" flag of the subtraction A - B (alumacc.cc get_lt/get_cf/get_of/get_sf): unsigned
  * it is the inverted carry out of the top bit; signed it is overflow ^ sign, where overflow is
@@ -36,86 +34,93 @@ static odin3_status less_than(lw_ctx *lw, const lw_alu_out *res, odin3_net_id ca
 }
 
 /* $le = lt | eq; $gt = ~(lt | eq); $ge = gt | eq, where eq is the AND of every P bit. */
-static odin3_status compare_flag(lw_ctx *lw, cmp_kind kind, const lw_alu_out *res,
+static odin3_status compare_flag(lw_ctx *lw, lw_cmp_kind kind, const lw_alu_out *res,
                                  odin3_net_id less, odin3_net_id *flag) {
     *flag = less;
-    if (kind == CMP_LT) {
+    if (kind == LW_CMP_LT) {
         return ODIN3_OK;
     }
     odin3_net_id equal = {0};
     odin3_status st = lw_tree(lw, LW_G_AND, lw_bits_span(&res->prop), &equal);
     st = st == ODIN3_OK ? lw_or(lw, less, equal, flag) : st;
-    if (st == ODIN3_OK && kind != CMP_LE) {
+    if (st == ODIN3_OK && kind != LW_CMP_LE) {
         st = lw_not(lw, *flag, flag);
     }
-    if (st == ODIN3_OK && kind == CMP_GE) {
+    if (st == ODIN3_OK && kind == LW_CMP_GE) {
         st = lw_or(lw, *flag, equal, flag);
     }
     return st;
 }
 
-static odin3_status build_cmp(lw_ctx *lw, const lw_cell *cell, cmp_kind kind, lw_bits *out) {
-    uint32_t wa = cell->port[PORT_A].n;
-    uint32_t wb = cell->port[PORT_B].n;
-    lw_alu_args args = {cell->port[PORT_A], cell->port[PORT_B], {0}, true, false, false,
-                        wa > wb ? wa : wb};
-    args.is_signed = lw_both_signed(lw, cell);
+odin3_status lw_compare(lw_ctx *lw, const lw_cmp_args *cmp, odin3_net_id *flag) {
+    uint32_t width = cmp->a.n > cmp->b.n ? cmp->a.n : cmp->b.n;
+    lw_alu_args args = {cmp->a, cmp->b, {0}, true, cmp->is_signed, false, width};
     odin3_status st = lw_const(lw, ODIN3_BIT_1, &args.carry_in);
     lw_alu_out res;
     lw_alu_out_init(&res);
     st = st == ODIN3_OK ? lw_alu(lw, &args, &res) : st;
     odin3_net_id less = {0};
-    odin3_net_id flag = {0};
-    st = st == ODIN3_OK ? less_than(lw, &res, args.carry_in, args.is_signed, &less) : st;
-    st = st == ODIN3_OK ? compare_flag(lw, kind, &res, less, &flag) : st;
-    st = st == ODIN3_OK ? lw_finish_flag(lw, cell, flag, out) : st;
+    st = st == ODIN3_OK ? less_than(lw, &res, args.carry_in, cmp->is_signed, &less) : st;
+    st = st == ODIN3_OK ? compare_flag(lw, cmp->kind, &res, less, flag) : st;
     lw_alu_out_free(&res);
     return st;
 }
 
+static odin3_status build_cmp(lw_ctx *lw, const lw_cell *cell, lw_cmp_kind kind, lw_bits *out) {
+    lw_cmp_args cmp = {cell->port[PORT_A], cell->port[PORT_B], kind, false};
+    cmp.is_signed = lw_both_signed(lw, cell);
+    odin3_net_id flag = {0};
+    odin3_status st = lw_compare(lw, &cmp, &flag);
+    return st == ODIN3_OK ? lw_finish_flag(lw, cell, flag, out) : st;
+}
+
 odin3_status lw_build_lt(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
-    return build_cmp(lw, cell, CMP_LT, out);
+    return build_cmp(lw, cell, LW_CMP_LT, out);
 }
 
 odin3_status lw_build_le(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
-    return build_cmp(lw, cell, CMP_LE, out);
+    return build_cmp(lw, cell, LW_CMP_LE, out);
 }
 
 odin3_status lw_build_gt(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
-    return build_cmp(lw, cell, CMP_GT, out);
+    return build_cmp(lw, cell, LW_CMP_GT, out);
 }
 
 odin3_status lw_build_ge(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
-    return build_cmp(lw, cell, CMP_GE, out);
+    return build_cmp(lw, cell, LW_CMP_GE, out);
 }
 
 /* The subtraction without sum bits, the flag(s) of `kind`, and the AND tree of P for eq. */
-static uint64_t cmp_estimate(const lw_cell *cell, cmp_kind kind) {
-    uint64_t wa = cell->port[PORT_A].n;
-    uint64_t wb = cell->port[PORT_B].n;
-    uint64_t width = wa > wb ? wa : wb;
-    bool is_signed = cell->params[LW_P_BIN_ASIGNED].i != 0 && cell->params[LW_P_BIN_BSIGNED].i != 0;
-    uint64_t gates = lw_alu_gates(width, true, false);
-    gates = lw_sat_add(gates, is_signed ? 3 : 1);
-    if (kind != CMP_LT) {
-        gates = lw_sat_add(gates, width - 1);
-        gates = lw_sat_add(gates, (uint64_t)kind); /* le: 1 (OR), gt: 2 (OR, NOT), ge: 3 */
+uint64_t lw_compare_gates(const lw_cmp_shape *shape) {
+    uint64_t gates = lw_alu_gates(shape->width, true, false);
+    gates = lw_sat_add(gates, shape->is_signed ? 3 : 1);
+    if (shape->kind != LW_CMP_LT) {
+        gates = lw_sat_add(gates, shape->width - 1);
+        gates = lw_sat_add(gates, (uint64_t)shape->kind); /* le: 1 (OR), gt: 2 (OR, NOT), ge: 3 */
     }
     return gates;
 }
 
+static uint64_t cmp_estimate(const lw_cell *cell, lw_cmp_kind kind) {
+    uint64_t wa = cell->port[PORT_A].n;
+    uint64_t wb = cell->port[PORT_B].n;
+    bool is_signed = cell->params[LW_P_BIN_ASIGNED].i != 0 && cell->params[LW_P_BIN_BSIGNED].i != 0;
+    lw_cmp_shape shape = {wa > wb ? wa : wb, kind, is_signed};
+    return lw_compare_gates(&shape);
+}
+
 uint64_t lw_est_lt(const lw_cell *cell) {
-    return cmp_estimate(cell, CMP_LT);
+    return cmp_estimate(cell, LW_CMP_LT);
 }
 
 uint64_t lw_est_le(const lw_cell *cell) {
-    return cmp_estimate(cell, CMP_LE);
+    return cmp_estimate(cell, LW_CMP_LE);
 }
 
 uint64_t lw_est_gt(const lw_cell *cell) {
-    return cmp_estimate(cell, CMP_GT);
+    return cmp_estimate(cell, LW_CMP_GT);
 }
 
 uint64_t lw_est_ge(const lw_cell *cell) {
-    return cmp_estimate(cell, CMP_GE);
+    return cmp_estimate(cell, LW_CMP_GE);
 }

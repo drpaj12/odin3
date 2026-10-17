@@ -199,8 +199,44 @@ def arith_cells() -> list[Cell]:
     return cells
 
 
+MUL_WIDTHS = (1, 2, 3, 4, 5, 8)
+MUL_WIDE = (12, 16)
+MUL_PAIRS = ((3, 5), (5, 3), (2, 7), (1, 4))
+DIV_WIDTHS = (1, 2, 3, 4, 5, 8)
+DIV_WIDE = (12,)
+DIV_PAIRS = ((3, 5), (5, 3), (2, 6), (6, 2))
+
+
+def mul_cells() -> list[Cell]:
+    """``$mul`` (maccmap): equal and unequal operands, signs, ``Y`` narrower, equal, wider."""
+    cells: list[Cell] = []
+    for w in MUL_WIDTHS + MUL_WIDE:
+        cells += [binary("mul", "*", (w, w), sign, w) for sign in ("", "s")]
+    for w in MUL_WIDTHS[1:]:
+        cells += [binary("mul", "*", (w, w), sign, 2 * w) for sign in ("", "s")]
+    cells += [binary("mul", "*", (4, 4), sign, 3) for sign in ("", "s")]
+    for p in MUL_PAIRS:
+        cells += [binary("mul", "*", p, sign, max(p)) for sign in SIGN_VARIANTS]
+        cells.append(binary("mul", "*", p, "", sum(p)))
+    return cells
+
+
+def div_cells() -> list[Cell]:
+    """``$div`` and ``$mod`` (the restoring divider of ``$__div_mod_u``), the same grid."""
+    cells: list[Cell] = []
+    for name, op in (("div", "/"), ("mod", "%")):
+        for w in DIV_WIDTHS + DIV_WIDE:
+            cells += [binary(name, op, (w, w), sign, w) for sign in ("", "s")]
+        for w in (3, 4):
+            cells += [binary(name, op, (w, w), sign, w + 3) for sign in ("", "s")]
+        cells += [binary(name, op, (4, 4), sign, 2) for sign in ("", "s")]
+        for p in DIV_PAIRS:
+            cells += [binary(name, op, p, sign, max(p)) for sign in SIGN_VARIANTS]
+    return cells
+
+
 FAMILY_GENERATORS = {"bitwise": bitwise_cells, "pmux": pmux_cells, "shift": shift_cells,
-                     "arith": arith_cells}
+                     "arith": arith_cells, "mul": mul_cells, "div": div_cells}
 
 
 def generate(families: Sequence[str]) -> list[Cell]:

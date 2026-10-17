@@ -361,6 +361,10 @@ LW_DECLARE_BUILDER(add);
 LW_DECLARE_BUILDER(sub);
 LW_DECLARE_BUILDER(neg);
 
+/* 0 - src at `width` bits (src extended by is_signed) into *out (cleared first): the $neg rule.
+ * Gates: lw_alu_gates(width, true, true). */
+odin3_status lw_neg_bits(lw_ctx *lw, lw_span src, uint32_t width, bool is_signed, lw_bits *out);
+
 /* --- cmp.c: $lt $le $gt $ge (spec §5.4) ---------------------------------------------------------
  */
 
@@ -368,6 +372,64 @@ LW_DECLARE_BUILDER(lt);
 LW_DECLARE_BUILDER(le);
 LW_DECLARE_BUILDER(gt);
 LW_DECLARE_BUILDER(ge);
+
+/* The four comparisons, in the order of cmp_estimate's arithmetic (LT 0, LE 1, GT 2, GE 3). */
+typedef enum lw_cmp_kind { LW_CMP_LT, LW_CMP_LE, LW_CMP_GT, LW_CMP_GE } lw_cmp_kind;
+
+/* The operands of lw_compare: each extended to the wider one's width by is_signed. */
+typedef struct lw_cmp_args {
+    lw_span a;
+    lw_span b;
+    lw_cmp_kind kind;
+    bool is_signed;
+} lw_cmp_args;
+
+/* The flag net of `a <kind> b` (the subtraction without sum bits, alumacc.cc); the rule of
+ * $lt $le $gt $ge, shared with the divider. Gates: lw_compare_gates. */
+odin3_status lw_compare(lw_ctx *lw, const lw_cmp_args *cmp, odin3_net_id *flag);
+
+/* The shape lw_compare_gates counts: the operand width (the wider one) and the flavour. */
+typedef struct lw_cmp_shape {
+    uint64_t width;
+    lw_cmp_kind kind;
+    bool is_signed;
+} lw_cmp_shape;
+uint64_t lw_compare_gates(const lw_cmp_shape *shape);
+
+/* --- mul.c: the bit heap, the full adder, $mul (spec §5.5) --------------------------------------
+ */
+
+/* One column of the bit heap: nets in ascending ID order, `head` the first one still in it. */
+typedef struct lw_column {
+    lw_bits nets;
+    uint32_t head;
+} lw_column;
+
+/* maccmap.cc's `bits`: one set of nets per column (weight 2^column). */
+typedef struct lw_heap {
+    odin3_vec cols; /* lw_column */
+    odin3_net_id zero;
+} lw_heap;
+
+void lw_heap_init(lw_heap *heap);
+void lw_heap_free(lw_heap *heap);
+/* Empties the heap and gives it `width` columns; nets equal to `zero` are never added. */
+odin3_status lw_heap_reset(lw_heap *heap, uint32_t width, odin3_net_id zero);
+uint32_t lw_heap_width(const lw_heap *heap);
+uint32_t lw_heap_depth(const lw_heap *heap, uint32_t pos);
+/* The smallest net ID of the column (its depth must be > 0), removed. */
+odin3_net_id lw_heap_pop(lw_heap *heap, uint32_t pos);
+/*
+ * maccmap.cc `add(bit, position)`: nothing for a position past the width or for the zero net; a
+ * net the column already holds leaves it and is added to the next column instead (cancel and
+ * carry, an explicit loop); else the net joins the column. NO_MEMORY leaves the heap valid.
+ */
+odin3_status lw_heap_add(lw_heap *heap, odin3_net_id net, uint32_t pos);
+
+/* techmap.v `_90_fa`: sum = a ^ b ^ c = out[0], carry = ab | c(a ^ b) = out[1]; 5 gates. */
+odin3_status lw_fa(lw_ctx *lw, const odin3_net_id in[3], odin3_net_id out[2]);
+
+LW_DECLARE_BUILDER(mul);
 
 /* --- dispatch (dispatch.c) ---------------------------------------------------------------- */
 

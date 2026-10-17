@@ -208,13 +208,11 @@ odin3_status lw_build_sub(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
     return addsub(lw, cell, true, out);
 }
 
-/* Y = 0 - A with the operands signed by A_SIGNED (alumacc turns a lone negation into 0 - A). */
-odin3_status lw_build_neg(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
+/* 0 - src at `width` bits, src extended by is_signed (alumacc turns a lone negation into 0 - A). */
+odin3_status lw_neg_bits(lw_ctx *lw, lw_span src, uint32_t width, bool is_signed, lw_bits *out) {
     odin3_net_id zero = {0};
     odin3_status st = lw_const(lw, ODIN3_BIT_0, &zero);
-    lw_alu_args args = {{&zero, 1}, cell->port[PORT_A],        {0}, true, false,
-                        true,       cell->port[PORT_Y_UNARY].n};
-    args.is_signed = lw_both_signed(lw, cell);
+    lw_alu_args args = {{&zero, 1}, src, {0}, true, is_signed, true, width};
     st = st == ODIN3_OK ? lw_const(lw, ODIN3_BIT_1, &args.carry_in) : st;
     lw_alu_out res;
     lw_alu_out_init(&res);
@@ -225,6 +223,12 @@ odin3_status lw_build_neg(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
     }
     lw_alu_out_free(&res);
     return st;
+}
+
+/* Y = 0 - A with the operands signed by A_SIGNED. */
+odin3_status lw_build_neg(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
+    return lw_neg_bits(lw, cell->port[PORT_A], cell->port[PORT_Y_UNARY].n, lw_both_signed(lw, cell),
+                       out);
 }
 
 uint64_t lw_est_add(const lw_cell *cell) {
