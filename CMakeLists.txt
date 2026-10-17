@@ -879,6 +879,12 @@ if(BUILD_TESTING)
         COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-cells --odin3 $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tests/lower/cells)
     set_tests_properties(lower_cells PROPERTIES LABELS lower SKIP_RETURN_CODE 77 TIMEOUT 1800)
+    # 3B Task 5 (spec 5.7): a $pow that survives to lower is the located error, nothing built.
+    add_test(NAME cli_lower_pow
+        COMMAND $<TARGET_FILE:odin3> -p
+                "read_verilog --nolatches ${PROJECT_SOURCE_DIR}/tests/lower/hand/pow.v; hierarchy; proc; lower")
+    set_tests_properties(cli_lower_pow PROPERTIES LABELS lower
+        PASS_REGULAR_EXPRESSION "lower: module 'm': '[$]pow' '[^']*' has no bit-level form \\(run opt first; Yosys leaves it unmapped\\)")
     add_test(NAME cli_lower_hand
         COMMAND $<TARGET_FILE:odin3> -p
                 "read_verilog --nolatches ${PROJECT_SOURCE_DIR}/tests/lower/hand/and_mux.v; hierarchy; proc; opt; lower; check; stats")
