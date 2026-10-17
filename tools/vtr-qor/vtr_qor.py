@@ -26,6 +26,10 @@ Subcommands here: ``doctor``, ``run``, ``fcheck``, ``status``, ``clean``, ``tabl
   2 in group A and 1 in group B, and writes ``metrics.json`` ``verdicts.fcheck``; ``run --fcheck``
   does the same right after each job. A missing job is named and makes the exit 1; exit 1 for a
   ``fail`` or ``error``, 3 for ``capped``.
+- ``equiv (--set S | --designs D)`` (heavy) runs ``tools/equiv-check`` on the O' job's and the O
+  job's kept ``<d>.blif`` (spec §8.2) and writes the O job's ``verdicts.equiv`` (``equivalent``,
+  ``differs``, ``ram``, ``multiclock``, ``timeout``, ``error``). Exit 1 for ``differs`` or
+  ``error`` or a missing job, 3 for ``timeout``.
 - ``status`` prints one line per (arch, leg) of the current VTR commit:
   ``<arch> <leg> latest <key12|-> ok <n> failed <m> age <d>d``.
 - ``clean [--keep N]`` runs retention (spec §5.4, ``qor_sched.prune``) over every
@@ -756,6 +760,38 @@ def cmd_fcheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
     return _checks_exit(verdicts, missing, stop, FCHECK_BAD, frozenset({"capped"}))
 
 
+EQUIV_BAD = frozenset({"differs", "error"})
+
+
+def cmd_equiv(args: argparse.Namespace, argv: Sequence[str]) -> int:
+    """``equiv (--set S | --designs D)``: spec §8.2 on existing O and O' jobs (both kept with
+    ``--keep-netlists``): ``equiv-check`` before and after ``abc``. Always heavy, as it runs
+    ABC's ``dsec``. Exit 1 for ``differs`` or ``error`` or a missing job, 3 for ``timeout``."""
+    opts = RunOptions(out=_out(args), meminfo=MEMINFO)
+    jobs, missing, _ = _plan_existing(args, ("O", "Oprime"), "equiv")
+    primes = {job.design: job for job in jobs if job.leg == "Oprime"}
+    pairs = []
+    for job in jobs:
+        if job.leg != "O":
+            continue
+        if job.design in primes:
+            pairs.append((job, primes[job.design]))
+        else:
+            print(f"{PREFIX}equiv: {_label(job)}: no ok O' job to compare with", file=sys.stderr)
+            missing += 1
+    opts.scope = qor_heavy.reexec_under_lock(list(argv), script=SCRIPT, no_wait=args.no_wait,
+                                             lock=qor_heavy.HEAVY_LOCK)
+    by_o = {id(o): prime for o, prime in pairs}
+
+    def step(job: Job) -> str:
+        return qor_sched.run_equiv(job.design, job, by_o[id(job)], opts)
+
+    verdicts, stop = qor_sched.run_checks([o for o, _ in pairs], opts, step)
+    counts = ", ".join(f"{verdicts.count(v)} {v}" for v in sorted(set(verdicts)))
+    _warn_log(opts, f"equiv done: {counts or 'nothing to check'}")
+    return _checks_exit(verdicts, missing, stop, EQUIV_BAD, frozenset({"timeout"}))
+
+
 def _warn_log(opts: RunOptions, message: str) -> None:
     if opts.log is not None:
         opts.log.emit(message)
@@ -1330,6 +1366,11 @@ def _parser() -> argparse.ArgumentParser:
     fcheck.add_argument("--designs", default="", metavar="D[,D...]")
     fcheck.add_argument("--xl", action="store_true",
                         help="the 9 GiB slice, for capped --designs only (the controller's)")
+    equiv = sub.add_parser("equiv", parents=[common],
+                           help="equiv-check before and after abc, O' against O (heavy)")
+    equiv.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
+                       help="gate, extra, smoke")
+    equiv.add_argument("--designs", default="", metavar="D[,D...]")
     sub.add_parser("status", parents=[common], help="latest key and counts per arch and leg")
     clean = sub.add_parser("clean", parents=[common], help="retention (spec §5.4)")
     clean.add_argument("--keep", type=_positive, default=qor_sched.KEEP_KEYS, metavar="N",
@@ -1352,7 +1393,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 COMMANDS: dict[str, Callable[[argparse.Namespace, Sequence[str]], int]] = {
-    "doctor": cmd_doctor, "run": cmd_run, "fcheck": cmd_fcheck, "status": cmd_status,
+    "doctor": cmd_doctor, "run": cmd_run, "fcheck": cmd_fcheck, "equiv": cmd_equiv,
+    "status": cmd_status,
     "clean": cmd_clean, "table": cmd_table, "gate": cmd_gate, "publish": cmd_publish,
 }
 

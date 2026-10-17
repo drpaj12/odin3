@@ -1631,6 +1631,93 @@ def run_fcheck(job: Job, opts: RunOptions, verilator_j: int) -> str:
     return verdict
 
 
+EQUIV_TIMEOUT_S = 600
+EQUIV_WALL_S = 660  # the harness's own cap on the child: equiv-check's 600 s plus its start-up
+EQUIV_TOOL = Path("tools") / "equiv-check" / "equiv-check"
+EQUIV_LOG = "equiv.log"
+EQUIV_ERR = "equiv.err"
+_MULTICLOCK = "unsupported: more than one clock domain"
+EXIT_EQUIV, EXIT_DIFFERS, EXIT_UNPROVEN = 0, 1, 4
+
+
+def equiv_command(repo: Path, before: Path, after: Path) -> list[str]:
+    """Spec §8.2: ``equiv-check --timeout 600 <before> <after>`` (``before`` the O' job's
+    ``<d>.blif``, ``after`` the O job's)."""
+    return [str(repo / EQUIV_TOOL), "--timeout", str(EQUIV_TIMEOUT_S), str(before), str(after)]
+
+
+def equiv_verdict(returncode: int | None, stderr: str) -> str:
+    """Plan point (v), widened for ``equiv-check``'s current exit codes: 0 ``equivalent``, 1
+    ``differs``; the multi-clock message (exit 2, or 4 *unproven*) ``multiclock``; ABC timing out
+    (exit 2 ``running ABC failed:`` with ``timed out``, or any other exit 4, a tool limit) and the
+    harness's own wall cap (``None``) ``timeout``; anything else ``error``."""
+    if returncode is None:
+        return "timeout"
+    if returncode == EXIT_EQUIV:
+        return "equivalent"
+    if returncode == EXIT_DIFFERS:
+        return "differs"
+    if _MULTICLOCK in stderr:
+        return "multiclock"
+    abc_timed_out = "running ABC failed:" in stderr and "timed out" in stderr
+    if returncode == EXIT_UNPROVEN or abc_timed_out:
+        return "timeout"
+    return "error"
+
+
+def _equiv_netlists(o_job: Job, oprime_job: Job) -> tuple[Path, Path] | str:
+    """The kept ``<d>.blif`` of O' (before) and O (after), else the text saying which is gone."""
+    for job in (oprime_job, o_job):
+        if not _regular(job.job_dir / f"{job.design}.blif"):
+            return f"equiv: {_label(job)}: no kept netlist (run with --keep-netlists)"
+    return oprime_job.job_dir / f"{oprime_job.design}.blif", o_job.job_dir / f"{o_job.design}.blif"
+
+
+def _ram_slices(job: Job) -> int:
+    try:
+        record = json.loads((job.job_dir / "metrics.json").read_text(encoding="utf-8"))
+        return int(record["netlist"]["ram_slices"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0
+
+
+def _equiv_outcome(o_job: Job, before: Path, after: Path, opts: RunOptions) -> str:
+    repo = o_job.ctx.repo if o_job.ctx is not None else qor_legs.REPO_ROOT
+    cmd = Command(tuple(equiv_command(repo, before, after)), o_job.job_dir,
+                  o_job.job_dir / EQUIV_LOG, (), o_job.job_dir / EQUIV_ERR)
+    outcome = run_command(cmd, opts, deadline=opts.clock() + EQUIV_WALL_S)
+    if outcome.kind == ABORTED:
+        _emit(opts, outcome.error)
+    elif outcome.kind == "error":
+        _emit(opts, f"equiv: {_label(o_job)}: {outcome.error}")
+    if outcome.kind not in ("exit", TIMEOUT):
+        return "error"
+    try:
+        err = cmd.stderr.read_text(encoding="utf-8", errors="replace") if cmd.stderr else ""
+    except OSError:
+        err = ""
+    return equiv_verdict(outcome.returncode, err)
+
+
+def run_equiv(design: str, o_job: Job, oprime_job: Job, opts: RunOptions) -> str:
+    """Spec §8.2: ``equiv-check`` between the O' job's and the O job's kept ``<d>.blif``, inside
+    the verified heavy run. A netlist with RAM slices is ``ram`` and nothing runs (PHASE0 #8).
+    The verdict goes to the O job's ``metrics.json`` ``verdicts.equiv``."""
+    _heavy_scope(opts)
+    if _ram_slices(o_job) > 0:
+        verdict = "ram"
+    else:
+        netlists = _equiv_netlists(o_job, oprime_job)
+        if isinstance(netlists, str):
+            _emit(opts, netlists)
+            verdict = "error"
+        else:
+            verdict = _equiv_outcome(o_job, netlists[0], netlists[1], opts)
+    record_verdict(o_job, "equiv", verdict)
+    _emit(opts, f"equiv {design}: {verdict}")
+    return verdict
+
+
 def run_checks(jobs: Sequence[Job], opts: RunOptions, step: Callable[[Job], str]
                ) -> tuple[list[str], int]:
     """Run ``step`` (a check on one finished job: ``run_fcheck``, ``run_equiv``) over ``jobs``

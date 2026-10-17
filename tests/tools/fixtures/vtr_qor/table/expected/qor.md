@@ -458,9 +458,9 @@ ABC exchange (3D I8; runs per exchange): P' aig 21; O aig 20, blif 1
 | design | fcheck P | fcheck O | equiv | rerun |
 |---|---|---|---|---|
 | ch_intrinsics | pass | pass | ram | same |
-| stereovision3 | pass | pass | equivalent | same |
-| diffeq2 | pass | pass | equivalent | same |
-| diffeq1 | pass | pass | equivalent | same |
+| stereovision3 | pass | pass | equivalent (exception: multiclock) | same |
+| diffeq2 | pass | pass | equivalent (exception: multiplier) | same |
+| diffeq1 | pass | pass | equivalent (exception: multiplier) | same |
 | mkPktMerge | pass | pass | ram | same |
 | raygentop | pass | pass | ram | same |
 | sha | pass | pass | equivalent | same |
@@ -468,12 +468,12 @@ ABC exchange (3D I8; runs per exchange): P' aig 21; O aig 20, blif 1
 | mkSMAdapter4B | pass | pass | ram | same |
 | or1200 | pass | pass | ram | same |
 | stereovision0 | pass | pass | equivalent | same |
-| stereovision1 | pass | pass | equivalent | same |
+| stereovision1 | pass | pass | equivalent (exception: multiplier) | same |
 | mkDelayWorker32B | pass | pass | ram | same |
-| stereovision2 | pass | pass | equivalent | same |
+| stereovision2 | pass | pass | equivalent (exception: multiplier) | same |
 | blob_merge | pass | pass | equivalent | same |
 | LU8PEEng | pass | pass | ram | same |
-| bgm | pass | pass | equivalent | same |
+| bgm | pass | pass | equivalent (exception: multiplier) | same |
 | mcml | pass | pass | ram | same |
 | LU32PEEng | pass | pass | ram | same |
 | spree | pass | pass | ram | same |

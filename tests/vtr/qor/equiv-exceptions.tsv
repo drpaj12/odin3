@@ -1,0 +1,7 @@
+# design	class	text (3H spec 8.2; class: multiclock, multiplier, timeout)
+stereovision3	multiclock	two clocks (tm3_clk_v0, tm3_clk_v2): the Verilator check stands in
+diffeq1	multiplier	5 multiply, inlined by equiv-check as 36x36 logic: the Verilator check stands in
+diffeq2	multiplier	5 multiply, inlined by equiv-check as 36x36 logic: the Verilator check stands in
+stereovision1	multiplier	152 multiply, inlined by equiv-check as 36x36 logic: the Verilator check stands in
+stereovision2	multiplier	468 multiply, inlined by equiv-check as 36x36 logic: the Verilator check stands in
+bgm	multiplier	11 multiply, inlined by equiv-check as 36x36 logic: the Verilator check stands in

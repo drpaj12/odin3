@@ -984,6 +984,125 @@ class FcheckTest(RunnerTestBase):
         self.assertEqual([self.verdict(j) for j in jobs], ["pass"] * 3)
 
 
+FAKE_EQUIV_CHECK = """
+import json, sys, time
+from pathlib import Path
+here = Path(__file__).resolve().parent
+mode = json.loads((here / "mode.json").read_text())
+with (here / "calls.jsonl").open("a") as log:
+    log.write(json.dumps(sys.argv[1:]) + "\\n")
+time.sleep(mode.get("sleep", 0))
+sys.stderr.write(mode.get("stderr", ""))
+sys.exit(mode.get("exit", 0))
+"""
+
+
+class EquivTest(RunnerTestBase):
+    """Plan Task 12: ``equiv-check`` between the O' and O netlists."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.repo = self.tmp / "repo"
+        self.tool = self.repo / "tools" / "equiv-check" / "equiv-check"
+        self.tool.parent.mkdir(parents=True)
+        self.tool.write_text(f"#!{sys.executable}\n{FAKE_EQUIV_CHECK}")
+        self.tool.chmod(0o755)
+        self.mode({})
+
+    def mode(self, mode: dict[str, Any]) -> None:
+        (self.tool.parent / "mode.json").write_text(json.dumps(mode))
+
+    def calls(self) -> list[list[str]]:
+        log = self.tool.parent / "calls.jsonl"
+        return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+    def pair(self, design: str, *, ram: int = 0, keep: bool = True) -> tuple[Job, Job]:
+        jobs = []
+        for leg in ("O", "Oprime"):
+            ctx = qor_legs.LegContext(
+                vtr_root=self.tmp / "vtr", python=Path(sys.executable), arch_xml=self.tmp / "a",
+                odin3=self.tmp / "odin3", repo=self.repo, job_dir=self.job_dir(design, leg),
+                k=6, group="A")
+            job = dataclasses.replace(self.job(design, [{}], leg=leg), ctx=ctx)
+            job.job_dir.mkdir(parents=True, exist_ok=True)
+            if keep:
+                (job.job_dir / f"{design}.blif").write_text(f".model {leg}\n.end\n")
+            (job.job_dir / "metrics.json").write_text(json.dumps({
+                "schema": 1, "key": job.key, "status": "ok", "verdicts": {"equiv": "skipped"},
+                "netlist": {"ram_slices": ram}}))
+            jobs.append(job)
+        return jobs[0], jobs[1]
+
+    def verdict(self, job: Job) -> str:
+        return str(json.loads((job.job_dir / "metrics.json").read_text())["verdicts"]["equiv"])
+
+    def test_equiv_command(self) -> None:
+        repo, before, after = Path("/r"), Path("/j/Oprime/sha/sha.blif"), Path("/j/O/sha/sha.blif")
+        self.assertEqual(qor_sched.equiv_command(repo, before, after), [
+            "/r/tools/equiv-check/equiv-check", "--timeout", "600", str(before), str(after)])
+        self.assertEqual((qor_sched.EQUIV_TIMEOUT_S, qor_sched.EQUIV_WALL_S), (600, 660))
+
+    def test_equiv_classification(self) -> None:
+        cases = [
+            (0, "", "equivalent"), (1, "equiv-check: NOT equivalent", "differs"),
+            (2, "equiv-check: unproven: x: unsupported: more than one clock domain (type, "
+                "clock): [('re', 'a'), ('re', 'b')]", "multiclock"),
+            (4, "unproven: x: unsupported: more than one clock domain", "multiclock"),
+            (2, "equiv-check: running ABC failed: timed out", "timeout"),
+            (4, "unproven: ABC dsec timed out after 600 seconds", "timeout"),
+            (4, "unproven: ABC dsec ended UNDECIDED", "timeout"),
+            (None, "", "timeout"),
+            (2, "equiv-check: cannot read a.blif", "error"),
+            (2, "running ABC failed: no such file", "error"),
+            (5, "ABC killed by signal 9", "error"), (3, "", "error"),
+        ]
+        for code, err, expected in cases:
+            self.assertEqual(qor_sched.equiv_verdict(code, err), expected, (code, err))
+
+    def test_equiv_runs_the_tool(self) -> None:
+        """The fake tool's exit and stderr give each verdict, written to the O job; the argv is
+        O' then O."""
+        for code, err, expected in ((0, "", "equivalent"), (1, "", "differs"),
+                                    (2, "unsupported: more than one clock domain", "multiclock"),
+                                    (4, "timed out", "timeout"), (2, "boom", "error")):
+            self.mode({"exit": code, "stderr": err})
+            o_job, prime = self.pair("sha")
+            self.assertEqual(qor_sched.run_equiv("sha", o_job, prime, self.opts()), expected)
+            self.assertEqual(self.verdict(o_job), expected)
+            self.assertEqual((o_job.job_dir / "equiv.err").read_text(), err)
+        self.assertEqual(self.calls()[-1], [
+            "--timeout", "600", str(self.job_dir("sha", "Oprime") / "sha.blif"),
+            str(self.job_dir("sha", "O") / "sha.blif")])
+
+    def test_equiv_ram_skipped(self) -> None:
+        o_job, prime = self.pair("diffeq1", ram=4)
+        self.assertEqual(qor_sched.run_equiv("diffeq1", o_job, prime, self.opts()), "ram")
+        self.assertEqual(self.verdict(o_job), "ram")
+        self.assertEqual(self.calls(), [])
+        self.assertFalse((o_job.job_dir / "equiv.log").exists())
+
+    def test_equiv_wall_cap_and_missing_netlist(self) -> None:
+        o_job, prime = self.pair("sha")
+        self.mode({"exit": 0, "sleep": 60})  # outlives the (patched) wall cap and is killed
+        err = io.StringIO()
+        with mock.patch.object(qor_sched, "EQUIV_WALL_S", 0.5), redirect_stderr(err):
+            verdict = qor_sched.run_equiv("sha", o_job, prime, self.opts(clock=time.monotonic))
+        self.assertEqual((verdict, self.verdict(o_job)), ("timeout", "timeout"))
+        gone_o, gone_prime = self.pair("stereovision3", keep=False)
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(qor_sched.run_equiv("stereovision3", gone_o, gone_prime,
+                                                 self.opts()), "error")
+        self.assertIn("vtr-qor: equiv: O' stereovision3: no kept netlist", err.getvalue()
+                      .replace("Oprime", "O'"))
+        self.assertEqual(self.verdict(gone_o), "error")
+
+    def test_equiv_refused_outside_heavy_run(self) -> None:
+        o_job, prime = self.pair("sha")
+        with self.assertRaises(HeavyError):
+            qor_sched.run_equiv("sha", o_job, prime, self.opts(scope=None))
+
+
 class HeavyGuardTest(RunnerTestBase):
     """Nothing starts unless the real nesting evidence and the cap hold (standing rules)."""
 

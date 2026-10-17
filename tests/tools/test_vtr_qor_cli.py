@@ -1042,6 +1042,23 @@ class FcheckCliTest(CliTestBase):
 class CommittedInputsTest(unittest.TestCase):
     """The committed gate inputs under tests/vtr/qor."""
 
+    def test_equiv_exceptions_file(self) -> None:
+        rows = qor_table.load_tsv(REPO_ROOT / "tests" / "vtr" / "qor" / "equiv-exceptions.tsv")
+        self.assertEqual([r[0] for r in rows], ["stereovision3", "diffeq1", "diffeq2",
+                                                "stereovision1", "stereovision2", "bgm"])
+        self.assertEqual(rows[0][1:], ("multiclock", "two clocks (tm3_clk_v0, tm3_clk_v2): the "
+                                                     "Verilator check stands in"))
+        counts = {"diffeq1": 5, "diffeq2": 5, "stereovision1": 152, "stereovision2": 468,
+                  "bgm": 11}
+        for design, cls, text in rows[1:]:
+            self.assertEqual(cls, "multiplier")
+            self.assertEqual(text, f"{counts[design]} multiply, inlined by equiv-check as "
+                                   "36x36 logic: the Verilator check stands in")
+        for design, _, _ in rows:
+            self.assertIn(design, SETS.gate)
+        for absent in ("sha", "stereovision0", "blob_merge"):
+            self.assertNotIn(absent, [r[0] for r in rows])
+
     def test_divergences_rows(self) -> None:
         rows = qor_table.load_tsv(REPO_ROOT / "tests" / "vtr" / "qor" / "divergences.tsv")
         self.assertEqual(rows[0], ("ch_intrinsics", "mem-init-dropped",
@@ -1052,6 +1069,51 @@ class CommittedInputsTest(unittest.TestCase):
             self.assertIn(cls, classes)
             if cls == "baseline-fails":
                 self.assertIn("fcheck.log", text)  # each such row cites P's log
+
+
+class EquivCliTest(CliTestBase):
+    """Plan Task 12: ``equiv`` on O' and O jobs kept with --keep-netlists."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tool = _script(self.repo / "tools" / "equiv-check" / "equiv-check", (
+            "import sys\nfrom pathlib import Path\nhere = Path(__file__).parent\n"
+            "(here / 'calls').open('a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "mode = here / 'mode'\nsys.exit(int(mode.read_text()) if mode.exists() else 0)\n"))
+
+    def verdict(self, design: str) -> str:
+        (job,) = self.job_dirs("O", design)
+        return str(self.load(job / "metrics.json")["verdicts"]["equiv"])
+
+    def test_equiv_command_line(self) -> None:
+        code, _, err = self.cli("run", "--leg", "O,Oprime", "--designs", "ch_intrinsics,sha",
+                                "--keep-netlists")
+        self.assertEqual(code, 0, err)
+        code, _, err = self.cli("equiv", "--designs", "ch_intrinsics,sha")
+        self.assertEqual(code, 0, err)
+        calls = (self.tool.parent / "calls").read_text().splitlines()
+        self.assertEqual(len(calls), 2)
+        (o_job,) = self.job_dirs("O", "sha")
+        (p_job,) = self.job_dirs("Oprime", "sha")
+        self.assertEqual(calls[1], f"--timeout 600 {p_job}/sha.blif {o_job}/sha.blif")
+        self.assertEqual((self.verdict("sha"), self.verdict("ch_intrinsics")),
+                         ("equivalent", "equivalent"))
+        self.assertIn("vtr-qor: equiv done: 2 equivalent", self.harness_lines()[-1])
+        (self.tool.parent / "mode").write_text("1")
+        code, _, err = self.cli("equiv", "--designs", "sha")
+        self.assertEqual(code, 1, err)
+        self.assertEqual(self.verdict("sha"), "differs")
+        (self.tool.parent / "mode").write_text("4")
+        self.assertEqual(self.cli("equiv", "--designs", "sha")[0], 3)
+
+    def test_equiv_missing_jobs(self) -> None:
+        code, _, err = self.cli("run", "--leg", "O", "--designs", "sha", "--keep-netlists")
+        self.assertEqual(code, 0, err)
+        code, _, err = self.cli("equiv", "--designs", "sha")
+        self.assertEqual(code, 1)
+        self.assertIn("vtr-qor: equiv: Oprime sha: no ok job; run it first\n", err)
+        self.assertIn("vtr-qor: equiv: O sha: no ok O' job to compare with\n", err)
+        self.assertFalse((self.tool.parent / "calls").exists())
 
 
 class StatusCleanTest(CliTestBase):
