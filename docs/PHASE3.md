@@ -884,6 +884,20 @@ then the options considered.
     | mkDelayWorker32B | 0.09 | 17 | 18 | 0 | 0 | 1350 | 12564 | 1157 | 961 | 92 | 2.08 | same | yes |
     | mcml | 1.36 | 115 | 225 | 0 | 0 | 5368 | 172262 | 10484 | 15508 | 108 | 1.42 | same | yes |
 
+36. **`read_blif` refuses a multiply-driven net** (the Phase 2 small fix of #31(3); fuzz seed
+    `blif003`, 2026-10-16, branch `fix/2H-blif-multidriver-hier`; overrides PHASE1 #15's "read as
+    written"). The reader now checks, after each cell it makes, that none of the cell's driver pins
+    gives a net a second driver that is neither `inout` nor of a `tristate` type (check rule 4's
+    own test). A hit is a located error, `<file>:<line>: net '<name>' is driven by N cell outputs
+    (one allowed)`, at the line of the second driver's directive; the status is `PARSE`; the cell
+    is removed again, so the IR left behind passes `check`. `check` rule 4 is unchanged. The four
+    Odin II goldens PHASE1 #15 listed (`elsif_both_defined` and `multi_assignment`, both arches)
+    are now read refusals: the round-trip, writer and sim scripts count them as "refused at read".
+    Fixture `elsif_both_defined.odin.blif` moved to `tests/golden/blif-multidriver/` (no sweep
+    reads that directory); `blif003` is pinned in `tests/fuzz/fuzz_opt_regress`, and
+    `test_abc_pass` pins the new located error where it pinned check rule 4. The `write_blif
+    --vtr` E12 refusal stays for IR built by other means (hand IR, a later pass).
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this

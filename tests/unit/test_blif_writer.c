@@ -40,7 +40,6 @@ static const char *const FIXTURES[] = {
     ODIN3_BLIF_FIXTURES "/adder_hard_block.parmys.blif",
     ODIN3_BLIF_FIXTURES "/ansiportlist_2.parmys.blif",
     ODIN3_BLIF_FIXTURES "/dffsre.parmys.blif",
-    ODIN3_BLIF_FIXTURES "/elsif_both_defined.odin.blif",
     ODIN3_BLIF_FIXTURES "/ff.odin.blif",
     ODIN3_BLIF_FIXTURES "/ff.parmys.blif",
     ODIN3_BLIF_FIXTURES "/hand_body.blif",

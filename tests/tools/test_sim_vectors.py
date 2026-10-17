@@ -159,7 +159,7 @@ class SimVectorsTest(unittest.TestCase):
             ((BLIF / "no_such.blif",), "no_such.blif"),
             ((BLIF / "pow.parmys.blif",), "cannot simulate"),
             ((TECHLIB / "multiply.parmys.01.blif",), "cannot simulate"),
-            ((BLIF / "elsif_both_defined.odin.blif",), "driver"),
+            ((BLIF.parent / "blif-multidriver" / "elsif_both_defined.odin.blif",), "driven by 2"),
             ((BLIF / "ff.parmys.blif", "--techlib", Path("/nonexistent.o3lib")), "nonexistent"),
         ]
         for args, needle in cases:

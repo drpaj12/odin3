@@ -16,4 +16,3 @@ tests/golden/blif/dffsre.parmys.blif error blackbox: $_DFFSR_PPP_ is not declare
 tests/golden/blif/hand_ports.blif error undriven output bits (equiv-check needs --allow-undriven)
 tests/golden/blif/hand_writers.blif error undriven net reaches an output (equiv-check needs --allow-undriven)
 tests/golden/blif/hand_body.blif error unnamed black box that equiv-check cannot pair
-tests/golden/blif/elsif_both_defined.odin.blif odin3-error two drivers on one net: read_blif fails the check

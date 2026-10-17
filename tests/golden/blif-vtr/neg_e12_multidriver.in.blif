@@ -1,4 +1,4 @@
-# neg_e12_multidriver: two .names drive one net (E12; a Debug build's check refuses it first)
+# neg_e12_multidriver: two .names drive one net (E12; read_blif refuses it at the second .names)
 .model neg_e12
 .inputs a b
 .outputs y

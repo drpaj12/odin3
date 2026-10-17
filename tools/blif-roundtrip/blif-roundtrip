@@ -212,7 +212,12 @@ worker() {
     warns=$(sed -n 's/.*check FULL: \([0-9]*\) errors, \([0-9]*\) warnings.*/\2/p' "$errf" | head -n 1)
     errs=${errs:--}
     warns=${warns:--}
-    if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -ne 0 ] && is_multi_driver "$path" && grep -q 'cell outputs (one allowed)' "$errf"; then
+        # read_blif refuses a net with two drivers (a located error); expected for the #15 list.
+        text="refused"
+        struct="refused"
+        note=$(tail -n 1 "$errf" | tr '\t' ' ')
+    elif [ "$rc" -ne 0 ]; then
         text="RTFAIL"
         struct="-"
         note=$(tail -n 1 "$errf" | tr '\t' ' ')
@@ -261,7 +266,7 @@ report() {
             b = path[r]; sub(/.*\//, "", b)
             printf "%-8s %-16s %-6s %-6s %7s  %s\n", text[r], s, er[r], wr[r], secs[r], p
             tot++
-            if (text[r] == "ok") tx_ok++; else if (text[r] == "RTFAIL") rtfail++; else tx_fail++
+            if (text[r] == "ok") tx_ok++; else if (text[r] == "refused") tx_ref++; else if (text[r] == "RTFAIL") rtfail++; else tx_fail++
             cnt[base]++
             if (er[r] != "-" && er[r] + 0 > 0) { if (b in multi) chk_exc++; else chk_bad++ }
             rttot += rts[r]
@@ -274,7 +279,7 @@ report() {
         print ""
         print "SUMMARY"
         printf "files: %d (structural gate run on %d distinct contents)\n", tot, tot - dupn()
-        printf "text gate: %d ok, %d FAIL, %d read/write failures\n", tx_ok, tx_fail, rtfail
+        printf "text gate: %d ok, %d FAIL, %d read/write failures, %d refused at read (multi-driver original)\n", tx_ok, tx_fail, rtfail, tx_ref
         printf "structural gate: identical %d, identical+stubs %d, refused (multi-driver original) %d, timeout %d, memlimit %d, different %d, error %d, not run %d\n",
             cnt["identical"], cnt["identical+stubs"], cnt["refused"], cnt["timeout"], cnt["memlimit"], cnt["different"], cnt["error"], cnt["-"]
         printf "check FULL errors: %d files outside the multi-driver list, %d inside it\n", chk_bad, chk_exc

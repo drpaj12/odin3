@@ -241,17 +241,19 @@ static void test_views_refusal_on_pow(void) {
     TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
 }
 
-/* elsif_both_defined.odin.blif reads, but has two drivers on one net: check fails before the pass
- * (listed `odin3-error`), and the design is left unchanged. */
-static void test_two_drivers_refuse_before_the_pass(void) {
+/* elsif_both_defined.odin.blif has two drivers on one net (fuzz seed blif003): read_blif refuses it
+ * with a located error (it was check rule 4 before the reader refused it), so no design reaches
+ * the pass and ABC is never opened. */
+static void test_two_drivers_refused_at_read(void) {
     char path[AFX_JOIN];
-    (void)snprintf(path, sizeof path, "%s/tests/golden/blif/elsif_both_defined.odin.blif",
+    (void)snprintf(path, sizeof path,
+                   "%s/tests/golden/blif-multidriver/elsif_both_defined.odin.blif",
                    ODIN3_SOURCE_DIR);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_design(path));
     afx_log_reset();
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, run_abc("--lut 6"));
-    const char *line = afx_only(ODIN3_LOG_ERROR, "check: simple_op: rule 4: net ");
-    TEST_ASSERT_NOT_NULL(strstr(line, "has 2 drivers that are neither inout nor tristate"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_design(path));
+    const char *line = afx_only(ODIN3_LOG_ERROR, path);
+    TEST_ASSERT_NOT_NULL(strstr(line, "elsif_both_defined.odin.blif:19: net 'simple_op^out' is "
+                                      "driven by 2 cell outputs (one allowed)"));
     TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
 }
 
@@ -458,7 +460,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_every_design_maps_to_an_equal_netlist);
     RUN_TEST(test_views_refusal_on_pow);
-    RUN_TEST(test_two_drivers_refuse_before_the_pass);
+    RUN_TEST(test_two_drivers_refused_at_read);
     RUN_TEST(test_no_deleted_slots_and_no_temp_directory);
     RUN_TEST(test_lut_round_trip);
     RUN_TEST(test_real_engine_script_and_second_pass);

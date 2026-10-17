@@ -265,9 +265,8 @@ worker() {
         if [ "$out" != ok ]; then
             # Any failure of the simulator under test fails the gate, timeouts and OOM included.
             status=sim-error note="$out: $(last_words "$dir/ours.log")"
-            if [ "${out%% *}" = error ] && grep -q 'more than one driver' "$dir/ours.log.err" &&
-                abc_refuses_multi_driver "$dir" "$path"; then
-                status=excluded flavor=- note="multi-driver netlist (PHASE1 #15): the simulator and ABC both refuse it"
+            if [ "${out%% *}" = error ] && grep -q 'cell outputs (one allowed)' "$dir/ours.log.err"; then
+                status=excluded flavor=- note="multi-driver netlist (PHASE1 #15): read_blif refuses it"
             fi
         fi
     fi
