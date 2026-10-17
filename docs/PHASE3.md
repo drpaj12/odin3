@@ -898,6 +898,17 @@ then the options considered.
     `test_abc_pass` pins the new located error where it pinned check rule 4. The `write_blif
     --vtr` E12 refusal stays for IR built by other means (hand IR, a later pass).
 
+37. **`check` validates provenance `hier`** (Peter approved the check change; the Phase 2 small fix of
+    #31(3), 2026-10-16, branch `fix/2H-blif-multidriver-hier`; milestone M2 is the O' leg of
+    "Order of work", not a spec). Rule 7 gains one test per record: `hier` is 0 or a string-table ID
+    of the design (the test `odin3_prov_derive_hier` and `odin3_prov_source` already apply on the
+    way in); a larger value is an error `check: design: rule 7: record N has hier H, which is not a
+    string of the design`. The test covers what IR.md states for the field (a strtab ID, 0 = none).
+    It does not test the path's shape (module-relative first component, instance names): IR-12
+    writes no such invariant, so a shape rule would need Peter's decision first. FAST is unchanged
+    (rule 7 is FULL only). New fault `ODIN3_IR_TEST_BAD_HIER` and two tests in `test_ir_check`
+    (a flatten-style path passes; a `hier` one past the table fails).
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this
