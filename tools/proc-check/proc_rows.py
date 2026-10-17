@@ -26,7 +26,8 @@ runs with the rows directory as its working directory, so a diagnostic names ``<
 - ``bridge`` (CTest ``proc_bridge_rows``, Yosys 0.55): ``elab-equiv --pass proc --async2sync
   --unmap-enables --top t`` per non-error row, ``--no-trio`` until ``opt`` exists, expecting exit
   0. A row in ``bridge_expect.txt`` (``slug|text|reason``: what the oracle cannot check) must exit
-  2 with ``text`` in its message, so a row that starts to pass is noticed.
+  4 (unproven; 2 before elab-equiv split the two) with ``text`` in its message, so a row that
+  starts to pass is noticed.
 
 Exit 0 when every check holds, 1 when one fails (all are reported), 2 on a usage or tool error;
 77 (skip) when a child needs a cap that cannot be applied.
@@ -50,7 +51,7 @@ DEFAULT_ROWS = ROOT / "tests" / "proc" / "rows"
 TOOL = "proc-rows"
 GIB = 1 << 30
 CAP = 3 * GIB
-EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
+EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_UNPROVEN, EXIT_SKIP = 0, 1, 2, 4, 77
 ERR_STATUS = "pass proc: failed: ODIN3_ERR_PARSE"
 ERROR_LINE_RE = re.compile(r"^odin3: error: (\S+\.v:\d+:\d+: error: .*)$")
 ROW_RE = re.compile(r"^(\w+) comb=([01]) err=([01])$")
@@ -257,8 +258,8 @@ def cmd_bridge(ctx: Context) -> None:
         text = out + err
         if row.slug in expect:
             needle, _ = expect[row.slug]
-            if code != EXIT_ERROR or needle not in text:
-                ctx.fail(f"{row.slug}: expected exit 2 with '{needle}', got exit {code}")
+            if code not in (EXIT_ERROR, EXIT_UNPROVEN) or needle not in text:
+                ctx.fail(f"{row.slug}: expected exit 4 with '{needle}', got exit {code}")
         elif code == EXIT_SKIP:
             raise load_memcap().CapUnavailable(text.strip())
         elif code != 0:

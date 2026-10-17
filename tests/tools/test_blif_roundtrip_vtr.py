@@ -25,8 +25,8 @@ HEADER = "golden\ttool\twritten|refused\terror class\tidempotent\tcompare\tequiv
 
 # The fake writer. `# fake:` lines in the input: `refuse E1|E7|E5|E12|E2`, `renamed N`, `drift`
 # (every write appends a line, so W2 != W1), `mutate` (W1 gets an extra cell: not the same
-# netlist), `flip` (every write toggles that cell), `io` (exit 2). The output is the input, its
-# `# fake:` lines kept.
+# netlist), `flip` (every write toggles that cell), `io` (exit 2), `readrefuse` (read_blif's
+# multi-driver refusal, exit 2). The output is the input, its `# fake:` lines kept.
 FAKE_RT = r"""#!/usr/bin/env python3
 import os, sys
 args = sys.argv[1:]
@@ -52,6 +52,10 @@ MESSAGES = {
 }
 for f in facts:
     if f[0] == "io":
+        sys.exit(2)
+    if f[0] == "readrefuse":  # read_blif's multi-driver refusal (PHASE3 #36): a usage exit
+        print(f"odin3: error: {src}:8: net 'z' is driven by 2 cell outputs (one allowed)",
+              file=sys.stderr)
         sys.exit(2)
     if f[0] == "refuse":
         print(f"odin3: error: write_blif: --vtr: x.blif:1: {MESSAGES[f[1]]}", file=sys.stderr)
@@ -309,6 +313,21 @@ class RefusalTest(RoundTripVtrBase):
         self.add("multi_assignment.odin.blif", blif("refuse E12"))
         self.assertEqual(self.run_tool().returncode, 0)
         self.assertEqual(self.rows()[0][3], "E12")
+
+    def test_multi_driver_odin_refused_at_read_is_e12_and_passes(self) -> None:
+        self.add("elsif_both_defined.odin.blif", blif("readrefuse"))
+        self.assertEqual(self.run_tool().returncode, 0)
+        self.assertEqual(self.rows()[0][2:4], ["refused", "E12"])
+        self.assertEqual(self.rows()[0][7], "pass")
+
+    def test_a_read_refusal_of_any_other_file_still_fails(self) -> None:
+        self.add("w.odin.blif", blif("readrefuse"))
+        self.add("x.parmys.blif", blif("readrefuse", pad=3))
+        # the listed name with another read failure is not a refusal either
+        self.add("multi_assignment.odin.blif", blif("io", pad=6))
+        self.assertEqual(self.run_tool().returncode, 1)
+        self.assertEqual([row[2] for row in self.rows()], ["failed", "failed", "failed"])
+        self.assertEqual([row[7] for row in self.rows()], ["fail:io"] * 3)
 
     def test_async_and_word_cell_refusals_pass_on_parmys(self) -> None:
         self.add("dffsre.parmys.blif", blif("refuse E1b"))

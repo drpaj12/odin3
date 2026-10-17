@@ -25,6 +25,7 @@
 #include "proc_build.h"
 #include "unity.h"
 #include "util/alloc.h"
+#include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
 #include "util/vec.h"
@@ -458,6 +459,74 @@ static void test_cse_cascade(void) {
     cascade();
 }
 
+/* A chain of 200 duplicated gates whose readers come first in ID order: each sweep used to merge
+ * one level and hash every node again (lenet.v: about 200 sweeps over 600,000 nodes, 39 s). The
+ * merges are all found and the keys hashed a few times per node, not once per level. */
+enum { CHAIN_LEN = 200, CHAIN_TEXT = 40000, HASH_PER_NODE_MAX = 12, CHAIN_NODES = 2 * CHAIN_LEN };
+
+static uint32_t hash_calls;
+
+static uint64_t counting_hash(const void *key, size_t len) {
+    hash_calls++;
+    return odin3_hash_bytes((odin3_bytes){key, len}, ODIN3_HASH_SEED);
+}
+
+/* The net chain `chain` leaves gate `gate` on: the output port after the last gate. */
+static void chain_net(char *out, size_t size, int chain, int gate) {
+    if (gate == CHAIN_LEN - 1) {
+        (void)snprintf(out, size, "%s", chain == 1 ? "\\y" : "\\z");
+    } else if (gate < 0) {
+        (void)snprintf(out, size, "\\a");
+    } else {
+        (void)snprintf(out, size, "\\c%d_%d", chain, gate);
+    }
+}
+
+static size_t chain_text(char *out, size_t size) {
+    size_t at = (size_t)snprintf(out, size,
+                                 "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n"
+                                 "  wire output 3 \\y\n  wire output 4 \\z\n");
+    for (int chain = 1; chain <= 2; chain++) {
+        for (int i = 0; i < CHAIN_LEN - 1; i++) {
+            at += (size_t)snprintf(out + at, size - at, "  wire \\c%d_%d\n", chain, i);
+        }
+    }
+    for (int i = CHAIN_LEN - 1; i >= 0; i--) { /* readers first: the last gate has the lowest ID */
+        for (int chain = 1; chain <= 2; chain++) {
+            char in[32];
+            char net[32];
+            chain_net(in, sizeof in, chain, i - 1);
+            chain_net(net, sizeof net, chain, i);
+            at += (size_t)snprintf(out + at, size - at,
+                                   "  cell $not \\n%d_%d\n    connect \\A %s\n    connect \\Y %s\n"
+                                   "  end\n",
+                                   chain, i, in, net);
+        }
+    }
+    at += (size_t)snprintf(out + at, size - at, "end\n");
+    return at;
+}
+
+static void build_chain(void) {
+    char *text = odin3_util_malloc(CHAIN_TEXT);
+    TEST_ASSERT_NOT_NULL(text);
+    TEST_ASSERT_TRUE(chain_text(text, CHAIN_TEXT) < CHAIN_TEXT);
+    build(text);
+    odin3_util_free(text);
+}
+
+static void test_cse_deep_cascade_is_linear(void) {
+    hash_calls = 0;
+    odin3_opt_merge_test_set_key_hash(counting_hash);
+    build_chain();
+    odin3_log_set_level(ODIN3_LOG_INFO); /* not a debug line per merge: the sink keeps 64 lines */
+    run_merge();
+    TEST_ASSERT_TRUE(merged_pair());
+    expect_removed(CHAIN_LEN);
+    TEST_ASSERT_EQUAL_UINT32(CHAIN_LEN, count_type("$not"));
+    TEST_ASSERT_TRUE_MESSAGE(hash_calls < HASH_PER_NODE_MAX * CHAIN_NODES, "keys hashed per level");
+}
+
 static uint64_t const_hash(const void *key, size_t len) {
     (void)key;
     (void)len;
@@ -734,6 +803,33 @@ static void test_cse_provenance(void) {
     expect_index(surv, second);
 }
 
+/* A lower-ID node reaches the entry in a later round: `lo` reads f, which only becomes w when the
+ * sweep merges f's driver into w's; `hi` (higher ID) read w from the start and owns the key. The
+ * round's lookup displaces hi: lo survives, as the old full sweep would have chosen. */
+static void test_cse_late_lower_id_displaces_owner(void) {
+    build("module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire output 3 \\y\n"
+          "  wire output 4 \\z\n  wire \\w\n  wire \\f\n"
+          "  attribute \\src \"t.v:7.1\"\n  cell $not \\lo\n    connect \\A \\f\n    connect \\Y "
+          "\\y\n  end\n"
+          "  attribute \\src \"t.v:8.1\"\n  cell $not \\hi\n    connect \\A \\w\n    connect \\Y "
+          "\\z\n  end\n"
+          "  cell $and \\w1\n" AB "    connect \\Y \\w\n  end\n"
+          "  cell $and \\f1\n" AB "    connect \\Y \\f\n  end\n"
+          "end\n");
+    odin3_prov_id lo_rec = odin3_node_prov(fx.module, node_named("lo"));
+    odin3_prov_id hi_rec = odin3_node_prov(fx.module, node_named("hi"));
+    TEST_ASSERT_TRUE(lo_rec.v != 0 && hi_rec.v != 0 && lo_rec.v != hi_rec.v);
+    TEST_ASSERT_TRUE(node_named("lo").v < node_named("hi").v);
+    run_merge();
+    TEST_ASSERT_TRUE(merged_pair());
+    expect_removed(2);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$not"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$and"));
+    expect_alive("lo", true); /* the lower ID survives, not the earlier owner */
+    expect_alive("hi", false);
+    expect_derived(node_named("lo"), lo_rec, hi_rec);
+}
+
 /* --- out of memory ------------------------------------------------------------------------------
  */
 
@@ -809,11 +905,13 @@ int main(void) {
     RUN_TEST(test_cse_keep_first);
     RUN_TEST(test_cse_keep_both);
     RUN_TEST(test_cse_cascade);
+    RUN_TEST(test_cse_deep_cascade_is_linear);
     RUN_TEST(test_cse_collision);
     RUN_TEST(test_cse_open_input);
     RUN_TEST(test_cse_never);
     RUN_TEST(test_merge_yosys_cases);
     RUN_TEST(test_cse_provenance);
+    RUN_TEST(test_cse_late_lower_id_displaces_owner);
     RUN_TEST(test_cse_oom);
     return UNITY_END();
 }

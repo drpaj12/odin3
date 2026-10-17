@@ -384,7 +384,14 @@ worker() {
     local write_rss
     write_rss=$(rss_of "$w.write.rss")
     wsec=$(echo "$(now) $t0" | awk '{printf "%.1f", $1 - $2}')
-    if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -ne 0 ] && is_multi_driver "$path" && grep -q 'cell outputs (one allowed)' "$w.write.log"; then
+        # read_blif refuses a net with two drivers; expected for the multi-driver originals.
+        json="refused"
+        iv="-"
+        eq="-"
+        dt="-"
+        note=$(grep -v '^odin3-write: ' "$w.write.log" | tail -n 1 | tr '\t' ' ')
+    elif [ "$rc" -ne 0 ]; then
         json=$(fail_word "$rc" "$w.write.log" WRITEFAIL)
         note=$(grep -v '^odin3-write: ' "$w.write.log" | tail -n 1 | tr '\t' ' ')
     else

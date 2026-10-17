@@ -18,10 +18,12 @@
 enum { ODIN3_BUDGET_FRACTION = 60 };
 
 /*
- * The limit in bytes: ODIN3_BUDGET_FRACTION% of sysconf(_SC_PHYS_PAGES) x sysconf(_SC_PAGESIZE),
- * or of 8 GiB when either call fails; the test hook's value instead while one is set. Physical
- * memory, not a cgroup cap: under tools/heavy-run's 6G slice the limit lies above the cap, so a
- * sweep that outgrows the slice ends with the OOM killer's 137, not E6. E6 guards ad hoc runs.
+ * The limit in bytes: the smaller of ODIN3_BUDGET_FRACTION% of sysconf(_SC_PHYS_PAGES) x
+ * sysconf(_SC_PAGESIZE) (or of 8 GiB when either call fails) and the smallest numeric
+ * `memory.max` on the process's cgroup path and its ancestors (3D point (i): the `0::<path>` line
+ * of /proc/self/cgroup, then /sys/fs/cgroup<path>/memory.max up to the root; `max` and missing
+ * files do not count). Under tools/heavy-run the job's own scope says `max` and the 6G cap sits on
+ * its slice, so the walk finds it. The test hook's value instead while one is set.
  */
 uint64_t odin3_budget_limit(void);
 
@@ -37,8 +39,9 @@ odin3_status odin3_budget_check(const odin3_pass_ctx *ctx, const odin3_design *d
                                 uint64_t extra_bytes);
 
 /*
- * Appends "<pass> needs more than <limit> bytes (the design's budget is 60% of physical memory)"
- * to out, where <pass> is the name of ctx's pass run and <limit> odin3_budget_limit(). Logs
+ * Appends "<pass> needs more than <limit> bytes (the design's budget is <limit> bytes: the smaller
+ * of 60% of physical memory and the cgroup's memory.max)" (the one message of every pass, 3D point
+ * (i)) to out, where <pass> is the name of ctx's pass run and <limit> odin3_budget_limit(). Logs
  * nothing else. ODIN3_ERR_INVALID_ARG (logged) for a NULL argument or a run without a name;
  * ODIN3_ERR_NO_MEMORY with out unchanged.
  */
@@ -46,5 +49,13 @@ odin3_status odin3_budget_message(const odin3_pass_ctx *ctx, odin3_strbuf *out);
 
 /* Test hook: the limit becomes bytes (0 restores the physical-memory limit). */
 void odin3_budget_test_set_limit(uint64_t bytes);
+
+/*
+ * Test hook: reads the cgroup limit from the directory root (instead of /sys/fs/cgroup) for the
+ * cgroup path self_cgroup (instead of /proc/self/cgroup's `0::` line), e.g. root with
+ * `<root>/a.slice/b.scope/memory.max` for self_cgroup "/a.slice/b.scope". Both strings are copied;
+ * an empty root directory means no cgroup limit. NULL for either restores the real files.
+ */
+void odin3_budget_test_set_cgroup_root(const char *root, const char *self_cgroup);
 
 #endif

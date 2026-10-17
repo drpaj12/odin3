@@ -139,6 +139,16 @@ static bool bad_prov(odin3_module *module, uint32_t id) {
     return true;
 }
 
+static bool bad_hier(odin3_module *module, uint32_t id) {
+    odin3_prov_store *store = module->design->prov;
+    if (id == 0 || id >= odin3_pagevec_len(store->records)) {
+        return false;
+    }
+    odin3_prov_record *rec = odin3_pagevec_at(store->records, id);
+    rec->hier = (uint32_t)odin3_strtab_count(odin3_design_strtab(module->design));
+    return true;
+}
+
 static bool wire_backref(odin3_module *module, uint32_t id) {
     const odin3_wire_rec *wire = odin3_wire_rec_cat(module, (odin3_wire_id){id});
     odin3_net_rec *net = wire != NULL && !wire->dead && wire->width > 0
@@ -269,6 +279,7 @@ odin3_status odin3_ir_test_corrupt(odin3_module *module, odin3_ir_test_target ta
         [ODIN3_IR_TEST_PORT_WIRE_MISMATCH] = NULL, /* goes through the API, may fail */
         [ODIN3_IR_TEST_PORT_SIGN] = port_sign,
         [ODIN3_IR_TEST_PORT_SCALAR] = port_scalar,
+        [ODIN3_IR_TEST_BAD_HIER] = bad_hier,
     };
     if (module != NULL && (target.fault == ODIN3_IR_TEST_MULTI_DRIVER ||
                            target.fault == ODIN3_IR_TEST_PORT_WIRE_MISMATCH)) {

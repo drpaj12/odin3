@@ -698,14 +698,13 @@ static void test_blif_form(void) {
     }
 }
 
-/* write_verilog writes a generic instance, LUT MSB first; write_dot a box labelled $lut. */
+/* write_verilog writes the cover as an assign (3D Task 9); write_dot a box labelled $lut. */
 static void test_interim_verilog_dot(void) {
     (void)build_lut_module(2, "1000");
     char path[PATH_MAX_LEN];
     out_path(path, "interim.v");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, path, NULL));
-    expect_in(slurp(path),
-              "  \\$lut #(.WIDTH(2), .LUT(4'b1000)) u (\n    .A(a),\n    .Y(y)\n  );\n");
+    expect_in(slurp(path), "  assign y = a[0] & a[1];\n");
     out_path(path, "interim.dot");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_dot_write(design, path, NULL));
     expect_in(slurp(path), "[label=\"$lut\\nu\"];");

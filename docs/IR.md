@@ -349,12 +349,11 @@ and `LUT[i]` is bit *i* of the parameter counted from its least significant bit:
 semantics (text forms write `LUT` MSB first). Its `const_value` is 0 or 1 when every `LUT` bit
 is, and it simulates (1E). The writers today: `write_json` and `write_rtlil` write it as Yosys
 `$lut` (`LUT` MSB first; RTLIL spells the output of a constant one as the constant),
-`write_verilog` as a generic instance `\$lut #(.WIDTH(…), .LUT(…))` (`LUT` MSB first),
-`write_dot` as a node labelled `$lut`, and `write_blif` (3E-5, both dialects) as a BLIF
+`write_verilog` (3D Task 9) as `assign Y = <expr>;` over the same cover, a sum of products
+(`~(…)` for an off-set cover, `1'b0`/`1'b1` for a constant one), `write_dot` as a node labelled `$lut`, and `write_blif` (3E-5, both dialects) as a BLIF
 `.names A[0] … A[WIDTH−1] Y` with an irredundant cover (3E's `odin3_blif_isop`: the shorter of
 the on-set and off-set ISOP, the on-set on a tie), a constant one as the zero-input `.names Y`,
-so a BLIF round trip turns it into the `$sop` with that cover. 3D Task 9 makes `write_verilog`
-print that cover as a sum of products. `abc` is its only producer in Phase 3 and never makes a
+so a BLIF round trip turns it into the `$sop` with that cover. `abc` is its only producer in Phase 3 and never makes a
 constant one.
 
 **IR-11 Registration.** Built-in and plugin cell-type *definitions* live in a process-global
@@ -628,7 +627,7 @@ reports through `util/log` and returns `ODIN3_OK` or `ODIN3_ERR_CHECK` (new stat
    object is in a name map.
 7. **E** Every prov ID on a live object is a valid record; every `DERIVED` record has at least
    one parent and every parent has a smaller ID (a DAG by construction); every record's run
-   exists. Phase 1: a live object with prov 0 is a **W** (one line per module); a nonzero ID that
+   exists; every record's `hier` is 0 or a string of the design (PHASE3 #37). Phase 1: a live object with prov 0 is a **W** (one line per module); a nonzero ID that
    is not a record is **E**.
 8. **E** Every wire's nets are live, and each either has this (wire, bit) as its primary or
    lists it in the alias table; every primary/alias entry is matched by the wire's vector.
@@ -705,6 +704,9 @@ information, and provenance across ABC (IR-12).
 Under PHASE3 #30 (3A spec, the one IR addition Peter approved): `odin3_prov_derive_hier` (IR-12),
 `odin3_prov_derive` with a caller-chosen `hier` string, which `flatten` uses to record the instance
 path. Additive: no field, rule, ABI export or check rule changes.
+
+Under PHASE3 #37: check rule 7 also tests that a record's `hier` is 0 or a string-table ID. No
+other check rule, field or ABI change; the path's shape is not checked.
 
 ## 12. Out of scope for Phase 1
 

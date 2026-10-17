@@ -31,7 +31,8 @@ SLICE = "odin3-heavy.slice"
 SCOPE = "odin3-heavy-4242-1760000000000000000.scope"
 
 # `odin3 -p "read_techlib L; read_blif G; write_blif --vtr W"`. G's `# fake:` lines: `refuse E1|E3b|
-# E7|E12` (log an error line of that class, exit 1), `crash` (exit 3, no error line), `warn` (an
+# E7|E12` (log an error line of that class, exit 1), `readrefuse` (read_blif's multi-driver
+# refusal, exit 1), `crash` (exit 3, no error line), `warn` (an
 # info line). The default copies G to W.
 FAKE_ODIN3 = r"""#!/usr/bin/env python3
 import os, re, sys
@@ -55,6 +56,11 @@ for f in facts:
     if f[0] == "crash":
         print("odin3: error: read_blif: boom", file=sys.stderr)
         sys.exit(3)
+    if f[0] == "readrefuse":  # read_blif's own refusal of a multiply-driven net (PHASE3 #36)
+        print("odin3: error: " + g + ":8: net 'z' is driven by 2 cell outputs (one allowed)",
+              file=sys.stderr)
+        print("odin3: error: pass read_blif: failed: ODIN3_ERR_PARSE", file=sys.stderr)
+        sys.exit(1)
     if f[0] == "refuse":
         print("odin3: error: write_blif: --vtr: " + MSG[f[1]], file=sys.stderr)
         sys.exit(1)
@@ -236,6 +242,19 @@ class PairingTest(unittest.TestCase):
         self.assertEqual(vrc.refusal_classes(log), ["E1", "E7", "E12"])
         self.assertEqual(vrc.refusal_classes(""), [])
 
+    def test_read_refusal_is_e12_only_for_the_listed_goldens(self) -> None:
+        log = (
+            "odin3: error: /g/elsif_both_defined.odin.blif:8: net 'z' is driven by 2 cell "
+            "outputs (one allowed)\n"
+            "odin3: error: pass read_blif: failed: ODIN3_ERR_PARSE\n"
+        )
+        for name in ("elsif_both_defined.odin.blif", "multi_assignment.odin.blif"):
+            self.assertEqual(vrc.refusal_classes(log, Path("/g/arch/" + name)), ["E12"])
+        self.assertEqual(vrc.refusal_classes(log, Path("/g/other.odin.blif")), [])
+        self.assertEqual(vrc.refusal_classes(log), [])
+        other = "odin3: error: /g/multi_assignment.odin.blif:3: unknown formal 'q'\n"
+        self.assertEqual(vrc.refusal_classes(other, Path("/g/multi_assignment.odin.blif")), [])
+
 
 class SweepTest(ReadCheckBase):
     def test_smallest_first_and_the_steps(self) -> None:
@@ -338,6 +357,23 @@ class SweepTest(ReadCheckBase):
         code, out, err = self.run_main()
         self.assertEqual(code, 0, out + err)
         self.assertEqual(self.rows()[0][3:6], ["E12", "-", "crash"])
+
+    def test_a_read_refusal_of_a_listed_multi_driver_golden_is_e12_and_passes(self) -> None:
+        self.add("m/multi_assignment.odin.blif", netlist("# fake: readrefuse", "# vpr-fake: assert",
+                                                         "# chk-fake: reject"))
+        code, out, err = self.run_main()
+        self.assertEqual(code, 0, out + err)
+        row = self.rows()[0]
+        self.assertEqual((row[2], row[3], row[8]), ("refused", "E12", "pass"))
+
+    def test_a_read_refusal_of_any_other_golden_still_fails(self) -> None:
+        self.add("m/other.odin.blif", netlist("# fake: readrefuse", "# vpr-fake: assert",
+                                              "# chk-fake: reject"))
+        code, out, _ = self.run_main()
+        self.assertEqual(code, 1)
+        row = self.rows()[0]
+        self.assertEqual((row[2], row[8]), ("failed", "fail"))
+        self.assertIn("odin3 failed:", out)
 
     def test_a_listed_step_the_cap_kills_is_capped_listed_not_pass(self) -> None:
         self.add("bgm/bgm.parmys.blif", netlist("# vpr-fake: kill"))

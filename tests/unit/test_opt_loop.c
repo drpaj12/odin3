@@ -454,7 +454,8 @@ static void test_budget(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_pass("opt_clean", ""));
     TEST_ASSERT_EQUAL_UINT32(
         1, count_lines(ODIN3_LOG_ERROR, "opt_clean needs more than 4096 bytes (the design's budget "
-                                        "is 60% of physical memory)"));
+                                        "is 4096 bytes: the smaller of 60% of physical memory and "
+                                        "the cgroup's memory.max)"));
     odin3_budget_test_set_limit(0);
     check_full();
 }
@@ -1073,8 +1074,9 @@ static void test_budget_opt(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_pass("opt", ""));
     TEST_ASSERT_EQUAL_UINT32(
         1,
-        count_lines(ODIN3_LOG_ERROR, "opt needs more than 4096 bytes (the design's budget is 60% "
-                                     "of physical memory)"));
+        count_lines(ODIN3_LOG_ERROR, "opt needs more than 4096 bytes (the design's budget is 4096 "
+                                     "bytes: the smaller of 60% of physical memory and the "
+                                     "cgroup's memory.max)"));
     odin3_budget_test_set_limit(0);
     char *after = design_text();
     TEST_ASSERT_EQUAL_STRING(before, after);

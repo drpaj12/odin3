@@ -1,1 +1,1 @@
-odin3: error: write_blif: --vtr: neg_e12: net 'y' has 2 drivers ('$c4', '$c5')
+odin3: error: neg_e12_multidriver.in.blif:7: net 'y' is driven by 2 cell outputs (one allowed)
