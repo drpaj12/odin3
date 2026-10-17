@@ -913,7 +913,7 @@ then the options considered.
     writes no such invariant, so a shape rule would need Peter's decision first. FAST is unchanged
     (rule 7 is FULL only). New fault `ODIN3_IR_TEST_BAD_HIER` and two tests in `test_ir_check`
     (a flatten-style path passes; a `hier` one past the table fails).
-38. **3C-1 `hardmap` review fixes: explicit `multiply` and wide-Y `$mul`** (2026-10-17, branch
+39. **3C-1 `hardmap` review fixes: explicit `multiply` and wide-Y `$mul`** (2026-10-17, branch
     `feat/3C-hardmap-mul`; agent default under Peter's Parmys-default rule, he may override).
     (a) An explicit `multiply` instance is treated like the equivalent `$mul`, as Parmys resolves
     the primitive: `WIDTH` 2 becomes a `$mul` for `lower`, other `WIDTH` below 36 are padded to 36
