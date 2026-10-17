@@ -602,18 +602,6 @@ static void test_golden_ff_per_oracle(void) {
     TEST_ASSERT_NOT_NULL(memchr(odin.q, 1, N_CYCLES)); /* q is not stuck at 0 */
 }
 
-/* An Odin II golden that drives one net from two covers is rejected, naming the net. */
-static void test_golden_multi_driver_rejected(void) {
-    char path[512];
-    (void)snprintf(path, sizeof path, "%s/%s", ODIN3_BLIF_FIXTURES, "elsif_both_defined.odin.blif");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read(design, path), log_text);
-    odin3_sim *sim = (odin3_sim *)&sim;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_sim_build(design, (odin3_module_id){1}, &sim));
-    TEST_ASSERT_NULL(sim);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "driver"), log_text);
-}
-
 /* --- multiple drivers ------------------------------------------------------------------------- */
 
 static odin3_prov_id located(const char *file, uint32_t line) {
@@ -767,7 +755,6 @@ int main(void) {
     RUN_TEST(test_init_one_and_zero);
     RUN_TEST(test_same_seed_same_outputs);
     RUN_TEST(test_golden_ff_per_oracle);
-    RUN_TEST(test_golden_multi_driver_rejected);
     RUN_TEST(test_two_cells_driving_a_net_are_rejected);
     RUN_TEST(test_input_and_cell_driving_a_net_are_rejected);
     RUN_TEST(test_drivers_across_hierarchy_are_rejected);

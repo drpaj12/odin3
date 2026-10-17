@@ -662,16 +662,61 @@ static void test_subckt_formal_matches_scalar_bit_named_port(void) {
     expect_check_clean();
 }
 
-/* Multiple drivers are read as written; check reports them (rule 4). */
-static void test_multiple_drivers_are_read(void) {
-    write_str(".model top\n.inputs a b\n.outputs y\n.names a y\n1 1\n.names b y\n1 1\n.end\n");
+/* A net with two ordinary drivers is a located error at the second driver's directive, and the
+ * IR left behind passes check (the second cell is removed). */
+static void test_multiple_drivers_are_refused(void) {
+    expect_parse_error(
+        ".model top\n.inputs a b\n.outputs y\n.names a y\n1 1\n.names b y\n1 1\n.end\n", 6,
+        "net 'y' is driven by 2 cell outputs (one allowed)");
+    expect_check_clean();
+}
+
+/* An input port's net already has its $port_in driver; a latch is a driver like a .names. */
+static void test_multiple_drivers_port_and_latch(void) {
+    expect_parse_error(".model top\n.inputs a\n.outputs y\n.names a a\n1 1\n.end\n", 4,
+                       "net 'a' is driven by 2 cell outputs");
+    expect_check_clean();
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    expect_parse_error(
+        ".model top\n.inputs a b clk\n.outputs y\n.names a y\n1 1\n.latch b y re clk 0\n.end\n", 6,
+        "net 'y' is driven by 2 cell outputs");
+    expect_check_clean();
+}
+
+/* A model's output pins are drivers too: two instances of `sub` on one net, and one instance
+ * with two outputs on one net, are refused at the second driver; check stays clean. */
+static void test_multiple_drivers_subckt_outputs(void) {
+    static const char sub[] = ".model sub\n.inputs i\n.outputs o p\n.names i o\n1 1\n"
+                              ".names i p\n1 1\n.end\n";
+    char text[MSG_MAX];
+    (void)snprintf(text, sizeof text,
+                   ".model top\n.inputs a\n.outputs z\n.subckt sub i=a o=z\n"
+                   ".subckt sub i=a o=z\n.end\n%s",
+                   sub);
+    expect_parse_error(text, 5, "net 'z' is driven by 2 cell outputs (one allowed)");
+    expect_check_clean();
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    (void)snprintf(text, sizeof text,
+                   ".model top\n.inputs a\n.outputs z\n.subckt sub i=a o=z p=z\n.end\n%s", sub);
+    expect_parse_error(text, 4, "net 'z' is driven by 2 cell outputs (one allowed)");
+    expect_check_clean();
+}
+
+/* The bus exemption (check rule 4): the pins of an implicit black box are INOUT and a $tribuf
+ * output is tristate, so either may share a net with one ordinary driver. */
+static void test_multiple_drivers_bus_exemption(void) {
+    write_str(".model top\n.inputs a\n.outputs n\n.subckt mystery Y=n\n.subckt mystery Y=n\n"
+              ".names a n\n1 1\n.end\n");
     read_ok(PATH);
-    odin3_module *top = module_at(1);
-    TEST_ASSERT_EQUAL_UINT32(2,
-                             odin3_net_driver_count(top, odin3_module_find_net(top, intern("y"))));
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_ERR_CHECK,
-        odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
+    expect_check_clean();
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    write_str(".model top\n.inputs a e\n.outputs n\n.subckt $tribuf A[0]=a EN=e Y[0]=n\n"
+              ".names a n\n1 1\n.end\n");
+    read_ok(PATH);
+    expect_check_clean();
 }
 
 /* --- pass 2 errors ------------------------------------------------------------------------- */
@@ -1103,7 +1148,7 @@ static void expect_changed(const char *second, uint32_t line) {
 static void test_file_changed_between_passes(void) {
     expect_changed(".model top\n.end\n.model m\n.end\n.model extra\n.end\n", 5); /* more */
     expect_changed(".model top\n.end\n.model n\n.end\n", 3);                     /* renamed */
-    expect_changed(".model top\n.names a\n.end\n", 3);                           /* fewer */
+    expect_changed(".model top\n.names b\n.end\n", 3);                           /* fewer */
     expect_changed(".names a\n.model top\n.end\n", 1); /* body before any .model */
 }
 
@@ -1192,15 +1237,15 @@ static void test_golden_dffsre_implicit_cell(void) {
     expect_check_clean();
 }
 
-/* Odin II wrote two drivers on one net: read as written, check reports rule 4. */
+/* Odin II wrote two drivers on one net (fuzz seed blif003): read_blif refuses it, located. */
 static void test_golden_multiple_drivers(void) {
-    read_ok(ODIN3_BLIF_FIXTURES "/elsif_both_defined.odin.blif");
-    odin3_module *top = module_at(1);
-    TEST_ASSERT_EQUAL_UINT32(
-        2, odin3_net_driver_count(top, odin3_module_find_net(top, intern("simple_op^out"))));
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_ERR_CHECK,
-        odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
+    const char *path = ODIN3_BLIF_FIXTURES "/../blif-multidriver/elsif_both_defined.odin.blif";
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_blif_read(design, path));
+    char want[MSG_MAX];
+    (void)snprintf(want, sizeof want,
+                   "%s:19: net 'simple_op^out' is driven by 2 cell outputs (one allowed)", path);
+    TEST_ASSERT_EQUAL_STRING(want, last_error);
+    expect_check_clean();
 }
 
 /* Every allocation failure gives NO_MEMORY (or IO when the lexer itself cannot be opened). */
@@ -1288,7 +1333,10 @@ static void run_pass2_and_golden_tests(void) {
     RUN_TEST(test_body_provenance);
     RUN_TEST(test_check_clean_after_every_fixture);
     RUN_TEST(test_subckt_formal_matches_scalar_bit_named_port);
-    RUN_TEST(test_multiple_drivers_are_read);
+    RUN_TEST(test_multiple_drivers_are_refused);
+    RUN_TEST(test_multiple_drivers_port_and_latch);
+    RUN_TEST(test_multiple_drivers_subckt_outputs);
+    RUN_TEST(test_multiple_drivers_bus_exemption);
     RUN_TEST(test_cover_row_width_mismatch);
     RUN_TEST(test_cover_row_bad_characters);
     RUN_TEST(test_cover_row_outside_names);

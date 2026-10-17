@@ -243,14 +243,11 @@ class SimCheckTest(unittest.TestCase):
             "adder_hard_block.parmys.blif": "pass",
             "ansiportlist_2.parmys.blif": "pass",
             "dffsre.parmys.blif": "excluded",
-            "elsif_both_defined.odin.blif": "excluded",
             "ff.odin.blif": "pass",
             "ff.parmys.blif": "pass",
             "pow.parmys.blif": "excluded",
         })
         self.assertIn("pass 4, FAIL 0", res.stdout)
-        self.assertIn("multi-driver netlist (PHASE1 #15): the simulator and ABC both refuse it",
-                      res.stdout)
         self.assertIn("RESULT: PASS", res.stdout)
 
     def test_techlib_fixtures(self) -> None:

@@ -28,6 +28,7 @@ typedef enum odin3_ir_test_fault {
     ODIN3_IR_TEST_PORT_WIRE_MISMATCH, /* rule 9: port id's pin 0 moves to a new net */
     ODIN3_IR_TEST_PORT_SIGN,          /* rule 9: port id's wire flips its sign, its type's not */
     ODIN3_IR_TEST_PORT_SCALAR,        /* rule 9: port id's cell-type port becomes scalar */
+    ODIN3_IR_TEST_BAD_HIER,           /* rule 7: record id's hier = one past the last string */
     ODIN3_IR_TEST_FAULT_COUNT
 } odin3_ir_test_fault;
 

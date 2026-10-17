@@ -770,7 +770,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_flatten_expand)
     target_sources(test_flatten_expand PRIVATE tests/unit/flatten_fixture.c)
     target_compile_definitions(test_flatten_expand PRIVATE
-        ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+        ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif"
+        ODIN3_FLATTEN_DIR="${PROJECT_SOURCE_DIR}/tests/flatten")
     # 3A Task 4: flatten-sim (no Yosys), flatten-golden and flatten-diff (Yosys 0.55, in the block
     # below) over the fixtures of tests/flatten; exit 77 skips when an ASan child cannot be capped.
     # The sim leg leaves out mem.v (1E has no $mem) and bb.v (a black box has no semantics); the
@@ -800,16 +801,17 @@ if(BUILD_TESTING)
                 "read_blif ${PROJECT_SOURCE_DIR}/tests/golden/blif/hand_body.blif; flatten; check")
     set_tests_properties(cli_flatten PROPERTIES LABELS flatten
         PASS_REGULAR_EXPRESSION "flatten: 1 instances expanded \\(0 kept\\) in 1 roots")
-    # cli_flatten_multidriver (non-Debug builds only: Debug runs `check` after read_blif, which
-    # already rejects the multiply-driven net): two instances drive one net and `flatten` itself
-    # must refuse it, not only the `check` after it (review C1).
-    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_test(NAME cli_flatten_multidriver
-            COMMAND $<TARGET_FILE:odin3> -p
-                    "read_blif ${PROJECT_SOURCE_DIR}/tests/flatten/multidriver.blif; flatten")
-        set_tests_properties(cli_flatten_multidriver PROPERTIES LABELS flatten
-            PASS_REGULAR_EXPRESSION "net 'z' has 2 drivers after joining port 'o'")
-    endif()
+    # cli_flatten_multidriver: two instances of sub drive z. No legal read can reach flatten with
+    # that net (read_blif refuses it, PHASE3 #36; so does read_verilog), so the CLI test pins the
+    # located read error, in every build type. What `flatten` itself does with a net it joins to a
+    # second driver is covered by test_flatten_expand (test_flat_multidriver_*, hand IR; and
+    # test_flat_multidriver_from_blif, two legal reads plus a second instance added by hand).
+    add_test(NAME cli_flatten_multidriver
+        COMMAND $<TARGET_FILE:odin3> -p
+                "read_blif ${PROJECT_SOURCE_DIR}/tests/flatten/multidriver.blif; flatten")
+    set_tests_properties(cli_flatten_multidriver PROPERTIES LABELS flatten
+        PASS_REGULAR_EXPRESSION
+        "multidriver\\.blif:8: .*net 'z' is driven by 2 cell outputs \\(one allowed\\)")
     # 3A Task 5 (spec 14.5): 2,000 random hierarchies of `verilog-gen --flatten` through
     # flatten + check (Debug runs check around the pass) and sim before = after (a design the
     # simulator cannot run is counted skipped, never a pass). A failing case is written to
