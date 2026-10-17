@@ -118,6 +118,7 @@ void lw_ctx_free(lw_ctx *lw) {
     odin3_vec_free(&lw->portnets);
     odin3_vec_free(&lw->merged);
     odin3_strbuf_free(&lw->namebuf);
+    odin3_strbuf_free(&lw->prefix);
     for (uint32_t i = 0; i < LW_REP_COUNT; i++) {
         odin3_strbuf_free(&lw->report[i]);
     }
@@ -212,21 +213,60 @@ static odin3_status copy_keep(lw_ctx *lw, odin3_node_id node) {
     return odin3_attr_set(lw->module, obj, lw->keep_key, lw->keep_value);
 }
 
+/* The text of a string-table entry, "" for 0. */
+static const char *text_of(const lw_ctx *lw, uint32_t name) {
+    return name != 0 ? odin3_strtab_get(odin3_design_strtab(lw->design), name) : "";
+}
+
+/* The name of the net on pin 0 of the open cell's output port, else of the wire holding it; 0 when
+ * the net has neither or the pin is open. */
+static uint32_t output_net_name(const lw_ctx *lw) {
+    const odin3_celltype_def *def =
+        odin3_celltype_get(lw->design, odin3_node_type(lw->module, lw->cur));
+    for (uint32_t port = 0; def != NULL && port < def->n_ports; port++) {
+        odin3_pinslice pins = odin3_node_port(lw->module, lw->cur, port);
+        if (def->ports[port].dir == ODIN3_DIR_IN || pins.count == 0) {
+            continue;
+        }
+        odin3_net_id net = odin3_pin_net(lw->module, pins.first);
+        if (!odin3_net_valid(net)) {
+            return 0;
+        }
+        uint32_t name = odin3_net_name(lw->module, net);
+        odin3_wirebit primary = odin3_net_primary(lw->module, net);
+        return name != 0 || !odin3_wire_valid(primary.wire)
+                   ? name
+                   : odin3_wire_name(lw->module, primary.wire);
+    }
+    return 0;
+}
+
 /*
- * The name of the next gate of the open cell (PHASE3 #38): "<cell>.<op><i>", i counting the cell's
- * gates from 0, then "_1", "_2", ... until no node of the module has it. 0 (unnamed) when the word
- * cell has no name.
+ * Fixes the open cell's bit-node name prefix once (PHASE3 #38): the word cell's name, else the name
+ * of its output net (or the wire holding it), else "$c<ID>".
+ */
+static odin3_status set_prefix(lw_ctx *lw) {
+    uint32_t name = odin3_node_name(lw->module, lw->cur);
+    name = name != 0 ? name : output_net_name(lw);
+    odin3_strbuf_clear(&lw->prefix);
+    odin3_status st = name != 0 ? odin3_strbuf_appendf(&lw->prefix, "%s", text_of(lw, name))
+                                : odin3_strbuf_appendf(&lw->prefix, "$c%" PRIu32, lw->cur.v);
+    lw->prefix_set = st == ODIN3_OK;
+    return st;
+}
+
+/*
+ * The name of the next gate of the open cell (PHASE3 #38): "<prefix>.<op><i>", i counting the
+ * cell's gates from 0 (constants excluded), then "_1", "_2", ... until no node of the module has
+ * it.
  */
 static odin3_status gate_name(lw_ctx *lw, lw_kind kind, uint32_t *out) {
     *out = 0;
-    uint32_t cell_name = odin3_node_name(lw->module, lw->cur);
-    if (cell_name == 0) {
-        return ODIN3_OK;
-    }
+    odin3_status st = lw->prefix_set ? ODIN3_OK : set_prefix(lw);
     odin3_strbuf_clear(&lw->namebuf);
-    odin3_status st = odin3_strbuf_appendf(
-        &lw->namebuf, "%s.%s%" PRIu64, odin3_strtab_get(odin3_design_strtab(lw->design), cell_name),
-        k_op_names[kind], lw->gates);
+    st = st == ODIN3_OK ? odin3_strbuf_appendf(&lw->namebuf, "%s.%s%" PRIu64, lw->prefix.data,
+                                               k_op_names[kind], lw->gates)
+                        : st;
     size_t base_len = lw->namebuf.len;
     for (uint32_t tries = 1; st == ODIN3_OK; tries++) {
         st = odin3_design_intern(lw->design, odin3_bytes_cstr(lw->namebuf.data), out);

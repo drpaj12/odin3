@@ -406,8 +406,8 @@ the rule creates shares one DERIVED record whose single parent is the word cell'
 gate made from it, and a provenance name leads with the word cell's source. Merged nets
 (`lower_connect`) are rewiring (IR-15): they keep their records. Memory nodes get the `$mem`'s
 record; the clock inverter of §6.1 gets the FF's. Bit nodes are **named** `<cell>.<op><i>` after the
-word cell (e.g. `u_add.xor3`; a name the cell lacks is left unnamed), made unique by the IR's `_N`
-rule, as 3C's hardmap names (PHASE3 #33); the output nets keep their names and wires (Peter,
+word cell (e.g. `u_add.xor3`; a cell without a name uses the name of its Y net or wire, else `$c<ID>`),
+made unique by a `_N` suffix, as 3C's hardmap names (PHASE3 #33); the output nets keep their names and wires (Peter,
 2026-10-15, PHASE3 #38: lowered netlists stay readable for reverse engineering).
 
 **Attributes.** Only `keep` is copied from the word cell to every node it creates (so `opt_clean`
@@ -681,7 +681,7 @@ provenance primitives.
 | 11 | `$pow` and `$tribuf` are errors | `$pow` is left unmapped (`_TECHMAP_FAIL_`); `$tribuf` becomes `$_TBUF_` | no bit cells for them; Peter's question 4 |
 | 12 | `$mem`: transparent read ports, async write ports and write ports on different clocks are errors; reads past `SIZE` give x | `memory_map` lowers transparent reads with a bypass and rejects the other two | 2D never emits them; hand-built only |
 | 13 | `$mem` `INIT` is kept | `hardmap` drops it with a warning (decision 6.5) | soft memories have somewhere to put it |
-| 14 | bit nodes are unnamed; output nets keep their names | `techmap` makes `$techmap<N>$…` names | names never reach `netlist-compare`; DESIGN §13 #6 |
+| 14 | bit nodes are named `<cell>.<op><i>` (PHASE3 #38); output nets keep their names | `techmap` makes `$techmap<N>$…` names | names never reach `netlist-compare`; DESIGN §13 #6 |
 | 15 | `$pmux` multi-hot gives the OR of the selected words | `techmap.v` does too; simlib says x | refinement; checks drive one-hot |
 | 16 | a division by zero gives the divider's result | simlib: x | refinement |
 | 17 | `$reduce_*`, `$logic_*`, `$eq`, `$ne`: `Y[k>0]` merged with the constant-0 net | `connect Y[k] 1'0` | the same thing in the IR (IR-1, IR-4) |
@@ -741,5 +741,5 @@ script text, 3 and 4 fix what is lowered and how, 5 confirms the evidence form.
 
 The remaining defaults are marked "agent default (Peter may override)" where they occur and are
 logged in PHASE3's decisions by Task 9: the caps (§11), `--neg-edge keep`, `--async error`,
-`--report`, the unnamed bit nodes, the copied `keep` attribute, the per-cell transaction, the
+`--report`, the bit-node names of an unnamed cell, the copied `keep` attribute, the per-cell transaction, the
 duplicated connect helper.

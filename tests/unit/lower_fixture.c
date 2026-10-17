@@ -76,21 +76,24 @@ odin3_net_id lf_wnet(lf *fix, odin3_module *mod, const char *name, uint32_t bit)
     return odin3_wire_net(mod, wire, bit);
 }
 
-/* A module port for port `pidx` of the cell type, with the nets of its wire bits in *nets. */
-static uint32_t add_cell_port(lf *fix, odin3_module *mod, const odin3_celltype_def *def,
+/* A module port for port `query->port` of the cell type, named prefix + the port name, with the
+ * nets of its wire bits in *nets. */
+static uint32_t add_cell_port(lf *fix, odin3_module *mod, const char *prefix,
                               const odin3_port_query *query, odin3_net_id **nets) {
+    const odin3_celltype_def *def = odin3_celltype_get(fix->design, query->type);
     uint32_t width =
         odin3_celltype_port_width(fix->design, query->type, query->params, query->port);
     TEST_ASSERT_TRUE(width > 0);
     const odin3_port_def *pdef = &def->ports[query->port];
+    char wname[64];
+    TEST_ASSERT_TRUE(snprintf(wname, sizeof wname, "%s%s", prefix, pdef->name) < (int)sizeof wname);
     odin3_dir dir = pdef->dir == ODIN3_DIR_IN ? ODIN3_DIR_IN : ODIN3_DIR_OUT;
-    odin3_port_spec port = {
-        lf_str(fix, pdef->name), dir, width, width == 1, {0}, false, 0, 0, false};
+    odin3_port_spec port = {lf_str(fix, wname), dir, width, width == 1, {0}, false, 0, 0, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &port, NULL));
     *nets = calloc(width, sizeof(odin3_net_id));
     TEST_ASSERT_NOT_NULL(*nets);
     for (uint32_t bit = 0; bit < width; bit++) {
-        (*nets)[bit] = lf_wnet(fix, mod, pdef->name, bit);
+        (*nets)[bit] = lf_wnet(fix, mod, wname, bit);
     }
     return width;
 }
@@ -104,7 +107,8 @@ static const odin3_value *fill_defaults(const odin3_celltype_def *def, odin3_val
     return out;
 }
 
-odin3_node_id lf_cell(lf *fix, odin3_module *mod, const lf_cell_spec *spec) {
+odin3_node_id lf_cell_prefixed(lf *fix, odin3_module *mod, const lf_cell_spec *spec,
+                               const char *prefix) {
     odin3_celltype_id tid = type_named(fix, spec->type);
     const odin3_celltype_def *def = odin3_celltype_get(fix->design, tid);
     TEST_ASSERT_TRUE(def->n_ports <= MAX_PORTS);
@@ -116,7 +120,7 @@ odin3_node_id lf_cell(lf *fix, odin3_module *mod, const lf_cell_spec *spec) {
     odin3_netvec ports[MAX_PORTS];
     for (uint32_t pidx = 0; pidx < def->n_ports; pidx++) {
         odin3_port_query query = {tid, params, pidx};
-        uint32_t width = add_cell_port(fix, mod, def, &query, &nets[pidx]);
+        uint32_t width = add_cell_port(fix, mod, prefix, &query, &nets[pidx]);
         ports[pidx] = (odin3_netvec){nets[pidx], width};
     }
     odin3_node_spec nspec = {tid, spec->name != NULL ? lf_str(fix, spec->name) : 0, spec->prov,
@@ -127,6 +131,10 @@ odin3_node_id lf_cell(lf *fix, odin3_module *mod, const lf_cell_spec *spec) {
         free(nets[pidx]);
     }
     return node;
+}
+
+odin3_node_id lf_cell(lf *fix, odin3_module *mod, const lf_cell_spec *spec) {
+    return lf_cell_prefixed(fix, mod, spec, "");
 }
 
 odin3_node_id lf_one_cell(lf *fix, const lf_cell_spec *spec, odin3_module **mod) {
@@ -253,6 +261,63 @@ static bool compare_outputs(const odin3_sim *sim_a, const odin3_sim *sim_b, lf_s
     return true;
 }
 
+/* Applies bits[0..total) to both sims, cycles them and compares the outputs. */
+static void try_bits(odin3_sim *sim_a, odin3_sim *sim_b, const bool *bits, lf_sim_result *res) {
+    uint32_t total = input_bits(sim_a);
+    for (uint32_t i = 0; i < total; i++) {
+        set_bit(sim_a, i, bits[i]);
+        set_bit(sim_b, i, bits[i]);
+    }
+    odin3_sim_cycle(sim_a);
+    odin3_sim_cycle(sim_b);
+    res->vectors++;
+    res->equal = compare_outputs(sim_a, sim_b, res);
+}
+
+/* Directed corners for the widths random vectors cannot reach (rare outputs of $eq, $reduce_and,
+ * ...): all zeros, all ones, each bit alone set, each bit alone clear. */
+static void run_corners(odin3_sim *sim_a, odin3_sim *sim_b, bool *bits, lf_sim_result *res) {
+    uint32_t total = input_bits(sim_a);
+    for (uint32_t kind = 0; kind < 2 && res->equal; kind++) {
+        for (uint32_t i = 0; i < total; i++) {
+            bits[i] = kind == 1;
+        }
+        try_bits(sim_a, sim_b, bits, res);
+    }
+    for (uint32_t kind = 0; kind < 2; kind++) {
+        for (uint32_t one = 0; one < total && res->equal; one++) {
+            for (uint32_t i = 0; i < total; i++) {
+                bits[i] = (i == one) == (kind == 0);
+            }
+            try_bits(sim_a, sim_b, bits, res);
+        }
+    }
+}
+
+/* Two-operand corners: input port 1 equals port 0 (patterns 0000, 1111, 0101), and equals it with
+ * one bit flipped (every bit in turn); the "equal" outputs of $eq/$ne sit there. */
+static void run_equal_operands(odin3_sim *sim_a, odin3_sim *sim_b, bool *bits, lf_sim_result *res) {
+    if (odin3_sim_input_count(sim_a) < 2 ||
+        odin3_sim_input_width(sim_a, 0) != odin3_sim_input_width(sim_a, 1)) {
+        return;
+    }
+    uint32_t width = odin3_sim_input_width(sim_a, 0);
+    uint32_t total = input_bits(sim_a);
+    for (uint32_t pattern = 0; pattern < 3; pattern++) {
+        for (uint32_t flip = 0; flip <= width && res->equal; flip++) {
+            for (uint32_t i = 0; i < total; i++) {
+                bits[i] = false;
+            }
+            for (uint32_t i = 0; i < width; i++) {
+                bool value = pattern == 1 || (pattern == 2 && i % 2 == 0);
+                bits[i] = value;
+                bits[width + i] = value != (flip == i + 1);
+            }
+            try_bits(sim_a, sim_b, bits, res);
+        }
+    }
+}
+
 static void run_vectors(odin3_sim *sim_a, odin3_sim *sim_b, const lf_sim_opts *opts,
                         lf_sim_result *res) {
     uint32_t total = input_bits(sim_a);
@@ -267,6 +332,13 @@ static void run_vectors(odin3_sim *sim_a, odin3_sim *sim_b, const lf_sim_opts *o
         res->vectors++;
         res->equal = compare_outputs(sim_a, sim_b, res);
     }
+    bool *bits = all ? NULL : calloc((size_t)total + 1, sizeof *bits);
+    if (!all) {
+        TEST_ASSERT_NOT_NULL(bits);
+        run_corners(sim_a, sim_b, bits, res);
+        run_equal_operands(sim_a, sim_b, bits, res);
+    }
+    free(bits);
 }
 
 lf_sim_result lf_sim_equal(odin3_design *design_a, odin3_module_id top_a, odin3_design *design_b,

@@ -23,6 +23,7 @@ odin3_status lw_begin(lw_ctx *lw, odin3_node_id node) {
     odin3_vec_clear(&lw->merged);
     lw->cur = node;
     lw->gates = 0;
+    lw->prefix_set = false;
     lw->prov = (odin3_prov_id){0};
     lw->keep_value = NULL;
     odin3_prov_begin_op(lw->pass);

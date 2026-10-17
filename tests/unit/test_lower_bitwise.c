@@ -635,23 +635,95 @@ static void test_eq_names_use_each_gates_own_op(void) {
     lf_end(&fix);
 }
 
-static void test_an_unnamed_word_cell_leaves_its_bit_nodes_unnamed(void) {
+/* Constants are not counted: $and 2 -> 4 bits unsigned makes constants before its first gate. */
+static void test_the_name_index_counts_gates_not_constants(void) {
     lf fix;
-    lf_begin(&fix);
+    odin3_module *mod = NULL;
+    bw_case cs = {"$and", SH_BINARY, 2, 4, 4, false, false};
+    lower_and_check(&fix, &cs, &mod);
+    TEST_ASSERT_TRUE(lf_count_type(&fix, mod, "$_CONST0_") > 0);
+    const char *want[4] = {"dut.and0", "dut.and1", "dut.and2", "dut.and3"};
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, gates_named(&fix, mod, want[i]), want[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, gates_named(&fix, mod, "dut.and4"));
+    lf_end(&fix);
+}
+
+static void test_a_signed_not_has_no_constant_and_the_same_indices(void) {
+    lf fix;
+    odin3_module *mod = NULL;
+    bw_case cs = {"$not", SH_UNARY, 2, 0, 4, true, false};
+    lower_and_check(&fix, &cs, &mod);
+    for (uint32_t i = 0; i < 4; i++) {
+        char want[16];
+        (void)snprintf(want, sizeof want, "dut.not%u", i);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, gates_named(&fix, mod, want), want);
+    }
+    lf_end(&fix);
+}
+
+/* An unnamed $or on 2-bit ports: its name is that of the output wire "Y". */
+static odin3_node_id unnamed_or(lf *fix, odin3_module **mod) {
+    lf_begin(fix);
     odin3_value params[5];
     lf_binary spec = {false, false, 2, 2, 2};
     lf_binary_params(&spec, params);
     lf_cell_spec cell = {"$or", params, 5, NULL, {0}};
+    return lf_one_cell(fix, &cell, mod);
+}
+
+static void test_an_unnamed_word_cell_takes_the_name_of_its_output_wire(void) {
+    lf fix;
     odin3_module *mod = NULL;
-    (void)lf_one_cell(&fix, &cell, &mod);
+    (void)unnamed_or(&fix, &mod);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_lower(&fix));
-    for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
-        odin3_node_id node = {id};
-        if (odin3_node_live(mod, node) &&
-            odin3_celltype_get(fix.design, odin3_node_type(mod, node))->gran == ODIN3_GRAN_BIT) {
-            TEST_ASSERT_EQUAL_UINT32(0, odin3_node_name(mod, node));
-        }
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "Y.or0"));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "Y.or1"));
+    lf_end(&fix);
+}
+
+static void test_an_unnamed_word_cell_prefers_the_name_of_its_output_net(void) {
+    lf fix;
+    odin3_module *mod = NULL;
+    (void)unnamed_or(&fix, &mod);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_net_rename(mod, lf_wnet(&fix, mod, "Y", 0), lf_str(&fix, "ynet")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_lower(&fix));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "ynet.or0"));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "ynet.or1"));
+    lf_end(&fix);
+}
+
+static void test_a_cell_named_neither_way_falls_back_to_dollar_c_id(void) {
+    lf fix;
+    odin3_module *mod = NULL;
+    odin3_node_id cell = unnamed_or(&fix, &mod);
+    odin3_pinslice ypins = odin3_node_port(mod, cell, 2);
+    for (uint32_t i = 0; i < ypins.count; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_pin_disconnect(mod, (odin3_pin_id){ypins.first.v + i}));
     }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_lower(&fix));
+    char want[32];
+    (void)snprintf(want, sizeof want, "$c%u.or0", cell.v);
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, want));
+    lf_end(&fix);
+}
+
+static void test_a_taken_derived_name_gets_the_underscore_n_suffix(void) {
+    lf fix;
+    odin3_module *mod = NULL;
+    (void)unnamed_or(&fix, &mod);
+    odin3_celltype_id tid = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(fix.design, lf_str(&fix, "$_CONST0_"), &tid));
+    odin3_node_spec taken = {tid, lf_str(&fix, "Y.or0"), {0}, NULL, 0};
+    odin3_node_id squatter = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(mod, &taken, &squatter));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_lower(&fix));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "Y.or0"));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "Y.or0_1"));
+    TEST_ASSERT_EQUAL_UINT32(1, gates_named(&fix, mod, "Y.or1"));
     lf_end(&fix);
 }
 
@@ -863,45 +935,82 @@ static void test_a_cell_with_an_open_input_pin_lowers_to_a_gate_with_an_open_pin
 
 /* --- out of memory -------------------------------------------------------------------------- */
 
-static void oom_sweep(const bw_case *cs) {
+/* The fixture of an OOM run: module "m" with the case's cell; with `second`, module "n" after it
+ * holds a 40-bit $and, lowered after it. */
+typedef struct oom_fix {
+    odin3_module *mod, *other;
+    odin3_node_id cell, other_cell;
+    uint32_t other_live; /* live nodes of "n" in the input */
+} oom_fix;
+
+static void oom_setup(lf *fix, const bw_case *cs, bool second, oom_fix *of) {
+    lf_begin(fix);
+    of->cell = build(fix, cs, &of->mod);
+    of->other = NULL;
+    of->other_cell = (odin3_node_id){0};
+    if (second) {
+        odin3_value params[5];
+        lf_binary spec = {false, false, 40, 40, 40};
+        lf_binary_params(&spec, params);
+        lf_cell_spec cell = {"$and", params, 5, "big", {0}};
+        of->other = lf_module(fix, "n");
+        of->other_cell = lf_cell(fix, of->other, &cell);
+        of->other_live = lf_live_nodes(of->other);
+    }
+}
+
+/*
+ * After a failed run, decide the phase from the IR (spec 12.2). While the first word cell is live
+ * the run failed before its commit: the design must equal the input byte for byte. Once it
+ * is dead the failure is in its commit (a partial state, check FULL clean) or in a later cell;
+ * a later cell that is still live must have been rolled back to exactly its input.
+ */
+static bool oom_judge(lf *fix, const oom_fix *of, const odin3_strbuf *input, const char *msg) {
+    odin3_strbuf after;
+    odin3_strbuf_init(&after);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_rtlil(fix, &after));
+    bool partial = !odin3_node_live(of->mod, of->cell);
+    if (!partial) {
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(input->data, after.data, msg);
+    } else if (of->other != NULL && odin3_node_live(of->other, of->other_cell)) {
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(of->other_live, lf_live_nodes(of->other), msg);
+    }
+    odin3_strbuf_free(&after);
+    return partial;
+}
+
+static void oom_sweep(const bw_case *cs, bool second) {
     char msg[96];
     describe(cs, msg, sizeof msg);
-    lf fix;
-    odin3_module *mod = NULL;
-    lf_begin(&fix);
-    (void)build(&fix, cs, &mod);
     odin3_strbuf input;
     odin3_strbuf_init(&input);
+    lf fix;
+    oom_fix of;
+    oom_setup(&fix, cs, second, &of);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_rtlil(&fix, &input));
     bool done = false;
-    uint32_t failures = 0;
+    uint32_t built = 0;
     for (long step = 0; !done && step < 4000; step++) {
         odin3_util_set_alloc_fail_after(step);
         odin3_status st = odin3_lower_run(&fix.ctx, fix.design, NULL);
         odin3_util_set_alloc_fail_after(-1);
         odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
-        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_check_module(mod, opts), msg);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_check_module(of.mod, opts), msg);
         if (st == ODIN3_OK) {
             done = true;
             break;
         }
         TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_NO_MEMORY, st, msg);
-        failures++;
-        odin3_strbuf after;
-        odin3_strbuf_init(&after);
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_rtlil(&fix, &after));
-        if (strcmp(after.data, input.data) != 0) { /* a commit-phase failure: partial but valid */
-            odin3_strbuf_free(&after);
-            lf_end(&fix);
-            lf_begin(&fix);
-            (void)build(&fix, cs, &mod);
+        if (!oom_judge(&fix, &of, &input, msg)) {
+            built++;
             continue;
         }
-        odin3_strbuf_free(&after);
+        lf_end(&fix); /* a commit-phase partial state: start again from the input */
+        oom_setup(&fix, cs, second, &of);
     }
     TEST_ASSERT_TRUE_MESSAGE(done, msg);
-    TEST_ASSERT_TRUE_MESSAGE(failures > 0, msg);
-    check_netlist_view(mod);
+    TEST_ASSERT_TRUE_MESSAGE(built > 0, msg); /* the sweep did hit the build phase */
+    check_netlist_view(of.mod);
     odin3_strbuf_free(&input);
     lf_end(&fix);
 }
@@ -916,7 +1025,8 @@ static void test_oom_at_every_allocation_leaves_a_valid_design_per_rule_family(v
         {"$eq", SH_CMP, 4, 3, 1, true, true},
     };
     for (size_t i = 0; i < sizeof k_cases / sizeof k_cases[0]; i++) {
-        oom_sweep(&k_cases[i]);
+        oom_sweep(&k_cases[i], false);
+        oom_sweep(&k_cases[i], true);
     }
 }
 
@@ -961,6 +1071,138 @@ static void test_the_module_cap_counts_live_nodes(void) {
     lf_end(&fix);
 }
 
+static void lower_with_caps(lf *fix, odin3_lower_limits caps, odin3_status want) {
+    odin3_lower_test_set_limits(&caps);
+    odin3_status st = run_lower(fix);
+    odin3_lower_test_set_limits(NULL);
+    TEST_ASSERT_EQUAL_INT(want, st);
+}
+
+/* $and 8 bits: 8 gates + 3 constants of slack = 11 nodes. The cap is inclusive. */
+static void test_the_cell_cap_is_inclusive(void) {
+    lf fix;
+    odin3_module *mod = NULL;
+    bw_case cs = {"$and", SH_BINARY, 8, 8, 8, false, false};
+    lf_begin(&fix);
+    (void)build(&fix, &cs, &mod);
+    lower_with_caps(&fix, (odin3_lower_limits){10, 0, 0}, ODIN3_ERR_INVALID_ARG);
+    TEST_ASSERT_EQUAL_UINT32(1, word_nodes(&fix, mod));
+    lower_with_caps(&fix, (odin3_lower_limits){11, 0, 0}, ODIN3_OK);
+    TEST_ASSERT_EQUAL_UINT32(0, word_nodes(&fix, mod));
+    lf_end(&fix);
+}
+
+static void test_the_module_cap_is_inclusive(void) {
+    lf fix;
+    odin3_module *mod = NULL;
+    bw_case cs = {"$and", SH_BINARY, 8, 8, 8, false, false};
+    lf_begin(&fix);
+    (void)build(&fix, &cs, &mod);
+    uint64_t live = lf_live_nodes(mod);
+    lower_with_caps(&fix, (odin3_lower_limits){0, live + 10, 0}, ODIN3_ERR_INVALID_ARG);
+    TEST_ASSERT_EQUAL_UINT32(1, word_nodes(&fix, mod));
+    lower_with_caps(&fix, (odin3_lower_limits){0, live + 11, 0}, ODIN3_OK);
+    TEST_ASSERT_EQUAL_UINT32(0, word_nodes(&fix, mod));
+    lf_end(&fix);
+}
+
+/* Three 2-bit $and cells in one module: each lowering nets +1 live node (2 gates, the word cell
+ * gone), so the third needs live0 + 2 + 5. Neither a missed decrement nor a missed increment of
+ * the live count passes both bounds. */
+static void three_ands(lf *fix, odin3_module **mod) {
+    lf_begin(fix);
+    odin3_value params[5];
+    lf_binary spec = {false, false, 2, 2, 2};
+    lf_binary_params(&spec, params);
+    *mod = lf_module(fix, "m");
+    static const char *const k_prefix[3] = {"p0_", "p1_", "p2_"};
+    static const char *const k_name[3] = {"c0", "c1", "c2"};
+    for (int i = 0; i < 3; i++) {
+        lf_cell_spec cell = {"$and", params, 5, k_name[i], {0}};
+        (void)lf_cell_prefixed(fix, *mod, &cell, k_prefix[i]);
+    }
+}
+
+static void test_the_module_cap_follows_the_live_count_over_several_cells(void) {
+    lf fix;
+    odin3_module *mod = NULL;
+    three_ands(&fix, &mod);
+    uint64_t live = lf_live_nodes(mod);
+    lower_with_caps(&fix, (odin3_lower_limits){0, live + 6, 0}, ODIN3_ERR_INVALID_ARG);
+    TEST_ASSERT_EQUAL_UINT32(1, word_nodes(&fix, mod)); /* the first two lowered, the third not */
+    lf_end(&fix);
+    three_ands(&fix, &mod);
+    lower_with_caps(&fix, (odin3_lower_limits){0, live + 7, 0}, ODIN3_OK);
+    TEST_ASSERT_EQUAL_UINT32(0, word_nodes(&fix, mod));
+    lf_end(&fix);
+}
+
+/* --- the post-condition (spec 12.3) --------------------------------------------------------- */
+
+/* A rule for $not that builds like the real one and also leaves a live word node behind. */
+static odin3_status leaky_build(lw_ctx *lw, const lw_cell *cell, lw_bits *outs) {
+    odin3_status st = lw_build_not(lw, cell, outs);
+    odin3_celltype_id tid = {0};
+    uint32_t type_name = 0;
+    st =
+        st == ODIN3_OK ? odin3_design_intern(lw->design, odin3_bytes_cstr("$and"), &type_name) : st;
+    if (st != ODIN3_OK || !odin3_celltype_find(lw->design, type_name, &tid)) {
+        return st != ODIN3_OK ? st : ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_value params[5];
+    lf_binary spec = {false, false, 1, 1, 1};
+    lf_binary_params(&spec, params);
+    odin3_node_spec leak = {tid, 0, {0}, params, 5};
+    odin3_node_id node = {0};
+    return odin3_node_create(lw->module, &leak, &node);
+}
+
+static void test_a_word_cell_left_live_is_a_check_error(void) {
+    static const lw_rule k_leaky = {"$not", leaky_build, lw_est_not};
+    lf fix;
+    odin3_module *mod = NULL;
+    bw_case cs = {"$not", SH_UNARY, 2, 0, 2, false, false};
+    lf_begin(&fix);
+    (void)build(&fix, &cs, &mod);
+    odin3_lower_test_override_rule(&k_leaky);
+    odin3_status st = run_lower(&fix);
+    odin3_lower_test_override_rule(NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, st);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "is not in the netlist view after lowering"));
+    lf_end(&fix);
+}
+
+/* L1: a cell without a rule is known before anything changes: nothing is lowered, all are listed.
+ */
+static void test_ruleless_cells_are_reported_before_any_cell_is_lowered(void) {
+    lf fix;
+    lf_begin(&fix);
+    odin3_value params[5];
+    lf_binary spec = {false, false, 2, 2, 2};
+    lf_binary_params(&spec, params);
+    odin3_module *mod = lf_module(&fix, "m");
+    lf_cell_spec first = {"$and", params, 5, "first", {0}};
+    lf_cell_spec add1 = {"$add", params, 5, "sum1", {0}};
+    lf_cell_spec add2 = {"$add", params, 5, "sum2", {0}};
+    (void)lf_cell_prefixed(&fix, mod, &first, "a_");
+    (void)lf_cell_prefixed(&fix, mod, &add1, "b_");
+    (void)lf_cell_prefixed(&fix, mod, &add2, "c_");
+    odin3_strbuf before;
+    odin3_strbuf_init(&before);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_rtlil(&fix, &before));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run_lower(&fix));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "no lowering rule for cell type '$add' ('sum1')"));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "('sum2')"));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "not implemented yet"));
+    odin3_strbuf after;
+    odin3_strbuf_init(&after);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_rtlil(&fix, &after));
+    TEST_ASSERT_EQUAL_STRING(before.data, after.data);
+    odin3_strbuf_free(&before);
+    odin3_strbuf_free(&after);
+    lf_end(&fix);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_not_sweep);
@@ -987,7 +1229,12 @@ int main(void) {
     RUN_TEST(test_output_nets_keep_their_names_and_wire_membership);
     RUN_TEST(test_bit_nodes_are_named_cell_dot_op_index);
     RUN_TEST(test_eq_names_use_each_gates_own_op);
-    RUN_TEST(test_an_unnamed_word_cell_leaves_its_bit_nodes_unnamed);
+    RUN_TEST(test_the_name_index_counts_gates_not_constants);
+    RUN_TEST(test_a_signed_not_has_no_constant_and_the_same_indices);
+    RUN_TEST(test_an_unnamed_word_cell_takes_the_name_of_its_output_wire);
+    RUN_TEST(test_an_unnamed_word_cell_prefers_the_name_of_its_output_net);
+    RUN_TEST(test_a_cell_named_neither_way_falls_back_to_dollar_c_id);
+    RUN_TEST(test_a_taken_derived_name_gets_the_underscore_n_suffix);
     RUN_TEST(test_a_taken_bit_node_name_gets_the_underscore_n_suffix);
     RUN_TEST(test_every_created_node_has_a_derived_record_of_the_word_cell);
     RUN_TEST(test_each_lowered_cell_gets_its_own_provenance_operation);
@@ -998,5 +1245,10 @@ int main(void) {
     RUN_TEST(test_oom_at_every_allocation_leaves_a_valid_design_per_rule_family);
     RUN_TEST(test_a_cell_over_the_node_cap_is_a_located_error_and_nothing_is_built);
     RUN_TEST(test_the_module_cap_counts_live_nodes);
+    RUN_TEST(test_the_cell_cap_is_inclusive);
+    RUN_TEST(test_the_module_cap_is_inclusive);
+    RUN_TEST(test_the_module_cap_follows_the_live_count_over_several_cells);
+    RUN_TEST(test_a_word_cell_left_live_is_a_check_error);
+    RUN_TEST(test_ruleless_cells_are_reported_before_any_cell_is_lowered);
     return UNITY_END();
 }

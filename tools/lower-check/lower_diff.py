@@ -26,21 +26,25 @@ Per design (the FILEs together; with ``--each``, every FILE is its own design):
    - ``T`` (the ``techmap.v`` structures): ``equiv-check`` exits 0 (step ``equiv``) and the
      histograms of ``lo_opt.il`` and ``yo_opt.il``, both after ``opt -fast``, are equal (step
      ``histogram``; a listed difference is printed with its reason). An ``equiv-check`` that is
-     inconclusive (its exit 4) is ``UNPROVEN``: printed, listed, never ``ok``;
+     inconclusive (its exit 4) is ``UNPROVEN``: printed, a failure like a difference unless an
+     ``equiv`` line lists it, never ``ok``;
    - ``D`` (a declared reference: the asynchronous flip-flops, the other latches, ``$mem``): the
      reference is Yosys's lowering with the maps; ``equiv-check lo.blif yo.blif`` exits 0 (step
      ``equiv``).
 
-A difference fails unless ``--expect F`` lists it: lines ``<path> <family> <step> <reason>`` (``#``
-comments), ``path`` relative to ``--root`` (else the file name), ``family`` a family name or ``*``,
-``step`` ``histogram``, ``identity`` or ``equiv``. A listed difference that does not occur fails
-too (a stale entry). Yosys other than 0.55 is refused.
+A design whose ``in.il`` holds no word cell (``opt`` folded it away) compared nothing: it prints
+``NOTHING TO COMPARE`` and fails (step ``compared``), and ``ok (N cells)`` names how many word
+cells were lowered and compared. A difference fails unless ``--expect F`` lists it: lines
+``<path> <family> <step> <reason>`` (``#`` comments), ``path`` relative to ``--root`` (else the
+file name), ``family`` a family name or ``*``, ``step`` ``histogram``, ``identity``, ``equiv`` or
+``compared``. A listed difference that does not occur fails too (a stale entry).
+Yosys other than 0.55 is refused.
 
 Exit codes (one convention across the opt tools): 0 every design agrees to its tier; 1 a
-difference, or a stale entry; 2 usage, or Odin III or Yosys exited with an error; 3 hard: a child
-crashed, was killed by a signal or its memory cap, or timed out (never absorbed by the expect list);
-77 skipped (an ASan child and no systemd-run). The work directory is made under
-``$ODIN3_LOWER_WORK`` (else ``$TMPDIR``) and is never removed.
+difference, an unproven check, nothing to compare, or a stale entry; 2 usage, or Odin III or Yosys
+exited with an error; 3 hard: a child crashed, was killed by a signal or its memory cap, or timed
+out (never absorbed by the expect list); 77 skipped (an ASan child and no systemd-run). The work
+directory is made under ``$ODIN3_LOWER_WORK`` (else ``$TMPDIR``) and is never removed.
 """
 
 from __future__ import annotations
@@ -62,7 +66,7 @@ HERE = Path(__file__).resolve().parent
 MAPS = HERE / "maps"
 NETLIST_COMPARE = HERE.parent / "netlist-compare" / "netlist-compare"
 EQUIV_CHECK = HERE.parent / "equiv-check" / "equiv-check"
-STEPS = ("histogram", "identity", "equiv")
+STEPS = ("histogram", "identity", "equiv", "compared")
 DEFAULT_PRE = ("proc", "opt")
 YOSYS_BLIF = "write_blif -icells -true + vcc -false + gnd -undef + unconn"
 EQUIV_OK, EQUIV_DIFFERENT, EQUIV_ERROR, EQUIV_X, EQUIV_UNPROVEN, EQUIV_HARD = 0, 1, 2, 3, 4, 5
@@ -186,6 +190,7 @@ class Result:
     tier: str = ""
     differences: dict[str, str] = field(default_factory=dict)
     unproven: str = ""
+    cells: int = 0  # word cells in in.il: what lower had to lower and the tools to compare
 
 
 class Diff:
@@ -217,7 +222,7 @@ class Diff:
         self.must("odin3", [lc.exe(args.odin3), *lc.odin_args(args.top), "-p",
                             odin_script(plan, run_dir)], run_dir)
         in_il = (run_dir / "in.il").read_text(encoding="utf-8")
-        result = Result(family.name, tier_of(family, args.tier, in_il))
+        result = Result(family.name, tier_of(family, args.tier, in_il), cells=word_cells(in_il))
         maps = [resolve_map(n, self.parmys) for n in family.maps] + [Path(m) for m in args.map]
         self.must("yosys", [lc.exe(args.yosys), "-p", yosys_script(run_dir, maps)], run_dir)
         self.judge(result, run_dir)
@@ -271,6 +276,12 @@ class Diff:
             raise lc.ToolError(f"equiv-check exit {done.returncode}: {lc.why(out)}")
 
 
+def word_cells(rtlil: str) -> int:
+    """Word cells (``$name``, not ``$_NAME_``) of an RTLIL text: the cells ``lower`` lowers."""
+    return sum(n for counts in lc.histogram(rtlil).values() for name, n in counts.items()
+               if name.startswith("$") and not name.startswith("$_"))
+
+
 def vtr_techlibs() -> Path | None:
     root = os.environ.get("VTR_ROOT")
     if not root:
@@ -290,27 +301,30 @@ def check_yosys(yosys: str, work: Path, cap: int) -> None:
 
 def verdict(name: str, key: str, res: Result, table: dict[tuple[str, str, str], Expect],
             verbose: bool) -> tuple[list[str], bool]:
-    """The output lines of one design and whether it failed (a difference nobody listed, or a
-    listed one that did not occur)."""
+    """The output lines of one design and whether it failed (a difference, an unproven check or an
+    empty comparison nobody listed, or a listed one that did not occur)."""
     lines: list[str] = []
     failed = False
     tag = f"{TOOL}: {name} [{res.family}/{res.tier}]"
+    found_by_step = dict(res.differences)
+    if res.unproven:
+        found_by_step["equiv"] = f"UNPROVEN: {res.unproven}"
+    if res.cells == 0:
+        found_by_step["compared"] = "NOTHING TO COMPARE: in.il holds no word cell (folded away?)"
     for step in STEPS:
         reason = expected(key, res.family, step, table)
-        found = res.differences.get(step)
+        found = found_by_step.get(step)
         if found is None and reason is not None:
             lines.append(f"{tag}: {step}: stale entry in the expect list ({reason.reason})")
             failed = True
         elif found is not None and reason is None:
-            lines.append(f"{tag}: {step}: DIFFERS: {found}")
+            shown = found if found.startswith(("UNPROVEN", "NOTHING")) else f"DIFFERS: {found}"
+            lines.append(f"{tag}: {step}: {shown}")
             failed = True
         elif found is not None and reason is not None:
             lines.append(f"{tag}: {step}: differs as listed ({reason.reason})")
-    if res.unproven:
-        lines.append(f"{tag}: equiv: UNPROVEN: {res.unproven}")
-    elif not res.differences and not any(
-            expected(key, res.family, s, table) for s in STEPS):
-        lines.append(f"{tag}: ok")
+    if not found_by_step and not any(expected(key, res.family, s, table) for s in STEPS):
+        lines.append(f"{tag}: ok ({res.cells} cells)")
     return lines, failed
 
 

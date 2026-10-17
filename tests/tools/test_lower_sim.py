@@ -154,6 +154,26 @@ class RunTest(unittest.TestCase):
         self.assertIn("11 0", mutated.read_text())
         self.assertIn("read_blif", self.tree.log()[-1])
 
+    def test_a_design_folded_to_no_word_cell_compares_nothing_and_fails(self) -> None:
+        # `assign y = a & 4'b0000;` after opt: the cell is gone, so is every type
+        self.tree.set_spec(before_il="module \\m\nend\n")
+        code, out, err = self.tree.run()
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("lower-sim: and_mux.v: NOTHING TO COMPARE: no word cell left after "
+                      "'proc; opt'", out)
+        self.assertNotIn("pass", out)
+        self.assertEqual(len(self.tree.log()), 1)  # the lowered run never happens
+
+    def test_only_bit_cells_left_is_also_nothing_to_compare(self) -> None:
+        self.tree.set_spec(before_il="module \\m\n  cell $_AND_ $g\nend\n")
+        self.assertEqual(self.tree.run()[0], 1)
+
+    def test_allow_empty_makes_nothing_to_compare_exit_0_but_still_says_so(self) -> None:
+        self.tree.set_spec(before_il="module \\m\nend\n")
+        code, out, _ = self.tree.run("--allow-empty")
+        self.assertEqual(code, 0)
+        self.assertIn("NOTHING TO COMPARE", out)
+
     def test_a_shiftx_design_is_skipped_never_passed(self) -> None:
         self.tree.set_spec(before_il=SHIFTX_IL, before_rc=1)
         code, out, err = self.tree.run()

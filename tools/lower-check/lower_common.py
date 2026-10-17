@@ -131,7 +131,7 @@ def strip_unused_constants(blif: str) -> str:
     ``.names`` drivers for the false, true and undefined nets, used or not, which Odin III does
     not; ``netlist-compare`` would call that a difference. A zero-input ``.names`` whose net nothing
     reads (and that is no output) is dropped."""
-    blocks = _blif_blocks(blif)
+    blocks = _blif_blocks(blif.replace("\\\n", " "))  # a "\" line continuation is one line
     used = _blif_uses(blocks)
     kept: list[str] = []
     for block in blocks:

@@ -916,10 +916,13 @@ then the options considered.
 
 38. **3B `lower`: bit nodes are named after their word cell** (Peter, 2026-10-15: "yes do that
     naming"). Each bit node a word cell lowers to is named `<cell>.<op><i>` (e.g. `u_add.xor3`),
-    made unique by the IR's `_N` rule, in the style of 3C's hardmap names (#33); a word cell with no
-    name leaves its bit nodes unnamed. Replaces the spec's "bit nodes are unnamed" agent default
-    (spec 3B §11), so a lowered netlist stays readable for reverse engineering; provenance is
-    unchanged. 3B Tasks 1–3 (paused) predate this and are updated when 3B resumes.
+    made unique by a `_N` suffix (`kit.c`, the first name no node of the module has), in the style of
+    3C's hardmap names (#33). A word cell with no name (every cell `read_verilog; proc` makes)
+    takes the name of its output (Y) net, else of the wire holding it, and only when neither has a
+    name `$c<ID>`; the prefix is fixed once per cell (agent default 2026-10-17, Peter may override).
+    Replaces the spec's "bit nodes are unnamed" agent default (spec 3B §9), so a lowered netlist
+    stays readable for reverse engineering; provenance is unchanged. 3B Tasks 1–3 (paused) predate
+    this and are updated when 3B resumes.
 
 ## Risks
 

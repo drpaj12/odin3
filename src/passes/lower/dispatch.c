@@ -4,6 +4,7 @@
  * driver), the types that deliberately have none and the ones whose rule a later task adds.
  */
 #include "passes/lower/lower_int.h"
+#include "passes/lower/lower_test.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -47,7 +48,17 @@ const lw_rule *lw_rule_at(uint32_t idx) {
     return idx < lw_rule_count() ? &k_rules[idx] : NULL;
 }
 
+/* Test hook (lower_test.h): a rule that shadows the table entry of its type name. */
+static const lw_rule *g_override = NULL;
+
+void odin3_lower_test_override_rule(const lw_rule *rule) {
+    g_override = rule;
+}
+
 const lw_rule *lw_rule_find(const char *type_name) {
+    if (g_override != NULL && strcmp(g_override->type_name, type_name) == 0) {
+        return g_override;
+    }
     for (uint32_t i = 0; k_rules[i].type_name != NULL; i++) {
         if (strcmp(k_rules[i].type_name, type_name) == 0) {
             return &k_rules[i];
@@ -100,7 +111,7 @@ void lw_log_no_rule(const lw_ctx *lw, odin3_node_id node, const char *type_name)
     } else if (strcmp(type_name, "$memrd") == 0 || strcmp(type_name, "$memwr") == 0) {
         odin3_log(ODIN3_LOG_ERROR, "lower: standalone $memrd/$memwr '%s' (use $mem)", label);
     } else {
-        odin3_log(ODIN3_LOG_ERROR, "lower: no lowering rule for cell type '%s' ('%s')", type_name,
-                  label);
+        odin3_log(ODIN3_LOG_ERROR, "lower: no lowering rule for cell type '%s' ('%s')%s", type_name,
+                  label, lw_rule_pending(type_name) ? ": not implemented yet (3B-2)" : "");
     }
 }

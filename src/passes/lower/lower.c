@@ -244,6 +244,38 @@ static void report_run(lw_ctx *lw) {
     odin3_strbuf_free(&info);
 }
 
+/* True when module holds a live word cell without a rule; logs every such cell (spec 12.2: the
+ * knowable failure comes before any change). */
+static bool module_has_ruleless(lw_ctx *lw, const lw_rules *rules, odin3_module *module) {
+    lw_ctx_enter(lw, module);
+    bool found = false;
+    uint32_t end = odin3_module_node_end(module);
+    for (uint32_t id = 1; id < end; id++) {
+        odin3_node_id node = {id};
+        bool is_word = false;
+        if (!odin3_node_live(module, node) || rule_of(lw, rules, node, &is_word) != NULL ||
+            !is_word) {
+            continue;
+        }
+        const odin3_celltype_def *def =
+            odin3_celltype_get(lw->design, odin3_node_type(module, node));
+        lw_log_no_rule(lw, node, def->name);
+        found = true;
+    }
+    return found;
+}
+
+/* Reports every word cell of the design that has no rule, before anything is lowered. */
+static odin3_status prescan(lw_ctx *lw, const lw_rules *rules) {
+    bool found = false;
+    uint32_t end = odin3_design_module_end(lw->design);
+    for (uint32_t id = 1; id < end; id++) {
+        odin3_module *module = odin3_module_get(lw->design, (odin3_module_id){id});
+        found = module_has_ruleless(lw, rules, module) || found;
+    }
+    return found ? ODIN3_ERR_INVALID_ARG : ODIN3_OK;
+}
+
 odin3_status odin3_lower_run(odin3_pass_ctx *ctx, odin3_design *design,
                              const odin3_lower_opts *opts) {
     if (ctx == NULL || design == NULL) {
@@ -255,6 +287,7 @@ odin3_status odin3_lower_run(odin3_pass_ctx *ctx, odin3_design *design,
     lw_rules rules = {NULL, 0};
     odin3_status st = lw_ctx_init(&lw, ctx, design, opts != NULL ? opts : &k_none);
     st = st == ODIN3_OK ? rules_build(design, &rules) : st;
+    st = st == ODIN3_OK ? prescan(&lw, &rules) : st;
     uint32_t end = odin3_design_module_end(design);
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
         odin3_module *module = odin3_module_get(design, (odin3_module_id){id});
