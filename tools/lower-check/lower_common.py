@@ -49,6 +49,53 @@ def make_work(requested: Path | None, prefix: str) -> Path:
     return Path(tempfile.mkdtemp(prefix=prefix, dir=os.environ.get(WORK_ENV) or None)).resolve()
 
 
+STORAGE_SUBCKT = {"$_DFF_P_": ("re", "C"), "$_DFF_N_": ("fe", "C"), "$_DLATCH_P_": ("ah", "E"),
+                  "$_DLATCH_N_": ("al", "E")}
+
+
+def storage_to_latch(blif: str) -> str:
+    """Rewrites Yosys's ``.subckt $_DFF_P_ C=c D=d Q=q`` (``write_blif -icells``) as the ``.latch d
+    q re c 3`` Odin III writes (``fe`` for ``$_DFF_N_``, ``ah``/``al`` with the enable for the
+    latches); the init is 3, as the cells carry no ``INIT`` in Yosys's text. Other lines are kept.
+    """
+    out: list[str] = []
+    for line in blif.splitlines():
+        words = line.split()
+        if len(words) >= 2 and words[0] == ".subckt" and words[1] in STORAGE_SUBCKT:
+            kind, clock = STORAGE_SUBCKT[words[1]]
+            pins = dict(word.split("=", 1) for word in words[2:] if "=" in word)
+            if {clock, "D", "Q"} <= set(pins):
+                out.append(f".latch {pins['D']} {pins['Q']} {kind} {pins[clock]} 3")
+                continue
+        out.append(line)
+    return "\n".join(out) + ("\n" if blif.endswith("\n") else "")
+
+
+LATCH_TYPES = {"re": "$_DFF_P_", "fe": "$_DFF_N_", "ah": "$_DLATCH_P_", "al": "$_DLATCH_N_"}
+
+
+def blif_histogram(blif: str) -> dict[str, Counter[str]]:
+    """Per ``.model``, the count of every ``.subckt`` type and ``.latch`` kind (a ``re`` latch is
+    ``$_DFF_P_``, ``fe`` ``$_DFF_N_``, ``ah``/``al`` the level latches) of a BLIF text. Used where
+    Odin III cannot write RTLIL (the storage bit cells have no RTLIL form, 1F); ``.names`` covers
+    are counted as ``.names``."""
+    found: dict[str, Counter[str]] = {}
+    current: Counter[str] | None = None
+    for line in blif.splitlines():
+        words = line.split()
+        if not words:
+            continue
+        if words[0] == ".model" and len(words) > 1:
+            current = found.setdefault(words[1], Counter())
+        elif current is not None and words[0] == ".subckt" and len(words) > 1:
+            current[words[1]] += 1
+        elif current is not None and words[0] == ".latch":
+            current[LATCH_TYPES.get(words[3] if len(words) > 3 else "", "$_FF_")] += 1
+        elif current is not None and words[0] == ".names":
+            current[".names"] += 1
+    return found
+
+
 def histogram(rtlil: str) -> dict[str, Counter[str]]:
     """Per module, the count of every cell type of an RTLIL text (constants left out, a module's
     leading backslash dropped)."""

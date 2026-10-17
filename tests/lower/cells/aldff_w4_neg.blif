@@ -1,0 +1,22 @@
+.model m
+.inputs clk ld ad[0] ad[1] ad[2] ad[3] d[0] d[1] d[2] d[3]
+.outputs q[0] q[1] q[2] q[3]
+.subckt $_NOT_ A=clk Y=$n21
+.cname q.not0
+.subckt $_MUX_ A=d[0] B=ad[0] S=ld Y=$n23
+.cname q.mux1
+.latch $n23 q[0] re $n21 3
+.cname q.dff_p2
+.subckt $_MUX_ A=d[1] B=ad[1] S=ld Y=$n25
+.cname q.mux3
+.latch $n25 q[1] re $n21 3
+.cname q.dff_p4
+.subckt $_MUX_ A=d[2] B=ad[2] S=ld Y=$n27
+.cname q.mux5
+.latch $n27 q[2] re $n21 3
+.cname q.dff_p6
+.subckt $_MUX_ A=d[3] B=ad[3] S=ld Y=$n29
+.cname q.mux7
+.latch $n29 q[3] re $n21 3
+.cname q.dff_p8
+.end

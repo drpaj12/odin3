@@ -7,6 +7,12 @@ Layout (3B spec 14.1, 14.2; plan Task 2):
   adds the committed `.il` (the input of `lower`, `read_verilog; proc; write_rtlil`) and `.blif` (the
   committed output) beside each `.v`; CTest `lower_cells` compares a fresh run with the `.blif` by
   `netlist-compare`, and `lower_cells_yosys` runs `lower-diff` over the same files (needs Yosys 0.55).
+- `cells/{dff,dffe,sdff,sdffe,sdffce,adff,adffe,aldff,aldffe,dffsr,dffsre}_*` (Task 6): the flip-flops,
+  64 fixtures (widths 1, 4, 8; at width 4 the falling clock, active-low controls and both). They run
+  `proc; opt` (not `proc` alone) so that the enable and synchronous reset are folded into the cell;
+  the `.blif` is the lowered netlist (`.latch`); `lower-diff --family ff` reads the Odin III side as
+  BLIF only (the storage bit cells have no RTLIL form). `diff_expect_parmys.txt` lists the cells on
+  which Parmys's unmodified `adffe2dff.v` / `aldffe2dff.v` differ (spec 16 row 4).
 - `hand/` — hand-built designs for `lower-sim`: `and_mux.v` (a design every cell of which has a
   simulate hook) and `shiftx.v` (a `$shiftx`, which has none: reported `skipped`); `pow.v` is a surviving `$pow` (CTest `cli_lower_pow`: the located error of
   spec 5.7; no golden exists).

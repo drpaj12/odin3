@@ -1,0 +1,65 @@
+.model m
+.inputs clk set clr d[0] d[1] d[2] d[3]
+.outputs q[0] q[1] q[2] q[3]
+.names gnd
+.names vcc
+1
+.subckt $_NOT_ A=clk Y=$n62
+.cname q.not0
+.subckt $_MUX_ A=d[0] B=vcc S=$n83 Y=$n64
+.cname q.mux1
+.subckt $_MUX_ A=$n64 B=gnd S=$n87 Y=$n65
+.cname q.mux2
+.latch $n65 q[0] re $n62 3
+.cname q.dff_p3
+.subckt $_MUX_ A=d[1] B=vcc S=$n84 Y=$n67
+.cname q.mux4
+.subckt $_MUX_ A=$n67 B=gnd S=$n88 Y=$n68
+.cname q.mux5
+.latch $n68 q[1] re $n62 3
+.cname q.dff_p6
+.subckt $_MUX_ A=d[2] B=vcc S=$n85 Y=$n70
+.cname q.mux7
+.subckt $_MUX_ A=$n70 B=gnd S=$n89 Y=$n71
+.cname q.mux8
+.latch $n71 q[2] re $n62 3
+.cname q.dff_p9
+.subckt $_MUX_ A=d[3] B=vcc S=$n86 Y=$n73
+.cname q.mux10
+.subckt $_MUX_ A=$n73 B=gnd S=$n90 Y=$n74
+.cname q.mux11
+.latch $n74 q[3] re $n62 3
+.cname q.dff_p12
+.subckt $_MUX_ A=gnd B=gnd S=set Y=$n75
+.cname $c20.mux0
+.subckt $_MUX_ A=vcc B=gnd S=set Y=$n76
+.cname $c20.mux1
+.subckt $_MUX_ A=gnd B=gnd S=set Y=$n77
+.cname $c20.mux2
+.subckt $_MUX_ A=vcc B=gnd S=set Y=$n78
+.cname $c20.mux3
+.subckt $_MUX_ A=vcc B=gnd S=set Y=$n79
+.cname $c21.mux0
+.subckt $_MUX_ A=gnd B=gnd S=set Y=$n80
+.cname $c21.mux1
+.subckt $_MUX_ A=vcc B=gnd S=set Y=$n81
+.cname $c21.mux2
+.subckt $_MUX_ A=gnd B=gnd S=set Y=$n82
+.cname $c21.mux3
+.subckt $_MUX_ A=gnd B=$n75 S=clr Y=$n83
+.cname $c22.mux0
+.subckt $_MUX_ A=gnd B=$n76 S=clr Y=$n84
+.cname $c22.mux1
+.subckt $_MUX_ A=gnd B=$n77 S=clr Y=$n85
+.cname $c22.mux2
+.subckt $_MUX_ A=gnd B=$n78 S=clr Y=$n86
+.cname $c22.mux3
+.subckt $_MUX_ A=vcc B=$n79 S=clr Y=$n87
+.cname $c23.mux0
+.subckt $_MUX_ A=vcc B=$n80 S=clr Y=$n88
+.cname $c23.mux1
+.subckt $_MUX_ A=vcc B=$n81 S=clr Y=$n89
+.cname $c23.mux2
+.subckt $_MUX_ A=vcc B=$n82 S=clr Y=$n90
+.cname $c23.mux3
+.end

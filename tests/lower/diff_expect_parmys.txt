@@ -1,0 +1,12 @@
+# lower-diff --family ff --parmys-exact: Parmys's unmodified adffe2dff.v and aldffe2dff.v put the
+# enable over the reset (the $sdffce shape): with EN low and the asynchronous reset (load) active it
+# holds Q, where the RTL, and `lower` (reset/load over the enable, 3B spec 6.3, 16 row 4), reset
+# (load) Q. Exactly these cells differ; every other fixture agrees with Parmys's maps.
+adffe_w1.v ff equiv Parmys enable over reset (spec 16 row 4)
+adffe_w4.v ff equiv Parmys enable over reset (spec 16 row 4)
+adffe_w4_lo.v ff equiv Parmys enable over reset (spec 16 row 4)
+adffe_w8.v ff equiv Parmys enable over reset (spec 16 row 4)
+aldffe_w1.v ff equiv Parmys enable over load (spec 16 row 4)
+aldffe_w4.v ff equiv Parmys enable over load (spec 16 row 4)
+aldffe_w4_lo.v ff equiv Parmys enable over load (spec 16 row 4)
+aldffe_w8.v ff equiv Parmys enable over load (spec 16 row 4)

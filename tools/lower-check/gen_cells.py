@@ -235,8 +235,85 @@ def div_cells() -> list[Cell]:
     return cells
 
 
+FF_KINDS = ("dff", "dffe", "sdff", "sdffe", "sdffce", "adff", "adffe", "aldff", "aldffe", "dffsr",
+            "dffsre")
+FF_ENABLE_KINDS = ("dffe", "sdffe", "sdffce", "adffe", "aldffe", "dffsre")
+FF_WIDTHS = (1, 4, 8)
+FF_VALUES = {1: "1'b1", 4: "4'd5", 8: "8'hA5"}
+FF_SET_VALUES = {1: "1'b1", 4: "4'b1010", 8: "8'hA5"}
+
+
+def _active(name: str, low: bool) -> str:
+    return f"!{name}" if low else name
+
+
+def _event(name: str, low: bool) -> str:
+    return f"{'negedge' if low else 'posedge'} {name}"
+
+
+def ff_cell(kind: str, width: int, neg_clk: bool, low: bool) -> Cell:
+    """One flip-flop module: ``kind`` is the word cell ``proc; opt`` infers (``$dff``..``$dffsre``),
+    ``neg_clk`` a falling-edge clock, ``low`` every control active low. Reset values are constants
+    (``$dffsr`` gets a set value with ones and a clear value of zeros, so ``proc`` keeps both)."""
+    vec = f"[{width - 1}:0] " if width > 1 else ""
+    value, setv = FF_VALUES[width], FF_SET_VALUES[width]
+    ctl = "ld" if kind.startswith("al") else "rst"
+    ports = ["input clk"]
+    if kind in FF_ENABLE_KINDS:
+        ports.append("input en")
+    if kind.startswith("al"):
+        ports += ["input ld", f"input {vec}ad"]
+    elif kind.startswith("sd") or kind.startswith("ad"):
+        ports.append("input rst")
+    elif kind.startswith("dffsr"):
+        ports += ["input set", "input clr"]
+    ports += [f"input {vec}d", f"output reg {vec}q"]
+    clk_ev = _event("clk", neg_clk)
+    en = _active("en", low)
+    srst = _active("rst", low)
+    if kind == "dff":
+        body = f"always @({clk_ev}) q <= d;"
+    elif kind == "dffe":
+        body = f"always @({clk_ev}) if ({en}) q <= d;"
+    elif kind == "sdff":
+        body = f"always @({clk_ev}) if ({srst}) q <= {value}; else q <= d;"
+    elif kind == "sdffe":
+        body = f"always @({clk_ev}) if ({srst}) q <= {value}; else if ({en}) q <= d;"
+    elif kind == "sdffce":
+        body = f"always @({clk_ev}) if ({en}) begin if ({srst}) q <= {value}; else q <= d; end"
+    elif kind in ("adff", "adffe"):
+        tail = f" else if ({en}) q <= d;" if kind == "adffe" else " else q <= d;"
+        body = (f"always @({clk_ev} or {_event('rst', low)}) "
+                f"if ({_active('rst', low)}) q <= {value};{tail}")
+    elif kind in ("aldff", "aldffe"):
+        tail = f" else if ({en}) q <= d;" if kind == "aldffe" else " else q <= d;"
+        body = (f"always @({clk_ev} or {_event(ctl, low)}) "
+                f"if ({_active(ctl, low)}) q <= ad;{tail}")
+    else:  # dffsr, dffsre
+        tail = f" else if ({en}) q <= d;" if kind == "dffsre" else " else q <= d;"
+        body = (f"always @({clk_ev} or {_event('set', low)} or {_event('clr', low)}) "
+                f"if ({_active('clr', low)}) q <= {width}'d0; "
+                f"else if ({_active('set', low)}) q <= {setv};{tail}")
+    suffix = f"_w{width}" + ("_neg" if neg_clk else "") + ("_lo" if low else "")
+    return Cell(f"{kind}{suffix}", _module(ports, body), "ff")
+
+
+def ff_cells() -> list[Cell]:
+    """The eleven word flip-flops: widths 1, 4, 8 with active-high controls and a rising clock,
+    then at width 4 the falling clock, the active-low controls and both."""
+    cells: list[Cell] = []
+    for kind in FF_KINDS:
+        has_ctl = kind != "dff"
+        cells += [ff_cell(kind, width, False, False) for width in FF_WIDTHS]
+        cells.append(ff_cell(kind, 4, True, False))
+        if has_ctl:
+            cells += [ff_cell(kind, 4, False, True), ff_cell(kind, 4, True, True)]
+    return cells
+
+
 FAMILY_GENERATORS = {"bitwise": bitwise_cells, "pmux": pmux_cells, "shift": shift_cells,
-                     "arith": arith_cells, "mul": mul_cells, "div": div_cells}
+                     "arith": arith_cells, "mul": mul_cells, "div": div_cells, "ff": ff_cells}
+
 
 
 def generate(families: Sequence[str]) -> list[Cell]:

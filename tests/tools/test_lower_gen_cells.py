@@ -68,6 +68,22 @@ class GridTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(sorted(p.name for p in out.glob("*.v")), sorted(text.split()))
 
+    def test_the_ff_family_has_every_type_at_three_widths_and_the_polarity_variants(self) -> None:
+        cells = {c.stem: c for c in gc.generate(["ff"])}
+        self.assertEqual(len(cells), 64)
+        for kind in gc.FF_KINDS:
+            for width in (1, 4, 8):
+                self.assertIn(f"{kind}_w{width}", cells)
+            self.assertIn(f"{kind}_w4_neg", cells)
+            self.assertEqual(f"{kind}_w4_lo" in cells, kind != "dff")
+        text = cells["adffe_w4_neg_lo"].text
+        self.assertIn("always @(negedge clk or negedge rst) if (!rst) q <= 4'd5; "
+                      "else if (!en) q <= d;", text)
+        self.assertIn("input en", cells["sdffce_w1"].text)
+        self.assertNotIn("input en", cells["sdff_w1"].text)
+        self.assertIn("4'b1010", cells["dffsr_w4"].text)
+        self.assertIn("input [3:0] ad", cells["aldffe_w4"].text)
+
     def test_an_unknown_family_is_refused(self) -> None:
         with self.assertRaises(SystemExit):
             gc.generate(["nosuch"])

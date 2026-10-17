@@ -2237,7 +2237,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # 3B Task 4: one test per family; tier T (equiv-check and equal histograms after opt -fast)
         # for the techmap.v family. Fixtures are told apart by their file-name prefix.
         file(GLOB _lower_cells CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/lower/cells/*.v)
-        set(_lower_prefixes pmux shl shr sshr shiftx neg add sub lt le gt ge mul div mod)
+        set(_lower_prefixes pmux shl shr sshr shiftx neg add sub lt le gt ge mul div mod
+            dff dffe sdff sdffe sdffce adff adffe aldff aldffe dffsr dffsre)
         set(_lower_family_bitwise "")
         set(_lower_family_pmux "pmux")
         set(_lower_family_shift "shl;shr;sshr;shiftx")
@@ -2272,6 +2273,48 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                                      SKIP_RETURN_CODE 77 TIMEOUT 1800)
             endif()
         endforeach()
+        # 3B Task 6 (spec 14.2, PHASE3 #19): the flip-flops. Tier S (netlist-compare exit 0) for the
+        # synchronous types; tier D (equiv-check) for the asynchronous ones against Yosys's lowering
+        # with tools/lower-check/maps/; the falling-edge fixtures run --neg-edge keep (the default
+        # makes an inverter, which equiv-check does not accept as a clock); and Parmys's unmodified
+        # enable-over-reset maps, which differ exactly on $adffe and $aldffe (spec 16 row 4).
+        set(_ff_sync dff dffe sdff sdffe sdffce)
+        set(_ff_async adff adffe aldff aldffe dffsr dffsre)
+        set(_ff_sync_pos "")
+        set(_ff_async_pos "")
+        set(_ff_neg "")
+        set(_ff_parmys "")
+        foreach(_prefix IN LISTS _ff_sync _ff_async)
+            set(_prefix_files ${_lower_cells})
+            list(FILTER _prefix_files INCLUDE REGEX "/cells/${_prefix}_[^/]*$")
+            set(_prefix_pos ${_prefix_files})
+            list(FILTER _prefix_pos EXCLUDE REGEX "_neg")
+            list(FILTER _prefix_files INCLUDE REGEX "_neg")
+            list(APPEND _ff_neg ${_prefix_files})
+            if(_prefix IN_LIST _ff_sync)
+                list(APPEND _ff_sync_pos ${_prefix_pos})
+            else()
+                list(APPEND _ff_async_pos ${_prefix_pos})
+            endif()
+            if(_prefix MATCHES "^a(dff|ldff)e?$")
+                list(APPEND _ff_parmys ${_prefix_pos})
+            endif()
+        endforeach()
+        if(_ff_sync_pos AND _ff_async_pos AND _ff_neg AND _ff_parmys)
+            set(_lower_diff ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-diff
+                --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055} --family ff)
+            add_test(NAME lower_cells_yosys_ff_sync COMMAND ${_lower_diff} --tier S --each ${_ff_sync_pos})
+            add_test(NAME lower_cells_yosys_ff_async COMMAND ${_lower_diff} --tier D --each ${_ff_async_pos})
+            add_test(NAME lower_cells_yosys_ff_neg
+                COMMAND ${_lower_diff} --lower-args "--neg-edge keep" --each ${_ff_neg})
+            add_test(NAME lower_cells_yosys_ff_parmys
+                COMMAND ${_lower_diff} --parmys-exact
+                        --expect ${PROJECT_SOURCE_DIR}/tests/lower/diff_expect_parmys.txt
+                        --each ${_ff_parmys})
+            set_tests_properties(lower_cells_yosys_ff_sync lower_cells_yosys_ff_async
+                lower_cells_yosys_ff_neg lower_cells_yosys_ff_parmys
+                PROPERTIES LABELS lower SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        endif()
         add_test(NAME flatten_diff_fixtures
             COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-diff
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}

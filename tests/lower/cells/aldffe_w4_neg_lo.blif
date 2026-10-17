@@ -1,0 +1,30 @@
+.model m
+.inputs clk en ld ad[0] ad[1] ad[2] ad[3] d[0] d[1] d[2] d[3]
+.outputs q[0] q[1] q[2] q[3]
+.subckt $_NOT_ A=clk Y=$n37
+.cname q.not0
+.subckt $_MUX_ A=d[0] B=q[0] S=en Y=$n39
+.cname q.mux1
+.subckt $_MUX_ A=ad[0] B=$n39 S=ld Y=$n40
+.cname q.mux2
+.latch $n40 q[0] re $n37 3
+.cname q.dff_p3
+.subckt $_MUX_ A=d[1] B=q[1] S=en Y=$n42
+.cname q.mux4
+.subckt $_MUX_ A=ad[1] B=$n42 S=ld Y=$n43
+.cname q.mux5
+.latch $n43 q[1] re $n37 3
+.cname q.dff_p6
+.subckt $_MUX_ A=d[2] B=q[2] S=en Y=$n45
+.cname q.mux7
+.subckt $_MUX_ A=ad[2] B=$n45 S=ld Y=$n46
+.cname q.mux8
+.latch $n46 q[2] re $n37 3
+.cname q.dff_p9
+.subckt $_MUX_ A=d[3] B=q[3] S=en Y=$n48
+.cname q.mux10
+.subckt $_MUX_ A=ad[3] B=$n48 S=ld Y=$n49
+.cname q.mux11
+.latch $n49 q[3] re $n37 3
+.cname q.dff_p12
+.end
