@@ -169,12 +169,18 @@ class UnitsTest(unittest.TestCase):
             with mock.patch.object(memcap, "run", return_value=done):
                 res = nightly.run_unit(cfg, nightly.units()[0], item, 3 << 30)
             self.assertEqual(res.hard, hard, code)
-        # opt-diff has no unproven class: a cap kill of it stays hard
+        # a cap kill of opt-diff itself stays hard; its own exit 4 (Yosys cap kill) is unproven
         done = mock.Mock(returncode=-9, stdout="", stderr="")
         with mock.patch.object(memcap, "run", return_value=done):
             res = nightly.run_unit(cfg, nightly.units("diff")[0], item, 3 << 30)
         self.assertTrue(res.hard)
         self.assertFalse(res.unproven)
+        done = mock.Mock(returncode=4, stdout="opt-diff: unproven: yosys: killed (exit -9)\n",
+                         stderr="")
+        with mock.patch.object(memcap, "run", return_value=done):
+            res = nightly.run_unit(cfg, nightly.units("diff")[0], item, 3 << 30)
+        self.assertTrue(res.unproven)
+        self.assertFalse(res.hard)
 
     def test_opt_equiv_exit_4_and_a_cap_kill_of_the_tool_are_unproven_not_hard(self) -> None:
         """2F VTR triage: a proof that timed out says "timed out" in its lines (a HARD_MARK) but

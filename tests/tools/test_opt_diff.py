@@ -67,6 +67,8 @@ if spec.get("yosys_rc") and "write_blif" not in script:
     sys.stderr.write("ERROR: cannot read in.il\n")
     sys.exit(spec["yosys_rc"])
 if "write_blif" in script:
+    if spec.get("lower_signal"):
+        os.kill(os.getpid(), spec["lower_signal"])
     out = script.split("-blackbox ")[1].strip()
     Path(out).write_text(".model t\n.end\n")
     sys.exit(0)
@@ -346,6 +348,29 @@ class RunTest(unittest.TestCase):
         self.assertEqual(self.tree.run()[0], 3)
         self.tree.set_spec(yosys_rc=1)
         self.assertEqual(self.tree.run()[0], 2)
+
+    def test_a_yosys_cap_kill_is_unproven_exit_4_not_a_crash(self) -> None:
+        """2H triage (LU64PEEng, arm_core): Yosys killed at the cap, in its step-2 run or in a BLIF
+        lowering, is a limit of the oracle: exit 4, so a sweep may list it. A signal other than
+        the cap kill, an Odin III cap kill, a netlist-compare one and the refinement child with
+        --no-cec stay hard (exit 3)."""
+        for spec in ({"yosys_signal": 9}, {"lower_signal": 9}):
+            with self.subTest(spec=spec):
+                self.tree.set_spec(**spec)
+                code, out, err = self.tree.run()
+                self.assertEqual(code, 4, out + err)
+                self.assertIn("opt-diff: unproven: yosys", err)
+                self.assertNotIn("HARD", err)
+        for spec in ({"yosys_signal": 11}, {"lower_signal": 11}, {"odin_signal": 9},
+                     {"compare_signal": 9}):
+            with self.subTest(spec=spec):
+                self.tree.set_spec(**spec)
+                code, out, err = self.tree.run()
+                self.assertEqual(code, 3, out + err)
+                self.assertIn("HARD", err)
+        self.tree.set_spec(refine_signal=9)
+        code, out, err = self.tree.run("--no-cec")
+        self.assertEqual(code, 3, out + err)
 
     def test_a_refinement_crash_is_hard_not_a_refine_difference(self) -> None:
         """Review I3: a dying Yosys is not `refine: DIFFERS`, and no needle-less line absorbs it."""

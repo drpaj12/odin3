@@ -40,9 +40,12 @@ a failing run keep it.
 Exit codes (one convention across the opt tools): 0 no unexpected difference; 1 a difference, or a
 stale entry; 2 usage, or Odin III or Yosys exited with an error; 3 hard: a child (Odin III, Yosys or
 netlist-compare) crashed, was killed by a signal or its memory cap, or timed out (never an expected
-difference: no expect line absorbs it); 77 skipped (an ASan child and no systemd-run). The work
-directory this tool made (under ``$TMPDIR``) is removed after a clean run and after an error; a
-failure (1 or 3) keeps it.
+difference: no expect line absorbs it); 4 unproven: Yosys (its step-2 run or a lowering for the
+BLIF steps) was killed by the memory cap, so no verdict exists on Odin III: a limit of the oracle,
+not a crash, which a sweep may list as ``untested for now (size limit)`` (an Odin III or
+netlist-compare cap kill, and any timeout, stay exit 3); 77 skipped (an ASan child and no
+systemd-run). The work directory this tool made (under ``$TMPDIR``) is removed after a clean run,
+after an error and after exit 4; a failure (1 or 3) keeps it.
 """
 
 from __future__ import annotations
@@ -64,7 +67,7 @@ import opt_rules
 TOOL = "opt-diff"
 HERE = Path(__file__).resolve().parent
 NETLIST_COMPARE = HERE.parent / "netlist-compare" / "netlist-compare"
-EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
+EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_UNPROVEN, EXIT_SKIP = 0, 1, 2, 3, 4, 77
 STEPS = ("histogram", "widths", "refine", "identity")
 PHASE3 = HERE / "phase3.script"
 WIDTH_SCRIPTS = ("wreduce", "phase3")  # the scripts that hold wreduce: widths are compared
@@ -370,6 +373,13 @@ def execute(args: argparse.Namespace, work: Path) -> int:
     return EXIT_FAIL if failed else EXIT_OK
 
 
+def yosys_cap_kill(exc: opt_equiv.CrashError) -> bool:
+    """Yosys's own step-2 run or a BLIF lowering was killed by the memory cap: the oracle is too
+    big for the cap, which says nothing about Odin III (exit 4). The refinement child
+    (``yosys-refine``), Odin III, netlist-compare and every timeout stay hard."""
+    return exc.cap_killed and (exc.what == "yosys" or exc.what.startswith("yosys ("))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
     opt_equiv.REFINE_TIMEOUT_SECONDS = args.refine_timeout
@@ -381,14 +391,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         code = execute(args, work)
     except opt_equiv.CrashError as exc:
-        print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
-        code = EXIT_CRASH
+        if yosys_cap_kill(exc):
+            print(f"{TOOL}: unproven: {exc}", file=sys.stderr)
+            code = EXIT_UNPROVEN
+        else:
+            print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
+            code = EXIT_CRASH
     except (OSError, opt_equiv.ToolError, ValueError) as exc:
         print(f"{TOOL}: error: {exc}", file=sys.stderr)
     except memcap.CapUnavailable as exc:
         print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
         code = EXIT_SKIP
-    if made and code in (EXIT_OK, EXIT_ERROR, EXIT_SKIP):
+    if made and code in (EXIT_OK, EXIT_ERROR, EXIT_UNPROVEN, EXIT_SKIP):
         shutil.rmtree(work, ignore_errors=True)  # the directory this run made, and only it
     elif made:
         print(f"{TOOL}: work directory kept: {work}", file=sys.stderr)

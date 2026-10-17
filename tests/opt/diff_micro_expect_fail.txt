@@ -10,3 +10,9 @@
 # Pre-existing: both are above 5.9 KB and were never run for opt-diff (triage 2026-10-17, G3).
 large/paj_framebuftop_hierarchy_no_mem.v [Multiple edge sensitive events] Yosys 0.55 rejects the RTLIL process (Parmys rejects it too); opt-diff's Yosys side stops with ERROR: Multiple edge sensitive events found for this signal
 large/paj_raygentop_hierarchy_no_mem.v [Multiple edge sensitive events] Yosys 0.55 rejects the RTLIL process (Parmys rejects it too); opt-diff's Yosys side stops with ERROR: Multiple edge sensitive events found for this signal
+#
+# Untested for now (size limit): Yosys, the oracle, is killed at the sweep's 2 GiB cap (opt-diff exit 4:
+# no verdict on Odin III, not a crash; triage 2026-10-17, G4). The small designs carry the proof; the
+# same two are untested for now in tests/opt/equiv_expect_fail.txt.
+large/LU64PEEng.v [unproven:] untested for now (size limit): Yosys killed at the 2 GiB cap (BLIF lowering of the opt-diff netlists); 178350 B source
+large/arm_core.v [unproven:] untested for now (size limit): Yosys killed at the 2 GiB cap; 345328 B source

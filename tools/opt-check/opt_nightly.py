@@ -22,7 +22,8 @@ and a summary line.
   cec decided nothing) is a failure an expect-fail line lists as ``untested for now (size
   limit)``, never hard (the timeout and kill words in its lines are the checker's); an unlisted one
   is printed ``UNPROVEN`` and fails the run like any unlisted failure. Odin III's own cap kill is
-  exit 3, hard.
+  exit 3, hard. opt-diff exit 4 (Yosys, the oracle, killed
+  by the memory cap: no verdict on Odin III) is listed the same way.
 - ``--expect-fail F`` (repeatable; default ``tests/opt/vtr_expect_fail.txt`` and
   ``tests/opt/vtr_nightly_xl.txt``) lists ``<path> [needle] <reason>`` lines. A listed file must
   fail (a tool exits non-zero; the needle must appear in the output); an unlisted failure, a
@@ -213,7 +214,8 @@ def run_unit(cfg: Config, unit: Unit, item: elab_sweep.Item, cap: int) -> Result
     if killed:  # opt-equiv itself (its Python, not Odin III: that child's kill is its exit 3)
         text += (f"opt-equiv: unproven: opt-equiv itself was killed by its memory cap "
                  f"({format_cap(cap)}); the snapshot is too big for the checker\n")
-    unproven = unit.tool == OPT_EQUIV and (done.returncode == opt_equiv.EXIT_UNPROVEN or killed)
+    unproven = (unit.tool == OPT_EQUIV and (done.returncode == opt_equiv.EXIT_UNPROVEN or killed)
+                or unit.tool == OPT_DIFF and done.returncode == opt_equiv.EXIT_UNPROVEN)
     hard = not unproven and (
         toolutil.is_crash(done.returncode) or done.returncode == opt_equiv.EXIT_CRASH
         or any(mark in text for mark in HARD_MARKS)
