@@ -1,0 +1,10 @@
+# Starts odin3-vtr-qor-nightly.service at 01:00. Install and remove commands: see the .service.
+[Unit]
+Description=vtr-qor nightly QoR run at 01:00
+
+[Timer]
+OnCalendar=*-*-* 01:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -128,6 +128,16 @@ mode = root / "fcheck-exit"
 sys.exit(int(mode.read_text()) if mode.exists() else 0)
 """
 
+FAKE_TASK = """
+import sys
+from pathlib import Path
+args = sys.argv[1:]
+root = Path(__file__).resolve().parents[2]
+run = Path(args[args.index("-temp_dir") + 1]) / "run001"
+run.mkdir(parents=True, exist_ok=True)
+(run / "parse_results.txt").write_text((root / "task-results").read_text())
+"""
+
 FAKE_PATHS = """
 import pathlib
 root_path = pathlib.Path(__file__).absolute().parent.parent.parent.parent.parent
@@ -252,6 +262,7 @@ class CliTestBase(unittest.TestCase):
             (verilog / f"{design}.v").write_text(f"module {design}(); endmodule\n")
         scripts = v / "vtr_flow" / "scripts"
         _script(scripts / "run_vtr_flow.py", FAKE_FLOW)
+        _script(scripts / "run_vtr_task.py", FAKE_TASK)
         _script(v / "mosaic" / "verilator_check" / "run_random_check.py", FAKE_RANDOM_CHECK)
         libs = scripts / "python_libs" / "vtr"
         _script(libs / "parse_vtr_flow.py", FAKE_PARSE)

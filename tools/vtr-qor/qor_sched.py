@@ -669,6 +669,7 @@ class RunOptions:
     keep_netlists: frozenset[str] = frozenset()
     fcheck: bool = False
     deadline: float | None = None
+    deadline_text: str = ""
     scope: ScopeInfo | None = None
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
@@ -804,6 +805,9 @@ def _lock_fds() -> tuple[int, ...]:
     if os.path.realpath(target) != os.path.realpath(qor_heavy.HEAVY_LOCK):
         return ()
     return (LOCK_FD,)
+
+
+lock_fds = _lock_fds  # public: the nightly passes descriptor 9 to its heavy child tools
 
 
 def _alive(pid: int) -> bool:
@@ -1271,7 +1275,7 @@ def _deadline_line(job: Job, opts: RunOptions) -> str:
     expected = opts.expected_s(job) if opts.expected_s is not None else 0.0
     minutes = math.ceil(expected / SECONDS_PER_MINUTE)
     wall = time.time() + ((opts.deadline or 0.0) - opts.clock())  # deadline is on clock's scale
-    when = time.strftime("%H:%M", time.localtime(wall))
+    when = opts.deadline_text or time.strftime("%H:%M", time.localtime(wall))
     return f"nightly: {_label(job)} not started: expected {minutes} min would pass {when}"
 
 
