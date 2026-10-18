@@ -344,6 +344,11 @@ def judge(key: str, entries: list[Entry], delta: dict[str, int],
         return Result(key, "counts-differ", False,
                       f"Odin III minus Parmys: {fmt_delta(delta)}; listed: {fmt_delta(want)}")
     if counts:
+        others = [e for e in entries if e.ident != "counts"]
+        if others:
+            return Result(key, "stale", False,
+                          f"listed {listed_ids(others)} beside counts: the netlists are not "
+                          "compared, so it can never occur")
         return Result(key, f"listed:{listed_ids(entries)}", True, counts[0].reason)
     return judge_compare(key, entries, compare())
 
