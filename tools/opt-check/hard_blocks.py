@@ -124,12 +124,11 @@ def box_uses(design: dict[str, Any], top: str, boxes: set[str]) -> dict[str, Box
 
 def box_mismatch(gold: dict[str, BoxUse], gate: dict[str, BoxUse]) -> str:
     """The first hard block that gold and gate both hold under one name but with another type,
-    other port widths or another value of a parameter both carry; '' when there is none."""
+    other port widths or other parameters (a value that differs, or a parameter on one side
+    only: the block falls back to its declaration default); '' when there is none."""
     for name in sorted(gold.keys() & gate.keys()):
         mine, theirs = gold[name], gate[name]
-        params = dict(theirs.params)
-        if mine.kind != theirs.kind or mine.widths != theirs.widths or any(
-                key in params and params[key] != value for key, value in mine.params):
+        if (mine.kind, mine.widths, mine.params) != (theirs.kind, theirs.widths, theirs.params):
             return f"hard block {name} differs: gold {describe(mine)}; gate {describe(theirs)}"
     return ""
 

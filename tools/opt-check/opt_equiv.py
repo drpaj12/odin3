@@ -47,6 +47,17 @@ check finds an output trace in ``BMC_STEPS`` steps, else "inconclusive"; a base 
 out is "inconclusive" (a size limit). A failed proof stays "not a refinement"; no path turns a
 failed or undecided proof into "ok".
 
+The BLIF cec of the whole script (``settle_inconclusive``) is a fallback for timeouts only, and
+only when it is sound: ``equiv-check`` starts a latch without ``init`` (or with 2/3) at 0 on both
+sides, so it cannot see a pair that differs from an unknown start (review H1). A pair whose base
+case found a trace (no output trace in 20 steps) or timed out is rescued only when the cec
+is exact for it: no latch of either BLIF lacks a 0/1 ``init`` (``latches_without_init``) and the
+gate reads no x net (the lowering folds a holding flop without init into x, which the cec ties
+to 0). Then the cec honours every start value, so it also decides the base case. Else the pair
+stays unproven (exit 4); a BLIF cec never turns a pair with an undefined start into ok. (A
+combinational pair whose internal wire a pass narrows fails the base case on that wire but
+has no latch: the cec decides it, e.g. wreduce/y_unused.)
+
 A failing pair prints ``opt-equiv: <NNNN>-<sub>: not a refinement`` with the rule counters of the
 run (Odin III's ``--opt-stats`` lines, which cover the whole run). A work directory this tool
 made is removed after a clean run; a failing run, and ``--work DIR``, keep it.
@@ -340,10 +351,42 @@ def uses_x(blif: Path) -> bool:
     return len(X_NET.findall(data)) > data.count(X_NET_DEFINITION)
 
 
-def cec_blifs(a: Path, b: Path, cap: int, work: Path) -> tuple[str, str]:
+LATCH_LINE = re.compile(r"^\s*\.latch\s+(?P<words>[^#\n]*)", re.MULTILINE)
+
+
+def latches_without_init(blif: Path) -> int:
+    """How many ``.latch`` lines of a BLIF lack a 0/1 initial value (none, 2 or 3). The fields are
+    ``input output [type control] [init]``: 3 words end in the init, 5 words do, 2 and 4 do not.
+    ``equiv-check`` ties these to 0, so a cec proof over them says nothing about an unknown start.
+    An unreadable file counts as one."""
+    try:
+        text = blif.read_text(encoding="utf-8", errors="replace").replace("\\\n", " ")
+    except OSError:
+        return 1
+    count = 0
+    for match in LATCH_LINE.finditer(text):
+        words = match.group("words").split()
+        if len(words) not in (3, 5) or words[-1] not in ("0", "1"):
+            count += 1
+    return count
+
+
+def cec_blifs(a: Path, b: Path, cap: int, work: Path, need_init: bool = False
+              ) -> tuple[str, str]:
     """(verdict, text) of ``equiv-check`` on two BLIFs: proved (exit 0), differs (exit 1), else
     unproven (a tool limit: hard-block models, several clocks, a timeout; the text says which). A
-    timeout or a crash of the checker is "unproven" too, never a pass."""
+    timeout or a crash of the checker is "unproven" too, never a pass. ``need_init`` (``b`` is the
+    gate): a latch without a 0/1 init in either file, or an x net read by the gate, is "unproven"
+    before the checker runs (it would start that latch, or read that x, as 0; the gold's x is a
+    don't care, the gate's is not)."""
+    if need_init:
+        loose = latches_without_init(a) + latches_without_init(b)
+        if loose:
+            return CEC_UNPROVEN, (f"BLIF cec: not used, {loose} latch(es) have no 0/1 init and "
+                                  "equiv-check would start them at 0")
+        if uses_x(b):  # the lowering folds a flop that never changes into an x net (review H1)
+            return CEC_UNPROVEN, ("BLIF cec: not used, the gate reads x nets (unconn) that "
+                                  "equiv-check ties to 0, so a gold value of 0 would match them")
     try:
         done = capped("equiv-check", [exe(str(EQUIV_CHECK)), str(a), str(b)], cap, cwd=work,
                       timeout=CEC_TIMEOUT_SECONDS)
@@ -361,7 +404,8 @@ def cec_blifs(a: Path, b: Path, cap: int, work: Path) -> tuple[str, str]:
     return CEC_UNPROVEN, f"BLIF cec: no verdict (exit {done.returncode}): {text}"
 
 
-def cec_ils(yosys: str, gold: Path, gate: Path, cap: int, work: Path, tag: str
+def cec_ils(yosys: str, gold: Path, gate: Path, cap: int, work: Path, tag: str,
+            need_init: bool = False
             ) -> tuple[str, str]:
     """``cec_blifs`` of the lowering of two RTLIL files."""
     blifs: list[Path] = []
@@ -376,7 +420,7 @@ def cec_ils(yosys: str, gold: Path, gate: Path, cap: int, work: Path, tag: str
             return CEC_UNPROVEN, (f"BLIF cec: the lowering of the {side} side failed: "
                                   f"{why((done.stdout or '') + (done.stderr or ''))}")
         blifs.append(blif)
-    return cec_blifs(blifs[0], blifs[1], cap, work)
+    return cec_blifs(blifs[0], blifs[1], cap, work, need_init)
 
 
 # ---- The base case: a bounded check from the initial state (3B soundness review H2) ----------
@@ -684,11 +728,12 @@ def check_all(run: Run, checker: Checker) -> list[Verdict]:
 def settle_inconclusive(run: Run, verdicts: Sequence[Verdict], args: argparse.Namespace,
                         work: Path) -> tuple[str, str]:
     """When no pair failed but some timed out: the whole script, Odin III's input against its
-    final result, through the BLIF cec. (verdict, text); ``CEC_PROVED`` clears the timeouts."""
+    final result, through the BLIF cec. (verdict, text); ``CEC_PROVED`` clears the timeouts. A pair
+    whose base case failed or timed out is rescued only by an exact cec (H1): ``need_init``."""
     if not run.pairs:
         return CEC_UNPROVEN, "no snapshot"
     return cec_ils(args.yosys, run.pairs[0].before, run.pairs[-1].after, args.mem_cap, work,
-                   "e2e")
+                   "e2e", True)
 
 
 def report(verdicts: Sequence[Verdict], counters: dict[str, int]) -> list[str]:
