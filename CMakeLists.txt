@@ -160,6 +160,7 @@ add_library(odin3_core OBJECT
     src/passes/hardmap/hardmap.c
     src/passes/hardmap/hm_kit.c
     src/passes/hardmap/mul.c
+    src/passes/hardmap/adder.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -789,6 +790,17 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_hardmap_mul PROPERTIES LABELS unit)
+    add_test(NAME cli_hardmap_add
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh hardmap_add $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_hardmap_add PROPERTIES LABELS unit)
+    # 3C Task 3: hardmap's $add/$sub rule (adder chains) on hand-built flat IR.
+    odin3_add_unit_test(test_hardmap_adder)
+    target_sources(test_hardmap_adder PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_hardmap_adder PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     # 3A Task 2: flatten's pre-flight graph; every test_flatten_* links the fixture helper.
     odin3_add_unit_test(test_flatten_graph)
     target_sources(test_flatten_graph PRIVATE tests/unit/flatten_fixture.c tests/unit/proc_build.c)

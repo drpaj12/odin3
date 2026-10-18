@@ -34,6 +34,7 @@
 # 0001-opt_clean-before.il and -after.il when opt_clean removes a cell; a missing DIR exits 2),
 # opt_determinism (two opt runs are byte-identical; the gates in reverse order compare identical).
 # hardmap_mul (3C-1: hardmap maps an 8x7 `$mul` to one `multiply`; write_blif --vtr equals tests/hardmap/expected/mul_8x7.blif).
+# hardmap_add (3C-2: hardmap maps `$add`/`$sub` to adder chains; the sim vectors before and after equal, an 8+6 add equals tests/hardmap/expected/add_8x6.blif).
 # The project cases run from the project's directory (tests/cli/project), so the paths given are
 # relative.
 set -euo pipefail
@@ -661,6 +662,40 @@ hardmap_mul)
     diff <(grep -v '^#' "$hm/expected/mul_8x7.blif") <(grep -v '^#' "$work/out.blif") >/dev/null ||
         fail "write_blif differs from tests/hardmap/expected/mul_8x7.blif"
     "$compare" "$hm/expected/mul_8x7.blif" "$work/out.blif" || fail "netlist-compare: not identical"
+    ;;
+hardmap_add)
+    # cli_hardmap_add: `$add`/`$sub` to adder chains (3C-2). Each design runs through read_techlib,
+    # read_verilog --vtr-compat, proc, opt, wreduce, opt, then the sim pass before and after hardmap
+    # with the same seed: the vectors must be byte-identical (the sim pass has no word-level $dff, so
+    # sx_add.v, the sequential repro, is only counted). write_blif --vtr of the 8+6 add equals the
+    # committed BLIF ('#' header lines are not compared).
+    hm=$fixtures/../../hardmap
+    lib=$fixtures/../../../lib/vtr.o3lib
+    pre="read_techlib $lib; read_verilog --vtr-compat"
+    post="proc; opt; wreduce; opt"
+    run_pair() { # run_pair <v-file> <adders>: sim before = sim after; INFO line with that count
+        "$odin3" -p "$pre $hm/$1; $post; sim 4000 11 $work/before.vec; hardmap; sim 4000 11 $work/after.vec" \
+            >"$work/out" 2>"$work/err" || fail "odin3 hardmap script failed on $1"
+        grep -qF "hardmap: 0 multiply, $2 adder in 1 chains" "$work/err" || fail "$1: no INFO line with $2 adders"
+        grep -qF "0 cells left soft" "$work/err" || fail "$1: a cell was left soft"
+        cmp "$work/before.vec" "$work/after.vec" || fail "$1: sim vectors differ after hardmap"
+    }
+    run_pair add_8x6.v 10
+    run_pair sub_pad_u.v 10
+    run_pair sub_pad_s.v 10
+    run_pair sx_add_c.v 11
+    "$odin3" -p "$pre $hm/sx_add.v; $post; hardmap; write_rtlil $work/sx.il" >"$work/out" 2>"$work/err" ||
+        fail "odin3 hardmap script failed on sx_add.v"
+    grep -qF "hardmap: 0 multiply, 11 adder in 1 chains" "$work/err" || fail "sx_add.v: no INFO line with 11 adders"
+    "$odin3" -p "read_techlib $lib; read_verilog --lib $hm/adder_lib.v; read_verilog --vtr-compat $hm/adder_use.v; proc; opt; flatten; opt; wreduce; opt; sim 500 3 $work/before.vec; hardmap; sim 500 3 $work/after.vec" \
+        >"$work/out" 2>"$work/err" || fail "odin3 hardmap script failed on adder_use.v"
+    grep -qF "in 4 chains" "$work/err" || fail "adder_use.v: the flattened adder #(4) was not mapped"
+    cmp "$work/before.vec" "$work/after.vec" || fail "adder_use.v: sim vectors differ after hardmap"
+    "$odin3" -p "$pre $hm/add_8x6.v; $post; hardmap; write_blif --vtr $work/out.blif" \
+        >"$work/out" 2>"$work/err" || fail "odin3 hardmap script failed on write_blif"
+    diff <(grep -v '^#' "$hm/expected/add_8x6.blif") <(grep -v '^#' "$work/out.blif") >/dev/null ||
+        fail "write_blif differs from tests/hardmap/expected/add_8x6.blif"
+    "$compare" "$hm/expected/add_8x6.blif" "$work/out.blif" || fail "netlist-compare: not identical"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

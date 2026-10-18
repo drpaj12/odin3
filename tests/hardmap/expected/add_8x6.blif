@@ -1,0 +1,25 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+
+.model add_8x6
+.inputs a[0] a[1] a[2] a[3] a[4] a[5] a[6] a[7] b[0] b[1] b[2] b[3] b[4] b[5]
+.outputs y[0] y[1] y[2] y[3] y[4] y[5] y[6] y[7] y[8]
+.names gnd
+.names vcc
+1
+.subckt adder a=vcc b=gnd cin=gnd cout=$n26 sumout=$n27
+.subckt adder a=a[0] b=b[0] cin=$n26 cout=$n28 sumout=y[0]
+.subckt adder a=a[1] b=b[1] cin=$n28 cout=$n30 sumout=y[1]
+.subckt adder a=a[2] b=b[2] cin=$n30 cout=$n32 sumout=y[2]
+.subckt adder a=a[3] b=b[3] cin=$n32 cout=$n34 sumout=y[3]
+.subckt adder a=a[4] b=b[4] cin=$n34 cout=$n36 sumout=y[4]
+.subckt adder a=a[5] b=b[5] cin=$n36 cout=$n38 sumout=y[5]
+.subckt adder a=a[6] b=gnd cin=$n38 cout=$n40 sumout=y[6]
+.subckt adder a=a[7] b=gnd cin=$n40 cout=$n42 sumout=y[7]
+.subckt adder a=gnd b=gnd cin=$n42 cout=$n44 sumout=y[8]
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end

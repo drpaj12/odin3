@@ -935,7 +935,10 @@ then the options considered.
     spec M-6 and D7 text are amended. This is what lets `micro/multiply_hard_block.v` match its
     Parmys golden. (b) An unsigned `$mul` with `Y_WIDTH > A_WIDTH + B_WIDTH` stays soft with a
     warning (new D7b; moot after 3G `wreduce`): the gnd merges would allocate after the delete and
-    break H-9. (c) A failed mapping also removes the constant node it created.
+    break H-9. (c) A failed mapping also removes the constant node it created. (d) 3C-2: an
+    `$add`/`$sub` with `Y_WIDTH > max(A_WIDTH, B_WIDTH) + 1` stays soft with the same warning, for
+    the same H-9 reason (spec A-7 amended). 3G `wreduce` caps Y at `n + 1`, so the target script
+    never hits (b) or (d); 3C Task 4's sweep checks that no such WARNING appears on the 19.
 
 ## Risks
 
