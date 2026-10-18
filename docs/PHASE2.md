@@ -1099,11 +1099,16 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `read_verilog --lib` is that mode, and 2H checks it carries them.
     - **2F follow-ups:** opt-equiv hard-block cut compares ports only, not instance presence or
       parameters (review 2026-10-16); parameters and port widths are compared since #29.
-    - **3G follow-ups:** 20 micro designs have an opt-diff refine step that is unproven (Yosys's
-      SAT proof hits its 60 s limit, the BLIF cec gives no verdict; opt-diff exit 4); they are listed
-      untested for now (size limit), 2026-10-17 (`tests/opt/diff_micro_expect_fail.txt`), and the
-      sweep requires exit 4 of them, so one unproven refine cannot hide another difference.
-      opt-equiv proves one of the 20 (`full/iir_no_combinational.v`). Two more micros
+    - **3G follow-ups:** 20 micro designs have an opt-diff refine step that is unproven under the
+      wreduce/Phase 3 scripts (Yosys's SAT proof hits its 60 s limit, the BLIF cec gives no verdict;
+      opt-diff exit 4); they are listed untested for now (size limit), 2026-10-17
+      (`tests/opt/diff_micro_wreduce_expect_fail.txt`), and the sweep requires exit 4 of them, so one
+      unproven refine cannot hide another difference. Under the Phase 2 script and `opt -full`
+      (`opt_diff_micro`, first run 2026-10-18) 15 of them stay unproven and `large/LU32PEEng.v` also
+      loses Yosys to the memory cap (`tests/opt/diff_micro_phase2_expect_fail.txt`); five refine
+      without a limit there (`full/diffeq1.v`, `syntax/diffeq_paj_convert.v`, `large/spree.v`,
+      `full/cf_fft_256_8.v`, `full/iir_no_combinational.v`) and are not listed. opt-equiv proves one
+      of the 20 (`full/iir_no_combinational.v`). Two more micros
       (`large/LU64PEEng.v`, `large/arm_core.v`) are exit 4 because Yosys is killed at the 2 GiB cap,
       and three are rejected by Yosys 0.55 (exit 2, same list). `large/sv_chip0_hierarchy_no_mem.v`
       is structural-identity only: its refine step passes (`tests/opt/diff_expect.txt`).

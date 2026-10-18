@@ -1,4 +1,4 @@
-# tests/opt/diff_micro_expect_fail.txt: the micros opt_diff_micro and opt_diff_micro_wreduce expect to
+# tests/opt/diff_micro_expect_fail.txt: the micros opt_diff_micro and opt_diff_micro_wreduce both expect to
 # fail beyond tests/proc/micro_expect_fail.txt and tests/opt/micro_expect_fail.txt. Only the opt-diff
 # sweeps read this file: both lists below are about Yosys, which opt-equiv does not run on the original
 # the same way (paj_framebuftop passes opt_equiv_micro_phase3, paj_raygentop and LU64PEEng/arm_core are
@@ -23,28 +23,7 @@ large/paj_raygentop_hierarchy_no_mem.v [Multiple edge sensitive events] Yosys 0.
 # difference in the same file is exit 1, and the sweep reports it as an unexpected failure.
 large/LU64PEEng.v [opt-diff: unproven: yosys] untested for now (size limit): Yosys killed at the 2 GiB cap (BLIF lowering of the opt-diff netlists); 178350 B source
 large/arm_core.v [opt-diff: unproven: yosys] untested for now (size limit): Yosys killed at the 2 GiB cap; 345328 B source
-# 2026-10-17 rerun on c7896ac (opt_diff_micro_wreduce): these 20 fail only on opt-diff's refine step, which is
-# unproven (yosys-refine SAT 60 s limit, BLIF cec no verdict) under the wreduce and/or phase3 scripts; every other differing
-# step is listed in diff_expect.txt (and opt-diff exits 4, not 1, only because of that). Per PHASE2 #29 they are
-# untested for now (size limit), never a pass. full/iir_no_combinational.v is in this list although opt_equiv_micro_phase3
-# proves it: opt-diff's own refine step is unproven there, and the equivalence is what #29 asks for.
-full/diffeq1.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 1409 B source, 865.377 s in the 2026-10-17 sweep
-syntax/diffeq_paj_convert.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 1409 B source, 860.150 s in the 2026-10-17 sweep
-full/iir_no_combinational.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 4627 B source, 132.474 s in the 2026-10-17 sweep
-full/stereovision2.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 63133 B source, 1635.521 s in the 2026-10-17 sweep
-full/oc54_cpu.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 65857 B source, 882.157 s in the 2026-10-17 sweep
-large/sv_chip2_hierarchy_no_mem.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 66245 B source, 437.899 s in the 2026-10-17 sweep
-large/spree.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 68378 B source, 84.834 s in the 2026-10-17 sweep
-large/bgm.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 71513 B source, 967.996 s in the 2026-10-17 sweep
-large/boundtop.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 72115 B source, 136.325 s in the 2026-10-17 sweep
-large/raygentop.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 84884 B source, 88.000 s in the 2026-10-17 sweep
-large/sv_chip1_hierarchy_no_mem.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 101811 B source, 218.059 s in the 2026-10-17 sweep
-full/stereovision1.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 103022 B source, 1271.163 s in the 2026-10-17 sweep
-full/cf_fft_256_8.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 122569 B source, 1219.674 s in the 2026-10-17 sweep
-full/stereovision0.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 132421 B source, 160.830 s in the 2026-10-17 sweep
-large/or1200.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 136931 B source, 132.038 s in the 2026-10-17 sweep
-full/LU8PEEng.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 141390 B source, 281.480 s in the 2026-10-17 sweep
-large/mkSMAdapter4B.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 141554 B source, 126.750 s in the 2026-10-17 sweep
-large/LU32PEEng.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 157618 B source, 765.704 s in the 2026-10-17 sweep
-large/mkDelayWorker32B.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 207980 B source, 135.689 s in the 2026-10-17 sweep
-syntax/cf_fft_1024_16.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; BLIF cec gave no verdict); 236934 B source, 1422.708 s in the 2026-10-17 sweep
+#
+# The micros whose opt-diff refine step is unproven (exit 4) differ by sweep and are listed per sweep: Phase 2 and opt -full in
+# tests/opt/diff_micro_phase2_expect_fail.txt (opt_diff_micro), wreduce and Phase 3 in tests/opt/diff_micro_wreduce_expect_fail.txt
+# (opt_diff_micro_wreduce). One sweep reads one of them, never both (a path may be in one file only).
