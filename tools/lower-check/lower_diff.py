@@ -4,7 +4,8 @@ Usage::
 
     lower-diff --odin3 O --yosys Y [--top T] [--family F] [--tier S|T|D] [--lower-args A]
                [--pre CMDS] [--expect F] [--root R] [--techlib L] [--parmys-techlibs DIR]
-               [--map M]... [--netlist-compare N] [--equiv-check E] [--mem-cap C] [--work DIR]
+               [--parmys-exact] [--map M]... [--netlist-compare N] [--equiv-check E]
+               [--mem-cap C] [--work DIR]
                [--each] [--verbose] FILE...
 
 Per design (the FILEs together; with ``--each``, every FILE is its own design):
@@ -68,10 +69,18 @@ NETLIST_COMPARE = HERE.parent / "netlist-compare" / "netlist-compare"
 EQUIV_CHECK = HERE.parent / "equiv-check" / "equiv-check"
 STEPS = ("histogram", "identity", "equiv", "compared")
 DEFAULT_PRE = ("proc", "opt")
+# The latch fixtures: `opt` folds an active-low enable into the latch last and leaves the dead
+# inverter cells of the condition; `opt_clean` removes them (Yosys's opt does both).
+LATCH_PRE = ("proc", "opt", "opt_clean")
 YOSYS_BLIF = "write_blif -icells -true + vcc -false + gnd -undef + unconn"
 EQUIV_OK, EQUIV_DIFFERENT, EQUIV_ERROR, EQUIV_X, EQUIV_UNPROVEN, EQUIV_HARD = 0, 1, 2, 3, 4, 5
 ASYNC_TYPES = frozenset({"$adff", "$adffe", "$aldff", "$aldffe", "$dffsr", "$dffsre",
                          "$adlatch", "$dlatchsr", "$sr", "$mem"})
+# Families whose lowered netlist holds storage bit cells, which write_rtlil rejects (1F): the Odin
+# III side is written as BLIF only and the histograms are read from the BLIFs.
+BLIF_ONLY_FAMILIES = frozenset({"ff", "latch", "mem"})
+# The Yosys commands a family runs on in.il before the techmap: the memory flow of plan Task 8.
+YOSYS_PRE = {"mem": ("memory -nomap", "memory_map")}
 VERSION_WORD = re.compile(r"Yosys\s+(\d+\.\d+)")
 
 
@@ -86,7 +95,11 @@ class Family:
 
 # The maps of a name are looked up beside this tool (maps/) first, then in --parmys-techlibs.
 FF_MAPS = ("adff2dff.v", "adffe2dff_reset_first.v", "aldff2dff.v", "aldffe2dff_reset_first.v",
-           "dffsre2dff.v")
+           "dffsr2dff.v", "dffsre2dff.v")
+# --parmys-exact: Parmys's own enable-over-reset maps in place of the reset-first ones (spec 16
+# row 4).
+PARMYS_EXACT = {"adffe2dff_reset_first.v": "adffe2dff.v",
+                "aldffe2dff_reset_first.v": "aldffe2dff.v"}
 FAMILIES = {
     "bitwise": Family("bitwise", "S"),
     "pmux": Family("pmux", "T"),
@@ -116,6 +129,10 @@ def tier_of(family: Family, forced: str | None, in_il: str) -> str:
     return "D" if lc.cell_types(in_il) & ASYNC_TYPES else "S"
 
 
+def default_pre(family: Family) -> tuple[str, ...]:
+    return LATCH_PRE if family.name == "latch" else DEFAULT_PRE
+
+
 def resolve_map(name: str, parmys_dir: Path | None) -> Path:
     """The path of a map: ``maps/<name>`` of this tool, else ``<parmys-techlibs>/<name>``."""
     own = MAPS / name
@@ -136,20 +153,26 @@ class Plan:
     pre: tuple[str, ...]
     lower_args: str
     techlib: str | None
+    rtlil_out: bool = True
+    nolatches: bool = True  # False for the latch family: the fixtures need the inferred latches
 
 
 def odin_script(plan: Plan, work: Path) -> str:
     """Step 1's Odin III ``-p`` script."""
-    front = lc.read_front(plan.files, plan.top, plan.techlib)
+    front = lc.read_front(plan.files, plan.top, plan.techlib, plan.nolatches)
     lower = f"lower {plan.lower_args}".strip()
+    if not plan.rtlil_out:  # the storage bit cells have no RTLIL form (1F): BLIF only
+        return "; ".join([*front, *plan.pre, f"write_rtlil {work / 'in.il'}", lower,
+                          f"write_blif {work / 'lo.blif'}"])
     return "; ".join([*front, *plan.pre, f"write_rtlil {work / 'in.il'}", lower,
                       f"write_rtlil {work / 'lo.il'}", f"write_blif {work / 'lo.blif'}",
                       "opt -fast", f"write_rtlil {work / 'lo_opt.il'}"])
 
 
-def yosys_script(work: Path, maps: Sequence[Path]) -> str:
-    """Step 2's Yosys 0.55 ``-p`` script."""
-    return "; ".join([f"read_rtlil {work / 'in.il'}", *(f"techmap -map {m}" for m in maps),
+def yosys_script(work: Path, maps: Sequence[Path], pre: Sequence[str] = ()) -> str:
+    """Step 2's Yosys 0.55 ``-p`` script; ``pre`` runs right after the read (``mem``:
+    ``memory -nomap; memory_map``)."""
+    return "; ".join([f"read_rtlil {work / 'in.il'}", *pre, *(f"techmap -map {m}" for m in maps),
                       "techmap", "dffunmap", "opt_clean -purge", f"write_rtlil {work / 'yo.il'}",
                       f"{YOSYS_BLIF} {work / 'yo.blif'}", "opt -fast",
                       f"write_rtlil {work / 'yo_opt.il'}"])
@@ -217,14 +240,17 @@ class Diff:
     def run(self, files: Sequence[str], run_dir: Path) -> Result:
         args = self.args
         family = family_named(args.family)
-        plan = Plan(tuple(files), args.top, tuple(args.pre or DEFAULT_PRE), args.lower_args or "",
-                    self.techlib)
+        plan = Plan(tuple(files), args.top, tuple(args.pre or default_pre(family)),
+                    args.lower_args or "", self.techlib, family.name not in BLIF_ONLY_FAMILIES,
+                    family.name != "latch")
         self.must("odin3", [lc.exe(args.odin3), *lc.odin_args(args.top), "-p",
                             odin_script(plan, run_dir)], run_dir)
         in_il = (run_dir / "in.il").read_text(encoding="utf-8")
         result = Result(family.name, tier_of(family, args.tier, in_il), cells=word_cells(in_il))
-        maps = [resolve_map(n, self.parmys) for n in family.maps] + [Path(m) for m in args.map]
-        self.must("yosys", [lc.exe(args.yosys), "-p", yosys_script(run_dir, maps)], run_dir)
+        names = [PARMYS_EXACT.get(n, n) if args.parmys_exact else n for n in family.maps]
+        maps = [resolve_map(n, self.parmys) for n in names] + [Path(m) for m in args.map]
+        self.must("yosys", [lc.exe(args.yosys), "-p",
+                            yosys_script(run_dir, maps, YOSYS_PRE.get(family.name, ()))], run_dir)
         self.judge(result, run_dir)
         return result
 
@@ -232,16 +258,23 @@ class Diff:
         """lo.blif and yo.blif without unused constant generators, as lo.norm.blif/yo.norm.blif."""
         for name in ("lo", "yo"):
             text = (run_dir / f"{name}.blif").read_text(encoding="utf-8")
-            (run_dir / f"{name}.norm.blif").write_text(lc.strip_unused_constants(text),
-                                                       encoding="utf-8")
+            text = lc.strip_unused_constants(text)
+            text = lc.storage_to_latch(text) if name == "yo" else text
+            (run_dir / f"{name}.norm.blif").write_text(text, encoding="utf-8")
 
     def judge(self, result: Result, run_dir: Path) -> None:
         self.normalise(run_dir)
         tier = result.tier
         if tier in ("S", "T"):
             raw = tier == "S"
-            odin = lc.histogram((run_dir / ("lo.il" if raw else "lo_opt.il")).read_text("utf-8"))
-            yosys = lc.histogram((run_dir / ("yo.il" if raw else "yo_opt.il")).read_text("utf-8"))
+            if result.family in BLIF_ONLY_FAMILIES:
+                odin = lc.blif_histogram((run_dir / "lo.norm.blif").read_text("utf-8"))
+                yosys = lc.blif_histogram((run_dir / "yo.norm.blif").read_text("utf-8"))
+            else:
+                lo_il = run_dir / ("lo.il" if raw else "lo_opt.il")
+                yo_il = run_dir / ("yo.il" if raw else "yo_opt.il")
+                odin = lc.histogram(lo_il.read_text("utf-8"))
+                yosys = lc.histogram(yo_il.read_text("utf-8"))
             diff = lc.histogram_diff(odin, yosys)
             if diff:
                 result.differences["histogram"] = diff
@@ -264,7 +297,11 @@ class Diff:
         for name in ("lo", "yo"):
             text = (run_dir / f"{name}.norm.blif").read_text(encoding="utf-8")
             (run_dir / f"{name}.eq.blif").write_text(lc.with_gate_models(text), encoding="utf-8")
-        done = self.child("equiv-check", [self.args.equiv_check, str(run_dir / "lo.eq.blif"),
+        # memory_map leaves the leaves past SIZE undriven (x); equiv-check ties them to 0, as the
+        # $_CONSTX_ leaves of lower (spec 7) are.
+        extra = ["--allow-undriven"] if result.family == "mem" else []
+        done = self.child("equiv-check", [self.args.equiv_check, *extra,
+                                          str(run_dir / "lo.eq.blif"),
                                           str(run_dir / "yo.eq.blif")], run_dir)
         out = (done.stdout or "") + (done.stderr or "")
         if done.returncode == EQUIV_OK:
@@ -354,6 +391,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--techlib", help="read this tech library (.o3lib) first")
     ap.add_argument("--parmys-techlibs", metavar="DIR",
                     help="Parmys's techlibs (default $VTR_ROOT/parmys/parmys-plugin/techlibs)")
+    ap.add_argument("--parmys-exact", action="store_true",
+                    help="use Parmys's unmodified adffe2dff.v / aldffe2dff.v (the enable over the "
+                         "reset, spec 16 row 4) instead of the reset-first maps")
     ap.add_argument("--map", action="append", default=[], metavar="M",
                     help="an extra techmap file for the Yosys side (repeatable)")
     ap.add_argument("--netlist-compare", default=str(NETLIST_COMPARE), metavar="N")

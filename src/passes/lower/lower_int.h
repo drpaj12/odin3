@@ -131,6 +131,8 @@ typedef struct lw_totals {
     uint64_t nodes;           /* bit nodes created (constants included) */
     uint64_t modules;         /* modules with at least one word cell */
     uint64_t mixed_sign;      /* cells warned of for A_SIGNED != B_SIGNED */
+    uint64_t async_bits;      /* flip-flop bits whose async control was made synchronous */
+    uint64_t async_cells;     /* the cells those bits belong to */
     uint64_t soft[LW_N_SOFT]; /* cells of $add, $mem, $mul, $sub (the soft-logic INFO line) */
 } lw_totals;
 
@@ -201,6 +203,20 @@ odin3_status lw_const(lw_ctx *lw, odin3_bit bit, odin3_net_id *out);
 odin3_status lw_gate(lw_ctx *lw, lw_kind kind, const odin3_net_id *in, uint32_t n_in,
                      odin3_net_id *out_net);
 
+/* A gate to create on the net `out_net` (made by lw_net): `kind` on `in[0 .. n_in)` (input ports in
+ * order), with the node parameters `params` (one value: the INIT of a storage cell; NULL: the
+ * defaults). */
+typedef struct lw_gate_spec {
+    lw_kind kind;
+    const odin3_net_id *in;
+    uint32_t n_in;
+    const odin3_value *params;
+} lw_gate_spec;
+
+/* The gate of `spec` driving the existing net out_net (a storage cell's Q is read before it is
+ * built, so its net is made first). Same failure modes as lw_gate. */
+odin3_status lw_gate_on(lw_ctx *lw, const lw_gate_spec *spec, odin3_net_id out_net);
+
 odin3_status lw_not(lw_ctx *lw, odin3_net_id src, odin3_net_id *out_net);
 odin3_status lw_and(lw_ctx *lw, odin3_net_id lhs, odin3_net_id rhs, odin3_net_id *out_net);
 odin3_status lw_or(lw_ctx *lw, odin3_net_id lhs, odin3_net_id rhs, odin3_net_id *out_net);
@@ -209,6 +225,24 @@ odin3_status lw_xnor(lw_ctx *lw, odin3_net_id lhs, odin3_net_id rhs, odin3_net_i
 /* Y = sel ? rhs : lhs (`$_MUX_`: A when S is 0). */
 odin3_status lw_mux(lw_ctx *lw, odin3_net_id lhs, odin3_net_id rhs, odin3_net_id sel,
                     odin3_net_id *out_net);
+
+/* A control net with its polarity (high: active when 1). */
+typedef struct lw_sel {
+    odin3_net_id net;
+    bool high;
+} lw_sel;
+
+/* `then_net` when `sel` is active, else `else_net`: one `$_MUX_`, the arms swapped for an
+ * active-low control (no inverter node). */
+odin3_status lw_pick(lw_ctx *lw, lw_sel sel, odin3_net_id then_net, odin3_net_id else_net,
+                     odin3_net_id *out_net);
+
+/* A cell's port nets by port name ({NULL, 0}: the type has no such port), a parameter by name
+ * (NULL: none) and a polarity parameter (true: active high, also when the type has no such
+ * parameter). */
+lw_span lw_cell_span(const lw_cell *cell, const char *name);
+const odin3_value *lw_cell_param(const lw_cell *cell, const char *name);
+bool lw_cell_polarity(const lw_cell *cell, const char *name);
 
 /*
  * The signedness `lower` extends a cell's operands by (spec §3.3, PHASE2 #25): A_SIGNED alone for a
@@ -462,6 +496,47 @@ uint64_t lw_divmod_u_gates(uint64_t width, bool want_rem);
 LW_DECLARE_BUILDER(div);
 LW_DECLARE_BUILDER(mod);
 
+/* --- ff.c: the eleven word flip-flops (spec §6.1; PHASE3 decision 19) ----------------------------
+ */
+
+LW_DECLARE_BUILDER(dff);
+LW_DECLARE_BUILDER(dffe);
+LW_DECLARE_BUILDER(sdff);
+LW_DECLARE_BUILDER(sdffe);
+LW_DECLARE_BUILDER(sdffce);
+LW_DECLARE_BUILDER(adff);
+LW_DECLARE_BUILDER(adffe);
+LW_DECLARE_BUILDER(aldff);
+LW_DECLARE_BUILDER(aldffe);
+LW_DECLARE_BUILDER(dffsr);
+LW_DECLARE_BUILDER(dffsre);
+
+/* --- mem.c: $mem to flip-flops and multiplexers (spec §7, LW-9) ---------------------------------
+ */
+
+LW_DECLARE_BUILDER(mem);
+
+/* With a `$mem` node: logs the error the pre-scan finds (spec §7: the bit cap, an asynchronous
+ * write port, write ports on different clocks or polarities, ABITS above 64) as `lower: module
+ * 'm': '$mem' '<cell>' <reason>` and returns true. False for any other type and for a `$mem` with
+ * no read port (it is deleted). Nothing has been changed yet. */
+bool lw_mem_refused(const lw_ctx *lw, odin3_node_id node, const char *type_name);
+
+/* --- latch.c: $dlatch $adlatch $dlatchsr $sr (spec §6.2, LW-8) ----------------------------------
+ */
+
+LW_DECLARE_BUILDER(dlatch);
+LW_DECLARE_BUILDER(adlatch);
+LW_DECLARE_BUILDER(dlatchsr);
+LW_DECLARE_BUILDER(sr);
+
+/* True for the FF types whose asynchronous set, reset or load `lower` makes synchronous. */
+bool lw_ff_is_async(const char *type_name);
+
+/* With `--async error` and an async FF type: logs `lower: module 'm': asynchronous control on
+ * '<type>' '<cell>'` and returns true (the pre-scan of the run; nothing has been changed yet). */
+bool lw_ff_async_refused(const lw_ctx *lw, odin3_node_id node, const char *type_name);
+
 /* --- dispatch (dispatch.c) ---------------------------------------------------------------- */
 
 typedef odin3_status (*lw_build_fn)(lw_ctx *lw, const lw_cell *cell, lw_bits *out);
@@ -484,12 +559,10 @@ const lw_rule *lw_rule_at(uint32_t idx);
 /*
  * Word types the registry has and `lower` deliberately has no rule for (spec §5.7, §8): $proc,
  * $tribuf, $pow, $memrd, $memwr. lw_no_rule_listed says so; lw_log_no_rule logs the error of the
- * type (its own text, else "no lowering rule for cell type"). `pending` types get their rule in a
- * later task of the plan (lw_rule_pending); the completeness test reads both lists, so a cell type
- * added to the registry later fails it.
+ * type (its own text, else "no lowering rule for cell type"). The completeness test reads the rule
+ * table and this list, so a cell type added to the registry later fails it.
  */
 bool lw_no_rule_listed(const char *type_name);
-bool lw_rule_pending(const char *type_name);
 void lw_log_no_rule(const lw_ctx *lw, odin3_node_id node, const char *type_name);
 
 #endif

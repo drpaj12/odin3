@@ -1,7 +1,7 @@
 /*
  * dispatch.c — the rule table of `lower` (3B plan Task 1, point (e)): one entry per word cell
  * type that has a builder, found by the type's name (resolved to type IDs once per run by the
- * driver), the types that deliberately have none and the ones whose rule a later task adds.
+ * driver) and the types that deliberately have none.
  */
 #include "passes/lower/lower_int.h"
 #include "passes/lower/lower_test.h"
@@ -18,8 +18,19 @@
 
 static const lw_rule k_rules[] = {
     LW_RULE("$add", add),
+    LW_RULE("$adff", adff),
+    LW_RULE("$adffe", adffe),
+    LW_RULE("$adlatch", adlatch),
+    LW_RULE("$aldff", aldff),
+    LW_RULE("$aldffe", aldffe),
     LW_RULE("$and", and),
+    LW_RULE("$dff", dff),
+    LW_RULE("$dffe", dffe),
+    LW_RULE("$dffsr", dffsr),
+    LW_RULE("$dffsre", dffsre),
     LW_RULE("$div", div),
+    LW_RULE("$dlatch", dlatch),
+    LW_RULE("$dlatchsr", dlatchsr),
     LW_RULE("$eq", eq),
     LW_RULE("$ge", ge),
     LW_RULE("$gt", gt),
@@ -28,6 +39,7 @@ static const lw_rule k_rules[] = {
     LW_RULE("$logic_not", logic_not),
     LW_RULE("$logic_or", logic_or),
     LW_RULE("$lt", lt),
+    LW_RULE("$mem", mem),
     LW_RULE("$mod", mod),
     LW_RULE("$mul", mul),
     LW_RULE("$mux", mux),
@@ -41,9 +53,13 @@ static const lw_rule k_rules[] = {
     LW_RULE("$reduce_or", reduce_or),
     LW_RULE("$reduce_xnor", reduce_xnor),
     LW_RULE("$reduce_xor", reduce_xor),
+    LW_RULE("$sdff", sdff),
+    LW_RULE("$sdffce", sdffce),
+    LW_RULE("$sdffe", sdffe),
     LW_RULE("$shiftx", shiftx),
     LW_RULE("$shl", shl),
     LW_RULE("$shr", shr),
+    LW_RULE("$sr", sr),
     LW_RULE("$sshr", sshr),
     LW_RULE("$sub", sub),
     LW_RULE("$xnor", xnor),
@@ -85,12 +101,6 @@ const lw_rule *lw_rule_find(const char *type_name) {
 /* Word types with no bit form, by design (spec §5.7, §7, §8, Peter's ruling 4 of PHASE3 #32). */
 static const char *const k_no_rule[] = {"$proc", "$tribuf", "$pow", "$memrd", "$memwr"};
 
-/* Word types whose rule a later task adds (plan Tasks 4 to 8). */
-static const char *const k_pending[] = {
-    "$dff",    "$dffe",  "$sdff",   "$sdffe",  "$sdffce",  "$adff",     "$adffe", "$aldff",
-    "$aldffe", "$dffsr", "$dffsre", "$dlatch", "$adlatch", "$dlatchsr", "$sr",    "$mem",
-};
-
 static bool listed(const char *const *names, size_t count, const char *type_name) {
     for (size_t i = 0; i < count; i++) {
         if (strcmp(names[i], type_name) == 0) {
@@ -102,10 +112,6 @@ static bool listed(const char *const *names, size_t count, const char *type_name
 
 bool lw_no_rule_listed(const char *type_name) {
     return listed(k_no_rule, sizeof k_no_rule / sizeof k_no_rule[0], type_name);
-}
-
-bool lw_rule_pending(const char *type_name) {
-    return listed(k_pending, sizeof k_pending / sizeof k_pending[0], type_name);
 }
 
 void lw_log_no_rule(const lw_ctx *lw, odin3_node_id node, const char *type_name) {
@@ -124,7 +130,7 @@ void lw_log_no_rule(const lw_ctx *lw, odin3_node_id node, const char *type_name)
     } else if (strcmp(type_name, "$memrd") == 0 || strcmp(type_name, "$memwr") == 0) {
         odin3_log(ODIN3_LOG_ERROR, "lower: standalone $memrd/$memwr '%s' (use $mem)", label);
     } else {
-        odin3_log(ODIN3_LOG_ERROR, "lower: no lowering rule for cell type '%s' ('%s')%s", type_name,
-                  label, lw_rule_pending(type_name) ? ": not implemented yet (3B-2)" : "");
+        odin3_log(ODIN3_LOG_ERROR, "lower: no lowering rule for cell type '%s' ('%s')", type_name,
+                  label);
     }
 }

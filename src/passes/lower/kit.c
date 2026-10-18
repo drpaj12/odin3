@@ -284,6 +284,9 @@ static odin3_status gate_name(lw_ctx *lw, lw_kind kind, uint32_t *out) {
     return st;
 }
 
+/* The most pins of a gate `lower` creates: a $_MUX_ has three inputs and one output. */
+enum { MAX_GATE_PINS = 4 };
+
 /* Creates the node of `type` named `name` (0: unnamed) on `ports` (inputs then the output). */
 static odin3_status make_node(lw_ctx *lw, odin3_celltype_id type, uint32_t name,
                               const odin3_value *params, const odin3_netvec *ports) {
@@ -302,8 +305,7 @@ static odin3_status make_node(lw_ctx *lw, odin3_celltype_id type, uint32_t name,
     return st == ODIN3_OK ? budget_tick(lw) : st;
 }
 
-odin3_status lw_gate(lw_ctx *lw, lw_kind kind, const odin3_net_id *in, uint32_t n_in,
-                     odin3_net_id *out_net) {
+odin3_status lw_gate_on(lw_ctx *lw, const lw_gate_spec *spec, odin3_net_id out_net) {
     if (lw->gates >= lw->cap_cell) {
         char label[LW_LABEL_LEN];
         lw_node_label(lw, lw->cur, label, sizeof label);
@@ -314,27 +316,35 @@ odin3_status lw_gate(lw_ctx *lw, lw_kind kind, const odin3_net_id *in, uint32_t 
                   label, lw->cap_cell, lw->cap_cell);
         return ODIN3_ERR_INVALID_ARG;
     }
-    odin3_net_id nets[4];
-    for (uint32_t i = 0; i < n_in; i++) {
-        nets[i] = in[i];
+    odin3_net_id nets[MAX_GATE_PINS];
+    for (uint32_t i = 0; i < spec->n_in; i++) {
+        nets[i] = spec->in[i];
     }
-    odin3_status st = lw_net(lw, &nets[n_in]);
-    if (st != ODIN3_OK) {
-        return st;
-    }
-    odin3_netvec ports[4];
-    for (uint32_t i = 0; i <= n_in; i++) {
+    nets[spec->n_in] = out_net;
+    odin3_netvec ports[MAX_GATE_PINS];
+    for (uint32_t i = 0; i <= spec->n_in; i++) {
         ports[i] = (odin3_netvec){&nets[i], 1};
     }
     uint32_t name = 0;
-    st = gate_name(lw, kind, &name);
-    st = st == ODIN3_OK ? make_node(lw, lw->gate[kind], name, NULL, ports) : st;
+    odin3_status st = gate_name(lw, spec->kind, &name);
+    st = st == ODIN3_OK ? make_node(lw, lw->gate[spec->kind], name, spec->params, ports) : st;
     if (st != ODIN3_OK) {
         return st;
     }
     lw->gates++;
-    *out_net = nets[n_in];
     return ODIN3_OK;
+}
+
+odin3_status lw_gate(lw_ctx *lw, lw_kind kind, const odin3_net_id *in, uint32_t n_in,
+                     odin3_net_id *out_net) {
+    odin3_net_id net = {0};
+    odin3_status st = lw_net(lw, &net);
+    const lw_gate_spec spec = {kind, in, n_in, NULL};
+    st = st == ODIN3_OK ? lw_gate_on(lw, &spec, net) : st;
+    if (st == ODIN3_OK) {
+        *out_net = net;
+    }
+    return st;
 }
 
 odin3_status lw_not(lw_ctx *lw, odin3_net_id src, odin3_net_id *out_net) {
@@ -365,6 +375,45 @@ odin3_status lw_mux(lw_ctx *lw, odin3_net_id lhs, odin3_net_id rhs, odin3_net_id
                     odin3_net_id *out_net) {
     const odin3_net_id in[3] = {lhs, rhs, sel};
     return lw_gate(lw, LW_G_MUX, in, 3, out_net);
+}
+
+odin3_status lw_pick(lw_ctx *lw, lw_sel sel, odin3_net_id then_net, odin3_net_id else_net,
+                     odin3_net_id *out_net) {
+    return sel.high ? lw_mux(lw, else_net, then_net, sel.net, out_net)
+                    : lw_mux(lw, then_net, else_net, sel.net, out_net);
+}
+
+static uint32_t port_index(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; name != NULL && i < def->n_ports; i++) {
+        if (strcmp(def->ports[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
+}
+
+static uint32_t param_index(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; name != NULL && i < def->n_params; i++) {
+        if (strcmp(def->params[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
+}
+
+lw_span lw_cell_span(const lw_cell *cell, const char *name) {
+    uint32_t idx = port_index(cell->def, name);
+    return idx == UINT32_MAX ? (lw_span){NULL, 0} : cell->port[idx];
+}
+
+const odin3_value *lw_cell_param(const lw_cell *cell, const char *name) {
+    uint32_t idx = param_index(cell->def, name);
+    return idx == UINT32_MAX ? NULL : &cell->params[idx];
+}
+
+bool lw_cell_polarity(const lw_cell *cell, const char *name) {
+    const odin3_value *param = lw_cell_param(cell, name);
+    return param == NULL || param->i != 0;
 }
 
 odin3_status lw_const(lw_ctx *lw, odin3_bit bit, odin3_net_id *out) {

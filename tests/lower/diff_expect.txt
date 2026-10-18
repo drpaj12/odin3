@@ -16,3 +16,9 @@ shiftx_w8b4_y2.v shift equiv open (x) output bits resolved to 1 by Yosys and to 
 # A mux with a constant-0 data input and a free select: Yosys's map runs `opt_expr -mux_bool -fine`
 # inside itself, which turns it into an AND; `opt -fast` here leaves the mux (spec 16 row 10).
 shl_w3b2_y6.v shift histogram mux_bool inside Yosys's shift map makes one AND where lower keeps a $_MUX_ with a constant input
+# ABITS above clog2(SIZE): Yosys's memory_map builds the read mux tree on the low clog2(SIZE)
+# address bits only, so a read at an address outside the memory returns another word; `lower`
+# reads x there (spec 7, the Verilog meaning; a write to such an address is lost in both). The two
+# agree on every address that reaches a word. mem_w4_d4_off1 is a 4-word memory at OFFSET 1 with a
+# 3-bit address.
+mem_w4_d4_off1.v mem equiv reads outside the memory: Yosys wraps to a word (high address bits ignored), lower reads x

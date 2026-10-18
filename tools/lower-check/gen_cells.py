@@ -235,8 +235,155 @@ def div_cells() -> list[Cell]:
     return cells
 
 
+FF_KINDS = ("dff", "dffe", "sdff", "sdffe", "sdffce", "adff", "adffe", "aldff", "aldffe", "dffsr",
+            "dffsre")
+FF_ENABLE_KINDS = ("dffe", "sdffe", "sdffce", "adffe", "aldffe", "dffsre")
+FF_WIDTHS = (1, 4, 8)
+FF_VALUES = {1: "1'b1", 4: "4'd5", 8: "8'hA5"}
+FF_SET_VALUES = {1: "1'b1", 4: "4'b1010", 8: "8'hA5"}
+
+
+def _active(name: str, low: bool) -> str:
+    return f"!{name}" if low else name
+
+
+def _event(name: str, low: bool) -> str:
+    return f"{'negedge' if low else 'posedge'} {name}"
+
+
+def ff_cell(kind: str, width: int, neg_clk: bool, low: bool) -> Cell:
+    """One flip-flop module: ``kind`` is the word cell ``proc; opt`` infers (``$dff``..``$dffsre``),
+    ``neg_clk`` a falling-edge clock, ``low`` every control active low. Reset values are constants
+    (``$dffsr`` gets a set value with ones and a clear value of zeros, so ``proc`` keeps both)."""
+    vec = f"[{width - 1}:0] " if width > 1 else ""
+    value, setv = FF_VALUES[width], FF_SET_VALUES[width]
+    ctl = "ld" if kind.startswith("al") else "rst"
+    ports = ["input clk"]
+    if kind in FF_ENABLE_KINDS:
+        ports.append("input en")
+    if kind.startswith("al"):
+        ports += ["input ld", f"input {vec}ad"]
+    elif kind.startswith("sd") or kind.startswith("ad"):
+        ports.append("input rst")
+    elif kind.startswith("dffsr"):
+        ports += ["input set", "input clr"]
+    ports += [f"input {vec}d", f"output reg {vec}q"]
+    clk_ev = _event("clk", neg_clk)
+    en = _active("en", low)
+    srst = _active("rst", low)
+    if kind == "dff":
+        body = f"always @({clk_ev}) q <= d;"
+    elif kind == "dffe":
+        body = f"always @({clk_ev}) if ({en}) q <= d;"
+    elif kind == "sdff":
+        body = f"always @({clk_ev}) if ({srst}) q <= {value}; else q <= d;"
+    elif kind == "sdffe":
+        body = f"always @({clk_ev}) if ({srst}) q <= {value}; else if ({en}) q <= d;"
+    elif kind == "sdffce":
+        body = f"always @({clk_ev}) if ({en}) begin if ({srst}) q <= {value}; else q <= d; end"
+    elif kind in ("adff", "adffe"):
+        tail = f" else if ({en}) q <= d;" if kind == "adffe" else " else q <= d;"
+        body = (f"always @({clk_ev} or {_event('rst', low)}) "
+                f"if ({_active('rst', low)}) q <= {value};{tail}")
+    elif kind in ("aldff", "aldffe"):
+        tail = f" else if ({en}) q <= d;" if kind == "aldffe" else " else q <= d;"
+        body = (f"always @({clk_ev} or {_event(ctl, low)}) "
+                f"if ({_active(ctl, low)}) q <= ad;{tail}")
+    else:  # dffsr, dffsre
+        tail = f" else if ({en}) q <= d;" if kind == "dffsre" else " else q <= d;"
+        body = (f"always @({clk_ev} or {_event('set', low)} or {_event('clr', low)}) "
+                f"if ({_active('clr', low)}) q <= {width}'d0; "
+                f"else if ({_active('set', low)}) q <= {setv};{tail}")
+    suffix = f"_w{width}" + ("_neg" if neg_clk else "") + ("_lo" if low else "")
+    return Cell(f"{kind}{suffix}", _module(ports, body), "ff")
+
+
+def ff_cells() -> list[Cell]:
+    """The eleven word flip-flops: widths 1, 4, 8 with active-high controls and a rising clock,
+    then at width 4 the falling clock, the active-low controls and both."""
+    cells: list[Cell] = []
+    for kind in FF_KINDS:
+        has_ctl = kind != "dff"
+        cells += [ff_cell(kind, width, False, False) for width in FF_WIDTHS]
+        cells.append(ff_cell(kind, 4, True, False))
+        if has_ctl:
+            cells += [ff_cell(kind, 4, False, True), ff_cell(kind, 4, True, True)]
+    return cells
+
+
+LATCH_WIDTHS = (1, 4, 8)
+
+
+def dlatch_cell(width: int, low: bool) -> Cell:
+    """One ``$dlatch`` module: a level-sensitive ``always @*`` latch, transparent while ``en`` is
+    high (``low``: while it is low, ``EN_POLARITY`` 0). The other latch cells ($adlatch, $dlatchsr,
+    $sr) have no Verilog form that ``proc; opt`` turns into them (Yosys has none either), so they
+    are covered by ``test_lower_latch`` alone."""
+    vec = f"[{width - 1}:0] " if width > 1 else ""
+    ports = ["input en", f"input {vec}d", f"output reg {vec}q"]
+    body = f"always @* if ({_active('en', low)}) q = d;"
+    return Cell(f"dlatch_w{width}{'_lo' if low else ''}", _module(ports, body), "latch")
+
+
+def latch_cells() -> list[Cell]:
+    """The ``$dlatch`` fixtures: widths 1, 4, 8, then the active-low enable at width 4."""
+    return [*(dlatch_cell(width, False) for width in LATCH_WIDTHS), dlatch_cell(4, True)]
+
+
+def _vec(width: int) -> str:
+    return f"[{width - 1}:0] " if width > 1 else ""
+
+
+def _mem_plain(stem: str, width: int, lo: int, hi: int, abits: int) -> Cell:
+    """One memory ``mem[lo:hi]`` of ``width`` bits, one write port and one asynchronous read
+    (a one-bit port is a scalar: Odin III names a ``[0:0]`` vector's bit ``x[0]``)."""
+    text = (f"module m(input clk, input we, input {_vec(abits)}wa, input {_vec(width)}wd, "
+            f"input {_vec(abits)}ra, output {_vec(width)}rd);\n  reg {_vec(width)}mem [{lo}:{hi}];"
+            "\n  always @(posedge clk) if (we) mem[wa] <= wd;\n  assign rd = mem[ra];\nendmodule\n")
+    return Cell(stem, text, "mem")
+
+
+MEM_TWO_PORTS = ("module m(input clk, input we, input we2, input [1:0] wa, input [1:0] wa2, "
+                 "input [3:0] wd, input [3:0] wd2, input [1:0] ra, input [1:0] rb, "
+                 "output [3:0] rd, output [3:0] rd2);\n  reg [3:0] mem [0:3];\n")
+MEM_BYTE_EN = ("module m(input clk, input [1:0] we, input [1:0] wa, input [3:0] wd, "
+               "input [1:0] ra, output [3:0] rd);\n  reg [3:0] mem [0:3];\n"
+               "  always @(posedge clk) begin\n    if (we[0]) mem[wa][1:0] <= wd[1:0];\n"
+               "    if (we[1]) mem[wa][3:2] <= wd[3:2];\n  end\n"
+               "  assign rd = mem[ra];\nendmodule\n")
+MEM_SYNC_READ = ("module m(input clk, input we, input [1:0] wa, input [3:0] wd, input [1:0] ra, "
+                 "output reg [3:0] rd);\n  reg [3:0] mem [0:3];\n  always @(posedge clk) begin\n"
+                 "    if (we) mem[wa] <= wd;\n    rd <= mem[ra];\n  end\nendmodule\n")
+
+
+def mem_cells() -> list[Cell]:
+    """The ``$mem`` fixtures (spec 7): SIZE <= 16 and WIDTH <= 4, so ``equiv-check`` decides them.
+    Sizes (powers of two and not), OFFSET 1, a negative OFFSET, two read ports, two write ports
+    (the later wins), per-bit write enables, a registered read, a falling clock."""
+    plain = _mem_plain("mem_w4_d4", 4, 0, 3, 2)
+    cells = [
+        _mem_plain("mem_w1_d2", 1, 0, 1, 1),
+        plain,
+        _mem_plain("mem_w4_d16", 4, 0, 15, 4),
+        _mem_plain("mem_w2_d6", 2, 0, 5, 3),
+        _mem_plain("mem_w4_d4_off1", 4, 1, 4, 3),
+        _mem_plain("mem_w3_d8_offm2", 3, -2, 5, 3),
+        Cell("mem_w4_d4_r2", MEM_TWO_PORTS + "  always @(posedge clk) if (we) mem[wa] <= wd;\n"
+             "  assign rd = mem[ra];\n  assign rd2 = mem[rb];\nendmodule\n", "mem"),
+        Cell("mem_w4_d4_w2", MEM_TWO_PORTS + "  always @(posedge clk) begin\n"
+             "    if (we) mem[wa] <= wd;\n    if (we2) mem[wa2] <= wd2;\n  end\n"
+             "  assign rd = mem[ra];\n  assign rd2 = mem[rb];\nendmodule\n", "mem"),
+        Cell("mem_w4_d4_be", MEM_BYTE_EN, "mem"),
+        Cell("mem_w4_d4_sync", MEM_SYNC_READ, "mem"),
+        Cell("mem_w4_d4_neg", plain.text.replace("posedge", "negedge"), "mem"),
+    ]
+    return cells
+
+
 FAMILY_GENERATORS = {"bitwise": bitwise_cells, "pmux": pmux_cells, "shift": shift_cells,
-                     "arith": arith_cells, "mul": mul_cells, "div": div_cells}
+                     "arith": arith_cells, "mul": mul_cells, "div": div_cells, "ff": ff_cells,
+                     "latch": latch_cells, "mem": mem_cells}
+
 
 
 def generate(families: Sequence[str]) -> list[Cell]:

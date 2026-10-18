@@ -6,7 +6,8 @@ Usage::
 
 For every ``X.v`` (a directory contributes its ``*.v`` files, smallest first): Odin III runs
 ``read_verilog --nolatches X.v; hierarchy; proc; write_rtlil in.il; lower; write_blif out.blif``
-(no ``opt``: the cell under test must survive). The committed ``X.il`` (the input of ``lower``,
+(no ``opt``: the cell under test must survive; the flip-flop fixtures run ``proc; opt``, which
+infers the enable and synchronous reset). The committed ``X.il`` (the input of ``lower``,
 which ``lower-diff`` hands to Yosys) must equal ``in.il`` byte for byte, and the committed
 ``X.blif`` must be ``netlist-compare``-identical to ``out.blif``. ``--update`` writes both next to
 the ``.v`` instead (overwriting, never removing); review the diff against Yosys with ``lower-diff``
@@ -33,8 +34,26 @@ HERE = Path(__file__).resolve().parent
 NETLIST_COMPARE = HERE.parent / "netlist-compare" / "netlist-compare"
 
 
+# The fixtures that need ``opt`` after ``proc``: a flip-flop's enable and synchronous reset are
+# folded into the cell by ``opt`` (``$dffe``, ``$sdff``, ...); ``proc`` alone leaves ``$dff`` and
+# muxes.
+FF_STEMS = frozenset({"dff", "dffe", "sdff", "sdffe", "sdffce", "adff", "adffe", "aldff", "aldffe",
+                      "dffsr", "dffsre"})
+
+
+def pre_of(source: Path) -> str:
+    """The Odin III commands between ``hierarchy`` and ``lower``: ``proc``, plus ``opt`` for a
+    flip-flop."""
+    stem = source.stem.split("_")[0]
+    if stem == "dlatch":  # `opt` leaves the dead inverters of an active-low enable
+        return "proc; opt; opt_clean"
+    return "proc; opt" if stem in FF_STEMS or stem == "mem" else "proc"
+
+
 def odin_script(source: Path, work: Path) -> str:
-    return "; ".join([f"read_verilog --nolatches {lc.quote(str(source))}", "hierarchy", "proc",
+    flag = "" if source.stem.split("_")[0] == "dlatch" else "--nolatches "
+    return "; ".join([f"read_verilog {flag}{lc.quote(str(source))}", "hierarchy",
+                      pre_of(source),
                       f"write_rtlil {work / 'in.il'}", "lower", f"write_blif {work / 'out.blif'}"])
 
 

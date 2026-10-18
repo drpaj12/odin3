@@ -10,8 +10,8 @@
 tier D): `adffe2dff_reset_first.v` and `aldffe2dff_reset_first.v` are Parmys's `techlibs/` files
 (VTR `3c9a4d23`, read-only under `external/`) with the enable order changed so that an active
 asynchronous reset or load wins over the enable (PHASE3 #32 ruling 1), and `dffsre2dff.v` is
-written in the same style (Parmys does not convert `$dffsre`). Parmys's own `adff2dff.v` and
-`aldff2dff.v` are used unmodified from `$VTR_ROOT/parmys/parmys-plugin/techlibs` (`--parmys-techlibs`).
+written in the same style (Parmys does not convert `$dffsre`). `dffsr2dff.v` is the same without the enable. Parmys's own `adff2dff.v` and
+`aldff2dff.v` are used unmodified from `$VTR_ROOT/parmys/parmys-plugin/techlibs` (`--parmys-techlibs`); `--parmys-exact` also takes Parmys's unmodified `adffe2dff.v` and `aldffe2dff.v` (enable over reset, spec 16 row 4) in place of the reset-first maps. For the `ff` and `latch` families the lowered netlist holds storage bit cells, which `write_rtlil` rejects (1F): `lower-diff` writes only `lo.blif` on the Odin III side, reads both histograms from the BLIFs, and rewrites Yosys's `.subckt $_DFF_P_` as `.latch` before comparing.
 
 Exit codes (one convention across the opt tools): 0 everything holds; 1 a difference; 2 usage or a
 tool error; 3 hard (a child crashed, was killed by a signal or its memory cap, or timed out: never

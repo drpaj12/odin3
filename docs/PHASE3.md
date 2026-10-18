@@ -940,6 +940,17 @@ then the options considered.
     the same H-9 reason (spec A-7 amended). 3G `wreduce` caps Y at `n + 1`, so the target script
     never hits (b) or (d); 3C Task 4's sweep checks that no such WARNING appears on the 19.
 
+40. **3B-3 `lower` `$mem`: transparent read ports keep the RTL-correct bypass** (2026-10-17, branch
+    `feat/3B-3`; agent default, Peter may override). A sync `$mem` read port with `RD_TRANSPARENT`
+    1 is lowered with a write-to-read bypass against the write ports on its clock net and edge, as
+    Yosys's `memory_map` does it (`extract_rdff`, `emulate_transparency`); a write port on another
+    net or edge gets none. This is a **divergence from Parmys**: it never reads `RD_TRANSPARENT`
+    and its target RAMs are read-first, so its netlists read the old value. Peter's rule
+    "match Parmys and WARN" does not apply cleanly (Parmys has no soft-memory path at all), so the
+    RTL meaning wins and a WARNING names the memory and port: `lower: module 'm': memory '<cell>'
+    read port <i> is transparent; lowered with a write-to-read bypass (Parmys reads the old value:
+    PHASE3 #40)`. Spec 3B §7 and §16 row 12b amended; 2D never emits a transparent read.
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this

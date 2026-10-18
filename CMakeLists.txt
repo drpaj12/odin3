@@ -156,6 +156,9 @@ add_library(odin3_core OBJECT
     src/passes/lower/cmp.c
     src/passes/lower/mul.c
     src/passes/lower/div.c
+    src/passes/lower/ff.c
+    src/passes/lower/latch.c
+    src/passes/lower/mem.c
     src/passes/hardmap/register.c
     src/passes/hardmap/hardmap.c
     src/passes/hardmap/hm_kit.c
@@ -887,12 +890,18 @@ if(BUILD_TESTING)
     target_sources(test_lower_mul PRIVATE tests/unit/lower_fixture.c)
     odin3_add_unit_test(test_lower_div)
     target_sources(test_lower_div PRIVATE tests/unit/lower_fixture.c)
+    odin3_add_unit_test(test_lower_ff)
+    target_sources(test_lower_ff PRIVATE tests/unit/lower_fixture.c tests/unit/lower_ffref.c)
+    odin3_add_unit_test(test_lower_latch)
+    target_sources(test_lower_latch PRIVATE tests/unit/lower_fixture.c tests/unit/lower_latchref.c)
+    odin3_add_unit_test(test_lower_mem)
+    target_sources(test_lower_mem PRIVATE tests/unit/lower_fixture.c tests/unit/lower_memref.c)
     odin3_add_unit_test(test_lower_pass)
     target_sources(test_lower_pass PRIVATE tests/unit/lower_fixture.c tests/unit/proc_fixture.c
                    tests/unit/proc_fixture_core.c)
     target_compile_definitions(test_lower_pass PRIVATE
         ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
-    set_tests_properties(test_lower_kit test_lower_bitwise test_lower_pmux_shift test_lower_alu test_lower_mul test_lower_div test_lower_pass PROPERTIES LABELS "unit;lower")
+    set_tests_properties(test_lower_kit test_lower_bitwise test_lower_pmux_shift test_lower_alu test_lower_mul test_lower_div test_lower_ff test_lower_mem test_lower_pass PROPERTIES LABELS "unit;lower")
     # 3B Task 2/3: lower-sim on the hand-built designs (the 1E simulator before = after; a design
     # with a $shiftx is reported skipped), the per-cell goldens (lower-cells) and the CLI line.
     # Labelled `lower`, never `fuzz`: the CI fuzz-smoke build has no odin3 binary.
@@ -2246,7 +2255,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # 3B Task 4: one test per family; tier T (equiv-check and equal histograms after opt -fast)
         # for the techmap.v family. Fixtures are told apart by their file-name prefix.
         file(GLOB _lower_cells CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/lower/cells/*.v)
-        set(_lower_prefixes pmux shl shr sshr shiftx neg add sub lt le gt ge mul div mod)
+        set(_lower_prefixes pmux shl shr sshr shiftx neg add sub lt le gt ge mul div mod
+            dff dffe sdff sdffe sdffce adff adffe aldff aldffe dffsr dffsre dlatch mem)
         set(_lower_family_bitwise "")
         set(_lower_family_pmux "pmux")
         set(_lower_family_shift "shl;shr;sshr;shiftx")
@@ -2281,6 +2291,83 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                                      SKIP_RETURN_CODE 77 TIMEOUT 1800)
             endif()
         endforeach()
+        # 3B Task 6 (spec 14.2, PHASE3 #19): the flip-flops. Tier S (netlist-compare exit 0) for the
+        # synchronous types; tier D (equiv-check) for the asynchronous ones against Yosys's lowering
+        # with tools/lower-check/maps/; the falling-edge fixtures run --neg-edge keep (the default
+        # makes an inverter, which equiv-check does not accept as a clock); and Parmys's unmodified
+        # enable-over-reset maps, which differ exactly on $adffe and $aldffe (spec 16 row 4).
+        set(_ff_sync dff dffe sdff sdffe sdffce)
+        set(_ff_async adff adffe aldff aldffe dffsr dffsre)
+        set(_ff_sync_pos "")
+        set(_ff_async_pos "")
+        set(_ff_neg "")
+        set(_ff_parmys "")
+        foreach(_prefix IN LISTS _ff_sync _ff_async)
+            set(_prefix_files ${_lower_cells})
+            list(FILTER _prefix_files INCLUDE REGEX "/cells/${_prefix}_[^/]*$")
+            set(_prefix_pos ${_prefix_files})
+            list(FILTER _prefix_pos EXCLUDE REGEX "_neg")
+            list(FILTER _prefix_files INCLUDE REGEX "_neg")
+            list(APPEND _ff_neg ${_prefix_files})
+            if(_prefix IN_LIST _ff_sync)
+                list(APPEND _ff_sync_pos ${_prefix_pos})
+            else()
+                list(APPEND _ff_async_pos ${_prefix_pos})
+            endif()
+            if(_prefix MATCHES "^a(dff|ldff)e?$")
+                list(APPEND _ff_parmys ${_prefix_pos})
+            endif()
+        endforeach()
+        if(_ff_sync_pos AND _ff_async_pos AND _ff_neg AND _ff_parmys)
+            set(_lower_diff ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-diff
+                --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055} --family ff)
+            add_test(NAME lower_cells_yosys_ff_sync COMMAND ${_lower_diff} --tier S --each ${_ff_sync_pos})
+            add_test(NAME lower_cells_yosys_ff_async COMMAND ${_lower_diff} --tier D --each ${_ff_async_pos})
+            add_test(NAME lower_cells_yosys_ff_neg
+                COMMAND ${_lower_diff} --lower-args "--neg-edge keep" --each ${_ff_neg})
+            add_test(NAME lower_cells_yosys_ff_parmys
+                COMMAND ${_lower_diff} --parmys-exact
+                        --expect ${PROJECT_SOURCE_DIR}/tests/lower/diff_expect_parmys.txt
+                        --each ${_ff_parmys})
+            set_tests_properties(lower_cells_yosys_ff_sync lower_cells_yosys_ff_async
+                lower_cells_yosys_ff_neg lower_cells_yosys_ff_parmys
+                PROPERTIES LABELS lower SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        endif()
+        # 3B Task 7 (spec 6.2, 14.2): the latches. $dlatch is tier S (netlist-compare exit 0). The
+        # fixtures cover $dlatch only: $adlatch, $dlatchsr and $sr have no Verilog form (proc and
+        # opt infer one $dlatch per bit, in Yosys as in Odin III), so they are covered by
+        # test_lower_latch.
+        set(_latch_files ${_lower_cells})
+        list(FILTER _latch_files INCLUDE REGEX "/cells/dlatch_[^/]*$")
+        if(_latch_files)
+            add_test(NAME lower_cells_yosys_latch
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-diff
+                        --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                        --family latch --tier S --each ${_latch_files})
+            set_tests_properties(lower_cells_yosys_latch PROPERTIES LABELS lower
+                                 SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        endif()
+        # 3B Task 8 (spec 7, 14.2): $mem against Yosys's `memory -nomap; memory_map`, tier D
+        # (equiv-check; SIZE <= 16, WIDTH <= 4 so it decides). The falling-edge fixture runs
+        # --neg-edge keep (equiv-check does not accept an inverter as a clock). mem_w4_d4_off1 is
+        # the listed difference: ABITS above clog2(SIZE) (tests/lower/diff_expect.txt).
+        set(_mem_files ${_lower_cells})
+        list(FILTER _mem_files INCLUDE REGEX "/cells/mem_[^/]*$")
+        set(_mem_neg ${_mem_files})
+        list(FILTER _mem_neg INCLUDE REGEX "_neg")
+        list(FILTER _mem_files EXCLUDE REGEX "_neg")
+        if(_mem_files AND _mem_neg)
+            set(_lower_mem_diff ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-diff
+                --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055} --family mem)
+            add_test(NAME lower_cells_yosys_mem
+                COMMAND ${_lower_mem_diff}
+                        --expect ${PROJECT_SOURCE_DIR}/tests/lower/diff_expect.txt
+                        --each ${_mem_files})
+            add_test(NAME lower_cells_yosys_mem_neg
+                COMMAND ${_lower_mem_diff} --lower-args "--neg-edge keep" --each ${_mem_neg})
+            set_tests_properties(lower_cells_yosys_mem lower_cells_yosys_mem_neg
+                PROPERTIES LABELS lower SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        endif()
         add_test(NAME flatten_diff_fixtures
             COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-diff
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}

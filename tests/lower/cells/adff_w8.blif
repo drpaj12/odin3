@@ -1,0 +1,39 @@
+.model m
+.inputs clk rst d[0] d[1] d[2] d[3] d[4] d[5] d[6] d[7]
+.outputs q[0] q[1] q[2] q[3] q[4] q[5] q[6] q[7]
+.names gnd
+.names vcc
+1
+.subckt $_MUX_ A=d[0] B=vcc S=rst Y=$n32
+.cname q.mux0
+.latch $n32 q[0] re clk 3
+.cname q.dff_p1
+.subckt $_MUX_ A=d[1] B=gnd S=rst Y=$n35
+.cname q.mux2
+.latch $n35 q[1] re clk 3
+.cname q.dff_p3
+.subckt $_MUX_ A=d[2] B=vcc S=rst Y=$n37
+.cname q.mux4
+.latch $n37 q[2] re clk 3
+.cname q.dff_p5
+.subckt $_MUX_ A=d[3] B=gnd S=rst Y=$n39
+.cname q.mux6
+.latch $n39 q[3] re clk 3
+.cname q.dff_p7
+.subckt $_MUX_ A=d[4] B=gnd S=rst Y=$n41
+.cname q.mux8
+.latch $n41 q[4] re clk 3
+.cname q.dff_p9
+.subckt $_MUX_ A=d[5] B=vcc S=rst Y=$n43
+.cname q.mux10
+.latch $n43 q[5] re clk 3
+.cname q.dff_p11
+.subckt $_MUX_ A=d[6] B=gnd S=rst Y=$n45
+.cname q.mux12
+.latch $n45 q[6] re clk 3
+.cname q.dff_p13
+.subckt $_MUX_ A=d[7] B=vcc S=rst Y=$n47
+.cname q.mux14
+.latch $n47 q[7] re clk 3
+.cname q.dff_p15
+.end

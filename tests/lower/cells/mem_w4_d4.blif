@@ -1,0 +1,130 @@
+.model m
+.inputs clk we wa[0] wa[1] wd[0] wd[1] wd[2] wd[3] ra[0] ra[1]
+.outputs rd[0] rd[1] rd[2] rd[3]
+.names gnd
+.names vcc
+1
+.names unconn
+.subckt $_NOT_ A=$n108 Y=$n53
+.cname $c11.not0
+.subckt $_NOT_ A=$n107 Y=$n54
+.cname $c11.not1
+.subckt $_AND_ A=$n53 B=$n54 Y=$n55
+.cname $c11.and2
+.subckt $_AND_ A=$n53 B=$n107 Y=$n56
+.cname $c11.and3
+.subckt $_AND_ A=$n108 B=$n54 Y=$n57
+.cname $c11.and4
+.subckt $_AND_ A=$n108 B=$n107 Y=$n58
+.cname $c11.and5
+.subckt $_AND_ A=$n55 B=$n113 Y=$n60
+.cname $c11.and6
+.subckt $_MUX_ A=$n59 B=$n109 S=$n60 Y=$n61
+.cname $c11.mux7
+.latch $n61 $n59 re clk 3
+.cname $c11.dff_p8
+.subckt $_MUX_ A=$n62 B=$n110 S=$n60 Y=$n63
+.cname $c11.mux9
+.latch $n63 $n62 re clk 3
+.cname $c11.dff_p10
+.subckt $_MUX_ A=$n64 B=$n111 S=$n60 Y=$n65
+.cname $c11.mux11
+.latch $n65 $n64 re clk 3
+.cname $c11.dff_p12
+.subckt $_MUX_ A=$n66 B=$n112 S=$n60 Y=$n67
+.cname $c11.mux13
+.latch $n67 $n66 re clk 3
+.cname $c11.dff_p14
+.subckt $_AND_ A=$n56 B=$n113 Y=$n69
+.cname $c11.and15
+.subckt $_MUX_ A=$n68 B=$n109 S=$n69 Y=$n70
+.cname $c11.mux16
+.latch $n70 $n68 re clk 3
+.cname $c11.dff_p17
+.subckt $_MUX_ A=$n71 B=$n110 S=$n69 Y=$n72
+.cname $c11.mux18
+.latch $n72 $n71 re clk 3
+.cname $c11.dff_p19
+.subckt $_MUX_ A=$n73 B=$n111 S=$n69 Y=$n74
+.cname $c11.mux20
+.latch $n74 $n73 re clk 3
+.cname $c11.dff_p21
+.subckt $_MUX_ A=$n75 B=$n112 S=$n69 Y=$n76
+.cname $c11.mux22
+.latch $n76 $n75 re clk 3
+.cname $c11.dff_p23
+.subckt $_AND_ A=$n57 B=$n113 Y=$n78
+.cname $c11.and24
+.subckt $_MUX_ A=$n77 B=$n109 S=$n78 Y=$n79
+.cname $c11.mux25
+.latch $n79 $n77 re clk 3
+.cname $c11.dff_p26
+.subckt $_MUX_ A=$n80 B=$n110 S=$n78 Y=$n81
+.cname $c11.mux27
+.latch $n81 $n80 re clk 3
+.cname $c11.dff_p28
+.subckt $_MUX_ A=$n82 B=$n111 S=$n78 Y=$n83
+.cname $c11.mux29
+.latch $n83 $n82 re clk 3
+.cname $c11.dff_p30
+.subckt $_MUX_ A=$n84 B=$n112 S=$n78 Y=$n85
+.cname $c11.mux31
+.latch $n85 $n84 re clk 3
+.cname $c11.dff_p32
+.subckt $_AND_ A=$n58 B=$n113 Y=$n87
+.cname $c11.and33
+.subckt $_MUX_ A=$n86 B=$n109 S=$n87 Y=$n88
+.cname $c11.mux34
+.latch $n88 $n86 re clk 3
+.cname $c11.dff_p35
+.subckt $_MUX_ A=$n89 B=$n110 S=$n87 Y=$n90
+.cname $c11.mux36
+.latch $n90 $n89 re clk 3
+.cname $c11.dff_p37
+.subckt $_MUX_ A=$n91 B=$n111 S=$n87 Y=$n92
+.cname $c11.mux38
+.latch $n92 $n91 re clk 3
+.cname $c11.dff_p39
+.subckt $_MUX_ A=$n93 B=$n112 S=$n87 Y=$n94
+.cname $c11.mux40
+.latch $n94 $n93 re clk 3
+.cname $c11.dff_p41
+.subckt $_MUX_ A=$n59 B=$n68 S=ra[0] Y=$n95
+.cname $c11.mux42
+.subckt $_MUX_ A=$n77 B=$n86 S=ra[0] Y=$n96
+.cname $c11.mux43
+.subckt $_MUX_ A=$n95 B=$n96 S=ra[1] Y=rd[0]
+.cname $c11.mux44
+.subckt $_MUX_ A=$n62 B=$n71 S=ra[0] Y=$n98
+.cname $c11.mux45
+.subckt $_MUX_ A=$n80 B=$n89 S=ra[0] Y=$n99
+.cname $c11.mux46
+.subckt $_MUX_ A=$n98 B=$n99 S=ra[1] Y=rd[1]
+.cname $c11.mux47
+.subckt $_MUX_ A=$n64 B=$n73 S=ra[0] Y=$n101
+.cname $c11.mux48
+.subckt $_MUX_ A=$n82 B=$n91 S=ra[0] Y=$n102
+.cname $c11.mux49
+.subckt $_MUX_ A=$n101 B=$n102 S=ra[1] Y=rd[2]
+.cname $c11.mux50
+.subckt $_MUX_ A=$n66 B=$n75 S=ra[0] Y=$n104
+.cname $c11.mux51
+.subckt $_MUX_ A=$n84 B=$n93 S=ra[0] Y=$n105
+.cname $c11.mux52
+.subckt $_MUX_ A=$n104 B=$n105 S=ra[1] Y=rd[3]
+.cname $c11.mux53
+.subckt $_MUX_ A=unconn B=wa[0] S=we Y=$n107
+.cname $c12.mux0
+.subckt $_MUX_ A=unconn B=wa[1] S=we Y=$n108
+.cname $c12.mux1
+.subckt $_MUX_ A=unconn B=wd[0] S=we Y=$n109
+.cname $c13.mux0
+.subckt $_MUX_ A=unconn B=wd[1] S=we Y=$n110
+.cname $c13.mux1
+.subckt $_MUX_ A=unconn B=wd[2] S=we Y=$n111
+.cname $c13.mux2
+.subckt $_MUX_ A=unconn B=wd[3] S=we Y=$n112
+.cname $c13.mux3
+.subckt $_MUX_ A=gnd B=vcc S=we Y=$n113
+.cname $c15.mux0
+.end

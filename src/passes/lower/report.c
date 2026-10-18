@@ -10,6 +10,7 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 static const char *const k_list_names[LW_REP_COUNT] = {"async_to_sync", "neg_edge", "mixed_sign",
                                                        "mem"};
@@ -47,16 +48,28 @@ static odin3_status append_member(odin3_strbuf *out, json_member member) {
     return st == ODIN3_OK ? append_string(out, member.text) : st;
 }
 
+/* Appends the comma-separated `controls` as the JSON strings of one array body. */
+static odin3_status append_controls(odin3_strbuf *out, const char *controls) {
+    odin3_status st = odin3_strbuf_appendf(out, ", \"controls\": [");
+    const char *start = controls;
+    while (st == ODIN3_OK && start != NULL) {
+        const char *comma = strchr(start, ',');
+        size_t len = comma != NULL ? (size_t)(comma - start) : strlen(start);
+        st = odin3_strbuf_appendf(out, start == controls ? "\"" : ", \"");
+        for (size_t i = 0; st == ODIN3_OK && i < len; i++) {
+            st = append_byte(out, (unsigned char)start[i]);
+        }
+        st = st == ODIN3_OK ? odin3_strbuf_appendf(out, "\"") : st;
+        start = comma != NULL ? comma + 1 : NULL;
+    }
+    return st == ODIN3_OK ? odin3_strbuf_appendf(out, "]") : st;
+}
+
 /* The members after "cell": the type, the bits and the optional controls. */
 static odin3_status append_tail(odin3_strbuf *out, const lw_report_entry *entry) {
     odin3_status st = append_member(out, (json_member){"type", entry->type});
     st = st == ODIN3_OK ? odin3_strbuf_appendf(out, ", \"bits\": %" PRIu64, entry->bits) : st;
-    if (st == ODIN3_OK && entry->controls != NULL) {
-        st = odin3_strbuf_appendf(out, ", \"controls\": [");
-        st = st == ODIN3_OK ? append_string(out, entry->controls) : st;
-        st = st == ODIN3_OK ? odin3_strbuf_appendf(out, "]") : st;
-    }
-    return st;
+    return st == ODIN3_OK && entry->controls != NULL ? append_controls(out, entry->controls) : st;
 }
 
 odin3_status lw_report_add(lw_ctx *lw, lw_report_kind kind, const lw_report_entry *entry) {
