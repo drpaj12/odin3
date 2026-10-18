@@ -1360,8 +1360,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       by the cap even at 5G), three small designs under Phase 3 only (`bm_arithmetic_unused_bits`,
       `iir_no_combinational`, `iir`: the base case fails on named wires whose unused upper bits a wreduce
       call drops, x in the gate against defined bits in the gold; the output-only check passes 20 steps;
-      a checker limit, not a size limit), and, in the same lists, `diffeq2` (2131 B; the induction of its multipliers is
-      still unproven after 600 s). `syntax/inferred_ram_w_clog2.v` (1479 B) proves under both scripts
+      a checker limit, not a size limit). `diffeq2` (2131 B) stays unproven: the induction of its
+      multipliers is unproven after 600 s. `syntax/inferred_ram_w_clog2.v` (1479 B) proves under both scripts
       at a 4G cap (its base case peaks at 2.3 GB; the sweeps give it `--cap-for ...=4G`). The seven
       entries only Phase 3 fails moved to `equiv_phase3_expect_fail.txt`. Expected after the
       re-listing: Phase 2 script 0 unexpected, Phase 3 0 unexpected, nothing listed but passing.
