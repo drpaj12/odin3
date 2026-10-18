@@ -1,0 +1,9 @@
+# tests/opt/equiv_phase2_expect_fail.txt: the micros opt_equiv_micro (the Phase 2 script) expects to fail beyond
+# micro_expect_fail.txt and equiv_expect_fail.txt. Format: `<path> [needle] <reason>`.
+#
+# full/matmul.v: under the Phase 3 script the listing is `[not a refinement]` (the wreduce mem_addr skip, equiv_phase3_expect_fail.txt).
+# Under the Phase 2 script there is no wreduce, and since c5eeb7f3 the first changing call 0001-opt_expr is unproven: its equiv_induct
+# lowering of the 1022 B design's memory (`$mem_v2`, no SAT model) is killed by the memory cap in 9 s at 2G and still at 5G (25 s, replay of the
+# kept work directory); the other 5 changing calls prove (opt_equiv_micro 2026-10-18: 6 calls, 5 refine, 0 do not, 1 inconclusive; the BLIF cec
+# fallback is refused: 30 latches with no 0/1 init).
+full/matmul.v [unproven:] untested for now (size limit): opt_equiv_micro 2026-10-18 (c5eeb7f3, Release, 2G cap): 6 calls changed something, 5 refine, 0 do not, 1 inconclusive (0001-opt_expr, killed by the memory cap in the memory's equiv_induct lowering; still killed at 5G); the BLIF cec fallback is refused: 30 latches with no 0/1 init; 1022 B source

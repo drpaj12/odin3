@@ -127,7 +127,7 @@ source or the parameters change (decision 17: "cached per VTR commit").
 ```
 /usr/bin/time -v -o <J>/frontend.time $O3 --diag-paths resolved -p "read_techlib $LIB; \
   read_verilog --nolatches $V/vtr_flow/benchmarks/verilog/<d>.v; proc; opt; flatten; wreduce; \
-  hardmap; lower; abc --lut <K>; write_blif --vtr --lut-k <K> <J>/<d>.blif" > <J>/frontend.log 2>&1
+  hardmap; lower; opt -fast; compact; abc --lut <K>; write_blif --vtr --lut-k <K> <J>/<d>.blif" > <J>/frontend.log 2>&1
 $PY run_vtr_flow.py <J>/<d>.blif <arch> -start vpr <common>
 ```
 

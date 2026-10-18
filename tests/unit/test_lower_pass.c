@@ -89,6 +89,25 @@ static void test_every_option_is_parsed(void) {
     odin3_strbuf_free(&report);
 }
 
+static void test_the_snapshot_directory_is_parsed_and_bounded(void) {
+    odin3_strbuf report;
+    odin3_strbuf_init(&report);
+    odin3_lower_opts opts;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse("", &report, &opts));
+    TEST_ASSERT_EQUAL_STRING("", opts.snapshot_dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          parse("--lower-snapshot /tmp/snap --report r.json", &report, &opts));
+    TEST_ASSERT_EQUAL_STRING("/tmp/snap", opts.snapshot_dir);
+    TEST_ASSERT_EQUAL_STRING("r.json", opts.report_path);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, parse("--lower-snapshot", &report, &opts));
+    char longer[ODIN3_LOWER_SNAPSHOT_PATH + 64];
+    memset(longer, 'd', sizeof longer);
+    memcpy(longer, "--lower-snapshot ", 17);
+    longer[sizeof longer - 1U] = '\0';
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, parse(longer, &report, &opts));
+    odin3_strbuf_free(&report);
+}
+
 static void test_the_other_spellings_restore_the_defaults(void) {
     odin3_strbuf report;
     odin3_strbuf_init(&report);
@@ -349,6 +368,7 @@ int main(void) {
     RUN_TEST(test_options_default_to_invert_sync_and_no_report);
     RUN_TEST(test_every_option_is_parsed);
     RUN_TEST(test_the_other_spellings_restore_the_defaults);
+    RUN_TEST(test_the_snapshot_directory_is_parsed_and_bounded);
     RUN_TEST(test_a_quoted_report_path_may_hold_blanks);
     RUN_TEST(test_an_unknown_argument_is_invalid_arg_with_the_1d_text);
     RUN_TEST(test_bad_option_values_are_invalid_arg);

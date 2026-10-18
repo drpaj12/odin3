@@ -1,0 +1,29 @@
+# tests/opt/diff_micro_expect_fail.txt: the micros opt_diff_micro and opt_diff_micro_wreduce both expect to
+# fail beyond tests/proc/micro_expect_fail.txt and tests/opt/micro_expect_fail.txt. Only the opt-diff
+# sweeps read this file: both lists below are about Yosys, which opt-equiv does not run on the original
+# the same way (paj_framebuftop passes opt_equiv_micro_phase3, paj_raygentop and LU64PEEng/arm_core are
+# already listed in tests/opt/equiv_expect_fail.txt, and one file may be in one list only).
+# Format: `<path> [needle] <reason>`.
+#
+# Yosys 0.55 rejects the RTLIL process that Odin III accepts (the same error as
+# syntax/diffeq_f_systemC.v in micro_expect_fail.txt; Parmys rejects both too: tests/exit/micro_expect.txt).
+# Pre-existing: both are above 5.9 KB and were never run for opt-diff (triage 2026-10-17, G3).
+syntax/diffeq_f_systemC.v [Multiple edge sensitive events] Yosys 0.55 rejects the RTLIL process (Parmys rejects it too: proc-diff's `lowers` list); opt-diff's Yosys side stops at the error (so the Phase 2/3 scripts have no Yosys result to compare); moved here from micro_expect_fail.txt in 2H
+large/paj_framebuftop_hierarchy_no_mem.v [Multiple edge sensitive events] Yosys 0.55 rejects the RTLIL process (Parmys rejects it too); opt-diff's Yosys side stops with ERROR: Multiple edge sensitive events found for this signal
+large/paj_raygentop_hierarchy_no_mem.v [Multiple edge sensitive events] Yosys 0.55 rejects the RTLIL process (Parmys rejects it too); opt-diff's Yosys side stops with ERROR: Multiple edge sensitive events found for this signal
+#
+# Untested for now (size limit): Yosys, the oracle, is killed at the sweep's 2 GiB cap (opt-diff exit 4:
+# no verdict on Odin III, not a crash; triage 2026-10-17, G4). The small designs carry the proof; the
+# same two are untested for now in tests/opt/equiv_expect_fail.txt. The needle is opt-diff's exact
+# stderr line, so an unproven refine (a different exit 4) does not match it.
+#
+# Rule (2H review H2): every entry below whose reason starts with "untested for now (size limit)"
+# or whose needle holds "unproven" is expected only on opt-diff exit 4, which opt-diff gives only when
+# every failing step of every script is an unproven refine (or a Yosys cap kill). Any other unlisted
+# difference in the same file is exit 1, and the sweep reports it as an unexpected failure.
+large/LU64PEEng.v [opt-diff: unproven: yosys] untested for now (size limit): Yosys killed at the 2 GiB cap (BLIF lowering of the opt-diff netlists); 178350 B source
+large/arm_core.v [opt-diff: unproven: yosys] untested for now (size limit): Yosys killed at the 2 GiB cap; 345328 B source
+#
+# The micros whose opt-diff refine step is unproven (exit 4) differ by sweep and are listed per sweep: Phase 2 and opt -full in
+# tests/opt/diff_micro_phase2_expect_fail.txt (opt_diff_micro), wreduce and Phase 3 in tests/opt/diff_micro_wreduce_expect_fail.txt
+# (opt_diff_micro_wreduce). One sweep reads one of them, never both (a path may be in one file only).

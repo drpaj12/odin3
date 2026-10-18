@@ -59,11 +59,14 @@ class GridTest(unittest.TestCase):
 
     def test_the_mem_family_has_scalar_one_bit_ports_and_a_falling_clock_variant(self) -> None:
         by_stem = {c.stem: c for c in gc.generate(["mem"])}
-        self.assertEqual(11, len(by_stem))
+        self.assertEqual(12, len(by_stem))
         self.assertIn("input wa, input wd, input ra, output rd);", by_stem["mem_w1_d2"].text)
         self.assertIn("negedge clk", by_stem["mem_w4_d4_neg"].text)
         self.assertNotIn("posedge", by_stem["mem_w4_d4_neg"].text)
         self.assertIn("reg [2:0] mem [-2:5];", by_stem["mem_w3_d8_offm2"].text)
+        # SIZE 8 above 2^ABITS 4 at OFFSET 1 (3B-3 L-1)
+        self.assertIn("reg [3:0] mem [1:8];", by_stem["mem_w4_d8_a2_off1"].text)
+        self.assertIn("input [1:0] ra", by_stem["mem_w4_d8_a2_off1"].text)
 
     def test_writing_twice_gives_identical_files(self) -> None:
         out = Path(tempfile.mkdtemp(prefix="gen_cells_test_"))

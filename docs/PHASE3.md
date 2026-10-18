@@ -26,7 +26,7 @@ decisions 2–3 and 16 below):
    address width of 15.
 3. **Through P&R**: Odin III alone produces each netlist. The script is `read_techlib
    lib/vtr.o3lib; read_verilog --nolatches --vtr-compat; proc; opt; wreduce; opt_clean; opt -full;
-   flatten; opt -full; hardmap; opt -full; lower; abc; write_blif --vtr` (3C spec H-2; the part
+   flatten; opt -full; hardmap; opt -full; lower; opt -fast; compact; abc; write_blif --vtr` (3C spec H-2; the part
    up to `lower` is `tools/hardmap-check/phase3_pre_abc.script`, run by `hardmap-diff`) (`wreduce` before `flatten` as Parmys, decisions 7 and 31 and 3G WR-9; `opt -full`
    after `flatten` as Parmys runs it, decision 30). Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
@@ -117,7 +117,14 @@ which PRs remain.
   the 3H-4 merge is its evidence
 - [ ] 3A `flatten` (implemented on `feat/3A-flatten`: pass, unit/golden/fuzz tests, `flatten-diff`
   against Yosys 0.55 and the 19-design sweep, decision 35; ticked when the PR merges)
-- [ ] 3B `lower` (simulator-equal before/after on hand-built and micro designs)
+- [ ] 3B `lower` (simulator-equal before/after on hand-built and micro designs; one box per run, ticked by the controller with the real result; reopened 2026-10-18 after the 3B-4 review, which found the earlier tick claimed runs that were not made). Commands: `ODIN3_REQUIRE_CFFI=1 ctest -j2` from `build/debug`; `ctest -R 'lower_(run|sim|equiv)_micro'` through heavy-run (micros); `tools/lower-check/lower-equiv --odin3 build/release/odin3 --yosys $YOSYS055 --each <design>` for the VTR designs (decision 41); `bench_lower --cells 1000000` (Release).
+  - [x] debug unit tests, `lower_cells*`, `lower_equiv_python`, `lower_cells_equiv`, `lower_reverse_netlist_compare` (run by lane G, 2026-10-18; see the 3B-4 report)
+  - [ ] `lower_run_micro`, `lower_sim_micro`, `lower_equiv_micro`: pending controller run (2026-10-18)
+  - [ ] `lower-run` and `lower-equiv` on the 13 VTR designs (only `single_wire` ran): pending controller run (2026-10-18)
+  - [ ] 525-fixture `lower-equiv` sweep (239 ran): pending controller run (2026-10-18)
+  - [ ] `fuzz_lower` long run (the 60 s smoke ran once in a clang build): pending controller run (2026-10-18)
+  - [ ] `bench_lower --cells 1000000` (100000 cells ran, 1.36 s): pending controller run (2026-10-18)
+  - [ ] 200-seed `verilog-gen --lower` generator (spec 14.5): not built; no `--lower` weighting exists
 - [ ] 3G `wreduce` (decision 7 = b; a faithful Yosys 0.55 `wreduce`, signed rewrite included)
 - [ ] 3C `hardmap` (Peter reviews; spec first, Peter approves the mapping rules before any code;
   signed adders sign-extend, the declared divergence from Parmys of decision 29); **M2**: O′ leg
@@ -952,6 +959,50 @@ then the options considered.
     read port <i> is transparent; lowered with a write-to-read bypass (Parmys reads the old value:
     PHASE3 #40)`. Spec 3B §7 and §16 row 12b amended; 2D never emits a transparent read.
 
+41. **3B `lower` Task 9: refinement, corpus and fuzz; agent defaults** (2026-10-17, branch `feat/3B-4`;
+    agent defaults, Peter may override). (a) `lower --lower-snapshot DIR` is available in every
+    build, not Debug only (it costs nothing when absent; `--opt-snapshot` is the same). It writes
+    `lower-before.il` (`write_rtlil`, before) and `lower-after.blif` (`write_blif`, after) for the
+    whole design, not one file per module. (b) `lower-equiv`: gold is `lower-before.il` with the
+    `maps/` flip-flop conversions applied when it holds an asynchronous cell, gate is
+    `read_blif -wideports lower-after.blif`; 2F's clock-aware `Checker` proves it. When the SAT
+    flow fails and the gold holds a `$mem`, the BLIF cec (`equiv-check --allow-undriven`) judges it
+    again: its induction cannot pair a memory's registers. A cec "proved" is a proof; a design with
+    no memory keeps the SAT verdict. The cec ties undriven nets to 0 on both sides, so a gate bit left
+    undriven where the gold computes 0 would pass: only reachable after a SAT failure with a `$mem`
+    (review L2, accepted). A cec that gives no verdict (an inverted clock) is
+    `unproven` (exit 4), never `ok`; the falling-edge memory runs with `--neg-edge keep`. (c) The
+    `lower-diff` tier T `equiv` entries for `$shiftx` (3B-2 F1) now also require that
+    `lower-equiv` proves `lower` refines the input: the difference is then confined to the outputs
+    the input leaves open (x). (d) The mul/div/mod fixtures above 3 bits are left to tier T:
+    their SAT proofs pass 60 s. (e) The fuzz harness builds cells from module ports (no wiring
+    between cells). (f) The reverse-order check compares four cell types through
+    `netlist-compare --implicit-models`. (g) Provenance to the dead cell is covered by the Task 2
+    test (`test_lower_bitwise`). (h) Evidence status (corrected 2026-10-18 after the 3B-4 review; nothing below is ticked until it
+    has run): the 14 small VTR designs and the PHASE2 #29 equivalence: pending controller run
+    (2026-10-18), only `single_wire` ran; the three micro sweeps: pending controller run
+    (2026-10-18); the 1M-cell bench number: pending controller run (2026-10-18); big designs need
+    P&R and QoR (3H). (i) Review fixes (3B-4 fix round): `lower-equiv` matches a port with a nonzero
+    low index (`output [7:1]`) bit for bit; `lower-sim` exits 6 for a skipped design (the sweeps pass
+    `--allow-skipped` and count `compared`); the micro sweeps fail below a floor of designs really
+    compared (`--min-compared-total`, set in CMake); `lower-run` fails on a log without a `lower:`
+    line and is a smoke check, not a correctness check (it cannot see a wrong lowering).
+    `bm_arithmetic_unused_bits` (four 32x32 multipliers) is untested for now (size limit; the SAT
+    proof times out at 60 s, exit 4; `tests/lower/equiv_micro_expect_fail.txt`). (j) The remaining
+    agent defaults of spec 3B section 18, logged here as plan Step 7 asks (Peter may override,
+    values as the spec gives them): the node caps (spec 11), `--neg-edge keep`, `--async error`,
+    `--report`, the bit-node names of an unnamed cell, the copied `keep` attribute, the per-cell
+    transaction and the duplicated connect helper. (k) Soundness fix round (2026-10-18, review of
+    `fix/3B-heavy-triage`, C1/H1/H2/M1; agent defaults): every hard-block instance is declared at
+    the widths it connects before `expose -evert` (the techlib's `dynports` declaration is 1 bit
+    wide for `data`/`out`, so only bit 0 was compared), and a shared instance with another type
+    or port widths is a difference; a failed proof is "differs" only with a trace from the
+    initial state (`miter -equiv -ignore_gold_x; sat -seq 20 -set-init-zero -enable_undef`, after
+    `clk2fflogic`), else "unproven" unless the BLIF cec proves it; a passed proof is "ok" only
+    when that check over every wire both sides name holds for 4 steps of the proof's own clock
+    model (the base case `equiv_induct` lacks). Init convention: `init` honoured, other
+    flip-flops 0 (VTR power-up, the cec's rule). The same holes exist in `opt-equiv` (C1, H2);
+    not fixed there yet (`3B-heavy-triage.md`, "Soundness fix round").
 42. **3C `hardmap` Tasks 4-7: the check tool, the 19, the divergences, the agent defaults a-i**
     (2026-10-17, branch `feat/3C-hardmap-ram`; agent defaults under Peter's Parmys-default rule, he
     may override). Defaults a-i are the plan's (names `<cell>.<role>` and the `hardmap` attribute,

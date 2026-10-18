@@ -188,8 +188,11 @@ def _shell(path: Path, body: str) -> Path:
 
 
 def _git(repo: Path, *args: str) -> str:
+    # gc.auto/maintenance.auto off: a detached auto-gc could still be writing .git when the
+    # TemporaryDirectory is removed ("Directory not empty: .../vtr/.git", CI 2026-10-18).
     proc = subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
-                           "-c", "commit.gpgsign=false", *args],
+                           "-c", "commit.gpgsign=false", "-c", "gc.auto=0",
+                           "-c", "maintenance.auto=false", *args],
                           capture_output=True, text=True, check=True)
     return proc.stdout.strip()
 
@@ -221,7 +224,8 @@ SPEC_TREE = {  # spec §5.2 plus netlist.abc_exchange (point (e))
 class CliTestBase(unittest.TestCase):
     def setUp(self) -> None:
         HEAVY_DIR.mkdir(parents=True, exist_ok=True)
-        self._tmp = tempfile.TemporaryDirectory(dir=HEAVY_DIR, prefix="qor-cli-test-")
+        self._tmp = tempfile.TemporaryDirectory(dir=HEAVY_DIR, prefix="qor-cli-test-",
+                                                ignore_cleanup_errors=True)
         self.addCleanup(self._tmp.cleanup)
         self.tmp = Path(self._tmp.name)
         self.out = self.tmp / "out"
