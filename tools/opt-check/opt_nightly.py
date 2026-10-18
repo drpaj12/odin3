@@ -29,7 +29,8 @@ and a summary line.
 - ``--expect-fail F`` (repeatable; default ``tests/opt/vtr_expect_fail.txt``,
   ``tests/opt/vtr_nightly_xl.txt`` and, unless ``--leg diff``,
   ``tests/opt/vtr_equiv_expect_fail.txt`` for the files only the opt-equiv leg fails) lists
-  ``<path> [needle] <reason>`` lines. A listed file must fail (a tool exits non-zero; the needle must appear in the output); an unlisted failure, a
+  ``<path> [needle] <reason>`` lines. A listed file must
+  fail (a tool exits non-zero; the needle must appear in the output); an unlisted failure, a
   listed file that passes fully, and a hard failure (a cap kill or a timeout) fail the run. A
   reason that starts with ``xl`` marks a file for the oversized run: without ``--xl`` it is
   skipped, with ``--xl`` only such files run, each must pass, and an empty selection exits 2.
