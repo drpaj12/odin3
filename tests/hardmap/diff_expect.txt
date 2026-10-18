@@ -12,8 +12,9 @@
 # D15 (new, 2026-10-17): Parmys's Yosys (opt_mem) deletes a memory that has no write port and no
 # INIT; its read data is x and the golden netlist has no RAM and undriven outputs. Odin III's opt
 # has no opt_mem, so hardmap maps the read-only memory to RAM slices with we on gnd (R-10 p_1_0).
-# Not a hardmap rule: the fix is an opt_mem rule in 3G. Checked by hand: the golden BLIFs have no
-# subckt at all and Odin III's slices carry data and we on gnd, so no defined value differs.
+# Not a hardmap rule: the fix is an opt_mem rule in 3G. By reading the BLIFs (not a recorded run):
+# the golden BLIFs have no subckt and Odin III's slices carry data and we on gnd. The `counts:`
+# lines skip the comparison, so nothing here proves that no defined value differs.
 common/1r.v counts:+8 single_port_ram D15: read-only memory without INIT, Parmys deletes it (opt_mem), Odin III maps 8 slices
 common/2r.v counts:+8 dual_port_ram D15: read-only memory without INIT, Parmys deletes it (opt_mem), Odin III maps 8 slices
 

@@ -1,12 +1,12 @@
 /*
  * mem_merge.c — R-8 (3C spec §6.2): the flip-flop merge into the read ports of an inferred `$mem`
- * (Yosys'snk memory_dff, subset). For each port that is still asynchronous:
+ * (Yosys's memory_dff, subset). For each port that is still asynchronous:
  *  - data merge: every RD_DATA bit feeds exactly one `$dff`, or `$dffe`, and the flip-flops share
  *    one clock, polarity and enable and have no other D bit: they go, the port is synchronous with
  *    RD_TRANSPARENT 0 and its output is the flip-flops' Q;
  *  - address merge, otherwise: every RD_ADDR bit is the Q of a `$dff` on one clock: the port reads
  *    the D nets. Plan divergence D12 (agent default d): only when no write port is on that clock,
- *    because the arch'snk RAMs are read-first and the merged read of a registered address would
+ *    because the arch's RAMs are read-first and the merged read of a registered address would
  *    return the old word after a same-address write where the RTL returns the new one. A flip-flop
  *    whose Q feeds anything but the merged address pins stays.
  * This works on the copy in mem_model: the design is untouched, so a `$mem` that ends soft keeps
@@ -201,7 +201,7 @@ static bool fed_by_mem(const addr_scan *as, odin3_net_id net) {
     return odin3_pin_valid(drv) && odin3_pin_node(as->hc->module, drv).v == as->mm->node.v;
 }
 
-/* Result as scan_bit'snk. */
+/* Result as scan_bit's. */
 static odin3_status scan_addr_bit(addr_scan *as, odin3_net_id net, uint32_t index) {
     odin3_pin_id drv =
         odin3_net_valid(net) ? odin3_net_driver(as->hc->module, net) : (odin3_pin_id){0};

@@ -1003,16 +1003,16 @@ then the options considered.
     model (the base case `equiv_induct` lacks). Init convention: `init` honoured, other
     flip-flops 0 (VTR power-up, the cec's rule). The same holes exist in `opt-equiv` (C1, H2);
     not fixed there yet (`3B-heavy-triage.md`, "Soundness fix round").
-42. **3C `hardmap` Tasks 4-7: the check tool, the 19, the divergences, the agent defaults a-i**
+42. **3C `hardmap` Tasks 4-7: the check tool, the 19, the divergences, the agent defaults a-p**
     (2026-10-17, branch `feat/3C-hardmap-ram`; agent defaults under Peter's Parmys-default rule, he
     may override). Defaults a-i are the plan's (names `<cell>.<role>` and the `hardmap` attribute,
     Y bits above a chain aliased or soft, address merge only without a write port on the read
     clock (D12), `OFFSET` != 0 and falling-edge ports soft (D13, D14), node parameters, the
-    `dual-write-race` divergence class, the probes as evidence) and the Task 5-6 ones in the 3C
-    report (namesake = first non-glue node; ADDR bound 31; read-only memory SP/DP; R-11 also covers
+    `dual-write-race` divergence class, the probes as evidence) and the Task 5-6 ones (namesake = first non-glue node; ADDR bound 31; read-only memory SP/DP; R-11 also covers
     split write enables, async or unclocked write ports and read-first conflicts; unused RAM
     outputs left open; `hm_commit` deletes the `$mem` before the merged flip-flops; the test
-    RAM model is read-first). Task 4 and 7 defaults: (j) `hardmap-diff` runs the script
+    RAM model is read-first; a merged flip-flop's `init` is dropped when its data is merged into
+    the RAM port, unlike R-12's INIT warning: deferred, see (p)). Task 4 and 7 defaults: (j) `hardmap-diff` runs the script
     `tools/hardmap-check/phase3_pre_abc.script` (3G WR-9 plus `opt -full` after `hardmap` as spec
     H-2, `opt -fast; compact` after `lower`) with `--top` the golden's first `.model` and the n-bit
     `adder` of `tests/hardmap/adder_lib.v` read with `--lib` (what Parmys gets from
@@ -1028,8 +1028,14 @@ then the options considered.
     (`common/1r.v`, `2r.v`: +8 slices). The cure is an `opt_mem` rule in 3G/Phase 4, not a hardmap
     rule. (n) The micro `common/nrnw.v` is not in `micros.txt`: Parmys rejects it. (o) Spec 10:
     D2b and D4 are confirmed by the probes, D12-D15 added, D6 and D9 effects recorded (micros only).
+    (p) Deferred, not fixed: the R-8 data merge drops a flip-flop's defined `init` (the RAM output
+    powers up unknown); the `dual-write-race` rows of `tests/vtr/qor/divergences.tsv` excuse nothing
+    in the 3H gate until 3H lists the class in `STANDS_ALONE`.
     **Evidence.** Micros (`hardmap_diff_micro`, 26 designs, release or debug build): 16 equivalent
-    to Parmys through the full `lower` (adder, sub, mult, mult_const, mem, spram, dpram, 1r2w,
+    to Parmys through the full `lower` (for the six RAM micros, mem, spram, dpram, 1r2w, 2r1w and
+    2r2w, equivalent through the RAM black-box cut of `equiv-check`: the logic around the RAM pins
+    matches; RAM port semantics are covered by the `test_hardmap_ram`/`test_hardmap_mem` simulations
+    against Odin III's own RAM model, not by this tool) (adder, sub, mult, mult_const, mem, spram, dpram, 1r2w,
     2r1w, 2r2w, adder_hard_block, hard_adder_cin_propagation, twobits_arithmetic_div, _mod, _plus,
     _uminus), 10 listed: D15 (1r, 2r, rom +8 latch, nr +24 latch), D9 (bram: -8 dual_port_ram,
     +136 latch), D6 (multiply_hard_block -8 adder, twobits_arithmetic_multiply -4 adder), D2b
@@ -1071,16 +1077,26 @@ then the options considered.
     an FSM** (2026-10-18, branch `feat/3C-hardmap-ram`; agent default under Peter's Parmys-default
     rule, he may override). Parmys's `synthesis.tcl` runs `procs -norom; fsm; opt; ...`; Yosys `fsm`
     recodes a state register one-hot, so Parmys has S flops where Odin III keeps the Verilog's
-    ceil(log2 S) bits: ch_intrinsics 15 vs 4 (+11), blob_merge 28 vs 5 (+23), stereovision3 27 vs 5
-    (+22; 21 observed, one flop unexplained and still open). Not an Odin III bug (investigation
-    `inv-3C-ff-gap.md`; the `opt` flop drop 265 to 199 on ch_intrinsics is unread, constant,
-    duplicate and unused flops, all in the first `opt`). `tests/hardmap/vtr_expect.txt` lists the
-    three as `counts:` lines with this reason. Phase 4 owns FSM extraction (decision 7). WARNING:
-    none is printed today, because no pass recodes or detects state registers. Peter's rule would
-    ask for one in `--vtr-compat` once Phase 4 adds `fsm` (it should warn when it does not recode);
-    until then this decision is the record. Nothing is implemented here. Equivalence tooling note:
-    a one-hot recoded golden starts all-zero in ABC, so `equiv-check` reports NOT equivalent; the
-    comparison needs the reset state initialised to 1.
+    ceil(log2 S) bits. Evidence, by design (an investigation of 2026-10-18; its numbers are
+    summarised here): **ch_intrinsics**: `cur_state` 4 bits, 15 states, 15 - 4 = +11; the flop
+    count falls 265 (after `proc`) to 199 in the first `opt` (an unread register, a constant, an
+    unused one and a duplicate pair), unchanged by `flatten`, `hardmap`, `lower`; Parmys 210 =
+    199 + 11; Yosys with the same script plus `fsm` logs the one-hot recoding of 15 states.
+    `equiv-check` says NOT equivalent only because ABC starts the one-hot register all-zero (no
+    legal state); a scratch copy of the golden with the state-0 bit initialised to 1 compared
+    equivalent (the one comparison made). **blob_merge**: `state` 5 bits, 28 states, +23: explained
+    by arithmetic (Yosys `fsm` log) only, netlists not compared. **stereovision3**: `reg_prog_state`
+    5 bits, 27 states, +22 expected, 21 seen: one flop is unexplained and open; netlists not
+    compared. So the gap is explained for ch_intrinsics and blob_merge and open by one flop for
+    stereovision3; no Odin III defect is claimed for stereovision3. `tests/hardmap/vtr_expect.txt`
+    lists the three as `counts:` lines, the documented exception to "no known-differs lists" until
+    Phase 4 (they require the exact flop delta and equal hard-block counts, and skip the netlist
+    comparison). Phase 4 owns FSM extraction (decision 7). WARNING: `read_verilog --vtr-compat`
+    prints one line (`fsm recoding (Parmys) not performed; flip-flop counts on designs with state
+    machines differ from Parmys (PHASE3 #43)`), unconditionally, because no Odin III pass recodes a
+    state register; Phase 4 removes it when `fsm` runs. Nothing else is implemented. Open check, to
+    close the gap: compare blob_merge and stereovision3 against a golden with the reset-state bit
+    initialised to 1 (a heavy run, not done).
 
 ## Risks
 
@@ -1116,6 +1132,13 @@ then the options considered.
    measures both styles on the 19, and short stays the default until then.
 10. **VTR drift.** We depend on `-start vpr`, the parse configs and `run_random_check.py` at
     `3c9a4d23`; a VTR bump is an ORACLES change that reruns the P leg.
+11. **`opt -full` `-mux_undef` refinement (open, from the 3C flip-flop investigation).** On
+    ch_intrinsics the first `opt_expr` of `opt -full` is reported "not a refinement" by `opt-equiv`
+    (6 unproven cells, all the combinational `memory_controller_address` output and the RAM
+    address/str_address): it replaces x data of `$mux`/`$pmux` by a value, which is a refinement by
+    definition and matches Yosys's `opt_expr -mux_undef` by reading. Whether this is a limit of
+    Yosys's `equiv_simple -undef` modelling or a real difference is not settled (the control run
+    did not finish). It does not change the flop count. Owner: 3G.
 
 ## Order of work relative to Phase 2
 

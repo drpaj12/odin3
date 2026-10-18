@@ -25,7 +25,9 @@ Classes and the expect syntax are in the tool's docstring. In short, an expect l
 `<path> <id> <reason>` with `id` one of `D<n>` (the spec's divergence table, section 10),
 `counts:<+N|-N> <unit>`, `lower-gap` (now only `$pow`), `unproven`, `no-golden`. A line that does not occur is stale and
 fails: the lists shrink. A `run wreduce first` warning from `hardmap` fails the design and cannot be
-listed (3C-2a review M-2).
+listed (3C-2a review M-2). Every entry of a design must occur: a `counts:` line skips the netlist
+comparison, so any other entry beside it is stale. `hardmap_diff_micro` skips (77) without the
+golden tree, so CI has no evidence from it; it passes no `--arch` (the sweep does).
 
 Micros (non-heavy): `ctest --preset debug -R hardmap_diff_micro`. The 19 (heavy, controller, one
 design per `tools/heavy-run`, smallest first): `ctest --preset sweep -R hardmap_vtr_sweep` runs them

@@ -335,7 +335,8 @@ item 1). `hardmap` legalises it to the arch's shape, as Parmys's `iterate_memori
     the port becomes synchronous on that clock with `RD_TRANSPARENT = 0`.
   - **Address merge, otherwise:** if every `RD_ADDR` bit is the `Q` of a `$dff` on one clock, and
     each such `D` net feeds nothing else that would change, the address FFs are bypassed, and the
-    port becomes synchronous with `RD_TRANSPARENT = 1` when a write port on the same clock exists.
+    port becomes synchronous (D12: the merge does not apply when a write port is on the read clock,
+    because the RAMs are read-first and the registered address would read the old value).
   - Yosys's further cases (reset values, `$sdff` with init, mixed clocks) are not merged. The port
     stays asynchronous.
 - **R-9 A read port that stays asynchronous**, or a memory whose ports use more than one clock
@@ -390,7 +391,9 @@ Each soft decision except S-1 logs one WARN line per cell. S-1 is the default an
   give byte-identical BLIF (PHASE3 exit item 3).
 - **H-9 Memory.**
   - Each mapping builds all its nodes and nets before it kills the source cell. On `NO_MEMORY` the
-    IR is valid and the source cell is intact.
+    IR is valid and the source cell is intact. The one exception (R-8): the merged flip-flops are
+    deleted best effort after the `$mem`; on `NO_MEMORY` such a flip-flop stays with every pin
+    open, and `opt -full` removes it (a bare `hardmap; write_*` would carry it).
   - The design budget (`odin3_budget_check`, 60%) is checked per cell kind and every 2^16 created
     pins. `LU32PEEng` makes 5,251 RAM slices and about 13,500 adders, which is small.
   - `hardmap` never compacts; the script's `compact` after `opt -full` does (PHASE2 #19).
