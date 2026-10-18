@@ -20,9 +20,15 @@ stepper of the unit tests and by the C array model (3B spec 14.3 table). A ``.bl
 ``read_blif``. A design with no word cell (``opt`` folded it away, or only bit cells) compared
 nothing: it prints ``NOTHING TO COMPARE`` and exits 1 unless ``--allow-empty`` is given.
 
-Exit codes (one convention across the opt tools): 0 no difference (skips are listed); 1 a
-difference (the after run's vectors differ, or the lowered design does not simulate) or nothing
-to compare; 2 usage or a
+A skipped design compared nothing, so it is not a success: exit 6 unless ``--allow-skipped``
+(the corpus sweeps pass it and count ``compared`` instead; 3B-4 review H3). The last line of
+every run is ``lower-sim: compared N of M designs (S skipped, E empty)``: N counts the designs
+whose two runs really agreed.
+
+Exit codes (one convention across the opt tools): 0 no difference and every design compared (or
+skipped with ``--allow-skipped``); 1 a difference (the after run's vectors differ, or the
+lowered design does not simulate) or nothing to compare; 6 a design was skipped (no simulate
+hook) and no other design failed; 2 usage or a
 tool error (Odin III exited with an error, or the before run cannot be simulated for a reason that
 is not a known skip); 3 hard: a child crashed, was killed by a signal or its memory cap, or timed
 out; 77 skipped (an ASan child and no systemd-run). The work directory is made under
@@ -40,12 +46,14 @@ import lower_common as lc
 import memcap
 
 TOOL = "lower-sim"
+EXIT_SKIPPED = 6  # a design without a simulate hook compared nothing
 DEFAULT_VECTORS = 64
 DEFAULT_SEED = 1
 DEFAULT_PRE = ("proc", "opt")
 NO_HOOK = "no simulate hook"
 FF_REASON = "no simulate hook (IR change D); checked against the reference stepper"
 MEM_REASON = "no simulate hook; covered by lower-equiv and the C array model"
+HARD_REASON = f"{NO_HOOK} (a hard block); lower-equiv shares its outputs and compares its inputs"
 SKIP_REASONS = {
     "$shl": f"{NO_HOOK}; covered by lower-diff (tier T) and the unit tests' C model",
     "$shr": f"{NO_HOOK}; covered by lower-diff (tier T) and the unit tests' C model",
@@ -56,6 +64,8 @@ SKIP_REASONS = {
     "$pow": f"{NO_HOOK}; lower has no rule for it",
     "$tribuf": f"{NO_HOOK}; lower has no rule for it",
     "$mem": MEM_REASON,
+    "\\single_port_ram": HARD_REASON,  # (RTLIL spells a user cell type with a backslash)
+    "\\dual_port_ram": HARD_REASON,
     "$memrd": MEM_REASON,
     "$memwr": MEM_REASON,
     **dict.fromkeys(("$dff", "$dffe", "$adff", "$sdff", "$adffe", "$sdffe", "$sdffce", "$aldff",
@@ -208,25 +218,37 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--mutant", choices=MUTANTS, help=argparse.SUPPRESS)
     ap.add_argument("--allow-empty", action="store_true",
                     help="a design with no word cell to compare is not a failure")
+    ap.add_argument("--allow-skipped", action="store_true",
+                    help="a design without a simulate hook is not a failure (it is not compared)")
     ap.add_argument("--each", action="store_true", help="every FILE is its own design")
     ap.add_argument("files", nargs="+", help="the Verilog (or BLIF) files")
     return ap.parse_args(argv)
+
+
+def exit_code(kinds: Sequence[str], args: argparse.Namespace) -> int:
+    """The exit code of a run from the class of every design."""
+    if "differs" in kinds or ("empty" in kinds and not args.allow_empty):
+        return lc.EXIT_FAIL
+    if "skipped" in kinds and not args.allow_skipped:
+        return EXIT_SKIPPED
+    return lc.EXIT_OK
 
 
 def execute(args: argparse.Namespace, work: Path) -> int:
     files = [str(Path(f).resolve()) for f in args.files]
     designs = [[f] for f in files] if args.each else [files]
     sim = Sim(args, work)
-    worst = lc.EXIT_OK
+    kinds: list[str] = []
     for number, design in enumerate(designs):
         run_dir = work / f"d{number:04d}"
         run_dir.mkdir(exist_ok=True)
         lines, kind = classify(sim, design, run_dir)
         for line in lines:
             print(line, flush=True)
-        empty_fails = kind == "empty" and not args.allow_empty
-        worst = lc.EXIT_FAIL if kind == "differs" or empty_fails else worst
-    return worst
+        kinds.append(kind)
+    print(f"{TOOL}: compared {kinds.count('equal')} of {len(kinds)} designs "
+          f"({kinds.count('skipped')} skipped, {kinds.count('empty')} empty)", flush=True)
+    return exit_code(kinds, args)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

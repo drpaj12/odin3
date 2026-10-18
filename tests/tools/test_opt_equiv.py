@@ -2,7 +2,9 @@
 
 Fakes stand in for both tools in the argv tests: the fake ``odin3`` writes the snapshot pairs of
 ``fake.json`` into the ``--opt-snapshot`` directory and prints ``log``; the fake ``yosys`` exits 1
-when the script's gate file holds the word ``BAD``. ``memcap.run`` is a plain subprocess call. The
+when the script's gate file holds the word ``BAD``; on a bounded check (``sat -seq``) it prints a
+trace when the gate holds ``BASEFAIL`` (the base case) or ``OUTFAIL`` (the output check), else
+no trace. ``memcap.run`` is a plain subprocess call. The
 probe class runs the real Yosys 0.55 (``ODIN3_YOSYS055``) and is skipped without it.
 """
 
@@ -19,6 +21,7 @@ from typing import Any
 from unittest import mock
 
 import clock_sig
+import hard_blocks as hb
 import memcap
 import opt_equiv as oe
 
@@ -50,6 +53,12 @@ script = sys.argv[sys.argv.index("-p") + 1]
 with open(HERE / "yosys.log", "a") as log:
     log.write(script + "\n")
 gate = re.findall(r"read_rtlil ([^;\s]+)", script)[1]
+if "sat -seq" in script:
+    marker = "BASEFAIL" if "expose -shared" in script else "OUTFAIL"
+    found = marker in Path(gate).read_text()
+    sys.stdout.write("SAT proof finished - model found: FAIL!\n" if found else
+                     "SAT proof finished - no model found: SUCCESS!\n")
+    sys.exit(0)
 if "BAD" in Path(gate).read_text():
     sys.stdout.write("ERROR: Found 1 unproven $equiv cells in 'equiv_status -assert'.\n")
     sys.exit(1)
@@ -295,7 +304,93 @@ class MainTest(unittest.TestCase):
         self.fakes.spec({**self.pair("0010", "opt_dff"), **self.pair("0002", "opt_expr")})
         _, out, _ = self.fakes.main()
         self.assertLess(out.index("0002-opt_expr"), out.index("0010-opt_dff"))
-        self.assertEqual(len(self.fakes.log("yosys.log")), 2)
+        proofs = [line for line in self.fakes.log("yosys.log") if "equiv_make" in line]
+        self.assertEqual(len(proofs), 2)
+
+    def test_a_failed_base_case_with_an_output_trace_is_not_a_refinement(self) -> None:
+        """H2: the proof passes, the base case from the initial state fails and the output
+        check finds a trace (an init value changed): not a refinement, exit 1."""
+        self.fakes.spec(self.pair("0001", "opt_dff", IL_GOOD + "# BASEFAIL OUTFAIL\n"))
+        code, out, _ = self.fakes.main("--no-cec")
+        self.assertEqual(code, oe.EXIT_FAIL, out)
+        self.assertIn("0001-opt_dff: not a refinement", out)
+        self.assertIn("the initial states differ", out)
+
+    def test_a_failed_base_case_without_an_output_trace_is_never_ok(self) -> None:
+        """The base case fails on a named wire but no output differs in BMC_STEPS steps: no
+        verdict either way, so inconclusive (exit 4), never ok."""
+        self.fakes.spec(self.pair("0001", "opt_dff", IL_GOOD + "# BASEFAIL\n"))
+        code, out, _ = self.fakes.main("--no-cec")
+        self.assertEqual(code, oe.EXIT_UNPROVEN, out)
+        self.assertIn("0001-opt_dff: inconclusive (the proof passed but its base case", out)
+        self.assertNotIn(": ok", out)
+
+    def test_a_failed_base_case_reaches_only_the_exact_cec(self) -> None:
+        """Review H1: equiv-check starts a latch without init at 0, so it proved a pair whose
+        base case found a trace (init dropped, 12 flops from the output). The cec now runs with
+        ``need_init`` and its refusal is exit 4, never ok."""
+        self.fakes.spec(self.pair("0001", "opt_dff", IL_GOOD + "# BASEFAIL\n"))
+        refusal = (oe.CEC_UNPROVEN, "BLIF cec: not used, 1 latch(es) have no 0/1 init")
+        with mock.patch.object(oe, "cec_ils", return_value=refusal) as cec:
+            code, out, _ = self.fakes.main()
+        self.assertEqual(code, oe.EXIT_UNPROVEN, out)
+        self.assertEqual(cec.call_args.args[-1], True)  # need_init
+        self.assertIn("not decided by the BLIF cec: BLIF cec: not used", out)
+        self.assertNotIn(": ok", out)
+        self.assertNotIn("proved by the BLIF cec", out)
+
+    def test_a_timeout_is_rescued_by_the_cec_only_with_an_init_on_every_latch(self) -> None:
+        """A proof timeout may go to the cec; the cec step refuses latches without a 0/1 init."""
+        self.fakes.spec(self.pair("0001", "opt_expr"))
+
+        def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if "equiv_make" in " ".join(argv):
+                raise subprocess.TimeoutExpired(list(argv), 60.0)
+            return fake_run(argv, cap, **kw)
+        with mock.patch.object(oe, "cec_ils", return_value=(oe.CEC_PROVED, "")) as cec:
+            code, out, err = self.run_with(hang)
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(cec.call_args.args[-1], True)  # need_init
+
+    def test_the_cec_refuses_latches_without_a_defined_init(self) -> None:
+        loose = ".model m\n.inputs c d\n.outputs q\n"
+        cases = {"none": ".latch d q re c\n", "two": ".latch d q re c 2\n",
+                 "three": ".latch d q re c 3\n", "bare": ".latch d q\n",
+                 "bare3": ".latch d q 3\n", "wrapped": ".latch d q \\\n re c\n"}
+        tight = {"zero": ".latch d q re c 0\n", "one": ".latch d q 1\n",
+                 "comment": ".latch d q re c 1 # init 1\n"}
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, line in {**cases, **tight}.items():
+                path = Path(tmp) / f"{name}.blif"
+                path.write_text(loose + line + ".end\n", encoding="utf-8")
+                want = 1 if name in cases else 0
+                with self.subTest(latch=name):
+                    self.assertEqual(oe.latches_without_init(path), want)
+                    if want:
+                        with mock.patch.object(oe, "capped") as run:
+                            got = oe.cec_blifs(path, path, 1 << 30, Path(tmp), True)
+                        self.assertEqual(got[0], oe.CEC_UNPROVEN)
+                        self.assertIn("no 0/1 init", got[1])
+                        run.assert_not_called()
+
+    def test_a_base_case_timeout_is_a_size_limit_not_a_pass(self) -> None:
+        self.fakes.spec(self.pair("0001", "opt_expr"))
+
+        def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if "expose -shared" in " ".join(argv):
+                raise subprocess.TimeoutExpired(list(argv), 60.0)
+            return fake_run(argv, cap, **kw)
+        code, out, _ = self.run_with(hang, "--no-cec")
+        self.assertEqual(code, oe.EXIT_UNPROVEN, out)
+        self.assertIn("inconclusive (yosys-bmc: base case from the initial state", out)
+
+    def test_every_proved_pair_gets_its_base_case(self) -> None:
+        self.fakes.spec({**self.pair("0001", "opt_expr"), **self.pair("0002", "opt_clean")})
+        code, out, err = self.fakes.main()
+        self.assertEqual(code, 0, out + err)
+        bases = [line for line in self.fakes.log("yosys.log") if "expose -shared" in line]
+        self.assertEqual(len(bases), 2)
+        self.assertIn(f"sat -seq {oe.BASE_STEPS} -set-init-undef", bases[0])
 
     def test_odin_failure_is_a_tool_error(self) -> None:
         self.fakes.spec({}, exit=3)
@@ -425,7 +520,7 @@ class MainTest(unittest.TestCase):
         code, out, _ = self.run_with(hang, "--no-cec")
         self.assertEqual(code, oe.EXIT_UNPROVEN, out)
         self.assertEqual(len(calls), oe.MAX_SAT_TIMEOUTS)
-        self.assertIn("4 inconclusive (SAT size limit)", out)
+        self.assertIn("4 inconclusive (SAT size limit or initial state unproven)", out)
         self.assertIn("not tried after 2 SAT size-limit hits", out)
 
     def test_refine_timeout_reaches_the_proof(self) -> None:
@@ -785,6 +880,246 @@ class ProbeTest(unittest.TestCase):
         replaced by a constant, still fails."""
         self.assertFalse(self.refines(hard_block_module("\\a"), hard_block_module("\\b")))
         self.assertFalse(self.refines(hard_block_module("\\a"), hard_block_module("\\a", cut=True)))
+
+
+# The 3B soundness review's adversarial cases, as Odin III writes them (`write_rtlil` of a design
+# with the tech library: `single_port_ram` declared `dynports` with 1-bit `data`/`out`).
+NOT_CELL = ("  cell $not $n{k}\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"
+            "    parameter \\Y_WIDTH 1\n    connect \\A {a}\n    connect \\Y {y}\n  end\n")
+AND4_CELL = ("  cell $and $g\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+             "    parameter \\A_WIDTH 4\n    parameter \\B_WIDTH 4\n    parameter \\Y_WIDTH 4\n"
+             "    connect \\A \\d\n    connect \\B 4'1111\n    connect \\Y \\dd\n  end\n")
+RAM_DECL = ("attribute \\blackbox 1\nattribute \\dynports 1\nmodule \\single_port_ram\n"
+            "  parameter \\ADDR_WIDTH 15\n  parameter \\DATA_WIDTH 1\n  wire input 1 \\clk\n"
+            "  wire input 2 \\data\n  wire width 15 input 3 \\addr\n  wire input 4 \\we\n"
+            "  wire output 5 \\out\nend\n")
+
+
+def ram(extra: str = "", data: str = "\\d", we: str = "\\we", out: str = "\\q",
+        width: int = 4) -> str:
+    """A top whose 4-bit output ``q`` is a ``single_port_ram``'s read data."""
+    return ("attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire input 2 \\we\n"
+            "  wire width 4 input 3 \\d\n  wire width 4 input 4 \\a\n"
+            f"  wire width 4 output 5 \\q\n{extra}  cell \\single_port_ram \\i\n"
+            f"    parameter \\ADDR_WIDTH 4\n    parameter \\DATA_WIDTH {width}\n"
+            f"    connect \\clk \\clk\n    connect \\data {data}\n    connect \\addr \\a\n"
+            f"    connect \\we {we}\n    connect \\out {out}\n  end\nend\n" + RAM_DECL)
+
+
+def counter(init: str) -> str:
+    """A 4-bit counter ``q`` (output ``y``) with ``attribute \\init 4'<init>``."""
+    return ("attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire width 4 output 2 \\y\n"
+            f"  attribute \\init 4'{init}\n  wire width 4 \\q\n  wire width 4 \\n\n"
+            "  cell $add $a\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+            "    parameter \\A_WIDTH 4\n    parameter \\B_WIDTH 4\n    parameter \\Y_WIDTH 4\n"
+            "    connect \\A \\q\n    connect \\B 4'0001\n    connect \\Y \\n\n  end\n"
+            "  cell $dff $f\n    parameter \\WIDTH 4\n    parameter \\CLK_POLARITY 1\n"
+            "    connect \\CLK \\clk\n    connect \\D \\n\n    connect \\Q \\q\n  end\n"
+            "  connect \\y \\q\nend\n")
+
+
+RAM = ram()
+RAM_MUTANTS = {
+    "data_bit_2": ram("  wire \\n2\n" + NOT_CELL.format(k=1, a="\\d [2]", y="\\n2"),
+                      data="{ \\d [3] \\n2 \\d [1:0] }"),
+    "out_bit_3": ram("  wire width 4 \\qq\n  wire \\n3\n"
+                     + NOT_CELL.format(k=1, a="\\qq [3]", y="\\n3")
+                     + "  connect \\q { \\n3 \\qq [2:0] }\n", out="\\qq"),
+    "data_width_5": ram("  wire \\qx\n", data="{ 1'0 \\d }", out="{ \\qx \\q }", width=5),
+    "we_inverted": ram("  wire \\nwe\n" + NOT_CELL.format(k=1, a="\\we", y="\\nwe"),
+                       we="\\nwe"),
+    "addr_width_param": RAM.replace("parameter \\ADDR_WIDTH 4", "parameter \\ADDR_WIDTH 5"),
+    # review M1: a parameter on one side only (the block falls back to its declaration default)
+    "data_width_param_dropped": RAM.replace("    parameter \\DATA_WIDTH 4\n", ""),
+}
+
+
+def hold(d_net: str) -> str:
+    """The re-check's N2 case: a flip-flop ``r`` with no init, ``r <= <d_net>`` (``\\n`` is
+    ``r & d``, ``\\r`` holds), output ``y = r``."""
+    return ("attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire input 2 \\d\n"
+            "  wire output 3 \\y\n  wire \\r\n  wire \\n\n"
+            "  cell $and $a\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+            "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"
+            "    connect \\A \\r\n    connect \\B \\d\n    connect \\Y \\n\n  end\n"
+            "  cell $dff $f\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+            f"    connect \\CLK \\clk\n    connect \\D {d_net}\n    connect \\Q \\r\n  end\n"
+            "  connect \\y \\r\nend\n")
+
+
+class HardBlockTextTest(unittest.TestCase):
+    """``hard_blocks``: the declarations at instance width and the mismatch rule (no Yosys)."""
+
+    USE = hb.BoxUse("\\single_port_ram", (("\\addr", 4), ("\\data", 4), ("\\out", 4)),
+                    (("\\DATA_WIDTH", "4"),))
+
+    def test_a_declaration_takes_the_instance_widths(self) -> None:
+        text = hb.box_declaration(RAM_DECL, "\\r$o3w0", {"\\data": 8, "\\out": 8, "\\we": 1})
+        self.assertIn("module \\r$o3w0\n", text)
+        self.assertIn("  wire width 8 input 1 \\data\n", text)
+        self.assertIn("  wire input 2 \\we\n", text)
+        self.assertIn("  wire width 8 output 3 \\out\n", text)
+        self.assertNotIn("dynports", text)
+        self.assertNotIn("\\addr", text)
+        with self.assertRaises(hb.BoxError):
+            hb.box_declaration(RAM_DECL, "\\r", {"\\data1": 8})
+
+    def test_a_shared_block_must_agree_on_type_widths_and_parameters(self) -> None:
+        same = {"\\i": self.USE}
+        self.assertEqual(hb.box_mismatch(same, same), "")
+        wider = hb.BoxUse(self.USE.kind, (("\\addr", 4), ("\\data", 5), ("\\out", 5)),
+                          self.USE.params)
+        self.assertIn("hard block \\i differs", hb.box_mismatch(same, {"\\i": wider}))
+        param = hb.BoxUse(self.USE.kind, self.USE.widths, (("\\DATA_WIDTH", "5"),))
+        self.assertIn("DATA_WIDTH=5", hb.box_mismatch(same, {"\\i": param}))
+        dropped = hb.BoxUse(self.USE.kind, self.USE.widths, ())  # review M1, both directions
+        self.assertIn("hard block \\i differs", hb.box_mismatch(same, {"\\i": dropped}))
+        self.assertIn("hard block \\i differs", hb.box_mismatch({"\\i": dropped}, same))
+        other = hb.BoxUse("\\dual_port_ram", self.USE.widths, self.USE.params)
+        self.assertIn("dual_port_ram", hb.box_mismatch(same, {"\\i": other}))
+
+    def test_json_values_and_the_top_mark(self) -> None:
+        self.assertEqual(hb.json_value("00000000000000000000000000000100"), "4")
+        self.assertEqual(hb.json_value("text "), "text")
+        marked = hb.mark_top("attribute \\top 1\nmodule \\a\nend\nmodule \\m\nend\n", "\\m")
+        self.assertEqual(marked, "module \\a\nend\nattribute \\top 1\nmodule \\m\nend\n")
+        self.assertEqual(list(hb.blackbox_modules(RAM)), ["\\single_port_ram"])
+
+    def test_the_bounded_script_follows_the_proof_model(self) -> None:
+        base = oe.bounded_script("g.il", "h.il", False, oe.BASE_STEPS, (True, True, False))
+        self.assertIn("async2sync; opt_clean; expose -shared gold gate; miter -equiv", base)
+        self.assertIn("sat -seq 4 -set-init-undef -enable_undef", base)
+        out = oe.bounded_script("g.il", "h.il", True, oe.BMC_STEPS, (False, False, True))
+        self.assertIn("proc; flatten; " + oe.EVERT_BLACKBOXES + "; memory; clk2fflogic; "
+                      "opt_clean -purge; miter", out)
+        self.assertNotIn("expose -shared", out)
+
+
+@unittest.skipUnless(YOSYS and Path(YOSYS).exists(), "Yosys 0.55 (ODIN3_YOSYS055) not found")
+class SoundnessTest(unittest.TestCase):
+    """The 3B soundness review's cases through ``Checker.judge`` (one opt-equiv pair each): a
+    wrong RAM data or read bit, a ``DATA_WIDTH`` change, an inverted ``we`` and an init value
+    changed must be "not a refinement"; correct pairs stay ok."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.work = Path(self._tmp.name)
+        self.count = 0
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def judge(self, gold: str, gate: str) -> tuple[bool, str, bool]:
+        self.count += 1
+        paths = (self.work / f"g{self.count}.il", self.work / f"h{self.count}.il")
+        for path, text in zip(paths, (gold, gate), strict=True):
+            path.write_text(text, encoding="utf-8")
+        checker = oe.Checker(YOSYS, self.work, 2 << 30)
+        return checker.judge(paths[0], paths[1], f"p{self.count}")
+
+    def assert_not_a_refinement(self, gold: str, gate: str) -> str:
+        ok, text, unsure = self.judge(gold, gate)
+        self.assertFalse(ok, text)
+        self.assertFalse(unsure, f"inconclusive, want not a refinement: {text}")
+        return text
+
+    def test_correct_pairs_still_refine(self) -> None:
+        rewrite = ram("  wire width 4 \\dd\n" + AND4_CELL, data="\\dd")  # d & 4'1111 -> d
+        for name, gold, gate in (("ram", RAM, RAM), ("ram_rewrite", rewrite, RAM),
+                                 ("init", counter("0000"), counter("0000"))):
+            with self.subTest(pair=name):
+                self.assertEqual(self.judge(gold, gate), (True, "", False))
+
+    def test_every_hard_block_mutant_is_not_a_refinement(self) -> None:
+        """C1 (data bit 2, read bit 3: the 1-bit declaration compared only bit 0), M1
+        (``DATA_WIDTH`` 4 -> 5), the ``we`` bug, and a parameter alone (re-check N3: RTLIL keeps
+        the parameters, so they are compared)."""
+        for name, gate in RAM_MUTANTS.items():
+            with self.subTest(mutant=name):
+                text = self.assert_not_a_refinement(RAM, gate)
+                if name in ("data_width_5", "addr_width_param", "data_width_param_dropped"):
+                    self.assertIn("hard block \\i differs", text)
+
+    def test_an_init_value_changed_is_not_a_refinement(self) -> None:
+        """H2: `reg q = 0` -> `= 1` passes the induction; the base case finds the trace."""
+        text = self.assert_not_a_refinement(counter("0000"), counter("0001"))
+        self.assertIn("the initial states differ", text)
+
+    def test_a_flop_without_init_starts_unconstrained_not_at_0(self) -> None:
+        """Re-check N2: gold `r <= r & d` against gate `r <= r`, no init, differ only when r
+        starts at 1; a check that starts every such flop at 0 calls them equal. The base case
+        starts them at x (``sat -set-init-undef``), so every start value counts."""
+        self.assert_not_a_refinement(hold("\\n"), hold("\\r"))
+        self.assertEqual(self.judge(hold("\\n"), hold("\\n")), (True, "", False))
+
+    def test_a_never_changing_flop_without_init_may_become_x(self) -> None:
+        """opt_dff's d_eq_q: a flip-flop with D = Q and no init is x for ever, so the gate may
+        drive its output with an x; a base case that starts it at 0 would call that a
+        difference (tests/opt/rules/dff/d_eq_q.v)."""
+        gate = ("attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire input 2 \\d\n"
+                "  wire output 3 \\y\n  connect \\y 1'x\nend\n")
+        self.assertEqual(self.judge(hold("\\r"), gate), (True, "", False))
+
+
+def deep_delay(init: str, stages: int = 12) -> str:
+    """Review H1: a holding flop ``r`` (D = Q, ``init`` as written, '' for none) followed by
+    ``stages`` flops to the output ``y``: a difference of ``r`` shows 13 clock edges later,
+    beyond the 20-step output check."""
+    nets = "".join(f"  wire \\c{k}\n" for k in range(stages))
+    flop = ("  cell $dff ${name}\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+            "    connect \\CLK \\clk\n    connect \\D {d}\n    connect \\Q {q}\n  end\n")
+    chain = ["\\r", *(f"\\c{k}" for k in range(stages))]
+    cells = flop.format(name="hold", d="\\r", q="\\r") + "".join(
+        flop.format(name=f"s{k}", d=chain[k], q=chain[k + 1]) for k in range(stages))
+    return ("attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire output 2 \\y\n"
+            f"{init}  wire \\r\n{nets}{cells}  connect \\y {chain[-1]}\nend\n")
+
+
+@unittest.skipUnless(YOSYS and Path(YOSYS).exists(), "Yosys 0.55 (ODIN3_YOSYS055) not found")
+class DeepDelayTest(unittest.TestCase):
+    """Review H1 (``init_dropped_deep12``) on real Yosys: gold flop init 0, gate init dropped, 12
+    flops to the output. The base case fails, the output check finds nothing in 20 steps, and
+    the BLIF cec would tie the missing init to 0 and prove it. It must never be ok."""
+
+    GOLD = deep_delay("  attribute \\init 1'0\n")
+    GATE = deep_delay("")
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.work = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_the_same_pair_refines(self) -> None:
+        paths = (self.work / "gold.il", self.work / "same.il")
+        for path in paths:
+            path.write_text(self.GOLD, encoding="utf-8")
+        checker = oe.Checker(YOSYS, self.work, 2 << 30)
+        self.assertEqual(checker.judge(paths[0], paths[1], "same"), (True, "", False))
+
+    def test_a_dropped_init_behind_a_deep_delay_is_never_ok(self) -> None:
+        """The base case fails, the output check finds nothing in 20 steps: inconclusive."""
+        paths = (self.work / "gold.il", self.work / "gate.il")
+        for path, text in zip(paths, (self.GOLD, self.GATE), strict=True):
+            path.write_text(text, encoding="utf-8")
+        ok, text, unsure = oe.Checker(YOSYS, self.work, 2 << 30).judge(paths[0], paths[1], "deep")
+        self.assertFalse(ok, text)
+        self.assertTrue(unsure, text)
+        self.assertIn("no output trace", text)
+
+    def test_the_real_cec_is_refused_for_the_pair(self) -> None:
+        """The lowering folds the gate's holding flop (no init) into an x net, which the cec ties
+        to 0 = the gold's value, and proves it. ``cec_ils(need_init)`` stops before the checker;
+        without ``need_init`` the cec does prove the pair (the hole)."""
+        paths = (self.work / "gold.il", self.work / "gate.il")
+        for path, text in zip(paths, (self.GOLD, self.GATE), strict=True):
+            path.write_text(text, encoding="utf-8")
+        verdict, _ = oe.cec_ils(YOSYS, paths[0], paths[1], 2 << 30, self.work, "open")
+        self.assertEqual(verdict, oe.CEC_PROVED)
+        verdict, why = oe.cec_ils(YOSYS, paths[0], paths[1], 2 << 30, self.work, "e2e", True)
+        self.assertEqual(verdict, oe.CEC_UNPROVEN, why)
+        self.assertIn("not used", why)
 
 
 if __name__ == "__main__":

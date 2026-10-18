@@ -1,0 +1,7 @@
+# tests/opt/vtr_equiv_expect_fail.txt: the designs only the opt-equiv leg of opt-nightly (opt_equiv_vtr) fails.
+# Read with vtr_expect_fail.txt unless the run is `--leg diff`: the opt-diff leg passes these, and an entry no unit fails is
+# reported STALE (2H, p2-final-1018-0849). Format: `<path> [needle] <reason>`.
+# opt-equiv soundness fix (PHASE2 #29, 2026-10-18): a passed proof now needs its base case from the
+# initial state, and the RAM ports are compared at full width. mkPktMerge was ok before only because
+# neither was checked (RAM data[0]/out[0] alone, no initial state).
+mkPktMerge.v [unproven:] untested for now (size limit): opt_equiv_vtr 2026-10-18 (92c2ba44, Release, 3G cap, 3037 s run of 14 files): 5 calls inconclusive; 0004-opt_merge and 0016-opt_dff pass the full-width induction (dual_port_ram data 153 bits) but their base case from the initial state (sat -seq 4 over the named wires) hit the 60 s limit, the other 3 not tried after 2 size-limit hits; the whole-script BLIF cec gives no verdict (equiv-check exit 2: model 'dual_port_ram' has no port 'data1[0]'). lower-equiv's re-proof measured the same base-case timeout on all 5 pairs

@@ -48,7 +48,11 @@ runs it alone). A child killed by its cap is reported ``out of memory (cap 4G)``
 - ``--opt-equiv`` / ``--opt-diff`` (need ``--yosys``; 2F Task 17): ``opt-equiv`` or ``opt-diff`` on
   the file (``--top`` as in the default mode; each ``--opt-arg=ARG`` goes to the child, e.g.
   ``--opt-arg=--script=phase2`` or ``--opt-arg=--expect=tests/opt/diff_expect.txt``). Exit 0 is a
-  pass, 1 a difference, anything else the child's first error line.
+  pass, 1 a difference, anything else the child's first error line. With ``--opt-diff`` an entry
+  whose reason starts with ``untested for now (size limit)`` or whose needle holds ``unproven`` must
+  see exit 4 (opt-diff: no verdict, and every other step agrees or is listed); any other failure of
+  that file, e.g. exit 1 for an unlisted histogram difference next to an unproven refine, is an
+  unexpected failure.
 
 - ``--opt-run`` (2F Task 18; Odin III only, no ``--yosys``): ``opt-run`` on the file, the Phase 2
   script with ``ODIN3_OK``, ``check`` FULL and the iteration cap (``--techlib`` passed on; ``--top``
@@ -97,6 +101,8 @@ from run_rows_equiv import parse_expect_line
 TOOL = "elab-sweep"
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_SKIP = 0, 1, 2, 77
 OPT_CRASH = 3  # opt-equiv, opt-diff, opt-run: a child crashed, was cap-killed or timed out (hard)
+OPT_UNPROVEN = 4  # opt-equiv, opt-diff: no verdict (a size limit), nothing else failed
+UNTESTED_REASON = "untested for now (size limit)"  # PHASE2 #29: a design too big for the check
 TIMEOUT_S = 3600  # a file past an hour is that file's failure
 TAIL_LINES = 3
 SUFFIX = ".v"
@@ -105,10 +111,20 @@ ELAB_EQUIV = Path(__file__).resolve().parent / "elab_equiv.py"
 PROC_DIFF = Path(__file__).resolve().parents[1] / "proc-check" / "proc_diff.py"
 OPT_TOOLS = {"opt-equiv": Path(__file__).resolve().parents[1] / "opt-check" / "opt_equiv.py",
              "opt-diff": Path(__file__).resolve().parents[1] / "opt-check" / "opt_diff.py",
-             "opt-run": Path(__file__).resolve().parents[1] / "opt-check" / "opt_run.py"}
+             "opt-run": Path(__file__).resolve().parents[1] / "opt-check" / "opt_run.py",
+             "lower-equiv": Path(__file__).resolve().parents[1] / "lower-check" / "lower_equiv.py",
+             "lower-sim": Path(__file__).resolve().parents[1] / "lower-check" / "lower_sim.py",
+             "lower-run": Path(__file__).resolve().parents[1] / "lower-check" / "lower_run.py"}
+# The 3B lower tools: they import opt-check's and lower-check's modules; only lower-equiv wants
+# Yosys. Their exit 5 (lower-run: a cap of `lower`) is a failure an expect-fail list may name.
+LOWER_TOOLS = ("lower-equiv", "lower-sim", "lower-run")
+NO_YOSYS_TOOLS = ("opt-run", "lower-sim", "lower-run")
 TRIO_PROBE = "opt -nodffe -nosdff"  # the trio's own flags; fails until `opt` exists (2F-5)
 # opt-equiv's summary line; the sweeps sum it (``--min-changed-total``)
 OPT_CHANGED_CALLS = re.compile(r"^opt-equiv: (\d+) calls changed something", re.M)
+# the lower tools' summary line (``lower-sim: compared 3 of 4 designs ...``); the sweeps sum it
+# (``--min-compared-total``): a design a tool skipped or found empty is not compared
+LOWER_COMPARED = re.compile(r"^lower-(?:sim|equiv|run): compared (\d+) of \d+ designs", re.M)
 # Exit 2 of an opt tool that is our own check failing, not the design: never an expected failure
 OPT_TOOL_ABORT = ("yosys-refine exit", "netlist-compare cannot compare")
 OPT_RUN_ITERATIONS = re.compile(r"iterations max=(\d+)")
@@ -142,6 +158,13 @@ class Outcome:
     why: str = ""
     output: str = ""
     hard: bool = False  # a signal, a memory-cap kill, a timeout or a child that cannot run
+    code: int = 0  # the opt tool's exit code (run_opt_tool only)
+
+
+def needs_unproven(entry: Expect) -> bool:
+    """An entry that says the file cannot be checked: its failure must be exit 4 (unproven) and
+    nothing else, or the listing would hide a real difference next to the unproven step."""
+    return entry.reason.startswith(UNTESTED_REASON) or "unproven" in entry.needle
 
 
 def parse_size(text: str) -> int:
@@ -319,6 +342,19 @@ def first_error(text: str) -> str:
     return " | ".join(lines[-TAIL_LINES:])
 
 
+OPT_FINDING_MARKS = ("DIFFERS", "stale entry", "differs as listed", "unproven", "not a refinement",
+                     "inconclusive")
+
+
+def opt_findings(text: str) -> str:
+    """What an opt tool (exit 1) found, whole: every line that names a difference, a stale entry,
+    a listed difference or an unproven step, else the first error. ``first_error`` alone keeps
+    the last three lines, which hide every script but the last (2H: opt_diff_micro)."""
+    found = [line.strip() for line in text.splitlines()
+             if any(mark in line for mark in OPT_FINDING_MARKS)]
+    return " | ".join(found) if found else first_error(text)
+
+
 def child_why(done: subprocess.CompletedProcess[str], cap: int) -> str:
     """Why a child that exited non-zero failed: its cap, a signal, or its first error."""
     code = done.returncode
@@ -491,14 +527,18 @@ def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
     """opt-equiv, opt-diff or opt-run on the file: exit 0 passes, 1 is a difference, 2 an error,
     and 3 (the one convention of the opt tools) a crash, cap kill or timeout of a child: hard."""
     start = time.monotonic()
-    assert cfg.yosys is not None or cfg.opt_tool == "opt-run"
+    assert cfg.yosys is not None or cfg.opt_tool in NO_YOSYS_TOOLS
     top = top_for(item, cfg.tops, cfg.golden_root)
     argv = [sys.executable, str(OPT_TOOLS[cfg.opt_tool]), "--odin3", cfg.odin3,
             *(["--yosys", cfg.yosys] if cfg.yosys else []), "--mem-cap", str(cap),
             *(["--top", top] if top else []),
             *(["--techlib", cfg.techlib] if cfg.techlib else []), *cfg.opt_args, str(item.path)]
     here = str(Path(__file__).resolve().parent)  # the tool imports memcap from here
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join([here, os.environ.get("PYTHONPATH", "")])}
+    paths = [here, os.environ.get("PYTHONPATH", "")]
+    if cfg.opt_tool in LOWER_TOOLS:
+        tools = Path(here).parent
+        paths = [str(tools / "lower-check"), str(tools / "opt-check"), *paths]
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(paths)}
     try:  # the tool caps each of its own children
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
                               timeout=TIMEOUT_S, check=False, pass_fds=lock_fds(), env=env)
@@ -512,9 +552,10 @@ def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
     if done.returncode == EXIT_SKIP:
         return Outcome("skip", secs, "cannot be capped")
     why = "NOT ok: " if done.returncode == 1 else ""
-    return Outcome("fail", secs, why + (first_error(text) or f"exit {done.returncode}"), text,
+    found = opt_findings(text) if done.returncode == 1 else first_error(text)
+    return Outcome("fail", secs, why + (found or f"exit {done.returncode}"), text,
                    hard=done.returncode < 0 or done.returncode == OPT_CRASH
-                   or any(mark in text for mark in OPT_TOOL_ABORT))
+                   or any(mark in text for mark in OPT_TOOL_ABORT), code=done.returncode)
 
 
 def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
@@ -565,8 +606,10 @@ def run_file(cfg: Config, item: Item) -> Outcome:
 # ---- the sweep --------------------------------------------------------------------------------
 
 
-def verdict(item: Item, outcome: Outcome, expect: dict[str, Expect], xl: bool) -> tuple[str, str]:
-    """(class, line): class is ok, xfail, FAIL, XPASS, crash or skip."""
+def verdict(item: Item, outcome: Outcome, expect: dict[str, Expect], xl: bool,
+            strict_unproven: bool = False) -> tuple[str, str]:
+    """(class, line): class is ok, xfail, FAIL, XPASS, crash or skip. ``strict_unproven``
+    (opt-diff and opt-equiv): an entry that ``needs_unproven`` is expected only on exit 4."""
     head = f"{item.rel} ({item.size} B, {outcome.secs:.3f} s)"
     entry = expect.get(item.rel)
     listed = entry is not None and not entry.xl  # an xl entry is a run class, not an expectation
@@ -590,6 +633,10 @@ def verdict(item: Item, outcome: Outcome, expect: dict[str, Expect], xl: bool) -
         if entry.needle and entry.needle not in outcome.output:
             return "FAIL", (f"FAIL  {head}: fails differently from the listing: expected "
                             f"[{entry.needle}], got {outcome.why}")
+        if strict_unproven and needs_unproven(entry) and outcome.code != OPT_UNPROVEN:
+            return "FAIL", (f"FAIL  {head}: listed as untested/unproven ({entry.reason}), which "
+                            f"needs exit {OPT_UNPROVEN} (unproven and nothing else), got exit "
+                            f"{outcome.code}: {outcome.why}")
         return "xfail", f"xfail {head}: {entry.reason}"
     return "FAIL", f"FAIL  {head}: {outcome.why}"
 
@@ -612,6 +659,7 @@ class Sweep:
         self.skipped_run = False
         self.bench_rows: dict[str, dict[str, str]] = {}
         self.changed_total = 0  # opt-equiv: the calls that changed something, over the ok files
+        self.compared_total = 0  # lower tools: the designs really compared, over the ok files
         self.max_iterations = (0, "")  # opt-run: the largest `opt` iteration count and its file
 
     def note_iterations(self, item: Item, output: str) -> None:
@@ -620,13 +668,16 @@ class Sweep:
             self.max_iterations = (int(found.group(1)), item.rel)
 
     def report(self, item: Item, outcome: Outcome) -> None:
-        cls, line = verdict(item, outcome, self.expect, self.xl)
+        cls, line = verdict(item, outcome, self.expect, self.xl,
+                            self.cfg.opt_tool in ("opt-diff", "opt-equiv"))
         print(line, flush=True)
         if outcome.kind == "ok" and self.cfg.mode() == "bench" and outcome.output:
             print(f"bench: {outcome.output}", flush=True)
             self.bench_rows[item.rel] = parse_bench(outcome.output)
         if outcome.kind == "ok" and self.cfg.opt_tool == "opt-equiv":
             self.changed_total += sum(int(n) for n in OPT_CHANGED_CALLS.findall(outcome.output))
+        if outcome.kind == "ok" and self.cfg.opt_tool in LOWER_TOOLS:
+            self.compared_total += sum(int(n) for n in LOWER_COMPARED.findall(outcome.output))
         if outcome.kind == "ok" and self.cfg.opt_tool == "opt-run":
             self.note_iterations(item, outcome.output)
         self.counts[cls] += 1
@@ -685,12 +736,20 @@ def sweep(cfg: Config, args: argparse.Namespace, items: list[Item],
     if short:  # an odin3 that does nothing passes every per-file check (2F-6 re-review N3)
         print(f"{TOOL}: FAIL: opt-equiv: {state.changed_total} changing calls in total, want at "
               f"least {args.min_changed_total}")
+    if cfg.opt_tool in LOWER_TOOLS:
+        print(f"{TOOL}: {cfg.opt_tool}: compared {state.compared_total} designs in total "
+              f"(floor {args.min_compared_total})")
+    thin = cfg.opt_tool in LOWER_TOOLS and state.compared_total < args.min_compared_total
+    if thin:  # a sweep of skipped, empty or unrun designs passes every per-file check (H3)
+        print(f"{TOOL}: FAIL: {cfg.opt_tool}: {state.compared_total} designs compared in total, "
+              f"want at least {args.min_compared_total}")
     missed = False
     if cfg.bench_report:
         lines, missed = bench_report.report(cfg.bench_report, state.bench_rows,
                                             frozenset(expect))
         print("\n".join(lines))
-    return EXIT_FAIL if counts["FAIL"] or counts["XPASS"] or stale or missed or short else EXIT_OK
+    failed = counts["FAIL"] or counts["XPASS"] or stale or missed or short or thin
+    return EXIT_FAIL if failed else EXIT_OK
 
 
 # ---- arguments --------------------------------------------------------------------------------
@@ -714,11 +773,20 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                     help="run opt-diff (Odin III's opt against Yosys 0.55's) per file")
     ap.add_argument("--opt-run", action="store_true", dest="opt_run",
                     help="run opt-run (Phase 2 script, ODIN3_OK, check, iteration cap) per file")
+    ap.add_argument("--lower-equiv", action="store_true", dest="lower_equiv",
+                    help="run lower-equiv (lower refines its input, in Yosys 0.55) per file")
+    ap.add_argument("--lower-sim", action="store_true", dest="lower_sim",
+                    help="run lower-sim (the simulator before and after lower) per file")
+    ap.add_argument("--lower-run", action="store_true", dest="lower_run",
+                    help="run lower-run (the Phase 3 script up to compact, ODIN3_OK, check)")
     ap.add_argument("--opt-arg", action="append", default=[], metavar="ARG",
                     help="--opt-equiv/--opt-diff: an argument for the child (use --opt-arg=ARG)")
     ap.add_argument("--min-changed-total", type=int, default=0, metavar="N",
                     help="--opt-equiv: fail (exit 1) unless at least N calls changed something "
                          "over the whole sweep (a do-nothing odin3 passes every file)")
+    ap.add_argument("--min-compared-total", type=int, default=0, metavar="N",
+                    help="--lower-equiv/--lower-sim/--lower-run: fail (exit 1) unless the tools "
+                         "really compared at least N designs over the whole sweep")
     ap.add_argument("--pass", choices=("elab", "proc"), default="elab", dest="stop_pass",
                     help="--equiv: side A stops after elaboration (default) or after proc")
     ap.add_argument("--trio", choices=("auto", "on", "off"), default="auto",
@@ -756,15 +824,23 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
-def build_config(args: argparse.Namespace) -> Config:
-    modes = [args.equiv, args.bench, args.proc_diff, args.opt_equiv, args.opt_diff, args.opt_run]
-    if sum(bool(m) for m in modes) > 1:
-        raise UsageError("--equiv, --bench, --proc-diff, --opt-equiv, --opt-diff and --opt-run "
-                         "cannot be combined")
+def check_floors(args: argparse.Namespace) -> None:
+    """The floor options belong to their modes."""
     if args.min_changed_total and not args.opt_equiv:
         raise UsageError("--min-changed-total needs --opt-equiv")
-    if (args.opt_equiv or args.opt_diff) and not args.yosys:
-        raise UsageError("--opt-equiv and --opt-diff need --yosys")
+    if args.min_compared_total and not (args.lower_equiv or args.lower_sim or args.lower_run):
+        raise UsageError("--min-compared-total needs --lower-equiv, --lower-sim or --lower-run")
+
+
+def build_config(args: argparse.Namespace) -> Config:
+    modes = [args.equiv, args.bench, args.proc_diff, args.opt_equiv, args.opt_diff, args.opt_run,
+             args.lower_equiv, args.lower_sim, args.lower_run]
+    if sum(bool(m) for m in modes) > 1:
+        raise UsageError("--equiv, --bench, --proc-diff, --opt-equiv, --opt-diff, --opt-run, "
+                         "--lower-equiv, --lower-sim and --lower-run cannot be combined")
+    check_floors(args)
+    if (args.opt_equiv or args.opt_diff or args.lower_equiv) and not args.yosys:
+        raise UsageError("--opt-equiv, --opt-diff and --lower-equiv need --yosys")
     if args.bench_report and not args.bench:
         raise UsageError("--bench-report needs --bench")
     if args.bench_report and args.bench_report not in bench_report.PROFILES:
@@ -785,7 +861,8 @@ def build_config(args: argparse.Namespace) -> Config:
             raise UsageError(f"--cap-for {spec!r}: expected SUFFIX=CAP")
         caps[suffix] = parse_size(size)
     cap = parse_size(args.mem_cap)
-    yosys_mode = args.equiv or args.proc_diff or args.opt_equiv or args.opt_diff
+    yosys_mode = (args.equiv or args.proc_diff or args.opt_equiv or args.opt_diff
+                  or args.lower_equiv)
     for tool in (args.odin3, args.bench) if not yosys_mode else (args.odin3,):
         if tool is not None and shutil.which(tool) is None:
             raise UsageError(f"{tool} is not an executable file")
@@ -802,7 +879,8 @@ def build_config(args: argparse.Namespace) -> Config:
         bench_report=args.bench_report, libs=tuple(str(Path(lib).resolve()) for lib in args.lib),
         proc_diff=bool(args.proc_diff),
         opt_tool="opt-equiv" if args.opt_equiv else "opt-diff" if args.opt_diff
-        else "opt-run" if args.opt_run else "",
+        else "opt-run" if args.opt_run else "lower-equiv" if args.lower_equiv
+        else "lower-sim" if args.lower_sim else "lower-run" if args.lower_run else "",
         opt_args=tuple(args.opt_arg), pass_proc=args.stop_pass == "proc",
         no_trio=args.trio == "off", also_no_trio=bool(args.also_no_trio),
         nolatches=bool(args.nolatches), vtr_compat=bool(args.vtr_compat),

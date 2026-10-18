@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# lower-run: the Phase 3 script up to compact with the corpus checks (3B spec 14.5). See lower_run.py.
+# Exit codes: 0 ok, 1 failed, 2 error or usage, 3 hard (crash or timeout), 5 cap, 77 skipped.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../elab-check:$here/../opt-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/lower_run.py" "$@"

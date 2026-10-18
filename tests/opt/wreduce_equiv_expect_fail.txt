@@ -3,3 +3,4 @@
 # two rows are documented refinement skips in tests/opt/rules/refine_skip.txt.
 wreduce/divmod_trim_pow.v [No SAT model available] Yosys has no SAT model for $pow (the flow fails on the cell, not on the rewrite)
 wreduce/mem_addr.v [Unproven $equiv] out-of-range accesses alias valid words after the address bits go (Yosys's own rule; wreduce -memx exists for it)
+wreduce/ff_unused.v [unproven:] unproven (exit 4), a checker limit and not a size limit: the proof passes, the base case compares the dropped bits q[7:4] (x in the gate, defined in the gold), fails, and the BLIF cec cannot decide a flop without init (it starts it at 0; PHASE2 #29 H1)

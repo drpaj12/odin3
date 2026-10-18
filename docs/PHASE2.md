@@ -34,17 +34,22 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
 - [x] 2E `proc` (#92)
 - [x] 2F `opt` (#95)
 - [x] 2H micros + VTR benchmark set identical/equivalent to Parmys (#98, #113, #114)
-  Closed 2026-10-18 under decision #29: micros and the 14-design evidence set equivalent; big designs untested for now (size limit) and moved to the Phase 3 QoR exit; follow-ups: opt_dff enable inference on blob_merge and stereovision3 (QoR), D15 no-write memory deletion (3C).
+  Closed 2026-10-18 under decision #30: micros and the 14-design evidence set equivalent; big designs untested for now (size limit) and moved to the Phase 3 QoR exit; follow-ups: opt_dff enable inference on blob_merge and stereovision3 (QoR), D15 no-write memory deletion (3C).
 
 ## Exit statement
 
-Phase 2 is complete. 2H closed 2026-10-18 under decision #29.
+Phase 2 is complete. 2H closed 2026-10-18 under decision #30.
 Exit sweeps of 2026-10-15: exit_micro 0 failing, 453 PROVEN of 539; exit_vtr 0 failing, 26 of 31 PROVEN, 5 unproven.
-Sweeps of 2026-10-17/18: opt_equiv_micro_phase3 539 files, 0 unexpected failures; opt_diff_micro_wreduce 438 passed, 101 expected failures, 0 unexpected, 0 stale.
+Final sweeps of 2026-10-18 (release, heavy-run; no counterexample anywhere):
+opt_diff_micro 539 files, 433 passed, 106 expected, 0 unexpected, 0 stale; opt_diff_micro_wreduce 431 / 106 / 2 unexpected (spree, cf_fft_256_8: refine now proves, relabelled in a2e154f4, single-file runs exit 0);
+opt_diff_vtr (14 designs) 70 runs, 56 ok, 14 fail as listed, 0 unexpected;
+opt_equiv_vtr (14 designs) 9 proved, 5 untested for now (size limit; deferred to a bigger machine): diffeq1, diffeq2, mkPktMerge, sha, blob_merge;
+opt_equiv_micro 539 files, 421 passed, 118 expected, 0 unexpected, 0 stale; opt_equiv_micro_phase3 411 / 128 / 0 / 0 stale.
+Details and checker soundness fixes: decision #29.
 Big designs that are untested for now (size limit): mcml.v, LU32PEEng.v, LU64PEEng.v (VTR set); LU32PEEng.v and LU64PEEng.v (micro set).
 Designs untested for now at exit_vtr (two clocks; equiv-check models one clock): stereovision3.v and multiclock_reader_writer.v.
 The lenet xl legs are untested for now: the Yosys-side runs (opt_equiv_vtr_xl, opt_diff_vtr_xl, sweep-xl S-P) need an idle machine.
-Their VTR-flow and QoR check is the Phase 3 exit (decision #29, PHASE3 #16 amended).
+Their VTR-flow and QoR check is the Phase 3 exit (decision #30, PHASE3 #16 amended).
 
 Sweep lines, verbatim from `results/exit-sweeps-2026-10-15.txt`:
 
@@ -1101,13 +1106,13 @@ Sweep lines, verbatim from `results/exit-sweeps-2026-10-15.txt`:
       here.** Each file runs `opt-equiv` and `opt-diff` with all five scripts (spec 20.3), one tool
       at a time under memcap, smallest first (`mcml.v` last). After `tools/build-locked --preset
       release -j6`, with no other heavy job and no agent running a build:
-      - `opt_equiv_vtr` on the 14-design evidence set (decision #29; 2026-10-17, 08dfe76): 14 of 14 proven equivalent, 0 unexpected, 824 s.
-        The earlier run on all 31 files (2026-10-16, 6490.69 s) had 20 UNEXPECTED. That scope is replaced by decision #29.
-      - `opt_diff_vtr` on the 14-design evidence set (2026-10-17, c7896ac): 70 runs (14 designs x 5 scripts), 0 unexpected.
-        7 designs are structurally identical to Yosys. Seven (sha, ch_intrinsics, ch_intrinsics_nolatches, diffeq1, diffeq2, blob_merge, stereovision3) differ only structurally and are listed; `opt_equiv_vtr` proves them equivalent.
-        blob_merge and stereovision3 also infer fewer `$dffe` than Yosys (blob_merge 83 vs 93 under the Phase 2 script; stereovision3 7 vs 12). That is a QoR follow-up, not a correctness failure (decision #29).
-      - `opt_equiv_micro_phase3` (2026-10-17, branch fix/2H-micro-expect 08dfe76): 539 files, 0 unexpected failures.
-      - `opt_diff_micro_wreduce` (2026-10-18, fix/2H-micro-expect 9ee5f65a): 539 files, 438 passed, 101 expected failures (each listed with its reason; 20 of them are "untested for now (size limit)": opt-diff's refine step hit the 60 s SAT limit with no BLIF cec verdict), 0 unexpected, 0 stale entries, 8799 s.
+      - `opt_equiv_vtr` on the 14-design evidence set (decision #30; final, 2026-10-18): 9 proved, 5 untested for now (size
+        limit: diffeq1, diffeq2, mkPktMerge, sha, blob_merge), no counterexample; see "Final exit results" in decision #29.
+        The earlier run on all 31 files (2026-10-16, 6490.69 s) had 20 UNEXPECTED. That scope is replaced by decision #30.
+      - `opt_diff_vtr` on the 14-design evidence set (5545c666, 2026-10-18): 70 runs (14 designs x 5 scripts), 56 ok, 14 fail as listed in `diff_expect.txt`, 0 unexpected.
+        blob_merge and stereovision3 also infer fewer `$dffe` than Yosys (blob_merge 83 vs 93 under the Phase 2 script; stereovision3 7 vs 12). That is a QoR follow-up, not a correctness failure (decision #30).
+      - `opt_equiv_micro` / `opt_equiv_micro_phase3` (390ea0e3, 2026-10-18): 421 / 411 passed, 118 / 128 expected, 0 unexpected, 0 stale.
+      - `opt_diff_micro` / `opt_diff_micro_wreduce` (556b00df, 2026-10-18): 433 / 431 passed, 106 / 106 expected, 0 / 2 unexpected (spree, cf_fft_256_8, relabelled in a2e154f4), 0 stale.
       - `ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_(equiv|diff)_vtr$'` (31 files, one tool
         child at a time, `--mem-cap 3G`); or by hand:
         `ODIN3_HEAVY_OK=1 tools/heavy-run tools/opt-check/opt-nightly --odin3 build/release/odin3
@@ -1151,7 +1156,23 @@ Sweep lines, verbatim from `results/exit-sweeps-2026-10-15.txt`:
       `vtr_primitives.v` as a library unit with per-read flags (`--nomem2reg`); 2D-7b's
       `read_verilog --lib` is that mode, and 2H checks it carries them.
     - **2F follow-ups:** opt-equiv hard-block cut compares ports only, not instance presence or
-      parameters (review 2026-10-16); follow-up.
+      parameters (review 2026-10-16); parameters and port widths are compared since #29.
+    - **3G follow-ups:** the opt-diff refine step (Yosys's SAT proof, 60 s limit; then the BLIF cec
+      fallback, which since 6a8759eb is refused for latches with no 0/1 init and for x nets read by
+      Odin III's side) is unproven, opt-diff exit 4, on two sets of micros, each listed untested for
+      now (size limit) and required to exit 4, so one unproven refine cannot hide another difference.
+      Under the wreduce/Phase 3 scripts: 25 micros (`tests/opt/diff_micro_wreduce_expect_fail.txt`;
+      20 listed 2026-10-17, `large/spree.v` and `full/cf_fft_256_8.v` left it 2026-10-18 because their
+      refine proves, seven joined because the fallback had rescued them). Under the Phase 2 script and
+      `opt -full`: 26 micros (`tests/opt/diff_micro_phase2_expect_fail.txt`: 15 with a SAT limit, ten
+      more that the fallback had rescued - diffeq1, diffeq2, diffeq_paj_convert, rs_decoder_1/2,
+      mac1/2, blob_merge, cf_fft_256_8, sv_chip0 - and `large/LU32PEEng.v`, which also loses Yosys to the
+      memory cap). Both sweeps ran clean on these lists (opt_diff_micro 556b00df, 2026-10-18: 433 pass, 106 listed,
+      0 unexpected, 0 stale; opt_diff_micro_wreduce 556b00df: 431 pass, 106 listed, 2 unexpected,
+      spree and cf_fft_256_8, relabelled in a2e154f4 and verified by single-file runs).
+      `full/iir_no_combinational.v` is in the wreduce list only: its Phase 2/`opt -full` refine
+      proves. Two more micros (`large/LU64PEEng.v`, `large/arm_core.v`) are exit 4 because Yosys is
+      killed at the 2 GiB cap, and three are rejected by Yosys 0.55 (exit 2, same list).
     - **For Peter:**
       1. *Decided, #25:* the mixed-sign cell semantics (2F Task 18 review I1 and I2): Peter ruled
          "2a" on 2026-10-13, both-signed-only everywhere, with a warning.
@@ -1347,7 +1368,88 @@ Sweep lines, verbatim from `results/exit-sweeps-2026-10-15.txt`:
       --vtr-compat` on `tests/golden/vtr_tristate/tri_out.v` and compares the netlist with the
       Parmys golden shape (`tests/golden/vtr_tristate/tri_out.parmys.blif`, a copy of the oracle's
       output) and checks the WARNING.
-29. **Equivalence scope for the Phase 2 exit** (Peter, 2026-10-17): "I'm not super interested in having all of them, and we can just put the ones that don't pass (as long as some do) to later testing on a bigger machine." and "let's get the smaller micros equivalent and some of the smaller benchmarks equivalent and then for the bigger ones worry about do they get into the flow and are the final numbers reported by VTR metrics similar".
+29. **opt-equiv soundness fix: hard blocks at full width, the initial state checked** (agent
+    defaults, 2026-10-18; the 3B soundness audit, Part 2, of `tools/opt-check/opt_equiv.py`, the
+    same holes as lower-equiv's fix 9ac875a4 and its re-check N2/N3). Peter may override.
+    - **Hard blocks (C1, M1, N3).** `expose -evert` gives each cut port the width of the black
+      box's declaration, and the tech library declares `single_port_ram`/`dual_port_ram` with
+      `dynports` and 1-bit `data`/`out`: only bit 0 of a RAM's write and read data was compared.
+      Every hard-block instance is now declared at the widths it connects
+      (`tools/opt-check/hard_blocks.py`, `Checker.prepare_boxes`), and a block that both sides
+      hold under one name with another type, port widths or parameter value (RTLIL keeps the
+      parameters) is "not a refinement".
+    - **Initial state (H2, N2).** `equiv_simple`/`equiv_induct` have no base case from the initial
+      state. A passed proof counts only when `sat -seq 4` from the initial state finds no difference
+      on any wire both sides name, in the proof's clock model (`Checker.judge`). `init` values are
+      honoured; a flip-flop with no init starts at x (`-set-init-undef`), so every start value
+      counts and `opt_dff`'s x for a never-changing flip-flop stays a refinement (0 would reject it,
+      and would miss the re-check's `r <= r & d` against `r <= r`). A failed base case is "not a
+      refinement" when an output differs within 20 `clk2fflogic` steps, else inconclusive; a
+      base-case timeout is a size limit (inconclusive, exit 4 unless the whole-script BLIF cec
+      proves the run). A failed proof stays "not a refinement"; no path makes a failed or
+      undecided check "ok".
+    - **Evidence.** `tests/tools/test_opt_equiv.py` (`SoundnessTest`, real Yosys 0.55): RAM data
+      bit 2, read bit 3, `DATA_WIDTH` 4 to 5, `ADDR_WIDTH` parameter alone, inverted `we`, init 0
+      to 1, `r <= r & d` against `r <= r`: all "not a refinement"; correct pairs ok. Each fix
+      reverted once (five mutants and the 0-init one) fails a test. `opt_equiv_rules` and
+      `opt_equiv_wreduce_rules` pass. VTR re-proof of the 14 small designs (`opt-nightly --leg equiv
+      --set vtr31 --only ...`, 92c2ba44, then c5eeb7f3, Release, 3G cap): 9 proved (single_wire,
+      single_ff, and_latch, the three multiclock designs, ch_intrinsics(+_nolatches) with
+      full-width RAM ports, stereovision3) and 5 untested for now (size limit), listed in
+      `tests/opt/vtr_expect_fail.txt`: mkPktMerge (its base case times out at 60 s, the BLIF cec
+      cannot read `dual_port_ram`'s `data1[0]`), and, since c5eeb7f3 refuses the BLIF cec fallback
+      for latches with no 0/1 init, diffeq1 (4 of 4 calls inconclusive, 386 such latches), diffeq2
+      (3 of 3, 192), sha (1 of 8, 1786) and blob_merge (4 of 9, 1144). None of the five has a
+      counterexample (no call is "not a refinement"). opt-diff's refine step has the same rule
+      (`need_init`, 6a8759eb): a SAT timeout on a design with such latches is unproven (exit 4);
+      the micros it affects are in `tests/opt/diff_micro_phase2_expect_fail.txt` and
+      `diff_micro_wreduce_expect_fail.txt`, and the VTR designs' opt-diff lines in `diff_expect.txt`.
+      Final micro sweeps (390ea0e3, 2026-10-18, Release, heavy-run): `opt_equiv_micro` (Phase 2
+      script) 539 files, 421 passed, 118 expected failures, 0 unexpected, 0 stale;
+      `opt_equiv_micro_phase3` 411 / 128 / 0 / 0 stale. No counterexample anywhere. Listed files
+      do have "not a refinement" calls: `full/stereovision3.v` and
+      `large/sv_chip3_hierarchy_no_mem.v` (call 0016-opt_dff; Yosys 0.55's own `opt_dff` fails the
+      identical induction on the same before-state and a 10-step output check finds no trace, so it is a
+      limit of the checker; the VTR copy of stereovision3 differs in its sensitivity list and a missing
+      `default:` and proves), the `wreduce.mem_addr` skips, `ch_intrinsics` (0039-opt_expr) and
+      `cf_cordic_v_8_8_8` (opt_share), each with the pair name in its needle. 2H lists the unproven: 12
+      big micros and `diffeq2` under both scripts (`tests/opt/equiv_expect_fail.txt`), matmul
+      under the Phase 2 script (`equiv_phase2_expect_fail.txt`: its memory's equiv_induct is killed
+      by the cap even at 5G), three small designs under Phase 3 only (`bm_arithmetic_unused_bits`,
+      `iir_no_combinational`, `iir`: the base case fails on named wires whose unused upper bits a wreduce
+      call drops, x in the gate against defined bits in the gold; the output-only check passes 20 steps;
+      a checker limit, not a size limit). `diffeq2` (2131 B) stays unproven: the induction of its
+      multipliers is unproven after 600 s. `syntax/inferred_ram_w_clog2.v` (1479 B) proves under both scripts
+      at a 4G cap (its base case peaks at 2.3 GB; the sweeps give it `--cap-for ...=4G`). The seven
+      entries only Phase 3 fails moved to `equiv_phase3_expect_fail.txt`.
+    - **Final exit results (2026-10-18, Release, heavy-run; no counterexample anywhere).**
+      `opt_diff_micro` (556b00df): 539 files, 433 passed, 106 expected, 0 unexpected, 0 stale.
+      `opt_diff_micro_wreduce` (556b00df): 431 passed, 106 expected, 2 unexpected (`large/spree.v`
+      and `full/cf_fft_256_8.v`, whose refine now proves; relabelled in a2e154f4 and verified by
+      single-file runs, exit 0). `opt_diff_vtr`, 14 small designs (5545c666): 70 runs, 56 ok, 14
+      fail as listed in `diff_expect.txt`, 0 unexpected. `opt_equiv_vtr`, 14 small designs: 9
+      proved (single_wire, single_ff, and_latch, multiclock_output_and_latch,
+      multiclock_separate_and_latch, multiclock_reader_writer, ch_intrinsics,
+      ch_intrinsics_nolatches, stereovision3); 5 untested for now (size limit), deferred to a bigger
+      machine: diffeq1, diffeq2, mkPktMerge, sha, blob_merge (no-init latches, so the BLIF cec
+      fallback is not sound; SAT 60 s limits on multipliers and memories). A listing never counts as
+      a pass. `opt_equiv_micro` (390ea0e3): 539 files, 421 passed, 118 expected, 0 unexpected, 0
+      stale; `opt_equiv_micro_phase3` (390ea0e3): 411 / 128 / 0 / 0 stale.
+    - **Checker soundness fixes during the exit.** opt-equiv: full-width hard blocks, the
+      initial-state base case (`sat -seq 4 -set-init-undef`), and the BLIF cec fallback refused for
+      no-init latches and x nets (92c2ba44, c5eeb7f3). opt-diff: the same fallback fix and the
+      gold/gate order (6a8759eb). `elab-sweep` requires exit 4 for any "untested" listing in the
+      opt-diff and opt-equiv sweeps. Earlier Phase 2 equivalence claims that relied on the old
+      fallback were re-proven or relabelled.
+    - **Known checker limits (accepted, Low).** The `stereovision3` and `sv_chip3` micro copies (not
+      the VTR files) fail the 0016-opt_dff induction as Yosys's own `opt_dff` does; a 10-step
+      bounded output check finds no trace. The `-opt_dff` and `-opt_share` needles name the pass,
+      not the pair.
+    - **Not changed:** opt-diff, opt-rules, flatten-diff and opt-gen-diff call `Checker.refines`
+      (the proof alone) and do not get the hard-block widths or the base case yet; the
+      whole-script BLIF cec cannot read a `dual_port_ram`/`single_port_ram` whose ports are bit
+      names (`data1[0]`) against Yosys's 1-bit black-box model. Follow-ups.
+30. **Equivalence scope for the Phase 2 exit** (Peter, 2026-10-17): "I'm not super interested in having all of them, and we can just put the ones that don't pass (as long as some do) to later testing on a bigger machine." and "let's get the smaller micros equivalent and some of the smaller benchmarks equivalent and then for the bigger ones worry about do they get into the flow and are the final numbers reported by VTR metrics similar".
     - **Rule.** Equivalence (`opt-equiv`, `opt-diff`, `equiv-check`) is required for the micros and for 14 small VTR designs: single_wire, single_ff, and_latch, multiclock_output_and_latch, multiclock_separate_and_latch, multiclock_reader_writer, ch_intrinsics, ch_intrinsics_nolatches, diffeq1, diffeq2, mkPktMerge, sha, blob_merge, stereovision3. This is the Phase 2 evidence set. Phase 3 proves itself on the same set.
     - **VTR opt legs.** They run `tools/opt-check/opt-nightly --only <each of the 14>`.
     - **Big VTR designs.** A big VTR design counts for Phase 2 when the Odin III front end completes on it (exit_vtr 2026-10-15: 31 designs, 0 failing). Designs that cannot be proven are deferred to a bigger machine. Their VTR-flow and QoR check is the Phase 3 exit (3H, `tools/vtr-qor`).

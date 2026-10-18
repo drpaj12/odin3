@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# lower-equiv: `lower` refines its input, proved in Yosys 0.55 (3B spec 14.4). See lower_equiv.py.
+# Exit codes: 0 every design refines, 1 not, 2 error or usage, 3 hard (a child crashed or timed
+# out), 4 unproven (SAT size limit), 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../elab-check:$here/../opt-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/lower_equiv.py" "$@"
