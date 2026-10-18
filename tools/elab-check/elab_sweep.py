@@ -332,6 +332,18 @@ def first_error(text: str) -> str:
     return " | ".join(lines[-TAIL_LINES:])
 
 
+OPT_FINDING_MARKS = ("DIFFERS", "stale entry", "differs as listed", "unproven")
+
+
+def opt_findings(text: str) -> str:
+    """What an opt tool (exit 1) found, whole: every line that names a difference, a stale entry,
+    a listed difference or an unproven step, else the first error. ``first_error`` alone keeps
+    the last three lines, which hide every script but the last (2H: opt_diff_micro)."""
+    found = [line.strip() for line in text.splitlines()
+             if any(mark in line for mark in OPT_FINDING_MARKS)]
+    return " | ".join(found) if found else first_error(text)
+
+
 def child_why(done: subprocess.CompletedProcess[str], cap: int) -> str:
     """Why a child that exited non-zero failed: its cap, a signal, or its first error."""
     code = done.returncode
@@ -525,7 +537,8 @@ def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
     if done.returncode == EXIT_SKIP:
         return Outcome("skip", secs, "cannot be capped")
     why = "NOT ok: " if done.returncode == 1 else ""
-    return Outcome("fail", secs, why + (first_error(text) or f"exit {done.returncode}"), text,
+    found = opt_findings(text) if done.returncode == 1 else first_error(text)
+    return Outcome("fail", secs, why + (found or f"exit {done.returncode}"), text,
                    hard=done.returncode < 0 or done.returncode == OPT_CRASH
                    or any(mark in text for mark in OPT_TOOL_ABORT), code=done.returncode)
 

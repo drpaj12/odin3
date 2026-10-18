@@ -101,6 +101,12 @@ text = open(argv[-1]).read()
 for code in (1, 2, 3, 4):
     if f"OT{code}" in text:
         print(f"opt-tool: message for exit {code}")
+        if "MANY" in text:
+            print("opt-tool: x.v [phase2]: histogram: DIFFERS: first script")
+            print("opt-tool: x.v [phase2]: counters odin3: none; yosys: none")
+            print("opt-tool: x.v [full]: identity: DIFFERS: last script")
+            print("opt-tool: x.v [full]: counters odin3: none; yosys: none")
+            print("opt-tool: work directory kept: /tmp/w")
         if "WORD" in text:
             print("refine: DIFFERS: unproven: the SAT proof hit its size limit")
         sys.exit(code)
@@ -638,6 +644,19 @@ class OptModesTest(SweepTestCase):
             code, out, _ = self.run_tool("--opt-diff", "--yosys", "Y", str(self.dir / "m"))
             self.assertEqual(code, 1, out)
             self.assertIn("FAIL  u.v", out)
+
+    def test_exit_1_reports_every_script_not_only_the_last_lines(self) -> None:
+        """2H: opt_diff_micro printed the last three lines, so the [phase2] findings of a design
+        whose [full] script also differed were invisible. Exit 1 now lists every finding line."""
+        fake = _exe(self.bin / "fake_opt_tool.py", FAKE_OPT_TOOL)
+        self.write("m/many.v", "OT1 MANY\n")
+        tools = dict(elab_sweep.OPT_TOOLS, **{"opt-diff": fake})
+        with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+            code, out, _ = self.run_tool("--opt-diff", "--yosys", "Y", str(self.dir / "m"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("[phase2]: histogram: DIFFERS: first script", out)
+        self.assertIn("[full]: identity: DIFFERS: last script", out)
+        self.assertNotIn("counters", out)
 
     def test_h2_an_unproven_refine_next_to_another_difference_is_unexpected(self) -> None:
         """2H review H2: a file listed as untested (reason) or unproven (needle) is expected only on
