@@ -1,0 +1,5 @@
+.model m
+.inputs a[0] a[1]
+.outputs y
+.subckt $_XOR_ A=a[0] B=a[1] Y=y
+.end
