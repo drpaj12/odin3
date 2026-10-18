@@ -7,7 +7,7 @@
 # the two sides share its outputs and the check compares what drives its inputs. constant_module_inst,
 # spram_big, memlooptesting, memory_combinational, ch_intrinsics and mkPktMerge prove under the Phase 2
 # and the Phase 3 script (ch_intrinsics' one Phase 3 pair is in equiv_phase3_expect_fail.txt).
-# `[not a refinement]` matches only a pair Yosys left unproven (re-audited in 2F-6: a Yosys crash or
+# `[...: not a refinement]` needles name the pair (`<NNNN>-<pass>: not a refinement`, opt-equiv's output line), so a second failing pair of the same design is not absorbed; the check matches only a pair Yosys left unproven (re-audited in 2F-6: a Yosys crash or
 # timeout is exit 3, hard, and no needle matches it). `[unproven:]` is opt-equiv exit 4: the SAT proofs
 # hit their size limit and the BLIF cec of the whole script decided nothing.
 
@@ -17,8 +17,8 @@ operators/eightbit_arithmetic_power.v [No SAT model] $pow has no SAT model in Yo
 operators/twobits_arithmetic_power.v [No SAT model] $pow has no SAT model in Yosys's equiv flow (a model limit, nothing is proved either way)
 full/diffeq1.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 1409 B source, sweep time 421 s
 syntax/diffeq_paj_convert.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 1409 B source, sweep time 418 s
-full/stereovision3.v [not a refinement] not caused by wreduce: opt_dff fails the same way under the Phase 2 script (probe)
-large/sv_chip3_hierarchy_no_mem.v [not a refinement] not caused by wreduce: opt_dff fails the same way under the Phase 2 script (probe)
+full/stereovision3.v [-opt_dff: not a refinement] not a counterexample, a limit of the checker's induction (2H final review H1, measured 2026-10-18, c5eeb7f3): call 0016-opt_dff of the Phase 2 script (8 calls change something, 7 refine, 1 does not) fails equiv_induct on the state registers (reg_prog_state[4] and others), 12 unproven $equiv cells; Yosys 0.55's own `opt_dff` on the same before-state fails the identical check with the identical text (replayed from the kept work directory), and a 10-step output-only bounded check of the pair finds no trace. The micro differs from the VTR copy (`always @(reg_prog_state or iic_stop)` instead of `@(*)` and no `default:` branch in the case that drives reg_prog_nextstate, iicaddr, iicdata and iic_start), which opt_equiv_vtr proves on every call; the clock model is the same code. No other call fails
+large/sv_chip3_hierarchy_no_mem.v [-opt_dff: not a refinement] not a counterexample, a limit of the checker's induction (2H final review H1, measured 2026-10-18, c5eeb7f3): call 0016-opt_dff of the Phase 2 script (8 calls change something, 7 refine, 1 does not) fails equiv_induct on the state registers (iic_state[6], iic_state[4] and others), 12 unproven $equiv cells; Yosys 0.55's own `opt_dff` on the same before-state fails the identical check with the identical text (replayed from the kept work directory), and a 10-step output-only bounded check of the pair finds no trace. The micro differs from the VTR copy (the same sensitivity-list and missing-default differences as full/stereovision3.v), which opt_equiv_vtr proves on every call; the clock model is the same code. No other call fails
 full/stereovision2.v [unproven:] untested for now (size limit): Yosys killed at the 2 GiB cap; 63133 B source, sweep time 32 s
 full/oc54_cpu.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 65857 B source, sweep time 188 s
 large/sv_chip2_hierarchy_no_mem.v [unproven:] untested for now (size limit): Yosys killed at the 2 GiB cap; 66245 B source, sweep time 32 s

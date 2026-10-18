@@ -9,17 +9,17 @@
 # on the same before-state fails the same check with the same 6 cells (167 proved); (3) a bounded
 # check, `miter -equiv -ignore_gold_x` + `sat -prove-asserts -seq 6 -set-init-zero`, finds no
 # counterexample, and opt-diff's phase3 refine step proves Odin III's final result refines Yosys's.
-full/ch_intrinsics.v [not a refinement] 0039-opt_expr (opt -full's x-leg mux removals): Yosys 0.55's own opt_expr -mux_undef -mux_bool -fine fails the same 6 hard-block pins in the same check; a 6-step bounded miter finds no counterexample
+full/ch_intrinsics.v [0039-opt_expr: not a refinement] 0039-opt_expr (opt -full's x-leg mux removals): Yosys 0.55's own opt_expr -mux_undef -mux_bool -fine fails the same 6 hard-block pins in the same check; a 6-step bounded miter finds no counterexample
 #
 # Moved from equiv_expect_fail.txt (2H, 2026-10-18): under the Phase 2 script these pass (opt_equiv_micro: listed but passing), so they are Phase 3 / wreduce facts.
 # full/matmul.v is unproven under the Phase 2 script too: equiv_phase2_expect_fail.txt.
 common/pow_const.v [No SAT model] $pow has no SAT model in Yosys's equiv flow (a model limit, nothing is proved either way)
-syntax/bm_simple_memory.v [not a refinement] wreduce.mem_addr: the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
-syntax/multi_edge_reader_writer.v [not a refinement] wreduce.mem_addr: the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
-common/bram.v [not a refinement] wreduce.mem_addr: the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
-full/matmul.v [not a refinement] wreduce.mem_addr: the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
+syntax/bm_simple_memory.v [0019-wreduce: not a refinement] wreduce.mem_addr: the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
+syntax/multi_edge_reader_writer.v [0019-wreduce: not a refinement] wreduce.mem_addr: the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
+common/bram.v [0025-wreduce: not a refinement] wreduce.mem_addr: the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
+full/matmul.v [0031-wreduce: not a refinement] wreduce.mem_addr (pair 0031-wreduce; call 0001-opt_expr is also inconclusive here, see equiv_phase2_expect_fail.txt): the $mem address is narrowed as the spec says, out-of-range accesses alias (documented skip, tests/opt/rules/refine_skip.txt); every other step of the design proves after opt_clean -purge
 full/iir1.v [unproven:] untested for now (size limit): SAT proofs timed out (60 s) on the calls tried (all or some) and the BLIF cec of the whole script gave no verdict; 16216 B source, sweep time 342 s
-full/cf_cordic_v_8_8_8.v [not a refinement] not caused by wreduce: opt_share fails the same way with the Phase 3 script minus wreduce (probe)
+full/cf_cordic_v_8_8_8.v [-opt_share: not a refinement] not caused by wreduce: opt_share fails the same way with the Phase 3 script minus wreduce (probe)
 #
 # Unproven under Phase 3 only (the wreduce calls): see the reason of each.
 micro/bm_arithmetic_unused_bits.v [unproven:] unproven, a checker limit and not a size limit (nothing timed out, no cap kill): opt_equiv_micro_phase3 2026-10-18 (c5eeb7f3, Release, 2G cap): 2 calls changed something, 1 refine, 0 do not, 1 inconclusive (call 0019-wreduce); the proof passes, then the base case from the initial state (sat -seq 4 -set-init-undef over the named wires both sides share) fails on the *_temp registers (add_15_0_temp, add_7_0_temp, mult_15_0_temp, mult_7_0_temp, sub_15_0_temp, sub_7_0_temp): wreduce drops their unused upper bits, which are x in the gate and defined (0 or a computed value) in the gold; the output-only check (no shared wires, sat -seq 20) finds no trace, replayed on the kept work directory, so the outputs agree for 20 steps but nothing is proven; the BLIF cec fallback is refused: 288 latches with no 0/1 init; 3249 B source

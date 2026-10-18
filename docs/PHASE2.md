@@ -1099,21 +1099,21 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `read_verilog --lib` is that mode, and 2H checks it carries them.
     - **2F follow-ups:** opt-equiv hard-block cut compares ports only, not instance presence or
       parameters (review 2026-10-16); parameters and port widths are compared since #29.
-    - **3G follow-ups:** 20 micro designs have an opt-diff refine step that is unproven under the
-      wreduce/Phase 3 scripts (Yosys's SAT proof hits its 60 s limit, the BLIF cec gives no verdict;
-      opt-diff exit 4); they are listed untested for now (size limit), 2026-10-17
-      (`tests/opt/diff_micro_wreduce_expect_fail.txt`), and the sweep requires exit 4 of them, so one
-      unproven refine cannot hide another difference. Under the Phase 2 script and `opt -full`
-      (`opt_diff_micro`, first run 2026-10-18) 15 of them stay unproven and `large/LU32PEEng.v` also
-      loses Yosys to the memory cap, and ten more (diffeq1, diffeq2, diffeq_paj_convert, rs_decoder_1/2,
-      mac1/2, blob_merge, cf_fft_256_8, sv_chip0) were rescued by the BLIF cec fallback, which
-      opt-diff no longer lets prove a design with latches of no 0/1 init
-      (`tests/opt/diff_micro_phase2_expect_fail.txt`); `large/spree.v` and
-      `full/iir_no_combinational.v` refine without a limit there and are not listed. opt-equiv proves one
-      of the 20 (`full/iir_no_combinational.v`). Two more micros
-      (`large/LU64PEEng.v`, `large/arm_core.v`) are exit 4 because Yosys is killed at the 2 GiB cap,
-      and three are rejected by Yosys 0.55 (exit 2, same list). `large/sv_chip0_hierarchy_no_mem.v`
-      is untested for now (size limit) since 2026-10-18 (`tests/opt/diff_expect.txt`).
+    - **3G follow-ups:** the opt-diff refine step (Yosys's SAT proof, 60 s limit; then the BLIF cec
+      fallback, which since 6a8759eb is refused for latches with no 0/1 init and for x nets read by
+      Odin III's side) is unproven, opt-diff exit 4, on two sets of micros, each listed untested for
+      now (size limit) and required to exit 4, so one unproven refine cannot hide another difference.
+      Under the wreduce/Phase 3 scripts: 25 micros (`tests/opt/diff_micro_wreduce_expect_fail.txt`;
+      20 listed 2026-10-17, `large/spree.v` and `full/cf_fft_256_8.v` left it 2026-10-18 because their
+      refine proves, seven joined because the fallback had rescued them). Under the Phase 2 script and
+      `opt -full`: 26 micros (`tests/opt/diff_micro_phase2_expect_fail.txt`: 15 with a SAT limit, ten
+      more that the fallback had rescued - diffeq1, diffeq2, diffeq_paj_convert, rs_decoder_1/2,
+      mac1/2, blob_merge, cf_fft_256_8, sv_chip0 - and `large/LU32PEEng.v`, which also loses Yosys to the
+      memory cap). Both sweeps ran clean on these lists (opt_diff_micro 2026-10-18: 433 pass, 106 listed,
+      0 unexpected, 0 stale; opt_diff_micro_wreduce: clean but for spree and cf_fft_256_8, fixed).
+      `full/iir_no_combinational.v` is in the wreduce list only: its Phase 2/`opt -full` refine
+      proves. Two more micros (`large/LU64PEEng.v`, `large/arm_core.v`) are exit 4 because Yosys is
+      killed at the 2 GiB cap, and three are rejected by Yosys 0.55 (exit 2, same list).
     - **For Peter:**
       1. *Decided, #25:* the mixed-sign cell semantics (2F Task 18 review I1 and I2): Peter ruled
          "2a" on 2026-10-13, both-signed-only everywhere, with a warning.
@@ -1347,13 +1347,20 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `diff_micro_wreduce_expect_fail.txt`, and the VTR designs' opt-diff lines in `diff_expect.txt`.
       The micro sweeps on c5eeb7f3 (2026-10-18, Release, 2G cap): `opt_equiv_micro` (Phase 2 script)
       539 files, 414 pass, 104 expected failures, 15 unexpected, 6 listed but passing;
-      `opt_equiv_micro_phase3` 410 / 112 / 17 unexpected / 0. Every failing call is "inconclusive"
-      (SAT size limit or initial state unproven), none is "not a refinement" (0 "do not" in both).
-      2H lists them: 13 big micros under both scripts (`tests/opt/equiv_expect_fail.txt`), matmul
+      `opt_equiv_micro_phase3` 410 / 112 / 17 unexpected / 0. Every unexpected failing call is
+      "inconclusive" (SAT size limit or initial state unproven), none is "not a refinement" (0 "do not"
+      among the unexpected). Listed files do have "not a refinement" calls: `full/stereovision3.v` and
+      `large/sv_chip3_hierarchy_no_mem.v` (call 0016-opt_dff; Yosys 0.55's own `opt_dff` fails the
+      identical induction on the same before-state and a 10-step output check finds no trace, so it is a
+      limit of the checker; the VTR copy of stereovision3 differs in its sensitivity list and a missing
+      `default:` and proves), the `wreduce.mem_addr` skips, `ch_intrinsics` (0039-opt_expr) and
+      `cf_cordic_v_8_8_8` (opt_share), each with the pair name in its needle. 2H lists the unproven: 12
+      big micros and `diffeq2` under both scripts (`tests/opt/equiv_expect_fail.txt`), matmul
       under the Phase 2 script (`equiv_phase2_expect_fail.txt`: its memory's equiv_induct is killed
       by the cap even at 5G), three small designs under Phase 3 only (`bm_arithmetic_unused_bits`,
-      `iir_no_combinational`, `iir`: the base case fails on a named wire after a wreduce call; the
-      output-only check passes 20 steps), and `diffeq2` (2131 B; the induction of its multipliers is
+      `iir_no_combinational`, `iir`: the base case fails on named wires whose unused upper bits a wreduce
+      call drops, x in the gate against defined bits in the gold; the output-only check passes 20 steps;
+      a checker limit, not a size limit), and, in the same lists, `diffeq2` (2131 B; the induction of its multipliers is
       still unproven after 600 s). `syntax/inferred_ram_w_clog2.v` (1479 B) proves under both scripts
       at a 4G cap (its base case peaks at 2.3 GB; the sweeps give it `--cap-for ...=4G`). The seven
       entries only Phase 3 fails moved to `equiv_phase3_expect_fail.txt`. Expected after the
