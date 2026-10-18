@@ -262,7 +262,11 @@ class Diff:
                 raise
             limit = str(exc)
         blifs = self.lower(run_dir)
-        verdict, text = opt_equiv.cec_blifs(blifs[0], blifs[1], self.cap, self.work)
+        # blifs is [odin, yosys]; the cec's gold is Yosys's, its gate Odin III's. need_init: the
+        # checker starts a latch with no 0/1 init at 0 and ties x nets to 0, which proves nothing
+        # about an unknown start (review H1 of opt-equiv, c5eeb7f3).
+        verdict, text = opt_equiv.cec_blifs(blifs[1], blifs[0], self.cap, self.work,
+                                            need_init=True)
         if verdict == opt_equiv.CEC_PROVED:
             return True, ""
         if verdict == opt_equiv.CEC_DIFFERS:

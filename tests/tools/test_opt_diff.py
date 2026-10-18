@@ -309,6 +309,44 @@ class RunTest(unittest.TestCase):
             got, _, _ = helpers.run_main(od.main, [*argv[:-1], "--no-cec", argv[-1]])
             self.assertEqual(got, 3)
 
+    def test_the_cec_fallback_does_not_prove_a_pair_with_no_init_latches(self) -> None:
+        """Review H1 (as c5eeb7f3 for opt-equiv): after a SAT timeout the BLIF cec refuses a pair
+        whose latches have no 0/1 init, so the step is `unproven` (exit 4), never ok (the message
+        says why: the checker is not run). It gets the gold (Yosys) first, the gate (Odin III)
+        second."""
+        def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if "equiv_make" in " ".join(argv):
+                raise subprocess.TimeoutExpired(list(argv), 60.0)
+            return fake_run(argv, cap, **kw)
+        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
+                "--netlist-compare", str(self.tree.bin / "netlist-compare"),
+                "--work", str(self.tree.root / "work"), str(self.tree.root / "micro" / "d.v")]
+        seen: list[tuple[Path, Path, bool]] = []
+        real = opt_equiv.cec_blifs
+
+        def spy(a: Path, b: Path, cap: int, work: Path, need_init: bool = False
+                ) -> tuple[str, str]:
+            seen.append((a, b, need_init))
+            return real(a, b, cap, work, need_init)
+
+        def lower(_self: Any, run_dir: Path) -> list[Path]:
+            paths = []
+            for side in ("odin", "yosys"):
+                blif = run_dir / f"{side}.blif"
+                blif.write_text(".model m\n.inputs c d\n.outputs q\n.latch d q re c\n.end\n")
+                paths.append(blif)
+            return paths
+        with mock.patch.object(memcap, "run", hang), mock.patch.object(
+                od.Diff, "lower", lower), mock.patch.object(
+                opt_equiv, "cec_blifs", spy):
+            got, out, err = helpers.run_main(od.main, argv)
+        self.assertEqual(got, 4, out + err)
+        self.assertIn("refine: DIFFERS: unproven", out)
+        self.assertIn("no 0/1 init", out)
+        self.assertNotIn("[phase2]: ok", out)
+        self.assertTrue(seen and all(need for _, _, need in seen))
+        self.assertTrue(seen[0][0].name == "yosys.blif" and seen[0][1].name == "odin.blif")
+
     def test_identity_failure_and_error(self) -> None:
         self.tree.set_spec(compare_rc=1)
         code, out, _ = self.tree.run()
