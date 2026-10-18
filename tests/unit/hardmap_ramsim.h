@@ -16,6 +16,7 @@
 #include "util/hash.h"
 #include "util/str.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef struct rs_io {
@@ -28,6 +29,9 @@ typedef struct rs_io {
 typedef struct rs_run {
     uint32_t cycles;
     uint64_t seed;
+    bool preload; /* every memory word starts as a fixed pseudo-random function of its index (all
+                   * bits of a word equal), so a ROM reads back data; the same in a `$mem` and in
+                   * the RAMs that replace it, as long as the memory is not depth-split */
 } rs_run;
 
 /* Appends one line of '0'/'1' per cycle for `cycles` cycles from the seeded random inputs. The

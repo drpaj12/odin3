@@ -385,6 +385,27 @@ static void rs_init(rs *sim, const odin3_module *mod) {
     }
 }
 
+/* The initial bit of word `word` (the same for every bit of the word). */
+static uint8_t preload_bit(uint32_t word) {
+    uint32_t mixed = word * 2654435761U + 12345U;
+    mixed ^= mixed >> 15;
+    mixed *= 2246822519U;
+    mixed ^= mixed >> 13;
+    return (uint8_t)(mixed & 1U);
+}
+
+static void preload(rs *sim) {
+    for (uint32_t id = 1; id < sim->n_nodes; id++) {
+        uint8_t *cells = sim->kind[id] == K_MEM ? sim->memo[id].mem : sim->ram[id].mem;
+        size_t width = sim->kind[id] == K_MEM ? sim->memo[id].width : sim->ram[id].data_bits;
+        size_t words =
+            sim->kind[id] == K_MEM ? sim->memo[id].size : (size_t)1 << sim->ram[id].addr_bits;
+        for (size_t word = 0; cells != NULL && word < words; word++) {
+            memset(cells + word * width, preload_bit((uint32_t)word), width);
+        }
+    }
+}
+
 static void rs_free(rs *sim) {
     for (uint32_t id = 1; id < sim->n_nodes; id++) {
         free(sim->ram[id].mem);
@@ -402,6 +423,9 @@ void rs_trace(const odin3_module *module, const rs_io *io, rs_run run, odin3_str
     rs sim;
     odin3_prng prng;
     rs_init(&sim, module);
+    if (run.preload) {
+        preload(&sim);
+    }
     odin3_prng_seed(&prng, run.seed);
     for (uint32_t cycle = 0; cycle < run.cycles; cycle++) {
         for (uint32_t i = 0; i < io->n_in; i++) {

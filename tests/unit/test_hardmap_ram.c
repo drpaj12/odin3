@@ -333,8 +333,8 @@ static void collect_nets(const pb_result *res, nets *io) {
 static void trace_of(pb_result *res, odin3_strbuf *out) {
     nets io;
     collect_nets(res, &io);
-    rs_trace(res->module, &(rs_io){io.in, io.n_in, io.out, io.n_out}, (rs_run){SIM_CYCLES, 12345},
-             out);
+    rs_trace(res->module, &(rs_io){io.in, io.n_in, io.out, io.n_out},
+             (rs_run){SIM_CYCLES, 12345, false}, out);
 }
 
 /* Builds the case twice, maps the second, and compares the traces; returns true when equal. */

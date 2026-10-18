@@ -99,6 +99,8 @@ typedef struct rdp {
     bool en_var; /* R_SYNC: RD_EN is the input wire ren<pn> */
     uint32_t
         addr_wr;  /* 0: the port's own address wire ra<pn>; slot: write port slot-1's wa<slot-1> */
+    bool en_neg;  /* R_DFFE_ONE: EN_POLARITY 0, the enable constant is the active level 0 */
+    bool en_off;  /* R_DFFE_ONE: the enable constant is the inactive level */
     bool addr_q0; /* RD_ADDR is the Q (q0) of port 0's data flip-flop (needs WIDTH == ABITS) */
 } rdp;
 
@@ -118,6 +120,7 @@ typedef struct memcase {
     wrp wr[MAXP];
     bool init;     /* a defined INIT */
     bool split_en; /* write port 0's enable bits are two nets */
+    bool tap_rq;   /* a second `$dff` reads port 0's address flip-flop (output tap) */
 } memcase;
 
 static void put(odin3_strbuf *out, const char *fmt, ...) ODIN3_PRINTF(2, 3);
@@ -189,6 +192,9 @@ static void decl_wires(odin3_strbuf *out, const memcase *mc) {
     if (mc->split_en) {
         wire_decl(out, "input", 1, &port, "we0b");
     }
+    if (mc->tap_rq) {
+        wire_decl(out, "output", mc->abits, &port, "tap");
+    }
     for (uint32_t pn = 0; pn < mc->n_rd; pn++) {
         if (uses_ff(mc->rd[pn].mode)) {
             put(out, "  wire width %" PRIu32 " \\rd%" PRIu32 "\n", mc->width, pn);
@@ -213,9 +219,9 @@ static void ff_cell(odin3_strbuf *out, const memcase *mc, uint32_t pn) {
         "\n    parameter \\CLK_POLARITY %d\n",
         en ? "$dffe" : "$dff", pn, addr ? mc->abits : mc->width, rd_port->neg ? 0 : 1);
     if (en) {
-        put(out, "    parameter \\EN_POLARITY 1\n    connect \\EN ");
+        put(out, "    parameter \\EN_POLARITY %d\n    connect \\EN ", rd_port->en_neg ? 0 : 1);
         if (rd_port->mode == R_DFFE_ONE) {
-            put(out, "1'1\n");
+            put(out, "1'%d\n", rd_port->en_neg != rd_port->en_off ? 0 : 1);
         } else {
             put(out, "\\ren%" PRIu32 "\n", pn);
         }
@@ -234,6 +240,13 @@ static void ff_cells(odin3_strbuf *out, const memcase *mc) {
         if (uses_ff(mc->rd[pn].mode) || mc->rd[pn].mode == R_AFF) {
             ff_cell(out, mc, pn);
         }
+    }
+    if (mc->tap_rq) {
+        put(out,
+            "  cell $dff \\tapff\n    parameter \\WIDTH %" PRIu32
+            "\n    parameter \\CLK_POLARITY 1\n    connect \\CLK \\clk\n    connect \\D \\rq0\n"
+            "    connect \\Q \\tap\n  end\n",
+            mc->abits);
     }
 }
 
@@ -642,6 +655,48 @@ static void test_r8_addr_merge_own_read_data(void) {
     pb_free(&res);
 }
 
+/* Review M-3 (mutant M4): an address flip-flop whose Q feeds other logic stays; the port still
+ * merges, and the second flip-flop keeps a driver. */
+static void test_r8_addr_merge_shared_q_stays(void) {
+    memcase mc = base((shape){4, 2, 1, 0});
+    mc.rd[0].mode = R_AFF;
+    mc.tap_rq = true;
+    pb_result res;
+    odin3_hardmap_stats stats;
+    build_mem(mc, &res);
+    TEST_ASSERT_EQUAL_UINT32(2, hm_count(res.module, "$dff"));
+    TEST_ASSERT_TRUE(mapped(&res, &stats));
+    TEST_ASSERT_EQUAL_UINT32(2, hm_count(res.module, "$dff"));
+    TEST_ASSERT_EQUAL_UINT32(2, hm_count(res.module, "single_port_ram"));
+    odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(res.design, opts));
+    pb_free(&res);
+}
+
+/* Review M-3: a `$dffe` with EN_POLARITY 0. The constant 0 is the active level (merges), the
+ * constant 1 never enables (the read enable is not constant active: soft). */
+static void test_r8_dffe_active_low(void) {
+    memcase mc = base((shape){4, 3, 1, 1});
+    pb_result res;
+    odin3_hardmap_stats stats;
+    mc.rd[0].mode = R_DFFE_ONE;
+    mc.rd[0].en_neg = true;
+    build_mem(mc, &res);
+    TEST_ASSERT_TRUE(mapped(&res, &stats));
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$dffe"));
+    pb_free(&res);
+    mc.rd[0].en_off = true;
+    build_mem(mc, &res);
+    expect_soft(&res, W_EN);
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$dffe"));
+    pb_free(&res);
+    log_text[0] = '\0';
+    mc.rd[0].en_neg = false; /* the positive twin: the constant 0 never enables */
+    build_mem(mc, &res);
+    expect_soft(&res, W_EN);
+    pb_free(&res);
+}
+
 static void test_r8_mixed_clocks_no_merge(void) {
     memcase mc = base((shape){4, 2, 1, 1});
     mc.rd[0].mode = R_DFF;
@@ -991,6 +1046,7 @@ static void test_e_abits_wide_soft(void) {
 /* --- simulation: the `$mem` before and the RAMs after ------------------------------------- */
 
 static memcase g_mc;
+static bool g_preload;   /* the memories start with data (a ROM reads back something) */
 static uint32_t g_amask; /* the address bits the simulation drives; the others stay 0 */
 
 static odin3_status build_g(pb_result *out) {
@@ -1048,8 +1104,8 @@ static void collect_nets(const pb_result *res, nets *io) {
 static void trace_of(pb_result *res, odin3_strbuf *out) {
     nets io;
     collect_nets(res, &io);
-    rs_trace(res->module, &(rs_io){io.in, io.n_in, io.out, io.n_out}, (rs_run){SIM_CYCLES, 777},
-             out);
+    rs_trace(res->module, &(rs_io){io.in, io.n_in, io.out, io.n_out},
+             (rs_run){SIM_CYCLES, 777, g_preload}, out);
 }
 
 /* Builds the case twice, maps the second, and compares the traces; true when equal. */
@@ -1123,6 +1179,50 @@ static void test_mem_sim_two_writes(void) {
     mc.rd[1].mode = R_SYNC;
     mc.rd[1].addr_wr = 2;
     TEST_ASSERT_TRUE(sim_equal(mc, LOW_BITS));
+}
+
+/* Review M-3: the address merge of a ROM, simulated. The registered address of the `$mem` and the
+ * RAM that registers its read must agree cycle by cycle. */
+static void test_mem_sim_addr_merge_rom(void) {
+    memcase mc = base((shape){4, 3, 1, 0});
+    mc.rd[0].mode = R_AFF;
+    g_preload = true;
+    TEST_ASSERT_TRUE(sim_equal(mc, LOW_BITS));
+    mc = base((shape){4, 2, 2, 0}); /* two ports, one of them registered at the address */
+    mc.rd[0].mode = R_AFF;
+    mc.rd[1].mode = R_AFF;
+    TEST_ASSERT_TRUE(sim_equal(mc, LOW_BITS));
+    g_preload = false;
+}
+
+/* Review M-3: active-low and constant enables of a `$dffe`. */
+static void test_mem_sim_dffe_polarity(void) {
+    memcase mc = base((shape){4, 3, 1, 1});
+    mc.rd[0].mode = R_DFFE_ONE;
+    mc.rd[0].en_neg = true; /* EN_POLARITY 0 with the constant 0: enabled every cycle */
+    TEST_ASSERT_TRUE(sim_equal(mc, LOW_BITS));
+}
+
+/* Review L-1: two write ports map to a dual_port_ram, whose same-address collision is undefined. */
+/* Maps the case; true when the log has the collision warning. */
+static bool warns_collision(memcase mc) {
+    pb_result res;
+    odin3_hardmap_stats stats;
+    log_text[0] = '\0';
+    build_mem(mc, &res);
+    TEST_ASSERT_TRUE(mapped(&res, &stats));
+    pb_free(&res);
+    return strstr(log_text, "write collision") != NULL;
+}
+
+static void test_l1_two_write_warning(void) {
+    memcase mc = base((shape){4, 2, 1, 2});
+    mc.rd[0].mode = R_SYNC;
+    mc.rd[0].addr_wr = 2;
+    TEST_ASSERT_TRUE(warns_collision(mc));
+    mc = base((shape){4, 2, 1, 1});
+    mc.rd[0].mode = R_SYNC;
+    TEST_ASSERT_FALSE(warns_collision(mc));
 }
 
 /* ABITS 16 splits the depth: the registered select (R-7) is in play. */
@@ -1402,11 +1502,9 @@ static void oom_cases(oom_case *cases) {
  * the case says so. */
 static void oom_expect(const oom_case *oc) {
     oom_tally tally = oom_sweep(oc);
-    const bool failed = tally.failed > 1;
-    const bool reached = tally.left > 0;
-    TEST_ASSERT_TRUE(failed || oc->soft);
-    TEST_ASSERT_TRUE(reached == (oc->reach || (oc->flip_flops && reached)));
-    TEST_ASSERT_TRUE(oc->flip_flops || !reached);
+    TEST_ASSERT_TRUE(tally.failed > 1 || oc->soft);
+    TEST_ASSERT_TRUE(tally.left > 0 || !oc->reach);
+    TEST_ASSERT_TRUE(tally.left == 0 || oc->flip_flops);
 }
 
 static void test_h9_oom(void) {
@@ -1424,6 +1522,8 @@ int main(void) {
     RUN_TEST(test_r8_addr_merge_no_write);
     RUN_TEST(test_r8_addr_merge_with_write);
     RUN_TEST(test_r8_addr_merge_own_read_data);
+    RUN_TEST(test_r8_addr_merge_shared_q_stays);
+    RUN_TEST(test_r8_dffe_active_low);
     RUN_TEST(test_r8_mixed_clocks_no_merge);
     RUN_TEST(test_r9_async_stays_soft);
     RUN_TEST(test_r9_multi_clock);
@@ -1447,6 +1547,9 @@ int main(void) {
     RUN_TEST(test_e_abits_wide_soft);
     RUN_TEST(test_mem_sim_data_merge);
     RUN_TEST(test_mem_sim_same_address);
+    RUN_TEST(test_mem_sim_addr_merge_rom);
+    RUN_TEST(test_mem_sim_dffe_polarity);
+    RUN_TEST(test_l1_two_write_warning);
     RUN_TEST(test_mem_sim_2r1w);
     RUN_TEST(test_mem_sim_two_writes);
     RUN_TEST(test_mem_sim_deep);

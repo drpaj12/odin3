@@ -261,6 +261,12 @@ static odin3_status map_hard(hm_ctx *hc, const mem_model *mm) {
                 "hardmap: memory '%s': initial contents dropped (the arch's RAMs have no init)",
                 mem_name(hc, mm));
     }
+    if (mm->n_wr > 1) {
+        hm_diag(hc, ODIN3_LOG_WARN, mm->node,
+                "hardmap: memory '%s': a same-address write collision of its write ports is "
+                "undefined in the arch's RAM (the `$mem` lets the later port win)",
+                mem_name(hc, mm));
+    }
     st = hm_commit(hc, odin3_vec_cat(&ties, 0), ties.len);
     if (st == ODIN3_OK) {
         hc->stats.sp_slices += slices[HM_SP_RAM];
