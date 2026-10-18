@@ -26,9 +26,10 @@ and a summary line.
   killed by the memory cap, and nothing else differs) is listed the same way. An entry that says
   ``untested for now (size limit)`` or whose needle holds ``unproven`` is expected only on exit 4:
   any other failure of that file (exit 1: a real difference) is an unexpected one.
-- ``--expect-fail F`` (repeatable; default ``tests/opt/vtr_expect_fail.txt`` and
-  ``tests/opt/vtr_nightly_xl.txt``) lists ``<path> [needle] <reason>`` lines. A listed file must
-  fail (a tool exits non-zero; the needle must appear in the output); an unlisted failure, a
+- ``--expect-fail F`` (repeatable; default ``tests/opt/vtr_expect_fail.txt``,
+  ``tests/opt/vtr_nightly_xl.txt`` and, unless ``--leg diff``,
+  ``tests/opt/vtr_equiv_expect_fail.txt`` for the files only the opt-equiv leg fails) lists
+  ``<path> [needle] <reason>`` lines. A listed file must fail (a tool exits non-zero; the needle must appear in the output); an unlisted failure, a
   listed file that passes fully, and a hard failure (a cap kill or a timeout) fail the run. A
   reason that starts with ``xl`` marks a file for the oversized run: without ``--xl`` it is
   skipped, with ``--xl`` only such files run, each must pass, and an empty selection exits 2.
@@ -67,6 +68,13 @@ REPO = HERE.parents[1]
 OPT_EQUIV = HERE / "opt_equiv.py"
 OPT_DIFF = HERE / "opt_diff.py"
 DEFAULT_EXPECT = (REPO / "tests/opt/vtr_expect_fail.txt", REPO / "tests/opt/vtr_nightly_xl.txt")
+EQUIV_EXPECT = REPO / "tests/opt/vtr_equiv_expect_fail.txt"  # fails the opt-equiv leg only
+
+
+def default_expect(leg: str) -> list[Path]:
+    """The lists read when no ``--expect-fail`` is given. A file the opt-diff leg passes is listed
+    in the equiv-leg file, which a ``--leg diff`` run does not read (it would be reported STALE)."""
+    return [*DEFAULT_EXPECT, *([] if leg == "diff" else [EQUIV_EXPECT])]
 DEFAULT_DIFF_EXPECT = REPO / "tests/opt/diff_expect.txt"
 SCRIPTS = ("phase2", "opt -full", "opt -fast", "opt -fast -noff", "opt -nodffe -nosdff")
 SETS = ("vtr31", "all64")
@@ -293,7 +301,7 @@ def execute(args: argparse.Namespace, runner: Runner = run_unit,
     if not root.is_dir():
         raise UsageError(f"{root}: no such directory (set VTR_ROOT or pass --root)")
     root = root.resolve()
-    expect = elab_sweep.merge_expect(args.expect_fail or list(DEFAULT_EXPECT))
+    expect = elab_sweep.merge_expect(args.expect_fail or default_expect(args.leg))
     items = collect_set(root, args.set)
     run, _ = select(items, expect, args.xl, args.limit, getattr(args, "only", None) or ())
     if not run:
@@ -323,7 +331,8 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--xl", action="store_true", help="only the files listed `xl`")
     ap.add_argument("--keep", type=Path, help="keep every tool's work directory under DIR")
     ap.add_argument("--expect-fail", type=Path, action="append", metavar="F",
-                    help="repeatable; default tests/opt/vtr_expect_fail.txt + vtr_nightly_xl.txt")
+                    help="repeatable; default tests/opt/vtr_expect_fail.txt + vtr_nightly_xl.txt "
+                    "(+ vtr_equiv_expect_fail.txt unless --leg diff)")
     ap.add_argument("--diff-expect", type=Path, default=DEFAULT_DIFF_EXPECT, metavar="F")
     ap.add_argument("--root", type=Path, help="verilog/ of the VTR benchmarks (default $VTR_ROOT)")
     ap.add_argument("--tops", type=Path, help="one `<file> <top>` per line")

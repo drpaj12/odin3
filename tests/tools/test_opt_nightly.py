@@ -16,7 +16,8 @@ import opt_nightly as nightly
 from . import helpers
 
 REAL_EXPECT = [nightly.REPO / "tests/opt/vtr_expect_fail.txt",
-               nightly.REPO / "tests/opt/vtr_nightly_xl.txt"]
+               nightly.REPO / "tests/opt/vtr_nightly_xl.txt",
+               nightly.REPO / "tests/opt/vtr_equiv_expect_fail.txt"]
 
 
 def make_tree(root: Path, sizes: dict[str, int]) -> None:
@@ -349,6 +350,16 @@ class XlTest(Base):
 
 
 class RealExpectTest(Base):
+    def test_the_diff_leg_does_not_read_the_equiv_only_list(self) -> None:
+        """2H: mkPktMerge fails the opt-equiv leg only; a `--leg diff` run reading its entry would
+        report it STALE. The real lists parse together, and no path is in two of them."""
+        self.assertNotIn(nightly.EQUIV_EXPECT, nightly.default_expect("diff"))
+        for leg in ("equiv", "both"):
+            self.assertIn(nightly.EQUIV_EXPECT, nightly.default_expect(leg))
+        merged = elab_sweep.merge_expect(REAL_EXPECT)
+        self.assertIn("mkPktMerge.v", merged)
+        self.assertNotIn("mkPktMerge.v", elab_sweep.merge_expect(nightly.default_expect("diff")))
+
     def test_all64_xl_against_the_real_lists_selects_exactly_lenet(self) -> None:
         expect = elab_sweep.merge_expect(REAL_EXPECT)
         items = nightly.collect_set(self.root, "all64")

@@ -34,10 +34,6 @@ LU64PEEng.v [unproven:] untested for now (size limit): 15 calls inconclusive (SA
 mkDelayWorker32B.v [unproven:] untested for now (size limit): 10 calls inconclusive (SAT size limit: 60 s timeout or cap kill); the whole-script BLIF cec cannot read the hard block (dual_port_ram: Yosys's blackbox model has the default one-bit ports, the instance uses ports such as data1[0]), so no cec verdict
 arm_core.v [unproven:] untested for now (size limit): 20 calls inconclusive (SAT size limit: 60 s timeout or cap kill); equiv-check on the whole script was killed (SIGKILL) at the 3G cap (306950 latches)
 mcml.v [unproven:] untested for now (size limit): 39 calls inconclusive (SAT size limit: 60 s timeout or cap kill); the Yosys lowering of the whole script for the BLIF cec timed out after 600 s
-# opt-equiv soundness fix (PHASE2 #29, 2026-10-18): a passed proof now needs its base case from the
-# initial state, and the RAM ports are compared at full width. mkPktMerge was ok before only because
-# neither was checked (RAM data[0]/out[0] alone, no initial state).
-mkPktMerge.v [unproven:] untested for now (size limit): opt_equiv_vtr 2026-10-18 (92c2ba44, Release, 3G cap, 3037 s run of 14 files): 5 calls inconclusive; 0004-opt_merge and 0016-opt_dff pass the full-width induction (dual_port_ram data 153 bits) but their base case from the initial state (sat -seq 4 over the named wires) hit the 60 s limit, the other 3 not tried after 2 size-limit hits; the whole-script BLIF cec gives no verdict (equiv-check exit 2: model 'dual_port_ram' has no port 'data1[0]'). lower-equiv's re-proof measured the same base-case timeout on all 5 pairs
 #
 # The next four are the same fix seen from the BLIF cec (opt_equiv_vtr 2026-10-18, c5eeb7f3, Release, 3G cap, log
 # p2-equiv-rerun-1018-0643): a call whose SAT proof hit the 60 s limit used to be rescued by the whole-script BLIF cec, which starts a
