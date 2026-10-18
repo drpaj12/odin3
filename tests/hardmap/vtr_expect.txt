@@ -1,0 +1,8 @@
+# What hardmap-diff may report for the 19 VTR designs other than identical or equivalent
+# (3C spec 9.4, 10; plan Task 7). Syntax as diff_expect.txt: `<path> <id> <reason>`, <path> relative
+# to benchmarks/verilog. A line that does not occur fails as stale: the list shrinks.
+#
+# D1: signed operands of `$add`/`$sub` are sign-extended into the chain; Parmys pads with `unconn`
+# (spec A-2, A-6; Peter's ruling 2026-10-14). Same adder count; Odin III is RTL-correct (PHASE3 #41).
+# `unproven`: equiv-check cannot decide the design (tests/exit/vtr_unproven.txt); the hard-block
+# counts, which hardmap-diff always checks, are then the evidence.

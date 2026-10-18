@@ -2828,6 +2828,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                             --root $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog
                             ${_exit_vtr_files})
             endif()
+            # 3C Task 7 (spec 9.4): the 19 through hardmap-diff, in the order of vtr_designs.txt.
+            file(STRINGS ${PROJECT_SOURCE_DIR}/tests/hardmap/vtr_designs.txt _hm_vtr_names
+                 REGEX "^[^#]")
+            set(_hm_vtr "")
+            foreach(_hm_name IN LISTS _hm_vtr_names)
+                list(APPEND _hm_vtr $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog/${_hm_name}.v)
+            endforeach()
+            odin3_add_sweep_test(hardmap_vtr_sweep LABEL sweep
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/hardmap-check/hardmap-diff
+                        --odin3 $<TARGET_FILE:odin3> --yosys $ENV{VTR_ROOT}/build/bin/yosys
+                        --arch $ENV{VTR_ROOT}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
+                        --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/diff_expect.txt
+                        --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/vtr_expect.txt
+                        ${_hm_vtr})
         else()
             message(STATUS "exit_micro, exit_vtr not registered: needs VTR_ROOT with the k6_frac arch")
         endif()

@@ -24,9 +24,10 @@ decisions 2–3 and 16 below):
    `vtr_reg_qor_chain`. Its `<models>` are `adder`, `multiply`, `single_port_ram` and
    `dual_port_ram`. VTR's own readers give LUT K = 6 (the largest `.names` pb_type) and a RAM
    address width of 15.
-3. **Through P&R**: Odin III alone produces each netlist. The script is `read_verilog
-   --nolatches; proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full; hardmap; lower; abc;
-   write_blif --vtr` (`wreduce` before `flatten` as Parmys, decisions 7 and 31 and 3G WR-9; `opt -full`
+3. **Through P&R**: Odin III alone produces each netlist. The script is `read_techlib
+   lib/vtr.o3lib; read_verilog --nolatches --vtr-compat; proc; opt; wreduce; opt_clean; opt -full;
+   flatten; opt -full; hardmap; opt -full; lower; abc; write_blif --vtr` (3C spec H-2; the part
+   up to `lower` is `tools/hardmap-check/phase3_pre_abc.script`, run by `hardmap-diff`) (`wreduce` before `flatten` as Parmys, decisions 7 and 31 and 3G WR-9; `opt -full`
    after `flatten` as Parmys runs it, decision 30). Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
    -crit_path_router_iterations 100` (the `vtr_reg_qor_chain` options) must end with
