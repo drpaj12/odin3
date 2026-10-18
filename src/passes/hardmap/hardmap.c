@@ -1,9 +1,8 @@
 /*
  * hardmap.c — the driver of the `hardmap` pass (3C spec H-8, H-9, H-10): the explicit-instance
  * pre-check over the whole design (M-6), then, module by module in creation order and cell by
- * cell in node-ID order, the `$mul` phase and the explicit `multiply` phase. PR 3C-2 adds
- * `$add`/`$sub` and PR 3C-3 the memories
- * as further phases in spec order (H-8).
+ * cell in node-ID order, the `$mul` phase, the explicit `multiply` phase and the `$add`/`$sub`
+ * phase. PR 3C-3 adds the memories as a further phase in spec order (H-8).
  */
 #include "passes/hardmap/hardmap.h"
 #include "ir/celltype.h"
@@ -102,6 +101,44 @@ static odin3_status all_mul_phases(hm_ctx *hc) {
     return st;
 }
 
+/* The `$add` / `$sub` phase of one module (H-8, after every `$mul`): the cells live at the start,
+ * in node-ID order. */
+static odin3_status add_phase(hm_ctx *hc, odin3_module *mod, const odin3_celltype_id types[2]) {
+    uint32_t end = odin3_module_node_end(mod);
+    hm_set_module(hc, mod);
+    odin3_status st = hm_budget_check(hc);
+    for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
+        odin3_node_id node = {id};
+        odin3_celltype_id type = odin3_node_type(mod, node);
+        if (!odin3_node_live(mod, node) || (type.v != types[0].v && type.v != types[1].v)) {
+            continue;
+        }
+        uint64_t before = hc->stats.chains;
+        st = hm_map_adder(hc, node);
+        if (st == ODIN3_OK && hc->stats.chains != before) {
+            char label[ODIN3_LOG_BUF / 4];
+            hm_label(hc, node, label, sizeof label);
+            odin3_log(ODIN3_LOG_DEBUG, "hardmap: '%s' cell '%s' mapped to an adder chain",
+                      type.v == types[0].v ? "$add" : "$sub", label);
+        }
+    }
+    return st;
+}
+
+static odin3_status all_add_phases(hm_ctx *hc) {
+    odin3_celltype_id types[2] = {{0}, {0}};
+    if (!hm_find_type(hc->design, "$add", &types[0]) ||
+        !hm_find_type(hc->design, "$sub", &types[1])) {
+        return ODIN3_OK;
+    }
+    odin3_status st = ODIN3_OK;
+    for (uint32_t mi = 1; st == ODIN3_OK && mi < odin3_design_module_end(hc->design); mi++) {
+        odin3_module *mod = module_at(hc->design, mi);
+        st = mod != NULL ? add_phase(hc, mod, types) : st;
+    }
+    return st;
+}
+
 static void report(hm_ctx *hc) {
     const odin3_hardmap_stats *st = &hc->stats;
     odin3_log(ODIN3_LOG_INFO,
@@ -128,6 +165,7 @@ odin3_status odin3_hardmap_run(odin3_pass_ctx *ctx, odin3_design *design,
     hm_init(&hc, ctx, design);
     odin3_status st = precheck_multiply(&hc);
     st = st == ODIN3_OK ? all_mul_phases(&hc) : st;
+    st = st == ODIN3_OK ? all_add_phases(&hc) : st;
     if (st == ODIN3_OK) {
         report(&hc);
     }
