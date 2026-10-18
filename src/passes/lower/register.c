@@ -1,7 +1,7 @@
 /*
  * register.c — the `lower` pass definition (3B spec §11, §13; plan Task 1): option parsing and the
  * pass entry. `lower [--neg-edge invert|keep] [--async sync|error] [--report <file>]
- * [--max-mem-bits N]`; processes = REFUSE (a $proc has no bit form, O1).
+ * [--max-mem-bits N] [--lower-snapshot <dir>]`; processes = REFUSE (a $proc has no bit form, O1).
  */
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
@@ -71,6 +71,11 @@ static odin3_status apply_option(const char *name, const char *value, odin3_strb
         if (!parse_u64(value, &opts->max_mem_bits) || opts->max_mem_bits == 0) {
             return bad_value(name, "a positive number");
         }
+    } else if (strcmp(name, "--lower-snapshot") == 0) {
+        if (strlen(value) >= sizeof opts->snapshot_dir) {
+            return bad_value(name, "a shorter directory name");
+        }
+        memcpy(opts->snapshot_dir, value, strlen(value) + 1U);
     } else {
         odin3_strbuf_clear(report);
         odin3_status st = odin3_strbuf_append(report, odin3_bytes_cstr(value));
@@ -85,7 +90,8 @@ static odin3_status apply_option(const char *name, const char *value, odin3_strb
 static const char k_enable_first[] = "--async-enable-first";
 
 static bool is_option(const char *word) {
-    static const char *const k_options[] = {"--neg-edge", "--async", "--report", "--max-mem-bits"};
+    static const char *const k_options[] = {"--neg-edge", "--async", "--report", "--max-mem-bits",
+                                                  "--lower-snapshot"};
     for (size_t i = 0; i < sizeof k_options / sizeof k_options[0]; i++) {
         if (strcmp(word, k_options[i]) == 0) {
             return true;
@@ -111,7 +117,7 @@ odin3_status odin3_lower_parse_args(odin3_bytes args, odin3_strbuf *report,
         if (!is_option(word)) {
             odin3_log(ODIN3_LOG_ERROR,
                       "lower: unknown argument '%s' (options: --neg-edge invert|keep, --async "
-                      "sync|error, --report <file>, --max-mem-bits N)",
+                      "sync|error, --report <file>, --max-mem-bits N, --lower-snapshot <dir>)",
                       word);
             st = ODIN3_ERR_INVALID_ARG;
             break;
@@ -142,7 +148,8 @@ static odin3_status lower_pass_run(odin3_pass_ctx *ctx, odin3_design *design, od
 
 const odin3_pass_def odin3_pass_lower = {
     "lower",
-    "lower [--neg-edge invert|keep] [--async sync|error] [--report <file>] [--max-mem-bits N]",
+    "lower [--neg-edge invert|keep] [--async sync|error] [--report <file>] [--max-mem-bits N] "
+    "[--lower-snapshot <dir>]",
     lower_pass_run,
     NULL,
     false,

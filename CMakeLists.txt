@@ -159,6 +159,7 @@ add_library(odin3_core OBJECT
     src/passes/lower/ff.c
     src/passes/lower/latch.c
     src/passes/lower/mem.c
+    src/passes/lower/snapshot.c
     src/passes/hardmap/register.c
     src/passes/hardmap/hardmap.c
     src/passes/hardmap/hm_kit.c
@@ -652,6 +653,11 @@ if(ODIN3_FUZZ)
     target_include_directories(fuzz_opt PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(fuzz_opt PRIVATE odin3_core odin3_flags)
     target_link_options(fuzz_opt PRIVATE -fsanitize=fuzzer)
+    # tests/fuzz/fuzz_lower.c: lower's crash fuzzer (3B spec 14.5, Task 9).
+    add_executable(fuzz_lower tests/fuzz/fuzz_lower.c tests/unit/lower_fixture.c)
+    target_include_directories(fuzz_lower PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_lower PRIVATE odin3_core unity odin3_flags)
+    target_link_options(fuzz_lower PRIVATE -fsanitize=fuzzer)
     # tests/fuzz/fuzz_elab.c: the elaborator's crash fuzzer (2D §14.5, plan Task 28).
     add_executable(fuzz_elab tests/fuzz/fuzz_elab.c)
     target_include_directories(fuzz_elab PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -896,12 +902,36 @@ if(BUILD_TESTING)
     target_sources(test_lower_latch PRIVATE tests/unit/lower_fixture.c tests/unit/lower_latchref.c)
     odin3_add_unit_test(test_lower_mem)
     target_sources(test_lower_mem PRIVATE tests/unit/lower_fixture.c tests/unit/lower_memref.c)
+    # 3B Task 9: bench_lower (Release; nodes created per second and peak RSS of `lower` on N mixed word
+    # cells). Built with the unit tests' fixture helper, so only when tests are built.
+    add_executable(bench_lower tests/bench/bench_lower.c tests/unit/lower_fixture.c)
+    target_include_directories(bench_lower PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/tests/bench)
+    target_link_libraries(bench_lower PRIVATE odin3_core unity odin3_flags)
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
+        target_compile_definitions(bench_lower PRIVATE ODIN3_BENCH_RELEASE)
+        add_test(NAME bench_lower_smoke COMMAND bench_lower --cells 5000)
+        set_tests_properties(bench_lower_smoke PROPERTIES LABELS lower
+            PASS_REGULAR_EXPRESSION "cells=5000 .* nodes_per_s=[0-9]+ ")
+    else()
+        add_test(NAME bench_lower_refuses_debug COMMAND bench_lower --cells 10)
+        set_tests_properties(bench_lower_refuses_debug PROPERTIES LABELS lower
+            WILL_FAIL FALSE PASS_REGULAR_EXPRESSION "needs a Release build")
+    endif()
+    odin3_add_unit_test(test_lower_corpus)
+    target_sources(test_lower_corpus PRIVATE tests/unit/lower_fixture.c)
+    # 3B Task 9 (spec 12.1): the module built in reverse order compares identical (netlist-compare).
+    add_test(NAME lower_reverse_netlist_compare
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                --implicit-models lower_reverse_a.blif lower_reverse_b.blif)
+    set_tests_properties(test_lower_corpus PROPERTIES FIXTURES_SETUP lower_reverse)
+    set_tests_properties(lower_reverse_netlist_compare PROPERTIES FIXTURES_REQUIRED lower_reverse
+        LABELS lower)
     odin3_add_unit_test(test_lower_pass)
     target_sources(test_lower_pass PRIVATE tests/unit/lower_fixture.c tests/unit/proc_fixture.c
                    tests/unit/proc_fixture_core.c)
     target_compile_definitions(test_lower_pass PRIVATE
         ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
-    set_tests_properties(test_lower_kit test_lower_bitwise test_lower_pmux_shift test_lower_alu test_lower_mul test_lower_div test_lower_ff test_lower_mem test_lower_pass PROPERTIES LABELS "unit;lower")
+    set_tests_properties(test_lower_kit test_lower_bitwise test_lower_pmux_shift test_lower_alu test_lower_mul test_lower_div test_lower_ff test_lower_mem test_lower_corpus test_lower_pass PROPERTIES LABELS "unit;lower")
     # 3B Task 2/3: lower-sim on the hand-built designs (the 1E simulator before = after; a design
     # with a $shiftx is reported skipped), the per-cell goldens (lower-cells) and the CLI line.
     # Labelled `lower`, never `fuzz`: the CI fuzz-smoke build has no odin3 binary.
@@ -1941,6 +1971,18 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                                  ENVIRONMENT "${_fuzz_env}")
         endif()
 
+        # 3B §14.5 (Task 9): lower's fuzzer, 60 s (a gate test; the long run is a heavy-run).
+        set(_fl_corpus ${PROJECT_BINARY_DIR}/fuzz_lower_corpus)
+        file(MAKE_DIRECTORY ${_fl_corpus})
+        add_test(NAME fuzz_lower_smoke
+            COMMAND $<TARGET_FILE:fuzz_lower> -seed=1 -max_total_time=60 -timeout=30
+                    -rss_limit_mb=2048 -max_len=64 -print_funcs=0 -print_final_stats=1
+                    ${_fl_corpus})
+        set_tests_properties(fuzz_lower_smoke PROPERTIES LABELS fuzz TIMEOUT 600)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_lower_smoke PROPERTIES ENVIRONMENT "${_fuzz_env}")
+        endif()
+
         # 3D §13.7 (Task 19): 2,000 runs of the splice fuzzer in the smoke (no odin3 binary needed,
         # so the fuzz label is right); the long run is a sweep.
         set(_fs_corpus ${PROJECT_BINARY_DIR}/fuzz_abc_splice_corpus)
@@ -2711,6 +2753,50 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # --min-changed-total 200: the 441 micros under 1100 B alone have 266 changing calls, so
         # a do-nothing odin3 (0 on every design) fails (2F-6 re-review N3).
         set_tests_properties(opt_equiv_micro PROPERTIES LABELS "sweep;opt_equiv")
+        # 3B Task 9 (spec 14.4): lower-equiv. The mutants of spec 14.4 as unittest cases; the
+        # per-cell fixtures (the mul/div/mod fixtures above 3 bits are SAT-heavy: their proofs
+        # run past the 60 s limit and are left to lower-diff's tier T); the falling-edge memory
+        # with --neg-edge keep (equiv-check does not take an inverted clock, as in lower-diff).
+        add_test(NAME lower_equiv_python
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_CLI=$<TARGET_FILE:odin3>
+                    ODIN3_YOSYS055=${ODIN3_YOSYS055} VTR_ROOT=$ENV{VTR_ROOT}
+                    ${Python3_EXECUTABLE} -m unittest tests.tools.test_lower_equiv
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(lower_equiv_python PROPERTIES LABELS lower TIMEOUT 900)
+        set(_lower_equiv_files ${_lower_cells})
+        list(FILTER _lower_equiv_files EXCLUDE REGEX "/cells/(mul|div|mod)_w([4-9]|1[0-9])")
+        list(FILTER _lower_equiv_files EXCLUDE REGEX "/cells/mem_w4_d4_neg[.]v$")
+        set(_lower_equiv_neg ${PROJECT_SOURCE_DIR}/tests/lower/cells/mem_w4_d4_neg.v)
+        add_test(NAME lower_cells_equiv
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-equiv
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --pre proc --expect ${PROJECT_SOURCE_DIR}/tests/lower/equiv_expect.txt
+                    --root ${PROJECT_SOURCE_DIR}/tests/lower/cells --each ${_lower_equiv_files})
+        add_test(NAME lower_cells_equiv_neg_keep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-equiv
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --pre proc --lower-args "--neg-edge keep" ${_lower_equiv_neg})
+        set_tests_properties(lower_cells_equiv lower_cells_equiv_neg_keep
+                             PROPERTIES LABELS lower SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        # 3B Task 9 (spec 14.4, 14.5): the lower corpus over the micros, smallest first, through
+        # heavy-run: lower_run_micro (ODIN3_OK, check FULL, the netlist view written as BLIF),
+        # lower_sim_micro (the simulator before and after; a type without a hook is `skipped`,
+        # never `pass`) and lower_equiv_micro (lower refines its input, in Yosys 0.55). A micro
+        # `opt` folds to no word cell compares nothing (--allow-empty). The micros that 2D, proc or
+        # opt reject are in the other lists; tests/lower/micro_expect_fail.txt lists lower's own.
+        set(_lower_micro_expect ${_micro_expect}
+            --expect-fail ${PROJECT_SOURCE_DIR}/tests/lower/micro_expect_fail.txt
+            --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt)
+        odin3_add_sweep_test(lower_run_micro LABEL sweep
+            COMMAND ${_opt_sweep} --lower-run ${_lower_micro_expect} ${_micro_dir})
+        odin3_add_sweep_test(lower_sim_micro LABEL sweep
+            COMMAND ${_opt_sweep} --lower-sim --opt-arg=--allow-empty ${_lower_micro_expect}
+                    ${_micro_dir})
+        odin3_add_sweep_test(lower_equiv_micro LABEL sweep
+            COMMAND ${_opt_sweep} --lower-equiv --opt-arg=--allow-empty ${_lower_micro_expect}
+                    ${_micro_dir})
+        set_tests_properties(lower_run_micro lower_sim_micro lower_equiv_micro
+                             PROPERTIES LABELS "sweep;lower")
         # opt_diff_micro: every micro with the Phase 2 script and `opt -full`; a difference fails
         # unless tests/opt/diff_expect.txt lists it with a reason.
         odin3_add_sweep_test(opt_diff_micro LABEL sweep

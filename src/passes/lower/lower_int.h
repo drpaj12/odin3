@@ -297,6 +297,14 @@ void lw_rollback(lw_ctx *lw);
 /* Ends the transaction after a successful commit: the created constants become permanent. */
 void lw_end(lw_ctx *lw);
 
+/* --- the snapshot (snapshot.c; spec 14.4) ------------------------------------------------- */
+
+/* With --lower-snapshot DIR: writes DIR/lower-before.il (write_rtlil text, before the first cell is
+ * lowered) and DIR/lower-after.blif (write_blif, after the last). No-ops without the option; a
+ * failure is a WARNING. */
+void odin3_lower_snapshot_before(const odin3_lower_opts *opts, const odin3_design *design);
+void odin3_lower_snapshot_after(const odin3_lower_opts *opts, const odin3_design *design);
+
 /* --- the report (report.c) ---------------------------------------------------------------- */
 
 /* Appends an entry to list `kind` when the run has a report path (a no-op otherwise). NO_MEMORY. */

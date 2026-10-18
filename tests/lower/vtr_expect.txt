@@ -1,0 +1,6 @@
+# VTR designs whose `lower` run ends in a cap (3B spec 14.5, M2): before 3C maps $mul and $mem to
+# hard blocks, `lower` builds them as soft logic and a big design can exceed the caps of spec 11.
+# One path (relative to the VTR benchmark directory) per line with its reason after the first
+# blank. After 3C lands this file must be empty. Recorded outcome of the 14 small designs of
+# PHASE2 #29 (see docs/PHASE3.md, the 3B entry): no entry; the large designs are run by the
+# controller (docs/PHASE3.md lists the commands).

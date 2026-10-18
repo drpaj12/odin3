@@ -358,7 +358,7 @@ MEM_SYNC_READ = ("module m(input clk, input we, input [1:0] wa, input [3:0] wd, 
 
 def mem_cells() -> list[Cell]:
     """The ``$mem`` fixtures (spec 7): SIZE <= 16 and WIDTH <= 4, so ``equiv-check`` decides them.
-    Sizes (powers of two and not), OFFSET 1, a negative OFFSET, two read ports, two write ports
+    Sizes (powers of two and not), OFFSET 1, a negative OFFSET, SIZE above 2^ABITS, two read ports, two write ports
     (the later wins), per-bit write enables, a registered read, a falling clock."""
     plain = _mem_plain("mem_w4_d4", 4, 0, 3, 2)
     cells = [
@@ -368,6 +368,7 @@ def mem_cells() -> list[Cell]:
         _mem_plain("mem_w2_d6", 2, 0, 5, 3),
         _mem_plain("mem_w4_d4_off1", 4, 1, 4, 3),
         _mem_plain("mem_w3_d8_offm2", 3, -2, 5, 3),
+        _mem_plain("mem_w4_d8_a2_off1", 4, 1, 8, 2),  # SIZE 8 > 2^ABITS 4, OFFSET 1 (3B-3 L-1)
         Cell("mem_w4_d4_r2", MEM_TWO_PORTS + "  always @(posedge clk) if (we) mem[wa] <= wd;\n"
              "  assign rd = mem[ra];\n  assign rd2 = mem[rb];\nendmodule\n", "mem"),
         Cell("mem_w4_d4_w2", MEM_TWO_PORTS + "  always @(posedge clk) begin\n"

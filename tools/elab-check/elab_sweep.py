@@ -105,7 +105,14 @@ ELAB_EQUIV = Path(__file__).resolve().parent / "elab_equiv.py"
 PROC_DIFF = Path(__file__).resolve().parents[1] / "proc-check" / "proc_diff.py"
 OPT_TOOLS = {"opt-equiv": Path(__file__).resolve().parents[1] / "opt-check" / "opt_equiv.py",
              "opt-diff": Path(__file__).resolve().parents[1] / "opt-check" / "opt_diff.py",
-             "opt-run": Path(__file__).resolve().parents[1] / "opt-check" / "opt_run.py"}
+             "opt-run": Path(__file__).resolve().parents[1] / "opt-check" / "opt_run.py",
+             "lower-equiv": Path(__file__).resolve().parents[1] / "lower-check" / "lower_equiv.py",
+             "lower-sim": Path(__file__).resolve().parents[1] / "lower-check" / "lower_sim.py",
+             "lower-run": Path(__file__).resolve().parents[1] / "lower-check" / "lower_run.py"}
+# The 3B lower tools: they import opt-check's and lower-check's modules; only lower-equiv wants
+# Yosys. Their exit 5 (lower-run: a cap of `lower`) is a failure an expect-fail list may name.
+LOWER_TOOLS = ("lower-equiv", "lower-sim", "lower-run")
+NO_YOSYS_TOOLS = ("opt-run", "lower-sim", "lower-run")
 TRIO_PROBE = "opt -nodffe -nosdff"  # the trio's own flags; fails until `opt` exists (2F-5)
 # opt-equiv's summary line; the sweeps sum it (``--min-changed-total``)
 OPT_CHANGED_CALLS = re.compile(r"^opt-equiv: (\d+) calls changed something", re.M)
@@ -491,14 +498,18 @@ def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
     """opt-equiv, opt-diff or opt-run on the file: exit 0 passes, 1 is a difference, 2 an error,
     and 3 (the one convention of the opt tools) a crash, cap kill or timeout of a child: hard."""
     start = time.monotonic()
-    assert cfg.yosys is not None or cfg.opt_tool == "opt-run"
+    assert cfg.yosys is not None or cfg.opt_tool in NO_YOSYS_TOOLS
     top = top_for(item, cfg.tops, cfg.golden_root)
     argv = [sys.executable, str(OPT_TOOLS[cfg.opt_tool]), "--odin3", cfg.odin3,
             *(["--yosys", cfg.yosys] if cfg.yosys else []), "--mem-cap", str(cap),
             *(["--top", top] if top else []),
             *(["--techlib", cfg.techlib] if cfg.techlib else []), *cfg.opt_args, str(item.path)]
     here = str(Path(__file__).resolve().parent)  # the tool imports memcap from here
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join([here, os.environ.get("PYTHONPATH", "")])}
+    paths = [here, os.environ.get("PYTHONPATH", "")]
+    if cfg.opt_tool in LOWER_TOOLS:
+        tools = Path(here).parent
+        paths = [str(tools / "lower-check"), str(tools / "opt-check"), *paths]
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(paths)}
     try:  # the tool caps each of its own children
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
                               timeout=TIMEOUT_S, check=False, pass_fds=lock_fds(), env=env)
@@ -714,6 +725,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                     help="run opt-diff (Odin III's opt against Yosys 0.55's) per file")
     ap.add_argument("--opt-run", action="store_true", dest="opt_run",
                     help="run opt-run (Phase 2 script, ODIN3_OK, check, iteration cap) per file")
+    ap.add_argument("--lower-equiv", action="store_true", dest="lower_equiv",
+                    help="run lower-equiv (lower refines its input, in Yosys 0.55) per file")
+    ap.add_argument("--lower-sim", action="store_true", dest="lower_sim",
+                    help="run lower-sim (the simulator before and after lower) per file")
+    ap.add_argument("--lower-run", action="store_true", dest="lower_run",
+                    help="run lower-run (the Phase 3 script up to compact, ODIN3_OK, check)")
     ap.add_argument("--opt-arg", action="append", default=[], metavar="ARG",
                     help="--opt-equiv/--opt-diff: an argument for the child (use --opt-arg=ARG)")
     ap.add_argument("--min-changed-total", type=int, default=0, metavar="N",
@@ -757,14 +774,15 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def build_config(args: argparse.Namespace) -> Config:
-    modes = [args.equiv, args.bench, args.proc_diff, args.opt_equiv, args.opt_diff, args.opt_run]
+    modes = [args.equiv, args.bench, args.proc_diff, args.opt_equiv, args.opt_diff, args.opt_run,
+             args.lower_equiv, args.lower_sim, args.lower_run]
     if sum(bool(m) for m in modes) > 1:
-        raise UsageError("--equiv, --bench, --proc-diff, --opt-equiv, --opt-diff and --opt-run "
-                         "cannot be combined")
+        raise UsageError("--equiv, --bench, --proc-diff, --opt-equiv, --opt-diff, --opt-run, "
+                         "--lower-equiv, --lower-sim and --lower-run cannot be combined")
     if args.min_changed_total and not args.opt_equiv:
         raise UsageError("--min-changed-total needs --opt-equiv")
-    if (args.opt_equiv or args.opt_diff) and not args.yosys:
-        raise UsageError("--opt-equiv and --opt-diff need --yosys")
+    if (args.opt_equiv or args.opt_diff or args.lower_equiv) and not args.yosys:
+        raise UsageError("--opt-equiv, --opt-diff and --lower-equiv need --yosys")
     if args.bench_report and not args.bench:
         raise UsageError("--bench-report needs --bench")
     if args.bench_report and args.bench_report not in bench_report.PROFILES:
@@ -785,7 +803,8 @@ def build_config(args: argparse.Namespace) -> Config:
             raise UsageError(f"--cap-for {spec!r}: expected SUFFIX=CAP")
         caps[suffix] = parse_size(size)
     cap = parse_size(args.mem_cap)
-    yosys_mode = args.equiv or args.proc_diff or args.opt_equiv or args.opt_diff
+    yosys_mode = (args.equiv or args.proc_diff or args.opt_equiv or args.opt_diff
+                  or args.lower_equiv)
     for tool in (args.odin3, args.bench) if not yosys_mode else (args.odin3,):
         if tool is not None and shutil.which(tool) is None:
             raise UsageError(f"{tool} is not an executable file")
@@ -802,7 +821,8 @@ def build_config(args: argparse.Namespace) -> Config:
         bench_report=args.bench_report, libs=tuple(str(Path(lib).resolve()) for lib in args.lib),
         proc_diff=bool(args.proc_diff),
         opt_tool="opt-equiv" if args.opt_equiv else "opt-diff" if args.opt_diff
-        else "opt-run" if args.opt_run else "",
+        else "opt-run" if args.opt_run else "lower-equiv" if args.lower_equiv
+        else "lower-sim" if args.lower_sim else "lower-run" if args.lower_run else "",
         opt_args=tuple(args.opt_arg), pass_proc=args.stop_pass == "proc",
         no_trio=args.trio == "off", also_no_trio=bool(args.also_no_trio),
         nolatches=bool(args.nolatches), vtr_compat=bool(args.vtr_compat),

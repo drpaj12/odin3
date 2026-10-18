@@ -25,6 +25,9 @@
 /* The byte budget is checked every this many created nodes (spec §11). */
 #define ODIN3_LOWER_BUDGET_NODES ((uint64_t)1 << 16)
 
+/* The longest --lower-snapshot directory, with its NUL. */
+#define ODIN3_LOWER_SNAPSHOT_PATH 4096
+
 /* Options of `lower` (spec §13). */
 typedef struct odin3_lower_opts {
     bool keep_neg_edge;      /* --neg-edge keep */
@@ -32,11 +35,12 @@ typedef struct odin3_lower_opts {
     uint64_t max_mem_bits;   /* 0 = ODIN3_LOWER_MAX_MEM_BITS */
     const char *report_path; /* NULL = none */
     bool async_enable_first; /* hidden, test-only: the enable over a reset/load (Parmys's shape) */
+    char snapshot_dir[ODIN3_LOWER_SNAPSHOT_PATH]; /* --lower-snapshot DIR, "" = none (spec 14.4) */
 } odin3_lower_opts;
 
 /*
  * Parses the pass arguments: `[--neg-edge invert|keep] [--async sync|error] [--report <file>]
- * [--max-mem-bits N]`. *opts is filled (zero when no argument is given); report_path points into
+ * [--max-mem-bits N] [--lower-snapshot <dir>]`. *opts is filled (zero when no argument is given); report_path points into
  * the argument text's copy in *report (caller-owned, freed by the caller). INVALID_ARG (logged
  * "lower: unknown argument '<arg>'" or the option's own message) for anything else; NO_MEMORY.
  */
