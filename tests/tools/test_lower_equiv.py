@@ -59,6 +59,12 @@ INIT2 = """module m(input clk0, input clk1, input [3:0] a, output [3:0] y, outpu
   assign y = q; assign z = s ^ a[0];
 endmodule
 """
+NOINIT_AND = """module m(input clk, input d, output q);
+  reg r;
+  always @(posedge clk) r <= {body};
+  assign q = r;
+endmodule
+"""
 
 FF = """module m(input clk, input clk2, input rst, input en, input [3:0] d, output reg [3:0] q);
   always @(posedge {clk}) {body}
@@ -263,6 +269,15 @@ class RefinementTest(unittest.TestCase):
         self.refines(INIT2.format(val=0))
         self.differs(INIT2.format(val=0), INIT2.format(val=1))
 
+    def test_a_flop_without_init_starts_at_every_value_not_only_zero(self) -> None:
+        """N2: gold `r <= r & d` against gate `r <= r` differs only when r starts at 1 (the
+        zero start hid it); the verdict is a difference, exit 1; the controls stay ok."""
+        gold = NOINIT_AND.format(body="r & d")
+        self.refines(gold)
+        got = self.verdict(gold, NOINIT_AND.format(body="(r & d) | (r & ~d)"))
+        self.assertEqual(got.kind, "differs", f"{got.kind}: {got.detail}")
+        self.assertEqual(le.report_line("m.v", "m.v", got, {})[1], lc.EXIT_FAIL)
+
 
 GATE = """autoidx 1
 module \\m
@@ -400,7 +415,7 @@ class PairRegistersTest(unittest.TestCase):
         self.assertEqual(le.pair_registers(gate, PAIR_GOLD).count("wire \\s\n"), 1)
 
 
-USES = {"\\i": le.BoxUse("\\ram", (("\\a", 4), ("\\q", 4)), (("\\W", "4"),))}
+USES = {"\\i": le.BoxUse("\\ram", (("\\a", 4), ("\\q", 4)))}
 
 
 class BoxTest(unittest.TestCase):
@@ -418,10 +433,10 @@ class BoxTest(unittest.TestCase):
 
     def test_a_shared_instance_must_agree_on_type_widths_and_parameters(self) -> None:
         self.assertEqual(le.box_mismatch(USES, USES), "")
-        wide = {"\\i": le.BoxUse("\\ram", (("\\a", 4), ("\\q", 5)), ())}
+        wide = {"\\i": le.BoxUse("\\ram", (("\\a", 4), ("\\q", 5)))}
         self.assertIn("hard block \\i", le.box_mismatch(USES, wide))
-        other = {"\\i": le.BoxUse("\\ram", USES["\\i"].widths, (("\\W", "5"),))}
-        self.assertIn("hard block \\i", le.box_mismatch(USES, other))
+        kind = {"\\i": le.BoxUse("\\rom", USES["\\i"].widths)}
+        self.assertIn("hard block \\i", le.box_mismatch(USES, kind))
         self.assertEqual(le.box_mismatch(USES, {}), "")  # (left to the port match)
 
     def test_instances_are_retyped_by_name(self) -> None:
@@ -430,11 +445,9 @@ class BoxTest(unittest.TestCase):
         self.assertIn("  cell \\ram$o3w0 \\i\n", out)
         self.assertIn("  cell \\ram \\j\n", out)
 
-    def test_json_names_and_values(self) -> None:
+    def test_json_names(self) -> None:
         self.assertEqual(le.rtlil_id("i"), "\\i")
         self.assertEqual(le.rtlil_id("$n1"), "$n1")
-        self.assertEqual(le.json_value("00000000000000000000000000000100"), "4")
-        self.assertEqual(le.json_value("abc"), "abc")
 
 
 class BoundedScriptTest(unittest.TestCase):
@@ -447,6 +460,24 @@ class BoundedScriptTest(unittest.TestCase):
         self.assertIn("sat -seq 20 ", script)
         self.assertLess(script.index(opt_equiv.EVERT_BLACKBOXES), script.index("clk2fflogic"))
         self.assertNotIn("expose -shared", script)
+        undef = le.bounded_script("g.il", "t.il", False, 4, True, False, le.START_UNDEF)
+        self.assertIn("sat -seq 4 -set-init-undef -enable_undef ", undef)
+        self.assertNotIn("-set-init-zero", undef)
+
+    def test_a_tied_start_gives_both_sides_one_value_to_paired_wires_only(self) -> None:
+        gold = ("autoidx 1\nmodule \\m\n  wire input 1 \\clk\n  wire width 4 \\r\n"
+                "  attribute \\init 1'1\n  wire \\s\n  wire \\only\n  wire \\x\nend\n")
+        gate = ("autoidx 1\nmodule \\m\n  wire input 1 \\clk\n  attribute \\init 4'xxxx\n"
+                "  wire width 4 \\r\n  wire \\s\n  wire \\x\nend\n")
+        new_gold, new_gate = le.tie_starts(gold, gate, ("\\m", "\\m"))
+        self.assertIn("  attribute \\init 4'1111\n  wire width 4 \\r\n", new_gold)
+        self.assertIn("  attribute \\init 4'1111\n  wire width 4 \\r\n", new_gate)
+        self.assertNotIn("4'xxxx", new_gate)
+        self.assertIn("  attribute \\init 1'1\n  wire \\s\n", new_gold)  # (gold's own init stays)
+        self.assertEqual(new_gold.count("init"), 3)  # r, s (its own), x
+        self.assertNotIn("init 1'1\n  wire \\s\n", new_gate)  # not tied: gold defines it
+        self.assertNotIn("init 1'1\n  wire \\only\n", new_gold)  # one side only
+        self.assertNotIn("init 1'1\n  wire input", new_gold)  # (an input)
 
     def test_the_base_case_compares_every_shared_name(self) -> None:
         script = le.bounded_script("g.il", "t.il", True, le.BASE_STEPS, True)
@@ -532,37 +563,61 @@ class RefineVerdictTest(unittest.TestCase):
 
     def verdict(self, sat_ok: bool, bmc: list[str], cec: str = opt_equiv.CEC_UNPROVEN
                 ) -> tuple[str, str, list[Any]]:
-        """(verdict, detail, the bounded checks' ``run`` arguments); ``bmc`` = the answers of
-        the bounded checks in call order."""
+        """(verdict, detail, the checks run); ``bmc`` = the answers of the bounded checks in call
+        order: a base case (``bounded_check``, recorded as its ``run``) or the concrete output
+        runs (``output_trace``, recorded as "outputs")."""
         base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-refine-"))
         gold, gate = base / "gold.il", base / "gate.il"
         gold.write_text(self.GOLD, encoding="utf-8")
         gate.write_text(self.GATE, encoding="utf-8")
         checker = mock.Mock()
         checker.refines.return_value = (sat_ok, "the SAT flow failed")
-        bounded = mock.Mock(side_effect=[(answer, "trace text") for answer in bmc])
+        answers = iter([(answer, "trace text") for answer in bmc])
+        runs: list[Any] = []
+
+        def bounded(*args: Any) -> tuple[str, str]:
+            runs.append(args[4])
+            return next(answers)
+
+        def outputs(*_: Any) -> tuple[str, str]:
+            runs.append("outputs")
+            return next(answers)
+
         with mock.patch.object(opt_equiv, "Checker", return_value=checker), \
                 mock.patch.object(le, "bounded_check", bounded), \
+                mock.patch.object(le, "output_trace", outputs), \
                 mock.patch.object(le, "cec_gold_and_blif", return_value=(cec, "cec text")):
             kind, detail = le.refine("y", (gold, gate), base / "after.blif", base, 1, None)
-        return kind, detail, [call.args[4] for call in bounded.call_args_list]
+        return kind, detail, runs
 
     def test_a_failed_proof_is_a_difference_only_with_a_trace(self) -> None:
         kind, _, runs = self.verdict(False, [le.TRACE])
         self.assertEqual(kind, "differs")
-        self.assertEqual(runs, [(None, le.BMC_STEPS, False)])  # the outputs only
+        self.assertEqual(runs, ["outputs"])  # the concrete output runs only
         for answer in (le.NO_TRACE, le.NO_ANSWER):
             for cec in (opt_equiv.CEC_DIFFERS, opt_equiv.CEC_UNPROVEN):
                 with self.subTest(answer=answer, cec=cec):
                     self.assertEqual(self.verdict(False, [answer], cec)[0], "unproven")
 
     def test_a_failed_proof_without_a_trace_follows_a_cec_proof(self) -> None:
-        self.assertEqual(self.verdict(False, [le.NO_TRACE], opt_equiv.CEC_PROVED)[0], "ok")
+        proved = opt_equiv.CEC_PROVED
+        kind, _, runs = self.verdict(False, [le.NO_TRACE, le.NO_TRACE], proved)
+        self.assertEqual(kind, "ok")
+        self.assertEqual(runs[1], (None, le.BASE_STEPS, True, le.START_UNDEF))  # N2: base case too
+        # a cec proof starts every flop at 0: a base-case doubt is a difference only with a trace
+        self.assertEqual(self.verdict(False, [le.NO_TRACE, le.TRACE, le.TRACE], proved)[0],
+                         "differs")
+        for answers in ([le.NO_TRACE, le.TRACE, le.NO_TRACE],
+                        [le.NO_TRACE, le.NO_ANSWER, le.NO_ANSWER],
+                        [le.NO_TRACE, le.TRACE, le.NO_ANSWER]):
+            with self.subTest(answers=answers):
+                self.assertEqual(self.verdict(False, answers, proved)[0], "unproven")
 
     def test_a_passed_proof_needs_its_base_case(self) -> None:
         kind, _, runs = self.verdict(True, [le.NO_TRACE], opt_equiv.CEC_DIFFERS)
         self.assertEqual(kind, "ok")
-        self.assertEqual(runs, [(None, le.BASE_STEPS, True)])  # every shared name
+        # every shared name, every flop without init undefined
+        self.assertEqual(runs, [(None, le.BASE_STEPS, True, le.START_UNDEF)])
         self.assertEqual(self.verdict(True, [le.TRACE, le.TRACE])[0], "differs")
         for first in (le.TRACE, le.NO_ANSWER):
             for second in (le.NO_TRACE, le.NO_ANSWER):

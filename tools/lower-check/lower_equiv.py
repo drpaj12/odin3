@@ -25,9 +25,10 @@ Every hard-block instance is declared at the widths it connects, so ``expose -ev
 every bit of its inputs and shares every bit of its outputs; a hard block that gold and gate both
 hold under one name with another type or other port widths is a difference (``prepare_boxes``).
 The induction has no base case, so a passed proof is ``ok`` only when a bounded check from the
-initial state (``init`` values honoured, other flip-flops 0) finds no difference on any wire both
-sides name; a failed proof is a difference only when the bounded check finds a trace on an
-output, else ``unproven`` unless the BLIF cec proves the pair (``refine``, ``base_case``).
+initial state (``init`` values honoured, other flip-flops undefined on both sides, so every
+starting value is covered) finds no difference on any wire both sides name; a failed proof is a
+difference only when a bounded check finds a trace on an output, else ``unproven`` unless the BLIF
+cec proves the pair (which then needs the base case too; ``refine``, ``base_case``).
 A refinement that the SAT flow cannot decide inside 60 s is ``unproven`` (exit 4), never ``ok``.
 A difference fails unless ``--expect F`` lists it: lines ``<path> refine <reason>`` (``#``
 comments), ``path`` relative to ``--root`` (else the file name); a listed difference that does not
@@ -443,30 +444,25 @@ def cec_blifs(gold: Path, gate: Path, cap: int, work: Path) -> tuple[str, str]:
 # read bit above 0 passed. Every hard-block instance of the flattened top therefore gets a type of
 # its own, ``<type>$o3w<k>``, declared with exactly the ports the instance connects at the widths it
 # connects them (one declaration per distinct (type, widths), the same on both sides), and the
-# instances that gold and gate share by name must agree on type, port widths and the parameters
-# both carry (the BLIF keeps no parameter: a ``DATA_WIDTH`` change shows as a width change).
+# instances that gold and gate share by name must agree on type and port widths. Only the widths
+# are compared: the gate is read from BLIF, which has no ``.param``, so a parameter of the gate
+# side does not exist (no library cell has a parameter that does not also change a port width:
+# a ``DATA_WIDTH`` change shows as a width change).
 BOX_TAG = "$o3w"
 USER_CELL = re.compile(r"^\s+cell \\", re.M)
 
 
 @dataclass(frozen=True)
 class BoxUse:
-    """One hard-block instance: its type, the width of each port it connects, its parameters."""
+    """One hard-block instance: its type and the width of each port it connects."""
 
     kind: str
     widths: tuple[tuple[str, int], ...]
-    params: tuple[tuple[str, str], ...]
 
 
 def rtlil_id(name: str) -> str:
     """An RTLIL identifier from a ``write_json`` name (which drops the ``\\`` of a public one)."""
     return name if name.startswith(("$", "\\")) else "\\" + name
-
-
-def json_value(value: object) -> str:
-    """A ``write_json`` parameter as a comparable text: a bit string becomes its number."""
-    text = str(value).rstrip(" ")
-    return str(int(text, 2)) if re.fullmatch(r"[01]+", text) else text
 
 
 def flat_probe(yosys: str, il: Path, tag: str, work: Path, cap: int) -> tuple[Path, dict[str, Any]]:
@@ -501,23 +497,19 @@ def box_uses(design: dict[str, Any], top: str, boxes: set[str]) -> dict[str, Box
         if kind in boxes:
             uses[rtlil_id(name)] = BoxUse(
                 kind, tuple(sorted((rtlil_id(port), len(bits))
-                                   for port, bits in cell["connections"].items())),
-                tuple(sorted((rtlil_id(key), json_value(value))
-                             for key, value in cell.get("parameters", {}).items())))
+                                   for port, bits in cell["connections"].items())))
     return uses
 
 
 def box_mismatch(gold: dict[str, BoxUse], gate: dict[str, BoxUse]) -> str:
-    """The first hard block that gold and gate both hold under one name but with another type,
-    other port widths or another value of a parameter both carry; '' when there is none."""
+    """The first hard block that gold and gate both hold under one name but with another type or
+    other port widths; '' when there is none. Parameters are not compared: the gate side is read
+    from BLIF, which carries no ``.param`` (a parameter that matters changes a port width)."""
     for name in sorted(gold.keys() & gate.keys()):
         mine, theirs = gold[name], gate[name]
-        params = dict(theirs.params)
-        if mine.kind != theirs.kind or mine.widths != theirs.widths or any(
-                key in params and params[key] != value for key, value in mine.params):
-            return (f"hard block {name}: gold {mine.kind[1:]} {dict(mine.widths)} "
-                    f"{dict(mine.params)}, gate {theirs.kind[1:]} {dict(theirs.widths)} "
-                    f"{dict(theirs.params)}")
+        if mine.kind != theirs.kind or mine.widths != theirs.widths:
+            return (f"hard block {name}: gold {mine.kind[1:]} {dict(mine.widths)}, "
+                    f"gate {theirs.kind[1:]} {dict(theirs.widths)}")
     return ""
 
 
@@ -563,7 +555,7 @@ def prepare_boxes(yosys: str, gold: Path, gate: Path, top: str, work: Path, cap:
                   ) -> tuple[Path, Path, str]:
     """(gold, gate, difference) with every hard block declared at its instance's widths (C1). The
     two paths are unchanged when neither side has a user cell; ``difference`` is non-empty when a
-    shared hard block differs in type, widths or a parameter (M1)."""
+    shared hard block differs in type or widths (M1)."""
     texts = [gold.read_text(encoding="utf-8"), gate.read_text(encoding="utf-8")]
     if not any(USER_CELL.search(text) for text in texts):
         return gold, gate, ""
@@ -598,9 +590,17 @@ def prepare_boxes(yosys: str, gold: Path, gate: Path, top: str, work: Path, cap:
 #
 # The model: both sides flattened, hard blocks cut as in the proof, ``memory``, then the clock
 # model, ``miter -equiv -ignore_gold_x`` (an x in the gold is a don't care) and ``sat -seq N
-# -enable_undef -set-def-inputs``. The initial state honours every ``init`` attribute; a
-# flip-flop without one starts at 0 on both sides (``-set-init-zero``: VTR's power-up value and
-# the BLIF cec's convention for init 2/3), so a trace is a real run of the circuit VTR builds.
+# -enable_undef -set-def-inputs``. The initial state honours every ``init`` attribute. Flip-flops
+# without one are treated in two ways (N2):
+#
+# * the base case (the "ok" decision) starts them ALL undefined (``-set-init-undef``, the same x on
+#   both sides; three-valued, so it covers every starting value, paired flops included, and a gate
+#   that is defined or x where the gold is defined and different fails). x is pessimistic, so a
+#   failure here is a doubt, not a difference: it is "unproven" unless a concrete trace confirms it;
+# * the output traces (the "differs" decision) are concrete runs: every no-init flop 0 (VTR's
+#   power-up value and the BLIF cec's convention for init 2/3), or, as a second start, every no-init
+#   flop that gold and gate both name at the top level 1 (``tie_starts``: the same value on both
+#   sides), the rest 0. A trace from either start is a real run of both circuits.
 #
 # Output traces (H1) always use ``clk2fflogic``: every clock a sampled input, exact for any
 # number of clocks and asynchronous resets; one step is half a cycle, so BMC_STEPS = 20 covers
@@ -617,6 +617,7 @@ def prepare_boxes(yosys: str, gold: Path, gate: Path, top: str, work: Path, cap:
 # line can be lost; without it Yosys exits 0 and the verdict is the final message.
 BASE_STEPS = 4
 BMC_STEPS = 20
+START_ZERO, START_ONES, START_UNDEF = "zero", "ones", "undef"
 BMC_TIMEOUT_SECONDS = 60.0
 TRACE = "trace"
 NO_TRACE = "none"
@@ -626,36 +627,92 @@ SAT_PASS = re.compile(r"SAT proof finished - no model found: SUCCESS!")
 
 
 def bounded_script(gold: str, gate: str, procs: bool, steps: int, shared: bool,
-                   one_clock: bool = False) -> str:
+                   one_clock: bool = False, start: str = START_ZERO) -> str:
     """The Yosys script of the bounded check of two files ``rename_modules`` made gold/gate;
     ``shared``: every public wire both sides name is compared too (the base case);
-    ``one_clock``: ``async2sync`` steps (one per cycle) instead of ``clk2fflogic``'s."""
+    ``one_clock``: ``async2sync`` steps (one per cycle) instead of ``clk2fflogic``'s; ``start``:
+    ``START_UNDEF`` leaves the flip-flops without ``init`` undefined, else they start at 0."""
     clocks = "async2sync" if one_clock else "clk2fflogic"
+    init = "-set-init-undef" if start == START_UNDEF else "-set-init-zero"
     script = [f"read_rtlil {gold}", f"read_rtlil {gate}", *(["proc"] if procs else []),
               "flatten", opt_equiv.EVERT_BLACKBOXES, "memory", clocks, "opt_clean",
               *(["expose -shared gold gate"] if shared else []),
               "miter -equiv -flatten -make_assert -ignore_gold_x gold gate miter",
               "hierarchy -top miter",
-              f"sat -seq {steps} -set-init-zero -enable_undef -set-def-inputs "
+              f"sat -seq {steps} {init} -enable_undef -set-def-inputs "
               "-prove-asserts -show-inputs miter"]
     return "; ".join(script)
 
 
+WIRE_LINE = re.compile(r"^  wire (?P<mid>.*?)(?P<name>\\\S+)$")
+INIT_LINE = re.compile(r"^  attribute \\init (?P<width>\d+)'(?P<bits>[01xzm-]*)$")
+
+
+def wire_width(mid: str) -> int:
+    """The width in the words between ``wire`` and the name of a wire line."""
+    words = mid.split()
+    return int(words[words.index("width") + 1]) if "width" in words else 1
+
+
+def start_candidates(text: str, top: str) -> dict[str, int]:
+    """name -> width of the non-input wires of module ``top`` that have no defined ``init``."""
+    start, end = module_span(text, top)
+    found: dict[str, int] = {}
+    defined = False
+    for line in text[start:end].splitlines():
+        init, wire = INIT_LINE.match(line), WIRE_LINE.match(line)
+        if init is not None:
+            defined = defined or re.search("[01]", init.group("bits")) is not None
+        elif wire is not None:
+            if not defined and not {"input", "inout"} & set(wire.group("mid").split()):
+                found[wire.group("name")] = wire_width(wire.group("mid"))
+            defined = False
+        elif not line.startswith("  attribute "):
+            defined = False
+    return found
+
+
+def tie_starts(gold: str, gate: str, tops: tuple[str, str]) -> tuple[str, str]:
+    """(gold, gate) RTLIL texts where every top-level wire that both name at one width, neither
+    with a defined ``init`` and not an input, gets ``init`` all ones on both sides: one starting
+    value for the paired flip-flops (the others start at 0 in the sat call)."""
+    mine, theirs = (start_candidates(text, top) for text, top in zip((gold, gate), tops,
+                                                                      strict=True))
+    names = {name for name, width in mine.items() if theirs.get(name) == width}
+    out = []
+    for text, top in zip((gold, gate), tops, strict=True):
+        start, end = module_span(text, top)
+        body: list[str] = []
+        for line in text[start:end].splitlines(keepends=True):
+            wire = WIRE_LINE.match(line.rstrip("\n"))
+            if wire is not None and wire.group("name") in names:
+                width = wire_width(wire.group("mid"))
+                while body and INIT_LINE.match(body[-1].rstrip("\n")):  # (an x init)
+                    body.pop()
+                body.append(f"  attribute \\init {width}'{'1' * width}\n")
+            body.append(line)
+        out.append(text[:start] + "".join(body) + text[end:])
+    return out[0], out[1]
+
+
 def bounded_check(yosys: str, sides: tuple[Path, Path], work: Path, cap: int,
-                  run: tuple[str | None, int, bool]) -> tuple[str, str]:
+                  run: tuple[str | None, int, bool, str]) -> tuple[str, str]:
     """(TRACE | NO_TRACE | NO_ANSWER, Yosys's last lines) of the bounded check of ``sides`` (gold,
-    gate). ``run`` = (top, steps, shared); the base case (``shared``) steps like the proof."""
-    top, steps, shared = run
+    gate). ``run`` = (top, steps, shared, start); the base case (``shared``) steps like the proof;
+    ``start``: START_ZERO, START_ONES (tied paired flip-flops at 1, the rest 0) or START_UNDEF."""
+    top, steps, shared, start = run
     texts = [path.read_text(encoding="utf-8") for path in sides]
+    tops = (opt_equiv.top_module(texts[0], top), opt_equiv.top_module(texts[1], top))
+    if start == START_ONES:
+        texts = list(tie_starts(texts[0], texts[1], tops))
     names = []
-    for text, side in zip(texts, ("gold", "gate"), strict=True):
+    for text, side, name in zip(texts, ("gold", "gate"), tops, strict=True):
         path = work / f"bmc.{side}.il"
-        path.write_text(opt_equiv.rename_modules(text, side, opt_equiv.top_module(text, top)),
-                        encoding="utf-8")
+        path.write_text(opt_equiv.rename_modules(text, side, name), encoding="utf-8")
         names.append(str(path))
     procs = any(opt_equiv.has_processes(text) for text in texts)
     one_clock = shared and clock_sig.same_clocks(texts[0], texts[1])
-    script = bounded_script(names[0], names[1], procs, steps, shared, one_clock)
+    script = bounded_script(names[0], names[1], procs, steps, shared, one_clock, start)
     try:
         done = lc.capped("yosys-bmc", [lc.exe(yosys), "-p", script], cap, cwd=work,
                          timeout=BMC_TIMEOUT_SECONDS)
@@ -667,6 +724,21 @@ def bounded_check(yosys: str, sides: tuple[Path, Path], work: Path, cap: int,
     if done.returncode == 0 and SAT_PASS.search(log):
         return NO_TRACE, ""
     return NO_ANSWER, f"bounded check exit {done.returncode}: {lc.why(log)}"
+
+
+def output_trace(yosys: str, sides: tuple[Path, Path], work: Path, cap: int, top: str | None
+                 ) -> tuple[str, str]:
+    """(TRACE | NO_TRACE | NO_ANSWER, text) of the concrete runs on the outputs: from the all-0
+    start, then from the tied all-1 start (N2). A trace from either is a real difference."""
+    answers = [bounded_check(yosys, sides, work, cap, (top, BMC_STEPS, False, start))
+               for start in (START_ZERO, START_ONES)]
+    for found, text in answers:
+        if found == TRACE:
+            return found, text
+    for found, text in answers:
+        if found == NO_ANSWER:
+            return found, text
+    return NO_TRACE, ""
 
 
 def refine(yosys: str, sides: tuple[Path, Path], after: Path, work: Path, cap: int,
@@ -687,33 +759,38 @@ def refine(yosys: str, sides: tuple[Path, Path], after: Path, work: Path, cap: i
         raise
     if ok:
         return base_case(yosys, sides, work, cap, top)
-    found, text = bounded_check(yosys, sides, work, cap, (top, BMC_STEPS, False))
+    found, text = output_trace(yosys, sides, work, cap, top)
     if found == TRACE:
         return "differs", f"{last} | bounded check from the initial state: {text}"
     # No trace inside BMC_STEPS. The induction cannot pair the registers of a memory, nor those
     # whose BLIF names were lost, nor across clk2fflogic's shadow registers, so a failed proof is
     # no evidence; the BLIF cec (ABC's dsec pairs registers itself) may still prove the pair. Its
-    # "not equivalent" ties the x of the gold to 0 and is not a trace either: "unproven".
+    # "not equivalent" ties the x of the gold to 0 and is not a trace either: "unproven". Its
+    # proof starts every flip-flop at 0 (init 2/3), so it also needs the base case (N2).
     verdict, cec = cec_gold_and_blif(yosys, gold, after, work, cap)
     if verdict == opt_equiv.CEC_PROVED:
-        return "ok", "proved by the BLIF cec (the SAT flow could not pair the registers)"
+        kind, detail = base_case(yosys, sides, work, cap, top)
+        return kind, (detail if kind != "ok" else
+                      "proved by the BLIF cec (the SAT flow could not pair the registers)")
     return "unproven", (f"the SAT flow failed ({last.strip()[-120:]}), the bounded check found no "
                         f"trace in {BMC_STEPS} steps ({found}: {text[-200:]}) and {cec}")
 
 
 def base_case(yosys: str, sides: tuple[Path, Path], work: Path, cap: int, top: str | None
               ) -> tuple[str, str]:
-    """The verdict after a passed proof: "ok" when the base case holds (H2), else "differs" on
-    an output trace from the initial state, else "unproven"."""
-    found, text = bounded_check(yosys, sides, work, cap, (top, BASE_STEPS, True))
+    """The verdict of a proved pair: "ok" when the base case holds for every starting value of
+    the flip-flops without ``init`` (H2, N2: undefined on both sides, so x covers all values), else
+    "differs" on a concrete output trace, else "unproven" (x is pessimistic, a timeout is no
+    answer)."""
+    found, text = bounded_check(yosys, sides, work, cap, (top, BASE_STEPS, True, START_UNDEF))
     if found == NO_TRACE:
         return "ok", ""
-    trace, detail = bounded_check(yosys, sides, work, cap, (top, BMC_STEPS, False))
+    trace, detail = output_trace(yosys, sides, work, cap, top)
     if trace == TRACE:
         return "differs", f"the initial states differ: bounded check: {detail}"
     outputs = (f"no output trace in {BMC_STEPS} steps" if trace == NO_TRACE else
                f"the output check gave no answer ({detail[-120:]})")
-    return "unproven", (f"the induction passed but its base case from the initial state "
+    return "unproven", (f"the proof passed but its base case from the initial state "
                         f"{'failed' if found == TRACE else 'gave no answer'} on the named wires "
                         f"({text[-200:]}) and {outputs}")
 
