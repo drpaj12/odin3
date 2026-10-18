@@ -7,32 +7,20 @@
 # `unproven`: equiv-check cannot decide the design (tests/exit/vtr_unproven.txt); the hard-block
 # counts, which hardmap-diff always checks, are then the evidence.
 
-# lower-gap: `lower` (3B-1) has no rule yet for the `$dff`/`$dffe`/`$lt`/`$ge` cells of these designs,
-# so no netlist view exists. hardmap-diff then compares the hard cells of the RTLIL written before
-# `lower` (top module) with the golden: equal on the 7 small designs (run 2026-10-17, one
-# tools/heavy-run each); the other 12 are predicted the same and are the controller's to confirm.
-# These lines go when the 3B-2 PR lands (then every design is compared as a netlist).
-ch_intrinsics.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
-stereovision3.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
-diffeq2.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
-diffeq1.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
-mkPktMerge.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
-raygentop.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
-sha.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
-boundtop.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
-mkSMAdapter4B.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
-or1200.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
-stereovision0.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
-stereovision1.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
-mkDelayWorker32B.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
-stereovision2.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
-blob_merge.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
-LU8PEEng.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
-bgm.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
-mcml.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
-LU32PEEng.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
 
-# After 3B-2 (predicted from spec 2 and 10; confirm with the commands in PHASE3 #42):
+# Run 2026-10-18 on the full `lower` (3B-2, 3B-3), one tools/heavy-run each. diffeq1, diffeq2 and
+# mkPktMerge are equivalent to Parmys (no line). The other four small designs:
+# Odin III's `opt` (3G) leaves fewer flip-flops than Parmys: for ch_intrinsics 265 after proc, 200
+# after `opt`, 199 after `opt -full` against Parmys's 210 (opt_merge and opt_dff act, hardmap and
+# `lower` do not change the count). Not hardmap's, not lower's; equiv-check says not equivalent
+# for ch_intrinsics, unresolved: the cause is a 3G question, and the netlists are not compared
+# while a `counts:` line is listed.
+ch_intrinsics.v counts:-11 latch 3G `opt` removes 11 flip-flops Parmys keeps (opt_merge/opt_dff); netlist equivalence unresolved
+blob_merge.v counts:-23 latch 3G `opt` removes 23 flip-flops Parmys keeps (same signature as ch_intrinsics, cause not isolated)
+stereovision3.v counts:-21 latch 3G `opt` removes 21 flip-flops Parmys keeps (same signature as ch_intrinsics, cause not isolated)
+sha.v unproven ABC dsec UNDECIDED after 482 s; hard-block and latch counts equal Parmys's
+
+# Predicted for the 12 designs not run yet (spec 2 and 10; the commands are in PHASE3 #42):
 stereovision0.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
 stereovision1.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
 stereovision2.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count

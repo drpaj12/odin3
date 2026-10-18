@@ -990,17 +990,17 @@ then the options considered.
     `tests/hardmap/sx_add_c.v`, `sub_pad_s.v` and `sub_pad_u.v` (through `lower`) against their
     RTL with `parmys-probe`: 0 mismatches in 3000 cycles each, where Parmys's own netlists fail
     (probes README). **The 19** (run order, `tests/hardmap/vtr_designs.txt`): small designs run
-    2026-10-17, one `tools/heavy-run` each, release build:
+    2026-10-18 on the full `lower` (after 3B-2 and 3B-3), one `tools/heavy-run` each, release build:
 
     | design | result | hard-block counts vs the golden |
     |---|---|---|
-    | ch_intrinsics | lower-gap (`$dffe`) | equal (adder 0, multiply 0, SP 8) |
-    | stereovision3 | lower-gap (`$dff`) | equal |
-    | diffeq2 | lower-gap (`$lt`) | equal |
-    | diffeq1 | lower-gap (`$lt`) | equal |
-    | mkPktMerge | lower-gap (`$sdffe`) | equal |
-    | sha | lower-gap (`$lt`) | equal |
-    | blob_merge | lower-gap (`$ge`) | equal |
+    | ch_intrinsics | counts: latch -11 (Odin III `opt` keeps fewer flops: 265 after proc, 199 after `opt -full`, Parmys 210; not hardmap, not lower; equiv-check: not equivalent, unresolved) | equal |
+    | diffeq1 | equivalent | equal |
+    | diffeq2 | equivalent | equal |
+    | mkPktMerge | equivalent | equal |
+    | sha | unproven (ABC dsec UNDECIDED, 482 s) | equal |
+    | blob_merge | counts: latch -23 (same signature, cause not isolated) | equal |
+    | stereovision3 | counts: latch -21 (same signature, cause not isolated) | equal |
     | raygentop, boundtop, mkSMAdapter4B, or1200, stereovision0, stereovision1, mkDelayWorker32B, stereovision2, LU8PEEng, bgm, mcml, LU32PEEng | not run (controller, heavy) | predicted equal; mcml +6 `.latch` (D4) after 3B-2 |
 
     No "run wreduce first" warning on the seven. Commands for the rest, from the worktree root,
@@ -1012,9 +1012,9 @@ then the options considered.
     --arch $VTR_ROOT/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml --expect
     tests/hardmap/diff_expect.txt --expect tests/hardmap/vtr_expect.txt $V/$d.v; done`
     (each iteration is its own heavy-run; `spree` and `arm_core` have goldens but are outside the
-    19 and have no expectation lines: add `lower-gap` lines first). `ctest --preset sweep -R
+    19 and have no expectation lines: add expect lines first). `ctest --preset sweep -R
     hardmap_vtr_sweep` runs all 19 in one heavy job. Task 7 step 5 (the O' leg through VPR) waits
-    for 3D-5 `abc` and 3H, and for 3B-2.
+    for 3D-5 `abc` and 3H.
 
 ## Risks
 

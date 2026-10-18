@@ -23,7 +23,7 @@ the Phase 3 script up to `lower`) on a design and compares the BLIF with the Par
 
 Classes and the expect syntax are in the tool's docstring. In short, an expect line is
 `<path> <id> <reason>` with `id` one of `D<n>` (the spec's divergence table, section 10),
-`counts:<+N|-N> <unit>`, `lower-gap`, `unproven`, `no-golden`. A line that does not occur is stale and
+`counts:<+N|-N> <unit>`, `lower-gap` (now only `$pow`), `unproven`, `no-golden`. A line that does not occur is stale and
 fails: the lists shrink. A `run wreduce first` warning from `hardmap` fails the design and cannot be
 listed (3C-2a review M-2).
 
