@@ -214,6 +214,7 @@ class Result:
     differences: dict[str, str] = field(default_factory=dict)
     unproven: str = ""
     cells: int = 0  # word cells in in.il: what lower had to lower and the tools to compare
+    beyond_x: bool = False  # an equiv difference that lower-equiv's refinement check does not cover
 
 
 class Diff:
@@ -308,12 +309,30 @@ class Diff:
             return
         if done.returncode == EQUIV_DIFFERENT:
             result.differences["equiv"] = f"equiv-check: {lc.why(out)}"
+            result.beyond_x = result.family == "shift" and not self.refines_input(run_dir)
         elif done.returncode == EQUIV_UNPROVEN:
             result.unproven = lc.why(out) or "no verdict"
         elif done.returncode == EQUIV_HARD:
             raise lc.CrashError("equiv-check", f"hard (exit 5): {lc.why(out)}")
         else:
             raise lc.ToolError(f"equiv-check exit {done.returncode}: {lc.why(out)}")
+
+
+    def refines_input(self, run_dir: Path) -> bool:
+        """True when ``lo.blif`` refines ``in.il`` in Yosys with an x in the input a don't-care
+        (lower-equiv's check): then every output bit on which the two lowerings differ is one the
+        input leaves open, which is what an ``equiv`` entry in the expect list may excuse (review
+        3B-2 F1). False for any other difference, and for a proof that does not decide."""
+        import lower_equiv  # (lower_equiv imports this module)
+        from opt_equiv import top_module
+
+        gold = run_dir / "in.il"
+        top = top_module(gold.read_text(encoding="utf-8"), self.args.top)
+        gate = lower_equiv.make_gate(self.args.yosys, run_dir / "lo.blif", (gold, top), run_dir,
+                                     self.cap)
+        kind, _ = lower_equiv.refine(self.args.yosys, gold, gate, run_dir / "lo.blif", run_dir,
+                                     self.cap, self.args.top)
+        return kind == "ok"
 
 
 def word_cells(rtlil: str) -> int:
@@ -363,6 +382,10 @@ def verdict(name: str, key: str, res: Result, table: dict[tuple[str, str, str], 
             failed = True
         elif found is not None and reason is not None:
             lines.append(f"{tag}: {step}: differs as listed ({reason.reason})")
+    if res.beyond_x and "equiv" in found_by_step:
+        lines.append(f"{tag}: equiv: the difference is NOT confined to outputs the input leaves "
+                     "open (x): lower-equiv says lower does not refine the input")
+        failed = True
     if not found_by_step and not any(expected(key, res.family, s, table) for s in STEPS):
         lines.append(f"{tag}: ok ({res.cells} cells)")
     return lines, failed

@@ -297,18 +297,22 @@ odin3_status odin3_lower_run(odin3_pass_ctx *ctx, odin3_design *design,
         odin3_log(ODIN3_LOG_ERROR, "lower: no pass context or design");
         return ODIN3_ERR_INVALID_ARG;
     }
-    static const odin3_lower_opts k_none = {false, false, 0, NULL, false};
+    static const odin3_lower_opts k_none = {false, false, 0, NULL, false, ""};
     lw_ctx lw;
     lw_rules rules = {NULL, 0};
     odin3_status st = lw_ctx_init(&lw, ctx, design, opts != NULL ? opts : &k_none);
     st = st == ODIN3_OK ? rules_build(design, &rules) : st;
     st = st == ODIN3_OK ? prescan(&lw, &rules) : st;
+    if (st == ODIN3_OK) {
+        odin3_lower_snapshot_before(lw.opts, design);
+    }
     uint32_t end = odin3_design_module_end(design);
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
         odin3_module *module = odin3_module_get(design, (odin3_module_id){id});
         st = lower_module(&lw, &rules, module);
     }
     if (st == ODIN3_OK) {
+        odin3_lower_snapshot_after(lw.opts, design);
         report_run(&lw);
         st = lw_report_write(&lw);
     }

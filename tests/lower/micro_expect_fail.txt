@@ -1,0 +1,4 @@
+# Micros the 3B lower corpus sweeps (lower_run_micro, lower_sim_micro, lower_equiv_micro) expect to
+# fail, one path (relative to tests/micro/verilog) per line with its reason after the first
+# blank; a listed micro that passes is a stale entry and fails. Empty: every micro the front end
+# and proc accept (tests/proc/micro_expect_fail.txt lists the rest) runs through lower.

@@ -323,7 +323,7 @@ Every node, net and wire carries a provenance ID (pins inherit their node's) int
 6. `memory_infer` — `reg` arrays → `$mem` with port analysis; attribute overrides
 7. `read_arch` — `.o3lib` tech libraries (target-agnostic: gates first, then FPGA hard cells; `docs/specs/2026-10-08-1G-techlib-design.md`) → hard/gate set; VPR XML `<model>`s and the Altera device via importers into the same form
 8. `partial_map` (§7)
-9. `lower` — word → bit; hard/blackbox nodes untouched
+9. `lower` — word → bit; hard/blackbox nodes untouched. `lower` is Yosys 0.55's `simplemap`/`techmap.v` structures; asynchronous controls become synchronous (decision 19); the script follows it with `opt -fast; compact`
 10. `abc`: linked ABC (`adapters/abc`, an engine behind the C ABI) maps each module's soft logic to `$lut` cells, one ABC run per clock domain, with hard cells, black boxes, instances and other domains' flip-flops as cut points (hard-block inputs on `unconn`, x or a constant pass unchanged; soft logic reads them as 0); the script is `abc --script`, else `--abc-script`, else the project's `abc_script`, else `lib/abc/vtr.abc`; results are re-stitched with provenance from ABC's correspondence (3D spec)
 11. `write_*`
 
