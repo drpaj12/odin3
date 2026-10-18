@@ -1045,13 +1045,13 @@ then the options considered.
 
     | design | result | hard-block counts vs the golden |
     |---|---|---|
-    | ch_intrinsics | counts: latch -11 (Odin III `opt` keeps fewer flops: 265 after proc, 199 after `opt -full`, Parmys 210; not hardmap, not lower; equiv-check: not equivalent, unresolved) | equal |
+    | ch_intrinsics | counts: latch -11 (`fsm` divergence, #43: Parmys one-hot cur_state 15 flops vs 4; 265 after proc, 199 after `opt`, Parmys 210; equiv-check NOT equivalent only from the all-zero one-hot init) | equal |
     | diffeq1 | equivalent | equal |
     | diffeq2 | equivalent | equal |
     | mkPktMerge | equivalent | equal |
     | sha | unproven (ABC dsec UNDECIDED, 482 s) | equal |
-    | blob_merge | counts: latch -23 (same signature, cause not isolated) | equal |
-    | stereovision3 | counts: latch -21 (same signature, cause not isolated) | equal |
+    | blob_merge | counts: latch -23 (`fsm`, #43: state 28 one-hot flops vs 5) | equal |
+    | stereovision3 | counts: latch -21 (`fsm`, #43: reg_prog_state 27 vs 5 = 22 expected; 1 flop unexplained, open) | equal |
     | raygentop, boundtop, mkSMAdapter4B, or1200, stereovision0, stereovision1, mkDelayWorker32B, stereovision2, LU8PEEng, bgm, mcml, LU32PEEng | not run (controller, heavy) | predicted equal; mcml +6 `.latch` (D4) after 3B-2 |
 
     No "run wreduce first" warning on the seven. Commands for the rest, from the worktree root,
@@ -1066,6 +1066,21 @@ then the options considered.
     19 and have no expectation lines: add expect lines first). `ctest --preset sweep -R
     hardmap_vtr_sweep` runs all 19 in one heavy job. Task 7 step 5 (the O' leg through VPR) waits
     for 3D-5 `abc` and 3H.
+
+43. **`fsm` stays out of the Phase 3 script; the flip-flop count differs from Parmys on designs with
+    an FSM** (2026-10-18, branch `feat/3C-hardmap-ram`; agent default under Peter's Parmys-default
+    rule, he may override). Parmys's `synthesis.tcl` runs `procs -norom; fsm; opt; ...`; Yosys `fsm`
+    recodes a state register one-hot, so Parmys has S flops where Odin III keeps the Verilog's
+    ceil(log2 S) bits: ch_intrinsics 15 vs 4 (+11), blob_merge 28 vs 5 (+23), stereovision3 27 vs 5
+    (+22; 21 observed, one flop unexplained and still open). Not an Odin III bug (investigation
+    `inv-3C-ff-gap.md`; the `opt` flop drop 265 to 199 on ch_intrinsics is unread, constant,
+    duplicate and unused flops, all in the first `opt`). `tests/hardmap/vtr_expect.txt` lists the
+    three as `counts:` lines with this reason. Phase 4 owns FSM extraction (decision 7). WARNING:
+    none is printed today, because no pass recodes or detects state registers. Peter's rule would
+    ask for one in `--vtr-compat` once Phase 4 adds `fsm` (it should warn when it does not recode);
+    until then this decision is the record. Nothing is implemented here. Equivalence tooling note:
+    a one-hot recoded golden starts all-zero in ABC, so `equiv-check` reports NOT equivalent; the
+    comparison needs the reset state initialised to 1.
 
 ## Risks
 
