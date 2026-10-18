@@ -347,6 +347,49 @@ class RunTest(unittest.TestCase):
         self.assertTrue(seen and all(need for _, _, need in seen))
         self.assertTrue(seen[0][0].name == "yosys.blif" and seen[0][1].name == "odin.blif")
 
+    def test_the_cec_fallback_reads_x_nets_with_odin_as_the_gate(self) -> None:
+        """L3: Odin III's BLIF is the gate. An `unconn` read by the gate is unproven without running
+        the checker; one read only by Yosys's (the gold: an x there is a don't care) lets a passing
+        checker prove, and a failing checker is "no verdict", not a difference."""
+        def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if "equiv_make" in " ".join(argv):
+                raise subprocess.TimeoutExpired(list(argv), 60.0)
+            return fake_run(argv, cap, **kw)
+        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
+                "--netlist-compare", str(self.tree.bin / "netlist-compare"),
+                "--work", str(self.tree.root / "work"), str(self.tree.root / "micro" / "d.v")]
+        clean = ".model m\n.inputs c d\n.outputs q\n.latch d q re c 0\n.end\n"
+        with_x = clean.replace(".end", ".names unconn\n.names unconn q\n1 1\n.end")
+        real_capped = opt_equiv.capped
+        for odin_x, yosys_x, checker, want_code, want_text in (
+                (True, False, 0, 4, "gate reads x nets"),
+                (False, True, 0, 0, "[phase2]: ok"),
+                (False, True, 1, 4, "no verdict either way")):
+            checker_calls: list[list[str]] = []
+
+            def capped(what: str, cmd: Sequence[str], *args: Any, _rc: int = checker,
+                       _calls: list[list[str]] = checker_calls, **kw: Any) -> Any:
+                if what == "equiv-check":
+                    _calls.append(list(cmd))
+                    return subprocess.CompletedProcess(list(cmd), _rc, "", "")
+                return real_capped(what, cmd, *args, **kw)
+
+            def lower(_self: Any, run_dir: Path, _o: bool = odin_x, _y: bool = yosys_x
+                      ) -> list[Path]:
+                paths = []
+                for side, has_x in (("odin", _o), ("yosys", _y)):
+                    blif = run_dir / f"{side}.blif"
+                    blif.write_text(with_x if has_x else clean)
+                    paths.append(blif)
+                return paths
+            with self.subTest(odin_x=odin_x, yosys_x=yosys_x, checker=checker), mock.patch.object(
+                    memcap, "run", hang), mock.patch.object(od.Diff, "lower", lower), \
+                    mock.patch.object(opt_equiv, "capped", capped):
+                got, out, err = helpers.run_main(od.main, argv)
+            self.assertEqual(got, want_code, out + err)
+            self.assertIn(want_text, out)
+            self.assertEqual(len(checker_calls), 0 if odin_x else 1)
+
     def test_identity_failure_and_error(self) -> None:
         self.tree.set_spec(compare_rc=1)
         code, out, _ = self.tree.run()

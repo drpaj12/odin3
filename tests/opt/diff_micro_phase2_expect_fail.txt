@@ -9,7 +9,7 @@
 # diffeq_paj_convert, rs_decoder_1/2, mac1/2, blob_merge, cf_fft_256_8, sv_chip0) passed refine in that run only through the BLIF
 # cec fallback after a SAT timeout (the mtimes of the kept work directories show 60 s between the refine inputs and the lowering);
 # since opt-diff passes need_init=True the fallback is refused for their latches with no 0/1 init, so they are exit 4.
-# diffeq1/2/paj_convert were confirmed by single-file runs (2026-10-18, 6a8759eb), the rest are predicted from the mtimes.
+# diffeq1/2/paj_convert were confirmed by single-file runs (2026-10-18, 6a8759eb) and all ten by the opt_diff_micro run of 2026-10-18 (556b00df, clean).
 # Unproven only under wreduce/Phase 3 (iir_no_combinational, spree) stay in diff_micro_wreduce_expect_fail.txt.
 full/stereovision2.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven under the Phase 2 script or opt -full (yosys-refine SAT proof hit the 60 s limit; the BLIF cec fallback gives no verdict or is refused for latches with no 0/1 init); 63133 B source, 1715.297 s in the 2026-10-18 sweep
 full/oc54_cpu.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven under the Phase 2 script or opt -full (yosys-refine SAT proof hit the 60 s limit; the BLIF cec fallback gives no verdict or is refused for latches with no 0/1 init); 65857 B source, 750.647 s in the 2026-10-18 sweep

@@ -658,6 +658,26 @@ class OptModesTest(SweepTestCase):
         self.assertIn("[full]: identity: DIFFERS: last script", out)
         self.assertNotIn("counters", out)
 
+    def test_opt_equiv_untested_and_unproven_listings_absorb_only_exit_4(self) -> None:
+        """2H review H2/M1: the exit-4 rule holds for opt-equiv sweeps too. A needle `unproven`
+        (no colon) also matches the text of a failed proof; with exit 1 it must not be "fails as
+        listed"."""
+        fake = _exe(self.bin / "fake_opt_tool.py", FAKE_OPT_TOOL)
+        self.write("m/real.v", "OT1 WORD\n")  # exit 1, text holds `unproven`
+        self.write("m/limit.v", "OT4 WORD\n")  # exit 4, the same text
+        tools = dict(elab_sweep.OPT_TOOLS, **{"opt-equiv": fake})
+        for listing in ("real.v [unproven] x\nlimit.v [unproven] x\n",
+                        "real.v [message] untested for now (size limit): x\n"
+                        "limit.v [message] untested for now (size limit): x\n"):
+            expect = self.expect(listing)
+            with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+                code, out, _ = self.run_tool("--opt-equiv", "--yosys", "Y", "--expect-fail",
+                                             str(expect), str(self.dir / "m"))
+            self.assertEqual(code, 1, out)
+            self.assertIn("FAIL  real.v", out)
+            self.assertIn("needs exit 4", out)
+            self.assertIn("xfail limit.v", out)
+
     def test_h2_an_unproven_refine_next_to_another_difference_is_unexpected(self) -> None:
         """2H review H2: a file listed as untested (reason) or unproven (needle) is expected only on
         opt-diff exit 4. Exit 1 (an unlisted histogram difference printed next to the unproven

@@ -332,7 +332,8 @@ def first_error(text: str) -> str:
     return " | ".join(lines[-TAIL_LINES:])
 
 
-OPT_FINDING_MARKS = ("DIFFERS", "stale entry", "differs as listed", "unproven")
+OPT_FINDING_MARKS = ("DIFFERS", "stale entry", "differs as listed", "unproven", "not a refinement",
+                     "inconclusive")
 
 
 def opt_findings(text: str) -> str:
@@ -594,7 +595,7 @@ def run_file(cfg: Config, item: Item) -> Outcome:
 def verdict(item: Item, outcome: Outcome, expect: dict[str, Expect], xl: bool,
             strict_unproven: bool = False) -> tuple[str, str]:
     """(class, line): class is ok, xfail, FAIL, XPASS, crash or skip. ``strict_unproven``
-    (opt-diff): an entry that ``needs_unproven`` is expected only on exit 4."""
+    (opt-diff and opt-equiv): an entry that ``needs_unproven`` is expected only on exit 4."""
     head = f"{item.rel} ({item.size} B, {outcome.secs:.3f} s)"
     entry = expect.get(item.rel)
     listed = entry is not None and not entry.xl  # an xl entry is a run class, not an expectation
@@ -653,7 +654,7 @@ class Sweep:
 
     def report(self, item: Item, outcome: Outcome) -> None:
         cls, line = verdict(item, outcome, self.expect, self.xl,
-                            self.cfg.opt_tool == "opt-diff")
+                            self.cfg.opt_tool in ("opt-diff", "opt-equiv"))
         print(line, flush=True)
         if outcome.kind == "ok" and self.cfg.mode() == "bench" and outcome.output:
             print(f"bench: {outcome.output}", flush=True)

@@ -2,13 +2,13 @@
 # tests/opt/diff_micro_expect_fail.txt (tests/proc/micro_expect_fail.txt and tests/opt/micro_expect_fail.txt as well).
 # Format: `<path> [needle] <reason>`.
 #
-# 2026-10-17 rerun on c7896ac (opt_diff_micro_wreduce): these 20 fail only on opt-diff's refine step, which is
-# unproven (yosys-refine SAT 60 s limit, BLIF cec no verdict) under the wreduce and/or phase3 scripts; every other differing
-# step is listed in diff_expect.txt (and opt-diff exits 4, not 1, only because of that). Per PHASE2 #29 they are
-# untested for now (size limit), never a pass. full/iir_no_combinational.v is in this list although opt_equiv_micro_phase3
-# proves it: opt-diff's own refine step is unproven there, and the equivalence is what #29 asks for.
-# These are the Phase 3 sweep's facts: under the Phase 2 script and opt -full (opt_diff_micro) full/iir_no_combinational.v refines without a limit under Phase 2/opt -full (2026-10-18 run), so it is not in
-# diff_micro_phase2_expect_fail.txt.
+# 2026-10-17 rerun on c7896ac (opt_diff_micro_wreduce): 20 micros failed only on opt-diff's refine step, which is unproven
+# (yosys-refine SAT 60 s limit, BLIF cec no verdict) under the wreduce and/or phase3 scripts; every other differing step is
+# listed in diff_expect.txt and opt-diff exits 4, not 1, only because of that. Per PHASE2 #29 they are untested for now (size limit),
+# never a pass. full/iir_no_combinational.v is listed although opt_equiv_micro_phase3 does not prove it either (it is in
+# equiv_phase3_expect_fail.txt: wreduce base case); its opt-diff refine is unproven under wreduce/Phase 3 and proves under Phase 2/opt -full.
+# 2026-10-18: large/spree.v and full/cf_fft_256_8.v left the list (their wreduce/Phase 3 refine proves), seven micros joined (below):
+# 18 + 7 = 25 entries. The 2026-10-18 opt_diff_micro_wreduce run (p2-final-1018-0849) is clean with this list except the two removals.
 full/diffeq1.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; the BLIF cec fallback gives no verdict or is refused for latches with no 0/1 init); 1409 B source, 865.377 s in the 2026-10-17 sweep
 syntax/diffeq_paj_convert.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; the BLIF cec fallback gives no verdict or is refused for latches with no 0/1 init); 1409 B source, 860.150 s in the 2026-10-17 sweep
 full/iir_no_combinational.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; the BLIF cec fallback gives no verdict or is refused for latches with no 0/1 init); 4627 B source, 132.474 s in the 2026-10-17 sweep
@@ -29,8 +29,8 @@ large/mkDelayWorker32B.v [refine: DIFFERS: unproven] untested for now (size limi
 syntax/cf_fft_1024_16.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven (yosys-refine SAT proof hit the 60 s limit; the BLIF cec fallback gives no verdict or is refused for latches with no 0/1 init); 236934 B source, 1422.708 s in the 2026-10-17 sweep
 #
 # Added 2026-10-18 (opt-diff need_init=True, 6a8759eb): these passed the 2026-10-17 run only through the BLIF cec fallback after a SAT
-# timeout; the fallback is now refused for latches with no 0/1 init. diffeq2 confirmed by a single-file run; the others are predicted from
-# their Phase 2/opt -full timeouts (Phase 3 holds the Phase 2 calls). Confirm at the next opt_diff_micro_wreduce run.
+# timeout; the fallback is now refused for latches with no 0/1 init. all seven are confirmed by the opt_diff_micro_wreduce run of
+# 2026-10-18 (clean with them listed); diffeq2 also by a single-file run.
 full/diffeq2.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven under the wreduce/Phase 3 scripts (yosys-refine SAT proof hit the 60 s limit; the BLIF cec fallback gives no verdict or is refused for latches with no 0/1 init); 2131 B source
 syntax/rs_decoder_1.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven under the wreduce/Phase 3 scripts (yosys-refine SAT proof hit the 60 s limit; the BLIF cec fallback gives no verdict or is refused for latches with no 0/1 init); 30616 B source
 syntax/rs_decoder_2.v [refine: DIFFERS: unproven] untested for now (size limit): opt-diff refine step unproven under the wreduce/Phase 3 scripts (yosys-refine SAT proof hit the 60 s limit; the BLIF cec fallback gives no verdict or is refused for latches with no 0/1 init); 41297 B source
