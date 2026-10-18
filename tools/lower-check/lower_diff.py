@@ -330,7 +330,11 @@ class Diff:
         top = top_module(gold.read_text(encoding="utf-8"), self.args.top)
         gate = lower_equiv.make_gate(self.args.yosys, run_dir / "lo.blif", (gold, top), run_dir,
                                      self.cap)
-        kind, _ = lower_equiv.refine(self.args.yosys, gold, gate, run_dir / "lo.blif", run_dir,
+        gold, gate, mismatch = lower_equiv.prepare_boxes(self.args.yosys, gold, gate, top,
+                                                         run_dir, self.cap)
+        if mismatch:
+            return False
+        kind, _ = lower_equiv.refine(self.args.yosys, (gold, gate), run_dir / "lo.blif", run_dir,
                                      self.cap, self.args.top)
         return kind == "ok"
 

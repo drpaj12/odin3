@@ -991,7 +991,17 @@ then the options considered.
     agent defaults of spec 3B section 18, logged here as plan Step 7 asks (Peter may override,
     values as the spec gives them): the node caps (spec 11), `--neg-edge keep`, `--async error`,
     `--report`, the bit-node names of an unnamed cell, the copied `keep` attribute, the per-cell
-    transaction and the duplicated connect helper.
+    transaction and the duplicated connect helper. (k) Soundness fix round (2026-10-18, review of
+    `fix/3B-heavy-triage`, C1/H1/H2/M1; agent defaults): every hard-block instance is declared at
+    the widths it connects before `expose -evert` (the techlib's `dynports` declaration is 1 bit
+    wide for `data`/`out`, so only bit 0 was compared), and a shared instance with another type
+    or port widths is a difference; a failed proof is "differs" only with a trace from the
+    initial state (`miter -equiv -ignore_gold_x; sat -seq 20 -set-init-zero -enable_undef`, after
+    `clk2fflogic`), else "unproven" unless the BLIF cec proves it; a passed proof is "ok" only
+    when that check over every wire both sides name holds for 4 steps of the proof's own clock
+    model (the base case `equiv_induct` lacks). Init convention: `init` honoured, other
+    flip-flops 0 (VTR power-up, the cec's rule). The same holes exist in `opt-equiv` (C1, H2);
+    not fixed there yet (`3B-heavy-triage.md`, "Soundness fix round").
 
 ## Risks
 

@@ -21,6 +21,13 @@ Per design (the FILEs together; with ``--each``, every FILE is its own design):
    selects and out-of-range ``$mem`` reads are judged correctly, and a flipped edge, a wrong
    clock net or a wrong function is a counterexample.
 
+Every hard-block instance is declared at the widths it connects, so ``expose -evert`` compares
+every bit of its inputs and shares every bit of its outputs; a hard block that gold and gate both
+hold under one name with another type or other port widths is a difference (``prepare_boxes``).
+The induction has no base case, so a passed proof is ``ok`` only when a bounded check from the
+initial state (``init`` values honoured, other flip-flops 0) finds no difference on any wire both
+sides name; a failed proof is a difference only when the bounded check finds a trace on an
+output, else ``unproven`` unless the BLIF cec proves the pair (``refine``, ``base_case``).
 A refinement that the SAT flow cannot decide inside 60 s is ``unproven`` (exit 4), never ``ok``.
 A difference fails unless ``--expect F`` lists it: lines ``<path> refine <reason>`` (``#``
 comments), ``path`` relative to ``--root`` (else the file name); a listed difference that does not
@@ -40,13 +47,16 @@ never removed.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+import clock_sig
 import lower_common as lc
 import lower_diff as ld
 import memcap
@@ -372,20 +382,6 @@ def pair_registers(gate: str, gold: str) -> str:
     return out
 
 
-def unpaired_registers(gate: str) -> int:
-    """The storage cells of a gate whose output has no public name: a net called ``$...`` that no
-    module-level ``connect`` gives one (``pair_registers`` adds those). The induction of the SAT
-    flow cannot relate such a register to the gold's, so its failed proof says little."""
-    count = 0
-    for module in MODULE_LINE.findall(gate):
-        start, end = module_span(gate, module)
-        body = gate[start:end]
-        aliased = set(re.split(r"[\s{}]+", " ".join(
-            line for line in body.splitlines() if line.startswith("  connect "))))
-        count += sum(1 for _, q in storage_cells(body) if q.startswith("$") and q not in aliased)
-    return count
-
-
 def make_gate(yosys: str, after: Path, gold: tuple[Path, str], work: Path, cap: int) -> Path:
     """The gate: Yosys's reading of the BLIF as RTLIL (``gate.il``), the module ``top`` marked and
     its ports in the gold's shape. ``gold`` = (gold.il, the top module's RTLIL name)."""
@@ -437,10 +433,247 @@ def cec_blifs(gold: Path, gate: Path, cap: int, work: Path) -> tuple[str, str]:
     return opt_equiv.CEC_UNPROVEN, f"BLIF cec: no verdict (exit {done.returncode}): {text}"
 
 
-def refine(yosys: str, gold: Path, gate: Path, after: Path, work: Path, cap: int,
+# ---- Hard blocks at their real widths (soundness review C1, M1) ------------------------------
+#
+# ``expose -evert`` (``opt_equiv.EVERT_BLACKBOXES``) gives each new port the width of the black
+# box's *declaration* and cuts the instance's connection to it (Yosys 0.55 expose.cc:
+# ``add_new_wire(.., p->width)``, ``sig.extend_u0(w->width)``). A tech library declares
+# ``single_port_ram`` with ``dynports`` and width-1 ``data``/``out``, so only bit 0 of the data was
+# compared and ``out[N-1:1]`` became undriven, an x, a don't care in the gold: a wrong data or
+# read bit above 0 passed. Every hard-block instance of the flattened top therefore gets a type of
+# its own, ``<type>$o3w<k>``, declared with exactly the ports the instance connects at the widths it
+# connects them (one declaration per distinct (type, widths), the same on both sides), and the
+# instances that gold and gate share by name must agree on type, port widths and the parameters
+# both carry (the BLIF keeps no parameter: a ``DATA_WIDTH`` change shows as a width change).
+BOX_TAG = "$o3w"
+USER_CELL = re.compile(r"^\s+cell \\", re.M)
+
+
+@dataclass(frozen=True)
+class BoxUse:
+    """One hard-block instance: its type, the width of each port it connects, its parameters."""
+
+    kind: str
+    widths: tuple[tuple[str, int], ...]
+    params: tuple[tuple[str, str], ...]
+
+
+def rtlil_id(name: str) -> str:
+    """An RTLIL identifier from a ``write_json`` name (which drops the ``\\`` of a public one)."""
+    return name if name.startswith(("$", "\\")) else "\\" + name
+
+
+def json_value(value: object) -> str:
+    """A ``write_json`` parameter as a comparable text: a bit string becomes its number."""
+    text = str(value).rstrip(" ")
+    return str(int(text, 2)) if re.fullmatch(r"[01]+", text) else text
+
+
+def flat_probe(yosys: str, il: Path, tag: str, work: Path, cap: int) -> tuple[Path, dict[str, Any]]:
+    """(``<tag>.flat.il``, its ``write_json`` design): ``il`` flattened (after ``proc`` when it
+    holds processes), as the refinement script does first anyway."""
+    flat, dump = work / f"{tag}.flat.il", work / f"{tag}.flat.json"
+    procs = "proc; " if opt_equiv.has_processes(il.read_text(encoding="utf-8")) else ""
+    run_yosys(yosys, f"read_rtlil {il}; {procs}flatten; write_rtlil {flat}; write_json {dump}",
+              work, cap)
+    design: dict[str, Any] = json.loads(dump.read_text(encoding="utf-8"))
+    return flat, design
+
+
+def box_uses(design: dict[str, Any], top: str, boxes: set[str]) -> dict[str, BoxUse]:
+    """instance name -> ``BoxUse`` of the hard blocks of the flattened ``top``. ``ToolError`` for a
+    user cell whose type has no module: ``expose -evert`` would drop it and leave its outputs
+    undriven (an x, a don't care), so it would never be compared."""
+    modules = {rtlil_id(name) for name in design["modules"]}
+    top_name = top[1:] if top.startswith("\\") else top
+    for name, module in design["modules"].items():  # (a keep_hierarchy module stays unflattened)
+        if name != top_name and any(rtlil_id(c["type"]) in boxes
+                                     for c in module.get("cells", {}).values()):
+            raise lc.ToolError(f"module {rtlil_id(name)} holds a hard block after flatten")
+    cells = design["modules"][top_name]["cells"]
+    uses: dict[str, BoxUse] = {}
+    for name, cell in cells.items():
+        kind = rtlil_id(cell["type"])
+        if kind.startswith("$"):
+            continue
+        if kind not in modules:
+            raise lc.ToolError(f"cell {rtlil_id(name)} has the undeclared type {kind}")
+        if kind in boxes:
+            uses[rtlil_id(name)] = BoxUse(
+                kind, tuple(sorted((rtlil_id(port), len(bits))
+                                   for port, bits in cell["connections"].items())),
+                tuple(sorted((rtlil_id(key), json_value(value))
+                             for key, value in cell.get("parameters", {}).items())))
+    return uses
+
+
+def box_mismatch(gold: dict[str, BoxUse], gate: dict[str, BoxUse]) -> str:
+    """The first hard block that gold and gate both hold under one name but with another type,
+    other port widths or another value of a parameter both carry; '' when there is none."""
+    for name in sorted(gold.keys() & gate.keys()):
+        mine, theirs = gold[name], gate[name]
+        params = dict(theirs.params)
+        if mine.kind != theirs.kind or mine.widths != theirs.widths or any(
+                key in params and params[key] != value for key, value in mine.params):
+            return (f"hard block {name}: gold {mine.kind[1:]} {dict(mine.widths)} "
+                    f"{dict(mine.params)}, gate {theirs.kind[1:]} {dict(theirs.widths)} "
+                    f"{dict(theirs.params)}")
+    return ""
+
+
+def box_declaration(module: str, name: str, widths: dict[str, int]) -> str:
+    """The black-box ``module`` text renamed ``name`` with exactly the ports in ``widths``, at
+    those widths. ``ToolError`` when the instance connects a port the declaration lacks."""
+    lines, number = [], 0
+    declared = set(port_shapes(module))
+    if not set(widths) <= declared:
+        raise lc.ToolError(f"a hard block connects {sorted(set(widths) - declared)}, which its "
+                           "declaration lacks")
+    for line in module.splitlines():
+        found = PORT_DECL.match(line)
+        if line.startswith("module "):
+            line = f"module {name}"
+        elif found is not None:
+            port = found.group("name")
+            if port not in widths:
+                continue
+            number += 1
+            size = f"width {widths[port]} " if widths[port] > 1 else ""
+            line = f"  wire {size}{found.group('dir')} {number} {port}"
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def retype_boxes(text: str, top: str, uses: dict[str, BoxUse], names: dict[tuple[str, tuple[
+        tuple[str, int], ...]], str]) -> str:
+    """``text`` (a flattened RTLIL design) with each hard-block instance of ``top`` given its
+    specialised type from ``names`` ((type, widths) -> new type)."""
+    start, end = module_span(text, top)
+    body = []
+    for line in text[start:end].splitlines(keepends=True):
+        words = line.split()
+        if len(words) == 3 and words[0] == "cell" and words[2] in uses:
+            use = uses[words[2]]
+            line = line.replace(f"cell {use.kind} ", f"cell {names[(use.kind, use.widths)]} ", 1)
+        body.append(line)
+    return text[:start] + "".join(body) + text[end:]
+
+
+def prepare_boxes(yosys: str, gold: Path, gate: Path, top: str, work: Path, cap: int
+                  ) -> tuple[Path, Path, str]:
+    """(gold, gate, difference) with every hard block declared at its instance's widths (C1). The
+    two paths are unchanged when neither side has a user cell; ``difference`` is non-empty when a
+    shared hard block differs in type, widths or a parameter (M1)."""
+    texts = [gold.read_text(encoding="utf-8"), gate.read_text(encoding="utf-8")]
+    if not any(USER_CELL.search(text) for text in texts):
+        return gold, gate, ""
+    modules = blackbox_modules(texts[0])
+    probes = [flat_probe(yosys, il, f"box.{tag}", work, cap)
+              for il, tag in ((gold, "gold"), (gate, "gate"))]
+    uses = [box_uses(design, top, set(modules)) for _, design in probes]
+    names: dict[tuple[str, tuple[tuple[str, int], ...]], str] = {}
+    decls = ""
+    for use in sorted({(u.kind, u.widths) for side in uses for u in side.values()}):
+        names[use] = f"{use[0]}{BOX_TAG}{len(names)}"
+        decls += "attribute \\blackbox 1\n" + box_declaration(modules[use[0]], names[use],
+                                                              dict(use[1]))
+    out = []
+    for (flat, _), side, tag in zip(probes, uses, ("gold", "gate"), strict=True):
+        path = work / f"box.{tag}.il"
+        path.write_text(retype_boxes(flat.read_text(encoding="utf-8"), top, side, names) + decls,
+                        encoding="utf-8")
+        out.append(path)
+    return out[0], out[1], box_mismatch(uses[0], uses[1])
+
+
+# ---- Bounded check from the initial state (soundness review H1, H2) ---------------------------
+#
+# ``equiv_simple``/``equiv_induct`` prove that gold and gate never diverge once their named wires
+# agree; neither starts from the initial state (equiv_induct's base case only asks that a
+# consistent trace exists). So (H1) a failed proof is "differs" only when a bounded model check
+# from the initial state finds a concrete trace on which an output differs, else "unproven"; and
+# (H2) a passed proof stands only when the same check, run over every public wire both sides
+# name (the wires ``equiv_make`` pairs, made outputs by ``expose -shared``), finds no
+# difference in the first BASE_STEPS steps: that is the base case the induction lacks.
+#
+# The model: both sides flattened, hard blocks cut as in the proof, ``memory``, then the clock
+# model, ``miter -equiv -ignore_gold_x`` (an x in the gold is a don't care) and ``sat -seq N
+# -enable_undef -set-def-inputs``. The initial state honours every ``init`` attribute; a
+# flip-flop without one starts at 0 on both sides (``-set-init-zero``: VTR's power-up value and
+# the BLIF cec's convention for init 2/3), so a trace is a real run of the circuit VTR builds.
+#
+# Output traces (H1) always use ``clk2fflogic``: every clock a sampled input, exact for any
+# number of clocks and asynchronous resets; one step is half a cycle, so BMC_STEPS = 20 covers
+# 10 edges of each clock, which finds the shallow bugs of a lowering (a swapped bit, a wrong
+# init, a wrong mux). The base case (H2) uses the proof's own steps: ``async2sync`` (one step per
+# cycle) when ``clock_sig.same_clocks`` holds, as the proof did, else ``clk2fflogic``.
+# ``equiv_simple -seq 4`` proves a cell over at most 5 time frames (equiv_simple.cc: ``step``
+# from 4 down to 0) from a free state, the other ``$equiv`` cells cut points, and ``equiv_induct``
+# steps from any state where they all hold; so a step t >= 4 is covered by the proof once all named
+# wires agree in steps 0..3, and those four are the check: BASE_STEPS = 4.
+# (mkPktMerge: 18 s at 4 steps, 48 s at 6.) Either check stops after BMC_TIMEOUT_SECONDS; a
+# timeout or any Yosys error is "no answer" (never a trace, never a proof). No ``-verify``: its
+# ``log_error`` exits before Yosys flushes stdout, so the model and even the "model found: FAIL"
+# line can be lost; without it Yosys exits 0 and the verdict is the final message.
+BASE_STEPS = 4
+BMC_STEPS = 20
+BMC_TIMEOUT_SECONDS = 60.0
+TRACE = "trace"
+NO_TRACE = "none"
+NO_ANSWER = "unknown"
+SAT_FAIL = re.compile(r"SAT proof finished - model found: FAIL!")
+SAT_PASS = re.compile(r"SAT proof finished - no model found: SUCCESS!")
+
+
+def bounded_script(gold: str, gate: str, procs: bool, steps: int, shared: bool,
+                   one_clock: bool = False) -> str:
+    """The Yosys script of the bounded check of two files ``rename_modules`` made gold/gate;
+    ``shared``: every public wire both sides name is compared too (the base case);
+    ``one_clock``: ``async2sync`` steps (one per cycle) instead of ``clk2fflogic``'s."""
+    clocks = "async2sync" if one_clock else "clk2fflogic"
+    script = [f"read_rtlil {gold}", f"read_rtlil {gate}", *(["proc"] if procs else []),
+              "flatten", opt_equiv.EVERT_BLACKBOXES, "memory", clocks, "opt_clean",
+              *(["expose -shared gold gate"] if shared else []),
+              "miter -equiv -flatten -make_assert -ignore_gold_x gold gate miter",
+              "hierarchy -top miter",
+              f"sat -seq {steps} -set-init-zero -enable_undef -set-def-inputs "
+              "-prove-asserts -show-inputs miter"]
+    return "; ".join(script)
+
+
+def bounded_check(yosys: str, sides: tuple[Path, Path], work: Path, cap: int,
+                  run: tuple[str | None, int, bool]) -> tuple[str, str]:
+    """(TRACE | NO_TRACE | NO_ANSWER, Yosys's last lines) of the bounded check of ``sides`` (gold,
+    gate). ``run`` = (top, steps, shared); the base case (``shared``) steps like the proof."""
+    top, steps, shared = run
+    texts = [path.read_text(encoding="utf-8") for path in sides]
+    names = []
+    for text, side in zip(texts, ("gold", "gate"), strict=True):
+        path = work / f"bmc.{side}.il"
+        path.write_text(opt_equiv.rename_modules(text, side, opt_equiv.top_module(text, top)),
+                        encoding="utf-8")
+        names.append(str(path))
+    procs = any(opt_equiv.has_processes(text) for text in texts)
+    one_clock = shared and clock_sig.same_clocks(texts[0], texts[1])
+    script = bounded_script(names[0], names[1], procs, steps, shared, one_clock)
+    try:
+        done = lc.capped("yosys-bmc", [lc.exe(yosys), "-p", script], cap, cwd=work,
+                         timeout=BMC_TIMEOUT_SECONDS)
+    except lc.CrashError as exc:
+        return NO_ANSWER, str(exc)
+    log = (done.stdout or "") + (done.stderr or "")
+    if done.returncode == 0 and SAT_FAIL.search(log):
+        return TRACE, lc.why(log)
+    if done.returncode == 0 and SAT_PASS.search(log):
+        return NO_TRACE, ""
+    return NO_ANSWER, f"bounded check exit {done.returncode}: {lc.why(log)}"
+
+
+def refine(yosys: str, sides: tuple[Path, Path], after: Path, work: Path, cap: int,
            top: str | None) -> tuple[str, str]:
-    """("ok" | "differs" | "unproven", detail) for gate against gold. A crash or a tool error
-    propagates (never a verdict)."""
+    """("ok" | "differs" | "unproven", detail) for gate against gold (``sides``). A crash or a
+    tool error of the proof propagates (never a verdict)."""
+    gold, gate = sides
     checker = opt_equiv.Checker(yosys, work, cap, True, True, top)
     try:
         ok, last = checker.refines(gold, gate, "lower")
@@ -453,30 +686,36 @@ def refine(yosys: str, gold: Path, gate: Path, after: Path, work: Path, cap: int
             return "unproven", str(exc)
         raise
     if ok:
-        return "ok", ""
-    # The SAT flow failed. Its induction cannot pair the registers of a memory (the gold's words
-    # and the gate's flip-flops share no names), nor those of a design whose BLIF lost the names
-    # of its registers (the gate's are `$n123`) or that has several clocks, so a refinement it
-    # cannot prove is judged again by the BLIF cec of opt-equiv (both sides lowered to bit level,
-    # equiv-check: ABC's `dsec` pairs the registers). A cec "proved" is a proof; "differs"
-    # confirms; "unproven" (the checker's limits: several clocks, a SAT timeout) is "unproven"
-    # too when the design holds state, because a failed induction proves no difference there. Only
-    # a design without state is judged by the SAT flow alone: its proof is exact.
-    verdict, text = cec_gold_and_blif(yosys, gold, after, work, cap)
+        return base_case(yosys, sides, work, cap, top)
+    found, text = bounded_check(yosys, sides, work, cap, (top, BMC_STEPS, False))
+    if found == TRACE:
+        return "differs", f"{last} | bounded check from the initial state: {text}"
+    # No trace inside BMC_STEPS. The induction cannot pair the registers of a memory, nor those
+    # whose BLIF names were lost, nor across clk2fflogic's shadow registers, so a failed proof is
+    # no evidence; the BLIF cec (ABC's dsec pairs registers itself) may still prove the pair. Its
+    # "not equivalent" ties the x of the gold to 0 and is not a trace either: "unproven".
+    verdict, cec = cec_gold_and_blif(yosys, gold, after, work, cap)
     if verdict == opt_equiv.CEC_PROVED:
         return "ok", "proved by the BLIF cec (the SAT flow could not pair the registers)"
-    if verdict == opt_equiv.CEC_DIFFERS:
-        return "differs", f"{last} | {text}"
-    if not induction_is_weak(gold.read_text(encoding="utf-8"), gate.read_text(encoding="utf-8")):
-        return "differs", last  # every register is paired: the failed proof is the verdict
-    return "unproven", f"the SAT flow failed ({last.strip()[-120:]}) and {text}"
+    return "unproven", (f"the SAT flow failed ({last.strip()[-120:]}), the bounded check found no "
+                        f"trace in {BMC_STEPS} steps ({found}: {text[-200:]}) and {cec}")
 
 
-def induction_is_weak(gold: str, gate: str) -> bool:
-    """True when the SAT flow's failed proof is no evidence of a difference: the gold has a
-    ``$mem`` (the words and the gate's flip-flops share no names), or a register of the gate has
-    no public name to pair it by (``unpaired_registers``)."""
-    return "$mem" in lc.cell_types(gold) or unpaired_registers(gate) > 0
+def base_case(yosys: str, sides: tuple[Path, Path], work: Path, cap: int, top: str | None
+              ) -> tuple[str, str]:
+    """The verdict after a passed proof: "ok" when the base case holds (H2), else "differs" on
+    an output trace from the initial state, else "unproven"."""
+    found, text = bounded_check(yosys, sides, work, cap, (top, BASE_STEPS, True))
+    if found == NO_TRACE:
+        return "ok", ""
+    trace, detail = bounded_check(yosys, sides, work, cap, (top, BMC_STEPS, False))
+    if trace == TRACE:
+        return "differs", f"the initial states differ: bounded check: {detail}"
+    outputs = (f"no output trace in {BMC_STEPS} steps" if trace == NO_TRACE else
+               f"the output check gave no answer ({detail[-120:]})")
+    return "unproven", (f"the induction passed but its base case from the initial state "
+                        f"{'failed' if found == TRACE else 'gave no answer'} on the named wires "
+                        f"({text[-200:]}) and {outputs}")
 
 
 def check_pair(yosys: str, before: Path, after: Path, work: Path, cap: int,
@@ -489,7 +728,10 @@ def check_pair(yosys: str, before: Path, after: Path, work: Path, cap: int,
     gold = make_gold(yosys, before, (parmys, exact), work, cap)
     gold_top = opt_equiv.top_module(gold.read_text(encoding="utf-8"), top)
     gate = make_gate(yosys, after, (gold, gold_top), work, cap)
-    kind, detail = refine(yosys, gold, gate, after, work, cap, top)
+    boxed_gold, boxed_gate, mismatch = prepare_boxes(yosys, gold, gate, gold_top, work, cap)
+    if mismatch:
+        return Verdict("differs", mismatch, cells)
+    kind, detail = refine(yosys, (boxed_gold, boxed_gate), after, work, cap, top)
     return Verdict(kind, detail, cells)
 
 
