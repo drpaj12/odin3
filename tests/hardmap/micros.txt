@@ -1,0 +1,30 @@
+# The arithmetic and memory micros hardmap-diff runs against the Parmys goldens (3C spec 9.3).
+# One path per line, relative to tests/micro/verilog. Run by the CTest hardmap_diff_micro.
+# Not here: common/nrnw.v (Parmys itself rejects it, tests/exit/micro_expect.txt), and the
+# full/* copies of the VTR designs (they are the first rows of the 19, tests/hardmap/vtr_expect.txt).
+common/adder.v
+common/sub.v
+common/mult.v
+common/mult_const.v
+common/mem.v
+common/rom.v
+common/spram.v
+common/dpram.v
+common/bram.v
+common/1r.v
+common/2r.v
+common/1r2w.v
+common/2r1w.v
+common/2r2w.v
+common/nr.v
+micro/adder_hard_block.v
+micro/multiply_hard_block.v
+micro/hard_adder_cin_propagation.v
+operators/eightbit_arithmetic_power.v
+operators/twobits_arithmetic_div.v
+operators/twobits_arithmetic_minus.v
+operators/twobits_arithmetic_mod.v
+operators/twobits_arithmetic_multiply.v
+operators/twobits_arithmetic_plus.v
+operators/twobits_arithmetic_power.v
+operators/twobits_arithmetic_uminus.v

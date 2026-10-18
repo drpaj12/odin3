@@ -815,6 +815,20 @@ if(BUILD_TESTING)
     target_compile_definitions(test_hardmap_mem PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 3C Task 4 (spec 9.3): the arithmetic and memory micros through the Phase 3 script up to
+    # `lower`, against the Parmys goldens (tools/hardmap-check/hardmap-diff). Exit 77 (skipped)
+    # when the golden tree is absent (CI). Its Python tests run in python_tools.
+    file(STRINGS ${PROJECT_SOURCE_DIR}/tests/hardmap/micros.txt _hm_micro_names REGEX "^[^#]")
+    set(_hm_micros "")
+    foreach(_hm_micro IN LISTS _hm_micro_names)
+        list(APPEND _hm_micros ${PROJECT_SOURCE_DIR}/tests/micro/verilog/${_hm_micro})
+    endforeach()
+    add_test(NAME hardmap_diff_micro
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/hardmap-check/hardmap-diff
+                --odin3 $<TARGET_FILE:odin3>
+                --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/diff_expect.txt ${_hm_micros})
+    set_tests_properties(hardmap_diff_micro PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                         TIMEOUT 1800)
     # 3A Task 2: flatten's pre-flight graph; every test_flatten_* links the fixture helper.
     odin3_add_unit_test(test_flatten_graph)
     target_sources(test_flatten_graph PRIVATE tests/unit/flatten_fixture.c tests/unit/proc_build.c)

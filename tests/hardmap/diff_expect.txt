@@ -1,0 +1,35 @@
+# What hardmap-diff may report for a design other than identical or equivalent (3C spec 9.3, 10).
+# Syntax: `<path> <id> <reason>`; <path> is relative to tests/micro/verilog (a micro) or
+# benchmarks/verilog (a VTR design). <id> is one of
+#   D<n>           the design differs from Parmys by the divergence of spec 10 (equiv-check: not
+#                  equivalent), with the same hard-block counts;
+#   counts:<+N|-N> <unit>   the unit's count differs from Parmys by exactly N (the netlists are
+#                  then not compared); the reason names the divergence;
+#   lower-gap      Odin III stops in `lower`, which has no rule for a cell yet (3B-2);
+#   unproven       equiv-check cannot decide the design (tests/exit/vtr_unproven.txt).
+# A reason is required on every line. An entry that no longer occurs is stale and fails: the list
+# shrinks. A `run wreduce first` warning is never listable.
+
+# D15 (new, 2026-10-17): Parmys's Yosys (opt_mem) deletes a memory that has no write port and no
+# INIT; its read data is x and the golden netlist has no RAM and undriven outputs. Odin III's opt
+# has no opt_mem, so hardmap maps the read-only memory to RAM slices with we on gnd (R-10 p_1_0).
+# Not a hardmap rule: the fix is an opt_mem rule in 3G. Checked by hand: the golden BLIFs have no
+# subckt at all and Odin III's slices carry data and we on gnd, so no defined value differs.
+common/1r.v counts:+8 single_port_ram D15: read-only memory without INIT, Parmys deletes it (opt_mem), Odin III maps 8 slices
+common/2r.v counts:+8 dual_port_ram D15: read-only memory without INIT, Parmys deletes it (opt_mem), Odin III maps 8 slices
+
+# lower-gap: `lower` (3B-1) has no rule yet for these cell types, so no netlist view is reachable.
+# hardmap's own output on each is covered by the unit tests and by `write_rtlil` runs. The 3B-2
+# PR removes these lines; the equivalence of multiply_hard_block is owed until then (3C-1 report).
+common/rom.v lower-gap `$mem` and `$dffe` left soft by hardmap (R-10, read enable not constant 1); 3B-2 lowers them
+common/bram.v lower-gap `$mem` and `$dffe` left soft by hardmap (read enable not constant 1); 3B-2 lowers them
+common/nr.v lower-gap `$mem` and three `$dffe` left soft by hardmap (read enable not constant 1, R-10); 3B-2 lowers them
+micro/multiply_hard_block.v lower-gap two 2x2 `$mul` left soft (M-2, D6); 3B-2 lowers `$mul`
+operators/eightbit_arithmetic_power.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it
+operators/twobits_arithmetic_div.v lower-gap `$div` and `$sdff` (not hardmap's); 3B-2 lowers them
+operators/twobits_arithmetic_minus.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it
+operators/twobits_arithmetic_mod.v lower-gap `$mod` and `$sdff` (not hardmap's); 3B-2 lowers them
+operators/twobits_arithmetic_multiply.v lower-gap 2x2 `$mul` left soft (M-2, D6) and `$sdff`; 3B-2 lowers them
+operators/twobits_arithmetic_plus.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it
+operators/twobits_arithmetic_power.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it
+operators/twobits_arithmetic_uminus.v lower-gap `$neg` and `$sdff` (S-1, not hardmap's); 3B-2 lowers them
