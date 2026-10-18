@@ -98,7 +98,8 @@ typedef struct rdp {
     bool transparent;
     bool en_var; /* R_SYNC: RD_EN is the input wire ren<pn> */
     uint32_t
-        addr_wr; /* 0: the port's own address wire ra<pn>; slot: write port slot-1's wa<slot-1> */
+        addr_wr;  /* 0: the port's own address wire ra<pn>; slot: write port slot-1's wa<slot-1> */
+    bool addr_q0; /* RD_ADDR is the Q (q0) of port 0's data flip-flop (needs WIDTH == ABITS) */
 } rdp;
 
 typedef struct wrp {
@@ -318,6 +319,8 @@ static void connect_rd_addr(odin3_strbuf *out, const memcase *mc) {
         const rdp *rd_port = &mc->rd[pn - 1];
         if (rd_port->mode == R_AFF) {
             put(out, " \\rq%" PRIu32, pn - 1);
+        } else if (rd_port->addr_q0) {
+            put(out, " \\q0");
         } else if (rd_port->addr_wr > 0) {
             put(out, " \\wa%" PRIu32, rd_port->addr_wr - 1);
         } else {
@@ -619,6 +622,23 @@ static void test_r8_addr_merge_with_write(void) {
     build_mem(mc, &res);
     expect_soft(&res, W_ASYNC);
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$dff"));
+    pb_free(&res);
+}
+
+/* Review M-1: port 1 reads at the registered read data of port 0 (a table of tables). The address
+ * flip-flop is the data flip-flop of port 0, whose D is the `$mem`'s own async read data, so
+ * bypassing it would leave the RAM address undriven: the port stays asynchronous, the design is
+ * untouched. */
+static void test_r8_addr_merge_own_read_data(void) {
+    memcase mc = base((shape){3, 3, 2, 0});
+    mc.rd[0].mode = R_DFF;
+    mc.rd[1].mode = R_ASYNC;
+    mc.rd[1].addr_q0 = true;
+    pb_result res;
+    build_mem(mc, &res);
+    expect_soft(&res, W_ASYNC);
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$dff"));
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mem"));
     pb_free(&res);
 }
 
@@ -1258,61 +1278,103 @@ static void snap_take(const pb_result *res, snapshot *snap) {
 
 typedef struct oom_case {
     memcase mc;
-    bool flip_flops; /* R-8 deletes flip-flops, which go before the `$mem` (H-9) */
+    bool flip_flops; /* R-8 merges flip-flops, which are released after the `$mem` goes (H-9) */
     bool soft;       /* the run leaves the `$mem` */
+    bool reach;      /* the sweep must fail an allocation of the flip-flop release */
 } oom_case;
 
-/* Fails the fail_at-th allocation of the run; true when the run reported it. On a failure the
- * `$mem` is live (H-9) and the IR checks; unless a flip-flop was already gone (the run then said
- * "discard it") nothing else changed either. */
-static bool oom_try(const oom_case *oc, long fail_at) {
+typedef enum oom_hit {
+    OOM_MISS, /* the run did not reach the failing allocation */
+    OOM_FAIL, /* the run reported NO_MEMORY; the IR is byte-identical */
+    OOM_LEFT  /* the run finished; the allocation failed on the delete of a merged flip-flop */
+} oom_hit;
+
+typedef struct oom_tally {
+    long failed;
+    long left;
+} oom_tally;
+
+/* Flip-flops with no pin connected: what a merged flip-flop leaves when its delete fails. */
+static uint32_t dead_flip_flops(const pb_result *res) {
+    uint32_t dead = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(res->module); id++) {
+        odin3_node_id node = {id};
+        const odin3_celltype_def *def =
+            odin3_node_live(res->module, node)
+                ? odin3_celltype_get(res->design, odin3_node_type(res->module, node))
+                : NULL;
+        if (def == NULL || (strcmp(def->name, "$dff") != 0 && strcmp(def->name, "$dffe") != 0)) {
+            continue;
+        }
+        odin3_pinslice pins = odin3_node_pins(res->module, node);
+        bool open = true;
+        for (uint32_t pin = 0; pin < pins.count; pin++) {
+            open = open &&
+                   !odin3_net_valid(odin3_pin_net(res->module, (odin3_pin_id){pins.first.v + pin}));
+        }
+        dead += open ? 1U : 0U;
+    }
+    return dead;
+}
+
+/* NO_MEMORY: the `$mem` is live and the IR is byte-identical, whatever R-8 had merged. */
+static void expect_untouched(const pb_result *res, const snapshot *before) {
+    snapshot now;
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res->module, "$mem"));
+    TEST_ASSERT_NULL(strstr(log_text, "discard it"));
+    snap_take(res, &now);
+    TEST_ASSERT_EQUAL_STRING(before->text.data, now.text.data);
+    TEST_ASSERT_EQUAL_UINT32(before->nodes, now.nodes);
+    TEST_ASSERT_EQUAL_UINT32(before->nets, now.nets);
+    odin3_strbuf_free(&now.text);
+}
+
+/* Fails the fail_at-th allocation of the run. Whatever fails, H-9 holds: on NO_MEMORY the IR is
+ * unchanged; on success the `$mem` is gone, and only a merged flip-flop whose delete ran out of
+ * memory may remain (it has no connections left). The IR checks either way. */
+static oom_hit oom_try(const oom_case *oc, long fail_at) {
     pb_result res;
     snapshot before;
-    snapshot now;
+    oom_hit hit = OOM_MISS;
     log_text[0] = '\0';
     build_mem(oc->mc, &res);
     snap_take(&res, &before);
     odin3_util_set_alloc_fail_after(fail_at);
     odin3_status st = odin3_hardmap_run(&res.ctx, res.design, NULL);
     odin3_util_set_alloc_fail_after(-1);
-    bool injected = st != ODIN3_OK;
-    if (injected) {
+    if (st != ODIN3_OK) {
+        hit = OOM_FAIL;
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
-        TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mem"));
-        if (strstr(log_text, "discard it") == NULL) {
-            snap_take(&res, &now);
-            TEST_ASSERT_EQUAL_STRING(before.text.data, now.text.data);
-            TEST_ASSERT_EQUAL_UINT32(before.nodes, now.nodes);
-            TEST_ASSERT_EQUAL_UINT32(before.nets, now.nets);
-            odin3_strbuf_free(&now.text);
-        } else {
-            TEST_ASSERT_TRUE(oc->flip_flops);
-        }
+        expect_untouched(&res, &before);
     } else {
         TEST_ASSERT_EQUAL_UINT32(oc->soft ? 1U : 0U, hm_count(res.module, "$mem"));
+        hit = dead_flip_flops(&res) > 0 ? OOM_LEFT : OOM_MISS;
+        TEST_ASSERT_TRUE(oc->flip_flops || hit == OOM_MISS);
     }
     odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(res.design, opts));
     odin3_strbuf_free(&before.text);
     pb_free(&res);
-    return injected;
+    return hit;
 }
 
-static long oom_sweep(const oom_case *oc) {
-    long failed = 0;
+static oom_tally oom_sweep(const oom_case *oc) {
+    oom_tally tally = {0, 0};
     long quiet = 0;
     for (long fail_at = 0; fail_at < OOM_LIMIT && quiet < OOM_QUIET; fail_at++) {
-        bool injected = oom_try(oc, fail_at);
-        failed += injected ? 1 : 0;
-        quiet = injected ? 0 : quiet + 1;
+        oom_hit hit = oom_try(oc, fail_at);
+        tally.failed += hit == OOM_FAIL ? 1 : 0;
+        tally.left += hit == OOM_LEFT ? 1 : 0;
+        quiet = hit == OOM_MISS ? quiet + 1 : 0;
     }
     TEST_ASSERT_TRUE(quiet == OOM_QUIET);
-    return failed;
+    return tally;
 }
 
-static void test_h9_oom(void) {
-    oom_case cases[5];
-    memset(cases, 0, sizeof cases);
+enum { OOM_CASES = 6 };
+
+static void oom_cases(oom_case *cases) {
+    memset(cases, 0, OOM_CASES * sizeof *cases);
     cases[0].mc = base((shape){4, 2, 1, 1}); /* data merge, DP, the pad */
     cases[0].mc.rd[0].mode = R_DFF;
     cases[0].flip_flops = true;
@@ -1328,9 +1390,30 @@ static void test_h9_oom(void) {
     cases[3].flip_flops = true;
     cases[4].mc = base((shape){4, 2, 1, 1}); /* soft: nothing to allocate in the design */
     cases[4].soft = true;
-    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
-        long failed = oom_sweep(&cases[i]);
-        TEST_ASSERT_TRUE(i == 4 || failed > 1);
+    /* the `$mem` has 14 pins and the flip-flop 3: its delete is the one that grows the record
+     * of dead pins past 16, so the sweep reaches an allocation of the R-8 release */
+    cases[5].mc = base((shape){4, 1, 1, 1});
+    cases[5].mc.rd[0].mode = R_DFF;
+    cases[5].flip_flops = true;
+    cases[5].reach = true;
+}
+
+/* One case: it fails some allocations (the soft one need not), and the R-8 release is reached where
+ * the case says so. */
+static void oom_expect(const oom_case *oc) {
+    oom_tally tally = oom_sweep(oc);
+    const bool failed = tally.failed > 1;
+    const bool reached = tally.left > 0;
+    TEST_ASSERT_TRUE(failed || oc->soft);
+    TEST_ASSERT_TRUE(reached == (oc->reach || (oc->flip_flops && reached)));
+    TEST_ASSERT_TRUE(oc->flip_flops || !reached);
+}
+
+static void test_h9_oom(void) {
+    oom_case cases[OOM_CASES];
+    oom_cases(cases);
+    for (size_t i = 0; i < OOM_CASES; i++) {
+        oom_expect(&cases[i]);
     }
 }
 
@@ -1340,6 +1423,7 @@ int main(void) {
     RUN_TEST(test_r8_data_merge_dffe);
     RUN_TEST(test_r8_addr_merge_no_write);
     RUN_TEST(test_r8_addr_merge_with_write);
+    RUN_TEST(test_r8_addr_merge_own_read_data);
     RUN_TEST(test_r8_mixed_clocks_no_merge);
     RUN_TEST(test_r9_async_stays_soft);
     RUN_TEST(test_r9_multi_clock);

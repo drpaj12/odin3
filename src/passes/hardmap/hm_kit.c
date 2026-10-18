@@ -407,31 +407,36 @@ static void log_discard(const hm_ctx *hc) {
               str_of(hc, odin3_module_name(hc->module)));
 }
 
-/* The nodes hm_doom listed (the flip-flops R-8 merges). They go before the source, so that a
- * failure leaves the source cell intact (H-9); *done counts the ones already gone. */
-static odin3_status delete_doomed(hm_ctx *hc, size_t *done) {
-    odin3_status st = ODIN3_OK;
-    for (size_t i = 0; st == ODIN3_OK && i < hc->doomed.len; i++) {
-        const odin3_node_id *node = odin3_vec_cat(&hc->doomed, i);
-        st = odin3_node_live(hc->module, *node) ? odin3_node_delete(hc->module, *node) : st;
-        *done += st == ODIN3_OK ? 1U : 0U;
+/* The nodes hm_doom listed (the flip-flops R-8 merges). They are dead once the source is gone:
+ * their pins leave their nets (that never allocates), which makes the new RAM the only driver of
+ * the merged nets. The delete itself records the pin nets and can run out of memory; that is
+ * harmless here (a dead flip-flop with no connections stays for `opt`, H-2), so it is the last
+ * step, after the one delete that must not fail midway (H-9). */
+static void release_doomed(hm_ctx *hc) {
+    for (size_t i = 0; i < hc->doomed.len; i++) {
+        odin3_node_id node = *(const odin3_node_id *)odin3_vec_cat(&hc->doomed, i);
+        if (!odin3_node_live(hc->module, node)) {
+            continue;
+        }
+        odin3_pinslice pins = odin3_node_pins(hc->module, node);
+        for (uint32_t pin = 0; pin < pins.count; pin++) {
+            (void)odin3_pin_disconnect(hc->module, (odin3_pin_id){pins.first.v + pin});
+        }
+        (void)odin3_node_delete(hc->module, node);
     }
-    return st;
 }
 
 odin3_status hm_commit(hm_ctx *hc, const hm_tie *ties, size_t n_ties) {
     odin3_vec_clear(&hc->merged);
-    size_t gone = 0;
     odin3_status st = odin3_vec_reserve(&hc->merged, n_ties);
-    st = st == ODIN3_OK ? delete_doomed(hc, &gone) : st;
+    /* The source goes first and alone: its delete is the only step that can fail and leave
+     * the design as it was (H-9); everything after it cannot fail for lack of memory. */
     st = st == ODIN3_OK ? odin3_node_delete(hc->module, hc->src) : st;
     if (st != ODIN3_OK) {
         hm_abort(hc);
-        if (gone > 0) {
-            log_discard(hc);
-        }
         return st;
     }
+    release_doomed(hc);
     st = finish_commit(hc, ties, n_ties);
     if (st != ODIN3_OK) {
         log_discard(hc);

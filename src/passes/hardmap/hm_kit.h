@@ -67,7 +67,7 @@ typedef struct hm_ctx {
     odin3_vec made_nodes;            /* odin3_node_id: undone by hm_abort */
     odin3_vec made_nets;             /* odin3_net_id: the fresh nets, likewise */
     odin3_vec merged;                /* odin3_net_pair: the merges of a commit */
-    odin3_vec doomed;                /* odin3_node_id: deleted at the commit, before the source */
+    odin3_vec doomed;                /* odin3_node_id: released at the commit, after the source */
     odin3_strbuf text;               /* scratch for names and attribute values */
 } hm_ctx;
 
@@ -111,8 +111,9 @@ odin3_status hm_begin_cell(hm_ctx *hc, odin3_node_id src);
  * undone by hm_abort. */
 odin3_status hm_fresh_nets(hm_ctx *hc, uint32_t n, odin3_net_id *out);
 
-/* Adds node (live, in the current module) to the cells hm_commit deletes before the source. The
- * only allocation of that deletion, so a failure here leaves the source intact (H-9). */
+/* Adds node (live, in the current module) to the cells hm_commit releases after the source: it
+ * disconnects every pin, then deletes the node if memory allows (else the dead node stays for
+ * `opt`). The only allocation of that step is here, so a failure leaves the design intact (H-9). */
 odin3_status hm_doom(hm_ctx *hc, odin3_node_id node);
 
 /*

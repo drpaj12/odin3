@@ -187,11 +187,19 @@ static odin3_status merge_data(const hm_ctx *hc, mem_model *mm, mem_rport *rp) {
 
 typedef struct addr_scan {
     const hm_ctx *hc;
+    const mem_model *mm;
     ff_view first;
     bool have;
     odin3_net_id d[MEM_MAX_ABITS];
     odin3_vec found; /* odin3_node_id */
 } addr_scan;
+
+/* True when the net is driven by this `$mem`: an address FF fed by the memory's own read data
+ * would read an async net that has no driver once the `$mem` is gone (review M-1). */
+static bool fed_by_mem(const addr_scan *as, odin3_net_id net) {
+    odin3_pin_id drv = odin3_net_driver(as->hc->module, net);
+    return odin3_pin_valid(drv) && odin3_pin_node(as->hc->module, drv).v == as->mm->node.v;
+}
 
 /* Result as scan_bit'snk. */
 static odin3_status scan_addr_bit(addr_scan *as, odin3_net_id net, uint32_t index) {
@@ -208,7 +216,8 @@ static odin3_status scan_addr_bit(addr_scan *as, odin3_net_id net, uint32_t inde
     as->have = true;
     as->d[index] =
         mem_pin_net(as->hc, view.node, (mem_pin){view.d_port, odin3_pin_bit(as->hc->module, drv)});
-    if (!odin3_net_valid(as->d[index])) {
+    if (!odin3_net_valid(as->d[index]) || fed_by_mem(as, as->d[index]) ||
+        has_node(&as->mm->dead, view.node)) {
         return ODIN3_ERR_INVALID_ARG;
     }
     return add_node(&as->found, view.node);
@@ -252,7 +261,7 @@ static bool only_feeds_merged(const hm_ctx *hc, const mem_model *mm, odin3_node_
 /* R-8 address merge of one port; the flip-flops found are appended to cands. */
 static odin3_status merge_addr(const hm_ctx *hc, const mem_model *mm, mem_rport *rp,
                                odin3_vec *cands) {
-    addr_scan as = {.hc = hc};
+    addr_scan as = {.hc = hc, .mm = mm};
     odin3_vec_init(&as.found, sizeof(odin3_node_id));
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < mm->abits; i++) {
