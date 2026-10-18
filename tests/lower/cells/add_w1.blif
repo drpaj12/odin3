@@ -1,0 +1,10 @@
+.model m
+.inputs a b
+.outputs y
+.names gnd
+.subckt $_XOR_ A=a B=b Y=$n5
+.subckt $_AND_ A=a B=b Y=$n6
+.subckt $_AND_ A=$n5 B=gnd Y=$n7
+.subckt $_OR_ A=$n6 B=$n7 Y=$n8
+.subckt $_XOR_ A=$n5 B=gnd Y=y
+.end

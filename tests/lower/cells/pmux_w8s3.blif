@@ -1,0 +1,56 @@
+.model m
+.inputs a[0] a[1] a[2] a[3] a[4] a[5] a[6] a[7] b0[0] b0[1] b0[2] b0[3] b0[4] b0[5] b0[6] b0[7] \
+  b1[0] b1[1] b1[2] b1[3] b1[4] b1[5] b1[6] b1[7] b2[0] b2[1] b2[2] b2[3] b2[4] b2[5] b2[6] b2[7] \
+  s[0] s[1] s[2]
+.outputs y[0] y[1] y[2] y[3] y[4] y[5] y[6] y[7]
+.subckt $_OR_ A=s[2] B=s[1] Y=$n72
+.subckt $_OR_ A=$n72 B=s[0] Y=$n73
+.subckt $_AND_ A=b2[0] B=s[2] Y=$n74
+.subckt $_AND_ A=b1[0] B=s[1] Y=$n75
+.subckt $_AND_ A=b0[0] B=s[0] Y=$n76
+.subckt $_OR_ A=$n74 B=$n75 Y=$n77
+.subckt $_OR_ A=$n77 B=$n76 Y=$n78
+.subckt $_MUX_ A=a[0] B=$n78 S=$n73 Y=y[0]
+.subckt $_AND_ A=b2[1] B=s[2] Y=$n80
+.subckt $_AND_ A=b1[1] B=s[1] Y=$n81
+.subckt $_AND_ A=b0[1] B=s[0] Y=$n82
+.subckt $_OR_ A=$n80 B=$n81 Y=$n83
+.subckt $_OR_ A=$n83 B=$n82 Y=$n84
+.subckt $_MUX_ A=a[1] B=$n84 S=$n73 Y=y[1]
+.subckt $_AND_ A=b2[2] B=s[2] Y=$n86
+.subckt $_AND_ A=b1[2] B=s[1] Y=$n87
+.subckt $_AND_ A=b0[2] B=s[0] Y=$n88
+.subckt $_OR_ A=$n86 B=$n87 Y=$n89
+.subckt $_OR_ A=$n89 B=$n88 Y=$n90
+.subckt $_MUX_ A=a[2] B=$n90 S=$n73 Y=y[2]
+.subckt $_AND_ A=b2[3] B=s[2] Y=$n92
+.subckt $_AND_ A=b1[3] B=s[1] Y=$n93
+.subckt $_AND_ A=b0[3] B=s[0] Y=$n94
+.subckt $_OR_ A=$n92 B=$n93 Y=$n95
+.subckt $_OR_ A=$n95 B=$n94 Y=$n96
+.subckt $_MUX_ A=a[3] B=$n96 S=$n73 Y=y[3]
+.subckt $_AND_ A=b2[4] B=s[2] Y=$n98
+.subckt $_AND_ A=b1[4] B=s[1] Y=$n99
+.subckt $_AND_ A=b0[4] B=s[0] Y=$n100
+.subckt $_OR_ A=$n98 B=$n99 Y=$n101
+.subckt $_OR_ A=$n101 B=$n100 Y=$n102
+.subckt $_MUX_ A=a[4] B=$n102 S=$n73 Y=y[4]
+.subckt $_AND_ A=b2[5] B=s[2] Y=$n104
+.subckt $_AND_ A=b1[5] B=s[1] Y=$n105
+.subckt $_AND_ A=b0[5] B=s[0] Y=$n106
+.subckt $_OR_ A=$n104 B=$n105 Y=$n107
+.subckt $_OR_ A=$n107 B=$n106 Y=$n108
+.subckt $_MUX_ A=a[5] B=$n108 S=$n73 Y=y[5]
+.subckt $_AND_ A=b2[6] B=s[2] Y=$n110
+.subckt $_AND_ A=b1[6] B=s[1] Y=$n111
+.subckt $_AND_ A=b0[6] B=s[0] Y=$n112
+.subckt $_OR_ A=$n110 B=$n111 Y=$n113
+.subckt $_OR_ A=$n113 B=$n112 Y=$n114
+.subckt $_MUX_ A=a[6] B=$n114 S=$n73 Y=y[6]
+.subckt $_AND_ A=b2[7] B=s[2] Y=$n116
+.subckt $_AND_ A=b1[7] B=s[1] Y=$n117
+.subckt $_AND_ A=b0[7] B=s[0] Y=$n118
+.subckt $_OR_ A=$n116 B=$n117 Y=$n119
+.subckt $_OR_ A=$n119 B=$n118 Y=$n120
+.subckt $_MUX_ A=a[7] B=$n120 S=$n73 Y=y[7]
+.end

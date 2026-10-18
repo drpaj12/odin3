@@ -1,0 +1,43 @@
+.model m
+.inputs a[0] a[1] a[2] b[0] b[1] b[2]
+.outputs y[0] y[1] y[2]
+.names gnd
+.subckt $_AND_ A=a[0] B=b[0] Y=$n11
+.subckt $_AND_ A=a[1] B=b[0] Y=$n12
+.subckt $_AND_ A=a[2] B=b[0] Y=$n13
+.subckt $_AND_ A=a[0] B=b[1] Y=$n14
+.subckt $_AND_ A=a[1] B=b[1] Y=$n15
+.subckt $_AND_ A=a[0] B=b[2] Y=$n16
+.subckt $_XOR_ A=$n11 B=gnd Y=$n17
+.subckt $_AND_ A=$n11 B=gnd Y=$n18
+.subckt $_AND_ A=gnd B=$n17 Y=$n19
+.subckt $_XOR_ A=$n17 B=gnd Y=$n20
+.subckt $_OR_ A=$n18 B=$n19 Y=$n21
+.subckt $_XOR_ A=$n12 B=$n14 Y=$n22
+.subckt $_AND_ A=$n12 B=$n14 Y=$n23
+.subckt $_AND_ A=gnd B=$n22 Y=$n24
+.subckt $_XOR_ A=$n22 B=gnd Y=$n25
+.subckt $_OR_ A=$n23 B=$n24 Y=$n26
+.subckt $_XOR_ A=$n13 B=$n15 Y=$n27
+.subckt $_AND_ A=$n13 B=$n15 Y=$n28
+.subckt $_AND_ A=$n16 B=$n27 Y=$n29
+.subckt $_XOR_ A=$n27 B=$n16 Y=$n30
+.subckt $_OR_ A=$n28 B=$n29 Y=$n31
+.subckt $_XOR_ A=$n20 B=gnd Y=$n32
+.subckt $_AND_ A=$n20 B=gnd Y=$n33
+.subckt $_XOR_ A=$n25 B=$n21 Y=$n34
+.subckt $_AND_ A=$n25 B=$n21 Y=$n35
+.subckt $_XOR_ A=$n30 B=$n26 Y=$n36
+.subckt $_AND_ A=$n30 B=$n26 Y=$n37
+.subckt $_AND_ A=$n32 B=gnd Y=$n38
+.subckt $_OR_ A=$n33 B=$n38 Y=$n39
+.subckt $_AND_ A=$n34 B=$n39 Y=$n40
+.subckt $_OR_ A=$n35 B=$n40 Y=$n41
+.subckt $_AND_ A=$n34 B=$n32 Y=$n42
+.subckt $_AND_ A=$n36 B=$n41 Y=$n43
+.subckt $_OR_ A=$n37 B=$n43 Y=$n44
+.subckt $_AND_ A=$n36 B=$n42 Y=$n45
+.subckt $_XOR_ A=$n32 B=gnd Y=y[0]
+.subckt $_XOR_ A=$n34 B=$n39 Y=y[1]
+.subckt $_XOR_ A=$n36 B=$n41 Y=y[2]
+.end

@@ -3,7 +3,7 @@
 # to benchmarks/verilog. A line that does not occur fails as stale: the list shrinks.
 #
 # D1: signed operands of `$add`/`$sub` are sign-extended into the chain; Parmys pads with `unconn`
-# (spec A-2, A-6; Peter's ruling 2026-10-14). Same adder count; Odin III is RTL-correct (PHASE3 #41).
+# (spec A-2, A-6; Peter's ruling 2026-10-14). Same adder count; Odin III is RTL-correct (PHASE3 #42).
 # `unproven`: equiv-check cannot decide the design (tests/exit/vtr_unproven.txt); the hard-block
 # counts, which hardmap-diff always checks, are then the evidence.
 
@@ -32,7 +32,7 @@ bgm.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); p
 mcml.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
 LU32PEEng.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
 
-# After 3B-2 (predicted from spec 2 and 10; confirm with the commands in PHASE3 #41):
+# After 3B-2 (predicted from spec 2 and 10; confirm with the commands in PHASE3 #42):
 stereovision0.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
 stereovision1.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
 stereovision2.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count

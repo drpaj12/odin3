@@ -31,6 +31,7 @@ typedef struct odin3_lower_opts {
     bool async_is_error;     /* --async error */
     uint64_t max_mem_bits;   /* 0 = ODIN3_LOWER_MAX_MEM_BITS */
     const char *report_path; /* NULL = none */
+    bool async_enable_first; /* hidden, test-only: the enable over a reset/load (Parmys's shape) */
 } odin3_lower_opts;
 
 /*

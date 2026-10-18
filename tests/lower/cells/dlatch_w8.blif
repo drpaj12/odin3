@@ -1,0 +1,20 @@
+.model m
+.inputs en d[0] d[1] d[2] d[3] d[4] d[5] d[6] d[7]
+.outputs q[0] q[1] q[2] q[3] q[4] q[5] q[6] q[7]
+.latch d[0] q[0] ah en 3
+.cname q.dlatch_p0
+.latch d[1] q[1] ah en 3
+.cname q.dlatch_p1
+.latch d[2] q[2] ah en 3
+.cname q.dlatch_p2
+.latch d[3] q[3] ah en 3
+.cname q.dlatch_p3
+.latch d[4] q[4] ah en 3
+.cname q.dlatch_p4
+.latch d[5] q[5] ah en 3
+.cname q.dlatch_p5
+.latch d[6] q[6] ah en 3
+.cname q.dlatch_p6
+.latch d[7] q[7] ah en 3
+.cname q.dlatch_p7
+.end

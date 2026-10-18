@@ -1,0 +1,30 @@
+.model m
+.inputs clk we wa wd ra
+.outputs rd
+.names gnd
+.names vcc
+1
+.names unconn
+.subckt $_NOT_ A=$n28 Y=$n20
+.cname $c11.not0
+.subckt $_AND_ A=$n20 B=$n30 Y=$n22
+.cname $c11.and1
+.subckt $_MUX_ A=$n21 B=$n29 S=$n22 Y=$n23
+.cname $c11.mux2
+.latch $n23 $n21 re clk 3
+.cname $c11.dff_p3
+.subckt $_AND_ A=$n28 B=$n30 Y=$n25
+.cname $c11.and4
+.subckt $_MUX_ A=$n24 B=$n29 S=$n25 Y=$n26
+.cname $c11.mux5
+.latch $n26 $n24 re clk 3
+.cname $c11.dff_p6
+.subckt $_MUX_ A=$n21 B=$n24 S=ra Y=rd
+.cname $c11.mux7
+.subckt $_MUX_ A=unconn B=wa S=we Y=$n28
+.cname $c12.mux0
+.subckt $_MUX_ A=unconn B=wd S=we Y=$n29
+.cname $c13.mux0
+.subckt $_MUX_ A=gnd B=vcc S=we Y=$n30
+.cname $c14.mux0
+.end

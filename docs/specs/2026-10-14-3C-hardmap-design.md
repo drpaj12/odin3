@@ -460,8 +460,8 @@ Each soft decision except S-1 logs one WARN line per cell. S-1 is the default an
 
 ## 11. Amendments this spec needs (after approval)
 
-Status 2026-10-17 (3C-3): all five are applied (PHASE3 #4/#5 notes, #41, `docs/PASSES.md`). Also
-amended by the implementation, each logged in PHASE3 #39 and #41: M-3 and A-7 (a `$mul` with
+Status 2026-10-17 (3C-3): all five are applied (PHASE3 #4/#5 notes, #42, `docs/PASSES.md`). Also
+amended by the implementation, each logged in PHASE3 #39 and #42: M-3 and A-7 (a `$mul` with
 `Y_WIDTH` above `A_WIDTH + B_WIDTH`, an `$add`/`$sub` with `Y_WIDTH` above `max + 1`, stay soft with
 a warning: `wreduce` caps Y, and the alias merges would allocate after the delete, H-9), M-6 (an
 explicit `multiply` is treated like the `$mul`), R-8 (D12), R-9..R-12 texts (the warnings are

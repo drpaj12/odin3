@@ -6,6 +6,7 @@
  * view, names and wire membership of Y, provenance, the mixed-sign warning and simulator-equal
  * before and after (exhaustive for total input width up to 12, 4,096 seeded random vectors above).
  */
+#include "ir/celltype.h"
 #include "ir/check.h"
 #include "ir/module.h"
 #include "lower_fixture.h"
@@ -1176,31 +1177,43 @@ static void test_a_word_cell_left_live_is_a_check_error(void) {
     lf_end(&fix);
 }
 
+/* A word type of a plugin: registered in the test, it has no rule in the table. */
+static void add_plugin_word_type(lf *fix) {
+    static odin3_port_def ports[2] = {{"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+                                      {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false}};
+    static odin3_celltype_def def = {
+        "$plugin_word", ODIN3_GRAN_WORD, 0, ports, 2, NULL, 0, NULL, NULL, NULL, NULL};
+    odin3_celltype_id tid = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(fix->design, &def, &tid));
+}
+
 /* L1: a cell without a rule is known before anything changes: nothing is lowered, all are listed.
- */
+ * The rule-less type is a test-registered plugin type (every built-in word type has a rule or is
+ * listed with its own error text). */
 static void test_ruleless_cells_are_reported_before_any_cell_is_lowered(void) {
     lf fix;
     lf_begin(&fix);
+    add_plugin_word_type(&fix);
     odin3_value params[5];
     lf_binary spec = {false, false, 2, 2, 2};
     lf_binary_params(&spec, params);
     odin3_module *mod = lf_module(&fix, "m");
     lf_cell_spec first = {"$and", params, 5, "first", {0}};
-    lf_cell_spec add1 = {"$add", params, 5, "sum1", {0}};
-    lf_cell_spec add2 = {"$add", params, 5, "sum2", {0}};
+    lf_cell_spec add1 = {"$plugin_word", NULL, 0, "sum1", {0}};
+    lf_cell_spec add2 = {"$plugin_word", NULL, 0, "sum2", {0}};
     (void)lf_cell_prefixed(&fix, mod, &first, "a_");
     (void)lf_cell_prefixed(&fix, mod, &add1, "b_");
     (void)lf_cell_prefixed(&fix, mod, &add2, "c_");
     odin3_strbuf before;
     odin3_strbuf_init(&before);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_rtlil(&fix, &before));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_signature(&fix, &before));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run_lower(&fix));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "no lowering rule for cell type '$add' ('sum1')"));
+    TEST_ASSERT_NOT_NULL(
+        strstr(log_text, "no lowering rule for cell type '$plugin_word' ('sum1')"));
     TEST_ASSERT_NOT_NULL(strstr(log_text, "('sum2')"));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "not implemented yet"));
     odin3_strbuf after;
     odin3_strbuf_init(&after);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_rtlil(&fix, &after));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_signature(&fix, &after));
     TEST_ASSERT_EQUAL_STRING(before.data, after.data);
     odin3_strbuf_free(&before);
     odin3_strbuf_free(&after);

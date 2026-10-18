@@ -1,0 +1,10 @@
+.model m
+.inputs clk en ld ad d
+.outputs q
+.subckt $_MUX_ A=q B=d S=en Y=$n12
+.cname q.mux0
+.subckt $_MUX_ A=$n12 B=ad S=ld Y=$n13
+.cname q.mux1
+.latch $n13 q re clk 3
+.cname q.dff_p2
+.end

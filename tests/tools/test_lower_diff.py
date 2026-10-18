@@ -168,6 +168,31 @@ class PureTest(unittest.TestCase):
         self.assertTrue(ld.odin_script(plan, Path("w")).startswith(
             "read_techlib lib/x.o3lib; read_verilog --nolatches a.v; hierarchy -auto; proc;"))
 
+    def test_the_storage_families_write_no_rtlil_of_the_lowered_netlist(self) -> None:
+        plan = ld.Plan(("a.v",), None, ("proc", "opt"), "", None, False)
+        self.assertEqual(
+            ld.odin_script(plan, Path("w")),
+            "read_verilog --nolatches a.v; hierarchy -auto; proc; opt; write_rtlil w/in.il; lower; "
+            "write_blif w/lo.blif")
+
+    def test_yosys_storage_subckts_become_latches_and_blif_histograms_count_them(self) -> None:
+        yosys = (".model m\n.inputs c d\n.outputs q r\n.subckt $_DFF_P_ C=c D=d Q=q\n"
+                 ".subckt $_DFF_N_ D=d Q=r C=c\n.subckt $_MUX_ A=a B=b S=s Y=y\n.end\n")
+        odin = ".model m\n.inputs c d\n.outputs q r\n.latch d q re c 3\n.latch d r fe c 3\n.end\n"
+        self.assertEqual(lc.storage_to_latch(yosys).splitlines()[3:5],
+                         [".latch d q re c 3", ".latch d r fe c 3"])
+        self.assertEqual(dict(lc.blif_histogram(odin)["m"]), {"$_DFF_P_": 1, "$_DFF_N_": 1})
+        self.assertEqual(dict(lc.blif_histogram(lc.storage_to_latch(yosys))["m"]),
+                         {"$_DFF_P_": 1, "$_DFF_N_": 1, "$_MUX_": 1})
+
+    def test_the_ff_maps_cover_dffsr_and_parmys_exact_swaps_the_enable_maps(self) -> None:
+        self.assertIn("dffsr2dff.v", ld.FF_MAPS)
+        self.assertEqual(ld.PARMYS_EXACT["adffe2dff_reset_first.v"], "adffe2dff.v")
+        self.assertEqual(ld.PARMYS_EXACT["aldffe2dff_reset_first.v"], "aldffe2dff.v")
+        for name in ld.FF_MAPS:
+            parmys = name in ("adff2dff.v", "aldff2dff.v")
+            self.assertTrue((ld.MAPS / name).exists() or parmys, name)
+
     def test_yosys_script_is_the_spec_14_2_step_2(self) -> None:
         self.assertEqual(
             ld.yosys_script(Path("w"), [Path("m/a.v"), Path("m/b.v")]),
@@ -405,6 +430,14 @@ class RealCompareTest(unittest.TestCase):
         code, out, err = tree.run()
         self.assertEqual(code, 1, out + err)
         self.assertIn("identity: DIFFERS: netlist-compare: not identical", out)
+
+
+class GateModelsTest(unittest.TestCase):
+    def test_every_gate_spelled_as_a_subckt_has_a_model(self) -> None:
+        text = lc.with_gate_models(".model m\n.end\n")
+        for gate in ("NOT", "AND", "OR", "XOR", "XNOR", "MUX"):
+            self.assertIn(f".model $_{gate}_\n", text)
+        self.assertTrue(text.startswith(".model m\n.end\n"))
 
 
 if __name__ == "__main__":

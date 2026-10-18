@@ -1,0 +1,1806 @@
+.model m
+.inputs a[0] a[1] a[2] a[3] a[4] a[5] a[6] a[7] b[0] b[1] b[2] b[3] b[4] b[5] b[6] b[7]
+.outputs y[0] y[1] y[2] y[3] y[4] y[5] y[6] y[7]
+.names gnd
+.names vcc
+1
+.subckt $_NOT_ A=a[0] Y=$n27
+.subckt $_NOT_ A=a[1] Y=$n28
+.subckt $_NOT_ A=a[2] Y=$n29
+.subckt $_NOT_ A=a[3] Y=$n30
+.subckt $_NOT_ A=a[4] Y=$n31
+.subckt $_NOT_ A=a[5] Y=$n32
+.subckt $_NOT_ A=a[6] Y=$n33
+.subckt $_NOT_ A=a[7] Y=$n34
+.subckt $_XOR_ A=gnd B=$n27 Y=$n35
+.subckt $_AND_ A=gnd B=$n27 Y=$n36
+.subckt $_XOR_ A=gnd B=$n28 Y=$n37
+.subckt $_AND_ A=gnd B=$n28 Y=$n38
+.subckt $_XOR_ A=gnd B=$n29 Y=$n39
+.subckt $_AND_ A=gnd B=$n29 Y=$n40
+.subckt $_XOR_ A=gnd B=$n30 Y=$n41
+.subckt $_AND_ A=gnd B=$n30 Y=$n42
+.subckt $_XOR_ A=gnd B=$n31 Y=$n43
+.subckt $_AND_ A=gnd B=$n31 Y=$n44
+.subckt $_XOR_ A=gnd B=$n32 Y=$n45
+.subckt $_AND_ A=gnd B=$n32 Y=$n46
+.subckt $_XOR_ A=gnd B=$n33 Y=$n47
+.subckt $_AND_ A=gnd B=$n33 Y=$n48
+.subckt $_XOR_ A=gnd B=$n34 Y=$n49
+.subckt $_AND_ A=gnd B=$n34 Y=$n50
+.subckt $_AND_ A=$n35 B=vcc Y=$n51
+.subckt $_OR_ A=$n36 B=$n51 Y=$n52
+.subckt $_AND_ A=$n37 B=$n52 Y=$n53
+.subckt $_OR_ A=$n38 B=$n53 Y=$n54
+.subckt $_AND_ A=$n37 B=$n35 Y=$n55
+.subckt $_AND_ A=$n41 B=$n40 Y=$n56
+.subckt $_OR_ A=$n42 B=$n56 Y=$n57
+.subckt $_AND_ A=$n41 B=$n39 Y=$n58
+.subckt $_AND_ A=$n45 B=$n44 Y=$n59
+.subckt $_OR_ A=$n46 B=$n59 Y=$n60
+.subckt $_AND_ A=$n45 B=$n43 Y=$n61
+.subckt $_AND_ A=$n49 B=$n48 Y=$n62
+.subckt $_OR_ A=$n50 B=$n62 Y=$n63
+.subckt $_AND_ A=$n49 B=$n47 Y=$n64
+.subckt $_AND_ A=$n58 B=$n54 Y=$n65
+.subckt $_OR_ A=$n57 B=$n65 Y=$n66
+.subckt $_AND_ A=$n58 B=$n55 Y=$n67
+.subckt $_AND_ A=$n64 B=$n60 Y=$n68
+.subckt $_OR_ A=$n63 B=$n68 Y=$n69
+.subckt $_AND_ A=$n64 B=$n61 Y=$n70
+.subckt $_AND_ A=$n70 B=$n66 Y=$n71
+.subckt $_OR_ A=$n69 B=$n71 Y=$n72
+.subckt $_AND_ A=$n70 B=$n67 Y=$n73
+.subckt $_AND_ A=$n61 B=$n66 Y=$n74
+.subckt $_OR_ A=$n60 B=$n74 Y=$n75
+.subckt $_AND_ A=$n61 B=$n67 Y=$n76
+.subckt $_AND_ A=$n39 B=$n54 Y=$n77
+.subckt $_OR_ A=$n40 B=$n77 Y=$n78
+.subckt $_AND_ A=$n39 B=$n55 Y=$n79
+.subckt $_AND_ A=$n43 B=$n66 Y=$n80
+.subckt $_OR_ A=$n44 B=$n80 Y=$n81
+.subckt $_AND_ A=$n43 B=$n67 Y=$n82
+.subckt $_AND_ A=$n47 B=$n75 Y=$n83
+.subckt $_OR_ A=$n48 B=$n83 Y=$n84
+.subckt $_AND_ A=$n47 B=$n76 Y=$n85
+.subckt $_XOR_ A=$n35 B=vcc Y=$n86
+.subckt $_XOR_ A=$n37 B=$n52 Y=$n87
+.subckt $_XOR_ A=$n39 B=$n54 Y=$n88
+.subckt $_XOR_ A=$n41 B=$n78 Y=$n89
+.subckt $_XOR_ A=$n43 B=$n66 Y=$n90
+.subckt $_XOR_ A=$n45 B=$n81 Y=$n91
+.subckt $_XOR_ A=$n47 B=$n75 Y=$n92
+.subckt $_XOR_ A=$n49 B=$n84 Y=$n93
+.subckt $_MUX_ A=a[0] B=$n86 S=a[7] Y=$n94
+.subckt $_MUX_ A=a[1] B=$n87 S=a[7] Y=$n95
+.subckt $_MUX_ A=a[2] B=$n88 S=a[7] Y=$n96
+.subckt $_MUX_ A=a[3] B=$n89 S=a[7] Y=$n97
+.subckt $_MUX_ A=a[4] B=$n90 S=a[7] Y=$n98
+.subckt $_MUX_ A=a[5] B=$n91 S=a[7] Y=$n99
+.subckt $_MUX_ A=a[6] B=$n92 S=a[7] Y=$n100
+.subckt $_MUX_ A=a[7] B=$n93 S=a[7] Y=$n101
+.subckt $_NOT_ A=b[0] Y=$n102
+.subckt $_NOT_ A=b[1] Y=$n103
+.subckt $_NOT_ A=b[2] Y=$n104
+.subckt $_NOT_ A=b[3] Y=$n105
+.subckt $_NOT_ A=b[4] Y=$n106
+.subckt $_NOT_ A=b[5] Y=$n107
+.subckt $_NOT_ A=b[6] Y=$n108
+.subckt $_NOT_ A=b[7] Y=$n109
+.subckt $_XOR_ A=gnd B=$n102 Y=$n110
+.subckt $_AND_ A=gnd B=$n102 Y=$n111
+.subckt $_XOR_ A=gnd B=$n103 Y=$n112
+.subckt $_AND_ A=gnd B=$n103 Y=$n113
+.subckt $_XOR_ A=gnd B=$n104 Y=$n114
+.subckt $_AND_ A=gnd B=$n104 Y=$n115
+.subckt $_XOR_ A=gnd B=$n105 Y=$n116
+.subckt $_AND_ A=gnd B=$n105 Y=$n117
+.subckt $_XOR_ A=gnd B=$n106 Y=$n118
+.subckt $_AND_ A=gnd B=$n106 Y=$n119
+.subckt $_XOR_ A=gnd B=$n107 Y=$n120
+.subckt $_AND_ A=gnd B=$n107 Y=$n121
+.subckt $_XOR_ A=gnd B=$n108 Y=$n122
+.subckt $_AND_ A=gnd B=$n108 Y=$n123
+.subckt $_XOR_ A=gnd B=$n109 Y=$n124
+.subckt $_AND_ A=gnd B=$n109 Y=$n125
+.subckt $_AND_ A=$n110 B=vcc Y=$n126
+.subckt $_OR_ A=$n111 B=$n126 Y=$n127
+.subckt $_AND_ A=$n112 B=$n127 Y=$n128
+.subckt $_OR_ A=$n113 B=$n128 Y=$n129
+.subckt $_AND_ A=$n112 B=$n110 Y=$n130
+.subckt $_AND_ A=$n116 B=$n115 Y=$n131
+.subckt $_OR_ A=$n117 B=$n131 Y=$n132
+.subckt $_AND_ A=$n116 B=$n114 Y=$n133
+.subckt $_AND_ A=$n120 B=$n119 Y=$n134
+.subckt $_OR_ A=$n121 B=$n134 Y=$n135
+.subckt $_AND_ A=$n120 B=$n118 Y=$n136
+.subckt $_AND_ A=$n124 B=$n123 Y=$n137
+.subckt $_OR_ A=$n125 B=$n137 Y=$n138
+.subckt $_AND_ A=$n124 B=$n122 Y=$n139
+.subckt $_AND_ A=$n133 B=$n129 Y=$n140
+.subckt $_OR_ A=$n132 B=$n140 Y=$n141
+.subckt $_AND_ A=$n133 B=$n130 Y=$n142
+.subckt $_AND_ A=$n139 B=$n135 Y=$n143
+.subckt $_OR_ A=$n138 B=$n143 Y=$n144
+.subckt $_AND_ A=$n139 B=$n136 Y=$n145
+.subckt $_AND_ A=$n145 B=$n141 Y=$n146
+.subckt $_OR_ A=$n144 B=$n146 Y=$n147
+.subckt $_AND_ A=$n145 B=$n142 Y=$n148
+.subckt $_AND_ A=$n136 B=$n141 Y=$n149
+.subckt $_OR_ A=$n135 B=$n149 Y=$n150
+.subckt $_AND_ A=$n136 B=$n142 Y=$n151
+.subckt $_AND_ A=$n114 B=$n129 Y=$n152
+.subckt $_OR_ A=$n115 B=$n152 Y=$n153
+.subckt $_AND_ A=$n114 B=$n130 Y=$n154
+.subckt $_AND_ A=$n118 B=$n141 Y=$n155
+.subckt $_OR_ A=$n119 B=$n155 Y=$n156
+.subckt $_AND_ A=$n118 B=$n142 Y=$n157
+.subckt $_AND_ A=$n122 B=$n150 Y=$n158
+.subckt $_OR_ A=$n123 B=$n158 Y=$n159
+.subckt $_AND_ A=$n122 B=$n151 Y=$n160
+.subckt $_XOR_ A=$n110 B=vcc Y=$n161
+.subckt $_XOR_ A=$n112 B=$n127 Y=$n162
+.subckt $_XOR_ A=$n114 B=$n129 Y=$n163
+.subckt $_XOR_ A=$n116 B=$n153 Y=$n164
+.subckt $_XOR_ A=$n118 B=$n141 Y=$n165
+.subckt $_XOR_ A=$n120 B=$n156 Y=$n166
+.subckt $_XOR_ A=$n122 B=$n150 Y=$n167
+.subckt $_XOR_ A=$n124 B=$n159 Y=$n168
+.subckt $_MUX_ A=b[0] B=$n161 S=b[7] Y=$n169
+.subckt $_MUX_ A=b[1] B=$n162 S=b[7] Y=$n170
+.subckt $_MUX_ A=b[2] B=$n163 S=b[7] Y=$n171
+.subckt $_MUX_ A=b[3] B=$n164 S=b[7] Y=$n172
+.subckt $_MUX_ A=b[4] B=$n165 S=b[7] Y=$n173
+.subckt $_MUX_ A=b[5] B=$n166 S=b[7] Y=$n174
+.subckt $_MUX_ A=b[6] B=$n167 S=b[7] Y=$n175
+.subckt $_MUX_ A=b[7] B=$n168 S=b[7] Y=$n176
+.subckt $_NOT_ A=gnd Y=$n177
+.subckt $_NOT_ A=gnd Y=$n178
+.subckt $_NOT_ A=gnd Y=$n179
+.subckt $_NOT_ A=gnd Y=$n180
+.subckt $_NOT_ A=gnd Y=$n181
+.subckt $_NOT_ A=gnd Y=$n182
+.subckt $_NOT_ A=gnd Y=$n183
+.subckt $_NOT_ A=$n169 Y=$n184
+.subckt $_NOT_ A=$n170 Y=$n185
+.subckt $_NOT_ A=$n171 Y=$n186
+.subckt $_NOT_ A=$n172 Y=$n187
+.subckt $_NOT_ A=$n173 Y=$n188
+.subckt $_NOT_ A=$n174 Y=$n189
+.subckt $_NOT_ A=$n175 Y=$n190
+.subckt $_NOT_ A=$n176 Y=$n191
+.subckt $_XOR_ A=$n94 B=$n177 Y=$n192
+.subckt $_AND_ A=$n94 B=$n177 Y=$n193
+.subckt $_XOR_ A=$n95 B=$n178 Y=$n194
+.subckt $_AND_ A=$n95 B=$n178 Y=$n195
+.subckt $_XOR_ A=$n96 B=$n179 Y=$n196
+.subckt $_AND_ A=$n96 B=$n179 Y=$n197
+.subckt $_XOR_ A=$n97 B=$n180 Y=$n198
+.subckt $_AND_ A=$n97 B=$n180 Y=$n199
+.subckt $_XOR_ A=$n98 B=$n181 Y=$n200
+.subckt $_AND_ A=$n98 B=$n181 Y=$n201
+.subckt $_XOR_ A=$n99 B=$n182 Y=$n202
+.subckt $_AND_ A=$n99 B=$n182 Y=$n203
+.subckt $_XOR_ A=$n100 B=$n183 Y=$n204
+.subckt $_AND_ A=$n100 B=$n183 Y=$n205
+.subckt $_XOR_ A=$n101 B=$n184 Y=$n206
+.subckt $_AND_ A=$n101 B=$n184 Y=$n207
+.subckt $_XOR_ A=gnd B=$n185 Y=$n208
+.subckt $_AND_ A=gnd B=$n185 Y=$n209
+.subckt $_XOR_ A=gnd B=$n186 Y=$n210
+.subckt $_AND_ A=gnd B=$n186 Y=$n211
+.subckt $_XOR_ A=gnd B=$n187 Y=$n212
+.subckt $_AND_ A=gnd B=$n187 Y=$n213
+.subckt $_XOR_ A=gnd B=$n188 Y=$n214
+.subckt $_AND_ A=gnd B=$n188 Y=$n215
+.subckt $_XOR_ A=gnd B=$n189 Y=$n216
+.subckt $_AND_ A=gnd B=$n189 Y=$n217
+.subckt $_XOR_ A=gnd B=$n190 Y=$n218
+.subckt $_AND_ A=gnd B=$n190 Y=$n219
+.subckt $_XOR_ A=gnd B=$n191 Y=$n220
+.subckt $_AND_ A=gnd B=$n191 Y=$n221
+.subckt $_AND_ A=$n192 B=vcc Y=$n222
+.subckt $_OR_ A=$n193 B=$n222 Y=$n223
+.subckt $_AND_ A=$n194 B=$n223 Y=$n224
+.subckt $_OR_ A=$n195 B=$n224 Y=$n225
+.subckt $_AND_ A=$n194 B=$n192 Y=$n226
+.subckt $_AND_ A=$n198 B=$n197 Y=$n227
+.subckt $_OR_ A=$n199 B=$n227 Y=$n228
+.subckt $_AND_ A=$n198 B=$n196 Y=$n229
+.subckt $_AND_ A=$n202 B=$n201 Y=$n230
+.subckt $_OR_ A=$n203 B=$n230 Y=$n231
+.subckt $_AND_ A=$n202 B=$n200 Y=$n232
+.subckt $_AND_ A=$n206 B=$n205 Y=$n233
+.subckt $_OR_ A=$n207 B=$n233 Y=$n234
+.subckt $_AND_ A=$n206 B=$n204 Y=$n235
+.subckt $_AND_ A=$n210 B=$n209 Y=$n236
+.subckt $_OR_ A=$n211 B=$n236 Y=$n237
+.subckt $_AND_ A=$n210 B=$n208 Y=$n238
+.subckt $_AND_ A=$n214 B=$n213 Y=$n239
+.subckt $_OR_ A=$n215 B=$n239 Y=$n240
+.subckt $_AND_ A=$n214 B=$n212 Y=$n241
+.subckt $_AND_ A=$n218 B=$n217 Y=$n242
+.subckt $_OR_ A=$n219 B=$n242 Y=$n243
+.subckt $_AND_ A=$n218 B=$n216 Y=$n244
+.subckt $_AND_ A=$n229 B=$n225 Y=$n245
+.subckt $_OR_ A=$n228 B=$n245 Y=$n246
+.subckt $_AND_ A=$n229 B=$n226 Y=$n247
+.subckt $_AND_ A=$n235 B=$n231 Y=$n248
+.subckt $_OR_ A=$n234 B=$n248 Y=$n249
+.subckt $_AND_ A=$n235 B=$n232 Y=$n250
+.subckt $_AND_ A=$n241 B=$n237 Y=$n251
+.subckt $_OR_ A=$n240 B=$n251 Y=$n252
+.subckt $_AND_ A=$n241 B=$n238 Y=$n253
+.subckt $_AND_ A=$n250 B=$n246 Y=$n254
+.subckt $_OR_ A=$n249 B=$n254 Y=$n255
+.subckt $_AND_ A=$n250 B=$n247 Y=$n256
+.subckt $_AND_ A=$n253 B=$n255 Y=$n257
+.subckt $_OR_ A=$n252 B=$n257 Y=$n258
+.subckt $_AND_ A=$n253 B=$n256 Y=$n259
+.subckt $_AND_ A=$n232 B=$n246 Y=$n260
+.subckt $_OR_ A=$n231 B=$n260 Y=$n261
+.subckt $_AND_ A=$n232 B=$n247 Y=$n262
+.subckt $_AND_ A=$n238 B=$n255 Y=$n263
+.subckt $_OR_ A=$n237 B=$n263 Y=$n264
+.subckt $_AND_ A=$n238 B=$n256 Y=$n265
+.subckt $_AND_ A=$n244 B=$n258 Y=$n266
+.subckt $_OR_ A=$n243 B=$n266 Y=$n267
+.subckt $_AND_ A=$n244 B=$n259 Y=$n268
+.subckt $_AND_ A=$n196 B=$n225 Y=$n269
+.subckt $_OR_ A=$n197 B=$n269 Y=$n270
+.subckt $_AND_ A=$n196 B=$n226 Y=$n271
+.subckt $_AND_ A=$n200 B=$n246 Y=$n272
+.subckt $_OR_ A=$n201 B=$n272 Y=$n273
+.subckt $_AND_ A=$n200 B=$n247 Y=$n274
+.subckt $_AND_ A=$n204 B=$n261 Y=$n275
+.subckt $_OR_ A=$n205 B=$n275 Y=$n276
+.subckt $_AND_ A=$n204 B=$n262 Y=$n277
+.subckt $_AND_ A=$n208 B=$n255 Y=$n278
+.subckt $_OR_ A=$n209 B=$n278 Y=$n279
+.subckt $_AND_ A=$n208 B=$n256 Y=$n280
+.subckt $_AND_ A=$n212 B=$n264 Y=$n281
+.subckt $_OR_ A=$n213 B=$n281 Y=$n282
+.subckt $_AND_ A=$n212 B=$n265 Y=$n283
+.subckt $_AND_ A=$n216 B=$n258 Y=$n284
+.subckt $_OR_ A=$n217 B=$n284 Y=$n285
+.subckt $_AND_ A=$n216 B=$n259 Y=$n286
+.subckt $_AND_ A=$n220 B=$n267 Y=$n287
+.subckt $_OR_ A=$n221 B=$n287 Y=$n288
+.subckt $_AND_ A=$n220 B=$n268 Y=$n289
+.subckt $_NOT_ A=$n288 Y=$n290
+.subckt $_AND_ A=$n192 B=$n194 Y=$n291
+.subckt $_AND_ A=$n196 B=$n198 Y=$n292
+.subckt $_AND_ A=$n200 B=$n202 Y=$n293
+.subckt $_AND_ A=$n204 B=$n206 Y=$n294
+.subckt $_AND_ A=$n208 B=$n210 Y=$n295
+.subckt $_AND_ A=$n212 B=$n214 Y=$n296
+.subckt $_AND_ A=$n216 B=$n218 Y=$n297
+.subckt $_AND_ A=$n291 B=$n292 Y=$n298
+.subckt $_AND_ A=$n293 B=$n294 Y=$n299
+.subckt $_AND_ A=$n295 B=$n296 Y=$n300
+.subckt $_AND_ A=$n297 B=$n220 Y=$n301
+.subckt $_AND_ A=$n298 B=$n299 Y=$n302
+.subckt $_AND_ A=$n300 B=$n301 Y=$n303
+.subckt $_AND_ A=$n302 B=$n303 Y=$n304
+.subckt $_OR_ A=$n290 B=$n304 Y=$n305
+.subckt $_NOT_ A=$n305 Y=$n306
+.subckt $_OR_ A=$n306 B=$n304 Y=$n307
+.subckt $_NOT_ A=gnd Y=$n308
+.subckt $_NOT_ A=gnd Y=$n309
+.subckt $_NOT_ A=gnd Y=$n310
+.subckt $_NOT_ A=gnd Y=$n311
+.subckt $_NOT_ A=gnd Y=$n312
+.subckt $_NOT_ A=gnd Y=$n313
+.subckt $_NOT_ A=gnd Y=$n314
+.subckt $_NOT_ A=$n169 Y=$n315
+.subckt $_NOT_ A=$n170 Y=$n316
+.subckt $_NOT_ A=$n171 Y=$n317
+.subckt $_NOT_ A=$n172 Y=$n318
+.subckt $_NOT_ A=$n173 Y=$n319
+.subckt $_NOT_ A=$n174 Y=$n320
+.subckt $_NOT_ A=$n175 Y=$n321
+.subckt $_NOT_ A=$n176 Y=$n322
+.subckt $_XOR_ A=$n94 B=$n308 Y=$n323
+.subckt $_AND_ A=$n94 B=$n308 Y=$n324
+.subckt $_XOR_ A=$n95 B=$n309 Y=$n325
+.subckt $_AND_ A=$n95 B=$n309 Y=$n326
+.subckt $_XOR_ A=$n96 B=$n310 Y=$n327
+.subckt $_AND_ A=$n96 B=$n310 Y=$n328
+.subckt $_XOR_ A=$n97 B=$n311 Y=$n329
+.subckt $_AND_ A=$n97 B=$n311 Y=$n330
+.subckt $_XOR_ A=$n98 B=$n312 Y=$n331
+.subckt $_AND_ A=$n98 B=$n312 Y=$n332
+.subckt $_XOR_ A=$n99 B=$n313 Y=$n333
+.subckt $_AND_ A=$n99 B=$n313 Y=$n334
+.subckt $_XOR_ A=$n100 B=$n314 Y=$n335
+.subckt $_AND_ A=$n100 B=$n314 Y=$n336
+.subckt $_XOR_ A=$n101 B=$n315 Y=$n337
+.subckt $_AND_ A=$n101 B=$n315 Y=$n338
+.subckt $_XOR_ A=gnd B=$n316 Y=$n339
+.subckt $_AND_ A=gnd B=$n316 Y=$n340
+.subckt $_XOR_ A=gnd B=$n317 Y=$n341
+.subckt $_AND_ A=gnd B=$n317 Y=$n342
+.subckt $_XOR_ A=gnd B=$n318 Y=$n343
+.subckt $_AND_ A=gnd B=$n318 Y=$n344
+.subckt $_XOR_ A=gnd B=$n319 Y=$n345
+.subckt $_AND_ A=gnd B=$n319 Y=$n346
+.subckt $_XOR_ A=gnd B=$n320 Y=$n347
+.subckt $_AND_ A=gnd B=$n320 Y=$n348
+.subckt $_XOR_ A=gnd B=$n321 Y=$n349
+.subckt $_AND_ A=gnd B=$n321 Y=$n350
+.subckt $_XOR_ A=gnd B=$n322 Y=$n351
+.subckt $_AND_ A=gnd B=$n322 Y=$n352
+.subckt $_AND_ A=$n323 B=vcc Y=$n353
+.subckt $_OR_ A=$n324 B=$n353 Y=$n354
+.subckt $_AND_ A=$n325 B=$n354 Y=$n355
+.subckt $_OR_ A=$n326 B=$n355 Y=$n356
+.subckt $_AND_ A=$n325 B=$n323 Y=$n357
+.subckt $_AND_ A=$n329 B=$n328 Y=$n358
+.subckt $_OR_ A=$n330 B=$n358 Y=$n359
+.subckt $_AND_ A=$n329 B=$n327 Y=$n360
+.subckt $_AND_ A=$n333 B=$n332 Y=$n361
+.subckt $_OR_ A=$n334 B=$n361 Y=$n362
+.subckt $_AND_ A=$n333 B=$n331 Y=$n363
+.subckt $_AND_ A=$n337 B=$n336 Y=$n364
+.subckt $_OR_ A=$n338 B=$n364 Y=$n365
+.subckt $_AND_ A=$n337 B=$n335 Y=$n366
+.subckt $_AND_ A=$n341 B=$n340 Y=$n367
+.subckt $_OR_ A=$n342 B=$n367 Y=$n368
+.subckt $_AND_ A=$n341 B=$n339 Y=$n369
+.subckt $_AND_ A=$n345 B=$n344 Y=$n370
+.subckt $_OR_ A=$n346 B=$n370 Y=$n371
+.subckt $_AND_ A=$n345 B=$n343 Y=$n372
+.subckt $_AND_ A=$n349 B=$n348 Y=$n373
+.subckt $_OR_ A=$n350 B=$n373 Y=$n374
+.subckt $_AND_ A=$n349 B=$n347 Y=$n375
+.subckt $_AND_ A=$n360 B=$n356 Y=$n376
+.subckt $_OR_ A=$n359 B=$n376 Y=$n377
+.subckt $_AND_ A=$n360 B=$n357 Y=$n378
+.subckt $_AND_ A=$n366 B=$n362 Y=$n379
+.subckt $_OR_ A=$n365 B=$n379 Y=$n380
+.subckt $_AND_ A=$n366 B=$n363 Y=$n381
+.subckt $_AND_ A=$n372 B=$n368 Y=$n382
+.subckt $_OR_ A=$n371 B=$n382 Y=$n383
+.subckt $_AND_ A=$n372 B=$n369 Y=$n384
+.subckt $_AND_ A=$n381 B=$n377 Y=$n385
+.subckt $_OR_ A=$n380 B=$n385 Y=$n386
+.subckt $_AND_ A=$n381 B=$n378 Y=$n387
+.subckt $_AND_ A=$n384 B=$n386 Y=$n388
+.subckt $_OR_ A=$n383 B=$n388 Y=$n389
+.subckt $_AND_ A=$n384 B=$n387 Y=$n390
+.subckt $_AND_ A=$n363 B=$n377 Y=$n391
+.subckt $_OR_ A=$n362 B=$n391 Y=$n392
+.subckt $_AND_ A=$n363 B=$n378 Y=$n393
+.subckt $_AND_ A=$n369 B=$n386 Y=$n394
+.subckt $_OR_ A=$n368 B=$n394 Y=$n395
+.subckt $_AND_ A=$n369 B=$n387 Y=$n396
+.subckt $_AND_ A=$n375 B=$n389 Y=$n397
+.subckt $_OR_ A=$n374 B=$n397 Y=$n398
+.subckt $_AND_ A=$n375 B=$n390 Y=$n399
+.subckt $_AND_ A=$n327 B=$n356 Y=$n400
+.subckt $_OR_ A=$n328 B=$n400 Y=$n401
+.subckt $_AND_ A=$n327 B=$n357 Y=$n402
+.subckt $_AND_ A=$n331 B=$n377 Y=$n403
+.subckt $_OR_ A=$n332 B=$n403 Y=$n404
+.subckt $_AND_ A=$n331 B=$n378 Y=$n405
+.subckt $_AND_ A=$n335 B=$n392 Y=$n406
+.subckt $_OR_ A=$n336 B=$n406 Y=$n407
+.subckt $_AND_ A=$n335 B=$n393 Y=$n408
+.subckt $_AND_ A=$n339 B=$n386 Y=$n409
+.subckt $_OR_ A=$n340 B=$n409 Y=$n410
+.subckt $_AND_ A=$n339 B=$n387 Y=$n411
+.subckt $_AND_ A=$n343 B=$n395 Y=$n412
+.subckt $_OR_ A=$n344 B=$n412 Y=$n413
+.subckt $_AND_ A=$n343 B=$n396 Y=$n414
+.subckt $_AND_ A=$n347 B=$n389 Y=$n415
+.subckt $_OR_ A=$n348 B=$n415 Y=$n416
+.subckt $_AND_ A=$n347 B=$n390 Y=$n417
+.subckt $_AND_ A=$n351 B=$n398 Y=$n418
+.subckt $_OR_ A=$n352 B=$n418 Y=$n419
+.subckt $_AND_ A=$n351 B=$n399 Y=$n420
+.subckt $_XOR_ A=$n323 B=vcc Y=$n421
+.subckt $_XOR_ A=$n325 B=$n354 Y=$n422
+.subckt $_XOR_ A=$n327 B=$n356 Y=$n423
+.subckt $_XOR_ A=$n329 B=$n401 Y=$n424
+.subckt $_XOR_ A=$n331 B=$n377 Y=$n425
+.subckt $_XOR_ A=$n333 B=$n404 Y=$n426
+.subckt $_XOR_ A=$n335 B=$n392 Y=$n427
+.subckt $_XOR_ A=$n337 B=$n407 Y=$n428
+.subckt $_XOR_ A=$n339 B=$n386 Y=$n429
+.subckt $_XOR_ A=$n341 B=$n410 Y=$n430
+.subckt $_XOR_ A=$n343 B=$n395 Y=$n431
+.subckt $_XOR_ A=$n345 B=$n413 Y=$n432
+.subckt $_XOR_ A=$n347 B=$n389 Y=$n433
+.subckt $_XOR_ A=$n349 B=$n416 Y=$n434
+.subckt $_XOR_ A=$n351 B=$n398 Y=$n435
+.subckt $_MUX_ A=$n94 B=$n421 S=$n307 Y=$n436
+.subckt $_MUX_ A=$n95 B=$n422 S=$n307 Y=$n437
+.subckt $_MUX_ A=$n96 B=$n423 S=$n307 Y=$n438
+.subckt $_MUX_ A=$n97 B=$n424 S=$n307 Y=$n439
+.subckt $_MUX_ A=$n98 B=$n425 S=$n307 Y=$n440
+.subckt $_MUX_ A=$n99 B=$n426 S=$n307 Y=$n441
+.subckt $_MUX_ A=$n100 B=$n427 S=$n307 Y=$n442
+.subckt $_MUX_ A=$n101 B=$n428 S=$n307 Y=$n443
+.subckt $_NOT_ A=gnd Y=$n444
+.subckt $_NOT_ A=gnd Y=$n445
+.subckt $_NOT_ A=gnd Y=$n446
+.subckt $_NOT_ A=gnd Y=$n447
+.subckt $_NOT_ A=gnd Y=$n448
+.subckt $_NOT_ A=gnd Y=$n449
+.subckt $_NOT_ A=$n169 Y=$n450
+.subckt $_NOT_ A=$n170 Y=$n451
+.subckt $_NOT_ A=$n171 Y=$n452
+.subckt $_NOT_ A=$n172 Y=$n453
+.subckt $_NOT_ A=$n173 Y=$n454
+.subckt $_NOT_ A=$n174 Y=$n455
+.subckt $_NOT_ A=$n175 Y=$n456
+.subckt $_NOT_ A=$n176 Y=$n457
+.subckt $_XOR_ A=$n436 B=$n444 Y=$n458
+.subckt $_AND_ A=$n436 B=$n444 Y=$n459
+.subckt $_XOR_ A=$n437 B=$n445 Y=$n460
+.subckt $_AND_ A=$n437 B=$n445 Y=$n461
+.subckt $_XOR_ A=$n438 B=$n446 Y=$n462
+.subckt $_AND_ A=$n438 B=$n446 Y=$n463
+.subckt $_XOR_ A=$n439 B=$n447 Y=$n464
+.subckt $_AND_ A=$n439 B=$n447 Y=$n465
+.subckt $_XOR_ A=$n440 B=$n448 Y=$n466
+.subckt $_AND_ A=$n440 B=$n448 Y=$n467
+.subckt $_XOR_ A=$n441 B=$n449 Y=$n468
+.subckt $_AND_ A=$n441 B=$n449 Y=$n469
+.subckt $_XOR_ A=$n442 B=$n450 Y=$n470
+.subckt $_AND_ A=$n442 B=$n450 Y=$n471
+.subckt $_XOR_ A=$n443 B=$n451 Y=$n472
+.subckt $_AND_ A=$n443 B=$n451 Y=$n473
+.subckt $_XOR_ A=gnd B=$n452 Y=$n474
+.subckt $_AND_ A=gnd B=$n452 Y=$n475
+.subckt $_XOR_ A=gnd B=$n453 Y=$n476
+.subckt $_AND_ A=gnd B=$n453 Y=$n477
+.subckt $_XOR_ A=gnd B=$n454 Y=$n478
+.subckt $_AND_ A=gnd B=$n454 Y=$n479
+.subckt $_XOR_ A=gnd B=$n455 Y=$n480
+.subckt $_AND_ A=gnd B=$n455 Y=$n481
+.subckt $_XOR_ A=gnd B=$n456 Y=$n482
+.subckt $_AND_ A=gnd B=$n456 Y=$n483
+.subckt $_XOR_ A=gnd B=$n457 Y=$n484
+.subckt $_AND_ A=gnd B=$n457 Y=$n485
+.subckt $_AND_ A=$n458 B=vcc Y=$n486
+.subckt $_OR_ A=$n459 B=$n486 Y=$n487
+.subckt $_AND_ A=$n460 B=$n487 Y=$n488
+.subckt $_OR_ A=$n461 B=$n488 Y=$n489
+.subckt $_AND_ A=$n460 B=$n458 Y=$n490
+.subckt $_AND_ A=$n464 B=$n463 Y=$n491
+.subckt $_OR_ A=$n465 B=$n491 Y=$n492
+.subckt $_AND_ A=$n464 B=$n462 Y=$n493
+.subckt $_AND_ A=$n468 B=$n467 Y=$n494
+.subckt $_OR_ A=$n469 B=$n494 Y=$n495
+.subckt $_AND_ A=$n468 B=$n466 Y=$n496
+.subckt $_AND_ A=$n472 B=$n471 Y=$n497
+.subckt $_OR_ A=$n473 B=$n497 Y=$n498
+.subckt $_AND_ A=$n472 B=$n470 Y=$n499
+.subckt $_AND_ A=$n476 B=$n475 Y=$n500
+.subckt $_OR_ A=$n477 B=$n500 Y=$n501
+.subckt $_AND_ A=$n476 B=$n474 Y=$n502
+.subckt $_AND_ A=$n480 B=$n479 Y=$n503
+.subckt $_OR_ A=$n481 B=$n503 Y=$n504
+.subckt $_AND_ A=$n480 B=$n478 Y=$n505
+.subckt $_AND_ A=$n484 B=$n483 Y=$n506
+.subckt $_OR_ A=$n485 B=$n506 Y=$n507
+.subckt $_AND_ A=$n484 B=$n482 Y=$n508
+.subckt $_AND_ A=$n493 B=$n489 Y=$n509
+.subckt $_OR_ A=$n492 B=$n509 Y=$n510
+.subckt $_AND_ A=$n493 B=$n490 Y=$n511
+.subckt $_AND_ A=$n499 B=$n495 Y=$n512
+.subckt $_OR_ A=$n498 B=$n512 Y=$n513
+.subckt $_AND_ A=$n499 B=$n496 Y=$n514
+.subckt $_AND_ A=$n505 B=$n501 Y=$n515
+.subckt $_OR_ A=$n504 B=$n515 Y=$n516
+.subckt $_AND_ A=$n505 B=$n502 Y=$n517
+.subckt $_AND_ A=$n514 B=$n510 Y=$n518
+.subckt $_OR_ A=$n513 B=$n518 Y=$n519
+.subckt $_AND_ A=$n514 B=$n511 Y=$n520
+.subckt $_AND_ A=$n517 B=$n519 Y=$n521
+.subckt $_OR_ A=$n516 B=$n521 Y=$n522
+.subckt $_AND_ A=$n517 B=$n520 Y=$n523
+.subckt $_AND_ A=$n496 B=$n510 Y=$n524
+.subckt $_OR_ A=$n495 B=$n524 Y=$n525
+.subckt $_AND_ A=$n496 B=$n511 Y=$n526
+.subckt $_AND_ A=$n502 B=$n519 Y=$n527
+.subckt $_OR_ A=$n501 B=$n527 Y=$n528
+.subckt $_AND_ A=$n502 B=$n520 Y=$n529
+.subckt $_AND_ A=$n508 B=$n522 Y=$n530
+.subckt $_OR_ A=$n507 B=$n530 Y=$n531
+.subckt $_AND_ A=$n508 B=$n523 Y=$n532
+.subckt $_AND_ A=$n462 B=$n489 Y=$n533
+.subckt $_OR_ A=$n463 B=$n533 Y=$n534
+.subckt $_AND_ A=$n462 B=$n490 Y=$n535
+.subckt $_AND_ A=$n466 B=$n510 Y=$n536
+.subckt $_OR_ A=$n467 B=$n536 Y=$n537
+.subckt $_AND_ A=$n466 B=$n511 Y=$n538
+.subckt $_AND_ A=$n470 B=$n525 Y=$n539
+.subckt $_OR_ A=$n471 B=$n539 Y=$n540
+.subckt $_AND_ A=$n470 B=$n526 Y=$n541
+.subckt $_AND_ A=$n474 B=$n519 Y=$n542
+.subckt $_OR_ A=$n475 B=$n542 Y=$n543
+.subckt $_AND_ A=$n474 B=$n520 Y=$n544
+.subckt $_AND_ A=$n478 B=$n528 Y=$n545
+.subckt $_OR_ A=$n479 B=$n545 Y=$n546
+.subckt $_AND_ A=$n478 B=$n529 Y=$n547
+.subckt $_AND_ A=$n482 B=$n522 Y=$n548
+.subckt $_OR_ A=$n483 B=$n548 Y=$n549
+.subckt $_AND_ A=$n482 B=$n523 Y=$n550
+.subckt $_NOT_ A=$n531 Y=$n551
+.subckt $_AND_ A=$n458 B=$n460 Y=$n552
+.subckt $_AND_ A=$n462 B=$n464 Y=$n553
+.subckt $_AND_ A=$n466 B=$n468 Y=$n554
+.subckt $_AND_ A=$n470 B=$n472 Y=$n555
+.subckt $_AND_ A=$n474 B=$n476 Y=$n556
+.subckt $_AND_ A=$n478 B=$n480 Y=$n557
+.subckt $_AND_ A=$n482 B=$n484 Y=$n558
+.subckt $_AND_ A=$n552 B=$n553 Y=$n559
+.subckt $_AND_ A=$n554 B=$n555 Y=$n560
+.subckt $_AND_ A=$n556 B=$n557 Y=$n561
+.subckt $_AND_ A=$n559 B=$n560 Y=$n562
+.subckt $_AND_ A=$n561 B=$n558 Y=$n563
+.subckt $_AND_ A=$n562 B=$n563 Y=$n564
+.subckt $_OR_ A=$n551 B=$n564 Y=$n565
+.subckt $_NOT_ A=$n565 Y=$n566
+.subckt $_OR_ A=$n566 B=$n564 Y=$n567
+.subckt $_NOT_ A=gnd Y=$n568
+.subckt $_NOT_ A=gnd Y=$n569
+.subckt $_NOT_ A=gnd Y=$n570
+.subckt $_NOT_ A=gnd Y=$n571
+.subckt $_NOT_ A=gnd Y=$n572
+.subckt $_NOT_ A=gnd Y=$n573
+.subckt $_NOT_ A=$n169 Y=$n574
+.subckt $_NOT_ A=$n170 Y=$n575
+.subckt $_NOT_ A=$n171 Y=$n576
+.subckt $_NOT_ A=$n172 Y=$n577
+.subckt $_NOT_ A=$n173 Y=$n578
+.subckt $_NOT_ A=$n174 Y=$n579
+.subckt $_NOT_ A=$n175 Y=$n580
+.subckt $_NOT_ A=$n176 Y=$n581
+.subckt $_XOR_ A=$n436 B=$n568 Y=$n582
+.subckt $_AND_ A=$n436 B=$n568 Y=$n583
+.subckt $_XOR_ A=$n437 B=$n569 Y=$n584
+.subckt $_AND_ A=$n437 B=$n569 Y=$n585
+.subckt $_XOR_ A=$n438 B=$n570 Y=$n586
+.subckt $_AND_ A=$n438 B=$n570 Y=$n587
+.subckt $_XOR_ A=$n439 B=$n571 Y=$n588
+.subckt $_AND_ A=$n439 B=$n571 Y=$n589
+.subckt $_XOR_ A=$n440 B=$n572 Y=$n590
+.subckt $_AND_ A=$n440 B=$n572 Y=$n591
+.subckt $_XOR_ A=$n441 B=$n573 Y=$n592
+.subckt $_AND_ A=$n441 B=$n573 Y=$n593
+.subckt $_XOR_ A=$n442 B=$n574 Y=$n594
+.subckt $_AND_ A=$n442 B=$n574 Y=$n595
+.subckt $_XOR_ A=$n443 B=$n575 Y=$n596
+.subckt $_AND_ A=$n443 B=$n575 Y=$n597
+.subckt $_XOR_ A=gnd B=$n576 Y=$n598
+.subckt $_AND_ A=gnd B=$n576 Y=$n599
+.subckt $_XOR_ A=gnd B=$n577 Y=$n600
+.subckt $_AND_ A=gnd B=$n577 Y=$n601
+.subckt $_XOR_ A=gnd B=$n578 Y=$n602
+.subckt $_AND_ A=gnd B=$n578 Y=$n603
+.subckt $_XOR_ A=gnd B=$n579 Y=$n604
+.subckt $_AND_ A=gnd B=$n579 Y=$n605
+.subckt $_XOR_ A=gnd B=$n580 Y=$n606
+.subckt $_AND_ A=gnd B=$n580 Y=$n607
+.subckt $_XOR_ A=gnd B=$n581 Y=$n608
+.subckt $_AND_ A=gnd B=$n581 Y=$n609
+.subckt $_AND_ A=$n582 B=vcc Y=$n610
+.subckt $_OR_ A=$n583 B=$n610 Y=$n611
+.subckt $_AND_ A=$n584 B=$n611 Y=$n612
+.subckt $_OR_ A=$n585 B=$n612 Y=$n613
+.subckt $_AND_ A=$n584 B=$n582 Y=$n614
+.subckt $_AND_ A=$n588 B=$n587 Y=$n615
+.subckt $_OR_ A=$n589 B=$n615 Y=$n616
+.subckt $_AND_ A=$n588 B=$n586 Y=$n617
+.subckt $_AND_ A=$n592 B=$n591 Y=$n618
+.subckt $_OR_ A=$n593 B=$n618 Y=$n619
+.subckt $_AND_ A=$n592 B=$n590 Y=$n620
+.subckt $_AND_ A=$n596 B=$n595 Y=$n621
+.subckt $_OR_ A=$n597 B=$n621 Y=$n622
+.subckt $_AND_ A=$n596 B=$n594 Y=$n623
+.subckt $_AND_ A=$n600 B=$n599 Y=$n624
+.subckt $_OR_ A=$n601 B=$n624 Y=$n625
+.subckt $_AND_ A=$n600 B=$n598 Y=$n626
+.subckt $_AND_ A=$n604 B=$n603 Y=$n627
+.subckt $_OR_ A=$n605 B=$n627 Y=$n628
+.subckt $_AND_ A=$n604 B=$n602 Y=$n629
+.subckt $_AND_ A=$n608 B=$n607 Y=$n630
+.subckt $_OR_ A=$n609 B=$n630 Y=$n631
+.subckt $_AND_ A=$n608 B=$n606 Y=$n632
+.subckt $_AND_ A=$n617 B=$n613 Y=$n633
+.subckt $_OR_ A=$n616 B=$n633 Y=$n634
+.subckt $_AND_ A=$n617 B=$n614 Y=$n635
+.subckt $_AND_ A=$n623 B=$n619 Y=$n636
+.subckt $_OR_ A=$n622 B=$n636 Y=$n637
+.subckt $_AND_ A=$n623 B=$n620 Y=$n638
+.subckt $_AND_ A=$n629 B=$n625 Y=$n639
+.subckt $_OR_ A=$n628 B=$n639 Y=$n640
+.subckt $_AND_ A=$n629 B=$n626 Y=$n641
+.subckt $_AND_ A=$n638 B=$n634 Y=$n642
+.subckt $_OR_ A=$n637 B=$n642 Y=$n643
+.subckt $_AND_ A=$n638 B=$n635 Y=$n644
+.subckt $_AND_ A=$n641 B=$n643 Y=$n645
+.subckt $_OR_ A=$n640 B=$n645 Y=$n646
+.subckt $_AND_ A=$n641 B=$n644 Y=$n647
+.subckt $_AND_ A=$n620 B=$n634 Y=$n648
+.subckt $_OR_ A=$n619 B=$n648 Y=$n649
+.subckt $_AND_ A=$n620 B=$n635 Y=$n650
+.subckt $_AND_ A=$n626 B=$n643 Y=$n651
+.subckt $_OR_ A=$n625 B=$n651 Y=$n652
+.subckt $_AND_ A=$n626 B=$n644 Y=$n653
+.subckt $_AND_ A=$n632 B=$n646 Y=$n654
+.subckt $_OR_ A=$n631 B=$n654 Y=$n655
+.subckt $_AND_ A=$n632 B=$n647 Y=$n656
+.subckt $_AND_ A=$n586 B=$n613 Y=$n657
+.subckt $_OR_ A=$n587 B=$n657 Y=$n658
+.subckt $_AND_ A=$n586 B=$n614 Y=$n659
+.subckt $_AND_ A=$n590 B=$n634 Y=$n660
+.subckt $_OR_ A=$n591 B=$n660 Y=$n661
+.subckt $_AND_ A=$n590 B=$n635 Y=$n662
+.subckt $_AND_ A=$n594 B=$n649 Y=$n663
+.subckt $_OR_ A=$n595 B=$n663 Y=$n664
+.subckt $_AND_ A=$n594 B=$n650 Y=$n665
+.subckt $_AND_ A=$n598 B=$n643 Y=$n666
+.subckt $_OR_ A=$n599 B=$n666 Y=$n667
+.subckt $_AND_ A=$n598 B=$n644 Y=$n668
+.subckt $_AND_ A=$n602 B=$n652 Y=$n669
+.subckt $_OR_ A=$n603 B=$n669 Y=$n670
+.subckt $_AND_ A=$n602 B=$n653 Y=$n671
+.subckt $_AND_ A=$n606 B=$n646 Y=$n672
+.subckt $_OR_ A=$n607 B=$n672 Y=$n673
+.subckt $_AND_ A=$n606 B=$n647 Y=$n674
+.subckt $_XOR_ A=$n582 B=vcc Y=$n675
+.subckt $_XOR_ A=$n584 B=$n611 Y=$n676
+.subckt $_XOR_ A=$n586 B=$n613 Y=$n677
+.subckt $_XOR_ A=$n588 B=$n658 Y=$n678
+.subckt $_XOR_ A=$n590 B=$n634 Y=$n679
+.subckt $_XOR_ A=$n592 B=$n661 Y=$n680
+.subckt $_XOR_ A=$n594 B=$n649 Y=$n681
+.subckt $_XOR_ A=$n596 B=$n664 Y=$n682
+.subckt $_XOR_ A=$n598 B=$n643 Y=$n683
+.subckt $_XOR_ A=$n600 B=$n667 Y=$n684
+.subckt $_XOR_ A=$n602 B=$n652 Y=$n685
+.subckt $_XOR_ A=$n604 B=$n670 Y=$n686
+.subckt $_XOR_ A=$n606 B=$n646 Y=$n687
+.subckt $_XOR_ A=$n608 B=$n673 Y=$n688
+.subckt $_MUX_ A=$n436 B=$n675 S=$n567 Y=$n689
+.subckt $_MUX_ A=$n437 B=$n676 S=$n567 Y=$n690
+.subckt $_MUX_ A=$n438 B=$n677 S=$n567 Y=$n691
+.subckt $_MUX_ A=$n439 B=$n678 S=$n567 Y=$n692
+.subckt $_MUX_ A=$n440 B=$n679 S=$n567 Y=$n693
+.subckt $_MUX_ A=$n441 B=$n680 S=$n567 Y=$n694
+.subckt $_MUX_ A=$n442 B=$n681 S=$n567 Y=$n695
+.subckt $_MUX_ A=$n443 B=$n682 S=$n567 Y=$n696
+.subckt $_NOT_ A=gnd Y=$n697
+.subckt $_NOT_ A=gnd Y=$n698
+.subckt $_NOT_ A=gnd Y=$n699
+.subckt $_NOT_ A=gnd Y=$n700
+.subckt $_NOT_ A=gnd Y=$n701
+.subckt $_NOT_ A=$n169 Y=$n702
+.subckt $_NOT_ A=$n170 Y=$n703
+.subckt $_NOT_ A=$n171 Y=$n704
+.subckt $_NOT_ A=$n172 Y=$n705
+.subckt $_NOT_ A=$n173 Y=$n706
+.subckt $_NOT_ A=$n174 Y=$n707
+.subckt $_NOT_ A=$n175 Y=$n708
+.subckt $_NOT_ A=$n176 Y=$n709
+.subckt $_XOR_ A=$n689 B=$n697 Y=$n710
+.subckt $_AND_ A=$n689 B=$n697 Y=$n711
+.subckt $_XOR_ A=$n690 B=$n698 Y=$n712
+.subckt $_AND_ A=$n690 B=$n698 Y=$n713
+.subckt $_XOR_ A=$n691 B=$n699 Y=$n714
+.subckt $_AND_ A=$n691 B=$n699 Y=$n715
+.subckt $_XOR_ A=$n692 B=$n700 Y=$n716
+.subckt $_AND_ A=$n692 B=$n700 Y=$n717
+.subckt $_XOR_ A=$n693 B=$n701 Y=$n718
+.subckt $_AND_ A=$n693 B=$n701 Y=$n719
+.subckt $_XOR_ A=$n694 B=$n702 Y=$n720
+.subckt $_AND_ A=$n694 B=$n702 Y=$n721
+.subckt $_XOR_ A=$n695 B=$n703 Y=$n722
+.subckt $_AND_ A=$n695 B=$n703 Y=$n723
+.subckt $_XOR_ A=$n696 B=$n704 Y=$n724
+.subckt $_AND_ A=$n696 B=$n704 Y=$n725
+.subckt $_XOR_ A=gnd B=$n705 Y=$n726
+.subckt $_AND_ A=gnd B=$n705 Y=$n727
+.subckt $_XOR_ A=gnd B=$n706 Y=$n728
+.subckt $_AND_ A=gnd B=$n706 Y=$n729
+.subckt $_XOR_ A=gnd B=$n707 Y=$n730
+.subckt $_AND_ A=gnd B=$n707 Y=$n731
+.subckt $_XOR_ A=gnd B=$n708 Y=$n732
+.subckt $_AND_ A=gnd B=$n708 Y=$n733
+.subckt $_XOR_ A=gnd B=$n709 Y=$n734
+.subckt $_AND_ A=gnd B=$n709 Y=$n735
+.subckt $_AND_ A=$n710 B=vcc Y=$n736
+.subckt $_OR_ A=$n711 B=$n736 Y=$n737
+.subckt $_AND_ A=$n712 B=$n737 Y=$n738
+.subckt $_OR_ A=$n713 B=$n738 Y=$n739
+.subckt $_AND_ A=$n712 B=$n710 Y=$n740
+.subckt $_AND_ A=$n716 B=$n715 Y=$n741
+.subckt $_OR_ A=$n717 B=$n741 Y=$n742
+.subckt $_AND_ A=$n716 B=$n714 Y=$n743
+.subckt $_AND_ A=$n720 B=$n719 Y=$n744
+.subckt $_OR_ A=$n721 B=$n744 Y=$n745
+.subckt $_AND_ A=$n720 B=$n718 Y=$n746
+.subckt $_AND_ A=$n724 B=$n723 Y=$n747
+.subckt $_OR_ A=$n725 B=$n747 Y=$n748
+.subckt $_AND_ A=$n724 B=$n722 Y=$n749
+.subckt $_AND_ A=$n728 B=$n727 Y=$n750
+.subckt $_OR_ A=$n729 B=$n750 Y=$n751
+.subckt $_AND_ A=$n728 B=$n726 Y=$n752
+.subckt $_AND_ A=$n732 B=$n731 Y=$n753
+.subckt $_OR_ A=$n733 B=$n753 Y=$n754
+.subckt $_AND_ A=$n732 B=$n730 Y=$n755
+.subckt $_AND_ A=$n743 B=$n739 Y=$n756
+.subckt $_OR_ A=$n742 B=$n756 Y=$n757
+.subckt $_AND_ A=$n743 B=$n740 Y=$n758
+.subckt $_AND_ A=$n749 B=$n745 Y=$n759
+.subckt $_OR_ A=$n748 B=$n759 Y=$n760
+.subckt $_AND_ A=$n749 B=$n746 Y=$n761
+.subckt $_AND_ A=$n755 B=$n751 Y=$n762
+.subckt $_OR_ A=$n754 B=$n762 Y=$n763
+.subckt $_AND_ A=$n755 B=$n752 Y=$n764
+.subckt $_AND_ A=$n761 B=$n757 Y=$n765
+.subckt $_OR_ A=$n760 B=$n765 Y=$n766
+.subckt $_AND_ A=$n761 B=$n758 Y=$n767
+.subckt $_AND_ A=$n764 B=$n766 Y=$n768
+.subckt $_OR_ A=$n763 B=$n768 Y=$n769
+.subckt $_AND_ A=$n764 B=$n767 Y=$n770
+.subckt $_AND_ A=$n746 B=$n757 Y=$n771
+.subckt $_OR_ A=$n745 B=$n771 Y=$n772
+.subckt $_AND_ A=$n746 B=$n758 Y=$n773
+.subckt $_AND_ A=$n752 B=$n766 Y=$n774
+.subckt $_OR_ A=$n751 B=$n774 Y=$n775
+.subckt $_AND_ A=$n752 B=$n767 Y=$n776
+.subckt $_AND_ A=$n714 B=$n739 Y=$n777
+.subckt $_OR_ A=$n715 B=$n777 Y=$n778
+.subckt $_AND_ A=$n714 B=$n740 Y=$n779
+.subckt $_AND_ A=$n718 B=$n757 Y=$n780
+.subckt $_OR_ A=$n719 B=$n780 Y=$n781
+.subckt $_AND_ A=$n718 B=$n758 Y=$n782
+.subckt $_AND_ A=$n722 B=$n772 Y=$n783
+.subckt $_OR_ A=$n723 B=$n783 Y=$n784
+.subckt $_AND_ A=$n722 B=$n773 Y=$n785
+.subckt $_AND_ A=$n726 B=$n766 Y=$n786
+.subckt $_OR_ A=$n727 B=$n786 Y=$n787
+.subckt $_AND_ A=$n726 B=$n767 Y=$n788
+.subckt $_AND_ A=$n730 B=$n775 Y=$n789
+.subckt $_OR_ A=$n731 B=$n789 Y=$n790
+.subckt $_AND_ A=$n730 B=$n776 Y=$n791
+.subckt $_AND_ A=$n734 B=$n769 Y=$n792
+.subckt $_OR_ A=$n735 B=$n792 Y=$n793
+.subckt $_AND_ A=$n734 B=$n770 Y=$n794
+.subckt $_NOT_ A=$n793 Y=$n795
+.subckt $_AND_ A=$n710 B=$n712 Y=$n796
+.subckt $_AND_ A=$n714 B=$n716 Y=$n797
+.subckt $_AND_ A=$n718 B=$n720 Y=$n798
+.subckt $_AND_ A=$n722 B=$n724 Y=$n799
+.subckt $_AND_ A=$n726 B=$n728 Y=$n800
+.subckt $_AND_ A=$n730 B=$n732 Y=$n801
+.subckt $_AND_ A=$n796 B=$n797 Y=$n802
+.subckt $_AND_ A=$n798 B=$n799 Y=$n803
+.subckt $_AND_ A=$n800 B=$n801 Y=$n804
+.subckt $_AND_ A=$n802 B=$n803 Y=$n805
+.subckt $_AND_ A=$n804 B=$n734 Y=$n806
+.subckt $_AND_ A=$n805 B=$n806 Y=$n807
+.subckt $_OR_ A=$n795 B=$n807 Y=$n808
+.subckt $_NOT_ A=$n808 Y=$n809
+.subckt $_OR_ A=$n809 B=$n807 Y=$n810
+.subckt $_NOT_ A=gnd Y=$n811
+.subckt $_NOT_ A=gnd Y=$n812
+.subckt $_NOT_ A=gnd Y=$n813
+.subckt $_NOT_ A=gnd Y=$n814
+.subckt $_NOT_ A=gnd Y=$n815
+.subckt $_NOT_ A=$n169 Y=$n816
+.subckt $_NOT_ A=$n170 Y=$n817
+.subckt $_NOT_ A=$n171 Y=$n818
+.subckt $_NOT_ A=$n172 Y=$n819
+.subckt $_NOT_ A=$n173 Y=$n820
+.subckt $_NOT_ A=$n174 Y=$n821
+.subckt $_NOT_ A=$n175 Y=$n822
+.subckt $_NOT_ A=$n176 Y=$n823
+.subckt $_XOR_ A=$n689 B=$n811 Y=$n824
+.subckt $_AND_ A=$n689 B=$n811 Y=$n825
+.subckt $_XOR_ A=$n690 B=$n812 Y=$n826
+.subckt $_AND_ A=$n690 B=$n812 Y=$n827
+.subckt $_XOR_ A=$n691 B=$n813 Y=$n828
+.subckt $_AND_ A=$n691 B=$n813 Y=$n829
+.subckt $_XOR_ A=$n692 B=$n814 Y=$n830
+.subckt $_AND_ A=$n692 B=$n814 Y=$n831
+.subckt $_XOR_ A=$n693 B=$n815 Y=$n832
+.subckt $_AND_ A=$n693 B=$n815 Y=$n833
+.subckt $_XOR_ A=$n694 B=$n816 Y=$n834
+.subckt $_AND_ A=$n694 B=$n816 Y=$n835
+.subckt $_XOR_ A=$n695 B=$n817 Y=$n836
+.subckt $_AND_ A=$n695 B=$n817 Y=$n837
+.subckt $_XOR_ A=$n696 B=$n818 Y=$n838
+.subckt $_AND_ A=$n696 B=$n818 Y=$n839
+.subckt $_XOR_ A=gnd B=$n819 Y=$n840
+.subckt $_AND_ A=gnd B=$n819 Y=$n841
+.subckt $_XOR_ A=gnd B=$n820 Y=$n842
+.subckt $_AND_ A=gnd B=$n820 Y=$n843
+.subckt $_XOR_ A=gnd B=$n821 Y=$n844
+.subckt $_AND_ A=gnd B=$n821 Y=$n845
+.subckt $_XOR_ A=gnd B=$n822 Y=$n846
+.subckt $_AND_ A=gnd B=$n822 Y=$n847
+.subckt $_XOR_ A=gnd B=$n823 Y=$n848
+.subckt $_AND_ A=gnd B=$n823 Y=$n849
+.subckt $_AND_ A=$n824 B=vcc Y=$n850
+.subckt $_OR_ A=$n825 B=$n850 Y=$n851
+.subckt $_AND_ A=$n826 B=$n851 Y=$n852
+.subckt $_OR_ A=$n827 B=$n852 Y=$n853
+.subckt $_AND_ A=$n826 B=$n824 Y=$n854
+.subckt $_AND_ A=$n830 B=$n829 Y=$n855
+.subckt $_OR_ A=$n831 B=$n855 Y=$n856
+.subckt $_AND_ A=$n830 B=$n828 Y=$n857
+.subckt $_AND_ A=$n834 B=$n833 Y=$n858
+.subckt $_OR_ A=$n835 B=$n858 Y=$n859
+.subckt $_AND_ A=$n834 B=$n832 Y=$n860
+.subckt $_AND_ A=$n838 B=$n837 Y=$n861
+.subckt $_OR_ A=$n839 B=$n861 Y=$n862
+.subckt $_AND_ A=$n838 B=$n836 Y=$n863
+.subckt $_AND_ A=$n842 B=$n841 Y=$n864
+.subckt $_OR_ A=$n843 B=$n864 Y=$n865
+.subckt $_AND_ A=$n842 B=$n840 Y=$n866
+.subckt $_AND_ A=$n846 B=$n845 Y=$n867
+.subckt $_OR_ A=$n847 B=$n867 Y=$n868
+.subckt $_AND_ A=$n846 B=$n844 Y=$n869
+.subckt $_AND_ A=$n857 B=$n853 Y=$n870
+.subckt $_OR_ A=$n856 B=$n870 Y=$n871
+.subckt $_AND_ A=$n857 B=$n854 Y=$n872
+.subckt $_AND_ A=$n863 B=$n859 Y=$n873
+.subckt $_OR_ A=$n862 B=$n873 Y=$n874
+.subckt $_AND_ A=$n863 B=$n860 Y=$n875
+.subckt $_AND_ A=$n869 B=$n865 Y=$n876
+.subckt $_OR_ A=$n868 B=$n876 Y=$n877
+.subckt $_AND_ A=$n869 B=$n866 Y=$n878
+.subckt $_AND_ A=$n875 B=$n871 Y=$n879
+.subckt $_OR_ A=$n874 B=$n879 Y=$n880
+.subckt $_AND_ A=$n875 B=$n872 Y=$n881
+.subckt $_AND_ A=$n878 B=$n880 Y=$n882
+.subckt $_OR_ A=$n877 B=$n882 Y=$n883
+.subckt $_AND_ A=$n878 B=$n881 Y=$n884
+.subckt $_AND_ A=$n860 B=$n871 Y=$n885
+.subckt $_OR_ A=$n859 B=$n885 Y=$n886
+.subckt $_AND_ A=$n860 B=$n872 Y=$n887
+.subckt $_AND_ A=$n866 B=$n880 Y=$n888
+.subckt $_OR_ A=$n865 B=$n888 Y=$n889
+.subckt $_AND_ A=$n866 B=$n881 Y=$n890
+.subckt $_AND_ A=$n828 B=$n853 Y=$n891
+.subckt $_OR_ A=$n829 B=$n891 Y=$n892
+.subckt $_AND_ A=$n828 B=$n854 Y=$n893
+.subckt $_AND_ A=$n832 B=$n871 Y=$n894
+.subckt $_OR_ A=$n833 B=$n894 Y=$n895
+.subckt $_AND_ A=$n832 B=$n872 Y=$n896
+.subckt $_AND_ A=$n836 B=$n886 Y=$n897
+.subckt $_OR_ A=$n837 B=$n897 Y=$n898
+.subckt $_AND_ A=$n836 B=$n887 Y=$n899
+.subckt $_AND_ A=$n840 B=$n880 Y=$n900
+.subckt $_OR_ A=$n841 B=$n900 Y=$n901
+.subckt $_AND_ A=$n840 B=$n881 Y=$n902
+.subckt $_AND_ A=$n844 B=$n889 Y=$n903
+.subckt $_OR_ A=$n845 B=$n903 Y=$n904
+.subckt $_AND_ A=$n844 B=$n890 Y=$n905
+.subckt $_AND_ A=$n848 B=$n883 Y=$n906
+.subckt $_OR_ A=$n849 B=$n906 Y=$n907
+.subckt $_AND_ A=$n848 B=$n884 Y=$n908
+.subckt $_XOR_ A=$n824 B=vcc Y=$n909
+.subckt $_XOR_ A=$n826 B=$n851 Y=$n910
+.subckt $_XOR_ A=$n828 B=$n853 Y=$n911
+.subckt $_XOR_ A=$n830 B=$n892 Y=$n912
+.subckt $_XOR_ A=$n832 B=$n871 Y=$n913
+.subckt $_XOR_ A=$n834 B=$n895 Y=$n914
+.subckt $_XOR_ A=$n836 B=$n886 Y=$n915
+.subckt $_XOR_ A=$n838 B=$n898 Y=$n916
+.subckt $_XOR_ A=$n840 B=$n880 Y=$n917
+.subckt $_XOR_ A=$n842 B=$n901 Y=$n918
+.subckt $_XOR_ A=$n844 B=$n889 Y=$n919
+.subckt $_XOR_ A=$n846 B=$n904 Y=$n920
+.subckt $_XOR_ A=$n848 B=$n883 Y=$n921
+.subckt $_MUX_ A=$n689 B=$n909 S=$n810 Y=$n922
+.subckt $_MUX_ A=$n690 B=$n910 S=$n810 Y=$n923
+.subckt $_MUX_ A=$n691 B=$n911 S=$n810 Y=$n924
+.subckt $_MUX_ A=$n692 B=$n912 S=$n810 Y=$n925
+.subckt $_MUX_ A=$n693 B=$n913 S=$n810 Y=$n926
+.subckt $_MUX_ A=$n694 B=$n914 S=$n810 Y=$n927
+.subckt $_MUX_ A=$n695 B=$n915 S=$n810 Y=$n928
+.subckt $_MUX_ A=$n696 B=$n916 S=$n810 Y=$n929
+.subckt $_NOT_ A=gnd Y=$n930
+.subckt $_NOT_ A=gnd Y=$n931
+.subckt $_NOT_ A=gnd Y=$n932
+.subckt $_NOT_ A=gnd Y=$n933
+.subckt $_NOT_ A=$n169 Y=$n934
+.subckt $_NOT_ A=$n170 Y=$n935
+.subckt $_NOT_ A=$n171 Y=$n936
+.subckt $_NOT_ A=$n172 Y=$n937
+.subckt $_NOT_ A=$n173 Y=$n938
+.subckt $_NOT_ A=$n174 Y=$n939
+.subckt $_NOT_ A=$n175 Y=$n940
+.subckt $_NOT_ A=$n176 Y=$n941
+.subckt $_XOR_ A=$n922 B=$n930 Y=$n942
+.subckt $_AND_ A=$n922 B=$n930 Y=$n943
+.subckt $_XOR_ A=$n923 B=$n931 Y=$n944
+.subckt $_AND_ A=$n923 B=$n931 Y=$n945
+.subckt $_XOR_ A=$n924 B=$n932 Y=$n946
+.subckt $_AND_ A=$n924 B=$n932 Y=$n947
+.subckt $_XOR_ A=$n925 B=$n933 Y=$n948
+.subckt $_AND_ A=$n925 B=$n933 Y=$n949
+.subckt $_XOR_ A=$n926 B=$n934 Y=$n950
+.subckt $_AND_ A=$n926 B=$n934 Y=$n951
+.subckt $_XOR_ A=$n927 B=$n935 Y=$n952
+.subckt $_AND_ A=$n927 B=$n935 Y=$n953
+.subckt $_XOR_ A=$n928 B=$n936 Y=$n954
+.subckt $_AND_ A=$n928 B=$n936 Y=$n955
+.subckt $_XOR_ A=$n929 B=$n937 Y=$n956
+.subckt $_AND_ A=$n929 B=$n937 Y=$n957
+.subckt $_XOR_ A=gnd B=$n938 Y=$n958
+.subckt $_AND_ A=gnd B=$n938 Y=$n959
+.subckt $_XOR_ A=gnd B=$n939 Y=$n960
+.subckt $_AND_ A=gnd B=$n939 Y=$n961
+.subckt $_XOR_ A=gnd B=$n940 Y=$n962
+.subckt $_AND_ A=gnd B=$n940 Y=$n963
+.subckt $_XOR_ A=gnd B=$n941 Y=$n964
+.subckt $_AND_ A=gnd B=$n941 Y=$n965
+.subckt $_AND_ A=$n942 B=vcc Y=$n966
+.subckt $_OR_ A=$n943 B=$n966 Y=$n967
+.subckt $_AND_ A=$n944 B=$n967 Y=$n968
+.subckt $_OR_ A=$n945 B=$n968 Y=$n969
+.subckt $_AND_ A=$n944 B=$n942 Y=$n970
+.subckt $_AND_ A=$n948 B=$n947 Y=$n971
+.subckt $_OR_ A=$n949 B=$n971 Y=$n972
+.subckt $_AND_ A=$n948 B=$n946 Y=$n973
+.subckt $_AND_ A=$n952 B=$n951 Y=$n974
+.subckt $_OR_ A=$n953 B=$n974 Y=$n975
+.subckt $_AND_ A=$n952 B=$n950 Y=$n976
+.subckt $_AND_ A=$n956 B=$n955 Y=$n977
+.subckt $_OR_ A=$n957 B=$n977 Y=$n978
+.subckt $_AND_ A=$n956 B=$n954 Y=$n979
+.subckt $_AND_ A=$n960 B=$n959 Y=$n980
+.subckt $_OR_ A=$n961 B=$n980 Y=$n981
+.subckt $_AND_ A=$n960 B=$n958 Y=$n982
+.subckt $_AND_ A=$n964 B=$n963 Y=$n983
+.subckt $_OR_ A=$n965 B=$n983 Y=$n984
+.subckt $_AND_ A=$n964 B=$n962 Y=$n985
+.subckt $_AND_ A=$n973 B=$n969 Y=$n986
+.subckt $_OR_ A=$n972 B=$n986 Y=$n987
+.subckt $_AND_ A=$n973 B=$n970 Y=$n988
+.subckt $_AND_ A=$n979 B=$n975 Y=$n989
+.subckt $_OR_ A=$n978 B=$n989 Y=$n990
+.subckt $_AND_ A=$n979 B=$n976 Y=$n991
+.subckt $_AND_ A=$n985 B=$n981 Y=$n992
+.subckt $_OR_ A=$n984 B=$n992 Y=$n993
+.subckt $_AND_ A=$n985 B=$n982 Y=$n994
+.subckt $_AND_ A=$n991 B=$n987 Y=$n995
+.subckt $_OR_ A=$n990 B=$n995 Y=$n996
+.subckt $_AND_ A=$n991 B=$n988 Y=$n997
+.subckt $_AND_ A=$n994 B=$n996 Y=$n998
+.subckt $_OR_ A=$n993 B=$n998 Y=$n999
+.subckt $_AND_ A=$n994 B=$n997 Y=$n1000
+.subckt $_AND_ A=$n976 B=$n987 Y=$n1001
+.subckt $_OR_ A=$n975 B=$n1001 Y=$n1002
+.subckt $_AND_ A=$n976 B=$n988 Y=$n1003
+.subckt $_AND_ A=$n982 B=$n996 Y=$n1004
+.subckt $_OR_ A=$n981 B=$n1004 Y=$n1005
+.subckt $_AND_ A=$n982 B=$n997 Y=$n1006
+.subckt $_AND_ A=$n946 B=$n969 Y=$n1007
+.subckt $_OR_ A=$n947 B=$n1007 Y=$n1008
+.subckt $_AND_ A=$n946 B=$n970 Y=$n1009
+.subckt $_AND_ A=$n950 B=$n987 Y=$n1010
+.subckt $_OR_ A=$n951 B=$n1010 Y=$n1011
+.subckt $_AND_ A=$n950 B=$n988 Y=$n1012
+.subckt $_AND_ A=$n954 B=$n1002 Y=$n1013
+.subckt $_OR_ A=$n955 B=$n1013 Y=$n1014
+.subckt $_AND_ A=$n954 B=$n1003 Y=$n1015
+.subckt $_AND_ A=$n958 B=$n996 Y=$n1016
+.subckt $_OR_ A=$n959 B=$n1016 Y=$n1017
+.subckt $_AND_ A=$n958 B=$n997 Y=$n1018
+.subckt $_AND_ A=$n962 B=$n1005 Y=$n1019
+.subckt $_OR_ A=$n963 B=$n1019 Y=$n1020
+.subckt $_AND_ A=$n962 B=$n1006 Y=$n1021
+.subckt $_NOT_ A=$n999 Y=$n1022
+.subckt $_AND_ A=$n942 B=$n944 Y=$n1023
+.subckt $_AND_ A=$n946 B=$n948 Y=$n1024
+.subckt $_AND_ A=$n950 B=$n952 Y=$n1025
+.subckt $_AND_ A=$n954 B=$n956 Y=$n1026
+.subckt $_AND_ A=$n958 B=$n960 Y=$n1027
+.subckt $_AND_ A=$n962 B=$n964 Y=$n1028
+.subckt $_AND_ A=$n1023 B=$n1024 Y=$n1029
+.subckt $_AND_ A=$n1025 B=$n1026 Y=$n1030
+.subckt $_AND_ A=$n1027 B=$n1028 Y=$n1031
+.subckt $_AND_ A=$n1029 B=$n1030 Y=$n1032
+.subckt $_AND_ A=$n1032 B=$n1031 Y=$n1033
+.subckt $_OR_ A=$n1022 B=$n1033 Y=$n1034
+.subckt $_NOT_ A=$n1034 Y=$n1035
+.subckt $_OR_ A=$n1035 B=$n1033 Y=$n1036
+.subckt $_NOT_ A=gnd Y=$n1037
+.subckt $_NOT_ A=gnd Y=$n1038
+.subckt $_NOT_ A=gnd Y=$n1039
+.subckt $_NOT_ A=gnd Y=$n1040
+.subckt $_NOT_ A=$n169 Y=$n1041
+.subckt $_NOT_ A=$n170 Y=$n1042
+.subckt $_NOT_ A=$n171 Y=$n1043
+.subckt $_NOT_ A=$n172 Y=$n1044
+.subckt $_NOT_ A=$n173 Y=$n1045
+.subckt $_NOT_ A=$n174 Y=$n1046
+.subckt $_NOT_ A=$n175 Y=$n1047
+.subckt $_NOT_ A=$n176 Y=$n1048
+.subckt $_XOR_ A=$n922 B=$n1037 Y=$n1049
+.subckt $_AND_ A=$n922 B=$n1037 Y=$n1050
+.subckt $_XOR_ A=$n923 B=$n1038 Y=$n1051
+.subckt $_AND_ A=$n923 B=$n1038 Y=$n1052
+.subckt $_XOR_ A=$n924 B=$n1039 Y=$n1053
+.subckt $_AND_ A=$n924 B=$n1039 Y=$n1054
+.subckt $_XOR_ A=$n925 B=$n1040 Y=$n1055
+.subckt $_AND_ A=$n925 B=$n1040 Y=$n1056
+.subckt $_XOR_ A=$n926 B=$n1041 Y=$n1057
+.subckt $_AND_ A=$n926 B=$n1041 Y=$n1058
+.subckt $_XOR_ A=$n927 B=$n1042 Y=$n1059
+.subckt $_AND_ A=$n927 B=$n1042 Y=$n1060
+.subckt $_XOR_ A=$n928 B=$n1043 Y=$n1061
+.subckt $_AND_ A=$n928 B=$n1043 Y=$n1062
+.subckt $_XOR_ A=$n929 B=$n1044 Y=$n1063
+.subckt $_AND_ A=$n929 B=$n1044 Y=$n1064
+.subckt $_XOR_ A=gnd B=$n1045 Y=$n1065
+.subckt $_AND_ A=gnd B=$n1045 Y=$n1066
+.subckt $_XOR_ A=gnd B=$n1046 Y=$n1067
+.subckt $_AND_ A=gnd B=$n1046 Y=$n1068
+.subckt $_XOR_ A=gnd B=$n1047 Y=$n1069
+.subckt $_AND_ A=gnd B=$n1047 Y=$n1070
+.subckt $_XOR_ A=gnd B=$n1048 Y=$n1071
+.subckt $_AND_ A=gnd B=$n1048 Y=$n1072
+.subckt $_AND_ A=$n1049 B=vcc Y=$n1073
+.subckt $_OR_ A=$n1050 B=$n1073 Y=$n1074
+.subckt $_AND_ A=$n1051 B=$n1074 Y=$n1075
+.subckt $_OR_ A=$n1052 B=$n1075 Y=$n1076
+.subckt $_AND_ A=$n1051 B=$n1049 Y=$n1077
+.subckt $_AND_ A=$n1055 B=$n1054 Y=$n1078
+.subckt $_OR_ A=$n1056 B=$n1078 Y=$n1079
+.subckt $_AND_ A=$n1055 B=$n1053 Y=$n1080
+.subckt $_AND_ A=$n1059 B=$n1058 Y=$n1081
+.subckt $_OR_ A=$n1060 B=$n1081 Y=$n1082
+.subckt $_AND_ A=$n1059 B=$n1057 Y=$n1083
+.subckt $_AND_ A=$n1063 B=$n1062 Y=$n1084
+.subckt $_OR_ A=$n1064 B=$n1084 Y=$n1085
+.subckt $_AND_ A=$n1063 B=$n1061 Y=$n1086
+.subckt $_AND_ A=$n1067 B=$n1066 Y=$n1087
+.subckt $_OR_ A=$n1068 B=$n1087 Y=$n1088
+.subckt $_AND_ A=$n1067 B=$n1065 Y=$n1089
+.subckt $_AND_ A=$n1071 B=$n1070 Y=$n1090
+.subckt $_OR_ A=$n1072 B=$n1090 Y=$n1091
+.subckt $_AND_ A=$n1071 B=$n1069 Y=$n1092
+.subckt $_AND_ A=$n1080 B=$n1076 Y=$n1093
+.subckt $_OR_ A=$n1079 B=$n1093 Y=$n1094
+.subckt $_AND_ A=$n1080 B=$n1077 Y=$n1095
+.subckt $_AND_ A=$n1086 B=$n1082 Y=$n1096
+.subckt $_OR_ A=$n1085 B=$n1096 Y=$n1097
+.subckt $_AND_ A=$n1086 B=$n1083 Y=$n1098
+.subckt $_AND_ A=$n1092 B=$n1088 Y=$n1099
+.subckt $_OR_ A=$n1091 B=$n1099 Y=$n1100
+.subckt $_AND_ A=$n1092 B=$n1089 Y=$n1101
+.subckt $_AND_ A=$n1098 B=$n1094 Y=$n1102
+.subckt $_OR_ A=$n1097 B=$n1102 Y=$n1103
+.subckt $_AND_ A=$n1098 B=$n1095 Y=$n1104
+.subckt $_AND_ A=$n1101 B=$n1103 Y=$n1105
+.subckt $_OR_ A=$n1100 B=$n1105 Y=$n1106
+.subckt $_AND_ A=$n1101 B=$n1104 Y=$n1107
+.subckt $_AND_ A=$n1083 B=$n1094 Y=$n1108
+.subckt $_OR_ A=$n1082 B=$n1108 Y=$n1109
+.subckt $_AND_ A=$n1083 B=$n1095 Y=$n1110
+.subckt $_AND_ A=$n1089 B=$n1103 Y=$n1111
+.subckt $_OR_ A=$n1088 B=$n1111 Y=$n1112
+.subckt $_AND_ A=$n1089 B=$n1104 Y=$n1113
+.subckt $_AND_ A=$n1053 B=$n1076 Y=$n1114
+.subckt $_OR_ A=$n1054 B=$n1114 Y=$n1115
+.subckt $_AND_ A=$n1053 B=$n1077 Y=$n1116
+.subckt $_AND_ A=$n1057 B=$n1094 Y=$n1117
+.subckt $_OR_ A=$n1058 B=$n1117 Y=$n1118
+.subckt $_AND_ A=$n1057 B=$n1095 Y=$n1119
+.subckt $_AND_ A=$n1061 B=$n1109 Y=$n1120
+.subckt $_OR_ A=$n1062 B=$n1120 Y=$n1121
+.subckt $_AND_ A=$n1061 B=$n1110 Y=$n1122
+.subckt $_AND_ A=$n1065 B=$n1103 Y=$n1123
+.subckt $_OR_ A=$n1066 B=$n1123 Y=$n1124
+.subckt $_AND_ A=$n1065 B=$n1104 Y=$n1125
+.subckt $_AND_ A=$n1069 B=$n1112 Y=$n1126
+.subckt $_OR_ A=$n1070 B=$n1126 Y=$n1127
+.subckt $_AND_ A=$n1069 B=$n1113 Y=$n1128
+.subckt $_XOR_ A=$n1049 B=vcc Y=$n1129
+.subckt $_XOR_ A=$n1051 B=$n1074 Y=$n1130
+.subckt $_XOR_ A=$n1053 B=$n1076 Y=$n1131
+.subckt $_XOR_ A=$n1055 B=$n1115 Y=$n1132
+.subckt $_XOR_ A=$n1057 B=$n1094 Y=$n1133
+.subckt $_XOR_ A=$n1059 B=$n1118 Y=$n1134
+.subckt $_XOR_ A=$n1061 B=$n1109 Y=$n1135
+.subckt $_XOR_ A=$n1063 B=$n1121 Y=$n1136
+.subckt $_XOR_ A=$n1065 B=$n1103 Y=$n1137
+.subckt $_XOR_ A=$n1067 B=$n1124 Y=$n1138
+.subckt $_XOR_ A=$n1069 B=$n1112 Y=$n1139
+.subckt $_XOR_ A=$n1071 B=$n1127 Y=$n1140
+.subckt $_MUX_ A=$n922 B=$n1129 S=$n1036 Y=$n1141
+.subckt $_MUX_ A=$n923 B=$n1130 S=$n1036 Y=$n1142
+.subckt $_MUX_ A=$n924 B=$n1131 S=$n1036 Y=$n1143
+.subckt $_MUX_ A=$n925 B=$n1132 S=$n1036 Y=$n1144
+.subckt $_MUX_ A=$n926 B=$n1133 S=$n1036 Y=$n1145
+.subckt $_MUX_ A=$n927 B=$n1134 S=$n1036 Y=$n1146
+.subckt $_MUX_ A=$n928 B=$n1135 S=$n1036 Y=$n1147
+.subckt $_MUX_ A=$n929 B=$n1136 S=$n1036 Y=$n1148
+.subckt $_NOT_ A=gnd Y=$n1149
+.subckt $_NOT_ A=gnd Y=$n1150
+.subckt $_NOT_ A=gnd Y=$n1151
+.subckt $_NOT_ A=$n169 Y=$n1152
+.subckt $_NOT_ A=$n170 Y=$n1153
+.subckt $_NOT_ A=$n171 Y=$n1154
+.subckt $_NOT_ A=$n172 Y=$n1155
+.subckt $_NOT_ A=$n173 Y=$n1156
+.subckt $_NOT_ A=$n174 Y=$n1157
+.subckt $_NOT_ A=$n175 Y=$n1158
+.subckt $_NOT_ A=$n176 Y=$n1159
+.subckt $_XOR_ A=$n1141 B=$n1149 Y=$n1160
+.subckt $_AND_ A=$n1141 B=$n1149 Y=$n1161
+.subckt $_XOR_ A=$n1142 B=$n1150 Y=$n1162
+.subckt $_AND_ A=$n1142 B=$n1150 Y=$n1163
+.subckt $_XOR_ A=$n1143 B=$n1151 Y=$n1164
+.subckt $_AND_ A=$n1143 B=$n1151 Y=$n1165
+.subckt $_XOR_ A=$n1144 B=$n1152 Y=$n1166
+.subckt $_AND_ A=$n1144 B=$n1152 Y=$n1167
+.subckt $_XOR_ A=$n1145 B=$n1153 Y=$n1168
+.subckt $_AND_ A=$n1145 B=$n1153 Y=$n1169
+.subckt $_XOR_ A=$n1146 B=$n1154 Y=$n1170
+.subckt $_AND_ A=$n1146 B=$n1154 Y=$n1171
+.subckt $_XOR_ A=$n1147 B=$n1155 Y=$n1172
+.subckt $_AND_ A=$n1147 B=$n1155 Y=$n1173
+.subckt $_XOR_ A=$n1148 B=$n1156 Y=$n1174
+.subckt $_AND_ A=$n1148 B=$n1156 Y=$n1175
+.subckt $_XOR_ A=gnd B=$n1157 Y=$n1176
+.subckt $_AND_ A=gnd B=$n1157 Y=$n1177
+.subckt $_XOR_ A=gnd B=$n1158 Y=$n1178
+.subckt $_AND_ A=gnd B=$n1158 Y=$n1179
+.subckt $_XOR_ A=gnd B=$n1159 Y=$n1180
+.subckt $_AND_ A=gnd B=$n1159 Y=$n1181
+.subckt $_AND_ A=$n1160 B=vcc Y=$n1182
+.subckt $_OR_ A=$n1161 B=$n1182 Y=$n1183
+.subckt $_AND_ A=$n1162 B=$n1183 Y=$n1184
+.subckt $_OR_ A=$n1163 B=$n1184 Y=$n1185
+.subckt $_AND_ A=$n1162 B=$n1160 Y=$n1186
+.subckt $_AND_ A=$n1166 B=$n1165 Y=$n1187
+.subckt $_OR_ A=$n1167 B=$n1187 Y=$n1188
+.subckt $_AND_ A=$n1166 B=$n1164 Y=$n1189
+.subckt $_AND_ A=$n1170 B=$n1169 Y=$n1190
+.subckt $_OR_ A=$n1171 B=$n1190 Y=$n1191
+.subckt $_AND_ A=$n1170 B=$n1168 Y=$n1192
+.subckt $_AND_ A=$n1174 B=$n1173 Y=$n1193
+.subckt $_OR_ A=$n1175 B=$n1193 Y=$n1194
+.subckt $_AND_ A=$n1174 B=$n1172 Y=$n1195
+.subckt $_AND_ A=$n1178 B=$n1177 Y=$n1196
+.subckt $_OR_ A=$n1179 B=$n1196 Y=$n1197
+.subckt $_AND_ A=$n1178 B=$n1176 Y=$n1198
+.subckt $_AND_ A=$n1189 B=$n1185 Y=$n1199
+.subckt $_OR_ A=$n1188 B=$n1199 Y=$n1200
+.subckt $_AND_ A=$n1189 B=$n1186 Y=$n1201
+.subckt $_AND_ A=$n1195 B=$n1191 Y=$n1202
+.subckt $_OR_ A=$n1194 B=$n1202 Y=$n1203
+.subckt $_AND_ A=$n1195 B=$n1192 Y=$n1204
+.subckt $_AND_ A=$n1204 B=$n1200 Y=$n1205
+.subckt $_OR_ A=$n1203 B=$n1205 Y=$n1206
+.subckt $_AND_ A=$n1204 B=$n1201 Y=$n1207
+.subckt $_AND_ A=$n1192 B=$n1200 Y=$n1208
+.subckt $_OR_ A=$n1191 B=$n1208 Y=$n1209
+.subckt $_AND_ A=$n1192 B=$n1201 Y=$n1210
+.subckt $_AND_ A=$n1198 B=$n1206 Y=$n1211
+.subckt $_OR_ A=$n1197 B=$n1211 Y=$n1212
+.subckt $_AND_ A=$n1198 B=$n1207 Y=$n1213
+.subckt $_AND_ A=$n1164 B=$n1185 Y=$n1214
+.subckt $_OR_ A=$n1165 B=$n1214 Y=$n1215
+.subckt $_AND_ A=$n1164 B=$n1186 Y=$n1216
+.subckt $_AND_ A=$n1168 B=$n1200 Y=$n1217
+.subckt $_OR_ A=$n1169 B=$n1217 Y=$n1218
+.subckt $_AND_ A=$n1168 B=$n1201 Y=$n1219
+.subckt $_AND_ A=$n1172 B=$n1209 Y=$n1220
+.subckt $_OR_ A=$n1173 B=$n1220 Y=$n1221
+.subckt $_AND_ A=$n1172 B=$n1210 Y=$n1222
+.subckt $_AND_ A=$n1176 B=$n1206 Y=$n1223
+.subckt $_OR_ A=$n1177 B=$n1223 Y=$n1224
+.subckt $_AND_ A=$n1176 B=$n1207 Y=$n1225
+.subckt $_AND_ A=$n1180 B=$n1212 Y=$n1226
+.subckt $_OR_ A=$n1181 B=$n1226 Y=$n1227
+.subckt $_AND_ A=$n1180 B=$n1213 Y=$n1228
+.subckt $_NOT_ A=$n1227 Y=$n1229
+.subckt $_AND_ A=$n1160 B=$n1162 Y=$n1230
+.subckt $_AND_ A=$n1164 B=$n1166 Y=$n1231
+.subckt $_AND_ A=$n1168 B=$n1170 Y=$n1232
+.subckt $_AND_ A=$n1172 B=$n1174 Y=$n1233
+.subckt $_AND_ A=$n1176 B=$n1178 Y=$n1234
+.subckt $_AND_ A=$n1230 B=$n1231 Y=$n1235
+.subckt $_AND_ A=$n1232 B=$n1233 Y=$n1236
+.subckt $_AND_ A=$n1234 B=$n1180 Y=$n1237
+.subckt $_AND_ A=$n1235 B=$n1236 Y=$n1238
+.subckt $_AND_ A=$n1238 B=$n1237 Y=$n1239
+.subckt $_OR_ A=$n1229 B=$n1239 Y=$n1240
+.subckt $_NOT_ A=$n1240 Y=$n1241
+.subckt $_OR_ A=$n1241 B=$n1239 Y=$n1242
+.subckt $_NOT_ A=gnd Y=$n1243
+.subckt $_NOT_ A=gnd Y=$n1244
+.subckt $_NOT_ A=gnd Y=$n1245
+.subckt $_NOT_ A=$n169 Y=$n1246
+.subckt $_NOT_ A=$n170 Y=$n1247
+.subckt $_NOT_ A=$n171 Y=$n1248
+.subckt $_NOT_ A=$n172 Y=$n1249
+.subckt $_NOT_ A=$n173 Y=$n1250
+.subckt $_NOT_ A=$n174 Y=$n1251
+.subckt $_NOT_ A=$n175 Y=$n1252
+.subckt $_NOT_ A=$n176 Y=$n1253
+.subckt $_XOR_ A=$n1141 B=$n1243 Y=$n1254
+.subckt $_AND_ A=$n1141 B=$n1243 Y=$n1255
+.subckt $_XOR_ A=$n1142 B=$n1244 Y=$n1256
+.subckt $_AND_ A=$n1142 B=$n1244 Y=$n1257
+.subckt $_XOR_ A=$n1143 B=$n1245 Y=$n1258
+.subckt $_AND_ A=$n1143 B=$n1245 Y=$n1259
+.subckt $_XOR_ A=$n1144 B=$n1246 Y=$n1260
+.subckt $_AND_ A=$n1144 B=$n1246 Y=$n1261
+.subckt $_XOR_ A=$n1145 B=$n1247 Y=$n1262
+.subckt $_AND_ A=$n1145 B=$n1247 Y=$n1263
+.subckt $_XOR_ A=$n1146 B=$n1248 Y=$n1264
+.subckt $_AND_ A=$n1146 B=$n1248 Y=$n1265
+.subckt $_XOR_ A=$n1147 B=$n1249 Y=$n1266
+.subckt $_AND_ A=$n1147 B=$n1249 Y=$n1267
+.subckt $_XOR_ A=$n1148 B=$n1250 Y=$n1268
+.subckt $_AND_ A=$n1148 B=$n1250 Y=$n1269
+.subckt $_XOR_ A=gnd B=$n1251 Y=$n1270
+.subckt $_AND_ A=gnd B=$n1251 Y=$n1271
+.subckt $_XOR_ A=gnd B=$n1252 Y=$n1272
+.subckt $_AND_ A=gnd B=$n1252 Y=$n1273
+.subckt $_XOR_ A=gnd B=$n1253 Y=$n1274
+.subckt $_AND_ A=gnd B=$n1253 Y=$n1275
+.subckt $_AND_ A=$n1254 B=vcc Y=$n1276
+.subckt $_OR_ A=$n1255 B=$n1276 Y=$n1277
+.subckt $_AND_ A=$n1256 B=$n1277 Y=$n1278
+.subckt $_OR_ A=$n1257 B=$n1278 Y=$n1279
+.subckt $_AND_ A=$n1256 B=$n1254 Y=$n1280
+.subckt $_AND_ A=$n1260 B=$n1259 Y=$n1281
+.subckt $_OR_ A=$n1261 B=$n1281 Y=$n1282
+.subckt $_AND_ A=$n1260 B=$n1258 Y=$n1283
+.subckt $_AND_ A=$n1264 B=$n1263 Y=$n1284
+.subckt $_OR_ A=$n1265 B=$n1284 Y=$n1285
+.subckt $_AND_ A=$n1264 B=$n1262 Y=$n1286
+.subckt $_AND_ A=$n1268 B=$n1267 Y=$n1287
+.subckt $_OR_ A=$n1269 B=$n1287 Y=$n1288
+.subckt $_AND_ A=$n1268 B=$n1266 Y=$n1289
+.subckt $_AND_ A=$n1272 B=$n1271 Y=$n1290
+.subckt $_OR_ A=$n1273 B=$n1290 Y=$n1291
+.subckt $_AND_ A=$n1272 B=$n1270 Y=$n1292
+.subckt $_AND_ A=$n1283 B=$n1279 Y=$n1293
+.subckt $_OR_ A=$n1282 B=$n1293 Y=$n1294
+.subckt $_AND_ A=$n1283 B=$n1280 Y=$n1295
+.subckt $_AND_ A=$n1289 B=$n1285 Y=$n1296
+.subckt $_OR_ A=$n1288 B=$n1296 Y=$n1297
+.subckt $_AND_ A=$n1289 B=$n1286 Y=$n1298
+.subckt $_AND_ A=$n1298 B=$n1294 Y=$n1299
+.subckt $_OR_ A=$n1297 B=$n1299 Y=$n1300
+.subckt $_AND_ A=$n1298 B=$n1295 Y=$n1301
+.subckt $_AND_ A=$n1286 B=$n1294 Y=$n1302
+.subckt $_OR_ A=$n1285 B=$n1302 Y=$n1303
+.subckt $_AND_ A=$n1286 B=$n1295 Y=$n1304
+.subckt $_AND_ A=$n1292 B=$n1300 Y=$n1305
+.subckt $_OR_ A=$n1291 B=$n1305 Y=$n1306
+.subckt $_AND_ A=$n1292 B=$n1301 Y=$n1307
+.subckt $_AND_ A=$n1258 B=$n1279 Y=$n1308
+.subckt $_OR_ A=$n1259 B=$n1308 Y=$n1309
+.subckt $_AND_ A=$n1258 B=$n1280 Y=$n1310
+.subckt $_AND_ A=$n1262 B=$n1294 Y=$n1311
+.subckt $_OR_ A=$n1263 B=$n1311 Y=$n1312
+.subckt $_AND_ A=$n1262 B=$n1295 Y=$n1313
+.subckt $_AND_ A=$n1266 B=$n1303 Y=$n1314
+.subckt $_OR_ A=$n1267 B=$n1314 Y=$n1315
+.subckt $_AND_ A=$n1266 B=$n1304 Y=$n1316
+.subckt $_AND_ A=$n1270 B=$n1300 Y=$n1317
+.subckt $_OR_ A=$n1271 B=$n1317 Y=$n1318
+.subckt $_AND_ A=$n1270 B=$n1301 Y=$n1319
+.subckt $_AND_ A=$n1274 B=$n1306 Y=$n1320
+.subckt $_OR_ A=$n1275 B=$n1320 Y=$n1321
+.subckt $_AND_ A=$n1274 B=$n1307 Y=$n1322
+.subckt $_XOR_ A=$n1254 B=vcc Y=$n1323
+.subckt $_XOR_ A=$n1256 B=$n1277 Y=$n1324
+.subckt $_XOR_ A=$n1258 B=$n1279 Y=$n1325
+.subckt $_XOR_ A=$n1260 B=$n1309 Y=$n1326
+.subckt $_XOR_ A=$n1262 B=$n1294 Y=$n1327
+.subckt $_XOR_ A=$n1264 B=$n1312 Y=$n1328
+.subckt $_XOR_ A=$n1266 B=$n1303 Y=$n1329
+.subckt $_XOR_ A=$n1268 B=$n1315 Y=$n1330
+.subckt $_XOR_ A=$n1270 B=$n1300 Y=$n1331
+.subckt $_XOR_ A=$n1272 B=$n1318 Y=$n1332
+.subckt $_XOR_ A=$n1274 B=$n1306 Y=$n1333
+.subckt $_MUX_ A=$n1141 B=$n1323 S=$n1242 Y=$n1334
+.subckt $_MUX_ A=$n1142 B=$n1324 S=$n1242 Y=$n1335
+.subckt $_MUX_ A=$n1143 B=$n1325 S=$n1242 Y=$n1336
+.subckt $_MUX_ A=$n1144 B=$n1326 S=$n1242 Y=$n1337
+.subckt $_MUX_ A=$n1145 B=$n1327 S=$n1242 Y=$n1338
+.subckt $_MUX_ A=$n1146 B=$n1328 S=$n1242 Y=$n1339
+.subckt $_MUX_ A=$n1147 B=$n1329 S=$n1242 Y=$n1340
+.subckt $_MUX_ A=$n1148 B=$n1330 S=$n1242 Y=$n1341
+.subckt $_NOT_ A=gnd Y=$n1342
+.subckt $_NOT_ A=gnd Y=$n1343
+.subckt $_NOT_ A=$n169 Y=$n1344
+.subckt $_NOT_ A=$n170 Y=$n1345
+.subckt $_NOT_ A=$n171 Y=$n1346
+.subckt $_NOT_ A=$n172 Y=$n1347
+.subckt $_NOT_ A=$n173 Y=$n1348
+.subckt $_NOT_ A=$n174 Y=$n1349
+.subckt $_NOT_ A=$n175 Y=$n1350
+.subckt $_NOT_ A=$n176 Y=$n1351
+.subckt $_XOR_ A=$n1334 B=$n1342 Y=$n1352
+.subckt $_AND_ A=$n1334 B=$n1342 Y=$n1353
+.subckt $_XOR_ A=$n1335 B=$n1343 Y=$n1354
+.subckt $_AND_ A=$n1335 B=$n1343 Y=$n1355
+.subckt $_XOR_ A=$n1336 B=$n1344 Y=$n1356
+.subckt $_AND_ A=$n1336 B=$n1344 Y=$n1357
+.subckt $_XOR_ A=$n1337 B=$n1345 Y=$n1358
+.subckt $_AND_ A=$n1337 B=$n1345 Y=$n1359
+.subckt $_XOR_ A=$n1338 B=$n1346 Y=$n1360
+.subckt $_AND_ A=$n1338 B=$n1346 Y=$n1361
+.subckt $_XOR_ A=$n1339 B=$n1347 Y=$n1362
+.subckt $_AND_ A=$n1339 B=$n1347 Y=$n1363
+.subckt $_XOR_ A=$n1340 B=$n1348 Y=$n1364
+.subckt $_AND_ A=$n1340 B=$n1348 Y=$n1365
+.subckt $_XOR_ A=$n1341 B=$n1349 Y=$n1366
+.subckt $_AND_ A=$n1341 B=$n1349 Y=$n1367
+.subckt $_XOR_ A=gnd B=$n1350 Y=$n1368
+.subckt $_AND_ A=gnd B=$n1350 Y=$n1369
+.subckt $_XOR_ A=gnd B=$n1351 Y=$n1370
+.subckt $_AND_ A=gnd B=$n1351 Y=$n1371
+.subckt $_AND_ A=$n1352 B=vcc Y=$n1372
+.subckt $_OR_ A=$n1353 B=$n1372 Y=$n1373
+.subckt $_AND_ A=$n1354 B=$n1373 Y=$n1374
+.subckt $_OR_ A=$n1355 B=$n1374 Y=$n1375
+.subckt $_AND_ A=$n1354 B=$n1352 Y=$n1376
+.subckt $_AND_ A=$n1358 B=$n1357 Y=$n1377
+.subckt $_OR_ A=$n1359 B=$n1377 Y=$n1378
+.subckt $_AND_ A=$n1358 B=$n1356 Y=$n1379
+.subckt $_AND_ A=$n1362 B=$n1361 Y=$n1380
+.subckt $_OR_ A=$n1363 B=$n1380 Y=$n1381
+.subckt $_AND_ A=$n1362 B=$n1360 Y=$n1382
+.subckt $_AND_ A=$n1366 B=$n1365 Y=$n1383
+.subckt $_OR_ A=$n1367 B=$n1383 Y=$n1384
+.subckt $_AND_ A=$n1366 B=$n1364 Y=$n1385
+.subckt $_AND_ A=$n1370 B=$n1369 Y=$n1386
+.subckt $_OR_ A=$n1371 B=$n1386 Y=$n1387
+.subckt $_AND_ A=$n1370 B=$n1368 Y=$n1388
+.subckt $_AND_ A=$n1379 B=$n1375 Y=$n1389
+.subckt $_OR_ A=$n1378 B=$n1389 Y=$n1390
+.subckt $_AND_ A=$n1379 B=$n1376 Y=$n1391
+.subckt $_AND_ A=$n1385 B=$n1381 Y=$n1392
+.subckt $_OR_ A=$n1384 B=$n1392 Y=$n1393
+.subckt $_AND_ A=$n1385 B=$n1382 Y=$n1394
+.subckt $_AND_ A=$n1394 B=$n1390 Y=$n1395
+.subckt $_OR_ A=$n1393 B=$n1395 Y=$n1396
+.subckt $_AND_ A=$n1394 B=$n1391 Y=$n1397
+.subckt $_AND_ A=$n1382 B=$n1390 Y=$n1398
+.subckt $_OR_ A=$n1381 B=$n1398 Y=$n1399
+.subckt $_AND_ A=$n1382 B=$n1391 Y=$n1400
+.subckt $_AND_ A=$n1388 B=$n1396 Y=$n1401
+.subckt $_OR_ A=$n1387 B=$n1401 Y=$n1402
+.subckt $_AND_ A=$n1388 B=$n1397 Y=$n1403
+.subckt $_AND_ A=$n1356 B=$n1375 Y=$n1404
+.subckt $_OR_ A=$n1357 B=$n1404 Y=$n1405
+.subckt $_AND_ A=$n1356 B=$n1376 Y=$n1406
+.subckt $_AND_ A=$n1360 B=$n1390 Y=$n1407
+.subckt $_OR_ A=$n1361 B=$n1407 Y=$n1408
+.subckt $_AND_ A=$n1360 B=$n1391 Y=$n1409
+.subckt $_AND_ A=$n1364 B=$n1399 Y=$n1410
+.subckt $_OR_ A=$n1365 B=$n1410 Y=$n1411
+.subckt $_AND_ A=$n1364 B=$n1400 Y=$n1412
+.subckt $_AND_ A=$n1368 B=$n1396 Y=$n1413
+.subckt $_OR_ A=$n1369 B=$n1413 Y=$n1414
+.subckt $_AND_ A=$n1368 B=$n1397 Y=$n1415
+.subckt $_NOT_ A=$n1402 Y=$n1416
+.subckt $_AND_ A=$n1352 B=$n1354 Y=$n1417
+.subckt $_AND_ A=$n1356 B=$n1358 Y=$n1418
+.subckt $_AND_ A=$n1360 B=$n1362 Y=$n1419
+.subckt $_AND_ A=$n1364 B=$n1366 Y=$n1420
+.subckt $_AND_ A=$n1368 B=$n1370 Y=$n1421
+.subckt $_AND_ A=$n1417 B=$n1418 Y=$n1422
+.subckt $_AND_ A=$n1419 B=$n1420 Y=$n1423
+.subckt $_AND_ A=$n1422 B=$n1423 Y=$n1424
+.subckt $_AND_ A=$n1424 B=$n1421 Y=$n1425
+.subckt $_OR_ A=$n1416 B=$n1425 Y=$n1426
+.subckt $_NOT_ A=$n1426 Y=$n1427
+.subckt $_OR_ A=$n1427 B=$n1425 Y=$n1428
+.subckt $_NOT_ A=gnd Y=$n1429
+.subckt $_NOT_ A=gnd Y=$n1430
+.subckt $_NOT_ A=$n169 Y=$n1431
+.subckt $_NOT_ A=$n170 Y=$n1432
+.subckt $_NOT_ A=$n171 Y=$n1433
+.subckt $_NOT_ A=$n172 Y=$n1434
+.subckt $_NOT_ A=$n173 Y=$n1435
+.subckt $_NOT_ A=$n174 Y=$n1436
+.subckt $_NOT_ A=$n175 Y=$n1437
+.subckt $_NOT_ A=$n176 Y=$n1438
+.subckt $_XOR_ A=$n1334 B=$n1429 Y=$n1439
+.subckt $_AND_ A=$n1334 B=$n1429 Y=$n1440
+.subckt $_XOR_ A=$n1335 B=$n1430 Y=$n1441
+.subckt $_AND_ A=$n1335 B=$n1430 Y=$n1442
+.subckt $_XOR_ A=$n1336 B=$n1431 Y=$n1443
+.subckt $_AND_ A=$n1336 B=$n1431 Y=$n1444
+.subckt $_XOR_ A=$n1337 B=$n1432 Y=$n1445
+.subckt $_AND_ A=$n1337 B=$n1432 Y=$n1446
+.subckt $_XOR_ A=$n1338 B=$n1433 Y=$n1447
+.subckt $_AND_ A=$n1338 B=$n1433 Y=$n1448
+.subckt $_XOR_ A=$n1339 B=$n1434 Y=$n1449
+.subckt $_AND_ A=$n1339 B=$n1434 Y=$n1450
+.subckt $_XOR_ A=$n1340 B=$n1435 Y=$n1451
+.subckt $_AND_ A=$n1340 B=$n1435 Y=$n1452
+.subckt $_XOR_ A=$n1341 B=$n1436 Y=$n1453
+.subckt $_AND_ A=$n1341 B=$n1436 Y=$n1454
+.subckt $_XOR_ A=gnd B=$n1437 Y=$n1455
+.subckt $_AND_ A=gnd B=$n1437 Y=$n1456
+.subckt $_XOR_ A=gnd B=$n1438 Y=$n1457
+.subckt $_AND_ A=gnd B=$n1438 Y=$n1458
+.subckt $_AND_ A=$n1439 B=vcc Y=$n1459
+.subckt $_OR_ A=$n1440 B=$n1459 Y=$n1460
+.subckt $_AND_ A=$n1441 B=$n1460 Y=$n1461
+.subckt $_OR_ A=$n1442 B=$n1461 Y=$n1462
+.subckt $_AND_ A=$n1441 B=$n1439 Y=$n1463
+.subckt $_AND_ A=$n1445 B=$n1444 Y=$n1464
+.subckt $_OR_ A=$n1446 B=$n1464 Y=$n1465
+.subckt $_AND_ A=$n1445 B=$n1443 Y=$n1466
+.subckt $_AND_ A=$n1449 B=$n1448 Y=$n1467
+.subckt $_OR_ A=$n1450 B=$n1467 Y=$n1468
+.subckt $_AND_ A=$n1449 B=$n1447 Y=$n1469
+.subckt $_AND_ A=$n1453 B=$n1452 Y=$n1470
+.subckt $_OR_ A=$n1454 B=$n1470 Y=$n1471
+.subckt $_AND_ A=$n1453 B=$n1451 Y=$n1472
+.subckt $_AND_ A=$n1457 B=$n1456 Y=$n1473
+.subckt $_OR_ A=$n1458 B=$n1473 Y=$n1474
+.subckt $_AND_ A=$n1457 B=$n1455 Y=$n1475
+.subckt $_AND_ A=$n1466 B=$n1462 Y=$n1476
+.subckt $_OR_ A=$n1465 B=$n1476 Y=$n1477
+.subckt $_AND_ A=$n1466 B=$n1463 Y=$n1478
+.subckt $_AND_ A=$n1472 B=$n1468 Y=$n1479
+.subckt $_OR_ A=$n1471 B=$n1479 Y=$n1480
+.subckt $_AND_ A=$n1472 B=$n1469 Y=$n1481
+.subckt $_AND_ A=$n1481 B=$n1477 Y=$n1482
+.subckt $_OR_ A=$n1480 B=$n1482 Y=$n1483
+.subckt $_AND_ A=$n1481 B=$n1478 Y=$n1484
+.subckt $_AND_ A=$n1469 B=$n1477 Y=$n1485
+.subckt $_OR_ A=$n1468 B=$n1485 Y=$n1486
+.subckt $_AND_ A=$n1469 B=$n1478 Y=$n1487
+.subckt $_AND_ A=$n1475 B=$n1483 Y=$n1488
+.subckt $_OR_ A=$n1474 B=$n1488 Y=$n1489
+.subckt $_AND_ A=$n1475 B=$n1484 Y=$n1490
+.subckt $_AND_ A=$n1443 B=$n1462 Y=$n1491
+.subckt $_OR_ A=$n1444 B=$n1491 Y=$n1492
+.subckt $_AND_ A=$n1443 B=$n1463 Y=$n1493
+.subckt $_AND_ A=$n1447 B=$n1477 Y=$n1494
+.subckt $_OR_ A=$n1448 B=$n1494 Y=$n1495
+.subckt $_AND_ A=$n1447 B=$n1478 Y=$n1496
+.subckt $_AND_ A=$n1451 B=$n1486 Y=$n1497
+.subckt $_OR_ A=$n1452 B=$n1497 Y=$n1498
+.subckt $_AND_ A=$n1451 B=$n1487 Y=$n1499
+.subckt $_AND_ A=$n1455 B=$n1483 Y=$n1500
+.subckt $_OR_ A=$n1456 B=$n1500 Y=$n1501
+.subckt $_AND_ A=$n1455 B=$n1484 Y=$n1502
+.subckt $_XOR_ A=$n1439 B=vcc Y=$n1503
+.subckt $_XOR_ A=$n1441 B=$n1460 Y=$n1504
+.subckt $_XOR_ A=$n1443 B=$n1462 Y=$n1505
+.subckt $_XOR_ A=$n1445 B=$n1492 Y=$n1506
+.subckt $_XOR_ A=$n1447 B=$n1477 Y=$n1507
+.subckt $_XOR_ A=$n1449 B=$n1495 Y=$n1508
+.subckt $_XOR_ A=$n1451 B=$n1486 Y=$n1509
+.subckt $_XOR_ A=$n1453 B=$n1498 Y=$n1510
+.subckt $_XOR_ A=$n1455 B=$n1483 Y=$n1511
+.subckt $_XOR_ A=$n1457 B=$n1501 Y=$n1512
+.subckt $_MUX_ A=$n1334 B=$n1503 S=$n1428 Y=$n1513
+.subckt $_MUX_ A=$n1335 B=$n1504 S=$n1428 Y=$n1514
+.subckt $_MUX_ A=$n1336 B=$n1505 S=$n1428 Y=$n1515
+.subckt $_MUX_ A=$n1337 B=$n1506 S=$n1428 Y=$n1516
+.subckt $_MUX_ A=$n1338 B=$n1507 S=$n1428 Y=$n1517
+.subckt $_MUX_ A=$n1339 B=$n1508 S=$n1428 Y=$n1518
+.subckt $_MUX_ A=$n1340 B=$n1509 S=$n1428 Y=$n1519
+.subckt $_MUX_ A=$n1341 B=$n1510 S=$n1428 Y=$n1520
+.subckt $_NOT_ A=gnd Y=$n1521
+.subckt $_NOT_ A=$n169 Y=$n1522
+.subckt $_NOT_ A=$n170 Y=$n1523
+.subckt $_NOT_ A=$n171 Y=$n1524
+.subckt $_NOT_ A=$n172 Y=$n1525
+.subckt $_NOT_ A=$n173 Y=$n1526
+.subckt $_NOT_ A=$n174 Y=$n1527
+.subckt $_NOT_ A=$n175 Y=$n1528
+.subckt $_NOT_ A=$n176 Y=$n1529
+.subckt $_XOR_ A=$n1513 B=$n1521 Y=$n1530
+.subckt $_AND_ A=$n1513 B=$n1521 Y=$n1531
+.subckt $_XOR_ A=$n1514 B=$n1522 Y=$n1532
+.subckt $_AND_ A=$n1514 B=$n1522 Y=$n1533
+.subckt $_XOR_ A=$n1515 B=$n1523 Y=$n1534
+.subckt $_AND_ A=$n1515 B=$n1523 Y=$n1535
+.subckt $_XOR_ A=$n1516 B=$n1524 Y=$n1536
+.subckt $_AND_ A=$n1516 B=$n1524 Y=$n1537
+.subckt $_XOR_ A=$n1517 B=$n1525 Y=$n1538
+.subckt $_AND_ A=$n1517 B=$n1525 Y=$n1539
+.subckt $_XOR_ A=$n1518 B=$n1526 Y=$n1540
+.subckt $_AND_ A=$n1518 B=$n1526 Y=$n1541
+.subckt $_XOR_ A=$n1519 B=$n1527 Y=$n1542
+.subckt $_AND_ A=$n1519 B=$n1527 Y=$n1543
+.subckt $_XOR_ A=$n1520 B=$n1528 Y=$n1544
+.subckt $_AND_ A=$n1520 B=$n1528 Y=$n1545
+.subckt $_XOR_ A=gnd B=$n1529 Y=$n1546
+.subckt $_AND_ A=gnd B=$n1529 Y=$n1547
+.subckt $_AND_ A=$n1530 B=vcc Y=$n1548
+.subckt $_OR_ A=$n1531 B=$n1548 Y=$n1549
+.subckt $_AND_ A=$n1532 B=$n1549 Y=$n1550
+.subckt $_OR_ A=$n1533 B=$n1550 Y=$n1551
+.subckt $_AND_ A=$n1532 B=$n1530 Y=$n1552
+.subckt $_AND_ A=$n1536 B=$n1535 Y=$n1553
+.subckt $_OR_ A=$n1537 B=$n1553 Y=$n1554
+.subckt $_AND_ A=$n1536 B=$n1534 Y=$n1555
+.subckt $_AND_ A=$n1540 B=$n1539 Y=$n1556
+.subckt $_OR_ A=$n1541 B=$n1556 Y=$n1557
+.subckt $_AND_ A=$n1540 B=$n1538 Y=$n1558
+.subckt $_AND_ A=$n1544 B=$n1543 Y=$n1559
+.subckt $_OR_ A=$n1545 B=$n1559 Y=$n1560
+.subckt $_AND_ A=$n1544 B=$n1542 Y=$n1561
+.subckt $_AND_ A=$n1555 B=$n1551 Y=$n1562
+.subckt $_OR_ A=$n1554 B=$n1562 Y=$n1563
+.subckt $_AND_ A=$n1555 B=$n1552 Y=$n1564
+.subckt $_AND_ A=$n1561 B=$n1557 Y=$n1565
+.subckt $_OR_ A=$n1560 B=$n1565 Y=$n1566
+.subckt $_AND_ A=$n1561 B=$n1558 Y=$n1567
+.subckt $_AND_ A=$n1567 B=$n1563 Y=$n1568
+.subckt $_OR_ A=$n1566 B=$n1568 Y=$n1569
+.subckt $_AND_ A=$n1567 B=$n1564 Y=$n1570
+.subckt $_AND_ A=$n1558 B=$n1563 Y=$n1571
+.subckt $_OR_ A=$n1557 B=$n1571 Y=$n1572
+.subckt $_AND_ A=$n1558 B=$n1564 Y=$n1573
+.subckt $_AND_ A=$n1534 B=$n1551 Y=$n1574
+.subckt $_OR_ A=$n1535 B=$n1574 Y=$n1575
+.subckt $_AND_ A=$n1534 B=$n1552 Y=$n1576
+.subckt $_AND_ A=$n1538 B=$n1563 Y=$n1577
+.subckt $_OR_ A=$n1539 B=$n1577 Y=$n1578
+.subckt $_AND_ A=$n1538 B=$n1564 Y=$n1579
+.subckt $_AND_ A=$n1542 B=$n1572 Y=$n1580
+.subckt $_OR_ A=$n1543 B=$n1580 Y=$n1581
+.subckt $_AND_ A=$n1542 B=$n1573 Y=$n1582
+.subckt $_AND_ A=$n1546 B=$n1569 Y=$n1583
+.subckt $_OR_ A=$n1547 B=$n1583 Y=$n1584
+.subckt $_AND_ A=$n1546 B=$n1570 Y=$n1585
+.subckt $_NOT_ A=$n1584 Y=$n1586
+.subckt $_AND_ A=$n1530 B=$n1532 Y=$n1587
+.subckt $_AND_ A=$n1534 B=$n1536 Y=$n1588
+.subckt $_AND_ A=$n1538 B=$n1540 Y=$n1589
+.subckt $_AND_ A=$n1542 B=$n1544 Y=$n1590
+.subckt $_AND_ A=$n1587 B=$n1588 Y=$n1591
+.subckt $_AND_ A=$n1589 B=$n1590 Y=$n1592
+.subckt $_AND_ A=$n1591 B=$n1592 Y=$n1593
+.subckt $_AND_ A=$n1593 B=$n1546 Y=$n1594
+.subckt $_OR_ A=$n1586 B=$n1594 Y=$n1595
+.subckt $_NOT_ A=$n1595 Y=$n1596
+.subckt $_OR_ A=$n1596 B=$n1594 Y=$n1597
+.subckt $_NOT_ A=gnd Y=$n1598
+.subckt $_NOT_ A=$n169 Y=$n1599
+.subckt $_NOT_ A=$n170 Y=$n1600
+.subckt $_NOT_ A=$n171 Y=$n1601
+.subckt $_NOT_ A=$n172 Y=$n1602
+.subckt $_NOT_ A=$n173 Y=$n1603
+.subckt $_NOT_ A=$n174 Y=$n1604
+.subckt $_NOT_ A=$n175 Y=$n1605
+.subckt $_NOT_ A=$n176 Y=$n1606
+.subckt $_XOR_ A=$n1513 B=$n1598 Y=$n1607
+.subckt $_AND_ A=$n1513 B=$n1598 Y=$n1608
+.subckt $_XOR_ A=$n1514 B=$n1599 Y=$n1609
+.subckt $_AND_ A=$n1514 B=$n1599 Y=$n1610
+.subckt $_XOR_ A=$n1515 B=$n1600 Y=$n1611
+.subckt $_AND_ A=$n1515 B=$n1600 Y=$n1612
+.subckt $_XOR_ A=$n1516 B=$n1601 Y=$n1613
+.subckt $_AND_ A=$n1516 B=$n1601 Y=$n1614
+.subckt $_XOR_ A=$n1517 B=$n1602 Y=$n1615
+.subckt $_AND_ A=$n1517 B=$n1602 Y=$n1616
+.subckt $_XOR_ A=$n1518 B=$n1603 Y=$n1617
+.subckt $_AND_ A=$n1518 B=$n1603 Y=$n1618
+.subckt $_XOR_ A=$n1519 B=$n1604 Y=$n1619
+.subckt $_AND_ A=$n1519 B=$n1604 Y=$n1620
+.subckt $_XOR_ A=$n1520 B=$n1605 Y=$n1621
+.subckt $_AND_ A=$n1520 B=$n1605 Y=$n1622
+.subckt $_XOR_ A=gnd B=$n1606 Y=$n1623
+.subckt $_AND_ A=gnd B=$n1606 Y=$n1624
+.subckt $_AND_ A=$n1607 B=vcc Y=$n1625
+.subckt $_OR_ A=$n1608 B=$n1625 Y=$n1626
+.subckt $_AND_ A=$n1609 B=$n1626 Y=$n1627
+.subckt $_OR_ A=$n1610 B=$n1627 Y=$n1628
+.subckt $_AND_ A=$n1609 B=$n1607 Y=$n1629
+.subckt $_AND_ A=$n1613 B=$n1612 Y=$n1630
+.subckt $_OR_ A=$n1614 B=$n1630 Y=$n1631
+.subckt $_AND_ A=$n1613 B=$n1611 Y=$n1632
+.subckt $_AND_ A=$n1617 B=$n1616 Y=$n1633
+.subckt $_OR_ A=$n1618 B=$n1633 Y=$n1634
+.subckt $_AND_ A=$n1617 B=$n1615 Y=$n1635
+.subckt $_AND_ A=$n1621 B=$n1620 Y=$n1636
+.subckt $_OR_ A=$n1622 B=$n1636 Y=$n1637
+.subckt $_AND_ A=$n1621 B=$n1619 Y=$n1638
+.subckt $_AND_ A=$n1632 B=$n1628 Y=$n1639
+.subckt $_OR_ A=$n1631 B=$n1639 Y=$n1640
+.subckt $_AND_ A=$n1632 B=$n1629 Y=$n1641
+.subckt $_AND_ A=$n1638 B=$n1634 Y=$n1642
+.subckt $_OR_ A=$n1637 B=$n1642 Y=$n1643
+.subckt $_AND_ A=$n1638 B=$n1635 Y=$n1644
+.subckt $_AND_ A=$n1644 B=$n1640 Y=$n1645
+.subckt $_OR_ A=$n1643 B=$n1645 Y=$n1646
+.subckt $_AND_ A=$n1644 B=$n1641 Y=$n1647
+.subckt $_AND_ A=$n1635 B=$n1640 Y=$n1648
+.subckt $_OR_ A=$n1634 B=$n1648 Y=$n1649
+.subckt $_AND_ A=$n1635 B=$n1641 Y=$n1650
+.subckt $_AND_ A=$n1611 B=$n1628 Y=$n1651
+.subckt $_OR_ A=$n1612 B=$n1651 Y=$n1652
+.subckt $_AND_ A=$n1611 B=$n1629 Y=$n1653
+.subckt $_AND_ A=$n1615 B=$n1640 Y=$n1654
+.subckt $_OR_ A=$n1616 B=$n1654 Y=$n1655
+.subckt $_AND_ A=$n1615 B=$n1641 Y=$n1656
+.subckt $_AND_ A=$n1619 B=$n1649 Y=$n1657
+.subckt $_OR_ A=$n1620 B=$n1657 Y=$n1658
+.subckt $_AND_ A=$n1619 B=$n1650 Y=$n1659
+.subckt $_AND_ A=$n1623 B=$n1646 Y=$n1660
+.subckt $_OR_ A=$n1624 B=$n1660 Y=$n1661
+.subckt $_AND_ A=$n1623 B=$n1647 Y=$n1662
+.subckt $_XOR_ A=$n1607 B=vcc Y=$n1663
+.subckt $_XOR_ A=$n1609 B=$n1626 Y=$n1664
+.subckt $_XOR_ A=$n1611 B=$n1628 Y=$n1665
+.subckt $_XOR_ A=$n1613 B=$n1652 Y=$n1666
+.subckt $_XOR_ A=$n1615 B=$n1640 Y=$n1667
+.subckt $_XOR_ A=$n1617 B=$n1655 Y=$n1668
+.subckt $_XOR_ A=$n1619 B=$n1649 Y=$n1669
+.subckt $_XOR_ A=$n1621 B=$n1658 Y=$n1670
+.subckt $_XOR_ A=$n1623 B=$n1646 Y=$n1671
+.subckt $_MUX_ A=$n1513 B=$n1663 S=$n1597 Y=$n1672
+.subckt $_MUX_ A=$n1514 B=$n1664 S=$n1597 Y=$n1673
+.subckt $_MUX_ A=$n1515 B=$n1665 S=$n1597 Y=$n1674
+.subckt $_MUX_ A=$n1516 B=$n1666 S=$n1597 Y=$n1675
+.subckt $_MUX_ A=$n1517 B=$n1667 S=$n1597 Y=$n1676
+.subckt $_MUX_ A=$n1518 B=$n1668 S=$n1597 Y=$n1677
+.subckt $_MUX_ A=$n1519 B=$n1669 S=$n1597 Y=$n1678
+.subckt $_MUX_ A=$n1520 B=$n1670 S=$n1597 Y=$n1679
+.subckt $_NOT_ A=$n169 Y=$n1680
+.subckt $_NOT_ A=$n170 Y=$n1681
+.subckt $_NOT_ A=$n171 Y=$n1682
+.subckt $_NOT_ A=$n172 Y=$n1683
+.subckt $_NOT_ A=$n173 Y=$n1684
+.subckt $_NOT_ A=$n174 Y=$n1685
+.subckt $_NOT_ A=$n175 Y=$n1686
+.subckt $_NOT_ A=$n176 Y=$n1687
+.subckt $_XOR_ A=$n1672 B=$n1680 Y=$n1688
+.subckt $_AND_ A=$n1672 B=$n1680 Y=$n1689
+.subckt $_XOR_ A=$n1673 B=$n1681 Y=$n1690
+.subckt $_AND_ A=$n1673 B=$n1681 Y=$n1691
+.subckt $_XOR_ A=$n1674 B=$n1682 Y=$n1692
+.subckt $_AND_ A=$n1674 B=$n1682 Y=$n1693
+.subckt $_XOR_ A=$n1675 B=$n1683 Y=$n1694
+.subckt $_AND_ A=$n1675 B=$n1683 Y=$n1695
+.subckt $_XOR_ A=$n1676 B=$n1684 Y=$n1696
+.subckt $_AND_ A=$n1676 B=$n1684 Y=$n1697
+.subckt $_XOR_ A=$n1677 B=$n1685 Y=$n1698
+.subckt $_AND_ A=$n1677 B=$n1685 Y=$n1699
+.subckt $_XOR_ A=$n1678 B=$n1686 Y=$n1700
+.subckt $_AND_ A=$n1678 B=$n1686 Y=$n1701
+.subckt $_XOR_ A=$n1679 B=$n1687 Y=$n1702
+.subckt $_AND_ A=$n1679 B=$n1687 Y=$n1703
+.subckt $_AND_ A=$n1688 B=vcc Y=$n1704
+.subckt $_OR_ A=$n1689 B=$n1704 Y=$n1705
+.subckt $_AND_ A=$n1690 B=$n1705 Y=$n1706
+.subckt $_OR_ A=$n1691 B=$n1706 Y=$n1707
+.subckt $_AND_ A=$n1690 B=$n1688 Y=$n1708
+.subckt $_AND_ A=$n1694 B=$n1693 Y=$n1709
+.subckt $_OR_ A=$n1695 B=$n1709 Y=$n1710
+.subckt $_AND_ A=$n1694 B=$n1692 Y=$n1711
+.subckt $_AND_ A=$n1698 B=$n1697 Y=$n1712
+.subckt $_OR_ A=$n1699 B=$n1712 Y=$n1713
+.subckt $_AND_ A=$n1698 B=$n1696 Y=$n1714
+.subckt $_AND_ A=$n1702 B=$n1701 Y=$n1715
+.subckt $_OR_ A=$n1703 B=$n1715 Y=$n1716
+.subckt $_AND_ A=$n1702 B=$n1700 Y=$n1717
+.subckt $_AND_ A=$n1711 B=$n1707 Y=$n1718
+.subckt $_OR_ A=$n1710 B=$n1718 Y=$n1719
+.subckt $_AND_ A=$n1711 B=$n1708 Y=$n1720
+.subckt $_AND_ A=$n1717 B=$n1713 Y=$n1721
+.subckt $_OR_ A=$n1716 B=$n1721 Y=$n1722
+.subckt $_AND_ A=$n1717 B=$n1714 Y=$n1723
+.subckt $_AND_ A=$n1723 B=$n1719 Y=$n1724
+.subckt $_OR_ A=$n1722 B=$n1724 Y=$n1725
+.subckt $_AND_ A=$n1723 B=$n1720 Y=$n1726
+.subckt $_AND_ A=$n1714 B=$n1719 Y=$n1727
+.subckt $_OR_ A=$n1713 B=$n1727 Y=$n1728
+.subckt $_AND_ A=$n1714 B=$n1720 Y=$n1729
+.subckt $_AND_ A=$n1692 B=$n1707 Y=$n1730
+.subckt $_OR_ A=$n1693 B=$n1730 Y=$n1731
+.subckt $_AND_ A=$n1692 B=$n1708 Y=$n1732
+.subckt $_AND_ A=$n1696 B=$n1719 Y=$n1733
+.subckt $_OR_ A=$n1697 B=$n1733 Y=$n1734
+.subckt $_AND_ A=$n1696 B=$n1720 Y=$n1735
+.subckt $_AND_ A=$n1700 B=$n1728 Y=$n1736
+.subckt $_OR_ A=$n1701 B=$n1736 Y=$n1737
+.subckt $_AND_ A=$n1700 B=$n1729 Y=$n1738
+.subckt $_NOT_ A=$n1725 Y=$n1739
+.subckt $_AND_ A=$n1688 B=$n1690 Y=$n1740
+.subckt $_AND_ A=$n1692 B=$n1694 Y=$n1741
+.subckt $_AND_ A=$n1696 B=$n1698 Y=$n1742
+.subckt $_AND_ A=$n1700 B=$n1702 Y=$n1743
+.subckt $_AND_ A=$n1740 B=$n1741 Y=$n1744
+.subckt $_AND_ A=$n1742 B=$n1743 Y=$n1745
+.subckt $_AND_ A=$n1744 B=$n1745 Y=$n1746
+.subckt $_OR_ A=$n1739 B=$n1746 Y=$n1747
+.subckt $_NOT_ A=$n1747 Y=$n1748
+.subckt $_OR_ A=$n1748 B=$n1746 Y=$n1749
+.subckt $_XOR_ A=a[7] B=b[7] Y=$n1750
+.subckt $_NOT_ A=$n1749 Y=$n1751
+.subckt $_NOT_ A=$n1597 Y=$n1752
+.subckt $_NOT_ A=$n1428 Y=$n1753
+.subckt $_NOT_ A=$n1242 Y=$n1754
+.subckt $_NOT_ A=$n1036 Y=$n1755
+.subckt $_NOT_ A=$n810 Y=$n1756
+.subckt $_NOT_ A=$n567 Y=$n1757
+.subckt $_NOT_ A=$n307 Y=$n1758
+.subckt $_XOR_ A=gnd B=$n1751 Y=$n1759
+.subckt $_AND_ A=gnd B=$n1751 Y=$n1760
+.subckt $_XOR_ A=gnd B=$n1752 Y=$n1761
+.subckt $_AND_ A=gnd B=$n1752 Y=$n1762
+.subckt $_XOR_ A=gnd B=$n1753 Y=$n1763
+.subckt $_AND_ A=gnd B=$n1753 Y=$n1764
+.subckt $_XOR_ A=gnd B=$n1754 Y=$n1765
+.subckt $_AND_ A=gnd B=$n1754 Y=$n1766
+.subckt $_XOR_ A=gnd B=$n1755 Y=$n1767
+.subckt $_AND_ A=gnd B=$n1755 Y=$n1768
+.subckt $_XOR_ A=gnd B=$n1756 Y=$n1769
+.subckt $_AND_ A=gnd B=$n1756 Y=$n1770
+.subckt $_XOR_ A=gnd B=$n1757 Y=$n1771
+.subckt $_AND_ A=gnd B=$n1757 Y=$n1772
+.subckt $_XOR_ A=gnd B=$n1758 Y=$n1773
+.subckt $_AND_ A=gnd B=$n1758 Y=$n1774
+.subckt $_AND_ A=$n1759 B=vcc Y=$n1775
+.subckt $_OR_ A=$n1760 B=$n1775 Y=$n1776
+.subckt $_AND_ A=$n1761 B=$n1776 Y=$n1777
+.subckt $_OR_ A=$n1762 B=$n1777 Y=$n1778
+.subckt $_AND_ A=$n1761 B=$n1759 Y=$n1779
+.subckt $_AND_ A=$n1765 B=$n1764 Y=$n1780
+.subckt $_OR_ A=$n1766 B=$n1780 Y=$n1781
+.subckt $_AND_ A=$n1765 B=$n1763 Y=$n1782
+.subckt $_AND_ A=$n1769 B=$n1768 Y=$n1783
+.subckt $_OR_ A=$n1770 B=$n1783 Y=$n1784
+.subckt $_AND_ A=$n1769 B=$n1767 Y=$n1785
+.subckt $_AND_ A=$n1773 B=$n1772 Y=$n1786
+.subckt $_OR_ A=$n1774 B=$n1786 Y=$n1787
+.subckt $_AND_ A=$n1773 B=$n1771 Y=$n1788
+.subckt $_AND_ A=$n1782 B=$n1778 Y=$n1789
+.subckt $_OR_ A=$n1781 B=$n1789 Y=$n1790
+.subckt $_AND_ A=$n1782 B=$n1779 Y=$n1791
+.subckt $_AND_ A=$n1788 B=$n1784 Y=$n1792
+.subckt $_OR_ A=$n1787 B=$n1792 Y=$n1793
+.subckt $_AND_ A=$n1788 B=$n1785 Y=$n1794
+.subckt $_AND_ A=$n1794 B=$n1790 Y=$n1795
+.subckt $_OR_ A=$n1793 B=$n1795 Y=$n1796
+.subckt $_AND_ A=$n1794 B=$n1791 Y=$n1797
+.subckt $_AND_ A=$n1785 B=$n1790 Y=$n1798
+.subckt $_OR_ A=$n1784 B=$n1798 Y=$n1799
+.subckt $_AND_ A=$n1785 B=$n1791 Y=$n1800
+.subckt $_AND_ A=$n1763 B=$n1778 Y=$n1801
+.subckt $_OR_ A=$n1764 B=$n1801 Y=$n1802
+.subckt $_AND_ A=$n1763 B=$n1779 Y=$n1803
+.subckt $_AND_ A=$n1767 B=$n1790 Y=$n1804
+.subckt $_OR_ A=$n1768 B=$n1804 Y=$n1805
+.subckt $_AND_ A=$n1767 B=$n1791 Y=$n1806
+.subckt $_AND_ A=$n1771 B=$n1799 Y=$n1807
+.subckt $_OR_ A=$n1772 B=$n1807 Y=$n1808
+.subckt $_AND_ A=$n1771 B=$n1800 Y=$n1809
+.subckt $_XOR_ A=$n1759 B=vcc Y=$n1810
+.subckt $_XOR_ A=$n1761 B=$n1776 Y=$n1811
+.subckt $_XOR_ A=$n1763 B=$n1778 Y=$n1812
+.subckt $_XOR_ A=$n1765 B=$n1802 Y=$n1813
+.subckt $_XOR_ A=$n1767 B=$n1790 Y=$n1814
+.subckt $_XOR_ A=$n1769 B=$n1805 Y=$n1815
+.subckt $_XOR_ A=$n1771 B=$n1799 Y=$n1816
+.subckt $_XOR_ A=$n1773 B=$n1808 Y=$n1817
+.subckt $_MUX_ A=$n1749 B=$n1810 S=$n1750 Y=y[0]
+.subckt $_MUX_ A=$n1597 B=$n1811 S=$n1750 Y=y[1]
+.subckt $_MUX_ A=$n1428 B=$n1812 S=$n1750 Y=y[2]
+.subckt $_MUX_ A=$n1242 B=$n1813 S=$n1750 Y=y[3]
+.subckt $_MUX_ A=$n1036 B=$n1814 S=$n1750 Y=y[4]
+.subckt $_MUX_ A=$n810 B=$n1815 S=$n1750 Y=y[5]
+.subckt $_MUX_ A=$n567 B=$n1816 S=$n1750 Y=y[6]
+.subckt $_MUX_ A=$n307 B=$n1817 S=$n1750 Y=y[7]
+.end

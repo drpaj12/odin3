@@ -29,4 +29,4 @@ listed (3C-2a review M-2).
 
 Micros (non-heavy): `ctest --preset debug -R hardmap_diff_micro`. The 19 (heavy, controller, one
 design per `tools/heavy-run`, smallest first): `ctest --preset sweep -R hardmap_vtr_sweep` runs them
-all in one heavy job; the per-design commands are in PHASE3 decision 41.
+all in one heavy job; the per-design commands are in PHASE3 decision 42.
