@@ -23,3 +23,12 @@ operators/eightbit_arithmetic_power.v [no bit-level] lower refuses a $pow cell (
 operators/twobits_arithmetic_power.v [no bit-level] lower refuses a $pow cell (located error, decision 41(3B)(4))
 keywords/inout/inout_failure.v [no bit-level] lower refuses a $tribuf cell (located error, decision 41(3B)(4))
 keywords/inout/simple_inout.v [no bit-level] lower refuses a $tribuf cell (located error, decision 41(3B)(4))
+#
+# syntax/multi_edge_reader_writer: untested for now (checker limit). A negedge read of a memory
+# written on posedge. The SAT proof cannot pair the memory registers, the bounded check from the
+# initial state finds no trace in 20 steps from either start, and the BLIF cec refuses two clock
+# domains in one design. Evidence, 2026-10-18, release build, lower-equiv of the file alone (rc 4):
+#   lower-equiv: multi_edge_reader_writer.v: UNPROVEN: the SAT flow failed (...), the bounded check
+#   found no trace in 20 steps (none: ) and BLIF cec: no verdict (exit 4): ... unsupported: more
+#   than one clock domain (type, clock): [('fe', 'clock'), ('re', 'clock')]
+syntax/multi_edge_reader_writer.v [UNPROVEN:] untested for now (checker limit): negedge read plus posedge write of one memory; no counterexample in 20 steps, the BLIF cec supports one clock domain only

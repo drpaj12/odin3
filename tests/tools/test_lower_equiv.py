@@ -46,6 +46,12 @@ HARD_BLOCK = """module m(input clk, input we, input [3:0] d, output [3:0] q);
   single_port_ram i (.addr(a), .data(d), .we(we), .clk(clk), .out(q));
 endmodule
 """
+WIDE_ADDR_MEM = """module m(input clk, input [3:0] wa, input [3:0] ra, output [2:0] y);
+  reg [2:0] mem [7:0];
+  always @(posedge clk) mem[wa] <= wa;
+  assign y = mem[ra];
+endmodule
+"""
 INIT = """module m(input clk, output [3:0] y);
   reg [3:0] q = 4'd{val};
   always @(posedge clk) q <= q + 1;
@@ -201,6 +207,11 @@ class RefinementTest(unittest.TestCase):
 
     def test_a_bit_swapped_pmux(self) -> None:
         self.differs(PMUX.format(one="b", two="c"), PMUX.format(one="c", two="b"))
+
+    def test_a_read_past_the_words_is_a_dont_care(self) -> None:
+        """A 4-bit address over 8 words: Yosys's `memory` aliases the read of 8..15 onto a word,
+        the `$mem` meaning is x (bm_simple_memory.v, 3B close): lower reads x, a refinement."""
+        self.refines(WIDE_ADDR_MEM)
 
     def test_a_signed_comparison_read_unsigned(self) -> None:
         self.differs(CMP.format(sign="signed"), CMP.format(sign=""))

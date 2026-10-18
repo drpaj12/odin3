@@ -71,6 +71,7 @@ TOP_LINE = "attribute \\top 1\n"
 # The word cell types that the ``maps/`` flip-flop conversions rewrite (spec 6.3): only a design
 # that holds one needs the techmap step.
 MAPPED_TYPES = frozenset({"$adff", "$adffe", "$aldff", "$aldffe", "$dffsr", "$dffsre"})
+MEM_TYPES = frozenset({"$mem", "$mem_v2"})
 
 
 @dataclass
@@ -124,11 +125,19 @@ def make_gold(yosys: str, before: Path, parmys: tuple[Path | None, bool], work: 
     of it). Written to ``gold.il``. ``parmys`` = (Parmys's techlibs directory, exact)."""
     text = before.read_text(encoding="utf-8")
     gold = work / "gold.il"
-    if not lc.cell_types(text) & MAPPED_TYPES:
+    types = lc.cell_types(text)
+    # Yosys's ``memory`` (memory_map) makes a read past SIZE alias a word (the address bits
+    # above the words are ignored); the spec of ``$mem`` (and of lower) is x there, a don't-care
+    # of the gold. ``memory_memx`` writes the x in; ``memory_map`` then maps the memories at once,
+    # since ``memory`` (memory_dff) would merge an output flip-flop through the x mux and lose it
+    # (multi_edge_reader_writer.v).
+    memx = bool(types & MEM_TYPES)
+    if not types & MAPPED_TYPES and not memx:
         gold.write_text(text, encoding="utf-8")
         return gold
-    maps = synchronous_maps(*parmys)
-    steps = [f"read_rtlil {before}", *(f"techmap -map {m}" for m in maps), f"write_rtlil {gold}"]
+    maps = synchronous_maps(*parmys) if types & MAPPED_TYPES else []
+    steps = [f"read_rtlil {before}", *(["memory_memx", "memory_map"] if memx else []),
+             *(f"techmap -map {m}" for m in maps), f"write_rtlil {gold}"]
     run_yosys(yosys, "; ".join(steps), work, cap)
     return gold
 
