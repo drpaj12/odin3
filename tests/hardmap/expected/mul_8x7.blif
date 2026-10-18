@@ -1,0 +1,42 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+
+.model mul_8x7
+.inputs a[0] a[1] a[2] a[3] a[4] a[5] a[6] a[7] b[0] b[1] b[2] b[3] b[4] b[5] b[6]
+.outputs y[0] y[1] y[2] y[3] y[4] y[5] y[6] y[7] y[8] y[9] y[10] y[11] y[12] y[13] y[14]
+.names unconn
+.subckt multiply a[0]=a[0] a[1]=a[1] a[2]=a[2] a[3]=a[3] a[4]=a[4] a[5]=a[5] a[6]=a[6] a[7]=a[7] \
+  a[8]=unconn a[9]=unconn a[10]=unconn a[11]=unconn a[12]=unconn a[13]=unconn a[14]=unconn \
+  a[15]=unconn a[16]=unconn a[17]=unconn a[18]=unconn a[19]=unconn a[20]=unconn a[21]=unconn \
+  a[22]=unconn a[23]=unconn a[24]=unconn a[25]=unconn a[26]=unconn a[27]=unconn a[28]=unconn \
+  a[29]=unconn a[30]=unconn a[31]=unconn a[32]=unconn a[33]=unconn a[34]=unconn a[35]=unconn \
+  b[0]=b[0] b[1]=b[1] b[2]=b[2] b[3]=b[3] b[4]=b[4] b[5]=b[5] b[6]=b[6] b[7]=unconn b[8]=unconn \
+  b[9]=unconn b[10]=unconn b[11]=unconn b[12]=unconn b[13]=unconn b[14]=unconn b[15]=unconn \
+  b[16]=unconn b[17]=unconn b[18]=unconn b[19]=unconn b[20]=unconn b[21]=unconn b[22]=unconn \
+  b[23]=unconn b[24]=unconn b[25]=unconn b[26]=unconn b[27]=unconn b[28]=unconn b[29]=unconn \
+  b[30]=unconn b[31]=unconn b[32]=unconn b[33]=unconn b[34]=unconn b[35]=unconn out[0]=y[0] \
+  out[1]=y[1] out[2]=y[2] out[3]=y[3] out[4]=y[4] out[5]=y[5] out[6]=y[6] out[7]=y[7] out[8]=y[8] \
+  out[9]=y[9] out[10]=y[10] out[11]=y[11] out[12]=y[12] out[13]=y[13] out[14]=y[14] out[15]=$n47 \
+  out[16]=$n48 out[17]=$n49 out[18]=$n50 out[19]=$n51 out[20]=$n52 out[21]=$n53 out[22]=$n54 \
+  out[23]=$n55 out[24]=$n56 out[25]=$n57 out[26]=$n58 out[27]=$n59 out[28]=$n60 out[29]=$n61 \
+  out[30]=$n62 out[31]=$n63 out[32]=$n64 out[33]=$n65 out[34]=$n66 out[35]=$n67 out[36]=$n68 \
+  out[37]=$n69 out[38]=$n70 out[39]=$n71 out[40]=$n72 out[41]=$n73 out[42]=$n74 out[43]=$n75 \
+  out[44]=$n76 out[45]=$n77 out[46]=$n78 out[47]=$n79 out[48]=$n80 out[49]=$n81 out[50]=$n82 \
+  out[51]=$n83 out[52]=$n84 out[53]=$n85 out[54]=$n86 out[55]=$n87 out[56]=$n88 out[57]=$n89 \
+  out[58]=$n90 out[59]=$n91 out[60]=$n92 out[61]=$n93 out[62]=$n94 out[63]=$n95 out[64]=$n96 \
+  out[65]=$n97 out[66]=$n98 out[67]=$n99 out[68]=$n100 out[69]=$n101 out[70]=$n102 out[71]=$n103
+.end
+
+.model multiply
+.inputs a[0] a[1] a[2] a[3] a[4] a[5] a[6] a[7] a[8] a[9] a[10] a[11] a[12] a[13] a[14] a[15] \
+  a[16] a[17] a[18] a[19] a[20] a[21] a[22] a[23] a[24] a[25] a[26] a[27] a[28] a[29] a[30] a[31] \
+  a[32] a[33] a[34] a[35] b[0] b[1] b[2] b[3] b[4] b[5] b[6] b[7] b[8] b[9] b[10] b[11] b[12] \
+  b[13] b[14] b[15] b[16] b[17] b[18] b[19] b[20] b[21] b[22] b[23] b[24] b[25] b[26] b[27] b[28] \
+  b[29] b[30] b[31] b[32] b[33] b[34] b[35]
+.outputs out[0] out[1] out[2] out[3] out[4] out[5] out[6] out[7] out[8] out[9] out[10] out[11] \
+  out[12] out[13] out[14] out[15] out[16] out[17] out[18] out[19] out[20] out[21] out[22] out[23] \
+  out[24] out[25] out[26] out[27] out[28] out[29] out[30] out[31] out[32] out[33] out[34] out[35] \
+  out[36] out[37] out[38] out[39] out[40] out[41] out[42] out[43] out[44] out[45] out[46] out[47] \
+  out[48] out[49] out[50] out[51] out[52] out[53] out[54] out[55] out[56] out[57] out[58] out[59] \
+  out[60] out[61] out[62] out[63] out[64] out[65] out[66] out[67] out[68] out[69] out[70] out[71]
+.blackbox
+.end

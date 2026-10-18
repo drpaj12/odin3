@@ -1,0 +1,20 @@
+.model m
+.inputs clk d[0] d[1] d[2] d[3] d[4] d[5] d[6] d[7]
+.outputs q[0] q[1] q[2] q[3] q[4] q[5] q[6] q[7]
+.latch d[0] q[0] re clk 3
+.cname q.dff_p0
+.latch d[1] q[1] re clk 3
+.cname q.dff_p1
+.latch d[2] q[2] re clk 3
+.cname q.dff_p2
+.latch d[3] q[3] re clk 3
+.cname q.dff_p3
+.latch d[4] q[4] re clk 3
+.cname q.dff_p4
+.latch d[5] q[5] re clk 3
+.cname q.dff_p5
+.latch d[6] q[6] re clk 3
+.cname q.dff_p6
+.latch d[7] q[7] re clk 3
+.cname q.dff_p7
+.end

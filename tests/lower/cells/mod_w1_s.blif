@@ -1,0 +1,44 @@
+.model m
+.inputs a b
+.outputs y
+.names gnd
+.names vcc
+1
+.subckt $_NOT_ A=a Y=$n6
+.subckt $_XOR_ A=gnd B=$n6 Y=$n7
+.subckt $_AND_ A=gnd B=$n6 Y=$n8
+.subckt $_AND_ A=$n7 B=vcc Y=$n9
+.subckt $_OR_ A=$n8 B=$n9 Y=$n10
+.subckt $_XOR_ A=$n7 B=vcc Y=$n11
+.subckt $_MUX_ A=a B=$n11 S=a Y=$n12
+.subckt $_NOT_ A=b Y=$n13
+.subckt $_XOR_ A=gnd B=$n13 Y=$n14
+.subckt $_AND_ A=gnd B=$n13 Y=$n15
+.subckt $_AND_ A=$n14 B=vcc Y=$n16
+.subckt $_OR_ A=$n15 B=$n16 Y=$n17
+.subckt $_XOR_ A=$n14 B=vcc Y=$n18
+.subckt $_MUX_ A=b B=$n18 S=b Y=$n19
+.subckt $_NOT_ A=$n19 Y=$n20
+.subckt $_XOR_ A=$n12 B=$n20 Y=$n21
+.subckt $_AND_ A=$n12 B=$n20 Y=$n22
+.subckt $_AND_ A=$n21 B=vcc Y=$n23
+.subckt $_OR_ A=$n22 B=$n23 Y=$n24
+.subckt $_NOT_ A=$n24 Y=$n25
+.subckt $_OR_ A=$n25 B=$n21 Y=$n26
+.subckt $_NOT_ A=$n26 Y=$n27
+.subckt $_OR_ A=$n27 B=$n21 Y=$n28
+.subckt $_NOT_ A=$n19 Y=$n29
+.subckt $_XOR_ A=$n12 B=$n29 Y=$n30
+.subckt $_AND_ A=$n12 B=$n29 Y=$n31
+.subckt $_AND_ A=$n30 B=vcc Y=$n32
+.subckt $_OR_ A=$n31 B=$n32 Y=$n33
+.subckt $_XOR_ A=$n30 B=vcc Y=$n34
+.subckt $_MUX_ A=$n12 B=$n34 S=$n28 Y=$n35
+.subckt $_NOT_ A=$n35 Y=$n36
+.subckt $_XOR_ A=gnd B=$n36 Y=$n37
+.subckt $_AND_ A=gnd B=$n36 Y=$n38
+.subckt $_AND_ A=$n37 B=vcc Y=$n39
+.subckt $_OR_ A=$n38 B=$n39 Y=$n40
+.subckt $_XOR_ A=$n37 B=vcc Y=$n41
+.subckt $_MUX_ A=$n35 B=$n41 S=a Y=y
+.end

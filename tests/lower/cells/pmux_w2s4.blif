@@ -1,0 +1,23 @@
+.model m
+.inputs a[0] a[1] b0[0] b0[1] b1[0] b1[1] b2[0] b2[1] b3[0] b3[1] s[0] s[1] s[2] s[3]
+.outputs y[0] y[1]
+.subckt $_OR_ A=s[3] B=s[2] Y=$n28
+.subckt $_OR_ A=s[1] B=s[0] Y=$n29
+.subckt $_OR_ A=$n28 B=$n29 Y=$n30
+.subckt $_AND_ A=b3[0] B=s[3] Y=$n31
+.subckt $_AND_ A=b2[0] B=s[2] Y=$n32
+.subckt $_AND_ A=b1[0] B=s[1] Y=$n33
+.subckt $_AND_ A=b0[0] B=s[0] Y=$n34
+.subckt $_OR_ A=$n31 B=$n32 Y=$n35
+.subckt $_OR_ A=$n33 B=$n34 Y=$n36
+.subckt $_OR_ A=$n35 B=$n36 Y=$n37
+.subckt $_MUX_ A=a[0] B=$n37 S=$n30 Y=y[0]
+.subckt $_AND_ A=b3[1] B=s[3] Y=$n39
+.subckt $_AND_ A=b2[1] B=s[2] Y=$n40
+.subckt $_AND_ A=b1[1] B=s[1] Y=$n41
+.subckt $_AND_ A=b0[1] B=s[0] Y=$n42
+.subckt $_OR_ A=$n39 B=$n40 Y=$n43
+.subckt $_OR_ A=$n41 B=$n42 Y=$n44
+.subckt $_OR_ A=$n43 B=$n44 Y=$n45
+.subckt $_MUX_ A=a[1] B=$n45 S=$n30 Y=y[1]
+.end

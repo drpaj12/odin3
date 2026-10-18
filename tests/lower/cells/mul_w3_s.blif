@@ -1,0 +1,59 @@
+.model m
+.inputs a[0] a[1] a[2] b[0] b[1] b[2]
+.outputs y[0] y[1] y[2]
+.names gnd
+.subckt $_AND_ A=a[0] B=b[0] Y=$n11
+.subckt $_AND_ A=a[1] B=b[0] Y=$n12
+.subckt $_AND_ A=a[2] B=b[0] Y=$n13
+.subckt $_AND_ A=a[0] B=b[1] Y=$n14
+.subckt $_AND_ A=a[1] B=b[1] Y=$n15
+.subckt $_NOT_ A=a[0] Y=$n16
+.subckt $_AND_ A=$n16 B=b[2] Y=$n17
+.subckt $_XOR_ A=$n11 B=gnd Y=$n18
+.subckt $_AND_ A=$n11 B=gnd Y=$n19
+.subckt $_AND_ A=gnd B=$n18 Y=$n20
+.subckt $_XOR_ A=$n18 B=gnd Y=$n21
+.subckt $_OR_ A=$n19 B=$n20 Y=$n22
+.subckt $_XOR_ A=$n12 B=$n14 Y=$n23
+.subckt $_AND_ A=$n12 B=$n14 Y=$n24
+.subckt $_AND_ A=gnd B=$n23 Y=$n25
+.subckt $_XOR_ A=$n23 B=gnd Y=$n26
+.subckt $_OR_ A=$n24 B=$n25 Y=$n27
+.subckt $_XOR_ A=b[2] B=$n13 Y=$n28
+.subckt $_AND_ A=b[2] B=$n13 Y=$n29
+.subckt $_AND_ A=$n15 B=$n28 Y=$n30
+.subckt $_XOR_ A=$n28 B=$n15 Y=$n31
+.subckt $_OR_ A=$n29 B=$n30 Y=$n32
+.subckt $_XOR_ A=$n21 B=gnd Y=$n33
+.subckt $_AND_ A=$n21 B=gnd Y=$n34
+.subckt $_AND_ A=gnd B=$n33 Y=$n35
+.subckt $_XOR_ A=$n33 B=gnd Y=$n36
+.subckt $_OR_ A=$n34 B=$n35 Y=$n37
+.subckt $_XOR_ A=$n26 B=$n22 Y=$n38
+.subckt $_AND_ A=$n26 B=$n22 Y=$n39
+.subckt $_AND_ A=gnd B=$n38 Y=$n40
+.subckt $_XOR_ A=$n38 B=gnd Y=$n41
+.subckt $_OR_ A=$n39 B=$n40 Y=$n42
+.subckt $_XOR_ A=$n31 B=$n27 Y=$n43
+.subckt $_AND_ A=$n31 B=$n27 Y=$n44
+.subckt $_AND_ A=$n17 B=$n43 Y=$n45
+.subckt $_XOR_ A=$n43 B=$n17 Y=$n46
+.subckt $_OR_ A=$n44 B=$n45 Y=$n47
+.subckt $_XOR_ A=$n36 B=gnd Y=$n48
+.subckt $_AND_ A=$n36 B=gnd Y=$n49
+.subckt $_XOR_ A=$n41 B=$n37 Y=$n50
+.subckt $_AND_ A=$n41 B=$n37 Y=$n51
+.subckt $_XOR_ A=$n46 B=$n42 Y=$n52
+.subckt $_AND_ A=$n46 B=$n42 Y=$n53
+.subckt $_AND_ A=$n48 B=gnd Y=$n54
+.subckt $_OR_ A=$n49 B=$n54 Y=$n55
+.subckt $_AND_ A=$n50 B=$n55 Y=$n56
+.subckt $_OR_ A=$n51 B=$n56 Y=$n57
+.subckt $_AND_ A=$n50 B=$n48 Y=$n58
+.subckt $_AND_ A=$n52 B=$n57 Y=$n59
+.subckt $_OR_ A=$n53 B=$n59 Y=$n60
+.subckt $_AND_ A=$n52 B=$n58 Y=$n61
+.subckt $_XOR_ A=$n48 B=gnd Y=y[0]
+.subckt $_XOR_ A=$n50 B=$n55 Y=y[1]
+.subckt $_XOR_ A=$n52 B=$n57 Y=y[2]
+.end

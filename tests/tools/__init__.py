@@ -1,8 +1,8 @@
 """Tests for tools/netlist-compare, tools/equiv-check, tools/golden-sample, tools/golden-blackboxes,
 tools/project-fixtures, tools/parse-check, tools/elab-check, tools/opt-check, tools/exit-check,
-tools/proc-check, tools/heavy-run, tools/build-locked, tools/blif-vtr-check (the checker and the
-fixture driver), tools/vtr-models, tools/vtr-qor, tools/vtr-read-check, tools/verilog-gen,
-the BLIF reader and the
+tools/hardmap-check, tools/proc-check, tools/heavy-run, tools/build-locked,
+tools/blif-vtr-check (the checker and the fixture driver), tools/vtr-models,
+tools/vtr-qor, tools/vtr-read-check, tools/verilog-gen, the BLIF reader and the
 Python plugin binding (plugins/python).
 
 The tools are stand-alone scripts (not installed packages); their directories are put on
@@ -30,6 +30,8 @@ for _sub in (
     "tools/elab-check",
     "tools/opt-check",
     "tools/flatten-check",
+    "tools/lower-check",
+    "tools/hardmap-check",
     "tools/exit-check",
     "tools/proc-check",
     "tools/vtr-qor",

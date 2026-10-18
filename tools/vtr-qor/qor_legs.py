@@ -15,6 +15,7 @@ first run the front end under ``/usr/bin/time -v`` into ``<J>/frontend.log``, th
 
 from __future__ import annotations
 
+import hashlib
 import os
 import pwd
 import re
@@ -140,6 +141,72 @@ def golden_blif(arch: str, design: str) -> Path:
     return GOLDEN_ROOT / arch_base(arch) / "vtr" / design / f"{design}.parmys.blif"
 
 
+def golden_path(arch_base: str, design: str, home: Path) -> Path:
+    """``<home>/odin3-ws/golden/<arch base>/vtr/<d>/<d>.parmys.blif`` (spec §3.4)."""
+    return (home / "odin3-ws" / "golden" / arch_base / "vtr" / design
+            / f"{design}.parmys.blif")
+
+
+def arch_xml_rel(arch: str) -> str:
+    """The arch XML as a golden ``.prov`` names it: ``vtr_flow/arch/timing/<arch base>.xml``."""
+    return f"vtr_flow/arch/timing/{arch_base(arch)}.xml"
+
+
+def _prov_fields(path: Path) -> dict[str, str] | None:
+    """A ``.prov``'s ``key=value`` lines; None when it cannot be read."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    fields = {}
+    for line in text.splitlines():
+        name, sep, value = line.partition("=")
+        if sep:
+            fields[name.strip()] = value.strip()
+    return fields
+
+
+def _sha256_of(path: Path) -> str | None:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def verify_golden(blif: Path, arch_xml_rel: str, sha256: str | None = None) -> str | None:
+    """Spec §3.4: None when the Parmys golden ``blif`` may be used, else the E-QH6 reason. Its
+    ``<d>.parmys.prov`` (next to it) must say ``status=ok``, name the pin as ``vtr_commit`` and
+    ``arch_xml_rel`` as ``arch``, and hold the file's ``blif_sha256`` (``sha256`` when the caller
+    already hashed the file). Checked in that order; a missing BLIF or ``.prov`` is ``missing``."""
+    fields = _prov_fields(blif.with_suffix(".prov")) if blif.is_file() else None
+    if fields is None:
+        return "missing"
+    status = fields.get("status", "")
+    if status != "ok":
+        return f"status={status}"
+    commit = fields.get("vtr_commit", "")
+    if commit != VTR_PIN:
+        return f"vtr_commit {commit} is not the pin {VTR_PIN}"
+    arch = fields.get("arch", "")
+    if arch != arch_xml_rel:
+        return f"arch {arch} is not {arch_xml_rel}"
+    actual = sha256 if sha256 is not None else _sha256_of(blif)
+    if actual is None:
+        return "missing"
+    if fields.get("blif_sha256", "") != actual:
+        return "blif_sha256 does not match"
+    return None
+
+
+def golden_error(design: str, blif: Path, reason: str) -> str:
+    """E-QH6: ``<d>: Parmys golden <path>: <reason>``."""
+    return f"{design}: Parmys golden {blif}: {reason}"
+
+
 def stage_timeout(group: str) -> int:
     if group not in STAGE_TIMEOUT_S:
         raise ValueError(f"unknown group '{group}' (A, B)")
@@ -234,6 +301,32 @@ def build_commands(leg: str, design: str, ctx: LegContext) -> list[Command]:
         _frontend_command(leg, design, ctx),
         _vtr_command(ctx, ctx.job_dir / f"{design}.blif", VTR_START[leg]),
     ]
+
+
+FCHECK_VECTORS = 50000
+FCHECK_SEED = 1
+FCHECK_VERDICTS = {0: "pass", 1: "fail", 2: "error"}
+
+
+def fcheck_command(ctx: LegContext, design: str, netlist: Path, verilator_j: int) -> Command:
+    """Spec §8.1: VTR's ``run_random_check.py`` on the design's RTL and ``netlist``, its work
+    directory ``<J>/fcheck`` (the script's default would write into the working directory),
+    ``cwd`` ``<J>``, output to ``<J>/fcheck.log``, VTR's venv first on ``PATH``."""
+    script = ctx.vtr_root / "mosaic" / "verilator_check" / "run_random_check.py"
+    argv = (str(ctx.python), str(script), "--rtl", str(design_verilog(ctx.vtr_root, design)),
+            "--post-synth-blif", str(netlist), "--work-dir", str(ctx.job_dir / "fcheck"),
+            "--vectors", str(FCHECK_VECTORS), "--seed", str(FCHECK_SEED),
+            "--verilator-j", str(verilator_j))
+    path = f"{ctx.vtr_root / '.venv' / 'bin'}:{os.environ.get('PATH', os.defpath)}"
+    return Command(argv, ctx.job_dir, ctx.job_dir / "fcheck.log", (("PATH", path),))
+
+
+def fcheck_verdict(returncode: int, capped: bool) -> str:
+    """Spec §8.1 (review H6): the script's exit 0 is ``pass``, 1 ``fail`` (vectors mismatch), 2
+    ``error``; a kill by the memory cap is ``capped``; anything else is ``error``."""
+    if capped:
+        return "capped"
+    return FCHECK_VERDICTS.get(returncode, "error")
 
 
 def registered_passes(odin3_help: str) -> frozenset[str]:

@@ -1,0 +1,21 @@
+.model m
+.inputs clk en set clr d
+.outputs q
+.names gnd
+.names vcc
+1
+.subckt $_MUX_ A=gnd B=vcc S=set Y=$n17
+.cname $c11.mux0
+.subckt $_MUX_ A=$n17 B=gnd S=clr Y=$n18
+.cname $c14.mux0
+.subckt $_MUX_ A=gnd B=vcc S=clr Y=$n19
+.cname $c16.mux0
+.subckt $_MUX_ A=q B=d S=en Y=$n21
+.cname q.mux0
+.subckt $_MUX_ A=$n21 B=vcc S=$n18 Y=$n22
+.cname q.mux1
+.subckt $_MUX_ A=$n22 B=gnd S=$n19 Y=$n23
+.cname q.mux2
+.latch $n23 q re clk 3
+.cname q.dff_p3
+.end

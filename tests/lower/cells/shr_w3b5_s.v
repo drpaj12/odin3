@@ -1,0 +1,3 @@
+module m(input signed [2:0] a, input [4:0] b, output [2:0] y);
+  assign y = a >> b;
+endmodule

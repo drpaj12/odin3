@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# lower-diff: Odin III's lower against Yosys 0.55 on the same input (3B spec 14.2). See lower_diff.py.
+# Exit codes: 0 every cell agrees to its tier, 1 a difference, 2 error or usage, 3 hard (a child
+# crashed or timed out), 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../elab-check:$here/../opt-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/lower_diff.py" "$@"

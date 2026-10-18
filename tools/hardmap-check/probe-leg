@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# probe-leg: one Parmys probe leg (3C spec 9.2): run Parmys on tests/hardmap/probes/MICRO.v (scratch
+# golden root under WORKDIR, never ~/odin3-ws/golden), then parmys-probe the netlist against the
+# source, and check that the probe's exit code is the expected one (0 = Parmys right, 1 = the
+# recorded Parmys defect).
+#
+# usage: probe-leg WORKDIR MICRO EXPECT_EXIT [parmys-probe options...]
+# Needs VTR_ROOT (default ~/odin3-ws/external/vtr-verilog-to-routing) and iverilog.
+# Exit: 0 the probe gave EXPECT_EXIT, 1 it did not, 2 usage or Parmys error, 77 skipped.
+set -uo pipefail
+if [[ $# -lt 3 ]]; then
+    grep -m1 '^# usage:' "${BASH_SOURCE[0]}" | sed 's/^# //' >&2
+    exit 2
+fi
+work=$1 micro=$2 expect=$3
+shift 3
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+repo="$here/../.."
+vtr_root=${VTR_ROOT:-$HOME/odin3-ws/external/vtr-verilog-to-routing}
+arch=$vtr_root/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
+src=$repo/tests/hardmap/probes/$micro.v
+[[ -f $arch ]] || { echo "probe-leg: no arch at $arch (VTR_ROOT?)" >&2; exit 77; }
+command -v iverilog >/dev/null || { echo "probe-leg: no iverilog" >&2; exit 77; }
+[[ -f $src ]] || { echo "probe-leg: no such micro $src" >&2; exit 2; }
+mkdir -p "$work/golden" || exit 2
+golden=$work/golden/k6_frac_N10_frac_chain_mem32K_40nm/$micro/$micro.parmys.blif
+if [[ ! -f $golden ]]; then
+    "$repo/tools/run-oracle.sh" --tool parmys --golden "$work/golden" --name "$micro" "$src" "$arch" ||
+        { echo "probe-leg: Parmys failed on $micro" >&2; exit 2; }
+fi
+"$here/parmys-probe" "$@" "$src" "$micro" "$golden" "$work/out/$micro"
+got=$?
+[[ $got -eq 77 ]] && exit 77
+if [[ $got -eq $expect ]]; then
+    echo "probe-leg: $micro: probe exit $got as expected"
+    exit 0
+fi
+echo "probe-leg: $micro: probe exit $got, expected $expect" >&2
+exit 1

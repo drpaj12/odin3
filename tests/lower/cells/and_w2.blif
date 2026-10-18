@@ -1,0 +1,6 @@
+.model m
+.inputs a[0] a[1] b[0] b[1]
+.outputs y[0] y[1]
+.subckt $_AND_ A=a[0] B=b[0] Y=y[0]
+.subckt $_AND_ A=a[1] B=b[1] Y=y[1]
+.end

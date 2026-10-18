@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# lower-cells: the per-cell goldens of the lower pass (3B spec 14.2). See lower_cells.py.
+# Exit codes: 0 every golden matches, 1 one differs, 2 error or usage, 3 hard (a child crashed or
+# timed out), 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../elab-check:$here/../opt-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/lower_cells.py" "$@"

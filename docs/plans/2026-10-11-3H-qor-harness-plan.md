@@ -113,9 +113,10 @@ Effort cues:
 
   ```
   systemd-run --user --unit=odin3-vtr-qor-nightly-<YYYYMMDD> --collect --setenv=ODIN3_HEAVY_OK=1 \
-    <repo>/tools/heavy-run <repo>/tools/vtr-qor/vtr-qor nightly [--budget H]
+    -p RuntimeMaxSec=19800 <repo>/tools/heavy-run <repo>/tools/vtr-qor/vtr-qor nightly [--budget H]
   ```
 
+  - `RuntimeMaxSec=19800` (5.5 h: the 5 h budget plus 30 min for the last tool's SIGTERM grace) stops the service, and so releases the lock, if a tool outlives the night's own deadline (3H-3 review H3); the unit file `tools/vtr-qor/systemd/odin3-vtr-qor-nightly.service` carries the same line.
   - The transient service outlives the Claude session. `heavy-run` takes the lock, creates the scope and exports `ODIN3_HEAVY_SLICE`, so `nightly` finds itself inside (point (a)) and starts at once.
   - Its deadline is the earlier of the next 06:00 local and the start plus `--budget` (default 5 h).
   - `ODIN3_HEAVY_SERVICE`, `--start-at` and the in-Python `flock` are gone. The timer files ship in `tools/vtr-qor/systemd/` for Peter, running the same `heavy-run … nightly` command; no agent installs them.
@@ -184,7 +185,7 @@ Effort cues:
   | `KEEP_KEYS`, `KEEP_FAILED`, `KEEP_FAILED_BYTES` | 3, 5, 2 GiB per (arch, leg) |
   | `FCHECK_VECTORS`, `FCHECK_SEED`, `FCHECK_J_A`, `FCHECK_J_B` | 50,000, 1, 2, 1 |
   | `EQUIV_TIMEOUT_S` | 600 (child wall cap 660) |
-  | `NIGHTLY_DEADLINE`, `NIGHTLY_BUDGET_H` | 06:00, 4 |
+  | `NIGHTLY_DEADLINE`, `NIGHTLY_BUDGET_H` | 06:00, 5 (point (c) and Task 13; 3H-3 review L1) |
   | `GEOMEAN_MAX`, `PER_DESIGN_MAX` | from `bands.json` (1.20, 1.50), never constants in code |
 - **Files.** Never write `~/odin3-ws/golden` (only `publish`, by the controller, with `ODIN3_QOR_PUBLISH=1`) or `~/odin3-ws/external`. VTR's scripts run read-only: the working directory is `<J>`, and outputs go to `--temp_dir`/`--work-dir` under `<J>`. Every deletion goes through `safe_rmtree`. No symlinks are created: `latest` is a file written by atomic rename.
 - **Determinism.** The job list, the keys and every table file are pure functions of `sets.json`, the job directories and their `metrics.json`/`job.json`; dates and hosts never come from the clock. JSON is written with `sort_keys=True`, `indent=1`; CSV per RFC 4180 with `\n` line ends.

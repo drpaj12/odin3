@@ -380,7 +380,8 @@ exactly the form EL-27/EL-39 fix: one `$mem` per array, async read ports (`RD_CL
 | Async read | per read port `r` and data bit `j`: a binary `$_MUX_` tree over the words, selected from the low address bit up (`abits` levels, as `memory_map`'s `$rdmux`); a word index `≥ SIZE` reads `$_CONSTX_` |
 | Sync read, not transparent | the same tree, registered: `$_DFF_P_` per data bit on `RD_CLK` (polarity `RD_CLK_POLARITY`); when `RD_EN` is not the constant 1 the register's D is `$_MUX_(Q, tree, RD_EN)` |
 | Dropped | a `$mem` with no read port is deleted; a write port whose `WR_EN` bits are all constant 0 is skipped |
-| Errors | an **async write port** (`WR_CLK_ENABLE` 0), write ports on different clocks or polarities (one FF has one clock), and a **transparent** read port (`RD_TRANSPARENT` 1) are `lower: module 'm': '$mem' '<cell>' <reason>` (2D never emits them; Yosys's `memory_map` refuses the first two as well). Standalone `$memrd`/`$memwr` cells (a Yosys form, 2D collects into `$mem`) are `lower: standalone $memrd/$memwr '<cell>' (use $mem)` |
+| Transparent read | a sync read port with `RD_TRANSPARENT` 1 is lowered with a write-to-read bypass, as Yosys's `memory_map` does it (`extract_rdff`, `emulate_transparency`): per write port on the **same clock net and edge** as the read clock, a registered copy of the write data and of `WR_EN[bit] & (RD_ADDR == WR_ADDR)`, both with the read enable as clock enable, and a `$_MUX_` per write port in port order (the later port wins). A write port on another net or edge has no bypass (the read is read-first for it). One WARNING per transparent read port: `lower: module 'm': memory '<cell>' read port <i> is transparent; lowered with a write-to-read bypass (Parmys reads the old value: PHASE3 #40)`. Amended 2026-10-17, PHASE3 #40. |
+| Errors | an **async write port** (`WR_CLK_ENABLE` 0), write ports on different clocks or polarities (one FF has one clock) are `lower: module 'm': '$mem' '<cell>' <reason>` (2D never emits them; Yosys's `memory_map` refuses them as well). Standalone `$memrd`/`$memwr` cells (a Yosys form, 2D collects into `$mem`) are `lower: standalone $memrd/$memwr '<cell>' (use $mem)` |
 | Cap | `SIZE × WIDTH` above `ODIN3_LOWER_MAX_MEM_BITS` (2^22 = 4,194,304) is `lower: module 'm': '$mem' '<cell>' has N bits (cap 4194304); hardmap it or raise --max-mem-bits`. The VTR RAMs are 5,251 slices for `LU32PEEng` (decision 6) and must never reach here |
 
 Memory contents `INIT` are kept (unlike `hardmap`, which drops them with a warning, decision 6.5).
@@ -405,9 +406,10 @@ the rule creates shares one DERIVED record whose single parent is the word cell'
 `odin3_prov_index_by_loc` on `foo.v:42` reaches the dead `$add` (slot or tombstone, IR-6) and every
 gate made from it, and a provenance name leads with the word cell's source. Merged nets
 (`lower_connect`) are rewiring (IR-15): they keep their records. Memory nodes get the `$mem`'s
-record; the clock inverter of §6.1 gets the FF's. Bit nodes are **unnamed**; the output nets keep
-their names and wires (agent default; naming each bit node `<name>[i]` costs memory for nothing
-the writers use, and DESIGN §13 #6 is open).
+record; the clock inverter of §6.1 gets the FF's. Bit nodes are **named** `<cell>.<op><i>` after the
+word cell (e.g. `u_add.xor3`; a cell without a name uses the name of its Y net or wire, else `$c<ID>`),
+made unique by a `_N` suffix, as 3C's hardmap names (PHASE3 #33); the output nets keep their names and wires (Peter,
+2026-10-15, PHASE3 #38: lowered netlists stay readable for reverse engineering).
 
 **Attributes.** Only `keep` is copied from the word cell to every node it creates (so `opt_clean`
 still honours it). `src`-style attributes live in provenance.
@@ -678,9 +680,10 @@ provenance primitives.
 | 9 | each cell is built alone; no sharing between a comparison and a subtraction of the same operands | `alumacc` merges `$alu` nodes with equal operands when run on a whole module; `techmap`'s wrapper runs it per cell, so Yosys's `techmap` does not share either | `opt_merge` shares them afterwards in both |
 | 10 | constants are left in (`CI = 0`, shift stages on constants, `Y[k>0] = 0`) | `techmap` runs `opt_muxtree; opt_expr -fine` inside the shift and divider maps and `opt -fast` after | §2.2; the script adds `opt -fast` |
 | 11 | `$pow` and `$tribuf` are errors | `$pow` is left unmapped (`_TECHMAP_FAIL_`); `$tribuf` becomes `$_TBUF_` | no bit cells for them; Peter's question 4 |
-| 12 | `$mem`: transparent read ports, async write ports and write ports on different clocks are errors; reads past `SIZE` give x | `memory_map` lowers transparent reads with a bypass and rejects the other two | 2D never emits them; hand-built only |
+| 12 | `$mem`: async write ports and write ports on different clocks or polarities are errors; reads past `SIZE` give x (one INFO line per such memory) | `memory_map` rejects the two errors as well; it leaves words past `SIZE` undriven | 2D never emits them; hand-built only |
+| 12b | `$mem`: a transparent read port is lowered with a write-to-read bypass against write ports on its clock net and edge (Yosys `memory_map`), with a WARNING (PHASE3 #40) | Parmys never reads `RD_TRANSPARENT`; its RAMs are read-first (`vtr_primitives.v`), so its netlists read the old value | Agent default (Peter may override); 2D never emits `RD_TRANSPARENT` 1 |
 | 13 | `$mem` `INIT` is kept | `hardmap` drops it with a warning (decision 6.5) | soft memories have somewhere to put it |
-| 14 | bit nodes are unnamed; output nets keep their names | `techmap` makes `$techmap<N>$…` names | names never reach `netlist-compare`; DESIGN §13 #6 |
+| 14 | bit nodes are named `<cell>.<op><i>` (PHASE3 #38); output nets keep their names | `techmap` makes `$techmap<N>$…` names | names never reach `netlist-compare`; DESIGN §13 #6 |
 | 15 | `$pmux` multi-hot gives the OR of the selected words | `techmap.v` does too; simlib says x | refinement; checks drive one-hot |
 | 16 | a division by zero gives the divider's result | simlib: x | refinement |
 | 17 | `$reduce_*`, `$logic_*`, `$eq`, `$ne`: `Y[k>0]` merged with the constant-0 net | `connect Y[k] 1'0` | the same thing in the IR (IR-1, IR-4) |
@@ -728,7 +731,7 @@ script text, 3 and 4 fix what is lowered and how, 5 confirms the evidence form.
    alternative, ripple adders and array multipliers, is simpler to review and gives ABC the same
    function, but it is not "Yosys structures".
 4. **Cells with no bit form** (§5.7, §7, §8): `$pow` (non-constant), `$tribuf`, standalone
-   `$memrd`/`$memwr`, transparent or async-write or multi-clock `$mem`: located errors, no IR change.
+   `$memrd`/`$memwr`, async-write or multi-clock `$mem`: located errors, no IR change.
    *Recommended:* yes. `$_TBUF_` would be an IR addition for Phase 6 (Altera); the other cells never
    occur in 2D's output.
 5. **Evidence for sequential cells** (§14.3): 1E has no hooks for the word FF family (IR change D),
@@ -740,5 +743,5 @@ script text, 3 and 4 fix what is lowered and how, 5 confirms the evidence form.
 
 The remaining defaults are marked "agent default (Peter may override)" where they occur and are
 logged in PHASE3's decisions by Task 9: the caps (§11), `--neg-edge keep`, `--async error`,
-`--report`, the unnamed bit nodes, the copied `keep` attribute, the per-cell transaction, the
+`--report`, the bit-node names of an unnamed cell, the copied `keep` attribute, the per-cell transaction, the
 duplicated connect helper.

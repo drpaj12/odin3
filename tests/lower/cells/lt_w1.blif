@@ -1,0 +1,12 @@
+.model m
+.inputs a b
+.outputs y
+.names vcc
+1
+.subckt $_NOT_ A=b Y=$n5
+.subckt $_XOR_ A=a B=$n5 Y=$n6
+.subckt $_AND_ A=a B=$n5 Y=$n7
+.subckt $_AND_ A=$n6 B=vcc Y=$n8
+.subckt $_OR_ A=$n7 B=$n8 Y=$n9
+.subckt $_NOT_ A=$n9 Y=y
+.end

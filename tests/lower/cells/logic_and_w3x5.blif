@@ -1,0 +1,11 @@
+.model m
+.inputs a[0] a[1] a[2] b[0] b[1] b[2] b[3] b[4]
+.outputs y
+.subckt $_OR_ A=a[0] B=a[1] Y=$n10
+.subckt $_OR_ A=$n10 B=a[2] Y=$n11
+.subckt $_OR_ A=b[0] B=b[1] Y=$n12
+.subckt $_OR_ A=b[2] B=b[3] Y=$n13
+.subckt $_OR_ A=$n12 B=$n13 Y=$n14
+.subckt $_OR_ A=$n14 B=b[4] Y=$n15
+.subckt $_AND_ A=$n11 B=$n15 Y=y
+.end

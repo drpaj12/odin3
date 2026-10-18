@@ -101,6 +101,9 @@ which PRs remain.
 - [x] 3H: P-baseline table published to odin3-golden `qor/3c9a4d23b27d/P-baseline/` (golden commit
   76c485a; decisions 28 and 29)
 - [ ] 3H partial: 3H-1..2 merged; 3H-3 (to M1) and 3H-4 remain, and now carry 3F (below)
+  (3H-3 code: P' and R golden check, `fcheck`, `equiv`, `nightly`, `check-lib`, `crosscheck`
+  on `feat/3H-legs`; the M1 run and the group B measurements are the controller's and not yet
+  done, so nothing here is ticked)
 - [ ] 3E `write_blif --vtr`: Parmys goldens round-trip through it and route via `-start abc`
   (partial: 3E-1..3 and 3E-5 merged; 3E-4's round-trip and VPR-read sweeps are done, decision 34;
   ticked when 3H's R leg routes all 19 via `-start abc`)
@@ -914,6 +917,40 @@ then the options considered.
     writes no such invariant, so a shape rule would need Peter's decision first. FAST is unchanged
     (rule 7 is FULL only). New fault `ODIN3_IR_TEST_BAD_HIER` and two tests in `test_ir_check`
     (a flatten-style path passes; a `hier` one past the table fails).
+38. **3B `lower`: bit nodes are named after their word cell** (Peter, 2026-10-15: "yes do that
+    naming"). Each bit node a word cell lowers to is named `<cell>.<op><i>` (e.g. `u_add.xor3`),
+    made unique by a `_N` suffix (`kit.c`, the first name no node of the module has), in the style of
+    3C's hardmap names (#33). A word cell with no name (every cell `read_verilog; proc` makes)
+    takes the name of its output (Y) net, else of the wire holding it, and only when neither has a
+    name `$c<ID>`; the prefix is fixed once per cell (agent default 2026-10-17, Peter may override).
+    Replaces the spec's "bit nodes are unnamed" agent default (spec 3B §9), so a lowered netlist
+    stays readable for reverse engineering; provenance is unchanged. 3B Tasks 1–3 (paused) predate
+    this and are updated when 3B resumes.
+
+39. **3C-1 `hardmap` review fixes: explicit `multiply` and wide-Y `$mul`** (2026-10-17, branch
+    `feat/3C-hardmap-mul`; agent default under Peter's Parmys-default rule, he may override).
+    (a) An explicit `multiply` instance is treated like the equivalent `$mul`, as Parmys resolves
+    the primitive: `WIDTH` 2 becomes a `$mul` for `lower`, other `WIDTH` below 36 are padded to 36
+    exactly as a `$mul`, 36 is unchanged, above 36 stays the located error; a WARNING names each
+    instance treated. `--vtr-compat` does not reach passes, so the rule is not gated by it. The
+    spec M-6 and D7 text are amended. This is what lets `micro/multiply_hard_block.v` match its
+    Parmys golden. (b) An unsigned `$mul` with `Y_WIDTH > A_WIDTH + B_WIDTH` stays soft with a
+    warning (new D7b; moot after 3G `wreduce`): the gnd merges would allocate after the delete and
+    break H-9. (c) A failed mapping also removes the constant node it created. (d) 3C-2: an
+    `$add`/`$sub` with `Y_WIDTH > max(A_WIDTH, B_WIDTH) + 1` stays soft with the same warning, for
+    the same H-9 reason (spec A-7 amended). 3G `wreduce` caps Y at `n + 1`, so the target script
+    never hits (b) or (d); 3C Task 4's sweep checks that no such WARNING appears on the 19.
+
+40. **3B-3 `lower` `$mem`: transparent read ports keep the RTL-correct bypass** (2026-10-17, branch
+    `feat/3B-3`; agent default, Peter may override). A sync `$mem` read port with `RD_TRANSPARENT`
+    1 is lowered with a write-to-read bypass against the write ports on its clock net and edge, as
+    Yosys's `memory_map` does it (`extract_rdff`, `emulate_transparency`); a write port on another
+    net or edge gets none. This is a **divergence from Parmys**: it never reads `RD_TRANSPARENT`
+    and its target RAMs are read-first, so its netlists read the old value. Peter's rule
+    "match Parmys and WARN" does not apply cleanly (Parmys has no soft-memory path at all), so the
+    RTL meaning wins and a WARNING names the memory and port: `lower: module 'm': memory '<cell>'
+    read port <i> is transparent; lowered with a write-to-read bypass (Parmys reads the old value:
+    PHASE3 #40)`. Spec 3B §7 and §16 row 12b amended; 2D never emits a transparent read.
 
 ## Risks
 
