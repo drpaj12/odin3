@@ -1098,7 +1098,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `vtr_primitives.v` as a library unit with per-read flags (`--nomem2reg`); 2D-7b's
       `read_verilog --lib` is that mode, and 2H checks it carries them.
     - **2F follow-ups:** opt-equiv hard-block cut compares ports only, not instance presence or
-      parameters (review 2026-10-16); follow-up.
+      parameters (review 2026-10-16); parameters and port widths are compared since #29.
     - **3G follow-ups:** 20 micro designs have an opt-diff refine step that is unproven (Yosys's
       SAT proof hits its 60 s limit, the BLIF cec gives no verdict; opt-diff exit 4); they are listed
       untested for now (size limit), 2026-10-17 (`tests/opt/diff_micro_expect_fail.txt`), and the
@@ -1302,3 +1302,38 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       --vtr-compat` on `tests/golden/vtr_tristate/tri_out.v` and compares the netlist with the
       Parmys golden shape (`tests/golden/vtr_tristate/tri_out.parmys.blif`, a copy of the oracle's
       output) and checks the WARNING.
+29. **opt-equiv soundness fix: hard blocks at full width, the initial state checked** (agent
+    defaults, 2026-10-18; the 3B soundness audit, Part 2, of `tools/opt-check/opt_equiv.py`, the
+    same holes as lower-equiv's fix 9ac875a4 and its re-check N2/N3). Peter may override.
+    - **Hard blocks (C1, M1, N3).** `expose -evert` gives each cut port the width of the black
+      box's declaration, and the tech library declares `single_port_ram`/`dual_port_ram` with
+      `dynports` and 1-bit `data`/`out`: only bit 0 of a RAM's write and read data was compared.
+      Every hard-block instance is now declared at the widths it connects
+      (`tools/opt-check/hard_blocks.py`, `Checker.prepare_boxes`), and a block that both sides
+      hold under one name with another type, port widths or parameter value (RTLIL keeps the
+      parameters) is "not a refinement".
+    - **Initial state (H2, N2).** `equiv_simple`/`equiv_induct` have no base case from the initial
+      state. A passed proof counts only when `sat -seq 4` from the initial state finds no difference
+      on any wire both sides name, in the proof's clock model (`Checker.judge`). `init` values are
+      honoured; a flip-flop with no init starts at x (`-set-init-undef`), so every start value
+      counts and `opt_dff`'s x for a never-changing flip-flop stays a refinement (0 would reject it,
+      and would miss the re-check's `r <= r & d` against `r <= r`). A failed base case is "not a
+      refinement" when an output differs within 20 `clk2fflogic` steps, else inconclusive; a
+      base-case timeout is a size limit (inconclusive, exit 4 unless the whole-script BLIF cec
+      proves the run). A failed proof stays "not a refinement"; no path makes a failed or
+      undecided check "ok".
+    - **Evidence.** `tests/tools/test_opt_equiv.py` (`SoundnessTest`, real Yosys 0.55): RAM data
+      bit 2, read bit 3, `DATA_WIDTH` 4 to 5, `ADDR_WIDTH` parameter alone, inverted `we`, init 0
+      to 1, `r <= r & d` against `r <= r`: all "not a refinement"; correct pairs ok. Each fix
+      reverted once (five mutants and the 0-init one) fails a test. `opt_equiv_rules` and
+      `opt_equiv_wreduce_rules` pass. VTR re-proof of the 14 small designs (`opt-nightly --leg equiv
+      --set vtr31 --only ...`, 92c2ba44, Release, one heavy-run, 3037 s): 13 ok (single_wire,
+      single_ff, and_latch, the three multiclock designs, ch_intrinsics(+_nolatches) with
+      full-width RAM ports, diffeq1, diffeq2, sha, blob_merge, stereovision3); mkPktMerge is
+      unproven (its base case times out at 60 s, the BLIF cec cannot read `dual_port_ram`'s
+      `data1[0]`) and listed untested for now (size limit) in `tests/opt/vtr_expect_fail.txt`.
+      The micro sweeps (`opt_equiv_micro`, `opt_equiv_micro_phase3`) are not re-run yet.
+    - **Not changed:** opt-diff, opt-rules, flatten-diff and opt-gen-diff call `Checker.refines`
+      (the proof alone) and do not get the hard-block widths or the base case yet; the
+      whole-script BLIF cec cannot read a `dual_port_ram`/`single_port_ram` whose ports are bit
+      names (`data1[0]`) against Yosys's 1-bit black-box model. Follow-ups.
