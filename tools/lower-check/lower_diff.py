@@ -323,10 +323,11 @@ class Diff:
         (lower-equiv's check): then every output bit on which the two lowerings differ is one the
         input leaves open, which is what an ``equiv`` entry in the expect list may excuse (review
         3B-2 F1). False for any other difference, and for a proof that does not decide."""
-        import lower_equiv  # noqa: PLC0415  (lower_equiv imports this module)
+        import lower_equiv  # (lower_equiv imports this module)
+        from opt_equiv import top_module
 
         gold = run_dir / "in.il"
-        top = lower_equiv.opt_equiv.top_module(gold.read_text(encoding="utf-8"), self.args.top)
+        top = top_module(gold.read_text(encoding="utf-8"), self.args.top)
         gate = lower_equiv.make_gate(self.args.yosys, run_dir / "lo.blif", top, run_dir, self.cap)
         kind, _ = lower_equiv.refine(self.args.yosys, gold, gate, run_dir / "lo.blif", run_dir,
                                      self.cap, self.args.top)

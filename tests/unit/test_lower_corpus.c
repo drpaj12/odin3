@@ -1,6 +1,6 @@
 /*
- * test_lower_corpus.c — 3B Task 9 (spec 12.1, 12.2): out-of-memory at every allocation for each rule
- * family (the shifts, $pmux, the arithmetic and comparisons, $mul, $div and $mod, the bitwise
+ * test_lower_corpus.c — 3B Task 9 (spec 12.1, 12.2): out-of-memory at every allocation for each
+ * rule family (the shifts, $pmux, the arithmetic and comparisons, $mul, $div and $mod, the bitwise
  * cells: the Task 4 and 5 builders that the Task 1 kit sweep does not run), and a module built in
  * reverse creation order. The reverse test writes lower_reverse_a.blif and lower_reverse_b.blif to
  * the working directory; CTest lower_reverse_netlist_compare compares them.
@@ -57,47 +57,52 @@ static odin3_node_id build_case(lf *fix, const oom_case *cs, odin3_module **mod)
     return lf_one_cell(fix, &cell, mod);
 }
 
-/* Fails the n-th allocation of `lower` on a fresh one-cell design for n = 0, 1, ... until a run
- * succeeds; every run must leave a design that passes check FULL, and a failure before the commit
- * must leave the design as it was (spec 12.2's two contracts). */
-static void sweep_case(const oom_case *cs) {
-    bool done = false;
-    for (long step = 0; !done && step < MAX_STEPS; step++) {
-        lf fix;
-        lf_begin(&fix);
-        odin3_module *mod = NULL;
-        odin3_node_id node = build_case(&fix, cs, &mod);
-        odin3_strbuf before;
-        odin3_strbuf after;
-        odin3_strbuf_init(&before);
-        odin3_strbuf_init(&after);
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_signature(&fix, &before));
-        odin3_util_set_alloc_fail_after(step);
-        odin3_status st = odin3_pass_run(fix.design, "lower", odin3_bytes_cstr(""));
-        odin3_util_set_alloc_fail_after(-1);
-        odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
-        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_check_module(mod, opts), cs->type);
-        done = st == ODIN3_OK;
-        if (done) {
-            TEST_ASSERT_TRUE_MESSAGE(step > 3, "the sweep injected no failure"); /* it did run */
-        }
-        if (!done) {
-            TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_NO_MEMORY, st, cs->type);
-        }
-        if (!done && odin3_node_live(mod, node)) {
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_signature(&fix, &after));
-            TEST_ASSERT_EQUAL_STRING_MESSAGE(before.data, after.data, cs->type);
-        }
-        odin3_strbuf_free(&before);
-        odin3_strbuf_free(&after);
-        lf_end(&fix);
+/* One run with the `step`-th allocation failing: true when `lower` succeeded. Every run must leave
+ * a design that passes check FULL, and a failure before the commit must leave it as it was. */
+static bool oom_run(const oom_case *cs, long step) {
+    lf fix;
+    lf_begin(&fix);
+    odin3_module *mod = NULL;
+    odin3_node_id node = build_case(&fix, cs, &mod);
+    odin3_strbuf before;
+    odin3_strbuf after;
+    odin3_strbuf_init(&before);
+    odin3_strbuf_init(&after);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_signature(&fix, &before));
+    odin3_util_set_alloc_fail_after(step);
+    odin3_status st = odin3_pass_run(fix.design, "lower", odin3_bytes_cstr(""));
+    odin3_util_set_alloc_fail_after(-1);
+    odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_check_module(mod, opts), cs->type);
+    bool done = st == ODIN3_OK;
+    if (!done) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_NO_MEMORY, st, cs->type);
     }
-    TEST_ASSERT_TRUE_MESSAGE(done, cs->type);
+    if (!done && odin3_node_live(mod, node)) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_signature(&fix, &after));
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(before.data, after.data, cs->type);
+    }
+    odin3_strbuf_free(&before);
+    odin3_strbuf_free(&after);
+    lf_end(&fix);
+    return done;
+}
+
+/* Fails the n-th allocation of `lower` for n = 0, 1, ... until a run succeeds (spec 12.2). */
+static void sweep_case(const oom_case *cs) {
+    long step = 0;
+    while (step < MAX_STEPS && !oom_run(cs, step)) {
+        step++;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(step < MAX_STEPS, cs->type);
+    TEST_ASSERT_TRUE_MESSAGE(step > 3, "the sweep injected no failure");
 }
 
 static void test_oom_at_every_allocation_shifts_and_pmux(void) {
-    static const oom_case k_cases[] = {{"$shl", OOM_BINARY, false},  {"$shr", OOM_BINARY, false},
-                                       {"$sshr", OOM_BINARY, true},  {"$shiftx", OOM_BINARY, false},
+    static const oom_case k_cases[] = {{"$shl", OOM_BINARY, false},
+                                       {"$shr", OOM_BINARY, false},
+                                       {"$sshr", OOM_BINARY, true},
+                                       {"$shiftx", OOM_BINARY, false},
                                        {"$pmux", OOM_PMUX, false}};
     for (size_t i = 0; i < sizeof k_cases / sizeof k_cases[0]; i++) {
         sweep_case(&k_cases[i]);
@@ -114,16 +119,20 @@ static void test_oom_at_every_allocation_arithmetic_and_comparisons(void) {
 }
 
 static void test_oom_at_every_allocation_mul_div_mod(void) {
-    static const oom_case k_cases[] = {{"$mul", OOM_BINARY, false}, {"$mul", OOM_BINARY, true},
-                                       {"$div", OOM_BINARY, false}, {"$mod", OOM_BINARY, true}};
+    static const oom_case k_cases[] = {{"$mul", OOM_BINARY, false},
+                                       {"$mul", OOM_BINARY, true},
+                                       {"$div", OOM_BINARY, false},
+                                       {"$mod", OOM_BINARY, true}};
     for (size_t i = 0; i < sizeof k_cases / sizeof k_cases[0]; i++) {
         sweep_case(&k_cases[i]);
     }
 }
 
 static void test_oom_at_every_allocation_bitwise(void) {
-    static const oom_case k_cases[] = {{"$and", OOM_BINARY, false}, {"$xor", OOM_BINARY, true},
-                                       {"$not", OOM_UNARY, false},  {"$reduce_or", OOM_UNARY, false}};
+    static const oom_case k_cases[] = {{"$and", OOM_BINARY, false},
+                                       {"$xor", OOM_BINARY, true},
+                                       {"$not", OOM_UNARY, false},
+                                       {"$reduce_or", OOM_UNARY, false}};
     for (size_t i = 0; i < sizeof k_cases / sizeof k_cases[0]; i++) {
         sweep_case(&k_cases[i]);
     }

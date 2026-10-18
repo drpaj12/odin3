@@ -40,9 +40,10 @@ typedef struct odin3_lower_opts {
 
 /*
  * Parses the pass arguments: `[--neg-edge invert|keep] [--async sync|error] [--report <file>]
- * [--max-mem-bits N] [--lower-snapshot <dir>]`. *opts is filled (zero when no argument is given); report_path points into
- * the argument text's copy in *report (caller-owned, freed by the caller). INVALID_ARG (logged
- * "lower: unknown argument '<arg>'" or the option's own message) for anything else; NO_MEMORY.
+ * [--max-mem-bits N] [--lower-snapshot <dir>]`. *opts is filled (zero when no argument is given);
+ * report_path points into the argument text's copy in *report (caller-owned, freed by the caller).
+ * INVALID_ARG (logged "lower: unknown argument '<arg>'" or the option's own message) for anything
+ * else; NO_MEMORY.
  */
 odin3_status odin3_lower_parse_args(odin3_bytes args, odin3_strbuf *report, odin3_lower_opts *opts);
 

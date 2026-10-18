@@ -54,6 +54,25 @@ static bool parse_u64(const char *text, uint64_t *out) {
     return true;
 }
 
+/* --lower-snapshot DIR: the directory is copied into the options. */
+static odin3_status set_snapshot_dir(const char *value, odin3_lower_opts *opts) {
+    if (strlen(value) >= sizeof opts->snapshot_dir) {
+        return bad_value("--lower-snapshot", "a shorter directory name");
+    }
+    memcpy(opts->snapshot_dir, value, strlen(value) + 1U);
+    return ODIN3_OK;
+}
+
+/* --report FILE: the path lives in the caller's buffer. */
+static odin3_status set_report(const char *value, odin3_strbuf *report, odin3_lower_opts *opts) {
+    odin3_strbuf_clear(report);
+    odin3_status st = odin3_strbuf_append(report, odin3_bytes_cstr(value));
+    if (st == ODIN3_OK) {
+        opts->report_path = report->data;
+    }
+    return st;
+}
+
 /* One option whose value word is in `value` (the option's own name is `name`). */
 static odin3_status apply_option(const char *name, const char *value, odin3_strbuf *report,
                                  odin3_lower_opts *opts) {
@@ -72,17 +91,9 @@ static odin3_status apply_option(const char *name, const char *value, odin3_strb
             return bad_value(name, "a positive number");
         }
     } else if (strcmp(name, "--lower-snapshot") == 0) {
-        if (strlen(value) >= sizeof opts->snapshot_dir) {
-            return bad_value(name, "a shorter directory name");
-        }
-        memcpy(opts->snapshot_dir, value, strlen(value) + 1U);
+        return set_snapshot_dir(value, opts);
     } else {
-        odin3_strbuf_clear(report);
-        odin3_status st = odin3_strbuf_append(report, odin3_bytes_cstr(value));
-        if (st != ODIN3_OK) {
-            return st;
-        }
-        opts->report_path = report->data;
+        return set_report(value, report, opts);
     }
     return ODIN3_OK;
 }
@@ -91,7 +102,7 @@ static const char k_enable_first[] = "--async-enable-first";
 
 static bool is_option(const char *word) {
     static const char *const k_options[] = {"--neg-edge", "--async", "--report", "--max-mem-bits",
-                                                  "--lower-snapshot"};
+                                            "--lower-snapshot"};
     for (size_t i = 0; i < sizeof k_options / sizeof k_options[0]; i++) {
         if (strcmp(word, k_options[i]) == 0) {
             return true;

@@ -25,8 +25,10 @@
 /* Unity (linked for the fixture helper) references these. */
 void setUp(void);
 void tearDown(void);
-void setUp(void) {}
-void tearDown(void) {}
+void setUp(void) {
+}
+void tearDown(void) {
+}
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
@@ -50,12 +52,13 @@ typedef struct type_row {
 } type_row;
 
 static const type_row k_types[] = {
-    {"$and", BINARY},  {"$or", BINARY},   {"$xor", BINARY},     {"$xnor", BINARY}, {"$add", BINARY},
-    {"$sub", BINARY},  {"$mul", BINARY},  {"$div", BINARY},     {"$mod", BINARY},  {"$eq", BINARY},
-    {"$ne", BINARY},   {"$lt", BINARY},   {"$le", BINARY},      {"$gt", BINARY},   {"$ge", BINARY},
-    {"$shl", BINARY},  {"$shr", BINARY},  {"$sshr", BINARY},    {"$shiftx", BINARY},
-    {"$not", UNARY},   {"$neg", UNARY},   {"$reduce_and", UNARY}, {"$reduce_or", UNARY},
-    {"$reduce_xor", UNARY}, {"$logic_not", UNARY}, {"$pmux", PMUX},
+    {"$and", BINARY},      {"$or", BINARY},        {"$xor", BINARY},      {"$xnor", BINARY},
+    {"$add", BINARY},      {"$sub", BINARY},       {"$mul", BINARY},      {"$div", BINARY},
+    {"$mod", BINARY},      {"$eq", BINARY},        {"$ne", BINARY},       {"$lt", BINARY},
+    {"$le", BINARY},       {"$gt", BINARY},        {"$ge", BINARY},       {"$shl", BINARY},
+    {"$shr", BINARY},      {"$sshr", BINARY},      {"$shiftx", BINARY},   {"$not", UNARY},
+    {"$neg", UNARY},       {"$reduce_and", UNARY}, {"$reduce_or", UNARY}, {"$reduce_xor", UNARY},
+    {"$logic_not", UNARY}, {"$pmux", PMUX},
 };
 
 static void quiet_sink(odin3_log_level level, const char *msg, void *user) {

@@ -26,13 +26,15 @@
 /* Unity (linked for the fixture helper) references these. */
 void setUp(void);
 void tearDown(void);
-void setUp(void) {}
-void tearDown(void) {}
+void setUp(void) {
+}
+void tearDown(void) {
+}
 
 enum { DEFAULT_CELLS = 100000, WIDTH = 4, NS_PER_S = 1000000000, KIB = 1 };
 
-static const char *const k_binary[] = {"$and", "$or", "$xor", "$add", "$sub", "$lt",
-                                       "$eq",  "$shl", "$shr", "$ge"};
+static const char *const k_binary[] = {"$and", "$or", "$xor", "$add", "$sub",
+                                       "$lt",  "$eq", "$shl", "$shr", "$ge"};
 
 static long peak_rss_kib(void) {
     struct rusage usage;
@@ -68,8 +70,8 @@ int main(int argc, char **argv) {
     for (uint32_t i = 0; i < cells; i++) {
         char prefix[16];
         (void)snprintf(prefix, sizeof prefix, "c%u_", (unsigned)i);
-        lf_cell_spec cell = {k_binary[i % (sizeof k_binary / sizeof k_binary[0])], params, 5,
-                             "dut", {0}};
+        lf_cell_spec cell = {
+            k_binary[i % (sizeof k_binary / sizeof k_binary[0])], params, 5, "dut", {0}};
         (void)lf_cell_prefixed(&fix, mod, &cell, prefix);
     }
     uint32_t before = lf_live_nodes(mod);

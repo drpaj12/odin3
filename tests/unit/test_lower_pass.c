@@ -95,7 +95,8 @@ static void test_the_snapshot_directory_is_parsed_and_bounded(void) {
     odin3_lower_opts opts;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse("", &report, &opts));
     TEST_ASSERT_EQUAL_STRING("", opts.snapshot_dir);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse("--lower-snapshot /tmp/snap --report r.json", &report, &opts));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          parse("--lower-snapshot /tmp/snap --report r.json", &report, &opts));
     TEST_ASSERT_EQUAL_STRING("/tmp/snap", opts.snapshot_dir);
     TEST_ASSERT_EQUAL_STRING("r.json", opts.report_path);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, parse("--lower-snapshot", &report, &opts));

@@ -122,7 +122,8 @@ def make_gold(yosys: str, before: Path, parmys: tuple[Path | None, bool], work: 
 def make_gate(yosys: str, after: Path, top: str, work: Path, cap: int) -> Path:
     """The gate: Yosys's reading of the BLIF as RTLIL (``gate.il``), the module ``top`` marked."""
     gate = work / "gate.il"
-    run_yosys(yosys, f"read_blif -wideports {after}; opt_clean -purge; write_rtlil {gate}", work, cap)
+    script = f"read_blif -wideports {after}; opt_clean -purge; write_rtlil {gate}"
+    run_yosys(yosys, script, work, cap)
     text = gate.read_text(encoding="utf-8")
     marker = f"\nmodule {top}\n"
     if marker not in text:
@@ -148,8 +149,8 @@ def cec_gold_and_blif(yosys: str, gold: Path, after: Path, work: Path, cap: int)
 def cec_blifs(gold: Path, gate: Path, cap: int, work: Path) -> tuple[str, str]:
     """``equiv-check`` with undriven nets (the x of a memory read past its words) tied to 0. A
     "proved" is a proof: the gate equals one resolution of the gold's x, and every resolution is a
-    legal behaviour of the gold. A "differs" with x in either side is not a counterexample (another
-    resolution might match), so it is reported as a difference of the cec, and the caller decides."""
+    legal behaviour of the gold. A "differs" with x in either side is not a counterexample
+    (another resolution might match), so it is reported as a difference of the cec only."""
     try:
         done = lc.capped("equiv-check", [lc.exe(str(opt_equiv.EQUIV_CHECK)), "--allow-undriven",
                                          str(gold), str(gate)], cap, cwd=work,
@@ -159,7 +160,7 @@ def cec_blifs(gold: Path, gate: Path, cap: int, work: Path) -> tuple[str, str]:
     text = lc.why((done.stdout or "") + (done.stderr or ""))
     if done.returncode == 0:
         return opt_equiv.CEC_PROVED, ""
-    if done.returncode == 1:  # (with x tied to 0 this can be a false alarm; the SAT flow failed too)
+    if done.returncode == 1:  # (with x tied to 0 a false alarm is possible; the SAT flow failed)
         return opt_equiv.CEC_DIFFERS, f"BLIF cec: not equivalent: {text}"
     return opt_equiv.CEC_UNPROVEN, f"BLIF cec: no verdict (exit {done.returncode}): {text}"
 
