@@ -1,3 +1,4 @@
 # tests/opt/micro_expect_fail.txt: the micros opt_equiv_micro and opt_diff_micro expect to fail beyond
 # tests/proc/micro_expect_fail.txt (2F Task 17). Format as there: `<path> [needle] <reason>`.
-syntax/diffeq_f_systemC.v [Multiple edge sensitive events] Yosys 0.55 rejects the RTLIL process (Parmys rejects it too: proc-diff's `lowers` list); opt-diff's Yosys side stops
+# Empty on purpose: this list is read by all four opt micro sweeps. diffeq_f_systemC moved (2H): the opt-diff
+# sweeps list its Yosys error in diff_micro_expect_fail.txt, the opt-equiv ones its unproven result in equiv_expect_fail.txt.

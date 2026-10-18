@@ -34,7 +34,29 @@ runs the plain flow (the clock is not checked), ``--no-techmap`` the first try o
 
 A hard block (a black box module such as ``single_port_ram``) is cut at its ports before the
 lowering (``EVERT_BLACKBOXES``): its outputs become shared inputs, the nets on its inputs become
-outputs the check compares.
+outputs the check compares. Each instance is first declared at the widths it connects
+(``hard_blocks``; the tech library's ``dynports`` declaration is 1 bit wide, which compared only
+bit 0), and a hard block that both sides hold under one name with another type, other port widths
+or another parameter value is "not a refinement".
+
+``equiv_simple``/``equiv_induct`` never start from the initial state, so a passed proof counts
+only when a bounded check from the initial state (``init`` values honoured, other flip-flops x)
+finds no difference in the first ``BASE_STEPS`` steps on any wire both sides name (the base case
+of the induction, ``Checker.judge``). The base case failing is "not a refinement" when the same
+check finds an output trace in ``BMC_STEPS`` steps, else "inconclusive"; a base case that times
+out is "inconclusive" (a size limit). A failed proof stays "not a refinement"; no path turns a
+failed or undecided proof into "ok".
+
+The BLIF cec of the whole script (``settle_inconclusive``) is a fallback for timeouts only, and
+only when it is sound: ``equiv-check`` starts a latch without ``init`` (or with 2/3) at 0 on both
+sides, so it cannot see a pair that differs from an unknown start (review H1). A pair whose base
+case found a trace (no output trace in 20 steps) or timed out is rescued only when the cec
+is exact for it: no latch of either BLIF lacks a 0/1 ``init`` (``latches_without_init``) and the
+gate reads no x net (the lowering folds a holding flop without init into x, which the cec ties
+to 0). Then the cec honours every start value, so it also decides the base case. Else the pair
+stays unproven (exit 4); a BLIF cec never turns a pair with an undefined start into ok. (A
+combinational pair whose internal wire a pass narrows fails the base case on that wire but
+has no latch: the cec decides it, e.g. wreduce/y_unused.)
 
 A failing pair prints ``opt-equiv: <NNNN>-<sub>: not a refinement`` with the rule counters of the
 run (Odin III's ``--opt-stats`` lines, which cover the whole run). A work directory this tool
@@ -60,6 +82,7 @@ and no systemd-run).
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 import subprocess
@@ -70,6 +93,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import clock_sig
+import hard_blocks as hb
 import memcap
 import toolutil
 
@@ -327,10 +351,42 @@ def uses_x(blif: Path) -> bool:
     return len(X_NET.findall(data)) > data.count(X_NET_DEFINITION)
 
 
-def cec_blifs(a: Path, b: Path, cap: int, work: Path) -> tuple[str, str]:
+LATCH_LINE = re.compile(r"^\s*\.latch\s+(?P<words>[^#\n]*)", re.MULTILINE)
+
+
+def latches_without_init(blif: Path) -> int:
+    """How many ``.latch`` lines of a BLIF lack a 0/1 initial value (none, 2 or 3). The fields are
+    ``input output [type control] [init]``: 3 words end in the init, 5 words do, 2 and 4 do not.
+    ``equiv-check`` ties these to 0, so a cec proof over them says nothing about an unknown start.
+    An unreadable file counts as one."""
+    try:
+        text = blif.read_text(encoding="utf-8", errors="replace").replace("\\\n", " ")
+    except OSError:
+        return 1
+    count = 0
+    for match in LATCH_LINE.finditer(text):
+        words = match.group("words").split()
+        if len(words) not in (3, 5) or words[-1] not in ("0", "1"):
+            count += 1
+    return count
+
+
+def cec_blifs(a: Path, b: Path, cap: int, work: Path, need_init: bool = False
+              ) -> tuple[str, str]:
     """(verdict, text) of ``equiv-check`` on two BLIFs: proved (exit 0), differs (exit 1), else
     unproven (a tool limit: hard-block models, several clocks, a timeout; the text says which). A
-    timeout or a crash of the checker is "unproven" too, never a pass."""
+    timeout or a crash of the checker is "unproven" too, never a pass. ``need_init`` (``b`` is the
+    gate): a latch without a 0/1 init in either file, or an x net read by the gate, is "unproven"
+    before the checker runs (it would start that latch, or read that x, as 0; the gold's x is a
+    don't care, the gate's is not)."""
+    if need_init:
+        loose = latches_without_init(a) + latches_without_init(b)
+        if loose:
+            return CEC_UNPROVEN, (f"BLIF cec: not used, {loose} latch(es) have no 0/1 init and "
+                                  "equiv-check would start them at 0")
+        if uses_x(b):  # the lowering folds a flop that never changes into an x net (review H1)
+            return CEC_UNPROVEN, ("BLIF cec: not used, the gate reads x nets (unconn) that "
+                                  "equiv-check ties to 0, so a gold value of 0 would match them")
     try:
         done = capped("equiv-check", [exe(str(EQUIV_CHECK)), str(a), str(b)], cap, cwd=work,
                       timeout=CEC_TIMEOUT_SECONDS)
@@ -348,7 +404,8 @@ def cec_blifs(a: Path, b: Path, cap: int, work: Path) -> tuple[str, str]:
     return CEC_UNPROVEN, f"BLIF cec: no verdict (exit {done.returncode}): {text}"
 
 
-def cec_ils(yosys: str, gold: Path, gate: Path, cap: int, work: Path, tag: str
+def cec_ils(yosys: str, gold: Path, gate: Path, cap: int, work: Path, tag: str,
+            need_init: bool = False
             ) -> tuple[str, str]:
     """``cec_blifs`` of the lowering of two RTLIL files."""
     blifs: list[Path] = []
@@ -363,7 +420,57 @@ def cec_ils(yosys: str, gold: Path, gate: Path, cap: int, work: Path, tag: str
             return CEC_UNPROVEN, (f"BLIF cec: the lowering of the {side} side failed: "
                                   f"{why((done.stdout or '') + (done.stderr or ''))}")
         blifs.append(blif)
-    return cec_blifs(blifs[0], blifs[1], cap, work)
+    return cec_blifs(blifs[0], blifs[1], cap, work, need_init)
+
+
+# ---- The base case: a bounded check from the initial state (3B soundness review H2) ----------
+#
+# ``equiv_simple``/``equiv_induct`` prove that gold and gate never diverge once their named wires
+# agree; neither starts from the initial state (equiv_induct's base case only asks that some
+# consistent trace exists), so ``reg q = 0`` against ``reg q = 1`` passed. A passed proof stands
+# only when a bounded model check from the initial state, over every public wire both sides name
+# (the wires ``equiv_make`` pairs, made outputs by ``expose -shared``), finds no difference in the
+# first BASE_STEPS steps. ``equiv_simple -seq 4`` proves a cell over at most 5 time frames from a
+# free state (equiv_simple.cc: ``step`` from 4 down to 0), the other ``$equiv`` cells cut points,
+# and ``equiv_induct`` steps from any state where they all hold, so a step t >= 4 is covered once
+# all named wires agree in steps 0..3: BASE_STEPS = 4.
+#
+# The model: both sides as the proof had them (flattened, hard blocks cut), ``memory``, then the
+# proof's clock model (``async2sync``, one step per cycle, when ``clock_sig.same_clocks``; else
+# ``clk2fflogic``), ``opt_clean`` (``-purge`` when the proof passed purged: it paired only the
+# wires left), ``miter -equiv -ignore_gold_x`` (an x in the gold is a don't care) and ``sat -seq N
+# -set-init-undef -enable_undef -set-def-inputs``: every ``init`` attribute is honoured and a
+# flip-flop without one starts at x, its RTLIL meaning (lower-equiv's ``-set-init-zero`` is VTR's
+# power-up value for a BLIF gate; here both sides are RTLIL and ``opt_dff`` may replace a
+# flip-flop that never changes and has no init by an x: a refinement that a 0 would call a
+# difference). When the base case fails, the output check
+# (``clk2fflogic``, outputs only, BMC_STEPS = 20 half-cycles: 10 edges of each clock) decides "not a
+# refinement" on a trace, else "inconclusive". Each check stops after ``REFINE_TIMEOUT_SECONDS``;
+# a timeout is a size limit, a Yosys error no answer: neither is a proof. No ``sat -verify``: its
+# ``log_error`` exits before Yosys flushes stdout (the same rule as lower-equiv, 9ac875a4).
+BASE_STEPS = 4
+BMC_STEPS = 20
+TRACE, NO_TRACE, NO_ANSWER, SIZE_LIMIT = "trace", "none", "unknown", "size limit"
+SAT_FAIL = re.compile(r"SAT proof finished - model found: FAIL!")
+SAT_PASS = re.compile(r"SAT proof finished - no model found: SUCCESS!")
+
+
+def bounded_script(gold: str, gate: str, procs: bool, steps: int,
+                   model: tuple[bool, bool, bool] = (False, False, False)) -> str:
+    """The Yosys script of the bounded check of two files ``rename_modules`` made gold/gate.
+    ``model`` = (shared: every public wire both sides name is compared too, the base case;
+    one_clock: ``async2sync`` steps instead of ``clk2fflogic``'s; purge: ``opt_clean -purge``)."""
+    shared, one_clock, purge = model
+    script = [f"read_rtlil {gold}", f"read_rtlil {gate}", *(["proc"] if procs else []),
+              "flatten", EVERT_BLACKBOXES, "memory",
+              "async2sync" if one_clock else "clk2fflogic",
+              "opt_clean -purge" if purge else "opt_clean",
+              *(["expose -shared gold gate"] if shared else []),
+              "miter -equiv -flatten -make_assert -ignore_gold_x gold gate miter",
+              "hierarchy -top miter",
+              f"sat -seq {steps} -set-init-undef -enable_undef -set-def-inputs "
+              "-prove-asserts -show-inputs miter"]
+    return "; ".join(script)
 
 
 class Checker:
@@ -377,6 +484,7 @@ class Checker:
         self.lower = lower
         self.techmap = techmap
         self.top = top
+        self.passed: tuple[Sequence[str], bool] | None = None  # the last proof: lowering, purge
 
     def child(self, argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
         return capped("yosys-refine", argv, self.cap, cwd=self.work,
@@ -416,6 +524,7 @@ class Checker:
                 crashed = crashed or exc  # a lowering that aborts proves nothing: try the next
                 continue
             if done.returncode == 0:
+                self.passed = (lowering, purge)
                 return True, ""
             output = (done.stdout or "") + (done.stderr or "")
             if not PROOF_FAILED.search(output):  # an ERROR that is not the failed proof: this
@@ -433,6 +542,104 @@ class Checker:
         if pending is not None and not last:  # no lowering produced a failed proof either
             raise pending
         return False, last
+
+    def judge(self, gold: Path, gate: Path, tag: str) -> tuple[bool, str, bool]:
+        """(ok, text, inconclusive) for one pair: the hard blocks at full width (a shared block
+        that differs is not a refinement), the proof (``refines``; a failed proof is not a
+        refinement), then the base case from the initial state. ``ok`` only when the proof and
+        the base case both pass. A proof timeout propagates as ``refines``'s ``CrashError``, a
+        base-case timeout raises one too (both a size limit for ``check_all``)."""
+        texts = [gold.read_text(encoding="utf-8"), gate.read_text(encoding="utf-8")]
+        tops = (top_module(texts[0], self.top), top_module(texts[1], self.top))
+        gold, gate, mismatch = self.prepare_boxes((gold, gate), tops, tag)
+        if mismatch:
+            return False, mismatch, False
+        self.passed = None
+        ok, last = self.refines(gold, gate, tag)
+        if not ok:
+            return False, last, False
+        purge = self.passed[1] if self.passed else False
+        found, text = self.bounded((gold, gate), tag, BASE_STEPS, (True, purge))
+        if found == NO_TRACE:
+            return True, "", False
+        if found == SIZE_LIMIT:
+            raise CrashError("yosys-bmc", f"base case from the initial state: {text}", True)
+        trace, detail = self.bounded((gold, gate), tag, BMC_STEPS, (False, False))
+        if trace == TRACE:
+            return False, f"the initial states differ: bounded check: {detail}", False
+        outputs = (f"no output trace in {BMC_STEPS} steps" if trace == NO_TRACE else
+                   f"the output check gave no answer ({detail[-160:]})")
+        return False, (f"the proof passed but its base case from the initial state "
+                       f"{'failed' if found == TRACE else 'gave no answer'} on the named wires "
+                       f"({text[-200:]}) and {outputs}"), True
+
+    def bounded(self, sides: tuple[Path, Path], tag: str, steps: int,
+                shared_purge: tuple[bool, bool]) -> tuple[str, str]:
+        """(TRACE | NO_TRACE | NO_ANSWER | SIZE_LIMIT, Yosys's last lines) of the bounded check
+        of ``sides`` (gold, gate). ``shared_purge`` = (the base case: every named wire, in the
+        proof's clock model; ``opt_clean -purge``). Only the base case uses async2sync."""
+        shared, purge = shared_purge
+        texts = [path.read_text(encoding="utf-8") for path in sides]
+        names = []
+        for text, side in zip(texts, ("gold", "gate"), strict=True):
+            path = self.work / f"{tag}.bmc.{side}.il"
+            path.write_text(rename_modules(text, side, top_module(text, self.top)),
+                            encoding="utf-8")
+            names.append(str(path))
+        procs = any(has_processes(text) for text in texts)
+        one_clock = shared and self.lower and clock_sig.same_clocks(texts[0], texts[1])
+        script = bounded_script(names[0], names[1], procs, steps, (shared, one_clock, purge))
+        try:
+            done = capped("yosys-bmc", [self.yosys, "-p", script], self.cap, cwd=self.work,
+                          timeout=REFINE_TIMEOUT_SECONDS)
+        except CrashError as exc:
+            return (SIZE_LIMIT if exc.size_limit else NO_ANSWER), str(exc)
+        log = (done.stdout or "") + (done.stderr or "")
+        if done.returncode == 0 and SAT_FAIL.search(log):
+            return TRACE, why(log)
+        if done.returncode == 0 and SAT_PASS.search(log):
+            return NO_TRACE, ""
+        return NO_ANSWER, f"bounded check exit {done.returncode}: {why(log)}"
+
+    def prepare_boxes(self, sides: tuple[Path, Path], tops: tuple[str, str], tag: str
+                      ) -> tuple[Path, Path, str]:
+        """(gold, gate, difference) with every hard block declared at its instance's widths
+        (``hard_blocks``). The paths are unchanged when neither side has a user cell;
+        ``difference`` is non-empty when a shared hard block differs in type, widths or a
+        parameter. A Yosys error or a block that cannot be cut is a ``ToolError``."""
+        texts = [path.read_text(encoding="utf-8") for path in sides]
+        if not any(hb.has_user_cells(text) for text in texts):
+            return sides[0], sides[1], ""
+        modules = {**hb.blackbox_modules(texts[1]), **hb.blackbox_modules(texts[0])}
+        probes = [self.flat_probe(path, f"{tag}.box.{side}")
+                  for path, side in zip(sides, ("gold", "gate"), strict=True)]
+        try:
+            uses = [hb.box_uses(design, top, set(modules))
+                    for (_, design), top in zip(probes, tops, strict=True)]
+            names, decls = hb.declarations(modules, uses)
+            out = []
+            for (flat, _), side, top, side_uses in zip(probes, ("gold", "gate"), tops, uses,
+                                                       strict=True):
+                text = hb.retype_boxes(flat.read_text(encoding="utf-8"), top, side_uses, names)
+                path = self.work / f"{tag}.box.{side}.il"
+                path.write_text(hb.mark_top(text, top) + decls, encoding="utf-8")
+                out.append(path)
+        except hb.BoxError as exc:
+            raise ToolError(f"hard blocks: {exc}") from exc
+        return out[0], out[1], hb.box_mismatch(uses[0], uses[1])
+
+    def flat_probe(self, il: Path, tag: str) -> tuple[Path, dict[str, object]]:
+        """(``<tag>.flat.il``, its ``write_json`` design): ``il`` flattened (after ``proc`` when
+        it holds processes), as the refinement script does first anyway."""
+        flat, dump = self.work / f"{tag}.flat.il", self.work / f"{tag}.flat.json"
+        procs = "proc; " if has_processes(il.read_text(encoding="utf-8")) else ""
+        script = f"read_rtlil {il}; {procs}flatten; write_rtlil {flat}; write_json {dump}"
+        done = capped("yosys-flatten", [self.yosys, "-p", script], self.cap, cwd=self.work)
+        if done.returncode != 0:
+            raise ToolError(f"yosys-flatten exit {done.returncode}: "
+                            f"{why((done.stdout or '') + (done.stderr or ''))}")
+        design: dict[str, object] = json.loads(dump.read_text(encoding="utf-8"))
+        return flat, design
 
     def flows(self, one_clock: bool = False) -> list[Sequence[str]]:
         """The lowerings tried in order; a pass in any one is a proof (each lowers both sides
@@ -496,8 +703,9 @@ def snapshot_run(odin3: str, files: Sequence[str], top: str | None, script: Sequ
 
 
 def check_all(run: Run, checker: Checker) -> list[Verdict]:
-    """A pair whose SAT proof times out is "inconclusive" (the run goes on); every other crash
-    stays a ``CrashError``."""
+    """A pair whose SAT proof or base case times out is "inconclusive" (the run goes on), as is
+    one whose base case ``Checker.judge`` cannot settle; every other crash stays a
+    ``CrashError``."""
     verdicts: list[Verdict] = []
     timeouts = 0
     for pair in run.pairs:
@@ -506,25 +714,26 @@ def check_all(run: Run, checker: Checker) -> list[Verdict]:
                                     True))
             continue
         try:
-            ok, reason = checker.refines(pair.before, pair.after, pair.name)
+            ok, reason, unsure = checker.judge(pair.before, pair.after, pair.name)
         except CrashError as exc:
             if not exc.size_limit:
                 raise
             timeouts += 1
             verdicts.append(Verdict(pair, False, str(exc), True))
             continue
-        verdicts.append(Verdict(pair, ok, reason))
+        verdicts.append(Verdict(pair, ok, reason, unsure))
     return verdicts
 
 
 def settle_inconclusive(run: Run, verdicts: Sequence[Verdict], args: argparse.Namespace,
                         work: Path) -> tuple[str, str]:
     """When no pair failed but some timed out: the whole script, Odin III's input against its
-    final result, through the BLIF cec. (verdict, text); ``CEC_PROVED`` clears the timeouts."""
+    final result, through the BLIF cec. (verdict, text); ``CEC_PROVED`` clears the timeouts. A pair
+    whose base case failed or timed out is rescued only by an exact cec (H1): ``need_init``."""
     if not run.pairs:
         return CEC_UNPROVEN, "no snapshot"
     return cec_ils(args.yosys, run.pairs[0].before, run.pairs[-1].after, args.mem_cap, work,
-                   "e2e")
+                   "e2e", True)
 
 
 def report(verdicts: Sequence[Verdict], counters: dict[str, int]) -> list[str]:
@@ -542,7 +751,8 @@ def report(verdicts: Sequence[Verdict], counters: dict[str, int]) -> list[str]:
     bad = sum(1 for v in verdicts if not v.ok and not v.inconclusive)
     lines.append(f"{TOOL}: {len(verdicts)} calls changed something: "
                  f"{len(verdicts) - bad - slow} refine, {bad} do not"
-                 + (f", {slow} inconclusive (SAT size limit)" if slow else ""))
+                 + (f", {slow} inconclusive (SAT size limit or initial state unproven)"
+                    if slow else ""))
     if not verdicts:
         lines.append(f"{TOOL}: NOTE: 0 calls changed anything: nothing was checked")
     return lines

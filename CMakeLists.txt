@@ -2745,10 +2745,14 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_opt_rules_dir}/wreduce)
         set_tests_properties(opt_diff_wreduce_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
                              TIMEOUT 1800)
+        # --cap-for: syntax/inferred_ram_w_clog2.v (1479 B, a 3776-latch RAM) needs 2.3 GB for its base
+        # case from the initial state, over the 2G child cap; it proves at 4G under both scripts (2H).
         odin3_add_sweep_test(opt_equiv_micro LABEL sweep
             COMMAND ${_opt_sweep} --opt-equiv --min-changed-total 200 ${_micro_expect}
+                    --cap-for syntax/inferred_ram_w_clog2.v=4G
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_phase2_expect_fail.txt
                     ${_micro_dir})
         # --min-changed-total 200: the 441 micros under 1100 B alone have 266 changing calls, so
         # a do-nothing odin3 (0 on every design) fails (2F-6 re-review N3).
@@ -2818,6 +2822,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         odin3_add_sweep_test(opt_diff_micro LABEL sweep
             COMMAND ${_opt_sweep} --opt-diff ${_micro_expect}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_phase2_expect_fail.txt
                     --opt-arg=--script=phase2 "--opt-arg=--script=opt -full"
                     --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
                     --opt-arg=--root=${_micro_dir} ${_micro_dir})
@@ -2825,6 +2831,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # checked, wreduce included) and with `wreduce` and the Phase 3 script against Yosys.
         odin3_add_sweep_test(opt_equiv_micro_phase3 LABEL sweep
             COMMAND ${_opt_sweep} --opt-equiv --min-changed-total 200 ${_micro_expect}
+                    --cap-for syntax/inferred_ram_w_clog2.v=4G
                     --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
@@ -2834,6 +2841,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         odin3_add_sweep_test(opt_diff_micro_wreduce LABEL sweep
             COMMAND ${_opt_sweep} --opt-diff ${_micro_expect}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_wreduce_expect_fail.txt
                     --opt-arg=--script=wreduce --opt-arg=--script=phase3
                     --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
                     --opt-arg=--root=${_micro_dir} ${_micro_dir})

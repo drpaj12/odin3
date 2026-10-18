@@ -1098,7 +1098,22 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `vtr_primitives.v` as a library unit with per-read flags (`--nomem2reg`); 2D-7b's
       `read_verilog --lib` is that mode, and 2H checks it carries them.
     - **2F follow-ups:** opt-equiv hard-block cut compares ports only, not instance presence or
-      parameters (review 2026-10-16); follow-up.
+      parameters (review 2026-10-16); parameters and port widths are compared since #29.
+    - **3G follow-ups:** the opt-diff refine step (Yosys's SAT proof, 60 s limit; then the BLIF cec
+      fallback, which since 6a8759eb is refused for latches with no 0/1 init and for x nets read by
+      Odin III's side) is unproven, opt-diff exit 4, on two sets of micros, each listed untested for
+      now (size limit) and required to exit 4, so one unproven refine cannot hide another difference.
+      Under the wreduce/Phase 3 scripts: 25 micros (`tests/opt/diff_micro_wreduce_expect_fail.txt`;
+      20 listed 2026-10-17, `large/spree.v` and `full/cf_fft_256_8.v` left it 2026-10-18 because their
+      refine proves, seven joined because the fallback had rescued them). Under the Phase 2 script and
+      `opt -full`: 26 micros (`tests/opt/diff_micro_phase2_expect_fail.txt`: 15 with a SAT limit, ten
+      more that the fallback had rescued - diffeq1, diffeq2, diffeq_paj_convert, rs_decoder_1/2,
+      mac1/2, blob_merge, cf_fft_256_8, sv_chip0 - and `large/LU32PEEng.v`, which also loses Yosys to the
+      memory cap). Both sweeps ran clean on these lists (opt_diff_micro 2026-10-18: 433 pass, 106 listed,
+      0 unexpected, 0 stale; opt_diff_micro_wreduce: clean but for spree and cf_fft_256_8, fixed).
+      `full/iir_no_combinational.v` is in the wreduce list only: its Phase 2/`opt -full` refine
+      proves. Two more micros (`large/LU64PEEng.v`, `large/arm_core.v`) are exit 4 because Yosys is
+      killed at the 2 GiB cap, and three are rejected by Yosys 0.55 (exit 2, same list).
     - **For Peter:**
       1. *Decided, #25:* the mixed-sign cell semantics (2F Task 18 review I1 and I2): Peter ruled
          "2a" on 2026-10-13, both-signed-only everywhere, with a warning.
@@ -1294,3 +1309,63 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       --vtr-compat` on `tests/golden/vtr_tristate/tri_out.v` and compares the netlist with the
       Parmys golden shape (`tests/golden/vtr_tristate/tri_out.parmys.blif`, a copy of the oracle's
       output) and checks the WARNING.
+29. **opt-equiv soundness fix: hard blocks at full width, the initial state checked** (agent
+    defaults, 2026-10-18; the 3B soundness audit, Part 2, of `tools/opt-check/opt_equiv.py`, the
+    same holes as lower-equiv's fix 9ac875a4 and its re-check N2/N3). Peter may override.
+    - **Hard blocks (C1, M1, N3).** `expose -evert` gives each cut port the width of the black
+      box's declaration, and the tech library declares `single_port_ram`/`dual_port_ram` with
+      `dynports` and 1-bit `data`/`out`: only bit 0 of a RAM's write and read data was compared.
+      Every hard-block instance is now declared at the widths it connects
+      (`tools/opt-check/hard_blocks.py`, `Checker.prepare_boxes`), and a block that both sides
+      hold under one name with another type, port widths or parameter value (RTLIL keeps the
+      parameters) is "not a refinement".
+    - **Initial state (H2, N2).** `equiv_simple`/`equiv_induct` have no base case from the initial
+      state. A passed proof counts only when `sat -seq 4` from the initial state finds no difference
+      on any wire both sides name, in the proof's clock model (`Checker.judge`). `init` values are
+      honoured; a flip-flop with no init starts at x (`-set-init-undef`), so every start value
+      counts and `opt_dff`'s x for a never-changing flip-flop stays a refinement (0 would reject it,
+      and would miss the re-check's `r <= r & d` against `r <= r`). A failed base case is "not a
+      refinement" when an output differs within 20 `clk2fflogic` steps, else inconclusive; a
+      base-case timeout is a size limit (inconclusive, exit 4 unless the whole-script BLIF cec
+      proves the run). A failed proof stays "not a refinement"; no path makes a failed or
+      undecided check "ok".
+    - **Evidence.** `tests/tools/test_opt_equiv.py` (`SoundnessTest`, real Yosys 0.55): RAM data
+      bit 2, read bit 3, `DATA_WIDTH` 4 to 5, `ADDR_WIDTH` parameter alone, inverted `we`, init 0
+      to 1, `r <= r & d` against `r <= r`: all "not a refinement"; correct pairs ok. Each fix
+      reverted once (five mutants and the 0-init one) fails a test. `opt_equiv_rules` and
+      `opt_equiv_wreduce_rules` pass. VTR re-proof of the 14 small designs (`opt-nightly --leg equiv
+      --set vtr31 --only ...`, 92c2ba44, then c5eeb7f3, Release, 3G cap): 9 proved (single_wire,
+      single_ff, and_latch, the three multiclock designs, ch_intrinsics(+_nolatches) with
+      full-width RAM ports, stereovision3) and 5 untested for now (size limit), listed in
+      `tests/opt/vtr_expect_fail.txt`: mkPktMerge (its base case times out at 60 s, the BLIF cec
+      cannot read `dual_port_ram`'s `data1[0]`), and, since c5eeb7f3 refuses the BLIF cec fallback
+      for latches with no 0/1 init, diffeq1 (4 of 4 calls inconclusive, 386 such latches), diffeq2
+      (3 of 3, 192), sha (1 of 8, 1786) and blob_merge (4 of 9, 1144). None of the five has a
+      counterexample (no call is "not a refinement"). opt-diff's refine step has the same rule
+      (`need_init`, 6a8759eb): a SAT timeout on a design with such latches is unproven (exit 4);
+      the micros it affects are in `tests/opt/diff_micro_phase2_expect_fail.txt` and
+      `diff_micro_wreduce_expect_fail.txt`, and the VTR designs' opt-diff lines in `diff_expect.txt`.
+      The micro sweeps on c5eeb7f3 (2026-10-18, Release, 2G cap): `opt_equiv_micro` (Phase 2 script)
+      539 files, 414 pass, 104 expected failures, 15 unexpected, 6 listed but passing;
+      `opt_equiv_micro_phase3` 410 / 112 / 17 unexpected / 0. Every unexpected failing call is
+      "inconclusive" (SAT size limit or initial state unproven), none is "not a refinement" (0 "do not"
+      among the unexpected). Listed files do have "not a refinement" calls: `full/stereovision3.v` and
+      `large/sv_chip3_hierarchy_no_mem.v` (call 0016-opt_dff; Yosys 0.55's own `opt_dff` fails the
+      identical induction on the same before-state and a 10-step output check finds no trace, so it is a
+      limit of the checker; the VTR copy of stereovision3 differs in its sensitivity list and a missing
+      `default:` and proves), the `wreduce.mem_addr` skips, `ch_intrinsics` (0039-opt_expr) and
+      `cf_cordic_v_8_8_8` (opt_share), each with the pair name in its needle. 2H lists the unproven: 12
+      big micros and `diffeq2` under both scripts (`tests/opt/equiv_expect_fail.txt`), matmul
+      under the Phase 2 script (`equiv_phase2_expect_fail.txt`: its memory's equiv_induct is killed
+      by the cap even at 5G), three small designs under Phase 3 only (`bm_arithmetic_unused_bits`,
+      `iir_no_combinational`, `iir`: the base case fails on named wires whose unused upper bits a wreduce
+      call drops, x in the gate against defined bits in the gold; the output-only check passes 20 steps;
+      a checker limit, not a size limit). `diffeq2` (2131 B) stays unproven: the induction of its
+      multipliers is unproven after 600 s. `syntax/inferred_ram_w_clog2.v` (1479 B) proves under both scripts
+      at a 4G cap (its base case peaks at 2.3 GB; the sweeps give it `--cap-for ...=4G`). The seven
+      entries only Phase 3 fails moved to `equiv_phase3_expect_fail.txt`. Expected after the
+      re-listing: Phase 2 script 0 unexpected, Phase 3 0 unexpected, nothing listed but passing.
+    - **Not changed:** opt-diff, opt-rules, flatten-diff and opt-gen-diff call `Checker.refines`
+      (the proof alone) and do not get the hard-block widths or the base case yet; the
+      whole-script BLIF cec cannot read a `dual_port_ram`/`single_port_ram` whose ports are bit
+      names (`data1[0]`) against Yosys's 1-bit black-box model. Follow-ups.
