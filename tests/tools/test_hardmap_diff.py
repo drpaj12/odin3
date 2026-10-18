@@ -199,6 +199,14 @@ class ListedTests(ToolCase):
         self.assertIn("listed:counts:+6 latch", out)
         self.assertEqual(self.log("compare.log"), "")
 
+    def test_counts_beside_another_entry_is_stale(self) -> None:
+        self.expect("common/foo.v counts:+6 latch D4: select flip-flops\n"
+                    "common/foo.v unproven cannot decide\n")
+        self.spec["odin_blif"] = SIX_LATCHES
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("STALE", out)
+
     def test_counts_form_wrong_delta_fails(self) -> None:
         self.expect("common/foo.v counts:+5 latch D4: select flip-flops\n")
         self.spec["odin_blif"] = SIX_LATCHES

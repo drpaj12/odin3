@@ -30,14 +30,7 @@ blob_merge.v counts:-23 latch fsm: Parmys recodes state (5 bits, 28 states) one-
 stereovision3.v counts:-21 latch fsm: Parmys recodes reg_prog_state (5 bits, 27 states) one-hot, +22 expected, 21 seen, 1 flop unexplained (open); no fsm in Odin III Phase 3 (PHASE3 #43)
 sha.v unproven ABC dsec UNDECIDED after 482 s; hard-block and latch counts equal Parmys's
 
-# Predicted for the 12 designs not run yet (spec 2 and 10; the commands are in PHASE3 #42):
-stereovision0.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
-stereovision1.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
-stereovision2.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
-LU8PEEng.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
-LU32PEEng.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
-LU8PEEng.v D1 also R-6: 4 instances with two live write ports map as plain dual_port_ram slices, no priority logic
-mcml.v counts:+6 latch D4: registered depth-split select, 6 more flip-flops (R-7); D1 applies too (1 signed adder)
-LU32PEEng.v unproven equiv-check cannot decide it (tests/exit/vtr_unproven.txt); the counts are the evidence
-mcml.v unproven equiv-check cannot decide it (tests/exit/vtr_unproven.txt); the counts are the evidence
-stereovision3.v unproven equiv-check cannot decide it (tests/exit/vtr_unproven.txt); the counts are the evidence
+# The 12 designs not run yet (raygentop, boundtop, mkSMAdapter4B, or1200, stereovision0/1/2,
+# mkDelayWorker32B, LU8PEEng, bgm, mcml, LU32PEEng) have no line: an unlisted `differs`, `unproven`
+# or `counts-differ` fails the sweep, which is the safe direction. Add a line for each only from
+# its run (the commands are in PHASE3 #42).

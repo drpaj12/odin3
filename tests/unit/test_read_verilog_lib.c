@@ -278,6 +278,27 @@ static void test_unit_flag_vtr_compat_recorded(void) {
     TEST_ASSERT_FALSE(module_has_attr(elab, "odin3_lib_nolatches"));
 }
 
+static const char k_flat[] = "module top (input a, output y);\n  assign y = a;\nendmodule\n";
+
+/* PHASE3 #43: --vtr-compat prints one fsm WARNING on a design read; a --lib read and a plain read
+ * print none. */
+static void test_vtr_compat_fsm_warning(void) {
+    et_src srcs[] = {{"t.v", k_flat}};
+    setup_files(srcs, 1, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--vtr-compat t.v"), et_log(&rs));
+    const char *log = et_log(&rs);
+    const char *hit = strstr(log, "fsm recoding (Parmys) not performed");
+    TEST_ASSERT_NOT_NULL_MESSAGE(hit, log);
+    TEST_ASSERT_NULL(strstr(hit + 1, "fsm recoding (Parmys) not performed"));
+}
+
+static void test_no_fsm_warning_without_vtr_compat(void) {
+    et_src srcs[] = {{"t.v", k_flat}};
+    setup_files(srcs, 1, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "t.v"), et_log(&rs));
+    TEST_ASSERT_NULL(strstr(et_log(&rs), "fsm recoding"));
+}
+
 /* --- precedence over a techlib hard cell --------------------------------------------------- */
 
 #define TECHLIB "read_techlib " ODIN3_LIB_DIR "/vtr.o3lib"
@@ -391,6 +412,8 @@ static void test_lib_unit_sees_macro_of_unitless_lib_file(void) {
     X(test_design_flag_applies_to_design_units)                                                    \
     X(test_unit_flag_nolatches_recorded)                                                           \
     X(test_unit_flag_vtr_compat_recorded)                                                          \
+    X(test_vtr_compat_fsm_warning)                                                                 \
+    X(test_no_fsm_warning_without_vtr_compat)                                                      \
     X(test_lib_unit_over_hard_cell_when_params_do_not_fit)                                         \
     X(test_hard_cell_kept_when_params_fit)                                                         \
     X(test_named_parameter_not_on_hard_cell)                                                       \
