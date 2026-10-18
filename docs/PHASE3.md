@@ -1047,7 +1047,8 @@ then the options considered.
     `tests/hardmap/sx_add_c.v`, `sub_pad_s.v` and `sub_pad_u.v` (through `lower`) against their
     RTL with `parmys-probe`: 0 mismatches in 3000 cycles each, where Parmys's own netlists fail
     (probes README). **The 19** (run order, `tests/hardmap/vtr_designs.txt`): small designs run
-    2026-10-18 on the full `lower` (after 3B-2 and 3B-3), one `tools/heavy-run` each, release build:
+    2026-10-18 on the full `lower` (after 3B-2 and 3B-3) and re-run after the merge of main
+    (#129-#134), same numbers, one `tools/heavy-run` each, release build:
 
     | design | result | hard-block counts vs the golden |
     |---|---|---|
