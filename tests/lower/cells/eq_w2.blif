@@ -1,0 +1,8 @@
+.model m
+.inputs a[0] a[1] b[0] b[1]
+.outputs y
+.subckt $_XOR_ A=a[0] B=b[0] Y=$n6
+.subckt $_XOR_ A=a[1] B=b[1] Y=$n7
+.subckt $_OR_ A=$n6 B=$n7 Y=$n8
+.subckt $_NOT_ A=$n8 Y=y
+.end

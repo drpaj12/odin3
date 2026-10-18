@@ -1,0 +1,5 @@
+.model m
+.inputs a
+.outputs y
+.subckt $_NOT_ A=a Y=y
+.end

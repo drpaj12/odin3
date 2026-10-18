@@ -1,0 +1,12 @@
+.model m
+.inputs a[0] a[1] a[2] a[3] a[4] a[5] a[6] a[7] b[0] b[1] b[2] b[3] b[4] b[5] b[6] b[7]
+.outputs y[0] y[1] y[2] y[3] y[4] y[5] y[6] y[7]
+.subckt $_XOR_ A=a[0] B=b[0] Y=y[0]
+.subckt $_XOR_ A=a[1] B=b[1] Y=y[1]
+.subckt $_XOR_ A=a[2] B=b[2] Y=y[2]
+.subckt $_XOR_ A=a[3] B=b[3] Y=y[3]
+.subckt $_XOR_ A=a[4] B=b[4] Y=y[4]
+.subckt $_XOR_ A=a[5] B=b[5] Y=y[5]
+.subckt $_XOR_ A=a[6] B=b[6] Y=y[6]
+.subckt $_XOR_ A=a[7] B=b[7] Y=y[7]
+.end

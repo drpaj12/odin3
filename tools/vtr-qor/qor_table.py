@@ -74,9 +74,12 @@ ATTRIBUTION_REFERENCES = ("Oprime", "Pprime")
 STANDS_ALONE = frozenset({"mem-init-dropped", "async-reset-made-sync"})
 BASELINE_FAILS = "baseline-fails"
 FCHECK_PASS, FCHECK_FAIL = "pass", "fail"
-P_SIDE_FCHECK = frozenset({"error", "capped"})
+P_SIDE_FCHECK = frozenset({"error", "capped", "timeout"})
+# PHASE3 #16: on a design outside EQUIV_REQUIRED a capped or timed-out fcheck is informational.
+FCHECK_INFO = frozenset({"capped", "timeout"})
 EQUIV_OK = frozenset({"equivalent", "ram"})
 EQUIV_DIFFERS = "differs"
+EQUIV_INCOMPLETE = frozenset({"capped"})  # ABC killed by the memory cap: unmeasured, not failed
 RERUN_SAME = "same"
 # Ruling D1: a check that did not run is unmeasured (INCOMPLETE), not failed.
 NOT_RUN = frozenset({"skipped", MISSING})
@@ -365,6 +368,7 @@ class Verdict:
 
     state: str
     violations: tuple[str, ...]
+    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -380,7 +384,12 @@ class GateInputs:
 @dataclass
 class _Collect:
     lines: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
     incomplete: bool = False
+
+    def note(self, text: str) -> None:
+        """Informational: neither a violation nor a hold (PHASE3 #16)."""
+        self.notes.append(text)
 
     def fail(self, text: str) -> None:
         self.lines.append(text)
@@ -391,7 +400,7 @@ class _Collect:
 
     def verdict(self) -> Verdict:
         state = INCOMPLETE if self.incomplete else FAIL if self.lines else PASS
-        return Verdict(state=state, violations=tuple(self.lines))
+        return Verdict(state=state, violations=tuple(self.lines), notes=tuple(self.notes))
 
 
 @dataclass(frozen=True)
@@ -525,7 +534,11 @@ def _rule5_fcheck(ctx: _Ctx, usable: Sequence[str], out: _Collect) -> None:
         mine = text_field(ctx.index[(ctx.x, design)], "fcheck")
         ref_run = ctx.index.get((ctx.y, design))
         reference = text_field(ref_run, "fcheck") if ref_run is not None else MISSING
-        if reference in P_SIDE_FCHECK:
+        if design not in qor_sched.EQUIV_REQUIRED and mine != FCHECK_FAIL and (
+                mine in FCHECK_INFO or reference in FCHECK_INFO):
+            out.note(f"gate: note: {design} fcheck {mine} (reference {reference}); informational "
+                     "on a design outside PHASE3 #16's small set")
+        elif reference in P_SIDE_FCHECK:
             out.hold(f"gate: INCOMPLETE: {design} {ctx.y} fcheck is {reference} (reference); "
                      "rerun it")
             if mine == FCHECK_FAIL and design not in declared:  # review M1: Odin III's own
@@ -539,13 +552,20 @@ def _rule5_fcheck(ctx: _Ctx, usable: Sequence[str], out: _Collect) -> None:
 
 
 def _rule6_equiv(ctx: _Ctx, usable: Sequence[str], out: _Collect) -> None:
+    """Rule 6, narrowed by PHASE3 #16: only a design in ``EQUIV_REQUIRED`` is held to
+    equivalence. Any other design's verdict is a note, except ``differs``, which still fails."""
     excepted = {row[0] for row in ctx.inp.equiv_exceptions}
     for design in usable:
         verdict = text_field(ctx.index[(ctx.x, design)], "equiv")
         if verdict == EQUIV_DIFFERS:
             out.fail(f"gate: FAIL: {design} equiv differs")
+        elif design not in qor_sched.EQUIV_REQUIRED:
+            if verdict not in NOT_RUN and verdict not in EQUIV_OK:  # the table cell says the rest
+                out.note(f"gate: note: {design} equiv {verdict}; {qor_sched.EQUIV_NOT_REQUIRED}")
         elif verdict in EQUIV_OK or design in excepted:
             continue
+        elif verdict in EQUIV_INCOMPLETE:
+            out.hold(f"gate: INCOMPLETE: {design} {ctx.x} equiv {verdict}; rerun it")
         elif verdict in NOT_RUN:
             _not_run(ctx, design, "equiv", verdict, out)
         else:
@@ -941,7 +961,11 @@ def _geomeans_json(layout: _Layout) -> list[dict[str, object]]:
 def verdict_json(verdict: Verdict | None) -> dict[str, object] | None:
     if verdict is None:
         return None
-    return {"pass": verdict.state == PASS, "violations": list(verdict.violations)}
+    gate_object: dict[str, object] = {"pass": verdict.state == PASS,
+                                      "violations": list(verdict.violations)}
+    if verdict.notes:
+        gate_object["notes"] = list(verdict.notes)
+    return gate_object
 
 
 def verdict_state(gate_object: Mapping[str, object]) -> str:
@@ -1157,6 +1181,7 @@ def _md_gate(layout: _Layout, verdict: Verdict | None, narrowed: int | None) -> 
     lines += _md_table(_compare_header(layout, pair, True),
                        _compare_rows(layout, pair, layout.gate, violations))
     lines += [f"- {line}" for line in violations] or ["No violations."]
+    lines += [f"- {line}" for line in verdict.notes]
     lines.append("")
     if layout.extra:
         lines += [f"## Non-gating rows ({', '.join(layout.extra)})", ""]
@@ -1257,6 +1282,9 @@ def _md_cost(layout: _Layout) -> list[str]:
         for name in COST_COLUMNS:
             text = fmt_value(name, metric(run, name) if ok else None)
             out.append(f"{text}*" if text and warned and name in FRONTEND_COST else text)
+        parmys = run.job.get("parmys_stage_wall_s")  # P' (point (o)): both front-end parts
+        if ok and run.leg == "Pprime" and isinstance(parmys, float) and out[0]:
+            out[0] = f"{out[0]} + {fmt_value('frontend_wall_s', parmys)} Parmys"
         return [*out, "xl" if run.job.get("slice") == XL_SLICE else ""]
     head = ["design", "leg", "front-end wall (s)", "front-end peak (MiB)", "VPR time (s)",
             "VPR mem (MiB)", "slice"]
@@ -1325,7 +1353,9 @@ def _md_checks(layout: _Layout, exceptions: Sequence[tuple[str, str, str]]) -> l
         if "O" in legs:
             run = layout.index.get(("O", design))
             equiv = _verdict_cell(run, "equiv")
-            if equiv and design in excepted:
+            if design not in qor_sched.EQUIV_REQUIRED and equiv in ("", "skipped", MISSING):
+                equiv = qor_sched.EQUIV_NOT_REQUIRED
+            elif equiv and design in excepted:
                 equiv += f" (exception: {excepted[design]})"
             row += [equiv, _verdict_cell(run, "rerun")]
         rows.append(row)

@@ -1,0 +1,5 @@
+.model m
+.inputs a b s
+.outputs y
+.subckt $_MUX_ A=a B=b S=s Y=y
+.end

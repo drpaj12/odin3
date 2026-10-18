@@ -1,0 +1,6 @@
+.model m
+.inputs a[0] a[1] a[2]
+.outputs y
+.subckt $_OR_ A=a[0] B=a[1] Y=$n5
+.subckt $_OR_ A=$n5 B=a[2] Y=y
+.end

@@ -37,6 +37,8 @@ import qor_sched
 from qor_heavy import HEAVY_DIR, HeavyError
 from qor_sched import Job, KeyInputs, PlanRequest
 
+from .helpers import write_golden
+
 PIN = qor_legs.VTR_PIN
 K6 = "k6_frac_N10_frac_chain_mem32K_40nm"
 SETS = qor_sched.load_sets(qor_legs.REPO_ROOT / "tests" / "vtr" / "qor" / "sets.json")
@@ -142,9 +144,7 @@ class PlanTestBase(unittest.TestCase):
         (self.repo / "lib" / "abc" / "vtr.abc").write_text("strash; dch -f; if -K 6; mfs2\n")
         self.golden = tmp / "golden"
         for design in ("sha", "ch_intrinsics"):
-            blif = self.golden / K6 / "vtr" / design / f"{design}.parmys.blif"
-            blif.parent.mkdir(parents=True)
-            blif.write_text(f".model {design}\n.end\n")
+            write_golden(self.golden / K6, design, f".model {design}\n.end\n")
         self.odin3, self.libs = self._build()
         self.out = tmp / "out"
         stack = ExitStack()
@@ -392,7 +392,7 @@ class PlanTest(PlanTestBase):
         after = self.keys(legs)
         for (leg, design), key in after.items():
             self.assertEqual(key == before[(leg, design)], leg == "P", (leg, design))
-        _bump(self.golden / K6 / "vtr" / "sha" / "sha.parmys.blif")
+        write_golden(self.golden / K6, "sha", ".model sha\n# regenerated\n.end\n")
         golden = self.keys(legs)
         changed = {lk for lk, key in golden.items() if key != after[lk]}
         self.assertEqual(changed, {("Pprime", "sha")})
@@ -806,6 +806,65 @@ class RunOrderTest(RunnerTestBase):
             "restore_latch*.out", "report_clocks.abc.out", "parse_results.err",
             "qor_results.err"))
 
+    def fcheck_exit(self, verdicts: list[str], jobs: list[Job], **kwargs: Any
+                    ) -> qor_sched.RunSummary:
+        queue = iter(verdicts)
+
+        def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
+            return next(queue)
+
+        with mock.patch.object(qor_sched, "run_fcheck", fake_fcheck):
+            return self.run_jobs(jobs, self.opts(fcheck=True, **kwargs))[0]
+
+    def test_failing_fcheck_shows_in_exit_code(self) -> None:
+        """Review M4: a run whose jobs are ok but whose fcheck failed exits 1; capped or
+        timed-out, 3; a pass, 0."""
+        jobs = [self.job("sha", [{}])]
+        self.assertEqual(self.fcheck_exit(["pass"], jobs).exit_code, 0)
+        self.assertEqual(self.fcheck_exit(["fail"], jobs).exit_code, 1)
+        self.assertEqual(self.fcheck_exit(["error"], jobs).exit_code, 1)
+        self.assertEqual(self.fcheck_exit(["capped"], jobs).exit_code, 3)
+        self.assertEqual(self.fcheck_exit(["timeout"], jobs).exit_code, 3)
+
+    def test_cached_job_gets_its_missing_fcheck(self) -> None:
+        """Review M4: ``--fcheck`` over a cached job with no fcheck verdict runs the check; a
+        cached job that has one is left alone."""
+        job = self.job("sha", [{}], cached=True)
+        job.job_dir.mkdir(parents=True)
+        (job.job_dir / "status").write_text("ok\n")
+        record = {"status": "ok", "key": job.key, "verdicts": {"fcheck": "pass"}}
+        (job.job_dir / "metrics.json").write_text(json.dumps({**record, "verdicts": {
+            "fcheck": "skipped"}}))
+        calls: list[str] = []
+
+        def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
+            calls.append(job.design)
+            return "fail"
+
+        with mock.patch.object(qor_sched, "run_fcheck", fake_fcheck):
+            summary, _ = self.run_jobs([job], self.opts(fcheck=True))
+            self.assertEqual((calls, summary.exit_code, self.starts()), (["sha"], 1, []))
+            (job.job_dir / "metrics.json").write_text(json.dumps(record))
+            self.run_jobs([job], self.opts(fcheck=True))
+        self.assertEqual(calls, ["sha"])  # the second pass found a verdict already
+
+    def test_fcheck_not_started_after_deadline(self) -> None:
+        """Review H3: the job's own fcheck does not start once the night's deadline passed."""
+        calls: list[str] = []
+
+        def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
+            calls.append(job.design)
+            return "pass"
+
+        job = self.job("sha", [{}])
+        opts = self.opts(clock=lambda: 10.0, fcheck=True, deadline=10.0, deadline_text="06:00")
+        run = qor_sched._Run([job], opts, finish_ok, qor_sched.HarnessLog(self.out))
+        with mock.patch.object(qor_sched, "run_fcheck", fake_fcheck), \
+                redirect_stderr(io.StringIO()):
+            self.assertTrue(qor_sched._after_ok(run, job))
+        self.assertEqual(calls, [])
+        self.assertEqual(qor_sched._exit_code([], 0, run.fchecks), 3)
+
     def test_cached_job_not_run(self) -> None:
         """A cached job is not started; one whose metrics.json key is not the planned key is."""
         job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}], cached=True)
@@ -820,6 +879,347 @@ class RunOrderTest(RunnerTestBase):
         summary, _ = self.run_jobs([job], self.opts())
         self.assertEqual(self.starts(), ["sha"])
         self.assertTrue(qor_sched.job_complete(job))
+
+
+FAKE_RANDOM_CHECK = """
+import json, sys, time
+from pathlib import Path
+here = Path(__file__).resolve().parent
+mode = json.loads((here / "mode.json").read_text())
+args = sys.argv[1:]
+net = Path(args[args.index("--post-synth-blif") + 1])
+work = Path(args[args.index("--work-dir") + 1])
+work.mkdir(parents=True, exist_ok=True)
+(work / "marker.txt").write_text("work\\n")
+with (here / "calls.jsonl").open("a") as log:
+    log.write(json.dumps({"argv": args, "netlist": net.read_text(), "t0": time.time()}) + "\\n")
+if "oom" in mode:
+    events = Path(mode["oom"])
+    events.write_text(events.read_text().replace("oom_kill 0", "oom_kill 1"))
+if "sleep" in mode:
+    time.sleep(mode["sleep"])
+with (here / "calls.jsonl").open("a") as log:
+    log.write(json.dumps({"end": args[args.index("--rtl") + 1], "t1": time.time()}) + "\\n")
+sys.exit(mode.get("exit", 0))
+"""
+
+
+class FcheckTest(RunnerTestBase):
+    """Plan Task 11: the Verilator random check of a finished job."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.vtr = self.tmp / "vtr"
+        self.script = self.vtr / "mosaic" / "verilator_check" / "run_random_check.py"
+        self.script.parent.mkdir(parents=True)
+        self.script.write_text(FAKE_RANDOM_CHECK)
+        self.mode({})
+
+    def mode(self, mode: dict[str, Any]) -> None:
+        (self.script.parent / "mode.json").write_text(json.dumps(mode))
+
+    def calls(self) -> list[dict[str, Any]]:
+        log = self.script.parent / "calls.jsonl"
+        lines = log.read_text().splitlines() if log.exists() else []
+        return [c for c in map(json.loads, lines) if "argv" in c]
+
+    def ends(self) -> list[dict[str, Any]]:
+        log = self.script.parent / "calls.jsonl"
+        lines = log.read_text().splitlines() if log.exists() else []
+        return [c for c in map(json.loads, lines) if "end" in c]
+
+    def legctx(self, design: str, leg: str, group: str) -> qor_legs.LegContext:
+        return qor_legs.LegContext(
+            vtr_root=self.vtr, python=Path(sys.executable), arch_xml=self.vtr / "arch.xml",
+            odin3=self.tmp / "odin3", repo=self.tmp / "repo", job_dir=self.job_dir(design, leg),
+            k=6, group=group)
+
+    def finished(self, design: str, *, leg: str = "P", group: str = "A", gz: bool = True,
+                 netlist: str = ".model m\n.end\n") -> Job:
+        """An ok job on disk (metrics.json, and the kept netlist as the runner leaves it)."""
+        job = dataclasses.replace(self.job(design, [{}], leg=leg, group=group),
+                                  ctx=self.legctx(design, leg, group))
+        run = job.job_dir / "run"
+        run.mkdir(parents=True, exist_ok=True)
+        pre = run / f"{design}.pre-vpr.blif"
+        if gz:
+            with gzip.open(run / (pre.name + ".gz"), "wt") as handle:
+                handle.write(netlist)
+        else:
+            pre.write_text(netlist)
+        (job.job_dir / "metrics.json").write_text(json.dumps(
+            {"schema": 1, "key": job.key, "status": "ok", "verdicts": {"fcheck": "skipped"}}))
+        return job
+
+    def verdict(self, job: Job) -> str:
+        return str(json.loads((job.job_dir / "metrics.json").read_text())["verdicts"]["fcheck"])
+
+    def test_fcheck_command(self) -> None:
+        ctx = self.legctx("sha", "P", "A")
+        netlist = ctx.job_dir / "fcheck" / "sha.pre-vpr.blif"
+        cmd = qor_legs.fcheck_command(ctx, "sha", netlist, 2)
+        self.assertEqual(list(cmd.argv), [
+            sys.executable, f"{self.vtr}/mosaic/verilator_check/run_random_check.py",
+            "--rtl", f"{self.vtr}/vtr_flow/benchmarks/verilog/sha.v",
+            "--post-synth-blif", str(netlist), "--work-dir", f"{ctx.job_dir}/fcheck",
+            "--vectors", "50000", "--seed", "1", "--verilator-j", "2"])
+        self.assertEqual((cmd.cwd, cmd.stdout), (ctx.job_dir, ctx.job_dir / "fcheck.log"))
+        self.assertEqual(dict(cmd.env)["PATH"].split(":")[0], f"{self.vtr}/.venv/bin")
+
+    def test_fcheck_exit_mapping(self) -> None:
+        for code, verdict in ((0, "pass"), (1, "fail"), (2, "error"), (3, "error"),
+                              (137, "error")):
+            self.mode({"exit": code})
+            job = self.finished("sha")
+            self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), verdict, code)
+            self.assertEqual(self.verdict(job), verdict)
+        self.assertEqual(qor_legs.fcheck_verdict(137, True), "capped")
+        self.assertEqual(qor_legs.fcheck_verdict(0, False), "pass")
+        self.mode({"exit": 137, "oom": str(self.events)})
+        job = self.finished("sha")
+        self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "capped")
+        self.assertEqual(self.verdict(job), "capped")
+
+    def test_fcheck_timeout_is_not_error(self) -> None:
+        """Review M2: a Verilator check stopped at the job limit is ``timeout``, not ``error``."""
+        self.mode({"exit": 0, "sleep": 60})
+        job = self.finished("sha")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            verdict = qor_sched.run_fcheck(
+                job, self.opts(clock=time.monotonic, job_timeout_s={"A": 0.5, "B": 0.5}), 2)
+        self.assertEqual((verdict, self.verdict(job)), ("timeout", "timeout"))
+
+    def test_fcheck_stopped_at_the_night_deadline(self) -> None:
+        """Review H3: the check is capped by the night's deadline, not only the job limit."""
+        self.mode({"exit": 0, "sleep": 60})
+        job = self.finished("sha")
+        opts = self.opts(clock=time.monotonic, job_timeout_s={"A": 600, "B": 600},
+                         deadline=time.monotonic() + 0.5, deadline_text="06:00")
+        started = time.monotonic()
+        with redirect_stderr(io.StringIO()):
+            verdict = qor_sched.run_fcheck(job, opts, 2)
+        self.assertEqual(verdict, "timeout")
+        self.assertLess(time.monotonic() - started, 30)
+
+    def test_fcheck_p_from_gz(self) -> None:
+        job = self.finished("sha", netlist=".model sha\n.names a b\n11 1\n.end\n")
+        self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "pass")
+        (call,) = self.calls()
+        argv = call["argv"]
+        self.assertEqual(argv[argv.index("--post-synth-blif") + 1],
+                         str(job.job_dir / "fcheck" / "sha.pre-vpr.blif"))
+        self.assertEqual(call["netlist"], ".model sha\n.names a b\n11 1\n.end\n")
+
+    def test_fcheck_other_leg_needs_kept_netlist(self) -> None:
+        job = self.finished("sha", leg="O", gz=False)
+        self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "pass")
+        (call,) = self.calls()
+        self.assertEqual(call["argv"][call["argv"].index("--post-synth-blif") + 1],
+                         str(job.job_dir / "run" / "sha.pre-vpr.blif"))
+        gone = self.finished("stereovision3", leg="O", gz=True)  # only a .gz: not a kept pre-vpr
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(qor_sched.run_fcheck(gone, self.opts(), 2), "error")
+        self.assertIn("vtr-qor: fcheck: O stereovision3: no kept netlist (run with "
+                      "--keep-netlists)", err.getvalue())
+        self.assertEqual(self.verdict(gone), "error")
+        self.assertEqual(len(self.calls()), 1)  # none for stereovision3
+
+    def test_fcheck_dir_kept_on_fail(self) -> None:
+        passed = self.finished("sha")
+        qor_sched.run_fcheck(passed, self.opts(), 2)
+        self.assertFalse((passed.job_dir / "fcheck").exists())
+        self.mode({"exit": 1})
+        failed = self.finished("diffeq1")
+        qor_sched.run_fcheck(failed, self.opts(), 2)
+        self.assertTrue((failed.job_dir / "fcheck" / "marker.txt").is_file())
+
+    def test_fcheck_refused_outside_heavy_run(self) -> None:
+        job = self.finished("sha")
+        with self.assertRaises(HeavyError):
+            qor_sched.run_fcheck(job, self.opts(scope=None), 2)
+
+    def test_fcheck_after_own_job(self) -> None:
+        """Each fcheck starts after its own VPR job ends and ends before the next job starts;
+        group B gets --verilator-j 1, group A 2."""
+        specs = {d: {"stamp": str(self.stamps), "name": d,
+                     "write": [{"path": str(self.job_dir(d, "O") / "run" / f"{d}.pre-vpr.blif"),
+                                "text": ".model m\n.end\n"}]}
+                 for d in ("sha", "mkPktMerge", "bgm")}
+        self.mode({"sleep": 0.05})
+        jobs = [dataclasses.replace(self.job(d, [specs[d]], leg="O", group=g),
+                                    ctx=self.legctx(d, "O", g))
+                for d, g in (("sha", "A"), ("mkPktMerge", "A"), ("bgm", "B"))]
+        summary, _ = self.run_jobs(jobs, self.opts(fcheck=True, keep_netlists=frozenset({"O"})))
+        self.assertEqual([r.status for r in summary.results], ["ok"] * 3)
+        stamps = {(f[0], f[1]): float(f[2]) for f in self.stamp_lines()}
+        starts, ends = self.calls(), self.ends()
+        self.assertEqual([c["argv"][c["argv"].index("--verilator-j") + 1] for c in starts],
+                         ["2", "2", "1"])
+        order = ["sha", "mkPktMerge", "bgm"]
+        for i, design in enumerate(order):
+            self.assertGreater(starts[i]["t0"], stamps[("end", design)])
+            self.assertLess(ends[i]["t1"], stamps.get(("start", order[i + 1]), 1e18)
+                            if i + 1 < len(order) else 1e18)
+        self.assertEqual([self.verdict(j) for j in jobs], ["pass"] * 3)
+
+
+FAKE_EQUIV_CHECK = """
+import json, sys, time
+from pathlib import Path
+here = Path(__file__).resolve().parent
+mode = json.loads((here / "mode.json").read_text())
+with (here / "calls.jsonl").open("a") as log:
+    log.write(json.dumps(sys.argv[1:]) + "\\n")
+time.sleep(mode.get("sleep", 0))
+sys.stderr.write(mode.get("stderr", ""))
+sys.exit(mode.get("exit", 0))
+"""
+
+
+class EquivTest(RunnerTestBase):
+    """Plan Task 12: ``equiv-check`` between the O' and O netlists."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.repo = self.tmp / "repo"
+        self.tool = self.repo / "tools" / "equiv-check" / "equiv-check"
+        self.tool.parent.mkdir(parents=True)
+        self.tool.write_text(f"#!{sys.executable}\n{FAKE_EQUIV_CHECK}")
+        self.tool.chmod(0o755)
+        self.mode({})
+
+    def mode(self, mode: dict[str, Any]) -> None:
+        (self.tool.parent / "mode.json").write_text(json.dumps(mode))
+
+    def calls(self) -> list[list[str]]:
+        log = self.tool.parent / "calls.jsonl"
+        return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+    def pair(self, design: str, *, ram: int = 0, keep: bool = True) -> tuple[Job, Job]:
+        jobs = []
+        for leg in ("O", "Oprime"):
+            ctx = qor_legs.LegContext(
+                vtr_root=self.tmp / "vtr", python=Path(sys.executable), arch_xml=self.tmp / "a",
+                odin3=self.tmp / "odin3", repo=self.repo, job_dir=self.job_dir(design, leg),
+                k=6, group="A")
+            job = dataclasses.replace(self.job(design, [{}], leg=leg), ctx=ctx)
+            job.job_dir.mkdir(parents=True, exist_ok=True)
+            if keep:
+                (job.job_dir / f"{design}.blif").write_text(f".model {leg}\n.end\n")
+            (job.job_dir / "metrics.json").write_text(json.dumps({
+                "schema": 1, "key": job.key, "status": "ok", "verdicts": {"equiv": "skipped"},
+                "netlist": {"ram_slices": ram}}))
+            jobs.append(job)
+        return jobs[0], jobs[1]
+
+    def verdict(self, job: Job) -> str:
+        return str(json.loads((job.job_dir / "metrics.json").read_text())["verdicts"]["equiv"])
+
+    def test_equiv_command(self) -> None:
+        repo, before, after = Path("/r"), Path("/j/Oprime/sha/sha.blif"), Path("/j/O/sha/sha.blif")
+        self.assertEqual(qor_sched.equiv_command(repo, before, after), [
+            "/r/tools/equiv-check/equiv-check", "--timeout", "600", str(before), str(after)])
+        self.assertEqual((qor_sched.EQUIV_TIMEOUT_S, qor_sched.EQUIV_WALL_S), (600, 660))
+
+    def test_equiv_classification(self) -> None:
+        cases = [
+            (0, "", "equivalent"), (1, "equiv-check: NOT equivalent", "differs"),
+            (2, "equiv-check: unproven: x: unsupported: more than one clock domain (type, "
+                "clock): [('re', 'a'), ('re', 'b')]", "multiclock"),
+            (4, "unproven: x: unsupported: more than one clock domain", "multiclock"),
+            (2, "equiv-check: running ABC failed: timed out", "timeout"),
+            (4, "unproven: ABC dsec timed out after 600 seconds", "timeout"),
+            (4, "unproven: ABC dsec ended UNDECIDED", "timeout"),
+            (None, "", "timeout"),
+            (2, "equiv-check: cannot read a.blif", "error"),
+            (2, "running ABC failed: no such file", "error"),
+            (5, "ABC killed by signal 9", "capped"), (3, "", "error"),
+        ]
+        for code, err, expected in cases:
+            self.assertEqual(qor_sched.equiv_verdict(code, err), expected, (code, err))
+
+    def test_equiv_runs_the_tool(self) -> None:
+        """The fake tool's exit and stderr give each verdict, written to the O job; the argv is
+        O' then O."""
+        for code, err, expected in ((0, "", "equivalent"), (1, "", "differs"),
+                                    (2, "unsupported: more than one clock domain", "multiclock"),
+                                    (4, "timed out", "timeout"), (2, "boom", "error")):
+            self.mode({"exit": code, "stderr": err})
+            o_job, prime = self.pair("sha")
+            self.assertEqual(qor_sched.run_equiv("sha", o_job, prime, self.opts()), expected)
+            self.assertEqual(self.verdict(o_job), expected)
+            self.assertEqual((o_job.job_dir / "equiv.err").read_text(), err)
+        self.assertEqual(self.calls()[-1], [
+            "--timeout", "600", str(self.job_dir("sha", "Oprime") / "sha.blif"),
+            str(self.job_dir("sha", "O") / "sha.blif")])
+
+    def test_equiv_stopped_at_the_night_deadline(self) -> None:
+        """Review H3: ``equiv-check`` is killed at the night's deadline, well before its own
+        wall cap."""
+        o_job, prime = self.pair("sha")
+        self.mode({"exit": 0, "sleep": 60})
+        opts = self.opts(clock=time.monotonic, deadline=time.monotonic() + 0.5,
+                         deadline_text="06:00")
+        started = time.monotonic()
+        with redirect_stderr(io.StringIO()):
+            verdict = qor_sched.run_equiv("sha", o_job, prime, opts)
+        self.assertEqual(verdict, "timeout")
+        self.assertLess(time.monotonic() - started, 30)
+
+    def test_checks_not_started_after_deadline(self) -> None:
+        """Review H3: past the deadline ``run_checks`` starts nothing and says so (exit 3)."""
+        o_job, _ = self.pair("sha")
+        ran: list[str] = []
+
+        def step(job: Job) -> str:
+            ran.append(job.design)
+            return "equivalent"
+
+        err = io.StringIO()
+        opts = self.opts(clock=lambda: 10.0, deadline=10.0, deadline_text="06:00")
+        with redirect_stderr(err):
+            verdicts, code = qor_sched.run_checks([o_job], opts, step)
+        self.assertEqual((verdicts, code, ran), ([], 3, []))
+        self.assertIn("1 checks not started before the deadline 06:00", err.getvalue())
+
+    def test_capped_deadline(self) -> None:
+        opts = self.opts(clock=lambda: 100.0)
+        self.assertEqual(qor_sched.capped_deadline(opts, 60), 160.0)
+        opts.deadline = 130.0
+        self.assertEqual(qor_sched.capped_deadline(opts, 60), 130.0)
+        self.assertFalse(qor_sched.past_deadline(opts))
+        opts.deadline = 100.0
+        self.assertTrue(qor_sched.past_deadline(opts))
+
+    def test_equiv_ram_skipped(self) -> None:
+        o_job, prime = self.pair("diffeq1", ram=4)
+        self.assertEqual(qor_sched.run_equiv("diffeq1", o_job, prime, self.opts()), "ram")
+        self.assertEqual(self.verdict(o_job), "ram")
+        self.assertEqual(self.calls(), [])
+        self.assertFalse((o_job.job_dir / "equiv.log").exists())
+
+    def test_equiv_wall_cap_and_missing_netlist(self) -> None:
+        o_job, prime = self.pair("sha")
+        self.mode({"exit": 0, "sleep": 60})  # outlives the (patched) wall cap and is killed
+        err = io.StringIO()
+        with mock.patch.object(qor_sched, "EQUIV_WALL_S", 0.5), redirect_stderr(err):
+            verdict = qor_sched.run_equiv("sha", o_job, prime, self.opts(clock=time.monotonic))
+        self.assertEqual((verdict, self.verdict(o_job)), ("timeout", "timeout"))
+        gone_o, gone_prime = self.pair("stereovision3", keep=False)
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(qor_sched.run_equiv("stereovision3", gone_o, gone_prime,
+                                                 self.opts()), "error")
+        self.assertIn("vtr-qor: equiv: O' stereovision3: no kept netlist", err.getvalue()
+                      .replace("Oprime", "O'"))
+        self.assertEqual(self.verdict(gone_o), "error")
+
+    def test_equiv_refused_outside_heavy_run(self) -> None:
+        o_job, prime = self.pair("sha")
+        with self.assertRaises(HeavyError):
+            qor_sched.run_equiv("sha", o_job, prime, self.opts(scope=None))
 
 
 class HeavyGuardTest(RunnerTestBase):
