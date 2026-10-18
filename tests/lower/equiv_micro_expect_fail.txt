@@ -13,3 +13,13 @@
 # The multiplier lowering itself is covered at up to 3 bits by test_lower_mul and lower-equiv's
 # mul fixtures (CTest lower_cells_equiv), and wider by lower-diff tier T (tests/lower/diff_expect.txt).
 micro/bm_arithmetic_unused_bits.v [UNPROVEN:] untested for now (size limit): four 32x32 multipliers, SAT proof times out at 60 s
+#
+# The six micros that `lower` refuses (a non-constant `$pow`, a `$tribuf`; PHASE3 decision 41(3B)(4)) are
+# listed in tests/lower/run_micro_expect_fail.txt too; here the error is lower-equiv's exit 2 ("odin3 exit 1: ...
+# has no bit-level").
+common/pow.v [no bit-level] lower refuses a $pow cell (located error, decision 41(3B)(4))
+common/pow_const.v [no bit-level] lower refuses a $pow cell (located error, decision 41(3B)(4))
+operators/eightbit_arithmetic_power.v [no bit-level] lower refuses a $pow cell (located error, decision 41(3B)(4))
+operators/twobits_arithmetic_power.v [no bit-level] lower refuses a $pow cell (located error, decision 41(3B)(4))
+keywords/inout/inout_failure.v [no bit-level] lower refuses a $tribuf cell (located error, decision 41(3B)(4))
+keywords/inout/simple_inout.v [no bit-level] lower refuses a $tribuf cell (located error, decision 41(3B)(4))

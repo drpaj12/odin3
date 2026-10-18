@@ -29,6 +29,23 @@ ODIN3 = os.environ.get("ODIN3_CLI", "")
 YOSYS = os.environ.get("ODIN3_YOSYS055", "")
 CAP = 3 << 30
 HERE = Path(__file__).resolve().parent
+TECHLIB = HERE.parent.parent / "lib" / "vtr.o3lib"
+TWO_CLOCKS = """module m(input clk0, input clk1, input [1:0] a, output out);
+  reg sel;
+  reg [1:0] t;
+  always @(posedge clk0) t <= a;
+  always @(posedge clk1) sel <= sel + 1;
+  assign out = sel ? t[1] : t[0];
+endmodule
+"""
+HARD_BLOCK = """module m(input clk, input we, input [3:0] d, output [3:0] q);
+  reg [3:0] a;
+  always @(posedge clk) a <= a + 1;
+  defparam i.ADDR_WIDTH = 4;
+  defparam i.DATA_WIDTH = 4;
+  single_port_ram i (.addr(a), .data(d), .we(we), .clk(clk), .out(q));
+endmodule
+"""
 
 FF = """module m(input clk, input clk2, input rst, input en, input [3:0] d, output reg [3:0] q);
   always @(posedge {clk}) {body}
@@ -91,19 +108,19 @@ class RefinementTest(unittest.TestCase):
         self.base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-"))
         self.count = 0
 
-    def snap(self, text: str) -> tuple[Path, Path]:
+    def snap(self, text: str, techlib: str | None = None) -> tuple[Path, Path]:
         """(lower-before.il, lower-after.blif) of a design given as Verilog text."""
         self.count += 1
         run = self.base / f"d{self.count}"
         run.mkdir()
         source = run / "m.v"
         source.write_text(text, encoding="utf-8")
-        script = le.snapshot_script([str(source)], None, None, ["proc", "opt"], "", run)
+        script = le.snapshot_script([str(source)], None, techlib, ["proc", "opt"], "", run)
         return le.snapshot(ODIN3, script, None, run, CAP)
 
-    def verdict(self, gold: str, gate: str) -> le.Verdict:
-        before, _ = self.snap(gold)
-        _, after = self.snap(gate)
+    def verdict(self, gold: str, gate: str, techlib: str | None = None) -> le.Verdict:
+        before, _ = self.snap(gold, techlib)
+        _, after = self.snap(gate, techlib)
         work = self.base / f"check{self.count}"
         work.mkdir()
         return le.check_pair(YOSYS, before, after, work, CAP, (None, None, False))
@@ -175,6 +192,24 @@ class RefinementTest(unittest.TestCase):
     def test_a_wrong_mem_offset(self) -> None:
         self.differs(MEM.format(lo=1, hi=4), MEM.format(lo=2, hi=5))
 
+    def test_a_register_that_feeds_itself_is_paired_by_name_across_two_clocks(self) -> None:
+        """The BLIF keeps no internal net name, so without the pairing hint the induction cannot
+        relate the gate's `$n` register to the gold's `sel` (3B heavy triage, 2026-10-18:
+        multiclock_output_and_latch was reported as not a refinement)."""
+        self.refines(TWO_CLOCKS)
+
+    def test_a_hard_block_fed_by_a_register_refines(self) -> None:
+        """A `single_port_ram` has no model: its inputs are compared and its outputs shared
+        (`expose -evert`), which needs the module declared on both sides (ch_intrinsics,
+        mkPktMerge were reported as a port mismatch)."""
+        got = self.verdict(HARD_BLOCK, HARD_BLOCK, str(TECHLIB))
+        self.assertEqual(got.kind, "ok", got.detail)
+
+    def test_a_hard_block_with_a_wrong_input_is_not_proved(self) -> None:
+        wrong = HARD_BLOCK.replace("a <= a + 1", "a <= a + 2")
+        got = self.verdict(HARD_BLOCK, wrong, str(TECHLIB))
+        self.assertIn(got.kind, ("differs", "unproven"), got.detail)
+
 
 GATE = """autoidx 1
 module \\m
@@ -219,6 +254,102 @@ class NormalisePortsTest(unittest.TestCase):
     def test_a_port_with_a_missing_bit_is_left_to_the_port_match(self) -> None:
         gold = GOLD.replace("width 7 offset 1 output 2", "width 9 offset 1 output 2")
         self.assertEqual(le.normalise_ports(GATE, gold, "\\m"), GATE)
+
+
+BOX = """attribute \\blackbox 1
+attribute \\dynports 1
+module \\ram
+  parameter \\W 1
+  wire input 1 \\a
+  wire output 2 \\q
+end
+"""
+
+
+class BlackboxTest(unittest.TestCase):
+    """The black-box declarations copied into the gate (no tool runs)."""
+
+    def test_the_modules_with_the_blackbox_attribute_are_found(self) -> None:
+        text = "autoidx 1\nmodule \\m\n  cell \\ram \\i\n  end\nend\n" + BOX
+        self.assertEqual(list(le.blackbox_modules(text)), ["\\ram"])
+        self.assertEqual(le.blackbox_modules(text)["\\ram"], BOX)
+
+    def test_a_used_declaration_the_gate_lacks_is_added_once(self) -> None:
+        gate = "autoidx 1\nmodule \\m\n  cell \\ram \\i\n  end\nend\n"
+        out = le.add_blackboxes(gate, gate + BOX)
+        self.assertEqual(out, gate + BOX)
+        self.assertEqual(le.add_blackboxes(out, gate + BOX), out)
+
+    def test_an_unused_declaration_is_not_added(self) -> None:
+        gate = "module \\m\nend\n"
+        self.assertEqual(le.add_blackboxes(gate, gate + BOX), gate)
+
+
+PAIR_GOLD = """autoidx 1
+module \\m
+  wire width 3 \\r
+  wire \\s
+  wire width 2 \\u
+end
+"""
+PAIR_GATE = """autoidx 1
+module \\m
+  wire $n1
+  cell $dff \\r.dff_p5
+    connect \\Q $n5
+  end
+  cell $dff \\r.dff_p2
+    connect \\Q $n2
+  end
+  cell $dff \\r.dff_p8
+    connect \\Q $n8
+  end
+  cell $dff \\s.dff_p1
+    connect \\Q $n1
+  end
+  cell $dff \\u.dff_p1
+    connect \\Q $n9
+  end
+end
+"""
+
+
+class PairRegistersTest(unittest.TestCase):
+    """The register pairing hint of ``make_gate`` on RTLIL text (no tool runs)."""
+
+    def test_a_register_gets_its_golds_name_with_the_bits_in_order(self) -> None:
+        out = le.pair_registers(PAIR_GATE, PAIR_GOLD)
+        self.assertIn("  wire width 3 \\r\n  connect \\r [0] $n2\n  connect \\r [1] $n5\n"
+                      "  connect \\r [2] $n8\n", out)
+        self.assertIn("  wire \\s\n  connect \\s $n1\n", out)
+
+    def test_the_bits_the_golds_cells_drive_take_the_cells_that_survived(self) -> None:
+        """A register whose upper bits nothing reads keeps its width in the gold wire but fewer
+        cells in the gate (multiclock_reader_writer's `register`)."""
+        cell = "  cell $dff \\c\n    connect \\Q \\r [2:1]\n  end\n"
+        gold = PAIR_GOLD.replace("end\n", cell + "end\n", 1)
+        gate = PAIR_GATE.replace("  cell $dff \\r.dff_p8\n    connect \\Q $n8\n  end\n", "")
+        out = le.pair_registers(gate, gold)
+        self.assertIn("  connect \\r [1] $n2\n  connect \\r [2] $n5\n", out)
+        self.assertNotIn("connect \\r [0]", out)
+
+    def test_a_register_with_fewer_cells_than_the_golds_width_is_left_alone(self) -> None:
+        self.assertNotIn("connect \\u ", le.pair_registers(PAIR_GATE, PAIR_GOLD))
+
+    def test_a_dup_suffix_orders_cells_of_one_name(self) -> None:
+        gate = PAIR_GATE.replace("r.dff_p5", "r.dff_p1_2").replace("r.dff_p2", "r.dff_p1_1")
+        gate = gate.replace("r.dff_p8", "r.dff_p1")
+        out = le.pair_registers(gate, PAIR_GOLD)
+        self.assertIn("connect \\r [0] $n8\n  connect \\r [1] $n2\n  connect \\r [2] $n5\n", out)
+
+    def test_unpaired_registers_are_the_cells_without_a_public_name(self) -> None:
+        self.assertEqual(le.unpaired_registers(PAIR_GATE), 5)  # r (3 cells), s and u
+        paired = le.pair_registers(PAIR_GATE, PAIR_GOLD)
+        self.assertEqual(le.unpaired_registers(paired), 1)  # u: one cell for a width-2 wire
+
+    def test_a_name_the_gate_already_has_is_not_declared_twice(self) -> None:
+        gate = PAIR_GATE.replace("  wire $n1\n", "  wire $n1\n  wire \\s\n")
+        self.assertEqual(le.pair_registers(gate, PAIR_GOLD).count("wire \\s\n"), 1)
 
 
 class ReportTest(unittest.TestCase):
@@ -293,11 +424,18 @@ class RefineVerdictTest(unittest.TestCase):
 
     GOLD_PLAIN = "module \\m\n  cell $and \\c\n  end\nend\n"
     GOLD_MEM = "module \\m\n  cell $mem \\c\n  end\nend\n"
+    GOLD_SEQ = "autoidx 1\nmodule \\m\n  cell $dff \\c\n  end\nend\n"
+    # The gate: a flip-flop whose output has no public name, and one that has.
+    GATE_UNPAIRED = ("autoidx 1\nmodule \\m\n  cell $dff \\r.dff_p1\n    connect \\Q $n1\n  end\n"
+                     "end\n")
+    GATE_PAIRED = GATE_UNPAIRED.replace("$n1", "\\r")
 
-    def verdict(self, gold_text: str, sat_ok: bool, cec: str) -> tuple[str, str]:
+    def verdict(self, gold_text: str, sat_ok: bool, cec: str,
+                gate_text: str = "autoidx 1\nmodule \\m\n  wire \\x\nend\n") -> tuple[str, str]:
         base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-refine-"))
         gold = base / "gold.il"
         gold.write_text(gold_text, encoding="utf-8")
+        (base / "gate.il").write_text(gate_text, encoding="utf-8")
         checker = mock.Mock()
         checker.refines.return_value = (sat_ok, "the SAT flow failed")
         with mock.patch.object(opt_equiv, "Checker", return_value=checker), \
@@ -314,6 +452,18 @@ class RefineVerdictTest(unittest.TestCase):
         self.assertEqual(self.verdict(self.GOLD_MEM, False, opt_equiv.CEC_DIFFERS)[0], "differs")
         self.assertEqual(self.verdict(self.GOLD_MEM, False, opt_equiv.CEC_UNPROVEN)[0],
                          "unproven")
+
+    def test_a_sat_failure_with_an_unpaired_register_follows_the_cec(self) -> None:
+        """An induction that cannot pair the gate's registers proves no difference: `differs`
+        only when the cec says so (3B heavy triage: two-clock designs were reported as not a
+        refinement)."""
+        got = [self.verdict(self.GOLD_SEQ, False, cec, self.GATE_UNPAIRED)[0]
+               for cec in (opt_equiv.CEC_UNPROVEN, opt_equiv.CEC_DIFFERS, opt_equiv.CEC_PROVED)]
+        self.assertEqual(got, ["unproven", "differs", "ok"])
+
+    def test_a_sat_failure_with_every_register_paired_is_a_difference(self) -> None:
+        self.assertEqual(self.verdict(self.GOLD_SEQ, False, opt_equiv.CEC_UNPROVEN,
+                                      self.GATE_PAIRED)[0], "differs")
 
     def test_a_proof_never_asks_the_cec(self) -> None:
         self.assertEqual(self.verdict(self.GOLD_PLAIN, True, opt_equiv.CEC_DIFFERS)[0], "ok")

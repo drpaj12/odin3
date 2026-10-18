@@ -1,0 +1,13 @@
+# Micros that `lower` itself refuses, by design (PHASE3 decision 41(3B)(4): a non-constant `$pow` and a
+# `$tribuf` are located errors; no bit-level form, as in Yosys's techmap). Read by lower_run_micro and
+# lower_equiv_micro; lower_sim_micro does not read it: lower-sim skips the two types (never a pass)
+# and a listed micro that passes is a stale entry. Format: `<path> [needle] <reason>`.
+# Evidence, 2026-10-18 sweep logs (/tmp/claude-1000/laneg-heavy-1018-0114/lower_run_micro.log):
+#   FAIL operators/eightbit_arithmetic_power.v: lower: module '...': '$pow' '$c7' has no bit-level form
+#   FAIL keywords/inout/simple_inout.v: lower: '$tribuf' '$c6' has no bit-level cell in the registry
+common/pow.v [no bit-level] lower refuses a $pow cell (located error, decision 41(3B)(4))
+common/pow_const.v [no bit-level] lower refuses a $pow cell (located error, decision 41(3B)(4))
+operators/eightbit_arithmetic_power.v [no bit-level] lower refuses a $pow cell (located error, decision 41(3B)(4))
+operators/twobits_arithmetic_power.v [no bit-level] lower refuses a $pow cell (located error, decision 41(3B)(4))
+keywords/inout/inout_failure.v [no bit-level] lower refuses a $tribuf cell (located error, decision 41(3B)(4))
+keywords/inout/simple_inout.v [no bit-level] lower refuses a $tribuf cell (located error, decision 41(3B)(4))

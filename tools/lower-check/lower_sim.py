@@ -53,6 +53,7 @@ DEFAULT_PRE = ("proc", "opt")
 NO_HOOK = "no simulate hook"
 FF_REASON = "no simulate hook (IR change D); checked against the reference stepper"
 MEM_REASON = "no simulate hook; covered by lower-equiv and the C array model"
+HARD_REASON = f"{NO_HOOK} (a hard block); lower-equiv shares its outputs and compares its inputs"
 SKIP_REASONS = {
     "$shl": f"{NO_HOOK}; covered by lower-diff (tier T) and the unit tests' C model",
     "$shr": f"{NO_HOOK}; covered by lower-diff (tier T) and the unit tests' C model",
@@ -63,6 +64,8 @@ SKIP_REASONS = {
     "$pow": f"{NO_HOOK}; lower has no rule for it",
     "$tribuf": f"{NO_HOOK}; lower has no rule for it",
     "$mem": MEM_REASON,
+    "\\single_port_ram": HARD_REASON,  # (RTLIL spells a user cell type with a backslash)
+    "\\dual_port_ram": HARD_REASON,
     "$memrd": MEM_REASON,
     "$memwr": MEM_REASON,
     **dict.fromkeys(("$dff", "$dffe", "$adff", "$sdff", "$adffe", "$sdffe", "$sdffce", "$aldff",

@@ -213,6 +213,179 @@ def normalise_ports(gate: str, gold: str, top: str) -> str:
     return gate[:start] + body + gate[end:]
 
 
+def blackbox_modules(text: str) -> dict[str, str]:
+    """name -> RTLIL text (attributes included) of every ``blackbox`` module of an RTLIL text: the
+    hard blocks (``single_port_ram``, ``dual_port_ram``, ``multiply``) a tech library declares."""
+    found: dict[str, str] = {}
+    lines = text.splitlines(keepends=True)
+    attrs: list[str] = []
+    number = 0
+    while number < len(lines):
+        line = lines[number]
+        if line.startswith("attribute "):
+            attrs.append(line)
+        elif line.startswith("module "):
+            end = number
+            while end < len(lines) and lines[end] != "end\n":
+                end += 1
+            if "attribute \\blackbox 1\n" in attrs:
+                found[line.split()[1]] = "".join([*attrs, *lines[number:end + 1]])
+            attrs = []
+            number = end
+        else:
+            attrs = []
+        number += 1
+    return found
+
+
+def add_blackboxes(gate: str, gold: str) -> str:
+    """``gate`` plus the gold's black-box modules it lacks. ``read_blif`` makes a hard block's
+    ``.subckt`` a cell of an undeclared type, and ``expose -evert`` (which lifts a block's ports
+    out so that the check compares what drives its inputs) takes a port's direction from the
+    module: without it the gate exposes nothing, ``equiv_make`` cannot match the gold's
+    ``<instance>.<port>`` outputs and reports a gate that does not refine (ch_intrinsics,
+    mkPktMerge, every micro with a ``single_port_ram``). The module is only a declaration."""
+    out = gate if gate.endswith("\n") else gate + "\n"
+    for name, module in blackbox_modules(gold).items():
+        if module_span(out, name)[0] < 0 and f"cell {name} " in out:
+            out += module
+    return out
+
+
+WIRE_DECL = re.compile(r"^  wire (?P<mid>.*?)\s*(?P<name>\\\S+)$")
+STORAGE_NAME = re.compile(
+    r"^\\(?P<stem>.+)\.[a-z]+_[a-z]?(?P<index>\d+)(?:_(?P<dup>\d+))?$")
+STORAGE_Q = "    connect \\Q "
+MODULE_LINE = re.compile(r"^module (\\\S+)$", re.M)
+
+
+def is_storage(kind: str) -> bool:
+    """True for a word or bit storage cell type (flip-flop, latch, SR) with a ``Q`` output."""
+    return kind.startswith("$") and ("ff" in kind or "latch" in kind or kind == "$sr")
+
+
+SLICE = re.compile(r"(\\\S+)(?: \[(\d+)(?::(\d+))?\])?")
+
+
+def driven_bits(q_signal: str) -> dict[str, list[int]]:
+    """wire -> the bit indices (low to high) that a gold cell's ``Q`` signal drives: a wire, a
+    bit or slice of one, or a concatenation of those. Constants and anything else add nothing."""
+    found: dict[str, list[int]] = {}
+    for name, high, low in reversed(SLICE.findall(q_signal)):
+        if high == "":
+            found.setdefault(name, []).append(-1)  # the whole wire (width unknown here)
+        else:
+            found.setdefault(name, []).extend(range(int(low or high), int(high) + 1))
+    return found
+
+
+def gold_driven(body: str) -> dict[str, list[int]]:
+    """wire -> the sorted bit indices that the storage cells of a gold module body drive; a whole
+    wire is listed as ``range(width)``."""
+    widths = wire_widths(body)
+    found: dict[str, set[int]] = {}
+    for _, q_signal in storage_cells(body):
+        for name, bits in driven_bits(q_signal).items():
+            width = widths.get(name, 0)
+            found.setdefault(name, set()).update(range(width) if bits == [-1] else bits)
+    return {name: sorted(bits) for name, bits in found.items()}
+
+
+def storage_cells(body: str) -> list[tuple[str, str]]:
+    """(cell name, Q signal) of the ``$dff`` and ``$dlatch`` cells of a module body."""
+    found: list[tuple[str, str]] = []
+    lines = body.splitlines()
+    for number, line in enumerate(lines):
+        words = line.split()
+        if len(words) != 3 or words[0] != "cell" or not is_storage(words[1]):
+            continue
+        end = number + 1
+        while end < len(lines) and lines[end] != "  end":
+            end += 1
+        for conn in lines[number + 1:end]:
+            if conn.startswith(STORAGE_Q):
+                found.append((words[2], conn[len(STORAGE_Q):]))
+    return found
+
+
+def gate_storage(body: str) -> dict[str, list[tuple[tuple[int, int], str]]]:
+    """stem -> [((index, dup), Q signal)] of the storage cells of a gate module named
+    ``<stem>.<kind>_<index>[_<dup>]`` (the name ``lower`` gives the bit cells of the register
+    ``stem``; ``dup`` numbers the cells that would otherwise share a name)."""
+    found: dict[str, list[tuple[tuple[int, int], str]]] = {}
+    for name, q_signal in storage_cells(body):
+        named = STORAGE_NAME.match(name)
+        if named is not None:
+            found.setdefault(named.group("stem"), []).append(
+                ((int(named.group("index")), int(named.group("dup") or 0)), q_signal))
+    return found
+
+
+def wire_widths(body: str) -> dict[str, int]:
+    """name -> width of the wires a module body declares."""
+    widths: dict[str, int] = {}
+    for line in body.splitlines():
+        found = WIRE_DECL.match(line)
+        if found is not None:
+            width = WIDTH_WORD.search(found.group("mid"))
+            widths[found.group("name")] = int(width.group(1)) if width else 1
+    return widths
+
+
+def pair_registers(gate: str, gold: str) -> str:
+    """``gate`` with each register of the gold that it can recognise by the gold's name.
+
+    The BLIF keeps no internal net name, so the gate's flip-flops drive ``$n123`` and the SAT
+    flow's induction cannot pair them with the gold's: a register that feeds itself or a hard
+    block fails to prove, whatever the lowering. ``lower`` names the bit cells of a register
+    ``<wire>.dff_p<n>`` with ``n`` rising with the bit, so a gold wire of width W with exactly W
+    such cells in the same module gets a public gate wire of that name and width, joined to the
+    cells' Q bits in order (the bits the gold's own storage cells drive when some are unused and
+    were dropped). ``equiv_make`` then compares the two (and the induction uses them as
+    the invariant). The pairing is a hint and no assumption: a wrong guess is an ``$equiv`` that
+    fails to prove, never a proof."""
+    out = gate
+    for module in MODULE_LINE.findall(gate):
+        g_start, g_end = module_span(gold, module)
+        start, end = module_span(out, module)
+        if g_start < 0 or start < 0:
+            continue
+        body = out[start:end]
+        gold_body = gold[g_start:g_end]
+        gold_wires, have, driven = wire_widths(gold_body), wire_widths(body), gold_driven(gold_body)
+        extra = ""
+        for stem, cells in sorted(gate_storage(body).items()):
+            name = "\\" + stem
+            if name in have or name not in gold_wires:
+                continue
+            bits = driven.get(name) or (list(range(gold_wires[name]))
+                                        if gold_wires[name] == len(cells) else [])
+            if len(bits) != len(cells):
+                continue
+            width = gold_wires[name]
+            extra += f"  wire {f'width {width} ' if width > 1 else ''}{name}\n"
+            for bit, (_, sig) in zip(bits, sorted(cells), strict=True):
+                target = f"{name} [{bit}]" if width > 1 else name
+                extra += f"  connect {target} {sig}\n"
+        if extra:
+            out = out[:end] + extra + out[end:]
+    return out
+
+
+def unpaired_registers(gate: str) -> int:
+    """The storage cells of a gate whose output has no public name: a net called ``$...`` that no
+    module-level ``connect`` gives one (``pair_registers`` adds those). The induction of the SAT
+    flow cannot relate such a register to the gold's, so its failed proof says little."""
+    count = 0
+    for module in MODULE_LINE.findall(gate):
+        start, end = module_span(gate, module)
+        body = gate[start:end]
+        aliased = set(re.split(r"[\s{}]+", " ".join(
+            line for line in body.splitlines() if line.startswith("  connect "))))
+        count += sum(1 for _, q in storage_cells(body) if q.startswith("$") and q not in aliased)
+    return count
+
+
 def make_gate(yosys: str, after: Path, gold: tuple[Path, str], work: Path, cap: int) -> Path:
     """The gate: Yosys's reading of the BLIF as RTLIL (``gate.il``), the module ``top`` marked and
     its ports in the gold's shape. ``gold`` = (gold.il, the top module's RTLIL name)."""
@@ -224,7 +397,9 @@ def make_gate(yosys: str, after: Path, gold: tuple[Path, str], work: Path, cap: 
     marker = f"\nmodule {top}\n"
     if marker not in text:
         raise lc.ToolError(f"the lowered BLIF has no module {top[1:]}")
-    text = normalise_ports(text, gold[0].read_text(encoding="utf-8"), top)
+    gold_text = gold[0].read_text(encoding="utf-8")
+    text = add_blackboxes(pair_registers(normalise_ports(text, gold_text, top), gold_text),
+                          gold_text)
     gate.write_text(text.replace(marker, f"\n{TOP_LINE}module {top}\n", 1), encoding="utf-8")
     return gate
 
@@ -280,18 +455,28 @@ def refine(yosys: str, gold: Path, gate: Path, after: Path, work: Path, cap: int
     if ok:
         return "ok", ""
     # The SAT flow failed. Its induction cannot pair the registers of a memory (the gold's words
-    # and the gate's flip-flops share no names), so a refinement it cannot prove is judged again by
-    # the BLIF cec of opt-equiv (both sides lowered to bit level, equiv-check). A cec "proved" is a
-    # proof; "differs" confirms; "unproven" (the checker's limits) is "unproven"
-    # failure, which is the conservative verdict.
+    # and the gate's flip-flops share no names), nor those of a design whose BLIF lost the names
+    # of its registers (the gate's are `$n123`) or that has several clocks, so a refinement it
+    # cannot prove is judged again by the BLIF cec of opt-equiv (both sides lowered to bit level,
+    # equiv-check: ABC's `dsec` pairs the registers). A cec "proved" is a proof; "differs"
+    # confirms; "unproven" (the checker's limits: several clocks, a SAT timeout) is "unproven"
+    # too when the design holds state, because a failed induction proves no difference there. Only
+    # a design without state is judged by the SAT flow alone: its proof is exact.
     verdict, text = cec_gold_and_blif(yosys, gold, after, work, cap)
     if verdict == opt_equiv.CEC_PROVED:
         return "ok", "proved by the BLIF cec (the SAT flow could not pair the registers)"
     if verdict == opt_equiv.CEC_DIFFERS:
         return "differs", f"{last} | {text}"
-    if "$mem" not in lc.cell_types(gold.read_text(encoding="utf-8")):
-        return "differs", last  # without a memory the SAT flow's failed proof is the verdict
+    if not induction_is_weak(gold.read_text(encoding="utf-8"), gate.read_text(encoding="utf-8")):
+        return "differs", last  # every register is paired: the failed proof is the verdict
     return "unproven", f"the SAT flow failed ({last.strip()[-120:]}) and {text}"
+
+
+def induction_is_weak(gold: str, gate: str) -> bool:
+    """True when the SAT flow's failed proof is no evidence of a difference: the gold has a
+    ``$mem`` (the words and the gate's flip-flops share no names), or a register of the gate has
+    no public name to pair it by (``unpaired_registers``)."""
+    return "$mem" in lc.cell_types(gold) or unpaired_registers(gate) > 0
 
 
 def check_pair(yosys: str, before: Path, after: Path, work: Path, cap: int,
