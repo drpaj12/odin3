@@ -101,6 +101,8 @@ text = open(argv[-1]).read()
 for code in (1, 2, 3, 4):
     if f"OT{code}" in text:
         print(f"opt-tool: message for exit {code}")
+        if "WORD" in text:
+            print("refine: DIFFERS: unproven: the SAT proof hit its size limit")
         sys.exit(code)
 print("opt-tool: ok")
 """
@@ -636,6 +638,35 @@ class OptModesTest(SweepTestCase):
             code, out, _ = self.run_tool("--opt-diff", "--yosys", "Y", str(self.dir / "m"))
             self.assertEqual(code, 1, out)
             self.assertIn("FAIL  u.v", out)
+
+    def test_h2_an_unproven_refine_next_to_another_difference_is_unexpected(self) -> None:
+        """2H review H2: a file listed as untested (reason) or unproven (needle) is expected only on
+        opt-diff exit 4. Exit 1 (an unlisted histogram difference printed next to the unproven
+        refine) matches the needle but is an unexpected failure; exit 4 alone is expected."""
+        fake = _exe(self.bin / "fake_opt_tool.py", FAKE_OPT_TOOL)
+        self.write("m/mixed.v", "OT1 WORD\n")  # exit 1, text holds `refine: DIFFERS: unproven`
+        self.write("m/only.v", "OT4 WORD\n")  # exit 4, the same text
+        by_reason = ("mixed.v [message for exit] untested for now (size limit): x\n"
+                     "only.v [message for exit] untested for now (size limit): x\n")
+        by_needle = ("mixed.v [refine: DIFFERS: unproven] known\n"
+                     "only.v [refine: DIFFERS: unproven] known\n")
+        tools = dict(elab_sweep.OPT_TOOLS, **{"opt-diff": fake})
+        for listing in (by_reason, by_needle):
+            expect = self.expect(listing)
+            with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+                code, out, _ = self.run_tool("--opt-diff", "--yosys", "Y", "--expect-fail",
+                                             str(expect), str(self.dir / "m"))
+            self.assertEqual(code, 1, out)
+            self.assertIn("FAIL  mixed.v", out)
+            self.assertIn("needs exit 4", out)
+            self.assertIn("xfail only.v", out)
+            self.assertNotIn("xfail mixed.v", out)
+        # another reason is not held to exit 4, and opt-equiv mode is not touched
+        expect = self.expect("mixed.v [message for exit 1] a known difference\n")
+        with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+            code, out, _ = self.run_tool("--opt-diff", "--yosys", "Y", "--expect-fail",
+                                         str(expect), str(self.dir / "m"))
+        self.assertIn("xfail mixed.v", out)
 
     def test_modes_need_yosys_and_exclude_each_other(self) -> None:
         self.write("m/a.v", "x\n")

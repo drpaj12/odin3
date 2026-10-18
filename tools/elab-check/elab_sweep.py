@@ -48,7 +48,11 @@ runs it alone). A child killed by its cap is reported ``out of memory (cap 4G)``
 - ``--opt-equiv`` / ``--opt-diff`` (need ``--yosys``; 2F Task 17): ``opt-equiv`` or ``opt-diff`` on
   the file (``--top`` as in the default mode; each ``--opt-arg=ARG`` goes to the child, e.g.
   ``--opt-arg=--script=phase2`` or ``--opt-arg=--expect=tests/opt/diff_expect.txt``). Exit 0 is a
-  pass, 1 a difference, anything else the child's first error line.
+  pass, 1 a difference, anything else the child's first error line. With ``--opt-diff`` an entry
+  whose reason starts with ``untested for now (size limit)`` or whose needle holds ``unproven`` must
+  see exit 4 (opt-diff: no verdict, and every other step agrees or is listed); any other failure of
+  that file, e.g. exit 1 for an unlisted histogram difference next to an unproven refine, is an
+  unexpected failure.
 
 - ``--opt-run`` (2F Task 18; Odin III only, no ``--yosys``): ``opt-run`` on the file, the Phase 2
   script with ``ODIN3_OK``, ``check`` FULL and the iteration cap (``--techlib`` passed on; ``--top``
@@ -97,6 +101,8 @@ from run_rows_equiv import parse_expect_line
 TOOL = "elab-sweep"
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_SKIP = 0, 1, 2, 77
 OPT_CRASH = 3  # opt-equiv, opt-diff, opt-run: a child crashed, was cap-killed or timed out (hard)
+OPT_UNPROVEN = 4  # opt-equiv, opt-diff: no verdict (a size limit), nothing else failed
+UNTESTED_REASON = "untested for now (size limit)"  # PHASE2 #29: a design too big for the check
 TIMEOUT_S = 3600  # a file past an hour is that file's failure
 TAIL_LINES = 3
 SUFFIX = ".v"
@@ -142,6 +148,13 @@ class Outcome:
     why: str = ""
     output: str = ""
     hard: bool = False  # a signal, a memory-cap kill, a timeout or a child that cannot run
+    code: int = 0  # the opt tool's exit code (run_opt_tool only)
+
+
+def needs_unproven(entry: Expect) -> bool:
+    """An entry that says the file cannot be checked: its failure must be exit 4 (unproven) and
+    nothing else, or the listing would hide a real difference next to the unproven step."""
+    return entry.reason.startswith(UNTESTED_REASON) or "unproven" in entry.needle
 
 
 def parse_size(text: str) -> int:
@@ -514,7 +527,7 @@ def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
     why = "NOT ok: " if done.returncode == 1 else ""
     return Outcome("fail", secs, why + (first_error(text) or f"exit {done.returncode}"), text,
                    hard=done.returncode < 0 or done.returncode == OPT_CRASH
-                   or any(mark in text for mark in OPT_TOOL_ABORT))
+                   or any(mark in text for mark in OPT_TOOL_ABORT), code=done.returncode)
 
 
 def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
@@ -565,8 +578,10 @@ def run_file(cfg: Config, item: Item) -> Outcome:
 # ---- the sweep --------------------------------------------------------------------------------
 
 
-def verdict(item: Item, outcome: Outcome, expect: dict[str, Expect], xl: bool) -> tuple[str, str]:
-    """(class, line): class is ok, xfail, FAIL, XPASS, crash or skip."""
+def verdict(item: Item, outcome: Outcome, expect: dict[str, Expect], xl: bool,
+            strict_unproven: bool = False) -> tuple[str, str]:
+    """(class, line): class is ok, xfail, FAIL, XPASS, crash or skip. ``strict_unproven``
+    (opt-diff): an entry that ``needs_unproven`` is expected only on exit 4."""
     head = f"{item.rel} ({item.size} B, {outcome.secs:.3f} s)"
     entry = expect.get(item.rel)
     listed = entry is not None and not entry.xl  # an xl entry is a run class, not an expectation
@@ -590,6 +605,10 @@ def verdict(item: Item, outcome: Outcome, expect: dict[str, Expect], xl: bool) -
         if entry.needle and entry.needle not in outcome.output:
             return "FAIL", (f"FAIL  {head}: fails differently from the listing: expected "
                             f"[{entry.needle}], got {outcome.why}")
+        if strict_unproven and needs_unproven(entry) and outcome.code != OPT_UNPROVEN:
+            return "FAIL", (f"FAIL  {head}: listed as untested/unproven ({entry.reason}), which "
+                            f"needs exit {OPT_UNPROVEN} (unproven and nothing else), got exit "
+                            f"{outcome.code}: {outcome.why}")
         return "xfail", f"xfail {head}: {entry.reason}"
     return "FAIL", f"FAIL  {head}: {outcome.why}"
 
@@ -620,7 +639,8 @@ class Sweep:
             self.max_iterations = (int(found.group(1)), item.rel)
 
     def report(self, item: Item, outcome: Outcome) -> None:
-        cls, line = verdict(item, outcome, self.expect, self.xl)
+        cls, line = verdict(item, outcome, self.expect, self.xl,
+                            self.cfg.opt_tool == "opt-diff")
         print(line, flush=True)
         if outcome.kind == "ok" and self.cfg.mode() == "bench" and outcome.output:
             print(f"bench: {outcome.output}", flush=True)

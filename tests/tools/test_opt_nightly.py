@@ -182,6 +182,18 @@ class UnitsTest(unittest.TestCase):
         self.assertTrue(res.unproven)
         self.assertFalse(res.hard)
 
+    def test_opt_diff_exit_3_is_hard_whatever_its_text_says(self) -> None:
+        """2H review M3a: only opt-diff exit 4 is unproven; its exit 3 (a child crashed or timed
+        out, even Yosys, and its text may say `unproven` or `killed`) is hard."""
+        cfg = nightly.Config("O", "Y", Path("/r"), 3 << 30, {}, {}, None, Path("de"), None, 9.0)
+        item = elab_sweep.Item(Path("/r/a.v"), "a.v", 1)
+        done = mock.Mock(returncode=3, stdout="", stderr="opt-diff: HARD: yosys-refine: timed out "
+                         "after 60 s\nrefine: DIFFERS: unproven: x\n")
+        with mock.patch.object(memcap, "run", return_value=done):
+            res = nightly.run_unit(cfg, nightly.units("diff")[0], item, 3 << 30)
+        self.assertFalse(res.unproven)
+        self.assertTrue(res.hard)
+
     def test_opt_equiv_exit_4_and_a_cap_kill_of_the_tool_are_unproven_not_hard(self) -> None:
         """2F VTR triage: a proof that timed out says "timed out" in its lines (a HARD_MARK) but
         is the checker's size limit; opt-equiv killed by its own cap is the checker's too (Odin
@@ -267,6 +279,23 @@ class RunTest(Base):
         self.assertEqual(code, 0, lines)
         self.assertTrue(any("a.v [opt-equiv]: fails as listed (untested for now" in line
                             for line in lines))
+
+    def test_an_unproven_entry_needs_exit_4_not_another_failure_with_the_same_word(self) -> None:
+        """2H review H2: `[unproven:]` also matches `refine: DIFFERS: unproven: ...` next to a real
+        difference (opt-diff exit 1). Such an entry is expected only on the unproven exit."""
+        self.expect_file.write_text("a.v [unproven:] untested for now (size limit): 60 s timeout\n",
+                                    encoding="utf-8")
+        text = "refine: DIFFERS: unproven: x\nhistogram: DIFFERS: module 't'\n"
+        mixed = nightly.Result(1, 0.1, text, False, False)
+        answer = Runs(lambda f, label: mixed if (f, label) == ("a.v", "opt-diff[phase2]") else ok())
+        code, lines = self.execute(answer)
+        self.assertEqual(code, 1, lines)
+        self.assertTrue(any("a.v [opt-diff[phase2]]: FAIL (listed as unproven, but exit 1 is not "
+                            "4)" in line for line in lines), lines)
+        alone = nightly.Result(4, 0.1, text, False, True)
+        answer = Runs(lambda f, label: alone if (f, label) == ("a.v", "opt-diff[phase2]") else ok())
+        code, lines = self.execute(answer)
+        self.assertEqual(code, 0, lines)
 
     def test_a_listed_failure_passes_and_a_listed_pass_is_stale(self) -> None:
         self.expect_file.write_text("a.v [boom] a known reason\nb.v a known reason\n",

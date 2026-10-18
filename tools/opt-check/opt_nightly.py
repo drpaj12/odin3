@@ -22,8 +22,10 @@ and a summary line.
   cec decided nothing) is a failure an expect-fail line lists as ``untested for now (size
   limit)``, never hard (the timeout and kill words in its lines are the checker's); an unlisted one
   is printed ``UNPROVEN`` and fails the run like any unlisted failure. Odin III's own cap kill is
-  exit 3, hard. opt-diff exit 4 (Yosys, the oracle, killed
-  by the memory cap: no verdict on Odin III) is listed the same way.
+  exit 3, hard. opt-diff exit 4 (no verdict on Odin III: an unproven refine or Yosys, the oracle,
+  killed by the memory cap, and nothing else differs) is listed the same way. An entry that says
+  ``untested for now (size limit)`` or whose needle holds ``unproven`` is expected only on exit 4:
+  any other failure of that file (exit 1: a real difference) is an unexpected one.
 - ``--expect-fail F`` (repeatable; default ``tests/opt/vtr_expect_fail.txt`` and
   ``tests/opt/vtr_nightly_xl.txt``) lists ``<path> [needle] <reason>`` lines. A listed file must
   fail (a tool exits non-zero; the needle must appear in the output); an unlisted failure, a
@@ -261,14 +263,16 @@ def run_file(cfg: Config, item: elab_sweep.Item, entry: elab_sweep.Expect | None
             continue
         failed_any = True
         why = finish_line(res.text)
-        if entry is not None and not res.hard and entry.needle in res.text:
+        weak = entry is not None and elab_sweep.needs_unproven(entry) and not res.unproven
+        if entry is not None and not res.hard and entry.needle in res.text and not weak:
             out(f"{tag}: fails as listed ({entry.reason}): {why}")
             tally.listed += 1
         else:
             kind = "HARD FAIL" if res.hard else "UNPROVEN" if res.unproven else "FAIL"
             extra = ""
             if entry is not None and not res.hard:
-                extra = f" (listed, but the needle '{entry.needle}' is missing)"
+                extra = (f" (listed as unproven, but exit {res.code} is not 4)" if weak
+                         else f" (listed, but the needle '{entry.needle}' is missing)")
             out(f"{tag}: {kind}{extra}: {why}")
             tally.bad += 1
     if entry is not None and not failed_any:

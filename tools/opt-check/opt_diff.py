@@ -30,7 +30,9 @@ opt_clean; opt -full``), ``wreduce``, ``opt -full``, ``opt -fast``, ``opt -fast 
 6. the rule counters of both, printed for a design with a difference (``--verbose``: always); no
    gate.
 
-A difference fails unless ``--expect F`` lists it: lines ``<path> <script> <step> <reason>``
+A difference fails unless ``--expect F`` lists it, except an **unproven refine** (the SAT proof hit
+its size limit and the BLIF cec gave no verdict: text ``unproven: ...``), which no listing absorbs:
+it is exit 4 below. Lines ``<path> <script> <step> <reason>``
 (``#`` comments), ``path`` relative to ``--root`` (else the file name), ``script`` one of
 ``phase2 phase3 wreduce full fast fast-noff nodffe-nosdff`` or ``*``, ``step`` ``histogram``,
 ``widths``, ``refine`` or ``identity``. A listed difference that does not occur fails too (a
@@ -40,12 +42,17 @@ a failing run keep it.
 Exit codes (one convention across the opt tools): 0 no unexpected difference; 1 a difference, or a
 stale entry; 2 usage, or Odin III or Yosys exited with an error; 3 hard: a child (Odin III, Yosys or
 netlist-compare) crashed, was killed by a signal or its memory cap, or timed out (never an expected
-difference: no expect line absorbs it); 4 unproven: Yosys (its step-2 run or a lowering for the
-BLIF steps) was killed by the memory cap, so no verdict exists on Odin III: a limit of the oracle,
-not a crash, which a sweep may list as ``untested for now (size limit)`` (an Odin III or
-netlist-compare cap kill, and any timeout, stay exit 3); 77 skipped (an ASan child and no
-systemd-run). The work directory this tool made (under ``$TMPDIR``) is removed after a clean run,
-after an error and after exit 4; a failure (1 or 3) keeps it.
+difference: no expect line absorbs it); 4 unproven: no verdict exists on Odin III for some step and
+nothing else failed. That is an unproven refine, or Yosys (its step-2 run or a lowering for the BLIF
+steps) killed by the memory cap (a limit of the oracle, not a crash; an Odin III or netlist-compare
+cap kill, and any timeout, stay exit 3). A sweep may list exit 4 as ``untested for now (size
+limit)`` and must insist on it: **any other unlisted difference, in any script, makes the exit 1**,
+so one unproven refine cannot hide another difference. Every script's result is printed before the
+tool exits, whatever the code; a Yosys cap kill in one script does not stop the next scripts.
+(Yosys killed by the host's OOM killer or an outside SIGKILL looks the same as the cap kill: exit
+4.) 77 skipped (an ASan child and no systemd-run). The work directory this tool made (under
+``$TMPDIR``) is removed after a clean run, after an error and after exit 4; a failure (1 or 3)
+keeps it.
 """
 
 from __future__ import annotations
@@ -69,6 +76,8 @@ HERE = Path(__file__).resolve().parent
 NETLIST_COMPARE = HERE.parent / "netlist-compare" / "netlist-compare"
 EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_UNPROVEN, EXIT_SKIP = 0, 1, 2, 3, 4, 77
 STEPS = ("histogram", "widths", "refine", "identity")
+UNPROVEN_PREFIX = "unproven:"  # the refine difference text of a proof that reached its size limit
+UNTESTED_REASON = "untested for now (size limit)"  # PHASE2 #29: what a reason may say only then
 PHASE3 = HERE / "phase3.script"
 WIDTH_SCRIPTS = ("wreduce", "phase3")  # the scripts that hold wreduce: widths are compared
 ODIN_FRONT = "proc", "opt_expr -keepdc"
@@ -300,17 +309,29 @@ def expected(key: str, slug: str, step: str, table: dict[tuple[str, str, str], E
 
 
 def verdict(name: str, key: str, results: Sequence[Result],
-            table: dict[tuple[str, str, str], Expect], verbose: bool) -> tuple[list[str], bool]:
-    """The output lines of one design and whether it failed (a difference nobody listed, or a
-    listed one that did not occur)."""
+            table: dict[tuple[str, str, str], Expect], verbose: bool, killed: bool = False
+            ) -> tuple[list[str], bool, bool]:
+    """The output lines of one design, whether it failed (a difference nobody listed, or a listed
+    one that did not occur) and whether a refine step is unproven. An unproven refine is never
+    absorbed by a listing and is not a failure: it is the exit 4 of a run where nothing else fails.
+    A listed reason that says ``untested for now (size limit)`` is true only when some step has no
+    verdict (``unproven``, or ``killed``: a script lost to the Yosys cap); otherwise the listing
+    would count a design with nothing untested as a pass, which fails."""
     lines: list[str] = []
     failed = False
+    unproven = False
+    untested_listed: list[str] = []
     for res in results:
         tag = f"{TOOL}: {name} [{res.script.slug}]"
         for step in STEPS:
             reason = expected(key, res.script.slug, step, table)
             found = res.differences.get(step)
-            if found is None and reason is not None:
+            if step == "refine" and found is not None and found.startswith(UNPROVEN_PREFIX):
+                note = (f" (listed as '{reason.reason}', but a listing never makes an unproven "
+                        "step a pass)" if reason is not None else "")
+                lines.append(f"{tag}: refine: DIFFERS: {found}{note}")
+                unproven = True
+            elif found is None and reason is not None:
                 lines.append(f"{tag}: {step}: stale entry in the expect list ({reason.reason})")
                 failed = True
             elif found is not None and reason is None:
@@ -318,13 +339,21 @@ def verdict(name: str, key: str, results: Sequence[Result],
                 failed = True
             elif found is not None and reason is not None:
                 lines.append(f"{tag}: {step}: differs as listed ({reason.reason})")
+                if reason.reason.startswith(UNTESTED_REASON):
+                    untested_listed.append(f"[{res.script.slug}] {step}")
         if not res.differences and not any(
                 expected(key, res.script.slug, s, table) for s in STEPS):
             lines.append(f"{tag}: ok")
         if res.differences or verbose:
             lines.append(f"{tag}: counters odin3: {opt_equiv.counter_text(res.odin_counters)}; "
                          f"yosys: {opt_equiv.counter_text(res.yosys_counters)}")
-    return lines, failed
+    if untested_listed and not (unproven or killed):
+        which = ", ".join(untested_listed)
+        lines.append(f"{TOOL}: {name}: DIFFERS: {which} say '{UNTESTED_REASON}' but no step is "
+                     "unproven: nothing is untested, so the listing would be a pass; say what is "
+                     "true (a listing is never a pass)")
+        failed = True
+    return lines, failed, unproven
 
 
 def rel_key(files: Sequence[str], root: Path | None) -> str:
@@ -365,12 +394,32 @@ def execute(args: argparse.Namespace, work: Path) -> int:
     scripts = [script_named(n) for n in (args.script or ["phase2"])]
     table = parse_expect(args.expect.read_text(encoding="utf-8")) if args.expect else {}
     diff = Diff(args, work)
-    results = [diff.run(s, files) for s in scripts]
-    lines, failed = verdict(Path(files[0]).name, rel_key(files, args.root), results, table,
-                            args.verbose)
+    name, key = Path(files[0]).name, rel_key(files, args.root)
+    results: list[Result] = []
+    killed: list[tuple[Script, opt_equiv.CrashError]] = []
+    for script in scripts:
+        try:
+            results.append(diff.run(script, files))
+        except opt_equiv.CrashError as exc:
+            if not yosys_cap_kill(exc):
+                show(verdict(name, key, results, table, args.verbose)[0])  # keep what was found
+                raise
+            killed.append((script, exc))  # no verdict on this script; the next ones still run
+        except opt_equiv.ToolError:
+            show(verdict(name, key, results, table, args.verbose)[0])
+            raise
+    lines, failed, unproven = verdict(name, key, results, table, args.verbose, bool(killed))
+    show([*lines, *(f"{TOOL}: {name} [{s.slug}]: unproven (no verdict): {e}" for s, e in killed)])
+    for _, kill in killed:
+        print(f"{TOOL}: unproven: {kill}", file=sys.stderr)
+    if failed:
+        return EXIT_FAIL
+    return EXIT_UNPROVEN if unproven or killed else EXIT_OK
+
+
+def show(lines: Sequence[str]) -> None:
     for line in lines:
         print(line, flush=True)
-    return EXIT_FAIL if failed else EXIT_OK
 
 
 def yosys_cap_kill(exc: opt_equiv.CrashError) -> bool:
@@ -391,12 +440,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         code = execute(args, work)
     except opt_equiv.CrashError as exc:
-        if yosys_cap_kill(exc):
-            print(f"{TOOL}: unproven: {exc}", file=sys.stderr)
-            code = EXIT_UNPROVEN
-        else:
-            print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
-            code = EXIT_CRASH
+        print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
+        code = EXIT_CRASH
     except (OSError, opt_equiv.ToolError, ValueError) as exc:
         print(f"{TOOL}: error: {exc}", file=sys.stderr)
     except memcap.CapUnavailable as exc:

@@ -98,6 +98,7 @@ ODIN_LOG = ("odin3: info: opt: rule const_and 2\n"
             "odin3: info: stats: module t: cell $xor 2\n")
 YSTAT = ("\n=== t ===\n\n   Number of cells:                  2\n"
          "     $xor                            2\n")
+YSTAT_MORE = YSTAT.replace("$xor                            2", "$xor                            3")
 COVER = "passes/opt/opt_expr.cc:570:f   3 opt.opt_expr.const_and\nx.cc:1:g   0 opt.opt_expr.zero\n"
 
 
@@ -264,8 +265,7 @@ class RunTest(unittest.TestCase):
         self.assertIn("counters odin3: const_and 2; yosys: opt.opt_expr.const_and 3", out)
 
     def test_histogram_difference_fails(self) -> None:
-        self.tree.set_spec(ystat=YSTAT.replace("$xor                            2",
-                                               "$xor                            3"))
+        self.tree.set_spec(ystat=YSTAT_MORE)
         code, out, _ = self.tree.run()
         self.assertEqual(code, 1)
         self.assertIn("[phase2]: histogram: DIFFERS: module 't'", out)
@@ -287,7 +287,8 @@ class RunTest(unittest.TestCase):
 
     def test_a_sat_timeout_falls_back_to_the_blif_cec(self) -> None:
         """A timed-out proof goes to equiv-check on the lowered BLIFs: proved is a pass, a cec
-        that decides nothing is the difference `unproven`, --no-cec keeps the hard timeout."""
+        that decides nothing is the difference `unproven` (exit 4, nothing else failed), a cec
+        that says not equivalent is exit 1, --no-cec keeps the hard timeout."""
         def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
             if "equiv_make" in " ".join(argv):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
@@ -296,7 +297,7 @@ class RunTest(unittest.TestCase):
                 "--netlist-compare", str(self.tree.bin / "netlist-compare"),
                 "--work", str(self.tree.root / "work"), str(self.tree.root / "micro" / "d.v")]
         for verdict, code, needle in ((opt_equiv.CEC_PROVED, 0, "[phase2]: ok"),
-                                      (opt_equiv.CEC_UNPROVEN, 1, "refine: DIFFERS: unproven"),
+                                      (opt_equiv.CEC_UNPROVEN, 4, "refine: DIFFERS: unproven"),
                                       (opt_equiv.CEC_DIFFERS, 1, "refine: DIFFERS: text")):
             with self.subTest(verdict=verdict), mock.patch.object(
                     memcap, "run", hang), mock.patch.object(
@@ -381,18 +382,134 @@ class RunTest(unittest.TestCase):
         self.assertNotIn("differs as listed", out)
 
     def test_a_cap_kill_of_the_refinement_is_a_size_limit_not_a_crash(self) -> None:
-        """SIGKILL (the memory cap) takes the BLIF cec fallback like a timeout: unproven there is a
-        difference a narrow expect line may list, never a pass."""
+        """SIGKILL (the memory cap) takes the BLIF cec fallback like a timeout: unproven there is
+        exit 4, and no expect line turns it into a pass (2H review: a listing never counts)."""
         self.tree.set_spec(refine_signal=9)
         with mock.patch.object(opt_equiv, "cec_blifs",
                                return_value=(opt_equiv.CEC_UNPROVEN, "BLIF cec: no verdict")):
             code, out, err = self.tree.run()
-            self.assertEqual(code, 1, out + err)
+            self.assertEqual(code, 4, out + err)
             self.assertIn("refine: DIFFERS: unproven: the SAT proof hit its size limit", out)
             extra = self.tree.expect("d.v phase2 refine untested for now (size limit)\n")
             code, out, err = self.tree.run(*extra)
-            self.assertEqual(code, 0, out + err)
-            self.assertIn("differs as listed (untested for now (size limit))", out)
+            self.assertEqual(code, 4, out + err)
+            self.assertIn("refine: DIFFERS: unproven", out)
+            self.assertIn("a listing never makes an unproven step a pass", out)
+
+    def test_h2_an_unproven_refine_does_not_hide_another_difference(self) -> None:
+        """2H review H2: exit 4 only when every failing step is an unproven refine. Any other
+        unlisted difference, a stale entry or a refine that is not unproven makes it exit 1; a
+        listed other difference leaves exit 4."""
+        self.tree.set_spec(refine_signal=9)
+        unproven = mock.patch.object(opt_equiv, "cec_blifs",
+                                     return_value=(opt_equiv.CEC_UNPROVEN, "BLIF cec: no verdict"))
+        with unproven:
+            self.assertEqual(self.tree.run()[0], 4)
+            self.tree.set_spec(refine_signal=9, compare_rc=1)  # identity differs as well
+            code, out, _ = self.tree.run()
+            self.assertEqual(code, 1, out)
+            self.assertIn("refine: DIFFERS: unproven", out)
+            self.assertIn("identity: DIFFERS", out)
+            extra = self.tree.expect("d.v phase2 identity structural\n")
+            code, out, _ = self.tree.run(*extra)
+            self.assertEqual(code, 4, out)  # the other difference is listed
+            self.assertIn("identity: differs as listed", out)
+            extra = self.tree.expect("d.v phase2 histogram it used to differ\n")
+            self.tree.set_spec(refine_signal=9)
+            code, out, _ = self.tree.run(*extra)
+            self.assertEqual(code, 1, out)  # a stale entry
+            self.assertIn("stale entry", out)
+        self.tree.set_spec(refine_signal=9)
+        with mock.patch.object(opt_equiv, "cec_blifs",
+                               return_value=(opt_equiv.CEC_DIFFERS, "not equivalent")):
+            self.assertEqual(self.tree.run()[0], 1)
+
+    def test_h1_an_untested_listing_needs_an_unproven_step(self) -> None:
+        """2H review H1: a listed difference whose reason says `untested for now (size limit)` is a
+        pass unless some step has no verdict. With a refine that passes it fails (exit 1); with an
+        unproven refine it is exit 4; a reason that says what is true stays exit 0."""
+        self.tree.set_spec(compare_rc=1)  # identity differs, everything else agrees
+        untested = self.tree.expect("d.v phase2 identity untested for now (size limit): big\n")
+        code, out, _ = self.tree.run(*untested)
+        self.assertEqual(code, 1, out)
+        self.assertIn("nothing is untested", out)
+        honest = self.tree.expect("d.v phase2 identity structural only: refine passes\n")
+        self.assertEqual(self.tree.run(*honest)[0], 0)
+        self.tree.set_spec(compare_rc=1, refine_signal=9)
+        with mock.patch.object(opt_equiv, "cec_blifs",
+                               return_value=(opt_equiv.CEC_UNPROVEN, "BLIF cec: no verdict")):
+            code, out, _ = self.tree.run(*untested)
+        self.assertEqual(code, 4, out)
+        self.assertNotIn("nothing is untested", out)
+
+    def test_m1_a_cap_kill_keeps_the_findings_of_the_other_scripts(self) -> None:
+        """2H review M1: a Yosys cap kill in a later script printed nothing and hid the earlier
+        script's difference. Every script's result is printed; a real difference wins (exit 1);
+        a cap kill in the first script does not stop the next one."""
+        hist = YSTAT_MORE
+
+        def kill_in(slug: str) -> Any:
+            def run(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
+                if argv[0].endswith("yosys") and f"/{slug}/" in " ".join(argv):
+                    return subprocess.CompletedProcess(list(argv), -9, "", "killed")
+                return fake_run(argv, cap, **kw)
+            return run
+
+        def argv_for(*scripts: str) -> list[str]:
+            return ["--odin3", str(self.tree.bin / "odin3"), "--yosys",
+                    str(self.tree.bin / "yosys"), "--netlist-compare",
+                    str(self.tree.bin / "netlist-compare"), "--work", str(self.tree.root / "work"),
+                    *(a for s in scripts for a in ("--script", s)),
+                    str(self.tree.root / "micro" / "d.v")]
+        self.tree.set_spec(ystat=hist)
+        for first, second, killed in (("phase2", "opt -full", "full"),
+                                      ("opt -full", "phase2", "full")):
+            with self.subTest(first=first), mock.patch.object(memcap, "run", kill_in(killed)):
+                code, out, err = helpers.run_main(od.main, argv_for(first, second))
+                self.assertEqual(code, 1, out + err)
+                self.assertIn("[phase2]: histogram: DIFFERS", out)
+                self.assertIn("[full]: unproven (no verdict): yosys: killed", out)
+                self.assertIn("opt-diff: unproven: yosys: killed", err)
+        self.tree.set_spec()  # no difference anywhere: the cap kill alone is exit 4
+        with mock.patch.object(memcap, "run", kill_in("full")):
+            code, out, err = helpers.run_main(od.main, argv_for("phase2", "opt -full"))
+            self.assertEqual(code, 4, out + err)
+            self.assertIn("[phase2]: ok", out)
+            self.assertIn("[full]: unproven (no verdict)", out)
+
+    def test_a_hard_crash_in_a_later_script_still_prints_the_earlier_findings(self) -> None:
+        self.tree.set_spec(ystat=YSTAT_MORE)
+
+        def crash_full(argv: Sequence[str], cap: int, **kw: Any
+                       ) -> subprocess.CompletedProcess[str]:
+            if argv[0].endswith("odin3") and "/full/" in " ".join(argv):
+                return subprocess.CompletedProcess(list(argv), -11, "", "segfault")
+            return fake_run(argv, cap, **kw)
+        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
+                "--netlist-compare", str(self.tree.bin / "netlist-compare"), "--work",
+                str(self.tree.root / "work"), "--script", "phase2", "--script", "opt -full",
+                str(self.tree.root / "micro" / "d.v")]
+        with mock.patch.object(memcap, "run", crash_full):
+            code, out, err = helpers.run_main(od.main, argv)
+        self.assertEqual(code, 3, out + err)
+        self.assertIn("[phase2]: histogram: DIFFERS", out)
+        self.assertIn("HARD", err)
+
+    def test_m3b_the_work_dir_goes_after_exit_4_and_stays_after_exit_1(self) -> None:
+        """2H review M3b: the docstring says the directory this run made is removed after exit 4;
+        a failure keeps it."""
+        base = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
+                "--netlist-compare", str(self.tree.bin / "netlist-compare"),
+                str(self.tree.root / "micro" / "d.v")]
+        for spec, want_code, kept in (({"yosys_signal": 9}, 4, False),
+                                      ({"ystat": YSTAT_MORE}, 1, True)):
+            with self.subTest(code=want_code), tempfile.TemporaryDirectory() as tmpdir, \
+                    mock.patch.dict(os.environ, {"TMPDIR": tmpdir}), \
+                    mock.patch.object(tempfile, "tempdir", None), \
+                    mock.patch.object(memcap, "run", fake_run):
+                self.tree.set_spec(**spec)
+                self.assertEqual(helpers.run_main(od.main, base)[0], want_code)
+                self.assertEqual(bool(list(Path(tmpdir).iterdir())), kept)
 
     def test_a_netlist_compare_crash_is_hard_not_an_identity_difference(self) -> None:
         self.tree.set_spec(compare_signal=11)
