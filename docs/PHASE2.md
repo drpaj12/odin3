@@ -33,18 +33,18 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
 - [x] 2D elaboration to word-level IR (#94)
 - [x] 2E `proc` (#92)
 - [x] 2F `opt` (#95)
-- [ ] 2H micros + VTR benchmark set identical/equivalent to Parmys (#98, #113, #114)
-  Open: 5 VTR and 5 micro designs unproven (size limit: mcml.v, LU32PEEng.v, LU64PEEng.v; two clock domains: stereovision3.v, multiclock_reader_writer.v); VTR opt legs rescoped to the 14-design evidence set (#29), reruns PENDING; reruns of opt_diff_vtr, opt_equiv_micro_phase3 and opt_diff_micro_wreduce pending; lenet.v xl legs untested; lenet.v opt time target MISSED (fix pending).
+- [x] 2H micros + VTR benchmark set identical/equivalent to Parmys (#98, #113, #114)
+  Closed 2026-10-18 under decision #29: micros and the 14-design evidence set equivalent; big designs untested for now (size limit) and moved to the Phase 3 QoR exit; follow-ups: opt_dff enable inference on blob_merge and stereovision3 (QoR), D15 no-write memory deletion (3C).
 
 ## Exit statement
 
-Phase 2 is complete except the items still open (2H, and the lenet.v opt time target).
+Phase 2 is complete. 2H closed 2026-10-18 under decision #29.
 Exit sweeps of 2026-10-15: exit_micro 0 failing, 453 PROVEN of 539; exit_vtr 0 failing, 26 of 31 PROVEN, 5 unproven.
-Big designs that could not be checked are untested for now (size limit): mcml.v, LU32PEEng.v, LU64PEEng.v (VTR set); LU32PEEng.v and LU64PEEng.v (micro set).
-Two more VTR designs are unproven by a tool limit, not size: stereovision3.v and multiclock_reader_writer.v (equiv-check models one clock; both have two).
-The lenet xl legs are untested: the Yosys-side runs (opt_equiv_vtr_xl, opt_diff_vtr_xl, sweep-xl S-P) need an idle machine.
-The VTR opt legs are scoped to the 14-design evidence set (decision #29). The opt_equiv_vtr leg failed on main (20 UNEXPECTED) under the old scope; its rerun and three other reruns are PENDING rerun (2026-10-16). Results of the 2026-10-17 reruns are PENDING; the controller fills them.
-2H stays open until these close.
+Sweeps of 2026-10-17/18: opt_equiv_micro_phase3 539 files, 0 unexpected failures; opt_diff_micro_wreduce 438 passed, 101 expected failures, 0 unexpected, 0 stale.
+Big designs that are untested for now (size limit): mcml.v, LU32PEEng.v, LU64PEEng.v (VTR set); LU32PEEng.v and LU64PEEng.v (micro set).
+Designs untested for now at exit_vtr (two clocks; equiv-check models one clock): stereovision3.v and multiclock_reader_writer.v.
+The lenet xl legs are untested for now: the Yosys-side runs (opt_equiv_vtr_xl, opt_diff_vtr_xl, sweep-xl S-P) need an idle machine.
+Their VTR-flow and QoR check is the Phase 3 exit (decision #29, PHASE3 #16 amended).
 
 Sweep lines, verbatim from `results/exit-sweeps-2026-10-15.txt`:
 
@@ -1090,7 +1090,7 @@ Sweep lines, verbatim from `results/exit-sweeps-2026-10-15.txt`:
         slowest file: koios/lenet.v 46.288 s
       ```
 
-      lenet.v Phase 2 opt passes MISSED on main (46.288 s against 15 s). fix in PR fix/2F-vtr-equiv-triage: opt_merge t_merge 35 s to 2.5 s; re-measure pending.
+      lenet.v Phase 2 opt passes MISSED on main (46.288 s against 15 s). fix in PR fix/2F-vtr-equiv-triage: opt_merge t_merge 37.6 s to 2.5 s; re-measure: lenet.v opt 11.48 s (t_merge 2.61 s, rss 22.8%), target 15 s met.
 
       mcml.v Phase 2 opt passes <= 1.0 s; mcml.v `opt -full` <= 0.3 s; lenet.v Phase 2 opt passes
       <= 15 s; lenet.v RSS growth <= 25%; the 31 VTR files <= 3 s in total. A miss is investigated
@@ -1101,10 +1101,13 @@ Sweep lines, verbatim from `results/exit-sweeps-2026-10-15.txt`:
       here.** Each file runs `opt-equiv` and `opt-diff` with all five scripts (spec 20.3), one tool
       at a time under memcap, smallest first (`mcml.v` last). After `tools/build-locked --preset
       release -j6`, with no other heavy job and no agent running a build:
-      - Recorded 2026-10-16 (`results/opt_equiv_vtr.log`): `opt_equiv_vtr` FAILED (6490.69 sec). Summary: `set vtr31: 31 files (0 skipped as xl or unselected), 31 runs: 11 ok, 0 fail as listed, 20 UNEXPECTED`. The 20 unexpected: ch_intrinsics, ch_intrinsics_nolatches, mkPktMerge, stereovision0, stereovision1, stereovision2, boundtop, boundtop_nolatches, raygentop, raygentop_nolatches, spree, bgm, or1200, mkSMAdapter4B, LU8PEEng, LU32PEEng, LU64PEEng, mkDelayWorker32B, arm_core, mcml.v.
-      - `opt_diff_vtr`: PENDING rerun (2026-10-16)
-      - `opt_equiv_micro_phase3`: PENDING rerun (2026-10-16)
-      - `opt_diff_micro_wreduce`: PENDING rerun (2026-10-16)
+      - `opt_equiv_vtr` on the 14-design evidence set (decision #29; 2026-10-17, 08dfe76): 14 of 14 proven equivalent, 0 unexpected, 824 s.
+        The earlier run on all 31 files (2026-10-16, 6490.69 s) had 20 UNEXPECTED. That scope is replaced by decision #29.
+      - `opt_diff_vtr` on the 14-design evidence set (2026-10-17, c7896ac): 70 runs (14 designs x 5 scripts), 0 unexpected.
+        7 designs are structurally identical to Yosys. Seven (sha, ch_intrinsics, ch_intrinsics_nolatches, diffeq1, diffeq2, blob_merge, stereovision3) differ only structurally and are listed; `opt_equiv_vtr` proves them equivalent.
+        blob_merge and stereovision3 also infer fewer `$dffe` than Yosys (blob_merge 83 vs 93 under the Phase 2 script; stereovision3 7 vs 12). That is a QoR follow-up, not a correctness failure (decision #29).
+      - `opt_equiv_micro_phase3` (2026-10-17, branch fix/2H-micro-expect 08dfe76): 539 files, 0 unexpected failures.
+      - `opt_diff_micro_wreduce` (2026-10-18, fix/2H-micro-expect 9ee5f65a): 539 files, 438 passed, 101 expected failures (each listed with its reason; 20 of them are "untested for now (size limit)": opt-diff's refine step hit the 60 s SAT limit with no BLIF cec verdict), 0 unexpected, 0 stale entries, 8799 s.
       - `ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_(equiv|diff)_vtr$'` (31 files, one tool
         child at a time, `--mem-cap 3G`); or by hand:
         `ODIN3_HEAVY_OK=1 tools/heavy-run tools/opt-check/opt-nightly --odin3 build/release/odin3
