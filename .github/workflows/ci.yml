@@ -96,7 +96,7 @@ jobs:
         run: |
           cmake -S . -B build/fuzz -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug \
             -DODIN3_FUZZ=ON -DODIN3_WITH_ABC=OFF
-          cmake --build build/fuzz --target fuzz_pp fuzz_verilog fuzz_abc_script fuzz_elab fuzz_opt fuzz_abc_splice
+          cmake --build build/fuzz --target fuzz_pp fuzz_verilog fuzz_abc_script fuzz_elab fuzz_opt fuzz_abc_splice fuzz_lower
           ctest --test-dir build/fuzz -L fuzz --output-on-failure
       - name: Release configure and build (ABC already covered by the debug build)
         run: |
