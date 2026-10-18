@@ -18,9 +18,11 @@ HAND = ROOT / "tests" / "lower" / "hand"
 SCRIPT = "{read}; hierarchy; proc; opt; {pre}lower; opt -fast; compact; check; stats{write}"
 
 
-def run(script: str, cwd: Path) -> str:
-    done = subprocess.run([ODIN3, "--check", "-p", script], capture_output=True, text=True,
-                          cwd=cwd, check=False, timeout=300)
+def run(script: str, cwd: Path, env: dict[str, str] | None = None,
+        prefix: tuple[str, ...] = ()) -> str:
+    done = subprocess.run([*prefix, ODIN3, "--check", "-p", script], capture_output=True,
+                          text=True, cwd=cwd, check=False, timeout=300,
+                          env=None if env is None else {**os.environ, **env})
     text = done.stdout + done.stderr
     if done.returncode != 0:
         raise AssertionError(f"odin3 exit {done.returncode}: {text[-400:]}")
@@ -77,6 +79,76 @@ class DeterminismTest(unittest.TestCase):
             with self.subTest(design=name):
                 self.assertEqual(self.outputs(cells / name, False),
                                  self.outputs(cells / name, False))
+
+
+@unittest.skipUnless(ODIN3 and Path(ODIN3).exists(), "odin3 (ODIN3_CLI) is needed")
+class MixedDesignDeterminismTest(unittest.TestCase):
+    """3B-4 review M4: the earlier fixtures are single-cell modules, where nothing can reorder.
+    ``mixed_modules.v`` has three modules with arithmetic, shifts, a `$pmux`, flip-flops with
+    reset and enable and a `$mem`. The runs differ in their allocator filling and their address
+    layout, and the snapshots are compared as well as the final BLIF."""
+
+    SOURCE = HAND / "mixed_modules.v"
+    VARIANTS: tuple[tuple[dict[str, str], tuple[str, ...]], ...] = (
+        ({}, ()), ({"MALLOC_PERTURB_": "165"}, ()), ({}, ("setarch", "-R")))
+
+    def one(self, env: dict[str, str], prefix: tuple[str, ...]) -> dict[str, bytes]:
+        work = Path(tempfile.mkdtemp(prefix="test-lower-mixed-"))
+        script = (f"read_verilog --nolatches {self.SOURCE}; hierarchy; proc; opt; "
+                  f"lower --lower-snapshot {work}; opt -fast; compact; check; "
+                  f"write_blif {work / 'o.blif'}")
+        run(script, work, env, prefix)
+        return {name: (work / name).read_bytes()
+                for name in ("o.blif", "lower-before.il", "lower-after.blif")}
+
+    def test_every_variant_gives_identical_outputs_and_snapshots(self) -> None:
+        baseline = self.one(*self.VARIANTS[0])
+        self.assertTrue(all(baseline.values()))
+        self.assertIn(b"module", baseline["lower-before.il"])
+        for env, prefix in self.VARIANTS[1:]:
+            with self.subTest(env=env, prefix=prefix):
+                self.assertEqual(self.one(env, prefix), baseline)
+
+
+@unittest.skipUnless(ODIN3 and Path(ODIN3).exists(), "odin3 (ODIN3_CLI) is needed")
+class SnapshotTest(unittest.TestCase):
+    """3B-4 review M3: ``--lower-snapshot DIR`` promises (1) no change to the result and (2)
+    identical snapshots across runs."""
+
+    def result(self, name: str, techlib: bool, snap: str | None) -> tuple[bytes, Path]:
+        work = Path(tempfile.mkdtemp(prefix="test-lower-snap-"))
+        read = (f"read_techlib {TECHLIB}; " if techlib else "") + \
+            f"read_verilog --nolatches {HAND / name}"
+        option = f" --lower-snapshot {work / 'snap'}" if snap == "yes" else \
+            f" --lower-snapshot {snap}" if snap else ""
+        if snap == "yes":
+            (work / "snap").mkdir()
+        script = SCRIPT.format(read=read, pre="", write=f"; write_blif {work / 'o.blif'}")
+        run(script.replace("lower;", f"lower{option};"), work)
+        return (work / "o.blif").read_bytes(), work / "snap"
+
+    def test_the_snapshot_does_not_change_the_result_and_is_reproducible(self) -> None:
+        for name, techlib in (("and_mux.v", False), ("hard_and_soft.v", True)):
+            with self.subTest(design=name):
+                plain, _ = self.result(name, techlib, None)
+                first, snap1 = self.result(name, techlib, "yes")
+                second, snap2 = self.result(name, techlib, "yes")
+                self.assertEqual(plain, first)
+                self.assertEqual(plain, second)
+                for file in ("lower-before.il", "lower-after.blif"):
+                    self.assertTrue((snap1 / file).read_bytes().strip())
+                    self.assertEqual((snap1 / file).read_bytes(), (snap2 / file).read_bytes())
+
+    def test_an_unwritable_snapshot_directory_is_a_warning_and_not_a_failure(self) -> None:
+        missing = Path(tempfile.mkdtemp(prefix="test-lower-nosnap-")) / "no" / "such" / "dir"
+        work = Path(tempfile.mkdtemp(prefix="test-lower-snap-"))
+        read = f"read_verilog --nolatches {HAND / 'and_mux.v'}"
+        script = SCRIPT.format(read=read, pre="", write="").replace(
+            "lower;", f"lower --lower-snapshot {missing};")
+        text = run(script, work)
+        self.assertIn("warning", text.lower())
+        self.assertFalse(missing.exists())
+        self.assertIn("lower:", text)
 
 
 if __name__ == "__main__":

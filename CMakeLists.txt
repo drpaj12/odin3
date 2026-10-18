@@ -2787,13 +2787,24 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         set(_lower_micro_expect ${_micro_expect}
             --expect-fail ${PROJECT_SOURCE_DIR}/tests/lower/micro_expect_fail.txt
             --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt)
+        # --min-compared-total (3B-4 review H3): every tool prints `compared N of M designs`; a
+        # skipped, folded or unrun design adds 0, and a sweep below its floor fails, so an odin3
+        # that lowers nothing (or a tool that skips everything) cannot pass. The floors are a
+        # third to a half of the rate measured on the 58 bm_* micros by hand (2026-10-18:
+        # lower-run 56 of 58, lower-sim 24 of 58 (the rest hold a type without a simulate hook,
+        # which --allow-skipped lets through), lower-equiv 38 of 40 ok) applied to the about 450
+        # micros the other lists leave; the controller raises them after the first full sweep.
         odin3_add_sweep_test(lower_run_micro LABEL sweep
-            COMMAND ${_opt_sweep} --lower-run ${_lower_micro_expect} ${_micro_dir})
-        odin3_add_sweep_test(lower_sim_micro LABEL sweep
-            COMMAND ${_opt_sweep} --lower-sim --opt-arg=--allow-empty ${_lower_micro_expect}
+            COMMAND ${_opt_sweep} --lower-run --min-compared-total 250 ${_lower_micro_expect}
                     ${_micro_dir})
+        odin3_add_sweep_test(lower_sim_micro LABEL sweep
+            COMMAND ${_opt_sweep} --lower-sim --opt-arg=--allow-empty --opt-arg=--allow-skipped
+                    --min-compared-total 100 ${_lower_micro_expect} ${_micro_dir})
+        # equiv_micro_expect_fail.txt: the micros lower-equiv cannot decide (a SAT size limit)
         odin3_add_sweep_test(lower_equiv_micro LABEL sweep
-            COMMAND ${_opt_sweep} --lower-equiv --opt-arg=--allow-empty ${_lower_micro_expect}
+            COMMAND ${_opt_sweep} --lower-equiv --opt-arg=--allow-empty
+                    --min-compared-total 200 ${_lower_micro_expect}
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/lower/equiv_micro_expect_fail.txt
                     ${_micro_dir})
         set_tests_properties(lower_run_micro lower_sim_micro lower_equiv_micro
                              PROPERTIES LABELS "sweep;lower")

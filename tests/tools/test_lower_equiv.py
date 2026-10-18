@@ -13,10 +13,15 @@ import os
 import stat
 import tempfile
 import unittest
+from contextlib import AbstractContextManager
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 import lower_common as lc
+import lower_diff as ld
 import lower_equiv as le
+import opt_equiv
 
 from . import helpers
 
@@ -62,6 +67,15 @@ COMB = """module m(input [3:0] a, input [3:0] b, output [3:0] y, output [3:0] z)
   assign z = {zexpr};
 endmodule
 """
+LOW = """module m(input [7:1] a, input [3:0] b, output [7:1] y, output [4:2] z);
+  assign y = {{a[7:2] & {{b[3:0], b[1:0]}}, {y1}}};
+  assign z = {zexpr};
+endmodule
+"""
+
+
+def low(y1: str = "a[1] | b[0]", zexpr: str = "a[4:2] ^ b[2:0]") -> str:
+    return LOW.format(y1=y1, zexpr=zexpr)
 
 
 def ff(clk: str = "clk", rst: str = "rst", val: str = "4'b0101") -> str:
@@ -111,6 +125,17 @@ class RefinementTest(unittest.TestCase):
             with self.subTest(text=text.splitlines()[0] + text.splitlines()[1]):
                 self.refines(text)
 
+    def test_a_port_with_a_nonzero_low_index_compares_bit_for_bit(self) -> None:
+        """H2 (3B-4 review): ``output [7:1]`` is a width-8 wide port in the BLIF; it must be
+        matched to the gold's width-7 port at offset 1, not reported as a difference."""
+        self.refines(low())
+        self.refines(low(y1="1'b0", zexpr="a[4:2] & b[2:0]"))
+
+    def test_a_wrong_bit_of_a_low_offset_port_differs(self) -> None:
+        self.differs(low(), low(y1="a[1] & b[0]"))  # bit y[1], the port's lowest
+        self.differs(low(), low(zexpr="a[4:2] ^ b[3:1]"))  # z[4:2], offset 2
+        self.differs(low(), low().replace("a[7:2] &", "a[7:2] |"))  # y[7:2]
+
     def test_a_flipped_edge(self) -> None:
         self.differs(ff(), ff().replace("posedge", "negedge"))
 
@@ -151,6 +176,51 @@ class RefinementTest(unittest.TestCase):
         self.differs(MEM.format(lo=1, hi=4), MEM.format(lo=2, hi=5))
 
 
+GATE = """autoidx 1
+module \\m
+  wire width 3 input 1 \\a
+  wire width 8 output 2 \\y
+  wire width 2 offset 3 output 3 \\z
+  wire \\y[1]
+  cell $_BUF_ \\y.buf1
+    connect \\A \\a [0]
+    connect \\Y \\y[1]
+  end
+  connect \\y [7:1] { \\y[7] \\y[6] \\y[5] \\y[4] \\y[3] \\y[2] \\y[1] }
+end
+"""
+GOLD = """autoidx 1
+module \\m
+  wire width 3 input 1 \\a
+  wire width 7 offset 1 output 2 \\y
+  wire width 2 offset 3 output 3 \\z
+end
+"""
+
+
+class NormalisePortsTest(unittest.TestCase):
+    """The port bridge of ``make_gate`` on RTLIL text (no tool runs)."""
+
+    def test_a_wide_port_is_bridged_to_the_golds_shape(self) -> None:
+        out = le.normalise_ports(GATE, GOLD, "\\m")
+        self.assertIn("  wire width 8 \\y$wide\n", out)
+        self.assertIn("  wire width 7 offset 1 output 2 \\y\n", out)
+        self.assertIn("  connect \\y \\y$wide [7:1]\n", out)
+        self.assertIn("  connect \\y$wide [7:1] { \\y[7]", out)  # the old uses are renamed
+        self.assertIn("    connect \\Y \\y[1]\n", out)  # a bit wire named like it is not
+        self.assertIn("  cell $_BUF_ \\y.buf1\n", out)  # nor a cell
+        self.assertEqual(out.count("output 2"), 1)
+
+    def test_a_port_that_already_matches_is_untouched(self) -> None:
+        out = le.normalise_ports(GATE, GOLD, "\\m")
+        self.assertIn("  wire width 2 offset 3 output 3 \\z\n", out)
+        self.assertNotIn("z$wide", out)
+
+    def test_a_port_with_a_missing_bit_is_left_to_the_port_match(self) -> None:
+        gold = GOLD.replace("width 7 offset 1 output 2", "width 9 offset 1 output 2")
+        self.assertEqual(le.normalise_ports(GATE, gold, "\\m"), GATE)
+
+
 class ReportTest(unittest.TestCase):
     """The expect list and the verdict lines (no tool runs)."""
 
@@ -175,6 +245,94 @@ class ReportTest(unittest.TestCase):
             le.parse_expect("only_two_fields refine\n")
 
 
+def verdicts(*kinds: str) -> AbstractContextManager[Any]:
+    """``check_design`` returning these verdict kinds in turn (no tool runs)."""
+    return mock.patch.object(le, "check_design",
+                             side_effect=[le.Verdict(kind, "d", 1) for kind in kinds])
+
+
+class ExitCodeTest(unittest.TestCase):
+    """``main``'s exit code from the verdicts (M3 of the 3B-4 review: exit 4 was never pinned)."""
+
+    def run_main(self, *kinds: str) -> tuple[int, str]:
+        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-exit-"))
+        files = [str(base / f"d{n}.v") for n in range(len(kinds))]
+        with verdicts(*kinds), mock.patch.object(ld, "check_yosys"):
+            code, out, err = helpers.run_main(le.main, ["--odin3", "o", "--yosys", "y", "--work",
+                                                        str(base / "w"), "--each", *files])
+        return code, out + err
+
+    def test_an_unproven_design_alone_is_exit_4(self) -> None:
+        code, out = self.run_main("unproven")
+        self.assertEqual(code, le.EXIT_UNPROVEN)
+        self.assertEqual(le.EXIT_UNPROVEN, 4)
+        self.assertIn("UNPROVEN", out)
+        self.assertIn("lower-equiv: compared 0 of 1 designs (1 unproven, 0 empty)", out)
+
+    def test_unproven_beside_a_proved_design_is_still_exit_4(self) -> None:
+        self.assertEqual(self.run_main("ok", "unproven", "ok")[0], 4)
+
+    def test_a_failure_beats_an_unproven_design(self) -> None:
+        self.assertEqual(self.run_main("unproven", "differs")[0], 1)
+        self.assertEqual(self.run_main("differs", "unproven")[0], 1)
+
+    def test_proved_designs_are_exit_0_and_counted(self) -> None:
+        code, out = self.run_main("ok", "ok")
+        self.assertEqual(code, 0)
+        self.assertIn("lower-equiv: compared 2 of 2 designs (0 unproven, 0 empty)", out)
+
+    def test_an_empty_design_is_not_counted(self) -> None:
+        code, out = self.run_main("empty")
+        self.assertEqual(code, 1)
+        self.assertIn("compared 0 of 1 designs (0 unproven, 1 empty)", out)
+
+
+class RefineVerdictTest(unittest.TestCase):
+    """``refine``'s decision table with the SAT flow and the cec stubbed (M1 of the review: only
+    one real test reached the "no memory, the SAT flow failed" line)."""
+
+    GOLD_PLAIN = "module \\m\n  cell $and \\c\n  end\nend\n"
+    GOLD_MEM = "module \\m\n  cell $mem \\c\n  end\nend\n"
+
+    def verdict(self, gold_text: str, sat_ok: bool, cec: str) -> tuple[str, str]:
+        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-refine-"))
+        gold = base / "gold.il"
+        gold.write_text(gold_text, encoding="utf-8")
+        checker = mock.Mock()
+        checker.refines.return_value = (sat_ok, "the SAT flow failed")
+        with mock.patch.object(opt_equiv, "Checker", return_value=checker), \
+                mock.patch.object(le, "cec_gold_and_blif", return_value=(cec, "cec text")):
+            return le.refine("y", gold, base / "gate.il", base / "after.blif", base, 1, None)
+
+    def test_a_sat_failure_without_a_memory_is_a_difference_whatever_the_cec_says(self) -> None:
+        for cec in (opt_equiv.CEC_UNPROVEN, opt_equiv.CEC_DIFFERS):
+            with self.subTest(cec=cec):
+                self.assertEqual(self.verdict(self.GOLD_PLAIN, False, cec)[0], "differs")
+
+    def test_a_sat_failure_with_a_memory_follows_the_cec(self) -> None:
+        self.assertEqual(self.verdict(self.GOLD_MEM, False, opt_equiv.CEC_PROVED)[0], "ok")
+        self.assertEqual(self.verdict(self.GOLD_MEM, False, opt_equiv.CEC_DIFFERS)[0], "differs")
+        self.assertEqual(self.verdict(self.GOLD_MEM, False, opt_equiv.CEC_UNPROVEN)[0],
+                         "unproven")
+
+    def test_a_proof_never_asks_the_cec(self) -> None:
+        self.assertEqual(self.verdict(self.GOLD_PLAIN, True, opt_equiv.CEC_DIFFERS)[0], "ok")
+
+    def test_a_cec_proof_without_a_memory_proves_the_design(self) -> None:
+        self.assertEqual(self.verdict(self.GOLD_PLAIN, False, opt_equiv.CEC_PROVED)[0], "ok")
+
+    def test_a_sat_timeout_is_unproven_but_a_crash_is_not_absorbed(self) -> None:
+        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-refine-"))
+        checker = mock.Mock()
+        checker.refines.side_effect = lc.CrashError("yosys", "timed out after 60 s", True)
+        with mock.patch.object(opt_equiv, "Checker", return_value=checker):
+            self.assertEqual(le.refine("y", base / "g", base / "h", base / "a", base, 1,
+                                       None)[0], "unproven")
+            checker.refines.side_effect = lc.CrashError("yosys", "killed by signal 11")
+            with self.assertRaises(lc.CrashError):
+                le.refine("y", base / "g", base / "h", base / "a", base, 1, None)
+
+
 @unittest.skipUnless(ODIN3 and Path(ODIN3).exists(), "odin3 (ODIN3_CLI) is needed")
 class HardFailureTest(unittest.TestCase):
     """A crashing Yosys child is exit 3 and no expect list absorbs it."""
@@ -195,6 +353,27 @@ class HardFailureTest(unittest.TestCase):
                                                   str(expect), str(source)])
         self.assertEqual(code, 3, err)
         self.assertIn("HARD", err)
+
+    def test_a_stale_snapshot_in_a_reused_work_directory_is_not_judged(self) -> None:
+        """Review L1: odin3 wrote no snapshot, the work directory holds an old one: exit 2."""
+        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-stale-"))
+        yosys = base / "yosys"
+        yosys.write_text("#!/usr/bin/env bash\necho 'Yosys 0.55 (fake)'\n", encoding="utf-8")
+        yosys.chmod(yosys.stat().st_mode | stat.S_IXUSR)
+        odin = base / "odin3"
+        odin.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        odin.chmod(odin.stat().st_mode | stat.S_IXUSR)
+        for snap in ("snap", "snap-old"):  # the old name and any directory the tool might reuse
+            stale = base / "w" / "d0000" / snap
+            stale.mkdir(parents=True)
+            (stale / le.BEFORE_NAME).write_text("module \\m\nend\n", encoding="utf-8")
+            (stale / le.AFTER_NAME).write_text(".model m\n.end\n", encoding="utf-8")
+        source = base / "m.v"
+        source.write_text(COMB.format(zexpr="a | b"), encoding="utf-8")
+        code, _, err = helpers.run_main(le.main, ["--odin3", str(odin), "--yosys", str(yosys),
+                                                  "--work", str(base / "w"), str(source)])
+        self.assertEqual(code, 2, err)
+        self.assertIn("wrote no", err)
 
     def test_a_failing_odin3_is_exit_2(self) -> None:
         base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-err-"))

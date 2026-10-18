@@ -418,6 +418,48 @@ class RunTest(unittest.TestCase):
         self.assertTrue((self.tree.root / "work" / "d0000" / "lo.blif").exists())
 
 
+class BeyondXTest(unittest.TestCase):
+    """3B-2 F1 (3B-4 review M1): a ``shift`` equiv entry excuses a difference only on the outputs
+    the input leaves open (x), which is what ``lower-equiv``'s refinement check decides."""
+
+    def setUp(self) -> None:
+        self.tree = Tree(Path(tempfile.mkdtemp(prefix="lower_diff_beyond_x_")))
+        self.tree.set_spec(**{"equiv-check_rc": 1, "equiv-check_out": "NOT equivalent\n"})
+        self.extra = self.tree.expect("and_2.v shift equiv open (x) output bits differ\n")
+
+    def run_with(self, kind: str) -> tuple[int, str]:
+        import lower_equiv
+
+        with mock.patch.object(lower_equiv, "make_gate", return_value=Path("gate.il")), \
+                mock.patch.object(lower_equiv, "refine", return_value=(kind, "detail")):
+            code, out, err = self.tree.run("--family", "shift", *self.extra)
+        return code, out + err
+
+    def test_a_difference_confined_to_x_outputs_is_excused_by_the_entry(self) -> None:
+        code, out = self.run_with("ok")
+        self.assertEqual(code, 0, out)
+        self.assertIn("equiv: differs as listed (open (x) output bits differ)", out)
+        self.assertNotIn("NOT confined", out)
+
+    def test_a_difference_beyond_x_fails_although_the_entry_lists_it(self) -> None:
+        code, out = self.run_with("differs")
+        self.assertEqual(code, 1, out)
+        self.assertIn("equiv: the difference is NOT confined to outputs the input leaves open", out)
+
+    def test_an_unproven_refinement_is_not_an_excuse(self) -> None:
+        code, out = self.run_with("unproven")
+        self.assertEqual(code, 1, out)
+        self.assertIn("NOT confined", out)
+
+    def test_the_narrowing_applies_to_the_shift_family_only(self) -> None:
+        import lower_equiv
+
+        extra = self.tree.expect("and_2.v arith equiv a listed difference\n")
+        with mock.patch.object(lower_equiv, "refine", side_effect=AssertionError("asked")):
+            code, out, err = self.tree.run("--family", "arith", *extra)
+        self.assertEqual(code, 0, out + err)
+
+
 class RealCompareTest(unittest.TestCase):
     """The real netlist-compare on real BLIF: equal passes, a swapped gate input is exit 1."""
 

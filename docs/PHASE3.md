@@ -116,7 +116,14 @@ which PRs remain.
   the 3H-4 merge is its evidence
 - [ ] 3A `flatten` (implemented on `feat/3A-flatten`: pass, unit/golden/fuzz tests, `flatten-diff`
   against Yosys 0.55 and the 19-design sweep, decision 35; ticked when the PR merges)
-- [x] 3B `lower` (simulator-equal before/after on hand-built and micro designs). Evidence: `ODIN3_REQUIRE_CFFI=1 ctest -j2` from `build/debug` (lower label: unit, `lower_cells*`, `lower_equiv_python`, `lower_cells_equiv`, `lower_reverse_netlist_compare`, `fuzz_lower_smoke` in the fuzz build); `ctest -R 'lower_(run|sim|equiv)_micro'` through heavy-run (micros); `tools/lower-check/lower-equiv --odin3 build/release/odin3 --yosys $YOSYS055 --each <design>` for the VTR designs (PHASE3 3B entry, decision 41); `bench_lower --cells 1000000` (Release).
+- [ ] 3B `lower` (simulator-equal before/after on hand-built and micro designs; one box per run, ticked by the controller with the real result; reopened 2026-10-18 after the 3B-4 review, which found the earlier tick claimed runs that were not made). Commands: `ODIN3_REQUIRE_CFFI=1 ctest -j2` from `build/debug`; `ctest -R 'lower_(run|sim|equiv)_micro'` through heavy-run (micros); `tools/lower-check/lower-equiv --odin3 build/release/odin3 --yosys $YOSYS055 --each <design>` for the VTR designs (decision 41); `bench_lower --cells 1000000` (Release).
+  - [x] debug unit tests, `lower_cells*`, `lower_equiv_python`, `lower_cells_equiv`, `lower_reverse_netlist_compare` (run by lane G, 2026-10-18; see the 3B-4 report)
+  - [ ] `lower_run_micro`, `lower_sim_micro`, `lower_equiv_micro`: pending controller run (2026-10-18)
+  - [ ] `lower-run` and `lower-equiv` on the 13 VTR designs (only `single_wire` ran): pending controller run (2026-10-18)
+  - [ ] 525-fixture `lower-equiv` sweep (239 ran): pending controller run (2026-10-18)
+  - [ ] `fuzz_lower` long run (the 60 s smoke ran once in a clang build): pending controller run (2026-10-18)
+  - [ ] `bench_lower --cells 1000000` (100000 cells ran, 1.36 s): pending controller run (2026-10-18)
+  - [ ] 200-seed `verilog-gen --lower` generator (spec 14.5): not built; no `--lower` weighting exists
 - [ ] 3G `wreduce` (decision 7 = b; a faithful Yosys 0.55 `wreduce`, signed rewrite included)
 - [ ] 3C `hardmap` (Peter reviews; spec first, Peter approves the mapping rules before any code;
   signed adders sign-extend, the declared divergence from Parmys of decision 29); **M2**: O′ leg
@@ -960,7 +967,9 @@ then the options considered.
     `read_blif -wideports lower-after.blif`; 2F's clock-aware `Checker` proves it. When the SAT
     flow fails and the gold holds a `$mem`, the BLIF cec (`equiv-check --allow-undriven`) judges it
     again: its induction cannot pair a memory's registers. A cec "proved" is a proof; a design with
-    no memory keeps the SAT verdict. A cec that gives no verdict (an inverted clock) is
+    no memory keeps the SAT verdict. The cec ties undriven nets to 0 on both sides, so a gate bit left
+    undriven where the gold computes 0 would pass: only reachable after a SAT failure with a `$mem`
+    (review L2, accepted). A cec that gives no verdict (an inverted clock) is
     `unproven` (exit 4), never `ok`; the falling-edge memory runs with `--neg-edge keep`. (c) The
     `lower-diff` tier T `equiv` entries for `$shiftx` (3B-2 F1) now also require that
     `lower-equiv` proves `lower` refines the input: the difference is then confined to the outputs
@@ -968,8 +977,21 @@ then the options considered.
     their SAT proofs pass 60 s. (e) The fuzz harness builds cells from module ports (no wiring
     between cells). (f) The reverse-order check compares four cell types through
     `netlist-compare --implicit-models`. (g) Provenance to the dead cell is covered by the Task 2
-    test (`test_lower_bitwise`). (h) The soft-logic memories, the 14 small VTR designs and the
-    PHASE2 #29 equivalence are recorded in the 3B-4 report; big designs need P&R and QoR (3H).
+    test (`test_lower_bitwise`). (h) Evidence status (corrected 2026-10-18 after the 3B-4 review; nothing below is ticked until it
+    has run): the 14 small VTR designs and the PHASE2 #29 equivalence: pending controller run
+    (2026-10-18), only `single_wire` ran; the three micro sweeps: pending controller run
+    (2026-10-18); the 1M-cell bench number: pending controller run (2026-10-18); big designs need
+    P&R and QoR (3H). (i) Review fixes (3B-4 fix round): `lower-equiv` matches a port with a nonzero
+    low index (`output [7:1]`) bit for bit; `lower-sim` exits 6 for a skipped design (the sweeps pass
+    `--allow-skipped` and count `compared`); the micro sweeps fail below a floor of designs really
+    compared (`--min-compared-total`, set in CMake); `lower-run` fails on a log without a `lower:`
+    line and is a smoke check, not a correctness check (it cannot see a wrong lowering).
+    `bm_arithmetic_unused_bits` (four 32x32 multipliers) is untested for now (size limit; the SAT
+    proof times out at 60 s, exit 4; `tests/lower/equiv_micro_expect_fail.txt`). (j) The remaining
+    agent defaults of spec 3B section 18, logged here as plan Step 7 asks (Peter may override,
+    values as the spec gives them): the node caps (spec 11), `--neg-edge keep`, `--async error`,
+    `--report`, the bit-node names of an unnamed cell, the copied `keep` attribute, the per-cell
+    transaction and the duplicated connect helper.
 
 ## Risks
 

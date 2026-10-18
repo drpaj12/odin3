@@ -25,7 +25,9 @@ A refinement that the SAT flow cannot decide inside 60 s is ``unproven`` (exit 4
 A difference fails unless ``--expect F`` lists it: lines ``<path> refine <reason>`` (``#``
 comments), ``path`` relative to ``--root`` (else the file name); a listed difference that does not
 occur fails too (a stale entry). A design whose snapshot holds no word cell compared nothing:
-``NOTHING TO COMPARE`` (exit 1).
+``NOTHING TO COMPARE`` (exit 1). The last line of every run is ``lower-equiv: compared N of M
+designs (U unproven, E empty)``: N counts the designs with a verdict, proved or not a refinement
+(the corpus sweeps sum it and fail below a floor, 3B-4 review H3).
 
 Exit codes (one convention across the opt tools): 0 every design refines; 1 a design does not,
 compared nothing, or a stale entry; 2 usage, or Odin III or Yosys exited with an error; 3 hard: a
@@ -40,6 +42,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -119,15 +122,109 @@ def make_gold(yosys: str, before: Path, parmys: tuple[Path | None, bool], work: 
     return gold
 
 
-def make_gate(yosys: str, after: Path, top: str, work: Path, cap: int) -> Path:
-    """The gate: Yosys's reading of the BLIF as RTLIL (``gate.il``), the module ``top`` marked."""
+PORT_DECL = re.compile(
+    r"^  wire (?P<mid>.*?)\s*(?P<dir>input|output) (?P<num>\d+) (?P<name>\\\S+)$")
+WIDTH_WORD = re.compile(r"\bwidth (\d+)")
+OFFSET_WORD = re.compile(r"\boffset (-?\d+)")
+END_LINE = "\nend\n"
+
+
+def module_span(text: str, top: str) -> tuple[int, int]:
+    """(start, end) offsets of the body of module ``top`` in an RTLIL text (after its header
+    line, up to its ``end``); (-1, -1) when it is absent."""
+    head = f"\nmodule {top}\n"
+    start = text.find(head)
+    if start < 0:
+        return -1, -1
+    start += len(head)
+    return start, text.index(END_LINE, start) + 1
+
+
+def port_shapes(body: str) -> dict[str, tuple[str, str, int, int, str]]:
+    """name -> (direction, port number, width, offset, the wire's flags) of a module's ports."""
+    shapes: dict[str, tuple[str, str, int, int, str]] = {}
+    for line in body.splitlines():
+        found = PORT_DECL.match(line)
+        if found is None:
+            continue
+        mid = found.group("mid")
+        width = WIDTH_WORD.search(mid)
+        offset = OFFSET_WORD.search(mid)
+        shapes[found.group("name")] = (found.group("dir"), found.group("num"),
+                                       int(width.group(1)) if width else 1,
+                                       int(offset.group(1)) if offset else 0, mid)
+    return shapes
+
+
+def rename_signal(line: str, old: str, new: str) -> str:
+    """``line`` with the signal token ``old`` replaced by ``new``. Only the signal operands of a
+    ``connect`` are touched (never a cell's name, type or port names)."""
+    stripped = line.lstrip()
+    if not stripped.startswith("connect "):
+        return line
+    indent = line[:len(line) - len(stripped)]
+    words = stripped.split(" ")
+    first = 2 if len(indent) >= len("    ") else 1  # a cell's `connect \PORT sig`: sig from 2
+    pattern = re.compile(rf"(?<!\S){re.escape(old)}(?!\S)")
+    tail = pattern.sub(lambda _: new, " ".join(words[first:]))
+    return indent + " ".join(words[:first]) + " " + tail
+
+
+def bridge_port(body: str, name: str, gold: tuple[str, str, int, int, str]) -> str:
+    """``body`` (a gate module) with its wide port ``name`` re-exposed with the gold's shape (low
+    index and width), or unchanged when it already has that shape or lacks one of the bits (a
+    missing bit is a real difference: the port match then reports it)."""
+    direction, number, width, offset, flags = gold
+    mine = port_shapes(body).get(name)
+    if mine is None or mine[2:4] == (width, offset) or mine[0] != direction:
+        return body
+    low = offset - mine[3]  # the gate's raw index of the gold's lowest bit
+    if low < 0 or low + width > mine[2]:
+        return body
+    wide = f"{name}$wide"
+    rewritten = []
+    for line in body.splitlines():
+        if PORT_DECL.match(line) and line.endswith(f" {name}"):
+            line = f"  wire width {mine[2]} offset {mine[3]} {wide}" if mine[3] else \
+                f"  wire width {mine[2]} {wide}"
+        else:
+            line = rename_signal(line, name, wide)
+        rewritten.append(line)
+    span = f"[{low + width - 1}:{low}]" if width > 1 else f"[{low}]"
+    here, there = (name, f"{wide} {span}") if direction == "output" else (f"{wide} {span}", name)
+    rewritten += [f"  wire {flags} {direction} {number} {name}", f"  connect {here} {there}"]
+    return "\n".join(rewritten) + "\n"
+
+
+def normalise_ports(gate: str, gold: str, top: str) -> str:
+    """The gate's module ``top`` with every port given the gold's width and low index.
+
+    ``read_blif -wideports`` makes a width-8 port ``leds`` of the bits ``leds[1]``..``leds[7]``
+    of a gold ``output [7:1] leds``; the equivalence flow matches ports by name, width and offset,
+    so a correct lowering would be reported as a difference. Each wide port is kept as
+    ``leds$wide`` and bridged to a new port of the gold's shape (bit for bit)."""
+    g_start, g_end = module_span(gold, top)
+    start, end = module_span(gate, top)
+    if g_start < 0 or start < 0:
+        return gate
+    body = gate[start:end]
+    for name, shape in port_shapes(gold[g_start:g_end]).items():
+        body = bridge_port(body, name, shape)
+    return gate[:start] + body + gate[end:]
+
+
+def make_gate(yosys: str, after: Path, gold: tuple[Path, str], work: Path, cap: int) -> Path:
+    """The gate: Yosys's reading of the BLIF as RTLIL (``gate.il``), the module ``top`` marked and
+    its ports in the gold's shape. ``gold`` = (gold.il, the top module's RTLIL name)."""
     gate = work / "gate.il"
     script = f"read_blif -wideports {after}; opt_clean -purge; write_rtlil {gate}"
     run_yosys(yosys, script, work, cap)
     text = gate.read_text(encoding="utf-8")
+    top = gold[1]
     marker = f"\nmodule {top}\n"
     if marker not in text:
         raise lc.ToolError(f"the lowered BLIF has no module {top[1:]}")
+    text = normalise_ports(text, gold[0].read_text(encoding="utf-8"), top)
     gate.write_text(text.replace(marker, f"\n{TOP_LINE}module {top}\n", 1), encoding="utf-8")
     return gate
 
@@ -206,7 +303,7 @@ def check_pair(yosys: str, before: Path, after: Path, work: Path, cap: int,
         return Verdict("empty")
     gold = make_gold(yosys, before, (parmys, exact), work, cap)
     gold_top = opt_equiv.top_module(gold.read_text(encoding="utf-8"), top)
-    gate = make_gate(yosys, after, gold_top, work, cap)
+    gate = make_gate(yosys, after, (gold, gold_top), work, cap)
     kind, detail = refine(yosys, gold, gate, after, work, cap, top)
     return Verdict(kind, detail, cells)
 
@@ -214,8 +311,7 @@ def check_pair(yosys: str, before: Path, after: Path, work: Path, cap: int,
 def check_design(args: argparse.Namespace, files: Sequence[str], run_dir: Path) -> Verdict:
     techlib = str(Path(args.techlib).resolve()) if args.techlib else None
     pre = args.pre if args.pre else list(ld.DEFAULT_PRE)
-    snap = run_dir / "snap"
-    snap.mkdir(exist_ok=True)
+    snap = Path(tempfile.mkdtemp(prefix="snap-", dir=run_dir))  # fresh: never a stale snapshot
     script = snapshot_script(files, args.top, techlib, pre, args.lower_args, snap)
     before, after = snapshot(args.odin3, script, args.top, snap, args.mem_cap)
     parmys = Path(args.parmys_techlibs) if args.parmys_techlibs else ld.vtr_techlibs()
@@ -295,6 +391,7 @@ def execute(args: argparse.Namespace, work: Path) -> int:
     ld.check_yosys(args.yosys, work, args.mem_cap)
     worst = lc.EXIT_OK
     unproven = False
+    kinds: list[str] = []
     for number, design in enumerate(designs):
         run_dir = work / f"d{number:04d}"
         run_dir.mkdir(exist_ok=True)
@@ -302,8 +399,12 @@ def execute(args: argparse.Namespace, work: Path) -> int:
         line, code = report_line(Path(design[0]).name, ld.rel_key(design, args.root), verdict,
                                  table, args.allow_empty)
         print(line, flush=True)
+        kinds.append(verdict.kind)
         unproven = unproven or code == EXIT_UNPROVEN
         worst = lc.EXIT_FAIL if code == lc.EXIT_FAIL else worst
+    compared = sum(kind in ("ok", "differs") for kind in kinds)
+    print(f"{TOOL}: compared {compared} of {len(kinds)} designs ({kinds.count('unproven')} "
+          f"unproven, {kinds.count('empty')} empty)", flush=True)
     return worst if worst else (EXIT_UNPROVEN if unproven else lc.EXIT_OK)
 
 

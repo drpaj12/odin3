@@ -3,8 +3,8 @@
  * step 6). Release only. Usage: `bench_lower [--cells N]` (default 100000; the PHASE3 number is
  * `--cells 1000000`, run inside tools/heavy-run).
  *
- * One module of N cells cycling through $and $add $mux-free types (bit, shift, compare and
- * arithmetic cells of 4 bits, every port a module port, as the unit fixtures build them), lowered
+ * One module of N cells cycling through bit, shift, compare and arithmetic types
+ * (4 bits wide, every port a module port, as the unit fixtures build them), lowered
  * once. Prints: cells, nodes_before, nodes_after, seconds, nodes_per_s (bit nodes created per
  * second), rss_build_kib (peak before `lower`) and rss_peak_kib (peak after).
  */

@@ -15,7 +15,11 @@ before and after every pass), under memcap, and requires:
 - no cap error: a ``lower: ... would create N nodes (cap C)`` line is the outcome ``cap`` (exit 5,
   the one the VTR list ``tests/lower/vtr_expect.txt`` records before 3C lands, spec 14.5).
 
-On success it prints ``lower-run: ok: <lower's INFO line>`` (modules, cells, nodes). Exit codes:
+On success it prints ``lower-run: ok: <lower's INFO line>`` (modules, cells, nodes) and
+``lower-run: compared N of 1 designs`` (N is 1 when `lower` lowered a word cell, 0 for "nothing to
+lower"; the corpus sweeps sum it and fail below a floor, 3B-4 review H3). A log without any
+`lower:` line is a failure (the pass did not run), never ok. This is a smoke check: it sees an
+error, a failed `check` or a cap, not a wrong lowering (that is lower-equiv's job). Exit codes:
 0 ok; 1 a command or check failed; 2 usage, or Odin III failed to start; 3 the child crashed (a
 signal or a memcap kill) or timed out (elab-sweep marks it ``hard``: never an expected failure);
 5 a cap (the design needs more than a cap of `lower` allows); 77 skipped (an ASan child and no
@@ -54,9 +58,17 @@ def script_for(files: Sequence[str], top: str | None, techlib: str | None, lower
 
 
 def judge(log: str) -> tuple[int, str]:
-    """(exit code, one line) of a successful child's log."""
+    """(exit code, one line) of a successful child's log: a log with no ``lower:`` line (module
+    totals or "nothing to lower") means the pass never ran, which is a failure."""
     totals = TOTALS_LINE.findall(log)
-    return EXIT_OK, "ok: " + ("; ".join(totals) if totals else "no lower line in the log")
+    if not totals:
+        return EXIT_FAIL, "no lower line in the log (the lower pass did not run)"
+    return EXIT_OK, "ok: " + "; ".join(totals)
+
+
+def compared(log: str) -> int:
+    """1 when the log shows `lower` lowering at least one word cell, else 0."""
+    return int(any("lowered" in line for line in TOTALS_LINE.findall(log)))
 
 
 def parse(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -93,6 +105,8 @@ def execute(args: argparse.Namespace, work: Path) -> int:
         return EXIT_FAIL
     code, line = judge(log)
     print(f"{TOOL}: {'FAIL: ' if code else ''}{line}")
+    if code == EXIT_OK:
+        print(f"{TOOL}: compared {compared(log)} of 1 designs")
     return code
 
 

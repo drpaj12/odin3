@@ -130,6 +130,13 @@ if n == 0:
     print("opt-equiv: NOTE: 0 calls changed anything: nothing was checked")
 """
 
+# A lower tool: `CMP<n>` in the file is the number of designs it says it compared.
+FAKE_LOWER_TOOL = """#!{python}
+import re, sys
+n = int(re.search(r"CMP(\\d+)", open(sys.argv[-1]).read()).group(1))
+print("lower-sim: compared %d of 1 designs (%d skipped, 0 empty)" % (n, 1 - n))
+"""
+
 # An odin3 on which `opt` exists: every run succeeds (the trio probe included).
 FAKE_ODIN3_OPT = """#!{python}
 import json, os, sys
@@ -689,6 +696,30 @@ class OptModesTest(SweepTestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("FAIL  a.v", out)
         self.assertIn("never an expected failure", out)
+
+    def test_min_compared_total_fails_a_lower_sweep_that_compared_nothing(self) -> None:
+        """3B-4 review H3: skipped and empty designs exit 0 per file; the sweep counts them out."""
+        fake = _exe(self.bin / "fake_lower_tool.py", FAKE_LOWER_TOOL)
+        self.write("m/a.v", "CMP0\n")
+        self.write("m/bb.v", "CMP0 pad\n")
+        tools = dict(elab_sweep.OPT_TOOLS, **{"lower-sim": fake})
+        with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+            args = ("--lower-sim", str(self.dir / "m"))
+            self.assertEqual(self.run_tool(*args)[0], 0)  # no floor: as before
+            code, out, _ = self.run_tool("--min-compared-total", "1", *args)
+            self.assertEqual(code, 1, out)
+            self.assertIn("0 designs compared in total, want at least 1", out)
+            self.write("m/c.v", "CMP1 padding to sort last\n")
+            code, out, _ = self.run_tool("--min-compared-total", "1", *args)
+            self.assertEqual(code, 0, out)
+            self.assertIn("lower-sim: compared 1 designs in total (floor 1)", out)
+            self.assertEqual(self.run_tool("--min-compared-total", "2", *args)[0], 1)
+
+    def test_min_compared_total_needs_a_lower_mode(self) -> None:
+        self.write("m/a.v", "x\n")
+        code, _, err = self.run_tool("--min-compared-total", "1", "--opt-run", str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("--min-compared-total needs --lower-equiv", err)
 
     def test_min_changed_total_needs_opt_equiv(self) -> None:
         self.write("m/a.v", "x\n")

@@ -116,6 +116,9 @@ NO_YOSYS_TOOLS = ("opt-run", "lower-sim", "lower-run")
 TRIO_PROBE = "opt -nodffe -nosdff"  # the trio's own flags; fails until `opt` exists (2F-5)
 # opt-equiv's summary line; the sweeps sum it (``--min-changed-total``)
 OPT_CHANGED_CALLS = re.compile(r"^opt-equiv: (\d+) calls changed something", re.M)
+# the lower tools' summary line (``lower-sim: compared 3 of 4 designs ...``); the sweeps sum it
+# (``--min-compared-total``): a design a tool skipped or found empty is not compared
+LOWER_COMPARED = re.compile(r"^lower-(?:sim|equiv|run): compared (\d+) of \d+ designs", re.M)
 # Exit 2 of an opt tool that is our own check failing, not the design: never an expected failure
 OPT_TOOL_ABORT = ("yosys-refine exit", "netlist-compare cannot compare")
 OPT_RUN_ITERATIONS = re.compile(r"iterations max=(\d+)")
@@ -623,6 +626,7 @@ class Sweep:
         self.skipped_run = False
         self.bench_rows: dict[str, dict[str, str]] = {}
         self.changed_total = 0  # opt-equiv: the calls that changed something, over the ok files
+        self.compared_total = 0  # lower tools: the designs really compared, over the ok files
         self.max_iterations = (0, "")  # opt-run: the largest `opt` iteration count and its file
 
     def note_iterations(self, item: Item, output: str) -> None:
@@ -638,6 +642,8 @@ class Sweep:
             self.bench_rows[item.rel] = parse_bench(outcome.output)
         if outcome.kind == "ok" and self.cfg.opt_tool == "opt-equiv":
             self.changed_total += sum(int(n) for n in OPT_CHANGED_CALLS.findall(outcome.output))
+        if outcome.kind == "ok" and self.cfg.opt_tool in LOWER_TOOLS:
+            self.compared_total += sum(int(n) for n in LOWER_COMPARED.findall(outcome.output))
         if outcome.kind == "ok" and self.cfg.opt_tool == "opt-run":
             self.note_iterations(item, outcome.output)
         self.counts[cls] += 1
@@ -696,12 +702,20 @@ def sweep(cfg: Config, args: argparse.Namespace, items: list[Item],
     if short:  # an odin3 that does nothing passes every per-file check (2F-6 re-review N3)
         print(f"{TOOL}: FAIL: opt-equiv: {state.changed_total} changing calls in total, want at "
               f"least {args.min_changed_total}")
+    if cfg.opt_tool in LOWER_TOOLS:
+        print(f"{TOOL}: {cfg.opt_tool}: compared {state.compared_total} designs in total "
+              f"(floor {args.min_compared_total})")
+    thin = cfg.opt_tool in LOWER_TOOLS and state.compared_total < args.min_compared_total
+    if thin:  # a sweep of skipped, empty or unrun designs passes every per-file check (H3)
+        print(f"{TOOL}: FAIL: {cfg.opt_tool}: {state.compared_total} designs compared in total, "
+              f"want at least {args.min_compared_total}")
     missed = False
     if cfg.bench_report:
         lines, missed = bench_report.report(cfg.bench_report, state.bench_rows,
                                             frozenset(expect))
         print("\n".join(lines))
-    return EXIT_FAIL if counts["FAIL"] or counts["XPASS"] or stale or missed or short else EXIT_OK
+    failed = counts["FAIL"] or counts["XPASS"] or stale or missed or short or thin
+    return EXIT_FAIL if failed else EXIT_OK
 
 
 # ---- arguments --------------------------------------------------------------------------------
@@ -736,6 +750,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--min-changed-total", type=int, default=0, metavar="N",
                     help="--opt-equiv: fail (exit 1) unless at least N calls changed something "
                          "over the whole sweep (a do-nothing odin3 passes every file)")
+    ap.add_argument("--min-compared-total", type=int, default=0, metavar="N",
+                    help="--lower-equiv/--lower-sim/--lower-run: fail (exit 1) unless the tools "
+                         "really compared at least N designs over the whole sweep")
     ap.add_argument("--pass", choices=("elab", "proc"), default="elab", dest="stop_pass",
                     help="--equiv: side A stops after elaboration (default) or after proc")
     ap.add_argument("--trio", choices=("auto", "on", "off"), default="auto",
@@ -773,14 +790,21 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
+def check_floors(args: argparse.Namespace) -> None:
+    """The floor options belong to their modes."""
+    if args.min_changed_total and not args.opt_equiv:
+        raise UsageError("--min-changed-total needs --opt-equiv")
+    if args.min_compared_total and not (args.lower_equiv or args.lower_sim or args.lower_run):
+        raise UsageError("--min-compared-total needs --lower-equiv, --lower-sim or --lower-run")
+
+
 def build_config(args: argparse.Namespace) -> Config:
     modes = [args.equiv, args.bench, args.proc_diff, args.opt_equiv, args.opt_diff, args.opt_run,
              args.lower_equiv, args.lower_sim, args.lower_run]
     if sum(bool(m) for m in modes) > 1:
         raise UsageError("--equiv, --bench, --proc-diff, --opt-equiv, --opt-diff, --opt-run, "
                          "--lower-equiv, --lower-sim and --lower-run cannot be combined")
-    if args.min_changed_total and not args.opt_equiv:
-        raise UsageError("--min-changed-total needs --opt-equiv")
+    check_floors(args)
     if (args.opt_equiv or args.opt_diff or args.lower_equiv) and not args.yosys:
         raise UsageError("--opt-equiv, --opt-diff and --lower-equiv need --yosys")
     if args.bench_report and not args.bench:

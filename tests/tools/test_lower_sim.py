@@ -177,11 +177,23 @@ class RunTest(unittest.TestCase):
     def test_a_shiftx_design_is_skipped_never_passed(self) -> None:
         self.tree.set_spec(before_il=SHIFTX_IL, before_rc=1)
         code, out, err = self.tree.run()
+        self.assertEqual(code, ls.EXIT_SKIPPED, out + err)  # H3: a skip is not a success
+        self.assertIn("lower-sim: compared 0 of 1 designs (1 skipped, 0 empty)", out)
+        self.assertEqual(len(self.tree.log()), 1)  # the lowered run never happens
+        code, out, err = self.tree.run("--allow-skipped")
         self.assertEqual(code, 0, out + err)
         self.assertIn("$shiftx: skipped (no simulate hook; x outputs: covered by lower-equiv)", out)
         self.assertIn("$and: skipped (design skipped)", out)
         self.assertNotIn("pass", out)
-        self.assertEqual(len(self.tree.log()), 1)  # the lowered run never happens
+
+    def test_a_compared_design_is_counted_and_a_difference_beats_a_skip(self) -> None:
+        code, out, _ = self.tree.run()
+        self.assertEqual(code, 0)
+        self.assertIn("lower-sim: compared 1 of 1 designs (0 skipped, 0 empty)", out)
+        args = ls.parse(["--odin3", "x", "f.v"])
+        self.assertEqual(ls.exit_code(["equal", "skipped"], args), ls.EXIT_SKIPPED)
+        self.assertEqual(ls.exit_code(["skipped", "differs"], args), 1)
+        self.assertEqual(ls.exit_code(["equal", "empty"], args), 1)
 
     def test_a_before_failure_that_is_not_a_known_skip_is_a_tool_error(self) -> None:
         self.tree.set_spec(before_rc=1)

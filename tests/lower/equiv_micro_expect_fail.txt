@@ -1,0 +1,15 @@
+# Micros the lower_equiv_micro sweep expects to fail, on top of tests/lower/micro_expect_fail.txt
+# (the CTest line reads both). Format: `<path> [needle] <reason>`. `[UNPROVEN:]` matches only
+# lower-equiv's exit 4 (the SAT proof hit its size limit); a listed micro that passes is a stale
+# entry and fails.
+#
+# bm_arithmetic_unused_bits: untested for now (size limit). Four 32x32 `$mul` cells (plus eight
+# 32-bit `$add`/`$sub`): the SAT proof of a multiplier of that width is far past the 60 s limit.
+# Evidence, 2026-10-18, debug build, `tools/lower-check/lower-equiv --odin3 build/debug/odin3
+# --yosys $VTR_ROOT/build/bin/yosys tests/micro/verilog/micro/bm_arithmetic_unused_bits.v`
+# (default pre `proc; opt`), real 1m0.9s:
+#   lower-equiv: bm_arithmetic_unused_bits.v: UNPROVEN: yosys-refine: timed out after 60 s
+#   rc=4
+# The multiplier lowering itself is covered at up to 3 bits by test_lower_mul and lower-equiv's
+# mul fixtures (CTest lower_cells_equiv), and wider by lower-diff tier T (tests/lower/diff_expect.txt).
+micro/bm_arithmetic_unused_bits.v [UNPROVEN:] untested for now (size limit): four 32x32 multipliers, SAT proof times out at 60 s

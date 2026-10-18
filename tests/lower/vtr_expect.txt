@@ -1,6 +1,7 @@
 # VTR designs whose `lower` run ends in a cap (3B spec 14.5, M2): before 3C maps $mul and $mem to
 # hard blocks, `lower` builds them as soft logic and a big design can exceed the caps of spec 11.
 # One path (relative to the VTR benchmark directory) per line with its reason after the first
-# blank. After 3C lands this file must be empty. Recorded outcome of the 14 small designs of
-# PHASE2 #29 (see docs/PHASE3.md, the 3B entry): no entry; the large designs are run by the
-# controller (docs/PHASE3.md lists the commands).
+# blank. After 3C lands this file must be empty. No entry means "no cap seen so far", not "all
+# designs pass": only single_wire has been run through lower-run. The other 13 designs of PHASE2
+# #29 and the large designs: pending controller run (2026-10-18); the controller adds an entry for
+# each cap outcome (lower-run exit 5) and ticks the PHASE3 3B box (docs/PHASE3.md, decision 41(h)).
