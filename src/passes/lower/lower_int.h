@@ -51,6 +51,8 @@ void lw_bits_clear(lw_bits *bits);
 /* NO_MEMORY leaves the vector unchanged. */
 odin3_status lw_bits_push(lw_bits *bits, odin3_net_id net);
 uint32_t lw_bits_len(const lw_bits *bits);
+/* Replaces bit `idx` (< lw_bits_len). */
+void lw_bits_set(lw_bits *bits, uint32_t idx, odin3_net_id net);
 odin3_net_id lw_bits_at(const lw_bits *bits, uint32_t idx);
 lw_span lw_bits_span(const lw_bits *bits);
 
@@ -284,6 +286,9 @@ odin3_status lw_check_size(const lw_ctx *lw, const lw_cell *cell, uint64_t estim
 uint64_t lw_sat_add(uint64_t lhs, uint64_t rhs);
 uint64_t lw_sat_mul(uint64_t lhs, uint64_t rhs);
 
+/* Yosys's $clog2: the smallest n with 2^n >= value (0 for 0 and 1). */
+uint32_t lw_clog2(uint64_t value);
+
 /* --- the rules (bitwise.c; later tasks add the others) --------------------------------------- */
 
 #define LW_DECLARE_BUILDER(name)                                                                   \
@@ -305,6 +310,157 @@ LW_DECLARE_BUILDER(logic_and);
 LW_DECLARE_BUILDER(logic_or);
 LW_DECLARE_BUILDER(eq);
 LW_DECLARE_BUILDER(ne);
+
+/* --- pmux_shift.c: $pmux, $shl $shr $sshr, $shiftx (spec §5.1 to §5.3) ------------------------ */
+
+LW_DECLARE_BUILDER(pmux);
+LW_DECLARE_BUILDER(shl);
+LW_DECLARE_BUILDER(shr);
+LW_DECLARE_BUILDER(sshr);
+LW_DECLARE_BUILDER(shiftx);
+
+/* --- alu.c: the carry-lookahead unit, the adder, $add $sub $neg (spec §5.4) ------------------- */
+
+/*
+ * techmap.v `_90_lcu_brent_kung`: the carries CO[0 .. W) of the propagate bits `prop` and generate
+ * bits `gen` (W bits each, W >= 1) and the carry-in: g[0] |= p[0] & CI, the main tree for
+ * i = 1 .. clog2(W) at j = 2^i - 1 step 2^i, then the inverse tree for i = clog2(W) .. 1 at
+ * j = 2^i + 2^(i-1) - 1 step 2^i. *out is cleared first. Gates: lw_lcu_gates(W).
+ */
+odin3_status lw_lcu(lw_ctx *lw, lw_span prop, lw_span gen, odin3_net_id carry_in, lw_bits *out);
+uint64_t lw_lcu_gates(uint64_t width);
+
+/* The inputs of lw_alu: A + (BI ? ~B : B) + CI at `width` bits, each operand extended to it. */
+typedef struct lw_alu_args {
+    lw_span a;
+    lw_span b;
+    odin3_net_id carry_in;
+    bool invert_b; /* BI: B is inverted (a $_NOT_ row) */
+    bool is_signed;
+    bool need_sum; /* false: the sum bits are not built (the comparisons do not read them) */
+    uint32_t width;
+} lw_alu_args;
+
+/* The outputs of lw_alu, `width` bits each (sum: none unless need_sum): Y, X (P = AA ^ BB), CO. */
+typedef struct lw_alu_out {
+    lw_bits sum;
+    lw_bits prop;
+    lw_bits carry;
+} lw_alu_out;
+
+void lw_alu_out_init(lw_alu_out *res);
+void lw_alu_out_free(lw_alu_out *res);
+
+/* techmap.v `_90_alu` (P = AA ^ BB, G = AA & BB, CO = lcu, Y = P ^ {CO, CI}). Previous contents of
+ * *res are dropped. */
+odin3_status lw_alu(lw_ctx *lw, const lw_alu_args *args, lw_alu_out *res);
+uint64_t lw_alu_gates(uint64_t width, bool invert_b, bool need_sum);
+
+/* Y[0] = root, Y[k > 0] = the constant-0 net: the result shape of a one-bit cell. */
+odin3_status lw_finish_flag(lw_ctx *lw, const lw_cell *cell, odin3_net_id root, lw_bits *out);
+
+LW_DECLARE_BUILDER(add);
+LW_DECLARE_BUILDER(sub);
+LW_DECLARE_BUILDER(neg);
+
+/* 0 - src at `width` bits (src extended by is_signed) into *out (cleared first): the $neg rule.
+ * Gates: lw_alu_gates(width, true, true). */
+odin3_status lw_neg_bits(lw_ctx *lw, lw_span src, uint32_t width, bool is_signed, lw_bits *out);
+
+/* --- cmp.c: $lt $le $gt $ge (spec §5.4) ---------------------------------------------------------
+ */
+
+LW_DECLARE_BUILDER(lt);
+LW_DECLARE_BUILDER(le);
+LW_DECLARE_BUILDER(gt);
+LW_DECLARE_BUILDER(ge);
+
+/* The four comparisons, in the order of cmp_estimate's arithmetic (LT 0, LE 1, GT 2, GE 3). */
+typedef enum lw_cmp_kind { LW_CMP_LT, LW_CMP_LE, LW_CMP_GT, LW_CMP_GE } lw_cmp_kind;
+
+/* The operands of lw_compare: each extended to the wider one's width by is_signed. */
+typedef struct lw_cmp_args {
+    lw_span a;
+    lw_span b;
+    lw_cmp_kind kind;
+    bool is_signed;
+} lw_cmp_args;
+
+/* The flag net of `a <kind> b` (the subtraction without sum bits, alumacc.cc); the rule of
+ * $lt $le $gt $ge, shared with the divider. Gates: lw_compare_gates. */
+odin3_status lw_compare(lw_ctx *lw, const lw_cmp_args *cmp, odin3_net_id *flag);
+
+/* The shape lw_compare_gates counts: the operand width (the wider one) and the flavour. */
+typedef struct lw_cmp_shape {
+    uint64_t width;
+    lw_cmp_kind kind;
+    bool is_signed;
+} lw_cmp_shape;
+uint64_t lw_compare_gates(const lw_cmp_shape *shape);
+
+/* --- mul.c: the bit heap, the full adder, $mul (spec §5.5) --------------------------------------
+ */
+
+/* One column of the bit heap: nets in ascending ID order, `head` the first one still in it. */
+typedef struct lw_column {
+    lw_bits nets;
+    uint32_t head;
+} lw_column;
+
+/* maccmap.cc's `bits`: one set of nets per column (weight 2^column). */
+typedef struct lw_heap {
+    odin3_vec cols; /* lw_column */
+    odin3_net_id zero;
+} lw_heap;
+
+void lw_heap_init(lw_heap *heap);
+void lw_heap_free(lw_heap *heap);
+/* Empties the heap and gives it `width` columns; nets equal to `zero` are never added. */
+odin3_status lw_heap_reset(lw_heap *heap, uint32_t width, odin3_net_id zero);
+uint32_t lw_heap_width(const lw_heap *heap);
+uint32_t lw_heap_depth(const lw_heap *heap, uint32_t pos);
+/* The smallest net ID of the column (its depth must be > 0), removed. */
+odin3_net_id lw_heap_pop(lw_heap *heap, uint32_t pos);
+/*
+ * maccmap.cc `add(bit, position)`: nothing for a position past the width or for the zero net; a
+ * net the column already holds leaves it and is added to the next column instead (cancel and
+ * carry, an explicit loop); else the net joins the column. NO_MEMORY leaves the heap valid.
+ */
+odin3_status lw_heap_add(lw_heap *heap, odin3_net_id net, uint32_t pos);
+
+/* techmap.v `_90_fa`: sum = a ^ b ^ c = out[0], carry = ab | c(a ^ b) = out[1]; 5 gates. */
+odin3_status lw_fa(lw_ctx *lw, const odin3_net_id in[3], odin3_net_id out[2]);
+
+LW_DECLARE_BUILDER(mul);
+
+/* --- div.c: the restoring divider, $div, $mod (spec §5.6) ---------------------------------------
+ */
+
+/* The outputs of lw_divmod_u: W quotient bits and, when asked for, W remainder bits. */
+typedef struct lw_divmod_out {
+    lw_bits quot;
+    lw_bits rem;
+} lw_divmod_out;
+
+void lw_divmod_out_init(lw_divmod_out *res);
+void lw_divmod_out_free(lw_divmod_out *res);
+
+/*
+ * techmap.v `$__div_mod_u`: A / B and A % B for unsigned operands of the same width W >= 1, W
+ * stages. Stage i compares the running remainder with {B, W-1-i zeros}, sets quotient bit W-1-i to
+ * the result and keeps the difference when it is set. B = 0 gives quotient all ones and remainder
+ * A. Without `want_rem` the last stage's difference is not built. Gates: lw_divmod_u_gates.
+ */
+typedef struct lw_divmod_args {
+    lw_span dividend;
+    lw_span divisor;
+    bool want_rem;
+} lw_divmod_args;
+odin3_status lw_divmod_u(lw_ctx *lw, const lw_divmod_args *args, lw_divmod_out *res);
+uint64_t lw_divmod_u_gates(uint64_t width, bool want_rem);
+
+LW_DECLARE_BUILDER(div);
+LW_DECLARE_BUILDER(mod);
 
 /* --- dispatch (dispatch.c) ---------------------------------------------------------------- */
 

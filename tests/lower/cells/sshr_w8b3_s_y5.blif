@@ -1,0 +1,37 @@
+.model m
+.inputs a[0] a[1] a[2] a[3] a[4] a[5] a[6] a[7] b[0] b[1] b[2]
+.outputs y[0] y[1] y[2] y[3] y[4]
+.names gnd
+.subckt $_MUX_ A=a[0] B=a[7] S=gnd Y=$n26
+.subckt $_MUX_ A=a[1] B=a[7] S=gnd Y=$n27
+.subckt $_MUX_ A=a[2] B=a[7] S=gnd Y=$n28
+.subckt $_MUX_ A=a[3] B=a[7] S=gnd Y=$n29
+.subckt $_MUX_ A=a[4] B=a[7] S=gnd Y=$n30
+.subckt $_MUX_ A=a[5] B=a[7] S=gnd Y=$n31
+.subckt $_MUX_ A=a[6] B=a[7] S=gnd Y=$n32
+.subckt $_MUX_ A=a[7] B=a[7] S=gnd Y=$n33
+.subckt $_MUX_ A=$n26 B=$n27 S=b[0] Y=$n34
+.subckt $_MUX_ A=$n27 B=$n28 S=b[0] Y=$n35
+.subckt $_MUX_ A=$n28 B=$n29 S=b[0] Y=$n36
+.subckt $_MUX_ A=$n29 B=$n30 S=b[0] Y=$n37
+.subckt $_MUX_ A=$n30 B=$n31 S=b[0] Y=$n38
+.subckt $_MUX_ A=$n31 B=$n32 S=b[0] Y=$n39
+.subckt $_MUX_ A=$n32 B=$n33 S=b[0] Y=$n40
+.subckt $_MUX_ A=$n33 B=$n33 S=b[0] Y=$n41
+.subckt $_MUX_ A=$n34 B=$n36 S=b[1] Y=$n42
+.subckt $_MUX_ A=$n35 B=$n37 S=b[1] Y=$n43
+.subckt $_MUX_ A=$n36 B=$n38 S=b[1] Y=$n44
+.subckt $_MUX_ A=$n37 B=$n39 S=b[1] Y=$n45
+.subckt $_MUX_ A=$n38 B=$n40 S=b[1] Y=$n46
+.subckt $_MUX_ A=$n39 B=$n41 S=b[1] Y=$n47
+.subckt $_MUX_ A=$n40 B=$n41 S=b[1] Y=$n48
+.subckt $_MUX_ A=$n41 B=$n41 S=b[1] Y=$n49
+.subckt $_MUX_ A=$n42 B=$n46 S=b[2] Y=y[0]
+.subckt $_MUX_ A=$n43 B=$n47 S=b[2] Y=y[1]
+.subckt $_MUX_ A=$n44 B=$n48 S=b[2] Y=y[2]
+.subckt $_MUX_ A=$n45 B=$n49 S=b[2] Y=y[3]
+.subckt $_MUX_ A=$n46 B=$n49 S=b[2] Y=y[4]
+.subckt $_MUX_ A=$n47 B=$n49 S=b[2] Y=$n55
+.subckt $_MUX_ A=$n48 B=$n49 S=b[2] Y=$n56
+.subckt $_MUX_ A=$n49 B=$n49 S=b[2] Y=$n57
+.end

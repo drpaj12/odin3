@@ -1,0 +1,64 @@
+.model m
+.inputs a[0] a[1] a[2] a[3] a[4] a[5] a[6] a[7] b[0] b[1] b[2] b[3] b[4] b[5] b[6] b[7]
+.outputs y[0] y[1] y[2] y[3] y[4] y[5] y[6] y[7]
+.names gnd
+.subckt $_XOR_ A=a[0] B=b[0] Y=$n26
+.subckt $_AND_ A=a[0] B=b[0] Y=$n27
+.subckt $_XOR_ A=a[1] B=b[1] Y=$n28
+.subckt $_AND_ A=a[1] B=b[1] Y=$n29
+.subckt $_XOR_ A=a[2] B=b[2] Y=$n30
+.subckt $_AND_ A=a[2] B=b[2] Y=$n31
+.subckt $_XOR_ A=a[3] B=b[3] Y=$n32
+.subckt $_AND_ A=a[3] B=b[3] Y=$n33
+.subckt $_XOR_ A=a[4] B=b[4] Y=$n34
+.subckt $_AND_ A=a[4] B=b[4] Y=$n35
+.subckt $_XOR_ A=a[5] B=b[5] Y=$n36
+.subckt $_AND_ A=a[5] B=b[5] Y=$n37
+.subckt $_XOR_ A=a[6] B=b[6] Y=$n38
+.subckt $_AND_ A=a[6] B=b[6] Y=$n39
+.subckt $_XOR_ A=a[7] B=b[7] Y=$n40
+.subckt $_AND_ A=a[7] B=b[7] Y=$n41
+.subckt $_AND_ A=$n26 B=gnd Y=$n42
+.subckt $_OR_ A=$n27 B=$n42 Y=$n43
+.subckt $_AND_ A=$n28 B=$n43 Y=$n44
+.subckt $_OR_ A=$n29 B=$n44 Y=$n45
+.subckt $_AND_ A=$n28 B=$n26 Y=$n46
+.subckt $_AND_ A=$n32 B=$n31 Y=$n47
+.subckt $_OR_ A=$n33 B=$n47 Y=$n48
+.subckt $_AND_ A=$n32 B=$n30 Y=$n49
+.subckt $_AND_ A=$n36 B=$n35 Y=$n50
+.subckt $_OR_ A=$n37 B=$n50 Y=$n51
+.subckt $_AND_ A=$n36 B=$n34 Y=$n52
+.subckt $_AND_ A=$n40 B=$n39 Y=$n53
+.subckt $_OR_ A=$n41 B=$n53 Y=$n54
+.subckt $_AND_ A=$n40 B=$n38 Y=$n55
+.subckt $_AND_ A=$n49 B=$n45 Y=$n56
+.subckt $_OR_ A=$n48 B=$n56 Y=$n57
+.subckt $_AND_ A=$n49 B=$n46 Y=$n58
+.subckt $_AND_ A=$n55 B=$n51 Y=$n59
+.subckt $_OR_ A=$n54 B=$n59 Y=$n60
+.subckt $_AND_ A=$n55 B=$n52 Y=$n61
+.subckt $_AND_ A=$n61 B=$n57 Y=$n62
+.subckt $_OR_ A=$n60 B=$n62 Y=$n63
+.subckt $_AND_ A=$n61 B=$n58 Y=$n64
+.subckt $_AND_ A=$n52 B=$n57 Y=$n65
+.subckt $_OR_ A=$n51 B=$n65 Y=$n66
+.subckt $_AND_ A=$n52 B=$n58 Y=$n67
+.subckt $_AND_ A=$n30 B=$n45 Y=$n68
+.subckt $_OR_ A=$n31 B=$n68 Y=$n69
+.subckt $_AND_ A=$n30 B=$n46 Y=$n70
+.subckt $_AND_ A=$n34 B=$n57 Y=$n71
+.subckt $_OR_ A=$n35 B=$n71 Y=$n72
+.subckt $_AND_ A=$n34 B=$n58 Y=$n73
+.subckt $_AND_ A=$n38 B=$n66 Y=$n74
+.subckt $_OR_ A=$n39 B=$n74 Y=$n75
+.subckt $_AND_ A=$n38 B=$n67 Y=$n76
+.subckt $_XOR_ A=$n26 B=gnd Y=y[0]
+.subckt $_XOR_ A=$n28 B=$n43 Y=y[1]
+.subckt $_XOR_ A=$n30 B=$n45 Y=y[2]
+.subckt $_XOR_ A=$n32 B=$n69 Y=y[3]
+.subckt $_XOR_ A=$n34 B=$n57 Y=y[4]
+.subckt $_XOR_ A=$n36 B=$n72 Y=y[5]
+.subckt $_XOR_ A=$n38 B=$n66 Y=y[6]
+.subckt $_XOR_ A=$n40 B=$n75 Y=y[7]
+.end

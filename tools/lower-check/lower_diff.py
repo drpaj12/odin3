@@ -261,8 +261,11 @@ class Diff:
                                f"{lc.why((done.stdout or '') + (done.stderr or ''))}")
 
     def equiv(self, result: Result, run_dir: Path) -> None:
-        done = self.child("equiv-check", [self.args.equiv_check, str(run_dir / "lo.norm.blif"),
-                                          str(run_dir / "yo.norm.blif")], run_dir)
+        for name in ("lo", "yo"):
+            text = (run_dir / f"{name}.norm.blif").read_text(encoding="utf-8")
+            (run_dir / f"{name}.eq.blif").write_text(lc.with_gate_models(text), encoding="utf-8")
+        done = self.child("equiv-check", [self.args.equiv_check, str(run_dir / "lo.eq.blif"),
+                                          str(run_dir / "yo.eq.blif")], run_dir)
         out = (done.stdout or "") + (done.stderr or "")
         if done.returncode == EQUIV_OK:
             return

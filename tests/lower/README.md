@@ -8,7 +8,8 @@ Layout (3B spec 14.1, 14.2; plan Task 2):
   committed output) beside each `.v`; CTest `lower_cells` compares a fresh run with the `.blif` by
   `netlist-compare`, and `lower_cells_yosys` runs `lower-diff` over the same files (needs Yosys 0.55).
 - `hand/` — hand-built designs for `lower-sim`: `and_mux.v` (a design every cell of which has a
-  simulate hook) and `shiftx.v` (a `$shiftx`, which has none: reported `skipped`).
+  simulate hook) and `shiftx.v` (a `$shiftx`, which has none: reported `skipped`); `pow.v` is a surviving `$pow` (CTest `cli_lower_pow`: the located error of
+  spec 5.7; no golden exists).
 - `diff_expect.txt`, `vtr_expect.txt` — later tasks (the differences with a reason, the expected
   cap outcomes).
 

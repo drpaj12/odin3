@@ -18,6 +18,30 @@ class GridTest(unittest.TestCase):
         self.assertEqual(len(stems), len(set(stems)))
         self.assertGreater(len(cells), 100)
 
+    def test_a_pmux_fixture_is_a_parallel_case_with_one_item_per_select(self) -> None:
+        cell = gc.pmux_cell(2, 3)
+        self.assertEqual(cell.stem, "pmux_w2s3")
+        self.assertIn("(* parallel_case *) case (1'b1)", cell.text)
+        self.assertEqual(cell.text.count("y = b"), 3)
+        self.assertIn("input [2:0] s", cell.text)
+
+    def test_the_arith_family_has_add_sub_and_neg_and_no_duplicate_stems(self) -> None:
+        stems = [c.stem for c in gc.generate(["arith"])]
+        self.assertEqual(len(stems), len(set(stems)))
+        for prefix in ("add_", "sub_", "neg_"):
+            self.assertTrue(any(s.startswith(prefix) for s in stems), prefix)
+
+    def test_the_mul_and_div_families_cover_the_operators_and_their_shapes(self) -> None:
+        by_stem = {c.stem: c for c in gc.generate(["mul", "div"])}
+        self.assertEqual(len(by_stem), len(gc.generate(["mul", "div"])))
+        self.assertIn("assign y = a * b;", by_stem["mul_w3x5"].text)
+        self.assertIn("assign y = a / b;", by_stem["div_w4_s"].text)
+        self.assertIn("assign y = a % b;", by_stem["mod_w5x3_ms"].text)
+        self.assertIn("module m(input signed [3:0] a, input signed [3:0] b, output [2:0] y);",
+                      by_stem["mul_w4_s_y3"].text)
+        for prefix in ("mul_", "div_", "mod_"):
+            self.assertTrue(any(s.startswith(prefix) for s in by_stem), prefix)
+
     def test_module_text_of_a_mixed_sign_binary_cell(self) -> None:
         by_stem = {c.stem: c for c in gc.generate(["bitwise"])}
         self.assertEqual(

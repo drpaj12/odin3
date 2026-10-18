@@ -119,7 +119,124 @@ def bitwise_cells() -> list[Cell]:
     return cells
 
 
-FAMILY_GENERATORS = {"bitwise": bitwise_cells}
+PMUX_WIDTHS = (1, 2, 5, 8)
+PMUX_SELECTS = (2, 3, 4)
+
+
+def pmux_cell(width: int, selects: int) -> Cell:
+    """A one-hot priority-free case (``parallel_case``), which ``proc`` turns into one ``$pmux``."""
+    ports = [_decl("input", "a", width, False)]
+    ports += [_decl("input", f"b{i}", width, False) for i in range(selects)]
+    ports += [_decl("input", "s", selects, False), _decl("output reg", "y", width, False)]
+    items = "\n".join(f"      s[{i}]: y = b{i};" for i in range(selects))
+    body = ("always @* begin\n    y = a;\n    (* parallel_case *) case (1'b1)\n"
+            f"{items}\n    endcase\n  end")
+    return Cell(f"pmux_w{width}s{selects}", _module(ports, body), "pmux")
+
+
+def pmux_cells() -> list[Cell]:
+    return [pmux_cell(w, n) for w in PMUX_WIDTHS for n in PMUX_SELECTS]
+
+
+SHIFT_OPS = (("shl", "<<"), ("shr", ">>"), ("sshr", ">>>"))
+SHIFT_A = (3, 8)
+SHIFT_B = (2, 3, 5)
+SHIFT_WIDE_Y = ((3, 2, 6), (8, 3, 5))  # (A width, B width, Y width) with a Y other than A's
+SHIFTX_A = (4, 8)
+SHIFTX_B = (2, 3, 4)
+
+
+def shift_cell(name: str, op: str, widths: tuple[int, int], signed: bool, y_width: int) -> Cell:
+    """``y = a <op> b``; ``a`` is signed for the ``_s`` variant (``$sshr`` needs it to sign-fill);
+    ``b`` is the shift amount, always unsigned."""
+    wa, wb = widths
+    ports = [_decl("input", "a", wa, signed), _decl("input", "b", wb, False),
+             _decl("output", "y", y_width, False)]
+    stem = f"{name}_w{wa}b{wb}{'_s' if signed else ''}{_suffix('', y_width, wa)}"
+    return Cell(stem, _module(ports, f"assign y = a {op} b;"), "shift")
+
+
+def shiftx_cell(wa: int, wb: int, signed: bool, y_width: int) -> Cell:
+    """``y = a[b +: Y]``: a variable part select, which elaboration makes a ``$shiftx``."""
+    ports = [_decl("input", "a", wa, False), _decl("input", "b", wb, signed),
+             _decl("output", "y", y_width, False)]
+    stem = f"shiftx_w{wa}b{wb}{'_s' if signed else ''}_y{y_width}"
+    return Cell(stem, _module(ports, f"assign y = a[b +: {y_width}];"), "shift")
+
+
+def shift_cells() -> list[Cell]:
+    cells: list[Cell] = []
+    for name, op in SHIFT_OPS:
+        for signed in (False, True):
+            cells += [shift_cell(name, op, (wa, wb), signed, wa)
+                      for wa in SHIFT_A for wb in SHIFT_B]
+            cells += [shift_cell(name, op, (wa, wb), signed, wy) for wa, wb, wy in SHIFT_WIDE_Y]
+    for signed in (False, True):
+        cells += [shiftx_cell(wa, wb, signed, 2) for wa in SHIFTX_A for wb in SHIFTX_B]
+    return cells
+
+
+COMPARE_OPS = (("lt", "<"), ("le", "<="), ("gt", ">"), ("ge", ">="))
+COMPARE_WIDTHS = (1, 2, 5, 8)
+COMPARE_SIGNED_WIDTHS = (1, 3, 8)
+ARITH_WIDTHS = (1, 3, 8, 17)
+ARITH_PAIRS = ((3, 5), (5, 3))
+
+
+def arith_cells() -> list[Cell]:
+    """``$add``, ``$sub``, ``$neg`` and the comparisons (the ``$alu`` structures)."""
+    cells: list[Cell] = []
+    for name, op in (("add", "+"), ("sub", "-")):
+        cells += [binary(name, op, (w, w), "", w) for w in ARITH_WIDTHS]
+        cells += [binary(name, op, p, sign, max(p)) for p in ARITH_PAIRS for sign in SIGN_VARIANTS]
+        cells += [binary(name, op, (4, 4), "s", 7), binary(name, op, (8, 8), "", 5)]
+    cells += [unary("neg", "-", w, sign, y)
+              for w in ARITH_WIDTHS for sign in ("", "s") for y in (w, w + 3)]
+    for name, op in COMPARE_OPS:
+        cells += [binary(name, op, (w, w), "", 1, 1) for w in COMPARE_WIDTHS]
+        cells += [binary(name, op, (w, w), "s", 1, 1) for w in COMPARE_SIGNED_WIDTHS]
+        cells += [binary(name, op, p, sign, 1, 1) for p in ARITH_PAIRS for sign in SIGN_VARIANTS]
+    return cells
+
+
+MUL_WIDTHS = (1, 2, 3, 4, 5, 8)
+MUL_WIDE = (12, 16)
+MUL_PAIRS = ((3, 5), (5, 3), (2, 7), (1, 4))
+DIV_WIDTHS = (1, 2, 3, 4, 5, 8)
+DIV_WIDE = (12,)
+DIV_PAIRS = ((3, 5), (5, 3), (2, 6), (6, 2))
+
+
+def mul_cells() -> list[Cell]:
+    """``$mul`` (maccmap): equal and unequal operands, signs, ``Y`` narrower, equal, wider."""
+    cells: list[Cell] = []
+    for w in MUL_WIDTHS + MUL_WIDE:
+        cells += [binary("mul", "*", (w, w), sign, w) for sign in ("", "s")]
+    for w in MUL_WIDTHS[1:]:
+        cells += [binary("mul", "*", (w, w), sign, 2 * w) for sign in ("", "s")]
+    cells += [binary("mul", "*", (4, 4), sign, 3) for sign in ("", "s")]
+    for p in MUL_PAIRS:
+        cells += [binary("mul", "*", p, sign, max(p)) for sign in SIGN_VARIANTS]
+        cells.append(binary("mul", "*", p, "", sum(p)))
+    return cells
+
+
+def div_cells() -> list[Cell]:
+    """``$div`` and ``$mod`` (the restoring divider of ``$__div_mod_u``), the same grid."""
+    cells: list[Cell] = []
+    for name, op in (("div", "/"), ("mod", "%")):
+        for w in DIV_WIDTHS + DIV_WIDE:
+            cells += [binary(name, op, (w, w), sign, w) for sign in ("", "s")]
+        for w in (3, 4):
+            cells += [binary(name, op, (w, w), sign, w + 3) for sign in ("", "s")]
+        cells += [binary(name, op, (4, 4), sign, 2) for sign in ("", "s")]
+        for p in DIV_PAIRS:
+            cells += [binary(name, op, p, sign, max(p)) for sign in SIGN_VARIANTS]
+    return cells
+
+
+FAMILY_GENERATORS = {"bitwise": bitwise_cells, "pmux": pmux_cells, "shift": shift_cells,
+                     "arith": arith_cells, "mul": mul_cells, "div": div_cells}
 
 
 def generate(families: Sequence[str]) -> list[Cell]:

@@ -1,0 +1,48 @@
+.model m
+.inputs a[0] a[1] a[2] a[3] a[4] b0[0] b0[1] b0[2] b0[3] b0[4] b1[0] b1[1] b1[2] b1[3] b1[4] b2[0] \
+  b2[1] b2[2] b2[3] b2[4] b3[0] b3[1] b3[2] b3[3] b3[4] s[0] s[1] s[2] s[3]
+.outputs y[0] y[1] y[2] y[3] y[4]
+.subckt $_OR_ A=s[3] B=s[2] Y=$n55
+.subckt $_OR_ A=s[1] B=s[0] Y=$n56
+.subckt $_OR_ A=$n55 B=$n56 Y=$n57
+.subckt $_AND_ A=b3[0] B=s[3] Y=$n58
+.subckt $_AND_ A=b2[0] B=s[2] Y=$n59
+.subckt $_AND_ A=b1[0] B=s[1] Y=$n60
+.subckt $_AND_ A=b0[0] B=s[0] Y=$n61
+.subckt $_OR_ A=$n58 B=$n59 Y=$n62
+.subckt $_OR_ A=$n60 B=$n61 Y=$n63
+.subckt $_OR_ A=$n62 B=$n63 Y=$n64
+.subckt $_MUX_ A=a[0] B=$n64 S=$n57 Y=y[0]
+.subckt $_AND_ A=b3[1] B=s[3] Y=$n66
+.subckt $_AND_ A=b2[1] B=s[2] Y=$n67
+.subckt $_AND_ A=b1[1] B=s[1] Y=$n68
+.subckt $_AND_ A=b0[1] B=s[0] Y=$n69
+.subckt $_OR_ A=$n66 B=$n67 Y=$n70
+.subckt $_OR_ A=$n68 B=$n69 Y=$n71
+.subckt $_OR_ A=$n70 B=$n71 Y=$n72
+.subckt $_MUX_ A=a[1] B=$n72 S=$n57 Y=y[1]
+.subckt $_AND_ A=b3[2] B=s[3] Y=$n74
+.subckt $_AND_ A=b2[2] B=s[2] Y=$n75
+.subckt $_AND_ A=b1[2] B=s[1] Y=$n76
+.subckt $_AND_ A=b0[2] B=s[0] Y=$n77
+.subckt $_OR_ A=$n74 B=$n75 Y=$n78
+.subckt $_OR_ A=$n76 B=$n77 Y=$n79
+.subckt $_OR_ A=$n78 B=$n79 Y=$n80
+.subckt $_MUX_ A=a[2] B=$n80 S=$n57 Y=y[2]
+.subckt $_AND_ A=b3[3] B=s[3] Y=$n82
+.subckt $_AND_ A=b2[3] B=s[2] Y=$n83
+.subckt $_AND_ A=b1[3] B=s[1] Y=$n84
+.subckt $_AND_ A=b0[3] B=s[0] Y=$n85
+.subckt $_OR_ A=$n82 B=$n83 Y=$n86
+.subckt $_OR_ A=$n84 B=$n85 Y=$n87
+.subckt $_OR_ A=$n86 B=$n87 Y=$n88
+.subckt $_MUX_ A=a[3] B=$n88 S=$n57 Y=y[3]
+.subckt $_AND_ A=b3[4] B=s[3] Y=$n90
+.subckt $_AND_ A=b2[4] B=s[2] Y=$n91
+.subckt $_AND_ A=b1[4] B=s[1] Y=$n92
+.subckt $_AND_ A=b0[4] B=s[0] Y=$n93
+.subckt $_OR_ A=$n90 B=$n91 Y=$n94
+.subckt $_OR_ A=$n92 B=$n93 Y=$n95
+.subckt $_OR_ A=$n94 B=$n95 Y=$n96
+.subckt $_MUX_ A=a[4] B=$n96 S=$n57 Y=y[4]
+.end

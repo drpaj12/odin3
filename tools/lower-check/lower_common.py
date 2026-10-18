@@ -140,3 +140,54 @@ def strip_unused_constants(blif: str) -> str:
             continue
         kept.extend(block)
     return "\n".join(kept) + ("\n" if blif.endswith("\n") else "")
+
+
+# The bit gates as BLIF models: both writers spell a gate as ``.subckt $_AND_ ...`` with no model
+# (Yosys ``-icells``), which ``equiv-check`` cannot flatten, so tier T appends these definitions.
+GATE_MODELS = """
+.model $_NOT_
+.inputs A
+.outputs Y
+.names A Y
+0 1
+.end
+.model $_AND_
+.inputs A B
+.outputs Y
+.names A B Y
+11 1
+.end
+.model $_OR_
+.inputs A B
+.outputs Y
+.names A B Y
+1- 1
+-1 1
+.end
+.model $_XOR_
+.inputs A B
+.outputs Y
+.names A B Y
+10 1
+01 1
+.end
+.model $_XNOR_
+.inputs A B
+.outputs Y
+.names A B Y
+00 1
+11 1
+.end
+.model $_MUX_
+.inputs A B S
+.outputs Y
+.names A B S Y
+1-0 1
+-11 1
+.end
+"""
+
+
+def with_gate_models(text: str) -> str:
+    """``text`` (a BLIF) followed by the models of the bit gates."""
+    return text.rstrip("\n") + "\n" + GATE_MODELS

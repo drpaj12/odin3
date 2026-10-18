@@ -151,6 +151,11 @@ add_library(odin3_core OBJECT
     src/passes/lower/dispatch.c
     src/passes/lower/report.c
     src/passes/lower/bitwise.c
+    src/passes/lower/pmux_shift.c
+    src/passes/lower/alu.c
+    src/passes/lower/cmp.c
+    src/passes/lower/mul.c
+    src/passes/lower/div.c
     src/passes/hardmap/register.c
     src/passes/hardmap/hardmap.c
     src/passes/hardmap/hm_kit.c
@@ -874,12 +879,20 @@ if(BUILD_TESTING)
     target_sources(test_lower_kit PRIVATE tests/unit/lower_fixture.c)
     odin3_add_unit_test(test_lower_bitwise)
     target_sources(test_lower_bitwise PRIVATE tests/unit/lower_fixture.c)
+    odin3_add_unit_test(test_lower_pmux_shift)
+    target_sources(test_lower_pmux_shift PRIVATE tests/unit/lower_fixture.c)
+    odin3_add_unit_test(test_lower_alu)
+    target_sources(test_lower_alu PRIVATE tests/unit/lower_fixture.c)
+    odin3_add_unit_test(test_lower_mul)
+    target_sources(test_lower_mul PRIVATE tests/unit/lower_fixture.c)
+    odin3_add_unit_test(test_lower_div)
+    target_sources(test_lower_div PRIVATE tests/unit/lower_fixture.c)
     odin3_add_unit_test(test_lower_pass)
     target_sources(test_lower_pass PRIVATE tests/unit/lower_fixture.c tests/unit/proc_fixture.c
                    tests/unit/proc_fixture_core.c)
     target_compile_definitions(test_lower_pass PRIVATE
         ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
-    set_tests_properties(test_lower_kit test_lower_bitwise test_lower_pass PROPERTIES LABELS "unit;lower")
+    set_tests_properties(test_lower_kit test_lower_bitwise test_lower_pmux_shift test_lower_alu test_lower_mul test_lower_div test_lower_pass PROPERTIES LABELS "unit;lower")
     # 3B Task 2/3: lower-sim on the hand-built designs (the 1E simulator before = after; a design
     # with a $shiftx is reported skipped), the per-cell goldens (lower-cells) and the CLI line.
     # Labelled `lower`, never `fuzz`: the CI fuzz-smoke build has no odin3 binary.
@@ -893,6 +906,12 @@ if(BUILD_TESTING)
         COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-cells --odin3 $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tests/lower/cells)
     set_tests_properties(lower_cells PROPERTIES LABELS lower SKIP_RETURN_CODE 77 TIMEOUT 1800)
+    # 3B Task 5 (spec 5.7): a $pow that survives to lower is the located error, nothing built.
+    add_test(NAME cli_lower_pow
+        COMMAND $<TARGET_FILE:odin3> -p
+                "read_verilog --nolatches ${PROJECT_SOURCE_DIR}/tests/lower/hand/pow.v; hierarchy; proc; lower")
+    set_tests_properties(cli_lower_pow PROPERTIES LABELS lower
+        PASS_REGULAR_EXPRESSION "lower: module 'm': '[$]pow' '[^']*' has no bit-level form \\(run opt first; Yosys leaves it unmapped\\)")
     add_test(NAME cli_lower_hand
         COMMAND $<TARGET_FILE:odin3> -p
                 "read_verilog --nolatches ${PROJECT_SOURCE_DIR}/tests/lower/hand/and_mux.v; hierarchy; proc; opt; lower; check; stats")
@@ -2223,13 +2242,45 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # listed in tests/flatten/diff_expect.txt (with a reason) fails.
         # 3B Task 3 (spec 14.2): lower against Yosys 0.55 on the per-cell fixtures, tier S (the
         # simplemap family): netlist-compare exit 0 and equal cell-type histograms for every file.
+        # 3B Task 5 adds the mul and div families ($mul; $div and $mod).
+        # 3B Task 4: one test per family; tier T (equiv-check and equal histograms after opt -fast)
+        # for the techmap.v family. Fixtures are told apart by their file-name prefix.
         file(GLOB _lower_cells CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/lower/cells/*.v)
+        set(_lower_prefixes pmux shl shr sshr shiftx neg add sub lt le gt ge mul div mod)
+        set(_lower_family_bitwise "")
+        set(_lower_family_pmux "pmux")
+        set(_lower_family_shift "shl;shr;sshr;shiftx")
+        set(_lower_family_arith "neg;add;sub;lt;le;gt;ge")
+        set(_lower_family_mul "mul")
+        set(_lower_family_div "div;mod")
+        set(_lower_bitwise_files ${_lower_cells})
+        foreach(_prefix IN LISTS _lower_prefixes)
+            list(FILTER _lower_bitwise_files EXCLUDE REGEX "/cells/${_prefix}_[^/]*$")
+        endforeach()
         add_test(NAME lower_cells_yosys
             COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-diff
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
-                    --family bitwise --pre proc --each ${_lower_cells})
+                    --family bitwise --pre proc --each ${_lower_bitwise_files})
         set_tests_properties(lower_cells_yosys PROPERTIES LABELS lower SKIP_RETURN_CODE 77
                              TIMEOUT 1800)
+        foreach(_family IN ITEMS pmux shift arith mul div)
+            set(_family_files "")
+            foreach(_prefix IN LISTS _lower_family_${_family})
+                set(_prefix_files ${_lower_cells})
+                list(FILTER _prefix_files INCLUDE REGEX "/cells/${_prefix}_[^/]*$")
+                list(APPEND _family_files ${_prefix_files})
+            endforeach()
+            if(_family_files)
+                add_test(NAME lower_cells_yosys_${_family}
+                    COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-diff
+                            --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                            --family ${_family} --pre proc
+                            --expect ${PROJECT_SOURCE_DIR}/tests/lower/diff_expect.txt
+                            --each ${_family_files})
+                set_tests_properties(lower_cells_yosys_${_family} PROPERTIES LABELS lower
+                                     SKIP_RETURN_CODE 77 TIMEOUT 1800)
+            endif()
+        endforeach()
         add_test(NAME flatten_diff_fixtures
             COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-diff
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
