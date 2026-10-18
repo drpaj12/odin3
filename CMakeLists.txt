@@ -2469,6 +2469,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND ${_opt_sweep} --opt-equiv --min-changed-total 200 ${_micro_expect}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_phase2_expect_fail.txt
                     ${_micro_dir})
         # --min-changed-total 200: the 441 micros under 1100 B alone have 266 changing calls, so
         # a do-nothing odin3 (0 on every design) fails (2F-6 re-review N3).
