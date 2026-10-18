@@ -446,11 +446,11 @@ Each soft decision except S-1 logs one WARN line per cell. S-1 is the default an
 | D3 | signed `$mul` sign-extended to `Y_WIDTH` (≤ 36), else soft (M-5) | `unconn` pad | none (no signed `$mul`) |
 | D4 | depth-split output select registered (R-7) | live address bit (confirmed: 468 mismatches in 2000 cycles, 0 with `addr[0]` held) | `mcml`: 6 more FFs (`counts:+6 latch`) |
 | D5 | an inferred `$mem` with an asynchronous read stays soft (R-9) | mapped as synchronous | none (no inferred memory) |
-| D6 | `2×2` `$mul` soft (M-2) | AND gates + hard adders | none |
+| D6 | `2×2` `$mul` soft (M-2) | AND gates + hard adders | none in the 19; micros: 4 fewer hard `adder` per 2×2 `$mul` (`counts:-4 adder`) |
 | D7 | `$mul` wider than 36 soft, with a warning (M-2); explicit `multiply` above 36 is an error (M-6); an explicit `multiply` below 36 is treated like the equivalent `$mul` with a warning (PHASE3 #39a) | split into 36-bit pieces + adders | none |
 | D7b | unsigned `$mul` with `Y_WIDTH > A_WIDTH + B_WIDTH` soft, with a warning (M-3) | hard, gnd on the extra Y bits | none after 3G |
 | D8 | inferred `$mem` with more than two ports, or ports that cannot share a RAM port: replicas or soft (R-10, R-11) | multiplexed port modes | none |
-| D9 | `RD_EN` mapped only when constant 1, else soft (R-10) | dropped | none |
+| D9 | `RD_EN` mapped only when constant 1, else soft (R-10) | dropped | none in the 19; micro `common/bram.v` (`counts:-8 dual_port_ram`) |
 | D10 | INIT dropped with a warning (R-12) | dropped silently | none |
 | D11 | names follow 3E's styles | Parmys's `~` names | names only |
 | D12 | an inferred `$mem` whose read address is registered stays asynchronous (R-9) when a write port is on the read clock; the address merge applies only to read-only memories (plan default d) | merged | none (no inferred memory in the 19) |

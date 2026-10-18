@@ -31,6 +31,10 @@ with open(HERE / "odin.log", "a") as log:
     log.write(" ".join(sys.argv[1:3]) + " :: " + script + "\n")
 if spec.get("odin_signal"):
     os.kill(os.getpid(), spec["odin_signal"])
+if "write_rtlil " in script:  # the lower-gap fallback run (stops before lower)
+    out = script.split("write_rtlil ")[1].split(";")[0]
+    Path(out).write_text(spec.get("odin_il", ""))
+    sys.exit(spec.get("il_rc", 0))
 sys.stderr.write(spec.get("odin_stderr", ""))
 if spec.get("odin_rc"):
     sys.exit(spec["odin_rc"])
@@ -72,6 +76,11 @@ GOLDEN = (
     ".model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n"
 )
 ONE_ADDER = GOLDEN.replace(".subckt adder a[0]=a b[0]=a cin[0]=n1 cout[0]=n2 sumout[0]=y2\n", "")
+IL_OK = (
+    "module \\other\n  cell \\multiply m9\n  end\nend\n"
+    "module \\top\n  cell \\adder a1\n  end\n  cell \\adder a2\n  end\n"
+    "  cell \\multiply m1\n  end\n  cell $dff d1\n  end\nend\n"
+)
 SIX_LATCHES = GOLDEN.replace(".latch a q re clk 0\n", ".latch a q re clk 0\n" * 7)
 
 
@@ -247,13 +256,44 @@ class ErrorTests(ToolCase):
         self.spec["odin_rc"] = 1
         self.spec["odin_stderr"] = (
             "odin3: error: lower: no lowering rule for cell type '$mul' ('m1'): not yet (3B-2)\n")
+        self.spec["odin_il"] = IL_OK
         code, out, _ = self.run_tool()
         self.assertEqual(code, 1)
-        self.assertIn("LOWER-GAP", out)
+        self.assertIn("LOWER-GAP (counts equal Parmys's", out)
         self.expect("common/foo.v lower-gap waits for the $mul rule of 3B-2\n")
         code, out, _ = self.run_tool()
         self.assertEqual(code, 0, out)
         self.assertIn("listed:lower-gap", out)
+
+    def test_wreduce_warning_in_a_lower_gap_run_is_warned(self) -> None:
+        self.spec["odin_rc"] = 1
+        self.spec["odin_stderr"] = (
+            "odin3: warning: hardmap: cell 'm': left soft for lower (run wreduce first)\n"
+            "odin3: error: lower: no lowering rule for cell type '$mul' ('m1')\n")
+        self.spec["odin_il"] = IL_OK
+        self.expect("common/foo.v lower-gap waits for 3B-2\n")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1)
+        self.assertIn("WARNED", out)
+
+    def test_lower_gap_counts_differ_is_not_absorbed(self) -> None:
+        self.spec["odin_rc"] = 1
+        self.spec["odin_stderr"] = "odin3: error: lower: no lowering rule for cell type '$x'\n"
+        self.spec["odin_il"] = IL_OK.replace("  cell \\multiply m1\n  end\n", "")
+        self.expect("common/foo.v lower-gap waits for 3B-2\n")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1)
+        self.assertIn("COUNTS-DIFFER", out)
+        self.assertIn("multiply -1", out)
+        self.expect("common/foo.v counts:-1 multiply D9: mapped by Parmys only\n")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 0, out)
+
+    def test_count_rtlil_reads_only_the_top_module(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "x.il"
+            path.write_text(IL_OK)
+            self.assertEqual(hd.count_rtlil(path, "top"), Counter(adder=2, multiply=1))
 
     def test_lower_gap_listed_but_odin_succeeds_is_stale(self) -> None:
         self.expect("common/foo.v lower-gap waits for 3B-2\n")

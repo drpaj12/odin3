@@ -19,16 +19,20 @@ common/1r.v counts:+8 single_port_ram D15: read-only memory without INIT, Parmys
 common/2r.v counts:+8 dual_port_ram D15: read-only memory without INIT, Parmys deletes it (opt_mem), Odin III maps 8 slices
 
 # lower-gap: `lower` (3B-1) has no rule yet for these cell types, so no netlist view is reachable.
-# hardmap's own output on each is covered by the unit tests and by `write_rtlil` runs. The 3B-2
+# hardmap-diff then counts the hard cells of the RTLIL written before `lower` (top module) against
+# the golden's hard blocks; those counts must equal the golden's plus the `counts:` lines above. The 3B-2
 # PR removes these lines; the equivalence of multiply_hard_block is owed until then (3C-1 report).
 common/rom.v lower-gap `$mem` and `$dffe` left soft by hardmap (R-10, read enable not constant 1); 3B-2 lowers them
+common/bram.v counts:-8 dual_port_ram D9: Parmys drops RD_EN and maps 8 slices, Odin III leaves the `$mem` soft (R-10)
 common/bram.v lower-gap `$mem` and `$dffe` left soft by hardmap (read enable not constant 1); 3B-2 lowers them
 common/nr.v lower-gap `$mem` and three `$dffe` left soft by hardmap (read enable not constant 1, R-10); 3B-2 lowers them
+micro/multiply_hard_block.v counts:-8 adder D6: Parmys builds each 2x2 multiplier from AND gates and 4 hard adders, Odin III leaves the `$mul` soft (M-2)
 micro/multiply_hard_block.v lower-gap two 2x2 `$mul` left soft (M-2, D6); 3B-2 lowers `$mul`
 operators/eightbit_arithmetic_power.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it
 operators/twobits_arithmetic_div.v lower-gap `$div` and `$sdff` (not hardmap's); 3B-2 lowers them
 operators/twobits_arithmetic_minus.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it
 operators/twobits_arithmetic_mod.v lower-gap `$mod` and `$sdff` (not hardmap's); 3B-2 lowers them
+operators/twobits_arithmetic_multiply.v counts:-4 adder D6: Parmys builds the 2x2 multiplier from AND gates and 4 hard adders, Odin III leaves the `$mul` soft (M-2)
 operators/twobits_arithmetic_multiply.v lower-gap 2x2 `$mul` left soft (M-2, D6) and `$sdff`; 3B-2 lowers them
 operators/twobits_arithmetic_plus.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it
 operators/twobits_arithmetic_power.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it

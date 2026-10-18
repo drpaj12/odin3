@@ -941,6 +941,63 @@ then the options considered.
     the same H-9 reason (spec A-7 amended). 3G `wreduce` caps Y at `n + 1`, so the target script
     never hits (b) or (d); 3C Task 4's sweep checks that no such WARNING appears on the 19.
 
+41. **3C `hardmap` Tasks 4-7: the check tool, the 19, the divergences, the agent defaults a-i**
+    (2026-10-17, branch `feat/3C-hardmap-ram`; agent defaults under Peter's Parmys-default rule, he
+    may override). Defaults a-i are the plan's (names `<cell>.<role>` and the `hardmap` attribute,
+    Y bits above a chain aliased or soft, address merge only without a write port on the read
+    clock (D12), `OFFSET` != 0 and falling-edge ports soft (D13, D14), node parameters, the
+    `dual-write-race` divergence class, the probes as evidence) and the Task 5-6 ones in the 3C
+    report (namesake = first non-glue node; ADDR bound 31; read-only memory SP/DP; R-11 also covers
+    split write enables, async or unclocked write ports and read-first conflicts; unused RAM
+    outputs left open; `hm_commit` deletes the `$mem` before the merged flip-flops; the test
+    RAM model is read-first). Task 4 and 7 defaults: (j) `hardmap-diff` runs the script
+    `tools/hardmap-check/phase3_pre_abc.script` (3G WR-9 plus `opt -full` after `hardmap` as spec
+    H-2, `opt -fast; compact` after `lower`) with `--top` the golden's first `.model` and the n-bit
+    `adder` of `tests/hardmap/adder_lib.v` read with `--lib` (what Parmys gets from
+    vtr_primitives.v, A-9); `--yosys` is accepted and unused. (k) A "run wreduce first" warning
+    fails a design and cannot be listed (3C-2a review M-2). (l) `lower` on main has no rule for
+    `$dff`, `$dffe`, `$sdff`, `$mem`, `$mul`, `$lt`, `$ge`, `$div`, `$mod`, `$neg` (3B-2), so most
+    designs cannot reach a BLIF. The expect id `lower-gap` lists that; the tool then counts the
+    hard cells of the RTLIL written before `lower` (top module) and requires them to equal the
+    golden's. The `lower-gap` lines go with 3B-2; the equivalence of
+    `micro/multiply_hard_block.v` is owed until then. (m) New divergence D15: Yosys's `opt_mem`
+    deletes a memory with no write port and no INIT; `opt` has no such rule, so hardmap maps it
+    (`common/1r.v`, `2r.v`: +8 slices). The cure is an `opt_mem` rule in 3G/Phase 4, not a hardmap
+    rule. (n) The micro `common/nrnw.v` is not in `micros.txt`: Parmys rejects it. (o) Spec 10:
+    D2b and D4 are confirmed by the probes, D12-D15 added, D6 and D9 effects recorded (micros only).
+    **Evidence.** Micros (`hardmap_diff_micro`, 26 designs, release or debug build): 12 equivalent
+    to Parmys through `lower` (adder, sub, mult, mult_const, mem, spram, dpram, 1r2w, 2r1w, 2r2w,
+    adder_hard_block, hard_adder_cin_propagation), 14 listed (D15 x2, D6/D9 count differences,
+    and `lower-gap` with equal counts otherwise). D1 and D2b positive test: the Odin III netlists of
+    `tests/hardmap/sx_add_c.v`, `sub_pad_s.v` and `sub_pad_u.v` (through `lower`) against their
+    RTL with `parmys-probe`: 0 mismatches in 3000 cycles each, where Parmys's own netlists fail
+    (probes README). **The 19** (run order, `tests/hardmap/vtr_designs.txt`): small designs run
+    2026-10-17, one `tools/heavy-run` each, release build:
+
+    | design | result | hard-block counts vs the golden |
+    |---|---|---|
+    | ch_intrinsics | lower-gap (`$dffe`) | equal (adder 0, multiply 0, SP 8) |
+    | stereovision3 | lower-gap (`$dff`) | equal |
+    | diffeq2 | lower-gap (`$lt`) | equal |
+    | diffeq1 | lower-gap (`$lt`) | equal |
+    | mkPktMerge | lower-gap (`$sdffe`) | equal |
+    | sha | lower-gap (`$lt`) | equal |
+    | blob_merge | lower-gap (`$ge`) | equal |
+    | raygentop, boundtop, mkSMAdapter4B, or1200, stereovision0, stereovision1, mkDelayWorker32B, stereovision2, LU8PEEng, bgm, mcml, LU32PEEng | not run (controller, heavy) | predicted equal; mcml +6 `.latch` (D4) after 3B-2 |
+
+    No "run wreduce first" warning on the seven. Commands for the rest, from the worktree root,
+    one design per call, in this order (add `--keep /tmp/claude-1000/<dir>` to keep the work files):
+    `export VTR_ROOT=~/odin3-ws/external/vtr-verilog-to-routing; V=$VTR_ROOT/vtr_flow/benchmarks/verilog;
+    for d in raygentop boundtop mkSMAdapter4B or1200 stereovision0 stereovision1 mkDelayWorker32B
+    stereovision2 LU8PEEng bgm mcml LU32PEEng; do ODIN3_HEAVY_OK=1 tools/heavy-run
+    tools/hardmap-check/hardmap-diff --odin3 build/release/odin3 --yosys $VTR_ROOT/build/bin/yosys
+    --arch $VTR_ROOT/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml --expect
+    tests/hardmap/diff_expect.txt --expect tests/hardmap/vtr_expect.txt $V/$d.v; done`
+    (each iteration is its own heavy-run; `spree` and `arm_core` have goldens but are outside the
+    19 and have no expectation lines: add `lower-gap` lines first). `ctest --preset sweep -R
+    hardmap_vtr_sweep` runs all 19 in one heavy job. Task 7 step 5 (the O' leg through VPR) waits
+    for 3D-5 `abc` and 3H, and for 3B-2.
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this

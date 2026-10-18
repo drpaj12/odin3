@@ -74,6 +74,8 @@ PLAIN_IDS = ("unproven", "no-golden", "lower-gap")
 GAP_NEEDLE = "no lowering rule for cell type"
 MODEL = re.compile(r"^\.model\s+(\S+)", re.MULTILINE)
 SUBCKT = re.compile(r"^\.subckt\s+(\S+)")
+RTLIL_CELL = re.compile(r"^\s*cell\s+\\(\S+)\s")
+HARD_UNITS = tuple(unit for unit in UNITS if unit != "latch")
 NOT_EQUIVALENT = "NOT equivalent"
 PASSING = ("identical", "equivalent")
 
@@ -84,6 +86,10 @@ class ToolError(Exception):
 
 class LowerGap(Exception):
     """Odin III stopped in ``lower``, which has no rule for a cell yet (3B-2): not hardmap's."""
+
+    def __init__(self, text: str, log: str) -> None:
+        super().__init__(text)
+        self.log = log
 
 
 class HardFailure(Exception):
@@ -128,10 +134,12 @@ class Result:
 
 
 def script_text(template: Path, lib: Path, design: Path, out: Path,
-                adder_lib: Path | None = None) -> str:
+                adder_lib: Path | None = None, rtlil: bool = False) -> str:
     """The ``-p`` string: the script file's commands joined by ``; `` with the names filled."""
     lines = [ln.strip() for ln in template.read_text(encoding="utf-8").splitlines()]
     commands = [ln for ln in lines if ln and not ln.startswith("#")]
+    if rtlil:  # stop before `lower` and write the RTLIL view (the lower-gap fallback)
+        commands = [*commands[:commands.index("lower")], "write_rtlil @OUT@"]
     if adder_lib is None:
         commands = [ln for ln in commands if "@ADDERLIB@" not in ln]
     text = "; ".join(commands)
@@ -172,6 +180,20 @@ def count_blocks(path: Path) -> Counter[str]:
             continue
         match = SUBCKT.match(line)
         if match and match.group(1) in UNITS:
+            counts[match.group(1)] += 1
+    return counts
+
+
+def count_rtlil(path: Path, top: str) -> Counter[str]:
+    """The hard cells of module ``top`` in an RTLIL text (other modules are not the netlist)."""
+    counts: Counter[str] = Counter()
+    inside = False
+    for line in blif_lines(path):
+        if line.startswith("module "):
+            inside = line.split()[1] == "\\" + top
+            continue
+        match = RTLIL_CELL.match(line) if inside else None
+        if match and match.group(1) in HARD_UNITS:
             counts[match.group(1)] += 1
     return counts
 
@@ -254,7 +276,7 @@ def run_odin(cfg: Config, design: Path, top: str, work: Path) -> tuple[Path, str
     (work / "odin.log").write_text(log, encoding="utf-8")
     if proc.returncode != 0 and GAP_NEEDLE in proc.stderr:
         gap = next(ln for ln in proc.stderr.splitlines() if GAP_NEEDLE in ln)
-        raise LowerGap(gap.replace("odin3: error: ", "").strip())
+        raise LowerGap(gap.replace("odin3: error: ", "").strip(), log)
     if proc.returncode != 0:
         raise ToolError(f"odin3 exited {proc.returncode}: {tail(proc.stderr)}")
     return out, log
@@ -325,12 +347,31 @@ def judge(key: str, entries: list[Entry], delta: dict[str, int],
     return judge_compare(key, entries, compare())
 
 
-def judge_gap(key: str, entries: list[Entry], text: str) -> Result:
-    """Odin III stopped in ``lower``: a failure unless the design is listed ``lower-gap``."""
+def judge_gap(key: str, entries: list[Entry], text: str, delta: dict[str, int]) -> Result:
+    """Odin III stopped in ``lower``: the hard-block counts of the RTLIL before ``lower`` still
+    have to equal the listed ones (``counts-differ`` otherwise); then a failure unless the design
+    is listed ``lower-gap``. ``delta`` covers the hard units only (the RTLIL has no ``.latch``)."""
+    want = {e.unit: e.delta for e in entries if e.ident == "counts" and e.unit != "latch"}
+    if delta != want:
+        return Result(key, "counts-differ", False,
+                      f"in lower-gap, RTLIL before lower: {fmt_delta(delta)}; "
+                      f"listed: {fmt_delta(want)}")
     listed = [e for e in entries if e.ident == "lower-gap"]
     if listed:
-        return Result(key, "listed:lower-gap", True, listed[0].reason)
-    return Result(key, "lower-gap", False, text)
+        return Result(key, "listed:lower-gap", True, f"counts equal Parmys's; {listed[0].reason}")
+    return Result(key, "lower-gap", False, f"counts equal Parmys's; {text}")
+
+
+def gap_delta(cfg: Config, design: Path, golden: Path, work: Path) -> dict[str, int]:
+    """Count difference (Odin III minus Parmys) from the RTLIL written before ``lower``."""
+    top = first_model(golden)
+    out = work / "odin.il"
+    script = script_text(SCRIPT, cfg.techlib, design, out, cfg.adder_lib, rtlil=True)
+    proc = run_child([cfg.odin3, "--top", top, "-p", script], cfg.timeout)
+    if proc.returncode != 0:
+        raise ToolError(f"odin3 (before lower) exited {proc.returncode}: {tail(proc.stderr)}")
+    gold = count_blocks(golden)
+    return count_delta(count_rtlil(out, top), Counter({u: gold[u] for u in HARD_UNITS}))
 
 
 def check_arch(cfg: Config, golden: Path) -> None:
@@ -341,6 +382,14 @@ def check_arch(cfg: Config, golden: Path) -> None:
     recorded = fields.get("arch")
     if recorded and Path(recorded).stem != Path(cfg.arch).stem:
         raise ToolError(f"{golden.name}: golden arch '{recorded}' is not --arch '{cfg.arch}'")
+
+
+def wreduce_warning(key: str, log: str) -> Result | None:
+    """The ``warned`` result when Odin III's output holds the ``run wreduce first`` warning."""
+    for line in log.splitlines():
+        if WARN_NEEDLE in line:
+            return Result(key, "warned", False, line.strip())
+    return None
 
 
 def find_golden(cfg: Config, design: Path) -> Path:
@@ -362,10 +411,13 @@ def check_design(cfg: Config, design: Path, work: Path) -> Result:
     try:
         out, log = run_odin(cfg, design, first_model(golden), work)
     except LowerGap as gap:
-        return judge_gap(key, entries, str(gap))
-    if WARN_NEEDLE in log:
-        line = next(ln for ln in log.splitlines() if WARN_NEEDLE in ln)
-        return Result(key, "warned", False, line.strip())
+        warned = wreduce_warning(key, gap.log)
+        if warned is not None:
+            return warned
+        return judge_gap(key, entries, str(gap), gap_delta(cfg, design, golden, work))
+    warned = wreduce_warning(key, log)
+    if warned is not None:
+        return warned
     delta = count_delta(count_blocks(out), count_blocks(golden))
     return judge(key, entries, delta, lambda: compare_netlists(cfg, golden, out, work))
 

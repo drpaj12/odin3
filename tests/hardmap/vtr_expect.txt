@@ -6,3 +6,40 @@
 # (spec A-2, A-6; Peter's ruling 2026-10-14). Same adder count; Odin III is RTL-correct (PHASE3 #41).
 # `unproven`: equiv-check cannot decide the design (tests/exit/vtr_unproven.txt); the hard-block
 # counts, which hardmap-diff always checks, are then the evidence.
+
+# lower-gap: `lower` (3B-1) has no rule yet for the `$dff`/`$dffe`/`$lt`/`$ge` cells of these designs,
+# so no netlist view exists. hardmap-diff then compares the hard cells of the RTLIL written before
+# `lower` (top module) with the golden: equal on the 7 small designs (run 2026-10-17, one
+# tools/heavy-run each); the other 12 are predicted the same and are the controller's to confirm.
+# These lines go when the 3B-2 PR lands (then every design is compared as a netlist).
+ch_intrinsics.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
+stereovision3.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
+diffeq2.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
+diffeq1.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
+mkPktMerge.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
+raygentop.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+sha.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
+boundtop.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+mkSMAdapter4B.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+or1200.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+stereovision0.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+stereovision1.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+mkDelayWorker32B.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+stereovision2.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+blob_merge.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); verified, hard-block counts equal Parmys's
+LU8PEEng.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+bgm.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+mcml.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+LU32PEEng.v lower-gap `lower` has no rule for its flip-flops and comparisons (3B-2); predicted, not run yet
+
+# After 3B-2 (predicted from spec 2 and 10; confirm with the commands in PHASE3 #41):
+stereovision0.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
+stereovision1.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
+stereovision2.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
+LU8PEEng.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
+LU32PEEng.v D1 signed adder operands sign-extended, Parmys pads with unconn (A-2, A-6); same adder count
+LU8PEEng.v D1 also R-6: 4 instances with two live write ports map as plain dual_port_ram slices, no priority logic
+mcml.v counts:+6 latch D4: registered depth-split select, 6 more flip-flops (R-7); D1 applies too (1 signed adder)
+LU32PEEng.v unproven equiv-check cannot decide it (tests/exit/vtr_unproven.txt); the counts are the evidence
+mcml.v unproven equiv-check cannot decide it (tests/exit/vtr_unproven.txt); the counts are the evidence
+stereovision3.v unproven equiv-check cannot decide it (tests/exit/vtr_unproven.txt); the counts are the evidence
