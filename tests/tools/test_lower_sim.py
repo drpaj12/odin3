@@ -118,8 +118,8 @@ class PureTest(unittest.TestCase):
 
     def test_the_skip_table_covers_the_types_without_a_hook(self) -> None:
         for name in ("$shl", "$shr", "$sshr", "$shiftx", "$div", "$mod", "$pow", "$tribuf", "$mem",
-                     "$dff", "$adffe", "$dlatch", "$sr"):
-            self.assertIn(name, ls.SKIP_REASONS)
+                     "$dff", "$adffe", "$dlatch", "$sr", "\\single_port_ram", "\\dual_port_ram"):
+            self.assertIn(name, ls.SKIP_REASONS)  # (the two RAMs: "cannot simulate ... no hook")
         for name in ("$and", "$mux", "$pmux", "$add", "$mul", "$eq", "$reduce_or"):
             self.assertNotIn(name, ls.SKIP_REASONS)
 
@@ -185,6 +185,16 @@ class RunTest(unittest.TestCase):
         self.assertIn("$shiftx: skipped (no simulate hook; x outputs: covered by lower-equiv)", out)
         self.assertIn("$and: skipped (design skipped)", out)
         self.assertNotIn("pass", out)
+
+    def test_a_hard_block_design_is_skipped_not_a_tool_error(self) -> None:
+        """lower_sim_micro (2026-10-18): spram.v, dpram.v, LargeRam.v ... ended as `odin3 (before)
+        exit 1: cannot simulate `single_port_ram`: the cell type has no simulate hook`."""
+        self.tree.set_spec(before_il=SHIFTX_IL.replace("$shiftx", "\\single_port_ram"),
+                           before_rc=1)
+        code, out, err = self.tree.run("--allow-skipped")
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("\\single_port_ram: skipped (no simulate hook (a hard block)", out)
+        self.assertIn("(1 skipped, 0 empty)", out)
 
     def test_a_compared_design_is_counted_and_a_difference_beats_a_skip(self) -> None:
         code, out, _ = self.tree.run()

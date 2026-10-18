@@ -430,7 +430,9 @@ class BeyondXTest(unittest.TestCase):
     def run_with(self, kind: str) -> tuple[int, str]:
         import lower_equiv
 
+        boxes = (Path("in.il"), Path("gate.il"), "")
         with mock.patch.object(lower_equiv, "make_gate", return_value=Path("gate.il")), \
+                mock.patch.object(lower_equiv, "prepare_boxes", return_value=boxes), \
                 mock.patch.object(lower_equiv, "refine", return_value=(kind, "detail")):
             code, out, err = self.tree.run("--family", "shift", *self.extra)
         return code, out + err

@@ -29,6 +29,42 @@ ODIN3 = os.environ.get("ODIN3_CLI", "")
 YOSYS = os.environ.get("ODIN3_YOSYS055", "")
 CAP = 3 << 30
 HERE = Path(__file__).resolve().parent
+TECHLIB = HERE.parent.parent / "lib" / "vtr.o3lib"
+TWO_CLOCKS = """module m(input clk0, input clk1, input [1:0] a, output out);
+  reg sel;
+  reg [1:0] t;
+  always @(posedge clk0) t <= a;
+  always @(posedge clk1) sel <= sel + 1;
+  assign out = sel ? t[1] : t[0];
+endmodule
+"""
+HARD_BLOCK = """module m(input clk, input we, input [3:0] d, output [3:0] q);
+  reg [3:0] a;
+  always @(posedge clk) a <= a + 1;
+  defparam i.ADDR_WIDTH = 4;
+  defparam i.DATA_WIDTH = 4;
+  single_port_ram i (.addr(a), .data(d), .we(we), .clk(clk), .out(q));
+endmodule
+"""
+INIT = """module m(input clk, output [3:0] y);
+  reg [3:0] q = 4'd{val};
+  always @(posedge clk) q <= q + 1;
+  assign y = q;
+endmodule
+"""
+INIT2 = """module m(input clk0, input clk1, input [3:0] a, output [3:0] y, output z);
+  reg [3:0] q = 4'd{val}; reg s = 0;
+  always @(posedge clk0) q <= q + 1;
+  always @(posedge clk1) s <= ~s;
+  assign y = q; assign z = s ^ a[0];
+endmodule
+"""
+NOINIT_AND = """module m(input clk, input d, output q);
+  reg r;
+  always @(posedge clk) r <= {body};
+  assign q = r;
+endmodule
+"""
 
 FF = """module m(input clk, input clk2, input rst, input en, input [3:0] d, output reg [3:0] q);
   always @(posedge {clk}) {body}
@@ -91,19 +127,19 @@ class RefinementTest(unittest.TestCase):
         self.base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-"))
         self.count = 0
 
-    def snap(self, text: str) -> tuple[Path, Path]:
+    def snap(self, text: str, techlib: str | None = None) -> tuple[Path, Path]:
         """(lower-before.il, lower-after.blif) of a design given as Verilog text."""
         self.count += 1
         run = self.base / f"d{self.count}"
         run.mkdir()
         source = run / "m.v"
         source.write_text(text, encoding="utf-8")
-        script = le.snapshot_script([str(source)], None, None, ["proc", "opt"], "", run)
+        script = le.snapshot_script([str(source)], None, techlib, ["proc", "opt"], "", run)
         return le.snapshot(ODIN3, script, None, run, CAP)
 
-    def verdict(self, gold: str, gate: str) -> le.Verdict:
-        before, _ = self.snap(gold)
-        _, after = self.snap(gate)
+    def verdict(self, gold: str, gate: str, techlib: str | None = None) -> le.Verdict:
+        before, _ = self.snap(gold, techlib)
+        _, after = self.snap(gate, techlib)
         work = self.base / f"check{self.count}"
         work.mkdir()
         return le.check_pair(YOSYS, before, after, work, CAP, (None, None, False))
@@ -175,6 +211,73 @@ class RefinementTest(unittest.TestCase):
     def test_a_wrong_mem_offset(self) -> None:
         self.differs(MEM.format(lo=1, hi=4), MEM.format(lo=2, hi=5))
 
+    def test_a_register_that_feeds_itself_is_paired_by_name_across_two_clocks(self) -> None:
+        """The BLIF keeps no internal net name, so without the pairing hint the induction cannot
+        relate the gate's `$n` register to the gold's `sel` (3B heavy triage, 2026-10-18:
+        multiclock_output_and_latch was reported as not a refinement)."""
+        self.refines(TWO_CLOCKS)
+
+    def test_a_hard_block_fed_by_a_register_refines(self) -> None:
+        """A `single_port_ram` has no model: its inputs are compared and its outputs shared
+        (`expose -evert`), which needs the module declared on both sides (ch_intrinsics,
+        mkPktMerge were reported as a port mismatch)."""
+        got = self.verdict(HARD_BLOCK, HARD_BLOCK, str(TECHLIB))
+        self.assertEqual(got.kind, "ok", got.detail)
+
+    def hard_differs(self, gate: str) -> None:
+        got = self.verdict(HARD_BLOCK, gate, str(TECHLIB))
+        self.assertEqual(got.kind, "differs", f"{got.kind}: {got.detail}")
+
+    def test_a_hard_block_with_a_wrong_address_differs(self) -> None:
+        self.hard_differs(HARD_BLOCK.replace("a <= a + 1", "a <= a + 2"))
+
+    def test_a_wrong_data_bit_into_a_hard_block_differs(self) -> None:
+        """Soundness review C1 (A5): the black box declares `data` 1 bit wide; every bit of the
+        instance's connection must still be compared."""
+        self.hard_differs(HARD_BLOCK.replace(".data(d)", ".data({d[3], ~d[2], d[1:0]})"))
+        self.hard_differs(HARD_BLOCK.replace(".data(d)", ".data({d[3:2], ~d[1], d[0]})"))
+
+    def test_a_wrong_read_bit_of_a_hard_block_differs(self) -> None:
+        """C1 (A6): `out[3:1]` must be shared inputs, not undriven x (a don't care in the gold)."""
+        for bit in (3, 1):
+            body = [f"~qq[{k}]" if k == bit else f"qq[{k}]" for k in range(3, -1, -1)]
+            gate = HARD_BLOCK.replace(".out(q)", ".out(qq)").replace(
+                "  reg [3:0] a;", f"  wire [3:0] qq; assign q = {{{', '.join(body)}}};\n"
+                "  reg [3:0] a;")
+            with self.subTest(bit=bit):
+                self.hard_differs(gate)
+
+    def test_a_hard_block_of_another_data_width_differs(self) -> None:
+        """M1 (A7): the BLIF keeps no parameter; `DATA_WIDTH` 5 shows as a 5-bit `data`/`out`."""
+        self.hard_differs(HARD_BLOCK.replace("DATA_WIDTH = 4", "DATA_WIDTH = 5"))
+
+    def test_an_unpaired_two_clock_bug_differs(self) -> None:
+        """H1 (A4): the gate's register `tt` has no gold name, so the induction cannot pair it;
+        the bounded check from the initial state finds the trace of the swapped mux."""
+        gate = TWO_CLOCKS.replace("[1:0] t;", "[1:0] tt;").replace("t <= a", "tt <= a")
+        self.differs(TWO_CLOCKS, gate.replace("t[1] : t[0]", "tt[0] : tt[1]"))
+
+    def test_an_equivalent_unpaired_two_clock_design_is_never_a_difference(self) -> None:
+        gate = TWO_CLOCKS.replace("[1:0] t;", "[1:0] tt;").replace("t <= a", "tt <= a")
+        got = self.verdict(TWO_CLOCKS, gate.replace("t[1] : t[0]", "tt[1] : tt[0]"))
+        self.assertIn(got.kind, ("ok", "unproven"), got.detail)
+
+    def test_a_wrong_initial_value_differs(self) -> None:
+        """H2 (A9): equiv_induct has no base case; the bounded check starts from `init`."""
+        self.refines(INIT.format(val=0))
+        self.differs(INIT.format(val=0), INIT.format(val=1))
+        self.refines(INIT2.format(val=0))
+        self.differs(INIT2.format(val=0), INIT2.format(val=1))
+
+    def test_a_flop_without_init_starts_at_every_value_not_only_zero(self) -> None:
+        """N2: gold `r <= r & d` against gate `r <= r` differs only when r starts at 1 (the
+        zero start hid it); the verdict is a difference, exit 1; the controls stay ok."""
+        gold = NOINIT_AND.format(body="r & d")
+        self.refines(gold)
+        got = self.verdict(gold, NOINIT_AND.format(body="(r & d) | (r & ~d)"))
+        self.assertEqual(got.kind, "differs", f"{got.kind}: {got.detail}")
+        self.assertEqual(le.report_line("m.v", "m.v", got, {})[1], lc.EXIT_FAIL)
+
 
 GATE = """autoidx 1
 module \\m
@@ -219,6 +322,169 @@ class NormalisePortsTest(unittest.TestCase):
     def test_a_port_with_a_missing_bit_is_left_to_the_port_match(self) -> None:
         gold = GOLD.replace("width 7 offset 1 output 2", "width 9 offset 1 output 2")
         self.assertEqual(le.normalise_ports(GATE, gold, "\\m"), GATE)
+
+
+BOX = """attribute \\blackbox 1
+attribute \\dynports 1
+module \\ram
+  parameter \\W 1
+  wire input 1 \\a
+  wire output 2 \\q
+end
+"""
+
+
+class BlackboxTest(unittest.TestCase):
+    """The black-box declarations copied into the gate (no tool runs)."""
+
+    def test_the_modules_with_the_blackbox_attribute_are_found(self) -> None:
+        text = "autoidx 1\nmodule \\m\n  cell \\ram \\i\n  end\nend\n" + BOX
+        self.assertEqual(list(le.blackbox_modules(text)), ["\\ram"])
+        self.assertEqual(le.blackbox_modules(text)["\\ram"], BOX)
+
+    def test_a_used_declaration_the_gate_lacks_is_added_once(self) -> None:
+        gate = "autoidx 1\nmodule \\m\n  cell \\ram \\i\n  end\nend\n"
+        out = le.add_blackboxes(gate, gate + BOX)
+        self.assertEqual(out, gate + BOX)
+        self.assertEqual(le.add_blackboxes(out, gate + BOX), out)
+
+    def test_an_unused_declaration_is_not_added(self) -> None:
+        gate = "module \\m\nend\n"
+        self.assertEqual(le.add_blackboxes(gate, gate + BOX), gate)
+
+
+PAIR_GOLD = """autoidx 1
+module \\m
+  wire width 3 \\r
+  wire \\s
+  wire width 2 \\u
+end
+"""
+PAIR_GATE = """autoidx 1
+module \\m
+  wire $n1
+  cell $dff \\r.dff_p5
+    connect \\Q $n5
+  end
+  cell $dff \\r.dff_p2
+    connect \\Q $n2
+  end
+  cell $dff \\r.dff_p8
+    connect \\Q $n8
+  end
+  cell $dff \\s.dff_p1
+    connect \\Q $n1
+  end
+  cell $dff \\u.dff_p1
+    connect \\Q $n9
+  end
+end
+"""
+
+
+class PairRegistersTest(unittest.TestCase):
+    """The register pairing hint of ``make_gate`` on RTLIL text (no tool runs)."""
+
+    def test_a_register_gets_its_golds_name_with_the_bits_in_order(self) -> None:
+        out = le.pair_registers(PAIR_GATE, PAIR_GOLD)
+        self.assertIn("  wire width 3 \\r\n  connect \\r [0] $n2\n  connect \\r [1] $n5\n"
+                      "  connect \\r [2] $n8\n", out)
+        self.assertIn("  wire \\s\n  connect \\s $n1\n", out)
+
+    def test_the_bits_the_golds_cells_drive_take_the_cells_that_survived(self) -> None:
+        """A register whose upper bits nothing reads keeps its width in the gold wire but fewer
+        cells in the gate (multiclock_reader_writer's `register`)."""
+        cell = "  cell $dff \\c\n    connect \\Q \\r [2:1]\n  end\n"
+        gold = PAIR_GOLD.replace("end\n", cell + "end\n", 1)
+        gate = PAIR_GATE.replace("  cell $dff \\r.dff_p8\n    connect \\Q $n8\n  end\n", "")
+        out = le.pair_registers(gate, gold)
+        self.assertIn("  connect \\r [1] $n2\n  connect \\r [2] $n5\n", out)
+        self.assertNotIn("connect \\r [0]", out)
+
+    def test_a_register_with_fewer_cells_than_the_golds_width_is_left_alone(self) -> None:
+        self.assertNotIn("connect \\u ", le.pair_registers(PAIR_GATE, PAIR_GOLD))
+
+    def test_a_dup_suffix_orders_cells_of_one_name(self) -> None:
+        gate = PAIR_GATE.replace("r.dff_p5", "r.dff_p1_2").replace("r.dff_p2", "r.dff_p1_1")
+        gate = gate.replace("r.dff_p8", "r.dff_p1")
+        out = le.pair_registers(gate, PAIR_GOLD)
+        self.assertIn("connect \\r [0] $n8\n  connect \\r [1] $n2\n  connect \\r [2] $n5\n", out)
+
+    def test_a_name_the_gate_already_has_is_not_declared_twice(self) -> None:
+        gate = PAIR_GATE.replace("  wire $n1\n", "  wire $n1\n  wire \\s\n")
+        self.assertEqual(le.pair_registers(gate, PAIR_GOLD).count("wire \\s\n"), 1)
+
+
+USES = {"\\i": le.BoxUse("\\ram", (("\\a", 4), ("\\q", 4)))}
+
+
+class BoxTest(unittest.TestCase):
+    """The hard-block declarations at the instances' widths (C1, M1; no tool runs)."""
+
+    def test_a_declaration_gets_exactly_the_connected_ports_at_their_widths(self) -> None:
+        out = le.box_declaration(BOX, "\\ram$o3w0", {"\\q": 4})
+        self.assertIn("module \\ram$o3w0\n", out)
+        self.assertIn("  wire width 4 output 1 \\q\n", out)
+        self.assertNotIn("\\a\n", out)  # an unconnected port is not declared
+
+    def test_a_port_the_declaration_lacks_is_an_error(self) -> None:
+        with self.assertRaises(lc.ToolError):
+            le.box_declaration(BOX, "\\ram$o3w0", {"\\b": 1})
+
+    def test_a_shared_instance_must_agree_on_type_widths_and_parameters(self) -> None:
+        self.assertEqual(le.box_mismatch(USES, USES), "")
+        wide = {"\\i": le.BoxUse("\\ram", (("\\a", 4), ("\\q", 5)))}
+        self.assertIn("hard block \\i", le.box_mismatch(USES, wide))
+        kind = {"\\i": le.BoxUse("\\rom", USES["\\i"].widths)}
+        self.assertIn("hard block \\i", le.box_mismatch(USES, kind))
+        self.assertEqual(le.box_mismatch(USES, {}), "")  # (left to the port match)
+
+    def test_instances_are_retyped_by_name(self) -> None:
+        text = "autoidx 1\nmodule \\m\n  cell \\ram \\i\n  end\n  cell \\ram \\j\n  end\nend\n"
+        out = le.retype_boxes(text, "\\m", USES, {("\\ram", USES["\\i"].widths): "\\ram$o3w0"})
+        self.assertIn("  cell \\ram$o3w0 \\i\n", out)
+        self.assertIn("  cell \\ram \\j\n", out)
+
+    def test_json_names(self) -> None:
+        self.assertEqual(le.rtlil_id("i"), "\\i")
+        self.assertEqual(le.rtlil_id("$n1"), "$n1")
+
+
+class BoundedScriptTest(unittest.TestCase):
+    """The bounded check's script (H1, H2; no tool runs)."""
+
+    def test_the_script_starts_from_init_and_ignores_gold_x(self) -> None:
+        script = le.bounded_script("g.il", "t.il", False, 20, False)
+        self.assertIn("-set-init-zero -enable_undef -set-def-inputs -prove-asserts", script)
+        self.assertIn("miter -equiv -flatten -make_assert -ignore_gold_x gold gate miter", script)
+        self.assertIn("sat -seq 20 ", script)
+        self.assertLess(script.index(opt_equiv.EVERT_BLACKBOXES), script.index("clk2fflogic"))
+        self.assertNotIn("expose -shared", script)
+        undef = le.bounded_script("g.il", "t.il", False, 4, True, False, le.START_UNDEF)
+        self.assertIn("sat -seq 4 -set-init-undef -enable_undef ", undef)
+        self.assertNotIn("-set-init-zero", undef)
+
+    def test_a_tied_start_gives_both_sides_one_value_to_paired_wires_only(self) -> None:
+        gold = ("autoidx 1\nmodule \\m\n  wire input 1 \\clk\n  wire width 4 \\r\n"
+                "  attribute \\init 1'1\n  wire \\s\n  wire \\only\n  wire \\x\nend\n")
+        gate = ("autoidx 1\nmodule \\m\n  wire input 1 \\clk\n  attribute \\init 4'xxxx\n"
+                "  wire width 4 \\r\n  wire \\s\n  wire \\x\nend\n")
+        new_gold, new_gate = le.tie_starts(gold, gate, ("\\m", "\\m"))
+        self.assertIn("  attribute \\init 4'1111\n  wire width 4 \\r\n", new_gold)
+        self.assertIn("  attribute \\init 4'1111\n  wire width 4 \\r\n", new_gate)
+        self.assertNotIn("4'xxxx", new_gate)
+        self.assertIn("  attribute \\init 1'1\n  wire \\s\n", new_gold)  # (gold's own init stays)
+        self.assertEqual(new_gold.count("init"), 3)  # r, s (its own), x
+        self.assertNotIn("init 1'1\n  wire \\s\n", new_gate)  # not tied: gold defines it
+        self.assertNotIn("init 1'1\n  wire \\only\n", new_gold)  # one side only
+        self.assertNotIn("init 1'1\n  wire input", new_gold)  # (an input)
+
+    def test_the_base_case_compares_every_shared_name(self) -> None:
+        script = le.bounded_script("g.il", "t.il", True, le.BASE_STEPS, True)
+        self.assertIn("proc; flatten", script)
+        self.assertIn("; clk2fflogic;", script)
+        self.assertIn("; async2sync;", le.bounded_script("g", "t", False, 4, True, True))
+        self.assertLess(script.index("expose -shared gold gate"), script.index("miter -equiv"))
 
 
 class ReportTest(unittest.TestCase):
@@ -288,49 +554,86 @@ class ExitCodeTest(unittest.TestCase):
 
 
 class RefineVerdictTest(unittest.TestCase):
-    """``refine``'s decision table with the SAT flow and the cec stubbed (M1 of the review: only
-    one real test reached the "no memory, the SAT flow failed" line)."""
+    """``refine``'s decision table with the SAT flow, the bounded check and the cec stubbed
+    (soundness review H1, H2): "differs" only on a trace from the initial state, "ok" only with
+    the base case or a cec proof, "unproven" otherwise."""
 
-    GOLD_PLAIN = "module \\m\n  cell $and \\c\n  end\nend\n"
-    GOLD_MEM = "module \\m\n  cell $mem \\c\n  end\nend\n"
+    GOLD = "autoidx 1\nmodule \\m\n  cell $dff \\c\n  end\nend\n"
+    GATE = "autoidx 1\nmodule \\m\n  wire \\x\nend\n"
 
-    def verdict(self, gold_text: str, sat_ok: bool, cec: str) -> tuple[str, str]:
+    def verdict(self, sat_ok: bool, bmc: list[str], cec: str = opt_equiv.CEC_UNPROVEN
+                ) -> tuple[str, str, list[Any]]:
+        """(verdict, detail, the checks run); ``bmc`` = the answers of the bounded checks in call
+        order: a base case (``bounded_check``, recorded as its ``run``) or the concrete output
+        runs (``output_trace``, recorded as "outputs")."""
         base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-refine-"))
-        gold = base / "gold.il"
-        gold.write_text(gold_text, encoding="utf-8")
+        gold, gate = base / "gold.il", base / "gate.il"
+        gold.write_text(self.GOLD, encoding="utf-8")
+        gate.write_text(self.GATE, encoding="utf-8")
         checker = mock.Mock()
         checker.refines.return_value = (sat_ok, "the SAT flow failed")
+        answers = iter([(answer, "trace text") for answer in bmc])
+        runs: list[Any] = []
+
+        def bounded(*args: Any) -> tuple[str, str]:
+            runs.append(args[4])
+            return next(answers)
+
+        def outputs(*_: Any) -> tuple[str, str]:
+            runs.append("outputs")
+            return next(answers)
+
         with mock.patch.object(opt_equiv, "Checker", return_value=checker), \
+                mock.patch.object(le, "bounded_check", bounded), \
+                mock.patch.object(le, "output_trace", outputs), \
                 mock.patch.object(le, "cec_gold_and_blif", return_value=(cec, "cec text")):
-            return le.refine("y", gold, base / "gate.il", base / "after.blif", base, 1, None)
+            kind, detail = le.refine("y", (gold, gate), base / "after.blif", base, 1, None)
+        return kind, detail, runs
 
-    def test_a_sat_failure_without_a_memory_is_a_difference_whatever_the_cec_says(self) -> None:
-        for cec in (opt_equiv.CEC_UNPROVEN, opt_equiv.CEC_DIFFERS):
-            with self.subTest(cec=cec):
-                self.assertEqual(self.verdict(self.GOLD_PLAIN, False, cec)[0], "differs")
+    def test_a_failed_proof_is_a_difference_only_with_a_trace(self) -> None:
+        kind, _, runs = self.verdict(False, [le.TRACE])
+        self.assertEqual(kind, "differs")
+        self.assertEqual(runs, ["outputs"])  # the concrete output runs only
+        for answer in (le.NO_TRACE, le.NO_ANSWER):
+            for cec in (opt_equiv.CEC_DIFFERS, opt_equiv.CEC_UNPROVEN):
+                with self.subTest(answer=answer, cec=cec):
+                    self.assertEqual(self.verdict(False, [answer], cec)[0], "unproven")
 
-    def test_a_sat_failure_with_a_memory_follows_the_cec(self) -> None:
-        self.assertEqual(self.verdict(self.GOLD_MEM, False, opt_equiv.CEC_PROVED)[0], "ok")
-        self.assertEqual(self.verdict(self.GOLD_MEM, False, opt_equiv.CEC_DIFFERS)[0], "differs")
-        self.assertEqual(self.verdict(self.GOLD_MEM, False, opt_equiv.CEC_UNPROVEN)[0],
-                         "unproven")
+    def test_a_failed_proof_without_a_trace_follows_a_cec_proof(self) -> None:
+        proved = opt_equiv.CEC_PROVED
+        kind, _, runs = self.verdict(False, [le.NO_TRACE, le.NO_TRACE], proved)
+        self.assertEqual(kind, "ok")
+        self.assertEqual(runs[1], (None, le.BASE_STEPS, True, le.START_UNDEF))  # N2: base case too
+        # a cec proof starts every flop at 0: a base-case doubt is a difference only with a trace
+        self.assertEqual(self.verdict(False, [le.NO_TRACE, le.TRACE, le.TRACE], proved)[0],
+                         "differs")
+        for answers in ([le.NO_TRACE, le.TRACE, le.NO_TRACE],
+                        [le.NO_TRACE, le.NO_ANSWER, le.NO_ANSWER],
+                        [le.NO_TRACE, le.TRACE, le.NO_ANSWER]):
+            with self.subTest(answers=answers):
+                self.assertEqual(self.verdict(False, answers, proved)[0], "unproven")
 
-    def test_a_proof_never_asks_the_cec(self) -> None:
-        self.assertEqual(self.verdict(self.GOLD_PLAIN, True, opt_equiv.CEC_DIFFERS)[0], "ok")
-
-    def test_a_cec_proof_without_a_memory_proves_the_design(self) -> None:
-        self.assertEqual(self.verdict(self.GOLD_PLAIN, False, opt_equiv.CEC_PROVED)[0], "ok")
+    def test_a_passed_proof_needs_its_base_case(self) -> None:
+        kind, _, runs = self.verdict(True, [le.NO_TRACE], opt_equiv.CEC_DIFFERS)
+        self.assertEqual(kind, "ok")
+        # every shared name, every flop without init undefined
+        self.assertEqual(runs, [(None, le.BASE_STEPS, True, le.START_UNDEF)])
+        self.assertEqual(self.verdict(True, [le.TRACE, le.TRACE])[0], "differs")
+        for first in (le.TRACE, le.NO_ANSWER):
+            for second in (le.NO_TRACE, le.NO_ANSWER):
+                with self.subTest(first=first, second=second):
+                    self.assertEqual(self.verdict(True, [first, second])[0], "unproven")
 
     def test_a_sat_timeout_is_unproven_but_a_crash_is_not_absorbed(self) -> None:
         base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-refine-"))
         checker = mock.Mock()
         checker.refines.side_effect = lc.CrashError("yosys", "timed out after 60 s", True)
+        sides = (base / "g", base / "h")
         with mock.patch.object(opt_equiv, "Checker", return_value=checker):
-            self.assertEqual(le.refine("y", base / "g", base / "h", base / "a", base, 1,
-                                       None)[0], "unproven")
+            self.assertEqual(le.refine("y", sides, base / "a", base, 1, None)[0], "unproven")
             checker.refines.side_effect = lc.CrashError("yosys", "killed by signal 11")
             with self.assertRaises(lc.CrashError):
-                le.refine("y", base / "g", base / "h", base / "a", base, 1, None)
+                le.refine("y", sides, base / "a", base, 1, None)
 
 
 @unittest.skipUnless(ODIN3 and Path(ODIN3).exists(), "odin3 (ODIN3_CLI) is needed")

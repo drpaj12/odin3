@@ -2794,16 +2794,21 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # lower-run 56 of 58, lower-sim 24 of 58 (the rest hold a type without a simulate hook,
         # which --allow-skipped lets through), lower-equiv 38 of 40 ok) applied to the about 450
         # micros the other lists leave; the controller raises them after the first full sweep.
+        # First full sweep (release build, 2026-10-18, head 5cf3d1f5; 539 micros): lower-run
+        # compared 330, lower-sim 96, lower-equiv 265 (of which 18 were reported "not a
+        # refinement" by the checker limits fixed in 3B-heavy-triage, so 247 were proved). The
+        # floors below are those counts less a margin of about 10%: 300, 90 and 240.
         odin3_add_sweep_test(lower_run_micro LABEL sweep
-            COMMAND ${_opt_sweep} --lower-run --min-compared-total 250 ${_lower_micro_expect}
+            COMMAND ${_opt_sweep} --lower-run --min-compared-total 300 ${_lower_micro_expect}
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/lower/run_micro_expect_fail.txt
                     ${_micro_dir})
         odin3_add_sweep_test(lower_sim_micro LABEL sweep
             COMMAND ${_opt_sweep} --lower-sim --opt-arg=--allow-empty --opt-arg=--allow-skipped
-                    --min-compared-total 100 ${_lower_micro_expect} ${_micro_dir})
+                    --min-compared-total 90 ${_lower_micro_expect} ${_micro_dir})
         # equiv_micro_expect_fail.txt: the micros lower-equiv cannot decide (a SAT size limit)
         odin3_add_sweep_test(lower_equiv_micro LABEL sweep
             COMMAND ${_opt_sweep} --lower-equiv --opt-arg=--allow-empty
-                    --min-compared-total 200 ${_lower_micro_expect}
+                    --min-compared-total 240 ${_lower_micro_expect}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/lower/equiv_micro_expect_fail.txt
                     ${_micro_dir})
         set_tests_properties(lower_run_micro lower_sim_micro lower_equiv_micro
