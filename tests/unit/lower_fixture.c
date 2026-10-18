@@ -84,7 +84,10 @@ static uint32_t add_cell_port(lf *fix, odin3_module *mod, const char *prefix,
     const odin3_celltype_def *def = odin3_celltype_get(fix->design, query->type);
     uint32_t width =
         odin3_celltype_port_width(fix->design, query->type, query->params, query->port);
-    TEST_ASSERT_TRUE(width > 0);
+    if (width == 0) { /* a $mem with no read or write port has empty port vectors */
+        *nets = NULL;
+        return 0;
+    }
     const odin3_port_def *pdef = &def->ports[query->port];
     char wname[64];
     TEST_ASSERT_TRUE(snprintf(wname, sizeof wname, "%s%s", prefix, pdef->name) < (int)sizeof wname);

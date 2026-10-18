@@ -291,16 +291,14 @@ static void test_report_file_is_written_with_the_four_lists(void) {
 
 /* --- the rule table against the registry ---------------------------------------------------- */
 
-/* Exactly one of: a rule, listed as having none, pending a later task. */
+/* Exactly one of: a rule, listed as having none. */
 static void check_one_home(const odin3_celltype_def *def) {
     bool has_rule = lw_rule_find(def->name) != NULL;
     bool listed = lw_no_rule_listed(def->name);
-    bool pending = lw_rule_pending(def->name);
     char msg[96];
-    (void)snprintf(msg, sizeof msg, "%s: rule %d, no_rule %d, pending %d", def->name,
-                   has_rule ? 1 : 0, listed ? 1 : 0, pending ? 1 : 0);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, (has_rule ? 1 : 0) + (listed ? 1 : 0) + (pending ? 1 : 0),
-                                  msg);
+    (void)snprintf(msg, sizeof msg, "%s: rule %d, no_rule %d", def->name, has_rule ? 1 : 0,
+                   listed ? 1 : 0);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, (has_rule ? 1 : 0) + (listed ? 1 : 0), msg);
 }
 
 /* Checks one registry entry; returns whether it is a word type. */

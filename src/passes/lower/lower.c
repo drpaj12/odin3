@@ -252,8 +252,9 @@ static void report_run(lw_ctx *lw) {
     odin3_strbuf_free(&info);
 }
 
-/* True when module holds a live word cell without a rule, or one `--async error` refuses; logs
- * every such cell (spec 12.2: the knowable failure comes before any change). */
+/* True when module holds a live word cell without a rule, one `--async error` refuses or a `$mem`
+ * the pre-scan refuses (spec §7); logs every such cell (spec 12.2: the knowable failure comes
+ * before any change). */
 static bool module_has_ruleless(lw_ctx *lw, const lw_rules *rules, odin3_module *module) {
     lw_ctx_enter(lw, module);
     bool found = false;
@@ -270,6 +271,7 @@ static bool module_has_ruleless(lw_ctx *lw, const lw_rules *rules, odin3_module 
             odin3_celltype_get(lw->design, odin3_node_type(module, node));
         if (rule != NULL) {
             found = lw_ff_async_refused(lw, node, def->name) || found;
+            found = lw_mem_refused(lw, node, def->name) || found;
             continue;
         }
         lw_log_no_rule(lw, node, def->name);

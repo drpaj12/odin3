@@ -511,6 +511,17 @@ LW_DECLARE_BUILDER(aldffe);
 LW_DECLARE_BUILDER(dffsr);
 LW_DECLARE_BUILDER(dffsre);
 
+/* --- mem.c: $mem to flip-flops and multiplexers (spec §7, LW-9) ---------------------------------
+ */
+
+LW_DECLARE_BUILDER(mem);
+
+/* With a `$mem` node: logs the error the pre-scan finds (spec §7: the bit cap, an asynchronous
+ * write port, write ports on different clocks or polarities, ABITS above 64) as `lower: module
+ * 'm': '$mem' '<cell>' <reason>` and returns true. False for any other type and for a `$mem` with
+ * no read port (it is deleted). Nothing has been changed yet. */
+bool lw_mem_refused(const lw_ctx *lw, odin3_node_id node, const char *type_name);
+
 /* --- latch.c: $dlatch $adlatch $dlatchsr $sr (spec §6.2, LW-8) ----------------------------------
  */
 
@@ -548,12 +559,10 @@ const lw_rule *lw_rule_at(uint32_t idx);
 /*
  * Word types the registry has and `lower` deliberately has no rule for (spec §5.7, §8): $proc,
  * $tribuf, $pow, $memrd, $memwr. lw_no_rule_listed says so; lw_log_no_rule logs the error of the
- * type (its own text, else "no lowering rule for cell type"). `pending` types get their rule in a
- * later task of the plan (lw_rule_pending); the completeness test reads both lists, so a cell type
- * added to the registry later fails it.
+ * type (its own text, else "no lowering rule for cell type"). The completeness test reads the rule
+ * table and this list, so a cell type added to the registry later fails it.
  */
 bool lw_no_rule_listed(const char *type_name);
-bool lw_rule_pending(const char *type_name);
 void lw_log_no_rule(const lw_ctx *lw, odin3_node_id node, const char *type_name);
 
 #endif

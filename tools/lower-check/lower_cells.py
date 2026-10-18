@@ -47,7 +47,7 @@ def pre_of(source: Path) -> str:
     stem = source.stem.split("_")[0]
     if stem == "dlatch":  # `opt` leaves the dead inverters of an active-low enable
         return "proc; opt; opt_clean"
-    return "proc; opt" if stem in FF_STEMS else "proc"
+    return "proc; opt" if stem in FF_STEMS or stem == "mem" else "proc"
 
 
 def odin_script(source: Path, work: Path) -> str:

@@ -57,6 +57,14 @@ class GridTest(unittest.TestCase):
         by_stem = {c.stem: c for c in gc.generate(["bitwise"])}
         self.assertIn("module m(input a, input b, output y);", by_stem["and_w1"].text)
 
+    def test_the_mem_family_has_scalar_one_bit_ports_and_a_falling_clock_variant(self) -> None:
+        by_stem = {c.stem: c for c in gc.generate(["mem"])}
+        self.assertEqual(11, len(by_stem))
+        self.assertIn("input wa, input wd, input ra, output rd);", by_stem["mem_w1_d2"].text)
+        self.assertIn("negedge clk", by_stem["mem_w4_d4_neg"].text)
+        self.assertNotIn("posedge", by_stem["mem_w4_d4_neg"].text)
+        self.assertIn("reg [2:0] mem [-2:5];", by_stem["mem_w3_d8_offm2"].text)
+
     def test_writing_twice_gives_identical_files(self) -> None:
         out = Path(tempfile.mkdtemp(prefix="gen_cells_test_"))
         for _ in range(2):

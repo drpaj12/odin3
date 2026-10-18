@@ -78,7 +78,9 @@ ASYNC_TYPES = frozenset({"$adff", "$adffe", "$aldff", "$aldffe", "$dffsr", "$dff
                          "$adlatch", "$dlatchsr", "$sr", "$mem"})
 # Families whose lowered netlist holds storage bit cells, which write_rtlil rejects (1F): the Odin
 # III side is written as BLIF only and the histograms are read from the BLIFs.
-BLIF_ONLY_FAMILIES = frozenset({"ff", "latch"})
+BLIF_ONLY_FAMILIES = frozenset({"ff", "latch", "mem"})
+# The Yosys commands a family runs on in.il before the techmap: the memory flow of plan Task 8.
+YOSYS_PRE = {"mem": ("memory -nomap", "memory_map")}
 VERSION_WORD = re.compile(r"Yosys\s+(\d+\.\d+)")
 
 
@@ -167,9 +169,10 @@ def odin_script(plan: Plan, work: Path) -> str:
                       "opt -fast", f"write_rtlil {work / 'lo_opt.il'}"])
 
 
-def yosys_script(work: Path, maps: Sequence[Path]) -> str:
-    """Step 2's Yosys 0.55 ``-p`` script."""
-    return "; ".join([f"read_rtlil {work / 'in.il'}", *(f"techmap -map {m}" for m in maps),
+def yosys_script(work: Path, maps: Sequence[Path], pre: Sequence[str] = ()) -> str:
+    """Step 2's Yosys 0.55 ``-p`` script; ``pre`` runs right after the read (``mem``:
+    ``memory -nomap; memory_map``)."""
+    return "; ".join([f"read_rtlil {work / 'in.il'}", *pre, *(f"techmap -map {m}" for m in maps),
                       "techmap", "dffunmap", "opt_clean -purge", f"write_rtlil {work / 'yo.il'}",
                       f"{YOSYS_BLIF} {work / 'yo.blif'}", "opt -fast",
                       f"write_rtlil {work / 'yo_opt.il'}"])
@@ -246,7 +249,8 @@ class Diff:
         result = Result(family.name, tier_of(family, args.tier, in_il), cells=word_cells(in_il))
         names = [PARMYS_EXACT.get(n, n) if args.parmys_exact else n for n in family.maps]
         maps = [resolve_map(n, self.parmys) for n in names] + [Path(m) for m in args.map]
-        self.must("yosys", [lc.exe(args.yosys), "-p", yosys_script(run_dir, maps)], run_dir)
+        self.must("yosys", [lc.exe(args.yosys), "-p",
+                            yosys_script(run_dir, maps, YOSYS_PRE.get(family.name, ()))], run_dir)
         self.judge(result, run_dir)
         return result
 
@@ -293,7 +297,11 @@ class Diff:
         for name in ("lo", "yo"):
             text = (run_dir / f"{name}.norm.blif").read_text(encoding="utf-8")
             (run_dir / f"{name}.eq.blif").write_text(lc.with_gate_models(text), encoding="utf-8")
-        done = self.child("equiv-check", [self.args.equiv_check, str(run_dir / "lo.eq.blif"),
+        # memory_map leaves the leaves past SIZE undriven (x); equiv-check ties them to 0, as the
+        # $_CONSTX_ leaves of lower (spec 7) are.
+        extra = ["--allow-undriven"] if result.family == "mem" else []
+        done = self.child("equiv-check", [self.args.equiv_check, *extra,
+                                          str(run_dir / "lo.eq.blif"),
                                           str(run_dir / "yo.eq.blif")], run_dir)
         out = (done.stdout or "") + (done.stderr or "")
         if done.returncode == EQUIV_OK:
