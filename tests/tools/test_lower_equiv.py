@@ -497,6 +497,13 @@ class BoundedScriptTest(unittest.TestCase):
         self.assertIn("; async2sync;", le.bounded_script("g", "t", False, 4, True, True))
         self.assertLess(script.index("expose -shared gold gate"), script.index("miter -equiv"))
 
+    def test_the_shared_wires_are_exposed_before_any_opt_clean(self) -> None:
+        """A flip-flop that drives only an unread public bit must survive on both sides
+        (expression_in_chain_modules.v, 3B close)."""
+        script = le.bounded_script("g.il", "t.il", False, le.BASE_STEPS, True)
+        self.assertLess(script.index("expose -shared gold gate"), script.index("memory"))
+        self.assertLess(script.index("expose -shared gold gate"), script.index("opt_clean"))
+
 
 class ReportTest(unittest.TestCase):
     """The expect list and the verdict lines (no tool runs)."""
@@ -650,6 +657,18 @@ class RefineVerdictTest(unittest.TestCase):
 @unittest.skipUnless(ODIN3 and Path(ODIN3).exists(), "odin3 (ODIN3_CLI) is needed")
 class HardFailureTest(unittest.TestCase):
     """A crashing Yosys child is exit 3 and no expect list absorbs it."""
+
+    def test_a_cap_kill_while_preparing_a_big_design_is_unproven_not_hard(self) -> None:
+        before = Path(tempfile.mkdtemp(prefix="test-lower-equiv-cap-")) / "b.il"
+        before.write_text("module \\m\n  cell $add $c\n  end\nend\n", encoding="utf-8")
+        killed = opt_equiv.CrashError("yosys", "killed (exit -9)", cap_killed=True)
+        with mock.patch.object(le, "make_gold", side_effect=killed):
+            got = le.check_pair("y", before, before, before.parent, 1, (None, None, False))
+        self.assertEqual(got.kind, "unproven", got.detail)
+        segv = opt_equiv.CrashError("yosys", "killed (exit -11)")
+        with mock.patch.object(le, "make_gold", side_effect=segv), \
+                self.assertRaises(opt_equiv.CrashError):
+            le.check_pair("y", before, before, before.parent, 1, (None, None, False))
 
     def test_a_crashing_yosys_is_exit_3(self) -> None:
         base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-hard-"))
