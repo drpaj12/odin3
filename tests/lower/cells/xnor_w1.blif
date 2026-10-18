@@ -1,0 +1,5 @@
+.model m
+.inputs a b
+.outputs y
+.subckt $_XNOR_ A=a B=b Y=y
+.end

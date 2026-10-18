@@ -1,0 +1,23 @@
+.model m
+.inputs a[0] a[1] a[2] a[3] a[4] a[5] a[6] a[7] a[8] a[9] a[10] a[11] a[12] a[13] a[14] a[15] \
+  a[16]
+.outputs y[0] y[1] y[2] y[3] y[4] y[5] y[6] y[7] y[8] y[9] y[10] y[11] y[12] y[13] y[14] y[15] \
+  y[16]
+.subckt $_NOT_ A=a[0] Y=y[0]
+.subckt $_NOT_ A=a[1] Y=y[1]
+.subckt $_NOT_ A=a[2] Y=y[2]
+.subckt $_NOT_ A=a[3] Y=y[3]
+.subckt $_NOT_ A=a[4] Y=y[4]
+.subckt $_NOT_ A=a[5] Y=y[5]
+.subckt $_NOT_ A=a[6] Y=y[6]
+.subckt $_NOT_ A=a[7] Y=y[7]
+.subckt $_NOT_ A=a[8] Y=y[8]
+.subckt $_NOT_ A=a[9] Y=y[9]
+.subckt $_NOT_ A=a[10] Y=y[10]
+.subckt $_NOT_ A=a[11] Y=y[11]
+.subckt $_NOT_ A=a[12] Y=y[12]
+.subckt $_NOT_ A=a[13] Y=y[13]
+.subckt $_NOT_ A=a[14] Y=y[14]
+.subckt $_NOT_ A=a[15] Y=y[15]
+.subckt $_NOT_ A=a[16] Y=y[16]
+.end

@@ -1,0 +1,12 @@
+.model m
+.inputs a b[0] b[1] b[2] b[3]
+.outputs y
+.names gnd
+.subckt $_XOR_ A=a B=b[0] Y=$n8
+.subckt $_XOR_ A=gnd B=b[1] Y=$n9
+.subckt $_XOR_ A=gnd B=b[2] Y=$n10
+.subckt $_XOR_ A=gnd B=b[3] Y=$n11
+.subckt $_OR_ A=$n8 B=$n9 Y=$n12
+.subckt $_OR_ A=$n10 B=$n11 Y=$n13
+.subckt $_OR_ A=$n12 B=$n13 Y=y
+.end

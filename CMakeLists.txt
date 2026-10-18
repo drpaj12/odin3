@@ -143,6 +143,14 @@ add_library(odin3_core OBJECT
     src/passes/flatten/copy.c
     src/passes/flatten/names.c
     src/passes/flatten/prov.c
+    src/passes/lower/register.c
+    src/passes/lower/lower.c
+    src/passes/lower/kit.c
+    src/passes/lower/connect.c
+    src/passes/lower/size.c
+    src/passes/lower/dispatch.c
+    src/passes/lower/report.c
+    src/passes/lower/bitwise.c
     src/passes/hardmap/register.c
     src/passes/hardmap/hardmap.c
     src/passes/hardmap/hm_kit.c
@@ -849,6 +857,35 @@ if(BUILD_TESTING)
                 "read_blif ${PROJECT_SOURCE_DIR}/tests/flatten/nested.blif; flatten; check")
     set_tests_properties(cli_flatten_nested PROPERTIES LABELS flatten
         PASS_REGULAR_EXPRESSION "flatten: 7 instances expanded \\(0 kept\\) in 1 roots")
+    # 3B Task 1: lower's toolkit and pass; every test_lower_* links the fixture helper.
+    odin3_add_unit_test(test_lower_kit)
+    target_sources(test_lower_kit PRIVATE tests/unit/lower_fixture.c)
+    odin3_add_unit_test(test_lower_bitwise)
+    target_sources(test_lower_bitwise PRIVATE tests/unit/lower_fixture.c)
+    odin3_add_unit_test(test_lower_pass)
+    target_sources(test_lower_pass PRIVATE tests/unit/lower_fixture.c tests/unit/proc_fixture.c
+                   tests/unit/proc_fixture_core.c)
+    target_compile_definitions(test_lower_pass PRIVATE
+        ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    set_tests_properties(test_lower_kit test_lower_bitwise test_lower_pass PROPERTIES LABELS "unit;lower")
+    # 3B Task 2/3: lower-sim on the hand-built designs (the 1E simulator before = after; a design
+    # with a $shiftx is reported skipped), the per-cell goldens (lower-cells) and the CLI line.
+    # Labelled `lower`, never `fuzz`: the CI fuzz-smoke build has no odin3 binary.
+    add_test(NAME lower_sim_hand
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-sim --odin3 $<TARGET_FILE:odin3>
+                --each ${PROJECT_SOURCE_DIR}/tests/lower/hand/and_mux.v
+                ${PROJECT_SOURCE_DIR}/tests/lower/hand/shiftx.v)
+    set_tests_properties(lower_sim_hand PROPERTIES LABELS lower SKIP_RETURN_CODE 77 TIMEOUT 600
+        PASS_REGULAR_EXPRESSION "and_mux.v: .and: pass.*shiftx.v: .shiftx: skipped")
+    add_test(NAME lower_cells
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-cells --odin3 $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tests/lower/cells)
+    set_tests_properties(lower_cells PROPERTIES LABELS lower SKIP_RETURN_CODE 77 TIMEOUT 1800)
+    add_test(NAME cli_lower_hand
+        COMMAND $<TARGET_FILE:odin3> -p
+                "read_verilog --nolatches ${PROJECT_SOURCE_DIR}/tests/lower/hand/and_mux.v; hierarchy; proc; opt; lower; check; stats")
+    set_tests_properties(cli_lower_hand PROPERTIES LABELS lower
+        PASS_REGULAR_EXPRESSION "lower: module 'm': lowered [0-9]+ word cells to [0-9]+ bit cells")
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
@@ -2172,6 +2209,15 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     if(ODIN3_YOSYS055_OK)
         # 3A Task 4 (spec 14.3): flatten against Yosys 0.55 on the fixtures; a difference not
         # listed in tests/flatten/diff_expect.txt (with a reason) fails.
+        # 3B Task 3 (spec 14.2): lower against Yosys 0.55 on the per-cell fixtures, tier S (the
+        # simplemap family): netlist-compare exit 0 and equal cell-type histograms for every file.
+        file(GLOB _lower_cells CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/lower/cells/*.v)
+        add_test(NAME lower_cells_yosys
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --family bitwise --pre proc --each ${_lower_cells})
+        set_tests_properties(lower_cells_yosys PROPERTIES LABELS lower SKIP_RETURN_CODE 77
+                             TIMEOUT 1800)
         add_test(NAME flatten_diff_fixtures
             COMMAND ${PROJECT_SOURCE_DIR}/tools/flatten-check/flatten-diff
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
