@@ -152,14 +152,18 @@ static uint32_t port_named(const odin3_celltype_def *def, const char *name) {
             return i;
         }
     }
-    return 0;
+    return def->n_ports; /* no such port: callers treat it as open */
 }
 
 /* The net on bit `bit` of the cell's port `name`, none when open. */
 static odin3_net_id pin_of(const lw_ctx *lw, odin3_node_id node, const char *name, uint32_t bit) {
     const odin3_celltype_def *def =
         odin3_celltype_get(lw->design, odin3_node_type(lw->module, node));
-    odin3_pinslice pins = odin3_node_port(lw->module, node, port_named(def, name));
+    uint32_t port = port_named(def, name);
+    if (port >= def->n_ports) {
+        return (odin3_net_id){0};
+    }
+    odin3_pinslice pins = odin3_node_port(lw->module, node, port);
     if (bit >= pins.count) {
         return (odin3_net_id){0};
     }
@@ -745,6 +749,17 @@ static bool sees_write(const mem_build *mb, const mem_bypass *bp) {
            flag(geo->wr_clk_pol, wport) == flag(geo->rd_clk_pol, bp->rport);
 }
 
+/* The WARNING for a transparent read port (PHASE3 #40): the bypass is RTL-correct, as Yosys's
+ * `memory_map` lowers it, but Parmys never reads RD_TRANSPARENT and its RAMs read the old word. */
+static void warn_transparent(const mem_build *mb, uint32_t rport) {
+    char label[LW_LABEL_LEN];
+    lw_node_label(mb->lw, mb->cell->node, label, sizeof label);
+    odin3_log(ODIN3_LOG_WARN,
+              "lower: module '%s': memory '%s' read port %u is transparent; lowered with a "
+              "write-to-read bypass (Parmys reads the old value: PHASE3 #40)",
+              module_text(mb->lw), label, rport);
+}
+
 /* One sync read port: a register per data bit behind the tree, then the bypasses. */
 static odin3_status read_sync(mem_build *mb, uint32_t rport, lw_bits *data) {
     const mem_geo *geo = &mb->geo;
@@ -757,6 +772,9 @@ static odin3_status read_sync(mem_build *mb, uint32_t rport, lw_bits *data) {
         st = read_tree(mb, (mem_tap){rport, bit}, &root);
         st = st == ODIN3_OK ? make_reg(mb, &bp.reg, root, &qnet) : st;
         st = st == ODIN3_OK ? lw_bits_push(data, qnet) : st;
+    }
+    if (st == ODIN3_OK && flag(geo->rd_transparent, rport)) {
+        warn_transparent(mb, rport);
     }
     for (bp.ai = 0; st == ODIN3_OK && flag(geo->rd_transparent, rport) && bp.ai < n_acts(mb);
          bp.ai++) {
@@ -794,6 +812,12 @@ static odin3_status book(const mem_build *mb) {
     lw_report_entry entry = {module_text(lw), label, "$mem", mb->geo.size * mb->geo.width, NULL};
     odin3_log(ODIN3_LOG_WARN, "lower: module '%s': '$mem' '%s' lowered to %" PRIu64 " flip-flops",
               entry.module, label, mb->dffs);
+    if (mb->geo.n_rd > 0 && mb->geo.mask != UINT64_MAX && mb->geo.mask + 1U > mb->geo.size) {
+        odin3_log(ODIN3_LOG_INFO,
+                  "lower: module '%s': memory '%s' reads of addresses past SIZE %" PRIu64
+                  " give x (Yosys leaves those words undriven)",
+                  entry.module, label, mb->geo.size);
+    }
     odin3_status st = lw_report_add(lw, LW_REP_MEM, &entry);
     if (st == ODIN3_OK && mb->inverted) {
         odin3_log(ODIN3_LOG_WARN,

@@ -44,6 +44,10 @@ enum {
 
 static char log_text[LOG_TEXT];
 
+/* Masks over the read and write ports: the clock polarity opposite to the rest (setUp resets). */
+static uint8_t g_rd_flip;
+static uint8_t g_wr_flip;
+
 static void text_sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     (void)level;
@@ -55,6 +59,8 @@ static void text_sink(odin3_log_level level, const char *msg, void *user) {
 
 void setUp(void) {
     log_text[0] = '\0';
+    g_rd_flip = 0;
+    g_wr_flip = 0;
     odin3_log_set_sink(text_sink, NULL);
 }
 
@@ -103,12 +109,14 @@ static void fill_port_bits(const mcase *cs, mem_params *pp) {
     const memref_cfg *cfg = &cs->cfg;
     for (uint32_t rport = 0; rport < cfg->n_rd; rport++) {
         pp->rd_en[rport] = cfg->rd_sync[rport] ? ODIN3_BIT_1 : ODIN3_BIT_0;
-        pp->rd_pol[rport] = cs->falling ? ODIN3_BIT_0 : ODIN3_BIT_1;
+        bool rd_low = cs->falling != (((g_rd_flip >> rport) & 1) != 0);
+        pp->rd_pol[rport] = rd_low ? ODIN3_BIT_0 : ODIN3_BIT_1;
         pp->rd_tr[rport] = cfg->rd_trans[rport] ? ODIN3_BIT_1 : ODIN3_BIT_0;
     }
     for (uint32_t wport = 0; wport < cfg->n_wr; wport++) {
         pp->wr_en[wport] = cs->async_write ? ODIN3_BIT_0 : ODIN3_BIT_1;
-        pp->wr_pol[wport] = cs->falling ? ODIN3_BIT_0 : ODIN3_BIT_1;
+        bool wr_low = cs->falling != (((g_wr_flip >> wport) & 1) != 0);
+        pp->wr_pol[wport] = wr_low ? ODIN3_BIT_0 : ODIN3_BIT_1;
     }
 }
 
@@ -668,10 +676,115 @@ static void test_falling_edge_by_default_gets_one_shared_inverter_and_a_warning(
     lf_end(&dd.fix);
 }
 
-/* --- structure ------------------------------------------------------------------------------ */
-
 static const mcase k_small = {
     {4, 2, 2, 1, 1, 0, {ASYNC}, {false}}, "small", false, true, false, false, {EN_SHARED}};
+
+/* --- transparent reads (PHASE3 #40) ------------------------------------------------------- */
+
+/* One sync read port transparent to one write port, all on one clock net and edge. */
+static mcase transparent_case(void) {
+    mcase cs = k_small;
+    cs.cfg.rd_sync[0] = SYNC;
+    cs.cfg.rd_trans[0] = true;
+    cs.name = "transparent";
+    return cs;
+}
+
+static void test_a_transparent_read_warns_with_the_memory_and_port(void) {
+    mcase cs = transparent_case();
+    md dd;
+    md_lowered(&dd, &cs, "");
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(log_text, "lower: module 'm': memory 'dut' read port 0 is transparent; lowered "
+                         "with a write-to-read bypass (Parmys reads the old value: PHASE3 #40)"),
+        log_text);
+    lf_end(&dd.fix);
+    cs.cfg.rd_trans[0] = false;
+    log_text[0] = '\0';
+    md_lowered(&dd, &cs, "");
+    TEST_ASSERT_NULL(strstr(log_text, "is transparent"));
+    lf_end(&dd.fix);
+}
+
+/* The flip-flops and muxes of the cell as lowered; `cs` with the transparent flag as given. */
+typedef struct counts {
+    uint32_t dffs;
+    uint32_t muxes;
+} counts;
+
+static counts lowered_counts(const mcase *cs) {
+    md dd;
+    md_lowered(&dd, cs, "--neg-edge keep");
+    counts cc = {lf_count_type(&dd.fix, dd.mod, "$_DFF_P_") +
+                     lf_count_type(&dd.fix, dd.mod, "$_DFF_N_"),
+                 lf_count_type(&dd.fix, dd.mod, "$_MUX_")};
+    lf_end(&dd.fix);
+    return cc;
+}
+
+/* A bypass adds registers and muxes; no bypass leaves the counts of the read-first lowering. */
+static void expect_bypass(const mcase *cs, bool bypass) {
+    mcase plain = *cs;
+    plain.cfg.rd_trans[0] = false;
+    counts base = lowered_counts(&plain);
+    counts with = lowered_counts(cs);
+    if (bypass) {
+        TEST_ASSERT_TRUE(with.dffs > base.dffs);
+        TEST_ASSERT_TRUE(with.muxes > base.muxes);
+    } else {
+        TEST_ASSERT_EQUAL_UINT32(base.dffs, with.dffs);
+        TEST_ASSERT_EQUAL_UINT32(base.muxes, with.muxes);
+    }
+}
+
+static void test_a_transparent_read_on_the_write_clock_gets_a_bypass(void) {
+    mcase cs = transparent_case();
+    expect_bypass(&cs, true);
+}
+
+static void test_a_transparent_read_on_the_other_edge_gets_no_bypass(void) {
+    mcase cs = transparent_case();
+    g_rd_flip = 1U;
+    expect_bypass(&cs, false);
+    g_rd_flip = 0;
+    g_wr_flip = 1U;
+    expect_bypass(&cs, false);
+}
+
+static void test_a_transparent_read_on_another_clock_net_gets_no_bypass(void) {
+    mcase cs = transparent_case();
+    cs.share_clock = false;
+    expect_bypass(&cs, false);
+}
+
+static void test_a_transparent_read_bypasses_only_the_writes_on_its_clock(void) {
+    mcase cs = k_cases[2]; /* two write ports on one net; read port 1 is sync */
+    cs.cfg.rd_trans[1] = true;
+    cs.cfg.rd_trans[0] = false;
+    counts one = lowered_counts(&cs);
+    cs.cfg.rd_trans[1] = false;
+    counts none = lowered_counts(&cs);
+    TEST_ASSERT_TRUE(one.dffs > none.dffs);
+    cs.cfg.rd_trans[1] = true;
+    g_rd_flip = 2U; /* read port 1 on the other edge: no write port is seen */
+    counts flipped = lowered_counts(&cs);
+    TEST_ASSERT_EQUAL_UINT32(none.dffs, flipped.dffs);
+    TEST_ASSERT_EQUAL_UINT32(none.muxes, flipped.muxes);
+}
+
+static void test_a_read_past_size_is_noted(void) {
+    mcase cs = k_cases[2]; /* size 5 in a 3-bit address space */
+    md dd;
+    md_lowered(&dd, &cs, "");
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "memory 'dut' reads of addresses past SIZE 5 give x"));
+    lf_end(&dd.fix);
+    log_text[0] = '\0';
+    md_lowered(&dd, &k_small, "");
+    TEST_ASSERT_NULL(strstr(log_text, "past SIZE"));
+    lf_end(&dd.fix);
+}
+
+/* --- structure ------------------------------------------------------------------------------ */
 
 static void test_structure_of_a_small_memory(void) {
     md dd;
@@ -866,6 +979,14 @@ static void test_write_ports_on_different_clocks_are_an_error(void) {
                                  "clocks or polarities"});
 }
 
+static void test_write_ports_on_one_net_with_opposite_edges_are_an_error(void) {
+    mcase cs = k_cases[2]; /* one clock net, two write ports */
+    g_wr_flip = 2U;
+    expect_refused(&cs,
+                   (refusal){"", "lower: module 'm': '$mem' 'dut' has write ports on different "
+                                 "clocks or polarities"});
+}
+
 static void test_the_bit_cap_is_an_error_with_nothing_built(void) {
     mcase cs = k_cases[0]; /* 4 words x 3 bits = 12 bits */
     expect_refused(&cs, (refusal){"--max-mem-bits 11",
@@ -994,6 +1115,12 @@ int main(void) {
     RUN_TEST(test_init_contents_are_read_before_any_write);
     RUN_TEST(test_falling_edge_with_keep_is_a_dff_n);
     RUN_TEST(test_falling_edge_by_default_gets_one_shared_inverter_and_a_warning);
+    RUN_TEST(test_a_transparent_read_warns_with_the_memory_and_port);
+    RUN_TEST(test_a_transparent_read_on_the_write_clock_gets_a_bypass);
+    RUN_TEST(test_a_transparent_read_on_the_other_edge_gets_no_bypass);
+    RUN_TEST(test_a_transparent_read_on_another_clock_net_gets_no_bypass);
+    RUN_TEST(test_a_transparent_read_bypasses_only_the_writes_on_its_clock);
+    RUN_TEST(test_a_read_past_size_is_noted);
     RUN_TEST(test_structure_of_a_small_memory);
     RUN_TEST(test_a_sync_read_adds_a_register_and_an_enable_mux_per_bit);
     RUN_TEST(test_a_rom_has_no_flip_flops_and_reads_its_init);
@@ -1005,6 +1132,7 @@ int main(void) {
     RUN_TEST(test_the_estimate_bounds_the_gates);
     RUN_TEST(test_an_asynchronous_write_port_is_an_error);
     RUN_TEST(test_write_ports_on_different_clocks_are_an_error);
+    RUN_TEST(test_write_ports_on_one_net_with_opposite_edges_are_an_error);
     RUN_TEST(test_the_bit_cap_is_an_error_with_nothing_built);
     RUN_TEST(test_an_address_wider_than_64_bits_is_an_error);
     RUN_TEST(test_the_default_bit_cap_comes_from_the_limits);

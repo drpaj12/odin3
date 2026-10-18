@@ -64,6 +64,7 @@ typedef struct ltc {
     ltref_cfg cfg;
     uint64_t init_val; /* the init attribute bits that are 0 or 1 ... */
     uint64_t init_def; /* ... where this mask says the bit is defined (else x) */
+    uint64_t value_x;  /* the ARST_VALUE bits that are x instead of the bit of cfg.value */
 } ltc;
 
 /* The parameters of each type in definition order: W width, E EN_POLARITY, P ARST_POLARITY, V the
@@ -119,6 +120,7 @@ static odin3_value param_of(const ltc *cs, char code, const uint8_t *bits) {
 static uint32_t make_params(const ltc *cs, odin3_value *params, uint8_t *bits) {
     for (uint32_t i = 0; i < cs->cfg.width; i++) {
         bits[i] = (uint8_t)(((cs->cfg.value >> i) & 1U) != 0 ? ODIN3_BIT_1 : ODIN3_BIT_0);
+        bits[i] = ((cs->value_x >> i) & 1U) != 0 ? ODIN3_BIT_X : bits[i];
     }
     const char *code = k_param_codes[cs->cfg.kind];
     uint32_t count = 0;
@@ -735,12 +737,29 @@ static void test_oom_at_every_allocation_leaves_a_valid_design(void) {
     }
 }
 
+/* An x bit in ARST_VALUE stays an x constant (it must not become 0). */
+static void test_an_x_reset_value_lowers_to_an_x_constant(void) {
+    ltc cs = MAKE_CASE(LTREF_ADLATCH, 4);
+    cs.cfg.value = 5U;
+    ltd dd;
+    ltd_make(&dd, &cs);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, ltd_lower(&dd, ""));
+    TEST_ASSERT_EQUAL_UINT32(0, lf_count_type(&dd.fix, dd.mod, "$_CONSTX_"));
+    lf_end(&dd.fix);
+    cs.value_x = 0xAU;
+    ltd_make(&dd, &cs);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, ltd_lower(&dd, ""));
+    TEST_ASSERT_TRUE(lf_count_type(&dd.fix, dd.mod, "$_CONSTX_") > 0);
+    lf_end(&dd.fix);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_the_reference_matches_hand_computed_sequences);
     RUN_TEST(test_structure_of_every_type_polarity_and_width);
     RUN_TEST(test_dlatch_with_an_active_low_enable_is_a_dlatch_n_on_the_enable);
     RUN_TEST(test_the_size_estimate_bounds_the_gates);
+    RUN_TEST(test_an_x_reset_value_lowers_to_an_x_constant);
     RUN_TEST(test_init_values_come_from_the_init_attribute);
     RUN_TEST(test_latches_have_no_divergence_and_pass_async_error);
     RUN_TEST(test_w1_exhaustive_short_sequences_for_every_type_and_init);

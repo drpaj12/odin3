@@ -60,6 +60,7 @@ typedef struct ffc {
     uint64_t init_val; /* the init attribute bits that are 0 or 1 ... */
     uint64_t init_def; /* ... where this mask says the bit is defined (else x) */
     const char *args;  /* the lower arguments, "" for none */
+    uint64_t value_x;  /* the *_VALUE bits that are x instead of the bit of cfg.value */
 } ffc;
 
 /* The parameters of each type in definition order: W width, C CLK_POLARITY, E EN_POLARITY, P the
@@ -102,6 +103,7 @@ static void describe(const ffc *cs, char *msg) {
 static uint32_t make_params(const ffc *cs, odin3_value *params, uint8_t *bits) {
     for (uint32_t i = 0; i < cs->cfg.width; i++) {
         bits[i] = (uint8_t)(((cs->cfg.value >> i) & 1U) != 0 ? ODIN3_BIT_1 : ODIN3_BIT_0);
+        bits[i] = ((cs->value_x >> i) & 1U) != 0 ? ODIN3_BIT_X : bits[i];
     }
     const char *code = k_param_codes[cs->cfg.kind];
     uint32_t count = 0;
@@ -573,6 +575,25 @@ static void test_init_values_come_from_the_init_attribute(void) {
     }
 }
 
+/* An x bit in a reset value stays an x constant (it must not become 0). */
+static void test_an_x_reset_value_lowers_to_an_x_constant(void) {
+    static const ffref_kind k_kinds[] = {FFREF_SDFF, FFREF_ADFF};
+    for (size_t i = 0; i < sizeof k_kinds / sizeof k_kinds[0]; i++) {
+        ffc cs = MAKE_CASE(k_kinds[i], 4);
+        cs.cfg.value = 5U;
+        ffd dd;
+        ffd_make(&dd, &cs);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, ffd_lower(&dd, ""));
+        TEST_ASSERT_EQUAL_UINT32(0, lf_count_type(&dd.fix, dd.mod, "$_CONSTX_"));
+        lf_end(&dd.fix);
+        cs.value_x = 0xAU;
+        ffd_make(&dd, &cs);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, ffd_lower(&dd, ""));
+        TEST_ASSERT_TRUE(lf_count_type(&dd.fix, dd.mod, "$_CONSTX_") > 0);
+        lf_end(&dd.fix);
+    }
+}
+
 static void test_neg_edge_invert_shares_one_not_and_warns_per_cell(void) {
     ffc cs = MAKE_CASE(FFREF_DFFE, 3);
     cs.clk_high = false;
@@ -868,6 +889,7 @@ int main(void) {
     RUN_TEST(test_the_stepper_matches_hand_computed_sequences);
     RUN_TEST(test_structure_of_every_type_polarity_and_width);
     RUN_TEST(test_the_size_estimate_bounds_the_gates);
+    RUN_TEST(test_an_x_reset_value_lowers_to_an_x_constant);
     RUN_TEST(test_init_values_come_from_the_init_attribute);
     RUN_TEST(test_neg_edge_invert_shares_one_not_and_warns_per_cell);
     RUN_TEST(test_async_error_names_the_cell_and_changes_nothing);
