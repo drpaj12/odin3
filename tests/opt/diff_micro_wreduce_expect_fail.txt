@@ -4,7 +4,7 @@
 #
 # 2026-10-17 rerun on c7896ac (opt_diff_micro_wreduce): 20 micros failed only on opt-diff's refine step, which is unproven
 # (yosys-refine SAT 60 s limit, BLIF cec no verdict) under the wreduce and/or phase3 scripts; every other differing step is
-# listed in diff_expect.txt and opt-diff exits 4, not 1, only because of that. Per PHASE2 #29 they are untested for now (size limit),
+# listed in diff_expect.txt and opt-diff exits 4, not 1, only because of that. Per PHASE2 #30 they are untested for now (size limit),
 # never a pass. full/iir_no_combinational.v is listed although opt_equiv_micro_phase3 does not prove it either (it is in
 # equiv_phase3_expect_fail.txt: wreduce base case); its opt-diff refine is unproven under wreduce/Phase 3 and proves under Phase 2/opt -full.
 # 2026-10-18: large/spree.v and full/cf_fft_256_8.v left the list (their wreduce/Phase 3 refine proves), seven micros joined (below):
