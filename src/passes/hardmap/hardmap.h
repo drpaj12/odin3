@@ -2,7 +2,8 @@
  * hardmap.h — the `hardmap` pass (3C; spec docs/specs/2026-10-14-3C-hardmap-design.md, plan
  * docs/plans/2026-10-14-3C-hardmap-plan.md): binds word cells to the VTR arch's hard blocks where
  * Parmys's defaults do. Internal: not part of the ABI. PR 3C-1 has the `$mul` rule (M-1..M-7), 3C-2
- * the `$add`/`$sub` rule (A-1..A-9); the memories arrive with 3C-3.
+ * the `$add`/`$sub` rule (A-1..A-9), 3C-3 the explicit RAM instances (R-1..R-7); the inferred
+ * `$mem` follows.
  */
 #ifndef ODIN3_PASSES_HARDMAP_HARDMAP_H
 #define ODIN3_PASSES_HARDMAP_HARDMAP_H
@@ -29,7 +30,10 @@ typedef struct odin3_hardmap_stats {
 /*
  * The pass: maps, in every module and in node-ID order, the `$mul` cells to `multiply` blocks, then
  * the `$add` and `$sub` cells to `adder` chains of max(A_WIDTH, B_WIDTH) + 2 cells, a signed cell's
- * operands sign-extended (spec H-8: `$mul`, then `$add`/`$sub`, then memories). Each source cell is
+ * operands sign-extended; then each `single_port_ram` / `dual_port_ram` instance that is not 15
+ * address bits by 1 data bit into slices of that shape (depth split with registered selects, width
+ * split, address padding; an instance of more than 31 address bits is the located error; spec H-8:
+ * `$mul`, then `$add`/`$sub`, then memories). Each source cell is
  * one transaction: every new node is built first, then the source is deleted and its output nets
  * are merged into the new ones, so ODIN3_ERR_NO_MEMORY before that leaves the IR valid and the
  * source cell intact (H-9); a `$mul` whose Y_WIDTH exceeds A_WIDTH + B_WIDTH (unsigned), and an

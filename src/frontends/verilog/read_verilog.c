@@ -587,6 +587,11 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
         st = odin3_read_verilog_files(design, &opts, &ast);
     }
     st = st != ODIN3_OK ? st : hand_over(ctx, ast, &parsed);
+    if (st == ODIN3_OK && parsed.elab.vtr_compat && !parsed.lib && !parsed.parse_only) {
+        /* Parmys runs `fsm` after `proc`; no Odin III pass does (PHASE3 #43). */
+        odin3_log(ODIN3_LOG_WARN, "fsm recoding (Parmys) not performed; flip-flop counts on "
+                                  "designs with state machines differ from Parmys (PHASE3 #43)");
+    }
     odin3_vec_free(&srcs);
     odin3_vec_free(&parsed.files);
     return st;

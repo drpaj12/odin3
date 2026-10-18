@@ -1101,7 +1101,7 @@ class CommittedInputsTest(unittest.TestCase):
         rows = qor_table.load_tsv(REPO_ROOT / "tests" / "vtr" / "qor" / "divergences.tsv")
         self.assertEqual(rows[0], ("ch_intrinsics", "mem-init-dropped",
                                    "decision 6 step 5: hardmap drops RAM initial values (3C)"))
-        classes = {"mem-init-dropped", "async-reset-made-sync", "baseline-fails"}
+        classes = {"mem-init-dropped", "async-reset-made-sync", "baseline-fails", "dual-write-race"}
         for design, cls, text in rows:
             self.assertIn(design, SETS.designs)
             self.assertIn(cls, classes)

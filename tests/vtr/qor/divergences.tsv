@@ -1,2 +1,4 @@
-# design	class	text (3H spec 8.1; class: mem-init-dropped, async-reset-made-sync, baseline-fails)
+# design	class	text (3H spec 8.1; class: mem-init-dropped, async-reset-made-sync, baseline-fails, dual-write-race; 3H does not act on dual-write-race yet: PHASE3 #42 (p))
 ch_intrinsics	mem-init-dropped	decision 6 step 5: hardmap drops RAM initial values (3C)
+LU8PEEng	dual-write-race	3C R-6: two live write ports to one address are an IEEE race
+LU32PEEng	dual-write-race	3C R-6: two live write ports to one address are an IEEE race

@@ -335,7 +335,8 @@ item 1). `hardmap` legalises it to the arch's shape, as Parmys's `iterate_memori
     the port becomes synchronous on that clock with `RD_TRANSPARENT = 0`.
   - **Address merge, otherwise:** if every `RD_ADDR` bit is the `Q` of a `$dff` on one clock, and
     each such `D` net feeds nothing else that would change, the address FFs are bypassed, and the
-    port becomes synchronous with `RD_TRANSPARENT = 1` when a write port on the same clock exists.
+    port becomes synchronous (D12: the merge does not apply when a write port is on the read clock,
+    because the RAMs are read-first and the registered address would read the old value).
   - Yosys's further cases (reset values, `$sdff` with init, mixed clocks) are not merged. The port
     stays asynchronous.
 - **R-9 A read port that stays asynchronous**, or a memory whose ports use more than one clock
@@ -390,7 +391,9 @@ Each soft decision except S-1 logs one WARN line per cell. S-1 is the default an
   give byte-identical BLIF (PHASE3 exit item 3).
 - **H-9 Memory.**
   - Each mapping builds all its nodes and nets before it kills the source cell. On `NO_MEMORY` the
-    IR is valid and the source cell is intact.
+    IR is valid and the source cell is intact. The one exception (R-8): the merged flip-flops are
+    deleted best effort after the `$mem`; on `NO_MEMORY` such a flip-flop stays with every pin
+    open, and `opt -full` removes it (a bare `hardmap; write_*` would carry it).
   - The design budget (`odin3_budget_check`, 60%) is checked per cell kind and every 2^16 created
     pins. `LU32PEEng` makes 5,251 RAM slices and about 13,500 adders, which is small.
   - `hardmap` never compacts; the script's `compact` after `opt -full` does (PHASE2 #19).
@@ -442,19 +445,32 @@ Each soft decision except S-1 logs one WARN line per cell. S-1 is the default an
 |---|---|---|---|
 | D1 | signed operands of `$add`/`$sub` are sign-extended into the chain (A-2, A-6) | `unconn` (0) pad | `stereovision0/1/2`, `LU8/32PEEng`, `mcml`: different adder pins above the narrow operand; same adder count; RTL-correct (Peter's ruling, 2026-10-14) |
 | D2 | Y bits above the chain: sign of the result for signed or `$sub`, else gnd (A-7) | gnd (`$add`), `unconn` (`$sub`) | none after 3G (Y ≤ n + 1) |
-| D2b | top stage of an unsigned `$sub` uses `~0 = vcc` (A-8) | `unconn` (to be confirmed) | to be measured |
+| D2b | top stage of an unsigned `$sub` uses `~0 = vcc` (A-8) | `unconn` (confirmed by Peter's probe, 2026-10-14: the borrow bit is lost) | pin difference only; Parmys is wrong, Odin III is RTL-correct (`tests/hardmap/sub_pad_u.v`) |
 | D3 | signed `$mul` sign-extended to `Y_WIDTH` (≤ 36), else soft (M-5) | `unconn` pad | none (no signed `$mul`) |
-| D4 | depth-split output select registered (R-7) | live address bit | `mcml`: 6 more FFs, if confirmed |
+| D4 | depth-split output select registered (R-7) | live address bit (confirmed: 468 mismatches in 2000 cycles, 0 with `addr[0]` held) | `mcml`: 6 more FFs (`counts:+6 latch`) |
 | D5 | an inferred `$mem` with an asynchronous read stays soft (R-9) | mapped as synchronous | none (no inferred memory) |
-| D6 | `2×2` `$mul` soft (M-2) | AND gates + hard adders | none |
-| D7 | `$mul` wider than 36 soft, with a warning (M-2); explicit `multiply` above 36 is an error (M-6) | split into 36-bit pieces + adders | none |
+| D6 | `2×2` `$mul` soft (M-2) | AND gates + hard adders | none in the 19; micros: 4 fewer hard `adder` per 2×2 `$mul` (`counts:-4 adder`) |
+| D7 | `$mul` wider than 36 soft, with a warning (M-2); explicit `multiply` above 36 is an error (M-6); an explicit `multiply` below 36 is treated like the equivalent `$mul` with a warning (PHASE3 #39a) | split into 36-bit pieces + adders | none |
 | D7b | unsigned `$mul` with `Y_WIDTH > A_WIDTH + B_WIDTH` soft, with a warning (M-3) | hard, gnd on the extra Y bits | none after 3G |
 | D8 | inferred `$mem` with more than two ports, or ports that cannot share a RAM port: replicas or soft (R-10, R-11) | multiplexed port modes | none |
-| D9 | `RD_EN` mapped only when constant 1, else soft (R-10) | dropped | none |
+| D9 | `RD_EN` mapped only when constant 1, else soft (R-10) | dropped | none in the 19; micro `common/bram.v` (`counts:-8 dual_port_ram`) |
 | D10 | INIT dropped with a warning (R-12) | dropped silently | none |
 | D11 | names follow 3E's styles | Parmys's `~` names | names only |
+| D12 | an inferred `$mem` whose read address is registered stays asynchronous (R-9) when a write port is on the read clock; the address merge applies only to read-only memories (plan default d) | merged | none (no inferred memory in the 19) |
+| D13 | an inferred `$mem` with `OFFSET` != 0 stays soft with a warning (R-11 class) | records the offset, ignores it | none |
+| D14 | an inferred `$mem` with a port on the falling clock edge stays soft with a warning (R-11 class) | mapped as a rising-edge RAM | none |
+| D15 | a memory with no write port and no INIT is mapped to RAM slices (`we` on gnd, R-10 pattern `p_1_0`) | deleted by Yosys's `opt_mem`: read data x, no RAM | `common/1r.v` and `2r.v` (+8 slices); none in the 19. Not a `hardmap` rule: the cure is an `opt_mem` rule in `opt` |
 
 ## 11. Amendments this spec needs (after approval)
+
+Status 2026-10-17 (3C-3): all five are applied (PHASE3 #4/#5 notes, #42, `docs/PASSES.md`). Also
+amended by the implementation, each logged in PHASE3 #39 and #42: M-3 and A-7 (a `$mul` with
+`Y_WIDTH` above `A_WIDTH + B_WIDTH`, an `$add`/`$sub` with `Y_WIDTH` above `max + 1`, stay soft with
+a warning: `wreduce` caps Y, and the alias merges would allocate after the delete, H-9), M-6 (an
+explicit `multiply` is treated like the `$mul`), R-8 (D12), R-9..R-12 texts (the warnings are
+verbatim in `test_hardmap_mem.c`), R-6 (a hard-mapped `$mem` with more than one write port logs a
+warning: a same-address collision is undefined), and the ADDR bound of 31 (an instance above it is
+a located error).
 
 - PHASE3 decision 4: "`$mul` with both widths ≥ 3" becomes M-2. "Inputs extended to 36 bits
   (sign-extended when signed)" becomes M-3/M-4/M-5.

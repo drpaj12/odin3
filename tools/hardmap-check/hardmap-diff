@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# hardmap-diff: Odin III's pre-ABC netlist against Parmys's golden (3C spec 9.3, plan Task 4).
+# Exit codes: 0 every design identical, equivalent or listed; 1 a difference, a count mismatch, a
+# warning or a stale entry; 2 usage or tool error; 3 a child crashed or timed out. See hardmap_diff.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here/../elab-check:$here/../exit-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/hardmap_diff.py" "$@"

@@ -1,0 +1,38 @@
+# What hardmap-diff may report for the 19 VTR designs other than identical or equivalent
+# (3C spec 9.4, 10; plan Task 7). Syntax as diff_expect.txt: `<path> <id> <reason>`, <path> relative
+# to benchmarks/verilog. A line that does not occur fails as stale: the list shrinks.
+#
+# D1: signed operands of `$add`/`$sub` are sign-extended into the chain; Parmys pads with `unconn`
+# (spec A-2, A-6; Peter's ruling 2026-10-14). Same adder count; Odin III is RTL-correct (PHASE3 #42).
+# `unproven`: equiv-check cannot decide the design (tests/exit/vtr_unproven.txt); the hard-block
+# counts, which hardmap-diff always checks, are then the evidence.
+
+
+# Run 2026-10-18 on the full `lower` (3B-2, 3B-3), again after merging main (#129-#134) at head
+# 3C review fixes (release build), one tools/heavy-run each; numbers unchanged by the merge. diffeq1, diffeq2 and
+# mkPktMerge are equivalent to Parmys (no line). The other four small designs:
+# Parmys runs `fsm` after `proc` (synthesis.tcl: `procs -norom; fsm; opt; ...`) and recodes a state
+# register one-hot: S states take S flip-flops where the Verilog's binary register has ceil(log2 S).
+# Odin III's Phase 3 script has no `fsm` (PHASE3 #43; FSM extraction is Phase 4), so Odin III has
+# fewer flip-flops. The arithmetic, measured in the investigation (inv-3C-ff-gap):
+#   ch_intrinsics   cur_state 4 bits, 15 states: 15 - 4 = +11 for Parmys (265 after proc, 199 after
+#                   the first `opt`, Parmys 210 = 199 + 11; hardmap and lower change nothing)
+#   blob_merge      state 5 bits, 28 states: 28 - 5 = +23
+#   stereovision3   reg_prog_state 5 bits, 27 states: 27 - 5 = +22; observed 21, ONE FLOP UNEXPLAINED
+#                   (open: not isolated)
+# Scope: `counts:` needs the latch delta to equal the listed number exactly and every hard-block
+# count (adder, multiply, single_port_ram, dual_port_ram) to equal Parmys's, so these lines hide no
+# hard-block difference. They do skip the netlist comparison: equiv-check says NOT equivalent for
+# ch_intrinsics only because ABC starts the one-hot register all-zero (an illegal state); with that
+# one bit initialised to 1 in a scratch copy of the golden it reports equivalent (the only such
+# comparison made; blob_merge and stereovision3 are explained by arithmetic alone, not compared).
+# The function of these three is not compared by this tool.
+ch_intrinsics.v counts:-11 latch fsm: Parmys recodes cur_state (4 bits, 15 states) one-hot, 15 flops; Odin III has no fsm in Phase 3 (PHASE3 #43)
+blob_merge.v counts:-23 latch fsm: Parmys recodes state (5 bits, 28 states) one-hot, 28 flops; Odin III has no fsm in Phase 3 (PHASE3 #43)
+stereovision3.v counts:-21 latch fsm: Parmys recodes reg_prog_state (5 bits, 27 states) one-hot, +22 expected, 21 seen, 1 flop unexplained (open); no fsm in Odin III Phase 3 (PHASE3 #43)
+sha.v unproven ABC dsec UNDECIDED after 482 s; hard-block and latch counts equal Parmys's
+
+# The 12 designs not run yet (raygentop, boundtop, mkSMAdapter4B, or1200, stereovision0/1/2,
+# mkDelayWorker32B, LU8PEEng, bgm, mcml, LU32PEEng) have no line: an unlisted `differs`, `unproven`
+# or `counts-differ` fails the sweep, which is the safe direction. Add a line for each only from
+# its run (the commands are in PHASE3 #42).
