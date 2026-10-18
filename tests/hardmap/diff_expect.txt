@@ -5,7 +5,6 @@
 #                  equivalent), with the same hard-block counts;
 #   counts:<+N|-N> <unit>   the unit's count differs from Parmys by exactly N (the netlists are
 #                  then not compared); the reason names the divergence;
-#   lower-gap      Odin III stops in `lower`, which has no rule for a cell yet (3B-2);
 #   unproven       equiv-check cannot decide the design (tests/exit/vtr_unproven.txt).
 # A reason is required on every line. An entry that no longer occurs is stale and fails: the list
 # shrinks. A `run wreduce first` warning is never listable.
@@ -18,22 +17,31 @@
 common/1r.v counts:+8 single_port_ram D15: read-only memory without INIT, Parmys deletes it (opt_mem), Odin III maps 8 slices
 common/2r.v counts:+8 dual_port_ram D15: read-only memory without INIT, Parmys deletes it (opt_mem), Odin III maps 8 slices
 
-# lower-gap: `lower` (3B-1) has no rule yet for these cell types, so no netlist view is reachable.
-# hardmap-diff then counts the hard cells of the RTLIL written before `lower` (top module) against
-# the golden's hard blocks; those counts must equal the golden's plus the `counts:` lines above. The 3B-2
-# PR removes these lines; the equivalence of multiply_hard_block is owed until then (3C-1 report).
-common/rom.v lower-gap `$mem` and `$dffe` left soft by hardmap (R-10, read enable not constant 1); 3B-2 lowers them
+# D6 evidence (2026-10-17, owed since 3C-1): with every `adder` subckt of both BLIFs expanded to
+# sumout = a^b^cin, cout = maj(a,b,cin), equiv-check says micro/multiply_hard_block.v is equivalent
+# (abc cec) and twobits_arithmetic_multiply.v is equivalent (abc dsec): only the adder count differs.
 common/bram.v counts:-8 dual_port_ram D9: Parmys drops RD_EN and maps 8 slices, Odin III leaves the `$mem` soft (R-10)
-common/bram.v lower-gap `$mem` and `$dffe` left soft by hardmap (read enable not constant 1); 3B-2 lowers them
-common/nr.v lower-gap `$mem` and three `$dffe` left soft by hardmap (read enable not constant 1, R-10); 3B-2 lowers them
 micro/multiply_hard_block.v counts:-8 adder D6: Parmys builds each 2x2 multiplier from AND gates and 4 hard adders, Odin III leaves the `$mul` soft (M-2)
-micro/multiply_hard_block.v lower-gap two 2x2 `$mul` left soft (M-2, D6); 3B-2 lowers `$mul`
-operators/eightbit_arithmetic_power.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it
-operators/twobits_arithmetic_div.v lower-gap `$div` and `$sdff` (not hardmap's); 3B-2 lowers them
-operators/twobits_arithmetic_minus.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it
-operators/twobits_arithmetic_mod.v lower-gap `$mod` and `$sdff` (not hardmap's); 3B-2 lowers them
 operators/twobits_arithmetic_multiply.v counts:-4 adder D6: Parmys builds the 2x2 multiplier from AND gates and 4 hard adders, Odin III leaves the `$mul` soft (M-2)
-operators/twobits_arithmetic_multiply.v lower-gap 2x2 `$mul` left soft (M-2, D6) and `$sdff`; 3B-2 lowers them
-operators/twobits_arithmetic_plus.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it
-operators/twobits_arithmetic_power.v lower-gap `$sdff` (not hardmap's); 3B-2 lowers it
-operators/twobits_arithmetic_uminus.v lower-gap `$neg` and `$sdff` (S-1, not hardmap's); 3B-2 lowers them
+
+# D2b (3C spec 10): the top stage of an unsigned `$sub` whose result is wider than the operands. The
+# 2026-10-17 run of the full `lower` shows it on this micro: Parmys wires the top adder's a and b to
+# `unconn`, so out[2] is the carry (the borrow is lost); Odin III uses a=gnd, b=vcc and is RTL-correct.
+# hardmap's choice (A-8), not lower's.
+operators/twobits_arithmetic_minus.v D2b top adder of the unsigned `$sub` pads with vcc (RTL-correct); Parmys uses unconn and loses the borrow
+
+# D15 on the full `lower` (2026-10-17): with a constant-free read enable hardmap leaves the read-only
+# `$mem` soft (R-10), `lower` turns its read data `$dffe` into latches (3 x 8 in nr) and Parmys, whose
+# opt_mem deleted the memory, has none. Not a hardmap or lower rule: opt_mem is 3G.
+common/rom.v counts:+8 latch D15: read-only memory without INIT, Parmys deletes it and its read register (opt_mem), Odin III keeps the 8 read-data flops
+common/nr.v counts:+24 latch D15: three read-only memories without INIT, Parmys deletes them and their read registers (opt_mem), Odin III keeps 3 x 8 read-data flops
+
+# D9 on the full `lower`: the `$mem` Odin III leaves soft (R-10) is lowered by `lower` to 128 bit flops
+# plus the 8 read-data flops; Parmys maps it to 8 RAM slices.
+common/bram.v counts:+136 latch D9: the soft `$mem` is lowered to 16 x 8 bit latches plus 8 read-data latches
+
+# lower-gap: `lower` has no bit-level form for `$pow` (3B-2 left it unmapped as Yosys does), so no
+# netlist view is reachable. hardmap-diff counts the hard cells of the RTLIL written before `lower`
+# (top module) against the golden's hard blocks. Cell type owed by lower: `$pow`. Not hardmap's.
+operators/eightbit_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)
+operators/twobits_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)

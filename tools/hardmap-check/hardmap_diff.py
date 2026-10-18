@@ -71,7 +71,7 @@ DEFAULT_EQUIV_TIMEOUT = 600
 EQUIV_UNPROVEN, EQUIV_HARD = 4, 5
 DIVERGENCE = re.compile(r"D\d+[a-z]?")
 PLAIN_IDS = ("unproven", "no-golden", "lower-gap")
-GAP_NEEDLE = "no lowering rule for cell type"
+GAP_NEEDLES = ("no lowering rule for cell type", "has no bit-level form")
 MODEL = re.compile(r"^\.model\s+(\S+)", re.MULTILINE)
 SUBCKT = re.compile(r"^\.subckt\s+(\S+)")
 RTLIL_CELL = re.compile(r"^\s*cell\s+\\(\S+)\s")
@@ -274,8 +274,9 @@ def run_odin(cfg: Config, design: Path, top: str, work: Path) -> tuple[Path, str
     proc = run_child([cfg.odin3, "--top", top, "-p", script], cfg.timeout)
     log = proc.stderr + proc.stdout
     (work / "odin.log").write_text(log, encoding="utf-8")
-    if proc.returncode != 0 and GAP_NEEDLE in proc.stderr:
-        gap = next(ln for ln in proc.stderr.splitlines() if GAP_NEEDLE in ln)
+    gap_lines = [ln for ln in proc.stderr.splitlines() if any(n in ln for n in GAP_NEEDLES)]
+    if proc.returncode != 0 and gap_lines:
+        gap = gap_lines[0]
         raise LowerGap(gap.replace("odin3: error: ", "").strip(), log)
     if proc.returncode != 0:
         raise ToolError(f"odin3 exited {proc.returncode}: {tail(proc.stderr)}")

@@ -970,16 +970,23 @@ then the options considered.
     `$dff`, `$dffe`, `$sdff`, `$mem`, `$mul`, `$lt`, `$ge`, `$div`, `$mod`, `$neg` (3B-2), so most
     designs cannot reach a BLIF. The expect id `lower-gap` lists that; the tool then counts the
     hard cells of the RTLIL written before `lower` (top module) and requires them to equal the
-    golden's. The `lower-gap` lines go with 3B-2; the equivalence of
-    `micro/multiply_hard_block.v` is owed until then. (m) New divergence D15: Yosys's `opt_mem`
+    golden's. Update 2026-10-18, after 3B-2 and 3B-3 merged: only `$pow` is left (no bit-level form
+    in `lower`, the two `*_arithmetic_power` micros); the equivalence of
+    `micro/multiply_hard_block.v` is done (see Evidence). (m) New divergence D15: Yosys's `opt_mem`
     deletes a memory with no write port and no INIT; `opt` has no such rule, so hardmap maps it
     (`common/1r.v`, `2r.v`: +8 slices). The cure is an `opt_mem` rule in 3G/Phase 4, not a hardmap
     rule. (n) The micro `common/nrnw.v` is not in `micros.txt`: Parmys rejects it. (o) Spec 10:
     D2b and D4 are confirmed by the probes, D12-D15 added, D6 and D9 effects recorded (micros only).
-    **Evidence.** Micros (`hardmap_diff_micro`, 26 designs, release or debug build): 12 equivalent
-    to Parmys through `lower` (adder, sub, mult, mult_const, mem, spram, dpram, 1r2w, 2r1w, 2r2w,
-    adder_hard_block, hard_adder_cin_propagation), 14 listed (D15 x2, D6/D9 count differences,
-    and `lower-gap` with equal counts otherwise). D1 and D2b positive test: the Odin III netlists of
+    **Evidence.** Micros (`hardmap_diff_micro`, 26 designs, release or debug build): 16 equivalent
+    to Parmys through the full `lower` (adder, sub, mult, mult_const, mem, spram, dpram, 1r2w,
+    2r1w, 2r2w, adder_hard_block, hard_adder_cin_propagation, twobits_arithmetic_div, _mod, _plus,
+    _uminus), 10 listed: D15 (1r, 2r, rom +8 latch, nr +24 latch), D9 (bram: -8 dual_port_ram,
+    +136 latch), D6 (multiply_hard_block -8 adder, twobits_arithmetic_multiply -4 adder), D2b
+    (twobits_arithmetic_minus: Parmys uses `unconn` at the top stage of the unsigned `$sub` and
+    loses the borrow; Odin III is RTL-correct) and `lower-gap` on `$pow` (lower's, not hardmap's;
+    eightbit_ and twobits_arithmetic_power). The D6 BLIFs, with every `adder` subckt expanded to
+    logic on both sides, are equivalent to Parmys for `multiply_hard_block` (abc cec) and
+    `twobits_arithmetic_multiply` (abc dsec). D1 and D2b positive test: the Odin III netlists of
     `tests/hardmap/sx_add_c.v`, `sub_pad_s.v` and `sub_pad_u.v` (through `lower`) against their
     RTL with `parmys-probe`: 0 mismatches in 3000 cycles each, where Parmys's own netlists fail
     (probes README). **The 19** (run order, `tests/hardmap/vtr_designs.txt`): small designs run
