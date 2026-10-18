@@ -1345,7 +1345,19 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       (`need_init`, 6a8759eb): a SAT timeout on a design with such latches is unproven (exit 4);
       the micros it affects are in `tests/opt/diff_micro_phase2_expect_fail.txt` and
       `diff_micro_wreduce_expect_fail.txt`, and the VTR designs' opt-diff lines in `diff_expect.txt`.
-      The micro sweeps (`opt_equiv_micro`, `opt_equiv_micro_phase3`) are not re-run yet.
+      The micro sweeps on c5eeb7f3 (2026-10-18, Release, 2G cap): `opt_equiv_micro` (Phase 2 script)
+      539 files, 414 pass, 104 expected failures, 15 unexpected, 6 listed but passing;
+      `opt_equiv_micro_phase3` 410 / 112 / 17 unexpected / 0. Every failing call is "inconclusive"
+      (SAT size limit or initial state unproven), none is "not a refinement" (0 "do not" in both).
+      2H lists them: 13 big micros under both scripts (`tests/opt/equiv_expect_fail.txt`), matmul
+      under the Phase 2 script (`equiv_phase2_expect_fail.txt`: its memory's equiv_induct is killed
+      by the cap even at 5G), three small designs under Phase 3 only (`bm_arithmetic_unused_bits`,
+      `iir_no_combinational`, `iir`: the base case fails on a named wire after a wreduce call; the
+      output-only check passes 20 steps), and `diffeq2` (2131 B; the induction of its multipliers is
+      still unproven after 600 s). `syntax/inferred_ram_w_clog2.v` (1479 B) proves under both scripts
+      at a 4G cap (its base case peaks at 2.3 GB; the sweeps give it `--cap-for ...=4G`). The seven
+      entries only Phase 3 fails moved to `equiv_phase3_expect_fail.txt`. Expected after the
+      re-listing: Phase 2 script 0 unexpected, Phase 3 0 unexpected, nothing listed but passing.
     - **Not changed:** opt-diff, opt-rules, flatten-diff and opt-gen-diff call `Checker.refines`
       (the proof alone) and do not get the hard-block widths or the base case yet; the
       whole-script BLIF cec cannot read a `dual_port_ram`/`single_port_ram` whose ports are bit
