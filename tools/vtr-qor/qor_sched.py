@@ -1650,7 +1650,7 @@ def run_fcheck(job: Job, opts: RunOptions, verilator_j: int) -> str:
     return verdict
 
 
-# PHASE3 #16 (Peter, 2026-10-17; PHASE2 #29): equivalence is required only on the micros and these
+# PHASE3 #16 (Peter, 2026-10-17; PHASE2 #30): equivalence is required only on the micros and these
 # 14 small VTR designs. A bigger design needs P&R success and QoR within decision 3's bands, and
 # its equiv verdict is informational ("not required (PHASE3 #16)"). The nightly runs ``equiv``
 # only on the gate designs inside this set; the Verilator fcheck stays on every design.

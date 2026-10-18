@@ -1,7 +1,7 @@
 # tests/opt/diff_micro_phase2_expect_fail.txt: the micros opt_diff_micro (the Phase 2 script and `opt -full`) expects to fail
 # beyond tests/opt/diff_micro_expect_fail.txt. Format: `<path> [needle] <reason>`.
 #
-# Untested for now (size limit), PHASE2 #29: opt-diff exits 4 because a refine step is unproven (yosys-refine SAT proof hit the
+# Untested for now (size limit), PHASE2 #30: opt-diff exits 4 because a refine step is unproven (yosys-refine SAT proof hit the
 # 60 s limit, the BLIF cec of the netlists gave no verdict) in the Phase 2 script or `opt -full`, or because Yosys was killed at
 # the cap. Every other differing step of these files is listed in diff_expect.txt (path-keyed lines at its end) and the sweep
 # requires exit 4: one unproven refine cannot hide another difference. 2026-10-18 run on 3855e702; seconds are that run's.

@@ -349,6 +349,7 @@ then the options considered.
       reset made synchronous (decision 19).
     - (b) `equiv-check` only.
     - (c) P&R success only.
+    - **Amended 2026-10-17 (PHASE2 #30):** equiv-check before and after abc runs on the micros and the 14 small VTR designs only; the big designs need P&R success and QoR within the bands (decision 3). VTR's Verilator random check stays on every design as a cheap sanity check (agent default).
 17. **Runtime and memory on the WSL VM** (24 GB, 12 threads; PHASE0 #29). Recommend (a). It
     keeps the parallel total at or below 60% of RAM, and the four largest designs carry most
     of the risk (VTR's golden `max_vpr_mem`: `LU32PEEng` 2.3 GB, `mcml` 2.2 GB; `LU32PEEng`
@@ -978,7 +979,7 @@ then the options considered.
     between cells). (f) The reverse-order check compares four cell types through
     `netlist-compare --implicit-models`. (g) Provenance to the dead cell is covered by the Task 2
     test (`test_lower_bitwise`). (h) Evidence status (corrected 2026-10-18 after the 3B-4 review; nothing below is ticked until it
-    has run): the 14 small VTR designs and the PHASE2 #29 equivalence: pending controller run
+    has run): the 14 small VTR designs and the PHASE2 #30 equivalence: pending controller run
     (2026-10-18), only `single_wire` ran; the three micro sweeps: pending controller run
     (2026-10-18); the 1M-cell bench number: pending controller run (2026-10-18); big designs need
     P&R and QoR (3H). (i) Review fixes (3B-4 fix round): `lower-equiv` matches a port with a nonzero
