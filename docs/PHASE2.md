@@ -1105,13 +1105,15 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       (`tests/opt/diff_micro_wreduce_expect_fail.txt`), and the sweep requires exit 4 of them, so one
       unproven refine cannot hide another difference. Under the Phase 2 script and `opt -full`
       (`opt_diff_micro`, first run 2026-10-18) 15 of them stay unproven and `large/LU32PEEng.v` also
-      loses Yosys to the memory cap (`tests/opt/diff_micro_phase2_expect_fail.txt`); five refine
-      without a limit there (`full/diffeq1.v`, `syntax/diffeq_paj_convert.v`, `large/spree.v`,
-      `full/cf_fft_256_8.v`, `full/iir_no_combinational.v`) and are not listed. opt-equiv proves one
+      loses Yosys to the memory cap, and ten more (diffeq1, diffeq2, diffeq_paj_convert, rs_decoder_1/2,
+      mac1/2, blob_merge, cf_fft_256_8, sv_chip0) were rescued by the BLIF cec fallback, which
+      opt-diff no longer lets prove a design with latches of no 0/1 init
+      (`tests/opt/diff_micro_phase2_expect_fail.txt`); `large/spree.v` and
+      `full/iir_no_combinational.v` refine without a limit there and are not listed. opt-equiv proves one
       of the 20 (`full/iir_no_combinational.v`). Two more micros
       (`large/LU64PEEng.v`, `large/arm_core.v`) are exit 4 because Yosys is killed at the 2 GiB cap,
       and three are rejected by Yosys 0.55 (exit 2, same list). `large/sv_chip0_hierarchy_no_mem.v`
-      is structural-identity only: its refine step passes (`tests/opt/diff_expect.txt`).
+      is untested for now (size limit) since 2026-10-18 (`tests/opt/diff_expect.txt`).
     - **For Peter:**
       1. *Decided, #25:* the mixed-sign cell semantics (2F Task 18 review I1 and I2): Peter ruled
          "2a" on 2026-10-13, both-signed-only everywhere, with a warning.
@@ -1332,11 +1334,17 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       to 1, `r <= r & d` against `r <= r`: all "not a refinement"; correct pairs ok. Each fix
       reverted once (five mutants and the 0-init one) fails a test. `opt_equiv_rules` and
       `opt_equiv_wreduce_rules` pass. VTR re-proof of the 14 small designs (`opt-nightly --leg equiv
-      --set vtr31 --only ...`, 92c2ba44, Release, one heavy-run, 3037 s): 13 ok (single_wire,
+      --set vtr31 --only ...`, 92c2ba44, then c5eeb7f3, Release, 3G cap): 9 proved (single_wire,
       single_ff, and_latch, the three multiclock designs, ch_intrinsics(+_nolatches) with
-      full-width RAM ports, diffeq1, diffeq2, sha, blob_merge, stereovision3); mkPktMerge is
-      unproven (its base case times out at 60 s, the BLIF cec cannot read `dual_port_ram`'s
-      `data1[0]`) and listed untested for now (size limit) in `tests/opt/vtr_expect_fail.txt`.
+      full-width RAM ports, stereovision3) and 5 untested for now (size limit), listed in
+      `tests/opt/vtr_expect_fail.txt`: mkPktMerge (its base case times out at 60 s, the BLIF cec
+      cannot read `dual_port_ram`'s `data1[0]`), and, since c5eeb7f3 refuses the BLIF cec fallback
+      for latches with no 0/1 init, diffeq1 (4 of 4 calls inconclusive, 386 such latches), diffeq2
+      (3 of 3, 192), sha (1 of 8, 1786) and blob_merge (4 of 9, 1144). None of the five has a
+      counterexample (no call is "not a refinement"). opt-diff's refine step has the same rule
+      (`need_init`, 6a8759eb): a SAT timeout on a design with such latches is unproven (exit 4);
+      the micros it affects are in `tests/opt/diff_micro_phase2_expect_fail.txt` and
+      `diff_micro_wreduce_expect_fail.txt`, and the VTR designs' opt-diff lines in `diff_expect.txt`.
       The micro sweeps (`opt_equiv_micro`, `opt_equiv_micro_phase3`) are not re-run yet.
     - **Not changed:** opt-diff, opt-rules, flatten-diff and opt-gen-diff call `Checker.refines`
       (the proof alone) and do not get the hard-block widths or the base case yet; the
