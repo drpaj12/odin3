@@ -82,7 +82,9 @@ static void add_cell(lf *fix, odin3_module *mod, const uint8_t *rec, uint32_t in
     lf_binary spec = {(rec[4] & SIGN_A) != 0, (rec[4] & SIGN_B) != 0, width_of(rec[1]),
                       width_of(rec[2]), width_of(rec[3])};
     odin3_value params[5];
-    lf_cell_spec cell = {row->name, params, 5, "dut", {0}};
+    char prefix[16];
+    (void)snprintf(prefix, sizeof prefix, "c%u_", (unsigned)index);
+    lf_cell_spec cell = {row->name, params, 5, prefix, {0}};
     if (row->shape == UNARY) {
         lf_unary_params(&spec, params);
         cell.n_params = 3;
@@ -93,8 +95,6 @@ static void add_cell(lf *fix, odin3_module *mod, const uint8_t *rec, uint32_t in
     } else {
         lf_binary_params(&spec, params);
     }
-    char prefix[16];
-    (void)snprintf(prefix, sizeof prefix, "c%u_", (unsigned)index);
     (void)lf_cell_prefixed(fix, mod, &cell, prefix);
 }
 

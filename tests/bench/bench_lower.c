@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
         char prefix[16];
         (void)snprintf(prefix, sizeof prefix, "c%u_", (unsigned)i);
         lf_cell_spec cell = {
-            k_binary[i % (sizeof k_binary / sizeof k_binary[0])], params, 5, "dut", {0}};
+            k_binary[i % (sizeof k_binary / sizeof k_binary[0])], params, 5, prefix, {0}};
         (void)lf_cell_prefixed(&fix, mod, &cell, prefix);
     }
     uint32_t before = lf_live_nodes(mod);
