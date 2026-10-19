@@ -93,18 +93,18 @@ large/mac1.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
 large/des_perf.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
 large/raygentop.v [UNPROVEN:] untested for now (size limit): SAT proof killed by the 2G memory cap after about 225 s
 large/paj_raygentop_hierarchy_no_mem.v [UNPROVEN:] untested for now (size limit): SAT proof killed by the 2G memory cap after about 211 s
-large/sv_chip1_hierarchy_no_mem.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (65 s in the sweep; not retried at a longer limit)
-full/stereovision1.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (65 s in the sweep; not retried at a longer limit)
-full/cf_fft_256_8.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep; not retried at a longer limit)
-large/sv_chip0_hierarchy_no_mem.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep; not retried at a longer limit)
-FIR/ex4LS16_fir.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (63 s in the sweep; not retried at a longer limit)
-full/stereovision0.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep; not retried at a longer limit)
-large/or1200.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (61 s in the sweep; not retried at a longer limit)
-full/LU8PEEng.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (68 s in the sweep; not retried at a longer limit)
+large/sv_chip1_hierarchy_no_mem.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (65 s in the sweep); also unproven alone at 300 s (timed out or killed by the 2G cap)
+full/stereovision1.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (65 s in the sweep); also unproven alone at 300 s (timed out or killed by the 2G cap)
+full/cf_fft_256_8.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep); also unproven alone at 300 s (timed out or killed by the 2G cap)
+large/sv_chip0_hierarchy_no_mem.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep); also unproven alone at 300 s (timed out or killed by the 2G cap)
+FIR/ex4LS16_fir.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (63 s in the sweep); also unproven alone at 300 s (timed out or killed by the 2G cap)
+full/stereovision0.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep); also unproven alone at 300 s (timed out or killed by the 2G cap)
+large/or1200.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (61 s in the sweep); also unproven alone at 300 s (timed out or killed by the 2G cap)
+full/LU8PEEng.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (68 s in the sweep); also unproven alone at 300 s (timed out or killed by the 2G cap)
 large/mkSMAdapter4B.v [UNPROVEN:] untested for now (size limit): the SAT flow cannot pair the registers, no counterexample in 20 steps, no BLIF cec verdict (multi-clock or hard blocks)
 large/LU32PEEng.v [UNPROVEN:] untested for now (size limit): Yosys is killed by the 2G cap while it flattens the gate (7-10 s): size limit of the check
 large/LU64PEEng.v [UNPROVEN:] untested for now (size limit): Yosys is killed by the 2G cap while it flattens the gate (7-10 s): size limit of the check
-large/mkDelayWorker32B.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep; not retried at a longer limit)
-syntax/cf_fft_1024_16.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (70 s in the sweep; not retried at a longer limit)
-large/mac2.v [UNPROVEN:] untested for now (size limit): SAT proof killed by the 2G memory cap
+large/mkDelayWorker32B.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep); also unproven alone at 300 s (timed out or killed by the 2G cap)
+syntax/cf_fft_1024_16.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (70 s in the sweep); also unproven alone at 300 s (timed out or killed by the 2G cap)
+large/mac2.v [UNPROVEN:] untested for now (size limit): SAT proof killed by the 2G memory cap (also alone at 300 s)
 large/arm_core.v [UNPROVEN:] untested for now (size limit): Yosys is killed by the 2G cap while it flattens the gate (7-10 s): size limit of the check
