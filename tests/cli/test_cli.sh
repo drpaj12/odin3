@@ -682,6 +682,18 @@ blif_vtr_prov_names)
     grep -qE '^\.names a b top/[^ @]+@pn\.v:2$' "$work/p1.blif" || fail "no provenance name on the AND"
     grep -qE '^\.latch top/[^ @]+@pn\.v:3 q re clk 2$' "$work/p1.blif" || fail "latch input name"
     ! grep -q '@' "$work/s.blif" || fail "short style has a location"
+    repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+    # read-back: odin3 reads the provenance names and writes them again unchanged (short style)
+    "$odin3" -p "read_techlib $lib; read_blif $work/p1.blif; write_blif --vtr $work/rb.blif" \
+        >"$work/out" 2>"$work/err" || fail "read_blif of the provenance output failed"
+    diff <(grep -v '^#' "$work/p1.blif") <(grep -v '^#' "$work/rb.blif") >/dev/null ||
+        fail "provenance names changed through read_blif"
+    # the VPR-legality checker is strict on the provenance output, and it is equivalent to the
+    # short-name output
+    "$repo/tools/blif-vtr-check/blif-vtr-check" --strict "$work/p1.blif" >"$work/out" 2>&1 ||
+        fail "blif-vtr-check --strict on the provenance output: $(tail -3 "$work/out")"
+    "$repo/tools/equiv-check/equiv-check" "$work/s.blif" "$work/p1.blif" >"$work/out" 2>&1 ||
+        fail "equiv-check: provenance names differ in function: $(tail -3 "$work/out")"
     ;;
 hardmap_mul)
     # cli_hardmap_mul: read_techlib, read_verilog --vtr-compat, proc, opt, hardmap, write_blif --vtr

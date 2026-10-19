@@ -624,6 +624,9 @@ static void claim_provenance(verilog_writer *wr, const vw_named *obj) {
     } else {
         int len = snprintf(generated, sizeof generated, "%s%u", obj->prefix, (unsigned)obj->id);
         short_name.len = len > 0 ? (size_t)len : 0;
+        if (short_name.len >= sizeof generated) { /* truncated by snprintf */
+            short_name.len = sizeof generated - 1;
+        }
     }
     if (wr->st != ODIN3_OK) {
         return;

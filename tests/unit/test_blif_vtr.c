@@ -8,6 +8,7 @@
  */
 #include "backends/blif/vtr.h"
 #include "backends/blif/writer.h"
+#include "backends/prov_name.h"
 #include "blif_vtr_test.h"
 #include "frontends/blif/reader.h"
 #include "ir/celltype.h"
@@ -3167,6 +3168,135 @@ static void run_task_4(void) {
     RUN_TEST(test_out_of_memory_sweep_gates);
 }
 
+/* A net named `short_name` with a SOURCE record of file:line in hierarchy hier, written as a
+ * chain; the hand design is rebuilt for each call. */
+static void write_prov_named(const char *short_name, const char *file, const char *hier) {
+    odin3_module *top = hand_top();
+    write_prov_chain(top, prov_net(top, short_name, prov_at(file, 3, hier)));
+}
+
+/* A flattened short name already holds the instance path: not `top/u1/u1.x` (agent default,
+ * PHASE3 #45). The longest matching suffix of the hierarchy goes; a name that is all overlap stays.
+ */
+typedef struct flat_case {
+    const char *short_name, *hier, *want;
+} flat_case;
+
+static void expect_flat(flat_case fc) {
+    write_prov_named(fc.short_name, "t.blif", fc.hier);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, fc.want), out.data);
+    bvt_free(&tc);
+}
+
+static void test_prov_names_flattened_path_not_doubled(void) {
+    expect_flat((flat_case){"u1.x", "top/u1", ".names a top/u1/x@t.blif:3\n"});
+    expect_flat((flat_case){"u1.mid.x", "top/u1/mid", ".names a top/u1/mid/x@t.blif:3\n"});
+    expect_flat(
+        (flat_case){"mid.x", "top/u1/mid", ".names a top/u1/mid/x@t.blif:3\n"}); /* suffix `mid` */
+    expect_flat((flat_case){"x", "top/u1", ".names a top/u1/x@t.blif:3\n"}); /* nothing to remove */
+    expect_flat(
+        (flat_case){"u1.", "top/u1", "top/u1/u1.@t.blif:3"}); /* nothing would remain: kept */
+    TEST_ASSERT_EQUAL_UINT64(
+        3, odin3_prov_hier_overlap(odin3_bytes_cstr("top/u1"), odin3_bytes_cstr("u1.x")));
+    TEST_ASSERT_EQUAL_UINT64(
+        0, odin3_prov_hier_overlap(odin3_bytes_cstr("top/u1"), odin3_bytes_cstr("u2.x")));
+}
+
+/* VB-10 rule 1 on the path's special bytes: = " # \ % are %XX. */
+static void test_prov_names_special_path_bytes(void) {
+    write_prov_named("n", "a=b\"c#d\\e%f.blif", "top");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names a top/n@a%3Db%22c%23d%5Ce%25f.blif:3\n"),
+                                 out.data);
+}
+
+/* Rule 4: a provenance name another net already has makes this one `$n<ID>`; the result is the
+ * same on a second write. */
+static void test_prov_names_collision_falls_back(void) {
+    odin3_module *top = hand_top();
+    odin3_net_id taken = prov_net(top, "top/n@t.blif:3", (odin3_prov_id){0}); /* earlier ID */
+    odin3_net_id mid = prov_net(top, "n", prov_at("t.blif", 3, "top"));
+    odin3_net_id in = hand_scalar(top, "a", ODIN3_DIR_IN);
+    odin3_net_id out_y = hand_scalar(top, "y", ODIN3_DIR_OUT);
+    hand_buffer(top, in, taken);
+    hand_buffer(top, taken, mid);
+    hand_buffer(top, mid, out_y);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "--vtr --name-style provenance out.blif", &out));
+    char want[LINE_BUF];
+    (void)snprintf(want, sizeof want, ".names a top/n@t.blif:3\n1 1\n.names top/n@t.blif:3 $n%u\n",
+                   (unsigned)mid.v);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, want), out.data);
+    char *first = odin3_util_malloc(out.len + 1);
+    TEST_ASSERT_NOT_NULL(first);
+    memcpy(first, out.data, out.len + 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "--vtr --name-style provenance out.blif", &out));
+    TEST_ASSERT_EQUAL_STRING(first, out.data);
+    odin3_util_free(first);
+}
+
+/* Rule 8 runs after the wrap: a latch clock net whose path has `|` or `_^_` is escaped. */
+static void test_prov_names_clock_net(void) {
+    odin3_module *top = hand_top();
+    odin3_net_id d_net = hand_scalar(top, "d", ODIN3_DIR_IN);
+    odin3_net_id ck = hand_scalar(top, "ck", ODIN3_DIR_IN);
+    odin3_net_id q_net = hand_scalar(top, "q", ODIN3_DIR_OUT);
+    odin3_net_id clk = prov_net(top, "c", prov_at("p|q_^_r.blif", 5, "top"));
+    hand_buffer(top, ck, clk);
+    odin3_node_id dff = hand_cell(top, "$_DFF_P_", NULL, 0);
+    odin3_pinslice pins = odin3_node_pins(top, dff);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(top, pins.first, clk));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pin_connect(top, (odin3_pin_id){pins.first.v + 1}, d_net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pin_connect(top, (odin3_pin_id){pins.first.v + 2}, q_net));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, bvt_write(&tc, "--vtr --name-style provenance out.blif", &out), tc.log.data);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, "top/c@p%7Cq_%5E_r.blif:5"), out.data);
+    TEST_ASSERT_NULL(strstr(out.data, "|"));
+}
+
+/* A DERIVED record whose leaf has a hierarchy but no location: `hier/name`, no `@`. */
+static void test_prov_names_hier_only(void) {
+    odin3_module *top = hand_top();
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(tc.design, intern("hier"), &ctx));
+    odin3_prov_origin origin = {.hier = intern("top/u1")};
+    odin3_prov_id leaf = {0};
+    odin3_prov_id derived = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &leaf));
+    odin3_prov_begin_op(&ctx);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){&leaf, 1}, &derived));
+    write_prov_chain(top, prov_net(top, "n", derived));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names a top/u1/n\n"), out.data);
+}
+
+/* An unnamed net with no provenance keeps what the short style gives, under the provenance style.
+ */
+static void test_prov_names_unnamed_without_provenance(void) {
+    odin3_module *top = hand_top();
+    odin3_net_id mid = prov_net(top, NULL, (odin3_prov_id){0});
+    write_prov_chain(top, mid);
+    char want[LINE_BUF];
+    (void)snprintf(want, sizeof want, ".names a $n%u\n", (unsigned)mid.v);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, want), out.data);
+}
+
+/* The written names read back: read_blif keeps `top/n@t.blif:7` byte for byte, and writing it with
+ * the short style gives the same names. */
+static void test_prov_names_read_back(void) {
+    write_prov_net("t.blif");
+    char *text = odin3_util_malloc(out.len + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    memcpy(text, out.data, out.len + 1);
+    bvt_free(&tc);
+    read_ok(text, false);
+    odin3_util_free(text);
+    TEST_ASSERT_TRUE(odin3_net_valid(net_named("top/n@t.blif:7")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names a top/n@t.blif:7\n1 1\n"
+                                                  ".names top/n@t.blif:7 y\n"),
+                                 out.data);
+}
+
 /* Tasks 1 and 2: options, arguments, the API, E13, names. */
 static void run_tasks_1_2(void) {
     RUN_TEST(test_unknown_argument);
@@ -3181,6 +3311,13 @@ static void run_tasks_1_2(void) {
     RUN_TEST(test_prov_names_without_location);
     RUN_TEST(test_prov_names_deterministic_and_as_given);
     RUN_TEST(test_prov_names_need_vtr);
+    RUN_TEST(test_prov_names_flattened_path_not_doubled);
+    RUN_TEST(test_prov_names_special_path_bytes);
+    RUN_TEST(test_prov_names_collision_falls_back);
+    RUN_TEST(test_prov_names_clock_net);
+    RUN_TEST(test_prov_names_hier_only);
+    RUN_TEST(test_prov_names_unnamed_without_provenance);
+    RUN_TEST(test_prov_names_read_back);
     RUN_TEST(test_options_need_vtr);
     RUN_TEST(test_option_given_twice);
     RUN_TEST(test_dash_paths);

@@ -495,8 +495,18 @@ static odin3_status provenance_name(blif_writer *wr, odin3_net_id net, bool *app
             return ODIN3_ERR_NO_MEMORY;
         }
     }
-    odin3_status st = odin3_prov_name(wr->design, odin3_net_prov(wr->module, net),
-                                      buf_bytes(&wr->cand), wr->prov_leaf, &wr->prov);
+    odin3_prov_id prov = odin3_net_prov(wr->module, net);
+    const odin3_prov_record *rec = NULL;
+    odin3_status st = odin3_prov_leaf(wr->design, prov, wr->prov_leaf, &rec);
+    odin3_bytes short_name = buf_bytes(&wr->cand);
+    if (st == ODIN3_OK && rec != NULL && rec->hier != 0) {
+        /* a flattened short name `u1.x` already holds the instance path: `top/u1/x`, not
+         * `top/u1/u1.x` */
+        size_t skip = odin3_prov_hier_overlap(str_bytes(wr, rec->hier), short_name);
+        short_name = (odin3_bytes){(const char *)short_name.ptr + skip, short_name.len - skip};
+    }
+    st = st == ODIN3_OK ? odin3_prov_name(wr->design, prov, short_name, wr->prov_leaf, &wr->prov)
+                        : st;
     if (st == ODIN3_OK && wr->prov.len != 0) {
         odin3_strbuf_clear(&wr->cand);
         st = odin3_strbuf_append(&wr->cand, buf_bytes(&wr->prov));

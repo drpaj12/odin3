@@ -13,6 +13,7 @@
 #include "util/u64map.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /*
@@ -41,5 +42,14 @@ bool odin3_prov_location(const odin3_design *design, const odin3_prov_record *re
  */
 odin3_status odin3_prov_name(const odin3_design *design, odin3_prov_id prov, odin3_bytes short_name,
                              odin3_u64map *cache, odin3_strbuf *out);
+
+/*
+ * The number of leading bytes of short_name that repeat the end of hier, written with `.` for
+ * `/`: for hier `top/u1` and the flattened name `u1.x` it is 3 (`u1.`), so `hier/x` is the name
+ * and the instance path is not doubled (`top/u1/u1.x`). The longest such suffix of hier wins; 0
+ * when none matches or nothing would remain of the name. Writers that take a flattened short name
+ * apply it before odin3_prov_name.
+ */
+size_t odin3_prov_hier_overlap(odin3_bytes hier, odin3_bytes short_name);
 
 #endif

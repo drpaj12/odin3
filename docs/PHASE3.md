@@ -1145,10 +1145,17 @@ then the options considered.
     hierarchy, so a net it read is `n@t.blif:4` (the Verilog writer does the same for a record
     without `hier`); the plan's `top/n@t.blif:7` is what a record with `hier` `top` gives (unit
     tests build one; `cli_blif_vtr_prov_names` takes the Verilog front end's). (d) VB-10 rules 1
-    to 4 run on the provenance name as on a short name, so a collision falls back to `$n<ID>`.
+    to 4 run on the provenance name as on a short name, so a collision falls back to `$n<ID>`, and
+    rule 8 (clock nets: `|` is `%7C`, `_^_` is `_%5E_`) applies after the wrap.
     (e) The fixture driver reads an optional `<name>.args` beside a case (extra `write_blif --vtr`
     options); `prov_names` uses it. (f) Not measured here: VPR time and memory with long names
     (DESIGN §13 #6, 3H at M3); short stays the default.
+    (g) Review fixes: a flattened short name that repeats the end of the hierarchy is not doubled:
+    `u1.x` with hier `top/u1` is `top/u1/x@f:3` (`odin3_prov_hier_overlap`: the longest suffix of
+    the hierarchy, `/` read as `.`, that starts the short name and leaves a non-empty rest; the
+    Verilog writer keeps its own form, `top/u1/u1.x`, so its bytes are unchanged). (h) The leaf
+    walk stops at the first leaf (the chain of first parents) instead of visiting every ancestor;
+    `odin3_prov_sources` is only the fallback for a broken chain.
 
 ## Risks
 
