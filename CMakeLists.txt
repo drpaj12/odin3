@@ -345,6 +345,7 @@ add_library(odin3_core OBJECT
     src/backends/json/cells.c
     src/backends/json/lut.c
     src/backends/json/writer.c
+    src/backends/prov_name.c
     src/backends/verilog/escape.c
     src/backends/verilog/writer.c
     src/backends/rtlil/writer.c)
@@ -799,6 +800,11 @@ if(BUILD_TESTING)
     target_compile_definitions(test_hardmap_mul PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME cli_blif_vtr_prov_names
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh blif_vtr_prov_names $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_blif_vtr_prov_names PROPERTIES LABELS unit)
     add_test(NAME cli_hardmap_mul
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh hardmap_mul $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare

@@ -3,6 +3,7 @@
 
 #include "backends/blif/isop.h"
 #include "backends/common/attrs.h"
+#include "backends/prov_name.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/lut.h"
@@ -25,8 +26,9 @@
 #include <string.h>
 
 enum {
-    FLUSH_AT = 1 << 16, /* pending output bytes that trigger a write */
-    KEY_SHIFT = 32,     /* object-name key: kind << 32 | ID; location: file << 32 | line */
+    FLUSH_AT = 1 << 16,        /* pending output bytes that trigger a write */
+    KEY_SHIFT = 32,            /* object-name key: kind << 32 | ID; location: file << 32 | line */
+    GENERATED_NAME_BYTES = 32, /* prefix and a 32-bit ID in decimal */
     FIRST_PRINTABLE = 0x20,
     LAST_PRINTABLE = 0x7e,
     OCTAL_DIGITS = 3,
@@ -287,61 +289,28 @@ static odin3_bytes str_bytes(const verilog_writer *wr, uint32_t str) {
 
 /* --- provenance comments ------------------------------------------------------------------- */
 
-typedef struct vw_leaf {
-    odin3_prov_id first;
-} vw_leaf;
-
-static void first_leaf(void *user, odin3_prov_id leaf) {
-    vw_leaf *found = user;
-    if (!odin3_prov_valid(found->first)) {
-        found->first = leaf;
-    }
-}
-
-static bool printable(odin3_bytes text) {
-    const uint8_t *bytes = text.ptr;
-    for (size_t i = 0; i < text.len; i++) {
-        if (bytes[i] < FIRST_PRINTABLE || bytes[i] > LAST_PRINTABLE) {
-            return false;
-        }
-    }
-    return true;
-}
-
 /* file << 32 | line of the record's first location, 0 when it has none worth printing. */
 static uint64_t location_of(const verilog_writer *wr, const odin3_prov_record *rec) {
-    if (rec == NULL || rec->n_locs == 0 || rec->locs[0].file == 0 ||
-        !printable(str_bytes(wr, rec->locs[0].file))) {
+    odin3_srcloc loc = {0};
+    if (!odin3_prov_location(wr->design, rec, &loc)) {
         return 0;
     }
-    return (uint64_t)rec->locs[0].file << KEY_SHIFT | rec->locs[0].line;
+    return (uint64_t)loc.file << KEY_SHIFT | loc.line;
 }
 
-/* The record that names an object with provenance prov (IR §6): prov itself, or for a DERIVED
- * record the first leaf of the backward walk. Cached per record; NULL for none. */
+/* The record that names an object with provenance prov (IR §6; backends/prov_name.h), cached per
+ * record; NULL for none. */
 static const odin3_prov_record *prov_leaf(verilog_writer *wr, odin3_prov_id prov) {
-    uint64_t leaf = 0;
-    if (prov.v == 0 || wr->st != ODIN3_OK) {
+    const odin3_prov_record *rec = NULL;
+    if (wr->st != ODIN3_OK) {
         return NULL;
     }
-    if (!odin3_u64map_get(wr->prov_leaf, prov.v, &leaf)) {
-        const odin3_prov_record *rec = odin3_prov_get(wr->design, prov);
-        vw_leaf found = {rec != NULL ? prov : (odin3_prov_id){0}};
-        if (rec != NULL && rec->kind == ODIN3_PROV_DERIVED) {
-            found.first = (odin3_prov_id){0};
-            odin3_status st = odin3_prov_sources(wr->design, prov, first_leaf, &found);
-            if (st != ODIN3_OK) {
-                (void)vw_fail(wr, st);
-                return NULL;
-            }
-        }
-        leaf = found.first.v;
-        if (odin3_u64map_put(wr->prov_leaf, (odin3_kv){prov.v, leaf}) != ODIN3_OK) {
-            (void)vw_fail(wr, ODIN3_ERR_NO_MEMORY);
-            return NULL;
-        }
+    odin3_status st = odin3_prov_leaf(wr->design, prov, wr->prov_leaf, &rec);
+    if (st != ODIN3_OK) {
+        (void)vw_fail(wr, st);
+        return NULL;
     }
-    return odin3_prov_get(wr->design, (odin3_prov_id){(uint32_t)leaf});
+    return rec;
 }
 
 /* Ends a line: `  // file:line` when prov has a location, then the newline. */
@@ -645,38 +614,31 @@ typedef struct vw_named {
     const char *prefix;
 } vw_named;
 
-/* Appends the short name (own name, else prefix<id>) to wr->cand. */
-static odin3_status append_short(verilog_writer *wr, const vw_named *obj) {
-    if (obj->own != 0) {
-        return odin3_strbuf_append(&wr->cand, str_bytes(wr, obj->own));
-    }
-    return odin3_strbuf_appendf(&wr->cand, "%s%u", obj->prefix, (unsigned)obj->id);
-}
-
-/* PROVENANCE style (IR §6): tries hier/<short name>@file:line from the record naming the object;
- * nothing when the record has neither a hierarchy nor a location. */
+/* PROVENANCE style (IR §6): tries hier/<short name>@file:line from the record naming the object
+ * (backends/prov_name.h); nothing when the record has neither a hierarchy nor a location. */
 static void claim_provenance(verilog_writer *wr, const vw_named *obj) {
-    const odin3_prov_record *rec = prov_leaf(wr, obj->prov);
-    uint64_t loc = location_of(wr, rec);
-    if (rec == NULL || (rec->hier == 0 && loc == 0)) {
+    char generated[GENERATED_NAME_BYTES];
+    odin3_bytes short_name = {generated, 0};
+    if (obj->own != 0) {
+        short_name = str_bytes(wr, obj->own);
+    } else {
+        int len = snprintf(generated, sizeof generated, "%s%u", obj->prefix, (unsigned)obj->id);
+        short_name.len = len > 0 ? (size_t)len : 0;
+        if (short_name.len >= sizeof generated) { /* truncated by snprintf */
+            short_name.len = sizeof generated - 1;
+        }
+    }
+    if (wr->st != ODIN3_OK) {
         return;
     }
-    odin3_strbuf_clear(&wr->cand);
-    odin3_status st = ODIN3_OK;
-    if (rec->hier != 0) {
-        st = odin3_strbuf_appendf(&wr->cand, "%s/", odin3_strtab_get(wr->tab, rec->hier));
-    }
-    st = st == ODIN3_OK ? append_short(wr, obj) : st;
-    if (st == ODIN3_OK && loc != 0) {
-        st = odin3_strbuf_appendf(&wr->cand, "@%s:%u",
-                                  odin3_strtab_get(wr->tab, (uint32_t)(loc >> KEY_SHIFT)),
-                                  (unsigned)(uint32_t)loc);
-    }
+    odin3_status st = odin3_prov_name(wr->design, obj->prov, short_name, wr->prov_leaf, &wr->cand);
     if (st != ODIN3_OK) {
         (void)vw_fail(wr, st);
         return;
     }
-    (void)claim(wr, obj_key(obj->kind, obj->id), (odin3_bytes){wr->cand.data, wr->cand.len});
+    if (wr->cand.len != 0) {
+        (void)claim(wr, obj_key(obj->kind, obj->id), (odin3_bytes){wr->cand.data, wr->cand.len});
+    }
 }
 
 /* The object's provenance name (PROVENANCE style), else its own name when writable and free. */

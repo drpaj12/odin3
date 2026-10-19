@@ -56,6 +56,7 @@ without `.blif`.
 | `x_output` | `.vtr.blif` | An output nothing drives, and an output buffered from a net nothing drives. Both read x as `gnd` through a buffer, and the `gnd` generator is emitted. |
 | `ram_dual_port_clock` | `.vtr.blif` | A `dual_port_ram`, whose formals are given in library order, is written sorted as Parmys sorts them: `addr1[*] addr2[*] clk data1 data2 out1 out2 we1 we2`. Its stub is in library order. A `single_port_ram` whose `clk` is the constant `gnd` is written `clk=gnd`; the writer warns about it, and the warning is not compared. |
 | `subckt_unconnected_outputs_named` | `.vtr.blif` | Two adders whose `cout` nobody reads. Each gets its own `$p<pin ID>` net, so every output bit is written and the block names are distinct (R12). |
+| `prov_names` | `.vtr.blif` | 3E-6. `prov_names.args` holds `--name-style provenance`, which the driver adds to this case's `write_blif --vtr` (any case may have an `<name>.args`; its round trip is not applied, since W2 would wrap each name with the location in W1). A reader's record has no hierarchy, so the nets are `n@prov_names.in.blif:4`, the file as given; the ports and the `clk`/`q` latch pins keep their short names. Hand-checked: the line numbers are the `.names` and `.latch` lines of the input. |
 | `neg_e1_fe` | `.err` | E1: an `fe` latch. |
 | `neg_e2_ah` | `.err` | E2: an `ah` latch. |
 | `neg_e3_untyped` | `.err` | E3: an untyped latch (`$_FF_`, no clock). |

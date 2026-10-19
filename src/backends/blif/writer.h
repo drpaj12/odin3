@@ -132,8 +132,7 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
  * a dialect or name style out of its enum ("odin3_blif_write_with: unknown dialect" / "unknown
  * name_style"); PLAIN with a non-zero lut_k or PROVENANCE ("odin3_blif_write_with: lut_k and
  * name_style apply to the VTR dialect only"); a non-zero lut_k outside 2..16
- * ("odin3_blif_write_with: lut_k <k> is outside 2..16"); VTR with PROVENANCE ("write_blif: --vtr:
- * --name-style provenance is not available yet (3E-6)"); then the preflight's refusals.
+ * ("odin3_blif_write_with: lut_k <k> is outside 2..16"); then the preflight's refusals.
  *
  * VTR names (spec 3E VB-10): every net, port bit and generated name is written in its
  * odin3_blif_vtr_legal_name form, and a net used as a `.latch` control or a hard cell's clock
@@ -142,6 +141,12 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
  * `gnd`/`vcc`/`unconn` that a zero-input $sop of value 0/1/0 drives keeps its name. Port bits are
  * named by their wire's declared index, as in the plain dialect. The top is named once, by the
  * preflight (odin3_blif_vtr_plan_build), and written under the names its plan holds.
+ *
+ * With ODIN3_BLIF_NAMES_PROVENANCE (3E-6, spec 3E §10 item 7) every net but a top port bit and a
+ * generator is first named `hier/<short name>@file:line` (backends/prov_name.h: the record's
+ * first location, the file as the record has it) when its provenance record has a hierarchy or a
+ * location, then VB-10 rules 1 to 4 apply as above; any other net keeps its short name. Nets are
+ * the only named objects of this dialect (no `.cname`).
  *
  * VTR output (spec 3E §5-§9): the header line `# Odin III <version> write_blif --vtr (K=<K>,
  * names short|provenance)`, one `# abc: <run information>` line per pass run named `abc` that has

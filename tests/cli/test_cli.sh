@@ -662,6 +662,39 @@ PY
         echo "test_cli $case_name: note: no $golden; only the committed fixture was checked"
     fi
     ;;
+blif_vtr_prov_names)
+    # cli_blif_vtr_prov_names (3E-6): Verilog through proc/opt/lower, write_blif --vtr
+    # --name-style provenance: the nets carry hier/<short>@file:line (the front end records the
+    # hierarchy), the ports keep their names, the file is as given, two runs are identical bytes,
+    # and the short style (default) has no '@'.
+    printf 'module top(input clk, input a, input b, output reg q);\n  wire n = a & b;\n  always @(posedge clk) q <= n ^ q;\nendmodule\n' >"$work/pn.v"
+    lib="$fixtures/../../../lib/vtr.o3lib"
+    run() {
+        (cd "$work" && "$odin3" -p "read_techlib $lib; read_verilog --vtr-compat pn.v; proc; opt; lower; write_blif --vtr $1 $2") \
+            >"$work/out" 2>"$work/err" || fail "odin3 failed: $1"
+    }
+    run "--name-style provenance" p1.blif
+    run "--name-style provenance" p2.blif
+    run "--name-style short" s.blif
+    cmp -s "$work/p1.blif" "$work/p2.blif" || fail "two provenance runs differ"
+    grep -q '^# Odin III .* write_blif --vtr (K=6, names provenance)$' "$work/p1.blif" || fail "header"
+    grep -q '^\.inputs clk a b$' "$work/p1.blif" || fail "port names changed"
+    grep -qE '^\.names a b top/[^ @]+@pn\.v:2$' "$work/p1.blif" || fail "no provenance name on the AND"
+    grep -qE '^\.latch top/[^ @]+@pn\.v:3 q re clk 2$' "$work/p1.blif" || fail "latch input name"
+    ! grep -q '@' "$work/s.blif" || fail "short style has a location"
+    repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+    # read-back: odin3 reads the provenance names and writes them again unchanged (short style)
+    "$odin3" -p "read_techlib $lib; read_blif $work/p1.blif; write_blif --vtr $work/rb.blif" \
+        >"$work/out" 2>"$work/err" || fail "read_blif of the provenance output failed"
+    diff <(grep -v '^#' "$work/p1.blif") <(grep -v '^#' "$work/rb.blif") >/dev/null ||
+        fail "provenance names changed through read_blif"
+    # the VPR-legality checker is strict on the provenance output, and it is equivalent to the
+    # short-name output
+    "$repo/tools/blif-vtr-check/blif-vtr-check" --strict "$work/p1.blif" >"$work/out" 2>&1 ||
+        fail "blif-vtr-check --strict on the provenance output: $(tail -3 "$work/out")"
+    "$repo/tools/equiv-check/equiv-check" "$work/s.blif" "$work/p1.blif" >"$work/out" 2>&1 ||
+        fail "equiv-check: provenance names differ in function: $(tail -3 "$work/out")"
+    ;;
 hardmap_mul)
     # cli_hardmap_mul: read_techlib, read_verilog --vtr-compat, proc, opt, hardmap, write_blif --vtr
     # on an 8x7 multiply (3C-1): one `multiply`, the 57 pad pins written as unconn, equal to the
