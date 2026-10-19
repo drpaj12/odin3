@@ -1,0 +1,11 @@
+# The 5.2 gate level (the gold is BLIF: the RTLIL writer has no bit storage cells): the word script, then flatten and lower.
+read_verilog --nolatches @DESIGN@
+proc
+opt
+opt_clean
+flatten
+opt -full
+lower
+opt -fast
+write_blif --vtr @IL@
+write_verilog @OUT@

@@ -1,0 +1,12 @@
+# The 5.2 LUT level: the gate script, then abc with 6-input LUTs.
+read_verilog --nolatches @DESIGN@
+proc
+opt
+opt_clean
+flatten
+opt -full
+lower
+opt -fast
+abc --lut 6
+write_blif --vtr @IL@
+write_verilog @OUT@

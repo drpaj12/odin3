@@ -1,0 +1,8 @@
+# The 5.2 word level (spec section 8): the netlist after opt, written as it stands.
+# @DESIGN@ is the design, @IL@ the RTLIL of the netlist as written (the gold), @OUT@ the Verilog.
+read_verilog --nolatches @DESIGN@
+proc
+opt
+opt_clean
+write_rtlil @IL@
+write_verilog @OUT@
