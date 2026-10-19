@@ -125,8 +125,19 @@ class AbcEquivTest(unittest.TestCase):
         (equiv_call,) = self.calls("equiv")
         self.assertEqual(equiv_call["argv"], [
             self.equiv, "--blackbox", "adder,multiply,single_port_ram,dual_port_ram",
-            "--allow-undriven", "--timeout", "600", f"{work}/before.blif", f"{work}/after.blif"])
+            "--timeout", "600", f"{work}/before.blif", f"{work}/after.blif"])
         self.assertRegex(out, r"one\.blif equivalent [0-9.]+ s\n")
+
+    def test_allow_undriven_only_for_the_listed_designs(self) -> None:
+        listed = self.blif("x/hand_ports.blif", design_text())
+        other = self.blif("x/other.blif", design_text())
+        self.assertEqual(self.run_tool(listed, other)[0], 0)
+        argvs: dict[str, list[str]] = {}
+        for call in self.calls("equiv"):
+            argv = [str(word) for word in call["argv"]]  # type: ignore[attr-defined]
+            argvs[Path(argv[-1]).parent.name] = argv
+        self.assertIn("--allow-undriven", argvs["0000-hand_ports"])
+        self.assertNotIn("--allow-undriven", argvs["0001-other"])
 
     def test_the_default_odin3_script(self) -> None:
         design = self.blif("one.blif", design_text())
