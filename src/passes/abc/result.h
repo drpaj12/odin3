@@ -6,6 +6,7 @@
 #define ODIN3_PASSES_ABC_RESULT_H
 
 #include "odin3/odin3.h"
+#include "util/arena.h"
 #include "util/vec.h"
 
 #include <stdint.h>
@@ -55,6 +56,24 @@ uint32_t odin3_abc_result_first_lut(const odin3_abc_result *res);
  */
 odin3_status odin3_abc_result_check(const odin3_abc_result *res,
                                     const odin3_abc_result_expect *expect, odin3_abc_fail *fail);
+
+/*
+ * The in-memory exchange's result (§6.1, AB-16): the engine's MiniLUT (odin3_abc_luts, §4.3's
+ * layout) as an abc_result, *out initialised here (unusable on failure: free it). Objects are
+ * numbered as in the MiniLUT's order of appearance: the constants, the PIs (the real inputs, then
+ * the registers), then the LUTs, whatever their place among the POs (an inverter LUT may follow a
+ * PO). Each table is read as the engine layout says: the first 2^k bits of the object's 32-bit
+ * words, bit 0 of word 0 least significant. Result register j is named by ci_from of its PI: a
+ * name that is a loaded register PI (expect->n_cis ..) gives reg_from[j], any other entry (a real
+ * input, -1, a name another register already carries, no ci_from at all) leaves it
+ * ODIN3_ABC_NO_REG, and odin3_abc_result_check then gives `register J carries no input register's
+ * name`. A fanin that is not an earlier PI or LUT is `a fanin is not an earlier input or LUT`.
+ * Every failure is logged as `abc: ABC returned a malformed network: <why>` with ODIN3_ERR_ENGINE;
+ * the result is checked against expect. NO_MEMORY (not logged). arena holds the object map.
+ */
+odin3_status odin3_abc_result_from_luts(const odin3_abc_luts *luts,
+                                        const odin3_abc_result_expect *expect, odin3_arena *arena,
+                                        odin3_abc_result *out);
 
 /*
  * Constant folding (I10): a LUT whose table is all 0 or all 1 over its 2^k bits becomes object 0

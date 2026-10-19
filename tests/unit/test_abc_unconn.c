@@ -24,6 +24,7 @@ enum { ADDR_BITS = 15, FIRST_OPEN = 5, X_BIT = 4, BUFFERED_BIT = 3 };
 
 static odin3_design *design;
 static odin3_module *mod;
+static const char *exchange_env; /* ODIN3_ABC_EXCHANGE for the cases being run: "aig" or NULL */
 
 void setUp(void) {
     afx_log_reset();
@@ -34,7 +35,11 @@ void setUp(void) {
     afx_path(tmp, "tmp");
     afx_mkdir(tmp);
     TEST_ASSERT_EQUAL_INT(0, setenv("TMPDIR", tmp, 1));
-    TEST_ASSERT_EQUAL_INT(0, unsetenv("ODIN3_ABC_EXCHANGE"));
+    if (exchange_env != NULL) {
+        TEST_ASSERT_EQUAL_INT(0, setenv("ODIN3_ABC_EXCHANGE", exchange_env, 1));
+    } else {
+        TEST_ASSERT_EQUAL_INT(0, unsetenv("ODIN3_ABC_EXCHANGE"));
+    }
     design = odin3_design_create();
 }
 
@@ -216,5 +221,9 @@ int main(void) {
     RUN_TEST(test_hard_block_pins_stay_open_child);
     RUN_TEST(test_buffer_of_unconn_ends_on_gnd_child);
     RUN_TEST(test_no_written_pin_on_unconn_child);
+    exchange_env = "aig"; /* the same three on the in-memory exchange (3D-7, fake engine) */
+    RUN_TEST(test_hard_block_pins_stay_open);
+    RUN_TEST(test_buffer_of_unconn_ends_on_gnd);
+    RUN_TEST(test_no_written_pin_on_unconn);
     return UNITY_END();
 }

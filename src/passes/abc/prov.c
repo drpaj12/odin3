@@ -82,6 +82,57 @@ static odin3_status add_anchor(odin3_vec *out, uint32_t obj, odin3_net_id net, u
     return ODIN3_OK;
 }
 
+/* Marks the objects and nets the anchors so far use. */
+static odin3_status mark_taken(const odin3_abc_run *run, const odin3_vec *anchors, odin3_vec *objs,
+                               odin3_vec *nets) {
+    odin3_status st = zeros(nets, odin3_module_net_end(run->module));
+    for (size_t at = 0; st == ODIN3_OK && at < anchors->len; at++) {
+        const odin3_abc_anchor *an = odin3_vec_cat(anchors, at);
+        ((uint32_t *)objs->data)[an->obj] = 1;
+        if (odin3_net_valid(an->old_net)) {
+            ((uint32_t *)nets->data)[an->old_net.v] = 1;
+        }
+    }
+    return st;
+}
+
+/* §8.2's name-map anchors: each LUT whose object ABC proved equal to literal l (old_lit) is paired
+ * with the lowest-ID old internal net on l's variable, unless the LUT or the net already has an
+ * anchor. The pair is complemented when the net's literal is the complement of l's. */
+static odin3_status add_namemap_anchors(const odin3_abc_run *run, const odin3_abc_result *res,
+                                        odin3_vec *out) {
+    if (res->old_lit.len == 0 || run->aig.net_lit == NULL) {
+        return ODIN3_OK;
+    }
+    odin3_vec objs;
+    odin3_vec nets;
+    odin3_vec_init(&nets, sizeof(uint32_t));
+    odin3_status st = zeros(&objs, obj_total(res));
+    st = st == ODIN3_OK ? mark_taken(run, out, &objs, &nets) : st;
+    uint32_t total =
+        obj_total(res) < res->old_lit.len ? obj_total(res) : (uint32_t)res->old_lit.len;
+    for (uint32_t obj = odin3_abc_result_first_lut(res); st == ODIN3_OK && obj < total; obj++) {
+        uint32_t lit = u32_at(&res->old_lit, obj);
+        odin3_net_id net = {0};
+        if (lit != UINT32_MAX && lit >> 1 != 0 && u32_at(&objs, obj) == 0) {
+            net = odin3_abc_aig_net_of_var(&run->aig, lit >> 1);
+        }
+        if (!odin3_net_valid(net) || u32_at(&nets, net.v) != 0 ||
+            u32_at(&run->region->ci_of, net.v) != 0 || u32_at(&run->region->co_of, net.v) != 0) {
+            continue;
+        }
+        bool inverted = ((uint32_t)odin3_abc_aig_lit(&run->aig, net) & 1U) != (lit & 1U);
+        st = add_anchor(out, obj, net, ODIN3_ABC_ANCHOR_NAMEMAP);
+        if (st == ODIN3_OK) {
+            ((odin3_abc_anchor *)out->data)[out->len - 1U].complemented = inverted;
+            ((uint32_t *)nets.data)[net.v] = 1;
+        }
+    }
+    odin3_vec_free(&objs);
+    odin3_vec_free(&nets);
+    return st;
+}
+
 odin3_status odin3_abc_anchors(odin3_abc_run *run, const odin3_abc_result *res, odin3_vec *out) {
     const odin3_abc_region *region = run->region;
     odin3_vec_clear(out);
@@ -106,7 +157,7 @@ odin3_status odin3_abc_anchors(odin3_abc_run *run, const odin3_abc_result *res, 
         st = add_anchor(out, FIRST_OBJ + ci, (odin3_net_id){u32_at(&region->cis, ci)},
                         ODIN3_ABC_ANCHOR_CI);
     }
-    return st;
+    return st == ODIN3_OK ? add_namemap_anchors(run, res, out) : st;
 }
 
 /* --- the walks ----------------------------------------------------------------------------- */
@@ -224,7 +275,8 @@ static odin3_status old_seed(pv *pw, const odin3_abc_anchor *an) {
     if (an->kind == ODIN3_ABC_ANCHOR_REG) {
         uint32_t reg = an->obj - FIRST_OBJ - pw->res->n_cis;
         root = u32_at(&pw->region->regs, u32_at(&pw->res->reg_from, reg));
-    } else if (an->kind == ODIN3_ABC_ANCHOR_CO || an->kind == ODIN3_ABC_ANCHOR_REG_IN) {
+    } else if (an->kind == ODIN3_ABC_ANCHOR_CO || an->kind == ODIN3_ABC_ANCHOR_REG_IN ||
+               an->kind == ODIN3_ABC_ANCHOR_NAMEMAP) {
         root = soft_driver(pw, an->old_net);
     }
     return root != 0 ? push_u32(&pw->stack, root) : ODIN3_OK;

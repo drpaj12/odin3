@@ -180,6 +180,8 @@ add_library(odin3_core OBJECT
     src/passes/abc/result.c
     src/passes/abc/xblif.c
     src/passes/abc/xblif_read.c
+    src/passes/abc/aig.c
+    src/passes/abc/aligned.c
     src/passes/abc/exchange.c
     src/passes/abc/splice.c
     src/passes/abc/splice_a.c
@@ -1032,6 +1034,13 @@ if(BUILD_TESTING)
         endif()
     endforeach()
     target_sources(test_abc_args PRIVATE tests/unit/proc_fixture.c tests/unit/proc_fixture_core.c)
+    # 3D Task 20: the AIG builder and the in-memory protocol, on the fake engine.
+    odin3_add_unit_test(test_abc_aig)
+    target_compile_definitions(test_abc_aig PRIVATE
+        ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/test_abc_aig"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_sources(test_abc_aig PRIVATE tests/unit/abc_fake_engine.c)
     # 3D Task 19: the splice's end-to-end checks. test_abc_unconn and test_abc_pass run the fake
     # engine in process; with ABC, test_abc_pass and test_abc_init1 also drive the odin3 binary
     # (real ABC) and tools/equiv-check, whose ABC is the build's own.
@@ -1518,6 +1527,15 @@ if(BUILD_TESTING)
         add_test(NAME abc_child_real COMMAND test_abc_child_real)
         set_tests_properties(abc_child_real PROPERTIES LABELS unit
             ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
+        # 3D Task 21: test_abc_prov's fine-mode cases run the real linked engine in process (the
+        # name map), beside its fake-engine cases (the adapter's sources, as test_abc_child_real).
+        target_include_directories(test_abc_prov PRIVATE ${PROJECT_SOURCE_DIR}/adapters/abc)
+        target_compile_definitions(test_abc_prov PRIVATE ODIN3_HAVE_REAL_ABC)
+        target_link_libraries(test_abc_prov PRIVATE odin3_abc_testlib $<LINK_ONLY:libabc-pic>)
+        target_link_options(test_abc_prov PRIVATE ${ODIN3_ABC_WRAPS} -Wl,--wrap=pthread_create)
+        set_target_properties(test_abc_prov PROPERTIES LINKER_LANGUAGE CXX)
+        set_tests_properties(test_abc_prov PROPERTIES
+            ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
     endif()
     odin3_add_unit_test(test_abi_core)
     target_compile_definitions(test_abi_core PRIVATE
@@ -1697,6 +1715,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(abc_equiv_micro PROPERTIES LABELS tools TIMEOUT 3600)
+        # 3D Task 21: the same micros through both exchanges (abc-diff): each result equivalent to
+        # the input and to the other, the LUT, FF and depth counts printed.
+        add_test(NAME abc_diff_micro
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_diff.py
+                    --odin3 $<TARGET_FILE:odin3>
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --lut 6 --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                    --keep ${PROJECT_BINARY_DIR}/abc_tests/abc_diff_micro
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif
+                    ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(abc_diff_micro PROPERTIES LABELS tools TIMEOUT 3600)
         # 3D Task 19 (deferred to the controller, point (m)): every k6 Parmys golden of the VTR set
         # except mcml and LU32PEEng, smallest first (abc-equiv sorts), stereovision3 listed as
         # multiclock; the run log's summary is quoted in the PR.
@@ -1713,6 +1745,27 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --lut 6 --timeout 3000
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
                         --keep $ENV{HOME}/odin3-ws/work/abc-equiv-golden ${_abc_goldens})
+            # 3D Task 21 (deferred to the controller, point (m); the exchange differential, I8):
+            # the same goldens through the in-memory exchange against equiv-check, and both
+            # exchanges against each other (abc-diff: LUT, FF and depth ratios, smallest first).
+            odin3_add_sweep_test(abc_equiv_golden_aig LABEL sweep
+                COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                        ODIN3_REQUIRE_ABC=1
+                        ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_equiv.py
+                        --odin3 $<TARGET_FILE:odin3>
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --lut 6 --timeout 3000 --exchange aig
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                        --keep $ENV{HOME}/odin3-ws/work/abc-equiv-golden-aig ${_abc_goldens})
+            odin3_add_sweep_test(abc_diff_golden LABEL sweep
+                COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                        ODIN3_REQUIRE_ABC=1
+                        ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_diff.py
+                        --odin3 $<TARGET_FILE:odin3>
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --lut 6 --timeout 3000
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                        --keep $ENV{HOME}/odin3-ws/work/abc-diff-golden ${_abc_goldens})
         endif()
     endif()
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).

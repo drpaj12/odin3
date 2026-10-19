@@ -17,6 +17,7 @@
 #endif
 
 static odin3_design *design;
+static const char *exchange_env; /* ODIN3_ABC_EXCHANGE for the odin3 runs: "aig" or NULL */
 
 void setUp(void) {
     design = NULL;
@@ -79,7 +80,12 @@ static void expect_one_flop_at_one(const char *name, uint32_t want_flops, bool c
                    "read_techlib %s/vtr.o3lib; read_blif %s; write_blif %s; abc --lut 6%s; "
                    "write_blif %s",
                    ODIN3_LIB_DIR, data, before, option, after);
-    TEST_ASSERT_EQUAL_INT(0, afx_run_odin3(script));
+    if (exchange_env != NULL) {
+        TEST_ASSERT_EQUAL_INT(0, setenv("ODIN3_ABC_EXCHANGE", exchange_env, 1));
+    }
+    int status = afx_run_odin3(script);
+    TEST_ASSERT_EQUAL_INT(0, unsetenv("ODIN3_ABC_EXCHANGE"));
+    TEST_ASSERT_EQUAL_INT(0, status);
     odin3_design_destroy(design);
     design = odin3_design_create();
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_read(design, after));
@@ -124,11 +130,27 @@ static void test_scorr_merge_init1_child(void) {
 #endif
 }
 
+/* The same two on the in-memory exchange (3D-7): the register correspondence goes through ABC's
+ * names (ci_from) and the restore is the same. */
+static void test_toggle_init1_aig(void) {
+    exchange_env = "aig";
+    test_toggle_init1();
+    exchange_env = NULL;
+}
+
+static void test_scorr_merge_init1_aig(void) {
+    exchange_env = "aig";
+    test_scorr_merge_init1();
+    exchange_env = NULL;
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_toggle_init1);
     RUN_TEST(test_scorr_merge_init1);
     RUN_TEST(test_toggle_init1_child);
     RUN_TEST(test_scorr_merge_init1_child);
+    RUN_TEST(test_toggle_init1_aig);
+    RUN_TEST(test_scorr_merge_init1_aig);
     return UNITY_END();
 }
