@@ -203,6 +203,10 @@ static const char *kind_text(odin3_value_kind kind) {
     if (kind == ODIN3_VAL_INT) {
         return "an integer";
     }
+    if (kind == ODIN3_VAL_COVER) {
+        return "a quoted list of cover rows (blank separated; inputs 0, 1 or -, then output 0 or "
+               "1)";
+    }
     return kind == ODIN3_VAL_STRING ? "a string" : "a bit vector";
 }
 
@@ -217,20 +221,19 @@ static void param_kind_error(const inst_run *run, const odin3_param_def *pdef, o
                       pdef->name, run->module_name, kind_text(pdef->kind));
 }
 
+/* The longest string a BITS or COVER parameter is read from (the lengths are uint32_t). */
+enum { ICELL_STRING_MAX = 1U << 24 };
+
 /* Spec V-5, under -icells only: a string literal given to a BITS parameter is the bits of its
  * bytes, first character most significant (Verilog's rule), and "" is the zero-length value the
- * writer uses for an empty BITS value. ODIN3_ERR_INVALID_ARG: not this case (nothing done). */
-static odin3_status icell_string_bits(const inst_run *run, const odin3_param_def *pdef,
-                                      odin3_ast_id node, odin3_value *out) {
-    odin3_elab2 *e2 = run->e2;
-    if (!run->icell || pdef->kind != ODIN3_VAL_BITS ||
-        odin3_ast_kind_of(e2->elab, node) != ODIN3_AST_STRING) {
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    const char *text = odin3_elab2_str_of(e2, odin3_ast_name(e2->elab, node));
+ * writer uses for an empty BITS value. ODIN3_ERR_PARSE: too long. */
+static odin3_status string_to_bits(odin3_elab2 *e2, const char *text, odin3_value *out) {
     size_t bytes = strlen(text);
     const size_t per_byte = CHAR_BIT;
     size_t count = bytes * per_byte;
+    if (bytes > ICELL_STRING_MAX) {
+        return ODIN3_ERR_PARSE;
+    }
     uint8_t *bits = odin3_arena_alloc(e2->scratch, count + 1U);
     if (bits == NULL) {
         return ODIN3_ERR_NO_MEMORY;
@@ -241,6 +244,68 @@ static odin3_status icell_string_bits(const inst_run *run, const odin3_param_def
     }
     *out = (odin3_value){.kind = ODIN3_VAL_BITS, .bits = bits, .len = (uint32_t)count};
     return ODIN3_OK;
+}
+
+/* The inputs per row of an empty cover: the WIDTH parameter of the type, 0 when it has none. */
+static uint32_t cover_default_inputs(const inst_run *run) {
+    int64_t at = param_index(run->tg.def, "WIDTH");
+    bool usable = at >= 0 && run->params != NULL && run->params[at].kind == ODIN3_VAL_INT &&
+                  run->params[at].i >= 0 && run->params[at].i < ICELL_STRING_MAX;
+    return usable ? (uint32_t)run->params[at].i : 0U;
+}
+
+/* True when text[0 .. inputs] is a cover row: `inputs` characters of 0, 1 or -, then 0 or 1. */
+static bool cover_row_ok(const char *text, uint32_t inputs) {
+    for (uint32_t k = 0; k < inputs; k++) {
+        if (text[k] != '0' && text[k] != '1' && text[k] != '-') {
+            return false;
+        }
+    }
+    return text[inputs] == '0' || text[inputs] == '1';
+}
+
+/* The writer's COVER spelling (writer.h): the rows, each `inputs` characters of 0, 1 or - and one
+ * output character 0 or 1, separated by blanks; the inputs per row are those of the first row
+ * (an empty text has no rows). ODIN3_ERR_PARSE for text that is not that. */
+static odin3_status string_to_cover(odin3_elab2 *e2, const char *text, uint32_t dflt_inputs,
+                                    odin3_value *out) {
+    size_t len = strlen(text);
+    size_t first = strcspn(text, " ");
+    uint32_t inputs = len == 0 ? dflt_inputs : (uint32_t)(first > 0 ? first - 1U : 0U);
+    size_t row_len = (size_t)inputs + 1U;
+    if (len > ICELL_STRING_MAX) {
+        return ODIN3_ERR_PARSE;
+    }
+    uint8_t *rows = odin3_arena_alloc(e2->scratch, len + 1U);
+    if (rows == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    size_t used = 0;
+    for (size_t at = 0; at < len; at += row_len + 1U) {
+        bool whole = at + row_len <= len && cover_row_ok(text + at, inputs);
+        if (!whole || (at + row_len < len && text[at + row_len] != ' ')) {
+            return ODIN3_ERR_PARSE;
+        }
+        memcpy(rows + used, text + at, row_len);
+        used += row_len;
+    }
+    *out = (odin3_value){
+        .kind = ODIN3_VAL_COVER, .bits = rows, .len = (uint32_t)used, .cover_inputs = inputs};
+    return ODIN3_OK;
+}
+
+/* Under -icells, a string literal given to a BITS or COVER parameter. ODIN3_ERR_INVALID_ARG: not
+ * this case (nothing done; the ordinary value reading follows). */
+static odin3_status icell_string_value(const inst_run *run, const odin3_param_def *pdef,
+                                       odin3_ast_id node, odin3_value *out) {
+    odin3_elab2 *e2 = run->e2;
+    bool wanted = pdef->kind == ODIN3_VAL_BITS || pdef->kind == ODIN3_VAL_COVER;
+    if (!run->icell || !wanted || odin3_ast_kind_of(e2->elab, node) != ODIN3_AST_STRING) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    const char *text = odin3_elab2_str_of(e2, odin3_ast_name(e2->elab, node));
+    return pdef->kind == ODIN3_VAL_BITS ? string_to_bits(e2, text, out)
+                                        : string_to_cover(e2, text, cover_default_inputs(run), out);
 }
 
 /* The values given by the INSTANTIATION's params LIST, over the defaults and the inferred ones. */
@@ -256,7 +321,7 @@ static odin3_status inst_given_params(inst_run *run) {
         }
         odin3_value value;
         odin3_ast_id node = odin3_ast_child(e2->elab, list.ids[i], 0);
-        odin3_status st = icell_string_bits(run, &def->params[at], node, &value);
+        odin3_status st = icell_string_value(run, &def->params[at], node, &value);
         st = st == ODIN3_ERR_INVALID_ARG
                  ? odin3_elab2_param_value(e2, &def->params[at], node, &value)
                  : st;

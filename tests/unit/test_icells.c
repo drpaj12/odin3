@@ -270,6 +270,116 @@ static void test_verify_located(void) {
     TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&rs, ODIN3_LOG_ERROR, "t.v:2:"));
 }
 
+/* L1: a user module whose name begins with `$` and is not a registered type resolves as a module.
+ */
+static void test_user_module_with_dollar_name(void) {
+    const char *text = "module \\$mine (input a, output y); assign y = ~a; endmodule\n"
+                       "module top(input a, output y); \\$mine u (.a(a), .y(y)); endmodule\n";
+    read_with("", text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    et_free(&rs);
+    memset(&rs, 0, sizeof rs);
+    read_with("-icells", text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    expect_ir_ok();
+}
+
+/* The parameter at index of the first cell of the type, as an INT. */
+static int64_t int_param(const char *type, uint32_t index) {
+    odin3_node_id node = nth_node(type, 0);
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, node.v, type);
+    return odin3_node_param(top(), node, index)->i;
+}
+
+static void read_cell_ok(const char *text) {
+    read_with("-icells", text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    expect_ir_ok();
+}
+
+/* T-2: each family the writer emits as an instance, and the bit cells, with non-default values. */
+static void test_shiftx_cell(void) {
+    read_cell_ok("module top(input [7:0] a, input [2:0] b, output [3:0] y);\n"
+                 "  \\$shiftx #(.A_SIGNED(0), .B_SIGNED(1), .A_WIDTH(8), .B_WIDTH(3), .Y_WIDTH(4)) "
+                 "u (.A(a), .B(b), .Y(y));\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT64(1, int_param("$shiftx", 1));
+    TEST_ASSERT_EQUAL_INT64(8, int_param("$shiftx", 2));
+    TEST_ASSERT_EQUAL_INT64(4, int_param("$shiftx", 4));
+}
+
+static void test_dffsr_cell(void) {
+    read_cell_ok("module top(input clk, input s, input r, input [3:0] d, output [3:0] q);\n"
+                 "  \\$dffsr #(.WIDTH(4), .CLK_POLARITY(0), .SET_POLARITY(1), .CLR_POLARITY(0)) u "
+                 "(.CLK(clk), .SET({4{s}}), .CLR({4{r}}), .D(d), .Q(q));\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT64(4, int_param("$dffsr", 0));
+    TEST_ASSERT_EQUAL_INT64(0, int_param("$dffsr", 1));
+    TEST_ASSERT_EQUAL_INT64(1, int_param("$dffsr", 2));
+    TEST_ASSERT_EQUAL_INT64(0, int_param("$dffsr", 3));
+}
+
+static void test_dlatch_cell(void) {
+    read_cell_ok(
+        "module top(input en, input [2:0] d, output [2:0] q);\n"
+        "  \\$dlatch #(.WIDTH(3), .EN_POLARITY(0)) u (.EN(en), .D(d), .Q(q));\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT64(3, int_param("$dlatch", 0));
+    TEST_ASSERT_EQUAL_INT64(0, int_param("$dlatch", 1));
+}
+
+static void test_bit_flip_flops(void) {
+    read_cell_ok("module top(input c, input d, output q1, output q2);\n"
+                 "  \\$_DFF_P_ u1 (.C(c), .D(d), .Q(q1));\n"
+                 "  \\$_DFF_N_ u2 (.C(c), .D(d), .Q(q2));\nendmodule\n");
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nth_node("$_DFF_P_", 0).v);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nth_node("$_DFF_N_", 0).v);
+}
+
+static void test_lut_cell(void) {
+    read_cell_ok("module top(input [1:0] a, output y);\n"
+                 "  \\$lut #(.WIDTH(2), .LUT(4'b1000)) u (.A(a), .Y(y));\nendmodule\n");
+    const odin3_value *lut = odin3_node_param(top(), nth_node("$lut", 0), 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_VAL_BITS, lut->kind);
+    TEST_ASSERT_EQUAL_UINT32(4, lut->len);
+    TEST_ASSERT_EQUAL_UINT8(1, lut->bits[3]);
+    TEST_ASSERT_EQUAL_UINT8(0, lut->bits[0]);
+}
+
+/* M1: the writer's quoted COVER rows read back; bad text is a located, accurate error. */
+static void test_sop_cover(void) {
+    read_cell_ok("module top(input [1:0] a, output y);\n"
+                 "  \\$sop #(.WIDTH(2), .COVER(\"111 -01\")) u (.A(a), .Y(y));\nendmodule\n");
+    const odin3_value *cover = odin3_node_param(top(), nth_node("$sop", 0), 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_VAL_COVER, cover->kind);
+    TEST_ASSERT_EQUAL_UINT32(2, cover->cover_inputs);
+    TEST_ASSERT_EQUAL_UINT32(6, cover->len);
+    TEST_ASSERT_EQUAL_MEMORY("111-01", cover->bits, 6);
+    et_free(&rs);
+    memset(&rs, 0, sizeof rs);
+    read_cell_ok("module top(input [1:0] a, output y);\n"
+                 "  \\$sop #(.WIDTH(2), .COVER(\"\")) u (.A(a), .Y(y));\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_node_param(top(), nth_node("$sop", 0), 1)->len);
+}
+
+static void test_sop_cover_errors(void) {
+    const char *bad[] = {"11x 1", "111 11", "111 1", "111  1"};
+    for (uint32_t i = 0; i < 4; i++) {
+        char text[256];
+        (void)snprintf(text, sizeof text,
+                       "module top(input [1:0] a, output y);\n"
+                       "  \\$sop #(.WIDTH(2), .COVER(\"%s\")) u (.A(a), .Y(y));\nendmodule\n",
+                       bad[i]);
+        read_with("-icells", text);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE, rs.status, bad[i]);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+            1,
+            et_count_with(&rs, ODIN3_LOG_ERROR,
+                          "value of parameter 'COVER' of cell type '$sop' is not a quoted list of "
+                          "cover rows"),
+            bad[i]);
+        et_free(&rs);
+        memset(&rs, 0, sizeof rs);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_off_by_default);
@@ -285,5 +395,13 @@ int main(void) {
     RUN_TEST(test_parameter_kinds);
     RUN_TEST(test_string_bits);
     RUN_TEST(test_verify_located);
+    RUN_TEST(test_user_module_with_dollar_name);
+    RUN_TEST(test_shiftx_cell);
+    RUN_TEST(test_dffsr_cell);
+    RUN_TEST(test_dlatch_cell);
+    RUN_TEST(test_bit_flip_flops);
+    RUN_TEST(test_lut_cell);
+    RUN_TEST(test_sop_cover);
+    RUN_TEST(test_sop_cover_errors);
     return UNITY_END();
 }

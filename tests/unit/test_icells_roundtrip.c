@@ -68,6 +68,10 @@ void setUp(void) {
 
 void tearDown(void) {
     odin3_log_set_sink(NULL, NULL);
+    if (getenv("ODIN3_ICELLS_KEEP") != NULL) {
+        (void)printf("kept %s\n", g_path);
+        return;
+    }
     (void)remove(g_path);
     (void)rmdir(g_dir);
 }

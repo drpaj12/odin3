@@ -251,8 +251,9 @@ void odin3_elab1_reject_def(odin3_elab1 *e1, uint32_t def);
 odin3_elab_res odin3_elab1_resolve(odin3_elab1 *e1, uint32_t name, uint32_t library);
 
 /*
- * EL-6 item 0 (5.2, read_verilog -icells): false, with res untouched, unless opts.icells is set
- * and name begins with `$`. Then true: *res is ODIN3_RES_CELLTYPE for the registered type of that
+ * EL-6 item 0 (5.2, read_verilog -icells): false, with res unspecified, unless opts.icells is set
+ * and name begins with `$` and is a registered cell type or no definition has the name (a design
+ * or library MODULE named `$x` that is not a registered type resolves as it does without -icells). Then true: *res is ODIN3_RES_CELLTYPE for the registered type of that
  * name (any granularity but module, port and process; no module, library unit or stub of the name
  * is consulted, so none shadows it; a design or library MODULE of the name gets an info line, once
  * per name), or ODIN3_RES_NONE after a located error at item (an unregistered `$` name, which
