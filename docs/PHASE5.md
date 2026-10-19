@@ -83,3 +83,16 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
    read on one rising-edge clock, no `INIT`, no byte enable (else soft); the LPM names are
    verified against Intel documentation before any rule is coded (no local source exists for
    `lpm_compare`, nor for `lpm_add_sub` and `lpm_mult` beyond a commented-out use in `spree.v`).
+6. **5.1 spec approved** (Peter, 2026-10-19): "yes to all recommendations" on the ten open
+   questions of `docs/specs/2026-10-19-5.1-lpm-design.md` §14, which includes the rule IDs and the
+   mapping rules as written. Chosen: (1) the four LPM cells are `blackbox`; (2) `.o3lib` gains
+   `param NAME string "text"`; (3) the round trip is a write, read, write Verilog fixpoint plus
+   `check` (BLIF as a bonus leg if it works); (4) a new pass `lpmmap`, not a `hardmap` rule set;
+   (5) no `write_verilog --no-stubs` until Quartus is needed; (6) the minimal parameter set, and
+   no `intended_device_family` on the `lpm_*` cells; (7) every `$mul` maps; (8) every comparison
+   maps; (9) reuse the `hardmap` FF merge through a header if it splits cleanly, else data merge
+   only; (10) verify the names against public Intel documentation. Task 1 then verified the
+   names (spec §11, from Altera's UG-01063 and Quartus help). It changed two rules: R-3 maps a
+   `RD_EN` only when it is constant 1 (the behaviour of `rden` low is not verified, V-7), and
+   R-4 sets `address_reg_b` `"CLOCK0"` and `outdata_reg_b` `"UNREGISTERED"` as the Quartus wizard
+   does. Still open: V-7 and a primary-document spelling of `"Cyclone V"`.
