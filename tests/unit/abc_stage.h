@@ -21,7 +21,8 @@ typedef struct afx_staged {
     odin3_abc_result result;
 } afx_staged;
 
-static inline void afx_stage(odin3_design *design, odin3_module *mod, afx_staged *st) {
+/* The run, the first domain and its region, without any exchange (the result is left empty). */
+static inline void afx_stage_region(odin3_design *design, odin3_module *mod, afx_staged *st) {
     *st = (afx_staged){0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_pass_run_begin(design, afx_intern(design, "abc"), &st->ctx));
@@ -34,7 +35,20 @@ static inline void afx_stage(odin3_design *design, odin3_module *mod, afx_staged
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_region_build(st->run, st->run->domain, &st->region));
     st->run->region = &st->region;
     odin3_abc_result_init(&st->result);
+}
+
+static inline void afx_stage(odin3_design *design, odin3_module *mod, afx_staged *st) {
+    afx_stage_region(design, mod, st);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_exchange_blif(st->run, &st->result));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_result_fold(&st->result));
+}
+
+/* The same through the in-memory exchange (the run's exchange field is set to AIG). */
+static inline void afx_stage_aig(odin3_design *design, odin3_module *mod, afx_staged *st) {
+    afx_stage_region(design, mod, st);
+    st->run->exchange = ODIN3_ABC_EXCHANGE_AIG;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_abc_exchange_aig(st->run, &st->result),
+                                  afx_errors());
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_result_fold(&st->result));
 }
 
