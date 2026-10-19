@@ -207,19 +207,28 @@ class TestBytes(unittest.TestCase):
         self.assertEqual(names(out), ["$c2", "$c1", "$c2$m2", "$c1$m2"])
         self.assertEqual(out.count("module"), 2)
 
-    def test_offset_wire_slices_use_declared_numbers(self) -> None:
-        text = "\n".join(["module \\m", "  wire width 2 offset 4 $bus", "  wire \\x", "  wire $n5",
-                          cell("$not", "$c1", A="$bus [5]", Y="$n5"),
-                          cell("$not", "$c2", A="\\x", Y="$bus [4]"),
-                          cell("$not", "$c3", A="\\x", Y="$bus [5]"), "end"]) + "\n"
-        self.assertEqual(order(text), ["$c3", "$c1", "$c2"])
+    def test_user_instance_names_are_kept(self) -> None:
+        sub = "\n".join(["module \\sub", "  wire input 1 \\i", "  wire output 2 \\o", "end"])
+        top = module(cell("\\sub", "\\u1", i="$n1", o="$n2"))
+        out = il_order.reorder_text(sub + "\n" + top + top.replace("\\m", "\\n"))
+        self.assertEqual(names(out), ["\\u1", "\\u1"])
 
-    def test_upto_wire_numbers_run_the_other_way(self) -> None:
-        text = "\n".join(["module \\m", "  wire width 2 upto $bus", "  wire \\x", "  wire $n5",
-                          cell("$not", "$c1", A="$bus [0]", Y="$n5"),
-                          cell("$not", "$c2", A="\\x", Y="$bus [0]"),
-                          cell("$not", "$c3", A="\\x", Y="$bus [1]"), "end"]) + "\n"
-        self.assertEqual(order(text), ["$c2", "$c1", "$c3"])
+    def test_slices_count_storage_bits_whatever_offset_or_upto(self) -> None:
+        # RTLIL slices index the stored bits from 0; `offset` and `upto` only name them
+        for flags in ("offset 4", "upto", "offset 4 upto"):
+            text = "\n".join(["module \\m", f"  wire width 2 {flags} $bus", "  wire \\x",
+                              "  wire $n5",
+                              cell("$not", "$c1", A="$bus [1]", Y="$n5"),
+                              cell("$not", "$c2", A="\\x", Y="$bus [0]"),
+                              cell("$not", "$c3", A="\\x", Y="$bus [1]"), "end"]) + "\n"
+            self.assertEqual(order(text), ["$c3", "$c1", "$c2"], flags)
+
+    def test_slice_outside_the_wire_fails(self) -> None:
+        text = "\n".join(["module \\m", "  wire width 2 offset 1 $bus", "  wire $n5",
+                          cell("$not", "$c1", A="$bus [2]", Y="$n5"),
+                          cell("$not", "$c2", A="$n5", Y="$bus [0]"), "end"]) + "\n"
+        with self.assertRaises(il_order.OrderError):
+            order(text)
 
     def test_main_exit_codes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
