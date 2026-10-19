@@ -1,0 +1,2 @@
+# tests/opt/ffbits_equiv_expect_fail.txt: the ffbits micros opt_equiv_ffbits expects to fail (none; PHASE3 #49).
+# Paths are relative to tests/opt/ffbits; format `<path> [needle] <reason>`.

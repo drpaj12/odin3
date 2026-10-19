@@ -1,0 +1,13 @@
+# The Phase 3 opt script of phase3.script followed by `opt -full -ffbits` (PHASE3 #49), the step the
+# Phase 3 hardmap script runs as its last `opt` before `lower`: opt-equiv checks that the bit merge
+# refines (clock-aware, init honoured) on tests/opt/ffbits.
+opt_expr
+opt_clean
+opt -nodffe -nosdff
+proc
+opt
+wreduce
+opt_clean
+opt -full
+opt -full -ffbits
+compact

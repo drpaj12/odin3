@@ -26,7 +26,7 @@ decisions 2–3 and 16 below):
    address width of 15.
 3. **Through P&R**: Odin III alone produces each netlist. The script is `read_techlib
    lib/vtr.o3lib; read_verilog --nolatches --vtr-compat; proc; opt; wreduce; opt_clean; opt -full;
-   flatten; opt -full; hardmap; opt -full; lower; opt -fast; compact; abc; write_blif --vtr` (3C spec H-2; the part
+   flatten; opt -full; hardmap; opt -full -ffbits; lower; opt -fast; compact; abc; write_blif --vtr` (3C spec H-2, decision 49 for `opt_merge -ffbits`; the part
    up to `lower` is `tools/hardmap-check/phase3_pre_abc.script`, run by `hardmap-diff`) (`wreduce` before `flatten` as Parmys, decisions 7 and 31 and 3G WR-9; `opt -full`
    after `flatten` as Parmys runs it, decision 30). Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
@@ -1231,7 +1231,6 @@ then the options considered.
     `* / %` (SAT limit). **Open for Peter:** whether `lower` should match techmap.v's shifter,
     divider and multiplier structure to the gate on these 1-4 gates (a lowering-algorithm choice;
     `lower` is unchanged here). Not a soundness question.
-
 48. **3D-7 the in-memory exchange (plan Tasks 20 and 21): the agent defaults and the flip gate**
     (2026-10-19, branch `feat/3D-7`; agent defaults, Peter may override). (a) **The default
     exchange is still BLIF.** The flip is its own commit, made only after `abc_diff_golden` and the
@@ -1285,6 +1284,55 @@ then the options considered.
     complements feeds only a register input, so it has that input's identity anchor and never a name-map
     one. **To record before the flip:** the 19 per-design ratios and their
     explanations (`abc_diff_golden`), and H1/H4.
+49. **`opt_merge -ffbits`: merge identical flip-flop bits before `lower`** (2026-10-19, branch
+    `feat/opt-ffbit-merge`; agent default, Peter may override; Peter's rule: where Odin III and
+    Parmys differ, match Parmys). No IR invariant and no public ABI changed. (a) **Cause**: Yosys
+    `techmap` turns a word `$dffe`/`$sdff`/`$sdffe`/... into one `$_*DFF*_` cell per bit and
+    `opt -fast` runs `opt_merge` over them (opt_merge.cc 129-130, 175-179: an FF cell's key holds
+    its type, parameters, inputs and the init of Q), so bits with the same clock, D, enable, reset,
+    polarities, reset value and equal init become one before `dffunmap`. Odin III's `lower` writes
+    enable and sync reset as a mux whose input is the bit's own Q, so afterwards no two bits are
+    identical. Triage `hardmap-big-triage.md` 3.4 and 5b B1: +14, +17, +70, +156, +14, +7, +7, +6,
+    +25 flip-flops, every latch delta that is not fsm. (b) **Design**: an option of `opt_merge`
+    (`-ffbits`, `src/passes/opt/ffbits.c`), not a change to `opt -full` or plain `opt_merge`, so the
+    Phase 2 equivalence gates are unchanged (it is off unless named). It is a flag of `opt_merge`
+    and of `opt` (`opt -ffbits`: the `opt_merge` of every loop iteration also merges FF bits). The
+    Phase 3 script `phase3_pre_abc.script` runs `opt -full -ffbits` as its last `opt`, before
+    `lower`, instead of a bare `opt_merge -ffbits` after it: measured on mkSMAdapter4B, a bare step
+    leaves 5 bits that a following `opt -full` exposes (word-level duplicates of the `$pmux` data
+    bits that only appear once the FF bits are merged), and mkDelayWorker32B stays +22 instead of
+    exactly Parmys's count; inside the loop the merge and the combinational passes reach one fixed
+    point, as Yosys's `techmap; opt -fast` does on its bit cells.
+    Per bit of every word FF (`$dff $dffe $adff $adffe $aldff $aldffe $sdff $sdffe $sdffce $dffsr
+    $dffsre` and the latches; the fine `$_DFF_*_` cells are left to the ordinary pass) the key is the
+    kind (which controls, their polarities, `ce_over_srst`), the nets of the controls, of D (or AD)
+    and SET/CLR for that bit, the bit's ARST and SRST values and its init; equal keys form a class.
+    Yosys's FF cell types after `adff2dff`/`aldff2dff` are fewer; matching on the full key is the
+    same rule and is sound for the rest. (c) **Survivor and names**: the lowest (node ID, bit), or
+    the first bit of a `keep` node; the others (of nodes without `keep`) are dropped and their Q nets
+    tied to the survivor's. Yosys walks its cell dictionary newest first and so keeps the later
+    cell; as in `opt_merge` (spec 2F row 7) the earlier survives here. Each drop is
+    `odin3_ff_emit_shrunk`: a node keeps its remaining bits as a word cell of the same kind with its
+    name and attributes (a multi-bit FF is split only as far as needed: the duplicate bits go, the
+    rest stays one cell); a node with no bit left goes; the init of a dropped Q is removed (it
+    equals the survivor's). `-keepdc` skips bits with an undefined init. (d) **Provenance**: the
+    survivor's node is rebuilt with a DERIVED record whose parents are [its own record, the records
+    of the nodes that dropped bits into it, in ID order]; a node that only loses bits takes
+    `emit_shrunk`'s DERIVED record of itself. (e) **Rounds**: a drop changes the D net of the
+    readers of the dropped Q, so FF bits, then the ordinary `opt_merge`, repeat until a round
+    drops nothing. (f) **Deviations from Yosys**: a `keep` bit that is not first of its class
+    stays separate (Yosys lets the `keep` cell survive); latches and `$dffsr` merge on the full key
+    (Yosys merges the same cells after techmap); a `keep` on the dropped Q net or wire (not the node) is
+    not protected, as in the ordinary `opt_merge`. Known cost: every `opt -ffbits` iteration rescans all FFs. (g) **Tests**: `test_opt_ffbits`, the micros
+    `tests/opt/ffbits` (equal bits merged; different init, enable, reset, reset value, polarity,
+    clock not merged) with `opt_ffbits` (counts), `opt_ffbits_yosys` (the same counts as Yosys
+    0.55's `techmap; opt -fast`) and `opt_equiv_ffbits` (`opt-equiv` on `tools/opt-check/ffbits.script`).
+    - **G1 cleared** (2026-10-19, merge gate of the review): final-script `equiv-check` (abc dsec)
+      of Odin III without vs with `opt -full -ffbits` is equivalent on all five designs:
+      or1200, mkSMAdapter4B, stereovision2, stereovision0, mkDelayWorker32B. Latches with
+      `-ffbits` equal Parmys on stereovision2 (15591), stereovision0 (11673) and
+      mkDelayWorker32B (2151) (`ffbit-merge-report.md` section 9).
+
 50. **fcheck: the `untested` verdict and the P-leg baseline defects** (Peter, 2026-10-19; branch
     `fix/fcheck-classify`; decision 8 of the fcheck-classify review). The Verilator check of
     the Parmys (P) leg showed 10 of 19 designs failing; 9 of the 10 are properties of the
