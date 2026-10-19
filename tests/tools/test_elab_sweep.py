@@ -204,6 +204,26 @@ class SweepTestCase(unittest.TestCase):
         return str(self.write("expect.txt", text))
 
 
+class LowerEquivStrictTest(unittest.TestCase):
+    """3B close review M1: an `[UNPROVEN:]` entry of a lower-equiv sweep needs exit 4."""
+
+    def verdict(self, code: int, *, hard: bool = False) -> str:
+        item = elab_sweep.Item(Path("m/a.v"), "m/a.v", 10)
+        outcome = elab_sweep.Outcome("fail", 1.0, "x", "UNPROVEN: x", hard=hard, code=code)
+        expect = {"m/a.v": elab_sweep.Expect("checker limit", False, "UNPROVEN:")}
+        return elab_sweep.verdict(item, outcome, expect, False, True)[0]
+
+    def test_exit_4_is_listed_and_any_other_exit_fails(self) -> None:
+        self.assertEqual(self.verdict(4), "xfail")
+        self.assertEqual(self.verdict(1), "FAIL")
+        self.assertEqual(self.verdict(2), "FAIL")
+        self.assertEqual(self.verdict(3, hard=True), "FAIL")
+
+    def test_the_needle_form_needs_exit_4_without_a_reason_prefix(self) -> None:
+        self.assertTrue(elab_sweep.needs_unproven(elab_sweep.Expect("checker limit", False,
+                                                                    "UNPROVEN:")))
+
+
 class CollectTest(SweepTestCase):
     def test_one_ascending_size_order_across_two_directories(self) -> None:
         """Review I12: all files sorted together, not directory by directory."""

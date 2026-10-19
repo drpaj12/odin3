@@ -72,6 +72,7 @@ TOP_LINE = "attribute \\top 1\n"
 # that holds one needs the techmap step.
 MAPPED_TYPES = frozenset({"$adff", "$adffe", "$aldff", "$aldffe", "$dffsr", "$dffsre"})
 MEM_TYPES = frozenset({"$mem", "$mem_v2"})
+ALIAS_GOLD = "gold.alias.il"
 
 
 @dataclass
@@ -125,6 +126,7 @@ def make_gold(yosys: str, before: Path, parmys: tuple[Path | None, bool], work: 
     of it). Written to ``gold.il``. ``parmys`` = (Parmys's techlibs directory, exact)."""
     text = before.read_text(encoding="utf-8")
     gold = work / "gold.il"
+    (work / ALIAS_GOLD).unlink(missing_ok=True)  # never reuse the alias gold of an earlier run
     types = lc.cell_types(text)
     # Yosys's ``memory`` (memory_map) makes a read past SIZE alias a word (the address bits
     # above the words are ignored); the spec of ``$mem`` (and of lower) is x there, a don't-care
@@ -139,6 +141,10 @@ def make_gold(yosys: str, before: Path, parmys: tuple[Path | None, bool], work: 
     steps = [f"read_rtlil {before}", *(["memory_memx", "memory_map"] if memx else []),
              *(f"techmap -map {m}" for m in maps), f"write_rtlil {gold}"]
     run_yosys(yosys, "; ".join(steps), work, cap)
+    if memx:  # the gold without the x: the BLIF cec ties an x to 0 and cannot use it (H2)
+        alias = ["memory_map", *(f"techmap -map {m}" for m in maps)]
+        run_yosys(yosys, "; ".join([f"read_rtlil {before}", *alias,
+                                    f"write_rtlil {work / ALIAS_GOLD}"]), work, cap)
     return gold
 
 
@@ -780,6 +786,14 @@ def refine(yosys: str, sides: tuple[Path, Path], after: Path, work: Path, cap: i
     # "not equivalent" ties the x of the gold to 0 and is not a trace either: "unproven". Its
     # proof starts every flip-flop at 0 (init 2/3), so it also needs the base case (N2).
     verdict, cec = cec_gold_and_blif(yosys, gold, after, work, cap)
+    alias = work / ALIAS_GOLD
+    if verdict != opt_equiv.CEC_PROVED and alias.is_file():
+        # The cec cannot take the x of memory_memx (it ties it to 0). Yosys's own memory_map gold
+        # is a legal stand-in: if the gate equals it on every input, the gate also refines the
+        # memx gold, which is that gold with x on the addresses past the words (H2,
+        # mem_w4_d8_a2_off1.v).
+        verdict, cec = cec_gold_and_blif(yosys, alias, after, work, cap)
+        cec = f"the BLIF cec on the plain memory_map gold (not a verdict on the memx gold): {cec}"
     if verdict == opt_equiv.CEC_PROVED:
         kind, detail = base_case(yosys, sides, work, cap, top)
         return kind, (detail if kind != "ok" else
@@ -935,6 +949,9 @@ def execute(args: argparse.Namespace, work: Path) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
+    if args.refine_timeout <= 0:
+        print(f"{TOOL}: error: --refine-timeout must be positive", file=sys.stderr)
+        return lc.EXIT_ERROR
     opt_equiv.REFINE_TIMEOUT_SECONDS = args.refine_timeout
     global BMC_TIMEOUT_SECONDS
     BMC_TIMEOUT_SECONDS = args.refine_timeout

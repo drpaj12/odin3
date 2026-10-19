@@ -2835,11 +2835,11 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # compared 330, lower-sim 96, lower-equiv 265 (of which 18 were reported "not a
         # refinement" by the checker limits fixed in 3B-heavy-triage, so 247 were proved). Floors
         # of that round: 300, 90 and 240. 3B close (main 12473742 after the soundness fixes,
-        # 2026-10-18): lower-run 330 compared, lower-sim 96, lower-equiv 261 (7 more files became
-        # "ok" with the fixes of tools/lower-check/lower_equiv.py, one went to unproven and 4 more
-        # prove with --timeout-for: 268 expected). The floors are the measured counts for lower-run
-        # and lower-sim (330, 96) and, for lower-equiv, 260 (the 261 measured, a margin below the
-        # 268 expected until the controller's rerun gives the number).
+        # 2026-10-18): lower-run 330 compared, lower-sim 96, lower-equiv 261. Expected after 3B close:
+        # 261 + 4 (base-case false differences now ok) + 4 (--timeout-for) - 1 (multi_edge, now
+        # unproven) = 268; the 3 "not a refinement" fixed were already counted. Floors: the measured
+        # counts for lower-run and lower-sim (330, 96: no margin, a new expect entry trips them) and
+        # 260 for lower-equiv (the 268 expected less a margin, until the controller's rerun gives the number).
         odin3_add_sweep_test(lower_run_micro LABEL sweep
             COMMAND ${_opt_sweep} --lower-run --min-compared-total 330 ${_lower_micro_expect}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/lower/run_micro_expect_fail.txt

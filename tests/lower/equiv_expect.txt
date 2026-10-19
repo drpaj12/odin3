@@ -1,8 +1,6 @@
 # Designs that `lower-equiv` expects NOT to refine (3B spec 14.4). Format: <path> refine <reason>.
 # A listed design that refines is a stale entry and fails.
 #
-# ABITS above clog2(SIZE): the gold is the `$mem` as Yosys's `memory_map` lowers it, which builds
-# the read mux tree on the low clog2(SIZE) address bits, so an out-of-range read returns another
-# word; `lower` reads x there (spec 7, the Verilog meaning). The two agree on every address that
-# reaches a word (tests/lower/diff_expect.txt, same fixture).
-mem_w4_d4_off1.v refine reads outside the memory: the gold's Yosys memory_map wraps to a word, lower reads x
+# Empty since 3B close: a read past a memory's words is x in the gold (`memory_memx`, PHASE3
+# decision 44), so mem_w4_d4_off1.v (ABITS above clog2(SIZE)) refines. tests/lower/diff_expect.txt
+# still lists it for lower-diff, which compares against Yosys's own memory_map.
