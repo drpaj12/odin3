@@ -18,6 +18,11 @@ Legs, in order (the first failure is printed and the exit status is 1):
    reads them). Every written instance is also checked for the defaults of spec M1: an input pin
    that has a documented default must be tied, never open and never ``1'bx``
    (``DEFAULTED`` below; ``add_sub`` is exempt, it cannot be used with ``lpm_direction``).
+   The same script then writes BLIF (``write_blif``, PLAIN dialect; the LPM parameters the reader
+   cannot derive are ``.param`` lines, PHASE5 decision 8), which is read back with the LPM library
+   and written again: the two files must be identical and ``netlist-compare`` must say identical
+   (the models of the LPM cells have no ``.model`` stanza, so black-box stubs built from
+   ``lib/lpm.o3lib`` are appended to copies first).
 2. ``roundtrip`` (spec T-3): the Verilog is read back with the LPM library and written again
    (generation 2), then again (generation 3). Reading turns an open instance pin into the
    constant x (inputs) or a fresh net (outputs), so generation 2 differs from generation 1 in
@@ -50,6 +55,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LIB = ROOT / "lib" / "lpm.o3lib"
 DEFAULT_SCRIPT = ROOT / "tests" / "lpm" / "lpm.script"
 DEFAULT_EXPECT = ROOT / "tests" / "lpm" / "expect.txt"
+DEFAULT_COMPARE = ROOT / "tools" / "netlist-compare" / "netlist-compare"
 TIMEOUT = 120
 LPM_TYPES = ("lpm_add_sub", "lpm_mult", "lpm_compare", "altsyncram")
 
@@ -255,6 +261,69 @@ def check_roundtrip(odin3: str, lib: Path, v1: Path, work: Path) -> None:
             raise CheckError(f"roundtrip: instance {a[2]} changed: {a} -> {b}")
 
 
+# --- the BLIF round trip ------------------------------------------------------------------------
+
+SUBCKT_RE = re.compile(r"^\.subckt\s+(\S+)((?:\s+\S+=\S+|\s*\\\n)*)", re.M)
+
+
+def lib_directions(lib: Path) -> dict[str, dict[str, str]]:
+    """``cell -> port -> in|out`` from the statements of an .o3lib file (one per line)."""
+    cells: dict[str, dict[str, str]] = {}
+    current: dict[str, str] | None = None
+    for raw in lib.read_text().splitlines():
+        words = raw.split("#", 1)[0].split()
+        if len(words) >= 2 and words[0] == "cell":
+            current = cells.setdefault(words[1], {})
+        elif words[:1] == ["end"]:
+            current = None
+        elif current is not None and len(words) >= 2 and words[0] in ("in", "out"):
+            current[words[1]] = words[0]
+    return cells
+
+
+def with_stubs(text: str, dirs: dict[str, dict[str, str]]) -> str:
+    """The BLIF text plus a ``.blackbox`` model for every library cell it instantiates."""
+    joined = text.replace("\\\n", " ")
+    used: dict[str, dict[str, None]] = {}
+    for match in SUBCKT_RE.finditer(joined):
+        if match.group(1) in dirs:
+            formals = used.setdefault(match.group(1), {})
+            for tok in match.group(2).split():
+                formals[tok.partition("=")[0]] = None
+    out = [text if text.endswith("\n") else text + "\n"]
+    for name, formals in sorted(used.items()):
+        ports = dirs[name]
+        ins = [f for f in formals if ports.get(f.partition("[")[0]) == "in"]
+        outs = [f for f in formals if ports.get(f.partition("[")[0]) == "out"]
+        out.append(f".model {name}\n")
+        out += [f"{d} {' '.join(p)}\n" for d, p in ((".inputs", ins), (".outputs", outs)) if p]
+        out.append(".blackbox\n.end\n")
+    return "".join(out)
+
+
+def check_blif(args: argparse.Namespace, text: str, out: Path, work: Path) -> None:
+    """Write BLIF, read it back, write again: identical text, netlist-compare identical."""
+    first = work / "gen1.blif"
+    second = work / "gen2.blif"
+    odin3_run(args.odin3, text.replace(f"write_verilog {out}", f"write_blif {first}"))
+    odin3_run(
+        args.odin3,
+        f"read_techlib {args.lib}; read_blif {first}; write_blif {second}",
+    )
+    if first.read_text() != second.read_text():
+        raise CheckError("blif: the second write differs from the first")
+    dirs = lib_directions(args.lib)
+    stubbed = []
+    for path in (first, second):
+        copy = path.with_suffix(".stub.blif")
+        copy.write_text(with_stubs(path.read_text(), dirs))
+        stubbed.append(str(copy))
+    proc = run([str(args.compare), *stubbed])
+    if proc.returncode != 0:
+        first_line = (proc.stdout + proc.stderr).strip().splitlines()[:1]
+        raise CheckError(f"blif: netlist-compare exit {proc.returncode}: {first_line}")
+
+
 # --- the lint -----------------------------------------------------------------------------------
 
 
@@ -293,6 +362,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--script", type=Path, default=DEFAULT_SCRIPT)
     ap.add_argument("--expect", type=Path, default=DEFAULT_EXPECT)
     ap.add_argument("--family", default=None)
+    ap.add_argument("--netlist-compare", dest="compare", type=Path, default=DEFAULT_COMPARE)
     ap.add_argument("--keep", type=Path, default=None)
     ap.add_argument("--lint-only", action="store_true")
     return ap.parse_args(argv)
@@ -314,6 +384,7 @@ def check_micro(args: argparse.Namespace, work: Path) -> None:
         raise CheckError(f"counts: --family {args.family}: no altsyncram carries it")
     if exp.roundtrip:
         check_roundtrip(args.odin3, args.lib, out, work)
+        check_blif(args, text, out, work)
     if exp.lint:
         check_lint(out)
 

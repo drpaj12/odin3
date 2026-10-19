@@ -19,7 +19,7 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
 
 ## Checklist
 
-- [x] 5.1 Altera via LPM, light (code on `feat/5.1-lpm-spec`, awaiting review; PHASE5 decision 7) (was PHASE4 4.14; decision 1):
+- [ ] 5.1 Altera via LPM, light (code on `feat/5.1-lpm-spec`; tick when the PR merges; PHASE5 decisions 7 and 8) (was PHASE4 4.14; decision 1):
   - an LPM tech library (`.o3lib`) with exactly `lpm_add_sub`, `lpm_mult`, `lpm_compare` and
     `altsyncram` (single-port and simple-dual-port). Flip-flops are plain DFFs in soft logic,
     not `lpm_ff`. Everything else is soft logic as structural Verilog gates or assigns;
@@ -108,10 +108,25 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
      LPM pin into the constant x (inputs) or a fresh net (outputs), so generation 2 differs from
      generation 1 in exactly those connections. `lpm-check` also compares instance by instance
      (type, name, parameters, connected pins; open, x and fresh nets count as equal);
-   - `write_blif` refuses a design with LPM cells (`parameters neither declared nor implied by the
-     connected formals have no BLIF form`), so the BLIF leg of spec T-3 is dropped;
+   - `write_blif` refused LPM cells at first, so the BLIF leg of spec T-3 was dropped; decision 8 brings
+     it back;
    - `iverilog -Wall` notes every open instance input as a floating port; the lint leg filters
      exactly those notes (Altera defaults apply, spec H-4) and fails on any other finding, and
      Verilator runs with `-Wno-PINCONNECTEMPTY -Wno-PINMISSING`;
+   - Verilator is a local-only extra leg of the lint (`lpm-check` runs it when installed); CI has iverilog
+     only and Verilator is not added to CI (review M3, Peter's rule);
+   - review of 47a5ed88: H1, M1, M2, M3, L1, L4, L5, L7 fixed; L2, L6 accepted with the reasons in spec
+     §17; L3 superseded by decision 8;
    - the Debug `check` logs rule 11 warnings (unconnected pin) for the open LPM inputs; they are
      warnings, not failures.
+8. **BLIF carries LPM parameters** (agent default, 2026-10-19; Peter asked why LPM cannot be a black
+   box in BLIF; he may override). `write_blif` (PLAIN dialect) writes, after the `.cname` of a
+   `.subckt` of a tech-library cell, a Yosys-style `.param NAME VALUE` line for each parameter the
+   reader cannot derive (format of Yosys `backends/blif/blif.cc` `dump_params`: strings quoted with
+   `\\` and `\"` escapes, integers as 32 binary digits, bits as `01xz`); derivable and default
+   parameters write nothing, so existing BLIF is byte-identical. `read_blif` sets a `.param` on a
+   library cell that declares it (the cell is rebuilt on the same nets, name and attributes);
+   elsewhere it stays an attribute. The VTR dialect still refuses parameterised `.subckt` cells.
+   `lpm-check` has the BLIF leg (write, read, write identical, `netlist-compare` identical with
+   `.blackbox` stubs from the `.o3lib`). Docs: 1C amendment, 3E note, `writer.h`, `reader.h`,
+   `attrs.h`. The IR is not changed.

@@ -80,6 +80,10 @@ HERE = Path(__file__).resolve().parent
 script = sys.argv[sys.argv.index("-p") + 1]
 with open(HERE / "odin.log", "a") as log:
     log.write(" ".join(sys.argv[1:]) + "\n")
+if "write_blif " in script:
+    out = script.split("write_blif ")[1].split(";")[0].strip()
+    Path(out).write_text((HERE / "model.blif").read_text())
+    sys.exit(0)
 out = script.split("write_verilog ")[1].split(";")[0].strip()
 name = "gen1" if "lpmmap" in script else "gen2"
 Path(out).write_text((HERE / (name + ".v")).read_text())
@@ -167,6 +171,28 @@ class Lint(unittest.TestCase):
             self.assertEqual(code, 0, err)
 
 
+class Blif(unittest.TestCase):
+    def test_lib_directions_and_stubs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = Path(tmp) / "t.o3lib"
+            lib.write_text(
+                "# c\nlibrary t\ncell lpm_x blackbox\n  param w int 1\n  out result w\n"
+                "  in dataa w\n  in clock 1 clock\nend\n"
+            )
+            dirs = lc.lib_directions(lib)
+        self.assertEqual(dirs, {"lpm_x": {"result": "out", "dataa": "in", "clock": "in"}})
+        text = (
+            ".model m\n.inputs a[0]\n.outputs s[0]\n"
+            ".subckt lpm_x result[0]=s[0] dataa[0]=a[0] \\\n  clock=gnd\n.end\n"
+        )
+        out = lc.with_stubs(text, dirs)
+        self.assertIn(
+            ".model lpm_x\n.inputs dataa[0] clock\n.outputs result[0]\n.blackbox\n.end", out
+        )
+        self.assertTrue(out.startswith(text))
+        self.assertEqual(lc.with_stubs(".model m\n.end\n", dirs), ".model m\n.end\n")
+
+
 class Driver(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -178,6 +204,17 @@ class Driver(unittest.TestCase):
             "odin3: info: lpmmap: 1 lpm_add_sub, 0 lpm_mult, 0 lpm_compare, 0 altsyncram; "
             "0 cells left soft\n"
         )
+        (self.dir / "model.blif").write_text(
+            ".model m\n.inputs a[0]\n.outputs s[0]\n"
+            '.subckt lpm_add_sub dataa[0]=a[0] result[0]=s[0]\n.param lpm_direction "ADD"\n.end\n'
+        )
+        (self.dir / "lpm.o3lib").write_text(
+            "library t\ncell lpm_add_sub blackbox\n  param lpm_width int 1\n"
+            "  out result lpm_width\n  in dataa lpm_width\nend\n"
+        )
+        compare = self.dir / "netlist-compare"
+        compare.write_text("#!/bin/sh\nexit ${FAKE_COMPARE_RC:-0}\n")
+        compare.chmod(0o755)
         fake = self.dir / "odin3"
         fake.write_text(FAKE_ODIN)
         fake.chmod(0o755)
@@ -193,7 +230,9 @@ class Driver(unittest.TestCase):
             "--expect",
             str(self.expect),
             "--lib",
-            "lib/lpm.o3lib",
+            str(self.dir / "lpm.o3lib"),
+            "--netlist-compare",
+            str(self.dir / "netlist-compare"),
             *extra,
             str(self.micro),
         ]
@@ -204,9 +243,10 @@ class Driver(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("micro.v: ok", out)
         log = (self.dir / "odin.log").read_text().splitlines()
-        self.assertEqual(len(log), 3)  # the script, the read-back, the second read-back
+        # the script, the read-back, the second read-back, the BLIF script, the BLIF read-back
+        self.assertEqual(len(log), 5)
         self.assertIn("lpmmap", log[0])
-        self.assertTrue(all(line.startswith("--check ") for line in log[1:]))  # IR invariants
+        self.assertTrue(all(line.startswith("--check ") for line in log[1:3]))  # IR invariants
 
     @unittest.skipUnless(shutil.which("iverilog"), "iverilog is not installed")
     def test_count_mismatch_exit_1(self) -> None:
@@ -221,6 +261,13 @@ class Driver(unittest.TestCase):
         code, _, err = run_main(lc.main, self.args())
         self.assertEqual(code, 1)
         self.assertIn("roundtrip:", err)
+
+    @unittest.skipUnless(shutil.which("iverilog"), "iverilog is not installed")
+    def test_netlist_compare_difference_exit_1(self) -> None:
+        with mock.patch.dict(os.environ, {"FAKE_COMPARE_RC": "1"}):
+            code, _, err = run_main(lc.main, self.args())
+        self.assertEqual(code, 1)
+        self.assertIn("blif: netlist-compare", err)
 
     def test_missing_file_exit_2(self) -> None:
         if shutil.which("iverilog") is None:
