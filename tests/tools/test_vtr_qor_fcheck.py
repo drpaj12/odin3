@@ -426,6 +426,28 @@ class InitRunsTest(unittest.TestCase):
         self.assertIn("ERROR: the initial-state dumps cannot be compared", done.stdout)
         self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "error")
 
+    def test_dumps_are_removed_after_the_verdict(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as raw:
+            build = Path(raw) / "sim_build"
+            build.mkdir()
+            calls: list[list[str]] = []
+
+            def fake_call(argv: list[str], stdout: io.TextIOBase, stderr: int) -> int:
+                calls.append(argv)
+                stdout.write("tb clocks: clk\nVD 2:2 1:1\n")
+                return 0
+
+            out = io.StringIO()
+            code = qor_fcheck_run._run_inits([str(build / "Vtb"), "+verilator+seed+1"], OUTPUTS,
+                                             out, fake_call)
+            self.assertEqual(code, 0)
+            self.assertEqual(len(calls), 1)  # a clean first run needs no other initial state
+            self.assertTrue(calls[0][-1].endswith("rand+reset+0"))
+            self.assertEqual(sorted(p.name for p in Path(raw).iterdir()), ["sim_build"])
+            self.assertIn("PASS: 1 vectors matched", out.getvalue())
+
     def test_upstream_without_a_generator_is_reported(self) -> None:
         HEAVY_DIR.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as raw:

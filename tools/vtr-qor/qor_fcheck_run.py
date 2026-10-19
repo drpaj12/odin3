@@ -250,6 +250,8 @@ def _run_inits(argv: list[str], outputs: Sequence[tuple[str, int]], stdout: Any,
         return 3
     with open(dumps[0], encoding="utf-8", errors="replace") as handle:
         header = [ln for ln in handle if not ln.startswith(("VD ", "RAW_"))]
+    for path in dumps:  # one line per vector: tens of MB on a big design; the log has the verdict
+        path.unlink()
     stdout.write("".join(header) + render_verdict(verdict))
     stdout.flush()
     return 0 if verdict.passed else (1 if verdict.mismatched else 3)
