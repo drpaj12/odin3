@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import sys
+import tempfile
 import unittest
 from collections.abc import Sequence
 from contextlib import redirect_stderr
@@ -22,11 +23,13 @@ import qor_heavy
 import qor_legs
 import qor_nightly
 import qor_sched
+import qor_table
 import vtr_qor
 from qor_sched import Job
 
 from .test_vtr_qor_cli import CliTestBase
 from .test_vtr_qor_sched import KEY12, RunnerTestBase
+from .test_vtr_qor_table import BANDS, GATE, drop, header, replace, run, table
 
 FAKE_ODIN3 = """
 import json, sys
@@ -208,6 +211,22 @@ class ExitCliTest(CliTestBase):
             # the nightly never names Oprov in
             self.assertNotIn("Oprov", vtr_qor._available_legs(self.odin3))
 
+    def test_table_seeds_option(self) -> None:
+        """``table --seeds 2,3`` finds the seed jobs by the planner's keys and adds the section."""
+        self.assertEqual(self.cli("run", "--leg", "P,O", "--set", "smoke")[0], 0)
+        for seed in ("2", "3"):
+            code, _, err = self.cli("run", "--leg", "P,O", "--designs", "sha", "--seed", seed)
+            self.assertEqual(code, 0, err)
+        self.stack.enter_context(mock.patch.object(vtr_qor, "_golden", return_value=None))
+        code, out, err = self.cli("table", "--legs", "P,O", "--label", "s", "--set", "smoke",
+                                  "--seeds", "2,3")
+        self.assertEqual(code, 0, err)
+        md = (Path(out.strip().splitlines()[-1]) / "qor.md").read_text(encoding="utf-8")
+        self.assertIn("## Seeds\n", md)
+        self.assertEqual(self.cli("table", "--legs", "P,O", "--label", "s", "--seeds", "1")[0], 2)
+        self.assertEqual(self.cli("table", "--legs", "P", "--label", "s", "--seeds", "2")[0], 2)
+        self.assertEqual(self.cli("table", "--legs", "P,O", "--label", "s", "--seeds", "x")[0], 2)
+
     def test_probe_runs_the_oprov_script(self) -> None:
         """The real probe against the fake odin3: exit 0 and a file: capable; exit 1: the reason."""
         work = self.tmp / "probe"
@@ -215,6 +234,70 @@ class ExitCliTest(CliTestBase):
         self.assertTrue((work / "probe.v").is_file())
         (self.bin / "fail").write_text("")
         self.assertIsNotNone(qor_legs.probe_name_style(self.odin3, self.repo, work))
+
+
+class SeedTableTest(unittest.TestCase):
+    """Plan Task 14: ``seed_candidates`` and the Seeds and Name style sections."""
+
+    def test_seed_candidates(self) -> None:
+        # 1.36 for sha: listed (>= 1.35); nothing else is
+        runs = table(o_scales={"sha": 1.36})
+        self.assertEqual(qor_table.seed_candidates(runs, BANDS), ["sha"])
+        # exactly 1.35 is listed, 1.349 is not
+        self.assertEqual(qor_table.seed_candidates(table(o_scales={"sha": 1.35}), BANDS), ["sha"])
+        self.assertEqual(qor_table.seed_candidates(table(o_scales={"sha": 1.349}), BANDS), [])
+        # a geomean of 1.09 (>= 1.08) with bgm at 1.12: bgm is above the geomean, the rest below
+        rest = (1.09**19 / 1.12) ** (1 / 18)
+        scales = {d: rest for d in GATE}
+        scales["bgm"] = 1.12
+        self.assertEqual(qor_table.seed_candidates(table(o_scales=scales), BANDS), ["bgm"])
+        # everything below: empty
+        self.assertEqual(qor_table.seed_candidates(table(1.05), BANDS), [])
+        # a failed O job never makes a candidate; an absent P job neither
+        runs = replace(table(o_scales={"sha": 1.4}), run("O", "sha", 1.4, status="failed"))
+        self.assertEqual(qor_table.seed_candidates(runs, BANDS), [])
+        self.assertEqual(qor_table.seed_candidates(drop(table(o_scales={"sha": 1.4}), "P", "sha"),
+                                                   BANDS), [])
+
+    def write(self, runs: list[qor_table.Run], seeds: dict[int, list[qor_table.Run]] | None
+              ) -> str:
+        with tempfile.TemporaryDirectory(dir=qor_heavy.HEAVY_DIR) as tmp:
+            path = Path(tmp) / "qor.md"
+            verdict = qor_table.gate(qor_table.GateInputs(
+                runs=runs, bands=BANDS, gate_set=GATE, explanations=[], divergences=[],
+                equiv_exceptions=[]))
+            qor_table.write_md(runs, verdict, header(runs), path, golden=None, seeds=seeds)
+            return path.read_text(encoding="utf-8")
+
+    def test_md_seed_and_name_style(self) -> None:
+        runs = table(o_scales={"sha": 1.36})
+        for design in GATE:
+            runs.append(run("Oprov", design, override={"vpr_time_s": 2.0}
+                            if design == "sha" else None))
+        seeds = {2: [run("O", "sha", 1.30), run("P", "sha")],
+                 3: [run("O", "sha", 1.34), run("P", "sha")]}
+        md = self.write(runs, seeds)
+        seed_block = (
+            "## Seeds\n\n"
+            "Designs within 10 % of a bound (O/P at least 1.35 per design, or above a geomean "
+            "of at least 1.08) rerun with VPR seeds 2 and 3 for O and P. The gate stays on "
+            "seed 1.\n\n"
+            "| design | metric | O/P s1 (gate) | O/P s2 | O/P s3 | mean(s1..s3) |\n"
+            "|---|---|---|---|---|---|\n"
+            "| sha | num_clb | 1.360 | 1.300 | 1.340 | 1.333 |\n"
+            "| sha | min_chan_width | 1.360 | 1.300 | 1.340 | 1.333 |\n"
+            "| sha | critical_path_delay_ns | 1.360 | 1.300 | 1.340 | 1.333 |\n"
+            "| sha | crit_path_routed_wirelength | 1.360 | 1.300 | 1.340 | 1.333 |\n\n")
+        self.assertIn(seed_block, md)
+        self.assertLess(md.index("## Seeds"), md.index("## Netlist"))
+        self.assertIn("| **geomean** |  |  | **1.037** |  |  |  |\n", md)
+        self.assertIn("| sha | 1.0 | 2.0 | 2.000 |  |  |  |\n", md)
+        # no seed runs: no Seeds section; a seed missing: its cell is empty and so is the mean
+        self.assertNotIn("## Seeds", self.write(runs, None))
+        partial = self.write(runs, {2: seeds[2]})
+        self.assertIn("| sha | num_clb | 1.360 | 1.300 |  |  |\n", partial)
+        none = self.write(table(1.05), {2: [], 3: []})
+        self.assertIn("None.\n", none.split("## Seeds")[1].split("##")[0])
 
 
 class NightRerunStepTest(unittest.TestCase):

@@ -1225,6 +1225,27 @@ def gate_designs(sets: Sets, arch_key: str, selected: Collection[str]) -> tuple[
     return tuple(design for design in base if design in selected)
 
 
+def _seed_runs(args: argparse.Namespace, legs: Sequence[str], designs: Collection[str],
+               sets: Sets) -> dict[int, list[qor_table.Run]]:
+    """``table --seeds 2,3``: the O and P jobs of those VPR seeds (§6.3) that exist, found by the
+    planner's key for each seed (the same VTR, odin3 and files as the table's seed 1)."""
+    try:
+        seeds = sorted({int(word) for word in _split(args.seeds)})
+    except ValueError as exc:
+        raise HeavyError(EXIT_USAGE, f"table: --seeds {args.seeds}: {exc}") from exc
+    wanted = tuple(leg for leg in ("P", "O") if leg in legs)
+    if not seeds or wanted != ("P", "O") or any(seed <= qor_legs.DEFAULT_SEED for seed in seeds):
+        raise HeavyError(EXIT_USAGE, "table: --seeds needs O and P in --legs and seeds above 1")
+    found: dict[int, list[qor_table.Run]] = {}
+    for seed in seeds:
+        req = PlanRequest(legs=wanted, designs=tuple(sorted(designs)), arch=args.arch,
+                          out=_out(args), vtr_root=_vtr_root(args), odin3=_odin3(args),
+                          rerun=False, seed=seed)
+        found[seed] = [qor_table.load_job_dir(job.job_dir, job.leg, job.arch)
+                       for job in qor_sched.plan_jobs(req, sets) if job.job_dir.is_dir()]
+    return found
+
+
 def cmd_table(args: argparse.Namespace, argv: Sequence[str]) -> int:
     """Spec §6: the four files of one table; prints its directory."""
     out = _out(args)
@@ -1254,9 +1275,10 @@ def cmd_table(args: argparse.Namespace, argv: Sequence[str]) -> int:
     header = qor_table.table_header(runs, arch=arch, label=label, vtr12=vtr12)
     table_dir = out / "tables" / f"{qor_table.table_stamp(header)}-{label}"
     table_dir.mkdir(parents=True, exist_ok=True)
+    seeds = _seed_runs(args, legs, designs, sets) if args.seeds else None
     qor_table.write_md(runs, verdict, header, table_dir / "qor.md", golden=golden, bands=bands,
                        divergences=divergences, equiv_exceptions=exceptions, gate_set=gate_set,
-                       narrowed=narrowed)
+                       narrowed=narrowed, seeds=seeds)
     qor_table.write_csv(runs, table_dir / "runs.csv", table_dir / "ratios.csv", bands=bands,
                         gate_set=gate_set)
     qor_table.write_json(runs, verdict, header, table_dir / "runs.json", bands=bands,
@@ -1679,6 +1701,8 @@ def _parser() -> argparse.ArgumentParser:
     table.add_argument("--label", required=True, metavar="TEXT")
     table.add_argument("--set", dest="sets", default=DEFAULT_TABLE_SETS, metavar="S[,S...]",
                        help="gate, extra, smoke (default gate,extra)")
+    table.add_argument("--seeds", default="", metavar="N[,N...]",
+                       help="VPR seeds of O and P to show beside seed 1 (spec §6.3), e.g. 2,3")
     gate = sub.add_parser("gate", parents=[common], help="print a table's verdict")
     gate.add_argument("table_dir", type=Path, metavar="TABLE_DIR")
     publish = sub.add_parser("publish", parents=[common],
