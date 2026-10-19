@@ -4,7 +4,7 @@ Usage::
 
     lower-equiv --odin3 O --yosys Y [--top T] [--pre CMD]... [--lower-args A] [--techlib L]
                 [--parmys-techlibs DIR] [--parmys-exact] [--expect F] [--root R] [--mem-cap C]
-                [--work DIR] [--each] FILE...
+                [--work DIR] [--latches] [--each] FILE...
 
 Per design (the FILEs together; with ``--each``, every FILE is its own design):
 
@@ -86,9 +86,10 @@ class Verdict:
 
 
 def snapshot_script(files: Sequence[str], top: str | None, techlib: str | None,
-                    pre: Sequence[str], lower_args: str, snap: Path) -> str:
+                    pre: Sequence[str], lower_args: str, snap: Path,
+                    nolatches: bool = True) -> str:
     """Step 1's Odin III ``-p`` script."""
-    front = lc.read_front(files, top, techlib, True)
+    front = lc.read_front(files, top, techlib, nolatches)
     lower = f"lower --lower-snapshot {lc.quote(str(snap))} {lower_args}".rstrip()
     return "; ".join([*front, *pre, lower])
 
@@ -846,9 +847,11 @@ def check_pair(yosys: str, before: Path, after: Path, work: Path, cap: int,
 
 def check_design(args: argparse.Namespace, files: Sequence[str], run_dir: Path) -> Verdict:
     techlib = str(Path(args.techlib).resolve()) if args.techlib else None
-    pre = args.pre if args.pre else list(ld.DEFAULT_PRE)
+    default = ld.DEFAULT_PRE if not args.latches else ld.LATCH_PRE
+    pre = args.pre if args.pre else list(default)
     snap = Path(tempfile.mkdtemp(prefix="snap-", dir=run_dir))  # fresh: never a stale snapshot
-    script = snapshot_script(files, args.top, techlib, pre, args.lower_args, snap)
+    script = snapshot_script(files, args.top, techlib, pre, args.lower_args, snap,
+                             not args.latches)
     before, after = snapshot(args.odin3, script, args.top, snap, args.mem_cap)
     parmys = Path(args.parmys_techlibs) if args.parmys_techlibs else ld.vtr_techlibs()
     return check_pair(args.yosys, before, after, run_dir, args.mem_cap,
@@ -916,6 +919,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--refine-timeout", type=float, default=opt_equiv.REFINE_TIMEOUT_SECONDS,
                     metavar="S", help="seconds for one SAT proof and for one bounded check "
                     "(default 60); a design that needs longer is unproven")
+    ap.add_argument("--latches", action="store_true",
+                    help="read without --nolatches (an inferred latch stays a $dlatch) and run "
+                    "opt_clean after opt, as lower-diff --family latch does")
     ap.add_argument("--allow-empty", action="store_true",
                     help="a design with no word cell after the pre commands is not a failure")
     ap.add_argument("--each", action="store_true", help="every FILE is its own design")

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# lower-gen-diff: seeds of verilog-gen --lower through lower-diff and lower-equiv (3B spec 14.5).
+# See lower_gen_diff.py. Exit codes: 0 every seed ok (unproven and folded seeds are counted),
+# 1 a difference or a NOT A REFINEMENT (a BUG in lower), 2 usage or setup error, 3 hard,
+# 4 strict mode and some seed unproven, 77 skipped (no memory cap).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../verilog-gen:$here/../elab-check:$here/../opt-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/lower_gen_diff.py" "$@"
