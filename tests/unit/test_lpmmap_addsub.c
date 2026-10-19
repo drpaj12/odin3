@@ -111,6 +111,33 @@ static bool is_const(const odin3_module *mod, odin3_net_id net, odin3_const valu
     return odin3_net_valid(net) && odin3_net_const_value(mod, net) == value;
 }
 
+/* The first `have` bits of port `port` of blk are the nets src[0..have), the rest up to `width`
+ * are gnd. */
+static void expect_zero_extended(const pb_result *res, odin3_node_id blk, const char *port,
+                                 const odin3_net_id *src, uint32_t have) {
+    uint32_t width = lm_port_width(res->module, blk, port);
+    for (uint32_t i = 0; i < width; i++) {
+        odin3_net_id net = lm_pin_net(res->module, blk, port, i);
+        if (i < have) {
+            TEST_ASSERT_EQUAL_UINT32(src[i].v, net.v);
+        } else {
+            TEST_ASSERT_TRUE(is_const(res->module, net, ODIN3_CONST_0));
+        }
+    }
+}
+
+/* The attribute `lpmmap` of blk is expected. */
+static void expect_lpmmap_attr(const pb_result *res, odin3_node_id blk, const char *expected) {
+    uint32_t key = 0;
+    TEST_ASSERT_TRUE(
+        odin3_strtab_find(odin3_design_strtab(res->design), odin3_bytes_cstr("lpmmap"), &key));
+    const odin3_value *val =
+        odin3_attr_get(res->module, (odin3_objref){ODIN3_OBJ_NODE, blk.v}, key);
+    TEST_ASSERT_NOT_NULL(val);
+    TEST_ASSERT_EQUAL_STRING(expected,
+                             odin3_strtab_get(odin3_design_strtab(res->design), val->str));
+}
+
 /* --- A-1 ------------------------------------------------------------------------------------ */
 
 static void test_a1_candidates(void) {
@@ -150,19 +177,9 @@ static void test_a2_width_is_y_unsigned(void) {
     odin3_node_id blk = lm_nth(res.module, "lpm_add_sub", 0);
     TEST_ASSERT_EQUAL_INT64(9, lm_param_int(res.module, blk, "lpm_width"));
     TEST_ASSERT_EQUAL_UINT32(9, lm_port_width(res.module, blk, "dataa"));
+    expect_zero_extended(&res, blk, "dataa", bf.a, 8);
+    expect_zero_extended(&res, blk, "datab", bf.b, 4);
     for (uint32_t i = 0; i < 9; i++) {
-        odin3_net_id a = lm_pin_net(res.module, blk, "dataa", i);
-        odin3_net_id b = lm_pin_net(res.module, blk, "datab", i);
-        if (i < 8) {
-            TEST_ASSERT_EQUAL_UINT32(bf.a[i].v, a.v);
-        } else {
-            TEST_ASSERT_TRUE(is_const(res.module, a, ODIN3_CONST_0));
-        }
-        if (i < 4) {
-            TEST_ASSERT_EQUAL_UINT32(bf.b[i].v, b.v);
-        } else {
-            TEST_ASSERT_TRUE(is_const(res.module, b, ODIN3_CONST_0));
-        }
         TEST_ASSERT_EQUAL_UINT32(bf.y[i].v, lm_pin_net(res.module, blk, "result", i).v);
     }
     pb_free(&res);
@@ -243,14 +260,7 @@ static void test_a4_params_add_and_sub(void) {
         TEST_ASSERT_EQUAL_INT64(0, lm_param_int(res.module, blk, "lpm_pipeline"));
         /* A-5: the subtract leaves cin open (the Altera default is 1 for subtraction) */
         TEST_ASSERT_TRUE(lm_port_open(res.module, blk, "cin"));
-        uint32_t key = 0;
-        TEST_ASSERT_TRUE(
-            odin3_strtab_find(odin3_design_strtab(res.design), odin3_bytes_cstr("lpmmap"), &key));
-        const odin3_value *val =
-            odin3_attr_get(res.module, (odin3_objref){ODIN3_OBJ_NODE, blk.v}, key);
-        TEST_ASSERT_NOT_NULL(val);
-        TEST_ASSERT_EQUAL_STRING(rows[i].role,
-                                 odin3_strtab_get(odin3_design_strtab(res.design), val->str));
+        expect_lpmmap_attr(&res, blk, rows[i].role);
         pb_free(&res);
     }
 }
@@ -262,10 +272,10 @@ static void test_a_const_operand(void) {
     build_one((addcase){"$add", 4, 4, 5, false, false, NULL, "4'0101"}, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, NULL));
     odin3_node_id blk = lm_nth(res.module, "lpm_add_sub", 0);
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "datab", 0), ODIN3_CONST_1));
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "datab", 1), ODIN3_CONST_0));
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "datab", 2), ODIN3_CONST_1));
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "datab", 3), ODIN3_CONST_0));
+    static const odin3_const bits[] = {ODIN3_CONST_1, ODIN3_CONST_0, ODIN3_CONST_1, ODIN3_CONST_0};
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "datab", i), bits[i]));
+    }
     pb_free(&res);
 }
 
@@ -321,6 +331,7 @@ static void test_a_prov_and_attr(void) {
     TEST_ASSERT_EQUAL_UINT32(source.v, rec->parents.ids[0].v);
     TEST_ASSERT_EQUAL_STRING(
         "u0", odin3_strtab_get(odin3_design_strtab(res.design), odin3_node_name(res.module, blk)));
+    expect_lpmmap_attr(&res, blk, "lpm_add_sub:add");
     pb_free(&res);
 }
 
@@ -353,10 +364,10 @@ static void test_a_idempotent(void) {
 
 static void test_a_oom(void) {
     int mapped = 0;
-    for (int n = 0; n < OOM_LIMIT && mapped == 0; n++) {
+    for (int fail_at = 0; fail_at < OOM_LIMIT && mapped == 0; fail_at++) {
         pb_result res;
         build_one((addcase){"$sub", 8, 6, 9, true, true, NULL, NULL}, &res);
-        odin3_util_set_alloc_fail_after(n);
+        odin3_util_set_alloc_fail_after(fail_at);
         odin3_status st = odin3_lpmmap_run(&res.ctx, res.design, NULL, NULL);
         odin3_util_set_alloc_fail_after(-1);
         if (st == ODIN3_OK) {

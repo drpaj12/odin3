@@ -84,9 +84,9 @@ static odin3_status build_into(lm_ctx *lc, odin3_node_id src, uint32_t width, cm
 }
 
 static odin3_status build(lm_ctx *lc, odin3_node_id src, odin3_vec *ties) {
-    uint32_t a = param_u32(lc, src, P_A_WIDTH);
-    uint32_t b = param_u32(lc, src, P_B_WIDTH);
-    uint32_t width = a > b ? a : b;
+    uint32_t a_width = param_u32(lc, src, P_A_WIDTH);
+    uint32_t b_width = param_u32(lc, src, P_B_WIDTH);
+    uint32_t width = a_width > b_width ? a_width : b_width;
     cmp_bus bus;
     odin3_vec_init(&bus.va, sizeof(odin3_net_id));
     odin3_vec_init(&bus.vb, sizeof(odin3_net_id));

@@ -165,10 +165,10 @@ static void test_string_param_blackbox_cell(void) {
 
 static void test_string_param_oom_sweep(void) {
     static const char text[] = "library L\ncell C blackbox\n  param S string \"Cyclone V\"\nend\n";
-    for (int n = 0; n < 200; n++) {
+    for (int fail_at = 0; fail_at < 200; fail_at++) {
         tearDown();
         setUp();
-        odin3_util_set_alloc_fail_after(n);
+        odin3_util_set_alloc_fail_after(fail_at);
         odin3_status st = read_text(text);
         odin3_util_set_alloc_fail_after(-1);
         if (st == ODIN3_OK) {

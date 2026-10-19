@@ -186,9 +186,33 @@ static void test_lib_param_kinds_and_defaults(void) {
     TEST_ASSERT_EQUAL_INT64(1, param_def(ram, "width_byteena_a")->dflt.i);
 }
 
-static void test_lib_clock_flags(void) {
+/* True when the port `port` of cell type `cell` carries the clock flag. */
+typedef struct portref {
+    const char *cell;
+    const char *port;
+} portref;
+
+static bool port_is_clock(portref ref) {
+    const char *cell = ref.cell;
+    const char *port = ref.port;
     uint32_t str = 0;
     odin3_celltype_id id = {0};
+    TEST_ASSERT_TRUE(
+        odin3_strtab_find(odin3_design_strtab(g_design), odin3_bytes_cstr(cell), &str));
+    TEST_ASSERT_TRUE(odin3_celltype_find(g_design, str, &id));
+    const odin3_techlib_cell *lib = odin3_techlib_cell_get(g_design, id);
+    TEST_ASSERT_NOT_NULL(lib);
+    const odin3_celltype_def *def = def_of(cell);
+    for (uint32_t idx = 0; idx < def->n_ports; idx++) {
+        if (strcmp(def->ports[idx].name, port) == 0) {
+            return lib->ports[idx].clock;
+        }
+    }
+    TEST_FAIL_MESSAGE(port);
+    return false;
+}
+
+static void test_lib_clock_flags(void) {
     static const struct {
         const char *cell;
         const char *port;
@@ -198,18 +222,10 @@ static void test_lib_clock_flags(void) {
                   {"altsyncram", "clock0"},
                   {"altsyncram", "clock1"}};
     for (size_t i = 0; i < sizeof clocks / sizeof clocks[0]; i++) {
-        TEST_ASSERT_TRUE(odin3_strtab_find(odin3_design_strtab(g_design),
-                                           odin3_bytes_cstr(clocks[i].cell), &str));
-        TEST_ASSERT_TRUE(odin3_celltype_find(g_design, str, &id));
-        const odin3_techlib_cell *lib = odin3_techlib_cell_get(g_design, id);
-        TEST_ASSERT_NOT_NULL(lib);
-        const odin3_celltype_def *def = def_of(clocks[i].cell);
-        for (uint32_t p = 0; p < def->n_ports; p++) {
-            if (strcmp(def->ports[p].name, clocks[i].port) == 0) {
-                TEST_ASSERT_TRUE_MESSAGE(lib->ports[p].clock, clocks[i].port);
-            }
-        }
+        TEST_ASSERT_TRUE_MESSAGE(port_is_clock((portref){clocks[i].cell, clocks[i].port}),
+                                 clocks[i].port);
     }
+    TEST_ASSERT_FALSE(port_is_clock((portref){"lpm_add_sub", "clken"}));
 }
 
 static odin3_module *module_with(const char *type) {

@@ -19,7 +19,7 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
 
 ## Checklist
 
-- [ ] 5.1 Altera via LPM, light (was PHASE4 4.14; decision 1):
+- [x] 5.1 Altera via LPM, light (code on `feat/5.1-lpm-spec`, awaiting review; PHASE5 decision 7) (was PHASE4 4.14; decision 1):
   - an LPM tech library (`.o3lib`) with exactly `lpm_add_sub`, `lpm_mult`, `lpm_compare` and
     `altsyncram` (single-port and simple-dual-port). Flip-flops are plain DFFs in soft logic,
     not `lpm_ff`. Everything else is soft logic as structural Verilog gates or assigns;
@@ -96,3 +96,22 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
    `RD_EN` only when it is constant 1 (the behaviour of `rden` low is not verified, V-7), and
    R-4 sets `address_reg_b` `"CLOCK0"` and `outdata_reg_b` `"UNREGISTERED"` as the Quartus wizard
    does. Still open: V-7 and a primary-document spelling of `"Cyclone V"`.
+7. **5.1 implemented** (agent defaults under decision 6, 2026-10-19; Peter may override):
+   - the pass is `lpmmap`, `lib/lpm.o3lib`, `tools/lpm-check`, micros in `tests/lpm/` (plan Tasks 2 to
+     9); no heavy run was needed;
+   - the `.o3lib` reader also lets a port be named `clock` (the modifier is read only after the
+     width); `signed` and `x` stay reserved;
+   - R-1 reuses hardmap's R-8 merge: `mem_load` and `mem_model_free` are exported from
+     `src/passes/hardmap/mem.c` and declared in `mem.h`, with no change of behaviour (question 9,
+     option i);
+   - the round trip is a fixpoint of generation 2 to 3, not generation 1 to 2: reading turns an open
+     LPM pin into the constant x (inputs) or a fresh net (outputs), so generation 2 differs from
+     generation 1 in exactly those connections. `lpm-check` also compares instance by instance
+     (type, name, parameters, connected pins; open, x and fresh nets count as equal);
+   - `write_blif` refuses a design with LPM cells (`parameters neither declared nor implied by the
+     connected formals have no BLIF form`), so the BLIF leg of spec T-3 is dropped;
+   - `iverilog -Wall` notes every open instance input as a floating port; the lint leg filters
+     exactly those notes (Altera defaults apply, spec H-4) and fails on any other finding, and
+     Verilator runs with `-Wno-PINCONNECTEMPTY -Wno-PINMISSING`;
+   - the Debug `check` logs rule 11 warnings (unconnected pin) for the open LPM inputs; they are
+     warnings, not failures.

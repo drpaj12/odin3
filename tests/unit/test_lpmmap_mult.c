@@ -95,6 +95,18 @@ static void snapshot(const pb_result *res, before *bf) {
     port_nets(res->module, src, 2, bf->y);
 }
 
+/* The attribute `lpmmap` of blk is expected. */
+static void expect_lpmmap_attr(const pb_result *res, odin3_node_id blk, const char *expected) {
+    uint32_t key = 0;
+    TEST_ASSERT_TRUE(
+        odin3_strtab_find(odin3_design_strtab(res->design), odin3_bytes_cstr("lpmmap"), &key));
+    const odin3_value *val =
+        odin3_attr_get(res->module, (odin3_objref){ODIN3_OBJ_NODE, blk.v}, key);
+    TEST_ASSERT_NOT_NULL(val);
+    TEST_ASSERT_EQUAL_STRING(expected,
+                             odin3_strtab_get(odin3_design_strtab(res->design), val->str));
+}
+
 /* --- M-1 ------------------------------------------------------------------------------------ */
 
 static void test_m1_candidates(void) {
@@ -230,13 +242,7 @@ static void test_m_prov_and_attr(void) {
     TEST_ASSERT_NOT_NULL(rec);
     TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
     TEST_ASSERT_EQUAL_UINT32(source.v, rec->parents.ids[0].v);
-    uint32_t key = 0;
-    TEST_ASSERT_TRUE(
-        odin3_strtab_find(odin3_design_strtab(res.design), odin3_bytes_cstr("lpmmap"), &key));
-    const odin3_value *val = odin3_attr_get(res.module, (odin3_objref){ODIN3_OBJ_NODE, blk.v}, key);
-    TEST_ASSERT_NOT_NULL(val);
-    TEST_ASSERT_EQUAL_STRING("lpm_mult:mul",
-                             odin3_strtab_get(odin3_design_strtab(res.design), val->str));
+    expect_lpmmap_attr(&res, blk, "lpm_mult:mul");
     pb_free(&res);
 }
 
@@ -258,10 +264,10 @@ static void test_m_explicit_untouched(void) {
 
 static void test_m_oom(void) {
     int mapped = 0;
-    for (int n = 0; n < OOM_LIMIT && mapped == 0; n++) {
+    for (int fail_at = 0; fail_at < OOM_LIMIT && mapped == 0; fail_at++) {
         pb_result res;
         build_one((mulcase){6, 5, 11, true, true, NULL, NULL}, &res);
-        odin3_util_set_alloc_fail_after(n);
+        odin3_util_set_alloc_fail_after(fail_at);
         odin3_status st = odin3_lpmmap_run(&res.ctx, res.design, NULL, NULL);
         odin3_util_set_alloc_fail_after(-1);
         if (st == ODIN3_OK) {

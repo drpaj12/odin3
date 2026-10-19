@@ -149,9 +149,14 @@ static void test_p2_lazy_lookup(void) {
 
 /* --- H-2, H-3 ------------------------------------------------------------------------------- */
 
-static odin3_net_id port_net(const pb_result *res, const char *type, uint32_t port, uint32_t bit) {
-    odin3_pinslice pins = odin3_node_port(res->module, lm_nth(res->module, type, 0), port);
-    return odin3_pin_net(res->module, (odin3_pin_id){pins.first.v + bit});
+typedef struct pinref {
+    uint32_t port;
+    uint32_t bit;
+} pinref;
+
+static odin3_net_id port_net(const pb_result *res, const char *type, pinref ref) {
+    odin3_pinslice pins = odin3_node_port(res->module, lm_nth(res->module, type, 0), ref.port);
+    return odin3_pin_net(res->module, (odin3_pin_id){pins.first.v + ref.bit});
 }
 
 static void test_h2_ext_table(void) {
@@ -166,7 +171,7 @@ static void test_h2_ext_table(void) {
         TEST_ASSERT_EQUAL_INT(
             ODIN3_OK, lm_extend(&lc, odin3_node_port(res.module, add, 0), 6, is_signed, out));
         for (uint32_t i = 0; i < 3; i++) {
-            TEST_ASSERT_EQUAL_UINT32(port_net(&res, "$add", 0, i).v, out[i].v);
+            TEST_ASSERT_EQUAL_UINT32(port_net(&res, "$add", (pinref){0, i}).v, out[i].v);
         }
         for (uint32_t i = 3; i < 6; i++) {
             if (is_signed) {
@@ -178,7 +183,7 @@ static void test_h2_ext_table(void) {
         /* truncation: B has 5 bits, taken at width 2 */
         TEST_ASSERT_EQUAL_INT(
             ODIN3_OK, lm_extend(&lc, odin3_node_port(res.module, add, 1), 2, is_signed, out));
-        TEST_ASSERT_EQUAL_UINT32(port_net(&res, "$add", 1, 1).v, out[1].v);
+        TEST_ASSERT_EQUAL_UINT32(port_net(&res, "$add", (pinref){1, 1}).v, out[1].v);
         lm_free(&lc);
         pb_free(&res);
     }
@@ -206,6 +211,18 @@ static void test_h3_constants_are_canonical_nets(void) {
 
 /* --- H-6, H-7, H-8: a transaction ------------------------------------------------------------ */
 
+/* The attribute `lpmmap` of node is "lpm_add_sub:add". */
+static void expect_add_attr(const pb_result *res, odin3_node_id node) {
+    uint32_t key = 0;
+    TEST_ASSERT_TRUE(
+        odin3_strtab_find(odin3_design_strtab(res->design), odin3_bytes_cstr("lpmmap"), &key));
+    const odin3_value *val =
+        odin3_attr_get(res->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
+    TEST_ASSERT_NOT_NULL(val);
+    TEST_ASSERT_EQUAL_STRING("lpm_add_sub:add",
+                             odin3_strtab_get(odin3_design_strtab(res->design), val->str));
+}
+
 static void test_transaction_makes_one_named_node(void) {
     pb_result res;
     lm_build_ok(k_one_add, &res);
@@ -230,24 +247,16 @@ static void test_transaction_makes_one_named_node(void) {
     TEST_ASSERT_EQUAL_UINT32(1, rec->parents.count);
     TEST_ASSERT_EQUAL_UINT32(source.v, rec->parents.ids[0].v);
     TEST_ASSERT_EQUAL_UINT32(1, rec->op);
-    /* the lpmmap attribute, "<type>:<role>" */
-    uint32_t key = 0;
-    TEST_ASSERT_TRUE(
-        odin3_strtab_find(odin3_design_strtab(res.design), odin3_bytes_cstr("lpmmap"), &key));
-    const odin3_value *val =
-        odin3_attr_get(res.module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
-    TEST_ASSERT_NOT_NULL(val);
-    TEST_ASSERT_EQUAL_STRING("lpm_add_sub:add",
-                             odin3_strtab_get(odin3_design_strtab(res.design), val->str));
+    expect_add_attr(&res, node);
     pb_free(&res);
 }
 
 static void test_h8_oom(void) {
     int made = 0;
-    for (int n = 0; n < OOM_LIMIT && made == 0; n++) {
+    for (int fail_at = 0; fail_at < OOM_LIMIT && made == 0; fail_at++) {
         pb_result res;
         lm_build_ok(k_one_add, &res);
-        odin3_util_set_alloc_fail_after(n);
+        odin3_util_set_alloc_fail_after(fail_at);
         odin3_status st = run_build_add(&res);
         odin3_util_set_alloc_fail_after(-1);
         if (st == ODIN3_OK) {

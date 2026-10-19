@@ -110,33 +110,61 @@ static const struct {
 
 static const char *const k_all_outs[] = {"alb", "aeb", "agb", "aleb", "aneb", "ageb"};
 
+/* The attribute `lpmmap` of blk is expected. */
+static void expect_lpmmap_attr(const pb_result *res, odin3_node_id blk, const char *expected) {
+    uint32_t key = 0;
+    TEST_ASSERT_TRUE(
+        odin3_strtab_find(odin3_design_strtab(res->design), odin3_bytes_cstr("lpmmap"), &key));
+    const odin3_value *val =
+        odin3_attr_get(res->module, (odin3_objref){ODIN3_OBJ_NODE, blk.v}, key);
+    TEST_ASSERT_NOT_NULL(val);
+    TEST_ASSERT_EQUAL_STRING(expected,
+                             odin3_strtab_get(odin3_design_strtab(res->design), val->str));
+}
+
 /* --- C-1 ------------------------------------------------------------------------------------ */
+
+/* Exactly the output `wanted` of blk is connected, to net `y0`; the other five are open. */
+static void expect_one_output(const pb_result *res, odin3_node_id blk, const char *wanted,
+                              odin3_net_id y0) {
+    for (size_t idx = 0; idx < sizeof k_all_outs / sizeof k_all_outs[0]; idx++) {
+        if (strcmp(k_all_outs[idx], wanted) == 0) {
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(y0.v, lm_pin_net(res->module, blk, wanted, 0).v,
+                                             wanted);
+        } else {
+            TEST_ASSERT_TRUE_MESSAGE(lm_port_open(res->module, blk, k_all_outs[idx]),
+                                     k_all_outs[idx]);
+        }
+    }
+}
+
+/* The control ports are open. */
+static void expect_ctrl_open(const pb_result *res, odin3_node_id blk) {
+    TEST_ASSERT_TRUE(lm_port_open(res->module, blk, "clock"));
+    TEST_ASSERT_TRUE(lm_port_open(res->module, blk, "clken"));
+    TEST_ASSERT_TRUE(lm_port_open(res->module, blk, "aclr"));
+}
+
+/* One comparison type maps to one lpm_compare driving its output. */
+static void check_one_type(size_t row) {
+    pb_result res;
+    build_one((cmpcase){k_table[row].type, 6, 6, 1, false, false, NULL, NULL}, &res);
+    before bf;
+    snapshot(&res, k_table[row].type, &bf);
+    odin3_lpmmap_stats stats;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, &stats));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "lpm_compare"));
+    TEST_ASSERT_EQUAL_UINT32(0, lm_count(res.module, k_table[row].type));
+    TEST_ASSERT_EQUAL_UINT64(1, stats.compare);
+    odin3_node_id blk = lm_nth(res.module, "lpm_compare", 0);
+    expect_one_output(&res, blk, k_table[row].out, bf.y[0]);
+    expect_ctrl_open(&res, blk);
+    pb_free(&res);
+}
 
 static void test_c1_output_table(void) {
     for (size_t i = 0; i < sizeof k_table / sizeof k_table[0]; i++) {
-        pb_result res;
-        build_one((cmpcase){k_table[i].type, 6, 6, 1, false, false, NULL, NULL}, &res);
-        before bf;
-        snapshot(&res, k_table[i].type, &bf);
-        odin3_lpmmap_stats stats;
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, &stats));
-        TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "lpm_compare"));
-        TEST_ASSERT_EQUAL_UINT32(0, lm_count(res.module, k_table[i].type));
-        TEST_ASSERT_EQUAL_UINT64(1, stats.compare);
-        odin3_node_id blk = lm_nth(res.module, "lpm_compare", 0);
-        for (size_t o = 0; o < 6; o++) {
-            if (strcmp(k_all_outs[o], k_table[i].out) == 0) {
-                TEST_ASSERT_EQUAL_UINT32_MESSAGE(
-                    bf.y[0].v, lm_pin_net(res.module, blk, k_all_outs[o], 0).v, k_table[i].type);
-            } else {
-                TEST_ASSERT_TRUE_MESSAGE(lm_port_open(res.module, blk, k_all_outs[o]),
-                                         k_all_outs[o]);
-            }
-        }
-        TEST_ASSERT_TRUE(lm_port_open(res.module, blk, "clock"));
-        TEST_ASSERT_TRUE(lm_port_open(res.module, blk, "clken"));
-        TEST_ASSERT_TRUE(lm_port_open(res.module, blk, "aclr"));
-        pb_free(&res);
+        check_one_type(i);
     }
 }
 
@@ -168,11 +196,11 @@ static void test_c2_width_is_max(void) {
     TEST_ASSERT_EQUAL_INT64(8, lm_param_int(res.module, blk, "lpm_width"));
     for (uint32_t i = 0; i < 8; i++) {
         TEST_ASSERT_EQUAL_UINT32(bf.a[i].v, lm_pin_net(res.module, blk, "dataa", i).v);
-        odin3_net_id b = lm_pin_net(res.module, blk, "datab", i);
+        odin3_net_id net_b = lm_pin_net(res.module, blk, "datab", i);
         if (i < 4) {
-            TEST_ASSERT_EQUAL_UINT32(bf.b[i].v, b.v);
+            TEST_ASSERT_EQUAL_UINT32(bf.b[i].v, net_b.v);
         } else {
-            TEST_ASSERT_TRUE(is_const(res.module, b, ODIN3_CONST_0));
+            TEST_ASSERT_TRUE(is_const(res.module, net_b, ODIN3_CONST_0));
         }
     }
     pb_free(&res);
@@ -243,22 +271,16 @@ static void test_c_prov_and_attr(void) {
     TEST_ASSERT_NOT_NULL(rec);
     TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
     TEST_ASSERT_EQUAL_UINT32(source.v, rec->parents.ids[0].v);
-    uint32_t key = 0;
-    TEST_ASSERT_TRUE(
-        odin3_strtab_find(odin3_design_strtab(res.design), odin3_bytes_cstr("lpmmap"), &key));
-    const odin3_value *val = odin3_attr_get(res.module, (odin3_objref){ODIN3_OBJ_NODE, blk.v}, key);
-    TEST_ASSERT_NOT_NULL(val);
-    TEST_ASSERT_EQUAL_STRING("lpm_compare:cmp",
-                             odin3_strtab_get(odin3_design_strtab(res.design), val->str));
+    expect_lpmmap_attr(&res, blk, "lpm_compare:cmp");
     pb_free(&res);
 }
 
 static void test_c_oom(void) {
     int mapped = 0;
-    for (int n = 0; n < OOM_LIMIT && mapped == 0; n++) {
+    for (int fail_at = 0; fail_at < OOM_LIMIT && mapped == 0; fail_at++) {
         pb_result res;
         build_one((cmpcase){"$le", 6, 4, 2, true, true, NULL, NULL}, &res);
-        odin3_util_set_alloc_fail_after(n);
+        odin3_util_set_alloc_fail_after(fail_at);
         odin3_status st = odin3_lpmmap_run(&res.ctx, res.design, NULL, NULL);
         odin3_util_set_alloc_fail_after(-1);
         if (st == ODIN3_OK) {

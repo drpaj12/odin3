@@ -18,8 +18,11 @@
 #include <stdint.h>
 
 /* One kind of source cell: the type names it looks for and the rule that maps one cell. */
+/* The most type names one kind lists. */
+enum { LM_KIND_TYPES = 6 };
+
 typedef struct lm_kind {
-    const char *types[6];
+    const char *types[LM_KIND_TYPES];
     odin3_status (*rule)(lm_ctx *lc, odin3_node_id src);
 } lm_kind;
 
@@ -73,16 +76,16 @@ static const lm_kind k_kinds[] = {
 
 /* Runs one kind over every module. A kind whose types the design does not know is skipped. */
 static odin3_status run_kind(lm_ctx *lc, const lm_kind *kind) {
-    odin3_celltype_id ids[6] = {{0}, {0}, {0}, {0}, {0}, {0}};
-    size_t n = 0;
-    for (size_t i = 0; i < 6 && kind->types[i] != NULL; i++) {
-        n += lm_find_type(lc->design, kind->types[i], &ids[n]) ? 1U : 0U;
+    odin3_celltype_id ids[LM_KIND_TYPES] = {{0}};
+    size_t found = 0;
+    for (size_t i = 0; i < LM_KIND_TYPES && kind->types[i] != NULL; i++) {
+        found += lm_find_type(lc->design, kind->types[i], &ids[found]) ? 1U : 0U;
     }
     odin3_status st = ODIN3_OK;
-    for (uint32_t mi = 1; n > 0 && st == ODIN3_OK && mi < odin3_design_module_end(lc->design);
+    for (uint32_t mi = 1; found > 0 && st == ODIN3_OK && mi < odin3_design_module_end(lc->design);
          mi++) {
         odin3_module *mod = module_at(lc->design, mi);
-        st = mod != NULL ? phase(lc, mod, kind, ids, n) : st;
+        st = mod != NULL ? phase(lc, mod, kind, ids, found) : st;
     }
     return st;
 }

@@ -44,9 +44,9 @@ static void operand_nets(const lm_ctx *lc, odin3_pinslice pins, odin3_net_id *ds
 static odin3_status make_ties(const lm_ctx *lc, odin3_node_id src, const odin3_net_id *result,
                               uint32_t bits, odin3_vec *ties) {
     odin3_pinslice ypins = odin3_node_port(lc->module, src, PORT_Y);
-    uint32_t n = bits < ypins.count ? bits : ypins.count;
-    odin3_status st = odin3_vec_reserve(ties, n);
-    for (uint32_t k = 0; st == ODIN3_OK && k < n; k++) {
+    uint32_t count = bits < ypins.count ? bits : ypins.count;
+    odin3_status st = odin3_vec_reserve(ties, count);
+    for (uint32_t k = 0; st == ODIN3_OK && k < count; k++) {
         lm_tie *tie = odin3_vec_push(ties); /* reserved: never NULL */
         *tie = (lm_tie){odin3_pin_net(lc->module, (odin3_pin_id){ypins.first.v + k}), result[k]};
     }
@@ -91,7 +91,10 @@ static odin3_status build_into(lm_ctx *lc, odin3_node_id src, const mul_shape *s
     const lm_pconn ports[] = {
         {"dataa", bus->a, sh->a}, {"datab", bus->b, sh->b}, {"result", bus->r, product}};
     odin3_node_id node = {0};
-    st = lm_new_node(lc, &(lm_node_req){LM_MULT, params, 5, ports, 3, "mul"}, &node);
+    st = lm_new_node(lc,
+                     &(lm_node_req){LM_MULT, params, sizeof params / sizeof params[0], ports,
+                                    sizeof ports / sizeof ports[0], "mul"},
+                     &node);
     return st == ODIN3_OK ? make_ties(lc, src, bus->r, product, ties) : st;
 }
 

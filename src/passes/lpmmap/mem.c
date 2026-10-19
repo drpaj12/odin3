@@ -17,7 +17,7 @@
 #include <inttypes.h>
 #include <string.h>
 
-enum { P_SIZE = 1, ABITS_MIN = 1 };
+enum { P_SIZE = 1, ABITS_MIN = 1, LM_SCALAR_NETS = 8 };
 
 typedef enum lm_verdict {
     LV_OK,
@@ -155,7 +155,7 @@ static odin3_status nets_make(lm_ctx *lc, const mem_model *mm, ram_nets *rn) {
     memset(rn, 0, sizeof *rn);
     odin3_vec_init(&rn->pool, sizeof(odin3_net_id));
     rn->awid = mm->abits > 0 ? mm->abits : ABITS_MIN;
-    size_t total = (size_t)2 * mm->width + rn->awid + 8U;
+    size_t total = (size_t)2 * mm->width + rn->awid + LM_SCALAR_NETS;
     odin3_status st = odin3_vec_reserve(&rn->pool, total);
     st = st == ODIN3_OK ? lm_net_array(&rn->pool, mm->width, &rn->q) : st;
     st = st == ODIN3_OK ? lm_net_array(&rn->pool, mm->width, &rn->gdata) : st;

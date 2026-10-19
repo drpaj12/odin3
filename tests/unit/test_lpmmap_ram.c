@@ -80,10 +80,15 @@ static void put(odin3_strbuf *out, const char *fmt, ...) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr(buf)));
 }
 
-static void put_cat(odin3_strbuf *out, const char *pin, const char *wire, uint32_t count) {
-    put(out, "    connect \\%s {", pin);
+typedef struct catref {
+    const char *pin;  /* the formal */
+    const char *wire; /* the wire repeated over the ports */
+} catref;
+
+static void put_cat(odin3_strbuf *out, catref ref, uint32_t count) {
+    put(out, "    connect \\%s {", ref.pin);
     for (uint32_t i = 0; i < count; i++) {
-        put(out, " \\%s", wire);
+        put(out, " \\%s", ref.wire);
     }
     put(out, " }\n");
 }
@@ -108,10 +113,15 @@ static void decl(odin3_strbuf *out, const memcase *mc) {
     }
 }
 
-static void bits(odin3_strbuf *out, const char *name, uint32_t n, uint32_t mask) {
-    put(out, "    parameter \\%s %" PRIu32 "'", name, n);
-    for (uint32_t i = n; i > 0; i--) {
-        put(out, "%c", ((mask >> (i - 1)) & 1U) != 0 ? '1' : '0');
+typedef struct bitspec {
+    uint32_t count;
+    uint32_t mask;
+} bitspec;
+
+static void bits(odin3_strbuf *out, const char *name, bitspec spec) {
+    put(out, "    parameter \\%s %" PRIu32 "'", name, spec.count);
+    for (uint32_t i = spec.count; i > 0; i--) {
+        put(out, "%c", ((spec.mask >> (i - 1)) & 1U) != 0 ? '1' : '0');
     }
     put(out, "\n");
 }
@@ -128,12 +138,12 @@ static void params(odin3_strbuf *out, const memcase *mc) {
         "\n    parameter \\WR_PORTS %" PRIu32 "\n",
         size_of(mc), mc->offset, mc->abits, mc->width, mc->n_rd, mc->n_wr);
     uint32_t rmask = (1U << mc->n_rd) - 1U;
-    bits(out, "RD_CLK_ENABLE", mc->n_rd, mc->mode == R_SYNC ? rmask : 0);
-    bits(out, "RD_CLK_POLARITY", mc->n_rd, mc->rd_neg ? 0 : rmask);
-    bits(out, "RD_TRANSPARENT", mc->n_rd, mc->transparent ? rmask : 0);
+    bits(out, "RD_CLK_ENABLE", (bitspec){mc->n_rd, mc->mode == R_SYNC ? rmask : 0});
+    bits(out, "RD_CLK_POLARITY", (bitspec){mc->n_rd, mc->rd_neg ? 0 : rmask});
+    bits(out, "RD_TRANSPARENT", (bitspec){mc->n_rd, mc->transparent ? rmask : 0});
     uint32_t wmask = (1U << mc->n_wr) - 1U;
-    bits(out, "WR_CLK_ENABLE", mc->n_wr, wmask);
-    bits(out, "WR_CLK_POLARITY", mc->n_wr, mc->wr_neg ? 0 : wmask);
+    bits(out, "WR_CLK_ENABLE", (bitspec){mc->n_wr, wmask});
+    bits(out, "WR_CLK_POLARITY", (bitspec){mc->n_wr, mc->wr_neg ? 0 : wmask});
     if (mc->init) {
         uint32_t total = size_of(mc) * mc->width;
         put(out, "    parameter \\INIT %" PRIu32 "'1", total);
@@ -146,11 +156,10 @@ static void params(odin3_strbuf *out, const memcase *mc) {
     }
 }
 
-static void connects(odin3_strbuf *out, const memcase *mc) {
+static void connect_read_ctl(odin3_strbuf *out, const memcase *mc) {
     const char *rclk = mc->rd_clk2 ? "clk2" : "clk";
-    const char *raddr = mc->same_addr ? "wa" : "ra";
     if (mc->mode == R_SYNC) {
-        put_cat(out, "RD_CLK", rclk, mc->n_rd);
+        put_cat(out, (catref){"RD_CLK", rclk}, mc->n_rd);
     } else {
         put(out, "    connect \\RD_CLK {");
         for (uint32_t i = 0; i < mc->n_rd; i++) {
@@ -163,25 +172,30 @@ static void connects(odin3_strbuf *out, const memcase *mc) {
         put(out, mc->mode == R_SYNC && mc->en_var ? " \\ren" : " 1'1");
     }
     put(out, " }\n");
-    if (mc->abits > 0) {
-        put_cat(out, "RD_ADDR", raddr, mc->n_rd);
-        put_cat(out, "WR_ADDR", "wa", mc->n_wr);
-    } else {
-        put(out, "    connect \\RD_ADDR { }\n    connect \\WR_ADDR { }\n");
-    }
+}
+
+static void connect_read(odin3_strbuf *out, const memcase *mc) {
+    const char *raddr = mc->same_addr ? "wa" : "ra";
+    connect_read_ctl(out, mc);
+    put_cat(out, (catref){"RD_ADDR", raddr}, mc->abits > 0 ? mc->n_rd : 0);
     if (mc->n_rd == 0) {
         put(out, "    connect \\RD_DATA { }\n");
     } else {
-        put(out, "    connect \\RD_DATA %s",
-            mc->mode == R_DFF || mc->mode == R_DFFE_VAR ? "\\rd\n" : "\\q\n");
+        const char *wire = mc->mode == R_DFF || mc->mode == R_DFFE_VAR ? "\\rd\n" : "\\q\n";
+        put(out, "    connect \\RD_DATA %s", wire);
     }
-    put_cat(out, "WR_CLK", mc->wr_neg ? "clk" : "clk", mc->n_wr);
+}
+
+static void connects(odin3_strbuf *out, const memcase *mc) {
+    connect_read(out, mc);
+    put_cat(out, (catref){"WR_ADDR", "wa"}, mc->abits > 0 ? mc->n_wr : 0);
+    put_cat(out, (catref){"WR_CLK", "clk"}, mc->n_wr);
     put(out, "    connect \\WR_EN {");
     for (uint32_t i = 0; i < mc->n_wr * mc->width; i++) {
         put(out, mc->split_en && i == 0 ? " \\we2" : " \\we");
     }
     put(out, " }\n");
-    put_cat(out, "WR_DATA", "wd", mc->n_wr);
+    put_cat(out, (catref){"WR_DATA", "wd"}, mc->n_wr);
     put(out, "  end\n");
 }
 
@@ -218,11 +232,15 @@ typedef struct snap {
     odin3_net_id wd[16], wa[8], ra[8], q[16], we, clk;
 } snap;
 
-static void port_net(const odin3_module *mod, odin3_node_id node, uint32_t port, uint32_t bit,
-                     odin3_net_id *out) {
-    odin3_pinslice pins = odin3_node_port(mod, node, port);
-    *out = bit < pins.count ? odin3_pin_net(mod, (odin3_pin_id){pins.first.v + bit})
-                            : (odin3_net_id){0};
+typedef struct pinref {
+    uint32_t port;
+    uint32_t bit;
+} pinref;
+
+static odin3_net_id mem_pin(const odin3_module *mod, odin3_node_id node, pinref ref) {
+    odin3_pinslice pins = odin3_node_port(mod, node, ref.port);
+    return ref.bit < pins.count ? odin3_pin_net(mod, (odin3_pin_id){pins.first.v + ref.bit})
+                                : (odin3_net_id){0};
 }
 
 /* The nets of the `$mem`'s data pins before the run. */
@@ -232,15 +250,15 @@ static void snapshot(const pb_result *res, const memcase *mc, snap *sn) {
     memset(sn, 0, sizeof *sn);
     odin3_node_id mem = lm_nth(res->module, "$mem", 0);
     for (uint32_t i = 0; i < mc->width; i++) {
-        port_net(res->module, mem, MP_WR_DATA, i, &sn->wd[i]);
-        port_net(res->module, mem, MP_RD_DATA, i, &sn->q[i]);
+        sn->wd[i] = mem_pin(res->module, mem, (pinref){MP_WR_DATA, i});
+        sn->q[i] = mem_pin(res->module, mem, (pinref){MP_RD_DATA, i});
     }
     for (uint32_t i = 0; i < mc->abits; i++) {
-        port_net(res->module, mem, MP_WR_ADDR, i, &sn->wa[i]);
-        port_net(res->module, mem, MP_RD_ADDR, i, &sn->ra[i]);
+        sn->wa[i] = mem_pin(res->module, mem, (pinref){MP_WR_ADDR, i});
+        sn->ra[i] = mem_pin(res->module, mem, (pinref){MP_RD_ADDR, i});
     }
-    port_net(res->module, mem, MP_WR_EN, 0, &sn->we);
-    port_net(res->module, mem, MP_WR_CLK, 0, &sn->clk);
+    sn->we = mem_pin(res->module, mem, (pinref){MP_WR_EN, 0});
+    sn->clk = mem_pin(res->module, mem, (pinref){MP_WR_CLK, 0});
 }
 
 static bool is_const(const odin3_module *mod, odin3_net_id net, odin3_const value) {
@@ -286,6 +304,24 @@ static void test_r2_single_port(void) {
     pb_free(&res);
 }
 
+/* Every bit of each listed port of blk is the constant `value`. */
+typedef struct portset {
+    const char *const *names;
+    size_t count;
+} portset;
+
+static void expect_ports_const(const pb_result *res, odin3_node_id blk, portset set,
+                               odin3_const value) {
+    for (size_t i = 0; i < set.count; i++) {
+        uint32_t width = lm_port_width(res->module, blk, set.names[i]);
+        for (uint32_t bit = 0; bit < width; bit++) {
+            TEST_ASSERT_TRUE_MESSAGE(
+                is_const(res->module, lm_pin_net(res->module, blk, set.names[i], bit), value),
+                set.names[i]);
+        }
+    }
+}
+
 static void test_r3_tie_offs(void) {
     pb_result res;
     build(k_sp, &res);
@@ -295,22 +331,8 @@ static void test_r3_tie_offs(void) {
                                        "clocken1", "clocken2", "clocken3"};
     static const char *const zeros[] = {"aclr0",  "aclr1",  "addressstall_a", "addressstall_b",
                                         "wren_b", "rden_b", "data_b",         "address_b"};
-    for (size_t i = 0; i < sizeof ones / sizeof ones[0]; i++) {
-        uint32_t w = lm_port_width(res.module, blk, ones[i]);
-        for (uint32_t b = 0; b < w; b++) {
-            TEST_ASSERT_TRUE_MESSAGE(
-                is_const(res.module, lm_pin_net(res.module, blk, ones[i], b), ODIN3_CONST_1),
-                ones[i]);
-        }
-    }
-    for (size_t i = 0; i < sizeof zeros / sizeof zeros[0]; i++) {
-        uint32_t w = lm_port_width(res.module, blk, zeros[i]);
-        for (uint32_t b = 0; b < w; b++) {
-            TEST_ASSERT_TRUE_MESSAGE(
-                is_const(res.module, lm_pin_net(res.module, blk, zeros[i], b), ODIN3_CONST_0),
-                zeros[i]);
-        }
-    }
+    expect_ports_const(&res, blk, (portset){ones, sizeof ones / sizeof ones[0]}, ODIN3_CONST_1);
+    expect_ports_const(&res, blk, (portset){zeros, sizeof zeros / sizeof zeros[0]}, ODIN3_CONST_0);
     pb_free(&res);
 }
 
@@ -333,6 +355,14 @@ static void test_r3_params(void) {
 
 /* --- R-4: simple dual port ------------------------------------------------------------------ */
 
+/* The first `count` bits of port `port` of blk are the nets src[0..count). */
+static void expect_nets(const pb_result *res, odin3_node_id blk, const char *port,
+                        const odin3_net_id *src, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(src[i].v, lm_pin_net(res->module, blk, port, i).v, port);
+    }
+}
+
 static void test_r2_simple_dual(void) {
     pb_result res;
     build(k_sdp, &res);
@@ -343,19 +373,14 @@ static void test_r2_simple_dual(void) {
     TEST_ASSERT_EQUAL_STRING("DUAL_PORT", lm_param_str(res.module, blk, "operation_mode"));
     TEST_ASSERT_EQUAL_STRING("CLOCK0", lm_param_str(res.module, blk, "address_reg_b"));
     TEST_ASSERT_EQUAL_STRING("UNREGISTERED", lm_param_str(res.module, blk, "outdata_reg_b"));
-    for (uint32_t i = 0; i < 8; i++) {
-        TEST_ASSERT_EQUAL_UINT32(sn.wd[i].v, lm_pin_net(res.module, blk, "data_a", i).v);
-        TEST_ASSERT_EQUAL_UINT32(sn.q[i].v, lm_pin_net(res.module, blk, "q_b", i).v);
-        TEST_ASSERT_TRUE(
-            is_const(res.module, lm_pin_net(res.module, blk, "data_b", i), ODIN3_CONST_0));
-    }
-    for (uint32_t i = 0; i < 4; i++) {
-        TEST_ASSERT_EQUAL_UINT32(sn.wa[i].v, lm_pin_net(res.module, blk, "address_a", i).v);
-        TEST_ASSERT_EQUAL_UINT32(sn.ra[i].v, lm_pin_net(res.module, blk, "address_b", i).v);
-    }
+    expect_nets(&res, blk, "data_a", sn.wd, 8);
+    expect_nets(&res, blk, "q_b", sn.q, 8);
+    expect_nets(&res, blk, "address_a", sn.wa, 4);
+    expect_nets(&res, blk, "address_b", sn.ra, 4);
+    static const char *const zeros[] = {"data_b", "wren_b"};
+    expect_ports_const(&res, blk, (portset){zeros, 2}, ODIN3_CONST_0);
     TEST_ASSERT_TRUE(lm_port_open(res.module, blk, "q_a"));
     TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "rden_b", 0), ODIN3_CONST_1));
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "wren_b", 0), ODIN3_CONST_0));
     pb_free(&res);
 }
 
@@ -503,6 +528,18 @@ static void test_f1_family(void) {
 
 /* --- R-8 ------------------------------------------------------------------------------------ */
 
+/* The attribute `lpmmap` of blk is expected. */
+static void expect_lpmmap_attr(const pb_result *res, odin3_node_id blk, const char *expected) {
+    uint32_t key = 0;
+    TEST_ASSERT_TRUE(
+        odin3_strtab_find(odin3_design_strtab(res->design), odin3_bytes_cstr("lpmmap"), &key));
+    const odin3_value *val =
+        odin3_attr_get(res->module, (odin3_objref){ODIN3_OBJ_NODE, blk.v}, key);
+    TEST_ASSERT_NOT_NULL(val);
+    TEST_ASSERT_EQUAL_STRING(expected,
+                             odin3_strtab_get(odin3_design_strtab(res->design), val->str));
+}
+
 static void test_r8_prov_and_attr(void) {
     static const memcase *const cases[] = {&k_sp, &k_sdp};
     static const char *const roles[] = {"altsyncram:sp", "altsyncram:sdp"};
@@ -517,24 +554,17 @@ static void test_r8_prov_and_attr(void) {
         TEST_ASSERT_NOT_NULL(rec);
         TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
         TEST_ASSERT_EQUAL_UINT32(source.v, rec->parents.ids[0].v);
-        uint32_t key = 0;
-        TEST_ASSERT_TRUE(
-            odin3_strtab_find(odin3_design_strtab(res.design), odin3_bytes_cstr("lpmmap"), &key));
-        const odin3_value *val =
-            odin3_attr_get(res.module, (odin3_objref){ODIN3_OBJ_NODE, blk.v}, key);
-        TEST_ASSERT_NOT_NULL(val);
-        TEST_ASSERT_EQUAL_STRING(roles[i],
-                                 odin3_strtab_get(odin3_design_strtab(res.design), val->str));
+        expect_lpmmap_attr(&res, blk, roles[i]);
         pb_free(&res);
     }
 }
 
 static void oom_sweep(memcase mc, const char *type_after) {
     int mapped = 0;
-    for (int n = 0; n < OOM_LIMIT && mapped == 0; n++) {
+    for (int fail_at = 0; fail_at < OOM_LIMIT && mapped == 0; fail_at++) {
         pb_result res;
         build(mc, &res);
-        odin3_util_set_alloc_fail_after(n);
+        odin3_util_set_alloc_fail_after(fail_at);
         odin3_status st = odin3_lpmmap_run(&res.ctx, res.design, NULL, NULL);
         odin3_util_set_alloc_fail_after(-1);
         if (st == ODIN3_OK) {

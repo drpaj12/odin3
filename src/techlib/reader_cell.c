@@ -354,8 +354,14 @@ odin3_status odin3_rd_st_cell(odin3_reader *rd, odin3_rd_span rest) {
 /* --- param and ports ----------------------------------------------------------------------- */
 
 /* An int parameter's default: a constant integer expression. */
-static odin3_status param_int_default(odin3_reader *rd, odin3_rd_span name, odin3_rd_span rest,
-                                      int64_t *value) {
+typedef struct param_text {
+    odin3_rd_span name;
+    odin3_rd_span rest; /* the text after the kind word */
+} param_text;
+
+static odin3_status param_int_default(odin3_reader *rd, const param_text *text, int64_t *value) {
+    odin3_rd_span name = text->name;
+    odin3_rd_span rest = text->rest;
     const odin3_expr *expr = NULL;
     odin3_status st = odin3_rd_expr(rd, rest, &expr);
     if (st != ODIN3_OK) {
@@ -410,7 +416,7 @@ odin3_status odin3_rd_st_param(odin3_reader *rd, odin3_rd_span rest) {
                             "expected the parameter kind int or string");
     }
     odin3_rd_param param = {id, !is_int, 0, 0};
-    st = is_int ? param_int_default(rd, name, rest, &param.dflt)
+    st = is_int ? param_int_default(rd, &(param_text){name, rest}, &param.dflt)
                 : param_string_default(rd, rest, &param.dflt_str);
     odin3_rd_param *slot = st == ODIN3_OK ? odin3_vec_push(&rd->cell.params) : NULL;
     if (st == ODIN3_OK && slot == NULL) {

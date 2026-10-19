@@ -172,10 +172,11 @@ odin3_status lm_map_mult(lm_ctx *lc, odin3_node_id src);
 odin3_status lm_map_compare(lm_ctx *lc, odin3_node_id src);
 odin3_status lm_map_mem(lm_ctx *lc, odin3_node_id src);
 
-/* Appends n open (none) nets to v and puts the address of the first in *first; the pointer is valid
- * until v grows again, so reserve all of a builder's arrays before taking any pointer. NO_MEMORY.
+/* Appends count open (none) nets to vec and puts the address of the first in *first; the pointer is
+ * valid until vec grows again, so reserve all of a builder's arrays before taking any pointer.
+ * NO_MEMORY.
  */
-odin3_status lm_net_array(odin3_vec *v, uint32_t n, odin3_net_id **first);
+odin3_status lm_net_array(odin3_vec *vec, uint32_t count, odin3_net_id **first);
 
 /* Runs build(lc, src, ties) as one transaction: builds, then commits, or aborts on failure. */
 typedef odin3_status (*lm_build_fn)(lm_ctx *lc, odin3_node_id src, odin3_vec *ties);
