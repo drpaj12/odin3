@@ -39,6 +39,9 @@ for target in targets:
         out = text.replace("addr[5]=unconn", "addr[5]=n5")
     with open(target, "w", encoding="utf-8") as fh:
         fh.write(out)
+if "rc3" in name:
+    sys.stderr.write("abc: late failure\\n")
+    sys.exit(3)
 """
 
 FAKE_EQUIV = """#!{python}
@@ -121,8 +124,8 @@ class AbcEquivTest(unittest.TestCase):
         self.assertEqual(odin3_call["argv"], [self.odin3, "-p", script])
         (equiv_call,) = self.calls("equiv")
         self.assertEqual(equiv_call["argv"], [
-            self.equiv, "--blackbox", "adder,multiply,single_port_ram,dual_port_ram", "--timeout",
-            "600", f"{work}/before.blif", f"{work}/after.blif"])
+            self.equiv, "--blackbox", "adder,multiply,single_port_ram,dual_port_ram",
+            "--allow-undriven", "--timeout", "600", f"{work}/before.blif", f"{work}/after.blif"])
         self.assertRegex(out, r"one\.blif equivalent [0-9.]+ s\n")
 
     def test_the_default_odin3_script(self) -> None:
@@ -210,6 +213,24 @@ class AbcEquivTest(unittest.TestCase):
         self.assertRegex(out, r"one\.blif equivalent")
         self.assertEqual(len(self.calls("odin3")), 1)
         self.assertEqual(len(self.calls("equiv")), 1)
+
+    def test_a_failing_odin3_does_not_reuse_the_files_of_an_earlier_run(self) -> None:
+        good = self.blif("a/broken.blif", design_text())
+        work = self.keep / "0000-broken"
+        work.mkdir(parents=True)
+        for name in ("before.blif", "after.blif"):
+            (work / name).write_text(design_text(), encoding="utf-8")
+        code, out, _ = self.run_tool("--step", "abc", good)
+        self.assertEqual(code, 1)
+        self.assertRegex(out, r"broken\.blif odin3-error")
+        self.assertFalse((work / "after.blif").exists())
+
+    def test_a_nonzero_odin3_exit_is_not_mapped(self) -> None:
+        design = self.blif("a/rc3.blif", design_text())
+        code, out, _ = self.run_tool("--step", "abc", design)
+        self.assertEqual(code, 1)
+        self.assertRegex(out, r"rc3\.blif odin3-error")
+        self.assertEqual(self.calls("equiv"), [])
 
     def test_step_equiv_with_a_missing_file_is_an_error(self) -> None:
         design = self.blif("one.blif", design_text())

@@ -176,6 +176,8 @@ def run_odin3(cfg: Config, design: Path, out: Path) -> Outcome:
     if re.search(r"[;\s]", str(design)) or re.search(r"[;\s]", str(out)):
         return Outcome("error", 0.0, "a path with a blank or ';' cannot go in an odin3 -p script")
     out.mkdir(parents=True, exist_ok=True)
+    for stale in ("before.blif", "after.blif", "after.vtr.blif"):
+        (out / stale).unlink(missing_ok=True)  # a reused --keep dir must not pass an old run off
     argv = [cfg.odin3, "-p", odin3_script(cfg, design, out)]
     try:
         proc = subprocess.run(argv, cwd=REPO_ROOT, env=child_env(cfg, True), capture_output=True,
@@ -186,7 +188,7 @@ def run_odin3(cfg: Config, design: Path, out: Path) -> Outcome:
         return Outcome("error", time.monotonic() - start, f"cannot run {cfg.odin3}: {exc}")
     secs = time.monotonic() - start
     log = proc.stdout + proc.stderr
-    if all(p.is_file() for p in wanted):
+    if all(p.is_file() for p in wanted) and proc.returncode == 0:
         return Outcome("mapped", secs)
     if VIEWS_TEXT in log:
         return Outcome("views", secs, log.strip().splitlines()[-1])
@@ -225,8 +227,8 @@ def run_equiv(cfg: Config, out: Path) -> Outcome:
     missing = [n for n in names if not (out / n).is_file()]
     if missing:
         return Outcome("error", 0.0, f"{out}: missing {', '.join(missing)}")
-    argv = [cfg.equiv_check, "--blackbox", BLACKBOX_MODELS, "--timeout", str(cfg.timeout),
-            str(out / "before.blif"), str(out / "after.blif")]
+    argv = [cfg.equiv_check, "--blackbox", BLACKBOX_MODELS, "--allow-undriven", "--timeout",
+            str(cfg.timeout), str(out / "before.blif"), str(out / "after.blif")]
     try:
         proc = subprocess.run(argv, cwd=REPO_ROOT, env=child_env(cfg, False), capture_output=True,
                               text=True, timeout=cfg.timeout + EQUIV_SLACK, check=False)

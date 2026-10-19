@@ -623,15 +623,14 @@ SH
     ;;
 abc_unconn_ch_intrinsics)
     # abc_unconn_ch_intrinsics (3D Review Focus 1): every hard-block pin on unconn before the pass
-    # is still on unconn after it, in write_blif --vtr's text. Skipped (77) without the golden or
-    # without write_blif --vtr.
+    # is still on unconn after it, in write_blif --vtr's text. Skipped (77) only without the
+    # golden, which lives outside the repo: CI has none, so CI skips this case (the dev machine
+    # and the controller run it). write_blif --vtr exists (3E); a failing probe is a failure.
     golden=$HOME/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/vtr/ch_intrinsics/ch_intrinsics.parmys.blif
     [[ -f $golden ]] || { echo "test_cli $case_name: SKIP: no $golden"; exit 77; }
     repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-    if ! "$odin3" -p "read_techlib $repo/lib/vtr.o3lib; read_blif $golden; write_blif --vtr $work/probe.blif" >/dev/null 2>&1; then
-        echo "test_cli $case_name: SKIP: write_blif --vtr is not available"
-        exit 77
-    fi
+    "$odin3" -p "read_techlib $repo/lib/vtr.o3lib; read_blif $golden; write_blif --vtr $work/probe.blif" \
+        >"$work/out" 2>"$work/err" || fail "the write_blif --vtr probe on the golden failed"
     "$odin3" -p "read_techlib $repo/lib/vtr.o3lib; read_blif $golden; abc --lut 6; write_blif --vtr $work/W.blif" \
         >"$work/out" 2>"$work/err" || fail "odin3 abc on ch_intrinsics failed"
     python3 -I - "$repo" "$work/W.blif" "$golden" <<'PY' || fail "the unconn pins changed"

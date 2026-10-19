@@ -258,8 +258,9 @@ spec §5.2. An entry declares:
 ID, so IDs never move. IDs 0–52 are 1B's set (structural and constant types, the word cells, the
 bit cells, `$sop`); 53–61 are 2D's IR change A (`$neg` … `$pow`), 62 is IR change B (`$proc`,
 IR-19), 63–73 are 2E's IR change D (2E spec §13): the word flip-flops and latches `$adffe
-$sdffe $sdffce $aldff $aldffe $dffsr $dffsre $dlatch $adlatch $dlatchsr $sr` (`ff.c`), and 74 is
-3D's `$lut` (`lut.c`; its ID is named only through `odin3_lut_builtin_index`), 75 types in all.
+$sdffe $sdffce $aldff $aldffe $dffsr $dffsre $dlatch $adlatch $dlatchsr $sr` (`ff.c`), and index 74
+is 3D's `$lut` (`lut.c`; found by `odin3_celltype_find` on `$lut`, never by number: a design's slot 0 is
+reserved, so a built-in's cell-type ID is its index + 1), 75 types in all.
 IR change D follows Yosys 0.55 simlib: its ports in simlib's order, `WIDTH` first (INT, ≥ 1),
 polarities INT 0/1, every `*_VALUE` BITS of `WIDTH` bits; `CLK`, `EN`, `ARST`, `SRST` and
 `ALOAD` are 1 bit, `D`, `Q`, `AD`, `SET` and `CLR` are `WIDTH` bits, and `Q` is the only output.
@@ -303,7 +304,7 @@ wire pages, arena, pin pool, vector capacities and name and attribute maps; and 
 strtab, provenance store (tombstones included), source manager, arena (local cell types) and
 cell-type table. Dead objects count until compact frees them; AST stores are added by the caller
 (`odin3_ast_bytes_reserved`). It changes nothing and is O(modules). It is the measure of the one
-design-wide byte budget (`src/passes/budget.h`: 60% of physical memory, shared by 2E's `proc` and
+design-wide byte budget (`src/passes/budget.h`: the smaller of 60% of physical memory and the cgroup's `memory.max`, shared by 2E's `proc` and
 2F's opt passes, 2E §16, 2F §19), backed by the byte accessors of `u64map`, `idindex`, `strtab`
 and the provenance store.
 
