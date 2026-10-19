@@ -91,6 +91,7 @@ class Verdict:
 
     outcome: str
     reason: str = ""
+    instances: int = 0  # the ``$`` instances written and read back as themselves
 
 
 # --- pure helpers (unit-tested) -------------------------------------------------------------
@@ -429,7 +430,9 @@ def judge_text(
     if problem:
         return Verdict("fail:instances", problem)
     same = strip_comments(text2) == strip_comments(text3)
-    return Verdict("ok", "text fixpoint" if same else "census fixpoint")
+    count = len(instances(paths["W.v"].read_text(encoding="utf-8")))
+    note = "text fixpoint" if same else "census fixpoint"
+    return Verdict("ok", f"{note}, {count} $ instances", count)
 
 
 # --- the command line -------------------------------------------------------------------------
@@ -460,6 +463,7 @@ def execute(args: argparse.Namespace, work: Path) -> int:
     cfg = Config(args.odin3, args.yosys, args.scripts, args.lib, args.lpm_script, cap, args.abc)
     table = parse_expect(args.expect.read_text(encoding="utf-8")) if args.expect else {}
     worst, unproven, compared, excepted, unproven_n = EXIT_OK, False, 0, 0, 0
+    read_back = 0
     for level in levels:
         for number, design in enumerate(args.files):
             run_dir = work / f"{level}-{number:04d}"
@@ -469,6 +473,7 @@ def execute(args: argparse.Namespace, work: Path) -> int:
             passed, word = judge_expected(verdict, listed)
             detail = f" ({verdict.reason})" if verdict.reason else ""
             print(f"{TOOL}: {level} {design.name}: {word}{detail}", flush=True)
+            read_back += verdict.instances
             compared += verdict.outcome in ("ok", "fail:equivalent")
             unproven_n += verdict.outcome == "unproven"
             excepted += listed is not None and passed
@@ -478,7 +483,8 @@ def execute(args: argparse.Namespace, work: Path) -> int:
                 worst = EXIT_FAIL
     total = len(levels) * len(args.files)
     print(
-        f"{TOOL}: compared {compared} of {total} ({unproven_n} unproven, {excepted} excepted)",
+        f"{TOOL}: compared {compared} of {total} ({unproven_n} unproven, {excepted} excepted); "
+        f"{read_back} $ instances read back as cells",
         flush=True,
     )
     return worst if worst else (EXIT_UNPROVEN if unproven else EXIT_OK)

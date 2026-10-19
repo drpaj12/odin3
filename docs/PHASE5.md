@@ -130,3 +130,23 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
    `lpm-check` has the BLIF leg (write, read, write identical, `netlist-compare` identical with
    `.blackbox` stubs from the `.o3lib`). Docs: 1C amendment, 3E note, `writer.h`, `reader.h`,
    `attrs.h`. The IR is not changed.
+9. **5.2 `read_verilog -icells` implemented** (agent defaults, 2026-10-20; Peter may override; spec
+   `docs/specs/2026-10-20-5.2-icells-design.md` v1.1 section 12 has the eleven questions with
+   recommendations, section 13 what the implementation changed; plan
+   `docs/plans/2026-10-20-5.2-icells-plan.md`). No IR, ABI, ADR or Verilog-without-`-icells` change.
+   - the option is `-icells` and `--icells`; an instance of a `$` name is that registered cell (item 0
+     of EL-6, before the module chain, so no stub or module shadows it; an info line when one exists);
+     every registered type but module, port and process may be instantiated, not only the ones the
+     writer emits as instances; an unregistered `$` name is an error, also with `--auto-blackbox`;
+     refused with `--lib` and `--parse-only`;
+   - widths are strict for these instances (an error, not the resize warning), parameter kinds are
+     checked, a string given to a BITS parameter is its bytes and `""` the empty value (the writer's
+     spelling), and the type's `verify` failure is located on the instance;
+   - the round trip is `tools/icells-check`: the RTLIL Checker (word, LPM) or `equiv-check` on BLIF
+     (gate, LUT), the census fixpoint, and the instance comparison; all 68 micros and the per-cell
+     designs are CTests (about 6 minutes in all in Debug), nothing in heavy-run;
+   - documented exceptions, none silent (spec X-9 to X-12, `tests/icells/expect.txt`): `always`
+     storage has no text fixpoint; three micros need `lib/vtr.o3lib`; `$pow` is unproven by Yosys at
+     the word and LPM levels and `lower` cannot take it;
+   - `lpm-check` keeps `noroundtrip altsyncram_soft.v` (the text fixpoint of X-9); `icells-check`
+     covers that micro at the LPM level.

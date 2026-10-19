@@ -140,10 +140,10 @@ class MainTests(unittest.TestCase):
         return code, out
 
     def test_ok(self) -> None:
-        code, out = self.run_with(ic.Verdict("ok", "text fixpoint"))
+        code, out = self.run_with(ic.Verdict("ok", "text fixpoint", 4))
         self.assertEqual(code, ic.EXIT_OK)
         self.assertIn("word d.v: ok (text fixpoint)", out)
-        self.assertIn("compared 1 of 1 (0 unproven, 0 excepted)", out)
+        self.assertIn("compared 1 of 1 (0 unproven, 0 excepted); 4 $ instances", out)
 
     def test_leg_failure_is_exit_1(self) -> None:
         code, out = self.run_with(ic.Verdict("fail:instances", "instance x changed"))
