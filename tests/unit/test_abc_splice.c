@@ -24,6 +24,7 @@ static odin3_design *design;
 static odin3_module *mod;
 static asim_trace before;
 static bool traced;
+static const char *exchange_env; /* ODIN3_ABC_EXCHANGE for the cases being run: "aig" or NULL */
 
 enum { OOM_LIMIT = 4000 };
 
@@ -37,7 +38,11 @@ void setUp(void) {
     afx_path(tmp, "tmp");
     afx_mkdir(tmp);
     TEST_ASSERT_EQUAL_INT(0, setenv("TMPDIR", tmp, 1));
-    TEST_ASSERT_EQUAL_INT(0, unsetenv("ODIN3_ABC_EXCHANGE"));
+    if (exchange_env != NULL) {
+        TEST_ASSERT_EQUAL_INT(0, setenv("ODIN3_ABC_EXCHANGE", exchange_env, 1));
+    } else {
+        TEST_ASSERT_EQUAL_INT(0, unsetenv("ODIN3_ABC_EXCHANGE"));
+    }
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
     odin3_module_id mid = {0};
@@ -666,8 +671,7 @@ static void test_invalid_arguments(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_abc_canonical_const(NULL, 0, &net));
 }
 
-int main(void) {
-    UNITY_BEGIN();
+static void run_cases(void) {
     RUN_TEST(test_fresh_net);
     RUN_TEST(test_shared_driver);
     RUN_TEST(test_special_port_pair_buffered);
@@ -694,5 +698,13 @@ int main(void) {
     RUN_TEST(test_cleanup_nets_and_wires);
     RUN_TEST(test_oom_sweep);
     RUN_TEST(test_invalid_arguments);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    exchange_env = NULL; /* the BLIF exchange (the default) */
+    run_cases();
+    exchange_env = "aig"; /* every case again on the in-memory exchange (3D-7) */
+    run_cases();
     return UNITY_END();
 }

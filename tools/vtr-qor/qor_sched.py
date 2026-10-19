@@ -1646,6 +1646,9 @@ def _fcheck_outcome(job: Job, cmd: Command, opts: RunOptions, scope: ScopeInfo) 
         return "error"
     capped = outcome.returncode != 0 and qor_heavy.oom_kills(scope) > oom_before
     verdict = qor_legs.fcheck_verdict(outcome.returncode, capped, _read_log(cmd.stdout))
+    if verdict == "untested":
+        _emit(opts, f"{_label(job)}: fcheck untested (the RTL leaves the mismatching bits "
+                    f"undefined); see {cmd.stdout}")
     if verdict == "error":
         _emit(opts, f"{_label(job)}: fcheck could not compare (exit {outcome.returncode}); "
                     f"see {cmd.stdout}")
@@ -2024,7 +2027,8 @@ def _exit_code(results: Sequence[JobResult], stop_code: int,
     """Plan, Global Constraints: 5 stopped for disk (or the stopping error's code), 1 a failure
     (a job skipped for its Parmys golden, E-QH6, counts), 3 capped or timeout without a
     failure, else 0. A failing ``--fcheck`` (``fail``, ``error``) counts as a failure and a
-    ``capped`` or ``timeout`` one as incomplete (review M4)."""
+    ``capped``, ``timeout`` or ``untested`` one as incomplete (review M4; an untested design is
+    never a pass, and not a failure either)."""
     if stop_code != EXIT_OK:
         return stop_code
     statuses = {result.status for result in results}
@@ -2033,8 +2037,8 @@ def _exit_code(results: Sequence[JobResult], stop_code: int,
     golden_skipped = any(r.status == SKIPPED and r.job.skip_reason for r in results)
     if FAILED in statuses or ABORTED in statuses or golden_skipped:
         return EXIT_FAILED
-    if CAPPED in statuses or TIMEOUT in statuses or any(v in ("capped", "timeout")
-                                                        for v in fchecks):
+    if CAPPED in statuses or TIMEOUT in statuses or any(
+            v in ("capped", "timeout", "untested") for v in fchecks):
         return EXIT_INCOMPLETE
     return EXIT_OK
 

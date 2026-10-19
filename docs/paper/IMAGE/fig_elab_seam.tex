@@ -9,7 +9,7 @@
        {Verilog-2005\\files\\[-1pt]\odinsub{preprocessed, 2B}};
   \node[store, built, text width=14mm, minimum height=14mm] (ps) at (2.95, 0)
        {parsed\\store\\[-1pt]\odinsub{form \odintt{PARSED}}\\[-2pt]\odinsub{2C}};
-  \node[stage, inprog] (s1) at (5.84, 0)
+  \node[stage, built] (s1) at (5.84, 0)
        {\textbf{stage 1} (Verilog only)\\[1pt]
         \scriptsize module lookup, top selection\\
         \scriptsize \odintt{\#()}, \odintt{defparam}, project params\\
@@ -17,13 +17,13 @@
         \scriptsize \odintt{generate}\\
         \scriptsize constant functions\\
         \scriptsize implicit nets};
-  \node[store, spec, emph, text width=30mm, inner xsep=4pt, inner ysep=0pt, minimum height=20mm] (es) at (9.81, 0)
+  \node[store, built, emph, text width=30mm, inner xsep=4pt, inner ysep=0pt, minimum height=20mm] (es) at (9.81, 0)
        {\textbf{elaborated store}\\[-1pt]\odinsub{the seam, form}\\[-2pt]\odinsub{\odintt{ELABORATED}}\\[1pt]
         \scriptsize no \odintt{generate} or \odintt{defparam}\\
         \scriptsize constants resolved\\
         \scriptsize one \odintt{MODULE} per\\
         \scriptsize specialisation};
-  \node[stage, spec] (s2) at (13.78, 0)
+  \node[stage, built] (s2) at (13.78, 0)
        {\textbf{stage 2} (every front end)\\[1pt]
         \scriptsize binding (symbol table)\\
         \scriptsize Yosys widths and signedness\\
@@ -37,7 +37,7 @@
   \node[box, light, text width=40mm, align=center] (chk) at (9.81, 2.0)
        {\odintt{odin3\_ast\_check}, rule 7\\\odinsub{enforces the elaborated subset}};
   \node[box, planned, text width=36mm] (sl) at (9.81, -2.35)
-       {slang adapter (C++)\\\odinsub{\odintt{odin3\_ast\_*} builders; Phase 5}};
+       {slang adapter (C++)\\\odinsub{\odintt{odin3\_ast\_*} builders; Phase 5, deferred}};
   \node[box, built, text width=19.5mm] (rt) at (16.94, -2.35)
        {\odintt{write\_rtlil}\\\odinsub{2D-1}};
   \node[box, external, text width=28mm] (yo) at (13.6, -2.35)
