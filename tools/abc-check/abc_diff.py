@@ -30,15 +30,21 @@ abc-equiv's file (``<path> <status> <reason>``): a listed design passes only wit
 status.  A path under ``~/odin3-ws/golden`` first needs ``qor_heavy.require_heavy()`` (point
 (m)): run through ``tools/heavy-run``.  Nothing is deleted.
 
-Exit codes (the project's): 0 every design passes (``equivalent`` or ``explain``, or a listed
-class), 1 a design ``differs`` (or a listed design passes: XPASS), 2 a tool error (usage, a run that
-did not finish, ``error``, ``views``, ``multiclock`` unlisted), 4 only ``unproven`` or ``timeout``
-designs failed (equiv-check's exit 4 is ``unproven``, absorbed only by a listing of
-``unproven``), 77 ABC is not available (``ODIN3_ABC`` names a missing file, or odin3 says the linked ABC is missing),
-every design skipped.  The plan said 0, 1, 2; exit code 3 (a crash) is not produced: a crashing
-odin3 is ``odin3-error``.  All three pairs (input~blif, input~aig, blif~aig) always run; the verdict
-is the worst of them (differs, timeout, unproven, error, multiclock), so a listed ``error`` on the
-input pairs cannot hide a ``differs`` of the two results.
+Exit codes (the project's):
+
+- 0: every design passes (``equivalent``, ``explain`` or a listed class).
+- 1: a design ``differs``, or a listed design passes (XPASS).
+- 2: a tool error (usage, a run that did not finish, ``error``, ``views`` or ``multiclock``
+  unlisted).
+- 4: only ``unproven`` or ``timeout`` designs failed (equiv-check's exit 4 is ``unproven``; only a
+  listing of ``unproven`` absorbs it).
+- 77: ABC is not available (``ODIN3_ABC`` names a missing file, or odin3 says the linked ABC is
+  missing) and every design was skipped.
+
+The plan said 0, 1, 2; exit code 3 (a crash) is not produced: a crashing odin3 is ``odin3-error``.
+All three pairs (input~blif, input~aig, blif~aig) always run; the verdict is the worst of them
+(differs, timeout, unproven, error, multiclock), so a listed ``error`` on the input pairs cannot
+hide a ``differs`` of the two results.
 """
 
 from __future__ import annotations
