@@ -247,6 +247,8 @@ add_library(odin3_core OBJECT
     src/frontends/arch/arch_xml.c
     src/frontends/arch/arch_models.c
     src/frontends/arch/arch_pb.c
+    src/frontends/arch/arch_lib.c
+    src/frontends/arch/arch_templates.c
     src/frontends/project/odin2.c
     src/frontends/verilog/preproc.c
     src/frontends/verilog/macro.c
@@ -1218,10 +1220,11 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_techlib_reader)
     odin3_add_unit_test(test_techlib_string_param)
     odin3_add_unit_test(test_arch_record)
-    foreach(_t IN ITEMS test_arch_models test_arch_pb)
+    foreach(_t IN ITEMS test_arch_models test_arch_pb test_arch_lib)
         odin3_add_unit_test(${_t})
         target_compile_definitions(${_t} PRIVATE
-            ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch")
+            ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     endforeach()
     # 5.1 Task 3: lib/lpm.o3lib and LPM-structured Verilog read back as registered cells.
     odin3_add_unit_test(test_lpm_lib)

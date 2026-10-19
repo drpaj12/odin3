@@ -21,7 +21,7 @@ static char g_warn[ARCH_TEST_MSG];  /* the first warning */
 static char g_info[ARCH_TEST_MSG];  /* the first info */
 static unsigned g_errors, g_warnings;
 
-static void arch_test_sink(odin3_log_level level, const char *msg, void *user) {
+static inline void arch_test_sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     if (level == ODIN3_LOG_ERROR && g_errors++ == 0) {
         (void)snprintf(g_msg, sizeof g_msg, "%s", msg);
@@ -32,19 +32,19 @@ static void arch_test_sink(odin3_log_level level, const char *msg, void *user) {
     }
 }
 
-static void arch_test_reset(void) {
+static inline void arch_test_reset(void) {
     g_msg[0] = g_warn[0] = g_info[0] = '\0';
     g_errors = g_warnings = 0;
     odin3_log_set_sink(arch_test_sink, NULL);
 }
 
-static void arch_test_done(void) {
+static inline void arch_test_done(void) {
     odin3_util_set_alloc_fail_after(-1);
     odin3_log_set_sink(NULL, NULL);
 }
 
 /* Parses text as the architecture `name` into arch. */
-static odin3_status arch_test_parse(odin3_arch *arch, const char *name, const char *text) {
+static inline odin3_status arch_test_parse(odin3_arch *arch, const char *name, const char *text) {
     const odin3_arch_src src = {name, odin3_bytes_cstr(text)};
     return odin3_arch_parse(arch, &src);
 }
@@ -63,7 +63,7 @@ static char *arch_test_load(const char *file) {
     return buf;
 }
 
-static odin3_status arch_test_parse_file(odin3_arch *arch, const char *file) {
+static inline odin3_status arch_test_parse_file(odin3_arch *arch, const char *file) {
     char *text = arch_test_load(file);
     odin3_status st = arch_test_parse(arch, file, text);
     free(text);
