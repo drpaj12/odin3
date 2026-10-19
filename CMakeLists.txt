@@ -170,6 +170,13 @@ add_library(odin3_core OBJECT
     src/passes/hardmap/mem.c
     src/passes/hardmap/mem_merge.c
     src/passes/hardmap/mem_plan.c
+    src/passes/lpmmap/register.c
+    src/passes/lpmmap/lpmmap.c
+    src/passes/lpmmap/lm_kit.c
+    src/passes/lpmmap/addsub.c
+    src/passes/lpmmap/mult.c
+    src/passes/lpmmap/compare.c
+    src/passes/lpmmap/mem.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -1203,6 +1210,10 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_techlib_string_param)
     # 5.1 Task 3: lib/lpm.o3lib and LPM-structured Verilog read back as registered cells.
     odin3_add_unit_test(test_lpm_lib)
+    odin3_add_unit_test(test_lpmmap_scaffold)
+    target_sources(test_lpmmap_scaffold PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_scaffold PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     target_sources(test_lpm_lib PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
     target_compile_definitions(test_lpm_lib PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
