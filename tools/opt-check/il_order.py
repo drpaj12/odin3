@@ -18,10 +18,13 @@ file). The walk, bit for bit as in C:
   walk meets a cell already entered.
 
 Cells are placed in the slots the cell blocks occupied; every other line, and the bytes of every
-line (line ends included), stay as they were. A cell type or a port the table does not have, an
-instance of a module the file does not define, a signal this tool does not read (an ``offset`` or
-``upto`` wire) and a result that is not a permutation of the input raise ``OrderError`` (exit 2):
-the tool never guesses.
+line (line ends included), stay as they were, with one exception: Yosys interns names over the
+whole design, so a cell name that an earlier module of the file already has (Odin III's ``$c<ID>``
+repeat from module to module) would take the order of its first use. A repeated name is made
+unique (``$c150`` in the third module becomes ``$c150$m3``), so that the order of a module is its
+own, as in Yosys's front end, whose names are unique. A cell type or a port the table does not have,
+an instance of a module the file does not define, a signal this tool does not read and a result
+that is not a permutation of the input raise ``OrderError`` (exit 2): the tool never guesses.
 
 Only ``opt-diff`` uses it; ``opt-rules`` hands Yosys the file as Odin III wrote it.
 
@@ -37,7 +40,7 @@ from pathlib import Path
 
 TABLE = Path(__file__).resolve().parent / "il_celltypes.txt"
 _TOKEN = re.compile(r"\{|\}|\[[^\]]*\]|[\\$][^\s{}\[\]]+|\d+'[01xzmu-]*")
-_WIRE_FLAGS = {"signed", "upto"}
+_WIRE_FLAGS = {"signed"}
 
 Bit = tuple[str, int]  # (wire name, index)
 
@@ -75,6 +78,7 @@ def load_table(path: Path = TABLE) -> dict[str, CellType]:
 class Module:
     name: str
     widths: dict[str, int] = field(default_factory=dict)
+    layouts: dict[str, tuple[int, bool]] = field(default_factory=dict)  # (offset, upto)
     port_dirs: list[tuple[int, str, str]] = field(default_factory=list)  # (number, name, dir)
 
 
@@ -90,10 +94,21 @@ def _body(line: str) -> str:
     return line.rstrip("\r\n")
 
 
-def parse_wire(line: str) -> tuple[str, int, str | None, int]:
-    """(name, width, direction or None, port number) of a ``wire`` line."""
+@dataclass(frozen=True)
+class Wire:
+    name: str
+    width: int
+    direction: str | None
+    number: int
+    offset: int
+    upto: bool
+
+
+def parse_wire(line: str) -> Wire:
+    """The fields of a ``wire`` line."""
     words = _body(line).split()[1:]
     name, width, direction, number, i = words[-1], 1, None, 0, 0
+    offset, upto = 0, False
     while i < len(words) - 1:
         word = words[i]
         if word == "width":
@@ -102,13 +117,17 @@ def parse_wire(line: str) -> tuple[str, int, str | None, int]:
         elif word in ("input", "output", "inout"):
             direction, number = word, int(words[i + 1])
             i += 2
-        elif word in ("offset", "upto"):
-            raise OrderError(f"wire '{name}': '{word}' is not read")
+        elif word == "offset":
+            offset = int(words[i + 1])
+            i += 2
+        elif word == "upto":
+            upto = True
+            i += 1
         elif word in _WIRE_FLAGS:
             i += 1
         else:
             raise OrderError(f"wire line not read: {_body(line)!r}")
-    return name, width, direction, number
+    return Wire(name, width, direction, number, offset, upto)
 
 
 def split_items(lines: list[str]) -> list[Item]:
@@ -144,8 +163,9 @@ def split_items(lines: list[str]) -> list[Item]:
 class Signals:
     """A module's signal bits: wire widths, the module-level ``connect`` aliases, public wires."""
 
-    def __init__(self, widths: dict[str, int]) -> None:
+    def __init__(self, widths: dict[str, int], layouts: dict[str, tuple[int, bool]]) -> None:
         self.widths = widths
+        self.layouts = layouts
         self.alias: dict[Bit, Bit] = {}
         self.named: set[Bit] = set()
 
@@ -186,12 +206,19 @@ class Signals:
             at += 1
         return [(token, i) for i in range(lo, hi + 1)], at
 
+    def _index(self, name: str, number: int) -> int:
+        """The bit index (0 = LSB side of the storage) of declared bit ``number`` of a wire."""
+        offset, upto = self.layouts[name]
+        width = self.widths[name]
+        index = width - 1 - (number - offset) if upto else number - offset
+        if not 0 <= index < width:
+            raise OrderError(f"bit {number} is outside wire '{name}'")
+        return index
+
     def _slice(self, name: str, text: str) -> tuple[int, int]:
         inner = text[1:-1].split(":")
-        hi, lo = int(inner[0]), int(inner[-1])
-        if not 0 <= lo <= hi < self.widths[name]:
-            raise OrderError(f"slice {text} of '{name}' is outside the wire")
-        return lo, hi
+        first, last = self._index(name, int(inner[0])), self._index(name, int(inner[-1]))
+        return min(first, last), max(first, last)
 
     def add_connect(self, lhs: str, rhs: str) -> None:
         left, right = self.bits(lhs), self.bits(rhs)
@@ -223,10 +250,11 @@ def parse_modules(text_lines: list[str]) -> dict[str, Module]:
         if body.startswith("module "):
             current = modules.setdefault(body.split()[1], Module(body.split()[1]))
         elif current is not None and body.startswith("  wire "):
-            name, width, direction, number = parse_wire(line)
-            current.widths[name] = width
-            if direction is not None:
-                current.port_dirs.append((number, name, direction))
+            wire = parse_wire(line)
+            current.widths[wire.name] = wire.width
+            current.layouts[wire.name] = (wire.offset, wire.upto)
+            if wire.direction is not None:
+                current.port_dirs.append((wire.number, wire.name, wire.direction))
     return modules
 
 
@@ -333,7 +361,7 @@ def reorder_module(lines: list[str], modules: dict[str, Module],
     if len(slots) < 2:
         return lines
     name = _body(lines[0]).split()[1]
-    sig = Signals(modules[name].widths)
+    sig = Signals(modules[name].widths, modules[name].layouts)
     for item in items:
         text = _body(item.lines[0])
         if not item.cell and text.startswith("  connect "):
@@ -374,6 +402,29 @@ def _split_connect(text: str) -> tuple[str, str]:
     return " ".join(tokens[:cut]), " ".join(tokens[cut:])
 
 
+def make_names_unique(lines: list[str], seen: set[str], ordinal: int) -> list[str]:
+    """The module's lines with each cell name that an earlier module has renamed ``name$m<n>``;
+    ``seen`` gains the names of this module."""
+    out: list[str] = []
+    mine: set[str] = set()
+    for line in lines:
+        body = _body(line)
+        if body.startswith("  cell "):
+            words = body.split()
+            name = words[2]
+            if name in seen:
+                new = f"{name}$m{ordinal}"
+                while new in seen or new in mine:
+                    new += "_"
+                ending = line[len(body):]
+                line = f"  cell {words[1]} {new}{ending}"
+                name = new
+            mine.add(name)
+        out.append(line)
+    seen.update(mine)
+    return out
+
+
 def reorder_text(text: str, table: dict[str, CellType] | None = None) -> str:
     """The RTLIL text with each module's cells in operand-first order; all else byte for byte."""
     table = table if table is not None else load_table()
@@ -381,11 +432,15 @@ def reorder_text(text: str, table: dict[str, CellType] | None = None) -> str:
     modules = parse_modules(lines)
     out: list[str] = []
     module: list[str] = []
+    seen_names: set[str] = set()
+    ordinal = 0
     for line in lines:
         if module or _body(line).startswith("module "):
             module.append(line)
             if _body(line) == "end":
-                out.extend(reorder_module(module[:-1], modules, table))
+                ordinal += 1
+                done = reorder_module(module[:-1], modules, table)
+                out.extend(make_names_unique(done, seen_names, ordinal))
                 out.append(line)
                 module = []
         else:

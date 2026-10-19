@@ -197,6 +197,30 @@ class TestBytes(unittest.TestCase):
         two = one.replace("\\m", "\\n").replace("$c1", "$c5").replace("$c2", "$c6")
         self.assertEqual(order(one + two), ["$c2", "$c1", "$c6", "$c5"])
 
+    def test_repeated_cell_names_get_unique_names(self) -> None:
+        # Yosys interns names design-wide: module \\n reusing $c1 and $c2 must not take the order
+        # of their first use in module \\m, so the repeats are renamed and the order is its own
+        one = module(cell("$add", "$c1", A="$n1", B="\\x", Y="$n3"),
+                     cell("$not", "$c2", A="\\x", Y="$n1"))
+        two = one.replace("\\m", "\\n")
+        out = il_order.reorder_text(one + two)
+        self.assertEqual(names(out), ["$c2", "$c1", "$c2$m2", "$c1$m2"])
+        self.assertEqual(out.count("module"), 2)
+
+    def test_offset_wire_slices_use_declared_numbers(self) -> None:
+        text = "\n".join(["module \\m", "  wire width 2 offset 4 $bus", "  wire \\x", "  wire $n5",
+                          cell("$not", "$c1", A="$bus [5]", Y="$n5"),
+                          cell("$not", "$c2", A="\\x", Y="$bus [4]"),
+                          cell("$not", "$c3", A="\\x", Y="$bus [5]"), "end"]) + "\n"
+        self.assertEqual(order(text), ["$c3", "$c1", "$c2"])
+
+    def test_upto_wire_numbers_run_the_other_way(self) -> None:
+        text = "\n".join(["module \\m", "  wire width 2 upto $bus", "  wire \\x", "  wire $n5",
+                          cell("$not", "$c1", A="$bus [0]", Y="$n5"),
+                          cell("$not", "$c2", A="\\x", Y="$bus [0]"),
+                          cell("$not", "$c3", A="\\x", Y="$bus [1]"), "end"]) + "\n"
+        self.assertEqual(order(text), ["$c2", "$c1", "$c3"])
+
     def test_main_exit_codes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src, dst = Path(tmp) / "in.il", Path(tmp) / "out.il"

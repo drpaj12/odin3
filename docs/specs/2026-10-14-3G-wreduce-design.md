@@ -252,7 +252,10 @@ hardmap-diffs of LU8PEEng, LU32PEEng and mcml against the Parmys goldens, PHASE3
 - *Name interning is design-wide in Yosys.* In a file with several modules the order of module 2 is
   the order in which the names were first seen in the whole file; Odin III's `$c<ID>` names repeat
   from module to module. This affects only a file that Yosys reads (`opt-diff`'s oracle input), not
-  Odin III.
+  Odin III. It is modelled in `il_order.py`, which makes a repeated cell name unique
+  (`$c150$m3`), so that each module has its own order as in Yosys's front end, whose names are
+  unique. (Found by the LU8PEEng run of `opt_diff_micro_wreduce`: without it Yosys visited `$c150`,
+  interned by an earlier module, before its operand `$c846`.)
 - *Statement order across `always` blocks and `generate`* follows node-ID order, that is the
   elaborator's order, which is source order for the cases measured but is not specified.
 
