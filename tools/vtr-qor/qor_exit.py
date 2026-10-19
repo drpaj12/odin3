@@ -45,6 +45,7 @@ SMOKE_LEGS = ("P", "Pprime", "Oprime", "O")
 # Step 3: PHASE3 #16's required designs among the gate, plus the one the plan measures (§8.2).
 EQUIV_EXTRA = ("stereovision0",)
 SEEDS = (2, 3)
+OUTSIDE_GATE = (5, 6)  # the EArch smoke and the seed reruns
 SEED_LEGS = ("P", "O")
 SEED_DESIGNS_NONE = "no design is near a bound"
 
@@ -218,19 +219,22 @@ def run_exit(ctx: ExitContext) -> int:
             done[number] = code
             save_done(ctx.out, ctx.label, done, ctx.fingerprint)
     failed = sorted(n for n, c in done.items() if c == EXIT_FAIL)
+    # Only the steps outside the k6 gate force a FAIL: a failed job of steps 1 to 4 is in the
+    # pinned table (gate rule 1) and a failing check is the gate's to judge (a permitted fcheck
+    # fail or equiv exception must not fail the run; an unpermitted one fails the gate).
+    forced = [n for n in failed if n in OUTSIDE_GATE]
     if failed:
         ctx.emit(f"exit-run: steps {failed} had failed jobs or checks (not retried on resume; "
                  "rerun them with run --rerun --designs ...)")
     if short:
         ctx.emit(f"exit-run: steps 7 and 8 wait for the unfinished steps; run exit-run --label "
                  f"{ctx.label} again")
-        return worst([*short, *([EXIT_FAIL] if failed else [])])
+        return worst([*short, *([EXIT_FAIL] if forced else [])])
     _step_line(ctx, STEPS - 1)
     code, last = _run_step(STEPS - 1, ctx, ctx.candidates() or [])
     if code not in (EXIT_OK, EXIT_FAIL, EXIT_INCOMPLETE) or not last:
         return code or EXIT_FAIL
     _step_line(ctx, STEPS)
     verdict = _run_step(STEPS, ctx, (), Path(last))[0]
-    # a failed job anywhere (the EArch smoke and the seed reruns are outside the gate) fails
-    # the exit run, whatever the k6 gate says
-    return EXIT_FAIL if failed and verdict in (EXIT_OK, EXIT_INCOMPLETE) else verdict
+    # a failed job of the EArch smoke or the seed reruns (outside the k6 gate) fails the run
+    return EXIT_FAIL if forced and verdict in (EXIT_OK, EXIT_INCOMPLETE) else verdict

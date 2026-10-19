@@ -516,17 +516,27 @@ class ExitRunTest(unittest.TestCase):
         inner_code = qor_exit.run_exit(self.ctx(inner, candidates=[]))
         self.assertEqual(inner_code, 1)
 
-    def test_failed_job_fails_the_exit_whatever_the_gate_says(self) -> None:
-        """Review H1/M1: a failed step 1 job, EArch smoke job or seed job is exit 1 even when
-        the gate answers PASS, and the table is made from this run's keys."""
-        for failing in (0, 1, 2):  # the 1st, 2nd and 3rd run command: step 1, step 5, step 6
+    def test_failures_outside_the_gate_fail_the_exit(self) -> None:
+        """Review H1/M1: a failed EArch smoke job (step 5) or seed job (step 6) is exit 1 even
+        when the gate answers PASS; the table is made from this run's keys."""
+        for failing in (1, 2):  # the 2nd and 3rd run command: step 5, step 6
             self.setUp()
             inner = FakeInner({"run": [1 if i == failing else 0 for i in range(3)]})
             self.assertEqual(qor_exit.run_exit(self.ctx(inner, candidates=["sha"])), 1, failing)
             table = next(c for c in inner.calls if c[0] == "table")
-            self.assertIn("--keys", table)
             self.assertIn("O=dddddddddddd", table[table.index("--keys") + 1])
             self.assertTrue(any("run --rerun" in line for line in self.lines))
+
+    def test_gate_judges_steps_one_to_four(self) -> None:
+        """Review N1: a permitted fcheck fail (exit 1 of step 1 or 2, gate PASS) does not fail
+        the run; an unpermitted one (gate FAIL) does."""
+        for codes in ({"run": [1]}, {"fcheck": [1]}, {"equiv": [1]}, {"rerun-check": [1]}):
+            self.setUp()
+            self.assertEqual(qor_exit.run_exit(self.ctx(FakeInner({**codes, "gate": [0]}),
+                                                        candidates=[])), 0, codes)
+            self.setUp()
+            self.assertEqual(qor_exit.run_exit(self.ctx(FakeInner({**codes, "gate": [1]}),
+                                                        candidates=[])), 1, codes)
 
     def test_changed_fingerprint_reruns_every_step(self) -> None:
         """Review H2: state recorded for one odin3 build is discarded for another."""
