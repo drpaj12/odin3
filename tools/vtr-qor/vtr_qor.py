@@ -31,6 +31,16 @@ Subcommands here: ``doctor``, ``run``, ``fcheck``, ``status``, ``clean``, ``tabl
   ``differs``, ``ram``, ``multiclock``, ``timeout``, ``capped``, ``error``). Exit 1 for
   ``differs`` or
   ``error`` or a missing job, 3 for ``timeout`` or ``capped``.
+- ``rerun-check [--leg O] (--set S | --designs D) [--resume]`` (heavy) runs the O front end
+  again into ``<J>/rerun.blif`` and compares its SHA-256 with the first run's (spec §8.3); it
+  writes ``verdicts.rerun`` (``same`` or ``differs``) and deletes ``rerun.blif``. Exit 1 for
+  ``differs``, ``error`` or a missing job, 3 for ``capped`` or ``timeout``. ``run --seed N`` is
+  another VPR seed (a new key that never moves ``latest``); ``table --seeds 2,3`` shows the seed
+  jobs beside seed 1 (spec §6.3).
+- ``exit-run --label TEXT [--budget H]`` (heavy, started inside ``tools/heavy-run`` like
+  ``nightly``) runs ``qor_exit``'s eight steps; started again with the label it resumes. Exit
+  ``gate``'s when every job ran, else the run's code. ``Oprov`` needs 3E-6: it is available only
+  when ``odin3`` writes ``--name-style provenance`` (``name_style_probe``).
 - ``status`` prints one line per (arch, leg) of the current VTR commit:
   ``<arch> <leg> latest <key12|-> ok <n> failed <m> age <d>d``.
 - ``clean [--keep N]`` runs retention (spec §5.4, ``qor_sched.prune``) over every
