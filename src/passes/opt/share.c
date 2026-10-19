@@ -5,8 +5,9 @@
  *
  * Soundness (OP-13) outranks parity with Yosys 0.55, so the rewrite is narrower than Yosys's
  * (spec §17 #44 to #46):
- * - a candidate drives a whole data port (its whole Y, bit for bit, and nothing else reads those
- *   nets); Yosys also merges cells whose Y is only partly the port;
+ * - a candidate drives a whole chunk of a data port (its whole Y, bit for bit, and nothing else
+ *   reads those nets; the chunk may be part of a wider port, PHASE3 #52, and the cells of a group
+ *   start at the same bit); Yosys also merges cells whose Y is wider than the chunk (spec 17 #44);
  * - the cells of a group have the same parameters, except the width of the muxed operand, which
  *   may differ only for the types whose extension composes (extends in k_kinds) and equal signed
  *   flags: the narrower operands are extended by that flag, as the cell would have done;
@@ -98,6 +99,7 @@ typedef struct cand {
     uint32_t op;
     uint32_t kind;
     uint32_t sport; /* the port the cell holds the shared operand on (set when it joins) */
+    uint32_t off;   /* the bit of the mux's data port where the cell's Y starts */
     bool open;
 } cand;
 
@@ -237,12 +239,14 @@ static bool inputs_connected(const sh_state *ss, odin3_node_id op) {
     return true;
 }
 
-/* The whole of the cell's Y is nets[0 .. width), nothing else reads them, and none is kept. */
-static bool y_is_port(const sh_state *ss, odin3_node_id op, const odin3_net_id *nets) {
-    if (port_width(ss, op, PORT_Y) != ss->width) {
+/* The whole of the cell's Y is nets[0 .. Y_WIDTH), nothing else reads them, and none is kept. */
+static bool y_is_port(const sh_state *ss, odin3_node_id op, const odin3_net_id *nets,
+                      uint32_t avail) {
+    const uint32_t ylen = port_width(ss, op, PORT_Y);
+    if (ylen > avail) {
         return false;
     }
-    for (uint32_t bit = 0; bit < ss->width; bit++) {
+    for (uint32_t bit = 0; bit < ylen; bit++) {
         odin3_net_id net = nets[bit];
         if (!odin3_net_valid(net) || net.v != port_net(ss, (port_ref){op, PORT_Y}, bit).v ||
             odin3_net_driver_count(ss->m, net) != 1 || odin3_kit_readers(ss->oc, net) != 1 ||
@@ -253,9 +257,10 @@ static bool y_is_port(const sh_state *ss, odin3_node_id op, const odin3_net_id *
     return true;
 }
 
-/* Does the data port `slot` hold a candidate? Fills *out when it does. */
-static bool cand_at(const sh_state *ss, uint32_t slot, cand *out) {
-    const odin3_net_id *nets = nets_at(&ss->dn, (size_t)slot * ss->width);
+/* Does the data port `slot` hold a candidate that starts at bit `off`? Fills *out when it does:
+ * a cell whose whole Y is bits off .. off + Y_WIDTH of the port (PHASE3 #52, Yosys's chunks). */
+static bool cand_at(const sh_state *ss, uint32_t slot, uint32_t off, cand *out) {
+    const odin3_net_id *nets = nets_at(&ss->dn, (size_t)slot * ss->width + off);
     if (!odin3_net_valid(nets[0])) {
         return false;
     }
@@ -266,7 +271,7 @@ static bool cand_at(const sh_state *ss, uint32_t slot, cand *out) {
     odin3_node_id op = odin3_pin_node(ss->m, drv);
     const uint32_t kind = kind_of(ss, odin3_node_type(ss->m, op));
     odin3_objref obj = {ODIN3_OBJ_NODE, op.v};
-    if (kind == N_KINDS || !y_is_port(ss, op, nets) || !inputs_connected(ss, op) ||
+    if (kind == N_KINDS || !y_is_port(ss, op, nets, ss->width - off) || !inputs_connected(ss, op) ||
         odin3_kit_keep(ss->oc, obj)) {
         return false;
     }
@@ -277,7 +282,7 @@ static bool cand_at(const sh_state *ss, uint32_t slot, cand *out) {
             return false;
         }
     }
-    *out = (cand){slot, op.v, kind, PORT_A, true};
+    *out = (cand){slot, op.v, kind, PORT_A, off, true};
     return true;
 }
 
@@ -293,17 +298,27 @@ static odin3_status load_mux(sh_state *ss, odin3_node_id node, bool is_pmux) {
     return st == ODIN3_OK ? push_port(ss, &ss->sn, node, MUX_PORT_S) : st;
 }
 
+static odin3_status push_cand(sh_state *ss, const cand *cnd) {
+    cand *dst = odin3_vec_push(&ss->cands);
+    if (dst == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *dst = *cnd;
+    return ODIN3_OK;
+}
+
+/* The candidates of every data port, in port order and, within a port, by offset. */
 static odin3_status gather(sh_state *ss) {
     odin3_vec_clear(&ss->cands);
     odin3_status st = ODIN3_OK;
     for (uint32_t slot = 0; st == ODIN3_OK && slot <= ss->slices; slot++) {
-        cand cnd;
-        if (cand_at(ss, slot, &cnd)) {
-            cand *dst = odin3_vec_push(&ss->cands);
-            if (dst == NULL) {
-                st = ODIN3_ERR_NO_MEMORY;
+        for (uint32_t off = 0; st == ODIN3_OK && off < ss->width;) {
+            cand cnd;
+            if (cand_at(ss, slot, off, &cnd)) {
+                st = push_cand(ss, &cnd);
+                off += port_width(ss, (odin3_node_id){cnd.op}, PORT_Y);
             } else {
-                *dst = cnd;
+                off++;
             }
         }
     }
@@ -383,7 +398,7 @@ static bool joins_on(const sh_state *ss, const cand *seed, uint32_t sport, const
  * *at (when not NULL) is the port the cell holds it on: sport when it can, else the other. */
 static bool joins(const sh_state *ss, const cand *seed, const cand *cnd, uint32_t sport,
                   uint32_t *at) {
-    if (k_kinds[seed->kind].cls != k_kinds[cnd->kind].cls) {
+    if (k_kinds[seed->kind].cls != k_kinds[cnd->kind].cls || seed->off != cnd->off) {
         return false;
     }
     for (uint32_t pick = 0; pick < 2U; pick++) {
@@ -712,7 +727,7 @@ static odin3_status commit(sh_state *ss, odin3_node_id op) {
     odin3_vec_clear(&ss->yn);
     odin3_status st = push_port(ss, &ss->yn, op, PORT_Y);
     for (size_t i = 0; st == ODIN3_OK && i < ss->byid.len; i++) {
-        const odin3_kit_conn conn = {ids[i], PORT_Y, ss->yn.data, ss->width};
+        const odin3_kit_conn conn = {ids[i], PORT_Y, ss->yn.data, (uint32_t)ss->yn.len};
         st = odin3_kit_connect(ss->oc, &conn);
     }
     if (st == ODIN3_OK && name != 0) {

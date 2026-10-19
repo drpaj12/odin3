@@ -532,6 +532,62 @@ static void test_share_swap_widths(void) {
     expect_port(inner, MUX_B, "c c:1 c:2 c:3");
 }
 
+/* A mux port wider than the cells (PHASE3 #52, Yosys's chunks): the cells drive the low half of
+ * each data port; the high half is other signals and stays on the old mux. */
+#define HEAD8                                                                                      \
+    "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"                         \
+    "  wire width 4 input 3 \\c\n  wire width 4 input 4 \\d\n  wire input 5 \\s\n"                 \
+    "  wire width 8 output 6 \\y\n  wire width 4 \\t1\n  wire width 4 \\t2\n"                      \
+    "  wire width 4 \\t3\n  wire width 4 \\t4\n"
+
+#define MUX8(a, b)                                                                                 \
+    "  cell $mux \\m\n    parameter \\WIDTH 8\n    connect \\A " a "\n    connect \\B " b          \
+    "\n    connect \\S \\s\n    connect \\Y \\y\n  end\n"
+
+static void test_share_chunk(void) {
+    build(HEAD8 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1") BIN(
+        "$and", "and2", "0", "\\a", "\\c", "\\t2") MUX8("{ \\d \\t1 }", "{ \\d \\t2 }") "end\n");
+    run_share();
+    expect_merged(2);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$and"));
+    odin3_node_id op = nth_of("$and", 0);
+    odin3_node_id inner = new_mux("$mux", "m");
+    odin3_node_id old = node_named("m");
+    expect_port(op, OP_A, "a a:1 a:2 a:3");
+    expect_same_port(op, OP_B, inner, MUX_Y);
+    TEST_ASSERT_EQUAL_INT64(4, pint(inner, PRM_WIDTH));
+    expect_port(inner, MUX_A, "b b:1 b:2 b:3");
+    expect_port(inner, MUX_B, "c c:1 c:2 c:3");
+    TEST_ASSERT_EQUAL_INT64(8, pint(old, PRM_WIDTH));
+    /* the old mux reads the new cell's Y in bits 0 to 3 of both ports and d in bits 4 to 7 */
+    for (uint32_t bit = 0; bit < 4; bit++) {
+        TEST_ASSERT_EQUAL_UINT32(pnet(PIN(op, OP_Y, bit)).v, pnet(PIN(old, MUX_A, bit)).v);
+        TEST_ASSERT_EQUAL_UINT32(pnet(PIN(op, OP_Y, bit)).v, pnet(PIN(old, MUX_B, bit)).v);
+    }
+    TEST_ASSERT_TRUE(is_net(pnet(PIN(old, MUX_A, 4)), "d"));
+    TEST_ASSERT_TRUE(is_net(pnet(PIN(old, MUX_B, 7)), "d:3"));
+}
+
+/* Two groups side by side in one wide port (Yosys's cat.il), and the cells at different offsets
+ * in the two ports, which do not group. */
+static void test_share_chunk_two_groups(void) {
+    build(HEAD8 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
+              BIN("$and", "and2", "0", "\\a", "\\c", "\\t2")
+                  BIN("$or", "or1", "0", "\\d", "\\b", "\\t3")
+                      BIN("$or", "or2", "0", "\\d", "\\c", "\\t4")
+                          MUX8("{ \\t3 \\t1 }", "{ \\t4 \\t2 }") "end\n");
+    run_share();
+    expect_merged(4);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$and"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$or"));
+    TEST_ASSERT_EQUAL_UINT32(3, count_type("$mux"));
+    reset();
+    build(HEAD8 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1") BIN(
+        "$and", "and2", "0", "\\a", "\\c", "\\t2") MUX8("{ \\d \\t1 }", "{ \\t2 \\d }") "end\n");
+    run_share();
+    expect_merged(0);
+}
+
 /* Two groups under one mux. */
 static void test_share_two_groups(void) {
     build(HEAD4 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
@@ -915,6 +971,17 @@ static const refusal k_equiv[] = {
               "\\t2") "  cell $mux \\m\n    parameter \\WIDTH 5\n    connect \\A \\t1\n"
                       "    connect \\B \\t2\n    connect \\S \\s\n    connect \\Y \\y\n  "
                       "end\nend\n"},
+    {"chunk", HEAD8 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
+                  BIN("$and", "and2", "0", "\\a", "\\c", "\\t2")
+                      MUX8("{ \\d \\t1 }", "{ \\d \\t2 }") "end\n"},
+    {"chunk swap add sub", HEAD8 BIN("$add", "add1", "0", "\\b", "\\a", "\\t1")
+                               BIN("$sub", "sub1", "0", "\\a", "\\c", "\\t2")
+                                   MUX8("{ \\d \\t2 }", "{ \\d \\t1 }") "end\n"},
+    {"chunk two groups",
+     HEAD8 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
+         BIN("$and", "and2", "0", "\\a", "\\c", "\\t2") BIN("$or", "or1", "0", "\\d", "\\b", "\\t3")
+             BIN("$or", "or2", "0", "\\d", "\\c", "\\t4")
+                 MUX8("{ \\t3 \\t1 }", "{ \\t4 \\t2 }") "end\n"},
 };
 
 static void test_share_function_kept(void) {
@@ -924,6 +991,9 @@ static void test_share_function_kept(void) {
             want = (equiv_expect){3U, XOR_PMUX_SELECTS};
         } else if (i == ADDSUB_PMUX_CASE) {
             want = (equiv_expect){3U, ADDSUB_SELECTS};
+        }
+        if (strcmp(k_equiv[i].name, "chunk two groups") == 0) {
+            want.merged = 4U;
         }
         expect_function_kept(&k_equiv[i], &want);
         reset();
@@ -1223,6 +1293,8 @@ int main(void) {
     RUN_TEST(test_share_swap_and);
     RUN_TEST(test_share_swap_add_sub);
     RUN_TEST(test_share_swap_widths);
+    RUN_TEST(test_share_chunk);
+    RUN_TEST(test_share_chunk_two_groups);
     RUN_TEST(test_share_two_groups);
     RUN_TEST(test_share_pmux);
     RUN_TEST(test_share_parents);
