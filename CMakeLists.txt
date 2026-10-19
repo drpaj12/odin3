@@ -1200,6 +1200,7 @@ if(BUILD_TESTING)
         ODIN3_BVT_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/blif_vtr")
     odin3_add_unit_test(test_techlib_expr)
     odin3_add_unit_test(test_techlib_reader)
+    odin3_add_unit_test(test_techlib_string_param)
     odin3_add_unit_test(test_techlib_libs)
     target_compile_definitions(test_techlib_libs PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
