@@ -7,6 +7,7 @@ and the compile failed on a duplicate port declaration its own packing leaves be
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -149,6 +150,275 @@ class WrapperTest(unittest.TestCase):
         done = subprocess.run([sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER)],
                               capture_output=True, text=True, check=False)
         self.assertEqual(done.returncode, 2)
+
+
+# The shape of VTR's generated testbench around what the wrapper edits (tb_generator.py).
+TB = """\
+module tb;
+    localparam int NUM_VECTORS = 50000;
+    localparam int MAX_ERRORS = 20;
+    initial begin
+        for (vecIdx = 0; vecIdx < NUM_VECTORS; vecIdx++) begin
+            if (q_rtl !== q_synth) begin
+                if (errors < MAX_ERRORS) begin
+                    $display("MISMATCH vec=%0d port=q", vecIdx);
+                end
+                errors++;
+                vecFail = 1;
+            end
+            if (vecFail) begin
+                vecMismatched++;
+            end else begin
+                vecMatched++;
+            end
+            if (errors >= MAX_ERRORS) begin
+                $display("aborting after %0d errors", errors);
+                $display("VCHECK_SUMMARY matched=%0d", vecMatched);
+                $fatal(1);
+            end
+        end
+        $display("VCHECK_SUMMARY matched=%0d", vecMatched);
+        if (errors == 0) begin
+            $display("PASS: %0d vectors matched across rtl/post-synth", NUM_VECTORS);
+            $finish;
+        end else begin
+            $display("FAIL: %0d mismatches in %0d vectors", errors, NUM_VECTORS);
+            $fatal(1);
+        end
+    end
+endmodule
+"""
+OUTPUTS = [("q", 3), ("done", 1)]
+
+
+def vd(*pairs: tuple[int, int]) -> str:
+    """One dump line of the instrumented testbench: ``rtl:synth`` per port, in hex."""
+    return "VD " + " ".join(f"{r:x}:{s:x}" for r, s in pairs) + "\n"
+
+
+class InstrumentTest(unittest.TestCase):
+    def test_dump_limit_and_renamed_verdicts(self) -> None:
+        out = qor_fcheck_run.instrument_testbench(TB, OUTPUTS)
+        dump = '$display("VD %h:%h %h:%h", q_rtl, q_synth, done_rtl, done_synth);'
+        self.assertEqual(out.count(dump), 1)
+        self.assertLess(out.index(dump), out.index("if (vecFail) begin"))
+        self.assertIn("MAX_ERRORS = 2147483647;", out)
+        self.assertNotIn("MAX_ERRORS = 20;", out)
+        self.assertNotIn("if (errors < MAX_ERRORS)", out)  # no mismatch line of its own
+        self.assertNotIn("$fatal", out)
+        # only the wrapper writes the verdict lines the callers search for
+        for word in ("VCHECK_SUMMARY", "PASS:", "FAIL:"):
+            self.assertNotIn(f'$display("{word}', out)
+            self.assertIn(f'$display("RAW_{word}', out)
+
+    def test_unexpected_shape_is_an_error(self) -> None:
+        with self.assertRaises(RuntimeError):
+            qor_fcheck_run.instrument_testbench(TB.replace("vecMismatched++", "vecBad++"),
+                                                OUTPUTS)
+        with self.assertRaises(RuntimeError):
+            qor_fcheck_run.instrument_testbench(TB.replace("MAX_ERRORS = 20", "MAX_ERRORS = 2 "),
+                                                OUTPUTS)
+
+    def test_no_output_ports(self) -> None:
+        self.assertIn('$display("VD ");', qor_fcheck_run.instrument_testbench(TB, []))
+
+    def test_x_initial_flag(self) -> None:
+        self.assertEqual(qor_fcheck_run._unique_x_initial(["v", "--x-initial", "0", "-O"]),
+                         ["v", "--x-initial", "unique", "-O"])
+        self.assertEqual(qor_fcheck_run._unique_x_initial(["v"]), ["v", "--x-initial", "unique"])
+
+
+class CompareRunsTest(unittest.TestCase):
+    """Initial-state masking: a bit whose RTL value differs between the runs at any vector is
+    not compared at all; every other bit is."""
+
+    def compare(self, run0: list[str], run1: list[str]) -> qor_fcheck_run.InitVerdict:
+        unknown = qor_fcheck_run.init_dependent_bits(OUTPUTS, run0, run1)
+        return qor_fcheck_run.compare_runs(OUTPUTS, unknown, run0, run1)
+
+    def test_state_dependent_bits_are_masked_not_compared(self) -> None:
+        # q: RTL 0b000 (init 0) and 0b111 (init 1): all three bits are x, so the netlist's 0b101
+        # (different from both) does not count; done is defined and equal
+        v = self.compare([vd((0, 5), (1, 1))], [vd((7, 5), (1, 1))])
+        self.assertEqual((v.matched, v.mismatched, v.port_errors), (1, 0, 0))
+        self.assertEqual((v.masked_bits, v.compared_bits, v.masked_ports), (3, 1, ["q[3/3]"]))
+        self.assertTrue(v.passed)
+
+    def test_a_bit_is_masked_at_every_vector_once_it_depends_on_the_state(self) -> None:
+        # the runs agree on q at vectors 0 and 2 and differ in bit 2 at vector 1; the netlist's
+        # bit 2 differs from the RTL at vector 0: x for the whole run, not a mismatch at vector 0
+        run0 = [vd((2, 6), (0, 0)), vd((2, 6), (0, 0)), vd((2, 6), (0, 0))]
+        run1 = [vd((2, 6), (0, 0)), vd((6, 6), (0, 0)), vd((2, 6), (0, 0))]
+        v = self.compare(run0, run1)
+        self.assertEqual((v.matched, v.mismatched), (3, 0))
+        self.assertEqual((v.masked_bits, v.compared_bits), (3, 9))
+
+    def test_mismatch_on_a_defined_bit_is_never_masked(self) -> None:
+        # bit 2 depends on the initial state (x); bit 0 is defined 0 in both runs but the netlist
+        # drives 1: a mismatch although another bit of the same port is masked
+        v = self.compare([vd((0b000, 0b101), (0, 0))], [vd((0b100, 0b101), (0, 0))])
+        self.assertEqual((v.matched, v.mismatched, v.port_errors), (0, 1, 1))
+        self.assertEqual(v.lines, ["MISMATCH vec=0 port=q rtl=x00 synth=101"])
+        self.assertFalse(v.passed)
+
+    def test_mismatch_in_the_second_run_only(self) -> None:
+        # the RTL is 0b010 in both runs; a netlist output that moves with the initial state
+        # matches run one and not run two: that is a mismatch
+        v = self.compare([vd((2, 2), (0, 0))], [vd((2, 3), (0, 0))])
+        self.assertEqual((v.matched, v.mismatched), (0, 1))
+        self.assertEqual(v.lines, ["MISMATCH vec=0 port=q rtl=010 synth=011"])
+
+    def test_counts_and_vector_numbers(self) -> None:
+        run0 = [vd((1, 1), (0, 0)), "tb clocks: clk\n", vd((1, 2), (1, 0)), vd((4, 4), (1, 1))]
+        v = self.compare(run0, list(run0))
+        self.assertEqual((v.matched, v.mismatched, v.vectors, v.port_errors), (2, 1, 3, 2))
+        self.assertEqual([ln.split()[1] for ln in v.lines], ["vec=1", "vec=1"])
+        self.assertEqual(v.masked_bits, 0)
+
+    def test_nothing_compared_is_not_a_pass(self) -> None:
+        v = self.compare([vd((0, 0), (0, 0))], [vd((7, 0), (1, 0))])  # every bit differs
+        self.assertEqual((v.matched, v.compared_bits, v.masked_bits), (1, 0, 4))
+        self.assertFalse(v.passed)
+        no_ports = qor_fcheck_run.compare_runs([], [], ["VD \n"], ["VD \n"])
+        self.assertFalse(no_ports.passed)
+        self.assertFalse(self.compare([], []).passed)
+
+    def test_runs_that_do_not_fit_raise(self) -> None:
+        with self.assertRaises(ValueError):  # one run dumped fewer vectors
+            self.compare([vd((0, 0), (0, 0))], [])
+        with self.assertRaises(ValueError):  # a value missing from the dump line
+            self.compare(["VD 0:0\n"], ["VD 0:0\n"])
+
+    def test_report_is_capped(self) -> None:
+        bad = [vd((0, 1), (0, 0))] * 30
+        v = self.compare(bad, bad)
+        self.assertEqual((len(v.lines), v.port_errors, v.mismatched), (20, 30, 30))
+        self.assertIn("... 10 more port mismatches", qor_fcheck_run.render_verdict(v))
+
+    def test_verdict_text_goes_through_the_callers_verdict_rules(self) -> None:
+        same = [vd((1, 1), (1, 1))] * 3
+        text = qor_fcheck_run.render_verdict(self.compare(same, same))
+        self.assertIn("VCHECK_SUMMARY matched=3 mismatched=0 vectors=3 port_errors=0", text)
+        self.assertIn("VCHECK_INIT_MASK masked_bits=0 compared_bits=12 masked_ports=(none)", text)
+        self.assertIn("PASS: 3 vectors matched across rtl/post-synth", text)
+        self.assertEqual(qor_legs.fcheck_verdict(0, False, text), "pass")
+        bad = [vd((1, 0), (1, 1))]
+        text = qor_fcheck_run.render_verdict(self.compare(bad, bad))
+        self.assertNotIn("PASS:", text)
+        self.assertEqual(qor_legs.fcheck_verdict(1, False, text), "fail")
+        # every bit masked: no PASS and no mismatch line, an error and never a pass
+        text = qor_fcheck_run.render_verdict(
+            self.compare([vd((0, 0), (0, 0))], [vd((7, 0), (1, 0))]))
+        self.assertNotIn("PASS:", text)
+        self.assertEqual(qor_legs.fcheck_verdict(3, False, text), "error")
+
+
+CHECKER = """\
+import subprocess, sys
+from pathlib import Path
+import blif_to_verilog, tb_generator
+
+class Port:
+    def __init__(self, name, direction, width):
+        self.name, self.direction, self.width = name, direction, width
+
+work = Path(sys.argv[1])
+(work / 'sim_build').mkdir(parents=True)
+ports = [Port('clk', 'input', 1), Port('q', 'output', 3), Port('done', 'output', 1)]
+tb = tb_generator.generate_dual_testbench(ports)
+(work / 'tb.sv').write_text(tb)
+with open(work / 'verilator.out', 'w') as log:
+    rc = subprocess.call(['verilator', '--binary', '--x-initial', '0'], stdout=log,
+                         stderr=subprocess.STDOUT)
+sim = work / 'sim_build' / 'Vtb'
+sim.write_text(Path(sys.argv[2]).read_text())
+sim.chmod(0o755)
+with open(work / 'sim.out', 'w') as log:
+    rc = subprocess.call([str(sim), '+verilator+seed+1', '+verilator+rand+reset+0'], stdout=log,
+                         stderr=subprocess.STDOUT)
+print((work / 'sim.out').read_text().strip())
+raise SystemExit(rc)
+"""
+
+
+class TwoRunsTest(unittest.TestCase):
+    """The wrapper end to end on a stand-in VTR tree: its ``tb_generator``, and a checker that
+    compiles with a fake ``verilator`` and runs a fake testbench binary once per initial state."""
+
+    def _run(self, sim_body: str) -> subprocess.CompletedProcess[str]:
+        HEAVY_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as raw:
+            tmp = Path(raw)
+            vdir = tmp / "verilator_check"
+            vdir.mkdir()
+            (vdir / "blif_to_verilog.py").write_text(
+                "def pack_bit_blasted_top_ports(t):\n    return t\n", encoding="utf-8")
+            (vdir / "tb_generator.py").write_text(
+                f"def generate_dual_testbench(ports, **kwargs):\n    return {TB!r}\n",
+                encoding="utf-8")
+            (vdir / "run_random_check.py").write_text(CHECKER, encoding="utf-8")
+            bindir = tmp / "bin"
+            bindir.mkdir()
+            verilator = bindir / "verilator"
+            verilator.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            verilator.chmod(0o755)
+            sim = tmp / "sim.sh"
+            sim.write_text("#!/bin/sh\necho 'tb clocks: clk'\n" + sim_body, encoding="utf-8")
+            env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
+            run = [sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER),
+                   str(vdir / "run_random_check.py"), str(tmp / "work"), str(sim)]
+            return subprocess.run(run, capture_output=True, text=True, check=False, env=env)
+
+    def test_pass_when_only_the_initial_state_differs(self) -> None:
+        # run 0: RTL q=0 (init 0) vs netlist 5; run 1: RTL q=7 (init 1) vs 5: all x, done fixed
+        body = ("case \"$*\" in\n  *reset+0*) echo 'VD 0:5 1:1'; echo 'VD 0:5 1:1';;\n"
+                "  *) echo 'VD 7:5 1:1'; echo 'VD 7:5 1:1';;\nesac\necho 'RAW_PASS: 2'\n")
+        done = self._run(body)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("VCHECK_INIT_MASK masked_bits=6 compared_bits=2 masked_ports=q[3/3]",
+                      done.stdout)
+        self.assertIn("VCHECK_SUMMARY matched=2 mismatched=0 vectors=2 port_errors=0", done.stdout)
+        self.assertIn("PASS: 2 vectors matched across rtl/post-synth", done.stdout)
+        self.assertIn("tb clocks: clk", done.stdout)
+        self.assertNotIn("RAW_", done.stdout)
+        self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "pass")
+
+    def test_a_mismatch_on_a_defined_bit_fails(self) -> None:
+        body = "echo 'VD 2:3 1:1'\necho 'RAW_PASS: 1'\n"  # defined in both runs, netlist differs
+        done = self._run(body)
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("MISMATCH vec=0 port=q rtl=010 synth=011", done.stdout)
+        self.assertNotIn("PASS:", done.stdout)
+        self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "fail")
+
+    def test_testbench_crash_is_passed_through(self) -> None:
+        done = self._run("echo 'VD 0:0 0:0'\nexit 9\n")
+        self.assertEqual(done.returncode, 9)
+        self.assertNotIn("PASS:", done.stdout)
+        self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "error")
+
+    def test_missing_dump_in_one_run_is_an_error(self) -> None:
+        body = "case \"$*\" in\n  *reset+0*) echo 'VD 0:0 0:0';;\nesac\n"
+        done = self._run(body)
+        self.assertEqual(done.returncode, 3)
+        self.assertIn("ERROR: the two initial-state dumps cannot be compared", done.stdout)
+        self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "error")
+
+    def test_upstream_without_a_generator_is_reported(self) -> None:
+        HEAVY_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as raw:
+            vdir = Path(raw)
+            (vdir / "blif_to_verilog.py").write_text(
+                "def pack_bit_blasted_top_ports(t):\n    return t\n", encoding="utf-8")
+            (vdir / "tb_generator.py").write_text("def renamed(ports):\n    return ''\n",
+                                                  encoding="utf-8")
+            (vdir / "run_random_check.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
+            run = [sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER),
+                   str(vdir / "run_random_check.py")]
+            done = subprocess.run(run, capture_output=True, text=True, check=False)
+            self.assertEqual(done.returncode, 2)
+            self.assertIn("has no generate_dual_testbench (renamed or removed upstream)",
+                          done.stderr)
 
 
 if __name__ == "__main__":
