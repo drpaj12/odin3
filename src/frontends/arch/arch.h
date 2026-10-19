@@ -28,8 +28,8 @@ typedef struct odin3_arch_mport {
     bool is_out;
     bool is_clock;
     bool non_clock_global;
-    const char *clock;              /* the `clock` attribute, NULL when absent */
-    const char *const *sinks;       /* combinational_sink_ports */
+    const char *clock;        /* the `clock` attribute, NULL when absent */
+    const char *const *sinks; /* combinational_sink_ports */
     uint32_t n_sinks;
     uint32_t max_width, min_width;
     uint32_t line;
@@ -51,7 +51,11 @@ typedef enum odin3_arch_leaf_kind {
     ODIN3_ARCH_LEAF_SUBCKT
 } odin3_arch_leaf_kind;
 
-typedef enum odin3_arch_pin_dir { ODIN3_ARCH_PIN_IN, ODIN3_ARCH_PIN_OUT, ODIN3_ARCH_PIN_CLOCK } odin3_arch_pin_dir;
+typedef enum odin3_arch_pin_dir {
+    ODIN3_ARCH_PIN_IN,
+    ODIN3_ARCH_PIN_OUT,
+    ODIN3_ARCH_PIN_CLOCK
+} odin3_arch_pin_dir;
 
 /* A pb_type port: `input`, `output` or `clock` element. */
 typedef struct odin3_arch_pin {
@@ -71,8 +75,8 @@ typedef struct odin3_arch_level {
 
 typedef struct odin3_arch_leaf {
     odin3_arch_leaf_kind kind;
-    const char *model; /* the `.subckt` model name, NULL otherwise */
-    const char *cls;   /* the `class` attribute, NULL when absent */
+    const char *model;              /* the `.subckt` model name, NULL otherwise */
+    const char *cls;                /* the `class` attribute, NULL when absent */
     const odin3_arch_level *levels; /* top-level block first, the leaf last */
     uint32_t n_levels;
     const odin3_arch_pin *pins;

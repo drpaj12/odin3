@@ -46,22 +46,33 @@ static bool model_names_ok(const odin3_arch_model *model) {
     return true;
 }
 
-/* --- templates ---------------------------------------------------------------------------------- */
+/* --- templates ----------------------------------------------------------------------------------
+ */
 
-static void make_token(const odin3_arch_mport *port, char *tok, size_t cap) {
-    char kind = port->is_out ? 'o' : (port->is_clock ? 'c' : 'i');
-    (void)snprintf(tok, cap, "%c:%s", kind, port->name);
+typedef struct sig_tok {
+    char text[LIB_TOKEN_MAX];
+} sig_tok;
+
+static char kind_char(const odin3_arch_mport *port) {
+    if (port->is_out) {
+        return 'o';
+    }
+    return port->is_clock ? 'c' : 'i';
 }
 
-static bool sig_has(const char *sig, const char *tok) {
-    size_t len = strlen(tok);
+static void make_token(const odin3_arch_mport *port, sig_tok *tok) {
+    (void)snprintf(tok->text, sizeof tok->text, "%c:%s", kind_char(port), port->name);
+}
+
+static bool sig_has(const char *sig, const sig_tok *tok) {
+    size_t len = strlen(tok->text);
     for (const char *at = sig; *at != '\0';) {
         const char *end = strchr(at, ' ');
-        size_t n = end != NULL ? (size_t)(end - at) : strlen(at);
-        if (n == len && strncmp(at, tok, n) == 0) {
+        size_t span = end != NULL ? (size_t)(end - at) : strlen(at);
+        if (span == len && strncmp(at, tok->text, span) == 0) {
             return true;
         }
-        at = end != NULL ? end + 1 : at + n;
+        at = end != NULL ? end + 1 : at + span;
     }
     return false;
 }
@@ -69,22 +80,23 @@ static bool sig_has(const char *sig, const char *tok) {
 static uint32_t sig_count(const char *sig) {
     uint32_t count = 1;
     for (const char *at = sig; *at != '\0'; at++) {
-        count += *at == ' ' ? 1u : 0u;
+        count += *at == ' ' ? 1U : 0U;
     }
     return count;
 }
 
 /* The first way the model differs from the template's signature, in msg; false when it matches. */
 static bool sig_differs(const odin3_arch_model *model, const char *sig, char *msg, size_t cap) {
-    char tok[LIB_TOKEN_MAX];
+    sig_tok tok;
     for (uint32_t i = 0; i < model->n_ports; i++) {
-        make_token(&model->ports[i], tok, sizeof tok);
-        if (!sig_has(sig, tok)) {
+        make_token(&model->ports[i], &tok);
+        if (!sig_has(sig, &tok)) {
             char suffix[LIB_TOKEN_MAX];
             (void)snprintf(suffix, sizeof suffix, ":%s", model->ports[i].name);
-            (void)snprintf(msg, cap, strstr(sig, suffix) != NULL
-                                         ? "port '%s' has another direction or clock flag"
-                                         : "port '%s' is not a port of the primitive",
+            (void)snprintf(msg, cap,
+                           strstr(sig, suffix) != NULL
+                               ? "port '%s' has another direction or clock flag"
+                               : "port '%s' is not a port of the primitive",
                            model->ports[i].name);
             return true;
         }
@@ -97,7 +109,8 @@ static bool sig_differs(const odin3_arch_model *model, const char *sig, char *ms
     return false;
 }
 
-/* The template for the model: NULL when its name is none of the four or its ports differ (warned). */
+/* The template for the model: NULL when its name is none of the four or its ports differ (warned).
+ */
 static const odin3_arch_template *template_for(const arch_rd *rd, const odin3_arch_model *model) {
     for (int i = 0; i < ODIN3_ARCH_N_TEMPLATES; i++) {
         const odin3_arch_template *tpl = &odin3_arch_templates[i];
@@ -115,7 +128,8 @@ static const odin3_arch_template *template_for(const arch_rd *rd, const odin3_ar
     return NULL;
 }
 
-/* --- generic cells ------------------------------------------------------------------------------ */
+/* --- generic cells ------------------------------------------------------------------------------
+ */
 
 static odin3_status add_generic(const arch_rd *rd, const odin3_arch_model *model,
                                 odin3_strbuf *out) {
@@ -125,8 +139,9 @@ static odin3_status add_generic(const arch_rd *rd, const odin3_arch_model *model
         uint32_t width = port->max_width;
         if (width == 0) {
             width = 1;
-            odin3_log(ODIN3_LOG_INFO, "%s:%u: model '%s' port '%s' is not used by any pb_type; "
-                                      "width 1",
+            odin3_log(ODIN3_LOG_INFO,
+                      "%s:%u: model '%s' port '%s' is not used by any pb_type; "
+                      "width 1",
                       rd->file, port->line, model->name, port->name);
         }
         st = odin3_strbuf_appendf(out, "  %s %s %u%s\n", port->is_out ? "out" : "in", port->name,
@@ -135,7 +150,8 @@ static odin3_status add_generic(const arch_rd *rd, const odin3_arch_model *model
     return st != ODIN3_OK ? st : odin3_strbuf_appendf(out, "end\n");
 }
 
-/* --- the library -------------------------------------------------------------------------------- */
+/* --- the library --------------------------------------------------------------------------------
+ */
 
 /* The file's stem as an identifier (spec L-1). */
 static odin3_status library_name(odin3_arch *arch) {
@@ -144,7 +160,7 @@ static odin3_status library_name(odin3_arch *arch) {
     size_t len = strlen(base);
     const char *dot = strrchr(base, '.');
     len = (dot != NULL && dot != base) ? (size_t)(dot - base) : len;
-    char *name = odin3_arena_alloc(arch->arena, len + 2u);
+    char *name = odin3_arena_alloc(arch->arena, len + 2U);
     if (name == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
@@ -154,7 +170,11 @@ static odin3_status library_name(odin3_arch *arch) {
     }
     for (size_t i = 0; i < len; i++) {
         bool keep = is_ident_start(base[i]) || (base[i] >= '0' && base[i] <= '9');
-        name[at++] = keep ? base[i] : '_';
+        if (keep) {
+            name[at++] = base[i];
+        } else {
+            name[at++] = '_';
+        }
     }
     arch->library = name;
     return ODIN3_OK;
@@ -195,20 +215,21 @@ odin3_status odin3_arch_make_library(odin3_arch *arch) {
     odin3_strbuf_clear(&arch->text);
     odin3_status st = library_name(arch);
     st = st != ODIN3_OK ? st : emit_models(&rd, &out);
-    st = st != ODIN3_OK ? st
-                        : odin3_strbuf_appendf(&arch->text,
-                                               "# generated by odin3 read_arch from %s (VPR "
-                                               "architecture)\n# models: %u, registered: %u\n"
-                                               "library %s\n",
-                                               arch->file, arch->n_models, arch->n_registered,
-                                               arch->library);
+    st = st != ODIN3_OK
+             ? st
+             : odin3_strbuf_appendf(&arch->text,
+                                    "# generated by odin3 read_arch from %s (VPR "
+                                    "architecture)\n# models: %u, registered: %u\n"
+                                    "library %s\n",
+                                    arch->file, arch->n_models, arch->n_registered, arch->library);
     if (st == ODIN3_OK && out.body.len > 0) {
         st = odin3_strbuf_append(&arch->text, (odin3_bytes){out.body.data, out.body.len});
     }
     odin3_strbuf_free(&out.body);
     if (st == ODIN3_OK && out.skipped > 0) {
-        odin3_log(ODIN3_LOG_WARN, "%s: %u models have names that are not .o3lib identifiers and "
-                                  "are not registered (first: '%s')",
+        odin3_log(ODIN3_LOG_WARN,
+                  "%s: %u models have names that are not .o3lib identifiers and "
+                  "are not registered (first: '%s')",
                   arch->file, out.skipped, out.first_skipped);
     }
     return st;

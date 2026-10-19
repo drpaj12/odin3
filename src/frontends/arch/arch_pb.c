@@ -9,9 +9,9 @@
 #include <string.h>
 
 typedef struct pb_frame {
-    uint32_t cursor;   /* the next child element index or ODIN3_XML_NONE */
-    uint32_t depth;    /* index of the pb_type in the level path */
-    const char *mode;  /* the mode this frame stands for, NULL for a pb_type frame */
+    uint32_t cursor;  /* the next child element index or ODIN3_XML_NONE */
+    uint32_t depth;   /* index of the pb_type in the level path */
+    const char *mode; /* the mode this frame stands for, NULL for a pb_type frame */
 } pb_frame;
 
 typedef struct pb_walk {
@@ -61,10 +61,15 @@ static odin3_status leaf_kind(const arch_rd *rd, const odin3_xml_elem *elem, con
     return arch_fail(rd, elem, "unsupported blif_model '%s'", text);
 }
 
+static odin3_arch_pin_dir pin_dir_of(const odin3_xml_elem *xp) {
+    if (arch_tag_is(xp, "input")) {
+        return ODIN3_ARCH_PIN_IN;
+    }
+    return arch_tag_is(xp, "output") ? ODIN3_ARCH_PIN_OUT : ODIN3_ARCH_PIN_CLOCK;
+}
+
 static odin3_status read_pin(const arch_rd *rd, const odin3_xml_elem *xp, odin3_arch_pin *pin) {
-    pin->dir = arch_tag_is(xp, "input")    ? ODIN3_ARCH_PIN_IN
-               : arch_tag_is(xp, "output") ? ODIN3_ARCH_PIN_OUT
-                                           : ODIN3_ARCH_PIN_CLOCK;
+    pin->dir = pin_dir_of(xp);
     odin3_status st = arch_attr_req(rd, xp, "name", &pin->name);
     st = st != ODIN3_OK ? st : arch_attr_u32(rd, xp, "num_pins", 1, &pin->num_pins);
     return st != ODIN3_OK ? st : arch_attr(rd, xp, "port_class", &pin->port_class);
@@ -74,26 +79,29 @@ static bool is_pin_tag(const odin3_xml_elem *elem) {
     return arch_tag_is(elem, "input") || arch_tag_is(elem, "output") || arch_tag_is(elem, "clock");
 }
 
-static odin3_status read_pins(const arch_rd *rd, const odin3_xml_elem *elem, odin3_arch_leaf *leaf) {
+static odin3_status read_pins(const arch_rd *rd, const odin3_xml_elem *elem,
+                              odin3_arch_leaf *leaf) {
     uint32_t count = 0;
-    for (const odin3_xml_elem *c = arch_first(rd, elem); c != NULL; c = arch_next(rd, c)) {
-        count += is_pin_tag(c) ? 1u : 0u;
+    for (const odin3_xml_elem *child = arch_first(rd, elem); child != NULL;
+         child = arch_next(rd, child)) {
+        count += is_pin_tag(child) ? 1U : 0U;
     }
-    odin3_arch_pin *pins = odin3_arena_alloc(rd->arch->arena, (count + 1u) * sizeof *pins);
+    odin3_arch_pin *pins = odin3_arena_alloc(rd->arch->arena, (count + 1U) * sizeof *pins);
     if (pins == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    uint32_t n = 0;
-    for (const odin3_xml_elem *c = arch_first(rd, elem); c != NULL; c = arch_next(rd, c)) {
-        if (is_pin_tag(c)) {
-            odin3_status st = read_pin(rd, c, &pins[n++]);
+    uint32_t filled = 0;
+    for (const odin3_xml_elem *child = arch_first(rd, elem); child != NULL;
+         child = arch_next(rd, child)) {
+        if (is_pin_tag(child)) {
+            odin3_status st = read_pin(rd, child, &pins[filled++]);
             if (st != ODIN3_OK) {
                 return st;
             }
         }
     }
     leaf->pins = pins;
-    leaf->n_pins = n;
+    leaf->n_pins = filled;
     return ODIN3_OK;
 }
 
@@ -106,38 +114,46 @@ static const odin3_arch_mport *find_mport(const odin3_arch_model *model, const c
     return NULL;
 }
 
-/* VPR's checks of a leaf against its model (arch_util.cpp). */
-static odin3_status check_leaf(const pb_walk *w, const odin3_xml_elem *elem,
+/* VPR's checks of one leaf port against its model's port (arch_util.cpp). */
+static odin3_status check_pin(const arch_rd *rd, const odin3_xml_elem *elem, const char *pb,
+                              const odin3_arch_model *model, const odin3_arch_pin *pin) {
+    const odin3_arch_mport *port = find_mport(model, pin->name);
+    bool out = pin->dir == ODIN3_ARCH_PIN_OUT;
+    if (port == NULL) {
+        return arch_fail(rd, elem, "pb_type '%s' port '%s' is not a port of model '%s'", pb,
+                         pin->name, model->name);
+    }
+    if (port->is_out != out) {
+        return arch_fail(rd, elem, "pb_type '%s' port '%s' is %s but model '%s' declares %s", pb,
+                         pin->name, out ? "an output" : "an input", model->name,
+                         out ? "an input" : "an output");
+    }
+    /* VPR checks is_clock for input model ports only: a clock output of the model may be a plain
+     * output in the pb_type. */
+    if (!port->is_out && (pin->dir == ODIN3_ARCH_PIN_CLOCK) != port->is_clock) {
+        return arch_fail(rd, elem, "pb_type '%s' port '%s' %s a clock but model '%s' %s", pb,
+                         pin->name, port->is_clock ? "is not" : "is", model->name,
+                         port->is_clock ? "declares it one" : "does not");
+    }
+    return ODIN3_OK;
+}
+
+static odin3_status check_leaf(const pb_walk *walk, const odin3_xml_elem *elem,
                                const odin3_arch_leaf *leaf) {
-    const arch_rd *rd = w->rd;
+    const arch_rd *rd = walk->rd;
     if (leaf->kind != ODIN3_ARCH_LEAF_SUBCKT) {
         return ODIN3_OK;
     }
-    const char *pb = ((const odin3_arch_level *)w->levels.data)[w->levels.len - 1].pb;
+    const char *pb = ((const odin3_arch_level *)walk->levels.data)[walk->levels.len - 1].pb;
     const odin3_arch_model *model = odin3_arch_model_find(rd->arch, leaf->model);
     if (model == NULL) {
         return arch_fail(rd, elem, "pb_type '%s' uses model '%s', which is not in <models>", pb,
                          leaf->model);
     }
     for (uint32_t i = 0; i < leaf->n_pins; i++) {
-        const odin3_arch_pin *pin = &leaf->pins[i];
-        const odin3_arch_mport *port = find_mport(model, pin->name);
-        bool out = pin->dir == ODIN3_ARCH_PIN_OUT;
-        if (port == NULL) {
-            return arch_fail(rd, elem, "pb_type '%s' port '%s' is not a port of model '%s'", pb,
-                             pin->name, model->name);
-        }
-        if (port->is_out != out) {
-            return arch_fail(rd, elem, "pb_type '%s' port '%s' is %s but model '%s' declares %s",
-                             pb, pin->name, out ? "an output" : "an input", model->name,
-                             out ? "an input" : "an output");
-        }
-        /* VPR checks is_clock for input model ports only (arch_util.cpp): a clock output of the
-         * model may be a plain output in the pb_type. */
-        if (!port->is_out && (pin->dir == ODIN3_ARCH_PIN_CLOCK) != port->is_clock) {
-            return arch_fail(rd, elem, "pb_type '%s' port '%s' %s a clock but model '%s' %s", pb,
-                             pin->name, port->is_clock ? "is not" : "is", model->name,
-                             port->is_clock ? "declares it one" : "does not");
+        odin3_status st = check_pin(rd, elem, pb, model, &leaf->pins[i]);
+        if (st != ODIN3_OK) {
+            return st;
         }
     }
     return ODIN3_OK;
@@ -154,65 +170,74 @@ static void note_lut(odin3_arch *arch, const odin3_arch_leaf *leaf) {
     }
 }
 
-static odin3_status record_leaf(pb_walk *w, const odin3_xml_elem *elem, const char *blif) {
-    arch_rd *rd = w->rd;
+static odin3_status record_leaf(pb_walk *walk, const odin3_xml_elem *elem, const char *blif) {
+    arch_rd *rd = walk->rd;
     odin3_arch_leaf leaf = {0};
     leaf.line = elem->line;
     odin3_status st = leaf_kind(rd, elem, blif, &leaf);
     st = st != ODIN3_OK ? st : arch_attr(rd, elem, "class", &leaf.cls);
     st = st != ODIN3_OK ? st : read_pins(rd, elem, &leaf);
-    st = st != ODIN3_OK ? st : check_leaf(w, elem, &leaf);
+    st = st != ODIN3_OK ? st : check_leaf(walk, elem, &leaf);
     if (st != ODIN3_OK) {
         return st;
     }
-    size_t bytes = w->levels.len * sizeof(odin3_arch_level);
-    odin3_arch_level *path = odin3_arena_alloc(rd->arch->arena, bytes + 1u);
+    size_t bytes = walk->levels.len * sizeof(odin3_arch_level);
+    odin3_arch_level *path = odin3_arena_alloc(rd->arch->arena, bytes + 1U);
     odin3_arch_leaf *slot = path != NULL ? odin3_vec_push(&rd->arch->leaves) : NULL;
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    memcpy(path, w->levels.data, bytes);
+    memcpy(path, walk->levels.data, bytes);
     leaf.levels = path;
-    leaf.n_levels = (uint32_t)w->levels.len;
+    leaf.n_levels = (uint32_t)walk->levels.len;
     leaf.num_pb = path[leaf.n_levels - 1].num_pb;
     *slot = leaf;
     note_lut(rd->arch, &leaf);
     return ODIN3_OK;
 }
 
-/* --- interconnect ------------------------------------------------------------------------------ */
+/* --- interconnect ------------------------------------------------------------------------------
+ */
 
 static odin3_status read_packs(const arch_rd *rd, const odin3_xml_elem *elem, odin3_arch_ic *ic) {
     uint32_t count = arch_count(rd, elem, "pack_pattern");
-    odin3_arch_pack *packs = odin3_arena_alloc(rd->arch->arena, (count + 1u) * sizeof *packs);
+    odin3_arch_pack *packs = odin3_arena_alloc(rd->arch->arena, (count + 1U) * sizeof *packs);
     if (packs == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    uint32_t n = 0;
-    for (const odin3_xml_elem *c = arch_first(rd, elem); c != NULL; c = arch_next(rd, c)) {
-        if (!arch_tag_is(c, "pack_pattern")) {
+    uint32_t filled = 0;
+    for (const odin3_xml_elem *child = arch_first(rd, elem); child != NULL;
+         child = arch_next(rd, child)) {
+        if (!arch_tag_is(child, "pack_pattern")) {
             continue;
         }
-        odin3_status st = arch_attr_req(rd, c, "name", &packs[n].name);
-        st = st != ODIN3_OK ? st : arch_attr(rd, c, "in_port", &packs[n].in_port);
-        st = st != ODIN3_OK ? st : arch_attr(rd, c, "out_port", &packs[n].out_port);
+        odin3_status st = arch_attr_req(rd, child, "name", &packs[filled].name);
+        st = st != ODIN3_OK ? st : arch_attr(rd, child, "in_port", &packs[filled].in_port);
+        st = st != ODIN3_OK ? st : arch_attr(rd, child, "out_port", &packs[filled].out_port);
         if (st != ODIN3_OK) {
             return st;
         }
-        n++;
+        filled++;
     }
     ic->packs = packs;
-    ic->n_packs = n;
+    ic->n_packs = filled;
     return ODIN3_OK;
 }
 
-static odin3_status record_ic(pb_walk *w, const odin3_xml_elem *elem, const pb_frame *frame) {
-    arch_rd *rd = w->rd;
+static const char *ic_kind(const odin3_xml_elem *elem) {
+    if (arch_tag_is(elem, "direct")) {
+        return "direct";
+    }
+    return arch_tag_is(elem, "mux") ? "mux" : "complete";
+}
+
+static odin3_status record_ic(pb_walk *walk, const odin3_xml_elem *elem, const pb_frame *frame) {
+    arch_rd *rd = walk->rd;
     odin3_arch_ic ic = {0};
     ic.line = elem->line;
     ic.in_mode = frame->mode;
-    ic.kind = arch_tag_is(elem, "direct") ? "direct" : arch_tag_is(elem, "mux") ? "mux" : "complete";
-    ic.pb = ((const odin3_arch_level *)w->levels.data)[frame->depth].pb;
+    ic.kind = ic_kind(elem);
+    ic.pb = ((const odin3_arch_level *)walk->levels.data)[frame->depth].pb;
     odin3_status st = arch_attr(rd, elem, "name", &ic.name);
     st = st != ODIN3_OK ? st : arch_attr(rd, elem, "input", &ic.input);
     st = st != ODIN3_OK ? st : arch_attr(rd, elem, "output", &ic.output);
@@ -227,11 +252,13 @@ static odin3_status record_ic(pb_walk *w, const odin3_xml_elem *elem, const pb_f
     return st;
 }
 
-static odin3_status record_interconnect(pb_walk *w, const odin3_xml_elem *group,
+static odin3_status record_interconnect(pb_walk *walk, const odin3_xml_elem *group,
                                         const pb_frame *frame) {
-    for (const odin3_xml_elem *c = arch_first(w->rd, group); c != NULL; c = arch_next(w->rd, c)) {
-        if (arch_tag_is(c, "direct") || arch_tag_is(c, "mux") || arch_tag_is(c, "complete")) {
-            odin3_status st = record_ic(w, c, frame);
+    for (const odin3_xml_elem *child = arch_first(walk->rd, group); child != NULL;
+         child = arch_next(walk->rd, child)) {
+        if (arch_tag_is(child, "direct") || arch_tag_is(child, "mux") ||
+            arch_tag_is(child, "complete")) {
+            odin3_status st = record_ic(walk, child, frame);
             if (st != ODIN3_OK) {
                 return st;
             }
@@ -240,10 +267,11 @@ static odin3_status record_interconnect(pb_walk *w, const odin3_xml_elem *group,
     return ODIN3_OK;
 }
 
-/* --- the walk ---------------------------------------------------------------------------------- */
+/* --- the walk ----------------------------------------------------------------------------------
+ */
 
-static odin3_status push_frame(pb_walk *w, uint32_t cursor, uint32_t depth, const char *mode) {
-    pb_frame *frame = odin3_vec_push(&w->stack);
+static odin3_status push_frame(pb_walk *walk, uint32_t cursor, uint32_t depth, const char *mode) {
+    pb_frame *frame = odin3_vec_push(&walk->stack);
     if (frame == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
@@ -251,9 +279,9 @@ static odin3_status push_frame(pb_walk *w, uint32_t cursor, uint32_t depth, cons
     return ODIN3_OK;
 }
 
-static odin3_status set_level(pb_walk *w, uint32_t depth, odin3_arch_level level) {
-    w->levels.len = depth; /* the level of a sibling subtree is dead */
-    odin3_arch_level *slot = odin3_vec_push(&w->levels);
+static odin3_status set_level(pb_walk *walk, uint32_t depth, odin3_arch_level level) {
+    walk->levels.len = depth; /* the level of a sibling subtree is dead */
+    odin3_arch_level *slot = odin3_vec_push(&walk->levels);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
@@ -261,50 +289,50 @@ static odin3_status set_level(pb_walk *w, uint32_t depth, odin3_arch_level level
     return ODIN3_OK;
 }
 
-static odin3_status enter_pb(pb_walk *w, const odin3_xml_elem *elem, const char *in_mode,
+static odin3_status enter_pb(pb_walk *walk, const odin3_xml_elem *elem, const char *in_mode,
                              uint32_t depth) {
     odin3_arch_level level = {NULL, in_mode, 1};
     const char *blif = NULL;
-    odin3_status st = arch_attr_req(w->rd, elem, "name", &level.pb);
-    st = st != ODIN3_OK ? st : arch_attr_u32(w->rd, elem, "num_pb", 1, &level.num_pb);
-    st = st != ODIN3_OK ? st : arch_attr(w->rd, elem, "blif_model", &blif);
-    st = st != ODIN3_OK ? st : set_level(w, depth, level);
+    odin3_status st = arch_attr_req(walk->rd, elem, "name", &level.pb);
+    st = st != ODIN3_OK ? st : arch_attr_u32(walk->rd, elem, "num_pb", 1, &level.num_pb);
+    st = st != ODIN3_OK ? st : arch_attr(walk->rd, elem, "blif_model", &blif);
+    st = st != ODIN3_OK ? st : set_level(walk, depth, level);
     if (st != ODIN3_OK) {
         return st;
     }
     if (blif != NULL) {
-        return record_leaf(w, elem, blif);
+        return record_leaf(walk, elem, blif);
     }
-    return push_frame(w, elem->first_child, depth, NULL);
+    return push_frame(walk, elem->first_child, depth, NULL);
 }
 
-static odin3_status step(pb_walk *w) {
-    pb_frame *top = odin3_vec_at(&w->stack, w->stack.len - 1);
+static odin3_status step(pb_walk *walk) {
+    pb_frame *top = odin3_vec_at(&walk->stack, walk->stack.len - 1);
     if (top->cursor == ODIN3_XML_NONE) {
-        odin3_vec_pop(&w->stack);
+        odin3_vec_pop(&walk->stack);
         return ODIN3_OK;
     }
-    const odin3_xml_elem *child = arch_elem(w->rd, top->cursor);
+    const odin3_xml_elem *child = arch_elem(walk->rd, top->cursor);
     pb_frame frame = *top;
     top->cursor = child->next_sibling;
     if (arch_tag_is(child, "pb_type")) {
-        return enter_pb(w, child, frame.mode, frame.depth + 1);
+        return enter_pb(walk, child, frame.mode, frame.depth + 1);
     }
     if (arch_tag_is(child, "interconnect")) {
-        return record_interconnect(w, child, &frame);
+        return record_interconnect(walk, child, &frame);
     }
     if (arch_tag_is(child, "mode") && frame.mode == NULL) {
         const char *mode = NULL;
-        odin3_status st = arch_attr_req(w->rd, child, "name", &mode);
-        return st != ODIN3_OK ? st : push_frame(w, child->first_child, frame.depth, mode);
+        odin3_status st = arch_attr_req(walk->rd, child, "name", &mode);
+        return st != ODIN3_OK ? st : push_frame(walk, child->first_child, frame.depth, mode);
     }
     return ODIN3_OK;
 }
 
-static odin3_status walk_top(pb_walk *w, const odin3_xml_elem *top) {
-    odin3_status st = enter_pb(w, top, NULL, 0);
-    while (st == ODIN3_OK && w->stack.len > 0) {
-        st = step(w);
+static odin3_status walk_top(pb_walk *walk, const odin3_xml_elem *top) {
+    odin3_status st = enter_pb(walk, top, NULL, 0);
+    while (st == ODIN3_OK && walk->stack.len > 0) {
+        st = step(walk);
     }
     return st;
 }
@@ -317,16 +345,17 @@ odin3_status arch_parse_pbs(arch_rd *rd, const odin3_xml_elem *blocks) {
     odin3_vec_init(&walk.stack, sizeof(pb_frame));
     odin3_vec_init(&walk.levels, sizeof(odin3_arch_level));
     odin3_status st = ODIN3_OK;
-    for (const odin3_xml_elem *c = arch_first(rd, blocks); st == ODIN3_OK && c != NULL;
-         c = arch_next(rd, c)) {
-        st = arch_tag_is(c, "pb_type") ? walk_top(&walk, c) : ODIN3_OK;
+    for (const odin3_xml_elem *child = arch_first(rd, blocks); st == ODIN3_OK && child != NULL;
+         child = arch_next(rd, child)) {
+        st = arch_tag_is(child, "pb_type") ? walk_top(&walk, child) : ODIN3_OK;
     }
     odin3_vec_free(&walk.stack);
     odin3_vec_free(&walk.levels);
     return st;
 }
 
-/* --- directlist -------------------------------------------------------------------------------- */
+/* --- directlist --------------------------------------------------------------------------------
+ */
 
 static odin3_status attr_i32(const arch_rd *rd, const odin3_xml_elem *elem, const char *name,
                              int32_t *out) {
@@ -337,7 +366,7 @@ static odin3_status attr_i32(const arch_rd *rd, const odin3_xml_elem *elem, cons
         return st;
     }
     char *end = NULL;
-    long value = strtol(text, &end, 10);
+    long value = strtol(text, &end, ODIN3_ARCH_DECIMAL);
     if (end == text || *end != '\0' || value < INT32_MIN || value > INT32_MAX) {
         return arch_fail(rd, elem, "attribute '%s' must be an integer, not '%s'", name, text);
     }
@@ -345,26 +374,28 @@ static odin3_status attr_i32(const arch_rd *rd, const odin3_xml_elem *elem, cons
     return ODIN3_OK;
 }
 
-static odin3_status read_direct(const arch_rd *rd, const odin3_xml_elem *xd, odin3_arch_direct *d) {
-    d->line = xd->line;
-    odin3_status st = arch_attr_req(rd, xd, "name", &d->name);
-    st = st != ODIN3_OK ? st : arch_attr(rd, xd, "from_pin", &d->from_pin);
-    st = st != ODIN3_OK ? st : arch_attr(rd, xd, "to_pin", &d->to_pin);
-    st = st != ODIN3_OK ? st : attr_i32(rd, xd, "x_offset", &d->x_offset);
-    st = st != ODIN3_OK ? st : attr_i32(rd, xd, "y_offset", &d->y_offset);
-    return st != ODIN3_OK ? st : attr_i32(rd, xd, "z_offset", &d->z_offset);
+static odin3_status read_direct(const arch_rd *rd, const odin3_xml_elem *xd,
+                                odin3_arch_direct *entry) {
+    entry->line = xd->line;
+    odin3_status st = arch_attr_req(rd, xd, "name", &entry->name);
+    st = st != ODIN3_OK ? st : arch_attr(rd, xd, "from_pin", &entry->from_pin);
+    st = st != ODIN3_OK ? st : arch_attr(rd, xd, "to_pin", &entry->to_pin);
+    st = st != ODIN3_OK ? st : attr_i32(rd, xd, "x_offset", &entry->x_offset);
+    st = st != ODIN3_OK ? st : attr_i32(rd, xd, "y_offset", &entry->y_offset);
+    return st != ODIN3_OK ? st : attr_i32(rd, xd, "z_offset", &entry->z_offset);
 }
 
 odin3_status arch_parse_directlist(arch_rd *rd, const odin3_xml_elem *list) {
     if (list == NULL) {
         return ODIN3_OK;
     }
-    for (const odin3_xml_elem *c = arch_first(rd, list); c != NULL; c = arch_next(rd, c)) {
-        if (!arch_tag_is(c, "direct")) {
+    for (const odin3_xml_elem *child = arch_first(rd, list); child != NULL;
+         child = arch_next(rd, child)) {
+        if (!arch_tag_is(child, "direct")) {
             continue;
         }
-        odin3_arch_direct d = {0};
-        odin3_status st = read_direct(rd, c, &d);
+        odin3_arch_direct entry = {0};
+        odin3_status st = read_direct(rd, child, &entry);
         odin3_arch_direct *slot = st == ODIN3_OK ? odin3_vec_push(&rd->arch->directs) : NULL;
         if (st == ODIN3_OK && slot == NULL) {
             st = ODIN3_ERR_NO_MEMORY;
@@ -372,12 +403,13 @@ odin3_status arch_parse_directlist(arch_rd *rd, const odin3_xml_elem *list) {
         if (st != ODIN3_OK) {
             return st;
         }
-        *slot = d;
+        *slot = entry;
     }
     return ODIN3_OK;
 }
 
-/* --- sizes and flags after the walk ------------------------------------------------------------ */
+/* --- sizes and flags after the walk ------------------------------------------------------------
+ */
 
 static bool is_adder_model(const odin3_arch_model *model) {
     static const char *const k_names[] = {"a", "b", "cin", "cout", "sumout"};
@@ -392,21 +424,27 @@ static bool is_adder_model(const odin3_arch_model *model) {
     return true;
 }
 
+/* The VPR port sizes: the maximum and minimum num_pins over the leaves of the model. */
+static void note_widths(const odin3_arch_model *model, const odin3_arch_leaf *leaf) {
+    for (uint32_t pin_idx = 0; pin_idx < leaf->n_pins; pin_idx++) {
+        odin3_arch_mport *port = (odin3_arch_mport *)find_mport(model, leaf->pins[pin_idx].name);
+        uint32_t width = leaf->pins[pin_idx].num_pins;
+        port->max_width = width > port->max_width ? width : port->max_width;
+        port->min_width =
+            (port->min_width == 0 || width < port->min_width) ? width : port->min_width;
+    }
+}
+
 void arch_finish_widths(arch_rd *rd) {
     odin3_arch *arch = rd->arch;
     for (uint32_t i = 0; i < arch->leaves.len; i++) {
         const odin3_arch_leaf *leaf = odin3_vec_cat(&arch->leaves, i);
         const odin3_arch_model *model =
             leaf->kind == ODIN3_ARCH_LEAF_SUBCKT ? odin3_arch_model_find(arch, leaf->model) : NULL;
-        if (model == NULL) {
-            continue;
-        }
-        arch->has_adder = arch->has_adder || (strcmp(model->name, "adder") == 0 && is_adder_model(model));
-        for (uint32_t p = 0; p < leaf->n_pins; p++) {
-            odin3_arch_mport *port = (odin3_arch_mport *)find_mport(model, leaf->pins[p].name);
-            uint32_t width = leaf->pins[p].num_pins;
-            port->max_width = width > port->max_width ? width : port->max_width;
-            port->min_width = (port->min_width == 0 || width < port->min_width) ? width : port->min_width;
+        if (model != NULL) {
+            arch->has_adder =
+                arch->has_adder || (strcmp(model->name, "adder") == 0 && is_adder_model(model));
+            note_widths(model, leaf);
         }
     }
 }

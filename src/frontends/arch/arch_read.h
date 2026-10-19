@@ -13,7 +13,7 @@
 #include <stdint.h>
 
 /* The most nodes (elements, attributes, text runs) the importer reads (spec X-2). */
-enum { ODIN3_ARCH_MAX_XML_NODES = 1u << 24 };
+enum { ODIN3_ARCH_MAX_XML_NODES = 1U << 24, ODIN3_ARCH_DECIMAL = 10 };
 
 typedef struct arch_rd {
     odin3_arch *arch;
@@ -59,7 +59,8 @@ uint32_t arch_count(const arch_rd *rd, const odin3_xml_elem *elem, const char *t
 /* spec M-1..M-3: the `<models>` element (NULL: none). */
 odin3_status arch_parse_models(arch_rd *rd, const odin3_xml_elem *models);
 
-/* spec P-1..P-7: the `<complexblocklist>` element (NULL: none) and the `<directlist>` of the root. */
+/* spec P-1..P-7: the `<complexblocklist>` element (NULL: none) and the `<directlist>` of the root.
+ */
 odin3_status arch_parse_pbs(arch_rd *rd, const odin3_xml_elem *blocks);
 odin3_status arch_parse_directlist(arch_rd *rd, const odin3_xml_elem *list);
 

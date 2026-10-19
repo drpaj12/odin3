@@ -4,8 +4,8 @@
 #include "frontends/arch/arch.h"
 
 #include "frontends/arch/arch_read.h"
-#include "util/alloc.h"
 #include "techlib/reader.h"
+#include "util/alloc.h"
 #include "util/log.h"
 
 #include <stdio.h>
@@ -148,7 +148,8 @@ odin3_status odin3_arch_parse(odin3_arch *arch, const odin3_arch_src *src) {
     return st;
 }
 
-/* --- the import -------------------------------------------------------------------------------- */
+/* --- the import --------------------------------------------------------------------------------
+ */
 
 enum { ARCH_READ_CHUNK = 1 << 16, ARCH_NAME_MAX = 1024 };
 

@@ -25,8 +25,8 @@ static odin3_status one_word(const char *pass, odin3_bytes args, odin3_strbuf *b
 
 static bool has_suffix(const char *path, const char *suffix) {
     size_t len = strlen(path);
-    size_t n = strlen(suffix);
-    return len >= n && strcmp(path + len - n, suffix) == 0;
+    size_t suffix_len = strlen(suffix);
+    return len >= suffix_len && strcmp(path + len - suffix_len, suffix) == 0;
 }
 
 static odin3_status read_arch_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
@@ -56,9 +56,13 @@ static odin3_status write_techlib_run(odin3_pass_ctx *ctx, odin3_design *design,
     odin3_strbuf path;
     odin3_strbuf_init(&path);
     odin3_status st = one_word("write_techlib", args, &path);
-    const odin3_arch *arch = odin3_design_arch(design);
+    odin3_arch *arch = NULL;
+    if (st == ODIN3_OK && odin3_design_arch(design) != NULL) {
+        st = odin3_design_get_arch(design, &arch); /* returns the existing record */
+    }
     if (st == ODIN3_OK && arch == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "write_techlib: no architecture has been read (read_arch first)");
+        odin3_log(ODIN3_LOG_ERROR,
+                  "write_techlib: no architecture has been read (read_arch first)");
         st = ODIN3_ERR_INVALID_ARG;
     }
     if (st == ODIN3_OK && strcmp(path.data, "-") == 0) {

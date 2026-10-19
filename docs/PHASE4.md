@@ -28,7 +28,7 @@ writers and harnesses Opus `high`; bulk configs Sonnet. Peter reviews every mapp
 
 Each item has a one-line acceptance test.
 
-- [ ] 4.1 VPR-XML import: `read_arch` reads a VPR arch's `<models>` and pb_types into a
+- [x] 4.1 VPR-XML import: `read_arch` reads a VPR arch's `<models>` and pb_types into a
   `.o3lib` tech library. Test: the imported library for the Phase 3 arch yields the same hard
   cells and ports as `lib/vtr.o3lib`; each sweep arch imports without error.
 - [ ] 4.2 Generic hard blocks matched by exact port signature (Odin II style). Test: a

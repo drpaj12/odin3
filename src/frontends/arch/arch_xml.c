@@ -6,6 +6,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum { ARCH_MSG_MAX = 480 };
@@ -25,7 +26,7 @@ odin3_status arch_fail(const arch_rd *rd, const odin3_xml_elem *at, const char *
     va_start(ap, fmt);
     (void)vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
-    odin3_log(ODIN3_LOG_ERROR, "%s:%u: %s", rd->file, at != NULL ? at->line : 0u, msg);
+    odin3_log(ODIN3_LOG_ERROR, "%s:%u: %s", rd->file, at != NULL ? at->line : 0U, msg);
     return ODIN3_ERR_PARSE;
 }
 
@@ -58,12 +59,9 @@ odin3_status arch_attr_u32(const arch_rd *rd, const odin3_xml_elem *elem, const 
     if (st != ODIN3_OK || text == NULL) {
         return st;
     }
-    uint64_t value = 0;
-    size_t i = 0;
-    for (; text[i] >= '0' && text[i] <= '9' && value <= UINT32_MAX; i++) {
-        value = value * 10 + (uint64_t)(text[i] - '0');
-    }
-    if (i == 0 || text[i] != '\0' || value > UINT32_MAX) {
+    char *end = NULL;
+    unsigned long long value = strtoull(text, &end, ODIN3_ARCH_DECIMAL);
+    if (text[0] < '0' || text[0] > '9' || *end != '\0' || value > UINT32_MAX) {
         return arch_fail(rd, elem, "attribute '%s' must be a non-negative integer, not '%s'", name,
                          text);
     }
@@ -99,9 +97,10 @@ const odin3_xml_elem *arch_next(const arch_rd *rd, const odin3_xml_elem *elem) {
 }
 
 const odin3_xml_elem *arch_child(const arch_rd *rd, const odin3_xml_elem *elem, const char *tag) {
-    for (const odin3_xml_elem *c = arch_first(rd, elem); c != NULL; c = arch_next(rd, c)) {
-        if (arch_tag_is(c, tag)) {
-            return c;
+    for (const odin3_xml_elem *child = arch_first(rd, elem); child != NULL;
+         child = arch_next(rd, child)) {
+        if (arch_tag_is(child, tag)) {
+            return child;
         }
     }
     return NULL;
@@ -109,8 +108,9 @@ const odin3_xml_elem *arch_child(const arch_rd *rd, const odin3_xml_elem *elem, 
 
 uint32_t arch_count(const arch_rd *rd, const odin3_xml_elem *elem, const char *tag) {
     uint32_t count = 0;
-    for (const odin3_xml_elem *c = arch_first(rd, elem); c != NULL; c = arch_next(rd, c)) {
-        count += arch_tag_is(c, tag) ? 1u : 0u;
+    for (const odin3_xml_elem *child = arch_first(rd, elem); child != NULL;
+         child = arch_next(rd, child)) {
+        count += arch_tag_is(child, tag) ? 1U : 0U;
     }
     return count;
 }
