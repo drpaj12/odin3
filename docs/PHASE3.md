@@ -1232,6 +1232,47 @@ then the options considered.
     divider and multiplier structure to the gate on these 1-4 gates (a lowering-algorithm choice;
     `lower` is unchanged here). Not a soundness question.
 
+48. **3D-7 the in-memory exchange (plan Tasks 20 and 21): the agent defaults and the flip gate**
+    (2026-10-19, branch `feat/3D-7`; agent defaults, Peter may override). (a) **The default
+    exchange is still BLIF.** The flip is its own commit, made only after `abc_diff_golden` and the
+    H1/H4 legs have recorded their per-design ratios here (I8); those are the controller's heavy
+    runs (commands in the 3D-7 report) and are not done, so the gate is not met. The flip is one
+    line in `odin3_abc_exchange_choice` (`src/passes/abc/args.c`: the default `ODIN3_ABC_EXCHANGE_BLIF`
+    becomes `_AIG`) plus the cases that name the default (`test_abc_aig`'s `test_session_commands`,
+    the "BLIF exchange" default in `abc.h`'s comment). `ODIN3_ABC_EXCHANGE=aig` selects the new
+    exchange until then; `--via-blif` and the subprocess route stay BLIF. (b) The plan's layout test
+    for `t1` says the register input is `(6, ...)`; it is the AND, so `(8, ...)` (`(9, ...)` with
+    INIT 1), and the PO of `y` is `(6, ...)` (`(7, ...)`). (c) The in-memory session lives in
+    `exchange.c` (`odin3_abc_exchange_aig`), the aligned MiniLUT in `aligned.c`, and the AIG in
+    `aig.[ch]`; `odin3_abc_aligned_build` takes `const odin3_abc_run *` so that it reads the region.
+    The AIG keeps a third map, literal variable to lowest-ID soft output net (`var_net`), which is
+    the name map's reverse index. The aligned MiniLUT has one register output per *input* register
+    (the plan's "2 register outputs" reading is the result's count; the test uses three input
+    registers, two of them merged by `scorr`, and finds three aligned register outputs and the
+    constant 0 on the third register input). (d) `odin3_abc_result_from_luts` trusts nothing in
+    `ci_from` (the 3D-2 final review's note): a result register whose PI name is not an input
+    register's `c<n>`, or repeats one, is `register J carries no input register's name`; a fanin
+    that is not an earlier PI or LUT is `a fanin is not an earlier input or LUT` and a register
+    count above the PI or PO count `more registers than inputs or outputs` (both new malformed-network
+    texts under §11's prefix). A LUT may follow a PO in the MiniLUT: objects are numbered by kind in
+    order of appearance. (e) Name-map anchors (fine provenance): `result.old_lit` carries the proven
+    MiniAIG literal per LUT object; folding remaps it and the init-1 restore flips its low bit when
+    it complements a LUT (so a restored D source stays sound). A LUT or old net that already has an
+    identity anchor, and a CI or CO net, gets no name-map anchor; only phase C moves names, and only
+    for an uncomplemented anchor. The name map is skipped under `--prov cone`, above the cap, on
+    the BLIF exchange, and on a `RESULT` or `COMMAND` failure, with the §8.2 INFO line and its
+    reason. (f) Observation outputs are not built (the spike's criterion 2 passes for the default
+    script, C8 of decision 22). (g) The fake engine gained an in-memory mode (LUTs of two inputs, an
+    inverter LUT before a complemented PO, `ci_from` by loaded PI name); its `name_map` returns
+    `RESULT`. `test_abc_splice`, `test_abc_unconn` and `test_abc_init1` run every case on both
+    exchanges; the real-engine fine-mode cases are in `test_abc_prov` (linked with the adapter's
+    sources, as `test_abc_child_real`). (h) `abc-diff` counts LUTs (`.names` with an input), FFs
+    and LUT depth from the written BLIF, prints `equivalent`, or `explain` for equivalent results
+    with a ratio more than 5% from 1 (exact integer arithmetic), and accepts `differs` and `timeout`
+    as pinned statuses in its expect list; `--keep DIR` defaults to a fresh directory under
+    `~/odin3-ws/work/abc-diff/`. **To record before the flip:** the 19 per-design ratios and their
+    explanations (`abc_diff_golden`), and H1/H4.
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this

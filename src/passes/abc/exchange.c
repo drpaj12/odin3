@@ -389,7 +389,12 @@ static odin3_status aig_name_map(odin3_abc_run *run, const odin3_abc_luts *luts,
         arena != NULL ? odin3_abc_aligned_build(run, luts, arena, &aligned) : ODIN3_ERR_NO_MEMORY;
     st = st == ODIN3_OK ? eng->name_map(eng->self, &aligned, &lits, &fail) : st;
     flush_lines(run);
-    if (st == ODIN3_ERR_ENGINE) {
+    if (st ==
+        ODIN3_ERR_INVALID_ARG) { /* not reached after the result's checks: no map, no failure */
+        (void)snprintf(run->nomap_reason, sizeof run->nomap_reason,
+                       "ABC: the aligned network cannot be built");
+        st = ODIN3_OK;
+    } else if (st == ODIN3_ERR_ENGINE) {
         st = name_map_failed(run, &fail);
     } else if (st == ODIN3_OK) {
         uint32_t lut_base = FIRST_OBJ_NUMBER + res->n_cis + (uint32_t)run->region->regs.len;

@@ -16,6 +16,9 @@
 #include "util/sha256.h"
 
 #include <regex.h>
+#ifdef ODIN3_HAVE_REAL_ABC
+#include "odin3_abc.h"
+#endif
 
 #ifndef ODIN3_LIB_DIR
 #error "ODIN3_LIB_DIR must name lib/"
@@ -56,6 +59,7 @@ void tearDown(void) {
     odin3_abc_test_set_run_limits(NULL);
     odin3_abc_test_set_engine(NULL);
     odin3_abc_test_set_route(ODIN3_ABC_TEST_ROUTE_AUTO);
+    (void)unsetenv("ODIN3_ABC_EXCHANGE");
     odin3_log_set_sink(NULL, NULL);
     odin3_design_destroy(design);
     odin3_arena_destroy(lut_arena);
@@ -550,6 +554,114 @@ static void test_oom_sweep_over_records(void) {
     TEST_ASSERT_TRUE_MESSAGE(ok_after > 0, "the sweep never reached a success");
 }
 
+/* --- fine mode: the name map (3D plan Task 21; spec §8.2, §6.3) --------------------------- */
+
+/* The real linked engine for the rest of the case (registered once per process), with the
+ * in-memory exchange and K = 2, so a node with two readers stays a LUT of its own. */
+static void use_real_in_memory(void) {
+#ifdef ODIN3_HAVE_REAL_ABC
+    static bool registered;
+    if (!registered) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_adapter_init());
+        registered = true;
+    }
+    odin3_abc_test_set_engine(NULL);
+    TEST_ASSERT_EQUAL_INT(0, setenv("ODIN3_ABC_EXCHANGE", "aig", 1));
+#else
+    TEST_IGNORE_MESSAGE("built without ODIN3_WITH_ABC");
+#endif
+}
+
+/* p = a & b (or its inverse) feeds y1 = p & c and y2 = p | d, named net `p`. */
+static void build_two_readers(bool inverted, odin3_prov_id *s_p) {
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id in_c = input("c");
+    odin3_net_id in_d = input("d");
+    odin3_net_id net_p = wire_net("p");
+    odin3_net_id y1 = output("y1");
+    odin3_net_id y2 = output("y2");
+    odin3_net_id gate[3] = {in_a, in_b, net_p};
+    *s_p = odin3_node_prov(mod, cell_at(inverted ? "$_NAND_" : "$_AND_", 50, gate, 3));
+    (void)and_at(51, net_p, in_c, y1);
+    odin3_net_id gate_or[3] = {net_p, in_d, y2};
+    (void)cell_at("$_OR_", 52, gate_or, 3);
+}
+
+/* ABC proves the LUT of p equal to the old net p: it gets a region and a record of its own (the
+ * old gate's), and the old net's name moves onto the new net (phase C). */
+static void test_namemap_anchor_moves_the_name(void) {
+    use_real_in_memory();
+    odin3_prov_id s_p;
+    build_two_readers(false, &s_p);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 2"), afx_errors());
+    afx_check(design);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        0, afx_count(ODIN3_LOG_INFO, "abc: module 'm', no flip-flops: no name map"),
+        "the run has a name map");
+    odin3_node_id top = driver_of(port_net_of("y1"));
+    odin3_node_id feeder = lut_feeder(top);
+    expect_parents(feeder, &s_p, 1);
+    odin3_net_id moved = odin3_module_find_net(mod, afx_intern(design, "p"));
+    TEST_ASSERT_TRUE_MESSAGE(odin3_net_valid(moved), "the name p was lost");
+    TEST_ASSERT_EQUAL_UINT32(feeder.v, driver_of(moved).v);
+    /* y1's LUT stops at the anchored p: its region is its own gate alone */
+    odin3_prov_id s_1 = odin3_node_prov(mod, top);
+    TEST_ASSERT_TRUE(s_1.v != 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, odin3_prov_get(design, s_1)->kind);
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_prov_get(design, s_1)->parents.count);
+}
+
+/* The same with p = NAND(a, b): ABC's LUT is the AND, the anchor is complemented. It counts for
+ * the LUT's record and moves no name. */
+static void test_namemap_complemented_anchor_moves_no_name(void) {
+    use_real_in_memory();
+    odin3_prov_id s_p;
+    build_two_readers(true, &s_p);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 2"), afx_errors());
+    afx_check(design);
+    odin3_node_id feeder = lut_feeder(driver_of(port_net_of("y1")));
+    expect_parents(feeder, &s_p, 1);
+    TEST_ASSERT_FALSE_MESSAGE(odin3_net_valid(odin3_module_find_net(mod, afx_intern(design, "p"))),
+                              "a complemented anchor moved its name");
+}
+
+/* The pass arguments of a run and the reason its §8.2 line must give. */
+typedef struct no_map_case {
+    const char *args;
+    const char *reason;
+} no_map_case;
+
+/* The three reasons of the §8.2 line, on the fake engine. */
+static void expect_no_map_line(no_map_case which) {
+    TEST_ASSERT_EQUAL_INT(0, setenv("ODIN3_ABC_EXCHANGE", "aig", 1));
+    odin3_prov_id s_p;
+    build_two_readers(false, &s_p);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc(which.args), afx_errors());
+    afx_check(design);
+    char line[AFX_LINE];
+    (void)snprintf(line, sizeof line,
+                   "abc: module 'm', no flip-flops: no name map (%s); provenance uses cut cones",
+                   which.reason);
+    TEST_ASSERT_TRUE_MESSAGE(afx_has(ODIN3_LOG_INFO, line), line);
+}
+
+static void test_no_namemap_above_the_cap(void) {
+    odin3_abc_run_limits limits = {0};
+    limits.namemap_objs = 4;
+    odin3_abc_test_set_run_limits(&limits);
+    expect_no_map_line((no_map_case){"--lut 6", "the AIG has more than 4 objects"});
+}
+
+static void test_no_namemap_under_prov_cone(void) {
+    expect_no_map_line((no_map_case){"--lut 6 --prov cone", "--prov cone"});
+}
+
+/* The fake engine's name_map fails with RESULT: the run falls back to cones and succeeds. */
+static void test_no_namemap_after_an_engine_failure(void) {
+    expect_no_map_line((no_map_case){"--lut 6", "ABC: the fake engine has no name map"});
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_cone_records_in_node_order);
@@ -565,5 +677,10 @@ int main(void) {
     RUN_TEST(test_run_information_without_top);
     RUN_TEST(test_run_info_line);
     RUN_TEST(test_oom_sweep_over_records);
+    RUN_TEST(test_namemap_anchor_moves_the_name);
+    RUN_TEST(test_namemap_complemented_anchor_moves_no_name);
+    RUN_TEST(test_no_namemap_above_the_cap);
+    RUN_TEST(test_no_namemap_under_prov_cone);
+    RUN_TEST(test_no_namemap_after_an_engine_failure);
     return UNITY_END();
 }

@@ -453,6 +453,82 @@ static void test_internal_command_failure(void) {
     TEST_ASSERT_EQUAL_INT(0, unsetenv("ODIN3_ABC_EXCHANGE"));
 }
 
+/* --- the aligned MiniLUT ------------------------------------------------------------------- */
+
+/* Three input registers: k = 0 on a, k = 1 and k = 2 both on b. scorr merges 1 and 2 into one
+ * result register named after k = 1, so the result has two registers and the aligned MiniLUT has
+ * three register outputs, with the register input of k = 2 on the constant 0. */
+static void test_aligned_after_scorr_merge(void) {
+    load_text((blif_text){"merge3.blif", ".model m3\n.inputs clk a b\n.outputs q0 q1 q2\n"
+                                         ".latch a q0 re clk 0\n.latch b q1 re clk 0\n"
+                                         ".latch b q2 re clk 0\n.end\n"});
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, build_aig(), afx_errors());
+    const odin3_abc_engine *eng = odin3_abc_fake_engine();
+    odin3_abc_fail fail = {0};
+    odin3_abc_aig view = odin3_abc_aig_view(&aig);
+    odin3_abc_luts luts = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, eng->open(eng->self, NULL, NULL, &fail));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, eng->load_aig(eng->self, &view, &fail));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, eng->exec(eng->self, "scorr", &fail));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, eng->get_luts(eng->self, &luts, &fail));
+    TEST_ASSERT_EQUAL_UINT32(2, luts.n_regs);
+    odin3_arena *arena = odin3_arena_create(0);
+    odin3_abc_luts aligned = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_aligned_build(staged.run, &luts, arena, &aligned));
+    TEST_ASSERT_EQUAL_UINT32(3, aligned.n_regs);
+    TEST_ASSERT_EQUAL_UINT32(2, aligned.lut_size);
+    /* objects: 0, 1, PIs a b + three registers, no LUT, POs q0 q1 q2 + three register inputs */
+    TEST_ASSERT_EQUAL_UINT32(2U + 2U + 3U + 0U + 3U + 3U, aligned.n_objs);
+    const uint32_t first_po = 2U + 2U + 3U;
+    const uint32_t reg_pos = first_po + 3U; /* the register inputs of k = 0, 1, 2 */
+    const size_t width = aligned.lut_size;
+    TEST_ASSERT_EQUAL_INT(2, aligned.fanins[reg_pos * width]);        /* a: PI 0 */
+    TEST_ASSERT_EQUAL_INT(3, aligned.fanins[(reg_pos + 1U) * width]); /* b: PI 1 */
+    TEST_ASSERT_EQUAL_INT(0, aligned.fanins[(reg_pos + 2U) * width]); /* constant 0 */
+    for (uint32_t po = first_po; po < aligned.n_objs; po++) {
+        TEST_ASSERT_EQUAL_INT(0x7FFFFFFE, aligned.fanins[(po * width) + 1U]);
+    }
+    odin3_arena_destroy(arena);
+    eng->close(eng->self);
+    free_all();
+}
+
+/* --- the register correspondence ----------------------------------------------------------- */
+
+/* A hand-made MiniLUT of one real input and one register whose PI names ci_from[1]; the result
+ * is checked against expect (1 input, 1 output, 1 register, no K). */
+static odin3_status from_luts_with_name(int32_t name, bool has_names) {
+    static const int32_t fanins[6 * 2] = {
+        0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, /* constants */
+        0x7FFFFFFF, 0x7FFFFFFF,                         /* PI: the input */
+        0x7FFFFFFF, 0x7FFFFFFF,                         /* PI: the register */
+        2,          0x7FFFFFFE,                         /* PO y: reads the input */
+        3,          0x7FFFFFFE};                        /* PO: the register's D reads it */
+    static const uint32_t truths[6 * 1] = {0, UINT32_MAX, 0, 0, 0, 0};
+    int32_t names[2] = {0, name};
+    odin3_abc_luts luts = {fanins, truths, has_names ? names : NULL, 6, 1, 2};
+    odin3_abc_result_expect expect = {1, 1, 1, 0};
+    odin3_arena *arena = odin3_arena_create(0);
+    odin3_abc_result res;
+    odin3_status st = odin3_abc_result_from_luts(&luts, &expect, arena, &res);
+    odin3_abc_result_free(&res);
+    odin3_arena_destroy(arena);
+    return st;
+}
+
+static void test_result_names_checked(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, from_luts_with_name(1, true));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, from_luts_with_name(0, true)); /* a real input's name */
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_ERROR,
+                             "abc: ABC returned a malformed network: register 0 carries no input "
+                             "register's name"));
+    afx_log_reset();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, from_luts_with_name(-1, true));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, from_luts_with_name(1, false)); /* no names at all */
+    TEST_ASSERT_EQUAL_UINT32(
+        2, afx_count(ODIN3_LOG_ERROR, "abc: ABC returned a malformed network: register 0"));
+}
+
 /* --- the cap ------------------------------------------------------------------------------- */
 
 static void test_cap(void) {
@@ -539,6 +615,8 @@ int main(void) {
     RUN_TEST(test_equal_two_ports);
     RUN_TEST(test_equal_keep_net);
     RUN_TEST(test_pi_names);
+    RUN_TEST(test_aligned_after_scorr_merge);
+    RUN_TEST(test_result_names_checked);
     RUN_TEST(test_session_commands);
     RUN_TEST(test_session_commands_aig);
     RUN_TEST(test_internal_command_failure);
