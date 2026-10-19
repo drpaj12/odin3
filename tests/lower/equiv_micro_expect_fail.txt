@@ -32,3 +32,79 @@ keywords/inout/simple_inout.v [no bit-level] lower refuses a $tribuf cell (locat
 #   found no trace in 20 steps (none: ) and BLIF cec: no verdict (exit 4): ... unsupported: more
 #   than one clock domain (type, clock): [('fe', 'clock'), ('re', 'clock')]
 syntax/multi_edge_reader_writer.v [UNPROVEN:] untested for now (checker limit): negedge read plus posedge write of one memory; no counterexample in 20 steps, the BLIF cec supports one clock domain only
+#
+# 3B close (2026-10-18, release build, lane G): the lower_equiv_micro sweep of 12473742 had 68
+# unexpected files; 7 were checker bugs fixed in tools/lower-check/lower_equiv.py (a read past a
+# memory's words is x in the gold, not an alias: bm_simple_memory, bram, matmul; the base case
+# exposes the shared wires before opt_clean: expression_in_chain_modules,
+# mix_expression_in_module_port_nested, sign_extend_nomem, memory_combinational), 5 prove with a
+# longer limit and get `--timeout-for` in CMakeLists.txt (bm_match3_str_arch 112 s, cf_fir_3_8_8
+# 103 s, rs_decoder_1 134 s, cf_cordic_v_18_18_18 125 s, all alone with `--refine-timeout 300`),
+# multi_edge_reader_writer is above, and the rest are listed here. Every one was run alone, with
+# the default 60 s limit in the sweep (the same timeouts in the three sweeps of 2026-10-18, so
+# machine load is not the cause) and, for the files up to 90 KB, again with `--refine-timeout 300`
+# through tools/heavy-run (logs /tmp/claude-1000/g3b/b300*, bigk). The cause is the SAT proof of
+# multipliers and wide datapaths, which the full-width hard-block comparison of the soundness round
+# (PR 133) did not create: bm_match1..6 timed out at 60 s in the sweep before it too. Examples,
+#   tools/lower-check/lower-equiv --odin3 build/release/odin3 --yosys $VTR_ROOT/build/bin/yosys \
+#     --refine-timeout 400 tests/micro/verilog/micro/bm_match6_str_arch.v
+#   lower-equiv: bm_match6_str_arch.v: UNPROVEN: yosys-refine: timed out after 400 s   (rc=4, 407 s)
+#   (bm_match3_str_arch.v: ok (8 cells), 112 s, 86 MB; bm_match4: the proof passes, the base case
+#   gives no answer in 400 s, 1312 s in all)
+# A cap kill of Yosys while it flattens the gate (LU32PEEng, LU64PEEng, arm_core) is unproven too.
+micro/bm_match6_str_arch.v [UNPROVEN:] untested for now (size limit): multiply-accumulate on 9 bit operands, 18 bit sum: no proof in 400 s
+syntax/include-syntax.v [UNPROVEN:] untested for now (size limit): 8x8 multiplier: the proof passes, the base case needs about 280 s (include-syntax.v: ok at 283 s with a 300 s limit); the 60 s limit gives no answer (192 s in the sweep)
+micro/bm_match4_str_arch.v [UNPROVEN:] untested for now (size limit): multiply-accumulate on 9 bit operands, 18 bit sum: no proof in 400 s (the proof passes, the base case gives no answer in 400 s)
+micro/bm_match1_str_arch.v [UNPROVEN:] untested for now (size limit): multiply-accumulate on 9 bit operands, 18 bit sum: no proof in 400 s
+micro/bm_match2_str_arch.v [UNPROVEN:] untested for now (size limit): multiply-accumulate on 9 bit operands, 18 bit sum: no proof in 400 s
+micro/bm_match5_str_arch.v [UNPROVEN:] untested for now (size limit): multiply-accumulate on 9 bit operands, 18 bit sum: no proof in 400 s
+full/diffeq1.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+syntax/diffeq_paj_convert.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+syntax/ifdef-else-syntax.v [UNPROVEN:] untested for now (size limit): 8x8 multiplier: the proof passes, the base case needs about 280 s (include-syntax.v: ok at 283 s with a 300 s limit); the 60 s limit gives no answer (194 s in the sweep)
+syntax/inferred_ram_w_clog2.v [UNPROVEN:] untested for now (size limit): 3776-latch RAM: proves in 400 s with a 300 s limit and a 4G cap, past the 60 s limit
+syntax/ifndef-else-syntax.v [UNPROVEN:] untested for now (size limit): 8x8 multiplier: the proof passes, the base case needs about 280 s (include-syntax.v: ok at 283 s with a 300 s limit); the 60 s limit gives no answer (193 s in the sweep)
+micro/bm_base_multiply.v [UNPROVEN:] untested for now (size limit): 8x8 multiplier: the proof passes, the base case needs about 280 s (include-syntax.v: ok at 283 s with a 300 s limit); the 60 s limit gives no answer (194 s in the sweep)
+syntax/nested-ifdef-syntax.v [UNPROVEN:] untested for now (size limit): 8x8 multiplier: the proof passes, the base case needs about 280 s (include-syntax.v: ok at 283 s with a 300 s limit); the 60 s limit gives no answer (194 s in the sweep)
+full/diffeq2.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+syntax/diffeq_f_systemC.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+syntax/multi_clock_reader_writer.v [UNPROVEN:] untested for now (size limit): two clocks around a memory: the SAT flow cannot pair the memory registers, no counterexample in 20 steps, the BLIF cec supports one clock domain only
+full/iir_no_combinational.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+FIR/ex1BT16_fir_20.v [UNPROVEN:] untested for now (size limit): the proof passes, the base case from the initial state gives no answer in 300 s
+full/iir1.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+FIR/ex1PM16_fir_28.v [UNPROVEN:] untested for now (size limit): the proof passes, the base case from the initial state gives no answer in 300 s
+FIR/ex1LS16_fir_41.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+FIR/ex2BT16_fir_71.v [UNPROVEN:] untested for now (size limit): SAT proof killed by the 2G memory cap after about 248 s
+full/stereovision3.v [UNPROVEN:] untested for now (size limit): the SAT flow cannot pair the registers, no counterexample in 20 steps, no BLIF cec verdict (multi-clock or hard blocks)
+FIR/ex3PM16_fir_61.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+large/sv_chip3_hierarchy_no_mem.v [UNPROVEN:] untested for now (size limit): the SAT flow cannot pair the registers, no counterexample in 20 steps, no BLIF cec verdict (multi-clock or hard blocks)
+full/sha.v [UNPROVEN:] untested for now (size limit): the proof passes, the base case fails on `cmd` (four gold cells drive it, pair_registers guesses its bit order: a false difference, then the 300 s output check gives no answer); with the pairing skipped the proof itself passes 300 s
+syntax/rs_decoder_2.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+full/cf_fir_24_16_16.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+full/stereovision2.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+full/oc54_cpu.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+FIR/ex2PM16_fir_119.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+large/sv_chip2_hierarchy_no_mem.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+full/blob_merge.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+large/spree.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+large/bgm.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+large/boundtop.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+FIR/ex4PM16_fir_152.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+large/mac1.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+large/des_perf.v [UNPROVEN:] untested for now (size limit): SAT proof past 300 s
+large/raygentop.v [UNPROVEN:] untested for now (size limit): SAT proof killed by the 2G memory cap after about 225 s
+large/paj_raygentop_hierarchy_no_mem.v [UNPROVEN:] untested for now (size limit): SAT proof killed by the 2G memory cap after about 211 s
+large/sv_chip1_hierarchy_no_mem.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (65 s in the sweep; not retried at a longer limit)
+full/stereovision1.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (65 s in the sweep; not retried at a longer limit)
+full/cf_fft_256_8.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep; not retried at a longer limit)
+large/sv_chip0_hierarchy_no_mem.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep; not retried at a longer limit)
+FIR/ex4LS16_fir.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (63 s in the sweep; not retried at a longer limit)
+full/stereovision0.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep; not retried at a longer limit)
+large/or1200.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (61 s in the sweep; not retried at a longer limit)
+full/LU8PEEng.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (68 s in the sweep; not retried at a longer limit)
+large/mkSMAdapter4B.v [UNPROVEN:] untested for now (size limit): the SAT flow cannot pair the registers, no counterexample in 20 steps, no BLIF cec verdict (multi-clock or hard blocks)
+large/LU32PEEng.v [UNPROVEN:] untested for now (size limit): Yosys is killed by the 2G cap while it flattens the gate (7-10 s): size limit of the check
+large/LU64PEEng.v [UNPROVEN:] untested for now (size limit): Yosys is killed by the 2G cap while it flattens the gate (7-10 s): size limit of the check
+large/mkDelayWorker32B.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (62 s in the sweep; not retried at a longer limit)
+syntax/cf_fft_1024_16.v [UNPROVEN:] untested for now (size limit): SAT proof past the 60 s limit (70 s in the sweep; not retried at a longer limit)
+large/mac2.v [UNPROVEN:] untested for now (size limit): SAT proof killed by the 2G memory cap
+large/arm_core.v [UNPROVEN:] untested for now (size limit): Yosys is killed by the 2G cap while it flattens the gate (7-10 s): size limit of the check
