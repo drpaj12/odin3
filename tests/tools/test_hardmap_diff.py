@@ -63,8 +63,9 @@ HERE = Path(__file__).resolve().parent
 spec = json.loads((HERE / "fake.json").read_text())
 with open(HERE / "equiv.log", "a") as log:
     log.write(" ".join(sys.argv[1:]) + "\n")
-sys.stdout.write(spec.get("equiv_out", ""))
-sys.exit(spec.get("equiv_rc", 1))
+suffix = "_d2b" if any(a.endswith("golden.d2b.blif") for a in sys.argv) else ""
+sys.stdout.write(spec.get("equiv_out" + suffix, ""))
+sys.exit(spec.get("equiv_rc" + suffix, 1))
 """
 
 GOLDEN = (
@@ -80,6 +81,15 @@ IL_OK = (
     "module \\other\n  cell \\multiply m9\n  end\nend\n"
     "module \\top\n  cell \\adder a1\n  end\n  cell \\adder a2\n  end\n"
     "  cell \\multiply m1\n  end\n  cell $dff d1\n  end\nend\n"
+)
+SUB_GOLDEN = GOLDEN.replace(
+    ".subckt adder a[0]=a b[0]=a cin[0]=n1 cout[0]=n2 sumout[0]=y2\n",
+    ".subckt adder a=a b=unconn cin=n1 cout=$sub~7^MIN~8-1[0] \\\n  sumout=$sub~7^MIN~8-1[1]\n"
+    ".subckt adder a=a b=unconn cin=n1 cout=$add~7^ADD~8-1[0] sumout=$add~7^ADD~8-1[1]\n")
+UNPAIRED_OUT = (
+    "equiv-check: unnamed black-box instances cannot be matched one-to-one (matched by simulation "
+    "signature)\n  only in A: multiply unnamed, out[0]=$mul~1[0] (g.blif:5)\n"
+    "  only in B: multiply unnamed, out[0]=$n7 (o.blif:9)\n"
 )
 SIX_LATCHES = GOLDEN.replace(".latch a q re clk 0\n", ".latch a q re clk 0\n" * 7)
 
@@ -174,6 +184,82 @@ class ClassTests(ToolCase):
         code, out, _ = self.run_tool()
         self.assertEqual(code, 1)
         self.assertIn("UNPROVEN", out)
+
+
+class UnpairedTests(ToolCase):
+    """equiv-check exit 2 "cannot be matched one-to-one" (bgm): a class, not a tool error; the
+    D2b retry on a golden with the `$sub` pad undone (spec 10)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.put_golden(SUB_GOLDEN)
+        self.spec["odin_blif"] = SUB_GOLDEN
+        self.spec["equiv_rc"] = 2
+        self.spec["equiv_out"] = UNPAIRED_OUT
+
+    def test_unpaired_unlisted_fails_and_says_what(self) -> None:
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("UNPAIRED", out)
+        self.assertIn("1 only in A, 1 only in B: multiply 2", out)
+        self.assertIn("list D2b", out)
+        self.assertEqual(len(self.log("equiv.log").splitlines()), 1)
+
+    def test_exit_2_without_the_unpaired_text_is_still_an_error(self) -> None:
+        self.spec["equiv_out"] = "equiv-check: error: bad file\n"
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 2, out)
+        self.assertIn("equiv-check exited 2", out)
+
+    def test_d2b_listed_retries_on_the_normalised_golden(self) -> None:
+        self.expect("common/foo.v D2b Parmys leaves the sub pad on unconn\n")
+        self.spec["equiv_rc_d2b"] = 0
+        code, out, _ = self.run_tool("--keep", str(self.tmp / "keep"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("listed:D2b", out)
+        self.assertIn("equivalent to the golden with D2b undone", out)
+        calls = self.log("equiv.log").splitlines()
+        self.assertEqual(len(calls), 2)
+        self.assertIn("golden.d2b.blif", calls[1])
+        fixed = (self.tmp / "keep" / "common_foo.v" / "golden.d2b.blif").read_text()
+        self.assertIn("b=vcc", fixed)
+        self.assertEqual(fixed.count("b=unconn"), 1)  # the `$add` chain pad stays
+
+    def test_d2b_listed_but_still_different_fails(self) -> None:
+        self.expect("common/foo.v D2b Parmys leaves the sub pad on unconn\n")
+        self.spec["equiv_rc_d2b"] = 1
+        self.spec["equiv_out_d2b"] = "equiv-check: NOT equivalent\n"
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("DIFFERS", out)
+        self.assertIn("after undoing D2b", out)
+
+    def test_d2b_listed_and_still_unproven_needs_the_unproven_line(self) -> None:
+        self.expect("common/foo.v D2b pad\n")
+        self.spec["equiv_rc_d2b"] = hd.EQUIV_UNPROVEN
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("UNPROVEN", out)
+        self.expect("common/foo.v unproven dsec timed out\n")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 0, out)
+        self.assertIn("listed:unproven", out)
+
+    def test_d2b_listed_without_a_sub_pad_stays_unpaired(self) -> None:
+        self.put_golden(GOLDEN)
+        self.spec["odin_blif"] = GOLDEN
+        self.expect("common/foo.v D2b pad\n")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("UNPAIRED", out)
+        self.assertIn("no `$sub` chain pad", out)
+        self.assertEqual(len(self.log("equiv.log").splitlines()), 1)
+
+    def test_other_divergence_does_not_trigger_the_retry(self) -> None:
+        self.expect("common/foo.v D1 signed\n")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len(self.log("equiv.log").splitlines()), 1)
 
 
 class ListedTests(ToolCase):
@@ -410,6 +496,27 @@ class UnitTests(unittest.TestCase):
             path = Path(tmp) / "g.blif"
             path.write_text(GOLDEN)
             self.assertEqual(hd.count_blocks(path), Counter(adder=2, multiply=1, latch=1))
+
+    def test_normalize_d2b_ties_only_sub_chain_b_pads(self) -> None:
+        text = (".model t\n"
+                ".subckt adder a=x b=unconn cin=c cout=$sub~1^MIN~2-1[0] \\\n"
+                "  sumout=$sub~1^MIN~2-1[1]\n"
+                ".subckt adder a=unconn b=unconn cin=c cout=$sub~1^MIN~2-2[0] sumout=s\n"
+                ".subckt adder a=x b=unconn cin=c cout=$add~1^ADD~2-1[0] sumout=s2\n"
+                ".subckt adder a=x b=y cin=c cout=$sub~3^MIN~4-1[0] sumout=s3\n.end\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dst = Path(tmp) / "g.blif", Path(tmp) / "d.blif"
+            src.write_text(text)
+            self.assertEqual(hd.normalize_d2b(src, dst), 2)
+            lines = dst.read_text().splitlines()
+        self.assertIn(".subckt adder a=x b=vcc cin=c cout=$sub~1^MIN~2-1[0] "
+                      "sumout=$sub~1^MIN~2-1[1]", lines)
+        self.assertIn(".subckt adder a=unconn b=vcc cin=c cout=$sub~1^MIN~2-2[0] sumout=s", lines)
+        self.assertIn(".subckt adder a=x b=unconn cin=c cout=$add~1^ADD~2-1[0] sumout=s2", lines)
+        self.assertIn(".subckt adder a=x b=y cin=c cout=$sub~3^MIN~4-1[0] sumout=s3", lines)
+
+    def test_unpaired_summary(self) -> None:
+        self.assertEqual(hd.unpaired_summary(UNPAIRED_OUT), "1 only in A, 1 only in B: multiply 2")
 
     def test_script_file_is_the_single_source(self) -> None:
         text = hd.script_text(hd.SCRIPT, Path("/l"), Path("/d.v"), Path("/o.blif"))

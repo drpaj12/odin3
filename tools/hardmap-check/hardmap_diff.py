@@ -22,6 +22,11 @@ Per design:
    minus Parmys) must equal what the expect file lists for the design, else ``counts-differ``;
 4. ``netlist-compare --implicit-models``: exit 0 is ``identical``; else ``equiv-check
    --match-unnamed``: 0 ``equivalent``, 1 with ``NOT equivalent`` ``differs``, 4 ``unproven``.
+   Exit 2 with "cannot be matched one-to-one" is ``unpaired``: some unnamed hard block has no
+   partner because its input functions differ between the files, so the netlists differ upstream
+   of it (a stop of the pairing, not a tool error). For a design listed ``D2b`` the pairing is
+   retried once against a copy of the golden with the declared divergence undone (below), so that
+   the rest of the netlist is still compared; only then does the line count as occurring.
 
 The expect files (``--expect``, repeatable) hold lines ``<path> <id> <reason>`` (``#`` comments),
 ``path`` relative to ``--root`` (else the part after ``micro/verilog/`` or ``benchmarks/verilog/``,
@@ -32,12 +37,17 @@ function is not compared). Every line needs a reason. The class of a listed desi
 ``listed:<id>[,<id>]``. A listed entry that does not occur (the design matches, or the delta is
 not seen) is ``stale`` and fails: the list shrinks. Entries for designs not run are ignored.
 
+D2b normalisation (``normalize_d2b``): Parmys leaves the ``b`` pad pins of a ``$sub`` chain on
+``unconn`` (a + 0 + c), where ``a - b`` needs ``~0`` (spec 10, D2b; ``subtractor.cc`` lines
+517-527, "connect those pins to unconn"). The copy ties ``b`` of every ``adder`` of a ``$sub``
+chain (net names with ``MIN~``) that is on ``unconn`` to ``vcc``; nothing else changes. It is made
+only for a design whose expect entries hold ``D2b``, and only after an ``unpaired`` result.
+
 Exit codes: 0 every design identical, equivalent or listed; 1 a failing class (``counts-differ``,
-``differs``, ``unproven``, ``warned``, ``stale``, ``no-golden``); 2 usage, a missing golden or
-tool, or Odin III exited with an error; 3 a child crashed (signal) or timed out; 77 no golden
-root (CI). Heavy designs run
-under ``tools/heavy-run``, which caps the memory. ``--yosys`` is accepted so one command line fits
-every check tool; this tool does not run Yosys.
+``differs``, ``unpaired``, ``unproven``, ``warned``, ``stale``, ``no-golden``); 2 usage, a missing
+golden or tool, or Odin III exited with an error; 3 a child crashed (signal) or timed out; 77 no
+golden root (CI). Heavy designs run under ``tools/heavy-run``, which caps the memory. ``--yosys``
+is accepted so one command line fits every check tool; this tool does not run Yosys.
 """
 
 from __future__ import annotations
@@ -77,6 +87,10 @@ SUBCKT = re.compile(r"^\.subckt\s+(\S+)")
 RTLIL_CELL = re.compile(r"^\s*cell\s+\\(\S+)\s")
 HARD_UNITS = tuple(unit for unit in UNITS if unit != "latch")
 NOT_EQUIVALENT = "NOT equivalent"
+UNPAIRED_NEEDLE = "cannot be matched one-to-one"
+D2B = "D2b"
+SUB_CHAIN_MARK = "MIN~"  # Parmys names the nets of a `$sub` chain `$sub~N^MIN~M-K[i]`
+ADDER_B_ON_UNCONN = re.compile(r"\bb=unconn\b")
 PASSING = ("identical", "equivalent")
 
 
@@ -283,25 +297,94 @@ def run_odin(cfg: Config, design: Path, top: str, work: Path) -> tuple[Path, str
     return out, log
 
 
-def compare_netlists(cfg: Config, golden: Path, out: Path, work: Path) -> str:
-    """The class of the structural / functional comparison."""
-    nc = run_child([cfg.netlist_compare, "--implicit-models", str(golden), str(out)], cfg.timeout)
-    if nc.returncode == 0:
-        return "identical"
-    if nc.returncode != 1:
-        raise ToolError(f"netlist-compare exited {nc.returncode}: {tail(nc.stderr)}")
+def normalize_d2b(golden: Path, dest: Path) -> int:
+    """Writes to ``dest`` a copy of the Parmys ``golden`` with D2b undone: ``b=unconn`` becomes
+    ``b=vcc`` on every ``.subckt adder`` whose nets belong to a ``$sub`` chain (``MIN~`` in a
+    name). Returns the number of pins changed. Statement continuations (``\\`` at the end of a
+    line) are kept as they are unless the statement changes."""
+    changed = 0
+    with golden.open(encoding="utf-8", errors="replace") as src, \
+            dest.open("w", encoding="utf-8") as out:
+        pending: list[str] = []
+        for line in src:
+            pending.append(line)
+            if line.rstrip("\n").endswith("\\"):
+                continue
+            statement = " ".join(part.rstrip("\n").rstrip("\\").strip() for part in pending)
+            if (statement.startswith(".subckt adder") and SUB_CHAIN_MARK in statement
+                    and ADDER_B_ON_UNCONN.search(statement)):
+                out.write(ADDER_B_ON_UNCONN.sub("b=vcc", statement) + "\n")
+                changed += 1
+            else:
+                out.writelines(pending)
+            pending = []
+        out.writelines(pending)
+    return changed
+
+
+def run_equiv(cfg: Config, golden: Path, out: Path, work: Path, log: str) -> tuple[str, str]:
+    """One ``equiv-check --match-unnamed``: (class, its output). A class is ``equivalent``,
+    ``differs``, ``unproven`` or ``unpaired``; anything else is a tool failure."""
     eq = run_child([cfg.equiv_check, "--match-unnamed", "--timeout", str(cfg.equiv_timeout),
                     str(golden), str(out)], cfg.timeout)
-    (work / "equiv.log").write_text(eq.stdout + eq.stderr, encoding="utf-8")
+    text = eq.stdout + eq.stderr
+    (work / log).write_text(text, encoding="utf-8")
     if eq.returncode == 0:
-        return "equivalent"
-    if eq.returncode == 1 and NOT_EQUIVALENT in eq.stdout + eq.stderr:
-        return "differs"
+        return "equivalent", text
+    if eq.returncode == 1 and NOT_EQUIVALENT in text:
+        return "differs", text
     if eq.returncode == EQUIV_UNPROVEN:
-        return "unproven"
+        return "unproven", text
+    if eq.returncode == 2 and UNPAIRED_NEEDLE in text:
+        return "unpaired", text
     if eq.returncode == EQUIV_HARD:
         raise HardFailure("equiv-check: ABC died or ran out of memory")
     raise ToolError(f"equiv-check exited {eq.returncode}: {tail(eq.stderr + eq.stdout)}")
+
+
+def unpaired_summary(text: str) -> str:
+    """``3 only in A, 3 only in B: multiply 3`` from the lines equiv-check lists."""
+    sides: Counter[str] = Counter()
+    kinds: Counter[str] = Counter()
+    for line in text.splitlines():
+        match = re.match(r"\s+only in ([AB]): (\S+) unnamed", line)
+        if match:
+            sides[match.group(1)] += 1
+            kinds[match.group(2)] += 1
+    kind_text = ", ".join(f"{name} {n}" for name, n in sorted(kinds.items()))
+    return f"{sides['A']} only in A, {sides['B']} only in B: {kind_text}"
+
+
+@dataclass(frozen=True)
+class Compared:
+    """The class of the comparison, whether the golden had D2b undone for it, and a note."""
+
+    cls: str
+    normalized: bool = False
+    note: str = ""
+
+
+def compare_netlists(cfg: Config, golden: Path, out: Path, work: Path,
+                     try_d2b: bool = False) -> Compared:
+    """The structural / functional comparison. With ``try_d2b`` (the design is listed ``D2b``) an
+    ``unpaired`` result is retried once on a golden with D2b undone."""
+    nc = run_child([cfg.netlist_compare, "--implicit-models", str(golden), str(out)], cfg.timeout)
+    if nc.returncode == 0:
+        return Compared("identical")
+    if nc.returncode != 1:
+        raise ToolError(f"netlist-compare exited {nc.returncode}: {tail(nc.stderr)}")
+    cls, text = run_equiv(cfg, golden, out, work, "equiv.log")
+    if cls != "unpaired":
+        return Compared(cls)
+    note = unpaired_summary(text)
+    if not try_d2b:
+        return Compared(cls, False, note)
+    fixed = work / "golden.d2b.blif"
+    changed = normalize_d2b(golden, fixed)
+    if changed == 0:
+        return Compared(cls, False, f"{note}; the golden has no `$sub` chain pad to undo")
+    cls, _ = run_equiv(cfg, fixed, out, work, "equiv.d2b.log")
+    return Compared(cls, True, f"{note}; D2b undone on {changed} adder pins of the golden")
 
 
 # ---- the verdict --------------------------------------------------------------------------
@@ -320,14 +403,32 @@ def fmt_delta(delta: dict[str, int]) -> str:
     return ", ".join(f"{unit} {n:+d}" for unit, n in sorted(delta.items())) or "none"
 
 
-def judge_compare(key: str, entries: list[Entry], cls: str) -> Result:
-    """The listing logic after the comparison class ``cls``."""
+def judge_compare(key: str, entries: list[Entry], compared: Compared) -> Result:
+    """The listing logic after the comparison ``compared``."""
+    cls = compared.cls
     divergences = [e for e in entries if DIVERGENCE.fullmatch(e.ident)]
     unproven = [e for e in entries if e.ident == "unproven"]
+    d2b = [e for e in divergences if e.ident == D2B]
+    if cls == "equivalent" and compared.normalized and d2b:
+        return Result(key, f"listed:{D2B}", True, f"{d2b[0].reason}; {compared.note}; "
+                      "equivalent to the golden with D2b undone")
     if cls in PASSING:
         if entries:
             return Result(key, "stale", False, f"listed {listed_ids(entries)} but it is {cls}")
         return Result(key, cls, True)
+    if cls == "unpaired":
+        return Result(key, "unpaired", False,
+                      f"unnamed hard blocks cannot be paired ({compared.note}); the inputs "
+                      "of some differ between the files" +
+                      ("" if d2b else "; list D2b if it is the subtractor pad (spec 10)"))
+    if compared.normalized:  # a listed D2b design: what is left after undoing it
+        if cls == "unproven" and unproven:
+            return Result(key, "listed:unproven", True, f"{unproven[0].reason}; {compared.note}")
+        if cls == "differs":
+            others = [e for e in divergences if e.ident != D2B]
+            if others:
+                return Result(key, f"listed:{listed_ids(others)}", True, others[0].reason)
+        return Result(key, cls, False, f"after undoing D2b ({compared.note})")
     if cls == "differs" and divergences:
         return Result(key, f"listed:{listed_ids(divergences)}", True, divergences[0].reason)
     if cls == "unproven" and unproven:
@@ -336,7 +437,7 @@ def judge_compare(key: str, entries: list[Entry], cls: str) -> Result:
 
 
 def judge(key: str, entries: list[Entry], delta: dict[str, int],
-          compare: Callable[[], str]) -> Result:
+          compare: Callable[[], Compared]) -> Result:
     """Counts first, then (when no count is listed) the netlists."""
     counts = [e for e in entries if e.ident == "counts"]
     want = {e.unit: e.delta for e in counts}
@@ -425,7 +526,9 @@ def check_design(cfg: Config, design: Path, work: Path) -> Result:
     if warned is not None:
         return warned
     delta = count_delta(count_blocks(out), count_blocks(golden))
-    return judge(key, entries, delta, lambda: compare_netlists(cfg, golden, out, work))
+    try_d2b = any(e.ident == D2B for e in entries)
+    return judge(key, entries, delta,
+                 lambda: compare_netlists(cfg, golden, out, work, try_d2b))
 
 
 def run_design(cfg: Config, design: Path) -> Result:
