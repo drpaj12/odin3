@@ -1,4 +1,4 @@
-# Odin III: Phase 4: VTR architectures and Altera via LPM
+# Odin III: Phase 4: VTR architectures, Altera via LPM, and the analysis flow
 
 Spec: `docs/DESIGN.md` §6 step 7 (`read_arch`), §7 (partial mapping), §9 (writers), §12, §12.1,
 §13 Q5; ADRs D10 (the scope; amends D5 and D6), D1, D3 (subprocess tools), D9 (provenance).
@@ -8,7 +8,9 @@ decision 4), `lib/vtr.o3lib` (1G), the `tools/vtr-qor` harness and its `fcheck`
 (`docs/ORACLES.md`). External trees are read-only.
 
 **Goal (Peter, 2026-10-19): the tool works on VTR architectures and on Altera via LPM.** QoR
-parity is no longer an exit criterion.
+parity is no longer an exit criterion. Phase 4 also builds the generalized analysis flow
+(4.15 to 4.19, decision 5): the inputs and outputs the post-v1.0 experiments need, not the
+experiments.
 
 **Exit test** (DESIGN §12 row 4, 4.13 and 4.14):
 
@@ -19,6 +21,8 @@ parity is no longer an exit criterion.
 2. **Altera via LPM (4.14).** The LPM netlist written by Odin III is equivalent to the RTL,
    using the LPM library's simulation models (`equiv-check` or `sim`). An optional Quartus Lite
    compile is Peter's hands, not CI.
+3. **Analysis flow (4.15 to 4.19).** Each item's acceptance test passes; the provenance
+   coverage numbers of 4.19 are recorded (a measurement, not a threshold).
 
 Each sub-project gets its own spec (`docs/specs/`), plan and PRs. Model and effort follow
 `docs/PHASE0.md` §9: mapping algorithms Opus `xhigh` to `high` with the advisor; importers,
@@ -53,7 +57,9 @@ Each item has a one-line acceptance test.
 - [ ] 4.14 Altera target via LPM:
   - an LPM tech library (`.o3lib`), a basic path of memory plus simple items (decision 3), with
     exactly: `lpm_add_sub`, `lpm_mult`, `lpm_compare`, and `altsyncram` (single-port and
-    simple-dual-port, Cyclone V). Flip-flops are plain DFFs in soft logic, not `lpm_ff` (agent
+    simple-dual-port). The output is family-neutral: a family option sets the device-family
+    parameters (`intended_device_family`), default Cyclone V, the one tested; Stratix is
+    reachable by the option and untested (decision 4). Flip-flops are plain DFFs in soft logic, not `lpm_ff` (agent
     default, decision 3). Everything else goes to soft logic as generic structural Verilog gates
     or assigns;
   - mapping word-level cells to them (partial map, as for VTR hard blocks);
@@ -63,6 +69,26 @@ Each item has a one-line acceptance test.
   Test: the exit test item 2; and writer output re-read by the front end gives the same
   netlist (LPM instances kept as hard cells).
   Out of scope: VQM, EDIF, `stratixiv_*`/device atoms, Altera `bind`/`unbind` to atoms, Titan.
+- [ ] 4.15 Gate-level netlist ingest: structural Verilog over a cell library (cells given as
+  Verilog models through `read_verilog -v`/`-y`, kept as cells or flattened to IR primitives)
+  and BLIF (`read_blif`), with hierarchy and names kept. Test: a micro mapped by Yosys to a
+  small CMOS cell set (BUF, NOT, NAND2, NOR2, DFF, DFFSR) and the same micro as BLIF both read
+  in and are equivalent to the RTL.
+- [ ] 4.16 `write_dot --color-by <attr>` and provenance on node labels: nodes coloured by the
+  value of a named attribute (a legend per value), the HDL `file:line` on each node label when
+  provenance has one. Test: a micro with an attribute set on some cells gives the expected
+  colours and labels; the dot parses (Graphviz `nop`).
+- [ ] 4.17 Graph export for analysis tools: a flat, documented format (nodes with ID, cell
+  type, module path, attributes, level, provenance; edges driver pin to sink pin) that networkx
+  and PyTorch Geometric load without Odin III. Test: export of a micro reloads in Python with
+  the same node and edge counts as the IR; the format is versioned.
+- [ ] 4.18 `levelize` pass: the combinational level of each cell from inputs and register
+  outputs, stored as an attribute; combinational loops reported. Test: levels on micros match a
+  hand count; a loop gives a located warning.
+- [ ] 4.19 Provenance coverage report: the share of final-netlist objects (BLIF after `abc`,
+  LPM Verilog, VPR block names from the `.place` file) that resolve to an HDL source location.
+  Test: the report runs on the Phase 3 design set and on the LPM micros; the numbers are
+  recorded in this file.
 
 ## Dropped from Phase 4 (D10)
 
@@ -106,6 +132,17 @@ Phases 5 (deferred) and 6 (removed) are recorded in DESIGN §12.1.
    V). Flip-flops: plain DFF in soft logic rather than `lpm_ff` (agent default, Peter may
    override; it needs no extra library cell or simulation model). Everything else is soft logic
    as generic structural Verilog gates or assigns.
+
+4. **Altera family** (Peter, 2026-10-19): "we just want a path to stratix (nothing deep) so an
+   LPM family neutral is completely reasonable". The LPM output is family-neutral, with a
+   family option (default Cyclone V, tested in Quartus Lite). Stratix is set by the option and
+   untested; Quartus Lite has no Stratix support. Amends decision 2.
+5. **The generalized analysis flow** (Peter, 2026-10-19): "yes to all the recommendations and
+   build the generalized flow in OdinIII to hit on this". Items 4.15 to 4.19 serve the goals
+   in D10 follow-up 2 (netlist reverse engineering, graph methods, provenance back to HDL).
+   The experiments (Gate-Breaker dataset, Bayesian classifier, graphlets, graph sandwich, GNNs,
+   the placement study) are designed after v1.0, as plugins over these outputs. Phase 3
+   parity scope: PHASE3 decision 53.
 
 ## Open items
 
