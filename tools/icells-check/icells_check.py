@@ -491,8 +491,8 @@ def signature_problem(paths: dict[str, Path]) -> str:
     widths, connectivity up to renaming), else what differs."""
     one = sg.signature(paths["S2.il"].read_text(encoding="utf-8"))
     two = sg.signature(paths["S3.il"].read_text(encoding="utf-8"))
-    if sg.cell_count(one) == 0:
-        return "the signature of generation 2 holds no cell (nothing was compared)"
+    if not one:  # a netlist of constants alone has no cell, but it has a module
+        return "the signature of generation 2 holds no module (nothing was compared)"
     if one != two:
         return "reading the read-back changed a cell, a parameter, a width or the wiring"
     return ""
