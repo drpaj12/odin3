@@ -13,17 +13,18 @@ its own). VTR's tree is only read (``-B``: no bytecode is written there).
 
 The second change is the initial state. Verilator is two-state: every register the RTL does not
 reset (or only assigns in some branches of a combinational block, an inferred latch) starts at 0,
-while the netlist's latches start at the BLIF value, so the first vectors compare a defined 0
-against what a four-state simulator calls ``x``. The checker's run of the compiled testbench is
-therefore done twice, once with all uninitialised RTL state 0 and once with all of it 1
-(``--x-initial unique`` plus ``+verilator+rand+reset+0|1``). A bit of an output port whose RTL
-value differs between the two runs at any vector depends on that initial state: it is ``x`` (and
-so is whatever the design computes from it later), and it is not compared at any vector. Every
-other bit is compared in both runs; one mismatch on a bit with an initial-state-independent RTL
-value is a mismatch, whatever else is masked. The testbench's own verdict is dropped (it would
-compare every bit of run one); the verdict lines (``MISMATCH``, ``VCHECK_SUMMARY``, ``PASS:``)
-are written from the two dumps, with the masked bits in ``VCHECK_INIT_MASK``. A run that compares
-no bit is not a pass.
+while a four-state simulator calls it ``x``. The netlist's latches start at the BLIF value, 0.
+The compiled testbench is therefore run first with all uninitialised RTL state 0 (the BLIF's
+state: same start, same behaviour expected) and compared on every output bit, as before; no
+mismatch is a ``PASS``. When there are mismatches it is run twice more, with all uninitialised
+state 1 and with random state (``--x-initial unique`` plus ``+verilator+rand+reset+0|1|2``). A
+mismatch on a bit whose RTL value differs between those runs at that vector is on an ``x`` bit:
+it is reported as ``XDEPEND``, never as a pass, and a design with only such mismatches is
+``UNTESTED`` (exit 3, the caller's ``error``: the netlist cannot be judged on them). Any
+mismatch on a bit whose RTL value is the same in all three runs is a ``MISMATCH``: ``FAIL``,
+whatever else is ``x``. The testbench's own verdict is dropped (it has no initial-state
+classification); the verdict lines are written from the dumps, and a run that compares no output
+bit is not a pass.
 """
 
 from __future__ import annotations
@@ -54,12 +55,12 @@ def drop_port_wires(verilog: str) -> str:
     return verilog[: top.start()] + body + verilog[top.end():]
 
 
-# --- initial state: the two-run comparison ---------------------------------------------------
+# --- initial state: classify mismatches by the RTL's dependence on it -------------------------
 
-_MAX_REPORT = 20  # MISMATCH lines written, as the testbench's own limit
+_MAX_REPORT = 20  # MISMATCH and XDEPEND lines written, each, as the testbench's own limit
 _NEVER = "2147483647"  # the testbench's abort limit, out of reach: every vector is dumped
 _TALLY = "            if (vecFail) begin\n                vecMismatched++;"
-_INIT_MODES = (0, 1)  # +verilator+rand+reset+N: all uninitialised state 0, then all 1
+_INIT_MODES = (0, 1, 2)  # +verilator+rand+reset+N: uninitialised state all 0, all 1, random
 _RESET_ARG = "+verilator+rand+reset+"
 
 
@@ -91,23 +92,25 @@ def instrument_testbench(tb: str, outputs: Sequence[tuple[str, int]]) -> str:
 
 @dataclass
 class InitVerdict:
-    """The comparison of one design over both initial-state runs."""
+    """The comparison of one design over its initial-state runs."""
 
-    matched: int = 0
-    mismatched: int = 0
+    matched: int = 0  # vectors without any mismatch
+    mismatched: int = 0  # vectors with a mismatch on a bit that does not depend on the state
+    x_dependent: int = 0  # vectors whose only mismatches are on bits that do
     port_errors: int = 0
-    masked_bits: int = 0  # over all vectors
-    compared_bits: int = 0  # over all vectors
-    masked_ports: list[str] = field(default_factory=list)  # ``name[n bits]``
+    x_port_errors: int = 0
+    compared_bits: int = 0
     lines: list[str] = field(default_factory=list)  # the first MISMATCH lines
+    x_lines: list[str] = field(default_factory=list)  # the first XDEPEND lines
 
     @property
     def vectors(self) -> int:
-        return self.matched + self.mismatched
+        return self.matched + self.mismatched + self.x_dependent
 
     @property
     def passed(self) -> bool:
-        return self.matched > 0 and self.mismatched == 0 and self.compared_bits > 0
+        return (self.matched > 0 and self.mismatched == 0 and self.x_dependent == 0
+                and self.compared_bits > 0)
 
 
 def _bits(value: int, width: int, unknown: int) -> str:
@@ -138,111 +141,115 @@ def _dump_rows(lines: Iterable[str], widths: Sequence[int]) -> Iterator[list[tup
             yield row
 
 
-def _paired_rows(outputs: Sequence[tuple[str, int]], run0: Iterable[str],
-                 run1: Iterable[str]) -> Iterator[tuple[list[tuple[int, int]],
-                                                        list[tuple[int, int]]]]:
+def compare_runs(outputs: Sequence[tuple[str, int]],
+                 runs: Sequence[Iterable[str]]) -> InitVerdict:
+    """Compare ``runs[0]`` (all uninitialised state 0) vector by vector, RTL against netlist, on
+    every output bit. With more runs (other initial states), a mismatching bit whose RTL value
+    differs from ``runs[0]``'s in any of them at that vector is ``x`` (XDEPEND); every other
+    mismatch is real. A vector is ``mismatched`` when it has a real mismatch, ``x_dependent``
+    when it has only x ones, ``matched`` otherwise. Raises ``ValueError`` when the runs dumped a
+    different number of vectors."""
     widths = [w for _, w in outputs]
-    return zip(_dump_rows(run0, widths), _dump_rows(run1, widths), strict=True)
-
-
-def init_dependent_bits(outputs: Sequence[tuple[str, int]], run0: Iterable[str],
-                        run1: Iterable[str]) -> list[int]:
-    """Per output port, the bits whose RTL value differs between the two runs at any vector.
-    Such a bit depends on state the RTL never defined (an unreset register, a latch read before
-    it is written): it is ``x``, and so is everything the design computes from it later, so the
-    bit is not compared at any vector, whether or not the two runs happen to agree there. Raises
-    ``ValueError`` when the two runs dumped a different number of vectors."""
-    unknown = [0] * len(outputs)
-    for row0, row1 in _paired_rows(outputs, run0, run1):
-        for i, ((rtl0, _), (rtl1, _)) in enumerate(zip(row0, row1, strict=True)):
-            unknown[i] |= rtl0 ^ rtl1
-    return unknown
-
-
-def compare_runs(outputs: Sequence[tuple[str, int]], unknown: Sequence[int],
-                 run0: Iterable[str], run1: Iterable[str]) -> InitVerdict:
-    """Compare the two runs vector by vector on the bits that are not ``unknown``: RTL and
-    netlist must agree on each of them in both runs. A vector counts as matched when none of its
-    compared bits differ, as mismatched when one does; the port errors count the ports with a
-    mismatching bit. Raises ``ValueError`` when the runs dumped a different number of vectors."""
     verdict = InitVerdict()
-    n_unknown = sum(u.bit_count() for u in unknown)
-    width_all = sum(w for _, w in outputs)
-    for index, (row0, row1) in enumerate(_paired_rows(outputs, run0, run1)):
-        bad_ports = 0
-        for (name, width), mask, (rtl0, syn0), (rtl1, syn1) in zip(
-                outputs, unknown, row0, row1, strict=True):
-            known = ((1 << width) - 1) & ~mask
-            if (rtl0 ^ syn0) & known or (rtl1 ^ syn1) & known:
-                bad_ports += 1
+    for index, rows in enumerate(zip(*(_dump_rows(run, widths) for run in runs), strict=True)):
+        real_ports = x_ports = 0
+        for i, (name, width) in enumerate(outputs):
+            rtl, syn = rows[0][i]
+            bad = rtl ^ syn
+            if not bad:
+                continue
+            unknown = 0
+            for row in rows[1:]:
+                unknown |= rtl ^ row[i][0]
+            line = f"vec={index} port={name} rtl={_bits(rtl, width, unknown)} " \
+                   f"synth={_bits(syn, width, 0)}"
+            if bad & ~unknown:
+                real_ports += 1
                 if len(verdict.lines) < _MAX_REPORT:
-                    rtl, syn = (rtl0, syn0) if (rtl0 ^ syn0) & known else (rtl1, syn1)
-                    verdict.lines.append(f"MISMATCH vec={index} port={name} "
-                                         f"rtl={_bits(rtl, width, mask)} "
-                                         f"synth={_bits(syn, width, 0)}")
-        verdict.masked_bits += n_unknown
-        verdict.compared_bits += width_all - n_unknown
-        verdict.port_errors += bad_ports
-        if bad_ports:
+                    verdict.lines.append("MISMATCH " + line)
+            else:
+                x_ports += 1
+                if len(verdict.x_lines) < _MAX_REPORT:
+                    verdict.x_lines.append("XDEPEND " + line)
+        verdict.compared_bits += sum(w for _, w in outputs)
+        verdict.port_errors += real_ports
+        verdict.x_port_errors += x_ports
+        if real_ports:
             verdict.mismatched += 1
+        elif x_ports:
+            verdict.x_dependent += 1
         else:
             verdict.matched += 1
-    verdict.masked_ports = [f"{name}[{mask.bit_count()}/{width}]"
-                            for (name, width), mask in zip(outputs, unknown, strict=True) if mask]
     return verdict
 
 
 def render_verdict(verdict: InitVerdict) -> str:
     """The verdict lines the callers (``qor_legs.fcheck_verdict``) read."""
-    lines = list(verdict.lines)
+    lines = verdict.lines + verdict.x_lines
     if verdict.port_errors > len(verdict.lines):
-        lines.append(f"... {verdict.port_errors - len(verdict.lines)} more port mismatches")
-    lines.append(f"VCHECK_INIT_MASK masked_bits={verdict.masked_bits} "
-                 f"compared_bits={verdict.compared_bits} "
-                 f"masked_ports={','.join(verdict.masked_ports) or '(none)'}")
+        lines.append(f"... {verdict.port_errors - len(verdict.lines)} more MISMATCH ports")
+    if verdict.x_port_errors > len(verdict.x_lines):
+        lines.append(f"... {verdict.x_port_errors - len(verdict.x_lines)} more XDEPEND ports")
     lines.append(f"VCHECK_SUMMARY matched={verdict.matched} mismatched={verdict.mismatched} "
-                 f"vectors={verdict.vectors} port_errors={verdict.port_errors}")
+                 f"vectors={verdict.vectors} port_errors={verdict.port_errors} "
+                 f"x_dependent_vectors={verdict.x_dependent}")
     if verdict.passed:
         lines.append(f"PASS: {verdict.matched} vectors matched across rtl/post-synth")
     elif verdict.mismatched:
         lines.append(f"FAIL: {verdict.port_errors} mismatches in {verdict.vectors} vectors")
+    elif verdict.x_dependent:
+        lines.append(f"UNTESTED: {verdict.x_port_errors} mismatches in {verdict.x_dependent} "
+                     "vectors, every one on a bit whose RTL value depends on the initial state "
+                     "(x in a four-state simulation); the netlist cannot be judged on them")
     else:
-        lines.append("ERROR: no output bit was compared (every bit depends on the initial state, "
-                     "or the design has no output port)")
+        lines.append("ERROR: no output bit was compared (the design has no output port)")
     return "\n".join(lines) + "\n"
 
 
-def _lines(path: Path) -> Iterator[str]:
-    with open(path, encoding="utf-8", errors="replace") as handle:
-        yield from handle
+class _Lines:
+    """The lines of a file, read again on every iteration."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def __iter__(self) -> Iterator[str]:
+        with open(self.path, encoding="utf-8", errors="replace") as handle:
+            yield from handle
 
 
-def _run_two_inits(argv: list[str], outputs: Sequence[tuple[str, int]], stdout: Any,
-                   real_call: Callable[..., int]) -> int:
-    """Run the compiled testbench once per initial state, write the verdict into ``stdout``
-    (the checker's ``sim.out``). The binary's own non-zero exit is returned as is, with its
-    output: the checker then reports a simulation error."""
-    work = Path(argv[0]).resolve().parent.parent
-    dumps = []
-    header: list[str] = []
-    for mode in _INIT_MODES:
-        run_argv = [a for a in argv if not a.startswith(_RESET_ARG)] + [f"{_RESET_ARG}{mode}"]
-        out = work / f"sim_init{mode}.out"
-        with open(out, "w", encoding="utf-8") as handle:
-            code = real_call(run_argv, stdout=handle, stderr=subprocess.STDOUT)
-        if code != 0:
-            stdout.write(out.read_text(encoding="utf-8", errors="replace"))
-            return code
-        dumps.append(out)
-        if mode == _INIT_MODES[0]:
-            with open(out, encoding="utf-8", errors="replace") as handle:
-                header = [ln for ln in handle if not ln.startswith(("VD ", "RAW_"))]
+def _run_init(argv: list[str], mode: int, real_call: Callable[..., int]) -> tuple[Path, int]:
+    """One run of the compiled testbench with initial state ``mode`` (``+verilator+rand+reset``);
+    its output goes to ``sim_init<mode>.out`` next to ``sim_build``."""
+    run_argv = [a for a in argv if not a.startswith(_RESET_ARG)] + [f"{_RESET_ARG}{mode}"]
+    out = Path(argv[0]).resolve().parent.parent / f"sim_init{mode}.out"
+    with open(out, "w", encoding="utf-8") as handle:
+        code = real_call(run_argv, stdout=handle, stderr=subprocess.STDOUT)
+    return out, code
+
+
+def _run_inits(argv: list[str], outputs: Sequence[tuple[str, int]], stdout: Any,
+               real_call: Callable[..., int]) -> int:
+    """Run the compiled testbench with all uninitialised state 0; when that shows mismatches, also
+    with all 1 and with random state, and classify them. The verdict goes into ``stdout`` (the
+    checker's ``sim.out``); the return value is 0 for a pass, 1 for a fail, 3 for untested or
+    nothing compared. The binary's own non-zero exit is returned as is, with its output."""
+    dumps: list[Path] = []
     try:
-        unknown = init_dependent_bits(outputs, _lines(dumps[0]), _lines(dumps[1]))
-        verdict = compare_runs(outputs, unknown, _lines(dumps[0]), _lines(dumps[1]))
+        for mode in _INIT_MODES:
+            out, code = _run_init(argv, mode, real_call)
+            if code != 0:
+                stdout.write(out.read_text(encoding="utf-8", errors="replace"))
+                return code
+            dumps.append(out)
+            if mode in (_INIT_MODES[0], _INIT_MODES[-1]):
+                verdict = compare_runs(outputs, [_Lines(path) for path in dumps])
+                if mode == _INIT_MODES[0] and verdict.vectors == verdict.matched:
+                    break  # same start as the netlist and no mismatch: nothing to classify
     except ValueError as exc:  # a dump that does not fit the ports, or runs of unequal length
-        stdout.write(f"ERROR: the two initial-state dumps cannot be compared: {exc}\n")
+        stdout.write(f"ERROR: the initial-state dumps cannot be compared: {exc}\n")
         return 3
+    with open(dumps[0], encoding="utf-8", errors="replace") as handle:
+        header = [ln for ln in handle if not ln.startswith(("VD ", "RAW_"))]
     stdout.write("".join(header) + render_verdict(verdict))
     stdout.flush()
     return 0 if verdict.passed else (1 if verdict.mismatched else 3)
@@ -283,7 +290,7 @@ def _install_init_runs() -> bool:
         if name == "verilator":
             return int(real_call(_unique_x_initial(argv), *args, **kwargs))
         if name.startswith("Vtb") and any(a.startswith(_RESET_ARG) for a in argv):
-            return _run_two_inits(argv, outputs, kwargs["stdout"], real_call)
+            return _run_inits(argv, outputs, kwargs["stdout"], real_call)
         return int(real_call(cmd, *args, **kwargs))
 
     tb_generator.generate_dual_testbench = generate

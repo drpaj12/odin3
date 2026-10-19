@@ -229,88 +229,99 @@ class InstrumentTest(unittest.TestCase):
 
 
 class CompareRunsTest(unittest.TestCase):
-    """Initial-state masking: a bit whose RTL value differs between the runs at any vector is
-    not compared at all; every other bit is."""
+    """The first run (all uninitialised state 0, the netlist's own start) decides; the other runs
+    only say whether a mismatching bit is ``x``."""
 
-    def compare(self, run0: list[str], run1: list[str]) -> qor_fcheck_run.InitVerdict:
-        unknown = qor_fcheck_run.init_dependent_bits(OUTPUTS, run0, run1)
-        return qor_fcheck_run.compare_runs(OUTPUTS, unknown, run0, run1)
+    def compare(self, *runs: list[str]) -> qor_fcheck_run.InitVerdict:
+        return qor_fcheck_run.compare_runs(OUTPUTS, runs)
 
-    def test_state_dependent_bits_are_masked_not_compared(self) -> None:
-        # q: RTL 0b000 (init 0) and 0b111 (init 1): all three bits are x, so the netlist's 0b101
-        # (different from both) does not count; done is defined and equal
-        v = self.compare([vd((0, 5), (1, 1))], [vd((7, 5), (1, 1))])
-        self.assertEqual((v.matched, v.mismatched, v.port_errors), (1, 0, 0))
-        self.assertEqual((v.masked_bits, v.compared_bits, v.masked_ports), (3, 1, ["q[3/3]"]))
+    def test_a_clean_first_run_is_a_pass_with_no_other_run(self) -> None:
+        run = [vd((5, 5), (1, 1)), vd((2, 2), (0, 0))]
+        v = self.compare(run)
+        self.assertEqual((v.matched, v.mismatched, v.x_dependent, v.vectors), (2, 0, 0, 2))
+        self.assertEqual(v.compared_bits, 8)
         self.assertTrue(v.passed)
 
-    def test_a_bit_is_masked_at_every_vector_once_it_depends_on_the_state(self) -> None:
-        # the runs agree on q at vectors 0 and 2 and differ in bit 2 at vector 1; the netlist's
-        # bit 2 differs from the RTL at vector 0: x for the whole run, not a mismatch at vector 0
-        run0 = [vd((2, 6), (0, 0)), vd((2, 6), (0, 0)), vd((2, 6), (0, 0))]
-        run1 = [vd((2, 6), (0, 0)), vd((6, 6), (0, 0)), vd((2, 6), (0, 0))]
-        v = self.compare(run0, run1)
-        self.assertEqual((v.matched, v.mismatched), (3, 0))
-        self.assertEqual((v.masked_bits, v.compared_bits), (3, 9))
-
-    def test_mismatch_on_a_defined_bit_is_never_masked(self) -> None:
-        # bit 2 depends on the initial state (x); bit 0 is defined 0 in both runs but the netlist
-        # drives 1: a mismatch although another bit of the same port is masked
-        v = self.compare([vd((0b000, 0b101), (0, 0))], [vd((0b100, 0b101), (0, 0))])
+    def test_mismatch_without_other_runs_is_real(self) -> None:
+        v = self.compare([vd((5, 4), (1, 1))])
         self.assertEqual((v.matched, v.mismatched, v.port_errors), (0, 1, 1))
-        self.assertEqual(v.lines, ["MISMATCH vec=0 port=q rtl=x00 synth=101"])
+        self.assertEqual(v.lines, ["MISMATCH vec=0 port=q rtl=101 synth=100"])
         self.assertFalse(v.passed)
 
-    def test_mismatch_in_the_second_run_only(self) -> None:
-        # the RTL is 0b010 in both runs; a netlist output that moves with the initial state
-        # matches run one and not run two: that is a mismatch
-        v = self.compare([vd((2, 2), (0, 0))], [vd((2, 3), (0, 0))])
-        self.assertEqual((v.matched, v.mismatched), (0, 1))
-        self.assertEqual(v.lines, ["MISMATCH vec=0 port=q rtl=010 synth=011"])
+    def test_mismatch_on_a_state_dependent_bit_is_x_not_a_pass(self) -> None:
+        # run 0: q=0b000, netlist 0b101; run 1: q=0b111; run 2: 0b010: bits 2, 1, 0 all differ
+        # between the runs, so every mismatched bit is x: reported, but never a pass
+        v = self.compare([vd((0, 5), (1, 1))], [vd((7, 5), (1, 1))], [vd((2, 5), (1, 1))])
+        self.assertEqual((v.matched, v.mismatched, v.x_dependent), (0, 0, 1))
+        self.assertEqual((v.port_errors, v.x_port_errors), (0, 1))
+        self.assertEqual(v.x_lines, ["XDEPEND vec=0 port=q rtl=xxx synth=101"])
+        self.assertFalse(v.passed)
 
-    def test_counts_and_vector_numbers(self) -> None:
-        run0 = [vd((1, 1), (0, 0)), "tb clocks: clk\n", vd((1, 2), (1, 0)), vd((4, 4), (1, 1))]
-        v = self.compare(run0, list(run0))
+    def test_a_defined_bit_that_mismatches_makes_a_fail_whatever_else_is_x(self) -> None:
+        # bit 2 depends on the initial state; bit 0 is 0 in every run but the netlist drives 1
+        v = self.compare([vd((0b000, 0b101), (0, 0))], [vd((0b100, 0b101), (0, 0))],
+                         [vd((0b000, 0b101), (0, 0))])
+        self.assertEqual((v.mismatched, v.x_dependent, v.port_errors), (1, 0, 1))
+        self.assertEqual(v.lines, ["MISMATCH vec=0 port=q rtl=x00 synth=101"])
+
+    def test_only_the_vector_of_the_dependence_is_x(self) -> None:
+        # the runs agree on q at vector 0 (a defined mismatch) and differ at vector 1
+        run0 = [vd((0, 1), (0, 0)), vd((0, 1), (0, 0))]
+        run1 = [vd((0, 1), (0, 0)), vd((1, 1), (0, 0))]
+        v = self.compare(run0, run1)
+        self.assertEqual((v.mismatched, v.x_dependent, v.matched), (1, 1, 0))
+        self.assertEqual(v.lines, ["MISMATCH vec=0 port=q rtl=000 synth=001"])
+        self.assertEqual(v.x_lines, ["XDEPEND vec=1 port=q rtl=00x synth=001"])
+
+    def test_a_third_initial_state_can_expose_what_two_miss(self) -> None:
+        # bit 1 of q is the same under init 0 and init 1 and differs under the random init
+        v = self.compare([vd((0, 2), (0, 0))], [vd((0, 2), (0, 0))], [vd((2, 2), (0, 0))])
+        self.assertEqual((v.mismatched, v.x_dependent), (0, 1))
+        self.assertEqual(v.x_lines, ["XDEPEND vec=0 port=q rtl=0x0 synth=010"])
+
+    def test_vector_numbers_and_other_lines(self) -> None:
+        run = [vd((1, 1), (0, 0)), "tb clocks: clk\n", vd((1, 2), (1, 0)), vd((4, 4), (1, 1))]
+        v = self.compare(run)
         self.assertEqual((v.matched, v.mismatched, v.vectors, v.port_errors), (2, 1, 3, 2))
         self.assertEqual([ln.split()[1] for ln in v.lines], ["vec=1", "vec=1"])
-        self.assertEqual(v.masked_bits, 0)
 
     def test_nothing_compared_is_not_a_pass(self) -> None:
-        v = self.compare([vd((0, 0), (0, 0))], [vd((7, 0), (1, 0))])  # every bit differs
-        self.assertEqual((v.matched, v.compared_bits, v.masked_bits), (1, 0, 4))
-        self.assertFalse(v.passed)
-        no_ports = qor_fcheck_run.compare_runs([], [], ["VD \n"], ["VD \n"])
-        self.assertFalse(no_ports.passed)
-        self.assertFalse(self.compare([], []).passed)
+        self.assertFalse(qor_fcheck_run.compare_runs([], [["VD \n"]]).passed)
+        self.assertFalse(self.compare([]).passed)
 
     def test_runs_that_do_not_fit_raise(self) -> None:
         with self.assertRaises(ValueError):  # one run dumped fewer vectors
             self.compare([vd((0, 0), (0, 0))], [])
         with self.assertRaises(ValueError):  # a value missing from the dump line
-            self.compare(["VD 0:0\n"], ["VD 0:0\n"])
+            self.compare(["VD 0:0\n"])
 
     def test_report_is_capped(self) -> None:
         bad = [vd((0, 1), (0, 0))] * 30
-        v = self.compare(bad, bad)
+        v = self.compare(bad)
         self.assertEqual((len(v.lines), v.port_errors, v.mismatched), (20, 30, 30))
-        self.assertIn("... 10 more port mismatches", qor_fcheck_run.render_verdict(v))
+        self.assertIn("... 10 more MISMATCH ports", qor_fcheck_run.render_verdict(v))
 
     def test_verdict_text_goes_through_the_callers_verdict_rules(self) -> None:
         same = [vd((1, 1), (1, 1))] * 3
-        text = qor_fcheck_run.render_verdict(self.compare(same, same))
+        text = qor_fcheck_run.render_verdict(self.compare(same))
         self.assertIn("VCHECK_SUMMARY matched=3 mismatched=0 vectors=3 port_errors=0", text)
-        self.assertIn("VCHECK_INIT_MASK masked_bits=0 compared_bits=12 masked_ports=(none)", text)
         self.assertIn("PASS: 3 vectors matched across rtl/post-synth", text)
         self.assertEqual(qor_legs.fcheck_verdict(0, False, text), "pass")
         bad = [vd((1, 0), (1, 1))]
-        text = qor_fcheck_run.render_verdict(self.compare(bad, bad))
+        text = qor_fcheck_run.render_verdict(self.compare(bad, bad, bad))
         self.assertNotIn("PASS:", text)
+        self.assertIn("FAIL: 1 mismatches in 1 vectors", text)
         self.assertEqual(qor_legs.fcheck_verdict(1, False, text), "fail")
-        # every bit masked: no PASS and no mismatch line, an error and never a pass
+        # only x mismatches: no PASS, no MISMATCH line, a summary with mismatched=0 and exit 3:
+        # the callers' ``error``, never a pass and never a fail
         text = qor_fcheck_run.render_verdict(
-            self.compare([vd((0, 0), (0, 0))], [vd((7, 0), (1, 0))]))
+            self.compare([vd((0, 5), (1, 1))], [vd((7, 5), (1, 1))], [vd((2, 5), (1, 1))]))
         self.assertNotIn("PASS:", text)
+        self.assertNotIn("MISMATCH", text)
+        self.assertIn("UNTESTED: 1 mismatches in 1 vectors", text)
+        self.assertIn("x_dependent_vectors=1", text)
         self.assertEqual(qor_legs.fcheck_verdict(3, False, text), "error")
+        self.assertEqual(qor_legs.fcheck_verdict(0, False, text), "error")  # exit 0 is no pass
 
 
 CHECKER = """\
@@ -341,7 +352,7 @@ raise SystemExit(rc)
 """
 
 
-class TwoRunsTest(unittest.TestCase):
+class InitRunsTest(unittest.TestCase):
     """The wrapper end to end on a stand-in VTR tree: its ``tb_generator``, and a checker that
     compiles with a fake ``verilator`` and runs a fake testbench binary once per initial state."""
 
@@ -369,22 +380,32 @@ class TwoRunsTest(unittest.TestCase):
                    str(vdir / "run_random_check.py"), str(tmp / "work"), str(sim)]
             return subprocess.run(run, capture_output=True, text=True, check=False, env=env)
 
-    def test_pass_when_only_the_initial_state_differs(self) -> None:
-        # run 0: RTL q=0 (init 0) vs netlist 5; run 1: RTL q=7 (init 1) vs 5: all x, done fixed
-        body = ("case \"$*\" in\n  *reset+0*) echo 'VD 0:5 1:1'; echo 'VD 0:5 1:1';;\n"
-                "  *) echo 'VD 7:5 1:1'; echo 'VD 7:5 1:1';;\nesac\necho 'RAW_PASS: 2'\n")
+    def test_clean_first_run_passes_and_stops(self) -> None:
+        # the first run is clean: no further run (a second invocation would print the marker)
+        body = ("case \"$*\" in\n  *reset+0*) echo 'VD 2:2 1:1'; echo 'VD 5:5 0:0';;\n"
+                "  *) echo 'RAN-AGAIN';;\nesac\necho 'RAW_PASS: 2'\n")
         done = self._run(body)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("VCHECK_INIT_MASK masked_bits=6 compared_bits=2 masked_ports=q[3/3]",
-                      done.stdout)
         self.assertIn("VCHECK_SUMMARY matched=2 mismatched=0 vectors=2 port_errors=0", done.stdout)
         self.assertIn("PASS: 2 vectors matched across rtl/post-synth", done.stdout)
         self.assertIn("tb clocks: clk", done.stdout)
         self.assertNotIn("RAW_", done.stdout)
         self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "pass")
 
+    def test_mismatch_on_state_dependent_bits_is_untested(self) -> None:
+        # run 0: RTL q=0 (init 0) vs netlist 5; run 1: q=7; run 2: q=2: every bit is x
+        body = ("case \"$*\" in\n  *reset+0*) echo 'VD 0:5 1:1';;\n"
+                "  *reset+1*) echo 'VD 7:5 1:1';;\n  *) echo 'VD 2:5 1:1';;\nesac\n")
+        done = self._run(body)
+        self.assertEqual(done.returncode, 3, done.stderr)
+        self.assertIn("XDEPEND vec=0 port=q rtl=xxx synth=101", done.stdout)
+        self.assertIn("UNTESTED: 1 mismatches in 1 vectors", done.stdout)
+        self.assertNotIn("PASS:", done.stdout)
+        self.assertNotIn("MISMATCH", done.stdout)
+        self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "error")
+
     def test_a_mismatch_on_a_defined_bit_fails(self) -> None:
-        body = "echo 'VD 2:3 1:1'\necho 'RAW_PASS: 1'\n"  # defined in both runs, netlist differs
+        body = "echo 'VD 2:3 1:1'\n"  # the same in every run, the netlist differs
         done = self._run(body)
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("MISMATCH vec=0 port=q rtl=010 synth=011", done.stdout)
@@ -397,11 +418,12 @@ class TwoRunsTest(unittest.TestCase):
         self.assertNotIn("PASS:", done.stdout)
         self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "error")
 
-    def test_missing_dump_in_one_run_is_an_error(self) -> None:
-        body = "case \"$*\" in\n  *reset+0*) echo 'VD 0:0 0:0';;\nesac\n"
+    def test_runs_of_different_length_are_an_error(self) -> None:
+        # run 0 has a mismatch (so the others run); run 1 dumps nothing
+        body = "case \"$*\" in\n  *reset+0*) echo 'VD 0:1 0:0';;\nesac\n"
         done = self._run(body)
         self.assertEqual(done.returncode, 3)
-        self.assertIn("ERROR: the two initial-state dumps cannot be compared", done.stdout)
+        self.assertIn("ERROR: the initial-state dumps cannot be compared", done.stdout)
         self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "error")
 
     def test_upstream_without_a_generator_is_reported(self) -> None:
