@@ -41,7 +41,8 @@ MISMATCH vec=0 port=memory_controller_write_enable rtl=0 synth=1
 aborting after 21 errors
 VCHECK_SUMMARY matched=0 mismatched=7 vectors=7 port_errors=21
 """
-PASSED = "tops: synth=memset rtl=memset\nPASS: 50000 vectors matched across rtl/post-synth\n"
+PASSED = ("tops: synth=memset rtl=memset\nPASS: 50000 vectors matched across rtl/post-synth\n"
+          "VCHECK_SUMMARY matched=50000 mismatched=0 vectors=50000 port_errors=0\n")
 
 
 class VerdictTest(unittest.TestCase):
@@ -61,6 +62,15 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(qor_legs.fcheck_verdict(0, False, COMPILE_ERROR), "error")
         # a pass line with a non-zero exit is not a pass either
         self.assertEqual(qor_legs.fcheck_verdict(1, False, PASSED), "error")
+
+    def test_vacuous_pass_is_error(self) -> None:
+        """A PASS line over zero compared vectors (no output port) or without the summary."""
+        line = "PASS: 0 vectors matched across rtl/post-synth\n"
+        for summary in ("VCHECK_SUMMARY matched=0 mismatched=0 vectors=0 port_errors=0\n", ""):
+            self.assertEqual(qor_legs.fcheck_verdict(0, False, line + summary), "error")
+        self.assertEqual(qor_legs.fcheck_verdict(
+            0, False, "PASS: 9 vectors matched\n"
+            "VCHECK_SUMMARY matched=9 mismatched=0 vectors=9 port_errors=0\n"), "pass")
 
     def test_other_exits_and_the_cap(self) -> None:
         for code in (2, 3, 137):
@@ -108,6 +118,32 @@ class WrapperTest(unittest.TestCase):
             plain = subprocess.run([sys.executable, "-B", str(vdir / "run_random_check.py"),
                                     str(sample)], capture_output=True, text=True, check=False)
             self.assertEqual(plain.returncode, 7)
+
+    def test_only_the_top_module_is_filtered(self) -> None:
+        two = YOSYS_TOP + (r"module sub(\x~1 );" "\n" r"  input \x~1 ;" "\n" r"  wire \x~1 ;"
+                           "\nendmodule\n")
+        text = qor_fcheck_run.drop_port_wires(two)
+        self.assertEqual(text.count(r"wire \x~1 ;"), 1)  # sub keeps its own line
+        self.assertNotIn(r"wire \memory_controller_address~26", text)
+
+    def test_str_exit_message_and_missing_function(self) -> None:
+        HEAVY_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as tmp:
+            vdir = Path(tmp)
+            (vdir / "blif_to_verilog.py").write_text("def pack_bit_blasted_top_ports(t):\n"
+                                                     "    return t\n", encoding="utf-8")
+            (vdir / "run_random_check.py").write_text("raise SystemExit('boom message')\n",
+                                                      encoding="utf-8")
+            run = [sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER),
+                   str(vdir / "run_random_check.py")]
+            done = subprocess.run(run, capture_output=True, text=True, check=False)
+            self.assertEqual((done.returncode, done.stderr.strip()), (1, "boom message"))
+            (vdir / "blif_to_verilog.py").write_text("def renamed(t):\n    return t\n",
+                                                     encoding="utf-8")
+            done = subprocess.run(run, capture_output=True, text=True, check=False)
+            self.assertEqual(done.returncode, 2)
+            self.assertIn("has no pack_bit_blasted_top_ports (renamed or removed upstream)",
+                          done.stderr)
 
     def test_wrapper_usage_error(self) -> None:
         done = subprocess.run([sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER)],

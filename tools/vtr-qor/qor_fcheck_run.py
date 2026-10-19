@@ -19,13 +19,19 @@ from pathlib import Path
 
 _PORT = re.compile(r"^\s*(?:input|output|inout)(?:\s+wire|\s+reg)?\s+(\\\S+)\s*;", re.M)
 _WIRE = re.compile(r"^[ \t]*wire\s+(\\\S+)\s*;[ \t]*\n", re.M)
+_FIRST_MODULE = re.compile(r"^\s*module\b.*?^\s*endmodule\b", re.M | re.S)
 
 
 def drop_port_wires(verilog: str) -> str:
     """Remove ``wire \\name ;`` for every ``name`` that is also declared ``input``, ``output`` or
     ``inout`` (an escaped identifier, as Yosys writes the BLIF's ``a~3``)."""
-    ports = set(_PORT.findall(verilog))
-    return _WIRE.sub(lambda m: "" if m.group(1) in ports else m.group(0), verilog)
+    top = _FIRST_MODULE.search(verilog)  # the module the packer rewrites
+    if top is None:
+        return verilog
+    body = top.group(0)
+    ports = set(_PORT.findall(body))
+    body = _WIRE.sub(lambda m: "" if m.group(1) in ports else m.group(0), body)
+    return verilog[: top.start()] + body + verilog[top.end():]
 
 
 def main(argv: list[str]) -> int:
@@ -36,7 +42,12 @@ def main(argv: list[str]) -> int:
     sys.path.insert(0, str(script.parent))
     import blif_to_verilog  # type: ignore[import-not-found]  # VTR's, from the script's directory
 
-    original = blif_to_verilog.pack_bit_blasted_top_ports
+    original = getattr(blif_to_verilog, "pack_bit_blasted_top_ports", None)
+    if original is None:
+        print("qor_fcheck_run: VTR's blif_to_verilog has no pack_bit_blasted_top_ports (renamed "
+              "or removed upstream); update tools/vtr-qor/qor_fcheck_run.py to the new code",
+              file=sys.stderr)
+        return 2
 
     def patched(text: str) -> str:
         return str(original(drop_port_wires(text)))
@@ -47,6 +58,8 @@ def main(argv: list[str]) -> int:
         runpy.run_path(str(script), run_name="__main__")
     except SystemExit as exc:
         code = exc.code
+        if isinstance(code, str):
+            print(code, file=sys.stderr)  # as Python does for sys.exit("message")
         return code if isinstance(code, int) else (0 if code is None else 1)
     return 0
 

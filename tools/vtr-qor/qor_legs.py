@@ -332,20 +332,31 @@ def fcheck_command(ctx: LegContext, design: str, netlist: Path, verilator_j: int
 # with a non-zero exit. The script also exits 1 (and others) when it could not compile or set up
 # the comparison; that is an ``error``, never a ``fail`` and never a ``pass``.
 _FCHECK_PASS = re.compile(r"^PASS: \d+ vectors matched", re.M)
+_FCHECK_SUMMARY = re.compile(
+    r"^VCHECK_SUMMARY matched=(\d+) mismatched=0 vectors=(\d+)", re.M)
 _FCHECK_MISMATCH = re.compile(
     r"^(?:MISMATCH (?:vec|directed)\b|VCHECK_SUMMARY\b.*\bmismatched=[1-9]"
     r"|FAIL: \d+ mismatches in)", re.M)
 
 
+def _passed(log: str) -> bool:
+    """The PASS line and a summary of N > 0 matched vectors and no mismatch: a comparison of
+    nothing (no output port, no vector) is not a pass."""
+    summary = _FCHECK_SUMMARY.search(log)
+    return (_FCHECK_PASS.search(log) is not None and summary is not None
+            and int(summary.group(1)) > 0 and int(summary.group(2)) > 0)
+
+
 def fcheck_verdict(returncode: int, capped: bool, log: str) -> str:
     """Spec §8.1 (review H6): ``capped`` when the memory cap killed it; ``pass`` only for exit 0
-    with the testbench's PASS line in ``log`` (the checker's output); ``fail`` only for a non-zero
-    exit with mismatches reported in ``log``; anything else (a Verilator compile failure, a Yosys
+    with the testbench's PASS line and a ``VCHECK_SUMMARY matched=N mismatched=0`` (N > 0) in
+    ``log`` (the checker's output); ``fail`` only for a non-zero exit with mismatches reported in
+    ``log``; anything else (a Verilator compile failure, a Yosys
     failure, a crash, exit 2) is ``error``."""
     if capped:
         return "capped"
     if returncode == 0:
-        return "pass" if _FCHECK_PASS.search(log) else "error"
+        return "pass" if _passed(log) else "error"
     return "fail" if _FCHECK_MISMATCH.search(log) else "error"
 
 

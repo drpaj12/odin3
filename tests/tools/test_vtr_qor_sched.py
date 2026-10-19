@@ -909,7 +909,8 @@ with (here / "calls.jsonl").open("a") as log:
     log.write(json.dumps({"end": args[args.index("--rtl") + 1], "t1": time.time()}) + "\\n")
 # What the real checker prints: PASS on exit 0, mismatches on exit 1, else an error text.
 code = mode.get("exit", 0)
-print(mode.get("log", "PASS: 50000 vectors matched across rtl/post-synth" if code == 0 else
+print(mode.get("log", "PASS: 50000 vectors matched across rtl/post-synth\\n"
+      "VCHECK_SUMMARY matched=50000 mismatched=0 vectors=50000 port_errors=0" if code == 0 else
       "MISMATCH vec=0 port=y rtl=0 synth=1" if code == 1 else "ERROR: boom"))
 sys.exit(code)
 """
@@ -988,7 +989,9 @@ class FcheckTest(RunnerTestBase):
             self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), verdict, code)
             self.assertEqual(self.verdict(job), verdict)
         self.assertEqual(qor_legs.fcheck_verdict(137, True, ""), "capped")
-        self.assertEqual(qor_legs.fcheck_verdict(0, False, "PASS: 5 vectors matched"), "pass")
+        self.assertEqual(qor_legs.fcheck_verdict(
+            0, False, "PASS: 5 vectors matched\nVCHECK_SUMMARY matched=5 mismatched=0 vectors=5"),
+            "pass")
         self.mode({"exit": 137, "oom": str(self.events)})
         job = self.finished("sha")
         self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "capped")

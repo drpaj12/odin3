@@ -133,7 +133,8 @@ if not Path(args[args.index("--post-synth-blif") + 1]).is_file():
     sys.exit(2)
 mode = root / "fcheck-exit"
 code = int(mode.read_text()) if mode.exists() else 0
-print("PASS: 50000 vectors matched across rtl/post-synth" if code == 0 else
+print("PASS: 50000 vectors matched across rtl/post-synth\\n"
+      "VCHECK_SUMMARY matched=50000 mismatched=0 vectors=50000 port_errors=0" if code == 0 else
       "MISMATCH vec=0 port=y rtl=0 synth=1" if code == 1 else "ERROR: boom")
 sys.exit(code)
 """
