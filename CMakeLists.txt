@@ -2776,9 +2776,11 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                              TIMEOUT 1800)
         # PHASE3 #52 (opt_share parity): the opt_share sources with the Phase 3 script, whose
         # `opt -full` runs opt_share; every call that changes something is checked in turn, and
-        # opt_share must change something (--min-changed 1 counts the whole run).
+        # opt_share must change something in every source (--require-sub: --min-changed counts
+        # calls of any sub-pass, and wreduce or opt_expr alone would satisfy it).
         add_test(NAME opt_equiv_share_rules
             COMMAND ${_opt_sweep} --jobs 1 --opt-equiv --opt-arg=--min-changed=1
+                    --opt-arg=--require-sub=opt_share
                     --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
                     --root ${_opt_rules_dir} ${_opt_rules_dir}/share)
         set_tests_properties(opt_equiv_share_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77

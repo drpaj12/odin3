@@ -38,7 +38,7 @@ share/and.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full
 share/eq.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement
 share/pmux.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement
 share/shift.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement
-share/swap_and.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement and by opt_equiv_share_rules (Phase 3 script)
-share/swap_add_sub.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement and by opt_equiv_share_rules (Phase 3 script)
-share/chunk.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement and by opt_equiv_share_rules (Phase 3 script)
-share/swap_narrow.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement and by opt_equiv_share_rules (Phase 3 script)
+share/swap_and.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement and by opt_equiv_share_rules (Phase 3 script, which must change something with opt_share: --require-sub)
+share/swap_add_sub.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement and by opt_equiv_share_rules (Phase 3 script, which must change something with opt_share: --require-sub)
+share/chunk.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement and by opt_equiv_share_rules (Phase 3 script, which must change something with opt_share: --require-sub)
+share/swap_narrow.v [want at least 1] Phase 2 does not run opt_share (only in `opt -full`); covered by opt-rules' per-row refinement and by opt_equiv_share_rules (Phase 3 script, which must change something with opt_share: --require-sub)
