@@ -13,10 +13,10 @@ Per design:
    ``--arch`` must name the arch of the golden's ``.prov`` (``arch=``), when both say one;
 2. Odin III runs the script of ``phase3_pre_abc.script`` (``read_techlib; read_verilog --nolatches
    --vtr-compat; proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full; hardmap; opt -full;
-   lower; opt -fast; compact; write_blif --vtr``), ``--top`` the first ``.model`` of the golden. A
-   ``run wreduce first`` warning on its output (``hardmap`` left a ``$mul``, ``$add`` or ``$sub``
-   soft only because the script did not narrow it) is the class ``warned``: a failure no list
-   absorbs (3C-2a review M-2);
+   opt_merge -ffbits; lower; opt -fast; compact; write_blif --vtr``), ``--top`` the first
+   ``.model`` of the golden. A ``run wreduce first`` warning on its output (``hardmap`` left a
+   ``$mul``, ``$add`` or ``$sub`` soft only because the script did not narrow it) is the class
+   ``warned``: a failure no list absorbs (3C-2a review M-2);
 3. the hard blocks of both BLIFs are counted by model (``adder``, ``multiply``,
    ``single_port_ram``, ``dual_port_ram``) with the ``.latch`` count; the difference (Odin III
    minus Parmys) must equal what the expect file lists for the design, else ``counts-differ``;

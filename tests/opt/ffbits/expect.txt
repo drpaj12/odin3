@@ -1,0 +1,15 @@
+# tests/opt/ffbits/expect.txt: flip-flop bits per micro, `<name> <plain> <merged>` (PHASE3 #48).
+# plain = after `read_verilog --nolatches; proc; opt; opt -full`; merged = also `opt_merge -ffbits`.
+# merged is what Yosys 0.55 leaves after `proc; opt -full; techmap; opt -fast` (checked by
+# tools/opt-check/ffbits-check --yosys). Run: tools/opt-check/ffbits-check --odin3 O [--yosys Y].
+adff_equal 4 2
+adff_value_differs 4 3
+clock_differs 4 4
+dffe_cascade 8 4
+enable_differs 4 4
+equal_bits 4 2
+init_differs 4 4
+init_equal 4 2
+polarity_differs 4 4
+reset_differs 4 4
+reset_value_differs 4 4
