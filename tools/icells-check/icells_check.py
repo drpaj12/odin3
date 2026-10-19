@@ -56,8 +56,10 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+import icells_signature as sg
 
 import memcap
 import opt_equiv
@@ -65,11 +67,12 @@ import opt_equiv
 TOOL = "icells-check"
 ROOT = Path(__file__).resolve().parents[2]
 EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_UNPROVEN, EXIT_SKIP = 0, 1, 2, 3, 4, 77
-LEVELS = ("word", "gate", "lut", "lpm")
+LEVELS = ("word", "gate", "lut", "lpm", "inst", "insttext")
 TIMEOUT = 900.0
 DEFAULT_CAP = 4 << 30
 NO_SAT_MODEL = "No SAT model available for cell"
-RTLIL_LEVELS = ("word", "lpm")
+RTLIL_LEVELS = ("word", "lpm", "inst")
+TEXT_LEVELS = ("insttext",)  # the cells have no RTLIL form: only the text legs run
 EQUIV_CHECK = ROOT / "tools" / "equiv-check" / "equiv-check"
 OUTCOMES = (
     "unproven",
@@ -92,6 +95,7 @@ class Verdict:
     outcome: str
     reason: str = ""
     instances: int = 0  # the ``$`` instances written and read back as themselves
+    libs: int = 0  # the black-box library instances written and read back
 
 
 # --- pure helpers (unit-tested) -------------------------------------------------------------
@@ -147,6 +151,25 @@ def instances(text: str) -> list[tuple[str, str, str, dict[str, str]]]:
     return found
 
 
+def lib_instances(text: str) -> int:
+    """The instances of the black-box library cells the file declares (``(* blackbox *)`` stubs)."""
+    names = re.findall(r"\(\* blackbox \*\)\s*module\s+(\S+)", text)
+    total = 0
+    for name in names:
+        total += len(
+            re.findall(rf"^[ \t]*(?:\(\*.*?\*\)[ \t]*)?{re.escape(name)}[ \t]+[#\\\w]", text, re.M)
+        )
+    return total
+
+
+def required_type(level: str, design: Path) -> str:
+    """The `$` type an `inst` design must hold: ``inst_dffsr.v`` holds ``$dffsr``."""
+    stem = design.stem
+    return (
+        "$" + stem[len("inst_") :] if level.startswith("inst") and stem.startswith("inst_") else ""
+    )
+
+
 def compare_instances(written: str, read: str) -> str:
     """'' when every ``$`` instance of ``written`` came back as itself, else the first change."""
     one, two = instances(written), instances(read)
@@ -169,6 +192,24 @@ def parse_expect(text: str) -> dict[tuple[str, str], tuple[str, str]]:
         if len(words) < 4 or words[0] not in LEVELS or words[2] not in OUTCOMES:
             raise ToolError(f"expect line {number}: want '<level> <design> <outcome> <reason>'")
         table[(words[0], words[1])] = (words[2], words[3])
+    return table
+
+
+def parse_techlibs(path: Path) -> dict[str, list[str]]:
+    """``design file name -> commands`` from the list file: ``<design> <tech library> [<soft
+    library>]`` is ``read_techlib <tech library>`` and ``read_verilog --lib <soft library>``
+    (paths relative to the repository root)."""
+    table: dict[str, list[str]] = {}
+    if not path.is_file():
+        return table
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        words = raw.split("#", 1)[0].split()
+        if len(words) not in (0, 2, 3):
+            raise ToolError(f"{path}: want '<design> <tech library> [<soft library>]': {raw!r}")
+        if words:
+            absolute = [w if Path(w).is_absolute() else str(ROOT / w) for w in words[1:]]
+            table[words[0]] = [f"read_techlib {absolute[0]}"]
+            table[words[0]] += [f"read_verilog --lib {w}" for w in absolute[1:]]
     return table
 
 
@@ -269,7 +310,8 @@ def lpm_template(text: str) -> str:
     """The 5.1 LPM script with ``write_rtlil @IL@`` put before its ``write_verilog @OUT@``."""
     if "write_verilog @OUT@" not in text:
         raise ToolError("tests/lpm/lpm.script has no 'write_verilog @OUT@'")
-    return text.replace("write_verilog @OUT@", "write_rtlil @IL@; write_verilog @OUT@")
+    text = text.replace("write_verilog @OUT@", "write_rtlil @IL@; write_verilog @OUT@")
+    return "@TECHLIB@\n" + text
 
 
 # --- running --------------------------------------------------------------------------------
@@ -304,6 +346,9 @@ class Config:
     lpm_script: Path
     cap: int
     abc: str = ""
+    techlibs: dict[str, list[str]] = field(default_factory=dict)  # design file name -> its commands
+    require_dollar: bool = False  # a design with no `$` instance read via -icells fails
+    require_lib: bool = False  # a design with no black-box library instance fails
 
 
 def template_for(cfg: Config, level: str) -> str:
@@ -315,49 +360,73 @@ def template_for(cfg: Config, level: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def read_back_script(cfg: Config, level: str, source: Path, outs: tuple[Path | None, Path]) -> str:
+def libs_for(cfg: Config, level: str, design: Path) -> str:
+    """``read_techlib`` of the LPM library (LPM level) and of the design's own (techlib list)."""
+    commands = [f"read_techlib {cfg.lib}"] if level == "lpm" else []
+    commands += cfg.techlibs.get(design.name, [])
+    return "".join(f"{command}; " for command in commands)
+
+
+@dataclass
+class ReadOut:
+    """What a read-back run writes: the gold-format file (None: not needed), the Verilog and the
+    RTLIL the signature leg compares."""
+
+    gold: Path | None
+    verilog: Path
+    sig: Path
+
+
+def read_back_script(cfg: Config, level: str, source: Path, outs: ReadOut, design: Path) -> str:
     """``read_verilog -icells`` of source, then proc, opt_clean (lower at the BLIF levels) and the
-    writes: outs is (the gold-format file or None, the Verilog)."""
-    lib = f"read_techlib {cfg.lib}; " if level == "lpm" else ""
-    gold, verilog = outs
+    writes."""
     lower = "" if level in RTLIL_LEVELS else "lower; "
     fmt = "write_rtlil" if level in RTLIL_LEVELS else "write_blif --vtr"
-    write_gold = f"{lower}{fmt} {gold}" if gold else ""
+    write_gold = f"; {lower}{fmt} {outs.gold}" if outs.gold and level not in TEXT_LEVELS else ""
+    sig = f"write_rtlil {outs.sig}; " if level not in TEXT_LEVELS else ""
+    clean = "opt_clean; " if level not in TEXT_LEVELS else ""  # it removes an output-less $memwr
     return (
-        f"{lib}read_verilog -icells {source}; proc; opt_clean; stats; "
-        f"write_verilog {verilog}{'; ' + write_gold if write_gold else ''}"
+        f"{libs_for(cfg, level, design)}read_verilog -icells {source}; proc; {clean}stats; "
+        f"{sig}write_verilog {outs.verilog}{write_gold}"
     )
 
 
 def run_legs(cfg: Config, level: str, design: Path, work: Path) -> Verdict:
-    ext = "il" if level in RTLIL_LEVELS else "blif"
-    paths = {name: work / name for name in (f"G.{ext}", "W.v", f"R.{ext}", "W2.v", "W3.v")}
+    ext = "il" if level in RTLIL_LEVELS or level in TEXT_LEVELS else "blif"
+    names = (f"G.{ext}", "W.v", f"R.{ext}", "W2.v", "W3.v", "S2.il", "S3.il")
+    paths = {name: work / name for name in names}
     subs = {
         "@DESIGN@": str(design),
         "@OUT@": str(paths["W.v"]),
         "@IL@": str(paths["G.il"] if ext == "il" else paths["G.blif"]),
         "@LIB@": str(cfg.lib),
         "@FAMILY@": "",
+        "@TECHLIB@": "; ".join(cfg.techlibs.get(design.name, [])),
     }
     done = odin3_run(cfg.odin3, level_script(template_for(cfg, level), subs), work)
     if done.returncode != 0:
         raise ToolError(f"{design.name}: the {level} script failed: {last_lines(done)}")
     flags = ["--check", *top_flag((done.stderr or "") + (done.stdout or ""))]
     steps = (
-        (paths["W.v"], (paths[f"R.{ext}"], paths["W2.v"])),
-        (paths["W2.v"], (None, paths["W3.v"])),
+        (paths["W.v"], ReadOut(paths[f"R.{ext}"], paths["W2.v"], paths["S2.il"])),
+        (paths["W2.v"], ReadOut(None, paths["W3.v"], paths["S3.il"])),
     )
     logs: list[str] = []
     for source, outs in steps:
-        done = odin3_run(cfg.odin3, read_back_script(cfg, level, source, outs), work, flags)
+        script = read_back_script(cfg, level, source, outs, design)
+        done = odin3_run(cfg.odin3, script, work, flags)
         if done.returncode != 0:
             return Verdict("fail:read", last_lines(done))
         logs.append((done.stderr or "") + (done.stdout or ""))
-    text = judge_text(paths, census(logs[0]), census(logs[1]))
+    text = judge_text(cfg, (level, design), paths, (census(logs[0]), census(logs[1])))
     if text.outcome != "ok":
         return text
+    if level in TEXT_LEVELS:
+        return text
     equal = judge_equivalent(cfg, level, paths, design.stem + "." + level, work)
-    return equal if equal.outcome != "ok" else text
+    if equal.outcome == "ok":
+        return text
+    return Verdict(equal.outcome, equal.reason, text.instances, text.libs)
 
 
 def run_one(cfg: Config, level: str, design: Path, work: Path) -> Verdict:
@@ -417,22 +486,56 @@ def judge_equivalent(
     return Verdict("ok")
 
 
+def signature_problem(paths: dict[str, Path]) -> str:
+    """'' when generations 2 and 3 have the same per-cell signature (type, parameters, port
+    widths, connectivity up to renaming), else what differs."""
+    one = sg.signature(paths["S2.il"].read_text(encoding="utf-8"))
+    two = sg.signature(paths["S3.il"].read_text(encoding="utf-8"))
+    if sg.cell_count(one) == 0:
+        return "the signature of generation 2 holds no cell (nothing was compared)"
+    if one != two:
+        return "reading the read-back changed a cell, a parameter, a width or the wiring"
+    return ""
+
+
 def judge_text(
-    paths: dict[str, Path], gen2: dict[tuple[str, str], int], gen3: dict[tuple[str, str], int]
+    cfg: Config,
+    what: tuple[str, Path],
+    paths: dict[str, Path],
+    censuses: tuple[dict[tuple[str, str], int], dict[tuple[str, str], int]],
 ) -> Verdict:
     """The fixpoint and the instance legs on the written Verilog."""
+    level, design = what
+    gen2, gen3 = censuses
+    if not gen2 or not gen3:
+        return Verdict("fail:fixpoint", "stats produced no cell census (nothing was compared)")
     if gen2 != gen3:
-        return Verdict(
-            "fail:fixpoint", f"reading the read-back changed the cells: {gen2} -> {gen3}"
-        )
-    text2, text3 = (paths[n].read_text(encoding="utf-8") for n in ("W2.v", "W3.v"))
-    problem = compare_instances(paths["W.v"].read_text(encoding="utf-8"), text2)
+        return Verdict("fail:fixpoint", f"the cell census changed: {gen2} -> {gen3}")
+    problem = signature_problem(paths) if level not in TEXT_LEVELS else ""
+    if problem:
+        return Verdict("fail:fixpoint", problem)
+    text1, text2, text3 = (paths[n].read_text(encoding="utf-8") for n in ("W.v", "W2.v", "W3.v"))
+    problem = compare_instances(text1, text2) or compare_instances(text2, text3)
+    problem = problem or (
+        "library instances differ between generations"
+        if not lib_instances(text1) == lib_instances(text2) == lib_instances(text3)
+        else ""
+    )
+    want = required_type(level, design)
+    problem = problem or (
+        f"no {want} instance was written and read back"
+        if want and not any(item[0] == want for item in instances(text2))
+        else ""
+    )
     if problem:
         return Verdict("fail:instances", problem)
-    same = strip_comments(text2) == strip_comments(text3)
-    count = len(instances(paths["W.v"].read_text(encoding="utf-8")))
-    note = "text fixpoint" if same else "census fixpoint"
-    return Verdict("ok", f"{note}, {count} $ instances", count)
+    count, libs = len(instances(text1)), lib_instances(text1)
+    if (cfg.require_dollar and count == 0) or (cfg.require_lib and libs == 0):
+        return Verdict("fail:instances", f"{count} $ and {libs} library instances: none to read")
+    note = (
+        "text fixpoint" if strip_comments(text2) == strip_comments(text3) else "signature fixpoint"
+    )
+    return Verdict("ok", f"{note}, {count} $ instances, {libs} library instances", count, libs)
 
 
 # --- the command line -------------------------------------------------------------------------
@@ -440,7 +543,7 @@ def judge_text(
 
 def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog=TOOL, description=__doc__.split("\n")[0])
-    ap.add_argument("--level", required=True, help="word, gate, lut, lpm (comma separated)")
+    ap.add_argument("--level", required=True, help="word, gate, lut, lpm, inst (comma separated)")
     ap.add_argument("--odin3", default=str(ROOT / "build" / "debug" / "odin3"))
     ap.add_argument("--yosys", default=os.environ.get("ODIN3_YOSYS055", "yosys"))
     ap.add_argument("--scripts", type=Path, default=ROOT / "tests" / "icells")
@@ -450,6 +553,16 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--work", type=Path, help="keep every file here")
     ap.add_argument("--abc", default=os.environ.get("ODIN3_ABC", ""), help="ABC for equiv-check")
     ap.add_argument("--mem-cap", default="4G")
+    ap.add_argument(
+        "--techlib-list",
+        type=Path,
+        default=ROOT / "tests" / "icells" / "techlib.txt",
+        help="lines '<design file name> <tech library>': designs that read one first",
+    )
+    ap.add_argument(
+        "--require-dollar", action="store_true", help="fail a design with no $ instance"
+    )
+    ap.add_argument("--require-lib", action="store_true", help="fail a design with no library cell")
     ap.add_argument("files", nargs="+", type=Path)
     return ap.parse_args(argv)
 
@@ -461,9 +574,11 @@ def execute(args: argparse.Namespace, work: Path) -> int:
         raise ToolError(f"unknown level {bad[0]} (want one of {', '.join(LEVELS)})")
     cap = opt_equiv.parse_size(args.mem_cap)
     cfg = Config(args.odin3, args.yosys, args.scripts, args.lib, args.lpm_script, cap, args.abc)
+    cfg.techlibs = parse_techlibs(args.techlib_list)
+    cfg.require_dollar, cfg.require_lib = args.require_dollar, args.require_lib
     table = parse_expect(args.expect.read_text(encoding="utf-8")) if args.expect else {}
     worst, unproven, compared, excepted, unproven_n = EXIT_OK, False, 0, 0, 0
-    read_back = 0
+    read_back, library = 0, 0
     for level in levels:
         for number, design in enumerate(args.files):
             run_dir = work / f"{level}-{number:04d}"
@@ -474,6 +589,7 @@ def execute(args: argparse.Namespace, work: Path) -> int:
             detail = f" ({verdict.reason})" if verdict.reason else ""
             print(f"{TOOL}: {level} {design.name}: {word}{detail}", flush=True)
             read_back += verdict.instances
+            library += verdict.libs
             compared += verdict.outcome in ("ok", "fail:equivalent")
             unproven_n += verdict.outcome == "unproven"
             excepted += listed is not None and passed
@@ -484,7 +600,7 @@ def execute(args: argparse.Namespace, work: Path) -> int:
     total = len(levels) * len(args.files)
     print(
         f"{TOOL}: compared {compared} of {total} ({unproven_n} unproven, {excepted} excepted); "
-        f"{read_back} $ instances read back as cells",
+        f"{read_back} $ instances read back as cells (-icells), {library} library instances",
         flush=True,
     )
     return worst if worst else (EXIT_UNPROVEN if unproven else EXIT_OK)
@@ -496,21 +612,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     work = Path(args.work).resolve() if keep else Path(tempfile.mkdtemp(prefix="icells-check-"))
     work.mkdir(parents=True, exist_ok=True)
     try:
-        code = execute(args, work)
+        return execute(args, work)
     except opt_equiv.CrashError as exc:
         print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
-        print(f"{TOOL}: work directory kept: {work}", file=sys.stderr)
         return EXIT_CRASH
     except (OSError, ToolError, opt_equiv.ToolError, ValueError) as exc:
         print(f"{TOOL}: error: {exc}", file=sys.stderr)
-        print(f"{TOOL}: work directory kept: {work}", file=sys.stderr)
         return EXIT_ERROR
     except memcap.CapUnavailable as exc:
         print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
         return EXIT_SKIP
-    if not keep and code in (EXIT_OK, EXIT_UNPROVEN):
-        shutil.rmtree(work, ignore_errors=True)
-    return code
+    finally:
+        if not keep:  # a failing design is described on stdout; --work DIR keeps the files
+            shutil.rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":

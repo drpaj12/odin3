@@ -6,6 +6,7 @@ runs replaced by fixed verdicts.
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -117,15 +118,62 @@ class ScriptTests(unittest.TestCase):
 
     def test_read_back_script_by_level(self) -> None:
         cfg = ic.Config("o", "y", Path("s"), Path("lib.o3lib"), Path("l"), 1)
-        word = ic.read_back_script(cfg, "word", Path("W.v"), (Path("R.il"), Path("W2.v")))
-        self.assertIn("read_verilog -icells W.v; proc; opt_clean; stats;", word)
-        self.assertTrue(word.endswith("write_rtlil R.il"))
+        cfg.techlibs = {"hard.v": ["read_techlib vtr.o3lib", "read_verilog --lib adder.v"]}
+        word = ic.read_back_script(
+            cfg,
+            "word",
+            Path("W.v"),
+            ic.ReadOut(Path("R.il"), Path("W2.v"), Path("S2.il")),
+            Path("d.v"),
+        )
+        self.assertIn("read_verilog -icells W.v; proc; opt_clean; stats; write_rtlil S2.il;", word)
+        self.assertTrue(word.endswith("write_verilog W2.v; write_rtlil R.il"))
         self.assertNotIn("read_techlib", word)
-        gate = ic.read_back_script(cfg, "gate", Path("W.v"), (Path("R.blif"), Path("W2.v")))
-        self.assertTrue(gate.endswith("lower; write_blif --vtr R.blif"))
-        lpm = ic.read_back_script(cfg, "lpm", Path("W.v"), (None, Path("W3.v")))
-        self.assertTrue(lpm.startswith("read_techlib lib.o3lib; read_verilog -icells"))
+        gate = ic.read_back_script(
+            cfg,
+            "gate",
+            Path("W.v"),
+            ic.ReadOut(Path("R.blif"), Path("W2.v"), Path("S2.il")),
+            Path("d.v"),
+        )
+        self.assertTrue(gate.endswith("; lower; write_blif --vtr R.blif"))
+        lpm = ic.read_back_script(
+            cfg, "lpm", Path("W.v"), ic.ReadOut(None, Path("W3.v"), Path("S3.il")), Path("hard.v")
+        )
+        self.assertTrue(
+            lpm.startswith(
+                "read_techlib lib.o3lib; read_techlib vtr.o3lib; read_verilog --lib adder.v; "
+                "read_verilog -icells"
+            )
+        )
         self.assertTrue(lpm.endswith("write_verilog W3.v"))
+        text = ic.read_back_script(
+            cfg, "insttext", Path("W.v"), ic.ReadOut(None, Path("W2.v"), Path("S2.il")), Path("d.v")
+        )
+        self.assertNotIn("opt_clean", text)
+        self.assertNotIn("write_rtlil", text)
+
+    def test_required_type_and_library_instances(self) -> None:
+        self.assertEqual(ic.required_type("inst", Path("inst_dffsr.v")), "$dffsr")
+        self.assertEqual(ic.required_type("insttext", Path("inst_memwr.v")), "$memwr")
+        self.assertEqual(ic.required_type("word", Path("inst_dffsr.v")), "")
+        text = "(* blackbox *)\nmodule lpm_x #(parameter a = 1) (input b);\nendmodule\n"
+        text += (
+            "module t;\n  lpm_x #(.a(2)) \\$c3 (\n    .b(1'b1)\n  );\n  lpm_x u ();\nendmodule\n"
+        )
+        self.assertEqual(ic.lib_instances(text), 2)
+
+    def test_parse_techlibs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.txt"
+            path.write_text("# c\na.v lib/x.o3lib\nb.v lib/y.o3lib soft.v\n")
+            table = ic.parse_techlibs(path)
+            self.assertEqual(table["a.v"], [f"read_techlib {ic.ROOT / 'lib/x.o3lib'}"])
+            self.assertEqual(len(table["b.v"]), 2)
+            self.assertIn("read_verilog --lib", table["b.v"][1])
+            path.write_text("a.v\n")
+            with self.assertRaises(ic.ToolError):
+                ic.parse_techlibs(path)
 
 
 class MainTests(unittest.TestCase):
@@ -167,6 +215,128 @@ class MainTests(unittest.TestCase):
         code, _, err = run_main(ic.main, ["--level", "nope", "x.v"])
         self.assertEqual(code, ic.EXIT_ERROR)
         self.assertIn("unknown level", err)
+
+
+IL = """module \\top
+  wire width 4 input 1 \\d
+  wire width 4 output 2 \\q
+  cell $dff $c1
+    parameter \\\\WIDTH 4
+    connect \\D \\d
+    connect \\Q \\q
+  end
+end
+"""
+CENSUS = {("top", "$dff"): 1}
+
+
+class JudgeTextTests(unittest.TestCase):
+    """The fixpoint and instance legs on files, and the require flags."""
+
+    def verdict(
+        self,
+        census: dict[tuple[str, str], int],
+        il3: str = IL,
+        text: str = WRITTEN,
+        flags: tuple[bool, bool] = (False, False),
+        design: str = "d.v",
+    ) -> ic.Verdict:
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            paths = {name: work / name for name in ("W.v", "W2.v", "W3.v", "S2.il", "S3.il")}
+            for name in ("W.v", "W2.v", "W3.v"):
+                paths[name].write_text(text)
+            paths["S2.il"].write_text(IL)
+            paths["S3.il"].write_text(il3)
+            cfg = ic.Config("o", "y", Path("s"), Path("l"), Path("p"), 1)
+            cfg.require_dollar, cfg.require_lib = flags
+            return ic.judge_text(cfg, ("word", Path(design)), paths, (census, census))
+
+    def test_ok_counts_the_instances(self) -> None:
+        verdict = self.verdict(CENSUS)
+        self.assertEqual(verdict.outcome, "ok")
+        self.assertEqual(verdict.instances, 1)
+
+    def test_an_empty_census_fails(self) -> None:
+        self.assertEqual(self.verdict({}).outcome, "fail:fixpoint")
+        self.assertIn("no cell census", self.verdict({}).reason)
+
+    def test_a_changed_parameter_in_generation_3_fails(self) -> None:
+        verdict = self.verdict(CENSUS, il3=IL.replace("WIDTH 4", "WIDTH 5"))
+        self.assertEqual(verdict.outcome, "fail:fixpoint")
+        self.assertIn("parameter", verdict.reason)
+
+    def test_an_empty_signature_fails(self) -> None:
+        verdict = self.verdict(CENSUS, il3="")
+        self.assertEqual(verdict.outcome, "fail:fixpoint")
+
+    def test_a_design_without_dollar_instance_fails_when_required(self) -> None:
+        plain = "module m (input a, output y);\n  assign y = a;\nendmodule\n"
+        self.assertEqual(self.verdict(CENSUS, text=plain).outcome, "ok")
+        verdict = self.verdict(CENSUS, text=plain, flags=(True, False))
+        self.assertEqual(verdict.outcome, "fail:instances")
+        self.assertEqual(
+            self.verdict(CENSUS, text=plain, flags=(False, True)).outcome, "fail:instances"
+        )
+
+    def test_the_type_of_an_inst_file_must_be_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            paths = {n: work / n for n in ("W.v", "W2.v", "W3.v", "S2.il", "S3.il")}
+            for name in ("W.v", "W2.v", "W3.v"):
+                paths[name].write_text(WRITTEN)
+            paths["S2.il"].write_text(IL)
+            paths["S3.il"].write_text(IL)
+            cfg = ic.Config("o", "y", Path("s"), Path("l"), Path("p"), 1)
+            verdict = ic.judge_text(cfg, ("inst", Path("inst_dffsr.v")), paths, (CENSUS, CENSUS))
+            self.assertEqual(verdict.outcome, "fail:instances")
+            self.assertIn("$dffsr", verdict.reason)
+            verdict = ic.judge_text(cfg, ("inst", Path("inst_pow.v")), paths, (CENSUS, CENSUS))
+            self.assertEqual(verdict.outcome, "ok")
+
+
+class MutatedReadBackTests(unittest.TestCase):
+    """End to end (needs the build's odin3 in ODIN3_CLI and Yosys 0.55 in ODIN3_YOSYS055): a
+    read-back mutated after Odin III wrote it fails the leg that watches that file (review L3)."""
+
+    DESIGN = ic.ROOT / "tests" / "icells" / "inst" / "inst_dffsr.v"
+
+    def run_mutated(self, mode: str) -> tuple[int, str]:
+        cli, yosys = os.environ.get("ODIN3_CLI"), os.environ.get("ODIN3_YOSYS055")
+        if not cli or not yosys or not Path(yosys).exists():
+            self.skipTest("needs ODIN3_CLI and ODIN3_YOSYS055")
+        fake = Path(__file__).resolve().parent / "fixtures" / "icells_mutating_odin3"
+        env = {"ICELLS_MUTATE": mode, "ODIN3_CLI": cli}
+        with mock.patch.dict(os.environ, env):
+            code, out, _ = run_main(
+                ic.main,
+                ["--level", "inst", "--odin3", str(fake), "--yosys", yosys, str(self.DESIGN)],
+            )
+        return code, out
+
+    def test_unmutated_passes(self) -> None:
+        code, out = self.run_mutated("")
+        self.assertEqual(code, ic.EXIT_OK, out)
+
+    def test_read_leg(self) -> None:
+        code, out = self.run_mutated("read")
+        self.assertEqual(code, ic.EXIT_FAIL)
+        self.assertIn("fail:read", out)
+
+    def test_instances_leg(self) -> None:
+        code, out = self.run_mutated("instances")
+        self.assertEqual(code, ic.EXIT_FAIL)
+        self.assertIn("fail:instances", out)
+
+    def test_fixpoint_leg(self) -> None:
+        code, out = self.run_mutated("fixpoint")
+        self.assertEqual(code, ic.EXIT_FAIL)
+        self.assertIn("fail:fixpoint", out)
+
+    def test_equivalent_leg(self) -> None:
+        code, out = self.run_mutated("equivalent")
+        self.assertEqual(code, ic.EXIT_FAIL)
+        self.assertIn("fail:equivalent", out)
 
 
 if __name__ == "__main__":

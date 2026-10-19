@@ -1,6 +1,7 @@
 # The 5.2 word level (spec section 8): the netlist after opt, written as it stands. Latches are
 # allowed (no --nolatches), so $dlatch reaches the writer.
 # @DESIGN@ is the design, @IL@ the RTLIL of the netlist as written (the gold), @OUT@ the Verilog.
+@TECHLIB@
 read_verilog @DESIGN@
 proc
 opt
