@@ -243,6 +243,7 @@ add_library(odin3_core OBJECT
     src/frontends/project/o3proj.c
     src/frontends/project/entry.c
     src/frontends/project/xml.c
+    src/frontends/arch/arch.c
     src/frontends/project/odin2.c
     src/frontends/verilog/preproc.c
     src/frontends/verilog/macro.c
@@ -1213,6 +1214,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_techlib_expr)
     odin3_add_unit_test(test_techlib_reader)
     odin3_add_unit_test(test_techlib_string_param)
+    odin3_add_unit_test(test_arch_record)
     # 5.1 Task 3: lib/lpm.o3lib and LPM-structured Verilog read back as registered cells.
     odin3_add_unit_test(test_lpm_lib)
     # BLIF `.param` on a tech-library `.subckt` (1C amendment 2026-10-19, PHASE5 decision 8).

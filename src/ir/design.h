@@ -96,6 +96,20 @@ struct odin3_project *odin3_design_project(const odin3_design *design);
 /* Destroys the design's project record (a failed read_project), so the next use starts clean. */
 void odin3_design_drop_project(odin3_design *design);
 
+struct odin3_arch; /* src/frontends/arch/arch.h */
+
+/*
+ * The design's architecture record (Phase 4.1, `read_arch`), created empty on first use; the design
+ * destroys it. NO_MEMORY (with *out unchanged) when creating it fails.
+ */
+odin3_status odin3_design_get_arch(odin3_design *design, struct odin3_arch **out);
+
+/* The design's architecture record, NULL when there is none. */
+struct odin3_arch *odin3_design_arch(const odin3_design *design);
+
+/* Destroys the design's architecture record (a failed read_arch), so the next use starts clean. */
+void odin3_design_drop_arch(odin3_design *design);
+
 /*
  * How diagnostics name files (PRJ-18 --diag-paths): ODIN3_SRCFMT_GIVEN (the default) or
  * ODIN3_SRCFMT_RESOLVED. Any other value is stored as GIVEN.
