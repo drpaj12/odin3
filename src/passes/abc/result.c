@@ -19,7 +19,8 @@ enum {
     MINI_NULL2 = 0x7FFFFFFE,
     HALF_WORD_BITS = 32,
     SMALL_TABLE_LOG = 5, /* tables of up to 5 inputs fill one 32-bit word */
-    MIN_WIDE_WORDS = 2   /* 32-bit words of one 64-bit word */
+    MIN_LUT_SIZE = 2,
+    MIN_WIDE_WORDS = 2 /* 32-bit words of one 64-bit word */
 };
 
 #define NOT_A_LUT UINT32_MAX /* the map entry of a PO */
@@ -464,6 +465,9 @@ odin3_status odin3_abc_result_from_luts(const odin3_abc_luts *luts,
                                         const odin3_abc_result_expect *expect, odin3_arena *arena,
                                         odin3_abc_result *out) {
     odin3_abc_result_init(out);
+    if (luts->lut_size < MIN_LUT_SIZE || luts->lut_size > ODIN3_LUT_MAX_WIDTH) {
+        return lr_fail("a LUT size outside 2 to 16");
+    }
     lread lr = {luts,
                 out,
                 NULL,

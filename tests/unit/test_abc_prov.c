@@ -662,6 +662,59 @@ static void test_no_namemap_after_an_engine_failure(void) {
     expect_no_map_line((no_map_case){"--lut 6", "ABC: the fake engine has no name map"});
 }
 
+/* A COMMAND failure of name_map falls back to cones like a RESULT one (§6.3). */
+static void test_no_namemap_after_a_command_failure(void) {
+    odin3_abc_fake_name_map(ODIN3_FAKE_MAP_COMMAND);
+    expect_no_map_line((no_map_case){"--lut 6", "ABC: the fake name map command failed"});
+}
+
+/* Fresh design and module for one more run of the sweep. */
+static void fresh_design(void) {
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    odin3_module_id mid = {0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, mid));
+    mod = odin3_module_get(design, mid);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pass_run_begin(design, afx_intern(design, "read"), &reader_ctx));
+}
+
+/* A sweep step: out of memory, or a success that moved the name p (the name map was used). */
+static void expect_sweep_step(odin3_status st) {
+    if (st == ODIN3_OK) {
+        TEST_ASSERT_TRUE_MESSAGE(
+            odin3_net_valid(odin3_module_find_net(mod, afx_intern(design, "p"))),
+            "the name map never anchored p");
+    } else {
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_NO_MEMORY, st, afx_errors());
+    }
+}
+
+/*
+ * The whole pass on the in-memory exchange with a name map that proves every LUT (the fake's
+ * literals), every allocation failing in turn: NO_MEMORY, a valid IR, and finally a success that
+ * went through store_old_lit, fold_old_lit and the name-map anchors (the name p moved).
+ */
+static void test_oom_sweep_over_the_name_map(void) {
+    odin3_abc_fake_name_map(ODIN3_FAKE_MAP_LITS);
+    TEST_ASSERT_EQUAL_INT(0, setenv("ODIN3_ABC_EXCHANGE", "aig", 1));
+    long ok_after = -1;
+    for (long nth = 0; nth < SWEEP_LIMIT && ok_after < 0; nth++) {
+        fresh_design();
+        odin3_prov_id s_p;
+        build_two_readers(false, &s_p);
+        odin3_util_set_alloc_fail_after(nth);
+        odin3_status st = run_abc("--lut 2");
+        odin3_util_set_alloc_fail_after(-1);
+        afx_check(design);
+        ok_after = st == ODIN3_OK ? nth : ok_after;
+        expect_sweep_step(st);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(ok_after > 0, "the sweep never reached a success");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_cone_records_in_node_order);
@@ -682,5 +735,7 @@ int main(void) {
     RUN_TEST(test_no_namemap_above_the_cap);
     RUN_TEST(test_no_namemap_under_prov_cone);
     RUN_TEST(test_no_namemap_after_an_engine_failure);
+    RUN_TEST(test_no_namemap_after_a_command_failure);
+    RUN_TEST(test_oom_sweep_over_the_name_map);
     return UNITY_END();
 }

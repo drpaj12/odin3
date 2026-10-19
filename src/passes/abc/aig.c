@@ -181,6 +181,26 @@ static odin3_status cube_lit(ab *bld, const char *row, int32_t *out) {
     return and_balanced(bld, lits_of(&bld->cube), (uint32_t)bld->cube.len, out);
 }
 
+/* A row is valid when its planes are 0, 1 or - and its output character is 0 or 1 and equals the
+ * first row's (BLIF has one polarity per cover); logs and says INVALID_ARG otherwise. */
+static odin3_status check_row(const ab *bld, const char *row, const rows_view *rows) {
+    uint32_t inputs = (uint32_t)bld->ins.len;
+    char out_char = row[inputs + (rows->spaced ? 1U : 0U)];
+    const char *first = rows->data;
+    bool ok = (out_char == '0' || out_char == '1') &&
+              out_char == first[inputs + (rows->spaced ? 1U : 0U)];
+    for (uint32_t col = 0; ok && col < inputs; col++) {
+        ok = row[col] == '0' || row[col] == '1' || row[col] == '-';
+    }
+    if (!ok) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "abc: module '%s': a cover has a row with a plane or output character other than "
+                  "0, 1 or -, or with another output polarity than the first row",
+                  module_text(bld->run));
+    }
+    return ok ? ODIN3_OK : ODIN3_ERR_INVALID_ARG;
+}
+
 /* The literal of a cover over the input literals in bld->ins: a balanced OR of its cubes in row
  * order (an AND of complements), complemented for an off-set cover. */
 static odin3_status cover_lit(ab *bld, const rows_view *rows, int32_t *out) {
@@ -190,7 +210,8 @@ static odin3_status cover_lit(ab *bld, const rows_view *rows, int32_t *out) {
     for (uint32_t num = 0; num < rows->count; num++) {
         const char *row = rows->data + (size_t)num * rows->stride;
         int32_t cube = 0;
-        odin3_status st = cube_lit(bld, row, &cube);
+        odin3_status st = check_row(bld, row, rows);
+        st = st == ODIN3_OK ? cube_lit(bld, row, &cube) : st;
         st = st == ODIN3_OK ? push_lit(&bld->cubes, cube ^ LIT_FLIP) : st;
         if (st != ODIN3_OK) {
             return st;

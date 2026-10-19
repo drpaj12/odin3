@@ -45,4 +45,14 @@ void odin3_abc_fake_fail_on(const char *word, odin3_abc_fail fail);
  */
 void odin3_abc_fake_extra(const char *command);
 
+/* What the fake name_map does (default RESULT; odin3_abc_fake_reset restores it). */
+enum { ODIN3_FAKE_MAP_RESULT = 0, ODIN3_FAKE_MAP_COMMAND, ODIN3_FAKE_MAP_LITS };
+
+/*
+ * RESULT: fail with kind RESULT ("the fake engine has no name map"); COMMAND: fail with kind
+ * COMMAND (text "the fake name map command failed"); LITS: give every LUT of the in-memory result
+ * the literal of the loaded AND it was made from (-1 for an inverter LUT and every other object).
+ */
+void odin3_abc_fake_name_map(int mode);
+
 #endif

@@ -7,6 +7,7 @@
 
 #include "passes/abc/abc.h"
 #include "passes/abc/aig.h"
+#include "passes/abc/aligned.h"
 #include "passes/abc/child.h"
 #include "passes/abc/region.h"
 #include "passes/abc/result.h"

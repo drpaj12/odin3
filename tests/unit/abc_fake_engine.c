@@ -54,6 +54,7 @@ typedef struct fake {
     char extra[NAME_BYTES * 2]; /* a command run just before every write_hie */
     odin3_abc_fail fail;
     bool open;
+    int map_mode; /* odin3_abc_fake_name_map */
 } fake;
 
 static fake fk;
@@ -563,6 +564,9 @@ static int32_t name_index(const char *name) {
 
 /* The loaded MiniAIG object (index) -> the fake node, and the literal converted. */
 static uint32_t aig_node[MAX_OBJS];
+static uint32_t aig_obj_of_node[MAX_NODES]; /* the loaded object of a node, UINT32_MAX for none */
+static int32_t lut_lit[MAX_OBJS];           /* per emitted LUT: its loaded AIG literal or -1 */
+static uint32_t n_lut_lit;
 
 static uint32_t aig_lit(int32_t lit) {
     return 2U * aig_node[(uint32_t)lit >> 1] + ((uint32_t)lit & 1U);
@@ -572,6 +576,7 @@ static uint32_t aig_lit(int32_t lit) {
 static void load_nodes(const odin3_abc_aig *aig, uint32_t pis) {
     uint32_t real = pis - aig->n_regs;
     uint32_t pi = 0;
+    memset(aig_obj_of_node, 0xFF, sizeof aig_obj_of_node);
     aig_node[0] = new_node(K_CONST, "const0");
     for (uint32_t obj = 1; obj < aig->n_objs; obj++) {
         int32_t lit0 = aig_first(aig, obj);
@@ -591,6 +596,7 @@ static void load_nodes(const odin3_abc_aig *aig, uint32_t pis) {
             fk.nodes[node].fan0 = aig_lit(lit0);
             fk.nodes[node].fan1 = aig_lit(lit1);
             aig_node[obj] = node;
+            aig_obj_of_node[node] = obj;
         }
     }
 }
@@ -664,6 +670,8 @@ static void emit_ands(const bool *used) {
         }
         int32_t objs[LUT_SIZE] = {(int32_t)out_node[fan[0] >> 1], (int32_t)out_node[fan[1] >> 1]};
         out_node[id] = out_push(objs, replicate(table));
+        lut_lit[n_lut_lit++] =
+            aig_obj_of_node[id] == UINT32_MAX ? -1 : (int32_t)(2U * aig_obj_of_node[id]);
     }
 }
 
@@ -676,6 +684,7 @@ static void emit_po(uint32_t lit) {
     } else if ((lit & 1U) != 0) {
         int32_t one[LUT_SIZE] = {(int32_t)drv, MINI_NULL};
         drv = out_push(one, replicate(TABLE_NOT));
+        lut_lit[n_lut_lit++] = -1;
     }
     int32_t fan[LUT_SIZE] = {(int32_t)drv, MINI_NULL2};
     (void)out_push(fan, 0);
@@ -717,6 +726,7 @@ static odin3_status fake_get_luts(void *self, odin3_abc_luts *luts, odin3_abc_fa
         }
     }
     out_objs = 0;
+    n_lut_lit = 0;
     (void)out_push(NULL, 0);          /* constant 0 */
     (void)out_push(NULL, UINT32_MAX); /* constant 1 */
     emit_inputs();
@@ -733,11 +743,34 @@ static odin3_status fake_get_luts(void *self, odin3_abc_luts *luts, odin3_abc_fa
     return ODIN3_OK;
 }
 
+static int32_t out_lits[MAX_OBJS];
+
+/* The map of mode FAKE_MAP_LITS: each LUT of the aligned MiniLUT (they keep the order of the
+ * result's) gets the literal of the loaded AND it was made from, -1 for an inverter LUT. */
+static void fill_lits(const odin3_abc_luts *aligned) {
+    uint32_t next = 0;
+    for (uint32_t obj = 0; obj < aligned->n_objs; obj++) {
+        const int32_t *fan = aligned->fanins + ((size_t)aligned->lut_size * obj);
+        bool is_lut = obj >= 2U && fan[0] != MINI_NULL && fan[1] != MINI_NULL2;
+        out_lits[obj] = is_lut && next < n_lut_lit ? lut_lit[next] : -1;
+        next += is_lut ? 1U : 0U;
+    }
+}
+
 static odin3_status fake_name_map(void *self, const odin3_abc_luts *aligned, const int32_t **lits,
                                   odin3_abc_fail *fail) {
     (void)self;
-    (void)aligned;
-    (void)lits;
+    if (fk.map_mode == ODIN3_FAKE_MAP_LITS && aligned->n_objs < MAX_OBJS) {
+        fill_lits(aligned);
+        *lits = out_lits;
+        return ODIN3_OK;
+    }
+    if (fk.map_mode == ODIN3_FAKE_MAP_COMMAND) {
+        fail->kind = ODIN3_ABC_FAIL_COMMAND;
+        fail->code = 1;
+        (void)snprintf(fail->text, sizeof fail->text, "the fake name map command failed");
+        return ODIN3_ERR_ENGINE;
+    }
     return fake_fail_result(fail, "the fake engine has no name map");
 }
 
@@ -786,4 +819,8 @@ void odin3_abc_fake_fail_on(const char *word, odin3_abc_fail fail) {
 
 void odin3_abc_fake_extra(const char *command) {
     (void)snprintf(fk.extra, sizeof fk.extra, "%s", command == NULL ? "" : command);
+}
+
+void odin3_abc_fake_name_map(int mode) {
+    fk.map_mode = mode;
 }

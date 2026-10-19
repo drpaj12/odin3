@@ -1270,7 +1270,20 @@ then the options considered.
     and LUT depth from the written BLIF, prints `equivalent`, or `explain` for equivalent results
     with a ratio more than 5% from 1 (exact integer arithmetic), and accepts `differs` and `timeout`
     as pinned statuses in its expect list; `--keep DIR` defaults to a fresh directory under
-    `~/odin3-ws/work/abc-diff/`. **To record before the flip:** the 19 per-design ratios and their
+    `~/odin3-ws/work/abc-diff/`. (i) **Review fixes.** `abc-diff` runs all three pairs and reports the
+    worst, so a listed `error` cannot hide a `differs` of the two results. Its exit codes are the
+    project's: 0 ok, 1 differs (or a listed design that passes), 2 tool error, 4 unproven (equiv-check's
+    exit 4; only a listing of `unproven` absorbs it) or timeout, 77 ABC missing (all designs skipped);
+    the plan said 0, 1, 2 and 3 (a crash) is not produced. A LUT depth on a combinational cycle is
+    printed `n/a`. (j) A fifth no-name-map reason, `ABC: the aligned network cannot be built`, covers an
+    `INVALID_ARG` of `odin3_abc_aligned_build` (not reachable after the result's checks); the spec lists
+    four. (k) The three designs no simulator can run (`derived_clock`, `loop`, `ram_unconn`) are checked
+    against the IR cell by cell, CIs and register values random, every CO and register input compared
+    (`test_abc_aig`, `test_comb_equal_*`); they are not covered by `test_abc_pass`, which runs BLIF only.
+    (l) `cover_lit` refuses a `$sop` row with another output polarity than its first row or a plane
+    character other than `0`, `1`, `-`. (m) The init-1 restore does not flip `old_lit`: the LUT it
+    complements feeds only a register input, so it has that input's identity anchor and never a name-map
+    one. **To record before the flip:** the 19 per-design ratios and their
     explanations (`abc_diff_golden`), and H1/H4.
 
 ## Risks

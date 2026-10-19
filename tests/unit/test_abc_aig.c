@@ -8,9 +8,11 @@
 #include "abc_fixture.h"
 #include "abc_sim.h"
 #include "abc_stage.h"
+#include "ir/lut.h"
 #include "passes/abc/abc.h"
 #include "passes/abc/abc_test.h"
 #include "passes/abc/aig.h"
+#include "passes/abc/aligned.h"
 #include "passes/abc/region.h"
 #include "passes/abc/result.h"
 #include "passes/abc/run.h"
@@ -18,6 +20,9 @@
 #include "sim/sim.h"
 #include "util/alloc.h"
 
+#ifndef ODIN3_LIB_DIR
+#error "ODIN3_LIB_DIR must name lib/"
+#endif
 #ifndef ODIN3_SOURCE_DIR
 #error "ODIN3_SOURCE_DIR must name the repository"
 #endif
@@ -529,6 +534,262 @@ static void test_result_names_checked(void) {
         2, afx_count(ODIN3_LOG_ERROR, "abc: ABC returned a malformed network: register 0"));
 }
 
+/* --- every CO and register input against the IR, cell by cell ---------------------------- */
+
+/* The IR's own values for one random vector: rd[net] is what a reader of the net sees (a CI, a
+ * register's value, a constant, else the driver's output), drv[net] what the soft driver computes
+ * (they differ on a loop-cut net). Independent of the builder's trees: each cell is evaluated
+ * straight from its table or its rows. */
+typedef struct irvals {
+    uint8_t rd[MAX_VALUES];
+    uint8_t drv[MAX_VALUES];
+    uint8_t reg[MAX_PIS]; /* each register's IR value Q */
+} irvals;
+
+static bool ir_read(const irvals *iv, odin3_net_id net) {
+    int lit = odin3_abc_pin_literal(staged.run, net);
+    if (!odin3_net_valid(net) || lit == 0) {
+        return false;
+    }
+    return lit == 1 || iv->rd[net.v] != 0;
+}
+
+/* The inputs of node in port order as bits of an index (input j is bit j; at most 64). */
+static uint64_t ir_inputs(const irvals *iv, odin3_node_id node, uint32_t *count) {
+    uint64_t index = 0;
+    *count = 0;
+    odin3_pinslice pins = odin3_node_pins(mod, node);
+    for (uint32_t i = 0; i < pins.count; i++) {
+        odin3_pin_id pin = {pins.first.v + i};
+        if (odin3_pin_dir(mod, pin) == ODIN3_DIR_IN) {
+            index |= (uint64_t)(ir_read(iv, odin3_pin_net(mod, pin)) ? 1U : 0U) << (*count)++;
+        }
+    }
+    return index;
+}
+
+static bool ir_sop(const odin3_value *cover, uint64_t index) {
+    uint32_t inputs = cover->cover_inputs;
+    size_t stride = (size_t)inputs + 1U;
+    bool any = false;
+    bool off_set = false;
+    for (size_t off = 0; off + stride <= cover->len; off += stride) {
+        bool match = true;
+        for (uint32_t col = 0; col < inputs; col++) {
+            char want = (char)cover->bits[off + col];
+            bool bit = ((index >> col) & 1U) != 0;
+            match = match && (want == '-' || (want == '1') == bit);
+        }
+        any = any || match;
+        off_set = cover->bits[off + inputs] == '0';
+    }
+    return off_set ? !any : any;
+}
+
+static bool ir_cell(const irvals *iv, odin3_node_id node) {
+    uint32_t counted = 0;
+    uint64_t index = ir_inputs(iv, node, &counted);
+    odin3_celltype_id type = odin3_node_type(mod, node);
+    uint64_t table = 0;
+    uint32_t gate_inputs = 0;
+    if (odin3_abc_gate_table(staged.run, type, &table, &gate_inputs) == ODIN3_OK) {
+        return ((table >> index) & 1U) != 0;
+    }
+    if (strcmp(odin3_celltype_get(design, type)->name, "$lut") == 0) {
+        uint64_t words[ODIN3_LUT_MAX_WORDS];
+        odin3_value params[2] = {*odin3_node_param(mod, node, ODIN3_LUT_P_WIDTH),
+                                 *odin3_node_param(mod, node, ODIN3_LUT_P_LUT)};
+        TEST_ASSERT_TRUE(odin3_lut_table(params, words, ODIN3_LUT_MAX_WORDS));
+        return ((words[index / 64U] >> (index % 64U)) & 1U) != 0;
+    }
+    return ir_sop(odin3_node_param(mod, node, 1), index);
+}
+
+static odin3_net_id out_net(odin3_node_id node) {
+    odin3_pinslice pins = odin3_node_pins(mod, node);
+    for (uint32_t i = 0; i < pins.count; i++) {
+        odin3_pin_id pin = {pins.first.v + i};
+        if (odin3_pin_drives(mod, pin)) {
+            return odin3_pin_net(mod, pin);
+        }
+    }
+    return (odin3_net_id){0};
+}
+
+static bool reg_inverted(uint32_t reg) {
+    odin3_node_id node = {((const uint32_t *)staged.region.regs.data)[reg]};
+    const odin3_value *init = odin3_node_param(mod, node, 0);
+    return init != NULL && init->kind == ODIN3_VAL_INT && init->i == 1;
+}
+
+/* Random CIs and register values (rd), a register's Q net reads its value. */
+static void ir_seed(irvals *iv, odin3_prng *prng) {
+    const odin3_abc_region *region = &staged.region;
+    memset(iv, 0, sizeof *iv);
+    for (size_t ci = 0; ci < region->cis.len; ci++) {
+        iv->rd[((const uint32_t *)region->cis.data)[ci]] = odin3_prng_bit(prng) ? 1U : 0U;
+    }
+    for (uint32_t net = 1; net < odin3_module_net_end(mod); net++) {
+        uint32_t reg = ((const uint32_t *)region->q_of.data)[net];
+        if (reg != 0) {
+            iv->reg[reg - 1U] = odin3_prng_bit(prng) ? 1U : 0U;
+            iv->rd[net] = iv->reg[reg - 1U];
+        }
+    }
+}
+
+/* One random vector: the seed values, then the soft cells in region order. */
+static void ir_vector(irvals *iv, odin3_prng *prng) {
+    const odin3_abc_region *region = &staged.region;
+    ir_seed(iv, prng);
+    for (size_t at = 0; at < region->soft.len; at++) {
+        odin3_node_id node = {((const uint32_t *)region->soft.data)[at]};
+        odin3_net_id net = out_net(node);
+        uint8_t value = ir_cell(iv, node) ? 1U : 0U;
+        if (odin3_net_valid(net)) {
+            iv->drv[net.v] = value;
+            iv->rd[net.v] =
+                ((const uint32_t *)region->ci_of.data)[net.v] == 0 ? value : iv->rd[net.v];
+        }
+    }
+}
+
+/* The AIG on the same vector: PIs are the CIs, then each register's Q xor its inversion. */
+static void aig_vector(const irvals *iv, evaluator *ev) {
+    const odin3_abc_region *region = &staged.region;
+    for (size_t ci = 0; ci < region->cis.len; ci++) {
+        ev->pis[ci] = iv->rd[((const uint32_t *)region->cis.data)[ci]];
+    }
+    for (uint32_t reg = 0; reg < aig.n_regs; reg++) {
+        ev->pis[region->cis.len + reg] = iv->reg[reg] ^ (reg_inverted(reg) ? 1U : 0U);
+    }
+    evaluate(ev);
+}
+
+/* Every real CO and every register input of the AIG against the IR on this vector. */
+static void expect_pos_equal(const irvals *iv, const evaluator *ev) {
+    const odin3_abc_region *region = &staged.region;
+    uint32_t first_po = n_objs() - aig.n_pos;
+    for (size_t co = 0; co < region->cos.len; co++) {
+        uint32_t net = ((const uint32_t *)region->cos.data)[co];
+        uint32_t reg = ((const uint32_t *)region->q_of.data)[net];
+        uint8_t want = reg != 0 ? iv->reg[reg - 1U] : iv->drv[net];
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(want, ev->value[first_po + co], "a CO differs");
+    }
+    for (uint32_t reg = 0; reg < aig.n_regs; reg++) {
+        odin3_net_id dnet = {((const uint32_t *)region->reg_d.data)[reg]};
+        uint8_t want = (ir_read(iv, dnet) ? 1U : 0U) ^ (reg_inverted(reg) ? 1U : 0U);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(want, ev->value[first_po + region->cos.len + reg],
+                                        "a register input differs");
+    }
+}
+
+static void expect_comb_equal(const char *name) {
+    char path[AFX_PATH];
+    char lib[AFX_PATH];
+    (void)snprintf(lib, sizeof lib, "%s/vtr.o3lib", ODIN3_LIB_DIR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "read_techlib", odin3_bytes_cstr(lib)));
+    (void)snprintf(path, sizeof path, "%s/tests/unit/data/abc/%s.blif", ODIN3_SOURCE_DIR, name);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_read(design, path));
+    mod = afx_top(design);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, build_aig(), afx_errors());
+    static irvals iv;
+    static evaluator ev;
+    for (uint32_t seed = 1; seed <= ASIM_SEEDS; seed++) {
+        odin3_prng prng;
+        odin3_prng_seed(&prng, seed);
+        for (uint32_t vec = 0; vec < ASIM_CYCLES; vec++) {
+            memset(&ev, 0, sizeof ev);
+            ir_vector(&iv, &prng);
+            aig_vector(&iv, &ev);
+            expect_pos_equal(&iv, &ev);
+        }
+    }
+    free_all();
+}
+
+/* All eight data designs, including the three the simulator cannot run (a derived clock, a
+ * combinational loop with its cut net, a hard block): CIs and register values are random, the IR
+ * is evaluated cell by cell. */
+static void test_comb_equal_t1(void) {
+    expect_comb_equal("t1");
+}
+
+static void test_comb_equal_toggle_init1(void) {
+    expect_comb_equal("toggle_init1");
+}
+
+static void test_comb_equal_scorr_merge_init1(void) {
+    expect_comb_equal("scorr_merge_init1");
+}
+
+static void test_comb_equal_two_ports(void) {
+    expect_comb_equal("two_ports");
+}
+
+static void test_comb_equal_keep_net(void) {
+    expect_comb_equal("keep_net");
+}
+
+static void test_comb_equal_derived_clock(void) {
+    expect_comb_equal("derived_clock");
+}
+
+static void test_comb_equal_loop(void) {
+    expect_comb_equal("loop");
+}
+
+static void test_comb_equal_ram_unconn(void) {
+    expect_comb_equal("ram_unconn");
+}
+
+/* --- cover and size checks ----------------------------------------------------------------- */
+
+/* A $sop whose rows disagree on the output polarity is refused, not built as a wrong function. */
+static void test_mixed_polarity_cover_refused(void) {
+    new_module();
+    odin3_net_id in_a = input("a");
+    odin3_net_id in_b = input("b");
+    odin3_net_id out_y = output("y");
+    odin3_value params[2] = {odin3_value_int(2), {.kind = ODIN3_VAL_COVER}};
+    static const uint8_t rows[6] = {'1', '-', '1', '-', '1', '0'};
+    params[1].bits = rows;
+    params[1].len = sizeof rows;
+    params[1].cover_inputs = 2;
+    odin3_net_id nets[3] = {in_a, in_b, out_y};
+    odin3_netvec ports[2] = {{nets, 2}, {&nets[2], 1}};
+    odin3_node_spec spec = {afx_type(design, "$sop"), 0, (odin3_prov_id){0}, params, 2};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(mod, &spec, ports, &node));
+    odin3_status st = build_aig();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, st, afx_errors());
+    TEST_ASSERT_EQUAL_UINT32(1, afx_count(ODIN3_LOG_ERROR, "abc: module 'm': a cover has a row"));
+    free_all();
+}
+
+/* A MiniLUT with lut_size 1 is malformed for the import and for the aligned build. */
+static void test_lut_size_checked(void) {
+    static const int32_t fanins[4] = {0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF};
+    static const uint32_t truths[4] = {0, UINT32_MAX, 0, 0};
+    odin3_abc_luts luts = {fanins, truths, NULL, 4, 0, 1};
+    odin3_abc_result_expect expect = {0, 0, 0, 0};
+    odin3_arena *arena = odin3_arena_create(0);
+    odin3_abc_result res;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE,
+                          odin3_abc_result_from_luts(&luts, &expect, arena, &res));
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_ERROR,
+                             "abc: ABC returned a malformed network: a LUT size outside 2 to 16"));
+    odin3_abc_result_free(&res);
+    load_t1(0);
+    afx_stage_region(design, mod, &staged);
+    odin3_abc_luts aligned = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_abc_aligned_build(staged.run, &luts, arena, &aligned));
+    odin3_arena_destroy(arena);
+    afx_unstage(&staged);
+    staged = (afx_staged){0};
+}
+
 /* --- the cap ------------------------------------------------------------------------------- */
 
 static void test_cap(void) {
@@ -614,6 +875,16 @@ int main(void) {
     RUN_TEST(test_equal_scorr_merge_init1);
     RUN_TEST(test_equal_two_ports);
     RUN_TEST(test_equal_keep_net);
+    RUN_TEST(test_comb_equal_t1);
+    RUN_TEST(test_comb_equal_toggle_init1);
+    RUN_TEST(test_comb_equal_scorr_merge_init1);
+    RUN_TEST(test_comb_equal_two_ports);
+    RUN_TEST(test_comb_equal_keep_net);
+    RUN_TEST(test_comb_equal_derived_clock);
+    RUN_TEST(test_comb_equal_loop);
+    RUN_TEST(test_comb_equal_ram_unconn);
+    RUN_TEST(test_mixed_polarity_cover_refused);
+    RUN_TEST(test_lut_size_checked);
     RUN_TEST(test_pi_names);
     RUN_TEST(test_aligned_after_scorr_merge);
     RUN_TEST(test_result_names_checked);

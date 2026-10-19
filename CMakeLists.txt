@@ -1038,6 +1038,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_abc_aig)
     target_compile_definitions(test_abc_aig PRIVATE
         ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/test_abc_aig"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_sources(test_abc_aig PRIVATE tests/unit/abc_fake_engine.c)
     # 3D Task 19: the splice's end-to-end checks. test_abc_unconn and test_abc_pass run the fake

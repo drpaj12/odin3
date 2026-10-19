@@ -2,8 +2,8 @@
  * aligned.c — the aligned MiniLUT of the name map (3D spec §6.3, AB-16; plan Task 21): the result
  * with the loaded AIG's interface.
  */
+#include "passes/abc/aligned.h"
 #include "odin3/odin3.h"
-#include "passes/abc/exchange.h"
 #include "passes/abc/region.h"
 #include "passes/abc/run.h"
 #include "util/arena.h"
@@ -16,7 +16,9 @@ enum {
     MINI_NULL = 0x7FFFFFFF,
     MINI_NULL2 = 0x7FFFFFFE,
     FIRST_OBJ = 2, /* objects 0 and 1 are the constants */
-    TRUTH_BITS_LOG = 5
+    TRUTH_BITS_LOG = 5,
+    MIN_LUT_SIZE = 2,
+    MAX_LUT_SIZE = 16
 };
 
 #define NONE UINT32_MAX /* a k that no result register is named after */
@@ -170,8 +172,26 @@ static odin3_status alloc_dst(align *al, uint32_t n_objs, odin3_arena *arena) {
     return ODIN3_OK;
 }
 
+/* The source has as many real inputs and outputs as the region sent. */
+static bool shape_ok(const align *al, const odin3_abc_run *run) {
+    const odin3_abc_luts *res = al->src;
+    return res->n_regs <= al->n_pos && al->real == run->region->cis.len &&
+           al->real_cos == run->region->cos.len;
+}
+
+static void copy_luts(const align *al) {
+    for (uint32_t obj = FIRST_OBJ; obj < al->src->n_objs; obj++) {
+        if (kind_of(al, obj) == KIND_LUT) {
+            copy_lut(al, obj);
+        }
+    }
+}
+
 odin3_status odin3_abc_aligned_build(const odin3_abc_run *run, const odin3_abc_luts *res,
                                      odin3_arena *arena, odin3_abc_luts *aligned) {
+    if (res->lut_size < MIN_LUT_SIZE || res->lut_size > MAX_LUT_SIZE) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
     align al = {res,
                 aligned,
                 NULL,
@@ -194,8 +214,7 @@ odin3_status odin3_abc_aligned_build(const odin3_abc_run *run, const odin3_abc_l
         al.j_of_k[reg] = NONE;
     }
     count_kinds(&al);
-    if (res->n_regs > al.n_pos || al.real != run->region->cis.len ||
-        al.real_cos != run->region->cos.len) {
+    if (!shape_ok(&al, run)) {
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_status st = number_objects(&al);
@@ -203,12 +222,8 @@ odin3_status odin3_abc_aligned_build(const odin3_abc_run *run, const odin3_abc_l
              ? alloc_dst(&al, FIRST_OBJ + al.real + al.regs_in + al.luts + al.real_cos + al.regs_in,
                          arena)
              : st;
-    for (uint32_t obj = FIRST_OBJ; st == ODIN3_OK && obj < res->n_objs; obj++) {
-        if (kind_of(&al, obj) == KIND_LUT) {
-            copy_lut(&al, obj);
-        }
-    }
     if (st == ODIN3_OK) {
+        copy_luts(&al);
         fill_pos(&al);
     }
     return st;
