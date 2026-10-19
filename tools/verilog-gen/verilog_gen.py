@@ -7,6 +7,7 @@ Usage::
     verilog_gen.py --proc --seed N --out F.v
     verilog_gen.py --elab --seed N --out F.v
     verilog_gen.py --opt --seed N --out F.v
+    verilog_gen.py --lower --seed N --out F.v
     verilog_gen.py --flatten --seed N --out F.v
 
 writes ``F.v``, one compilation unit of one to four modules generated from seed N over the MUST
@@ -38,6 +39,10 @@ line lists the features used, each a counted production): constants and ``x`` in
 with and without ``default``, repeated sub-expressions, enable and reset nests, constant shifts and
 power-of-two multiplies; no ``F.ast``.
 
+``--lower`` (3B Task 9) is the profile for the ``lower`` differential (``lower_profile.py``;
+``tools/lower-check/lower-gen-diff``; the first two lines give the kind and the features): one
+module of word cells of mixed widths and signs, flip-flops, latches or a memory.
+
 ``--elab`` (2D Task 28) is another profile: one synthesisable module for the elaboration
 differential (``tools/elab-check/elab-diff``; ``elab_profile.py``; its first line lists the
 counted traps it used), no ``F.ast``.
@@ -64,6 +69,7 @@ from pathlib import Path
 
 import elab_profile
 import flatten_profile
+import lower_profile
 import opt_profile
 import proc_profile
 
@@ -2361,6 +2367,16 @@ def write_elab(seed: int, out: Path) -> int:
     return 0
 
 
+def write_lower(seed: int, out: Path) -> int:
+    """``--lower``: the lower profile's module for seed into out."""
+    try:
+        out.write_text(lower_profile.generate(seed).text, encoding="utf-8")
+    except OSError as exc:
+        print(f"verilog_gen: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def write_flatten(seed: int, out: Path) -> int:
     """``--flatten``: the flatten profile's hierarchy for seed into out."""
     try:
@@ -2385,11 +2401,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="the elaboration profile (expression trees, parameters, generate)")
     parser.add_argument("--flatten", action="store_true",
                         help="the flatten profile (module hierarchy, generate, inout, keep)")
+    parser.add_argument("--lower", action="store_true",
+                        help="the lower profile (mixed widths and signs, every operator, "
+                        "flip-flops, latches, memories)")
     args = parser.parse_args(argv)
     out = Path(args.out)
-    if args.proc or args.elab or args.opt or args.flatten:
-        if args.mutate or (args.proc + args.elab + args.opt + args.flatten) > 1:
-            parser.error("--proc, --elab, --opt, --flatten and --mutate cannot be combined")
+    if args.proc or args.elab or args.opt or args.flatten or args.lower:
+        if args.mutate or (args.proc + args.elab + args.opt + args.flatten + args.lower) > 1:
+            parser.error("--proc, --elab, --opt, --flatten, --lower and --mutate cannot be "
+                         "combined")
+        if args.lower:
+            return write_lower(args.seed, out)
         if args.flatten:
             return write_flatten(args.seed, out)
         if args.opt:

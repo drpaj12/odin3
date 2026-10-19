@@ -126,7 +126,7 @@ which PRs remain.
   - [x] 525-fixture `lower-equiv` sweep (2026-10-18): 518 of 526 compared, 8 unproven, 0 differ. The 8 are exactly the fixtures `lower_cells_equiv` leaves out of CTest for their size or clock (`mul_w12`, `mul_w12_s`, `mul_w16`, `mul_w16_s`, `mod_w12`, `mod_w12_s`, `mul_w8_s_y16`: SAT size, covered by `lower-diff` tier T; `mem_w4_d4_neg`: its inverted clock net is run with `--neg-edge keep` in `lower_cells_equiv_neg_keep`)
   - [ ] `fuzz_lower` long run (the 60 s smoke ran once in a clang build): pending controller run (2026-10-18)
   - [ ] `bench_lower --cells 1000000` (100000 cells ran, 1.36 s): pending controller run (2026-10-18)
-  - [ ] 200-seed `verilog-gen --lower` generator (spec 14.5): not built; no `--lower` weighting exists
+  - [~] 200-seed `verilog-gen --lower` generator (spec 14.5, decision 47): `tools/verilog-gen/lower_profile.py`, `tools/lower-check/lower-gen-diff`, CTest `lower_gen_vs_yosys` (1..200, strict, `--strict-unproven`) and `lower_gen_vs_yosys_long` (1..5000, nightly, `--tier-t report`). Direct run 2026-10-19 on the main release build (work/odin3-m1), command `lower-gen-diff --odin3 .../odin3 --yosys .../yosys --seeds 1..200 --expect tests/lower/gen_diff_expect.txt --min-compared 190 --strict-unproven`, result `200 ok, 0 structural, 0 unproven, 0 empty, 0 differ, 0 BUG; compared 200 of 200` rc 0 (8 of the 200 are the listed tier-T histogram differences; with `--tier-t report` and no list the same run gives `192 ok, 8 structural`; lower-equiv proved 200 of 200). Open: the CTest runs (`lower_gen_vs_yosys`, the 5,000-seed window) are not yet run (controller)
 - [ ] 3G `wreduce` (decision 7 = b; a faithful Yosys 0.55 `wreduce`, signed rewrite included)
 - [ ] 3C `hardmap` (Peter reviews; spec first, Peter approves the mapping rules before any code;
   signed adders sign-extend, the declared divergence from Parmys of decision 29); **M2**: O′ leg
@@ -1178,6 +1178,33 @@ then the options considered.
     own job, `FCHECK_J`): a separate step after all VPR jobs would need a different resume point
     in the 3H-3 runner, and the 06:00 deadline already stops an fcheck not started in time;
     Peter may ask for the split. A seed key counts against `KEEP_KEYS` (3) with the seed-1 key.
+47. **3B `lower` Task 9: the `--lower` generator** (2026-10-19, branch `feat/3B-lower-gen`; agent
+    defaults, Peter may override). (a) One seed makes one *kind* of module (`comb`, `ff`, `latch`,
+    `mem`; five, three, one, one in every ten consecutive seeds) because `lower-diff` judges a family
+    at a time: `comb` is family `arith` forced to tier T (a module of mixed word cells has no
+    gate-for-gate form), `ff` is family `ff` tier D with `--neg-edge keep` (`equiv-check` takes one
+    clock domain and no internal clock net, so a module has one clock edge; the default
+    `--neg-edge invert` is covered by `lower-equiv`, which runs it), `latch` is family `latch` tier S
+    (its data is a plain operand so that no word cell feeds it), `mem` is family `mem`. (b)
+    `lower-equiv --latches` (python only) reads without `--nolatches` and runs `opt_clean`, as
+    `lower-diff --family latch` does; the latch kind needs it. (c) A `NOT A REFINEMENT` of a
+    generated seed is a bug in `lower`: `lower-gen-diff` prints `BUG`, keeps the directory and exits
+    1, and no expect list takes it. An unproven result is counted as a measured fact (`--strict-unproven`
+    exits 4); a seed that `opt` folds to no word cell is counted `empty` and `--min-compared` is the
+    floor. (d) Seeds 1..200: 0 BUG (lower-equiv proved all 200, none unproven), 8 of the 100 `comb`
+    seeds differ from Yosys's `techmap` in tier T's histogram after `opt -fast` by one or two gates
+    (an AND for a MUX, an OR for an XOR) while `equiv-check` and `lower-equiv` hold: listed with the
+    reason in `tests/lower/gen_diff_expect.txt` (keyed by seed, so regenerated with the profile). The
+    smallest (seed 121: `w1 << b[2:0]`, `d >>> b[2:0]` and `d | (b[2] ? a : 3'd5)` together) has each
+    cell alone matching exactly; Yosys's `opt -fast` on Odin III's lowering gives Odin III's count, so
+    the difference is in the structure `lower` builds, not in `opt`. (e) The 5,000-seed run
+    keeps equivalence the pass criterion (spec 14.4; spec 14.5 names no other): `--tier-t report` counts
+    the histogram differences (about 4% of the comb seeds) without failing; the 200-seed CTest stays
+    strict with the list, which `lower-gen-diff` checks by step and gate delta (at most 4). The
+    generator does not make `$dlatchsr`, `$adlatch`, `$eqx`/`$nex`, active-low flop polarities or wide
+    `* / %` (SAT limit). **Open for Peter:** whether `lower` should match techmap.v's shifter,
+    divider and multiplier structure to the gate on these 1-4 gates (a lowering-algorithm choice;
+    `lower` is unchanged here). Not a soundness question.
 
 ## Risks
 

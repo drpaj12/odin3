@@ -2913,6 +2913,25 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --seeds 1..200 --jobs 1 --mem-cap 3G
                     --expect-structural ${PROJECT_SOURCE_DIR}/tests/opt/gen_structural_expect.txt
                     --work ${PROJECT_BINARY_DIR}/opt_gen_work)
+        # 3B Task 9 (spec 14.5, decision 47): lower_gen_vs_yosys, 200 seeds of the --lower generator
+        # through lower-diff (tier by kind) and lower-equiv. Strict: a NOT A REFINEMENT is a bug in
+        # lower and is never listed; an unproven seed fails (--strict-unproven; 0 measured); the
+        # tier-T histogram differences of seeds 1..200 (equivalent, a few gates apart after
+        # `opt -fast`) are the list tests/lower/gen_diff_expect.txt, checked by step and gate delta.
+        # lower_gen_vs_yosys_long (5,000 seeds, the heavy-run window, nightly) keeps equivalence
+        # (lower-equiv, and lower-diff's equiv step) the pass criterion and only reports the
+        # histogram differences (--tier-t report): about 4% of the comb seeds, not listed.
+        set(_lower_gen ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-gen-diff
+            --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055} --mem-cap 3G
+            --expect ${PROJECT_SOURCE_DIR}/tests/lower/gen_diff_expect.txt)
+        odin3_add_sweep_test(lower_gen_vs_yosys LABEL sweep
+            COMMAND ${_lower_gen} --seeds 1..200 --min-compared 190 --strict-unproven
+                    --work ${PROJECT_BINARY_DIR}/lower_gen_work)
+        odin3_add_sweep_test(lower_gen_vs_yosys_long LABEL sweep
+            COMMAND ${_lower_gen} --seeds 1..5000 --min-compared 4500 --tier-t report
+                    --work ${PROJECT_BINARY_DIR}/lower_gen_long_work)
+        set_tests_properties(lower_gen_vs_yosys PROPERTIES LABELS "sweep;lower")
+        set_tests_properties(lower_gen_vs_yosys_long PROPERTIES LABELS "sweep;lower;nightly")
         # 2D Task 28 (spec 14.5, review M24): the --elab generator's modules through the bridge
         # (elab-diff, 200 seeds) and 500 random constant expressions, odin3_cval_op against Yosys
         # 0.55's folds (const-diff). The nightly runs are the *_long tests: 5,000 seeds, 10,000
