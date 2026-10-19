@@ -339,6 +339,11 @@ _FCHECK_MISMATCH = re.compile(
     r"|FAIL: \d+ mismatches in)", re.M)
 
 
+# The wrapper's own line for a design whose mismatches are all on bits the RTL leaves undefined
+# (qor_fcheck_run.py): exit 3, no MISMATCH line.
+_FCHECK_UNTESTED = re.compile(r"^UNTESTED: ", re.M)
+
+
 def _passed(log: str) -> bool:
     """The PASS line and a summary of N > 0 matched vectors and no mismatch: a comparison of
     nothing (no output port, no vector) is not a pass."""
@@ -351,13 +356,16 @@ def fcheck_verdict(returncode: int, capped: bool, log: str) -> str:
     """Spec §8.1 (review H6): ``capped`` when the memory cap killed it; ``pass`` only for exit 0
     with the testbench's PASS line and a ``VCHECK_SUMMARY matched=N mismatched=0`` (N > 0) in
     ``log`` (the checker's output); ``fail`` only for a non-zero exit with mismatches reported in
-    ``log``; anything else (a Verilator compile failure, a Yosys
-    failure, a crash, exit 2) is ``error``."""
+    ``log``; ``untested`` for a non-zero exit with the wrapper's ``UNTESTED:`` line and no
+    mismatch (every mismatch is on a bit the RTL leaves undefined: never a pass, never a fail);
+    anything else (a Verilator compile failure, a Yosys failure, a crash, exit 2) is ``error``."""
     if capped:
         return "capped"
     if returncode == 0:
         return "pass" if _passed(log) else "error"
-    return "fail" if _FCHECK_MISMATCH.search(log) else "error"
+    if _FCHECK_MISMATCH.search(log):
+        return "fail"
+    return "untested" if _FCHECK_UNTESTED.search(log) else "error"
 
 
 RERUN_BLIF = "rerun.blif"

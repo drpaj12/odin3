@@ -25,7 +25,8 @@ Subcommands here: ``doctor``, ``run``, ``fcheck``, ``status``, ``clean``, ``tabl
   (spec §8.1) on existing ``ok`` jobs of the current keys, one at a time with ``--verilator-j``
   2 in group A and 1 in group B, and writes ``metrics.json`` ``verdicts.fcheck``; ``run --fcheck``
   does the same right after each job. A missing job is named and makes the exit 1; exit 1 for a
-  ``fail`` or ``error`` (also from ``run --fcheck``), 3 for ``capped`` or ``timeout``.
+  ``fail`` or ``error`` (also from ``run --fcheck``), 3 for ``capped``, ``timeout`` or
+  ``untested`` (every mismatch is on a bit the RTL leaves undefined; never a pass).
 - ``equiv (--set S | --designs D)`` (heavy) runs ``tools/equiv-check`` on the O' job's and the O
   job's kept ``<d>.blif`` (spec §8.2) and writes the O job's ``verdicts.equiv`` (``equivalent``,
   ``differs``, ``ram``, ``multiclock``, ``timeout``, ``capped``, ``error``). Exit 1 for
@@ -866,7 +867,8 @@ def cmd_fcheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
     verdicts, stop = qor_sched.run_checks(jobs, opts, step)
     counts = ", ".join(f"{verdicts.count(v)} {v}" for v in sorted(set(verdicts)))
     _warn_log(opts, f"fcheck done: {counts or 'nothing to check'}")
-    return _checks_exit(verdicts, missing, stop, FCHECK_BAD, frozenset({"capped", "timeout"}))
+    return _checks_exit(verdicts, missing, stop, FCHECK_BAD,
+                        frozenset({"capped", "timeout", "untested"}))
 
 
 EQUIV_BAD = frozenset({"differs", "error"})
