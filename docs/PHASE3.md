@@ -1231,6 +1231,39 @@ then the options considered.
     `* / %` (SAT limit). **Open for Peter:** whether `lower` should match techmap.v's shifter,
     divider and multiplier structure to the gate on these 1-4 gates (a lowering-algorithm choice;
     `lower` is unchanged here). Not a soundness question.
+52. **`opt_share` parity with Yosys 0.55: the commutative swap and mux chunks** (Peter, 2026-10-19,
+    branch `feat/opt-share-parity`; item B2 of the hardmap-big triage, approved). Amends 2F spec §11 and
+    §17 #44 and #45 (the amended text is in the spec rows). Soundness (OP-13) still comes first: every
+    widening below has a unit test with negative cases, a Yosys 0.55 case run through the real
+    `opt_share`, an `opt-rules` row (Yosys log, cell histogram and refinement) and an `opt-equiv` run
+    with the Phase 3 script (CTest `opt_equiv_share_rules`).
+    (a) **What is widened.** 1. The shared operand may be on port `A` of one cell and port `B` of
+    another when one of them is `$add $mul $and $or $xor $xnor $eq $ne $logic_and $logic_or`; the signed
+    flags must agree role by role; the new cell keeps the lowest-ID member's ports. Proof: for these
+    types `f(A, B) = f(B, A)` with the widths and flags swapped too, and the new cell is built from
+    the lead's ports with each member's muxed operand extended as before. 2. An `$add` and a `$sub`
+    share an operand that is not the subtracted one (Yosys: `decode_port_sign` gives a `$sub`'s port `B`
+    the sign 1 and the shared operand is compared with it), so `d + 1` and `1 - d` share the `1`: the
+    mux feeds `d` and `-d` to one `$add`. Proof: `S + m` with `m = d` or `-d` at a width of at least
+    `Y_WIDTH`, as the `$add`/`$sub` mix on port `A` already did. 3. A candidate is a cell whose whole
+    `Y` is a contiguous chunk of a wider data port; the cells of a group start at the same bit; the
+    other bits of the port stay on the old mux. Proof: the new cell's `Y` takes the members' chunk
+    nets, so the old mux reads the same function.
+    (b) **What stays narrower than Yosys, and why.** 1. A cell whose `Y` is wider than the chunk the port
+    reads, with other `Y_WIDTH`s in the group (`diff_port_widths`): that the low bits of a cell's
+    result do not depend on `Y_WIDTH` is not shown for every type (and not by a Yosys case), and in
+    the Phase 3 script `wreduce` trims `Y` to the used bits before `opt -full`, so the case is rare;
+    not done without a per-type proof. 2.
+    A mixed-sign pair and the signed extension of bitwise cells (§17 #47, #57): unchanged. 3. The
+    types Odin III has no cell for (`$sshl $shift $eqx $nex $divfloor $modfloor $alu $concat`) and the
+    gates: unchanged (the gates exist only after `lower`, where `opt -fast` does not run `opt_share`).
+    4. The lead is the lowest node ID; Yosys keeps the member of the first mux port. In every test case
+    both give the same cell type and widths.
+    (c) **Evidence** (2026-10-19, release build; the commands and outputs are in
+    `.superpowers/sdd/opt-share-parity-report.md`). `d + 1` against `1 - d` under a mux: 34 adders
+    before, 17 after (Parmys 17). `hardmap-diff` on stereovision1 (`tools/heavy-run`): adder +24 before,
+    adder 0 after (the latch -65 of decision 43 is unchanged). `opt_diff_micro` (release, `tools/heavy-run`):
+    passed, 6643 s, no `diff_expect` entry became stale.
 
 ## Risks
 
