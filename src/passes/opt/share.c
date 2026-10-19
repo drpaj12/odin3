@@ -17,8 +17,8 @@
  * - the shared operand may be on different ports of the cells only for the commutative types
  *   (extends the 2F spec: PHASE3 #52; `d + 1` and `1 - d` share the 1), with the signed flags
  *   equal role by role;
- * - the group's cell is a new node of the lowest-ID member's type (Yosys keeps the member of the
- *   first mux port), and the members' Y nets are merged into its Y net.
+ * - the group's cell is a new node of the type, ports and name of the member on the first mux
+ *   port (Yosys's ports[0], PHASE3 #52), and the members' Y nets are merged into its Y net.
  * Each rewrite builds the $neg cells, the new mux and the new cell before its first destructive
  * step, kit_connect; any later failure is a half-done rewrite (odin3_kit_half_done).
  */
@@ -109,6 +109,7 @@ typedef struct sh_state {
     odin3_celltype_id kinds[N_KINDS];
     odin3_celltype_id mux, pmux, neg;
     odin3_node_id mux_node;
+    odin3_node_id lead; /* the member on the first mux port: Yosys keeps its type and ports */
     uint32_t width, slices;
     odin3_vec cands;  /* cand */
     odin3_vec dn;     /* the mux's data nets: B slices, then A, width each */
@@ -422,37 +423,15 @@ static uint32_t count_joiners(const sh_state *ss, size_t seed, uint32_t sport) {
     return hits;
 }
 
-/* <0, 0, >0: the seed's operand vector on port A against the one on port B, by net ID. */
-static int cmp_operands(const sh_state *ss, odin3_node_id op) {
-    const uint32_t count = port_width(ss, op, PORT_A);
-    const uint32_t other = port_width(ss, op, PORT_B);
-    for (uint32_t bit = 0; bit < count && bit < other; bit++) {
-        const uint32_t lhs = port_net(ss, (port_ref){op, PORT_A}, bit).v;
-        const uint32_t rhs = port_net(ss, (port_ref){op, PORT_B}, bit).v;
-        if (lhs != rhs) {
-            return lhs < rhs ? -1 : 1;
-        }
-    }
-    if (count == other) {
-        return 0;
-    }
-    return count < other ? -1 : 1;
-}
-
-/* The port to share on: of the two operands with a partner, the one with the lower net IDs. */
+/* The port to share on: port A when another open candidate shares it, else port B (Yosys's
+ * find_shared_operand tries A first). */
 static bool choose_port(const sh_state *ss, size_t seed, uint32_t *port) {
-    const uint32_t on_a = count_joiners(ss, seed, PORT_A);
-    const uint32_t on_b = count_joiners(ss, seed, PORT_B);
-    if (on_a == 0 && on_b == 0) {
-        return false;
-    }
-    if (on_a != 0 && on_b != 0) {
-        const odin3_node_id op = {((const cand *)ss->cands.data)[seed].op};
-        *port = cmp_operands(ss, op) <= 0 ? PORT_A : PORT_B;
+    if (count_joiners(ss, seed, PORT_A) != 0) {
+        *port = PORT_A;
         return true;
     }
-    *port = on_a != 0 ? PORT_A : PORT_B;
-    return true;
+    *port = PORT_B;
+    return count_joiners(ss, seed, PORT_B) != 0;
 }
 
 /* group = the seed and the open candidates that join it, in port order; each member's sport is
@@ -483,7 +462,8 @@ static int cmp_node(const void *lhs, const void *rhs) {
     return lhs_id < rhs_id ? -1 : 1;
 }
 
-/* byid = the group's cells, lowest ID first; the lead and the widths follow. */
+/* byid = the group's cells, lowest ID first (for the record); the lead (the first member in port
+ * order, as Yosys's ports[0]) and the widths follow. */
 static odin3_status group_facts(sh_state *ss) {
     const cand *all = ss->cands.data;
     const uint32_t *idx = ss->group.data;
@@ -499,7 +479,8 @@ static odin3_status group_facts(sh_state *ss) {
         wmax = wid > wmax ? wid : wmax;
     }
     qsort(ss->byid.data, ss->byid.len, sizeof(odin3_node_id), cmp_node);
-    const odin3_node_id lead = *(const odin3_node_id *)ss->byid.data;
+    const odin3_node_id lead = {all[idx[0]].op};
+    ss->lead = lead;
     ss->lead_kind = kind_of(ss, odin3_node_type(ss->m, lead));
     ss->mixed = false;
     for (size_t i = 0; i < ss->group.len; i++) {
@@ -723,7 +704,7 @@ static uint32_t members_gone(const sh_state *ss) {
  * lead's name. */
 static odin3_status commit(sh_state *ss, odin3_node_id op) {
     const odin3_node_id *ids = ss->byid.data;
-    const uint32_t name = odin3_node_name(ss->m, ids[0]);
+    const uint32_t name = odin3_node_name(ss->m, ss->lead);
     odin3_vec_clear(&ss->yn);
     odin3_status st = push_port(ss, &ss->yn, op, PORT_Y);
     for (size_t i = 0; st == ODIN3_OK && i < ss->byid.len; i++) {
@@ -751,7 +732,7 @@ static odin3_status apply_group(sh_state *ss) {
     odin3_node_id mux_new = {0};
     odin3_node_id op = {0};
     st = st == ODIN3_OK ? make_mux(ss, prov, &mux_new) : st;
-    st = st == ODIN3_OK ? make_op(ss, *(const odin3_node_id *)ss->byid.data, mux_new, prov, &op)
+    st = st == ODIN3_OK ? make_op(ss, ss->lead, mux_new, prov, &op)
                         : st;
     if (st != ODIN3_OK) {
         return rolled_back(ss, st);

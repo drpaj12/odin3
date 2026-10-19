@@ -1239,7 +1239,7 @@ then the options considered.
     with the Phase 3 script (CTest `opt_equiv_share_rules`).
     (a) **What is widened.** 1. The shared operand may be on port `A` of one cell and port `B` of
     another when one of them is `$add $mul $and $or $xor $xnor $eq $ne $logic_and $logic_or`; the signed
-    flags must agree role by role; the new cell keeps the lowest-ID member's ports. Proof: for these
+    flags must agree role by role; the new cell keeps the ports of the member on the first mux port. Proof: for these
     types `f(A, B) = f(B, A)` with the widths and flags swapped too, and the new cell is built from
     the lead's ports with each member's muxed operand extended as before. 2. An `$add` and a `$sub`
     share an operand that is not the subtracted one (Yosys: `decode_port_sign` gives a `$sub`'s port `B`
@@ -1257,8 +1257,10 @@ then the options considered.
     A mixed-sign pair and the signed extension of bitwise cells (§17 #47, #57): unchanged. 3. The
     types Odin III has no cell for (`$sshl $shift $eqx $nex $divfloor $modfloor $alu $concat`) and the
     gates: unchanged (the gates exist only after `lower`, where `opt -fast` does not run `opt_share`).
-    4. The lead is the lowest node ID; Yosys keeps the member of the first mux port. In every test case
-    both give the same cell type and widths.
+    4. The lead (new cell's type, ports and name) is the member on the first mux port, and the shared
+    operand is port `A` first, as Yosys (review M2 and M3 of 818cec0a; both differed before: the
+    lowest node ID, and the lower net-ID vector). `mixed3.il` (3-member `$add`/`$sub` group: 2 `$neg`,
+    `$add` lead) and `choose_a.il` (`and(a,b) and(a,c) and(d,b)`: `a` shared) are real Yosys cases.
     (c) **Evidence** (2026-10-19, release build; the commands and outputs are in
     `.superpowers/sdd/opt-share-parity-report.md`). `d + 1` against `1 - d` under a mux: 34 adders
     before, 17 after (Parmys 17). `hardmap-diff` on stereovision1 (`tools/heavy-run`): adder +24 before,
