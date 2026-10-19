@@ -126,7 +126,7 @@ which PRs remain.
   - [x] 525-fixture `lower-equiv` sweep (2026-10-18): 518 of 526 compared, 8 unproven, 0 differ. The 8 are exactly the fixtures `lower_cells_equiv` leaves out of CTest for their size or clock (`mul_w12`, `mul_w12_s`, `mul_w16`, `mul_w16_s`, `mod_w12`, `mod_w12_s`, `mul_w8_s_y16`: SAT size, covered by `lower-diff` tier T; `mem_w4_d4_neg`: its inverted clock net is run with `--neg-edge keep` in `lower_cells_equiv_neg_keep`)
   - [ ] `fuzz_lower` long run (the 60 s smoke ran once in a clang build): pending controller run (2026-10-18)
   - [ ] `bench_lower --cells 1000000` (100000 cells ran, 1.36 s): pending controller run (2026-10-18)
-  - [x] 200-seed `verilog-gen --lower` generator (spec 14.5, decision 45): `tools/verilog-gen/lower_profile.py`, `tools/lower-check/lower-gen-diff`, CTest `lower_gen_vs_yosys` (1..200) and `lower_gen_vs_yosys_long` (1..5000, nightly). Seeds 1..200 run directly on the main release build (2026-10-19): 200 ok, 0 BUG, 0 unproven, 8 listed tier-T histogram differences in `tests/lower/gen_diff_expect.txt`. The ctest run and the 5,000-seed window are pending the controller
+  - [x] 200-seed `verilog-gen --lower` generator (spec 14.5, decision 47): `tools/verilog-gen/lower_profile.py`, `tools/lower-check/lower-gen-diff`, CTest `lower_gen_vs_yosys` (1..200) and `lower_gen_vs_yosys_long` (1..5000, nightly). Direct run 2026-10-19 on head 65ca48c2 with the main release build (work/odin3-m1): seeds 1..200, 200 of 200 proved by `lower-equiv`, 0 BUG, 0 unproven, 8 listed tier-T histogram differences in `tests/lower/gen_diff_expect.txt`; log `/tmp/claude-1000/-home-jamiespa-odin3-ws/a3f90acd-46d0-47d5-a556-de762a9b9fa5/scratchpad/run8.log`. CTest `lower_gen_vs_yosys` is not yet run (controller), nor the 5,000-seed window
 - [ ] 3G `wreduce` (decision 7 = b; a faithful Yosys 0.55 `wreduce`, signed rewrite included)
 - [ ] 3C `hardmap` (Peter reviews; spec first, Peter approves the mapping rules before any code;
   signed adders sign-extend, the declared divergence from Parmys of decision 29); **M2**: O′ leg
@@ -1130,7 +1130,7 @@ then the options considered.
     so it stays. (f) No lowering bug was found: the four "not a refinement" files are the checker
     (a, one also an unsupported two-clock-domain cec, now listed as unproven).
 
-45. **3B `lower` Task 9: the `--lower` generator** (2026-10-19, branch `feat/3B-lower-gen`; agent
+47. **3B `lower` Task 9: the `--lower` generator** (2026-10-19, branch `feat/3B-lower-gen`; agent
     defaults, Peter may override). (a) One seed makes one *kind* of module (`comb`, `ff`, `latch`,
     `mem`; five, three, one, one in every ten consecutive seeds) because `lower-diff` judges a family
     at a time: `comb` is family `arith` forced to tier T (a module of mixed word cells has no
