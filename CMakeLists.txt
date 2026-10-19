@@ -1431,6 +1431,8 @@ if(BUILD_TESTING)
     add_dependencies(test_icells verilog_generated)
     target_compile_definitions(test_icells PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 5.2 Task 3 (spec T-3): every cell type the writer writes as an instance reads back.
+    odin3_add_unit_test(test_icells_roundtrip)
     # 2D Task 20: memories (the mem2reg decision, registers per word, $mem and its read ports).
     odin3_add_unit_test(test_elab_stage2_mem)
     target_include_directories(test_elab_stage2_mem PRIVATE ${_gen})
