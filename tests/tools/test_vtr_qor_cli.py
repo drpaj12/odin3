@@ -117,13 +117,20 @@ print("\\t".join(fields.values()) + "\\t")
 """
 
 FAKE_RANDOM_CHECK = """
-import sys
+import shutil, sys
 from pathlib import Path
 args = sys.argv[1:]
 root = Path(__file__).resolve().parents[2]
 with (root / "fcheck-calls.log").open("a") as log:
     log.write(" ".join(args) + "\\n")
-Path(args[args.index("--work-dir") + 1]).mkdir(parents=True, exist_ok=True)
+# As VTR's run_random_check.py: wipe the work dir first, then need the netlist (yosys fails
+# when it is missing).
+work = Path(args[args.index("--work-dir") + 1])
+if work.exists():
+    shutil.rmtree(work)
+work.mkdir(parents=True)
+if not Path(args[args.index("--post-synth-blif") + 1]).is_file():
+    sys.exit(2)
 mode = root / "fcheck-exit"
 sys.exit(int(mode.read_text()) if mode.exists() else 0)
 """
