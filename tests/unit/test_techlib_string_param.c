@@ -192,6 +192,18 @@ static void test_signed_and_x_stay_reserved(void) {
     TEST_ASSERT_NOT_NULL(strstr(g_msg, "reserved word"));
 }
 
+static void test_clock_is_reserved_for_parameters(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_text(CELL "  param clock int 4\nend\n"));
+    TEST_ASSERT_NOT_NULL(strstr(g_msg, "'clock' is a reserved word"));
+}
+
+static void test_string_default_with_separator_explains(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_text(CELL "  param S string \"a;b\"\nend\n"));
+    TEST_ASSERT_NOT_NULL(strstr(g_msg, "may not hold ';' or '#'"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_text(CELL "  param T string \"a#b\"\nend\n"));
+    TEST_ASSERT_NOT_NULL(strstr(g_msg, "may not hold ';' or '#'"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_string_param_default);
@@ -209,5 +221,7 @@ int main(void) {
     RUN_TEST(test_string_param_oom_sweep);
     RUN_TEST(test_clock_may_name_a_port);
     RUN_TEST(test_signed_and_x_stay_reserved);
+    RUN_TEST(test_clock_is_reserved_for_parameters);
+    RUN_TEST(test_string_default_with_separator_explains);
     return UNITY_END();
 }

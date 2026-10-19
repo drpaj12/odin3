@@ -12,6 +12,12 @@ Legs, in order (the first failure is printed and the exit status is 1):
 1. ``counts``: Odin III runs the script (``tests/lpm/lpm.script``) on the micro and writes
    Verilog; the INFO line ``lpmmap: N lpm_add_sub, ...`` must equal the ``counts`` row of the
    expect file, and every ``param`` row must be found on an instance of its type.
+   Rows ``pin <micro> <type> <pin> <value>`` do the same for a pin connection, and ``noroundtrip
+   <micro>`` skips the round trip and ``nolint <micro>`` the lint (a micro that keeps ``$mem``
+   cells: the writer emits them without a stub and only ``read_verilog -icells``, item 5.2,
+   reads them). Every written instance is also checked for the defaults of spec M1: an input pin
+   that has a documented default must be tied, never open and never ``1'bx``
+   (``DEFAULTED`` below; ``add_sub`` is exempt, it cannot be used with ``lpm_direction``).
 2. ``roundtrip`` (spec T-3): the Verilog is read back with the LPM library and written again
    (generation 2), then again (generation 3). Reading turns an open instance pin into the
    constant x (inputs) or a fresh net (outputs), so generation 2 differs from generation 1 in
@@ -64,6 +70,34 @@ OPEN_PIN = re.compile(r"^(?:1'bx|\\\$n\d+ ?|\{(?:\\\$n\d+ ?,? ?)+\})$")
 FLOATING = re.compile(r"dangling input port .* floating")
 
 
+# The input pins that have a documented default and are tied by lpmmap (spec M1, UG-01063; the
+# altsyncram list is R-3/R-4's ties). An open or x pin here is a finding.
+DEFAULTED: dict[str, tuple[str, ...]] = {
+    "lpm_add_sub": ("cin", "clken", "aclr", "clock"),
+    "lpm_mult": ("sum", "clken", "aclr", "clock"),
+    "lpm_compare": ("clken", "aclr", "clock"),
+    "altsyncram": (
+        "clock1",
+        "address_a",
+        "data_a",
+        "rden_a",
+        "wren_a",
+        "addressstall_a",
+        "address_b",
+        "data_b",
+        "rden_b",
+        "wren_b",
+        "addressstall_b",
+        "clocken0",
+        "clocken1",
+        "clocken2",
+        "clocken3",
+        "aclr0",
+        "aclr1",
+    ),
+}
+
+
 class CheckError(Exception):
     """A leg failed (exit 1) or the tool could not run (exit 2, usage=True)."""
 
@@ -106,21 +140,34 @@ def script_text(script: Path, lib: Path, design: Path, out: Path, family: str | 
 # --- the expect file ---------------------------------------------------------------------------
 
 
-def read_expect(path: Path, micro: str) -> tuple[list[int] | None, list[tuple[str, str, str]]]:
-    counts: list[int] | None = None
-    params: list[tuple[str, str, str]] = []
+class Expect:
+    """The rows of the expect file for one micro."""
+
+    def __init__(self) -> None:
+        self.counts: list[int] | None = None
+        self.params: list[tuple[str, str, str]] = []
+        self.pins: list[tuple[str, str, str]] = []
+        self.roundtrip = True
+        self.lint = True
+
+
+def read_expect(path: Path, micro: str) -> Expect:
+    exp = Expect()
     for raw in path.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
+        parts = raw.split(None, 4)
+        if len(parts) < 2 or parts[0].startswith("#") or parts[1] != micro:
             continue
-        parts = line.split(None, 4)
-        if parts[0] == "counts" and parts[1] == micro:
-            counts = [int(n) for n in parts[2:7]] if len(parts) >= 7 else None
-            if counts is None:
-                counts = [int(n) for n in line.split()[2:]]
-        elif parts[0] == "param" and parts[1] == micro:
-            params.append((parts[2], parts[3], parts[4]))
-    return counts, params
+        if parts[0] == "counts":
+            exp.counts = [int(n) for n in raw.split()[2:]]
+        elif parts[0] == "param":
+            exp.params.append((parts[2], parts[3], parts[4]))
+        elif parts[0] == "pin":
+            exp.pins.append((parts[2], parts[3], parts[4]))
+        elif parts[0] == "noroundtrip":
+            exp.roundtrip = False
+        elif parts[0] == "nolint":
+            exp.lint = False
+    return exp
 
 
 # --- parsing the written Verilog ----------------------------------------------------------------
@@ -143,8 +190,20 @@ def instances(text: str) -> list[tuple[str, dict[str, str], str, dict[str, str]]
     return found
 
 
+def check_defaults(text: str, label: str) -> None:
+    """Every defaulted input pin of every LPM instance is tied (spec M1)."""
+    for kind, _params, name, pins in instances(text):
+        for pin in DEFAULTED.get(kind, ()):
+            if pin not in pins:
+                raise CheckError(f"defaults: {label}: {kind} {name}: input .{pin}() is open or x")
+
+
 def check_counts(
-    text: str, info: str, counts: list[int] | None, params: list[tuple[str, str, str]]
+    text: str,
+    info: str,
+    counts: list[int] | None,
+    params: list[tuple[str, str, str]],
+    pins: list[tuple[str, str, str]] | None = None,
 ) -> None:
     match = INFO_RE.search(info)
     if match is None:
@@ -156,6 +215,12 @@ def check_counts(
     for kind, name, value in params:
         if not any(k == kind and p.get(name) == value for k, p, _, _ in seen):
             raise CheckError(f"counts: no {kind} instance with .{name}({value})")
+    for kind, pin, value in pins or []:
+        if not any(k == kind and q.get(pin) == value for k, _, _, q in seen):
+            raise CheckError(f"counts: no {kind} instance with .{pin}({value})")
+    for kind, pin, value in pins or []:
+        if not any(k == kind and q.get(pin) == value for k, _, _, q in seen):
+            raise CheckError(f"counts: no {kind} instance with .{pin}({value})")
     for kind in LPM_TYPES:
         n_inst = sum(1 for k, _, _, _ in seen if k == kind)
         if n_inst != got[LPM_TYPES.index(kind)]:
@@ -181,6 +246,7 @@ def check_roundtrip(odin3: str, lib: Path, v1: Path, work: Path) -> None:
     text3 = read_back(odin3, lib, v2, v3)
     if strip_comments(text2) != strip_comments(text3):
         raise CheckError("roundtrip: generation 3 differs from generation 2 (not a fixpoint)")
+    check_defaults(text2, "generation 2")
     one, two = instances(text1), instances(text2)
     if len(one) != len(two):
         raise CheckError(f"roundtrip: {len(one)} instances written, {len(two)} read back")
@@ -236,15 +302,20 @@ def check_micro(args: argparse.Namespace, work: Path) -> None:
     out = work / "gen1.v"
     text = script_text(args.script, args.lib, args.micro, out, args.family)
     proc = odin3_run(args.odin3, text)
-    counts, params = read_expect(args.expect, args.micro.name)
+    exp = read_expect(args.expect, args.micro.name)
+    params = exp.params
     if args.family:  # the expect rows name the default family
         params = [row for row in params if row[1] != "intended_device_family"]
-    check_counts(out.read_text(), proc.stderr, counts, params)
-    wrote = f'.intended_device_family("{args.family}")' in out.read_text()
-    if args.family and counts and counts[3] and not wrote:
+    written = out.read_text()
+    check_counts(written, proc.stderr, exp.counts, params, exp.pins)
+    check_defaults(written, "generation 1")
+    wrote = f'.intended_device_family("{args.family}")' in written
+    if args.family and exp.counts and exp.counts[3] and not wrote:
         raise CheckError(f"counts: --family {args.family}: no altsyncram carries it")
-    check_roundtrip(args.odin3, args.lib, out, work)
-    check_lint(out)
+    if exp.roundtrip:
+        check_roundtrip(args.odin3, args.lib, out, work)
+    if exp.lint:
+        check_lint(out)
 
 
 def main(argv: Sequence[str]) -> int:

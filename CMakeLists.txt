@@ -1213,7 +1213,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_lpmmap_scaffold)
     # 5.1 Task 9 (spec T-1..T-4): one micro per LPM cell through the LPM script, the Verilog round
     # trip and the lint (tools/lpm-check). Exit 77 (skipped) when iverilog is missing.
-    foreach(_lpm_micro IN ITEMS lpm_add_sub lpm_mult lpm_compare altsyncram_sp altsyncram_sdp)
+    foreach(_lpm_micro IN ITEMS lpm_add_sub lpm_mult lpm_compare lpm_mixed altsyncram_sp altsyncram_sdp
+                                 altsyncram_soft)
         add_test(NAME lpm_check_${_lpm_micro}
             COMMAND ${PROJECT_SOURCE_DIR}/tools/lpm-check/lpm-check
                     --odin3 $<TARGET_FILE:odin3>

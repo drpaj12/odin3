@@ -387,7 +387,8 @@ static odin3_status param_string_default(odin3_reader *rd, odin3_rd_span rest, u
     }
     const char *close = memchr(rest.ptr + 1, '"', rest.len - 1U);
     if (close == NULL) {
-        return odin3_rd_err(rd, odin3_rd_at(rd, rest.col), "unterminated string default");
+        return odin3_rd_err(rd, odin3_rd_at(rd, rest.col),
+                            "unterminated string default (the text may not hold ';' or '#')");
     }
     size_t used = (size_t)(close - rest.ptr) + 1U;
     odin3_rd_span tail = {rest.ptr + used, rest.len - used, rest.col + (uint32_t)used};
@@ -404,6 +405,9 @@ odin3_status odin3_rd_st_param(odin3_reader *rd, odin3_rd_span rest) {
     odin3_rd_span kind = {NULL, 0, rest.col};
     if (!odin3_rd_ident(&rest, &name)) {
         return odin3_rd_err(rd, odin3_rd_at(rd, rest.col), "expected a parameter name");
+    }
+    if (odin3_rd_is(name, "clock")) { /* a port may be called clock, a parameter may not */
+        return odin3_rd_err(rd, odin3_rd_at(rd, name.col), "'clock' is a reserved word");
     }
     uint32_t id = 0;
     odin3_status st = declare_name(rd, name, &id);

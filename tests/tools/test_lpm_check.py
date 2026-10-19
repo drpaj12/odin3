@@ -54,12 +54,12 @@ GEN1 = (
     .cout(),
     .overflow(),
     .add_sub(),
-    .cin(),
+    .cin(1'b0),
     .dataa({1'b0, a}),
     .datab({1'b0, b}),
-    .clock(),
-    .clken(),
-    .aclr()
+    .clock(1'b0),
+    .clken(1'b1),
+    .aclr(1'b0)
   );
 endmodule
 """
@@ -98,10 +98,24 @@ class Parsing(unittest.TestCase):
         self.assertEqual(params["lpm_width"], "9")
         self.assertEqual(params["lpm_direction"], '"ADD"')
         self.assertEqual(name, "\\$c15")
-        self.assertEqual(sorted(pins), ["dataa", "datab", "result"])
+        self.assertEqual(
+            sorted(pins), ["aclr", "cin", "clken", "clock", "dataa", "datab", "result"]
+        )
 
     def test_open_pins_equal_x_and_fresh_nets(self) -> None:
         self.assertEqual(lc.instances(GEN1), lc.instances(GEN2))
+
+    def test_defaults_must_be_tied(self) -> None:
+        lc.check_defaults(GEN1, "gen1")
+        lc.check_defaults(GEN2, "gen2")  # add_sub is exempt
+        for pin, tied in (("cin", "1'b0"), ("clken", "1'b1"), ("aclr", "1'b0"), ("clock", "1'b0")):
+            opened = GEN1.replace(f".{pin}({tied})", f".{pin}(1'bx)")
+            self.assertNotEqual(opened, GEN1)
+            with self.assertRaises(lc.CheckError, msg=pin):
+                lc.check_defaults(opened, "gen1")
+        blank = GEN1.replace(".cin(1'b0)", ".cin()")
+        with self.assertRaises(lc.CheckError):
+            lc.check_defaults(blank, "gen1")
 
     def test_a_real_difference_is_seen(self) -> None:
         changed = GEN2.replace(".dataa({1'b0, a})", ".dataa({1'b1, a})")
@@ -125,10 +139,15 @@ class Parsing(unittest.TestCase):
             path = Path(tmp) / "expect.txt"
             path.write_text(
                 "# c\ncounts a.v 1 2 3 4 5\nparam a.v lpm_mult lpm_widtha 8\ncounts b.v 0 0 0 0 0\n"
+                "noroundtrip b.v\nnolint b.v\npin b.v lpm_compare alb lt\n"
             )
-            counts, params = lc.read_expect(path, "a.v")
-            self.assertEqual(counts, [1, 2, 3, 4, 5])
-            self.assertEqual(params, [("lpm_mult", "lpm_widtha", "8")])
+            other = lc.read_expect(path, "b.v")
+            self.assertFalse(other.roundtrip or other.lint)
+            self.assertEqual(other.pins, [("lpm_compare", "alb", "lt")])
+            exp = lc.read_expect(path, "a.v")
+            self.assertEqual(exp.counts, [1, 2, 3, 4, 5])
+            self.assertEqual(exp.params, [("lpm_mult", "lpm_widtha", "8")])
+            self.assertTrue(exp.roundtrip and exp.lint)
 
 
 @unittest.skipUnless(shutil.which("iverilog"), "iverilog is not installed")
