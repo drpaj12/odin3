@@ -2,6 +2,7 @@
 #include "lpmmap_fixture.h"
 
 #include "ir/celltype.h"
+#include "ir/check.h"
 #include "ir/design.h"
 #include "unity.h"
 
@@ -17,6 +18,19 @@ void lm_build_ok(const char *rtlil, pb_result *out) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build_lib((pb_source){rtlil, lib}, out));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_design_set_top(out->design, odin3_module_id_of(out->module)));
+}
+
+static void check_full(odin3_design *design) {
+    odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, opts));
+}
+
+odin3_status lm_run(pb_result *res, const char *family, odin3_lpmmap_stats *stats) {
+    check_full(res->design);
+    odin3_lpmmap_opts opts = {family};
+    odin3_status st = odin3_lpmmap_run(&res->ctx, res->design, &opts, stats);
+    check_full(res->design);
+    return st;
 }
 
 static bool is_type(const odin3_module *module, odin3_node_id node, const char *type) {

@@ -591,3 +591,18 @@ odin3_status lm_extend(lm_ctx *lc, odin3_pinslice port, uint32_t width, bool is_
     }
     return st;
 }
+
+/* --- arrays -------------------------------------------------------------------------------- */
+
+odin3_status lm_net_array(odin3_vec *v, uint32_t n, odin3_net_id **first) {
+    size_t at = v->len;
+    odin3_status st = odin3_vec_reserve(v, v->len + n + 1U);
+    for (uint32_t i = 0; st == ODIN3_OK && i < n; i++) {
+        odin3_net_id *slot = odin3_vec_push(v); /* reserved: never NULL */
+        *slot = (odin3_net_id){0};
+    }
+    if (st == ODIN3_OK) {
+        *first = odin3_vec_at(v, at);
+    }
+    return st;
+}
