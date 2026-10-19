@@ -3,7 +3,9 @@
  */
 #include "frontends/arch/arch.h"
 
+#include "frontends/arch/arch_read.h"
 #include "util/alloc.h"
+#include "util/log.h"
 
 #include <string.h>
 
@@ -105,4 +107,41 @@ const odin3_arch_direct *odin3_arch_direct_at(const odin3_arch *arch, uint32_t i
 
 const char *odin3_arch_library_text(const odin3_arch *arch) {
     return arch->text.data != NULL ? arch->text.data : "";
+}
+
+/* --- parsing --------------------------------------------------------------------------------- */
+
+static odin3_status parse_root(arch_rd *rd) {
+    const odin3_xml_elem *root = odin3_xml_elem_at(rd->doc, 0);
+    if (!arch_tag_is(root, "architecture")) {
+        return arch_fail(rd, root, "expected the root element 'architecture'");
+    }
+    odin3_status st = arch_parse_models(rd, arch_child(rd, root, "models"));
+    st = st != ODIN3_OK ? st : arch_parse_pbs(rd, arch_child(rd, root, "complexblocklist"));
+    st = st != ODIN3_OK ? st : arch_parse_directlist(rd, arch_child(rd, root, "directlist"));
+    if (st == ODIN3_OK) {
+        arch_finish_widths(rd);
+    }
+    return st;
+}
+
+odin3_status odin3_arch_parse(odin3_arch *arch, const odin3_arch_src *src) {
+    arch->file = odin3_arena_strndup(arch->arena, src->name, strlen(src->name));
+    if (arch->file == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_xml_doc doc;
+    odin3_xml_err err;
+    odin3_xml_doc_init(&doc, ODIN3_ARCH_MAX_XML_NODES);
+    odin3_status st = odin3_xml_parse(src->text, &doc, &err);
+    if (st == ODIN3_ERR_PARSE) {
+        odin3_log(ODIN3_LOG_ERROR, "%s:%u: %s%s", src->name, err.line, err.what,
+                  err.over_cap ? " (more than 2^24 XML nodes)" : "");
+    }
+    if (st == ODIN3_OK) {
+        arch_rd rd = {arch, &doc, arch->file};
+        st = parse_root(&rd);
+    }
+    odin3_xml_doc_free(&doc);
+    return st;
 }
