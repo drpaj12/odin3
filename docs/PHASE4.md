@@ -128,8 +128,20 @@ DESIGN §12.1.
    decisions 5 and 7) becomes Phase 6 items 6.1 to 6.5 (`docs/PHASE6.md`). Decisions 2 to 5
    and 7 stay here as history; PHASE5 and PHASE6 restate them.
 
+9. **4.1 design choices** (Peter, 2026-10-19: "go with your recommendations"). The arch record is
+   `odin3_design_get_arch` in `src/ir/design.[ch]`, shaped like the project record; it is an IR
+   container change Peter reviewed and approved, kept minimal and documented in `docs/IR.md`.
+   Agent defaults (spec `docs/specs/2026-10-20-4.1-arch-import-design.md` §12 questions 1, 3 to 8):
+   reuse `src/frontends/project/xml.[ch]` in place, no new dependency; `write_techlib` dumps only
+   the library `read_arch` generated; the `multiply` template stays the square VTR primitive;
+   models with non-identifier names are skipped with one warning; only `<complexblocklist>` is
+   read; generic cells are `blackbox`; no script changes before 4.2.
+10. **Sweep archs** (Peter, 2026-10-19, same message; closes open item 1). DSP arch:
+   `COFFE_22nm/k6_frac_N10_4add_2chains_depop50_mem20K_22nm.xml` (fallback
+   `timing/k6_N10_mem32K_40nm.xml`). Plain-LUT arch: `timing/k4_N4_90nm.xml` (fallback
+   `timing/k6_N10_40nm.xml`). Each needs Parmys goldens from `tools/run-oracle.sh`, scheduled by
+   the coordinator (not run by the 4.1 lane).
+
 ## Open items
 
-1. **Sweep archs.** Which DSP arch and which plain-LUT arch from `$VTR_ROOT/vtr_flow/arch` join
-   `k6_frac_N10_frac_chain_mem32K_40nm.xml`; each needs a Parmys golden for the micro
-   equivalence check.
+(none open. Item 1, the sweep archs, is closed by decision 10.)
