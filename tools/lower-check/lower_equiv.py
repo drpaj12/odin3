@@ -8,7 +8,8 @@ Usage::
 
 Per design (the FILEs together; with ``--each``, every FILE is its own design):
 
-1. Odin III: ``read_verilog --nolatches FILE...; hierarchy; <pre>; lower --lower-snapshot DIR
+1. Odin III: ``read_verilog --nolatches FILE...`` (no flag under ``--latches``); ``hierarchy;
+    <pre>; lower --lower-snapshot DIR
    <A>`` (``pre`` defaults to ``proc; opt``), which writes ``lower-before.il`` (``write_rtlil`` of
    the design as ``lower`` found it) and ``lower-after.blif`` (``write_blif`` of the bit cells);
 2. gold: ``read_rtlil lower-before.il`` with the declared synchronous-conversion maps of spec 6.3

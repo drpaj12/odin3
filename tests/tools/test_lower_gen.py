@@ -117,15 +117,15 @@ class DriverTest(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def run_tool(self, *args: str) -> tuple[int, str, str]:
-        argv = ["--odin3", "/bin/odin3", "--yosys", "/bin/yosys55", "--work", str(self.work),
-                *args]
+        argv = ["--odin3", "/bin/odin3", "--yosys", "/bin/yosys55", "--parmys-techlibs", "/x",
+                "--work", str(self.work), *args]
         return helpers.run_main(lgd.main, argv)
 
     def test_clean_seeds_pass_and_write_their_files(self) -> None:
         code, out, _ = self.run_tool("--seeds", "1..10")
         self.assertEqual(code, 0, out)
-        self.assertIn("seeds 1..10: 10 ok, 0 unproven, 0 empty, 0 differ, 0 BUG; compared 10 of 10",
-                      out)
+        self.assertIn("seeds 1..10: 10 ok, 0 structural, 0 unproven, 0 empty, 0 differ, 0 BUG; "
+                      "compared 10 of 10", out)
         text = (self.work / "seed2" / "seed2.v").read_text(encoding="utf-8")
         self.assertEqual(text, lower_profile.generate(2).text)
 
@@ -155,11 +155,11 @@ class DriverTest(unittest.TestCase):
 
     def test_unproven_is_counted_not_failed_unless_strict(self) -> None:
         self.fake.equiv = (4, "lower-equiv: s.v: UNPROVEN: SAT timeout\n")
-        code, out, _ = self.run_tool("--seeds", "1..2")
+        code, out, _ = self.run_tool("--seeds", "1..2", "--min-compared", "0")
         self.assertEqual(code, 0, out)
-        self.assertIn("0 ok, 2 unproven", out)
+        self.assertIn("0 ok, 0 structural, 2 unproven", out)
         self.assertIn("UNPROVEN: SAT timeout", out)
-        code, _, _ = self.run_tool("--seeds", "1..2", "--strict-unproven")
+        code, _, _ = self.run_tool("--seeds", "1..2", "--strict-unproven", "--min-compared", "0")
         self.assertEqual(code, 4)
 
     def test_a_lower_diff_unproven_is_a_measured_fact_not_a_difference(self) -> None:
@@ -171,7 +171,7 @@ class DriverTest(unittest.TestCase):
     def test_empty_seeds_do_not_count_as_compared(self) -> None:
         self.fake.diff = (1, "lower-diff: s.v: compared: NOTHING TO COMPARE\n")
         self.fake.equiv = (1, "lower-equiv: s.v: NOTHING TO COMPARE: folded\n")
-        code, out, _ = self.run_tool("--seeds", "1..3")
+        code, out, _ = self.run_tool("--seeds", "1..3", "--min-compared", "0")
         self.assertEqual(code, 0, out)
         self.assertIn("3 empty", out)
         code, _, err = self.run_tool("--seeds", "1..3", "--min-compared", "1")
@@ -191,13 +191,80 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(code, 2, text)
             self.assertIn("expected A..B", err)
 
-    def test_expect_list_and_root_are_passed_to_lower_diff(self) -> None:
-        expect = Path(self._tmp.name) / "expect.txt"
-        expect.write_text("", encoding="utf-8")
-        self.run_tool("--seeds", "1..1", "--expect", str(expect))
-        call = next(c for c in self.fake.calls if "lower-diff" in c[0])
-        self.assertEqual(call[call.index("--expect") + 1], str(expect.resolve()))
-        self.assertEqual(call[call.index("--root") + 1], str(self.work.resolve()))
+    HIST = ("lower-diff: seed1.v [arith/T]: histogram: DIFFERS: module t: odin3 $_AND_ 10, "
+            "$_OR_ 5; yosys $_AND_ 11, $_OR_ 4\n")
+
+    def expect_file(self, text: str) -> Path:
+        path = Path(self._tmp.name) / "expect.txt"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_a_histogram_only_difference_fails_unless_listed_within_the_limit(self) -> None:
+        self.fake.diff = (1, self.HIST)
+        code, out, _ = self.run_tool("--seeds", "1..1")
+        self.assertEqual(code, 1, out)
+        self.assertIn("not listed", out)
+        listed = self.expect_file("seed1/seed1.v arith histogram structural\n")
+        code, out, _ = self.run_tool("--seeds", "1..1", "--expect", str(listed))
+        self.assertEqual(code, 0, out)
+        self.assertIn("1 ok", out)
+
+    def test_a_listed_seed_with_a_big_delta_or_no_difference_fails(self) -> None:
+        listed = self.expect_file("seed1/seed1.v arith histogram structural\n")
+        self.fake.diff = (1, self.HIST.replace("_AND_ 10", "_AND_ 30"))
+        code, out, _ = self.run_tool("--seeds", "1..1", "--expect", str(listed))
+        self.assertEqual(code, 1, out)
+        self.assertIn("above the listed limit", out)
+        self.fake.diff = (0, "lower-diff: seed1.v: ok (3 cells)\n")
+        code, out, _ = self.run_tool("--seeds", "1..1", "--expect", str(listed))
+        self.assertEqual(code, 1, out)
+        self.assertIn("no longer differs", out)
+
+    def test_the_list_never_absorbs_an_equiv_or_other_step(self) -> None:
+        listed = self.expect_file("seed1/seed1.v arith histogram structural\n")
+        self.fake.diff = (1, self.HIST + "lower-diff: seed1.v [arith/T]: equiv: DIFFERS: x\n")
+        code, out, _ = self.run_tool("--seeds", "1..1", "--expect", str(listed))
+        self.assertEqual(code, 1, out)
+        self.assertIn("seed 1 [comb]: FAIL", out)
+
+    def test_report_mode_counts_a_histogram_difference_but_not_an_equiv_one(self) -> None:
+        self.fake.diff = (1, self.HIST)
+        code, out, _ = self.run_tool("--seeds", "1..2", "--tier-t", "report")
+        self.assertEqual(code, 0, out)
+        self.assertIn("0 ok, 2 structural", out)
+        self.fake.diff = (1, self.HIST + "lower-diff: s [arith/T]: equiv: DIFFERS: x\n")
+        code, _, _ = self.run_tool("--seeds", "1..1", "--tier-t", "report")
+        self.assertEqual(code, 1)
+
+    def test_a_stale_line_beside_unproven_is_not_softened(self) -> None:
+        self.fake.diff = (1, "lower-diff: s: equiv: UNPROVEN: x\n"
+                             "lower-diff: s: histogram: stale entry in the expect list (r)\n")
+        code, out, _ = self.run_tool("--seeds", "1..1")
+        self.assertEqual(code, 1, out)
+
+    def test_a_child_exit_2_or_77_ends_the_run_with_that_code(self) -> None:
+        self.fake.diff = (2, "lower-diff: error: map adff2dff.v not found\n")
+        code, out, err = self.run_tool("--seeds", "1..5")
+        self.assertEqual(code, 2, out)
+        self.assertNotIn("seed 2", out)
+        self.fake.diff = (0, "ok\n")
+        self.fake.equiv = (77, "skipped\n")
+        code, _, _ = self.run_tool("--seeds", "1..5")
+        self.assertEqual(code, 77)
+
+    def test_no_vtr_root_and_no_techlibs_is_a_skip(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VTR_ROOT", None)
+            code, _, err = helpers.run_main(lgd.main, ["--odin3", "o", "--yosys", "y",
+                                                       "--seeds", "1..1"])
+        self.assertEqual(code, 77)
+        self.assertIn("VTR_ROOT", err)
+
+    def test_a_bad_expect_line_is_a_usage_error(self) -> None:
+        bad = self.expect_file("seed1/seed1.v arith equiv nope\n")
+        code, _, err = self.run_tool("--seeds", "1..1", "--expect", str(bad))
+        self.assertEqual(code, 2)
+        self.assertIn("want '<seedN/seedN.v> arith histogram", err)
 
 
 class LatchesFlagTest(unittest.TestCase):

@@ -1,20 +1,23 @@
 # tests/lower/gen_diff_expect.txt: the --lower generator seeds (1..200, tools/verilog-gen/lower_profile.py)
 # on which lower-diff's tier T (comb kind, family arith) finds different cell-type histograms after
-# `opt -fast`. Format: <seedN/seedN.v> <family> <step> <reason>. A listed seed that no longer differs
-# fails (stale); regenerate the list when lower_profile.py changes (the seeds change with it).
+# `opt -fast`. Format: <seedN/seedN.v> arith histogram <reason>. Read by lower-gen-diff itself (not
+# by lower-diff): the step must be `histogram`, the summed gate-count delta over the cell types must
+# be at most 4 (lower_gen_diff.MAX_LISTED_DELTA; the reason text is not matched), a listed seed that
+# no longer differs fails (stale), and an equiv/identity difference is never absorbed. The seeds
+# change with lower_profile.py: regenerate the list with `lower-gen-diff --tier-t report` when it does.
 #
 # Every one of these is equivalent to Yosys's techmap (the `equiv` step passes) and lower-equiv proves
 # that lower refines its input. They are the shifter / divider / multiplier structures of 3B spec 5
-# against techmap.v's, one or two gates apart (an AND for a MUX, an OR for an XOR) once several
+# against techmap.v's, two to four gates apart in total (an AND for a MUX, an OR for an XOR) once several
 # cells share inputs: the minimal case is seed121 (three cells: `w1 << b[2:0]`, `d >>> b[2:0]`,
 # `d | (b[2] ? a : 3'd5)`; odin3 32 MUX, yosys 31 MUX + 1 AND; each cell alone matches exactly).
 # Yosys's own `opt -fast` on Odin III's lowering gives Odin III's count, so the difference is in the
 # structure `lower` builds (pre-opt), not in `opt`.
-seed27/seed27.v arith histogram structural: equivalent, same function, gate counts differ by 1-2 after opt -fast (see header)
-seed33/seed33.v arith histogram structural: equivalent, same function, gate counts differ by 1-2 after opt -fast (see header)
-seed47/seed47.v arith histogram structural: equivalent, same function, gate counts differ by 1-2 after opt -fast (see header)
-seed87/seed87.v arith histogram structural: equivalent, same function, gate counts differ by 1-2 after opt -fast (see header)
-seed119/seed119.v arith histogram structural: equivalent, same function, gate counts differ by 1-2 after opt -fast (see header)
-seed121/seed121.v arith histogram structural: equivalent, same function, gate counts differ by 1-2 after opt -fast (see header)
-seed149/seed149.v arith histogram structural: equivalent, same function, gate counts differ by 1-2 after opt -fast (see header)
-seed173/seed173.v arith histogram structural: equivalent, same function, gate counts differ by 1-2 after opt -fast (see header)
+seed27/seed27.v arith histogram structural: equivalent (equiv-check and lower-equiv hold); 2 gates apart after opt -fast (see header)
+seed33/seed33.v arith histogram structural: equivalent (equiv-check and lower-equiv hold); 2 gates apart after opt -fast (see header)
+seed47/seed47.v arith histogram structural: equivalent (equiv-check and lower-equiv hold); 2 gates apart after opt -fast (see header)
+seed87/seed87.v arith histogram structural: equivalent (equiv-check and lower-equiv hold); 2 gates apart after opt -fast (see header)
+seed119/seed119.v arith histogram structural: equivalent (equiv-check and lower-equiv hold); 4 gates apart after opt -fast (see header)
+seed121/seed121.v arith histogram structural: equivalent (equiv-check and lower-equiv hold); 2 gates apart after opt -fast (see header)
+seed149/seed149.v arith histogram structural: equivalent (equiv-check and lower-equiv hold); 4 gates apart after opt -fast (see header)
+seed173/seed173.v arith histogram structural: equivalent (equiv-check and lower-equiv hold); 2 gates apart after opt -fast (see header)

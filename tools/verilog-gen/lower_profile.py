@@ -17,7 +17,8 @@ consecutive seeds hold every kind (``KIND_CYCLE``):
   through ``case`` and a variable indexed part-select (``$shiftx``);
 - ``ff`` (``--family ff --tier D``): registers behind an enable and a synchronous or asynchronous
   reset in both nesting orders (``$dffe``, ``$sdff``, ``$sdffe``, ``$sdffce``, ``$adff``,
-  ``$adffe``), an asynchronous load (``$aldff``), set and reset together (``$dffsr``), and a
+  ``$adffe``), an asynchronous load (``$aldff``, ``$aldffe``), set and reset together (``$dffsr``,
+  ``$dffsre``), and a
   falling clock edge;
 - ``latch`` (``--family latch``, tier S): ``always @*`` with a path that leaves the target
   unassigned (``$dlatch``), with an active-high and an active-low enable, and a second branch;
@@ -42,7 +43,8 @@ FEATURES = (
     "bitwise", "reduce", "logic", "compare", "compare_signed", "add", "sub", "neg",
     "shift_const", "shift_var", "sshift_var", "mul", "div", "mod", "mux", "pmux", "shiftx",
     "mixed_width", "mixed_sign", "signed_op", "cast",
-    "dffe", "sdff", "sdffe", "sdffce", "adff", "adffe", "aldff", "dffsr", "negedge",
+    "dffe", "sdff", "sdffe", "sdffce", "adff", "adffe", "aldff", "aldffe", "dffsr", "dffsre",
+    "negedge",
     "dlatch", "dlatch_neg", "dlatch_else",
     "mem", "mem_two_write", "mem_two_read", "mem_sync_read", "mem_non_pow2",
 )
@@ -239,7 +241,7 @@ class _Module:
         value = f"{width}'d{self.rng.randrange(1 << width)}"
         edge = self.edge
         form = self.rng.choice(("dffe", "sdff", "sdffe", "sdffce", "adff", "adffe", "aldff",
-                                "dffsr"))
+                                "aldffe", "dffsr", "dffsre"))
         self.features.add(form)
         self.body.append(self.ff_text(form, name, (edge, data, value)))
         self.outputs.append((name, width, True))
@@ -268,6 +270,13 @@ class _Module:
         if form == "aldff":
             return (f"  always @({edge} or posedge rst) if (rst) {name} <= {self.expr(1)}; "
                     f"else {name} <= {data};")
+        if form == "aldffe":
+            return (f"  always @({edge} or posedge rst) if (rst) {name} <= {self.expr(1)}; "
+                    f"else if (en) {name} <= {data};")
+        if form == "dffsre":
+            return (f"  always @({edge} or posedge rst or posedge s[0]) "
+                    f"if (rst) {name} <= 0; else if (s[0]) {name} <= {value}; "
+                    f"else if (en) {name} <= {data};")
         return (f"  always @({edge} or posedge rst or posedge en) "
                 f"if (rst) {name} <= 0; else if (en) {name} <= {value}; else {name} <= {data};")
 
