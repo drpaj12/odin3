@@ -1425,6 +1425,12 @@ if(BUILD_TESTING)
     target_compile_definitions(test_read_verilog_lib PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 5.2 Task 1/2: read_verilog -icells (spec I, N, V rules).
+    odin3_add_unit_test(test_icells)
+    target_include_directories(test_icells PRIVATE ${_gen})
+    add_dependencies(test_icells verilog_generated)
+    target_compile_definitions(test_icells PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 20: memories (the mem2reg decision, registers per word, $mem and its read ports).
     odin3_add_unit_test(test_elab_stage2_mem)
     target_include_directories(test_elab_stage2_mem PRIVATE ${_gen})

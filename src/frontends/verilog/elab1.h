@@ -249,6 +249,17 @@ void odin3_elab1_reject_def(odin3_elab1 *e1, uint32_t def);
  */
 odin3_elab_res odin3_elab1_resolve(odin3_elab1 *e1, uint32_t name, uint32_t library);
 
+/*
+ * EL-6 item 0 (5.2, read_verilog -icells): false, with res untouched, unless opts.icells is set
+ * and name begins with `$`. Then true: *res is ODIN3_RES_CELLTYPE for the registered type of that
+ * name (any granularity but module, port and process; no module, library unit or stub of the name
+ * is consulted, so none shadows it; a design or library MODULE of the name gets an info line, once
+ * per name), or ODIN3_RES_NONE after a located error at item (an unregistered `$` name, which
+ * --auto-blackbox does not turn into a black box, a port, a process or a module type).
+ */
+bool odin3_elab1_resolve_icell(odin3_elab1 *e1, odin3_ast_id item, uint32_t name,
+                               odin3_elab_res *res);
+
 /* --- the top and reachability (elab1_top.c) ------------------------------------------------ */
 
 /*

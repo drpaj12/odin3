@@ -1160,7 +1160,10 @@ static odin3_status convert_all(odin3_elab1 *e1, const odin3_celltype_def *type,
         odin3_elab1_gparam *gp = odin3_vec_at(&e1->gparams, i);
         uint32_t k = type_param(type, str_of(e1, gp->name));
         gp->kind = (uint8_t)type->params[k].kind;
-        if (gp->kind == ODIN3_VAL_INT && !odin3_cval_to_i64(&gp->ovr.value, &gp->num)) {
+        bool string_for_int = e1->opts.icells && type->name[0] == '$' &&
+                              (gp->ovr.value.flags & ODIN3_CVAL_STRING) != 0;
+        if (gp->kind == ODIN3_VAL_INT &&
+            (string_for_int || !odin3_cval_to_i64(&gp->ovr.value, &gp->num))) {
             odin3_elab1_error(e1, gp->ovr.at,
                               "value of parameter '%s' of cell type '%s' is not an integer",
                               type->params[k].name, type->name);

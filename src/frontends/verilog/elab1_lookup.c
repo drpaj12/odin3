@@ -468,3 +468,54 @@ odin3_elab_res odin3_elab1_resolve(odin3_elab1 *e1, uint32_t name, uint32_t libr
     }
     return resolve_outside(e1, name);
 }
+
+/* --- item 0: -icells (5.2) ------------------------------------------------------------------- */
+
+/* Why a registered type cannot be instantiated from Verilog, NULL when it can (spec I-4). */
+static const char *icell_refusal(const odin3_celltype_def *def) {
+    if (def->gran == ODIN3_GRAN_PORT) {
+        return "a module port";
+    }
+    if ((def->flags & ODIN3_CT_PROCESS) != 0) {
+        return "a process; run proc first";
+    }
+    return def->gran == ODIN3_GRAN_MODULE ? "a module" : NULL;
+}
+
+/* A design or library MODULE (a stub of the writer) that has the name of the type is ignored. */
+static void note_shadowed_stub(odin3_elab1 *e1, uint32_t name) {
+    if (odin3_u64map_get(e1->by_name, name, NULL) && first_note(e1, name)) {
+        odin3_elab1_info(e1, (odin3_loc){0},
+                         "module '%s' has the name of a registered cell type; ignored "
+                         "(read_verilog -icells)",
+                         text_of(e1, name));
+    }
+}
+
+bool odin3_elab1_resolve_icell(odin3_elab1 *e1, odin3_ast_id item, uint32_t name,
+                               odin3_elab_res *res) {
+    const char *text = text_of(e1, name);
+    if (!e1->opts.icells || text[0] != '$') {
+        return false;
+    }
+    odin3_loc at = odin3_ast_loc(e1->parsed, item);
+    odin3_celltype_id type;
+    *res = (odin3_elab_res){ODIN3_RES_NONE, 0, {0}};
+    if (!odin3_celltype_find(e1->design, name, &type)) {
+        odin3_elab1_error(e1, at,
+                          "unresolved_module: cell type '%s' is not registered (read_verilog "
+                          "-icells)",
+                          text);
+        return true;
+    }
+    const char *why = icell_refusal(odin3_celltype_get(e1->design, type));
+    if (why != NULL) {
+        odin3_elab1_error(e1, at, "cell type '%s' cannot be instantiated from Verilog (%s)", text,
+                          why);
+        return true;
+    }
+    note_shadowed_stub(e1, name);
+    res->kind = ODIN3_RES_CELLTYPE;
+    res->type = type;
+    return true;
+}
