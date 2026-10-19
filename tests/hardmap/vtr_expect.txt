@@ -32,7 +32,19 @@ blob_merge.v counts:-23 latch fsm: Parmys recodes state (5 bits, 28 states) one-
 stereovision3.v counts:-21 latch fsm: Parmys recodes reg_prog_state (5 bits, 27 states) one-hot, +22 expected, 21 seen, 1 flop unexplained (open); no fsm in Odin III Phase 3 (PHASE3 #43)
 sha.v unproven ABC dsec UNDECIDED after 482 s; hard-block and latch counts equal Parmys's
 
-# The 12 designs not run yet (raygentop, boundtop, mkSMAdapter4B, or1200, stereovision0/1/2,
-# mkDelayWorker32B, LU8PEEng, bgm, mcml, LU32PEEng) have no line: an unlisted `differs`, `unproven`
-# or `counts-differ` fails the sweep, which is the safe direction. Add a line for each only from
-# its run (the commands are in PHASE3 #42).
+# bgm (run 2026-10-19, release build, one tools/heavy-run, --equiv-timeout 900; triage in
+# hardmap-big-triage.md): hard-block and latch counts equal Parmys's, but equiv-check cannot pair
+# 5 of the 11 `multiply` boxes: the 311 `adder` cells of `$sub` chains have `b=unconn` in Parmys
+# (the pad of a subtraction is not inverted, subtractor.cc 517-527) and `b=vcc` in Odin III (D2b),
+# so everything downstream of them has other input functions. hardmap-diff undoes D2b on a copy of
+# the golden (b=unconn to b=vcc on `$sub` chain adders only) and compares that: equivalent (abc
+# dsec proved it within 900 s). What is proved: Odin III equals the golden with that pad made
+# RTL-correct (a + ~0), not Parmys's own netlist; that Parmys loses the borrow is shown by
+# tests/hardmap/probes on the sub_pad micros, not by this run.
+bgm.v D2b Parmys ties the b pad of a `$sub` chain to unconn, Odin III to vcc (spec 10 D2b); equivalent to the golden with D2b undone
+
+# The 11 designs without a line (raygentop, boundtop, mkSMAdapter4B, or1200, stereovision0/1/2,
+# mkDelayWorker32B, LU8PEEng, mcml, LU32PEEng; run 2026-10-19, all counts-differ, causes in
+# hardmap-big-triage.md: fsm, bit-level flip-flop merge, opt_share, wreduce order) have no line:
+# an unlisted `differs`, `unproven` or `counts-differ` fails the sweep, which is the safe
+# direction. Add a line for each only from its run (the commands are in PHASE3 #42).
