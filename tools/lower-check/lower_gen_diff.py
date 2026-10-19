@@ -10,7 +10,7 @@ For each seed N in A..B, ``verilog_gen --lower`` (``lower_profile.generate``) wr
 ``DIR/seedN/seedN.v`` (the module is always ``t``; its first line names the *kind*), then:
 
 1. ``lower-diff`` (tier by kind, spec 14.2: ``comb`` family ``arith`` tier T, ``ff`` family ``ff``
-   tier D, ``latch`` family ``latch`` tier D, ``mem`` family ``mem``): Odin III's ``lower``
+   tier D, ``latch`` family ``latch`` tier S, ``mem`` family ``mem``): Odin III's ``lower``
    against Yosys 0.55's ``techmap`` on the same ``in.il``. A difference fails the seed unless
    ``--expect FILE`` lists it (``tests/lower/gen_diff_expect.txt``: lower-diff's own
    ``<path> <family> <step> <reason>`` lines, ``path`` = ``seedN/seedN.v``);
@@ -36,6 +36,7 @@ import argparse
 import re
 import subprocess
 import sys
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,17 +51,20 @@ LOWER_EQUIV = HERE / "lower-equiv"
 TOP = "t"
 EXIT_UNPROVEN = 4
 # kind -> lower-diff arguments (spec 14.2: the tier of the family; a module of mixed word cells has
-# no gate-for-gate form, and a module of flip-flops or latches holds the logic of its data input).
+# no gate-for-gate form, and a module of flip-flops holds the logic of its data input; equiv-check
+# cannot take a clock that is an internal net, so lower-diff keeps the falling edge, while
+# lower-equiv runs the default `--neg-edge invert`; a $dlatch is tier S, gate for gate).
 DIFF_ARGS = {
     "comb": ("--family", "arith", "--tier", "T"),
-    "ff": ("--family", "ff", "--tier", "D"),
-    "latch": ("--family", "latch", "--tier", "D"),
+    "ff": ("--family", "ff", "--tier", "D", "--lower-args=--neg-edge keep"),
+    "latch": ("--family", "latch"),
     "mem": ("--family", "mem"),
 }
 EQUIV_ARGS = {"latch": ("--latches",)}
 _RANGE = re.compile(r"(\d+)\.\.(\d+)")
 _NOT_REFINEMENT = "NOT A REFINEMENT"
 _NOTHING = "NOTHING TO COMPARE"
+_UNPROVEN = "UNPROVEN"
 
 
 class GenDiffError(Exception):
@@ -80,7 +84,7 @@ class Seed:
 
     seed: int
     kind: str
-    diff: str = ""  # lower-diff: "ok", "differ", "empty" or "error"
+    diff: str = ""  # lower-diff: "ok", "differ", "unproven", "empty" or "error"
     equiv: str = ""  # lower-equiv: "ok", "bug", "unproven", "empty" or "error"
     notes: list[str] = field(default_factory=list)
     hard: bool = False
@@ -106,6 +110,9 @@ def judge_diff(code: int, out: str, seed: Seed) -> None:
         seed.diff = "ok"
     elif code == lc.EXIT_FAIL and _NOTHING in out:
         seed.diff = "empty"
+    elif code == lc.EXIT_FAIL and _UNPROVEN in out and "DIFFERS" not in out:
+        seed.diff = "unproven"
+        seed.notes.append(f"lower-diff: {last_lines(out, 2)}")
     elif code == lc.EXIT_FAIL:
         seed.diff = "differ"
         seed.notes.append(f"lower-diff: {last_lines(out)}")
@@ -145,7 +152,7 @@ def run_seed(args: argparse.Namespace, number: int, work: Path) -> Seed:
     folder.mkdir(parents=True, exist_ok=True)
     source = folder / f"seed{number}.v"
     source.write_text(profile.text, encoding="utf-8")
-    expect = ["--expect", str(args.expect), "--root", str(work)] if args.expect else []
+    expect = ["--expect", str(args.expect.resolve()), "--root", str(work)] if args.expect else []
     code, out = run_tool([str(LOWER_DIFF), *common_args(args), *DIFF_ARGS[profile.kind], *expect,
                           "--work", str(folder / "diff"), str(source)], folder)
     judge_diff(code, out, seed)
@@ -156,14 +163,19 @@ def run_seed(args: argparse.Namespace, number: int, work: Path) -> Seed:
     return seed
 
 
+def verdict_of(seed: Seed) -> str:
+    """BUG, FAIL, unproven, empty or ok: one word per seed (the first that applies)."""
+    if seed.equiv == "bug":
+        return "BUG"
+    if seed.diff in ("differ", "error") or seed.equiv == "error":
+        return "FAIL"
+    if "unproven" in (seed.diff, seed.equiv):
+        return "unproven"
+    return "empty" if seed.diff == "empty" else "ok"
+
+
 def report(seed: Seed, folder: Path) -> str:
-    verdict = "BUG" if seed.equiv == "bug" else "ok"
-    if verdict == "ok" and (seed.diff in ("differ", "error") or seed.equiv == "error"):
-        verdict = "FAIL"
-    elif verdict == "ok" and "unproven" in (seed.equiv,):
-        verdict = "unproven"
-    elif verdict == "ok" and seed.diff == "empty" and seed.equiv != "ok":
-        verdict = "empty"
+    verdict = verdict_of(seed)
     head = (f"{TOOL}: seed {seed.seed} [{seed.kind}]: {verdict} "
             f"(diff {seed.diff}, equiv {seed.equiv})")
     if verdict in ("ok", "empty"):
@@ -181,22 +193,18 @@ def execute(args: argparse.Namespace, work: Path) -> int:
         if result.hard:
             print(f"{TOOL}: HARD: seed {number}; work directory kept: {work}", file=sys.stderr)
             return lc.EXIT_CRASH
-    bug = sum(s.equiv == "bug" for s in found)
-    differ = sum(s.diff in ("differ", "error") or s.equiv == "error" for s in found) - bug
-    unproven = sum(s.equiv == "unproven" for s in found)
-    empty = sum(s.diff == "empty" and s.equiv in ("empty", "ok") for s in found)
-    okay = sum(s.diff == "ok" and s.equiv == "ok" for s in found)
+    count = Counter(verdict_of(s) for s in found)
     compared = sum(s.compared for s in found)
-    print(f"{TOOL}: seeds {seeds.start}..{seeds.stop - 1}: {okay} ok, {unproven} unproven, "
-          f"{empty} empty, {max(differ, 0)} differ, {bug} BUG; compared {compared} of "
-          f"{len(found)}", flush=True)
-    if bug or differ > 0:
+    print(f"{TOOL}: seeds {seeds.start}..{seeds.stop - 1}: {count['ok']} ok, "
+          f"{count['unproven']} unproven, {count['empty']} empty, {count['FAIL']} differ, "
+          f"{count['BUG']} BUG; compared {compared} of {len(found)}", flush=True)
+    if count["BUG"] or count["FAIL"]:
         return lc.EXIT_FAIL
     if compared < args.min_compared:
         print(f"{TOOL}: error: compared {compared}, below --min-compared {args.min_compared}",
               file=sys.stderr)
         return lc.EXIT_ERROR
-    return EXIT_UNPROVEN if unproven and args.strict_unproven else lc.EXIT_OK
+    return EXIT_UNPROVEN if count["unproven"] and args.strict_unproven else lc.EXIT_OK
 
 
 def parse(argv: Sequence[str] | None) -> argparse.Namespace:

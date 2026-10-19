@@ -162,6 +162,12 @@ class DriverTest(unittest.TestCase):
         code, _, _ = self.run_tool("--seeds", "1..2", "--strict-unproven")
         self.assertEqual(code, 4)
 
+    def test_a_lower_diff_unproven_is_a_measured_fact_not_a_difference(self) -> None:
+        self.fake.diff = (1, "lower-diff: s.v [ff/D]: equiv: UNPROVEN: equiv-check: unsupported\n")
+        code, out, _ = self.run_tool("--seeds", "1..1")
+        self.assertEqual(code, 0, out)
+        self.assertIn("seed 1 [comb]: unproven (diff unproven, equiv ok)", out)
+
     def test_empty_seeds_do_not_count_as_compared(self) -> None:
         self.fake.diff = (1, "lower-diff: s.v: compared: NOTHING TO COMPARE\n")
         self.fake.equiv = (1, "lower-equiv: s.v: NOTHING TO COMPARE: folded\n")
@@ -190,7 +196,7 @@ class DriverTest(unittest.TestCase):
         expect.write_text("", encoding="utf-8")
         self.run_tool("--seeds", "1..1", "--expect", str(expect))
         call = next(c for c in self.fake.calls if "lower-diff" in c[0])
-        self.assertEqual(call[call.index("--expect") + 1], str(expect))
+        self.assertEqual(call[call.index("--expect") + 1], str(expect.resolve()))
         self.assertEqual(call[call.index("--root") + 1], str(self.work.resolve()))
 
 

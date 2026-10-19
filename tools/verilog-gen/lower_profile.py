@@ -19,7 +19,7 @@ consecutive seeds hold every kind (``KIND_CYCLE``):
   reset in both nesting orders (``$dffe``, ``$sdff``, ``$sdffe``, ``$sdffce``, ``$adff``,
   ``$adffe``), an asynchronous load (``$aldff``), set and reset together (``$dffsr``), and a
   falling clock edge;
-- ``latch`` (``--family latch --tier D``): ``always @*`` with a path that leaves the target
+- ``latch`` (``--family latch``, tier S): ``always @*`` with a path that leaves the target
   unassigned (``$dlatch``), with an active-high and an active-low enable, and a second branch;
 - ``mem`` (``--family mem``): a ``reg`` array with one or two write ports, one or two read ports,
   a registered read, sizes that are and are not a power of two.
@@ -82,6 +82,8 @@ class _Module:
         self.outputs: list[tuple[str, int, bool]] = []  # name, width, is a reg
         self.count = 0
         self.readable = list(PORTS)
+        # one clock edge per module: equiv-check (lower-diff tier D) takes one clock domain
+        self.edge = "negedge clk" if self.chance(0.2) else "posedge clk"
 
     def chance(self, p: float) -> bool:
         return self.rng.random() < p
@@ -174,10 +176,10 @@ class _Module:
         left, right = self.operand(NARROW), self.operand(NARROW)
         roll = self.rng.random()
         self.note_mix(left, right)
-        if roll < 0.5:
+        if roll < 0.4:
             self.features.add("mul")
             return f"({left} * {right})"
-        if roll < 0.75:
+        if roll < 0.7:
             self.features.add("div")
             return f"({left} / {right})"
         self.features.add("mod")
@@ -187,9 +189,9 @@ class _Module:
         roll = self.rng.random()
         if depth >= MAX_DEPTH or roll < 0.2:
             return self.operand()
-        if roll < 0.3 and depth == 0:
-            return self.arith()
         if roll < 0.36 and depth == 0:
+            return self.arith()
+        if roll < 0.42 and depth == 0:
             self.features.add("shiftx")
             name = self.rng.choice(("a", "c"))
             return f"{name}[s +: {self.rng.randint(1, 3)}]"
@@ -235,10 +237,7 @@ class _Module:
         width = self.rng.choice((1, 2, 4, 5, 8))
         data = self.expr(1)
         value = f"{width}'d{self.rng.randrange(1 << width)}"
-        edge = "posedge clk"
-        if self.chance(0.2):
-            edge = "negedge clk"
-            self.features.add("negedge")
+        edge = self.edge
         form = self.rng.choice(("dffe", "sdff", "sdffe", "sdffce", "adff", "adffe", "aldff",
                                 "dffsr"))
         self.features.add(form)
@@ -273,6 +272,8 @@ class _Module:
                 f"if (rst) {name} <= 0; else if (en) {name} <= {value}; else {name} <= {data};")
 
     def build_ff(self) -> None:
+        if self.edge == "negedge clk":
+            self.features.add("negedge")
         for _ in range(self.rng.randint(2, 4)):
             self.register()
         if self.chance(0.5):
@@ -288,10 +289,11 @@ class _Module:
         if self.chance(0.3):
             test = "!en"
             self.features.add("dlatch_neg")
-        lines = [f"  always @* begin if ({test}) {name} = {self.expr(1)};"]
+        # data is a plain operand: a latch is judged gate for gate (tier S), no word cell feeds it
+        lines = [f"  always @* begin if ({test}) {name} = {self.operand()};"]
         if self.chance(0.4):
             self.features.add("dlatch_else")
-            lines.append(f"    else if (s[0]) {name} = {self.expr(1)};")
+            lines.append(f"    else if (s[0]) {name} = {self.operand()};")
         lines.append("  end")
         self.body.append("\n".join(lines))
         self.outputs.append((name, width, True))
@@ -340,7 +342,8 @@ class _Module:
         ports += [f"input {'signed ' if signed else ''}[{width - 1}:0] {name}"
                   for name, (width, signed) in PORTS.items()]
         for name, width, is_reg in self.outputs:
-            ports.append(f"output {'reg ' if is_reg else ''}[{width - 1}:0] {name}")
+            span = f"[{width - 1}:0] " if width > 1 else ""
+            ports.append(f"output {'reg ' if is_reg else ''}{span}{name}")
         features = " ".join(sorted(self.features))
         return "\n".join([f"// kind: {self.kind}", f"// features: {features}",
                           "module t (" + ", ".join(ports) + ");", *self.body, "endmodule", ""])
