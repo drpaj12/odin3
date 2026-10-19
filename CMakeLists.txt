@@ -180,6 +180,8 @@ add_library(odin3_core OBJECT
     src/passes/abc/result.c
     src/passes/abc/xblif.c
     src/passes/abc/xblif_read.c
+    src/passes/abc/aig.c
+    src/passes/abc/aligned.c
     src/passes/abc/exchange.c
     src/passes/abc/splice.c
     src/passes/abc/splice_a.c
@@ -1032,6 +1034,12 @@ if(BUILD_TESTING)
         endif()
     endforeach()
     target_sources(test_abc_args PRIVATE tests/unit/proc_fixture.c tests/unit/proc_fixture_core.c)
+    # 3D Task 20: the AIG builder and the in-memory protocol, on the fake engine.
+    odin3_add_unit_test(test_abc_aig)
+    target_compile_definitions(test_abc_aig PRIVATE
+        ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/test_abc_aig"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_sources(test_abc_aig PRIVATE tests/unit/abc_fake_engine.c)
     # 3D Task 19: the splice's end-to-end checks. test_abc_unconn and test_abc_pass run the fake
     # engine in process; with ABC, test_abc_pass and test_abc_init1 also drive the odin3 binary
     # (real ABC) and tools/equiv-check, whose ABC is the build's own.

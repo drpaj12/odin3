@@ -250,6 +250,9 @@ static odin3_status restore_input(rst *rs, uint32_t reg) {
                src - odin3_abc_result_first_lut(res) < rs->luts0) {
         uint32_t lut = src - odin3_abc_result_first_lut(res);
         table_complement(lut_words(res, lut), u32s(&res->lut_k)[lut]);
+        if (src < res->old_lit.len && u32s(&res->old_lit)[src] != UINT32_MAX) {
+            u32s(&res->old_lit)[src] ^= 1U; /* the LUT now computes the complement of its literal */
+        }
         if (u32s(&res->lut_k)[lut] == 1 && lut_words(res, lut)[0] == IDENTITY_TABLE) {
             u32s(&res->co_driver)[slot] = lut_fanins(res, lut)[0]; /* ¬¬x: no cell at all */
         }

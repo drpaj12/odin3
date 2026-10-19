@@ -5,13 +5,24 @@
 
 #include "ir/lut.h"
 #include "odin3/odin3.h"
+#include "util/arena.h"
+#include "util/log.h"
 #include "util/vec.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-enum { FIRST_OBJ = 2 /* objects 0 and 1 are the constants */ };
+enum {
+    FIRST_OBJ = 2, /* objects 0 and 1 are the constants */
+    MINI_NULL = 0x7FFFFFFF,
+    MINI_NULL2 = 0x7FFFFFFE,
+    HALF_WORD_BITS = 32,
+    SMALL_TABLE_LOG = 5, /* tables of up to 5 inputs fill one 32-bit word */
+    MIN_WIDE_WORDS = 2   /* 32-bit words of one 64-bit word */
+};
+
+#define NOT_A_LUT UINT32_MAX /* the map entry of a PO */
 
 void odin3_abc_result_init(odin3_abc_result *res) {
     *res = (odin3_abc_result){0};
@@ -234,6 +245,27 @@ static odin3_status fold_prepare(const odin3_abc_result *res, fold *fd) {
     return st;
 }
 
+/* old_lit through the map: one entry per new object, the literal of each surviving LUT. */
+static odin3_status fold_old_lit(const odin3_abc_result *res, fold *fd) {
+    if (res->old_lit.len == 0) {
+        return ODIN3_OK;
+    }
+    uint32_t first = odin3_abc_result_first_lut(res);
+    uint32_t new_first = FIRST_OBJ + fd->out.n_cis + fd->out.n_regs_out;
+    uint32_t total = new_first + (uint32_t)fd->out.lut_k.len;
+    odin3_status st = odin3_vec_reserve(&fd->out.old_lit, total);
+    for (uint32_t obj = 0; st == ODIN3_OK && obj < total; obj++) {
+        st = push_u32(&fd->out.old_lit, UINT32_MAX);
+    }
+    for (uint32_t obj = first; obj < res->old_lit.len; obj++) {
+        uint32_t to = ((const uint32_t *)fd->map.data)[obj];
+        if (to >= new_first) {
+            ((uint32_t *)fd->out.old_lit.data)[to] = u32_at(&res->old_lit, obj);
+        }
+    }
+    return st;
+}
+
 /* Copies reg_from and old_lit, and co_driver through the map. */
 static odin3_status fold_copy_outputs(const odin3_abc_result *res, fold *fd) {
     odin3_status st = ODIN3_OK;
@@ -244,10 +276,7 @@ static odin3_status fold_copy_outputs(const odin3_abc_result *res, fold *fd) {
     for (size_t co = 0; st == ODIN3_OK && co < res->co_driver.len; co++) {
         st = push_u32(&fd->out.co_driver, map[u32_at(&res->co_driver, co)]);
     }
-    for (size_t obj = 0; st == ODIN3_OK && obj < res->old_lit.len; obj++) {
-        st = push_u32(&fd->out.old_lit, u32_at(&res->old_lit, obj));
-    }
-    return st;
+    return st == ODIN3_OK ? fold_old_lit(res, fd) : st;
 }
 
 odin3_status odin3_abc_result_fold(odin3_abc_result *res) {
@@ -265,5 +294,199 @@ odin3_status odin3_abc_result_fold(odin3_abc_result *res) {
         odin3_abc_result_free(&fd.out);
     }
     odin3_vec_free(&fd.map);
+    return st;
+}
+
+/* --- the in-memory exchange's result ------------------------------------------------------- */
+
+/* One read of an engine MiniLUT. */
+typedef struct lread {
+    const odin3_abc_luts *luts;
+    odin3_abc_result *res;
+    uint32_t *map; /* per MiniLUT object: its result object, NOT_A_LUT for a PO */
+    uint32_t n_pis, n_pos, n_luts;
+    uint32_t words; /* 32-bit truth words per MiniLUT object */
+} lread;
+
+enum { OBJ_PI = 0, OBJ_PO, OBJ_LUT };
+
+static const int32_t *fanins_of(const lread *lr, uint32_t obj) {
+    return lr->luts->fanins + (size_t)lr->luts->lut_size * obj;
+}
+
+static uint32_t obj_kind(const lread *lr, uint32_t obj) {
+    const int32_t *fan = fanins_of(lr, obj);
+    if (fan[0] == MINI_NULL) {
+        return OBJ_PI;
+    }
+    return fan[1] == MINI_NULL2 ? OBJ_PO : OBJ_LUT;
+}
+
+static odin3_status lr_fail(const char *why) {
+    odin3_log(ODIN3_LOG_ERROR, "abc: ABC returned a malformed network: %s", why);
+    return ODIN3_ERR_ENGINE;
+}
+
+/* Numbers the objects: the constants, the PIs and the LUTs in order of appearance; POs get no
+ * number. Counts the kinds. */
+static void lr_scan(lread *lr) {
+    uint32_t pis = 0;
+    uint32_t luts = 0;
+    for (uint32_t obj = 0; obj < lr->luts->n_objs; obj++) {
+        if (obj < FIRST_OBJ) {
+            lr->map[obj] = obj;
+            continue;
+        }
+        uint32_t kind = obj_kind(lr, obj);
+        lr->map[obj] = NOT_A_LUT;
+        pis += kind == OBJ_PI ? 1U : 0U;
+        luts += kind == OBJ_LUT ? 1U : 0U;
+        lr->n_pos += kind == OBJ_PO ? 1U : 0U;
+    }
+    lr->n_pis = pis;
+    lr->n_luts = luts;
+    uint32_t next_pi = FIRST_OBJ;
+    uint32_t next_lut = FIRST_OBJ + pis;
+    for (uint32_t obj = FIRST_OBJ; obj < lr->luts->n_objs; obj++) {
+        uint32_t kind = obj_kind(lr, obj);
+        if (kind == OBJ_PI) {
+            lr->map[obj] = next_pi++;
+        } else if (kind == OBJ_LUT) {
+            lr->map[obj] = next_lut++;
+        }
+    }
+}
+
+/* The result object of fanin f of object obj; false when it is not an earlier PI, LUT or
+ * constant. */
+static bool lr_map_fanin(const lread *lr, uint32_t obj, int32_t fanin, uint32_t *out) {
+    if (fanin < 0 || (uint32_t)fanin >= obj || lr->map[fanin] == NOT_A_LUT) {
+        return false;
+    }
+    *out = lr->map[fanin];
+    return true;
+}
+
+/* One 64-bit word of a table: word number word of a table of inputs variables. */
+typedef struct word_req {
+    uint32_t inputs;
+    uint32_t word;
+} word_req;
+
+/* The word, read from the engine's 32-bit words. */
+static uint64_t table_word(const uint32_t *src, word_req req) {
+    if (req.inputs <= SMALL_TABLE_LOG) {
+        uint32_t bits = 1U << req.inputs;
+        uint32_t mask = bits >= HALF_WORD_BITS ? UINT32_MAX : (1U << bits) - 1U;
+        return src[0] & mask;
+    }
+    size_t low = (size_t)MIN_WIDE_WORDS * req.word;
+    return (uint64_t)src[low] | ((uint64_t)src[low + 1U] << HALF_WORD_BITS);
+}
+
+/* Appends LUT object obj: its fanins (mapped) and its table. */
+static odin3_status lr_lut(lread *lr, uint32_t obj) {
+    const int32_t *fan = fanins_of(lr, obj);
+    odin3_abc_result *res = lr->res;
+    uint32_t inputs = 0;
+    while (inputs < lr->luts->lut_size && fan[inputs] < MINI_NULL2) {
+        uint32_t mapped = 0;
+        if (!lr_map_fanin(lr, obj, fan[inputs], &mapped)) {
+            return lr_fail("a fanin is not an earlier input or LUT");
+        }
+        odin3_status st = push_u32(&res->fanins, mapped);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+        inputs++;
+    }
+    odin3_status st = push_u32(&res->lut_k, inputs);
+    const uint32_t *src = lr->luts->truths + (size_t)lr->words * obj;
+    for (uint32_t word = 0; st == ODIN3_OK && word < odin3_lut_words(inputs); word++) {
+        uint64_t *slot = odin3_vec_push(&res->truth);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = table_word(src, (word_req){inputs, word});
+    }
+    st = st == ODIN3_OK ? push_u32(&res->fanin_start, (uint32_t)res->fanins.len) : st;
+    return st == ODIN3_OK ? push_u32(&res->truth_start, (uint32_t)res->truth.len) : st;
+}
+
+/* The drivers of the POs in order (the real outputs, then the register inputs). */
+static odin3_status lr_po(lread *lr, uint32_t obj) {
+    uint32_t mapped = 0;
+    if (!lr_map_fanin(lr, obj, fanins_of(lr, obj)[0], &mapped)) {
+        return lr_fail("a fanin is not an earlier input or LUT");
+    }
+    return push_u32(&lr->res->co_driver, mapped);
+}
+
+/* The input register each result register carries the name of (ci_from of its PI). */
+static odin3_status lr_registers(const lread *lr, const odin3_abc_result_expect *expect) {
+    odin3_abc_result *res = lr->res;
+    odin3_vec seen;
+    odin3_vec_init(&seen, sizeof(uint8_t));
+    odin3_status st = odin3_vec_reserve(&seen, (size_t)expect->n_regs + 1U);
+    if (st == ODIN3_OK) {
+        memset(seen.data, 0, (size_t)expect->n_regs + 1U);
+    }
+    for (uint32_t reg = 0; st == ODIN3_OK && reg < res->n_regs_out; reg++) {
+        uint32_t from = ODIN3_ABC_NO_REG;
+        int32_t name = lr->luts->ci_from != NULL ? lr->luts->ci_from[res->n_cis + reg] : -1;
+        if (name >= (int32_t)expect->n_cis && (uint32_t)name - expect->n_cis < expect->n_regs &&
+            ((uint8_t *)seen.data)[(uint32_t)name - expect->n_cis] == 0) {
+            from = (uint32_t)name - expect->n_cis;
+            ((uint8_t *)seen.data)[from] = 1;
+        }
+        st = push_u32(&res->reg_from, from);
+    }
+    odin3_vec_free(&seen);
+    return st;
+}
+
+static odin3_status lr_fill(lread *lr, const odin3_abc_result_expect *expect) {
+    odin3_abc_result *res = lr->res;
+    odin3_status st = push_u32(&res->fanin_start, 0);
+    st = st == ODIN3_OK ? push_u32(&res->truth_start, 0) : st;
+    for (uint32_t obj = FIRST_OBJ; st == ODIN3_OK && obj < lr->luts->n_objs; obj++) {
+        uint32_t kind = obj_kind(lr, obj);
+        if (kind == OBJ_LUT) {
+            st = lr_lut(lr, obj);
+        } else if (kind == OBJ_PO) {
+            st = lr_po(lr, obj);
+        }
+    }
+    return st == ODIN3_OK ? lr_registers(lr, expect) : st;
+}
+
+odin3_status odin3_abc_result_from_luts(const odin3_abc_luts *luts,
+                                        const odin3_abc_result_expect *expect, odin3_arena *arena,
+                                        odin3_abc_result *out) {
+    odin3_abc_result_init(out);
+    lread lr = {luts,
+                out,
+                NULL,
+                0,
+                0,
+                0,
+                luts->lut_size > SMALL_TABLE_LOG ? 1U << (luts->lut_size - SMALL_TABLE_LOG) : 1U};
+    lr.map = odin3_arena_alloc(arena, sizeof(uint32_t) * ((size_t)luts->n_objs + 1U));
+    if (lr.map == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    lr_scan(&lr);
+    if (luts->n_regs > lr.n_pis || luts->n_regs > lr.n_pos) {
+        return lr_fail("more registers than inputs or outputs");
+    }
+    out->n_cis = lr.n_pis - luts->n_regs;
+    out->n_regs_out = luts->n_regs;
+    out->n_luts = lr.n_luts;
+    out->n_cos = lr.n_pos - luts->n_regs;
+    odin3_status st = lr_fill(&lr, expect);
+    odin3_abc_fail fail = {0};
+    if (st == ODIN3_OK && odin3_abc_result_check(out, expect, &fail) != ODIN3_OK) {
+        return lr_fail(fail.text);
+    }
     return st;
 }
