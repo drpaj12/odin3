@@ -2774,6 +2774,15 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_opt_rules_dir}/wreduce)
         set_tests_properties(opt_equiv_wreduce_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
                              TIMEOUT 1800)
+        # PHASE3 #52 (opt_share parity): the opt_share sources with the Phase 3 script, whose
+        # `opt -full` runs opt_share; every call that changes something is checked in turn, and
+        # opt_share must change something (--min-changed 1 counts the whole run).
+        add_test(NAME opt_equiv_share_rules
+            COMMAND ${_opt_sweep} --jobs 1 --opt-equiv --opt-arg=--min-changed=1
+                    --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
+                    --root ${_opt_rules_dir} ${_opt_rules_dir}/share)
+        set_tests_properties(opt_equiv_share_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 1800)
         # 3G (plan Task 3 step 4): Odin III's wreduce and Phase 3 script against Yosys's on the
         # same input: cells, widths and flags of every $add $sub $mul, refinement, identity.
         add_test(NAME opt_diff_wreduce_rules

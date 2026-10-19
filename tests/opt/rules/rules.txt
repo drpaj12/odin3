@@ -143,6 +143,8 @@ share/pmux share.merged log:Found\scells\sthat\sshare\san\soperand
 share/shift share.merged log:Found\scells\sthat\sshare\san\soperand
 share/swap_and share.merged log:Found\scells\sthat\sshare\san\soperand
 share/swap_add_sub share.merged log:Found\scells\sthat\sshare\san\soperand
+share/chunk share.merged log:Found\scells\sthat\sshare\san\soperand
+share/swap_narrow share.merged log:Found\scells\sthat\sshare\san\soperand
 dff/add_en opt_dff.add_en log:Adding\sEN\ssignal
 dff/add_srst opt_dff.add_srst log:Adding\sSRST\ssignal
 dff/aload_to_arst opt_dff.aload_to_arst log:Changing\sconst-value\sasync\sload
