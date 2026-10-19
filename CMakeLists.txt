@@ -165,6 +165,11 @@ add_library(odin3_core OBJECT
     src/passes/hardmap/hm_kit.c
     src/passes/hardmap/mul.c
     src/passes/hardmap/adder.c
+    src/passes/hardmap/ram.c
+    src/passes/hardmap/ram_split.c
+    src/passes/hardmap/mem.c
+    src/passes/hardmap/mem_merge.c
+    src/passes/hardmap/mem_plan.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -810,6 +815,34 @@ if(BUILD_TESTING)
     target_compile_definitions(test_hardmap_adder PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 3C Task 5: hardmap's explicit RAM instances (depth and width split) on hand-built flat IR.
+    odin3_add_unit_test(test_hardmap_ram)
+    target_sources(test_hardmap_ram PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c
+        tests/unit/hardmap_ramsim.c)
+    target_compile_definitions(test_hardmap_ram PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 3C Task 6: hardmap's inferred `$mem` (FF merge, port patterns) on hand-built flat IR.
+    odin3_add_unit_test(test_hardmap_mem)
+    target_sources(test_hardmap_mem PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c
+        tests/unit/hardmap_ramsim.c)
+    target_compile_definitions(test_hardmap_mem PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 3C Task 4 (spec 9.3): the arithmetic and memory micros through the Phase 3 script up to
+    # `lower`, against the Parmys goldens (tools/hardmap-check/hardmap-diff). Exit 77 (skipped)
+    # when the golden tree is absent (CI). Its Python tests run in python_tools.
+    file(STRINGS ${PROJECT_SOURCE_DIR}/tests/hardmap/micros.txt _hm_micro_names REGEX "^[^#]")
+    set(_hm_micros "")
+    foreach(_hm_micro IN LISTS _hm_micro_names)
+        list(APPEND _hm_micros ${PROJECT_SOURCE_DIR}/tests/micro/verilog/${_hm_micro})
+    endforeach()
+    add_test(NAME hardmap_diff_micro
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/hardmap-check/hardmap-diff
+                --odin3 $<TARGET_FILE:odin3>
+                --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/diff_expect.txt ${_hm_micros})
+    set_tests_properties(hardmap_diff_micro PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                         TIMEOUT 1800)
     # 3A Task 2: flatten's pre-flight graph; every test_flatten_* links the fixture helper.
     odin3_add_unit_test(test_flatten_graph)
     target_sources(test_flatten_graph PRIVATE tests/unit/flatten_fixture.c tests/unit/proc_build.c)
@@ -3055,6 +3088,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                             --root $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog
                             ${_exit_vtr_files})
             endif()
+            # 3C Task 7 (spec 9.4): the 19 through hardmap-diff, in the order of vtr_designs.txt.
+            file(STRINGS ${PROJECT_SOURCE_DIR}/tests/hardmap/vtr_designs.txt _hm_vtr_names
+                 REGEX "^[^#]")
+            set(_hm_vtr "")
+            foreach(_hm_name IN LISTS _hm_vtr_names)
+                list(APPEND _hm_vtr $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog/${_hm_name}.v)
+            endforeach()
+            odin3_add_sweep_test(hardmap_vtr_sweep LABEL sweep
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/hardmap-check/hardmap-diff
+                        --odin3 $<TARGET_FILE:odin3> --yosys $ENV{VTR_ROOT}/build/bin/yosys
+                        --arch $ENV{VTR_ROOT}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
+                        --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/diff_expect.txt
+                        --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/vtr_expect.txt
+                        ${_hm_vtr})
         else()
             message(STATUS "exit_micro, exit_vtr not registered: needs VTR_ROOT with the k6_frac arch")
         endif()

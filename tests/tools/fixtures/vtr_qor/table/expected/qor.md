@@ -484,6 +484,8 @@ ABC exchange (3D I8; runs per exchange): P' aig 21; O aig 20, blif 1
 | design | class | text |
 |---|---|---|
 | ch_intrinsics | mem-init-dropped | decision 6 step 5: hardmap drops RAM initial values (3C) |
+| LU8PEEng | dual-write-race | 3C R-6: two live write ports to one address are an IEEE race |
+| LU32PEEng | dual-write-race | 3C R-6: two live write ports to one address are an IEEE race |
 
 ## Cross-check against VTR's golden
 

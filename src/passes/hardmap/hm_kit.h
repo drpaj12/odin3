@@ -11,8 +11,9 @@
  * the IR valid and the source cell intact (H-9). A failure after it (a merge that needs an alias
  * record) logs "out of memory in the middle of a mapping ... discard it" and leaves the IR valid.
  *
- * Naming (agent default (b), approved in PHASE3 #33): the first node a transaction creates takes
- * the source's name and attributes at commit; every other node is named `<cell>.<role>` (`$c<ID>`
+ * Naming (agent default (b), approved in PHASE3 #33): the first node a transaction creates that is
+ * not glue (the namesake) takes the source's name and attributes at commit; every other node is
+ * named `<cell>.<role>` (`$c<ID>`
  * for an unnamed source), made unique by `_1`, `_2` ...; every node carries the string attribute
  * `hardmap` = `<cell type>:<role>`. The source is reached through the DERIVED record.
  */
@@ -66,6 +67,7 @@ typedef struct hm_ctx {
     odin3_vec made_nodes;            /* odin3_node_id: undone by hm_abort */
     odin3_vec made_nets;             /* odin3_net_id: the fresh nets, likewise */
     odin3_vec merged;                /* odin3_net_pair: the merges of a commit */
+    odin3_vec doomed;                /* odin3_node_id: released at the commit, after the source */
     odin3_strbuf text;               /* scratch for names and attribute values */
 } hm_ctx;
 
@@ -108,6 +110,11 @@ odin3_status hm_begin_cell(hm_ctx *hc, odin3_node_id src);
 /* n fresh unnamed nets with the transaction's record in out[0 .. n). NO_MEMORY: the ones made are
  * undone by hm_abort. */
 odin3_status hm_fresh_nets(hm_ctx *hc, uint32_t n, odin3_net_id *out);
+
+/* Adds node (live, in the current module) to the cells hm_commit releases after the source: it
+ * disconnects every pin, then deletes the node if memory allows (else the dead node stays for
+ * `opt`). The only allocation of that step is here, so a failure leaves the design intact (H-9). */
+odin3_status hm_doom(hm_ctx *hc, odin3_node_id node);
 
 /*
  * Creates a node on the given nets with the transaction's record, its name and `hardmap`
@@ -172,5 +179,18 @@ odin3_status hm_check_multiply(hm_ctx *hc, odin3_node_id node);
 /* The explicit `multiply` rule (M-6 as amended): treat src like the equivalent `$mul`, with a
  * warning; WIDTH 36 is left as it is. */
 odin3_status hm_map_explicit(hm_ctx *hc, odin3_node_id src);
+
+/* The inferred-memory rule (mem.c, R-8..R-12): maps a `$mem` to RAM slices, merging the flip-flops
+ * of its read ports (R-8), or leaves it soft with a warning. */
+odin3_status hm_map_mem(hm_ctx *hc, odin3_node_id src);
+
+/* The explicit RAM rule (ram.c, R-1..R-7): legalises a `single_port_ram` / `dual_port_ram`
+ * instance to ADDR_WIDTH 15 and DATA_WIDTH 1 slices (depth split, width split, address padding)
+ * or leaves it when it already has that shape. Any other node is left alone. */
+odin3_status hm_map_ram(hm_ctx *hc, odin3_node_id src);
+
+/* The pre-check of a RAM instance: the type's shape (H-3), then ADDR_WIDTH within what hardmap
+ * splits (at most 31): OK, or the located error. */
+odin3_status hm_check_ram(hm_ctx *hc, odin3_node_id node);
 
 #endif
