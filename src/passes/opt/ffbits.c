@@ -73,6 +73,7 @@ enum {
     FLAG_POL_SET,
     FLAG_POL_CLR,
     FLAG_GCLK,
+    LABEL_MAX = 128,
     VAL_SRST_SHIFT = 4,
     VAL_INIT_SHIFT = 8
 };
@@ -306,6 +307,12 @@ static odin3_status add_drop(ffbits_state *fs, const bitrec *drop, const bitrec 
     slot->keep_q = surv->q;
     slot->surv = surv->node;
     slot->prov = odin3_node_prov(fs->oc->module, (odin3_node_id){drop->node});
+    char drop_label[LABEL_MAX];
+    char keep_label[LABEL_MAX];
+    odin3_kit_node_label(fs->oc, (odin3_node_id){drop->node}, drop_label, sizeof drop_label);
+    odin3_kit_node_label(fs->oc, (odin3_node_id){surv->node}, keep_label, sizeof keep_label);
+    odin3_log(ODIN3_LOG_DEBUG, "opt_merge: -ffbits: '%s' bit %u is identical to '%s' bit %u",
+              drop_label, (unsigned)drop->bit, keep_label, (unsigned)surv->bit);
     return ODIN3_OK;
 }
 
@@ -417,6 +424,19 @@ static size_t lower_bound(const odin3_vec *list, uint32_t node, bool by_surv) {
     return lo;
 }
 
+/* Appends rec to provs unless it is 0 (none); NO_MEMORY when the push fails. */
+static odin3_status push_prov(odin3_vec *provs, odin3_prov_id rec) {
+    if (rec.v == 0) {
+        return ODIN3_OK;
+    }
+    odin3_prov_id *slot = odin3_vec_push(provs);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = rec;
+    return ODIN3_OK;
+}
+
 /* The record for node: DERIVED of [its own record, the records dropped into it], or 0 for none
  * dropped into it. */
 static odin3_status node_prov(ffbits_state *fs, uint32_t node, odin3_prov_id *out) {
@@ -427,17 +447,10 @@ static odin3_status node_prov(ffbits_state *fs, uint32_t node, odin3_prov_id *ou
     odin3_prov_id own = odin3_node_prov(fs->oc->module, (odin3_node_id){node});
     odin3_status st = ODIN3_OK;
     *out = (odin3_prov_id){0};
+    bool any = first < fs->inc.len && inc[first].surv == node;
+    st = any ? push_prov(&provs, own) : st;
     for (size_t k = first; st == ODIN3_OK && k < fs->inc.len && inc[k].surv == node; k++) {
-        odin3_prov_id *slot = provs.len == 0 && own.v != 0 ? odin3_vec_push(&provs) : NULL;
-        if (slot != NULL) {
-            *slot = own;
-        }
-        slot = inc[k].prov.v != 0 ? odin3_vec_push(&provs) : NULL;
-        if (slot != NULL) {
-            *slot = inc[k].prov;
-        } else if (inc[k].prov.v != 0) {
-            st = ODIN3_ERR_NO_MEMORY;
-        }
+        st = push_prov(&provs, inc[k].prov);
     }
     if (st == ODIN3_OK && provs.len > 0) {
         st = odin3_prov_derive(fs->oc->pass, (odin3_prov_list){provs.data, (uint32_t)provs.len},

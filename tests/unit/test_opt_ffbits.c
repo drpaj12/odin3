@@ -341,6 +341,93 @@ static void test_opt_loop_merges_bits(void) {
     TEST_ASSERT_TRUE(same_net("q", 0, "q", 2));
 }
 
+/* --- the other FF kinds and the init cases --------------------------------------------------- */
+
+#define ALDFF(name, pol, ad, d, q)                                                                 \
+    "  cell $aldff \\" name "\n    parameter \\WIDTH 2\n    parameter \\CLK_POLARITY 1\n"          \
+    "    parameter \\ALOAD_POLARITY " pol "\n    connect \\CLK \\clk\n    connect \\ALOAD \\en\n"  \
+    "    connect \\AD " ad "\n    connect \\D " d "\n    connect \\Q " q "\n  end\n"
+#define DFFSR(name, set, d, q)                                                                     \
+    "  cell $dffsr \\" name "\n    parameter \\WIDTH 2\n    parameter \\CLK_POLARITY 1\n"          \
+    "    parameter \\SET_POLARITY 1\n    parameter \\CLR_POLARITY 1\n    connect \\CLK \\clk\n"    \
+    "    connect \\SET " set "\n    connect \\CLR { \\en \\en }\n    connect \\D " d               \
+    "\n    connect \\Q " q "\n  end\n"
+#define DLATCH(name, en, d, q)                                                                     \
+    "  cell $dlatch \\" name "\n    parameter \\WIDTH 2\n    parameter \\EN_POLARITY 1\n"          \
+    "    connect \\EN \\" en "\n    connect \\D " d "\n    connect \\Q " q "\n  end\n"
+#define ADFF(name, rst, d, q)                                                                      \
+    "  cell $adff \\" name "\n    parameter \\WIDTH 2\n    parameter \\CLK_POLARITY 1\n"           \
+    "    parameter \\ARST_POLARITY 1\n    parameter \\ARST_VALUE 2'11\n    connect \\CLK \\clk\n"  \
+    "    connect \\ARST \\" rst "\n    connect \\D " d "\n    connect \\Q " q "\n  end\n"
+#define OUT2 "  wire width 2 output 8 \\y\n  wire width 2 output 9 \\z\n"
+
+static uint32_t count_ffs(void) {
+    return count_type("$aldff") + count_type("$dffsr") + count_type("$dlatch") +
+           count_type("$adff") + count_type("$dffe");
+}
+
+static void expect_two_bits(const char *text) {
+    build(text);
+    run_merge();
+    TEST_ASSERT_EQUAL_UINT32(2, fx.counts.merge_removed);
+    TEST_ASSERT_EQUAL_UINT32(1, count_ffs());
+    TEST_ASSERT_TRUE(same_net("y", 0, "z", 1));
+    TEST_ASSERT_TRUE(same_net("y", 1, "z", 0));
+}
+
+static void test_aldff_ad_and_aload(void) {
+    expect_two_bits(HEAD OUT2 ALDFF("f1", "1", "{ \\a \\b }", "{ \\a \\b }", "\\y")
+                        ALDFF("f2", "1", "{ \\b \\a }", "{ \\b \\a }", "\\z") "end\n");
+    tearDown();
+    setUp();
+    expect_apart(HEAD OUT2 ALDFF("f1", "1", "{ \\a \\b }", "{ \\a \\b }", "\\y")
+                     ALDFF("f2", "1", "{ \\en2 \\en2 }", "{ \\b \\a }", "\\z") "end\n");
+    tearDown();
+    setUp();
+    expect_apart(HEAD OUT2 ALDFF("f1", "1", "{ \\a \\b }", "{ \\a \\b }", "\\y")
+                     ALDFF("f2", "0", "{ \\b \\a }", "{ \\b \\a }", "\\z") "end\n");
+}
+
+static void test_dffsr_set_and_clr(void) {
+    expect_two_bits(HEAD OUT2 DFFSR("f1", "{ \\a \\b }", "{ \\a \\b }", "\\y")
+                        DFFSR("f2", "{ \\b \\a }", "{ \\b \\a }", "\\z") "end\n");
+    tearDown();
+    setUp();
+    expect_apart(HEAD OUT2 DFFSR("f1", "{ \\a \\b }", "{ \\a \\b }", "\\y")
+                     DFFSR("f2", "{ \\en2 \\en2 }", "{ \\b \\a }", "\\z") "end\n");
+}
+
+static void test_dlatch(void) {
+    expect_two_bits(HEAD OUT2 DLATCH("f1", "en", "{ \\a \\b }", "\\y")
+                        DLATCH("f2", "en", "{ \\b \\a }", "\\z") "end\n");
+    tearDown();
+    setUp();
+    expect_apart(HEAD OUT2 DLATCH("f1", "en", "{ \\a \\b }", "\\y")
+                     DLATCH("f2", "en2", "{ \\b \\a }", "\\z") "end\n");
+}
+
+static void test_adff_arst_net(void) {
+    expect_two_bits(HEAD OUT2 ADFF("f1", "rst", "{ \\a \\b }", "\\y")
+                        ADFF("f2", "rst", "{ \\b \\a }", "\\z") "end\n");
+    tearDown();
+    setUp();
+    expect_apart(HEAD OUT2 ADFF("f1", "rst", "{ \\a \\b }", "\\y")
+                     ADFF("f2", "rst2", "{ \\b \\a }", "\\z") "end\n");
+}
+
+/* Yosys 0.55 opt_merge compares initvals(Q) as constants: x equals x (merged without -keepdc, the
+ * x init is a value) and x differs from 0. */
+static void test_x_init_against_zero(void) {
+    expect_apart(HEAD "  attribute \\init 2'00\n  wire width 2 output 8 \\y\n"
+                      "  wire width 2 output 9 \\z\n" DFFE("f1", "1", "en", "{ \\a \\b }", "\\y")
+                          DFFE("f2", "1", "en", "{ \\b \\a }", "\\z") "end\n");
+}
+
+static void test_x_init_equal_merges(void) {
+    expect_two_bits(HEAD OUT2 DFFE("f1", "1", "en", "{ \\a \\b }", "\\y")
+                        DFFE("f2", "1", "en", "{ \\b \\a }", "\\z") "end\n");
+}
+
 /* --- out of memory -----------------------------------------------------------------------------
  */
 
@@ -349,16 +436,29 @@ static void test_opt_loop_merges_bits(void) {
         "f1", "11", "rst", "en", "{ \\a \\b }", "\\y")                                             \
         SDFFE("f2", "11", "rst", "en", "{ \\b \\a }", "\\z") "end\n"
 
+/* The survivor's own record is a parent, not silently dropped (review L1). */
+static void expect_parents(const odin3_prov_id parents[2]) {
+    odin3_prov_id now = odin3_node_prov(fx.module, node_named("f1"));
+    TEST_ASSERT_TRUE(has_parent(now, &parents[0]));
+    TEST_ASSERT_TRUE(has_parent(now, &parents[1]));
+}
+
 /* One run with the nth allocation failing; true when it ran through. */
 static bool oom_once(long fail) {
     pb_free(&fx.res);
     memset(&fx.counts, 0, sizeof fx.counts);
     build(OOM_TEXT);
+    odin3_prov_id own = odin3_node_prov(fx.module, node_named("f1"));
+    odin3_prov_id gone = odin3_node_prov(fx.module, node_named("f2"));
     odin3_util_set_alloc_fail_after(fail);
     odin3_status st = odin3_opt_merge_run(&fx.ctx, fx.res.design, &fx.opts, &fx.counts);
     odin3_util_set_alloc_fail_after(-1);
     TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
     check_full();
+    if (st == ODIN3_OK) {
+        const odin3_prov_id parents[2] = {own, gone};
+        expect_parents(parents);
+    }
     return st == ODIN3_OK;
 }
 
@@ -394,6 +494,12 @@ int main(void) {
     RUN_TEST(test_partial_drop_keeps_word_cell);
     RUN_TEST(test_opt_option);
     RUN_TEST(test_opt_loop_merges_bits);
+    RUN_TEST(test_aldff_ad_and_aload);
+    RUN_TEST(test_dffsr_set_and_clr);
+    RUN_TEST(test_dlatch);
+    RUN_TEST(test_adff_arst_net);
+    RUN_TEST(test_x_init_against_zero);
+    RUN_TEST(test_x_init_equal_merges);
     RUN_TEST(test_oom);
     return UNITY_END();
 }

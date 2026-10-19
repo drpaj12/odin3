@@ -1269,7 +1269,8 @@ then the options considered.
     readers of the dropped Q, so FF bits, then the ordinary `opt_merge`, repeat until a round
     drops nothing. (f) **Deviations from Yosys**: a `keep` bit that is not first of its class
     stays separate (Yosys lets the `keep` cell survive); latches and `$dffsr` merge on the full key
-    (Yosys merges the same cells after techmap). (g) **Tests**: `test_opt_ffbits`, the micros
+    (Yosys merges the same cells after techmap); a `keep` on the dropped Q net or wire (not the node) is
+    not protected, as in the ordinary `opt_merge`. Known cost: every `opt -ffbits` iteration rescans all FFs. (g) **Tests**: `test_opt_ffbits`, the micros
     `tests/opt/ffbits` (equal bits merged; different init, enable, reset, reset value, polarity,
     clock not merged) with `opt_ffbits` (counts), `opt_ffbits_yosys` (the same counts as Yosys
     0.55's `techmap; opt -fast`) and `opt_equiv_ffbits` (`opt-equiv` on `tools/opt-check/ffbits.script`).
