@@ -1618,6 +1618,18 @@ def record_verdict(job: Job, name: str, verdict: str) -> None:
     _write_atomic(path, json.dumps(record, sort_keys=True, indent=1) + "\n")
 
 
+LOG_READ_BYTES = 16 << 20
+
+
+def _read_log(path: Path) -> str:
+    """The checker's output (``fcheck.log``), at most ``LOG_READ_BYTES``; '' when unreadable."""
+    try:
+        with path.open("rb") as handle:
+            return handle.read(LOG_READ_BYTES).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 def _fcheck_outcome(job: Job, cmd: Command, opts: RunOptions, scope: ScopeInfo) -> str:
     oom_before = qor_heavy.oom_kills(scope)
     outcome = run_command(cmd, opts, deadline=capped_deadline(opts, opts.job_timeout_s[job.group]))
@@ -1633,7 +1645,11 @@ def _fcheck_outcome(job: Job, cmd: Command, opts: RunOptions, scope: ScopeInfo) 
     if outcome.returncode is None:
         return "error"
     capped = outcome.returncode != 0 and qor_heavy.oom_kills(scope) > oom_before
-    return qor_legs.fcheck_verdict(outcome.returncode, capped)
+    verdict = qor_legs.fcheck_verdict(outcome.returncode, capped, _read_log(cmd.stdout))
+    if verdict == "error":
+        _emit(opts, f"{_label(job)}: fcheck could not compare (exit {outcome.returncode}); "
+                    f"see {cmd.stdout}")
+    return verdict
 
 
 def run_fcheck(job: Job, opts: RunOptions, verilator_j: int) -> str:

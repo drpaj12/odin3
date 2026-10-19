@@ -132,7 +132,10 @@ work.mkdir(parents=True)
 if not Path(args[args.index("--post-synth-blif") + 1]).is_file():
     sys.exit(2)
 mode = root / "fcheck-exit"
-sys.exit(int(mode.read_text()) if mode.exists() else 0)
+code = int(mode.read_text()) if mode.exists() else 0
+print("PASS: 50000 vectors matched across rtl/post-synth" if code == 0 else
+      "MISMATCH vec=0 port=y rtl=0 synth=1" if code == 1 else "ERROR: boom")
+sys.exit(code)
 """
 
 FAKE_TASK = """
@@ -277,6 +280,8 @@ class CliTestBase(unittest.TestCase):
         _script(scripts / "run_vtr_flow.py", FAKE_FLOW)
         _script(scripts / "run_vtr_task.py", FAKE_TASK)
         _script(v / "mosaic" / "verilator_check" / "run_random_check.py", FAKE_RANDOM_CHECK)
+        (v / "mosaic" / "verilator_check" / "blif_to_verilog.py").write_text(
+            "def pack_bit_blasted_top_ports(text):\n    return text\n")
         libs = scripts / "python_libs" / "vtr"
         _script(libs / "parse_vtr_flow.py", FAKE_PARSE)
         (libs / "__init__.py").write_text("")
