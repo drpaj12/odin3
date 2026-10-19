@@ -1387,11 +1387,19 @@ then the options considered.
     before, 17 after (Parmys 17). `hardmap-diff` on stereovision1 (`tools/heavy-run`): adder +24 before,
     adder 0 after (the latch -65 of decision 43 is unchanged). `opt_diff_micro` (release, `tools/heavy-run`):
     passed (6643 s, no `diff_expect` entry stale); `opt_equiv_micro_phase3`: passed (3594 s, every call
-    that changes something proved, `opt_share` included); `opt_diff_micro_wreduce`: 3 unexpected failures
-    (`large/spree.v`, `full/cf_cordic_v_18_18_18.v`, `full/cf_fft_256_8.v`; a listed structural
-    difference plus a 60 s SAT timeout), byte-identical with the build of main 5d9d191a on the same
-    three files (timings aside), so not from this change; `full/sha.v` failed once under load and passed
-    on a rerun of both builds. `opt_equiv_micro` (Phase 2 script, no `opt_share`) was not run.
+    that changes something proved, `opt_share` included); `opt_diff_micro_wreduce`: 4
+    unexpected failures at 60 s SAT (`full/sha.v` once, under load; `large/spree.v`,
+    `full/cf_cordic_v_18_18_18.v`, `full/cf_fft_256_8.v`). Review M4 rerun of the three, same options
+    with `--refine-timeout=600`, one design at a time under `tools/heavy-run`, main build 5d9d191a
+    against this branch before the merge of main (4af23175): spree ok on both; cf_fft ok on both;
+    cf_cordic ok on main, FAIL on the branch with three STALE entries (phase3 histogram, widths and
+    identity now equal Yosys's; the listed differences `$add` 1 vs 18, `$sub` 56 vs 39 are gone, and
+    no refine verdict failed). So at 600 s all three prove on both builds and the 60 s failures were
+    SAT timeouts; `opt_share` merged the same number of cells in each build (spree 0, cordic 102,
+    fft 0), and the cordic change comes from the lead and operand choice now being Yosys's
+    (M2, M3). The stale `diff_expect.txt` lines of cordic are left for Peter's call. Logs:
+    `/tmp/claude-1000/opt-share-m4/{spree,cf_cordic_v_18_18_18,cf_fft_256_8}.{base,head}.log`,
+    counts in `share_counts.txt` there. `opt_equiv_micro` (Phase 2 script, no `opt_share`) was not run.
 
 53. **Parity scope after the goals statement** (Peter, 2026-10-19). Peter: Odin III "needs to be
     compatible with modern VTR and Stratix, but doesn't neccessarily need to be right there with
