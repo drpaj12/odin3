@@ -37,7 +37,7 @@ typedef struct odin3_arch_mport {
 
 typedef struct odin3_arch_model {
     const char *name;
-    const odin3_arch_mport *ports; /* XML order, inputs then outputs as written */
+    odin3_arch_mport *ports; /* XML order, inputs then outputs as written */
     uint32_t n_ports;
     uint32_t line;
     bool registered; /* became a library cell (spec M-5) */

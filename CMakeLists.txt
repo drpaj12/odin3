@@ -1218,7 +1218,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_techlib_reader)
     odin3_add_unit_test(test_techlib_string_param)
     odin3_add_unit_test(test_arch_record)
-    foreach(_t IN ITEMS test_arch_models)
+    foreach(_t IN ITEMS test_arch_models test_arch_pb)
         odin3_add_unit_test(${_t})
         target_compile_definitions(${_t} PRIVATE
             ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch")
