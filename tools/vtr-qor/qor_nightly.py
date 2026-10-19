@@ -436,6 +436,10 @@ def check_lib_command(repo: Path, vtr_root: Path) -> list[str]:
             "--vtr-root", str(vtr_root)]
 
 
+# 3F's task for ``crosscheck`` (PHASE3 decision 29, ruling 2): the three smallest designs, P's flow.
+DEFAULT_TASK = qor_legs.REPO_ROOT / "tests" / "vtr" / "tasks" / "qor_p"
+
+
 def crosscheck_command(vtr_root: Path, task: Path, out: Path) -> list[str]:
     """``run_vtr_task.py <abs task> -temp_dir <out>/crosscheck -j 1`` (spec §9)."""
     python = vtr_root / ".venv" / "bin" / "python"
@@ -575,7 +579,9 @@ class Night:
         if checks:
             small = ",".join(d for d in group_a if d in EQUIV_REQUIRED and d in ctx.sets.gate)
             self.inner("3 equiv", ["equiv", *ctx.common, "--designs", small])
-            ctx.emit("nightly: rerun-check skipped (lands with plan Task 14)")
+            if "O" in ctx.legs:
+                self.inner("3 rerun-check",
+                           ["rerun-check", *ctx.common, "--designs", designs, "--resume"])
 
     def step4(self, slot: Slot) -> bool:
         """Run the slot's jobs; True when none was refused by the deadline."""

@@ -20,6 +20,7 @@ import os
 import pwd
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -327,6 +328,62 @@ def fcheck_verdict(returncode: int, capped: bool) -> str:
     if capped:
         return "capped"
     return FCHECK_VERDICTS.get(returncode, "error")
+
+
+RERUN_BLIF = "rerun.blif"
+RERUN_TIME = "rerun.time"
+RERUN_LOG = "rerun.log"
+
+
+def rerun_command(cmd: Command, job_dir: Path, design: str) -> Command:
+    """Spec §8.3: a job's front end (its first command, ``/usr/bin/time -v ... odin3 -p <script>``)
+    again, with its output ``<J>/<d>.blif`` replaced by ``<J>/rerun.blif``. Its time file and log
+    get their own names, so the first run's ``frontend.time`` and ``frontend.log`` stay. A command
+    that is not an odin3 front end (a P job's VTR run) is ValueError."""
+    if not cmd.argv or cmd.argv[0] != TIME_BIN:
+        raise ValueError("rerun needs an odin3 front end command")
+    swaps = {str(job_dir / f"{design}.blif"): str(job_dir / RERUN_BLIF),
+             str(job_dir / "frontend.time"): str(job_dir / RERUN_TIME)}
+    argv = []
+    for word in cmd.argv:
+        for old, new in swaps.items():
+            word = word.replace(old, new)
+        argv.append(word)
+    return Command(tuple(argv), cmd.cwd, job_dir / RERUN_LOG, cmd.env, cmd.stderr)
+
+
+_PROBE_DESIGN = "module probe(input a, input b, output y);\n  assign y = a & b;\nendmodule\n"
+PROBE_TIMEOUT_S = 120
+
+
+def probe_name_style(odin3: Path, repo: Path, work: Path, *, k: int = 6,
+                     run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
+                     ) -> str | None:
+    """Whether ``odin3`` writes ``--vtr --name-style provenance`` (3E-6; before it the writer
+    refuses the option with "not available yet"). The probe runs the Oprov script and the O
+    script (short names) on a two-input AND in ``work`` (a directory of the caller's, which this
+    creates) and needs exit 0 and both files, and the two outputs must differ: an odin3 that
+    accepts the option and ignores it is not capable. None: it can; else the reason. ``run`` is
+    a test seam. Each run has ``PROBE_TIMEOUT_S`` (no cgroup: a two-gate design)."""
+    work.mkdir(parents=True, exist_ok=True)
+    design = work / "probe.v"
+    design.write_text(_PROBE_DESIGN, encoding="utf-8")
+    texts = {}
+    for style, leg in (("provenance", "Oprov"), ("short", "O")):
+        out = work / f"probe-{style}.blif"
+        script = _script(leg, design, out, k, style, repo / LIB_REL)
+        try:
+            proc = run([str(odin3), "-p", script], capture_output=True, text=True, check=False,
+                       timeout=PROBE_TIMEOUT_S, cwd=work)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"cannot run {odin3}: {exc}"
+        if proc.returncode != 0 or not out.is_file():
+            lines = (proc.stderr + proc.stdout).strip().splitlines()
+            return lines[-1] if lines else f"exit {proc.returncode}"
+        texts[style] = out.read_bytes()
+    if texts["provenance"] == texts["short"]:
+        return "--name-style provenance wrote the same names as the default"
+    return None
 
 
 def registered_passes(odin3_help: str) -> frozenset[str]:

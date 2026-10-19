@@ -1156,6 +1156,54 @@ then the options considered.
     Verilog writer keeps its own form, `top/u1/u1.x`, so its bytes are unchanged). (h) The leaf
     walk stops at the first leaf (the chain of first parents) instead of visiting every ancestor;
     `odin3_prov_sources` is only the fallback for a broken chain.
+46. **3H-4: the exit legs, `rerun-check`, `exit-run`, the seed section and the `tests/vtr/tasks`
+    configs; agent defaults** (2026-10-19, branch `feat/3H-4`; Peter may override). Number 45 is
+    left to the 3E-6 lane. (a) **Oprov availability** is a probe, not a pass name: before 3E-6
+    `write_blif --vtr --name-style provenance` is refused with "not available yet", so
+    `qor_legs.probe_name_style` runs the real Oprov script on a two-input AND and the leg is
+    available only on exit 0 with the file written. A refusing odin3 gives `leg Oprov needs pass
+    'write_blif --name-style provenance'` (E-QH5) and `exit-run` the matching `skipped:` line. The
+    nightly never runs Oprov (spec 3.6: once at M3 and on request). (b) `rerun-check` writes
+    `rerun.log` and `rerun.time` beside the first run's `frontend.*` (the plan only named
+    `rerun.blif`), compares with `<d>.blif.sha256` or the kept `<d>.blif`, and records `same`,
+    `differs`, or `error`, `capped`, `timeout` when the rerun itself did not finish; nightly step 3
+    now runs it on group A. (c) `run --seed N` (N above 1) is another key, never moves `latest`
+    (a seed run covers only the designs near a bound), and `table --seeds 2,3` finds those jobs
+    by the planner's keys. The Seeds section lists, per candidate and gated metric, O/P at seeds 1
+    (the gate), 2 and 3 and the arithmetic mean of the three ratios as `mean(s1..s3)`; a missing
+    seed leaves its cell and the mean empty. Candidates: O/P at least 0.9 of `per_design_max`
+    (1.35), or above the geomean of a metric whose geomean is at least 0.9 of `geomean_max`
+    (1.08). The Name style section gains a geomean row. (d) **`run --fcheck` checks P and O
+    only** (spec 8.1; the plan's step 1 passes `--fcheck` with four legs, which would have run
+    Verilator on the two control legs too: about double the 3 to 6 h estimate). `fcheck --leg L`
+    still checks any leg that kept its netlist. (e) `exit-run` is `nightly`'s sibling: started
+    inside `tools/heavy-run`, same 06:00 admission deadline and `expected_minutes`, the not-started
+    line says `exit-run:`; state in `<out>/exit-run/<label>/state.json` (a step that ended with
+    every job run, exit 0 or 1, is not repeated); `--resume` on `fcheck`, `equiv` and
+    `rerun-check` skips jobs holding a measured verdict (an equiv `timeout` is a measurement,
+    so it is kept; fcheck and rerun timeouts are retried). Steps 7 and 8 run only when no earlier
+    step stopped short (exit 3 or 5), and the exit code is `gate`'s then; a failed job (exit 1)
+    goes on to the table. Step 3 runs `equiv` on the gate designs PHASE3 #16 requires plus
+    `stereovision0` (the plan wants its time measured). The plan's step 7 argv gets
+    `--seeds 2,3` when step 6 had candidates. Oprov is not one of the eight steps: the
+    controller runs it once (`run --leg Oprov --set gate,extra`, then `table --legs P,O,Oprov`).
+    (f) **3F folded**: `tests/vtr/tasks/qor_p` (the three smallest designs, `crosscheck`'s
+    default task) and `tests/vtr/tasks/qor_gate` (the 19 and 2 extra) are P-flow task configs with
+    VTR-relative `circuits_dir`/`archs_dir` (rule 4 of VTR's `resolve_vtr_source_file`; no home
+    path in the repo) and the harness's `script_params`; `test_task_configs` pins them to
+    `sets.json` and `QOR_CHAIN_PARAMS`, and VTR's own `load_task_config` loads both. There is no
+    Odin III task config: its netlists live under the work tree with a key in the path, and the
+    harness runs them as `run_vtr_flow.py <blif> -start vpr`. `crosscheck` says `no harness P job`
+    once per design instead of one line per key.
+    Review fixes (2026-10-19): step 7 and the seed candidates use this run's leg keys
+    (`table --keys`), never `latest`; `state.json` carries a fingerprint (odin3 build, VTR commit,
+    inputs, legs, seeds) and is discarded on a mismatch; a failed job in any step is exit 1
+    whatever `gate` says (the EArch smoke is outside the k6 gate); the Oprov probe also runs the
+    default style and needs the names to differ; the probe directory goes through `safe_rmtree`;
+    `exit-run` refuses `--arch`. **Group B fcheck stays inline in step 1** (`-j1` right after its
+    own job, `FCHECK_J`): a separate step after all VPR jobs would need a different resume point
+    in the 3H-3 runner, and the 06:00 deadline already stops an fcheck not started in time;
+    Peter may ask for the split. A seed key counts against `KEEP_KEYS` (3) with the seed-1 key.
 
 ## Risks
 
