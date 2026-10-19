@@ -1263,7 +1263,12 @@ then the options considered.
     `.superpowers/sdd/opt-share-parity-report.md`). `d + 1` against `1 - d` under a mux: 34 adders
     before, 17 after (Parmys 17). `hardmap-diff` on stereovision1 (`tools/heavy-run`): adder +24 before,
     adder 0 after (the latch -65 of decision 43 is unchanged). `opt_diff_micro` (release, `tools/heavy-run`):
-    passed, 6643 s, no `diff_expect` entry became stale.
+    passed (6643 s, no `diff_expect` entry stale); `opt_equiv_micro_phase3`: passed (3594 s, every call
+    that changes something proved, `opt_share` included); `opt_diff_micro_wreduce`: 3 unexpected failures
+    (`large/spree.v`, `full/cf_cordic_v_18_18_18.v`, `full/cf_fft_256_8.v`; a listed structural
+    difference plus a 60 s SAT timeout), byte-identical with the build of main 5d9d191a on the same
+    three files (timings aside), so not from this change; `full/sha.v` failed once under load and passed
+    on a rerun of both builds. `opt_equiv_micro` (Phase 2 script, no `opt_share`) was not run.
 
 ## Risks
 
