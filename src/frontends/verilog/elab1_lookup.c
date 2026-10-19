@@ -503,7 +503,8 @@ bool odin3_elab1_resolve_icell(odin3_elab1 *e1, odin3_ast_id item, uint32_t name
     *res = (odin3_elab_res){ODIN3_RES_NONE, 0, {0}};
     if (!odin3_celltype_find(e1->design, name, &type)) {
         if (odin3_u64map_get(e1->by_name, name, NULL)) {
-            return false; /* not a registered type, but a module of that name: it resolves as ever */
+            return false; /* not a registered type, but a module of that name: it resolves as ever
+                           */
         }
         odin3_elab1_error(e1, at,
                           "unresolved_module: cell type '%s' is not registered (read_verilog "

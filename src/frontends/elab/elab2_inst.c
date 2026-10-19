@@ -270,8 +270,11 @@ static bool cover_row_ok(const char *text, uint32_t inputs) {
 static odin3_status string_to_cover(odin3_elab2 *e2, const char *text, uint32_t dflt_inputs,
                                     odin3_value *out) {
     size_t len = strlen(text);
-    size_t first = strcspn(text, " ");
-    uint32_t inputs = len == 0 ? dflt_inputs : (uint32_t)(first > 0 ? first - 1U : 0U);
+    uint32_t inputs = dflt_inputs;
+    if (len > 0) {
+        size_t first = strcspn(text, " ");
+        inputs = (uint32_t)(first > 0 ? first - 1U : 0U);
+    }
     size_t row_len = (size_t)inputs + 1U;
     if (len > ICELL_STRING_MAX) {
         return ODIN3_ERR_PARSE;

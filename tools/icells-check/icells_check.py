@@ -516,9 +516,11 @@ def judge_text(
         return Verdict("fail:fixpoint", problem)
     text1, text2, text3 = (paths[n].read_text(encoding="utf-8") for n in ("W.v", "W2.v", "W3.v"))
     problem = compare_instances(text1, text2) or compare_instances(text2, text3)
+    # W.v may hold modules nothing instantiates (opt removed their instance); --top drops them from
+    # the read-back, so only generations 2 and 3 are compared
     problem = problem or (
-        "library instances differ between generations"
-        if not lib_instances(text1) == lib_instances(text2) == lib_instances(text3)
+        "library instances differ between generations 2 and 3"
+        if lib_instances(text2) != lib_instances(text3)
         else ""
     )
     want = required_type(level, design)
