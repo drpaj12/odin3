@@ -72,6 +72,7 @@ TOP_LINE = "attribute \\top 1\n"
 # that holds one needs the techmap step.
 MAPPED_TYPES = frozenset({"$adff", "$adffe", "$aldff", "$aldffe", "$dffsr", "$dffsre"})
 MEM_TYPES = frozenset({"$mem", "$mem_v2"})
+ALIAS_GOLD = "gold.alias.il"
 
 
 @dataclass
@@ -139,6 +140,10 @@ def make_gold(yosys: str, before: Path, parmys: tuple[Path | None, bool], work: 
     steps = [f"read_rtlil {before}", *(["memory_memx", "memory_map"] if memx else []),
              *(f"techmap -map {m}" for m in maps), f"write_rtlil {gold}"]
     run_yosys(yosys, "; ".join(steps), work, cap)
+    if memx:  # the gold without the x: the BLIF cec ties an x to 0 and cannot use it (H2)
+        alias = ["memory_map", *(f"techmap -map {m}" for m in maps)]
+        run_yosys(yosys, "; ".join([f"read_rtlil {before}", *alias,
+                                    f"write_rtlil {work / ALIAS_GOLD}"]), work, cap)
     return gold
 
 
@@ -780,6 +785,13 @@ def refine(yosys: str, sides: tuple[Path, Path], after: Path, work: Path, cap: i
     # "not equivalent" ties the x of the gold to 0 and is not a trace either: "unproven". Its
     # proof starts every flip-flop at 0 (init 2/3), so it also needs the base case (N2).
     verdict, cec = cec_gold_and_blif(yosys, gold, after, work, cap)
+    alias = work / ALIAS_GOLD
+    if verdict != opt_equiv.CEC_PROVED and alias.is_file():
+        # The cec cannot take the x of memory_memx (it ties it to 0). Yosys's own memory_map gold
+        # is a legal stand-in: if the gate equals it on every input, the gate also refines the
+        # memx gold, which is that gold with x on the addresses past the words (H2,
+        # mem_w4_d8_a2_off1.v).
+        verdict, cec = cec_gold_and_blif(yosys, alias, after, work, cap)
     if verdict == opt_equiv.CEC_PROVED:
         kind, detail = base_case(yosys, sides, work, cap, top)
         return kind, (detail if kind != "ok" else

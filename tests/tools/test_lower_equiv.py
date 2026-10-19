@@ -52,6 +52,22 @@ WIDE_ADDR_MEM = """module m(input clk, input [3:0] wa, input [3:0] ra, output [2
   assign y = mem[ra];
 endmodule
 """
+NARROW_ADDR_MEM = """module m(input clk, input we, input [1:0] wa, input [3:0] wd, input [1:0] ra,
+  output [3:0] rd);
+  reg [3:0] mem [1:8];
+  always @(posedge clk) if (we) mem[wa] <= wd;
+  assign rd = mem[ra];
+endmodule
+"""
+UNREAD_BIT = """module top(input clk, input [3:0] x, input [3:0] y, output [7:0] q);
+  wire [7:0] f;
+  sub a(clk, x, y, f);
+  sub b(clk, f[3:0], x, q);
+endmodule
+module sub(input clk, input [3:0] i, input [3:0] j, output reg [7:0] o);
+  always @(posedge clk) o <= i + j;
+endmodule
+"""
 INIT = """module m(input clk, output [3:0] y);
   reg [3:0] q = 4'd{val};
   always @(posedge clk) q <= q + 1;
@@ -212,6 +228,16 @@ class RefinementTest(unittest.TestCase):
         """A 4-bit address over 8 words: Yosys's `memory` aliases the read of 8..15 onto a word,
         the `$mem` meaning is x (bm_simple_memory.v, 3B close): lower reads x, a refinement."""
         self.refines(WIDE_ADDR_MEM)
+
+    def test_a_narrow_address_over_more_words_is_proved_by_the_cec(self) -> None:
+        """SIZE 8 words, a 2 bit address, OFFSET 1: the SAT flow cannot pair the memory, and the
+        BLIF cec ties the x of memory_memx to 0; it must judge the alias gold (3B close, H2)."""
+        self.refines(NARROW_ADDR_MEM)
+        self.differs(NARROW_ADDR_MEM, NARROW_ADDR_MEM.replace("<= wd", "<= ~wd"))
+
+    def test_a_flop_that_drives_only_an_unread_bit_does_not_make_a_difference(self) -> None:
+        """expression_in_chain_modules.v shape: the base case keeps both sides' shared wires."""
+        self.refines(UNREAD_BIT)
 
     def test_a_signed_comparison_read_unsigned(self) -> None:
         self.differs(CMP.format(sign="signed"), CMP.format(sign=""))
