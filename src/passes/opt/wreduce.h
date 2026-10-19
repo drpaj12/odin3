@@ -166,8 +166,16 @@ void wr_label(const wr_state *ws, odin3_node_id node, char *out, size_t size);
 const char *wr_type_name(const wr_state *ws, odin3_node_id node);
 
 /* wreduce_order.c: ws->rank[node] = the node's place in a post-order of the net graph (operand
- * before consumer, WR-7); ranks are 1..N, ws->rank must already hold one entry per node. */
+ * before consumer, WR-7); ranks are 1..N, ws->rank must already hold one entry per node (else
+ * INVALID_ARG). A node with no rank of its own (made later, never given one by wr_rebuild) keeps
+ * UINT32_MAX: it sorts after every ranked node, by node ID. */
 odin3_status wr_order_ranks(wr_state *ws);
+/* True for a storage type (flip-flop, latch, memory): its outputs are not followed by the walk. */
+bool wr_order_is_source(const char *type);
+/* The k-th port (of n_ports) the walk reads for `type`: registry order, but `$mux` S, B, A. */
+uint32_t wr_order_port(const char *type, uint32_t n_ports, uint32_t k);
+/* Bytes per node the walk needs besides the rank table: `seen` (1) and the stack (8). */
+enum { WR_ORDER_BYTES_PER_NODE = 9 };
 
 /* wreduce_op.c: the pre-step (spec 3, step 1) and §4.3 for one node. */
 odin3_status wr_prestep(wr_state *ws, odin3_node_id node);
