@@ -421,6 +421,15 @@ class PairRegistersTest(unittest.TestCase):
         out = le.pair_registers(gate, PAIR_GOLD)
         self.assertIn("connect \\r [0] $n8\n  connect \\r [1] $n2\n  connect \\r [2] $n5\n", out)
 
+    def test_a_register_driven_by_several_gold_cells_is_not_paired(self) -> None:
+        """sha.v `cmd`: four gold cells drive it, so `dff_p<n>` is not the register bit."""
+        cells = "".join(f"  cell $dff \\c{k}\n    connect \\Q \\r [{k}]\n  end\n" for k in range(2))
+        gold = PAIR_GOLD.replace("end\n", cells + "end\n", 1)
+        self.assertNotIn("connect \\r ", le.pair_registers(PAIR_GATE, gold))
+        one = "  cell $dff \\c\n    connect \\Q \\r\n  end\n"
+        self.assertIn("connect \\r [0]", le.pair_registers(PAIR_GATE, PAIR_GOLD.replace(
+            "end\n", one + "end\n", 1)))
+
     def test_a_name_the_gate_already_has_is_not_declared_twice(self) -> None:
         gate = PAIR_GATE.replace("  wire $n1\n", "  wire $n1\n  wire \\s\n")
         self.assertEqual(le.pair_registers(gate, PAIR_GOLD).count("wire \\s\n"), 1)

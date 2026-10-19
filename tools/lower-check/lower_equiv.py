@@ -311,6 +311,15 @@ def gold_driven(body: str) -> dict[str, list[int]]:
     return {name: sorted(bits) for name, bits in found.items()}
 
 
+def gold_driver_counts(body: str) -> dict[str, int]:
+    """wire -> how many storage cells of a gold module body drive some bit of it."""
+    found: dict[str, int] = {}
+    for _, q_signal in storage_cells(body):
+        for name in driven_bits(q_signal):
+            found[name] = found.get(name, 0) + 1
+    return found
+
+
 def storage_cells(body: str) -> list[tuple[str, str]]:
     """(cell name, Q signal) of the ``$dff`` and ``$dlatch`` cells of a module body."""
     found: list[tuple[str, str]] = []
@@ -373,10 +382,17 @@ def pair_registers(gate: str, gold: str) -> str:
         body = out[start:end]
         gold_body = gold[g_start:g_end]
         gold_wires, have, driven = wire_widths(gold_body), wire_widths(body), gold_driven(gold_body)
+        drivers = gold_driver_counts(gold_body)
         extra = ""
         for stem, cells in sorted(gate_storage(body).items()):
             name = "\\" + stem
             if name in have or name not in gold_wires:
+                continue
+            # Several gold cells drive the wire: the bit order is a guess (sha.v: `cmd` is the Q
+            # of four gold cells, `cmd.dff_p2`, `_p2_1`, `_p2_2`, `_p5`: the cell index is the
+            # bit within its cell, not within the register), and a wrong name is a false
+            # difference in the base case.
+            if drivers.get(name, 0) > 1:
                 continue
             bits = driven.get(name) or (list(range(gold_wires[name]))
                                         if gold_wires[name] == len(cells) else [])
