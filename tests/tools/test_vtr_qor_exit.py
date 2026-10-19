@@ -30,7 +30,7 @@ import qor_table
 import vtr_qor
 from qor_sched import Job
 
-from .test_vtr_qor_cli import CliTestBase
+from .test_vtr_qor_cli import CliTestBase, _script
 from .test_vtr_qor_sched import KEY12, FakeClock, RunnerTestBase
 from .test_vtr_qor_table import BANDS, GATE, drop, header, replace, run, table
 
@@ -265,6 +265,20 @@ class ExitCliTest(CliTestBase):
         self.assertEqual(err, "vtr-qor: crosscheck: ch_intrinsics: no harness P job; run "
                               "vtr-qor run --leg P --designs ch_intrinsics\n")
 
+    def test_exit_keys_never_latest(self) -> None:
+        """Review H1: with an older complete key in place, the exit run's keys are those of the
+        current odin3, and the candidates are not decided from the older key."""
+        self.assertEqual(self.cli("run", "--leg", "P,O", "--set", "smoke")[0], 0)
+        out = self.out
+        old = vtr_qor.read_latest(out / self.pin[:12] / "k6_frac_N10_frac_chain_mem32K_40nm" / "O")
+        self.assertIsNotNone(old)
+        self.odin3.write_text(self.odin3.read_text() + "\n# rebuilt\n")
+        args = vtr_qor._parser().parse_args(["exit-run", "--label", "x"])
+        sets = qor_sched.load_sets()
+        keys = vtr_qor._exit_keys(args, out, self.vtr, self.odin3, ("P", "O"), sets)()
+        self.assertNotEqual(keys["O"], old)
+        self.assertEqual(vtr_qor._exit_candidates(args, out, lambda: keys)(), None)
+
     def test_probe_runs_the_oprov_script(self) -> None:
         """The real probe against the fake odin3: exit 0 and a file: capable; exit 1: the reason."""
         work = self.tmp / "probe"
@@ -272,6 +286,23 @@ class ExitCliTest(CliTestBase):
         self.assertTrue((work / "probe.v").is_file())
         (self.bin / "fail").write_text("")
         self.assertIsNotNone(qor_legs.probe_name_style(self.odin3, self.repo, work))
+
+    def test_probe_rejects_an_odin3_that_ignores_the_style(self) -> None:
+        """Review M2: exit 0 and a file for both scripts, but the same names: not capable."""
+        same = _script(self.bin / "same-odin3", (
+            "import sys\nfrom pathlib import Path\n"
+            "script = sys.argv[sys.argv.index('-p') + 1]\n"
+            "Path(script.split()[-1]).write_text('.model m\\n.end\\n')\n"))
+        reason = qor_legs.probe_name_style(same, self.repo, self.tmp / "probe2")
+        self.assertEqual(reason, "--name-style provenance wrote the same names as the default")
+        with mock.patch.object(vtr_qor, "name_style_probe", wraps=vtr_qor.name_style_probe):
+            self.assertEqual(vtr_qor.leg_lacks("Oprov", same, frozenset(qor_legs.LEG_PASSES["O"])),
+                             vtr_qor.NAME_STYLE_PASS)
+
+    def test_name_style_probe_cleans_up(self) -> None:
+        """Review M3: the probe's directory is gone afterwards (through safe_rmtree)."""
+        self.assertIsNone(vtr_qor.name_style_probe(self.odin3))
+        self.assertFalse(list((qor_heavy.HEAVY_DIR / "vtr-qor-probe").glob("*")))
 
 
 class SeedTableTest(unittest.TestCase):
@@ -361,13 +392,16 @@ class NightRerunStepTest(unittest.TestCase):
             self.assertEqual(len(reruns), int(expect))
             if expect:
                 group_a = ",".join(d for d in sets.order if sets.designs[d].group == "A")
-                self.assertEqual(reruns[0], ["rerun-check", "--out", "/o", "--designs", group_a])
+                self.assertEqual(reruns[0], ["rerun-check", "--out", "/o", "--designs", group_a,
+                                       "--resume"])
                 self.assertEqual(seen[-1], reruns[0])
 
 
 SETS = qor_sched.load_sets()
 TASKS = qor_legs.REPO_ROOT / "tests" / "vtr" / "tasks"
 COMMON = ("--vtr-root", "/v", "--odin3", "/o/odin3", "--out", "/out")
+KEYS = {"P": "aaaaaaaaaaaa", "Oprime": "bbbbbbbbbbbb", "Pprime": "cccccccccccc",
+        "O": "dddddddddddd"}
 ALL = ("P", "Pprime", "Oprime", "O", "R", "Oprov")
 
 
@@ -397,11 +431,12 @@ class ExitRunTest(unittest.TestCase):
 
     def ctx(self, inner: FakeInner, *, legs: Sequence[str] = ALL,
             lacks: dict[str, str] | None = None,
-            candidates: list[str] | None = None) -> qor_exit.ExitContext:
+            candidates: list[str] | None = None,
+            fingerprint: str = "fp1") -> qor_exit.ExitContext:
         return qor_exit.ExitContext(
             out=self.out, label="exit-20261019", sets=SETS, legs=tuple(legs),
             lacks=lacks or {}, common=COMMON, run_inner=inner, emit=self.lines.append,
-            candidates=lambda: candidates)
+            candidates=lambda: candidates, keys=lambda: dict(KEYS), fingerprint=fingerprint)
 
     def test_exit_run_steps(self) -> None:
         """The eight steps in order with the exact argv each builds; the step line precedes each."""
@@ -419,8 +454,9 @@ class ExitRunTest(unittest.TestCase):
             ["run", *COMMON, "--arch", "earch", "--set", "smoke", "--leg", "P,Pprime,Oprime,O"],
             ["run", *COMMON, "--leg", "P,O", "--designs", "sha,bgm", "--seed", "2"],
             ["run", *COMMON, "--leg", "P,O", "--designs", "sha,bgm", "--seed", "3"],
-            ["table", *COMMON, "--legs", "P,Oprime,Pprime,O", "--label", "exit-20261019",
-             "--seeds", "2,3"],
+            ["table", *COMMON, "--legs", "P,Oprime,Pprime,O", "--keys",
+             "P=aaaaaaaaaaaa,Oprime=bbbbbbbbbbbb,Pprime=cccccccccccc,O=dddddddddddd",
+             "--label", "exit-20261019", "--seeds", "2,3"],
             ["gate", "/out/tables/20261019-0300-x"],
         ])
         steps = [line for line in self.lines if line.startswith("exit-run: step")]
@@ -446,7 +482,7 @@ class ExitRunTest(unittest.TestCase):
         # no table or gate
         self.assertEqual([c[0] for c in first.calls],
                          ["run", "fcheck", "equiv", "rerun-check", "run"])
-        self.assertEqual(qor_exit.load_done(self.out, "exit-20261019"),
+        self.assertEqual(qor_exit.load_done(self.out, "exit-20261019", "fp1"),
                          {1: 0, 2: 0, 4: 0, 5: 0, 6: 0})
         second = FakeInner()
         self.assertEqual(qor_exit.run_exit(self.ctx(second, candidates=[])), 0)
@@ -479,6 +515,31 @@ class ExitRunTest(unittest.TestCase):
         inner = FakeInner({"table": [1]})
         inner_code = qor_exit.run_exit(self.ctx(inner, candidates=[]))
         self.assertEqual(inner_code, 1)
+
+    def test_failed_job_fails_the_exit_whatever_the_gate_says(self) -> None:
+        """Review H1/M1: a failed step 1 job, EArch smoke job or seed job is exit 1 even when
+        the gate answers PASS, and the table is made from this run's keys."""
+        for failing in (0, 1, 2):  # the 1st, 2nd and 3rd run command: step 1, step 5, step 6
+            self.setUp()
+            inner = FakeInner({"run": [1 if i == failing else 0 for i in range(3)]})
+            self.assertEqual(qor_exit.run_exit(self.ctx(inner, candidates=["sha"])), 1, failing)
+            table = next(c for c in inner.calls if c[0] == "table")
+            self.assertIn("--keys", table)
+            self.assertIn("O=dddddddddddd", table[table.index("--keys") + 1])
+            self.assertTrue(any("run --rerun" in line for line in self.lines))
+
+    def test_changed_fingerprint_reruns_every_step(self) -> None:
+        """Review H2: state recorded for one odin3 build is discarded for another."""
+        first = FakeInner({"equiv": [3]})
+        qor_exit.run_exit(self.ctx(first, candidates=[], fingerprint="build-A"))
+        same = FakeInner()
+        qor_exit.run_exit(self.ctx(same, candidates=[], fingerprint="build-A"))
+        self.assertEqual(same.calls[0][0], "equiv")  # resumed
+        rebuilt = FakeInner()
+        self.lines.clear()
+        qor_exit.run_exit(self.ctx(rebuilt, candidates=[], fingerprint="build-B"))
+        self.assertEqual([c[0] for c in rebuilt.calls][:2], ["run", "fcheck"])
+        self.assertTrue(any("for another build or input set" in line for line in self.lines))
 
     def test_leg_skip_message(self) -> None:
         """O unavailable: the exact skip line, the other legs run."""

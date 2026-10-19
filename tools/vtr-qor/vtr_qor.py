@@ -80,6 +80,7 @@ import argparse
 import contextlib
 import dataclasses
 import functools
+import hashlib
 import io
 import json
 import math
@@ -89,7 +90,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -287,8 +287,12 @@ NAME_STYLE_PASS = "write_blif --name-style provenance"
 def name_style_probe(odin3: Path) -> str | None:
     """None when ``odin3`` writes ``--vtr --name-style provenance`` (3E-6), else the reason. A
     module seam: tests replace it."""
-    with tempfile.TemporaryDirectory(prefix="vtr-qor-probe-") as work:
-        return qor_legs.probe_name_style(odin3, qor_legs.REPO_ROOT, Path(work) / "probe")
+    root = qor_heavy.HEAVY_DIR / "vtr-qor-probe"
+    work = root / str(os.getpid())
+    try:
+        return qor_legs.probe_name_style(odin3, qor_legs.REPO_ROOT, work)
+    finally:
+        qor_heavy.safe_rmtree(work, root)
 
 
 def leg_lacks(leg: str, odin3: Path, passes: frozenset[str]) -> str | None:
@@ -1122,18 +1126,46 @@ def cmd_nightly(args: argparse.Namespace, argv: Sequence[str]) -> int:
 # -- exit-run ----------------------------------------------------------------------------------
 
 
-def _exit_candidates(args: argparse.Namespace, out: Path) -> Callable[[], list[str] | None]:
-    """Step 6's designs: ``seed_candidates`` over the latest complete P and O of k6; None while
-    either leg has no complete key."""
+def _exit_keys(args: argparse.Namespace, out: Path, vtr_root: Path, odin3: Path,
+               legs: Sequence[str], sets: Sets) -> Callable[[], dict[str, str]]:
+    """The leg key of each of ``legs`` for THIS ``odin3`` and these files (the planner's, the
+    same ones step 1 ran under): step 7 and the seed candidates use these and never ``latest``."""
+    def keys() -> dict[str, str]:
+        req = PlanRequest(legs=tuple(legs), designs=(sets.order[0],), arch="k6", out=out,
+                          vtr_root=vtr_root, odin3=odin3, rerun=False)
+        return {job.leg: job.key12 for job in qor_sched.plan_jobs(req, sets)}
+    return keys
+
+
+def _exit_candidates(args: argparse.Namespace, out: Path, keys: Callable[[], dict[str, str]]
+                     ) -> Callable[[], list[str] | None]:
+    """Step 6's designs: ``seed_candidates`` over this run's P and O keys; None while either leg
+    has no job directory under its key."""
     def candidates() -> list[str] | None:
+        pinned = keys()
         try:
-            runs = qor_table.load_runs(out, _table_vtr12(args), qor_legs.ARCH_BASES["k6"], {},
+            runs = qor_table.load_runs(out, _table_vtr12(args), qor_legs.ARCH_BASES["k6"],
+                                       {leg: pinned[leg] for leg in ("P", "O") if leg in pinned},
                                        legs=("P", "O"))
             bands = qor_table.load_bands(qor_table.BANDS_JSON)
         except (HeavyError, OSError, ValueError):
             return None
         return qor_table.seed_candidates(runs, bands)
     return candidates
+
+
+def _exit_fingerprint(odin3: Path, vtr_root: Path, legs: Sequence[str]) -> str:
+    """What recorded steps are valid for: the odin3 build, the VTR commit, the inputs that enter
+    the keys (``sets.json``, ``bands.json``, the lib, the ABC script, the TSVs), the legs and the
+    seeds. Any change discards the state (the job cache still keeps what holds)."""
+    repo = qor_legs.REPO_ROOT
+    parts = [qor_sched.odin3_build_id(odin3), qor_legs.vtr_commit(vtr_root), ",".join(legs),
+             ",".join(str(seed) for seed in qor_exit.SEEDS)]
+    files = [qor_sched.SETS_JSON, qor_table.BANDS_JSON, repo / qor_legs.LIB_REL,
+             repo / qor_legs.ABC_SCRIPT_REL,
+             *(qor_table.REPO_INPUTS / name for name in TSV_INPUTS)]
+    parts += [qor_sched._sha_or(path, "absent") or "absent" for path in files]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
 def cmd_exit_run(args: argparse.Namespace, argv: Sequence[str]) -> int:
@@ -1144,6 +1176,9 @@ def cmd_exit_run(args: argparse.Namespace, argv: Sequence[str]) -> int:
     resumes. Exit: ``gate``'s when every job ran, else the run's code."""
     global ADMISSION  # noqa: PLW0603 (the module seam read by cmd_run)
     qor_heavy.require_heavy()
+    if args.arch != "k6":
+        raise HeavyError(EXIT_USAGE, "exit-run runs the k6 gate and the EArch smoke itself; "
+                                     "--arch is not accepted")
     out, odin3, vtr_root = _out(args), _odin3(args), _vtr_root(args)
     if not odin3.is_file():
         raise HeavyError(EXIT_USAGE, f"exit-run: odin3 binary not found: {odin3} "
@@ -1157,11 +1192,13 @@ def cmd_exit_run(args: argparse.Namespace, argv: Sequence[str]) -> int:
              and (lack := leg_lacks(leg, odin3, passes)) is not None}
     common = ["--vtr-root", str(vtr_root), "--odin3", str(odin3), "--out", str(out),
               *(["--allow-vtr-drift"] if args.allow_vtr_drift else [])]
+    legs = tuple(leg for leg in qor_legs.LEGS if leg not in lacks and leg != "Oprov")
+    keys = _exit_keys(args, out, vtr_root, odin3, legs, sets)
     ctx = qor_exit.ExitContext(
-        out=out, label=label, sets=sets,
-        legs=tuple(leg for leg in qor_legs.LEGS if leg not in lacks and leg != "Oprov"),
-        lacks=lacks, common=tuple(common), run_inner=run_inner,
-        emit=lambda m: _warn_log(RunOptions(out=out), m), candidates=_exit_candidates(args, out))
+        out=out, label=label, sets=sets, legs=legs, lacks=lacks, common=tuple(common),
+        run_inner=run_inner, emit=lambda m: _warn_log(RunOptions(out=out), m),
+        candidates=_exit_candidates(args, out, keys), keys=keys,
+        fingerprint=_exit_fingerprint(odin3, vtr_root, legs))
     ADMISSION = Admission((deadline - now).total_seconds(), deadline.strftime("%H:%M"),
                           lambda job: qor_nightly.expected_minutes(job, out, sets) * 60.0,
                           owner="exit-run")

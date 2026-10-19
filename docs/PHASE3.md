@@ -1169,6 +1169,15 @@ then the options considered.
     Odin III task config: its netlists live under the work tree with a key in the path, and the
     harness runs them as `run_vtr_flow.py <blif> -start vpr`. `crosscheck` says `no harness P job`
     once per design instead of one line per key.
+    Review fixes (2026-10-19): step 7 and the seed candidates use this run's leg keys
+    (`table --keys`), never `latest`; `state.json` carries a fingerprint (odin3 build, VTR commit,
+    inputs, legs, seeds) and is discarded on a mismatch; a failed job in any step is exit 1
+    whatever `gate` says (the EArch smoke is outside the k6 gate); the Oprov probe also runs the
+    default style and needs the names to differ; the probe directory goes through `safe_rmtree`;
+    `exit-run` refuses `--arch`. **Group B fcheck stays inline in step 1** (`-j1` right after its
+    own job, `FCHECK_J`): a separate step after all VPR jobs would need a different resume point
+    in the 3H-3 runner, and the 06:00 deadline already stops an fcheck not started in time;
+    Peter may ask for the split. A seed key counts against `KEEP_KEYS` (3) with the seed-1 key.
 
 ## Risks
 

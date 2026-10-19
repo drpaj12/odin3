@@ -359,23 +359,31 @@ PROBE_TIMEOUT_S = 120
 def probe_name_style(odin3: Path, repo: Path, work: Path, *, k: int = 6,
                      run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
                      ) -> str | None:
-    """Whether ``odin3`` can write ``--vtr --name-style provenance`` (3E-6; before it the writer
-    refuses the option with "not available yet"). The probe runs the Oprov script on a two-input
-    AND in ``work`` (a directory of the caller's, which this creates) and needs exit 0 and the
-    output file. None: it can; else the reason (the last stderr line). ``run`` is a test seam."""
+    """Whether ``odin3`` writes ``--vtr --name-style provenance`` (3E-6; before it the writer
+    refuses the option with "not available yet"). The probe runs the Oprov script and the O
+    script (short names) on a two-input AND in ``work`` (a directory of the caller's, which this
+    creates) and needs exit 0 and both files, and the two outputs must differ: an odin3 that
+    accepts the option and ignores it is not capable. None: it can; else the reason. ``run`` is
+    a test seam. Each run has ``PROBE_TIMEOUT_S`` (no cgroup: a two-gate design)."""
     work.mkdir(parents=True, exist_ok=True)
-    design, out = work / "probe.v", work / "probe.blif"
+    design = work / "probe.v"
     design.write_text(_PROBE_DESIGN, encoding="utf-8")
-    script = _script("Oprov", design, out, k, "provenance", repo / LIB_REL)
-    try:
-        proc = run([str(odin3), "-p", script], capture_output=True, text=True, check=False,
-                   timeout=PROBE_TIMEOUT_S, cwd=work)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return f"cannot run {odin3}: {exc}"
-    if proc.returncode == 0 and out.is_file():
-        return None
-    lines = (proc.stderr + proc.stdout).strip().splitlines()
-    return lines[-1] if lines else f"exit {proc.returncode}"
+    texts = {}
+    for style, leg in (("provenance", "Oprov"), ("short", "O")):
+        out = work / f"probe-{style}.blif"
+        script = _script(leg, design, out, k, style, repo / LIB_REL)
+        try:
+            proc = run([str(odin3), "-p", script], capture_output=True, text=True, check=False,
+                       timeout=PROBE_TIMEOUT_S, cwd=work)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"cannot run {odin3}: {exc}"
+        if proc.returncode != 0 or not out.is_file():
+            lines = (proc.stderr + proc.stdout).strip().splitlines()
+            return lines[-1] if lines else f"exit {proc.returncode}"
+        texts[style] = out.read_bytes()
+    if texts["provenance"] == texts["short"]:
+        return "--name-style provenance wrote the same names as the default"
+    return None
 
 
 def registered_passes(odin3_help: str) -> frozenset[str]:

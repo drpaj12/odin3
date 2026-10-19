@@ -66,27 +66,33 @@ class ExitContext:
     run_inner: Callable[[Sequence[str]], int]
     emit: Callable[[str], None]
     candidates: Callable[[], list[str] | None]
+    keys: Callable[[], dict[str, str]]
+    fingerprint: str = ""
 
 
 def state_path(out: Path, label: str) -> Path:
     return out / "exit-run" / label / STATE_FILE
 
 
-def load_done(out: Path, label: str) -> dict[int, int]:
-    """The recorded steps (number to exit code); unreadable or malformed: none."""
+def load_done(out: Path, label: str, fingerprint: str = "") -> dict[int, int]:
+    """The recorded steps (number to exit code); unreadable, malformed, or recorded for another
+    fingerprint (a rebuilt odin3, a moved VTR, an edited input): none."""
     try:
         data = json.loads(state_path(out, label).read_text(encoding="utf-8"))
+        if data.get("fingerprint", "") != fingerprint:
+            return {}
         return {int(k): int(v) for k, v in data["done"].items()}
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return {}
 
 
-def save_done(out: Path, label: str, done: dict[int, int]) -> None:
+def save_done(out: Path, label: str, done: dict[int, int], fingerprint: str = "") -> None:
     path = state_path(out, label)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(json.dumps({"label": label, "done": {str(k): done[k] for k in sorted(done)}},
-                              sort_keys=True, indent=1) + "\n", encoding="utf-8")
+    body = {"label": label, "fingerprint": fingerprint,
+            "done": {str(k): done[k] for k in sorted(done)}}
+    tmp.write_text(json.dumps(body, sort_keys=True, indent=1) + "\n", encoding="utf-8")
     os.replace(tmp, path)
 
 
@@ -130,8 +136,10 @@ def step_argvs(number: int, ctx: ExitContext, designs: Sequence[str] = (),
                  "--seed", str(seed)] for seed in SEEDS] if designs else []
     if number == 7:
         seeds = ["--seeds", ",".join(str(seed) for seed in SEEDS)] if designs else []
-        return [["table", *common, "--legs", _legs_arg(GATE_LEGS, ctx.legs), "--label", ctx.label,
-                 *seeds]]
+        keys = ctx.keys()
+        pinned = ["--keys", ",".join(f"{leg}={keys[leg]}" for leg in GATE_LEGS if leg in keys)]
+        return [["table", *common, "--legs", _legs_arg(GATE_LEGS, ctx.legs), *pinned,
+                 "--label", ctx.label, *seeds]]
     return [["gate", str(table_dir)]] if table_dir is not None else []
 
 
@@ -180,7 +188,10 @@ def run_exit(ctx: ExitContext) -> int:
     those steps (5, then 2, 4, then 3)."""
     for line in skip_lines(ctx):
         ctx.emit(line)
-    done = load_done(ctx.out, ctx.label)
+    done = load_done(ctx.out, ctx.label, ctx.fingerprint)
+    if not done and state_path(ctx.out, ctx.label).is_file():
+        ctx.emit(f"exit-run: {state_path(ctx.out, ctx.label)} is for another build or input set; "
+                 "every step starts again (the job cache keeps what still holds)")
     short: list[int] = []
     for number in range(1, STEPS - 1):
         if number in done:
@@ -205,14 +216,21 @@ def run_exit(ctx: ExitContext) -> int:
             short.append(code)
         else:
             done[number] = code
-            save_done(ctx.out, ctx.label, done)
+            save_done(ctx.out, ctx.label, done, ctx.fingerprint)
+    failed = sorted(n for n, c in done.items() if c == EXIT_FAIL)
+    if failed:
+        ctx.emit(f"exit-run: steps {failed} had failed jobs or checks (not retried on resume; "
+                 "rerun them with run --rerun --designs ...)")
     if short:
         ctx.emit(f"exit-run: steps 7 and 8 wait for the unfinished steps; run exit-run --label "
                  f"{ctx.label} again")
-        return worst(short)
+        return worst([*short, *([EXIT_FAIL] if failed else [])])
     _step_line(ctx, STEPS - 1)
     code, last = _run_step(STEPS - 1, ctx, ctx.candidates() or [])
     if code not in (EXIT_OK, EXIT_FAIL, EXIT_INCOMPLETE) or not last:
         return code or EXIT_FAIL
     _step_line(ctx, STEPS)
-    return _run_step(STEPS, ctx, (), Path(last))[0]
+    verdict = _run_step(STEPS, ctx, (), Path(last))[0]
+    # a failed job anywhere (the EArch smoke and the seed reruns are outside the gate) fails
+    # the exit run, whatever the k6 gate says
+    return EXIT_FAIL if failed and verdict in (EXIT_OK, EXIT_INCOMPLETE) else verdict
