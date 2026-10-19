@@ -26,7 +26,7 @@ Pin = tuple[str, int, str]
 
 
 def _digest(*parts: object) -> str:
-    return hashlib.sha1(repr(parts).encode()).hexdigest()[:16]  # noqa: S324 (not security)
+    return hashlib.sha256(repr(parts).encode()).hexdigest()[:16]
 
 
 class Module:

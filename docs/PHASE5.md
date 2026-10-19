@@ -151,7 +151,7 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
      (word, LPM, inst) or `equiv-check` (gate, LUT); fixpoint: cell census plus a per-cell signature
      (type, parameters, widths, wiring up to renaming); instances: type, name, parameters, pins; the
      report counts the `$` instances read via `-icells` and the library instances;
-   - tests: `test_icells` (24 cases), `test_icells_roundtrip` (16 instance types), `python_tools` (the
+   - tests: `test_icells` (21 cases), `test_icells_roundtrip` (16 instance types), `python_tools` (the
      tool's unit tests and an end-to-end mutated read-back per leg), CTests `icells_inst`,
      `icells_insttext`, `icells_cells_word/lpm`, `icells_lpm_cells/soft`, `icells_plain_gate/lut`
      (default set, about 40 s) and `icells_micros_<level>` over the 68 micros (label `sweep`, run with
@@ -161,7 +161,7 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
    - `-icells` also reads a `$sop` COVER parameter from the writer's quoted rows, and a user module
      named `$x` that is not a registered type still resolves as a module;
    - documented exceptions, none silent (spec X-9 to X-13, `tests/icells/expect.txt`): `always`
-     storage has no text fixpoint; `multiply_hard_block.v` cannot be written as BLIF; `$pow` is
+     storage has no text fixpoint; `multiply_hard_block.v` at gate/LUT (the read-back of the written stub is refused by `write_blif --vtr`; passes without the stub; cause not confirmed); `$pow` is
      unproven by Yosys and `lower` cannot take it; `$memrd`/`$memwr` have no RTLIL form (text legs only);
    - `lpm-check` keeps `noroundtrip altsyncram_soft.v` (the text fixpoint of X-9); `icells-check`
      covers that micro at the LPM level.

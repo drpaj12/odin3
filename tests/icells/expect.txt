@@ -2,14 +2,17 @@
 #   <level> <design file name> <outcome> <reason>
 # An entry for a design that passes is stale and fails the run. Nothing is skipped silently.
 #
-# X-11: the micro multiply_hard_block.v instantiates the VTR hard block `multiply` (tech library
+# X-11: multiply_hard_block.v instantiates the VTR hard block `multiply` (tech library
 # lib/vtr.o3lib, tests/icells/techlib.txt). The word and LPM levels read it back (the library
-# instances are compared). `write_blif --vtr` cannot write a `multiply` instance: its WIDTH
-# parameter is not derivable from the BLIF formals, so the gold of the gate and LUT levels does not
-# exist. (The other two hard-block micros, adder_hard_block and hard_adder_cin_propagation, pass
-# at all four levels with the soft n-bit adder tests/hardmap/adder_lib.v.)
-gate multiply_hard_block.v fail:read write_blif --vtr cannot recover the WIDTH parameter of a multiply instance from the BLIF formals
-lut multiply_hard_block.v fail:read write_blif --vtr cannot recover the WIDTH parameter of a multiply instance from the BLIF formals
+# instances are compared). At the gate and LUT levels `write_blif --vtr` writes the original netlist
+# but refuses the read-back of its written Verilog: "parameters 'WIDTH' cannot be recovered from BLIF
+# formals". Confirmed: it passes when the written `(* blackbox *) module multiply` stub is cut from
+# the file, so the stub changes what the instance is. Not confirmed: why (the likely cause is that
+# the stub declares `out [1:0]`, the width at the default WIDTH = 1, where the hard cell has
+# 2 * WIDTH). The other two hard-block micros pass at all four levels (the soft n-bit adder
+# tests/hardmap/adder_lib.v is read with --lib).
+gate multiply_hard_block.v fail:read the written (* blackbox *) stub of multiply changes the read-back instance (passes without the stub); cause not confirmed
+lut multiply_hard_block.v fail:read the written (* blackbox *) stub of multiply changes the read-back instance (passes without the stub); cause not confirmed
 #
 # X-12: Yosys 0.55 has no SAT model of $pow (spec 20.2 of 2F), so the equivalence of a design with
 # a $pow cell is unproven at the word, LPM and inst levels; the text legs (signature fixpoint,
