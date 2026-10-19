@@ -1,0 +1,116 @@
+# lpm.o3lib - the Altera megafunctions the 5.1 LPM output path uses (PHASE5 5.1, D10, D11):
+# lpm_add_sub, lpm_mult, lpm_compare and altsyncram. Spec: docs/specs/2026-10-19-5.1-lpm-design.md.
+#
+# All four are `blackbox` cells: ports and parameters only, no simulation function (equivalence
+# under LPM models waits until it is needed, PHASE5 decision 1). Names, port order and defaults
+# are the ones verified in spec section 3 and 11:
+# - lpm_add_sub, lpm_mult, lpm_compare: Altera UG-01063 (Integer Arithmetic IP Cores User Guide,
+#   2016.06.10), the Verilog prototypes of lpm.v (p. 5-2, 4-2, 6-2). Port order is the prototype's.
+# - altsyncram: Quartus 16.0 help (VHDL component declaration) and the Yosys
+#   techlibs/intel_alm/common/megafunction_bb.v port order; byteena_a/b and eccstatus are left out
+#   (no byte enables, no ECC in 5.1).
+# Names are lower case, as the prototypes write them. `sclr` (lpm_mult) is in the guide's port
+# table but not in its prototype, so it is not declared. 5.1 does not declare
+# intended_device_family on the lpm_* cells (the prototypes do not).
+library lpm
+
+cell lpm_add_sub blackbox
+  param lpm_type string "lpm_add_sub"
+  param lpm_width int 1
+  param lpm_direction string "UNUSED"
+  param lpm_representation string "SIGNED"
+  param lpm_pipeline int 0
+  param lpm_hint string "UNUSED"
+  out result lpm_width
+  out cout 1
+  out overflow 1
+  in  add_sub 1
+  in  cin 1
+  in  dataa lpm_width
+  in  datab lpm_width
+  in  clock 1 clock
+  in  clken 1
+  in  aclr 1
+end
+
+cell lpm_mult blackbox
+  param lpm_type string "lpm_mult"
+  param lpm_widtha int 1
+  param lpm_widthb int 1
+  param lpm_widths int 1
+  param lpm_widthp int 1
+  param lpm_representation string "UNSIGNED"
+  param lpm_pipeline int 0
+  param lpm_hint string "UNUSED"
+  out result lpm_widthp
+  in  dataa lpm_widtha
+  in  datab lpm_widthb
+  in  sum lpm_widths
+  in  clock 1 clock
+  in  clken 1
+  in  aclr 1
+end
+
+cell lpm_compare blackbox
+  param lpm_type string "lpm_compare"
+  param lpm_width int 1
+  param lpm_representation string "UNSIGNED"
+  param lpm_pipeline int 0
+  param lpm_hint string "UNUSED"
+  out alb 1
+  out aeb 1
+  out agb 1
+  out aleb 1
+  out aneb 1
+  out ageb 1
+  in  dataa lpm_width
+  in  datab lpm_width
+  in  clock 1 clock
+  in  clken 1
+  in  aclr 1
+end
+
+cell altsyncram blackbox
+  param width_a int 1
+  param widthad_a int 1
+  param numwords_a int 1
+  param width_b int 1
+  param widthad_b int 1
+  param numwords_b int 1
+  param width_byteena_a int 1
+  param lpm_type string "altsyncram"
+  param operation_mode string "SINGLE_PORT"
+  param intended_device_family string "Cyclone V"
+  param ram_block_type string "AUTO"
+  param outdata_reg_a string "UNREGISTERED"
+  param outdata_reg_b string "UNREGISTERED"
+  param power_up_uninitialized string "FALSE"
+  param read_during_write_mode_port_a string "NEW_DATA_NO_NBE_READ"
+  param read_during_write_mode_mixed_ports string "DONT_CARE"
+  param address_reg_b string "CLOCK1"
+  param outdata_aclr_b string "NONE"
+  param clock_enable_input_a string "NORMAL"
+  param clock_enable_input_b string "NORMAL"
+  param clock_enable_output_a string "NORMAL"
+  param clock_enable_output_b string "NORMAL"
+  in  clock0 1 clock
+  in  clock1 1 clock
+  in  address_a widthad_a
+  in  data_a width_a
+  in  rden_a 1
+  in  wren_a 1
+  out q_a width_a
+  in  addressstall_a 1
+  in  address_b widthad_b
+  in  data_b width_b
+  in  rden_b 1
+  in  wren_b 1
+  out q_b width_b
+  in  addressstall_b 1
+  in  clocken0 1
+  in  clocken1 1
+  in  clocken2 1
+  in  clocken3 1
+  in  aclr0 1
+  in  aclr1 1
+end
