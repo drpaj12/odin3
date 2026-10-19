@@ -26,7 +26,7 @@ decisions 2–3 and 16 below):
    address width of 15.
 3. **Through P&R**: Odin III alone produces each netlist. The script is `read_techlib
    lib/vtr.o3lib; read_verilog --nolatches --vtr-compat; proc; opt; wreduce; opt_clean; opt -full;
-   flatten; opt -full; hardmap; opt -full; lower; opt -fast; compact; abc; write_blif --vtr` (3C spec H-2; the part
+   flatten; opt -full; hardmap; opt -full -ffbits; lower; opt -fast; compact; abc; write_blif --vtr` (3C spec H-2, decision 49 for `opt_merge -ffbits`; the part
    up to `lower` is `tools/hardmap-check/phase3_pre_abc.script`, run by `hardmap-diff`) (`wreduce` before `flatten` as Parmys, decisions 7 and 31 and 3G WR-9; `opt -full`
    after `flatten` as Parmys runs it, decision 30). Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
@@ -1231,6 +1231,140 @@ then the options considered.
     `* / %` (SAT limit). **Open for Peter:** whether `lower` should match techmap.v's shifter,
     divider and multiplier structure to the gate on these 1-4 gates (a lowering-algorithm choice;
     `lower` is unchanged here). Not a soundness question.
+48. **3D-7 the in-memory exchange (plan Tasks 20 and 21): the agent defaults and the flip gate**
+    (2026-10-19, branch `feat/3D-7`; agent defaults, Peter may override). (a) **The default
+    exchange is still BLIF.** The flip is its own commit, made only after `abc_diff_golden` and the
+    H1/H4 legs have recorded their per-design ratios here (I8); those are the controller's heavy
+    runs (commands in the 3D-7 report) and are not done, so the gate is not met. The flip is one
+    line in `odin3_abc_exchange_choice` (`src/passes/abc/args.c`: the default `ODIN3_ABC_EXCHANGE_BLIF`
+    becomes `_AIG`) plus the cases that name the default (`test_abc_aig`'s `test_session_commands`,
+    the "BLIF exchange" default in `abc.h`'s comment). `ODIN3_ABC_EXCHANGE=aig` selects the new
+    exchange until then; `--via-blif` and the subprocess route stay BLIF. (b) The plan's layout test
+    for `t1` says the register input is `(6, ...)`; it is the AND, so `(8, ...)` (`(9, ...)` with
+    INIT 1), and the PO of `y` is `(6, ...)` (`(7, ...)`). (c) The in-memory session lives in
+    `exchange.c` (`odin3_abc_exchange_aig`), the aligned MiniLUT in `aligned.c`, and the AIG in
+    `aig.[ch]`; `odin3_abc_aligned_build` takes `const odin3_abc_run *` so that it reads the region.
+    The AIG keeps a third map, literal variable to lowest-ID soft output net (`var_net`), which is
+    the name map's reverse index. The aligned MiniLUT has one register output per *input* register
+    (the plan's "2 register outputs" reading is the result's count; the test uses three input
+    registers, two of them merged by `scorr`, and finds three aligned register outputs and the
+    constant 0 on the third register input). (d) `odin3_abc_result_from_luts` trusts nothing in
+    `ci_from` (the 3D-2 final review's note): a result register whose PI name is not an input
+    register's `c<n>`, or repeats one, is `register J carries no input register's name`; a fanin
+    that is not an earlier PI or LUT is `a fanin is not an earlier input or LUT` and a register
+    count above the PI or PO count `more registers than inputs or outputs` (both new malformed-network
+    texts under §11's prefix). A LUT may follow a PO in the MiniLUT: objects are numbered by kind in
+    order of appearance. (e) Name-map anchors (fine provenance): `result.old_lit` carries the proven
+    MiniAIG literal per LUT object; folding remaps it and the init-1 restore flips its low bit when
+    it complements a LUT (so a restored D source stays sound). A LUT or old net that already has an
+    identity anchor, and a CI or CO net, gets no name-map anchor; only phase C moves names, and only
+    for an uncomplemented anchor. The name map is skipped under `--prov cone`, above the cap, on
+    the BLIF exchange, and on a `RESULT` or `COMMAND` failure, with the §8.2 INFO line and its
+    reason. (f) Observation outputs are not built (the spike's criterion 2 passes for the default
+    script, C8 of decision 22). (g) The fake engine gained an in-memory mode (LUTs of two inputs, an
+    inverter LUT before a complemented PO, `ci_from` by loaded PI name); its `name_map` returns
+    `RESULT`. `test_abc_splice`, `test_abc_unconn` and `test_abc_init1` run every case on both
+    exchanges; the real-engine fine-mode cases are in `test_abc_prov` (linked with the adapter's
+    sources, as `test_abc_child_real`). (h) `abc-diff` counts LUTs (`.names` with an input), FFs
+    and LUT depth from the written BLIF, prints `equivalent`, or `explain` for equivalent results
+    with a ratio more than 5% from 1 (exact integer arithmetic), and accepts `differs` and `timeout`
+    as pinned statuses in its expect list; `--keep DIR` defaults to a fresh directory under
+    `~/odin3-ws/work/abc-diff/`. (i) **Review fixes.** `abc-diff` runs all three pairs and reports the
+    worst, so a listed `error` cannot hide a `differs` of the two results. Its exit codes are the
+    project's: 0 ok, 1 differs (or a listed design that passes), 2 tool error, 4 unproven (equiv-check's
+    exit 4; only a listing of `unproven` absorbs it) or timeout, 77 ABC missing (all designs skipped);
+    the plan said 0, 1, 2 and 3 (a crash) is not produced. A LUT depth on a combinational cycle is
+    printed `n/a`. (j) A fifth no-name-map reason, `ABC: the aligned network cannot be built`, covers an
+    `INVALID_ARG` of `odin3_abc_aligned_build` (not reachable after the result's checks); the spec lists
+    four. (k) The three designs no simulator can run (`derived_clock`, `loop`, `ram_unconn`) are checked
+    against the IR cell by cell, CIs and register values random, every CO and register input compared
+    (`test_abc_aig`, `test_comb_equal_*`); they are not covered by `test_abc_pass`, which runs BLIF only.
+    (l) `cover_lit` refuses a `$sop` row with another output polarity than its first row or a plane
+    character other than `0`, `1`, `-`. (m) The init-1 restore does not flip `old_lit`: the LUT it
+    complements feeds only a register input, so it has that input's identity anchor and never a name-map
+    one. **To record before the flip:** the 19 per-design ratios and their
+    explanations (`abc_diff_golden`), and H1/H4.
+49. **`opt_merge -ffbits`: merge identical flip-flop bits before `lower`** (2026-10-19, branch
+    `feat/opt-ffbit-merge`; agent default, Peter may override; Peter's rule: where Odin III and
+    Parmys differ, match Parmys). No IR invariant and no public ABI changed. (a) **Cause**: Yosys
+    `techmap` turns a word `$dffe`/`$sdff`/`$sdffe`/... into one `$_*DFF*_` cell per bit and
+    `opt -fast` runs `opt_merge` over them (opt_merge.cc 129-130, 175-179: an FF cell's key holds
+    its type, parameters, inputs and the init of Q), so bits with the same clock, D, enable, reset,
+    polarities, reset value and equal init become one before `dffunmap`. Odin III's `lower` writes
+    enable and sync reset as a mux whose input is the bit's own Q, so afterwards no two bits are
+    identical. Triage `hardmap-big-triage.md` 3.4 and 5b B1: +14, +17, +70, +156, +14, +7, +7, +6,
+    +25 flip-flops, every latch delta that is not fsm. (b) **Design**: an option of `opt_merge`
+    (`-ffbits`, `src/passes/opt/ffbits.c`), not a change to `opt -full` or plain `opt_merge`, so the
+    Phase 2 equivalence gates are unchanged (it is off unless named). It is a flag of `opt_merge`
+    and of `opt` (`opt -ffbits`: the `opt_merge` of every loop iteration also merges FF bits). The
+    Phase 3 script `phase3_pre_abc.script` runs `opt -full -ffbits` as its last `opt`, before
+    `lower`, instead of a bare `opt_merge -ffbits` after it: measured on mkSMAdapter4B, a bare step
+    leaves 5 bits that a following `opt -full` exposes (word-level duplicates of the `$pmux` data
+    bits that only appear once the FF bits are merged), and mkDelayWorker32B stays +22 instead of
+    exactly Parmys's count; inside the loop the merge and the combinational passes reach one fixed
+    point, as Yosys's `techmap; opt -fast` does on its bit cells.
+    Per bit of every word FF (`$dff $dffe $adff $adffe $aldff $aldffe $sdff $sdffe $sdffce $dffsr
+    $dffsre` and the latches; the fine `$_DFF_*_` cells are left to the ordinary pass) the key is the
+    kind (which controls, their polarities, `ce_over_srst`), the nets of the controls, of D (or AD)
+    and SET/CLR for that bit, the bit's ARST and SRST values and its init; equal keys form a class.
+    Yosys's FF cell types after `adff2dff`/`aldff2dff` are fewer; matching on the full key is the
+    same rule and is sound for the rest. (c) **Survivor and names**: the lowest (node ID, bit), or
+    the first bit of a `keep` node; the others (of nodes without `keep`) are dropped and their Q nets
+    tied to the survivor's. Yosys walks its cell dictionary newest first and so keeps the later
+    cell; as in `opt_merge` (spec 2F row 7) the earlier survives here. Each drop is
+    `odin3_ff_emit_shrunk`: a node keeps its remaining bits as a word cell of the same kind with its
+    name and attributes (a multi-bit FF is split only as far as needed: the duplicate bits go, the
+    rest stays one cell); a node with no bit left goes; the init of a dropped Q is removed (it
+    equals the survivor's). `-keepdc` skips bits with an undefined init. (d) **Provenance**: the
+    survivor's node is rebuilt with a DERIVED record whose parents are [its own record, the records
+    of the nodes that dropped bits into it, in ID order]; a node that only loses bits takes
+    `emit_shrunk`'s DERIVED record of itself. (e) **Rounds**: a drop changes the D net of the
+    readers of the dropped Q, so FF bits, then the ordinary `opt_merge`, repeat until a round
+    drops nothing. (f) **Deviations from Yosys**: a `keep` bit that is not first of its class
+    stays separate (Yosys lets the `keep` cell survive); latches and `$dffsr` merge on the full key
+    (Yosys merges the same cells after techmap); a `keep` on the dropped Q net or wire (not the node) is
+    not protected, as in the ordinary `opt_merge`. Known cost: every `opt -ffbits` iteration rescans all FFs. (g) **Tests**: `test_opt_ffbits`, the micros
+    `tests/opt/ffbits` (equal bits merged; different init, enable, reset, reset value, polarity,
+    clock not merged) with `opt_ffbits` (counts), `opt_ffbits_yosys` (the same counts as Yosys
+    0.55's `techmap; opt -fast`) and `opt_equiv_ffbits` (`opt-equiv` on `tools/opt-check/ffbits.script`).
+    - **G1 cleared** (2026-10-19, merge gate of the review): final-script `equiv-check` (abc dsec)
+      of Odin III without vs with `opt -full -ffbits` is equivalent on all five designs:
+      or1200, mkSMAdapter4B, stereovision2, stereovision0, mkDelayWorker32B. Latches with
+      `-ffbits` equal Parmys on stereovision2 (15591), stereovision0 (11673) and
+      mkDelayWorker32B (2151) (`ffbit-merge-report.md` section 9).
+
+50. **fcheck: the `untested` verdict and the P-leg baseline defects** (Peter, 2026-10-19; branch
+    `fix/fcheck-classify`; decision 8 of the fcheck-classify review). The Verilator check of
+    the Parmys (P) leg showed 10 of 19 designs failing; 9 of the 10 are properties of the
+    Parmys flow or of the RTL, not of the harness (`fcheck-classify-report.md`).
+    - **New verdict `untested`** (the fcheck set is now pass/fail/error/capped/timeout/untested).
+      A design whose mismatches are all on bits whose RTL value depends on the initial state
+      (x in a four-state simulation: `XDEPEND`, none stable) is `untested`, exit 3 of the wrapper.
+      It is never a pass and never a failure. A stable mismatch is still `fail`. `vtr-qor run
+      --fcheck` and `fcheck` count it as incomplete (exit 3); on an Odin III leg the gate holds
+      INCOMPLETE ("cannot be judged").
+    - **The P leg is the baseline.** Each P-leg fail or untested is recorded in
+      `tests/vtr/qor/divergences.tsv` as class `baseline-fails` with text `<tag>: <reason>`
+      (tags: `D2b` subtract pad, `lost-sign-bits` duplicated sign bits in an add,
+      `dropped-latches` RTL latches the flow drops, `x-state` RTL reads undefined state). The
+      table shows the cell as `fail (baseline: D2b)`, never as a pass. The milestone gate judges
+      fcheck only on Odin III's legs (P', O, O', R as applicable); a P-leg baseline defect does
+      not fail the gate. An Odin III fcheck fail still needs its own row (or a P fail with a
+      `baseline-fails` row, as before; an untested P now counts like a fail there).
+
+53. **Parity scope after the goals statement** (Peter, 2026-10-19). Peter: Odin III "needs to be
+    compatible with modern VTR and Stratix, but doesn't neccessarily need to be right there with
+    Parmsys"; "yes to all the recommendations". Comparable results with Parmys (goal 1 of
+    D10's follow-up 2) is the target, not parity.
+    - The Phase 3 QoR gate stays the loose gate of decision 3(b) (geomean O/P at most 1.20, no
+      design over 1.50). It is not tightened.
+    - The three parity lanes already running finish and merge on their own gates: FF bit merge
+      (decision 49), `wreduce` order (51) and `opt_share` widened to Yosys (52). No new
+      Parmys-parity work starts after them. A QoR gap that stays inside the gate is recorded,
+      not chased.
+    - Correctness is unchanged: a real counterexample is a bug, unprovable designs are
+      `untested`, and Odin III/Parmys differences under `--vtr-compat` still match Parmys with a
+      WARNING.
 
 51. **`wreduce` visits an operand before its consumer: amendment of 3G WR-7** (Peter, 2026-10-19;
     branch `feat/wreduce-order`; triage item B3 of `hardmap-big-triage`). Yosys's `wreduce` result

@@ -54,6 +54,7 @@ typedef struct fake {
     char extra[NAME_BYTES * 2]; /* a command run just before every write_hie */
     odin3_abc_fail fail;
     bool open;
+    int map_mode; /* odin3_abc_fake_name_map */
 } fake;
 
 static fake fk;
@@ -528,31 +529,249 @@ static odin3_status fake_exec(void *self, const char *command, odin3_abc_fail *f
     return st;
 }
 
-static odin3_status fake_unsupported(odin3_abc_fail *fail) {
+static odin3_status fake_fail_result(odin3_abc_fail *fail, const char *text) {
     fail->kind = ODIN3_ABC_FAIL_RESULT;
     fail->code = 0;
-    (void)snprintf(fail->text, sizeof fail->text, "the fake engine has no in-memory exchange yet");
+    (void)snprintf(fail->text, sizeof fail->text, "%s", text);
     return ODIN3_ERR_ENGINE;
+}
+
+/* --- the in-memory exchange ---------------------------------------------------------------- */
+
+enum {
+    MINI_NULL = 0x7FFFFFFF,
+    MINI_NULL2 = 0x7FFFFFFE,
+    MAX_OBJS = 2 * MAX_NODES + 4 * MAX_PORTS,
+    LUT_SIZE = 2,
+    TABLE_FULL = 0xF,
+    TABLE_NOT = 0x1,
+    WORD_BITS = 32
+};
+
+/* The two literals of loaded object obj. */
+static int32_t aig_first(const odin3_abc_aig *aig, uint32_t obj) {
+    return aig->objs[(size_t)2 * obj];
+}
+
+static int32_t aig_second(const odin3_abc_aig *aig, uint32_t obj) {
+    return aig->objs[((size_t)2 * obj) + 1U];
+}
+
+/* n of a name "c<n>" (the PIs of a loaded AIG). */
+static int32_t name_index(const char *name) {
+    return (int32_t)strtol(name + 1, NULL, 10);
+}
+
+/* The loaded MiniAIG object (index) -> the fake node, and the literal converted. */
+static uint32_t aig_node[MAX_OBJS];
+static uint32_t aig_obj_of_node[MAX_NODES]; /* the loaded object of a node, UINT32_MAX for none */
+static int32_t lut_lit[MAX_OBJS];           /* per emitted LUT: its loaded AIG literal or -1 */
+static uint32_t n_lut_lit;
+
+static uint32_t aig_lit(int32_t lit) {
+    return 2U * aig_node[(uint32_t)lit >> 1] + ((uint32_t)lit & 1U);
+}
+
+/* Reads the PIs and ANDs of aig; returns the first object that is a PO (n_objs when none). */
+static void load_nodes(const odin3_abc_aig *aig, uint32_t pis) {
+    uint32_t real = pis - aig->n_regs;
+    uint32_t pi = 0;
+    memset(aig_obj_of_node, 0xFF, sizeof aig_obj_of_node);
+    aig_node[0] = new_node(K_CONST, "const0");
+    for (uint32_t obj = 1; obj < aig->n_objs; obj++) {
+        int32_t lit0 = aig_first(aig, obj);
+        int32_t lit1 = aig_second(aig, obj);
+        char name[NAME_BYTES];
+        if (lit0 == MINI_NULL) {
+            (void)snprintf(name, NAME_BYTES, "c%u", (unsigned)pi);
+            aig_node[obj] = new_node(pi < real ? K_PI : K_LATCH, name);
+            if (pi < real) {
+                add_port_name(&fk.pis[fk.n_pis++], name);
+            } else {
+                fk.latches[fk.n_latches++] = aig_node[obj];
+            }
+            pi++;
+        } else if (lit1 != MINI_NULL) {
+            uint32_t node = new_node(K_AND, "");
+            fk.nodes[node].fan0 = aig_lit(lit0);
+            fk.nodes[node].fan1 = aig_lit(lit1);
+            aig_node[obj] = node;
+            aig_obj_of_node[node] = obj;
+        }
+    }
 }
 
 static odin3_status fake_load_aig(void *self, const odin3_abc_aig *aig, odin3_abc_fail *fail) {
     (void)self;
-    (void)aig;
-    return fake_unsupported(fail);
+    uint32_t pis = 0;
+    uint32_t pos = 0;
+    for (uint32_t obj = 1; obj < aig->n_objs; obj++) {
+        pis += aig_first(aig, obj) == MINI_NULL ? 1U : 0U;
+        pos += aig_first(aig, obj) != MINI_NULL && aig_second(aig, obj) == MINI_NULL ? 1U : 0U;
+    }
+    if (aig->n_objs >= MAX_OBJS || pis > MAX_PORTS || pos > MAX_PORTS || aig->n_regs > pis ||
+        aig->n_regs > pos) {
+        return fake_fail_result(fail, "the fake engine cannot hold this AIG");
+    }
+    reset_network();
+    load_nodes(aig, pis);
+    uint32_t po = 0;
+    for (uint32_t obj = 1; obj < aig->n_objs; obj++) {
+        if (aig_first(aig, obj) == MINI_NULL || aig_second(aig, obj) != MINI_NULL) {
+            continue;
+        }
+        uint32_t lit = aig_lit(aig_first(aig, obj));
+        if (po < pos - aig->n_regs) {
+            (void)snprintf(fk.pos[fk.n_pos].name, NAME_BYTES, "co%u", (unsigned)po);
+            fk.pos[fk.n_pos++].lit = lit;
+        } else {
+            fk.nodes[fk.latches[po - (pos - aig->n_regs)]].fan0 = lit;
+        }
+        po++;
+    }
+    return ODIN3_OK;
+}
+
+/* The MiniLUT of the network, in static arrays. */
+static int32_t out_fanins[MAX_OBJS * LUT_SIZE];
+static uint32_t out_truths[MAX_OBJS];
+static int32_t out_ci_from[MAX_PORTS * 2];
+static uint32_t out_objs;
+static uint32_t out_node[MAX_NODES]; /* node -> MiniLUT object (PIs, kept latches, used ANDs) */
+
+static uint32_t out_push(const int32_t *fanins, uint32_t table) {
+    uint32_t obj = out_objs++;
+    for (uint32_t slot = 0; slot < LUT_SIZE; slot++) {
+        out_fanins[((size_t)obj * LUT_SIZE) + slot] = fanins != NULL ? fanins[slot] : MINI_NULL;
+    }
+    out_truths[obj] = table;
+    return obj;
+}
+
+/* A 2-input table (bits 0..3) replicated over the word. */
+static uint32_t replicate(uint64_t table) {
+    uint32_t word = 0;
+    for (uint32_t at = 0; at < WORD_BITS; at += 4U) {
+        word |= (uint32_t)(table & TABLE_FULL) << at;
+    }
+    return word;
+}
+
+static void emit_ands(const bool *used) {
+    int lut_index = 0;
+    for (uint32_t id = 1; id < fk.n_nodes; id++) {
+        if (!used[id]) {
+            continue;
+        }
+        const uint32_t fan[2] = {resolve(fk.nodes[id].fan0), resolve(fk.nodes[id].fan1)};
+        uint64_t table = and_table(fan);
+        if (fk.const_lut == lut_index++) {
+            table = fk.const_value != 0 ? TABLE_FULL : 0U;
+        }
+        int32_t objs[LUT_SIZE] = {(int32_t)out_node[fan[0] >> 1], (int32_t)out_node[fan[1] >> 1]};
+        out_node[id] = out_push(objs, replicate(table));
+        lut_lit[n_lut_lit++] =
+            aig_obj_of_node[id] == UINT32_MAX ? -1 : (int32_t)(2U * aig_obj_of_node[id]);
+    }
+}
+
+/* One PO: an inverter LUT first when the driver is complemented and not a constant. */
+static void emit_po(uint32_t lit) {
+    lit = resolve(lit);
+    uint32_t drv = out_node[lit >> 1];
+    if ((lit >> 1) == 0) {
+        drv = lit & 1U;
+    } else if ((lit & 1U) != 0) {
+        int32_t one[LUT_SIZE] = {(int32_t)drv, MINI_NULL};
+        drv = out_push(one, replicate(TABLE_NOT));
+        lut_lit[n_lut_lit++] = -1;
+    }
+    int32_t fan[LUT_SIZE] = {(int32_t)drv, MINI_NULL2};
+    (void)out_push(fan, 0);
+}
+
+/* The PIs (real inputs first, in the order loaded), then the kept latches; ci_from is the index
+ * each was loaded with (its name is c<n>). */
+static void emit_inputs(void) {
+    uint32_t pi = 0;
+    for (uint32_t node = 1; node < fk.n_nodes; node++) {
+        if (fk.nodes[node].kind == K_PI) {
+            out_ci_from[pi++] = name_index(fk.nodes[node].name);
+            out_node[node] = out_push(NULL, 0);
+        }
+    }
+    for (uint32_t i = 0; i < fk.n_latches; i++) {
+        const fnode *latch = &fk.nodes[fk.latches[i]];
+        if (latch->rep == LIT_NONE) {
+            out_ci_from[pi++] = name_index(latch->name);
+            out_node[fk.latches[i]] = out_push(NULL, 0);
+        }
+    }
 }
 
 static odin3_status fake_get_luts(void *self, odin3_abc_luts *luts, odin3_abc_fail *fail) {
     (void)self;
-    (void)luts;
-    return fake_unsupported(fail);
+    (void)fail;
+    run_extra();
+    static bool used[MAX_NODES];
+    memset(used, 0, sizeof used);
+    for (uint32_t i = 0; i < fk.n_pos; i++) {
+        mark_cone(fk.pos[i].lit, used);
+    }
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < fk.n_latches; i++) {
+        if (fk.nodes[fk.latches[i]].rep == LIT_NONE) {
+            mark_cone(fk.nodes[fk.latches[i]].fan0, used);
+            kept++;
+        }
+    }
+    out_objs = 0;
+    n_lut_lit = 0;
+    (void)out_push(NULL, 0);          /* constant 0 */
+    (void)out_push(NULL, UINT32_MAX); /* constant 1 */
+    emit_inputs();
+    emit_ands(used);
+    for (uint32_t i = 0; i < fk.n_pos; i++) {
+        emit_po(fk.pos[i].lit);
+    }
+    for (uint32_t i = 0; i < fk.n_latches; i++) {
+        if (fk.nodes[fk.latches[i]].rep == LIT_NONE) {
+            emit_po(fk.nodes[fk.latches[i]].fan0);
+        }
+    }
+    *luts = (odin3_abc_luts){out_fanins, out_truths, out_ci_from, out_objs, kept, LUT_SIZE};
+    return ODIN3_OK;
+}
+
+static int32_t out_lits[MAX_OBJS];
+
+/* The map of mode FAKE_MAP_LITS: each LUT of the aligned MiniLUT (they keep the order of the
+ * result's) gets the literal of the loaded AND it was made from, -1 for an inverter LUT. */
+static void fill_lits(const odin3_abc_luts *aligned) {
+    uint32_t next = 0;
+    for (uint32_t obj = 0; obj < aligned->n_objs; obj++) {
+        const int32_t *fan = aligned->fanins + ((size_t)aligned->lut_size * obj);
+        bool is_lut = obj >= 2U && fan[0] != MINI_NULL && fan[1] != MINI_NULL2;
+        out_lits[obj] = is_lut && next < n_lut_lit ? lut_lit[next] : -1;
+        next += is_lut ? 1U : 0U;
+    }
 }
 
 static odin3_status fake_name_map(void *self, const odin3_abc_luts *aligned, const int32_t **lits,
                                   odin3_abc_fail *fail) {
     (void)self;
-    (void)aligned;
-    (void)lits;
-    return fake_unsupported(fail);
+    if (fk.map_mode == ODIN3_FAKE_MAP_LITS && aligned->n_objs < MAX_OBJS) {
+        fill_lits(aligned);
+        *lits = out_lits;
+        return ODIN3_OK;
+    }
+    if (fk.map_mode == ODIN3_FAKE_MAP_COMMAND) {
+        fail->kind = ODIN3_ABC_FAIL_COMMAND;
+        fail->code = 1;
+        (void)snprintf(fail->text, sizeof fail->text, "the fake name map command failed");
+        return ODIN3_ERR_ENGINE;
+    }
+    return fake_fail_result(fail, "the fake engine has no name map");
 }
 
 static void fake_close(void *self) {
@@ -600,4 +819,8 @@ void odin3_abc_fake_fail_on(const char *word, odin3_abc_fail fail) {
 
 void odin3_abc_fake_extra(const char *command) {
     (void)snprintf(fk.extra, sizeof fk.extra, "%s", command == NULL ? "" : command);
+}
+
+void odin3_abc_fake_name_map(int mode) {
+    fk.map_mode = mode;
 }

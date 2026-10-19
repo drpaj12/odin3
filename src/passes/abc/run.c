@@ -112,6 +112,7 @@ void odin3_abc_run_destroy(odin3_abc_run *run) {
         remove_temp_dir(run);
     }
     odin3_abc_script_free(&run->script);
+    odin3_abc_aig_free(&run->aig);
     odin3_vec_free(&run->gates);
     odin3_u64map_destroy(run->gate_index);
     odin3_strbuf_free(&run->lines);
@@ -277,11 +278,6 @@ static odin3_status startup_checks(odin3_abc_run *run) {
     if (run->route == ODIN3_ABC_ROUTE_CHILD) {
         run->exchange = ODIN3_ABC_EXCHANGE_BLIF; /* the subprocess always uses the BLIF exchange */
     }
-    if (run->exchange == ODIN3_ABC_EXCHANGE_AIG) {
-        odin3_log(ODIN3_LOG_ERROR, "abc: the in-memory exchange is not available yet; use "
-                                   "--via-blif or unset ODIN3_ABC_EXCHANGE");
-        return ODIN3_ERR_INVALID_ARG;
-    }
     st = odin3_abc_check_views(run->design);
     st = st == ODIN3_OK ? open_log(run) : st;
     st = st == ODIN3_OK ? make_given_dir(run) : st;
@@ -384,9 +380,11 @@ static void log_run_info(const odin3_abc_run *run, const odin3_abc_result *res,
     char domain[DOMAIN_TEXT_BYTES];
     odin3_abc_domain_text(run->module, run->domain, domain, sizeof domain);
     result_shape shape = shape_of(res);
-    odin3_log(ODIN3_LOG_INFO, "abc: module '%s', %s: no name map (%s); provenance uses cut cones",
-              module_text(run), domain,
-              run->opts.prov == ODIN3_ABC_PROV_CONE ? "--prov cone" : "BLIF exchange");
+    if (run->nomap_reason[0] != '\0') {
+        odin3_log(ODIN3_LOG_INFO,
+                  "abc: module '%s', %s: no name map (%s); provenance uses cut cones",
+                  module_text(run), domain, run->nomap_reason);
+    }
     odin3_log(ODIN3_LOG_INFO,
               "abc: module '%s', %s: %u cells and %u flip-flops -> %u LUTs (at most %u inputs, "
               "depth %u) and %u flip-flops, %.1f ms in ABC",
@@ -400,8 +398,14 @@ static odin3_status map_region(odin3_abc_run *run) {
     odin3_abc_result result;
     odin3_abc_result_init(&result);
     double start = now_ms();
+    bool in_memory = run->exchange == ODIN3_ABC_EXCHANGE_AIG;
+    (void)snprintf(run->nomap_reason, sizeof run->nomap_reason, "%s",
+                   run->opts.prov == ODIN3_ABC_PROV_CONE ? "--prov cone" : "BLIF exchange");
     odin3_status st = check_caps(run, run->region);
-    st = st == ODIN3_OK ? odin3_abc_exchange_blif(run, &result) : st;
+    if (st == ODIN3_OK) {
+        st = in_memory ? odin3_abc_exchange_aig(run, &result)
+                       : odin3_abc_exchange_blif(run, &result);
+    }
     double spent = now_ms() - start;
     st = st == ODIN3_OK ? odin3_abc_result_fold(&result) : st;
     odin3_abc_splice_stats stats = {0};
@@ -410,6 +414,7 @@ static odin3_status map_region(odin3_abc_run *run) {
         log_run_info(run, &result, &stats, spent);
     }
     odin3_abc_result_free(&result);
+    odin3_abc_aig_free(&run->aig);
     return st;
 }
 

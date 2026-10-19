@@ -144,7 +144,8 @@ static odin3_status move_anchored_nets(splice *sp) {
     odin3_status first = ODIN3_OK;
     for (size_t at = 0; at < sp->anchors.len; at++) {
         const odin3_abc_anchor *an = odin3_vec_cat(&sp->anchors, at);
-        if (an->kind != ODIN3_ABC_ANCHOR_REG_IN || an->complemented || !movable(sp, an->old_net)) {
+        bool names = an->kind == ODIN3_ABC_ANCHOR_REG_IN || an->kind == ODIN3_ABC_ANCHOR_NAMEMAP;
+        if (!names || an->complemented || !movable(sp, an->old_net)) {
             continue;
         }
         odin3_net_id target = object_net_now(sp, an->obj);

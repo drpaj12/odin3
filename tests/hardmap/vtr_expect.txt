@@ -45,6 +45,9 @@ bgm.v D2b Parmys ties the b pad of a `$sub` chain to unconn, Odin III to vcc (sp
 
 # The 11 designs without a line (raygentop, boundtop, mkSMAdapter4B, or1200, stereovision0/1/2,
 # mkDelayWorker32B, LU8PEEng, mcml, LU32PEEng; run 2026-10-19, all counts-differ, causes in
-# hardmap-big-triage.md: fsm, bit-level flip-flop merge, opt_share, wreduce order) have no line:
+# hardmap-big-triage.md: fsm, bit-level flip-flop merge, opt_share, wreduce order) have no line.
+# Since PHASE3 #49 (opt -full -ffbits) the latch count of or1200, stereovision0, stereovision2 and
+# mkDelayWorker32B equals Parmys's and mkSMAdapter4B is +4 (bit-level opt_dff); counts only, no
+# line added here, the next sweep decides:
 # an unlisted `differs`, `unproven` or `counts-differ` fails the sweep, which is the safe
 # direction. Add a line for each only from its run (the commands are in PHASE3 #42).
