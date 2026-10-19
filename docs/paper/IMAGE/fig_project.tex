@@ -37,7 +37,7 @@
   \node[fit=(rh)(f1)(f8), inner sep=0pt, draw=o3blue8, line width=0.7pt] (rec) {};
 
   % ---- the readers of the record ------------------------------------------------------------
-  \node[use, inprog]  (rv) at (1.05, -5.0) {{\scriptsize\odintt{read\_verilog}}\\\odinsub{preprocess, parse,\\[-2pt]elaborate}};
+  \node[use, built]  (rv) at (1.05, -5.0) {{\scriptsize\odintt{read\_verilog}}\\\odinsub{preprocess, parse,\\[-2pt]elaborate}};
   \node[use, built]   (rt) at (3.25, -5.0) {{\scriptsize\odintt{read\_techlib}}\\\odinsub{\odintt{.o3lib}, 1G}};
   \node[use, planned] (pm) at (5.45, -5.0) {{\scriptsize\odintt{partial\_map}}\\\odinsub{Phase 4}};
   \node[use, built]   (dp) at (7.65, -5.0) {{\scriptsize\odintt{dump\_project}}\\\odinsub{JSON: the corpus\\[-2pt]oracle record}};
