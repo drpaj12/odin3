@@ -1304,6 +1304,20 @@ then the options considered.
       not fail the gate. An Odin III fcheck fail still needs its own row (or a P fail with a
       `baseline-fails` row, as before; an untested P now counts like a fail there).
 
+53. **Parity scope after the goals statement** (Peter, 2026-10-19). Peter: Odin III "needs to be
+    compatible with modern VTR and Stratix, but doesn't neccessarily need to be right there with
+    Parmsys"; "yes to all the recommendations". Comparable results with Parmys (goal 1 of
+    D10's follow-up 2) is the target, not parity.
+    - The Phase 3 QoR gate stays the loose gate of decision 3(b) (geomean O/P at most 1.20, no
+      design over 1.50). It is not tightened.
+    - The three parity lanes already running finish and merge on their own gates: FF bit merge
+      (decision 49), `wreduce` order (51) and `opt_share` widened to Yosys (52). No new
+      Parmys-parity work starts after them. A QoR gap that stays inside the gate is recorded,
+      not chased.
+    - Correctness is unchanged: a real counterexample is a bug, unprovable designs are
+      `untested`, and Odin III/Parmys differences under `--vtr-compat` still match Parmys with a
+      WARNING.
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this

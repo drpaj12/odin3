@@ -43,8 +43,10 @@ The status shown is as of 2026-10-19 (v1.0 scope: ADR D10, PHASE4):
   exchange), `write_blif --vtr` with provenance names, and the QoR harness `vtr-qor`.
 - **In progress:** the in-memory ABC exchange (3D-7, 3D-8), Parmys-matching refinements, and the
   M2 and M3 exit runs.
-- **Planned:** Phase 4 (VTR architectures and the Cyclone V LPM target) and Phase 7.
-- **Deferred:** Phase 5 (slang, GHDL). **Removed from v1.0:** Phase 6 (`raise`, RE scorecard,
+- **Planned (D11):** Phase 4 (VTR architectures and FSM), Phase 5 (outputs and read-back, LPM),
+  Phase 6 (analysis flow and provenance) and Phase 7 (release). The paper body still uses D10's
+  numbering until its next refresh.
+- **After v1.0 (D11):** old Phase 5 (slang, GHDL). **Removed from v1.0:** old Phase 6 (`raise`, RE scorecard,
   VQM/EDIF, Altera `bind`, Titan), kept as the design in the "Reverse Engineering" section.
 
 When the status changes, update the `built`/`inprog`/`spec`/`planned` keys in the figures, the
