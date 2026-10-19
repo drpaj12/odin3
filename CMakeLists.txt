@@ -125,6 +125,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/wreduce.c
     src/passes/opt/wreduce_op.c
     src/passes/opt/wreduce_ff.c
+    src/passes/opt/wreduce_order.c
     src/passes/opt/reduce.c
     src/passes/opt/share.c
     src/passes/opt/dff.c

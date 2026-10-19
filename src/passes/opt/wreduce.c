@@ -4,9 +4,10 @@
  * pre-step and the operator rules) and wreduce_ff.c (muxes, flip-flops, latches).
  *
  * Order (WR-7). Yosys visits the cells of a round in the order their names were first interned,
- * and a rewritten cell keeps its name. A rebuilt Odin III node has a new ID, so each node carries
- * a rank, the ID of the node it descends from, and a round is sorted by rank: the same order as
- * Yosys's on an RTLIL file written in node-ID order. No hash order reaches the IR.
+ * and a rewritten cell keeps its name. Its front end creates an operand's cell before the cell
+ * that consumes it, so the initial rank of a node is its place in an operand-first post-order of
+ * the net graph (wreduce_order.c). A rebuilt Odin III node has a new ID, so it inherits the rank
+ * of the node it descends from, and a round is sorted by rank. No hash order reaches the IR.
  *
  * Nets. Yosys's work_queue_bits are SigBits, which a later connect redirects; here a changed net
  * that is merged away is followed through `fwd` (a net that wreduce merged into another) to the
@@ -480,6 +481,7 @@ static odin3_status module_run(wr_state *ws) {
     odin3_status st = module_budget(ws);
     st = st == ODIN3_OK ? odin3_opt_canon_consts(ws->oc) : st;
     st = st == ODIN3_OK ? prepare(ws) : st;
+    st = st == ODIN3_OK ? wr_order_ranks(ws) : st;
     const uint32_t end = odin3_module_node_end(ws->m);
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
         if (odin3_node_live(ws->m, (odin3_node_id){id})) {
