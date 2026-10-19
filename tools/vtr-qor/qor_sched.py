@@ -1578,18 +1578,23 @@ def _gunzip(src: Path, dst: Path) -> None:
     os.replace(tmp, dst)
 
 
+FCHECK_STAGING = "fcheck-in"
+
+
 def _fcheck_netlist(job: Job) -> Path | str:
-    """The netlist the check reads: P's kept ``.gz`` decompressed into ``<J>/fcheck/``, another
-    leg's kept ``run/<d>.pre-vpr.blif``; else E-QH10-style text saying why there is none."""
+    """The netlist the check reads: P's kept ``.gz`` decompressed into ``<J>/fcheck-in/`` (NOT
+    ``<J>/fcheck``: ``run_random_check.py`` wipes its ``--work-dir`` first; and not ``run/``, where
+    ``_done`` takes an uncompressed ``<d>.pre-vpr.blif`` for an interrupted P job), another leg's
+    kept ``run/<d>.pre-vpr.blif``; else E-QH10-style text saying why there is none."""
     name = f"{job.design}.pre-vpr.blif"
     if job.leg == "P":
         gz = job.job_dir / "run" / (name + ".gz")
         if not _regular(gz):
             return f"fcheck: {_label(job)}: no kept netlist ({gz.name} is missing)"
-        work = job.job_dir / "fcheck"
-        work.mkdir(exist_ok=True)
-        _gunzip(gz, work / name)
-        return work / name
+        staging = job.job_dir / FCHECK_STAGING
+        staging.mkdir(exist_ok=True)
+        _gunzip(gz, staging / name)
+        return staging / name
     kept = job.job_dir / "run" / name
     if not _regular(kept):
         return f"fcheck: {_label(job)}: no kept netlist (run with --keep-netlists)"
@@ -1636,18 +1641,23 @@ def run_fcheck(job: Job, opts: RunOptions, verilator_j: int) -> str:
     the verified heavy run and the job cgroup. Its verdict (``pass``, ``fail``, ``error``,
     ``capped``, ``timeout``) goes to ``metrics.json`` ``verdicts.fcheck``. ``<J>/fcheck`` is
     removed on
-    ``pass`` and kept otherwise; ``<J>/fcheck.log`` stays."""
+    ``pass`` and kept otherwise; ``<J>/fcheck.log`` stays. The staged netlist of P lives in
+    ``<J>/fcheck-in`` and is removed in every outcome."""
     scope = _heavy_scope(opts)
     if job.ctx is None:
         raise HeavyError(EXIT_USAGE, f"{_label(job)}: fcheck needs a planned job")
     work = job.job_dir / "fcheck"
-    netlist = _fcheck_netlist(job)
-    if isinstance(netlist, str):
-        _emit(opts, netlist)
-        verdict = "error"
-    else:
-        cmd = qor_legs.fcheck_command(job.ctx, job.design, netlist, verilator_j)
-        verdict = _fcheck_outcome(job, cmd, opts, scope)
+    staging = job.job_dir / FCHECK_STAGING
+    try:
+        netlist = _fcheck_netlist(job)
+        if isinstance(netlist, str):
+            _emit(opts, netlist)
+            verdict = "error"
+        else:
+            cmd = qor_legs.fcheck_command(job.ctx, job.design, netlist, verilator_j)
+            verdict = _fcheck_outcome(job, cmd, opts, scope)
+    finally:
+        qor_heavy.safe_rmtree(staging, job_out_root(job))  # in every outcome
     record_verdict(job, "fcheck", verdict)
     if verdict == "pass":
         qor_heavy.safe_rmtree(work, job_out_root(job))

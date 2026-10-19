@@ -882,14 +882,21 @@ class RunOrderTest(RunnerTestBase):
 
 
 FAKE_RANDOM_CHECK = """
-import json, sys, time
+import json, shutil, sys, time
 from pathlib import Path
 here = Path(__file__).resolve().parent
 mode = json.loads((here / "mode.json").read_text())
 args = sys.argv[1:]
 net = Path(args[args.index("--post-synth-blif") + 1])
 work = Path(args[args.index("--work-dir") + 1])
-work.mkdir(parents=True, exist_ok=True)
+# As VTR's run_random_check.py build_work_dir: the work dir is wiped first, so a netlist staged
+# inside it is gone and yosys fails "File ... not found" (exit 2 here).
+if work.exists():
+    shutil.rmtree(work)
+work.mkdir(parents=True)
+if not net.is_file():
+    sys.stderr.write(f"File {net} not found\\n")
+    sys.exit(2)
 (work / "marker.txt").write_text("work\\n")
 with (here / "calls.jsonl").open("a") as log:
     log.write(json.dumps({"argv": args, "netlist": net.read_text(), "t0": time.time()}) + "\\n")
@@ -956,7 +963,7 @@ class FcheckTest(RunnerTestBase):
 
     def test_fcheck_command(self) -> None:
         ctx = self.legctx("sha", "P", "A")
-        netlist = ctx.job_dir / "fcheck" / "sha.pre-vpr.blif"
+        netlist = ctx.job_dir / "fcheck-in" / "sha.pre-vpr.blif"
         cmd = qor_legs.fcheck_command(ctx, "sha", netlist, 2)
         self.assertEqual(list(cmd.argv), [
             sys.executable, f"{self.vtr}/mosaic/verilator_check/run_random_check.py",
@@ -1008,8 +1015,26 @@ class FcheckTest(RunnerTestBase):
         (call,) = self.calls()
         argv = call["argv"]
         self.assertEqual(argv[argv.index("--post-synth-blif") + 1],
-                         str(job.job_dir / "fcheck" / "sha.pre-vpr.blif"))
+                         str(job.job_dir / "fcheck-in" / "sha.pre-vpr.blif"))
+        self.assertEqual(argv[argv.index("--work-dir") + 1], str(job.job_dir / "fcheck"))
         self.assertEqual(call["netlist"], ".model sha\n.names a b\n11 1\n.end\n")
+
+    def test_fcheck_staging_outside_the_work_dir(self) -> None:
+        """The checker wipes its --work-dir first (fake mirrors run_random_check.py): the staged
+        netlist survives that, is removed in every outcome, and never lands in run/."""
+        for code, verdict in ((0, "pass"), (1, "fail"), (2, "error")):
+            self.mode({"exit": code})
+            job = self.finished("sha")
+            self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), verdict)
+            self.assertFalse((job.job_dir / "fcheck-in").exists(), verdict)
+            self.assertFalse((job.job_dir / "run" / "sha.pre-vpr.blif").exists())
+        # a check killed by the deadline or an exception in the runner also leaves no staging
+        self.mode({"exit": 0})
+        job = self.finished("diffeq1")
+        with mock.patch.object(qor_sched, "_fcheck_outcome", side_effect=RuntimeError("boom")), \
+                self.assertRaises(RuntimeError):
+            qor_sched.run_fcheck(job, self.opts(), 2)
+        self.assertFalse((job.job_dir / "fcheck-in").exists())
 
     def test_fcheck_other_leg_needs_kept_netlist(self) -> None:
         job = self.finished("sha", leg="O", gz=False)
