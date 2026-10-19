@@ -387,6 +387,8 @@ static bool set_flag(odin3_bytes word, rv_args *out) {
         out->elab.nomem2reg = true;
     } else if (odin3_pass_arg_is(word, "--auto-blackbox")) {
         out->elab.auto_blackbox = true;
+    } else if (odin3_pass_arg_is(word, "-icells") || odin3_pass_arg_is(word, "--icells")) {
+        out->elab.icells = true;
     } else if (odin3_pass_arg_is(word, "--vtr-compat")) {
         out->elab.vtr_compat = true;
     } else {
@@ -398,6 +400,13 @@ static bool set_flag(odin3_bytes word, rv_args *out) {
 /* --lib reads and keeps; it elaborates nothing, so --auto-blackbox (a design read's option) has
  * nothing to act on and is refused rather than silently dropped. */
 static odin3_status check_lib_args(const rv_args *args) {
+    if (args->elab.icells && (args->lib || args->parse_only)) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: -icells cannot be combined with %s (it is an option of the "
+                  "design read)",
+                  args->lib ? "--lib" : "--parse-only");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     if (args->lib && args->elab.auto_blackbox) {
         odin3_log(ODIN3_LOG_ERROR,
                   "read_verilog: --lib cannot be combined with --auto-blackbox (it is an option of "
@@ -600,14 +609,15 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
 const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog",
     "read_verilog [--parse-only] [--lib] [--nolatches] [--nomem2reg] [--auto-blackbox] "
-    "[--vtr-compat] [<file>...]: "
+    "[--vtr-compat] [-icells] [<file>...]: "
     "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
     "libraries; --parse-only keeps it (write_verilog_ast prints it), otherwise elaboration (2D) "
     "follows: --nolatches makes unassigned paths of combinational blocks x, --nomem2reg keeps "
     "memories unless forced, --auto-blackbox makes an undefined module a black box, --vtr-compat "
     "reads a non-constant `initial x = e;` as `assign x = e;` as Parmys does (a warning each); "
-    "--lib keeps "
+    "-icells (or --icells) reads an instance of a `$` cell type as that registered cell, as Yosys "
+    "does; --lib keeps "
     "the modules as library units for later reads (elaborated, under this read's --nolatches, "
     "--nomem2reg and --vtr-compat, only where a later design instantiates them)",
     read_verilog_run,

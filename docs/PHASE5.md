@@ -130,3 +130,38 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
    `lpm-check` has the BLIF leg (write, read, write identical, `netlist-compare` identical with
    `.blackbox` stubs from the `.o3lib`). Docs: 1C amendment, 3E note, `writer.h`, `reader.h`,
    `attrs.h`. The IR is not changed.
+9. **5.2 `read_verilog -icells` implemented** (agent defaults, 2026-10-20; Peter may override; spec
+   `docs/specs/2026-10-20-5.2-icells-design.md` v1.1 section 12 has the eleven questions with
+   recommendations, section 13 what the implementation changed; plan
+   `docs/plans/2026-10-20-5.2-icells-plan.md`). No IR, ABI, ADR or Verilog-without-`-icells` change.
+   - the option is `-icells` and `--icells`; an instance of a `$` name is that registered cell (item 0
+     of EL-6, before the module chain, so no stub or module shadows it; an info line when one exists);
+     every registered type but module, port and process may be instantiated, not only the ones the
+     writer emits as instances; an unregistered `$` name is an error, also with `--auto-blackbox`;
+     refused with `--lib` and `--parse-only`;
+   - widths are strict for these instances (an error, not the resize warning), parameter kinds are
+     checked, a string given to a BITS parameter is its bytes and `""` the empty value (the writer's
+     spelling), and the type's `verify` failure is located on the instance;
+   - the round trip is `tools/icells-check`; what each level proves (review H1): `-icells` is exercised
+     where a `$` instance exists in the written Verilog, i.e. the word and LPM levels and the `inst`
+     level (hand-written netlists, one per cell type the writer emits as an instance: 16 types, each
+     required by file name). At the gate and LUT levels no `$` instance exists (every cell is an assign
+     or an always block), so they prove the plain Verilog read-back of the writer's output (equivalent
+     by `equiv-check` on BLIF), also a 5.2 requirement, not `-icells`. Equivalence: the RTLIL Checker
+     (word, LPM, inst) or `equiv-check` (gate, LUT); fixpoint: cell census plus a per-cell signature
+     (type, parameters, widths, wiring up to renaming); instances: type, name, parameters, pins; the
+     report counts the `$` instances read via `-icells` and the library instances;
+   - tests: `test_icells` (21 cases), `test_icells_roundtrip` (16 instance types), `python_tools` (the
+     tool's unit tests and an end-to-end mutated read-back per leg), CTests `icells_inst`,
+     `icells_insttext`, `icells_cells_word/lpm`, `icells_lpm_cells/soft`, `icells_plain_gate/lut`
+     (default set, about 40 s) and `icells_micros_<level>` over the 68 micros (label `sweep`, run with
+     `ctest --test-dir build/debug -R icells_micros`; nothing in heavy-run). CI has no Yosys 0.55, so
+     the CTests that need it are local-only; CI runs `test_icells`, `test_icells_roundtrip` and
+     `python_tools` (its end-to-end tests skip without Yosys 0.55);
+   - `-icells` also reads a `$sop` COVER parameter from the writer's quoted rows, and a user module
+     named `$x` that is not a registered type still resolves as a module;
+   - documented exceptions, none silent (spec X-9 to X-13, `tests/icells/expect.txt`): `always`
+     storage has no text fixpoint; `multiply_hard_block.v` at gate/LUT (the read-back of the written stub is refused by `write_blif --vtr`; passes without the stub; cause not confirmed); `$pow` is
+     unproven by Yosys and `lower` cannot take it; `$memrd`/`$memwr` have no RTLIL form (text legs only);
+   - `lpm-check` keeps `noroundtrip altsyncram_soft.v` (the text fixpoint of X-9); `icells-check`
+     covers that micro at the LPM level.

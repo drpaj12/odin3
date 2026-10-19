@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""A stand-in for odin3 in tests/tools/test_icells_check.py: runs the real one ($ODIN3_CLI) and then
+damages one file of the read-back as $ICELLS_MUTATE says, so the leg that watches the file must
+fail (5.2 review L3): read (exit 1 on the first read-back), instances (a parameter of W2.v),
+fixpoint (a parameter in the signature of generation 3), equivalent (a polarity in R.il)."""
+
+import os
+import re
+import subprocess
+import sys
+
+argv = sys.argv[1:]
+script = argv[argv.index("-p") + 1]
+real = subprocess.run([os.environ["ODIN3_CLI"], *argv], check=False)
+mode = os.environ.get("ICELLS_MUTATE", "")
+
+
+def edit(name, pattern, repl):
+    """Rewrites the first match of pattern in the file `name` of this script's work directory."""
+    found = re.search(r"(\S*/" + re.escape(name) + r")\b", script)
+    if found is None:
+        return
+    with open(found.group(1), encoding="utf-8") as src:
+        text = src.read()
+    with open(found.group(1), "w", encoding="utf-8") as dst:
+        dst.write(re.sub(pattern, repl, text, count=1))
+
+
+def bump(match):
+    return match.group(1) + str(int(match.group(2)) + 1)
+
+
+read_back = "stats" in script
+if real.returncode == 0 and read_back:
+    first = "/W.v;" in script  # the first read-back reads W.v, the second W2.v
+    if mode == "read" and first:
+        sys.exit(1)
+    if mode == "instances" and not first:  # after both reads, so only the text of W2.v is wrong
+        edit("W2.v", r"(#\(\.\w+\()(\d+)", bump)
+    if mode == "fixpoint" and not first:
+        edit("S3.il", r"(parameter \\WIDTH )(\d+)", bump)
+    if mode == "equivalent" and first:
+        edit("R.il", r"(parameter \\CLK_POLARITY )(\d)", lambda m: m.group(1) + str(1 - int(m.group(2))))
+sys.exit(real.returncode)

@@ -15,8 +15,9 @@ Legs, in order (the first failure is printed and the exit status is 1):
    Rows ``pin <micro> <type> <pin> <value>`` do the same for a pin connection, and ``noroundtrip
    <micro>`` skips the round trip and ``nolint <micro>`` the lint (a micro that keeps ``$mem``
    cells: the writer emits them without a stub and only ``read_verilog -icells``, item 5.2,
-   reads them). Every written instance is also checked for the defaults of spec M1: an input pin
-   that has a documented default must be tied, never open and never ``1'bx``
+   reads them; tools/icells-check round-trips that micro at the LPM level, 5.2 T-4). Every
+   written instance is also checked for the defaults of spec M1: an input pin that has a
+   documented default must be tied, never open and never ``1'bx``
    (``DEFAULTED`` below; ``add_sub`` is exempt, it cannot be used with ``lpm_direction``).
    The same script then writes BLIF (``write_blif``, PLAIN dialect; the LPM parameters the reader
    cannot derive are ``.param`` lines, PHASE5 decision 8), which is read back with the LPM library
