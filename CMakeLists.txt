@@ -1211,6 +1211,22 @@ if(BUILD_TESTING)
     # 5.1 Task 3: lib/lpm.o3lib and LPM-structured Verilog read back as registered cells.
     odin3_add_unit_test(test_lpm_lib)
     odin3_add_unit_test(test_lpmmap_scaffold)
+    # 5.1 Task 9 (spec T-1..T-4): one micro per LPM cell through the LPM script, the Verilog round
+    # trip and the lint (tools/lpm-check). Exit 77 (skipped) when iverilog is missing.
+    foreach(_lpm_micro IN ITEMS lpm_add_sub lpm_mult lpm_compare altsyncram_sp altsyncram_sdp)
+        add_test(NAME lpm_check_${_lpm_micro}
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/lpm-check/lpm-check
+                    --odin3 $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tests/lpm/${_lpm_micro}.v)
+        set_tests_properties(lpm_check_${_lpm_micro} PROPERTIES LABELS "unit;micro"
+                             SKIP_RETURN_CODE 77 TIMEOUT 300)
+    endforeach()
+    add_test(NAME lpm_check_family
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/lpm-check/lpm-check
+                --odin3 $<TARGET_FILE:odin3> --family "Stratix IV"
+                ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_sp.v)
+    set_tests_properties(lpm_check_family PROPERTIES LABELS "unit;micro" SKIP_RETURN_CODE 77
+                         TIMEOUT 300)
     odin3_add_unit_test(test_lpmmap_ram)
     target_sources(test_lpmmap_ram PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
     target_compile_definitions(test_lpmmap_ram PRIVATE

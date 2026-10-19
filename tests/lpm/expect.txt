@@ -1,0 +1,29 @@
+# What each tests/lpm micro must come out as (lpm-check, 5.1 plan Task 9, spec T-1).
+# counts <micro> <lpm_add_sub> <lpm_mult> <lpm_compare> <altsyncram> <left soft>
+# param <micro> <type> <name> <value>: some instance of <type> carries .name(value), as written.
+counts lpm_add_sub.v 4 0 0 0 0
+param lpm_add_sub.v lpm_add_sub lpm_direction "ADD"
+param lpm_add_sub.v lpm_add_sub lpm_direction "SUB"
+param lpm_add_sub.v lpm_add_sub lpm_representation "SIGNED"
+param lpm_add_sub.v lpm_add_sub lpm_representation "UNSIGNED"
+param lpm_add_sub.v lpm_add_sub lpm_width 9
+param lpm_add_sub.v lpm_add_sub lpm_width 7
+counts lpm_mult.v 0 2 0 0 0
+param lpm_mult.v lpm_mult lpm_widtha 8
+param lpm_mult.v lpm_mult lpm_widthp 15
+param lpm_mult.v lpm_mult lpm_representation "UNSIGNED"
+param lpm_mult.v lpm_mult lpm_representation "SIGNED"
+counts lpm_compare.v 0 0 8 0 0
+param lpm_compare.v lpm_compare lpm_width 8
+param lpm_compare.v lpm_compare lpm_width 6
+param lpm_compare.v lpm_compare lpm_representation "SIGNED"
+counts altsyncram_sp.v 0 0 0 1 0
+param altsyncram_sp.v altsyncram operation_mode "SINGLE_PORT"
+param altsyncram_sp.v altsyncram width_a 8
+param altsyncram_sp.v altsyncram widthad_a 4
+param altsyncram_sp.v altsyncram numwords_a 16
+param altsyncram_sp.v altsyncram intended_device_family "Cyclone V"
+counts altsyncram_sdp.v 0 0 0 1 0
+param altsyncram_sdp.v altsyncram operation_mode "DUAL_PORT"
+param altsyncram_sdp.v altsyncram address_reg_b "CLOCK0"
+param altsyncram_sdp.v altsyncram read_during_write_mode_mixed_ports "OLD_DATA"

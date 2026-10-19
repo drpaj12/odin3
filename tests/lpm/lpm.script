@@ -1,0 +1,4 @@
+# The 5.1 LPM script (spec P-3): the single source of the text lpm-check runs through `odin3 -p`.
+# @LIB@ is lib/lpm.o3lib, @DESIGN@ the micro, @FAMILY@ is empty or `--family "NAME"`, @OUT@ the
+# Verilog written. No `lower`: the soft remainder is written as word-level assigns.
+read_techlib @LIB@; read_verilog @DESIGN@; proc; opt; wreduce; opt_clean; opt -full; lpmmap @FAMILY@; opt -full; write_verilog @OUT@
