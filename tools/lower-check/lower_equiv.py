@@ -947,6 +947,9 @@ def execute(args: argparse.Namespace, work: Path) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
+    if args.refine_timeout <= 0:
+        print(f"{TOOL}: error: --refine-timeout must be positive", file=sys.stderr)
+        return lc.EXIT_ERROR
     opt_equiv.REFINE_TIMEOUT_SECONDS = args.refine_timeout
     global BMC_TIMEOUT_SECONDS
     BMC_TIMEOUT_SECONDS = args.refine_timeout

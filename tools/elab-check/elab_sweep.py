@@ -164,7 +164,7 @@ class Outcome:
 def needs_unproven(entry: Expect) -> bool:
     """An entry that says the file cannot be checked: its failure must be exit 4 (unproven) and
     nothing else, or the listing would hide a real difference next to the unproven step."""
-    return entry.reason.startswith(UNTESTED_REASON) or "unproven" in entry.needle
+    return entry.reason.startswith(UNTESTED_REASON) or "unproven" in entry.needle.lower()
 
 
 def parse_size(text: str) -> int:
@@ -679,7 +679,7 @@ class Sweep:
 
     def report(self, item: Item, outcome: Outcome) -> None:
         cls, line = verdict(item, outcome, self.expect, self.xl,
-                            self.cfg.opt_tool in ("opt-diff", "opt-equiv"))
+                            self.cfg.opt_tool in ("opt-diff", "opt-equiv", "lower-equiv"))
         print(line, flush=True)
         if outcome.kind == "ok" and self.cfg.mode() == "bench" and outcome.output:
             print(f"bench: {outcome.output}", flush=True)
@@ -852,7 +852,12 @@ def parse_timeouts(args: argparse.Namespace) -> dict[str, float]:
         suffix, _, seconds = spec.partition("=")
         if not suffix or not seconds:
             raise UsageError(f"--timeout-for {spec!r}: expected SUFFIX=SECONDS")
-        timeouts[suffix] = float(seconds)
+        try:
+            timeouts[suffix] = float(seconds)
+        except ValueError:
+            timeouts[suffix] = 0.0
+        if timeouts[suffix] <= 0:
+            raise UsageError(f"--timeout-for {spec!r}: SECONDS must be a positive number")
     if timeouts and not args.lower_equiv:
         raise UsageError("--timeout-for needs --lower-equiv")
     return timeouts
