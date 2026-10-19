@@ -157,6 +157,8 @@ if Path(__file__).with_name("fail").exists():
 script = sys.argv[sys.argv.index("-p") + 1]
 header = Path(__file__).with_name("abc_line.txt")  # a test's own # abc: line ("" for none)
 text = header.read_text() + {BLIF!r} if header.exists() else {ABC_LINE + BLIF!r}
+if "--name-style provenance" in script:
+    text += "# names: provenance\\n"
 Path(script.split()[-1]).write_text(text)
 """
 
