@@ -21,8 +21,9 @@ experiments.
 2. **Altera via LPM (4.14).** The LPM netlist written by Odin III is equivalent to the RTL,
    using the LPM library's simulation models (`equiv-check` or `sim`). An optional Quartus Lite
    compile is Peter's hands, not CI.
-3. **Analysis flow (4.15 to 4.19).** Each item's acceptance test passes; the provenance
-   coverage numbers of 4.19 are recorded (a measurement, not a threshold).
+3. **FSM and analysis flow (4.8, 4.15 to 4.19).** Each item's acceptance test passes; 4.19
+   resolves every final-netlist object to the HDL apart from its named exception classes
+   (decision 7).
 
 Each sub-project gets its own spec (`docs/specs/`), plan and PRs. Model and effort follow
 `docs/PHASE0.md` §9: mapping algorithms Opus `xhigh` to `high` with the advisor; importers,
@@ -53,6 +54,17 @@ Each item has a one-line acceptance test.
 - [ ] 4.7 Memory port merge: registered reads and writes merged into `$mem` ports; no
   `ram_style` attribute overrides. Test: a registered-read RAM micro yields one `$mem` with the
   read register merged, and is equivalent.
+- [ ] 4.8 FSM detect and recode (restored, decision 6): a port of Yosys 0.55's `fsm` as its
+  default script runs it (`fsm_detect`, `fsm_extract`, `fsm_opt`, `fsm_recode`, `fsm_map`;
+  `-expand` and `-export` are not in v1.0). It runs where Parmys runs it, right after `proc`
+  (Parmys: `proc -norom; fsm; opt; wreduce`, `parmys.cc`). Encoding follows Yosys: the
+  `fsm_encoding` attribute (`none`, `one-hot`, `binary`, `auto`) is honoured, and `auto` is
+  one-hot below 32 states and binary from 32; `-encoding one-hot` forces one-hot for every FSM.
+  Provenance: the recoded state register and next-state logic get `DERIVED` records whose
+  parents are the original state register and its logic, and each FSM gets attributes (state
+  count, encoding) that 4.16 and 4.17 export. Test: FSM micros are equivalent to the RTL after
+  `fsm`; detection and encoding match Yosys 0.55 `fsm` on the micros (same FSMs, state counts
+  and encodings); the 19 VTR designs with `fsm` in the script still route and pass fcheck.
 - [ ] 4.13 Arch-sweep exit test (above). Test: the exit test item 1.
 - [ ] 4.14 Altera target via LPM:
   - an LPM tech library (`.o3lib`), a basic path of memory plus simple items (decision 3), with
@@ -87,14 +99,19 @@ Each item has a one-line acceptance test.
   hand count; a loop gives a located warning.
 - [ ] 4.19 Provenance coverage report: the share of final-netlist objects (BLIF after `abc`,
   LPM Verilog, VPR block names from the `.place` file) that resolve to an HDL source location.
-  Test: the report runs on the Phase 3 design set and on the LPM micros; the numbers are
-  recorded in this file.
+  The path is the provenance chain: `DERIVED` records across every pass, including `abc`
+  (PHASE3 decision 14), back to `SOURCE` spans (D9). Test (decision 7): on the Phase 3 design
+  set and the LPM micros, every LUT, latch, hard block and LPM instance of the final netlist
+  resolves to at least one HDL location, and every VPR placed block's atoms do. The only
+  exceptions are named classes (constant drivers, buffers the writers add), each counted in
+  the report. An unresolved object outside those classes is a bug. Recorded per design: the
+  coverage, and the specificity (median and 90th percentile of distinct HDL lines per
+  object).
 
 ## Dropped from Phase 4 (D10)
 
 | Old item | Reason |
 |---|---|
-| 4.8 FSM detect/recode | Out of v1.0. PHASE3 decision #43 had moved `fsm` to Phase 4; it is now out of v1.0 |
 | 4.9 mux collapsing | Done: `opt` already does it (`opt_muxtree`, `opt_reduce`) |
 | 4.10 matcher v1 | The matcher is not in v1.0 (D5 amended); port signature and fixed rules instead |
 | 4.11 project mapping rules | Not needed to make the tool work; the project file still reads and stores them (DESIGN §4.0) |
@@ -143,6 +160,14 @@ Phases 5 (deferred) and 6 (removed) are recorded in DESIGN §12.1.
    The experiments (Gate-Breaker dataset, Bayesian classifier, graphlets, graph sandwich, GNNs,
    the placement study) are designed after v1.0, as plugins over these outputs. Phase 3
    parity scope: PHASE3 decision 53.
+6. **FSM restored** (Peter, 2026-10-19): "reinclude the FSM detection to map to one-hot
+   ecoding for FPGAs". 4.8 is back in Phase 4 (it had been dropped by D10). Agent defaults:
+   port Yosys `fsm` and run it right after `proc`, as Parmys does, so `--vtr-compat` matches
+   Parmys; Yosys's `auto` rule (one-hot below 32 states) is the default, `-encoding one-hot`
+   forces one-hot. The pass is a mapping algorithm: Peter reviews it (DESIGN §12).
+7. **Provenance coverage target** (Peter, 2026-10-19): "4.19 using the Provenance path we
+   should expect a very good report". 4.19 is a gate, not only a measurement: full coverage
+   apart from named exception classes; an unexplained unresolved object is a bug.
 
 ## Open items
 
