@@ -229,9 +229,9 @@ class DriverTest(unittest.TestCase):
 
     def test_report_mode_counts_a_histogram_difference_but_not_an_equiv_one(self) -> None:
         self.fake.diff = (1, self.HIST)
-        code, out, _ = self.run_tool("--seeds", "1..2", "--tier-t", "report")
+        code, out, _ = self.run_tool("--seeds", "1..1", "--tier-t", "report")
         self.assertEqual(code, 0, out)
-        self.assertIn("0 ok, 2 structural", out)
+        self.assertIn("0 ok, 1 structural", out)
         self.fake.diff = (1, self.HIST + "lower-diff: s [arith/T]: equiv: DIFFERS: x\n")
         code, _, _ = self.run_tool("--seeds", "1..1", "--tier-t", "report")
         self.assertEqual(code, 1)
@@ -251,6 +251,45 @@ class DriverTest(unittest.TestCase):
         self.fake.equiv = (77, "skipped\n")
         code, _, _ = self.run_tool("--seeds", "1..5")
         self.assertEqual(code, 77)
+
+    def test_a_later_equiv_error_does_not_reset_the_diff_exit_code_or_hard_flag(self) -> None:
+        self.fake.diff = (77, "skipped\n")
+        self.fake.equiv = (1, "lower-equiv: some other failure\n")
+        code, _, _ = self.run_tool("--seeds", "1..3")
+        self.assertEqual(code, 77)
+        self.fake.diff = (3, "lower-diff: HARD: killed\n")
+        self.fake.equiv = (2, "lower-equiv: error\n")
+        code, _, _ = self.run_tool("--seeds", "1..3")
+        self.assertEqual(code, 3)
+
+    def test_an_earlier_bug_or_difference_is_not_masked_by_a_later_2_or_77(self) -> None:
+        for later, expected in ((77, 1), (2, 1)):
+            for first in ((0, "ok\n", 1, "lower-equiv: NOT A REFINEMENT: t\n"),
+                          (1, "lower-diff: s [arith/T]: equiv: DIFFERS: x\n", 0, "ok\n")):
+                def fake(argv: Sequence[str], cwd: Path, first: tuple[object, ...] = first,
+                         later: int = later) -> tuple[int, str]:
+                    number = int(Path(argv[-1]).stem.removeprefix("seed"))
+                    diff = "lower-diff" in argv[0]
+                    if number == 1:
+                        return (first[0], first[1]) if diff else (first[2], first[3])  # type: ignore[return-value]
+                    return (later, "later\n")
+                with mock.patch.object(lgd, "run_tool", fake):
+                    code, out, _ = self.run_tool("--seeds", "1..3")
+                self.assertEqual(code, expected, (later, first, out))
+
+    def test_a_tool_error_outranks_a_skip(self) -> None:
+        def fake(argv: Sequence[str], cwd: Path) -> tuple[int, str]:
+            number = int(Path(argv[-1]).stem.removeprefix("seed"))
+            return (2, "err\n") if number == 1 and "lower-diff" in argv[0] else (0, "ok\n")
+        with mock.patch.object(lgd, "run_tool", fake):
+            code, _, _ = self.run_tool("--seeds", "1..3")
+        self.assertEqual(code, 2)
+
+    def test_report_mode_applies_to_the_comb_kind_only(self) -> None:
+        self.fake.diff = (1, self.HIST)
+        code, out, _ = self.run_tool("--seeds", "2..2", "--tier-t", "report")  # seed 2 is ff
+        self.assertEqual(code, 1, out)
+        self.assertIn("seed 2 [ff]: FAIL", out)
 
     def test_no_vtr_root_and_no_techlibs_is_a_skip(self) -> None:
         with mock.patch.dict(os.environ, {}, clear=False):

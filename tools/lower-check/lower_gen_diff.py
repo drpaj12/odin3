@@ -105,6 +105,11 @@ class Seed:
     code: int = 0  # a child's exit 2 or 77, which ends the run
 
     @property
+    def failed(self) -> bool:
+        """A finding that exit 1 reports: a BUG or a difference (not a tool error or a skip)."""
+        return self.equiv == "bug" or self.diff in ("differ", "stale")
+
+    @property
     def compared(self) -> bool:
         return self.diff != "empty" and self.equiv in ("ok", "bug")
 
@@ -156,7 +161,7 @@ def judge_diff(code: int, out: str, seed: Seed, tier_t: str = "strict",
         seed.notes.append(f"lower-diff: {last_lines(out)}")
     else:
         seed.diff = "error"
-        seed.hard = code == lc.EXIT_CRASH
+        seed.hard = seed.hard or code == lc.EXIT_CRASH
         seed.notes.append(f"lower-diff exit {code}: {last_lines(out)}")
 
 
@@ -164,7 +169,7 @@ def judge_histogram(lines: list[str], seed: Seed, tier_t: str, listed: str | Non
     delta = sum(gate_delta(x) for x in lines)
     if listed is not None and delta <= MAX_LISTED_DELTA:
         seed.diff = "listed"
-    elif tier_t == "report":
+    elif tier_t == "report" and seed.kind == "comb":  # tier T is the comb kind's
         seed.diff = "structural"
         seed.notes.append(f"lower-diff: histogram differs by {delta} gates (equivalent)")
     else:
@@ -187,8 +192,8 @@ def judge_equiv(code: int, out: str, seed: Seed) -> None:
         seed.notes.append(f"lower-equiv: {last_lines(out, 2)}")
     else:
         seed.equiv = "error"
-        seed.hard = code == lc.EXIT_CRASH
-        seed.code = code if code in (lc.EXIT_ERROR, lc.EXIT_SKIP) else 0
+        seed.hard = seed.hard or code == lc.EXIT_CRASH
+        seed.code = seed.code or (code if code in (lc.EXIT_ERROR, lc.EXIT_SKIP) else 0)
         seed.notes.append(f"lower-equiv exit {code}: {last_lines(out)}")
 
 
@@ -262,6 +267,19 @@ def report(seed: Seed, folder: Path) -> str:
     return head + "".join(f"\n    {note}" for note in seed.notes) + f"\n    kept: {folder}"
 
 
+def stop(found: list[Seed], last: Seed, work: Path) -> int:
+    """A child's exit 2, 77 or a crash ends the run; the exit code keeps the order BUG or
+    difference (1) > crash (3) > tool error (2) > skip (77), so that a later seed never masks an
+    earlier finding."""
+    what = "HARD: a child crashed or timed out" if last.hard else f"a child exited {last.code}"
+    print(f"{TOOL}: seed {last.seed}: {what}; work kept: {work}", file=sys.stderr)
+    if any(s.failed for s in found):
+        return lc.EXIT_FAIL
+    if last.hard:
+        return lc.EXIT_CRASH
+    return last.code
+
+
 def execute(args: argparse.Namespace, work: Path) -> int:
     seeds = parse_seeds(args.seeds)
     found: list[Seed] = []
@@ -270,13 +288,8 @@ def execute(args: argparse.Namespace, work: Path) -> int:
         result = run_seed(args, number, work, listed)
         found.append(result)
         print(report(result, work / f"seed{number}"), flush=True)
-        if result.code:
-            print(f"{TOOL}: seed {number}: a child exited {result.code}; work kept: {work}",
-                  file=sys.stderr)
-            return result.code
-        if result.hard:
-            print(f"{TOOL}: HARD: seed {number}; work directory kept: {work}", file=sys.stderr)
-            return lc.EXIT_CRASH
+        if result.code or result.hard:
+            return stop(found, result, work)
     count = Counter(verdict_of(s) for s in found)
     compared = sum(s.compared for s in found)
     print(f"{TOOL}: seeds {seeds.start}..{seeds.stop - 1}: {count['ok']} ok, "
