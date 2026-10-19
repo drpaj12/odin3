@@ -8,7 +8,7 @@ Usage::
 leaves after ``read_verilog --nolatches X.v; proc; opt; opt -full`` without and with
 ``opt -full -ffbits`` (a word cell counts its WIDTH). With ``--yosys`` (0.55) the ``merged`` count
 must also be what Yosys leaves after ``proc; opt -full; techmap; opt -fast``, the bit cells it
-merges (PHASE3 #48): the parity this pass exists for. Exit codes: 0 all rows pass, 1 a row fails,
+merges (PHASE3 #49): the parity this pass exists for. Exit codes: 0 all rows pass, 1 a row fails,
 2 error or usage.
 """
 

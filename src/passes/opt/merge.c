@@ -25,7 +25,7 @@
  * B_SIGNED (row 14): a mixed-sign cell is unsigned (#57), so a swap would be sound, but such
  * cells are rare and kept apart; Yosys swaps them too.
  * A node with an unconnected input pin is no candidate (row 16), as in opt_reduce.
- * With -ffbits (ffbits.c, PHASE3 #48) the bits of word FFs are merged as well, as Yosys does after
+ * With -ffbits (ffbits.c, PHASE3 #49) the bits of word FFs are merged as well, as Yosys does after
  * techmap.
  *
  * An FF merge never loses an init (OP-2): the dropped Q's init bits are only read before

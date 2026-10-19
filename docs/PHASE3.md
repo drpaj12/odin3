@@ -26,7 +26,7 @@ decisions 2–3 and 16 below):
    address width of 15.
 3. **Through P&R**: Odin III alone produces each netlist. The script is `read_techlib
    lib/vtr.o3lib; read_verilog --nolatches --vtr-compat; proc; opt; wreduce; opt_clean; opt -full;
-   flatten; opt -full; hardmap; opt -full -ffbits; lower; opt -fast; compact; abc; write_blif --vtr` (3C spec H-2, decision 48 for `opt_merge -ffbits`; the part
+   flatten; opt -full; hardmap; opt -full -ffbits; lower; opt -fast; compact; abc; write_blif --vtr` (3C spec H-2, decision 49 for `opt_merge -ffbits`; the part
    up to `lower` is `tools/hardmap-check/phase3_pre_abc.script`, run by `hardmap-diff`) (`wreduce` before `flatten` as Parmys, decisions 7 and 31 and 3G WR-9; `opt -full`
    after `flatten` as Parmys runs it, decision 30). Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
@@ -1231,7 +1231,7 @@ then the options considered.
     `* / %` (SAT limit). **Open for Peter:** whether `lower` should match techmap.v's shifter,
     divider and multiplier structure to the gate on these 1-4 gates (a lowering-algorithm choice;
     `lower` is unchanged here). Not a soundness question.
-48. **`opt_merge -ffbits`: merge identical flip-flop bits before `lower`** (2026-10-19, branch
+49. **`opt_merge -ffbits`: merge identical flip-flop bits before `lower`** (2026-10-19, branch
     `feat/opt-ffbit-merge`; agent default, Peter may override; Peter's rule: where Odin III and
     Parmys differ, match Parmys). No IR invariant and no public ABI changed. (a) **Cause**: Yosys
     `techmap` turns a word `$dffe`/`$sdff`/`$sdffe`/... into one `$_*DFF*_` cell per bit and

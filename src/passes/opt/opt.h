@@ -133,7 +133,7 @@ odin3_status odin3_opt_keep_modules(odin3_design *design, odin3_vec *keep);
  * the earlier one (the later when only it has `keep`); the sweeps repeat until one merges nothing.
  * Candidates are word and bit nodes except $mem, $tribuf, $_TBUF_, $proc, constants, nodes without
  * exactly one output port, $mux/$pmux under opts->nomux, and (opts->keepdc) FFs whose init is not
- * fully defined. With opts->ffbits the bits of word FFs are merged too (ffbits.c, PHASE3 #48).
+ * fully defined. With opts->ffbits the bits of word FFs are merged too (ffbits.c, PHASE3 #49).
  * Each class is then closed with one rebuild of its survivor whose DERIVED record
  * has the parents [survivor, drops in ID order]. Adds the drops to counts->merge_removed; logs
  * INFO "opt_merge: removed N cells" and a DEBUG line per drop. INVALID_ARG (logged) for a NULL

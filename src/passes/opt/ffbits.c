@@ -1,5 +1,5 @@
 /*
- * ffbits.c — `opt_merge -ffbits` (PHASE3 #48, agent default): merges the bits of word flip-flops
+ * ffbits.c — `opt_merge -ffbits` (PHASE3 #49, agent default): merges the bits of word flip-flops
  * that Yosys 0.55 merges only after `techmap`. Yosys's `techmap` turns a word `$dffe`/`$sdff`/...
  * into one `$_*DFF*_` cell per bit and `opt -fast` then runs opt_merge over them
  * (opt_merge.cc: an FF cell's key holds its type, parameters, inputs and the init of Q), so two

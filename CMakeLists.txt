@@ -769,7 +769,7 @@ if(BUILD_TESTING)
     target_sources(test_opt_cse PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_opt_cse PRIVATE
         ODIN3_MERGE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/merge")
-    # PHASE3 #48: opt_merge -ffbits.
+    # PHASE3 #49: opt_merge -ffbits.
     odin3_add_unit_test(test_opt_ffbits)
     target_sources(test_opt_ffbits PRIVATE tests/unit/proc_build.c)
     # 2F Task 9: opt_reduce.
@@ -1788,7 +1788,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-rules
                 --odin3 $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/opt/rules)
     set_tests_properties(opt_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77 TIMEOUT 600)
-    # opt_ffbits (PHASE3 #48): `opt_merge -ffbits` on the tests/opt/ffbits micros: the flip-flop
+    # opt_ffbits (PHASE3 #49): `opt_merge -ffbits` on the tests/opt/ffbits micros: the flip-flop
     # bits left, against tests/opt/ffbits/expect.txt. Needs no Yosys; opt_ffbits_yosys is the
     # parity check, opt_equiv_ffbits the refinement.
     add_test(NAME opt_ffbits
@@ -2776,7 +2776,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                              TIMEOUT 1800)
         # 3G (plan Task 3 step 3): the same on the wreduce sources with the Phase 3 script, which
         # runs wreduce; every call that changes something is checked (clock-aware) in turn.
-        # PHASE3 #48: opt_merge -ffbits against Yosys (techmap; opt -fast leaves the same bits) and
+        # PHASE3 #49: opt_merge -ffbits against Yosys (techmap; opt -fast leaves the same bits) and
         # its refinement (opt-equiv on the Phase 3 script plus the step) on tests/opt/ffbits.
         add_test(NAME opt_ffbits_yosys
             COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/ffbits-check

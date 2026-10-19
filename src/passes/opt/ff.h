@@ -141,7 +141,7 @@ odin3_status odin3_ff_emit_shrunk(odin3_opt_ctx *oc, odin3_ffdata *ff, const odi
                                   uint32_t n_ties, odin3_node_id *out);
 
 /*
- * `opt_merge -ffbits` on one module (ffbits.c, PHASE3 #48): the bits of the word FFs that have the
+ * `opt_merge -ffbits` on one module (ffbits.c, PHASE3 #49): the bits of the word FFs that have the
  * same clock, D bit, enable, reset, polarities, reset values and init are merged into the lowest
  * one, in rounds until a round drops nothing (Yosys 0.55 gets this from techmap and opt_merge on
  * the bit cells). Adds the dropped bits to *dropped_bits. NO_MEMORY, possibly after some nodes

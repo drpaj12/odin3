@@ -1,7 +1,7 @@
 # Odin III's Phase 3 script up to, but not including, `abc` (3G WR-9, 3C spec H-2): the single
 # source of the string hardmap-diff runs. `wreduce` runs before `flatten` as in Parmys; `hardmap`
 # needs the flat design; the last `opt -full -ffbits` also merges the identical bits of word
-# flip-flops, which Yosys merges after techmap (PHASE3 #48); `lower` makes the netlist view;
+# flip-flops, which Yosys merges after techmap (PHASE3 #49); `lower` makes the netlist view;
 # `compact` renumbers IDs last.
 # @ADDERLIB@ is the n-bit soft adder Parmys gets from vtr_primitives.v (spec A-9; dropped when
 # the tool has none). @LIB@ is lib/vtr.o3lib, @DESIGN@ the source, @OUT@ the BLIF hardmap-diff compares to Parmys's.

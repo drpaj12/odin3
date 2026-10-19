@@ -1,5 +1,5 @@
 /*
- * test_opt_ffbits.c — `opt_merge -ffbits` (ffbits.c; PHASE3 #48): bits of word FFs with the same
+ * test_opt_ffbits.c — `opt_merge -ffbits` (ffbits.c; PHASE3 #49): bits of word FFs with the same
  * clock, D bit, enable, sync reset, polarities, reset value and init merge (Yosys 0.55 gets this
  * from techmap and opt_merge); a differing init, enable, reset, reset value or polarity keeps them
  * apart. Also: a duplicate bit leaves a narrower word cell, cross-node bits, cascades, `keep`,

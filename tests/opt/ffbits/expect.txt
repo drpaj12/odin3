@@ -1,4 +1,4 @@
-# tests/opt/ffbits/expect.txt: flip-flop bits per micro, `<name> <plain> <merged>` (PHASE3 #48).
+# tests/opt/ffbits/expect.txt: flip-flop bits per micro, `<name> <plain> <merged>` (PHASE3 #49).
 # plain = after `read_verilog --nolatches; proc; opt; opt -full`; merged = also `opt_merge -ffbits`.
 # merged is what Yosys 0.55 leaves after `proc; opt -full; techmap; opt -fast` (checked by
 # tools/opt-check/ffbits-check --yosys). Run: tools/opt-check/ffbits-check --odin3 O [--yosys Y].

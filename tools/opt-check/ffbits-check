@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ffbits-check: FF bit counts of `opt_merge -ffbits` against tests/opt/ffbits/expect.txt and Yosys 0.55
-# (PHASE3 #48). See ffbits_check.py. Exit codes: 0 all rows pass, 1 a row fails, 2 error or usage.
+# (PHASE3 #49). See ffbits_check.py. Exit codes: 0 all rows pass, 1 a row fails, 2 error or usage.
 set -euo pipefail
 here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 exec python3 "$here/ffbits_check.py" "$@"
