@@ -126,6 +126,7 @@ def make_gold(yosys: str, before: Path, parmys: tuple[Path | None, bool], work: 
     of it). Written to ``gold.il``. ``parmys`` = (Parmys's techlibs directory, exact)."""
     text = before.read_text(encoding="utf-8")
     gold = work / "gold.il"
+    (work / ALIAS_GOLD).unlink(missing_ok=True)  # never reuse the alias gold of an earlier run
     types = lc.cell_types(text)
     # Yosys's ``memory`` (memory_map) makes a read past SIZE alias a word (the address bits
     # above the words are ignored); the spec of ``$mem`` (and of lower) is x there, a don't-care
@@ -792,6 +793,7 @@ def refine(yosys: str, sides: tuple[Path, Path], after: Path, work: Path, cap: i
         # memx gold, which is that gold with x on the addresses past the words (H2,
         # mem_w4_d8_a2_off1.v).
         verdict, cec = cec_gold_and_blif(yosys, alias, after, work, cap)
+        cec = f"the BLIF cec on the plain memory_map gold (not a verdict on the memx gold): {cec}"
     if verdict == opt_equiv.CEC_PROVED:
         kind, detail = base_case(yosys, sides, work, cap, top)
         return kind, (detail if kind != "ok" else

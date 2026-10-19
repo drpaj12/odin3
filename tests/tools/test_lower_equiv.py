@@ -438,6 +438,14 @@ class PairRegistersTest(unittest.TestCase):
         self.assertIn("  connect \\r [1] $n2\n  connect \\r [2] $n5\n", out)
         self.assertNotIn("connect \\r [0]", out)
 
+    def test_a_stale_alias_gold_is_never_reused(self) -> None:
+        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-alias-"))
+        before = base / "b.il"
+        before.write_text("module \\m\n  cell $add $c\n  end\nend\n", encoding="utf-8")
+        (base / le.ALIAS_GOLD).write_text("old", encoding="utf-8")
+        le.make_gold("y", before, (None, False), base, 1)  # no $mem: no Yosys run, no alias
+        self.assertFalse((base / le.ALIAS_GOLD).exists())
+
     def test_a_register_with_fewer_cells_than_the_golds_width_is_left_alone(self) -> None:
         self.assertNotIn("connect \\u ", le.pair_registers(PAIR_GATE, PAIR_GOLD))
 
