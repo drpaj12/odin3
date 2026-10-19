@@ -1397,7 +1397,7 @@ then the options considered.
     no refine verdict failed). So at 600 s all three prove on both builds and the 60 s failures were
     SAT timeouts; `opt_share` merged the same number of cells in each build (spree 0, cordic 102,
     fft 0), and the cordic change comes from the lead and operand choice now being Yosys's
-    (M2, M3). The stale `diff_expect.txt` lines of cordic are left for Peter's call. Logs:
+    (M2, M3). cf_cordic now equals Yosys under phase3 (M2/M3 lead and port-A choice); its three stale `diff_expect.txt` lines are removed. Logs:
     `/tmp/claude-1000/opt-share-m4/{spree,cf_cordic_v_18_18_18,cf_fft_256_8}.{base,head}.log`,
     counts in `share_counts.txt` there. `opt_equiv_micro` (Phase 2 script, no `opt_share`) was not run.
 
