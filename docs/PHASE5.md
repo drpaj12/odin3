@@ -72,3 +72,14 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
    so 5.3 reads both.
 4. **LPM first** (same message): 5.1 starts as soon as a Phase 3 lane frees up, ahead of the
    rest of Phase 4.
+5. **5.1 spec agent defaults** (agent default, 2026-10-19; Peter may override; spec
+   `docs/specs/2026-10-19-5.1-lpm-design.md` §14 has the ten questions with recommendations):
+   a new pass `lpmmap` with its own kit, not an LPM rule set inside `hardmap`; the four LPM
+   cells are `blackbox` kind in `lib/lpm.o3lib` (no simulation functions until the deferred
+   equivalence step); `.o3lib` gains `param NAME string "text"` (the LPM parameters are
+   strings); the round trip is judged by a write, read, write Verilog fixpoint plus `check`,
+   because the BLIF writer cannot carry string parameters and `netlist-compare` reads BLIF;
+   every `$mul` and comparison maps (no width threshold); `$mem` maps only with one write and one
+   read on one rising-edge clock, no `INIT`, no byte enable (else soft); the LPM names are
+   verified against Intel documentation before any rule is coded (no local source exists for
+   `lpm_compare`, nor for `lpm_add_sub` and `lpm_mult` beyond a commented-out use in `spree.v`).
