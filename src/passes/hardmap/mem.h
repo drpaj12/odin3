@@ -92,6 +92,12 @@ typedef struct mem_pin {
 /* The net on a pin of the node (none: open or out of range). */
 odin3_net_id mem_pin_net(const hm_ctx *hc, odin3_node_id node, mem_pin pin);
 
+/* Copies the `$mem` node into mm (the design is untouched); an ABITS above MEM_MAX_ABITS sets
+ * too_wide and loads no port. NO_MEMORY only. mem_model_free releases a loaded model. Shared with
+ * lpmmap (5.1 R-1), which reuses the R-8 flip-flop merge below. */
+odin3_status mem_load(const hm_ctx *hc, odin3_node_id node, mem_model *mm);
+void mem_model_free(mem_model *mm);
+
 /* R-8 on every asynchronous read port of mm (data merge, else address merge). NO_MEMORY only. */
 odin3_status mem_merge(const hm_ctx *hc, mem_model *mm);
 

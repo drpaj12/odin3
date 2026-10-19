@@ -341,7 +341,9 @@ static odin3_status port_nets(lm_ctx *lc, const lm_make *mk, odin3_netvec *out, 
             return ODIN3_ERR_INVALID_ARG;
         }
         odin3_net_id *dst = (odin3_net_id *)out[idx].nets;
-        memcpy(dst, conn->nets, sizeof *dst * conn->count);
+        if (conn->count > 0) {
+            memcpy(dst, conn->nets, sizeof *dst * conn->count);
+        }
     }
     *pins = total;
     return st;

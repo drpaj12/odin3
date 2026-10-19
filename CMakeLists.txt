@@ -1211,6 +1211,10 @@ if(BUILD_TESTING)
     # 5.1 Task 3: lib/lpm.o3lib and LPM-structured Verilog read back as registered cells.
     odin3_add_unit_test(test_lpm_lib)
     odin3_add_unit_test(test_lpmmap_scaffold)
+    odin3_add_unit_test(test_lpmmap_ram)
+    target_sources(test_lpmmap_ram PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_ram PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     odin3_add_unit_test(test_lpmmap_compare)
     target_sources(test_lpmmap_compare PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
     target_compile_definitions(test_lpmmap_compare PRIVATE

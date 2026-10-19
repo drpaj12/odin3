@@ -53,6 +53,12 @@ static const char k_one_add[] =
     "    parameter \\A_WIDTH 3\n    parameter \\B_WIDTH 5\n    parameter \\Y_WIDTH 6\n"
     "    connect \\A \\a\n    connect \\B \\b\n    connect \\Y \\y\n  end\nend\n";
 
+/* A design no rule fires on: one `$neg`. */
+static const char k_neg[] =
+    "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 output 2 \\y\n"
+    "  cell $neg \\u0\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 4\n"
+    "    parameter \\Y_WIDTH 4\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n";
+
 static const char k_signed_add[] =
     "module \\m\n  wire width 3 input 1 \\a\n  wire width 5 input 2 \\b\n"
     "  wire width 6 output 3 \\y\n"
@@ -135,9 +141,9 @@ static void test_p2_wrong_kind(void) {
 
 static void test_p2_lazy_lookup(void) {
     pb_result res;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(k_one_add, &res)); /* no lpm library read */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(k_neg, &res)); /* no lpm library read */
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(res.design, "lpmmap", (odin3_bytes){NULL, 0}));
-    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "$add"));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "$neg"));
     pb_free(&res);
 }
 
@@ -284,7 +290,7 @@ static void test_h8_determinism(void) {
 
 static void test_h8_info_line(void) {
     pb_result res;
-    lm_build_ok(k_one_add, &res);
+    lm_build_ok(k_neg, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(res.design, "lpmmap", (odin3_bytes){NULL, 0}));
     TEST_ASSERT_NOT_NULL(strstr(log_text, "lpmmap: 0 lpm_add_sub, 0 lpm_mult, 0 lpm_compare, "
                                           "0 altsyncram; 0 cells left soft"));
@@ -293,7 +299,7 @@ static void test_h8_info_line(void) {
 
 static void test_w5_options(void) {
     pb_result res;
-    lm_build_ok(k_one_add, &res);
+    lm_build_ok(k_neg, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(res.design, "lpmmap",
                                                    odin3_bytes_cstr("--family \"Stratix IV\"")));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
@@ -302,7 +308,7 @@ static void test_w5_options(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_pass_run(res.design, "lpmmap", odin3_bytes_cstr("--bogus")));
     TEST_ASSERT_NOT_NULL(strstr(log_text, "lpmmap: unknown option '--bogus'"));
-    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "$add"));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "$neg"));
     pb_free(&res);
 }
 
@@ -332,7 +338,7 @@ static void test_p3_refuse_processes(void) {
 
 static void test_lpmmap_twice(void) {
     pb_result res;
-    lm_build_ok(k_one_add, &res);
+    lm_build_ok(k_neg, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(res.design, "lpmmap", (odin3_bytes){NULL, 0}));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(res.design, "lpmmap", (odin3_bytes){NULL, 0}));
     pb_free(&res);
