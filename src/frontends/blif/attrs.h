@@ -16,10 +16,11 @@
  * - on a cell, for each Yosys `.attr key value` line after it: attribute
  *   ODIN3_BLIF_ATTR_PREFIX "key" (`blif.attr:key`), and for each `.param key value` line:
  *   ODIN3_BLIF_PARAM_PREFIX "key" (`blif.param:key`). `.param` lines are stored as these STRING
- *   attributes, never as IR parameters of the node. The value is the line's tokens after the key
- *   joined by single spaces, quotes kept: the lexer splits on blanks, so a run of blanks (spaces,
- *   tabs) inside a value, even inside quotes, becomes one space. A key repeated on the same cell
- *   keeps its last value;
+ *   attributes, never as IR parameters of the node, except a `.param` of a parameter that a
+ *   tech-library cell declares (reader.h; PHASE5 decision 8), which sets the node's parameter. The
+ * value is the line's tokens after the key joined by single spaces, quotes kept: the lexer splits
+ * on blanks, so a run of blanks (spaces, tabs) inside a value, even inside quotes, becomes one
+ * space. A key repeated on the same cell keeps its last value;
  * - ODIN3_BLIF_ATTR_EXTRAS on a cell that has any of those: the full attribute keys
  *   (`blif.attr:src blif.param:INIT`) in the order of their first `.attr`/`.param` line, joined
  *   by single spaces (BLIF keys hold no blanks). The IR cannot list a node's attributes, so writers

@@ -587,9 +587,8 @@ static const bad_case k_bad[] = {
      "t.o3lib:3:", "drives no output"},
     {CELL "  in c 1 ; out y 1 ; memory words 0 ; width 1 ; read async\nend\n",
      "t.o3lib:3:", "words"},
-    /* reserved names */
+    /* reserved names (`clock` may name a port: 5.1 lpm_add_sub) */
     {CELL "  param signed int 1\nend\n", "t.o3lib:3:9:", "reserved"},
-    {CELL "  in clock 1\nend\n", "t.o3lib:3:6:", "reserved"},
     {CELL "  out x 1 ; fn x = 0\nend\n", "t.o3lib:3:7:", "reserved"},
     /* clocks must be declared with `clock` */
     {CELL "  in c 1 ; out y 1 ; seq y <= 1 @ posedge c\nend\n",

@@ -1,6 +1,6 @@
 """Tests for tools/netlist-compare, tools/equiv-check, tools/golden-sample, tools/golden-blackboxes,
 tools/project-fixtures, tools/parse-check, tools/elab-check, tools/opt-check, tools/exit-check,
-tools/hardmap-check, tools/proc-check, tools/heavy-run, tools/build-locked,
+tools/hardmap-check, tools/lpm-check, tools/proc-check, tools/heavy-run, tools/build-locked,
 tools/blif-vtr-check (the checker and the fixture driver), tools/vtr-models,
 tools/vtr-qor, tools/vtr-read-check, tools/verilog-gen, the BLIF reader and the
 Python plugin binding (plugins/python).
@@ -32,6 +32,7 @@ for _sub in (
     "tools/flatten-check",
     "tools/lower-check",
     "tools/hardmap-check",
+    "tools/lpm-check",
     "tools/exit-check",
     "tools/proc-check",
     "tools/vtr-qor",

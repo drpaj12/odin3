@@ -77,6 +77,18 @@ drives (e.g. `read sync clk addr1 -> out1`), removing the positional rule. Every
 needs exactly one `fn`, `seq` or `memory` driving it (or the cell is a black box: no functions at
 all, legal only with `blackbox` kind).
 
+## Amendment 2026-10-19 (5.1, PHASE5 decision 6)
+
+- **String parameters.** `param NAME string "text"` declares a STRING parameter whose default is
+  the quoted text (any bytes except `"`; no escapes; an empty string is allowed; the text may not
+  hold `;` or `#`, which end a statement or start a comment). `int` parameters are unchanged. A
+  string parameter may not appear in a width or `fn` expression: the located error `'S' is a
+  string parameter and cannot be used in an expression`. A parameter kind other than `int` or
+  `string` is `expected the parameter kind int or string`.
+- **A port may be called `clock`.** The `clock` modifier is read only after the width, so the name
+  was never ambiguous; `signed` and `x` stay reserved. (`lpm_add_sub` has a port `clock`.)
+- Used by `lib/lpm.o3lib` (5.1); `vtr.o3lib` and `generic_gates.o3lib` are unchanged.
+
 ## Phase 1 scope
 
 - `src/techlib/` reader: parse `.o3lib`, report errors with file:line, register each cell as a

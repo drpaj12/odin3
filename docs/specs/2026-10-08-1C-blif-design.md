@@ -76,3 +76,28 @@ pass/fail table).
 Reading into an existing design with other content, `.exdc`, `.gate`/`.mlatch` (genlib-mapped
 BLIF), `.conn`, hierarchy flattening, tech-library typing of hard blocks (1G; until then the
 goldens' own `.blackbox` declarations type them).
+
+## Amendment 2026-10-19 (5.1, PHASE5 decision 8): `.param` on a tech-library `.subckt`
+
+Peter asked why LPM cells cannot be black boxes in BLIF. They can: a `.subckt` of a tech-library
+type (`read_techlib`) carries the parameters BLIF cannot derive as `.param NAME VALUE` lines, the
+format Yosys `write_blif -param` uses (`backends/blif/blif.cc`, `dump_params`).
+
+- **Writer (PLAIN dialect).** For a cell of a library type, each parameter that differs from what
+  the reader would derive (the declared model's, else those the connected formals imply) is
+  written after the `.cname`, in parameter order: a STRING quoted with `\"`, `\\` and `\ooo`
+  escapes (a byte below 32 or from 127 up as three octal digits), an INT as its 32 two's
+  complement binary digits (64 when it does not fit an int32), a BITS as `0 1 x z` MSB first (a
+  zero-length value is skipped). Derivable parameters (`lpm_width`, from the formals) and
+  parameters equal to the library default write nothing, so existing BLIF is unchanged. A cell of
+  another type with such parameters, and every cell in the VTR dialect (3E preflight), is still
+  refused.
+- **Reader.** A `.param NAME VALUE` on a cell of a library type that declares NAME sets that
+  parameter (the cell is rebuilt on the same nets with the same name and attributes through
+  `odin3_node_replace`) and makes no attribute. A value that changes a port width is the error
+  `.param NAME changes the port widths of 'type'`; a value not in the forms above is `.param NAME
+  of 'type': cannot read 'text' as a ...`. Any other `.param` stays a `blif.param:` attribute as
+  before. The lexer joins the value's blank-separated tokens with one blank, so a run of blanks
+  inside a string becomes one.
+- **Round trip.** Write, read, write is identical; `netlist-compare` needs a `.blackbox` stub per
+  library model (`lpm-check` builds them from the `.o3lib`).

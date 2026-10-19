@@ -78,6 +78,7 @@ add_library(odin3_core OBJECT
     src/util/file.c
     src/util/sha256.c
     src/frontends/blif/lexer.c
+    src/frontends/blif/param_text.c
     src/frontends/blif/reader.c
     src/backends/blif/writer.c
     src/backends/blif/vtr.c
@@ -171,6 +172,13 @@ add_library(odin3_core OBJECT
     src/passes/hardmap/mem.c
     src/passes/hardmap/mem_merge.c
     src/passes/hardmap/mem_plan.c
+    src/passes/lpmmap/register.c
+    src/passes/lpmmap/lpmmap.c
+    src/passes/lpmmap/lm_kit.c
+    src/passes/lpmmap/addsub.c
+    src/passes/lpmmap/mult.c
+    src/passes/lpmmap/compare.c
+    src/passes/lpmmap/mem.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -1204,6 +1212,55 @@ if(BUILD_TESTING)
         ODIN3_BVT_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/blif_vtr")
     odin3_add_unit_test(test_techlib_expr)
     odin3_add_unit_test(test_techlib_reader)
+    odin3_add_unit_test(test_techlib_string_param)
+    # 5.1 Task 3: lib/lpm.o3lib and LPM-structured Verilog read back as registered cells.
+    odin3_add_unit_test(test_lpm_lib)
+    # BLIF `.param` on a tech-library `.subckt` (1C amendment 2026-10-19, PHASE5 decision 8).
+    odin3_add_unit_test(test_blif_lib_params)
+    target_sources(test_blif_lib_params PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_blif_lib_params PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_scaffold)
+    # 5.1 Task 9 (spec T-1..T-4): one micro per LPM cell through the LPM script, the Verilog round
+    # trip and the lint (tools/lpm-check). Exit 77 (skipped) when iverilog is missing.
+    foreach(_lpm_micro IN ITEMS lpm_add_sub lpm_mult lpm_compare lpm_mixed altsyncram_sp altsyncram_sdp
+                                 altsyncram_soft)
+        add_test(NAME lpm_check_${_lpm_micro}
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/lpm-check/lpm-check
+                    --odin3 $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tests/lpm/${_lpm_micro}.v)
+        set_tests_properties(lpm_check_${_lpm_micro} PROPERTIES LABELS "unit;micro"
+                             SKIP_RETURN_CODE 77 TIMEOUT 300)
+    endforeach()
+    add_test(NAME lpm_check_family
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/lpm-check/lpm-check
+                --odin3 $<TARGET_FILE:odin3> --family "Stratix IV"
+                ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_sp.v)
+    set_tests_properties(lpm_check_family PROPERTIES LABELS "unit;micro" SKIP_RETURN_CODE 77
+                         TIMEOUT 300)
+    odin3_add_unit_test(test_lpmmap_ram)
+    target_sources(test_lpmmap_ram PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_ram PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_compare)
+    target_sources(test_lpmmap_compare PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_compare PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_mult)
+    target_sources(test_lpmmap_mult PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_mult PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_addsub)
+    target_sources(test_lpmmap_addsub PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_addsub PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    target_sources(test_lpmmap_scaffold PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_scaffold PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    target_sources(test_lpm_lib PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpm_lib PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_LPM_DIR="${PROJECT_SOURCE_DIR}/tests/lpm")
     odin3_add_unit_test(test_techlib_libs)
     target_compile_definitions(test_techlib_libs PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"

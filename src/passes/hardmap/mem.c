@@ -35,7 +35,7 @@ static bool bit_of(const odin3_value *val, uint32_t index) {
     return index < val->len && val->bits[index] == ODIN3_BIT_1;
 }
 
-static void model_free(mem_model *mm) {
+void mem_model_free(mem_model *mm) {
     for (size_t i = 0; i < mm->rd.len; i++) {
         odin3_vec_free(&((mem_rport *)odin3_vec_at(&mm->rd, i))->data);
     }
@@ -118,7 +118,7 @@ static bool init_has_defined(const odin3_value *init) {
 }
 
 /* Copies the `$mem` into mm. A memory of more address bits than hardmap splits is not loaded. */
-static odin3_status mem_load(const hm_ctx *hc, odin3_node_id node, mem_model *mm) {
+odin3_status mem_load(const hm_ctx *hc, odin3_node_id node, mem_model *mm) {
     memset(mm, 0, sizeof *mm);
     odin3_vec_init(&mm->rd, sizeof(mem_rport));
     odin3_vec_init(&mm->wr, sizeof(mem_wport));
@@ -288,6 +288,6 @@ odin3_status hm_map_mem(hm_ctx *hc, odin3_node_id src) {
         warn_soft(hc, &mm, verdict);
         hc->stats.soft++;
     }
-    model_free(&mm);
+    mem_model_free(&mm);
     return st;
 }
