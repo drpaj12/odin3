@@ -62,6 +62,8 @@ TOOL = "abc-equiv"
 EXIT_OK, EXIT_FAIL, EXIT_USAGE = 0, 1, 2
 GOLDEN_ROOT = Path.home() / "odin3-ws" / "golden"
 BLACKBOX_MODELS = "adder,multiply,single_port_ram,dual_port_ram"
+# Designs with an undriven net that reaches an output: only these get equiv-check --allow-undriven.
+ALLOW_UNDRIVEN = ("hand_ports", "hand_writers")
 TECHLIB = "lib/vtr.o3lib"
 DEFAULT_LUT = 6
 DEFAULT_TIMEOUT = 600
@@ -227,7 +229,9 @@ def run_equiv(cfg: Config, out: Path) -> Outcome:
     missing = [n for n in names if not (out / n).is_file()]
     if missing:
         return Outcome("error", 0.0, f"{out}: missing {', '.join(missing)}")
-    argv = [cfg.equiv_check, "--blackbox", BLACKBOX_MODELS, "--allow-undriven", "--timeout",
+    design = out.name.split("-", 1)[-1]  # design_dir's name without its index
+    extra = ["--allow-undriven"] if design in ALLOW_UNDRIVEN else []
+    argv = [cfg.equiv_check, "--blackbox", BLACKBOX_MODELS, *extra, "--timeout",
             str(cfg.timeout), str(out / "before.blif"), str(out / "after.blif")]
     try:
         proc = subprocess.run(argv, cwd=REPO_ROOT, env=child_env(cfg, False), capture_output=True,

@@ -12,8 +12,8 @@
 #include "passes/abc/run.h"
 #include "passes/abc/splice_int.h"
 #include "util/arena.h"
+#include "util/log.h"
 
-#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -200,7 +200,11 @@ static odin3_status create_ff(splice *sp, uint32_t reg) {
     uint32_t n_ports = odin3_celltype_get(sp->run->design, type)->n_ports;
     odin3_net_id clock = rep_clock(sp->mod, rep, n_ports);
     odin3_netvec ports[3];
-    assert(n_ports == 2 || n_ports == 3); /* $_FF_ or $_DFF_*_ / $_DLATCH_*_: ports[3] below */
+    if (n_ports != 2 && n_ports != 3) { /* $_FF_ has D, Q; the others C, D, Q: ports[3] below */
+        odin3_log(ODIN3_LOG_ERROR, "abc: flip-flop type with %u ports cannot be rebuilt",
+                  (unsigned)n_ports);
+        return ODIN3_ERR_INVALID_ARG;
+    }
     ports[0] = (odin3_netvec){&clock, 1}; /* C, D, Q; a $_FF_ has D, Q: this slot is then D's */
     ports[n_ports - 2] = (odin3_netvec){&data, 1};
     ports[n_ports - 1] = (odin3_netvec){&qout, 1};

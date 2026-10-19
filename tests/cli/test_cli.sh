@@ -623,17 +623,17 @@ SH
     ;;
 abc_unconn_ch_intrinsics)
     # abc_unconn_ch_intrinsics (3D Review Focus 1): every hard-block pin on unconn before the pass
-    # is still on unconn after it, in write_blif --vtr's text. Skipped (77) only without the
-    # golden, which lives outside the repo: CI has none, so CI skips this case (the dev machine
-    # and the controller run it). write_blif --vtr exists (3E); a failing probe is a failure.
-    golden=$HOME/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/vtr/ch_intrinsics/ch_intrinsics.parmys.blif
-    [[ -f $golden ]] || { echo "test_cli $case_name: SKIP: no $golden"; exit 77; }
+    # is still on unconn after it, in write_blif --vtr's text. Always runs on the committed
+    # fixture tests/golden/blif-vtr/ram_slice_unconn_addr.in.blif (a single_port_ram slice with
+    # addr[5..14] open, as in ch_intrinsics), so CI runs it. When the ch_intrinsics golden is
+    # present (outside the repo: dev machine, controller) it is checked too, to equality.
     repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-    "$odin3" -p "read_techlib $repo/lib/vtr.o3lib; read_blif $golden; write_blif --vtr $work/probe.blif" \
-        >"$work/out" 2>"$work/err" || fail "the write_blif --vtr probe on the golden failed"
-    "$odin3" -p "read_techlib $repo/lib/vtr.o3lib; read_blif $golden; abc --lut 6; write_blif --vtr $work/W.blif" \
-        >"$work/out" 2>"$work/err" || fail "odin3 abc on ch_intrinsics failed"
-    python3 -I - "$repo" "$work/W.blif" "$golden" <<'PY' || fail "the unconn pins changed"
+    fixture=$repo/tests/golden/blif-vtr/ram_slice_unconn_addr.in.blif
+    golden=$HOME/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/vtr/ch_intrinsics/ch_intrinsics.parmys.blif
+    check_unconn() { # <input> <exact: 0|1> <tag>
+        "$odin3" -p "read_techlib $repo/lib/vtr.o3lib; read_blif $1; abc --lut 6; write_blif --vtr $work/$3.blif" \
+            >"$work/out" 2>"$work/err" || fail "odin3 abc on $1 failed"
+        python3 -I - "$repo" "$work/$3.blif" "$1" "$2" <<'PY' || fail "the unconn pins changed ($1)"
 import sys
 from pathlib import Path
 repo = Path(sys.argv[1])
@@ -642,13 +642,25 @@ for sub in ("tools/blif", "tools/vtr-qor", "tools/abc-check"):
 import abc_equiv
 after = abc_equiv.unconn_pins(Path(sys.argv[2]))
 before = abc_equiv.unconn_pins(Path(sys.argv[3]))
-need = {("single_port_ram", n, f"addr[{b}]") for n in {k[1] for k in before if k[0] == "single_port_ram"}
-        for b in range(5, 15)}
+rams = {k[1] for k in before if k[0] == "single_port_ram"}
+if not rams:
+    sys.exit("the input has no single_port_ram pin on unconn: the check would prove nothing")
+need = {("single_port_ram", n, f"addr[{b}]") for n in rams for b in range(5, 15)}
 if not need <= after:
     sys.exit(f"single_port_ram address pins left unconn: {sorted(need - after)[:5]}")
-if after != before:
+if not before <= after:
+    sys.exit(f"pins no longer on unconn: {sorted(before - after)[:5]}")
+if sys.argv[4] == "1" and after != before:
     sys.exit(f"unconn sets differ: lost {sorted(before - after)[:5]}, gained {sorted(after - before)[:5]}")
 PY
+    }
+    [[ -f $fixture ]] || fail "missing $fixture"
+    check_unconn "$fixture" 0 fixture
+    if [[ -f $golden ]]; then
+        check_unconn "$golden" 1 golden
+    else
+        echo "test_cli $case_name: note: no $golden; only the committed fixture was checked"
+    fi
     ;;
 hardmap_mul)
     # cli_hardmap_mul: read_techlib, read_verilog --vtr-compat, proc, opt, hardmap, write_blif --vtr
