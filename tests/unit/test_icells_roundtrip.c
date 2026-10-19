@@ -93,8 +93,19 @@ static uint32_t intern(odin3_design *design, const char *text) {
     return id;
 }
 
-/* One cell of def at its default parameters, every port on fresh nets; false when the registry
- * refuses the defaults (reported by the caller with the type name). */
+/* A vector of fresh nets for one port of width `width`. */
+static odin3_netvec fresh_port(odin3_module *mod, uint32_t width) {
+    odin3_net_id *nets = calloc(width + 1U, sizeof *nets);
+    TEST_ASSERT_NOT_NULL(nets);
+    for (uint32_t bit = 0; bit < width; bit++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_net_create(mod, 0, odin3_module_prov(mod), &nets[bit]));
+    }
+    return (odin3_netvec){nets, width};
+}
+
+/* One cell of the type at its default parameters, every port on fresh nets; false when the
+ * registry refuses the defaults (reported by the caller with the type name). */
 static bool add_default_cell(odin3_design *design, odin3_module *mod, odin3_celltype_id type) {
     const odin3_celltype_def *def = odin3_celltype_get(design, type);
     odin3_value params[32];
@@ -105,14 +116,7 @@ static bool add_default_cell(odin3_design *design, odin3_module *mod, odin3_cell
     odin3_netvec *vecs = calloc(def->n_ports + 1U, sizeof *vecs);
     TEST_ASSERT_NOT_NULL(vecs);
     for (uint32_t i = 0; i < def->n_ports; i++) {
-        uint32_t width = odin3_celltype_port_width(design, type, params, i);
-        odin3_net_id *nets = calloc(width + 1U, sizeof *nets);
-        TEST_ASSERT_NOT_NULL(nets);
-        for (uint32_t b = 0; b < width; b++) {
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                                  odin3_net_create(mod, 0, odin3_module_prov(mod), &nets[b]));
-        }
-        vecs[i] = (odin3_netvec){nets, width};
+        vecs[i] = fresh_port(mod, odin3_celltype_port_width(design, type, params, i));
     }
     odin3_node_spec spec = {.type = type, .params = params, .n_params = def->n_params};
     odin3_node_id node;
@@ -124,19 +128,20 @@ static bool add_default_cell(odin3_design *design, odin3_module *mod, odin3_cell
     return st == ODIN3_OK;
 }
 
-static bool value_equal(const odin3_design *da, const odin3_value *a, const odin3_design *db,
-                        const odin3_value *b) {
-    if (a->kind != b->kind) {
+static bool value_equal(const odin3_design *des_a, const odin3_value *val_a,
+                        const odin3_design *des_b, const odin3_value *val_b) {
+    if (val_a->kind != val_b->kind) {
         return false;
     }
-    switch (a->kind) {
+    switch (val_a->kind) {
     case ODIN3_VAL_INT:
-        return a->i == b->i;
+        return val_a->i == val_b->i;
     case ODIN3_VAL_STRING:
-        return strcmp(odin3_strtab_get(odin3_design_strtab(da), a->str),
-                      odin3_strtab_get(odin3_design_strtab(db), b->str)) == 0;
+        return strcmp(odin3_strtab_get(odin3_design_strtab(des_a), val_a->str),
+                      odin3_strtab_get(odin3_design_strtab(des_b), val_b->str)) == 0;
     case ODIN3_VAL_BITS:
-        return a->len == b->len && (a->len == 0 || memcmp(a->bits, b->bits, a->len) == 0);
+        return val_a->len == val_b->len &&
+               (val_a->len == 0 || memcmp(val_a->bits, val_b->bits, val_a->len) == 0);
     default:
         return false;
     }
@@ -174,25 +179,59 @@ static bool written_as_instance(const char *name) {
     return strstr(g_text, key) != NULL;
 }
 
-static void test_every_instance_type_reads_back(void) {
+/* A default cell of builtin type i when it is eligible; true when one was built. */
+static bool add_builtin(odin3_design *design, odin3_module *mod, uint32_t idx) {
+    const odin3_celltype_def *def = odin3_builtin_celltypes[idx];
+    odin3_celltype_id type;
+    TEST_ASSERT_TRUE(odin3_celltype_find(design, intern(design, def->name), &type));
+    if (!eligible(def)) {
+        return false;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(add_default_cell(design, mod, type), def->name);
+    return true;
+}
+
+/* One design with a default cell of every eligible type; *built counts them. */
+static odin3_design *build_all(odin3_module **mod_out, uint32_t *built) {
     odin3_design *design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
     odin3_module_id mid;
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_module_create(design, intern(design, "top"), (odin3_prov_id){0}, &mid));
     odin3_module *mod = odin3_module_get(design, mid);
-    uint32_t built = 0;
     for (uint32_t i = 0; i < odin3_builtin_celltype_count; i++) {
-        odin3_celltype_id type;
-        TEST_ASSERT_TRUE(
-            odin3_celltype_find(design, intern(design, odin3_builtin_celltypes[i]->name), &type));
-        if (!eligible(odin3_builtin_celltypes[i])) {
-            continue;
-        }
-        TEST_ASSERT_TRUE_MESSAGE(add_default_cell(design, mod, type),
-                                 odin3_builtin_celltypes[i]->name);
-        built++;
+        *built += add_builtin(design, mod, i) ? 1U : 0U;
     }
+    *mod_out = mod;
+    return design;
+}
+
+/* The two designs hold the same cell of def: parameters and pin counts per port. */
+typedef struct pair_view {
+    odin3_design *design;
+    const odin3_module *mod;
+} pair_view;
+
+static void expect_same_cell(const odin3_celltype_def *def, pair_view was, pair_view now) {
+    odin3_node_id old_node = find_node(was.design, was.mod, def->name);
+    odin3_node_id new_node = find_node(now.design, now.mod, def->name);
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, new_node.v, def->name);
+    for (uint32_t k = 0; k < def->n_params; k++) {
+        TEST_ASSERT_TRUE_MESSAGE(value_equal(was.design, odin3_node_param(was.mod, old_node, k),
+                                             now.design, odin3_node_param(now.mod, new_node, k)),
+                                 def->params[k].name);
+    }
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(odin3_node_port(was.mod, old_node, port).count,
+                                         odin3_node_port(now.mod, new_node, port).count,
+                                         def->ports[port].name);
+    }
+}
+
+static void test_every_instance_type_reads_back(void) {
+    odin3_module *mod = NULL;
+    uint32_t built = 0;
+    odin3_design *design = build_all(&mod, &built);
     TEST_ASSERT_GREATER_THAN_UINT32(20, built);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_verilog_write(design, g_path, NULL), g_errors);
     slurp_output();
@@ -203,33 +242,18 @@ static void test_every_instance_type_reads_back(void) {
     (void)snprintf(args, sizeof args, "-icells %s", g_path);
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         ODIN3_OK, odin3_pass_run(back, "read_verilog", odin3_bytes_cstr(args)), g_errors);
-    const odin3_module *after = first_module(back);
     uint32_t covered = 0;
     for (uint32_t i = 0; i < odin3_builtin_celltype_count; i++) {
         const odin3_celltype_def *def = odin3_builtin_celltypes[i];
-        if (!eligible(def)) {
-            continue;
+        bool as_instance = eligible(def) && written_as_instance(def->name);
+        if (eligible(def)) {
+            /* the list and the writer agree */
+            TEST_ASSERT_EQUAL_INT_MESSAGE(!listed(def->name), as_instance, def->name);
         }
-        bool as_instance = written_as_instance(def->name);
-        TEST_ASSERT_EQUAL_INT_MESSAGE(!listed(def->name), as_instance,
-                                      def->name); /* the list and the writer agree */
-        if (!as_instance) {
-            continue;
+        if (as_instance) {
+            expect_same_cell(def, (pair_view){design, mod}, (pair_view){back, first_module(back)});
+            covered++;
         }
-        odin3_node_id was = find_node(design, mod, def->name);
-        odin3_node_id now = find_node(back, after, def->name);
-        TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, now.v, def->name);
-        for (uint32_t k = 0; k < def->n_params; k++) {
-            TEST_ASSERT_TRUE_MESSAGE(value_equal(design, odin3_node_param(mod, was, k), back,
-                                                 odin3_node_param(after, now, k)),
-                                     def->params[k].name);
-        }
-        for (uint32_t p = 0; p < def->n_ports; p++) {
-            TEST_ASSERT_EQUAL_UINT32_MESSAGE(odin3_node_port(mod, was, p).count,
-                                             odin3_node_port(after, now, p).count,
-                                             def->ports[p].name);
-        }
-        covered++;
     }
     TEST_ASSERT_GREATER_THAN_UINT32(15, covered);
     (void)printf("icells round trip: %u instance types read back of %u built\n", (unsigned)covered,

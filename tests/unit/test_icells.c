@@ -31,7 +31,14 @@ void tearDown(void) {
 }
 
 /* Reads t.v (the given text) with the pass arguments `args` (the file name is appended). */
-static void read_with(const char *args, const char *text) {
+typedef struct read_req {
+    const char *args;
+    const char *text;
+} read_req;
+
+static void read_text(read_req what) {
+    const char *args = what.args;
+    const char *text = what.text;
     et_src file = {"t.v", text};
     et_req req = {&file, 1, NULL, NULL, NULL};
     char line[256];
@@ -41,6 +48,8 @@ static void read_with(const char *args, const char *text) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(rs.design, ODIN3_KEEP_AST_NONE));
     rs.status = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr(line));
 }
+
+#define read_with(args, text) read_text((read_req){(args), (text)})
 
 static void expect_ir_ok(void) {
     odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
