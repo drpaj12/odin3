@@ -1232,6 +1232,25 @@ then the options considered.
     divider and multiplier structure to the gate on these 1-4 gates (a lowering-algorithm choice;
     `lower` is unchanged here). Not a soundness question.
 
+50. **fcheck: the `untested` verdict and the P-leg baseline defects** (Peter, 2026-10-19; branch
+    `fix/fcheck-classify`; decision 8 of the fcheck-classify review). The Verilator check of
+    the Parmys (P) leg showed 10 of 19 designs failing; 9 of the 10 are properties of the
+    Parmys flow or of the RTL, not of the harness (`fcheck-classify-report.md`).
+    - **New verdict `untested`** (the fcheck set is now pass/fail/error/capped/timeout/untested).
+      A design whose mismatches are all on bits whose RTL value depends on the initial state
+      (x in a four-state simulation: `XDEPEND`, none stable) is `untested`, exit 3 of the wrapper.
+      It is never a pass and never a failure. A stable mismatch is still `fail`. `vtr-qor run
+      --fcheck` and `fcheck` count it as incomplete (exit 3); on an Odin III leg the gate holds
+      INCOMPLETE ("cannot be judged").
+    - **The P leg is the baseline.** Each P-leg fail or untested is recorded in
+      `tests/vtr/qor/divergences.tsv` as class `baseline-fails` with text `<tag>: <reason>`
+      (tags: `D2b` subtract pad, `lost-sign-bits` duplicated sign bits in an add,
+      `dropped-latches` RTL latches the flow drops, `x-state` RTL reads undefined state). The
+      table shows the cell as `fail (baseline: D2b)`, never as a pass. The milestone gate judges
+      fcheck only on Odin III's legs (P', O, O', R as applicable); a P-leg baseline defect does
+      not fail the gate. An Odin III fcheck fail still needs its own row (or a P fail with a
+      `baseline-fails` row, as before; an untested P now counts like a fail there).
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this
