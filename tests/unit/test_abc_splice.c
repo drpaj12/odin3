@@ -322,6 +322,23 @@ static void test_const_port(void) {
     TEST_ASSERT_EQUAL_STRING("$_CONST0_", driver_type(port_wire_net("y")));
 }
 
+/* Two output ports that are both constant 0 (review 3D-5b): the check holds and each port keeps
+ * a driver. */
+static void test_const_two_ports(void) {
+    odin3_net_id in_a = input("a");
+    odin3_net_id na = wire_net("na");
+    odin3_net_id out_y = output("y");
+    odin3_net_id out_z = output("z");
+    (void)cell1("$_NOT_", in_a, na);
+    (void)cell2("$_AND_", in_a, na, out_y);
+    (void)cell2("$_AND_", na, in_a, out_z);
+    trace_before();
+    expect_clean();
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$lut"));
+    TEST_ASSERT_EQUAL_STRING("$_CONST0_", driver_type(port_wire_net("y")));
+    TEST_ASSERT_EQUAL_STRING("$_CONST0_", driver_type(port_wire_net("z")));
+}
+
 static void test_constant_to_clock_buffered(void) {
     odin3_net_id clk = input("clk");
     odin3_net_id in_a = input("a");
@@ -659,6 +676,7 @@ int main(void) {
     RUN_TEST(test_const_ordinary);
     RUN_TEST(test_const_ordinary_makes_generator);
     RUN_TEST(test_const_port);
+    RUN_TEST(test_const_two_ports);
     RUN_TEST(test_constant_to_clock_buffered);
     RUN_TEST(test_derived_clock_buffered);
     RUN_TEST(test_flop_init_zero);

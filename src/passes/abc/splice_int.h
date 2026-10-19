@@ -1,6 +1,7 @@
 /*
  * splice_int.h — the state the splice's source files share (3D plan Task 17): splice.c (phase A,
- * the driver), stitch.c (phases B and C) and clean.c (phase D). Not part of any interface.
+ * the driver), splice_a.c (phase A steps), splice_bc.c (phases B and C) and splice_d.c (phase D).
+ * Not part of any interface.
  */
 #ifndef ODIN3_PASSES_ABC_SPLICE_INT_H
 #define ODIN3_PASSES_ABC_SPLICE_INT_H

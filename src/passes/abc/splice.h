@@ -42,9 +42,10 @@ odin3_status odin3_abc_restore(struct odin3_abc_run *run, odin3_abc_result *res)
 /*
  * Applies res (constants folded, checked) to run->module for run->domain: records, the restore,
  * phases A to D (§6.5). region is the region res was made from. Any failure leaves the IR valid
- * and equivalent: a failure in phase A removes what it made; in phase B the old drivers of the
- * unvisited outputs stay; in phase C the function is complete and only names may not have moved.
- * stats (may be NULL) is filled on success. NO_MEMORY (not logged) and the IR statuses.
+ * and equivalent: a failure in phase A removes what it made (best effort: a node that cannot be
+ * deleted stays, fully disconnected); in phase B the old drivers of the unvisited outputs stay; in
+ * phase C the function is complete and only names may not have moved. stats (may be NULL) is filled
+ * on success. NO_MEMORY (not logged) and the IR statuses.
  */
 odin3_status odin3_abc_splice(struct odin3_abc_run *run, const odin3_abc_region *region,
                               odin3_abc_result *res, odin3_abc_splice_stats *stats);

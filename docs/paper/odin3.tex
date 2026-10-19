@@ -686,7 +686,7 @@ Preprocessed stream & $2^{28}$ B \\
 Parser stack (\code{YYMAXDEPTH}) & 262,144 \\
 Errors per run (parser, elaboration) & 20 \\
 Loop iterations: one / all & $2^{20}$ / $2^{24}$ \\
-Byte budget (elaboration, \code{proc}) & 60\% of physical memory \\
+Byte budget (elaboration, \code{proc}) & smaller of 60\% of physical memory and the cgroup \code{memory.max} \\
 \code{proc} pattern pool / reset rounds & $2^{24}$ bits / 100 \\
 ABC script numbers / LUT inputs $K$ & $0..10^6$ / ${\le}\,12$ \\
 \bottomrule

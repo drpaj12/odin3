@@ -29,8 +29,9 @@ enum { ODIN3_LUT_P_WIDTH = 0, ODIN3_LUT_P_LUT = 1 };
 enum { ODIN3_LUT_PORT_A = 0, ODIN3_LUT_PORT_Y = 1 };
 
 /*
- * The index of $lut in the built-in table (cells/builtin.c), which is its built-in cell-type ID.
- * Ruling I5: the only way a test or a pass names that ID; nothing writes it as a number.
+ * The index of $lut in the built-in table (cells/builtin.c). A design reserves cell-type slot 0,
+ * so the cell-type ID is this index + 1: never use the index as an ID; get the ID with
+ * odin3_celltype_find on "$lut". Ruling I5: nothing writes either as a number.
  */
 uint32_t odin3_lut_builtin_index(void);
 
