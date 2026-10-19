@@ -1,5 +1,5 @@
-# The Phase 3 opt script of phase3.script followed by `opt_merge -ffbits` (PHASE3 #48), the step the
-# Phase 3 hardmap script runs after its last `opt -full`: opt-equiv checks that the bit merge
+# The Phase 3 opt script of phase3.script followed by `opt -full -ffbits` (PHASE3 #48), the step the
+# Phase 3 hardmap script runs as its last `opt` before `lower`: opt-equiv checks that the bit merge
 # refines (clock-aware, init honoured) on tests/opt/ffbits.
 opt_expr
 opt_clean
@@ -9,5 +9,5 @@ opt
 wreduce
 opt_clean
 opt -full
-opt_merge -ffbits
+opt -full -ffbits
 compact

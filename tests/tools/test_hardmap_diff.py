@@ -349,8 +349,8 @@ class MechanicsTests(ToolCase):
         line = self.log("odin.log")
         self.assertIn("--top top", line)
         for needle in ("read_techlib /lib/vtr.o3lib", "read_verilog --nolatches --vtr-compat",
-                       "wreduce; opt_clean; opt -full; flatten; opt -full; hardmap; opt -full; "
-                       "opt_merge -ffbits; lower; opt -fast; compact; write_blif --vtr "):
+                       "wreduce; opt_clean; opt -full; flatten; opt -full; hardmap; "
+                       "opt -full -ffbits; lower; opt -fast; compact; write_blif --vtr "):
             self.assertIn(needle, line)
 
     def test_adder_lib_read_before_the_design(self) -> None:

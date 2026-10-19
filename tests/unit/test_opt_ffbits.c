@@ -312,6 +312,35 @@ static void test_partial_drop_keeps_word_cell(void) {
     TEST_ASSERT_TRUE(same_net("q", 0, "q", 2));
 }
 
+/* --- `opt -ffbits` ------------------------------------------------------------------------------
+ */
+
+static void test_opt_option(void) {
+    odin3_opt_args args;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_opt_parse_args("opt", odin3_bytes_cstr("-full -ffbits"), &args));
+    TEST_ASSERT_TRUE(args.opts.ffbits);
+    TEST_ASSERT_TRUE(args.opts.full);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_parse_args("opt", odin3_bytes_cstr("-full"), &args));
+    TEST_ASSERT_FALSE(args.opts.ffbits);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_opt_parse_args("opt_expr", odin3_bytes_cstr("-ffbits"), &args));
+}
+
+static void test_opt_loop_merges_bits(void) {
+    build(HEAD "  wire width 4 output 8 \\q\n"
+               "  cell $dffe \\f\n    parameter \\WIDTH 4\n    parameter \\CLK_POLARITY 1\n"
+               "    parameter \\EN_POLARITY 1\n    connect \\CLK \\clk\n    connect \\EN \\en\n"
+               "    connect \\D { \\a \\b \\a \\b }\n    connect \\Q \\q\n  end\nend\n");
+    odin3_opt_args args;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_opt_parse_args("opt", odin3_bytes_cstr("-ffbits"), &args));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_run(&fx.ctx, fx.res.design, &args, &fx.counts));
+    check_full();
+    TEST_ASSERT_EQUAL_UINT32(2, width_of("$dffe"));
+    TEST_ASSERT_TRUE(same_net("q", 0, "q", 2));
+}
+
 /* --- out of memory -----------------------------------------------------------------------------
  */
 
@@ -363,6 +392,8 @@ int main(void) {
     RUN_TEST(test_keep_node_survives);
     RUN_TEST(test_provenance);
     RUN_TEST(test_partial_drop_keeps_word_cell);
+    RUN_TEST(test_opt_option);
+    RUN_TEST(test_opt_loop_merges_bits);
     RUN_TEST(test_oom);
     return UNITY_END();
 }

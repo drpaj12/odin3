@@ -26,7 +26,7 @@ decisions 2–3 and 16 below):
    address width of 15.
 3. **Through P&R**: Odin III alone produces each netlist. The script is `read_techlib
    lib/vtr.o3lib; read_verilog --nolatches --vtr-compat; proc; opt; wreduce; opt_clean; opt -full;
-   flatten; opt -full; hardmap; opt -full; opt_merge -ffbits; lower; opt -fast; compact; abc; write_blif --vtr` (3C spec H-2, decision 48 for `opt_merge -ffbits`; the part
+   flatten; opt -full; hardmap; opt -full -ffbits; lower; opt -fast; compact; abc; write_blif --vtr` (3C spec H-2, decision 48 for `opt_merge -ffbits`; the part
    up to `lower` is `tools/hardmap-check/phase3_pre_abc.script`, run by `hardmap-diff`) (`wreduce` before `flatten` as Parmys, decisions 7 and 31 and 3G WR-9; `opt -full`
    after `flatten` as Parmys runs it, decision 30). Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
@@ -1242,8 +1242,14 @@ then the options considered.
     identical. Triage `hardmap-big-triage.md` 3.4 and 5b B1: +14, +17, +70, +156, +14, +7, +7, +6,
     +25 flip-flops, every latch delta that is not fsm. (b) **Design**: an option of `opt_merge`
     (`-ffbits`, `src/passes/opt/ffbits.c`), not a change to `opt -full` or plain `opt_merge`, so the
-    Phase 2 equivalence gates are unchanged (it is off unless named). The Phase 3 script
-    `phase3_pre_abc.script` runs `opt_merge -ffbits` after its last `opt -full` and before `lower`.
+    Phase 2 equivalence gates are unchanged (it is off unless named). It is a flag of `opt_merge`
+    and of `opt` (`opt -ffbits`: the `opt_merge` of every loop iteration also merges FF bits). The
+    Phase 3 script `phase3_pre_abc.script` runs `opt -full -ffbits` as its last `opt`, before
+    `lower`, instead of a bare `opt_merge -ffbits` after it: measured on mkSMAdapter4B, a bare step
+    leaves 5 bits that a following `opt -full` exposes (word-level duplicates of the `$pmux` data
+    bits that only appear once the FF bits are merged), and mkDelayWorker32B stays +22 instead of
+    exactly Parmys's count; inside the loop the merge and the combinational passes reach one fixed
+    point, as Yosys's `techmap; opt -fast` does on its bit cells.
     Per bit of every word FF (`$dff $dffe $adff $adffe $aldff $aldffe $sdff $sdffe $sdffce $dffsr
     $dffsre` and the latches; the fine `$_DFF_*_` cells are left to the ordinary pass) the key is the
     kind (which controls, their polarities, `ce_over_srst`), the nets of the controls, of D (or AD)

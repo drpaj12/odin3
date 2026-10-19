@@ -78,7 +78,7 @@ static const opt_word k_words[] = {
     {"nosdff", OPTS_AT(nosdff), ONLY(P_OPT) | ONLY(P_DFF), false},
     {"purge", OPTS_AT(purge), ONLY(P_OPT) | ONLY(P_CLEAN), false},
     {"nomux", OPTS_AT(nomux), ONLY(P_MERGE), false},
-    {"ffbits", OPTS_AT(ffbits), ONLY(P_MERGE), false},
+    {"ffbits", OPTS_AT(ffbits), ONLY(P_OPT) | ONLY(P_MERGE), false},
     {"fast", OPTS_AT(fast), ONLY(P_OPT), false},
     {"noff", OPTS_AT(noff), ONLY(P_OPT), false},
     {"opt-stats", offsetof(odin3_opt_args, stats), ALL_PASSES, true},
@@ -510,7 +510,8 @@ static odin3_status opt_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin
 
 OPT_DEF(odin3_pass_opt, P_OPT,
         "opt [-fast] [-full] [-keepdc] [-mux_undef] [-mux_bool] [-undriven] [-noclkinv] [-fine] "
-        "[-nodffe] [-nosdff] [-noff] [-purge] [--opt-full-rescan] [--opt-stats]: optimise the "
+        "[-nodffe] [-nosdff] [-noff] [-purge] [-ffbits] [--opt-full-rescan] [--opt-stats]: "
+        "optimise the "
         "design to a fixed point (opt_expr, "
         "opt_merge, opt_muxtree, opt_reduce, opt_share, opt_dff, opt_clean)");
 OPT_DEF(odin3_pass_opt_expr, P_EXPR,

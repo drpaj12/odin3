@@ -1,4 +1,4 @@
-"""ffbits-check: the flip-flop bit counts of ``opt_merge -ffbits`` against Yosys and a file.
+"""ffbits-check: the flip-flop bit counts of ``opt -ffbits`` against Yosys and a file.
 
 Usage::
 
@@ -6,7 +6,7 @@ Usage::
 
 ``expect.txt`` has one row per micro, ``<name> <plain> <merged>``: the flip-flop bits Odin III
 leaves after ``read_verilog --nolatches X.v; proc; opt; opt -full`` without and with
-``opt_merge -ffbits`` (a word cell counts its WIDTH). With ``--yosys`` (0.55) the ``merged`` count
+``opt -full -ffbits`` (a word cell counts its WIDTH). With ``--yosys`` (0.55) the ``merged`` count
 must also be what Yosys leaves after ``proc; opt -full; techmap; opt -fast``, the bit cells it
 merges (PHASE3 #48): the parity this pass exists for. Exit codes: 0 all rows pass, 1 a row fails,
 2 error or usage.
@@ -45,11 +45,11 @@ def rtlil_ff_bits(text: str) -> int:
 
 
 def odin_bits(odin3: str, source: Path, ffbits: bool) -> int:
-    """FF bits after the script, with or without ``opt_merge -ffbits``."""
+    """FF bits after the script, with or without a further ``opt -full -ffbits``."""
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "out.il"
         steps = ["read_verilog --nolatches " + str(source), "proc", "opt", "opt -full"]
-        steps += ["opt_merge -ffbits"] if ffbits else []
+        steps += ["opt -full -ffbits"] if ffbits else []
         steps += [f"write_rtlil {out}"]
         done = subprocess.run([odin3, "-p", "; ".join(steps)], capture_output=True, text=True,
                               timeout=TIMEOUT, check=False)
