@@ -74,9 +74,15 @@ typedef struct odin3_blif_write_opts {
  * order), unconnected pins skipped, formals by port
  * name (`p[k]` for bit k of a port that is not scalar — as the type's declaration writes it when
  * the design declares the type; a module port's ODIN3_BLIF_ATTR_PORT_NAME when it has one). BLIF
- * has no way to give parameters, so the node's must be those the reader derives (reader.h): the
+ * has no parameters of its own, so the node's must be those the reader derives (reader.h): the
  * declared-model parameters of a declared type, else those the connected formals imply
- * (odin3_celltype_infer_params; the defaults for a type no port of which a parameter sizes). A
+ * (odin3_celltype_infer_params; the defaults for a type no port of which a parameter sizes). In
+ * the PLAIN dialect a cell of a tech-library type (`read_techlib`; odin3_techlib_cell_get) may
+ * differ from that: each parameter that does is written as a Yosys-style `.param NAME VALUE` line
+ * after the `.cname` (param_text.h: a STRING quoted with `\"`, `\\` and `\ooo` escapes, an INT as
+ * 32 or 64 binary digits, a BITS as `0 1 x z` MSB first; a zero-length BITS value is skipped), in
+ * parameter order, and the reader sets it back (reader.h). Every other cell, and the VTR dialect
+ * for every cell, is refused instead. A
  * model with a name in both `.inputs` and `.outputs` has two ports of one BLIF name; BLIF can
  * connect only one of them per instance (the reader binds the formal to the input), so a cell with
  * both connected is refused. After each cell: `.cname` with the node's name, then each
@@ -113,12 +119,13 @@ typedef struct odin3_blif_write_opts {
  * fails ("path: cannot open …", "path:line: write failed …", "path: cannot rename …");
  * ODIN3_ERR_INVALID_ARG for a NULL argument, a port of direction INOUT, two ports of one BLIF name
  * on different nets, a port bit named after a generator the module reads, an IR change D flip-flop
- * or latch, a `.subckt` cell with parameters the reader would not derive or with both ports of one
- * BLIF name connected; ODIN3_ERR_NO_MEMORY on out of memory. The text goes to a private temporary
- * beside path (util/file.h), renamed over path on success; on any failure only the temporary is
- * removed, so an existing file at path keeps its old contents (a write into a directory that
- * refuses the temporary, such as /dev, is "cannot open"). Names are written as they are: a name
- * holding blanks or other characters BLIF cannot carry is not escaped.
+ * or latch, a `.subckt` cell with parameters the reader would not derive (and that are not a PLAIN
+ * library cell's, written as `.param`) or with both ports of one BLIF name connected;
+ * ODIN3_ERR_NO_MEMORY on out of memory. The text goes to a private temporary beside path
+ * (util/file.h), renamed over path on success; on any failure only the temporary is removed, so an
+ * existing file at path keeps its old contents (a write into a directory that refuses the
+ * temporary, such as /dev, is "cannot open"). Names are written as they are: a name holding blanks
+ * or other characters BLIF cannot carry is not escaped.
  */
 odin3_status odin3_blif_write(const odin3_design *design, const char *path);
 

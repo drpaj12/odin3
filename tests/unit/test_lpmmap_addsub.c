@@ -228,16 +228,23 @@ static void test_a2_mixed_sign_is_unsigned(void) {
 
 /* --- A-3, A-4, A-5 ---------------------------------------------------------------------------- */
 
+/* Bit 0 of port `port` of blk is the constant `value`. */
+static void expect_tied(const pb_result *res, odin3_node_id blk, const char *port,
+                        odin3_const value) {
+    TEST_ASSERT_TRUE_MESSAGE(is_const(res->module, lm_pin_net(res->module, blk, port, 0), value),
+                             port);
+}
+
 static void test_a3_defaults_tied_and_unused_open(void) {
     pb_result res;
     build_one((addcase){"$add", 4, 4, 5, false, false, NULL, NULL}, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, NULL));
     odin3_node_id blk = lm_nth(res.module, "lpm_add_sub", 0);
     /* M1: the documented defaults are tied; add_sub, cout and overflow stay open */
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "cin", 0), ODIN3_CONST_0));
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "clken", 0), ODIN3_CONST_1));
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "aclr", 0), ODIN3_CONST_0));
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "clock", 0), ODIN3_CONST_0));
+    expect_tied(&res, blk, "cin", ODIN3_CONST_0);
+    expect_tied(&res, blk, "clken", ODIN3_CONST_1);
+    expect_tied(&res, blk, "aclr", ODIN3_CONST_0);
+    expect_tied(&res, blk, "clock", ODIN3_CONST_0);
     static const char *const open_ports[] = {"add_sub", "cout", "overflow"};
     for (size_t i = 0; i < sizeof open_ports / sizeof open_ports[0]; i++) {
         TEST_ASSERT_TRUE_MESSAGE(lm_port_open(res.module, blk, open_ports[i]), open_ports[i]);

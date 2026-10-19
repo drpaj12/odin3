@@ -219,16 +219,23 @@ static void test_m4_y_wider_stays_soft(void) {
 
 /* --- M-5 ------------------------------------------------------------------------------------ */
 
+/* Bit 0 of port `port` of blk is the constant `value`. */
+static void expect_tied(const pb_result *res, odin3_node_id blk, const char *port,
+                        odin3_const value) {
+    TEST_ASSERT_TRUE_MESSAGE(is_const(res->module, lm_pin_net(res->module, blk, port, 0), value),
+                             port);
+}
+
 static void test_m5_defaults_tied_and_params(void) {
     pb_result res;
     build_one((mulcase){4, 4, 8, false, false, NULL, NULL}, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, NULL));
     odin3_node_id blk = lm_nth(res.module, "lpm_mult", 0);
     /* M1: sum 0, clken 1, aclr 0, clock 0 */
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "sum", 0), ODIN3_CONST_0));
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "clken", 0), ODIN3_CONST_1));
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "aclr", 0), ODIN3_CONST_0));
-    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "clock", 0), ODIN3_CONST_0));
+    expect_tied(&res, blk, "sum", ODIN3_CONST_0);
+    expect_tied(&res, blk, "clken", ODIN3_CONST_1);
+    expect_tied(&res, blk, "aclr", ODIN3_CONST_0);
+    expect_tied(&res, blk, "clock", ODIN3_CONST_0);
     TEST_ASSERT_EQUAL_INT64(0, lm_param_int(res.module, blk, "lpm_pipeline"));
     TEST_ASSERT_EQUAL_INT64(1, lm_param_int(res.module, blk, "lpm_widths"));
     TEST_ASSERT_EQUAL_STRING("UNUSED", lm_param_str(res.module, blk, "lpm_hint"));

@@ -78,6 +78,7 @@ add_library(odin3_core OBJECT
     src/util/file.c
     src/util/sha256.c
     src/frontends/blif/lexer.c
+    src/frontends/blif/param_text.c
     src/frontends/blif/reader.c
     src/backends/blif/writer.c
     src/backends/blif/vtr.c
@@ -1210,6 +1211,11 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_techlib_string_param)
     # 5.1 Task 3: lib/lpm.o3lib and LPM-structured Verilog read back as registered cells.
     odin3_add_unit_test(test_lpm_lib)
+    # BLIF `.param` on a tech-library `.subckt` (1C amendment 2026-10-19, PHASE5 decision 8).
+    odin3_add_unit_test(test_blif_lib_params)
+    target_sources(test_blif_lib_params PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_blif_lib_params PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     odin3_add_unit_test(test_lpmmap_scaffold)
     # 5.1 Task 9 (spec T-1..T-4): one micro per LPM cell through the LPM script, the Verilog round
     # trip and the lint (tools/lpm-check). Exit 77 (skipped) when iverilog is missing.

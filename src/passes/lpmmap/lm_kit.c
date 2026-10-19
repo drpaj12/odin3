@@ -623,6 +623,6 @@ void lm_warn_wide(lm_ctx *lc, odin3_node_id src, uint32_t width, lm_type which) 
         odin3_celltype_get(lc->design, odin3_node_type(lc->module, src));
     lm_diag(lc, ODIN3_LOG_WARN, src,
             "lpmmap: '%s' '%s' has width %" PRIu32 ", above the %d bits %s supports; left soft",
-            def->name, label, width, (int)LM_MAX_LPM_WIDTH, k_type_names[which]);
+            def->name, label, width, LM_MAX_LPM_WIDTH, k_type_names[which]);
     lc->stats.soft++;
 }
