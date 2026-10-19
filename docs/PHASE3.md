@@ -106,7 +106,8 @@ which PRs remain.
   on `feat/3H-legs`; the M1 run and the group B measurements are the controller's and not yet
   done, so nothing here is ticked)
 - [ ] 3E `write_blif --vtr`: Parmys goldens round-trip through it and route via `-start abc`
-  (partial: 3E-1..3 and 3E-5 merged; 3E-4's round-trip and VPR-read sweeps are done, decision 34;
+  (partial: 3E-1..3 and 3E-5 merged; 3E-6 provenance names on `feat/3E-6`, decision 45; 3E-4's
+  round-trip and VPR-read sweeps are done, decision 34;
   ticked when 3H's R leg routes all 19 via `-start abc`)
 - [ ] 3D linked ABC: adapter builds; `abc` pass; script ruling (#1); deterministic; **M1**: P′
   leg routes all 19 (partial: 3D-0..4 and 3D-6 merged; the subprocess tasks 9a..9c of decision 29,
@@ -825,7 +826,7 @@ then the options considered.
         `qor_heavy`; (b) the `--vtr` `$lut` row; (c) `# abc:` header lines; (d) first location; (e)
         E1b by name; (f) one refusal per node; (g) E7 counts stored inputs; (h) E12's driver list;
         (i) `<loc>`; (j) class-U clocks warn; (k) warning and info levels; (l) argument parsing;
-        (m) `--name-style provenance` refused until 3E-6; (n) the API's refusals; (o) upper-case-hex
+        (m) `--name-style provenance` refused until 3E-6 (done, decision 45); (n) the API's refusals; (o) upper-case-hex
         escapes; (p) plain-mode generators (decision 23); (q) the `write_blif` row; (r) fixture
         inputs from the copied goldens; (s) the header pattern; (t) ISOP order; (u) one file at a
         time in the 6G slice; (v) below; (w) E11's list; (x) §14.1 is answered by 3D's tests; (y)
@@ -1129,6 +1130,25 @@ then the options considered.
     base-case difference there ("unproven"); skipping the guess makes the proof itself time out,
     so it stays. (f) No lowering bug was found: the four "not a refinement" files are the checker
     (a, one also an unsupported two-clock-domain cec, now listed as unproven).
+
+45. **3E-6 `--name-style provenance`: the agent defaults** (2026-10-18, branch `feat/3E-6`, plan
+    Task 12; agent defaults, Peter may override). No IR invariant and no public ABI changed.
+    (a) The naming code of the 1F Verilog writer (first leaf of the backward walk, printable
+    check, `hier/<short>@file:line`) is now `src/backends/prov_name.[ch]` (`odin3_prov_leaf`,
+    `odin3_prov_location`, `odin3_prov_name`), and the Verilog writer calls it (its tests are
+    unchanged). The plan's `odin3_prov_name(design, id, short_name, out)` gained a cache argument
+    (a `u64map` prov ID -> leaf, may be NULL) and leaves `out` empty when the record has neither a
+    hierarchy nor a location, so the caller keeps the short name. (b) Only nets are named in this
+    dialect (no `.cname` is written), so "every net and cell name" is every net. Top port bits,
+    nets on a port bit, and the `gnd`/`vcc`/`unconn` generators keep their short names. An
+    unnamed net's short name is its wire bit name, else `$n<ID>`. (c) `read_blif` records no
+    hierarchy, so a net it read is `n@t.blif:4` (the Verilog writer does the same for a record
+    without `hier`); the plan's `top/n@t.blif:7` is what a record with `hier` `top` gives (unit
+    tests build one; `cli_blif_vtr_prov_names` takes the Verilog front end's). (d) VB-10 rules 1
+    to 4 run on the provenance name as on a short name, so a collision falls back to `$n<ID>`.
+    (e) The fixture driver reads an optional `<name>.args` beside a case (extra `write_blif --vtr`
+    options); `prov_names` uses it. (f) Not measured here: VPR time and memory with long names
+    (DESIGN §13 #6, 3H at M3); short stays the default.
 
 ## Risks
 

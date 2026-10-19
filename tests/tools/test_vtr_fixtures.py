@@ -68,6 +68,37 @@ class RoundTripVerdictTest(unittest.TestCase):
         self.assertIsNotNone(why)
 
 
+class CaseArgsTest(unittest.TestCase):
+    """A case's extra write_blif options come from <name>.args (3E-6: --name-style provenance)."""
+
+    def test_args_file_is_read_and_owns_no_orphan(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="vtr-args.") as tmp:
+            fixtures = Path(tmp)
+            (fixtures / "p.in.blif").write_text(".model p\n.end\n", encoding="utf-8")
+            (fixtures / "q.in.blif").write_text(".model q\n.end\n", encoding="utf-8")
+            (fixtures / "p.args").write_text("--name-style provenance\n", encoding="utf-8")
+            cases = {c.name: c for c in vtr_fixtures.find_cases(fixtures)}
+            self.assertEqual("--name-style provenance", cases["p"].args)
+            self.assertEqual("", cases["q"].args)
+            self.assertEqual([], vtr_fixtures.orphans(fixtures, list(cases.values())))
+            (fixtures / "z.args").write_text("x", encoding="utf-8")
+            self.assertEqual(["z.args"], vtr_fixtures.orphans(fixtures, list(cases.values())))
+
+    def test_the_script_carries_the_args(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="vtr-args.") as tmp:
+            fake = Path(tmp) / "odin3"
+            fake.write_text("#!/bin/sh\necho \"$2\" >&2\n", encoding="utf-8")
+            fake.chmod(0o755)
+            proc = vtr_fixtures.rewrite(
+                fake, Path(tmp) / "a.blif", Path(tmp) / "o.blif", "--name-style provenance"
+            )
+            self.assertIn(
+                b'write_blif --vtr --name-style provenance "', proc.stderr
+            )
+            plain = vtr_fixtures.rewrite(fake, Path(tmp) / "a.blif", Path(tmp) / "o.blif")
+            self.assertIn(b'write_blif --vtr "', plain.stderr)
+
+
 @unittest.skipUnless(ODIN3, "ODIN3_CLI not set (run CTest python_tools)")
 class FixtureRoundTripTest(unittest.TestCase):
     def round_trip(self, name: str, work: Path) -> tuple[int, bytes, bytes]:

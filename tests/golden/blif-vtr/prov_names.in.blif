@@ -1,0 +1,12 @@
+.model top
+.inputs clk a b
+.outputs y q
+.names a b n
+11 1
+.names n b m
+1- 1
+.latch m q re clk 2
+.names n q y
+10 1
+01 1
+.end

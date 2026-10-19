@@ -36,6 +36,9 @@ without ``--checker``). A case in ``STRICT_EXCEPTIONS`` runs the checker without
 (the VPR rules C1-C9 still apply) and must still fail ``--strict``, so a stale exception fails.
 An expected file that no case owns fails.
 
+A case may have ``<name>.args``: extra ``write_blif --vtr`` options (3E-6: ``--name-style
+provenance``). Its round trip is not applied (W2 would wrap each name with the location in W1).
+
 ``--write`` writes the missing expected file of a case (``.vtr.blif`` or ``.err``); it never
 overwrites one.
 
@@ -59,6 +62,7 @@ SAMPLE = "sample.txt"
 IN_SUFFIX = ".in.blif"
 OUT_SUFFIX = ".vtr.blif"
 ERR_SUFFIX = ".err"
+ARGS_SUFFIX = ".args"
 DEBUG_ERR_SUFFIX = ".debug.err"
 RUN_TIMEOUT = 300  # seconds per odin3 run; the fixtures take milliseconds
 HEADER = re.compile(r"^# Odin III \S+ write_blif --vtr \(K=(\d+), names (short|provenance)\)$")
@@ -86,6 +90,7 @@ class Case:
 
     name: str
     source: Path
+    args: str = ""  # extra write_blif options, from <name>.args
 
 
 @dataclass
@@ -106,9 +111,18 @@ def write_text(path: Path, text: str) -> None:
     path.write_bytes(text.encode("utf-8", errors="surrogateescape"))
 
 
+def args_of(fixtures: Path, name: str) -> str:
+    """The extra write_blif options of case name: the text of <name>.args, "" without the file."""
+    path = fixtures / (name + ARGS_SUFFIX)
+    return read_text(path).strip() if path.is_file() else ""
+
+
 def find_cases(fixtures: Path) -> list[Case]:
     """The cases of the fixture directory, smallest input first (then by name)."""
-    cases = [Case(p.name[: -len(IN_SUFFIX)], p) for p in fixtures.glob("*" + IN_SUFFIX)]
+    cases = [
+        Case(p.name[: -len(IN_SUFFIX)], p, args_of(fixtures, p.name[: -len(IN_SUFFIX)]))
+        for p in fixtures.glob("*" + IN_SUFFIX)
+    ]
     sample = fixtures / SAMPLE
     if sample.is_file():
         for line in read_text(sample).splitlines():
@@ -136,9 +150,15 @@ def error_lines(stderr: str) -> str:
     return "".join(line + "\n" for line in kept)
 
 
-def rewrite(odin3: Path, source: Path, out: Path) -> subprocess.CompletedProcess[bytes]:
-    """odin3 reads source (from its directory, by its basename) and writes it --vtr to out."""
-    script = f'read_techlib "{LIBRARY}"; read_blif "{source.name}"; write_blif --vtr "{out}"'
+def rewrite(
+    odin3: Path, source: Path, out: Path, args: str = ""
+) -> subprocess.CompletedProcess[bytes]:
+    """odin3 reads source (from its directory, by its basename) and writes it --vtr (with the extra
+    options args, such as ``--name-style provenance``) to out."""
+    extra = f" {args}" if args else ""
+    script = (
+        f'read_techlib "{LIBRARY}"; read_blif "{source.name}"; write_blif --vtr{extra} "{out}"'
+    )
     return subprocess.run(
         [str(odin3), "-p", script],
         cwd=source.parent,
@@ -156,7 +176,7 @@ def renamed_of(stderr: str) -> int:
 
 def run_case(odin3: Path, case: Case, work: Path) -> Outcome:
     out = work / (case.name + OUT_SUFFIX)
-    proc = rewrite(odin3, case.source, out)
+    proc = rewrite(odin3, case.source, out, case.args)
     stderr = proc.stderr.decode("utf-8", errors="surrogateescape")
     written = read_text(out) if out.is_file() else None
     detail = ""
@@ -299,7 +319,10 @@ def check_case(odin3: Path, case: Case, fixtures: Path, write: bool) -> str | No
         if write and write_missing(case, fixtures, outcome):
             return None
         why = compare(case, fixtures, outcome)
-        if why is None and outcome.written is not None:
+        if why is None and outcome.written is not None and case.args:
+            # a provenance name wraps the name it reads with W1's location: W2 differs by design
+            print(f"note {case.name}: round trip not applied (options: {case.args})")
+        elif why is None and outcome.written is not None:
             why = round_trip(odin3, case.name, Path(tmp), outcome.renamed)
         return why
 
@@ -309,7 +332,7 @@ def orphans(fixtures: Path, cases: list[Case]) -> list[str]:
     names = {case.name for case in cases}
     found = []
     for path in sorted(fixtures.iterdir()):
-        for suffix in (DEBUG_ERR_SUFFIX, OUT_SUFFIX, ERR_SUFFIX):
+        for suffix in (DEBUG_ERR_SUFFIX, OUT_SUFFIX, ERR_SUFFIX, ARGS_SUFFIX):
             if path.name.endswith(suffix):
                 if path.name[: -len(suffix)] not in names:
                     found.append(path.name)

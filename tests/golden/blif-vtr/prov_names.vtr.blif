@@ -1,0 +1,14 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names provenance)
+
+.model top
+.inputs clk a b
+.outputs y q
+.names a b n@prov_names.in.blif:4
+11 1
+.names n@prov_names.in.blif:4 b m@prov_names.in.blif:6
+1- 1
+.latch m@prov_names.in.blif:6 q re clk 2
+.names n@prov_names.in.blif:4 q y
+10 1
+01 1
+.end

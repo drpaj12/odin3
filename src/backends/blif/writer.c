@@ -3,6 +3,7 @@
 
 #include "backends/blif/isop.h"
 #include "backends/blif/vtr.h"
+#include "backends/prov_name.h"
 #include "frontends/blif/attrs.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
@@ -107,6 +108,8 @@ typedef struct blif_writer {
     odin3_u64map *declared;    /* declared cell type -> its first declared-model index */
     odin3_strbuf token;        /* the token being built */
     odin3_strbuf cand;         /* a candidate generated name */
+    odin3_strbuf prov;         /* a provenance name (3E-6), scratch */
+    odin3_u64map *prov_leaf;   /* prov ID -> the record that names it (backends/prov_name.h) */
     odin3_strbuf cover;        /* a $lut's rows (odin3_blif_isop) */
     /* the VTR dialect's names (spec 3E VB-10) */
     odin3_blif_names
@@ -471,6 +474,56 @@ static odin3_status take_numbered(blif_writer *wr, uint64_t key) {
     return st;
 }
 
+/*
+ * VTR with --name-style provenance (spec 3E §10 item 7): wr->cand, the net's short name, becomes
+ * `hier/<short name>@file:line` from the net's provenance record. Unchanged for a net on a port
+ * bit (pads, .inputs/.outputs and Verilator's port matcher depend on the short names), a
+ * generator, and a net whose record has neither a hierarchy nor a location. VB-10 rules 1 to 4
+ * follow in the caller.
+ */
+static odin3_status provenance_name(blif_writer *wr, odin3_net_id net, bool *applied) {
+    uint64_t owner = 0;
+    *applied = false;
+    if (wr->opts->name_style != ODIN3_BLIF_NAMES_PROVENANCE ||
+        odin3_u64map_get(wr->net_port, net.v, &owner) ||
+        is_generator(wr, net, buf_bytes(&wr->cand))) {
+        return ODIN3_OK;
+    }
+    if (wr->prov_leaf == NULL) {
+        wr->prov_leaf = odin3_u64map_create(0);
+        if (wr->prov_leaf == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    odin3_status st = odin3_prov_name(wr->design, odin3_net_prov(wr->module, net),
+                                      buf_bytes(&wr->cand), wr->prov_leaf, &wr->prov);
+    if (st == ODIN3_OK && wr->prov.len != 0) {
+        odin3_strbuf_clear(&wr->cand);
+        st = odin3_strbuf_append(&wr->cand, buf_bytes(&wr->prov));
+        *applied = st == ODIN3_OK;
+    }
+    return st;
+}
+
+/* An unnamed net under --name-style provenance: its short name (the wire bit name, else `$n<ID>`)
+ * wrapped by provenance_name; *found is set when the wrapped name replaces the candidate. */
+static odin3_status generate_provenance(blif_writer *wr, odin3_net_id net, bool *found) {
+    if (wr->opts->name_style != ODIN3_BLIF_NAMES_PROVENANCE) {
+        return ODIN3_OK;
+    }
+    if (!*found) {
+        odin3_strbuf_clear(&wr->cand);
+        odin3_status st = odin3_strbuf_appendf(&wr->cand, "$n%u", (unsigned)net.v);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    bool applied = false;
+    odin3_status st = provenance_name(wr, net, &applied);
+    *found = *found || applied;
+    return st;
+}
+
 /* The generated name of key (an unnamed net, or 1 << 32 | an unconnected pin): the net's wire bit
  * name (in the VTR dialect its VB-10 form) when free, else take_numbered. */
 static odin3_status generate(blif_writer *wr, uint64_t key) {
@@ -479,6 +532,9 @@ static odin3_status generate(blif_writer *wr, uint64_t key) {
     bool found = false;
     bool changed = false;
     odin3_status st = pin ? ODIN3_OK : wire_bit_name(wr, self, &found);
+    if (st == ODIN3_OK && wr->vtr && !pin) {
+        st = generate_provenance(wr, self, &found);
+    }
     if (st == ODIN3_OK && found && wr->vtr) {
         st = legalise(wr, &wr->cand, self, &changed);
     }
@@ -737,7 +793,9 @@ static odin3_status name_named_vtr(blif_writer *wr, odin3_net_id net, uint32_t r
     odin3_strbuf_clear(&wr->cand);
     odin3_status st = odin3_strbuf_append(&wr->cand, own);
     if (st == ODIN3_OK && !is_generator(wr, net, own)) {
-        st = legalise(wr, &wr->cand, net, &changed);
+        bool applied = false;
+        st = provenance_name(wr, net, &applied);
+        st = st == ODIN3_OK ? legalise(wr, &wr->cand, net, &changed) : st;
     }
     if (st != ODIN3_OK) {
         return st;
@@ -2128,6 +2186,7 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
                         .vtr = opts->dialect == ODIN3_BLIF_DIALECT_VTR};
     odin3_strbuf_init(&wr->token);
     odin3_strbuf_init(&wr->cand);
+    odin3_strbuf_init(&wr->prov);
     odin3_strbuf_init(&wr->cover);
     odin3_strbuf_init(&wr->orig);
     odin3_strbuf_init(&wr->legal);
@@ -2211,6 +2270,8 @@ static void wr_free(blif_writer *wr) {
     odin3_util_free(wr->buffer);
     odin3_strbuf_free(&wr->token);
     odin3_strbuf_free(&wr->cand);
+    odin3_strbuf_free(&wr->prov);
+    odin3_u64map_destroy(wr->prov_leaf);
     odin3_strbuf_free(&wr->cover);
     odin3_strbuf_free(&wr->orig);
     odin3_strbuf_free(&wr->legal);
@@ -2238,8 +2299,6 @@ static odin3_status check_opts(const odin3_blif_write_opts *opts) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_blif_write_with: lut_k %u is outside %u..%u",
                   (unsigned)opts->lut_k, ODIN3_BLIF_VTR_MIN_K, ODIN3_BLIF_VTR_MAX_K);
         return ODIN3_ERR_INVALID_ARG;
-    } else if (provenance) {
-        why = "write_blif: --vtr: --name-style provenance is not available yet (3E-6)";
     }
     if (why != NULL) {
         odin3_log(ODIN3_LOG_ERROR, "%s", why);
