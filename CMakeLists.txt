@@ -121,6 +121,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/expr_fine.c
     src/passes/opt/clean.c
     src/passes/opt/merge.c
+    src/passes/opt/ffbits.c
     src/passes/opt/muxtree.c
     src/passes/opt/wreduce.c
     src/passes/opt/wreduce_op.c
@@ -768,6 +769,9 @@ if(BUILD_TESTING)
     target_sources(test_opt_cse PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_opt_cse PRIVATE
         ODIN3_MERGE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/merge")
+    # PHASE3 #48: opt_merge -ffbits.
+    odin3_add_unit_test(test_opt_ffbits)
+    target_sources(test_opt_ffbits PRIVATE tests/unit/proc_build.c)
     # 2F Task 9: opt_reduce.
     odin3_add_unit_test(test_opt_reduce)
     target_sources(test_opt_reduce PRIVATE tests/unit/proc_build.c)

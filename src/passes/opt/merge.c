@@ -25,6 +25,8 @@
  * B_SIGNED (row 14): a mixed-sign cell is unsigned (#57), so a swap would be sound, but such
  * cells are rare and kept apart; Yosys swaps them too.
  * A node with an unconnected input pin is no candidate (row 16), as in opt_reduce.
+ * With -ffbits (ffbits.c, PHASE3 #48) the bits of word FFs are merged as well, as Yosys does after
+ * techmap.
  *
  * An FF merge never loses an init (OP-2): the dropped Q's init bits are only read before
  * kit_connect, and only after it succeeds is the survivor's net settled to one init bit.
@@ -989,6 +991,25 @@ static odin3_status merge_module(odin3_opt_ctx *oc, uint32_t *removed) {
     return st;
 }
 
+/* -ffbits: merge FF bits, then the ordinary merge again (the merged Q nets can make the cells
+ * that read them identical), until the FF bits give nothing more. */
+typedef struct ffbits_totals {
+    uint32_t removed, ff_bits;
+} ffbits_totals;
+
+static odin3_status merge_ffbits(odin3_opt_ctx *oc, ffbits_totals *tot) {
+    uint32_t bits = 1;
+    odin3_status st = ODIN3_OK;
+    while (st == ODIN3_OK && bits > 0) {
+        bits = 0;
+        st = odin3_opt_ffbits_module(oc, &bits);
+        tot->removed += bits;
+        tot->ff_bits += bits;
+        st = st == ODIN3_OK && bits > 0 ? merge_module(oc, &tot->removed) : st;
+    }
+    return st;
+}
+
 odin3_status odin3_opt_merge_run(odin3_pass_ctx *ctx, odin3_design *design,
                                  const odin3_opt_opts *opts, odin3_opt_counts *counts) {
     if (ctx == NULL || design == NULL || opts == NULL || counts == NULL) {
@@ -996,6 +1017,7 @@ odin3_status odin3_opt_merge_run(odin3_pass_ctx *ctx, odin3_design *design,
         return ODIN3_ERR_INVALID_ARG;
     }
     uint32_t removed = 0;
+    ffbits_totals tot = {0, 0};
     odin3_status st = ODIN3_OK;
     for (uint32_t id = 1; st == ODIN3_OK && id < odin3_design_module_end(design); id++) {
         odin3_opt_ctx oc;
@@ -1005,11 +1027,17 @@ odin3_status odin3_opt_merge_run(odin3_pass_ctx *ctx, odin3_design *design,
         }
         oc.counts = counts;
         st = merge_module(&oc, &removed);
+        st = st == ODIN3_OK && opts->ffbits ? merge_ffbits(&oc, &tot) : st;
         odin3_opt_ctx_free(&oc);
     }
+    removed += tot.removed;
     counts->merge_removed += removed;
     if (st == ODIN3_OK) {
         odin3_log(ODIN3_LOG_INFO, "opt_merge: removed %" PRIu32 " cells", removed);
+        if (opts->ffbits) {
+            odin3_log(ODIN3_LOG_INFO, "opt_merge: -ffbits: merged %" PRIu32 " flip-flop bits",
+                      tot.ff_bits);
+        }
     }
     return st;
 }
