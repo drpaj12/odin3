@@ -475,6 +475,65 @@ class InitRunsTest(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in Path(raw).iterdir()), ["sim_build"])
             self.assertIn("FAIL: 1 mismatches in 1 vectors", out.getvalue())
 
+    def _classify(self, rows_by_mode: dict[str, list[str]]) -> tuple[int, str, list[list[str]]]:
+        """``_run_inits`` over a fake testbench whose dump depends on ``+rand+reset+N``."""
+        import io
+
+        with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as raw:
+            build = Path(raw) / "sim_build"
+            build.mkdir()
+            calls: list[list[str]] = []
+
+            def fake_call(argv: list[str], stdout: io.TextIOBase, stderr: int) -> int:
+                calls.append(argv)
+                stdout.write("tb clocks: clk\n" + "".join(rows_by_mode[argv[-1][-1]]))
+                return 0
+
+            out = io.StringIO()
+            code = qor_fcheck_run._run_inits(
+                [str(build / "Vtb"), "+verilator+seed+1", "+verilator+rand+reset+0"], OUTPUTS,
+                out, fake_call)
+            self.assertEqual(sorted(p.name for p in Path(raw).iterdir()), ["sim_build"])
+            return code, out.getvalue(), calls
+
+    def test_netlist_init_one_against_zero_rtl_varying_across_runs_is_untested(self) -> None:
+        # a netlist register with BLIF init 1 starts at 1, the zero-init RTL at 0: run 0 shows a
+        # mismatch; the RTL value changes with the other starts, so it is x: never a pass, no fail
+        rows = {"0": [vd((0, 1), (0, 0))], "1": [vd((1, 1), (0, 0))], "2": [vd((1, 1), (0, 0))]}
+        code, text, calls = self._classify(rows)
+        self.assertEqual((code, len(calls)), (3, 6))
+        self.assertIn("XDEPEND vec=0 port=q rtl=00x synth=001", text)
+        self.assertIn("UNTESTED:", text)
+        self.assertNotIn("PASS:", text)
+        self.assertEqual(qor_legs.fcheck_verdict(code, False, text), "error")
+
+    def test_netlist_init_one_against_stable_zero_rtl_fails(self) -> None:
+        rows = {m: [vd((0, 1), (0, 0))] for m in "012"}  # RTL 0 in every start, netlist 1
+        code, text, _ = self._classify(rows)
+        self.assertEqual(code, 1)
+        self.assertIn("MISMATCH vec=0 port=q rtl=000 synth=001", text)
+        self.assertEqual(qor_legs.fcheck_verdict(code, False, text), "fail")
+
+    def test_one_vector_both_kinds_and_clean_vectors_are_counted(self) -> None:
+        # vector 1: bit 0 differs (stable RTL), bit 2 differs and is x; vectors 0, 2 are clean
+        clean = vd((3, 3), (0, 0))
+        rows = {"0": [clean, vd((0, 5), (0, 0)), clean],
+                "1": [clean, vd((4, 5), (0, 0)), clean],
+                "2": [clean, vd((0, 5), (0, 0)), clean]}
+        code, text, _ = self._classify(rows)
+        self.assertEqual(code, 1)
+        self.assertIn("MISMATCH vec=1 port=q rtl=x00 synth=101", text)
+        self.assertIn("VCHECK_SUMMARY matched=2 mismatched=1 vectors=3 port_errors=1", text)
+
+    def test_keep_vectors_filters_a_dump(self) -> None:
+        with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as raw:
+            path = Path(raw) / "d.out"
+            path.write_text("hdr\n" + vd((1, 1), (0, 0)) + vd((2, 2), (0, 0)) + vd((3, 3), (0, 0)))
+            qor_fcheck_run.keep_vectors(path, {1})
+            self.assertEqual(path.read_text(), vd((2, 2), (0, 0)))
+            run = [vd((1, 2), (0, 0)), vd((1, 1), (0, 0)), vd((2, 2), (0, 0))]
+            self.assertEqual(qor_fcheck_run.mismatching_vectors(OUTPUTS, run), (3, [0]))
+
     def test_dumps_are_removed_after_the_verdict(self) -> None:
         import io
 

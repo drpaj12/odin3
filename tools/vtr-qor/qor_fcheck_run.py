@@ -13,10 +13,17 @@ its own). VTR's tree is only read (``-B``: no bytecode is written there).
 
 The second change is the initial state. Verilator is two-state: every register the RTL does not
 reset (or only assigns in some branches of a combinational block, an inferred latch) starts at 0,
-while a four-state simulator calls it ``x``. The netlist's latches start at the BLIF value, 0.
-The compiled testbench is therefore run first with all uninitialised RTL state 0 (the BLIF's
-state: same start, same behaviour expected) and compared on every output bit, as before; no
-mismatch is a ``PASS``. When there are mismatches it is run five more times, with all uninitialised
+while a four-state simulator calls it ``x``. The netlist side is Yosys ``read_blif`` +
+``write_verilog``: a ``.latch`` with init 0 or 1 becomes ``reg q = 1'h0|1'h1``, init 2, 3 or none
+leaves the register without an initialiser (so it follows the Verilator run's value), and the
+``dff``/``dffl`` of sim_hardblocks.v always start at 0. The compiled testbench is therefore run
+first with all uninitialised RTL state 0 and compared on every output bit, as before. That is the
+same start as the netlist only where the netlist starts at 0 (init 0, 2, 3, none, ``dff``); a
+netlist register with init 1 starts at 1 against an RTL 0, and the mismatch that follows is a
+mismatch, not a pass. A ``PASS`` covers this one start, the all-zero one, and no other: a netlist
+bug that shows only from another start is not seen when this run is clean. No mismatch on any
+bit in that run is a ``PASS``. When there are mismatches it is run five more times (only the
+vectors that mismatched are kept from each, so the dumps do not pile up), with all uninitialised
 state 1 and with four random states (``--x-initial unique`` plus ``+verilator+rand+reset+0|1|2``,
 a different ``+verilator+seed`` for each random one; the stimulus has a generator of its own, so
 it is the same in every run). A mismatch on a bit whose RTL value differs between those runs at
@@ -166,17 +173,19 @@ def _dump_rows(lines: Iterable[str], widths: Sequence[int]) -> Iterator[list[tup
             yield row
 
 
-def compare_runs(outputs: Sequence[tuple[str, int]],
-                 runs: Sequence[Iterable[str]]) -> InitVerdict:
+def compare_runs(outputs: Sequence[tuple[str, int]], runs: Sequence[Iterable[str]],
+                 indices: Sequence[int] | None = None) -> InitVerdict:
     """Compare ``runs[0]`` (all uninitialised state 0) vector by vector, RTL against netlist, on
     every output bit. With more runs (other initial states), a mismatching bit whose RTL value
     differs from ``runs[0]``'s in any of them at that vector is ``x`` (XDEPEND); every other
     mismatch is real. A vector is ``mismatched`` when it has a real mismatch, ``x_dependent``
     when it has only x ones, ``matched`` otherwise. Raises ``ValueError`` when the runs dumped a
-    different number of vectors."""
+    different number of vectors. ``indices`` names the vectors the dumps hold when they were
+    filtered (``keep_vectors``); the others are not counted."""
     widths = [w for _, w in outputs]
     verdict = InitVerdict()
-    for index, rows in enumerate(zip(*(_dump_rows(run, widths) for run in runs), strict=True)):
+    for pos, rows in enumerate(zip(*(_dump_rows(run, widths) for run in runs), strict=True)):
+        index = pos if indices is None else indices[pos]
         real_ports = x_ports = 0
         for i, (name, width) in enumerate(outputs):
             rtl, syn = rows[0][i]
@@ -206,6 +215,31 @@ def compare_runs(outputs: Sequence[tuple[str, int]],
         else:
             verdict.matched += 1
     return verdict
+
+
+def mismatching_vectors(outputs: Sequence[tuple[str, int]],
+                        run: Iterable[str]) -> tuple[int, list[int]]:
+    """The number of vectors in ``run`` and the indices of those with any RTL/netlist mismatch."""
+    bad = []
+    count = 0
+    for count, row in enumerate(_dump_rows(run, [w for _, w in outputs]), 1):
+        if any(rtl != syn for rtl, syn in row):
+            bad.append(count - 1)
+    return count, bad
+
+
+def keep_vectors(path: Path, keep: set[int]) -> None:
+    """Rewrite the dump ``path`` with only the ``VD`` lines of the vectors in ``keep``."""
+    tmp = path.with_suffix(".tmp")
+    index = 0
+    with open(path, encoding="utf-8", errors="replace") as src, open(
+            tmp, "w", encoding="utf-8") as dst:
+        for line in src:
+            if line.startswith("VD "):
+                if index in keep:
+                    dst.write(line)
+                index += 1
+    tmp.replace(path)
 
 
 def render_verdict(verdict: InitVerdict) -> str:
@@ -267,6 +301,7 @@ def _run_inits(argv: list[str], outputs: Sequence[tuple[str, int]], stdout: Any,
     checker's ``sim.out``); the return value is 0 for a pass, 1 for a fail, 3 for untested or
     nothing compared. The binary's own non-zero exit is returned as is, with its output."""
     dumps: list[Path] = []
+    header: list[str] = []
     try:
         for mode, offset in _INIT_RUNS:
             out, code = _run_init(argv, mode, offset, real_call)
@@ -274,16 +309,23 @@ def _run_inits(argv: list[str], outputs: Sequence[tuple[str, int]], stdout: Any,
                 stdout.write(out.read_text(encoding="utf-8", errors="replace"))
                 return code
             dumps.append(out)
-            if len(dumps) in (1, len(_INIT_RUNS)):
-                verdict = compare_runs(outputs, [_Lines(path) for path in dumps])
-                if len(dumps) == 1 and verdict.vectors == verdict.matched:
-                    break  # same start as the netlist and no mismatch: nothing to classify
+            if len(dumps) == 1:
+                with open(out, encoding="utf-8", errors="replace") as handle:
+                    header = [ln for ln in handle if not ln.startswith(("VD ", "RAW_"))]
+                total, bad = mismatching_vectors(outputs, _Lines(out))
+                if not bad:  # same start as the netlist and no mismatch: nothing to classify
+                    verdict = compare_runs(outputs, [_Lines(out)])
+                    break
+            keep_vectors(out, set(bad))  # the rest of a big dump is not needed again
+        else:
+            verdict = compare_runs(outputs, [_Lines(path) for path in dumps], bad)
+            clean = total - len(bad)  # the vectors that were not kept matched
+            verdict.matched += clean
+            verdict.compared_bits += sum(w for _, w in outputs) * clean
     except ValueError as exc:  # a dump that does not fit the ports, or runs of unequal length
         stdout.write(f"ERROR: the initial-state dumps cannot be compared: {exc}\n")
         return 3
-    with open(dumps[0], encoding="utf-8", errors="replace") as handle:
-        header = [ln for ln in handle if not ln.startswith(("VD ", "RAW_"))]
-    for path in dumps:  # one line per vector: tens of MB on a big design; the log has the verdict
+    for path in dumps:
         path.unlink()
     stdout.write("".join(header) + render_verdict(verdict))
     stdout.flush()
