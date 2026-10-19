@@ -79,6 +79,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -269,14 +270,36 @@ def odin3_passes(odin3: Path) -> frozenset[str]:
     return qor_legs.registered_passes(proc.stdout + "\n" + proc.stderr)
 
 
+NAME_STYLE_PASS = "write_blif --name-style provenance"
+
+
+def name_style_probe(odin3: Path) -> str | None:
+    """None when ``odin3`` writes ``--vtr --name-style provenance`` (3E-6), else the reason. A
+    module seam: tests replace it."""
+    with tempfile.TemporaryDirectory(prefix="vtr-qor-probe-") as work:
+        return qor_legs.probe_name_style(odin3, qor_legs.REPO_ROOT, Path(work) / "probe")
+
+
+def leg_lacks(leg: str, odin3: Path, passes: frozenset[str]) -> str | None:
+    """What ``odin3`` lacks for ``leg``: the first unregistered pass of its script, and for Oprov
+    (which needs 3E-6) ``write_blif --name-style provenance`` when the probe refuses it. None:
+    the leg can run."""
+    missing = qor_legs.leg_available(leg, passes)
+    if missing is None and qor_legs.normalise_leg(leg) == "Oprov" \
+            and name_style_probe(odin3) is not None:
+        return NAME_STYLE_PASS
+    return missing
+
+
 def check_legs(legs: Sequence[str], odin3: Path) -> None:
-    """E-QH5: every pass of every odin3 leg's script is registered."""
+    """E-QH5: every pass of every odin3 leg's script is registered (Oprov: and the provenance
+    name style works)."""
     needing = [leg for leg in legs if qor_legs.LEG_PASSES[leg]]
     if not needing:
         return
     passes = odin3_passes(odin3)
     for leg in needing:
-        missing = qor_legs.leg_available(leg, passes)
+        missing = leg_lacks(leg, odin3, passes)
         if missing is not None:
             raise HeavyError(EXIT_USAGE, f"leg {leg} needs pass '{missing}', which {odin3} does "
                                          "not register")
@@ -615,6 +638,9 @@ def after_run(results: Sequence[qor_sched.JobResult], *, req: PlanRequest, sets:
     """The runner's last step before its ``done:`` line: ``job.json`` ends, then ``latest``
     (logged to ``harness.log``)."""
     _end_job_records(results)
+    if req.seed != qor_legs.DEFAULT_SEED:
+        # a seed run (spec §6.3) covers only the designs near a bound: it is never a leg's latest
+        return
     for line in update_latest(req, sets, drift=ctx.vtr_drift):
         _warn(ctx, [f"{PREFIX}{line}"])
 
@@ -720,7 +746,7 @@ def cmd_run(args: argparse.Namespace, argv: Sequence[str]) -> int:
     odin3 = _odin3(args)
     check_legs(legs, odin3)
     req = PlanRequest(legs=legs, designs=designs, arch=args.arch, out=out, vtr_root=vtr_root,
-                      odin3=odin3, rerun=args.rerun)
+                      odin3=odin3, rerun=args.rerun, seed=args.seed)
     jobs = qor_sched.plan_jobs(req, sets)
     if args.stage_timeout is not None:
         jobs = [_with_stage_timeout(job, args.stage_timeout) for job in jobs]
@@ -836,6 +862,29 @@ def cmd_equiv(args: argparse.Namespace, argv: Sequence[str]) -> int:
                         frozenset({"timeout", "capped"}))
 
 
+RERUN_BAD = frozenset({"differs", "error"})
+
+
+def cmd_rerun_check(args: argparse.Namespace, argv: Sequence[str]) -> int:
+    """``rerun-check [--leg O] (--set S | --designs D)`` (heavy): spec §8.3 on existing ``ok`` O
+    jobs: the front end runs again into ``<J>/rerun.blif`` and its SHA-256 is compared with the
+    first run's; ``verdicts.rerun`` is ``same`` or ``differs``. Exit 1 for ``differs``,
+    ``error`` or a missing job, 3 for ``capped`` or ``timeout``."""
+    opts = RunOptions(out=_out(args), meminfo=MEMINFO)
+    jobs, missing, _ = _plan_existing(args, (qor_legs.normalise_leg(args.leg),), "rerun-check")
+    opts.scope = qor_heavy.reexec_under_lock(list(argv), script=SCRIPT, no_wait=args.no_wait,
+                                             lock=qor_heavy.HEAVY_LOCK)
+    _apply_admission(opts)
+
+    def step(job: Job) -> str:
+        return qor_sched.run_rerun(job, opts)
+
+    verdicts, stop = qor_sched.run_checks(jobs, opts, step)
+    counts = ", ".join(f"{verdicts.count(v)} {v}" for v in sorted(set(verdicts)))
+    _warn_log(opts, f"rerun-check done: {counts or 'nothing to check'}")
+    return _checks_exit(verdicts, missing, stop, RERUN_BAD, frozenset({"capped", "timeout"}))
+
+
 def _warn_log(opts: RunOptions, message: str) -> None:
     if opts.log is not None:
         opts.log.emit(message)
@@ -890,10 +939,13 @@ def cmd_crosscheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
 # -- nightly -------------------------------------------------------------------------------------
 
 
-def _available_legs(odin3: Path) -> tuple[str, ...]:
+def _available_legs(odin3: Path, *, on_request: Collection[str] = ()) -> tuple[str, ...]:
+    """The legs ``odin3`` can run (P always). Oprov runs once at M3 and on request (spec §3.6):
+    only ``on_request`` names it in, so the nightly never does."""
     passes = odin3_passes(odin3) if odin3.is_file() else frozenset()
-    return tuple(leg for leg in qor_legs.LEGS if leg == "P"
-                 or (passes and qor_legs.leg_available(leg, passes) is None))
+    return tuple(leg for leg in qor_legs.LEGS
+                 if leg == "P" or ((leg != "Oprov" or leg in on_request)
+                                   and passes and leg_lacks(leg, odin3, passes) is None))
 
 
 def _refused_counter(out: Path) -> Callable[[], int]:
@@ -1494,7 +1546,7 @@ def _legs_item(odin3: Path) -> CheckResult:
     passes = odin3_passes(odin3)
     available, missing = [], []
     for leg in qor_sched.PLAN_LEG_ORDER:
-        lacking = qor_legs.leg_available(leg, passes)
+        lacking = leg_lacks(leg, odin3, passes)
         if lacking is None:
             available.append(leg)
         else:
@@ -1578,6 +1630,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--rerun", action="store_true", help="ignore the job cache")
     run.add_argument("--fcheck", action="store_true", help="the Verilator check after each job")
     run.add_argument("--keep-netlists", action="store_true")
+    run.add_argument("--seed", type=_positive, default=qor_legs.DEFAULT_SEED, metavar="N",
+                     help="VPR seed (default 1; N > 1 is a new key and never moves latest)")
     run.add_argument("--job-timeout", type=_positive, metavar="S")
     run.add_argument("--stage-timeout", type=_positive, metavar="S")
     run.add_argument("--dry-run", action="store_true", help="print the jobs; run nothing")
@@ -1597,6 +1651,12 @@ def _parser() -> argparse.ArgumentParser:
     equiv.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
                        help="gate, extra, smoke")
     equiv.add_argument("--designs", default="", metavar="D[,D...]")
+    rerun = sub.add_parser("rerun-check", parents=[common],
+                           help="the O front end again, SHA-256 against the first run (heavy)")
+    rerun.add_argument("--leg", default="O", choices=("O",), metavar="O")
+    rerun.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
+                       help="gate, extra, smoke")
+    rerun.add_argument("--designs", default="", metavar="D[,D...]")
     nightly = sub.add_parser("nightly", parents=[common],
                              help="the unattended night's steps (started inside heavy-run)")
     nightly.add_argument("--budget", type=float, default=qor_nightly.NIGHTLY_BUDGET_H, metavar="H",
@@ -1630,8 +1690,8 @@ def _parser() -> argparse.ArgumentParser:
 
 COMMANDS: dict[str, Callable[[argparse.Namespace, Sequence[str]], int]] = {
     "doctor": cmd_doctor, "run": cmd_run, "fcheck": cmd_fcheck, "equiv": cmd_equiv,
-    "nightly": cmd_nightly, "check-lib": cmd_check_lib, "crosscheck": cmd_crosscheck,
-    "status": cmd_status,
+    "rerun-check": cmd_rerun_check, "nightly": cmd_nightly, "check-lib": cmd_check_lib,
+    "crosscheck": cmd_crosscheck, "status": cmd_status,
     "clean": cmd_clean, "table": cmd_table, "gate": cmd_gate, "publish": cmd_publish,
 }
 

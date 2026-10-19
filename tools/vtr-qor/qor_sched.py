@@ -1750,6 +1750,68 @@ def run_equiv(design: str, o_job: Job, oprime_job: Job, opts: RunOptions) -> str
     return verdict
 
 
+def _rerun_reference(job: Job) -> str | None:
+    """The first run's netlist SHA-256: ``<J>/<d>.blif.sha256``, else the kept ``<d>.blif``'s."""
+    sidecar = job.job_dir / f"{job.design}.blif.sha256"
+    if _regular(sidecar):
+        words = sidecar.read_text(encoding="utf-8", errors="replace").split()
+        if words:
+            return words[0]
+    kept = job.job_dir / f"{job.design}.blif"
+    return file_sha256(kept) if _regular(kept) else None
+
+
+def _rerun_outcome(job: Job, cmd: Command, opts: RunOptions, scope: ScopeInfo) -> str:
+    oom_before = qor_heavy.oom_kills(scope)
+    outcome = run_command(cmd, opts, deadline=capped_deadline(opts, opts.job_timeout_s[job.group]))
+    if outcome.kind == ABORTED:
+        _emit(opts, outcome.error)
+    elif outcome.kind == "error":
+        _emit(opts, f"rerun-check: {_label(job)}: {outcome.error}")
+    if outcome.kind == TIMEOUT:
+        _emit(opts, f"rerun-check: {_label(job)}: timeout (job limit "
+                    f"{opts.job_timeout_s[job.group]} s or the night's deadline)")
+        return "timeout"
+    if outcome.returncode is None:
+        return "error"
+    if outcome.returncode != 0:
+        capped = qor_heavy.oom_kills(scope) > oom_before
+        _emit(opts, f"rerun-check: {_label(job)}: front end exit {outcome.returncode}; see "
+                    f"{cmd.stdout}")
+        return "capped" if capped else "error"
+    return "ok"
+
+
+def run_rerun(job: Job, opts: RunOptions) -> str:
+    """Spec §8.3: the O job's front end again in a fresh process into ``<J>/rerun.blif``, its
+    SHA-256 against the first run's: ``same`` or ``differs`` (``error``, ``capped``, ``timeout``
+    when the rerun itself did not finish, or the first netlist's SHA-256 is gone). The verdict
+    goes to ``metrics.json`` ``verdicts.rerun``; ``rerun.blif`` is deleted either way (through
+    ``safe_rmtree``); ``rerun.log`` stays."""
+    scope = _heavy_scope(opts)
+    reference = _rerun_reference(job)
+    rerun = job.job_dir / qor_legs.RERUN_BLIF
+    if reference is None:
+        _emit(opts, f"rerun-check: {_label(job)}: no first netlist or "
+                    f"{job.design}.blif.sha256 to compare with")
+        verdict = "error"
+    elif not job.commands:
+        verdict = "error"
+    else:
+        cmd = qor_legs.rerun_command(job.commands[0], job.job_dir, job.design)
+        verdict = _rerun_outcome(job, cmd, opts, scope)
+        if verdict == "ok":
+            fresh = file_sha256(rerun) if _regular(rerun) else None
+            verdict = "error" if fresh is None else ("same" if fresh == reference else "differs")
+            if fresh is None:
+                _emit(opts, f"rerun-check: {_label(job)}: the front end wrote no {rerun.name}")
+    if rerun.exists():
+        qor_heavy.safe_rmtree(rerun, job_out_root(job))
+    record_verdict(job, "rerun", verdict)
+    _emit(opts, f"rerun-check {_label(job)}: {verdict}")
+    return verdict
+
+
 def run_checks(jobs: Sequence[Job], opts: RunOptions, step: Callable[[Job], str]
                ) -> tuple[list[str], int]:
     """Run ``step`` (a check on one finished job: ``run_fcheck``, ``run_equiv``) over ``jobs``
