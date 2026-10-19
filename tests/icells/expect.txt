@@ -1,0 +1,28 @@
+# 5.2 icells-check: the designs a level cannot take, and why (spec section 5, T-5). Format:
+#   <level> <design file name> <outcome> <reason>
+# An entry for a design that passes is stale and fails the run. Nothing is skipped silently.
+#
+# X-11: three micros instantiate the VTR hard blocks `adder` and `multiply`; the level scripts read
+# no tech library, so the design itself does not read (unresolved_module). They are covered by
+# the hard-cell instance tests of read_verilog (test_read_verilog_lib) and by the LPM unit tests.
+word adder_hard_block.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+word hard_adder_cin_propagation.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+word multiply_hard_block.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+gate adder_hard_block.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+gate hard_adder_cin_propagation.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+gate multiply_hard_block.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+lut adder_hard_block.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+lut hard_adder_cin_propagation.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+lut multiply_hard_block.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+lpm adder_hard_block.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+lpm hard_adder_cin_propagation.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+lpm multiply_hard_block.v error:script needs lib/vtr.o3lib; the level scripts read no tech library
+#
+# X-12: Yosys 0.55 has no SAT model of $pow (spec 20.2 of 2F), so the equivalence of a design with
+# a $pow cell is unproven at the word and LPM levels; the instance leg (type, name, parameters and
+# pins of the $pow instance) still runs, so the cell itself is checked.
+# `lower` has no bit-level form of $pow, so the gate and LUT levels cannot take it.
+word cell_pow.v unproven Yosys has no SAT model of $pow
+lpm cell_pow.v unproven Yosys has no SAT model of $pow
+gate cell_pow.v error:script lower has no bit-level form of $pow
+lut cell_pow.v error:script lower has no bit-level form of $pow

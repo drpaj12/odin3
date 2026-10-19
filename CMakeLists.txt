@@ -2963,6 +2963,39 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --pre proc --lower-args "--neg-edge keep" ${_lower_equiv_neg})
         set_tests_properties(lower_cells_equiv lower_cells_equiv_neg_keep
                              PROPERTIES LABELS lower SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        # 5.2 (spec section 9): Verilog written at the word, gate, LUT and LPM level reads back with
+        # `read_verilog -icells` equivalent (tools/icells-check). The unit tests of the tool, then
+        # one test per level over the per-cell designs (tests/icells/cell_*.v) and over every micro
+        # of tests/micro/verilog/micro (68 files, a few minutes per level in Debug); the designs a
+        # level cannot take are listed with their reason in tests/icells/expect.txt. The gate and
+        # LUT levels compare BLIF with equiv-check (ABC), so they need the ABC build.
+        add_test(NAME icells_check_python
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_YOSYS055=${ODIN3_YOSYS055}
+                    ${Python3_EXECUTABLE} -m unittest tests.tools.test_icells_check
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(icells_check_python PROPERTIES LABELS "icells;unit" TIMEOUT 300)
+        file(GLOB _icells_cells ${PROJECT_SOURCE_DIR}/tests/icells/cell_*.v)
+        file(GLOB _icells_micros ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro/*.v)
+        list(SORT _icells_cells)
+        list(SORT _icells_micros)
+        set(_icells_levels word lpm)
+        if(ODIN3_WITH_ABC)
+            list(APPEND _icells_levels gate lut)
+        endif()
+        foreach(_lvl IN LISTS _icells_levels)
+            foreach(_set IN ITEMS cells micros)
+                add_test(NAME icells_${_set}_${_lvl}
+                    COMMAND ${CMAKE_COMMAND} -E env TMPDIR=${PROJECT_BINARY_DIR}/icells_tmp
+                            ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                            ${PROJECT_SOURCE_DIR}/tools/icells-check/icells-check
+                            --level ${_lvl} --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                            --expect ${PROJECT_SOURCE_DIR}/tests/icells/expect.txt
+                            ${_icells_${_set}})
+                set_tests_properties(icells_${_set}_${_lvl} PROPERTIES LABELS "icells;micro"
+                                     SKIP_RETURN_CODE 77 TIMEOUT 1800)
+            endforeach()
+        endforeach()
+        file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/icells_tmp)
         # 3B Task 9 (spec 14.4, 14.5): the lower corpus over the micros, smallest first, through
         # heavy-run: lower_run_micro (ODIN3_OK, check FULL, the netlist view written as BLIF),
         # lower_sim_micro (the simulator before and after; a type without a hook is `skipped`,

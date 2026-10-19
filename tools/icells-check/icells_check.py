@@ -12,7 +12,8 @@ levels: the netlist as it was written) and ``W.v`` (``write_verilog``). Then, wi
 IR invariants), ``[read_techlib L;] read_verilog -icells W.v; proc; opt_clean`` writes
 ``W2.v`` and then the read-back (``R.il``, or ``R.blif`` after ``lower``, so the netlist can be
 written as BLIF at the gate and LUT levels), and the same read of ``W2.v`` writes ``W3.v``. The
-legs, in order; the first failure of a design is printed:
+legs (the text legs 3 and 4 run before the proof 2, so a design whose proof is unproven still
+has them); the first failure of a design is printed:
 
 1. ``read``: the read-back runs and exits 0.
 2. ``equivalent``: the gold and the read-back. Word and LPM levels: RTLIL through
@@ -351,8 +352,11 @@ def run_legs(cfg: Config, level: str, design: Path, work: Path) -> Verdict:
         if done.returncode != 0:
             return Verdict("fail:read", last_lines(done))
         logs.append((done.stderr or "") + (done.stdout or ""))
+    text = judge_text(paths, census(logs[0]), census(logs[1]))
+    if text.outcome != "ok":
+        return text
     equal = judge_equivalent(cfg, level, paths, design.stem + "." + level, work)
-    return equal if equal.outcome != "ok" else judge_text(paths, census(logs[0]), census(logs[1]))
+    return equal if equal.outcome != "ok" else text
 
 
 def run_one(cfg: Config, level: str, design: Path, work: Path) -> Verdict:

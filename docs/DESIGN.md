@@ -247,7 +247,10 @@ would know (`dffeas`, `cyclonev_lcell_comb`, `cyclonev_io_ibuf`, `cyclonev_io_ob
 `cycloneive_lcell_comb`, `cycloneive_io_ibuf`, `cycloneive_io_obuf`; the VQM library would have grown in
 Phase 6, removed by D10) resolve through that library. Any other unresolved instance is `unresolved_module`,
 unless `read_verilog --auto-blackbox` makes it an implicit black box (2D EL-11: named
-connections, `inout` ports sized by the first instance, an info line naming it).
+connections, `inout` ports sized by the first instance, an info line naming it). `read_verilog -icells` (5.2) is the one
+exception for names beginning with `$`: an instance of a registered cell type of that name (`\$mem`,
+`\$shiftx`, `\$dffsr`, ...) is that cell, as in Yosys; it is how the Verilog the writer emits at the
+word, gate, LUT and LPM levels reads back.
 
 *Errors* are located at the project-file or source line (`file:line`) where there is one:
 `missing_file`, `unknown_key`, `unknown_option`, `unknown_file_type`, `unsupported_input_type`,

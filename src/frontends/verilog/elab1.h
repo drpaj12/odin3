@@ -243,9 +243,10 @@ void odin3_elab1_reject_def(odin3_elab1 *e1, uint32_t def);
  * libraries: the info line "module 'N' found in libraries 'A', 'B'; using 'A.N'", once per name);
  * a library-unit MODULE, the first in store order; a UDP_DECL; a registered cell type of
  * granularity hard or black box (never a built-in: none has those granularities, so a `$` name
- * never resolves to one); with --auto-blackbox an implicit black box (the info line "module 'N'
- * is not defined; it becomes an implicit black box (--auto-blackbox)", once per name); otherwise
- * ODIN3_RES_NONE, which the caller reports as unresolved_module. The info lines are unlocated.
+ * never resolves to one here; under -icells odin3_elab1_resolve_icell decides a `$` name first);
+ * with --auto-blackbox an implicit black box (the info line "module 'N' is not defined; it becomes
+ * an implicit black box (--auto-blackbox)", once per name); otherwise ODIN3_RES_NONE, which the
+ * caller reports as unresolved_module. The info lines are unlocated.
  */
 odin3_elab_res odin3_elab1_resolve(odin3_elab1 *e1, uint32_t name, uint32_t library);
 
