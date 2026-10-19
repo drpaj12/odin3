@@ -31,6 +31,16 @@ Subcommands here: ``doctor``, ``run``, ``fcheck``, ``status``, ``clean``, ``tabl
   ``differs``, ``ram``, ``multiclock``, ``timeout``, ``capped``, ``error``). Exit 1 for
   ``differs`` or
   ``error`` or a missing job, 3 for ``timeout`` or ``capped``.
+- ``rerun-check [--leg O] (--set S | --designs D) [--resume]`` (heavy) runs the O front end
+  again into ``<J>/rerun.blif`` and compares its SHA-256 with the first run's (spec §8.3); it
+  writes ``verdicts.rerun`` (``same`` or ``differs``) and deletes ``rerun.blif``. Exit 1 for
+  ``differs``, ``error`` or a missing job, 3 for ``capped`` or ``timeout``. ``run --seed N`` is
+  another VPR seed (a new key that never moves ``latest``); ``table --seeds 2,3`` shows the seed
+  jobs beside seed 1 (spec §6.3).
+- ``exit-run --label TEXT [--budget H]`` (heavy, started inside ``tools/heavy-run`` like
+  ``nightly``) runs ``qor_exit``'s eight steps; started again with the label it resumes. Exit
+  ``gate``'s when every job ran, else the run's code. ``Oprov`` needs 3E-6: it is available only
+  when ``odin3`` writes ``--name-style provenance`` (``name_style_probe``).
 - ``status`` prints one line per (arch, leg) of the current VTR commit:
   ``<arch> <leg> latest <key12|-> ok <n> failed <m> age <d>d``.
 - ``clean [--keep N]`` runs retention (spec §5.4, ``qor_sched.prune``) over every
@@ -70,6 +80,7 @@ import argparse
 import contextlib
 import dataclasses
 import functools
+import hashlib
 import io
 import json
 import math
@@ -90,6 +101,7 @@ from types import MappingProxyType
 _HERE = str(Path(__file__).resolve().parent)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
+import qor_exit  # noqa: E402
 import qor_heavy  # noqa: E402
 import qor_legs  # noqa: E402
 import qor_netstats  # noqa: E402
@@ -269,14 +281,40 @@ def odin3_passes(odin3: Path) -> frozenset[str]:
     return qor_legs.registered_passes(proc.stdout + "\n" + proc.stderr)
 
 
+NAME_STYLE_PASS = "write_blif --name-style provenance"
+
+
+def name_style_probe(odin3: Path) -> str | None:
+    """None when ``odin3`` writes ``--vtr --name-style provenance`` (3E-6), else the reason. A
+    module seam: tests replace it."""
+    root = qor_heavy.HEAVY_DIR / "vtr-qor-probe"
+    work = root / str(os.getpid())
+    try:
+        return qor_legs.probe_name_style(odin3, qor_legs.REPO_ROOT, work)
+    finally:
+        qor_heavy.safe_rmtree(work, root)
+
+
+def leg_lacks(leg: str, odin3: Path, passes: frozenset[str]) -> str | None:
+    """What ``odin3`` lacks for ``leg``: the first unregistered pass of its script, and for Oprov
+    (which needs 3E-6) ``write_blif --name-style provenance`` when the probe refuses it. None:
+    the leg can run."""
+    missing = qor_legs.leg_available(leg, passes)
+    if missing is None and qor_legs.normalise_leg(leg) == "Oprov" \
+            and name_style_probe(odin3) is not None:
+        return NAME_STYLE_PASS
+    return missing
+
+
 def check_legs(legs: Sequence[str], odin3: Path) -> None:
-    """E-QH5: every pass of every odin3 leg's script is registered."""
+    """E-QH5: every pass of every odin3 leg's script is registered (Oprov: and the provenance
+    name style works)."""
     needing = [leg for leg in legs if qor_legs.LEG_PASSES[leg]]
     if not needing:
         return
     passes = odin3_passes(odin3)
     for leg in needing:
-        missing = qor_legs.leg_available(leg, passes)
+        missing = leg_lacks(leg, odin3, passes)
         if missing is not None:
             raise HeavyError(EXIT_USAGE, f"leg {leg} needs pass '{missing}', which {odin3} does "
                                          "not register")
@@ -615,6 +653,9 @@ def after_run(results: Sequence[qor_sched.JobResult], *, req: PlanRequest, sets:
     """The runner's last step before its ``done:`` line: ``job.json`` ends, then ``latest``
     (logged to ``harness.log``)."""
     _end_job_records(results)
+    if req.seed != qor_legs.DEFAULT_SEED:
+        # a seed run (spec §6.3) covers only the designs near a bound: it is never a leg's latest
+        return
     for line in update_latest(req, sets, drift=ctx.vtr_drift):
         _warn(ctx, [f"{PREFIX}{line}"])
 
@@ -672,6 +713,7 @@ class Admission:
     text: str
     expected_s: Callable[[Job], float]
     begun: float = field(default_factory=lambda: time.monotonic())
+    owner: str = "nightly"  # the command whose lines say "not started" (nightly or exit-run)
 
     def start(self) -> tuple[float, str, Callable[[Job], float]]:
         """The one deadline of the night: fixed when the admission is made, so each later step
@@ -690,6 +732,7 @@ def _apply_admission(opts: RunOptions) -> None:
     """The nightly's deadline (plan Task 13) on a run or a check; every non-job step honours it."""
     if ADMISSION is not None:
         opts.deadline, opts.deadline_text, opts.expected_s = ADMISSION.start()
+        opts.deadline_owner = ADMISSION.owner
 
 
 def run_inner(argv: Sequence[str]) -> int:
@@ -720,7 +763,7 @@ def cmd_run(args: argparse.Namespace, argv: Sequence[str]) -> int:
     odin3 = _odin3(args)
     check_legs(legs, odin3)
     req = PlanRequest(legs=legs, designs=designs, arch=args.arch, out=out, vtr_root=vtr_root,
-                      odin3=odin3, rerun=args.rerun)
+                      odin3=odin3, rerun=args.rerun, seed=args.seed)
     jobs = qor_sched.plan_jobs(req, sets)
     if args.stage_timeout is not None:
         jobs = [_with_stage_timeout(job, args.stage_timeout) for job in jobs]
@@ -771,6 +814,30 @@ def _plan_existing(args: argparse.Namespace, legs: tuple[str, ...], what: str
     return found, missing, out
 
 
+RESUME_RETRY = MappingProxyType({
+    "fcheck": frozenset({"skipped", "error", "capped", "timeout"}),
+    "rerun": frozenset({"skipped", "error", "capped", "timeout"}),
+    "equiv": frozenset({"skipped", "error", "capped"}),  # an equiv timeout is a measured result
+})
+
+
+def _pending(jobs: Sequence[Job], name: str, args: argparse.Namespace) -> list[Job]:
+    """``--resume`` (exit-run): keep the jobs whose ``verdicts.<name>`` still needs a run; a
+    verdict already measured is kept as it is. Without ``--resume`` every job."""
+    if not getattr(args, "resume", False):
+        return list(jobs)
+    pending = []
+    for job in jobs:
+        try:
+            record = json.loads((job.job_dir / "metrics.json").read_text(encoding="utf-8"))
+            held = record["verdicts"][name]
+        except (OSError, ValueError, KeyError, TypeError):
+            held = "skipped"
+        if held in RESUME_RETRY[name]:
+            pending.append(job)
+    return pending
+
+
 def _checks_exit(verdicts: Sequence[str], missing: int, stop: int, bad: frozenset[str],
                  incomplete: frozenset[str]) -> int:
     """0 when every verdict is good; 1 for a ``bad`` verdict or a missing job; 3 for an
@@ -788,6 +855,7 @@ def cmd_fcheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
     opts = RunOptions(out=_out(args), meminfo=MEMINFO)
     _check_run_options(args, opts)
     jobs, missing, _ = _plan_existing(args, _legs(args.leg), "fcheck")
+    jobs = _pending(jobs, "fcheck", args)
     opts.scope = qor_heavy.reexec_under_lock(list(argv), script=SCRIPT, xl=args.xl,
                                              no_wait=args.no_wait, lock=qor_heavy.HEAVY_LOCK)
     _apply_admission(opts)
@@ -824,6 +892,8 @@ def cmd_equiv(args: argparse.Namespace, argv: Sequence[str]) -> int:
     opts.scope = qor_heavy.reexec_under_lock(list(argv), script=SCRIPT, no_wait=args.no_wait,
                                              lock=qor_heavy.HEAVY_LOCK)
     _apply_admission(opts)
+    wanted = {id(o) for o in _pending([o for o, _ in pairs], "equiv", args)}
+    pairs = [(o, prime) for o, prime in pairs if id(o) in wanted]
     by_o = {id(o): prime for o, prime in pairs}
 
     def step(job: Job) -> str:
@@ -834,6 +904,30 @@ def cmd_equiv(args: argparse.Namespace, argv: Sequence[str]) -> int:
     _warn_log(opts, f"equiv done: {counts or 'nothing to check'}")
     return _checks_exit(verdicts, missing, stop, EQUIV_BAD,
                         frozenset({"timeout", "capped"}))
+
+
+RERUN_BAD = frozenset({"differs", "error"})
+
+
+def cmd_rerun_check(args: argparse.Namespace, argv: Sequence[str]) -> int:
+    """``rerun-check [--leg O] (--set S | --designs D)`` (heavy): spec §8.3 on existing ``ok`` O
+    jobs: the front end runs again into ``<J>/rerun.blif`` and its SHA-256 is compared with the
+    first run's; ``verdicts.rerun`` is ``same`` or ``differs``. Exit 1 for ``differs``,
+    ``error`` or a missing job, 3 for ``capped`` or ``timeout``."""
+    opts = RunOptions(out=_out(args), meminfo=MEMINFO)
+    jobs, missing, _ = _plan_existing(args, (qor_legs.normalise_leg(args.leg),), "rerun-check")
+    jobs = _pending(jobs, "rerun", args)
+    opts.scope = qor_heavy.reexec_under_lock(list(argv), script=SCRIPT, no_wait=args.no_wait,
+                                             lock=qor_heavy.HEAVY_LOCK)
+    _apply_admission(opts)
+
+    def step(job: Job) -> str:
+        return qor_sched.run_rerun(job, opts)
+
+    verdicts, stop = qor_sched.run_checks(jobs, opts, step)
+    counts = ", ".join(f"{verdicts.count(v)} {v}" for v in sorted(set(verdicts)))
+    _warn_log(opts, f"rerun-check done: {counts or 'nothing to check'}")
+    return _checks_exit(verdicts, missing, stop, RERUN_BAD, frozenset({"capped", "timeout"}))
 
 
 def _warn_log(opts: RunOptions, message: str) -> None:
@@ -880,8 +974,12 @@ def cmd_crosscheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
     lines = []
     for result in sorted(work.glob("**/parse_results.txt")):
         for design, row in qor_nightly.parse_rows(result).items():
-            lines += qor_nightly.crosscheck_lines(design, row,
-                                                  _harness_row(out, vtr12, arch, design))
+            harness = _harness_row(out, vtr12, arch, design)
+            if not harness:  # no P job to compare with: one line, not every key "(absent)"
+                lines.append(f"{PREFIX}crosscheck: {design}: no harness P job; run "
+                             f"vtr-qor run --leg P --designs {design}")
+                continue
+            lines += qor_nightly.crosscheck_lines(design, row, harness)
     for line in lines:
         print(line, file=sys.stderr)
     return EXIT_FAIL if lines else EXIT_OK
@@ -890,10 +988,13 @@ def cmd_crosscheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
 # -- nightly -------------------------------------------------------------------------------------
 
 
-def _available_legs(odin3: Path) -> tuple[str, ...]:
+def _available_legs(odin3: Path, *, on_request: Collection[str] = ()) -> tuple[str, ...]:
+    """The legs ``odin3`` can run (P always). Oprov runs once at M3 and on request (spec §3.6):
+    only ``on_request`` names it in, so the nightly never does."""
     passes = odin3_passes(odin3) if odin3.is_file() else frozenset()
-    return tuple(leg for leg in qor_legs.LEGS if leg == "P"
-                 or (passes and qor_legs.leg_available(leg, passes) is None))
+    return tuple(leg for leg in qor_legs.LEGS
+                 if leg == "P" or ((leg != "Oprov" or leg in on_request)
+                                   and passes and leg_lacks(leg, odin3, passes) is None))
 
 
 def _refused_counter(out: Path) -> Callable[[], int]:
@@ -1018,6 +1119,91 @@ def cmd_nightly(args: argparse.Namespace, argv: Sequence[str]) -> int:
                           lambda job: qor_nightly.expected_minutes(job, out, sets) * 60.0)
     try:
         return _run_night(args, ctx, state, plan)
+    finally:
+        ADMISSION = None
+
+
+# -- exit-run ----------------------------------------------------------------------------------
+
+
+def _exit_keys(args: argparse.Namespace, out: Path, vtr_root: Path, odin3: Path,
+               legs: Sequence[str], sets: Sets) -> Callable[[], dict[str, str]]:
+    """The leg key of each of ``legs`` for THIS ``odin3`` and these files (the planner's, the
+    same ones step 1 ran under): step 7 and the seed candidates use these and never ``latest``."""
+    def keys() -> dict[str, str]:
+        req = PlanRequest(legs=tuple(legs), designs=(sets.order[0],), arch="k6", out=out,
+                          vtr_root=vtr_root, odin3=odin3, rerun=False)
+        return {job.leg: job.key12 for job in qor_sched.plan_jobs(req, sets)}
+    return keys
+
+
+def _exit_candidates(args: argparse.Namespace, out: Path, keys: Callable[[], dict[str, str]]
+                     ) -> Callable[[], list[str] | None]:
+    """Step 6's designs: ``seed_candidates`` over this run's P and O keys; None while either leg
+    has no job directory under its key."""
+    def candidates() -> list[str] | None:
+        pinned = keys()
+        try:
+            runs = qor_table.load_runs(out, _table_vtr12(args), qor_legs.ARCH_BASES["k6"],
+                                       {leg: pinned[leg] for leg in ("P", "O") if leg in pinned},
+                                       legs=("P", "O"))
+            bands = qor_table.load_bands(qor_table.BANDS_JSON)
+        except (HeavyError, OSError, ValueError):
+            return None
+        return qor_table.seed_candidates(runs, bands)
+    return candidates
+
+
+def _exit_fingerprint(odin3: Path, vtr_root: Path, legs: Sequence[str]) -> str:
+    """What recorded steps are valid for: the odin3 build, the VTR commit, the inputs that enter
+    the keys (``sets.json``, ``bands.json``, the lib, the ABC script, the TSVs), the legs and the
+    seeds. Any change discards the state (the job cache still keeps what holds)."""
+    repo = qor_legs.REPO_ROOT
+    parts = [qor_sched.odin3_build_id(odin3), qor_legs.vtr_commit(vtr_root), ",".join(legs),
+             ",".join(str(seed) for seed in qor_exit.SEEDS)]
+    files = [qor_sched.SETS_JSON, qor_table.BANDS_JSON, repo / qor_legs.LIB_REL,
+             repo / qor_legs.ABC_SCRIPT_REL,
+             *(qor_table.REPO_INPUTS / name for name in TSV_INPUTS)]
+    parts += [qor_sched._sha_or(path, "absent") or "absent" for path in files]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
+
+
+def cmd_exit_run(args: argparse.Namespace, argv: Sequence[str]) -> int:
+    """``exit-run --label TEXT [--budget H]`` (heavy, M3): the eight steps of ``qor_exit`` in
+    process, in the lock the controller started it in (as ``nightly``; outside, ``require_heavy``
+    refuses and nothing runs). No ``--xl`` and no delayed start (points (c), (d)). It shares the
+    nightly's admission deadline and ``expected_minutes``; started again with the same label it
+    resumes. Exit: ``gate``'s when every job ran, else the run's code."""
+    global ADMISSION  # noqa: PLW0603 (the module seam read by cmd_run)
+    qor_heavy.require_heavy()
+    if args.arch != "k6":
+        raise HeavyError(EXIT_USAGE, "exit-run runs the k6 gate and the EArch smoke itself; "
+                                     "--arch is not accepted")
+    out, odin3, vtr_root = _out(args), _odin3(args), _vtr_root(args)
+    if not odin3.is_file():
+        raise HeavyError(EXIT_USAGE, f"exit-run: odin3 binary not found: {odin3} "
+                                     "(build it, or pass --odin3)")
+    label = _label_arg(args.label)
+    now = datetime.now().astimezone()
+    deadline = qor_nightly.nightly_deadline(now, args.budget)
+    sets = qor_sched.load_sets()
+    passes = odin3_passes(odin3)
+    lacks = {leg: lack for leg in qor_legs.LEGS if leg != "P"
+             and (lack := leg_lacks(leg, odin3, passes)) is not None}
+    common = ["--vtr-root", str(vtr_root), "--odin3", str(odin3), "--out", str(out),
+              *(["--allow-vtr-drift"] if args.allow_vtr_drift else [])]
+    legs = tuple(leg for leg in qor_legs.LEGS if leg not in lacks and leg != "Oprov")
+    keys = _exit_keys(args, out, vtr_root, odin3, legs, sets)
+    ctx = qor_exit.ExitContext(
+        out=out, label=label, sets=sets, legs=legs, lacks=lacks, common=tuple(common),
+        run_inner=run_inner, emit=lambda m: _warn_log(RunOptions(out=out), m),
+        candidates=_exit_candidates(args, out, keys), keys=keys,
+        fingerprint=_exit_fingerprint(odin3, vtr_root, legs))
+    ADMISSION = Admission((deadline - now).total_seconds(), deadline.strftime("%H:%M"),
+                          lambda job: qor_nightly.expected_minutes(job, out, sets) * 60.0,
+                          owner="exit-run")
+    try:
+        return qor_exit.run_exit(ctx)
     finally:
         ADMISSION = None
 
@@ -1173,6 +1359,27 @@ def gate_designs(sets: Sets, arch_key: str, selected: Collection[str]) -> tuple[
     return tuple(design for design in base if design in selected)
 
 
+def _seed_runs(args: argparse.Namespace, legs: Sequence[str], designs: Collection[str],
+               sets: Sets) -> dict[int, list[qor_table.Run]]:
+    """``table --seeds 2,3``: the O and P jobs of those VPR seeds (§6.3) that exist, found by the
+    planner's key for each seed (the same VTR, odin3 and files as the table's seed 1)."""
+    try:
+        seeds = sorted({int(word) for word in _split(args.seeds)})
+    except ValueError as exc:
+        raise HeavyError(EXIT_USAGE, f"table: --seeds {args.seeds}: {exc}") from exc
+    wanted = tuple(leg for leg in ("P", "O") if leg in legs)
+    if not seeds or wanted != ("P", "O") or any(seed <= qor_legs.DEFAULT_SEED for seed in seeds):
+        raise HeavyError(EXIT_USAGE, "table: --seeds needs O and P in --legs and seeds above 1")
+    found: dict[int, list[qor_table.Run]] = {}
+    for seed in seeds:
+        req = PlanRequest(legs=wanted, designs=tuple(sorted(designs)), arch=args.arch,
+                          out=_out(args), vtr_root=_vtr_root(args), odin3=_odin3(args),
+                          rerun=False, seed=seed)
+        found[seed] = [qor_table.load_job_dir(job.job_dir, job.leg, job.arch)
+                       for job in qor_sched.plan_jobs(req, sets) if job.job_dir.is_dir()]
+    return found
+
+
 def cmd_table(args: argparse.Namespace, argv: Sequence[str]) -> int:
     """Spec §6: the four files of one table; prints its directory."""
     out = _out(args)
@@ -1202,9 +1409,10 @@ def cmd_table(args: argparse.Namespace, argv: Sequence[str]) -> int:
     header = qor_table.table_header(runs, arch=arch, label=label, vtr12=vtr12)
     table_dir = out / "tables" / f"{qor_table.table_stamp(header)}-{label}"
     table_dir.mkdir(parents=True, exist_ok=True)
+    seeds = _seed_runs(args, legs, designs, sets) if args.seeds else None
     qor_table.write_md(runs, verdict, header, table_dir / "qor.md", golden=golden, bands=bands,
                        divergences=divergences, equiv_exceptions=exceptions, gate_set=gate_set,
-                       narrowed=narrowed)
+                       narrowed=narrowed, seeds=seeds)
     qor_table.write_csv(runs, table_dir / "runs.csv", table_dir / "ratios.csv", bands=bands,
                         gate_set=gate_set)
     qor_table.write_json(runs, verdict, header, table_dir / "runs.json", bands=bands,
@@ -1494,7 +1702,7 @@ def _legs_item(odin3: Path) -> CheckResult:
     passes = odin3_passes(odin3)
     available, missing = [], []
     for leg in qor_sched.PLAN_LEG_ORDER:
-        lacking = qor_legs.leg_available(leg, passes)
+        lacking = leg_lacks(leg, odin3, passes)
         if lacking is None:
             available.append(leg)
         else:
@@ -1578,6 +1786,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--rerun", action="store_true", help="ignore the job cache")
     run.add_argument("--fcheck", action="store_true", help="the Verilator check after each job")
     run.add_argument("--keep-netlists", action="store_true")
+    run.add_argument("--seed", type=_positive, default=qor_legs.DEFAULT_SEED, metavar="N",
+                     help="VPR seed (default 1; N > 1 is a new key and never moves latest)")
     run.add_argument("--job-timeout", type=_positive, metavar="S")
     run.add_argument("--stage-timeout", type=_positive, metavar="S")
     run.add_argument("--dry-run", action="store_true", help="print the jobs; run nothing")
@@ -1592,21 +1802,41 @@ def _parser() -> argparse.ArgumentParser:
     fcheck.add_argument("--designs", default="", metavar="D[,D...]")
     fcheck.add_argument("--xl", action="store_true",
                         help="the 9 GiB slice, for capped --designs only (the controller's)")
+    fcheck.add_argument("--resume", action="store_true",
+                        help="skip jobs that already hold a measured verdict (exit-run)")
     equiv = sub.add_parser("equiv", parents=[common],
                            help="equiv-check before and after abc, O' against O (heavy)")
     equiv.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
                        help="gate, extra, smoke")
     equiv.add_argument("--designs", default="", metavar="D[,D...]")
+    equiv.add_argument("--resume", action="store_true",
+                       help="skip jobs that already hold a measured verdict (exit-run)")
+    rerun = sub.add_parser("rerun-check", parents=[common],
+                           help="the O front end again, SHA-256 against the first run (heavy)")
+    rerun.add_argument("--leg", default="O", choices=("O",), metavar="O")
+    rerun.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
+                       help="gate, extra, smoke")
+    rerun.add_argument("--designs", default="", metavar="D[,D...]")
+    rerun.add_argument("--resume", action="store_true",
+                       help="skip jobs that already hold a measured verdict (exit-run)")
     nightly = sub.add_parser("nightly", parents=[common],
                              help="the unattended night's steps (started inside heavy-run)")
     nightly.add_argument("--budget", type=float, default=qor_nightly.NIGHTLY_BUDGET_H, metavar="H",
                          help="hours; the deadline is the earlier of 06:00 and the start + H")
     nightly.add_argument("--slot", type=int, choices=range(1, len(qor_nightly.ROTATION) + 1),
                          metavar="N", help="run group B slot N instead of the rotation's next")
+    exit_run = sub.add_parser("exit-run", parents=[common],
+                              help="M3: the exit run's eight steps (started inside heavy-run)")
+    exit_run.add_argument("--label", required=True, metavar="TEXT")
+    exit_run.add_argument("--budget", type=float, default=qor_nightly.NIGHTLY_BUDGET_H,
+                          metavar="H", help="hours; the deadline is the earlier of 06:00 and "
+                                            "the start + H")
     sub.add_parser("check-lib", parents=[common], help="vtr-models check-lib against the arch")
     crosscheck = sub.add_parser("crosscheck", parents=[common],
                                 help="3F's task against the harness's results (heavy)")
-    crosscheck.add_argument("--task", type=Path, required=True, metavar="DIR")
+    crosscheck.add_argument("--task", type=Path, default=qor_nightly.DEFAULT_TASK, metavar="DIR",
+                            help="a task directory (default: the repo's tests/vtr/tasks/qor_p, "
+                                 "the three smallest designs)")
     sub.add_parser("status", parents=[common], help="latest key and counts per arch and leg")
     clean = sub.add_parser("clean", parents=[common], help="retention (spec §5.4)")
     clean.add_argument("--keep", type=_positive, default=qor_sched.KEEP_KEYS, metavar="N",
@@ -1619,6 +1849,8 @@ def _parser() -> argparse.ArgumentParser:
     table.add_argument("--label", required=True, metavar="TEXT")
     table.add_argument("--set", dest="sets", default=DEFAULT_TABLE_SETS, metavar="S[,S...]",
                        help="gate, extra, smoke (default gate,extra)")
+    table.add_argument("--seeds", default="", metavar="N[,N...]",
+                       help="VPR seeds of O and P to show beside seed 1 (spec §6.3), e.g. 2,3")
     gate = sub.add_parser("gate", parents=[common], help="print a table's verdict")
     gate.add_argument("table_dir", type=Path, metavar="TABLE_DIR")
     publish = sub.add_parser("publish", parents=[common],
@@ -1630,8 +1862,8 @@ def _parser() -> argparse.ArgumentParser:
 
 COMMANDS: dict[str, Callable[[argparse.Namespace, Sequence[str]], int]] = {
     "doctor": cmd_doctor, "run": cmd_run, "fcheck": cmd_fcheck, "equiv": cmd_equiv,
-    "nightly": cmd_nightly, "check-lib": cmd_check_lib, "crosscheck": cmd_crosscheck,
-    "status": cmd_status,
+    "rerun-check": cmd_rerun_check, "nightly": cmd_nightly, "exit-run": cmd_exit_run,
+    "check-lib": cmd_check_lib, "crosscheck": cmd_crosscheck, "status": cmd_status,
     "clean": cmd_clean, "table": cmd_table, "gate": cmd_gate, "publish": cmd_publish,
 }
 

@@ -39,6 +39,7 @@ import re
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
 from types import MappingProxyType
@@ -167,6 +168,11 @@ def _load_job(job_dir: Path, leg: str, arch: str, gate: Collection[str]) -> Run:
                job=_read_metrics(job_dir, leg, design, "job.json"))
 
 
+def load_job_dir(job_dir: Path, leg: str, arch: str) -> Run:
+    """One job directory as a ``Run`` (a seed run found by the planner's path, §6.3)."""
+    return _load_job(job_dir, leg, arch, qor_sched.load_sets().gate)
+
+
 def _legs_to_load(arch_dir: Path, keys: Mapping[str, str],
                   legs: Sequence[str] | None) -> tuple[str, ...]:
     if legs is not None:
@@ -283,6 +289,32 @@ def pair_ratios(runs: Sequence[Run], pair: tuple[str, str], name: str,
         out.append(None if x is None or y is None
                    else ratio(metric(x, name), metric(y, name), gated))
     return out
+
+
+# §6.3 Seeds: a design is rerun with seeds 2 and 3 when a gated ratio lies within 10 % of a bound.
+SEED_NEAR = Decimal("0.9")
+
+
+def seed_candidates(runs: Sequence[Run], bands: Bands) -> list[str]:
+    """The gate designs (in the order of ``runs``) whose O/P ratio of any gated metric is at least
+    0.9 of ``per_design_max`` (1.35 for 1.50), plus, for a gated metric whose geomean over those
+    designs is at least 0.9 of ``geomean_max`` (1.08 for 1.20), the designs whose ratio for that
+    metric is above that geomean. Only ``ok`` runs count; a design with an undefined ratio is
+    never a candidate by it."""
+    designs = list(dict.fromkeys(r.design for r in runs if r.gating))
+    per_design = float(Decimal(str(bands.per_design_max)) * SEED_NEAR)
+    on_geomean = float(Decimal(str(bands.geomean_max)) * SEED_NEAR)
+    chosen: set[str] = set()
+    for name in bands.metrics:
+        ratios = pair_ratios(runs, bands.pair, name, designs, gated=True)
+        defined = [v for v in ratios if v is not None]
+        mean = geomean(defined)
+        for design, value in zip(designs, ratios, strict=True):
+            if value is None:
+                continue
+            if value >= per_design or (mean is not None and mean >= on_geomean and value > mean):
+                chosen.add(design)
+    return [d for d in designs if d in chosen]
 
 
 def fmt_ratio(value: float, bounds: Sequence[float]) -> str:
@@ -1383,9 +1415,55 @@ def _md_name_style(layout: _Layout) -> list[str]:
                     fmt_value(name, layout.value("Oprov", design, name)),
                     _fmt_r(layout.ratio(pair, design, name), layout.bounds)]
         rows.append(row)
+    mean = ["**geomean**"]
+    for name in names:
+        value, n = layout.geomean(pair, name, layout.designs)
+        text = _fmt_r(value, layout.bounds)
+        mean += ["", "", _with_n(f"**{text}**" if text else "", n, len(layout.designs))]
+    rows.append(mean)
     head = ["design", "VPR time O", "VPR time Oprov", "Oprov/O", "VPR mem O", "VPR mem Oprov",
             "Oprov/O"]
-    return ["## Name style", "", *_md_table(head, rows)]
+    return ["## Name style", "", "VPR time and memory of Oprov (`--name-style provenance`) over O "
+            "(DESIGN §13 #6).", "", *_md_table(head, rows)]
+
+
+SEED_HEAD = ("design", "metric", "O/P s1 (gate)", "O/P s2", "O/P s3", "mean(s1..s3)")
+SEEDS = (2, 3)
+
+
+def _seed_ratio(seed_index: Mapping[tuple[str, str], Run], design: str, name: str) -> float | None:
+    """O/P of one seed's runs (both ``ok``) for ``name``; None when either is absent."""
+    x, y = seed_index.get(("O", design)), seed_index.get(("P", design))
+    if x is None or y is None or x.status != OK or y.status != OK:
+        return None
+    return ratio(metric(x, name), metric(y, name), True)
+
+
+def _md_seeds(layout: _Layout, seeds: Mapping[int, Sequence[Run]]) -> list[str]:
+    """§6.3 Seeds: the candidates (``seed_candidates``) with the O/P of seeds 1 (the gate's), 2
+    and 3 per gated metric, and the three-seed mean beside the gating value. Written only when
+    seed runs were given; the gate stays on seed 1."""
+    if not seeds or layout.bands.pair != ("O", "P"):
+        return []
+    candidates = seed_candidates(layout.runs, layout.bands)
+    indexes = {seed: index_runs(seeds.get(seed, ())) for seed in SEEDS}
+    lines = ["## Seeds", "", "Designs within 10 % of a bound (O/P at least "
+             f"{float(Decimal(str(layout.bounds[1])) * SEED_NEAR):g} per design, or above a "
+             "geomean of at least "
+             f"{float(Decimal(str(layout.bounds[0])) * SEED_NEAR):g}) rerun with VPR seeds 2 and "
+             "3 for O and P. The gate stays on seed 1.", ""]
+    if not candidates:
+        return [*lines, "None.", ""]
+    rows = []
+    for design in candidates:
+        for name in layout.bands.metrics:
+            ones = layout.ratio(("O", "P"), design, name)
+            values = [ones, *(_seed_ratio(indexes[seed], design, name) for seed in SEEDS)]
+            mean = (math.fsum(v for v in values if v is not None) / len(values)
+                    if all(v is not None for v in values) else None)
+            rows.append([design, name, *(_fmt_r(v, layout.bounds) for v in values),
+                         _fmt_r(mean, layout.bounds)])
+    return [*lines, *_md_table(list(SEED_HEAD), rows)]
 
 
 def _xcheck_rows(layout: _Layout, golden: GoldenXcheck,
@@ -1454,17 +1532,20 @@ def write_md(runs: Sequence[Run], verdict: Verdict | None, header: TableHeader, 
              golden: GoldenXcheck | None, bands: Bands | None = None,
              divergences: Sequence[tuple[str, str, str]] = (),
              equiv_exceptions: Sequence[tuple[str, str, str]] = (),
-             gate_set: Sequence[str] | None = None, narrowed: int | None = None) -> None:
+             gate_set: Sequence[str] | None = None, narrowed: int | None = None,
+             seeds: Mapping[int, Sequence[Run]] | None = None) -> None:
     """``qor.md``: §6.3's sections in order. The gate section (with the non-gating rows) only
     when O is in the table; Netlist, Packed, Routed and Cost always; Attribution, Noise floor,
     Declared divergences and Name style when their legs are in it; the functional check when P
     or O is; the cross-check against VTR's golden whenever P is (and ``golden`` is given).
     ``gate_set`` is the set the gate rows cover (default: the 19); an empty one, or no
     ``verdict``, writes the gate section as not gated; so does ``narrowed`` (a k6 table holding
-    only that many of the 19, ruling N1), with its reason."""
+    only that many of the 19, ruling N1), with its reason. ``seeds`` maps a VPR seed (2, 3) to the
+    O and P runs of that seed; with it, a Seeds section follows the gate section (§6.3)."""
     layout = _layout(runs, bands, gate_set)
     lines = _md_title(header)
     lines += _md_gate(layout, verdict, narrowed)
+    lines += _md_seeds(layout, seeds or {})
     lines += _md_netlist(layout) + _md_packed(layout) + _md_routed(layout) + _md_cost(layout)
     lines += _md_attribution(layout) + _md_noise(layout)
     lines += _md_checks(layout, equiv_exceptions) + _md_divergences(layout, divergences)
