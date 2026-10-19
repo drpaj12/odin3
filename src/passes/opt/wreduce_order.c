@@ -53,11 +53,11 @@ bool wr_order_is_source(const char *type) {
 /* `$mux` ports are A, B, S, Y: the walk takes S, B, A (the ternary's creation order). */
 static const uint32_t k_mux_walk[] = {2, 1, 0};
 
-uint32_t wr_order_port(const char *type, uint32_t n_ports, uint32_t k) {
-    if (strcmp(type, "$mux") == 0 && n_ports == 4U && k < 3U) {
-        return k_mux_walk[k];
+uint32_t wr_order_port(const char *type, uint32_t n_ports, uint32_t index) {
+    if (strcmp(type, "$mux") == 0 && n_ports == 4U && index < 3U) {
+        return k_mux_walk[index];
     }
-    return k;
+    return index;
 }
 
 /* The pin at flat index *cursor of node's ports in walk order; false past the last pin. */

@@ -172,8 +172,8 @@ const char *wr_type_name(const wr_state *ws, odin3_node_id node);
 odin3_status wr_order_ranks(wr_state *ws);
 /* True for a storage type (flip-flop, latch, memory): its outputs are not followed by the walk. */
 bool wr_order_is_source(const char *type);
-/* The k-th port (of n_ports) the walk reads for `type`: registry order, but `$mux` S, B, A. */
-uint32_t wr_order_port(const char *type, uint32_t n_ports, uint32_t k);
+/* The index-th port (of n_ports) the walk reads for `type`: registry order, but `$mux` S, B, A. */
+uint32_t wr_order_port(const char *type, uint32_t n_ports, uint32_t index);
 /* Bytes per node the walk needs besides the rank table: `seen` (1) and the stack (8). */
 enum { WR_ORDER_BYTES_PER_NODE = 9 };
 

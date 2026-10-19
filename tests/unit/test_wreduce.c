@@ -927,13 +927,13 @@ static rank_set probe_ranks(void) {
     set.n = odin3_module_node_end(fx.module);
     set.r = (uint32_t *)calloc(set.n, sizeof *set.r);
     TEST_ASSERT_NOT_NULL(set.r);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_wreduce_probe_ranks(&fx.ctx, fx.res.design, fx.module,
-                                                                  &fx.opts, set.r, set.n));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_opt_wreduce_probe_ranks(&fx.ctx, fx.module, &fx.opts, set.r, set.n));
     return set;
 }
 
 /* x is ranked before y. */
-static void expect_before(const rank_set *set, const char *x, const char *y);
+static void expect_before(const rank_set *set, const char *first, const char *second);
 
 static uint32_t rank_named(const rank_set *set, const char *name) {
     odin3_node_id node = node_named(name);
@@ -941,30 +941,38 @@ static uint32_t rank_named(const rank_set *set, const char *name) {
     return set->r[node.v];
 }
 
-static void expect_before(const rank_set *set, const char *x, const char *y) {
-    const uint32_t rx = rank_named(set, x);
-    const uint32_t ry = rank_named(set, y);
-    TEST_ASSERT_TRUE_MESSAGE(rx != 0 && ry != 0 && rx < ry, x);
+static void expect_before(const rank_set *set, const char *first, const char *second) {
+    const uint32_t rank_first = rank_named(set, first);
+    const uint32_t rank_second = rank_named(set, second);
+    TEST_ASSERT_TRUE_MESSAGE(rank_first != 0 && rank_second != 0 && rank_first < rank_second,
+                             first);
 }
 
 enum { BUS_TEXT = 640, TEXT_MAX = 8192, DEEP_CELLS = 100000, BIG_TEXT_PER_CELL = 160 };
 
 /* "{ $n<base+w-1> ... $n<base> }": a bus of anonymous single-bit nets, MSB first. */
-static void bus(char *out, size_t cap, uint32_t base, uint32_t width) {
+typedef struct bus_span {
+    uint32_t base;
+    uint32_t width;
+} bus_span;
+
+static void bus(char *out, size_t cap, bus_span span) {
     size_t at = (size_t)snprintf(out, cap, "{");
-    for (uint32_t k = width; k > 0; k--) {
-        at += (size_t)snprintf(out + at, cap - at, " $tmp%u", base + k - 1U);
+    for (uint32_t k = span.width; k > 0; k--) {
+        at += (size_t)snprintf(out + at, cap - at, " $tmp%u", span.base + k - 1U);
     }
-    snprintf(out + at, cap - at, " }");
+    (void)snprintf(out + at, cap - at, " }");
 }
 
 /* `(c == s1) ^ (c == s1+5-2)` as Odin III numbers it: each consumer before its operand, every
  * operand net anonymous (an expression temporary). */
 static void operand_first_text(char *out, size_t cap) {
-    char s1[BUS_TEXT], a[BUS_TEXT], s2[BUS_TEXT];
-    bus(s1, sizeof s1, 0, 32);
-    bus(a, sizeof a, 32, 32);
-    bus(s2, sizeof s2, 64, 32);
+    char s1[BUS_TEXT];
+    char add_out[BUS_TEXT];
+    char s2[BUS_TEXT];
+    bus(s1, sizeof s1, (bus_span){0, 32});
+    bus(add_out, sizeof add_out, (bus_span){32, 32});
+    bus(s2, sizeof s2, (bus_span){64, 32});
     size_t at =
         (size_t)snprintf(out, cap,
                          "module \\m\n  wire width 2 input 1 \\m\n  wire width 5 input 2 \\c\n"
@@ -991,7 +999,7 @@ static void operand_first_text(char *out, size_t cap) {
         "    parameter \\A_WIDTH 32\n    parameter \\B_WIDTH 32\n    parameter \\Y_WIDTH 32\n"
         "    connect \\A { %s \\m }\n    connect \\B 32'00000000000000000000000000000001\n"
         "    connect \\Y %s\n  end\nend\n",
-        zero27, s2, a, s2, s1, a, zero30, s1);
+        zero27, s2, add_out, s2, s1, add_out, zero30, s1);
 }
 
 /* WR-7 (amended): `(c == m-1) ^ (c == m-1+5-2)`, cells in Odin III's elaboration order (a consumer
@@ -1017,18 +1025,20 @@ static void test_named_nets_keep_id_order(void) {
     TEST_ASSERT_NOT_NULL(named);
     /* every anonymous temporary gets a wire: declare s1, a, s2 as 32-bit wires aliasing the nets */
     char extra[3 * BUS_TEXT + 256];
-    char b0[BUS_TEXT], b1[BUS_TEXT], b2[BUS_TEXT];
-    bus(b0, sizeof b0, 0, 32);
-    bus(b1, sizeof b1, 32, 32);
-    bus(b2, sizeof b2, 64, 32);
-    snprintf(extra, sizeof extra,
-             "  wire width 32 \\s1\n  wire width 32 \\a\n  wire width 32 \\s2\n"
-             "  connect \\s1 %s\n  connect \\a %s\n  connect \\s2 %s\n",
-             b0, b1, b2);
+    char b0[BUS_TEXT];
+    char b1[BUS_TEXT];
+    char b2[BUS_TEXT];
+    bus(b0, sizeof b0, (bus_span){0, 32});
+    bus(b1, sizeof b1, (bus_span){32, 32});
+    bus(b2, sizeof b2, (bus_span){64, 32});
+    (void)snprintf(extra, sizeof extra,
+                   "  wire width 32 \\s1\n  wire width 32 \\a\n  wire width 32 \\s2\n"
+                   "  connect \\s1 %s\n  connect \\a %s\n  connect \\s2 %s\n",
+                   b0, b1, b2);
     char full[TEXT_MAX + sizeof extra];
     const char *cut = strstr(named, "  cell $eq");
     TEST_ASSERT_NOT_NULL(cut);
-    snprintf(full, sizeof full, "%.*s%s%s", (int)(cut - named), named, extra, cut);
+    (void)snprintf(full, sizeof full, "%.*s%s%s", (int)(cut - named), named, extra, cut);
     free(named);
     build(full);
     run_wreduce();
@@ -1079,10 +1089,10 @@ static void test_rank_loop_through_flip_flop(void) {
 static void test_rank_first_driver_of_a_shared_net(void) {
     const char *tri = "    parameter \\WIDTH 1\n    connect \\A \\a\n    connect \\EN \\b\n";
     char text[TEXT_MAX];
-    snprintf(text, sizeof text,
-             "%s%s  cell $tribuf \\t1\n%s    connect \\Y $tmp1\n  end\n"
-             "  cell $tribuf \\t2\n%s    connect \\Y $tmp1\n  end\nend\n",
-             OHEAD, NOT1("cons", "$tmp1", "$tmp2"), tri, tri);
+    (void)snprintf(text, sizeof text,
+                   "%s%s  cell $tribuf \\t1\n%s    connect \\Y $tmp1\n  end\n"
+                   "  cell $tribuf \\t2\n%s    connect \\Y $tmp1\n  end\nend\n",
+                   OHEAD, NOT1("cons", "$tmp1", "$tmp2"), tri, tri);
     build(text);
     rank_set set = probe_ranks();
     /* t1 drives the net first: it goes before the reader; t2 is entered later, after it */
@@ -1137,19 +1147,19 @@ static void test_rank_deep_chain_uses_no_recursion(void) {
     }
     for (uint32_t k = DEEP_CELLS; k > 0; k--) { /* cell k reads net k-1: consumer first */
         char in[32];
-        snprintf(in, sizeof in, k == 1 ? "\\a" : "$tmp%u", k - 1U);
+        (void)snprintf(in, sizeof in, k == 1 ? "\\a" : "$tmp%u", k - 1U);
         at += (size_t)snprintf(text + at, cap - at,
                                "  cell $not \\c%u\n    parameter \\A_SIGNED 0\n"
                                "    parameter \\A_WIDTH 1\n    parameter \\Y_WIDTH 1\n"
                                "    connect \\A %s\n    connect \\Y $tmp%u\n  end\n",
                                k, in, k);
     }
-    snprintf(text + at, cap - at, "end\n");
+    (void)snprintf(text + at, cap - at, "end\n");
     build(text);
     free(text);
     rank_set set = probe_ranks();
     char last[16];
-    snprintf(last, sizeof last, "c%u", (unsigned)DEEP_CELLS);
+    (void)snprintf(last, sizeof last, "c%u", (unsigned)DEEP_CELLS);
     expect_before(&set, "c1", "c2");
     TEST_ASSERT_EQUAL_UINT32(rank_named(&set, "c1") + DEEP_CELLS - 1U, rank_named(&set, last));
     free(set.r);
@@ -1165,8 +1175,7 @@ static void test_rank_oom(void) {
         build(text);
         uint32_t ranks[16] = {0};
         odin3_util_set_alloc_fail_after(fail);
-        odin3_status st =
-            odin3_opt_wreduce_probe_ranks(&fx.ctx, fx.res.design, fx.module, &fx.opts, ranks, 16);
+        odin3_status st = odin3_opt_wreduce_probe_ranks(&fx.ctx, fx.module, &fx.opts, ranks, 16);
         odin3_util_set_alloc_fail_after(-1);
         TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
         done = st == ODIN3_OK;
@@ -1320,6 +1329,23 @@ static void test_ff_and_mux_oom(void) {
     oom_sweep(CASCADE, false);
 }
 
+/* The order walk (WR-7). */
+static void run_order_tests(void) {
+    RUN_TEST(test_operand_visited_before_consumer);
+    RUN_TEST(test_named_nets_keep_id_order);
+    RUN_TEST(test_rank_operand_before_consumer);
+    RUN_TEST(test_rank_named_net_is_not_followed);
+    RUN_TEST(test_rank_combinational_loop_terminates);
+    RUN_TEST(test_rank_loop_through_flip_flop);
+    RUN_TEST(test_rank_first_driver_of_a_shared_net);
+    RUN_TEST(test_rank_bus_is_walked_lsb_first);
+    RUN_TEST(test_rank_port_a_before_port_b);
+    RUN_TEST(test_rank_mux_walks_s_then_b_then_a);
+    RUN_TEST(test_rank_deep_chain_uses_no_recursion);
+    RUN_TEST(test_rank_oom);
+    RUN_TEST(test_order_oom);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_one_bit_result);
@@ -1364,19 +1390,7 @@ int main(void) {
     RUN_TEST(test_dff_unused_q_bits_and_init);
     RUN_TEST(test_dff_all_unused_goes);
     RUN_TEST(test_cascade_needs_rounds);
-    RUN_TEST(test_operand_visited_before_consumer);
-    RUN_TEST(test_named_nets_keep_id_order);
-    RUN_TEST(test_rank_operand_before_consumer);
-    RUN_TEST(test_rank_named_net_is_not_followed);
-    RUN_TEST(test_rank_combinational_loop_terminates);
-    RUN_TEST(test_rank_loop_through_flip_flop);
-    RUN_TEST(test_rank_first_driver_of_a_shared_net);
-    RUN_TEST(test_rank_bus_is_walked_lsb_first);
-    RUN_TEST(test_rank_port_a_before_port_b);
-    RUN_TEST(test_rank_mux_walks_s_then_b_then_a);
-    RUN_TEST(test_rank_deep_chain_uses_no_recursion);
-    RUN_TEST(test_rank_oom);
-    RUN_TEST(test_order_oom);
+    run_order_tests();
     RUN_TEST(test_round_cap_warns_and_stays_valid);
     RUN_TEST(test_two_runs_are_identical);
     RUN_TEST(test_two_runs_are_identical_mixed);

@@ -505,9 +505,9 @@ static odin3_status module_run(wr_state *ws) {
 }
 
 /* Test hook (opt_test.h): the initial ranks of one module, without running the pass. */
-odin3_status odin3_opt_wreduce_probe_ranks(odin3_pass_ctx *ctx, odin3_design *design,
-                                           odin3_module *module, const odin3_opt_opts *opts,
-                                           uint32_t *ranks, uint32_t count) {
+odin3_status odin3_opt_wreduce_probe_ranks(odin3_pass_ctx *ctx, odin3_module *module,
+                                           const odin3_opt_opts *opts, uint32_t *ranks,
+                                           uint32_t count) {
     odin3_opt_ctx oc;
     odin3_wreduce_counts counts;
     memset(&counts, 0, sizeof counts);
@@ -515,7 +515,6 @@ odin3_status odin3_opt_wreduce_probe_ranks(odin3_pass_ctx *ctx, odin3_design *de
     if (st != ODIN3_OK) {
         return st;
     }
-    (void)design;
     wr_state ws;
     state_init(&ws, &oc, &counts);
     st = prepare(&ws);

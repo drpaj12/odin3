@@ -34,9 +34,9 @@ uint32_t odin3_opt_wreduce_rounds_now(void);
  * The initial wreduce ranks of `module` (wr_order_ranks, no rewrite): ranks[i] is the rank of live
  * node i (1..N, operand before consumer), 0 for a dead or absent node, for i < count.
  */
-odin3_status odin3_opt_wreduce_probe_ranks(odin3_pass_ctx *ctx, odin3_design *design,
-                                           odin3_module *module, const odin3_opt_opts *opts,
-                                           uint32_t *ranks, uint32_t count);
+odin3_status odin3_opt_wreduce_probe_ranks(odin3_pass_ctx *ctx, odin3_module *module,
+                                           const odin3_opt_opts *opts, uint32_t *ranks,
+                                           uint32_t count);
 
 /*
  * on_call: called with the sub-pass's name ("opt_expr", "opt_merge", ...) at each sub-pass call of

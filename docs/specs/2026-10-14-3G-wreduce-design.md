@@ -217,23 +217,53 @@ earlier visit in the same round has just narrowed: `LUControl`'s
 
 The rule: **each node has a rank, and a round is sorted by (rank, node ID).**
 1. *Initial rank.* The position of the node in a depth-first post-order of the net graph of its
-   module. Nodes are entered in ascending node-ID order; from a node, the driver of each input pin
-   is entered first, pins in port order (port A before port B, bit 0 first). A node is entered
-   once.
-2. *Cuts.* A flip-flop, latch or `$mem` output is not followed (these outputs are sources: Yosys's
-   front end creates the register after the logic of its D input, and a cut keeps every feedback
-   loop out of the walk). A combinational loop is cut where the walk meets a node already entered.
-3. *Rewrites.* A rebuilt node inherits the rank of the node it descends from (unchanged from the
-   earlier WR-7); a new node's rank is that of the node it replaces.
-4. *Determinism.* No hash order reaches the IR; two runs give byte-identical `write_rtlil`. The
-   walk uses an explicit stack (the IR can be 2M nodes deep) and runs once per module, before the
-   pre-step, in time linear in nodes plus pins.
+   module (`src/passes/opt/wreduce_order.c`). Nodes are entered in ascending node-ID order; from a
+   node, the driver of each input pin is entered first. A node is entered once.
+2. *Pin order.* Ports in registry order, except `$mux`, which reads S, B, A (Yosys's ternary,
+   `genrtlil.cc:1904`: the condition, then the true value, then the false value; its other binary
+   and unary cells read A before B, left operand first); bits of a port LSB first (bit 0 first).
+   The driver followed on a net is its first driver.
+3. *Which nets are followed.* Only a net without a wire (an expression temporary). A net with a
+   wire is a statement boundary, where Yosys's order is the order of the statements, which is node-ID
+   order: a forward reference (the consumer's statement before the producer's) stays consumer first,
+   as in Yosys (micro `tests/opt/order_forward/forward_reference.v`).
+4. *Cuts.* Flip-flop, latch and `$mem` outputs are not followed (Yosys's front end creates a
+   register after the logic of its D input, and the cut keeps every feedback loop out of the walk). A
+   combinational loop is cut where the walk meets a node already entered. The cut types are the one
+   list `wr_order_is_source`.
+5. *Rewrites.* A rebuilt node inherits the rank of the node it descends from (unchanged from the
+   earlier WR-7); a node that has no rank of its own (never made by `wr_rebuild`) has the rank
+   UINT32_MAX, so it sorts after every ranked node, by node ID.
+6. *Determinism.* No hash order reaches the IR; two runs give byte-identical `write_rtlil`. The walk
+   uses an explicit stack (the IR can be 2M nodes deep), allocates one byte per node and the stack
+   (counted in the module budget), and is linear in nodes plus pins. An allocation failure is
+   `ODIN3_ERR_NO_MEMORY`.
 
-On a `write_rtlil` file the cells are in node-ID order, not rank order. Tools that hand Yosys an
-Odin III file (`opt-diff`) must put the cells in operand-first order first
-(`tools/opt-check/il_order.py`); otherwise Yosys's `wreduce` sees the order Odin III no longer uses
-and the §10.3 differential reports a difference that is the oracle's input order. Any difference
-that remains is a finding, not a tolerance.
+**Known approximations** (the walk reproduces Yosys's creation order for an expression tree written
+in statement order; these cases it does not, and they are not tolerances: each is measured by the
+hardmap-diffs of LU8PEEng, LU32PEEng and mcml against the Parmys goldens, PHASE3 #51):
+- *Cells made by `proc`* (`$mux`, `$pmux`, `$dff`, `$mem`). Yosys creates them after every front-end
+  cell; the walk ranks them like any other node, so a `proc` `$mux` that feeds arithmetic goes before
+  that arithmetic. Odin III's IR does not say which nodes `proc` made (no pass tag on a node), so
+  this is not modelled.
+- *A shared operand* is placed by the first consumer the walk enters; Yosys creates it at its first
+  use in source order. They agree when node-ID order is source order; `opt_merge` keeps the cell
+  with the lower ID, which is the first use.
+- *Name interning is design-wide in Yosys.* In a file with several modules the order of module 2 is
+  the order in which the names were first seen in the whole file; Odin III's `$c<ID>` names repeat
+  from module to module. This affects only a file that Yosys reads (`opt-diff`'s oracle input), not
+  Odin III.
+- *Statement order across `always` blocks and `generate`* follows node-ID order, that is the
+  elaborator's order, which is source order for the cases measured but is not specified.
+
+On a `write_rtlil` file the cells are in node-ID order, not rank order. `opt-diff` hands Yosys a copy
+of Odin III's file with the cells in rank order (`tools/opt-check/il_order.py`, the same walk in
+Python over the cell table `tools/opt-check/il_celltypes.txt`, which the unit test
+`test_il_celltypes` keeps equal to the registry and to the C file; an unknown cell type or port is an
+error, exit 2). **That gate is circular on the order**: both sides use the same walk, so
+`opt_diff_wreduce_order` shows that they agree and that wreduce refines Yosys's result for that order.
+Fidelity to Yosys's front end is measured only by hardmap-diff against Parmys. Any difference that
+remains is a finding, not a tolerance.
 
 ## 8. Wire narrowing (WR-8)
 
@@ -303,7 +333,7 @@ unknown argument '<arg>'`.
 
 | # | Odin III | Yosys 0.55 | Why / effect |
 |---|---|---|---|
-| 1 | work order = rank: a post-order of the net graph, operand first (amended 2026-10-19) | `IdString` interning order (the front end creates operands first) | determinism without names (WR-7); reproduces Yosys's order for expressions; it can differ on statement order (cells that do not depend on one another) |
+| 1 | work order = rank: a post-order of the net graph, operand first, anonymous nets only (amended 2026-10-19) | `IdString` interning order (the front end creates operands first) | determinism without names (WR-7); reproduces Yosys's order for expression trees in statement order; known approximations: cells made by `proc`, shared operands, design-wide interning, statement order (section 7) |
 | 2 | mixed-sign ruled cells read the both-signed flag everywhere | each port's own flag; pad by `A_SIGNED` | PHASE2 #25; Yosys is unsound there; the front end never makes such cells |
 | 3 | no wire narrowing | narrower wire + `swap_names` | names only (WR-8) |
 | 4 | `$mem` `ABITS` narrowed once per memory | per `$memrd`/`$memwr`/`$meminit` | v1 `$mem` form (2D EL-27); same after `memory_collect` |
