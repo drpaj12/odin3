@@ -24,9 +24,9 @@ Per design:
    --match-unnamed``: 0 ``equivalent``, 1 with ``NOT equivalent`` ``differs``, 4 ``unproven``.
    Exit 2 with "cannot be matched one-to-one" is ``unpaired``: some unnamed hard block has no
    partner because its input functions differ between the files, so the netlists differ upstream
-   of it (a stop of the pairing, not a tool error). For a design listed ``D2b`` the pairing is
-   retried once against a copy of the golden with the declared divergence undone (below), so that
-   the rest of the netlist is still compared; only then does the line count as occurring.
+   of it (a stop of the pairing, not a tool error). For a design listed ``D2b`` an ``unpaired`` or
+   ``differs`` result is retried once against a copy of the golden with the declared divergence
+   undone (below), so that the rest of the netlist is still compared and proved.
 
 The expect files (``--expect``, repeatable) hold lines ``<path> <id> <reason>`` (``#`` comments),
 ``path`` relative to ``--root`` (else the part after ``micro/verilog/`` or ``benchmarks/verilog/``,
@@ -39,9 +39,12 @@ not seen) is ``stale`` and fails: the list shrinks. Entries for designs not run 
 
 D2b normalisation (``normalize_d2b``): Parmys leaves the ``b`` pad pins of a ``$sub`` chain on
 ``unconn`` (a + 0 + c), where ``a - b`` needs ``~0`` (spec 10, D2b; ``subtractor.cc`` lines
-517-527, "connect those pins to unconn"). The copy ties ``b`` of every ``adder`` of a ``$sub``
-chain (net names with ``MIN~``) that is on ``unconn`` to ``vcc``; nothing else changes. It is made
-only for a design whose expect entries hold ``D2b``, and only after an ``unpaired`` result.
+517-527, "connect those pins to unconn"). The copy ties ``b`` of every ``adder`` whose own cout or
+sumout net has ``MIN~`` (a ``$sub`` chain stage) that is on ``unconn`` to ``vcc``; nothing else
+changes (soundness: ``normalize_d2b``). It is made only for a design whose expect entries hold
+``D2b``, and only after an ``unpaired`` or ``differs`` result. D2b absorbs nothing else: the
+line is ``listed:D2b`` only when the retry is ``equivalent``; a retry that differs fails, one that
+is unproven needs its own ``unproven`` line.
 
 Exit codes: 0 every design identical, equivalent or listed; 1 a failing class (``counts-differ``,
 ``differs``, ``unpaired``, ``unproven``, ``warned``, ``stale``, ``no-golden``); 2 usage, a missing
@@ -90,7 +93,8 @@ NOT_EQUIVALENT = "NOT equivalent"
 UNPAIRED_NEEDLE = "cannot be matched one-to-one"
 D2B = "D2b"
 SUB_CHAIN_MARK = "MIN~"  # Parmys names the nets of a `$sub` chain `$sub~N^MIN~M-K[i]`
-ADDER_B_ON_UNCONN = re.compile(r"\bb=unconn\b")
+ADDER_B_ON_UNCONN = re.compile(r"(?<!\S)(b(?:\[0\])?)=unconn(?!\S)")
+CHAIN_OUTPUT_PINS = ("cout", "sumout")
 PASSING = ("identical", "equivalent")
 
 
@@ -297,11 +301,34 @@ def run_odin(cfg: Config, design: Path, top: str, work: Path) -> tuple[Path, str
     return out, log
 
 
+def is_sub_chain_adder(tokens: list[str]) -> bool:
+    """A ``.subckt adder`` (exact model name) of a ``$sub`` chain: ``MIN~`` in the net of its own
+    ``cout`` or ``sumout`` pin. A ``$add`` adder that only reads a ``$sub`` net (``a``, ``cin``)
+    does not qualify."""
+    if len(tokens) < 2 or tokens[0] != ".subckt" or tokens[1] != "adder":
+        return False
+    for token in tokens[2:]:
+        pin, _, net = token.partition("=")
+        pin = pin.split("[", 1)[0]
+        if pin in CHAIN_OUTPUT_PINS and SUB_CHAIN_MARK in net:
+            return True
+    return False
+
+
 def normalize_d2b(golden: Path, dest: Path) -> int:
-    """Writes to ``dest`` a copy of the Parmys ``golden`` with D2b undone: ``b=unconn`` becomes
-    ``b=vcc`` on every ``.subckt adder`` whose nets belong to a ``$sub`` chain (``MIN~`` in a
-    name). Returns the number of pins changed. Statement continuations (``\\`` at the end of a
-    line) are kept as they are unless the statement changes."""
+    """Writes to ``dest`` a copy of the Parmys ``golden`` with D2b undone and returns the number
+    of pins changed: on every ``.subckt adder`` (the exact model name) whose own ``cout`` or
+    ``sumout`` net carries ``MIN~`` (a stage of a ``$sub`` chain), a ``b`` pin on ``unconn``
+    (``b=unconn`` or ``b[0]=unconn``) becomes ``vcc``. Nothing else changes. A statement with a
+    continuation line (``\\`` at the end) is rewritten as one line only when it changes.
+
+    Soundness. In a Parmys `$sub` chain a real ``b`` bit is the output of a NOT node
+    (``a + ~b + 1``); ``unconn`` is written only by ``connect_nodes(pad_node, ...)`` for a pin that
+    has no operand bit, the pad of the narrower operand (subtractor.cc 517-527). So a ``b`` on
+    ``unconn`` in such a stage is a pad, and ``~pad`` would be ``vcc``. The rewrite therefore turns
+    the golden into the RTL-correct form; an equivalence proved against it shows Odin III equals the
+    RTL-correct Parmys netlist, not Parmys's own. A golden whose ``b`` pins are not scalar or not
+    named ``b`` is not rewritten (no pins changed: the caller keeps the ``unpaired`` result)."""
     changed = 0
     with golden.open(encoding="utf-8", errors="replace") as src, \
             dest.open("w", encoding="utf-8") as out:
@@ -311,9 +338,8 @@ def normalize_d2b(golden: Path, dest: Path) -> int:
             if line.rstrip("\n").endswith("\\"):
                 continue
             statement = " ".join(part.rstrip("\n").rstrip("\\").strip() for part in pending)
-            if (statement.startswith(".subckt adder") and SUB_CHAIN_MARK in statement
-                    and ADDER_B_ON_UNCONN.search(statement)):
-                out.write(ADDER_B_ON_UNCONN.sub("b=vcc", statement) + "\n")
+            if is_sub_chain_adder(statement.split()) and ADDER_B_ON_UNCONN.search(statement):
+                out.write(ADDER_B_ON_UNCONN.sub(r"\1=vcc", statement) + "\n")
                 changed += 1
             else:
                 out.writelines(pending)
@@ -367,18 +393,16 @@ class Compared:
 def compare_netlists(cfg: Config, golden: Path, out: Path, work: Path,
                      try_d2b: bool = False) -> Compared:
     """The structural / functional comparison. With ``try_d2b`` (the design is listed ``D2b``) an
-    ``unpaired`` result is retried once on a golden with D2b undone."""
+    ``unpaired`` or ``differs`` result is retried once on a golden with D2b undone."""
     nc = run_child([cfg.netlist_compare, "--implicit-models", str(golden), str(out)], cfg.timeout)
     if nc.returncode == 0:
         return Compared("identical")
     if nc.returncode != 1:
         raise ToolError(f"netlist-compare exited {nc.returncode}: {tail(nc.stderr)}")
     cls, text = run_equiv(cfg, golden, out, work, "equiv.log")
-    if cls != "unpaired":
-        return Compared(cls)
-    note = unpaired_summary(text)
-    if not try_d2b:
-        return Compared(cls, False, note)
+    if cls not in ("unpaired", "differs") or not try_d2b:
+        return Compared(cls, False, unpaired_summary(text) if cls == "unpaired" else "")
+    note = unpaired_summary(text) if cls == "unpaired" else "equiv-check found a difference"
     fixed = work / "golden.d2b.blif"
     changed = normalize_d2b(golden, fixed)
     if changed == 0:
@@ -403,13 +427,28 @@ def fmt_delta(delta: dict[str, int]) -> str:
     return ", ".join(f"{unit} {n:+d}" for unit, n in sorted(delta.items())) or "none"
 
 
+def stale_others(key: str, entries: list[Entry], used: tuple[str, ...]) -> Result | None:
+    """``stale`` when an entry other than the ones the verdict used did not occur."""
+    rest = [e for e in entries if e.ident not in used]
+    if rest:
+        return Result(key, "stale", False,
+                      f"listed {listed_ids(rest)} beside {', '.join(used)}, which did not occur")
+    return None
+
+
 def judge_compare(key: str, entries: list[Entry], compared: Compared) -> Result:
-    """The listing logic after the comparison ``compared``."""
+    """The listing logic after the comparison ``compared``. ``D2b`` absorbs only the class
+    ``unpaired``, and only when the retry on the golden with D2b undone proves equivalence (or is
+    ``unproven`` with its own ``unproven`` line); a plain ``differs`` is never D2b's."""
     cls = compared.cls
     divergences = [e for e in entries if DIVERGENCE.fullmatch(e.ident)]
     unproven = [e for e in entries if e.ident == "unproven"]
     d2b = [e for e in divergences if e.ident == D2B]
+    others = [e for e in divergences if e.ident != D2B]
     if cls == "equivalent" and compared.normalized and d2b:
+        stale = stale_others(key, entries, (D2B,))
+        if stale is not None:
+            return stale
         return Result(key, f"listed:{D2B}", True, f"{d2b[0].reason}; {compared.note}; "
                       "equivalent to the golden with D2b undone")
     if cls in PASSING:
@@ -423,14 +462,13 @@ def judge_compare(key: str, entries: list[Entry], compared: Compared) -> Result:
                       ("" if d2b else "; list D2b if it is the subtractor pad (spec 10)"))
     if compared.normalized:  # a listed D2b design: what is left after undoing it
         if cls == "unproven" and unproven:
+            stale = stale_others(key, entries, (D2B, "unproven"))
+            if stale is not None:
+                return stale
             return Result(key, "listed:unproven", True, f"{unproven[0].reason}; {compared.note}")
-        if cls == "differs":
-            others = [e for e in divergences if e.ident != D2B]
-            if others:
-                return Result(key, f"listed:{listed_ids(others)}", True, others[0].reason)
         return Result(key, cls, False, f"after undoing D2b ({compared.note})")
-    if cls == "differs" and divergences:
-        return Result(key, f"listed:{listed_ids(divergences)}", True, divergences[0].reason)
+    if cls == "differs" and others:
+        return Result(key, f"listed:{listed_ids(others)}", True, others[0].reason)
     if cls == "unproven" and unproven:
         return Result(key, "listed:unproven", True, unproven[0].reason)
     return Result(key, cls, False, "not in the expect files")

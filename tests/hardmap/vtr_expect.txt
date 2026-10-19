@@ -38,7 +38,9 @@ sha.v unproven ABC dsec UNDECIDED after 482 s; hard-block and latch counts equal
 # (the pad of a subtraction is not inverted, subtractor.cc 517-527) and `b=vcc` in Odin III (D2b),
 # so everything downstream of them has other input functions. hardmap-diff undoes D2b on a copy of
 # the golden (b=unconn to b=vcc on `$sub` chain adders only) and compares that: equivalent (abc
-# dsec proved it within 900 s). Parmys's netlist is not RTL-correct here; Odin III's is.
+# dsec proved it within 900 s). What is proved: Odin III equals the golden with that pad made
+# RTL-correct (a + ~0), not Parmys's own netlist; that Parmys loses the borrow is shown by
+# tests/hardmap/probes on the sub_pad micros, not by this run.
 bgm.v D2b Parmys ties the b pad of a `$sub` chain to unconn, Odin III to vcc (spec 10 D2b); equivalent to the golden with D2b undone
 
 # The 11 designs without a line (raygentop, boundtop, mkSMAdapter4B, or1200, stereovision0/1/2,

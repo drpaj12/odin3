@@ -255,6 +255,76 @@ class UnpairedTests(ToolCase):
         self.assertIn("no `$sub` chain pad", out)
         self.assertEqual(len(self.log("equiv.log").splitlines()), 1)
 
+    def test_d2b_with_plain_differs_retries_and_fails_if_still_different(self) -> None:
+        self.expect("common/foo.v D2b pad\n")
+        self.spec["equiv_rc"] = 1
+        self.spec["equiv_out"] = "equiv-check: NOT equivalent\n"
+        self.spec["equiv_rc_d2b"] = 1
+        self.spec["equiv_out_d2b"] = "equiv-check: NOT equivalent\n"
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("DIFFERS", out)
+        self.assertNotIn("listed:D2b", out)
+        self.assertEqual(len(self.log("equiv.log").splitlines()), 2)
+
+    def test_d2b_with_plain_differs_without_sub_pad_fails(self) -> None:
+        self.put_golden(GOLDEN)
+        self.spec["odin_blif"] = GOLDEN
+        self.expect("common/foo.v D2b pad\n")
+        self.spec["equiv_rc"] = 1
+        self.spec["equiv_out"] = "equiv-check: NOT equivalent\n"
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("listed:D2b", out)
+
+    def test_d2b_with_plain_differs_then_equivalent_is_listed(self) -> None:
+        self.expect("common/foo.v D2b pad\n")
+        self.spec["equiv_rc"] = 1
+        self.spec["equiv_out"] = "equiv-check: NOT equivalent\n"
+        self.spec["equiv_rc_d2b"] = 0
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 0, out)
+        self.assertIn("listed:D2b", out)
+
+    def test_stale_d2b_when_the_design_pairs_without_it(self) -> None:
+        self.expect("common/foo.v D2b pad\n")
+        self.spec["equiv_rc"] = 0
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("STALE", out)
+        self.assertEqual(len(self.log("equiv.log").splitlines()), 1)
+
+    def test_d2b_beside_unproven_is_stale_when_the_retry_is_equivalent(self) -> None:
+        self.expect("common/foo.v D2b pad\ncommon/foo.v unproven dsec\n")
+        self.spec["equiv_rc_d2b"] = 0
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("STALE", out)
+        self.assertIn("unproven", out)
+
+    def test_d2b_beside_d1_is_stale_when_the_retry_is_equivalent(self) -> None:
+        self.expect("common/foo.v D2b pad\ncommon/foo.v D1 sign\n")
+        self.spec["equiv_rc_d2b"] = 0
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("STALE", out)
+
+    def test_d2b_with_unlisted_counts_difference_is_counts_differ(self) -> None:
+        self.expect("common/foo.v D2b pad\n")
+        self.spec["odin_blif"] = SUB_GOLDEN.replace(".latch a q re clk 0\n", "")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("COUNTS-DIFFER", out)
+        self.assertEqual(self.log("equiv.log"), "")
+
+    def test_d2b_beside_a_counts_entry_is_stale(self) -> None:
+        self.expect("common/foo.v D2b pad\ncommon/foo.v counts:+6 latch x\n")
+        self.spec["odin_blif"] = SUB_GOLDEN.replace(".latch a q re clk 0\n",
+                                                    ".latch a q re clk 0\n" * 7)
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("STALE", out)
+
     def test_other_divergence_does_not_trigger_the_retry(self) -> None:
         self.expect("common/foo.v D1 signed\n")
         code, out, _ = self.run_tool()
@@ -514,6 +584,25 @@ class UnitTests(unittest.TestCase):
         self.assertIn(".subckt adder a=unconn b=vcc cin=c cout=$sub~1^MIN~2-2[0] sumout=s", lines)
         self.assertIn(".subckt adder a=x b=unconn cin=c cout=$add~1^ADD~2-1[0] sumout=s2", lines)
         self.assertIn(".subckt adder a=x b=y cin=c cout=$sub~3^MIN~4-1[0] sumout=s3", lines)
+
+    def test_normalize_d2b_leaves_add_adders_and_prefix_names_alone(self) -> None:
+        text = (".model t\n"
+                # an $add adder that only reads a $sub net: its pad is correct
+                ".subckt adder a=$sub~1^MIN~2-1[0] b=unconn cin=$sub~1^MIN~2-1[0] "
+                "cout=$add~5^ADD~6-1[0] sumout=s0\n"
+                ".subckt adder2 a=x b=unconn cin=c cout=$sub~1^MIN~2-3[0] sumout=s1\n"
+                ".subckt adder_x a=x b=unconn cin=c cout=$sub~1^MIN~2-4[0] sumout=s2\n"
+                ".subckt adder a=x b[0]=unconn cin=c cout=$sub~1^MIN~2-5[0] sumout=s3\n"
+                ".subckt adder a=x b=unconn cin=c cout=c9 sumout=$sub~1^MIN~2-6[1]\n.end\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dst = Path(tmp) / "g.blif", Path(tmp) / "d.blif"
+            src.write_text(text)
+            self.assertEqual(hd.normalize_d2b(src, dst), 2)
+            lines = dst.read_text().splitlines()
+        self.assertEqual(sum(1 for ln in lines if "unconn" in ln), 3)
+        self.assertIn(".subckt adder a=x b[0]=vcc cin=c cout=$sub~1^MIN~2-5[0] sumout=s3", lines)
+        self.assertIn(".subckt adder a=x b=vcc cin=c cout=c9 sumout=$sub~1^MIN~2-6[1]", lines)
+        self.assertIn(".subckt adder2 a=x b=unconn cin=c cout=$sub~1^MIN~2-3[0] sumout=s1", lines)
 
     def test_unpaired_summary(self) -> None:
         self.assertEqual(hd.unpaired_summary(UNPAIRED_OUT), "1 only in A, 1 only in B: multiply 2")
