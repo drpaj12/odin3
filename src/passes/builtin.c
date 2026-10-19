@@ -704,8 +704,6 @@ static const odin3_pass_def WRITE_VERILOG_AST = {
 /* Registry order. */
 const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
                                                       &READ_TECHLIB,
-                                                      &odin3_pass_read_arch,
-                                                      &odin3_pass_write_techlib,
                                                       &WRITE_BLIF,
                                                       &odin3_pass_write_json,
                                                       &odin3_pass_write_verilog,
@@ -735,6 +733,8 @@ const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
                                                       &odin3_pass_lower,
                                                       &odin3_pass_hardmap,
                                                       &odin3_pass_lpmmap,
-                                                      &odin3_read_verilog_pass};
+                                                      &odin3_read_verilog_pass,
+                                                      &odin3_pass_read_arch,
+                                                      &odin3_pass_write_techlib};
 const uint32_t odin3_builtin_pass_count =
     (uint32_t)(sizeof odin3_builtin_passes / sizeof odin3_builtin_passes[0]);
