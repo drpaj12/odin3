@@ -2785,6 +2785,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_opt_rules_dir}/wreduce)
         set_tests_properties(opt_diff_wreduce_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
                              TIMEOUT 1800)
+        # WR-7 amended (PHASE3 #51): the visiting order. tests/opt/order holds Verilog whose result
+        # depends on the order of the cells; Yosys reads it through il_order (operand first),
+        # so the widths and flags of every $add $sub $mul must be equal, with no entry in
+        # diff_expect.txt. Script phase3 only: under `wreduce` alone the widths agree too, but the
+        # lowered netlists differ by two buffers (PHASE3 #51, wreduce-order report).
+        add_test(NAME opt_diff_wreduce_order
+            COMMAND ${_opt_sweep} --jobs 1 --opt-diff
+                    --opt-arg=--script=phase3
+                    --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
+                    --opt-arg=--root=${PROJECT_SOURCE_DIR}/tests/opt
+                    --root ${PROJECT_SOURCE_DIR}/tests/opt
+                    ${PROJECT_SOURCE_DIR}/tests/opt/order)
+        set_tests_properties(opt_diff_wreduce_order PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 600)
         # --cap-for: syntax/inferred_ram_w_clog2.v (1479 B, a 3776-latch RAM) needs 2.3 GB for its base
         # case from the initial state, over the 2G child cap; it proves at 4G under both scripts (2H).
         odin3_add_sweep_test(opt_equiv_micro LABEL sweep

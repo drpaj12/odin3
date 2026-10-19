@@ -887,9 +887,10 @@ static void test_dff_all_unused_goes(void) {
 /* --- the worker: rounds, order, determinism ----------------------------------------------------
  */
 
-/* add2 reads the register that add1 feeds. The cells are in this order, so each round only sees
- * what the earlier rounds exposed: add1 narrows in round 1, the register in round 2, add2 in
- * round 3. */
+/* add2 reads the register that add1 feeds. A round visits add1, then the register (its operand
+ * first, WR-7), then add2 only after: but add2 reads the register's output, which cuts the
+ * order (a flip-flop's output is not followed), so add2 comes first and sees the narrowed
+ * register in round 2. */
 #define CASCADE                                                                                    \
     "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"                         \
     "  wire width 4 input 3 \\c\n  wire input 4 \\clk\n  wire width 8 output 5 \\y\n"              \
@@ -913,16 +914,40 @@ static void test_cascade_needs_rounds(void) {
     TEST_ASSERT_EQUAL_UINT32(0, count_prefix(ODIN3_LOG_WARN, "wreduce:"));
 }
 
+/* WR-7 (amended): `(c >= m-1) ^ (c == m-1+5-2)`, cells in Odin III's elaboration order (a consumer
+ * before its operand). A round still visits the operand first, so the $sub narrows to A2:B1:Y3, the
+ * $add becomes signed A3:B4:Y5 and the next $sub signed A5:B3:Y6, the widths Yosys's own front end
+ * (and Parmys) reach. In node-ID order the $add stayed A32:B3 and cost 33 adder stages. */
+#define OPERAND_FIRST                                                                              \
+    "module \\m\n  wire width 2 input 1 \\m\n  wire width 5 input 2 \\c\n"                         \
+    "  wire width 32 \\s1\n  wire width 32 \\s2\n  wire width 32 \\a\n  wire output 3 \\o\n" BINW( \
+        "$eq", "eq", "0", "0", "32", "32", "1", "{ 27'000000000000000000000000000 \\c }", "\\s2",  \
+        "\\o") BINW("$sub", "sub2", "0", "0", "32", "32", "32", "\\a",                             \
+                    "32'00000000000000000000000000000010", "\\s2")                                 \
+        BINW("$add", "add", "0", "0", "32", "32", "32", "\\s1",                                    \
+             "32'00000000000000000000000000000101", "\\a")                                         \
+            BINW("$sub", "sub1", "0", "0", "32", "32", "32",                                       \
+                 "{ 30'000000000000000000000000000000 \\m }",                                      \
+                 "32'00000000000000000000000000000001", "\\s1") "end\n"
+
+static void test_operand_visited_before_consumer(void) {
+    build(OPERAND_FIRST);
+    run_wreduce();
+    expect_bin("sub1", 0, 0, 2, 1, 3);
+    expect_bin("add", 1, 1, 3, 4, 5);
+    expect_bin("sub2", 1, 1, 5, 3, 6);
+}
+
 static void test_round_cap_warns_and_stays_valid(void) {
-    odin3_opt_test_set_wreduce_rounds(2);
+    odin3_opt_test_set_wreduce_rounds(1);
     build(CASCADE);
     run_wreduce();
     TEST_ASSERT_EQUAL_UINT32(
         1, count_lines(ODIN3_LOG_WARN,
-                       "wreduce: module 'm': no fixed point after 2 rounds; stopping"));
+                       "wreduce: module 'm': no fixed point after 1 rounds; stopping"));
     expect_bin("add1", 0, 0, 4, 4, 5);
     TEST_ASSERT_EQUAL_INT64(5, pint(node_named("ff"), FF_WIDTH));
-    TEST_ASSERT_EQUAL_INT64(8, pint(node_named("add2"), PRM_A_WIDTH)); /* round 3 never ran */
+    TEST_ASSERT_EQUAL_INT64(8, pint(node_named("add2"), PRM_A_WIDTH)); /* round 2 never ran */
 }
 
 static void test_two_runs_are_identical(void) {
@@ -1096,6 +1121,7 @@ int main(void) {
     RUN_TEST(test_dff_unused_q_bits_and_init);
     RUN_TEST(test_dff_all_unused_goes);
     RUN_TEST(test_cascade_needs_rounds);
+    RUN_TEST(test_operand_visited_before_consumer);
     RUN_TEST(test_round_cap_warns_and_stays_valid);
     RUN_TEST(test_two_runs_are_identical);
     RUN_TEST(test_two_runs_are_identical_mixed);

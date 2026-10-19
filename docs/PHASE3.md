@@ -1232,6 +1232,22 @@ then the options considered.
     divider and multiplier structure to the gate on these 1-4 gates (a lowering-algorithm choice;
     `lower` is unchanged here). Not a soundness question.
 
+51. **`wreduce` visits an operand before its consumer: amendment of 3G WR-7** (Peter, 2026-10-19;
+    branch `feat/wreduce-order`; triage item B3 of `hardmap-big-triage`). Yosys's `wreduce` result
+    depends on the order of the cells (the rule "free to choose the signedness", `wreduce.cc` 316),
+    and Yosys's front end creates an operand before its consumer, while Odin III's elaborator
+    numbers a consumer first: LU8PEEng and LU32PEEng had 53 more adders than Parmys
+    (`counter == mdivk-1+5-2`: 69 against 16 in the minimal example). **Decision:** a round of
+    `wreduce` is sorted by a rank, the position of the node in a depth-first post-order of the net
+    graph (operand first, ties by node ID, explicit stack, flip-flop/latch/`$mem` outputs cut); a
+    rebuilt node keeps the rank of its ancestor. The amendment text is in 3G spec section 7 and
+    divergence row 1. The elaborator (2D) is not changed. Consequences, all explained in the PR:
+    node IDs of rewritten cells change (one golden, `tests/opt/rules/wreduce/cascade.il`, renumbered,
+    same cells); `opt-diff` hands Yosys the Odin III file through `tools/opt-check/il_order.py` so
+    that the oracle sees the same order (otherwise it reports a difference that is only its input
+    order); a micro `tests/opt/order/order_operand_first.v` is diffed against Yosys under the Phase 3
+    script (`opt_diff_wreduce_order`) and `test_operand_visited_before_consumer` pins the widths.
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this

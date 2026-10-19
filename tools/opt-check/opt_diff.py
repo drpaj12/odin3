@@ -16,7 +16,9 @@ opt_clean; opt -full``), ``wreduce``, ``opt -full``, ``opt -fast``, ``opt -fast 
    opt_expr; ...``;
 2. Yosys 0.55: ``read_rtlil in.il; S; write_rtlil yosys.il; stat`` with ``YOSYS_COVER_DIR``. Its
    ``phase2`` is Parmys's lines without ``compact``: ``opt_expr; opt_clean; opt -nodffe -nosdff;
-   proc -norom; opt`` (Parmys's ``procs -norom``);
+   proc -norom; opt`` (Parmys's ``procs -norom``). ``in.il`` is first rewritten by ``il_order`` so
+   its cells are in operand-first order, as Yosys's front end makes them (WR-7, PHASE3 #51; Odin
+   III's own file is kept as ``in.odin.il``);
 3. **histogram**: the per-module cell-type counts of ``stats`` and ``stat`` are equal; for the
    scripts that hold ``wreduce`` also **widths**: the widths and signed flags of every ``$add``,
    ``$sub`` and ``$mul`` are equal as a multiset;
@@ -67,6 +69,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import il_order
 import memcap
 import opt_equiv
 import opt_rules
@@ -217,6 +220,11 @@ class Diff:
                                        *(["--top", top] if top else []), "-p",
                                        odin_script(script, files, top, in_il, odin_il,
                                                    self.techlib)])
+        # Yosys's wreduce depends on the order of the cells (WR-7): hand it the file with the cells
+        # in the order its own front end makes them (operand first), not Odin III's node-ID order.
+        in_il.rename(run_dir / "in.odin.il")
+        odin_text = (run_dir / "in.odin.il").read_text(encoding="utf-8")
+        in_il.write_text(il_order.reorder_text(odin_text), encoding="utf-8")
         cover = run_dir / "cover"
         cover.mkdir(exist_ok=True)
         yosys_log = self.must("yosys", [opt_equiv.exe(self.args.yosys), "-p",

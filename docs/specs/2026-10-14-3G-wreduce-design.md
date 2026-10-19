@@ -71,9 +71,10 @@ opt passes and skips such a module itself, as `opt_muxtree` does).
       `ABITS 0` as in Yosys; the `$mem` registry entry must accept `ABITS 0` (WR-9, an IR question).
 2. **The worker** (Yosys `WreduceWorker::run`):
    1. Collect `keep` nets; load init values.
-   2. The work list is every node of the module, **in node-ID order** (WR-7).
+   2. The work list is every node of the module, **in rank order** (WR-7, amended 2026-10-19:
+      operand before consumer; the rank of a node is its place in `wreduce_order.c`'s post-order).
    3. Loop: clear the changed-net set; run §4's rule for each listed node in order; then the next
-      work list is every node with a pin on a changed net (deduplicated, ID order). Stop when the
+      work list is every node with a pin on a changed net (deduplicated, rank order). Stop when the
       list is empty.
 
 The worker never recurses: Yosys's `run_cell` calls itself when it changed the cell; Odin III
@@ -206,11 +207,33 @@ cell in the same round then reads (the stereovision0 rewrite needs the first add
 show bits 9 and 10 equal before the second adder is visited, which is why Odin III's and Yosys's
 own front ends rewrite different adders there).
 
-Odin III orders by node ID (OP-14), new nodes appended, the next round deduplicated and sorted by
-ID; no hash-map order reaches the IR. On a `write_rtlil` file, read by Yosys, the cell names are
-interned in file order, which is ID order, so the differential (§10.3) is expected to see the same
-order; any order-caused difference is a finding, not a tolerance. Two runs give byte-identical
-`write_rtlil`.
+**Amendment (Peter, 2026-10-19; PHASE3 #51).** Odin III no longer orders by node ID. The elaborator
+(2D) numbers a consumer before its operand, Yosys's front end creates an expression bottom-up, so an
+operand's cell has the lower `IdString` index. The cases where the order matters are the
+rule "free to choose the signedness" (Yosys `wreduce.cc` 316) and any other rule that reads a net an
+earlier visit in the same round has just narrowed: `LUControl`'s
+`counter == mdivk-1+5-2` gives `$add A3:B4:Y5` and `$sub A5:B3:Y6` (signed) in Yosys, and
+`$add A32:B3`, `$sub A31:B1` in node-ID order (53 more adder stages in LU8PEEng and LU32PEEng).
+
+The rule: **each node has a rank, and a round is sorted by (rank, node ID).**
+1. *Initial rank.* The position of the node in a depth-first post-order of the net graph of its
+   module. Nodes are entered in ascending node-ID order; from a node, the driver of each input pin
+   is entered first, pins in port order (port A before port B, bit 0 first). A node is entered
+   once.
+2. *Cuts.* A flip-flop, latch or `$mem` output is not followed (these outputs are sources: Yosys's
+   front end creates the register after the logic of its D input, and a cut keeps every feedback
+   loop out of the walk). A combinational loop is cut where the walk meets a node already entered.
+3. *Rewrites.* A rebuilt node inherits the rank of the node it descends from (unchanged from the
+   earlier WR-7); a new node's rank is that of the node it replaces.
+4. *Determinism.* No hash order reaches the IR; two runs give byte-identical `write_rtlil`. The
+   walk uses an explicit stack (the IR can be 2M nodes deep) and runs once per module, before the
+   pre-step, in time linear in nodes plus pins.
+
+On a `write_rtlil` file the cells are in node-ID order, not rank order. Tools that hand Yosys an
+Odin III file (`opt-diff`) must put the cells in operand-first order first
+(`tools/opt-check/il_order.py`); otherwise Yosys's `wreduce` sees the order Odin III no longer uses
+and the §10.3 differential reports a difference that is the oracle's input order. Any difference
+that remains is a finding, not a tolerance.
 
 ## 8. Wire narrowing (WR-8)
 
@@ -280,7 +303,7 @@ unknown argument '<arg>'`.
 
 | # | Odin III | Yosys 0.55 | Why / effect |
 |---|---|---|---|
-| 1 | work order = node ID | `IdString` interning order | determinism without names (WR-7); same order on an RTLIL round trip; may change which of two cascaded rewrites fires first on other inputs |
+| 1 | work order = rank: a post-order of the net graph, operand first (amended 2026-10-19) | `IdString` interning order (the front end creates operands first) | determinism without names (WR-7); reproduces Yosys's order for expressions; it can differ on statement order (cells that do not depend on one another) |
 | 2 | mixed-sign ruled cells read the both-signed flag everywhere | each port's own flag; pad by `A_SIGNED` | PHASE2 #25; Yosys is unsound there; the front end never makes such cells |
 | 3 | no wire narrowing | narrower wire + `swap_names` | names only (WR-8) |
 | 4 | `$mem` `ABITS` narrowed once per memory | per `$memrd`/`$memwr`/`$meminit` | v1 `$mem` form (2D EL-27); same after `memory_collect` |
