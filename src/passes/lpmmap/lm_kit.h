@@ -166,6 +166,18 @@ void lm_diag(const lm_ctx *lc, odin3_log_level level, odin3_node_id node, const 
 /* The label of node for messages: its name, else `$c<ID>`. */
 void lm_label(const lm_ctx *lc, odin3_node_id node, char *out, size_t size);
 
+/* The `$add`, `$sub`, `$mul` and comparison parameters lpmmap reads, by index (the cells' own
+ * declaration order: A_SIGNED, B_SIGNED, A_WIDTH, B_WIDTH, Y_WIDTH), and the widest operand an
+ * Altera lpm_add_sub, lpm_mult or lpm_compare supports (UG-01063: 1 to 256 bits). */
+enum { LM_P_A_WIDTH = 2, LM_P_B_WIDTH = 3, LM_P_Y_WIDTH = 4, LM_MAX_LPM_WIDTH = 256 };
+
+/* INT parameter `index` of node as an unsigned width; 0 when absent or not positive. */
+uint32_t lm_param_u32(const lm_ctx *lc, odin3_node_id node, uint32_t index);
+
+/* WARN that src is wider than the LPM type `which` supports and count it as left soft (M2):
+ * "lpmmap: '$add' 'u0' has width 300, above the 256 bits lpm_add_sub supports; left soft". */
+void lm_warn_wide(lm_ctx *lc, odin3_node_id src, uint32_t width, lm_type which);
+
 /* The rules (one file each). Each maps src or leaves it soft with a warning. */
 odin3_status lm_map_addsub(lm_ctx *lc, odin3_node_id src);
 odin3_status lm_map_mult(lm_ctx *lc, odin3_node_id src);

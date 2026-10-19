@@ -13,7 +13,6 @@
 
 #include <string.h>
 
-enum { P_A_WIDTH = 2, P_B_WIDTH = 3, P_Y_WIDTH = 4 };
 enum { PORT_A, PORT_B, PORT_Y };
 
 /* The cell type names and the lpm_compare output each one drives (C-1). */
@@ -22,11 +21,6 @@ static const struct {
     const char *out;
 } k_outputs[] = {{"$lt", "alb"},  {"$le", "aleb"}, {"$gt", "agb"},
                  {"$ge", "ageb"}, {"$eq", "aeb"},  {"$ne", "aneb"}};
-
-static uint32_t param_u32(const lm_ctx *lc, odin3_node_id node, uint32_t index) {
-    const odin3_value *val = odin3_node_param(lc->module, node, index);
-    return val != NULL && val->i > 0 ? (uint32_t)val->i : 0;
-}
 
 /* The output name for node's type; NULL for a type that is not a comparison. */
 static const char *output_of(const lm_ctx *lc, odin3_node_id node) {
@@ -71,21 +65,29 @@ static odin3_status build_into(lm_ctx *lc, odin3_node_id src, uint32_t width, cm
              ? lm_extend(lc, odin3_node_port(lc->module, src, PORT_B), width, sgn, bus->b)
              : st;
     st = st == ODIN3_OK ? lm_fresh_nets(lc, 1, &out) : st;
+    odin3_net_id gnd = {0};
+    odin3_net_id vcc = {0};
+    st = st == ODIN3_OK ? lm_const(lc, LM_GND, &gnd) : st;
+    st = st == ODIN3_OK ? lm_const(lc, LM_VCC, &vcc) : st;
     if (st != ODIN3_OK) {
         return st;
     }
     const lm_pset params[] = {{"lpm_width", (int64_t)width, NULL},
                               {"lpm_representation", 0, sgn ? "SIGNED" : "UNSIGNED"}};
+    /* C-4: the documented defaults are tied: clken 1, aclr 0, clock 0 (UG-01063 p. 6-3). */
     const lm_pconn ports[] = {
-        {"dataa", bus->a, width}, {"datab", bus->b, width}, {output_of(lc, src), &out, 1}};
+        {"dataa", bus->a, width}, {"datab", bus->b, width}, {output_of(lc, src), &out, 1},
+        {"clken", &vcc, 1},       {"aclr", &gnd, 1},        {"clock", &gnd, 1}};
     odin3_node_id node = {0};
-    st = lm_new_node(lc, &(lm_node_req){LM_COMPARE, params, 2, ports, 3, "cmp"}, &node);
+    st = lm_new_node(
+        lc, &(lm_node_req){LM_COMPARE, params, 2, ports, sizeof ports / sizeof ports[0], "cmp"},
+        &node);
     return st == ODIN3_OK ? make_ties(lc, src, out, ties) : st;
 }
 
 static odin3_status build(lm_ctx *lc, odin3_node_id src, odin3_vec *ties) {
-    uint32_t a_width = param_u32(lc, src, P_A_WIDTH);
-    uint32_t b_width = param_u32(lc, src, P_B_WIDTH);
+    uint32_t a_width = lm_param_u32(lc, src, LM_P_A_WIDTH);
+    uint32_t b_width = lm_param_u32(lc, src, LM_P_B_WIDTH);
     uint32_t width = a_width > b_width ? a_width : b_width;
     cmp_bus bus;
     odin3_vec_init(&bus.va, sizeof(odin3_net_id));
@@ -99,9 +101,16 @@ static odin3_status build(lm_ctx *lc, odin3_node_id src, odin3_vec *ties) {
 }
 
 odin3_status lm_map_compare(lm_ctx *lc, odin3_node_id src) {
-    if (output_of(lc, src) == NULL || param_u32(lc, src, P_A_WIDTH) == 0 ||
-        param_u32(lc, src, P_B_WIDTH) == 0 || param_u32(lc, src, P_Y_WIDTH) == 0) {
+    if (output_of(lc, src) == NULL || lm_param_u32(lc, src, LM_P_A_WIDTH) == 0 ||
+        lm_param_u32(lc, src, LM_P_B_WIDTH) == 0 || lm_param_u32(lc, src, LM_P_Y_WIDTH) == 0) {
         return ODIN3_OK; /* not a comparison, or a degenerate cell: left alone */
+    }
+    uint32_t widest = lm_param_u32(lc, src, LM_P_A_WIDTH) > lm_param_u32(lc, src, LM_P_B_WIDTH)
+                          ? lm_param_u32(lc, src, LM_P_A_WIDTH)
+                          : lm_param_u32(lc, src, LM_P_B_WIDTH);
+    if (widest > LM_MAX_LPM_WIDTH) {
+        lm_warn_wide(lc, src, widest, LM_COMPARE);
+        return ODIN3_OK;
     }
     odin3_celltype_id type = {0};
     odin3_status st = lm_need(lc, LM_COMPARE, src, &type);

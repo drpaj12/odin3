@@ -13,13 +13,7 @@
 
 #include <string.h>
 
-enum { P_A_WIDTH = 2, P_B_WIDTH = 3, P_Y_WIDTH = 4 };
 enum { PORT_A, PORT_B, PORT_Y };
-
-static uint32_t param_u32(const lm_ctx *lc, odin3_node_id node, uint32_t index) {
-    const odin3_value *val = odin3_node_param(lc->module, node, index);
-    return val != NULL && val->i > 0 ? (uint32_t)val->i : 0;
-}
 
 static bool is_sub(const lm_ctx *lc, odin3_node_id node) {
     const odin3_celltype_def *def =
@@ -73,6 +67,10 @@ static odin3_status build_into(lm_ctx *lc, odin3_node_id src, bus3 *bus, uint32_
              ? lm_extend(lc, odin3_node_port(lc->module, src, PORT_B), width, sgn, bus->b)
              : st;
     st = st == ODIN3_OK ? lm_fresh_nets(lc, width, bus->r) : st;
+    odin3_net_id gnd = {0};
+    odin3_net_id vcc = {0};
+    st = st == ODIN3_OK ? lm_const(lc, LM_GND, &gnd) : st;
+    st = st == ODIN3_OK ? lm_const(lc, LM_VCC, &vcc) : st;
     if (st != ODIN3_OK) {
         return st;
     }
@@ -80,16 +78,23 @@ static odin3_status build_into(lm_ctx *lc, odin3_node_id src, bus3 *bus, uint32_
     const lm_pset params[] = {{"lpm_width", (int64_t)width, NULL},
                               {"lpm_direction", 0, sub ? "SUB" : "ADD"},
                               {"lpm_representation", 0, sgn ? "SIGNED" : "UNSIGNED"}};
-    const lm_pconn ports[] = {
-        {"dataa", bus->a, width}, {"datab", bus->b, width}, {"result", bus->r, width}};
+    /* A-3: the documented defaults are tied, so a read-back netlist computes the same function:
+     * cin 0 for an add and 1 for a subtract, clken 1, aclr 0, clock 0 (UG-01063 p. 5-3 and the
+     * VHDL component). add_sub stays open: it cannot be used when lpm_direction is set. */
+    const lm_pconn ports[] = {{"dataa", bus->a, width},  {"datab", bus->b, width},
+                              {"result", bus->r, width}, {"cin", sub ? &vcc : &gnd, 1},
+                              {"clken", &vcc, 1},        {"aclr", &gnd, 1},
+                              {"clock", &gnd, 1}};
     odin3_node_id node = {0};
-    st = lm_new_node(lc, &(lm_node_req){LM_ADD_SUB, params, 3, ports, 3, sub ? "sub" : "add"},
+    st = lm_new_node(lc,
+                     &(lm_node_req){LM_ADD_SUB, params, 3, ports, sizeof ports / sizeof ports[0],
+                                    sub ? "sub" : "add"},
                      &node);
     return st == ODIN3_OK ? make_ties(lc, src, bus->r, width, ties) : st;
 }
 
 static odin3_status build(lm_ctx *lc, odin3_node_id src, odin3_vec *ties) {
-    uint32_t width = param_u32(lc, src, P_Y_WIDTH);
+    uint32_t width = lm_param_u32(lc, src, LM_P_Y_WIDTH);
     bus3 bus;
     odin3_status st = bus3_make(&bus, width);
     st = st == ODIN3_OK ? build_into(lc, src, &bus, width, ties) : st;
@@ -99,8 +104,12 @@ static odin3_status build(lm_ctx *lc, odin3_node_id src, odin3_vec *ties) {
 
 odin3_status lm_map_addsub(lm_ctx *lc, odin3_node_id src) {
     odin3_celltype_id type = {0};
-    if (param_u32(lc, src, P_A_WIDTH) == 0 || param_u32(lc, src, P_B_WIDTH) == 0 ||
-        param_u32(lc, src, P_Y_WIDTH) == 0) {
+    if (lm_param_u32(lc, src, LM_P_Y_WIDTH) > LM_MAX_LPM_WIDTH) {
+        lm_warn_wide(lc, src, lm_param_u32(lc, src, LM_P_Y_WIDTH), LM_ADD_SUB);
+        return ODIN3_OK;
+    }
+    if (lm_param_u32(lc, src, LM_P_A_WIDTH) == 0 || lm_param_u32(lc, src, LM_P_B_WIDTH) == 0 ||
+        lm_param_u32(lc, src, LM_P_Y_WIDTH) == 0) {
         return ODIN3_OK; /* a degenerate cell: left alone (A-1) */
     }
     odin3_status st = lm_need(lc, LM_ADD_SUB, src, &type);

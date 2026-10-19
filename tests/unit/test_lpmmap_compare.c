@@ -18,7 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { LOG_TEXT = 8192, TEXT_MAX = 4096, OOM_LIMIT = 4000, MAXW = 16 };
+enum { LOG_TEXT = 8192, TEXT_MAX = 8192, OOM_LIMIT = 4000, MAXW = 16 };
 
 static char log_text[LOG_TEXT];
 
@@ -138,11 +138,13 @@ static void expect_one_output(const pb_result *res, odin3_node_id blk, const cha
     }
 }
 
-/* The control ports are open. */
+/* M1: the control ports are tied to their documented defaults: clock 0, clken 1, aclr 0. */
 static void expect_ctrl_open(const pb_result *res, odin3_node_id blk) {
-    TEST_ASSERT_TRUE(lm_port_open(res->module, blk, "clock"));
-    TEST_ASSERT_TRUE(lm_port_open(res->module, blk, "clken"));
-    TEST_ASSERT_TRUE(lm_port_open(res->module, blk, "aclr"));
+    TEST_ASSERT_TRUE(
+        is_const(res->module, lm_pin_net(res->module, blk, "clock", 0), ODIN3_CONST_0));
+    TEST_ASSERT_TRUE(
+        is_const(res->module, lm_pin_net(res->module, blk, "clken", 0), ODIN3_CONST_1));
+    TEST_ASSERT_TRUE(is_const(res->module, lm_pin_net(res->module, blk, "aclr", 0), ODIN3_CONST_0));
 }
 
 /* One comparison type maps to one lpm_compare driving its output. */
@@ -275,6 +277,24 @@ static void test_c_prov_and_attr(void) {
     pb_free(&res);
 }
 
+/* M2: 256 bits maps, 257 stays soft with a warning. */
+static void test_c_width_cap(void) {
+    pb_result res;
+    build_one((cmpcase){"$lt", 256, 100, 1, false, false, NULL, NULL}, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "lpm_compare"));
+    pb_free(&res);
+    log_text[0] = '\0';
+    build_one((cmpcase){"$eq", 8, 257, 1, false, false, NULL, NULL}, &res);
+    odin3_lpmmap_stats stats;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, &stats));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "$eq"));
+    TEST_ASSERT_EQUAL_UINT64(1, stats.soft);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "lpmmap: '$eq' 'u0' has width 257, above the 256 bits "
+                                          "lpm_compare supports; left soft"));
+    pb_free(&res);
+}
+
 static void test_c_oom(void) {
     int mapped = 0;
     for (int fail_at = 0; fail_at < OOM_LIMIT && mapped == 0; fail_at++) {
@@ -309,6 +329,7 @@ int main(void) {
     RUN_TEST(test_c_const_operand);
     RUN_TEST(test_c_aliased);
     RUN_TEST(test_c_prov_and_attr);
+    RUN_TEST(test_c_width_cap);
     RUN_TEST(test_c_oom);
     return UNITY_END();
 }

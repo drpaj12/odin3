@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { LOG_TEXT = 8192, TEXT_MAX = 4096, OOM_LIMIT = 4000, MAXW = 40 };
+enum { LOG_TEXT = 8192, TEXT_MAX = 8192, OOM_LIMIT = 4000, MAXW = 40 };
 
 static char log_text[LOG_TEXT];
 
@@ -73,6 +73,10 @@ static void build_one(mulcase mc, pb_result *res) {
                    mc.a_signed ? 1 : 0, mc.b_signed ? 1 : 0, mc.a_width, mc.b_width, mc.y_width,
                    mc.a_sig != NULL ? mc.a_sig : "\\a", mc.b_sig != NULL ? mc.b_sig : "\\b");
     lm_build_ok(text, res);
+}
+
+static bool is_const(const odin3_module *mod, odin3_net_id net, odin3_const value) {
+    return odin3_net_valid(net) && odin3_net_const_value(mod, net) == value;
 }
 
 typedef struct before {
@@ -215,19 +219,38 @@ static void test_m4_y_wider_stays_soft(void) {
 
 /* --- M-5 ------------------------------------------------------------------------------------ */
 
-static void test_m5_unused_ports_open_and_params(void) {
+static void test_m5_defaults_tied_and_params(void) {
     pb_result res;
     build_one((mulcase){4, 4, 8, false, false, NULL, NULL}, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, NULL));
     odin3_node_id blk = lm_nth(res.module, "lpm_mult", 0);
-    static const char *const open_ports[] = {"sum", "clock", "clken", "aclr"};
-    for (size_t i = 0; i < sizeof open_ports / sizeof open_ports[0]; i++) {
-        TEST_ASSERT_TRUE_MESSAGE(lm_port_open(res.module, blk, open_ports[i]), open_ports[i]);
-    }
+    /* M1: sum 0, clken 1, aclr 0, clock 0 */
+    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "sum", 0), ODIN3_CONST_0));
+    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "clken", 0), ODIN3_CONST_1));
+    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "aclr", 0), ODIN3_CONST_0));
+    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "clock", 0), ODIN3_CONST_0));
     TEST_ASSERT_EQUAL_INT64(0, lm_param_int(res.module, blk, "lpm_pipeline"));
     TEST_ASSERT_EQUAL_INT64(1, lm_param_int(res.module, blk, "lpm_widths"));
     TEST_ASSERT_EQUAL_STRING("UNUSED", lm_param_str(res.module, blk, "lpm_hint"));
     TEST_ASSERT_EQUAL_STRING("lpm_mult", lm_param_str(res.module, blk, "lpm_type"));
+    pb_free(&res);
+}
+
+/* M2: an operand of 256 bits maps, 257 stays soft with a warning. */
+static void test_m_width_cap(void) {
+    pb_result res;
+    build_one((mulcase){256, 2, 258, false, false, NULL, NULL}, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "lpm_mult"));
+    pb_free(&res);
+    log_text[0] = '\0';
+    build_one((mulcase){3, 257, 260, false, false, NULL, NULL}, &res);
+    odin3_lpmmap_stats stats;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, &stats));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "$mul"));
+    TEST_ASSERT_EQUAL_UINT64(1, stats.soft);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "lpmmap: '$mul' 'u0' has width 257, above the 256 bits "
+                                          "lpm_mult supports; left soft"));
     pb_free(&res);
 }
 
@@ -293,7 +316,8 @@ int main(void) {
     RUN_TEST(test_m2_short_y_dangling_result_bits);
     RUN_TEST(test_m3_signedness);
     RUN_TEST(test_m4_y_wider_stays_soft);
-    RUN_TEST(test_m5_unused_ports_open_and_params);
+    RUN_TEST(test_m5_defaults_tied_and_params);
+    RUN_TEST(test_m_width_cap);
     RUN_TEST(test_m_prov_and_attr);
     RUN_TEST(test_m_explicit_untouched);
     RUN_TEST(test_m_oom);

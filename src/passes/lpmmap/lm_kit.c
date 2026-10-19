@@ -608,3 +608,21 @@ odin3_status lm_net_array(odin3_vec *vec, uint32_t count, odin3_net_id **first) 
     }
     return st;
 }
+
+/* --- shared rule helpers ------------------------------------------------------------------- */
+
+uint32_t lm_param_u32(const lm_ctx *lc, odin3_node_id node, uint32_t index) {
+    const odin3_value *val = odin3_node_param(lc->module, node, index);
+    return val != NULL && val->i > 0 ? (uint32_t)val->i : 0;
+}
+
+void lm_warn_wide(lm_ctx *lc, odin3_node_id src, uint32_t width, lm_type which) {
+    char label[ODIN3_LOG_BUF / 4];
+    lm_label(lc, src, label, sizeof label);
+    const odin3_celltype_def *def =
+        odin3_celltype_get(lc->design, odin3_node_type(lc->module, src));
+    lm_diag(lc, ODIN3_LOG_WARN, src,
+            "lpmmap: '%s' '%s' has width %" PRIu32 ", above the %d bits %s supports; left soft",
+            def->name, label, width, (int)LM_MAX_LPM_WIDTH, k_type_names[which]);
+    lc->stats.soft++;
+}

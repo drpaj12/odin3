@@ -12,7 +12,6 @@
 
 #include <inttypes.h>
 
-enum { P_A_WIDTH = 2, P_B_WIDTH = 3, P_Y_WIDTH = 4 };
 enum { PORT_A, PORT_B, PORT_Y };
 
 typedef struct mul_shape {
@@ -20,16 +19,11 @@ typedef struct mul_shape {
     bool is_signed;
 } mul_shape;
 
-static uint32_t param_u32(const lm_ctx *lc, odin3_node_id node, uint32_t index) {
-    const odin3_value *val = odin3_node_param(lc->module, node, index);
-    return val != NULL && val->i > 0 ? (uint32_t)val->i : 0;
-}
-
 static mul_shape shape_of(const lm_ctx *lc, odin3_node_id node) {
     mul_shape sh;
-    sh.a = param_u32(lc, node, P_A_WIDTH);
-    sh.b = param_u32(lc, node, P_B_WIDTH);
-    sh.y = param_u32(lc, node, P_Y_WIDTH);
+    sh.a = lm_param_u32(lc, node, LM_P_A_WIDTH);
+    sh.b = lm_param_u32(lc, node, LM_P_B_WIDTH);
+    sh.y = lm_param_u32(lc, node, LM_P_Y_WIDTH);
     sh.is_signed = odin3_opt_both_signed(lc->module, node);
     return sh;
 }
@@ -78,6 +72,10 @@ static odin3_status build_into(lm_ctx *lc, odin3_node_id src, const mul_shape *s
     uint32_t product = sh->a + sh->b;
     odin3_status st = lm_begin_cell(lc, src);
     st = st == ODIN3_OK ? lm_fresh_nets(lc, product, bus->r) : st;
+    odin3_net_id gnd = {0};
+    odin3_net_id vcc = {0};
+    st = st == ODIN3_OK ? lm_const(lc, LM_GND, &gnd) : st;
+    st = st == ODIN3_OK ? lm_const(lc, LM_VCC, &vcc) : st;
     if (st != ODIN3_OK) {
         return st;
     }
@@ -88,8 +86,12 @@ static odin3_status build_into(lm_ctx *lc, odin3_node_id src, const mul_shape *s
                               {"lpm_widthp", (int64_t)product, NULL},
                               {"lpm_representation", 0, sh->is_signed ? "SIGNED" : "UNSIGNED"},
                               {"lpm_pipeline", 0, NULL}};
-    const lm_pconn ports[] = {
-        {"dataa", bus->a, sh->a}, {"datab", bus->b, sh->b}, {"result", bus->r, product}};
+    /* M-5: the documented defaults are tied: sum 0, clken 1, aclr 0, clock 0 (UG-01063 p. 4-3 and
+     * the VHDL component). */
+    const lm_pconn ports[] = {{"dataa", bus->a, sh->a},    {"datab", bus->b, sh->b},
+                              {"result", bus->r, product}, {"sum", &gnd, 1},
+                              {"clken", &vcc, 1},          {"aclr", &gnd, 1},
+                              {"clock", &gnd, 1}};
     odin3_node_id node = {0};
     st = lm_new_node(lc,
                      &(lm_node_req){LM_MULT, params, sizeof params / sizeof params[0], ports,
@@ -111,6 +113,11 @@ odin3_status lm_map_mult(lm_ctx *lc, odin3_node_id src) {
     mul_shape sh = shape_of(lc, src);
     if (sh.a == 0 || sh.b == 0 || sh.y == 0) {
         return ODIN3_OK; /* a degenerate cell (the type's verify refuses it): left alone */
+    }
+    uint32_t widest = sh.a > sh.b ? sh.a : sh.b;
+    if (widest > LM_MAX_LPM_WIDTH) {
+        lm_warn_wide(lc, src, widest, LM_MULT);
+        return ODIN3_OK;
     }
     odin3_celltype_id type = {0};
     odin3_status st = lm_need(lc, LM_MULT, src, &type);

@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { LOG_TEXT = 8192, TEXT_MAX = 4096, OOM_LIMIT = 4000 };
+enum { LOG_TEXT = 8192, TEXT_MAX = 8192, OOM_LIMIT = 4000 };
 
 static char log_text[LOG_TEXT];
 
@@ -228,13 +228,17 @@ static void test_a2_mixed_sign_is_unsigned(void) {
 
 /* --- A-3, A-4, A-5 ---------------------------------------------------------------------------- */
 
-static void test_a3_unused_ports_open(void) {
+static void test_a3_defaults_tied_and_unused_open(void) {
     pb_result res;
     build_one((addcase){"$add", 4, 4, 5, false, false, NULL, NULL}, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, NULL));
     odin3_node_id blk = lm_nth(res.module, "lpm_add_sub", 0);
-    static const char *const open_ports[] = {"cin",  "add_sub", "clken",   "clock",
-                                             "aclr", "cout",    "overflow"};
+    /* M1: the documented defaults are tied; add_sub, cout and overflow stay open */
+    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "cin", 0), ODIN3_CONST_0));
+    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "clken", 0), ODIN3_CONST_1));
+    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "aclr", 0), ODIN3_CONST_0));
+    TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "clock", 0), ODIN3_CONST_0));
+    static const char *const open_ports[] = {"add_sub", "cout", "overflow"};
     for (size_t i = 0; i < sizeof open_ports / sizeof open_ports[0]; i++) {
         TEST_ASSERT_TRUE_MESSAGE(lm_port_open(res.module, blk, open_ports[i]), open_ports[i]);
     }
@@ -258,8 +262,9 @@ static void test_a4_params_add_and_sub(void) {
         TEST_ASSERT_EQUAL_STRING(rows[i].dir, lm_param_str(res.module, blk, "lpm_direction"));
         TEST_ASSERT_EQUAL_STRING(rows[i].rep, lm_param_str(res.module, blk, "lpm_representation"));
         TEST_ASSERT_EQUAL_INT64(0, lm_param_int(res.module, blk, "lpm_pipeline"));
-        /* A-5: the subtract leaves cin open (the Altera default is 1 for subtraction) */
-        TEST_ASSERT_TRUE(lm_port_open(res.module, blk, "cin"));
+        /* A-5: cin is the documented default: 1 for a subtract, 0 for an add */
+        TEST_ASSERT_TRUE(is_const(res.module, lm_pin_net(res.module, blk, "cin", 0),
+                                  strcmp(rows[i].dir, "SUB") == 0 ? ODIN3_CONST_1 : ODIN3_CONST_0));
         expect_lpmmap_attr(&res, blk, rows[i].role);
         pb_free(&res);
     }
@@ -386,6 +391,25 @@ static void test_a_oom(void) {
     TEST_ASSERT_EQUAL_INT(1, mapped);
 }
 
+/* M2: 256 bits maps, 257 stays soft with a warning naming the cell and the width. */
+static void test_a_width_cap(void) {
+    pb_result res;
+    build_one((addcase){"$add", 256, 256, 256, false, false, NULL, NULL}, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "lpm_add_sub"));
+    pb_free(&res);
+    log_text[0] = '\0';
+    build_one((addcase){"$sub", 257, 257, 257, false, false, NULL, NULL}, &res);
+    odin3_lpmmap_stats stats;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, &stats));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "$sub"));
+    TEST_ASSERT_EQUAL_UINT32(0, lm_count(res.module, "lpm_add_sub"));
+    TEST_ASSERT_EQUAL_UINT64(1, stats.soft);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "lpmmap: '$sub' 'u0' has width 257, above the 256 bits "
+                                          "lpm_add_sub supports; left soft"));
+    pb_free(&res);
+}
+
 static void test_a_missing_type_error(void) {
     pb_result res;
     char text[TEXT_MAX];
@@ -407,7 +431,8 @@ int main(void) {
     RUN_TEST(test_a2_truncation);
     RUN_TEST(test_a2_signed_ext);
     RUN_TEST(test_a2_mixed_sign_is_unsigned);
-    RUN_TEST(test_a3_unused_ports_open);
+    RUN_TEST(test_a3_defaults_tied_and_unused_open);
+    RUN_TEST(test_a_width_cap);
     RUN_TEST(test_a4_params_add_and_sub);
     RUN_TEST(test_a_const_operand);
     RUN_TEST(test_a_aliased_operands);
