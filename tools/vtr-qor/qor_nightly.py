@@ -436,6 +436,10 @@ def check_lib_command(repo: Path, vtr_root: Path) -> list[str]:
             "--vtr-root", str(vtr_root)]
 
 
+# 3F's task for ``crosscheck`` (PHASE3 decision 29, ruling 2): the three smallest designs, P's flow.
+DEFAULT_TASK = qor_legs.REPO_ROOT / "tests" / "vtr" / "tasks" / "qor_p"
+
+
 def crosscheck_command(vtr_root: Path, task: Path, out: Path) -> list[str]:
     """``run_vtr_task.py <abs task> -temp_dir <out>/crosscheck -j 1`` (spec §9)."""
     python = vtr_root / ".venv" / "bin" / "python"

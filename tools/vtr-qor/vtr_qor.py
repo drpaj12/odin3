@@ -960,8 +960,12 @@ def cmd_crosscheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
     lines = []
     for result in sorted(work.glob("**/parse_results.txt")):
         for design, row in qor_nightly.parse_rows(result).items():
-            lines += qor_nightly.crosscheck_lines(design, row,
-                                                  _harness_row(out, vtr12, arch, design))
+            harness = _harness_row(out, vtr12, arch, design)
+            if not harness:  # no P job to compare with: one line, not every key "(absent)"
+                lines.append(f"{PREFIX}crosscheck: {design}: no harness P job; run "
+                             f"vtr-qor run --leg P --designs {design}")
+                continue
+            lines += qor_nightly.crosscheck_lines(design, row, harness)
     for line in lines:
         print(line, file=sys.stderr)
     return EXIT_FAIL if lines else EXIT_OK
@@ -1783,7 +1787,9 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("check-lib", parents=[common], help="vtr-models check-lib against the arch")
     crosscheck = sub.add_parser("crosscheck", parents=[common],
                                 help="3F's task against the harness's results (heavy)")
-    crosscheck.add_argument("--task", type=Path, required=True, metavar="DIR")
+    crosscheck.add_argument("--task", type=Path, default=qor_nightly.DEFAULT_TASK, metavar="DIR",
+                            help="a task directory (default: the repo's tests/vtr/tasks/qor_p, "
+                                 "the three smallest designs)")
     sub.add_parser("status", parents=[common], help="latest key and counts per arch and leg")
     clean = sub.add_parser("clean", parents=[common], help="retention (spec §5.4)")
     clean.add_argument("--keep", type=_positive, default=qor_sched.KEEP_KEYS, metavar="N",

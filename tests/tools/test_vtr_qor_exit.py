@@ -10,6 +10,7 @@ import dataclasses
 import hashlib
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import time
@@ -253,6 +254,17 @@ class ExitCliTest(CliTestBase):
         self.assertEqual(self.cli("exit-run", "--label", "x", "--odin3", "/nonexistent/odin3",
                                   common=False)[0], 2)
 
+    def test_crosscheck_without_a_harness_job(self) -> None:
+        """A task design the harness has no P job for gets one clear line, not a line per key."""
+        task = self.tmp / "task"
+        task.mkdir()
+        (self.vtr / "task-results").write_text(
+            "circuit\tvpr_status\tnum_clb\t\nch_intrinsics.v\tsuccess\t12\t\n")
+        code, _, err = self.cli("crosscheck", "--task", str(task))
+        self.assertEqual(code, 1)
+        self.assertEqual(err, "vtr-qor: crosscheck: ch_intrinsics: no harness P job; run "
+                              "vtr-qor run --leg P --designs ch_intrinsics\n")
+
     def test_probe_runs_the_oprov_script(self) -> None:
         """The real probe against the fake odin3: exit 0 and a file: capable; exit 1: the reason."""
         work = self.tmp / "probe"
@@ -354,6 +366,7 @@ class NightRerunStepTest(unittest.TestCase):
 
 
 SETS = qor_sched.load_sets()
+TASKS = qor_legs.REPO_ROOT / "tests" / "vtr" / "tasks"
 COMMON = ("--vtr-root", "/v", "--odin3", "/o/odin3", "--out", "/out")
 ALL = ("P", "Pprime", "Oprime", "O", "R", "Oprov")
 
@@ -514,6 +527,78 @@ class ExitRunDeadlineTest(RunnerTestBase):
         self.assertEqual([r.status for r in summary.results], ["ok", "ok", "skipped"])
         self.assertIn("vtr-qor: exit-run: P bgm not started: expected 100 min would pass 06:00",
                       lines)
+
+
+def read_task(path: Path) -> dict[str, list[str]]:
+    """A VTR task config (``key=value`` lines, ``#`` comments) as VTR's ``load_task_config``
+    reads it: a repeated key keeps every value, in order."""
+    values: dict[str, list[str]] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#"):
+            key, _, value = line.partition("=")
+            values.setdefault(key, []).append(value)
+    return values
+
+
+class TaskConfigTest(unittest.TestCase):
+    """3F (folded into 3H): the committed ``tests/vtr/tasks`` configs agree with the harness."""
+
+    def test_task_configs(self) -> None:
+        expected = {"qor_p": list(SETS.order[:3]), "qor_gate": list(SETS.order)}
+        self.assertEqual(sorted(p.name for p in TASKS.iterdir()), sorted(expected))
+        for name, designs in expected.items():
+            task = read_task(TASKS / name / "config" / "config.txt")
+            self.assertEqual(task["circuit_list_add"], [f"{d}.v" for d in designs], name)
+            self.assertEqual(task["arch_list_add"], [f"{qor_legs.ARCH_BASES['k6']}.xml"])
+            # the harness's common parameters, and nothing machine specific
+            self.assertEqual(task["script_params"], [" ".join(qor_legs.QOR_CHAIN_PARAMS)])
+            self.assertEqual((task["circuits_dir"], task["archs_dir"]),
+                             (["benchmarks/verilog"], ["arch/timing"]))
+            self.assertEqual((task["parse_file"], task["qor_parse_file"]),
+                             (["vpr_standard.txt"], ["qor_standard.txt"]))
+            self.assertNotIn("/home/", (TASKS / name / "config" / "config.txt").read_text())
+
+    def test_qor_gate_is_the_p_leg_set(self) -> None:
+        task = read_task(TASKS / "qor_gate" / "config" / "config.txt")
+        names = [d.removesuffix(".v") for d in task["circuit_list_add"]]
+        self.assertEqual(set(names), set(SETS.gate) | set(SETS.extra))
+
+    def test_the_default_task_is_qor_p(self) -> None:
+        self.assertEqual(qor_nightly.DEFAULT_TASK, TASKS / "qor_p")
+
+    def test_task_files_exist_in_vtr(self) -> None:
+        """When a VTR checkout is at hand: the parse files and designs the configs name exist."""
+        vtr = Path.home() / "odin3-ws" / "external" / "vtr-verilog-to-routing" / "vtr_flow"
+        if not vtr.is_dir():
+            self.skipTest("no VTR checkout")
+        for name in ("qor_p", "qor_gate"):
+            task = read_task(TASKS / name / "config" / "config.txt")
+            self.assertTrue((vtr / "parse" / "parse_config" / task["parse_file"][0]).is_file())
+            self.assertTrue((vtr / "parse" / "qor_config" / task["qor_parse_file"][0]).is_file())
+            for circuit in task["circuit_list_add"]:
+                self.assertTrue((vtr / "benchmarks" / "verilog" / circuit).is_file(), circuit)
+            self.assertTrue((vtr / "arch" / "timing" / task["arch_list_add"][0]).is_file())
+
+    def test_vtr_loads_the_configs(self) -> None:
+        """VTR's own ``load_task_config`` (read only, no flow runs) accepts both configs."""
+        root = Path.home() / "odin3-ws" / "external" / "vtr-verilog-to-routing"
+        python = root / ".venv" / "bin" / "python"
+        if not python.is_file():
+            self.skipTest("no VTR venv")
+        snippet = ("import sys\nsys.path.insert(0, sys.argv[1])\n"
+                   "from vtr.task import load_task_config\n"
+                   "c = load_task_config(sys.argv[2])\n"
+                   "print(len(c.circuits), ' '.join(c.script_params))\n")
+        for name, count in (("qor_p", 3), ("qor_gate", len(SETS.order))):
+            proc = subprocess.run(
+                [str(python), "-I", "-B", "-c", snippet,
+                 str(root / "vtr_flow" / "scripts" / "python_libs"),
+                 str(TASKS / name / "config" / "config.txt")],
+                capture_output=True, text=True, check=False)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(),
+                             f"{count} -track_memory_usage -crit_path_router_iterations 100")
 
 
 if __name__ == "__main__":
