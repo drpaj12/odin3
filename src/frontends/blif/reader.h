@@ -68,7 +68,14 @@
  *   in the declared-model list (writers emit no `.model` for it), whose ports are the distinct
  *   formals used with it in the file, in order of first use, each scalar, width 1 and INOUT (the
  *   file gives no directions);
- * - `.cname`, `.attr`, `.param` apply to the previous cell of the model (see above).
+ * - `.cname`, `.attr`, `.param` apply to the previous cell of the model (see above). A `.param
+ *   NAME VALUE…` on a cell of a tech-library type (`read_techlib`; odin3_techlib_cell_get) that
+ *   declares a parameter NAME sets that parameter on the node (VALUE as param_text.h: a quoted
+ *   string, 32 or 64 binary digits for an INT, `0 1 x z` for a BITS) and makes no attribute; the
+ *   cell is rebuilt on the same nets with the same name and attributes (odin3_node_replace), so a
+ *   value that changes a port width is the error `.param NAME changes the port widths of 'type'`
+ *   and a value that is not that form is `.param NAME of 'type': cannot read '…' as a …`. A
+ *   `.param` for any other cell or name is an attribute as before.
  * A net with a second driver is refused (PHASE3 #36): after each cell, a net that has two drivers
  * that are neither inout pins nor outputs of a tristate type (check rule 4's own test; the pins
  * of an implicit black box are inout) is a located error at the second driver's directive, and

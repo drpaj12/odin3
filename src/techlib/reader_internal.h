@@ -48,7 +48,9 @@ typedef struct odin3_rd_port {
 
 typedef struct odin3_rd_param {
     uint32_t name; /* strtab ID */
-    int64_t dflt;
+    bool is_string;
+    int64_t dflt;      /* INT default */
+    uint32_t dflt_str; /* STRING default: strtab ID */
 } odin3_rd_param;
 
 /* The cell between `cell` and `end`. */

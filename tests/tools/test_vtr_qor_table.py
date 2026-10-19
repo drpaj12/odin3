@@ -341,6 +341,23 @@ class GateTest(unittest.TestCase):
         self.assertEqual(verdict(absent), Verdict(state="INCOMPLETE", violations=(
             "gate: INCOMPLETE: sha O fcheck missing (not run); run it",)))
 
+    def test_gate_fcheck_untested_and_baseline(self) -> None:
+        # Odin III's own untested leg is never a pass and not a failure: INCOMPLETE
+        untested = replace(table(), run("O", "sha", override={"fcheck": "untested"}))
+        self.assertEqual(verdict(untested), Verdict(state="INCOMPLETE", violations=(
+            "gate: INCOMPLETE: sha O fcheck untested (the RTL leaves the mismatching bits "
+            "undefined); it cannot be judged",)))
+        # a P-leg baseline defect (fail or untested) does not fail the gate when Odin III passes
+        for baseline in ("fail", "untested"):
+            p_bad = replace(table(), run("P", "sha", override={"fcheck": baseline}))
+            self.assertEqual(verdict(p_bad).state, "PASS", baseline)
+        # a declared baseline row lets O's fail stand against P's untested, as against P's fail
+        rows = [("sha", "baseline-fails", "D2b: subtract pad")]
+        both = replace(replace(table(), run("O", "sha", override={"fcheck": "fail"})),
+                       run("P", "sha", override={"fcheck": "untested"}))
+        self.assertEqual(verdict(both, divergences=rows).state, "PASS")
+        self.assertEqual(verdict(both).state, "FAIL")  # no row: O's own fail
+
     def test_gate_equiv(self) -> None:
         listed = [("stereovision3", "multiclock", "two clocks; the Verilator check stands in")]
         differs = replace(table(), run("O", "stereovision3", override={"equiv": "differs"}))
@@ -978,6 +995,19 @@ class WriterTest(unittest.TestCase):
         self.assertIn("## Name style\n", md)
         self.assertIn("| sha | 1.0 | 2.0 | 2.000 |  |  |  |", md)
         self.assertIn("| bgm | 1.0 | 1.0 | 1.000 |  |  |  |", md)
+
+    def test_md_shows_the_baseline_defect_never_a_pass(self) -> None:
+        runs = replace(table(), run("P", "sha", override={"fcheck": "fail"}))
+        runs = replace(runs, run("P", "bgm", override={"fcheck": "untested"}))
+        divergences = [("sha", "baseline-fails", "D2b: subtract pad"),
+                       ("sha", "baseline-fails", "dropped-latches: RTL latches"),
+                       ("bgm", "baseline-fails", "x-state: unreset pipeline")]
+        qor_table.write_md(runs, verdict(runs), header(runs), self.dir / "qor.md", golden=None,
+                           divergences=divergences, equiv_exceptions=())
+        md = (self.dir / "qor.md").read_text(encoding="utf-8")
+        self.assertIn("| sha | fail (baseline: D2b, dropped-latches) | pass |", md)
+        self.assertIn("| bgm | untested (baseline: x-state) | pass |", md)
+        self.assertEqual(qor_table.baseline_tags(divergences, "mcml"), [])
 
     def test_md_checks_divergences_marks(self) -> None:
         """Review I2: divergence rows, the equiv exception note, the ? mark, -dirty."""

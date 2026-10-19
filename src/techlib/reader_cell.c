@@ -73,9 +73,13 @@ static odin3_rd_port *port_at(odin3_reader *rd, uint32_t idx) {
     return odin3_vec_at(&rd->cell.ports, idx);
 }
 
-/* Words that cannot name a port or parameter: modifiers and the `init x` value. */
+/*
+ * Words that cannot name a port or parameter: the `signed` modifier and the `init x` value. A port
+ * may be called `clock` (the `clock` modifier is only read after the width; 5.1: lpm_add_sub has
+ * a port `clock`).
+ */
 static bool reserved(odin3_rd_span name) {
-    return odin3_rd_is(name, "signed") || odin3_rd_is(name, "clock") || odin3_rd_is(name, "x");
+    return odin3_rd_is(name, "signed") || odin3_rd_is(name, "x");
 }
 
 /* Interns a new port or parameter name; an error if reserved or the cell already uses it. */
@@ -151,6 +155,13 @@ static odin3_status take_output(odin3_reader *rd, odin3_rd_span *rest, uint32_t 
     return ODIN3_OK;
 }
 
+/* True when name is a parameter declared as a string. */
+static bool is_string_param(const odin3_rd_cell *cell, uint32_t name) {
+    int idx = param_index(cell, name);
+    return idx != NOT_FOUND &&
+           ((const odin3_rd_param *)odin3_vec_cat(&cell->params, (size_t)idx))->is_string;
+}
+
 /* Every identifier of expr names a parameter (or, when ports_ok, a port) declared so far. */
 static odin3_status check_idents(odin3_reader *rd, const odin3_expr *expr, bool ports_ok) {
     odin3_vec_clear(&rd->idents);
@@ -164,6 +175,10 @@ static odin3_status check_idents(odin3_reader *rd, const odin3_expr *expr, bool 
             st = odin3_rd_err(rd, odin3_rd_at(rd, (*node)->col), "'%s' is not a %s of cell '%s'",
                               odin3_strtab_get(rd->strtab, ident),
                               ports_ok ? "port or parameter" : "parameter", odin3_rd_cell_name(rd));
+        } else if (is_string_param(&rd->cell, ident)) {
+            st = odin3_rd_err(rd, odin3_rd_at(rd, (*node)->col),
+                              "'%s' is a string parameter and cannot be used in an expression",
+                              odin3_strtab_get(rd->strtab, ident));
         }
     }
     return st;
@@ -338,40 +353,83 @@ odin3_status odin3_rd_st_cell(odin3_reader *rd, odin3_rd_span rest) {
 
 /* --- param and ports ----------------------------------------------------------------------- */
 
+/* An int parameter's default: a constant integer expression. */
+typedef struct param_text {
+    odin3_rd_span name;
+    odin3_rd_span rest; /* the text after the kind word */
+} param_text;
+
+static odin3_status param_int_default(odin3_reader *rd, const param_text *text, int64_t *value) {
+    odin3_rd_span name = text->name;
+    odin3_rd_span rest = text->rest;
+    const odin3_expr *expr = NULL;
+    odin3_status st = odin3_rd_expr(rd, rest, &expr);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    odin3_expr_error err = {0, ""};
+    const odin3_expr_env names = {NULL, NULL, rd->strtab}; /* names identifiers in messages */
+    st = odin3_expr_eval_int_quiet(expr, &names, value, &err);
+    if (st != ODIN3_OK && st != ODIN3_ERR_NO_MEMORY) {
+        return odin3_rd_err(rd, odin3_rd_at(rd, err.col),
+                            "the default of '%.*s' must be a constant integer: %s", (int)name.len,
+                            name.ptr, err.text);
+    }
+    return st;
+}
+
+/* A string parameter's default: one double-quoted text with no quote inside, then nothing. */
+static odin3_status param_string_default(odin3_reader *rd, odin3_rd_span rest, uint32_t *id) {
+    rest = odin3_rd_trim(rest);
+    if (rest.len == 0 || rest.ptr[0] != '"') {
+        return odin3_rd_err(rd, odin3_rd_at(rd, rest.col),
+                            "expected the string default in double quotes");
+    }
+    const char *close = memchr(rest.ptr + 1, '"', rest.len - 1U);
+    if (close == NULL) {
+        return odin3_rd_err(rd, odin3_rd_at(rd, rest.col),
+                            "unterminated string default (the text may not hold ';' or '#')");
+    }
+    size_t used = (size_t)(close - rest.ptr) + 1U;
+    odin3_rd_span tail = {rest.ptr + used, rest.len - used, rest.col + (uint32_t)used};
+    if (odin3_rd_trim(tail).len != 0) {
+        return odin3_rd_err(rd, odin3_rd_at(rd, odin3_rd_trim(tail).col),
+                            "unexpected text after the string default");
+    }
+    odin3_rd_span text = {rest.ptr + 1, used - 2U, rest.col + 1U};
+    return odin3_rd_intern(rd, text, id);
+}
+
 odin3_status odin3_rd_st_param(odin3_reader *rd, odin3_rd_span rest) {
     odin3_rd_span name;
-    odin3_rd_span kind;
+    odin3_rd_span kind = {NULL, 0, rest.col};
     if (!odin3_rd_ident(&rest, &name)) {
         return odin3_rd_err(rd, odin3_rd_at(rd, rest.col), "expected a parameter name");
+    }
+    if (odin3_rd_is(name, "clock")) { /* a port may be called clock, a parameter may not */
+        return odin3_rd_err(rd, odin3_rd_at(rd, name.col), "'clock' is a reserved word");
     }
     uint32_t id = 0;
     odin3_status st = declare_name(rd, name, &id);
     if (st != ODIN3_OK) {
         return st;
     }
-    if (!odin3_rd_word(&rest, &kind) || !odin3_rd_is(kind, "int")) {
-        return odin3_rd_err(rd, odin3_rd_at(rd, kind.col), "only 'int' parameters are supported");
+    bool is_int = odin3_rd_word(&rest, &kind) && odin3_rd_is(kind, "int");
+    if (!is_int && !(kind.len != 0 && odin3_rd_is(kind, "string"))) {
+        return odin3_rd_err(rd, odin3_rd_at(rd, kind.col),
+                            "expected the parameter kind int or string");
     }
-    const odin3_expr *expr = NULL;
-    int64_t value = 0;
-    st = odin3_rd_expr(rd, rest, &expr);
-    if (st != ODIN3_OK) {
-        return st;
-    }
-    odin3_expr_error err = {0, ""};
-    const odin3_expr_env names = {NULL, NULL, rd->strtab}; /* names identifiers in messages */
-    st = odin3_expr_eval_int_quiet(expr, &names, &value, &err);
-    if (st != ODIN3_OK && st != ODIN3_ERR_NO_MEMORY) {
-        return odin3_rd_err(rd, odin3_rd_at(rd, err.col),
-                            "the default of '%.*s' must be a constant integer: %s", (int)name.len,
-                            name.ptr, err.text);
-    }
-    odin3_rd_param *param = st == ODIN3_OK ? odin3_vec_push(&rd->cell.params) : NULL;
-    if (param == NULL) {
+    odin3_rd_param param = {id, !is_int, 0, 0};
+    st = is_int ? param_int_default(rd, &(param_text){name, rest}, &param.dflt)
+                : param_string_default(rd, rest, &param.dflt_str);
+    odin3_rd_param *slot = st == ODIN3_OK ? odin3_vec_push(&rd->cell.params) : NULL;
+    if (st == ODIN3_OK && slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *param = (odin3_rd_param){id, value};
-    return ODIN3_OK;
+    if (slot != NULL) {
+        *slot = param;
+    }
+    return st;
 }
 
 /* Strips trailing `signed` / `clock` words (any order, each once) off the end of rest. */
@@ -817,8 +875,12 @@ static odin3_celltype_def *build_def(odin3_reader *rd) {
     }
     for (size_t i = 0; i < cell->params.len; i++) {
         const odin3_rd_param *param = odin3_vec_cat(&cell->params, i);
-        params[i] = (odin3_param_def){odin3_strtab_get(rd->strtab, param->name), ODIN3_VAL_INT,
-                                      odin3_value_int(param->dflt)};
+        const char *pname = odin3_strtab_get(rd->strtab, param->name);
+        params[i] = param->is_string
+                        ? (odin3_param_def){pname,
+                                            ODIN3_VAL_STRING,
+                                            {ODIN3_VAL_STRING, 0, NULL, 0, param->dflt_str, 0}}
+                        : (odin3_param_def){pname, ODIN3_VAL_INT, odin3_value_int(param->dflt)};
     }
     *def = (odin3_celltype_def){odin3_rd_cell_name(rd),
                                 gran_of(cell->kind),

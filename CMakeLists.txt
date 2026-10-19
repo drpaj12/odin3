@@ -78,6 +78,7 @@ add_library(odin3_core OBJECT
     src/util/file.c
     src/util/sha256.c
     src/frontends/blif/lexer.c
+    src/frontends/blif/param_text.c
     src/frontends/blif/reader.c
     src/backends/blif/writer.c
     src/backends/blif/vtr.c
@@ -121,6 +122,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/expr_fine.c
     src/passes/opt/clean.c
     src/passes/opt/merge.c
+    src/passes/opt/ffbits.c
     src/passes/opt/muxtree.c
     src/passes/opt/wreduce.c
     src/passes/opt/wreduce_op.c
@@ -170,6 +172,13 @@ add_library(odin3_core OBJECT
     src/passes/hardmap/mem.c
     src/passes/hardmap/mem_merge.c
     src/passes/hardmap/mem_plan.c
+    src/passes/lpmmap/register.c
+    src/passes/lpmmap/lpmmap.c
+    src/passes/lpmmap/lm_kit.c
+    src/passes/lpmmap/addsub.c
+    src/passes/lpmmap/mult.c
+    src/passes/lpmmap/compare.c
+    src/passes/lpmmap/mem.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -180,6 +189,8 @@ add_library(odin3_core OBJECT
     src/passes/abc/result.c
     src/passes/abc/xblif.c
     src/passes/abc/xblif_read.c
+    src/passes/abc/aig.c
+    src/passes/abc/aligned.c
     src/passes/abc/exchange.c
     src/passes/abc/splice.c
     src/passes/abc/splice_a.c
@@ -768,6 +779,9 @@ if(BUILD_TESTING)
     target_sources(test_opt_cse PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_opt_cse PRIVATE
         ODIN3_MERGE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/merge")
+    # PHASE3 #49: opt_merge -ffbits.
+    odin3_add_unit_test(test_opt_ffbits)
+    target_sources(test_opt_ffbits PRIVATE tests/unit/proc_build.c)
     # 2F Task 9: opt_reduce.
     odin3_add_unit_test(test_opt_reduce)
     target_sources(test_opt_reduce PRIVATE tests/unit/proc_build.c)
@@ -1032,6 +1046,13 @@ if(BUILD_TESTING)
         endif()
     endforeach()
     target_sources(test_abc_args PRIVATE tests/unit/proc_fixture.c tests/unit/proc_fixture_core.c)
+    # 3D Task 20: the AIG builder and the in-memory protocol, on the fake engine.
+    odin3_add_unit_test(test_abc_aig)
+    target_compile_definitions(test_abc_aig PRIVATE
+        ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/test_abc_aig"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_sources(test_abc_aig PRIVATE tests/unit/abc_fake_engine.c)
     # 3D Task 19: the splice's end-to-end checks. test_abc_unconn and test_abc_pass run the fake
     # engine in process; with ABC, test_abc_pass and test_abc_init1 also drive the odin3 binary
     # (real ABC) and tools/equiv-check, whose ABC is the build's own.
@@ -1191,6 +1212,55 @@ if(BUILD_TESTING)
         ODIN3_BVT_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/blif_vtr")
     odin3_add_unit_test(test_techlib_expr)
     odin3_add_unit_test(test_techlib_reader)
+    odin3_add_unit_test(test_techlib_string_param)
+    # 5.1 Task 3: lib/lpm.o3lib and LPM-structured Verilog read back as registered cells.
+    odin3_add_unit_test(test_lpm_lib)
+    # BLIF `.param` on a tech-library `.subckt` (1C amendment 2026-10-19, PHASE5 decision 8).
+    odin3_add_unit_test(test_blif_lib_params)
+    target_sources(test_blif_lib_params PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_blif_lib_params PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_scaffold)
+    # 5.1 Task 9 (spec T-1..T-4): one micro per LPM cell through the LPM script, the Verilog round
+    # trip and the lint (tools/lpm-check). Exit 77 (skipped) when iverilog is missing.
+    foreach(_lpm_micro IN ITEMS lpm_add_sub lpm_mult lpm_compare lpm_mixed altsyncram_sp altsyncram_sdp
+                                 altsyncram_soft)
+        add_test(NAME lpm_check_${_lpm_micro}
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/lpm-check/lpm-check
+                    --odin3 $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tests/lpm/${_lpm_micro}.v)
+        set_tests_properties(lpm_check_${_lpm_micro} PROPERTIES LABELS "unit;micro"
+                             SKIP_RETURN_CODE 77 TIMEOUT 300)
+    endforeach()
+    add_test(NAME lpm_check_family
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/lpm-check/lpm-check
+                --odin3 $<TARGET_FILE:odin3> --family "Stratix IV"
+                ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_sp.v)
+    set_tests_properties(lpm_check_family PROPERTIES LABELS "unit;micro" SKIP_RETURN_CODE 77
+                         TIMEOUT 300)
+    odin3_add_unit_test(test_lpmmap_ram)
+    target_sources(test_lpmmap_ram PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_ram PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_compare)
+    target_sources(test_lpmmap_compare PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_compare PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_mult)
+    target_sources(test_lpmmap_mult PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_mult PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_addsub)
+    target_sources(test_lpmmap_addsub PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_addsub PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    target_sources(test_lpmmap_scaffold PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_scaffold PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    target_sources(test_lpm_lib PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpm_lib PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_LPM_DIR="${PROJECT_SOURCE_DIR}/tests/lpm")
     odin3_add_unit_test(test_techlib_libs)
     target_compile_definitions(test_techlib_libs PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
@@ -1518,6 +1588,15 @@ if(BUILD_TESTING)
         add_test(NAME abc_child_real COMMAND test_abc_child_real)
         set_tests_properties(abc_child_real PROPERTIES LABELS unit
             ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
+        # 3D Task 21: test_abc_prov's fine-mode cases run the real linked engine in process (the
+        # name map), beside its fake-engine cases (the adapter's sources, as test_abc_child_real).
+        target_include_directories(test_abc_prov PRIVATE ${PROJECT_SOURCE_DIR}/adapters/abc)
+        target_compile_definitions(test_abc_prov PRIVATE ODIN3_HAVE_REAL_ABC)
+        target_link_libraries(test_abc_prov PRIVATE odin3_abc_testlib $<LINK_ONLY:libabc-pic>)
+        target_link_options(test_abc_prov PRIVATE ${ODIN3_ABC_WRAPS} -Wl,--wrap=pthread_create)
+        set_target_properties(test_abc_prov PROPERTIES LINKER_LANGUAGE CXX)
+        set_tests_properties(test_abc_prov PROPERTIES
+            ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
     endif()
     odin3_add_unit_test(test_abi_core)
     target_compile_definitions(test_abi_core PRIVATE
@@ -1697,6 +1776,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(abc_equiv_micro PROPERTIES LABELS tools TIMEOUT 3600)
+        # 3D Task 21: the same micros through both exchanges (abc-diff): each result equivalent to
+        # the input and to the other, the LUT, FF and depth counts printed.
+        add_test(NAME abc_diff_micro
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_diff.py
+                    --odin3 $<TARGET_FILE:odin3>
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --lut 6 --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                    --keep ${PROJECT_BINARY_DIR}/abc_tests/abc_diff_micro
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif
+                    ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(abc_diff_micro PROPERTIES LABELS tools TIMEOUT 3600)
         # 3D Task 19 (deferred to the controller, point (m)): every k6 Parmys golden of the VTR set
         # except mcml and LU32PEEng, smallest first (abc-equiv sorts), stereovision3 listed as
         # multiclock; the run log's summary is quoted in the PR.
@@ -1713,6 +1806,27 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --lut 6 --timeout 3000
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
                         --keep $ENV{HOME}/odin3-ws/work/abc-equiv-golden ${_abc_goldens})
+            # 3D Task 21 (deferred to the controller, point (m); the exchange differential, I8):
+            # the same goldens through the in-memory exchange against equiv-check, and both
+            # exchanges against each other (abc-diff: LUT, FF and depth ratios, smallest first).
+            odin3_add_sweep_test(abc_equiv_golden_aig LABEL sweep
+                COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                        ODIN3_REQUIRE_ABC=1
+                        ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_equiv.py
+                        --odin3 $<TARGET_FILE:odin3>
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --lut 6 --timeout 3000 --exchange aig
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                        --keep $ENV{HOME}/odin3-ws/work/abc-equiv-golden-aig ${_abc_goldens})
+            odin3_add_sweep_test(abc_diff_golden LABEL sweep
+                COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                        ODIN3_REQUIRE_ABC=1
+                        ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_diff.py
+                        --odin3 $<TARGET_FILE:odin3>
+                        --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                        --lut 6 --timeout 3000
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                        --keep $ENV{HOME}/odin3-ws/work/abc-diff-golden ${_abc_goldens})
         endif()
     endif()
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
@@ -1784,6 +1898,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-rules
                 --odin3 $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/opt/rules)
     set_tests_properties(opt_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77 TIMEOUT 600)
+    # opt_ffbits (PHASE3 #49): `opt_merge -ffbits` on the tests/opt/ffbits micros: the flip-flop
+    # bits left, against tests/opt/ffbits/expect.txt. Needs no Yosys; opt_ffbits_yosys is the
+    # parity check, opt_equiv_ffbits the refinement.
+    add_test(NAME opt_ffbits
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/ffbits-check --odin3 $<TARGET_FILE:odin3>)
+    set_tests_properties(opt_ffbits PROPERTIES LABELS opt TIMEOUT 600)
     # opt_simcheck_rules (review I2): the same 141 rows with --opt-simcheck (Debug builds), the
     # in-process 1E simulation check around every sub-pass call; it fails unless at least 90
     # modules were judged (95 at the time of writing), so a silent no-op cannot pass.
@@ -2766,6 +2886,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                              TIMEOUT 1800)
         # 3G (plan Task 3 step 3): the same on the wreduce sources with the Phase 3 script, which
         # runs wreduce; every call that changes something is checked (clock-aware) in turn.
+        # PHASE3 #49: opt_merge -ffbits against Yosys (techmap; opt -fast leaves the same bits) and
+        # its refinement (opt-equiv on the Phase 3 script plus the step) on tests/opt/ffbits.
+        add_test(NAME opt_ffbits_yosys
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/ffbits-check
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055})
+        set_tests_properties(opt_ffbits_yosys PROPERTIES LABELS opt TIMEOUT 600)
+        add_test(NAME opt_equiv_ffbits
+            COMMAND ${_opt_sweep} --jobs 1 --opt-equiv --opt-arg=--min-changed=1
+                    --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/ffbits.script
+                    --root ${PROJECT_SOURCE_DIR}/tests/opt/ffbits
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/ffbits_equiv_expect_fail.txt
+                    ${PROJECT_SOURCE_DIR}/tests/opt/ffbits)
+        set_tests_properties(opt_equiv_ffbits PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 1800)
         add_test(NAME opt_equiv_wreduce_rules
             COMMAND ${_opt_sweep} --jobs 1 --opt-equiv --opt-arg=--min-changed=1
                     --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script

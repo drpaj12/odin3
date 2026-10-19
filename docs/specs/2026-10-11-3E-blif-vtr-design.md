@@ -1023,3 +1023,9 @@ No minor finding was rejected.
 | I1 (3E-2 final) | §16.4's `--strict W` oracle fails by design on every golden with class-U `unconn` on a `.names`/`.latch` pin (§9.2 keeps it; C-S2 flags it): ≥ 39 goldens | applied (controller's ruling): checker option `--writer-log` (§15.1) pairs C-S2 with the writer's class-U warnings by count; §16.4 and plan Task 11 use it; every other `--strict` rule unchanged |
 | M1 (3E-2 final) | §15.1 C7 stricter than VPR for a formal repeated on the same net (Task 6 review M4) | applied: note in C7 (the checker keeps refusing both) |
 | M3 (3E-2 final) | `.inputs a a` gave C8 and C9; VPR accepts it | applied: a repeated `.inputs`/`.outputs` name is one pad (C9 note) |
+
+## Note 2026-10-19 (5.1)
+
+The 1C amendment of 2026-10-19 lets the PLAIN dialect write `.param` lines for a tech-library
+`.subckt`. The VTR dialect is unchanged: its preflight (E11) still refuses a hard cell whose
+parameters the reader would not derive, and `write_blif --vtr` writes no `.param`.

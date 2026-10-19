@@ -35,7 +35,7 @@
   \node[use, built, anchor=north] (sim) at (4.375, -4.25)
        {simulator\\\odinsub{hooks interpret the \odintt{fn} expressions}};
   \node[use, planned, anchor=north east] (pat) at (8.75, -4.25)
-       {matcher\\\odinsub{\odintt{fn} compiled to IR patterns; Phase 4}};
+       {matcher\\\odinsub{\odintt{fn} compiled to IR patterns; not in v1.0}};
   % ---- edges ---------------------------------------------------------------------------------
   \draw[flow] (src.east |- rd) -- (rd.west);
   \draw[flow] (rd) -- (ct);

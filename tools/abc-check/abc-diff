@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# abc-diff: the BLIF exchange against the in-memory exchange of the abc pass, design by design,
+# smallest first (3D Task 21). See abc_diff.py. Exit codes: 0 every design passes, 1 a design fails,
+# 2 usage error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/abc_diff.py" "$@"

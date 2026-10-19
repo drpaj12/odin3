@@ -486,6 +486,16 @@ ABC exchange (3D I8; runs per exchange): P' aig 21; O aig 20, blif 1
 | ch_intrinsics | mem-init-dropped | decision 6 step 5: hardmap drops RAM initial values (3C) |
 | LU8PEEng | dual-write-race | 3C R-6: two live write ports to one address are an IEEE race |
 | LU32PEEng | dual-write-race | 3C R-6: two live write ports to one address are an IEEE race |
+| sha | baseline-fails | D2b: read_counter - 7'b1 pads the adder b bits with unconn (reads 0): the netlist adds (P fcheck.log) |
+| blob_merge | baseline-fails | D2b: the divider's constant subtracts pad b with unconn (P fcheck.log) |
+| or1200 | baseline-fails | D2b: 6 subtract chains pad b with unconn (P fcheck.log) |
+| bgm | baseline-fails | D2b: 311 subtract chains pad b with unconn (2 residual mismatches not isolated) (P fcheck.log) |
+| boundtop | baseline-fails | dropped-latches: 103 RTL latches are dropped (read_verilog -nolatches); D2b also applies (P fcheck.log) |
+| raygentop | baseline-fails | dropped-latches: 109 RTL latches are dropped (read_verilog -nolatches); D2b also applies (P fcheck.log) |
+| ch_intrinsics | baseline-fails | x-state: 7 RTL latches are read before they are written; every mismatch bit is initial-state dependent (untested) (P fcheck.log) |
+| stereovision0 | baseline-fails | x-state: tm3_sram_addr reads vidin_addr_buf_sc_* before they are loaded; free-running unreset counters (P fcheck.log) |
+| stereovision1 | baseline-fails | lost-sign-bits: ({p[15],p[15],p}) + ({n[15],n[15],n}) loses the duplicated sign bits (P fcheck.log) |
+| stereovision2 | baseline-fails | lost-sign-bits: same pattern (19 lines); a residual mismatch after a rewrite is not isolated (P fcheck.log) |
 
 ## Cross-check against VTR's golden
 

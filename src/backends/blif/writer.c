@@ -1,5 +1,6 @@
 /* writer.c — BLIF writer: modules, cells and declared black boxes of a design. */
 #include "backends/blif/writer.h"
+#include "frontends/blif/param_text.h"
 
 #include "backends/blif/isop.h"
 #include "backends/blif/vtr.h"
@@ -60,7 +61,7 @@ static const char *const BUILTIN_NAMES[WR_BUILTINS] = {"$sop",        "$_DFF_P_"
  * to bit cells first). wr_init resolves the names to the design's type IDs once, and write_cell
  * compares IDs: exact, since no other type can be registered under a built-in's name.
  */
-enum { WR_NO_BLIF = 11 };
+enum { WR_NO_BLIF = 11, WR_MAX_PARAMS = 64 };
 static const char *const NO_BLIF_FORM[WR_NO_BLIF] = {"$adffe",   "$sdffe",    "$sdffce", "$aldff",
                                                      "$aldffe",  "$dffsr",    "$dffsre", "$dlatch",
                                                      "$adlatch", "$dlatchsr", "$sr"};
@@ -1548,11 +1549,12 @@ static odin3_status list_param(odin3_strbuf *bad, const char *name, bool *first)
     return st == ODIN3_OK ? odin3_strbuf_appendf(bad, "'%s'", name) : st;
 }
 
-/* odin3_blif_params_check for req's node (its design, module and declared map). */
-static odin3_status params_check(wr_implied req, odin3_strbuf *bad, bool *ok) {
+/* Which parameters of req's node differ from what the BLIF reader would derive (declared or
+ * implied by the connected formals): bit i of *mask is parameter i. A type has at most 64. */
+static odin3_status params_diff(wr_implied req, uint64_t *mask) {
     const odin3_celltype_def *def =
         odin3_celltype_get(req.design, odin3_node_type(req.module, req.node));
-    *ok = true;
+    *mask = 0;
     if (def->n_params == 0) {
         return ODIN3_OK;
     }
@@ -1560,15 +1562,27 @@ static odin3_status params_check(wr_implied req, odin3_strbuf *bad, bool *ok) {
     req.params = odin3_util_malloc(sizeof(odin3_value) * def->n_params);
     odin3_status st =
         req.seen != NULL && req.params != NULL ? implied_params(&req) : ODIN3_ERR_NO_MEMORY;
-    bool first = true;
-    for (uint32_t i = 0; st == ODIN3_OK && i < def->n_params; i++) {
+    for (uint32_t i = 0; st == ODIN3_OK && i < def->n_params && i < WR_MAX_PARAMS; i++) {
         if (!odin3_value_equal(odin3_node_param(req.module, req.node, i), &req.params[i])) {
-            *ok = false;
-            st = list_param(bad, def->params[i].name, &first);
+            *mask |= (uint64_t)1 << i;
         }
     }
     odin3_util_free(req.seen);
     odin3_util_free(req.params);
+    return st;
+}
+
+/* odin3_blif_params_check for req's node (its design, module and declared map). */
+static odin3_status params_check(wr_implied req, odin3_strbuf *bad, bool *ok) {
+    const odin3_celltype_def *def =
+        odin3_celltype_get(req.design, odin3_node_type(req.module, req.node));
+    uint64_t mask = 0;
+    odin3_status st = params_diff(req, &mask);
+    bool first = true;
+    *ok = mask == 0;
+    for (uint32_t i = 0; st == ODIN3_OK && i < def->n_params && i < WR_MAX_PARAMS; i++) {
+        st = ((mask >> i) & 1U) != 0 ? list_param(bad, def->params[i].name, &first) : st;
+    }
     return st;
 }
 
@@ -1625,8 +1639,14 @@ static uint32_t port_of_decl(const odin3_celltype_def *def, const odin3_celltype
     return at;
 }
 
+/* True for a type of a tech library (`.o3lib`): the PLAIN reader applies a `.param` line of a
+ * parameter such a type declares, so the writer may write the ones it cannot derive. */
+static bool is_techlib_type(const blif_writer *wr, odin3_celltype_id type) {
+    return odin3_techlib_cell_get(wr->design, type) != NULL;
+}
+
 /* Refuses a cell of def whose parameters the BLIF reader would not give it back (declared, or
- * implied by the connected formals). */
+ * implied by the connected formals, or written as `.param` lines: a library cell, PLAIN). */
 static odin3_status subckt_params_ok(blif_writer *wr, odin3_node_id node,
                                      const odin3_celltype_def *def) {
     bool ok = true;
@@ -1635,6 +1655,9 @@ static odin3_status subckt_params_ok(blif_writer *wr, odin3_node_id node,
         (wr_implied){wr->design, wr->module, node, wr->declared, NULL, NULL}, &wr->cand, &ok);
     if (checked != ODIN3_OK) {
         return wr_fail(wr, checked);
+    }
+    if (!ok && !wr->vtr && is_techlib_type(wr, odin3_node_type(wr->module, node))) {
+        return ODIN3_OK; /* write_cell_params writes them */
     }
     if (!ok) {
         return wr_refuse(wr,
@@ -1810,7 +1833,42 @@ static void write_extra(blif_writer *wr, odin3_node_id node, odin3_bytes key) {
     wr_end(wr);
 }
 
-/* `.cname` with the node's name, then its `.attr`/`.param` lines in recorded order. */
+/* `.param name value` for each parameter of a tech-library cell that the reader would not derive
+ * (not the declared model's, not implied by the connected formals), in definition order, as Yosys
+ * `write_blif -param` writes them (param_text.h). */
+static void write_cell_params(blif_writer *wr, odin3_node_id node) {
+    odin3_celltype_id type = odin3_node_type(wr->module, node);
+    const odin3_celltype_def *def = odin3_celltype_get(wr->design, type);
+    uint64_t mask = 0;
+    if (!is_techlib_type(wr, type)) {
+        return;
+    }
+    odin3_status st =
+        params_diff((wr_implied){wr->design, wr->module, node, wr->declared, NULL, NULL}, &mask);
+    for (uint32_t i = 0; st == ODIN3_OK && i < def->n_params && i < WR_MAX_PARAMS; i++) {
+        if (((mask >> i) & 1U) == 0) {
+            continue;
+        }
+        odin3_strbuf_clear(&wr->cand);
+        st = odin3_blif_param_format(wr->design, odin3_node_param(wr->module, node, i), &wr->cand);
+        if (st == ODIN3_ERR_INVALID_ARG) {
+            st = ODIN3_OK; /* a zero-length BITS value has no text; the reader default stands */
+            continue;
+        }
+        if (st == ODIN3_OK) {
+            wr_begin(wr, ".param");
+            wr_token(wr, odin3_bytes_cstr(def->params[i].name));
+            wr_token(wr, (odin3_bytes){wr->cand.data, wr->cand.len});
+            wr_end(wr);
+        }
+    }
+    if (st != ODIN3_OK) {
+        (void)wr_fail(wr, st);
+    }
+}
+
+/* `.cname` with the node's name, then its `.param` lines, then its `.attr`/`.param` extras in
+ * recorded order. */
 static void write_cell_extras(blif_writer *wr, odin3_node_id node) {
     uint32_t name = odin3_node_name(wr->module, node);
     if (name != 0) {
@@ -1818,6 +1876,7 @@ static void write_cell_extras(blif_writer *wr, odin3_node_id node) {
         wr_token(wr, str_bytes(wr, name));
         wr_end(wr);
     }
+    write_cell_params(wr, node);
     const odin3_value *extras =
         string_attr(wr->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, wr->keys.extras);
     if (extras == NULL) {

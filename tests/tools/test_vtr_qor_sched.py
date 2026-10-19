@@ -865,6 +865,11 @@ class RunOrderTest(RunnerTestBase):
         self.assertEqual(calls, [])
         self.assertEqual(qor_sched._exit_code([], 0, run.fchecks), 3)
 
+    def test_untested_fcheck_is_incomplete_not_ok_not_failed(self) -> None:
+        self.assertEqual(qor_sched._exit_code([], 0, ["pass", "untested"]), 3)
+        self.assertEqual(qor_sched._exit_code([], 0, ["untested", "fail"]), 1)
+        self.assertEqual(qor_sched._exit_code([], 0, ["pass"]), 0)
+
     def test_cached_job_not_run(self) -> None:
         """A cached job is not started; one whose metrics.json key is not the planned key is."""
         job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}], cached=True)

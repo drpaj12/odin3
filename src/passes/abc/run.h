@@ -12,6 +12,7 @@
 #include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "passes/abc/abc.h"
+#include "passes/abc/aig.h"
 #include "passes/abc/region.h"
 #include "passes/abc/script.h"
 #include "util/arena.h"
@@ -23,7 +24,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-enum { ODIN3_ABC_DIR_BYTES = 1024, ODIN3_ABC_LAST_LINE_BYTES = 256 };
+enum { ODIN3_ABC_DIR_BYTES = 1024, ODIN3_ABC_LAST_LINE_BYTES = 256, ODIN3_ABC_REASON_BYTES = 320 };
 
 /* What region.c knows of a cell type, computed once per type and cached in the run. */
 enum {
@@ -72,6 +73,9 @@ struct odin3_abc_run {
     bool lines_overflow;
     uint32_t cmd_class;                        /* the odin3_abc_class of the command in progress */
     char last_line[ODIN3_ABC_LAST_LINE_BYTES]; /* the last non-empty ABC output line */
+    odin3_abc_aigb
+        aig; /* the in-memory exchange's AIG of the run in progress (net_lit NULL: none) */
+    char nomap_reason[ODIN3_ABC_REASON_BYTES]; /* why the run has no name map, "" when it has one */
 };
 
 /*
