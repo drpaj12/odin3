@@ -16,12 +16,14 @@ reset (or only assigns in some branches of a combinational block, an inferred la
 while a four-state simulator calls it ``x``. The netlist's latches start at the BLIF value, 0.
 The compiled testbench is therefore run first with all uninitialised RTL state 0 (the BLIF's
 state: same start, same behaviour expected) and compared on every output bit, as before; no
-mismatch is a ``PASS``. When there are mismatches it is run twice more, with all uninitialised
-state 1 and with random state (``--x-initial unique`` plus ``+verilator+rand+reset+0|1|2``). A
-mismatch on a bit whose RTL value differs between those runs at that vector is on an ``x`` bit:
+mismatch is a ``PASS``. When there are mismatches it is run five more times, with all uninitialised
+state 1 and with four random states (``--x-initial unique`` plus ``+verilator+rand+reset+0|1|2``,
+a different ``+verilator+seed`` for each random one; the stimulus has a generator of its own, so
+it is the same in every run). A mismatch on a bit whose RTL value differs between those runs at
+that vector is on an ``x`` bit:
 it is reported as ``XDEPEND``, never as a pass, and a design with only such mismatches is
 ``UNTESTED`` (exit 3, the caller's ``error``: the netlist cannot be judged on them). Any
-mismatch on a bit whose RTL value is the same in all three runs is a ``MISMATCH``: ``FAIL``,
+mismatch on a bit whose RTL value is the same in all the runs is a ``MISMATCH``: ``FAIL``,
 whatever else is ``x``. The testbench's own verdict is dropped (it has no initial-state
 classification); the verdict lines are written from the dumps, and a run that compares no output
 bit is not a pass.
@@ -60,14 +62,30 @@ def drop_port_wires(verilog: str) -> str:
 _MAX_REPORT = 20  # MISMATCH and XDEPEND lines written, each, as the testbench's own limit
 _NEVER = "2147483647"  # the testbench's abort limit, out of reach: every vector is dumped
 _TALLY = "            if (vecFail) begin\n                vecMismatched++;"
-_INIT_MODES = (0, 1, 2)  # +verilator+rand+reset+N: uninitialised state all 0, all 1, random
+# The runs: (+verilator+rand+reset+N, seed offset): uninitialised state all 0 (the decisive run),
+# all 1, then four random patterns (a bit that is x slips through all six with chance about 2**-6).
+_INIT_RUNS = ((0, 0), (1, 0), (2, 1), (2, 2), (2, 3), (2, 4))
 _RESET_ARG = "+verilator+rand+reset+"
+_SEED_ARG = "+verilator+seed+"
+_SEED = re.compile(r"localparam int SEED_HINT = (\d+);")
+_RANDOM = '''\
+    // the wrapper's own stimulus generator: Verilator's seed also draws the random initial
+    // state of the later runs, and must change nothing but that state
+    reg [31:0] rnd_state = 32'h{state:08x};
+    function automatic [31:0] rnd32();
+        rnd_state = rnd_state ^ (rnd_state << 13);
+        rnd_state = rnd_state ^ (rnd_state >> 17);
+        rnd_state = rnd_state ^ (rnd_state << 5);
+        return rnd_state;
+    endfunction
+'''
 
 
 def instrument_testbench(tb: str, outputs: Sequence[tuple[str, int]]) -> str:
     """The generated testbench with a dump of every output port per vector and no verdict of its
     own: one line ``VD <rtl hex>:<synth hex> ...`` (the outputs in port order) before each
-    vector's tally, its abort limit out of reach, no mismatch printing, and its summary and
+    vector's tally, its own random generator for the stimulus (not ``$urandom``), its abort limit
+    out of reach, no mismatch printing, and its summary and
     ``PASS``/``FAIL`` lines renamed ``RAW_*`` (so only this wrapper's lines count) without the
     ``$fatal``. Raises ``RuntimeError`` when the generator's text no longer has the expected
     shape: the wrapper must then be updated, never run on a testbench it did not understand."""
@@ -78,12 +96,19 @@ def instrument_testbench(tb: str, outputs: Sequence[tuple[str, int]]) -> str:
     args = ", ".join(f"{name}_rtl, {name}_synth" for name, _ in outputs)
     dump = f'            $display("VD {fmt}"{", " + args if args else ""});\n'
     out = tb.replace(_TALLY, dump + _TALLY)
+    seed = _SEED.search(out)
+    if seed is None:
+        raise RuntimeError("qor_fcheck_run: the generated testbench has no SEED_HINT; update "
+                           "tools/vtr-qor/qor_fcheck_run.py to the new tb_generator")
+    state = (0x9E3779B9 ^ (int(seed.group(1)) * 0x85EBCA6B)) & 0xFFFFFFFF or 1
+    out = out.replace(seed.group(0), seed.group(0) + "\n" + _RANDOM.format(state=state), 1)
+    out = out.replace("$urandom_range(0, 1)", "(rnd32() >> 31)").replace("$urandom()", "rnd32()")
     out, limits = re.subn(r"(MAX_ERRORS = )\d+;", rf"\g<1>{_NEVER};", out)
     out = out.replace("if (errors < MAX_ERRORS) begin", "if (1'b0) begin")
     for word in ("VCHECK_SUMMARY", "PASS:", "FAIL:"):
         out = out.replace(f'$display("{word}', f'$display("RAW_{word}')
     out = out.replace("$fatal(1);", "$finish;")
-    if limits != 1 or "RAW_VCHECK_SUMMARY" not in out:
+    if limits != 1 or "RAW_VCHECK_SUMMARY" not in out or re.search(r"\$urandom\w*\s*\(", out):
         raise RuntimeError("qor_fcheck_run: the generated testbench has an unexpected limit or "
                            "summary; update tools/vtr-qor/qor_fcheck_run.py to the new "
                            "tb_generator")
@@ -217,11 +242,19 @@ class _Lines:
             yield from handle
 
 
-def _run_init(argv: list[str], mode: int, real_call: Callable[..., int]) -> tuple[Path, int]:
-    """One run of the compiled testbench with initial state ``mode`` (``+verilator+rand+reset``);
-    its output goes to ``sim_init<mode>.out`` next to ``sim_build``."""
-    run_argv = [a for a in argv if not a.startswith(_RESET_ARG)] + [f"{_RESET_ARG}{mode}"]
-    out = Path(argv[0]).resolve().parent.parent / f"sim_init{mode}.out"
+def _run_init(argv: list[str], mode: int, seed_offset: int,
+              real_call: Callable[..., int]) -> tuple[Path, int]:
+    """One run of the compiled testbench with initial state ``mode`` (``+verilator+rand+reset``)
+    and the seed raised by ``seed_offset``; its output goes to ``sim_init<n>.out`` next to
+    ``sim_build`` (``n`` from the offset and mode)."""
+    run_argv = []
+    for arg in argv:
+        if arg.startswith(_SEED_ARG) and arg[len(_SEED_ARG):].isdigit():
+            arg = f"{_SEED_ARG}{int(arg[len(_SEED_ARG):]) + seed_offset}"
+        if not arg.startswith(_RESET_ARG):
+            run_argv.append(arg)
+    run_argv.append(f"{_RESET_ARG}{mode}")
+    out = Path(argv[0]).resolve().parent.parent / f"sim_init{mode}_{seed_offset}.out"
     with open(out, "w", encoding="utf-8") as handle:
         code = real_call(run_argv, stdout=handle, stderr=subprocess.STDOUT)
     return out, code
@@ -230,20 +263,20 @@ def _run_init(argv: list[str], mode: int, real_call: Callable[..., int]) -> tupl
 def _run_inits(argv: list[str], outputs: Sequence[tuple[str, int]], stdout: Any,
                real_call: Callable[..., int]) -> int:
     """Run the compiled testbench with all uninitialised state 0; when that shows mismatches, also
-    with all 1 and with random state, and classify them. The verdict goes into ``stdout`` (the
+    with all 1 and with random states, and classify them. The verdict goes into ``stdout`` (the
     checker's ``sim.out``); the return value is 0 for a pass, 1 for a fail, 3 for untested or
     nothing compared. The binary's own non-zero exit is returned as is, with its output."""
     dumps: list[Path] = []
     try:
-        for mode in _INIT_MODES:
-            out, code = _run_init(argv, mode, real_call)
+        for mode, offset in _INIT_RUNS:
+            out, code = _run_init(argv, mode, offset, real_call)
             if code != 0:
                 stdout.write(out.read_text(encoding="utf-8", errors="replace"))
                 return code
             dumps.append(out)
-            if mode in (_INIT_MODES[0], _INIT_MODES[-1]):
+            if len(dumps) in (1, len(_INIT_RUNS)):
                 verdict = compare_runs(outputs, [_Lines(path) for path in dumps])
-                if mode == _INIT_MODES[0] and verdict.vectors == verdict.matched:
+                if len(dumps) == 1 and verdict.vectors == verdict.matched:
                     break  # same start as the netlist and no mismatch: nothing to classify
     except ValueError as exc:  # a dump that does not fit the ports, or runs of unequal length
         stdout.write(f"ERROR: the initial-state dumps cannot be compared: {exc}\n")

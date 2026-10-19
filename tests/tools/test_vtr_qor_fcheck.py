@@ -8,6 +8,7 @@ and the compile failed on a duplicate port declaration its own packing leaves be
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -154,11 +155,15 @@ class WrapperTest(unittest.TestCase):
 
 # The shape of VTR's generated testbench around what the wrapper edits (tb_generator.py).
 TB = """\
+// no $srandom (verilator pli); seed via +verilator+seed+N / $urandom.
 module tb;
     localparam int NUM_VECTORS = 50000;
     localparam int MAX_ERRORS = 20;
+    localparam int SEED_HINT = 1;
     initial begin
         for (vecIdx = 0; vecIdx < NUM_VECTORS; vecIdx++) begin
+            m = $urandom();
+            go = $urandom_range(0, 1);
             if (q_rtl !== q_synth) begin
                 if (errors < MAX_ERRORS) begin
                     $display("MISMATCH vec=%0d port=q", vecIdx);
@@ -211,6 +216,22 @@ class InstrumentTest(unittest.TestCase):
             self.assertNotIn(f'$display("{word}', out)
             self.assertIn(f'$display("RAW_{word}', out)
 
+    def test_stimulus_has_a_generator_of_its_own(self) -> None:
+        out = qor_fcheck_run.instrument_testbench(TB, OUTPUTS)
+        self.assertIsNone(re.search(r"\$urandom\w*\s*\(", out))  # the vectors follow its seed
+        with self.assertRaises(RuntimeError):  # a call it does not replace is never left behind
+            qor_fcheck_run.instrument_testbench(TB.replace("m = $urandom();", "m = $urandom (3);"),
+                                                OUTPUTS)
+        self.assertIn("m = rnd32();", out)
+        self.assertIn("go = (rnd32() >> 31);", out)
+        self.assertEqual(out.count("function automatic [31:0] rnd32();"), 1)
+        self.assertLess(out.index("SEED_HINT = 1;"), out.index("rnd_state = rnd_state ^"))
+        # the generator's start depends on the seed hint, and is never 0 (xorshift sticks at 0)
+        other = qor_fcheck_run.instrument_testbench(TB.replace("SEED_HINT = 1;", "SEED_HINT = 2;"),
+                                                    OUTPUTS)
+        self.assertNotEqual(out, other)
+        self.assertNotIn("32'h00000000;", out)
+
     def test_unexpected_shape_is_an_error(self) -> None:
         with self.assertRaises(RuntimeError):
             qor_fcheck_run.instrument_testbench(TB.replace("vecMismatched++", "vecBad++"),
@@ -218,6 +239,8 @@ class InstrumentTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             qor_fcheck_run.instrument_testbench(TB.replace("MAX_ERRORS = 20", "MAX_ERRORS = 2 "),
                                                 OUTPUTS)
+        with self.assertRaises(RuntimeError):  # no seed hint to start the generator from
+            qor_fcheck_run.instrument_testbench(TB.replace("SEED_HINT", "SEED_HUNT"), OUTPUTS)
 
     def test_no_output_ports(self) -> None:
         self.assertIn('$display("VD ");', qor_fcheck_run.instrument_testbench(TB, []))
@@ -425,6 +448,32 @@ class InitRunsTest(unittest.TestCase):
         self.assertEqual(done.returncode, 3)
         self.assertIn("ERROR: the initial-state dumps cannot be compared", done.stdout)
         self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "error")
+
+    def test_other_runs_change_the_initial_state_and_the_seed(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as raw:
+            build = Path(raw) / "sim_build"
+            build.mkdir()
+            calls: list[list[str]] = []
+
+            def fake_call(argv: list[str], stdout: io.TextIOBase, stderr: int) -> int:
+                calls.append(argv)
+                stdout.write("VD 2:3 1:1\n")  # the netlist differs, the RTL never depends on state
+                return 0
+
+            out = io.StringIO()
+            code = qor_fcheck_run._run_inits(
+                [str(build / "Vtb"), "+verilator+seed+7", "+verilator+rand+reset+0"], OUTPUTS, out,
+                fake_call)
+            self.assertEqual(code, 1)
+            self.assertEqual([(c[1], c[-1]) for c in calls],
+                             [("+verilator+seed+7", "+verilator+rand+reset+0"),
+                              ("+verilator+seed+7", "+verilator+rand+reset+1")]
+                             + [(f"+verilator+seed+{7 + n}", "+verilator+rand+reset+2")
+                                for n in (1, 2, 3, 4)])
+            self.assertEqual(sorted(p.name for p in Path(raw).iterdir()), ["sim_build"])
+            self.assertIn("FAIL: 1 mismatches in 1 vectors", out.getvalue())
 
     def test_dumps_are_removed_after_the_verdict(self) -> None:
         import io
