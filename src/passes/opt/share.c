@@ -732,8 +732,7 @@ static odin3_status apply_group(sh_state *ss) {
     odin3_node_id mux_new = {0};
     odin3_node_id op = {0};
     st = st == ODIN3_OK ? make_mux(ss, prov, &mux_new) : st;
-    st = st == ODIN3_OK ? make_op(ss, ss->lead, mux_new, prov, &op)
-                        : st;
+    st = st == ODIN3_OK ? make_op(ss, ss->lead, mux_new, prov, &op) : st;
     if (st != ODIN3_OK) {
         return rolled_back(ss, st);
     }
