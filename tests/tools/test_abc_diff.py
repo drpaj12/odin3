@@ -57,6 +57,11 @@ argv = sys.argv
 with open(os.environ["FAKE_LOG"] + ".equiv", "a", encoding="utf-8") as fh:
     fh.write(json.dumps({{"argv": argv}}) + "\\n")
 left, right = argv[-2], argv[-1]
+if "ierr" in left and left.endswith("before.blif"):
+    sys.stderr.write("equiv-check: cannot read\\n")
+    sys.exit(3)
+if "unp" in left and left.endswith("before.blif"):
+    sys.exit(4)
 text = open(left, encoding="utf-8").read() + open(right, encoding="utf-8").read()
 if "# aigside" in text:
     print("equiv-check: NOT equivalent: outputs differ")
@@ -176,7 +181,7 @@ class AbcDiffTest(unittest.TestCase):
         design = self.blif("d/broken.blif", design_text())
         views = self.blif("d/views.blif", design_text() + "#\n")
         code, out, err = self.run_tool(design, views)
-        self.assertEqual(code, 1, out + err)
+        self.assertEqual(code, 2, out + err)
         self.assertRegex(out, r"broken\.blif odin3-error \(blif exchange: ")
         self.assertRegex(out, r"views\.blif views \(blif exchange: ")
 
@@ -188,6 +193,50 @@ class AbcDiffTest(unittest.TestCase):
         self.assertEqual(code, 1, out + err)
         self.assertRegex(out, r"l2aig\.blif .* differs \(listed: differs x ")
         self.assertRegex(out, r"l1\.blif .* equivalent \(XPASS: listed \(differs x\)")
+
+    def test_a_listed_error_cannot_hide_a_difference_of_the_two_results(self) -> None:
+        both = self.blif("d/ierraig.blif", design_text())
+        only = self.blif("d/ierr.blif", design_text() + "#\n")
+        expect = self.blif("expect.txt", "ierraig.blif error x\nierr.blif error x\n")
+        code, out, err = self.run_tool("--expect-fail", expect, both, only)
+        self.assertEqual(code, 1, out + err)
+        self.assertRegex(out, r"ierraig\.blif .* differs \(UNEXPECTED: listed as error but differs")
+        self.assertRegex(out, r"ierr\.blif .* error \(listed: error x ")
+        self.assertEqual(len(self.calls("equiv")), 6)  # all three pairs of both designs
+        code, out, err = self.run_tool("--expect-fail", expect, only)
+        self.assertEqual(code, 0, out + err)
+
+    def test_an_explain_design_listed_as_failing_is_an_xpass(self) -> None:
+        design = self.blif("d/l1000r1051.blif", design_text())
+        expect = self.blif("expect.txt", "l1000r1051.blif differs x\n")
+        code, out, err = self.run_tool("--expect-fail", expect, design)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("XPASS: listed (differs x) but explain", out)
+
+    def test_unproven_is_exit_four_and_absorbed_only_by_a_listing(self) -> None:
+        design = self.blif("d/unp.blif", design_text())
+        code, out, err = self.run_tool(design)
+        self.assertEqual(code, 4, out + err)
+        self.assertIn(" unproven", out)
+        expect = self.blif("expect.txt", "unp.blif unproven x\n")
+        code, out, err = self.run_tool("--expect-fail", expect, design)
+        self.assertEqual(code, 0, out + err)
+        other = self.blif("expect2.txt", "unp.blif error x\n")
+        self.assertEqual(self.run_tool("--expect-fail", other, design)[0], 4)
+
+    def test_a_missing_abc_is_exit_77(self) -> None:
+        design = self.blif("d/l1.blif", design_text())
+        with mock.patch.dict(os.environ, {"ODIN3_ABC": str(self.root / "no-such-abc")}):
+            code, _, err = self.run_tool(design)
+        self.assertEqual(code, 77)
+        self.assertIn("skipped", err)
+
+    def test_depth_of_a_cycle_is_not_defined(self) -> None:
+        loop = ".model t\n.inputs a\n.outputs y\n.names a q p\n11 1\n.names p q\n1 1\n.end\n"
+        counts = abc_diff.netlist_counts(Path(self.blif("loop.blif", loop)))
+        self.assertEqual((counts.luts, counts.depth), (2, abc_diff.NO_DEPTH))
+        line = abc_diff.line_text(Path("x"), abc_diff.Verdict("equivalent", 0.0, (counts, counts)))
+        self.assertIn("depth n/a n/a n/a", line)
 
     def test_a_usage_error_is_exit_two(self) -> None:
         code, _, err = self.run_tool(str(self.root / "missing.blif"))

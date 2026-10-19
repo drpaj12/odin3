@@ -30,7 +30,15 @@ abc-equiv's file (``<path> <status> <reason>``): a listed design passes only wit
 status.  A path under ``~/odin3-ws/golden`` first needs ``qor_heavy.require_heavy()`` (point
 (m)): run through ``tools/heavy-run``.  Nothing is deleted.
 
-Exit codes: 0 every design passes (``equivalent`` or ``explain``), 1 any design fails, 2 usage.
+Exit codes (the project's): 0 every design passes (``equivalent`` or ``explain``, or a listed
+class), 1 a design ``differs`` (or a listed design passes: XPASS), 2 a tool error (usage, a run that
+did not finish, ``error``, ``views``, ``multiclock`` unlisted), 4 only ``unproven`` or ``timeout``
+designs failed (equiv-check's exit 4 is ``unproven``, absorbed only by a listing of
+``unproven``), 77 ABC is not available (``ODIN3_ABC`` names a missing file, or odin3 says the linked ABC is missing),
+every design skipped.  The plan said 0, 1, 2; exit code 3 (a crash) is not produced: a crashing
+odin3 is ``odin3-error``.  All three pairs (input~blif, input~aig, blif~aig) always run; the verdict
+is the worst of them (differs, timeout, unproven, error, multiclock), so a listed ``error`` on the
+input pairs cannot hide a ``differs`` of the two results.
 """
 
 from __future__ import annotations
@@ -38,6 +46,7 @@ from __future__ import annotations
 import argparse
 import collections
 import dataclasses
+import os
 import subprocess
 import sys
 import tempfile
@@ -54,12 +63,16 @@ import abc_equiv  # noqa: E402
 import blif  # noqa: E402
 
 TOOL = "abc-diff"
-EXIT_OK, EXIT_FAIL, EXIT_USAGE = 0, 1, 2
+EXIT_OK, EXIT_DIFFERS, EXIT_ERROR, EXIT_UNPROVEN, EXIT_SKIP = 0, 1, 2, 4, 77
+STATUS_ORDER = ("differs", "timeout", "unproven", "error", "multiclock")  # worst first
+NO_ABC_TEXT = "linked ABC is not available"
 WORK_ROOT = Path.home() / "odin3-ws" / "work" / "abc-diff"
 EXPLAIN_NUM, EXPLAIN_DEN = 1, 20  # a ratio more than 1/20 (5%) from 1 needs an explanation
 PASSING = ("equivalent", "explain")
+NO_DEPTH = -1  # a combinational cycle of LUTs: the depth is not defined
 ODIN3_FAILED = "odin3-error"
-PINNED = (*abc_equiv.PINNED, "differs", "timeout")  # the statuses a listed design may be pinned to
+# the statuses a listed design may be pinned to
+PINNED = (*abc_equiv.PINNED, "differs", "timeout", "unproven")
 
 
 @dataclass(frozen=True)
@@ -78,7 +91,9 @@ class Verdict:
 
 
 def ratio_text(blif_n: int, aig_n: int) -> str:
-    """``a/b`` to three decimals; ``1.000`` for 0/0 and ``inf`` for a/0."""
+    """``a/b`` to three decimals; ``1.000`` for 0/0, ``inf`` for a/0 and ``n/a`` for no depth."""
+    if NO_DEPTH in (blif_n, aig_n):
+        return "n/a"
     if blif_n == 0:
         return "1.000" if aig_n == 0 else "inf"
     return f"{aig_n / blif_n:.3f}"
@@ -86,6 +101,8 @@ def ratio_text(blif_n: int, aig_n: int) -> str:
 
 def needs_explanation(blif_n: int, aig_n: int) -> bool:
     """True when ``aig_n / blif_n`` is more than 5% from 1 (exact integer arithmetic)."""
+    if NO_DEPTH in (blif_n, aig_n):
+        return False
     if blif_n == 0:
         return aig_n != 0
     return abs(aig_n - blif_n) * EXPLAIN_DEN > blif_n * EXPLAIN_NUM
@@ -131,7 +148,8 @@ def netlist_counts(path: Path) -> Counts:
             pending[luts[reader][1]] -= 1
             if pending[luts[reader][1]] == 0:
                 ready.append(reader)
-    return Counts(len(luts), ffs, depth)
+    released = sum(1 for _, out in luts if out in level)
+    return Counts(len(luts), ffs, depth if released == len(luts) else NO_DEPTH)
 
 
 def line_text(design: Path, verdict: Verdict) -> str:
@@ -143,7 +161,8 @@ def line_text(design: Path, verdict: Verdict) -> str:
     fields = []
     for name, base, new in (("luts", left.luts, right.luts), ("ffs", left.ffs, right.ffs),
                             ("depth", left.depth, right.depth)):
-        fields.append(f"{name} {base} {new} {ratio_text(base, new)}")
+        shown = (("n/a" if n == NO_DEPTH else str(n)) for n in (base, new))
+        fields.append(f"{name} {' '.join(shown)} {ratio_text(base, new)}")
     extra = f" ({verdict.detail})" if verdict.detail else ""
     return f"{design} {' '.join(fields)} {verdict.status}{extra}"
 
@@ -167,7 +186,7 @@ def run_pair(cfg: abc_equiv.Config, design_name: str, pair: tuple[Path, Path]) -
     log = proc.stdout + proc.stderr
     if abc_equiv.MULTICLOCK_TEXT in log:
         return abc_equiv.Outcome("multiclock", secs, abc_equiv.MULTICLOCK_TEXT)
-    status = {0: "equivalent", 1: "differs", 4: "timeout"}.get(proc.returncode, "error")
+    status = {0: "equivalent", 1: "differs", 4: "unproven"}.get(proc.returncode, "error")
     if status == "differs" and "NOT equivalent" not in log:
         status = "error"
     return abc_equiv.Outcome(status, secs, (log.strip().splitlines() or [""])[-1])
@@ -183,6 +202,7 @@ def exchange_runs(cfg: abc_equiv.Config, design: Path,
         outcome = abc_equiv.run_odin3(run_cfg, design, where)
         if outcome.status != "mapped":
             status = outcome.status if outcome.status in ("timeout", "views") else ODIN3_FAILED
+            status = "skip" if NO_ABC_TEXT in outcome.detail else status
             return abc_equiv.Outcome(status, outcome.secs, f"{label} exchange: {outcome.detail}")
     return blif_dir / "after.blif", aig_dir / "after.blif"
 
@@ -197,12 +217,16 @@ def judge_design(cfg: abc_equiv.Config, design: Path, out: Path) -> Verdict:
     before = out / "blif" / "before.blif"
     pairs = (("input~blif", (before, after_blif)), ("input~aig", (before, after_aig)),
              ("blif~aig", (after_blif, after_aig)))
-    status, detail = "equivalent", ""
-    for label, files in pairs:
+    bad: list[tuple[str, abc_equiv.Outcome]] = []
+    for label, files in pairs:  # all three, whatever the first says
         outcome = run_pair(cfg, design.stem, files)
         if outcome.status != "equivalent":
-            status, detail = outcome.status, f"{label}: {outcome.detail}"
-            break
+            bad.append((label, outcome))
+    status = "equivalent"
+    if bad:
+        status = min((o.status for _, o in bad),
+                     key=lambda name: STATUS_ORDER.index(name) if name in STATUS_ORDER else 99)
+    detail = "; ".join(f"{label}: {o.detail}" for label, o in bad)
     counts = (netlist_counts(after_blif), netlist_counts(after_aig))
     if status == "equivalent" and any(
             needs_explanation(getattr(counts[0], f), getattr(counts[1], f))
@@ -247,19 +271,42 @@ def judge(verdict: Verdict, reason: str | None) -> tuple[bool, str]:
 
 def run_all(cfg: abc_equiv.Config, designs: Sequence[Path], entries: dict[str, str]) -> int:
     counts: dict[str, int] = {}
+    codes: list[int] = []
     failed = 0
     for index, design in enumerate(designs):
         verdict = judge_design(cfg, design, abc_equiv.design_dir(cfg, index, design))
         ok, note = judge(verdict, abc_equiv.listed_reason(design, entries))
         counts[verdict.status] = counts.get(verdict.status, 0) + 1
         failed += 0 if ok else 1
+        codes.append(design_code(verdict.status, ok))
         detail = " ".join(x for x in (note, verdict.detail) if x)
         shown = dataclasses.replace(verdict, detail=detail)
         print(line_text(design, shown), flush=True)
     shown_counts = ", ".join(f"{name} {count}" for name, count in sorted(counts.items()))
     print(f"{TOOL}: {len(designs)} designs: {len(designs) - failed} passed, {failed} failed"
           + (f" ({shown_counts})" if shown_counts else ""))
-    return EXIT_FAIL if failed else EXIT_OK
+    return exit_code(codes, len(designs))
+
+
+def exit_code(codes: Sequence[int], total: int) -> int:
+    """The project exit code of the per-design codes (0 for a pass)."""
+    if total and codes.count(EXIT_SKIP) == total:
+        return EXIT_SKIP
+    for code in (EXIT_DIFFERS, EXIT_ERROR, EXIT_UNPROVEN):
+        if code in codes:
+            return code
+    return EXIT_SKIP if EXIT_SKIP in codes else EXIT_OK
+
+
+def design_code(status: str, ok: bool) -> int:
+    """The exit code a design contributes."""
+    if ok:
+        return EXIT_OK
+    if status in PASSING or status == "differs":
+        return EXIT_DIFFERS  # a listed design that passes (XPASS), or a difference
+    if status in ("unproven", "timeout"):
+        return EXIT_UNPROVEN
+    return EXIT_SKIP if status == "skip" else EXIT_ERROR
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -283,6 +330,12 @@ def _keep_dir(arg: str | None) -> Path:
     return keep
 
 
+def no_abc() -> bool:
+    """True when ``ODIN3_ABC`` names a file that does not exist (ABC is not available)."""
+    path = os.environ.get("ODIN3_ABC")
+    return path is not None and not Path(path).exists()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -293,7 +346,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         designs = abc_equiv.collect(args.paths)
     except abc_equiv.UsageError as exc:
         print(f"{TOOL}: {exc}", file=sys.stderr)
-        return EXIT_USAGE
+        return EXIT_ERROR
+    if no_abc():
+        print(f"{TOOL}: ODIN3_ABC names a missing file; skipped", file=sys.stderr)
+        return EXIT_SKIP
     return run_all(cfg, designs, entries)
 
 
