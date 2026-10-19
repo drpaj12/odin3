@@ -448,6 +448,90 @@ static void test_share_port_b(void) {
     expect_same_port(op, OP_A, new_mux("$mux", "m"), MUX_Y);
 }
 
+/* The commutative swap (PHASE3 #52): the shared operand on port A of one cell, port B of the other.
+ */
+static void test_share_swap_and(void) {
+    build(HEAD4 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1") BIN(
+        "$and", "and2", "0", "\\c", "\\a", "\\t2") MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n");
+    run_share();
+    expect_merged(2);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$and"));
+    odin3_node_id op = nth_of("$and", 0);
+    odin3_node_id inner = new_mux("$mux", "m");
+    expect_port(op, OP_A, "a a:1 a:2 a:3");
+    expect_same_port(op, OP_B, inner, MUX_Y);
+    expect_port(inner, MUX_A, "b b:1 b:2 b:3");
+    expect_port(inner, MUX_B, "c c:1 c:2 c:3"); /* and2's other operand, which was on its A */
+    reset();
+    /* the lead (the lowest ID) holds the shared operand on B: the new cell does too */
+    build(HEAD4 BIN("$and", "and1", "0", "\\b", "\\a", "\\t1") BIN(
+        "$and", "and2", "0", "\\a", "\\c", "\\t2") MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n");
+    run_share();
+    expect_merged(2);
+    op = nth_of("$and", 0);
+    inner = new_mux("$mux", "m");
+    expect_port(op, OP_B, "a a:1 a:2 a:3");
+    expect_same_port(op, OP_A, inner, MUX_Y);
+    expect_port(inner, MUX_A, "b b:1 b:2 b:3");
+    expect_port(inner, MUX_B, "c c:1 c:2 c:3");
+}
+
+/* `d + 1` against `1 - d` (stereovision1): the shared operand is the 1, on B of the $add and on A
+ * of the $sub; the $sub's operand is negated. */
+static void test_share_swap_add_sub(void) {
+    build(HEAD4 BIN("$add", "add1", "0", "\\b", "\\a", "\\t1") BIN(
+        "$sub", "sub1", "0", "\\a", "\\c", "\\t2") MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n");
+    run_share();
+    expect_merged(2);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$add"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$sub"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$neg"));
+    odin3_node_id op = nth_of("$add", 0);
+    odin3_node_id neg = nth_of("$neg", 0);
+    odin3_node_id inner = new_mux("$mux", "m");
+    expect_port(op, OP_B, "a a:1 a:2 a:3");
+    expect_same_port(op, OP_A, inner, MUX_Y);
+    expect_port(inner, MUX_A, "b b:1 b:2 b:3");
+    expect_same_port(inner, MUX_B, neg, 1);
+    expect_port(neg, NEG_A, "c c:1 c:2 c:3");
+    reset();
+    /* a $sub first: S - mux(m1, -m2) with the $add's operand negated */
+    build(HEAD4 BIN("$sub", "sub1", "0", "\\a", "\\b", "\\t1") BIN(
+        "$add", "add1", "0", "\\c", "\\a", "\\t2") MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n");
+    run_share();
+    expect_merged(2);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$sub"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$add"));
+    op = nth_of("$sub", 0);
+    neg = nth_of("$neg", 0);
+    inner = new_mux("$mux", "m");
+    expect_port(op, OP_A, "a a:1 a:2 a:3");
+    expect_same_port(op, OP_B, inner, MUX_Y);
+    expect_port(inner, MUX_A, "b b:1 b:2 b:3");
+    expect_same_port(inner, MUX_B, neg, 1);
+    expect_port(neg, NEG_A, "c c:1 c:2 c:3");
+}
+
+/* A swap with a narrower muxed operand: extended by the signed flag, as without the swap. */
+static void test_share_swap_widths(void) {
+    build("module \\m\n  wire width 3 input 1 \\a\n  wire width 2 input 2 \\b\n"
+          "  wire width 4 input 3 \\c\n  wire input 4 \\s\n  wire width 5 output 5 \\y\n"
+          "  wire width 5 \\t1\n  wire width 5 \\t2\n" BINW("$add", "add1", "1", "1", "3", "2", "5",
+                                                            "\\a", "\\b", "\\t1")
+              BINW("$add", "add2", "1", "1", "4", "3", "5", "\\c", "\\a",
+                   "\\t2") "  cell $mux \\m\n    parameter \\WIDTH 5\n    connect \\A \\t1\n"
+                           "    connect \\B \\t2\n    connect \\S \\s\n    connect \\Y \\y\n  "
+                           "end\nend\n");
+    run_share();
+    expect_merged(2);
+    odin3_node_id op = nth_of("$add", 0);
+    odin3_node_id inner = new_mux("$mux", "m");
+    expect_port(op, OP_A, "a a:1 a:2");
+    TEST_ASSERT_EQUAL_INT64(4, pint(op, PRM_B_WIDTH));
+    expect_port(inner, MUX_A, "b b:1 b:1 b:1"); /* sign extended */
+    expect_port(inner, MUX_B, "c c:1 c:2 c:3");
+}
+
 /* Two groups under one mux. */
 static void test_share_two_groups(void) {
     build(HEAD4 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
@@ -537,9 +621,32 @@ static const refusal k_refusals[] = {
     {"no shared operand", HEAD4 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
                               BIN("$and", "and2", "0", "\\c", "\\d", "\\t2")
                                   MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
-    {"shared on different ports", HEAD4 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
-                                      BIN("$and", "and2", "0", "\\c", "\\a", "\\t2")
-                                          MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"sub shared on different ports", HEAD4 BIN("$sub", "sub1", "0", "\\a", "\\b", "\\t1")
+                                          BIN("$sub", "sub2", "0", "\\c", "\\a", "\\t2")
+                                              MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"shl shared on different ports", HEAD4 BIN("$shl", "shl1", "0", "\\a", "\\b", "\\t1")
+                                          BIN("$shl", "shl2", "0", "\\c", "\\a", "\\t2")
+                                              MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"lt shared on different ports",
+     "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"
+     "  wire width 4 input 3 \\c\n  wire input 4 \\s\n  wire output 5 \\y\n"
+     "  wire \\t1\n  wire \\t2\n" BINW("$lt", "lt1", "0", "0", "4", "4", "1", "\\a", "\\b", "\\t1")
+         BINW("$lt", "lt2", "0", "0", "4", "4", "1", "\\c", "\\a",
+              "\\t2") "  cell $mux \\m\n    parameter \\WIDTH 1\n    connect \\A \\t1\n"
+                      "    connect \\B \\t2\n    connect \\S \\s\n    connect \\Y \\y\n  "
+                      "end\nend\n"},
+    {"swap with signed flags that differ by role",
+     HEAD4 BINW("$add", "add1", "1", "0", "4", "4", "4", "\\a", "\\b", "\\t1")
+         BINW("$add", "add2", "1", "0", "4", "4", "4", "\\c", "\\a", "\\t2")
+             MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"add with the subtracted operand of a sub",
+     HEAD4 BIN("$sub", "sub1", "0", "\\b", "\\a", "\\t1")
+         BIN("$add", "add1", "0", "\\a", "\\c", "\\t2")
+             MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"swap with mixed sign add/sub",
+     HEAD4 BINW("$add", "add1", "1", "0", "4", "4", "4", "\\b", "\\a", "\\t1")
+         BINW("$sub", "sub1", "1", "0", "4", "4", "4", "\\a", "\\c", "\\t2")
+             MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
     {"signed flags differ", HEAD4 BIN("$add", "add1", "1", "\\a", "\\b", "\\t1")
                                 BIN("$add", "add2", "0", "\\a", "\\c", "\\t2")
                                     MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
@@ -787,6 +894,27 @@ static const refusal k_equiv[] = {
               "\\t2") "  cell $mux \\m\n    parameter \\WIDTH 3\n    connect \\A \\t1\n"
                       "    connect \\B \\t2\n    connect \\S \\s\n    connect \\Y \\y\n  "
                       "end\nend\n"},
+    {"swap and", HEAD4 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
+                     BIN("$and", "and2", "0", "\\c", "\\a", "\\t2")
+                         MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"swap add sub", HEAD4 BIN("$add", "add1", "0", "\\b", "\\a", "\\t1")
+                         BIN("$sub", "sub1", "0", "\\a", "\\c", "\\t2")
+                             MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"swap sub add", HEAD4 BIN("$sub", "sub1", "1", "\\a", "\\b", "\\t1")
+                         BIN("$add", "add1", "1", "\\c", "\\a", "\\t2")
+                             MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"swap mul", HEAD4 BIN("$mul", "mul1", "1", "\\a", "\\b", "\\t1")
+                     BIN("$mul", "mul2", "1", "\\c", "\\a", "\\t2")
+                         MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"swap add signed narrow",
+     "module \\m\n  wire width 3 input 1 \\a\n  wire width 2 input 2 \\b\n"
+     "  wire width 4 input 3 \\c\n  wire input 4 \\s\n  wire width 5 output 5 \\y\n"
+     "  wire width 5 \\t1\n  wire width 5 \\t2\n" BINW("$add", "add1", "1", "1", "3", "2", "5",
+                                                       "\\a", "\\b", "\\t1")
+         BINW("$add", "add2", "1", "1", "4", "3", "5", "\\c", "\\a",
+              "\\t2") "  cell $mux \\m\n    parameter \\WIDTH 5\n    connect \\A \\t1\n"
+                      "    connect \\B \\t2\n    connect \\S \\s\n    connect \\Y \\y\n  "
+                      "end\nend\n"},
 };
 
 static void test_share_function_kept(void) {
@@ -816,6 +944,11 @@ static const char *const k_cases[] = {
     "xor3",
     "same_type",
     "bitwise_signed_widths",
+    "swap_and",
+    "swap_add_sub",
+    "swap_sub_add",
+    "swap_sub_sub_refused",
+    "swap_shl_refused",
 };
 
 static void read_case(const char *name, const char *ext, char *buf) {
@@ -1087,6 +1220,9 @@ int main(void) {
     RUN_TEST(test_share_fanout);
     RUN_TEST(test_share_order);
     RUN_TEST(test_share_port_b);
+    RUN_TEST(test_share_swap_and);
+    RUN_TEST(test_share_swap_add_sub);
+    RUN_TEST(test_share_swap_widths);
     RUN_TEST(test_share_two_groups);
     RUN_TEST(test_share_pmux);
     RUN_TEST(test_share_parents);

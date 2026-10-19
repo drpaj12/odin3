@@ -10,9 +10,12 @@
  * - the cells of a group have the same parameters, except the width of the muxed operand, which
  *   may differ only for the types whose extension composes (extends in k_kinds) and equal signed
  *   flags: the narrower operands are extended by that flag, as the cell would have done;
- * - an $add and a $sub mix only on port A (the $sub operands are negated at a width of at least
- *   Y_WIDTH, so the sum modulo 2^Y_WIDTH is the same) and with equal signed flags;
- * - the shared operand is on the same port of every cell (no commutative swap);
+ * - an $add and a $sub mix only when the shared operand is not the subtracted one (a $sub's port
+ *   B is; Yosys keys the shared operand on that too), the $sub operands are negated at a width
+ *   of at least Y_WIDTH, so the sum modulo 2^Y_WIDTH is the same, and with equal signed flags;
+ * - the shared operand may be on different ports of the cells only for the commutative types
+ *   (extends the 2F spec: PHASE3 #52; `d + 1` and `1 - d` share the 1), with the signed flags
+ *   equal role by role;
  * - the group's cell is a new node of the lowest-ID member's type (Yosys keeps the member of the
  *   first mux port), and the members' Y nets are merged into its Y net.
  * Each rewrite builds the $neg cells, the new mux and the new cell before its first destructive
@@ -71,15 +74,22 @@ typedef struct op_kind {
     const char *name;
     uint8_t cls;
     bool extends;
+    bool commutes; /* f(A, B) = f(B, A) with the widths and flags swapped too */
+    bool negates;  /* $sub: its port B is subtracted */
 } op_kind;
 
 static const op_kind k_kinds[] = {
-    {"$add", 0, true},       {"$sub", 0, true},  {"$mul", 1, true},  {"$div", 2, false},
-    {"$mod", 3, false},      {"$and", 4, true},  {"$or", 5, true},   {"$xor", 6, true},
-    {"$xnor", 7, true},      {"$shl", 8, false}, {"$shr", 9, false}, {"$sshr", 10, false},
-    {"$shiftx", 11, false},  {"$eq", 12, true},  {"$ne", 13, true},  {"$lt", 14, true},
-    {"$le", 15, true},       {"$gt", 16, true},  {"$ge", 17, true},  {"$logic_and", 18, true},
-    {"$logic_or", 19, true},
+    {"$add", 0, true, true, false},       {"$sub", 0, true, false, true},
+    {"$mul", 1, true, true, false},       {"$div", 2, false, false, false},
+    {"$mod", 3, false, false, false},     {"$and", 4, true, true, false},
+    {"$or", 5, true, true, false},        {"$xor", 6, true, true, false},
+    {"$xnor", 7, true, true, false},      {"$shl", 8, false, false, false},
+    {"$shr", 9, false, false, false},     {"$sshr", 10, false, false, false},
+    {"$shiftx", 11, false, false, false}, {"$eq", 12, true, true, false},
+    {"$ne", 13, true, true, false},       {"$lt", 14, true, false, false},
+    {"$le", 15, true, false, false},      {"$gt", 16, true, false, false},
+    {"$ge", 17, true, false, false},      {"$logic_and", 18, true, true, false},
+    {"$logic_or", 19, true, true, false},
 };
 #define N_KINDS (sizeof k_kinds / sizeof k_kinds[0])
 
@@ -87,6 +97,7 @@ typedef struct cand {
     uint32_t slot; /* 0 .. slices-1: B slice; slices: A */
     uint32_t op;
     uint32_t kind;
+    uint32_t sport; /* the port the cell holds the shared operand on (set when it joins) */
     bool open;
 } cand;
 
@@ -111,7 +122,7 @@ typedef struct sh_state {
     odin3_vec tmp;
     odin3_vec made; /* nodes this rewrite made (odin3_node_id), in creation order */
     /* the current group */
-    uint32_t lead_kind, shared_port, wn, flag;
+    uint32_t lead_kind, lead_port, wn, flag;
     bool mixed, has_a;
     uint32_t merged;
 } sh_state;
@@ -266,7 +277,7 @@ static bool cand_at(const sh_state *ss, uint32_t slot, cand *out) {
             return false;
         }
     }
-    *out = (cand){slot, op.v, kind, true};
+    *out = (cand){slot, op.v, kind, PORT_A, true};
     return true;
 }
 
@@ -301,30 +312,36 @@ static odin3_status gather(sh_state *ss) {
 
 /* --- choosing a group ------------------------------------------------------------------------- */
 
-static bool ports_equal(const sh_state *ss, odin3_node_id lhs, odin3_node_id rhs, uint32_t port) {
-    const uint32_t count = port_width(ss, lhs, port);
-    if (count != port_width(ss, rhs, port)) {
+static uint32_t other_port(uint32_t port) {
+    return port == PORT_A ? PORT_B : PORT_A;
+}
+
+/* The nets of one port of lhs and of one port of rhs are the same, bit for bit. */
+static bool ports_equal(const sh_state *ss, port_ref lhs, port_ref rhs) {
+    const uint32_t count = port_width(ss, lhs.node, lhs.port);
+    if (count != port_width(ss, rhs.node, rhs.port)) {
         return false;
     }
     for (uint32_t bit = 0; bit < count; bit++) {
-        if (port_net(ss, (port_ref){lhs, port}, bit).v !=
-            port_net(ss, (port_ref){rhs, port}, bit).v) {
+        if (port_net(ss, lhs, bit).v != port_net(ss, rhs, bit).v) {
             return false;
         }
     }
     return true;
 }
 
-/* All parameters equal except the width of the muxed port q. */
-static bool params_equal(const sh_state *ss, odin3_node_id lhs, odin3_node_id rhs, uint32_t mport) {
-    const uint32_t skip = mport == PORT_A ? PRM_A_WIDTH : PRM_B_WIDTH;
-    for (uint32_t i = 0; i < N_BIN_PARAMS; i++) {
-        if (i != skip &&
-            !odin3_value_equal(odin3_node_param(ss->m, lhs, i), odin3_node_param(ss->m, rhs, i))) {
-            return false;
-        }
-    }
-    return true;
+static int64_t signed_of(const sh_state *ss, odin3_node_id node, uint32_t port) {
+    return param_int(ss, node, port == PORT_A ? PRM_A_SIGNED : PRM_B_SIGNED);
+}
+
+/* The parameters agree role by role (the width of the muxed operand apart): the shared operand
+ * (port sport of the seed, port cport of the cell), the muxed one, and Y_WIDTH. With cport == sport
+ * this is "all parameters equal". */
+static bool params_match(const sh_state *ss, port_ref seed, odin3_node_id cell, uint32_t cport) {
+    return signed_of(ss, seed.node, seed.port) == signed_of(ss, cell, cport) &&
+           signed_of(ss, seed.node, other_port(seed.port)) ==
+               signed_of(ss, cell, other_port(cport)) &&
+           param_int(ss, seed.node, PRM_Y_WIDTH) == param_int(ss, cell, PRM_Y_WIDTH);
 }
 
 /* Conservative (spec 17 #45): a mixed-sign cell is unsigned (#57), but a group still needs equal
@@ -333,27 +350,59 @@ static bool signs_equal(const sh_state *ss, odin3_node_id op) {
     return param_int(ss, op, PRM_A_SIGNED) == param_int(ss, op, PRM_B_SIGNED);
 }
 
-/* Can cell c join the group of seed, sharing the operand on port p? */
-static bool joins(const sh_state *ss, const cand *seed, const cand *cnd, uint32_t sport) {
-    const odin3_node_id so = {seed->op};
-    const odin3_node_id co = {cnd->op};
-    const uint32_t mport = sport == PORT_A ? PORT_B : PORT_A;
-    if (k_kinds[seed->kind].cls != k_kinds[cnd->kind].cls || !ports_equal(ss, so, co, sport) ||
-        !params_equal(ss, so, co, mport)) {
+/* Is the operand on `port` of the cell subtracted ($sub's port B)? Yosys keys the shared operand
+ * on this (opt_share.cc decode_port_sign), so an $add and a $sub share only a port that is not
+ * subtracted in either. */
+static bool subtracted(const cand *cnd, uint32_t port) {
+    return k_kinds[cnd->kind].negates && port == PORT_B;
+}
+
+/* Can cell cnd, holding the shared operand on port cport, join the group of seed, which holds it on
+ * port sport? cport != sport is the commutative swap (spec 17 #52): the new cell keeps the lead's
+ * ports, so the member's other operand goes to the lead's muxed port. */
+static bool joins_on(const sh_state *ss, const cand *seed, uint32_t sport, const cand *cnd,
+                     uint32_t cport) {
+    const port_ref sref = {{seed->op}, sport};
+    const port_ref cref = {{cnd->op}, cport};
+    if (!ports_equal(ss, sref, cref) || !params_match(ss, sref, cref.node, cport) ||
+        subtracted(seed, sport) != subtracted(cnd, cport)) {
         return false;
     }
-    if (seed->kind != cnd->kind && (sport != PORT_A || !signs_equal(ss, so) || ss->neg.v == 0)) {
+    if (cport != sport && !k_kinds[seed->kind].commutes && !k_kinds[cnd->kind].commutes) {
         return false;
     }
-    return port_width(ss, so, mport) == port_width(ss, co, mport) ||
-           (k_kinds[seed->kind].extends && signs_equal(ss, so));
+    if (seed->kind != cnd->kind && (!signs_equal(ss, sref.node) || ss->neg.v == 0)) {
+        return false;
+    }
+    return port_width(ss, sref.node, other_port(sport)) ==
+               port_width(ss, cref.node, other_port(cport)) ||
+           (k_kinds[seed->kind].extends && signs_equal(ss, sref.node));
+}
+
+/* Can c join the group of seed, sharing the operand held on port sport of the seed? On a yes
+ * *at (when not NULL) is the port the cell holds it on: sport when it can, else the other. */
+static bool joins(const sh_state *ss, const cand *seed, const cand *cnd, uint32_t sport,
+                  uint32_t *at) {
+    if (k_kinds[seed->kind].cls != k_kinds[cnd->kind].cls) {
+        return false;
+    }
+    for (uint32_t pick = 0; pick < 2U; pick++) {
+        const uint32_t port = pick == 0 ? sport : other_port(sport);
+        if (joins_on(ss, seed, sport, cnd, port)) {
+            if (at != NULL) {
+                *at = port;
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 static uint32_t count_joiners(const sh_state *ss, size_t seed, uint32_t sport) {
     const cand *all = ss->cands.data;
     uint32_t hits = 0;
     for (size_t i = seed + 1U; i < ss->cands.len; i++) {
-        hits += all[i].open && joins(ss, &all[seed], &all[i], sport) ? 1U : 0U;
+        hits += all[i].open && joins(ss, &all[seed], &all[i], sport, NULL) ? 1U : 0U;
     }
     return hits;
 }
@@ -391,20 +440,22 @@ static bool choose_port(const sh_state *ss, size_t seed, uint32_t *port) {
     return true;
 }
 
-/* group = the seed and the open candidates that join it, in port order. */
+/* group = the seed and the open candidates that join it, in port order; each member's sport is
+ * the port it holds the shared operand on. */
 static odin3_status build_group(sh_state *ss, size_t seed, uint32_t sport) {
-    const cand *all = ss->cands.data;
+    cand *all = ss->cands.data;
     odin3_vec_clear(&ss->group);
     for (size_t i = seed; i < ss->cands.len; i++) {
-        if (i == seed || (all[i].open && joins(ss, &all[seed], &all[i], sport))) {
+        uint32_t at = sport;
+        if (i == seed || (all[i].open && joins(ss, &all[seed], &all[i], sport, &at))) {
             uint32_t *slot = odin3_vec_push(&ss->group);
             if (slot == NULL) {
                 return ODIN3_ERR_NO_MEMORY;
             }
             *slot = (uint32_t)i;
+            all[i].sport = at;
         }
     }
-    ss->shared_port = sport;
     return ODIN3_OK;
 }
 
@@ -421,7 +472,6 @@ static int cmp_node(const void *lhs, const void *rhs) {
 static odin3_status group_facts(sh_state *ss) {
     const cand *all = ss->cands.data;
     const uint32_t *idx = ss->group.data;
-    const uint32_t mport = ss->shared_port == PORT_A ? PORT_B : PORT_A;
     odin3_vec_clear(&ss->byid);
     uint32_t wmax = 0;
     for (size_t i = 0; i < ss->group.len; i++) {
@@ -430,7 +480,7 @@ static odin3_status group_facts(sh_state *ss) {
             return ODIN3_ERR_NO_MEMORY;
         }
         *dst = (odin3_node_id){all[idx[i]].op};
-        const uint32_t wid = port_width(ss, *dst, mport);
+        const uint32_t wid = port_width(ss, *dst, other_port(all[idx[i]].sport));
         wmax = wid > wmax ? wid : wmax;
     }
     qsort(ss->byid.data, ss->byid.len, sizeof(odin3_node_id), cmp_node);
@@ -439,6 +489,7 @@ static odin3_status group_facts(sh_state *ss) {
     ss->mixed = false;
     for (size_t i = 0; i < ss->group.len; i++) {
         ss->mixed = ss->mixed || all[idx[i]].kind != ss->lead_kind;
+        ss->lead_port = all[idx[i]].op == lead.v ? all[idx[i]].sport : ss->lead_port;
     }
     const uint32_t ywidth = (uint32_t)param_int(ss, lead, PRM_Y_WIDTH);
     ss->wn = ss->mixed && ywidth > wmax ? ywidth : wmax;
@@ -507,7 +558,7 @@ static odin3_status const_net(sh_state *ss, odin3_bit bit, odin3_net_id *out) {
     return odin3_opt_const_net(ss->oc, bit, out);
 }
 
-/* tmp-free: appends the operand of member `node` (port q), extended to wn nets, to opnd. */
+/* tmp-free: appends the operand of member `node` (port mport), extended to wn nets, to opnd. */
 static odin3_status push_operand(sh_state *ss, odin3_node_id node, uint32_t mport) {
     const uint32_t have = port_width(ss, node, mport);
     odin3_status st = push_port(ss, &ss->opnd, node, mport);
@@ -548,12 +599,11 @@ static odin3_status negate_last(sh_state *ss, odin3_prov_id prov) {
 static odin3_status build_operands(sh_state *ss, odin3_prov_id prov) {
     const cand *all = ss->cands.data;
     const uint32_t *idx = ss->group.data;
-    const uint32_t mport = ss->shared_port == PORT_A ? PORT_B : PORT_A;
     odin3_vec_clear(&ss->opnd);
     odin3_status st = ODIN3_OK;
     for (size_t i = 0; st == ODIN3_OK && i < ss->group.len; i++) {
         const cand *cnd = &all[idx[i]];
-        st = push_operand(ss, (odin3_node_id){cnd->op}, mport);
+        st = push_operand(ss, (odin3_node_id){cnd->op}, other_port(cnd->sport));
         st = st == ODIN3_OK && cnd->kind != ss->lead_kind ? negate_last(ss, prov) : st;
     }
     return st;
@@ -614,17 +664,17 @@ static odin3_status make_op(sh_state *ss, odin3_node_id lead, odin3_node_id mux_
     for (uint32_t i = 0; i < N_BIN_PARAMS; i++) {
         params[i] = *odin3_node_param(ss->m, lead, i);
     }
-    const uint32_t mport = ss->shared_port == PORT_A ? PORT_B : PORT_A;
+    const uint32_t mport = other_port(ss->lead_port);
     params[mport == PORT_A ? PRM_A_WIDTH : PRM_B_WIDTH] = odin3_value_int((int64_t)ss->wn);
     odin3_vec_clear(&ss->shared);
     odin3_vec_clear(&ss->tmp);
-    odin3_status st = push_port(ss, &ss->shared, lead, ss->shared_port);
+    odin3_status st = push_port(ss, &ss->shared, lead, ss->lead_port);
     st = st == ODIN3_OK ? push_port(ss, &ss->tmp, mux_new, MUX_PORT_Y) : st;
     if (st != ODIN3_OK) {
         return st;
     }
     odin3_netvec ports[N_BIN_PORTS] = {{NULL, 0}, {NULL, 0}, {NULL, 0}};
-    ports[ss->shared_port] = (odin3_netvec){ss->shared.data, (uint32_t)ss->shared.len};
+    ports[ss->lead_port] = (odin3_netvec){ss->shared.data, (uint32_t)ss->shared.len};
     ports[mport] = (odin3_netvec){ss->tmp.data, (uint32_t)ss->tmp.len};
     odin3_kit_cell cell = {odin3_node_type(ss->m, lead), params, N_BIN_PARAMS, ports, prov};
     st = new_cell(ss, &cell, out);
