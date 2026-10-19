@@ -1,4 +1,4 @@
-# Odin III: Phase 4: VTR architectures, Altera via LPM, and the analysis flow
+# Odin III: Phase 4: VTR architectures and FSM
 
 Spec: `docs/DESIGN.md` §6 step 7 (`read_arch`), §7 (partial mapping), §9 (writers), §12, §12.1,
 §13 Q5; ADRs D10 (the scope; amends D5 and D6), D1, D3 (subprocess tools), D9 (provenance).
@@ -7,23 +7,17 @@ decision 4), `lib/vtr.o3lib` (1G), the `tools/vtr-qor` harness and its `fcheck`
 (functional check), `tools/hardmap-check`, `tools/equiv-check`. Oracle: VTR `3c9a4d23`
 (`docs/ORACLES.md`). External trees are read-only.
 
-**Goal (Peter, 2026-10-19): the tool works on VTR architectures and on Altera via LPM.** QoR
-parity is no longer an exit criterion. Phase 4 also builds the generalized analysis flow
-(4.15 to 4.19, decision 5): the inputs and outputs the post-v1.0 experiments need, not the
-experiments.
+**Goal (Peter, 2026-10-19): the tool works on VTR architectures, with FSM recoding.** QoR
+parity is no longer an exit criterion. Altera via LPM is Phase 5 and the analysis flow is
+Phase 6 (ADR D11, decision 8); their items left this file.
 
-**Exit test** (DESIGN §12 row 4, 4.13 and 4.14):
+**Exit test** (DESIGN §12 row 4, 4.8 and 4.13):
 
 1. **Arch sweep (4.13).** The VTR designs (the Phase 3 set) on several VTR archs:
    `k6_frac_N10` (the Phase 3 arch), one DSP arch and one plain-LUT arch (which ones: open
    item 1). Pass = VPR routes (`vpr_status=success`), the `vtr-qor` fcheck passes, and the
    micros are equivalent (`equiv-check` against the Parmys golden for that arch).
-2. **Altera via LPM (4.14).** The LPM netlist written by Odin III is equivalent to the RTL,
-   using the LPM library's simulation models (`equiv-check` or `sim`). An optional Quartus Lite
-   compile is Peter's hands, not CI.
-3. **FSM and analysis flow (4.8, 4.15 to 4.19).** Each item's acceptance test passes; 4.19
-   resolves every final-netlist object to the HDL apart from its named exception classes
-   (decision 7).
+2. **FSM (4.8).** Its acceptance test passes.
 
 Each sub-project gets its own spec (`docs/specs/`), plan and PRs. Model and effort follow
 `docs/PHASE0.md` §9: mapping algorithms Opus `xhigh` to `high` with the advisor; importers,
@@ -62,51 +56,11 @@ Each item has a one-line acceptance test.
   one-hot below 32 states and binary from 32; `-encoding one-hot` forces one-hot for every FSM.
   Provenance: the recoded state register and next-state logic get `DERIVED` records whose
   parents are the original state register and its logic, and each FSM gets attributes (state
-  count, encoding) that 4.16 and 4.17 export. Test: FSM micros are equivalent to the RTL after
-  `fsm`; detection and encoding match Yosys 0.55 `fsm` on the micros (same FSMs, state counts
-  and encodings); the 19 VTR designs with `fsm` in the script still route and pass fcheck.
+  count, encoding) that Phase 6 items 6.2 and 6.3 export. Test: FSM micros are equivalent to
+  the RTL after `fsm`; detection and encoding match Yosys 0.55 `fsm` on the micros (same FSMs,
+  state counts and encodings); the 19 VTR designs with `fsm` in the script still route and
+  pass fcheck.
 - [ ] 4.13 Arch-sweep exit test (above). Test: the exit test item 1.
-- [ ] 4.14 Altera target via LPM:
-  - an LPM tech library (`.o3lib`), a basic path of memory plus simple items (decision 3), with
-    exactly: `lpm_add_sub`, `lpm_mult`, `lpm_compare`, and `altsyncram` (single-port and
-    simple-dual-port). The output is family-neutral: a family option sets the device-family
-    parameters (`intended_device_family`), default Cyclone V, the one tested; Stratix is
-    reachable by the option and untested (decision 4). Flip-flops are plain DFFs in soft logic, not `lpm_ff` (agent
-    default, decision 3). Everything else goes to soft logic as generic structural Verilog gates
-    or assigns;
-  - mapping word-level cells to them (partial map, as for VTR hard blocks);
-  - a structural Verilog writer that instantiates LPM modules with their parameters;
-  - the same library reads LPM-structured Verilog back with LPM instances as hard cells (the
-    starting point of "going from Altera up").
-  Test: the exit test item 2; and writer output re-read by the front end gives the same
-  netlist (LPM instances kept as hard cells).
-  Out of scope: VQM, EDIF, `stratixiv_*`/device atoms, Altera `bind`/`unbind` to atoms, Titan.
-- [ ] 4.15 Gate-level netlist ingest: structural Verilog over a cell library (cells given as
-  Verilog models through `read_verilog -v`/`-y`, kept as cells or flattened to IR primitives)
-  and BLIF (`read_blif`), with hierarchy and names kept. Test: a micro mapped by Yosys to a
-  small CMOS cell set (BUF, NOT, NAND2, NOR2, DFF, DFFSR) and the same micro as BLIF both read
-  in and are equivalent to the RTL.
-- [ ] 4.16 `write_dot --color-by <attr>` and provenance on node labels: nodes coloured by the
-  value of a named attribute (a legend per value), the HDL `file:line` on each node label when
-  provenance has one. Test: a micro with an attribute set on some cells gives the expected
-  colours and labels; the dot parses (Graphviz `nop`).
-- [ ] 4.17 Graph export for analysis tools: a flat, documented format (nodes with ID, cell
-  type, module path, attributes, level, provenance; edges driver pin to sink pin) that networkx
-  and PyTorch Geometric load without Odin III. Test: export of a micro reloads in Python with
-  the same node and edge counts as the IR; the format is versioned.
-- [ ] 4.18 `levelize` pass: the combinational level of each cell from inputs and register
-  outputs, stored as an attribute; combinational loops reported. Test: levels on micros match a
-  hand count; a loop gives a located warning.
-- [ ] 4.19 Provenance coverage report: the share of final-netlist objects (BLIF after `abc`,
-  LPM Verilog, VPR block names from the `.place` file) that resolve to an HDL source location.
-  The path is the provenance chain: `DERIVED` records across every pass, including `abc`
-  (PHASE3 decision 14), back to `SOURCE` spans (D9). Test (decision 7): on the Phase 3 design
-  set and the LPM micros, every LUT, latch, hard block and LPM instance of the final netlist
-  resolves to at least one HDL location, and every VPR placed block's atoms do. The only
-  exceptions are named classes (constant drivers, buffers the writers add), each counted in
-  the report. An unresolved object outside those classes is a bug. Recorded per design: the
-  coverage, and the specificity (median and 90th percentile of distinct HDL lines per
-  object).
 
 ## Dropped from Phase 4 (D10)
 
@@ -117,7 +71,9 @@ Each item has a one-line acceptance test.
 | 4.11 project mapping rules | Not needed to make the tool work; the project file still reads and stores them (DESIGN §4.0) |
 | 4.12 per-bit `opt_dff` parity | Not needed for "the tool works"; QoR parity is no longer a goal |
 
-Phases 5 (deferred) and 6 (removed) are recorded in DESIGN §12.1.
+Moved out by D11: 4.14 (Altera via LPM) is Phase 5 item 5.1; 4.15 to 4.19 are Phase 6 items
+6.1 to 6.5. The old Phases 5 and 6 (SystemVerilog/VHDL, `raise`) are after v1.0, recorded in
+DESIGN §12.1.
 
 ## Dependencies on Phase 3
 
@@ -126,10 +82,8 @@ Phases 5 (deferred) and 6 (removed) are recorded in DESIGN §12.1.
   sub-project 3C).
 - `tools/vtr-qor` and its `fcheck` are the harness for 4.13; its caps and smallest-first order
   apply (heavy-run lock: sweeps run when lanes are idle).
-- `lib/vtr.o3lib` and the `.o3lib` format (1G) are the target of 4.1 and the model for 4.14.
+- `lib/vtr.o3lib` and the `.o3lib` format (1G) are the target of 4.1.
 - `write_blif --vtr` (3E), `lower` (3B) and the linked `abc` (3D) are unchanged.
-- The `equiv-check` models (PHASE0 #7/#8) and the simulator are the oracle for 4.14; LPM
-  simulation models for the four LPM cells must be added to them.
 
 ## Decisions log
 
@@ -168,6 +122,11 @@ Phases 5 (deferred) and 6 (removed) are recorded in DESIGN §12.1.
 7. **Provenance coverage target** (Peter, 2026-10-19): "4.19 using the Provenance path we
    should expect a very good report". 4.19 is a gate, not only a measurement: full coverage
    apart from named exception classes; an unexplained unresolved object is a bug.
+8. **Phase split** (Peter, 2026-10-19, ADR D11): "yes to all recommendations". Phase 4 keeps
+   4.1 to 4.8 and 4.13. Altera via LPM (4.14, decisions 2 to 4) becomes Phase 5 item 5.1, in a
+   Phase 5 of outputs and read-back (`docs/PHASE5.md`). The analysis flow (4.15 to 4.19,
+   decisions 5 and 7) becomes Phase 6 items 6.1 to 6.5 (`docs/PHASE6.md`). Decisions 2 to 5
+   and 7 stay here as history; PHASE5 and PHASE6 restate them.
 
 ## Open items
 

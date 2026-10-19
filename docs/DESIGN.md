@@ -241,7 +241,7 @@ instantiating unit's library first), else a `-v`/`libfile` module (first file wi
 `-y`/`libdir` file `<dir>/<name><ext>` (directories in order, then `+libext+` extensions in
 order, default `.v`); library modules load only when instantiated, never shadow design units
 and are never top candidates. Instances of Altera megafunctions in RTL (`altsyncram`,
-`altdpram`, `altshift_taps`, `altmult_add`, `lpm_*`) resolve through the LPM tech library (Phase 4.14, D10; PHASE2 #2 had planned a Phase 6 primitive
+`altdpram`, `altshift_taps`, `altmult_add`, `lpm_*`) resolve through the LPM tech library (Phase 5 item 5.1, D10, D11; PHASE2 #2 had planned a Phase 6 primitive
 library), not the project; in a VQM netlist (VQM reader removed from v1.0, D10), instances of the device primitives the VQM reader
 would know (`dffeas`, `cyclonev_lcell_comb`, `cyclonev_io_ibuf`, `cyclonev_io_obuf`,
 `cycloneive_lcell_comb`, `cycloneive_io_ibuf`, `cycloneive_io_obuf`; the VQM library would have grown in
@@ -292,7 +292,7 @@ Not built in v1.0; how it would be done is in §12.1.
 - VQM (Quartus post-synthesis Verilog): the Verilog grammar plus the Altera primitive library; no new parser. (removed from v1.0, D10)
 - EDIF 2.0.0: S-expression reader, structural only. (removed from v1.0, D10)
 - These produce bit-level IR with structural-only provenance; the `raise` pass (§8; removed from v1.0, D10) recovers word-level structure.
-- LPM-structured Verilog (v1.0, Phase 4.14, D10): read by the Verilog front end; the LPM tech library makes the `lpm_*` instances hard cells.
+- LPM-structured Verilog (v1.0, Phase 5 item 5.1, D10, D11): read by the Verilog front end; the LPM tech library makes the `lpm_*` instances hard cells.
 
 ### 4.5 Common AST and Symbol Table
 - Scoped symbol table (module → generate scope → block), each symbol with declaration location, type (net/var, width, signedness, array dims), and the list of AST nodes that assign it.
@@ -330,7 +330,7 @@ Every node, net and wire carries a provenance ID (pins inherit their node's) int
 4a. `flatten` — expands every module instance of the top (and of every `keep_hierarchy` module) into the module that holds it; objects get Yosys-style dotted instance-path names (`u1.mid.x`), the joined port nets keep every name as IR-2 aliases, and the instance path (`top/u1/mid`) goes into `DERIVED` provenance records (`odin3_prov_derive_hier`); black boxes, hard cells and library cells stay (3A; `docs/specs/2026-10-14-3A-flatten-design.md`). The Phase 3 script runs `opt -full` after it (as Parmys does)
 5. `fsm` — Yosys 0.55's `fsm` (`fsm_detect`, `fsm_extract`, `fsm_opt`, `fsm_recode`, `fsm_map`), right after `proc` as Parmys runs it; `auto` encoding is one-hot below 32 states (Phase 4 item 4.8; restored by D10 follow-up 2)
 6. `memory_infer` — `reg` arrays → `$mem` with port analysis; attribute overrides
-7. `read_arch` — `.o3lib` tech libraries (target-agnostic: gates first, then FPGA hard cells; `docs/specs/2026-10-08-1G-techlib-design.md`) → hard/gate set; VPR XML `<model>`s and pb_types via the importer (Phase 4.1) into the same form. The Altera target is an LPM `.o3lib` (Phase 4.14, D10); there is no Altera device importer in v1.0
+7. `read_arch` — `.o3lib` tech libraries (target-agnostic: gates first, then FPGA hard cells; `docs/specs/2026-10-08-1G-techlib-design.md`) → hard/gate set; VPR XML `<model>`s and pb_types via the importer (Phase 4.1) into the same form. The Altera target is an LPM `.o3lib` (Phase 5 item 5.1, D10, D11); there is no Altera device importer in v1.0
 8. `partial_map` (§7)
 9. `lower` — word → bit; hard/blackbox nodes untouched. `lower` is Yosys 0.55's `simplemap`/`techmap.v` structures; asynchronous controls become synchronous (decision 19); the script follows it with `opt -fast; compact`
 10. `abc`: linked ABC (`adapters/abc`, an engine behind the C ABI) maps each module's soft logic to `$lut` cells, one ABC run per clock domain, with hard cells, black boxes, instances and other domains' flip-flops as cut points (hard-block inputs on `unconn`, x or a constant pass unchanged; soft logic reads them as 0); the script is `abc --script`, else `--abc-script`, else the project's `abc_script`, else `lib/abc/vtr.abc`; results are re-stitched with provenance from ABC's correspondence (3D spec)
@@ -350,7 +350,7 @@ Matcher (§8, deferred, D10) pattern format: an IR fragment written as a tech-li
 
 ## 8. Subgraph matcher and reverse engineering (deferred, D10)
 
-Not in v1.0 (D5 amended by D10). The text below is the original plan, kept as the design for later work. Reverse engineering is now approached from Altera (LPM structural Verilog) up, which Phase 4.14 starts (§12.1).
+Not in v1.0 (D5 amended by D10). The text below is the original plan, kept as the design for later work. Reverse engineering is now approached from Altera (LPM structural Verilog) up, which Phase 5 item 5.1 starts (§12.1, D11).
 
 One matcher, two directions:
 - Forward: patterns = target hard blocks; candidates seeded at anchor cells (e.g. `$mul`) as in Odin I.
@@ -363,7 +363,7 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 | Format | Read | Write | Notes |
 |---|---|---|---|
 | BLIF | yes | yes | black boxes; `.latch` init. VTR dialect (`write_blif --vtr`): top only, `.latch … re` init 0/1/2, `unconn` on open hard-block inputs |
-| Verilog | yes (front end) | structural (bit/word); LPM-instantiating flavour (v1.0, Phase 4.14, D10) | Altera atoms flavour removed from v1.0 |
+| Verilog | yes (front end) | structural (bit/word); LPM-instantiating flavour (v1.0, Phase 5 item 5.1, D10, D11) | Altera atoms flavour removed from v1.0 |
 | SystemVerilog | via slang (deferred, D10) | word-level structural | |
 | VQM | removed from v1.0 (D10) | — | Titan (removed from v1.0) |
 | EDIF | removed from v1.0 (D10) | dropped (7.5, D10) | |
@@ -384,7 +384,7 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 - **Microbenchmarks** (VTR `odin_ii/regression_test/benchmark/...`): required *identical* canonicalized netlist across Verilog, SV (converted), and VHDL (converted) front ends, and equivalent to Parmys.
 - **VTR 19**: full flow to P&R; QoR table (min W, critical path, LUTs, FFs, hard blocks) vs. Parmys (Phase 3 exit; after Phase 3 QoR parity is not an exit criterion, D10; Phase 4 sweeps several archs for routability and equivalence).
 - **Titan** (removed from v1.0, D10): smallest designs first; VQM path and source path both; must match Quartus-synthesized BLIF functionally.
-- **Altera/LPM** (v1.0, Phase 4.14): LPM netlist equivalent to the RTL using the LPM library's simulation models; an optional Quartus Lite compile is by hand, not CI.
+- **Altera/LPM** (v1.0, Phase 5 item 5.1, D11): written, read back and linted; equivalence to the RTL using the LPM library's simulation models when Peter needs that step; an optional Quartus Lite compile is by hand, not CI.
 - **Fuzzing**: random Verilog generator with Yosys as differential oracle, from Phase 2.
 - **Reverse engineering** (removed from v1.0, D10): round-trip test — Verilog → lower → BLIF → read → raise → Verilog → equiv, plus structure-recovery scorecard.
 - CI runs lint gate + unit + micro + fuzz on every push; VTR 19 nightly; Titan weekly (Titan removed from v1.0, D10).
@@ -397,19 +397,23 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 | 1 | `util/`, core IR, op registry, pass manager, `check`, provenance, C ABI v0, BLIF read/write, dot/JSON/Verilog writers, simulator, tech-library format + reader + generic gate library | BLIF→IR→BLIF bit-identical on goldens; sim matches ABC on goldens; a Python plugin can walk the IR |
 | 2 | Verilog-2005 front end + preprocessor + elaboration; project input (§4.0: `.o3proj`, `-f` file lists, Quartus `.qsf`/`.qpf` import, top selection); `proc`, `opt`; VTR benchmark set elaborated (PHASE2 #2) | Micros identical/equivalent to Parmys; every project fixture (`tests/golden/projects`) parses to its expected record from `.o3proj`, `-f` and `.qsf`, and every phase-2 fixture elaborates to the same netlist from each of those formats, equivalent to its oracle (or fails with its located error); the Odin II XML format is excluded until its reader lands |
 | 3 | `lower`, linked ABC, VTR flow hookup | VTR 19 through P&R; QoR table |
-| 4 | VPR-XML import into the tech library (4.1); generic hard blocks by exact port signature (4.2); multiplier splitting from the arch (4.3); memory depth/width splitting (4.4); carry chains from the arch model (4.5); FF feature matching (4.6); memory port merge (4.7); FSM detect and recode, one-hot below 32 states as Yosys, run after `proc` as Parmys (4.8, restored); arch-sweep test (4.13); Altera target via LPM (4.14: LPM `.o3lib`, family-neutral, partial map to it, structural Verilog writer, LPM Verilog read back); the analysis flow (4.15 gate-level netlist ingest, 4.16 `write_dot --color-by` and provenance labels, 4.17 graph export, 4.18 `levelize`, 4.19 provenance coverage report). Dropped (D10): mux collapsing (4.9, done by `opt`), matcher v1 (4.10), project mapping rules (4.11), per-bit `opt_dff` parity (4.12). Plan: `docs/PHASE4.md` | The tool works on VTR architectures and on Altera via LPM: the VTR designs on several VTR archs (k6_frac_N10, one DSP arch, one plain-LUT arch) route in VPR, pass the vtr-qor fcheck, and the micros are equivalent; the LPM netlist is equivalent to the RTL under the LPM simulation models; 4.8 and 4.15 to 4.19 pass their tests; 4.19 resolves every final-netlist object to the HDL apart from named exception classes. QoR parity is not an exit criterion (D10) |
-| 5 | **Deferred (D10).** slang adapter, GHDL path, cross-language identical-netlist test, SV/VHDL/mixed fixtures; nothing is built (§12.1) | None in v1.0 |
-| 6 | **Removed from v1.0 (D10).** `raise`, RE scorecard and round trip, VQM/EDIF readers, Altera `bind` output, primitive library v0, Titan subset (§12.1). RE is approached from Altera (LPM structural Verilog) up, started by 4.14 | None in v1.0 |
-| 7 | CIRCT writer (7.1), Yosys JSON reader (7.2), visual tooling polish (7.3), docs including the extension-API review (7.4), release packaging and the v1.0 tag (7.6). The EDIF writer (7.5) is dropped (D10) | Release |
+| 4 | VTR architectures and FSM (D11): VPR-XML import into the tech library (4.1); generic hard blocks by exact port signature (4.2); multiplier splitting from the arch (4.3); memory depth/width splitting (4.4); carry chains from the arch model (4.5); FF feature matching (4.6); memory port merge (4.7); FSM detect and recode, one-hot below 32 states as Yosys, run after `proc` as Parmys (4.8); arch-sweep test (4.13). Dropped (D10): mux collapsing (4.9, done by `opt`), matcher v1 (4.10), project mapping rules (4.11), per-bit `opt_dff` parity (4.12). Plan: `docs/PHASE4.md` | The tool works on VTR architectures: the VTR designs on several VTR archs (k6_frac_N10, one DSP arch, one plain-LUT arch) route in VPR, pass the vtr-qor fcheck, and the micros are equivalent; 4.8 passes its test. QoR parity is not an exit criterion (D10) |
+| 5 | Outputs and read-back (D11): LPM via structural Verilog, light, family-neutral (5.1); Verilog read-back at word, gate, LUT and LPM level with `read_verilog -icells` (5.2); Yosys JSON reader (5.3, was 7.2); HDL locations through write and read for BLIF, Verilog and JSON (5.4). Plan: `docs/PHASE5.md` | Every BLIF, Verilog and JSON output reads back equivalent with its HDL locations; LPM micros write, read back and lint |
+| 6 | Analysis flow and provenance (D11): gate-level netlist ingest (6.1); `write_dot --color-by` and provenance labels (6.2); graph export as Yosys JSON plus Odin III keys (6.3); `levelize` (6.4); provenance coverage gate (6.5). Plan: `docs/PHASE6.md` | 6.1 to 6.4 pass their tests; 6.5 resolves every final-netlist object (BLIF, LPM, VPR blocks) to the HDL apart from named exception classes |
+| 7 | CIRCT writer (7.1), visual tooling polish (7.3), docs including the extension-API review (7.4), release packaging and the v1.0 tag (7.6). The Yosys JSON reader (7.2) moved to 5.3 (D11); the EDIF writer (7.5) is dropped (D10) | Release |
 
 Agentic working rules: one pass per PR; golden test per pass; `check` on in debug; lint gate must pass before commit; agent reads `docs/DESIGN.md` and the op-registry file for any task; human reviews IR/invariant changes and all mapping algorithms; no PR merges red. Per-pass workflow: `superpowers:brainstorming` → `superpowers:writing-plans` → human approves → `superpowers:executing-plans` → `/run-micro` → PR.
 
-### 12.1 Deferred and removed work (D10, 2026-10-19)
+### 12.1 After v1.0 (D10, D11, 2026-10-19)
 
 Peter re-scoped v1.0 on 2026-10-19 (`docs/ADR/D10.md`). Nothing below is built in v1.0; it is
 kept so the plan is not lost. Original phase 4 items dropped are listed in `docs/PHASE4.md`.
+D11 renumbered the v1.0 phases: "Phase 5" and "Phase 6" below are the old phases, now
+post-v1.0 work, not today's Phases 5 (outputs and read-back) and 6 (analysis flow).
+The research plugins of D10 follow-up 2 (Gate-Breaker redo, Bayesian classifier, graphlets,
+graph sandwich, GNNs, placement study) are also after v1.0; they read Phase 6's outputs.
 
-**Phase 5, deferred** (reason: Verilog is close to good enough). How each step would be done:
+**Old Phase 5, after v1.0** (reason: Verilog is close to good enough). How each step would be done:
 
 - 5.1 slang adapter: a C++ shim in `adapters/slang/` links slang, walks its elaborated AST
   (post-parameter, post-generate) into the `odin3_ast_*` builders, exports exactly one C function
@@ -423,7 +427,7 @@ kept so the plan is not lost. Original phase 4 items dropped are listed in `docs
 - 5.4 Fixtures: SV, VHDL and mixed-language project fixtures elaborate from each project format
   and are equivalent to their oracle.
 
-**Phase 6, removed from v1.0.** What it would have been:
+**Old Phase 6, removed from v1.0.** What it would have been:
 
 - 6.1 `raise`: `lower` run backwards via the matcher (§8), bit-level cones to word-level cells.
 - 6.2 RE scorecard and round trip: Verilog, `lower`, BLIF, read, `raise`, Verilog, equivalence
@@ -434,7 +438,7 @@ kept so the plan is not lost. Original phase 4 items dropped are listed in `docs
 - 6.6 Titan subset: smallest design parsed from its `.qsf` first (PHASE2 #2).
 
 Reverse engineering is now approached "from Altera (LPM structural Verilog) up", which Phase
-4.14 starts: the LPM library reads LPM-structured Verilog back with LPM instances as hard
+5 item 5.1 starts: the LPM library reads LPM-structured Verilog back with LPM instances as hard
 cells.
 
 **Also out of v1.0:** matcher v1 (4.10), project mapping rules (4.11), per-bit `opt_dff` parity (4.12), the EDIF
@@ -443,10 +447,10 @@ writer (7.5). Mux collapsing (4.9) is done: `opt_muxtree` and `opt_reduce` in `o
 ## 13. Open questions
 
 1. ~~Matcher pattern DSL and where patterns live.~~ **Resolved 2026-10-08:** tech-library (`.o3lib`) cell functions compiled to IR fragments, living in the tech library (PHASE1 #7/#8).
-2. GHDL `--out=verilog` coverage; fallback is linking libghdl in a separately-licensed optional module. **Deferred (D10):** Phase 5 is not in v1.0.
-3. Primitive library v0 scope: exactly which `lpm_*`/`alt*`/`stratixiv_*` the smallest Titan designs need. **Removed (D10)** as framed (Titan and `stratixiv_*` are out of v1.0). Replaced by the fixed LPM set of Phase 4.14 (`lpm_add_sub`, `lpm_mult`, `lpm_compare`, `altsyncram`; `docs/PHASE4.md` #3).
+2. GHDL `--out=verilog` coverage; fallback is linking libghdl in a separately-licensed optional module. **Deferred (D10):** the old Phase 5 is after v1.0 (D11).
+3. Primitive library v0 scope: exactly which `lpm_*`/`alt*`/`stratixiv_*` the smallest Titan designs need. **Removed (D10)** as framed (Titan and `stratixiv_*` are out of v1.0). Replaced by the fixed LPM set of Phase 5 item 5.1 (D11; `lpm_add_sub`, `lpm_mult`, `lpm_compare`, `altsyncram`; `docs/PHASE4.md` #3).
 4. Memory layout details (arena vs. SoA) — decide in Phase 1 with a 2M-node synthetic benchmark.
-5. Which Altera generation for `bind` output first (Cyclone IV/V for Quartus Lite vs. Stratix IV for Titan). **Answered for v1.0 (D10; Peter, 2026-10-19, PHASE4 #2):** no `bind` output; Cyclone V (Quartus Lite), via LPM. Family-neutral LPM with a family option; Stratix reachable, untested (PHASE4 #4).
+5. Which Altera generation for `bind` output first (Cyclone IV/V for Quartus Lite vs. Stratix IV for Titan). **Answered for v1.0 (D10; Peter, 2026-10-19, PHASE4 #2):** no `bind` output; Cyclone V (Quartus Lite), via LPM. Family-neutral LPM with a family option; Stratix reachable, untested (PHASE4 #4, PHASE5 #1).
 6. Name-style policy for VTR: provenance names are long; measure VPR runtime impact. 3A's part (PHASE3 #30): `flatten` names flat objects with dotted instance paths (`--separator` changes the dot), leaves unnamed objects unnamed (the path is in provenance) and labels the children of an unnamed instance `$c<ID>`; which style a writer prints is still open (3E-6/3H).
 7. Whether `raise` should also target Yosys's internal cell names for interop. **Removed (D10):** `raise` is out of v1.0.
 8. ~~Unit-test framework for C: Unity vs. CMocka (decide in PR #1).~~ **Resolved 2026-10-08: Unity**, vendored as `third_party/unity`.

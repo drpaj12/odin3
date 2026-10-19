@@ -16,7 +16,8 @@ beyond the spec's literal wording.
 | [D8](D8.md) | Core in C++20 (v0.1) | Superseded by D8' | 2026-10-08 | Original language choice; superseded, rationale not recorded in the spec. |
 | [D8'](D8-prime.md) | Core in structured C17, public C ABI | Accepted | 2026-10-08 | C17 core, C ABI plugins (`.so`/executables/cffi), C++ only in adapters and third_party. |
 | [D9](D9.md) | Provenance on every IR object | Accepted | 2026-10-08 | Pointers in-process plus stable string IDs in serialization and emitted names. |
-| [D10](D10.md) | v1.0 scope (2026-10-19) | Accepted | 2026-10-19 | Phase 4 = VTR archs plus Altera via LPM; Phase 5 delayed; Phase 6 removed; amends D5, D6; touches D2. |
+| [D10](D10.md) | v1.0 scope (2026-10-19) | Accepted | 2026-10-19 | Phase 4 = VTR archs plus Altera via LPM; Phase 5 delayed; Phase 6 removed; amends D5, D6; touches D2. Phase numbering superseded by D11. |
+| [D11](D11.md) | v1.0 phase plan (2026-10-19) | Accepted | 2026-10-19 | 4 = VTR archs + FSM; 5 = outputs and read-back (LPM light, Verilog/JSON/BLIF read-back with HDL locations); 6 = analysis flow and provenance gate; 7 = release; old 5/6 after v1.0. |
 
 Format: Nygard style (Context, Decision, Consequences, Related, Revisit if). Phase-0 decisions
 in `docs/PHASE0.md` §A.2 are cited from the ADRs they touch and are not ADRs themselves.
