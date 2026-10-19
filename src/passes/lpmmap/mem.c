@@ -11,6 +11,7 @@
 #include "passes/lpmmap/lm_kit.h"
 
 #include "ir/celltype.h"
+#include "passes/ffinit.h"
 #include "passes/hardmap/hm_kit.h"
 #include "passes/hardmap/mem.h"
 
@@ -29,7 +30,8 @@ typedef enum lm_verdict {
     LV_CLOCKS,
     LV_WEN,
     LV_REN,
-    LV_TRANSPARENT
+    LV_TRANSPARENT,
+    LV_RDINIT
 } lm_verdict;
 
 static const mem_rport *rd0(const mem_model *mm) {
@@ -71,6 +73,23 @@ static bool read_always(const lm_ctx *lc, const mem_rport *rp) {
                                           (rp->en_pos ? ODIN3_CONST_1 : ODIN3_CONST_0);
 }
 
+/* R-1 and R-6: a flip-flop the merge removes must not carry an initial value (the RAM has none). */
+static bool dead_ff_has_init(const lm_ctx *lc, const mem_model *mm) {
+    for (size_t i = 0; i < mm->dead.len; i++) {
+        odin3_node_id node = *(const odin3_node_id *)odin3_vec_cat(&mm->dead, i);
+        odin3_pinslice pins = odin3_node_pins(lc->module, node);
+        for (uint32_t pin = 0; pin < pins.count; pin++) {
+            odin3_pin_id id = {pins.first.v + pin};
+            odin3_net_id net = odin3_pin_net(lc->module, id);
+            if (odin3_pin_drives(lc->module, id) && odin3_net_valid(net) &&
+                odin3_ffinit_get(lc->module, net) != ODIN3_BIT_X) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 /* R-6: the checks of the two ports' clocks, edges and enables. */
 static lm_verdict port_verdict(const lm_ctx *lc, const mem_rport *rp, const mem_wport *wp) {
     if (!rp->sync) {
@@ -102,6 +121,9 @@ static lm_verdict verdict_of(const lm_ctx *lc, const mem_model *mm) {
     if (mm->init_defined) {
         return LV_INIT;
     }
+    if (dead_ff_has_init(lc, mm)) {
+        return LV_RDINIT;
+    }
     lm_verdict ports = port_verdict(lc, rd0(mm), wr0(mm));
     if (ports != LV_OK) {
         return ports;
@@ -123,7 +145,8 @@ static void warn_soft(const lm_ctx *lc, const mem_model *mm, lm_verdict verdict)
         [LV_CLOCKS] = "has read and write ports on different clocks",
         [LV_WEN] = "has a write enable that is not one net",
         [LV_REN] = "has a read enable that is not constant 1",
-        [LV_TRANSPARENT] = "has a transparent read across two ports"};
+        [LV_TRANSPARENT] = "has a transparent read across two ports",
+        [LV_RDINIT] = "has a read register with an initial value"};
     const char *name = mem_name(lc, mm);
     if (verdict == LV_OFFSET) {
         lm_diag(lc, ODIN3_LOG_WARN, mm->node,

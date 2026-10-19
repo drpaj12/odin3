@@ -65,7 +65,8 @@ typedef struct memcase {
     bool rd_clk2; /* the read port is on clk2 */
     bool init;
     bool split_en;
-    bool en_var; /* R_SYNC: RD_EN is the input wire ren */
+    bool en_var;  /* R_SYNC: RD_EN is the input wire ren */
+    bool rd_init; /* the output wire q carries init 8'hAA (a read register with an init value) */
 } memcase;
 
 static void put(odin3_strbuf *out, const char *fmt, ...) ODIN3_PRINTF(2, 3);
@@ -107,6 +108,9 @@ static void decl(odin3_strbuf *out, const memcase *mc) {
     port += 2;
     put(out, "  wire input %" PRIu32 " \\we\n  wire input %" PRIu32 " \\we2\n", port, port + 1);
     port += 2;
+    if (mc->rd_init) {
+        put(out, "  attribute \\init %" PRIu32 "'10101010\n", mc->width);
+    }
     put(out, "  wire width %" PRIu32 " output %" PRIu32 " \\q\n", mc->width, port);
     if (mc->mode == R_DFF || mc->mode == R_DFFE_VAR) {
         put(out, "  wire width %" PRIu32 " \\rd\n", mc->width);
@@ -468,6 +472,27 @@ static void test_r6_soft_cases(void) {
     expect_soft(mc, "lpmmap: memory 'mem' has a read enable that is not constant 1; left soft");
 }
 
+static void test_h1_read_register_init_stays_soft(void) {
+    memcase mc = k_sdp;
+    mc.mode = R_DFF;
+    mc.rd_init = true;
+    pb_result res;
+    build(mc, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "$mem"));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "$dff"));
+    TEST_ASSERT_EQUAL_UINT32(0, lm_count(res.module, "altsyncram"));
+    TEST_ASSERT_NOT_NULL(strstr(
+        log_text, "lpmmap: memory 'mem' has a read register with an initial value; left soft"));
+    pb_free(&res);
+    /* the same memory without the init maps */
+    mc.rd_init = false;
+    build(mc, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "altsyncram"));
+    pb_free(&res);
+}
+
 static void test_r2_unmapped_patterns(void) {
     memcase mc = k_sp;
     mc.n_wr = 0;
@@ -600,6 +625,7 @@ int main(void) {
     RUN_TEST(test_r1_data_merge);
     RUN_TEST(test_r1_soft_keeps_ffs);
     RUN_TEST(test_r6_soft_cases);
+    RUN_TEST(test_h1_read_register_init_stays_soft);
     RUN_TEST(test_r2_unmapped_patterns);
     RUN_TEST(test_r7_widths);
     RUN_TEST(test_r7_abits_zero);
