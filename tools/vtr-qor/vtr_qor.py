@@ -91,6 +91,7 @@ from types import MappingProxyType
 _HERE = str(Path(__file__).resolve().parent)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
+import qor_exit  # noqa: E402
 import qor_heavy  # noqa: E402
 import qor_legs  # noqa: E402
 import qor_netstats  # noqa: E402
@@ -698,6 +699,7 @@ class Admission:
     text: str
     expected_s: Callable[[Job], float]
     begun: float = field(default_factory=lambda: time.monotonic())
+    owner: str = "nightly"  # the command whose lines say "not started" (nightly or exit-run)
 
     def start(self) -> tuple[float, str, Callable[[Job], float]]:
         """The one deadline of the night: fixed when the admission is made, so each later step
@@ -716,6 +718,7 @@ def _apply_admission(opts: RunOptions) -> None:
     """The nightly's deadline (plan Task 13) on a run or a check; every non-job step honours it."""
     if ADMISSION is not None:
         opts.deadline, opts.deadline_text, opts.expected_s = ADMISSION.start()
+        opts.deadline_owner = ADMISSION.owner
 
 
 def run_inner(argv: Sequence[str]) -> int:
@@ -797,6 +800,30 @@ def _plan_existing(args: argparse.Namespace, legs: tuple[str, ...], what: str
     return found, missing, out
 
 
+RESUME_RETRY = MappingProxyType({
+    "fcheck": frozenset({"skipped", "error", "capped", "timeout"}),
+    "rerun": frozenset({"skipped", "error", "capped", "timeout"}),
+    "equiv": frozenset({"skipped", "error", "capped"}),  # an equiv timeout is a measured result
+})
+
+
+def _pending(jobs: Sequence[Job], name: str, args: argparse.Namespace) -> list[Job]:
+    """``--resume`` (exit-run): keep the jobs whose ``verdicts.<name>`` still needs a run; a
+    verdict already measured is kept as it is. Without ``--resume`` every job."""
+    if not getattr(args, "resume", False):
+        return list(jobs)
+    pending = []
+    for job in jobs:
+        try:
+            record = json.loads((job.job_dir / "metrics.json").read_text(encoding="utf-8"))
+            held = record["verdicts"][name]
+        except (OSError, ValueError, KeyError, TypeError):
+            held = "skipped"
+        if held in RESUME_RETRY[name]:
+            pending.append(job)
+    return pending
+
+
 def _checks_exit(verdicts: Sequence[str], missing: int, stop: int, bad: frozenset[str],
                  incomplete: frozenset[str]) -> int:
     """0 when every verdict is good; 1 for a ``bad`` verdict or a missing job; 3 for an
@@ -814,6 +841,7 @@ def cmd_fcheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
     opts = RunOptions(out=_out(args), meminfo=MEMINFO)
     _check_run_options(args, opts)
     jobs, missing, _ = _plan_existing(args, _legs(args.leg), "fcheck")
+    jobs = _pending(jobs, "fcheck", args)
     opts.scope = qor_heavy.reexec_under_lock(list(argv), script=SCRIPT, xl=args.xl,
                                              no_wait=args.no_wait, lock=qor_heavy.HEAVY_LOCK)
     _apply_admission(opts)
@@ -850,6 +878,8 @@ def cmd_equiv(args: argparse.Namespace, argv: Sequence[str]) -> int:
     opts.scope = qor_heavy.reexec_under_lock(list(argv), script=SCRIPT, no_wait=args.no_wait,
                                              lock=qor_heavy.HEAVY_LOCK)
     _apply_admission(opts)
+    wanted = {id(o) for o in _pending([o for o, _ in pairs], "equiv", args)}
+    pairs = [(o, prime) for o, prime in pairs if id(o) in wanted]
     by_o = {id(o): prime for o, prime in pairs}
 
     def step(job: Job) -> str:
@@ -872,6 +902,7 @@ def cmd_rerun_check(args: argparse.Namespace, argv: Sequence[str]) -> int:
     ``error`` or a missing job, 3 for ``capped`` or ``timeout``."""
     opts = RunOptions(out=_out(args), meminfo=MEMINFO)
     jobs, missing, _ = _plan_existing(args, (qor_legs.normalise_leg(args.leg),), "rerun-check")
+    jobs = _pending(jobs, "rerun", args)
     opts.scope = qor_heavy.reexec_under_lock(list(argv), script=SCRIPT, no_wait=args.no_wait,
                                              lock=qor_heavy.HEAVY_LOCK)
     _apply_admission(opts)
@@ -1070,6 +1101,58 @@ def cmd_nightly(args: argparse.Namespace, argv: Sequence[str]) -> int:
                           lambda job: qor_nightly.expected_minutes(job, out, sets) * 60.0)
     try:
         return _run_night(args, ctx, state, plan)
+    finally:
+        ADMISSION = None
+
+
+# -- exit-run ----------------------------------------------------------------------------------
+
+
+def _exit_candidates(args: argparse.Namespace, out: Path) -> Callable[[], list[str] | None]:
+    """Step 6's designs: ``seed_candidates`` over the latest complete P and O of k6; None while
+    either leg has no complete key."""
+    def candidates() -> list[str] | None:
+        try:
+            runs = qor_table.load_runs(out, _table_vtr12(args), qor_legs.ARCH_BASES["k6"], {},
+                                       legs=("P", "O"))
+            bands = qor_table.load_bands(qor_table.BANDS_JSON)
+        except (HeavyError, OSError, ValueError):
+            return None
+        return qor_table.seed_candidates(runs, bands)
+    return candidates
+
+
+def cmd_exit_run(args: argparse.Namespace, argv: Sequence[str]) -> int:
+    """``exit-run --label TEXT [--budget H]`` (heavy, M3): the eight steps of ``qor_exit`` in
+    process, in the lock the controller started it in (as ``nightly``; outside, ``require_heavy``
+    refuses and nothing runs). No ``--xl`` and no delayed start (points (c), (d)). It shares the
+    nightly's admission deadline and ``expected_minutes``; started again with the same label it
+    resumes. Exit: ``gate``'s when every job ran, else the run's code."""
+    global ADMISSION  # noqa: PLW0603 (the module seam read by cmd_run)
+    qor_heavy.require_heavy()
+    out, odin3, vtr_root = _out(args), _odin3(args), _vtr_root(args)
+    if not odin3.is_file():
+        raise HeavyError(EXIT_USAGE, f"exit-run: odin3 binary not found: {odin3} "
+                                     "(build it, or pass --odin3)")
+    label = _label_arg(args.label)
+    now = datetime.now().astimezone()
+    deadline = qor_nightly.nightly_deadline(now, args.budget)
+    sets = qor_sched.load_sets()
+    passes = odin3_passes(odin3)
+    lacks = {leg: lack for leg in qor_legs.LEGS if leg != "P"
+             and (lack := leg_lacks(leg, odin3, passes)) is not None}
+    common = ["--vtr-root", str(vtr_root), "--odin3", str(odin3), "--out", str(out),
+              *(["--allow-vtr-drift"] if args.allow_vtr_drift else [])]
+    ctx = qor_exit.ExitContext(
+        out=out, label=label, sets=sets,
+        legs=tuple(leg for leg in qor_legs.LEGS if leg not in lacks and leg != "Oprov"),
+        lacks=lacks, common=tuple(common), run_inner=run_inner,
+        emit=lambda m: _warn_log(RunOptions(out=out), m), candidates=_exit_candidates(args, out))
+    ADMISSION = Admission((deadline - now).total_seconds(), deadline.strftime("%H:%M"),
+                          lambda job: qor_nightly.expected_minutes(job, out, sets) * 60.0,
+                          owner="exit-run")
+    try:
+        return qor_exit.run_exit(ctx)
     finally:
         ADMISSION = None
 
@@ -1668,23 +1751,35 @@ def _parser() -> argparse.ArgumentParser:
     fcheck.add_argument("--designs", default="", metavar="D[,D...]")
     fcheck.add_argument("--xl", action="store_true",
                         help="the 9 GiB slice, for capped --designs only (the controller's)")
+    fcheck.add_argument("--resume", action="store_true",
+                        help="skip jobs that already hold a measured verdict (exit-run)")
     equiv = sub.add_parser("equiv", parents=[common],
                            help="equiv-check before and after abc, O' against O (heavy)")
     equiv.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
                        help="gate, extra, smoke")
     equiv.add_argument("--designs", default="", metavar="D[,D...]")
+    equiv.add_argument("--resume", action="store_true",
+                       help="skip jobs that already hold a measured verdict (exit-run)")
     rerun = sub.add_parser("rerun-check", parents=[common],
                            help="the O front end again, SHA-256 against the first run (heavy)")
     rerun.add_argument("--leg", default="O", choices=("O",), metavar="O")
     rerun.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
                        help="gate, extra, smoke")
     rerun.add_argument("--designs", default="", metavar="D[,D...]")
+    rerun.add_argument("--resume", action="store_true",
+                       help="skip jobs that already hold a measured verdict (exit-run)")
     nightly = sub.add_parser("nightly", parents=[common],
                              help="the unattended night's steps (started inside heavy-run)")
     nightly.add_argument("--budget", type=float, default=qor_nightly.NIGHTLY_BUDGET_H, metavar="H",
                          help="hours; the deadline is the earlier of 06:00 and the start + H")
     nightly.add_argument("--slot", type=int, choices=range(1, len(qor_nightly.ROTATION) + 1),
                          metavar="N", help="run group B slot N instead of the rotation's next")
+    exit_run = sub.add_parser("exit-run", parents=[common],
+                              help="M3: the exit run's eight steps (started inside heavy-run)")
+    exit_run.add_argument("--label", required=True, metavar="TEXT")
+    exit_run.add_argument("--budget", type=float, default=qor_nightly.NIGHTLY_BUDGET_H,
+                          metavar="H", help="hours; the deadline is the earlier of 06:00 and "
+                                            "the start + H")
     sub.add_parser("check-lib", parents=[common], help="vtr-models check-lib against the arch")
     crosscheck = sub.add_parser("crosscheck", parents=[common],
                                 help="3F's task against the harness's results (heavy)")
@@ -1714,8 +1809,8 @@ def _parser() -> argparse.ArgumentParser:
 
 COMMANDS: dict[str, Callable[[argparse.Namespace, Sequence[str]], int]] = {
     "doctor": cmd_doctor, "run": cmd_run, "fcheck": cmd_fcheck, "equiv": cmd_equiv,
-    "rerun-check": cmd_rerun_check, "nightly": cmd_nightly, "check-lib": cmd_check_lib,
-    "crosscheck": cmd_crosscheck, "status": cmd_status,
+    "rerun-check": cmd_rerun_check, "nightly": cmd_nightly, "exit-run": cmd_exit_run,
+    "check-lib": cmd_check_lib, "crosscheck": cmd_crosscheck, "status": cmd_status,
     "clean": cmd_clean, "table": cmd_table, "gate": cmd_gate, "publish": cmd_publish,
 }
 

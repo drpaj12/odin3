@@ -12,13 +12,15 @@ import io
 import json
 import sys
 import tempfile
+import time
 import unittest
 from collections.abc import Sequence
 from contextlib import redirect_stderr
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest import mock
 
+import qor_exit
 import qor_heavy
 import qor_legs
 import qor_nightly
@@ -28,7 +30,7 @@ import vtr_qor
 from qor_sched import Job
 
 from .test_vtr_qor_cli import CliTestBase
-from .test_vtr_qor_sched import KEY12, RunnerTestBase
+from .test_vtr_qor_sched import KEY12, FakeClock, RunnerTestBase
 from .test_vtr_qor_table import BANDS, GATE, drop, header, replace, run, table
 
 FAKE_ODIN3 = """
@@ -227,6 +229,30 @@ class ExitCliTest(CliTestBase):
         self.assertEqual(self.cli("table", "--legs", "P", "--label", "s", "--seeds", "2")[0], 2)
         self.assertEqual(self.cli("table", "--legs", "P,O", "--label", "s", "--seeds", "x")[0], 2)
 
+    def test_exit_run_command(self) -> None:
+        """``exit-run`` builds its steps from this odin3's legs (no Oprov), with the options every
+        inner command takes, and its admission names itself ``exit-run``."""
+        inner = FakeInner()
+        seen: list[str] = []
+
+        def record(argv: Sequence[str]) -> int:
+            seen.append(vtr_qor.ADMISSION.owner if vtr_qor.ADMISSION is not None else "none")
+            return inner(argv)
+
+        with mock.patch.object(vtr_qor, "run_inner", record), \
+                mock.patch.object(vtr_qor, "_exit_candidates", return_value=lambda: []), \
+                mock.patch.object(vtr_qor, "name_style_probe", return_value=None):
+            code, _, err = self.cli("exit-run", "--label", "exit-20261019")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(set(seen), {"exit-run"})
+        self.assertIsNone(vtr_qor.ADMISSION)
+        first = inner.calls[0]
+        self.assertEqual(first[:2], ["run", "--vtr-root"])
+        self.assertEqual(first[first.index("--leg") + 1], "P,Oprime,Pprime,O")
+        self.assertEqual(self.cli("exit-run", "--label", "bad label")[0], 2)
+        self.assertEqual(self.cli("exit-run", "--label", "x", "--odin3", "/nonexistent/odin3",
+                                  common=False)[0], 2)
+
     def test_probe_runs_the_oprov_script(self) -> None:
         """The real probe against the fake odin3: exit 0 and a file: capable; exit 1: the reason."""
         work = self.tmp / "probe"
@@ -325,6 +351,169 @@ class NightRerunStepTest(unittest.TestCase):
                 group_a = ",".join(d for d in sets.order if sets.designs[d].group == "A")
                 self.assertEqual(reruns[0], ["rerun-check", "--out", "/o", "--designs", group_a])
                 self.assertEqual(seen[-1], reruns[0])
+
+
+SETS = qor_sched.load_sets()
+COMMON = ("--vtr-root", "/v", "--odin3", "/o/odin3", "--out", "/out")
+ALL = ("P", "Pprime", "Oprime", "O", "R", "Oprov")
+
+
+class FakeInner:
+    """A ``run_inner`` that records each argv and answers from ``codes`` (by subcommand, a list
+    consumed in order, else 0); ``gate`` and ``table`` print their directory."""
+
+    def __init__(self, codes: dict[str, list[int]] | None = None) -> None:
+        self.calls: list[list[str]] = []
+        self.codes = codes or {}
+
+    def __call__(self, argv: Sequence[str]) -> int:
+        self.calls.append(list(argv))
+        queue = self.codes.get(argv[0], [])
+        code = queue.pop(0) if queue else 0
+        if argv[0] == "table" and code == 0:
+            print("/out/tables/20261019-0300-x")
+        return code
+
+
+class ExitRunTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(dir=qor_heavy.HEAVY_DIR, prefix="qor-exit-")
+        self.addCleanup(self._tmp.cleanup)
+        self.out = Path(self._tmp.name)
+        self.lines: list[str] = []
+
+    def ctx(self, inner: FakeInner, *, legs: Sequence[str] = ALL,
+            lacks: dict[str, str] | None = None,
+            candidates: list[str] | None = None) -> qor_exit.ExitContext:
+        return qor_exit.ExitContext(
+            out=self.out, label="exit-20261019", sets=SETS, legs=tuple(legs),
+            lacks=lacks or {}, common=COMMON, run_inner=inner, emit=self.lines.append,
+            candidates=lambda: candidates)
+
+    def test_exit_run_steps(self) -> None:
+        """The eight steps in order with the exact argv each builds; the step line precedes each."""
+        inner = FakeInner()
+        code = qor_exit.run_exit(self.ctx(inner, candidates=["sha", "bgm"]))
+        self.assertEqual(code, 0)
+        equiv = ",".join(d for d in SETS.order if (d in SETS.gate and d in qor_sched.EQUIV_REQUIRED)
+                         or d == "stereovision0")
+        self.assertEqual(inner.calls, [
+            ["run", *COMMON, "--leg", "P,Oprime,Pprime,O", "--set", "gate,extra", "--fcheck",
+             "--keep-netlists"],
+            ["fcheck", *COMMON, "--leg", "P", "--set", "gate,extra", "--resume"],
+            ["equiv", *COMMON, "--designs", equiv, "--resume"],
+            ["rerun-check", *COMMON, "--leg", "O", "--set", "gate", "--resume"],
+            ["run", *COMMON, "--arch", "earch", "--set", "smoke", "--leg", "P,Pprime,Oprime,O"],
+            ["run", *COMMON, "--leg", "P,O", "--designs", "sha,bgm", "--seed", "2"],
+            ["run", *COMMON, "--leg", "P,O", "--designs", "sha,bgm", "--seed", "3"],
+            ["table", *COMMON, "--legs", "P,Oprime,Pprime,O", "--label", "exit-20261019",
+             "--seeds", "2,3"],
+            ["gate", "/out/tables/20261019-0300-x"],
+        ])
+        steps = [line for line in self.lines if line.startswith("exit-run: step")]
+        self.assertEqual(steps, [
+            "exit-run: step 1/8 run", "exit-run: step 2/8 P fcheck",
+            "exit-run: step 3/8 equiv", "exit-run: step 4/8 rerun-check",
+            "exit-run: step 5/8 EArch smoke", "exit-run: step 6/8 seed reruns",
+            "exit-run: step 7/8 table", "exit-run: step 8/8 gate"])
+
+    def test_exit_run_no_candidates_has_no_seed_runs(self) -> None:
+        inner = FakeInner()
+        self.assertEqual(qor_exit.run_exit(self.ctx(inner, candidates=[])), 0)
+        self.assertEqual([c[0] for c in inner.calls],
+                         ["run", "fcheck", "equiv", "rerun-check", "run", "table", "gate"])
+        self.assertNotIn("--seeds", inner.calls[-2])
+        self.assertIn("exit-run: seed reruns: no design is near a bound", self.lines)
+
+    def test_exit_run_resumes_after_a_stop(self) -> None:
+        """Step 3 stops short (exit 3, the deadline): a second start repeats nothing of steps 1
+        and 2, resumes at step 3, and goes on to 4 to 8."""
+        first = FakeInner({"equiv": [3]})
+        self.assertEqual(qor_exit.run_exit(self.ctx(first, candidates=[])), 3)
+        # no table or gate
+        self.assertEqual([c[0] for c in first.calls],
+                         ["run", "fcheck", "equiv", "rerun-check", "run"])
+        self.assertEqual(qor_exit.load_done(self.out, "exit-20261019"),
+                         {1: 0, 2: 0, 4: 0, 5: 0, 6: 0})
+        second = FakeInner()
+        self.assertEqual(qor_exit.run_exit(self.ctx(second, candidates=[])), 0)
+        self.assertEqual([c[0] for c in second.calls], ["equiv", "table", "gate"])
+        self.assertIn("exit-run: step 1/8 run already done (exit 0)", self.lines)
+
+    def test_exit_run_exit_code(self) -> None:
+        # a fake gate FAIL: exit 1; a gate INCOMPLETE: 3; PASS: 0
+        for gate, expected in (([1], 1), ([3], 3), ([0], 0)):
+            self.setUp()
+            self.assertEqual(qor_exit.run_exit(self.ctx(FakeInner({"gate": gate}),
+                                                        candidates=[])), expected)
+        # a capped mcml P in step 1 (exit 3): the exit is 3 and no table is written
+        self.setUp()
+        inner = FakeInner({"run": [3]})
+        self.assertEqual(qor_exit.run_exit(self.ctx(inner, candidates=[])), 3)
+        self.assertNotIn("table", [c[0] for c in inner.calls])
+        # a failed job (exit 1) in step 1 still goes on to the table, and the gate decides
+        self.setUp()
+        inner = FakeInner({"run": [1], "gate": [1]})
+        self.assertEqual(qor_exit.run_exit(self.ctx(inner, candidates=[])), 1)
+        self.assertEqual(inner.calls[-1][0], "gate")
+        # the disk floor ends the run at once with 5
+        self.setUp()
+        inner = FakeInner({"fcheck": [5]})
+        self.assertEqual(qor_exit.run_exit(self.ctx(inner, candidates=[])), 5)
+        self.assertEqual([c[0] for c in inner.calls], ["run", "fcheck"])
+        # a table that cannot be made (no complete key): its code, no gate
+        self.setUp()
+        inner = FakeInner({"table": [1]})
+        inner_code = qor_exit.run_exit(self.ctx(inner, candidates=[]))
+        self.assertEqual(inner_code, 1)
+
+    def test_leg_skip_message(self) -> None:
+        """O unavailable: the exact skip line, the other legs run."""
+        lacks = {"O": "abc", "Oprov": "write_blif --name-style provenance"}
+        inner = FakeInner()
+        legs = tuple(leg for leg in ALL if leg not in lacks)
+        qor_exit.run_exit(self.ctx(inner, legs=legs, lacks=lacks, candidates=[]))
+        self.assertIn("O skipped: needs pass 'abc'", self.lines)
+        self.assertNotIn("Oprov skipped: needs pass 'write_blif --name-style provenance'",
+                         self.lines)  # Oprov is not an exit-run leg
+        self.assertEqual(inner.calls[0][inner.calls[0].index("--leg") + 1], "P,Oprime,Pprime")
+        smoke = inner.calls[4]
+        self.assertEqual(smoke[smoke.index("--leg") + 1], "P,Pprime,Oprime")
+
+    def test_state_file_is_atomic_and_tolerant(self) -> None:
+        self.assertEqual(qor_exit.load_done(self.out, "x"), {})
+        qor_exit.save_done(self.out, "x", {2: 0, 1: 1})
+        self.assertEqual(qor_exit.load_done(self.out, "x"), {1: 1, 2: 0})
+        qor_exit.state_path(self.out, "x").write_text("not json")
+        self.assertEqual(qor_exit.load_done(self.out, "x"), {})
+
+
+class ExitRunDeadlineTest(RunnerTestBase):
+    def test_exit_run_deadline(self) -> None:
+        """Started at 01:00 on a fake clock: a job expected to pass 06:00 is not started, with the
+        nightly's E-QH10 text and ``exit-run`` in place of ``nightly``; the next invocation (the
+        job is not cached) runs it."""
+        expected = {"sha": 120, "diffeq1": 120, "bgm": 100}
+        clock = FakeClock()
+        deadline = qor_nightly.nightly_deadline(datetime(2026, 10, 19, 1, 0), 5.0)
+        vtr_qor.ADMISSION = vtr_qor.Admission(
+            (deadline - datetime(2026, 10, 19, 1, 0)).total_seconds(), "06:00",
+            lambda job: expected[job.design] * 60.0, begun=clock.now, owner="exit-run")
+        self.addCleanup(setattr, vtr_qor, "ADMISSION", None)
+        opts = self.opts(clock=clock, sleep=clock.sleep)
+        with mock.patch.object(time, "monotonic", clock):
+            vtr_qor._apply_admission(opts)
+        self.assertEqual((opts.deadline_text, opts.deadline_owner), ("06:00", "exit-run"))
+
+        def finish(job: qor_sched.Job, start: float) -> dict[str, object]:
+            clock.now += expected[job.design] * 60.0
+            return {"schema": 1, "leg": job.leg, "routed": {"vpr_status": "success"}}
+
+        jobs = [self.job(d, [{}]) for d in expected]
+        summary, lines = self.run_jobs(jobs, opts, finish)
+        self.assertEqual([r.status for r in summary.results], ["ok", "ok", "skipped"])
+        self.assertIn("vtr-qor: exit-run: P bgm not started: expected 100 min would pass 06:00",
+                      lines)
 
 
 if __name__ == "__main__":

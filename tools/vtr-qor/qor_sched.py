@@ -66,6 +66,9 @@ from qor_legs import Command, LegContext
 SCHEMA = 1
 # One VTR or Verilator job at a time (ruling C1, point (w)).
 MAX_JOBS = 1
+# Spec §8.1: the Verilator check is for P and O; ``run --fcheck`` leaves the control legs alone
+# (``fcheck --leg L`` still checks any leg that kept its netlist).
+FCHECK_LEGS = frozenset({"P", "O"})
 PLAN_LEG_ORDER = ("P", "Pprime", "Oprime", "O", "R", "Oprov")
 GOLDEN_LEGS = frozenset({"Pprime", "R"})
 SET_NAMES = ("gate", "extra", "smoke")
@@ -670,6 +673,7 @@ class RunOptions:
     fcheck: bool = False
     deadline: float | None = None
     deadline_text: str = ""
+    deadline_owner: str = "nightly"  # the word before the colon in the deadline lines (exit-run)
     scope: ScopeInfo | None = None
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
@@ -1287,7 +1291,8 @@ def _deadline_line(job: Job, opts: RunOptions) -> str:
     minutes = math.ceil(expected / SECONDS_PER_MINUTE)
     wall = time.time() + ((opts.deadline or 0.0) - opts.clock())  # deadline is on clock's scale
     when = opts.deadline_text or time.strftime("%H:%M", time.localtime(wall))
-    return f"nightly: {_label(job)} not started: expected {minutes} min would pass {when}"
+    return (f"{opts.deadline_owner}: {_label(job)} not started: expected {minutes} min would "
+            f"pass {when}")
 
 
 def _admit_loop(job: Job, opts: RunOptions, *, deadline: bool) -> str:
@@ -1826,8 +1831,8 @@ def run_checks(jobs: Sequence[Job], opts: RunOptions, step: Callable[[Job], str]
     with _signals_as_exit():
         for index, job in enumerate(jobs):
             if past_deadline(opts):
-                log.emit(f"nightly: {len(jobs) - index} checks not started before the deadline "
-                         f"{opts.deadline_text}")
+                log.emit(f"{opts.deadline_owner}: {len(jobs) - index} checks not started before "
+                         f"the deadline {opts.deadline_text}")
                 return verdicts, EXIT_INCOMPLETE
             if _admit_loop(job, opts, deadline=False) == STOP:
                 for line in _pause_lines(opts, len(jobs) - index):
@@ -1893,11 +1898,11 @@ class _Run:
 def _after_ok(run: _Run, job: Job) -> bool:
     """The job's own fcheck (it is already cleaned up) before the next job; False when admission
     stopped the run."""
-    if not run.opts.fcheck:
+    if not run.opts.fcheck or job.leg not in FCHECK_LEGS:
         return True
     if past_deadline(run.opts):
-        run.log.emit(f"nightly: {_label(job)}: fcheck not started before the deadline "
-                     f"{run.opts.deadline_text}")
+        run.log.emit(f"{run.opts.deadline_owner}: {_label(job)}: fcheck not started before the "
+                     f"deadline {run.opts.deadline_text}")
         run.fchecks.append("timeout")
         return True
     if _admit_loop(job, run.opts, deadline=False) == STOP:
@@ -1920,7 +1925,7 @@ def _recorded_fcheck(job: Job) -> str | None:
 def _cached_fcheck(run: _Run, job: Job, index: int) -> bool:
     """Review M4: a cached job gets the fcheck it lacks; one that has a verdict counts it in
     the run's exit code. False when admission stopped the run."""
-    if not run.opts.fcheck:
+    if not run.opts.fcheck or job.leg not in FCHECK_LEGS:
         return True
     held = _recorded_fcheck(job)
     if held is not None:
