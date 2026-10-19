@@ -46,6 +46,12 @@ HARD_BLOCK = """module m(input clk, input we, input [3:0] d, output [3:0] q);
   single_port_ram i (.addr(a), .data(d), .we(we), .clk(clk), .out(q));
 endmodule
 """
+WIDE_ADDR_MEM = """module m(input clk, input [3:0] wa, input [3:0] ra, output [2:0] y);
+  reg [2:0] mem [7:0];
+  always @(posedge clk) mem[wa] <= wa;
+  assign y = mem[ra];
+endmodule
+"""
 INIT = """module m(input clk, output [3:0] y);
   reg [3:0] q = 4'd{val};
   always @(posedge clk) q <= q + 1;
@@ -201,6 +207,11 @@ class RefinementTest(unittest.TestCase):
 
     def test_a_bit_swapped_pmux(self) -> None:
         self.differs(PMUX.format(one="b", two="c"), PMUX.format(one="c", two="b"))
+
+    def test_a_read_past_the_words_is_a_dont_care(self) -> None:
+        """A 4-bit address over 8 words: Yosys's `memory` aliases the read of 8..15 onto a word,
+        the `$mem` meaning is x (bm_simple_memory.v, 3B close): lower reads x, a refinement."""
+        self.refines(WIDE_ADDR_MEM)
 
     def test_a_signed_comparison_read_unsigned(self) -> None:
         self.differs(CMP.format(sign="signed"), CMP.format(sign=""))
@@ -486,6 +497,13 @@ class BoundedScriptTest(unittest.TestCase):
         self.assertIn("; async2sync;", le.bounded_script("g", "t", False, 4, True, True))
         self.assertLess(script.index("expose -shared gold gate"), script.index("miter -equiv"))
 
+    def test_the_shared_wires_are_exposed_before_any_opt_clean(self) -> None:
+        """A flip-flop that drives only an unread public bit must survive on both sides
+        (expression_in_chain_modules.v, 3B close)."""
+        script = le.bounded_script("g.il", "t.il", False, le.BASE_STEPS, True)
+        self.assertLess(script.index("expose -shared gold gate"), script.index("memory"))
+        self.assertLess(script.index("expose -shared gold gate"), script.index("opt_clean"))
+
 
 class ReportTest(unittest.TestCase):
     """The expect list and the verdict lines (no tool runs)."""
@@ -639,6 +657,18 @@ class RefineVerdictTest(unittest.TestCase):
 @unittest.skipUnless(ODIN3 and Path(ODIN3).exists(), "odin3 (ODIN3_CLI) is needed")
 class HardFailureTest(unittest.TestCase):
     """A crashing Yosys child is exit 3 and no expect list absorbs it."""
+
+    def test_a_cap_kill_while_preparing_a_big_design_is_unproven_not_hard(self) -> None:
+        before = Path(tempfile.mkdtemp(prefix="test-lower-equiv-cap-")) / "b.il"
+        before.write_text("module \\m\n  cell $add $c\n  end\nend\n", encoding="utf-8")
+        killed = opt_equiv.CrashError("yosys", "killed (exit -9)", cap_killed=True)
+        with mock.patch.object(le, "make_gold", side_effect=killed):
+            got = le.check_pair("y", before, before, before.parent, 1, (None, None, False))
+        self.assertEqual(got.kind, "unproven", got.detail)
+        segv = opt_equiv.CrashError("yosys", "killed (exit -11)")
+        with mock.patch.object(le, "make_gold", side_effect=segv), \
+                self.assertRaises(opt_equiv.CrashError):
+            le.check_pair("y", before, before, before.parent, 1, (None, None, False))
 
     def test_a_crashing_yosys_is_exit_3(self) -> None:
         base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-hard-"))

@@ -401,6 +401,14 @@ class Config:
     nolatches: bool = False
     vtr_compat: bool = False  # --equiv: elab-equiv --vtr-compat
     equiv_budget: float | None = None  # --equiv: elab-equiv --budget (wall seconds)
+    timeouts: dict[str, float] = dataclasses.field(default_factory=dict)  # --timeout-for
+
+    def timeout_of(self, item: Item) -> float | None:
+        """The SAT limit of one file (``--timeout-for``), else None (the tool's own)."""
+        for suffix, seconds in self.timeouts.items():
+            if item.rel == suffix or item.rel.endswith("/" + suffix):
+                return seconds
+        return None
 
     def cap_of(self, item: Item) -> int:
         for suffix, cap in self.caps.items():
@@ -532,6 +540,8 @@ def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
     argv = [sys.executable, str(OPT_TOOLS[cfg.opt_tool]), "--odin3", cfg.odin3,
             *(["--yosys", cfg.yosys] if cfg.yosys else []), "--mem-cap", str(cap),
             *(["--top", top] if top else []),
+            *(["--refine-timeout", str(cfg.timeout_of(item))]
+              if cfg.opt_tool == "lower-equiv" and cfg.timeout_of(item) else []),
             *(["--techlib", cfg.techlib] if cfg.techlib else []), *cfg.opt_args, str(item.path)]
     here = str(Path(__file__).resolve().parent)  # the tool imports memcap from here
     paths = [here, os.environ.get("PYTHONPATH", "")]
@@ -806,6 +816,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--mem-cap", default="4G", help="per child (default 4G)")
     ap.add_argument("--cap-for", action="append", default=[], metavar="SUFFIX=CAP",
                     help="a larger cap for one file, which then runs alone (e.g. koios/lenet.v=5G)")
+    ap.add_argument("--timeout-for", action="append", default=[], metavar="SUFFIX=SECONDS",
+                    help="--lower-equiv: a longer SAT limit for one file (e.g. "
+                         "micro/bm_match3_str_arch.v=300)")
     ap.add_argument("--techlib", type=Path,
                     help="read this tech library (.o3lib) before each file: the hard blocks "
                          "(adder, multiply, single/dual_port_ram) the micros instantiate")
@@ -830,6 +843,19 @@ def check_floors(args: argparse.Namespace) -> None:
         raise UsageError("--min-changed-total needs --opt-equiv")
     if args.min_compared_total and not (args.lower_equiv or args.lower_sim or args.lower_run):
         raise UsageError("--min-compared-total needs --lower-equiv, --lower-sim or --lower-run")
+
+
+def parse_timeouts(args: argparse.Namespace) -> dict[str, float]:
+    """``--timeout-for SUFFIX=SECONDS`` as a dict."""
+    timeouts: dict[str, float] = {}
+    for spec in args.timeout_for:
+        suffix, _, seconds = spec.partition("=")
+        if not suffix or not seconds:
+            raise UsageError(f"--timeout-for {spec!r}: expected SUFFIX=SECONDS")
+        timeouts[suffix] = float(seconds)
+    if timeouts and not args.lower_equiv:
+        raise UsageError("--timeout-for needs --lower-equiv")
+    return timeouts
 
 
 def build_config(args: argparse.Namespace) -> Config:
@@ -860,6 +886,7 @@ def build_config(args: argparse.Namespace) -> Config:
         if not suffix or not size:
             raise UsageError(f"--cap-for {spec!r}: expected SUFFIX=CAP")
         caps[suffix] = parse_size(size)
+    timeouts = parse_timeouts(args)
     cap = parse_size(args.mem_cap)
     yosys_mode = (args.equiv or args.proc_diff or args.opt_equiv or args.opt_diff
                   or args.lower_equiv)
@@ -875,7 +902,8 @@ def build_config(args: argparse.Namespace) -> Config:
         yosys=_abs(args.yosys) if yosys_mode else None,
         equiv_check=_abs(args.equiv_check) if args.equiv else None,
         bench=_abs(args.bench) if args.bench else None, cap=cap, caps=caps, tops=tops,
-        golden_root=golden, techlib=_abs(args.techlib) if args.techlib else None,
+        timeouts=timeouts, golden_root=golden,
+        techlib=_abs(args.techlib) if args.techlib else None,
         bench_report=args.bench_report, libs=tuple(str(Path(lib).resolve()) for lib in args.lib),
         proc_diff=bool(args.proc_diff),
         opt_tool="opt-equiv" if args.opt_equiv else "opt-diff" if args.opt_diff

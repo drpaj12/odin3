@@ -119,9 +119,9 @@ which PRs remain.
   against Yosys 0.55 and the 19-design sweep, decision 35; ticked when the PR merges)
 - [ ] 3B `lower` (simulator-equal before/after on hand-built and micro designs; one box per run, ticked by the controller with the real result; reopened 2026-10-18 after the 3B-4 review, which found the earlier tick claimed runs that were not made). Commands: `ODIN3_REQUIRE_CFFI=1 ctest -j2` from `build/debug`; `ctest -R 'lower_(run|sim|equiv)_micro'` through heavy-run (micros); `tools/lower-check/lower-equiv --odin3 build/release/odin3 --yosys $YOSYS055 --each <design>` for the VTR designs (decision 41); `bench_lower --cells 1000000` (Release).
   - [x] debug unit tests, `lower_cells*`, `lower_equiv_python`, `lower_cells_equiv`, `lower_reverse_netlist_compare` (run by lane G, 2026-10-18; see the 3B-4 report)
-  - [ ] `lower_run_micro`, `lower_sim_micro`, `lower_equiv_micro`: pending controller run (2026-10-18)
-  - [ ] `lower-run` and `lower-equiv` on the 13 VTR designs (only `single_wire` ran): pending controller run (2026-10-18)
-  - [ ] 525-fixture `lower-equiv` sweep (239 ran): pending controller run (2026-10-18)
+  - [x] `lower_run_micro`, `lower_sim_micro` (2026-10-18, main 12473742, release, through heavy-run): lower-run 456 ok, 82 expected, 0 unexpected, 330 designs compared (floor 330); lower-sim 462 ok, 76 expected, 0 unexpected, 96 compared (floor 96). `lower_equiv_micro` (same run): 539 files, 388 ok, 83 expected, 68 unexpected, 261 compared; 7 of the 68 were checker bugs (fixed, decision 44), 4 now prove with a longer SAT limit (`--timeout-for`), 57 are listed `untested for now (size limit)` in `tests/lower/equiv_micro_expect_fail.txt` (multipliers, wide datapaths, big designs; unproven, not ok). The sweep rerun with these lists is pending the controller (about 268 compared expected, floor 260).
+  - [x] `lower-run` on the 14 small VTR designs and the 4 big ones (stereovision3, diffeq1, diffeq2, blob_merge): `lower-run` ok on all (2026-10-18); `lower-equiv` on stereovision3, diffeq1, diffeq2, blob_merge: unproven (exit 4: SAT size limit or the 2G cap), not ok; the equivalence of the 14 small designs and the big ones is not claimed (decision 44, PHASE2 #30 scope)
+  - [x] 525-fixture `lower-equiv` sweep (2026-10-18): 518 of 526 compared, 8 unproven, 0 differ. The 8 are exactly the fixtures `lower_cells_equiv` leaves out of CTest for their size or clock (`mul_w12`, `mul_w12_s`, `mul_w16`, `mul_w16_s`, `mod_w12`, `mod_w12_s`, `mul_w8_s_y16`: SAT size, covered by `lower-diff` tier T; `mem_w4_d4_neg`: its inverted clock net is run with `--neg-edge keep` in `lower_cells_equiv_neg_keep`)
   - [ ] `fuzz_lower` long run (the 60 s smoke ran once in a clang build): pending controller run (2026-10-18)
   - [ ] `bench_lower --cells 1000000` (100000 cells ran, 1.36 s): pending controller run (2026-10-18)
   - [ ] 200-seed `verilog-gen --lower` generator (spec 14.5): not built; no `--lower` weighting exists
@@ -1099,6 +1099,29 @@ then the options considered.
     state register; Phase 4 removes it when `fsm` runs. Nothing else is implemented. Open check, to
     close the gap: compare blob_merge and stereovision3 against a golden with the reset-state bit
     initialised to 1 (a heavy run, not done).
+
+44. **3B close: `lower-equiv` checker fixes and the unproven list** (2026-10-18, branch `fix/3B-close`;
+    agent defaults, Peter may override). (a) The gold of `lower-equiv` gets `memory_memx; memory_map`
+    when it holds a `$mem`: Yosys's `memory` pass makes a read of an address past SIZE alias a word,
+    the `$mem` meaning and `lower`'s is x, so the gate may answer anything there (bm_simple_memory,
+    bram, matmul were "not a refinement" for this reason; lower's lowering was correct). `memory_map`
+    runs at once because `memory_dff` merges an output flip-flop through the x mux and loses it.
+    The documented `wreduce/mem_addr` skip of `opt-rules` is a different gold (before wreduce) and
+    is unchanged. (b) The base case exposes the shared wires before `opt_clean`: a flip-flop that
+    drives only an unread public bit was dropped on one side, which left the wire undriven there
+    and gave a false difference (expression_in_chain_modules, mix_expression_in_module_port_nested,
+    sign_extend_nomem, memory_combinational). (c) A memory-cap kill of Yosys while it reads or
+    flattens a big design (LU32PEEng, LU64PEEng, arm_core) is "unproven" (exit 4), as a cap kill in
+    the proof already was, not a hard failure. (d) `lower-equiv --refine-timeout S` (SAT proof and
+    bounded check, default 60) and the sweep's `--timeout-for SUFFIX=S` give a file that proves in
+    100 to 140 s alone a longer limit; the others stay at 60 s. The 60 s timeouts on small micros
+    (bm_match1..6) are the SAT proof of a multiply-accumulate, not machine load or the
+    full-width comparison of PR 133: they timed out at 60 s before it too, and bm_match1, 2, 5, 6 do
+    not prove in 400 s. (e) Known checker limit, not a lowering difference: `pair_registers` guesses
+    the bit order of a register that several gold cells drive (sha.v `cmd`), which gives a false
+    base-case difference there ("unproven"); skipping the guess makes the proof itself time out,
+    so it stays. (f) No lowering bug was found: the four "not a refinement" files are the checker
+    (a, one also an unsupported two-clock-domain cec, now listed as unproven).
 
 ## Risks
 

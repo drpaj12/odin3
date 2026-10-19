@@ -2833,19 +2833,30 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # micros the other lists leave; the controller raises them after the first full sweep.
         # First full sweep (release build, 2026-10-18, head 5cf3d1f5; 539 micros): lower-run
         # compared 330, lower-sim 96, lower-equiv 265 (of which 18 were reported "not a
-        # refinement" by the checker limits fixed in 3B-heavy-triage, so 247 were proved). The
-        # floors below are those counts less a margin of about 10%: 300, 90 and 240.
+        # refinement" by the checker limits fixed in 3B-heavy-triage, so 247 were proved). Floors
+        # of that round: 300, 90 and 240. 3B close (main 12473742 after the soundness fixes,
+        # 2026-10-18): lower-run 330 compared, lower-sim 96, lower-equiv 261 (7 more files became
+        # "ok" with the fixes of tools/lower-check/lower_equiv.py, one went to unproven and 4 more
+        # prove with --timeout-for: 268 expected). The floors are the measured counts for lower-run
+        # and lower-sim (330, 96) and, for lower-equiv, 260 (the 261 measured, a margin below the
+        # 268 expected until the controller's rerun gives the number).
         odin3_add_sweep_test(lower_run_micro LABEL sweep
-            COMMAND ${_opt_sweep} --lower-run --min-compared-total 300 ${_lower_micro_expect}
+            COMMAND ${_opt_sweep} --lower-run --min-compared-total 330 ${_lower_micro_expect}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/lower/run_micro_expect_fail.txt
                     ${_micro_dir})
         odin3_add_sweep_test(lower_sim_micro LABEL sweep
             COMMAND ${_opt_sweep} --lower-sim --opt-arg=--allow-empty --opt-arg=--allow-skipped
-                    --min-compared-total 90 ${_lower_micro_expect} ${_micro_dir})
+                    --min-compared-total 96 ${_lower_micro_expect} ${_micro_dir})
         # equiv_micro_expect_fail.txt: the micros lower-equiv cannot decide (a SAT size limit)
+        # --timeout-for: the files that prove in 100 to 140 s alone (3B close; the default SAT
+        # limit is 60 s); a file that needs more is listed in equiv_micro_expect_fail.txt.
         odin3_add_sweep_test(lower_equiv_micro LABEL sweep
             COMMAND ${_opt_sweep} --lower-equiv --opt-arg=--allow-empty
-                    --min-compared-total 240 ${_lower_micro_expect}
+                    --timeout-for micro/bm_match3_str_arch.v=300
+                    --timeout-for full/cf_fir_3_8_8.v=300
+                    --timeout-for syntax/rs_decoder_1.v=300
+                    --timeout-for full/cf_cordic_v_18_18_18.v=300
+                    --min-compared-total 260 ${_lower_micro_expect}
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/lower/equiv_micro_expect_fail.txt
                     ${_micro_dir})
         set_tests_properties(lower_run_micro lower_sim_micro lower_equiv_micro

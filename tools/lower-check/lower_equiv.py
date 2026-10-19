@@ -71,6 +71,7 @@ TOP_LINE = "attribute \\top 1\n"
 # The word cell types that the ``maps/`` flip-flop conversions rewrite (spec 6.3): only a design
 # that holds one needs the techmap step.
 MAPPED_TYPES = frozenset({"$adff", "$adffe", "$aldff", "$aldffe", "$dffsr", "$dffsre"})
+MEM_TYPES = frozenset({"$mem", "$mem_v2"})
 
 
 @dataclass
@@ -124,11 +125,19 @@ def make_gold(yosys: str, before: Path, parmys: tuple[Path | None, bool], work: 
     of it). Written to ``gold.il``. ``parmys`` = (Parmys's techlibs directory, exact)."""
     text = before.read_text(encoding="utf-8")
     gold = work / "gold.il"
-    if not lc.cell_types(text) & MAPPED_TYPES:
+    types = lc.cell_types(text)
+    # Yosys's ``memory`` (memory_map) makes a read past SIZE alias a word (the address bits
+    # above the words are ignored); the spec of ``$mem`` (and of lower) is x there, a don't-care
+    # of the gold. ``memory_memx`` writes the x in; ``memory_map`` then maps the memories at once,
+    # since ``memory`` (memory_dff) would merge an output flip-flop through the x mux and lose it
+    # (multi_edge_reader_writer.v).
+    memx = bool(types & MEM_TYPES)
+    if not types & MAPPED_TYPES and not memx:
         gold.write_text(text, encoding="utf-8")
         return gold
-    maps = synchronous_maps(*parmys)
-    steps = [f"read_rtlil {before}", *(f"techmap -map {m}" for m in maps), f"write_rtlil {gold}"]
+    maps = synchronous_maps(*parmys) if types & MAPPED_TYPES else []
+    steps = [f"read_rtlil {before}", *(["memory_memx", "memory_map"] if memx else []),
+             *(f"techmap -map {m}" for m in maps), f"write_rtlil {gold}"]
     run_yosys(yosys, "; ".join(steps), work, cap)
     return gold
 
@@ -631,12 +640,15 @@ def bounded_script(gold: str, gate: str, procs: bool, steps: int, shared: bool,
     """The Yosys script of the bounded check of two files ``rename_modules`` made gold/gate;
     ``shared``: every public wire both sides name is compared too (the base case);
     ``one_clock``: ``async2sync`` steps (one per cycle) instead of ``clk2fflogic``'s; ``start``:
-    ``START_UNDEF`` leaves the flip-flops without ``init`` undefined, else they start at 0."""
+    ``START_UNDEF`` leaves the flip-flops without ``init`` undefined, else they start at 0.
+    The shared wires are exposed before any ``opt_clean`` (``memory`` runs one): a flip-flop that
+    drives only an unread public bit, kept on one side and dropped on the other, would else leave
+    that wire undriven there (expression_in_chain_modules.v: a carry bit nothing reads)."""
     clocks = "async2sync" if one_clock else "clk2fflogic"
     init = "-set-init-undef" if start == START_UNDEF else "-set-init-zero"
     script = [f"read_rtlil {gold}", f"read_rtlil {gate}", *(["proc"] if procs else []),
-              "flatten", opt_equiv.EVERT_BLACKBOXES, "memory", clocks, "opt_clean",
-              *(["expose -shared gold gate"] if shared else []),
+              "flatten", opt_equiv.EVERT_BLACKBOXES,
+              *(["expose -shared gold gate"] if shared else []), "memory", clocks, "opt_clean",
               "miter -equiv -flatten -make_assert -ignore_gold_x gold gate miter",
               "hierarchy -top miter",
               f"sat -seq {steps} {init} -enable_undef -set-def-inputs "
@@ -802,10 +814,16 @@ def check_pair(yosys: str, before: Path, after: Path, work: Path, cap: int,
     cells = ld.word_cells(before.read_text(encoding="utf-8"))
     if cells == 0:
         return Verdict("empty")
-    gold = make_gold(yosys, before, (parmys, exact), work, cap)
-    gold_top = opt_equiv.top_module(gold.read_text(encoding="utf-8"), top)
-    gate = make_gate(yosys, after, (gold, gold_top), work, cap)
-    boxed_gold, boxed_gate, mismatch = prepare_boxes(yosys, gold, gate, gold_top, work, cap)
+    try:
+        gold = make_gold(yosys, before, (parmys, exact), work, cap)
+        gold_top = opt_equiv.top_module(gold.read_text(encoding="utf-8"), top)
+        gate = make_gate(yosys, after, (gold, gold_top), work, cap)
+        boxed_gold, boxed_gate, mismatch = prepare_boxes(yosys, gold, gate, gold_top, work, cap)
+    except lc.CrashError as exc:
+        if exc.size_limit:  # the memory cap killed Yosys while it read or flattened a big design
+            return Verdict("unproven", f"{exc} (the design is past the memory cap of the check)",
+                           cells)
+        raise
     if mismatch:
         return Verdict("differs", mismatch, cells)
     kind, detail = refine(yosys, (boxed_gold, boxed_gate), after, work, cap, top)
@@ -881,6 +899,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--mem-cap", type=lc.parse_size, default=lc.DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 3G)")
     ap.add_argument("--work", type=Path, help="the work directory")
+    ap.add_argument("--refine-timeout", type=float, default=opt_equiv.REFINE_TIMEOUT_SECONDS,
+                    metavar="S", help="seconds for one SAT proof and for one bounded check "
+                    "(default 60); a design that needs longer is unproven")
     ap.add_argument("--allow-empty", action="store_true",
                     help="a design with no word cell after the pre commands is not a failure")
     ap.add_argument("--each", action="store_true", help="every FILE is its own design")
@@ -914,6 +935,9 @@ def execute(args: argparse.Namespace, work: Path) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
+    opt_equiv.REFINE_TIMEOUT_SECONDS = args.refine_timeout
+    global BMC_TIMEOUT_SECONDS
+    BMC_TIMEOUT_SECONDS = args.refine_timeout
     work = lc.make_work(args.work, "lower-equiv-")
     try:
         return execute(args, work)
