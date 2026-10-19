@@ -2,6 +2,8 @@
 # hard blocks, `lower` builds them as soft logic and a big design can exceed the caps of spec 11.
 # One path (relative to the VTR benchmark directory) per line with its reason after the first
 # blank. After 3C lands this file must be empty. No entry means "no cap seen so far", not "all
-# designs pass": only single_wire has been run through lower-run. The other 13 designs of PHASE2
-# #29 and the large designs: pending controller run (2026-10-18); the controller adds an entry for
-# each cap outcome (lower-run exit 5) and ticks the PHASE3 3B box (docs/PHASE3.md, decision 41(h)).
+# designs pass": lower-run ended ok (no cap) on stereovision3, diffeq1, diffeq2, blob_merge
+# (/tmp/claude-1000/lower-heavy2-1018-0605/) and on ch_intrinsics, mkPktMerge, sha and four hand
+# designs (/tmp/claude-1000/laneg-heavy-1018-0114/); the other designs of PHASE2 #29 have not been
+# run as a set. The controller adds an entry for each cap outcome (lower-run exit 5) and ticks the
+# PHASE3 3B box (docs/PHASE3.md, decision 41(h)).
