@@ -74,7 +74,10 @@ ATTRIBUTION_REFERENCES = ("Oprime", "Pprime")
 # §8.1: a divergence class that lets an O fcheck ``fail`` pass on its own.
 STANDS_ALONE = frozenset({"mem-init-dropped", "async-reset-made-sync"})
 BASELINE_FAILS = "baseline-fails"
-FCHECK_PASS, FCHECK_FAIL = "pass", "fail"
+FCHECK_PASS, FCHECK_FAIL, FCHECK_UNTESTED = "pass", "fail", "untested"
+# A P-leg fcheck that is not a pass and is declared a baseline defect (a ``baseline-fails`` row
+# whose text starts ``<tag>: <reason>``): shown as ``fail (baseline: <tag>)``, never as a pass.
+BASELINE_VERDICTS = frozenset({FCHECK_FAIL, FCHECK_UNTESTED})
 P_SIDE_FCHECK = frozenset({"error", "capped", "timeout"})
 # PHASE3 #16: on a design outside EQUIV_REQUIRED a capped or timed-out fcheck is informational.
 FCHECK_INFO = frozenset({"capped", "timeout"})
@@ -551,7 +554,7 @@ def _divergence_applies(ctx: _Ctx, design: str, reference: str) -> bool:
     for row_design, cls, _ in ctx.inp.divergences:
         if row_design != design:
             continue
-        if cls in STANDS_ALONE or (cls == BASELINE_FAILS and reference == FCHECK_FAIL):
+        if cls in STANDS_ALONE or (cls == BASELINE_FAILS and reference in BASELINE_VERDICTS):
             return True
     return False
 
@@ -577,6 +580,9 @@ def _rule5_fcheck(ctx: _Ctx, usable: Sequence[str], out: _Collect) -> None:
                 _fcheck_fail(ctx, design, out)
         elif mine in NOT_RUN:
             _not_run(ctx, design, "fcheck", mine, out)
+        elif mine == FCHECK_UNTESTED:  # never a pass; not a failure either: it cannot be judged
+            out.hold(f"gate: INCOMPLETE: {design} {ctx.x} fcheck untested (the RTL leaves the "
+                     "mismatching bits undefined); it cannot be judged")
         elif mine == FCHECK_FAIL and not _divergence_applies(ctx, design, reference):
             _fcheck_fail(ctx, design, out)
         elif mine not in (FCHECK_PASS, FCHECK_FAIL):
@@ -1362,6 +1368,12 @@ def _md_noise(layout: _Layout) -> list[str]:
                 ["metric", f"R/P geomean ({len(layout.gate)})", "min", "max"], rows)]
 
 
+def baseline_tags(divergences: Sequence[tuple[str, str, str]], design: str) -> list[str]:
+    """The tags (the text before the first colon) of the design's ``baseline-fails`` rows."""
+    return [text.split(":", 1)[0].strip() for row_design, cls, text in divergences
+            if row_design == design and cls == BASELINE_FAILS]
+
+
 def _verdict_cell(run: Run | None, name: str) -> str:
     if run is None:
         return ""
@@ -1370,7 +1382,8 @@ def _verdict_cell(run: Run | None, name: str) -> str:
     return text_field(run, name)
 
 
-def _md_checks(layout: _Layout, exceptions: Sequence[tuple[str, str, str]]) -> list[str]:
+def _md_checks(layout: _Layout, exceptions: Sequence[tuple[str, str, str]],
+               divergences: Sequence[tuple[str, str, str]] = ()) -> list[str]:
     legs = [leg for leg in ("P", "O") if leg in layout.legs]
     if not legs:
         return []
@@ -1382,6 +1395,9 @@ def _md_checks(layout: _Layout, exceptions: Sequence[tuple[str, str, str]]) -> l
     for design in layout.designs:
         row = [design, *(_verdict_cell(layout.index.get((leg, design)), "fcheck")
                          for leg in legs)]
+        tags = baseline_tags(divergences, design)
+        if tags and "P" in legs and row[1] in BASELINE_VERDICTS:
+            row[1] += f" (baseline: {', '.join(tags)})"
         if "O" in legs:
             run = layout.index.get(("O", design))
             equiv = _verdict_cell(run, "equiv")
@@ -1548,7 +1564,8 @@ def write_md(runs: Sequence[Run], verdict: Verdict | None, header: TableHeader, 
     lines += _md_seeds(layout, seeds or {})
     lines += _md_netlist(layout) + _md_packed(layout) + _md_routed(layout) + _md_cost(layout)
     lines += _md_attribution(layout) + _md_noise(layout)
-    lines += _md_checks(layout, equiv_exceptions) + _md_divergences(layout, divergences)
+    lines += _md_checks(layout, equiv_exceptions, divergences)
+    lines += _md_divergences(layout, divergences)
     lines += _md_name_style(layout) + _md_xcheck(layout, golden)
     while lines and lines[-1] == "":
         lines.pop()

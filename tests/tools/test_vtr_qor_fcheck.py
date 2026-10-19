@@ -74,6 +74,14 @@ class VerdictTest(unittest.TestCase):
             0, False, "PASS: 9 vectors matched\n"
             "VCHECK_SUMMARY matched=9 mismatched=0 vectors=9 port_errors=0\n"), "pass")
 
+    def test_untested_needs_its_line_and_no_mismatch(self) -> None:
+        line = "UNTESTED: 3 mismatches in 3 vectors, every one on a bit whose RTL value depends\n"
+        self.assertEqual(qor_legs.fcheck_verdict(3, False, line), "untested")
+        self.assertEqual(qor_legs.fcheck_verdict(0, False, line), "error")  # never a pass
+        self.assertEqual(qor_legs.fcheck_verdict(3, False, line + MISMATCH), "fail")
+        self.assertEqual(qor_legs.fcheck_verdict(3, False, "no verdict line"), "error")
+        self.assertEqual(qor_legs.fcheck_verdict(137, True, line), "capped")
+
     def test_other_exits_and_the_cap(self) -> None:
         for code in (2, 3, 137):
             self.assertEqual(qor_legs.fcheck_verdict(code, False, ""), "error")
@@ -343,7 +351,7 @@ class CompareRunsTest(unittest.TestCase):
         self.assertNotIn("MISMATCH", text)
         self.assertIn("UNTESTED: 1 mismatches in 1 vectors", text)
         self.assertIn("x_dependent_vectors=1", text)
-        self.assertEqual(qor_legs.fcheck_verdict(3, False, text), "error")
+        self.assertEqual(qor_legs.fcheck_verdict(3, False, text), "untested")
         self.assertEqual(qor_legs.fcheck_verdict(0, False, text), "error")  # exit 0 is no pass
 
 
@@ -425,7 +433,7 @@ class InitRunsTest(unittest.TestCase):
         self.assertIn("UNTESTED: 1 mismatches in 1 vectors", done.stdout)
         self.assertNotIn("PASS:", done.stdout)
         self.assertNotIn("MISMATCH", done.stdout)
-        self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "error")
+        self.assertEqual(qor_legs.fcheck_verdict(done.returncode, False, done.stdout), "untested")
 
     def test_a_mismatch_on_a_defined_bit_fails(self) -> None:
         body = "echo 'VD 2:3 1:1'\n"  # the same in every run, the netlist differs
@@ -505,7 +513,7 @@ class InitRunsTest(unittest.TestCase):
         self.assertIn("XDEPEND vec=0 port=q rtl=00x synth=001", text)
         self.assertIn("UNTESTED:", text)
         self.assertNotIn("PASS:", text)
-        self.assertEqual(qor_legs.fcheck_verdict(code, False, text), "error")
+        self.assertEqual(qor_legs.fcheck_verdict(code, False, text), "untested")
 
     def test_netlist_init_one_against_stable_zero_rtl_fails(self) -> None:
         rows = {m: [vd((0, 1), (0, 0))] for m in "012"}  # RTL 0 in every start, netlist 1
