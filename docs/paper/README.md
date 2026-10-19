@@ -6,7 +6,7 @@ text and print as **[TODO: …]**.
 
 ## Figures
 
-Ten figures are TikZ, drawn at print size in the paper's fonts; one, the byte-level AST record,
+Eleven figures are TikZ, drawn at print size in the paper's fonts; one, the byte-level AST record,
 is a hand-drawn SVG.
 
 - `IMAGE/odin3-tikz-styles.tex` holds the shared palette and styles. The palette is ColorBrewer
@@ -37,15 +37,15 @@ Build status is coded by fill and by border, so it survives greyscale printing:
 | specified | white fill, dashed blue border | approved specification and plan |
 | planned | white fill, dotted grey border | a later phase (Phase 3's plan is approved) |
 
-The status shown is as of 2026-10-12:
+The status shown is as of 2026-10-19 (v1.0 scope: ADR D10, PHASE4):
 
-- **Built:** Phases 0–1, 2A, 2B and 2C; 2D-1 (IR changes, `write_rtlil`) and 2D-2 (constants).
-- **In progress:** 2D stage 1 (2D-3); `proc` (2E-1 to 2E-3 merged, evidence open); linked ABC
-  (3D-0, 3D-1, 3D-3, 3D-4, 3D-6 merged); `write_blif --vtr` (3E-1, 3E-2, 3E-3, 3E-5 merged); the
-  QoR harness (3H-1, 3H-2 merged, with the first Parmys baseline).
-- **Specified:** the rest of 2D, and 2F.
-- **Planned:** the rest of Phase 3 (`flatten`, `lower`, `hardmap`, `wreduce`, VTR hookup) and
-  Phases 4–7.
+- **Built:** Phases 0-2; Phase 3's `wreduce`, `flatten`, `lower`, `hardmap`, linked ABC (BLIF
+  exchange), `write_blif --vtr` with provenance names, and the QoR harness `vtr-qor`.
+- **In progress:** the in-memory ABC exchange (3D-7, 3D-8), Parmys-matching refinements, and the
+  M2 and M3 exit runs.
+- **Planned:** Phase 4 (VTR architectures and the Cyclone V LPM target) and Phase 7.
+- **Deferred:** Phase 5 (slang, GHDL). **Removed from v1.0:** Phase 6 (`raise`, RE scorecard,
+  VQM/EDIF, Altera `bind`, Titan), kept as the design in the "Reverse Engineering" section.
 
 When the status changes, update the `built`/`inprog`/`spec`/`planned` keys in the figures, the
 features table and the phases table together.
@@ -63,6 +63,7 @@ features table and the phases table together.
 | `fig_ast` | the 24-byte AST record, node, child and payload tables | SVG → PDF | `\columnwidth` |
 | `fig_techlib` | the `.o3lib` tech library and its users | TikZ | `\columnwidth` |
 | `fig_abi` | the C ABI and plugin model | TikZ | `\columnwidth` |
+| `fig_re` | the reverse-engineering flow (Sec. Reverse Engineering) | TikZ | `\columnwidth` |
 
 ## Build on Overleaf (primary)
 
