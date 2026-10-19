@@ -5,8 +5,10 @@
 
 #include "frontends/arch/arch_read.h"
 #include "util/alloc.h"
+#include "techlib/reader.h"
 #include "util/log.h"
 
+#include <stdio.h>
 #include <string.h>
 
 odin3_arch *odin3_arch_create(void) {
@@ -143,5 +145,68 @@ odin3_status odin3_arch_parse(odin3_arch *arch, const odin3_arch_src *src) {
         st = parse_root(&rd);
     }
     odin3_xml_doc_free(&doc);
+    return st;
+}
+
+/* --- the import -------------------------------------------------------------------------------- */
+
+enum { ARCH_READ_CHUNK = 1 << 16, ARCH_NAME_MAX = 1024 };
+
+static odin3_status slurp(const char *path, odin3_strbuf *buf) {
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "read_arch: cannot read '%s'", path);
+        return ODIN3_ERR_IO;
+    }
+    char chunk[ARCH_READ_CHUNK];
+    odin3_status st = ODIN3_OK;
+    size_t count = 0;
+    while (st == ODIN3_OK && (count = fread(chunk, 1, sizeof chunk, file)) > 0) {
+        st = odin3_strbuf_append(buf, (odin3_bytes){chunk, count});
+    }
+    if (st == ODIN3_OK && ferror(file) != 0) {
+        odin3_log(ODIN3_LOG_ERROR, "read_arch: cannot read '%s'", path);
+        st = ODIN3_ERR_IO;
+    }
+    (void)fclose(file);
+    return st;
+}
+
+odin3_status odin3_arch_read_text(odin3_design *design, const odin3_arch_src *src) {
+    if (odin3_design_arch(design) != NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "read_arch: an architecture has already been read");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_arch *arch = NULL;
+    odin3_status st = odin3_design_get_arch(design, &arch);
+    st = st != ODIN3_OK ? st : odin3_arch_parse(arch, src);
+    st = st != ODIN3_OK ? st : odin3_arch_make_library(arch);
+    if (st == ODIN3_OK) {
+        /* the lines in a message refer to the generated text, not to the XML */
+        char name[ARCH_NAME_MAX];
+        (void)snprintf(name, sizeof name, "%s (generated .o3lib)", src->name);
+        const odin3_techlib_text lib = {
+            name, {arch->text.data != NULL ? arch->text.data : "", arch->text.len}};
+        st = odin3_techlib_read_text(design, &lib);
+    }
+    if (st != ODIN3_OK) {
+        odin3_design_drop_arch(design);
+        return st;
+    }
+    odin3_log(ODIN3_LOG_INFO, "read_arch: %s: %u models (%u registered), %u leaves, K=%u",
+              arch->library, arch->n_models, arch->n_registered, (uint32_t)arch->leaves.len,
+              arch->lut_k);
+    return ODIN3_OK;
+}
+
+odin3_status odin3_arch_read(odin3_design *design, const char *path) {
+    odin3_strbuf buf;
+    odin3_strbuf_init(&buf);
+    odin3_status st = slurp(path, &buf);
+    if (st == ODIN3_OK) {
+        const odin3_arch_src src = {path, {buf.data != NULL ? buf.data : "", buf.len}};
+        st = odin3_arch_read_text(design, &src);
+    }
+    odin3_strbuf_free(&buf);
     return st;
 }

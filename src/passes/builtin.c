@@ -704,6 +704,8 @@ static const odin3_pass_def WRITE_VERILOG_AST = {
 /* Registry order. */
 const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
                                                       &READ_TECHLIB,
+                                                      &odin3_pass_read_arch,
+                                                      &odin3_pass_write_techlib,
                                                       &WRITE_BLIF,
                                                       &odin3_pass_write_json,
                                                       &odin3_pass_write_verilog,

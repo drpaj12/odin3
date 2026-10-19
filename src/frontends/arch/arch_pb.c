@@ -132,7 +132,9 @@ static odin3_status check_leaf(const pb_walk *w, const odin3_xml_elem *elem,
                              pb, pin->name, out ? "an output" : "an input", model->name,
                              out ? "an input" : "an output");
         }
-        if ((pin->dir == ODIN3_ARCH_PIN_CLOCK) != port->is_clock) {
+        /* VPR checks is_clock for input model ports only (arch_util.cpp): a clock output of the
+         * model may be a plain output in the pb_type. */
+        if (!port->is_out && (pin->dir == ODIN3_ARCH_PIN_CLOCK) != port->is_clock) {
             return arch_fail(rd, elem, "pb_type '%s' port '%s' %s a clock but model '%s' %s", pb,
                              pin->name, port->is_clock ? "is not" : "is", model->name,
                              port->is_clock ? "declares it one" : "does not");
