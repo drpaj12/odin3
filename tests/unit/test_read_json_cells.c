@@ -144,6 +144,15 @@ static void test_auto_blackbox_conflicts(void) {
     rj_log_has("not equivalent to its source");
 }
 
+/* A type the IR refuses (a port with an empty name) is a located error naming the first cell. */
+static void test_implicit_type_refused(void) {
+    const odin3_json_opts opts = {.auto_blackbox = true};
+    rj_expect_failure(
+        (rj_failure){top_json("", "\"u\": {\"type\": \"mystery\", \"connections\": {\"\": [2]}}"),
+                     "modules.top.cells.u: cannot make the implicit black box 'mystery'", &opts});
+    rj_log_has("in.json:1:");
+}
+
 static void test_scopeinfo_is_dropped(void) {
     rj_expect_ok(top_json("",
                           "\"$scope\": {\"type\": \"$scopeinfo\", \"parameters\": {\"TYPE\": "
@@ -694,6 +703,7 @@ int main(void) {
     RUN_TEST(test_unknown_type_is_an_error);
     RUN_TEST(test_auto_blackbox);
     RUN_TEST(test_auto_blackbox_conflicts);
+    RUN_TEST(test_implicit_type_refused);
     RUN_TEST(test_scopeinfo_is_dropped);
     RUN_TEST(test_techlib_type);
     RUN_TEST(test_int_parameters);

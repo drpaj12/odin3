@@ -57,7 +57,9 @@ typedef struct jr_iport {
 typedef struct jr_implicit {
     uint32_t name_str;
     uint64_t total_width;
-    odin3_vec ports; /* jr_iport */
+    const odin3_json_node *first_cell; /* the first cell of the type, for messages */
+    const char *module;                /* the module of that cell */
+    odin3_vec ports;                   /* jr_iport */
 } jr_implicit;
 
 /* The state of the module whose netnames and cells are being read (pass 2). */
@@ -120,6 +122,10 @@ static inline const char *jr_text(const odin3_json_node *node, size_t *len) {
 }
 static inline int64_t jr_int(const odin3_json_node *node) {
     return node != NULL ? odin3_json_int(node) : 0;
+}
+
+static inline const char *jr_key_of(const odin3_json_node *node) {
+    return node != NULL ? odin3_json_key(node) : NULL;
 }
 
 /* Where in the module an error is: modules.<module>.<section>.<key>.<member>; NULL parts are
