@@ -3,6 +3,7 @@
   "modules": {
     "bm_lpm_concat": {
       "attributes": {
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_lpm_concat.v:4.1-53.10"
       },
       "ports": {

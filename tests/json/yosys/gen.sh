@@ -20,11 +20,13 @@ if [[ $# -gt 0 ]]; then micros=("$@"); else micros=("$root"/tests/micro/verilog/
 mkdir -p "$here/word" "$here/gate" "$here/lut"
 failed="$here/FAILED.new"
 : >"$failed"
-# One flow per level; @J@ is the output. The word level is the netlist after proc and opt_clean;
-# gate: synth without abc (bit-level gates); lut: the same, then abc with 4-input LUTs.
-flow_word='read_verilog @V@; proc; opt_clean; write_json @J@'
-flow_gate='read_verilog @V@; synth -noabc; opt_clean; write_json @J@'
-flow_lut='read_verilog @V@; synth -noabc; abc -lut 4; opt_clean; write_json @J@'
+# One flow per level; @J@ is the output. The word level is the netlist after hierarchy -auto-top
+# (it marks the top, as `synth` does at the other levels), proc and opt_clean;
+# gate: synth without abc, flattened (bit-level gates, one module: write_blif --vtr takes no
+# hierarchy); lut: the same, then abc with 4-input LUTs.
+flow_word='read_verilog @V@; hierarchy -auto-top; proc; opt_clean; write_json @J@'
+flow_gate='read_verilog @V@; synth -flatten -auto-top -noabc; opt_clean; write_json @J@'
+flow_lut='read_verilog @V@; synth -flatten -auto-top -noabc; abc -lut 4; opt_clean; write_json @J@'
 for v in "${micros[@]}"; do
     name="$(basename "$v" .v)"
     for level in word gate lut; do

@@ -3,7 +3,6 @@
   "modules": {
     "a": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_if_common.v:56.1-78.10"
       },
       "ports": {
@@ -337,7 +336,7 @@
     },
     "bm_if_common": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_if_common.v:4.1-53.10"
       },
       "ports": {
@@ -534,6 +533,26 @@
             "B": [ 15, 16 ],
             "S": [ 8 ],
             "Y": [ 18, 19 ]
+          }
+        },
+        "top_a": {
+          "hide_name": 0,
+          "type": "a",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_if_common.v:36.3-36.29"
+          },
+          "port_directions": {
+            "a_in": "input",
+            "clock": "input",
+            "out": "output"
+          },
+          "connections": {
+            "a_in": [ 4, 5 ],
+            "clock": [ 2 ],
+            "out": [ 20, 21 ]
           }
         }
       },

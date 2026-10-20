@@ -3,6 +3,7 @@
   "modules": {
     "bm_DL_4_16_encoder": {
       "attributes": {
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:3.1-15.10"
       },
       "ports": {
@@ -20,120 +21,562 @@
         }
       },
       "cells": {
-        "Dec1": {
-          "hide_name": 0,
-          "type": "dec2to4",
+        "$abc$665$auto$blifparse.cc:535:parse_blif$666": {
+          "hide_name": 1,
+          "type": "$lut",
           "parameters": {
+            "LUT": "10000000",
+            "WIDTH": "00000000000000000000000000000011"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:9.10-9.35"
           },
           "port_directions": {
-            "En": "input",
-            "W": "input",
+            "A": "input",
             "Y": "output"
           },
           "connections": {
-            "En": [ 22 ],
-            "W": [ 4, 5 ],
-            "Y": [ 23, 24, 25, 26 ]
+            "A": [ 23, 2, 3 ],
+            "Y": [ 6 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$667": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 22, 5, 4 ],
+            "Y": [ 23 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$668": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 23, 3 ],
+            "Y": [ 7 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$669": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 2, 23 ],
+            "Y": [ 8 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$670": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "00010000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 23 ],
+            "Y": [ 9 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$671": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 24, 2, 3 ],
+            "Y": [ 10 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$672": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 5, 22 ],
+            "Y": [ 24 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$673": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 24, 3 ],
+            "Y": [ 11 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$674": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 2, 24 ],
+            "Y": [ 12 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$675": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "00010000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 24 ],
+            "Y": [ 13 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$676": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 25, 2, 3 ],
+            "Y": [ 14 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$677": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5, 22, 4 ],
+            "Y": [ 25 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$678": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 25, 3 ],
+            "Y": [ 15 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$679": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 2, 25 ],
+            "Y": [ 16 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$680": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "00010000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 25 ],
+            "Y": [ 17 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$681": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 26, 2, 3 ],
+            "Y": [ 18 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$682": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "00010000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5, 4, 22 ],
+            "Y": [ 26 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$683": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 26, 3 ],
+            "Y": [ 19 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$684": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01000000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 2, 26 ],
+            "Y": [ 20 ]
+          }
+        },
+        "$abc$665$auto$blifparse.cc:535:parse_blif$685": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "00010000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 26 ],
+            "Y": [ 21 ]
+          }
+        },
+        "Dec1": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:9.10-9.35",
+            "module": "dec2to4",
+            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:17.1-32.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
           }
         },
         "Dec2": {
           "hide_name": 0,
-          "type": "dec2to4",
+          "type": "$scopeinfo",
           "parameters": {
+            "TYPE": "module"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:10.10-10.37"
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:10.10-10.37",
+            "module": "dec2to4",
+            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:17.1-32.10"
           },
           "port_directions": {
-            "En": "input",
-            "W": "input",
-            "Y": "output"
           },
           "connections": {
-            "En": [ 23 ],
-            "W": [ 2, 3 ],
-            "Y": [ 6, 7, 8, 9 ]
           }
         },
         "Dec3": {
           "hide_name": 0,
-          "type": "dec2to4",
+          "type": "$scopeinfo",
           "parameters": {
+            "TYPE": "module"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:11.10-11.37"
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:11.10-11.37",
+            "module": "dec2to4",
+            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:17.1-32.10"
           },
           "port_directions": {
-            "En": "input",
-            "W": "input",
-            "Y": "output"
           },
           "connections": {
-            "En": [ 24 ],
-            "W": [ 2, 3 ],
-            "Y": [ 10, 11, 12, 13 ]
           }
         },
         "Dec4": {
           "hide_name": 0,
-          "type": "dec2to4",
+          "type": "$scopeinfo",
           "parameters": {
+            "TYPE": "module"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:12.10-12.38"
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:12.10-12.38",
+            "module": "dec2to4",
+            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:17.1-32.10"
           },
           "port_directions": {
-            "En": "input",
-            "W": "input",
-            "Y": "output"
           },
           "connections": {
-            "En": [ 25 ],
-            "W": [ 2, 3 ],
-            "Y": [ 14, 15, 16, 17 ]
           }
         },
         "Dec5": {
           "hide_name": 0,
-          "type": "dec2to4",
+          "type": "$scopeinfo",
           "parameters": {
+            "TYPE": "module"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:13.10-13.39"
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:13.10-13.39",
+            "module": "dec2to4",
+            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:17.1-32.10"
           },
           "port_directions": {
-            "En": "input",
-            "W": "input",
-            "Y": "output"
           },
           "connections": {
-            "En": [ 26 ],
-            "W": [ 2, 3 ],
-            "Y": [ 18, 19, 20, 21 ]
           }
         }
       },
       "netnames": {
+        "$abc$665$new_n24": {
+          "hide_name": 1,
+          "bits": [ 23 ],
+          "attributes": {
+          }
+        },
+        "$abc$665$new_n29": {
+          "hide_name": 1,
+          "bits": [ 24 ],
+          "attributes": {
+          }
+        },
+        "$abc$665$new_n34": {
+          "hide_name": 1,
+          "bits": [ 25 ],
+          "attributes": {
+          }
+        },
+        "$abc$665$new_n39": {
+          "hide_name": 1,
+          "bits": [ 26 ],
+          "attributes": {
+          }
+        },
+        "Dec1.En": {
+          "hide_name": 0,
+          "bits": [ 22 ],
+          "attributes": {
+            "hdlname": "Dec1 En",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:19.8-19.10"
+          }
+        },
+        "Dec1.W": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
+          "attributes": {
+            "hdlname": "Dec1 W",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:18.14-18.15"
+          }
+        },
+        "Dec2.W": {
+          "hide_name": 0,
+          "bits": [ 2, 3 ],
+          "attributes": {
+            "hdlname": "Dec2 W",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:18.14-18.15"
+          }
+        },
+        "Dec2.Y": {
+          "hide_name": 0,
+          "bits": [ 6, 7, 8, 9 ],
+          "attributes": {
+            "hdlname": "Dec2 Y",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:20.15-20.16"
+          }
+        },
+        "Dec3.W": {
+          "hide_name": 0,
+          "bits": [ 2, 3 ],
+          "attributes": {
+            "hdlname": "Dec3 W",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:18.14-18.15"
+          }
+        },
+        "Dec3.Y": {
+          "hide_name": 0,
+          "bits": [ 10, 11, 12, 13 ],
+          "attributes": {
+            "hdlname": "Dec3 Y",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:20.15-20.16"
+          }
+        },
+        "Dec4.W": {
+          "hide_name": 0,
+          "bits": [ 2, 3 ],
+          "attributes": {
+            "hdlname": "Dec4 W",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:18.14-18.15"
+          }
+        },
+        "Dec4.Y": {
+          "hide_name": 0,
+          "bits": [ 14, 15, 16, 17 ],
+          "attributes": {
+            "hdlname": "Dec4 Y",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:20.15-20.16"
+          }
+        },
+        "Dec5.W": {
+          "hide_name": 0,
+          "bits": [ 2, 3 ],
+          "attributes": {
+            "hdlname": "Dec5 W",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:18.14-18.15"
+          }
+        },
+        "Dec5.Y": {
+          "hide_name": 0,
+          "bits": [ 18, 19, 20, 21 ],
+          "attributes": {
+            "hdlname": "Dec5 Y",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:20.15-20.16"
+          }
+        },
         "En": {
           "hide_name": 0,
           "bits": [ 22 ],
           "attributes": {
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:5.8-5.10"
-          }
-        },
-        "M": {
-          "hide_name": 0,
-          "bits": [ 23, 24, 25, 26 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:7.13-7.14"
           }
         },
         "W": {
@@ -148,122 +591,6 @@
           "bits": [ 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 ],
           "attributes": {
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:6.16-6.17"
-          }
-        }
-      }
-    },
-    "dec2to4": {
-      "attributes": {
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:17.1-32.10"
-      },
-      "ports": {
-        "W": {
-          "direction": "input",
-          "bits": [ 2, 3 ]
-        },
-        "Y": {
-          "direction": "output",
-          "bits": [ 4, 5, 6, 7 ]
-        },
-        "En": {
-          "direction": "input",
-          "bits": [ 8 ]
-        }
-      },
-      "cells": {
-        "$abc$209$auto$blifparse.cc:535:parse_blif$210": {
-          "hide_name": 1,
-          "type": "$lut",
-          "parameters": {
-            "LUT": "10000000",
-            "WIDTH": "00000000000000000000000000000011"
-          },
-          "attributes": {
-          },
-          "port_directions": {
-            "A": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 3, 8, 2 ],
-            "Y": [ 4 ]
-          }
-        },
-        "$abc$209$auto$blifparse.cc:535:parse_blif$211": {
-          "hide_name": 1,
-          "type": "$lut",
-          "parameters": {
-            "LUT": "01000000",
-            "WIDTH": "00000000000000000000000000000011"
-          },
-          "attributes": {
-          },
-          "port_directions": {
-            "A": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 2, 8, 3 ],
-            "Y": [ 5 ]
-          }
-        },
-        "$abc$209$auto$blifparse.cc:535:parse_blif$212": {
-          "hide_name": 1,
-          "type": "$lut",
-          "parameters": {
-            "LUT": "01000000",
-            "WIDTH": "00000000000000000000000000000011"
-          },
-          "attributes": {
-          },
-          "port_directions": {
-            "A": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 3, 8, 2 ],
-            "Y": [ 6 ]
-          }
-        },
-        "$abc$209$auto$blifparse.cc:535:parse_blif$213": {
-          "hide_name": 1,
-          "type": "$lut",
-          "parameters": {
-            "LUT": "00010000",
-            "WIDTH": "00000000000000000000000000000011"
-          },
-          "attributes": {
-          },
-          "port_directions": {
-            "A": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 3, 2, 8 ],
-            "Y": [ 7 ]
-          }
-        }
-      },
-      "netnames": {
-        "En": {
-          "hide_name": 0,
-          "bits": [ 8 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:19.8-19.10"
-          }
-        },
-        "W": {
-          "hide_name": 0,
-          "bits": [ 2, 3 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:18.14-18.15"
-          }
-        },
-        "Y": {
-          "hide_name": 0,
-          "bits": [ 4, 5, 6, 7 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:20.15-20.16"
           }
         }
       }

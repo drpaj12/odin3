@@ -3,7 +3,7 @@
   "modules": {
     "bm_DL_2_1_mux": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_2_1_mux.v:3.1-9.10"
       },
       "ports": {

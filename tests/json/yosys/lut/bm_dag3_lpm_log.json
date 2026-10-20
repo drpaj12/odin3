@@ -3,6 +3,7 @@
   "modules": {
     "bm_dag3_lpm_log": {
       "attributes": {
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm_log.v:4.1-32.10"
       },
       "ports": {

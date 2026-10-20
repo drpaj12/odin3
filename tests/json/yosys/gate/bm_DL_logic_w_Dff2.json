@@ -3,6 +3,7 @@
   "modules": {
     "bm_DL_logic_w_Dff2": {
       "attributes": {
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:3.1-14.10"
       },
       "ports": {

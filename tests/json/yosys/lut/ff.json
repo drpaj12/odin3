@@ -3,6 +3,7 @@
   "modules": {
     "dff": {
       "attributes": {
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/ff.v:1.1-16.10"
       },
       "ports": {

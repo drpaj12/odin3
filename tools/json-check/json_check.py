@@ -59,6 +59,7 @@ import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from subprocess import CompletedProcess
 
 import icells_check as ic
 
@@ -104,6 +105,18 @@ class Row:
 GENERATED_NAME = re.compile(r'"\$[a-z]*\d+(?:\$\d+)?"')
 BIT_ARRAY = re.compile(r"\[[ 0-9,]+\]")
 BIT_NUMBER = re.compile(r"\b\d+\b")
+SRC_ATTRIBUTE = re.compile(r'^\s*attribute \\src ".*"\n', re.M)
+MODULE_ATTRIBUTE = re.compile(r"^attribute \\(?!top |blackbox )\S+ .*\n", re.M)
+TOP_ATTRIBUTE = re.compile(r"^attribute \\top 32'0+1$", re.M)
+
+
+def plain_rtlil(text: str) -> str:
+    """RTLIL the checker can find the top of: no ``src`` attribute and no module attribute but
+    ``top`` and ``blackbox`` (they sit between ``attribute \\top 1`` and ``module``, where the
+    checker looks for the top), and a 32-bit ``top`` (read from a Yosys module attribute) as
+    ``attribute \\top 1``."""
+    text = MODULE_ATTRIBUTE.sub("", SRC_ATTRIBUTE.sub("", text))
+    return TOP_ATTRIBUTE.sub("attribute \\\\top 1", text)
 
 
 def normalise_json(text: str) -> str:
@@ -192,7 +205,17 @@ class Config:
 
 
 def libs_text(cfg: Config, design: Path) -> str:
-    return "; ".join((cfg.techlibs or {}).get(design.name, []))
+    """The tech library commands of a design (a fixture ``X.json`` is the design ``X.v``)."""
+    table = cfg.techlibs or {}
+    return "; ".join(table.get(design.name, table.get(design.stem + ".v", [])))
+
+
+def first_error(done: CompletedProcess[str]) -> str:
+    """The first error line of a failed odin3 run (the located message), else its last line."""
+    lines = ((done.stderr or "") + (done.stdout or "")).splitlines()
+    errors = [ln for ln in lines if "error" in ln]
+    text = (errors or lines or ["no output"])[0]
+    return text.split("odin3: error: ", 1)[-1][-300:]
 
 
 def read_back_script(libs: str, source: Path, outs: tuple[Path, str]) -> str:
@@ -215,7 +238,7 @@ def read_both(cfg: Config, level: str, flags: Sequence[str], paths: dict[str, Pa
         text = read_back_script(libs, source, outs)
         done = ic.odin3_run(cfg.odin3, text, paths["F2"].parent, flags)
         if done.returncode != 0:
-            return Row("fail:read", ic.last_lines(done))
+            return Row("fail:read", first_error(done))
     return None
 
 
@@ -241,6 +264,10 @@ def judge_equivalent(
 ) -> ic.Verdict:
     """The 5.2 equivalence legs over the files G.il/R.il (word) or G.blif/R.blif (gate, LUT)."""
     ext = "il" if level in RTLIL_LEVELS else "blif"
+    if ext == "il":
+        for key in ("G", "R"):
+            text = paths[key].read_text(encoding="utf-8")
+            paths[key].write_text(plain_rtlil(text), encoding="utf-8")
     named = {f"G.{ext}": paths["G"], f"R.{ext}": paths["R"]}
     return ic.judge_equivalent(cfg.icfg(), "word" if ext == "il" else level, named, tag, run_dir)
 

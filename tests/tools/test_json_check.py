@@ -67,6 +67,19 @@ class NormaliseTests(unittest.TestCase):
         self.assertEqual(json.loads(FILE1)["modules"]["top"]["cells"]["$c12"]["type"], "$not")
 
 
+class PlainRtlilTests(unittest.TestCase):
+    def test_src_module_attributes_and_a_32_bit_top_are_made_plain(self) -> None:
+        top32 = "attribute \\top 32'00000000000000000000000000000001\n"
+        text = (
+            top32
+            + 'attribute \\src "a.v:1.1-2.2"\nattribute \\hdlname "b"\nattribute \\blackbox 1\n'
+            + 'module \\m\n  attribute \\src "a.v:3.1-3.2"\n  wire \\w\nend\n'
+        )
+        want = "attribute \\top 1\nattribute \\blackbox 1\nmodule \\m\n  wire \\w\nend\n"
+        self.assertEqual(jc.plain_rtlil(text), want)
+        self.assertEqual(jc.plain_rtlil(want), want)
+
+
 class ExpectTests(unittest.TestCase):
     def test_parse_both_kinds_of_level(self) -> None:
         table = jc.parse_expect("# c\nword a.v unproven why\ny-gate b.json fail:read $x\n")

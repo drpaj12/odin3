@@ -1,9 +1,9 @@
 {
   "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
   "modules": {
-    "bottom": {
+    "$paramod$23221bbe9c85be81f7424fb76c64d8df9eba4c0b\\bottom": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
+        "hdlname": "bottom",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:17.1-23.10"
       },
       "parameter_default_values": {
@@ -21,7 +21,7 @@
         }
       },
       "cells": {
-        "$add$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$4": {
+        "$add$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$8": {
           "hide_name": 1,
           "type": "$add",
           "parameters": {
@@ -45,7 +45,7 @@
             "Y": [ 6, 7, 8, 9, 10, 11, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69 ]
           }
         },
-        "$mul$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$3": {
+        "$mul$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$7": {
           "hide_name": 1,
           "type": "$mul",
           "parameters": {
@@ -71,7 +71,7 @@
         }
       },
       "netnames": {
-        "$add$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$4_Y": {
+        "$add$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$8_Y": {
           "hide_name": 1,
           "bits": [ 6, 7, 8, 9, 10, 11, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69 ],
           "attributes": {
@@ -79,7 +79,209 @@
             "unused_bits": "6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31"
           }
         },
-        "$mul$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$3_Y": {
+        "$mul$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$7_Y": {
+          "hide_name": 1,
+          "bits": [ 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22.13-22.18"
+          }
+        },
+        "a": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:20.12-20.13"
+          }
+        },
+        "b": {
+          "hide_name": 0,
+          "bits": [ 6, 7, 8, 9, 10, 11 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:21.13-21.14"
+          }
+        }
+      }
+    },
+    "$paramod$40a811d08faf61fe64655e72d73cf85d534e9861\\bottom": {
+      "attributes": {
+        "hdlname": "bottom",
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:17.1-23.10"
+      },
+      "parameter_default_values": {
+        "c": "00000000000000000000000000000100",
+        "d": "00000000000000000000000000000100"
+      },
+      "ports": {
+        "a": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5 ]
+        },
+        "b": {
+          "direction": "output",
+          "bits": [ 6, 7, 8, 9, 10, 11 ]
+        }
+      },
+      "cells": {
+        "$add$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$6": {
+          "hide_name": 1,
+          "type": "$add",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000100000",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000100000",
+            "Y_WIDTH": "00000000000000000000000000100000"
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22.12-22.23"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43 ],
+            "B": [ "0", "0", "1", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" ],
+            "Y": [ 6, 7, 8, 9, 10, 11, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69 ]
+          }
+        },
+        "$mul$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$5": {
+          "hide_name": 1,
+          "type": "$mul",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000100",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000100000",
+            "Y_WIDTH": "00000000000000000000000000100000"
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22.13-22.18"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 4, 5 ],
+            "B": [ "0", "0", "1", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" ],
+            "Y": [ 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43 ]
+          }
+        }
+      },
+      "netnames": {
+        "$add$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$6_Y": {
+          "hide_name": 1,
+          "bits": [ 6, 7, 8, 9, 10, 11, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22.12-22.23",
+            "unused_bits": "6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31"
+          }
+        },
+        "$mul$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$5_Y": {
+          "hide_name": 1,
+          "bits": [ 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22.13-22.18"
+          }
+        },
+        "a": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:20.12-20.13"
+          }
+        },
+        "b": {
+          "hide_name": 0,
+          "bits": [ 6, 7, 8, 9, 10, 11 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:21.13-21.14"
+          }
+        }
+      }
+    },
+    "$paramod\\bottom\\d=s32'00000000000000000000000000000011": {
+      "attributes": {
+        "hdlname": "bottom",
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:17.1-23.10"
+      },
+      "parameter_default_values": {
+        "c": "00000000000000000000000000000100",
+        "d": "00000000000000000000000000000011"
+      },
+      "ports": {
+        "a": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5 ]
+        },
+        "b": {
+          "direction": "output",
+          "bits": [ 6, 7, 8, 9, 10, 11 ]
+        }
+      },
+      "cells": {
+        "$add$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$10": {
+          "hide_name": 1,
+          "type": "$add",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000100000",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000100000",
+            "Y_WIDTH": "00000000000000000000000000100000"
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22.12-22.23"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43 ],
+            "B": [ "1", "1", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" ],
+            "Y": [ 6, 7, 8, 9, 10, 11, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69 ]
+          }
+        },
+        "$mul$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$9": {
+          "hide_name": 1,
+          "type": "$mul",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000100",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000100000",
+            "Y_WIDTH": "00000000000000000000000000100000"
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22.13-22.18"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 4, 5 ],
+            "B": [ "0", "0", "1", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" ],
+            "Y": [ 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43 ]
+          }
+        }
+      },
+      "netnames": {
+        "$add$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$10_Y": {
+          "hide_name": 1,
+          "bits": [ 6, 7, 8, 9, 10, 11, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22.12-22.23",
+            "unused_bits": "6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31"
+          }
+        },
+        "$mul$/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:22$9_Y": {
           "hide_name": 1,
           "bits": [ 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43 ],
           "attributes": {
@@ -105,7 +307,7 @@
     "top": {
       "attributes": {
         "dynports": "00000000000000000000000000000001",
-        "cells_not_processed": "00000000000000000000000000000001",
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:1.1-15.10"
       },
       "parameter_default_values": {
@@ -184,13 +386,10 @@
         },
         "inst_1": {
           "hide_name": 0,
-          "type": "bottom",
+          "type": "$paramod$23221bbe9c85be81f7424fb76c64d8df9eba4c0b\\bottom",
           "parameters": {
-            "$1": "00000000000000000000000000000100",
-            "d": "00000000000000000000000000000011"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:11.13-11.34"
           },
           "port_directions": {
@@ -204,12 +403,10 @@
         },
         "inst_2": {
           "hide_name": 0,
-          "type": "bottom",
+          "type": "$paramod\\bottom\\d=s32'00000000000000000000000000000011",
           "parameters": {
-            "d": "00000000000000000000000000000011"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:8.8-8.29"
           },
           "port_directions": {
@@ -223,13 +420,10 @@
         },
         "inst_3": {
           "hide_name": 0,
-          "type": "bottom",
+          "type": "$paramod$40a811d08faf61fe64655e72d73cf85d534e9861\\bottom",
           "parameters": {
-            "$1": "00000000000000000000000000000100",
-            "$2": "00000000000000000000000000000100"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter.v:14.16-14.37"
           },
           "port_directions": {

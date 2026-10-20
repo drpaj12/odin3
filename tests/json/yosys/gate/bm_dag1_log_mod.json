@@ -1,374 +1,9 @@
 {
   "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
   "modules": {
-    "a": {
-      "attributes": {
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:44.1-60.10"
-      },
-      "ports": {
-        "clock": {
-          "direction": "input",
-          "bits": [ 2 ]
-        },
-        "a_in": {
-          "direction": "input",
-          "bits": [ 3, 4 ]
-        },
-        "b_in": {
-          "direction": "input",
-          "bits": [ 5, 6 ]
-        },
-        "out": {
-          "direction": "output",
-          "bits": [ 7, 8 ]
-        }
-      },
-      "cells": {
-        "$auto$ff.cc:266:slice$114": {
-          "hide_name": 1,
-          "type": "$_DFF_P_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:55.1-58.4"
-          },
-          "port_directions": {
-            "C": "input",
-            "D": "input",
-            "Q": "output"
-          },
-          "connections": {
-            "C": [ 2 ],
-            "D": [ 9 ],
-            "Q": [ 7 ]
-          }
-        },
-        "$auto$ff.cc:266:slice$115": {
-          "hide_name": 1,
-          "type": "$_DFF_P_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:55.1-58.4"
-          },
-          "port_directions": {
-            "C": "input",
-            "D": "input",
-            "Q": "output"
-          },
-          "connections": {
-            "C": [ 2 ],
-            "D": [ 10 ],
-            "Q": [ 8 ]
-          }
-        },
-        "$auto$simplemap.cc:83:simplemap_bitop$112": {
-          "hide_name": 1,
-          "type": "$_AND_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:57.9-57.20"
-          },
-          "port_directions": {
-            "A": "input",
-            "B": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 3 ],
-            "B": [ 5 ],
-            "Y": [ 9 ]
-          }
-        },
-        "$auto$simplemap.cc:83:simplemap_bitop$113": {
-          "hide_name": 1,
-          "type": "$_AND_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:57.9-57.20"
-          },
-          "port_directions": {
-            "A": "input",
-            "B": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 4 ],
-            "B": [ 6 ],
-            "Y": [ 10 ]
-          }
-        }
-      },
-      "netnames": {
-        "$0\\out[1:0]": {
-          "hide_name": 1,
-          "bits": [ 9, 10 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:55.1-58.4"
-          }
-        },
-        "a_in": {
-          "hide_name": 0,
-          "bits": [ 3, 4 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:50.55-50.59"
-          }
-        },
-        "b_in": {
-          "hide_name": 0,
-          "bits": [ 5, 6 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:51.55-51.59"
-          }
-        },
-        "clock": {
-          "hide_name": 0,
-          "bits": [ 2 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:49.7-49.12"
-          }
-        },
-        "out": {
-          "hide_name": 0,
-          "bits": [ 7, 8 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:52.59-52.62"
-          }
-        }
-      }
-    },
-    "b": {
-      "attributes": {
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:63.1-82.10"
-      },
-      "ports": {
-        "clock": {
-          "direction": "input",
-          "bits": [ 2 ]
-        },
-        "a_in": {
-          "direction": "input",
-          "bits": [ 3, 4 ]
-        },
-        "b_in": {
-          "direction": "input",
-          "bits": [ 5, 6 ]
-        },
-        "out": {
-          "direction": "output",
-          "bits": [ 7, 8 ]
-        }
-      },
-      "cells": {
-        "$auto$ff.cc:266:slice$104": {
-          "hide_name": 1,
-          "type": "$_DFF_P_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
-          },
-          "port_directions": {
-            "C": "input",
-            "D": "input",
-            "Q": "output"
-          },
-          "connections": {
-            "C": [ 2 ],
-            "D": [ 9 ],
-            "Q": [ 10 ]
-          }
-        },
-        "$auto$ff.cc:266:slice$105": {
-          "hide_name": 1,
-          "type": "$_DFF_P_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
-          },
-          "port_directions": {
-            "C": "input",
-            "D": "input",
-            "Q": "output"
-          },
-          "connections": {
-            "C": [ 2 ],
-            "D": [ 11 ],
-            "Q": [ 12 ]
-          }
-        },
-        "$auto$ff.cc:266:slice$106": {
-          "hide_name": 1,
-          "type": "$_DFF_P_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
-          },
-          "port_directions": {
-            "C": "input",
-            "D": "input",
-            "Q": "output"
-          },
-          "connections": {
-            "C": [ 2 ],
-            "D": [ 13 ],
-            "Q": [ 7 ]
-          }
-        },
-        "$auto$ff.cc:266:slice$107": {
-          "hide_name": 1,
-          "type": "$_DFF_P_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
-          },
-          "port_directions": {
-            "C": "input",
-            "D": "input",
-            "Q": "output"
-          },
-          "connections": {
-            "C": [ 2 ],
-            "D": [ 14 ],
-            "Q": [ 8 ]
-          }
-        },
-        "$auto$simplemap.cc:83:simplemap_bitop$108": {
-          "hide_name": 1,
-          "type": "$_OR_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:78.10-78.21"
-          },
-          "port_directions": {
-            "A": "input",
-            "B": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 3 ],
-            "B": [ 5 ],
-            "Y": [ 9 ]
-          }
-        },
-        "$auto$simplemap.cc:83:simplemap_bitop$109": {
-          "hide_name": 1,
-          "type": "$_OR_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:78.10-78.21"
-          },
-          "port_directions": {
-            "A": "input",
-            "B": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 4 ],
-            "B": [ 6 ],
-            "Y": [ 11 ]
-          }
-        },
-        "$auto$simplemap.cc:83:simplemap_bitop$110": {
-          "hide_name": 1,
-          "type": "$_XOR_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:79.9-79.20"
-          },
-          "port_directions": {
-            "A": "input",
-            "B": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 3 ],
-            "B": [ 10 ],
-            "Y": [ 13 ]
-          }
-        },
-        "$auto$simplemap.cc:83:simplemap_bitop$111": {
-          "hide_name": 1,
-          "type": "$_XOR_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:79.9-79.20"
-          },
-          "port_directions": {
-            "A": "input",
-            "B": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 4 ],
-            "B": [ 12 ],
-            "Y": [ 14 ]
-          }
-        }
-      },
-      "netnames": {
-        "$0\\out[1:0]": {
-          "hide_name": 1,
-          "bits": [ 13, 14 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
-          }
-        },
-        "$0\\temp[1:0]": {
-          "hide_name": 1,
-          "bits": [ 9, 11 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
-          }
-        },
-        "a_in": {
-          "hide_name": 0,
-          "bits": [ 3, 4 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:69.55-69.59"
-          }
-        },
-        "b_in": {
-          "hide_name": 0,
-          "bits": [ 5, 6 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:70.55-70.59"
-          }
-        },
-        "clock": {
-          "hide_name": 0,
-          "bits": [ 2 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:68.7-68.12"
-          }
-        },
-        "out": {
-          "hide_name": 0,
-          "bits": [ 7, 8 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:72.59-72.62"
-          }
-        },
-        "temp": {
-          "hide_name": 0,
-          "bits": [ 10, 12 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:71.53-71.57"
-          }
-        }
-      }
-    },
     "bm_dag1_log_mod": {
       "attributes": {
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:4.1-41.10"
       },
       "ports": {
@@ -406,26 +41,159 @@
         }
       },
       "cells": {
-        "$auto$simplemap.cc:83:simplemap_bitop$101": {
+        "$auto$ff.cc:266:slice$102": {
           "hide_name": 1,
-          "type": "$_AND_",
+          "type": "$_DFF_P_",
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:38.15-38.30"
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:55.1-58.4"
           },
           "port_directions": {
-            "A": "input",
-            "B": "input",
-            "Y": "output"
+            "C": "input",
+            "D": "input",
+            "Q": "output"
           },
           "connections": {
-            "A": [ 13 ],
-            "B": [ 14 ],
-            "Y": [ 10 ]
+            "C": [ 2 ],
+            "D": [ 13 ],
+            "Q": [ 14 ]
           }
         },
-        "$auto$simplemap.cc:83:simplemap_bitop$102": {
+        "$auto$ff.cc:266:slice$103": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:55.1-58.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 15 ],
+            "Q": [ 16 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$106": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 17 ],
+            "Q": [ 18 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$107": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 19 ],
+            "Q": [ 20 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$108": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 21 ],
+            "Q": [ 22 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$109": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 23 ],
+            "Q": [ 24 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$116": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:116.1-120.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 25 ],
+            "Q": [ 26 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$117": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:116.1-120.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 27 ],
+            "Q": [ 28 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$100": {
           "hide_name": 1,
           "type": "$_AND_",
           "parameters": {
@@ -439,12 +207,12 @@
             "Y": "output"
           },
           "connections": {
-            "A": [ 15 ],
-            "B": [ 16 ],
+            "A": [ 16 ],
+            "B": [ 24 ],
             "Y": [ 11 ]
           }
         },
-        "$auto$simplemap.cc:83:simplemap_bitop$103": {
+        "$auto$simplemap.cc:83:simplemap_bitop$101": {
           "hide_name": 1,
           "type": "$_OR_",
           "parameters": {
@@ -458,99 +226,325 @@
             "Y": "output"
           },
           "connections": {
-            "A": [ 17 ],
-            "B": [ 18 ],
+            "A": [ 29 ],
+            "B": [ 28 ],
             "Y": [ 12 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$104": {
+          "hide_name": 1,
+          "type": "$_AND_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:57.9-57.20"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4 ],
+            "B": [ 6 ],
+            "Y": [ 13 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$105": {
+          "hide_name": 1,
+          "type": "$_AND_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:57.9-57.20"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5 ],
+            "B": [ 7 ],
+            "Y": [ 15 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$110": {
+          "hide_name": 1,
+          "type": "$_XOR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:79.9-79.20"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4 ],
+            "B": [ 18 ],
+            "Y": [ 21 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$111": {
+          "hide_name": 1,
+          "type": "$_XOR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:79.9-79.20"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5 ],
+            "B": [ 20 ],
+            "Y": [ 23 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$112": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:78.10-78.21"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4 ],
+            "B": [ 6 ],
+            "Y": [ 17 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$113": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:78.10-78.21"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5 ],
+            "B": [ 7 ],
+            "Y": [ 19 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$114": {
+          "hide_name": 1,
+          "type": "$_AND_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:98.15-98.26"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 8 ],
+            "B": [ 9 ],
+            "Y": [ 30 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$115": {
+          "hide_name": 1,
+          "type": "$_XOR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:97.15-97.26"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 30 ],
+            "B": [ 9 ],
+            "Y": [ 29 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$118": {
+          "hide_name": 1,
+          "type": "$_XOR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:119.10-119.21"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 8 ],
+            "B": [ 9 ],
+            "Y": [ 25 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$119": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:118.10-118.21"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 26 ],
+            "B": [ 9 ],
+            "Y": [ 27 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$99": {
+          "hide_name": 1,
+          "type": "$_AND_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:38.15-38.30"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 14 ],
+            "B": [ 22 ],
+            "Y": [ 10 ]
           }
         },
         "top_a": {
           "hide_name": 0,
-          "type": "a",
+          "type": "$scopeinfo",
           "parameters": {
+            "TYPE": "module"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:33.3-33.35"
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:33.3-33.35",
+            "module": "a",
+            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:44.1-60.10"
           },
           "port_directions": {
-            "a_in": "input",
-            "b_in": "input",
-            "clock": "input",
-            "out": "output"
           },
           "connections": {
-            "a_in": [ 4, 5 ],
-            "b_in": [ 6, 7 ],
-            "clock": [ 2 ],
-            "out": [ 13, 15 ]
           }
         },
         "top_b": {
           "hide_name": 0,
-          "type": "b",
+          "type": "$scopeinfo",
           "parameters": {
+            "TYPE": "module"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:34.3-34.35"
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:34.3-34.35",
+            "module": "b",
+            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:63.1-82.10"
           },
           "port_directions": {
-            "a_in": "input",
-            "b_in": "input",
-            "clock": "input",
-            "out": "output"
           },
           "connections": {
-            "a_in": [ 4, 5 ],
-            "b_in": [ 6, 7 ],
-            "clock": [ 2 ],
-            "out": [ 14, 16 ]
           }
         },
         "top_c": {
           "hide_name": 0,
-          "type": "c",
+          "type": "$scopeinfo",
           "parameters": {
+            "TYPE": "module"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:35.3-35.28"
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:35.3-35.28",
+            "module": "c",
+            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:85.1-100.10"
           },
           "port_directions": {
-            "c_in": "input",
-            "d_in": "input",
-            "out1": "output"
           },
           "connections": {
-            "c_in": [ 8 ],
-            "d_in": [ 9 ],
-            "out1": [ 17 ]
           }
         },
         "top_d": {
           "hide_name": 0,
-          "type": "d",
+          "type": "$scopeinfo",
           "parameters": {
+            "TYPE": "module"
           },
           "attributes": {
-            "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:36.3-36.35"
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:36.3-36.35",
+            "module": "d",
+            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:103.1-122.10"
           },
           "port_directions": {
-            "c_in": "input",
-            "clock": "input",
-            "d_in": "input",
-            "out1": "output"
           },
           "connections": {
-            "c_in": [ 8 ],
-            "clock": [ 2 ],
-            "d_in": [ 9 ],
-            "out1": [ 18 ]
           }
         }
       },
       "netnames": {
+        "$flatten\\top_a.$0\\out[1:0]": {
+          "hide_name": 1,
+          "bits": [ 13, 15 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:55.1-58.4"
+          }
+        },
+        "$flatten\\top_b.$0\\out[1:0]": {
+          "hide_name": 1,
+          "bits": [ 21, 23 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
+          }
+        },
+        "$flatten\\top_b.$0\\temp[1:0]": {
+          "hide_name": 1,
+          "bits": [ 17, 19 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:76.1-80.4"
+          }
+        },
+        "$flatten\\top_d.$0\\out1[0:0]": {
+          "hide_name": 1,
+          "bits": [ 27 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:116.1-120.4"
+          }
+        },
+        "$flatten\\top_d.$0\\temp[0:0]": {
+          "hide_name": 1,
+          "bits": [ 25 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:116.1-120.4"
+          }
+        },
         "a_in": {
           "hide_name": 0,
           "bits": [ 4, 5 ],
@@ -609,270 +603,173 @@
         },
         "temp_a": {
           "hide_name": 0,
-          "bits": [ 13, 15 ],
+          "bits": [ 14, 16 ],
           "attributes": {
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:28.54-28.60"
           }
         },
         "temp_b": {
           "hide_name": 0,
-          "bits": [ 14, 16 ],
+          "bits": [ 22, 24 ],
           "attributes": {
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:29.54-29.60"
           }
         },
         "temp_c": {
           "hide_name": 0,
-          "bits": [ 17 ],
+          "bits": [ 29 ],
           "attributes": {
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:30.6-30.12"
           }
         },
         "temp_d": {
           "hide_name": 0,
-          "bits": [ 18 ],
+          "bits": [ 28 ],
           "attributes": {
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:31.6-31.12"
           }
-        }
-      }
-    },
-    "c": {
-      "attributes": {
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:85.1-100.10"
-      },
-      "ports": {
-        "c_in": {
-          "direction": "input",
-          "bits": [ 2 ]
         },
-        "d_in": {
-          "direction": "input",
-          "bits": [ 3 ]
-        },
-        "out1": {
-          "direction": "output",
-          "bits": [ 4 ]
-        }
-      },
-      "cells": {
-        "$auto$simplemap.cc:83:simplemap_bitop$100": {
-          "hide_name": 1,
-          "type": "$_AND_",
-          "parameters": {
-          },
+        "top_a.a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:98.15-98.26"
-          },
-          "port_directions": {
-            "A": "input",
-            "B": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 2 ],
-            "B": [ 3 ],
-            "Y": [ 5 ]
+            "hdlname": "top_a a_in",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:50.55-50.59"
           }
         },
-        "$auto$simplemap.cc:83:simplemap_bitop$99": {
-          "hide_name": 1,
-          "type": "$_XOR_",
-          "parameters": {
-          },
+        "top_a.b_in": {
+          "hide_name": 0,
+          "bits": [ 6, 7 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:97.15-97.26"
-          },
-          "port_directions": {
-            "A": "input",
-            "B": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 5 ],
-            "B": [ 3 ],
-            "Y": [ 4 ]
+            "hdlname": "top_a b_in",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:51.55-51.59"
           }
-        }
-      },
-      "netnames": {
-        "c_in": {
+        },
+        "top_a.clock": {
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
+            "hdlname": "top_a clock",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:49.7-49.12"
+          }
+        },
+        "top_a.out": {
+          "hide_name": 0,
+          "bits": [ 14, 16 ],
+          "attributes": {
+            "hdlname": "top_a out",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:52.59-52.62"
+          }
+        },
+        "top_b.a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
+          "attributes": {
+            "hdlname": "top_b a_in",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:69.55-69.59"
+          }
+        },
+        "top_b.b_in": {
+          "hide_name": 0,
+          "bits": [ 6, 7 ],
+          "attributes": {
+            "hdlname": "top_b b_in",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:70.55-70.59"
+          }
+        },
+        "top_b.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_b clock",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:68.7-68.12"
+          }
+        },
+        "top_b.out": {
+          "hide_name": 0,
+          "bits": [ 22, 24 ],
+          "attributes": {
+            "hdlname": "top_b out",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:72.59-72.62"
+          }
+        },
+        "top_b.temp": {
+          "hide_name": 0,
+          "bits": [ 18, 20 ],
+          "attributes": {
+            "hdlname": "top_b temp",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:71.53-71.57"
+          }
+        },
+        "top_c.c_in": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "hdlname": "top_c c_in",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:91.7-91.11"
           }
         },
-        "d_in": {
+        "top_c.d_in": {
           "hide_name": 0,
-          "bits": [ 3 ],
+          "bits": [ 9 ],
           "attributes": {
+            "hdlname": "top_c d_in",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:92.7-92.11"
           }
         },
-        "out1": {
+        "top_c.out1": {
           "hide_name": 0,
-          "bits": [ 4 ],
+          "bits": [ 29 ],
           "attributes": {
+            "hdlname": "top_c out1",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:93.9-93.13"
           }
         },
-        "temp": {
+        "top_c.temp": {
           "hide_name": 0,
-          "bits": [ 5 ],
+          "bits": [ 30 ],
           "attributes": {
+            "hdlname": "top_c temp",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:95.6-95.10"
           }
-        }
-      }
-    },
-    "d": {
-      "attributes": {
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:103.1-122.10"
-      },
-      "ports": {
-        "clock": {
-          "direction": "input",
-          "bits": [ 2 ]
         },
-        "c_in": {
-          "direction": "input",
-          "bits": [ 3 ]
-        },
-        "d_in": {
-          "direction": "input",
-          "bits": [ 4 ]
-        },
-        "out1": {
-          "direction": "output",
-          "bits": [ 5 ]
-        }
-      },
-      "cells": {
-        "$auto$ff.cc:266:slice$95": {
-          "hide_name": 1,
-          "type": "$_DFF_P_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:116.1-120.4"
-          },
-          "port_directions": {
-            "C": "input",
-            "D": "input",
-            "Q": "output"
-          },
-          "connections": {
-            "C": [ 2 ],
-            "D": [ 6 ],
-            "Q": [ 7 ]
-          }
-        },
-        "$auto$ff.cc:266:slice$96": {
-          "hide_name": 1,
-          "type": "$_DFF_P_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:116.1-120.4"
-          },
-          "port_directions": {
-            "C": "input",
-            "D": "input",
-            "Q": "output"
-          },
-          "connections": {
-            "C": [ 2 ],
-            "D": [ 8 ],
-            "Q": [ 5 ]
-          }
-        },
-        "$auto$simplemap.cc:83:simplemap_bitop$97": {
-          "hide_name": 1,
-          "type": "$_OR_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:118.10-118.21"
-          },
-          "port_directions": {
-            "A": "input",
-            "B": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 7 ],
-            "B": [ 4 ],
-            "Y": [ 8 ]
-          }
-        },
-        "$auto$simplemap.cc:83:simplemap_bitop$98": {
-          "hide_name": 1,
-          "type": "$_XOR_",
-          "parameters": {
-          },
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:119.10-119.21"
-          },
-          "port_directions": {
-            "A": "input",
-            "B": "input",
-            "Y": "output"
-          },
-          "connections": {
-            "A": [ 3 ],
-            "B": [ 4 ],
-            "Y": [ 6 ]
-          }
-        }
-      },
-      "netnames": {
-        "$0\\out1[0:0]": {
-          "hide_name": 1,
+        "top_d.c_in": {
+          "hide_name": 0,
           "bits": [ 8 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:116.1-120.4"
-          }
-        },
-        "$0\\temp[0:0]": {
-          "hide_name": 1,
-          "bits": [ 6 ],
-          "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:116.1-120.4"
-          }
-        },
-        "c_in": {
-          "hide_name": 0,
-          "bits": [ 3 ],
-          "attributes": {
+            "hdlname": "top_d c_in",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:110.7-110.11"
           }
         },
-        "clock": {
+        "top_d.clock": {
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
+            "hdlname": "top_d clock",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:109.7-109.12"
           }
         },
-        "d_in": {
+        "top_d.d_in": {
           "hide_name": 0,
-          "bits": [ 4 ],
+          "bits": [ 9 ],
           "attributes": {
+            "hdlname": "top_d d_in",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:111.7-111.11"
           }
         },
-        "out1": {
+        "top_d.out1": {
           "hide_name": 0,
-          "bits": [ 5 ],
+          "bits": [ 28 ],
           "attributes": {
+            "hdlname": "top_d out1",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:112.9-112.13"
           }
         },
-        "temp": {
+        "top_d.temp": {
           "hide_name": 0,
-          "bits": [ 7 ],
+          "bits": [ 26 ],
           "attributes": {
+            "hdlname": "top_d temp",
             "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_log_mod.v:114.5-114.9"
           }
         }

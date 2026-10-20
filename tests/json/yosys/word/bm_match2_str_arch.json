@@ -3,7 +3,7 @@
   "modules": {
     "bm_match2_str_arch": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_match2_str_arch.v:8.1-60.10"
       },
       "ports": {

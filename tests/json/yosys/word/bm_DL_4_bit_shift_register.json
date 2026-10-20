@@ -3,7 +3,7 @@
   "modules": {
     "bm_DL_4_bit_shift_register": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:3.1-14.10"
       },
       "ports": {
@@ -29,6 +29,102 @@
         }
       },
       "cells": {
+        "Stage0": {
+          "hide_name": 0,
+          "type": "muxdff",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:12.9-12.44"
+          },
+          "port_directions": {
+            "Clock": "input",
+            "D0": "input",
+            "D1": "input",
+            "Q": "output",
+            "Sel": "input"
+          },
+          "connections": {
+            "Clock": [ 8 ],
+            "D0": [ 10 ],
+            "D1": [ 2 ],
+            "Q": [ 9 ],
+            "Sel": [ 6 ]
+          }
+        },
+        "Stage1": {
+          "hide_name": 0,
+          "type": "muxdff",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:11.9-11.44"
+          },
+          "port_directions": {
+            "Clock": "input",
+            "D0": "input",
+            "D1": "input",
+            "Q": "output",
+            "Sel": "input"
+          },
+          "connections": {
+            "Clock": [ 8 ],
+            "D0": [ 11 ],
+            "D1": [ 3 ],
+            "Q": [ 10 ],
+            "Sel": [ 6 ]
+          }
+        },
+        "Stage2": {
+          "hide_name": 0,
+          "type": "muxdff",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:10.9-10.44"
+          },
+          "port_directions": {
+            "Clock": "input",
+            "D0": "input",
+            "D1": "input",
+            "Q": "output",
+            "Sel": "input"
+          },
+          "connections": {
+            "Clock": [ 8 ],
+            "D0": [ 12 ],
+            "D1": [ 4 ],
+            "Q": [ 11 ],
+            "Sel": [ 6 ]
+          }
+        },
+        "Stage3": {
+          "hide_name": 0,
+          "type": "muxdff",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:9.9-9.41"
+          },
+          "port_directions": {
+            "Clock": "input",
+            "D0": "input",
+            "D1": "input",
+            "Q": "output",
+            "Sel": "input"
+          },
+          "connections": {
+            "Clock": [ 8 ],
+            "D0": [ 7 ],
+            "D1": [ 5 ],
+            "Q": [ 12 ],
+            "Sel": [ 6 ]
+          }
+        }
       },
       "netnames": {
         "Clock": {
@@ -70,7 +166,6 @@
     },
     "muxdff": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:16.1-27.10"
       },
       "ports": {

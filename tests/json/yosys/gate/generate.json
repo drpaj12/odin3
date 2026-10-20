@@ -3,6 +3,7 @@
   "modules": {
     "down_counter": {
       "attributes": {
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/generate.v:1.1-25.10"
       },
       "ports": {

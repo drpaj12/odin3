@@ -3,7 +3,6 @@
   "modules": {
     "a": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag2_mod.v:45.1-61.10"
       },
       "ports": {
@@ -111,7 +110,6 @@
     },
     "b": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag2_mod.v:64.1-83.10"
       },
       "ports": {
@@ -177,6 +175,28 @@
             "B": [ 11, 12 ],
             "Y": [ 9, 10 ]
           }
+        },
+        "my_a": {
+          "hide_name": 0,
+          "type": "a",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag2_mod.v:76.3-76.32"
+          },
+          "port_directions": {
+            "a_in": "input",
+            "b_in": "input",
+            "clock": "input",
+            "out": "output"
+          },
+          "connections": {
+            "a_in": [ 3, 4 ],
+            "b_in": [ 5, 6 ],
+            "clock": [ 2 ],
+            "out": [ 11, 12 ]
+          }
         }
       },
       "netnames": {
@@ -226,7 +246,7 @@
     },
     "bm_dag2_mod": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag2_mod.v:4.1-42.10"
       },
       "ports": {
@@ -352,6 +372,50 @@
             "CLK": [ 2 ],
             "D": [ 19 ],
             "Q": [ 12 ]
+          }
+        },
+        "top_a": {
+          "hide_name": 0,
+          "type": "a",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag2_mod.v:33.3-33.35"
+          },
+          "port_directions": {
+            "a_in": "input",
+            "b_in": "input",
+            "clock": "input",
+            "out": "output"
+          },
+          "connections": {
+            "a_in": [ 4, 5 ],
+            "b_in": [ 6, 7 ],
+            "clock": [ 2 ],
+            "out": [ 13, 14 ]
+          }
+        },
+        "top_b": {
+          "hide_name": 0,
+          "type": "b",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag2_mod.v:34.3-34.35"
+          },
+          "port_directions": {
+            "a_in": "input",
+            "b_in": "input",
+            "clock": "input",
+            "out": "output"
+          },
+          "connections": {
+            "a_in": [ 4, 5 ],
+            "b_in": [ 6, 7 ],
+            "clock": [ 2 ],
+            "out": [ 15, 16 ]
           }
         }
       },

@@ -3,7 +3,7 @@
   "modules": {
     "bm_DL_four_bit_adder_continuous_assign": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:3.1-12.10"
       },
       "ports": {
@@ -65,8 +65,125 @@
         }
       },
       "cells": {
+        "stage0": {
+          "hide_name": 0,
+          "type": "fulladd",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:7.10-7.42"
+          },
+          "port_directions": {
+            "Cin": "input",
+            "Cout": "output",
+            "s": "output",
+            "x": "input",
+            "y": "input"
+          },
+          "connections": {
+            "Cin": [ 2 ],
+            "Cout": [ 16 ],
+            "s": [ 14 ],
+            "x": [ 6 ],
+            "y": [ 10 ]
+          }
+        },
+        "stage1": {
+          "hide_name": 0,
+          "type": "fulladd",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:8.10-8.37"
+          },
+          "port_directions": {
+            "Cin": "input",
+            "Cout": "output",
+            "s": "output",
+            "x": "input",
+            "y": "input"
+          },
+          "connections": {
+            "Cin": [ 16 ],
+            "Cout": [ 17 ],
+            "s": [ 13 ],
+            "x": [ 5 ],
+            "y": [ 9 ]
+          }
+        },
+        "stage2": {
+          "hide_name": 0,
+          "type": "fulladd",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:9.10-9.37"
+          },
+          "port_directions": {
+            "Cin": "input",
+            "Cout": "output",
+            "s": "output",
+            "x": "input",
+            "y": "input"
+          },
+          "connections": {
+            "Cin": [ 17 ],
+            "Cout": [ 18 ],
+            "s": [ 12 ],
+            "x": [ 4 ],
+            "y": [ 8 ]
+          }
+        },
+        "stage3": {
+          "hide_name": 0,
+          "type": "fulladd",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:10.10-10.43"
+          },
+          "port_directions": {
+            "Cin": "input",
+            "Cout": "output",
+            "s": "output",
+            "x": "input",
+            "y": "input"
+          },
+          "connections": {
+            "Cin": [ 18 ],
+            "Cout": [ 15 ],
+            "s": [ 11 ],
+            "x": [ 3 ],
+            "y": [ 7 ]
+          }
+        }
       },
       "netnames": {
+        "c1": {
+          "hide_name": 0,
+          "bits": [ 16 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:7.39-7.41"
+          }
+        },
+        "c2": {
+          "hide_name": 0,
+          "bits": [ 17 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:8.34-8.36"
+          }
+        },
+        "c3": {
+          "hide_name": 0,
+          "bits": [ 18 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:9.34-9.36"
+          }
+        },
         "carryin": {
           "hide_name": 0,
           "bits": [ 2 ],
@@ -169,7 +286,6 @@
     },
     "fulladd": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:14.1-21.10"
       },
       "ports": {

@@ -3,6 +3,7 @@
   "modules": {
     "bm_DL_4_bit_comparator": {
       "attributes": {
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:3.1-27.10"
       },
       "ports": {

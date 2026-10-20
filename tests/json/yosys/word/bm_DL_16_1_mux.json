@@ -3,7 +3,7 @@
   "modules": {
     "bm_DL_16_1_mux": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
+        "top": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_16_1_mux.v:3.1-15.10"
       },
       "ports": {
@@ -21,8 +21,115 @@
         }
       },
       "cells": {
+        "Mux1": {
+          "hide_name": 0,
+          "type": "mux4to1",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_16_1_mux.v:9.10-9.39"
+          },
+          "port_directions": {
+            "S": "input",
+            "W": "input",
+            "f": "output"
+          },
+          "connections": {
+            "S": [ 18, 19 ],
+            "W": [ 2, 3, 4, 5 ],
+            "f": [ 23 ]
+          }
+        },
+        "Mux2": {
+          "hide_name": 0,
+          "type": "mux4to1",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_16_1_mux.v:10.10-10.39"
+          },
+          "port_directions": {
+            "S": "input",
+            "W": "input",
+            "f": "output"
+          },
+          "connections": {
+            "S": [ 18, 19 ],
+            "W": [ 6, 7, 8, 9 ],
+            "f": [ 24 ]
+          }
+        },
+        "Mux3": {
+          "hide_name": 0,
+          "type": "mux4to1",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_16_1_mux.v:11.10-11.40"
+          },
+          "port_directions": {
+            "S": "input",
+            "W": "input",
+            "f": "output"
+          },
+          "connections": {
+            "S": [ 18, 19 ],
+            "W": [ 10, 11, 12, 13 ],
+            "f": [ 25 ]
+          }
+        },
+        "Mux4": {
+          "hide_name": 0,
+          "type": "mux4to1",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_16_1_mux.v:12.10-12.41"
+          },
+          "port_directions": {
+            "S": "input",
+            "W": "input",
+            "f": "output"
+          },
+          "connections": {
+            "S": [ 18, 19 ],
+            "W": [ 14, 15, 16, 17 ],
+            "f": [ 26 ]
+          }
+        },
+        "Mux5": {
+          "hide_name": 0,
+          "type": "mux4to1",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_16_1_mux.v:13.10-13.36"
+          },
+          "port_directions": {
+            "S": "input",
+            "W": "input",
+            "f": "output"
+          },
+          "connections": {
+            "S": [ 20, 21 ],
+            "W": [ 23, 24, 25, 26 ],
+            "f": [ 22 ]
+          }
+        }
       },
       "netnames": {
+        "M": {
+          "hide_name": 0,
+          "bits": [ 23, 24, 25, 26 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_16_1_mux.v:7.13-7.14"
+          }
+        },
         "S16": {
           "hide_name": 0,
           "bits": [ 18, 19, 20, 21 ],
@@ -48,7 +155,6 @@
     },
     "mux4to1": {
       "attributes": {
-        "cells_not_processed": "00000000000000000000000000000001",
         "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_16_1_mux.v:17.1-33.10"
       },
       "ports": {
