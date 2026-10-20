@@ -80,21 +80,25 @@ static void assert_times_are_numbers(const odin3_abc_run_report *rep) {
     }
 }
 
+static void assert_blif_counts(const odin3_abc_run_report *rep);
+
 static void test_blif_exchange_report(void) {
     read_data("keep_net");
     run_abc();
     TEST_ASSERT_EQUAL_UINT32(1, got.count);
     const odin3_abc_run_report *rep = &got.reports[0];
+    assert_blif_counts(rep);
+    assert_times_are_numbers(rep);
+}
+
+static void assert_blif_counts(const odin3_abc_run_report *rep) {
     TEST_ASSERT_EQUAL_STRING("keep_net", rep->module);
     TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_EXCHANGE_BLIF, rep->exchange);
     TEST_ASSERT_EQUAL_UINT32(0, rep->run_no);
     TEST_ASSERT_TRUE(rep->cells >= 2);
-    TEST_ASSERT_TRUE(rep->luts >= 1);
-    TEST_ASSERT_TRUE(rep->depth >= 1);
-    TEST_ASSERT_EQUAL_UINT32(0, rep->aig_objs); /* no AIG in the BLIF exchange */
-    TEST_ASSERT_EQUAL_UINT32(0, rep->namemap_total);
+    TEST_ASSERT_TRUE(rep->luts >= 1 && rep->depth >= 1);
+    TEST_ASSERT_EQUAL_UINT32(0, rep->aig_objs + rep->namemap_total); /* no AIG, no name map */
     TEST_ASSERT_TRUE(rep->edges > 0);
-    assert_times_are_numbers(rep);
 }
 
 static void test_aig_exchange_report(void) {
