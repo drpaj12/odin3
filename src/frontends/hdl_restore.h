@@ -36,9 +36,10 @@ typedef struct odin3_hdl_restored {
 } odin3_hdl_restored;
 
 /*
- * Makes SOURCE{locs, hier} (odin3_prov_source: kind SOURCE, the context's run, ast 0, loc 0), then,
- * when base is not 0, DERIVED{parents [source, base], hier} (odin3_prov_derive_hier) in the
- * context's current operation; out->prov is the DERIVED record, or the SOURCE when base is 0.
+ * Makes SOURCE{locs, hier} (odin3_prov_source: kind SOURCE, the context's run, ast 0, loc 0), then
+ * DERIVED{parents [source, base], hier} (odin3_prov_derive_hier) in the context's current
+ * operation; out->prov is the DERIVED record. With base 0 (the reader has no record of its own) its
+ * only parent is the SOURCE.
  * Records are hash-consed, so equal text on many objects is one SOURCE and one DERIVED per
  * distinct (source, base) pair. The caller begins one operation (odin3_prov_begin_op) per read
  * run; this function never does. File strings are interned in the design's table. More than

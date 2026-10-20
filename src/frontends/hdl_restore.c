@@ -42,11 +42,11 @@ odin3_status odin3_hdl_restore(odin3_pass_ctx *ctx, const odin3_hdl_restore_req 
         odin3_prov_origin origin = {locs, count, 0, req->hier_str};
         st = odin3_prov_source(ctx, &origin, &source);
     }
-    if (st == ODIN3_OK && req->base.v != 0) {
+    if (st == ODIN3_OK) {
         const odin3_prov_id parents[2] = {source, req->base};
-        st = odin3_prov_derive_hier(ctx, (odin3_prov_list){parents, 2}, req->hier_str, &out->prov);
-    } else if (st == ODIN3_OK) {
-        out->prov = source;
+        uint32_t n_parents = req->base.v != 0 ? 2 : 1;
+        st = odin3_prov_derive_hier(ctx, (odin3_prov_list){parents, n_parents}, req->hier_str,
+                                    &out->prov);
     }
     out->capped = st == ODIN3_OK && req->n > ODIN3_HDL_LOC_MAX;
     return st;

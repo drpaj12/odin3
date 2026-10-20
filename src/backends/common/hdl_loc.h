@@ -95,8 +95,9 @@ odin3_status odin3_hdl_name_vtr_decode(odin3_bytes name, odin3_strbuf *buf, odin
 /* --- the HDL locations of an object (W-1 to W-5) ---------------------------------------------- */
 
 /*
- * The state of one writer's use of this module: a cache of "prov ID -> first HDL leaf" and the
- * files already warned about. Create one per write; destroy it when done.
+ * The state of one writer's use of this module: per provenance record, its first 8 distinct HDL
+ * locations and first HDL leaf (memoised, so a chain shared by many objects is walked once), and
+ * the files already warned about. Create one per write; destroy it when done.
  */
 typedef struct odin3_hdl_ctx odin3_hdl_ctx;
 
@@ -115,14 +116,19 @@ typedef struct odin3_hdl_locs_out {
 /*
  * The HDL locations of the object with provenance prov (W-2, W-3): the SOURCE leaves of the
  * backward walk (odin3_prov_sources, iterative), in parent order. A leaf counts when its first
- * location has a file whose bytes are all in 0x20..0x7e; IMPORTED leaves never count. Each
- * location of a counted leaf with such a file is taken once (equal file, line, col, end_line and
- * end_col are one), up to ODIN3_HDL_LOC_MAX. A file with a byte outside that range is skipped with
- * one WARNING per file (`<who>: source file name '<name>' cannot be written; its locations are
+ * location has a line and a file whose bytes are all in 0x20..0x7e; IMPORTED leaves never count.
+ * Each location of a counted leaf with such a file is taken once (equal file, line, col, end_line
+ * and end_col are one), up to ODIN3_HDL_LOC_MAX. A file with a byte outside that range is skipped
+ * with one WARNING per file (`<who>: source file name '<name>' cannot be written; its locations are
  * skipped`, X-4). *out is cleared first; prov 0 or unknown gives n = 0. NO_MEMORY or the walk's
  * status.
  */
 odin3_status odin3_hdl_locs(odin3_hdl_ctx *ctx, odin3_prov_id prov, odin3_hdl_locs_out *out);
+
+/* The provenance records the context has resolved so far (each is walked once per context; a test
+ * seam for the memoisation: many objects over one shared chain add one record each, not the
+ * chain's length). */
+size_t odin3_hdl_ctx_records(const odin3_hdl_ctx *ctx);
 
 /* The design a context was made for. */
 const odin3_design *odin3_hdl_ctx_design(const odin3_hdl_ctx *ctx);

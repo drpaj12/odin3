@@ -561,7 +561,8 @@ hash-consing: every field including `run` and `op` for `DERIVED`; every field ex
 requires a prov ID argument, so nothing is
 created without lineage. Readers use `odin3_prov_source` / `odin3_prov_imported`; a reader that
 restores locations a writer printed (5.4, `odin3_hdl_restore`) makes one `DERIVED` record per
-object, parents = the restored `SOURCE` then the reader's own record.
+object, parents = the restored `SOURCE` then the reader's own record (the `SOURCE` alone when the
+reader has none).
 
 **Names in output (spec §5.3).** An object's provenance name is
 `hier/path/cellname@file:line`, from its first HDL location: the first `SOURCE` leaf of the

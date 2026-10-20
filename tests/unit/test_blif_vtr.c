@@ -3443,6 +3443,25 @@ static void test_src_attr_unwritable_file(void) {
                                  tc.log.data);
 }
 
+/* Review M3: read_blif accepts what --src-attr wrote (a blank inside the file name, two locations),
+ * and writing it again gives the same bytes. */
+static void test_src_attr_round_trips(void) {
+    src_begin();
+    odin3_prov_id parents[2] = {hdl_prov("a b.v", 3, false), hdl_prov("c.v", 4, false)};
+    (void)src_cell(hdl_derived(parents, 2));
+    write_plain("--src-attr out.blif");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".attr src \"a b.v:3.1-3.5|c.v:4.1-4.5\"\n"),
+                                 out.data);
+    char *first = odin3_util_malloc(out.len + 1);
+    TEST_ASSERT_NOT_NULL(first);
+    memcpy(first, out.data, out.len + 1);
+    bvt_free(&tc);
+    read_ok(first, false);
+    write_plain("--src-attr out.blif");
+    TEST_ASSERT_EQUAL_STRING(first, out.data);
+    odin3_util_free(first);
+}
+
 /* The VTR dialect has no .attr lines: the pass and the API refuse the combination. */
 static void test_src_attr_refused_with_vtr(void) {
     src_begin();
@@ -3477,6 +3496,7 @@ static void run_src_attr(void) {
     RUN_TEST(test_src_attr_own_src_wins);
     RUN_TEST(test_src_attr_unwritable_file);
     RUN_TEST(test_src_attr_refused_with_vtr);
+    RUN_TEST(test_src_attr_round_trips);
     RUN_TEST(test_vtr_names_source_and_imported);
 }
 

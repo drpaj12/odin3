@@ -3,6 +3,7 @@
 
 #include "util/alloc.h"
 #include "util/log.h"
+#include "util/vec.h"
 
 #include <string.h>
 
@@ -290,10 +291,28 @@ odin3_status odin3_hdl_name_vtr_decode(odin3_bytes name, odin3_strbuf *buf, odin
 /* --- the object's HDL locations ----------------------------------------------------------------
  */
 
+/* What is known about one provenance record: its first ODIN3_HDL_LOC_MAX distinct HDL locations
+ * (a slice of the pool, walk order) and the first counted leaf. */
+typedef struct memo_entry {
+    uint32_t off;        /* first location in the pool */
+    uint32_t first_leaf; /* record ID of the first counted leaf, 0 for none */
+    uint8_t n;           /* locations */
+    bool capped;         /* more than ODIN3_HDL_LOC_MAX distinct locations below this record */
+} memo_entry;
+
+/* A record of the explicit stack of the memoising walk. */
+typedef struct walk_frame {
+    odin3_prov_id prov;
+    uint32_t next; /* the parents before this index are resolved */
+} walk_frame;
+
 struct odin3_hdl_ctx {
     const odin3_design *design;
     const char *who;
-    odin3_u64map *first;  /* prov ID -> the first HDL leaf (record ID), 0 for none */
+    odin3_u64map *memo;   /* prov ID -> index in entries */
+    odin3_vec entries;    /* memo_entry */
+    odin3_vec pool;       /* odin3_srcloc */
+    odin3_vec stack;      /* walk_frame */
     odin3_u64map *warned; /* file | kind << 32 -> 1 */
 };
 
@@ -304,9 +323,12 @@ odin3_hdl_ctx *odin3_hdl_ctx_create(const odin3_design *design, const char *who)
     }
     ctx->design = design;
     ctx->who = who;
-    ctx->first = odin3_u64map_create(0);
+    odin3_vec_init(&ctx->entries, sizeof(memo_entry));
+    odin3_vec_init(&ctx->pool, sizeof(odin3_srcloc));
+    odin3_vec_init(&ctx->stack, sizeof(walk_frame));
+    ctx->memo = odin3_u64map_create(0);
     ctx->warned = odin3_u64map_create(0);
-    if (ctx->first == NULL || ctx->warned == NULL) {
+    if (ctx->memo == NULL || ctx->warned == NULL) {
         odin3_hdl_ctx_destroy(ctx);
         return NULL;
     }
@@ -317,9 +339,16 @@ void odin3_hdl_ctx_destroy(odin3_hdl_ctx *ctx) {
     if (ctx == NULL) {
         return;
     }
-    odin3_u64map_destroy(ctx->first);
+    odin3_u64map_destroy(ctx->memo);
     odin3_u64map_destroy(ctx->warned);
+    odin3_vec_free(&ctx->entries);
+    odin3_vec_free(&ctx->pool);
+    odin3_vec_free(&ctx->stack);
     odin3_util_free(ctx);
+}
+
+size_t odin3_hdl_ctx_records(const odin3_hdl_ctx *ctx) {
+    return ctx->entries.len;
 }
 
 bool odin3_hdl_file_printable(const odin3_design *design, uint32_t file) {
@@ -370,73 +399,181 @@ static odin3_status warn_file(odin3_hdl_ctx *ctx, uint32_t file, uint32_t why, c
 
 enum { WHY_BYTES = 1, WHY_TEXT = 2 };
 
-/* The state of one backward walk. */
-typedef struct collect {
-    odin3_hdl_ctx *ctx;
-    odin3_hdl_locs_out *out; /* NULL: only the first leaf is wanted */
-    uint32_t first_leaf;     /* record ID of the first counted leaf, 0 for none yet */
-    odin3_status st;
-} collect;
+/* An entry being built. */
+typedef struct entry_build {
+    odin3_hdl_locs_out acc;
+    uint32_t first_leaf;
+} entry_build;
 
 static bool same_loc(const odin3_srcloc *lhs, const odin3_srcloc *rhs) {
     return lhs->file == rhs->file && lhs->line == rhs->line && lhs->col == rhs->col &&
            lhs->end_line == rhs->end_line && lhs->end_col == rhs->end_col;
 }
 
-static void add_loc(collect *col, const odin3_srcloc *loc) {
-    odin3_hdl_locs_out *out = col->out;
-    for (uint32_t i = 0; i < out->n; i++) {
-        if (same_loc(&out->locs[i], loc)) {
+static void add_loc(odin3_hdl_locs_out *acc, const odin3_srcloc *loc) {
+    for (uint32_t i = 0; i < acc->n; i++) {
+        if (same_loc(&acc->locs[i], loc)) {
             return;
         }
     }
-    if (out->n == ODIN3_HDL_LOC_MAX) {
-        out->capped = true;
+    if (acc->n == ODIN3_HDL_LOC_MAX) {
+        acc->capped = true;
         return;
     }
-    out->locs[out->n++] = *loc;
+    acc->locs[acc->n++] = *loc;
 }
 
-/* A file with a byte outside 0x20..0x7e is warned about (once) and not counted. */
-static bool usable_file(collect *col, uint32_t file) {
+/* A file with a byte outside 0x20..0x7e is warned about (once) and not counted; *st takes a
+ * failure of the warning. */
+static bool usable_file(odin3_hdl_ctx *ctx, uint32_t file, odin3_status *st) {
     if (file == 0) {
         return false;
     }
-    if (odin3_hdl_file_printable(col->ctx->design, file)) {
+    if (odin3_hdl_file_printable(ctx->design, file)) {
         return true;
     }
-    odin3_status st = warn_file(col->ctx, file, WHY_BYTES,
-                                "cannot be written (a byte outside 0x20..0x7e); its locations are "
-                                "skipped");
-    col->st = col->st != ODIN3_OK ? col->st : st;
+    odin3_status warned = warn_file(ctx, file, WHY_BYTES,
+                                    "cannot be written (a byte outside 0x20..0x7e); its locations "
+                                    "are skipped");
+    *st = *st != ODIN3_OK ? *st : warned;
     return false;
 }
 
-static void visit_leaf(void *user, odin3_prov_id leaf) {
-    collect *col = user;
-    const odin3_prov_record *rec = odin3_prov_get(col->ctx->design, leaf);
-    if (col->st != ODIN3_OK || rec == NULL || rec->kind != ODIN3_PROV_SOURCE || rec->n_locs == 0 ||
-        !usable_file(col, rec->locs[0].file)) {
-        return;
+/* The entry of a leaf (or unknown) record: a SOURCE leaf whose first location has a line and a
+ * usable file counts, and gives each of its locations that has both (W-2). */
+static odin3_status leaf_build(odin3_hdl_ctx *ctx, odin3_prov_id id, entry_build *build) {
+    const odin3_prov_record *rec = odin3_prov_get(ctx->design, id);
+    odin3_status st = ODIN3_OK;
+    if (rec == NULL || rec->kind != ODIN3_PROV_SOURCE || rec->n_locs == 0 ||
+        rec->locs[0].line == 0 || !usable_file(ctx, rec->locs[0].file, &st)) {
+        return st;
     }
-    if (col->first_leaf == 0) {
-        col->first_leaf = leaf.v;
-    }
-    for (uint32_t i = 0; col->out != NULL && i < rec->n_locs; i++) {
-        if (usable_file(col, rec->locs[i].file)) {
-            add_loc(col, &rec->locs[i]);
+    build->first_leaf = id.v;
+    for (uint32_t i = 0; i < rec->n_locs; i++) {
+        if (rec->locs[i].line != 0 && usable_file(ctx, rec->locs[i].file, &st)) {
+            add_loc(&build->acc, &rec->locs[i]);
         }
     }
+    return st;
+}
+
+static const memo_entry *memo_get(const odin3_hdl_ctx *ctx, odin3_prov_id prov) {
+    uint64_t index = 0;
+    if (!odin3_u64map_get(ctx->memo, prov.v, &index)) {
+        return NULL;
+    }
+    return odin3_vec_cat(&ctx->entries, (size_t)index);
+}
+
+/* The parent's locations after the ones built so far (the first ODIN3_HDL_LOC_MAX distinct of a
+ * concatenation need only the first ODIN3_HDL_LOC_MAX distinct of each part). */
+static void merge_entry(const odin3_hdl_ctx *ctx, const memo_entry *src, entry_build *build) {
+    const odin3_srcloc *pool = ctx->pool.data;
+    for (uint32_t i = 0; i < src->n; i++) {
+        add_loc(&build->acc, &pool[src->off + i]);
+    }
+    build->acc.capped = build->acc.capped || src->capped;
+    build->first_leaf = build->first_leaf != 0 ? build->first_leaf : src->first_leaf;
+}
+
+static odin3_status memo_store(odin3_hdl_ctx *ctx, odin3_prov_id prov, const entry_build *build) {
+    memo_entry *entry = odin3_vec_push(&ctx->entries);
+    if (entry == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    size_t off = ctx->pool.len;
+    for (uint32_t i = 0; i < build->acc.n; i++) {
+        odin3_srcloc *slot = odin3_vec_push(&ctx->pool);
+        if (slot == NULL) {
+            odin3_vec_pop(&ctx->entries);
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = build->acc.locs[i];
+    }
+    entry->off = (uint32_t)off;
+    entry->n = (uint8_t)build->acc.n;
+    entry->capped = build->acc.capped;
+    entry->first_leaf = build->first_leaf;
+    odin3_kv kv = {prov.v, ctx->entries.len - 1};
+    if (odin3_u64map_put(ctx->memo, kv) != ODIN3_OK) {
+        odin3_vec_pop(&ctx->entries);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    return ODIN3_OK;
+}
+
+/* One step of the walk on the frame at the top of the stack: push an unresolved parent, or build
+ * and store its entry and pop it. */
+static odin3_status walk_step(odin3_hdl_ctx *ctx) {
+    walk_frame *top = odin3_vec_at(&ctx->stack, ctx->stack.len - 1);
+    odin3_prov_id prov = top->prov;
+    const odin3_prov_record *rec = odin3_prov_get(ctx->design, prov);
+    entry_build build;
+    memset(&build, 0, sizeof build);
+    odin3_status st = ODIN3_OK;
+    if (rec == NULL || rec->kind != ODIN3_PROV_DERIVED) {
+        st = leaf_build(ctx, prov, &build);
+    } else {
+        odin3_prov_list parents = odin3_prov_parents(ctx->design, prov);
+        while (top->next < parents.count && memo_get(ctx, parents.ids[top->next]) != NULL) {
+            top->next++;
+        }
+        if (top->next < parents.count) {
+            odin3_prov_id pending = parents.ids[top->next];
+            walk_frame *frame = odin3_vec_push(&ctx->stack); /* top is stale after this */
+            if (frame == NULL) {
+                return ODIN3_ERR_NO_MEMORY;
+            }
+            frame->prov = pending;
+            return ODIN3_OK;
+        }
+        for (uint32_t i = 0; i < parents.count; i++) {
+            merge_entry(ctx, memo_get(ctx, parents.ids[i]), &build);
+        }
+    }
+    st = st == ODIN3_OK ? memo_store(ctx, prov, &build) : st;
+    if (st == ODIN3_OK) {
+        odin3_vec_pop(&ctx->stack);
+    }
+    return st;
+}
+
+/* The entry of prov, walking (iteratively, each record once per context) what is not known yet. */
+static odin3_status resolve(odin3_hdl_ctx *ctx, odin3_prov_id prov, const memo_entry **entry) {
+    odin3_status st = ODIN3_OK;
+    *entry = memo_get(ctx, prov);
+    if (*entry != NULL) {
+        return ODIN3_OK;
+    }
+    odin3_vec_clear(&ctx->stack);
+    walk_frame *frame = odin3_vec_push(&ctx->stack);
+    if (frame == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    frame->prov = prov;
+    while (st == ODIN3_OK && ctx->stack.len > 0) {
+        st = walk_step(ctx);
+    }
+    *entry = st == ODIN3_OK ? memo_get(ctx, prov) : NULL;
+    return st;
 }
 
 odin3_status odin3_hdl_locs(odin3_hdl_ctx *ctx, odin3_prov_id prov, odin3_hdl_locs_out *out) {
-    collect col = {ctx, out, 0, ODIN3_OK};
+    const memo_entry *entry = NULL;
     memset(out, 0, sizeof *out);
     if (odin3_prov_get(ctx->design, prov) == NULL) {
         return ODIN3_OK;
     }
-    odin3_status st = odin3_prov_sources(ctx->design, prov, visit_leaf, &col);
-    return st != ODIN3_OK ? st : col.st;
+    odin3_status st = resolve(ctx, prov, &entry);
+    if (st == ODIN3_OK) {
+        const odin3_srcloc *pool = ctx->pool.data;
+        out->n = entry->n;
+        out->capped = entry->capped;
+        for (uint32_t i = 0; i < entry->n; i++) {
+            out->locs[i] = pool[entry->off + i];
+        }
+    }
+    return st;
 }
 
 const odin3_design *odin3_hdl_ctx_design(const odin3_hdl_ctx *ctx) {
@@ -445,25 +582,16 @@ const odin3_design *odin3_hdl_ctx_design(const odin3_hdl_ctx *ctx) {
 
 odin3_status odin3_hdl_first_record(odin3_hdl_ctx *ctx, odin3_prov_id prov,
                                     const odin3_prov_record **rec) {
-    uint64_t leaf = 0;
+    const memo_entry *entry = NULL;
     *rec = NULL;
     if (odin3_prov_get(ctx->design, prov) == NULL) {
         return ODIN3_OK;
     }
-    if (!odin3_u64map_get(ctx->first, prov.v, &leaf)) {
-        collect col = {ctx, NULL, 0, ODIN3_OK};
-        odin3_status st = odin3_prov_sources(ctx->design, prov, visit_leaf, &col);
-        st = st != ODIN3_OK ? st : col.st;
-        if (st != ODIN3_OK) {
-            return st;
-        }
-        leaf = col.first_leaf;
-        if (odin3_u64map_put(ctx->first, (odin3_kv){prov.v, leaf}) != ODIN3_OK) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
+    odin3_status st = resolve(ctx, prov, &entry);
+    if (st == ODIN3_OK && entry->first_leaf != 0) {
+        *rec = odin3_prov_get(ctx->design, (odin3_prov_id){entry->first_leaf});
     }
-    *rec = leaf != 0 ? odin3_prov_get(ctx->design, (odin3_prov_id){(uint32_t)leaf}) : NULL;
-    return ODIN3_OK;
+    return st;
 }
 
 odin3_status odin3_hdl_first(odin3_hdl_ctx *ctx, odin3_prov_id prov, odin3_srcloc *loc,
@@ -496,6 +624,9 @@ static bool file_writable(odin3_hdl_ctx *ctx, const odin3_hdl_print_req *req, ui
     const odin3_strtab *tab = odin3_design_strtab(ctx->design);
     const char *text = odin3_strtab_get(tab, file);
     size_t len = odin3_strtab_len(tab, file);
+    if (text == NULL || len == 0) {
+        return false;
+    }
     bool bad = memchr(text, '|', len) != NULL;
     if (req->plain_token) {
         bad = bad || memchr(text, '"', len) != NULL || memchr(text, '\\', len) != NULL ||

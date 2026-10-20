@@ -97,13 +97,15 @@ static void test_hier_on_both(void) {
     TEST_ASSERT_EQUAL_UINT(hier, odin3_prov_get(design, rec->parents.ids[0])->hier);
 }
 
-/* No netlist record (base 0): the SOURCE alone. */
-static void test_base_zero_is_source_alone(void) {
+/* No netlist record (base 0): still one DERIVED record, whose only parent is the SOURCE. */
+static void test_base_zero_has_source_parent(void) {
     odin3_hdl_loc loc = hdl_loc("a.v", 7);
     odin3_prov_begin_op(&run);
     odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){{0}, &loc, 1, 0});
     const odin3_prov_record *rec = odin3_prov_get(design, got.prov);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_SOURCE, rec->kind);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
+    TEST_ASSERT_EQUAL_UINT(1, rec->parents.count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_SOURCE, odin3_prov_get(design, rec->parents.ids[0])->kind);
 }
 
 /* Hash-consing: equal restore calls are one record; another base or location is another. */
@@ -220,6 +222,110 @@ static void test_check_and_forward_index(void) {
     odin3_prov_index_destroy(index);
 }
 
+/* --- the memoised walk (review M2) --------------------------------------------------------------
+ */
+
+enum { CHAIN = 3000, OBJECTS = 2000 };
+
+/* A DERIVED chain of CHAIN records (each over the one before and a SOURCE of its own line), then
+ * OBJECTS records each over the chain's tail and a SOURCE of its own: all queried through one
+ * context. Each record is walked once, so the context resolves about CHAIN + 3 * OBJECTS records,
+ * not OBJECTS * CHAIN. */
+static void test_shared_deep_chain_is_walked_once(void) {
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("deep"), &ctx));
+    odin3_prov_id tail = {0};
+    for (uint32_t i = 0; i < CHAIN; i++) {
+        odin3_srcloc loc = {intern("c.v"), i + 1, 1, i + 1, 2, 0};
+        odin3_prov_id leaf = {0};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_prov_source(&ctx, &(odin3_prov_origin){&loc, 1, 0, 0}, &leaf));
+        odin3_prov_id parents[2] = {leaf, tail};
+        odin3_prov_begin_op(&ctx);
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_OK,
+            odin3_prov_derive(&ctx, (odin3_prov_list){parents, tail.v != 0 ? 2U : 1U}, &tail));
+    }
+    odin3_hdl_ctx *hdl = odin3_hdl_ctx_create(design, "test");
+    TEST_ASSERT_NOT_NULL(hdl);
+    for (uint32_t i = 0; i < OBJECTS; i++) {
+        odin3_srcloc loc = {intern("o.v"), i + 1, 1, i + 1, 2, 0};
+        odin3_prov_id own = {0};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_prov_source(&ctx, &(odin3_prov_origin){&loc, 1, 0, 0}, &own));
+        odin3_prov_id parents[2] = {own, tail};
+        odin3_prov_begin_op(&ctx);
+        odin3_prov_id object = {0};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_prov_derive(&ctx, (odin3_prov_list){parents, 2}, &object));
+        odin3_hdl_locs_out out;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hdl_locs(hdl, object, &out));
+        TEST_ASSERT_EQUAL_UINT(ODIN3_HDL_LOC_MAX, out.n);
+        TEST_ASSERT_TRUE(out.capped);
+        TEST_ASSERT_EQUAL_UINT(i + 1, out.locs[0].line); /* own leaf first, then the chain tail */
+        TEST_ASSERT_EQUAL_UINT(CHAIN, out.locs[1].line);
+        TEST_ASSERT_EQUAL_UINT(CHAIN - (ODIN3_HDL_LOC_MAX - 2),
+                               out.locs[ODIN3_HDL_LOC_MAX - 1].line);
+    }
+    TEST_ASSERT_TRUE(odin3_hdl_ctx_records(hdl) <= (size_t)CHAIN * 2 + (size_t)OBJECTS * 3);
+    odin3_hdl_ctx_destroy(hdl);
+}
+
+/* The memoised result equals the plain definition on a small DAG with a shared diamond. */
+static void test_memo_equals_walk_on_diamond(void) {
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("dia"), &ctx));
+    odin3_prov_id leaf[3];
+    for (uint32_t i = 0; i < 3; i++) {
+        odin3_srcloc loc = {intern("d.v"), i + 1, 1, i + 1, 2, 0};
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_OK, odin3_prov_source(&ctx, &(odin3_prov_origin){&loc, 1, 0, 0}, &leaf[i]));
+    }
+    odin3_prov_id left = {0};
+    odin3_prov_id right = {0};
+    odin3_prov_id top = {0};
+    odin3_prov_id lp[2] = {leaf[0], leaf[1]};
+    odin3_prov_id rp[2] = {leaf[2], leaf[1]};
+    odin3_prov_begin_op(&ctx);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){lp, 2}, &left));
+    odin3_prov_begin_op(&ctx);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){rp, 2}, &right));
+    odin3_prov_id tp[2] = {left, right};
+    odin3_prov_begin_op(&ctx);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){tp, 2}, &top));
+    odin3_hdl_ctx *hdl = odin3_hdl_ctx_create(design, "test");
+    TEST_ASSERT_NOT_NULL(hdl);
+    odin3_hdl_locs_out out;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hdl_locs(hdl, top, &out));
+    TEST_ASSERT_EQUAL_UINT(3, out.n);
+    TEST_ASSERT_EQUAL_UINT(1, out.locs[0].line);
+    TEST_ASSERT_EQUAL_UINT(2, out.locs[1].line);
+    TEST_ASSERT_EQUAL_UINT(3, out.locs[2].line);
+    TEST_ASSERT_FALSE(out.capped);
+    odin3_hdl_ctx_destroy(hdl);
+}
+
+/* Review L1: a location with line 0 is never printed (the parser would reject `file:0`). */
+static void test_line_zero_is_skipped(void) {
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("zero"), &ctx));
+    odin3_srcloc locs[2] = {{intern("a.v"), 0, 0, 0, 0, 0}, {intern("b.v"), 5, 0, 0, 0, 0}};
+    odin3_prov_id only_zero = {0};
+    odin3_prov_id mixed = {0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_prov_source(&ctx, &(odin3_prov_origin){&locs[0], 1, 0, 0}, &only_zero));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_prov_source(&ctx, &(odin3_prov_origin){locs, 2, 0, 0}, &mixed));
+    odin3_hdl_ctx *hdl = odin3_hdl_ctx_create(design, "test");
+    TEST_ASSERT_NOT_NULL(hdl);
+    odin3_hdl_locs_out out;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hdl_locs(hdl, only_zero, &out));
+    TEST_ASSERT_EQUAL_UINT(0, out.n);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hdl_locs(hdl, mixed, &out));
+    TEST_ASSERT_EQUAL_UINT(0, out.n); /* the first location has no line: the leaf does not count */
+    odin3_hdl_ctx_destroy(hdl);
+}
+
 /* --- dump_locs ------------------------------------------------------------------------------- */
 
 static char *read_whole(const char *path) {
@@ -275,6 +381,28 @@ static void test_dump_locs_lines(void) {
     odin3_util_free(text);
 }
 
+/* Review L4: a `|` or backslash in a name is escaped, so the fields stay unambiguous. */
+static void test_dump_locs_escapes_names(void) {
+    odin3_hdl_loc loc = hdl_loc("a.v", 7);
+    odin3_prov_begin_op(&run);
+    odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), &loc, 1, 0});
+    odin3_module_id mid = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("t"), got.prov, &mid));
+    odin3_net_id net = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(odin3_module_get(design, mid),
+                                                     intern("x|y\\z"), got.prov, &net));
+    char dir[] = "/tmp/odin3_dumplocs_XXXXXX";
+    char path[PATH_MAX_LEN];
+    TEST_ASSERT_NOT_NULL(mkdtemp(dir));
+    (void)snprintf(path, sizeof path, "%s/locs.txt", dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "dump_locs", odin3_bytes_cstr(path)));
+    char *text = read_whole(path);
+    expect_line(text, "t|net|x\\|y\\\\z|a.v:7.1-7.9\n");
+    odin3_util_free(text);
+    (void)remove(path);
+    (void)rmdir(dir);
+}
+
 static void test_dump_locs_arguments(void) {
     errors_seen = 0;
     odin3_log_set_sink(error_sink, NULL);
@@ -287,13 +415,17 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_record_shape);
     RUN_TEST(test_hier_on_both);
-    RUN_TEST(test_base_zero_is_source_alone);
+    RUN_TEST(test_base_zero_has_source_parent);
+    RUN_TEST(test_shared_deep_chain_is_walked_once);
+    RUN_TEST(test_memo_equals_walk_on_diamond);
+    RUN_TEST(test_line_zero_is_skipped);
     RUN_TEST(test_equal_calls_one_record);
     RUN_TEST(test_hdl_view_of_restored);
     RUN_TEST(test_cap);
     RUN_TEST(test_invalid_arguments);
     RUN_TEST(test_check_and_forward_index);
     RUN_TEST(test_dump_locs_lines);
+    RUN_TEST(test_dump_locs_escapes_names);
     RUN_TEST(test_dump_locs_arguments);
     return UNITY_END();
 }

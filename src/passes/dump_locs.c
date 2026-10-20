@@ -2,7 +2,10 @@
  * dump_locs.c — the dump_locs pass (spec 5.4 section 6, T-3): every live module, wire, net and
  * node with its HDL locations, one line each, `module|kind|name|SRC`. SRC is the text the writers
  * print (backends/common/hdl_loc.h: only SOURCE leaves, Yosys's form, up to 8 joined by `|`) and is
- * empty for an object with none. An unnamed object is `$w<ID>`, `$n<ID>` or `$c<ID>`. The tool that
+ * empty for an object with none. In the module, kind and name fields a backslash is written as two,
+ * a `|` as backslash and `|`, and a newline as backslash and `n`, so the first three unescaped
+ * `|` end the fields and SRC (the rest of the line, its own `|` unescaped) is unambiguous. An
+ * unnamed object is `$w<ID>`, `$n<ID>` or `$c<ID>`. The tool that
  * measures a write and read back (tools/loc-check) runs it before and after and compares.
  */
 #include "backends/common/hdl_loc.h"
@@ -37,6 +40,21 @@ typedef struct dump {
     odin3_strbuf src;
 } dump;
 
+/* Appends text with backslash, `|` and newline escaped (see the file comment). */
+static odin3_status append_escaped(odin3_strbuf *out, const char *text) {
+    odin3_status st = ODIN3_OK;
+    for (const char *at = text; st == ODIN3_OK && *at != '\0'; at++) {
+        if (*at == '\\' || *at == '|') {
+            st = odin3_strbuf_appendf(out, "\\%c", *at);
+        } else if (*at == '\n') {
+            st = odin3_strbuf_append(out, odin3_bytes_cstr("\\n"));
+        } else {
+            st = odin3_strbuf_append(out, (odin3_bytes){at, 1});
+        }
+    }
+    return st;
+}
+
 static odin3_status add_line(dump *state, const dump_line *line) {
     odin3_hdl_locs_out locs;
     uint32_t written = 0;
@@ -45,11 +63,10 @@ static odin3_status add_line(dump *state, const dump_line *line) {
     odin3_strbuf_clear(&state->src);
     st = st == ODIN3_OK && locs.n > 0 ? odin3_hdl_src_text(state->hdl, &req, &state->src, &written)
                                       : st;
-    st = st == ODIN3_OK
-             ? odin3_strbuf_appendf(&state->text, "%s|%s|", state->module_name, line->kind)
-             : st;
+    st = st == ODIN3_OK ? append_escaped(&state->text, state->module_name) : st;
+    st = st == ODIN3_OK ? odin3_strbuf_appendf(&state->text, "|%s|", line->kind) : st;
     if (st == ODIN3_OK && line->name != 0) {
-        st = odin3_strbuf_appendf(&state->text, "%s", odin3_strtab_get(state->tab, line->name));
+        st = append_escaped(&state->text, odin3_strtab_get(state->tab, line->name));
     } else if (st == ODIN3_OK) {
         st = odin3_strbuf_appendf(&state->text, "$%c%u", line->prefix, (unsigned)line->id);
     }
