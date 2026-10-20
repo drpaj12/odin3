@@ -310,6 +310,16 @@ static void put_cover_value(jw *out, const odin3_value *val) {
     jw_char(out, '"');
 }
 
+void jw_cell_param_int(jw *out, jw_cell *cell, const char *key, int64_t num) {
+    (void)jw_claim(out, ODIN3_WATTR_PARAMETER, key);
+    jw_param_int(out, &cell->params, key, num);
+}
+
+void jw_cell_param_key(jw *out, jw_cell *cell, const char *key) {
+    (void)jw_claim(out, ODIN3_WATTR_PARAMETER, key);
+    jw_key(out, &cell->params, key);
+}
+
 void jw_param(jw *out, jw_list *list, const char *key, const odin3_value *val) {
     jw_key(out, list, key);
     switch (val->kind) {
@@ -396,15 +406,31 @@ typedef struct user_attrs {
     jw *out;
     jw_list *list;
     odin3_wattr_role role;
+    bool is_node; /* only a cell has parameters: elsewhere `parameter:<NAME>` is an attribute */
 } user_attrs;
 
 static odin3_status user_attr_visit(void *ctx, uint32_t key_str, const odin3_value *value) {
     const user_attrs *ua = ctx;
     jw *out = ua->out;
     odin3_wattr attr = odin3_wattr_classify(out->strtab, key_str, value);
+    if (attr.instance_param && !ua->is_node) {
+        attr.role = ODIN3_WATTR_ATTRIBUTE;
+        attr.key = (odin3_bytes){odin3_strtab_get(out->strtab, key_str),
+                                 odin3_strtab_len(out->strtab, key_str)};
+        attr.instance_param = false;
+    }
     /* attr.key ends where its strtab string ends, so it is NUL-terminated. */
     const char *key = attr.key.ptr;
-    if (attr.role != ua->role || !jw_claim(out, attr.role, key)) {
+    if (attr.role != ua->role) {
+        return out->status;
+    }
+    if (!jw_claim(out, attr.role, key)) {
+        if (attr.instance_param && out->status == ODIN3_OK) {
+            odin3_log(ODIN3_LOG_WARN,
+                      "write_json: attribute 'parameter:%s' dropped: the cell type has a "
+                      "parameter '%s'",
+                      key, key);
+        }
         return out->status;
     }
     if (attr.form == ODIN3_WATTR_VALUE) {
@@ -424,7 +450,7 @@ void jw_user_attrs(jw *out, jw_list *list, odin3_objref obj, odin3_wattr_role ro
     if (out->status != ODIN3_OK) {
         return;
     }
-    user_attrs ctx = {out, list, role};
+    user_attrs ctx = {out, list, role, obj.kind == ODIN3_OBJ_NODE};
     odin3_status status = odin3_attr_foreach(out->module, obj, user_attr_visit, &ctx);
     out->status = out->status != ODIN3_OK ? out->status : status;
 }

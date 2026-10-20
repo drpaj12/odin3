@@ -640,6 +640,80 @@ static void test_instance_parameter_attributes(void) {
     (void)remove("t6c.json");
 }
 
+/* A `parameter:<NAME>` attribute of an instance whose type has a parameter <NAME> does not write
+ * a second key: the real parameter stays, the attribute is dropped (with a warning). */
+static void test_instance_parameter_collision(void) {
+    odin3_module *mod = new_module("top");
+    odin3_net_id net_x = add_port(mod, (port_args){"x", ODIN3_DIR_IN, 1});
+    odin3_net_id net_s = add_port(mod, (port_args){"s", ODIN3_DIR_IN, 1});
+    odin3_net_id net_y = add_port(mod, (port_args){"y", ODIN3_DIR_OUT, 2});
+    odin3_net_id y1 = odin3_wire_net(mod, odin3_module_port_wire(mod, 2), 1);
+    odin3_net_id lo[2] = {net_x, net_x};
+    odin3_net_id out[2] = {net_y, y1};
+    odin3_value width = odin3_value_int(2);
+    odin3_node_spec spec = {type_id("$mux"), intern("m"), prov_at(9), &width, 1};
+    odin3_netvec ports[4] = {{lo, 2}, {lo, 2}, {&net_s, 1}, {out, 2}};
+    add_node(mod, &spec, ports);
+    odin3_objref obj = {ODIN3_OBJ_NODE, odin3_module_find_node(mod, intern("m")).v};
+    set_attr(mod, obj, "parameter:WIDTH", odin3_value_int(7));
+    set_attr(mod, obj, "parameter:EXTRA", odin3_value_int(5));
+    char *text = write_json("t6d.json");
+    const char *first = strstr(text, "\"WIDTH\"");
+    TEST_ASSERT_NOT_NULL(first);
+    TEST_ASSERT_NULL(strstr(first + 1, "\"WIDTH\""));
+    assert_has(text, "\"WIDTH\": \"00000000000000000000000000000010\"");
+    assert_has(text, "\"EXTRA\": \"00000000000000000000000000000101\"");
+    assert_lacks(text, "parameter:");
+    odin3_util_free(text);
+    (void)remove("t6d.json");
+}
+
+/* Only a cell has parameters: `parameter:<NAME>` on a net, wire or module stays an attribute, and
+ * so does the empty name `parameter:`. */
+static void test_parameter_attribute_elsewhere(void) {
+    odin3_module *sub = new_module("sub");
+    (void)add_port(sub, (port_args){"i", ODIN3_DIR_IN, 1});
+    odin3_module *mod = new_module("top");
+    odin3_net_id net_x = add_port(mod, (port_args){"x", ODIN3_DIR_IN, 1});
+    odin3_node_spec spec = {odin3_module_celltype(sub), intern("u1"), prov_at(8), NULL, 0};
+    odin3_netvec ports[1] = {{&net_x, 1}};
+    add_node(mod, &spec, ports);
+    odin3_net_id net_n = new_net(mod, "n");
+    set_attr(mod, (odin3_objref){ODIN3_OBJ_NET, net_n.v}, "parameter:N", odin3_value_int(1));
+    set_attr(mod, (odin3_objref){ODIN3_OBJ_WIRE, odin3_module_port_wire(mod, 0).v}, "parameter:V",
+             odin3_value_int(2));
+    set_attr(mod, (odin3_objref){ODIN3_OBJ_MODULE, odin3_module_id_of(mod).v}, "parameter:M",
+             odin3_value_int(3));
+    odin3_objref cell = {ODIN3_OBJ_NODE, odin3_module_find_node(mod, intern("u1")).v};
+    set_attr(mod, cell, "parameter:", odin3_value_int(4));
+    char *text = write_json("t6e.json");
+    assert_has(text, "\"parameter:N\": ");
+    assert_has(text, "\"parameter:V\": ");
+    assert_has(text, "\"parameter:M\": ");
+    assert_has(text, "\"attributes\": {\n            \"parameter:\": ");
+    odin3_util_free(text);
+    (void)remove("t6e.json");
+}
+
+/* A BITS value (with x and z) of a `parameter:` attribute is written as its bit string. */
+static void test_instance_parameter_bits_value(void) {
+    odin3_module *sub = new_module("sub");
+    (void)add_port(sub, (port_args){"i", ODIN3_DIR_IN, 1});
+    odin3_module *mod = new_module("top");
+    odin3_net_id net_x = add_port(mod, (port_args){"x", ODIN3_DIR_IN, 1});
+    odin3_node_spec spec = {odin3_module_celltype(sub), intern("u1"), prov_at(8), NULL, 0};
+    odin3_netvec ports[1] = {{&net_x, 1}};
+    add_node(mod, &spec, ports);
+    static const uint8_t bits[4] = {ODIN3_BIT_1, ODIN3_BIT_X, ODIN3_BIT_Z, ODIN3_BIT_0};
+    odin3_value val = {ODIN3_VAL_BITS, 0, bits, 4, 0, 0};
+    odin3_objref cell = {ODIN3_OBJ_NODE, odin3_module_find_node(mod, intern("u1")).v};
+    set_attr(mod, cell, "parameter:B", val);
+    char *text = write_json("t6f.json");
+    assert_has(text, "\"parameters\": {\n            \"B\": \"0zx1\"\n          }");
+    odin3_util_free(text);
+    (void)remove("t6f.json");
+}
+
 /* Parameters are binary strings (Yosys style). */
 static void test_parameters_binary(void) {
     odin3_module *mod = new_module("top");
@@ -1189,6 +1263,9 @@ int main(void) {
     RUN_TEST(test_declared_blackbox_module);
     RUN_TEST(test_instance_and_parameters);
     RUN_TEST(test_instance_parameter_attributes);
+    RUN_TEST(test_instance_parameter_collision);
+    RUN_TEST(test_parameter_attribute_elsewhere);
+    RUN_TEST(test_instance_parameter_bits_value);
     RUN_TEST(test_parameters_binary);
     RUN_TEST(test_2d_word_cells);
     RUN_TEST(test_wire_range_attributes);
