@@ -257,4 +257,30 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
 
 ## Deviations
 
-(empty; each lane appends what it changed from this plan and why)
+6.1 (Tasks 3 and 4, lane feat/6.1-ingest):
+
+1. Script order is `proc; flatten; lower`, not `flatten; proc; lower` (spec G-3): `flatten` refuses
+   a design with processes (`module 'DFF' has processes; run proc first`), and the cell models of
+   `cmos.v` contain `always` blocks. Same order as `tools/flatten-check`.
+2. The equivalence legs (G-5) add `abc --lut 6` after `lower`: `write_blif` writes `$_MUX_`,
+   `$_BUF_` and the other gates as `.subckt`, which `tools/equiv-check` cannot read. Both sides go
+   through the same flow, so the comparison is still netlist against RTL.
+3. `common/adder.v` is not readable as it stands (it instantiates `add_add_module`, defines
+   `add_module`). `gen.sh` copies it to `tests/netlist/adder/rtl.v` with that name fixed; the micro
+   itself is unchanged.
+4. `mapped.blif` is Yosys's `write_blif -icells` of the netlist before the techmap
+   (`.subckt $_NAND_ ...`, `$_BUF_`, `$_DFF_P_`, `$_DFFSR_PPP_`), because there is no BLIF form of the
+   `cmos.v` cell names. The IR has no `$_DFFSR_PPP_` cell type, so `gen.sh` appends
+   `cells/dffsr_sync.blif` (a `.model $_DFFSR_PPP_` whose latch is synchronous, reset first, the
+   same as `lower` makes it) to a `mapped.blif` that uses it; without it the reader makes an
+   implicit black box with inout pins.
+5. `gen.sh` adds `insbuf -buf $_BUF_ A Y` so that `BUF` occurs (G-7: every cell of G-2 occurs) and
+   `delete t:$scopeinfo`; `opt_clean` runs before the techmap only (it would delete the buffers
+   after).
+6. The `src` restoration test (`netlist_src_<micro>`) probes `odin3 --help` for `read_verilog
+   -netlist` and exits 77 with a named skip until 5.4c is merged; its enabled branch is untested.
+7. `dump_locs` has no provenance-kind column, so the BLIF `IMPORTED` kind is checked as "the BLIF
+   object prints no HDL location" and the Verilog `SOURCE` kind as "prints a location in
+   mapped.v".
+8. Extra: `unknown/unknown.v` (a hand fixture) for G-7, because `--auto-blackbox` with the real
+   fixtures fails (see Open issues in the lane result).

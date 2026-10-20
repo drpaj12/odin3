@@ -1,0 +1,12 @@
+# The synchronous model of $_DFFSR_PPP_ that gen.sh appends to a mapped.blif which uses it: the
+# IR has no bit-level asynchronous set/reset cell, and `lower` makes such a flip-flop synchronous
+# (PHASE3 decision 19), reset first. This is the same behaviour in BLIF, so the netlist and the
+# RTL compare equal.
+.model $_DFFSR_PPP_
+.inputs C S R D
+.outputs Q
+.names R S D N
+01- 1
+001 1
+.latch N Q re C 3
+.end
