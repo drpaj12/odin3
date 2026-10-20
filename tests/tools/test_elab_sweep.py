@@ -641,6 +641,28 @@ class OptModesTest(SweepTestCase):
             self.assertEqual(argv[argv.index("--yosys") + 1].split("/")[-1], "Y")
             self.assertIn("--script=phase2", argv)
 
+    def test_timeout_for_lengthens_the_sat_limit_of_one_file_in_both_opt_modes(self) -> None:
+        fake = _exe(self.bin / "fake_opt_tool.py", FAKE_OPT_TOOL)
+        self.write("m/slow.v", "x\n")
+        self.write("m/fast.v", "x\n")
+        for mode, name in (("--opt-equiv", "opt-equiv"), ("--opt-diff", "opt-diff")):
+            self.log.write_text("", encoding="utf-8")
+            tools = dict(elab_sweep.OPT_TOOLS, **{name: fake})
+            with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+                code, out, _ = self.run_tool(mode, "--yosys", "Y", "--timeout-for", "slow.v=300",
+                                             str(self.dir / "m"))
+            self.assertEqual(code, 0, out)
+            slow = next(c for c in self.tool_calls() if c[-1].endswith("slow.v"))
+            fast = next(c for c in self.tool_calls() if c[-1].endswith("fast.v"))
+            self.assertEqual(slow[slow.index("--refine-timeout") + 1], "300.0")
+            self.assertNotIn("--refine-timeout", fast)
+
+    def test_timeout_for_needs_a_tool_that_takes_it(self) -> None:
+        self.write("m/a.v", "x\n")
+        code, _, err = self.run_tool("--opt-run", "--timeout-for", "a.v=300", str(self.dir / "m"))
+        self.assertEqual(code, 2)
+        self.assertIn("--timeout-for needs", err)
+
     def test_exit_3_is_hard_in_both_modes_even_with_an_expect_fail_needle(self) -> None:
         """Review I1: a crash, kill or timeout inside opt-equiv/opt-diff is never listed away."""
         fake = _exe(self.bin / "fake_opt_tool.py", FAKE_OPT_TOOL)

@@ -1429,6 +1429,25 @@ then the options considered.
       not fail the gate. An Odin III fcheck fail still needs its own row (or a P fail with a
       `baseline-fails` row, as before; an untested P now counts like a fail there).
 
+51. **`wreduce` visits an operand before its consumer: amendment of 3G WR-7** (Peter, 2026-10-19;
+    branch `feat/wreduce-order`; triage item B3 of `hardmap-big-triage`). Yosys's `wreduce` result
+    depends on the order of the cells (the rule "free to choose the signedness", `wreduce.cc` 316),
+    and Yosys's front end creates an operand before its consumer, while Odin III's elaborator
+    numbers a consumer first: LU8PEEng and LU32PEEng had 53 more adders than Parmys
+    (`counter == mdivk-1+5-2`: 69 against 16 in the minimal example). **Decision:** a round of
+    `wreduce` is sorted by a rank, the position of the node in a depth-first post-order of the net
+    graph (operand first; ports in registry order, `$mux` S, B, A, bits LSB first; only nets without a
+    wire are followed, so a forward reference keeps node-ID order; ties by node ID; explicit stack;
+    storage outputs cut); a rebuilt node keeps the rank of its ancestor. Known approximations
+    (cells made by `proc`, shared operands, design-wide interning, statement order) are listed in
+    spec section 7; the gate `opt_diff_wreduce_order` is circular on the order (same walk in
+    `il_order.py`), so fidelity is measured by hardmap-diff (LU8PEEng, LU32PEEng, mcml). The amendment text is in 3G spec section 7 and
+    divergence row 1. The elaborator (2D) is not changed. Consequences, all explained in the PR:
+    no golden changes (the review fixes kept node-ID order for named nets, as `cascade.il` has); `opt-diff` hands Yosys the Odin III file through `tools/opt-check/il_order.py` so
+    that the oracle sees the same order (otherwise it reports a difference that is only its input
+    order); a micro `tests/opt/order/order_operand_first.v` is diffed against Yosys under the Phase 3
+    script (`opt_diff_wreduce_order`) and `test_operand_visited_before_consumer` pins the widths.
+
 52. **`opt_share` parity with Yosys 0.55: the commutative swap and mux chunks** (Peter, 2026-10-19,
     branch `feat/opt-share-parity`; item B2 of the hardmap-big triage, approved). Amends 2F spec §11 and
     §17 #44 and #45 (the amended text is in the spec rows). Soundness (OP-13) still comes first: every

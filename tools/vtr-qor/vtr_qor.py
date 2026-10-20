@@ -38,6 +38,11 @@ Subcommands here: ``doctor``, ``run``, ``fcheck``, ``status``, ``clean``, ``tabl
   ``differs``, ``error`` or a missing job, 3 for ``capped`` or ``timeout``. ``run --seed N`` is
   another VPR seed (a new key that never moves ``latest``); ``table --seeds 2,3`` shows the seed
   jobs beside seed 1 (spec §6.3).
+- ``run --job-timeout S`` caps each job's wall time (default 3600 s in group A, 21600 s in
+  group B; 0 is no cap). Its commands (front end, VTR flow, ``--fcheck``) share the one limit
+  and each runs in its own session and the job cgroup; on expiry the whole group gets SIGTERM,
+  then SIGKILL, the job is ``timeout`` (``<job>: timeout after S s in <command> (elapsed N s)``,
+  exit 3) and the run goes on.
 - ``exit-run --label TEXT [--budget H]`` (heavy, started inside ``tools/heavy-run`` like
   ``nightly``) runs ``qor_exit``'s eight steps; started again with the label it resumes. Exit
   ``gate``'s when every job ran, else the run's code. ``Oprov`` needs 3E-6: it is available only
@@ -138,6 +143,7 @@ OOM_POLICY = "OOMPolicy=continue"
 PROBE_TIMEOUT_S = 60
 GIT_TIMEOUT_S = 60
 PARSE_TIMEOUT_S = 600
+CROSSCHECK_TIMEOUT_S = 14400  # the crosscheck's one long command (was group A's job limit)
 SECONDS_PER_DAY = 86400
 KIB_PER_GIB = 1024**2
 MEM_DECIMALS = 10
@@ -968,7 +974,7 @@ def cmd_crosscheck(args: argparse.Namespace, argv: Sequence[str]) -> int:
     cmd = qor_legs.Command(tuple(qor_nightly.crosscheck_command(vtr_root, args.task, out)),
                            out, work / "run_vtr_task.log", ())
     outcome = qor_sched.run_command(cmd, opts, deadline=opts.clock()
-                                    + qor_sched.JOB_TIMEOUT_S["A"])
+                                    + CROSSCHECK_TIMEOUT_S)
     if outcome.kind != "exit" or outcome.returncode != 0:
         raise HeavyError(EXIT_FAIL, f"crosscheck: run_vtr_task.py did not finish ({outcome.kind} "
                                     f"{outcome.returncode}); see {cmd.stdout}")
@@ -1749,6 +1755,16 @@ def cmd_doctor(args: argparse.Namespace, argv: Sequence[str]) -> int:
 # -- main --------------------------------------------------------------------------------------
 
 
+def _non_negative(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        value = -1
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"'{text}' is not a non-negative integer")
+    return value
+
+
 def _positive(text: str) -> int:
     try:
         value = int(text)
@@ -1790,7 +1806,10 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--keep-netlists", action="store_true")
     run.add_argument("--seed", type=_positive, default=qor_legs.DEFAULT_SEED, metavar="N",
                      help="VPR seed (default 1; N > 1 is a new key and never moves latest)")
-    run.add_argument("--job-timeout", type=_positive, metavar="S")
+    run.add_argument("--job-timeout", type=_non_negative, metavar="S",
+                     help=f"wall limit per job in seconds, shared by its commands "
+                          f"(default {qor_sched.JOB_TIMEOUT_S['A']} in group A, "
+                          f"{qor_sched.JOB_TIMEOUT_S['B']} in group B; 0: no cap)")
     run.add_argument("--stage-timeout", type=_positive, metavar="S")
     run.add_argument("--dry-run", action="store_true", help="print the jobs; run nothing")
     run.add_argument("--xl", action="store_true",

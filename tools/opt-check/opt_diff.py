@@ -16,7 +16,9 @@ opt_clean; opt -full``), ``wreduce``, ``opt -full``, ``opt -fast``, ``opt -fast 
    opt_expr; ...``;
 2. Yosys 0.55: ``read_rtlil in.il; S; write_rtlil yosys.il; stat`` with ``YOSYS_COVER_DIR``. Its
    ``phase2`` is Parmys's lines without ``compact``: ``opt_expr; opt_clean; opt -nodffe -nosdff;
-   proc -norom; opt`` (Parmys's ``procs -norom``);
+   proc -norom; opt`` (Parmys's ``procs -norom``). Yosys reads ``in.yosys.il``, ``in.il`` with the
+   cells put in operand-first order by ``il_order``, as Yosys's front end makes them (WR-7, PHASE3
+   #51); ``in.il`` stays as Odin III wrote it;
 3. **histogram**: the per-module cell-type counts of ``stats`` and ``stat`` are equal; for the
    scripts that hold ``wreduce`` also **widths**: the widths and signed flags of every ``$add``,
    ``$sub`` and ``$mul`` are equal as a multiset;
@@ -67,6 +69,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import il_order
 import memcap
 import opt_equiv
 import opt_rules
@@ -217,10 +220,19 @@ class Diff:
                                        *(["--top", top] if top else []), "-p",
                                        odin_script(script, files, top, in_il, odin_il,
                                                    self.techlib)])
+        # Yosys's wreduce depends on the order of the cells (WR-7): it reads a copy of Odin III's
+        # file with the cells in the order its own front end makes them (operand first); in.il
+        # stays as Odin III wrote it (nothing else reads either).
+        yosys_in = run_dir / "in.yosys.il"
+        try:
+            yosys_in.write_text(il_order.reorder_text(in_il.read_text(encoding="utf-8")),
+                                encoding="utf-8")
+        except il_order.OrderError as exc:
+            raise opt_equiv.ToolError(f"il_order: {exc}") from exc
         cover = run_dir / "cover"
         cover.mkdir(exist_ok=True)
         yosys_log = self.must("yosys", [opt_equiv.exe(self.args.yosys), "-p",
-                                        yosys_script(script, in_il, yosys_il)],
+                                        yosys_script(script, yosys_in, yosys_il)],
                               {**os.environ, "YOSYS_COVER_DIR": str(cover)})
         result.odin_counters = opt_equiv.parse_counters(odin_log)
         result.yosys_counters = yosys_cover(cover)
