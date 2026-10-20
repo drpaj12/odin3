@@ -1,0 +1,626 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_16_1_mux": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:3.1-15.10"
+      },
+      "ports": {
+        "W": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ]
+        },
+        "S16": {
+          "direction": "input",
+          "bits": [ 18, 19, 20, 21 ]
+        },
+        "f": {
+          "direction": "output",
+          "bits": [ 22 ]
+        }
+      },
+      "cells": {
+        "$abc$329$auto$blifparse.cc:535:parse_blif$330": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1010000011001111",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 9, 6, 23, 24 ],
+            "Y": [ 25 ]
+          }
+        },
+        "$abc$329$auto$blifparse.cc:535:parse_blif$331": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1001",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 19, 18 ],
+            "Y": [ 23 ]
+          }
+        },
+        "$abc$329$auto$blifparse.cc:535:parse_blif$332": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1111010100110000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 7, 8, 19, 18 ],
+            "Y": [ 24 ]
+          }
+        },
+        "$abc$329$auto$blifparse.cc:535:parse_blif$333": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1010000011001111",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 17, 14, 23, 26 ],
+            "Y": [ 27 ]
+          }
+        },
+        "$abc$329$auto$blifparse.cc:535:parse_blif$334": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1111010100110000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 15, 16, 19, 18 ],
+            "Y": [ 26 ]
+          }
+        },
+        "$abc$329$auto$blifparse.cc:535:parse_blif$335": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1100111110100000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 5, 19, 18 ],
+            "Y": [ 28 ]
+          }
+        },
+        "$abc$329$auto$blifparse.cc:535:parse_blif$336": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1111110000001010",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 19, 28 ],
+            "Y": [ 29 ]
+          }
+        },
+        "$abc$329$auto$blifparse.cc:535:parse_blif$337": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1100111110100000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12, 13, 19, 18 ],
+            "Y": [ 30 ]
+          }
+        },
+        "$abc$329$auto$blifparse.cc:535:parse_blif$338": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1111110000001010",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 10, 11, 19, 30 ],
+            "Y": [ 31 ]
+          }
+        },
+        "$abc$329$auto$blifparse.cc:535:parse_blif$339": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1100111110100000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 32, 33, 20, 21 ],
+            "Y": [ 34 ]
+          }
+        },
+        "$abc$329$auto$blifparse.cc:535:parse_blif$340": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1111110000001010",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 35, 36, 20, 34 ],
+            "Y": [ 37 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$205": {
+          "hide_name": 1,
+          "type": "$_DLATCH_N_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "D": "input",
+            "E": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "D": [ 29 ],
+            "E": [ "0" ],
+            "Q": [ 35 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$242": {
+          "hide_name": 1,
+          "type": "$_DLATCH_N_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "D": "input",
+            "E": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "D": [ 25 ],
+            "E": [ "0" ],
+            "Q": [ 32 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$258": {
+          "hide_name": 1,
+          "type": "$_DLATCH_N_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "D": "input",
+            "E": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "D": [ 31 ],
+            "E": [ "0" ],
+            "Q": [ 36 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$262": {
+          "hide_name": 1,
+          "type": "$_DLATCH_N_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "D": "input",
+            "E": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "D": [ 27 ],
+            "E": [ "0" ],
+            "Q": [ 33 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$279": {
+          "hide_name": 1,
+          "type": "$_DLATCH_N_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "D": "input",
+            "E": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "D": [ 37 ],
+            "E": [ "0" ],
+            "Q": [ 22 ]
+          }
+        },
+        "Mux1": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:9.10-9.39",
+            "module": "mux4to1",
+            "module_src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:17.1-33.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "Mux2": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:10.10-10.39",
+            "module": "mux4to1",
+            "module_src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:17.1-33.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "Mux3": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:11.10-11.40",
+            "module": "mux4to1",
+            "module_src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:17.1-33.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "Mux4": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:12.10-12.41",
+            "module": "mux4to1",
+            "module_src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:17.1-33.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "Mux5": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:13.10-13.36",
+            "module": "mux4to1",
+            "module_src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:17.1-33.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        }
+      },
+      "netnames": {
+        "$abc$329$flatten\\Mux1.$0\\f[0:0]": {
+          "hide_name": 1,
+          "bits": [ 29 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          }
+        },
+        "$abc$329$flatten\\Mux2.$0\\f[0:0]": {
+          "hide_name": 1,
+          "bits": [ 25 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          }
+        },
+        "$abc$329$flatten\\Mux3.$0\\f[0:0]": {
+          "hide_name": 1,
+          "bits": [ 31 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          }
+        },
+        "$abc$329$flatten\\Mux4.$0\\f[0:0]": {
+          "hide_name": 1,
+          "bits": [ 27 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          }
+        },
+        "$abc$329$flatten\\Mux5.$0\\f[0:0]": {
+          "hide_name": 1,
+          "bits": [ 37 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          }
+        },
+        "$abc$329$new_n38": {
+          "hide_name": 1,
+          "bits": [ 23 ],
+          "attributes": {
+          }
+        },
+        "$abc$329$new_n40": {
+          "hide_name": 1,
+          "bits": [ 24 ],
+          "attributes": {
+          }
+        },
+        "$abc$329$new_n46": {
+          "hide_name": 1,
+          "bits": [ 26 ],
+          "attributes": {
+          }
+        },
+        "$abc$329$new_n52": {
+          "hide_name": 1,
+          "bits": [ 28 ],
+          "attributes": {
+          }
+        },
+        "$abc$329$new_n54": {
+          "hide_name": 1,
+          "bits": [ 30 ],
+          "attributes": {
+          }
+        },
+        "$abc$329$new_n56": {
+          "hide_name": 1,
+          "bits": [ 34 ],
+          "attributes": {
+          }
+        },
+        "M": {
+          "hide_name": 0,
+          "bits": [ 35, 32, 36, 33 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:7.13-7.14"
+          }
+        },
+        "Mux1.S": {
+          "hide_name": 0,
+          "bits": [ 18, 19 ],
+          "attributes": {
+            "hdlname": "Mux1 S",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:19.14-19.15"
+          }
+        },
+        "Mux1.W": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "hdlname": "Mux1 W",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:18.14-18.15"
+          }
+        },
+        "Mux1.f": {
+          "hide_name": 0,
+          "bits": [ 35 ],
+          "attributes": {
+            "hdlname": "Mux1 f",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:20.9-20.10"
+          }
+        },
+        "Mux2.S": {
+          "hide_name": 0,
+          "bits": [ 18, 19 ],
+          "attributes": {
+            "hdlname": "Mux2 S",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:19.14-19.15"
+          }
+        },
+        "Mux2.W": {
+          "hide_name": 0,
+          "bits": [ 6, 7, 8, 9 ],
+          "attributes": {
+            "hdlname": "Mux2 W",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:18.14-18.15"
+          }
+        },
+        "Mux2.f": {
+          "hide_name": 0,
+          "bits": [ 32 ],
+          "attributes": {
+            "hdlname": "Mux2 f",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:20.9-20.10"
+          }
+        },
+        "Mux3.S": {
+          "hide_name": 0,
+          "bits": [ 18, 19 ],
+          "attributes": {
+            "hdlname": "Mux3 S",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:19.14-19.15"
+          }
+        },
+        "Mux3.W": {
+          "hide_name": 0,
+          "bits": [ 10, 11, 12, 13 ],
+          "attributes": {
+            "hdlname": "Mux3 W",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:18.14-18.15"
+          }
+        },
+        "Mux3.f": {
+          "hide_name": 0,
+          "bits": [ 36 ],
+          "attributes": {
+            "hdlname": "Mux3 f",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:20.9-20.10"
+          }
+        },
+        "Mux4.S": {
+          "hide_name": 0,
+          "bits": [ 18, 19 ],
+          "attributes": {
+            "hdlname": "Mux4 S",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:19.14-19.15"
+          }
+        },
+        "Mux4.W": {
+          "hide_name": 0,
+          "bits": [ 14, 15, 16, 17 ],
+          "attributes": {
+            "hdlname": "Mux4 W",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:18.14-18.15"
+          }
+        },
+        "Mux4.f": {
+          "hide_name": 0,
+          "bits": [ 33 ],
+          "attributes": {
+            "hdlname": "Mux4 f",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:20.9-20.10"
+          }
+        },
+        "Mux5.S": {
+          "hide_name": 0,
+          "bits": [ 20, 21 ],
+          "attributes": {
+            "hdlname": "Mux5 S",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:19.14-19.15"
+          }
+        },
+        "Mux5.W": {
+          "hide_name": 0,
+          "bits": [ 35, 32, 36, 33 ],
+          "attributes": {
+            "hdlname": "Mux5 W",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:18.14-18.15"
+          }
+        },
+        "Mux5.f": {
+          "hide_name": 0,
+          "bits": [ 22 ],
+          "attributes": {
+            "hdlname": "Mux5 f",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:20.9-20.10"
+          }
+        },
+        "S16": {
+          "hide_name": 0,
+          "bits": [ 18, 19, 20, 21 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:5.14-5.17"
+          }
+        },
+        "W": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:4.15-4.16"
+          }
+        },
+        "f": {
+          "hide_name": 0,
+          "bits": [ 22 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:6.9-6.10"
+          }
+        }
+      }
+    }
+  }
+}

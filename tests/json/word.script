@@ -1,0 +1,9 @@
+# The 5.3 word level (spec T-2): the netlist after opt, written as it stands. Latches are allowed.
+# @DESIGN@ is the design, @IL@ the RTLIL of the netlist as written (the gold), @JSON@ file 1.
+@TECHLIB@
+read_verilog @DESIGN@
+proc
+opt
+opt_clean
+write_rtlil @IL@
+write_json @JSON@

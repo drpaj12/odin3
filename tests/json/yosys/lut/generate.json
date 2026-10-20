@@ -1,0 +1,821 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "down_counter": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/generate.v:1.1-25.10"
+      },
+      "ports": {
+        "clk": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "out1": {
+          "direction": "output",
+          "bits": [ 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 ]
+        },
+        "rst1": {
+          "direction": "input",
+          "bits": [ 19 ]
+        },
+        "rst2": {
+          "direction": "input",
+          "bits": [ 20 ]
+        }
+      },
+      "cells": {
+        "$abc$371$auto$blifparse.cc:535:parse_blif$372": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1000",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 19, 20 ],
+            "Y": [ 21 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$373": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1001",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 4 ],
+            "Y": [ 22 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$374": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "11100001",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 4, 5 ],
+            "Y": [ 23 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$375": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1111111000000001",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 4, 5, 6 ],
+            "Y": [ 24 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$376": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 25, 7 ],
+            "Y": [ 26 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$377": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0000000000000001",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 4, 5, 6 ],
+            "Y": [ 25 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$378": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10110100",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 7, 25, 8 ],
+            "Y": [ 27 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$379": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1110111100010000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 7, 8, 25, 9 ],
+            "Y": [ 28 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$380": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 29, 10 ],
+            "Y": [ 30 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$381": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0000000100000000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 7, 8, 9, 25 ],
+            "Y": [ 29 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$382": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10110100",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 10, 29, 11 ],
+            "Y": [ 31 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$383": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1110111100010000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 10, 11, 29, 12 ],
+            "Y": [ 32 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$384": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 33, 13 ],
+            "Y": [ 34 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$385": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0000000100000000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 10, 11, 12, 29 ],
+            "Y": [ 33 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$386": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10110100",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 13, 33, 14 ],
+            "Y": [ 35 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$387": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1110111100010000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 13, 14, 33, 15 ],
+            "Y": [ 36 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$388": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 37, 16 ],
+            "Y": [ 38 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$389": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0000000100000000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 13, 14, 15, 33 ],
+            "Y": [ 37 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$390": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10110100",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 16, 37, 17 ],
+            "Y": [ 39 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$391": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1110111100010000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 16, 17, 37, 18 ],
+            "Y": [ 40 ]
+          }
+        },
+        "$abc$371$auto$blifparse.cc:535:parse_blif$392": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3 ],
+            "Y": [ 41 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$100": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 26 ],
+            "Q": [ 7 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$101": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 27 ],
+            "Q": [ 8 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$102": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 28 ],
+            "Q": [ 9 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$103": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 30 ],
+            "Q": [ 10 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$104": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 31 ],
+            "Q": [ 11 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$105": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 32 ],
+            "Q": [ 12 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$106": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 34 ],
+            "Q": [ 13 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$107": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 35 ],
+            "Q": [ 14 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$108": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 36 ],
+            "Q": [ 15 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$109": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 38 ],
+            "Q": [ 16 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$110": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 39 ],
+            "Q": [ 17 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$111": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 40 ],
+            "Q": [ 18 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$96": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 41 ],
+            "Q": [ 3 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$97": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 22 ],
+            "Q": [ 4 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$98": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 23 ],
+            "Q": [ 5 ],
+            "R": [ 21 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$99": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP1_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:17.5-23.8"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 24 ],
+            "Q": [ 6 ],
+            "R": [ 21 ]
+          }
+        }
+      },
+      "netnames": {
+        "$abc$371$logic_and$tests/micro/verilog/micro/generate.v:19$2_Y": {
+          "hide_name": 1,
+          "bits": [ 21 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:19.13-19.25"
+          }
+        },
+        "$abc$371$new_n42": {
+          "hide_name": 1,
+          "bits": [ 25 ],
+          "attributes": {
+          }
+        },
+        "$abc$371$new_n46": {
+          "hide_name": 1,
+          "bits": [ 29 ],
+          "attributes": {
+          }
+        },
+        "$abc$371$new_n50": {
+          "hide_name": 1,
+          "bits": [ 33 ],
+          "attributes": {
+          }
+        },
+        "$abc$371$new_n54": {
+          "hide_name": 1,
+          "bits": [ 37 ],
+          "attributes": {
+          }
+        },
+        "$auto$alumacc.cc:495:replace_alu$10.Y": {
+          "hide_name": 1,
+          "bits": [ 41, 22, 23, 24, 26, 27, 28, 30, 31, 32, 34, 35, 36, 38, 39, 40 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/generate.v:22.21-22.29|yosys-share/techmap.v:270.26-270.27"
+          }
+        },
+        "a": {
+          "hide_name": 0,
+          "bits": [ "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1" ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:5.17-5.18"
+          }
+        },
+        "clk": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:2.23-2.26"
+          }
+        },
+        "out1": {
+          "hide_name": 0,
+          "bits": [ 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:3.23-3.27"
+          }
+        },
+        "rst1": {
+          "hide_name": 0,
+          "bits": [ 19 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:2.11-2.15"
+          }
+        },
+        "rst2": {
+          "hide_name": 0,
+          "bits": [ 20 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/generate.v:2.17-2.21"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_2_1_mux": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_DL_2_1_mux.v:3.1-9.10"
+      },
+      "ports": {
+        "w0": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "w1": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "s": {
+          "direction": "input",
+          "bits": [ 4 ]
+        },
+        "f": {
+          "direction": "output",
+          "bits": [ 5 ]
+        }
+      },
+      "cells": {
+        "$abc$80$auto$blifparse.cc:535:parse_blif$81": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10101100",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 2, 4 ],
+            "Y": [ 5 ]
+          }
+        }
+      },
+      "netnames": {
+        "f": {
+          "hide_name": 0,
+          "bits": [ 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_1_mux.v:5.9-5.10"
+          }
+        },
+        "s": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_1_mux.v:4.16-4.17"
+          }
+        },
+        "w0": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_1_mux.v:4.8-4.10"
+          }
+        },
+        "w1": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_1_mux.v:4.12-4.14"
+          }
+        }
+      }
+    }
+  }
+}

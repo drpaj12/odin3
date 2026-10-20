@@ -1,0 +1,9 @@
+# 5.3c json-check: designs that instantiate tech library cells read the library first (as
+# tests/icells/techlib.txt, plus the VTR memories of the small-design set): <design file name>
+# <tech library> [<soft library>], paths relative to the repository root.
+adder_hard_block.v lib/vtr.o3lib tests/hardmap/adder_lib.v
+hard_adder_cin_propagation.v lib/vtr.o3lib tests/hardmap/adder_lib.v
+multiply_hard_block.v lib/vtr.o3lib
+ch_intrinsics.v lib/vtr.o3lib
+ch_intrinsics_nolatches.v lib/vtr.o3lib
+mkPktMerge.v lib/vtr.o3lib

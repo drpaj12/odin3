@@ -1,0 +1,160 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_4_1_mux": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:3.1-10.10"
+      },
+      "ports": {
+        "w0": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "w1": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "w2": {
+          "direction": "input",
+          "bits": [ 4 ]
+        },
+        "w3": {
+          "direction": "input",
+          "bits": [ 5 ]
+        },
+        "S": {
+          "direction": "input",
+          "bits": [ 6, 7 ]
+        },
+        "f": {
+          "direction": "output",
+          "bits": [ 8 ]
+        }
+      },
+      "cells": {
+        "$auto$simplemap.cc:275:simplemap_mux$81": {
+          "hide_name": 1,
+          "type": "$_MUX_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:8.21-8.35"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4 ],
+            "B": [ 5 ],
+            "S": [ 6 ],
+            "Y": [ 9 ]
+          }
+        },
+        "$auto$simplemap.cc:275:simplemap_mux$82": {
+          "hide_name": 1,
+          "type": "$_MUX_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:8.40-8.54"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2 ],
+            "B": [ 3 ],
+            "S": [ 6 ],
+            "Y": [ 10 ]
+          }
+        },
+        "$auto$simplemap.cc:275:simplemap_mux$83": {
+          "hide_name": 1,
+          "type": "$_MUX_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:8.13-8.55"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 10 ],
+            "B": [ 9 ],
+            "S": [ 7 ],
+            "Y": [ 8 ]
+          }
+        }
+      },
+      "netnames": {
+        "$ternary$tests/micro/verilog/micro/bm_DL_4_1_mux.v:8$1_Y": {
+          "hide_name": 1,
+          "bits": [ 9 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:8.21-8.35"
+          }
+        },
+        "$ternary$tests/micro/verilog/micro/bm_DL_4_1_mux.v:8$2_Y": {
+          "hide_name": 1,
+          "bits": [ 10 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:8.40-8.54"
+          }
+        },
+        "S": {
+          "hide_name": 0,
+          "bits": [ 6, 7 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:5.14-5.15"
+          }
+        },
+        "f": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:6.9-6.10"
+          }
+        },
+        "w0": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:4.8-4.10"
+          }
+        },
+        "w1": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:4.12-4.14"
+          }
+        },
+        "w2": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:4.16-4.18"
+          }
+        },
+        "w3": {
+          "hide_name": 0,
+          "bits": [ 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_1_mux.v:4.20-4.22"
+          }
+        }
+      }
+    }
+  }
+}
