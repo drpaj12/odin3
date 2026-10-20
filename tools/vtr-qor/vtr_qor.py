@@ -26,7 +26,8 @@ Subcommands here: ``doctor``, ``run``, ``fcheck``, ``status``, ``clean``, ``tabl
   2 in group A and 1 in group B, and writes ``metrics.json`` ``verdicts.fcheck``; ``run --fcheck``
   does the same right after each job. A missing job is named and makes the exit 1; exit 1 for a
   ``fail`` or ``error`` (also from ``run --fcheck``), 3 for ``capped``, ``timeout`` or
-  ``untested`` (every mismatch is on a bit the RTL leaves undefined; never a pass).
+  ``untested`` (the RTL has latches or incomplete sensitivity lists, or every mismatch is on a bit
+  that depends on the initial state; never a pass).
 - ``equiv (--set S | --designs D)`` (heavy) runs ``tools/equiv-check`` on the O' job's and the O
   job's kept ``<d>.blif`` (spec §8.2) and writes the O job's ``verdicts.equiv`` (``equivalent``,
   ``differs``, ``ram``, ``multiclock``, ``timeout``, ``capped``, ``error``). Exit 1 for
