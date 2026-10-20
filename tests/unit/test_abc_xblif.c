@@ -176,9 +176,15 @@ static void build_dup(const char *type) {
     afx_check(design);
 }
 
+/* A gate type and the one `.names` line and rows the input BLIF should have for it. */
+typedef struct {
+    const char *type;
+    const char *want_names_and_rows;
+} dup_case;
+
 /* The one `.names` line and rows the input BLIF has for the gate: header, then rows. */
-static void expect_dup_cover(const char *type, const char *want_names_and_rows) {
-    build_dup(type);
+static void expect_dup_cover(dup_case want) {
+    build_dup(want.type);
     start_region("--lut 6");
     char path[AFX_PATH];
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_run_path(run, ODIN3_ABC_FILE_IN, path, sizeof path));
@@ -190,12 +196,12 @@ static void expect_dup_cover(const char *type, const char *want_names_and_rows) 
     TEST_ASSERT_NOT_NULL(end);
     char got[512];
     (void)snprintf(got, sizeof got, "%.*s", (int)(end - at), at);
-    TEST_ASSERT_EQUAL_STRING(want_names_and_rows, got);
+    TEST_ASSERT_EQUAL_STRING(want.want_names_and_rows, got);
 }
 
 /* A == B: the columns merge. XOR is constant 0 (an empty cover would be rejected by strash). */
 static void test_dup_fanin_xor_is_constant_0(void) {
-    expect_dup_cover("$_XOR_", ".names o3co0\n");
+    expect_dup_cover((dup_case){"$_XOR_", ".names o3co0\n"});
 }
 
 /* A 2-input $lut (A | ~B, one OFF-set row 01 or 10) on one net twice: the table is constant 1. */
@@ -225,15 +231,15 @@ static void test_dup_fanin_lut_or_not_is_constant_1(void) {
 }
 
 static void test_dup_fanin_xnor_keeps_both_rows(void) {
-    expect_dup_cover("$_XNOR_", ".names o3ci0 o3co0\n0 1\n1 1\n");
+    expect_dup_cover((dup_case){"$_XNOR_", ".names o3ci0 o3co0\n0 1\n1 1\n"});
 }
 
 static void test_dup_fanin_and_is_a_buffer(void) {
-    expect_dup_cover("$_AND_", ".names o3ci0 o3co0\n1 1\n");
+    expect_dup_cover((dup_case){"$_AND_", ".names o3ci0 o3co0\n1 1\n"});
 }
 
 static void test_dup_fanin_nand_survivor_row(void) {
-    expect_dup_cover("$_NAND_", ".names o3ci0 o3co0\n1 0\n");
+    expect_dup_cover((dup_case){"$_NAND_", ".names o3ci0 o3co0\n1 0\n"});
 }
 
 /* --- read-back ----------------------------------------------------------------------------- */
