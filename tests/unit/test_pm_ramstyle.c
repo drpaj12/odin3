@@ -133,14 +133,16 @@ static void test_other_attribute_silent(void) {
     pb_free(&res);
 }
 
-/* memory_merge warns too, under its own name. */
-static void test_memory_merge_warns(void) {
+/* memory_merge does not warn (it maps nothing); `memory_merge; partial_map` warns once per memory
+ * and attribute, as partial_map alone does (the replacement `$mem` keeps the attributes). */
+static void test_memory_merge_then_partial_map(void) {
     pb_result res;
     build_mem("  attribute \\ram_style \"block\"\n", &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_pass_run(res.design, "memory_merge", odin3_bytes_cstr("")));
-    TEST_ASSERT_EQUAL_UINT32(1, count_in("memory_merge: memory 'mem': attribute 'ram_style' is "
-                                         "ignored; mapping follows the architecture"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_in("is ignored"));
+    map_ok(&res);
+    TEST_ASSERT_EQUAL_UINT32(1, count_in(k_warning));
     pb_free(&res);
 }
 
@@ -226,7 +228,7 @@ int main(void) {
     RUN_TEST(test_warning_and_same_mapping);
     RUN_TEST(test_names_case_and_values);
     RUN_TEST(test_other_attribute_silent);
-    RUN_TEST(test_memory_merge_warns);
+    RUN_TEST(test_memory_merge_then_partial_map);
     RUN_TEST(test_ram_instance);
     RUN_TEST(test_only_ramstyle_names_them);
     return UNITY_END();

@@ -180,6 +180,56 @@ static void test_data_merge(void) {
     pb_free(&res);
 }
 
+/* The old asynchronous data net (the wire `rd`) has no driver and no reader after the merge: the
+ * pass removes it, so write_rtlil shows no undriven wire. */
+static void test_orphan_data_net_removed(void) {
+    pb_result res;
+    uint32_t name = 0;
+    build(&k_data, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(res.design, odin3_bytes_cstr("rd"), &name));
+    TEST_ASSERT_TRUE(odin3_wire_valid(odin3_module_find_wire(res.module, name)));
+    merge_ok(&res);
+    TEST_ASSERT_FALSE(odin3_wire_valid(odin3_module_find_wire(res.module, name)));
+    pb_free(&res);
+}
+
+/* Two read ports, port 1 with an active-low enable: port 0 still merges (as in partial_map), port 1
+ * stays asynchronous with its flip-flop. */
+static const char k_two_ports[] =
+    "module \\m\n  wire width 1 input 1 \\clk\n  wire width 4 input 2 \\ra0\n"
+    "  wire width 4 input 3 \\ra1\n  wire width 4 input 4 \\wa\n  wire width 3 input 5 \\wd\n"
+    "  wire width 1 input 6 \\we\n  wire width 1 input 7 \\ren\n"
+    "  wire width 3 output 8 \\q0\n  wire width 3 output 9 \\q1\n"
+    "  wire width 3 \\rd0\n  wire width 3 \\rd1\n"
+    "  cell $dff \\ff0\n    parameter \\WIDTH 3\n    parameter \\CLK_POLARITY 1\n"
+    "    connect \\CLK \\clk\n    connect \\D \\rd0\n    connect \\Q \\q0\n  end\n"
+    "  cell $dffe \\ff1\n    parameter \\WIDTH 3\n    parameter \\CLK_POLARITY 1\n"
+    "    parameter \\EN_POLARITY 0\n    connect \\EN \\ren\n    connect \\CLK \\clk\n"
+    "    connect \\D \\rd1\n    connect \\Q \\q1\n  end\n"
+    "  cell $mem \\u\n    parameter \\MEMID \"\\\\mem\"\n    parameter \\SIZE 16\n"
+    "    parameter \\OFFSET 0\n    parameter \\ABITS 4\n    parameter \\WIDTH 3\n"
+    "    parameter \\RD_PORTS 2\n    parameter \\WR_PORTS 1\n"
+    "    parameter \\RD_CLK_ENABLE 2'00\n    parameter \\RD_CLK_POLARITY 2'11\n"
+    "    parameter \\RD_TRANSPARENT 2'00\n    parameter \\WR_CLK_ENABLE 1'1\n"
+    "    parameter \\WR_CLK_POLARITY 1'1\n    parameter \\INIT 0'\n"
+    "    connect \\RD_CLK { 1'x 1'x }\n    connect \\RD_EN { 1'1 1'1 }\n"
+    "    connect \\RD_ADDR { \\ra1 \\ra0 }\n    connect \\RD_DATA { \\rd1 \\rd0 }\n"
+    "    connect \\WR_CLK \\clk\n    connect \\WR_EN { \\we \\we \\we }\n"
+    "    connect \\WR_ADDR \\wa\n    connect \\WR_DATA \\wd\n  end\nend\n";
+
+static void test_mixed_ports(void) {
+    pb_result res;
+    hm_build_ok(k_two_ports, &res);
+    merge_ok(&res);
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$dff"));
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$dffe"));
+    const odin3_value *prm = odin3_node_param(res.module, mem_node(&res), 0);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, prm[MP_RD_CLK_ENABLE].bits[0]);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_0, prm[MP_RD_CLK_ENABLE].bits[1]);
+    TEST_ASSERT_TRUE(contains("1 read ports merged (1 data, 0 address), 1 left asynchronous"));
+    pb_free(&res);
+}
+
 static void test_name_and_provenance(void) {
     pb_result res;
     build(&k_data, &res);
@@ -216,7 +266,7 @@ static void test_dffe_variable_enable(void) {
     pb_free(&res);
 }
 
-/* An active-low enable would need an inverter: the pass leaves the cell and its flip-flop. */
+/* An active-low enable would need an inverter: the pass leaves that port and its flip-flop. */
 static void test_active_low_enable_left(void) {
     pb_result res;
     build(&k_dffe_low, &res);
@@ -414,6 +464,8 @@ static void test_oom_sweep(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_data_merge);
+    RUN_TEST(test_orphan_data_net_removed);
+    RUN_TEST(test_mixed_ports);
     RUN_TEST(test_name_and_provenance);
     RUN_TEST(test_dffe_const_one);
     RUN_TEST(test_dffe_variable_enable);
