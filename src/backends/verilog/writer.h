@@ -62,9 +62,10 @@ typedef struct odin3_verilog_opts {
  * cell name that reads as a select of a vector port or earlier vector wire (`a[0]` beside
  * `a[1:0]`) counts as taken: Yosys write_blif would give both the same BLIF name. (A vector wire
  * named after an earlier wire's select lookalike is not caught.) Name style PROVENANCE first tries
- * `hier/<short name>@file:line` (the hierarchy and first location of the record naming the
- * object, either part left out when absent) for wires, nets and cells; ports keep their names, and
- * objects without provenance, or whose provenance name is taken, get their short name.
+ * `hier/<short name>@file:line` (the hierarchy and first HDL location of the object's first SOURCE
+ * leaf; `hier/` left out when that leaf has none) for wires, nets and cells; ports keep their
+ * names, and objects without an HDL location, or whose provenance name is taken, get their short
+ * name.
  *
  * Vectors: a port's nets are written MSB first as a concatenation `{…}`, consecutive bits of one
  * wire as a part-select (`w[3:1]`, or `w` for a whole unsigned wire), consecutive literals as one
@@ -95,9 +96,14 @@ typedef struct odin3_verilog_opts {
  * the cell), Icarus with Yosys simlib.v as a library. A zero-length BITS value has no
  * Verilog literal and is written `""` (which tools read as 8 zero bits).
  *
- * Provenance: a declaration or statement whose object has a provenance location ends with
- * `// file:line` (the record's first location; for a DERIVED record, the first leaf of the
- * backward walk), in both name styles.
+ * Provenance (spec 5.4 W-2 to W-6; backends/common/hdl_loc.h): only HDL locations, the SOURCE
+ * leaves of the object's provenance walk; an IMPORTED leaf (a netlist's own line) writes none. A
+ * declaration or statement whose object has one ends with `// file:line` (the first, line only),
+ * in both name styles. A module, port, wire, net, instance and storage cell (`always`) also gets
+ * `(* src = "SRC" *)`, SRC in Yosys's form (`file:L.C-EL.EC`, every distinct location up to 8
+ * joined by `|`), after the object's own attributes: a user `src` attribute wins. An `assign`
+ * has the comment only (an attribute is illegal there). A file name with a byte outside
+ * 0x20..0x7e or a `|` is skipped with one WARNING per file.
  *
  * Errors (logged): ODIN3_ERR_INVALID_ARG for a NULL design or path, an unknown name style, a
  * port or stub name that cannot be written, a net on two input/inout port bits, a `$sop` cover

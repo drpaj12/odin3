@@ -335,10 +335,196 @@ static void test_src_attribute_and_names(void) {
     add_gate(mod, "$_AND_", (odin3_net_id[3]){net_a, net_b, net_y});
     char *text = write_json("t5.json");
     assert_has(text, "\"$c1\": {\n          \"hide_name\": 1,");
-    assert_has(text, "\"src\": \"t.v:4.1\"");
-    assert_has(text, "\"src\": \"t.v:3.1\"");
+    assert_has(text, "\"src\": \"t.v:4.1-4.1\"");
+    assert_has(text, "\"src\": \"t.v:3.1-3.1\"");
     odin3_util_free(text);
     (void)remove("t5.json");
+}
+
+/* --- 5.4a: the src text (spec 5.4 W-2 to W-6) ------------------------------------------------- */
+
+/* Writes the design to a file of a private temporary directory, reads it, removes both. */
+static char *write_json_scratch(void) {
+    char dir[] = "/tmp/odin3_jsrc_XXXXXX";
+    char path[sizeof dir + 16];
+    TEST_ASSERT_NOT_NULL(mkdtemp(dir));
+    (void)snprintf(path, sizeof path, "%s/o.json", dir);
+    char *text = write_json(path);
+    (void)remove(path);
+    (void)rmdir(dir);
+    return text;
+}
+
+/* A SOURCE (or IMPORTED) record at file:line.col-end_line.end_col. */
+static odin3_prov_id leaf_at(const char *file, odin3_srcloc where, bool imported) {
+    odin3_srcloc loc = where;
+    loc.file = intern(file);
+    odin3_prov_origin origin = {&loc, 1, 0, 0};
+    odin3_prov_id id = {0};
+    odin3_status st = imported ? odin3_prov_imported(&reader, &origin, &id)
+                               : odin3_prov_source(&reader, &origin, &id);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    return id;
+}
+
+static odin3_prov_id derived_of(const odin3_prov_id *parents, uint32_t count) {
+    odin3_prov_id id = {0};
+    odin3_prov_begin_op(&reader);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_prov_derive(&reader, (odin3_prov_list){parents, count}, &id));
+    return id;
+}
+
+/* top with one named AND gate whose provenance is prov (its nets and ports carry t.v lines). */
+static void gate_with_prov(odin3_prov_id prov) {
+    odin3_module *mod = new_module("top");
+    odin3_net_id nets[3] = {new_net(mod, "a"), new_net(mod, "b"), new_net(mod, "y")};
+    odin3_node_spec spec = {type_id("$_AND_"), intern("g"), prov, NULL, 0};
+    odin3_netvec ports[3] = {{&nets[0], 1}, {&nets[1], 1}, {&nets[2], 1}};
+    add_node(mod, &spec, ports);
+}
+
+static size_t count_of(const char *text, const char *needle) {
+    size_t count = 0;
+    for (const char *at = strstr(text, needle); at != NULL; at = strstr(at + 1, needle)) {
+        count++;
+    }
+    return count;
+}
+
+/* W-4: Yosys's form, with the end span. */
+static void test_src_end_span(void) {
+    gate_with_prov(leaf_at("a.v", (odin3_srcloc){0, 3, 1, 4, 10, 0}, false));
+    char *text = write_json_scratch();
+    assert_has(text, "\"src\": \"a.v:3.1-4.10\"");
+    odin3_util_free(text);
+}
+
+/* W-4: a record with a column but no end is `file:L.C`; with neither it is `file:L`. */
+static void test_src_short_forms(void) {
+    odin3_prov_id parents[2] = {leaf_at("a.v", (odin3_srcloc){0, 3, 7, 0, 0, 0}, false),
+                                leaf_at("b.v", (odin3_srcloc){0, 9, 0, 0, 0, 0}, false)};
+    gate_with_prov(derived_of(parents, 2));
+    char *text = write_json_scratch();
+    assert_has(text, "\"src\": \"a.v:3.7|b.v:9\"");
+    odin3_util_free(text);
+}
+
+/* T-6, W-2: a design that only has IMPORTED leaves writes no src at all. */
+static void test_src_imported_only_writes_none(void) {
+    odin3_prov_id imp = leaf_at("d.blif", (odin3_srcloc){0, 5, 0, 0, 0, 0}, true);
+    odin3_module_id mid = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("top"), imp, &mid));
+    odin3_module *mod = odin3_module_get(design, mid);
+    const char *const names[3] = {"a", "b", "y"};
+    odin3_net_id nets[3] = {{0}, {0}, {0}};
+    for (uint32_t i = 0; i < 3; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(mod, intern(names[i]), imp, &nets[i]));
+    }
+    odin3_node_spec spec = {type_id("$_AND_"), intern("g"), imp, NULL, 0};
+    odin3_netvec ports[3] = {{&nets[0], 1}, {&nets[1], 1}, {&nets[2], 1}};
+    add_node(mod, &spec, ports);
+    char *text = write_json_scratch();
+    assert_lacks(text, "\"src\"");
+    assert_lacks(text, "d.blif");
+    odin3_util_free(text);
+}
+
+/* W-2: an IMPORTED parent ahead of a SOURCE one prints the SOURCE only. */
+static void test_src_imported_parent_skipped(void) {
+    odin3_prov_id parents[2] = {leaf_at("d.blif", (odin3_srcloc){0, 5, 0, 0, 0, 0}, true),
+                                leaf_at("a.v", (odin3_srcloc){0, 8, 1, 8, 4, 0}, false)};
+    gate_with_prov(derived_of(parents, 2));
+    char *text = write_json_scratch();
+    assert_has(text, "\"src\": \"a.v:8.1-8.4\"");
+    assert_lacks(text, "d.blif");
+    odin3_util_free(text);
+}
+
+/* W-3: a DERIVED record of three SOURCE parents prints three locations in parent order, deduped. */
+static void test_src_three_parents(void) {
+    odin3_prov_id parents[4] = {leaf_at("c.v", (odin3_srcloc){0, 3, 1, 3, 5, 0}, false),
+                                leaf_at("a.v", (odin3_srcloc){0, 1, 1, 1, 5, 0}, false),
+                                leaf_at("b.v", (odin3_srcloc){0, 2, 1, 2, 5, 0}, false),
+                                leaf_at("a.v", (odin3_srcloc){0, 1, 1, 1, 5, 0}, false)};
+    gate_with_prov(derived_of(parents, 4));
+    char *text = write_json_scratch();
+    assert_has(text, "\"src\": \"c.v:3.1-3.5|a.v:1.1-1.5|b.v:2.1-2.5\"");
+    odin3_util_free(text);
+}
+
+/* W-3, X-3: at most 8 locations; the first 8 are kept. */
+static void test_src_cap_of_eight(void) {
+    odin3_prov_id parents[10];
+    for (uint32_t i = 0; i < 10; i++) {
+        parents[i] = leaf_at("a.v", (odin3_srcloc){0, i + 1, 1, i + 1, 2, 0}, false);
+    }
+    gate_with_prov(derived_of(parents, 10));
+    char *text = write_json_scratch();
+    assert_has(text, "a.v:8.1-8.2\"");
+    assert_lacks(text, "a.v:9.1-9.2");
+    assert_has(text, "|a.v:7.1-7.2|a.v:8.1-8.2\"");
+    odin3_util_free(text);
+}
+
+static unsigned warned_files;
+static char warned_text[CELL_TEXT];
+
+static void warn_sink(odin3_log_level level, const char *msg, void *user) {
+    (void)user;
+    if (level == ODIN3_LOG_WARN) {
+        warned_files++;
+        (void)snprintf(warned_text, sizeof warned_text, "%s", msg);
+    }
+}
+
+/* W-5, X-4: a file name with a byte JSON src cannot carry is skipped, one WARNING per file. */
+static void test_src_unwritable_file_skipped(void) {
+    odin3_prov_id parents[3] = {leaf_at("x|y.v", (odin3_srcloc){0, 1, 1, 1, 2, 0}, false),
+                                leaf_at("ok.v", (odin3_srcloc){0, 2, 1, 2, 2, 0}, false),
+                                leaf_at("x|y.v", (odin3_srcloc){0, 3, 1, 3, 2, 0}, false)};
+    gate_with_prov(derived_of(parents, 3));
+    warned_files = 0;
+    odin3_log_set_level(ODIN3_LOG_WARN);
+    odin3_log_set_sink(warn_sink, NULL);
+    char *text = write_json_scratch();
+    odin3_log_set_sink(NULL, NULL);
+    odin3_log_set_level(ODIN3_LOG_ERROR);
+    assert_has(text, "\"src\": \"ok.v:2.1-2.2\"");
+    assert_lacks(text, "x|y.v");
+    TEST_ASSERT_EQUAL_UINT(1, warned_files);
+    TEST_ASSERT_NOT_NULL(strstr(warned_text, "write_json: source file name 'x|y.v'"));
+    odin3_util_free(text);
+}
+
+/* A file name with a quote or backslash is escaped by JSON itself. */
+static void test_src_file_with_quote_is_escaped(void) {
+    gate_with_prov(leaf_at("a\"b\\c.v", (odin3_srcloc){0, 4, 1, 4, 3, 0}, false));
+    char *text = write_json_scratch();
+    assert_has(text, "\"src\": \"a\\\"b\\\\c.v:4.1-4.3\"");
+    odin3_util_free(text);
+}
+
+/* W-6: a module carries its src (new), in its attributes before the user's. */
+static void test_src_on_module(void) {
+    odin3_prov_id prov = leaf_at("m.v", (odin3_srcloc){0, 2, 1, 9, 10, 0}, false);
+    odin3_module_id mid = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("top"), prov, &mid));
+    char *text = write_json_scratch();
+    assert_has(text, "\"attributes\": {\n        \"src\": \"m.v:2.1-9.10\"\n      }");
+    TEST_ASSERT_EQUAL_UINT(1, count_of(text, "m.v:2.1-9.10"));
+    odin3_util_free(text);
+}
+
+/* W-6: wires and named nets carry src in their netnames. */
+static void test_src_on_wires_and_nets(void) {
+    odin3_module *mod = new_module("top");
+    (void)add_port(mod, (port_args){"a", ODIN3_DIR_IN, 1});
+    (void)new_net(mod, "n");
+    char *text = write_json_scratch();
+    assert_has(text, "\"src\": \"t.v:2.1-2.1\"");
+    assert_has(text, "\"src\": \"t.v:3.1-3.1\"");
+    odin3_util_free(text);
 }
 
 static void set_attr(odin3_module *mod, odin3_objref obj, const char *key, odin3_value val) {
@@ -374,9 +560,10 @@ static void test_user_attributes(void) {
                      "            \"src\": \"top.v:7.3-7.9\",\n"
                      "            \"mask\": \"0110\"\n");
     assert_lacks(text, "blif_extras");
-    assert_lacks(text, "\"src\": \"t.v:4.1\""); /* the user's src wins */
+    assert_lacks(text, "\"src\": \"t.v:4.1-4.1\""); /* the user's src wins */
     assert_has(text, "\"note\": \"hi\"");
-    assert_has(text, "\"attributes\": {\n        \"top\": \"00000000000000000000000000000001\"\n");
+    assert_has(text, "\"attributes\": {\n        \"top\": \"00000000000000000000000000000001\",\n"
+                     "        \"src\": \"t.v:1.1-1.1\"\n");
     odin3_util_free(text);
     (void)remove("t13.json");
 }
@@ -578,14 +765,6 @@ static void test_ranged_ports(void) {
                      "          \"offset\": -1,\n          \"upto\": 1\n");
     odin3_util_free(text);
     (void)remove("t7r.json");
-}
-
-static size_t count_of(const char *text, const char *needle) {
-    size_t count = 0;
-    for (const char *at = strstr(text, needle); at != NULL; at = strstr(at + 1, needle)) {
-        count++;
-    }
-    return count;
 }
 
 /* A user name equal to a generated key wins; the generated one gets a $u suffix. */
@@ -974,6 +1153,16 @@ int main(void) {
     RUN_TEST(test_latch_init);
     RUN_TEST(test_latch_init_unnamed_q);
     RUN_TEST(test_src_attribute_and_names);
+    RUN_TEST(test_src_end_span);
+    RUN_TEST(test_src_short_forms);
+    RUN_TEST(test_src_imported_only_writes_none);
+    RUN_TEST(test_src_imported_parent_skipped);
+    RUN_TEST(test_src_three_parents);
+    RUN_TEST(test_src_cap_of_eight);
+    RUN_TEST(test_src_unwritable_file_skipped);
+    RUN_TEST(test_src_file_with_quote_is_escaped);
+    RUN_TEST(test_src_on_module);
+    RUN_TEST(test_src_on_wires_and_nets);
     RUN_TEST(test_user_attributes);
     RUN_TEST(test_declared_blackbox_module);
     RUN_TEST(test_instance_and_parameters);

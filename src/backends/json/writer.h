@@ -23,6 +23,13 @@
  * read_blif reads them; `blif_extras` is skipped. A user `src` replaces the provenance `src`;
  * the latch `init` wins over a user `init`; a repeated key keeps the first.
  *
+ * `src` (spec 5.4 W-1 to W-5; backends/common/hdl_loc.h) is on modules, cells and netnames, from
+ * the object's HDL locations only: the SOURCE leaves of its provenance walk, in parent order, each
+ * distinct location once, at most 8 joined by `|`, each as Yosys writes it (`file:L.C-EL.EC`;
+ * `file:L.C` and `file:L` for a record with fewer parts). An IMPORTED leaf (a netlist's own line)
+ * writes none. A file name with a byte outside 0x20..0x7e or a `|` is skipped with one WARNING per
+ * file.
+ *
  * After the IR modules, each declared black-box or hard model (odin3_design_declared_model, once,
  * names not starting with `$`) is a module with attribute `blackbox`, its ports (fresh bits from
  * 2; a parameter-sized port at the type's defaults) and no cells, as Yosys write_json writes one.
