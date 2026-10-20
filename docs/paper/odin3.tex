@@ -134,6 +134,69 @@ build on it (ADR D7): the LLVM dependency and SSA semantics fight the node/pin/n
 for in-place rewiring and reverse engineering. slang~\cite{slang} is an MIT-licensed
 SystemVerilog compiler that Odin III would use through an adapter (deferred by D10).
 
+\emph{RTLIL.} RTLIL is the register-transfer-level intermediate language of Yosys. Claire Xenia
+Wolf created it with Yosys~\cite{yosys}. A design is a set of modules. A module holds wires, cells,
+processes, memories and connections between signals. A cell has a type, parameters and named
+ports. A process holds the decision structure of an \code{always} block. RTLIL has two forms: a
+text form that tools read and write, and an in-memory form, the C++ objects that the passes
+change. Yosys elaborates in two steps. Its Verilog front end parses the source into an AST and
+simplifies that AST. Then \code{genrtlil} turns each module of the AST directly into RTLIL.
+The hierarchy is kept: an instance becomes a cell whose type is the name of another module. From
+then on, the passes work on RTLIL and never see the AST.
+
+\emph{Oracles.} In this project an oracle is a trusted reference tool whose output we compare
+against. There are two: Yosys with Parmys, and Odin~II. We use them as follows.
+\code{tools/run-oracle.sh} runs an oracle on a design and an architecture and stores the netlist,
+the tool's logs and the commit that made it as a \emph{golden}. Odin III then runs on the same
+design. \code{netlist-compare} checks whether the two netlists are identical after
+canonical renaming, and \code{equiv-check} checks whether they compute the same function
+(Sec.~\ref{sec:verify}). An oracle is trusted because it is the reference, not because it is
+always right. Where Odin III proves an oracle wrong, the difference is declared
+(Sec.~\ref{sec:verify}).
+
+\emph{The AST, the symbol table and elaboration.} In Odin~II, as the author sees it, the parser
+builds an AST, and a symbol table maps each name to its declaration, per scope. Elaboration is
+then a series of passes over the AST. Each pass walks an expression tree depth first. The
+passes walk the module hierarchy and its instances breadth first. Together they transform the
+AST into one flattened netlist graph. RTLIL does not work this way. \code{genrtlil} builds each
+module separately, the hierarchy stays, and flattening is a later pass on the graph. Odin III
+takes the RTLIL route with its own split. Elaboration has two stages with a seam between them, an
+\emph{elaborated AST} (Sec.~\ref{sec:seam}). Stage~1 resolves what the language fixes at
+elaboration time: parameters, generate and constant functions. Stage~2 binds names through the
+symbol table and builds word-level cells for each module. The hierarchy stays in the IR.
+\code{flatten} is a separate pass over the graph.
+
+\emph{Optimisation as graph operations.} Most steps of a synthesis flow are operations on a
+graph, and the author finds that view the clearest one. The netlist is a graph of cells and nets.
+Table~\ref{tab:graph} lists each step with its graph operation. Compiler-style optimisations are
+rewrites on a directed acyclic graph (DAG) of cells. Flattening inlines a subgraph in place of
+each instance. ABC's logic optimisation rewrites an And-Inverter Graph
+(AIG)~\cite{brayton2010abc,mishchenko2006rewriting}, and LUT mapping enumerates cuts of that
+DAG and covers it~\cite{cong1994flowmap}. Partial mapping matches subgraphs, the problem that
+VF2~\cite{cordella2004vf2} solves in general.
+
+\begin{table}[t]
+\caption{Synthesis steps as graph operations}
+\label{tab:graph}
+\centering
+\footnotesize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.36\columnwidth}%
+  >{\raggedright\arraybackslash}p{0.56\columnwidth}@{}}
+\toprule
+Step & Operation on the graph \\
+\midrule
+constant folding & replace a cell whose inputs are constants by a constant driver \\
+dead-code elimination & delete the nodes that reach no output \\
+common-subexpression elimination & merge nodes of one type with the same inputs \\
+flattening & inline the body of a module in place of each instance \\
+FSM extraction & find a state graph in the registers and next-state logic, then recode it \\
+partial mapping & match subgraphs (an adder, a multiplier, a RAM) to hard blocks \\
+ABC optimisation & rewrite an AIG: \code{strash}, \code{rewrite}, \code{balance}, \code{fraig} \\
+LUT mapping & enumerate cuts of the AIG and choose a cover of $K$-input LUTs \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 % ------------------------------------------------------------------------------------------
 \section{Architecture}
 \label{sec:arch}
@@ -231,6 +294,7 @@ project cases (36 positive, 19 negative), each written in every format that can 
 with a stdlib Python reference parser as the oracle for the C readers.
 
 \subsection{Two-stage elaboration and the seam}
+\label{sec:seam}
 
 \begin{figure*}[t]
 \centering
