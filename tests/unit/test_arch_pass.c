@@ -128,6 +128,25 @@ static void test_collision_on_a_later_model_registers_nothing(void) {
     IS_TRUE(has_type(design, "adder"));
 }
 
+static void test_duplicate_model_names_register_nothing(void) {
+    const odin3_arch_src src = {
+        "dup.xml",
+        odin3_bytes_cstr(
+            "<architecture><models>"
+            "<model name=\"m1\"><input_ports><port name=\"a\"/></input_ports>"
+            "<output_ports><port name=\"o\"/></output_ports></model>"
+            "<model name=\"m2\"><input_ports><port name=\"a\"/></input_ports>"
+            "<output_ports><port name=\"o\"/></output_ports></model>"
+            "<model name=\"m1\"><input_ports><port name=\"a\"/></input_ports>"
+            "<output_ports><port name=\"o\"/></output_ports></model>"
+            "</models></architecture>")};
+    odin3_status st = odin3_arch_read_text(g_design, &src);
+    IS_TRUE(st != ODIN3_OK);
+    IS_NULL(odin3_design_arch(g_design));
+    IS_FALSE(has_type(g_design, "m1"));
+    IS_FALSE(has_type(g_design, "m2"));
+}
+
 static void test_second_import_is_refused(void) {
     EQ_INT(ODIN3_OK, run(g_design, "read_arch", XML));
     const odin3_arch *first = odin3_design_arch(g_design);
@@ -145,6 +164,11 @@ static void test_oom_sweep(void) {
         odin3_util_set_alloc_fail_after(-1);
         IS_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
         EQ_INT(st == ODIN3_OK, odin3_design_arch(design) != NULL);
+        if (st != ODIN3_OK) { /* a failed import registers no type (even when it fails late) */
+            IS_FALSE(has_type(design, "multiply"));
+            IS_FALSE(has_type(design, "adder"));
+            IS_FALSE(has_type(design, "single_port_ram"));
+        }
         odin3_design_destroy(design);
         if (st == ODIN3_OK) {
             return;
@@ -162,6 +186,7 @@ int main(void) {
     RUN_TEST(test_bad_arguments);
     RUN_TEST(test_failed_import_changes_nothing);
     RUN_TEST(test_collision_on_a_later_model_registers_nothing);
+    RUN_TEST(test_duplicate_model_names_register_nothing);
     RUN_TEST(test_second_import_is_refused);
     RUN_TEST(test_oom_sweep);
     return UNITY_END();
