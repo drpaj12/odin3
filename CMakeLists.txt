@@ -403,6 +403,8 @@ add_library(odin3_core OBJECT
     src/backends/json/writer.c
     src/backends/prov_name.c
     src/backends/common/hdl_loc.c
+    src/backends/common/hash_name.c
+    src/backends/common/name_map.c
     src/frontends/hdl_restore.c
     src/backends/verilog/escape.c
     src/backends/verilog/writer.c
@@ -1528,6 +1530,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test_sim_word PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     odin3_add_unit_test(test_dot_writer)
     odin3_add_unit_test(test_hdl_loc)
+    odin3_add_unit_test(test_hash_name)
+    odin3_add_unit_test(test_name_map)
     odin3_add_unit_test(test_hdl_restore)
     odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)
