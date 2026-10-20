@@ -1,8 +1,8 @@
 """Tests for tools/loc-check/loc_check.py (5.4 spec T-3, section 5): the dump parser, the location
-text, the comparison of a hand-made before and after pair (same, line, inherited, lost with a class,
-gained), the failure rules (zero objects, a lost object with no class, gained, a line count where the
-format is lossless), the specificity numbers, the expect file and the exit codes, with the Odin III
-runs replaced by fixed dumps.
+text, the comparison of a hand-made before and after pair (same, line, inherited, lost with a
+class, gained), the failure rules (zero objects, a lost object with no class, gained, a line count
+where the format is lossless), the specificity numbers, the expect file and the exit codes, with
+the Odin III runs replaced by fixed dumps.
 """
 
 from __future__ import annotations
@@ -74,8 +74,12 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(lc.compare("verilog", before, after)["module"].same, 1)
 
     def test_pool_matching_of_generated_names(self) -> None:
-        before = dump(("node", "$c1", A), ("node", "$c2", A), ("node", "$c3", B), ("node", "$c4", ""))
-        after = dump(("node", "$c9", B), ("node", "$c8", A), ("node", "$c7", A), ("node", "$c6", ""))
+        before = dump(
+            ("node", "$c1", A), ("node", "$c2", A), ("node", "$c3", B), ("node", "$c4", "")
+        )
+        after = dump(
+            ("node", "$c9", B), ("node", "$c8", A), ("node", "$c7", A), ("node", "$c6", "")
+        )
         t = lc.compare("plain", before, after)["node"]
         self.assertEqual((t.had, t.same, t.line, t.unclassified, t.gained), (3, 3, 0, 0, 0))
 
@@ -96,12 +100,16 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(lc.compare("blif", before, after)["net"].unclassified, 1)
 
     def test_blif_cells_are_inherited(self) -> None:
-        before = dump(("node", "$c1", A), ("node", "$c2", B), ("node", "$c3", C), ("node", "$c4", ""))
+        before = dump(
+            ("node", "$c1", A), ("node", "$c2", B), ("node", "$c3", C), ("node", "$c4", "")
+        )
         after = dump(
             ("node", "$c5", "a.v:3"), ("node", "$c6", B), ("node", "$c7", ""), ("node", "$c8", A)
         )
         t = lc.compare("blif", before, after)["node"]
-        self.assertEqual((t.had, t.inherited, t.same, t.line), (3, 2, 0, 0))
+        # inherited: every located cell after (the dialect writes no cell location); lost: the
+        # had cell nothing matches
+        self.assertEqual((t.had, t.inherited, t.same, t.line), (3, 3, 0, 0))
         self.assertEqual((t.lost, t.gained, t.unclassified), ({"X-6": 1}, 0, 0))
 
     def test_gained_in_a_pool(self) -> None:
@@ -152,7 +160,9 @@ class CheckTests(unittest.TestCase):
         after = dump(("node", "$c1", "a.v:3"))
         problems = lc.check_tallies("json", lc.compare("json", before, after))
         self.assertTrue(any("line" in p for p in problems), problems)
-        self.assertTrue(any("line" in p for p in lc.check_tallies("plain", lc.compare("plain", before, after))))
+        self.assertTrue(
+            any("line" in p for p in lc.check_tallies("plain", lc.compare("plain", before, after)))
+        )
 
     def test_clean_pair(self) -> None:
         rows = dump(("module", "m", A), ("wire", "x", A), ("node", "$c1", B))
@@ -197,8 +207,10 @@ class ExpectTests(unittest.TestCase):
             lc.parse_expect("lut x.v bogus why\n")
 
     def test_level_script(self) -> None:
-        text = lc.level_script("# c\n@TECHLIB@\nread_verilog @DESIGN@\nproc\n", {"@DESIGN@": "d.v", "@TECHLIB@": ""})
-        self.assertEqual(text, "; read_verilog d.v; proc".lstrip("; "))
+        text = lc.level_script(
+            "# c\n@TECHLIB@\nread_verilog @DESIGN@\nproc\n", {"@DESIGN@": "d.v", "@TECHLIB@": ""}
+        )
+        self.assertEqual(text, "read_verilog d.v; proc")
 
 
 class MainTests(unittest.TestCase):

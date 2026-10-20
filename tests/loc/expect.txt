@@ -1,0 +1,4 @@
+# 5.4e loc-check: the designs a level cannot take, and why. Format:
+#   <level> <design file name> <outcome> <reason>
+# outcome: error:script (the level's own script fails) or error:read (a read-back fails).
+# An entry for a design that passes is stale and fails the run. Nothing is skipped silently.

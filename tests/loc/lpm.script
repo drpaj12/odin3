@@ -1,0 +1,12 @@
+# The 5.4 LPM level: the 5.1 LPM script (tests/lpm/lpm.script) without its write. @LIB@ is
+# lib/lpm.o3lib; @FAMILY@ is empty.
+read_techlib @LIB@
+read_verilog @DESIGN@
+proc
+opt
+wreduce
+opt_clean
+opt -full
+lpmmap @FAMILY@
+opt_clean
+opt -full
