@@ -20,6 +20,7 @@
 # read-data flops). `counts:+N latch` is the read register Odin III keeps (width x read ports,
 # plus what D15 lists). Odin III follows the RTL here; matching Parmys would drop the register
 # (Peter's "match Parmys and warn" rule, not applied: it changes the function).
+# Peter 2026-10-20: keep RTL-correct; Parmys defect. No code change.
 
 # no-golden (the k4 Parmys run failed, C1): common/mult_const.v, diffeq1, diffeq2, stereovision2
 # (ERROR BUF_NODE), mkDelayWorker32B (capped at 6144 MB).
