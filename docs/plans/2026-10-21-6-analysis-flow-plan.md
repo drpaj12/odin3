@@ -272,3 +272,9 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
   always runs. C-8 (b) "Verilog micro" is covered by a unit test with SOURCE provenance and by
   `cli_writers` (read_verilog, then `--locs`); a BLIF-read design is checked byte-identical with and
   without `--locs`.
+- 6.2 fix round (agent default): the colour legend names at most 32 classes (`LEGEND_MAX`); the
+  rest fold into one `(N more values)` entry with the neutral fill `#cfcfcf`. Node fills are
+  unchanged. Dot text keeps valid UTF-8 and replaces DEL and invalid bytes with `?`. Class texts are
+  interned once through a hash index (O(n)) and sorted (O(k log k)). `--color-by`, `--focus` and
+  `--max-nodes` reject a value that starts with `--`. `test_graphviz_nop` finds `nop` on PATH and
+  passes when it ran.
