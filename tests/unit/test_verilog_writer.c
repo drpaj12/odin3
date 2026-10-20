@@ -953,6 +953,19 @@ static void test_vectors_msb_first(void) {
     expect_not("CONST");
 }
 
+/* A module instance's `parameter:<NAME>` attributes stay attributes in Verilog (R-5): the module
+ * it instantiates is already specialised and declares no parameter to override, so `#(.W(8))`
+ * would not read; the name is escaped as any other. */
+static void test_instance_parameter_attributes(void) {
+    (void)build_instances();
+    odin3_objref obj = {ODIN3_OBJ_NODE, odin3_module_find_node(module, intern("u1")).v};
+    set_attr(obj, "parameter:W", odin3_value_int(8));
+    set_attr(obj, "parameter:S", str_value("ab"));
+    (void)write_ok();
+    expect_has("  (* \\parameter:W = 8, \\parameter:S = \"ab\" *)\n  sub u1 (");
+    expect_not("#(");
+}
+
 /* --- word cells ---------------------------------------------------------------------------- */
 
 typedef struct words_fixture {
@@ -2078,6 +2091,7 @@ int main(void) {
     RUN_TEST(test_storage_init_undefined);
     RUN_TEST(test_storage_yosys_latches);
     RUN_TEST(test_vectors_msb_first);
+    RUN_TEST(test_instance_parameter_attributes);
     RUN_TEST(test_word_logic);
     RUN_TEST(test_word_regs);
     RUN_TEST(test_word_yosys_reads);

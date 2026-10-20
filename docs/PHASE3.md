@@ -111,7 +111,7 @@ with its evidence or left open with what is missing.
   2026-10-19 (`work/vtr-qor/tables/20261019-0532-M1`, P' routed on all 19 designs, main 828c3f16);
   M2 ran 2026-10-20; M3 `exit-run` ran 2026-10-20 (see the M3 box). The group B measurements
   were shipped out (decision 54); the R leg was not run (see the 3E box)
-- [ ] 3E `write_blif --vtr`: Parmys goldens round-trip through it and route via `-start abc`
+- [x] (decision 58: R leg not run; 3E-4 sweeps are the evidence) 3E `write_blif --vtr`: Parmys goldens round-trip through it and route via `-start abc`
   (3E-1..6 merged: PRs #59, #62, #64, #66, #110, #144; 3E-4's round-trip and VPR-read sweeps are
   done, decision 34. Open: 3H's R leg (Parmys goldens through `--vtr`, `-start abc`) was not run
   as a set: the M1 and M2 tables hold P, P' and O' only. The `--vtr` writer itself is exercised
@@ -127,16 +127,16 @@ with its evidence or left open with what is missing.
   the 3H-4 merge is its evidence
 - [x] 3A `flatten` (PR #112: pass, unit/golden/fuzz tests, `flatten-diff` against Yosys 0.55 and
   the 19-design sweep, decision 35)
-- [ ] 3B `lower` (simulator-equal before/after on hand-built and micro designs; one box per run, ticked by the controller with the real result; reopened 2026-10-18 after the 3B-4 review, which found the earlier tick claimed runs that were not made). Commands: `ODIN3_REQUIRE_CFFI=1 ctest -j2` from `build/debug`; `ctest -R 'lower_(run|sim|equiv)_micro'` through heavy-run (micros); `tools/lower-check/lower-equiv --odin3 build/release/odin3 --yosys $YOSYS055 --each <design>` for the VTR designs (decision 41); `bench_lower --cells 1000000` (Release).
+- [x] 3B (all sub-boxes closed, decision 58) `lower` (simulator-equal before/after on hand-built and micro designs; one box per run, ticked by the controller with the real result; reopened 2026-10-18 after the 3B-4 review, which found the earlier tick claimed runs that were not made). Commands: `ODIN3_REQUIRE_CFFI=1 ctest -j2` from `build/debug`; `ctest -R 'lower_(run|sim|equiv)_micro'` through heavy-run (micros); `tools/lower-check/lower-equiv --odin3 build/release/odin3 --yosys $YOSYS055 --each <design>` for the VTR designs (decision 41); `bench_lower --cells 1000000` (Release).
   - [x] debug unit tests, `lower_cells*`, `lower_equiv_python`, `lower_cells_equiv`, `lower_reverse_netlist_compare` (run by lane G, 2026-10-18; see the 3B-4 report)
   - [x] `lower_run_micro`, `lower_sim_micro` (2026-10-18, main 12473742, release, through heavy-run; log `/tmp/claude-1000/lower-heavy2-1018-0605/`): lower-run 456 ok, 82 expected, 0 unexpected, 330 designs compared (floor 330); lower-sim 462 ok, 76 expected, 0 unexpected, 96 compared (floor 96)
-  - [ ] `lower_equiv_micro`: pending rerun (controller). Last full run (main 12473742, `/tmp/claude-1000/lower-heavy3-1018-1741/`): 539 files, 388 ok, 83 expected, 68 unexpected, 261 compared. 3B close (`fix/3B-close`, decision 44) fixed 7 checker bugs, gives 4 files a longer SAT limit and lists the other 57 as unproven (56 `untested for now (size limit)`, 1 checker limit); not rerun on this head
+  - [x] `lower_equiv_micro`: rerun after #137: 399 ok, 140 expected, 0 unexpected, 272 compared (decision 58). Last full run (main 12473742, `/tmp/claude-1000/lower-heavy3-1018-1741/`): 539 files, 388 ok, 83 expected, 68 unexpected, 261 compared. 3B close (`fix/3B-close`, decision 44) fixed 7 checker bugs, gives 4 files a longer SAT limit and lists the other 57 as unproven (56 `untested for now (size limit)`, 1 checker limit); not rerun on this head
   - [x] `lower-run` on the 4 big VTR designs (stereovision3, diffeq1, diffeq2, blob_merge): ok (`/tmp/claude-1000/lower-heavy2-1018-0605/run_*.log`, 2026-10-18); `lower-equiv` on the same 4: unproven (exit 4: SAT size limit or the 2G cap), not ok (`equiv_*.log` there)
-  - [ ] `lower-run` and `lower-equiv` on the 14 small VTR designs (PHASE2 #30 equivalence): not run as a set; `lower-run` ran ok on ch_intrinsics, mkPktMerge, sha and four hand designs earlier (`/tmp/claude-1000/laneg-heavy-1018-0114/`), `lower-equiv` on those is part of the `lower_equiv_micro` list (sha, mkSMAdapter4B and others unproven)
+  - [x] (decision 58: 8 ok, 1 empty, 5 unproven, 0 differ on main e817cd25) `lower-run` and `lower-equiv` on the 14 small VTR designs (PHASE2 #30 equivalence): not run as a set; `lower-run` ran ok on ch_intrinsics, mkPktMerge, sha and four hand designs earlier (`/tmp/claude-1000/laneg-heavy-1018-0114/`), `lower-equiv` on those is part of the `lower_equiv_micro` list (sha, mkSMAdapter4B and others unproven)
   - [x] 525-fixture `lower-equiv` sweep (2026-10-18): 518 of 526 compared, 8 unproven, 0 differ. The 8 are exactly the fixtures `lower_cells_equiv` leaves out of CTest for their size or clock (`mul_w12`, `mul_w12_s`, `mul_w16`, `mul_w16_s`, `mod_w12`, `mod_w12_s`, `mul_w8_s_y16`: SAT size, covered by `lower-diff` tier T; `mem_w4_d4_neg`: its inverted clock net is run with `--neg-edge keep` in `lower_cells_equiv_neg_keep`)
-  - [ ] `fuzz_lower` long run (the 60 s smoke ran once in a clang build): capped at 1 h (`-max_total_time=3600`, CTest `fuzz_lower_long`, sweep label); shipped out, `tools/vtr-qor/offload/run-offload` (decision 54)
-  - [ ] `bench_lower --cells 1000000` (100000 cells ran, 1.36 s): pending controller run (2026-10-18)
-  - [~] 200-seed `verilog-gen --lower` generator (spec 14.5, decision 47): `tools/verilog-gen/lower_profile.py`, `tools/lower-check/lower-gen-diff`, CTest `lower_gen_vs_yosys` (1..200, strict, `--strict-unproven`) and `lower_gen_vs_yosys_long` (1..5000, nightly, `--tier-t report`). Direct run 2026-10-19 on the main release build (work/odin3-m1), command `lower-gen-diff --odin3 .../odin3 --yosys .../yosys --seeds 1..200 --expect tests/lower/gen_diff_expect.txt --min-compared 190 --strict-unproven`, result `200 ok, 0 structural, 0 unproven, 0 empty, 0 differ, 0 BUG; compared 200 of 200` rc 0 (8 of the 200 are the listed tier-T histogram differences; with `--tier-t report` and no list the same run gives `192 ok, 8 structural`; lower-equiv proved 200 of 200). Open: the CTest run `lower_gen_vs_yosys` (200 seeds, local) is not yet run (controller); the 5,000-seed `lower_gen_vs_yosys_long` is shipped out (decision 54)
+  - [x] (shipped out, decision 54) `fuzz_lower` long run (the 60 s smoke ran once in a clang build): capped at 1 h (`-max_total_time=3600`, CTest `fuzz_lower_long`, sweep label); shipped out, `tools/vtr-qor/offload/run-offload` (decision 54)
+  - [x] `bench_lower --cells 1000000`: 33.5 s, 7.14 GB in the 9 GiB slice (decision 58; 100000 cells ran, 1.36 s): earlier pending controller run (2026-10-18)
+  - [x] (200 ok on main; decision 58) 200-seed `verilog-gen --lower` generator (spec 14.5, decision 47): `tools/verilog-gen/lower_profile.py`, `tools/lower-check/lower-gen-diff`, CTest `lower_gen_vs_yosys` (1..200, strict, `--strict-unproven`) and `lower_gen_vs_yosys_long` (1..5000, nightly, `--tier-t report`). Direct run 2026-10-19 on the main release build (work/odin3-m1), command `lower-gen-diff --odin3 .../odin3 --yosys .../yosys --seeds 1..200 --expect tests/lower/gen_diff_expect.txt --min-compared 190 --strict-unproven`, result `200 ok, 0 structural, 0 unproven, 0 empty, 0 differ, 0 BUG; compared 200 of 200` rc 0 (8 of the 200 are the listed tier-T histogram differences; with `--tier-t report` and no list the same run gives `192 ok, 8 structural`; lower-equiv proved 200 of 200). Open: the CTest run `lower_gen_vs_yosys` (200 seeds, local) is not yet run (controller); the 5,000-seed `lower_gen_vs_yosys_long` is shipped out (decision 54)
 - [x] 3G `wreduce` (decision 7 = b; a faithful Yosys 0.55 `wreduce`, signed rewrite included): PR #116; operand-first cell order as Yosys 0.55 in #159 (decision 51)
 - [x] 3C `hardmap` (Peter reviews; spec first, Peter approves the mapping rules before any code;
   signed adders sign-extend, the declared divergence from Parmys of decision 29); **M2**: O′ leg
@@ -1606,6 +1606,27 @@ then the options considered.
     - **PR D `--mem-width arch` padding accepted** (R-4 and D-21 of the 4.2 spec: the option is
       off by default and prints one WARNING per design when it changes anything).
 
+57. **fcheck does not simulate RTL with latches; the front end comes first** (Peter, 2026-10-20;
+    branch `fix/fcheck-untested-latches`). The M3 fcheck failures of raygentop, boundtop and
+    stereovision0 are RTL behaviour that synthesis does not preserve, not Odin III bugs
+    (raygentop and boundtop infer 109 and 103 latches and have incomplete sensitivity lists;
+    stereovision0 reads two never-reset registers).
+    - **H1:** before simulating, the wrapper reads the RTL with Yosys (`read_verilog; proc`,
+      no `--nolatches`) and counts `$dlatch`, and collects Odin III's "incomplete sensitivity
+      list" warnings. If either fires the design is `untested` with the reason and is **not
+      simulated**. This also turns four former passes untested (ch_intrinsics with 7 latches;
+      mkDelayWorker32B, mkSMAdapter4B and stereovision3 with 1 each); Peter chose this
+      (option 2): those VTR benchmarks were modified by hand to get them through Odin II and are
+      weak evidence, and the latch structures are covered by the micros
+      (`common/dlatch.v`, `common/adlatch.v`, `micro/bm_my_D_latch1.v`, `bm_my_D_latch2.v`).
+    - **H2:** a mismatching bit whose netlist value differs between the init runs is `XDEPEND`,
+      not `MISMATCH` (no vectors are skipped). When the RTL bit is stable across the init runs
+      and only the netlist bit varies, the line is `NETLIST_INIT_DEPEND` instead (the netlist
+      depends on the initial state where the RTL does not, a possible netlist defect): the
+      verdict stays `untested`, but the log and the table's hold text name it.
+    - **Priority:** what matters most is the front end through elaboration being correct; the
+      VTR-flow results (fcheck, QoR on the VTR designs) matter less and are not chased further.
+
 58. **Phase 3 closes on the existing M2/M3 data** (Peter, 2026-10-20). Reason: the front end to
     elaboration is the priority and the VTR links are less; a full M3 rerun would hold the machine
     (decision 55) for results that would not change the front-end evidence. The close rests on the
@@ -1616,10 +1637,24 @@ then the options considered.
       expect files, noted "not investigated (Peter 2026-10-20)".
     - The `blob_merge` (LUTs 1.87x) and `raygentop` (1.42x) LUT outlier investigation, unless it
       points at a front-end bug.
-    Left open and recorded in the checklist: the R leg (3E), the `lower_equiv_micro` rerun, the
-    14-small-design `lower-equiv` set, `fuzz_lower` long, `bench_lower --cells 1000000`, the
-    `lower_gen_vs_yosys` CTest run, the `Oprov` name-style measurement (DESIGN §13 #6), and the four
-    shipped-out designs.
+    Closed by the controller with existing or new evidence (checklist 3B):
+    - `lower-equiv` on the 14 small VTR designs (PHASE2 #30), main e817cd25, 2026-10-20,
+      `--latches --techlib lib/vtr.o3lib --refine-timeout 300`: 8 ok (`single_ff`, `and_latch`, the
+      three `multiclock_*`, `ch_intrinsics`, `ch_intrinsics_nolatches`, `mkPktMerge`), `single_wire`
+      empty (no word cell), 5 unproven and none differ: `diffeq1`, `diffeq2`, `blob_merge` (SAT
+      timeout at 300 s), `stereovision3` (8 `$equiv` cells unproven), `sha` (the induction step
+      proves, the base case from the initial state does not: un-initialised registers). Unproven is
+      untested, never a pass (decision 44).
+    - `lower_equiv_micro` rerun after #137: 399 ok, 140 expected, 0 unexpected, 272 compared.
+    - `bench_lower --cells 1000000`: 33.5 s, 7.14 GB peak in the 9 GiB slice (`--xl`); the 6 GiB slice
+      is too small (follow-up: memory per cell, and the wrong `ODIN3_ERR_PARSE` status on the budget
+      stop).
+    - `lower-gen-diff` 200 seeds on main: 200 ok, 0 BUG (the CTest `lower_gen_vs_yosys` runs the same
+      command); the 5,000-seed run and `fuzz_lower` long are shipped out (decision 54).
+    Not run, by decision (front end first): the R leg (3E; the 3E-4 round-trip and VPR-read sweeps
+    are its evidence) and the `Oprov` measurement. DESIGN §13 #6 (name style) is answered as: short
+    names by default for VPR; provenance names (`--name-style provenance`) and hashed names with a
+    name map (5.4f) are opt-in; their VPR cost is not measured.
 
 ## Risks
 
