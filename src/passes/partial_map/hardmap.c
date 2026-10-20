@@ -257,12 +257,32 @@ static void info_absent(const odin3_arch *arch, const char *model, uint64_t coun
               pm_arch_name(arch), model, count, cells);
 }
 
+/* C-2 and C-3: a record with an `adder` model but no carry pack pattern gets one warning; with
+ * one, the number of pack patterns reaching the adder's `cin` is reported as a fact. */
+static void carry_report(const odin3_arch *arch, bool have_adder) {
+    if (!have_adder) {
+        return;
+    }
+    if (!odin3_arch_chain_pattern_reaches_adder(arch)) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "partial_map: architecture '%s' has an 'adder' model but no carry pack pattern; "
+                  "chains may not pack",
+                  pm_arch_name(arch));
+        return;
+    }
+    odin3_log(ODIN3_LOG_INFO, "partial_map: architecture '%s' has %" PRIu32 " carry pack patterns",
+              pm_arch_name(arch), odin3_arch_adder_cin_patterns(arch));
+}
+
 /* S-2 and S-3: with an arch record the rules come from it, and a block whose model the library
  * does not hold is simply absent (one INFO line per kind); without a record the 3C values stand
  * and a missing type stays the H-3 error. */
-static void setup_rules(hm_ctx *hc) {
+static void setup_rules(hm_ctx *hc, const pm_options *opts) {
     const odin3_arch *arch = odin3_design_arch(hc->design);
     hc->rules = pm_rules_from_arch(arch);
+    if (opts != NULL && opts->min_add != 0) {
+        hc->rules.min_add = opts->min_add; /* C-4 */
+    }
     if (arch == NULL) {
         return;
     }
@@ -285,6 +305,7 @@ static void setup_rules(hm_ctx *hc) {
     if (!reg_sp && !reg_dp) {
         info_absent(arch, "single_port_ram", count_cells(hc, "$mem"), "$mem");
     }
+    carry_report(arch, hc->rules.have_adder);
 }
 
 static void report(hm_ctx *hc) {
@@ -307,11 +328,11 @@ static void report(hm_ctx *hc) {
     odin3_strbuf_free(&info);
 }
 
-odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
-                                   odin3_hardmap_stats *stats) {
+odin3_status odin3_partial_map_run_opts(odin3_pass_ctx *ctx, odin3_design *design,
+                                        const pm_options *opts, odin3_hardmap_stats *stats) {
     hm_ctx hc;
     hm_init(&hc, ctx, design);
-    setup_rules(&hc);
+    setup_rules(&hc, opts);
     odin3_status st = precheck(&hc);
     st = st == ODIN3_OK && hc.rules.have_mul ? all_mul_phases(&hc) : st;
     st = st == ODIN3_OK && hc.rules.have_adder ? all_add_phases(&hc) : st;
@@ -325,6 +346,11 @@ odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
     }
     hm_free(&hc);
     return st;
+}
+
+odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                   odin3_hardmap_stats *stats) {
+    return odin3_partial_map_run_opts(ctx, design, NULL, stats);
 }
 
 odin3_status odin3_hardmap_run(odin3_pass_ctx *ctx, odin3_design *design,

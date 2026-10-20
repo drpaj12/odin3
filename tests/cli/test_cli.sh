@@ -37,6 +37,8 @@
 # hardmap_add (3C-2: hardmap maps `$add`/`$sub` to adder chains; the sim vectors before and after equal, an 8+6 add equals tests/hardmap/expected/add_8x6.blif).
 # memory_merge (4.7 G-1: the registered-read RAM micro through memory_merge has the read register merged into the `$mem`; with partial_map after it the BLIF equals partial_map alone).
 # memory_merge_soft (4.7, review M-1: memories partial_map leaves soft, chained after memory_merge, are equivalent to partial_map alone: equiv-check on the BLIFs for a variable read enable and OFFSET != 0, sim vectors for a falling-edge read, the same lower error for write ports on two clocks).
+# pm_carry (4.5 C-4: `partial_map --min-add N` leaves smaller adds soft; bad arguments are refused with a located message).
+# pm_carry_arch (4.5, needs VTR_ROOT: the adder micros through partial_map on the k6 and COFFE records give the same sim vectors as before the pass; the k4 arch (no adder) leaves them to lower).
 # pm_ramstyle (4.7 G-3: a ram_style attribute gives one warning and the same BLIF as without it).
 # The project cases run from the project's directory (tests/cli/project), so the paths given are
 # relative.
@@ -810,6 +812,47 @@ memory_merge_soft)
         grep -qF "has write ports on different clocks or polarities" "$work/err" ||
             fail "mem_2clk: '$chain' did not give the lower error"
     done
+    ;;
+pm_carry)
+    # cli_pm_carry (4.5 C-4): `--min-add N` on the 8-bit add of add_8x6.v (n = 8).
+    hm=$fixtures/../../hardmap
+    lib=$fixtures/../../../lib/vtr.o3lib
+    pre="read_techlib $lib; read_verilog --vtr-compat $hm/add_8x6.v; proc; opt; wreduce; opt"
+    "$odin3" -p "$pre; partial_map --min-add 8" >"$work/out" 2>"$work/err" || fail "--min-add 8 failed"
+    grep -qF "partial_map: 0 multiply, 10 adder in 1 chains" "$work/err" || fail "--min-add 8 did not map the 8-bit add"
+    "$odin3" -p "$pre; partial_map --min-add 9" >"$work/out" 2>"$work/err" || fail "--min-add 9 failed"
+    grep -qF "partial_map: 0 multiply, 0 adder in 0 chains" "$work/err" || fail "--min-add 9 mapped the 8-bit add"
+    "$odin3" -p "$pre; hardmap --min-add 9" >"$work/out" 2>"$work/err" || fail "hardmap alias --min-add 9 failed"
+    grep -qF "0 adder in 0 chains" "$work/err" || fail "the hardmap alias ignored --min-add"
+    expect_fail "partial_map: --min-add needs a whole number of at least 1" -p "$pre; partial_map --min-add"
+    expect_fail "partial_map: --min-add '0': need a whole number of at least 1" -p "$pre; partial_map --min-add 0"
+    expect_fail "partial_map: --min-add 'x1': need a whole number of at least 1" -p "$pre; partial_map --min-add x1"
+    expect_fail "partial_map: --min-add '-3': need a whole number of at least 1" -p "$pre; partial_map --min-add -3"
+    expect_fail "partial_map: unknown argument '--min-mul' (known: --min-add N)" -p "$pre; partial_map --min-mul 2"
+    ;;
+pm_carry_arch)
+    # cli_pm_carry_arch (4.5, Task 12): each adder micro, through read_arch of the sweep arch, has
+    # the same sim vectors before and after partial_map; k4_N4 has no adder model, so nothing maps.
+    [[ -n ${VTR_ROOT:-} ]] || { echo "test_cli pm_carry_arch: VTR_ROOT not set, skipped" >&2; exit 77; }
+    hm=$fixtures/../../hardmap
+    arch_dir=$VTR_ROOT/vtr_flow/arch
+    post="proc; opt; wreduce; opt"
+    for arch in timing/k6_frac_N10_frac_chain_mem32K_40nm.xml COFFE_22nm/k6_frac_N10_4add_2chains_depop50_mem20K_22nm.xml; do
+        for micro in add_8x6 sub_pad_u sub_pad_s sx_add_c; do
+            pre="read_arch $arch_dir/$arch; read_verilog --vtr-compat $hm/$micro.v; $post"
+            "$odin3" -p "$pre; sim 4000 11 $work/before.vec; partial_map; sim 4000 11 $work/after.vec" \
+                >"$work/out" 2>"$work/err" || fail "$arch $micro: script failed"
+            grep -qF "adder in 1 chains" "$work/err" || fail "$arch $micro: no chain mapped"
+            ! grep -qF "chains may not pack" "$work/err" || fail "$arch: the chain warning fired"
+            grep -qF "carry pack patterns" "$work/err" || fail "$arch: no carry pack pattern INFO"
+            cmp "$work/before.vec" "$work/after.vec" || fail "$arch $micro: sim vectors differ"
+        done
+    done
+    pre="read_arch $arch_dir/timing/k4_N4_90nm.xml; read_verilog --vtr-compat $hm/add_8x6.v; $post"
+    "$odin3" -p "$pre; partial_map" >"$work/out" 2>"$work/err" || fail "k4_N4: script failed"
+    grep -qF "partial_map: architecture 'k4_N4_90nm' has no 'adder' model; 1 '\$add'/'\$sub' cells left to lower" "$work/err" ||
+        fail "k4_N4: no S-3 INFO"
+    grep -qF "0 adder in 0 chains" "$work/err" || fail "k4_N4: an adder was made"
     ;;
 pm_ramstyle)
     # cli_pm_ramstyle (4.7 G-3): the micro with `(* ram_style = "block" *)` gives one warning and

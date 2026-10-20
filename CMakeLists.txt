@@ -865,10 +865,27 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_pm_ramstyle PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_carry
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_carry $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_carry PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_carry_arch
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_carry_arch $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_carry_arch PROPERTIES LABELS unit SKIP_RETURN_CODE 77)
     # 4.2 Task 3: pm_rules (k6 values, absent models, no 3C number outside rules.c).
     odin3_add_unit_test(test_pm_rules)
     target_sources(test_pm_rules PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
     target_compile_definitions(test_pm_rules PRIVATE
+        ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 4.5 Tasks 11 and 12: carry chains from the arch record (model, --min-add, chain warning).
+    odin3_add_unit_test(test_pm_carry)
+    target_sources(test_pm_carry PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_pm_carry PRIVATE
         ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

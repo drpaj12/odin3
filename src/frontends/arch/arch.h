@@ -199,4 +199,12 @@ typedef struct odin3_arch_ram_mode {
 uint32_t odin3_arch_modes_of(const odin3_arch *arch, const char *model, odin3_arch_ram_mode *out,
                              uint32_t cap);
 
+/* C-2: true when some pack pattern name reaches both the `cin` and the `cout` of an `adder` leaf
+ * (a port reference `<pb>.cin` / `<pb>.cout` in an interconnect pack_pattern, the pb index
+ * ignored). False when the arch has no `adder` leaf or no such pattern. */
+bool odin3_arch_chain_pattern_reaches_adder(const odin3_arch *arch);
+
+/* C-3: the number of distinct pack pattern names that reach the `cin` of an `adder` leaf. */
+uint32_t odin3_arch_adder_cin_patterns(const odin3_arch *arch);
+
 #endif

@@ -170,6 +170,86 @@ uint32_t odin3_arch_modes_of(const odin3_arch *arch, const char *model, odin3_ar
     return count;
 }
 
+/* --- carry pack patterns (4.2 C-2, C-3) --------------------------------------------------- */
+
+/* True when ref is "<pb>.<port>" or "<pb>[range].<port>[range]" for exactly that pb and port. */
+static bool ref_is(const char *ref, const char *pb, const char *port) {
+    size_t pb_len = strlen(pb);
+    size_t port_len = strlen(port);
+    if (ref == NULL || strncmp(ref, pb, pb_len) != 0) {
+        return false;
+    }
+    const char *at = ref + pb_len;
+    if (*at == '[') {
+        at = strchr(at, ']');
+        at = at != NULL ? at + 1 : NULL;
+    }
+    if (at == NULL || *at != '.' || strncmp(at + 1, port, port_len) != 0) {
+        return false;
+    }
+    return at[1 + port_len] == '\0' || at[1 + port_len] == '[';
+}
+
+/* True when pack has a port reference to `port` of some `adder` leaf. */
+static bool pack_reaches(const odin3_arch *arch, const odin3_arch_pack *pack, const char *port) {
+    uint32_t idx = 0;
+    for (uint32_t from = 0; odin3_arch_next_leaf_of(arch, "adder", from, &idx); from = idx + 1) {
+        const odin3_arch_leaf *leaf = odin3_arch_leaf_at(arch, idx);
+        const char *pb = leaf->levels[leaf->n_levels - 1U].pb;
+        if (ref_is(pack->in_port, pb, port) || ref_is(pack->out_port, pb, port)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* A pack pattern's place: the interconnect index and the pattern index within it. */
+typedef struct pack_pos {
+    uint32_t ic, pack;
+} pack_pos;
+
+/* True when some pack named `name` reaches `port` of an `adder` leaf, looking only at the packs
+ * before `stop` (all of them for {UINT32_MAX, UINT32_MAX}). */
+static bool name_reaches(const odin3_arch *arch, const char *name, const char *port,
+                         pack_pos stop) {
+    for (uint32_t i = 0; i <= stop.ic && i < odin3_arch_ic_count(arch); i++) {
+        const odin3_arch_ic *ic = odin3_arch_ic_at(arch, i);
+        for (uint32_t j = 0; j < ic->n_packs && (i < stop.ic || j < stop.pack); j++) {
+            if (strcmp(ic->packs[j].name, name) == 0 && pack_reaches(arch, &ic->packs[j], port)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool odin3_arch_chain_pattern_reaches_adder(const odin3_arch *arch) {
+    const pack_pos all = {UINT32_MAX, UINT32_MAX};
+    for (uint32_t i = 0; i < odin3_arch_ic_count(arch); i++) {
+        const odin3_arch_ic *ic = odin3_arch_ic_at(arch, i);
+        for (uint32_t j = 0; j < ic->n_packs; j++) {
+            if (pack_reaches(arch, &ic->packs[j], "cin") &&
+                name_reaches(arch, ic->packs[j].name, "cout", all)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+uint32_t odin3_arch_adder_cin_patterns(const odin3_arch *arch) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < odin3_arch_ic_count(arch); i++) {
+        const odin3_arch_ic *ic = odin3_arch_ic_at(arch, i);
+        for (uint32_t j = 0; j < ic->n_packs; j++) {
+            bool first = pack_reaches(arch, &ic->packs[j], "cin") &&
+                         !name_reaches(arch, ic->packs[j].name, "cin", (pack_pos){i, j});
+            count += first ? 1U : 0U;
+        }
+    }
+    return count;
+}
+
 /* --- parsing --------------------------------------------------------------------------------- */
 
 static odin3_status parse_root(arch_rd *rd) {

@@ -11,6 +11,7 @@
 #include "ir/design.h"
 #include "odin3/odin3.h"
 #include "passes/manager.h"
+#include "passes/partial_map/rules.h"
 
 #include <stdint.h>
 
@@ -45,6 +46,11 @@ typedef struct odin3_hardmap_stats {
  */
 odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
                                    odin3_hardmap_stats *stats);
+
+/* odin3_partial_map_run with the pass options (NULL: all defaults); `--min-add N` (4.2 C-4) leaves
+ * an `$add`/`$sub` of fewer than N bits to lower. */
+odin3_status odin3_partial_map_run_opts(odin3_pass_ctx *ctx, odin3_design *design,
+                                        const pm_options *opts, odin3_hardmap_stats *stats);
 
 /* The 3C name of odin3_partial_map_run (4.2 S-1), kept for the existing tests. */
 odin3_status odin3_hardmap_run(odin3_pass_ctx *ctx, odin3_design *design,
