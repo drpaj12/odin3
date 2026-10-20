@@ -3674,3 +3674,24 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         message(STATUS "verilog_gen_vs_yosys not registered: needs yosys")
     endif()
 endif()
+
+# Every test runs with its own TMPDIR, one directory per build tree (outside the repo: a test
+# checks that a temporary directory is not a git checkout). A tool killed by a ctest TIMEOUT
+# (SIGKILL) cannot remove the temporary directory it made; the cleanup fixture below does, after
+# the last test that needs it, pass or fail. Tools remove their own directories on every other exit.
+if(BUILD_TESTING)
+    string(MD5 _bin_hash "${PROJECT_BINARY_DIR}")
+    string(SUBSTRING ${_bin_hash} 0 12 _bin_hash)
+    set(_test_tmp /tmp/odin3-ctest-${_bin_hash})
+    add_test(NAME test_tmp_setup COMMAND ${CMAKE_COMMAND} -E make_directory ${_test_tmp})
+    add_test(NAME test_tmp_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf ${_test_tmp})
+    set_tests_properties(test_tmp_setup PROPERTIES FIXTURES_SETUP test_tmp)
+    set_tests_properties(test_tmp_cleanup PROPERTIES FIXTURES_CLEANUP test_tmp)
+    get_property(_all_tests DIRECTORY PROPERTY TESTS)
+    foreach(_t IN LISTS _all_tests)
+        if(NOT _t MATCHES "^test_tmp_")
+            set_property(TEST ${_t} APPEND PROPERTY ENVIRONMENT "TMPDIR=${_test_tmp}")
+            set_property(TEST ${_t} APPEND PROPERTY FIXTURES_REQUIRED test_tmp)
+        endif()
+    endforeach()
+endif()

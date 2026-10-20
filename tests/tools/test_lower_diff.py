@@ -3,14 +3,13 @@
 Fakes stand in for ``odin3``, ``yosys``, ``equiv-check`` and, in most tests, ``netlist-compare``;
 each logs its argv, and ``fake.json`` beside them says what they write and return. The last class
 runs the real ``netlist-compare`` on real BLIF text, to show a swapped gate input is exit 1. The
-work directories are made by ``tempfile.mkdtemp`` and are left in place (these tools never delete).
+work directories are removed when each test ends.
 """
 
 from __future__ import annotations
 
 import json
 import subprocess
-import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
@@ -249,7 +248,7 @@ class PureTest(unittest.TestCase):
 
 class RunTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.tree = Tree(Path(tempfile.mkdtemp(prefix="lower_diff_test_")))
+        self.tree = Tree(helpers.scratch(self, "lower_diff_test_"))
 
     def test_tier_s_agrees(self) -> None:
         code, out, err = self.tree.run()
@@ -423,7 +422,7 @@ class BeyondXTest(unittest.TestCase):
     the input leaves open (x), which is what ``lower-equiv``'s refinement check decides."""
 
     def setUp(self) -> None:
-        self.tree = Tree(Path(tempfile.mkdtemp(prefix="lower_diff_beyond_x_")))
+        self.tree = Tree(helpers.scratch(self, "lower_diff_beyond_x_"))
         self.tree.set_spec(**{"equiv-check_rc": 1, "equiv-check_out": "NOT equivalent\n"})
         self.extra = self.tree.expect("and_2.v shift equiv open (x) output bits differ\n")
 
@@ -466,7 +465,7 @@ class RealCompareTest(unittest.TestCase):
     """The real netlist-compare on real BLIF: equal passes, a swapped gate input is exit 1."""
 
     def test_known_equal_pair_is_ok_and_swapped_gate_inputs_differ(self) -> None:
-        tree = Tree(Path(tempfile.mkdtemp(prefix="lower_diff_test_")), real_compare=True)
+        tree = Tree(helpers.scratch(self, "lower_diff_test_"), real_compare=True)
         tree.set_spec(lo_blif=MUX, yo_blif=MUX)
         code, out, err = tree.run()
         self.assertEqual(code, 0, out + err)

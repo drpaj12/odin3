@@ -32,7 +32,8 @@ hook) and no other design failed; 2 usage or a
 tool error (Odin III exited with an error, or the before run cannot be simulated for a reason that
 is not a known skip); 3 hard: a child crashed, was killed by a signal or its memory cap, or timed
 out; 77 skipped (an ASan child and no systemd-run). The work directory is made under
-``$ODIN3_LOWER_WORK`` (else ``$TMPDIR``) and is never removed.
+``$ODIN3_LOWER_WORK`` (else ``$TMPDIR``) and is removed on
+exit unless ``--keep-tmp``.
 """
 
 from __future__ import annotations
@@ -214,7 +215,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--techlib", help="read this tech library (.o3lib) first")
     ap.add_argument("--mem-cap", type=lc.parse_size, default=lc.DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 3G)")
-    ap.add_argument("--work", type=Path, help="the work directory")
+    ap.add_argument("--work", type=Path, help="the work directory (never removed)")
+    ap.add_argument("--keep-tmp", action="store_true",
+                    help="keep the temporary work directory this run makes (else removed)")
     ap.add_argument("--mutant", choices=MUTANTS, help=argparse.SUPPRESS)
     ap.add_argument("--allow-empty", action="store_true",
                     help="a design with no word cell to compare is not a failure")
@@ -253,19 +256,18 @@ def execute(args: argparse.Namespace, work: Path) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
-    work = lc.make_work(args.work, "lower-sim-")
-    try:
-        return execute(args, work)
-    except lc.CrashError as exc:
-        print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
-        print(f"{TOOL}: work directory kept: {work}", file=sys.stderr)
-        return lc.EXIT_CRASH
-    except (OSError, lc.ToolError, ValueError) as exc:
-        print(f"{TOOL}: error: {exc}", file=sys.stderr)
-        return lc.EXIT_ERROR
-    except memcap.CapUnavailable as exc:
-        print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
-        return lc.EXIT_SKIP
+    with lc.make_work(args.work, "lower-sim-", args.keep_tmp) as work:
+        try:
+            return execute(args, work)
+        except lc.CrashError as exc:
+            print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
+            return lc.EXIT_CRASH
+        except (OSError, lc.ToolError, ValueError) as exc:
+            print(f"{TOOL}: error: {exc}", file=sys.stderr)
+            return lc.EXIT_ERROR
+        except memcap.CapUnavailable as exc:
+            print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
+            return lc.EXIT_SKIP
 
 
 if __name__ == "__main__":

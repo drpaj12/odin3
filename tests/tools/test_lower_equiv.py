@@ -3,15 +3,14 @@
 The real ``odin3`` (``ODIN3_CLI``) and Yosys 0.55 (``ODIN3_YOSYS055``) run every case; the class is
 skipped without them. A mutant is a second Verilog design with the same ports: its lowered BLIF is
 checked against the first design's ``lower-before.il``, so the gate differs from the gold exactly
-as a wrong lowering would (spec 14.4's regression mutants). The work directories are made by
-``tempfile.mkdtemp`` and left in place (these tools never delete).
+as a wrong lowering would (spec 14.4's regression mutants). The work directories are removed
+when each test ends.
 """
 
 from __future__ import annotations
 
 import os
 import stat
-import tempfile
 import unittest
 from contextlib import AbstractContextManager
 from pathlib import Path
@@ -146,7 +145,7 @@ class RefinementTest(unittest.TestCase):
     """Correct lowerings refine (exit 0); each mutant of spec 14.4 does not."""
 
     def setUp(self) -> None:
-        self.base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-"))
+        self.base = helpers.scratch(self, "test-lower-equiv-")
         self.count = 0
 
     def snap(self, text: str, techlib: str | None = None) -> tuple[Path, Path]:
@@ -439,7 +438,7 @@ class PairRegistersTest(unittest.TestCase):
         self.assertNotIn("connect \\r [0]", out)
 
     def test_a_stale_alias_gold_is_never_reused(self) -> None:
-        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-alias-"))
+        base = helpers.scratch(self, "test-lower-equiv-alias-")
         before = base / "b.il"
         before.write_text("module \\m\n  cell $add $c\n  end\nend\n", encoding="utf-8")
         (base / le.ALIAS_GOLD).write_text("old", encoding="utf-8")
@@ -573,7 +572,7 @@ class ExitCodeTest(unittest.TestCase):
     """``main``'s exit code from the verdicts (M3 of the 3B-4 review: exit 4 was never pinned)."""
 
     def run_main(self, *kinds: str) -> tuple[int, str]:
-        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-exit-"))
+        base = helpers.scratch(self, "test-lower-equiv-exit-")
         files = [str(base / f"d{n}.v") for n in range(len(kinds))]
         with verdicts(*kinds), mock.patch.object(ld, "check_yosys"):
             code, out, err = helpers.run_main(le.main, ["--odin3", "o", "--yosys", "y", "--work",
@@ -618,7 +617,7 @@ class RefineVerdictTest(unittest.TestCase):
         """(verdict, detail, the checks run); ``bmc`` = the answers of the bounded checks in call
         order: a base case (``bounded_check``, recorded as its ``run``) or the concrete output
         runs (``output_trace``, recorded as "outputs")."""
-        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-refine-"))
+        base = helpers.scratch(self, "test-lower-equiv-refine-")
         gold, gate = base / "gold.il", base / "gate.il"
         gold.write_text(self.GOLD, encoding="utf-8")
         gate.write_text(self.GATE, encoding="utf-8")
@@ -677,7 +676,7 @@ class RefineVerdictTest(unittest.TestCase):
                     self.assertEqual(self.verdict(True, [first, second])[0], "unproven")
 
     def test_a_sat_timeout_is_unproven_but_a_crash_is_not_absorbed(self) -> None:
-        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-refine-"))
+        base = helpers.scratch(self, "test-lower-equiv-refine-")
         checker = mock.Mock()
         checker.refines.side_effect = lc.CrashError("yosys", "timed out after 60 s", True)
         sides = (base / "g", base / "h")
@@ -693,7 +692,7 @@ class HardFailureTest(unittest.TestCase):
     """A crashing Yosys child is exit 3 and no expect list absorbs it."""
 
     def test_a_cap_kill_while_preparing_a_big_design_is_unproven_not_hard(self) -> None:
-        before = Path(tempfile.mkdtemp(prefix="test-lower-equiv-cap-")) / "b.il"
+        before = helpers.scratch(self, "test-lower-equiv-cap-") / "b.il"
         before.write_text("module \\m\n  cell $add $c\n  end\nend\n", encoding="utf-8")
         killed = opt_equiv.CrashError("yosys", "killed (exit -9)", cap_killed=True)
         with mock.patch.object(le, "make_gold", side_effect=killed):
@@ -705,7 +704,7 @@ class HardFailureTest(unittest.TestCase):
             le.check_pair("y", before, before, before.parent, 1, (None, None, False))
 
     def test_a_crashing_yosys_is_exit_3(self) -> None:
-        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-hard-"))
+        base = helpers.scratch(self, "test-lower-equiv-hard-")
         fake = base / "yosys"
         fake.write_text("#!/usr/bin/env bash\n"
                         "if [ \"$1\" = -V ]; then echo 'Yosys 0.55 (fake)'; exit 0; fi\n"
@@ -723,7 +722,7 @@ class HardFailureTest(unittest.TestCase):
 
     def test_a_stale_snapshot_in_a_reused_work_directory_is_not_judged(self) -> None:
         """Review L1: odin3 wrote no snapshot, the work directory holds an old one: exit 2."""
-        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-stale-"))
+        base = helpers.scratch(self, "test-lower-equiv-stale-")
         yosys = base / "yosys"
         yosys.write_text("#!/usr/bin/env bash\necho 'Yosys 0.55 (fake)'\n", encoding="utf-8")
         yosys.chmod(yosys.stat().st_mode | stat.S_IXUSR)
@@ -743,7 +742,7 @@ class HardFailureTest(unittest.TestCase):
         self.assertIn("wrote no", err)
 
     def test_a_failing_odin3_is_exit_2(self) -> None:
-        base = Path(tempfile.mkdtemp(prefix="test-lower-equiv-err-"))
+        base = helpers.scratch(self, "test-lower-equiv-err-")
         fake = base / "yosys"
         fake.write_text("#!/usr/bin/env bash\necho 'Yosys 0.55 (fake)'\n", encoding="utf-8")
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)

@@ -6,6 +6,9 @@ import contextlib
 import hashlib
 import io
 import random
+import shutil
+import tempfile
+import unittest
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -35,6 +38,13 @@ def write_golden(arch_dir: Path, design: str, text: str, **prov: str) -> Path:
     fields.update(prov)
     blif_path.with_suffix(".prov").write_text("".join(f"{k}={v}\n" for k, v in fields.items()))
     return blif_path
+
+
+def scratch(case: unittest.TestCase, prefix: str) -> Path:
+    """A fresh temporary directory removed when ``case`` finishes, pass or fail."""
+    path = Path(tempfile.mkdtemp(prefix=prefix))
+    case.addCleanup(shutil.rmtree, path, True)
+    return path
 
 
 def run_main(main: Callable[[Sequence[str]], int], argv: Sequence[str]) -> tuple[int, str, str]:
