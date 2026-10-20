@@ -96,31 +96,37 @@ tri-state or a multi-driver net is a located error.
 ## Checklist
 
 Updated 2026-10-14 (decision 29) from the Phase 3 survey: what is merged is ticked; partial items say
-which PRs remain.
+which PRs remain. Refreshed 2026-10-20 for the Phase 3 close (decision 58): each item below is ticked
+with its evidence or left open with what is missing.
 
-- [ ] Decisions 2–20 answered (or kept as agent defaults); DESIGN §4.0 amended for decision 1
-  (decisions 1–29 are all answered; the DESIGN §4.0 text lands with 3D-6)
+- [x] Decisions 2–20 answered (or kept as agent defaults); DESIGN §4.0 amended for decision 1
+  (decisions 1–58 are logged; 3D-6, PR #70, added `abc_script` to the project file: DESIGN §4.0 lists
+  `abc_script <file>`)
 - [x] 3H: Parmys baseline (P) on the 19, `-temp_dir ~/odin3-ws/work/vtr-qor`, table generator
   (run 2026-10-12, key `6baf6f3cfaf9`, 1:08 wall; decision 25)
 - [x] 3H: P-baseline table published to odin3-golden `qor/3c9a4d23b27d/P-baseline/` (golden commit
   76c485a; decisions 28 and 29)
-- [ ] 3H partial: 3H-1..2 merged; 3H-3 (to M1) and 3H-4 remain, and now carry 3F (below)
-  (3H-3 code: P' and R golden check, `fcheck`, `equiv`, `nightly`, `check-lib`, `crosscheck`
-  on `feat/3H-legs`; the M1 run and the group B measurements are the controller's and not yet
-  done, so nothing here is ticked)
+- [x] 3H: 3H-1..4 merged (PRs #63, #68, #126, #140): QoR harness, table and gate, P' and R legs, `fcheck`,
+  `equiv`, `nightly`, `crosscheck`, `rerun-check`, `exit-run`, seeds, `tests/vtr/tasks`. M1 ran
+  2026-10-19 (`work/vtr-qor/tables/20261019-0532-M1`, P' routed on all 19 designs, main 828c3f16);
+  M2 ran 2026-10-20; M3 `exit-run` ran 2026-10-20 (see the M3 box). The group B measurements
+  were shipped out (decision 54); the R leg was not run (see the 3E box)
 - [ ] 3E `write_blif --vtr`: Parmys goldens round-trip through it and route via `-start abc`
-  (partial: 3E-1..3 and 3E-5 merged; 3E-6 provenance names on `feat/3E-6`, decision 45; 3E-4's
-  round-trip and VPR-read sweeps are done, decision 34;
-  ticked when 3H's R leg routes all 19 via `-start abc`)
-- [ ] 3D linked ABC: adapter builds; `abc` pass; script ruling (#1); deterministic; **M1**: P′
-  leg routes all 19 (partial: 3D-0..4 and 3D-6 merged; the subprocess tasks 9a..9c of decision 29,
-  then 3D-5, 3D-7, 3D-8 remain)
+  (3E-1..6 merged: PRs #59, #62, #64, #66, #110, #144; 3E-4's round-trip and VPR-read sweeps are
+  done, decision 34. Open: 3H's R leg (Parmys goldens through `--vtr`, `-start abc`) was not run
+  as a set: the M1 and M2 tables hold P, P' and O' only. The `--vtr` writer itself is exercised
+  by the 15 routed P' (M1) and O' (M2) designs)
+- [x] 3D linked ABC: adapter builds; `abc` pass; script ruling (#1); deterministic; **M1**: P′
+  leg routes all 19 (3D-0..8 merged: PRs #60, #61, #77, #69, #73, #70, #108, #121, #141, #148,
+  #163; M1 table `20261019-0532-M1`: P' routed on all 19; `abc-determinism` in #163 and
+  `rerun-check` 15/15 byte-identical at M3). 3D-8 open plus close 22 ms against the 20 ms target
+  is accepted as missed (decision 56); H1..H6 on `mcml` and `LU32PEEng` shipped out (decision 54c)
 - [x] 3F hookup: Odin III task configs run through `run_vtr_task.py` read-only. **Folded into 3H**
   (decision 29, ruling 2): it is delivered by 3H-3 and 3H-4 (the `tests/vtr/tasks` configs and the
   `run_vtr_task.py` check), not by a separate 3F spec and plan; the box is ticked as folded, and
   the 3H-4 merge is its evidence
-- [ ] 3A `flatten` (implemented on `feat/3A-flatten`: pass, unit/golden/fuzz tests, `flatten-diff`
-  against Yosys 0.55 and the 19-design sweep, decision 35; ticked when the PR merges)
+- [x] 3A `flatten` (PR #112: pass, unit/golden/fuzz tests, `flatten-diff` against Yosys 0.55 and
+  the 19-design sweep, decision 35)
 - [ ] 3B `lower` (simulator-equal before/after on hand-built and micro designs; one box per run, ticked by the controller with the real result; reopened 2026-10-18 after the 3B-4 review, which found the earlier tick claimed runs that were not made). Commands: `ODIN3_REQUIRE_CFFI=1 ctest -j2` from `build/debug`; `ctest -R 'lower_(run|sim|equiv)_micro'` through heavy-run (micros); `tools/lower-check/lower-equiv --odin3 build/release/odin3 --yosys $YOSYS055 --each <design>` for the VTR designs (decision 41); `bench_lower --cells 1000000` (Release).
   - [x] debug unit tests, `lower_cells*`, `lower_equiv_python`, `lower_cells_equiv`, `lower_reverse_netlist_compare` (run by lane G, 2026-10-18; see the 3B-4 report)
   - [x] `lower_run_micro`, `lower_sim_micro` (2026-10-18, main 12473742, release, through heavy-run; log `/tmp/claude-1000/lower-heavy2-1018-0605/`): lower-run 456 ok, 82 expected, 0 unexpected, 330 designs compared (floor 330); lower-sim 462 ok, 76 expected, 0 unexpected, 96 compared (floor 96)
@@ -131,13 +137,33 @@ which PRs remain.
   - [ ] `fuzz_lower` long run (the 60 s smoke ran once in a clang build): capped at 1 h (`-max_total_time=3600`, CTest `fuzz_lower_long`, sweep label); shipped out, `tools/vtr-qor/offload/run-offload` (decision 54)
   - [ ] `bench_lower --cells 1000000` (100000 cells ran, 1.36 s): pending controller run (2026-10-18)
   - [~] 200-seed `verilog-gen --lower` generator (spec 14.5, decision 47): `tools/verilog-gen/lower_profile.py`, `tools/lower-check/lower-gen-diff`, CTest `lower_gen_vs_yosys` (1..200, strict, `--strict-unproven`) and `lower_gen_vs_yosys_long` (1..5000, nightly, `--tier-t report`). Direct run 2026-10-19 on the main release build (work/odin3-m1), command `lower-gen-diff --odin3 .../odin3 --yosys .../yosys --seeds 1..200 --expect tests/lower/gen_diff_expect.txt --min-compared 190 --strict-unproven`, result `200 ok, 0 structural, 0 unproven, 0 empty, 0 differ, 0 BUG; compared 200 of 200` rc 0 (8 of the 200 are the listed tier-T histogram differences; with `--tier-t report` and no list the same run gives `192 ok, 8 structural`; lower-equiv proved 200 of 200). Open: the CTest run `lower_gen_vs_yosys` (200 seeds, local) is not yet run (controller); the 5,000-seed `lower_gen_vs_yosys_long` is shipped out (decision 54)
-- [ ] 3G `wreduce` (decision 7 = b; a faithful Yosys 0.55 `wreduce`, signed rewrite included)
-- [ ] 3C `hardmap` (Peter reviews; spec first, Peter approves the mapping rules before any code;
+- [x] 3G `wreduce` (decision 7 = b; a faithful Yosys 0.55 `wreduce`, signed rewrite included): PR #116; operand-first cell order as Yosys 0.55 in #159 (decision 51)
+- [x] 3C `hardmap` (Peter reviews; spec first, Peter approves the mapping rules before any code;
   signed adders sign-extend, the declared divergence from Parmys of decision 29); **M2**: O′ leg
-  routes all 15 (the local gate; `mcml`, `LU32PEEng`, `bgm`, `LU8PEEng` shipped out, decision 54)
-- [ ] **M3 / exit**: O leg routes all 15 (the 4 shipped-out designs are run by `tools/vtr-qor/offload/run-offload` on a bigger machine, decision 54); functional check; byte-identical reruns (the 15); QoR table
-  within decision 3's bands, recorded here verbatim; DESIGN §13 #6 answered (name style); no band
-  missed (decision 29, ruling 9)
+  routes all 15 (the local gate; `mcml`, `LU32PEEng`, `bgm`, `LU8PEEng` shipped out, decision 54).
+  PRs #109 (plan), #125, #128, #136, #146, then the partial_map rework #158, #164, #174, #179.
+  M2 table `work/vtr-qor/tables/20261020-1642-M2` (main 69f92d1c): O' routed 15 of 15; geomeans
+  O'/P: CLB 0.976, channel width 0.967, critical-path delay 0.974, routed wirelength 0.811. Outliers
+  `blob_merge` (LUTs 1.87x) and `raygentop` (1.42x) not investigated (Peter, 2026-10-20: VTR-link
+  effect, not the front end). Table not yet published to odin3-golden
+- [x] **M3 / exit** (closed on the existing M2/M3 data, decision 58): `exit-run exit-20261020`
+  (main 69f92d1c, `/tmp/claude-1000/m3-1020-1242/exit.log`). O leg: run 66 ok, 1 failed, 1 timeout
+  for `arm_core` (O' timeout at 3600 s and O stopped: that main lacked PR D, #179); `arm_core`
+  after PR D: ARMCORE_RESULT. Functional check (`fcheck` O): 12 pass; `raygentop`, `boundtop`,
+  `stereovision0` classified untested, not Odin III bugs (decision 57, which lands with PR #181;
+  `work/controller-scripts/reports/m3-fcheck-classify.md`). `equiv`: `sha` and `blob_merge`
+  equivalent; `ch_intrinsics` and `mkPktMerge` ram; `stereovision3` multiclock; `stereovision0`
+  timeout; `diffeq1` and `diffeq2` error (`equiv-check` cannot name an unnamed multiply black box:
+  tool limit, untested). Byte-identical reruns: `rerun-check` 15 of 15 same. EArch smoke ok. Seed
+  reruns (step 6) ran 8 ok. QoR table: the M2 table above (O'/P geomeans inside decision 3's
+  bands: at most 1.20; per-design outliers `blob_merge` and `raygentop` are listed above, not
+  investigated). Steps 7-8 of `exit-run` (final seed table and final QoR table) were not run (Peter,
+  2026-10-20: front end to elaboration is the priority, VTR links less; decision 58). The 4 designs
+  shipped out (`mcml`, `LU32PEEng`, `bgm`, `LU8PEEng`, decision 54) are run by
+  `tools/vtr-qor/offload/run-offload` on a bigger machine; nothing is claimed for them. DESIGN §13
+  #6 (name style): not answered by measurement. The `Oprov` leg (provenance names through VPR) was
+  not run, so VPR time and memory with long names are unmeasured; short stays the default
+  (decision 45 f), the question stays open in DESIGN §13 #6 and risk 9
 
 ## Decisions log
 
@@ -1579,6 +1605,21 @@ then the options considered.
       (`bench_abc --micro`; decision 53: comparable, not parity).
     - **PR D `--mem-width arch` padding accepted** (R-4 and D-21 of the 4.2 spec: the option is
       off by default and prints one WARNING per design when it changes anything).
+
+58. **Phase 3 closes on the existing M2/M3 data** (Peter, 2026-10-20). Reason: the front end to
+    elaboration is the priority and the VTR links are less; a full M3 rerun would hold the machine
+    (decision 55) for results that would not change the front-end evidence. The close rests on the
+    M2 table `20261020-1642-M2`, the M3 `exit-run` of main 69f92d1c, and the `arm_core` check after
+    PR D (#179): ARMCORE_RESULT. Skipped, by decision:
+    - `exit-run` steps 7 and 8 (the final seed table and the final QoR table); no new M3 run.
+    - The k4/COFFE latch and count investigation: the open deltas stay as comment lines in the
+      expect files, noted "not investigated (Peter 2026-10-20)".
+    - The `blob_merge` (LUTs 1.87x) and `raygentop` (1.42x) LUT outlier investigation, unless it
+      points at a front-end bug.
+    Left open and recorded in the checklist: the R leg (3E), the `lower_equiv_micro` rerun, the
+    14-small-design `lower-equiv` set, `fuzz_lower` long, `bench_lower --cells 1000000`, the
+    `lower_gen_vs_yosys` CTest run, the `Oprov` name-style measurement (DESIGN §13 #6), and the four
+    shipped-out designs.
 
 ## Risks
 
