@@ -1,0 +1,3 @@
+# 5.3c json-check: the designs and fixtures a level cannot take, and why (spec T-2, T-3, T-5).
+# Format: <level|y-level> <design file name> <outcome> <reason>
+# An entry for a design that passes is stale and fails the run. Nothing is skipped silently.

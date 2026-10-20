@@ -40,7 +40,7 @@ and the row says so.
 with outcome ``unproven``, ``error:script``, ``error:check`` or ``fail:<leg>``. A listed pair that
 passes or ends in another outcome fails the run, and an unlisted failure fails it: no exception is
 silent. The last line is ``json-check: compared N of M (U unproven, X excepted); ...``. A run that
-compared nothing fails.
+compared nothing fails. ``--smallest-first`` runs the designs by size (fixtures always are).
 
 Exit codes: 0 ok; 1 a leg failed, an expect line is stale or nothing was compared; 2 usage, Odin III
 or tool error; 3 hard (a child crashed or timed out); 4 unproven (nobody listed it); 77 skipped.
@@ -358,6 +358,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
         help="lines '<design file name> <tech library>': designs that read one first",
     )
     ap.add_argument("--yosys-dir", type=Path, help="read the fixtures DIR/<level>/*.json")
+    ap.add_argument(
+        "--smallest-first", action="store_true", help="run the designs by size, smallest first"
+    )
     ap.add_argument("files", nargs="*", type=Path)
     return ap.parse_args(argv)
 
@@ -365,8 +368,13 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
 def items_for(args: argparse.Namespace, level: str) -> list[Path]:
     """The designs (or fixtures) one level runs, in command line (or sorted) order."""
     if args.yosys_dir is None:
-        return list(args.files)
-    found = sorted((args.yosys_dir / level).glob("*.json"))
+        files: list[Path] = list(args.files)
+        if args.smallest_first:
+            files.sort(key=lambda f: (f.stat().st_size, f.name))
+        return files
+    found = sorted(
+        (args.yosys_dir / level).glob("*.json"), key=lambda f: (f.stat().st_size, f.name)
+    )
     if not found:
         raise ToolError(f"no fixtures in {args.yosys_dir / level}")
     return found
