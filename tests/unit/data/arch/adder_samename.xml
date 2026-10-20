@@ -1,0 +1,37 @@
+<architecture>
+  <models>
+    <model name="adder">
+      <input_ports><port name="a"/><port name="b"/><port name="cin"/></input_ports>
+      <output_ports><port name="cout"/><port name="sumout"/></output_ports>
+    </model>
+  </models>
+  <complexblocklist>
+    <pb_type name="fleA">
+      <input name="in" num_pins="4"/>
+      <pb_type name="add" blif_model=".subckt adder" num_pb="1">
+        <input name="a" num_pins="1"/><input name="b" num_pins="1"/>
+        <input name="cin" num_pins="1"/>
+        <output name="cout" num_pins="1"/><output name="sumout" num_pins="1"/>
+      </pb_type>
+      <interconnect>
+        <direct name="to_a" input="fleA.in[0:0]" output="add.a"/>
+      </interconnect>
+    </pb_type>
+    <pb_type name="fleB">
+      <input name="cin" num_pins="1"/>
+      <output name="cout" num_pins="1"/>
+      <pb_type name="add" blif_model=".names" num_pb="1" class="lut">
+        <input name="in" num_pins="4" port_class="lut_in"/>
+        <output name="out" num_pins="1" port_class="lut_out"/>
+      </pb_type>
+      <interconnect>
+        <direct name="carry_in" input="fleB.cin" output="add.cin">
+          <pack_pattern name="chain" in_port="fleB.cin" out_port="add.cin"/>
+        </direct>
+        <direct name="carry_out" input="add.cout" output="fleB.cout">
+          <pack_pattern name="chain" in_port="add.cout" out_port="fleB.cout"/>
+        </direct>
+      </interconnect>
+    </pb_type>
+  </complexblocklist>
+</architecture>

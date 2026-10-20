@@ -400,16 +400,17 @@ static void test_design_must_be_empty(void) {
 static void test_pass(void) {
     const char *path =
         rj_put("pass.json", "{\"creator\": \"c\", \"modules\": {\"a\": {}, \"b\": {}}}");
-    char args[RJ_PATH + 32];
+    char args[(2 * RJ_PATH) + 32];
+    const int keep = RJ_PATH - 1; /* rj_path never returns more; tells gcc the bound */
     rj_fresh();
-    (void)snprintf(args, sizeof args, "--top b \"%s\"", path);
+    (void)snprintf(args, sizeof args, "--top b \"%.*s\"", keep, path);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(rj_design, "read_json", odin3_bytes_cstr(args)));
     TEST_ASSERT_EQUAL_STRING("b", rj_top_name());
     rj_fresh();
     odin3_pass_options options = odin3_pass_get_options();
     options.top = "a";
     odin3_pass_set_options(options);
-    (void)snprintf(args, sizeof args, "\"%s\"", path);
+    (void)snprintf(args, sizeof args, "\"%.*s\"", keep, path);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(rj_design, "read_json", odin3_bytes_cstr(args)));
     TEST_ASSERT_EQUAL_STRING("a", rj_top_name());
     options.top = NULL;
@@ -421,7 +422,7 @@ static void test_pass(void) {
                           odin3_pass_run(rj_design, "read_json", odin3_bytes_cstr("--top")));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_pass_run(rj_design, "read_json", odin3_bytes_cstr("")));
-    (void)snprintf(args, sizeof args, "\"%s\" \"%s\"", path, path);
+    (void)snprintf(args, sizeof args, "\"%.*s\" \"%.*s\"", keep, path, keep, path);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_pass_run(rj_design, "read_json", odin3_bytes_cstr(args)));
 }

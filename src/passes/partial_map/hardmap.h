@@ -11,6 +11,7 @@
 #include "ir/design.h"
 #include "odin3/odin3.h"
 #include "passes/manager.h"
+#include "passes/partial_map/rules.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -51,6 +52,8 @@ odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
 typedef struct odin3_partial_map_opts {
     bool allow_unknown_blocks; /* `--allow-unknown-blocks` (B-6): an unknown black box is a warning
                                 */
+    uint32_t min_add;          /* `--min-add N` (4.2 C-4): an `$add`/`$sub` of fewer than N bits is
+                                  left to lower; 0 is "not given" (1) */
 } odin3_partial_map_opts;
 
 /* odin3_partial_map_run with options (NULL: the defaults). */
