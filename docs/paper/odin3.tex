@@ -214,24 +214,73 @@ slang adapter would enter; that adapter and GHDL are deferred (D10). Phase~4's
 \label{fig:pipeline}
 \end{figure*}
 
-Figure~\ref{fig:pipeline} shows the forward flow (DESIGN \S3, \S6). A design is described by a
-\emph{project} (Sec.~\ref{sec:project}). The preprocessor and parser build a parsed AST
-(Phase~2, 2B and 2C). Elaboration runs in two stages through an elaborated AST to word-level IR
-in which \code{always} blocks are \code{\$proc} cells (2D). \code{proc} (2E) turns them into mux
-trees and flip-flops, and the \code{opt} family (2F) folds and cleans. The back end is Phase~3.
-\code{wreduce} (3G) narrows widths and \code{flatten} (3A) joins the hierarchy.
-\code{hardmap} (3C) binds adders, multipliers and RAMs to hard blocks. \code{lower} (3B) takes
-everything else to bit level. Linked ABC (3D) maps the soft logic to LUTs.
-\code{write\_blif --vtr} (3E) writes the BLIF that VPR reads, and the QoR harness
-\code{vtr-qor} (3H) runs the VTR flow on it and compares with Parmys. Other writers emit JSON,
-Graphviz, structural Verilog and, as a bridge to Yosys, RTLIL. Sections~\ref{sec:backend}
-to~\ref{sec:harness} describe each Phase~3 stage; Sec.~\ref{sec:features} lists every feature
-with its phase and status.
+Odin III reads a design into one IR and changes that IR one pass at a time. Figure~\ref{fig:pipeline}
+shows the whole system and its status (DESIGN \S3, \S6). Figure~\ref{fig:flow} shows the path of
+a Verilog design through the stages, in the order of the production script. That script is the O
+leg of the \code{vtr-qor} harness (Sec.~\ref{sec:harness}):
+\begin{lstlisting}
+read_techlib lib/vtr.o3lib
+read_verilog --nolatches --vtr-compat d.v
+proc; fsm; opt; flatten; wreduce
+hardmap; lower
+abc --lut 6
+write_blif --vtr d.blif
+\end{lstlisting}
+Here \code{hardmap} is the script name of \code{partial\_map}. A test harness,
+\code{hardmap-diff}, runs a longer script that adds \code{opt -full} and \code{opt\_clean} calls
+between these passes so that each stage can be compared with Parmys.
 
-The original plan ran this flow backwards for reverse engineering (\code{raise}, Phase~6). On
-2026-10-19 the architect re-scoped v1.0 (ADR D10): the tool must work on VTR architectures and
-on Altera through LPM structural Verilog, and Phases~5 and~6 are out of v1.0.
-Section~\ref{sec:re} explains what remains of that thread.
+\begin{figure*}[t]
+\centering
+\odinfit{\textwidth}{\input{IMAGE/fig_flow}}
+\caption{The flow of a Verilog design through Odin III, in the order of the production script.
+Each box is a stage; the text under it says what it does. The dotted box marks a stage that does
+nothing, and the dashed box a stage that is specified but not yet built. Every stage from
+\code{proc} to \code{write\_blif} is a registered pass.}
+\label{fig:flow}
+\end{figure*}
+
+The stages come from four tools, and each idea keeps its lineage. From Odin and Odin~II, Odin III
+takes the node, pin and net model, the Bison and Flex parser, the reading of an architecture file
+and the idea of partial mapping. From Yosys, it takes the word-level cell set and the semantics of
+Verilog elaboration, and it re-implements the \code{proc}, \code{opt}, \code{wreduce},
+\code{fsm}, \code{flatten} and \code{techmap} steps in C. From Parmys, it takes the order of the
+script and the hard-block rules for the VTR architecture. From ABC, it takes logic optimisation
+and LUT mapping, linked into the core.
+
+\emph{Parse.} A project (Sec.~\ref{sec:project}) names the files. The preprocessor and the parser
+build a parsed AST with source locations, and the symbol table records each declaration
+(Phase~2; Sec.~\ref{sec:parser}).
+
+\emph{Before elaboration.} Odin III has no optimisation pass here. Yosys simplifies its AST before
+\code{genrtlil}; Odin III does not. Elaboration stage~1 evaluates parameters, \code{generate} blocks and
+constant functions, because the language fixes their values. A pre-\code{proc} \code{opt}, as
+Parmys runs, is possible because the \code{opt} passes accept \code{\$proc} cells, but the
+production script does not run it (PHASE4 decision 14, item~5).
+
+\emph{Elaborate.} Two stages through an elaborated AST give word-level IR in which each
+\code{always} block is a \code{\$proc} cell (Sec.~\ref{sec:seam}). \code{proc} then turns these
+cells into mux trees, latches and flip-flops, step by step as Yosys's \code{proc\_*} passes do.
+
+\emph{Word-level passes.} \code{fsm} finds state machines and recodes them one-hot, as Yosys's
+\code{fsm} does, placed right after \code{proc} as Parmys places it. \code{opt} is Yosys's
+\code{opt} family: \code{opt\_expr} folds constants, \code{opt\_clean} removes dead cells,
+\code{opt\_merge} merges cells with equal inputs, \code{opt\_share} merges operators that feed the
+same mux, and \code{opt\_muxtree}, \code{opt\_reduce} and \code{opt\_dff} tidy
+muxes, reductions and flip-flops. \code{flatten} inlines the instances, and \code{wreduce}
+narrows widths. The paragraphs below describe them.
+
+\emph{Partial mapping.} Following Odin~II's partial mapping and Parmys's hard-block rules,
+\code{partial\_map} binds word-level multipliers, adders and RAMs to the hard blocks that the
+architecture record lists, and leaves the rest soft (Sec.~\ref{sec:hardmap}).
+
+\emph{Lower, logic and LUTs.} \code{lower} takes every word cell to bits. The linked ABC
+optimises the soft logic and maps it to $K$-input LUTs, with VTR's own script as the default.
+
+\emph{Outputs.} BLIF with \code{--vtr} goes to VPR. Verilog, Yosys-schema JSON and LPM Verilog for
+Quartus, Graphviz \code{dot} and RTLIL go to other tools. Sections~\ref{sec:backend} to
+\ref{sec:harness} describe the Phase~3 stages, and Sec.~\ref{sec:features} lists every feature
+with its phase and status.
 
 \subsection{One IR, two granularities, passes everywhere}
 
@@ -330,6 +379,7 @@ nets by ID without pins was rejected in review because it broke the ``every driv
 rule.
 
 \subsection{Parsing}
+\label{sec:parser}
 
 The parser (2C; PHASE2 \#10, \#15) keeps Odin~II's Bison/Flex lineage but not its grammar. A
 reentrant Flex lexer reads the preprocessor's stream, and a pure LALR(1) Bison grammar
@@ -387,29 +437,45 @@ order. One divergence is a correctness fix (\S20 \#18, Sec.~\ref{sec:compare}).
 \subsection{The back end: the Phase 3 script}
 \label{sec:backend}
 
-Phase~3 takes word-level IR to a netlist that VPR places and routes. Its exit test fixes the
-script that Odin III alone runs on each of the 19 VTR~7.0 benchmarks (PHASE3 exit item~3):
-\begin{lstlisting}
-read_techlib lib/vtr.o3lib
-read_verilog --nolatches --vtr-compat
-proc; opt; wreduce; opt_clean; opt -full
-flatten; opt -full; hardmap; opt -full
-lower; opt -fast; compact; abc
-write_blif --vtr
-\end{lstlisting}
-The order is Parmys's: \code{wreduce} runs before \code{flatten}, and \code{opt -full} runs
-after \code{flatten} and after \code{hardmap} as Parmys runs it (PHASE3 \#7, \#30, \#31).
-Where Odin III and Parmys could differ, \code{--vtr-compat} makes Odin III do what Parmys does
-and print a WARNING when the result still differs (Sec.~\ref{sec:verify}). The next five
-subsections describe the stages.
+Phase~3 takes word-level IR to a netlist that VPR places and routes. Its exit test runs the
+production script of Sec.~\ref{sec:arch} on the VTR benchmarks of the local gate and routes the
+result with VPR (PHASE3 exit item~3). Where Odin III and Parmys could differ,
+\code{--vtr-compat} makes Odin III do what Parmys does and print a WARNING when the result still
+differs (Sec.~\ref{sec:verify}). The harness \code{hardmap-diff} runs a longer script in Parmys's
+order, with \code{wreduce} before \code{flatten} and extra \code{opt -full} calls (PHASE3 \#7,
+\#30, \#31), so that the netlist before ABC can be compared. The next five subsections describe
+the stages.
+
+\subsection{Word-level optimisation: \code{opt} and \code{fsm}}
+\label{sec:opt}
+
+\code{opt} (2F) follows Yosys~0.55's \code{opt} family and runs its sub-passes to a fixed point.
+Each sub-pass is a rewrite of the cell graph.
+\code{opt\_expr} folds constants and simplifies arithmetic and logic whose inputs are constant or
+repeated. \code{opt\_clean} removes cells and wires that reach no output (dead-code removal).
+\code{opt\_merge} merges cells of one type with the same inputs (common-subexpression
+elimination); with \code{-ffbits} it also merges identical bits of word flip-flops before
+\code{lower}, as Yosys does after \code{techmap} (PHASE3 \#49). \code{opt\_share} merges operators
+that feed the same mux (PHASE3 \#52). \code{opt\_muxtree} and \code{opt\_reduce} collapse
+muxes and reductions, and \code{opt\_dff} removes flip-flop features that are never used. Each
+call is checked as a refinement by \code{opt-equiv} (Sec.~\ref{sec:verify}). \code{opt} never
+renumbers IDs; the scripts call \code{compact} when they want that.
+
+\code{fsm} (4.8) is Odin III's port of Yosys~0.55's \code{fsm} (\code{fsm\_detect},
+\code{fsm\_extract}, \code{fsm\_opt}, \code{fsm\_recode}, \code{fsm\_map}). It finds a state
+register and its next-state logic, extracts the state graph, and recodes it. It runs right after
+\code{proc}, where Parmys runs it. The \code{fsm\_encoding} attribute is honoured, and
+\code{auto} gives one-hot below 32 states and binary from 32. The recoded register and logic get
+DERIVED records whose parents are the original register and logic, and each FSM gets attributes
+(state count, encoding) for the analysis flow. It is merged.
 
 \subsection{Width reduction and flattening: \code{wreduce} and \code{flatten}}
 
 \code{wreduce} (3G) narrows word cells to the widths their inputs and readers need, as Yosys
-0.55's \code{wreduce} does, signed rewrite included. It matters because widths decide hard-block
+0.55's \code{wreduce} does, signed rewrite included, and visits an operand before its consumer as Yosys does (PHASE3 \#51). It matters because widths decide hard-block
 counts: an adder chain has one \code{adder} cell per operand bit, and the multiplier threshold
 reads operand widths. Without it, CLB and adder counts drift for reasons unrelated to mapping.
-The pass runs before \code{flatten}, as in Parmys (PHASE3 \#7, \#31).
+Parmys runs it before \code{flatten}; the production script runs it after.
 
 \code{flatten} (3A) turns a design whose top module instantiates other modules into one flat
 top module. It expands instances top-down from a worklist. The nets joined at a port become one
@@ -420,13 +486,18 @@ untouched, and a pre-flight reports recursive instantiation and any exceeded cap
 changes. Its oracle is Yosys~0.55's \code{flatten}, compared by \code{flatten-diff} on names,
 widths and cell types and by an equivalence proof (PHASE3 \#30, \#35).
 
-\subsection{Mapping to hard blocks: \code{hardmap}}
+\subsection{Partial mapping: \code{partial\_map}}
+\label{sec:hardmap}
 
-\code{hardmap} (3C) is the fixed mapping that copies Parmys's defaults for the architecture
+\code{partial\_map} is Odin III's partial mapping. The idea is Odin~II's: bind some of the
+word-level design to the hard blocks of the target and leave the rest soft for ABC. The rules
+follow Parmys. The pass began as the fixed pass \code{hardmap} (3C), which copies Parmys's defaults for the architecture
 \code{k6\_frac\_N10\_frac\_chain\_mem32K\_40nm}, whose \code{<models>} are \code{adder},
 \code{multiply}, \code{single\_port\_ram} and \code{dual\_port\_ram} (PHASE3 decisions 2, 4).
-Library cells come from \code{lib/vtr.o3lib} (1G), not from code. The rules, which the architect
-approved before any code was written, are:
+Library cells come from \code{lib/vtr.o3lib} (1G), not from code. Phase~4 renamed the pass \code{partial\_map} and kept \code{hardmap} as an alias, and the
+script of Fig.~\ref{fig:flow} still says \code{hardmap}. Parmys's rule is the default, and every
+improvement is a named option that is off by default (PHASE4 decision 12). The k6 rules, which the
+architect approved before any code was written, are:
 \begin{itemize}
 \item \emph{Multipliers.} A \code{\$mul} becomes a \code{multiply} cell of width 36. Low pins
   carry the operand bits and the rest is padded with \code{unconn}. Small multipliers
@@ -438,9 +509,19 @@ approved before any code was written, are:
   \code{single\_port\_ram} or \code{dual\_port\_ram} slices. Memories that cannot share a RAM
   port are replicated or stay soft, with a warning.
 \end{itemize}
-Nodes are named \code{<cell>.<role>} and carry a \code{hardmap} attribute. Phase~4's
-\code{partial\_map} will replace this fixed binding by one read from the architecture, and must
-reproduce it on this architecture (PHASE4, ``Dependencies on Phase~3'').
+Nodes are named \code{<cell>.<role>} and carry a \code{hardmap} attribute.
+
+Phase~4 generalises the pass from the architecture record. \code{read\_arch} (4.1) reads the
+\code{<models>} and \code{pb\_type}s of a VPR architecture file into a tech library and an
+\emph{arch record} on the design. Three pull requests of \code{partial\_map} are merged. PR~A
+is the pass shell, the rule table, the alias and an identity gate, which requires the new pass
+to give the same netlist as \code{hardmap} on the k6 architecture. PR~B is \code{memory\_merge}
+(4.7), which merges registered reads and writes into the ports of a \code{\$mem}; a
+\code{ram\_style} attribute is ignored with a warning. PR~C binds generic hard blocks from the
+arch record (4.2), matched by exact port signature as in Odin~II. PR~D is in progress. It maps a
+RAM with a read enable to the architecture's RAM and emulates the enable exactly in logic,
+because the architecture's RAMs have no read-enable pin (PHASE3 decision 56, approved by the
+architect on 2026-10-20).
 
 \subsection{Lowering to bits: \code{lower}}
 

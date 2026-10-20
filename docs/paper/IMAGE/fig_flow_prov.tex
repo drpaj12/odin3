@@ -1,0 +1,22 @@
+% The flow annotated with the provenance records each stage makes. Wide: \textwidth.
+\def\flowbandA{File names go into the source manager, one 32-bit location space for all files.}%
+\def\flowbandB{Every AST node keeps a source range. Macro and include chains stay derivable
+  from the location.}%
+\def\flowbandC{No record is made.}%
+\def\flowbandD{Each IR object gets a \textbf{SOURCE} record from its AST node. \odintt{proc}
+  makes \textbf{DERIVED} records whose parent is the \odintt{\$proc} cell's record.}%
+\def\flowbandE{Each pass opens a pass run. A rewrite is one operation with one \textbf{DERIVED}
+  record; a merge has several parents. \odintt{flatten} stores the instance path. \odintt{fsm}
+  parents the new state logic on the old.}%
+\def\flowbandF{A hard block gets a \textbf{DERIVED} record with the word cell as parent. Nodes
+  are named \odintt{cell.role}.}%
+\def\flowbandG{Decomposing a word cell is one operation. The bit cells share one
+  \textbf{DERIVED} record with the word cell as parent.}%
+\def\flowbandH{One \textbf{DERIVED} record per LUT. Parents follow ABC's correspondence
+  (\odintt{--prov fine} or \odintt{cone}).}%
+\def\flowbandI{\odintt{--name-style provenance} writes \odintt{hier/path/name@file:line}. Plan
+  5.4: \odintt{src} attributes in Verilog and JSON.}%
+\def\flowbandJ{A reader makes an \textbf{IMPORTED} record per object. Plan 5.4 (IR-13
+  amendment): one \textbf{DERIVED} record with the restored HDL \textbf{SOURCE} and the
+  \textbf{IMPORTED} record as parents.}%
+\input{IMAGE/fig_flow_base}
