@@ -265,6 +265,17 @@ static odin3_status read_kept_libraries(odin3_rv *rv) {
 
 /* --- step 3 ------------------------------------------------------------------------------- */
 
+/* One wanted module no unit defines yet: the record's -v files, the -y directories, then (D18)
+ * the soft body of a primitive the arch lacks. */
+static odin3_status resolve_want(odin3_rv *rv, const odin3_rv_want *want) {
+    odin3_status st = rv->libfiles_read ? ODIN3_OK : read_libfiles(rv);
+    if (st != ODIN3_OK || is_defined(rv, want->name)) {
+        return st;
+    }
+    st = search_dirs(rv, want);
+    return st != ODIN3_OK || is_defined(rv, want->name) ? st : read_soft_block(rv, want);
+}
+
 odin3_status odin3_rv_resolve_libraries(odin3_rv *rv) {
     odin3_status st = sweep(rv, false);
     uint32_t first = odin3_ast_root_count(rv->ast);
@@ -274,14 +285,7 @@ odin3_status odin3_rv_resolve_libraries(odin3_rv *rv) {
         if (is_defined(rv, want.name)) {
             continue;
         }
-        if (!rv->libfiles_read) {
-            st = read_libfiles(rv);
-            if (st != ODIN3_OK || is_defined(rv, want.name)) {
-                continue;
-            }
-        }
-        st = search_dirs(rv, &want);
-        st = st != ODIN3_OK || is_defined(rv, want.name) ? st : read_soft_block(rv, &want);
+        st = resolve_want(rv, &want);
     }
     if (st == ODIN3_OK && first > 0 && odin3_ast_root_count(rv->ast) > first) {
         odin3_ast_set_library_units_from(rv->ast, first);
