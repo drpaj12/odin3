@@ -21,7 +21,8 @@ against each result and on the two results against each other.  One line per des
 
 ``b`` is the BLIF exchange's count, ``a`` the in-memory exchange's, the ratio ``a/b`` has three
 decimals.  LUTs are the ``.names`` with an input, FFs the ``.latch`` lines, depth the longest chain
-of LUTs between inputs, flip-flop outputs, hard-block outputs and outputs, flip-flop inputs.  The
+of LUTs between inputs, flip-flop outputs, hard-block outputs and outputs, flip-flop inputs
+(an identity buffer is a LUT but adds no level).  The
 verdict is ``equivalent``; ``explain`` when the results are equivalent but some ratio is more than
 5% from 1 (PHASE3 records the reason, I8); or the first failure: ``differs``, ``timeout``,
 ``views``, ``multiclock``, ``error`` (equiv-check), ``odin3-error`` (a run did not finish; then the
@@ -114,10 +115,14 @@ def needs_explanation(blif_n: int, aig_n: int) -> bool:
     return abs(aig_n - blif_n) * EXPLAIN_DEN > blif_n * EXPLAIN_NUM
 
 
-def top_cells(path: Path) -> tuple[list[tuple[list[str], str]], int]:
-    """The top model's ``.names`` (inputs, output) with at least one input, and its ``.latch``
-    count.  Read line by line: a hard block's ``.subckt`` needs no ``.model`` here."""
-    names: list[tuple[list[str], str]] = []
+IDENTITY_ROW = ["1", "1"]
+
+
+def top_cells(path: Path) -> tuple[list[tuple[list[str], str, bool]], int]:
+    """The top model's ``.names`` (inputs, output, identity) with at least one input, and its
+    ``.latch`` count.  ``identity`` is true for a one-input cover whose only row is ``1 1`` (a
+    buffer).  Read line by line: a hard block's ``.subckt`` needs no ``.model`` here."""
+    names: list[tuple[list[str], str, list[list[str]]]] = []
     latches = 0
     seen_models = 0
     for _, words in blif.logical_lines(path.read_text(encoding="utf-8")):
@@ -125,36 +130,43 @@ def top_cells(path: Path) -> tuple[list[tuple[list[str], str]], int]:
             seen_models += 1
         if seen_models > 1:
             break
-        if words[0] == ".names" and len(words) > 2:
-            names.append((words[1:-1], words[-1]))
+        if words[0] == ".names":
+            names.append((words[1:-1], words[-1], []))
         elif words[0] == ".latch":
             latches += 1
-    return names, latches
+        elif not words[0].startswith(".") and names:
+            names[-1][2].append(words)
+    cells = [(ins, out, len(ins) == 1 and rows == [IDENTITY_ROW]) for ins, out, rows in names]
+    return [cell for cell in cells if cell[0]], latches
 
 
 def netlist_counts(path: Path) -> Counts:
-    """LUTs, FFs and depth of the top model of a BLIF file (one linear pass, no recursion)."""
+    """LUTs, FFs and depth of the top model of a BLIF file (one linear pass, no recursion).  An
+    identity buffer is a LUT but adds no level: the 3H depth skips it, VPR absorbs it, and the
+    in-memory exchange gives a second output port of one LUT such a buffer where the BLIF
+    exchange copies the LUT (PHASE3 #48 (n))."""
     luts, ffs = top_cells(path)
-    outputs = {out for _, out in luts}
+    outputs = {out for _, out, _ in luts}
     pending: collections.Counter[str] = collections.Counter()
     readers: dict[str, list[int]] = collections.defaultdict(list)
-    for number, (ins, out) in enumerate(luts):
+    for number, (ins, out, _) in enumerate(luts):
         for net in set(ins):
             if net in outputs:
                 pending[out] += 1
                 readers[net].append(number)
     level: dict[str, int] = {}
-    ready = collections.deque(n for n, (_, out) in enumerate(luts) if pending[out] == 0)
+    ready = collections.deque(n for n, (_, out, _) in enumerate(luts) if pending[out] == 0)
     depth = 0
     while ready:
-        ins, out = luts[ready.popleft()]
-        level[out] = 1 + max((level.get(net, 0) for net in ins), default=0)
+        ins, out, identity = luts[ready.popleft()]
+        base = max((level.get(net, 0) for net in ins), default=0)
+        level[out] = base if identity else 1 + base
         depth = max(depth, level[out])
         for reader in readers.get(out, ()):
             pending[luts[reader][1]] -= 1
             if pending[luts[reader][1]] == 0:
                 ready.append(reader)
-    released = sum(1 for _, out in luts if out in level)
+    released = sum(1 for _, out, _ in luts if out in level)
     return Counts(len(luts), ffs, depth if released == len(luts) else NO_DEPTH)
 
 
