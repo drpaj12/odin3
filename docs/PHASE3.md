@@ -1580,6 +1580,27 @@ then the options considered.
     - **PR D `--mem-width arch` padding accepted** (R-4 and D-21 of the 4.2 spec: the option is
       off by default and prints one WARNING per design when it changes anything).
 
+57. **fcheck does not simulate RTL with latches; the front end comes first** (Peter, 2026-10-20;
+    branch `fix/fcheck-untested-latches`). The M3 fcheck failures of raygentop, boundtop and
+    stereovision0 are RTL behaviour that synthesis does not preserve, not Odin III bugs
+    (raygentop and boundtop infer 109 and 103 latches and have incomplete sensitivity lists;
+    stereovision0 reads two never-reset registers).
+    - **H1:** before simulating, the wrapper reads the RTL with Yosys (`read_verilog; proc`,
+      no `--nolatches`) and counts `$dlatch`, and collects Odin III's "incomplete sensitivity
+      list" warnings. If either fires the design is `untested` with the reason and is **not
+      simulated**. This also turns four former passes untested (ch_intrinsics with 7 latches;
+      mkDelayWorker32B, mkSMAdapter4B and stereovision3 with 1 each); Peter chose this
+      (option 2): those VTR benchmarks were modified by hand to get them through Odin II and are
+      weak evidence, and the latch structures are covered by the micros
+      (`common/dlatch.v`, `common/adlatch.v`, `micro/bm_my_D_latch1.v`, `bm_my_D_latch2.v`).
+    - **H2:** a mismatching bit whose netlist value differs between the init runs is `XDEPEND`,
+      not `MISMATCH` (no vectors are skipped). When the RTL bit is stable across the init runs
+      and only the netlist bit varies, the line is `NETLIST_INIT_DEPEND` instead (the netlist
+      depends on the initial state where the RTL does not, a possible netlist defect): the
+      verdict stays `untested`, but the log and the table's hold text name it.
+    - **Priority:** what matters most is the front end through elaboration being correct; the
+      VTR-flow results (fcheck, QoR on the VTR designs) matter less and are not chased further.
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this

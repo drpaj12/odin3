@@ -186,6 +186,14 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
     2 to 3, unregistered Yosys cell types are a located error (an implicit black box with a warning only
     under `--auto-blackbox`), no resize of widths, `$sop` is written as `$lut` so gen1 and gen2 are
     equivalent and not always `netlist-compare` identical, no public ABI entry, no `$mem_v2`.
+    Implemented as 5.3a/b/c (spec v1.1, plan deviations 1 to 20; agent defaults, Peter may override):
+    `tools/json-check` over `tests/json/{word,gate,lut}.script`; measured in Debug, all 68 micros read back
+    equivalent at the word, gate and LUT levels, R-1 holds on all, gate and LUT are `netlist-compare`
+    identical; the Yosys 0.55 fixtures (`tests/json/yosys`, 182 files) read and fixpoint in CI (CTests
+    `json_yosys_<level>`), 7, 9 and 10 of them are located errors by the M-5/M-6 rules listed in
+    `tests/json/expect.txt`; the 14 small VTR designs at the LUT level (`json_vtr14_lut`): 10 equivalent,
+    4 unproven by `equiv-check` (several clocks). R-5 (instance parameters written as JSON parameters) is a
+    separate small PR.
 11. **5.4 spec and plan** (Peter approved all ten recommendations, 2026-10-20, including
     question 1, the IR-13 amendment; spec
     `docs/specs/2026-10-20-5.4-hdl-locations-design.md` section 12 has the ten questions with

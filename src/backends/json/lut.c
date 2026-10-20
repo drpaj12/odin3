@@ -61,9 +61,9 @@ static void write_lut_cell(jw *out, jw_list *cells, odin3_node_id node, const co
     jw_cell_ref ref = {node, "", "$lut"};
     jw_cell cell;
     jw_cell_begin(out, cells, &ref, &cell);
-    jw_key(out, &cell.params, "LUT");
+    jw_cell_param_key(out, &cell, "LUT");
     write_lut(out, view);
-    jw_param_int(out, &cell.params, "WIDTH", view->inputs);
+    jw_cell_param_int(out, &cell, "WIDTH", view->inputs);
     jw_cell_attrs(out, &cell, node);
     jw_dir(out, &cell, "A", ODIN3_DIR_IN);
     jw_dir(out, &cell, "Y", ODIN3_DIR_OUT);
@@ -116,10 +116,10 @@ static void write_sop_cell(jw *out, jw_list *cells, odin3_node_id node, const co
     jw_cell_ref ref = {node, invert ? "$sop" : "", "$sop"};
     jw_cell cell;
     jw_cell_begin(out, cells, &ref, &cell);
-    jw_param_int(out, &cell.params, "DEPTH", depth_of(view));
-    jw_key(out, &cell.params, "TABLE");
+    jw_cell_param_int(out, &cell, "DEPTH", depth_of(view));
+    jw_cell_param_key(out, &cell, "TABLE");
     write_table(out, view);
-    jw_param_int(out, &cell.params, "WIDTH", view->inputs);
+    jw_cell_param_int(out, &cell, "WIDTH", view->inputs);
     jw_cell_attrs(out, &cell, node);
     jw_dir(out, &cell, "A", ODIN3_DIR_IN);
     jw_dir(out, &cell, "Y", ODIN3_DIR_OUT);
@@ -141,9 +141,9 @@ static void write_not_cell(jw *out, jw_list *cells, odin3_node_id node) {
     jw_cell_ref ref = {node, "", "$not"};
     jw_cell cell;
     jw_cell_begin(out, cells, &ref, &cell);
-    jw_param_int(out, &cell.params, "A_SIGNED", 0);
-    jw_param_int(out, &cell.params, "A_WIDTH", 1);
-    jw_param_int(out, &cell.params, "Y_WIDTH", 1);
+    jw_cell_param_int(out, &cell, "A_SIGNED", 0);
+    jw_cell_param_int(out, &cell, "A_WIDTH", 1);
+    jw_cell_param_int(out, &cell, "Y_WIDTH", 1);
     jw_cell_attrs(out, &cell, node);
     jw_dir(out, &cell, "A", ODIN3_DIR_IN);
     jw_dir(out, &cell, "Y", ODIN3_DIR_OUT);

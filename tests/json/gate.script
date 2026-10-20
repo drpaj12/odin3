@@ -1,0 +1,13 @@
+# The 5.3 gate level (the gold is BLIF: the RTLIL writer has no bit storage cells): the word script,
+# then flatten and lower. --nolatches: write_blif --vtr refuses a level-sensitive latch.
+@TECHLIB@
+read_verilog --nolatches @DESIGN@
+proc
+opt
+opt_clean
+flatten
+opt -full
+lower
+opt -fast
+write_blif --vtr @IL@
+write_json @JSON@

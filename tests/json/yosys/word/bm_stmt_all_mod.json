@@ -1,0 +1,837 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_stmt_all_mod": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:4.1-136.10"
+      },
+      "ports": {
+        "clock": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "reset_n": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "a_in": {
+          "direction": "input",
+          "bits": [ 4, 5, 6, 7 ]
+        },
+        "b_in": {
+          "direction": "input",
+          "bits": [ 8 ]
+        },
+        "out0": {
+          "direction": "output",
+          "bits": [ 9, 10, 11, 12 ]
+        },
+        "out1": {
+          "direction": "output",
+          "bits": [ 13 ]
+        },
+        "out3": {
+          "direction": "output",
+          "bits": [ 14 ]
+        },
+        "out4": {
+          "direction": "output",
+          "bits": [ 15, 16, 17, 18 ]
+        },
+        "out5": {
+          "direction": "output",
+          "bits": [ 19 ]
+        },
+        "out6": {
+          "direction": "output",
+          "bits": [ 20, 21, 22, 23 ]
+        },
+        "out7": {
+          "direction": "output",
+          "bits": [ 24 ]
+        },
+        "out8": {
+          "direction": "output",
+          "bits": [ 25, 26, 27, 28 ]
+        },
+        "out9": {
+          "direction": "output",
+          "bits": [ 29 ]
+        },
+        "out10": {
+          "direction": "output",
+          "bits": [ 30, 31, 32, 33 ]
+        }
+      },
+      "cells": {
+        "$auto$mem.cc:282:emit$12": {
+          "hide_name": 1,
+          "type": "$memrd_v2",
+          "parameters": {
+            "ABITS": "00000000000000000000000000000100",
+            "ARST_VALUE": "xxxx",
+            "CE_OVER_SRST": "00000000000000000000000000000000",
+            "CLK_ENABLE": "00000000000000000000000000000000",
+            "CLK_POLARITY": "00000000000000000000000000000001",
+            "COLLISION_X_MASK": "",
+            "INIT_VALUE": "xxxx",
+            "MEMID": "$auto$proc_rom.cc:155:do_switch$11",
+            "SRST_VALUE": "xxxx",
+            "TRANSPARENCY_MASK": "",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:50.2-68.9"
+          },
+          "port_directions": {
+            "ADDR": "input",
+            "ARST": "input",
+            "CLK": "input",
+            "DATA": "output",
+            "EN": "input",
+            "SRST": "input"
+          },
+          "connections": {
+            "ADDR": [ 4, 5, 6, 7 ],
+            "ARST": [ "0" ],
+            "CLK": [ "x" ],
+            "DATA": [ 34, 35, 36, 37 ],
+            "EN": [ "1" ],
+            "SRST": [ "0" ]
+          }
+        },
+        "$auto$mem.cc:328:emit$13": {
+          "hide_name": 1,
+          "type": "$meminit",
+          "parameters": {
+            "ABITS": "00000000000000000000000000100000",
+            "MEMID": "$auto$proc_rom.cc:155:do_switch$11",
+            "PRIORITY": "00000000000000000000000000000000",
+            "WIDTH": "00000000000000000000000000000100",
+            "WORDS": "00000000000000000000000000010000"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:50.2-68.9"
+          },
+          "port_directions": {
+            "ADDR": "input",
+            "DATA": "input"
+          },
+          "connections": {
+            "ADDR": [ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" ],
+            "DATA": [ "1", "1", "1", "1", "0", "1", "1", "1", "1", "0", "1", "1", "0", "0", "1", "1", "1", "1", "0", "1", "0", "1", "0", "1", "1", "0", "0", "1", "0", "0", "0", "1", "1", "1", "1", "0", "0", "1", "1", "0", "1", "0", "1", "0", "0", "0", "1", "0", "1", "1", "0", "0", "0", "1", "0", "0", "1", "0", "0", "0", "0", "0", "0", "0" ]
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_stmt_all_mod.v:118$8": {
+          "hide_name": 1,
+          "type": "$logic_not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000100",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:118.11-118.26"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 5, 6, 7 ],
+            "Y": [ 38 ]
+          }
+        },
+        "$procdff$42": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:130.1-134.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ "1" ],
+            "Q": [ 29 ]
+          }
+        },
+        "$procdff$43": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:130.1-134.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ "0", "0", "0", "0" ],
+            "Q": [ 30, 31, 32, 33 ]
+          }
+        },
+        "$procdff$44": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:111.1-128.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 39 ],
+            "Q": [ 24 ]
+          }
+        },
+        "$procdff$45": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:111.1-128.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 40, 41, 42, 43 ],
+            "Q": [ 25, 26, 27, 28 ]
+          }
+        },
+        "$procdff$46": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:97.1-109.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 44 ],
+            "Q": [ 19 ]
+          }
+        },
+        "$procdff$47": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:97.1-109.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 45, 46, 47, 48 ],
+            "Q": [ 20, 21, 22, 23 ]
+          }
+        },
+        "$procdff$48": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:80.1-95.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 49 ],
+            "Q": [ 14 ]
+          }
+        },
+        "$procdff$49": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:80.1-95.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 50, 51, 52, 53 ],
+            "Q": [ 15, 16, 17, 18 ]
+          }
+        },
+        "$procdff$50": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:71.1-78.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 54 ],
+            "Q": [ 13 ]
+          }
+        },
+        "$procdff$51": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:48.1-69.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 34, 35, 36, 37 ],
+            "Q": [ 9, 10, 11, 12 ]
+          }
+        },
+        "$procmux$15": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:118.11-118.26|tests/micro/verilog/micro/bm_stmt_all_mod.v:118.7-127.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "0", "0", "0", "0" ],
+            "B": [ "0", "0", "1", "0" ],
+            "S": [ 38 ],
+            "Y": [ 55, 56, 57, 58 ]
+          }
+        },
+        "$procmux$18": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:113.6-113.18|tests/micro/verilog/micro/bm_stmt_all_mod.v:113.2-127.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "1", "0", "0", "0" ],
+            "B": [ 55, 56, 57, 58 ],
+            "S": [ 8 ],
+            "Y": [ 40, 41, 42, 43 ]
+          }
+        },
+        "$procmux$21": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:118.11-118.26|tests/micro/verilog/micro/bm_stmt_all_mod.v:118.7-127.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "1" ],
+            "B": [ "0" ],
+            "S": [ 38 ],
+            "Y": [ 59 ]
+          }
+        },
+        "$procmux$24": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:113.6-113.18|tests/micro/verilog/micro/bm_stmt_all_mod.v:113.2-127.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "1" ],
+            "B": [ 59 ],
+            "S": [ 8 ],
+            "Y": [ 39 ]
+          }
+        },
+        "$procmux$27": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:99.6-99.18|tests/micro/verilog/micro/bm_stmt_all_mod.v:99.2-108.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "1", "0", "0", "0" ],
+            "B": [ "0", "0", "0", "0" ],
+            "S": [ 8 ],
+            "Y": [ 45, 46, 47, 48 ]
+          }
+        },
+        "$procmux$30": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:99.6-99.18|tests/micro/verilog/micro/bm_stmt_all_mod.v:99.2-108.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "1" ],
+            "B": [ "0" ],
+            "S": [ 8 ],
+            "Y": [ 44 ]
+          }
+        },
+        "$procmux$32": {
+          "hide_name": 1,
+          "type": "$pmux",
+          "parameters": {
+            "S_WIDTH": "00000000000000000000000000000010",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:0.0-0.0|tests/micro/verilog/micro/bm_stmt_all_mod.v:82.2-94.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "x", "x", "x", "x" ],
+            "B": [ "0", "0", "0", "0", "1", "0", "0", "0" ],
+            "S": [ 8, 60 ],
+            "Y": [ 50, 51, 52, 53 ]
+          }
+        },
+        "$procmux$34_CMP0": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:0.0-0.0|tests/micro/verilog/micro/bm_stmt_all_mod.v:82.2-94.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 8 ],
+            "Y": [ 60 ]
+          }
+        },
+        "$procmux$35": {
+          "hide_name": 1,
+          "type": "$pmux",
+          "parameters": {
+            "S_WIDTH": "00000000000000000000000000000010",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:0.0-0.0|tests/micro/verilog/micro/bm_stmt_all_mod.v:82.2-94.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "x" ],
+            "B": [ "0", "1" ],
+            "S": [ 8, 61 ],
+            "Y": [ 49 ]
+          }
+        },
+        "$procmux$37_CMP0": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:0.0-0.0|tests/micro/verilog/micro/bm_stmt_all_mod.v:82.2-94.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 8 ],
+            "Y": [ 61 ]
+          }
+        },
+        "$procmux$38": {
+          "hide_name": 1,
+          "type": "$pmux",
+          "parameters": {
+            "S_WIDTH": "00000000000000000000000000000010",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:0.0-0.0|tests/micro/verilog/micro/bm_stmt_all_mod.v:73.2-77.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "x" ],
+            "B": [ "0", "1" ],
+            "S": [ 8, 62 ],
+            "Y": [ 54 ]
+          }
+        },
+        "$procmux$40_CMP0": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:0.0-0.0|tests/micro/verilog/micro/bm_stmt_all_mod.v:73.2-77.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 8 ],
+            "Y": [ 62 ]
+          }
+        }
+      },
+      "memories": {
+        "$auto$proc_rom.cc:155:do_switch$11": {
+          "hide_name": 1,
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:50.2-68.9"
+          },
+          "width": 4,
+          "start_offset": 0,
+          "size": 16
+        }
+      },
+      "netnames": {
+        "$0\\out0[3:0]": {
+          "hide_name": 1,
+          "bits": [ 34, 35, 36, 37 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:48.1-69.4"
+          }
+        },
+        "$0\\out1[0:0]": {
+          "hide_name": 1,
+          "bits": [ 54 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:71.1-78.4"
+          }
+        },
+        "$0\\out3[0:0]": {
+          "hide_name": 1,
+          "bits": [ 49 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:80.1-95.4"
+          }
+        },
+        "$0\\out4[3:0]": {
+          "hide_name": 1,
+          "bits": [ 50, 51, 52, 53 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:80.1-95.4"
+          }
+        },
+        "$0\\out5[0:0]": {
+          "hide_name": 1,
+          "bits": [ 44 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:97.1-109.4"
+          }
+        },
+        "$0\\out6[3:0]": {
+          "hide_name": 1,
+          "bits": [ 45, 46, 47, 48 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:97.1-109.4"
+          }
+        },
+        "$0\\out7[0:0]": {
+          "hide_name": 1,
+          "bits": [ 39 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:111.1-128.4"
+          }
+        },
+        "$0\\out8[3:0]": {
+          "hide_name": 1,
+          "bits": [ 40, 41, 42, 43 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:111.1-128.4"
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_stmt_all_mod.v:118$8_Y": {
+          "hide_name": 1,
+          "bits": [ 38 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:118.11-118.26"
+          }
+        },
+        "$procmux$15_Y": {
+          "hide_name": 1,
+          "bits": [ 55, 56, 57, 58 ],
+          "attributes": {
+          }
+        },
+        "$procmux$21_Y": {
+          "hide_name": 1,
+          "bits": [ 59 ],
+          "attributes": {
+          }
+        },
+        "$procmux$34_CMP": {
+          "hide_name": 1,
+          "bits": [ 60 ],
+          "attributes": {
+          }
+        },
+        "$procmux$37_CMP": {
+          "hide_name": 1,
+          "bits": [ 61 ],
+          "attributes": {
+          }
+        },
+        "$procmux$40_CMP": {
+          "hide_name": 1,
+          "bits": [ 62 ],
+          "attributes": {
+          }
+        },
+        "a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5, 6, 7 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:23.55-23.59"
+          }
+        },
+        "b_in": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:24.8-24.12"
+          }
+        },
+        "clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:20.7-20.12"
+          }
+        },
+        "out0": {
+          "hide_name": 0,
+          "bits": [ 9, 10, 11, 12 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:26.56-26.60"
+          }
+        },
+        "out1": {
+          "hide_name": 0,
+          "bits": [ 13 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:27.9-27.13"
+          }
+        },
+        "out10": {
+          "hide_name": 0,
+          "bits": [ 30, 31, 32, 33 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:35.56-35.61"
+          }
+        },
+        "out3": {
+          "hide_name": 0,
+          "bits": [ 14 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:28.9-28.13"
+          }
+        },
+        "out4": {
+          "hide_name": 0,
+          "bits": [ 15, 16, 17, 18 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:29.56-29.60"
+          }
+        },
+        "out5": {
+          "hide_name": 0,
+          "bits": [ 19 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:30.9-30.13"
+          }
+        },
+        "out6": {
+          "hide_name": 0,
+          "bits": [ 20, 21, 22, 23 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:31.56-31.60"
+          }
+        },
+        "out7": {
+          "hide_name": 0,
+          "bits": [ 24 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:32.9-32.13"
+          }
+        },
+        "out8": {
+          "hide_name": 0,
+          "bits": [ 25, 26, 27, 28 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:33.56-33.60"
+          }
+        },
+        "out9": {
+          "hide_name": 0,
+          "bits": [ 29 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:34.9-34.13"
+          }
+        },
+        "reset_n": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_all_mod.v:21.8-21.15"
+          }
+        }
+      }
+    }
+  }
+}

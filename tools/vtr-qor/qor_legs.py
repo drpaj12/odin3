@@ -309,6 +309,10 @@ FCHECK_VECTORS = 50000
 FCHECK_SEED = 1
 
 
+# The wrapper reads the odin3 binary from this variable (its RTL pre-check, H1); the same name is
+# ``qor_fcheck_run.ODIN3_ENV``.
+FCHECK_ODIN3_ENV = "QOR_FCHECK_ODIN3"
+FCHECK_TECHLIB_ENV = "QOR_FCHECK_TECHLIB"
 FCHECK_RUNNER = Path(__file__).resolve().parent / "qor_fcheck_run.py"
 
 
@@ -317,7 +321,9 @@ def fcheck_command(ctx: LegContext, design: str, netlist: Path, verilator_j: int
     directory ``<J>/fcheck`` (the script's default would write into the working directory),
     ``cwd`` ``<J>``, output to ``<J>/fcheck.log``, VTR's venv first on ``PATH``. It runs through
     ``qor_fcheck_run.py`` (``-I -B``: nothing is written into VTR's tree), which works around the
-    script's duplicate port declaration for constant-driven outputs."""
+    script's duplicate port declaration for constant-driven outputs, classifies initial-state
+    dependence and first pre-checks the RTL for inferred latches and incomplete sensitivity lists
+    (``UNTESTED`` before any simulation)."""
     script = ctx.vtr_root / "mosaic" / "verilator_check" / "run_random_check.py"
     argv = (str(ctx.python), "-I", "-B", str(FCHECK_RUNNER), str(script),
             "--rtl", str(design_verilog(ctx.vtr_root, design)),
@@ -325,7 +331,9 @@ def fcheck_command(ctx: LegContext, design: str, netlist: Path, verilator_j: int
             "--vectors", str(FCHECK_VECTORS), "--seed", str(FCHECK_SEED),
             "--verilator-j", str(verilator_j))
     path = f"{ctx.vtr_root / '.venv' / 'bin'}:{os.environ.get('PATH', os.defpath)}"
-    return Command(argv, ctx.job_dir, ctx.job_dir / "fcheck.log", (("PATH", path),))
+    env = (("PATH", path), (FCHECK_ODIN3_ENV, str(ctx.odin3)),
+           (FCHECK_TECHLIB_ENV, str(ctx.repo / LIB_REL)))
+    return Command(argv, ctx.job_dir, ctx.job_dir / "fcheck.log", env)
 
 
 # What the checker prints. A finished comparison ends in the testbench's ``PASS:`` line, or shows
@@ -340,8 +348,9 @@ _FCHECK_MISMATCH = re.compile(
     r"|FAIL: \d+ mismatches in)", re.M)
 
 
-# The wrapper's own line for a design whose mismatches are all on bits the RTL leaves undefined
-# (qor_fcheck_run.py): exit 3, no MISMATCH line.
+# The wrapper's own line for a design it cannot judge (qor_fcheck_run.py): the RTL pre-check found
+# inferred latches or incomplete sensitivity lists, or every mismatch is on a bit that depends on
+# the initial state. Exit 3, no MISMATCH line.
 _FCHECK_UNTESTED = re.compile(r"^UNTESTED: ", re.M)
 
 
@@ -358,7 +367,8 @@ def fcheck_verdict(returncode: int, capped: bool, log: str) -> str:
     with the testbench's PASS line and a ``VCHECK_SUMMARY matched=N mismatched=0`` (N > 0) in
     ``log`` (the checker's output); ``fail`` only for a non-zero exit with mismatches reported in
     ``log``; ``untested`` for a non-zero exit with the wrapper's ``UNTESTED:`` line and no
-    mismatch (every mismatch is on a bit the RTL leaves undefined: never a pass, never a fail);
+    mismatch (the RTL has latches or incomplete sensitivity lists, or every mismatch is on a bit
+    that depends on the initial state: never a pass, never a fail);
     anything else (a Verilator compile failure, a Yosys failure, a crash, exit 2) is ``error``."""
     if capped:
         return "capped"
