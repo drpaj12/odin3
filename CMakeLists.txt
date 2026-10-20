@@ -144,6 +144,7 @@ add_library(odin3_core OBJECT
     src/passes/fsm/extract_trans.c
     src/passes/fsm/info.c
     src/passes/fsm/opt.c
+    src/passes/fsm/recode.c
     src/passes/fsm/unused.c
     src/passes/fsm/fsm.c
     src/passes/fsm/register.c
@@ -835,6 +836,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_fsm_opt)
     target_compile_definitions(test_fsm_opt PRIVATE
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    odin3_add_unit_test(test_fsm_recode)
+    target_sources(test_fsm_recode PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_fsm_ceval)
     target_sources(test_fsm_ceval PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_fsm_ceval PRIVATE

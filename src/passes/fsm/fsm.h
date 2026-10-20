@@ -88,7 +88,8 @@ typedef struct odin3_fsm_inst {
     odin3_vec out_drivers;   /* uint32_t node IDs that drove ctrl_out, ascending */
     odin3_fsm_sig clk, arst; /* arst is a constant 0 when the register has no async reset */
     bool clk_pol, arst_pol;
-    char encoding[ODIN3_FSM_ENC_MAX]; /* the wire's fsm_encoding when extracted */
+    char encoding[ODIN3_FSM_ENC_MAX];       /* the wire's fsm_encoding when extracted */
+    char final_encoding[ODIN3_FSM_ENC_MAX]; /* one-hot, binary, none or user, once recoded */
     odin3_fsm_data data;
 } odin3_fsm_inst;
 
@@ -136,6 +137,22 @@ odin3_status odin3_fsm_used_nets(const odin3_fsm_mod *fm, const odin3_vec *insts
 /* The unused flags of inst's control outputs for a used-net map (a constant output is used). */
 odin3_status odin3_fsm_unused_flags(const odin3_fsm_inst *inst, const uint8_t *used,
                                     odin3_vec *flags);
+
+/* --- recode (fsm_recode.cc; spec R-1 to R-5) ----------------------------------------------- */
+
+/*
+ * fsm_recode on one FSM: resolves the encoding (the attribute, default auto; `auto` is one-hot
+ * below 32 states and binary from 32 up unless opts->encoding says otherwise), numbers the states
+ * (the reset state 0, the others 1, 2, ... in table order) and rewrites the codes: one-hot is
+ * state_bits = number of states with a 1 in bit `index` and don't cares elsewhere, binary is
+ * ceil_log2(states) bits holding the index. none and user, and a binary request that would not
+ * shorten the register, leave the codes. Sets inst->final_encoding. NO_MEMORY leaves inst as it
+ * was.
+ */
+odin3_status odin3_fsm_recode(const odin3_fsm_mod *fm, odin3_fsm_inst *inst);
+
+/* Yosys's ceil_log2: 0 for 0 or 1, else the least n with 2^n >= x. */
+int32_t odin3_fsm_ceil_log2(int32_t value);
 
 /* --- info (fsm_info.cc, FsmData::log_info; spec I-1) -------------------------------------- */
 

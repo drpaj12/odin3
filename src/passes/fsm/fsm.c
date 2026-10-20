@@ -120,6 +120,17 @@ static odin3_status stage_opt(fsm_run *run, bool with_unused) {
     return st;
 }
 
+static odin3_status stage_recode(fsm_run *run) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < run->n_mods; i++) {
+        odin3_fsm_inst *insts = run->mods[i].insts.data;
+        for (size_t k = 0; st == ODIN3_OK && k < run->mods[i].insts.len; k++) {
+            st = odin3_fsm_recode(&run->mods[i].fm, &insts[k]);
+        }
+    }
+    return st;
+}
+
 static void stage_info(const fsm_run *run) {
     for (uint32_t i = 0; i < run->n_mods; i++) {
         const odin3_fsm_inst *insts = run->mods[i].insts.data;
@@ -143,6 +154,9 @@ odin3_status odin3_fsm_run(odin3_design *design, const odin3_fsm_opts *opts) {
     }
     if (st == ODIN3_OK) {
         st = stage_opt(&run, true);
+    }
+    if (st == ODIN3_OK && !opts->norecode) {
+        st = stage_recode(&run);
     }
     if (st == ODIN3_OK) {
         stage_info(&run);
