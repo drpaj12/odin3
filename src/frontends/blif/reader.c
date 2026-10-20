@@ -3,6 +3,7 @@
 
 #include "frontends/blif/lexer.h"
 #include "frontends/blif/param_text.h"
+#include "frontends/blif/reader_locs.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/module.h"
@@ -156,6 +157,7 @@ typedef struct blif_reader {
     odin3_vec seen;        /* uint32_t per port: widths the formals of a .subckt imply */
     odin3_strbuf cover;    /* rows of the open .names */
     odin3_u64map *formals; /* formal key -> port << 32 | bit (see TYPE_SHIFT) */
+    blif_locs *locs;       /* the --hdl-locs state, NULL without the option */
 } blif_reader;
 
 /* --- errors ------------------------------------------------------------------------------ */
@@ -777,6 +779,9 @@ static odin3_status begin_run(blif_reader *rd) {
 static odin3_status build_all(blif_reader *rd) {
     rd->line = 1;
     odin3_status st = begin_run(rd);
+    if (st == ODIN3_OK && rd->locs != NULL) {
+        odin3_prov_begin_op(&rd->ctx); /* the one operation of every restored record (D-1) */
+    }
     if (st == ODIN3_OK && rd->models.len > 0 && rd_model(rd, 0)->blackbox) {
         st = rd_error(rd, rd_model(rd, 0)->line, "the first model must be a module (the top)");
     }
@@ -817,13 +822,18 @@ static odin3_status find_builtins(blif_reader *rd) {
 static odin3_status get_net(blif_reader *rd, odin3_bytes name, uint32_t col, odin3_net_id *out) {
     uint32_t str = 0;
     odin3_status st = odin3_design_intern(rd->design, name, &str);
-    if (st == ODIN3_OK) {
+    if (st == ODIN3_OK && rd->locs != NULL) {
+        st = blif_locs_find_net(rd->locs, &(blif_scope){rd->module, rd->model_at}, str, out);
+    } else if (st == ODIN3_OK) {
         *out = odin3_module_find_net(rd->module, str);
     }
     if (st == ODIN3_OK && !odin3_net_valid(*out)) {
         odin3_prov_id prov = {0};
         st = rd_prov(rd, &(odin3_srcloc){.line = rd->line, .col = col, .end_col = col}, &prov);
-        if (st == ODIN3_OK) {
+        if (st == ODIN3_OK && rd->locs != NULL) {
+            st = blif_locs_create_net(rd->locs, &(blif_scope){rd->module, rd->model_at}, name, prov,
+                                      out);
+        } else if (st == ODIN3_OK) {
             st = odin3_net_create(rd->module, str, prov, out);
         }
     }
@@ -1438,34 +1448,6 @@ static odin3_status list_extra(blif_reader *rd, uint32_t key) {
 
 /* --- `.param` of a tech-library cell (1C amendment 2026-10-19) ------------------------------- */
 
-typedef struct attr_item {
-    uint32_t key;
-    const odin3_value *value;
-} attr_item;
-
-static odin3_status gather_attr(void *ctx, uint32_t key, const odin3_value *value) {
-    attr_item *item = odin3_vec_push((odin3_vec *)ctx);
-    if (item == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *item = (attr_item){key, value};
-    return ODIN3_OK;
-}
-
-/* Copies every attribute of node from to node to. */
-static odin3_status copy_node_attrs(odin3_module *module, odin3_node_id from, odin3_node_id to) {
-    odin3_vec items;
-    odin3_vec_init(&items, sizeof(attr_item));
-    odin3_status st =
-        odin3_attr_foreach(module, (odin3_objref){ODIN3_OBJ_NODE, from.v}, gather_attr, &items);
-    for (size_t i = 0; st == ODIN3_OK && i < items.len; i++) {
-        const attr_item *item = odin3_vec_cat(&items, i);
-        st = odin3_attr_set(module, (odin3_objref){ODIN3_OBJ_NODE, to.v}, item->key, item->value);
-    }
-    odin3_vec_free(&items);
-    return st;
-}
-
 /* The index of the parameter of def named by token, or -1. */
 static int param_index(const odin3_celltype_def *def, odin3_bytes key) {
     for (uint32_t i = 0; i < def->n_params; i++) {
@@ -1495,7 +1477,7 @@ static odin3_status rebuild_last(blif_reader *rd, const odin3_celltype_def *def,
     odin3_node_id fresh = {0};
     uint32_t name = odin3_node_name(rd->module, old);
     odin3_status st = odin3_node_create(rd->module, &spec, &fresh);
-    st = st == ODIN3_OK ? copy_node_attrs(rd->module, old, fresh) : st;
+    st = st == ODIN3_OK ? blif_copy_node_attrs(rd->module, old, fresh) : st;
     st = st == ODIN3_OK ? odin3_node_replace(rd->module, (odin3_node_pair){old, fresh}) : st;
     if (st == ODIN3_OK && name != 0) {
         st = odin3_node_rename(rd->module, fresh, name);
@@ -1569,6 +1551,19 @@ static odin3_status try_param(blif_reader *rd, const odin3_blif_line *ln, const 
                                                         : ODIN3_OK;
 }
 
+/* With --hdl-locs, `.attr src` (value joined in rd->scratch) is restored on the previous cell
+ * and makes no attribute: *restored is true then (D-4 b). */
+static odin3_status try_src(blif_reader *rd, const odin3_blif_line *ln, const char *prefix,
+                            bool *restored) {
+    *restored = false;
+    if (rd->locs == NULL || strcmp(prefix, ODIN3_BLIF_ATTR_PREFIX) != 0 ||
+        !tok_is(&ln->tokens[1], "src")) {
+        return ODIN3_OK;
+    }
+    blif_src_text src = {{rd->scratch.data, rd->scratch.len}, ln->line};
+    return rd_fail(rd, blif_locs_cell_src(rd->locs, rd->module, &rd->last, &src, restored));
+}
+
 /* `.attr key value…` / `.param key value…`: attribute prefix+key = the value tokens joined. */
 static odin3_status read_extra(blif_reader *rd, const odin3_blif_line *ln, const char *prefix) {
     if (ln->count < EXTRA_MIN) {
@@ -1592,9 +1587,12 @@ static odin3_status read_extra(blif_reader *rd, const odin3_blif_line *ln, const
         st = intern_scratch(rd, &key);
     }
     st = st == ODIN3_OK ? join_value_tokens(rd, ln) : st;
-    if (st == ODIN3_OK) {
-        st = intern_scratch(rd, &value.str);
+    bool restored = false;
+    st = st == ODIN3_OK ? try_src(rd, ln, prefix, &restored) : st;
+    if (st != ODIN3_OK || restored) {
+        return st;
     }
+    st = intern_scratch(rd, &value.str);
     bool listed =
         st == ODIN3_OK &&
         odin3_attr_get(rd->module, (odin3_objref){ODIN3_OBJ_NODE, rd->last.v}, key) != NULL;
@@ -1673,6 +1671,9 @@ static odin3_status body_line(blif_reader *rd, const odin3_blif_line *ln) {
         return cover_row(rd, ln);
     }
     odin3_status st = end_names(rd);
+    if (st == ODIN3_OK && rd->locs != NULL && rd->module != NULL && tok_is(tok, ".end")) {
+        st = rd_fail(rd, blif_locs_inherit(rd->locs, rd->module)); /* D-5 */
+    }
     if (st != ODIN3_OK || is_header(tok)) {
         return st;
     }
@@ -1768,9 +1769,22 @@ static void rd_free(blif_reader *rd) {
     odin3_u64map_destroy(rd->declared);
 }
 
+/* Both passes over the file. */
+static odin3_status read_passes(blif_reader *rd) {
+    odin3_status st = scan_file(rd);
+    if (st == ODIN3_OK) {
+        st = build_all(rd);
+    }
+    if (st == ODIN3_OK && between_passes != NULL) {
+        between_passes(between_passes_user);
+    }
+    return st == ODIN3_OK ? read_bodies(rd) : st;
+}
+
 /* Reads path into design; ctx is the caller's pass run (its op is advanced), or NULL for the
  * reader's own run. */
-static odin3_status read_file(odin3_design *design, const char *path, odin3_pass_ctx *ctx) {
+static odin3_status read_file(odin3_design *design, const char *path, odin3_pass_ctx *ctx,
+                              const odin3_blif_read_opts *opts) {
     if (design == NULL || path == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "blif_read: NULL design or path");
         return ODIN3_ERR_INVALID_ARG;
@@ -1784,27 +1798,40 @@ static odin3_status read_file(odin3_design *design, const char *path, odin3_pass
     if (ctx != NULL) {
         rd.ctx = *ctx;
     }
-    if (st == ODIN3_OK) {
-        st = scan_file(&rd);
+    odin3_blif_read_stats local;
+    odin3_blif_read_stats *stats = opts != NULL && opts->stats != NULL ? opts->stats : &local;
+    *stats = (odin3_blif_read_stats){0};
+    if (st == ODIN3_OK && opts != NULL && opts->hdl_locs) {
+        rd.locs = blif_locs_create(&rd.ctx, stats, path);
+        st = rd.locs == NULL ? rd_fail(&rd, ODIN3_ERR_NO_MEMORY) : st;
     }
-    if (st == ODIN3_OK) {
-        st = build_all(&rd);
-    }
-    if (st == ODIN3_OK && between_passes != NULL) {
-        between_passes(between_passes_user);
-    }
-    if (st == ODIN3_OK) {
-        st = read_bodies(&rd);
-    }
+    st = st == ODIN3_OK ? read_passes(&rd) : st;
     if (ctx != NULL) {
         ctx->op = rd.ctx.op;
     }
+    if (st == ODIN3_OK && rd.locs != NULL) {
+        odin3_log(ODIN3_LOG_INFO,
+                  "%s: hdl-locs: %u net names decoded, %u cell locations restored, %u inherited "
+                  "from output nets",
+                  path, stats->nets, stats->cells, stats->inherited);
+    }
+    blif_locs_destroy(rd.locs);
     rd_free(&rd);
     return st;
 }
 
 odin3_status odin3_blif_read(odin3_design *design, const char *path) {
-    return read_file(design, path, NULL);
+    return read_file(design, path, NULL, NULL);
+}
+
+odin3_status odin3_blif_read_ex(odin3_design *design, odin3_pass_ctx *ctx, const char *path,
+                                const odin3_blif_read_opts *opts) {
+    if (ctx != NULL && (ctx->design != design || !odin3_passrun_valid(ctx->run) ||
+                        ctx->run.v >= odin3_passrun_end(ctx->design))) {
+        odin3_log(ODIN3_LOG_ERROR, "blif_read: NULL or invalid pass context");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return read_file(design, path, ctx, opts);
 }
 
 odin3_status odin3_blif_read_in(odin3_pass_ctx *ctx, const char *path) {
@@ -1813,5 +1840,5 @@ odin3_status odin3_blif_read_in(odin3_pass_ctx *ctx, const char *path) {
         odin3_log(ODIN3_LOG_ERROR, "blif_read: NULL or invalid pass context");
         return ODIN3_ERR_INVALID_ARG;
     }
-    return read_file(ctx->design, path, ctx);
+    return read_file(ctx->design, path, ctx, NULL);
 }
