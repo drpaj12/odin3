@@ -4,6 +4,11 @@
 `IMAGE/` its figures. Gaps that need measurements or Peter's input are marked `\todo{…}` in the
 text and print as **[TODO: …]**.
 
+The paper has two parts. Part I (Sections I to VI, then the references) is the 8-page FCCM paper:
+the "final frontier" story of Odin, Odin II and Odin III, background, architecture, results,
+discussion and conclusion. Part II (Sections VII to XVI, after the references) describes the system
+in detail for its users after v1.0.
+
 ## Figures
 
 Fourteen figures are TikZ, drawn at print size in the paper's fonts; one, the byte-level AST record,
