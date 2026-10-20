@@ -29,6 +29,7 @@ typedef struct odin3_blif_write_opts {
     odin3_blif_dialect dialect;
     odin3_blif_name_style name_style; /* VTR only; PLAIN requires SHORT */
     uint32_t lut_k;                   /* VTR only: max .names inputs; 0 = the default */
+    bool src_attr;                    /* PLAIN only: `.attr src` with each cell's HDL locations */
 } odin3_blif_write_opts;
 
 #define ODIN3_BLIF_VTR_DEFAULT_K 6U /* k6_frac_N10_frac_chain_mem32K_40nm and EArch */
@@ -85,7 +86,13 @@ typedef struct odin3_blif_write_opts {
  * for every cell, is refused instead. A
  * model with a name in both `.inputs` and `.outputs` has two ports of one BLIF name; BLIF can
  * connect only one of them per instance (the reader binds the formal to the input), so a cell with
- * both connected is refused. After each cell: `.cname` with the node's name, then each
+ * both connected is refused. After each cell: `.cname` with the node's name, then, under
+ * opts->src_attr (PLAIN only; the VTR dialect is refused: "odin3_blif_write_with: src_attr applies
+ * to the PLAIN dialect only"), `.attr src "SRC"` with the cell's HDL locations (spec 5.4 W-3, W-4:
+ * the SOURCE leaves of its provenance walk, each distinct one in Yosys's form `file:L.C-EL.EC`, at
+ * most 8 joined by `|`; a file name that holds `|`, `"`, `\`, `#` or a leading, trailing or
+ * doubled blank is skipped with one WARNING; a cell that has its own `blif.attr:src` keeps it and
+ * gets no second line), then each
  * `.attr`/`.param` listed by its ODIN3_BLIF_ATTR_EXTRAS attribute, in that order; a listed key
  * without a `blif.attr:`/`blif.param:` prefix or without a STRING attribute on the cell is skipped
  * with a warning.
@@ -150,10 +157,10 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
  * preflight (odin3_blif_vtr_plan_build), and written under the names its plan holds.
  *
  * With ODIN3_BLIF_NAMES_PROVENANCE (3E-6, spec 3E §10 item 7) every net but a top port bit and a
- * generator is first named `hier/<short name>@file:line` (backends/prov_name.h: the record's
- * first location, the file as the record has it) when its provenance record has a hierarchy or a
- * location, then VB-10 rules 1 to 4 apply as above; any other net keeps its short name. Nets are
- * the only named objects of this dialect (no `.cname`).
+ * generator is first named `hier/<short name>@file:line` (backends/prov_name.h: the first HDL
+ * location, a SOURCE leaf, the file as the record has it; spec 5.4 W-2) when it has one, then
+ * VB-10 rules 1 to 4 apply as above; any other net, including one read from a BLIF (an IMPORTED
+ * record), keeps its short name. Nets are the only named objects of this dialect (no `.cname`).
  *
  * VTR output (spec 3E §5-§9): the header line `# Odin III <version> write_blif --vtr (K=<K>,
  * names short|provenance)`, one `# abc: <run information>` line per pass run named `abc` that has

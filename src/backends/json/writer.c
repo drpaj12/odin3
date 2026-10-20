@@ -331,6 +331,7 @@ static void write_module_body(jw *out, jw_list *entry) {
     odin3_wattr_seen_clear(&out->seen);
     jw_user_attrs(out, &attrs, (odin3_objref){ODIN3_OBJ_MODULE, odin3_module_id_of(out->module).v},
                   ODIN3_WATTR_ATTRIBUTE);
+    jw_src(out, &attrs, odin3_module_prov(out->module));
     jw_close(out, &attrs);
     write_ports(out, entry);
     jw_key(out, entry, "cells");
@@ -516,9 +517,13 @@ odin3_status odin3_json_write(const odin3_design *design, const char *path) {
                 .strtab = odin3_design_strtab(design),
                 .status = ODIN3_OK};
     odin3_strbuf_init(&state.key);
+    odin3_strbuf_init(&state.src);
     odin3_wattr_seen_init(&state.seen);
-    odin3_status status = save_design(&state, path);
+    state.hdl = odin3_hdl_ctx_create(design, "write_json");
+    odin3_status status = state.hdl != NULL ? save_design(&state, path) : ODIN3_ERR_NO_MEMORY;
+    odin3_hdl_ctx_destroy(state.hdl);
     odin3_wattr_seen_free(&state.seen);
+    odin3_strbuf_free(&state.src);
     odin3_strbuf_free(&state.key);
     return status;
 }

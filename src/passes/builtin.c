@@ -201,6 +201,7 @@ enum {
     WB_VTR = 1U << 0,
     WB_LUT_K = 1U << 1,
     WB_NAME_STYLE = 1U << 2,
+    WB_SRC_ATTR = 1U << 3,
     WB_DECIMAL = 10,
     WB_MAX_DIGITS = 9, /* more digits than this are out of range anyway (no overflow) */
 };
@@ -251,6 +252,8 @@ static odin3_status wb_option(odin3_bytes word, odin3_bytes *rest, write_blif_ar
         bit = WB_LUT_K;
     } else if (odin3_pass_arg_is(word, "--name-style")) {
         bit = WB_NAME_STYLE;
+    } else if (odin3_pass_arg_is(word, "--src-attr")) {
+        bit = WB_SRC_ATTR;
     } else {
         return unknown_arg("write_blif", word);
     }
@@ -262,6 +265,10 @@ static odin3_status wb_option(odin3_bytes word, odin3_bytes *rest, write_blif_ar
     out->seen |= bit;
     if (bit == WB_VTR) {
         out->opts.dialect = ODIN3_BLIF_DIALECT_VTR;
+        return ODIN3_OK;
+    }
+    if (bit == WB_SRC_ATTR) {
+        out->opts.src_attr = true;
         return ODIN3_OK;
     }
     odin3_bytes value = wb_value(rest);
@@ -304,6 +311,12 @@ static odin3_status write_blif_parse(odin3_bytes args, write_blif_args *out) {
         odin3_log(ODIN3_LOG_ERROR, "write_blif: --lut-k and --name-style need --vtr");
         return ODIN3_ERR_INVALID_ARG;
     }
+    if ((out->seen & WB_SRC_ATTR) != 0 && (out->seen & WB_VTR) != 0) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "write_blif: --src-attr is for the plain dialect; the VTR dialect has no "
+                  ".attr lines");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     return ODIN3_OK;
 }
 
@@ -311,7 +324,7 @@ static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, od
                                    void *user) {
     (void)user;
     (void)ctx;
-    write_blif_args parsed = {.opts = {ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0},
+    write_blif_args parsed = {.opts = {ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false},
                               .seen = 0};
     odin3_strbuf_init(&parsed.path);
     odin3_status st = write_blif_parse(args, &parsed);
@@ -663,8 +676,9 @@ static const odin3_pass_def READ_TECHLIB = {
     ODIN3_PASS_PROCESSES_OK};
 static const odin3_pass_def WRITE_BLIF = {
     "write_blif",
-    "write_blif [--vtr] [--lut-k K] [--name-style short|provenance] <file>: write the design as "
-    "BLIF (the top first); --vtr writes the top alone in the dialect VPR reads",
+    "write_blif [--vtr] [--lut-k K] [--name-style short|provenance] [--src-attr] <file>: write the "
+    "design as BLIF (the top first); --vtr writes the top alone in the dialect VPR reads; "
+    "--src-attr (plain dialect only) writes each cell's HDL locations as `.attr src \"SRC\"`",
     write_blif_run,
     NULL,
     false,
@@ -739,6 +753,7 @@ const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
                                                       &odin3_pass_lpmmap,
                                                       &odin3_read_verilog_pass,
                                                       &odin3_pass_read_arch,
-                                                      &odin3_pass_write_techlib};
+                                                      &odin3_pass_write_techlib,
+                                                      &odin3_pass_dump_locs};
 const uint32_t odin3_builtin_pass_count =
     (uint32_t)(sizeof odin3_builtin_passes / sizeof odin3_builtin_passes[0]);

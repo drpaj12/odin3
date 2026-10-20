@@ -559,11 +559,15 @@ run; `odin3_prov_begin_op(ctx)` starts an operation and
 hash-consing: every field including `run` and `op` for `DERIVED`; every field except `op` for
 `SOURCE`/`IMPORTED`, so one origin in one run is one record. Creating any node, net or wire
 requires a prov ID argument, so nothing is
-created without lineage. Readers use `odin3_prov_source` / `odin3_prov_imported`.
+created without lineage. Readers use `odin3_prov_source` / `odin3_prov_imported`; a reader that
+restores locations a writer printed (5.4, `odin3_hdl_restore`) makes one `DERIVED` record per
+object, parents = the restored `SOURCE` then the reader's own record (the `SOURCE` alone when the
+reader has none).
 
 **Names in output (spec §5.3).** An object's provenance name is
-`hier/path/cellname@file:line`, from the record's first location (for `DERIVED`, the first leaf
-of the backward walk in parent order). `--name-style` (writers) chooses provenance names or
+`hier/path/cellname@file:line`, from its first HDL location: the first `SOURCE` leaf of the
+backward walk in parent order that has a location (5.4 W-2: an `IMPORTED` leaf, a netlist's own
+line, names nothing, and writers print no location for it). `--name-style` (writers) chooses provenance names or
 short names; short names are the object's own name if set, else generated names
 `$n<ID>` / `$c<ID>`, stable until the next `compact` (writers run after the last one). Writers make names unique across kinds where the target language has one
 namespace (Verilog).
