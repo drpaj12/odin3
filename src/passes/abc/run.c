@@ -396,6 +396,7 @@ static void log_run_info(const odin3_abc_run *run, const odin3_abc_splice_stats 
 
 /* --- the report hook (abc_test.h) ----------------------------------------------------------- */
 
+/* The hook is set and read on the main (pass) thread only; tests and bench_abc use it. */
 static odin3_abc_report_fn report_fn;
 static void *report_user;
 
@@ -447,7 +448,7 @@ static odin3_status map_region(odin3_abc_run *run) {
         st = in_memory ? odin3_abc_exchange_aig(run, &result)
                        : odin3_abc_exchange_blif(run, &result);
     }
-    double spent = now_ms() - start - run->stats.check_ms;
+    double spent = now_ms() - start; /* the INFO "ms": caps check and exchange, as before 3D-8 */
     double folded = now_ms();
     st = st == ODIN3_OK ? odin3_abc_result_fold(&result) : st;
     run->stats.check_ms += now_ms() - folded;

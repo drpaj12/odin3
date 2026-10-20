@@ -125,11 +125,36 @@ static void test_one_report_per_clock_domain_with_a_run_number(void) {
     }
 }
 
-static void test_no_hook_no_report(void) {
-    odin3_abc_test_set_report(NULL, NULL);
+enum { BLIF_TEXT = 1 << 16 };
+
+/* keep_net through `abc`, then odin3_blif_write to name in the test's tmp: the file's text. */
+static void abc_then_blif(const char *file, char *text) {
+    char path[AFX_JOIN];
+    afx_path(path, file);
     read_data("keep_net");
     run_abc();
-    TEST_ASSERT_EQUAL_UINT32(0, got.count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_write(design, path));
+    FILE *f = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    size_t len = fread(text, 1U, BLIF_TEXT - 1U, f);
+    (void)fclose(f);
+    text[len] = '\0';
+    TEST_ASSERT_TRUE(len > 0);
+}
+
+/* The hook is only a reader: the mapped design is byte-identical with it set and unset. */
+static void test_the_hook_does_not_change_the_result(void) {
+    static char with_hook[BLIF_TEXT];
+    static char without_hook[BLIF_TEXT];
+    abc_then_blif("with_hook.blif", with_hook);
+    TEST_ASSERT_EQUAL_UINT32(1, got.count);
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    odin3_abc_fake_reset();
+    odin3_abc_test_set_report(NULL, NULL);
+    abc_then_blif("without_hook.blif", without_hook);
+    TEST_ASSERT_EQUAL_UINT32(1, got.count); /* the hook is off: nothing new arrived */
+    TEST_ASSERT_EQUAL_STRING(with_hook, without_hook);
 }
 
 int main(void) {
@@ -137,6 +162,6 @@ int main(void) {
     RUN_TEST(test_blif_exchange_report);
     RUN_TEST(test_aig_exchange_report);
     RUN_TEST(test_one_report_per_clock_domain_with_a_run_number);
-    RUN_TEST(test_no_hook_no_report);
+    RUN_TEST(test_the_hook_does_not_change_the_result);
     return UNITY_END();
 }

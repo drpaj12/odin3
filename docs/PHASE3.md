@@ -1321,9 +1321,13 @@ then the options considered.
       A".** `read_blif` refuses a second read into one design, and the pass maps every module in
       each call, so the tool writes the first model three times (`<m>`, `<m>__o3det2`,
       `<m>__o3det3`) and maps them with one `abc` call: three `open`/`close` sessions in one
-      process. The copies must come out identical, for the default script and for `strash; fraig;
-      if -K 6`. A script change between the sessions is not covered. The unit tests of the
-      engine (Task 9c) cover the session reuse itself.
+      process. With the default script the copies are three sessions of one process (the
+      reseeding at `open`, I5) and must come out identical. With `strash; fraig; if -K 6` the
+      script is not the default, so `odin3_abc_route` sends it to the ABC child: that row is
+      three child processes and tests the child route, not reseeding. A script change between
+      the sessions is not covered. The unit tests of the engine (Task 9c) cover the session
+      reuse itself. Mode (a) also runs the child route: two processes with `--script <fraig>
+      --via-blif`, files compared (a difference shows as `a:child:<file>`).
     - **`.out.blif` is compared without ABC's time stamp.** `write_hie` heads the file with `#
       Benchmark "<name>" written by ABC on <date>`; two runs a second apart differ there (seen:
       3 designs of 14 over 8 runs). The line is dropped before the comparison; every other byte
@@ -1336,10 +1340,27 @@ then the options considered.
       bytes_per_aig_obj`, the calibration figure) and `--header`, `--techlib`. A run without
       `--via-blif` uses the pass's default exchange (`ODIN3_ABC_EXCHANGE=aig` for the in-memory
       one). The RSS columns are those of the whole `abc` call (a multi-domain design repeats
-      them). The report hook (`odin3_abc_test_set_report`, abc_test.h) times the phases with
+      them); `bytes_per_aig_obj` is printed only for a call that made exactly one run. The peak
+      is `-` when `/proc/self/clear_refs` cannot reset the high-water mark. The `exe` row's peak
+      is the executable's own VmHWM polled every 1 ms (Linux gives a spawned child the parent's
+      `ru_maxrss` at exec, so `wait4` would be at least the linked run's peak): a lower bound,
+      `-` when no sample was possible; `bench_abc --selftest-rss MB --exe PROG` checks it
+      (`bench_abc_smoke`). A run with no report, or more than 64, exits 1. The report hook (`odin3_abc_test_set_report`, abc_test.h) times the phases with
       `odin3_now_ms`; "outside ABC" is classification, AIG (or BLIF write and read-back), caps
       and folding, splice less provenance, and provenance.
     - `abc-diff`'s depth no longer counts an identity buffer as a level (see (n)).
+    - **Review fixes (PR review of 3D-8).** H1 (exe peak inflated), M1 (child-route row), M2 (fraig
+      row text), M3 (`--via-blif` with no exchange files is an error), M4 (peak and per-run
+      calibration), M5 (`parse_args` split; the new tests/bench and tools code checked by hand
+      with `lizard -C 15 -L 60 -a 5`, as the gate scans only `src` and `adapters/abc`), L1 (a
+      test that the hook leaves the written BLIF byte-identical; times are still only checked
+      as numbers), L2 (the INFO "ms" keeps its old definition: caps check plus exchange), L3
+      (comment: hook is main-thread only), L4 (only a first-line stamp is ignored), L5 (mode c
+      compares the exchange files), L6 (usage text: the default `--keep` directory is never
+      removed), L7. Left open: **L8** (no `ok`/`MISSED` verdict column against spec 12's
+      targets: the controller reads the numbers, a verdict column is a follow-up; whether 3H's
+      nightly calls modes c and d is 3H's, no `nightly.yml` edit here) and the provenance
+      comparison of L1 (the hook test compares the plain BLIF text, not the provenance).
 49. **`opt_merge -ffbits`: merge identical flip-flop bits before `lower`** (2026-10-19, branch
     `feat/opt-ffbit-merge`; agent default, Peter may override; Peter's rule: where Odin III and
     Parmys differ, match Parmys). No IR invariant and no public ABI changed. (a) **Cause**: Yosys
