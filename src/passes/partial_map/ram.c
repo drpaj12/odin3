@@ -252,6 +252,7 @@ odin3_status hm_map_ram(hm_ctx *hc, odin3_node_id src) {
     odin3_vec ties;
     odin3_vec_init(&ties, sizeof(hm_tie));
     ram_ctx rc;
+    pm_memattr_warn(hc, src, "partial_map");
     ctx_init(&rc, hc, src, &ties);
     odin3_status st = needs_mapping(&rc) ? transact(&rc) : ODIN3_OK;
     ctx_free(&rc);

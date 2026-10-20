@@ -202,4 +202,10 @@ odin3_status hm_map_ram(hm_ctx *hc, odin3_node_id src);
  * splits (at most 31): OK, or the located error. */
 odin3_status hm_check_ram(hm_ctx *hc, odin3_node_id node);
 
+/* G-3: one WARNING per memory-style attribute of the list in its source file (name matched
+ * ignoring case, value ignored) on the memory `node` (a `$mem` or a RAM instance), "<pass>: memory
+ * '<name>': attribute '<attr>' is ignored; mapping follows the architecture". Nothing else reads
+ * these attributes. */
+void pm_memattr_warn(const hm_ctx *hc, odin3_node_id node, const char *pass);
+
 #endif
