@@ -10,7 +10,8 @@ Per design:
 
 1. the golden is ``<golden-root>/vtr/<d>/<d>.parmys.blif`` for a file under ``benchmarks/verilog``
    and ``regression/verilog/<group>/<leaf>/<leaf>.parmys.blif`` for a micro (exit-check's rule);
-   ``--arch`` must name the arch of the golden's ``.prov`` (``arch=``), when both say one;
+   ``--arch`` must name the arch of the golden's ``.prov`` (``arch=``), when both say one, and
+   Odin III then reads it with ``read_arch`` instead of ``read_techlib`` (4.2);
 2. Odin III runs the script of ``phase3_pre_abc.script`` (``read_techlib; read_verilog --nolatches
    --vtr-compat; proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full; hardmap;
    opt -full -ffbits; lower; opt -fast; compact; write_blif --vtr``), ``--top`` the first
@@ -152,12 +153,18 @@ class Result:
 
 
 def script_text(template: Path, lib: Path, design: Path, out: Path,
-                adder_lib: Path | None = None, rtlil: bool = False) -> str:
-    """The ``-p`` string: the script file's commands joined by ``; `` with the names filled."""
+                adder_lib: Path | None = None, rtlil: bool = False,
+                arch: str | None = None) -> str:
+    """The ``-p`` string: the script file's commands joined by ``; `` with the names filled.
+
+    With ``arch`` (a VPR XML path) the ``read_techlib`` line is ``read_arch`` of that file, so the
+    hard blocks and ``partial_map``'s rules come from the arch record (4.2)."""
     lines = [ln.strip() for ln in template.read_text(encoding="utf-8").splitlines()]
     commands = [ln for ln in lines if ln and not ln.startswith("#")]
     if rtlil:  # stop before `lower` and write the RTLIL view (the lower-gap fallback)
         commands = [*commands[:commands.index("lower")], "write_rtlil @OUT@"]
+    if arch is not None:
+        commands = [f"read_arch {arch}" if ln.startswith("read_techlib") else ln for ln in commands]
     if adder_lib is None:
         commands = [ln for ln in commands if "@ADDERLIB@" not in ln]
     text = "; ".join(commands)
@@ -288,7 +295,7 @@ def tail(text: str, lines: int = 3) -> str:
 def run_odin(cfg: Config, design: Path, top: str, work: Path) -> tuple[Path, str]:
     """Odin III's script; returns (BLIF, its output). Exit != 0 is ``ToolError``."""
     out = work / "odin.blif"
-    script = script_text(SCRIPT, cfg.techlib, design, out, cfg.adder_lib)
+    script = script_text(SCRIPT, cfg.techlib, design, out, cfg.adder_lib, arch=cfg.arch)
     proc = run_child([cfg.odin3, "--top", top, "-p", script], cfg.timeout)
     log = proc.stderr + proc.stdout
     (work / "odin.log").write_text(log, encoding="utf-8")
@@ -511,7 +518,7 @@ def gap_delta(cfg: Config, design: Path, golden: Path, work: Path) -> dict[str, 
     """Count difference (Odin III minus Parmys) from the RTLIL written before ``lower``."""
     top = first_model(golden)
     out = work / "odin.il"
-    script = script_text(SCRIPT, cfg.techlib, design, out, cfg.adder_lib, rtlil=True)
+    script = script_text(SCRIPT, cfg.techlib, design, out, cfg.adder_lib, rtlil=True, arch=cfg.arch)
     proc = run_child([cfg.odin3, "--top", top, "-p", script], cfg.timeout)
     if proc.returncode != 0:
         raise ToolError(f"odin3 (before lower) exited {proc.returncode}: {tail(proc.stderr)}")

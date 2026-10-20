@@ -615,6 +615,9 @@ class UnitTests(unittest.TestCase):
         with_lib = hd.script_text(hd.SCRIPT, Path("/l"), Path("/d.v"), Path("/o"), Path("/a.v"))
         self.assertIn("read_techlib /l; read_verilog --lib /a.v; read_verilog --nolatches",
                       with_lib)
+        with_arch = hd.script_text(hd.SCRIPT, Path("/l"), Path("/d.v"), Path("/o"), arch="/a.xml")
+        self.assertTrue(with_arch.startswith("read_arch /a.xml; "))
+        self.assertNotIn("read_techlib", with_arch)
         self.assertTrue(text.endswith("write_blif --vtr /o.blif"))
         self.assertNotIn("@", text)
         self.assertNotIn("#", text)

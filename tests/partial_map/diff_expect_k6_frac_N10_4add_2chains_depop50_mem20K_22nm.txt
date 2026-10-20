@@ -1,0 +1,14 @@
+# What hardmap-diff may report on the COFFE arch (multiply 27x27, RAM address limit 11) against the
+# Parmys goldens of controller step C1. Pass tests/hardmap/diff_expect.txt (the k6 entries, which
+# hold with the same numbers on this arch) and tests/hardmap/vtr_expect.txt too.
+#
+# D-16 (spec section 8), until PR F (Task 14, the oversize split X-4) lands: a `$mul` wider than the
+# multiplier W = 27 stays soft in Odin III, where Parmys splits it into smaller multiply and adder
+# cells. diffeq1 and diffeq2 multiply 32-bit operands (`u_var * DXport`, `[31:0]`), or1200 `x * y`
+# at 32 bits. PR F's author removes these lines (they go stale when the split exists).
+diffeq1.v counts:-13 multiply D-16: 32-bit `$mul` above W = 27 left soft until PR F (X-4), Parmys splits
+diffeq1.v counts:-48 adder D-16: adders of Parmys's split of the 32-bit `$mul`, Odin III leaves it soft until PR F
+diffeq2.v counts:-13 multiply D-16: 32-bit `$mul` above W = 27 left soft until PR F (X-4), Parmys splits
+diffeq2.v counts:-92 adder D-16: adders of Parmys's split of the 32-bit `$mul`, Odin III leaves it soft until PR F
+or1200.v counts:-4 multiply D-16: 32-bit `$mul` above W = 27 left soft until PR F (X-4), Parmys splits
+or1200.v counts:-72 adder D-16: adders of Parmys's split of the 32-bit `$mul`, Odin III leaves it soft until PR F

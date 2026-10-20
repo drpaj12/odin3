@@ -1,0 +1,35 @@
+# What hardmap-diff may report on arch k4_N4_90nm (no multiply, adder or RAM model) against the
+# Parmys goldens of controller step C1 (~/odin3-ws/golden/k4_N4_90nm). Same syntax and rules as
+# tests/hardmap/diff_expect.txt, but self-contained for the micros: do NOT also pass the k6
+# diff_expect.txt (its D9, D6, D2b and RAM-count entries do not occur on this arch and go stale).
+# For the VTR designs add tests/hardmap/vtr_expect.txt (the fsm line of stereovision3 holds here).
+# A listed entry that no longer occurs is stale and fails.
+#
+# no-golden: Parmys did not finish (C1, 2026-10-20). The first four failed with yosys
+# `ERROR: BUF_NODE`, status=failed, all with soft multipliers; mkDelayWorker32B hit the 6144 MB cap.
+common/mult_const.v no-golden Parmys yosys ERROR: BUF_NODE (status=failed), soft multipliers on k4_N4_90nm
+diffeq1.v no-golden Parmys yosys ERROR: BUF_NODE (status=failed), soft multipliers on k4_N4_90nm
+diffeq2.v no-golden Parmys yosys ERROR: BUF_NODE (status=failed), soft multipliers on k4_N4_90nm
+stereovision2.v no-golden Parmys yosys ERROR: BUF_NODE (status=failed), soft multipliers on k4_N4_90nm
+mkDelayWorker32B.v no-golden Parmys capped at 6144 MB on k4_N4_90nm
+
+# D15 as on k6 (tests/hardmap/diff_expect.txt), same numbers: read-only memories are deleted by
+# Parmys (opt_mem) with their read registers.
+common/rom.v counts:+8 latch D15: read-only memory without INIT, Parmys deletes it and its read register (opt_mem), Odin III keeps 8 read-data latches
+common/nr.v counts:+24 latch D15: three read-only memories without INIT, Parmys deletes them and their read registers (opt_mem), Odin III keeps 24 read-data latches
+
+# D-20 (spec section 8): no RAM model, the `$mem` goes to `lower`. Parmys's own soft memory path
+# has no registered read data: equiv-check (abc dsec) says NOT equivalent for each of these (the
+# golden's read data comes straight from the memory mux, `.names ... rd_data`), and the latch
+# difference is exactly the read-data bits (8 per read port for mem, bram and 2r2w; 32 for 1r2w; 2 x
+# 32 for 2r1w), where Odin III follows the RTL (`rd_data <= block_mem[rd_addr]`). By counts and
+# equiv-check only: the function is not compared by these lines.
+common/mem.v counts:+8 latch D-20: Parmys's soft memory has no read register (8 data bits), Odin III keeps it (RTL)
+common/bram.v counts:+8 latch D-20: Parmys's soft memory has no read register (8 data bits), Odin III keeps it (RTL)
+common/1r2w.v counts:+32 latch D-20: Parmys's soft memory has no read register (1 read port x 32 bits), Odin III keeps it (RTL)
+common/2r1w.v counts:+64 latch D-20: Parmys's soft memory has no read registers (2 read ports x 32 bits), Odin III keeps them (RTL)
+common/2r2w.v counts:+16 latch D-20: Parmys's soft memory has no read registers (2 read ports x 8 bits), Odin III keeps them (RTL)
+
+# Not hardmap's: `$pow` has no bit-level form in lower (as on k6).
+operators/eightbit_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)
+operators/twobits_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)
