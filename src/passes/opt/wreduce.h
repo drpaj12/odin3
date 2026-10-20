@@ -109,7 +109,7 @@ typedef struct wr_state {
     odin3_celltype_id types[WT_COUNT];
     odin3_vec marks; /* uint32_t net IDs: the nets this round changed (Yosys's work_queue_bits) */
     odin3_vec fwd;   /* uint32_t per net: the net it was merged into, 0 for none */
-    odin3_vec rank;  /* uint32_t per node: its place in Yosys's cell order (the first node's ID) */
+    odin3_vec rank;  /* uint32_t per node: its place in Yosys's cell order (wr_order_ranks) */
     odin3_vec work;  /* uint64_t: (rank << 32 | node) of this round, sorted */
     odin3_vec nets;  /* odin3_net_id scratch: the pins of the cell being looked at, in pin order */
     odin3_vec nets2; /* odin3_net_id scratch: a rebuilt port that is not a prefix (mux B) */
@@ -164,6 +164,18 @@ const char *wr_module_name(const wr_state *ws);
 /* The label of a node for a log line, the type's name. */
 void wr_label(const wr_state *ws, odin3_node_id node, char *out, size_t size);
 const char *wr_type_name(const wr_state *ws, odin3_node_id node);
+
+/* wreduce_order.c: ws->rank[node] = the node's place in a post-order of the net graph (operand
+ * before consumer, WR-7); ranks are 1..N, ws->rank must already hold one entry per node (else
+ * INVALID_ARG). A node with no rank of its own (made later, never given one by wr_rebuild) keeps
+ * UINT32_MAX: it sorts after every ranked node, by node ID. */
+odin3_status wr_order_ranks(wr_state *ws);
+/* True for a storage type (flip-flop, latch, memory): its outputs are not followed by the walk. */
+bool wr_order_is_source(const char *type);
+/* The index-th port (of n_ports) the walk reads for `type`: registry order, but `$mux` S, B, A. */
+uint32_t wr_order_port(const char *type, uint32_t n_ports, uint32_t index);
+/* Bytes per node the walk needs besides the rank table: `seen` (1) and the stack (8). */
+enum { WR_ORDER_BYTES_PER_NODE = 9 };
 
 /* wreduce_op.c: the pre-step (spec 3, step 1) and §4.3 for one node. */
 odin3_status wr_prestep(wr_state *ws, odin3_node_id node);

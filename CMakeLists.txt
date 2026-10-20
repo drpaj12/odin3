@@ -128,6 +128,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/wreduce.c
     src/passes/opt/wreduce_op.c
     src/passes/opt/wreduce_ff.c
+    src/passes/opt/wreduce_order.c
     src/passes/opt/reduce.c
     src/passes/opt/share.c
     src/passes/opt/dff.c
@@ -803,6 +804,10 @@ if(BUILD_TESTING)
     # 3G: wreduce.
     odin3_add_unit_test(test_wreduce)
     target_sources(test_wreduce PRIVATE tests/unit/proc_build.c)
+    # WR-7: tools/opt-check/il_celltypes.txt (il_order.py's cell table) against the registry.
+    odin3_add_unit_test(test_il_celltypes)
+    target_compile_definitions(test_il_celltypes PRIVATE
+        IL_CELLTYPES_FILE="${PROJECT_SOURCE_DIR}/tools/opt-check/il_celltypes.txt")
     # 2F Task 10: opt_muxtree.
     odin3_add_unit_test(test_opt_muxtree)
     target_sources(test_opt_muxtree PRIVATE tests/unit/proc_build.c)
@@ -2985,6 +2990,35 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_opt_rules_dir}/wreduce)
         set_tests_properties(opt_diff_wreduce_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
                              TIMEOUT 1800)
+        # WR-7 amended (PHASE3 #51): the visiting order. tests/opt/order holds Verilog whose result
+        # depends on the order of the cells. CIRCULAR on the order: Yosys reads Odin III's file
+        # through il_order.py, which ranks cells with the same walk as wreduce_order.c, so this
+        # proves that the two agree and that wreduce refines Yosys's result for that order, not that
+        # the walk is Yosys's front-end order. That is measured by hardmap-diff on LU8PEEng,
+        # LU32PEEng and mcml against the Parmys goldens (PHASE3 #51). Both scripts run; the one
+        # difference of `wreduce` alone (cell names, two buffers) is listed in diff_expect.txt with
+        # its cause.
+        add_test(NAME opt_diff_wreduce_order
+            COMMAND ${_opt_sweep} --jobs 1 --opt-diff
+                    --opt-arg=--script=wreduce --opt-arg=--script=phase3
+                    --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
+                    --opt-arg=--root=${PROJECT_SOURCE_DIR}/tests/opt
+                    --root ${PROJECT_SOURCE_DIR}/tests/opt
+                    ${PROJECT_SOURCE_DIR}/tests/opt/order)
+        set_tests_properties(opt_diff_wreduce_order PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 600)
+        # A forward reference (a net with a wire is not followed): Odin III keeps node-ID order and,
+        # like Yosys's front end, leaves the cells wide. Script wreduce alone: after `proc` and
+        # compact the Phase 3 names differ from Yosys's for a reason that is not wreduce's.
+        add_test(NAME opt_diff_wreduce_forward
+            COMMAND ${_opt_sweep} --jobs 1 --opt-diff
+                    --opt-arg=--script=wreduce
+                    --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
+                    --opt-arg=--root=${PROJECT_SOURCE_DIR}/tests/opt
+                    --root ${PROJECT_SOURCE_DIR}/tests/opt
+                    ${PROJECT_SOURCE_DIR}/tests/opt/order_forward)
+        set_tests_properties(opt_diff_wreduce_forward PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 600)
         # --cap-for: syntax/inferred_ram_w_clog2.v (1479 B, a 3776-latch RAM) needs 2.3 GB for its base
         # case from the initial state, over the 2G child cap; it proves at 4G under both scripts (2H).
         odin3_add_sweep_test(opt_equiv_micro LABEL sweep
@@ -3152,6 +3186,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         odin3_add_sweep_test(opt_equiv_micro_phase3 LABEL sweep
             COMMAND ${_opt_sweep} --opt-equiv --min-changed-total 200 ${_micro_expect}
                     --cap-for syntax/inferred_ram_w_clog2.v=4G
+                    # WR-7 (PHASE3 #51): the wreduce call of des_area refines but takes 60 to 600 s
+                    # of SAT with the new visiting order (main: under 60 s); proved at 600 s.
+                    --timeout-for large/des_area.v=600
                     --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
@@ -3163,6 +3200,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_wreduce_expect_fail.txt
+                    # WR-7 (PHASE3 #51): these refine, but not within 60 s any more (proved at 600 s)
+                    --timeout-for full/iir1.v=600 --timeout-for large/spree.v=600
+                    --timeout-for full/cf_fft_256_8.v=600
                     --opt-arg=--script=wreduce --opt-arg=--script=phase3
                     --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
                     --opt-arg=--root=${_micro_dir} ${_micro_dir})

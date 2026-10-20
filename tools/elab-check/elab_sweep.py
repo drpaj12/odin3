@@ -531,6 +531,10 @@ def run_proc_diff(cfg: Config, item: Item, cap: int) -> Outcome:
     return Outcome("ok", time.monotonic() - start, output="".join(outputs))
 
 
+# the opt tools that take --refine-timeout, so --timeout-for can lengthen the SAT limit of one file
+TIMEOUT_TOOLS = ("lower-equiv", "opt-equiv", "opt-diff")
+
+
 def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
     """opt-equiv, opt-diff or opt-run on the file: exit 0 passes, 1 is a difference, 2 an error,
     and 3 (the one convention of the opt tools) a crash, cap kill or timeout of a child: hard."""
@@ -541,7 +545,7 @@ def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
             *(["--yosys", cfg.yosys] if cfg.yosys else []), "--mem-cap", str(cap),
             *(["--top", top] if top else []),
             *(["--refine-timeout", str(cfg.timeout_of(item))]
-              if cfg.opt_tool == "lower-equiv" and cfg.timeout_of(item) else []),
+              if cfg.opt_tool in TIMEOUT_TOOLS and cfg.timeout_of(item) else []),
             *(["--techlib", cfg.techlib] if cfg.techlib else []), *cfg.opt_args, str(item.path)]
     here = str(Path(__file__).resolve().parent)  # the tool imports memcap from here
     paths = [here, os.environ.get("PYTHONPATH", "")]
@@ -858,8 +862,8 @@ def parse_timeouts(args: argparse.Namespace) -> dict[str, float]:
             timeouts[suffix] = 0.0
         if timeouts[suffix] <= 0:
             raise UsageError(f"--timeout-for {spec!r}: SECONDS must be a positive number")
-    if timeouts and not args.lower_equiv:
-        raise UsageError("--timeout-for needs --lower-equiv")
+    if timeouts and not (args.lower_equiv or args.opt_equiv or args.opt_diff):
+        raise UsageError("--timeout-for needs --lower-equiv, --opt-equiv or --opt-diff")
     return timeouts
 
 
