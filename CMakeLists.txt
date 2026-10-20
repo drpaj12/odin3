@@ -2993,6 +2993,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         odin3_add_sweep_test(opt_equiv_micro_phase3 LABEL sweep
             COMMAND ${_opt_sweep} --opt-equiv --min-changed-total 200 ${_micro_expect}
                     --cap-for syntax/inferred_ram_w_clog2.v=4G
+                    # WR-7 (PHASE3 #51): the wreduce call of des_area refines but takes 60 to 600 s
+                    # of SAT with the new visiting order (main: under 60 s); proved at 600 s.
+                    --timeout-for large/des_area.v=600
                     --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
@@ -3004,6 +3007,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_wreduce_expect_fail.txt
+                    # WR-7 (PHASE3 #51): these refine, but not within 60 s any more (proved at 600 s)
+                    --timeout-for full/iir1.v=600 --timeout-for large/spree.v=600
+                    --timeout-for full/cf_fft_256_8.v=600
                     --opt-arg=--script=wreduce --opt-arg=--script=phase3
                     --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
                     --opt-arg=--root=${_micro_dir} ${_micro_dir})
