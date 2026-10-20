@@ -3495,11 +3495,14 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     endif()
 endif()
 
-# Every test runs with TMPDIR in the build tree (not /tmp). A tool killed by a ctest TIMEOUT
+# Every test runs with its own TMPDIR, one directory per build tree (outside the repo: a test
+# checks that a temporary directory is not a git checkout). A tool killed by a ctest TIMEOUT
 # (SIGKILL) cannot remove the temporary directory it made; the cleanup fixture below does, after
 # the last test that needs it, pass or fail. Tools remove their own directories on every other exit.
 if(BUILD_TESTING)
-    set(_test_tmp ${PROJECT_BINARY_DIR}/test_tmp)
+    string(MD5 _bin_hash "${PROJECT_BINARY_DIR}")
+    string(SUBSTRING ${_bin_hash} 0 12 _bin_hash)
+    set(_test_tmp /tmp/odin3-ctest-${_bin_hash})
     add_test(NAME test_tmp_setup COMMAND ${CMAKE_COMMAND} -E make_directory ${_test_tmp})
     add_test(NAME test_tmp_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf ${_test_tmp})
     set_tests_properties(test_tmp_setup PROPERTIES FIXTURES_SETUP test_tmp)
