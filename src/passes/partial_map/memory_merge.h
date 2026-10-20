@@ -23,11 +23,13 @@ typedef struct pm_merge_stats {
  * cell and, when a read port merged, replaces the cell by one with RD_CLK_ENABLE, RD_CLK_POLARITY
  * and RD_TRANSPARENT set for that port, the port's pins on the flip-flops' nets, and the flip-flops
  * removed. The replacement is one transaction (hm_kit: the same name and attributes, one DERIVED
- * provenance record, the design intact on ODIN3_ERR_NO_MEMORY). A `$mem` is left as it is when a
- * flip-flop that would go carries an initial value, or when a merged read enable is active low
- * (the pass adds no inverter); its asynchronous ports then count in stats->async. G-4 cases
- * (several clock domains, falling edge, OFFSET, non-constant enable) are not merge failures here:
- * the merge is the same as partial_map's. Logs the INFO line of G-5. *stats may be NULL.
+ * provenance record, the design intact on ODIN3_ERR_NO_MEMORY); the old asynchronous data nets of a
+ * data merge are removed. A port whose merged enable is active low is left as it is (the pass adds
+ * no inverter), and a `$mem` is left whole when a flip-flop that would go carries an initial value;
+ * their asynchronous ports count in stats->async. Unlike partial_map, which keeps the flip-flops
+ * of a `$mem` that ends soft, the merge is made whatever the verdict would be. Logs the INFO line
+ * of G-5. *stats may be NULL. A read-port bit parameter shorter than RD_PORTS is a located error
+ * (ODIN3_ERR_INVALID_ARG).
  * ODIN3_ERR_PARSE when the design budget is exceeded; ODIN3_ERR_NO_MEMORY otherwise.
  */
 odin3_status pm_mem_merge(odin3_pass_ctx *ctx, odin3_design *design, pm_merge_stats *stats);

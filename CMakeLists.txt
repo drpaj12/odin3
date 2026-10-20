@@ -850,6 +850,11 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_memory_merge PROPERTIES LABELS unit)
+    add_test(NAME cli_memory_merge_soft
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh memory_merge_soft $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_memory_merge_soft PROPERTIES LABELS unit)
     add_test(NAME cli_pm_ramstyle
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_ramstyle $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
