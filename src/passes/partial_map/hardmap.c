@@ -61,12 +61,13 @@ static odin3_status precheck(hm_ctx *hc) {
                                                : st;
 }
 
-/* The `$mul` phase of one module: every `$mul` live at the start, in node-ID order. */
+/* The `$mul` phase of one module: every live `$mul`, in node-ID order. The pieces of an oversize
+ * split (X-4) are new `$mul` nodes with higher IDs, so the end is read again at each step: that is
+ * the worklist of the split, with no recursion. A piece left soft is visited once. */
 static odin3_status mul_phase(hm_ctx *hc, odin3_module *mod, odin3_celltype_id mul) {
-    uint32_t end = odin3_module_node_end(mod);
     hm_set_module(hc, mod);
     odin3_status st = hm_budget_check(hc);
-    for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
+    for (uint32_t id = 1; st == ODIN3_OK && id < odin3_module_node_end(mod); id++) {
         odin3_node_id node = {id};
         if (!odin3_node_live(mod, node) || odin3_node_type(mod, node).v != mul.v) {
             continue;
@@ -97,23 +98,46 @@ static odin3_status explicit_phase(hm_ctx *hc, odin3_module *mod, odin3_celltype
     return st;
 }
 
-static odin3_status all_mul_phases(hm_ctx *hc) {
-    odin3_celltype_id mul = {0};
-    odin3_celltype_id multiply = {0};
-    bool have_mul = hm_find_type(hc->design, "$mul", &mul);
-    bool have_multiply = hm_find_type(hc->design, "multiply", &multiply);
+/* The explicit `multiply` instances wider than W of one module (X-6): rewritten into `$mul` pieces
+ * before the `$mul` phase, which then reaches them. */
+static odin3_status oversize_phase(hm_ctx *hc, odin3_module *mod, odin3_celltype_id type) {
+    uint32_t end = odin3_module_node_end(mod);
+    hm_set_module(hc, mod);
     odin3_status st = ODIN3_OK;
-    for (uint32_t mi = 1; have_mul && st == ODIN3_OK && mi < odin3_design_module_end(hc->design);
-         mi++) {
-        odin3_module *mod = module_at(hc->design, mi);
-        st = mod != NULL ? mul_phase(hc, mod, mul) : st;
-    }
-    for (uint32_t mi = 1;
-         have_multiply && st == ODIN3_OK && mi < odin3_design_module_end(hc->design); mi++) {
-        odin3_module *mod = module_at(hc->design, mi);
-        st = mod != NULL ? explicit_phase(hc, mod, multiply) : st;
+    for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
+        odin3_node_id node = {id};
+        if (odin3_node_live(mod, node) && odin3_node_type(mod, node).v == type.v) {
+            st = hm_split_explicit(hc, node);
+        }
     }
     return st;
+}
+
+typedef odin3_status (*phase_fn)(hm_ctx *hc, odin3_module *mod, odin3_celltype_id type);
+
+/* Runs phase on every module in creation order, for the cell type named name (none registered:
+ * nothing to do). */
+static odin3_status each_module(hm_ctx *hc, const char *name, phase_fn phase) {
+    odin3_celltype_id type = {0};
+    odin3_status st = ODIN3_OK;
+    if (!hm_find_type(hc->design, name, &type)) {
+        return st;
+    }
+    for (uint32_t mi = 1; st == ODIN3_OK && mi < odin3_design_module_end(hc->design); mi++) {
+        odin3_module *mod = module_at(hc->design, mi);
+        st = mod != NULL ? phase(hc, mod, type) : st;
+    }
+    return st;
+}
+
+/* H-8: the explicit instances wider than W (X-6), the `$mul` cells (with the pieces of a split),
+ * then the other explicit instances. */
+static odin3_status all_mul_phases(hm_ctx *hc) {
+    odin3_celltype_id none = {0};
+    bool have_mul = hm_find_type(hc->design, "$mul", &none);
+    odin3_status st = have_mul ? each_module(hc, "multiply", oversize_phase) : ODIN3_OK;
+    st = st == ODIN3_OK && have_mul ? each_module(hc, "$mul", mul_phase) : st;
+    return st == ODIN3_OK ? each_module(hc, "multiply", explicit_phase) : st;
 }
 
 /* The `$add` / `$sub` phase of one module (H-8, after every `$mul`): the cells live at the start,
@@ -308,6 +332,9 @@ static void setup_rules(hm_ctx *hc, const odin3_partial_map_opts *opts) {
     if (opts != NULL && opts->min_add != 0) {
         hc->rules.min_add = opts->min_add; /* C-4 */
     }
+    if (opts != NULL && opts->min_mult != 0) {
+        hc->rules.min_mul = opts->min_mult; /* X-3 */
+    }
     if (arch == NULL) {
         return;
     }
@@ -350,6 +377,13 @@ static void setup_mem_width(hm_ctx *hc, const odin3_partial_map_opts *opts) {
 
 static void report(hm_ctx *hc) {
     const odin3_hardmap_stats *st = &hc->stats;
+    if (hc->b_splits > 0 && !hc->parmys_split_ext) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "partial_map: %" PRIu64
+                  " '$mul' cells split on operand B alone; Parmys sign-extends the low product "
+                  "there (wrong when its top bit is set), partial_map zero-extends (D19)",
+                  hc->b_splits);
+    }
     odin3_log(ODIN3_LOG_INFO,
               "partial_map: %" PRIu64 " multiply, %" PRIu64 " adder in %" PRIu64 " chains, %" PRIu64
               " single_port_ram + %" PRIu64 " dual_port_ram slices; %" PRIu64 " cells left soft",
@@ -374,6 +408,7 @@ odin3_status odin3_partial_map_run_opts(odin3_pass_ctx *ctx, odin3_design *desig
     hm_ctx hc;
     hm_init(&hc, ctx, design);
     hc.allow_unknown_blocks = opts != NULL && opts->allow_unknown_blocks;
+    hc.parmys_split_ext = opts != NULL && opts->parmys_split_ext;
     setup_rules(&hc, opts);
     setup_mem_width(&hc, opts);
     odin3_status st = hm_generic_phase(&hc);

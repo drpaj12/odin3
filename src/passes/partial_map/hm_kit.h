@@ -59,6 +59,8 @@ typedef struct hm_ctx {
     pm_rules rules;                      /* S-2: the numbers the rules read */
     bool width_warned;                   /* the S-5 warning of `--mem-width arch` was given */
     bool allow_unknown_blocks;           /* `--allow-unknown-blocks`: B-6 is a warning */
+    bool parmys_split_ext;               /* `--parmys-split-ext`: sign-extend as Parmys (D19) */
+    uint64_t b_splits;                   /* multipliers split on B alone (D19 warning) */
     odin3_celltype_id hard[HM_N_HARD];   /* found by hm_need; {0} until then */
     odin3_celltype_id glue[HM_N_GLUE];   /* found on first use */
     odin3_celltype_id konst[HM_N_CONST]; /* $_CONST0_, $_CONST1_, $_CONSTX_ */
@@ -176,6 +178,30 @@ odin3_status hm_generic_phase(hm_ctx *hc);
 
 /* The `$mul` rule (mul.c, M-1..M-7): maps src or leaves it soft with a warning. */
 odin3_status hm_map_mul(hm_ctx *hc, odin3_node_id src);
+
+/* The shape of a `$mul` or explicit `multiply` for the split: operand widths and Y_WIDTH. */
+typedef struct hm_mul_dims {
+    uint32_t a;
+    uint32_t b;
+    uint32_t y;
+} hm_mul_dims;
+
+/* The oversize split (mul_split.c, X-4, X-8): rewrites src (a `$mul`, or an explicit `multiply`
+ * of dims.a = dims.b = WIDTH; unsigned; dims.y at most dims.a + dims.b; the wider operand above
+ * rules.mul_width) into smaller `$mul` and `$add` cells, one transaction. The new `$mul` cells are
+ * mapped by the ordinary rule when the driver reaches them, the `$add` cells by the adder rule.
+ * ODIN3_OK, or the transaction's status with src intact. */
+odin3_status hm_split_mul(hm_ctx *hc, odin3_node_id src, hm_mul_dims dims);
+
+/* The explicit-instance prepass of M-6/X-6 for node (a `multiply`): a WIDTH above the arch's
+ * multiplier is rewritten like the equivalent `$mul` (warning, then the oversize split); any other
+ * node or WIDTH is left alone. */
+odin3_status hm_split_explicit(hm_ctx *hc, odin3_node_id src);
+
+/* Marks `node` (an `$add` made by the split in this transaction) as a chain without the top stage:
+ * Parmys builds the adders of a split multiplier as head plus Y_WIDTH stages (X-4). */
+odin3_status hm_mark_nocarry(hm_ctx *hc, odin3_node_id node);
+bool hm_is_nocarry(const hm_ctx *hc, odin3_node_id node);
 
 /* The `$add` / `$sub` rule (adder.c, A-1..A-9): maps src to an `adder` chain or leaves it soft with
  * a warning (Y_WIDTH above max(A_WIDTH, B_WIDTH) + 1); a cell with both operand widths 0 is left

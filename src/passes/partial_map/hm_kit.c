@@ -259,6 +259,27 @@ static odin3_status set_hardmap_attr(hm_ctx *hc, odin3_node_id node, const char 
                : st;
 }
 
+#define NOCARRY_KEY "partial_map_nocarry"
+
+odin3_status hm_mark_nocarry(hm_ctx *hc, odin3_node_id node) {
+    uint32_t key = 0;
+    odin3_status st = odin3_design_intern(hc->design, odin3_bytes_cstr(NOCARRY_KEY), &key);
+    odin3_value value = odin3_value_int(1);
+    return st == ODIN3_OK
+               ? odin3_attr_set(hc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key, &value)
+               : st;
+}
+
+bool hm_is_nocarry(const hm_ctx *hc, odin3_node_id node) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(hc->design), odin3_bytes_cstr(NOCARRY_KEY), &key)) {
+        return false;
+    }
+    const odin3_value *value =
+        odin3_attr_get(hc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
+    return value != NULL && value->kind == ODIN3_VAL_INT && value->i == 1;
+}
+
 static bool is_glue_type(const hm_ctx *hc, odin3_celltype_id type) {
     for (uint32_t i = 0; i < HM_N_GLUE; i++) {
         if (hc->glue[i].v == type.v) {
