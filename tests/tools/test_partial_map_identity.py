@@ -44,7 +44,8 @@ if leg.get("rc"):
     sys.stderr.write(leg.get("err", "odin3: error: boom\n"))
     sys.exit(leg["rc"])
 vtr = re.search(r"write_blif --vtr (\S+?);", script).group(1)
-plain, il = re.search(r"; write_blif (?!--vtr)(\S+); write_rtlil (\S+)$", script).groups()
+plain = re.search(r"; write_blif (?!--vtr)(\S+)$", script).group(1)
+il = re.search(r"; write_rtlil (\S+); lower; ", script).group(1)
 Path(vtr).write_text(leg.get("vtr", "# v1\n.model a\n.end\n"))
 Path(plain).write_text(leg.get("plain", "# v1\n.model b\n.end\n"))
 Path(il).write_text(leg.get("il", "# v1\nmodule m\n"))
@@ -154,8 +155,9 @@ class ClassTests(IdentityCase):
 
     def test_failure_logs_are_compared_modulo_the_prefix(self) -> None:
         allow = self.allow_file(str(self.design))
-        self.spec = {"hardmap": {"rc": 1, "err": "error: hardmap: boom\nnoise\ninfo: pass hardmap: 0.3 ms\n"},
-                     "partial_map": {"rc": 1, "err": "error: partial_map: boom\nother\ninfo: pass partial_map: 0.5 ms\n"}}
+        old = "error: hardmap: boom\nnoise\ninfo: pass hardmap: 0.3 ms\n"
+        new = "error: partial_map: boom\nother\ninfo: pass partial_map: 0.5 ms\n"
+        self.spec = {"hardmap": {"rc": 1, "err": old}, "partial_map": {"rc": 1, "err": new}}
         code, out, _ = self.run_tool("--allow-same-failure", allow, "--min-ok", "0",
                                      str(self.design))
         self.assertEqual(code, 0, out)
@@ -185,6 +187,7 @@ class ScriptTests(IdentityCase):
             self.assertIn("read_techlib", line)
             self.assertIn("opt -fast; compact; write_blif --vtr", line)
             self.assertIn("; write_rtlil ", line)
+            self.assertLess(line.index("; write_rtlil "), line.index("; lower; "))
 
     def test_tier2_swaps_the_library_for_read_arch(self) -> None:
         xml = self.tmp / "k6.xml"

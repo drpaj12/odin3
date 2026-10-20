@@ -13,8 +13,9 @@ against the head) is the merge gate.
 
 Runs Odin III's Phase 3 script up to and including ``lower; opt -fast; compact``
 (tools/hardmap-check/phase3_pre_abc.script) twice per design and compares what ``write_blif
---vtr``, plain ``write_blif`` and ``write_rtlil`` write, byte for byte (lines starting with ``#``
-are ignored). Scope: those three files; provenance, JSON, Verilog and run-info are not compared.
+--vtr``, plain ``write_blif`` and ``write_rtlil`` (of the ``hardmap`` result, before ``lower``)
+write, byte for byte (lines starting with ``#`` are ignored). Scope: those three files;
+provenance, JSON, Verilog and run-info are not compared.
 A pair that fails with the same exit status is ``same-failure`` only for a design named in the
 allow-list (``--allow-same-failure``, default tests/partial_map/identity_known_failures.txt);
 for it the tool also runs both legs up to ``write_rtlil`` before ``lower`` and compares that
@@ -29,8 +30,8 @@ fails on both sides is DIFFERENT.
 
 A list line is ``path [top]`` (relative to the repository root); a ``--vtr-list`` line is a design
 name under ``--vtr-root``, its top the first ``.model`` of its Parmys golden under
-``--golden-root``. Exit codes: 0 no difference and at least ``--min-ok`` designs written the same BLIF;
-1 a difference or too few; 2 usage or tool error; 3 a child crashed or timed out; 77 skipped.
+``--golden-root``. Exit codes: 0 no difference and at least ``--min-ok`` designs wrote the same
+files; 1 a difference or too few; 2 usage or tool error; 3 a child crashed or timed out; 77 skipped.
 """
 
 from __future__ import annotations
@@ -128,8 +129,9 @@ def read_vtr(path: Path, root: Path, golden_root: Path | None) -> list[Design]:
 def script_for(leg: Leg, design: Path, outs: Outputs, pre_lower: bool) -> str:
     """The Phase 3 script of ``leg`` on ``design``.
 
-    The full script writes the BLIFs and the RTLIL after ``compact``; with ``pre_lower`` it stops
-    before ``lower`` and writes the RTLIL of the ``hardmap`` result only.
+    The full script writes the RTLIL of the ``hardmap`` result just before ``lower`` (the
+    ``write_rtlil`` pass refuses the netlist view) and the BLIFs after ``compact``; with
+    ``pre_lower`` it stops after that RTLIL.
     """
     text = hd.script_text(hd.SCRIPT, hd.REPO / "lib" / "vtr.o3lib", design, outs.vtr, hd.ADDER_LIB,
                           rtlil=pre_lower)
@@ -139,7 +141,10 @@ def script_for(leg: Leg, design: Path, outs: Outputs, pre_lower: bool) -> str:
     text = text.replace(load, leg.load).replace("; hardmap; ", f"; {leg.pass_name}; ")
     if pre_lower:
         return text.replace(f"write_rtlil {outs.vtr}", f"write_rtlil {outs.rtlil}")
-    return f"{text}; write_blif {outs.plain}; write_rtlil {outs.rtlil}"
+    if text.count("; lower; ") != 1:
+        raise hd.ToolError("phase3_pre_abc.script no longer has one lower")
+    text = text.replace("; lower; ", f"; write_rtlil {outs.rtlil}; lower; ")
+    return f"{text}; write_blif {outs.plain}"
 
 
 def body(path: Path) -> list[str]:
