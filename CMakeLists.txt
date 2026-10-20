@@ -166,6 +166,7 @@ add_library(odin3_core OBJECT
     src/passes/lower/snapshot.c
     src/passes/partial_map/register.c
     src/passes/partial_map/hardmap.c
+    src/passes/partial_map/generic.c
     src/passes/partial_map/hm_kit.c
     src/passes/partial_map/mul.c
     src/passes/partial_map/adder.c
@@ -639,6 +640,27 @@ target_link_libraries(bench_proc PRIVATE odin3_core odin3_flags)
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
     target_compile_definitions(bench_proc PRIVATE ODIN3_BENCH_RELEASE)
 endif()
+# 3D Task 22: bench_abc (Release; `bench_abc --one FILE [--lut K] [--via-blif DIR] [--exe ABC]`):
+# one BLIF through the abc pass, the columns of spec 12. It registers the linked engine first
+# (3D plan finding 20) and reads the per-run report of abc_test.h.
+if(ODIN3_WITH_ABC)
+    add_executable(bench_abc tests/bench/bench_abc.c)
+    # wait4 (WNOHANG) and nanosleep: the executable's own peak RSS (its VmHWM, polled).
+    set_source_files_properties(tests/bench/bench_abc.c PROPERTIES COMPILE_DEFINITIONS
+        _DEFAULT_SOURCE)
+    target_include_directories(bench_abc PRIVATE ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/tests/bench ${PROJECT_SOURCE_DIR}/adapters/abc)
+    target_link_libraries(bench_abc PRIVATE odin3_core odin3_flags odin3_abc)
+    add_dependencies(bench_abc odin3_abc_exe)
+    # tests/bench/bench_guard.h refuses a Debug or sanitized binary.
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
+        target_compile_definitions(bench_abc PRIVATE ODIN3_BENCH_RELEASE)
+    else()
+        add_test(NAME bench_abc_refuses_debug COMMAND bench_abc --one /dev/null)
+        set_tests_properties(bench_abc_refuses_debug PROPERTIES
+            PASS_REGULAR_EXPRESSION "needs a Release build")
+    endif()
+endif()
 # 2F Task 15: bench_opt (Release; `bench_opt --one FILE`, the interface of elab-sweep --bench). Its
 # measuring core (bench_opt.c without main) is also linked into the gate test
 # test_bench_opt_columns below; bench_opt_smoke is registered with the Python tools (Task 19).
@@ -889,6 +911,27 @@ if(BUILD_TESTING)
         ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # The sweep-arch half: the same source with PM_CARRY_VTR; exits 77 without VTR_ROOT.
+    add_executable(test_pm_carry_vtr tests/unit/test_pm_carry.c tests/unit/hardmap_fixture.c
+        tests/unit/proc_build.c)
+    target_include_directories(test_pm_carry_vtr PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(test_pm_carry_vtr PRIVATE odin3_core unity odin3_flags)
+    add_test(NAME test_pm_carry_vtr COMMAND test_pm_carry_vtr)
+    set_tests_properties(test_pm_carry_vtr PROPERTIES LABELS unit)
+    target_compile_definitions(test_pm_carry_vtr PRIVATE PM_CARRY_VTR=1
+        ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    set_tests_properties(test_pm_carry_vtr PROPERTIES SKIP_RETURN_CODE 77)
+    # 4.2 Task 7: generic hard blocks (B-1..B-7): the bind check and report of partial_map.
+    odin3_add_unit_test(test_pm_generic)
+    target_compile_definitions(test_pm_generic PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 4.2 Task 8: every registered generic model of the real archs binds and maps (skips 77
+    # without VTR_ROOT).
+    odin3_add_unit_test(test_pm_generic_vtr)
+    set_tests_properties(test_pm_generic_vtr PROPERTIES SKIP_RETURN_CODE 77)
     # 3C Task 3: hardmap's $add/$sub rule (adder chains) on hand-built flat IR.
     odin3_add_unit_test(test_hardmap_adder)
     target_sources(test_hardmap_adder PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
@@ -1133,6 +1176,13 @@ if(BUILD_TESTING)
         endif()
     endforeach()
     target_sources(test_abc_args PRIVATE tests/unit/proc_fixture.c tests/unit/proc_fixture_core.c)
+    # 3D Task 22: the per-run report (phase times, counts) bench_abc reads, on the fake engine.
+    odin3_add_unit_test(test_abc_report)
+    target_compile_definitions(test_abc_report PRIVATE
+        ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/test_abc_report"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_sources(test_abc_report PRIVATE tests/unit/abc_fake_engine.c)
     # 3D Task 20: the AIG builder and the in-memory protocol, on the fake engine.
     odin3_add_unit_test(test_abc_aig)
     target_compile_definitions(test_abc_aig PRIVATE
@@ -1899,6 +1949,41 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(abc_diff_micro PROPERTIES LABELS tools TIMEOUT 3600)
+        # 3D Task 22: determinism (spec 13.8) on the micros, in CI: (a) two processes and (b) three
+        # sessions in one process, on the default exchange, and (a) through the BLIF exchange with
+        # its files compared. The designs abc-equiv lists as failing are skipped.
+        add_test(NAME abc_determinism_ci
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_determinism.py
+                    --odin3 $<TARGET_FILE:odin3> --mode a --mode b --lut 6
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                    --keep ${PROJECT_BINARY_DIR}/abc_tests/abc_determinism_ci
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif
+                    ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(abc_determinism_ci PROPERTIES LABELS tools TIMEOUT 3600)
+        add_test(NAME abc_determinism_ci_blif
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_determinism.py
+                    --odin3 $<TARGET_FILE:odin3> --via-blif --mode a --lut 6
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                    --keep ${PROJECT_BINARY_DIR}/abc_tests/abc_determinism_ci_blif
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif
+                    ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(abc_determinism_ci_blif PROPERTIES LABELS tools TIMEOUT 3600)
+        # bench_abc prints every column of spec 12's table (Release only; the Python test skips
+        # without ODIN3_BENCH_ABC).
+        if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
+            add_test(NAME bench_abc_smoke
+                COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                        ODIN3_REQUIRE_ABC=1 ODIN3_BENCH_ABC=$<TARGET_FILE:bench_abc>
+                        ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_bench_abc
+                WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+            set_tests_properties(bench_abc_smoke PROPERTIES LABELS tools TIMEOUT 900)
+        endif()
         # 3D Task 19 (deferred to the controller, point (m)): every k6 Parmys golden of the VTR set
         # except mcml and LU32PEEng, smallest first (abc-equiv sorts), stereovision3 listed as
         # multiclock; the run log's summary is quoted in the PR.
@@ -1927,6 +2012,24 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --lut 6 --timeout 3000 --exchange aig
                         --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
                         --keep $ENV{HOME}/odin3-ws/work/abc-equiv-golden-aig ${_abc_goldens})
+            # 3D Task 22 (the controller's, point (m)): determinism (a) on the goldens, with the
+            # BLIF exchange's files compared, and bench_abc on them, smallest first (the table
+            # goes verbatim into PHASE3); the linked ABC against the executable on the same BLIF.
+            odin3_add_sweep_test(abc_determinism_golden LABEL sweep
+                COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                        ODIN3_REQUIRE_ABC=1
+                        ${Python3_EXECUTABLE} -I
+                        ${PROJECT_SOURCE_DIR}/tools/abc-check/abc_determinism.py
+                        --odin3 $<TARGET_FILE:odin3> --via-blif --mode a --lut 6 --timeout 3000
+                        --expect-fail ${PROJECT_SOURCE_DIR}/tests/abc/equiv_expect_fail.txt
+                        --keep $ENV{HOME}/odin3-ws/work/abc-determinism-golden ${_abc_goldens})
+            if(TARGET bench_abc)
+                odin3_add_sweep_test(bench_abc_set LABEL sweep
+                    COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                            ${PROJECT_SOURCE_DIR}/tools/abc-check/bench-abc-set
+                            --bench $<TARGET_FILE:bench_abc> --exe $<TARGET_FILE:odin3_abc_exe>
+                            --keep $ENV{HOME}/odin3-ws/work/abc-bench-set ${_abc_goldens})
+            endif()
             odin3_add_sweep_test(abc_diff_golden LABEL sweep
                 COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
                         ODIN3_REQUIRE_ABC=1

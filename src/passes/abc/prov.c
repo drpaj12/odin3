@@ -595,6 +595,7 @@ odin3_status odin3_abc_records(odin3_abc_run *run, const odin3_abc_result *res,
     odin3_status st = pv_init(&pw, run, res, anchors);
     uint64_t edges = 0;
     st = st == ODIN3_OK ? walk_all(&pw, false, &edges) : st;
+    run->stats.edges = edges;
     if (st == ODIN3_OK) {
         st = edges > edge_budget(run, res) ? coarse_records(run, res, edges, obj_prov)
                                            : precise_records(&pw, obj_prov);

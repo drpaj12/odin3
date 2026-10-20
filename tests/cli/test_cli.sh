@@ -828,7 +828,8 @@ pm_carry)
     expect_fail "partial_map: --min-add '0': need a whole number of at least 1" -p "$pre; partial_map --min-add 0"
     expect_fail "partial_map: --min-add 'x1': need a whole number of at least 1" -p "$pre; partial_map --min-add x1"
     expect_fail "partial_map: --min-add '-3': need a whole number of at least 1" -p "$pre; partial_map --min-add -3"
-    expect_fail "partial_map: unknown argument '--min-mul' (known: --min-add N)" -p "$pre; partial_map --min-mul 2"
+    expect_fail "partial_map: --min-add '+5': need a whole number of at least 1" -p "$pre; partial_map --min-add +5"
+    expect_fail "partial_map: unknown argument '--min-mul' (known: --allow-unknown-blocks, --min-add N)" -p "$pre; partial_map --min-mul 2"
     ;;
 pm_carry_arch)
     # cli_pm_carry_arch (4.5, Task 12): each adder micro, through read_arch of the sweep arch, has

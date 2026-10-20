@@ -5,6 +5,7 @@
 #include "passes/abc/run.h"
 
 #include "passes/abc/abc.h"
+#include "passes/abc/abc_test.h"
 #include "passes/abc/engine.h"
 #include "passes/abc/exchange.h"
 #include "passes/abc/prov.h"
@@ -16,6 +17,7 @@
 #include "passes/builtin.h"
 #include "passes/manager.h"
 #include "util/alloc.h"
+#include "util/clock.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -375,11 +377,10 @@ static result_shape shape_of(const odin3_abc_result *res) {
 }
 
 /* §8.2's line for runs without a name map, then the run's summary line (§8.3, §11). */
-static void log_run_info(const odin3_abc_run *run, const odin3_abc_result *res,
-                         const odin3_abc_splice_stats *stats, double ms) {
+static void log_run_info(const odin3_abc_run *run, const odin3_abc_splice_stats *stats,
+                         result_shape shape, double ms) {
     char domain[DOMAIN_TEXT_BYTES];
     odin3_abc_domain_text(run->module, run->domain, domain, sizeof domain);
-    result_shape shape = shape_of(res);
     if (run->nomap_reason[0] != '\0') {
         odin3_log(ODIN3_LOG_INFO,
                   "abc: module '%s', %s: no name map (%s); provenance uses cut cones",
@@ -393,6 +394,46 @@ static void log_run_info(const odin3_abc_run *run, const odin3_abc_result *res,
               (unsigned)shape.depth, (unsigned)stats->ffs, ms);
 }
 
+/* --- the report hook (abc_test.h) ----------------------------------------------------------- */
+
+/* The hook is set and read on the main (pass) thread only; tests and bench_abc use it. */
+static odin3_abc_report_fn report_fn;
+static void *report_user;
+
+void odin3_abc_test_set_report(odin3_abc_report_fn fn, void *user) {
+    report_fn = fn;
+    report_user = user;
+}
+
+/* Hands the finished run's phase times and counts to the hook, when there is one. */
+static void emit_report(const odin3_abc_run *run, const odin3_abc_splice_stats *stats,
+                        result_shape shape) {
+    if (report_fn == NULL) {
+        return;
+    }
+    odin3_abc_run_report rep = {0};
+    (void)snprintf(rep.module, sizeof rep.module, "%s", module_text(run));
+    odin3_abc_domain_text(run->module, run->domain, rep.domain, sizeof rep.domain);
+    rep.run_no = run->run_no > 0 ? run->run_no - 1U : 0U; /* the exchange has counted it */
+    rep.exchange = run->exchange;
+    rep.cells = (uint32_t)run->region->soft.len;
+    rep.ffs = stats->ffs;
+    rep.luts = stats->luts;
+    rep.depth = shape.depth;
+    rep.aig_objs = (uint32_t)(run->aig.objs.len / 2U);
+    rep.namemap_hit = run->stats.namemap_hit;
+    rep.namemap_total = run->stats.namemap_total;
+    rep.edges = run->stats.edges;
+    rep.classify_ms = run->stats.classify_ms;
+    rep.aig_ms = run->stats.aig_ms;
+    rep.check_ms = run->stats.check_ms;
+    rep.splice_ms = run->stats.splice_ms;
+    rep.prov_ms = run->stats.prov_ms;
+    rep.abc_ms = run->stats.abc_ms;
+    rep.namemap_ms = run->stats.namemap_ms;
+    report_fn(&rep, report_user);
+}
+
 /* The exchange, folding and the splice of a built region, then the run's INFO lines. */
 static odin3_status map_region(odin3_abc_run *run) {
     odin3_abc_result result;
@@ -402,16 +443,24 @@ static odin3_status map_region(odin3_abc_run *run) {
     (void)snprintf(run->nomap_reason, sizeof run->nomap_reason, "%s",
                    run->opts.prov == ODIN3_ABC_PROV_CONE ? "--prov cone" : "BLIF exchange");
     odin3_status st = check_caps(run, run->region);
+    run->stats.check_ms = now_ms() - start;
     if (st == ODIN3_OK) {
         st = in_memory ? odin3_abc_exchange_aig(run, &result)
                        : odin3_abc_exchange_blif(run, &result);
     }
-    double spent = now_ms() - start;
+    double spent = now_ms() - start; /* the INFO "ms": caps check and exchange, as before 3D-8 */
+    double folded = now_ms();
     st = st == ODIN3_OK ? odin3_abc_result_fold(&result) : st;
+    run->stats.check_ms += now_ms() - folded;
     odin3_abc_splice_stats stats = {0};
+    double spliced = now_ms();
     st = st == ODIN3_OK ? odin3_abc_splice(run, run->region, &result, &stats) : st;
+    run->stats.splice_ms = now_ms() - spliced - run->stats.prov_ms;
+    run->stats.splice_ms = run->stats.splice_ms > 0.0 ? run->stats.splice_ms : 0.0;
     if (st == ODIN3_OK) {
-        log_run_info(run, &result, &stats, spent);
+        result_shape shape = shape_of(&result);
+        log_run_info(run, &stats, shape, spent);
+        emit_report(run, &stats, shape);
     }
     odin3_abc_result_free(&result);
     odin3_abc_aig_free(&run->aig);
@@ -421,7 +470,10 @@ static odin3_status map_region(odin3_abc_run *run) {
 /* One run: the region, the caps, the exchange, folding and the splice. */
 static odin3_status run_domain(odin3_abc_run *run, const odin3_abc_domain *domain, bool first) {
     run->domain = domain;
+    run->stats = (odin3_abc_run_stats){0};
+    double built = now_ms();
     odin3_status st = odin3_abc_region_build(run, domain, &run->region_own);
+    run->stats.classify_ms = now_ms() - built;
     if (st != ODIN3_OK) {
         return st;
     }

@@ -278,7 +278,7 @@ static void carry_report(const odin3_arch *arch, bool have_adder) {
 /* S-2 and S-3: with an arch record the rules come from it, and a block whose model the library
  * does not hold is simply absent (one INFO line per kind); without a record the 3C values stand
  * and a missing type stays the H-3 error. */
-static void setup_rules(hm_ctx *hc, const pm_options *opts) {
+static void setup_rules(hm_ctx *hc, const odin3_partial_map_opts *opts) {
     const odin3_arch *arch = odin3_design_arch(hc->design);
     hc->rules = pm_rules_from_arch(arch);
     if (opts != NULL && opts->min_add != 0) {
@@ -330,11 +330,14 @@ static void report(hm_ctx *hc) {
 }
 
 odin3_status odin3_partial_map_run_opts(odin3_pass_ctx *ctx, odin3_design *design,
-                                        const pm_options *opts, odin3_hardmap_stats *stats) {
+                                        const odin3_partial_map_opts *opts,
+                                        odin3_hardmap_stats *stats) {
     hm_ctx hc;
     hm_init(&hc, ctx, design);
+    hc.allow_unknown_blocks = opts != NULL && opts->allow_unknown_blocks;
     setup_rules(&hc, opts);
-    odin3_status st = precheck(&hc);
+    odin3_status st = hm_generic_phase(&hc);
+    st = st == ODIN3_OK ? precheck(&hc) : st;
     st = st == ODIN3_OK && hc.rules.have_mul ? all_mul_phases(&hc) : st;
     st = st == ODIN3_OK && hc.rules.have_adder ? all_add_phases(&hc) : st;
     st = st == ODIN3_OK ? all_ram_phases(&hc) : st;

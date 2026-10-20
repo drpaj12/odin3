@@ -69,8 +69,12 @@ if "# aigside" in text:
 print("equiv-check: equivalent (abc cec)")
 """
 
-CHAIN = (".model t\n.inputs a\n.outputs y\n.names a b\n1 1\n.names b c\n1 1\n.names c d\n1 1\n"
-         ".names d y\n1 1\n.latch y q re clk 0\n.end\n")
+CHAIN = (".model t\n.inputs a\n.outputs y\n.names a b\n0 1\n.names b c\n0 1\n.names c d\n0 1\n"
+         ".names d y\n0 1\n.latch y q re clk 0\n.end\n")
+# two POs share one NOT; the second is an identity buffer of the first (the in-memory exchange's
+# shape for equal port nets); the depth is 2, not 3, though all three cells are counted as LUTs
+SHARED_PO = (".model t\n.inputs a b\n.outputs y z\n.names a b n\n11 1\n.names n y\n0 1\n"
+             ".names y z\n1 1\n.end\n")
 
 
 def design_text() -> str:
@@ -135,7 +139,7 @@ class AbcDiffTest(unittest.TestCase):
         code, out, err = self.run_tool(design)
         self.assertEqual(code, 0, out + err)
         first = out.splitlines()[0]
-        self.assertEqual(first, f"{design} luts 101 101 1.000 ffs 0 0 1.000 depth 1 1 1.000 "
+        self.assertEqual(first, f"{design} luts 101 101 1.000 ffs 0 0 1.000 depth 0 0 1.000 "
                                 f"equivalent")
         blif_call, aig_call = self.calls("odin3")
         self.assertIsNone(blif_call["exchange"])
@@ -155,7 +159,7 @@ class AbcDiffTest(unittest.TestCase):
         code, out, err = self.run_tool(high, low)
         self.assertEqual(code, 0, out + err)
         lines = {Path(ln.split()[0]).name: ln for ln in out.splitlines() if ln.startswith("/")}
-        self.assertIn("luts 1001 1052 1.051 ffs 0 0 1.000 depth 1 1 1.000 explain",
+        self.assertIn("luts 1001 1052 1.051 ffs 0 0 1.000 depth 0 0 1.000 explain",
                       lines["l1000r1051.blif"])
         self.assertTrue(lines["l1000r1049.blif"].endswith("equivalent"))
         self.assertIn("abc-diff: 2 designs: 2 passed, 0 failed (equivalent 1, explain 1)", out)
@@ -173,7 +177,7 @@ class AbcDiffTest(unittest.TestCase):
         design = self.blif("d/l2aig.blif", design_text())
         code, out, err = self.run_tool(design)
         self.assertEqual(code, 1, out + err)
-        self.assertRegex(out, r"l2aig\.blif luts 3 3 1\.000 ffs 0 0 1\.000 depth 1 1 1\.000 "
+        self.assertRegex(out, r"l2aig\.blif luts 3 3 1\.000 ffs 0 0 1\.000 depth 0 0 1\.000 "
                               r"differs \(input~aig: equiv-check: NOT equivalent")
         self.assertIn("1 failed", out)
 
@@ -247,6 +251,10 @@ class AbcDiffTest(unittest.TestCase):
         path = Path(self.blif("chain.blif", CHAIN))
         counts = abc_diff.netlist_counts(path)
         self.assertEqual((counts.luts, counts.ffs, counts.depth), (4, 1, 4))
+
+    def test_identity_buffers_add_no_level(self) -> None:
+        counts = abc_diff.netlist_counts(Path(self.blif("shared.blif", SHARED_PO)))
+        self.assertEqual((counts.luts, counts.depth), (3, 2))
 
     def test_golden_paths_need_a_heavy_run(self) -> None:
         with mock.patch.object(abc_equiv, "GOLDEN_ROOT", self.root):

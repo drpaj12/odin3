@@ -1284,6 +1284,83 @@ then the options considered.
     complements feeds only a register input, so it has that input's identity anchor and never a name-map
     one. **To record before the flip:** the 19 per-design ratios and their
     explanations (`abc_diff_golden`), and H1/H4.
+    (n) **The two `explain` lines of the first `abc_diff_golden` run (2026-10-20; release build of
+    3D-7, both exchanges run by hand on each design, ABC a3001b72; agent default).**
+    - **`raygentop`, depth 3 against 4 (LUTs 1131 against 1122): an artefact of `abc-diff`'s
+      depth, not of the mapping.** ABC reports `lev = 3` on both exchanges. The in-memory result
+      is read from ABC's mapping, where the `tm3_sram_we~N` output ports share one LUT (the NOT
+      of `tm3_sram_oe~1`); `co_special` makes every port net after the first a one-input
+      identity buffer of the first (`splice_a.c` `make_buffer`). The BLIF result has a NOT per
+      port. The buffers cost no LUT level in VPR, and the 3H `depth` skips them, but `abc-diff`
+      counted them: the longest chain was `$n3302` (1), `tm3_sram_oe~1` (2), `we~3` (3), `we~4`
+      (4, the buffer). Fix: `netlist_counts` gives an identity buffer (one input, one row `1 1`)
+      no level, with a test; `raygentop` is then 3 against 3 and its LUT ratio 0.992 stays.
+    - **`sha`, LUTs 1209 against 1302 (1.077), depth 4 and 4: an ABC order effect, accepted.**
+      Both runs start from the same AIG size (7009 AND nodes, 18 levels) and `ifraig` and `scorr`
+      leave it at 7009, but the first `rewrite` already differs (6418 against 6420), so the
+      `dc2`, `dch` and `if` that follow map different but equally valid networks (final `nd`
+      1621 against 1714; the 93 extra nodes are the whole LUT difference). The two builders make
+      the same AIG in a different node order (ABC's `strash` walks the BLIF from its outputs, the
+      in-memory builder goes cell by cell), and ABC's rewriting and mapping depend on that order.
+      Evidence: the BLIF that the BLIF exchange handed ABC, with only its output and latch order
+      permuted (same logic), run through the same script by the `abc` executable, gives `nd` 1620
+      to 1789 and depth 3 to 5 over 10 permutations (1621 unpermuted); 1714 lies inside that
+      spread. The two results are `equivalent`, and the input, output and register counts agree.
+      The in-memory builder is not made to copy `strash`'s order: ABC's behaviour on a reordered
+      input is ABC's, and the flip rests on equivalence plus the heavy ratios, not on equal LUT
+      counts.
+    (o) **3D-8 (plan Task 22), code part (2026-10-20, branch `feat/3D-8`; agent defaults).** Built:
+    `tools/abc-check/abc-determinism` (modes a to d), `tests/bench/bench_abc.c`,
+    `tools/abc-check/bench-abc-set`, a per-run report hook in the pass, and the CTests
+    `abc_determinism_ci`, `abc_determinism_ci_blif`, `bench_abc_smoke` (Release) and, for the
+    controller, `abc_determinism_golden` and `bench_abc_set`. Not done here and still open: the
+    H1 to H6 runs, the bench table, the calibration of `ODIN3_ABC_BYTES_PER_AIG_OBJ` (still 512;
+    it needs the in-memory runs on the 19), the checklist tick and the PHASE3 table of results.
+    Deviations from the plan:
+    - **Mode (b) is three sessions of one design in one process, not "A, then B, then a fresh
+      A".** `read_blif` refuses a second read into one design, and the pass maps every module in
+      each call, so the tool writes the first model three times (`<m>`, `<m>__o3det2`,
+      `<m>__o3det3`) and maps them with one `abc` call: three `open`/`close` sessions in one
+      process. With the default script the copies are three sessions of one process (the
+      reseeding at `open`, I5) and must come out identical. With `strash; fraig; if -K 6` the
+      script is not the default, so `odin3_abc_route` sends it to the ABC child: that row is
+      three child processes and tests the child route, not reseeding. A script change between
+      the sessions is not covered. The unit tests of the engine (Task 9c) cover the session
+      reuse itself. Mode (a) also runs the child route: two processes with `--script <fraig>
+      --via-blif`, files compared (a difference shows as `a:child:<file>`).
+    - **`.out.blif` is compared without ABC's time stamp.** `write_hie` heads the file with `#
+      Benchmark "<name>" written by ABC on <date>`; two runs a second apart differ there (seen:
+      3 designs of 14 over 8 runs). The line is dropped before the comparison; every other byte
+      of `.out.blif`, `.in.blif`, `.cmd` and `write_blif` is compared, never a `.log`.
+    - `--mode` repeats (the gate runs `a` and `b` in one call); `--via-blif` is a flag (the BLIF
+      exchange through a directory, the same path in both runs: `.cmd` holds it); designs that
+      `tests/abc/equiv_expect_fail.txt` lists are skipped by `--expect-fail`.
+    - `bench_abc` prints three columns past spec 12's list (`abc_nodes abc_latches abc_levels`,
+      ABC's `print_stats`, so the linked and `exe` rows compare as spec 12 asks; `aig_objs
+      bytes_per_aig_obj`, the calibration figure) and `--header`, `--techlib`. A run without
+      `--via-blif` uses the pass's default exchange (`ODIN3_ABC_EXCHANGE=aig` for the in-memory
+      one). The RSS columns are those of the whole `abc` call (a multi-domain design repeats
+      them); `bytes_per_aig_obj` is printed only for a call that made exactly one run. The peak
+      is `-` when `/proc/self/clear_refs` cannot reset the high-water mark. The `exe` row's peak
+      is the executable's own VmHWM polled every 1 ms (Linux gives a spawned child the parent's
+      `ru_maxrss` at exec, so `wait4` would be at least the linked run's peak): a lower bound,
+      `-` when no sample was possible; `bench_abc --selftest-rss MB --exe PROG` checks it
+      (`bench_abc_smoke`). A run with no report, or more than 64, exits 1. The report hook (`odin3_abc_test_set_report`, abc_test.h) times the phases with
+      `odin3_now_ms`; "outside ABC" is classification, AIG (or BLIF write and read-back), caps
+      and folding, splice less provenance, and provenance.
+    - `abc-diff`'s depth no longer counts an identity buffer as a level (see (n)).
+    - **Review fixes (PR review of 3D-8).** H1 (exe peak inflated), M1 (child-route row), M2 (fraig
+      row text), M3 (`--via-blif`: a design with no exchange files, i.e. no soft logic, prints `same (no exchange files)`; if no design leaves any, exit 2), M4 (peak and per-run
+      calibration), M5 (`parse_args` split; the new tests/bench and tools code checked by hand
+      with `lizard -C 15 -L 60 -a 5`, as the gate scans only `src` and `adapters/abc`), L1 (a
+      test that the hook leaves the written BLIF byte-identical; times are still only checked
+      as numbers), L2 (the INFO "ms" keeps its old definition: caps check plus exchange), L3
+      (comment: hook is main-thread only), L4 (only a first-line stamp is ignored), L5 (mode c
+      compares the exchange files), L6 (usage text: the default `--keep` directory is never
+      removed), L7. Left open: **L8** (no `ok`/`MISSED` verdict column against spec 12's
+      targets: the controller reads the numbers, a verdict column is a follow-up; whether 3H's
+      nightly calls modes c and d is 3H's, no `nightly.yml` edit here) and the provenance
+      comparison of L1 (the hook test compares the plain BLIF text, not the provenance).
 49. **`opt_merge -ffbits`: merge identical flip-flop bits before `lower`** (2026-10-19, branch
     `feat/opt-ffbit-merge`; agent default, Peter may override; Peter's rule: where Odin III and
     Parmys differ, match Parmys). No IR invariant and no public ABI changed. (a) **Cause**: Yosys

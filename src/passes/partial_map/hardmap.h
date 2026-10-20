@@ -13,6 +13,7 @@
 #include "passes/manager.h"
 #include "passes/partial_map/rules.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /* What a run did, for the INFO line of H-10. */
@@ -47,10 +48,18 @@ typedef struct odin3_hardmap_stats {
 odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
                                    odin3_hardmap_stats *stats);
 
-/* odin3_partial_map_run with the pass options (NULL: all defaults); `--min-add N` (4.2 C-4) leaves
- * an `$add`/`$sub` of fewer than N bits to lower. */
+/* The options of the pass (all off by default; S-5). */
+typedef struct odin3_partial_map_opts {
+    bool allow_unknown_blocks; /* `--allow-unknown-blocks` (B-6): an unknown black box is a warning
+                                */
+    uint32_t min_add;          /* `--min-add N` (4.2 C-4): an `$add`/`$sub` of fewer than N bits is
+                                  left to lower; 0 is "not given" (1) */
+} odin3_partial_map_opts;
+
+/* odin3_partial_map_run with options (NULL: the defaults). */
 odin3_status odin3_partial_map_run_opts(odin3_pass_ctx *ctx, odin3_design *design,
-                                        const pm_options *opts, odin3_hardmap_stats *stats);
+                                        const odin3_partial_map_opts *opts,
+                                        odin3_hardmap_stats *stats);
 
 /* The 3C name of odin3_partial_map_run (4.2 S-1), kept for the existing tests. */
 odin3_status odin3_hardmap_run(odin3_pass_ctx *ctx, odin3_design *design,

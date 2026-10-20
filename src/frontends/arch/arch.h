@@ -199,12 +199,22 @@ typedef struct odin3_arch_ram_mode {
 uint32_t odin3_arch_modes_of(const odin3_arch *arch, const char *model, odin3_arch_ram_mode *out,
                              uint32_t cap);
 
+/*
+ * True when the BLIF writers write cell type `type` as a `.subckt` with every formal bit: a
+ * library `hard` cell, or a library `blackbox` cell that the design's arch record registered as a
+ * model (4.2 generic blocks). A library black box the arch does not have (lib/lpm.o3lib cells with
+ * no arch, or an arch without them) is false: VPR would reject its model (3E E6).
+ */
+bool odin3_arch_writes_subckt(const odin3_design *design, odin3_celltype_id type);
+
 /* C-2: true when some pack pattern name reaches both the `cin` and the `cout` of an `adder` leaf
- * (a port reference `<pb>.cin` / `<pb>.cout` in an interconnect pack_pattern, the pb index
- * ignored). False when the arch has no `adder` leaf or no such pattern. */
+ * (a port reference `<pb>.cin` / `<pb>.cout` in a pack_pattern of the interconnect that wires the
+ * leaf: same parent pb_type and mode, then the leaf's name; the pb index is ignored). False when
+ * the arch has no `adder` leaf or no such pattern. `arch` must not be NULL. */
 bool odin3_arch_chain_pattern_reaches_adder(const odin3_arch *arch);
 
-/* C-3: the number of distinct pack pattern names that reach the `cin` of an `adder` leaf. */
+/* C-3: the number of distinct pack pattern names that reach the `cin` of an `adder` leaf (matched
+ * as in odin3_arch_chain_pattern_reaches_adder). `arch` must not be NULL. */
 uint32_t odin3_arch_adder_cin_patterns(const odin3_arch *arch);
 
 #endif

@@ -36,12 +36,6 @@ typedef struct pm_rules {
     uint32_t mem_width; /* the data bits of one RAM slice (R-4) */
 } pm_rules;
 
-/* The options of one run (the pass arguments). A zero field is "not given": the rules keep their
- * default. */
-typedef struct pm_options {
-    uint32_t min_add; /* `--min-add N` (C-4): the smallest add the rule maps, at least 1 */
-} pm_options;
-
 /* The 3C values: multiplier 36, min multiplier 3, min adder 1, RAM 15 address bits by 1. */
 pm_rules pm_rules_k6_fixed(void);
 

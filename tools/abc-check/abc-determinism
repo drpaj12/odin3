@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# abc-determinism: the abc pass gives the same answer every time (3D Task 22). See
+# abc_determinism.py. Exit codes: 0 same, 1 differs, 2 usage or tool error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/abc_determinism.py" "$@"

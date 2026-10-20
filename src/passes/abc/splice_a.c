@@ -12,6 +12,7 @@
 #include "passes/abc/run.h"
 #include "passes/abc/splice_int.h"
 #include "util/arena.h"
+#include "util/clock.h"
 #include "util/log.h"
 
 #include <stdbool.h>
@@ -34,8 +35,11 @@ static uint32_t obj_count(const odin3_abc_result *res) {
 
 /* Anchors and the record of every new object (§8; prov.c). Records come before objects. */
 static odin3_status make_records(splice *sp) {
+    double started = odin3_now_ms();
     odin3_status st = odin3_abc_anchors(sp->run, sp->res, &sp->anchors);
-    return st == ODIN3_OK ? odin3_abc_records(sp->run, sp->res, &sp->anchors, &sp->objprov) : st;
+    st = st == ODIN3_OK ? odin3_abc_records(sp->run, sp->res, &sp->anchors, &sp->objprov) : st;
+    sp->run->stats.prov_ms = odin3_now_ms() - started;
+    return st;
 }
 
 /* --- nets ---------------------------------------------------------------------------------- */
