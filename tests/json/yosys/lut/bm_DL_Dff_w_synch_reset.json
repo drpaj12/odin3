@@ -1,0 +1,82 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_Dff_w_synch_reset": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:3.1-14.10"
+      },
+      "ports": {
+        "D": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "Clock": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "Resetn": {
+          "direction": "input",
+          "bits": [ 4 ]
+        },
+        "Q": {
+          "direction": "output",
+          "bits": [ 5 ]
+        }
+      },
+      "cells": {
+        "$auto$ff.cc:266:slice$85": {
+          "hide_name": 1,
+          "type": "$_SDFF_PN0_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:8.2-12.11"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 3 ],
+            "D": [ 2 ],
+            "Q": [ 5 ],
+            "R": [ 4 ]
+          }
+        }
+      },
+      "netnames": {
+        "Clock": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:4.11-4.16"
+          }
+        },
+        "D": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:4.8-4.9"
+          }
+        },
+        "Q": {
+          "hide_name": 0,
+          "bits": [ 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:5.9-5.10"
+          }
+        },
+        "Resetn": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:4.18-4.24"
+          }
+        }
+      }
+    }
+  }
+}

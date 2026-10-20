@@ -404,6 +404,8 @@ add_library(odin3_core OBJECT
     src/backends/json/writer.c
     src/backends/prov_name.c
     src/backends/common/hdl_loc.c
+    src/backends/common/hash_name.c
+    src/backends/common/name_map.c
     src/frontends/hdl_restore.c
     src/backends/verilog/escape.c
     src/backends/verilog/writer.c
@@ -1531,6 +1533,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test_sim_word PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     odin3_add_unit_test(test_dot_writer)
     odin3_add_unit_test(test_hdl_loc)
+    odin3_add_unit_test(test_hash_name)
+    odin3_add_unit_test(test_name_map)
     odin3_add_unit_test(test_hdl_restore)
     odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)
@@ -3415,6 +3419,70 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     FILES ${_icells_micros})
             endforeach()
         endif()
+        # 5.3c (spec 5.3 T-2, T-3; tools/json-check): write_json, read_json, write_json at the word,
+        # gate and LUT levels. R-1 (file 2 equals file 3), R-3 (the read-back is equivalent to the
+        # netlist that was written; netlist-compare says identical or equivalent-only) and `check`
+        # clean on the read-back. json_<level>: a default set of the smallest designs;
+        # json_micros_<level> (label sweep): all 68 micros, smallest first (a plain test, not under
+        # heavy-run, PHASE5 decision 9; never run in parallel with another lane's sweep).
+        # json_yosys_<level> (no Yosys needed): the committed Yosys 0.55 fixtures
+        # tests/json/yosys/<level>/*.json are read and fixpointed; with Yosys 0.55 they are also
+        # compared with Yosys's own reading of the same file (tests/json/yosys/gen.sh makes them).
+        # tests/json/expect.txt lists every design a level cannot take, with its reason.
+        file(GLOB _json_micros ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro/*.v)
+        list(SORT _json_micros)
+        set(_json_micro_dir ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro)
+        set(_json_default ${PROJECT_SOURCE_DIR}/tests/icells/plain_mux.v
+            ${_json_micro_dir}/bm_DL_2_1_mux.v ${_json_micro_dir}/bm_DL_D_flipflop.v
+            ${_json_micro_dir}/bm_my_D_latch2.v ${_json_micro_dir}/bm_DL_4_1_mux.v
+            ${_json_micro_dir}/ff.v ${_json_micro_dir}/bm_DL_2_cascaded_flip_flops.v
+            ${_json_micro_dir}/bm_DL_logic_w_Dff.v ${_json_micro_dir}/bm_DL_structural_logic.v)
+        file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/json_tmp)
+        set(_json_run ${CMAKE_COMMAND} -E env TMPDIR=${PROJECT_BINARY_DIR}/json_tmp
+            ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+            ${PROJECT_SOURCE_DIR}/tools/json-check/json-check
+            --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+            --expect ${PROJECT_SOURCE_DIR}/tests/json/expect.txt)
+        function(odin3_add_json_test name)
+            cmake_parse_arguments(ARG "" "LEVEL;LABELS" "FLAGS;FILES" ${ARGN})
+            add_test(NAME ${name}
+                COMMAND ${_json_run} --level ${ARG_LEVEL} ${ARG_FLAGS} ${ARG_FILES})
+            set_tests_properties(${name} PROPERTIES LABELS "${ARG_LABELS}" SKIP_RETURN_CODE 77
+                                 TIMEOUT 1800)
+        endfunction()
+        foreach(_lvl IN ITEMS word)
+            odin3_add_json_test(json_${_lvl} LEVEL ${_lvl} LABELS "json;unit"
+                FILES ${_json_default})
+            odin3_add_json_test(json_micros_${_lvl} LEVEL ${_lvl} LABELS "sweep;json"
+                FLAGS --smallest-first FILES ${_json_micros})
+        endforeach()
+        if(ODIN3_WITH_ABC)
+            foreach(_lvl IN ITEMS gate lut)
+                odin3_add_json_test(json_${_lvl} LEVEL ${_lvl} LABELS "json;unit"
+                    FILES ${_json_default})
+                odin3_add_json_test(json_micros_${_lvl} LEVEL ${_lvl} LABELS "sweep;json"
+                    FLAGS --smallest-first FILES ${_json_micros})
+            endforeach()
+        endif()
+        # 5.3c Task 5 step 3: the 14 small VTR designs (PHASE2 #30; qor_sched.EQUIV_REQUIRED) at the LUT
+        # level only: R-1 and equiv-check, no QoR and no big benchmark (they are untested for
+        # equivalence, PHASE3 #16 amended). Smallest first; label sweep, plain test.
+        if(DEFINED ENV{VTR_ROOT})
+            set(_json_vtr_root $ENV{VTR_ROOT})
+        else()
+            set(_json_vtr_root $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing)
+        endif()
+        set(_json_vtr_dir ${_json_vtr_root}/vtr_flow/benchmarks/verilog)
+        set(_json_vtr14)
+        foreach(_d IN ITEMS single_wire single_ff and_latch multiclock_output_and_latch
+                multiclock_separate_and_latch multiclock_reader_writer ch_intrinsics
+                ch_intrinsics_nolatches diffeq1 diffeq2 mkPktMerge sha blob_merge stereovision3)
+            list(APPEND _json_vtr14 ${_json_vtr_dir}/${_d}.v)
+        endforeach()
+        if(ODIN3_WITH_ABC AND EXISTS ${_json_vtr_dir}/sha.v)
+            odin3_add_json_test(json_vtr14_lut LEVEL lut LABELS "sweep;json"
+                FLAGS --smallest-first FILES ${_json_vtr14})
+        endif()
         # 3B Task 9 (spec 14.4, 14.5): the lower corpus over the micros, smallest first, through
         # heavy-run: lower_run_micro (ODIN3_OK, check FULL, the netlist view written as BLIF),
         # lower_sim_micro (the simulator before and after; a type without a hook is `skipped`,
@@ -3732,6 +3800,30 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             message(STATUS "exit_micro, exit_vtr not registered: needs VTR_ROOT with the k6_frac arch")
         endif()
     endif()
+
+    # 5.3c T-3: the committed Yosys 0.55 fixtures (tests/json/yosys/<level>/*.json), smallest first.
+    # They need no Yosys: each is read with `check`, written, read and written again (R-1). With
+    # Yosys 0.55 (and ABC for the BLIF levels) the read-back is also compared with Yosys's own
+    # reading of the same file. tests/json/expect.txt lists the fixtures a level cannot read.
+    foreach(_lvl IN ITEMS word gate lut)
+        set(_json_yosys_args)
+        if(ODIN3_YOSYS055_OK AND (_lvl STREQUAL "word" OR ODIN3_WITH_ABC))
+            set(_json_yosys_args --yosys ${ODIN3_YOSYS055})
+        endif()
+        set(_json_yosys_env TMPDIR=${PROJECT_BINARY_DIR}/json_tmp)
+        if(ODIN3_WITH_ABC)
+            list(APPEND _json_yosys_env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>)
+        endif()
+        file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/json_tmp)
+        add_test(NAME json_yosys_${_lvl}
+            COMMAND ${CMAKE_COMMAND} -E env ${_json_yosys_env}
+                    ${PROJECT_SOURCE_DIR}/tools/json-check/json-check
+                    --odin3 $<TARGET_FILE:odin3> ${_json_yosys_args}
+                    --expect ${PROJECT_SOURCE_DIR}/tests/json/expect.txt
+                    --level ${_lvl} --yosys-dir ${PROJECT_SOURCE_DIR}/tests/json/yosys)
+        set_tests_properties(json_yosys_${_lvl} PROPERTIES LABELS "json;unit" SKIP_RETURN_CODE 77
+                             TIMEOUT 1800)
+    endforeach()
 
     # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys
     # (tools/verilog-gen/compare.py; 200 seeds here, 5,000 locally). The oracle is VTR's Yosys

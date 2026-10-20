@@ -1,0 +1,319 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "top": {
+      "attributes": {
+        "dynports": "00000000000000000000000000000001",
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/param_override.v:1.1-16.10"
+      },
+      "parameter_default_values": {
+        "width": "00000000000000000000000000000100"
+      },
+      "ports": {
+        "a": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5 ]
+        },
+        "b1": {
+          "direction": "output",
+          "bits": [ "1", "1", 2, 3, 4, 5 ]
+        },
+        "b2": {
+          "direction": "output",
+          "bits": [ "0", "0", 6, 7, 8, 9 ]
+        },
+        "b3": {
+          "direction": "output",
+          "bits": [ 2, 3, 10, 11, 12, 13 ]
+        },
+        "b4": {
+          "direction": "output",
+          "bits": [ "1", "1", 2, 3, 4, 5 ]
+        }
+      },
+      "cells": {
+        "$abc$332$auto$blifparse.cc:535:parse_blif$333": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3 ],
+            "Y": [ 7 ]
+          }
+        },
+        "$abc$332$auto$blifparse.cc:535:parse_blif$334": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01111000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 4 ],
+            "Y": [ 8 ]
+          }
+        },
+        "$abc$332$auto$blifparse.cc:535:parse_blif$335": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0111111110000000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 4, 5 ],
+            "Y": [ 9 ]
+          }
+        },
+        "$abc$332$auto$blifparse.cc:535:parse_blif$336": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1001",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 4 ],
+            "Y": [ 10 ]
+          }
+        },
+        "$abc$332$auto$blifparse.cc:535:parse_blif$337": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0000001111101000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 5, 4 ],
+            "Y": [ 12 ]
+          }
+        },
+        "$abc$332$auto$blifparse.cc:535:parse_blif$338": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "00101100",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 5, 4 ],
+            "Y": [ 13 ]
+          }
+        },
+        "$abc$332$auto$blifparse.cc:535:parse_blif$339": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1110000100011110",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 4, 3, 5 ],
+            "Y": [ 11 ]
+          }
+        },
+        "$abc$332$auto$blifparse.cc:535:parse_blif$340": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2 ],
+            "Y": [ 6 ]
+          }
+        },
+        "inst_1": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_src": "tests/micro/verilog/micro/param_override.v:13.29-13.50",
+            "module": "$paramod\\bottom\\d=s32'00000000000000000000000000000011",
+            "module_hdlname": "bottom",
+            "module_src": "tests/micro/verilog/micro/param_override.v:18.1-26.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "inst_2": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_src": "tests/micro/verilog/micro/param_override.v:10.12-10.33",
+            "module": "$paramod\\bottom\\d=s32'00000000000000000000000000000100",
+            "module_hdlname": "bottom",
+            "module_src": "tests/micro/verilog/micro/param_override.v:18.1-26.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "inst_3": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_src": "tests/micro/verilog/micro/param_override.v:15.20-15.41",
+            "module": "$paramod$df1942bf5a5ce6287d2e89ba727681b40193fdfd\\bottom",
+            "module_hdlname": "bottom",
+            "module_src": "tests/micro/verilog/micro/param_override.v:18.1-26.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        }
+      },
+      "netnames": {
+        "a": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/param_override.v:4.24-4.25"
+          }
+        },
+        "b1": {
+          "hide_name": 0,
+          "bits": [ "1", "1", 2, 3, 4, 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/param_override.v:5.25-5.27"
+          }
+        },
+        "b2": {
+          "hide_name": 0,
+          "bits": [ "0", "0", 6, 7, 8, 9 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/param_override.v:5.29-5.31"
+          }
+        },
+        "b3": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 10, 11, 12, 13 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/param_override.v:5.33-5.35"
+          }
+        },
+        "b4": {
+          "hide_name": 0,
+          "bits": [ "1", "1", 2, 3, 4, 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/param_override.v:5.37-5.39"
+          }
+        },
+        "inst_1.a": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "hdlname": "inst_1 a",
+            "src": "tests/micro/verilog/micro/param_override.v:22.16-22.17"
+          }
+        },
+        "inst_1.b": {
+          "hide_name": 0,
+          "bits": [ "1", "1", 2, 3, 4, 5 ],
+          "attributes": {
+            "hdlname": "inst_1 b",
+            "src": "tests/micro/verilog/micro/param_override.v:23.17-23.18"
+          }
+        },
+        "inst_2.a": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "hdlname": "inst_2 a",
+            "src": "tests/micro/verilog/micro/param_override.v:22.16-22.17"
+          }
+        },
+        "inst_2.b": {
+          "hide_name": 0,
+          "bits": [ "0", "0", 6, 7, 8, 9 ],
+          "attributes": {
+            "hdlname": "inst_2 b",
+            "src": "tests/micro/verilog/micro/param_override.v:23.17-23.18"
+          }
+        },
+        "inst_3.a": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "hdlname": "inst_3 a",
+            "src": "tests/micro/verilog/micro/param_override.v:22.16-22.17"
+          }
+        },
+        "inst_3.b": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 10, 11, 12, 13 ],
+          "attributes": {
+            "hdlname": "inst_3 b",
+            "src": "tests/micro/verilog/micro/param_override.v:23.17-23.18"
+          }
+        }
+      }
+    }
+  }
+}

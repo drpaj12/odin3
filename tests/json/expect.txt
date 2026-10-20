@@ -1,0 +1,49 @@
+# 5.3c json-check: the designs and fixtures a level cannot take, and why (spec T-2, T-3, T-5).
+# Format: <level|y-level> <design file name> <outcome> <reason>
+# An entry for a design that passes is stale and fails the run. Nothing is skipped silently.
+#
+# T-3 Yosys fixtures (tests/json/yosys, Yosys 0.55). Every Yosys-written file that read_json cannot
+# take is listed with the reason; no fixture is dropped silently. tests/json/yosys/FAILED lists the
+# micros a Yosys flow could not write (the hard blocks have no module at the gate and LUT levels),
+# tests/json/yosys/DROPPED those over the 480 KiB file size rule (gen.sh).
+# M-5 rule 4: the flip-flop families with a reset or enable, and $memrd_v2 (memories, question 6),
+# are not registered, so the reader refuses the file with a located error (never a black box).
+# M-6: Yosys writes `#(1)` of an unresolved hard block (the VTR `adder`, `multiply`) as the
+# parameter `$1`; the registered library type has no parameter of that name.
+# write_blif --vtr: the read-back of a Yosys $_DLATCH_N_ cannot be written for VPR (a limit of the
+# BLIF writer, not of the reader).
+y-word adder_hard_block.json fail:read Yosys writes a positional parameter ($1) for an unresolved hard block; the registered type has no such parameter (M-6)y-word adder_hard_block.json fail:read Yosys writes a positional parameter ($1) for an unresolved hard block; the registered type has no such parameter (M-6)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-word hard_adder_cin_propagation.json fail:read Yosys writes a positional parameter ($1) for an unresolved hard block; the registered type has no such parameter (M-6)y-word hard_adder_cin_propagation.json fail:read Yosys writes a positional parameter ($1) for an unresolved hard block; the registered type has no such parameter (M-6)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-word multiply_hard_block.json fail:read Yosys writes a positional parameter ($1) for an unresolved hard block; the registered type has no such parameter (M-6)y-word multiply_hard_block.json fail:read Yosys writes a positional parameter ($1) for an unresolved hard block; the registered type has no such parameter (M-6)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-word bm_DL_BCD_7_segment_without_x.json fail:read Yosys cell type $memrd_v2 is not registered (M-5 rule 4)
+y-word bm_tester.json fail:read Yosys cell type $memrd_v2 is not registered (M-5 rule 4)
+y-word bm_stmt_compare_padding.json fail:read Yosys cell type $memrd_v2 is not registered (M-5 rule 4)
+y-word bm_stmt_all_mod.json fail:read Yosys cell type $memrd_v2 is not registered (M-5 rule 4)
+y-gate ff.json fail:read Yosys cell type $_SDFF_PP0_ is not registered (M-5 rule 4)y-gate ff.json fail:read Yosys cell type $_SDFF_PP0_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-gate bm_DL_Dff_w_synch_reset.json fail:read Yosys cell type $_SDFF_PN0_ is not registered (M-5 rule 4)y-gate bm_DL_Dff_w_synch_reset.json fail:read Yosys cell type $_SDFF_PN0_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-gate bm_if_reset.json fail:read Yosys cell type $_DFF_PN0_ is not registered (M-5 rule 4)y-gate bm_if_reset.json fail:read Yosys cell type $_DFF_PN0_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-gate bm_stmt_compare_padding.json fail:read Yosys cell type $_SDFF_PP0_ is not registered (M-5 rule 4)y-gate bm_stmt_compare_padding.json fail:read Yosys cell type $_SDFF_PP0_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-gate bm_stmt_all_mod.json fail:read Yosys cell type $_SDFF_PN1_ is not registered (M-5 rule 4)y-gate bm_stmt_all_mod.json fail:read Yosys cell type $_SDFF_PN1_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-gate bm_if_common.json fail:read Yosys cell type $_DFFE_PP_ is not registered (M-5 rule 4)y-gate bm_if_common.json fail:read Yosys cell type $_DFFE_PP_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-gate bm_if_collapse.json fail:read Yosys cell type $_SDFFE_PN0P_ is not registered (M-5 rule 4)y-gate bm_if_collapse.json fail:read Yosys cell type $_SDFFE_PN0P_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-gate bm_DL_16_1_mux.json fail:read write_blif --vtr refuses the `level-sensitive latch` of the read-back (VPR accepts rising-edge latches only)
+y-gate generate.json fail:read Yosys cell type $_SDFF_PP1_ is not registered (M-5 rule 4)y-gate generate.json fail:read Yosys cell type $_SDFF_PP1_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-lut ff.json fail:read Yosys cell type $_SDFF_PP0_ is not registered (M-5 rule 4)y-lut ff.json fail:read Yosys cell type $_SDFF_PP0_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-lut bm_DL_Dff_w_synch_reset.json fail:read Yosys cell type $_SDFF_PN0_ is not registered (M-5 rule 4)y-lut bm_DL_Dff_w_synch_reset.json fail:read Yosys cell type $_SDFF_PN0_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-lut bm_if_reset.json fail:read Yosys cell type $_DFF_PN0_ is not registered (M-5 rule 4)y-lut bm_if_reset.json fail:read Yosys cell type $_DFF_PN0_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-lut bm_stmt_compare_padding.json fail:read Yosys cell type $_SDFF_PP0_ is not registered (M-5 rule 4)y-lut bm_stmt_compare_padding.json fail:read Yosys cell type $_SDFF_PP0_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-lut bm_stmt_all_mod.json fail:read Yosys cell type $_SDFF_PN1_ is not registered (M-5 rule 4)y-lut bm_stmt_all_mod.json fail:read Yosys cell type $_SDFF_PN1_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-lut bm_if_common.json fail:read Yosys cell type $_DFFE_PP_ is not registered (M-5 rule 4)y-lut bm_if_common.json fail:read Yosys cell type $_DFFE_PP_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-lut bm_if_collapse.json fail:read Yosys cell type $_SDFFE_PN0P_ is not registered (M-5 rule 4)y-lut bm_if_collapse.json fail:read Yosys cell type $_SDFFE_PN0P_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-lut bm_DL_16_1_mux.json fail:read write_blif --vtr refuses the `level-sensitive latch` of the read-back (VPR accepts rising-edge latches only)
+y-lut generate.json fail:read Yosys cell type $_SDFF_PP1_ is not registered (M-5 rule 4)y-lut generate.json fail:read Yosys cell type $_SDFF_PP1_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+y-lut bm_functional_test.json fail:read Yosys cell type $_DFF_PN0_ is not registered (M-5 rule 4)y-lut bm_functional_test.json fail:read Yosys cell type $_DFF_PN0_ is not registered (M-5 rule 4)  # known gap, tracked: controller-todo 5.3 follow-ups
+#
+# Task 5 step 3, the 14 small VTR designs (PHASE2 #30 evidence set, qor_sched.EQUIV_REQUIRED) at the
+# LUT level, CTest json_vtr14_lut: R-1 and equiv-check hold on 10; equiv-check supports one clock
+# domain only, so the four designs with two or more read clocks are unproven by the tool (R-1, check
+# and the read-back all ran; the fixpoint leg is not excepted).
+lut multiclock_separate_and_latch.v unproven equiv-check: more than one clock domain (clock1, clock2)
+lut multiclock_output_and_latch.v unproven equiv-check: more than one clock domain
+lut multiclock_reader_writer.v unproven equiv-check: more than one clock domain (clock_reader_head, clock_writer_head)
+lut stereovision3.v unproven equiv-check: more than one clock domain (tm3_clk_v0, tm3_clk_v2)

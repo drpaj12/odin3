@@ -1,6 +1,6 @@
 # src/frontends
 - `verilog/` — Phase 2: preprocessor + Bison/Flex Verilog-2005 grammar + elaboration (spec §4.1).
 - `blif/` — Phase 1: full VTR-dialect BLIF reader (spec §4.4).
-- `json/` — Phase 5.3: iterative JSON parser with limits (`json_parse.h`) and the Yosys JSON reader (`reader.h`: `read_json`, `odin3_json_read`).
+- `json/` — Phase 5.3: iterative JSON parser with limits (`json_parse.h`) and the Yosys JSON reader (`reader.h`: `read_json`, `odin3_json_read`); round trip and Yosys fixtures: `tools/json-check`, `tests/json/`.
 - `vqm/` — Phase 6: Verilog grammar + Altera primitive library.
 - `edif/` — Phase 6: EDIF 2.0.0 structural reader.

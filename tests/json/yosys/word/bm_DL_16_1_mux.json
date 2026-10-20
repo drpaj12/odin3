@@ -1,0 +1,962 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_16_1_mux": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:3.1-15.10"
+      },
+      "ports": {
+        "W": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ]
+        },
+        "S16": {
+          "direction": "input",
+          "bits": [ 18, 19, 20, 21 ]
+        },
+        "f": {
+          "direction": "output",
+          "bits": [ 22 ]
+        }
+      },
+      "cells": {
+        "Mux1": {
+          "hide_name": 0,
+          "type": "mux4to1",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:9.10-9.39"
+          },
+          "port_directions": {
+            "S": "input",
+            "W": "input",
+            "f": "output"
+          },
+          "connections": {
+            "S": [ 18, 19 ],
+            "W": [ 2, 3, 4, 5 ],
+            "f": [ 23 ]
+          }
+        },
+        "Mux2": {
+          "hide_name": 0,
+          "type": "mux4to1",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:10.10-10.39"
+          },
+          "port_directions": {
+            "S": "input",
+            "W": "input",
+            "f": "output"
+          },
+          "connections": {
+            "S": [ 18, 19 ],
+            "W": [ 6, 7, 8, 9 ],
+            "f": [ 24 ]
+          }
+        },
+        "Mux3": {
+          "hide_name": 0,
+          "type": "mux4to1",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:11.10-11.40"
+          },
+          "port_directions": {
+            "S": "input",
+            "W": "input",
+            "f": "output"
+          },
+          "connections": {
+            "S": [ 18, 19 ],
+            "W": [ 10, 11, 12, 13 ],
+            "f": [ 25 ]
+          }
+        },
+        "Mux4": {
+          "hide_name": 0,
+          "type": "mux4to1",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:12.10-12.41"
+          },
+          "port_directions": {
+            "S": "input",
+            "W": "input",
+            "f": "output"
+          },
+          "connections": {
+            "S": [ 18, 19 ],
+            "W": [ 14, 15, 16, 17 ],
+            "f": [ 26 ]
+          }
+        },
+        "Mux5": {
+          "hide_name": 0,
+          "type": "mux4to1",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:13.10-13.36"
+          },
+          "port_directions": {
+            "S": "input",
+            "W": "input",
+            "f": "output"
+          },
+          "connections": {
+            "S": [ 20, 21 ],
+            "W": [ 23, 24, 25, 26 ],
+            "f": [ 22 ]
+          }
+        }
+      },
+      "netnames": {
+        "M": {
+          "hide_name": 0,
+          "bits": [ 23, 24, 25, 26 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:7.13-7.14"
+          }
+        },
+        "S16": {
+          "hide_name": 0,
+          "bits": [ 18, 19, 20, 21 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:5.14-5.17"
+          }
+        },
+        "W": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:4.15-4.16"
+          }
+        },
+        "f": {
+          "hide_name": 0,
+          "bits": [ 22 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:6.9-6.10"
+          }
+        }
+      }
+    },
+    "mux4to1": {
+      "attributes": {
+        "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:17.1-33.10"
+      },
+      "ports": {
+        "W": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5 ]
+        },
+        "S": {
+          "direction": "input",
+          "bits": [ 6, 7 ]
+        },
+        "f": {
+          "direction": "output",
+          "bits": [ 8 ]
+        }
+      },
+      "cells": {
+        "$auto$proc_dlatch.cc:249:make_hold$36": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 9 ],
+            "Y": [ 10 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:249:make_hold$38": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 9 ],
+            "Y": [ 11 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:249:make_hold$40": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12 ],
+            "Y": [ 13 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:249:make_hold$42": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 9 ],
+            "Y": [ 14 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:249:make_hold$44": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12 ],
+            "Y": [ 15 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:249:make_hold$46": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 16 ],
+            "Y": [ 17 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:249:make_hold$48": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 9 ],
+            "Y": [ 18 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:249:make_hold$50": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12 ],
+            "Y": [ 19 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:249:make_hold$52": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 16 ],
+            "Y": [ 20 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:249:make_hold$54": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 21 ],
+            "Y": [ 22 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:262:make_hold$100": {
+          "hide_name": 1,
+          "type": "$and",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 13 ],
+            "B": [ 23 ],
+            "Y": [ 24 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:262:make_hold$106": {
+          "hide_name": 1,
+          "type": "$and",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 11 ],
+            "B": [ 24 ],
+            "Y": [ 25 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:262:make_hold$112": {
+          "hide_name": 1,
+          "type": "$and",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 10 ],
+            "B": [ 25 ],
+            "Y": [ 26 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:262:make_hold$64": {
+          "hide_name": 1,
+          "type": "$and",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 20 ],
+            "B": [ 22 ],
+            "Y": [ 27 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:262:make_hold$70": {
+          "hide_name": 1,
+          "type": "$and",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 19 ],
+            "B": [ 27 ],
+            "Y": [ 28 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:262:make_hold$76": {
+          "hide_name": 1,
+          "type": "$and",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 18 ],
+            "B": [ 28 ],
+            "Y": [ 29 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:262:make_hold$82": {
+          "hide_name": 1,
+          "type": "$and",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 17 ],
+            "B": [ 29 ],
+            "Y": [ 30 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:262:make_hold$88": {
+          "hide_name": 1,
+          "type": "$and",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 15 ],
+            "B": [ 30 ],
+            "Y": [ 31 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:262:make_hold$94": {
+          "hide_name": 1,
+          "type": "$and",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 14 ],
+            "B": [ 31 ],
+            "Y": [ 23 ]
+          }
+        },
+        "$auto$proc_dlatch.cc:432:proc_dlatch$118": {
+          "hide_name": 1,
+          "type": "$dlatch",
+          "parameters": {
+            "EN_POLARITY": "00000000000000000000000000000000",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          },
+          "port_directions": {
+            "D": "input",
+            "EN": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "D": [ 32 ],
+            "EN": [ 26 ],
+            "Q": [ 8 ]
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_DL_16_1_mux.v:24$2": {
+          "hide_name": 1,
+          "type": "$logic_not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:24.7-24.17"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 7 ],
+            "Y": [ 9 ]
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_DL_16_1_mux.v:26$3": {
+          "hide_name": 1,
+          "type": "$eq",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:26.12-26.22"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 7 ],
+            "B": [ "1", "0" ],
+            "Y": [ 12 ]
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_DL_16_1_mux.v:28$4": {
+          "hide_name": 1,
+          "type": "$eq",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:28.12-28.22"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 7 ],
+            "B": [ "0", "1" ],
+            "Y": [ 16 ]
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_DL_16_1_mux.v:30$5": {
+          "hide_name": 1,
+          "type": "$eq",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:30.12-30.22"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 7 ],
+            "B": [ "1", "1" ],
+            "Y": [ 21 ]
+          }
+        },
+        "$procmux$19": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:28.12-28.22|tests/micro/verilog/micro/bm_DL_16_1_mux.v:28.8-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5 ],
+            "B": [ 4 ],
+            "S": [ 16 ],
+            "Y": [ 33 ]
+          }
+        },
+        "$procmux$28": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:26.12-26.22|tests/micro/verilog/micro/bm_DL_16_1_mux.v:26.8-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 33 ],
+            "B": [ 3 ],
+            "S": [ 12 ],
+            "Y": [ 34 ]
+          }
+        },
+        "$procmux$34": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:24.7-24.17|tests/micro/verilog/micro/bm_DL_16_1_mux.v:24.3-31.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 34 ],
+            "B": [ 2 ],
+            "S": [ 9 ],
+            "Y": [ 32 ]
+          }
+        }
+      },
+      "netnames": {
+        "$0\\f[0:0]": {
+          "hide_name": 1,
+          "bits": [ 32 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          }
+        },
+        "$2\\f[0:0]": {
+          "hide_name": 1,
+          "bits": [ 34 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          }
+        },
+        "$3\\f[0:0]": {
+          "hide_name": 1,
+          "bits": [ 33 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:23.2-31.13"
+          }
+        },
+        "$auto$rtlil.cc:2957:Not$37": {
+          "hide_name": 1,
+          "bits": [ 10 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2957:Not$39": {
+          "hide_name": 1,
+          "bits": [ 11 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2957:Not$41": {
+          "hide_name": 1,
+          "bits": [ 13 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2957:Not$43": {
+          "hide_name": 1,
+          "bits": [ 14 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2957:Not$45": {
+          "hide_name": 1,
+          "bits": [ 15 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2957:Not$47": {
+          "hide_name": 1,
+          "bits": [ 17 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2957:Not$49": {
+          "hide_name": 1,
+          "bits": [ 18 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2957:Not$51": {
+          "hide_name": 1,
+          "bits": [ 19 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2957:Not$53": {
+          "hide_name": 1,
+          "bits": [ 20 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2957:Not$55": {
+          "hide_name": 1,
+          "bits": [ 22 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2961:ReduceOr$103": {
+          "hide_name": 1,
+          "bits": [ 24 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2961:ReduceOr$109": {
+          "hide_name": 1,
+          "bits": [ 25 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2961:ReduceOr$115": {
+          "hide_name": 1,
+          "bits": [ 26 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2961:ReduceOr$67": {
+          "hide_name": 1,
+          "bits": [ 27 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2961:ReduceOr$73": {
+          "hide_name": 1,
+          "bits": [ 28 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2961:ReduceOr$79": {
+          "hide_name": 1,
+          "bits": [ 29 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2961:ReduceOr$85": {
+          "hide_name": 1,
+          "bits": [ 30 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2961:ReduceOr$91": {
+          "hide_name": 1,
+          "bits": [ 31 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:2961:ReduceOr$97": {
+          "hide_name": 1,
+          "bits": [ 23 ],
+          "attributes": {
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_DL_16_1_mux.v:24$2_Y": {
+          "hide_name": 1,
+          "bits": [ 9 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:24.7-24.17"
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_DL_16_1_mux.v:26$3_Y": {
+          "hide_name": 1,
+          "bits": [ 12 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:26.12-26.22"
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_DL_16_1_mux.v:28$4_Y": {
+          "hide_name": 1,
+          "bits": [ 16 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:28.12-28.22"
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_DL_16_1_mux.v:30$5_Y": {
+          "hide_name": 1,
+          "bits": [ 21 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:30.12-30.22"
+          }
+        },
+        "S": {
+          "hide_name": 0,
+          "bits": [ 6, 7 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:19.14-19.15"
+          }
+        },
+        "W": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:18.14-18.15"
+          }
+        },
+        "f": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_16_1_mux.v:20.9-20.10"
+          }
+        }
+      }
+    }
+  }
+}

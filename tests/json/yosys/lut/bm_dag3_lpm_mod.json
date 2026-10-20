@@ -1,0 +1,1345 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_dag3_lpm_mod": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:4.1-41.10"
+      },
+      "ports": {
+        "clock": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "reset_n": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "a_in": {
+          "direction": "input",
+          "bits": [ 4, 5 ]
+        },
+        "b_in": {
+          "direction": "input",
+          "bits": [ 6, 7 ]
+        },
+        "c_in": {
+          "direction": "input",
+          "bits": [ 8 ]
+        },
+        "d_in": {
+          "direction": "input",
+          "bits": [ 9 ]
+        },
+        "out0": {
+          "direction": "output",
+          "bits": [ 10, 11 ]
+        },
+        "out1": {
+          "direction": "output",
+          "bits": [ 12 ]
+        }
+      },
+      "cells": {
+        "$abc$388$auto$blifparse.cc:535:parse_blif$389": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 13 ],
+            "Y": [ 14 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$390": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 15 ],
+            "Y": [ 16 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$391": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 5 ],
+            "Y": [ 17 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$392": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 4 ],
+            "Y": [ 18 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$393": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 7, 4 ],
+            "Y": [ 19 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$395": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 8, 9 ],
+            "Y": [ 12 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$396": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 7, 20 ],
+            "Y": [ 21 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$397": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10010110",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 4, 22 ],
+            "Y": [ 23 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$398": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1000011101111000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 24, 25, 26, 27 ],
+            "Y": [ 11 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$399": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 24, 25 ],
+            "Y": [ 10 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$400": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1000011101111000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 28, 5, 29 ],
+            "Y": [ 30 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$401": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 28 ],
+            "Y": [ 31 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$402": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1001",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 32, 33 ],
+            "Y": [ 34 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$403": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0111100010000111",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 4, 7, 5 ],
+            "Y": [ 32 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$404": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1101011100101000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 22, 6, 4, 35 ],
+            "Y": [ 33 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$407": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0101110010100011",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 4, 22, 36 ],
+            "Y": [ 37 ]
+          }
+        },
+        "$abc$388$auto$blifparse.cc:535:parse_blif$408": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10010110",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 37, 7, 32 ],
+            "Y": [ 38 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$157": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:127.1-131.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 14 ],
+            "Q": [ 35 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$158": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:127.1-131.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 17 ],
+            "Q": [ 13 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$164": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:127.1-131.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 18 ],
+            "Q": [ 15 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$165": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:59.1-62.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 23 ],
+            "Q": [ 24 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$166": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:59.1-62.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 34 ],
+            "Q": [ 26 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$176": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:127.1-131.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 19 ],
+            "Q": [ 20 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$177": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:127.1-131.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 21 ],
+            "Q": [ 36 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$178": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:127.1-131.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 16 ],
+            "Q": [ 22 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$179": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:83.1-87.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 22 ],
+            "Q": [ 28 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$180": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:83.1-87.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 38 ],
+            "Q": [ 29 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$181": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:83.1-87.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 31 ],
+            "Q": [ 25 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$182": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:83.1-87.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 30 ],
+            "Q": [ 27 ]
+          }
+        },
+        "top_a": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:33.3-33.35",
+            "module": "a",
+            "module_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:44.1-64.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "top_a.mya_d": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:56.3-56.42",
+            "hdlname": "top_a mya_d",
+            "module": "d",
+            "module_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:114.1-133.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "top_a.mya_d2": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:57.3-57.43",
+            "hdlname": "top_a mya_d2",
+            "module": "d",
+            "module_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:114.1-133.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "top_b": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:34.3-34.35",
+            "module": "b",
+            "module_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:67.1-89.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "top_b.myb_c": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:80.3-80.43",
+            "hdlname": "top_b myb_c",
+            "module": "c",
+            "module_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:92.1-111.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "top_b.myb_c.myc_d": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:106.3-106.34",
+            "hdlname": "top_b myb_c myc_d",
+            "module": "d",
+            "module_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:114.1-133.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "top_b.myb_c2": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:81.3-81.44",
+            "hdlname": "top_b myb_c2",
+            "module": "c",
+            "module_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:92.1-111.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "top_b.myb_c2.myc_d": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:106.3-106.34",
+            "hdlname": "top_b myb_c2 myc_d",
+            "module": "d",
+            "module_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:114.1-133.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "top_c": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:35.3-35.35",
+            "module": "c",
+            "module_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:92.1-111.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "top_c.myc_d": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:106.3-106.34",
+            "hdlname": "top_c myc_d",
+            "module": "d",
+            "module_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:114.1-133.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        },
+        "top_d": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:36.3-36.35",
+            "module": "d",
+            "module_src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:114.1-133.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        }
+      },
+      "netnames": {
+        "$abc$388$new_n53": {
+          "hide_name": 1,
+          "bits": [ 32 ],
+          "attributes": {
+          }
+        },
+        "$abc$388$new_n54": {
+          "hide_name": 1,
+          "bits": [ 33 ],
+          "attributes": {
+          }
+        },
+        "$abc$388$new_n60": {
+          "hide_name": 1,
+          "bits": [ 37 ],
+          "attributes": {
+          }
+        },
+        "$auto$alumacc.cc:495:replace_alu$36.Y": {
+          "hide_name": 1,
+          "bits": [ 23, 34 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:61.9-61.27|yosys-share/techmap.v:270.26-270.27"
+          }
+        },
+        "$auto$alumacc.cc:495:replace_alu$39.Y": {
+          "hide_name": 1,
+          "bits": [ 16 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "single_bit_vector": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:129.10-129.21|yosys-share/techmap.v:270.26-270.27"
+          }
+        },
+        "$auto$alumacc.cc:495:replace_alu$42.Y": {
+          "hide_name": 1,
+          "bits": [ 18 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "single_bit_vector": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:130.10-130.21|yosys-share/techmap.v:270.26-270.27"
+          }
+        },
+        "$auto$alumacc.cc:495:replace_alu$45.Y": {
+          "hide_name": 1,
+          "bits": [ 14 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "single_bit_vector": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:129.10-129.21|yosys-share/techmap.v:270.26-270.27"
+          }
+        },
+        "$auto$alumacc.cc:495:replace_alu$48.Y": {
+          "hide_name": 1,
+          "bits": [ 17 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "single_bit_vector": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:130.10-130.21|yosys-share/techmap.v:270.26-270.27"
+          }
+        },
+        "$auto$alumacc.cc:495:replace_alu$51.X": {
+          "hide_name": 1,
+          "bits": [ 31, 39 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:86.9-86.20|yosys-share/techmap.v:270.23-270.24",
+            "unused_bits": "1 "
+          }
+        },
+        "$auto$alumacc.cc:495:replace_alu$51.Y": {
+          "hide_name": 1,
+          "bits": [ 31, 30 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:86.9-86.20|yosys-share/techmap.v:270.26-270.27"
+          }
+        },
+        "$auto$alumacc.cc:495:replace_alu$54.Y": {
+          "hide_name": 1,
+          "bits": [ 22, 38 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:85.10-85.29|yosys-share/techmap.v:270.26-270.27"
+          }
+        },
+        "$auto$alumacc.cc:495:replace_alu$63.Y": {
+          "hide_name": 1,
+          "bits": [ 21 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "single_bit_vector": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:129.10-129.21|yosys-share/techmap.v:270.26-270.27"
+          }
+        },
+        "$auto$alumacc.cc:495:replace_alu$69.Y": {
+          "hide_name": 1,
+          "bits": [ 19 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "single_bit_vector": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:130.10-130.21|yosys-share/techmap.v:270.26-270.27"
+          }
+        },
+        "a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:17.55-17.59"
+          }
+        },
+        "b_in": {
+          "hide_name": 0,
+          "bits": [ 6, 7 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:18.55-18.59"
+          }
+        },
+        "c_in": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:19.7-19.11"
+          }
+        },
+        "clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:14.7-14.12"
+          }
+        },
+        "d_in": {
+          "hide_name": 0,
+          "bits": [ 9 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:20.7-20.11"
+          }
+        },
+        "out0": {
+          "hide_name": 0,
+          "bits": [ 10, 11 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:22.56-22.60"
+          }
+        },
+        "out1": {
+          "hide_name": 0,
+          "bits": [ 12 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:23.9-23.13"
+          }
+        },
+        "reset_n": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:15.8-15.15"
+          }
+        },
+        "temp_a": {
+          "hide_name": 0,
+          "bits": [ 24, 26 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:28.54-28.60"
+          }
+        },
+        "temp_b": {
+          "hide_name": 0,
+          "bits": [ 25, 27 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:29.54-29.60"
+          }
+        },
+        "top_a.a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
+          "attributes": {
+            "hdlname": "top_a a_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:50.55-50.59"
+          }
+        },
+        "top_a.b_in": {
+          "hide_name": 0,
+          "bits": [ 6, 7 ],
+          "attributes": {
+            "hdlname": "top_a b_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:51.55-51.59"
+          }
+        },
+        "top_a.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_a clock",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:49.7-49.12"
+          }
+        },
+        "top_a.mya_d.c_in": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "hdlname": "top_a mya_d c_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:121.7-121.11"
+          }
+        },
+        "top_a.mya_d.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_a mya_d clock",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:120.7-120.12"
+          }
+        },
+        "top_a.mya_d.d_in": {
+          "hide_name": 0,
+          "bits": [ 6 ],
+          "attributes": {
+            "hdlname": "top_a mya_d d_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:122.7-122.11"
+          }
+        },
+        "top_a.mya_d.out1": {
+          "hide_name": 0,
+          "bits": [ 22 ],
+          "attributes": {
+            "hdlname": "top_a mya_d out1",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:123.9-123.13"
+          }
+        },
+        "top_a.mya_d.temp": {
+          "hide_name": 0,
+          "bits": [ 15 ],
+          "attributes": {
+            "hdlname": "top_a mya_d temp",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:125.5-125.9"
+          }
+        },
+        "top_a.mya_d2.c_in": {
+          "hide_name": 0,
+          "bits": [ 5 ],
+          "attributes": {
+            "hdlname": "top_a mya_d2 c_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:121.7-121.11"
+          }
+        },
+        "top_a.mya_d2.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_a mya_d2 clock",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:120.7-120.12"
+          }
+        },
+        "top_a.mya_d2.d_in": {
+          "hide_name": 0,
+          "bits": [ 6 ],
+          "attributes": {
+            "hdlname": "top_a mya_d2 d_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:122.7-122.11"
+          }
+        },
+        "top_a.mya_d2.out1": {
+          "hide_name": 0,
+          "bits": [ 35 ],
+          "attributes": {
+            "hdlname": "top_a mya_d2 out1",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:123.9-123.13"
+          }
+        },
+        "top_a.mya_d2.temp": {
+          "hide_name": 0,
+          "bits": [ 13 ],
+          "attributes": {
+            "hdlname": "top_a mya_d2 temp",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:125.5-125.9"
+          }
+        },
+        "top_a.out": {
+          "hide_name": 0,
+          "bits": [ 24, 26 ],
+          "attributes": {
+            "hdlname": "top_a out",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:52.59-52.62"
+          }
+        },
+        "top_a.temp": {
+          "hide_name": 0,
+          "bits": [ 22, 35 ],
+          "attributes": {
+            "hdlname": "top_a temp",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:54.54-54.58"
+          }
+        },
+        "top_b.a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
+          "attributes": {
+            "hdlname": "top_b a_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:73.55-73.59"
+          }
+        },
+        "top_b.b_in": {
+          "hide_name": 0,
+          "bits": [ 6, 7 ],
+          "attributes": {
+            "hdlname": "top_b b_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:74.55-74.59"
+          }
+        },
+        "top_b.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_b clock",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:72.7-72.12"
+          }
+        },
+        "top_b.myb_c.c_in": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "hdlname": "top_b myb_c c_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:99.7-99.11"
+          }
+        },
+        "top_b.myb_c.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_b myb_c clock",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:98.7-98.12"
+          }
+        },
+        "top_b.myb_c.d_in": {
+          "hide_name": 0,
+          "bits": [ 6 ],
+          "attributes": {
+            "hdlname": "top_b myb_c d_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:100.7-100.11"
+          }
+        },
+        "top_b.myb_c.myc_d.c_in": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "hdlname": "top_b myb_c myc_d c_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:121.7-121.11"
+          }
+        },
+        "top_b.myb_c.myc_d.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_b myb_c myc_d clock",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:120.7-120.12"
+          }
+        },
+        "top_b.myb_c.myc_d.d_in": {
+          "hide_name": 0,
+          "bits": [ 6 ],
+          "attributes": {
+            "hdlname": "top_b myb_c myc_d d_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:122.7-122.11"
+          }
+        },
+        "top_b.myb_c.myc_d.out1": {
+          "hide_name": 0,
+          "bits": [ 22 ],
+          "attributes": {
+            "hdlname": "top_b myb_c myc_d out1",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:123.9-123.13"
+          }
+        },
+        "top_b.myb_c.myc_d.temp": {
+          "hide_name": 0,
+          "bits": [ 15 ],
+          "attributes": {
+            "hdlname": "top_b myb_c myc_d temp",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:125.5-125.9"
+          }
+        },
+        "top_b.myb_c.out1": {
+          "hide_name": 0,
+          "bits": [ 23 ],
+          "attributes": {
+            "hdlname": "top_b myb_c out1",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:101.9-101.13"
+          }
+        },
+        "top_b.myb_c.temp2": {
+          "hide_name": 0,
+          "bits": [ 22 ],
+          "attributes": {
+            "hdlname": "top_b myb_c temp2",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:104.6-104.11"
+          }
+        },
+        "top_b.myb_c2.c_in": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "hdlname": "top_b myb_c2 c_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:99.7-99.11"
+          }
+        },
+        "top_b.myb_c2.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_b myb_c2 clock",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:98.7-98.12"
+          }
+        },
+        "top_b.myb_c2.d_in": {
+          "hide_name": 0,
+          "bits": [ 7 ],
+          "attributes": {
+            "hdlname": "top_b myb_c2 d_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:100.7-100.11"
+          }
+        },
+        "top_b.myb_c2.myc_d.c_in": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "hdlname": "top_b myb_c2 myc_d c_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:121.7-121.11"
+          }
+        },
+        "top_b.myb_c2.myc_d.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_b myb_c2 myc_d clock",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:120.7-120.12"
+          }
+        },
+        "top_b.myb_c2.myc_d.d_in": {
+          "hide_name": 0,
+          "bits": [ 7 ],
+          "attributes": {
+            "hdlname": "top_b myb_c2 myc_d d_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:122.7-122.11"
+          }
+        },
+        "top_b.myb_c2.myc_d.out1": {
+          "hide_name": 0,
+          "bits": [ 36 ],
+          "attributes": {
+            "hdlname": "top_b myb_c2 myc_d out1",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:123.9-123.13"
+          }
+        },
+        "top_b.myb_c2.myc_d.temp": {
+          "hide_name": 0,
+          "bits": [ 20 ],
+          "attributes": {
+            "hdlname": "top_b myb_c2 myc_d temp",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:125.5-125.9"
+          }
+        },
+        "top_b.myb_c2.temp2": {
+          "hide_name": 0,
+          "bits": [ 36 ],
+          "attributes": {
+            "hdlname": "top_b myb_c2 temp2",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:104.6-104.11"
+          }
+        },
+        "top_b.out": {
+          "hide_name": 0,
+          "bits": [ 25, 27 ],
+          "attributes": {
+            "hdlname": "top_b out",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:77.59-77.62"
+          }
+        },
+        "top_b.temp": {
+          "hide_name": 0,
+          "bits": [ 28, 29 ],
+          "attributes": {
+            "hdlname": "top_b temp",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:75.53-75.57"
+          }
+        },
+        "top_b.temp2": {
+          "hide_name": 0,
+          "bits": [ 23, 40 ],
+          "attributes": {
+            "hdlname": "top_b temp2",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:76.54-76.59",
+            "unused_bits": "1 "
+          }
+        },
+        "top_c.c_in": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "hdlname": "top_c c_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:99.7-99.11"
+          }
+        },
+        "top_c.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_c clock",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:98.7-98.12"
+          }
+        },
+        "top_c.d_in": {
+          "hide_name": 0,
+          "bits": [ 9 ],
+          "attributes": {
+            "hdlname": "top_c d_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:100.7-100.11"
+          }
+        },
+        "top_c.myc_d.c_in": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "hdlname": "top_c myc_d c_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:121.7-121.11"
+          }
+        },
+        "top_c.myc_d.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_c myc_d clock",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:120.7-120.12"
+          }
+        },
+        "top_c.myc_d.d_in": {
+          "hide_name": 0,
+          "bits": [ 9 ],
+          "attributes": {
+            "hdlname": "top_c myc_d d_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:122.7-122.11"
+          }
+        },
+        "top_d.c_in": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "hdlname": "top_d c_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:121.7-121.11"
+          }
+        },
+        "top_d.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_d clock",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:120.7-120.12"
+          }
+        },
+        "top_d.d_in": {
+          "hide_name": 0,
+          "bits": [ 9 ],
+          "attributes": {
+            "hdlname": "top_d d_in",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm_mod.v:122.7-122.11"
+          }
+        }
+      }
+    }
+  }
+}

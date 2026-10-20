@@ -1,0 +1,187 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_dag2_lpm": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_dag2_lpm.v:4.1-29.10"
+      },
+      "ports": {
+        "clock": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "reset_n": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "a_in": {
+          "direction": "input",
+          "bits": [ 4, 5 ]
+        },
+        "b_in": {
+          "direction": "input",
+          "bits": [ 6, 7 ]
+        },
+        "out": {
+          "direction": "output",
+          "bits": [ 6, 8 ]
+        }
+      },
+      "cells": {
+        "$auto$simplemap.cc:38:simplemap_not$96": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": ""
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6 ],
+            "Y": [ 9 ]
+          }
+        },
+        "$auto$simplemap.cc:38:simplemap_not$97": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": ""
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 7 ],
+            "Y": [ 10 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$101": {
+          "hide_name": 1,
+          "type": "$_XOR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag2_lpm.v:26.16-26.27|yosys-share/techmap.v:288.13-288.20"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6 ],
+            "B": [ 4 ],
+            "Y": [ 11 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$116": {
+          "hide_name": 1,
+          "type": "$_XOR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "yosys-share/techmap.v:289.13-289.25"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12 ],
+            "B": [ 9 ],
+            "Y": [ 8 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$119": {
+          "hide_name": 1,
+          "type": "$_XOR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "yosys-share/techmap.v:288.13-288.20"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 11 ],
+            "B": [ 10 ],
+            "Y": [ 12 ]
+          }
+        }
+      },
+      "netnames": {
+        "$auto$maccmap.cc:240:synth$92.B": {
+          "hide_name": 1,
+          "bits": [ 9, 10 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "src": "yosys-share/techmap.v:268.22-268.23"
+          }
+        },
+        "$auto$maccmap.cc:240:synth$92.X": {
+          "hide_name": 1,
+          "bits": [ 6, 12 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "src": "yosys-share/techmap.v:270.23-270.24"
+          }
+        },
+        "a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag2_lpm.v:14.55-14.59"
+          }
+        },
+        "b_in": {
+          "hide_name": 0,
+          "bits": [ 6, 7 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag2_lpm.v:15.55-15.59"
+          }
+        },
+        "clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag2_lpm.v:11.7-11.12"
+          }
+        },
+        "out": {
+          "hide_name": 0,
+          "bits": [ 6, 8 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag2_lpm.v:17.56-17.59"
+          }
+        },
+        "reset_n": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag2_lpm.v:12.8-12.15"
+          }
+        },
+        "temp1": {
+          "hide_name": 0,
+          "bits": [ 11, 13 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag2_lpm.v:20.57-20.62",
+            "unused_bits": "1 "
+          }
+        }
+      }
+    }
+  }
+}
