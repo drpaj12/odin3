@@ -2842,6 +2842,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
                     ${PROJECT_SOURCE_DIR}/tests/opt/rules)
         set_tests_properties(opt_rules_yosys PROPERTIES LABELS opt SKIP_RETURN_CODE 77 TIMEOUT 900)
+        # 4.8 Task 2 (spec T-2): fsm-equiv proves Yosys 0.55's own `fsm` on every FSM micro of
+        # tests/fsm/micros.txt equivalent to the RTL from reset, so each micro is a sound test;
+        # fsm_facts_current: tests/fsm/yosys_facts.json is what this Yosys reports for the corpus.
+        add_test(NAME fsm_equiv_selftest
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/fsm-check/fsm-equiv
+                    --yosys ${ODIN3_YOSYS055} --selftest ${PROJECT_SOURCE_DIR}/tests/fsm/micros.txt)
+        add_test(NAME fsm_facts_current
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/fsm-check/fsm-facts --check
+                    --yosys ${ODIN3_YOSYS055})
+        set_tests_properties(fsm_equiv_selftest fsm_facts_current PROPERTIES LABELS "unit;micro"
+                             TIMEOUT 300)
         # 2E Task 12: test_proc_gen_diff parses the --proc profile with this Yosys; 2D-7b:
         # test_hard_cell_widths runs write_rtlil's black-box stubs through it and the bridge.
         set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT

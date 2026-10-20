@@ -33,3 +33,33 @@ micro/full/bm_sfifo_rtl micro tests/micro/verilog/full/bm_sfifo_rtl.v
 micro/full/matmul micro tests/micro/verilog/full/matmul.v
 micro/full/memory_controller micro tests/micro/verilog/full/memory_controller.v
 micro/full/paj_framebuftop_hierarchy_no_mem_no_combinational micro tests/micro/verilog/full/paj_framebuftop_hierarchy_no_mem_no_combinational.v
+fsm/arst_low micro tests/fsm/arst_low.v arst_low
+fsm/counter_not_fsm micro tests/fsm/counter_not_fsm.v counter_not_fsm
+fsm/ctrl_out_case micro tests/fsm/ctrl_out_case.v ctrl_out_case
+fsm/enable_reg micro tests/fsm/enable_reg.v enable_reg
+fsm/enc_auto micro tests/fsm/enc_auto.v enc_auto
+fsm/enc_binary micro tests/fsm/enc_binary.v enc_binary
+fsm/enc_binary_packed micro tests/fsm/enc_binary_packed.v enc_binary_packed
+fsm/enc_none micro tests/fsm/enc_none.v enc_none
+fsm/enc_one_hot micro tests/fsm/enc_one_hot.v enc_one_hot
+fsm/enc_unknown micro tests/fsm/enc_unknown.v enc_unknown
+fsm/enc_user micro tests/fsm/enc_user.v enc_user
+fsm/init_reg micro tests/fsm/init_reg.v init_reg
+fsm/keep_reg micro tests/fsm/keep_reg.v keep_reg
+fsm/mealy_arst micro tests/fsm/mealy_arst.v mealy_arst
+fsm/moore_arst micro tests/fsm/moore_arst.v moore_arst
+fsm/negedge_clk micro tests/fsm/negedge_clk.v negedge_clk
+fsm/no_reset micro tests/fsm/no_reset.v no_reset
+fsm/one_bit micro tests/fsm/one_bit.v one_bit
+fsm/one_bit_attr micro tests/fsm/one_bit_attr.v one_bit_attr
+fsm/port_out micro tests/fsm/port_out.v port_out
+fsm/self_reset micro tests/fsm/self_reset.v self_reset
+fsm/states31 micro tests/fsm/states31.v states31
+fsm/states32 micro tests/fsm/states32.v states32
+fsm/states33 micro tests/fsm/states33.v states33
+fsm/sub_twice micro tests/fsm/sub_twice.v sub_twice
+fsm/sync_rst micro tests/fsm/sync_rst.v sync_rst
+fsm/two_fsm micro tests/fsm/two_fsm.v two_fsm
+fsm/selfloop_state micro tests/fsm/selfloop_state.v selfloop_state
+fsm/x_next micro tests/fsm/x_next.v x_next
+fsm/states32w micro tests/fsm/states32w.v states32w

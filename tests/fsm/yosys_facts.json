@@ -698,6 +698,569 @@
   ],
   "rejected": {}
  },
+ "fsm/arst_low": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$53",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "arst_low",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "arst_low.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/counter_not_fsm": {
+  "failures": [],
+  "fsms": [],
+  "marked": [],
+  "rejected": {}
+ },
+ "fsm/ctrl_out_case": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 4,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$61",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "ctrl_out_case",
+    "outputs": 4,
+    "reset_index": 0,
+    "states": 4,
+    "transitions": 5,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "ctrl_out_case.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/enable_reg": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$52",
+    "encoding": "one-hot",
+    "inputs": 2,
+    "module": "enable_reg",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 7,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "enable_reg.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/enc_auto": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$50",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "enc_auto",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "st"
+   }
+  ],
+  "marked": [],
+  "rejected": {}
+ },
+ "fsm/enc_binary": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 2,
+    "bits_before": 4,
+    "cell": "$fsm$\\st$51",
+    "encoding": "binary",
+    "inputs": 1,
+    "module": "enc_binary",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 4,
+    "transitions": 5,
+    "wire": "st"
+   }
+  ],
+  "marked": [],
+  "rejected": {}
+ },
+ "fsm/enc_binary_packed": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 2,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$51",
+    "encoding": "binary",
+    "inputs": 1,
+    "module": "enc_binary_packed",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 4,
+    "transitions": 5,
+    "wire": "st"
+   }
+  ],
+  "marked": [],
+  "rejected": {}
+ },
+ "fsm/enc_none": {
+  "failures": [],
+  "fsms": [],
+  "marked": [],
+  "rejected": {}
+ },
+ "fsm/enc_one_hot": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 4,
+    "bits_before": 3,
+    "cell": "$fsm$\\st$51",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "enc_one_hot",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 4,
+    "transitions": 5,
+    "wire": "st"
+   }
+  ],
+  "marked": [],
+  "rejected": {}
+ },
+ "fsm/enc_unknown": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$50",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "enc_unknown",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "st"
+   }
+  ],
+  "marked": [],
+  "rejected": {}
+ },
+ "fsm/enc_user": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 2,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$50",
+    "encoding": "user",
+    "inputs": 1,
+    "module": "enc_user",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "st"
+   }
+  ],
+  "marked": [],
+  "rejected": {}
+ },
+ "fsm/init_reg": {
+  "failures": [],
+  "fsms": [],
+  "marked": [],
+  "rejected": {
+   "init_reg.st": [
+    "Register has an initialization value"
+   ]
+  }
+ },
+ "fsm/keep_reg": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$50",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "keep_reg",
+    "outputs": 3,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "keep_reg.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/mealy_arst": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$55",
+    "encoding": "one-hot",
+    "inputs": 2,
+    "module": "mealy_arst",
+    "outputs": 2,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 6,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "mealy_arst.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/moore_arst": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$50",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "moore_arst",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "moore_arst.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/negedge_clk": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$50",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "negedge_clk",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "negedge_clk.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/no_reset": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$48",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "no_reset",
+    "outputs": 1,
+    "reset_index": -1,
+    "states": 3,
+    "transitions": 4,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "no_reset.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/one_bit": {
+  "failures": [],
+  "fsms": [],
+  "marked": [],
+  "rejected": {}
+ },
+ "fsm/one_bit_attr": {
+  "failures": [],
+  "fsms": [],
+  "marked": [],
+  "rejected": {}
+ },
+ "fsm/port_out": {
+  "failures": [],
+  "fsms": [],
+  "marked": [],
+  "rejected": {
+   "port_out.st": [
+    "Register is connected to module port",
+    "Users of register don't seem to benefit from recoding"
+   ]
+  }
+ },
+ "fsm/self_reset": {
+  "failures": [],
+  "fsms": [],
+  "marked": [],
+  "rejected": {
+   "self_reset.st": [
+    "Circuit seems to be self-resetting"
+   ]
+  }
+ },
+ "fsm/selfloop_state": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 4,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$53",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "selfloop_state",
+    "outputs": 2,
+    "reset_index": 0,
+    "states": 4,
+    "transitions": 5,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "selfloop_state.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/states31": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 31,
+    "bits_before": 5,
+    "cell": "$fsm$\\st$108",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "states31",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 31,
+    "transitions": 47,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "states31.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/states32": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 5,
+    "bits_before": 5,
+    "cell": "$fsm$\\st$109",
+    "encoding": "binary",
+    "inputs": 1,
+    "module": "states32",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 32,
+    "transitions": 48,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "states32.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/states32w": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 5,
+    "bits_before": 6,
+    "cell": "$fsm$\\st$109",
+    "encoding": "binary",
+    "inputs": 1,
+    "module": "states32w",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 32,
+    "transitions": 48,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "states32w.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/states33": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 6,
+    "bits_before": 6,
+    "cell": "$fsm$\\st$112",
+    "encoding": "binary",
+    "inputs": 1,
+    "module": "states33",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 33,
+    "transitions": 50,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "states33.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/sub_twice": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$49",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "sub_twice_cell",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "sub_twice_cell.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/sync_rst": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$51",
+    "encoding": "one-hot",
+    "inputs": 2,
+    "module": "sync_rst",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 6,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "sync_rst.st"
+  ],
+  "rejected": {}
+ },
+ "fsm/two_fsm": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\a$62",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "two_fsm",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "a"
+   },
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\b$68",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "two_fsm",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "b"
+   }
+  ],
+  "marked": [
+   "two_fsm.a",
+   "two_fsm.b"
+  ],
+  "rejected": {}
+ },
+ "fsm/x_next": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$50",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "x_next",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 3,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "x_next.st"
+  ],
+  "rejected": {}
+ },
  "mcml": {
   "failures": [],
   "fsms": [

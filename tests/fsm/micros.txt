@@ -1,0 +1,39 @@
+# NAME PATH TOP RESET CLOCK DEPTH EQUIV     (4.8 plan Task 2; spec T-2, section 15)
+# RESET is NAME:LEVEL (the input held at LEVEL in steps 1 and 2 of the bounded miter) or -.
+# EQUIV is yes when fsm-equiv must prove the micro equivalent from reset, no when only the
+# detection facts (tests/fsm/yosys_facts.json) are checked: RAM write-enable registers (the
+# miter would need memory_map) and designs with no reset.
+moore_arst tests/fsm/moore_arst.v moore_arst rst:1 clk 12 yes
+mealy_arst tests/fsm/mealy_arst.v mealy_arst rst:1 clk 12 yes
+sync_rst tests/fsm/sync_rst.v sync_rst rst:1 clk 12 yes
+no_reset tests/fsm/no_reset.v no_reset - clk 12 no
+states31 tests/fsm/states31.v states31 rst:1 clk 40 yes
+states32 tests/fsm/states32.v states32 rst:1 clk 40 yes
+states32w tests/fsm/states32w.v states32w rst:1 clk 40 yes
+states33 tests/fsm/states33.v states33 rst:1 clk 40 yes
+enc_one_hot tests/fsm/enc_one_hot.v enc_one_hot rst:1 clk 12 yes
+enc_binary tests/fsm/enc_binary.v enc_binary rst:1 clk 12 yes
+enc_binary_packed tests/fsm/enc_binary_packed.v enc_binary_packed rst:1 clk 12 yes
+enc_none tests/fsm/enc_none.v enc_none rst:1 clk 12 yes
+enc_auto tests/fsm/enc_auto.v enc_auto rst:1 clk 12 yes
+enc_unknown tests/fsm/enc_unknown.v enc_unknown rst:1 clk 12 yes
+enc_user tests/fsm/enc_user.v enc_user rst:1 clk 12 yes
+init_reg tests/fsm/init_reg.v init_reg rst:1 clk 12 yes
+port_out tests/fsm/port_out.v port_out rst:1 clk 12 yes
+keep_reg tests/fsm/keep_reg.v keep_reg rst:1 clk 12 yes
+self_reset tests/fsm/self_reset.v self_reset rst:1 clk 12 yes
+one_bit tests/fsm/one_bit.v one_bit rst:1 clk 12 yes
+one_bit_attr tests/fsm/one_bit_attr.v one_bit_attr rst:1 clk 12 yes
+two_fsm tests/fsm/two_fsm.v two_fsm rst:1 clk 12 yes
+sub_twice tests/fsm/sub_twice.v sub_twice rst:1 clk 12 yes
+negedge_clk tests/fsm/negedge_clk.v negedge_clk rst:1 clk 12 yes
+arst_low tests/fsm/arst_low.v arst_low rstn:0 clk 12 yes
+selfloop_state tests/fsm/selfloop_state.v selfloop_state rst:1 clk 12 yes
+x_next tests/fsm/x_next.v x_next rst:1 clk 12 no
+counter_not_fsm tests/fsm/counter_not_fsm.v counter_not_fsm rst:1 clk 12 yes
+ctrl_out_case tests/fsm/ctrl_out_case.v ctrl_out_case rst:1 clk 12 yes
+enable_reg tests/fsm/enable_reg.v enable_reg rst:1 clk 12 yes
+bm_DL_simple_fsm tests/micro/verilog/syntax/bm_DL_simple_fsm.v bm_DL_simple_fsm Resetn:0 Clock 12 yes
+multi_clock_reader_writer tests/micro/verilog/syntax/multi_clock_reader_writer.v multiclock_reader_writer reset:1 clock_reader_head 8 yes
+paj_framebuftop tests/micro/verilog/full/paj_framebuftop_hierarchy_no_mem_no_combinational.v paj_framebuftop_hierarchy_no_mem globalreset:1 tm3_clk_v0 4 yes
+memory_controller tests/micro/verilog/full/memory_controller.v memory_controller - clk 8 no
