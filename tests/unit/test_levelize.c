@@ -557,7 +557,8 @@ static void test_levels_reach_write_json(void) {
     char text[JSON_MAX] = {0};
     FILE *file = fopen(path, "rb");
     TEST_ASSERT_NOT_NULL(file);
-    (void)fread(text, 1, sizeof text - 1, file);
+    size_t got = fread(text, 1, sizeof text - 1, file);
+    TEST_ASSERT_TRUE(got > 0);
     (void)fclose(file);
     TEST_ASSERT_NOT_NULL(strstr(text, "\"odin3_level\""));
 }
