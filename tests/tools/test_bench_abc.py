@@ -76,7 +76,27 @@ class BenchAbcTest(unittest.TestCase):
         for column in ("abc_nodes", "abc_latches", "abc_levels"):
             self.assertEqual(linked[column], pinned[column], column)
         self.assertGreater(float(pinned["abc_ms"]), 0.0)
-        self.assertGreater(float(pinned["rss_peak_mb"]), 0.0)
+        if pinned["rss_peak_mb"] != "-":
+            self.assertGreater(float(pinned["rss_peak_mb"]), 0.0)
+
+    def test_a_childs_peak_is_not_inflated_by_the_parent(self) -> None:
+        sleeper = "/bin/sleep"
+        if not os.access(sleeper, os.X_OK):
+            self.skipTest("needs /bin/sleep")
+        proc = run([str(BENCH), "--selftest-rss", "200", "--exe", sleeper])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        fields = proc.stdout.split()
+        self.assertEqual((fields[0], fields[1], fields[3]),
+                         ("selftest_rss", "parent_mb", "child_peak_mb"))
+        parent, child = float(fields[2]), float(fields[4])
+        self.assertGreaterEqual(parent, 200.0)
+        self.assertGreater(child, 0.0)
+        self.assertLess(child, 50.0)  # ru_maxrss would read at least `parent`
+
+    def test_the_peak_column_is_a_dash_or_a_number(self) -> None:
+        row = rows(run([str(BENCH), "--one", str(FF), "--header"]).stdout)[0]
+        peak = row["rss_peak_mb"]
+        self.assertTrue(peak == "-" or float(peak) >= float(row["rss_before_mb"]), peak)
 
     def test_micro_prints_the_two_fixed_costs_as_numbers(self) -> None:
         proc = run([str(BENCH), "--micro"])

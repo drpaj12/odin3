@@ -5,6 +5,7 @@
  *
  * Usage: bench_abc --one FILE.blif [--lut K] [--via-blif DIR] [--exe ABC] [--techlib T] [--header]
  *        bench_abc --micro
+ *        bench_abc --selftest-rss MB --exe PROG
  *   --lut K       the LUT size (default 6)
  *   --via-blif D  the BLIF exchange through the directory D (abc<r>.in.blif, .cmd, .out.blif stay)
  *   --exe ABC     after each linked run, run the pinned `abc` executable on the same exchange BLIF
@@ -16,6 +17,9 @@
  * linked engine (the worst of 10, target 20 ms) and the script checker on a 64 KiB script (the
  * worst of 10, target 1 ms); one line `micro<TAB>open_close_ms<TAB>x<TAB>
  *                 checker_ms<TAB>y<TAB>checker_bytes<TAB>n`
+ * --selftest-rss MB --exe PROG: touch MB MiB, run `PROG 0.3` (e.g. /bin/sleep) through the same
+ * measuring spawn as --exe, print `selftest_rss<TAB>parent_mb<TAB>x<TAB>child_peak_mb<TAB>y`
+ * (y must be far below x: the child's peak is its own, polled from its /proc VmHWM).
  * The exchange of a run without --via-blif is the pass's default (ODIN3_ABC_EXCHANGE=aig|blif
  * chooses it, as for odin3). Run it from the repository root.
  *
@@ -30,7 +34,10 @@
  *                                            literal (percent), provenance parent edges
  *   rss_before_mb rss_peak_mb                the process's RSS before `abc` and its peak during it
  *                                            (VmHWM after a reset through /proc/self/clear_refs);
- *                                            on an `exe` line, the executable's peak RSS
+ *                                            on an `exe` line, the executable's own peak RSS
+ *                                            (its VmHWM polled every 1 ms until it exits: a lower
+ *                                            bound); `-` when the peak cannot be measured (no
+ *                                            clear_refs, or no sample)
  * then three columns past §12's list:
  *   abc_nodes abc_latches abc_levels         ABC's own `print_stats` line (nd, lat, lev) of the
  *                                            run's last, compared between the linked and `exe`
@@ -38,7 +45,8 @@
  *   aig_objs bytes_per_aig_obj               the calibration hook: AIG objects built (in-memory
  *                                            exchange) and (peak - before) / aig_objs in bytes;
  *                                            ODIN3_ABC_BYTES_PER_AIG_OBJ is 1.5 x the worst over
- *                                            the 19, only upwards
+ *                                            the 19, only upwards; `-` unless the call made
+ *                                            exactly one run (the peak is of the whole call)
  * A design with several clock domains has one line per domain; the RSS columns are those of the
  * whole `abc` call. Exit 0 on success, 1 when a read, the pass or the executable fails (the
  * diagnostics on stderr), 2 on a usage error or a Debug build (bench_guard.h).
@@ -65,6 +73,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 extern char **environ;
@@ -75,6 +84,8 @@ enum {
     ARGS_BYTES = 2 * PATH_BYTES,
     LINE_BYTES = 4096,
     DEFAULT_LUT = 6,
+    POLL_NS = 1000000,
+    PAGE_BYTES = 4096,
     KIB_PER_MIB = 1024,
     MICRO_REPEATS = 10,
     MICRO_LINES = 1000,
@@ -93,6 +104,7 @@ typedef struct bench_args {
     const char *exe;
     const char *techlib;
     unsigned lut;
+    unsigned long selftest_mb;
     bool header;
     bool micro;
 } bench_args;
@@ -106,6 +118,7 @@ typedef struct bench_state {
     odin3_abc_run_report reports[MAX_RUNS];
     abc_figures figures[MAX_RUNS];
     uint32_t count;
+    uint32_t dropped;
     abc_figures pending; /* the last print_stats line seen since the previous report */
 } bench_state;
 
@@ -150,15 +163,17 @@ static void on_report(const odin3_abc_run_report *report, void *user) {
         state->reports[state->count] = *report;
         state->figures[state->count] = state->pending;
         state->count++;
+    } else {
+        state->dropped++;
     }
     state->pending = (abc_figures){-1, -1, -1};
 }
 
 /* --- memory ---------------------------------------------------------------------------------- */
 
-/* The KiB after `key` (e.g. "VmHWM:") in /proc/self/status, or -1. */
-static long status_kib(const char *key) {
-    FILE *f = fopen("/proc/self/status", "r");
+/* The KiB after `key` (e.g. "VmHWM:") in the status file at path, or -1. */
+static long file_status_kib(const char *path, const char *key) {
+    FILE *f = fopen(path, "r");
     char line[LINE_BYTES / 8];
     long value = -1;
     if (f == NULL) {
@@ -174,6 +189,10 @@ static long status_kib(const char *key) {
     return value;
 }
 
+static long status_kib(const char *key) {
+    return file_status_kib("/proc/self/status", key);
+}
+
 /* Resets the kernel's high-water mark to the current RSS; false when that is unavailable. */
 static bool reset_peak(void) {
     FILE *f = fopen("/proc/self/clear_refs", "w");
@@ -184,8 +203,13 @@ static bool reset_peak(void) {
     return fclose(f) == 0 && ok;
 }
 
-static double mib(long kib) {
-    return kib < 0 ? -1.0 : (double)kib / KIB_PER_MIB;
+/* A MiB column: `-` when the figure is unavailable (kib < 0). */
+static void print_mib(long kib) {
+    if (kib < 0) {
+        (void)fputs("\t-", stdout);
+    } else {
+        (void)printf("\t%.1f", (double)kib / KIB_PER_MIB);
+    }
 }
 
 /* --- the pinned executable -------------------------------------------------------------------- */
@@ -244,13 +268,32 @@ static void read_exe_figures(const char *log_path, abc_figures *out) {
     free(text);
 }
 
-/* Spawns `exe -f cmd` with stdout and stderr in log_path; false when it fails or exits non-zero. */
-static bool spawn_exe(const char *exe, const char *cmd, const char *log_path, exe_result *out) {
+/* The child's own peak RSS: `ru_maxrss` of a spawned child is no use (Linux gives it the parent's
+ * high-water mark at exec), so the child's VmHWM (its own mm) is polled until it exits. It is the
+ * last sample before the exit: a lower bound, short by what the last POLL_NS could have added;
+ * -1 when no sample was possible. */
+static bool wait_polling(pid_t pid, int *status, long *peak) {
+    struct rusage usage;
+    char path[PATH_BYTES / 16];
+    const struct timespec nap = {0, POLL_NS};
+    (void)snprintf(path, sizeof path, "/proc/%ld/status", (long)pid);
+    *peak = -1;
+    for (;;) {
+        pid_t got = wait4(pid, status, WNOHANG, &usage);
+        if (got != 0) {
+            return got == pid;
+        }
+        long kib = file_status_kib(path, "VmHWM:");
+        *peak = kib > *peak ? kib : *peak;
+        (void)nanosleep(&nap, NULL);
+    }
+}
+
+/* Spawns argv[0] with stdout and stderr in log_path; false when it fails or exits non-zero. */
+static bool spawn_measured(char *const *argv, const char *log_path, exe_result *out) {
     posix_spawn_file_actions_t actions;
-    char *argv[] = {(char *)(uintptr_t)exe, (char *)(uintptr_t) "-f", (char *)(uintptr_t)cmd, NULL};
     pid_t pid = 0;
     int status = 0;
-    struct rusage usage;
     if (posix_spawn_file_actions_init(&actions) != 0) {
         return false;
     }
@@ -258,14 +301,19 @@ static bool spawn_exe(const char *exe, const char *cmd, const char *log_path, ex
                                               O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     rc = rc == 0 ? posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO) : rc;
     double start = odin3_now_ms();
-    rc = rc == 0 ? posix_spawn(&pid, exe, &actions, NULL, argv, environ) : rc;
+    rc = rc == 0 ? posix_spawn(&pid, argv[0], &actions, NULL, argv, environ) : rc;
     (void)posix_spawn_file_actions_destroy(&actions);
-    if (rc != 0 || wait4(pid, &status, 0, &usage) != pid) {
+    if (rc != 0 || !wait_polling(pid, &status, &out->peak_kib)) {
         return false;
     }
     out->ms = odin3_now_ms() - start;
-    out->peak_kib = usage.ru_maxrss;
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+/* Spawns `exe -f cmd` (see spawn_measured). */
+static bool spawn_exe(const char *exe, const char *cmd, const char *log_path, exe_result *out) {
+    char *argv[] = {(char *)(uintptr_t)exe, (char *)(uintptr_t) "-f", (char *)(uintptr_t)cmd, NULL};
+    return spawn_measured(argv, log_path, out);
 }
 
 /* Runs the pinned executable on run r's exchange files in dir; its figures in out. */
@@ -315,7 +363,7 @@ static void design_name(const char *file, char *name, size_t cap) {
 }
 
 static void print_linked(const char *design, const odin3_abc_run_report *rep,
-                         const abc_figures *abc, const memory *mem) {
+                         const abc_figures *abc, const memory *mem, uint32_t runs) {
     double outside = rep->classify_ms + rep->aig_ms + rep->check_ms + rep->splice_ms + rep->prov_ms;
     (void)printf("%s\t%s\t%s\t%s\t%u\t%u\t%u\t%u", design, rep->module, rep->domain,
                  rep->exchange == ODIN3_ABC_EXCHANGE_AIG ? "aig" : "blif", (unsigned)rep->cells,
@@ -328,11 +376,14 @@ static void print_linked(const char *design, const odin3_abc_run_report *rep,
     } else {
         (void)printf("\t%.1f", 100.0 * rep->namemap_hit / rep->namemap_total);
     }
-    (void)printf("\t%" PRIu64 "\t%.1f\t%.1f", rep->edges, mib(mem->before_kib), mib(mem->peak_kib));
+    (void)printf("\t%" PRIu64, rep->edges);
+    print_mib(mem->before_kib);
+    print_mib(mem->peak_kib);
     print_figure(abc->nodes);
     print_figure(abc->latches);
     print_figure(abc->levels);
-    if (rep->aig_objs == 0 || mem->peak_kib < mem->before_kib) {
+    /* peak - before is the whole `abc` call's growth: one run's own only when it made one run. */
+    if (rep->aig_objs == 0 || runs != 1 || mem->peak_kib < mem->before_kib) {
         (void)fputs("\t-\t-\n", stdout);
     } else {
         (void)printf("\t%u\t%.1f\n", (unsigned)rep->aig_objs,
@@ -345,7 +396,8 @@ static void print_exe(const char *design, const odin3_abc_run_report *rep, const
     print_figure(exe->figures.latches);
     print_figure(exe->figures.nodes);
     print_figure(exe->figures.levels);
-    (void)printf("\t-\t-\t-\t-\t-\t-\t%.3f\t-\t-\t-\t-\t%.1f", exe->ms, mib(exe->peak_kib));
+    (void)printf("\t-\t-\t-\t-\t-\t-\t%.3f\t-\t-\t-\t-", exe->ms);
+    print_mib(exe->peak_kib);
     print_figure(exe->figures.nodes);
     print_figure(exe->figures.latches);
     print_figure(exe->figures.levels);
@@ -359,8 +411,14 @@ static int print_all(const bench_args *args, const bench_state *state, const mem
         (void)puts(k_header);
     }
     int rc = 0;
+    if (state->count == 0 || state->dropped != 0) {
+        (void)fprintf(stderr, "bench_abc: %s\n",
+                      state->count == 0 ? "the abc call made no run (no soft logic?)"
+                                        : "more runs than MAX_RUNS: the extra reports are dropped");
+        rc = 1;
+    }
     for (uint32_t i = 0; i < state->count; i++) {
-        print_linked(name, &state->reports[i], &state->figures[i], mem);
+        print_linked(name, &state->reports[i], &state->figures[i], mem, state->count);
         exe_result exe = {0, -1, {-1, -1, -1}};
         if (args->exe != NULL && run_exe(args, state->reports[i].run_no, &exe)) {
             print_exe(name, &state->reports[i], &exe);
@@ -484,7 +542,7 @@ static int bench_one(const bench_args *args) {
     odin3_abc_test_set_report(on_report, &state);
     rc = rc == 0 && odin3_pass_run(design, "abc", odin3_bytes_cstr(pass_args)) != ODIN3_OK ? 1 : rc;
     odin3_abc_test_set_report(NULL, NULL);
-    mem.peak_kib = hwm ? status_kib("VmHWM:") : status_kib("VmRSS:");
+    mem.peak_kib = hwm ? status_kib("VmHWM:") : -1; /* no reset: no peak, not the current RSS */
     odin3_log_set_sink(NULL, NULL);
     rc = rc == 0 ? print_all(args, &state, &mem) : rc;
     odin3_design_destroy(design);
@@ -493,7 +551,9 @@ static int bench_one(const bench_args *args) {
 
 static int usage(void) {
     (void)fprintf(stderr, "usage: bench_abc --one FILE.blif [--lut K] [--via-blif DIR] [--exe ABC] "
-                          "[--techlib T] [--header]\n");
+                          "[--techlib T] [--header]\n"
+                          "       bench_abc --micro\n"
+                          "       bench_abc --selftest-rss MB --exe PROG\n");
     return 2;
 }
 
@@ -502,42 +562,96 @@ static bool plain_path(const char *path) {
     return path == NULL || (strpbrk(path, " \t\"'\\;#") == NULL && strlen(path) < PATH_BYTES / 2);
 }
 
-static bool parse_args(int argc, char **argv, bench_args *args) {
-    for (int i = 1; i < argc; i++) {
-        bool more = i + 1 < argc;
-        if (strcmp(argv[i], "--one") == 0 && more) {
-            args->file = argv[++i];
-        } else if (strcmp(argv[i], "--lut") == 0 && more) {
-            args->lut = (unsigned)strtoul(argv[++i], NULL, 10);
-        } else if (strcmp(argv[i], "--via-blif") == 0 && more) {
-            args->via_blif = argv[++i];
-        } else if (strcmp(argv[i], "--exe") == 0 && more) {
-            args->exe = argv[++i];
-        } else if (strcmp(argv[i], "--techlib") == 0 && more) {
-            args->techlib = argv[++i];
-        } else if (strcmp(argv[i], "--header") == 0) {
-            args->header = true;
-        } else if (strcmp(argv[i], "--micro") == 0) {
-            args->micro = true;
-        } else {
-            return false;
-        }
+/* An option with a value; false for any other name. */
+static bool value_option(bench_args *args, const char *name, const char *value) {
+    if (strcmp(name, "--one") == 0) {
+        args->file = value;
+    } else if (strcmp(name, "--lut") == 0) {
+        args->lut = (unsigned)strtoul(value, NULL, 10);
+    } else if (strcmp(name, "--via-blif") == 0) {
+        args->via_blif = value;
+    } else if (strcmp(name, "--exe") == 0) {
+        args->exe = value;
+    } else if (strcmp(name, "--techlib") == 0) {
+        args->techlib = value;
+    } else if (strcmp(name, "--selftest-rss") == 0) {
+        args->selftest_mb = strtoul(value, NULL, 10);
+    } else {
+        return false;
     }
+    return true;
+}
+
+/* An option without a value; false for any other name. */
+static bool flag_option(bench_args *args, const char *name) {
+    bool header = strcmp(name, "--header") == 0;
+    bool micro = strcmp(name, "--micro") == 0;
+    args->header = args->header || header;
+    args->micro = args->micro || micro;
+    return header || micro;
+}
+
+/* True when the arguments make one of the three modes. */
+static bool args_valid(const bench_args *args) {
     bool paths_ok = plain_path(args->file) && plain_path(args->via_blif) && plain_path(args->exe);
     if (args->micro) {
         return args->file == NULL && args->via_blif == NULL && args->exe == NULL;
     }
+    if (args->selftest_mb != 0) {
+        return args->file == NULL && args->via_blif == NULL && args->exe != NULL && paths_ok;
+    }
     return args->file != NULL && args->lut >= 2 && paths_ok &&
            (args->exe == NULL || args->via_blif != NULL);
+}
+
+static bool parse_args(int argc, char **argv, bench_args *args) {
+    for (int i = 1; i < argc; i++) {
+        if (flag_option(args, argv[i])) {
+            continue;
+        }
+        if (i + 1 >= argc || !value_option(args, argv[i], argv[i + 1])) {
+            return false;
+        }
+        i++;
+    }
+    return args_valid(args);
+}
+
+/* --selftest-rss MB: touch MB MiB here, run `--exe PROG 0.3` (so /bin/sleep) through the
+ * measuring spawn, print `selftest_rss<TAB>parent_mb<TAB>x<TAB>child_peak_mb<TAB>y`; the child's
+ * peak must not include what this process holds. */
+static int bench_selftest(const bench_args *args) {
+    size_t bytes = (size_t)args->selftest_mb * KIB_PER_MIB * KIB_PER_MIB;
+    volatile char *held = malloc(bytes);
+    if (held == NULL) {
+        return 1;
+    }
+    for (size_t at = 0; at < bytes; at += PAGE_BYTES) {
+        held[at] = 1; /* volatile: the pages are really touched */
+    }
+    char *argv[] = {(char *)(uintptr_t)args->exe, (char *)(uintptr_t) "0.3", NULL};
+    exe_result exe = {0, -1, {-1, -1, -1}};
+    bool ok = spawn_measured(argv, "/dev/null", &exe);
+    long parent_kib = status_kib("VmRSS:");
+    (void)printf("selftest_rss\tparent_mb");
+    print_mib(parent_kib);
+    (void)printf("\tchild_peak_mb");
+    print_mib(exe.peak_kib);
+    (void)puts("");
+    free((void *)(uintptr_t)held);
+    return ok ? 0 : 1;
 }
 
 int main(int argc, char **argv) {
     if (bench_refuse_unoptimized(argv[0]) != 0) {
         return 2;
     }
-    bench_args args = {NULL, NULL, NULL, NULL, DEFAULT_LUT, false, false};
+    bench_args args = {NULL, NULL, NULL, NULL, DEFAULT_LUT, 0, false, false};
     if (!parse_args(argc, argv, &args)) {
         return usage();
+    }
+    if (args.selftest_mb != 0) {
+        return bench_selftest(&args);
     }
     return args.micro ? bench_micro() : bench_one(&args);
 }

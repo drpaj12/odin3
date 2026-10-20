@@ -640,7 +640,7 @@ endif()
 # (3D plan finding 20) and reads the per-run report of abc_test.h.
 if(ODIN3_WITH_ABC)
     add_executable(bench_abc tests/bench/bench_abc.c)
-    # wait4: the executable's own peak RSS (ru_maxrss of that child alone).
+    # wait4 (WNOHANG) and nanosleep: the executable's own peak RSS (its VmHWM, polled).
     set_source_files_properties(tests/bench/bench_abc.c PROPERTIES COMPILE_DEFINITIONS
         _DEFAULT_SOURCE)
     target_include_directories(bench_abc PRIVATE ${PROJECT_SOURCE_DIR}/src
