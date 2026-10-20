@@ -7,21 +7,37 @@
 #include "passes/manager.h"
 #include "techlib/reader.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
 #define XML ODIN3_ARCH_DATA_DIR "/pb_ok.xml"
-#define OUT_DIR "/tmp/claude-1000/p4arch"
+enum { DIR_CAP = 64, PATH_CAP = 512 };
 
 static odin3_design *g_design;
+static char g_dir[DIR_CAP]; /* a fresh mkdtemp directory per test */
+
+/* Writes "<g_dir>/<name>" into buf and returns buf. */
+static const char *in_dir(char *buf, size_t cap, const char *name) {
+    (void)snprintf(buf, cap, "%s/%s", g_dir, name);
+    return buf;
+}
 
 void setUp(void) {
     arch_test_reset();
     EQ_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_DEBUG));
     g_design = odin3_design_create();
     NOT_NULL(g_design);
+    (void)snprintf(g_dir, sizeof g_dir, "/tmp/odin3-arch-pass-XXXXXX");
+    NOT_NULL(mkdtemp(g_dir));
 }
 
 void tearDown(void) {
     odin3_design_destroy(g_design);
     arch_test_done();
+    char path[PATH_CAP];
+    (void)unlink(in_dir(path, sizeof path, "rt.o3lib"));
+    (void)rmdir(g_dir);
 }
 
 static odin3_status run(odin3_design *design, const char *pass, const char *args) {
@@ -47,9 +63,11 @@ static void test_read_arch_registers_models(void) {
 
 static void test_write_techlib_round_trip(void) {
     EQ_INT(ODIN3_OK, run(g_design, "read_arch", XML));
-    EQ_INT_MSG(ODIN3_OK, run(g_design, "write_techlib", OUT_DIR "/rt.o3lib"), g_msg);
+    char path[PATH_CAP];
+    EQ_INT_MSG(ODIN3_OK, run(g_design, "write_techlib", in_dir(path, sizeof path, "rt.o3lib")),
+               g_msg);
     odin3_design *fresh = odin3_design_create();
-    EQ_INT_MSG(ODIN3_OK, odin3_techlib_read(fresh, OUT_DIR "/rt.o3lib"), g_msg);
+    EQ_INT_MSG(ODIN3_OK, odin3_techlib_read(fresh, path), g_msg);
     arch_test_same_type(g_design, fresh, "adder");
     arch_test_same_type(g_design, fresh, "multiply");
     arch_test_same_type(g_design, fresh, "single_port_ram");
@@ -74,7 +92,8 @@ static void test_bad_arguments(void) {
     EQ_INT(ODIN3_ERR_INVALID_ARG, run(g_design, "read_arch", ""));
     EQ_INT(ODIN3_ERR_INVALID_ARG, run(g_design, "read_arch", "a.xml b.xml"));
     arch_test_reset();
-    EQ_INT(ODIN3_ERR_IO, run(g_design, "read_arch", OUT_DIR "/missing.xml"));
+    char path[PATH_CAP];
+    EQ_INT(ODIN3_ERR_IO, run(g_design, "read_arch", in_dir(path, sizeof path, "missing.xml")));
     NOT_NULL(strstr(g_msg, "cannot read"));
     IS_NULL(odin3_design_arch(g_design));
 }
