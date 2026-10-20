@@ -38,10 +38,12 @@ typedef struct odin3_hardmap_stats {
  * source cell intact (H-9); a `$mul` whose Y_WIDTH exceeds A_WIDTH + B_WIDTH (unsigned), and an
  * `$add`/`$sub` whose Y_WIDTH exceeds max(A_WIDTH, B_WIDTH) + 1, stay soft so that no merge after
  * the delete allocates. An explicit `multiply` instance is treated like the equivalent `$mul`
- * (WIDTH 2 soft as a `$mul`, else padded to 36), with a warning (M-6 as amended 2026-10-17). One
+ * (WIDTH 2 soft as a `$mul`, else padded to the arch's multiplier width W), with a warning (M-6 as
+ * amended 2026-10-17); one above W is the equivalent `$mul`. An unsigned `$mul` with an operand
+ * above W is split into smaller `$mul` and `$add` cells (4.3 X-4, mul_split.c). One
  * provenance operation and one DERIVED record per source cell (H-7). Errors (logged, spec H-3,
- * M-6): a needed hard cell type that is missing, not `hard` or of another shape, an explicit
- * `multiply` wider than 36; ODIN3_ERR_INVALID_ARG, the IR unchanged. ODIN3_ERR_PARSE when the
+ * M-6): a needed hard cell type that is missing, not `hard` or of another shape;
+ * ODIN3_ERR_INVALID_ARG, the IR unchanged. ODIN3_ERR_PARSE when the
  * design budget is exceeded, possibly after earlier modules were mapped. *stats (may be NULL) gets
  * the totals; the INFO line of H-10 is logged.
  */
@@ -52,9 +54,15 @@ odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
 typedef struct odin3_partial_map_opts {
     bool allow_unknown_blocks; /* `--allow-unknown-blocks` (B-6): an unknown black box is a warning
                                 */
-    bool mem_width_arch; /* `--mem-width arch`: slice memories to the arch's widest mode (R-4) */
-    uint32_t min_add;    /* `--min-add N` (4.2 C-4): an `$add`/`$sub` of fewer than N bits is
-                            left to lower; 0 is "not given" (1) */
+    bool mem_width_arch;   /* `--mem-width arch`: slice memories to the arch's widest mode (R-4) */
+    uint32_t min_add;      /* `--min-add N` (4.2 C-4): an `$add`/`$sub` of fewer than N bits is
+                              left to lower; 0 is "not given" (1) */
+    bool parmys_split_ext; /* `--parmys-split-ext` (4.3 D19): the B split of a multiplier
+                              sign-extends the low product as Parmys does; for hardmap-diff's retry,
+                              not for use */
+    uint32_t min_mult;     /* `--min-mult N` (4.2 X-3): a `$mul` whose operands are both at least 2
+                              bits and whose wider operand has fewer than N bits is left to lower;
+                              0 is "not given" (3) */
 } odin3_partial_map_opts;
 
 /* odin3_partial_map_run with options (NULL: the defaults). `--mem-width arch` on a design without

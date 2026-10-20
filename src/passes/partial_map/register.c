@@ -1,6 +1,7 @@
 /*
  * register.c — the `partial_map` pass definition and its `hardmap` alias (3C spec H-1..H-3): the
- * arguments `--allow-unknown-blocks` (B-6), `--min-add N` (4.2 C-4) and `--mem-width arch` (R-4),
+ * arguments `--allow-unknown-blocks` (B-6), `--min-add N` (4.2 C-4), `--min-mult N` (X-3) and
+ * `--mem-width arch` (R-4),
  * no processes in the design (the manager refuses a design that still has `$proc` nodes), the
  * entry point is
  * odin3_partial_map_run_opts in hardmap.c.
@@ -21,13 +22,14 @@
 
 enum { ARG_CAP = 32, DECIMAL = 10 };
 #define OPT_MIN_ADD "--min-add"
+#define OPT_MIN_MULT "--min-mult"
 
-/* `--min-add N` (4.2 C-4): N a plain decimal whole number of at least 1 (no sign, no blanks).
- * Given twice, the last value wins. */
-static odin3_status parse_min_add(odin3_bytes value, uint32_t *out) {
+/* `--min-add N` (4.2 C-4) and `--min-mult N` (4.2 X-3): N a plain decimal whole number of at least
+ * 1 (no sign, no blanks), named by option. Given twice, the last value wins. */
+static odin3_status parse_count(const char *option, odin3_bytes value, uint32_t *out) {
     char text[ARG_CAP];
     if (value.ptr == NULL || value.len == 0) {
-        odin3_log(ODIN3_LOG_ERROR, "partial_map: --min-add needs a whole number of at least 1");
+        odin3_log(ODIN3_LOG_ERROR, "partial_map: %s needs a whole number of at least 1", option);
         return ODIN3_ERR_INVALID_ARG;
     }
     bool fits = value.len < sizeof text;
@@ -39,8 +41,8 @@ static odin3_status parse_min_add(odin3_bytes value, uint32_t *out) {
     unsigned long parsed = strtoul(text, &end, DECIMAL);
     bool digits = isdigit((unsigned char)text[0]) != 0;
     if (!digits || !fits || errno != 0 || *end != '\0' || parsed < 1 || parsed > UINT32_MAX) {
-        odin3_log(ODIN3_LOG_ERROR, "partial_map: --min-add '%s': need a whole number of at least 1",
-                  text);
+        odin3_log(ODIN3_LOG_ERROR, "partial_map: %s '%s': need a whole number of at least 1",
+                  option, text);
         return ODIN3_ERR_INVALID_ARG;
     }
     *out = (uint32_t)parsed;
@@ -71,13 +73,17 @@ static odin3_status partial_map_pass_run(odin3_pass_ctx *ctx, odin3_design *desi
         if (odin3_pass_arg_is(word, "--allow-unknown-blocks")) {
             opts.allow_unknown_blocks = true;
         } else if (odin3_pass_arg_is(word, OPT_MIN_ADD)) {
-            st = parse_min_add(odin3_pass_arg_next(&args), &opts.min_add);
+            st = parse_count(OPT_MIN_ADD, odin3_pass_arg_next(&args), &opts.min_add);
+        } else if (odin3_pass_arg_is(word, "--parmys-split-ext")) {
+            opts.parmys_split_ext = true;
+        } else if (odin3_pass_arg_is(word, OPT_MIN_MULT)) {
+            st = parse_count(OPT_MIN_MULT, odin3_pass_arg_next(&args), &opts.min_mult);
         } else if (odin3_pass_arg_is(word, "--mem-width")) {
             st = parse_mem_width(&args, &opts);
         } else {
             odin3_log(ODIN3_LOG_ERROR,
                       "partial_map: unknown argument '%.*s' (known: --allow-unknown-blocks, "
-                      "--min-add N, --mem-width arch)",
+                      "--min-add N, --min-mult N, --mem-width arch, --parmys-split-ext)",
                       (int)word.len, (const char *)word.ptr);
             st = ODIN3_ERR_INVALID_ARG;
         }

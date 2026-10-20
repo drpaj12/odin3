@@ -11,6 +11,7 @@
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_internal.h"
 #include "frontends/elab/elab_test.h"
+#include "frontends/elab/netlist_locs.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -91,7 +92,7 @@ static void node_srcloc(const odin3_elab2 *e2, const odin3_srcman *sm, odin3_ast
 
 /* The record of req for a module named spec_name (the module itself has no IR module yet). */
 static odin3_status prov_for(odin3_elab2 *e2, uint32_t spec_name, const odin3_elab2_prov_req *req,
-                             odin3_prov_id *out) {
+                             const odin3_elab2_nl_extra *nl, odin3_prov_id *out) {
     odin3_srcman *sm = NULL;
     odin3_status st = odin3_design_get_srcman(e2->design, &sm);
     odin3_srcloc locs[2];
@@ -110,11 +111,25 @@ static odin3_status prov_for(odin3_elab2 *e2, uint32_t spec_name, const odin3_el
     st = st != ODIN3_OK ? st
                         : odin3_design_intern(
                               e2->design, (odin3_bytes){e2->text.data, e2->text.len}, &origin.hier);
-    return st != ODIN3_OK ? st : odin3_prov_source(e2->ctx, &origin, out);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (!e2->opts.netlist) {
+        return odin3_prov_source(e2->ctx, &origin, out);
+    }
+    /* -netlist: the reader's own record is a netlist line (L-7), then the restored locations */
+    odin3_prov_id imported = {0};
+    st = odin3_prov_imported(e2->ctx, &origin, &imported);
+    return st != ODIN3_OK ? st : odin3_netlist_prov(e2, req, nl, imported, out);
 }
 
 odin3_status odin3_elab2_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req,
                               odin3_prov_id *out) {
+    return odin3_elab2_prov_nl(e2, req, NULL, out);
+}
+
+odin3_status odin3_elab2_prov_nl(odin3_elab2 *e2, const odin3_elab2_prov_req *req,
+                                 const odin3_elab2_nl_extra *nl, odin3_prov_id *out) {
     if (e2->mod == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_elab2_prov: no module is being emitted");
         return ODIN3_ERR_INVALID_ARG;
@@ -123,7 +138,7 @@ odin3_status odin3_elab2_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req,
     if (inlined.call.v == 0) { /* inside a call being inlined: the second loc of EL-45 */
         inlined.call = e2->call;
     }
-    return prov_for(e2, e2->mod_name, &inlined, out);
+    return prov_for(e2, e2->mod_name, &inlined, nl, out);
 }
 
 /* --- attributes (2A §7) ---------------------------------------------------------------------- */
@@ -154,6 +169,9 @@ static odin3_status attrs_apply(odin3_elab2 *e2, odin3_ast_id node, odin3_objref
     for (uint32_t i = 0; i < attrs.n; i++) {
         uint32_t key = odin3_ast_name(e2->elab, attrs.ids[i]);
         if (key == skip) {
+            continue;
+        }
+        if (odin3_netlist_src_consumed(e2, attrs.ids[i])) { /* restored as a record (D-3a) */
             continue;
         }
         odin3_value value;
@@ -238,8 +256,35 @@ static uint32_t implicit_key(const odin3_elab2 *e2, const odin3_symbol *rec) {
     return key;
 }
 
+/* Under -netlist, a module-level wire named `\\hier/short@file:line ` takes SHORT (L-5, D-3c), made
+ * unique (IR-14); nl_name carries the decoded name for its record. */
+static odin3_status netlist_wire_name(odin3_elab2 *e2, const odin3_symbol *rec,
+                                      odin3_wire_spec *spec, odin3_netlist_name *nl_name) {
+    if (!e2->opts.netlist || spec->name != rec->name) {
+        return ODIN3_OK;
+    }
+    odin3_status st = odin3_netlist_name_decode(e2, rec->name, nl_name);
+    return st != ODIN3_OK || !nl_name->matched
+               ? st
+               : odin3_netlist_unique_wire(e2, nl_name->short_str, &spec->name);
+}
+
+/* The declaration's attributes, then the declarator's, onto a wire just made. */
+typedef struct wire_decl {
+    odin3_ast_id decl, declarator;
+} wire_decl;
+
+static odin3_status wire_attrs(odin3_elab2 *e2, const odin3_symbol *rec, const wire_decl *wd,
+                               odin3_wire_id wire) {
+    odin3_objref obj = {ODIN3_OBJ_WIRE, wire.v};
+    odin3_status st = attrs_apply(e2, wd->decl, obj, implicit_key(e2, rec));
+    return st != ODIN3_OK ? st : attrs_apply(e2, wd->declarator, obj, 0);
+}
+
 /* The wire of one net or variable declarator (a memory makes none: EL-27, Task 20). */
-static odin3_status wire_one(odin3_elab2 *e2, odin3_ast_id decl, odin3_ast_id declarator) {
+static odin3_status wire_one(odin3_elab2 *e2, const wire_decl *wd) {
+    odin3_ast_id decl = wd->decl;
+    odin3_ast_id declarator = wd->declarator;
     odin3_sym_id sym = odin3_elab_sym_of(&e2->bind, declarator);
     const odin3_symbol *rec = odin3_symbol_get(e2->st, sym);
     if (rec == NULL || rec->ir_wire.v != 0 || rec->n_unpacked > 0) {
@@ -257,13 +302,14 @@ static odin3_status wire_one(odin3_elab2 *e2, odin3_ast_id decl, odin3_ast_id de
                           odin3_strtab_get(odin3_design_strtab(e2->design), spec.name));
         return ODIN3_OK;
     }
+    odin3_netlist_name nl_name = {0};
+    st = st != ODIN3_OK ? st : netlist_wire_name(e2, rec, &spec, &nl_name);
     odin3_elab2_prov_req req = {declarator, {0}, rec->scope.v};
-    st = st != ODIN3_OK ? st : odin3_elab2_prov(e2, &req, &spec.prov);
+    odin3_elab2_nl_extra nl = {decl, &nl_name};
+    st = st != ODIN3_OK ? st : odin3_elab2_prov_nl(e2, &req, &nl, &spec.prov);
     odin3_wire_id wire = {0};
     st = st != ODIN3_OK ? st : odin3_wire_create(e2->mod, &spec, NULL, &wire);
-    odin3_objref obj = {ODIN3_OBJ_WIRE, wire.v};
-    st = st != ODIN3_OK ? st : attrs_apply(e2, decl, obj, implicit_key(e2, rec));
-    st = st != ODIN3_OK ? st : attrs_apply(e2, declarator, obj, 0);
+    st = st != ODIN3_OK ? st : wire_attrs(e2, rec, wd, wire);
     st = st != ODIN3_OK ? st : odin3_symbol_set_ir(e2->st, sym, e2->mod_id, wire);
     odin3_elab2_counts made = {0, 0, width, 1};
     return st != ODIN3_OK ? st : odin3_elab2_account(e2, &made);
@@ -276,8 +322,28 @@ static odin3_status wires_of(odin3_elab2 *e2, odin3_ast_id decl) {
     for (uint32_t i = 0; st == ODIN3_OK && i < kids.n && !e2->stopped; i++) {
         if (kids.ids[i].v != 0 &&
             odin3_ast_kind_of(e2->elab, kids.ids[i]) == ODIN3_AST_DECLARATOR) {
-            st = wire_one(e2, decl, kids.ids[i]);
+            st = wire_one(e2, &(wire_decl){decl, kids.ids[i]});
         }
+    }
+    return st;
+}
+
+/* -netlist, before the wires: the raw spelling of every module-level declarator is noted, so a
+ * decoded name never takes one (the raw name always wins, as in the BLIF reader). */
+static odin3_status raw_names_of(odin3_elab2 *e2, odin3_ast_id decl) {
+    odin3_ast_span kids = odin3_ast_children(e2->elab, decl);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < kids.n; i++) {
+        if (kids.ids[i].v == 0 ||
+            odin3_ast_kind_of(e2->elab, kids.ids[i]) != ODIN3_AST_DECLARATOR) {
+            continue;
+        }
+        const odin3_symbol *rec =
+            odin3_symbol_get(e2->st, odin3_elab_sym_of(&e2->bind, kids.ids[i]));
+        uint32_t name = 0;
+        st = rec == NULL ? ODIN3_OK : odin3_elab2_scoped_name(e2, rec, &name);
+        st = st == ODIN3_OK && rec != NULL && name == rec->name ? odin3_netlist_note_raw(e2, name)
+                                                                : st;
     }
     return st;
 }
@@ -287,13 +353,16 @@ static bool is_expression(odin3_ast_kind kind) {
     return odin3_ast_class_has(ODIN3_AST_CLS_E, odin3_ast_kind_info_of((uint32_t)kind));
 }
 
-/* Whether the walk goes below node; a declaration makes its wires here (status in *st). */
-static bool wires_descend(odin3_elab2 *e2, odin3_ast_id node, odin3_status *st) {
+/* One NET_DECL or VAR_DECL met by the module walk. */
+typedef odin3_status (*decl_fn)(odin3_elab2 *e2, odin3_ast_id decl);
+
+/* Whether the walk goes below node; a declaration is handed to on_decl here (status in *st). */
+static bool wires_descend(odin3_elab2 *e2, odin3_ast_id node, decl_fn on_decl, odin3_status *st) {
     odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, node);
     switch (kind) {
     case ODIN3_AST_NET_DECL:
     case ODIN3_AST_VAR_DECL:
-        *st = odin3_elab2_pending(e2, node) ? ODIN3_OK : wires_of(e2, node);
+        *st = odin3_elab2_pending(e2, node) ? ODIN3_OK : on_decl(e2, node);
         return false;
     case ODIN3_AST_GEN_BLOCK:
     case ODIN3_AST_SEQ_BLOCK:
@@ -312,22 +381,29 @@ static bool wires_descend(odin3_elab2 *e2, odin3_ast_id node, odin3_status *st) 
     }
 }
 
-odin3_status odin3_elab2_wires(odin3_elab2 *e2, odin3_ast_id module_node) {
-    odin3_status st =
-        e2->mod_node.v == module_node.v ? ODIN3_OK : odin3_elab2_enter(e2, module_node);
+/* Hands every NET_DECL and VAR_DECL of the module (and its selected generate blocks) to on_decl. */
+static odin3_status walk_decls(odin3_elab2 *e2, odin3_ast_id module_node, decl_fn on_decl) {
     odin3_ast_cursor cur;
-    st = st != ODIN3_OK ? st : odin3_ast_cursor_init(&cur, e2->elab, module_node);
+    odin3_status st = odin3_ast_cursor_init(&cur, e2->elab, module_node);
     if (st != ODIN3_OK) {
         return st;
     }
     odin3_ast_event ev;
     odin3_ast_id node;
     while (st == ODIN3_OK && !e2->stopped && odin3_ast_cursor_next(&cur, &ev, &node)) {
-        if (ev == ODIN3_AST_ENTER && !wires_descend(e2, node, &st)) {
+        if (ev == ODIN3_AST_ENTER && !wires_descend(e2, node, on_decl, &st)) {
             odin3_ast_cursor_skip(&cur);
         }
     }
     odin3_ast_cursor_free(&cur);
+    return st;
+}
+
+odin3_status odin3_elab2_wires(odin3_elab2 *e2, odin3_ast_id module_node) {
+    odin3_status st =
+        e2->mod_node.v == module_node.v ? ODIN3_OK : odin3_elab2_enter(e2, module_node);
+    st = st == ODIN3_OK && e2->opts.netlist ? walk_decls(e2, module_node, raw_names_of) : st;
+    st = st == ODIN3_OK ? walk_decls(e2, module_node, wires_of) : st;
     if (st == ODIN3_OK && e2->stopped) {
         return ODIN3_ERR_PARSE;
     }
@@ -403,8 +479,9 @@ static odin3_status port_one(odin3_elab2 *e2, odin3_ast_id decl) {
                             .lsb = rec->packed.lsb,
                             .is_signed = (rec->flags & ODIN3_SYM_F_SIGNED) != 0};
     odin3_elab2_prov_req req = {decl, {0}, 0};
+    odin3_elab2_nl_extra nl = {declarator, NULL};
     odin3_status st = odin3_elab2_reserve_nets(e2, width, odin3_ast_loc(e2->elab, declarator));
-    st = st != ODIN3_OK ? st : odin3_elab2_prov(e2, &req, &spec.prov);
+    st = st != ODIN3_OK ? st : odin3_elab2_prov_nl(e2, &req, &nl, &spec.prov);
     odin3_node_id node = {0};
     odin3_status made = st != ODIN3_OK ? st : add_port(e2, &spec, &node);
     if (st == ODIN3_OK && made != ODIN3_OK) {
@@ -440,7 +517,7 @@ static odin3_status create_module(odin3_elab2 *e2, odin3_ast_id node) {
     }
     odin3_prov_id prov = {0};
     odin3_elab2_prov_req req = {node, {0}, 0};
-    odin3_status st = prov_for(e2, name, &req, &prov);
+    odin3_status st = prov_for(e2, name, &req, NULL, &prov);
     odin3_module_id id = {0};
     st = st != ODIN3_OK ? st : odin3_module_create(e2->design, name, prov, &id);
     st = st != ODIN3_OK ? st : register_module(e2, node, id);
