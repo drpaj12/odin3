@@ -19,7 +19,12 @@
 #include <stdint.h>
 
 /* E-3: modules, netnames and cells are each at most 2^24 (the IR's IDs are 32 bits). */
-enum { JR_MAX_OBJECTS = 1 << 24, JR_NAME_BUF = 160 };
+enum {
+    JR_MAX_OBJECTS = 1 << 24,
+    JR_NAME_BUF = 160,
+    JR_BAD_SHOW = 60,
+    JR_BAD_BUF = (JR_BAD_SHOW * 4) + 1
+};
 
 /* The kinds of a bit of a connection (M-3). Constants 0, 1, x, z are numbered as odin3_bit. */
 typedef enum jr_bit_kind { JR_BIT_NET = 4 } jr_bit_kind;
@@ -36,6 +41,7 @@ typedef struct jr_mod {
     const char *name;
     uint32_t name_str;
     odin3_module_id module; /* the IR module; none for a black-box module */
+    odin3_prov_id base;     /* its IMPORTED record: the nets and constants of the module take it */
     bool blackbox;
     bool top_attr;
     bool has_cells;
@@ -66,10 +72,11 @@ typedef struct jr_implicit {
 typedef struct jr_cur {
     const jr_mod *mod;
     odin3_module *module;
-    odin3_u64map *nets;  /* integer bit label -> net ID */
-    odin3_u64map *qbits; /* label of a bit flip-flop or latch Q bit -> 1 */
-    odin3_u64map *qinit; /* label of a Q bit -> INIT value (0, 1 or 3) */
-    odin3_vec labels;    /* uint64_t: labels to create nets for */
+    odin3_u64map *nets;   /* integer bit label -> net ID */
+    odin3_u64map *qbits;  /* label of a bit flip-flop or latch Q bit -> 1 */
+    odin3_u64map *qinit;  /* label of a Q bit -> INIT value (0, 1 or 3) */
+    odin3_u64map *netloc; /* label of a one-bit netname with a restored src -> its record */
+    odin3_vec labels;     /* uint64_t: labels to create nets for */
     odin3_net_id consts[JR_CONSTS];
     uint32_t const_order[JR_CONSTS]; /* constants in order of first use */
     uint32_t n_consts;
@@ -97,6 +104,11 @@ typedef struct jr {
     uint32_t n_unknown;             /* members skipped (J-8) */
     uint32_t n_ext;                 /* odin3_-prefixed members skipped (J-9) */
     uint32_t n_scopeinfo;           /* $scopeinfo cells dropped */
+    uint32_t n_bad_src;             /* `src` texts that are no location list (L-6) */
+    uint32_t n_capped_src;          /* restored texts of over 8 locations (D-7) */
+    odin3_json_loc bad_src_pos;     /* where the first bad one is */
+    char bad_src_text[JR_BAD_BUF];  /* its text, cut and escaped */
+    bool op_begun;                  /* the restore operation of this read has begun (D-1) */
     char first_unknown[JR_NAME_BUF];
     bool oom_logged;
     jr_cur cur;
@@ -158,6 +170,37 @@ odin3_status jr_join(const jr *rd, const jr_join_args *args, char *buf, size_t s
 /* Interns text in the design strtab. */
 odin3_status jr_intern(jr *rd, const char *text, uint32_t *out);
 const char *jr_str(const jr *rd, uint32_t str);
+
+/* --- reader_locs.c: the src restore (5.4 D-1, D-2, L-6, L-8, D-7) -------------------------- */
+
+/* True when the attributes object attrs has a `src` that parses as HDL locations and the read
+ * restores it (no --keep-src-attr): the attribute is then not set. Pure, no message. */
+bool jr_src_restorable(const jr *rd, const odin3_json_node *attrs);
+/* The same for the member `src` itself (a member of an attributes object). */
+bool jr_src_member_restorable(const jr *rd, const odin3_json_node *member);
+/* What to restore for one object: its attributes object (may be NULL), the record the reader
+ * would make without 5.4 (IMPORTED), and whether a `src` that does not parse is reported (L-6). */
+typedef struct jr_restore_in {
+    const odin3_json_node *attrs;
+    odin3_prov_id base;
+    bool warn;
+} jr_restore_in;
+/* *out is the record the object takes: the DERIVED of D-1 when its `src` restores, else base. */
+odin3_status jr_restore_src(jr *rd, const jr_restore_in *in, odin3_prov_id *out);
+/* The netnames of a module that hold a restorable `src`, by name, for its ports (D-2). */
+typedef struct jr_port_srcs {
+    odin3_u64map *by_name; /* name str -> index in nodes */
+    odin3_vec nodes;       /* const odin3_json_node *: the netname objects */
+} jr_port_srcs;
+odin3_status jr_port_srcs_open(jr *rd, const odin3_json_node *mod, jr_port_srcs *srcs);
+void jr_port_srcs_close(jr_port_srcs *srcs);
+/* The record of the port `port` (base: its IMPORTED record): that of its netname's `src`. */
+odin3_status jr_port_prov(jr *rd, const jr_port_srcs *srcs, const odin3_json_node *port,
+                          odin3_prov_id base, odin3_prov_id *out);
+/* The records of the one-bit netnames of the module with a restorable `src`, by net label. */
+odin3_status jr_collect_netlocs(jr *rd);
+/* The WARNING and INFO lines of the read (L-6, D-7). */
+void jr_report_src(const jr *rd);
 
 /* --- reader_ext.c: J-8, J-9 -------------------------------------------------------------- */
 

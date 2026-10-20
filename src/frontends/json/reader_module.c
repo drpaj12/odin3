@@ -65,7 +65,8 @@ static odin3_status port_dir(const jr *rd, const odin3_json_node *port, const jr
 /* The members every port is read from. */
 static const char *const PORT_KEYS[] = {"direction", "bits", "offset", "upto", "signed"};
 
-static odin3_status add_port(jr *rd, odin3_module *module, const odin3_json_node *port) {
+static odin3_status add_port(jr *rd, odin3_module *module, const odin3_json_node *port,
+                             const jr_port_srcs *srcs) {
     jr_where where = {"ports", odin3_json_key(port), NULL};
     if (jr_kind(port) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, port, &where, "the port is not an object");
@@ -82,8 +83,12 @@ static odin3_status add_port(jr *rd, odin3_module *module, const odin3_json_node
     if (st == ODIN3_OK) {
         st = jr_shape(rd, port, "ports", (jr_shape_out){width, &shape});
     }
+    odin3_prov_id imported = {0};
     if (st == ODIN3_OK) {
-        st = jr_prov(rd, port, &spec.prov);
+        st = jr_prov(rd, port, &imported);
+    }
+    if (st == ODIN3_OK) {
+        st = jr_port_prov(rd, srcs, port, imported, &spec.prov); /* D-2: its netname's src */
     }
     if (st == ODIN3_OK) {
         st = jr_intern(rd, odin3_json_key(port), &spec.name);
@@ -106,11 +111,13 @@ static odin3_status add_ports(jr *rd, odin3_module *module, const odin3_json_nod
     if (ports != NULL && jr_kind(ports) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, ports, &(jr_where){"ports", NULL, NULL}, "ports is not an object");
     }
-    odin3_status st = ODIN3_OK;
+    jr_port_srcs srcs;
+    odin3_status st = jr_port_srcs_open(rd, mod, &srcs);
     for (const odin3_json_node *port = jr_first(ports); st == ODIN3_OK && port != NULL;
          port = odin3_json_next(port)) {
-        st = add_port(rd, module, port);
+        st = add_port(rd, module, port, &srcs);
     }
+    jr_port_srcs_close(&srcs);
     return st;
 }
 
@@ -190,7 +197,11 @@ static odin3_status make_module(jr *rd, jr_mod *mod) {
         return jr_error(rd, mod->node, NULL, "module '%s' has the name of a cell type", mod->name);
     }
     odin3_prov_id prov = {0};
-    odin3_status st = jr_prov(rd, mod->node, &prov);
+    odin3_status st = jr_prov(rd, mod->node, &mod->base);
+    if (st == ODIN3_OK) {
+        st = jr_restore_src(
+            rd, &(jr_restore_in){jr_member(mod->node, "attributes"), mod->base, true}, &prov);
+    }
     if (st == ODIN3_OK) {
         st = jr_fail(rd, odin3_module_create(rd->design, mod->name_str, prov, &mod->module));
     }

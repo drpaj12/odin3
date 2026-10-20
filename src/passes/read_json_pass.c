@@ -25,6 +25,10 @@ static odin3_status take_option(odin3_bytes *rest, odin3_bytes word, read_json_a
         args->opts.auto_blackbox = true;
         return ODIN3_OK;
     }
+    if (odin3_pass_arg_is(word, "--keep-src-attr")) {
+        args->opts.keep_src_attr = true;
+        return ODIN3_OK;
+    }
     if (!odin3_pass_arg_is(word, "--top")) {
         odin3_log(ODIN3_LOG_ERROR, "read_json: unknown argument '%.*s'", (int)word.len,
                   (const char *)word.ptr);
@@ -83,9 +87,10 @@ static odin3_status read_json_run(odin3_pass_ctx *ctx, odin3_design *design, odi
 
 const odin3_pass_def odin3_pass_read_json = {
     "read_json",
-    "read_json [--top NAME] [--auto-blackbox] <file>: read a Yosys JSON netlist (or Odin III's "
-    "own write_json output) into an empty design; --auto-blackbox makes a cell type nothing "
-    "defines an implicit black box with a warning",
+    "read_json [--top NAME] [--auto-blackbox] [--keep-src-attr] <file>: read a Yosys JSON netlist "
+    "(or Odin III's own write_json output) into an empty design; --auto-blackbox makes a cell "
+    "type nothing defines an implicit black box with a warning; a `src` attribute that holds HDL "
+    "locations becomes a provenance record, --keep-src-attr keeps it as an attribute instead",
     read_json_run,
     NULL,
     false,
