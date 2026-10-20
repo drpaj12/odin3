@@ -5,8 +5,8 @@
  * the ABI.
  *
  * Two constructors. pm_rules_k6_fixed() gives the 3C values (the design has no arch record: the
- * Phase 3 script). pm_rules_from_arch() derives them from the record; until 4.2 Task 4 it returns
- * the k6 values for every record, with only `has_record` set. The fixed capacities below size the
+ * Phase 3 script). pm_rules_from_arch() derives them from the record: the multiplier width, the RAM
+ * depth and the `have_*` flags (rules.c). The fixed capacities below size the
  * pin arrays of the rules: a width or depth above them is refused by the constructor.
  */
 #ifndef ODIN3_PASSES_PARTIAL_MAP_RULES_H

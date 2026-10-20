@@ -24,7 +24,7 @@ static odin3_status partial_map_pass_run(odin3_pass_ctx *ctx, odin3_design *desi
 const odin3_pass_def odin3_pass_partial_map = {
     "partial_map", "partial_map", partial_map_pass_run, NULL, false, ODIN3_PASS_PROCESSES_REFUSE};
 
-/* S-1: the old name, kept for this phase; the same entry, so the same log prefix and bytes. */
+/* S-1: the old name, kept for this phase; the same entry, so it logs the new `partial_map:` prefix too. */
 const odin3_pass_def odin3_pass_hardmap = {
     "hardmap", "hardmap (alias of partial_map)", partial_map_pass_run, NULL,
     false,     ODIN3_PASS_PROCESSES_REFUSE};

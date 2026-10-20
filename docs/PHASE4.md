@@ -80,6 +80,10 @@ DESIGN §12.1.
 - 3C `hardmap` and its rules are the base: 4.2 to 4.6 generalise them from the arch, and must
   reproduce the fixed k6 result on `k6_frac_N10`. 4's `partial_map` replaces `hardmap` (PHASE3
   sub-project 3C).
+  The identity gate (`tools/partial-map-check/identity`): tier 1 (`partial_map_identity`, CI)
+  is a wiring/alias test, not a regression test (`hardmap` and `partial_map` share one entry
+  point in one binary); tier 3 (two binaries, main against the head, over the micros and the 19
+  VTR designs, `tools/partial-map-check/tier3`) is the merge gate of every refactor PR.
 - `tools/vtr-qor` and its `fcheck` are the harness for 4.13; its caps and smallest-first order
   apply (heavy-run lock: sweeps run when lanes are idle).
 - `lib/vtr.o3lib` and the `.o3lib` format (1G) are the target of 4.1.
