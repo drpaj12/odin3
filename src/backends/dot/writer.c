@@ -580,7 +580,7 @@ static odin3_status dot_build(dot_ctx *dc, const odin3_dot_opts *opts, odin3_str
 
 odin3_status odin3_dot_write(const odin3_design *design, const char *path,
                              const odin3_dot_opts *opts) {
-    static const odin3_dot_opts k_defaults = {ODIN3_DOT_FOCUS_NONE, NULL, 0};
+    static const odin3_dot_opts k_defaults = {ODIN3_DOT_FOCUS_NONE, NULL, 0, NULL, false};
     if (design == NULL || path == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "dot: design and path are required");
         return ODIN3_ERR_INVALID_ARG;

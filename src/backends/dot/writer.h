@@ -8,6 +8,7 @@
 #include "ir/design.h"
 #include "odin3/odin3.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 
 /* The node budget used when odin3_dot_opts.max_nodes is 0. */
@@ -25,6 +26,8 @@ typedef struct odin3_dot_opts {
     odin3_dot_focus_kind focus_kind;
     const char *focus;
     size_t max_nodes; /* 0 = ODIN3_DOT_DEFAULT_MAX_NODES */
+    const char *color_attr; /* NULL = no colouring; else the node attribute key, or "@type" */
+    bool locs;              /* add the first HDL location (file:line, +N) as a second label line */
 } odin3_dot_opts;
 
 /*

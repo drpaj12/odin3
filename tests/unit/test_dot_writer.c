@@ -275,7 +275,7 @@ static void expect_absent(const char *text, const char *needle) {
 
 /* Writes with the focus, checks the node count, frees the text. */
 static char *render(odin3_dot_focus_kind kind, const char *focus) {
-    odin3_dot_opts opts = {kind, focus, 0};
+    odin3_dot_opts opts = {kind, focus, 0, NULL, false};
     write_ok(&opts);
     return slurp(out_path);
 }
@@ -362,7 +362,7 @@ static void test_port_labels_and_ampersand(void) {
 static void test_budget_refusal_counts(void) {
     odin3_net_id last = {0};
     (void)build_chain(CHAIN, &last);
-    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_NONE, NULL, BUDGET_TEST};
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_NONE, NULL, BUDGET_TEST, NULL, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_dot_write(design, out_path, &opts));
     TEST_ASSERT_NOT_NULL(strstr(last_error, "5 nodes"));
     TEST_ASSERT_NOT_NULL(strstr(last_error, "max-nodes 2"));
@@ -382,7 +382,7 @@ static void test_default_budget(void) {
 static void test_focus_lifts_budget(void) {
     odin3_net_id last = {0};
     (void)build_chain(CHAIN, &last);
-    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_PATH, "top", BUDGET_TEST};
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_PATH, "top", BUDGET_TEST, NULL, false};
     write_ok(&opts);
     char *text = slurp(out_path);
     TEST_ASSERT_EQUAL_UINT(CHAIN, declared_nodes(text).count);
@@ -408,7 +408,7 @@ static void test_focus_path(void) {
 
 static void test_focus_path_invalid(void) {
     build_hier();
-    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_PATH, "nosuch", 0};
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_PATH, "nosuch", 0, NULL, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_dot_write(design, out_path, &opts));
     opts.focus = "top/nosuch";
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_dot_write(design, out_path, &opts));
@@ -458,7 +458,7 @@ static void test_focus_loc_matches_index(void) {
     TEST_ASSERT_NOT_NULL(ix);
     odin3_srcloc loc = {intern("x.v"), 10, 0, 0, 0, 0};
     odin3_prov_hits hits = odin3_prov_index_by_loc(ix, loc);
-    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_LOC, "x.v:10", 0};
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_LOC, "x.v:10", 0, NULL, false};
     write_ok(&opts);
     char *text = slurp(out_path);
     nodeset got = declared_nodes(text);
@@ -472,7 +472,7 @@ static void test_focus_loc_matches_index(void) {
 static void test_focus_loc_none_and_invalid(void) {
     odin3_net_id last = {0};
     (void)build_chain(2, &last);
-    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_LOC, "nowhere.v:3", 0};
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_LOC, "nowhere.v:3", 0, NULL, false};
     last_warning[0] = '\0';
     write_ok(&opts); /* a valid location with no objects: an empty graph, with a warning */
     TEST_ASSERT_NOT_NULL(strstr(last_warning, "focus 'nowhere.v:3' selects no node"));
@@ -516,9 +516,9 @@ static void test_cone_through_reconvergence_and_loop(void) {
 static void test_cone_deep_chain(void) {
     odin3_net_id last = {0};
     (void)build_chain(LONG_CHAIN, &last);
-    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_CONE, "n20000", 0};
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_CONE, "n20000", 0, NULL, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_dot_write(design, out_path, &(odin3_dot_opts){0, NULL, 0}));
+                          odin3_dot_write(design, out_path, &(odin3_dot_opts){0, NULL, 0, NULL, false}));
     write_ok(&opts);
     char *text = slurp(out_path);
     TEST_ASSERT_EQUAL_UINT(LONG_CHAIN - 1, count_of(text, " -> "));
@@ -528,7 +528,7 @@ static void test_cone_deep_chain(void) {
 static void test_cone_invalid(void) {
     odin3_net_id last = {0};
     (void)build_chain(2, &last);
-    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_CONE, "nonet", 0};
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_CONE, "nonet", 0, NULL, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_dot_write(design, out_path, &opts));
     opts.focus = "nomod:n1";
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_dot_write(design, out_path, &opts));
@@ -539,7 +539,7 @@ static void test_cone_invalid(void) {
 static void test_invalid_arguments(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_dot_write(NULL, out_path, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_dot_write(design, NULL, NULL));
-    odin3_dot_opts opts = {(odin3_dot_focus_kind)99, "x", 0};
+    odin3_dot_opts opts = {(odin3_dot_focus_kind)99, "x", 0, NULL, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_dot_write(design, out_path, &opts));
 }
 
@@ -647,11 +647,11 @@ static void test_focus_oom_sweep(void) {
     gate_spec located = {"$_NOT_", NULL, source_at("x.v", 1, 1)};
     odin3_net_id nets[2] = {last, net_named(module, NULL)};
     gate_in(module, located, nets);
-    odin3_dot_opts cone = {ODIN3_DOT_FOCUS_CONE, "top:n3", 0};
+    odin3_dot_opts cone = {ODIN3_DOT_FOCUS_CONE, "top:n3", 0, NULL, false};
     oom_sweep(&cone);
-    odin3_dot_opts loc = {ODIN3_DOT_FOCUS_LOC, "x.v:1", 0};
+    odin3_dot_opts loc = {ODIN3_DOT_FOCUS_LOC, "x.v:1", 0, NULL, false};
     oom_sweep(&loc);
-    odin3_dot_opts path = {ODIN3_DOT_FOCUS_PATH, "top", 0};
+    odin3_dot_opts path = {ODIN3_DOT_FOCUS_PATH, "top", 0, NULL, false};
     oom_sweep(&path);
 }
 
@@ -680,9 +680,338 @@ static void test_dot_accepts_output(void) {
     gate_in(module, gs, nets);
     write_ok(NULL);
     TEST_ASSERT_TRUE(dot_accepts(out_path));
-    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_PATH, "top/u1", 0};
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_PATH, "top/u1", 0, NULL, false};
     write_ok(&opts);
     TEST_ASSERT_TRUE(dot_accepts(out_path));
+}
+
+/* --- 6.2: --color-by and --locs (C-1 to C-8) ------------------------------------------------ */
+
+static const char *const PALETTE[] = {"#e69f00", "#56b4e9", "#009e73", "#f0e442",
+                                      "#0072b2", "#d55e00", "#cc79a7", "#999999",
+                                      "#88ccee", "#ddcc77", "#44aa99", "#aa4499"};
+enum { PALETTE_SIZE = 12, NONE_FILL_LEN = 7 };
+static const char *const NONE_FILL = "#e8e8e8";
+
+static void set_attr(odin3_node_id node, const char *key, const odin3_value *val) {
+    odin3_objref ref = {ODIN3_OBJ_NODE, node.v};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(module, ref, intern(key), val));
+}
+
+static void set_str_attr(uint32_t node, const char *key, const char *text) {
+    odin3_value val = {ODIN3_VAL_STRING, 0, NULL, 0, intern(text), 0};
+    set_attr((odin3_node_id){node}, key, &val);
+}
+
+/* The first line of text that starts (after blanks) with prefix, copied into buf. */
+static const char *line_with(const char *text, const char *prefix, char *buf, size_t cap) {
+    for (const char *at = text; at != NULL && *at != '\0'; at = strchr(at, '\n')) {
+        at += strspn(at, "\n \t");
+        if (strncmp(at, prefix, strlen(prefix)) == 0) {
+            size_t len = strcspn(at, "\n");
+            TEST_ASSERT_TRUE(len < cap);
+            memcpy(buf, at, len);
+            buf[len] = '\0';
+            return buf;
+        }
+    }
+    return NULL;
+}
+
+static void expect_node_line(const char *text, uint32_t node, const char *needle) {
+    char prefix[NAME_BUF];
+    char line[FILE_BUF];
+    (void)snprintf(prefix, sizeof prefix, "m%un%u [", odin3_module_id_of(module).v, node);
+    const char *got = line_with(text, prefix, line, sizeof line);
+    TEST_ASSERT_NOT_NULL_MESSAGE(got, prefix);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(got, needle), needle);
+}
+
+static void expect_fill(const char *text, uint32_t node, const char *color) {
+    char needle[NAME_BUF];
+    (void)snprintf(needle, sizeof needle, "style=filled, fillcolor=\"%s\"", color);
+    expect_node_line(text, node, needle);
+}
+
+static char *render_color(const char *attr, bool locs) {
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_NONE, NULL, 0, attr, locs};
+    write_ok(&opts);
+    return slurp(out_path);
+}
+
+/* Quotes balanced (an escaped quote does not count) and braces balanced outside quotes. */
+static void expect_structure(const char *text) {
+    bool quoted = false;
+    int depth = 0;
+    for (const char *at = text; *at != '\0'; at++) {
+        if (quoted && *at == '\\' && at[1] != '\0') {
+            at++;
+        } else if (*at == '"') {
+            quoted = !quoted;
+        } else if (!quoted && *at == '{') {
+            depth++;
+        } else if (!quoted && *at == '}') {
+            depth--;
+            TEST_ASSERT_TRUE(depth >= 0);
+        }
+    }
+    TEST_ASSERT_FALSE(quoted);
+    TEST_ASSERT_EQUAL_INT(0, depth);
+}
+
+/* g0..g4 (nodes 1..5) take alpha, beta, alpha, gamma and no value. */
+static void build_classes(void) {
+    odin3_net_id last = {0};
+    build_chain(CHAIN, &last);
+    set_str_attr(1, "my_class", "gamma");
+    set_str_attr(2, "my_class", "alpha");
+    set_str_attr(3, "my_class", "beta");
+    set_str_attr(4, "my_class", "alpha");
+}
+
+static void test_color_classes_and_legend(void) {
+    build_classes();
+    char *text = render_color("my_class", false);
+    expect_structure(text);
+    expect_fill(text, 1, PALETTE[2]); /* gamma sorts last of three */
+    expect_fill(text, 2, PALETTE[0]);
+    expect_fill(text, 3, PALETTE[1]);
+    expect_fill(text, 4, PALETTE[0]);
+    expect_fill(text, 5, NONE_FILL);
+    expect_in(text, "label=\"alpha (2)\"");
+    expect_in(text, "label=\"beta (1)\"");
+    expect_in(text, "label=\"gamma (1)\"");
+    expect_in(text, "label=\"(none) (1)\"");
+    const char *legend = strstr(text, "subgraph cluster_legend");
+    TEST_ASSERT_NOT_NULL(legend);
+    TEST_ASSERT_NULL(strstr(legend, " -> "));         /* after every edge */
+    TEST_ASSERT_NULL(strstr(legend + 1, "cluster_")); /* the last cluster */
+    TEST_ASSERT_TRUE(strstr(text, "cluster_1") < legend);
+    odin3_util_free(text);
+}
+
+static void test_color_deterministic_and_off_is_identical(void) {
+    build_classes();
+    char *first = render_color("my_class", false);
+    char *second = render_color("my_class", false);
+    TEST_ASSERT_EQUAL_STRING(first, second);
+    write_ok(NULL);
+    char *plain = slurp(out_path);
+    char *off = render_color(NULL, false);
+    TEST_ASSERT_EQUAL_STRING(plain, off);
+    expect_absent(plain, "fillcolor");
+    expect_absent(plain, "cluster_legend");
+    expect_absent(plain, "style=filled");
+    odin3_util_free(first);
+    odin3_util_free(second);
+    odin3_util_free(plain);
+    odin3_util_free(off);
+}
+
+static void test_color_thirteen_values_reuse_warns(void) {
+    odin3_net_id last = {0};
+    build_chain(PALETTE_SIZE + 1, &last);
+    for (uint32_t i = 0; i < PALETTE_SIZE + 1; i++) {
+        char val[NAME_BUF];
+        (void)snprintf(val, sizeof val, "v%02u", i);
+        set_str_attr(i + 1, "k", val);
+    }
+    last_warning[0] = '\0';
+    char *text = render_color("k", false);
+    expect_structure(text);
+    TEST_ASSERT_NOT_NULL(strstr(last_warning, "13"));
+    expect_fill(text, 1, PALETTE[0]);
+    expect_fill(text, PALETTE_SIZE, PALETTE[PALETTE_SIZE - 1]);
+    expect_fill(text, PALETTE_SIZE + 1, PALETTE[0]); /* the 13th reuses the first entry */
+    odin3_util_free(text);
+}
+
+static void test_color_twelve_values_no_warning(void) {
+    odin3_net_id last = {0};
+    build_chain(PALETTE_SIZE, &last);
+    for (uint32_t i = 0; i < PALETTE_SIZE; i++) {
+        char val[NAME_BUF];
+        (void)snprintf(val, sizeof val, "v%02u", i);
+        set_str_attr(i + 1, "k", val);
+    }
+    last_warning[0] = '\0';
+    char *text = render_color("k", false);
+    TEST_ASSERT_EQUAL_CHAR('\0', last_warning[0]);
+    for (uint32_t i = 0; i < PALETTE_SIZE; i++) {
+        expect_fill(text, i + 1, PALETTE[i]);
+    }
+    odin3_util_free(text);
+}
+
+static void test_color_missing_attribute_warns(void) {
+    odin3_net_id last = {0};
+    build_chain(3, &last);
+    last_warning[0] = '\0';
+    char *text = render_color("nosuch", false);
+    expect_structure(text);
+    TEST_ASSERT_NOT_NULL(strstr(last_warning, "nosuch"));
+    for (uint32_t i = 1; i <= 3; i++) {
+        expect_fill(text, i, NONE_FILL);
+    }
+    expect_in(text, "label=\"(none) (3)\"");
+    odin3_util_free(text);
+}
+
+static void test_color_empty_attribute_invalid(void) {
+    build_classes();
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_NONE, NULL, 0, "", false};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_dot_write(design, out_path, &opts));
+    TEST_ASSERT_NOT_NULL(strstr(last_error, "color"));
+}
+
+static void test_color_by_type(void) {
+    build_hier();
+    char *text = render_color("@type", false);
+    expect_structure(text);
+    expect_in(text, "label=\"sub (1)\"");
+    expect_in(text, "label=\"$_NOT_ (1)\"");
+    expect_absent(text, "label=\"(none)");
+    odin3_util_free(text);
+}
+
+static void test_color_int_and_bits_text(void) {
+    odin3_net_id last = {0};
+    build_chain(3, &last);
+    odin3_value num = odin3_value_int(7);
+    set_attr((odin3_node_id){1}, "k", &num);
+    static const uint8_t BITS[] = {ODIN3_BIT_1, ODIN3_BIT_1, ODIN3_BIT_0};
+    odin3_value bits = {ODIN3_VAL_BITS, 0, BITS, 3, 0, 0};
+    set_attr((odin3_node_id){2}, "k", &bits);
+    char *text = render_color("k", false);
+    expect_in(text, "label=\"7 (1)\"");
+    expect_in(text, "label=\"011 (1)\""); /* MSB first */
+    odin3_util_free(text);
+}
+
+static void test_color_value_escaping(void) {
+    odin3_net_id last = {0};
+    build_chain(1, &last);
+    set_str_attr(1, "k", "a\"b&c\\d");
+    char *text = render_color("k", false);
+    expect_structure(text);
+    expect_in(text, "label=\"a\\\"b&amp;c\\\\d (1)\"");
+    odin3_util_free(text);
+}
+
+static void test_color_with_focus_counts_drawn_nodes(void) {
+    build_classes();
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_CONE, "n3", 0, "my_class", false};
+    write_ok(&opts);
+    char *text = slurp(out_path);
+    expect_in(text, "label=\"alpha (1)\""); /* cone of n3: g0 gamma, g1 alpha, g2 beta */
+    expect_in(text, "label=\"beta (1)\"");
+    expect_in(text, "label=\"gamma (1)\"");
+    expect_absent(text, "alpha (2)");
+    expect_absent(text, "(none)");
+    odin3_util_free(text);
+}
+
+static void test_legend_outside_budget(void) {
+    build_classes();
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_NONE, NULL, CHAIN, "my_class", false};
+    write_ok(&opts); /* 5 nodes fit a budget of 5; the 4 legend entries are not counted */
+    char *text = slurp(out_path);
+    expect_in(text, "cluster_legend");
+    odin3_util_free(text);
+    odin3_dot_opts tight = {ODIN3_DOT_FOCUS_NONE, NULL, CHAIN - 1, "my_class", false};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_dot_write(design, out_path, &tight));
+}
+
+static odin3_prov_id source_at_n(const odin3_srcloc *locs, uint32_t count) {
+    odin3_prov_origin origin = {locs, count, 0, 0};
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &id));
+    return id;
+}
+
+/* Three nodes: one location; three (z.v:7 first); an IMPORTED netlist position (no HDL). */
+static void build_located(void) {
+    odin3_net_id nets[4] = {net_named(module, NULL), net_named(module, NULL),
+                            net_named(module, NULL), net_named(module, NULL)};
+    odin3_srcloc many[3] = {{intern("z.v"), 7, 1, 7, 2, 0},
+                            {intern("x.v"), 1, 1, 1, 2, 0},
+                            {intern("y.v"), 2, 1, 2, 2, 0}};
+    odin3_srcloc imp = {intern("f.blif"), 3, 1, 3, 2, 0};
+    odin3_prov_origin iorigin = {&imp, 1, 0, 0};
+    odin3_prov_id imported = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_imported(&ctx, &iorigin, &imported));
+    odin3_prov_id provs[3] = {source_at("x.v", 10, 1), source_at_n(many, 3), imported};
+    const char *names[3] = {"g0", "g1", "g2"};
+    for (uint32_t i = 0; i < 3; i++) {
+        odin3_net_id pair[2] = {nets[i], nets[i + 1]};
+        gate_spec gs = {"$_NOT_", names[i], provs[i]};
+        gate_in(module, gs, pair);
+    }
+}
+
+static void test_locs_second_label_line(void) {
+    build_located();
+    char *plain = render_color(NULL, false);
+    expect_absent(plain, "x.v:10");
+    char *text = render_color(NULL, true);
+    expect_structure(text);
+    expect_node_line(text, 1, "label=\"$_NOT_\\ng0\\nx.v:10\"");
+    expect_node_line(text, 2, "label=\"$_NOT_\\ng1\\nz.v:7 +2\"");
+    expect_node_line(text, 3, "label=\"$_NOT_\\ng2\"]"); /* a netlist position is not HDL */
+    expect_absent(text, "f.blif");
+    odin3_util_free(plain);
+    odin3_util_free(text);
+}
+
+static void test_locs_with_color(void) {
+    build_located();
+    set_str_attr(1, "k", "one");
+    char *text = render_color("k", true);
+    expect_structure(text);
+    expect_node_line(text, 1, "x.v:10\", style=filled");
+    expect_in(text, "label=\"one (1)\"");
+    expect_in(text, "label=\"(none) (2)\"");
+    odin3_util_free(text);
+}
+
+static void test_color_oom_sweep(void) {
+    build_located();
+    set_str_attr(1, "k", "one");
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_NONE, NULL, 0, "k", true};
+    oom_sweep(&opts);
+}
+
+static bool nop_accepts(const char *path) {
+    char *argv[] = {"nop", "-o", "/dev/null", (char *)path, NULL};
+    pid_t pid = 0;
+    int status = 0;
+    if (posix_spawn(&pid, "/usr/bin/nop", NULL, NULL, argv, environ) != 0) {
+        return false;
+    }
+    return waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+/* Every new output shape parses with Graphviz nop; the structure check always runs. */
+static void test_graphviz_nop(void) {
+    build_hier();
+    build_located();
+    set_str_attr(1, "k", "w\"e&i\\rd\nvalue");
+    set_str_attr(2, "k", "plain");
+    static const struct {
+        const char *attr;
+        bool locs;
+    } CASES[] = {{"k", false}, {NULL, true}, {"k", true}, {"@type", true}, {"nosuch", false}};
+    bool have_nop = access("/usr/bin/nop", X_OK) == 0;
+    for (size_t i = 0; i < sizeof CASES / sizeof CASES[0]; i++) {
+        char *text = render_color(CASES[i].attr, CASES[i].locs);
+        expect_structure(text);
+        odin3_util_free(text);
+        TEST_ASSERT_TRUE(!have_nop || nop_accepts(out_path));
+    }
+    if (!have_nop) {
+        (void)printf("SKIP graphviz_nop: dot not installed\n");
+        TEST_IGNORE_MESSAGE("SKIP graphviz_nop: dot not installed");
+    }
 }
 
 int main(void) {
@@ -714,5 +1043,20 @@ int main(void) {
     RUN_TEST(test_out_of_memory_sweep);
     RUN_TEST(test_focus_oom_sweep);
     RUN_TEST(test_dot_accepts_output);
+    RUN_TEST(test_color_classes_and_legend);
+    RUN_TEST(test_color_deterministic_and_off_is_identical);
+    RUN_TEST(test_color_thirteen_values_reuse_warns);
+    RUN_TEST(test_color_twelve_values_no_warning);
+    RUN_TEST(test_color_missing_attribute_warns);
+    RUN_TEST(test_color_empty_attribute_invalid);
+    RUN_TEST(test_color_by_type);
+    RUN_TEST(test_color_int_and_bits_text);
+    RUN_TEST(test_color_value_escaping);
+    RUN_TEST(test_color_with_focus_counts_drawn_nodes);
+    RUN_TEST(test_legend_outside_budget);
+    RUN_TEST(test_locs_second_label_line);
+    RUN_TEST(test_locs_with_color);
+    RUN_TEST(test_color_oom_sweep);
+    RUN_TEST(test_graphviz_nop);
     return UNITY_END();
 }

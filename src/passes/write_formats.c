@@ -156,7 +156,7 @@ static const char *const FORMAT_PASS[] = {"write_json", "write_verilog", "write_
 /* Shared body: parse, then call the format's writer (1F; each writes atomically). */
 static odin3_status write_format_run(odin3_design *design, odin3_bytes args, write_format format) {
     write_args parsed = {.verilog = {ODIN3_VERILOG_NAMES_SHORT},
-                         .dot = {ODIN3_DOT_FOCUS_NONE, NULL, 0}};
+                         .dot = {ODIN3_DOT_FOCUS_NONE, NULL, 0, NULL, false}};
     odin3_strbuf_init(&parsed.path);
     odin3_strbuf_init(&parsed.focus);
     odin3_status st = parse_write_args(FORMAT_PASS[format], args, &parsed);
