@@ -31,9 +31,10 @@ PACKED = re.compile(r"^\s+existing encoding is already a packed binary encoding\
 CODE_MAP = re.compile(r"^\s+([01x-]+) -> ([01x-]+)$")
 INFO_HEAD = re.compile(r"^\s+Information on FSM (.+) \(\\?(.+)\):$")
 FSM_OF = re.compile(r"^FSM `(.+)' from module `\\?(.+)':$")
-COUNT = re.compile(r"^\s+Number of (input signals|output signals|state bits):\s+(\d+)$")
+COUNT = re.compile(
+    r"^\s+[Nn]umber of (input signals|output signals|state bits):\s+(\d+)$")
 ENC_LINE = re.compile(r"^\s+\d+:\s+\d+'([01x-]+)(\s+<RESET STATE>)?$")
-TRANS_LINE = re.compile(r"^\s+\d+:\s+\d+ \d+'[01x-]+\s+->\s+\d+ \d+'[01x-]+$")
+TRANS_LINE = re.compile(r"^\s+\d+:\s+(-?\d+) (\d+'[01x-]+)\s+->\s+(-?\d+) (\d+'[01x-]+)$")
 
 
 @dataclass
@@ -51,6 +52,8 @@ class Fsm:
     inputs: int = 0
     outputs: int = 0
     transitions: int = 0
+    codes: tuple[str, ...] = ()
+    table: tuple[tuple[int, str, int, str], ...] = ()
 
 
 @dataclass
@@ -96,24 +99,32 @@ def _parse_recode(lines: list[str], start: int) -> tuple[_Recode, int]:
     return rec, i
 
 
-def _parse_info(lines: list[str], start: int) -> tuple[dict[str, int], int, int, int]:
-    """Counts, state lines, reset index and transition count of the block at ``start``."""
-    counts: dict[str, int] = {}
-    states = reset = trans = 0
-    reset = -1
+@dataclass
+class InfoBlock:
+    """What one ``FsmData::log_info`` block holds (Yosys's text, and Odin III's copy of it)."""
+
+    counts: dict[str, int] = field(default_factory=dict)
+    codes: list[str] = field(default_factory=list)
+    reset: int = -1
+    table: list[tuple[int, str, int, str]] = field(default_factory=list)
+
+
+def parse_info_block(lines: list[str], start: int, stop_prefix: str = "-----") -> InfoBlock:
+    """The counts, state codes, reset state and transition table of the block after ``start``."""
+    info = InfoBlock()
     i = start + 1
-    while i < len(lines) and not lines[i].startswith("-----"):
+    while i < len(lines) and not lines[i].startswith(stop_prefix):
         line = lines[i]
         if (c := COUNT.match(line)) is not None:
-            counts[c.group(1)] = int(c.group(2))
+            info.counts[c.group(1).lower()] = int(c.group(2))
         elif (e := ENC_LINE.match(line)) is not None:
             if e.group(2):
-                reset = states
-            states += 1
-        elif TRANS_LINE.match(line):
-            trans += 1
+                info.reset = len(info.codes)
+            info.codes.append(e.group(1))
+        elif (t := TRANS_LINE.match(line)) is not None:
+            info.table.append((int(t.group(1)), t.group(2), int(t.group(3)), t.group(4)))
         i += 1
-    return counts, states, reset, trans
+    return info
 
 
 def parse_log(text: str) -> dict[str, ModuleFacts]:
@@ -150,15 +161,16 @@ def parse_log(text: str) -> dict[str, ModuleFacts]:
             fsm_module[m.group(1)] = m.group(2)
         elif (m := INFO_HEAD.match(line)) is not None:
             cell, wire = m.group(1), m.group(2)
-            counts, states, reset, trans = _parse_info(lines, i)
+            info = parse_info_block(lines, i)
             rec = recodes.get(cell, _Recode(encoding="auto"))
-            bits = counts.get("state bits", 0)
+            bits = info.counts.get("state bits", 0)
             mod = fsm_module.get(cell, "")
             enc = "binary" if rec.packed else rec.encoding
             mods.setdefault(mod, ModuleFacts()).fsms.append(Fsm(
-                module=mod, wire=wire, cell=cell, states=states,
+                module=mod, wire=wire, cell=cell, states=len(info.codes),
                 bits_before=rec.bits_before or bits, bits_after=rec.bits_after or bits,
-                encoding=enc, reset_index=reset, inputs=counts.get("input signals", 0),
-                outputs=counts.get("output signals", 0), transitions=trans))
+                encoding=enc, reset_index=info.reset, inputs=info.counts.get("input signals", 0),
+                outputs=info.counts.get("output signals", 0), transitions=len(info.table),
+                codes=tuple(info.codes), table=tuple(info.table)))
         i += 1
     return mods

@@ -1,10 +1,10 @@
 # NAME STAGE REASON   (4.8 spec T-3; every line needs a reason, a stale line is an error)
 # A difference between Odin III and Yosys 0.55 that the plan accepts. NAME is the corpus name
 # (tests/fsm/facts_corpus.txt), STAGE is detect, extract, opt, recode, map or equiv.
-micro/syntax/8_bit_for_pass_through detect Odin III proc keeps no flip-flop for the for-loop variable i (dead after the loop); Yosys proc makes a 32-bit $dff that fsm_detect marks and fsm_extract then rejects
-micro/syntax/8_bit_for_pass_through_off_by_1 detect as 8_bit_for_pass_through
-micro/syntax/complex_post_for_loop detect as 8_bit_for_pass_through
-micro/syntax/for_loop_adv_post detect as 8_bit_for_pass_through
-micro/syntax/for_loop_adv_pre detect as 8_bit_for_pass_through
-micro/syntax/h7_of_8_bit_for_pass_through detect as 8_bit_for_pass_through
-micro/syntax/l2_and_h2_of_8_bit_for_pass_through detect as 8_bit_for_pass_through
+micro/syntax/8_bit_for_pass_through native-detect Odin III proc keeps no flip-flop for the for-loop variable i (dead after the loop); Yosys proc makes a 32-bit $dff that fsm_detect marks and fsm_extract then rejects
+micro/syntax/8_bit_for_pass_through_off_by_1 native-detect as 8_bit_for_pass_through
+micro/syntax/complex_post_for_loop native-detect as 8_bit_for_pass_through
+micro/syntax/for_loop_adv_post native-detect as 8_bit_for_pass_through
+micro/syntax/for_loop_adv_pre native-detect as 8_bit_for_pass_through
+micro/syntax/h7_of_8_bit_for_pass_through native-detect as 8_bit_for_pass_through
+micro/syntax/l2_and_h2_of_8_bit_for_pass_through native-detect as 8_bit_for_pass_through

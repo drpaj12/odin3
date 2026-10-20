@@ -2889,6 +2889,18 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         add_test(NAME fsm_equiv_selftest
             COMMAND ${PROJECT_SOURCE_DIR}/tools/fsm-check/fsm-equiv
                     --yosys ${ODIN3_YOSYS055} --selftest ${PROJECT_SOURCE_DIR}/tests/fsm/micros.txt)
+        # 4.8 Task 10 (spec T-2, T-3): Odin III's `fsm; opt` is equivalent to its `proc` from reset
+        # (a bounded miter in Yosys, tests/fsm/micros.txt), and fsm-diff finds the same FSMs,
+        # states and encodings as Yosys 0.55 on the same RTLIL for every micro of the corpus.
+        add_test(NAME fsm_equiv_micro
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/fsm-check/fsm-equiv --yosys ${ODIN3_YOSYS055}
+                    --odin $<TARGET_FILE:odin3>
+                    --selftest ${PROJECT_SOURCE_DIR}/tests/fsm/micros.txt)
+        add_test(NAME fsm_diff_micro
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/fsm-check/fsm-diff --yosys ${ODIN3_YOSYS055}
+                    --odin $<TARGET_FILE:odin3> --micros)
+        set_tests_properties(fsm_equiv_micro fsm_diff_micro PROPERTIES LABELS "unit;micro"
+                             TIMEOUT 900)
         add_test(NAME fsm_facts_current
             COMMAND ${PROJECT_SOURCE_DIR}/tools/fsm-check/fsm-facts --check
                     --yosys ${ODIN3_YOSYS055})

@@ -5,6 +5,7 @@
  * tests/fsm/detect_marks.txt, whose expected marks are Yosys 0.55's (tools/fsm-check/fsm-facts).
  */
 #include "fsm_test.h"
+
 #include "ir/check.h"
 #include "passes/fsm/fsm.h"
 #include "proc_build.h"
@@ -285,7 +286,7 @@ static uint32_t n_skipped;
 static bool detect_line_name(const char *line, char *name) {
     char stage[32];
     return line[0] != '#' && sscanf(line, "%4095s %31s", name, stage) == 2 &&
-           strcmp(stage, "detect") == 0;
+           strcmp(stage, "native-detect") == 0;
 }
 
 static void load_skipped(void) {

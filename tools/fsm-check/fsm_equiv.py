@@ -4,7 +4,8 @@ Usage::
 
     fsm-equiv GOLD [--gate FILE] --top T [--rst NAME[:LEVEL]] [--depth N]
               [--gold-script S] [--gate-script S] [--yosys PATH] [--log FILE]
-    fsm-equiv --selftest tests/fsm/micros.txt [--only NAME...]
+    fsm-equiv --odin ODIN3 FILE --top T [--rst NAME[:LEVEL]] [--depth N] [--yosys PATH]
+    fsm-equiv --selftest tests/fsm/micros.txt [--only NAME...] [--odin ODIN3]
 
 GOLD and GATE are Verilog (``.v``) or RTLIL (``.il``) files; GATE defaults to GOLD.  Each side is
 read, run through its script (default gold ``proc``, gate ``proc; fsm; opt``) and flattened into
@@ -17,7 +18,10 @@ The reset constraint is load-bearing: a recoded one-hot register powers up all-z
 code), so the comparison holds from reset only.  ``--rst`` names the reset input and its active
 LEVEL (default 1); without it the miter has no reset constraint.  ``--selftest`` runs Yosys's own
 ``fsm`` on every row of micros.txt whose ``equiv`` column is ``yes`` and checks the tool says
-equivalent; this proves each micro is a sound test.
+equivalent; this proves each micro is a sound test. With ``--odin ODIN3`` the gate is Odin III's:
+``read_verilog --nolatches FILE; proc`` is the gold, ``fsm; opt`` after it the gate (both written
+with ``write_rtlil``), and the same miter proves them equivalent; ``--selftest --odin`` does so for
+every ``yes`` row (Task 10, test fsm_equiv_micro).
 
 Exit codes: 0 equivalent; 1 not equivalent; 2 usage or tool error; 3 hard (crash or timeout).
 """
@@ -146,13 +150,38 @@ def read_rows(path: Path) -> list[MicroRow]:
     return rows
 
 
-def selftest(yosys: str, micros: Path, only: Sequence[str], root: Path) -> int:
+def odin_script(source: str, gold: Path, gate: Path) -> str:
+    """The Odin III script that writes the RTL after proc (gold) and after fsm; opt (gate)."""
+    return (f"read_verilog --nolatches {source}; proc; write_rtlil {gold}; fsm; opt; "
+            f"write_rtlil {gate}")
+
+
+def odin_check(odin: str, yosys: str, source: str, spec: Sequence[str]) -> int:
+    """Odin III's fsm; opt against its proc, in Yosys. spec: top, reset, depth (as text)."""
+    top, rst, depth = spec
+    with tempfile.TemporaryDirectory(prefix="fsm-equiv-") as tmp:
+        work = Path(tmp)
+        gold, gate = work / "gold.il", work / "gate.il"
+        proc = subprocess.run([odin, "-p", odin_script(source, gold, gate)], capture_output=True,
+                              text=True, timeout=TIMEOUT_SECONDS, check=False)
+        if proc.returncode != 0:
+            print(f"fsm-equiv: odin3 failed: {(proc.stdout + proc.stderr)[-300:]}", file=sys.stderr)
+            return EXIT_ERROR
+        return check(yosys, str(gold), str(gate), top, rst, int(depth), ("opt_clean", "opt_clean"))
+
+
+def selftest(yosys: str, micros: Path, only: Sequence[str], root: Path,
+             odin: str | None = None) -> int:
     worst = EXIT_EQUIVALENT
     for row in read_rows(micros):
         if not row.equiv or (only and row.name not in only):
             continue
-        code = check(yosys, str(root / row.path), str(root / row.path), row.top, row.reset,
-                     row.depth, (DEFAULT_GOLD_SCRIPT, DEFAULT_GATE_SCRIPT))
+        source = str(root / row.path)
+        if odin is not None:
+            code = odin_check(odin, yosys, source, (row.top, row.reset, str(row.depth)))
+        else:
+            code = check(yosys, source, source, row.top, row.reset, row.depth,
+                         (DEFAULT_GOLD_SCRIPT, DEFAULT_GATE_SCRIPT))
         print(f"{row.name}: {'equivalent' if code == EXIT_EQUIVALENT else f'exit {code}'}")
         worst = max(worst, code)
     return worst
@@ -169,14 +198,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--gate-script", default=DEFAULT_GATE_SCRIPT)
     ap.add_argument("--yosys", default=fsm_probe.default_yosys())
     ap.add_argument("--log", type=Path)
+    ap.add_argument("--odin", help="Odin III executable: the gate is its fsm; opt")
     ap.add_argument("--selftest", type=Path, metavar="MICROS_TXT")
     ap.add_argument("--only", nargs="*", default=[])
     args = ap.parse_args(argv)
     try:
         if args.selftest is not None:
-            return selftest(args.yosys, args.selftest, args.only, args.selftest.parents[1].parent)
+            return selftest(args.yosys, args.selftest, args.only, args.selftest.parents[1].parent,
+                            args.odin)
         if args.gold is None or args.top is None:
             raise EquivError("need GOLD and --top (or --selftest)")
+        if args.odin is not None:
+            return odin_check(args.odin, args.yosys, args.gold,
+                              (args.top, args.rst or "-", str(args.depth)))
         return check(args.yosys, args.gold, args.gate or args.gold, args.top, args.rst,
                      args.depth, (args.gold_script, args.gate_script), args.log)
     except EquivError as exc:

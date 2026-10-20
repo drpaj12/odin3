@@ -27,7 +27,7 @@
 #include <string.h>
 #include <unistd.h>
 
-enum { FT_PATH = 512, FT_MSG = 512, FT_MAX_MSGS = 4096 };
+enum { FT_PATH = 4608, FT_MSG = 512, FT_MAX_MSGS = 4096 };
 
 typedef struct ft_msg {
     odin3_log_level level;

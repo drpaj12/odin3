@@ -119,10 +119,12 @@ odin3_status odin3_fsm_recode(const odin3_fsm_mod *fm, odin3_fsm_inst *inst) {
                   "fsm: '%s': existing encoding is already a packed binary encoding", label);
         return ODIN3_OK;
     }
+    int32_t before = data->state_bits;
     odin3_status st = renumber(inst, kind, bits);
     if (st == ODIN3_OK) {
-        odin3_log(ODIN3_LOG_INFO, "fsm: recoding '%s' with %s encoding (%zu states, %d bits)",
-                  label, k_enc_names[kind], data->states.len, bits);
+        odin3_log(ODIN3_LOG_INFO,
+                  "fsm: recoding '%s' with %s encoding (%zu states, %d bits, was %d)", label,
+                  k_enc_names[kind], data->states.len, bits, before);
     }
     return st;
 }

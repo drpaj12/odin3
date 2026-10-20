@@ -98,6 +98,20 @@ class ScriptTest(unittest.TestCase):
         self.assertIn("yosys", err)
 
 
+class OdinLegTest(unittest.TestCase):
+    def test_odin_script_writes_gold_then_gate(self) -> None:
+        script = fsm_equiv.odin_script("a.v", Path("g.il"), Path("t.il"))
+        self.assertTrue(script.startswith("read_verilog --nolatches a.v; proc; write_rtlil g.il;"))
+        self.assertTrue(script.endswith("fsm; opt; write_rtlil t.il"))
+
+    def test_missing_odin_is_exit_2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "t.v"
+            src.write_text(RTL)
+            with self.assertRaises(FileNotFoundError):
+                fsm_equiv.odin_check(str(Path(tmp) / "nope"), YOSYS, str(src), ("t", "rst", "4"))
+
+
 @unittest.skipUnless(HAVE_YOSYS, "needs the VTR yosys (Yosys 0.55)")
 class YosysTest(unittest.TestCase):
     def run_pair(self, gate: str, rst: str | None) -> int:

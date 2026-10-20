@@ -126,7 +126,8 @@ static void test_the_log_names_the_choice(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, recode(&inst, (recode_case){"auto", NULL, -1}));
     TEST_ASSERT_TRUE(ft_has(ODIN3_LOG_INFO, "fsm: 'm.st': mapping auto encoding to 'one-hot'"));
     TEST_ASSERT_TRUE_MESSAGE(
-        ft_has(ODIN3_LOG_INFO, "fsm: recoding 'm.st' with one-hot encoding (3 states, 3 bits)"),
+        ft_has(ODIN3_LOG_INFO,
+               "fsm: recoding 'm.st' with one-hot encoding (3 states, 3 bits, was 3)"),
         ft_log());
     done(&inst);
 }
@@ -167,7 +168,7 @@ static void check_untouched(const char *attr) {
     open_design();
     odin3_fsm_inst inst;
     table(&inst, (tbl_shape){4, 5, 0});
-    char before[16][8];
+    char before[16][64];
     for (size_t i = 0; i < 5; i++) {
         (void)snprintf(before[i], sizeof before[i], "%s", code_text(&inst, i));
     }
@@ -256,7 +257,7 @@ static void test_already_packed_binary_keeps_the_codes(void) {
     open_design();
     odin3_fsm_inst inst;
     table(&inst, (tbl_shape){5, 32, 0}); /* 32 states in 5 bits */
-    char first[16];
+    char first[64];
     (void)snprintf(first, sizeof first, "%s", code_text(&inst, 1));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, recode(&inst, (recode_case){"binary", NULL, -1}));
     TEST_ASSERT_EQUAL_STRING(first, code_text(&inst, 1));

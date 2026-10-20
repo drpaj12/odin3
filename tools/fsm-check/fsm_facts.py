@@ -63,13 +63,20 @@ def design_path(kind: str, rel: str) -> str:
     return str(REPO_ROOT / rel)
 
 
+def _compact(fsm: yosys_log.Fsm) -> dict[str, object]:
+    """The fields the facts file keeps (not the codes and the table, which are long)."""
+    row = asdict(fsm)
+    del row["codes"], row["table"]
+    return row
+
+
 def facts_of(yosys: str, kind: str, rel: str, top: str | None) -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="fsm-facts-") as tmp:
         script = fsm_probe.probe_script([design_path(kind, rel)], kind == "vtr", top)
         text = fsm_probe.run_yosys(yosys, script, Path(tmp) / "yosys.log")
     mods = yosys_log.parse_log(text)
     return {
-        "fsms": [asdict(f) for m in sorted(mods) for f in mods[m].fsms],
+        "fsms": [_compact(f) for m in sorted(mods) for f in mods[m].fsms],
         "marked": [f"{m}.{w}" for m in sorted(mods) for w in mods[m].marked],
         "rejected": {f"{m}.{w}": r for m in sorted(mods) for w, r in mods[m].rejected.items()},
         "failures": [f"{m}.{w}: {r}" for m in sorted(mods) for w, r in mods[m].failures],

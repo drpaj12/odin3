@@ -84,6 +84,7 @@ def rows_of(design: str, facts: dict[str, yosys_log.ModuleFacts]) -> list[dict[s
         for fsm in facts[module].fsms:
             row: dict[str, object] = {"design": design}
             row.update(asdict(fsm))
+            del row["codes"], row["table"]
             rows.append(row)
     return rows
 
