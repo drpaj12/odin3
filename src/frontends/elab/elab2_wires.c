@@ -10,6 +10,7 @@
 #include "ast/symtab.h"
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_internal.h"
+#include "frontends/elab/netlist_locs.h"
 #include "frontends/elab/elab_test.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
@@ -91,7 +92,7 @@ static void node_srcloc(const odin3_elab2 *e2, const odin3_srcman *sm, odin3_ast
 
 /* The record of req for a module named spec_name (the module itself has no IR module yet). */
 static odin3_status prov_for(odin3_elab2 *e2, uint32_t spec_name, const odin3_elab2_prov_req *req,
-                             odin3_prov_id *out) {
+                             const odin3_elab2_nl_extra *nl, odin3_prov_id *out) {
     odin3_srcman *sm = NULL;
     odin3_status st = odin3_design_get_srcman(e2->design, &sm);
     odin3_srcloc locs[2];
@@ -110,11 +111,25 @@ static odin3_status prov_for(odin3_elab2 *e2, uint32_t spec_name, const odin3_el
     st = st != ODIN3_OK ? st
                         : odin3_design_intern(
                               e2->design, (odin3_bytes){e2->text.data, e2->text.len}, &origin.hier);
-    return st != ODIN3_OK ? st : odin3_prov_source(e2->ctx, &origin, out);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (!e2->opts.netlist) {
+        return odin3_prov_source(e2->ctx, &origin, out);
+    }
+    /* -netlist: the reader's own record is a netlist line (L-7), then the restored locations */
+    odin3_prov_id imported = {0};
+    st = odin3_prov_imported(e2->ctx, &origin, &imported);
+    return st != ODIN3_OK ? st : odin3_netlist_prov(e2, req, nl, imported, out);
 }
 
 odin3_status odin3_elab2_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req,
                               odin3_prov_id *out) {
+    return odin3_elab2_prov_nl(e2, req, NULL, out);
+}
+
+odin3_status odin3_elab2_prov_nl(odin3_elab2 *e2, const odin3_elab2_prov_req *req,
+                                 const odin3_elab2_nl_extra *nl, odin3_prov_id *out) {
     if (e2->mod == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_elab2_prov: no module is being emitted");
         return ODIN3_ERR_INVALID_ARG;
@@ -123,7 +138,7 @@ odin3_status odin3_elab2_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req,
     if (inlined.call.v == 0) { /* inside a call being inlined: the second loc of EL-45 */
         inlined.call = e2->call;
     }
-    return prov_for(e2, e2->mod_name, &inlined, out);
+    return prov_for(e2, e2->mod_name, &inlined, nl, out);
 }
 
 /* --- attributes (2A §7) ---------------------------------------------------------------------- */
@@ -154,6 +169,9 @@ static odin3_status attrs_apply(odin3_elab2 *e2, odin3_ast_id node, odin3_objref
     for (uint32_t i = 0; i < attrs.n; i++) {
         uint32_t key = odin3_ast_name(e2->elab, attrs.ids[i]);
         if (key == skip) {
+            continue;
+        }
+        if (odin3_netlist_src_consumed(e2, attrs.ids[i])) { /* restored as a record (D-3a) */
             continue;
         }
         odin3_value value;
@@ -257,8 +275,16 @@ static odin3_status wire_one(odin3_elab2 *e2, odin3_ast_id decl, odin3_ast_id de
                           odin3_strtab_get(odin3_design_strtab(e2->design), spec.name));
         return ODIN3_OK;
     }
+    odin3_netlist_name nl_name = {0};
+    if (st == ODIN3_OK && e2->opts.netlist && spec.name == rec->name) { /* module-level name */
+        st = odin3_netlist_name_decode(e2, rec->name, &nl_name);
+        st = st != ODIN3_OK || !nl_name.matched ? st
+                                                : odin3_netlist_unique_wire(e2, nl_name.short_str,
+                                                                            &spec.name);
+    }
     odin3_elab2_prov_req req = {declarator, {0}, rec->scope.v};
-    st = st != ODIN3_OK ? st : odin3_elab2_prov(e2, &req, &spec.prov);
+    odin3_elab2_nl_extra nl = {decl, &nl_name};
+    st = st != ODIN3_OK ? st : odin3_elab2_prov_nl(e2, &req, &nl, &spec.prov);
     odin3_wire_id wire = {0};
     st = st != ODIN3_OK ? st : odin3_wire_create(e2->mod, &spec, NULL, &wire);
     odin3_objref obj = {ODIN3_OBJ_WIRE, wire.v};
@@ -403,8 +429,9 @@ static odin3_status port_one(odin3_elab2 *e2, odin3_ast_id decl) {
                             .lsb = rec->packed.lsb,
                             .is_signed = (rec->flags & ODIN3_SYM_F_SIGNED) != 0};
     odin3_elab2_prov_req req = {decl, {0}, 0};
+    odin3_elab2_nl_extra nl = {declarator, NULL};
     odin3_status st = odin3_elab2_reserve_nets(e2, width, odin3_ast_loc(e2->elab, declarator));
-    st = st != ODIN3_OK ? st : odin3_elab2_prov(e2, &req, &spec.prov);
+    st = st != ODIN3_OK ? st : odin3_elab2_prov_nl(e2, &req, &nl, &spec.prov);
     odin3_node_id node = {0};
     odin3_status made = st != ODIN3_OK ? st : add_port(e2, &spec, &node);
     if (st == ODIN3_OK && made != ODIN3_OK) {
@@ -440,7 +467,7 @@ static odin3_status create_module(odin3_elab2 *e2, odin3_ast_id node) {
     }
     odin3_prov_id prov = {0};
     odin3_elab2_prov_req req = {node, {0}, 0};
-    odin3_status st = prov_for(e2, name, &req, &prov);
+    odin3_status st = prov_for(e2, name, &req, NULL, &prov);
     odin3_module_id id = {0};
     st = st != ODIN3_OK ? st : odin3_module_create(e2->design, name, prov, &id);
     st = st != ODIN3_OK ? st : register_module(e2, node, id);

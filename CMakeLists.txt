@@ -331,6 +331,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab_pending.c
     src/frontends/elab/elab2.c
     src/frontends/elab/elab2_wires.c
+    src/frontends/elab/netlist_locs.c
     src/frontends/elab/elab2_expr.c
     src/frontends/elab/elab2_select.c
     src/frontends/elab/elab2_varsel.c

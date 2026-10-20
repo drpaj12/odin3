@@ -24,6 +24,7 @@
 #include "frontends/elab/cval.h"
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
+#include "frontends/elab/netlist_locs.h"
 #include "ir/design.h"
 #include "odin3/odin3.h"
 #include "util/arena.h"
@@ -151,6 +152,7 @@ typedef struct w_attrs_of {
     odin3_ast_id made;  /* the elaborated node they are attached to */
     odin3_ast_id then;  /* a second parsed node merged in after from's (0: none); it wins a name */
     uint8_t unit_flags; /* the MODULE of a --lib unit: its ODIN3_UNIT_* become attributes (EL-4) */
+    odin3_bytes loc_text; /* -netlist: the `// LOC` comment of a CONT_ASSIGN, as an internal ATTR */
 } w_attrs_of;
 
 static void w_attach_attrs(e1w *wr, const w_attrs_of *at);
@@ -332,6 +334,29 @@ static const struct {
                     {"odin3_lib_vtr_compat", ODIN3_UNIT_VTR_COMPAT}};
 enum { W_UNIT_ATTRS = 4, W_ATTR_MSG = 160 };
 
+/* The internal ATTR that hands a CONT_ASSIGN's `// LOC` comment text to stage 2 (5.4c, D-3b): the
+ * parsed store (with its comment table) is dropped before stage 2 runs. */
+static uint32_t w_loc_attr(e1w *wr, const w_attrs_of *at, odin3_ast_id *ids) {
+    if (at->loc_text.len == 0 || !live(wr)) {
+        return 0;
+    }
+    odin3_ast_spec text = {.loc = odin3_ast_loc(wr->out, at->made).v,
+                           .end = odin3_ast_end(wr->out, at->made).v};
+    odin3_ast_spec spec = text;
+    spec.kind = ODIN3_AST_ATTR;
+    odin3_ast_id value = {0};
+    odin3_status st = string_spec(wr->e1, at->loc_text, &text);
+    st = st != ODIN3_OK ? st : odin3_ast_make(wr->out, &text, NULL, 0, &value);
+    st = st != ODIN3_OK ? st : odin3_ast_intern(wr->out, odin3_bytes_cstr(ODIN3_NETLIST_ASSIGN_KEY),
+                                                &spec.name);
+    st = st != ODIN3_OK ? st : odin3_ast_make(wr->out, &spec, &value, 1, ids);
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+        return 0;
+    }
+    return 1;
+}
+
 /* A value-less ATTR named text on made. */
 static odin3_ast_id w_flag_attr(e1w *wr, odin3_ast_id made, const char *text) {
     odin3_ast_spec spec = {.kind = ODIN3_AST_ATTR,
@@ -398,17 +423,19 @@ static uint32_t w_copy_attrs(e1w *wr, const w_attrs_of *at, odin3_ast_span first
 static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
     odin3_ast_span first = odin3_ast_attrs(wr->ast, at->from);
     odin3_ast_span second = odin3_ast_attrs(wr->ast, at->then);
-    if ((first.n + second.n == 0 && at->unit_flags == 0) || at->made.v == 0 || !live(wr)) {
+    if ((first.n + second.n == 0 && at->unit_flags == 0 && at->loc_text.len == 0) ||
+        at->made.v == 0 || !live(wr)) {
         return;
     }
     odin3_ast_id *ids = odin3_arena_alloc(
-        wr->env->arena, ((size_t)first.n + second.n + W_UNIT_ATTRS) * sizeof *ids);
+        wr->env->arena, ((size_t)first.n + second.n + W_UNIT_ATTRS + 1U) * sizeof *ids);
     if (ids == NULL) {
         fail(wr, ODIN3_ERR_NO_MEMORY);
         return;
     }
     uint32_t count = w_copy_attrs(wr, at, first, second, ids);
     count += w_unit_attrs(wr, at, ids + count);
+    count += w_loc_attr(wr, at, ids + count);
     if (!live(wr) || count == 0) { /* every attribute was a dropped reserved odin3_lib* one */
         return;
     }
@@ -1161,7 +1188,13 @@ static odin3_ast_id w_cont_assign(e1w *wr, odin3_ast_id item) {
     w_push(wr, (odin3_ast_id){0});
     w_declarators(wr, item, w_net_assign);
     odin3_ast_spec spec = spec_of(wr, ODIN3_AST_CONT_ASSIGN, item);
-    return w_make_marked(wr, &spec, mark, item);
+    odin3_ast_id id = w_make_plain(wr, &spec, mark, item);
+    w_attrs_of at = {.from = item, .made = id};
+    if (wr->e1->opts.netlist) {
+        (void)odin3_netlist_assign_comment(wr->e1->design, wr->ast, item, &at.loc_text);
+    }
+    w_attach_attrs(wr, &at);
+    return id;
 }
 
 /* --- the decision log (§3.4; internal risk §16 #4) ---------------------------------------- */

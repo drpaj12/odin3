@@ -397,6 +397,8 @@ static bool set_flag(odin3_bytes word, rv_args *out) {
         out->elab.auto_blackbox = true;
     } else if (odin3_pass_arg_is(word, "-icells") || odin3_pass_arg_is(word, "--icells")) {
         out->elab.icells = true;
+    } else if (odin3_pass_arg_is(word, "-netlist") || odin3_pass_arg_is(word, "--netlist")) {
+        out->elab.netlist = true;
     } else if (odin3_pass_arg_is(word, "--vtr-compat")) {
         out->elab.vtr_compat = true;
     } else {
@@ -411,6 +413,13 @@ static odin3_status check_lib_args(const rv_args *args) {
     if (args->elab.icells && (args->lib || args->parse_only)) {
         odin3_log(ODIN3_LOG_ERROR,
                   "read_verilog: -icells cannot be combined with %s (it is an option of the "
+                  "design read)",
+                  args->lib ? "--lib" : "--parse-only");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (args->elab.netlist && (args->lib || args->parse_only)) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: -netlist cannot be combined with %s (it is an option of the "
                   "design read)",
                   args->lib ? "--lib" : "--parse-only");
         return ODIN3_ERR_INVALID_ARG;
@@ -621,7 +630,7 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
 const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog",
     "read_verilog [--parse-only] [--lib] [--nolatches] [--nomem2reg] [--auto-blackbox] "
-    "[--vtr-compat] [-icells] [<file>...]: "
+    "[--vtr-compat] [-icells] [-netlist] [<file>...]: "
     "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
     "libraries; --parse-only keeps it (write_verilog_ast prints it), otherwise elaboration (2D) "
@@ -629,7 +638,9 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "memories unless forced, --auto-blackbox makes an undefined module a black box, --vtr-compat "
     "reads a non-constant `initial x = e;` as `assign x = e;` as Parmys does (a warning each); "
     "-icells (or --icells) reads an instance of a `$` cell type as that registered cell, as Yosys "
-    "does; --lib keeps "
+    "does; -netlist (or --netlist) says the file is a netlist written by write_verilog or Yosys: "
+    "its records are IMPORTED, a `(* src = \"file:line\" *)` attribute, a trailing `// file:line` "
+    "comment on an assign and a `\\hier/short@file:line ` net name restore HDL locations; --lib keeps "
     "the modules as library units for later reads (elaborated, under this read's --nolatches, "
     "--nomem2reg and --vtr-compat, only where a later design instantiates them)",
     read_verilog_run,

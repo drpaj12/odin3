@@ -211,6 +211,11 @@ struct odin3_elab2 {
     uint64_t objects;    /* IR objects made so far */
     uint64_t next_check; /* the object count of the next budget check */
     uint32_t ports_made; /* ports created (the refuse_port test hook counts them) */
+    /* read_verilog -netlist (5.4c; netlist_locs.c) */
+    const char *asg_loc;      /* the `// LOC` text of the CONT_ASSIGN being emitted; NULL: none */
+    uint32_t nl_bad;          /* `src` attributes that are not locations (kept; L-6) */
+    odin3_loc nl_bad_loc;     /* the first of them */
+    char nl_bad_text[64];     /* its text, cut */
     bool pend_seen[ODIN3_PEND_END];
 };
 
@@ -307,14 +312,30 @@ typedef struct odin3_elab2_prov_req {
     uint32_t scope;
 } odin3_elab2_prov_req;
 
+/* What read_verilog -netlist (5.4c) adds to a request: a second node whose `src` attribute counts
+ * after the request node's (a declaration beside its declarator, an instantiation beside its
+ * instance; 0: none) and the decoded L-5 name of the object (NULL: none). Ignored without
+ * -netlist. */
+struct odin3_netlist_name;
+typedef struct odin3_elab2_prov_nl {
+    odin3_ast_id attrs;
+    const struct odin3_netlist_name *name;
+} odin3_elab2_nl_extra;
+
 /*
- * The SOURCE record of EL-45 for the request (odin3_prov_source, so hash-consed): locs = the
+ * The SOURCE record of EL-45 for the request (odin3_prov_source, so hash-consed; IMPORTED under
+ * read_verilog -netlist): locs = the
  * node's {loc, end} then the call's when there is one (odin3_srcman_srcloc, raw loc kept), ast =
  * node, hier = `<specialization name>/<scope path>` with each generate or named block scope as
  * `name` or `name[index]` (the module's own scope: the name alone). ODIN3_ERR_NO_MEMORY;
  * ODIN3_ERR_INVALID_ARG (logged) with no module being emitted.
  */
 odin3_status odin3_elab2_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req, odin3_prov_id *out);
+
+/* odin3_elab2_prov with the -netlist additions nl (NULL: none). Under -netlist the record is
+ * IMPORTED (a netlist line, L-7), or the restored DERIVED one (odin3_netlist_prov). */
+odin3_status odin3_elab2_prov_nl(odin3_elab2 *e2, const odin3_elab2_prov_req *req,
+                                 const odin3_elab2_nl_extra *nl, odin3_prov_id *out);
 
 /*
  * Applies the ATTRs attached to node to obj (2A §7, EL-45): no value → INT 1, a NUMBER → BITS
