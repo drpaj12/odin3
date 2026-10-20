@@ -39,15 +39,17 @@
   "stereovision1",
   "mkDelayWorker32B",
   "stereovision2",
-  "blob_merge",
-  "LU8PEEng",
-  "bgm",
-  "mcml",
-  "LU32PEEng"
+  "blob_merge"
  ],
  "extra": [
   "spree",
   "arm_core"
+ ],
+ "offload": [
+  "LU8PEEng",
+  "bgm",
+  "mcml",
+  "LU32PEEng"
  ],
  "smoke": [
   "ch_intrinsics",
@@ -166,25 +168,25 @@
    "vtr_flow_time_s": 84.6
   },
   "LU8PEEng": {
-   "rank": 16,
+   "rank": null,
    "group": "B",
    "golden_bytes": 16900911,
    "vtr_flow_time_s": 532.9
   },
   "bgm": {
-   "rank": 17,
+   "rank": null,
    "group": "B",
    "golden_bytes": 23271051,
    "vtr_flow_time_s": 548.1
   },
   "mcml": {
-   "rank": 18,
+   "rank": null,
    "group": "B",
    "golden_bytes": 51063332,
    "vtr_flow_time_s": 4699.4
   },
   "LU32PEEng": {
-   "rank": 19,
+   "rank": null,
    "group": "B",
    "golden_bytes": 59566477,
    "vtr_flow_time_s": 3236.8

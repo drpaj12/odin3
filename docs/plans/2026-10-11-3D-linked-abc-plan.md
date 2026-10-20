@@ -212,7 +212,7 @@ Effort cues:
   - `abc_equiv_micro` (gate) therefore runs the committed BLIFs: `tests/golden/blif/*.blif` and `tests/unit/data/abc/*.blif`.
   - **Word-cell BLIFs are filtered out** (ruling I8; finding 8). `tests/abc/equiv_expect_fail.txt` lists `tests/golden/blif/pow.parmys.blif views` (it reads as the word cell `$pow`, so `abc` stops with the views error) and, if it fails `--blackbox`, `tests/golden/blif/dffsre.parmys.blif blackbox` (an undeclared `$_DFFSR_PPP_`). `abc-equiv` passes `views` entries only when the views error appears. `test_abc_pass` and `abc_determinism_ci` skip every listed file. The golden sweeps use the same file, extended per run.
   - The micros' Parmys goldens (the k6 `regression/` tree) and the `vtr/` goldens run in `abc_equiv_golden` (`sweep`): every k6 Parmys golden except `mcml` and `LU32PEEng`, smallest first.
-  - `mcml` and `LU32PEEng` run only in the H1–H6 slots.
+  - `mcml` and `LU32PEEng` run only in the H1–H6 slots (since 2026-10-20 shipped out to a bigger machine, `tools/vtr-qor/offload/`, PHASE3 decision 54).
 - (k) **`<domain>` and clock names.**
   - `<domain>` is spelled `clock '<net>' posedge|negedge`, `global clock`, or `no flip-flops`.
   - `<net>` is the clock net's own name, else its primary wire bit (`w[k]`, or `w` for a 1-bit wire), else `$n<ID>`.

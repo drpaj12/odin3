@@ -71,7 +71,7 @@ MAX_JOBS = 1
 FCHECK_LEGS = frozenset({"P", "O"})
 PLAN_LEG_ORDER = ("P", "Pprime", "Oprime", "O", "R", "Oprov")
 GOLDEN_LEGS = frozenset({"Pprime", "R"})
-SET_NAMES = ("gate", "extra", "smoke")
+SET_NAMES = ("gate", "extra", "smoke", "offload")
 GROUPS = ("A", "B")
 DESIGN_FIELDS = frozenset({"rank", "group", "golden_bytes", "vtr_flow_time_s"})
 # Design names become path components (<J>/<d>, <d>.v): no separators, no dots.
@@ -107,6 +107,7 @@ class Sets:
     gate: tuple[str, ...]
     extra: tuple[str, ...]
     smoke: tuple[str, ...]
+    offload: tuple[str, ...]
     group_b: tuple[str, ...]
     designs: dict[str, DesignInfo]
 
@@ -158,10 +159,12 @@ def _subsequence(part: tuple[str, ...], order: tuple[str, ...]) -> bool:
 def _check_split(sets: Sets, path: Path) -> None:
     if set(sets.designs) != set(sets.order):
         raise _bad(path, "'designs' and 'order' name different designs")
-    if set(sets.gate) & set(sets.extra) or set(sets.gate) | set(sets.extra) != set(sets.order):
-        raise _bad(path, "'gate' and 'extra' must split 'order'")
-    if not _subsequence(sets.gate, sets.order) or not _subsequence(sets.extra, sets.order):
-        raise _bad(path, "'gate' and 'extra' must follow 'order'")
+    parts = (sets.gate, sets.extra, sets.offload)
+    if sum(len(part) for part in parts) != len(set().union(*parts)) \
+            or set().union(*parts) != set(sets.order):
+        raise _bad(path, "'gate', 'extra' and 'offload' must split 'order'")
+    if not all(_subsequence(part, sets.order) for part in parts):
+        raise _bad(path, "'gate', 'extra' and 'offload' must follow 'order'")
     if sets.smoke != sets.gate[:len(sets.smoke)]:
         raise _bad(path, "'smoke' must be the first designs of 'gate'")
 
@@ -170,9 +173,9 @@ def _check_ranks(sets: Sets, path: Path) -> None:
     for i, design in enumerate(sets.gate, start=1):
         if sets.designs[design].rank != i:
             raise _bad(path, f"design '{design}': rank is not {i} (its place in 'gate')")
-    for design in sets.extra:
+    for design in (*sets.extra, *sets.offload):
         if sets.designs[design].rank is not None:
-            raise _bad(path, f"design '{design}': an extra has rank null")
+            raise _bad(path, f"design '{design}': an extra or offload design has rank null")
 
 
 def _check_order(sets: Sets, path: Path) -> None:
@@ -199,6 +202,7 @@ def load_sets(path: Path = SETS_JSON) -> Sets:
     sets = Sets(
         order=_names(data, "order", path), gate=_names(data, "gate", path),
         extra=_names(data, "extra", path, empty=True), smoke=_names(data, "smoke", path),
+        offload=_names(data, "offload", path, empty=True),
         group_b=_names(data, "group_b", path, empty=True),
         designs={name: _design_info(name, info, path) for name, info in raw.items()},
     )
@@ -223,7 +227,8 @@ def _in_order(sets: Sets, chosen: Iterable[str]) -> tuple[str, ...]:
 
 def select_designs(sets: Sets, set_names: Sequence[str], designs: Sequence[str]) -> tuple[str, ...]:
     """The union of the named sets and designs, in §2 order whatever the input order (E-QH7)."""
-    by_name = {"gate": sets.gate, "extra": sets.extra, "smoke": sets.smoke}
+    by_name = {"gate": sets.gate, "extra": sets.extra, "smoke": sets.smoke,
+               "offload": sets.offload}
     chosen: set[str] = set()
     for name in set_names:
         if name not in by_name:

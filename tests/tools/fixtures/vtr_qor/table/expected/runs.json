@@ -7,128 +7,128 @@
   {
    "geomean": 1.1,
    "metric": "luts",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "ffs",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 0.0,
    "metric": "adders",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "mults",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "ram_slices",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 0.8,
    "metric": "depth",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
-   "geomean": 1.1,
+   "geomean": 1.1164861825723824,
    "metric": "num_clb",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "num_memories",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "num_mult",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.2,
    "metric": "min_chan_width",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
-   "geomean": 1.0215696008151112,
+   "geomean": 1.0273996590637164,
    "metric": "critical_path_delay_ns",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.05,
    "metric": "crit_path_routed_wirelength",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 0.5,
    "metric": "frontend_wall_s",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 2.0,
    "metric": "frontend_peak_rss_mib",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.1,
    "metric": "vpr_time_s",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.1,
    "metric": "max_vpr_mem_mib",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/P",
    "set": "GEOMEAN_GATE"
   },
@@ -263,128 +263,128 @@
   {
    "geomean": 1.05,
    "metric": "luts",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "ffs",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "adders",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "mults",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "ram_slices",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "depth",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.1,
    "metric": "num_clb",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "num_memories",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "num_mult",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.1,
    "metric": "min_chan_width",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "critical_path_delay_ns",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.05,
    "metric": "crit_path_routed_wirelength",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 0.6,
    "metric": "frontend_wall_s",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.5,
    "metric": "frontend_peak_rss_mib",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "vpr_time_s",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "max_vpr_mem_mib",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O'/P",
    "set": "GEOMEAN_GATE"
   },
@@ -519,128 +519,128 @@
   {
    "geomean": 0.95,
    "metric": "luts",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "ffs",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "adders",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "mults",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "ram_slices",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "depth",
-   "n": 18,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 0.9,
    "metric": "num_clb",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "num_memories",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "num_mult",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "min_chan_width",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "critical_path_delay_ns",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 0.95,
    "metric": "crit_path_routed_wirelength",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 0.8,
    "metric": "frontend_wall_s",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.2,
    "metric": "frontend_peak_rss_mib",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "vpr_time_s",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "max_vpr_mem_mib",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "P'/P",
    "set": "GEOMEAN_GATE"
   },
@@ -775,128 +775,128 @@
   {
    "geomean": 1.0476190476190477,
    "metric": "luts",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "ffs",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 0.0,
    "metric": "adders",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "mults",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "ram_slices",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 0.8,
    "metric": "depth",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
-   "geomean": 1.0,
+   "geomean": 1.0149874387021658,
    "metric": "num_clb",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "num_memories",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "num_mult",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0909090909090908,
    "metric": "min_chan_width",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
-   "geomean": 1.0215696008151112,
+   "geomean": 1.0273996590637164,
    "metric": "critical_path_delay_ns",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.0,
    "metric": "crit_path_routed_wirelength",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 0.8333333333333334,
    "metric": "frontend_wall_s",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.3333333333333333,
    "metric": "frontend_peak_rss_mib",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.1,
    "metric": "vpr_time_s",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
   {
    "geomean": 1.1,
    "metric": "max_vpr_mem_mib",
-   "n": 19,
-   "of": 19,
+   "n": 15,
+   "of": 15,
    "pair": "O/O'",
    "set": "GEOMEAN_GATE"
   },
@@ -4278,870 +4278,6 @@
    },
    "schema": 1,
    "started": "2026-10-13T01:28:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "skipped",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": null,
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 100,
-    "frontend_wall_s": 10.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "LU8PEEng",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "1111111111111111111111111111111111111111111111111111111111111111",
-   "key12": "111111111111",
-   "leg": "P",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": null,
-    "adders": 10,
-    "blif_sha256": "1515151515151515151515151515151515151515151515151515151515151515",
-    "depth": 5,
-    "ffs": 100,
-    "luts": 1000,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": null,
-   "odin3_commit": null,
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 200,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1000,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 50,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-12T01:30:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "pass",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 200,
-    "frontend_wall_s": 5.0,
-    "max_vpr_mem_mib": 330,
-    "vpr_time_s": 22.0,
-    "vpr_total_runtime_s": 20.0
-   },
-   "design": "LU8PEEng",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "4444444444444444444444444444444444444444444444444444444444444444",
-   "key12": "444444444444",
-   "leg": "O",
-   "netlist": {
-    "abc_depth": 4,
-    "abc_exchange": "aig",
-    "adders": 10,
-    "blif_sha256": "1515151515151515151515151515151515151515151515151515151515151515",
-    "depth": 4,
-    "ffs": 100,
-    "luts": 1100,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 21,
-    "device_width": 21,
-    "num_clb": 176,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1050,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 60,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-13T04:30:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "ram",
-    "fcheck": "pass",
-    "rerun": "same"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": null,
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 150,
-    "frontend_wall_s": 6.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "LU8PEEng",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "2222222222222222222222222222222222222222222222222222222222222222",
-   "key12": "222222222222",
-   "leg": "Oprime",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": null,
-    "adders": 10,
-    "blif_sha256": "1515151515151515151515151515151515151515151515151515151515151515",
-    "depth": 5,
-    "ffs": 100,
-    "luts": 1050,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 220,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1050,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 55,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-12T04:30:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "skipped",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 120,
-    "frontend_wall_s": 8.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "LU8PEEng",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "3333333333333333333333333333333333333333333333333333333333333333",
-   "key12": "333333333333",
-   "leg": "Pprime",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": "aig",
-    "adders": 10,
-    "blif_sha256": "1515151515151515151515151515151515151515151515151515151515151515",
-    "depth": 5,
-    "ffs": 100,
-    "luts": 950,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 180,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 950,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 50,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-13T01:30:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "skipped",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": null,
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 100,
-    "frontend_wall_s": 10.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "bgm",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "1111111111111111111111111111111111111111111111111111111111111111",
-   "key12": "111111111111",
-   "leg": "P",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": null,
-    "adders": 10,
-    "blif_sha256": "1616161616161616161616161616161616161616161616161616161616161616",
-    "depth": 5,
-    "ffs": 100,
-    "luts": 1000,
-    "mults": 2,
-    "ram_slices": 0
-   },
-   "odin3_build": null,
-   "odin3_commit": null,
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 200,
-    "num_memories": 0,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1000,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 50,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-12T01:32:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "pass",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 200,
-    "frontend_wall_s": 5.0,
-    "max_vpr_mem_mib": 330,
-    "vpr_time_s": 22.0,
-    "vpr_total_runtime_s": 20.0
-   },
-   "design": "bgm",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "4444444444444444444444444444444444444444444444444444444444444444",
-   "key12": "444444444444",
-   "leg": "O",
-   "netlist": {
-    "abc_depth": 4,
-    "abc_exchange": "aig",
-    "adders": 10,
-    "blif_sha256": "1616161616161616161616161616161616161616161616161616161616161616",
-    "depth": 4,
-    "ffs": 100,
-    "luts": 1100,
-    "mults": 2,
-    "ram_slices": 0
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 21,
-    "device_width": 21,
-    "num_clb": 275,
-    "num_memories": 0,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1050,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 60,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-13T04:32:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "equivalent",
-    "fcheck": "pass",
-    "rerun": "same"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": null,
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 150,
-    "frontend_wall_s": 6.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "bgm",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "2222222222222222222222222222222222222222222222222222222222222222",
-   "key12": "222222222222",
-   "leg": "Oprime",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": null,
-    "adders": 10,
-    "blif_sha256": "1616161616161616161616161616161616161616161616161616161616161616",
-    "depth": 5,
-    "ffs": 100,
-    "luts": 1050,
-    "mults": 2,
-    "ram_slices": 0
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 220,
-    "num_memories": 0,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1050,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 55,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-12T04:32:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "skipped",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 120,
-    "frontend_wall_s": 8.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "bgm",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "3333333333333333333333333333333333333333333333333333333333333333",
-   "key12": "333333333333",
-   "leg": "Pprime",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": "aig",
-    "adders": 10,
-    "blif_sha256": "1616161616161616161616161616161616161616161616161616161616161616",
-    "depth": -1,
-    "ffs": 100,
-    "luts": 950,
-    "mults": 2,
-    "ram_slices": 0
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 180,
-    "num_memories": 0,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 950,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 50,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-13T01:32:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "skipped",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": null,
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 100,
-    "frontend_wall_s": 10.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "mcml",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "1111111111111111111111111111111111111111111111111111111111111111",
-   "key12": "111111111111",
-   "leg": "P",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": null,
-    "adders": 10,
-    "blif_sha256": "1717171717171717171717171717171717171717171717171717171717171717",
-    "depth": 5,
-    "ffs": 100,
-    "luts": 1000,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": null,
-   "odin3_commit": null,
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 200,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1000,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 50,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-12T01:34:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "pass",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 200,
-    "frontend_wall_s": 5.0,
-    "max_vpr_mem_mib": 330,
-    "vpr_time_s": 22.0,
-    "vpr_total_runtime_s": 20.0
-   },
-   "design": "mcml",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "4444444444444444444444444444444444444444444444444444444444444444",
-   "key12": "444444444444",
-   "leg": "O",
-   "netlist": {
-    "abc_depth": 4,
-    "abc_exchange": "blif",
-    "adders": 10,
-    "blif_sha256": "1717171717171717171717171717171717171717171717171717171717171717",
-    "depth": 4,
-    "ffs": 100,
-    "luts": 1100,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 21,
-    "device_width": 21,
-    "num_clb": 176,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1050,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 60,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-13T04:34:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "ram",
-    "fcheck": "pass",
-    "rerun": "same"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": null,
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 150,
-    "frontend_wall_s": 6.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "mcml",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "2222222222222222222222222222222222222222222222222222222222222222",
-   "key12": "222222222222",
-   "leg": "Oprime",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": null,
-    "adders": 10,
-    "blif_sha256": "1717171717171717171717171717171717171717171717171717171717171717",
-    "depth": 5,
-    "ffs": 100,
-    "luts": 1050,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 220,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1050,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 55,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-12T04:34:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "skipped",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 120,
-    "frontend_wall_s": 8.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "mcml",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "3333333333333333333333333333333333333333333333333333333333333333",
-   "key12": "333333333333",
-   "leg": "Pprime",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": "aig",
-    "adders": 10,
-    "blif_sha256": "1717171717171717171717171717171717171717171717171717171717171717",
-    "depth": 5,
-    "ffs": 100,
-    "luts": 950,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 180,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 950,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 50,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-13T01:34:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "skipped",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": null,
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 100,
-    "frontend_wall_s": 10.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "LU32PEEng",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "1111111111111111111111111111111111111111111111111111111111111111",
-   "key12": "111111111111",
-   "leg": "P",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": null,
-    "adders": 10,
-    "blif_sha256": "1818181818181818181818181818181818181818181818181818181818181818",
-    "depth": 5,
-    "ffs": 100,
-    "luts": 1000,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": null,
-   "odin3_commit": null,
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 200,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1000,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 50,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-12T01:36:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "pass",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 200,
-    "frontend_wall_s": 5.0,
-    "max_vpr_mem_mib": 330,
-    "vpr_time_s": 22.0,
-    "vpr_total_runtime_s": 20.0
-   },
-   "design": "LU32PEEng",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "4444444444444444444444444444444444444444444444444444444444444444",
-   "key12": "444444444444",
-   "leg": "O",
-   "netlist": {
-    "abc_depth": 4,
-    "abc_exchange": "aig",
-    "adders": 10,
-    "blif_sha256": "1818181818181818181818181818181818181818181818181818181818181818",
-    "depth": 4,
-    "ffs": 100,
-    "luts": 1100,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 21,
-    "device_width": 21,
-    "num_clb": 220,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1050,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 60,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-13T04:36:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "ram",
-    "fcheck": "pass",
-    "rerun": "same"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": null,
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 150,
-    "frontend_wall_s": 6.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "LU32PEEng",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "2222222222222222222222222222222222222222222222222222222222222222",
-   "key12": "222222222222",
-   "leg": "Oprime",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": null,
-    "adders": 10,
-    "blif_sha256": "1818181818181818181818181818181818181818181818181818181818181818",
-    "depth": 5,
-    "ffs": 100,
-    "luts": 1050,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 220,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 1050,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 55,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-12T04:36:00Z",
-   "status": "ok",
-   "verdicts": {
-    "equiv": "skipped",
-    "fcheck": "skipped",
-    "rerun": "skipped"
-   },
-   "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
-  },
-  {
-   "abc_script_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
-   "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
-   "cost": {
-    "frontend_peak_rss_mib": 120,
-    "frontend_wall_s": 8.0,
-    "max_vpr_mem_mib": 300,
-    "vpr_time_s": 20.0,
-    "vpr_total_runtime_s": 18.0
-   },
-   "design": "LU32PEEng",
-   "elapsed_s": 30.0,
-   "error": "",
-   "gating": true,
-   "key": "3333333333333333333333333333333333333333333333333333333333333333",
-   "key12": "333333333333",
-   "leg": "Pprime",
-   "netlist": {
-    "abc_depth": 5,
-    "abc_exchange": "aig",
-    "adders": 10,
-    "blif_sha256": "1818181818181818181818181818181818181818181818181818181818181818",
-    "depth": 5,
-    "ffs": 100,
-    "luts": 950,
-    "mults": 2,
-    "ram_slices": 4
-   },
-   "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
-   "packed": {
-    "device_height": 20,
-    "device_width": 20,
-    "num_clb": 180,
-    "num_memories": 1,
-    "num_mult": 2
-   },
-   "routed": {
-    "crit_path_routed_wirelength": 950,
-    "critical_path_delay_ns": 2.5,
-    "fmax_mhz": 400.0,
-    "min_chan_width": 50,
-    "vpr_status": "success"
-   },
-   "schema": 1,
-   "started": "2026-10-13T01:36:00Z",
    "status": "ok",
    "verdicts": {
     "equiv": "skipped",
