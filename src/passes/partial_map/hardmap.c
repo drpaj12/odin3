@@ -258,7 +258,8 @@ static void info_absent(const odin3_arch *arch, const char *model, uint64_t coun
 }
 
 /* C-2 and C-3: a record with an `adder` model but no carry pack pattern gets one warning; with
- * one, the number of pack patterns reaching the adder's `cin` is reported as a fact. */
+ * one, the number of pack patterns reaching the adder's `cin` is reported as a fact, at DEBUG level
+ * so that the pass log of the k6 record stays equal to the log without a record (identity gate). */
 static void carry_report(const odin3_arch *arch, bool have_adder) {
     if (!have_adder) {
         return;
@@ -270,7 +271,7 @@ static void carry_report(const odin3_arch *arch, bool have_adder) {
                   pm_arch_name(arch));
         return;
     }
-    odin3_log(ODIN3_LOG_INFO, "partial_map: architecture '%s' has %" PRIu32 " carry pack patterns",
+    odin3_log(ODIN3_LOG_DEBUG, "partial_map: architecture '%s' has %" PRIu32 " carry pack patterns",
               pm_arch_name(arch), odin3_arch_adder_cin_patterns(arch));
 }
 

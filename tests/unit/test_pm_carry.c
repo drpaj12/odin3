@@ -42,7 +42,7 @@ static void text_sink(odin3_log_level level, const char *msg, void *user) {
 void setUp(void) {
     log_text[0] = '\0';
     odin3_log_set_sink(text_sink, NULL);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_INFO));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_DEBUG));
 }
 
 void tearDown(void) {

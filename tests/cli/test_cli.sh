@@ -844,7 +844,6 @@ pm_carry_arch)
                 >"$work/out" 2>"$work/err" || fail "$arch $micro: script failed"
             grep -qF "adder in 1 chains" "$work/err" || fail "$arch $micro: no chain mapped"
             ! grep -qF "chains may not pack" "$work/err" || fail "$arch: the chain warning fired"
-            grep -qF "carry pack patterns" "$work/err" || fail "$arch: no carry pack pattern INFO"
             cmp "$work/before.vec" "$work/after.vec" || fail "$arch $micro: sim vectors differ"
         done
     done
