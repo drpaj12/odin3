@@ -227,6 +227,35 @@ static void test_check_and_forward_index(void) {
 
 enum { CHAIN = 3000, OBJECTS = 2000 };
 
+/* A SOURCE of file:line in ctx's run. */
+static odin3_prov_id source_at(odin3_pass_ctx *ctx, const char *file, uint32_t line) {
+    odin3_srcloc loc = {intern(file), line, 1, line, 2, 0};
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_prov_source(ctx, &(odin3_prov_origin){&loc, 1, 0, 0}, &id));
+    return id;
+}
+
+/* A DERIVED record over leaf and, when there is one, tail. */
+static odin3_prov_id derived_over(odin3_pass_ctx *ctx, odin3_prov_id leaf, odin3_prov_id tail) {
+    odin3_prov_id parents[2] = {leaf, tail};
+    odin3_prov_id id = {0};
+    odin3_prov_begin_op(ctx);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_prov_derive(ctx, (odin3_prov_list){parents, tail.v != 0 ? 2U : 1U}, &id));
+    return id;
+}
+
+static void expect_chain_object(odin3_hdl_ctx *hdl, odin3_prov_id object, uint32_t own_line) {
+    odin3_hdl_locs_out out;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hdl_locs(hdl, object, &out));
+    TEST_ASSERT_EQUAL_UINT(ODIN3_HDL_LOC_MAX, out.n);
+    TEST_ASSERT_TRUE(out.capped);
+    TEST_ASSERT_EQUAL_UINT(own_line, out.locs[0].line); /* own leaf first, then the chain tail */
+    TEST_ASSERT_EQUAL_UINT(CHAIN, out.locs[1].line);
+    TEST_ASSERT_EQUAL_UINT(CHAIN - (ODIN3_HDL_LOC_MAX - 2), out.locs[ODIN3_HDL_LOC_MAX - 1].line);
+}
+
 /* A DERIVED chain of CHAIN records (each over the one before and a SOURCE of its own line), then
  * OBJECTS records each over the chain's tail and a SOURCE of its own: all queried through one
  * context. Each record is walked once, so the context resolves about CHAIN + 3 * OBJECTS records,
@@ -236,36 +265,12 @@ static void test_shared_deep_chain_is_walked_once(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("deep"), &ctx));
     odin3_prov_id tail = {0};
     for (uint32_t i = 0; i < CHAIN; i++) {
-        odin3_srcloc loc = {intern("c.v"), i + 1, 1, i + 1, 2, 0};
-        odin3_prov_id leaf = {0};
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                              odin3_prov_source(&ctx, &(odin3_prov_origin){&loc, 1, 0, 0}, &leaf));
-        odin3_prov_id parents[2] = {leaf, tail};
-        odin3_prov_begin_op(&ctx);
-        TEST_ASSERT_EQUAL_INT(
-            ODIN3_OK,
-            odin3_prov_derive(&ctx, (odin3_prov_list){parents, tail.v != 0 ? 2U : 1U}, &tail));
+        tail = derived_over(&ctx, source_at(&ctx, "c.v", i + 1), tail);
     }
     odin3_hdl_ctx *hdl = odin3_hdl_ctx_create(design, "test");
     TEST_ASSERT_NOT_NULL(hdl);
     for (uint32_t i = 0; i < OBJECTS; i++) {
-        odin3_srcloc loc = {intern("o.v"), i + 1, 1, i + 1, 2, 0};
-        odin3_prov_id own = {0};
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                              odin3_prov_source(&ctx, &(odin3_prov_origin){&loc, 1, 0, 0}, &own));
-        odin3_prov_id parents[2] = {own, tail};
-        odin3_prov_begin_op(&ctx);
-        odin3_prov_id object = {0};
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                              odin3_prov_derive(&ctx, (odin3_prov_list){parents, 2}, &object));
-        odin3_hdl_locs_out out;
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hdl_locs(hdl, object, &out));
-        TEST_ASSERT_EQUAL_UINT(ODIN3_HDL_LOC_MAX, out.n);
-        TEST_ASSERT_TRUE(out.capped);
-        TEST_ASSERT_EQUAL_UINT(i + 1, out.locs[0].line); /* own leaf first, then the chain tail */
-        TEST_ASSERT_EQUAL_UINT(CHAIN, out.locs[1].line);
-        TEST_ASSERT_EQUAL_UINT(CHAIN - (ODIN3_HDL_LOC_MAX - 2),
-                               out.locs[ODIN3_HDL_LOC_MAX - 1].line);
+        expect_chain_object(hdl, derived_over(&ctx, source_at(&ctx, "o.v", i + 1), tail), i + 1);
     }
     TEST_ASSERT_TRUE(odin3_hdl_ctx_records(hdl) <= (size_t)CHAIN * 2 + (size_t)OBJECTS * 3);
     odin3_hdl_ctx_destroy(hdl);
