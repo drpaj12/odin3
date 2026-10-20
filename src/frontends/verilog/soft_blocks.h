@@ -11,6 +11,7 @@
 
 #include "ir/design.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 enum { SOFT_BLOCK_COUNT = 4 };
@@ -22,8 +23,16 @@ const char *odin3_soft_block_name(uint32_t index);
  * record (a model that took no template is a black box, not missing). */
 uint32_t odin3_soft_blocks_missing(const odin3_design *design);
 
-/* The directory of the bodies: $ODIN3_SOFT_PRIMITIVES_DIR, else the build's lib/soft_primitives;
- * NULL when neither is known. */
-const char *odin3_soft_blocks_dir(void);
+enum { SOFT_DIR_CAP = 4096 };
+
+/*
+ * The directory of the bodies (lib/soft_primitives, installed as share/odin3/soft_primitives) into
+ * dir (SOFT_DIR_CAP bytes): $ODIN3_SOFT_PRIMITIVES_DIR when set (the only candidate then; every
+ * `<name>.v` in it that a design needs is parsed as Verilog, so point it only at a directory you
+ * trust), else <exe>/../share/odin3/soft_primitives (install tree), <exe>/../../lib/soft_primitives
+ * (build tree), the source tree the build came from. tried (SOFT_DIR_CAP bytes) gets the candidates
+ * looked at. False when none is a directory.
+ */
+bool odin3_soft_blocks_dir(char *dir, char *tried);
 
 #endif

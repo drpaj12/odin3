@@ -110,10 +110,21 @@ static odin3_status read_library(odin3_rv *rv, const odin3_pp_source *src) {
  * is built from lib/soft_primitives/<name>.v, read as a library unit; the instance is warned. */
 static odin3_status read_soft_block(odin3_rv *rv, const odin3_rv_want *want) {
     const char *name = text_of(rv, want->name);
-    const char *dir = odin3_soft_blocks_dir();
-    for (uint32_t i = 0; dir != NULL && i < SOFT_BLOCK_COUNT; i++) {
+    char dir[SOFT_DIR_CAP];
+    char tried[SOFT_DIR_CAP];
+    bool found = odin3_soft_blocks_dir(dir, tried);
+    for (uint32_t i = 0; i < SOFT_BLOCK_COUNT; i++) {
         if (((rv->soft_mask >> i) & 1U) == 0 || strcmp(name, odin3_soft_block_name(i)) != 0) {
             continue;
+        }
+        if (!found) {
+            odin3_vl_report(
+                &rv->vl, ODIN3_LOG_ERROR, want->at,
+                "--vtr-compat needs the soft body of '%s' (the architecture has no such "
+                "model) but no soft_primitives directory was found; tried %s "
+                "(set ODIN3_SOFT_PRIMITIVES_DIR)",
+                name, tried);
+            return ODIN3_OK; /* counted as an error by the run: the read fails */
         }
         odin3_strbuf path;
         odin3_strbuf_init(&path);

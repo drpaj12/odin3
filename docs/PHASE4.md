@@ -249,7 +249,8 @@ DESIGN §12.1.
    `dual_port_ram`, `multiply` or `adder` instance on an arch without that model: under
    `read_verilog --vtr-compat` it is built as soft logic from `lib/soft_primitives/<name>.v` (our
    own behavioural bodies, read as library units on demand) with a located WARNING, as Parmys
-   does; without `--vtr-compat` the unresolved-module error stays. 4.2 plan PR D.
+   does; without `--vtr-compat` the unresolved-module error stays. Including `adder` in D18 is an
+   agent default, Peter may override. 4.2 plan PR D.
 
 ## Open items
 

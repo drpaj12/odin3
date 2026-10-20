@@ -884,11 +884,11 @@ pm_soft_blocks)
     lib=$fixtures/../../../lib/vtr.o3lib
     equiv=$(dirname "$compare")/../equiv-check/equiv-check
     flow="proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full; partial_map; opt -full -ffbits; lower; opt -fast; compact"
-    for case in common/spram:single_port_ram:spram_rtl micro/multiply_hard_block:multiply:multiply_rtl common/dpram:dual_port_ram:dpram_rtl; do
+    for case in common/spram:single_port_ram:spram_rtl micro/multiply_hard_block:multiply:multiply_rtl common/dpram:dual_port_ram:dpram_rtl ../../micro_pm/adder_inst:adder:adder_rtl; do
         IFS=: read -r design block rtl <<<"$case"
         "$odin3" -p "read_arch $arch; read_verilog --vtr-compat $mic/$design.v; $flow; write_blif --vtr $work/a.blif" \
             >"$work/out" 2>"$work/err" || fail "$design: odin3 failed"
-        grep -q "$design.v:[0-9]*:[0-9]*: warning: the architecture has no '$block' model; --vtr-compat builds this instance as soft logic" "$work/err" ||
+        grep -q "${design##*/}.v:[0-9]*:[0-9]*: warning: the architecture has no '$block' model; --vtr-compat builds this instance as soft logic" "$work/err" ||
             fail "$design: no located warning"
         "$odin3" -p "read_arch $arch; read_verilog --vtr-compat $mm/$rtl.v; $flow; write_blif --vtr $work/b.blif" \
             >"$work/out" 2>"$work/err" || fail "$rtl: odin3 failed"
@@ -898,6 +898,18 @@ pm_soft_blocks)
             >"$work/out" 2>"$work/err" || fail "$design: k6 failed"
         if grep -q "builds this instance as soft logic" "$work/err"; then fail "$design: k6 warns"; fi
     done
+    # the directory of the bodies: ODIN3_SOFT_PRIMITIVES_DIR is the only candidate when set. A
+    # missing one is a located error that names it; a copy of the bodies there works.
+    d=$mic/common/spram.v
+    if ODIN3_SOFT_PRIMITIVES_DIR=$work/none "$odin3" -p "read_arch $arch; read_verilog --vtr-compat $d" >"$work/out" 2>"$work/err"; then
+        fail "a missing soft_primitives directory was accepted"
+    fi
+    grep -qF "spram.v:23:2: error: --vtr-compat needs the soft body of 'single_port_ram'" "$work/err" || fail "no located error"
+    grep -qF "tried '$work/none'" "$work/err" || fail "the error does not name the directory"
+    mkdir "$work/soft"
+    cp "$fixtures"/../../../lib/soft_primitives/*.v "$work/soft/"
+    ODIN3_SOFT_PRIMITIVES_DIR=$work/soft "$odin3" -p "read_arch $arch; read_verilog --vtr-compat $d; $flow" >"$work/out" 2>"$work/err" ||
+        fail "the env override did not work"
     ;;
 pm_mem_rden)
     mm=$fixtures/../../micro_pm

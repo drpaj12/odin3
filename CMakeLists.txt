@@ -440,6 +440,7 @@ add_custom_target(verilog_generated
 # the warning off (verified with CMake 3.28 and both compilers).
 target_sources(odin3_core PRIVATE ${BISON_verilog_parser_OUTPUTS} ${FLEX_verilog_lexer_OUTPUTS})
 target_include_directories(odin3_core PRIVATE ${_gen})
+install(DIRECTORY lib/soft_primitives DESTINATION share/odin3 FILES_MATCHING PATTERN "*.v")
 target_compile_definitions(odin3_core PRIVATE
     ODIN3_SOFT_PRIMITIVES_DIR="${PROJECT_SOURCE_DIR}/lib/soft_primitives")
 # The list as measured with Bison 3.8.2, Flex 2.6.4, gcc 13 and clang 18 at -O0 and -O2: the
