@@ -221,7 +221,8 @@ static void check_full(odin3_design *design) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, opts));
 }
 
-odin3_status pmf_run(pb_result *res, const pm_options *opts, odin3_hardmap_stats *stats) {
+odin3_status pmf_run(pb_result *res, const odin3_partial_map_opts *opts,
+                     odin3_hardmap_stats *stats) {
     check_full(res->design);
     odin3_status st = odin3_partial_map_run_opts(&res->ctx, res->design, opts, stats);
     check_full(res->design);
@@ -299,7 +300,8 @@ static void trace_of(const pb_result *res, pmf_case cs, uint32_t addr_mask, odin
     free(io);
 }
 
-bool pmf_sim_equal(pmf_case cs, const char *arch_xml, const pm_options *opts, uint32_t addr_mask) {
+bool pmf_sim_equal(pmf_case cs, const char *arch_xml, const odin3_partial_map_opts *opts,
+                   uint32_t addr_mask) {
     pb_result before;
     pb_result after;
     odin3_strbuf trace_before;

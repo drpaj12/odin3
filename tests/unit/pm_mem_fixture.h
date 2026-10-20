@@ -39,11 +39,13 @@ void pmf_build_lib_record(pmf_case cs, const char *arch_xml, pb_result *out);
 
 /* odin3_partial_map_run_opts on res with check FULL before and after; returns its status. opts and
  * stats may be NULL. */
-odin3_status pmf_run(pb_result *res, const pm_options *opts, odin3_hardmap_stats *stats);
+odin3_status pmf_run(pb_result *res, const odin3_partial_map_opts *opts,
+                     odin3_hardmap_stats *stats);
 
 /* The simulation of the case before and after partial_map on the same random vectors: true when
  * the traces are equal. addr_mask is the set of address bits that are driven (the others stay 0)
  * so that a large memory is read back. Asserts that the run is OK and that data is read back. */
-bool pmf_sim_equal(pmf_case cs, const char *arch_xml, const pm_options *opts, uint32_t addr_mask);
+bool pmf_sim_equal(pmf_case cs, const char *arch_xml, const odin3_partial_map_opts *opts,
+                   uint32_t addr_mask);
 
 #endif

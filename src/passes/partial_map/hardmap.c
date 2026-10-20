@@ -312,7 +312,7 @@ static void setup_rules(hm_ctx *hc) {
 }
 
 /* R-8, S-5: `--mem-width arch` needs a record with RAM modes; without one it is a no-op. */
-static void setup_mem_width(hm_ctx *hc, const pm_options *opts) {
+static void setup_mem_width(hm_ctx *hc, const odin3_partial_map_opts *opts) {
     if (opts == NULL || !opts->mem_width_arch) {
         return;
     }
@@ -346,12 +346,15 @@ static void report(hm_ctx *hc) {
 }
 
 odin3_status odin3_partial_map_run_opts(odin3_pass_ctx *ctx, odin3_design *design,
-                                        const pm_options *opts, odin3_hardmap_stats *stats) {
+                                        const odin3_partial_map_opts *opts,
+                                        odin3_hardmap_stats *stats) {
     hm_ctx hc;
     hm_init(&hc, ctx, design);
+    hc.allow_unknown_blocks = opts != NULL && opts->allow_unknown_blocks;
     setup_rules(&hc);
     setup_mem_width(&hc, opts);
-    odin3_status st = precheck(&hc);
+    odin3_status st = hm_generic_phase(&hc);
+    st = st == ODIN3_OK ? precheck(&hc) : st;
     st = st == ODIN3_OK && hc.rules.have_mul ? all_mul_phases(&hc) : st;
     st = st == ODIN3_OK && hc.rules.have_adder ? all_add_phases(&hc) : st;
     st = st == ODIN3_OK ? all_ram_phases(&hc) : st;

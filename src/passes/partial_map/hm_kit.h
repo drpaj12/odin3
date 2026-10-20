@@ -58,6 +58,7 @@ typedef struct hm_ctx {
     odin3_hardmap_stats stats;
     pm_rules rules;                      /* S-2: the numbers the rules read */
     bool width_warned;                   /* the S-5 warning of `--mem-width arch` was given */
+    bool allow_unknown_blocks;           /* `--allow-unknown-blocks`: B-6 is a warning */
     odin3_celltype_id hard[HM_N_HARD];   /* found by hm_need; {0} until then */
     odin3_celltype_id glue[HM_N_GLUE];   /* found on first use */
     odin3_celltype_id konst[HM_N_CONST]; /* $_CONST0_, $_CONST1_, $_CONSTX_ */
@@ -166,6 +167,12 @@ void hm_diag(const hm_ctx *hc, odin3_log_level level, odin3_node_id node, const 
 
 /* The label of node for messages: its name, else `$c<ID>`. */
 void hm_label(const hm_ctx *hc, odin3_node_id node, char *out, size_t size);
+
+/* The 4.2 phase 0 (generic.c, B-1 to B-7): with an arch record, an instance of a black box that is
+ * not a model of the arch is a located error (a warning with hc->allow_unknown_blocks; the IR is
+ * then unchanged), an unconnected input of a generic block is tied to gnd with a warning, and the
+ * INFO line counts the bound blocks. Without a record: nothing. */
+odin3_status hm_generic_phase(hm_ctx *hc);
 
 /* The `$mul` rule (mul.c, M-1..M-7): maps src or leaves it soft with a warning. */
 odin3_status hm_map_mul(hm_ctx *hc, odin3_node_id src);

@@ -300,3 +300,18 @@ odin3_status odin3_arch_read(odin3_design *design, const char *path) {
     odin3_strbuf_free(&buf);
     return st;
 }
+
+bool odin3_arch_writes_subckt(const odin3_design *design, odin3_celltype_id type) {
+    const odin3_techlib_cell *lib = odin3_celltype_lib(design, type);
+    if (lib == NULL || lib->kind == ODIN3_TECHLIB_GATE) {
+        return false;
+    }
+    if (lib->kind == ODIN3_TECHLIB_HARD) {
+        return true;
+    }
+    const odin3_celltype_def *def = odin3_celltype_get(design, type);
+    const odin3_arch *arch = odin3_design_arch(design);
+    const odin3_arch_model *model =
+        arch != NULL && def != NULL ? odin3_arch_model_find(arch, def->name) : NULL;
+    return model != NULL && model->registered;
+}

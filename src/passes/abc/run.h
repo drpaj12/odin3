@@ -44,6 +44,13 @@ typedef struct odin3_abc_gate {
     uint64_t table;    /* GATE: 2^n_inputs bits */
 } odin3_abc_gate;
 
+/* The phase times and counts of the run in progress (abc_test.h's odin3_abc_run_report). */
+typedef struct odin3_abc_run_stats {
+    double classify_ms, aig_ms, check_ms, splice_ms, prov_ms, abc_ms, namemap_ms;
+    uint64_t edges;
+    uint32_t namemap_hit, namemap_total;
+} odin3_abc_run_stats;
+
 struct odin3_abc_run {
     odin3_pass_ctx *ctx;
     odin3_design *design;
@@ -76,6 +83,7 @@ struct odin3_abc_run {
     odin3_abc_aigb
         aig; /* the in-memory exchange's AIG of the run in progress (net_lit NULL: none) */
     char nomap_reason[ODIN3_ABC_REASON_BYTES]; /* why the run has no name map, "" when it has one */
+    odin3_abc_run_stats stats;                 /* reset by each run (run_domain) */
 };
 
 /*

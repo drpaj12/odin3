@@ -27,7 +27,7 @@ enum { LOG_TEXT = 16384 };
 #define WARN_TEXT "--mem-width arch: memories are sliced to the arch's widest mode"
 
 static char log_text[LOG_TEXT];
-static const pm_options ARCH_WIDTH = {true};
+static const odin3_partial_map_opts ARCH_WIDTH = {false, true};
 
 static void text_sink(odin3_log_level level, const char *msg, void *user) {
     (void)level;
@@ -69,7 +69,7 @@ static block block_of(const pb_result *res, const char *type, uint32_t index) {
                    odin3_node_param(res->module, node, 1)->i};
 }
 
-static pb_result run_mem(pmf_case cs, const pm_options *opts) {
+static pb_result run_mem(pmf_case cs, const odin3_partial_map_opts *opts) {
     pb_result res;
     pmf_build(cs, D11_XML, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, pmf_run(&res, opts, NULL));
