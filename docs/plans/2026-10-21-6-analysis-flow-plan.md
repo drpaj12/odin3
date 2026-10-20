@@ -56,7 +56,9 @@ wait on it.
 **Produces:** pass `levelize [--key NAME]`; attributes `odin3_level` (cells, nets) and `<key>_cut`.
 **Tests:** `test_levelize` (hand counts of V-7 a, loop cases V-7 b with the warning text, the named
 cell on the loop and its location, rerun identity, `$proc` and word-view `$dff` refusal, `--key`
-guard, `$_DFF_P_`/`$_DFF_N_`/`$_DLATCH_P_` sources, the V-6 100000-cell chain with its 10 s and 256 MB
+guard, `$_DFF_P_`/`$_DFF_N_`/`$_DLATCH_P_` sources, the Q4 cases V-7 h to j (a RAM between two LUT chains
+resets levels at its outputs and ends a path at its inputs; a black box with no stated latch passes
+levels through; one with a stated latch or register follows the memory rule: inputs end paths, outputs are level 0), the V-6 100000-cell chain with its 10 s and 256 MB
 bounds), `levelize_micro_<name>` script tests on
 three micros that dump the attribute with `write_json` (the plain attribute path, no 6.3 key yet).
 - [ ] Step 1: write the tests; run: fail (pass unknown).
@@ -65,9 +67,11 @@ three micros that dump the attribute with `write_json` (the plain attribute path
   for the exact accessor and copy the loop-cut rule, do not reuse the abc types). Only the
   bit-level storage types carry the flags (word `$dff` and the like do not): refuse word view (V-1).
   On a stall pick the lowest-ID cell that lies on a cycle of the remaining set (V-4).
+  Memory cells: inputs are endpoints, outputs level-0 sources; black boxes that state a latch or register follow
+  the same rule, all others are combinational (V-2). Level counting only: no delays or timing arcs.
 - [ ] Step 3: green, lint, commit and push.
 
-**Acceptance:** V-7 a to e pass; no recursion (V-6); attribute-only mutation (a structural dump
+**Acceptance:** V-7 a to e and g to j pass; no recursion (V-6); attribute-only mutation (a structural dump
 before and after is equal); `--key` guard (V-1); registry-order test updated with the new row only.
 
 ## Task 2 (6.2): `write_dot --color-by` and `--locs` (C-1 to C-8)

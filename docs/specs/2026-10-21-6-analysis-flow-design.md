@@ -1,9 +1,11 @@
 # Phase 6 (6.1 to 6.5): analysis flow and provenance: design
 
-Status: v1.1 (2026-10-21), **awaiting Peter's approval** (CLAUDE.md rule 2); no code before it.
+Status: v1.2 (2026-10-21), **approved by Peter 2026-10-20** (CLAUDE.md rule 2).
+v1.2: Peter's decisions applied (section 9): Q4 memory and black-box rule (V-2, V-7), levelize scope,
+`inherited` and `pad` approved (P-3), Q10 and Q11 accepted.
 v1.1: critique fixes (E-2/E-3/E-7 level key and round trip, V-1/V-2 view and sequential flags, V-4,
-G-7, P-3 exception classes, P-6 line format, tests and risks). The
-open questions of section 9 carry **agent defaults** (the recommendation of each); Peter may override.
+G-7, P-3 exception classes, P-6 line format, tests and risks). All
+questions of section 9 are decided (Peter, 2026-10-20).
 Rules have IDs (**G** 6.1, **C** 6.2, **E** 6.3, **V** 6.4, **P** 6.5) so a rule can be changed line by
 line; each ends with its test (**T**). Peter's priority (2026-10-20): the front end through
 elaboration and the research flow (reverse engineering, graph analysis, provenance to HDL) come first;
@@ -196,6 +198,10 @@ raises `odin3_version`. The loader refuses `odin3_version` above 1.
 
 ## 4. 6.4 `levelize` (V-1 to V-8)
 
+Scope (Peter, 2026-10-20): `levelize` is just an algorithm to count the levels of logic, from a
+combinational node perspective; additional details for timing can be added later. It counts levels
+only: no delays, no timing arcs, no criticality.
+
 **V-1 Pass.** `levelize [--key NAME]` (default `odin3_level`), over every module of the design.
 `NAME` must not start with `odin3_` unless it is exactly the default `odin3_level` (the prefix is
 reserved for Odin III keys; a name that does is `INVALID_ARG`), and the pass refuses an existing
@@ -204,7 +210,7 @@ attribute of that key on a cell or net unless the previous value was written by 
 Netlist view (bit-level cells and module instances): a module with a word-granularity cell or a
 `$proc` node is `INVALID_ARG` ("run proc, lower first"), because the word-view storage types
 (`$dff`, `$mem`, ...) carry no `SEQ_EDGE`/`SEQ_LEVEL` flag (see section 0), so the registry cannot
-mark them as sequential and a word-view result would be wrong. (Question 11.) Structure and
+mark them as sequential and a word-view result would be wrong. (Question 11, decided: word view is refused in v1; word-level levelize is a post-v1 item.) Structure and
 provenance are not changed; only attributes are written. Idempotent: a second run gives the same.
 
 **V-2 Definition.** A net is a source (level 0) when it is an input port net, a constant, undriven, or
@@ -212,8 +218,18 @@ an output of a sequential cell (`SEQ_EDGE` or `SEQ_LEVEL`, the registry's own fl
 `$_DFF_P_`, `$_DFF_N_`, `$_FF_`, `$_DLATCH_P_`, `$_DLATCH_N_`). The level of a
 combinational cell is `1 + max` of the levels of its input nets (1 when it has only source inputs; 0
 for a cell with no inputs); its output nets have that level. A sequential cell has level 0 and its
-outputs level 0 (it starts a path). Black boxes and hard blocks are combinational cells (no registry
-flag says otherwise). (Question 4.)
+outputs level 0 (it starts a path).
+
+Memories and black boxes (Peter's rule, Question 4, clarified 2026-10-20), one uniform rule:
+- **Memories** (hard RAM blocks, any memory cell) and **black boxes or hard blocks that state a latch or
+  register** (a sequential flag in the registry, or a clocked/sequential model in the library): their
+  **inputs are treated as primary outputs** (path endpoints: a path ends there) and their **outputs as
+  primary inputs** (level 0 sources). No combinational path passes through them. Registers and latches
+  in the netlist itself already cut paths this way; all are treated alike for uniformity.
+- **All other black boxes and hard blocks** are **combinational paths**: each output takes level
+  `max(levels of its input nets) + 1`, the rule of a combinational cell above.
+Task 1 step 2 confirms the exact accessors (memory class and sequential flag) in `src/ir/celltype.h`
+and the library model, and records them in the pass header comment.
 
 **V-3 Hierarchy.** An instance of a design module is one combinational cell (every output depends on
 every input). Run it after `flatten` for true depths; the pass logs an info line when it meets an
@@ -244,7 +260,11 @@ file:line, and the levels of the rest are as stated; a self-loop;
 two disjoint loops warn twice; (c) rerun is identical; (d) levels survive `write_json --odin3` then
 `read_json` (E-3); (e) a design with `$proc` or a word-view `$dff` is refused; (f) `--key odin3_x` and an
 existing attribute are refused; (g) a design with `$_DFF_P_`, `$_DFF_N_`, `$_DLATCH_P_`: each is
-level 0 and starts a path.
+level 0 and starts a path; (h) a RAM between two LUT chains: the level resets at the RAM outputs
+(level 0 sources, the chain after it counts from 1) and a path ends at the RAM inputs (the chain
+before it keeps its own levels, none flows through); (i) a black box with no stated latch passes
+levels through (outputs = max(inputs) + 1); (j) a black box with a stated latch or register follows
+the memory rule: its inputs end paths and its outputs are level 0 sources, same as the RAM in (h).
 
 **V-8 Registration.** One pass per PR (rule 1): `src/passes/levelize/`, a row in `docs/PASSES.md`,
 registered last in the built-in table.
@@ -262,9 +282,10 @@ placed blocks from the `.place` file (last, heavy). Legs (b) and (c) need 5.4. E
 
 **P-3 Named exception classes**, each counted, none silent. PHASE6 decision 2 allows only two
 exceptions: constant drivers and the buffers the writers add. P-3 splits them into named classes and
-adds two **proposed** classes that PHASE6 does not allow yet and that need Peter's approval
-(Questions 5 and 7): `inherited` and `pad`. Until approved the tool does not accept them
-(`--allow inherited,pad` is off by default; the gate counts them as unresolved).
+adds two classes, approved by Peter on top of decision 2
+(Questions 5 and 7): `inherited` and `pad`, **approved by Peter 2026-10-20** as named classes
+(PHASE6 decision 2 amended, decision 3). The tool enables them (`--allow inherited,pad` is the
+default); the strict figure (no exceptions) is always reported next to the resolved one.
 
 How an object is seen. The gate counts the nodes of a `dump_locs --types` dump taken at the leg's
 point (P-6). Objects the writers add are not IR nodes while the design is in memory (leg a, and the
@@ -286,9 +307,9 @@ evidence in the tool's docstring):
   name, the object is a **lost location**, not an exception.
 - `not-helper`: an inverter-type node with no location whose single input net is the output net
   of a `$sop` node (the helper `$not` of an OFF-set cover, 5.4 X-9).
-- `inherited` (proposed): a node whose location exists only through 5.4 D-5 (an output net's
+- `inherited` (approved): a node whose location exists only through 5.4 D-5 (an output net's
   location); counted both ways, resolved and strict (Question 5).
-- `pad` (proposed): a VPR I/O pad block of leg (d): the port bit carries no location (5.4 X-8)
+- `pad` (approved): a VPR I/O pad block of leg (d): the port bit carries no location (5.4 X-8)
   (Question 7).
 
 Anything else unresolved is a bug: the tool exits non-zero and names the first ten. The report
@@ -329,7 +350,7 @@ first, only with lanes idle. Peter runs no nightly; the sweep runs at PR time.
 **P-8 Tests of the tool.** Unit (Python): a handcrafted dump with each class gives the right
 coverage, an unresolved plain LUT fails the gate, median and p90 on a known list, a `.place` fixture
 with a pad and an unresolved block; per class, the dump count equals the written-file count, and a
-mismatch fails; `inherited` and `pad` are refused without `--allow`. Integration: the micro set passes with all legs a to c.
+mismatch fails; `inherited` and `pad` are enabled by default and `--allow` can narrow the set. Integration: the micro set passes with all legs a to c.
 
 ## 6. Where the code goes
 
@@ -365,7 +386,7 @@ mismatch fails; `inherited` and `pad` are refused without `--allow`. Integration
    holds for designs that are not levelized.
 9. **Exception classes weakening the gate.** Every class is a way to pass without a location.
    P-3 keeps each narrow, counted per class, cross-checked against the written file, and two of them
-   (`inherited`, `pad`) are off until Peter approves.
+   (`inherited`, `pad`) are approved by Peter, with the strict figure always reported.
 10. **Word-view storage unflagged.** `levelize` refuses word view (V-1) because the registry has no
     sequential flag on `$dff` and the like; supporting it needs a registry change (Question 11).
 
@@ -374,38 +395,48 @@ mismatch fails; `inherited` and `pad` are refused without `--allow`. Integration
 Subgraph matcher, `raise`, graph algorithms, the experiments of D10 follow-up 2, large-benchmark
 equivalence, VQM, EDIF, new netlist formats, rendering dot to images, a GUI.
 
-## 9. Open questions (agent defaults taken; Peter may override)
+## 9. Open questions (all decided, Peter, 2026-10-20)
 
 1. **`--locs` default.** (a) opt-in flag, existing dot output unchanged; (b) on by default. **Recommend
    (a)**: stable goldens, and locations make big graphs unreadable.
+   **Decided (Peter, 2026-10-20): option (a), as recommended.**
 2. **`--color-by @type`.** (a) allow the pseudo attribute `@type`; (b) attributes only. **Recommend
    (a)**: one line of code and the first thing a reverse engineer colours by.
+   **Decided (Peter, 2026-10-20): option (a), as recommended.**
 3. **Odin III keys opt-in.** (a) `write_json --odin3`, default byte-identical; (b) always written.
    **Recommend (a)**: the 5.3 round-trip goldens and Yosys-side tools stay untouched.
+   **Decided (Peter, 2026-10-20): option (a), as recommended.**
 4. **Black boxes and hard blocks in `levelize`.** (a) combinational; (b) cut points like registers.
    **Recommend (a)**: adders and multipliers are combinational in VTR; a registered hard block is
    flagged sequential in its registry entry if wanted later.
+   **Decided (Peter, 2026-10-20): Peter's own rule replaces (a)/(b): memories (hard RAM and any memory cell) treat inputs as primary outputs and outputs as primary inputs; memories and black boxes with a stated latch or register: inputs are primary outputs, outputs primary inputs; all other black boxes are combinational paths (V-2, V-7 h to j).**
 5. **Gate treatment of `inherited` BLIF cells (a new exception class; PHASE6 decision 2 does not
    allow it).** (a) approve `inherited` as a named class: counted as resolved, the strict number
    reported too; (b) strict only. **Recommend (a)**: BLIF VTR cells carry no location of their own
-   (5.4 X-6) and (b) would fail every read-back; the strict figure stays visible. Needs Peter's
-   approval; until then the tool treats them as unresolved.
+   (5.4 X-6) and (b) would fail every read-back; the strict figure stays visible.
+   **Decided (Peter, 2026-10-20): option (a): `inherited` is an approved named class, strict figure always reported (amends PHASE6 decision 2).**
 6. **Specificity.** (a) report only, set a threshold after the first sweep; (b) gate now on a guessed
    threshold. **Recommend (a)**: no data yet; PHASE6 asks for a "report".
+   **Decided (Peter, 2026-10-20): option (a), as recommended.**
 7. **Port bits and VPR pads (a new exception class `pad`, not allowed by PHASE6 decision 2).** (a)
    approve `pad` as a named class; (b) make port bits carry the
    declaration location (a 5.4 follow-up) so pads resolve. **Recommend (a)** now, (b) as a later item if
    Peter wants pads in the gate.
+   **Decided (Peter, 2026-10-20): option (a): `pad` is an approved named class, strict figure always reported (amends PHASE6 decision 2).**
 8. **networkx and PyG in CI.** (a) tests skip when absent, install in the lane environment for the
    PR run; (b) vendor a check. **Recommend (a)**.
+   **Decided (Peter, 2026-10-20): option (a), as recommended.**
 9. **Cell library licence/size.** (a) own small CMOS models (G-2); (b) also a SkyWater or Nangate
    subset for realism. **Recommend (a)**: nothing in PHASE6 needs more; (b) when reverse engineering
    a real netlist starts.
+   **Decided (Peter, 2026-10-20): option (a), as recommended.**
 10. **Provenance records on `read_json`.** E-3 does not restore `odin3_prov` (kind, `hier`) into
     records, so write, read, write is a fixpoint only from the second write. (a) accept that and test
     B equals C (E-3); (b) make `read_json` restore the records (a provenance-record change: needs your
     approval and an IR note). **Recommend (a)**: nothing in 6.3 to 6.5 needs the kind or `hier` back.
+   **Decided (Peter, 2026-10-20): option (a): accept the second-write fixpoint.**
 11. **Word-view `levelize`.** (a) netlist view only; refuse word view (V-1); (b) add a sequential
     flag to the word-view storage types in the registry so word view works (a registry change).
     **Recommend (a)**: levelize after `lower` is the meaningful use; (b) only if you want word-level
     depth.
+   **Decided (Peter, 2026-10-20): option (a): `levelize` refuses word view in v1; word-level levelize is a post-v1 item.**
