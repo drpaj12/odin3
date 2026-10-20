@@ -5,6 +5,7 @@
 #include "backends/blif/isop.h"
 #include "backends/blif/vtr.h"
 #include "backends/prov_name.h"
+#include "frontends/arch/arch.h"
 #include "frontends/blif/attrs.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
@@ -417,8 +418,7 @@ static odin3_status node_clocks(blif_writer *wr, odin3_node_id node) {
     const odin3_techlib_cell *lib = odin3_celltype_lib(wr->design, type);
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0;
-         lib != NULL && lib->kind == ODIN3_TECHLIB_HARD && st == ODIN3_OK && i < lib->n_ports;
-         i++) {
+         odin3_arch_writes_subckt(wr->design, type) && st == ODIN3_OK && i < lib->n_ports; i++) {
         st = lib->ports[i].clock ? mark_clocks(wr, node, i) : ODIN3_OK;
     }
     return st;
@@ -632,11 +632,10 @@ static bool names_every_pin(const blif_writer *wr, odin3_node_id node) {
            (wr->vtr && odin3_blif_vtr_rows_of(wr->module, node, &rows));
 }
 
-/* True for a hard cell of a loaded tech library (1G): in the VTR dialect, a .subckt that writes
- * every formal (spec 3E §8). */
+/* True for a hard or black-box cell of a loaded tech library (1G, 4.2): in the VTR dialect, a
+ * .subckt that writes every formal (spec 3E §8). */
 static bool hard_type(const odin3_design *design, odin3_celltype_id type) {
-    const odin3_techlib_cell *lib = odin3_celltype_lib(design, type);
-    return lib != NULL && lib->kind == ODIN3_TECHLIB_HARD;
+    return odin3_arch_writes_subckt(design, type);
 }
 
 /* Generates names for the unconnected pins of a node written by pin (see names_every_pin), or

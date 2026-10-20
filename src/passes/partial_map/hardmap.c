@@ -307,12 +307,15 @@ static void report(hm_ctx *hc) {
     odin3_strbuf_free(&info);
 }
 
-odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
-                                   odin3_hardmap_stats *stats) {
+odin3_status odin3_partial_map_run_opts(odin3_pass_ctx *ctx, odin3_design *design,
+                                        const odin3_partial_map_opts *opts,
+                                        odin3_hardmap_stats *stats) {
     hm_ctx hc;
     hm_init(&hc, ctx, design);
+    hc.allow_unknown_blocks = opts != NULL && opts->allow_unknown_blocks;
     setup_rules(&hc);
-    odin3_status st = precheck(&hc);
+    odin3_status st = hm_generic_phase(&hc);
+    st = st == ODIN3_OK ? precheck(&hc) : st;
     st = st == ODIN3_OK && hc.rules.have_mul ? all_mul_phases(&hc) : st;
     st = st == ODIN3_OK && hc.rules.have_adder ? all_add_phases(&hc) : st;
     st = st == ODIN3_OK ? all_ram_phases(&hc) : st;
@@ -325,6 +328,11 @@ odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
     }
     hm_free(&hc);
     return st;
+}
+
+odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                   odin3_hardmap_stats *stats) {
+    return odin3_partial_map_run_opts(ctx, design, NULL, stats);
 }
 
 odin3_status odin3_hardmap_run(odin3_pass_ctx *ctx, odin3_design *design,
