@@ -17,6 +17,8 @@ extern const uint32_t odin3_builtin_pass_count;
  * write_dot, write_rtlil), sim_pass.c, project_pass.c, proc/proc_pass.c (proc, 2E) and
  * read_verilog.c. */
 extern const odin3_pass_def odin3_pass_write_json;
+/* read_json_pass.c (5.3): read_json. */
+extern const odin3_pass_def odin3_pass_read_json;
 extern const odin3_pass_def odin3_pass_write_verilog;
 extern const odin3_pass_def odin3_pass_write_dot;
 extern const odin3_pass_def odin3_pass_write_rtlil;
