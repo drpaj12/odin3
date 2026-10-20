@@ -46,6 +46,11 @@ static int bytes_cmp(odin3_bytes lhs, odin3_bytes rhs) {
     return lhs.len < rhs.len ? -1 : 1;
 }
 
+/* The bytes of a view as a pointer that is never NULL (for a "%.*s" argument). */
+static const char *text_or_empty(odin3_bytes view) {
+    return view.ptr == NULL ? "" : (const char *)view.ptr;
+}
+
 /* The sort and search order of a map: module, kind, short in byte order. */
 static int key_cmp(const odin3_name_entry *lhs, const odin3_name_entry *rhs) {
     int cmp = bytes_cmp(lhs->module, rhs->module);
@@ -141,9 +146,9 @@ static odin3_status check_write_entries(const odin3_name_entry *sorted, uint32_t
         }
         if (i > 0 && key_cmp(&sorted[i - 1], &sorted[i]) == 0) {
             odin3_log(ODIN3_LOG_ERROR, "name map: two entries name '%.*s' (%s) in module '%.*s'",
-                      (int)sorted[i].short_name.len, (const char *)sorted[i].short_name.ptr,
+                      (int)sorted[i].short_name.len, text_or_empty(sorted[i].short_name),
                       odin3_name_kind_str(sorted[i].kind), (int)sorted[i].module.len,
-                      (const char *)sorted[i].module.ptr);
+                      text_or_empty(sorted[i].module));
             return ODIN3_ERR_INVALID_ARG;
         }
     }
@@ -208,9 +213,12 @@ typedef struct nm_parser {
 } nm_parser;
 
 static void parse_error(const nm_parser *ps, const char *msg, odin3_bytes detail) {
-    odin3_log(ODIN3_LOG_ERROR, "%s:%u: %s%s%.*s%s", ps->path, ps->lineno, msg,
-              detail.len > 0 ? " '" : "", (int)detail.len, (const char *)detail.ptr,
-              detail.len > 0 ? "'" : "");
+    if (detail.len == 0 || detail.ptr == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "%s:%u: %s", ps->path, ps->lineno, msg);
+        return;
+    }
+    odin3_log(ODIN3_LOG_ERROR, "%s:%u: %s '%.*s'", ps->path, ps->lineno, msg, (int)detail.len,
+              (const char *)detail.ptr);
 }
 
 /* A located warning; the entry line is then ignored. */
