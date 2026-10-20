@@ -416,15 +416,16 @@ static void test_dump_locs_arguments(void) {
     TEST_ASSERT_TRUE(errors_seen > 0);
 }
 
-/* A node of a port-less local type (name is the cell type name) with the given prov. */
+/* A node of the registered type, or of a port-less local type, of that name. */
 static void add_typed_node(odin3_module *mod, const char *type_name, const char *node_name,
                            odin3_prov_id prov) {
-    odin3_celltype_def def = {type_name, ODIN3_GRAN_HARD, 0,    NULL, 0,
-                              NULL,      0,               NULL, NULL, NULL,
+    odin3_celltype_def def = {type_name, ODIN3_GRAN_HARD, 0, NULL, 0, NULL, 0, NULL, NULL, NULL,
                               NULL};
     odin3_celltype_id type = {0};
     odin3_node_id node = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &type));
+    if (!odin3_celltype_find(design, intern(type_name), &type)) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &type));
+    }
     odin3_node_spec spec = {type, intern(node_name), prov, NULL, 0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(mod, &spec, &node));
 }
@@ -437,7 +438,8 @@ static char *dump_typed_design(const char *args_prefix) {
     odin3_module_id mid = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("t"), got.prov, &mid));
     odin3_module *mod = odin3_module_get(design, mid);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(mod, intern("n"), got.prov, &(odin3_net_id){0}));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_net_create(mod, intern("n"), got.prov, &(odin3_net_id){0}));
     add_typed_node(mod, "$lut", "u1", got.prov);
     add_typed_node(mod, "$_DFF_P_", "u2", got.prov);
     add_typed_node(mod, "lpm_add_sub", "u3", netlist_prov());
@@ -477,15 +479,16 @@ static void test_dump_locs_types(void) {
     odin3_util_free(text);
 }
 
-/* A reader tells the formats apart by the kind field alone; the first `:` splits kind and type. */
-static void test_dump_locs_kind_field_tells_formats(void) {
+/* A reader tells the formats apart by the kind field alone: plain text is `|node|`. */
+static void test_dump_locs_kind_field_plain(void) {
     char *plain = dump_typed_design("");
     TEST_ASSERT_NOT_NULL(strstr(plain, "|node|"));
     TEST_ASSERT_NULL(strstr(plain, "|node:"));
     odin3_util_free(plain);
-    odin3_design_destroy(design);
-    design = odin3_design_create();
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("read_x"), &run));
+}
+
+/* Typed text has no bare `|node|`; the first `:` of the kind field splits kind from type. */
+static void test_dump_locs_kind_field_typed(void) {
     char *typed = dump_typed_design("--types ");
     TEST_ASSERT_NULL(strstr(typed, "|node|"));
     TEST_ASSERT_NOT_NULL(strstr(typed, "|node:a:b"));
@@ -518,7 +521,8 @@ int main(void) {
     RUN_TEST(test_dump_locs_arguments);
     RUN_TEST(test_dump_locs_default_untyped);
     RUN_TEST(test_dump_locs_types);
-    RUN_TEST(test_dump_locs_kind_field_tells_formats);
+    RUN_TEST(test_dump_locs_kind_field_plain);
+    RUN_TEST(test_dump_locs_kind_field_typed);
     RUN_TEST(test_dump_locs_unknown_option);
     return UNITY_END();
 }
