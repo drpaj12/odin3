@@ -82,12 +82,22 @@ add_library(odin3_core OBJECT
     src/frontends/blif/reader.c
     src/frontends/json/json_lex.c
     src/frontends/json/json_parse.c
+    src/frontends/json/reader.c
+    src/frontends/json/reader_cell.c
+    src/frontends/json/reader_ext.c
+    src/frontends/json/reader_implicit.c
+    src/frontends/json/reader_module.c
+    src/frontends/json/reader_net.c
+    src/frontends/json/reader_sop.c
+    src/frontends/json/reader_value.c
+    src/frontends/json/reader_wire.c
     src/backends/blif/writer.c
     src/backends/blif/vtr.c
     src/backends/blif/isop.c
     src/passes/manager.c
     src/passes/builtin.c
     src/passes/write_formats.c
+    src/passes/read_json_pass.c
     src/passes/sim_pass.c
     src/passes/project_pass.c
     src/passes/dump_locs.c
@@ -766,6 +776,13 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_util_idindex)
     odin3_add_unit_test(test_util_str)
     odin3_add_unit_test(test_json_parse)
+    odin3_add_unit_test(test_read_json)
+    target_compile_definitions(test_read_json PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}")
+    odin3_add_unit_test(test_read_json_cells)
+    target_compile_definitions(test_read_json_cells PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_json_roundtrip)
+    target_compile_definitions(test_json_roundtrip PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_util_log)
     odin3_add_unit_test(test_util_file)
     odin3_add_unit_test(test_sha256)
