@@ -5,7 +5,7 @@
    {
     "bits_after": 2,
     "bits_before": 1024,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN$7829",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN$7829",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$60c9d87de58530ef8127a26b7b12b03d49d1fddf\\dual_port_ram",
@@ -13,12 +13,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 1024,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN$7831",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN$7831",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$60c9d87de58530ef8127a26b7b12b03d49d1fddf\\dual_port_ram",
@@ -26,12 +26,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 28,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1251_EN$7833",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1251_EN$7833",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram",
@@ -39,12 +39,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1251_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1251_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 28,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1252_EN$7835",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1252_EN$7835",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram",
@@ -52,12 +52,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1252_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1252_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 64,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1305_EN$7837",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1305_EN$7837",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram",
@@ -65,12 +65,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1305_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1305_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 64,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1306_EN$7839",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1306_EN$7839",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram",
@@ -78,12 +78,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1306_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1306_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN$7841",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN$7841",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$d78699e378fce70a72e70d03c41778142e0a2bcb\\dual_port_ram",
@@ -91,12 +91,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN$7843",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN$7843",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$d78699e378fce70a72e70d03c41778142e0a2bcb\\dual_port_ram",
@@ -104,12 +104,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 1024,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1269_EN$7845",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1269_EN$7845",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=12'010000000000",
@@ -117,12 +117,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1269_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1269_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 1024,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1270_EN$7847",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1270_EN$7847",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=12'010000000000",
@@ -130,12 +130,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1270_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1270_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 7,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1287_EN$7849",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1287_EN$7849",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0111",
@@ -143,12 +143,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1287_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1287_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 7,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1288_EN$7851",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1288_EN$7851",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0111",
@@ -156,7 +156,7 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1288_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1288_EN"
    },
    {
     "bits_after": 3,
@@ -199,18 +199,18 @@
    }
   ],
   "marked": [
-   "$paramod$60c9d87de58530ef8127a26b7b12b03d49d1fddf\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN",
-   "$paramod$60c9d87de58530ef8127a26b7b12b03d49d1fddf\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN",
-   "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1251_EN",
-   "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1252_EN",
-   "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1305_EN",
-   "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1306_EN",
-   "$paramod$d78699e378fce70a72e70d03c41778142e0a2bcb\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN",
-   "$paramod$d78699e378fce70a72e70d03c41778142e0a2bcb\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN",
-   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=12'010000000000.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1269_EN",
-   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=12'010000000000.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1270_EN",
-   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0111.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1287_EN",
-   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0111.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1288_EN",
+   "$paramod$60c9d87de58530ef8127a26b7b12b03d49d1fddf\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN",
+   "$paramod$60c9d87de58530ef8127a26b7b12b03d49d1fddf\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN",
+   "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1251_EN",
+   "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1252_EN",
+   "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1305_EN",
+   "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1306_EN",
+   "$paramod$d78699e378fce70a72e70d03c41778142e0a2bcb\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN",
+   "$paramod$d78699e378fce70a72e70d03c41778142e0a2bcb\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN",
+   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=12'010000000000.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1269_EN",
+   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=12'010000000000.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1270_EN",
+   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0111.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1287_EN",
+   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0111.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1288_EN",
    "DataTransferUnit.state",
    "LUControl.currentRowState",
    "LUControl.currentState"
@@ -237,7 +237,7 @@
    {
     "bits_after": 2,
     "bits_before": 256,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1143_EN$7271",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1143_EN$7271",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$9f7684d3d010f6bfae8063faa4e14a947f87085c\\dual_port_ram",
@@ -245,12 +245,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1143_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1143_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 256,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1144_EN$7273",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1144_EN$7273",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$9f7684d3d010f6bfae8063faa4e14a947f87085c\\dual_port_ram",
@@ -258,12 +258,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1144_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1144_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 28,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1179_EN$7275",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1179_EN$7275",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram",
@@ -271,12 +271,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1179_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1179_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 28,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1180_EN$7277",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1180_EN$7277",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram",
@@ -284,12 +284,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1180_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1180_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 64,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN$7279",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN$7279",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram",
@@ -297,12 +297,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 64,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN$7281",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN$7281",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram",
@@ -310,12 +310,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1161_EN$7283",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1161_EN$7283",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram",
@@ -323,12 +323,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1161_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1161_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1162_EN$7285",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1162_EN$7285",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram",
@@ -336,12 +336,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1162_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1162_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 5,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN$7287",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN$7287",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0101",
@@ -349,12 +349,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 5,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN$7289",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN$7289",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0101",
@@ -362,12 +362,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 256,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1197_EN$7291",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1197_EN$7291",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0110\\DATA_WIDTH=10'0100000000",
@@ -375,12 +375,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1197_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1197_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 256,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1198_EN$7293",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1198_EN$7293",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0110\\DATA_WIDTH=10'0100000000",
@@ -388,7 +388,7 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1198_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1198_EN"
    },
    {
     "bits_after": 3,
@@ -431,18 +431,18 @@
    }
   ],
   "marked": [
-   "$paramod$9f7684d3d010f6bfae8063faa4e14a947f87085c\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1143_EN",
-   "$paramod$9f7684d3d010f6bfae8063faa4e14a947f87085c\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1144_EN",
-   "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1179_EN",
-   "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1180_EN",
-   "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN",
-   "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN",
-   "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1161_EN",
-   "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1162_EN",
-   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0101.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN",
-   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0101.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN",
-   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0110\\DATA_WIDTH=10'0100000000.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1197_EN",
-   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0110\\DATA_WIDTH=10'0100000000.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1198_EN",
+   "$paramod$9f7684d3d010f6bfae8063faa4e14a947f87085c\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1143_EN",
+   "$paramod$9f7684d3d010f6bfae8063faa4e14a947f87085c\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1144_EN",
+   "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1179_EN",
+   "$paramod$b509a885304d9c8c49f505bb9d0e99a9fb676562\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1180_EN",
+   "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1233_EN",
+   "$paramod$cf942d93b0c557a0d5c26db05c3b568c3218660c\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1234_EN",
+   "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1161_EN",
+   "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1162_EN",
+   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0101.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1215_EN",
+   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0100\\DATA_WIDTH=4'0101.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1216_EN",
+   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0110\\DATA_WIDTH=10'0100000000.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$1197_EN",
+   "$paramod\\dual_port_ram\\ADDR_WIDTH=4'0110\\DATA_WIDTH=10'0100000000.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$1198_EN",
    "DataTransferUnit.state",
    "LUControl.currentRowState",
    "LUControl.currentState"
@@ -531,7 +531,7 @@
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$509_EN$5531",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$509_EN$5531",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$0599445ca2deee8a3a936f6577b0b3c330ef6f51\\single_port_ram",
@@ -539,7 +539,7 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$509_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$509_EN"
    },
    {
     "bits_after": 20,
@@ -621,7 +621,7 @@
    }
   ],
   "marked": [
-   "$paramod$0599445ca2deee8a3a936f6577b0b3c330ef6f51\\single_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$509_EN",
+   "$paramod$0599445ca2deee8a3a936f6577b0b3c330ef6f51\\single_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$509_EN",
    "boundcontroller.state",
    "listhandler.state",
    "onlyonecycle.state",
@@ -668,7 +668,7 @@
    {
     "bits_after": 2,
     "bits_before": 8,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$54_EN$264",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$54_EN$264",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$0c556c32f079dba0e97e031f1cc86e19880eaf1a\\single_port_ram",
@@ -676,7 +676,7 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$54_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$54_EN"
    },
    {
     "bits_after": 15,
@@ -693,7 +693,7 @@
    }
   ],
   "marked": [
-   "$paramod$0c556c32f079dba0e97e031f1cc86e19880eaf1a\\single_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$54_EN",
+   "$paramod$0c556c32f079dba0e97e031f1cc86e19880eaf1a\\single_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$54_EN",
    "memset.cur_state"
   ],
   "rejected": {}
@@ -1311,7 +1311,7 @@
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2377_EN$18530",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2377_EN$18530",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$0599445ca2deee8a3a936f6577b0b3c330ef6f51\\single_port_ram",
@@ -1319,12 +1319,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2377_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2377_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2296_EN$18532",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2296_EN$18532",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$442d3167270c0e545f67eed559acfecd45a19be9\\dual_port_ram",
@@ -1332,12 +1332,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2296_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2296_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2297_EN$18534",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2297_EN$18534",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$442d3167270c0e545f67eed559acfecd45a19be9\\dual_port_ram",
@@ -1345,12 +1345,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2297_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2297_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 36,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2314_EN$18536",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2314_EN$18536",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$7d332b0c228d8fe8c6e5dd6737680abe38895460\\dual_port_ram",
@@ -1358,12 +1358,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2314_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2314_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 36,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2315_EN$18538",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2315_EN$18538",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$7d332b0c228d8fe8c6e5dd6737680abe38895460\\dual_port_ram",
@@ -1371,12 +1371,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2315_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2315_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2368_EN$18540",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2368_EN$18540",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$998276863745f2ebb72c3a726a36b5dc53c5a4b1\\single_port_ram",
@@ -1384,12 +1384,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2368_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2368_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 18,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2332_EN$18542",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2332_EN$18542",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$b29934565cdb8ab673cd66ff2691da3a12d1b84c\\dual_port_ram",
@@ -1397,12 +1397,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2332_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2332_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 18,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2333_EN$18544",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2333_EN$18544",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$b29934565cdb8ab673cd66ff2691da3a12d1b84c\\dual_port_ram",
@@ -1410,12 +1410,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2333_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2333_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 8,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2350_EN$18546",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2350_EN$18546",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$caadb5546460dfdcfa355b3794f400b1f7563aed\\dual_port_ram",
@@ -1423,12 +1423,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2350_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2350_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 8,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2351_EN$18548",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2351_EN$18548",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$caadb5546460dfdcfa355b3794f400b1f7563aed\\dual_port_ram",
@@ -1436,7 +1436,7 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2351_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2351_EN"
    },
    {
     "bits_after": 5,
@@ -1453,16 +1453,16 @@
    }
   ],
   "marked": [
-   "$paramod$0599445ca2deee8a3a936f6577b0b3c330ef6f51\\single_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2377_EN",
-   "$paramod$442d3167270c0e545f67eed559acfecd45a19be9\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2296_EN",
-   "$paramod$442d3167270c0e545f67eed559acfecd45a19be9\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2297_EN",
-   "$paramod$7d332b0c228d8fe8c6e5dd6737680abe38895460\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2314_EN",
-   "$paramod$7d332b0c228d8fe8c6e5dd6737680abe38895460\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2315_EN",
-   "$paramod$998276863745f2ebb72c3a726a36b5dc53c5a4b1\\single_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2368_EN",
-   "$paramod$b29934565cdb8ab673cd66ff2691da3a12d1b84c\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2332_EN",
-   "$paramod$b29934565cdb8ab673cd66ff2691da3a12d1b84c\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2333_EN",
-   "$paramod$caadb5546460dfdcfa355b3794f400b1f7563aed\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2350_EN",
-   "$paramod$caadb5546460dfdcfa355b3794f400b1f7563aed\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2351_EN",
+   "$paramod$0599445ca2deee8a3a936f6577b0b3c330ef6f51\\single_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2377_EN",
+   "$paramod$442d3167270c0e545f67eed559acfecd45a19be9\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2296_EN",
+   "$paramod$442d3167270c0e545f67eed559acfecd45a19be9\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2297_EN",
+   "$paramod$7d332b0c228d8fe8c6e5dd6737680abe38895460\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2314_EN",
+   "$paramod$7d332b0c228d8fe8c6e5dd6737680abe38895460\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2315_EN",
+   "$paramod$998276863745f2ebb72c3a726a36b5dc53c5a4b1\\single_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$2368_EN",
+   "$paramod$b29934565cdb8ab673cd66ff2691da3a12d1b84c\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2332_EN",
+   "$paramod$b29934565cdb8ab673cd66ff2691da3a12d1b84c\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2333_EN",
+   "$paramod$caadb5546460dfdcfa355b3794f400b1f7563aed\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$2350_EN",
+   "$paramod$caadb5546460dfdcfa355b3794f400b1f7563aed\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$2351_EN",
    "LogCalc.r_indexFirstOne"
   ],
   "rejected": {
@@ -1487,7 +1487,7 @@
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/1r2w.v:40$38_EN$82",
+    "cell": "$fsm$$memwr$\\block_mem$tests/micro/verilog/common/1r2w.v:40$38_EN$82",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "R_twoW",
@@ -1495,12 +1495,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/1r2w.v:40$38_EN"
+    "wire": "$memwr$\\block_mem$tests/micro/verilog/common/1r2w.v:40$38_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/1r2w.v:46$39_EN$84",
+    "cell": "$fsm$$memwr$\\block_mem$tests/micro/verilog/common/1r2w.v:46$39_EN$84",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "R_twoW",
@@ -1508,12 +1508,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/1r2w.v:46$39_EN"
+    "wire": "$memwr$\\block_mem$tests/micro/verilog/common/1r2w.v:46$39_EN"
    }
   ],
   "marked": [
-   "R_twoW.$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/1r2w.v:40$38_EN",
-   "R_twoW.$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/1r2w.v:46$39_EN"
+   "R_twoW.$memwr$\\block_mem$tests/micro/verilog/common/1r2w.v:40$38_EN",
+   "R_twoW.$memwr$\\block_mem$tests/micro/verilog/common/1r2w.v:46$39_EN"
   ],
   "rejected": {}
  },
@@ -1523,7 +1523,7 @@
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/2r1w.v:37$38_EN$64",
+    "cell": "$fsm$$memwr$\\block_mem$tests/micro/verilog/common/2r1w.v:37$38_EN$64",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "R_twoW",
@@ -1531,11 +1531,11 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/2r1w.v:37$38_EN"
+    "wire": "$memwr$\\block_mem$tests/micro/verilog/common/2r1w.v:37$38_EN"
    }
   ],
   "marked": [
-   "R_twoW.$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/2r1w.v:37$38_EN"
+   "R_twoW.$memwr$\\block_mem$tests/micro/verilog/common/2r1w.v:37$38_EN"
   ],
   "rejected": {}
  },
@@ -1545,7 +1545,7 @@
    {
     "bits_after": 2,
     "bits_before": 8,
-    "cell": "$fsm$$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/bram.v:37$38_EN$85",
+    "cell": "$fsm$$memwr$\\block_mem$tests/micro/verilog/common/bram.v:37$38_EN$85",
     "encoding": "one-hot",
     "inputs": 2,
     "module": "block_ram",
@@ -1553,11 +1553,11 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 6,
-    "wire": "$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/bram.v:37$38_EN"
+    "wire": "$memwr$\\block_mem$tests/micro/verilog/common/bram.v:37$38_EN"
    }
   ],
   "marked": [
-   "block_ram.$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/bram.v:37$38_EN"
+   "block_ram.$memwr$\\block_mem$tests/micro/verilog/common/bram.v:37$38_EN"
   ],
   "rejected": {}
  },
@@ -1567,7 +1567,7 @@
    {
     "bits_after": 2,
     "bits_before": 16,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$38_EN$84",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$38_EN$84",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\dual_port_ram",
@@ -1575,12 +1575,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$38_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$38_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 16,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$39_EN$86",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$39_EN$86",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\dual_port_ram",
@@ -1588,12 +1588,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$39_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$39_EN"
    }
   ],
   "marked": [
-   "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$38_EN",
-   "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$39_EN"
+   "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$38_EN",
+   "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$39_EN"
   ],
   "rejected": {}
  },
@@ -1603,7 +1603,7 @@
    {
     "bits_after": 2,
     "bits_before": 8,
-    "cell": "$fsm$$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/nrnw.v:48$38_EN$195",
+    "cell": "$fsm$$memwr$\\block_mem$tests/micro/verilog/common/nrnw.v:48$38_EN$195",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "twoR_twoW",
@@ -1611,12 +1611,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/nrnw.v:48$38_EN"
+    "wire": "$memwr$\\block_mem$tests/micro/verilog/common/nrnw.v:48$38_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 8,
-    "cell": "$fsm$$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/nrnw.v:52$39_EN$197",
+    "cell": "$fsm$$memwr$\\block_mem$tests/micro/verilog/common/nrnw.v:52$39_EN$197",
     "encoding": "one-hot",
     "inputs": 2,
     "module": "twoR_twoW",
@@ -1624,12 +1624,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 6,
-    "wire": "$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/nrnw.v:52$39_EN"
+    "wire": "$memwr$\\block_mem$tests/micro/verilog/common/nrnw.v:52$39_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 8,
-    "cell": "$fsm$$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/nrnw.v:56$40_EN$199",
+    "cell": "$fsm$$memwr$\\block_mem$tests/micro/verilog/common/nrnw.v:56$40_EN$199",
     "encoding": "one-hot",
     "inputs": 3,
     "module": "twoR_twoW",
@@ -1637,13 +1637,13 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 8,
-    "wire": "$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/nrnw.v:56$40_EN"
+    "wire": "$memwr$\\block_mem$tests/micro/verilog/common/nrnw.v:56$40_EN"
    }
   ],
   "marked": [
-   "twoR_twoW.$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/nrnw.v:48$38_EN",
-   "twoR_twoW.$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/nrnw.v:52$39_EN",
-   "twoR_twoW.$memwr$\\block_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/common/nrnw.v:56$40_EN"
+   "twoR_twoW.$memwr$\\block_mem$tests/micro/verilog/common/nrnw.v:48$38_EN",
+   "twoR_twoW.$memwr$\\block_mem$tests/micro/verilog/common/nrnw.v:52$39_EN",
+   "twoR_twoW.$memwr$\\block_mem$tests/micro/verilog/common/nrnw.v:56$40_EN"
   ],
   "rejected": {}
  },
@@ -1653,7 +1653,7 @@
    {
     "bits_after": 2,
     "bits_before": 16,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN$61",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN$61",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\single_port_ram",
@@ -1661,11 +1661,11 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN"
    }
   ],
   "marked": [
-   "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\single_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN"
+   "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\single_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN"
   ],
   "rejected": {}
  },
@@ -1675,7 +1675,7 @@
    {
     "bits_after": 2,
     "bits_before": 4,
-    "cell": "$fsm$$memwr$\\memory$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/full/bm_base_memory.v:37$38_EN$67",
+    "cell": "$fsm$$memwr$\\memory$tests/micro/verilog/full/bm_base_memory.v:37$38_EN$67",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "bm_base_memory",
@@ -1683,11 +1683,11 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\memory$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/full/bm_base_memory.v:37$38_EN"
+    "wire": "$memwr$\\memory$tests/micro/verilog/full/bm_base_memory.v:37$38_EN"
    }
   ],
   "marked": [
-   "bm_base_memory.$memwr$\\memory$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/full/bm_base_memory.v:37$38_EN"
+   "bm_base_memory.$memwr$\\memory$tests/micro/verilog/full/bm_base_memory.v:37$38_EN"
   ],
   "rejected": {
    "bm_base_memory.out2": [
@@ -1703,7 +1703,7 @@
    {
     "bits_after": 2,
     "bits_before": 8,
-    "cell": "$fsm$$memwr$\\fifo_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/full/bm_sfifo_rtl.v:144$38_EN$112",
+    "cell": "$fsm$$memwr$\\fifo_mem$tests/micro/verilog/full/bm_sfifo_rtl.v:144$38_EN$112",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "bm_sfifo_rtl",
@@ -1711,11 +1711,11 @@
     "reset_index": 1,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\fifo_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/full/bm_sfifo_rtl.v:144$38_EN"
+    "wire": "$memwr$\\fifo_mem$tests/micro/verilog/full/bm_sfifo_rtl.v:144$38_EN"
    }
   ],
   "marked": [
-   "bm_sfifo_rtl.$memwr$\\fifo_mem$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/full/bm_sfifo_rtl.v:144$38_EN"
+   "bm_sfifo_rtl.$memwr$\\fifo_mem$tests/micro/verilog/full/bm_sfifo_rtl.v:144$38_EN"
   ],
   "rejected": {}
  },
@@ -1725,7 +1725,7 @@
    {
     "bits_after": 2,
     "bits_before": 2,
-    "cell": "$fsm$$memwr$\\matrixA$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/full/matmul.v:46$38_EN$133",
+    "cell": "$fsm$$memwr$\\matrixA$tests/micro/verilog/full/matmul.v:46$38_EN$133",
     "encoding": "one-hot",
     "inputs": 2,
     "module": "matrix_multiplication",
@@ -1733,11 +1733,11 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 6,
-    "wire": "$memwr$\\matrixA$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/full/matmul.v:46$38_EN"
+    "wire": "$memwr$\\matrixA$tests/micro/verilog/full/matmul.v:46$38_EN"
    }
   ],
   "marked": [
-   "matrix_multiplication.$memwr$\\matrixA$/home/jamiespa/odin3-ws/work/odin3-fsm/tests/micro/verilog/full/matmul.v:46$38_EN"
+   "matrix_multiplication.$memwr$\\matrixA$tests/micro/verilog/full/matmul.v:46$38_EN"
   ],
   "rejected": {}
  },
@@ -1747,7 +1747,7 @@
    {
     "bits_after": 2,
     "bits_before": 4,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$39_EN$111",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$39_EN$111",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\dual_port_ram",
@@ -1755,12 +1755,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$39_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$39_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 4,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$40_EN$113",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$40_EN$113",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\dual_port_ram",
@@ -1768,12 +1768,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$40_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$40_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 4,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$57_EN$115",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$57_EN$115",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\single_port_ram",
@@ -1781,13 +1781,13 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$57_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$57_EN"
    }
   ],
   "marked": [
-   "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$39_EN",
-   "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$40_EN",
-   "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\single_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$57_EN"
+   "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$39_EN",
+   "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$40_EN",
+   "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\single_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$57_EN"
   ],
   "rejected": {}
  },
@@ -1879,7 +1879,7 @@
    {
     "bits_after": 2,
     "bits_before": 8,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$47_EN$107",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$47_EN$107",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$f268381b9e5d6ef74da0fe98e49f628443bf7279\\dual_port_ram",
@@ -1887,12 +1887,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$47_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$47_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 8,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$48_EN$109",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$48_EN$109",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$f268381b9e5d6ef74da0fe98e49f628443bf7279\\dual_port_ram",
@@ -1900,12 +1900,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$48_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$48_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 8,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN$111",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN$111",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$f268381b9e5d6ef74da0fe98e49f628443bf7279\\single_port_ram",
@@ -1913,13 +1913,13 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN"
    }
   ],
   "marked": [
-   "$paramod$f268381b9e5d6ef74da0fe98e49f628443bf7279\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$47_EN",
-   "$paramod$f268381b9e5d6ef74da0fe98e49f628443bf7279\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$48_EN",
-   "$paramod$f268381b9e5d6ef74da0fe98e49f628443bf7279\\single_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN"
+   "$paramod$f268381b9e5d6ef74da0fe98e49f628443bf7279\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$47_EN",
+   "$paramod$f268381b9e5d6ef74da0fe98e49f628443bf7279\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$48_EN",
+   "$paramod$f268381b9e5d6ef74da0fe98e49f628443bf7279\\single_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$38_EN"
   ],
   "rejected": {}
  },
@@ -1939,7 +1939,7 @@
    {
     "bits_after": 2,
     "bits_before": 4,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$53_EN$76",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$53_EN$76",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\single_port_ram",
@@ -1947,11 +1947,11 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$53_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$53_EN"
    }
   ],
   "marked": [
-   "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\single_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$53_EN"
+   "$paramod$bbd801f47b161626758cfec67484eadf8a596ecf\\single_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$53_EN"
   ],
   "rejected": {}
  },
@@ -2001,7 +2001,7 @@
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$40_EN$67",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$40_EN$67",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$0e6d8bbdb961fb49166a5fb771284ac777a05584\\single_port_ram",
@@ -2009,11 +2009,11 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$40_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$40_EN"
    }
   ],
   "marked": [
-   "$paramod$0e6d8bbdb961fb49166a5fb771284ac777a05584\\single_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$40_EN"
+   "$paramod$0e6d8bbdb961fb49166a5fb771284ac777a05584\\single_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$40_EN"
   ],
   "rejected": {}
  },
@@ -2023,7 +2023,7 @@
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$83_EN$270",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$83_EN$270",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram",
@@ -2031,12 +2031,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$83_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$83_EN"
    },
    {
     "bits_after": 2,
     "bits_before": 32,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$84_EN$272",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$84_EN$272",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram",
@@ -2044,12 +2044,12 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 2,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$84_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$84_EN"
    }
   ],
   "marked": [
-   "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:317$83_EN",
-   "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:324$84_EN"
+   "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:317$83_EN",
+   "$paramod$dabc33672043c1bd8688d11910b01d4de28e1eae\\dual_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:324$84_EN"
   ],
   "rejected": {}
  },
@@ -2095,7 +2095,7 @@
    {
     "bits_after": 2,
     "bits_before": 16,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$42_EN$76",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$42_EN$76",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\single_port_ram",
@@ -2103,11 +2103,11 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$42_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$42_EN"
    }
   ],
   "marked": [
-   "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\single_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$42_EN"
+   "$paramod$0318761fde8c2368841dd869e2993015b4b784ab\\single_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$42_EN"
   ],
   "rejected": {}
  },
@@ -2119,7 +2119,7 @@
    {
     "bits_after": 2,
     "bits_before": 21,
-    "cell": "$fsm$$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$409_EN$5439",
+    "cell": "$fsm$$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$409_EN$5439",
     "encoding": "one-hot",
     "inputs": 1,
     "module": "$paramod$9ee3ecd7d6df662d94d11db698c34b33111bb736\\single_port_ram",
@@ -2127,7 +2127,7 @@
     "reset_index": 0,
     "states": 2,
     "transitions": 4,
-    "wire": "$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$409_EN"
+    "wire": "$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$409_EN"
    },
    {
     "bits_after": 3,
@@ -2209,7 +2209,7 @@
    }
   ],
   "marked": [
-   "$paramod$9ee3ecd7d6df662d94d11db698c34b33111bb736\\single_port_ram.$memwr$\\Mem$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/parmys/vtr_primitives.v:269$409_EN",
+   "$paramod$9ee3ecd7d6df662d94d11db698c34b33111bb736\\single_port_ram.$memwr$\\Mem$$VTR_ROOT/build/bin/../share/yosys/parmys/vtr_primitives.v:269$409_EN",
    "onlyonecycle.state",
    "raygencont.destaddr",
    "raygencont.state",
