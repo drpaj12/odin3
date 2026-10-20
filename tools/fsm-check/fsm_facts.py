@@ -8,7 +8,13 @@ The corpus has one design per line: ``NAME KIND PATH [TOP]``.  KIND is ``vtr`` (
 name under ``$VTR_ROOT/vtr_flow/benchmarks/verilog``; the RAM-model setattr lines are added) or
 ``micro`` (PATH is relative to the repository root).  The JSON maps NAME to the facts Yosys 0.55
 reports for it (``fsm_probe``'s rows plus the marked and rejected registers and the extraction
-failures).  With ``--check`` nothing is written; the exit code is 1 when the file differs.
+failures).  With ``--check`` nothing is written; the exit code is 1 when the file differs (the first
+differing keys are printed).
+
+Yosys names cells and wires after the source position (``$memwr$\\m$/abs/path/x.v:40$38_EN``), so
+every absolute path is normalised before it is written or compared: the repository root is
+stripped (the path becomes repo-relative) and the VTR root becomes ``$VTR_ROOT``.  The file is
+therefore the same from any checkout.
 
 ``--marks FILE`` writes the detection facts of the micros (no Yosys run: derived from the JSON)
 in the form the C unit test reads: ``PATH MARKED REJECTED`` per micro, MARKED the registers
@@ -35,6 +41,7 @@ from pathlib import Path
 import fsm_probe
 import yosys_log
 
+DIFF_LIMIT = 10
 EXIT_OK = 0
 EXIT_DIFFERS = 1
 EXIT_ERROR = 2
@@ -62,6 +69,54 @@ def design_path(kind: str, rel: str) -> str:
     if kind == "vtr":
         return str(fsm_probe.vtr_root() / "vtr_flow/benchmarks/verilog" / rel)
     return str(REPO_ROOT / rel)
+
+
+def _normalise_text(text: str, repo: Path, vtr: Path) -> str:
+    return text.replace(f"{vtr}/", "$VTR_ROOT/").replace(f"{repo}/", "")
+
+
+def normalise(value: object, repo: Path = REPO_ROOT, vtr: Path | None = None) -> object:
+    """``value`` (nested JSON) with every absolute path in a string or key made portable."""
+    root = fsm_probe.vtr_root() if vtr is None else vtr
+    if isinstance(value, str):
+        return _normalise_text(value, repo, root)
+    if isinstance(value, list):
+        return [normalise(item, repo, root) for item in value]
+    if isinstance(value, dict):
+        return {_normalise_text(str(k), repo, root): normalise(v, repo, root)
+                for k, v in value.items()}
+    return value
+
+
+def describe_diff(old: object, new: object, limit: int = DIFF_LIMIT,
+                  where: str = "") -> list[str]:
+    """Up to ``limit`` lines ``key: ...`` naming where two JSON values differ."""
+    out: list[str] = []
+    if isinstance(old, dict) and isinstance(new, dict):
+        for key in sorted(set(old) | set(new)):
+            here = f"{where}.{key}" if where else str(key)
+            if key not in new:
+                out.append(f"{here}: only in file")
+            elif key not in old:
+                out.append(f"{here}: only in fresh output")
+            else:
+                out.extend(describe_diff(old[key], new[key], limit - len(out), here))
+            if len(out) >= limit:
+                break
+    elif isinstance(old, list) and isinstance(new, list):
+        for i in range(max(len(old), len(new))):
+            here = f"{where}[{i}]"
+            if i >= len(new):
+                out.append(f"{here}: only in file")
+            elif i >= len(old):
+                out.append(f"{here}: only in fresh output")
+            else:
+                out.extend(describe_diff(old[i], new[i], limit - len(out), here))
+            if len(out) >= limit:
+                break
+    elif old != new:
+        out.append(f"{where}: file {old!r} != fresh {new!r}")
+    return out[:limit]
 
 
 def _compact(fsm: yosys_log.Fsm) -> dict[str, object]:
@@ -142,7 +197,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         for name, kind, rel, top in corpus:
             if args.only and name not in args.only:
                 continue
-            new[name] = facts_of(args.yosys, kind, rel, top)
+            new[name] = normalise(facts_of(args.yosys, kind, rel, top))
     except (fsm_probe.ProbeError, OSError, ValueError) as exc:
         print(f"fsm-facts: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -151,7 +206,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_HARD
     text = json.dumps(new, indent=1, sort_keys=True) + "\n"
     if args.check:
-        return EXIT_OK if args.out.exists() and args.out.read_text() == text else EXIT_DIFFERS
+        if not args.out.exists():
+            print(f"fsm-facts: {args.out} does not exist", file=sys.stderr)
+            return EXIT_DIFFERS
+        if args.out.read_text() == text:
+            return EXIT_OK
+        lines = describe_diff(json.loads(args.out.read_text()), new) or ["formatting only"]
+        for line in lines:
+            print(f"fsm-facts: differs: {line}", file=sys.stderr)
+        return EXIT_DIFFERS
     args.out.write_text(text)
     return EXIT_OK
 
