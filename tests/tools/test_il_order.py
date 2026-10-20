@@ -107,9 +107,9 @@ class TestOrder(unittest.TestCase):
 
     def test_cell_connects_are_not_aliases(self) -> None:
         # a public wire named like a port (\\A, \\Y, \\Q, \\D) must not alias anything (review H1).
-        # If cell-internal `connect \\A ...` lines were read as module-level aliases, \\A would stand
-        # for $n9 (the A of the cell that reads it), $n9 would count as named and c3 would not be
-        # placed after c2.
+        # If cell-internal `connect \\A ...` lines were read as module-level aliases, \\A would
+        # stand for $n9 (the A of the cell that reads it), $n9 would count as named and c3 would
+        # not be placed after c2.
         for port_name in ("w", "A", "B", "Y", "Q", "D"):
             text = module(cell("$not", "$c3", A="$n9", Y="$n10"),
                           cell("$not", "$c2", A="\\x", Y="$n9"),
