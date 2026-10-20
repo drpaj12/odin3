@@ -1309,6 +1309,37 @@ then the options considered.
       The in-memory builder is not made to copy `strash`'s order: ABC's behaviour on a reordered
       input is ABC's, and the flip rests on equivalence plus the heavy ratios, not on equal LUT
       counts.
+    (o) **3D-8 (plan Task 22), code part (2026-10-20, branch `feat/3D-8`; agent defaults).** Built:
+    `tools/abc-check/abc-determinism` (modes a to d), `tests/bench/bench_abc.c`,
+    `tools/abc-check/bench-abc-set`, a per-run report hook in the pass, and the CTests
+    `abc_determinism_ci`, `abc_determinism_ci_blif`, `bench_abc_smoke` (Release) and, for the
+    controller, `abc_determinism_golden` and `bench_abc_set`. Not done here and still open: the
+    H1 to H6 runs, the bench table, the calibration of `ODIN3_ABC_BYTES_PER_AIG_OBJ` (still 512;
+    it needs the in-memory runs on the 19), the checklist tick and the PHASE3 table of results.
+    Deviations from the plan:
+    - **Mode (b) is three sessions of one design in one process, not "A, then B, then a fresh
+      A".** `read_blif` refuses a second read into one design, and the pass maps every module in
+      each call, so the tool writes the first model three times (`<m>`, `<m>__o3det2`,
+      `<m>__o3det3`) and maps them with one `abc` call: three `open`/`close` sessions in one
+      process. The copies must come out identical, for the default script and for `strash; fraig;
+      if -K 6`. A script change between the sessions is not covered. The unit tests of the
+      engine (Task 9c) cover the session reuse itself.
+    - **`.out.blif` is compared without ABC's time stamp.** `write_hie` heads the file with `#
+      Benchmark "<name>" written by ABC on <date>`; two runs a second apart differ there (seen:
+      3 designs of 14 over 8 runs). The line is dropped before the comparison; every other byte
+      of `.out.blif`, `.in.blif`, `.cmd` and `write_blif` is compared, never a `.log`.
+    - `--mode` repeats (the gate runs `a` and `b` in one call); `--via-blif` is a flag (the BLIF
+      exchange through a directory, the same path in both runs: `.cmd` holds it); designs that
+      `tests/abc/equiv_expect_fail.txt` lists are skipped by `--expect-fail`.
+    - `bench_abc` prints three columns past spec 12's list (`abc_nodes abc_latches abc_levels`,
+      ABC's `print_stats`, so the linked and `exe` rows compare as spec 12 asks; `aig_objs
+      bytes_per_aig_obj`, the calibration figure) and `--header`, `--techlib`. A run without
+      `--via-blif` uses the pass's default exchange (`ODIN3_ABC_EXCHANGE=aig` for the in-memory
+      one). The RSS columns are those of the whole `abc` call (a multi-domain design repeats
+      them). The report hook (`odin3_abc_test_set_report`, abc_test.h) times the phases with
+      `odin3_now_ms`; "outside ABC" is classification, AIG (or BLIF write and read-back), caps
+      and folding, splice less provenance, and provenance.
+    - `abc-diff`'s depth no longer counts an identity buffer as a level (see (n)).
 49. **`opt_merge -ffbits`: merge identical flip-flop bits before `lower`** (2026-10-19, branch
     `feat/opt-ffbit-merge`; agent default, Peter may override; Peter's rule: where Odin III and
     Parmys differ, match Parmys). No IR invariant and no public ABI changed. (a) **Cause**: Yosys

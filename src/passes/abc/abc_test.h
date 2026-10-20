@@ -1,7 +1,7 @@
 /*
- * abc_test.h — test hooks of the abc pass (3D plan Tasks 4, 10, 11, 14; hidden; never exported,
- * never part of the ABI, never called outside tests/unit). The engine override is the only way
- * past "final" (3D spec §4.3).
+ * abc_test.h — test hooks of the abc pass (3D plan Tasks 4, 10, 11, 14, 22; hidden; never
+ * exported, never part of the ABI, never called outside tests/unit and tests/bench). The engine
+ * override is the only way past "final" (3D spec §4.3).
  */
 #ifndef ODIN3_PASSES_ABC_ABC_TEST_H
 #define ODIN3_PASSES_ABC_ABC_TEST_H
@@ -59,5 +59,36 @@ typedef enum odin3_abc_test_route {
  * default script in the child); AUTO restores the rule. Never fails, never logs.
  */
 void odin3_abc_test_set_route(odin3_abc_test_route mode);
+
+/* What odin3_abc_test_set_report delivers: one record per run (module and clock domain). */
+enum { ODIN3_ABC_REPORT_NAME_BYTES = 160 };
+typedef struct odin3_abc_run_report {
+    char module[ODIN3_ABC_REPORT_NAME_BYTES];
+    char domain[ODIN3_ABC_REPORT_NAME_BYTES];
+    uint32_t run_no;        /* the run's number: abc<run_no>.* in a --via-blif directory */
+    uint32_t exchange;      /* an odin3_abc_exchange */
+    uint32_t cells;         /* soft cells in the region */
+    uint32_t ffs;           /* flip-flops after the run */
+    uint32_t luts;          /* LUTs after the run (buffers not counted) */
+    uint32_t depth;         /* the longest LUT chain of the result */
+    uint32_t aig_objs;      /* AIG objects built (in-memory exchange only; 0 for BLIF) */
+    uint32_t namemap_hit;   /* LUT objects the name map gave an old literal */
+    uint32_t namemap_total; /* LUT objects of the result (0 without a name map) */
+    uint64_t edges;         /* provenance parent edges of the run */
+    /* Milliseconds. classify: the region; aig: the AIG build, or the BLIF write plus read-back;
+     * check: the cap check and constant folding; splice: phases A to D less provenance; prov: the
+     * anchors and records; abc: ABC itself (the session, or the process or linked call); namemap:
+     * the aligned network and ABC's name map. */
+    double classify_ms, aig_ms, check_ms, splice_ms, prov_ms, abc_ms, namemap_ms;
+} odin3_abc_run_report;
+
+typedef void (*odin3_abc_report_fn)(const odin3_abc_run_report *report, void *user);
+
+/*
+ * Makes every successful run of the abc pass call fn(report, user) once it has spliced (bench_abc
+ * and test_abc_report read the phase times and counts this way). NULL clears the hook. The report
+ * is valid during the call only. Never fails, never logs.
+ */
+void odin3_abc_test_set_report(odin3_abc_report_fn fn, void *user);
 
 #endif

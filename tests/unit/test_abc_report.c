@@ -1,0 +1,138 @@
+/*
+ * test_abc_report.c - the per-run report of the abc pass (3D plan Task 22; spec §12): phase times,
+ * counts, name-map coverage and provenance edges, read through abc_test.h's report hook as
+ * bench_abc reads them. The fake engine runs both exchanges; the figures that need real ABC are
+ * checked by bench_abc_smoke.
+ */
+#include "abc_fake_engine.h"
+#include "abc_fixture.h"
+#include "passes/abc/abc.h"
+#include "passes/abc/abc_test.h"
+#include "passes/manager.h"
+
+#ifndef ODIN3_SOURCE_DIR
+#error "ODIN3_SOURCE_DIR must name the repository"
+#endif
+#ifndef ODIN3_LIB_DIR
+#error "ODIN3_LIB_DIR must name lib/"
+#endif
+
+enum { MAX_REPORTS = 8 };
+
+typedef struct collected {
+    odin3_abc_run_report reports[MAX_REPORTS];
+    uint32_t count;
+} collected;
+
+static odin3_design *design;
+static collected got;
+
+static void on_report(const odin3_abc_run_report *report, void *user) {
+    collected *into = user;
+    if (into->count < MAX_REPORTS) {
+        into->reports[into->count++] = *report;
+    }
+}
+
+void setUp(void) {
+    afx_log_reset();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_DEBUG));
+    odin3_abc_fake_reset();
+    odin3_abc_test_set_engine(odin3_abc_fake_engine());
+    TEST_ASSERT_EQUAL_INT(0, unsetenv("ODIN3_ABC_EXCHANGE"));
+    got = (collected){0};
+    odin3_abc_test_set_report(on_report, &got);
+    char tmp[AFX_PATH];
+    afx_path(tmp, "tmp");
+    afx_mkdir(tmp);
+    TEST_ASSERT_EQUAL_INT(0, setenv("TMPDIR", tmp, 1));
+    design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+}
+
+void tearDown(void) {
+    odin3_abc_test_set_report(NULL, NULL);
+    odin3_abc_test_set_engine(NULL);
+    odin3_log_set_sink(NULL, NULL);
+    odin3_design_destroy(design);
+}
+
+/* tests/unit/data/abc/<name>.blif, with the VTR tech library read first. */
+static void read_data(const char *name) {
+    char lib[AFX_PATH];
+    char path[AFX_JOIN];
+    (void)snprintf(lib, sizeof lib, "%s/vtr.o3lib", ODIN3_LIB_DIR);
+    (void)snprintf(path, sizeof path, "%s/tests/unit/data/abc/%s.blif", ODIN3_SOURCE_DIR, name);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "read_techlib", odin3_bytes_cstr(lib)));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read(design, path), path);
+}
+
+static void run_abc(void) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_pass_run(design, "abc", odin3_bytes_cstr("--lut 6")), afx_errors());
+}
+
+static void assert_times_are_numbers(const odin3_abc_run_report *rep) {
+    const double times[] = {rep->classify_ms, rep->aig_ms, rep->check_ms,  rep->splice_ms,
+                            rep->prov_ms,     rep->abc_ms, rep->namemap_ms};
+    for (size_t i = 0; i < sizeof times / sizeof times[0]; i++) {
+        TEST_ASSERT_TRUE(times[i] >= 0.0 && times[i] < 3600000.0);
+    }
+}
+
+static void test_blif_exchange_report(void) {
+    read_data("keep_net");
+    run_abc();
+    TEST_ASSERT_EQUAL_UINT32(1, got.count);
+    const odin3_abc_run_report *rep = &got.reports[0];
+    TEST_ASSERT_EQUAL_STRING("keep_net", rep->module);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_EXCHANGE_BLIF, rep->exchange);
+    TEST_ASSERT_EQUAL_UINT32(0, rep->run_no);
+    TEST_ASSERT_TRUE(rep->cells >= 2);
+    TEST_ASSERT_TRUE(rep->luts >= 1);
+    TEST_ASSERT_TRUE(rep->depth >= 1);
+    TEST_ASSERT_EQUAL_UINT32(0, rep->aig_objs); /* no AIG in the BLIF exchange */
+    TEST_ASSERT_EQUAL_UINT32(0, rep->namemap_total);
+    TEST_ASSERT_TRUE(rep->edges > 0);
+    assert_times_are_numbers(rep);
+}
+
+static void test_aig_exchange_report(void) {
+    TEST_ASSERT_EQUAL_INT(0, setenv("ODIN3_ABC_EXCHANGE", "aig", 1));
+    read_data("keep_net");
+    run_abc();
+    TEST_ASSERT_EQUAL_UINT32(1, got.count);
+    const odin3_abc_run_report *rep = &got.reports[0];
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_EXCHANGE_AIG, rep->exchange);
+    TEST_ASSERT_TRUE(rep->aig_objs >= 2);
+    TEST_ASSERT_TRUE(rep->namemap_hit <= rep->namemap_total);
+    TEST_ASSERT_TRUE(rep->edges > 0);
+    assert_times_are_numbers(rep);
+    TEST_ASSERT_EQUAL_INT(0, unsetenv("ODIN3_ABC_EXCHANGE"));
+}
+
+static void test_one_report_per_clock_domain_with_a_run_number(void) {
+    read_data("derived_clock");
+    run_abc();
+    TEST_ASSERT_TRUE(got.count >= 2);
+    for (uint32_t i = 0; i < got.count; i++) {
+        TEST_ASSERT_EQUAL_UINT32(i, got.reports[i].run_no);
+        TEST_ASSERT_TRUE(got.reports[i].domain[0] != '\0');
+    }
+}
+
+static void test_no_hook_no_report(void) {
+    odin3_abc_test_set_report(NULL, NULL);
+    read_data("keep_net");
+    run_abc();
+    TEST_ASSERT_EQUAL_UINT32(0, got.count);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    RUN_TEST(test_blif_exchange_report);
+    RUN_TEST(test_aig_exchange_report);
+    RUN_TEST(test_one_report_per_clock_domain_with_a_run_number);
+    RUN_TEST(test_no_hook_no_report);
+    return UNITY_END();
+}

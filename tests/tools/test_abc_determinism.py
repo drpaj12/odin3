@@ -71,7 +71,7 @@ class AbcDeterminismTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.odin3 = self.script("odin3", FAKE_ODIN3)
-        self.debug = self.script("odin3-debug", FAKE_ODIN3)
+        self.dbg = self.script("odin3-debug", FAKE_ODIN3)
         self.log = self.root / "fake.log"
         patcher = mock.patch.dict(os.environ, {"FAKE_LOG": str(self.log)})
         patcher.start()
@@ -179,11 +179,11 @@ class AbcDeterminismTest(unittest.TestCase):
 
     def test_mode_d_runs_release_then_debug(self) -> None:
         design = self.design("d/ok.blif")
-        code, out, err = self.run_tool("--mode", "d", "--odin3-debug", self.debug, design)
+        code, out, err = self.run_tool("--mode", "d", "--odin3-debug", self.dbg, design)
         self.assertEqual(code, 0, out + err)
         self.assertEqual([c["bin"] for c in self.calls()], ["odin3", "odin3-debug"])
         bad = self.design("d/debug.blif")
-        code, out, _ = self.run_tool("--mode", "d", "--odin3-debug", self.debug, bad)
+        code, out, _ = self.run_tool("--mode", "d", "--odin3-debug", self.dbg, bad)
         self.assertEqual(code, 1)
         self.assertIn(f"{bad} differs d:write_blif", out)
 
@@ -197,9 +197,9 @@ class AbcDeterminismTest(unittest.TestCase):
     def test_mode_d_refuses_a_vtr_golden(self) -> None:
         golden = self.root / "golden" / "arch"
         design = self.design("golden/arch/vtr/x/x.parmys.blif")
-        with mock.patch.object(abc_equiv, "GOLDEN_ROOT", self.root / "golden"):
-            with mock.patch("abc_equiv.qor_heavy.require_heavy"):
-                code, _, err = self.run_tool("--mode", "d", "--odin3-debug", self.debug, design)
+        with (mock.patch.object(abc_equiv, "GOLDEN_ROOT", self.root / "golden"),
+              mock.patch("abc_equiv.qor_heavy.require_heavy")):
+            code, _, err = self.run_tool("--mode", "d", "--odin3-debug", self.dbg, design)
         self.assertEqual(code, 2)
         self.assertIn("micros", err)
         self.assertTrue(golden.exists())

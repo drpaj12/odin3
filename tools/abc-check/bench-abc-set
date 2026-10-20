@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# bench-abc-set: bench_abc over a set of BLIFs, smallest first (3D Task 22; spec 12, 13.9).
+#
+# usage: bench-abc-set --bench BENCH [--exe ABC] [--keep DIR] [--lut K] [--exchange aig|blif]
+#                      FILE.blif...
+#   --exe ABC     BLIF exchange, with the pinned executable's row beside each run; the exchange
+#                 files of a design are kept in DIR/<design>/ (DIR is required)
+#   --exchange aig  the in-memory exchange (ODIN3_ABC_EXCHANGE=aig); no --exe, no files
+# Prints bench_abc's table (the header once). Exit 0 when every run succeeded, 1 when one failed
+# (the others still run), 2 on a usage error. Run it through tools/heavy-run for golden paths.
+set -euo pipefail
+
+usage() {
+    sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//' >&2
+    exit 2
+}
+
+bench="" exe="" keep="" lut=6 exchange=blif
+files=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+    --bench) [ $# -ge 2 ] || usage; bench=$2; shift 2 ;;
+    --exe) [ $# -ge 2 ] || usage; exe=$2; shift 2 ;;
+    --keep) [ $# -ge 2 ] || usage; keep=$2; shift 2 ;;
+    --lut) [ $# -ge 2 ] || usage; lut=$2; shift 2 ;;
+    --exchange) [ $# -ge 2 ] || usage; exchange=$2; shift 2 ;;
+    -h | --help) usage ;;
+    -*) usage ;;
+    *) files+=("$1"); shift ;;
+    esac
+done
+[ -n "$bench" ] && [ ${#files[@]} -gt 0 ] || usage
+case "$exchange" in aig | blif) ;; *) usage ;; esac
+if [ "$exchange" = blif ] && [ -n "$exe" ] && [ -z "$keep" ]; then
+    echo "bench-abc-set: --exe needs --keep DIR" >&2
+    exit 2
+fi
+
+# smallest first, ties by path
+mapfile -t sorted < <(for f in "${files[@]}"; do printf '%s\t%s\n' "$(stat -c %s "$f")" "$f"; done |
+    sort -k1,1n -k2,2 | cut -f2-)
+
+status=0
+first=--header
+for f in "${sorted[@]}"; do
+    name=$(basename "$f")
+    name=${name%%.*}
+    args=(--one "$f" --lut "$lut" $first)
+    if [ "$exchange" = aig ]; then
+        export ODIN3_ABC_EXCHANGE=aig
+    elif [ -n "$keep" ]; then
+        mkdir -p "$keep/$name"
+        args+=(--via-blif "$keep/$name")
+        [ -z "$exe" ] || args+=(--exe "$exe")
+    fi
+    if "$bench" "${args[@]}"; then
+        first=
+    else
+        echo "bench-abc-set: $f failed" >&2
+        status=1
+    fi
+done
+exit $status

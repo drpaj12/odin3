@@ -30,9 +30,10 @@ odin3 does not finish).  The caller's environment is passed through unchanged.  
 ``~/odin3-ws/golden`` first needs ``qor_heavy.require_heavy()`` (run through ``tools/heavy-run``).
 Nothing is deleted.
 
-Differences from the plan, both recorded in PHASE3 decision 53: mode (b) cannot run "A, then B, then
+Differences from the plan, recorded in PHASE3 decision 48 (o): mode (b) cannot run "A, then B, then
 a fresh A" because ``read_blif`` refuses a second read into one design, so the repeated sessions
-are three copies of the design in one process; and ``--mode`` may repeat.
+are three copies of the design in one process; ``--mode`` may repeat; ABC's time-stamp comment is
+not compared.
 
 Exit codes (the project's): 0 every design is the same, 1 a design differs, 2 a usage or tool
 error.
