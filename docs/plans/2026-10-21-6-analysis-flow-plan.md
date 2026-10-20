@@ -1,12 +1,14 @@
-# Phase 6 analysis flow and provenance (6.1 to 6.5): Implementation Plan (v1)
+# Phase 6 analysis flow and provenance (6.1 to 6.5): Implementation Plan (v1.1)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans. Steps use checkbox
 > (`- [ ]`) syntax. Commit and push after every task and after each rule or sub-step inside a long
 > task. Never use `cd X && git ...`; use `git -C` and absolute paths. Tests first.
 
-v1 (2026-10-21). Spec: `docs/specs/2026-10-21-6-analysis-flow-design.md` v1 (rule IDs G, C, E, V, P are
-binding). **Peter approves the spec before Task 1 of any PR starts** (CLAUDE.md rule 2). Its nine
-questions are taken as agent defaults (logged by Task 12 as a PHASE6 decision). **Stop and report** if a
+v1.1 (2026-10-21; v1.1: critique fixes, tracks spec v1.1). Spec: `docs/specs/2026-10-21-6-analysis-flow-design.md`
+v1.1 (rule IDs G, C, E, V, P are binding). **Peter approves the spec before Task 1 of any PR starts** (CLAUDE.md rule 2). Its eleven
+questions are taken as agent defaults (logged by Task 12 as a PHASE6 decision), except that Questions
+5 and 7 (the `inherited` and `pad` exception classes, not allowed by PHASE6 decision 2) stay off in the
+tool until Peter approves them. **Stop and report** if a
 task needs an IR field, ID, invariant or check-rule change, an ABI change, or a change to how an existing
 reader or writer behaves without its new option.
 
@@ -26,7 +28,10 @@ levelized, exported to Python graph tools, and the coverage of provenance to HDL
 | 6.5c | 11 | leg (d), VPR placed blocks (heavy) | 6.5b |
 | docs | 12 | PHASE6.md numbers, decisions, PASSES.md, DESIGN 9 | all |
 
-**Parallel lanes (at most three).** Wave 1, all disjoint files, start at once: **6.4** (`src/passes/
+**Parallel lanes (at most three).** Wave 1 starts at once; the source directories are disjoint, but
+the lanes share `docs/PASSES.md` and `CMakeLists.txt` (and 6.2 and 6.3 `write_formats.c`): each lane
+merges `origin/main` before its PR, and the controller resolves those files (rows and test
+registrations are additive) at merge: **6.4** (`src/passes/
 levelize/`), **6.2** (`src/backends/dot/`, `write_formats.c`), **6.1** (`tests/netlist/`,
 `tools/netlist-ingest/`). Wave 2: **6.3** after 6.4 merges (it uses the level key; its handler work can
 start earlier against a hand-set attribute) and **6.5a** (touches `dump_locs.c` only). Wave 3: **6.5b**
@@ -49,17 +54,21 @@ wait on it.
 `tests/unit/test_levelize.c`, `src/passes/builtin.{c,h}` (register last), `CMakeLists.txt`,
 `docs/PASSES.md`.
 **Produces:** pass `levelize [--key NAME]`; attributes `odin3_level` (cells, nets) and `<key>_cut`.
-**Tests:** `test_levelize` (hand counts of V-7 a, loop cases V-7 b with the warning text and
-location, rerun identity, `$proc` refusal, 100000-cell chain), `levelize_micro_<name>` script tests on
+**Tests:** `test_levelize` (hand counts of V-7 a, loop cases V-7 b with the warning text, the named
+cell on the loop and its location, rerun identity, `$proc` and word-view `$dff` refusal, `--key`
+guard, `$_DFF_P_`/`$_DFF_N_`/`$_DLATCH_P_` sources, the V-6 100000-cell chain with its 10 s and 256 MB
+bounds), `levelize_micro_<name>` script tests on
 three micros that dump the attribute with `write_json` (the plain attribute path, no 6.3 key yet).
 - [ ] Step 1: write the tests; run: fail (pass unknown).
 - [ ] Step 2: Kahn sweep over cells in ID order using the registry's sequential flags
   (`odin3_sim_is_seq`-equivalent public flag; read `src/ir/celltype.h` and `src/passes/abc/region.c`
-  for the exact accessor and copy the loop-cut rule, do not reuse the abc types).
+  for the exact accessor and copy the loop-cut rule, do not reuse the abc types). Only the
+  bit-level storage types carry the flags (word `$dff` and the like do not): refuse word view (V-1).
+  On a stall pick the lowest-ID cell that lies on a cycle of the remaining set (V-4).
 - [ ] Step 3: green, lint, commit and push.
 
 **Acceptance:** V-7 a to e pass; no recursion (V-6); attribute-only mutation (a structural dump
-before and after is equal); registry-order test updated with the new row only.
+before and after is equal); `--key` guard (V-1); registry-order test updated with the new row only.
 
 ## Task 2 (6.2): `write_dot --color-by` and `--locs` (C-1 to C-8)
 
@@ -67,7 +76,9 @@ before and after is equal); registry-order test updated with the new row only.
 `src/passes/write_formats.c` (option parsing for `write_dot` only), `tests/unit/test_dot_writer.c` (or
 the existing dot test, found with the graph), `tests/` dot script tests, `docs/PASSES.md`.
 **Produces:** the two options; a legend cluster; the second label line.
-**Tests:** C-8 a to f. Existing dot tests unchanged (no-option output byte-identical).
+**Tests:** C-8 a to f (palette of the spec's twelve hex values, legend last). Existing dot tests
+unchanged (no-option output byte-identical). When `dot` is absent the `nop` test prints the named
+skip `SKIP graphviz_nop: dot not installed`.
 - [ ] Step 1: tests for the colour classes, legend counts and `(none)`; the 13-value warning; missing
   attribute warning; `@type`; `--locs` with Verilog and BLIF-read designs; the `nop` check when
   Graphviz is installed (record in the lane report whether it ran).
@@ -81,12 +92,16 @@ the existing dot test, found with the graph), `tests/` dot script tests, `docs/P
 
 **Files:** new `tests/netlist/cells/cmos.v`, `tests/netlist/<micro>/{rtl.v, mapped.v, mapped.blif,
 mapped_src.v, gen.sh}`, `tests/netlist/README.md` (how generated, Yosys 0.55 command lines).
-**Produces:** committed fixtures for 6 to 8 micros (list fixed here: the `tests/micro/verilog` entries
-chosen by the lane and named in its report, plus `regen` and `cone`).
+**Produces:** committed fixtures for 9 micros (the G-7 list, fixed here): `tests/micro/verilog/`
+`common/{dffsr,dff,dffe,adff,mux,adder}.v` and `micro/bm_DL_Dff_w_synch_reset.v`, plus the hand-written
+`regen` and `cone`. `dffsr` is the one that exercises the `DFFSR` cell (`always @(posedge rst, posedge
+clk)`). Also `tests/netlist/cells/cmos_map.v` (the Yosys techmap file).
 **Tests:** `netlist_cells_elab` (each model elaborates alone and as `--lib`).
 - [ ] Step 1: write the cell models and the two hand micros; elaborate them.
-- [ ] Step 2: write `gen.sh` (Yosys maps to exactly the G-2 set; one run with `src` kept, one with
-  `-noattr` for the reverse-engineering case) and run it once; commit the outputs.
+- [ ] Step 2: write `gen.sh` (Yosys 0.55 maps to exactly the G-2 set: `synth -flatten`, `dfflegalize`
+  to `$_DFF_P_` and `$_DFFSR_PPP_`, `abc -g NAND,NOR`, `techmap -map cells/cmos_map.v`, `check -assert`
+  so any other cell fails the script; verify the Yosys cell names first; one run with `src` kept, one
+  with `-noattr` for the reverse-engineering case) and run it once; commit the outputs.
 - [ ] Step 3: commit and push.
 
 **Acceptance:** every fixture reads with `read_verilog` (library via `-v`) or `read_blif`; sizes small
@@ -113,8 +128,10 @@ changes.
 write_formats.c`, `src/frontends/json/reader_ext.c` (handlers in `odin3_json_ext_keys[]`),
 `tests/unit/test_json_odin3.c`, `docs/PASSES.md`, `docs/DESIGN.md` 9 (JSON row).
 **Tests:** without the option the output is byte-identical to a stored golden of today; with it, key
-order and values for a micro (levels hand-set by attribute until 6.4); write, read, write is
-byte-equal; `odin3_version` 2 is the J-9 error; `odin3_fsm_*` attributes of an `fsm` micro appear in
+order and values for a micro (levels hand-set by attribute until 6.4); write A, read, write B, read, write C: A equals B after
+the `odin3_prov` objects are dropped, and B equals C byte-for-byte (E-3; no provenance-record change,
+a failure of B equals C is reported, Question 10); under `--odin3` the level is the key only, not
+repeated in `attributes` (E-2); `odin3_version` 2 is the J-9 error; `odin3_fsm_*` attributes of an `fsm` micro appear in
 `attributes`.
 - [ ] Step 1: tests; Step 2: writer; Step 3: handlers; Step 4: green, lint, commit and push.
 
@@ -122,12 +139,16 @@ byte-equal; `odin3_version` 2 is the J-9 error; `odin3_fsm_*` attributes of an `
 
 ## Task 6 (6.3): Python loader (E-4 to E-7)
 
-**Files:** new `plugins/python/odin3_graph.py`, new test `tests/python/` (or the existing Python test
-location, found by the lane) plus CTest `graph_export_counts`, `graph_loader_isolated`.
-**Tests:** E-6 counts against `walk.py`; E-5 isolated run (`python3 -I` of a temp copy, no `libodin3`);
-E-7 level ordering after `levelize` (skipped with a named skip until 6.4 merges); `to_pyg` when
+**Files:** new `plugins/python/odin3_graph.py`, new tests in `tests/tools/` (the Python tests live
+there; there is no `tests/python/`) plus CTest `graph_export_counts`, `graph_loader_isolated`.
+**Tests:** E-6 counts against the IR by `dump_locs` and the C ABI (`walk.py`), not by any code the
+loader shares (E-6); E-5 isolated run (`python3 -I` of a temp copy, no `libodin3`);
+E-7 level ordering after `levelize` (strictly lower into combinational non-cut cells; edges into
+sequential and cut cells exempt; skipped with a named skip until 6.4 merges); `to_pyg` when
 torch_geometric imports, else a named skip.
-- [ ] Step 1: write the E-4 counting rule in both the loader and the test helper and the tests; Step 2:
+- [ ] Step 1: write the E-4 counting rule in the loader; write the reference count in the test helper
+  independently from the IR (`dump_locs` nodes, C-ABI pins), one node per port, one edge per bit
+  pair; then the tests; Step 2:
   implement `load_json` and `to_pyg`; Step 3: green, lint (ruff, mypy), commit and push.
 
 **Acceptance:** counts equal on every micro of the default set; no skip is silent.
@@ -135,21 +156,28 @@ torch_geometric imports, else a named skip.
 ## Task 7 (6.5a): `dump_locs --types`
 
 **Files:** `src/passes/dump_locs.c`, its unit test, `docs/PASSES.md`.
-**Produces:** with `--types` each node line is `module|node|name|TYPE|SRC`, escaped like the other
-fields; without the option the output is byte-identical.
-**Tests:** unchanged-output test, typed output test with `$lut`, `$_DFF_P_`, `lpm_add_sub`.
+**Produces:** with `--types` each node line is `module|node:TYPE|name|SRC` (the type inside the kind
+field, escaped like the other fields; only the first `:` of the kind field splits; no extra field,
+so the three-field parse rule at the top of `dump_locs.c` still holds, whose comment gets one
+sentence); module, wire and net lines unchanged; without the option the output is byte-identical.
+**Tests:** unchanged-output test, typed output test with `$lut`, `$_DFF_P_`, `lpm_add_sub`, a type
+name containing `:` and `|`, and a reader check that tells the two formats apart by the kind field.
 **Acceptance:** `tools/loc-check` tests untouched and green.
 
 ## Task 8 (6.5b): the coverage tool core (P-1, P-3, P-5, P-8)
 
 **Files:** new `tools/prov-cover/{prov-cover,prov_cover.py,test_prov_cover.py}`.
-**Produces:** parser of typed dumps; class assignment (`lut`, `latch`, `hard`, `lpm`, and the
-exceptions `const`, `writer-buffer`, `inherited`, `pad`); coverage, median, p90, `capped`; report
-JSON and table; exit status per P-4.
+**Produces:** parser of typed dumps (`node:TYPE`); class assignment (`lut`, `latch`, `hard`, `lpm`, and
+the exceptions `const-driver`, `const-table`, `port-buffer`, `not-helper`, with the exact P-3 rules;
+`inherited` and `pad` only with `--allow`, off by default); the written-file cross-check count per
+class; coverage, median, p90, `capped`; report JSON and table with per-class counts for every class
+(zero included), shares and the strict figure; exit status per P-4.
 **Tests:** P-8 unit tests (pure Python, no odin3 binary).
 - [ ] Steps: tests first, implement, `ruff`/`mypy`, commit and push.
 
-**Acceptance:** an unresolved plain LUT fails the gate; each exception class is counted and printed.
+**Acceptance:** an unresolved plain LUT fails the gate; each exception class is counted and printed
+(every class, zero included) and equals its written-file count; a port-buffer whose net has a located
+leg-(a) driver is a lost location, not an exception.
 
 ## Task 9 (6.5b): legs (a) to (c) and CTests (P-2, P-4, P-7)
 
@@ -190,7 +218,7 @@ cited. If the mapping cannot be made exact, stop and report with the cases found
 ## Task 12 (docs)
 
 **Files:** `docs/PHASE6.md` (tick items, numbers table per design and leg, decisions log entries for the
-nine questions as agent defaults), `docs/PASSES.md`, `docs/DESIGN.md` 9 (JSON row), `docs/
+eleven questions as agent defaults; Questions 5 and 7 stay off until Peter approves), `docs/PASSES.md`, `docs/DESIGN.md` 9 (JSON row), `docs/
 log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.sh` green.
 
 ## Review focus (for the critique agent, one pass per PR)
@@ -202,7 +230,7 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
 - 6.1: no reader behaviour changed silently; fixtures small and regenerable; the `src`/no-`src`
   distinction is real (locations printed only for `SOURCE` leaves).
 - 6.3: default JSON bytes unchanged; key order fixed; the loader imports nothing from the repo; count
-  rule identical on both sides; version policy.
+  rule derived independently on each side (E-6); version policy.
 - 6.5: exception classes are narrow and counted (no catch-all); a netlist location never counts as
   an HDL location; `inherited` reported both ways; no flag guessed in the tool.
 - All: one pass or tool per PR; no IR, ABI or ADR change; docs for each option.
@@ -210,13 +238,18 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
 ## Risks
 
 1. Gate-level Verilog may expose elaboration gaps (Task 4); fixes are separate commits and reported.
-2. 6.2 and 6.3 both edit `write_formats.c`; a merge conflict is expected and trivial.
+2. Lanes share `docs/PASSES.md` and `CMakeLists.txt` (6.2 and 6.3 also `write_formats.c`); conflicts are
+   expected and trivial: lanes merge `origin/main` before the PR and the controller resolves them.
 3. networkx or Torch absent: named skips, never silent passes.
 4. The 8-location cap lowers specificity numbers on merged logic (P-5 notes it).
 5. VPR block naming unverified (Task 11 starts by verifying).
 6. Heavy lock: Tasks 10 (large designs) and 11 stall other lanes; run only when idle.
 7. 5.4b, 5.4c, 5.4d late: 6.5b legs (b) and (c) are the only blocked part; legs (a) and the tool core go
    ahead.
+8. `levelize --key` collisions and `odin3_level` appearing in default JSON (spec risks 7, 8): the
+   V-1 guard and the E-2 one-place rule are tested.
+9. Exception classes weakening the gate (spec risk 9): per-class counts and the file cross-check are
+   reviewed in 6.5b; `inherited` and `pad` stay off until Peter approves.
 
 ## Deviations
 
