@@ -64,6 +64,7 @@ spec = json.loads((HERE / "fake.json").read_text())
 with open(HERE / "equiv.log", "a") as log:
     log.write(" ".join(sys.argv[1:]) + "\n")
 suffix = "_d2b" if any(a.endswith("golden.d2b.blif") for a in sys.argv) else ""
+suffix = "_compat" if any(a.endswith("odin.compat.blif") for a in sys.argv) else suffix
 sys.stdout.write(spec.get("equiv_out" + suffix, ""))
 sys.exit(spec.get("equiv_rc" + suffix, 1))
 """
@@ -184,6 +185,50 @@ class ClassTests(ToolCase):
         code, out, _ = self.run_tool()
         self.assertEqual(code, 1)
         self.assertIn("UNPROVEN", out)
+
+
+class SplitExtensionTests(ToolCase):
+    """D19: Parmys sign-extends the low product of a B-split multiplier. A listed D19 design that
+    is unpaired is rerun with ``hardmap --parmys-split-ext``; equivalent then lists it."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.spec["equiv_rc"] = 2
+        self.spec["equiv_out"] = UNPAIRED_OUT
+
+    def test_unlisted_unpaired_is_not_rerun(self) -> None:
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len(self.log("odin.log").splitlines()), 1)
+        self.assertNotIn("parmys-split-ext", self.log("odin.log"))
+
+    def test_listed_and_equivalent_with_the_extension(self) -> None:
+        self.expect("common/foo.v D19 Parmys sign-extends the low product of a B split\n")
+        self.spec["equiv_rc_compat"] = 0
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 0, out)
+        self.assertIn("listed:D19", out)
+        lines = self.log("odin.log").splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertIn("hardmap --parmys-split-ext;", lines[1])
+        self.assertNotIn("parmys-split-ext", lines[0])
+
+    def test_listed_but_still_different_fails(self) -> None:
+        self.expect("common/foo.v D19 Parmys sign-extends the low product of a B split\n")
+        self.spec["equiv_rc_compat"] = 1
+        self.spec["equiv_out_compat"] = "equiv-check: NOT equivalent\n"
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("DIFFERS", out)
+        self.assertIn("D19", out)
+
+    def test_listed_but_equivalent_at_once_is_stale(self) -> None:
+        self.expect("common/foo.v D19 Parmys sign-extends the low product of a B split\n")
+        self.spec["equiv_rc"] = 0
+        self.spec["equiv_out"] = ""
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("STALE", out)
 
 
 class UnpairedTests(ToolCase):

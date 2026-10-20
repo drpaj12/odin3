@@ -157,6 +157,10 @@ static odin3_status budget_tick(hm_ctx *hc, uint64_t pins) {
     return hc->pins_created / HM_BUDGET_PINS == before ? ODIN3_OK : hm_budget_check(hc);
 }
 
+odin3_status hm_budget_work(hm_ctx *hc, uint64_t units) {
+    return budget_tick(hc, units);
+}
+
 /* --- hard cell types (H-3) ----------------------------------------------------------------- */
 
 static bool shape_matches(const odin3_celltype_def *def, const hm_shape *shape) {
@@ -257,6 +261,44 @@ static odin3_status set_hardmap_attr(hm_ctx *hc, odin3_node_id node, const char 
     return st == ODIN3_OK
                ? odin3_attr_set(hc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key, &value)
                : st;
+}
+
+#define NOCARRY_KEY "partial_map_nocarry"
+
+odin3_status hm_mark_nocarry(hm_ctx *hc, odin3_node_id node) {
+    uint32_t key = 0;
+    odin3_status st = odin3_design_intern(hc->design, odin3_bytes_cstr(NOCARRY_KEY), &key);
+    odin3_value value = odin3_value_int(1);
+    return st == ODIN3_OK
+               ? odin3_attr_set(hc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key, &value)
+               : st;
+}
+
+bool hm_is_nocarry(const hm_ctx *hc, odin3_node_id node) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(hc->design), odin3_bytes_cstr(NOCARRY_KEY), &key)) {
+        return false;
+    }
+    const odin3_value *value =
+        odin3_attr_get(hc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
+    return value != NULL && value->kind == ODIN3_VAL_INT && value->i == 1;
+}
+
+/* The marker is internal: no node of the output carries it (the namesake adder copies the source's
+ * attributes, and a split `$add` left soft by `--min-add` keeps it). */
+void hm_strip_nocarry(hm_ctx *hc) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(hc->design), odin3_bytes_cstr(NOCARRY_KEY), &key)) {
+        return;
+    }
+    for (uint32_t mi = 1; mi < odin3_design_module_end(hc->design); mi++) {
+        odin3_module *mod = odin3_module_get(hc->design, (odin3_module_id){mi});
+        for (uint32_t id = 1; mod != NULL && id < odin3_module_node_end(mod); id++) {
+            if (odin3_node_live(mod, (odin3_node_id){id})) {
+                (void)odin3_attr_remove(mod, (odin3_objref){ODIN3_OBJ_NODE, id}, key);
+            }
+        }
+    }
 }
 
 static bool is_glue_type(const hm_ctx *hc, odin3_celltype_id type) {

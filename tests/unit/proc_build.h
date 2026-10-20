@@ -54,7 +54,8 @@ odin3_status pb_build(const char *rtlil, pb_result *out);
 /*
  * pb_build, with the tech library at lib_path (`read_techlib`) read into the design first, so the
  * text may use its hard cell types (`cell \multiply \u`). lib_path NULL is
- * pb_build. A library that does not read is its status, logged; *out is empty then.
+ * pb_build. A lib_path ending in `.xml` is a VPR architecture, read with `read_arch` (the library
+ * and the record). A library that does not read is its status, logged; *out is empty then.
  */
 typedef struct pb_source {
     const char *rtlil;
