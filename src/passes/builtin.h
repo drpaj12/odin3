@@ -47,6 +47,8 @@ extern const odin3_pass_def odin3_pass_lower;
 /* src/passes/partial_map/register.c (3C Task 2; 4.2): `partial_map` and its alias `hardmap`. */
 extern const odin3_pass_def odin3_pass_partial_map;
 extern const odin3_pass_def odin3_pass_hardmap;
+/* src/passes/partial_map/register_merge.c (4.7): `memory_merge`. */
+extern const odin3_pass_def odin3_pass_memory_merge;
 extern const odin3_pass_def odin3_pass_lpmmap;
 /* src/frontends/verilog/read_verilog.c (2C §4). */
 extern const odin3_pass_def odin3_read_verilog_pass;

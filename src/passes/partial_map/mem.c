@@ -12,23 +12,6 @@
 #include <inttypes.h>
 #include <string.h>
 
-/* `$mem` parameter indices (src/ir/cells/mem.c, declaration order). */
-enum {
-    MP_MEMID,
-    MP_SIZE,
-    MP_OFFSET,
-    MP_ABITS,
-    MP_WIDTH,
-    MP_RD_PORTS,
-    MP_WR_PORTS,
-    MP_RD_CLK_ENABLE,
-    MP_RD_CLK_POLARITY,
-    MP_RD_TRANSPARENT,
-    MP_WR_CLK_ENABLE,
-    MP_WR_CLK_POLARITY,
-    MP_INIT
-};
-
 /* --- the model ----------------------------------------------------------------------------- */
 
 static bool bit_of(const odin3_value *val, uint32_t index) {
@@ -280,6 +263,7 @@ static odin3_status map_hard(hm_ctx *hc, const mem_model *mm) {
 odin3_status hm_map_mem(hm_ctx *hc, odin3_node_id src) {
     mem_model mm;
     mem_verdict verdict = MEM_SOFT_PATTERN;
+    pm_memattr_warn(hc, src, "partial_map");
     odin3_status st = mem_load(hc, src, &mm);
     st = st == ODIN3_OK && !mm.too_wide ? mem_merge(hc, &mm) : st;
     st = st == ODIN3_OK ? mem_classify(hc, &mm, &verdict) : st;

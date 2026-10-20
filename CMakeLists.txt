@@ -173,6 +173,9 @@ add_library(odin3_core OBJECT
     src/passes/partial_map/ram_split.c
     src/passes/partial_map/mem.c
     src/passes/partial_map/mem_merge.c
+    src/passes/partial_map/memory_merge.c
+    src/passes/partial_map/ramstyle.c
+    src/passes/partial_map/register_merge.c
     src/passes/partial_map/mem_plan.c
     src/passes/partial_map/rules.c
     src/passes/lpmmap/register.c
@@ -847,6 +850,21 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_pm_alias PROPERTIES LABELS unit)
+    add_test(NAME cli_memory_merge
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh memory_merge $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_memory_merge PROPERTIES LABELS unit)
+    add_test(NAME cli_memory_merge_soft
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh memory_merge_soft $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_memory_merge_soft PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_ramstyle
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_ramstyle $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_ramstyle PROPERTIES LABELS unit)
     # 4.2 Task 3: pm_rules (k6 values, absent models, no 3C number outside rules.c).
     odin3_add_unit_test(test_pm_rules)
     target_sources(test_pm_rules PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
@@ -872,6 +890,19 @@ if(BUILD_TESTING)
     target_sources(test_hardmap_mem PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c
         tests/unit/hardmap_ramsim.c)
     target_compile_definitions(test_hardmap_mem PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 4.7 (plan Task 5): the `memory_merge` pass on hand-built flat IR.
+    odin3_add_unit_test(test_memory_merge)
+    target_sources(test_memory_merge PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c
+        tests/unit/hardmap_ramsim.c)
+    target_compile_definitions(test_memory_merge PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 4.7 (plan Task 6): `ram_style` and its kin are ignored with a warning (G-3).
+    odin3_add_unit_test(test_pm_ramstyle)
+    target_sources(test_pm_ramstyle PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_pm_ramstyle PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     # 3C Task 4 (spec 9.3): the arithmetic and memory micros through the Phase 3 script up to
