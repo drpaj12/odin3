@@ -180,6 +180,10 @@ static odin3_status read_blif_parse(odin3_bytes args, odin3_strbuf *path, bool *
          word = odin3_pass_arg_next(&args)) {
         if (odin3_pass_arg_is(word, "--hdl-locs")) {
             *hdl_locs = true;
+        } else if (word.len > 2 && memcmp(word.ptr, "--", 2) == 0) {
+            odin3_log(ODIN3_LOG_ERROR, "read_blif: unknown option '%.*s'", (int)word.len,
+                      (const char *)word.ptr);
+            return ODIN3_ERR_INVALID_ARG;
         } else if (++paths == 1 && word.len > 0) {
             odin3_status st = odin3_strbuf_append(path, word);
             if (st != ODIN3_OK) {

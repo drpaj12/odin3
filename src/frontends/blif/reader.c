@@ -1800,6 +1800,7 @@ static odin3_status read_file(odin3_design *design, const char *path, odin3_pass
     }
     odin3_blif_read_stats local;
     odin3_blif_read_stats *stats = opts != NULL && opts->stats != NULL ? opts->stats : &local;
+    *stats = (odin3_blif_read_stats){0};
     if (st == ODIN3_OK && opts != NULL && opts->hdl_locs) {
         rd.locs = blif_locs_create(&rd.ctx, stats, path);
         st = rd.locs == NULL ? rd_fail(&rd, ODIN3_ERR_NO_MEMORY) : st;
@@ -1825,7 +1826,7 @@ odin3_status odin3_blif_read(odin3_design *design, const char *path) {
 
 odin3_status odin3_blif_read_ex(odin3_design *design, odin3_pass_ctx *ctx, const char *path,
                                 const odin3_blif_read_opts *opts) {
-    if (ctx != NULL && (ctx->design == NULL || !odin3_passrun_valid(ctx->run) ||
+    if (ctx != NULL && (ctx->design != design || !odin3_passrun_valid(ctx->run) ||
                         ctx->run.v >= odin3_passrun_end(ctx->design))) {
         odin3_log(ODIN3_LOG_ERROR, "blif_read: NULL or invalid pass context");
         return ODIN3_ERR_INVALID_ARG;

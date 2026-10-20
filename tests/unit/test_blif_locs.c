@@ -452,6 +452,89 @@ static void test_vtr_provenance_round_trip(void) {
     expect_check();
 }
 
+/* M1: a decoded net that moved aside stays decoded, so a raw name equal to its new name is exact.
+ */
+static void test_raw_name_exact_after_move(void) {
+    read_ok(".model top\n.inputs a\n.outputs y\n.names a w@d.v:3\n1 1\n.names a w\n1 1\n"
+            ".names a w$1\n1 1\n.names w@d.v:3 w w$1 y\n111 1\n.end\n",
+            true);
+    char *text = dump();
+    expect_in(text, "top|net|w|\n");
+    expect_in(text, "top|net|w$1|\n");
+    expect_in(text, "top|net|w$1$1|d.v:3\n");
+    odin3_util_free(text);
+    expect_check();
+}
+
+/* M2: a model must end with `.end` (next `.model` or end of file is an error), so D-5 has no other
+ * place to run. */
+static void test_missing_end_is_an_error(void) {
+    TEST_ASSERT_NOT_EQUAL_INT(
+        ODIN3_OK, read_text(".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n", true));
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, read_text(".model top\n.inputs a\n.outputs y\n"
+                                                  ".model two\n.end\n",
+                                                  true));
+}
+
+/* M3: an unknown option is an error, not a path. */
+static void test_unknown_option(void) {
+    put_input(NAMES);
+    char path[PATH_BUF];
+    char args[2 * PATH_BUF];
+    path_of("t.blif", path);
+    (void)snprintf(args, sizeof args, "--hdl-loc %s", path);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_pass_run(design, "read_blif", odin3_bytes_cstr(args)));
+    expect_in(log_text, "read_blif: unknown option '--hdl-loc'");
+}
+
+/* The stats are zeroed by every read, with or without the option. */
+static void test_stats_zeroed_without_option(void) {
+    stats = (odin3_blif_read_stats){7, 7, 7, 7, 7};
+    read_ok(NAMES, false);
+    TEST_ASSERT_EQUAL_UINT32(0,
+                             stats.nets + stats.cells + stats.inherited + stats.capped + stats.bad);
+}
+
+/* A context of another design is refused. */
+static void test_context_of_other_design(void) {
+    odin3_design *other = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(other);
+    odin3_pass_ctx ctx;
+    uint32_t name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(other, odin3_bytes_cstr("x"), &name));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(other, name, &ctx));
+    put_input(NAMES);
+    char path[PATH_BUF];
+    path_of("t.blif", path);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_read_ex(design, &ctx, path, NULL));
+    odin3_design_destroy(other);
+}
+
+/* A second `.attr src` on a cell replaces the first and counts the cell once. */
+static void test_second_src_counts_once(void) {
+    read_ok(".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.cname g\n"
+            ".attr src \"a.v:1\"\n.attr src \"b.v:2\"\n.end\n",
+            true);
+    TEST_ASSERT_EQUAL_UINT32(1, stats.cells);
+    char *text = dump();
+    expect_in(text, "top|node|g|b.v:2\n");
+    expect_out(text, "a.v:1");
+    odin3_util_free(text);
+}
+
+/* A name that decodes to text with a NUL byte keeps its raw name and gives a located warning. */
+static void test_nul_in_decoded_name(void) {
+    read_ok(".model top\n.inputs a\n.outputs y\n.names a n%00x@d.v:3\n1 1\n"
+            ".names n%00x@d.v:3 y\n1 1\n.end\n",
+            true);
+    TEST_ASSERT_EQUAL_UINT32(0, stats.nets);
+    expect_net("n%00x@d.v:3", true);
+    expect_in(log_text, "t.blif:4:");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_no_option_no_change);
@@ -467,5 +550,12 @@ int main(void) {
     RUN_TEST(test_pass_option);
     RUN_TEST(test_src_attr_round_trip);
     RUN_TEST(test_vtr_provenance_round_trip);
+    RUN_TEST(test_raw_name_exact_after_move);
+    RUN_TEST(test_missing_end_is_an_error);
+    RUN_TEST(test_unknown_option);
+    RUN_TEST(test_stats_zeroed_without_option);
+    RUN_TEST(test_context_of_other_design);
+    RUN_TEST(test_second_src_counts_once);
+    RUN_TEST(test_nul_in_decoded_name);
     return UNITY_END();
 }

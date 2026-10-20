@@ -109,10 +109,7 @@ odin3_status blif_locs_find_net(blif_locs *locs, const blif_scope *scope, uint32
     if (st == ODIN3_OK) {
         st = odin3_net_rename(module, net, moved);
     }
-    if (st == ODIN3_OK) {
-        (void)odin3_u64map_remove(locs->decoded, key_of(mod_key, net.v));
-    }
-    return st;
+    return st; /* the net stays decoded: a raw name equal to its new name moves it again */
 }
 
 static odin3_status put(odin3_u64map *map, uint64_t key, uint64_t value) {
@@ -136,7 +133,8 @@ static odin3_status name_record(blif_locs *locs, const odin3_hdl_name *nm, odin3
     return st;
 }
 
-/* Registers a decoded net: its original text finds it, and it still holds its SHORT name. */
+/* Registers a decoded net: its original text finds it, and a raw name equal to its current name
+ * moves it aside. */
 static odin3_status note_decoded(blif_locs *locs, const blif_scope *scope, odin3_bytes name,
                                  odin3_net_id net) {
     uint32_t raw = 0;
@@ -151,6 +149,16 @@ static odin3_status note_decoded(blif_locs *locs, const blif_scope *scope, odin3
     return st;
 }
 
+/* A decoded name with a NUL byte is no name: the raw name stays, with a located warning. */
+static void warn_nul(const blif_locs *locs, odin3_bytes name, odin3_prov_id imported) {
+    const odin3_prov_record *rec = odin3_prov_get(locs->ctx->design, imported);
+    odin3_log(ODIN3_LOG_WARN,
+              "%s:%u: net name '%.*s' decodes to a name holding a NUL byte; kept "
+              "as written",
+              locs->path, rec != NULL && rec->n_locs > 0 ? rec->locs[0].line : 0U, (int)name.len,
+              (const char *)name.ptr);
+}
+
 odin3_status blif_locs_create_net(blif_locs *locs, const blif_scope *scope, odin3_bytes name,
                                   odin3_prov_id imported, odin3_net_id *out) {
     odin3_hdl_name decoded;
@@ -158,6 +166,10 @@ odin3_status blif_locs_create_net(blif_locs *locs, const blif_scope *scope, odin
     odin3_status st = odin3_hdl_name_vtr_decode(name, &locs->buf, &decoded, &matched);
     uint32_t str = 0;
     odin3_prov_id prov = imported;
+    if (st == ODIN3_OK && matched && memchr(locs->buf.data, 0, locs->buf.len) != NULL) {
+        matched = false;
+        warn_nul(locs, name, imported);
+    }
     if (st == ODIN3_OK && matched) {
         st = name_record(locs, &decoded, imported, &prov);
         st = st == ODIN3_OK ? free_name(locs, scope->module, decoded.short_name, &str) : st;
@@ -266,15 +278,17 @@ odin3_status blif_locs_cell_src(blif_locs *locs, odin3_module *module, odin3_nod
         return ODIN3_OK;
     }
     uint32_t kept = count < ODIN3_HDL_LOC_MAX ? count : ODIN3_HDL_LOC_MAX;
-    odin3_hdl_restore_req req = {base_of(locs->ctx->design, odin3_node_prov(module, *node)), found,
-                                 kept, 0};
+    odin3_prov_id own = odin3_node_prov(module, *node);
+    odin3_prov_id base = base_of(locs->ctx->design, own);
+    bool again = base.v != own.v; /* a second `.attr src` replaces the first */
+    odin3_hdl_restore_req req = {base, found, kept, 0};
     odin3_hdl_restored made = {0};
     odin3_status st = odin3_hdl_restore(locs->ctx, &req, &made);
     st = st == ODIN3_OK ? reprov_node(locs, module, node, made.prov) : st;
     if (st == ODIN3_OK) {
         *restored = true;
-        locs->stats->cells++;
-        locs->stats->capped += count > ODIN3_HDL_LOC_MAX ? 1U : 0U;
+        locs->stats->cells += again ? 0U : 1U;
+        locs->stats->capped += count > ODIN3_HDL_LOC_MAX && !again ? 1U : 0U;
     }
     return st;
 }
