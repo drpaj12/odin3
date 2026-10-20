@@ -574,9 +574,10 @@ static odin3_status inst_create(inst_run *run, odin3_node_id *node) {
         vecs[i] = (odin3_netvec){run->ports[i].nets, run->ports[i].width};
     }
     odin3_elab2_prov_req preq = {run->instance, {0}, e2->scope.v};
+    odin3_elab2_nl_extra nl = {run->instantiation, NULL};
     odin3_node_spec spec = {.type = run->tg.type, .params = run->params, .n_params = def->n_params};
     odin3_status st = inst_node_name(run, &spec.name);
-    st = st != ODIN3_OK ? st : odin3_elab2_prov(e2, &preq, &spec.prov);
+    st = st != ODIN3_OK ? st : odin3_elab2_prov_nl(e2, &preq, &nl, &spec.prov);
     st = st != ODIN3_OK ? st : odin3_node_create_connected(e2->mod, &spec, vecs, node);
     if (st == ODIN3_ERR_INVALID_ARG && run->icell) {
         /* the type's verify hook refused the parameter set (spec V-6): located, and counted */

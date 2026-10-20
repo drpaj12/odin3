@@ -257,7 +257,27 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
 
 ## Deviations
 
-(empty; each lane appends what it changed from this plan and why)
+(each lane appends what it changed from this plan and why)
+
+- 6.2 (write_dot): `odin3_dot_opts` gained `color_attr` and `locs`; every positional initializer of the
+  struct (writer, pass, writer-check tool, existing dot tests) now lists the two new fields because
+  `-Wmissing-field-initializers` is an error. No behaviour change there.
+- 6.2: the legend is emitted after the edges, just before the closing brace (last in the file and after
+  every module cluster). The `(none)` legend entry is omitted when no drawn node is in that class.
+- 6.2: `+N` counts distinct locations of `odin3_hdl_locs`, which caps at 8 (X-3), so N is at most 7.
+- 6.2: bits text is MSB first (`0`, `1`, `x`, `z`); COVER and PROC values give the class texts
+  `(cover)` and `(proc)`.
+- 6.2: the `nop` check uses `/usr/bin/nop -o /dev/null` (Graphviz 2.43 ran here); the skip line
+  `SKIP graphviz_nop: dot not installed` is printed when `nop` is absent. The structural quote/brace check
+  always runs. C-8 (b) "Verilog micro" is covered by a unit test with SOURCE provenance and by
+  `cli_writers` (read_verilog, then `--locs`); a BLIF-read design is checked byte-identical with and
+  without `--locs`.
+- 6.2 fix round (agent default): the colour legend names at most 32 classes (`LEGEND_MAX`); the
+  rest fold into one `(N more values)` entry with the neutral fill `#cfcfcf`. Node fills are
+  unchanged. Dot text keeps valid UTF-8 and replaces DEL and invalid bytes with `?`. Class texts are
+  interned once through a hash index (O(n)) and sorted (O(k log k)). `--color-by`, `--focus` and
+  `--max-nodes` reject a value that starts with `--`. `test_graphviz_nop` finds `nop` on PATH and
+  passes when it ran.
 
 6.4 levelize (lane p6-levelize):
 
