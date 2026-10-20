@@ -170,6 +170,30 @@ static void test_malformed_stays_attribute(void) {
     rj_log_has("first: 'no location'");
 }
 
+/* A module whose attribute src is the JSON string text (already escaped for JSON). */
+static void read_module_src(const char *text) {
+    char json[512];
+    (void)snprintf(json, sizeof json,
+                   "{\"modules\": {\"top\": {\"attributes\": {\"src\": \"%s\"}}}}", text);
+    rj_expect_ok(json);
+}
+
+/* L-6: the text in the WARNING is untrusted: bytes outside 0x20..0x7e print as \xNN. */
+static void test_bad_text_escaped(void) {
+    read_module_src("caf\\u00e9\\u0001\\u007f!");
+    rj_log_has("first: 'caf\\xc3\\xa9\\x01\\x7f!'");
+}
+
+/* L-6: the cut at 60 bytes does not fall inside a UTF-8 sequence. */
+static void test_bad_text_cut_on_boundary(void) {
+    char text[128];
+    (void)snprintf(text, sizeof text, "%059d\\u00e9tail", 0);
+    read_module_src(text);
+    (void)snprintf(text, sizeof text, "first: '%059d'", 0);
+    rj_log_has(text);
+    TEST_ASSERT_NULL(strstr(rj_log, "\\xc3"));
+}
+
 /* L-8: --keep-src-attr keeps the string and makes no record. */
 static void test_keep_src_attr(void) {
     odin3_json_opts opts = {.keep_src_attr = true};
@@ -263,6 +287,8 @@ int main(void) {
     RUN_TEST(test_one_operation);
     RUN_TEST(test_multi_location);
     RUN_TEST(test_malformed_stays_attribute);
+    RUN_TEST(test_bad_text_escaped);
+    RUN_TEST(test_bad_text_cut_on_boundary);
     RUN_TEST(test_keep_src_attr);
     RUN_TEST(test_write_read_write);
     RUN_TEST(test_cell_count);

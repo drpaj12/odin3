@@ -19,7 +19,12 @@
 #include <stdint.h>
 
 /* E-3: modules, netnames and cells are each at most 2^24 (the IR's IDs are 32 bits). */
-enum { JR_MAX_OBJECTS = 1 << 24, JR_NAME_BUF = 160 };
+enum {
+    JR_MAX_OBJECTS = 1 << 24,
+    JR_NAME_BUF = 160,
+    JR_BAD_SHOW = 60,
+    JR_BAD_BUF = (JR_BAD_SHOW * 4) + 1
+};
 
 /* The kinds of a bit of a connection (M-3). Constants 0, 1, x, z are numbered as odin3_bit. */
 typedef enum jr_bit_kind { JR_BIT_NET = 4 } jr_bit_kind;
@@ -102,7 +107,7 @@ typedef struct jr {
     uint32_t n_bad_src;             /* `src` texts that are no location list (L-6) */
     uint32_t n_capped_src;          /* restored texts of over 8 locations (D-7) */
     odin3_json_loc bad_src_pos;     /* where the first bad one is */
-    char bad_src_text[JR_NAME_BUF]; /* its text, cut */
+    char bad_src_text[JR_BAD_BUF];  /* its text, cut and escaped */
     bool op_begun;                  /* the restore operation of this read has begun (D-1) */
     char first_unknown[JR_NAME_BUF];
     bool oom_logged;

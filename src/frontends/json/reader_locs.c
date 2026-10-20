@@ -9,8 +9,6 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { BAD_SHOW = 60 };
-
 /* The `src` member of an attributes object when it is a string. */
 static const odin3_json_node *src_member(const odin3_json_node *attrs) {
     if (jr_kind(attrs) != ODIN3_JSON_OBJECT) {
@@ -33,12 +31,30 @@ bool jr_src_restorable(const jr *rd, const odin3_json_node *attrs) {
     return jr_src_member_restorable(rd, src_member(attrs));
 }
 
+/* The shown prefix of an untrusted text: at most JR_BAD_SHOW bytes, never ending inside a UTF-8
+ * sequence; every byte outside 0x20..0x7e is written as \xNN. */
+static void escape_text(const char *text, size_t len, char *out) {
+    size_t shown = len < JR_BAD_SHOW ? len : (size_t)JR_BAD_SHOW;
+    while (shown < len && shown > 0 && ((unsigned char)text[shown] & 0xC0U) == 0x80U) {
+        shown--; /* the cut would split a sequence: stop before it */
+    }
+    size_t at = 0;
+    for (size_t i = 0; i < shown; i++) {
+        unsigned char byte = (unsigned char)text[i];
+        if (byte >= 0x20U && byte <= 0x7eU) {
+            out[at++] = (char)byte;
+        } else {
+            at += (size_t)snprintf(out + at, 5, "\\x%02x", (unsigned)byte);
+        }
+    }
+    out[at] = '\0';
+}
+
 /* L-6: counts a text that is no location list; the first one is kept for the report. */
 static void note_bad(jr *rd, const odin3_json_node *src, const char *text, size_t len) {
     if (rd->n_bad_src == 0) {
         rd->bad_src_pos = odin3_json_key_pos(src);
-        (void)snprintf(rd->bad_src_text, sizeof rd->bad_src_text, "%.*s", BAD_SHOW, text);
-        (void)len;
+        escape_text(text, len, rd->bad_src_text);
     }
     rd->n_bad_src++;
 }
