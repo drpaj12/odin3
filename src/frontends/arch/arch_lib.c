@@ -151,8 +151,8 @@ static odin3_status add_generic(const arch_rd *rd, const odin3_arch_model *model
             odin3_log(ODIN3_LOG_ERROR,
                       "%s:%u: model '%s' port '%s' is too wide for a library cell (a port is at "
                       "most %d bits, a cell %d bits in all)",
-                      rd->file, port->line, model->name, port->name, (int)ODIN3_READER_MAX_WIDTH,
-                      (int)ODIN3_READER_MAX_TOTAL_WIDTH);
+                      rd->file, port->line, model->name, port->name, ODIN3_READER_MAX_WIDTH,
+                      ODIN3_READER_MAX_TOTAL_WIDTH);
             return ODIN3_ERR_PARSE;
         }
         st = odin3_strbuf_appendf(out, "  %s %s %u%s\n", port->is_out ? "out" : "in", port->name,
