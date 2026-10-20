@@ -27,7 +27,14 @@ uint32_t odin3_soft_blocks_missing(const odin3_design *design) {
 
 /* Appends candidate to tried (", " separated) and true when it is an existing directory, copied
  * to dir. */
-static bool try_dir(const char *candidate, char *dir, char *tried) {
+typedef struct soft_search {
+    char *dir;
+    char *tried;
+} soft_search;
+
+static bool try_dir(const char *candidate, const soft_search *out) {
+    char *dir = out->dir;
+    char *tried = out->tried;
     struct stat info;
     size_t used = strlen(tried);
     (void)snprintf(tried + used, SOFT_DIR_CAP - used, "%s'%s'", used > 0 ? ", " : "", candidate);
@@ -41,8 +48,7 @@ static bool try_dir(const char *candidate, char *dir, char *tried) {
 /* The directory of the running executable, "" when it is not known. */
 static void exe_dir(char *out) {
     ssize_t len = readlink("/proc/self/exe", out, SOFT_DIR_CAP - 1);
-    out[0] = len > 0 ? out[0] : '\0';
-    out[len > 0 ? len : 0] = '\0';
+    out[len > 0 ? (size_t)len : 0] = '\0';
     char *slash = strrchr(out, '/');
     if (slash != NULL) {
         *slash = '\0';
@@ -54,7 +60,7 @@ bool odin3_soft_blocks_dir(char *dir, char *tried) {
     tried[0] = '\0';
     const char *env = getenv("ODIN3_SOFT_PRIMITIVES_DIR");
     if (env != NULL && env[0] != '\0') {
-        return try_dir(env, dir, tried); /* given: no fallback */
+        return try_dir(env, &(soft_search){dir, tried}); /* given: no fallback */
     }
     char base[SOFT_DIR_CAP];
     char path[SOFT_DIR_CAP];
@@ -63,12 +69,12 @@ bool odin3_soft_blocks_dir(char *dir, char *tried) {
                                         "%s/../../lib/soft_primitives"};
     for (size_t i = 0; base[0] != '\0' && i < sizeof k_rel / sizeof k_rel[0]; i++) {
         (void)snprintf(path, sizeof path, k_rel[i], base);
-        if (try_dir(path, dir, tried)) {
+        if (try_dir(path, &(soft_search){dir, tried})) {
             return true;
         }
     }
 #ifdef ODIN3_SOFT_PRIMITIVES_DIR
-    return try_dir(ODIN3_SOFT_PRIMITIVES_DIR, dir, tried);
+    return try_dir(ODIN3_SOFT_PRIMITIVES_DIR, &(soft_search){dir, tried});
 #else
     return false;
 #endif

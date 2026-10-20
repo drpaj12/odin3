@@ -70,6 +70,14 @@ static block block_of(const pb_result *res, const char *type, uint32_t index) {
                    odin3_node_param(res->module, node, 1)->i};
 }
 
+static bool has_mode(const odin3_arch_ram_mode *modes, uint32_t count, block blk) {
+    bool found = false;
+    for (uint32_t idx = 0; idx < count && idx < 16; idx++) {
+        found = found || (modes[idx].addr == blk.addr && modes[idx].data == blk.data);
+    }
+    return found;
+}
+
 /* M3: every RAM block that was emitted is a real mode of the arch (address pins, data pins). */
 static void expect_modes(const pb_result *res) {
     static const char *const k_types[2] = {"single_port_ram", "dual_port_ram"};
@@ -78,12 +86,8 @@ static void expect_modes(const pb_result *res) {
         odin3_arch_ram_mode modes[16];
         uint32_t count = odin3_arch_modes_of(arch, k_types[kind], modes, 16);
         for (uint32_t i = 0; i < hm_count(res->module, k_types[kind]); i++) {
-            block blk = block_of(res, k_types[kind], i);
-            bool found = false;
-            for (uint32_t m = 0; m < count && m < 16; m++) {
-                found = found || (modes[m].addr == blk.addr && modes[m].data == blk.data);
-            }
-            TEST_ASSERT_TRUE_MESSAGE(found, "a block that is no mode of the arch");
+            TEST_ASSERT_TRUE_MESSAGE(has_mode(modes, count, block_of(res, k_types[kind], i)),
+                                     "a block that is no mode of the arch");
         }
     }
 }

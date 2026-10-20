@@ -96,6 +96,7 @@ typedef struct ram_choices {
 typedef struct ram_chunk {
     uint32_t first;
     uint32_t n;
+    odin3_net_id pad; /* the pad net, set when the block is wider than n (make_slice) */
 } ram_chunk;
 
 /* A place in the split: read/write port (0, or 0 and 1 for dual port), data bit, level and leaf

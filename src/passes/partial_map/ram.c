@@ -144,6 +144,15 @@ static odin3_status setup_addr(ram_ctx *rc, uint32_t rwp) {
     return st;
 }
 
+/* The data pins of read/write port rwp of the RAM of chunk ck: its bits, then the pad up to the
+ * block's width (a real arch mode; R-4). */
+static void fill_data(const ram_ctx *rc, uint32_t rwp, ram_chunk ck, odin3_net_id *data) {
+    const odin3_net_id pad = ck.pad;
+    for (uint32_t j = 0; j < rc->shape.width; j++) {
+        data[j] = j < ck.n ? ram_src_net(rc, (ram_pin){rc->lay->data[rwp], ck.first + j}) : pad;
+    }
+}
+
 /* R-3: the RAM of the chunk `ck` of data bits in leaf `leaf`; its n outputs are appended to the
  * chunk list of each read port. */
 static odin3_status make_slice(ram_ctx *rc, uint32_t leaf, ram_chunk ck) {
@@ -153,8 +162,7 @@ static odin3_status make_slice(ram_ctx *rc, uint32_t leaf, ram_chunk ck) {
     odin3_net_id fresh[RAM_MAX_PORTS][PM_RAM_WIDTH_CAP];
     odin3_netvec ports[RAM_MAX_PINS];
     memset(fresh, 0, sizeof fresh); /* a port nobody reads keeps its output open */
-    odin3_net_id pad = {0};
-    odin3_status st = rc->shape.width > ck.n ? hm_const(rc->hc, HM_PAD, &pad) : ODIN3_OK;
+    odin3_status st = rc->shape.width > ck.n ? hm_const(rc->hc, HM_PAD, &ck.pad) : ODIN3_OK;
     for (uint32_t rwp = 0; st == ODIN3_OK && rwp < lay->n_ports; rwp++) {
         st = rc->read[rwp] ? hm_fresh_nets(rc->hc, ck.n, fresh[rwp]) : st;
     }
@@ -163,10 +171,7 @@ static odin3_status make_slice(ram_ctx *rc, uint32_t leaf, ram_chunk ck) {
     }
     ports[lay->clk] = (odin3_netvec){&clk, 1};
     for (uint32_t rwp = 0; rwp < lay->n_ports; rwp++) {
-        for (uint32_t j = 0; j < rc->shape.width; j++) {
-            data[rwp][j] =
-                j < ck.n ? ram_src_net(rc, (ram_pin){lay->data[rwp], ck.first + j}) : pad;
-        }
+        fill_data(rc, rwp, ck, data[rwp]);
         ports[lay->data[rwp]] = (odin3_netvec){data[rwp], rc->shape.width};
         ports[lay->addr[rwp]] = (odin3_netvec){rc->port[rwp].addr, rc->shape.addr};
         ports[lay->we[rwp]] = (odin3_netvec){odin3_vec_cat(&rc->port[rwp].we, leaf), 1};
@@ -237,7 +242,8 @@ static odin3_status build_body(ram_ctx *rc) {
     }
     for (uint32_t first = 0; st == ODIN3_OK && first < rc->data_bits; first += rc->shape.width) {
         uint32_t left = rc->data_bits - first;
-        st = build_chunk(rc, (ram_chunk){first, left < rc->shape.width ? left : rc->shape.width});
+        st = build_chunk(rc,
+                         (ram_chunk){first, left < rc->shape.width ? left : rc->shape.width, {0}});
     }
     return st;
 }
