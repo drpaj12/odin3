@@ -416,6 +416,90 @@ static void test_dump_locs_arguments(void) {
     TEST_ASSERT_TRUE(errors_seen > 0);
 }
 
+/* A node of a port-less local type (name is the cell type name) with the given prov. */
+static void add_typed_node(odin3_module *mod, const char *type_name, const char *node_name,
+                           odin3_prov_id prov) {
+    odin3_celltype_def def = {type_name, ODIN3_GRAN_HARD, 0,    NULL, 0,
+                              NULL,      0,               NULL, NULL, NULL,
+                              NULL};
+    odin3_celltype_id type = {0};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &type));
+    odin3_node_spec spec = {type, intern(node_name), prov, NULL, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(mod, &spec, &node));
+}
+
+/* A module "t" with located nodes of several types; the dump_locs output with the given args. */
+static char *dump_typed_design(const char *args_prefix) {
+    odin3_hdl_loc loc = hdl_loc("a.v", 7);
+    odin3_prov_begin_op(&run);
+    odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), &loc, 1, 0});
+    odin3_module_id mid = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("t"), got.prov, &mid));
+    odin3_module *mod = odin3_module_get(design, mid);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(mod, intern("n"), got.prov, &(odin3_net_id){0}));
+    add_typed_node(mod, "$lut", "u1", got.prov);
+    add_typed_node(mod, "$_DFF_P_", "u2", got.prov);
+    add_typed_node(mod, "lpm_add_sub", "u3", netlist_prov());
+    add_typed_node(mod, "a:b|c\\d", "u4", got.prov);
+    char dir[] = "/tmp/odin3_dumplocs_XXXXXX";
+    char path[PATH_MAX_LEN];
+    char args[PATH_MAX_LEN + 16];
+    TEST_ASSERT_NOT_NULL(mkdtemp(dir));
+    (void)snprintf(path, sizeof path, "%s/locs.txt", dir);
+    (void)snprintf(args, sizeof args, "%s%s", args_prefix, path);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "dump_locs", odin3_bytes_cstr(args)));
+    char *text = read_whole(path);
+    (void)remove(path);
+    (void)rmdir(dir);
+    return text;
+}
+
+/* Without --types the kind field is the bare `node` (byte-identical output). */
+static void test_dump_locs_default_untyped(void) {
+    char *text = dump_typed_design("");
+    expect_line(text, "t|node|u1|a.v:7.1-7.9\n");
+    expect_line(text, "t|node|u3|\n");
+    TEST_ASSERT_NULL(strstr(text, "node:"));
+    TEST_ASSERT_NULL(strstr(text, "$lut"));
+    odin3_util_free(text);
+}
+
+/* With --types a node line is `module|node:TYPE|name|SRC`, TYPE escaped; other lines unchanged. */
+static void test_dump_locs_types(void) {
+    char *text = dump_typed_design("--types ");
+    expect_line(text, "t|node:$lut|u1|a.v:7.1-7.9\n");
+    expect_line(text, "t|node:$_DFF_P_|u2|a.v:7.1-7.9\n");
+    expect_line(text, "t|node:lpm_add_sub|u3|\n");
+    expect_line(text, "t|node:a:b\\|c\\\\d|u4|a.v:7.1-7.9\n");
+    expect_line(text, "t|net|n|a.v:7.1-7.9\n");
+    expect_line(text, "t|module|t|a.v:7.1-7.9\n");
+    odin3_util_free(text);
+}
+
+/* A reader tells the formats apart by the kind field alone; the first `:` splits kind and type. */
+static void test_dump_locs_kind_field_tells_formats(void) {
+    char *plain = dump_typed_design("");
+    TEST_ASSERT_NOT_NULL(strstr(plain, "|node|"));
+    TEST_ASSERT_NULL(strstr(plain, "|node:"));
+    odin3_util_free(plain);
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("read_x"), &run));
+    char *typed = dump_typed_design("--types ");
+    TEST_ASSERT_NULL(strstr(typed, "|node|"));
+    TEST_ASSERT_NOT_NULL(strstr(typed, "|node:a:b"));
+    odin3_util_free(typed);
+}
+
+static void test_dump_locs_unknown_option(void) {
+    errors_seen = 0;
+    odin3_log_set_sink(error_sink, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_pass_run(design, "dump_locs", odin3_bytes_cstr("--bogus x")));
+    TEST_ASSERT_TRUE(errors_seen > 0);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_record_shape);
@@ -432,5 +516,9 @@ int main(void) {
     RUN_TEST(test_dump_locs_lines);
     RUN_TEST(test_dump_locs_escapes_names);
     RUN_TEST(test_dump_locs_arguments);
+    RUN_TEST(test_dump_locs_default_untyped);
+    RUN_TEST(test_dump_locs_types);
+    RUN_TEST(test_dump_locs_kind_field_tells_formats);
+    RUN_TEST(test_dump_locs_unknown_option);
     return UNITY_END();
 }
