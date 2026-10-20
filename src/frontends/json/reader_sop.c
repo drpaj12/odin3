@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { SOP_PARAM_WIDTH = 0, SOP_PARAM_COVER = 1, TABLE_BITS_PER_LITERAL = 2 };
+enum { TABLE_BITS_PER_LITERAL = 2 };
 
 /* The parameter of the cell named key, as an INT; absent is an error. */
 static odin3_status int_member(jr *rd, const odin3_json_node *params, const jr_where *where,
@@ -19,7 +19,7 @@ static odin3_status int_member(jr *rd, const odin3_json_node *params, const jr_w
     if (node == NULL) {
         return jr_error(rd, params, &here, "a $sop has no %s", key);
     }
-    odin3_value val;
+    odin3_value val = {0};
     odin3_status st = jr_param_value(rd, ODIN3_VAL_INT, node, &here, &val);
     *num = val.i;
     return st;
@@ -61,10 +61,43 @@ static odin3_status table_cover(jr *rd, const odin3_json_node *table, uint64_t w
     return ODIN3_OK;
 }
 
+int jr_find_param(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        if (strcmp(def->params[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* The indices of WIDTH and COVER in the registry's `$sop`, found by name. */
+typedef struct sop_slots {
+    int width;
+    int cover;
+} sop_slots;
+
+static odin3_status sop_slots_of(const jr *rd, const odin3_celltype_def *sop, sop_slots *slots) {
+    slots->width = jr_find_param(sop, "WIDTH");
+    slots->cover = jr_find_param(sop, "COVER");
+    if (slots->width < 0 || slots->cover < 0) {
+        return jr_error(rd, NULL, NULL, "internal error: $sop has no WIDTH or COVER parameter");
+    }
+    return ODIN3_OK;
+}
+
 odin3_status jr_sop_params(jr *rd, const odin3_json_node *params, const jr_where *where) {
+    odin3_celltype_id sop_id = {0};
+    sop_slots slots = {0, 0};
+    odin3_status st = ODIN3_OK;
+    if (!jr_lookup_type(rd, "$sop", &sop_id)) {
+        return jr_error(rd, params, where, "internal error: no $sop cell type");
+    }
+    st = sop_slots_of(rd, odin3_celltype_get(rd->design, sop_id), &slots);
     int64_t width = 0;
     int64_t depth = 0;
-    odin3_status st = int_member(rd, params, where, "WIDTH", &width);
+    if (st == ODIN3_OK) {
+        st = int_member(rd, params, where, "WIDTH", &width);
+    }
     if (st == ODIN3_OK) {
         st = int_member(rd, params, where, "DEPTH", &depth);
     }
@@ -77,36 +110,36 @@ odin3_status jr_sop_params(jr *rd, const odin3_json_node *params, const jr_where
         return jr_error(rd, params, where, "a $sop has no TABLE");
     }
     if (st == ODIN3_OK) {
-        st = table_cover(rd, table, (uint64_t)width, (uint64_t)depth, &vals[SOP_PARAM_COVER]);
+        st = table_cover(rd, table, (uint64_t)width, (uint64_t)depth, &vals[slots.cover]);
     }
     if (st == ODIN3_OK) {
-        vals[SOP_PARAM_WIDTH] = odin3_value_int(width);
+        vals[slots.width] = odin3_value_int(width);
     }
     return st;
 }
 
-bool jr_lut0_params(jr *rd, const odin3_celltype_def *lut) {
+odin3_status jr_lut0_params(jr *rd, const jr_lut_sop *defs, bool *converted) {
     odin3_value *vals = rd->cur.params.data;
-    int width_at = -1;
-    int table_at = -1;
-    for (uint32_t i = 0; i < lut->n_params; i++) {
-        width_at = strcmp(lut->params[i].name, "WIDTH") == 0 ? (int)i : width_at;
-        table_at = strcmp(lut->params[i].name, "LUT") == 0 ? (int)i : table_at;
-    }
-    if (width_at < 0 || table_at < 0 || vals[width_at].kind != ODIN3_VAL_INT ||
+    const int width_at = jr_find_param(defs->lut, "WIDTH");
+    const int table_at = jr_find_param(defs->lut, "LUT");
+    sop_slots slots = {0, 0};
+    *converted = false;
+    odin3_status st = sop_slots_of(rd, defs->sop, &slots);
+    if (st != ODIN3_OK || width_at < 0 || table_at < 0 || vals[width_at].kind != ODIN3_VAL_INT ||
         vals[width_at].i != 0 || vals[table_at].kind != ODIN3_VAL_BITS || vals[table_at].len != 1) {
-        return false;
+        return st;
     }
     bool one = vals[table_at].bits[0] == ODIN3_BIT_1;
     uint8_t *row = one ? jr_alloc(rd, 1) : NULL;
     if (one && row == NULL) {
-        return false;
+        return jr_fail(rd, ODIN3_ERR_NO_MEMORY);
     }
     if (one) {
         row[0] = '1';
     }
-    vals[SOP_PARAM_WIDTH] = odin3_value_int(0);
-    vals[SOP_PARAM_COVER] = (odin3_value){
+    vals[slots.width] = odin3_value_int(0);
+    vals[slots.cover] = (odin3_value){
         .kind = ODIN3_VAL_COVER, .bits = row, .len = one ? 1U : 0U, .cover_inputs = 0};
-    return true;
+    *converted = true;
+    return ODIN3_OK;
 }

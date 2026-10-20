@@ -300,10 +300,11 @@ static odin3_status scan_init(jr *rd, const odin3_json_node *name) {
     size_t k = 0; /* bit k of the vector is the char len-1-k of the string */
     for (const odin3_json_node *elem = jr_first(bits); st == ODIN3_OK && elem != NULL;
          elem = odin3_json_next(elem), k++) {
-        uint64_t label = (uint64_t)jr_int(elem);
+        uint64_t label = 0;
         uint64_t have = 0;
-        bool is_q = jr_kind(elem) == ODIN3_JSON_INT && k < len &&
-                    odin3_u64map_get(rd->cur.qbits, label, &have) &&
+        bool is_int = jr_kind(elem) == ODIN3_JSON_INT;
+        label = is_int ? (uint64_t)jr_int(elem) : 0;
+        bool is_q = is_int && k < len && odin3_u64map_get(rd->cur.qbits, label, &have) &&
                     !odin3_u64map_get(rd->cur.qinit, label, &have);
         if (is_q) {
             st = jr_fail(rd, odin3_u64map_put(rd->cur.qinit,

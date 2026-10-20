@@ -120,13 +120,17 @@ odin3_status jr_set_attr_member(jr *rd, odin3_module *module, odin3_objref obj,
                                 const odin3_json_node *member, const jr_where *where) {
     const char *key = odin3_json_key(member);
     char path[JR_NAME_BUF];
-    (void)snprintf(path, sizeof path, "attributes.%s", key);
+    odin3_status st =
+        jr_join(rd, &(jr_join_args){member, where, "attributes.", key}, path, sizeof path);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     jr_where here = {where->section, where->key, path};
     if (key[0] == '\0') {
         return jr_error(rd, member, &here, "an attribute has an empty name");
     }
-    odin3_value val;
-    odin3_status st = jr_attr_value(rd, member, &here, &val);
+    odin3_value val = {0};
+    st = jr_attr_value(rd, member, &here, &val);
     if (st == ODIN3_OK) {
         st = jr_set_attr_named(rd, module, obj, key, &val);
     }

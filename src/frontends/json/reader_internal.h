@@ -146,6 +146,15 @@ odin3_status jr_error(const jr *rd, const odin3_json_node *node, const jr_where 
 odin3_status jr_fail(jr *rd, odin3_status st);
 /* The IMPORTED record at the key position of node (a member), or at its value position. */
 odin3_status jr_prov(jr *rd, const odin3_json_node *node, odin3_prov_id *out);
+/* A name made of a prefix and a member key ("attributes.k", "parameter:K") for a message or an
+ * attribute key: node (its key position) and where locate the error when it would not fit. */
+typedef struct jr_join_args {
+    const odin3_json_node *node;
+    const jr_where *where;
+    const char *prefix;
+    const char *name;
+} jr_join_args;
+odin3_status jr_join(const jr *rd, const jr_join_args *args, char *buf, size_t size);
 /* Interns text in the design strtab. */
 odin3_status jr_intern(jr *rd, const char *text, uint32_t *out);
 const char *jr_str(const jr *rd, uint32_t str);
@@ -258,6 +267,12 @@ void jr_free_implicit(jr *rd);
 odin3_status jr_sop_params(jr *rd, const odin3_json_node *params, const jr_where *where);
 /* A `$lut` with WIDTH 0 (the writer's constant cover) as the `$sop` it was: true and the
  * parameters of that `$sop` in rd->cur.params when params are those of such a `$lut`. */
-bool jr_lut0_params(jr *rd, const odin3_celltype_def *lut);
+typedef struct jr_lut_sop {
+    const odin3_celltype_def *lut;
+    const odin3_celltype_def *sop;
+} jr_lut_sop;
+odin3_status jr_lut0_params(jr *rd, const jr_lut_sop *defs, bool *converted);
+/* The index of the parameter called name in def, -1 when it has none. */
+int jr_find_param(const odin3_celltype_def *def, const char *name);
 
 #endif
