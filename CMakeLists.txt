@@ -844,6 +844,10 @@ if(BUILD_TESTING)
     target_sources(test_fsm_map PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_fsm_map PRIVATE
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    odin3_add_unit_test(test_fsm_driver)
+    target_sources(test_fsm_driver PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_fsm_driver PRIVATE
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     odin3_add_unit_test(test_fsm_ceval)
     target_sources(test_fsm_ceval PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_fsm_ceval PRIVATE
