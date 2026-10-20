@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import tempfile
 import unittest
-from pathlib import Path
 
 import gen_cells as gc
 
@@ -69,7 +67,7 @@ class GridTest(unittest.TestCase):
         self.assertIn("input [1:0] ra", by_stem["mem_w4_d8_a2_off1"].text)
 
     def test_writing_twice_gives_identical_files(self) -> None:
-        out = Path(tempfile.mkdtemp(prefix="gen_cells_test_"))
+        out = helpers.scratch(self, "gen_cells_test_")
         for _ in range(2):
             code, _, _ = helpers.run_main(gc.main, ["--out", str(out)])
             self.assertEqual(code, 0)

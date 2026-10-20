@@ -29,10 +29,11 @@ G = Path("/g/k6/vtr/sha/sha.parmys.blif")
 R = qor_legs.REPO_ROOT
 SHA_V = "/v/vtr_flow/benchmarks/verilog/sha.v"
 O_SCRIPT = (
-    f"read_techlib {R}/lib/vtr.o3lib; read_verilog --nolatches --vtr-compat {SHA_V}; proc; opt; "
-    "flatten; wreduce; hardmap; lower; abc --lut 6; write_blif --vtr --lut-k 6 /w/j/sha.blif"
+    f"read_techlib {R}/lib/vtr.o3lib; read_verilog --nolatches --vtr-compat {SHA_V}; "
+    "proc; fsm; opt; flatten; wreduce; hardmap; lower; abc --lut 6; "
+    "write_blif --vtr --lut-k 6 /w/j/sha.blif"
 )
-O_PASSES = ("read_techlib", "read_verilog", "proc", "opt", "flatten", "wreduce", "hardmap",
+O_PASSES = ("read_techlib", "read_verilog", "proc", "fsm", "opt", "flatten", "wreduce", "hardmap",
             "lower", "abc", "write_blif")
 
 
@@ -243,14 +244,17 @@ class SetsTest(unittest.TestCase):
         sizes = [sets.designs[d].golden_bytes for d in sets.order]
         self.assertEqual(sizes, sorted(sizes))
         self.assertEqual(len(set(sizes)), 21)
-        self.assertEqual(len(sets.gate), 19)
+        self.assertEqual(len(sets.gate), 15)
+        self.assertEqual(sets.offload, sets.group_b)
+        self.assertEqual(set(sets.gate) | set(sets.extra) | set(sets.offload), set(sets.order))
         self.assertEqual(sets.extra, ("spree", "arm_core"))
         self.assertEqual(sets.smoke, sets.gate[:5])
         self.assertEqual(sets.group_b, ("LU8PEEng", "bgm", "mcml", "LU32PEEng"))
         self.assertEqual(sets.designs["mcml"].vtr_flow_time_s, 4699.4)
         self.assertEqual(sets.designs["ch_intrinsics"].golden_bytes, 59473)
-        self.assertEqual([sets.designs[d].rank for d in sets.gate], list(range(1, 20)))
+        self.assertEqual([sets.designs[d].rank for d in sets.gate], list(range(1, 16)))
         self.assertIsNone(sets.designs["spree"].rank)
+        self.assertIsNone(sets.designs["mcml"].rank)
         self.assertEqual(sets.order.index("spree"), sets.order.index("mkPktMerge") + 1)
         self.assertEqual(sets.order.index("arm_core"), sets.order.index("stereovision1") + 1)
         self.assertEqual(sets.order[-4:], sets.group_b)

@@ -2,14 +2,13 @@
 
 A fake ``odin3`` shell script stands in for the real one and prints what a case needs; one test
 per exit class (0 ok, 1 fail, 3 crash, 5 cap) and the vacuous-pass guard of the 3B-4 review H3: a
-log without any `lower:` line is a failure, never ok. The work directories are made by
-``tempfile.mkdtemp`` and left in place.
+log without any `lower:` line is a failure, never ok. The work directories are removed
+when each test ends.
 """
 
 from __future__ import annotations
 
 import subprocess
-import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
@@ -39,7 +38,7 @@ def fake_run(argv: Sequence[str], cap: int, **kwargs: Any) -> subprocess.Complet
 
 class RunTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.root = Path(tempfile.mkdtemp(prefix="lower_run_test_"))
+        self.root = helpers.scratch(self, "lower_run_test_")
         (self.root / "m.v").write_text("module m(input a, output y); endmodule\n")
 
     def run_fake(self, body: str) -> tuple[int, str, str]:

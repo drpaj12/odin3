@@ -1,0 +1,67 @@
+# NAME KIND PATH [TOP]   (4.8 plan Task 1; spec section 12). Sorted smallest first.
+ch_intrinsics vtr ch_intrinsics.v
+stereovision3 vtr stereovision3.v
+stereovision1 vtr stereovision1.v
+raygentop vtr raygentop.v
+boundtop vtr boundtop.v
+blob_merge vtr blob_merge.v
+LU8PEEng vtr LU8PEEng.v
+mcml vtr mcml.v
+LU32PEEng vtr LU32PEEng.v
+micro/common/1r2w micro tests/micro/verilog/common/1r2w.v
+micro/common/2r1w micro tests/micro/verilog/common/2r1w.v
+micro/common/bram micro tests/micro/verilog/common/bram.v
+micro/common/dpram micro tests/micro/verilog/common/dpram.v
+micro/common/nrnw micro tests/micro/verilog/common/nrnw.v
+micro/common/spram micro tests/micro/verilog/common/spram.v
+micro/syntax/8_bit_for_pass_through micro tests/micro/verilog/syntax/8_bit_for_pass_through.v
+micro/syntax/8_bit_for_pass_through_off_by_1 micro tests/micro/verilog/syntax/8_bit_for_pass_through_off_by_1.v
+micro/syntax/bm_DL_simple_fsm micro tests/micro/verilog/syntax/bm_DL_simple_fsm.v
+micro/syntax/both_ram micro tests/micro/verilog/syntax/both_ram.v
+micro/syntax/complex_post_for_loop micro tests/micro/verilog/syntax/complex_post_for_loop.v
+micro/syntax/constant_module_inst micro tests/micro/verilog/syntax/constant_module_inst.v
+micro/syntax/for_loop_adv_post micro tests/micro/verilog/syntax/for_loop_adv_post.v
+micro/syntax/for_loop_adv_pre micro tests/micro/verilog/syntax/for_loop_adv_pre.v
+micro/syntax/h7_of_8_bit_for_pass_through micro tests/micro/verilog/syntax/h7_of_8_bit_for_pass_through.v
+micro/syntax/l2_and_h2_of_8_bit_for_pass_through micro tests/micro/verilog/syntax/l2_and_h2_of_8_bit_for_pass_through.v
+micro/syntax/memlooptesting micro tests/micro/verilog/syntax/memlooptesting.v
+micro/syntax/memory_combinational micro tests/micro/verilog/syntax/memory_combinational.v
+micro/syntax/multi_clock_reader_writer micro tests/micro/verilog/syntax/multi_clock_reader_writer.v
+micro/syntax/spram_big micro tests/micro/verilog/syntax/spram_big.v
+micro/full/bm_base_memory micro tests/micro/verilog/full/bm_base_memory.v
+micro/full/bm_sfifo_rtl micro tests/micro/verilog/full/bm_sfifo_rtl.v
+micro/full/matmul micro tests/micro/verilog/full/matmul.v
+micro/full/memory_controller micro tests/micro/verilog/full/memory_controller.v
+micro/full/paj_framebuftop_hierarchy_no_mem_no_combinational micro tests/micro/verilog/full/paj_framebuftop_hierarchy_no_mem_no_combinational.v
+fsm/alias_wire micro tests/fsm/alias_wire.v alias_wire
+fsm/arst_low micro tests/fsm/arst_low.v arst_low
+fsm/counter_not_fsm micro tests/fsm/counter_not_fsm.v counter_not_fsm
+fsm/ctrl_out_case micro tests/fsm/ctrl_out_case.v ctrl_out_case
+fsm/enable_reg micro tests/fsm/enable_reg.v enable_reg
+fsm/enc_auto micro tests/fsm/enc_auto.v enc_auto
+fsm/enc_binary micro tests/fsm/enc_binary.v enc_binary
+fsm/enc_binary_packed micro tests/fsm/enc_binary_packed.v enc_binary_packed
+fsm/enc_none micro tests/fsm/enc_none.v enc_none
+fsm/enc_one_hot micro tests/fsm/enc_one_hot.v enc_one_hot
+fsm/enc_unknown micro tests/fsm/enc_unknown.v enc_unknown
+fsm/enc_user micro tests/fsm/enc_user.v enc_user
+fsm/init_reg micro tests/fsm/init_reg.v init_reg
+fsm/keep_reg micro tests/fsm/keep_reg.v keep_reg
+fsm/mealy_arst micro tests/fsm/mealy_arst.v mealy_arst
+fsm/moore_arst micro tests/fsm/moore_arst.v moore_arst
+fsm/negedge_clk micro tests/fsm/negedge_clk.v negedge_clk
+fsm/no_reset micro tests/fsm/no_reset.v no_reset
+fsm/one_bit micro tests/fsm/one_bit.v one_bit
+fsm/one_bit_attr micro tests/fsm/one_bit_attr.v one_bit_attr
+fsm/port_out micro tests/fsm/port_out.v port_out
+fsm/self_reset micro tests/fsm/self_reset.v self_reset
+fsm/states31 micro tests/fsm/states31.v states31
+fsm/states32 micro tests/fsm/states32.v states32
+fsm/states33 micro tests/fsm/states33.v states33
+fsm/sub_twice micro tests/fsm/sub_twice.v sub_twice
+fsm/sync_rst micro tests/fsm/sync_rst.v sync_rst
+fsm/two_fsm micro tests/fsm/two_fsm.v two_fsm
+fsm/selfloop_state micro tests/fsm/selfloop_state.v selfloop_state
+fsm/x_next micro tests/fsm/x_next.v x_next
+fsm/states32w micro tests/fsm/states32w.v states32w
+fsm/live_old_reg micro tests/fsm/live_old_reg.v live_old_reg

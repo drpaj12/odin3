@@ -135,6 +135,23 @@ add_library(odin3_core OBJECT
     src/passes/opt/dff.c
     src/passes/opt/dff_state.c
     src/passes/opt/dff_dirty.c
+    # 4.8: the fsm pass.
+    src/passes/fsm/fsmdata.c
+    src/passes/fsm/index.c
+    src/passes/fsm/ceval.c
+    src/passes/fsm/common.c
+    src/passes/fsm/sigcache.c
+    src/passes/fsm/detect.c
+    src/passes/fsm/extract.c
+    src/passes/fsm/extract_trans.c
+    src/passes/fsm/info.c
+    src/passes/fsm/opt.c
+    src/passes/fsm/recode.c
+    src/passes/fsm/map.c
+    src/passes/fsm/map_pattern.c
+    src/passes/fsm/unused.c
+    src/passes/fsm/fsm.c
+    src/passes/fsm/register.c
     src/passes/opt/dff_gates.c
     src/passes/opt/dff_rules.c
     src/passes/opt/dff_constbits.c
@@ -841,6 +858,34 @@ if(BUILD_TESTING)
     target_sources(test_opt_muxtree PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_opt_muxtree PRIVATE
         ODIN3_MUXTREE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/muxtree")
+    # 4.8 Task 3: the fsm pass's table and net index.
+    odin3_add_unit_test(test_fsm_data)
+    target_sources(test_fsm_data PRIVATE tests/unit/proc_build.c)
+    odin3_add_unit_test(test_fsm_detect)
+    target_sources(test_fsm_detect PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_fsm_detect PRIVATE
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    odin3_add_unit_test(test_fsm_extract)
+    target_sources(test_fsm_extract PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_fsm_extract PRIVATE
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    odin3_add_unit_test(test_fsm_opt)
+    target_compile_definitions(test_fsm_opt PRIVATE
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    odin3_add_unit_test(test_fsm_recode)
+    target_sources(test_fsm_recode PRIVATE tests/unit/proc_build.c)
+    odin3_add_unit_test(test_fsm_map)
+    target_sources(test_fsm_map PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_fsm_map PRIVATE
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    odin3_add_unit_test(test_fsm_driver)
+    target_sources(test_fsm_driver PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_fsm_driver PRIVATE
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    odin3_add_unit_test(test_fsm_ceval)
+    target_sources(test_fsm_ceval PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_fsm_ceval PRIVATE
+        ODIN3_OPT_DATA="${PROJECT_SOURCE_DIR}/tests/opt")
     # 2F Task 5: folding on 2D's evaluator, replayed against the Yosys 0.55 fold table.
     odin3_add_unit_test(test_opt_fold)
     target_sources(test_opt_fold PRIVATE tests/unit/proc_build.c)
@@ -2329,6 +2374,15 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         if(_fuzz_env)
             set_tests_properties(fuzz_lower_smoke PROPERTIES ENVIRONMENT "${_fuzz_env}")
         endif()
+        # The long run, capped at 1 h (PHASE3 decision 54: shipped out to the bigger machine,
+        # tools/vtr-qor/offload/run-offload; `timeout 90m` is only a backstop).
+        odin3_add_sweep_test(fuzz_lower_long LABEL sweep
+            COMMAND timeout 90m $<TARGET_FILE:fuzz_lower> -max_total_time=3600 -timeout=30
+                    -rss_limit_mb=2048 -max_len=64 -print_funcs=0 -print_final_stats=1
+                    ${_fl_corpus})
+        if(_fuzz_env)
+            set_tests_properties(fuzz_lower_long PROPERTIES ENVIRONMENT "${_fuzz_env}")
+        endif()
 
         # 3D §13.7 (Task 19): 2,000 runs of the splice fuzzer in the smoke (no odin3 binary needed,
         # so the fuzz label is right); the long run is a sweep.
@@ -3001,6 +3055,29 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
                     ${PROJECT_SOURCE_DIR}/tests/opt/rules)
         set_tests_properties(opt_rules_yosys PROPERTIES LABELS opt SKIP_RETURN_CODE 77 TIMEOUT 900)
+        # 4.8 Task 2 (spec T-2): fsm-equiv proves Yosys 0.55's own `fsm` on every FSM micro of
+        # tests/fsm/micros.txt equivalent to the RTL from reset, so each micro is a sound test;
+        # fsm_facts_current: tests/fsm/yosys_facts.json is what this Yosys reports for the corpus.
+        add_test(NAME fsm_equiv_selftest
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/fsm-check/fsm-equiv
+                    --yosys ${ODIN3_YOSYS055} --selftest ${PROJECT_SOURCE_DIR}/tests/fsm/micros.txt)
+        # 4.8 Task 10 (spec T-2, T-3): Odin III's `fsm; opt` is equivalent to its `proc` from reset
+        # (a bounded miter in Yosys, tests/fsm/micros.txt), and fsm-diff finds the same FSMs,
+        # states and encodings as Yosys 0.55 on the same RTLIL for every micro of the corpus.
+        add_test(NAME fsm_equiv_micro
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/fsm-check/fsm-equiv --yosys ${ODIN3_YOSYS055}
+                    --odin $<TARGET_FILE:odin3>
+                    --selftest ${PROJECT_SOURCE_DIR}/tests/fsm/micros.txt)
+        add_test(NAME fsm_diff_micro
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/fsm-check/fsm-diff --yosys ${ODIN3_YOSYS055}
+                    --odin $<TARGET_FILE:odin3> --micros)
+        set_tests_properties(fsm_equiv_micro fsm_diff_micro PROPERTIES LABELS "unit;micro"
+                             TIMEOUT 900)
+        add_test(NAME fsm_facts_current
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/fsm-check/fsm-facts --check
+                    --yosys ${ODIN3_YOSYS055})
+        set_tests_properties(fsm_equiv_selftest fsm_facts_current PROPERTIES LABELS "unit;micro"
+                             TIMEOUT 300)
         # 2E Task 12: test_proc_gen_diff parses the --proc profile with this Yosys; 2D-7b:
         # test_hard_cell_widths runs write_rtlil's black-box stubs through it and the bridge.
         set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT
@@ -3361,7 +3438,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # lower and is never listed; an unproven seed fails (--strict-unproven; 0 measured); the
         # tier-T histogram differences of seeds 1..200 (equivalent, a few gates apart after
         # `opt -fast`) are the list tests/lower/gen_diff_expect.txt, checked by step and gate delta.
-        # lower_gen_vs_yosys_long (5,000 seeds, the heavy-run window, nightly) keeps equivalence
+        # lower_gen_vs_yosys_long (5,000 seeds; shipped out to the bigger machine, PHASE3 decision
+        # 54, tools/vtr-qor/offload/run-offload; not run locally) keeps equivalence
         # (lower-equiv, and lower-diff's equiv step) the pass criterion and only reports the
         # histogram differences (--tier-t report): about 4% of the comb seeds, not listed.
         set(_lower_gen ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-gen-diff
@@ -3589,4 +3667,25 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     else()
         message(STATUS "verilog_gen_vs_yosys not registered: needs yosys")
     endif()
+endif()
+
+# Every test runs with its own TMPDIR, one directory per build tree (outside the repo: a test
+# checks that a temporary directory is not a git checkout). A tool killed by a ctest TIMEOUT
+# (SIGKILL) cannot remove the temporary directory it made; the cleanup fixture below does, after
+# the last test that needs it, pass or fail. Tools remove their own directories on every other exit.
+if(BUILD_TESTING)
+    string(MD5 _bin_hash "${PROJECT_BINARY_DIR}")
+    string(SUBSTRING ${_bin_hash} 0 12 _bin_hash)
+    set(_test_tmp /tmp/odin3-ctest-${_bin_hash})
+    add_test(NAME test_tmp_setup COMMAND ${CMAKE_COMMAND} -E make_directory ${_test_tmp})
+    add_test(NAME test_tmp_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf ${_test_tmp})
+    set_tests_properties(test_tmp_setup PROPERTIES FIXTURES_SETUP test_tmp)
+    set_tests_properties(test_tmp_cleanup PROPERTIES FIXTURES_CLEANUP test_tmp)
+    get_property(_all_tests DIRECTORY PROPERTY TESTS)
+    foreach(_t IN LISTS _all_tests)
+        if(NOT _t MATCHES "^test_tmp_")
+            set_property(TEST ${_t} APPEND PROPERTY ENVIRONMENT "TMPDIR=${_test_tmp}")
+            set_property(TEST ${_t} APPEND PROPERTY FIXTURES_REQUIRED test_tmp)
+        endif()
+    endforeach()
 endif()

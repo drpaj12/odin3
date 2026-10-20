@@ -19,7 +19,10 @@ decisions 2–3 and 16 below):
    runs them plus `arm_core` and `spree` (21). `LU64PEEng` is in neither. The goldens'
    `vtr/` group (PHASE0 §7, there called "VTR-19") is the whole `benchmarks/verilog` directory:
    31 files, including micros such as `single_ff` and the `*_nolatches` variants. Every one of
-   the 19 has a Parmys golden with `status=ok` on both arches.
+   the 19 has a Parmys golden with `status=ok` on both arches. Since 2026-10-20 (decision 54) the
+   local exit gate is the 15 of group A; `mcml`, `LU32PEEng`, `bgm` and `LU8PEEng` are the
+   offload set, "untested here: too big for this machine, shipped out" (`LU64PEEng` likewise
+   if ever run).
 2. **Architecture**: `vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml`, the arch of
    `vtr_reg_qor_chain`. Its `<models>` are `adder`, `multiply`, `single_port_ram` and
    `dual_port_ram`. VTR's own readers give LUT K = 6 (the largest `.names` pb_type) and a RAM
@@ -77,8 +80,8 @@ and harnesses Opus `high`; bulk configs Sonnet. The agent says when to switch.
 - **Lane 1, back end** (needs nothing from Phase 2): 3E → 3D → 3F. Milestone **M1**: the P′ leg
   routes all 19.
 - **Lane 2, front end**: 3A ‖ 3B → (3G) → 3C. Developed now on hand-built IR; it meets real
-  designs once 2D/2E/2F land. Milestones **M2** (the O′ leg routes all 19) and **M3** (the O
-  leg, which is the exit).
+  designs once 2D/2E/2F land. Milestones **M2** (the O′ leg routes all 15 of the local gate) and **M3** (the O
+  leg, which is the exit; the 4 big designs are shipped out, decision 54).
 - **Lane 3**: 3H, starting with the P baseline today.
 
 **3E `write_blif --vtr` rules** (the spec owns the detail): top model first, then a
@@ -125,14 +128,14 @@ which PRs remain.
   - [x] `lower-run` on the 4 big VTR designs (stereovision3, diffeq1, diffeq2, blob_merge): ok (`/tmp/claude-1000/lower-heavy2-1018-0605/run_*.log`, 2026-10-18); `lower-equiv` on the same 4: unproven (exit 4: SAT size limit or the 2G cap), not ok (`equiv_*.log` there)
   - [ ] `lower-run` and `lower-equiv` on the 14 small VTR designs (PHASE2 #30 equivalence): not run as a set; `lower-run` ran ok on ch_intrinsics, mkPktMerge, sha and four hand designs earlier (`/tmp/claude-1000/laneg-heavy-1018-0114/`), `lower-equiv` on those is part of the `lower_equiv_micro` list (sha, mkSMAdapter4B and others unproven)
   - [x] 525-fixture `lower-equiv` sweep (2026-10-18): 518 of 526 compared, 8 unproven, 0 differ. The 8 are exactly the fixtures `lower_cells_equiv` leaves out of CTest for their size or clock (`mul_w12`, `mul_w12_s`, `mul_w16`, `mul_w16_s`, `mod_w12`, `mod_w12_s`, `mul_w8_s_y16`: SAT size, covered by `lower-diff` tier T; `mem_w4_d4_neg`: its inverted clock net is run with `--neg-edge keep` in `lower_cells_equiv_neg_keep`)
-  - [ ] `fuzz_lower` long run (the 60 s smoke ran once in a clang build): pending controller run (2026-10-18)
+  - [ ] `fuzz_lower` long run (the 60 s smoke ran once in a clang build): capped at 1 h (`-max_total_time=3600`, CTest `fuzz_lower_long`, sweep label); shipped out, `tools/vtr-qor/offload/run-offload` (decision 54)
   - [ ] `bench_lower --cells 1000000` (100000 cells ran, 1.36 s): pending controller run (2026-10-18)
-  - [~] 200-seed `verilog-gen --lower` generator (spec 14.5, decision 47): `tools/verilog-gen/lower_profile.py`, `tools/lower-check/lower-gen-diff`, CTest `lower_gen_vs_yosys` (1..200, strict, `--strict-unproven`) and `lower_gen_vs_yosys_long` (1..5000, nightly, `--tier-t report`). Direct run 2026-10-19 on the main release build (work/odin3-m1), command `lower-gen-diff --odin3 .../odin3 --yosys .../yosys --seeds 1..200 --expect tests/lower/gen_diff_expect.txt --min-compared 190 --strict-unproven`, result `200 ok, 0 structural, 0 unproven, 0 empty, 0 differ, 0 BUG; compared 200 of 200` rc 0 (8 of the 200 are the listed tier-T histogram differences; with `--tier-t report` and no list the same run gives `192 ok, 8 structural`; lower-equiv proved 200 of 200). Open: the CTest runs (`lower_gen_vs_yosys`, the 5,000-seed window) are not yet run (controller)
+  - [~] 200-seed `verilog-gen --lower` generator (spec 14.5, decision 47): `tools/verilog-gen/lower_profile.py`, `tools/lower-check/lower-gen-diff`, CTest `lower_gen_vs_yosys` (1..200, strict, `--strict-unproven`) and `lower_gen_vs_yosys_long` (1..5000, nightly, `--tier-t report`). Direct run 2026-10-19 on the main release build (work/odin3-m1), command `lower-gen-diff --odin3 .../odin3 --yosys .../yosys --seeds 1..200 --expect tests/lower/gen_diff_expect.txt --min-compared 190 --strict-unproven`, result `200 ok, 0 structural, 0 unproven, 0 empty, 0 differ, 0 BUG; compared 200 of 200` rc 0 (8 of the 200 are the listed tier-T histogram differences; with `--tier-t report` and no list the same run gives `192 ok, 8 structural`; lower-equiv proved 200 of 200). Open: the CTest run `lower_gen_vs_yosys` (200 seeds, local) is not yet run (controller); the 5,000-seed `lower_gen_vs_yosys_long` is shipped out (decision 54)
 - [ ] 3G `wreduce` (decision 7 = b; a faithful Yosys 0.55 `wreduce`, signed rewrite included)
 - [ ] 3C `hardmap` (Peter reviews; spec first, Peter approves the mapping rules before any code;
   signed adders sign-extend, the declared divergence from Parmys of decision 29); **M2**: O′ leg
-  routes all 19
-- [ ] **M3 / exit**: O leg routes all 19; functional check; byte-identical reruns; QoR table
+  routes all 15 (the local gate; `mcml`, `LU32PEEng`, `bgm`, `LU8PEEng` shipped out, decision 54)
+- [ ] **M3 / exit**: O leg routes all 15 (the 4 shipped-out designs are run by `tools/vtr-qor/offload/run-offload` on a bigger machine, decision 54); functional check; byte-identical reruns (the 15); QoR table
   within decision 3's bands, recorded here verbatim; DESIGN §13 #6 answered (name style); no band
   missed (decision 29, ruling 9)
 
@@ -185,7 +188,8 @@ then the options considered.
 
 2. **Set and arch.** Recommend (a), because it is what DESIGN §11 names and what VTR itself
    tracks for QoR.
-   - (a) The gate is the 19 on `k6_frac_N10_frac_chain_mem32K_40nm`. `arm_core` and `spree`
+   - (a) The gate is the 19 on `k6_frac_N10_frac_chain_mem32K_40nm` (local gate: the 15 of group A
+     since 2026-10-20, decision 54). `arm_core` and `spree`
      are extra, non-gating rows, since `vtr_reg_qor_chain` runs them and they cost little.
      EArch runs the 5 smallest designs as a nightly smoke test.
    - (b) The 21 of `vtr_reg_qor_chain` as the gate.
@@ -1103,6 +1107,9 @@ then the options considered.
     state register; Phase 4 removes it when `fsm` runs. Nothing else is implemented. Open check, to
     close the gap: compare blob_merge and stereovision3 against a golden with the reset-state bit
     initialised to 1 (a heavy run, not done).
+    **Update (4.8, 2026-10-20):** `fsm` now runs after `proc` and the `read_verilog --vtr-compat`
+    WARNING is removed; see PHASE4 decision 14 for the results (ch_intrinsics equivalent, stereovision3
+    latch count equal, blob_merge listed D16).
 
 44. **3B close: `lower-equiv` checker fixes and the unproven list** (2026-10-18, branch `fix/3B-close`;
     agent defaults, Peter may override). (a) The gold of `lower-equiv` gets `memory_memx; memory_map`
@@ -1314,8 +1321,11 @@ then the options considered.
     `tools/abc-check/bench-abc-set`, a per-run report hook in the pass, and the CTests
     `abc_determinism_ci`, `abc_determinism_ci_blif`, `bench_abc_smoke` (Release) and, for the
     controller, `abc_determinism_golden` and `bench_abc_set`. Not done here and still open: the
-    H1 to H6 runs, the bench table, the calibration of `ODIN3_ABC_BYTES_PER_AIG_OBJ` (still 512;
-    it needs the in-memory runs on the 19), the checklist tick and the PHASE3 table of results.
+    bench table, the calibration of `ODIN3_ABC_BYTES_PER_AIG_OBJ` (still 512; it comes from the
+    local `bench-abc-set` table, which already excludes `mcml` and `LU32PEEng`), the checklist
+    tick and the PHASE3 table of results. Since 2026-10-20 (decision 54) the H1 to H6 runs on
+    `mcml` and `LU32PEEng` are shipped out (`tools/vtr-qor/offload/run-offload`), not run by the
+    controller here.
     Deviations from the plan:
     - **Mode (b) is three sessions of one design in one process, not "A, then B, then a fresh
       A".** `read_blif` refuses a second read into one design, and the pass maps every module in
@@ -1518,6 +1528,57 @@ then the options considered.
     - Correctness is unchanged: a real counterexample is a bug, unprovable designs are
       `untested`, and Odin III/Parmys differences under `--vtr-compat` still match Parmys with a
       WARNING.
+
+54. **The local gate shrinks to the 15 group A designs; the big runs are shipped out** (Peter,
+    2026-10-20; branch `feat/bench-gate-15`). Recommend (a), because the four group B designs
+    block this machine for most of a day (decision 55).
+    - (a) **Gate.** The local Phase 3 gate (M2, M3, `vtr-qor --set gate`) is the 15 group A
+      designs: `stereovision3`, `ch_intrinsics`, `diffeq1`, `diffeq2`, `mkPktMerge`, `sha`,
+      `boundtop`, `raygentop`, `mkSMAdapter4B`, `or1200`, `mkDelayWorker32B`, `stereovision0`,
+      `blob_merge`, `stereovision1`, `stereovision2` (each VTR flow at most 433 s). `mcml`,
+      `LU32PEEng`, `bgm` and `LU8PEEng` (and `LU64PEEng`) leave it: "untested here: too big for
+      this machine, shipped out". They stay defined as the `offload` set in
+      `tests/vtr/qor/sets.json` (rank null, group B), so `vtr-qor run --set offload` and the
+      offload script can run them. Decision 3's bands apply to the 15 (geomean at most 1.20, no
+      design over 1.50); a table narrower than the 15 is "not gated" (ruling N1), and an offload
+      table is report-only. Decisions 2 (a), 17 and the exit text above read "19" as the 15 plus
+      the offload set.
+    - (b) **Byte-identical reruns** (M3, `rerun-check` and the seed reruns) on group A only.
+    - (c) **3D-8 H1 to H6** on `mcml` and `LU32PEEng` are shipped out; the calibration of
+      `ODIN3_ABC_BYTES_PER_AIG_OBJ` comes from the local `bench-abc-set` table, which already
+      excludes those two.
+    - (d) **`lower_gen_vs_yosys` runs 200 seeds locally**; the 5,000-seed
+      `lower_gen_vs_yosys_long` is shipped out. The `fuzz_lower` long run is capped at 1 h
+      (`-max_total_time=3600`; CTest `fuzz_lower_long`, sweep label, new) and shipped out.
+    - (e) **`tools/vtr-qor/offload/`** holds a README (prerequisites, the measured RAM, disk and
+      time numbers, the exact commands, the expected outputs, how to send results back) and
+      `run-offload` (`check`, `vtr`, `abc`, `lower`, `fuzz`, `pack`). Results come back as one
+      tarball; the controller records them here.
+    - Tools: `qor_sched.SET_NAMES` gains `offload`, the loader checks that `gate`, `extra` and
+      `offload` split `order`, and `exit-run` steps 1 to 4 and 6 cover `gate,extra` only (17
+      designs). The 3H spec (sections 1, 2, 6, 8.3, 12) names the 15.
+55. **Machine limits** (Peter, 2026-10-20). This machine is WSL2 on Windows: 12 cores, 23 GiB RAM
+    for the VM, a 472 GB `C:` drive that the VM disk grows into (the VHDX does not shrink by
+    itself; PHASE0 #29). An OOM or a full `C:` kills the whole VM. Heavy runs share one lock
+    (`tools/heavy-run`; a 6 GiB slice, 9 GiB with `--xl`) and stall every lane's build while
+    they hold it. So: sweeps run only when the lanes are idle, parallel memory stays at or below
+    60 % of RAM (decision 17), and runs that need more than this machine gives go to the offload
+    machine (decision 54). The same list is in `tools/vtr-qor/offload/README.md`, "Machine
+    limits".
+56. **Other decisions of 2026-10-20** (Peter; logged by the agent from his list, wording kept
+    short; the details live in the specs named).
+    - **Read-enable RAMs map hard with exact emulation** (4.4, PR D). A memory with a read-enable
+      is mapped to the arch's RAM and the enable is emulated exactly in logic. This replaces the
+      "non-constant `RD_EN` stays soft" case (G-4) of the 4.2 partial-map spec (D9: the arch's
+      RAMs have no read-enable pin); the spec is amended in PR D.
+    - **Soft-memory warning above 50k bits.** A memory that stays soft and is larger than 50,000
+      bits gets a WARNING.
+    - **ABC time cap: deferred.** No ABC wall-time limit is added now.
+    - **FSM D16 accepted** (deviation D16 of the FSM spec, on the `fsm` lane).
+    - **3D-8: open plus close 22 ms against the 20 ms target is accepted as missed**
+      (`bench_abc --micro`; decision 53: comparable, not parity).
+    - **PR D `--mem-width arch` padding accepted** (R-4 and D-21 of the 4.2 spec: the option is
+      off by default and prints one WARNING per design when it changes anything).
 
 ## Risks
 

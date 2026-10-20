@@ -1,0 +1,12 @@
+# Backend windows for tools/token-cost.
+#
+# Claude Code transcripts record Claude model names even when the session ran against another
+# backend (DeepSeek's Anthropic-compatible API maps claude-opus* to deepseek-v4-pro and
+# claude-sonnet*/claude-haiku* to deepseek-flash server-side), so the backend cannot be read
+# from the transcript. List the time windows here instead.
+#
+# Format, one window per line:  <backend> <start UTC ISO> <end UTC ISO or "open">
+# Example:  deepseek 2026-10-23T07:00:00Z 2026-10-24T17:30:00Z
+# Start is inclusive, end is exclusive. "open" means the window has not closed yet.
+# Only the backend "deepseek" is known. Requests outside every window are "anthropic".
+# Blank lines and lines starting with # are ignored.

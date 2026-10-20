@@ -315,11 +315,11 @@ class SeedTableTest(unittest.TestCase):
         # exactly 1.35 is listed, 1.349 is not
         self.assertEqual(qor_table.seed_candidates(table(o_scales={"sha": 1.35}), BANDS), ["sha"])
         self.assertEqual(qor_table.seed_candidates(table(o_scales={"sha": 1.349}), BANDS), [])
-        # a geomean of 1.09 (>= 1.08) with bgm at 1.12: bgm is above the geomean, the rest below
-        rest = (1.09**19 / 1.12) ** (1 / 18)
+        # a geomean of 1.09 (>= 1.08) with raygentop at 1.12: it is above, the rest below
+        rest = (1.09**15 / 1.12) ** (1 / 14)
         scales = {d: rest for d in GATE}
-        scales["bgm"] = 1.12
-        self.assertEqual(qor_table.seed_candidates(table(o_scales=scales), BANDS), ["bgm"])
+        scales["raygentop"] = 1.12
+        self.assertEqual(qor_table.seed_candidates(table(o_scales=scales), BANDS), ["raygentop"])
         # everything below: empty
         self.assertEqual(qor_table.seed_candidates(table(1.05), BANDS), [])
         # a failed O job never makes a candidate; an absent P job neither
@@ -359,7 +359,7 @@ class SeedTableTest(unittest.TestCase):
             "| sha | crit_path_routed_wirelength | 1.360 | 1.300 | 1.340 | 1.333 |\n\n")
         self.assertIn(seed_block, md)
         self.assertLess(md.index("## Seeds"), md.index("## Netlist"))
-        self.assertIn("| **geomean** |  |  | **1.037** |  |  |  |\n", md)
+        self.assertIn("| **geomean** |  |  | **1.047** |  |  |  |\n", md)
         self.assertIn("| sha | 1.0 | 2.0 | 2.000 |  |  |  |\n", md)
         # no seed runs: no Seeds section; a seed missing: its cell is empty and so is the mean
         self.assertNotIn("## Seeds", self.write(runs, None))
@@ -633,7 +633,7 @@ class TaskConfigTest(unittest.TestCase):
     def test_qor_gate_is_the_p_leg_set(self) -> None:
         task = read_task(TASKS / "qor_gate" / "config" / "config.txt")
         names = [d.removesuffix(".v") for d in task["circuit_list_add"]]
-        self.assertEqual(set(names), set(SETS.gate) | set(SETS.extra))
+        self.assertEqual(set(names), set(SETS.gate) | set(SETS.extra) | set(SETS.offload))
 
     def test_the_default_task_is_qor_p(self) -> None:
         self.assertEqual(qor_nightly.DEFAULT_TASK, TASKS / "qor_p")

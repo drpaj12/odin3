@@ -49,8 +49,8 @@ KIB_PER_GIB = 1024**2
 SLICE_DIRS = "user.slice/user-1000.slice/user@1000.service/odin3.slice"
 CLI = REPO_ROOT / "tools" / "vtr-qor" / "vtr_qor.py"
 SHIM = REPO_ROOT / "tools" / "vtr-qor" / "vtr-qor"
-ALL_PASSES = ("read_techlib", "read_verilog", "read_blif", "proc", "opt", "flatten", "wreduce",
-              "hardmap", "lower", "abc", "write_blif")
+ALL_PASSES = ("read_techlib", "read_verilog", "read_blif", "proc", "fsm", "opt", "flatten",
+              "wreduce", "hardmap", "lower", "abc", "write_blif")
 TIMEV = ("\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.50\n"
          "\tMaximum resident set size (kbytes): 20480\n")
 BLIF = (".model top\n.inputs a b clk\n.outputs y\n.names a b n1\n11 1\n"
@@ -479,7 +479,7 @@ class InputTest(CliTestBase):
         self.assertEqual(err, "vtr-qor: unknown design 'nope' (see tests/vtr/qor/sets.json)\n")
         code, _, err = self.cli("run", "--leg", "P", "--set", "big")
         self.assertEqual(code, 2)
-        self.assertEqual(err, "vtr-qor: unknown set 'big' (gate, extra, smoke)\n")
+        self.assertEqual(err, "vtr-qor: unknown set 'big' (gate, extra, smoke, offload)\n")
         code, _, err = self.cli("run", "--leg", "Q", "--set", "smoke")
         self.assertEqual(code, 2)
         self.assertEqual(err, "vtr-qor: unknown leg 'Q' (P, O, Oprime, Pprime, R, Oprov)\n")
@@ -1118,7 +1118,7 @@ class CommittedInputsTest(unittest.TestCase):
             self.assertEqual(text, f"{counts[design]} multiply, inlined by equiv-check as "
                                    "36x36 logic: the Verilator check stands in")
         for design, _, _ in rows:
-            self.assertIn(design, SETS.gate)
+            self.assertIn(design, (*SETS.gate, *SETS.offload))
         for absent in ("sha", "stereovision0", "blob_merge"):
             self.assertNotIn(absent, [r[0] for r in rows])
 

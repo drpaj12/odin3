@@ -45,6 +45,28 @@ odin3_status odin3_opt_load(const odin3_opt_ctx *oc, const odin3_opt_load_req *r
                             bool *all_const);
 
 /*
+ * odin3_opt_eval_cell's request: the foldable cell `node` and its operands as values at the port
+ * widths (a, b and s; NULL for a port the type lacks), in `arena`, which also receives the result.
+ * The sign flags of the values are ignored: the cell's parameters decide, as for a fold.
+ */
+typedef struct odin3_opt_eval_req {
+    odin3_node_id node;
+    const odin3_cval *a, *b, *s;
+    odin3_arena *arena;
+} odin3_opt_eval_req;
+
+/*
+ * Evaluates the foldable cell req->node on the operands of req (the evaluator of odin3_opt_fold,
+ * Yosys 0.55's CellTypes::eval, 2F spec OP-5) and stores Y at Y's width in *out; the IR is not
+ * touched. *evaluable is false (and *out untouched) for a node that is not a foldable cell, for
+ * a missing operand, and for widths past the evaluator's cap. oc supplies the module, its design
+ * and its options (opts->keepdc). INVALID_ARG (logged) for a NULL argument or a node that is
+ * not live; NO_MEMORY.
+ */
+odin3_status odin3_opt_eval_cell(odin3_opt_ctx *oc, const odin3_opt_eval_req *req, odin3_cval *out,
+                                 bool *evaluable);
+
+/*
  * Folds node when it is a foldable cell with every input bit constant: its Y bits take the result
  * (Yosys const_<type> at Y's width, spec §5) through kit_connect on the canonical constant nets,
  * the node is deleted, *folded is true, and counts->expr.folded and counts->fold_type[<type>]

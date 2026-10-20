@@ -1,19 +1,20 @@
 """Shared pieces of lower-diff and lower-sim (3B spec 14.2, 14.3; plan Task 2): the exit codes of
-the opt tools' convention, the work directory that is never removed, the cell-type histograms of
-an RTLIL text, and Odin III's script front.
+the opt tools' convention, the work directory (removed unless ``--keep-tmp``), the cell-type
+histograms of an RTLIL text, and Odin III's script front.
 
 The convention (2F's tools): exit 0 every verdict holds, 1 a difference, 2 a tool error or usage,
 3 hard (a child crashed, was killed by a signal or its memory cap, or timed out; no expect list
 absorbs it), 77 skipped (an ASan child and no systemd-run). Every child runs through
 ``memcap.run``. A work directory is made under ``$ODIN3_LOWER_WORK`` (else ``$TMPDIR``) and is
-left in place: these tools never delete.
+removed on exit, success or failure, unless ``--keep-tmp`` (or ``$ODIN3_KEEP_TMP``) keeps it and
+prints its path; a ``--work DIR`` is never removed.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
-import tempfile
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -22,6 +23,7 @@ import opt_equiv
 
 EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
 WORK_ENV = "ODIN3_LOWER_WORK"
+KEEP_ENV = "ODIN3_KEEP_TMP"
 DEFAULT_CAP = 3 << 30  # one Yosys or Odin III child (plan Task 2: prlimit --as=3 GiB)
 TIMEOUT_SECONDS = opt_equiv.TIMEOUT_SECONDS
 YOSYS_VERSION = "0.55"
@@ -40,13 +42,13 @@ CELL_TYPE_ANYWHERE = re.compile(r"^\s*cell\s+(\S+)\s+\S+\s*$", re.M)
 IGNORED_TYPES = ("$_CONST",)  # constants are cells here and `connect`s in Yosys
 
 
-def make_work(requested: Path | None, prefix: str) -> Path:
-    """The work directory: ``requested`` (created if absent), else a fresh one under
-    ``$ODIN3_LOWER_WORK`` or ``$TMPDIR``. Never removed by these tools."""
-    if requested is not None:
-        requested.mkdir(parents=True, exist_ok=True)
-        return requested.resolve()
-    return Path(tempfile.mkdtemp(prefix=prefix, dir=os.environ.get(WORK_ENV) or None)).resolve()
+def make_work(requested: Path | None, prefix: str, keep: bool = False
+              ) -> contextlib.AbstractContextManager[Path]:
+    """The work directory: ``requested`` (created if absent, never removed), else a fresh one
+    under ``$ODIN3_LOWER_WORK`` or ``$TMPDIR`` that is removed on exit, success or failure, unless
+    ``keep`` (``--keep-tmp``) or ``$ODIN3_KEEP_TMP`` is set, which keeps it and prints its path."""
+    return opt_equiv.scratch(requested, prefix, prefix.rstrip("-"), keep,
+                             os.environ.get(WORK_ENV) or None)
 
 
 STORAGE_SUBCKT = {"$_DFF_P_": ("re", "C"), "$_DFF_N_": ("fe", "C"), "$_DLATCH_P_": ("ah", "E"),

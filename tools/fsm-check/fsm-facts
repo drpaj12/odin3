@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# fsm-facts: regenerate tests/fsm/yosys_facts.json with Yosys 0.55. See fsm_facts.py.
+# Exit codes: 0 done, 1 differs (--check), 2 usage or tool error, 3 yosys crashed or timed out.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec python3 "$here/fsm_facts.py" "$@"

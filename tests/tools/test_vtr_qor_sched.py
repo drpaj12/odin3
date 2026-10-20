@@ -289,7 +289,7 @@ class PlanTest(PlanTestBase):
 
         big = qor_sched.plan_jobs(self.request(("P",), ("mcml", "spree")), SETS)
         self.assertEqual([(j.design, j.group, j.gating) for j in big],
-                         [("spree", "A", False), ("mcml", "B", True)])
+                         [("spree", "A", False), ("mcml", "B", False)])
         self.assertIn("14400", big[1].commands[0].argv)
         earch = qor_sched.plan_jobs(self.request(("P",), ("sha",), arch="earch"), SETS)
         self.assertEqual((earch[0].arch, earch[0].gating), ("EArch", False))
@@ -339,7 +339,7 @@ class PlanTest(PlanTestBase):
             p, leg="O", odin3_build=qor_sched.odin3_build_id(self.odin3),
             lib_sha256=sha((self.repo / "lib/vtr.o3lib").read_bytes()).hexdigest(),
             abc_script_sha256=sha((self.repo / "lib/abc/vtr.abc").read_bytes()).hexdigest(),
-            script="read_techlib $LIB; read_verilog --nolatches --vtr-compat $IN; proc; opt; "
+            script="read_techlib $LIB; read_verilog --nolatches --vtr-compat $IN; proc; fsm; opt; "
             "flatten; wreduce; hardmap; lower; abc --lut 6; write_blif --vtr --lut-k 6 $OUT",
         )
         pprime = dataclasses.replace(
@@ -425,12 +425,17 @@ class PlanTest(PlanTestBase):
 class SelectTest(unittest.TestCase):
     def test_select_designs(self) -> None:
         self.assertEqual(qor_sched.select_designs(SETS, ["gate"], []), SETS.gate)
-        self.assertEqual(qor_sched.select_designs(SETS, ["extra", "gate"], []), SETS.order)
+        self.assertEqual(qor_sched.select_designs(SETS, ["extra", "gate"], []),
+                         SETS.order[:len(SETS.order) - len(SETS.offload)])
+        self.assertEqual(qor_sched.select_designs(SETS, ["offload"], []), SETS.offload)
+        self.assertEqual(qor_sched.select_designs(SETS, ["offload", "extra", "gate"], []),
+                         SETS.order)
         self.assertEqual(qor_sched.select_designs(SETS, ["smoke"], ["mcml", "spree"]),
                          (*SETS.smoke, "spree", "mcml"))
         with self.assertRaises(HeavyError) as caught:
             qor_sched.select_designs(SETS, ["big"], [])
-        self.assertEqual(caught.exception.message, "unknown set 'big' (gate, extra, smoke)")
+        self.assertEqual(caught.exception.message,
+                         "unknown set 'big' (gate, extra, smoke, offload)")
         with self.assertRaises(HeavyError) as caught:
             qor_sched.select_designs(SETS, [], ["nope"])
         self.assertEqual((caught.exception.code, caught.exception.message),
@@ -477,6 +482,11 @@ class SelectTest(unittest.TestCase):
                 lambda d: d["group_b"].pop(),
                 lambda d: d["designs"]["sha"].update(group="C"),
                 lambda d: d["gate"].append("spree"),
+                lambda d: d["offload"].append("sha"),
+                lambda d: d["offload"].pop(),
+                lambda d: d.pop("offload"),
+                lambda d: d.update(offload=list(reversed(d["offload"]))),
+                lambda d: d["designs"]["mcml"].update(rank=19),
                 lambda d: d["designs"]["sha"].update(golden_bytes="big"),
                 lambda d: d.pop("designs"),
             ]

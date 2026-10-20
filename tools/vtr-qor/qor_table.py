@@ -21,7 +21,7 @@
   ``ratios.csv``) and ``write_json`` (``runs.json``). Every byte is a function of the runs (their
   ``metrics.json`` and ``job.json``), the committed inputs and VTR's golden files; the header's
   date and host are the newest job's ``job.json`` end time and host record, never the clock
-  (T7). Rows follow §2's order with the extras after the 19; legs follow ``LEGS``, written
+  (T7). Rows follow §2's order with the extras after the gate designs; legs follow ``LEGS``, written
   ``O'``/``P'`` (point (s)). Numbers come from ``ok`` runs only.
 
 TSV inputs (``explanations.tsv``, ``divergences.tsv``, ``equiv-exceptions.tsv``) are three
@@ -674,13 +674,15 @@ def gate_title(arch: str) -> str:
     return EARCH_SMOKE_GATE if arch == EARCH_ARCH else DECISION3
 
 
-def narrowed_reason(n: int) -> str:
-    """Ruling N1: a k6 table without all 19 gate designs is not gated (and INCOMPLETE)."""
-    return f"decision 3 needs the 19 (this table has {n})"
+def narrowed_reason(n: int, total: int) -> str:
+    """Ruling N1: a k6 table without all gate designs (15 since 2026-10-20) is not gated (and
+    INCOMPLETE)."""
+    return f"decision 3 needs the {total} (this table has {n})"
 
 
-def narrowed_verdict(n: int) -> Verdict:
-    return Verdict(state=INCOMPLETE, violations=(f"gate: INCOMPLETE: {narrowed_reason(n)}",))
+def narrowed_verdict(n: int, total: int) -> Verdict:
+    return Verdict(state=INCOMPLETE,
+                   violations=(f"gate: INCOMPLETE: {narrowed_reason(n, total)}",))
 RUNS_HEADER = (
     "arch", "design", "leg", "key12", "status", "gating", "vpr_status", "luts", "ffs", "adders",
     "mults", "ram_slices", "depth", "abc_depth", "num_clb", "num_memories", "num_mult",
@@ -841,8 +843,8 @@ def _leg_rank(leg: str) -> int:
 
 @dataclass(frozen=True)
 class _Layout:
-    """What every writer needs: the designs in row order (the 19, then the extras, then any
-    other), the legs in the table, the runs by (leg, design), the gate and extra sets, the
+    """What every writer needs: the designs in row order (the gate designs, then the extras, then
+    any other), the legs in the table, the runs by (leg, design), the gate and extra sets, the
     bands and their bounds."""
 
     runs: Sequence[Run]
@@ -956,7 +958,7 @@ def write_csv(runs: Sequence[Run], runs_path: Path, ratios_path: Path, *,
     of its set's designs with an ``ok`` run on both legs; each metric's own count of defined
     ratios is in ``runs.json``. ``bands`` defaults to the committed ``bands.json`` (its
     metrics are the gated ones, §6.1; its bounds set the 4-decimal rule). ``gate_set`` is the
-    ``GEOMEAN_GATE`` set (default: the 19)."""
+    ``GEOMEAN_GATE`` set (default: the gate set)."""
     layout = _layout(runs, bands, gate_set)
     arch = layout.runs[0].arch if layout.runs else ""
     _write_text(runs_path, _csv([RUNS_HEADER, *(_run_cells(layout, r) for r in layout.runs)]))
@@ -1211,7 +1213,7 @@ def _md_gate(layout: _Layout, verdict: Verdict | None, narrowed: int | None) -> 
         return []
     title = gate_title(layout.arch)
     if narrowed is not None:
-        return [f"## {title}: {NOT_GATED} — {narrowed_reason(narrowed)}", ""]
+        return [f"## {title}: {NOT_GATED} — {narrowed_reason(narrowed, len(layout.gate))}", ""]
     if verdict is None or not layout.gate:
         return [f"## {title}: {NOT_GATED}", "", "No gate design in this table.", ""]
     state, violations = verdict.state, verdict.violations
@@ -1554,10 +1556,10 @@ def write_md(runs: Sequence[Run], verdict: Verdict | None, header: TableHeader, 
     when O is in the table; Netlist, Packed, Routed and Cost always; Attribution, Noise floor,
     Declared divergences and Name style when their legs are in it; the functional check when P
     or O is; the cross-check against VTR's golden whenever P is (and ``golden`` is given).
-    ``gate_set`` is the set the gate rows cover (default: the 19); an empty one, or no
+    ``gate_set`` is the set the gate rows cover (default: the gate set); an empty one, or no
     ``verdict``, writes the gate section as not gated; so does ``narrowed`` (a k6 table holding
-    only that many of the 19, ruling N1), with its reason. ``seeds`` maps a VPR seed (2, 3) to the
-    O and P runs of that seed; with it, a Seeds section follows the gate section (§6.3)."""
+    only that many of the gate set, ruling N1), with its reason. ``seeds`` maps a VPR seed (2, 3) to
+    the O and P runs of that seed; with it, a Seeds section follows the gate section (§6.3)."""
     layout = _layout(runs, bands, gate_set)
     lines = _md_title(header)
     lines += _md_gate(layout, verdict, narrowed)

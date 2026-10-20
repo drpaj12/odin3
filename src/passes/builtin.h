@@ -42,6 +42,9 @@ extern const odin3_pass_def odin3_pass_opt_clean;
 /* src/passes/abc/run.c (3D Task 14): the abc pass. */
 extern const odin3_pass_def odin3_pass_abc;
 extern const odin3_pass_def odin3_pass_wreduce;
+/* src/passes/fsm/register.c (4.8): fsm_detect, and fsm. */
+extern const odin3_pass_def odin3_pass_fsm_detect;
+extern const odin3_pass_def odin3_pass_fsm;
 /* src/passes/flatten/register.c (3A Task 2). */
 extern const odin3_pass_def odin3_pass_flatten;
 /* src/passes/lower/register.c (3B Task 1). */
