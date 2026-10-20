@@ -97,7 +97,7 @@ static odin3_status check_port_netname(const jr *rd, odin3_wire_id wire,
 static odin3_status make_wire(jr *rd, const odin3_json_node *name, uint32_t width,
                               odin3_wire_id *wire) {
     odin3_wire_spec spec = {0};
-    odin3_status st = jr_shape(rd, name, width, &spec);
+    odin3_status st = jr_shape(rd, name, "netnames", (jr_shape_out){width, &spec});
     if (st == ODIN3_OK) {
         st = jr_prov(rd, name, &spec.prov);
     }
@@ -158,10 +158,19 @@ odin3_status jr_read_netnames(jr *rd, const odin3_json_node *obj) {
 
 /* --- memories (M-13) ------------------------------------------------------------------------ */
 
-static odin3_status memory_attr(jr *rd, const char *name, const char *field,
-                                const odin3_value *val) {
+/* The memory node, whose key is the memory's name, and the field to keep as an attribute. */
+typedef struct memory_key {
+    const odin3_json_node *mem;
+    const char *field;
+} memory_key;
+
+static odin3_status memory_attr(jr *rd, const memory_key *mk, const odin3_value *val) {
     char key[JR_NAME_BUF * 2];
-    (void)snprintf(key, sizeof key, "memory:%s:%s", name, field);
+    int wrote = snprintf(key, sizeof key, "memory:%s:%s", odin3_json_key(mk->mem), mk->field);
+    if (wrote < 0 || (size_t)wrote >= sizeof key) {
+        return jr_error(rd, mk->mem, &(jr_where){"memories", odin3_json_key(mk->mem), NULL},
+                        "the name of the memory attribute is too long");
+    }
     odin3_module *module = rd->cur.module;
     return jr_set_attr_named(rd, module, (odin3_objref){ODIN3_OBJ_MODULE, rd->cur.mod->module.v},
                              key, val);
@@ -178,7 +187,7 @@ static odin3_status memory_number(jr *rd, const odin3_json_node *mem, const char
         return jr_error(rd, num, &where, "%s is not a non-negative integer", field);
     }
     odin3_value val = odin3_value_int(jr_int(num));
-    return memory_attr(rd, odin3_json_key(mem), field, &val);
+    return memory_attr(rd, &(memory_key){mem, field}, &val);
 }
 
 static odin3_status memory_attrs(jr *rd, const odin3_json_node *mem) {
@@ -194,11 +203,14 @@ static odin3_status memory_attrs(jr *rd, const odin3_json_node *mem) {
     for (const odin3_json_node *attr = jr_first(attrs); st == ODIN3_OK && attr != NULL;
          attr = odin3_json_next(attr)) {
         char field[JR_NAME_BUF];
-        odin3_value val;
-        (void)snprintf(field, sizeof field, "attribute:%s", odin3_json_key(attr));
-        st = jr_attr_value(rd, attr, &where, &val);
+        odin3_value val = {0};
+        st = jr_join(rd, &(jr_join_args){attr, &where, "attribute:", odin3_json_key(attr)}, field,
+                     sizeof field);
         if (st == ODIN3_OK) {
-            st = memory_attr(rd, odin3_json_key(mem), field, &val);
+            st = jr_attr_value(rd, attr, &where, &val);
+        }
+        if (st == ODIN3_OK) {
+            st = memory_attr(rd, &(memory_key){mem, field}, &val);
         }
     }
     return st;

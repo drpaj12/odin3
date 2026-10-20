@@ -5,6 +5,7 @@
 #define ODIN3_BACKENDS_JSON_JW_H
 
 #include "backends/common/attrs.h"
+#include "backends/common/hdl_loc.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
@@ -31,12 +32,12 @@ typedef struct jw {
     odin3_design *design;
     const odin3_strtab *strtab;
     odin3_module *module;
-    uint8_t *init;       /* per net ID: 0 = none, else '0', '1' or 'x' (latch Q initial value) */
-    uint32_t extra_bit;  /* next bit number no net uses (helper nets of OFF-set $sop) */
-    odin3_status status; /* first failure; later output is skipped */
-    int write_errno;     /* errno of the failed write when status is ODIN3_ERR_IO */
-    odin3_srcloc src;    /* scratch: first source location found by jw_src */
-    bool have_src;
+    uint8_t *init;         /* per net ID: 0 = none, else '0', '1' or 'x' (latch Q initial value) */
+    uint32_t extra_bit;    /* next bit number no net uses (helper nets of OFF-set $sop) */
+    odin3_status status;   /* first failure; later output is skipped */
+    int write_errno;       /* errno of the failed write when status is ODIN3_ERR_IO */
+    odin3_hdl_ctx *hdl;    /* HDL locations of the objects (backends/common/hdl_loc.h) */
+    odin3_strbuf src;      /* scratch: the src text jw_src builds */
     odin3_strbuf key;      /* scratch: the key being built by jw_make_key */
     odin3_wattr_seen seen; /* keys written in the current attributes/parameters object */
     odin3_strtab *written; /* cell and netname keys written in the current module */
@@ -101,8 +102,9 @@ void jw_pins(jw *out, odin3_pinslice pins);
 void jw_param_int(jw *out, jw_list *list, const char *key, int64_t num);
 /* `"key": <value>` for a cell parameter value as the next member. */
 void jw_param(jw *out, jw_list *list, const char *key, const odin3_value *val);
-/* Adds `"src": "file:line.col"` for prov's first source location, if it has one and no "src"
- * was written to this object yet (a user src attribute wins). */
+/* Adds `"src": "SRC"` for prov's HDL locations (Yosys's form, `file:L.C-EL.EC`, up to 8 joined by
+ * `|`; only SOURCE leaves, spec 5.4 W-2 to W-4), if it has one and no "src" was written to this
+ * object yet (a user src attribute wins). */
 void jw_src(jw *out, jw_list *list, odin3_prov_id prov);
 /* True (and recorded) when key is new in the current object; false after out of memory. */
 bool jw_claim(jw *out, odin3_wattr_role role, const char *key);

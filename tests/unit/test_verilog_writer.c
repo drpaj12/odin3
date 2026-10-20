@@ -1596,17 +1596,24 @@ static void test_names_unique_across_kinds(void) {
 
 /* --- provenance ---------------------------------------------------------------------------- */
 
-static void test_provenance_comments(void) {
+/* A SOURCE record (or, imported, an IMPORTED one) at file:line, columns 1 to 4. */
+static odin3_prov_id loc_prov(odin3_pass_ctx *ctx, const char *file, uint32_t line, bool imported) {
+    odin3_srcloc loc = {intern(file), line, 1, line, 4, 0};
+    odin3_prov_origin origin = {&loc, 1, 0, 0};
+    odin3_prov_id id = {0};
+    odin3_status st =
+        imported ? odin3_prov_imported(ctx, &origin, &id) : odin3_prov_source(ctx, &origin, &id);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    return id;
+}
+
+/* The design of the provenance tests: module pv (prov p7), port a (p9), wire m (p7), two NOT
+ * cells (p7, and a DERIVED record of p9), output y. */
+static void build_provenance_design(bool imported) {
     odin3_pass_ctx ctx;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("blif"), &ctx));
-    odin3_srcloc loc7 = {intern("in.blif"), 7, 1, 7, 1, 0};
-    odin3_srcloc loc9 = {intern("in.blif"), 9, 1, 9, 1, 0};
-    odin3_prov_id p7 = {0};
-    odin3_prov_id p9 = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_prov_imported(&ctx, &(odin3_prov_origin){&loc7, 1, 0, 0}, &p7));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_prov_imported(&ctx, &(odin3_prov_origin){&loc9, 1, 0, 0}, &p9));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("fe"), &ctx));
+    odin3_prov_id p7 = loc_prov(&ctx, imported ? "in.blif" : "in.v", 7, imported);
+    odin3_prov_id p9 = loc_prov(&ctx, imported ? "in.blif" : "in.v", 9, imported);
     odin3_pass_ctx opt;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("opt"), &opt));
     odin3_prov_begin_op(&opt);
@@ -1620,11 +1627,92 @@ static void test_provenance_comments(void) {
     (void)add_cell_args((cell_args){"$_NOT_", NULL, NULL, 0, p7}, first);
     odin3_netvec second[] = {NV1(wire_m), NV1(net_y)};
     (void)add_cell_args((cell_args){"$_NOT_", NULL, NULL, 0, derived}, second);
+}
+
+/* W-2, W-4, W-6: HDL locations are `// file:line` at the end of the line (line only) and the
+ * `src` attribute (Yosys's form) before the module, the port and the wire; an `assign` has the
+ * comment only (an attribute is illegal there). */
+static void test_provenance_comments(void) {
+    build_provenance_design(false);
     (void)write_ok();
-    expect_has("module pv (  // in.blif:7\n  input a,  // in.blif:9\n  output y\n);\n");
-    expect_has("  wire m;  // in.blif:7\n");
-    expect_has("  assign m = ~a;  // in.blif:7\n");
-    expect_has("  assign y = ~m;  // in.blif:9\n");
+    expect_has("(* src = \"in.v:7.1-7.4\" *)\nmodule pv (  // in.v:7\n"
+               "  (* src = \"in.v:9.1-9.4\" *) input a,  // in.v:9\n  output y\n);\n");
+    expect_has("  (* src = \"in.v:7.1-7.4\" *) wire m;  // in.v:7\n");
+    expect_has("  assign m = ~a;  // in.v:7\n");
+    expect_has("  assign y = ~m;  // in.v:9\n");
+    expect_not("(* src = \"in.v:7.1-7.4\" *)\n  assign");
+}
+
+/* T-6, W-2: a netlist's own lines (IMPORTED) are not HDL locations: no comment, no src. */
+static void test_provenance_imported_prints_nothing(void) {
+    build_provenance_design(true);
+    (void)write_ok();
+    expect_not("in.blif");
+    expect_not("src =");
+    expect_has("module pv (\n  input a,\n  output y\n);\n");
+    expect_has("  assign m = ~a;\n");
+}
+
+/* W-6: an instance and a storage cell (`always`) carry the src attribute on a line of their own;
+ * a user `src` attribute wins and is printed verbatim. */
+static void test_provenance_instance_always_and_user_src(void) {
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("fe"), &ctx));
+    odin3_prov_id p5 = loc_prov(&ctx, "in.v", 5, false);
+    odin3_prov_id p6 = loc_prov(&ctx, "in.v", 6, false);
+    new_module("sub3");
+    (void)gate1("$_BUF_", (io_pair){in_bit("i"), out_bit("o")});
+    odin3_celltype_id sub = odin3_module_celltype(module);
+    new_module("top3");
+    odin3_net_id clk = in_bit("clk");
+    odin3_net_id d_net = in_bit("d");
+    odin3_net_id q_net = out_bit("q");
+    odin3_node_spec dff = {type_of("$_DFF_P_"), 0, p5, NULL, 0};
+    odin3_netvec dff_ports[] = {NV1(clk), NV1(d_net), NV1(q_net)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &dff, dff_ports, NULL));
+    odin3_node_spec inst = {sub, intern("u3"), p6, NULL, 0};
+    odin3_netvec inst_ports[] = {NV1(d_net), NV1(out_bit("z"))};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &inst, inst_ports, &node));
+    set_attr((odin3_objref){ODIN3_OBJ_NODE, node.v}, "src", str_value("mine.v:1"));
+    (void)write_ok();
+    expect_has("  (* src = \"in.v:5.1-5.4\" *)\n  always @(posedge clk)");
+    expect_has("  (* src = \"mine.v:1\" *)\n  sub3 u3 (  // in.v:6\n");
+    expect_not("in.v:6.1-6.4");
+}
+
+/* W-3: a record of several SOURCE leaves prints them `a|b|c`, in parent order, up to 8; the
+ * trailing comment is the first only. */
+static void test_provenance_many_locations(void) {
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("fe"), &ctx));
+    odin3_prov_id parents[10];
+    for (uint32_t i = 0; i < 10; i++) {
+        parents[i] = loc_prov(&ctx, "m.v", i + 1, false);
+    }
+    odin3_prov_begin_op(&ctx);
+    odin3_prov_id merged = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_prov_derive(&ctx, (odin3_prov_list){parents, 10}, &merged));
+    new_module_prov("mm", merged);
+    (void)write_ok();
+    expect_has("(* src = \"m.v:1.1-1.4|m.v:2.1-2.4|m.v:3.1-3.4|m.v:4.1-4.4|m.v:5.1-5.4|m.v:6.1-6.4|"
+               "m.v:7.1-7.4|m.v:8.1-8.4\" *)\nmodule mm;  // m.v:1\n");
+    expect_not("m.v:9");
+}
+
+/* W-5, X-4: a file name with a byte that cannot be written is skipped with one WARNING. */
+static void test_provenance_unwritable_file(void) {
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("fe"), &ctx));
+    odin3_prov_id bad = loc_prov(&ctx, "a\tb.v", 3, false);
+    new_module_prov("bm", bad);
+    last_warning[0] = '\0';
+    (void)write_ok();
+    expect_not("a\tb.v");
+    expect_not("src =");
+    expect_has("module bm;\n");
+    TEST_ASSERT_NOT_NULL(strstr(last_warning, "write_verilog: source file name 'a?b.v'"));
 }
 
 /* --- whole-file properties and failures ---------------------------------------------------- */
@@ -1801,7 +1889,7 @@ static void test_string_blanks_exact(void) {
     (void)write_ok();
     expect_has("  hs #(.TAG(\" x  y   z \")) u (\n    .A(a),\n    .Z()\n  );\n");
     expect_has("  parameter TAG = \"dflt  two  spaces\"\n");
-    expect_has("  output \\q.r   // s.v:3\n");
+    expect_has("  (* src = \"s.v:3.1-3.1\" *) output \\q.r   // s.v:3\n");
 }
 
 /* A zero-width black-box port is declared without a range (never [-1:0]). */
@@ -1944,11 +2032,12 @@ static void test_name_style_short(void) {
     (void)slurp(out_path, text);
     (void)iverilog_compiles(out_path);
     char line[MSG_MAX];
-    expect_has("  wire m;  // in.v:7\n");
-    (void)snprintf(line, sizeof line, "  wire \\$n%u ;  // in.v:7\n", fix.unnamed.v);
+    expect_has("  (* src = \"in.v:7.1-7.1\" *) wire m;  // in.v:7\n");
+    (void)snprintf(line, sizeof line, "  (* src = \"in.v:7.1-7.1\" *) wire \\$n%u ;  // in.v:7\n",
+                   fix.unnamed.v);
     expect_has(line);
     expect_has("  wire n;\n");
-    expect_has("  sub2 u2 (  // in.v:9\n");
+    expect_has("  (* src = \"in.v:9.1-9.1\" *)\n  sub2 u2 (  // in.v:9\n");
 }
 
 /* PROVENANCE: hier/name@file:line for objects with a location; ports and the rest unchanged. */
@@ -1959,11 +2048,13 @@ static void test_name_style_provenance(void) {
     (void)slurp(out_path, text);
     (void)iverilog_compiles(out_path);
     char line[MSG_MAX];
-    expect_has("  wire \\top/u1/m@in.v:7 ;  // in.v:7\n");
-    (void)snprintf(line, sizeof line, "  wire \\top/u1/$n%u@in.v:7 ;  // in.v:7\n", fix.unnamed.v);
+    expect_has("  (* src = \"in.v:7.1-7.1\" *) wire \\top/u1/m@in.v:7 ;  // in.v:7\n");
+    (void)snprintf(line, sizeof line,
+                   "  (* src = \"in.v:7.1-7.1\" *) wire \\top/u1/$n%u@in.v:7 ;  // in.v:7\n",
+                   fix.unnamed.v);
     expect_has(line);
     expect_has("  wire n;\n");
-    expect_has("  sub2 \\u2@in.v:9 (  // in.v:9\n");
+    expect_has("  (* src = \"in.v:9.1-9.1\" *)\n  sub2 \\u2@in.v:9 (  // in.v:9\n");
     expect_has("  assign \\top/u1/m@in.v:7 = ~a;\n");
     expect_has("module pn (\n  input a,\n  output y\n);\n");
 }
@@ -2006,6 +2097,10 @@ int main(void) {
     RUN_TEST(test_unwritable_port_refused);
     RUN_TEST(test_names_unique_across_kinds);
     RUN_TEST(test_provenance_comments);
+    RUN_TEST(test_provenance_imported_prints_nothing);
+    RUN_TEST(test_provenance_instance_always_and_user_src);
+    RUN_TEST(test_provenance_many_locations);
+    RUN_TEST(test_provenance_unwritable_file);
     RUN_TEST(test_all_fixtures_compile_and_deterministic);
     RUN_TEST(test_portless_module);
     RUN_TEST(test_empty_design);

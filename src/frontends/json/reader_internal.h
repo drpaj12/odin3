@@ -57,7 +57,9 @@ typedef struct jr_iport {
 typedef struct jr_implicit {
     uint32_t name_str;
     uint64_t total_width;
-    odin3_vec ports; /* jr_iport */
+    const odin3_json_node *first_cell; /* the first cell of the type, for messages */
+    const char *module;                /* the module of that cell */
+    odin3_vec ports;                   /* jr_iport */
 } jr_implicit;
 
 /* The state of the module whose netnames and cells are being read (pass 2). */
@@ -122,6 +124,10 @@ static inline int64_t jr_int(const odin3_json_node *node) {
     return node != NULL ? odin3_json_int(node) : 0;
 }
 
+static inline const char *jr_key_of(const odin3_json_node *node) {
+    return node != NULL ? odin3_json_key(node) : NULL;
+}
+
 /* Where in the module an error is: modules.<module>.<section>.<key>.<member>; NULL parts are
  * left out. */
 typedef struct jr_where {
@@ -140,6 +146,15 @@ odin3_status jr_error(const jr *rd, const odin3_json_node *node, const jr_where 
 odin3_status jr_fail(jr *rd, odin3_status st);
 /* The IMPORTED record at the key position of node (a member), or at its value position. */
 odin3_status jr_prov(jr *rd, const odin3_json_node *node, odin3_prov_id *out);
+/* A name made of a prefix and a member key ("attributes.k", "parameter:K") for a message or an
+ * attribute key: node (its key position) and where locate the error when it would not fit. */
+typedef struct jr_join_args {
+    const odin3_json_node *node;
+    const jr_where *where;
+    const char *prefix;
+    const char *name;
+} jr_join_args;
+odin3_status jr_join(const jr *rd, const jr_join_args *args, char *buf, size_t size);
 /* Interns text in the design strtab. */
 odin3_status jr_intern(jr *rd, const char *text, uint32_t *out);
 const char *jr_str(const jr *rd, uint32_t str);
@@ -225,9 +240,15 @@ bool jr_lookup_type(const jr *rd, const char *name, odin3_celltype_id *id);
 
 odin3_status jr_read_netnames(jr *rd, const odin3_json_node *obj);
 odin3_status jr_read_memories(jr *rd, const odin3_json_node *obj);
-/* The range of a wire from offset/upto and its width. */
-odin3_status jr_shape(const jr *rd, const odin3_json_node *obj, uint32_t width,
-                      odin3_wire_spec *spec);
+/* The width of a port or netname and the spec whose msb, lsb and sign jr_shape sets. */
+typedef struct jr_shape_out {
+    uint32_t width;
+    odin3_wire_spec *spec;
+} jr_shape_out;
+/* The range of a wire from offset/upto and its width; an offset out of range is a located error
+ * in the section (ports or netnames) of obj. */
+odin3_status jr_shape(const jr *rd, const odin3_json_node *obj, const char *section,
+                      jr_shape_out out);
 
 /* --- reader_cell.c: cells ---------------------------------------------------------------- */
 
@@ -246,6 +267,12 @@ void jr_free_implicit(jr *rd);
 odin3_status jr_sop_params(jr *rd, const odin3_json_node *params, const jr_where *where);
 /* A `$lut` with WIDTH 0 (the writer's constant cover) as the `$sop` it was: true and the
  * parameters of that `$sop` in rd->cur.params when params are those of such a `$lut`. */
-bool jr_lut0_params(jr *rd, const odin3_celltype_def *lut);
+typedef struct jr_lut_sop {
+    const odin3_celltype_def *lut;
+    const odin3_celltype_def *sop;
+} jr_lut_sop;
+odin3_status jr_lut0_params(jr *rd, const jr_lut_sop *defs, bool *converted);
+/* The index of the parameter called name in def, -1 when it has none. */
+int jr_find_param(const odin3_celltype_def *def, const char *name);
 
 #endif

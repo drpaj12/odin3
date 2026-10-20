@@ -37,7 +37,8 @@ static odin3_status dir_of(const jr *rd, const odin3_json_node *entry, const jr_
 }
 
 /* The implicit type of name, made on first use. */
-static odin3_status entry_of(jr *rd, uint32_t name_str, uint64_t *index) {
+static odin3_status entry_of(jr *rd, uint32_t name_str, const odin3_json_node *cell,
+                             uint64_t *index) {
     if (odin3_u64map_get(rd->implicit_index, name_str, index)) {
         return ODIN3_OK;
     }
@@ -46,6 +47,8 @@ static odin3_status entry_of(jr *rd, uint32_t name_str, uint64_t *index) {
         return jr_fail(rd, ODIN3_ERR_NO_MEMORY);
     }
     entry->name_str = name_str;
+    entry->first_cell = cell;
+    entry->module = rd->cur_name;
     odin3_vec_init(&entry->ports, sizeof(jr_iport));
     *index = rd->implicit.len - 1;
     return jr_fail(rd, odin3_u64map_put(rd->implicit_index, (odin3_kv){name_str, *index}));
@@ -130,7 +133,7 @@ odin3_status jr_note_implicit(jr *rd, const odin3_json_node *cell, const char *t
     uint64_t entry = 0;
     odin3_status st = jr_intern(rd, type_name, &name_str);
     if (st == ODIN3_OK) {
-        st = entry_of(rd, name_str, &entry);
+        st = entry_of(rd, name_str, cell, &entry);
     }
     for (const odin3_json_node *conn = jr_first(conns); st == ODIN3_OK && conn != NULL;
          conn = odin3_json_next(conn)) {
@@ -172,9 +175,14 @@ static odin3_status make_implicit_one(jr *rd, jr_implicit *entry) {
                               .n_ports = (uint32_t)defs.len};
     if (st == ODIN3_OK) {
         st = odin3_celltype_add_local(rd->design, &def, NULL);
-        st = st == ODIN3_ERR_INVALID_ARG
-                 ? jr_error(rd, NULL, NULL, "cannot make the implicit black box '%s'", name)
-                 : jr_fail(rd, st);
+        if (st == ODIN3_ERR_INVALID_ARG) {
+            rd->cur_name = entry->module;
+            st = jr_error(rd, entry->first_cell,
+                          &(jr_where){"cells", jr_key_of(entry->first_cell), NULL},
+                          "cannot make the implicit black box '%s' (see the message before)", name);
+            rd->cur_name = NULL;
+        }
+        st = st == ODIN3_ERR_PARSE ? st : jr_fail(rd, st);
     }
     if (st == ODIN3_OK) {
         warn_implicit(rd, name);

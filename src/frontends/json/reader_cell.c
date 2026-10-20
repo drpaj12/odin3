@@ -31,15 +31,6 @@ static int find_port(const odin3_celltype_def *def, const char *name) {
     return -1;
 }
 
-static int find_param(const odin3_celltype_def *def, const char *name) {
-    for (uint32_t i = 0; i < def->n_params; i++) {
-        if (strcmp(def->params[i].name, name) == 0) {
-            return (int)i;
-        }
-    }
-    return -1;
-}
-
 /* The member `member` of a cell for an error. */
 static jr_where member_where(const jr_cell *cell, const char *path) {
     return (jr_where){cell->where.section, cell->where.key, path};
@@ -73,9 +64,15 @@ static odin3_status cell_begin(jr *rd, const odin3_json_node *node, jr_cell *cel
 /* One parameter of the cell, typed by the registry. */
 static odin3_status typed_param(jr *rd, const jr_cell *cell, const odin3_json_node *member) {
     char path[JR_NAME_BUF];
-    (void)snprintf(path, sizeof path, "parameters.%s", odin3_json_key(member));
-    jr_where here = member_where(cell, path);
-    int at = find_param(cell->def, odin3_json_key(member));
+    jr_where here = member_where(cell, "parameters");
+    odin3_status joined =
+        jr_join(rd, &(jr_join_args){member, &here, "parameters.", odin3_json_key(member)}, path,
+                sizeof path);
+    if (joined != ODIN3_OK) {
+        return joined;
+    }
+    here = member_where(cell, path);
+    int at = jr_find_param(cell->def, odin3_json_key(member));
     if (at < 0) {
         return jr_error(rd, member, &here, "'%s' has no parameter '%s'", cell->type_name,
                         odin3_json_key(member));
@@ -117,11 +114,18 @@ static odin3_status param_attrs(jr *rd, const jr_cell *cell, odin3_node_id node)
          cell->attr_params && st == ODIN3_OK && member != NULL; member = odin3_json_next(member)) {
         char key[JR_NAME_BUF];
         char path[JR_NAME_BUF];
-        (void)snprintf(key, sizeof key, "parameter:%s", odin3_json_key(member));
-        (void)snprintf(path, sizeof path, "parameters.%s", odin3_json_key(member));
-        jr_where here = member_where(cell, path);
-        odin3_value val;
-        st = jr_attr_value(rd, member, &here, &val);
+        const char *name = odin3_json_key(member);
+        jr_where here = member_where(cell, "parameters");
+        st = jr_join(rd, &(jr_join_args){member, &here, "parameter:", name}, key, sizeof key);
+        if (st == ODIN3_OK) {
+            st =
+                jr_join(rd, &(jr_join_args){member, &here, "parameters.", name}, path, sizeof path);
+        }
+        here = member_where(cell, path);
+        odin3_value val = {0};
+        if (st == ODIN3_OK) {
+            st = jr_attr_value(rd, member, &here, &val);
+        }
         if (st == ODIN3_OK) {
             st = jr_set_attr_named(rd, rd->cur.module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key,
                                    &val);
@@ -132,7 +136,7 @@ static odin3_status param_attrs(jr *rd, const jr_cell *cell, odin3_node_id node)
 
 /* M-11: INIT of a bit flip-flop or latch from the init attribute of the netname of its Q bit. */
 static void apply_init(jr *rd, const jr_cell *cell) {
-    int init = find_param(cell->def, "INIT");
+    int init = jr_find_param(cell->def, "INIT");
     const odin3_json_node *qconn = jr_member(jr_member(cell->node, "connections"), "Q");
     const odin3_json_node *bit = jr_first(qconn);
     uint64_t value = 0;
@@ -348,16 +352,20 @@ static odin3_status create_node(jr *rd, const jr_cell *cell, odin3_node_id *node
 /* The type after a `$lut` of no inputs became a `$sop`. */
 static odin3_status retype_lut0(jr *rd, jr_cell *cell) {
     odin3_celltype_id sop = {0};
-    if (strcmp(cell->def->name, "$lut") != 0 || cell->attr_params ||
-        !jr_lut0_params(rd, cell->def)) {
+    bool converted = false;
+    if (strcmp(cell->def->name, "$lut") != 0 || cell->attr_params) {
         return ODIN3_OK;
     }
     if (!jr_lookup_type(rd, "$sop", &sop)) {
         return jr_error(rd, cell->node, &cell->where, "internal error: no $sop cell type");
     }
-    cell->type = sop;
-    cell->def = odin3_celltype_get(rd->design, sop);
-    return ODIN3_OK;
+    const jr_lut_sop defs = {cell->def, odin3_celltype_get(rd->design, sop)};
+    odin3_status st = jr_lut0_params(rd, &defs, &converted);
+    if (st == ODIN3_OK && converted) {
+        cell->type = sop;
+        cell->def = defs.sop;
+    }
+    return st;
 }
 
 static odin3_status build_cell(jr *rd, const odin3_json_node *node) {

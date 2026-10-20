@@ -86,6 +86,16 @@ const char *jr_str(const jr *rd, uint32_t str) {
     return odin3_strtab_get(odin3_design_strtab(rd->design), str);
 }
 
+odin3_status jr_join(const jr *rd, const jr_join_args *args, char *buf, size_t size) {
+    int wrote = snprintf(buf, size, "%s%s", args->prefix, args->name);
+    if (wrote < 0 || (size_t)wrote >= size) {
+        buf[0] = '\0';
+        return jr_error(rd, args->node, args->where, "the name '%.40s...' is longer than %zu bytes",
+                        args->name, size - 1 - strlen(args->prefix));
+    }
+    return ODIN3_OK;
+}
+
 /* --- setup and teardown -------------------------------------------------------------------- */
 
 static odin3_status jr_init(jr *rd, odin3_design *design, const char *path,

@@ -144,6 +144,38 @@ static void test_auto_blackbox_conflicts(void) {
     rj_log_has("not equivalent to its source");
 }
 
+/* A type the IR refuses (a port with an empty name) is a located error naming the first cell. */
+static void test_implicit_type_refused(void) {
+    const odin3_json_opts opts = {.auto_blackbox = true};
+    rj_expect_failure(
+        (rj_failure){top_json("", "\"u\": {\"type\": \"mystery\", \"connections\": {\"\": [2]}}"),
+                     "modules.top.cells.u: cannot make the implicit black box 'mystery'", &opts});
+    rj_log_has("in.json:1:");
+}
+
+/* A name that would not fit its buffer is a located error, never a truncated key. */
+static void test_long_names(void) {
+    char name[400];
+    memset(name, 'k', sizeof name - 1);
+    name[sizeof name - 1] = '\0';
+    char json[2048];
+    (void)snprintf(json, sizeof json, "{\"modules\": {\"top\": {\"attributes\": {\"%s\": 1}}}}",
+                   name);
+    rj_expect_error(json, "is longer than");
+    (void)snprintf(
+        json, sizeof json,
+        "{\"modules\": {\"top\": {\"memories\": {\"m\": {\"attributes\": {\"%s\": 1}}}}}}", name);
+    rj_expect_error(json, "is longer than");
+    (void)snprintf(json, sizeof json,
+                   "{\"modules\": {\"top\": {\"memories\": {\"%s\": {\"width\": 1}}}}}", name);
+    rj_expect_error(json, "the name of the memory attribute is too long");
+    (void)snprintf(json, sizeof json,
+                   "{\"modules\": {\"sub\": {}, \"top\": {\"cells\": {\"u\": {\"type\": \"sub\", "
+                   "\"parameters\": {\"%s\": 1}, \"connections\": {}}}}}}",
+                   name);
+    rj_expect_error(json, "is longer than");
+}
+
 static void test_scopeinfo_is_dropped(void) {
     rj_expect_ok(top_json("",
                           "\"$scope\": {\"type\": \"$scopeinfo\", \"parameters\": {\"TYPE\": "
@@ -585,7 +617,9 @@ static const char *const FEATURE_JSON =
     "\"connections\": {\"A\": [6, 7], \"Y\": [5]}},"
     "\"u\": {\"type\": \"sub\", \"parameters\": {\"W\": 3}, \"connections\": {\"i\": [4]}},"
     "\"b\": {\"type\": \"bb\", \"connections\": {\"p\": [2, 3]}},"
-    "\"m\": {\"type\": \"mystery\", \"connections\": {\"A\": [2]}}},"
+    "\"m\": {\"type\": \"mystery\", \"connections\": {\"A\": [2]}},"
+    "\"k\": {\"type\": \"$lut\", \"parameters\": {\"WIDTH\": 0, \"LUT\": \"1\"}, "
+    "\"connections\": {\"A\": [], \"Y\": [9]}}},"
     "\"memories\": {\"mem\": {\"width\": 8, \"size\": 4}},"
     "\"netnames\": {\"q\": {\"bits\": [8], \"attributes\": {\"init\": \"1\"}}, "
     "\"w\": {\"bits\": [6, 7], \"attributes\": {\"keep\": 1}}}}}}";
@@ -694,6 +728,8 @@ int main(void) {
     RUN_TEST(test_unknown_type_is_an_error);
     RUN_TEST(test_auto_blackbox);
     RUN_TEST(test_auto_blackbox_conflicts);
+    RUN_TEST(test_implicit_type_refused);
+    RUN_TEST(test_long_names);
     RUN_TEST(test_scopeinfo_is_dropped);
     RUN_TEST(test_techlib_type);
     RUN_TEST(test_int_parameters);
