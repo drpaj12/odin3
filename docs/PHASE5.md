@@ -42,6 +42,10 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
   `write_json` writes, and Yosys's own JSON. Test: `write_json` then `read_json` round trip is
   identical under `netlist-compare` on the micros and the BLIF goldens; a Yosys-written JSON of
   a micro reads and is equivalent to its RTL.
+  Spec `docs/specs/2026-10-20-5.3-read-json-design.md`, plan `docs/plans/2026-10-20-5.3-read-json-plan.md`
+  (PRs 5.3a parser, 5.3b reader and pass, 5.3c round-trip tool and Yosys fixtures; decision 10). The
+  fixpoint is generation 2 to 3 (spec R-1); `netlist-compare` is identical where covers survive the
+  `$sop` to `$lut` write (spec R-3, question 3).
 - [ ] 5.4 HDL locations survive write and read:
   - BLIF: `read_blif` decodes `--name-style provenance` names (`hier/<name>@file:line`) back
     into provenance records pointing at the HDL, beside the IMPORTED record of the BLIF line;
@@ -51,6 +55,11 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
   - JSON: `read_json` turns `"src"` attributes into provenance records.
   Test: for the micros, every object that had an HDL location before writing has the same
   location after reading, in each of the three formats.
+  Spec `docs/specs/2026-10-20-5.4-hdl-locations-design.md`, plan
+  `docs/plans/2026-10-20-5.4-hdl-locations-plan.md` (PRs 5.4a text, helper and writers; 5.4b JSON,
+  5.4c Verilog `-netlist`, 5.4d BLIF `--hdl-locs`, in three parallel lanes; 5.4e `tools/loc-check` and
+  the numbers; decision 11). "Same location" is per object kind as the spec's section 5 table says,
+  with named exception classes X-1 to X-9, each counted.
 
 ## Dependencies
 
@@ -58,6 +67,10 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
   generic port-signature matching (4.2). It can start when a Phase 3 lane frees up (decision 4).
 - 5.3 is the reader for Phase 6's graph export (6.3), which is this JSON plus Odin III keys.
 - 5.4 feeds Phase 6's provenance coverage gate (6.5) on read-back netlists.
+- Task order (specs of 2026-10-20): 5.3a (parser) and 5.4a (location text, helper, writers) run in
+  parallel and touch disjoint files (5.4a touches the JSON writer's `src`, 5.3 only if its R-5 check
+  finds a defect); then 5.3b; then 5.3c, 5.4b, 5.4c and 5.4d (5.4b needs 5.3b, 5.4c and 5.4d only
+  5.4a); 5.4e last. At most three lanes at once.
 
 ## Decisions log
 
@@ -165,3 +178,23 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
      unproven by Yosys and `lower` cannot take it; `$memrd`/`$memwr` have no RTLIL form (text legs only);
    - `lpm-check` keeps `noroundtrip altsyncram_soft.v` (the text fixpoint of X-9); `icells-check`
      covers that micro at the LPM level.
+10. **5.3 spec and plan** (Peter approved all ten recommendations, 2026-10-20; spec
+    `docs/specs/2026-10-20-5.3-read-json-design.md` section 12 has the ten questions with
+    recommendations; plan `docs/plans/2026-10-20-5.3-read-json-plan.md`). No IR, ABI or ADR change. In
+    short: `read_json [--top] [--auto-blackbox]`, an iterative parser with limits (no recursion), a DOM
+    and two walks, nets created by ascending bit number so the write, read, write fixpoint is generation
+    2 to 3, unregistered Yosys cell types are a located error (an implicit black box with a warning only
+    under `--auto-blackbox`), no resize of widths, `$sop` is written as `$lut` so gen1 and gen2 are
+    equivalent and not always `netlist-compare` identical, no public ABI entry, no `$mem_v2`.
+11. **5.4 spec and plan** (Peter approved all ten recommendations, 2026-10-20, including
+    question 1, the IR-13 amendment; spec
+    `docs/specs/2026-10-20-5.4-hdl-locations-design.md` section 12 has the ten questions with
+    recommendations; plan `docs/plans/2026-10-20-5.4-hdl-locations-plan.md`). **Question 1 (approved by
+    Peter 2026-10-20; amend IR-13 in `docs/IR.md` in Task 3):** readers restore a location as one `DERIVED` record (parents:
+    the restored HDL `SOURCE`, then the reader's own `IMPORTED`), a one-sentence amendment of IR-13;
+    fallback is one `SOURCE` record. In short: writers print only `SOURCE` leaves (an `IMPORTED` line
+    never comes back as HDL), `src` in Yosys form with end span and up to 8 locations, Verilog `(* src *)`
+    plus the unchanged `// file:line` on assigns, plain BLIF `.attr src` under a new `--src-attr`,
+    readers decode only under `read_verilog -netlist`, `read_blif --hdl-locs`, `read_json` (default,
+    `--keep-src-attr` to keep the string); `tools/loc-check` reports same, line, inherited, lost by class
+    and gained per format, level and object kind, the baseline for 6.5.
