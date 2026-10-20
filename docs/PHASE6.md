@@ -1,6 +1,9 @@
 # Odin III: Phase 6: analysis flow and provenance
 
-Spec: `docs/DESIGN.md` §5 (IR, provenance), §9 (writers), §12; ADRs D11 (this phase), D10
+Spec: `docs/specs/2026-10-21-6-analysis-flow-design.md` (v1, awaiting Peter's approval). Plan:
+`docs/plans/2026-10-21-6-analysis-flow-plan.md`.
+
+Design inputs: `docs/DESIGN.md` §5 (IR, provenance), §9 (writers), §12; ADRs D11 (this phase), D10
 follow-up 2 (the goals), D9 (provenance). Inputs: `write_dot` (1F), `write_json` (1F), the
 provenance index and `DERIVED` records across every pass including `abc` (PHASE3 decision 14),
 `read_blif`/`read_verilog`, Phase 5's `read_json` and provenance read-back, and `tools/vtr-qor`
