@@ -258,6 +258,7 @@ static odin3_status read_all(jr *rd) {
     }
     if (st == ODIN3_OK) {
         jr_report_skipped(rd);
+        jr_report_src(rd);
     }
     return st;
 }
