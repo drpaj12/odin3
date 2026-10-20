@@ -174,7 +174,7 @@ writers)
     grep -qF 'module \t' "$work/stdout" || fail "write_rtlil - not on stdout"
     grep -qF "module t" "$work/stdout" || fail "write_verilog - not on stdout"
     expect_fail "dot: refusing to draw" -p "read_blif $fixture; write_dot $work/b.dot --max-nodes 2"
-    expect_fail "--name-style expects short or provenance" \
+    expect_fail "--name-style expects short, provenance or hash" \
         -p "read_blif $fixture; write_verilog $work/b.v --name-style long"
     expect_fail "write_json: expects one path" -p "read_blif $fixture; write_json"
     ;;

@@ -173,8 +173,8 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
  * ODIN3_ERR_INVALID_ARG. Without HASH, name_map is ignored.
  *
  * VTR output (spec 3E §5-§9): the header line `# Odin III <version> write_blif --vtr (K=<K>,
- * names short|provenance|hash)`, one `# abc: <run information>` line per pass run named `abc` that has
- * run information (odin3_passrun_info, verbatim; 3D AB-25), in run order, and a blank line;
+ * names short|provenance|hash)`, one `# abc: <run information>` line per pass run named `abc` that
+ * has run information (odin3_passrun_info, verbatim; 3D AB-25), in run order, and a blank line;
  * `.model <top>`; `.inputs`/`.outputs` (no `.clock`);
  * the generators `.names gnd`, `.names vcc` / `1`, `.names unconn` that some pin or buffer reads,
  * in that order, each left out when a written zero-input $sop already is it; the cells in node ID

@@ -102,6 +102,7 @@ add_library(odin3_core OBJECT
     src/passes/sim_pass.c
     src/passes/project_pass.c
     src/passes/dump_locs.c
+    src/passes/names.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
@@ -398,6 +399,7 @@ add_library(odin3_core OBJECT
     src/backends/common/attrs.c
     src/backends/dot/writer.c
     src/backends/json/emit.c
+    src/backends/json/names.c
     src/backends/json/cells.c
     src/backends/json/lut.c
     src/backends/json/writer.c

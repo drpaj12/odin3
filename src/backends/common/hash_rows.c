@@ -62,8 +62,8 @@ static odin3_status resolve_group(odin3_hash_rows *rows, const odin3_hash_resolv
     odin3_hash_name *names = odin3_util_calloc((total + 1) * sizeof *names);
     size_t *index = odin3_util_calloc((total + 1) * sizeof *index);
     uint32_t count = 0;
-    odin3_status st = fulls != NULL && names != NULL && index != NULL ? ODIN3_OK
-                                                                      : ODIN3_ERR_NO_MEMORY;
+    odin3_status st =
+        fulls != NULL && names != NULL && index != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
     for (size_t i = req->first; st == ODIN3_OK && i < rows->rows.len; i++) {
         const odin3_hash_row *row = odin3_hash_rows_at(rows, i);
         if (all || row->kind == kind) {
@@ -140,34 +140,39 @@ odin3_status odin3_hash_rows_map_text(const odin3_hash_rows *rows, odin3_strbuf 
     for (size_t i = 0; i < count; i++) {
         entries[i] = entry_of(rows, odin3_hash_rows_at(rows, i));
     }
-    odin3_status st =
-        odin3_name_map_write(entries, (uint32_t)count, ODIN3_HASH_NAME_WIDTH, out);
+    odin3_status st = odin3_name_map_write(entries, (uint32_t)count, ODIN3_HASH_NAME_WIDTH, out);
     odin3_util_free(entries);
     return st;
 }
 
-odin3_status odin3_hash_map_path(const char *who, const char *out_path, const char *name_map,
-                                 odin3_strbuf *path) {
+odin3_status odin3_hash_map_path(const odin3_hash_map_req *req, odin3_strbuf *path) {
     odin3_strbuf_clear(path);
-    if (name_map != NULL) {
-        return odin3_strbuf_append(path, odin3_bytes_cstr(name_map));
+    if (req->name_map != NULL) {
+        return odin3_strbuf_append(path, odin3_bytes_cstr(req->name_map));
     }
-    if (strcmp(out_path, "-") == 0) {
-        odin3_log(ODIN3_LOG_ERROR, "%s: --name-style hash needs --name-map when the output is stdout",
-                  who);
+    if (strcmp(req->out_path, "-") == 0) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "%s: --name-style hash needs --name-map when the output is stdout", req->who);
         return ODIN3_ERR_INVALID_ARG;
     }
-    return odin3_strbuf_appendf(path, "%s.names", out_path);
+    return odin3_strbuf_appendf(path, "%s.names", req->out_path);
 }
 
 odin3_status odin3_hash_map_open(odin3_hash_map_file *map, const char *path) {
-    odin3_status st = odin3_atomic_file_open(&map->file, path);
+    odin3_strbuf_init(&map->path);
+    map->open = false;
+    odin3_status st = odin3_strbuf_append(&map->path, odin3_bytes_cstr(path));
+    st = st == ODIN3_OK ? odin3_atomic_file_open(&map->file, map->path.data) : st;
     map->open = st == ODIN3_OK;
+    if (!map->open) {
+        odin3_strbuf_free(&map->path);
+    }
     return st;
 }
 
 odin3_status odin3_hash_map_close(odin3_hash_map_file *map, odin3_bytes text, odin3_status status) {
     if (!map->open) {
+        odin3_strbuf_free(&map->path);
         return status;
     }
     map->open = false;
@@ -176,5 +181,7 @@ odin3_status odin3_hash_map_close(odin3_hash_map_file *map, odin3_bytes text, od
         odin3_log(ODIN3_LOG_ERROR, "%s: write failed", map->file.path);
         st = ODIN3_ERR_IO;
     }
-    return odin3_atomic_file_close(&map->file, st);
+    st = odin3_atomic_file_close(&map->file, st);
+    odin3_strbuf_free(&map->path);
+    return st;
 }

@@ -84,26 +84,35 @@ odin3_status odin3_hash_rows_index(const odin3_hash_rows *rows, odin3_u64map **i
 /* Appends the whole map text (header and sorted lines, H-4) of all rows to out. */
 odin3_status odin3_hash_rows_map_text(const odin3_hash_rows *rows, odin3_strbuf *out);
 
-/* --- the map file ------------------------------------------------------------------------------ */
+/* --- the map file ------------------------------------------------------------------------------
+ */
 
-/* The map path of a write: `--name-map` if given, else `<out>.names` (NULL out: none). */
+/* The name map file of a write: a private temporary until odin3_hash_map_close. */
 typedef struct odin3_hash_map_file {
     odin3_atomic_file file;
+    odin3_strbuf path; /* the destination; the file borrows it */
     bool open;
 } odin3_hash_map_file;
+
+/* What odin3_hash_map_path resolves. */
+typedef struct odin3_hash_map_req {
+    const char *who;      /* the writer's name for its messages */
+    const char *out_path; /* the netlist's path */
+    const char *name_map; /* --name-map, or NULL */
+} odin3_hash_map_req;
 
 /*
  * Resolves the path of the name map: name_map if it is non-NULL, else `<out_path>.names`, into
  * *path (cleared first). ODIN3_ERR_INVALID_ARG, logged `<who>: --name-style hash needs --name-map
  * when the output is stdout`, for out_path "-" with no name_map.
  */
-odin3_status odin3_hash_map_path(const char *who, const char *out_path, const char *name_map,
-                                 odin3_strbuf *path);
+odin3_status odin3_hash_map_path(const odin3_hash_map_req *req, odin3_strbuf *path);
 
 /*
  * Opens the map file beside the netlist before anything is written, so a map that cannot be
- * written refuses the write (H-1). The file is a private temporary until commit. ODIN3_ERR_IO
- * (logged by util/file.h).
+ * written refuses the write (H-1). The path is copied. The file is a private temporary until
+ * commit. ODIN3_ERR_IO (logged by util/file.h). A map that was never opened (open false) is
+ * closed by odin3_hash_map_close as a no-op.
  */
 odin3_status odin3_hash_map_open(odin3_hash_map_file *map, const char *path);
 

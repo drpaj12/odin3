@@ -494,7 +494,7 @@ void jw_record_key(jw *out, const char *key) {
     }
 }
 
-const char *jw_make_key(jw *out, const jw_keyspec *spec) {
+const char *jw_plain_key(jw *out, const jw_keyspec *spec) {
     uint32_t bump = 0;
     odin3_status status = build_key(out, spec, bump);
     while (status == ODIN3_OK && out->key.data != NULL && key_taken(out, spec, out->key.data)) {
@@ -505,6 +505,12 @@ const char *jw_make_key(jw *out, const jw_keyspec *spec) {
         return "";
     }
     const char *key = out->key.data != NULL ? out->key.data : "";
+    out->hide = key[0] == '$';
     jw_record_key(out, key);
     return out->status == ODIN3_OK ? key : "";
+}
+
+const char *jw_make_key(jw *out, const jw_keyspec *spec) {
+    const char *key = jw_prov_key(out, spec);
+    return key != NULL ? key : jw_plain_key(out, spec);
 }

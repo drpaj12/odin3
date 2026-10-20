@@ -14,8 +14,8 @@
 #include "util/str.h"
 
 #include <dirent.h>
-#include <stdarg.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -43,7 +43,7 @@ static void sink(odin3_log_level level, const char *msg, void *user) {
 }
 
 static void path_of(const char *name, char *out) {
-    (void)snprintf(out, PATH_BUF, "%s/%s", dir, name);
+    (void)snprintf(out, PATH_BUF, "%s/%.240s", dir, name);
 }
 
 void setUp(void) {
@@ -100,12 +100,12 @@ static char *slurp(const char *name) {
     return text;
 }
 
-static void put_file(const char *name, const char *text) {
+static void put_file(const char *name, odin3_bytes text) {
     char path[PATH_BUF];
     path_of(name, path);
     FILE *file = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(file);
-    TEST_ASSERT_EQUAL_size_t(strlen(text), fwrite(text, 1, strlen(text), file));
+    TEST_ASSERT_EQUAL_size_t(text.len, fwrite(text.ptr, 1, text.len, file));
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
 }
 
@@ -117,7 +117,7 @@ static const char *const INPUT = ".model top\n.inputs a b\n.outputs y\n"
 
 static void load_design(void) {
     char path[PATH_BUF];
-    put_file("in.blif", INPUT);
+    put_file("in.blif", odin3_bytes_cstr(INPUT));
     path_of("in.blif", path);
     odin3_blif_read_stats stats = {0};
     odin3_blif_read_opts opts = {.hdl_locs = true, .stats = &stats};
@@ -125,15 +125,24 @@ static void load_design(void) {
                                   log_text);
 }
 
-/* Runs `pass <args with %s = dir>`. */
-static odin3_status run(const char *pass, const char *format, ...) __attribute__((format(printf, 2, 3)));
-static odin3_status run(const char *pass, const char *format, ...) {
-    char args[ARGS_BUF];
+/* The formatted arguments of a pass call (one buffer: use the result at once). */
+static odin3_bytes fmt_args(const char *format, ...) __attribute__((format(printf, 1, 2)));
+static odin3_bytes fmt_args(const char *format, ...) {
+    static char args[ARGS_BUF];
     va_list ap;
     va_start(ap, format);
-    (void)vsnprintf(args, sizeof args, format, ap);
+    int len = vsnprintf(args, sizeof args, format, ap);
     va_end(ap);
-    return odin3_pass_run(design, pass, odin3_bytes_cstr(args));
+    TEST_ASSERT_TRUE(len >= 0 && (size_t)len < sizeof args);
+    return (odin3_bytes){args, (size_t)len};
+}
+
+static odin3_status run(const char *pass, odin3_bytes args) {
+    return odin3_pass_run(design, pass, args);
+}
+
+static void run_ok(const char *pass, odin3_bytes args) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(pass, args), log_text);
 }
 
 /* --- the writers ------------------------------------------------------------------------------ */
@@ -142,19 +151,23 @@ typedef struct writer_case {
     const char *pass;
     const char *flags; /* before the path */
     const char *ext;
+    uint32_t entries; /* the renamed objects of the test design */
 } writer_case;
 
 static const writer_case WRITERS[] = {
-    {"write_blif", "--vtr", ".blif"},
-    {"write_verilog", "", ".v"},
-    {"write_json", "", ".json"},
+    {"write_blif", "--vtr", ".blif", 2},
+    {"write_verilog", "", ".v", 2},
+    {"write_json", "", ".json", 4},
 };
 enum { N_WRITERS = 3, HASH_CHARS = 11 };
 
-static odin3_status write_hash(const writer_case *wc, const char *base, const char *extra) {
-    char dirs[PATH_BUF];
-    (void)snprintf(dirs, sizeof dirs, "%s", dir);
-    return run(wc->pass, "%s --name-style hash %s %s/%s%s", wc->flags, extra, dirs, base, wc->ext);
+static odin3_status write_hash_extra(const writer_case *wc, const char *base, odin3_bytes extra) {
+    return run(wc->pass, fmt_args("%s --name-style hash %.*s %s/%s%s", wc->flags, (int)extra.len,
+                                  (const char *)extra.ptr, dir, base, wc->ext));
+}
+
+static odin3_status write_hash(const writer_case *wc, const char *base) {
+    return write_hash_extra(wc, base, odin3_bytes_cstr(""));
 }
 
 /* The data lines of a map: not blank, not `#`. */
@@ -169,74 +182,99 @@ static uint32_t map_lines(const char *map) {
     return count;
 }
 
-/* Calls check(short_name) for the third field of every data line. */
-typedef void (*short_check)(const char *short_name, const char *line, void *user);
+/* The third tab-separated field of line (the short name) into out. */
+static void short_field(const char *line, char *out) {
+    const char *tab = strchr(line, '\t');
+    tab = tab != NULL ? strchr(tab + 1, '\t') : NULL;
+    const char *end = tab != NULL ? strchr(tab + 1, '\t') : NULL;
+    TEST_ASSERT_NOT_NULL_MESSAGE(end, line);
+    memcpy(out, tab + 1, (size_t)(end - tab - 1));
+    out[end - tab - 1] = '\0';
+}
+
+/* One data line of a map and its short name. */
+typedef struct entry_view {
+    const char *line;
+    const char *short_name;
+} entry_view;
+
+/* Calls check(entry, user) for every data line of map. */
+typedef void (*short_check)(const entry_view *entry, void *user);
 static void each_entry(const char *map, short_check check, void *user) {
     for (const char *at = map; *at != '\0';) {
         const char *end = strchr(at, '\n');
         end = end != NULL ? end : at + strlen(at);
+        char line[LOG_MAX];
+        char shorts[ARGS_BUF];
+        TEST_ASSERT_TRUE((size_t)(end - at) < sizeof line);
+        memcpy(line, at, (size_t)(end - at));
+        line[end - at] = '\0';
         if (end > at && *at != '#') {
-            char line[LOG_MAX];
-            TEST_ASSERT_TRUE((size_t)(end - at) < sizeof line);
-            memcpy(line, at, (size_t)(end - at));
-            line[end - at] = '\0';
-            const char *tab1 = strchr(line, '\t');
-            const char *tab2 = tab1 != NULL ? strchr(tab1 + 1, '\t') : NULL;
-            const char *tab3 = tab2 != NULL ? strchr(tab2 + 1, '\t') : NULL;
-            TEST_ASSERT_NOT_NULL_MESSAGE(tab3, line);
-            char shorts[ARGS_BUF];
-            memcpy(shorts, tab2 + 1, (size_t)(tab3 - tab2 - 1));
-            shorts[tab3 - tab2 - 1] = '\0';
-            check(shorts, line, user);
+            short_field(line, shorts);
+            check(&(entry_view){line, shorts}, user);
         }
         at = *end != '\0' ? end + 1 : end;
     }
 }
 
-static void expect_hash_shape(const char *short_name, const char *line, void *user) {
-    (void)line;
-    const char *netlist = user;
+static bool base32_char(char chr) {
+    return (chr >= 'a' && chr <= 'z') || (chr >= '2' && chr <= '7');
+}
+
+/* `h` and 10 base32 characters. */
+static void expect_hash_text(const char *short_name) {
     TEST_ASSERT_EQUAL_size_t_MESSAGE(HASH_CHARS, strlen(short_name), short_name);
     TEST_ASSERT_EQUAL_CHAR('h', short_name[0]);
     for (size_t i = 1; i < HASH_CHARS; i++) {
-        TEST_ASSERT_TRUE_MESSAGE((short_name[i] >= 'a' && short_name[i] <= 'z') ||
-                                     (short_name[i] >= '2' && short_name[i] <= '7'),
-                                 short_name);
+        TEST_ASSERT_TRUE_MESSAGE(base32_char(short_name[i]), short_name);
     }
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(netlist, short_name), short_name);
+}
+
+static void expect_hash_shape(const entry_view *entry, void *user) {
+    /* every renamed object has an HDL location, so no port is in the map */
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(entry->line, "@d.v:"), entry->line);
+    expect_hash_text(entry->short_name);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr((const char *)user, entry->short_name), entry->short_name);
+}
+
+/* The netlist and the name map of one write named base. */
+typedef struct written {
+    char *net;
+    char *map;
+} written;
+
+static written read_written(const writer_case *wc, const char *base) {
+    char name[SMALL];
+    char map[SMALL + 8];
+    (void)snprintf(name, sizeof name, "%s%s", base, wc->ext);
+    (void)snprintf(map, sizeof map, "%s.names", name);
+    return (written){slurp(name), slurp(map)};
+}
+
+static void free_written(written *files) {
+    odin3_util_free(files->net);
+    odin3_util_free(files->map);
 }
 
 static void test_writer_hash(const writer_case *wc) {
     load_design();
-    char name1[SMALL];
-    char name2[SMALL];
-    (void)snprintf(name1, sizeof name1, "one%s", wc->ext);
-    (void)snprintf(name2, sizeof name2, "two%s", wc->ext);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, write_hash(wc, "one", ""), log_text);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, write_hash(wc, "two", ""), log_text);
-    char map1[SMALL + 8];
-    char map2[SMALL + 8];
-    (void)snprintf(map1, sizeof map1, "%s.names", name1);
-    (void)snprintf(map2, sizeof map2, "%s.names", name2);
-    char *net1 = slurp(name1);
-    char *net2 = slurp(name2);
-    char *mapped1 = slurp(map1);
-    char *mapped2 = slurp(map2);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, write_hash(wc, "one"), log_text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, write_hash(wc, "two"), log_text);
+    written one = read_written(wc, "one");
+    written two = read_written(wc, "two");
     /* deterministic: byte-equal netlist and map (the map holds no path) */
-    TEST_ASSERT_EQUAL_STRING(net1, net2);
-    TEST_ASSERT_EQUAL_STRING(mapped1, mapped2);
-    TEST_ASSERT_TRUE_MESSAGE(strncmp(mapped1, "# odin3-names 1 hash=sha256 width=10\n", 37) == 0,
-                             mapped1);
-    TEST_ASSERT_TRUE_MESSAGE(map_lines(mapped1) >= 2, mapped1);
-    each_entry(mapped1, expect_hash_shape, net1);
+    TEST_ASSERT_EQUAL_STRING(one.net, two.net);
+    TEST_ASSERT_EQUAL_STRING(one.map, two.map);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, strncmp(one.map, "# odin3-names 1 hash=sha256 width=10\n", 37),
+                                  one.map);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(wc->entries, map_lines(one.map), one.map);
+    each_entry(one.map, expect_hash_shape, one.net);
     /* the provenance form is gone from the netlist; the ports are not renamed */
-    TEST_ASSERT_NULL_MESSAGE(strstr(net1, "@d.v"), net1);
-    TEST_ASSERT_NOT_NULL(strstr(mapped1, "top/u1/w@d.v:3"));
-    TEST_ASSERT_NOT_NULL(strstr(mapped1, "\tnet\t"));
-    odin3_util_free(net1);
-    odin3_util_free(net2);
-    odin3_util_free(mapped1);
-    odin3_util_free(mapped2);
+    TEST_ASSERT_NULL_MESSAGE(strstr(one.net, "@d.v"), one.net);
+    TEST_ASSERT_NOT_NULL(strstr(one.map, "top/u1/w@d.v:3"));
+    TEST_ASSERT_NOT_NULL(strstr(one.map, "\tnet\t"));
+    free_written(&one);
+    free_written(&two);
 }
 
 static void test_blif_hash(void) {
@@ -271,7 +309,8 @@ static void test_explicit_map_path(void) {
         char extra[PATH_BUF];
         char sidecar[PATH_BUF];
         (void)snprintf(extra, sizeof extra, "--name-map %s/m%d.map", dir, i);
-        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, write_hash(wc, "o", extra), log_text);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, write_hash_extra(wc, "o", odin3_bytes_cstr(extra)),
+                                      log_text);
         (void)snprintf(sidecar, sizeof sidecar, "o%s.names", wc->ext);
         char mapname[PATH_BUF];
         (void)snprintf(mapname, sizeof mapname, "m%d.map", i);
@@ -290,7 +329,7 @@ static void test_refused_without_map(void) {
         char extra[PATH_BUF];
         (void)snprintf(extra, sizeof extra, "--name-map %s/no/such/dir/m.map", dir);
         log_text[0] = '\0';
-        TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, write_hash(wc, "x", extra));
+        TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, write_hash_extra(wc, "x", odin3_bytes_cstr(extra)));
         char outname[PATH_BUF];
         (void)snprintf(outname, sizeof outname, "x%s", wc->ext);
         TEST_ASSERT_FALSE(exists(outname));
@@ -305,7 +344,7 @@ static void test_refused_stdout_without_map(void) {
         const writer_case *wc = &WRITERS[i];
         load_design();
         log_text[0] = '\0';
-        odin3_status st = run(wc->pass, "%s --name-style hash -", wc->flags);
+        odin3_status st = run(wc->pass, fmt_args("%s --name-style hash -", wc->flags));
         TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, st, log_text);
         TEST_ASSERT_NOT_NULL(strstr(log_text, "--name-map"));
         odin3_design_destroy(design);
@@ -313,29 +352,49 @@ static void test_refused_stdout_without_map(void) {
     }
 }
 
-/* --name-map without hash is refused; provenance and short styles write no map. */
-static void test_map_only_with_hash(void) {
+/* --name-map without hash is refused. */
+static void test_map_needs_hash(void) {
     load_design();
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          run("write_verilog", "%s/p.v --name-map %s/p.map", dir, dir));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_verilog", "%s/p.v --name-style provenance", dir));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_json", "%s/p.json --name-style provenance", dir));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_json", "%s/s.json --name-style short", dir));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          run("write_blif", "--vtr --name-style provenance %s/p.blif", dir));
+                          run("write_verilog", fmt_args("%s/p.v --name-map %s/p.map", dir, dir)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          run("write_json", fmt_args("%s/p.json --name-map %s/p.map", dir, dir)));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_ERR_INVALID_ARG,
+        run("write_blif",
+            fmt_args("--vtr --name-style provenance --name-map %s/p.map %s/p.blif", dir, dir)));
+    TEST_ASSERT_FALSE(exists("p.map"));
+}
+
+static void expect_no_sidecars(void) {
     TEST_ASSERT_FALSE(exists("p.v.names"));
     TEST_ASSERT_FALSE(exists("p.json.names"));
     TEST_ASSERT_FALSE(exists("p.blif.names"));
+}
+
+static void expect_json_provenance(void) {
     char *prov = slurp("p.json");
     TEST_ASSERT_NOT_NULL(strstr(prov, "top/u1/w@d.v:3"));
     odin3_util_free(prov);
 }
 
+/* Provenance and short styles write no map; provenance JSON names carry the location. */
+static void test_no_map_without_hash(void) {
+    load_design();
+    run_ok("write_verilog", fmt_args("%s/p.v --name-style provenance", dir));
+    run_ok("write_json", fmt_args("%s/p.json --name-style provenance", dir));
+    run_ok("write_json", fmt_args("%s/s.json --name-style short", dir));
+    run_ok("write_blif", fmt_args("--vtr --name-style provenance %s/p.blif", dir));
+    expect_no_sidecars();
+    expect_json_provenance();
+}
+
 /* JSON without the option is as before: the IR names, no provenance names. */
 static void test_json_default_unchanged(void) {
     load_design();
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_json", "%s/a.json", dir));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_json", "%s/b.json --name-style short", dir));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_json", fmt_args("%s/a.json", dir)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          run("write_json", fmt_args("%s/b.json --name-style short", dir)));
     char *one = slurp("a.json");
     char *two = slurp("b.json");
     TEST_ASSERT_EQUAL_STRING(one, two);
@@ -376,13 +435,13 @@ typedef struct entry_fields {
     char full[ARGS_BUF];
 } entry_fields;
 
-static void first_entry(const char *short_name, const char *line, void *user) {
+static void first_entry(const entry_view *entry, void *user) {
     entry_fields *fields = user;
     if (fields->short_name[0] != '\0') {
         return;
     }
-    (void)snprintf(fields->short_name, sizeof fields->short_name, "%s", short_name);
-    const char *tab = line;
+    (void)snprintf(fields->short_name, sizeof fields->short_name, "%s", entry->short_name);
+    const char *tab = entry->line;
     for (int i = 0; i < 3; i++) {
         tab = strchr(tab, '\t') + 1;
     }
@@ -393,7 +452,7 @@ static void first_entry(const char *short_name, const char *line, void *user) {
 static entry_fields written_map(void) {
     load_design();
     TEST_ASSERT_EQUAL_INT_MESSAGE(
-        ODIN3_OK, run("write_blif", "--vtr --name-style hash %s/m.blif", dir), log_text);
+        ODIN3_OK, run("write_blif", fmt_args("--vtr --name-style hash %s/m.blif", dir)), log_text);
     char *map = slurp("m.blif.names");
     entry_fields fields = {{0}, {0}};
     each_entry(map, first_entry, &fields);
@@ -434,6 +493,8 @@ static void test_names_absent_fails(void) {
     odin3_util_free(text);
 }
 
+static void check_corrupted(void);
+
 static void test_names_check(void) {
     (void)written_map();
     odin3_status st = ODIN3_OK;
@@ -442,12 +503,18 @@ static void test_names_check(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "bad_hash=0 duplicates=0 ignored=0"), text);
     TEST_ASSERT_NOT_NULL(strstr(text, "entries=2 "));
     odin3_util_free(text);
-    /* a corrupted entry: the check reports it and fails */
+    check_corrupted();
+}
+
+/* A corrupted entry: the check reports it and fails. */
+static void check_corrupted(void) {
+    odin3_status st = ODIN3_OK;
+    char *text = NULL;
     char *map = slurp("m.blif.names");
     char *at = strstr(map, "\th");
     TEST_ASSERT_NOT_NULL(at);
     at[2] = at[2] == 'a' ? 'b' : 'a'; /* the short name is no longer the hash of the full name */
-    put_file("bad.names", map);
+    put_file("bad.names", odin3_bytes_cstr(map));
     odin3_util_free(map);
     text = names_out(&st, "--map %s/bad.names --check", dir);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, st);
@@ -463,7 +530,7 @@ static void test_names_arguments(void) {
     text = names_out(&st, "--map %s/none.names --check", dir);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, st);
     odin3_util_free(text);
-    put_file("one.names", "# odin3-names 1 hash=sha256 width=10\n");
+    put_file("one.names", odin3_bytes_cstr("# odin3-names 1 hash=sha256 width=10\n"));
     text = names_out(&st, "--map %s/one.names --check --lookup x", dir);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, st); /* one action only */
     odin3_util_free(text);
@@ -484,7 +551,8 @@ int main(void) {
     RUN_TEST(test_explicit_map_path);
     RUN_TEST(test_refused_without_map);
     RUN_TEST(test_refused_stdout_without_map);
-    RUN_TEST(test_map_only_with_hash);
+    RUN_TEST(test_map_needs_hash);
+    RUN_TEST(test_no_map_without_hash);
     RUN_TEST(test_json_default_unchanged);
     RUN_TEST(test_names_lookup_reverse);
     RUN_TEST(test_names_absent_fails);

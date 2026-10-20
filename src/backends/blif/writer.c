@@ -528,11 +528,12 @@ static odin3_status note_hashed(blif_writer *wr, odin3_net_id net) {
         return ODIN3_OK;
     }
     return odin3_hash_rows_add(
-        &wr->rows, &(odin3_hash_row_req){.module = odin3_module_id_of(wr->module).v,
-                                         .module_name = str_bytes(wr, odin3_module_name(wr->module)),
-                                         .kind = ODIN3_NAME_NET,
-                                         .key = net.v,
-                                         .full = buf_bytes(&wr->orig)});
+        &wr->rows,
+        &(odin3_hash_row_req){.module = odin3_module_id_of(wr->module).v,
+                              .module_name = str_bytes(wr, odin3_module_name(wr->module)),
+                              .kind = ODIN3_NAME_NET,
+                              .key = net.v,
+                              .full = buf_bytes(&wr->orig)});
 }
 
 /* An unnamed net under --name-style provenance: its short name (the wire bit name, else `$n<ID>`)
@@ -554,6 +555,14 @@ static odin3_status generate_provenance(blif_writer *wr, odin3_net_id net, bool 
     return st;
 }
 
+/* Takes wr->cand as the name of key when found and free, else the numbered name; HASH notes a net
+ * named by provenance. */
+static odin3_status take_generated(blif_writer *wr, uint64_t key, odin3_net_id self, bool found) {
+    bool as_is = found && name_free(wr, (odin3_bytes){wr->cand.data, wr->cand.len}, self);
+    odin3_status st = as_is ? take_name(wr, key) : take_numbered(wr, key);
+    return st == ODIN3_OK && as_is ? note_hashed(wr, self) : st;
+}
+
 /* The generated name of key (an unnamed net, or 1 << 32 | an unconnected pin): the net's wire bit
  * name (in the VTR dialect its VB-10 form) when free, else take_numbered. */
 static odin3_status generate(blif_writer *wr, uint64_t key) {
@@ -572,9 +581,7 @@ static odin3_status generate(blif_writer *wr, uint64_t key) {
     if (st != ODIN3_OK) {
         return st;
     }
-    bool as_is = found && name_free(wr, (odin3_bytes){wr->cand.data, wr->cand.len}, self);
-    st = as_is ? take_name(wr, key) : take_numbered(wr, key);
-    st = st == ODIN3_OK && as_is ? note_hashed(wr, self) : st;
+    st = take_generated(wr, key, self, found);
     return st == ODIN3_OK && changed ? note_renamed(wr, self.v, gen_get(wr, key)) : st;
 }
 
@@ -1013,10 +1020,9 @@ static odin3_status hash_finalize(blif_writer *wr) {
     odin3_bytes *reserved = NULL;
     uint32_t nreserved = 0;
     odin3_status st = hash_reserved(wr, &reserved, &nreserved);
-    st = st == ODIN3_OK
-             ? odin3_hash_rows_resolve(&wr->rows, &(odin3_hash_resolve_req){0, reserved, nreserved,
-                                                                            false})
-             : st;
+    st = st == ODIN3_OK ? odin3_hash_rows_resolve(
+                              &wr->rows, &(odin3_hash_resolve_req){0, reserved, nreserved, false})
+                        : st;
     for (size_t i = 0; st == ODIN3_OK && i < odin3_hash_rows_count(&wr->rows); i++) {
         const odin3_hash_row *row = odin3_hash_rows_at(&wr->rows, i);
         uint32_t id = 0;
@@ -2100,7 +2106,7 @@ static void names_take(blif_writer *wr, odin3_blif_names *from) {
 
 /* Moves the writer's tables (each it holds) into to, which must be empty. */
 static void names_give(blif_writer *wr, odin3_blif_names *to) {
-    *to = (odin3_blif_names){wr->gen_names, wr->claims,  wr->net_port, wr->gen,
+    *to = (odin3_blif_names){wr->gen_names, wr->claims, wr->net_port, wr->gen,
                              wr->port_of,   wr->clocks, wr->map_text};
     odin3_strbuf_init(&wr->map_text);
     wr->gen_names = NULL;
@@ -2517,8 +2523,7 @@ static odin3_status write_vtr_header(blif_writer *wr) {
     odin3_strbuf_clear(&wr->token);
     odin3_status st = odin3_strbuf_appendf(
         &wr->token, "# Odin III %s write_blif --vtr (K=%u, names %s)", odin3_version_string(),
-        (unsigned)odin3_blif_vtr_k(wr->opts),
-        NAME_STYLE_WORD[wr->opts->name_style]);
+        (unsigned)odin3_blif_vtr_k(wr->opts), NAME_STYLE_WORD[wr->opts->name_style]);
     if (st != ODIN3_OK) {
         return wr_fail(wr, st);
     }
@@ -2610,7 +2615,8 @@ static odin3_status write_planned(const odin3_design *design, const char *path,
     odin3_strbuf map_path;
     odin3_hash_map_file map = {.open = false};
     odin3_strbuf_init(&map_path);
-    odin3_status st = odin3_hash_map_path("write_blif", path, opts->name_map, &map_path);
+    odin3_status st =
+        odin3_hash_map_path(&(odin3_hash_map_req){"write_blif", path, opts->name_map}, &map_path);
     st = st == ODIN3_OK ? odin3_hash_map_open(&map, map_path.data) : st;
     if (st == ODIN3_OK) {
         st = write_opened(design, path, opts, plan->names);
@@ -2634,10 +2640,9 @@ odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
         return ODIN3_ERR_INVALID_ARG; /* 2D EL-33: before the path is opened */
     }
     odin3_blif_write_opts use =
-        opts != NULL
-            ? *opts
-            : (odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false,
-                                     NULL};
+        opts != NULL ? *opts
+                     : (odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0,
+                                               false, NULL};
     odin3_status st = check_opts(&use);
     odin3_blif_vtr_plan plan = {0};
     if (st == ODIN3_OK && use.dialect == ODIN3_BLIF_DIALECT_VTR) {

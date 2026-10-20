@@ -120,7 +120,7 @@ static void test_write_verilog_name_styles(void) {
 static void test_write_verilog_bad_name_style(void) {
     read_ff();
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("write_verilog", "x.v --name-style long"));
-    TEST_ASSERT_TRUE(log_has("write_verilog: --name-style expects short or provenance"));
+    TEST_ASSERT_TRUE(log_has("write_verilog: --name-style expects short, provenance or hash"));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("write_verilog", "x.v --name-style"));
     TEST_ASSERT_TRUE(log_has("write_verilog: --name-style expects a value"));
 }

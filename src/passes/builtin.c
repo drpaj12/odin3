@@ -323,6 +323,24 @@ static bool wb_is_option(odin3_bytes word) {
     return word.len > 2 && memcmp(word.ptr, "--", 2) == 0;
 }
 
+/* The options that go together: --lut-k and --name-style need --vtr, --name-map needs hash names,
+ * --src-attr is for the plain dialect. Logged, ODIN3_ERR_INVALID_ARG. */
+static odin3_status wb_check_options(const write_blif_args *out) {
+    const char *why = NULL;
+    if ((out->seen & (WB_LUT_K | WB_NAME_STYLE)) != 0 && (out->seen & WB_VTR) == 0) {
+        why = "write_blif: --lut-k and --name-style need --vtr";
+    } else if ((out->seen & WB_NAME_MAP) != 0 && out->opts.name_style != ODIN3_BLIF_NAMES_HASH) {
+        why = "write_blif: --name-map needs --name-style hash";
+    } else if ((out->seen & WB_SRC_ATTR) != 0 && (out->seen & WB_VTR) != 0) {
+        why = "write_blif: --src-attr is for the plain dialect; the VTR dialect has no .attr lines";
+    }
+    if (why != NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "%s", why);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
 /*
  * Plan 3E point (l), the words left to right: an option word (`--x`) is an option, and unknown or
  * repeated options fail at once; a lone `--` ends the options; any other word is a path, so a path
@@ -350,21 +368,7 @@ static odin3_status write_blif_parse(odin3_bytes args, write_blif_args *out) {
         odin3_log(ODIN3_LOG_ERROR, "write_blif: expects one path");
         return ODIN3_ERR_INVALID_ARG;
     }
-    if ((out->seen & (WB_LUT_K | WB_NAME_STYLE)) != 0 && (out->seen & WB_VTR) == 0) {
-        odin3_log(ODIN3_LOG_ERROR, "write_blif: --lut-k and --name-style need --vtr");
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    if ((out->seen & WB_NAME_MAP) != 0 && out->opts.name_style != ODIN3_BLIF_NAMES_HASH) {
-        odin3_log(ODIN3_LOG_ERROR, "write_blif: --name-map needs --name-style hash");
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    if ((out->seen & WB_SRC_ATTR) != 0 && (out->seen & WB_VTR) != 0) {
-        odin3_log(ODIN3_LOG_ERROR,
-                  "write_blif: --src-attr is for the plain dialect; the VTR dialect has no "
-                  ".attr lines");
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    return ODIN3_OK;
+    return wb_check_options(out);
 }
 
 static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
@@ -811,6 +815,7 @@ const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
                                                       &odin3_pass_read_arch,
                                                       &odin3_pass_write_techlib,
                                                       &odin3_pass_dump_locs,
+                                                      &odin3_pass_names,
                                                       &odin3_pass_read_json};
 const uint32_t odin3_builtin_pass_count =
     (uint32_t)(sizeof odin3_builtin_passes / sizeof odin3_builtin_passes[0]);
