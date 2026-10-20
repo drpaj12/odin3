@@ -1,0 +1,93 @@
+<architecture>
+  <models>
+    <model name="multiply">
+      <input_ports><port name="a"/><port name="b"/></input_ports>
+      <output_ports><port name="out"/></output_ports>
+    </model>
+    <model name="adder">
+      <input_ports><port name="a"/><port name="b"/><port name="cin"/></input_ports>
+      <output_ports><port name="cout"/><port name="sumout"/></output_ports>
+    </model>
+    <model name="single_port_ram">
+      <input_ports>
+        <port name="we" clock="clk"/><port name="addr" clock="clk"/><port name="data" clock="clk"/>
+        <port name="clk" is_clock="1"/>
+      </input_ports>
+      <output_ports><port name="out" clock="clk"/></output_ports>
+    </model>
+  </models>
+  <directlist>
+    <direct name="adder_carry" from_pin="clb.cout" to_pin="clb.cin" x_offset="0" y_offset="-1" z_offset="0"/>
+  </directlist>
+  <complexblocklist>
+    <pb_type name="clb">
+      <input name="in" num_pins="6"/>
+      <clock name="clk" num_pins="1"/>
+      <pb_type name="fle" num_pb="10">
+        <mode name="m5">
+          <pb_type name="lut5" blif_model=".names" num_pb="1" class="lut">
+            <input name="in" num_pins="5" port_class="lut_in"/>
+            <output name="out" num_pins="1" port_class="lut_out"/>
+          </pb_type>
+          <interconnect>
+            <direct name="d1" input="fle.in" output="lut5.in"/>
+          </interconnect>
+        </mode>
+        <mode name="m6">
+          <pb_type name="lut6" blif_model=".names" num_pb="1" class="lut">
+            <input name="in" num_pins="6"/>
+            <output name="out" num_pins="1"/>
+          </pb_type>
+          <pb_type name="ff" blif_model=".latch" num_pb="1" class="flipflop">
+            <input name="D" num_pins="1"/>
+            <output name="Q" num_pins="1"/>
+            <clock name="clk" num_pins="1"/>
+          </pb_type>
+          <pb_type name="add" blif_model=".subckt adder" num_pb="1">
+            <input name="a" num_pins="1"/><input name="b" num_pins="1"/>
+            <input name="cin" num_pins="1"/>
+            <output name="cout" num_pins="1"/><output name="sumout" num_pins="1"/>
+          </pb_type>
+          <interconnect>
+            <direct name="carry_in" input="fle.cin" output="add.cin">
+              <pack_pattern name="chain" in_port="fle.cin" out_port="add.cin"/>
+            </direct>
+            <mux name="mx" input="ff.Q lut6.out" output="fle.out"/>
+          </interconnect>
+        </mode>
+      </pb_type>
+      <interconnect>
+        <complete name="crossbar" input="clb.in" output="fle.in"/>
+      </interconnect>
+    </pb_type>
+    <pb_type name="mult_36">
+      <input name="a" num_pins="36"/>
+      <mode name="two">
+        <pb_type name="half" num_pb="2">
+          <pb_type name="m9" blif_model=".subckt multiply" num_pb="1">
+            <input name="a" num_pins="9"/><input name="b" num_pins="9"/>
+            <output name="out" num_pins="18"/>
+          </pb_type>
+        </pb_type>
+      </mode>
+      <mode name="one">
+        <pb_type name="m36" blif_model=".subckt multiply" num_pb="1">
+          <input name="a" num_pins="36"/><input name="b" num_pins="36"/>
+          <output name="out" num_pins="72"/>
+        </pb_type>
+      </mode>
+    </pb_type>
+    <pb_type name="memory">
+      <pb_type name="sp9" blif_model=".subckt single_port_ram" class="memory">
+        <input name="addr" num_pins="9"/><input name="data" num_pins="64"/>
+        <input name="we" num_pins="1"/><output name="out" num_pins="64"/>
+        <clock name="clk" num_pins="1"/>
+      </pb_type>
+      <pb_type name="sp15" blif_model=".subckt single_port_ram" class="memory">
+        <input name="addr" num_pins="15"/><input name="data" num_pins="1"/>
+        <input name="we" num_pins="1"/><output name="out" num_pins="1"/>
+        <clock name="clk" num_pins="1"/>
+      </pb_type>
+    </pb_type>
+  </complexblocklist>
+</architecture>

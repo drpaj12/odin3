@@ -1150,7 +1150,9 @@ static void test_builtin_processes_values(void) {
                                      "opt_share",
                                      "opt_dff",
                                      "opt_clean",
-                                     "wreduce"};
+                                     "wreduce",
+                                     "read_arch",
+                                     "write_techlib"};
     static const char *const refuse[] = {"write_blif", "write_json", "write_verilog", "write_dot",
                                          "flatten",    "lower",      "hardmap",       "lpmmap",
                                          "sim",        "abc"};

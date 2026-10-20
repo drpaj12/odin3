@@ -127,6 +127,9 @@ vectors, wire net vectors, attribute values); the count of its live processes (I
 
 **Design** — strtab; prov store and pass-run table; tombstone table; cell-type table; modules in
 creation order; top module (optional, 0 = none).
+Containers of facts that are not IR objects hang off the design like the project record: the
+architecture record (Phase 4.1, `odin3_design_get_arch`; PHASE4 decision 9) holds what `read_arch`
+read from a VPR XML file. It owns no node, net, wire or ID.
 
 ## 4. Hierarchy
 
@@ -708,6 +711,10 @@ path. Additive: no field, rule, ABI export or check rule changes.
 
 Under PHASE3 #37: check rule 7 also tests that a record's `hier` is 0 or a string-table ID. No
 other check rule, field or ABI change; the path's shape is not checked.
+
+Under PHASE4 #9 (4.1 spec, approved by Peter 2026-10-19): `odin3_design_get_arch`, `odin3_design_arch`
+and `odin3_design_drop_arch` (§3, Design). A container hook beside the project record: no IR object,
+field, ID, rule, check rule or ABI export changes.
 
 ## 12. Out of scope for Phase 1
 
