@@ -1061,6 +1061,54 @@ was built in 0.064\,s (168\,MB), a query on the busiest line returned 200,000 hi
 \code{hier/path/cell@file:line}, so a VPR block can be traced to its source line without Odin III
 loaded.
 
+\subsubsection*{Provenance along the flow}
+
+\begin{figure*}[t]
+\centering
+\odinfit{\textwidth}{\input{IMAGE/fig_flow_prov}}
+\caption{The flow of Fig.~\ref{fig:flow}, annotated with the provenance records that each stage
+makes or reads. SOURCE, DERIVED and IMPORTED are the three record kinds. The plan for Phase~5.4 is
+shown where it applies; it is approved and not yet built.}
+\label{fig:flow-prov}
+\end{figure*}
+
+Figure~\ref{fig:flow-prov} shows where each kind of record comes from. No stage builds a record by
+hand. A pass runs with a context that knows its pass run, starts an operation, and asks for a
+record with a list of parents (IR-13).
+
+\emph{SOURCE, at parse and elaboration.} The parser gives every AST node a source range in the
+source manager's location space. The read pass is a pass run. When elaboration creates an IR
+object from an AST node, it makes one SOURCE record with the file, line and column, the raw
+location and the AST node, and the object carries the record's ID. One origin in one run is one
+record.
+
+\emph{DERIVED, in each pass.} A pass makes a DERIVED record in one of three ways, depending on
+what it does to the objects. A pass that only rewires keeps the existing records. A pass that
+splits one object into many makes one operation and one record with the original as the single
+parent. \code{proc}, \code{partial\_map} and \code{lower} work this way, so all bit cells of one
+\code{\$add} share a record. A pass that joins several objects into one makes one operation whose
+record has all of them as parents. \code{opt\_merge} works this way. \code{flatten} adds the
+instance path to a DERIVED record, \code{fsm} gives the recoded state logic the original register
+and logic as parents, and \code{abc} pairs each new LUT with the old cells that compute the same
+function and takes those as parents. Records are never edited, and a deleted object leaves its
+records and, after \code{compact}, a tombstone.
+
+\emph{IMPORTED, on read.} A netlist reader has no HDL. It makes an IMPORTED record with the
+file and line of the netlist, so that an object read from BLIF still says where it came from.
+
+\emph{Names in the outputs.} With \code{--name-style provenance}, the writers name each object
+\code{hier/path/name@file:line} from the first location of its backward walk, so a VPR block can
+be traced to a source line without Odin III loaded.
+
+\emph{Plan 5.4: locations survive write and read.} The IMPORTED record points at the netlist, not
+at the HDL, so after a read-back the HDL location of a written object is lost. Phase~5.4 fixes
+that. Writers print only the HDL locations, which are the SOURCE leaves of an object's walk:
+the provenance name in BLIF, a \code{src} attribute in Verilog, and the \code{src} field in
+JSON. Readers decode them. The architect approved an amendment to IR-13 on 2026-10-20: a reader
+makes one DERIVED record whose parents are the restored HDL SOURCE record and the reader's own
+IMPORTED record. The location then survives any number of writes and reads as an HDL location,
+and a line of a netlist never becomes one. The coverage gate of Phase~6.5 measures the result.
+
 \subsection{Source manager}
 
 \begin{figure}[t]
