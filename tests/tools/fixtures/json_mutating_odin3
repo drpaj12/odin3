@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """A stand-in for odin3 in tests/tools/test_json_check.py: runs the real one ($ODIN3_CLI) and then
 damages one file of the round trip as $JSON_MUTATE says, so the leg that watches the file must
-fail: read (exit 1 on the first read-back), fixpoint (a bit number of F3.json), equivalent (a
-bit of a connection of the read-back R.il or R.blif flipped)."""
+fail: read (exit 1 on the first read-back), fixpoint (a bit number of F3.json), equivalent (the
+clock polarity of R.il, or the last input literal of the first cover row of R.blif, flipped)."""
 
 import os
 import re
@@ -37,6 +37,6 @@ if real.returncode == 0 and "read_json" in script:
     if mode == "fixpoint" and not first:
         edit("F3.json", r'("hide_name": )(\d)', flip)
     if mode == "equivalent" and first:
-        edit("R.il", r"(parameter \\A_SIGNED )(\d)", flip)
-        edit("R.blif", r"(\.names [^\n]*\n[01-]* )(\d)", flip)
+        edit("R.il", r"(parameter \\CLK_POLARITY )(\d)", flip)
+        edit("R.blif", r"(\n[01-]*)([01])( [01])", lambda m: m.group(1) + ("1" if m.group(2) == "0" else "0") + m.group(3))
 sys.exit(real.returncode)

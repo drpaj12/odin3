@@ -294,6 +294,7 @@ Not built in v1.0; how it would be done is in §12.1.
 - BLIF (full: `.subckt`, `.latch` with init, `.names`, black-box `.model`s) — required for the ABC round-trip.
 - VQM (Quartus post-synthesis Verilog): the Verilog grammar plus the Altera primitive library; no new parser. (removed from v1.0, D10)
 - EDIF 2.0.0: S-expression reader, structural only. (removed from v1.0, D10)
+- Yosys JSON (`read_json`, v1.0, Phase 5 item 5.3, D11): the netlist schema Yosys 0.55 `write_json` writes and Odin III's own `write_json` output; one module per JSON module, nets created by ascending bit number so `write_json`, `read_json`, `write_json` reaches a fixpoint; an unregistered cell type is a located error (a black box only under `--auto-blackbox`). Spec `docs/specs/2026-10-20-5.3-read-json-design.md`.
 - These produce bit-level IR with structural-only provenance; the `raise` pass (§8; removed from v1.0, D10) recovers word-level structure.
 - LPM-structured Verilog (v1.0, Phase 5 item 5.1, D10, D11): read by the Verilog front end; the LPM tech library makes the `lpm_*` instances hard cells.
 

@@ -387,7 +387,8 @@ class Tally:
     unproven: int = 0
     identical: int = 0
     equivalent_only: int = 0
-    differing: int = 0
+    differing: int = 0  # file 1 and file 2 differ before normalisation
+    unexplained: int = 0  # ... and after it
     total: int = 0
     worst: int = EXIT_OK
     open_unproven: bool = False
@@ -420,6 +421,7 @@ def account(tally: Tally, row: Row, listed: tuple[str, str] | None, passed: bool
     tally.identical += row.kind == "identical"
     tally.equivalent_only += row.kind == "equivalent-only"
     tally.differing += row.diff not in ("", "same")
+    tally.unexplained += row.diff not in ("", "same", "normalised")
     if not passed and row.outcome == "unproven" and listed is None:
         tally.open_unproven = True
     elif not passed:
@@ -433,8 +435,9 @@ def execute(args: argparse.Namespace, work: Path) -> int:
         raise ToolError(f"unknown level {bad[0]} (want one of {', '.join(LEVELS)})")
     if args.yosys_dir is None and not args.files:
         raise ToolError("no designs given (and no --yosys-dir)")
-    yosys = args.yosys if args.yosys and Path(args.yosys).exists() else ""
-    cfg = Config(args.odin3, yosys, args.scripts, opt_equiv.parse_size(args.mem_cap), args.abc)
+    yosys = str(Path(args.yosys).resolve()) if args.yosys and Path(args.yosys).exists() else ""
+    odin3, abc = str(Path(args.odin3).resolve()), args.abc and str(Path(args.abc).resolve())
+    cfg = Config(odin3, yosys, args.scripts, opt_equiv.parse_size(args.mem_cap), abc)
     cfg.techlibs = ic.parse_techlibs(args.techlib_list)
     if args.yosys_dir is not None and not yosys:
         print(f"{TOOL}: no Yosys 0.55: the fixtures are read and fixpointed, not compared")
@@ -457,8 +460,8 @@ def execute(args: argparse.Namespace, work: Path) -> int:
     print(
         f"{TOOL}: compared {tally.compared} of {tally.total} ({tally.unproven} unproven, "
         f"{tally.excepted} excepted); identical {tally.identical}, equivalent-only "
-        f"{tally.equivalent_only}; file 1 and file 2 differ after normalisation in "
-        f"{tally.differing}",
+        f"{tally.equivalent_only}; file 1 and file 2 differ before normalisation in "
+        f"{tally.differing}, after it in {tally.unexplained}",
         flush=True,
     )
     if tally.compared == 0 and not (fixtures and not cfg.yosys):

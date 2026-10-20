@@ -234,19 +234,17 @@ class MutatedReadBackTests(unittest.TestCase):
     """End to end (needs the build's odin3 in ODIN3_CLI and Yosys 0.55 in ODIN3_YOSYS055): a
     round trip damaged after Odin III wrote it fails the leg that watches that file."""
 
-    DESIGN = jc.ROOT / "tests" / "micro" / "verilog" / "micro" / "ff.v"
+    MICRO = jc.ROOT / "tests" / "micro" / "verilog" / "micro"
 
-    def run_mutated(self, mode: str, level: str = "word") -> tuple[int, str]:
+    def run_mutated(self, mode: str, level: str = "word", design: str = "ff.v") -> tuple[int, str]:
         cli, yosys = os.environ.get("ODIN3_CLI"), os.environ.get("ODIN3_YOSYS055")
         if not cli or not yosys or not Path(yosys).exists():
             self.skipTest("needs ODIN3_CLI and ODIN3_YOSYS055")
         fake = Path(__file__).resolve().parent / "fixtures" / "json_mutating_odin3"
         env = {"JSON_MUTATE": mode, "ODIN3_CLI": cli}
         with mock.patch.dict(os.environ, env):
-            code, out, _ = run_main(
-                jc.main,
-                ["--level", level, "--odin3", str(fake), "--yosys", yosys, str(self.DESIGN)],
-            )
+            argv = ["--level", level, "--odin3", str(fake), "--yosys", yosys]
+            code, out, _ = run_main(jc.main, [*argv, str(self.MICRO / design)])
         return code, out
 
     def test_unmutated_passes(self) -> None:
@@ -262,6 +260,19 @@ class MutatedReadBackTests(unittest.TestCase):
         code, out = self.run_mutated("fixpoint")
         self.assertEqual(code, jc.EXIT_FAIL)
         self.assertIn("fail:fixpoint", out)
+
+    def test_equivalent_leg_word(self) -> None:
+        code, out = self.run_mutated("equivalent")
+        self.assertEqual(code, jc.EXIT_FAIL)
+        self.assertIn("fail:equivalent", out)
+
+    def test_equivalent_leg_lut(self) -> None:
+        abc = os.environ.get("ODIN3_ABC")
+        if not abc:
+            self.skipTest("needs ODIN3_ABC")
+        code, out = self.run_mutated("equivalent", "lut", "bm_DL_2_1_mux.v")
+        self.assertEqual(code, jc.EXIT_FAIL)
+        self.assertIn("fail:equivalent", out)
 
 
 if __name__ == "__main__":
