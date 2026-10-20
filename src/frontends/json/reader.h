@@ -15,14 +15,17 @@
  * Options of a read. top: the name of the module to make the top, NULL for the choice of M-1 (an
  * explicit name wins over a `top` attribute of the file; a name that is no module is a located
  * error). auto_blackbox: a cell type that is neither a module of the file nor a registered cell
- * type becomes an implicit black box with a warning instead of an error (M-5). src_to_prov is
- * reserved for 5.4 (the `src` attribute becomes a provenance record, M-12); it is ignored here
- * and `src` stays a STRING attribute.
+ * type becomes an implicit black box with a warning instead of an error (M-5). keep_src_attr
+ * (5.4 L-8, `read_json --keep-src-attr`): by default a `src` attribute that parses as HDL
+ * locations (L-1) becomes a provenance record (D-1, D-2) and is not kept as an attribute; with
+ * keep_src_attr every `src` stays a STRING attribute and no record is made (the 5.3 behaviour).
+ * The field is the inverse of the spec's `src_to_prov` so that a zero-filled struct and a NULL
+ * opts both mean the 5.4 default.
  */
 typedef struct odin3_json_opts {
     const char *top;
     bool auto_blackbox;
-    bool src_to_prov;
+    bool keep_src_attr;
 } odin3_json_opts;
 
 /*
@@ -48,11 +51,17 @@ typedef struct odin3_json_opts {
  * are dropped. Yosys `$sop` (DEPTH, TABLE, WIDTH) is read as the `$sop` cover cell and a `$lut`
  * without inputs as a constant `$sop`; other parameters are typed by the registry (M-6) and for
  * an instance of a module or black box of the file they are attributes `parameter:<NAME>`.
- * Attributes are typed as Yosys types them (J-10); `src` stays an attribute. An `init` attribute
- * of a netname whose bits a bit flip-flop or latch Q drives sets that cell's INIT. Members the
- * schema does not list, and `odin3_`-prefixed members, are skipped and counted in one INFO line
- * (J-8, J-9); `odin3_version` above 1 is an error. A net with a second ordinary driver is refused
- * as read_blif refuses it. The top is chosen as in M-1.
+ * Attributes are typed as Yosys types them (J-10). A `src` of a module, netname or cell that
+ * parses (odin3_hdl_loc_parse, L-1) is restored (D-1, D-2): the object takes one DERIVED record,
+ * parents the restored SOURCE then its own IMPORTED record, made in one operation of the run
+ * (begun at the first restore); a port takes its netname's location, a one-bit netname also its
+ * net; the other nets of a module keep the module's IMPORTED record (X-1). The attribute is then
+ * not kept (L-8). A `src` that does not parse stays an attribute (L-6); one WARNING at the end
+ * reports the count and the first example, and one INFO line the texts of over 8 locations (D-7).
+ * An `init` attribute of a netname whose bits a bit flip-flop or latch Q drives sets that cell's
+ * INIT. Members the schema does not list, and `odin3_`-prefixed members, are skipped and counted in
+ * one INFO line (J-8, J-9); `odin3_version` above 1 is an error. A net with a second ordinary
+ * driver is refused as read_blif refuses it. The top is chosen as in M-1.
  *
  * Errors are logged as "path:line:col: modules.<module>.<section>.<key>: message" (the JSON path
  * of the value, E-4). ODIN3_ERR_PARSE for malformed JSON, a schema violation, an unknown cell
