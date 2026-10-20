@@ -729,6 +729,41 @@ Odin III's code was written by agents, so correctness evidence must come from ou
 (Sec.~\ref{sec:method}). Every pass is checked against an oracle, by a tool that is separate
 from the pass, and the tools follow one reporting discipline.
 
+\subsection{The methods in plain words}
+
+\begin{figure*}[t]
+\centering
+\odinfit{\textwidth}{\input{IMAGE/fig_flow_verify}}
+\caption{The flow of Fig.~\ref{fig:flow}, annotated with the techniques that check each stage.
+Names are tools of the repository; the text of this section explains each method.}
+\label{fig:flow-verify}
+\end{figure*}
+
+Figure~\ref{fig:flow-verify} marks which technique checks which stage. Six methods do the work.
+
+\emph{Golden comparison.} An oracle runs on a design, and its netlist is stored as a golden
+(Sec.~\ref{sec:background}). Odin III runs on the same design. \code{netlist-compare} reads both
+BLIF files, renames and orders them in a canonical way, and says whether they are identical. An
+identical netlist is the strongest result. A different one is not yet a bug, because two correct
+tools can build different netlists.
+
+\emph{Equivalence checking.} \code{equiv-check} reads two BLIF files and asks ABC whether they
+compute the same outputs. \code{cec} compares combinational logic. \code{dsec} compares
+sequential behaviour from the initial state. The answer is equivalent, not equivalent with a
+counterexample, or unproven when the proof runs out of time or size.
+
+\emph{Simulation.} Odin III has a cycle-based, two-state simulator that uses the semantics of the
+op registry. \code{lower-sim} simulates a design before and after \code{lower} on random vectors.
+In Phase~1 the simulator was compared with Icarus Verilog on the goldens.
+
+\emph{Functional check against the source.} \code{fcheck} compares a netlist with the Verilog
+source, not with another netlist (Sec.~\ref{sec:fcheck}).
+
+\emph{Random generators and fuzzers.} Sec.~\ref{sec:fuzz} explains them.
+
+\emph{Exit codes and the Parmys rule.} Every tool reports in one code convention, and Odin III
+matches Parmys and warns where it differs (Sec.~\ref{sec:exitcodes}, Sec.~\ref{sec:parmys}).
+
 \subsection{Oracles and equivalence tools}
 
 The oracles are VTR commit \code{3c9a4d23} (Yosys~0.55 with Parmys, ABC and VPR) and the Odin~II
@@ -771,6 +806,7 @@ a flip-flop's \code{init} is honoured and the others start at 0 (PHASE3 \#41).
 behaviour is covered by simulation against Odin III's RAM model.
 
 \subsection{Exit-code discipline}
+\label{sec:exitcodes}
 
 The tools use one convention, so a script or a controller can read a result without parsing text
 (the \code{opt-check} and \code{lower-check} tools):
@@ -797,7 +833,31 @@ is never a pass}: \code{lower-sim} reports a cell type without a simulate hook a
 Third, an unproven design is recorded with its reason, for example ``untested for now (size
 limit)'', and is carried to a larger machine, not dropped.
 
-\subsection{Random generators}
+\subsection{Random generators and fuzzers}
+\label{sec:fuzz}
+
+Two kinds of random testing run, and they find different bugs.
+
+\emph{Differential generators.} A generator writes a random valid Verilog design from a seed. The
+same seed always gives the same design. \code{tools/verilog-gen} has one profile for the parser,
+elaboration, \code{proc}, \code{opt}, \code{lower} and \code{flatten}. The driver runs Odin III
+and a reference on the design, and compares the results. For the parser the reference is Yosys:
+Odin III must accept what Yosys accepts and must print the generator's own tree. A mutated design,
+with one token dropped, duplicated or swapped, must be rejected with a located error whenever
+Yosys rejects it. For the passes the driver compares Odin III's netlist with the netlist of the
+Yosys pass, and an equivalence tool decides. A \emph{bug} is a case in which Odin III rejects
+a valid design, prints another tree, produces a netlist that is not a refinement of the original,
+crashes, hits a sanitizer report or times out. A case in which Odin III accepts what Yosys rejects
+is reported but is not a failure. The driver keeps the files of every failing seed. A separate
+generator, \code{pp-fuzz}, makes random projects for the preprocessor and predicts the output with
+its own reference expander.
+
+\emph{Crash fuzzers.} Seven libFuzzer targets (the preprocessor, parser, elaboration, \code{opt},
+\code{lower} and two for ABC scripts) run under ASan and UBSan with allocation failures injected
+and the caps lowered. They have no oracle. Each target states its invariants, for example that
+\code{opt} returns OK or out-of-memory, that the structural \code{check} passes afterwards, and
+that nothing leaks or hangs. A \emph{bug} is a violated invariant, a sanitizer report, a leak or a
+hang.
 
 Hand-written fixtures miss interactions, so each front-end pass has a seeded random generator
 (\code{tools/verilog-gen} with one profile per pass: elaboration, flatten, \code{proc},
@@ -812,6 +872,7 @@ and 0 bugs. Equivalence is the pass criterion for the long run, so a histogram d
 counted, not failed.
 
 \subsection{The functional check}
+\label{sec:fcheck}
 
 Equivalence tools compare netlists, and a netlist can be equivalent to a wrong reference.
 \code{fcheck} compares against the Verilog source. It runs VTR's own
@@ -831,6 +892,7 @@ illegal start reaches is ``unproven'', not ``differs'' (PHASE3 \#41, \#43). On
 equivalent.
 
 \subsection{Match Parmys, warn where different}
+\label{sec:parmys}
 
 The rule for the VTR flow is: where Odin III and Parmys differ, match Parmys under
 \code{--vtr-compat} and print a WARNING, and keep no list of known differences. For example,
