@@ -113,6 +113,11 @@ static odin3_status parse_dot_option(odin3_bytes *rest, odin3_bytes word, write_
     if (st != ODIN3_OK) {
         return st;
     }
+    if (value.len >= 2 && memcmp(value.ptr, "--", 2) == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "write_dot: %.*s expects a value, got option '%.*s'",
+                  (int)word.len, (const char *)word.ptr, (int)value.len, (const char *)value.ptr);
+        return ODIN3_ERR_INVALID_ARG;
+    }
     bool is_focus = odin3_pass_arg_is(word, "--focus");
     bool is_color = odin3_pass_arg_is(word, "--color-by");
     if ((is_focus && out->focus.len > 0) || (is_color && out->color.len > 0)) {

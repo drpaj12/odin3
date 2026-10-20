@@ -182,7 +182,16 @@ writers)
     "$odin3" -p "read_blif $fixture; write_dot $work/bp.dot; write_dot $work/bl.dot --locs" \
         2>"$work/err" || fail "BLIF write_dot --locs failed"
     cmp -s "$work/bp.dot" "$work/bl.dot" || fail "--locs changed a BLIF-read design's dot"
+    "$odin3" -p "read_blif $fixture; write_dot $work/cp.dot --color-by @type; write_dot $work/cl.dot --color-by @type --locs" \
+        2>"$work/err" || fail "BLIF write_dot --color-by --locs failed"
+    cmp -s "$work/cp.dot" "$work/cl.dot" || fail "--locs changed a BLIF-read coloured dot"
     expect_fail "--color-by expects a value" -p "read_blif $fixture; write_dot $work/b.dot --color-by"
+    expect_fail "--color-by expects a value, got option '--locs'" \
+        -p "read_blif $fixture; write_dot $work/b.dot --color-by --locs"
+    expect_fail "--focus expects a value, got option '--locs'" \
+        -p "read_blif $fixture; write_dot $work/b.dot --focus --locs"
+    expect_fail "--max-nodes expects a value, got option '--locs'" \
+        -p "read_blif $fixture; write_dot $work/b.dot --max-nodes --locs"
     expect_fail "--color-by given twice" \
         -p "read_blif $fixture; write_dot $work/b.dot --color-by a --color-by b"
     expect_fail "dot: refusing to draw" -p "read_blif $fixture; write_dot $work/b.dot --max-nodes 2"

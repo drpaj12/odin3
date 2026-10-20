@@ -917,6 +917,38 @@ static void test_color_value_escaping(void) {
     odin3_util_free(text);
 }
 
+static void test_color_invalid_utf8_replaced(void) {
+    odin3_net_id last = {0};
+    build_chain(1, &last);
+    /* e-acute and an emoji stay; DEL, a lone 0xff, overlong c0 af and a surrogate ed a0 80 each
+     * byte become '?' */
+    set_str_attr(1, (attr_text){"k", "ok\xc3\xa9\xf0\x9f\x98\x80\x7f\xff\xc0\xaf\xed\xa0\x80z"});
+    char *text = render_color("k", false);
+    expect_in(text, "label=\"ok\xc3\xa9\xf0\x9f\x98\x80???????z (1)\"");
+    expect_absent(text, "\x7f");
+    expect_absent(text, "\xff");
+    odin3_util_free(text);
+}
+
+static void test_color_legend_capped(void) {
+    enum { VALUES = 40, SHOWN = 32 };
+    odin3_net_id last = {0};
+    build_chain(VALUES, &last);
+    for (uint32_t i = 0; i < VALUES; i++) {
+        char val[NAME_BUF];
+        (void)snprintf(val, sizeof val, "v%02u", i);
+        set_str_attr(i + 1, (attr_text){"k", val});
+    }
+    char *text = render_color("k", false);
+    expect_structure(text);
+    TEST_ASSERT_EQUAL_size_t(SHOWN + 1, count_of(text, "    legend_"));
+    expect_in(text, "label=\"v31 (1)\"");
+    expect_absent(text, "label=\"v32 (1)\"");
+    expect_in(text, "label=\"(8 more values) (8)\", style=filled, fillcolor=\"#cfcfcf\"");
+    expect_fill(text, 40, PALETTE[(VALUES - 1) % PALETTE_SIZE]); /* nodes keep their own colour */
+    odin3_util_free(text);
+}
+
 static void test_color_with_focus_counts_drawn_nodes(void) {
     build_classes();
     odin3_dot_opts opts = {ODIN3_DOT_FOCUS_CONE, "n3", 0, "my_class", false};
@@ -982,6 +1014,41 @@ static void test_locs_second_label_line(void) {
     odin3_util_free(text);
 }
 
+static void test_locs_two_locations_plus_one(void) {
+    odin3_net_id in = net_named(module, NULL);
+    odin3_net_id out = net_named(module, NULL);
+    odin3_srcloc two[2] = {{intern("b.v"), 9, 1, 9, 2, 0}, {intern("a.v"), 4, 1, 4, 2, 0}};
+    odin3_net_id pair[2] = {in, out};
+    gate_spec gs = {"$_NOT_", "g0", source_at_n(two, 2)};
+    gate_in(module, gs, pair);
+    char *text = render_color(NULL, true);
+    expect_node_line(text, 1, "\\nb.v:9 +1\"");
+    odin3_util_free(text);
+}
+
+static void test_locs_default_bytes_unchanged_without_hdl(void) {
+    odin3_net_id in = net_named(module, NULL);
+    odin3_net_id out = net_named(module, NULL);
+    odin3_srcloc imp = {intern("f.blif"), 3, 1, 3, 2, 0};
+    odin3_prov_origin iorigin = {&imp, 1, 0, 0};
+    odin3_prov_id imported = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_imported(&ctx, &iorigin, &imported));
+    odin3_net_id pair[2] = {in, out};
+    gate_spec gs = {"$_NOT_", "g0", imported};
+    gate_in(module, gs, pair);
+    set_str_attr(1, (attr_text){"k", "one"});
+    char *plain = render_color(NULL, false);
+    char *locs = render_color(NULL, true);
+    char *color = render_color("k", false);
+    char *both = render_color("k", true);
+    TEST_ASSERT_EQUAL_STRING(plain, locs);
+    TEST_ASSERT_EQUAL_STRING(color, both);
+    odin3_util_free(plain);
+    odin3_util_free(locs);
+    odin3_util_free(color);
+    odin3_util_free(both);
+}
+
 static void test_locs_with_color(void) {
     build_located();
     set_str_attr(1, (attr_text){"k", "one"});
@@ -1000,11 +1067,30 @@ static void test_color_oom_sweep(void) {
     oom_sweep(&opts);
 }
 
-static bool nop_accepts(const char *path) {
-    char *argv[] = {"nop", "-o", "/dev/null", (char *)path, NULL};
+/* The full path of nop found on PATH, or NULL. */
+static const char *find_nop(char *buf, size_t cap) {
+    const char *path = getenv("PATH");
+    while (path != NULL && *path != '\0') {
+        const size_t len = strcspn(path, ":");
+        if (len > 0 && snprintf(buf, cap, "%.*s/nop", (int)len, path) < (int)cap &&
+            access(buf, X_OK) == 0) {
+            return buf;
+        }
+        path += len + (path[len] == ':' ? 1 : 0);
+    }
+    return NULL;
+}
+
+typedef struct nop_run {
+    const char *nop;
+    const char *path;
+} nop_run;
+
+static bool nop_accepts(nop_run run) {
+    char *argv[] = {"nop", "-o", "/dev/null", (char *)run.path, NULL};
     pid_t pid = 0;
     int status = 0;
-    if (posix_spawn(&pid, "/usr/bin/nop", NULL, NULL, argv, environ) != 0) {
+    if (posix_spawn(&pid, run.nop, NULL, NULL, argv, environ) != 0) {
         return false;
     }
     return waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0;
@@ -1014,20 +1100,21 @@ static bool nop_accepts(const char *path) {
 static void test_graphviz_nop(void) {
     build_hier();
     build_located();
-    set_str_attr(1, (attr_text){"k", "w\"e&i\\rd\nvalue"});
+    set_str_attr(1, (attr_text){"k", "w\"e&i\\rd\nvalue\xc3\xa9\xff\x7f"});
     set_str_attr(2, (attr_text){"k", "plain"});
     static const struct {
         const char *attr;
         bool locs;
     } CASES[] = {{"k", false}, {NULL, true}, {"k", true}, {"@type", true}, {"nosuch", false}};
-    bool have_nop = access("/usr/bin/nop", X_OK) == 0;
+    char nop_buf[PATH_BUF];
+    const char *nop = find_nop(nop_buf, sizeof nop_buf);
     for (size_t i = 0; i < sizeof CASES / sizeof CASES[0]; i++) {
         char *text = render_color(CASES[i].attr, CASES[i].locs);
         expect_structure(text);
         odin3_util_free(text);
-        TEST_ASSERT_TRUE(!have_nop || nop_accepts(out_path));
+        TEST_ASSERT_TRUE(nop == NULL || nop_accepts((nop_run){nop, out_path}));
     }
-    if (!have_nop) {
+    if (nop == NULL) {
         (void)printf("SKIP graphviz_nop: dot not installed\n");
         TEST_IGNORE_MESSAGE("SKIP graphviz_nop: dot not installed");
     }
@@ -1071,9 +1158,13 @@ int main(void) {
     RUN_TEST(test_color_by_type);
     RUN_TEST(test_color_int_and_bits_text);
     RUN_TEST(test_color_value_escaping);
+    RUN_TEST(test_color_invalid_utf8_replaced);
+    RUN_TEST(test_color_legend_capped);
     RUN_TEST(test_color_with_focus_counts_drawn_nodes);
     RUN_TEST(test_legend_outside_budget);
     RUN_TEST(test_locs_second_label_line);
+    RUN_TEST(test_locs_two_locations_plus_one);
+    RUN_TEST(test_locs_default_bytes_unchanged_without_hdl);
     RUN_TEST(test_locs_with_color);
     RUN_TEST(test_color_oom_sweep);
     RUN_TEST(test_graphviz_nop);
