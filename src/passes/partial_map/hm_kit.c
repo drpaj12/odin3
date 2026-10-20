@@ -3,7 +3,7 @@
  * (begin, build on fresh nets, commit or abort), node creation with agent default (b)'s names and
  * attributes, constants, 1-bit glue and located diagnostics.
  */
-#include "passes/hardmap/hm_kit.h"
+#include "passes/partial_map/hm_kit.h"
 
 #include "ast/srcman.h"
 #include "ir/celltype.h"
@@ -53,6 +53,7 @@ void hm_init(hm_ctx *hc, odin3_pass_ctx *pass, odin3_design *design) {
     memset(hc, 0, sizeof *hc);
     hc->pass = pass;
     hc->design = design;
+    hc->rules = pm_rules_k6_fixed();
     odin3_vec_init(&hc->made_nodes, sizeof(odin3_node_id));
     odin3_vec_init(&hc->made_nets, sizeof(odin3_net_id));
     odin3_vec_init(&hc->merged, sizeof(odin3_net_pair));
@@ -194,7 +195,8 @@ odin3_status hm_need(hm_ctx *hc, hm_hard which, odin3_node_id at, odin3_celltype
     }
     if (why != NULL) {
         hm_diag(hc, ODIN3_LOG_ERROR, at,
-                "hardmap: cell type '%s' %s; read_techlib lib/vtr.o3lib first", shape->type, why);
+                "partial_map: cell type '%s' %s; read_techlib lib/vtr.o3lib first", shape->type,
+                why);
         return ODIN3_ERR_INVALID_ARG;
     }
     hc->hard[which] = id;
@@ -402,7 +404,7 @@ static odin3_status finish_commit(hm_ctx *hc, const hm_tie *ties, size_t n_ties)
 
 static void log_discard(const hm_ctx *hc) {
     odin3_log(ODIN3_LOG_ERROR,
-              "hardmap: out of memory in the middle of a mapping in module '%s': the design "
+              "partial_map: out of memory in the middle of a mapping in module '%s': the design "
               "no longer matches its input; discard it",
               str_of(hc, odin3_module_name(hc->module)));
 }
@@ -506,7 +508,7 @@ odin3_status hm_const(hm_ctx *hc, hm_bit which, odin3_net_id *out) {
         return ODIN3_OK;
     }
     if (!const_type_known(hc, which)) {
-        odin3_log(ODIN3_LOG_ERROR, "hardmap: built-in cell type '%s' is missing",
+        odin3_log(ODIN3_LOG_ERROR, "partial_map: built-in cell type '%s' is missing",
                   k_const_names[which]);
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -524,7 +526,7 @@ odin3_status hm_const(hm_ctx *hc, hm_bit which, odin3_net_id *out) {
 static odin3_status glue_type(hm_ctx *hc, hm_glue which, odin3_celltype_id *out) {
     if (hc->glue[which].v == 0 &&
         !hm_find_type(hc->design, k_glue_names[which], &hc->glue[which])) {
-        odin3_log(ODIN3_LOG_ERROR, "hardmap: built-in cell type '%s' is missing",
+        odin3_log(ODIN3_LOG_ERROR, "partial_map: built-in cell type '%s' is missing",
                   k_glue_names[which]);
         return ODIN3_ERR_INVALID_ARG;
     }

@@ -1,0 +1,36 @@
+# The inputs of the k6 identity gate (4.2 spec T-2, tiers 1 and 2): the 26 micros of
+# tests/hardmap/micros.txt and the tests/hardmap/*.v designs. One 'path top' per line, paths
+# relative to the repository root.
+tests/micro/verilog/common/adder.v add_module
+tests/micro/verilog/common/sub.v sub
+tests/micro/verilog/common/mult.v mul
+tests/micro/verilog/common/mult_const.v mul_const
+tests/micro/verilog/common/mem.v mem_read
+tests/micro/verilog/common/rom.v rom
+tests/micro/verilog/common/spram.v spram_instance
+tests/micro/verilog/common/dpram.v dpram_instance
+tests/micro/verilog/common/bram.v block_ram
+tests/micro/verilog/common/1r.v twoR_twoW
+tests/micro/verilog/common/2r.v twoR_twoW
+tests/micro/verilog/common/1r2w.v R_twoW
+tests/micro/verilog/common/2r1w.v R_twoW
+tests/micro/verilog/common/2r2w.v twoR_twoW
+tests/micro/verilog/common/nr.v twoR_twoW
+tests/micro/verilog/micro/adder_hard_block.v top_module
+tests/micro/verilog/micro/multiply_hard_block.v top_module
+tests/micro/verilog/micro/hard_adder_cin_propagation.v top_module
+tests/micro/verilog/operators/eightbit_arithmetic_power.v eightbit_arithmetic_power
+tests/micro/verilog/operators/twobits_arithmetic_div.v simple_op
+tests/micro/verilog/operators/twobits_arithmetic_minus.v simple_op
+tests/micro/verilog/operators/twobits_arithmetic_mod.v simple_op
+tests/micro/verilog/operators/twobits_arithmetic_multiply.v simple_op
+tests/micro/verilog/operators/twobits_arithmetic_plus.v simple_op
+tests/micro/verilog/operators/twobits_arithmetic_power.v simple_op
+tests/micro/verilog/operators/twobits_arithmetic_uminus.v simple_op
+tests/hardmap/add_8x6.v add_8x6
+tests/hardmap/adder_use.v adder_use
+tests/hardmap/mul_8x7.v mul_8x7
+tests/hardmap/sub_pad_s.v sub_pad_s
+tests/hardmap/sub_pad_u.v sub_pad_u
+tests/hardmap/sx_add.v sx_add
+tests/hardmap/sx_add_c.v sx_add_c

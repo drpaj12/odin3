@@ -1,0 +1,16 @@
+<architecture>
+  <models>
+    <model name="multiply">
+      <input_ports><port name="x"/><port name="y"/></input_ports>
+      <output_ports><port name="z"/></output_ports>
+    </model>
+  </models>
+  <complexblocklist>
+    <pb_type name="mult">
+      <pb_type name="m" blif_model=".subckt multiply" num_pb="1">
+        <input name="x" num_pins="18"/><input name="y" num_pins="18"/>
+        <output name="z" num_pins="36"/>
+      </pb_type>
+    </pb_type>
+  </complexblocklist>
+</architecture>

@@ -14,7 +14,7 @@
 #include "ir/prov.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
-#include "passes/hardmap/hardmap.h"
+#include "passes/partial_map/hardmap.h"
 #include "proc_build.h"
 #include "unity.h"
 #include "util/alloc.h"
@@ -761,9 +761,9 @@ static void test_h10_info(void) {
     pb_result res;
     build_ram((ramcase){false, 16, 3, NULL, NULL}, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, NULL));
-    TEST_ASSERT_NOT_NULL(strstr(log_text,
-                                "hardmap: 0 multiply, 0 adder in 0 chains, 6 single_port_ram + 0 "
-                                "dual_port_ram slices; 0 cells left soft"));
+    TEST_ASSERT_NOT_NULL(
+        strstr(log_text, "partial_map: 0 multiply, 0 adder in 0 chains, 6 single_port_ram + 0 "
+                         "dual_port_ram slices; 0 cells left soft"));
     pb_free(&res);
 }
 
@@ -774,7 +774,7 @@ static void test_r_addr_too_wide(void) {
     build_ram((ramcase){false, 32, 1, NULL, NULL}, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_rtlil(&res, &before));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hardmap_run(&res.ctx, res.design, NULL));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "hardmap: RAM instance 'u' has ADDR_WIDTH 32"));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "partial_map: RAM instance 'u' has ADDR_WIDTH 32"));
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "single_port_ram"));
     assert_rtlil_equal(&res, &before);
     odin3_strbuf_free(&before);

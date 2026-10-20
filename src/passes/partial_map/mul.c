@@ -1,11 +1,11 @@
 /*
- * mul.c — `$mul` to `multiply` (3C spec §4, M-1..M-7). One `multiply` of WIDTH 36 per cell
- * (Parmys: fixed_hard_multiplier, no fracturing); the operand bits the cell has go to the low pins,
- * every other pin is the pad (`$_CONSTX_`, written `unconn`); out[i] drives Y[i]; the unused
- * outputs are fresh nets without a reader. A signed cell (both flags, PHASE2 #25) is sign-extended
- * to Y_WIDTH (D3). Cells M-2 leaves soft get one warning each.
+ * mul.c — `$mul` to `multiply` (3C spec §4, M-1..M-7). One `multiply` of WIDTH W (rules.mul_width)
+ * per cell (Parmys: fixed_hard_multiplier, no fracturing); the operand bits the cell has go to the
+ * low pins, every other pin is the pad (`$_CONSTX_`, written `unconn`); out[i] drives Y[i]; the
+ * unused outputs are fresh nets without a reader. A signed cell (both flags, PHASE2 #25) is
+ * sign-extended to Y_WIDTH (D3). Cells M-2 leaves soft get one warning each.
  */
-#include "passes/hardmap/hm_kit.h"
+#include "passes/partial_map/hm_kit.h"
 
 #include "passes/opt/kit.h"
 #include "util/log.h"
@@ -15,7 +15,7 @@
 
 enum { P_A_WIDTH = 2, P_B_WIDTH = 3, P_Y_WIDTH = 4 };
 enum { PORT_A, PORT_B, PORT_Y };
-enum { MUL_PINS = ODIN3_HARDMAP_MUL_WIDTH, MUL_OUT_PINS = 2 * ODIN3_HARDMAP_MUL_WIDTH };
+enum { MUL_PINS = PM_MUL_WIDTH_CAP, MUL_OUT_PINS = 2 * PM_MUL_WIDTH_CAP }; /* array capacities */
 
 /* The shape of a `$mul` cell. */
 typedef struct mul_shape {
@@ -52,18 +52,19 @@ static mul_shape shape_of(const hm_ctx *hc, odin3_node_id node) {
     return sh;
 }
 
-/* M-2, M-3 and M-5: hard unless 2x2 (Parmys builds that one from gates), wider than 36, signed
- * with Y_WIDTH above 36, or unsigned with Y_WIDTH above A_WIDTH + B_WIDTH (run wreduce first).
- * Parmys's own test is max(a,b) >= 3 || a == 1 || b == 1, so 1xN goes hard. */
-static mul_verdict verdict_of(const mul_shape *sh) {
+/* M-2, M-3 and M-5: hard unless too small (both operands at least 2 and the wider below
+ * rules.min_mul: Parmys builds the 2x2 from gates), wider than W, signed with Y_WIDTH above W, or
+ * unsigned with Y_WIDTH above A_WIDTH + B_WIDTH (run wreduce first). Parmys's own test is
+ * max(a,b) >= 3 || a == 1 || b == 1, so 1xN goes hard. */
+static mul_verdict verdict_of(const hm_ctx *hc, const mul_shape *sh) {
     uint32_t widest = sh->a > sh->b ? sh->a : sh->b;
-    if (sh->a == 2 && sh->b == 2) {
+    if (sh->a >= 2 && sh->b >= 2 && widest < hc->rules.min_mul) {
         return MUL_SOFT_2X2;
     }
-    if (widest > ODIN3_HARDMAP_MUL_WIDTH) {
+    if (widest > hc->rules.mul_width) {
         return MUL_SOFT_WIDE;
     }
-    if (sh->is_signed && sh->y > ODIN3_HARDMAP_MUL_WIDTH) {
+    if (sh->is_signed && sh->y > hc->rules.mul_width) {
         return MUL_SOFT_SIGNED_Y;
     }
     if (!sh->is_signed && sh->y > sh->a + sh->b) {
@@ -78,35 +79,35 @@ static void warn_soft(const hm_ctx *hc, odin3_node_id src, const mul_shape *sh,
     hm_label(hc, src, label, sizeof label);
     if (verdict == MUL_SOFT_2X2) {
         hm_diag(hc, ODIN3_LOG_WARN, src,
-                "hardmap: '$mul' cell '%s' is 2x2; left soft for lower (Parmys builds it from "
+                "partial_map: '$mul' cell '%s' is 2x2; left soft for lower (Parmys builds it from "
                 "gates and adders)",
                 label);
     } else if (verdict == MUL_SOFT_Y_WIDER) {
         hm_diag(hc, ODIN3_LOG_WARN, src,
-                "hardmap: '$mul' cell '%s' has Y_WIDTH %" PRIu32
+                "partial_map: '$mul' cell '%s' has Y_WIDTH %" PRIu32
                 " above A_WIDTH + B_WIDTH (%" PRIu32 "); left soft for lower (run wreduce first)",
                 label, sh->y, sh->a + sh->b);
     } else if (verdict == MUL_SOFT_WIDE) {
         hm_diag(hc, ODIN3_LOG_WARN, src,
-                "hardmap: '$mul' cell '%s' is %" PRIu32 "x%" PRIu32
-                "; the arch's multiplier is 36 wide; left soft for lower",
-                label, sh->a, sh->b);
+                "partial_map: '$mul' cell '%s' is %" PRIu32 "x%" PRIu32
+                "; the arch's multiplier is %" PRIu32 " wide; left soft for lower",
+                label, sh->a, sh->b, hc->rules.mul_width);
     } else {
         hm_diag(hc, ODIN3_LOG_WARN, src,
-                "hardmap: signed '$mul' cell '%s' has Y_WIDTH %" PRIu32
-                " above 36; left soft for lower",
-                label, sh->y);
+                "partial_map: signed '$mul' cell '%s' has Y_WIDTH %" PRIu32 " above %" PRIu32
+                "; left soft for lower",
+                label, sh->y, hc->rules.mul_width);
     }
 }
 
 /*
- * The 36 pins of one operand. Unsigned: the operand's bits, then the pad. Signed (M-5): the bits
+ * The W pins of one operand. Unsigned: the operand's bits, then the pad. Signed (M-5): the bits
  * below Y_WIDTH, the sign bit up to Y_WIDTH, then the pad.
  */
 static void fill_operand(const hm_ctx *hc, odin3_pinslice pins, const mul_shape *sh,
                          odin3_net_id *dst) {
-    uint32_t limit = sh->is_signed ? sh->y : ODIN3_HARDMAP_MUL_WIDTH;
-    for (uint32_t i = 0; i < MUL_PINS; i++) {
+    uint32_t limit = sh->is_signed ? sh->y : hc->rules.mul_width;
+    for (uint32_t i = 0; i < hc->rules.mul_width; i++) {
         if (i < pins.count && i < limit) {
             dst[i] = odin3_pin_net(hc->module, (odin3_pin_id){pins.first.v + i});
         } else if (sh->is_signed && i < limit && pins.count > 0) {
@@ -119,11 +120,12 @@ static void fill_operand(const hm_ctx *hc, odin3_pinslice pins, const mul_shape 
 
 /* Replaces the none entries that stand for the pad by the pad net: an operand bit that is really
  * unconnected stays open (it is a source bit), so the pad marks come from the fill's limit. */
-static void fill_pad(const mul_shape *sh, uint32_t width, odin3_net_id pad, odin3_net_id *dst) {
-    uint32_t limit = sh->is_signed ? sh->y : ODIN3_HARDMAP_MUL_WIDTH;
+static void fill_pad(const hm_ctx *hc, const mul_shape *sh, uint32_t width, odin3_net_id pad,
+                     odin3_net_id *dst) {
+    uint32_t limit = sh->is_signed ? sh->y : hc->rules.mul_width;
     uint32_t used = width < limit ? width : limit;
     used = sh->is_signed ? limit : used;
-    for (uint32_t i = used; i < MUL_PINS; i++) {
+    for (uint32_t i = used; i < hc->rules.mul_width; i++) {
         dst[i] = pad;
     }
 }
@@ -136,8 +138,8 @@ static odin3_status operands(hm_ctx *hc, odin3_node_id src, const mul_shape *sh,
     }
     fill_operand(hc, odin3_node_port(hc->module, src, PORT_A), sh, nets->a);
     fill_operand(hc, odin3_node_port(hc->module, src, PORT_B), sh, nets->b);
-    fill_pad(sh, sh->a, pad, nets->a);
-    fill_pad(sh, sh->b, pad, nets->b);
+    fill_pad(hc, sh, sh->a, pad, nets->a);
+    fill_pad(hc, sh, sh->b, pad, nets->b);
     return ODIN3_OK;
 }
 
@@ -164,12 +166,14 @@ static odin3_status build(hm_ctx *hc, odin3_node_id src, const mul_shape *sh, od
     odin3_status st = hm_need(hc, HM_MULTIPLY, src, &type);
     st = st == ODIN3_OK ? hm_begin_cell(hc, src) : st;
     st = st == ODIN3_OK ? operands(hc, src, sh, &nets) : st;
-    st = st == ODIN3_OK ? hm_fresh_nets(hc, MUL_OUT_PINS, nets.out) : st;
+    st = st == ODIN3_OK ? hm_fresh_nets(hc, 2U * hc->rules.mul_width, nets.out) : st;
     if (st != ODIN3_OK) {
         return st;
     }
-    odin3_value width = odin3_value_int(ODIN3_HARDMAP_MUL_WIDTH);
-    odin3_netvec ports[3] = {{nets.a, MUL_PINS}, {nets.b, MUL_PINS}, {nets.out, MUL_OUT_PINS}};
+    odin3_value width = odin3_value_int(hc->rules.mul_width);
+    odin3_netvec ports[3] = {{nets.a, hc->rules.mul_width},
+                             {nets.b, hc->rules.mul_width},
+                             {nets.out, 2U * hc->rules.mul_width}};
     odin3_node_id node = {0};
     st = hm_new_node(hc, &(hm_node_req){type, &width, 1, ports, "mul"}, &node);
     return st == ODIN3_OK ? make_ties(hc, src, sh, &nets, ties) : st;
@@ -197,7 +201,7 @@ odin3_status hm_map_mul(hm_ctx *hc, odin3_node_id src) {
     if (sh.a == 0 || sh.b == 0 || sh.y == 0) {
         return ODIN3_OK; /* a degenerate cell (the type's verify refuses it): left alone */
     }
-    mul_verdict verdict = verdict_of(&sh);
+    mul_verdict verdict = verdict_of(hc, &sh);
     if (verdict != MUL_HARD) {
         warn_soft(hc, src, &sh, verdict);
         hc->stats.soft++;
@@ -216,15 +220,15 @@ enum { MUL_PARAMS = 5 };
 
 static odin3_status check_width(const hm_ctx *hc, odin3_node_id node) {
     const odin3_value *width = odin3_node_param(hc->module, node, 0);
-    if (width == NULL || width->i <= (int64_t)ODIN3_HARDMAP_MUL_WIDTH) {
+    if (width == NULL || width->i <= (int64_t)hc->rules.mul_width) {
         return ODIN3_OK;
     }
     char label[ODIN3_LOG_BUF / 4];
     hm_label(hc, node, label, sizeof label);
     hm_diag(hc, ODIN3_LOG_ERROR, node,
-            "hardmap: 'multiply' instance '%s' has WIDTH %" PRId64
-            "; the arch's multiplier is 36 wide",
-            label, width->i);
+            "partial_map: 'multiply' instance '%s' has WIDTH %" PRId64
+            "; the arch's multiplier is %" PRIu32 " wide",
+            label, width->i, hc->rules.mul_width);
     return ODIN3_ERR_INVALID_ARG;
 }
 
@@ -278,24 +282,24 @@ static odin3_status build_soft(hm_ctx *hc, odin3_node_id src, const mul_shape *s
 
 /*
  * An explicit `multiply` is treated like the equivalent `$mul` (Parmys resolves the primitive to
- * `$mul`): WIDTH 2 becomes a `$mul` for lower, other WIDTH below 36 are padded to the arch's
- * multiplier exactly as a `$mul` of that shape, WIDTH 36 is already that. A warning names it.
+ * `$mul`): WIDTH 2 becomes a `$mul` for lower, other WIDTH below W are padded to the arch's
+ * multiplier exactly as a `$mul` of that shape, WIDTH W is already that. A warning names it.
  */
 odin3_status hm_map_explicit(hm_ctx *hc, odin3_node_id src) {
     const odin3_value *width = odin3_node_param(hc->module, src, 0);
     mul_shape sh = shape_of_multiply(hc, src);
-    if (width == NULL || width->i == (int64_t)ODIN3_HARDMAP_MUL_WIDTH || sh.a == 0 || sh.b == 0 ||
+    if (width == NULL || width->i == (int64_t)hc->rules.mul_width || sh.a == 0 || sh.b == 0 ||
         sh.y == 0) {
         return ODIN3_OK;
     }
-    mul_verdict verdict = verdict_of(&sh);
+    mul_verdict verdict = verdict_of(hc, &sh);
     if (verdict != MUL_HARD && verdict != MUL_SOFT_2X2) {
         return ODIN3_OK;
     }
     char label[ODIN3_LOG_BUF / 4];
     hm_label(hc, src, label, sizeof label);
     hm_diag(hc, ODIN3_LOG_WARN, src,
-            "hardmap: explicit 'multiply' instance '%s' (WIDTH %" PRId64
+            "partial_map: explicit 'multiply' instance '%s' (WIDTH %" PRId64
             ") treated as '$mul' as Parmys does",
             label, width->i);
     odin3_status st = transact(hc, src, &sh, verdict == MUL_HARD ? build : build_soft);

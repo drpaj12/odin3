@@ -112,6 +112,64 @@ const char *odin3_arch_library_text(const odin3_arch *arch) {
     return arch->text.data != NULL ? arch->text.data : "";
 }
 
+/* --- accessors of partial_map ---------------------------------------------------------------- */
+
+uint32_t odin3_arch_model_port_width(const odin3_arch_model *model, const char *port) {
+    for (uint32_t i = 0; model != NULL && i < model->n_ports; i++) {
+        if (strcmp(model->ports[i].name, port) == 0) {
+            return model->ports[i].max_width;
+        }
+    }
+    return 0;
+}
+
+bool odin3_arch_model_is_template(const odin3_arch *arch, const char *model) {
+    const odin3_arch_model *found = odin3_arch_model_find(arch, model);
+    return found != NULL && found->registered && found->is_template;
+}
+
+/* The largest num_pins of an input pin of leaf whose name contains `part`. */
+static uint32_t leaf_pins_named(const odin3_arch_leaf *leaf, const char *part) {
+    uint32_t most = 0;
+    for (uint32_t i = 0; i < leaf->n_pins; i++) {
+        const odin3_arch_pin *pin = &leaf->pins[i];
+        if (pin->dir == ODIN3_ARCH_PIN_IN && strstr(pin->name, part) != NULL &&
+            pin->num_pins > most) {
+            most = pin->num_pins;
+        }
+    }
+    return most;
+}
+
+uint32_t odin3_arch_max_addr_pins(const odin3_arch *arch) {
+    static const char *const rams[] = {"single_port_ram", "dual_port_ram"};
+    uint32_t most = 0;
+    for (size_t ram = 0; ram < sizeof rams / sizeof rams[0]; ram++) {
+        uint32_t idx = 0;
+        for (uint32_t from = 0; odin3_arch_next_leaf_of(arch, rams[ram], from, &idx);
+             from = idx + 1) {
+            uint32_t pins = leaf_pins_named(odin3_arch_leaf_at(arch, idx), "addr");
+            most = pins > most ? pins : most;
+        }
+    }
+    return most;
+}
+
+uint32_t odin3_arch_modes_of(const odin3_arch *arch, const char *model, odin3_arch_ram_mode *out,
+                             uint32_t cap) {
+    uint32_t count = 0;
+    uint32_t idx = 0;
+    for (uint32_t from = 0; odin3_arch_next_leaf_of(arch, model, from, &idx); from = idx + 1) {
+        if (count < cap) {
+            const odin3_arch_leaf *leaf = odin3_arch_leaf_at(arch, idx);
+            out[count] =
+                (odin3_arch_ram_mode){leaf_pins_named(leaf, "addr"), leaf_pins_named(leaf, "data")};
+        }
+        count++;
+    }
+    return count;
+}
+
 /* --- parsing --------------------------------------------------------------------------------- */
 
 static odin3_status parse_root(arch_rd *rd) {

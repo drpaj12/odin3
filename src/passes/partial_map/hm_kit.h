@@ -26,8 +26,9 @@
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
-#include "passes/hardmap/hardmap.h"
 #include "passes/manager.h"
+#include "passes/partial_map/hardmap.h"
+#include "passes/partial_map/rules.h"
 #include "util/attr.h"
 #include "util/str.h"
 #include "util/vec.h"
@@ -55,6 +56,7 @@ typedef struct hm_ctx {
     odin3_design *design;
     odin3_module *module;
     odin3_hardmap_stats stats;
+    pm_rules rules;                      /* S-2: the numbers the rules read */
     odin3_celltype_id hard[HM_N_HARD];   /* found by hm_need; {0} until then */
     odin3_celltype_id glue[HM_N_GLUE];   /* found on first use */
     odin3_celltype_id konst[HM_N_CONST]; /* $_CONST0_, $_CONST1_, $_CONSTX_ */
@@ -94,7 +96,7 @@ void hm_set_module(hm_ctx *hc, odin3_module *module);
 /*
  * The cell type of hard cell `which` in *out, checked once per context: it must be registered,
  * of granularity HARD, with the ports and parameters hardmap indexes by position. Otherwise the
- * error "hardmap: cell type 'multiply' is not registered; read_techlib lib/vtr.o3lib first" (or
+ * error "partial_map: cell type 'multiply' is not registered; read_techlib lib/vtr.o3lib first" (or
  * "... is not a hard block ..." / "... does not have the expected ports ...") is logged and
  * ODIN3_ERR_INVALID_ARG returned, nothing changed. The error is located at node `at` (none: bare).
  */
@@ -156,7 +158,7 @@ odin3_status hm_budget_check(const hm_ctx *hc);
 /*
  * Logs fmt at level, located at the source of node (its first source leaf: "file:line:col: error:
  * ..." or the source manager's form) or, without a location, as the bare text. The texts carry
- * their own "hardmap: " prefix.
+ * their own "partial_map: " prefix.
  */
 void hm_diag(const hm_ctx *hc, odin3_log_level level, odin3_node_id node, const char *fmt, ...)
     ODIN3_PRINTF(4, 5);
@@ -173,11 +175,11 @@ odin3_status hm_map_mul(hm_ctx *hc, odin3_node_id src);
 odin3_status hm_map_adder(hm_ctx *hc, odin3_node_id src);
 
 /* The explicit-instance check of M-6 for node (a `multiply`): the type's shape (H-3), then WIDTH
- * above 36: OK, or the located error. */
+ * above the arch's multiplier width: OK, or the located error. */
 odin3_status hm_check_multiply(hm_ctx *hc, odin3_node_id node);
 
 /* The explicit `multiply` rule (M-6 as amended): treat src like the equivalent `$mul`, with a
- * warning; WIDTH 36 is left as it is. */
+ * warning; a WIDTH equal to the arch's is left as it is. */
 odin3_status hm_map_explicit(hm_ctx *hc, odin3_node_id src);
 
 /* The inferred-memory rule (mem.c, R-8..R-12): maps a `$mem` to RAM slices, merging the flip-flops
@@ -185,8 +187,8 @@ odin3_status hm_map_explicit(hm_ctx *hc, odin3_node_id src);
 odin3_status hm_map_mem(hm_ctx *hc, odin3_node_id src);
 
 /* The explicit RAM rule (ram.c, R-1..R-7): legalises a `single_port_ram` / `dual_port_ram`
- * instance to ADDR_WIDTH 15 and DATA_WIDTH 1 slices (depth split, width split, address padding)
- * or leaves it when it already has that shape. Any other node is left alone. */
+ * instance to ADDR_WIDTH rules.mem_depth and DATA_WIDTH 1 slices (depth split, width split, address
+ * padding) or leaves it when it already has that shape. Any other node is left alone. */
 odin3_status hm_map_ram(hm_ctx *hc, odin3_node_id src);
 
 /* The pre-check of a RAM instance: the type's shape (H-3), then ADDR_WIDTH within what hardmap

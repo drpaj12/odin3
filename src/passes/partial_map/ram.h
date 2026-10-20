@@ -5,24 +5,20 @@
  *
  * The depth split is a loop over levels (R-2): level L splits on address bit L, `h` (bit 0, the
  * low half) or `s` (bit 1). A leaf is numbered by its choices, bit L of the number being level L's.
- * There are 2^k leaves for k = ADDR_WIDTH - 15 levels. The write enable of a leaf is the instance's
- * `we` ANDed with the matching address bits or their inverses; each read port has one registered
- * select per level (R-7, D4); the output of a data bit is a tree of `$mux` whose root is level 0.
+ * There are 2^k leaves for k = ADDR_WIDTH - D levels (D = rules.mem_depth). The write enable of a
+ * leaf is the instance's `we` ANDed with the matching address bits or their inverses; each read
+ * port has one registered select per level (R-7, D4); the output of a data bit is a tree of `$mux`
+ * whose root is level 0.
  */
 #ifndef ODIN3_PASSES_HARDMAP_RAM_H
 #define ODIN3_PASSES_HARDMAP_RAM_H
 
-#include "passes/hardmap/hm_kit.h"
+#include "passes/partial_map/hm_kit.h"
 
 #include <stdint.h>
 
-/* The arch's RAM shape (spec H-1: Parmys's split_memory_depth and split_memory_width). */
-#define ODIN3_HARDMAP_RAM_ADDR 15U
-/* An instance of more address bits is refused: 2^16 leaves per data bit is already beyond use. */
-#define ODIN3_HARDMAP_RAM_MAX_ADDR 31U
-
 enum {
-    RAM_MAX_LEVELS = ODIN3_HARDMAP_RAM_MAX_ADDR - ODIN3_HARDMAP_RAM_ADDR,
+    RAM_MAX_LEVELS = PM_RAM_MAX_ADDR - PM_RAM_DEPTH_MIN,
     RAM_MAX_PORTS = 2,
     RAM_MAX_PINS = 9 /* ports of dual_port_ram */
 };
@@ -44,11 +40,11 @@ typedef struct ram_layout {
 const ram_layout *ram_layout_of(hm_hard kind);
 
 typedef struct ram_port {
-    odin3_net_id addr[ODIN3_HARDMAP_RAM_ADDR]; /* the leaf's address pins */
-    odin3_net_id inv[RAM_MAX_LEVELS];          /* ~addr[L] */
-    odin3_net_id sel[RAM_MAX_LEVELS];          /* the registered select of level L */
-    odin3_vec we;                              /* odin3_net_id: the write enable of each leaf */
-    odin3_vec out;                             /* odin3_net_id: each leaf's output, one data bit */
+    odin3_net_id addr[PM_RAM_MAX_ADDR]; /* the leaf's address pins (D used) */
+    odin3_net_id inv[RAM_MAX_LEVELS];   /* ~addr[L] */
+    odin3_net_id sel[RAM_MAX_LEVELS];   /* the registered select of level L */
+    odin3_vec we;                       /* odin3_net_id: the write enable of each leaf */
+    odin3_vec out;                      /* odin3_net_id: each leaf's output, one data bit */
 } ram_port;
 
 /*

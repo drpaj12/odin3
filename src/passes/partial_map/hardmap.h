@@ -14,9 +14,6 @@
 
 #include <stdint.h>
 
-/* The width of the arch's multiplier (spec H-1: Parmys's fixed_hard_multiplier size). */
-#define ODIN3_HARDMAP_MUL_WIDTH 36U
-
 /* What a run did, for the INFO line of H-10. */
 typedef struct odin3_hardmap_stats {
     uint64_t multiply;  /* `multiply` blocks made */
@@ -46,6 +43,10 @@ typedef struct odin3_hardmap_stats {
  * design budget is exceeded, possibly after earlier modules were mapped. *stats (may be NULL) gets
  * the totals; the INFO line of H-10 is logged.
  */
+odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                   odin3_hardmap_stats *stats);
+
+/* The 3C name of odin3_partial_map_run (4.2 S-1), kept for the existing tests. */
 odin3_status odin3_hardmap_run(odin3_pass_ctx *ctx, odin3_design *design,
                                odin3_hardmap_stats *stats);
 

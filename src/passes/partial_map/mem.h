@@ -8,7 +8,7 @@
 #ifndef ODIN3_PASSES_HARDMAP_MEM_H
 #define ODIN3_PASSES_HARDMAP_MEM_H
 
-#include "passes/hardmap/ram.h"
+#include "passes/partial_map/ram.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -24,7 +24,7 @@ enum {
     MEM_P_WR_ADDR,
     MEM_P_WR_DATA,
     /* a RAM of more address bits is never built from a `$mem` (R-11) */
-    MEM_MAX_ABITS = ODIN3_HARDMAP_RAM_MAX_ADDR
+    MEM_MAX_ABITS = PM_RAM_MAX_ADDR
 };
 
 typedef struct mem_rport {

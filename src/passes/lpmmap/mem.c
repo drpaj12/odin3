@@ -12,8 +12,8 @@
 
 #include "ir/celltype.h"
 #include "passes/ffinit.h"
-#include "passes/hardmap/hm_kit.h"
-#include "passes/hardmap/mem.h"
+#include "passes/partial_map/hm_kit.h"
+#include "passes/partial_map/mem.h"
 
 #include <inttypes.h>
 #include <string.h>

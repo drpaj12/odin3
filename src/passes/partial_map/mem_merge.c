@@ -12,7 +12,7 @@
  * This works on the copy in mem_model: the design is untouched, so a `$mem` that ends soft keeps
  * its flip-flops (agent default d).
  */
-#include "passes/hardmap/mem.h"
+#include "passes/partial_map/mem.h"
 
 #include "ir/celltype.h"
 

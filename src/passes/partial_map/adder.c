@@ -8,7 +8,7 @@
  * warning, as M-3 does for `$mul`: aliasing the extra Y bits onto a net, or onto gnd, would
  * allocate after the source is deleted (H-9); 3G's wreduce caps Y at n + 1.
  */
-#include "passes/hardmap/hm_kit.h"
+#include "passes/partial_map/hm_kit.h"
 
 #include "passes/opt/kit.h"
 #include "util/log.h"
@@ -194,14 +194,14 @@ static odin3_status transact(hm_ctx *hc, odin3_node_id src, const add_shape *sh)
 
 odin3_status hm_map_adder(hm_ctx *hc, odin3_node_id src) {
     add_shape sh = shape_of(hc, src);
-    if (sh.n == 0 || sh.y == 0) {
-        return ODIN3_OK; /* a degenerate cell (A-1): left alone */
+    if (sh.n == 0 || sh.y == 0 || sh.n < hc->rules.min_add) {
+        return ODIN3_OK; /* a degenerate cell (A-1) or below --min-add: left alone */
     }
     if (sh.y > sh.n + 1) {
         char label[ODIN3_LOG_BUF / 4];
         hm_label(hc, src, label, sizeof label);
         hm_diag(hc, ODIN3_LOG_WARN, src,
-                "hardmap: '%s' cell '%s' has Y_WIDTH %" PRIu32
+                "partial_map: '%s' cell '%s' has Y_WIDTH %" PRIu32
                 " above max(A_WIDTH, B_WIDTH) + 1 (%" PRIu32
                 "); left soft for lower (run wreduce first)",
                 sh.sub ? "$sub" : "$add", label, sh.y, sh.n + 1);
