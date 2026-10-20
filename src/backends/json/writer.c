@@ -8,7 +8,6 @@
 #include "util/file.h"
 #include "util/log.h"
 
-#include <errno.h>
 #include <string.h>
 
 enum {
@@ -516,8 +515,9 @@ static odin3_status write_design(jw *out) {
 }
 
 /* Writes a private temporary beside the destination, then renames it over the destination: a
- * failure leaves the destination as it was and removes only the temporary. */
-static odin3_status save_design(jw *state, const char *path) {
+ * failure leaves the destination as it was and removes only the temporary. With a map (HASH) the
+ * map is renamed first and then the netlist, both or neither (odin3_hash_map_close). */
+static odin3_status save_design(jw *state, const char *path, odin3_hash_map_file *map) {
     odin3_atomic_file file;
     odin3_status status = odin3_atomic_file_open(&file, path);
     if (status != ODIN3_OK) {
@@ -529,29 +529,30 @@ static odin3_status save_design(jw *state, const char *path) {
         odin3_log(ODIN3_LOG_ERROR, "%s: write failed: %s", path, strerror(state->write_errno));
     }
     state->fp = NULL;
-    return odin3_atomic_file_close(&file, status);
+    if (map == NULL) {
+        return odin3_atomic_file_close(&file, status);
+    }
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    status = status == ODIN3_OK ? odin3_hash_rows_map_text(&state->rows, &text) : status;
+    status = odin3_hash_map_close(map, (odin3_bytes){text.data, text.len}, &file, status);
+    odin3_strbuf_free(&text);
+    return status;
 }
 
-/* HASH, the first pass: writes provenance names to a null sink and collects the renamed objects
- * with their hash names (names.c). */
+/* HASH, the first pass: writes provenance names to a counting sink (no file) and collects the
+ * renamed objects with their hash names (names.c). */
 static odin3_status collect_names(jw *state) {
-    FILE *sink = fopen("/dev/null", "wb");
-    if (sink == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "write_json: cannot open /dev/null for the hash names pass: %s",
-                  strerror(errno));
-        return ODIN3_ERR_IO;
-    }
-    state->fp = sink;
+    state->fp = NULL;
+    state->sunk = 0;
     state->names = JW_NAMES_COLLECT;
     odin3_status status = write_design(state);
-    state->fp = NULL;
-    (void)fclose(sink);
     state->status = ODIN3_OK;
     return status;
 }
 
 /* HASH: the name map's temporary is opened first, so a map that cannot be written refuses the
- * write (H-1); then the two passes; then the map is renamed into place. */
+ * write (H-1); then the two passes; then the map and the netlist are renamed into place. */
 static odin3_status save_hashed(jw *state, const char *path, const char *name_map) {
     odin3_strbuf map_path;
     odin3_hash_map_file map = {.open = false};
@@ -563,13 +564,10 @@ static odin3_status save_hashed(jw *state, const char *path, const char *name_ma
     if (status == ODIN3_OK) {
         state->names = JW_NAMES_APPLY;
         state->row_cursor = 0;
-        status = save_design(state, path);
+        status = save_design(state, path, &map);
+    } else {
+        status = odin3_hash_map_close(&map, (odin3_bytes){NULL, 0}, NULL, status);
     }
-    odin3_strbuf text;
-    odin3_strbuf_init(&text);
-    status = status == ODIN3_OK ? odin3_hash_rows_map_text(&state->rows, &text) : status;
-    status = odin3_hash_map_close(&map, (odin3_bytes){text.data, text.len}, status);
-    odin3_strbuf_free(&text);
     odin3_strbuf_free(&map_path);
     return status;
 }
@@ -609,7 +607,7 @@ odin3_status odin3_json_write_with(const odin3_design *design, const char *path,
     if (status == ODIN3_OK && style == ODIN3_JSON_NAMES_HASH) {
         status = save_hashed(&state, path, opts->name_map);
     } else if (status == ODIN3_OK) {
-        status = save_design(&state, path);
+        status = save_design(&state, path, NULL);
     }
     odin3_hdl_ctx_destroy(state.hdl);
     odin3_wattr_seen_free(&state.seen);

@@ -2000,15 +2000,16 @@ static odin3_status map_begin(const verilog_writer *wr, const odin3_verilog_opts
     return st;
 }
 
-/* HASH: writes the name map of every module's renamed objects and renames it into place (status
- * is the netlist's; a failed netlist removes the temporary). */
-static odin3_status map_end(const verilog_writer *wr, odin3_hash_map_file *map) {
+/* HASH: closes the netlist and the name map together (the map is renamed first, then the netlist;
+ * a failed write removes both). The status is sticky in wr->st. */
+static void map_end(verilog_writer *wr, odin3_hash_map_file *map) {
     odin3_strbuf text;
     odin3_strbuf_init(&text);
     odin3_status st = wr->st == ODIN3_OK ? odin3_hash_rows_map_text(&wr->rows, &text) : wr->st;
-    st = odin3_hash_map_close(map, (odin3_bytes){text.data, text.len}, st);
+    odin3_atomic_file *netlist = wr->opened ? &wr->file : NULL;
+    wr->opened = false;
+    wr->st = odin3_hash_map_close(map, (odin3_bytes){text.data, text.len}, netlist, st);
     odin3_strbuf_free(&text);
-    return st;
 }
 
 /* Opens the name map's temporary (HASH), then the netlist's. */
@@ -2045,9 +2046,12 @@ odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
         (void)write_stubs(&wr);
     }
     vw_flush(&wr);
-    wr_finish(&wr); /* the status is sticky: wr.st holds the first failure */
-    st = map.open ? map_end(&wr, &map) : wr.st;
-    st = wr.st != ODIN3_OK ? wr.st : st;
+    if (map.open) {
+        map_end(&wr, &map);
+    } else {
+        wr_finish(&wr); /* the status is sticky: wr.st holds the first failure */
+    }
+    st = wr.st;
     wr_free(&wr);
     return st;
 }

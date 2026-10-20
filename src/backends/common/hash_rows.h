@@ -116,8 +116,14 @@ odin3_status odin3_hash_map_path(const odin3_hash_map_req *req, odin3_strbuf *pa
  */
 odin3_status odin3_hash_map_open(odin3_hash_map_file *map, const char *path);
 
-/* Writes text and renames the temporary over the path. status is the netlist's: not OK removes
- * the temporary. Returns the final status. */
-odin3_status odin3_hash_map_close(odin3_hash_map_file *map, odin3_bytes text, odin3_status status);
+/*
+ * Commits the netlist and the map together. netlist is the netlist's atomic file (written, not
+ * yet closed; NULL when the caller has none to hold) and status is the write's. Both temporaries
+ * are finished first; then the map is renamed into place, then the netlist, so a failed map never
+ * leaves a new netlist beside a stale map. Any failure removes both temporaries. Returns the final
+ * status.
+ */
+odin3_status odin3_hash_map_close(odin3_hash_map_file *map, odin3_bytes text,
+                                  odin3_atomic_file *netlist, odin3_status status);
 
 #endif

@@ -338,6 +338,49 @@ static void test_refused_without_map(void) {
     }
 }
 
+/* A map that cannot be renamed into place (the path is a directory) fails the write and leaves an
+ * existing netlist as it was: never a new netlist beside a stale map. */
+static void test_map_commit_failure(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        char outname[SMALL];
+        char path[PATH_BUF];
+        char extra[PATH_BUF];
+        (void)snprintf(outname, sizeof outname, "old%s", wc->ext);
+        put_file(outname, odin3_bytes_cstr("OLD\n"));
+        path_of("mapdir", path);
+        TEST_ASSERT_EQUAL_INT(0, mkdir(path, 0700));
+        (void)snprintf(extra, sizeof extra, "--name-map %.400s", path);
+        TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, write_hash_extra(wc, "old", odin3_bytes_cstr(extra)));
+        char *net = slurp(outname);
+        TEST_ASSERT_EQUAL_STRING("OLD\n", net);
+        odin3_util_free(net);
+        TEST_ASSERT_EQUAL_INT(0, rmdir(path));
+        odin3_design_destroy(design);
+        design = odin3_design_create();
+    }
+}
+
+/* --name-map equal to the output path (also spelled with `./`) is refused; nothing is written. */
+static void test_map_is_output_path(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        char outname[SMALL];
+        char extra[PATH_BUF];
+        (void)snprintf(outname, sizeof outname, "same%s", wc->ext);
+        (void)snprintf(extra, sizeof extra, "--name-map %s/./%s", dir, outname);
+        log_text[0] = '\0';
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                              write_hash_extra(wc, "same", odin3_bytes_cstr(extra)));
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "--name-map is the output path"), log_text);
+        TEST_ASSERT_FALSE(exists(outname));
+        odin3_design_destroy(design);
+        design = odin3_design_create();
+    }
+}
+
 /* Output "-" (stdout) has no default map path: refused with --name-style hash. */
 static void test_refused_stdout_without_map(void) {
     for (int i = 0; i < N_WRITERS; i++) {
@@ -550,6 +593,8 @@ int main(void) {
     RUN_TEST(test_json_hash);
     RUN_TEST(test_explicit_map_path);
     RUN_TEST(test_refused_without_map);
+    RUN_TEST(test_map_commit_failure);
+    RUN_TEST(test_map_is_output_path);
     RUN_TEST(test_refused_stdout_without_map);
     RUN_TEST(test_map_needs_hash);
     RUN_TEST(test_no_map_without_hash);

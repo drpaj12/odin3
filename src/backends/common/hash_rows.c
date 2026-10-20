@@ -1,14 +1,19 @@
 /*
  * hash_rows.c — renamed objects, hash names and the name map file. See hash_rows.h.
  */
+#define _XOPEN_SOURCE 700 /* realpath */
+
 #include "backends/common/hash_rows.h"
 
 #include "backends/common/hdl_loc.h"
 #include "util/alloc.h"
 #include "util/log.h"
 
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 void odin3_hash_rows_init(odin3_hash_rows *rows) {
     odin3_vec_init(&rows->rows, sizeof(odin3_hash_row));
@@ -145,9 +150,57 @@ odin3_status odin3_hash_rows_map_text(const odin3_hash_rows *rows, odin3_strbuf 
     return st;
 }
 
+/* The directory of path made absolute (realpath), plus "/" and the last component, into out.
+ * False when the directory cannot be resolved. */
+static bool canonical_path(const char *path, odin3_strbuf *out) {
+    const char *slash = strrchr(path, '/');
+    char dir_buf[PATH_MAX];
+    char dir_in[PATH_MAX];
+    size_t dir_len = slash == NULL ? 0 : (size_t)(slash - path);
+    if (dir_len >= sizeof dir_in) {
+        return false;
+    }
+    if (slash == NULL) {
+        (void)strcpy(dir_in, ".");
+    } else {
+        (void)snprintf(dir_in, sizeof dir_in, "%.*s", dir_len == 0 ? 1 : (int)dir_len, path);
+    }
+    if (realpath(dir_in, dir_buf) == NULL) {
+        return false;
+    }
+    odin3_strbuf_clear(out);
+    return odin3_strbuf_appendf(out, "%s/%s", dir_buf, slash == NULL ? path : slash + 1) ==
+           ODIN3_OK;
+}
+
+/* True when both paths name one file: the same directory and name after realpath of the
+ * directory, or (both exist) the same device and inode. */
+static bool same_destination(const char *left, const char *right) {
+    struct stat a;
+    struct stat b;
+    if (stat(left, &a) == 0 && stat(right, &b) == 0 && a.st_dev == b.st_dev &&
+        a.st_ino == b.st_ino) {
+        return true;
+    }
+    odin3_strbuf first;
+    odin3_strbuf second;
+    odin3_strbuf_init(&first);
+    odin3_strbuf_init(&second);
+    bool same = canonical_path(left, &first) && canonical_path(right, &second) &&
+                strcmp(first.data, second.data) == 0;
+    odin3_strbuf_free(&first);
+    odin3_strbuf_free(&second);
+    return same;
+}
+
 odin3_status odin3_hash_map_path(const odin3_hash_map_req *req, odin3_strbuf *path) {
     odin3_strbuf_clear(path);
     if (req->name_map != NULL) {
+        if (strcmp(req->out_path, "-") != 0 && same_destination(req->out_path, req->name_map)) {
+            odin3_log(ODIN3_LOG_ERROR, "%s: --name-map is the output path %s", req->who,
+                      req->out_path);
+            return ODIN3_ERR_INVALID_ARG;
+        }
         return odin3_strbuf_append(path, odin3_bytes_cstr(req->name_map));
     }
     if (strcmp(req->out_path, "-") == 0) {
@@ -170,18 +223,22 @@ odin3_status odin3_hash_map_open(odin3_hash_map_file *map, const char *path) {
     return st;
 }
 
-odin3_status odin3_hash_map_close(odin3_hash_map_file *map, odin3_bytes text, odin3_status status) {
-    if (!map->open) {
-        odin3_strbuf_free(&map->path);
-        return status;
+odin3_status odin3_hash_map_close(odin3_hash_map_file *map, odin3_bytes text,
+                                  odin3_atomic_file *netlist, odin3_status status) {
+    odin3_status st = netlist != NULL ? odin3_atomic_file_finish(netlist, status) : status;
+    if (map->open) {
+        if (st == ODIN3_OK && text.len > 0 &&
+            fwrite(text.ptr, 1, text.len, map->file.fp) != text.len) {
+            odin3_log(ODIN3_LOG_ERROR, "%s: write failed", map->file.path);
+            st = ODIN3_ERR_IO;
+        }
+        st = odin3_atomic_file_finish(&map->file, st);
+        st = odin3_atomic_file_commit(&map->file, st); /* the map first: never a new netlist */
+        map->open = false;                             /* beside a stale map */
     }
-    map->open = false;
-    odin3_status st = status;
-    if (st == ODIN3_OK && text.len > 0 && fwrite(text.ptr, 1, text.len, map->file.fp) != text.len) {
-        odin3_log(ODIN3_LOG_ERROR, "%s: write failed", map->file.path);
-        st = ODIN3_ERR_IO;
+    if (netlist != NULL) {
+        st = odin3_atomic_file_commit(netlist, st);
     }
-    st = odin3_atomic_file_close(&map->file, st);
     odin3_strbuf_free(&map->path);
     return st;
 }

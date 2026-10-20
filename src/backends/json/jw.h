@@ -39,7 +39,8 @@ typedef enum jw_names_mode {
 
 /* Output state; one writer per odin3_json_write call, module fields reset per module. */
 typedef struct jw {
-    FILE *fp;
+    FILE *fp;              /* NULL for the counting sink of the first hash pass */
+    uint64_t sunk;         /* bytes the counting sink took */
     odin3_design *design;
     const odin3_strtab *strtab;
     odin3_module *module;

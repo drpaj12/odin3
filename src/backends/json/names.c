@@ -49,6 +49,11 @@ static const char *apply_row(jw *out, const jw_keyspec *spec) {
         return "";
     }
     jw_record_key(out, out->key.data);
+    /* the first pass held the full name, not the hash name: hold it too, so a plain key is bumped
+     * past it as it was there */
+    uint32_t id = 0;
+    st = odin3_strtab_intern(out->written, odin3_hash_rows_full(&out->rows, row), &id);
+    out->status = out->status == ODIN3_OK ? st : out->status;
     return out->status == ODIN3_OK ? out->key.data : "";
 }
 

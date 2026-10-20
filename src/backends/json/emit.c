@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 enum {
@@ -18,7 +19,9 @@ enum {
 };
 
 void jw_raw(jw *out, const char *text) {
-    if (out->status == ODIN3_OK && fputs(text, out->fp) == EOF) {
+    if (out->fp == NULL) {
+        out->sunk += strlen(text);
+    } else if (out->status == ODIN3_OK && fputs(text, out->fp) == EOF) {
         out->status = ODIN3_ERR_IO;
         out->write_errno = errno != 0 ? errno : EIO;
     }
@@ -27,7 +30,10 @@ void jw_raw(jw *out, const char *text) {
 void jw_fmt(jw *out, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    if (out->status == ODIN3_OK && vfprintf(out->fp, fmt, args) < 0) {
+    if (out->fp == NULL) {
+        int len = vsnprintf(NULL, 0, fmt, args);
+        out->sunk += len > 0 ? (uint64_t)len : 0;
+    } else if (out->status == ODIN3_OK && vfprintf(out->fp, fmt, args) < 0) {
         out->status = ODIN3_ERR_IO;
         out->write_errno = errno != 0 ? errno : EIO;
     }
@@ -35,7 +41,9 @@ void jw_fmt(jw *out, const char *fmt, ...) {
 }
 
 void jw_char(jw *out, int chr) {
-    if (out->status == ODIN3_OK && fputc(chr, out->fp) == EOF) {
+    if (out->fp == NULL) {
+        out->sunk++;
+    } else if (out->status == ODIN3_OK && fputc(chr, out->fp) == EOF) {
         out->status = ODIN3_ERR_IO;
         out->write_errno = errno != 0 ? errno : EIO;
     }

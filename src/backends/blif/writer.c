@@ -2431,7 +2431,7 @@ static odin3_status wr_open(blif_writer *wr) {
  * Flushes the temporary (a failure is a located write error), then renames it over the destination
  * on success or removes it on any failure, so a failed write leaves an existing file as it was.
  */
-static void wr_close(blif_writer *wr) {
+static void wr_close(blif_writer *wr, bool hold) {
     if (!wr->opened) {
         return;
     }
@@ -2446,7 +2446,9 @@ static void wr_close(blif_writer *wr) {
             (void)wr_fail(wr, ODIN3_ERR_IO);
         }
     }
-    wr->st = odin3_atomic_file_close(&wr->file, wr->st);
+    /* hold (HASH): the temporary is finished and kept for odin3_hash_map_close to rename */
+    wr->st = hold ? odin3_atomic_file_finish(&wr->file, wr->st)
+                  : odin3_atomic_file_close(&wr->file, wr->st);
 }
 
 static void wr_free(blif_writer *wr) {
@@ -2587,9 +2589,12 @@ odin3_status odin3_blif_vtr_name_top(const odin3_blif_names_req *req, odin3_blif
     return st;
 }
 
-/* Opens the temporary and writes the design with opts (VTR: with the plan's names, lent). */
+/* Opens the temporary and writes the design with opts (VTR: with the plan's names, lent). With a
+ * map (HASH) the netlist's temporary is kept and renamed together with the map, map first
+ * (odin3_hash_map_close). */
 static odin3_status write_opened(const odin3_design *design, const char *path,
-                                 const odin3_blif_write_opts *opts, odin3_blif_names *names) {
+                                 const odin3_blif_write_opts *opts, odin3_blif_names *names,
+                                 odin3_hash_map_file *map) {
     blif_writer wr;
     odin3_status st = wr_init(&wr, design, path, opts);
     wr.names = names;
@@ -2599,7 +2604,12 @@ static odin3_status write_opened(const odin3_design *design, const char *path,
     if (st == ODIN3_OK) {
         write_design(&wr);
     }
-    wr_close(&wr); /* the status is sticky: wr.st holds the first failure, closing included */
+    bool held = wr.opened && map != NULL;
+    wr_close(&wr, held); /* the status is sticky: wr.st holds the first failure, closing included */
+    if (map != NULL) {
+        wr.st = odin3_hash_map_close(map, odin3_blif_names_map(names), held ? &wr.file : NULL,
+                                     wr.st);
+    }
     st = wr.st;
     wr_free(&wr);
     return st;
@@ -2610,7 +2620,7 @@ static odin3_status write_opened(const odin3_design *design, const char *path,
 static odin3_status write_planned(const odin3_design *design, const char *path,
                                   const odin3_blif_write_opts *opts, odin3_blif_vtr_plan *plan) {
     if (opts->name_style != ODIN3_BLIF_NAMES_HASH) {
-        return write_opened(design, path, opts, plan->names);
+        return write_opened(design, path, opts, plan->names, NULL);
     }
     odin3_strbuf map_path;
     odin3_hash_map_file map = {.open = false};
@@ -2619,8 +2629,7 @@ static odin3_status write_planned(const odin3_design *design, const char *path,
         odin3_hash_map_path(&(odin3_hash_map_req){"write_blif", path, opts->name_map}, &map_path);
     st = st == ODIN3_OK ? odin3_hash_map_open(&map, map_path.data) : st;
     if (st == ODIN3_OK) {
-        st = write_opened(design, path, opts, plan->names);
-        st = odin3_hash_map_close(&map, odin3_blif_names_map(plan->names), st);
+        st = write_opened(design, path, opts, plan->names, &map);
     }
     odin3_strbuf_free(&map_path);
     return st;
