@@ -549,11 +549,31 @@ static void test_names_absent_fails(void) {
     odin3_status st = ODIN3_OK;
     log_text[0] = '\0';
     char *text = names_out(&st, "--map %s/m.blif.names --lookup hzzzzzzzzzz", dir);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, st);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, st); /* absent: not a usage error */
     TEST_ASSERT_EQUAL_STRING("", text);
     odin3_util_free(text);
     text = names_out(&st, "--map %s/m.blif.names --reverse nosuch@x.v:1", dir);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, st);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, st);
+    odin3_util_free(text);
+}
+
+/* A full name listed twice in a map prints its short name once. */
+static void test_names_reverse_once(void) {
+    entry_fields fields = written_map();
+    char *map = slurp("m.blif.names");
+    size_t len = strlen(map);
+    char *twice = odin3_util_malloc(2 * len + 1);
+    memcpy(twice, map, len);
+    memcpy(twice + len, map, len + 1);
+    put_file("dup.names", (odin3_bytes){twice, 2 * len});
+    odin3_util_free(twice);
+    odin3_util_free(map);
+    odin3_status st = ODIN3_OK;
+    char *text = names_out(&st, "--map %s/dup.names --reverse %s", dir, fields.full);
+    char expect[ARGS_BUF + 2];
+    (void)snprintf(expect, sizeof expect, "%s\n", fields.short_name);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, log_text);
+    TEST_ASSERT_EQUAL_STRING(expect, text);
     odin3_util_free(text);
 }
 
@@ -623,6 +643,7 @@ int main(void) {
     RUN_TEST(test_json_default_unchanged);
     RUN_TEST(test_names_lookup_reverse);
     RUN_TEST(test_names_absent_fails);
+    RUN_TEST(test_names_reverse_once);
     RUN_TEST(test_names_check);
     RUN_TEST(test_names_arguments);
     return UNITY_END();

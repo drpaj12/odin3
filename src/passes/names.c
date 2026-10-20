@@ -5,6 +5,8 @@
  *   names --map <file> --reverse <full>   the hash name(s) of a full name (failure when absent)
  *   names --map <file> --check            counts; failure when an entry is bad
  *
+ * Status: OK; ODIN3_ERR_CHECK when --lookup or --reverse finds nothing; ODIN3_ERR_PARSE when
+ * --check finds a bad entry or the map is malformed; ODIN3_ERR_INVALID_ARG for a usage error.
  * Plain text on stdout, for scripts. The pass reads only the map: it needs no design, so
  * `odin3 -c "names --map out.blif.names --lookup h..."` works with nothing loaded.
  */
@@ -107,6 +109,9 @@ static odin3_status load_map(const char *path, odin3_name_map *map) {
     } else if (st == ODIN3_ERR_PARSE) {
         odin3_log(ODIN3_LOG_ERROR, "names: %s: the name map is over %d bytes", path, MAP_MAX_BYTES);
     }
+    if (st == ODIN3_ERR_NO_MEMORY) {
+        odin3_log(ODIN3_LOG_ERROR, "names: %s: out of memory reading the name map", path);
+    }
     st = st == ODIN3_OK ? odin3_name_map_init(map) : st;
     st = st == ODIN3_OK ? odin3_name_map_parse(map, (odin3_bytes){file.data, file.len}, path) : st;
     odin3_file_bytes_free(&file);
@@ -151,28 +156,22 @@ static odin3_status run_lookup(const odin3_name_map *map, odin3_bytes value, odi
     return st;
 }
 
-/* True when the short name of entry i is the short name of an earlier entry that matched. */
-static bool short_listed(const odin3_name_map *map, size_t index, odin3_bytes full) {
-    for (size_t i = 0; i < index; i++) {
-        const odin3_name_entry *earlier = entry_at(map, i);
-        if (same_bytes(earlier->full, full) &&
-            same_bytes(earlier->short_name, entry_at(map, index)->short_name)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* --reverse: the short name of every entry whose full name is value, each once. */
+/* --reverse: the short name of every entry whose full name is value, each once (a set of the
+ * short names already written). */
 static odin3_status run_reverse(const odin3_name_map *map, odin3_bytes value, odin3_strbuf *out) {
-    odin3_status st = ODIN3_OK;
+    odin3_strtab *seen = odin3_strtab_create();
+    odin3_status st = seen != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
     for (size_t i = 0; st == ODIN3_OK && i < map->entries.len; i++) {
         const odin3_name_entry *entry = entry_at(map, i);
-        if (same_bytes(entry->full, value) && !short_listed(map, i, value)) {
-            st = odin3_strbuf_append(out, entry->short_name);
-            st = st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("\n")) : st;
+        uint32_t id = 0;
+        if (!same_bytes(entry->full, value) || odin3_strtab_find(seen, entry->short_name, &id)) {
+            continue;
         }
+        st = odin3_strtab_intern(seen, entry->short_name, &id);
+        st = st == ODIN3_OK ? odin3_strbuf_append(out, entry->short_name) : st;
+        st = st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("\n")) : st;
     }
+    odin3_strtab_destroy(seen);
     return st;
 }
 
@@ -211,7 +210,7 @@ static odin3_status names_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
     if (st == ODIN3_OK && text.len == 0 && parsed.action != ACTION_CHECK && found == ODIN3_OK) {
         odin3_log(ODIN3_LOG_ERROR, "names: '%.*s' is not in %s", (int)parsed.value.len,
                   (const char *)parsed.value.ptr, parsed.map.data);
-        found = ODIN3_ERR_INVALID_ARG;
+        found = ODIN3_ERR_CHECK; /* not a usage error: scripts tell "absent" from "bad call" */
     }
     odin3_status written = st == ODIN3_OK ? write_stdout(&text) : ODIN3_OK;
     if (st == ODIN3_OK) {
@@ -226,7 +225,8 @@ static odin3_status names_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
 const odin3_pass_def odin3_pass_names = {
     "names",
     "names --map <file> (--lookup <short> | --reverse <full> | --check): look hashed names up in "
-    "a name map written by `--name-style hash` (needs no design)",
+    "a name map written by `--name-style hash` (needs no design; fails with CHECK when the name is "
+    "absent, PARSE for a bad map, INVALID_ARG for a bad call)",
     names_run,
     NULL,
     false,

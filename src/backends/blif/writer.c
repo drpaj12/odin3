@@ -1049,6 +1049,20 @@ static odin3_status hash_reserved(blif_writer *wr, odin3_bytes **out, uint32_t *
     return st;
 }
 
+/* HASH: the info line's pair must hold names of the output: when the first changed name is a net
+ * that got a hash name, the "legal" side is that hash name (its original stays in the map). */
+static odin3_status hash_info_line(blif_writer *wr) {
+    for (size_t i = 0; wr->have_first && i < odin3_hash_rows_count(&wr->rows); i++) {
+        const odin3_hash_row *row = odin3_hash_rows_at(&wr->rows, i);
+        if (row->key == wr->first_key) {
+            odin3_strbuf_clear(&wr->first_legal);
+            return odin3_strbuf_append(&wr->first_legal,
+                                       (odin3_bytes){row->hash.text, strlen(row->hash.text)});
+        }
+    }
+    return ODIN3_OK;
+}
+
 /*
  * HASH (5.4f): the nets named by provenance get their hash names (H-3), written in place of the
  * provenance names (a hash name needs no VB-10 form), and the name map text is built.
@@ -1070,6 +1084,7 @@ static odin3_status hash_finalize(blif_writer *wr) {
                                  (odin3_bytes){row->hash.text, strlen(row->hash.text)}, &id);
         st = st == ODIN3_OK ? set_gen(wr, row->key, id) : st;
     }
+    st = st == ODIN3_OK ? hash_info_line(wr) : st;
     st = st == ODIN3_OK ? odin3_hash_rows_map_text(&wr->rows, &wr->map_text) : st;
     odin3_util_free(reserved);
     return st;

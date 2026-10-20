@@ -667,8 +667,10 @@ static void claim_object(verilog_writer *wr, vw_named obj) {
     if (prov_style(wr)) {
         claim_provenance(wr, &obj);
     }
+    /* No warning for an object a provenance (or hash) name already names: its own name is not in
+     * the output and the message would say a generated name is used. */
     if (obj.own != 0 && !claim(wr, obj_key(obj.kind, obj.id), str_bytes(wr, obj.own)) &&
-        wr->st == ODIN3_OK &&
+        wr->st == ODIN3_OK && !odin3_u64map_get(wr->mod.obj_names, obj_key(obj.kind, obj.id), NULL) &&
         odin3_verilog_ident_kind(str_bytes(wr, obj.own)) == ODIN3_VERILOG_UNWRITABLE) {
         odin3_bytes own = str_bytes(wr, obj.own);
         odin3_log(ODIN3_LOG_WARN,
