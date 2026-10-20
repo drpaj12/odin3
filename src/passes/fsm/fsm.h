@@ -14,6 +14,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "passes/fsm/fsmdata.h"
 #include "passes/fsm/index.h"
@@ -154,6 +155,19 @@ odin3_status odin3_fsm_recode(const odin3_fsm_mod *fm, odin3_fsm_inst *inst);
 /* Yosys's ceil_log2: 0 for 0 or 1, else the least n with 2^n >= x. */
 int32_t odin3_fsm_ceil_log2(int32_t value);
 
+/* --- map (fsm_map.cc; spec M-1 to M-6, P-1 to P-3) ------------------------------------------- */
+
+/*
+ * fsm_map on one FSM: builds the state register, decoders, next-state and control-output logic as
+ * ordinary cells, hands the control-output nets from their old drivers to the new logic, puts the
+ * state wire's name on the new register and leaves the old register and logic for opt to remove.
+ * One DERIVED record covers everything new (P-1). pass is the running pass (provenance). NO_MEMORY
+ * before the first change leaves the IR as it was; after it (rare) the IR is valid and the
+ * kit's "discard the design" message is logged.
+ */
+odin3_status odin3_fsm_map(const odin3_fsm_mod *fm, odin3_pass_ctx *pass,
+                           const odin3_fsm_inst *inst);
+
 /* --- info (fsm_info.cc, FsmData::log_info; spec I-1) -------------------------------------- */
 
 /* Logs the tables of inst at INFO level, one message per line, each starting "fsm: ". */
@@ -173,7 +187,7 @@ odin3_status odin3_fsm_detect_run(odin3_design *design, const odin3_fsm_opts *op
  * design, each stage over every module before the next. ODIN3_ERR_NO_MEMORY from a stage before
  * map leaves the IR as it was (detect's attributes aside).
  */
-odin3_status odin3_fsm_run(odin3_design *design, const odin3_fsm_opts *opts);
+odin3_status odin3_fsm_run(odin3_pass_ctx *pass, odin3_design *design, const odin3_fsm_opts *opts);
 
 /* --- detect (fsm_detect.cc) --------------------------------------------------------------- */
 

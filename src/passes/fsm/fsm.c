@@ -131,6 +131,17 @@ static odin3_status stage_recode(fsm_run *run) {
     return st;
 }
 
+static odin3_status stage_map(fsm_run *run, odin3_pass_ctx *pass) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < run->n_mods; i++) {
+        const odin3_fsm_inst *insts = run->mods[i].insts.data;
+        for (size_t k = 0; st == ODIN3_OK && k < run->mods[i].insts.len; k++) {
+            st = odin3_fsm_map(&run->mods[i].fm, pass, &insts[k]);
+        }
+    }
+    return st;
+}
+
 static void stage_info(const fsm_run *run) {
     for (uint32_t i = 0; i < run->n_mods; i++) {
         const odin3_fsm_inst *insts = run->mods[i].insts.data;
@@ -140,7 +151,7 @@ static void stage_info(const fsm_run *run) {
     }
 }
 
-odin3_status odin3_fsm_run(odin3_design *design, const odin3_fsm_opts *opts) {
+odin3_status odin3_fsm_run(odin3_pass_ctx *pass, odin3_design *design, const odin3_fsm_opts *opts) {
     fsm_run run;
     odin3_status st = run_open(&run, design, opts);
     if (st == ODIN3_OK && !opts->nodetect) {
@@ -160,6 +171,9 @@ odin3_status odin3_fsm_run(odin3_design *design, const odin3_fsm_opts *opts) {
     }
     if (st == ODIN3_OK) {
         stage_info(&run);
+    }
+    if (st == ODIN3_OK && !opts->nomap) {
+        st = stage_map(&run, pass);
     }
     run_free(&run);
     return st;

@@ -82,7 +82,6 @@ static odin3_status parse_fsm_word(odin3_bytes word, odin3_bytes *args, odin3_fs
 
 static odin3_status fsm_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                  void *user) {
-    (void)ctx;
     (void)user;
     odin3_fsm_opts opts;
     char encoding[ODIN3_FSM_ENC_MAX];
@@ -94,7 +93,7 @@ static odin3_status fsm_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin
             return st;
         }
     }
-    return odin3_fsm_run(design, &opts);
+    return odin3_fsm_run(ctx, design, &opts);
 }
 
 const odin3_pass_def odin3_pass_fsm = {
