@@ -1399,7 +1399,15 @@ then the options considered.
     fft 0), and the cordic change comes from the lead and operand choice now being Yosys's
     (M2, M3). cf_cordic now equals Yosys under phase3 (M2/M3 lead and port-A choice); its three stale `diff_expect.txt` lines are removed. Logs:
     `/tmp/claude-1000/opt-share-m4/{spree,cf_cordic_v_18_18_18,cf_fft_256_8}.{base,head}.log`,
-    counts in `share_counts.txt` there. `opt_equiv_micro` (Phase 2 script, no `opt_share`) was not run.
+    counts in `share_counts.txt` there. Rerun on the merged head 3b41d411 (logs in
+    `/tmp/claude-1000/opt-share-final/`): `opt_equiv_micro_phase3` passed (3715 s);
+    `opt_diff_micro_wreduce` and `opt_diff_micro` each end with 7 unexpected lines, none a new difference
+    or a failed proof: the phase3 or full histogram, widths or identity of `bm_DL_74381_ALU`,
+    `cf_cordic_v_8_8_8`, `cf_cordic_v_18_18_18`, `bm_functional_test`, `stereovision1` and
+    `mkDelayWorker32B` now equal Yosys's (stale `diff_expect.txt` lines, not yet removed), plus 60 s SAT
+    timeouts (`iir1` phase3, which proves at 600 s on the head; `ex4LS16_fir` phase2, where `opt_share` does
+    not run; `stereovision1`, `mkDelayWorker32B` and `sv_chip1`, already listed untested) and `spree` as on main.
+    `opt_equiv_micro` (Phase 2 script, no `opt_share`) was not run.
 
 53. **Parity scope after the goals statement** (Peter, 2026-10-19). Peter: Odin III "needs to be
     compatible with modern VTR and Stratix, but doesn't neccessarily need to be right there with
