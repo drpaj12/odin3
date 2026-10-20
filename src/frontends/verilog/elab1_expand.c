@@ -1475,7 +1475,12 @@ static odin3_status given_instances(e1_pass *ps, odin3_ast_id item, const odin3_
 static odin3_status instantiation(e1_pass *ps, odin3_ast_id item) {
     odin3_elab1 *e1 = ps->e1;
     uint32_t name = odin3_ast_name(e1->parsed, item);
-    odin3_elab_res res = odin3_elab1_resolve(e1, name, odin3_elab1_def(e1, ps->def)->library);
+    odin3_elab_res res;
+    if (odin3_elab1_resolve_icell(e1, item, name, &res)) {
+        return res.kind == ODIN3_RES_CELLTYPE ? given_instances(ps, item, &res)
+                                              : log_all(ps, item, ODIN3_DECISION_SKIPPED);
+    }
+    res = odin3_elab1_resolve(e1, name, odin3_elab1_def(e1, ps->def)->library);
     odin3_elab1_prefer_unit(e1, item, &res);
     switch (res.kind) {
     case ODIN3_RES_MODULE:

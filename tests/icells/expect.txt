@@ -1,0 +1,25 @@
+# 5.2 icells-check: the designs a level cannot take, and why (spec section 5, T-5). Format:
+#   <level> <design file name> <outcome> <reason>
+# An entry for a design that passes is stale and fails the run. Nothing is skipped silently.
+#
+# X-11: multiply_hard_block.v instantiates the VTR hard block `multiply` (tech library
+# lib/vtr.o3lib, tests/icells/techlib.txt). The word and LPM levels read it back (the library
+# instances are compared). At the gate and LUT levels `write_blif --vtr` writes the original netlist
+# but refuses the read-back of its written Verilog: "parameters 'WIDTH' cannot be recovered from BLIF
+# formals". Confirmed: it passes when the written `(* blackbox *) module multiply` stub is cut from
+# the file, so the stub changes what the instance is. Not confirmed: why (the likely cause is that
+# the stub declares `out [1:0]`, the width at the default WIDTH = 1, where the hard cell has
+# 2 * WIDTH). The other two hard-block micros pass at all four levels (the soft n-bit adder
+# tests/hardmap/adder_lib.v is read with --lib).
+gate multiply_hard_block.v fail:read the written (* blackbox *) stub of multiply changes the read-back instance (passes without the stub); cause not confirmed
+lut multiply_hard_block.v fail:read the written (* blackbox *) stub of multiply changes the read-back instance (passes without the stub); cause not confirmed
+#
+# X-12: Yosys 0.55 has no SAT model of $pow (spec 20.2 of 2F), so the equivalence of a design with
+# a $pow cell is unproven at the word, LPM and inst levels; the text legs (signature fixpoint,
+# instances) still run, so the cell itself is checked. `lower` has no bit-level form of $pow, so
+# the gate and LUT levels cannot take the design.
+word cell_pow.v unproven Yosys has no SAT model of $pow
+lpm cell_pow.v unproven Yosys has no SAT model of $pow
+inst inst_pow.v unproven Yosys has no SAT model of $pow
+gate cell_pow.v error:script lower has no bit-level form of $pow
+lut cell_pow.v error:script lower has no bit-level form of $pow
