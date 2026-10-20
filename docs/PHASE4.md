@@ -244,6 +244,12 @@ DESIGN §12.1.
    above 50,000 bits draws a located WARNING that names it, its bits and why it stayed soft (a
    warning only). 4.2 plan PR D, Tasks 11 and 12. Peter approved 2026-10-20: `--mem-width arch`
    pads the address to the chosen mode's width; DATA_WIDTH is the slice's bit count.
+16. **D17 and D18** (Peter, 2026-10-20). D17, Parmys's soft memory has no read register: keep
+   RTL-correct, a Parmys defect, no code change. D18, an explicit `single_port_ram`,
+   `dual_port_ram`, `multiply` or `adder` instance on an arch without that model: under
+   `read_verilog --vtr-compat` it is built as soft logic from `lib/soft_primitives/<name>.v` (our
+   own behavioural bodies, read as library units on demand) with a located WARNING, as Parmys
+   does; without `--vtr-compat` the unresolved-module error stays. 4.2 plan PR D.
 
 ## Open items
 

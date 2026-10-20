@@ -8,11 +8,10 @@
 #
 # no-golden: Parmys has no golden for the design on this arch (C1 run, 2026-10-20).
 #
-# Not run on this arch, D18 (3C table, PR E): an explicit instance of a hard block the arch has no model for
-# (common/spram.v, common/dpram.v: `single_port_ram`; micro/multiply_hard_block.v: `multiply`) is
-# an Odin III error (`unresolved_module`, the record has no such model). Parmys builds the
-# instance from its own soft modules (spram: 4096 latches). Needs Peter: either leave the error or
-# give Odin III soft models of the four blocks for an arch without them.
+# D18 (3C table, PR E; Peter 2026-10-20): an explicit instance of a block the arch has no model of
+# is built as soft logic under --vtr-compat (lib/soft_primitives, warning), as Parmys does: the
+# micros common/spram.v, common/dpram.v and micro/multiply_hard_block.v run here. The soft RAM
+# keeps its read register (D17), so their latch counts are above Parmys's.
 #
 # D17 (3C table, PR E): a memory left soft on an arch without RAM. Parmys's soft expansion of a synchronous
 # read has no read register (common/mem.v: 128 latches, all memory cells, the read data is
@@ -25,14 +24,18 @@
 # no-golden (the k4 Parmys run failed, C1): common/mult_const.v, diffeq1, diffeq2, stereovision2
 # (ERROR BUF_NODE), mkDelayWorker32B (capped at 6144 MB).
 #
-# D18 on the VTR designs: ch_intrinsics, mkPktMerge, raygentop, boundtop, mkSMAdapter4B, or1200
-# instantiate `single_port_ram` / `dual_port_ram` / `multiply`, which the arch lacks: the same
-# `unresolved_module` error, so they are not run here.
-#
 # Open, unexplained (each fails the sweep; no D-id): the latch counts of designs that have no memory, only
 # soft adders and multipliers: sha +1, stereovision0 -19, stereovision1 +1, blob_merge +14
 # (counts equal Parmys's on k6 and COFFE, so this comes from the soft `$add`/`$mul` path of `lower`
 # against Parmys's, not from memories); stereovision3 is unproven (several clock domains).
+common/spram.v counts:+16 latch D17: the soft single_port_ram keeps its 16 read-data flops, Parmys's has none
+common/dpram.v counts:+32 latch D17: the soft dual_port_ram keeps its 2 x 16 read-data flops, Parmys's has none
+ch_intrinsics.v counts:+8 latch D17: read registers of the soft RAM instances (width x ports, not itemised per design)
+mkPktMerge.v counts:+459 latch D17: read registers of the soft RAM instances (not itemised per design)
+raygentop.v counts:+29 latch D17: read registers of the soft RAM instances (not itemised per design)
+boundtop.v counts:+292 latch D17: read registers of the soft RAM instances (not itemised per design; boundtop is +6 on COFFE and k6 for another reason, unexplained)
+mkSMAdapter4B.v counts:+109 latch D17: read registers of the soft RAM instances (not itemised per design; +4 of it is the bit-level opt_dff delta seen on k6)
+or1200.v counts:+67 latch D17: read registers of the soft RAM instances (not itemised per design)
 stereovision3.v unproven equiv-check: more than one clock domain; same as on k6
 operators/eightbit_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)
 operators/twobits_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)
