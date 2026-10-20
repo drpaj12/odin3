@@ -498,7 +498,10 @@ MIN_DISK_FREE_GIB = 20
 DISK_FLOOR_GIB = 10
 PAUSE_LIMIT_S = 7200
 POLL_S = 60
-JOB_TIMEOUT_S: Mapping[str, int] = MappingProxyType({"A": 14400, "B": 21600})
+# Wall limit per job in seconds (``run --job-timeout``): every command of a job shares it; 0 is
+# no cap. Group B stays at 21600 s (mcml runs 4699 s,
+# LU32PEEng 3237 s). One hung tool must not hold the heavy lock for hours.
+JOB_TIMEOUT_S: Mapping[str, int] = MappingProxyType({"A": 3600, "B": 21600})
 KILL_GRACE_S = 30.0
 CAPPED_RETRIES = 0
 KEEP_KEYS = 3
@@ -1077,23 +1080,32 @@ def _ended(returncode: int) -> str:
     return f"exited {returncode}" if returncode >= 0 else f"was killed by signal {-returncode}"
 
 
+def _command_name(job: Job, cmd: Command) -> str:
+    """``front end``, ``VTR``, or the program's name."""
+    if cmd.stdout == job.job_dir / FRONTEND_LOG:
+        return "front end"
+    if len(cmd.argv) > 1 and Path(cmd.argv[1]).name == VTR_FLOW_SCRIPT:
+        return "VTR"
+    return Path(cmd.argv[0]).name
+
+
 def _failure_message(job: Job, cmd: Command, returncode: int) -> str:
     """E-QH8's front-end text, or the same shape for VTR and any other command."""
-    if cmd.stdout == job.job_dir / FRONTEND_LOG:
-        what = "front end"
-    elif len(cmd.argv) > 1 and Path(cmd.argv[1]).name == VTR_FLOW_SCRIPT:
-        what = "VTR"
-    else:
-        what = Path(cmd.argv[0]).name
-    return f"{_label(job)}: {what} {_ended(returncode)}; see {cmd.stdout}"
+    return f"{_label(job)}: {_command_name(job, cmd)} {_ended(returncode)}; see {cmd.stdout}"
+
+
+def _wall_deadline(opts: RunOptions, began: float, limit_s: float) -> float:
+    """``began`` plus ``limit_s`` on ``opts.clock``; a limit of 0 is no cap (never reached)."""
+    return began + limit_s if limit_s > 0 else math.inf
 
 
 def _classify(job: Job, cmd: Command, outcome: CommandOutcome, opts: RunOptions,
-              scope: ScopeInfo, oom_before: int) -> tuple[str, str]:
+              scope: ScopeInfo, oom_before: int, began: float) -> tuple[str, str]:
     """A command's outcome as a job status and message (spec §7.4): a failure while the scope's
     ``oom_kill`` counter rose is ``capped``."""
     if outcome.kind == TIMEOUT:
-        return TIMEOUT, f"{_label(job)}: timeout after {opts.job_timeout_s[job.group]} s"
+        return TIMEOUT, (f"{_label(job)}: timeout after {opts.job_timeout_s[job.group]} s in "
+                         f"{_command_name(job, cmd)} (elapsed {opts.clock() - began:.0f} s)")
     if outcome.kind == ABORTED:
         return ABORTED, outcome.error
     if outcome.kind == "error" or outcome.returncode is None:
@@ -1210,7 +1222,7 @@ def run_one(job: Job, opts: RunOptions, finish: Finish) -> JobResult:
 def _run_one(job: Job, opts: RunOptions, finish: Finish) -> JobResult:
     scope = _heavy_scope(opts)
     began = opts.clock()
-    deadline = began + opts.job_timeout_s[job.group]
+    deadline = _wall_deadline(opts, began, opts.job_timeout_s[job.group])
     if retract_latest(job):
         _emit(opts, f"latest: {job.leg} {job.key12} retracted (its {job.design} job reruns)")
     attempt_start = fresh_attempt(job)
@@ -1220,7 +1232,7 @@ def _run_one(job: Job, opts: RunOptions, finish: Finish) -> JobResult:
     oom_before = qor_heavy.oom_kills(scope)
     for cmd in job.commands:
         outcome = run_command(cmd, opts, deadline=deadline)
-        status, error = _classify(job, cmd, outcome, opts, scope, oom_before)
+        status, error = _classify(job, cmd, outcome, opts, scope, oom_before, began)
         if status != OK:
             return _end_job(job, opts, began, (status, error, None))
     return _end_job(job, opts, began, _finish(job, finish, attempt_start))
@@ -1268,8 +1280,9 @@ def admit(opts: RunOptions, *, running: int) -> str:
 
 
 def capped_deadline(opts: RunOptions, limit_s: float) -> float:
-    """``limit_s`` from now on ``opts.clock``, but never past the night's deadline (review H3)."""
-    end = opts.clock() + limit_s
+    """``limit_s`` from now on ``opts.clock`` (0: no cap), but never past the night's deadline
+    (review H3)."""
+    end = _wall_deadline(opts, opts.clock(), limit_s)
     return end if opts.deadline is None else min(end, opts.deadline)
 
 
