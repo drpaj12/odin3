@@ -524,8 +524,9 @@ A job starts only when all hold, re-checked every 60 s while waiting:
   drains; capped again (or capped in group B) it stays `capped`: no verdict, as in
   `run-oracle.sh`.
 - **Timeouts**: VTR's `-timeout` per stage, 7,200 s in group A (decision 17) and 14,400 s in
-  group B (§3); the harness's own wall limit per job is 14,400 s in group A and 21,600 s in group
-  B (`--job-timeout`). On expiry the job's process group (each job runs with
+  group B (§3); the harness's own wall limit per job is 3,600 s in both groups (`--job-timeout S`,
+  shared by the job's commands; 0 is no cap; changed 2026-10-20 from 14,400/21,600 after one
+  hung ABC held the heavy lock for hours). On expiry the job's process group (each job runs with
   `start_new_session=True`) gets SIGTERM, then SIGKILL after 30 s; status `timeout`.
 
 ### 7.5 Cleanup

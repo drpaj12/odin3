@@ -799,7 +799,7 @@ class RunOrderTest(RunnerTestBase):
              qor_sched.DISK_FLOOR_GIB, qor_sched.PAUSE_LIMIT_S, qor_sched.POLL_S,
              dict(qor_sched.JOB_TIMEOUT_S), qor_sched.KILL_GRACE_S, qor_sched.CAPPED_RETRIES,
              qor_sched.KEEP_KEYS, qor_sched.KEEP_FAILED, qor_sched.KEEP_FAILED_BYTES),
-            (7, 20, 10, 7200, 60, {"A": 14400, "B": 21600}, 30, 0, 3, 5, 2 * GIB))
+            (7, 20, 10, 7200, 60, {"A": 3600, "B": 3600}, 30, 0, 3, 5, 2 * GIB))
         self.assertEqual(qor_sched.KEEP_RUN_FILES, (
             "vtr_flow.out", "output.txt", "parse_results.txt", "qor_results.txt", "vpr.out",
             "vpr.crit_path.out", "parmys.out", "abc*.out", "*_blackboxing_latch.out",
@@ -1011,6 +1011,14 @@ class FcheckTest(RunnerTestBase):
             verdict = qor_sched.run_fcheck(
                 job, self.opts(clock=time.monotonic, job_timeout_s={"A": 0.5, "B": 0.5}), 2)
         self.assertEqual((verdict, self.verdict(job)), ("timeout", "timeout"))
+
+    def test_zero_job_timeout_fcheck_no_cap(self) -> None:
+        """A limit of 0 also leaves the fcheck uncapped."""
+        self.mode({"exit": 0, "sleep": 1})
+        job = self.finished("sha")
+        opts = self.opts(clock=time.monotonic, job_timeout_s={"A": 0, "B": 0})
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(qor_sched.run_fcheck(job, opts, 2), "pass")
 
     def test_fcheck_stopped_at_the_night_deadline(self) -> None:
         """Review H3: the check is capped by the night's deadline, not only the job limit."""
@@ -1518,14 +1526,36 @@ class OutcomeTest(RunnerTestBase):
             summary, lines = self.run_jobs([self.job("sha", [spec])], opts)
         took = time.monotonic() - began
         self.assertEqual([r.status for r in summary.results], ["timeout"])
-        self.assertIn("vtr-qor: P sha: timeout after 1 s", lines)
-        self.assertIn("vtr-qor: P sha: timeout after 1 s",
-                      (self.out / "harness.log").read_text().splitlines())
+        pattern = re.compile(r"vtr-qor: P sha: timeout after 1 s in \S+ \(elapsed \d+ s\)")
+        self.assertTrue(any(pattern.fullmatch(line) for line in lines), lines)
+        logged = (self.out / "harness.log").read_text().splitlines()
+        self.assertTrue(any(pattern.fullmatch(line) for line in logged), logged)
         self.assertGreaterEqual(took, 1.5)
         self.assertLess(took, 60)  # far below the fake's 600 s: the kill, not the job, ended it
         self.assertTrue(_wait_dead([int(p) for p in pids.read_text().split()]))
         self.assertEqual(summary.exit_code, 3)
         self.assertEqual((self.job_dir("sha") / "status").read_text(), "timeout\n")
+
+    def test_timeout_names_the_command(self) -> None:
+        """The timeout line names the command that was running and the elapsed seconds; the
+        next job still runs."""
+        slow = {"sleep": 600, "stamp": str(self.stamps), "name": "front"}
+        opts = self.opts(clock=time.monotonic, sleep=time.sleep, job_timeout_s={"A": 1, "B": 1})
+        jobs = [self.job("slow", [slow, {}], leg="O"), self.job("sha", [{}])]
+        with mock.patch.object(qor_sched, "KILL_GRACE_S", 0.5):
+            summary, lines = self.run_jobs(jobs, opts)
+        self.assertEqual([r.status for r in summary.results], ["timeout", "ok"])
+        pattern = re.compile(r"vtr-qor: O slow: timeout after 1 s in front end "
+                             r"\(elapsed \d+ s\)")
+        self.assertTrue(any(pattern.fullmatch(line) for line in lines), lines)
+        self.assertEqual(summary.exit_code, 3)
+
+    def test_zero_job_timeout_is_no_cap(self) -> None:
+        """A limit of 0 means no cap: the job runs to its own end."""
+        job = self.job("sha", [{"sleep": 1}])
+        opts = self.opts(clock=time.monotonic, sleep=time.sleep, job_timeout_s={"A": 0, "B": 0})
+        summary, _ = self.run_jobs([job], opts)
+        self.assertEqual([r.status for r in summary.results], ["ok"])
 
     def test_failure_texts(self) -> None:
         front = {"exit": 3, "stamp": str(self.stamps), "name": "front"}
@@ -1633,7 +1663,8 @@ class CgroupKillTest(RunnerTestBase):
         self.assertEqual(len(set(self.sessions)), 2)  # the stage really had its own session
         self.assertEqual([r.status for r in summary.results], ["timeout", "ok"])
         self.assertTrue(_wait_dead(self.pid_list(), 0.1))  # dead before the next job ran
-        self.assertIn("vtr-qor: P sha: timeout after 1 s", lines)
+        prefix = "vtr-qor: P sha: timeout after 1 s in "
+        self.assertTrue(any(line.startswith(prefix) for line in lines))
 
     def test_setsid_stage_killed_on_floor(self) -> None:
         spec = self.stage(write=[{"path": str(self.df_file), "text": "9\n"}])
