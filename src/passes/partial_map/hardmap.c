@@ -305,14 +305,18 @@ static void info_absent(const odin3_arch *arch, const char *model, uint64_t coun
               pm_arch_name(arch), model, count, cells);
 }
 
-/* C-2 and C-3: a record with an `adder` model but no carry pack pattern gets one warning; with
+/* C-2 and C-3: a record with an `adder` model but no carry pack pattern gets one warning (only when
+ * the design has an `$add` or `$sub`); with
  * one, the number of pack patterns reaching the adder's `cin` is reported as a fact, at DEBUG level
  * so that the pass log of the k6 record stays equal to the log without a record (identity gate). */
-static void carry_report(const odin3_arch *arch, bool have_adder) {
-    if (!have_adder) {
+static void carry_report(hm_ctx *hc, const odin3_arch *arch) {
+    if (!hc->rules.have_adder) {
         return;
     }
     if (!odin3_arch_chain_pattern_reaches_adder(arch)) {
+        if (count_cells(hc, "$add") + count_cells(hc, "$sub") == 0) {
+            return; /* nothing to chain: the warning would be noise */
+        }
         odin3_log(ODIN3_LOG_WARN,
                   "partial_map: architecture '%s' has an 'adder' model but no carry pack pattern; "
                   "chains may not pack",
@@ -358,7 +362,7 @@ static void setup_rules(hm_ctx *hc, const odin3_partial_map_opts *opts) {
         info_absent(arch, "single_port_ram", count_cells(hc, "$mem"), "$mem");
         info_bits(hc);
     }
-    carry_report(arch, hc->rules.have_adder);
+    carry_report(hc, arch);
 }
 
 /* R-8, S-5: `--mem-width arch` needs a record with RAM modes; without one it is a no-op. */

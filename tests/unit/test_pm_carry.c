@@ -406,6 +406,78 @@ static void test_k4_has_no_adder(void) {
 }
 #endif
 
+/* A leaf that is the root pb_type itself (one level) has no parent: no interconnect owns it. */
+#ifndef PM_CARRY_VTR
+static void test_accessors_root_level_adder_leaf(void) {
+    odin3_arch *arch = parse_fixture("adder_toplevel.xml");
+    TEST_ASSERT_FALSE(odin3_arch_chain_pattern_reaches_adder(arch));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_arch_adder_cin_patterns(arch));
+    odin3_arch_destroy(arch);
+}
+#endif
+
+/* The no-carry-pattern warning is about adds: a design without `$add`/`$sub` gets none. */
+#ifndef PM_CARRY_VTR
+static void test_adder_free_design_gets_no_carry_warning(void) {
+    pb_result res;
+    build_adds("$add", NULL, 0, &res, false);
+    read_arch_fixture(&res, "adder_nochain.xml");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_partial_map_run(&res.ctx, res.design, NULL));
+    assert_not_logged("carry pack pattern");
+    assert_not_logged("chains may not pack");
+    pb_free(&res);
+}
+#endif
+
+/* --- the --min-add argument parser ---------------------------------------------------------- */
+
+#ifndef PM_CARRY_VTR
+static void assert_min_add_refused(const char *args) {
+    pb_result res;
+    static const uint32_t widths[] = {4};
+    build_adds("$add", widths, 1, &res, true);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_ERR_INVALID_ARG,
+        odin3_pass_run(res.design, "partial_map", odin3_bytes_cstr(args)), args);
+    pb_free(&res);
+}
+
+static void assert_min_add_accepted(const char *args) {
+    pb_result res;
+    static const uint32_t widths[] = {4};
+    build_adds("$add", widths, 1, &res, true);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK,
+                                  odin3_pass_run(res.design, "partial_map", odin3_bytes_cstr(args)),
+                                  args);
+    pb_free(&res);
+}
+
+static void test_min_add_parser_refuses_bad_values(void) {
+    assert_min_add_refused("--min-add");                      /* no value */
+    assert_min_add_refused("--min-add 0");
+    assert_min_add_refused("--min-add 4294967296");            /* overflow of uint32 */
+    assert_min_add_refused("--min-add 99999999999999999999999"); /* overflow of unsigned long */
+    assert_min_add_refused("--min-add 12345678901234567890123456789012"); /* length >= 32 */
+    assert_min_add_refused("--min-add -3");
+    assert_min_add_refused("--min-add +3");
+    assert_min_add_refused("--min-add 3x");
+    assert_min_add_refused("--min-add --allow-unknown-blocks"); /* next flag taken as value */
+}
+
+static void test_min_add_parser_blanks(void) {
+    assert_min_add_refused("--min-add  8x");
+    assert_min_add_refused("--min-add 8 --min-add");           /* trailing flag without value */
+}
+
+static void test_min_add_parser_accepts(void) {
+    assert_min_add_accepted("--min-add 1");
+    assert_min_add_accepted("--min-add 8");
+    assert_min_add_accepted("--min-add 8 --allow-unknown-blocks");
+    assert_min_add_accepted("--allow-unknown-blocks --min-add 1");
+    assert_min_add_accepted("--min-add 8 --min-add 2"); /* the last wins */
+}
+#endif
+
 int main(void) {
 #ifdef PM_CARRY_VTR
     if (getenv("VTR_ROOT") == NULL) {
@@ -433,6 +505,11 @@ int main(void) {
     RUN_TEST(test_same_name_pb_elsewhere_still_warns);
     RUN_TEST(test_no_adder_model_gives_no_chain_message);
     RUN_TEST(test_no_record_gives_no_chain_message);
+    RUN_TEST(test_accessors_root_level_adder_leaf);
+    RUN_TEST(test_adder_free_design_gets_no_carry_warning);
+    RUN_TEST(test_min_add_parser_refuses_bad_values);
+    RUN_TEST(test_min_add_parser_blanks);
+    RUN_TEST(test_min_add_parser_accepts);
 #endif
     return UNITY_END();
 }
