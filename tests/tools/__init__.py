@@ -37,6 +37,7 @@ for _sub in (
     "tools/exit-check",
     "tools/proc-check",
     "tools/vtr-qor",
+    "tools/fsm-check",
     "tools/abc-check",
     "tools/vtr-read-check",
     "plugins/python",
