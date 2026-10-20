@@ -460,6 +460,7 @@ Each soft decision except S-1 logs one WARN line per cell. S-1 is the default an
 | D13 | an inferred `$mem` with `OFFSET` != 0 stays soft with a warning (R-11 class) | records the offset, ignores it | none |
 | D14 | an inferred `$mem` with a port on the falling clock edge stays soft with a warning (R-11 class) | mapped as a rising-edge RAM | none |
 | D15 | a memory with no write port and no INIT is mapped to RAM slices (`we` on gnd, R-10 pattern `p_1_0`) | deleted by Yosys's `opt_mem`: read data x, no RAM | `common/1r.v` and `2r.v` (+8 slices); none in the 19. Not a `hardmap` rule: the cure is an `opt_mem` rule in `opt` |
+| D16 | a one-hot register recoded by `fsm` with no async reset powers up all-zero, an illegal state (as Yosys and Parmys); the binary original started in state 0 | equivalence tools that start from the all-zero state (abc dsec) say not equivalent; from reset the netlists are equivalent (`fsm-equiv --odin`, PHASE4 decision 14) | `blob_merge` (sync reset, 28 states). Not a defect of the port; plan 4.8 Deviations 12 and 15 |
 
 ## 11. Amendments this spec needs (after approval)
 
