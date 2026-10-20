@@ -315,7 +315,7 @@ static void test_share_same_type(void) {
     expect_merged(2);
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$and"));
     TEST_ASSERT_EQUAL_UINT32(2, count_type("$mux"));
-    odin3_node_id op = node_named("and1");
+    odin3_node_id op = node_named("and2"); /* the cell on the first mux port (B) leads */
     TEST_ASSERT_TRUE(odin3_node_valid(op) && odin3_node_live(fx.module, op));
     TEST_ASSERT_EQUAL_STRING("$and", type_name(op));
     odin3_node_id inner = new_mux("$mux", "m");
@@ -355,34 +355,37 @@ static void test_share_add_sub(void) {
         "$sub", "sub1", "0", "\\a", "\\c", "\\t2") MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n");
     run_share();
     expect_merged(2);
-    TEST_ASSERT_EQUAL_UINT32(1, count_type("$add"));
-    TEST_ASSERT_EQUAL_UINT32(0, count_type("$sub"));
+    /* the $sub is on the first mux port (B): it leads (Yosys's ports[0]); the $add's b is negated
+     */
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$add"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$sub"));
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$neg"));
-    odin3_node_id op = nth_of("$add", 0);
+    odin3_node_id op = nth_of("$sub", 0);
     odin3_node_id neg = nth_of("$neg", 0);
     odin3_node_id inner = new_mux("$mux", "m");
     expect_port(op, OP_A, "a a:1 a:2 a:3");
     expect_same_port(op, OP_B, inner, MUX_Y);
-    expect_port(inner, MUX_A, "b b:1 b:2 b:3");
-    expect_same_port(inner, MUX_B, neg, 1);
-    expect_port(neg, NEG_A, "c c:1 c:2 c:3");
+    expect_same_port(inner, MUX_A, neg, 1);
+    expect_port(inner, MUX_B, "c c:1 c:2 c:3");
+    expect_port(neg, NEG_A, "b b:1 b:2 b:3");
     TEST_ASSERT_EQUAL_INT64(4, pint(neg, 1)); /* A_WIDTH */
     TEST_ASSERT_EQUAL_INT64(4, pint(neg, 2)); /* Y_WIDTH */
 }
 
-/* The lowest-ID cell gives the type: a $sub first negates the $add's operand. */
+/* The cell on the first mux port gives the type (here the $add, on B): the $sub's operand is
+ * negated. */
 static void test_share_sub_first(void) {
     build(HEAD4 BIN("$sub", "sub1", "0", "\\a", "\\b", "\\t1") BIN(
         "$add", "add1", "0", "\\a", "\\c", "\\t2") MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n");
     run_share();
-    TEST_ASSERT_EQUAL_UINT32(1, count_type("$sub"));
-    TEST_ASSERT_EQUAL_UINT32(0, count_type("$add"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$sub"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$add"));
     odin3_node_id neg = nth_of("$neg", 0);
-    expect_port(neg, NEG_A, "c c:1 c:2 c:3");
+    expect_port(neg, NEG_A, "b b:1 b:2 b:3");
     odin3_node_id inner = new_mux("$mux", "m");
-    expect_port(inner, MUX_A, "b b:1 b:2 b:3");
-    expect_same_port(inner, MUX_B, neg, 1);
-    expect_same_port(nth_of("$sub", 0), OP_B, inner, MUX_Y);
+    expect_same_port(inner, MUX_A, neg, 1);
+    expect_port(inner, MUX_B, "c c:1 c:2 c:3");
+    expect_same_port(nth_of("$add", 0), OP_B, inner, MUX_Y);
 }
 
 /* A narrower operand under a wider sum: the $neg runs at the sum's width, the other is extended. */
@@ -401,8 +404,8 @@ static void test_share_add_sub_widths(void) {
     TEST_ASSERT_EQUAL_INT64(5, pint(neg, 2));
     odin3_node_id inner = new_mux("$mux", "m");
     TEST_ASSERT_EQUAL_INT64(5, pint(inner, PRM_WIDTH));
-    expect_port(inner, MUX_A, "b b:1 b:2 b:2 b:2"); /* sign extended */
-    TEST_ASSERT_EQUAL_INT64(5, pint(nth_of("$add", 0), PRM_B_WIDTH));
+    expect_port(inner, MUX_B, "c c:1 c:2 c:2 c:2"); /* sign extended */
+    TEST_ASSERT_EQUAL_INT64(5, pint(nth_of("$sub", 0), PRM_B_WIDTH));
 }
 
 static void test_share_fanout(void) {
@@ -415,9 +418,10 @@ static void test_share_fanout(void) {
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$mux"));
 }
 
-/* Two shared operands: the one with the lower net ID is chosen, whichever port it is on. */
+/* Two shared operands: port A is tried first, whatever the net IDs (Yosys's find_shared_operand).
+ */
 static void test_share_order(void) {
-    build("module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n  wire input 3 \\s\n"
+    build("module \\m\n  wire width 4 input 1 \\b\n  wire width 4 input 2 \\a\n  wire input 3 \\s\n"
           "  wire width 4 output 4 \\y\n  wire width 4 \\t1\n  wire width 4 \\t2\n" BIN(
               "$and", "and1", "0", "\\a", "\\b", "\\t1")
               BIN("$and", "and2", "0", "\\a", "\\b", "\\t2")
@@ -425,16 +429,22 @@ static void test_share_order(void) {
     run_share();
     expect_merged(2);
     odin3_node_id op = nth_of("$and", 0);
-    expect_port(op, OP_A, "a a:1 a:2 a:3"); /* a has the lower net ID */
+    expect_port(op, OP_A, "a a:1 a:2 a:3"); /* b has the lower net ID, A is still taken */
     reset();
-    build("module \\m\n  wire width 4 input 1 \\b\n  wire width 4 input 2 \\a\n  wire input 3 \\s\n"
-          "  wire width 4 output 4 \\y\n  wire width 4 \\t1\n  wire width 4 \\t2\n" BIN(
-              "$and", "and1", "0", "\\a", "\\b", "\\t1")
-              BIN("$and", "and2", "0", "\\a", "\\b", "\\t2")
-                  MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n");
+    /* and(a,b), and(a,c), and(d,b): both a and b have a partner; Yosys groups the first two (on
+     * a), and Odin III used to take the lower net ID (b: the first and the third) */
+    build("module \\m\n  wire width 4 input 1 \\b\n  wire width 4 input 2 \\a\n"
+          "  wire width 4 input 3 \\c\n  wire width 4 input 4 \\d\n  wire input 5 \\s1\n"
+          "  wire input 6 \\s2\n  wire input 7 \\s3\n  wire width 4 output 8 \\y\n"
+          "  wire width 4 \\t1\n  wire width 4 \\t2\n  wire width 4 \\t3\n" BIN(
+              "$and", "and1", "0", "\\a", "\\b", "\\t1") BIN("$and", "and2", "0", "\\a", "\\c",
+                                                             "\\t2") BIN("$and", "and3", "0", "\\d",
+                                                                         "\\b", "\\t3")
+              PMUX4("p", "3", "4'xxxx", "{ \\t3 \\t2 \\t1 }", "{ \\s3 \\s2 \\s1 }", "\\y") "end\n");
     run_share();
-    op = nth_of("$and", 0);
-    expect_port(op, OP_B, "b b:1 b:2 b:3"); /* now b is lower: shared on port B */
+    expect_merged(2);
+    TEST_ASSERT_TRUE(odin3_node_live(fx.module, node_named("and3")));
+    TEST_ASSERT_EQUAL_UINT32(2, count_type("$and"));
 }
 
 /* The shared operand on port B of every cell. */
@@ -446,6 +456,148 @@ static void test_share_port_b(void) {
     odin3_node_id op = nth_of("$xor", 0);
     expect_port(op, OP_B, "a a:1 a:2 a:3");
     expect_same_port(op, OP_A, new_mux("$mux", "m"), MUX_Y);
+}
+
+/* The commutative swap (PHASE3 #52): the shared operand on port A of one cell, port B of the other.
+ */
+static void test_share_swap_and(void) {
+    build(HEAD4 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1") BIN(
+        "$and", "and2", "0", "\\c", "\\a", "\\t2") MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n");
+    run_share();
+    expect_merged(2);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$and"));
+    /* the lead is and2, on the first mux port (B), and holds a on its port B: so does the new cell
+     */
+    odin3_node_id op = nth_of("$and", 0);
+    odin3_node_id inner = new_mux("$mux", "m");
+    expect_port(op, OP_B, "a a:1 a:2 a:3");
+    expect_same_port(op, OP_A, inner, MUX_Y);
+    expect_port(inner, MUX_A, "b b:1 b:2 b:3");
+    expect_port(inner, MUX_B, "c c:1 c:2 c:3"); /* and2's other operand, which was on its A */
+    reset();
+    /* the lead (and2, first mux port) holds the shared operand on A: the new cell does too */
+    build(HEAD4 BIN("$and", "and1", "0", "\\b", "\\a", "\\t1") BIN(
+        "$and", "and2", "0", "\\a", "\\c", "\\t2") MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n");
+    run_share();
+    expect_merged(2);
+    op = nth_of("$and", 0);
+    inner = new_mux("$mux", "m");
+    expect_port(op, OP_A, "a a:1 a:2 a:3");
+    expect_same_port(op, OP_B, inner, MUX_Y);
+    expect_port(inner, MUX_A, "b b:1 b:2 b:3");
+    expect_port(inner, MUX_B, "c c:1 c:2 c:3");
+}
+
+/* `d + 1` against `1 - d` (stereovision1): the shared operand is the 1, on B of the $add and on A
+ * of the $sub; the $sub's operand is negated. */
+static void test_share_swap_add_sub(void) {
+    build(HEAD4 BIN("$add", "add1", "0", "\\b", "\\a", "\\t1") BIN(
+        "$sub", "sub1", "0", "\\a", "\\c", "\\t2") MUX4("m", "\\t2", "\\t1", "\\s", "\\y") "end\n");
+    run_share();
+    expect_merged(2);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$add"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$sub"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$neg"));
+    odin3_node_id op = nth_of("$add", 0);
+    odin3_node_id neg = nth_of("$neg", 0);
+    odin3_node_id inner = new_mux("$mux", "m");
+    expect_port(op, OP_B, "a a:1 a:2 a:3");
+    expect_same_port(op, OP_A, inner, MUX_Y);
+    expect_port(inner, MUX_B, "b b:1 b:2 b:3");
+    expect_same_port(inner, MUX_A, neg, 1);
+    expect_port(neg, NEG_A, "c c:1 c:2 c:3");
+    reset();
+    /* a $sub on the first port: S - mux(m1, -m2) with the $add's operand negated */
+    build(HEAD4 BIN("$sub", "sub1", "0", "\\a", "\\b", "\\t1") BIN(
+        "$add", "add1", "0", "\\c", "\\a", "\\t2") MUX4("m", "\\t2", "\\t1", "\\s", "\\y") "end\n");
+    run_share();
+    expect_merged(2);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$sub"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$add"));
+    op = nth_of("$sub", 0);
+    neg = nth_of("$neg", 0);
+    inner = new_mux("$mux", "m");
+    expect_port(op, OP_A, "a a:1 a:2 a:3");
+    expect_same_port(op, OP_B, inner, MUX_Y);
+    expect_port(inner, MUX_B, "b b:1 b:2 b:3");
+    expect_same_port(inner, MUX_A, neg, 1);
+    expect_port(neg, NEG_A, "c c:1 c:2 c:3");
+}
+
+/* A swap with a narrower muxed operand: extended by the signed flag, as without the swap. */
+static void test_share_swap_widths(void) {
+    build("module \\m\n  wire width 3 input 1 \\a\n  wire width 2 input 2 \\b\n"
+          "  wire width 4 input 3 \\c\n  wire input 4 \\s\n  wire width 5 output 5 \\y\n"
+          "  wire width 5 \\t1\n  wire width 5 \\t2\n" BINW("$add", "add1", "1", "1", "3", "2", "5",
+                                                            "\\a", "\\b", "\\t1")
+              BINW("$add", "add2", "1", "1", "4", "3", "5", "\\c", "\\a",
+                   "\\t2") "  cell $mux \\m\n    parameter \\WIDTH 5\n    connect \\A \\t1\n"
+                           "    connect \\B \\t2\n    connect \\S \\s\n    connect \\Y \\y\n  "
+                           "end\nend\n");
+    run_share();
+    expect_merged(2);
+    odin3_node_id op = nth_of("$add", 0);
+    odin3_node_id inner = new_mux("$mux", "m");
+    expect_port(op, OP_B, "a a:1 a:2"); /* the lead is add2, on the first mux port, a on its B */
+    TEST_ASSERT_EQUAL_INT64(4, pint(op, PRM_A_WIDTH));
+    expect_port(inner, MUX_A, "b b:1 b:1 b:1"); /* sign extended */
+    expect_port(inner, MUX_B, "c c:1 c:2 c:3");
+}
+
+/* A mux port wider than the cells (PHASE3 #52, Yosys's chunks): the cells drive the low half of
+ * each data port; the high half is other signals and stays on the old mux. */
+#define HEAD8                                                                                      \
+    "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"                         \
+    "  wire width 4 input 3 \\c\n  wire width 4 input 4 \\d\n  wire input 5 \\s\n"                 \
+    "  wire width 8 output 6 \\y\n  wire width 4 \\t1\n  wire width 4 \\t2\n"                      \
+    "  wire width 4 \\t3\n  wire width 4 \\t4\n"
+
+#define MUX8(a, b)                                                                                 \
+    "  cell $mux \\m\n    parameter \\WIDTH 8\n    connect \\A " a "\n    connect \\B " b          \
+    "\n    connect \\S \\s\n    connect \\Y \\y\n  end\n"
+
+static void test_share_chunk(void) {
+    build(HEAD8 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1") BIN(
+        "$and", "and2", "0", "\\a", "\\c", "\\t2") MUX8("{ \\d \\t1 }", "{ \\d \\t2 }") "end\n");
+    run_share();
+    expect_merged(2);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$and"));
+    odin3_node_id op = nth_of("$and", 0);
+    odin3_node_id inner = new_mux("$mux", "m");
+    odin3_node_id old = node_named("m");
+    expect_port(op, OP_A, "a a:1 a:2 a:3");
+    expect_same_port(op, OP_B, inner, MUX_Y);
+    TEST_ASSERT_EQUAL_INT64(4, pint(inner, PRM_WIDTH));
+    expect_port(inner, MUX_A, "b b:1 b:2 b:3");
+    expect_port(inner, MUX_B, "c c:1 c:2 c:3");
+    TEST_ASSERT_EQUAL_INT64(8, pint(old, PRM_WIDTH));
+    /* the old mux reads the new cell's Y in bits 0 to 3 of both ports and d in bits 4 to 7 */
+    for (uint32_t bit = 0; bit < 4; bit++) {
+        TEST_ASSERT_EQUAL_UINT32(pnet(PIN(op, OP_Y, bit)).v, pnet(PIN(old, MUX_A, bit)).v);
+        TEST_ASSERT_EQUAL_UINT32(pnet(PIN(op, OP_Y, bit)).v, pnet(PIN(old, MUX_B, bit)).v);
+    }
+    TEST_ASSERT_TRUE(is_net(pnet(PIN(old, MUX_A, 4)), "d"));
+    TEST_ASSERT_TRUE(is_net(pnet(PIN(old, MUX_B, 7)), "d:3"));
+}
+
+/* Two groups side by side in one wide port (Yosys's cat.il), and the cells at different offsets
+ * in the two ports, which do not group. */
+static void test_share_chunk_two_groups(void) {
+    build(HEAD8 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
+              BIN("$and", "and2", "0", "\\a", "\\c", "\\t2")
+                  BIN("$or", "or1", "0", "\\d", "\\b", "\\t3")
+                      BIN("$or", "or2", "0", "\\d", "\\c", "\\t4")
+                          MUX8("{ \\t3 \\t1 }", "{ \\t4 \\t2 }") "end\n");
+    run_share();
+    expect_merged(4);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$and"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$or"));
+    TEST_ASSERT_EQUAL_UINT32(3, count_type("$mux"));
+    reset();
+    build(HEAD8 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1") BIN(
+        "$and", "and2", "0", "\\a", "\\c", "\\t2") MUX8("{ \\d \\t1 }", "{ \\t2 \\d }") "end\n");
+    run_share();
+    expect_merged(0);
 }
 
 /* Two groups under one mux. */
@@ -510,7 +662,7 @@ static void test_share_parents(void) {
 /* The $neg of an add/sub mix has the same record; the cell keeps the first cell's name. */
 static void test_share_neg_record_and_name(void) {
     build(HEAD4 BIN("$add", "add1", "0", "\\a", "\\b", "\\t1") BIN(
-        "$sub", "sub1", "0", "\\a", "\\c", "\\t2") MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n");
+        "$sub", "sub1", "0", "\\a", "\\c", "\\t2") MUX4("m", "\\t2", "\\t1", "\\s", "\\y") "end\n");
     run_share();
     odin3_node_id op = nth_of("$add", 0);
     TEST_ASSERT_EQUAL_UINT32(op.v, node_named("add1").v);
@@ -537,9 +689,32 @@ static const refusal k_refusals[] = {
     {"no shared operand", HEAD4 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
                               BIN("$and", "and2", "0", "\\c", "\\d", "\\t2")
                                   MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
-    {"shared on different ports", HEAD4 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
-                                      BIN("$and", "and2", "0", "\\c", "\\a", "\\t2")
-                                          MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"sub shared on different ports", HEAD4 BIN("$sub", "sub1", "0", "\\a", "\\b", "\\t1")
+                                          BIN("$sub", "sub2", "0", "\\c", "\\a", "\\t2")
+                                              MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"shl shared on different ports", HEAD4 BIN("$shl", "shl1", "0", "\\a", "\\b", "\\t1")
+                                          BIN("$shl", "shl2", "0", "\\c", "\\a", "\\t2")
+                                              MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"lt shared on different ports",
+     "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"
+     "  wire width 4 input 3 \\c\n  wire input 4 \\s\n  wire output 5 \\y\n"
+     "  wire \\t1\n  wire \\t2\n" BINW("$lt", "lt1", "0", "0", "4", "4", "1", "\\a", "\\b", "\\t1")
+         BINW("$lt", "lt2", "0", "0", "4", "4", "1", "\\c", "\\a",
+              "\\t2") "  cell $mux \\m\n    parameter \\WIDTH 1\n    connect \\A \\t1\n"
+                      "    connect \\B \\t2\n    connect \\S \\s\n    connect \\Y \\y\n  "
+                      "end\nend\n"},
+    {"swap with signed flags that differ by role",
+     HEAD4 BINW("$add", "add1", "1", "0", "4", "4", "4", "\\a", "\\b", "\\t1")
+         BINW("$add", "add2", "1", "0", "4", "4", "4", "\\c", "\\a", "\\t2")
+             MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"add with the subtracted operand of a sub",
+     HEAD4 BIN("$sub", "sub1", "0", "\\b", "\\a", "\\t1")
+         BIN("$add", "add1", "0", "\\a", "\\c", "\\t2")
+             MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"swap with mixed sign add/sub",
+     HEAD4 BINW("$add", "add1", "1", "0", "4", "4", "4", "\\b", "\\a", "\\t1")
+         BINW("$sub", "sub1", "1", "0", "4", "4", "4", "\\a", "\\c", "\\t2")
+             MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
     {"signed flags differ", HEAD4 BIN("$add", "add1", "1", "\\a", "\\b", "\\t1")
                                 BIN("$add", "add2", "0", "\\a", "\\c", "\\t2")
                                     MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
@@ -705,6 +880,30 @@ enum {
     ADDSUB_SELECTS = 0xE00
 };
 
+/* Two 4-bit-operand cells with a 1-bit result, the shared a on port A of one and B of the other. */
+#define SWAP1(type, name1, name2)                                                                  \
+    {                                                                                              \
+        "swap " type,                                                                              \
+            "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"                 \
+            "  wire width 4 input 3 \\c\n  wire input 4 \\s\n  wire output 5 \\y\n  wire \\t1\n"   \
+            "  wire \\t2\n" BINW(type, name1, "0", "0", "4", "4", "1", "\\a", "\\b", "\\t1")       \
+                BINW(type, name2, "0", "0", "4", "4", "1", "\\c", "\\a",                           \
+                     "\\t2") "  cell $mux \\m\n    parameter \\WIDTH 1\n    connect \\A \\t1\n"    \
+                             "    connect \\B \\t2\n    connect \\S \\s\n    connect \\Y \\y\n  "  \
+                             "end\nend\n"                                                          \
+    }
+
+#define SWAP4(type)                                                                                \
+    {                                                                                              \
+        "swap " type, HEAD4 BIN(type, "c1", "0", "\\a", "\\b", "\\t1")                             \
+                          BIN(type, "c2", "0", "\\c", "\\a", "\\t2")                               \
+                              MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"                      \
+    }
+
+#define PMUX8(a, b, s)                                                                             \
+    "  cell $pmux \\p\n    parameter \\WIDTH 8\n    parameter \\S_WIDTH 3\n    connect \\A " a     \
+    "\n    connect \\B " b "\n    connect \\S " s "\n    connect \\Y \\y\n  end\n"
+
 static const refusal k_equiv[] = {
     {"same type", SAME_TYPE},
     {"add sub", HEAD4 BIN("$add", "add1", "0", "\\a", "\\b", "\\t1")
@@ -787,6 +986,53 @@ static const refusal k_equiv[] = {
               "\\t2") "  cell $mux \\m\n    parameter \\WIDTH 3\n    connect \\A \\t1\n"
                       "    connect \\B \\t2\n    connect \\S \\s\n    connect \\Y \\y\n  "
                       "end\nend\n"},
+    {"swap and", HEAD4 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
+                     BIN("$and", "and2", "0", "\\c", "\\a", "\\t2")
+                         MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"swap add sub", HEAD4 BIN("$add", "add1", "0", "\\b", "\\a", "\\t1")
+                         BIN("$sub", "sub1", "0", "\\a", "\\c", "\\t2")
+                             MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"swap sub add", HEAD4 BIN("$sub", "sub1", "1", "\\a", "\\b", "\\t1")
+                         BIN("$add", "add1", "1", "\\c", "\\a", "\\t2")
+                             MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"swap mul", HEAD4 BIN("$mul", "mul1", "1", "\\a", "\\b", "\\t1")
+                     BIN("$mul", "mul2", "1", "\\c", "\\a", "\\t2")
+                         MUX4("m", "\\t1", "\\t2", "\\s", "\\y") "end\n"},
+    {"swap add signed narrow",
+     "module \\m\n  wire width 3 input 1 \\a\n  wire width 2 input 2 \\b\n"
+     "  wire width 4 input 3 \\c\n  wire input 4 \\s\n  wire width 5 output 5 \\y\n"
+     "  wire width 5 \\t1\n  wire width 5 \\t2\n" BINW("$add", "add1", "1", "1", "3", "2", "5",
+                                                       "\\a", "\\b", "\\t1")
+         BINW("$add", "add2", "1", "1", "4", "3", "5", "\\c", "\\a",
+              "\\t2") "  cell $mux \\m\n    parameter \\WIDTH 5\n    connect \\A \\t1\n"
+                      "    connect \\B \\t2\n    connect \\S \\s\n    connect \\Y \\y\n  "
+                      "end\nend\n"},
+    {"chunk", HEAD8 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
+                  BIN("$and", "and2", "0", "\\a", "\\c", "\\t2")
+                      MUX8("{ \\d \\t1 }", "{ \\d \\t2 }") "end\n"},
+    {"chunk swap add sub", HEAD8 BIN("$add", "add1", "0", "\\b", "\\a", "\\t1")
+                               BIN("$sub", "sub1", "0", "\\a", "\\c", "\\t2")
+                                   MUX8("{ \\d \\t2 }", "{ \\d \\t1 }") "end\n"},
+    {"chunk two groups",
+     HEAD8 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
+         BIN("$and", "and2", "0", "\\a", "\\c", "\\t2") BIN("$or", "or1", "0", "\\d", "\\b", "\\t3")
+             BIN("$or", "or2", "0", "\\d", "\\c", "\\t4")
+                 MUX8("{ \\t3 \\t1 }", "{ \\t4 \\t2 }") "end\n"},
+    SWAP4("$or"),
+    SWAP4("$xor"),
+    SWAP4("$xnor"),
+    SWAP1("$eq", "c1", "c2"),
+    SWAP1("$ne", "c1", "c2"),
+    SWAP1("$logic_and", "c1", "c2"),
+    SWAP1("$logic_or", "c1", "c2"),
+    {"chunk at offset 4", HEAD8 BIN("$and", "and1", "0", "\\a", "\\b", "\\t1")
+                              BIN("$and", "and2", "0", "\\c", "\\a", "\\t2")
+                                  MUX8("{ \\t1 \\d }", "{ \\t2 \\d }") "end\n"},
+    {"chunk pmux three members", HEAD8
+     "  wire input 7 \\s1\n  wire input 8 \\s2\n" BIN("$add", "add1", "0", "\\a", "\\b", "\\t1")
+         BIN("$sub", "sub1", "0", "\\a", "\\c", "\\t2") BIN("$add", "add2", "0", "\\d", "\\a",
+                                                            "\\t3")
+             PMUX8("{ \\d \\a }", "{ \\d \\t3 \\d \\t2 \\d \\t1 }", "{ \\s2 \\s1 \\s }") "end\n"},
 };
 
 static void test_share_function_kept(void) {
@@ -796,6 +1042,12 @@ static void test_share_function_kept(void) {
             want = (equiv_expect){3U, XOR_PMUX_SELECTS};
         } else if (i == ADDSUB_PMUX_CASE) {
             want = (equiv_expect){3U, ADDSUB_SELECTS};
+        }
+        if (strcmp(k_equiv[i].name, "chunk two groups") == 0) {
+            want.merged = 4U;
+        }
+        if (strcmp(k_equiv[i].name, "chunk pmux three members") == 0) {
+            want = (equiv_expect){3U, 0x70000U};
         }
         expect_function_kept(&k_equiv[i], &want);
         reset();
@@ -816,6 +1068,13 @@ static const char *const k_cases[] = {
     "xor3",
     "same_type",
     "bitwise_signed_widths",
+    "swap_and",
+    "swap_add_sub",
+    "swap_sub_add",
+    "swap_sub_sub_refused",
+    "swap_shl_refused",
+    "mixed3",
+    "choose_a",
 };
 
 static void read_case(const char *name, const char *ext, char *buf) {
@@ -1087,6 +1346,11 @@ int main(void) {
     RUN_TEST(test_share_fanout);
     RUN_TEST(test_share_order);
     RUN_TEST(test_share_port_b);
+    RUN_TEST(test_share_swap_and);
+    RUN_TEST(test_share_swap_add_sub);
+    RUN_TEST(test_share_swap_widths);
+    RUN_TEST(test_share_chunk);
+    RUN_TEST(test_share_chunk_two_groups);
     RUN_TEST(test_share_two_groups);
     RUN_TEST(test_share_pmux);
     RUN_TEST(test_share_parents);

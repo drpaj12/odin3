@@ -69,6 +69,9 @@ source is built to make a rule fire, so ``--min-changed 1`` tells a broken or em
 ``$TMPDIR``) is removed after a clean run, after an error (exit 2) and after a ``--min-changed``
 shortfall; a pair that does not refine, and a crash (exit 3), keep it.
 
+``--require-sub SUB`` (repeatable) fails a run in which no call of the sub-pass SUB (``opt_share``)
+changed something; ``--min-changed`` counts calls of any sub-pass.
+
 Exit codes (one convention across the opt tools): 0 every pair refines; 1 a pair does not (or the
 whole-script cec says the netlists differ); 2 usage, Odin III or a tool error; 3 hard: Odin III or
 a Yosys proof child crashed or was killed by a signal; 4 unproven: no pair failed, but some proofs
@@ -778,6 +781,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
                     help="no BLIF cec fallback: a SAT timeout is unproven")
     ap.add_argument("--min-changed", type=int, default=0, metavar="N",
                     help="fail (exit 1) unless at least N calls changed something")
+    ap.add_argument("--require-sub", action="append", default=[], metavar="SUB",
+                    help="fail (exit 1) unless a call of sub-pass SUB (opt_share) changed "
+                         "something; repeatable")
     ap.add_argument("files", nargs="+", help="the Verilog files of one design")
     return ap.parse_args(argv)
 
@@ -815,6 +821,10 @@ def execute(args: argparse.Namespace, work: Path) -> tuple[int, bool]:
         print(f"{TOOL}: {len(verdicts)} calls changed something, want at least "
               f"{args.min_changed}", flush=True)
         return EXIT_FAIL, False
+    for sub in args.require_sub:
+        if not any(v.pair.sub == sub for v in verdicts):
+            print(f"{TOOL}: no {sub} call changed something, want at least one", flush=True)
+            return EXIT_FAIL, False
     return (EXIT_FAIL if bad else EXIT_OK), bad
 
 

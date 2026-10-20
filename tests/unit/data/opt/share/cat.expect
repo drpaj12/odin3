@@ -6,10 +6,4 @@ cell $mux WIDTH=16
 cell $mux WIDTH=32
 cell $neg A_WIDTH=16 Y_WIDTH=16
 cell $neg A_WIDTH=16 Y_WIDTH=16
-# diverges (spec 17 #44): each half of the 32-bit port is a different cell; Odin III merges only a
-# port driven by one cell, so nothing is merged
-odin3 cell $add A_WIDTH=16 B_WIDTH=16 Y_WIDTH=16
-odin3 cell $add A_WIDTH=16 B_WIDTH=16 Y_WIDTH=16
-odin3 cell $mux WIDTH=32
-odin3 cell $sub A_WIDTH=16 B_WIDTH=16 Y_WIDTH=16
-odin3 cell $sub A_WIDTH=16 B_WIDTH=16 Y_WIDTH=16
+# since PHASE3 #52 Odin III merges both halves as Yosys does (it diverged in spec 17 #44 before)
