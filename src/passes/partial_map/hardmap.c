@@ -11,6 +11,7 @@
 #include "ir/module.h"
 #include "odin3/odin3.h"
 #include "passes/partial_map/hm_kit.h"
+#include "passes/partial_map/mem.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -249,6 +250,29 @@ static uint64_t count_cells(hm_ctx *hc, const char *name) {
     return found;
 }
 
+/* R-8: the bits of every live `$mem` (SIZE x WIDTH), which an arch without RAM leaves to lower. */
+static void info_bits(hm_ctx *hc) {
+    odin3_celltype_id mem = {0};
+    uint64_t bits = 0;
+    if (!hm_find_type(hc->design, "$mem", &mem)) {
+        return;
+    }
+    for (uint32_t mi = 1; mi < odin3_design_module_end(hc->design); mi++) {
+        odin3_module *mod = module_at(hc->design, mi);
+        hm_set_module(hc, mod);
+        for (uint32_t id = 1; mod != NULL && id < odin3_module_node_end(mod); id++) {
+            odin3_node_id node = {id};
+            if (odin3_node_live(mod, node) && odin3_node_type(mod, node).v == mem.v) {
+                const odin3_value *prm = odin3_node_param(mod, node, 0);
+                bits += (uint64_t)prm[MP_SIZE].i * (uint64_t)prm[MP_WIDTH].i;
+                pm_mem_warn_big(hc, node, "the architecture has no RAM model");
+            }
+        }
+    }
+    hm_set_module(hc, NULL); /* the loop left it on the last module */
+    odin3_log(ODIN3_LOG_INFO, "partial_map: %" PRIu64 " bits of '$mem' left soft", bits);
+}
+
 static void info_absent(const odin3_arch *arch, const char *model, uint64_t count,
                         const char *cells) {
     odin3_log(ODIN3_LOG_INFO,
@@ -303,10 +327,25 @@ static void setup_rules(hm_ctx *hc, const odin3_partial_map_opts *opts) {
         info_absent(arch, "adder", count_cells(hc, "$add") + count_cells(hc, "$sub"),
                     "$add'/'$sub");
     }
-    if (!reg_sp && !reg_dp) {
+    if (!hc->rules.have_sp && !hc->rules.have_dp) {
         info_absent(arch, "single_port_ram", count_cells(hc, "$mem"), "$mem");
+        info_bits(hc);
     }
     carry_report(arch, hc->rules.have_adder);
+}
+
+/* R-8, S-5: `--mem-width arch` needs a record with RAM modes; without one it is a no-op. */
+static void setup_mem_width(hm_ctx *hc, const odin3_partial_map_opts *opts) {
+    if (opts == NULL || !opts->mem_width_arch) {
+        return;
+    }
+    bool modes = hc->rules.n_modes[0] + hc->rules.n_modes[1] > 0;
+    hc->rules.mem_arch = hc->rules.has_record && modes && (hc->rules.have_sp || hc->rules.have_dp);
+    if (!hc->rules.mem_arch && !(hc->rules.has_record && !modes)) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "partial_map: --mem-width arch needs an architecture record with RAM models; "
+                  "ignored");
+    }
 }
 
 static void report(hm_ctx *hc) {
@@ -336,6 +375,7 @@ odin3_status odin3_partial_map_run_opts(odin3_pass_ctx *ctx, odin3_design *desig
     hm_init(&hc, ctx, design);
     hc.allow_unknown_blocks = opts != NULL && opts->allow_unknown_blocks;
     setup_rules(&hc, opts);
+    setup_mem_width(&hc, opts);
     odin3_status st = hm_generic_phase(&hc);
     st = st == ODIN3_OK ? precheck(&hc) : st;
     st = st == ODIN3_OK && hc.rules.have_mul ? all_mul_phases(&hc) : st;

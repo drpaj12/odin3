@@ -36,7 +36,7 @@ odin3_wattr odin3_wattr_classify(const odin3_strtab *tab, uint32_t key_str,
                                  const odin3_value *value) {
     const char *name = odin3_strtab_get(tab, key_str);
     odin3_bytes key = {name != NULL ? name : "", odin3_strtab_len(tab, key_str)};
-    odin3_wattr attr = {ODIN3_WATTR_ATTRIBUTE, ODIN3_WATTR_VALUE, key, {NULL, 0}, value};
+    odin3_wattr attr = {ODIN3_WATTR_ATTRIBUTE, ODIN3_WATTR_VALUE, key, {NULL, 0}, value, false};
     if (key.len == strlen(ODIN3_BLIF_ATTR_EXTRAS) &&
         memcmp(key.ptr, ODIN3_BLIF_ATTR_EXTRAS, key.len) == 0) {
         attr.role = ODIN3_WATTR_SKIP;
@@ -45,6 +45,9 @@ odin3_wattr odin3_wattr_classify(const odin3_strtab *tab, uint32_t key_str,
     } else if (strip_prefix(key, ODIN3_BLIF_PARAM_PREFIX, &attr.key)) {
         attr.role = ODIN3_WATTR_PARAMETER;
         blif_value(&attr, tab, value);
+    } else if (strip_prefix(key, ODIN3_ATTR_PARAM_PREFIX, &attr.key)) {
+        attr.role = ODIN3_WATTR_PARAMETER;
+        attr.instance_param = true;
     }
     return attr;
 }

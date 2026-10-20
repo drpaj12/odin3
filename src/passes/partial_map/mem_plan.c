@@ -101,12 +101,18 @@ static bool read_always(const hm_ctx *hc, const mem_rport *rp) {
 }
 
 /* The checks that need no allocation. */
-static mem_verdict early_verdict(const hm_ctx *hc, const mem_model *mm) {
+static mem_verdict early_verdict(const mem_model *mm) {
     if (mm->offset != 0) {
         return MEM_SOFT_OFFSET;
     }
     if (mm->too_wide) {
         return MEM_SOFT_PATTERN;
+    }
+    for (uint32_t i = 0; i < mm->n_rd; i++) {
+        const mem_rport *rp = rd_at(mm, i);
+        if (!rp->en_always && !odin3_net_valid(rp->en)) {
+            return MEM_SOFT_EN; /* an undriven enable has no value to register */
+        }
     }
     mem_verdict clocks = clock_verdict(mm);
     if (clocks != MEM_HARD) {
@@ -114,9 +120,6 @@ static mem_verdict early_verdict(const hm_ctx *hc, const mem_model *mm) {
     }
     for (uint32_t i = 0; i < mm->n_rd; i++) {
         const mem_rport *rp = rd_at(mm, i);
-        if (!read_always(hc, rp)) {
-            return MEM_SOFT_EN;
-        }
         if (rp->transparent && mm->n_wr > 0) {
             return MEM_SOFT_PATTERN; /* the arch's RAMs are read-first */
         }
@@ -244,12 +247,24 @@ static odin3_status mem_pattern(pattern *pat) {
 }
 
 odin3_status mem_classify(const hm_ctx *hc, mem_model *mm, mem_verdict *verdict) {
-    *verdict = early_verdict(hc, mm);
+    *verdict = early_verdict(mm);
     if (*verdict != MEM_HARD) {
         return ODIN3_OK;
     }
+    for (uint32_t i = 0; i < mm->n_rd; i++) {
+        mem_rport *rp = odin3_vec_at(&mm->rd, i);
+        rp->emu_en = !read_always(hc, rp); /* the RAM has no read enable: emulated (R-10) */
+    }
     pattern pat = {hc, mm, true};
     odin3_status st = mem_pattern(&pat);
+    for (size_t i = 0; st == ODIN3_OK && pat.fits && i < mm->rams.len; i++) {
+        /* R-6: a RAM the arch has no model for (SP only, or DP only) is R-11: no mapping */
+        const mem_ram *ram = odin3_vec_cat(&mm->rams, i);
+        bool dual = ram->kind == HM_DP_RAM;
+        pat.fits = dual ? hc->rules.have_dp : hc->rules.have_sp;
+        /* --mem-width arch: no arch mode holds a block of this memory (R-4, R-11) */
+        pat.fits = pat.fits && pm_ram_shape_of(&hc->rules, dual, mm->abits).width != 0;
+    }
     if (st == ODIN3_OK && !pat.fits) {
         *verdict = MEM_SOFT_PATTERN;
     }

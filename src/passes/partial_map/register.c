@@ -1,7 +1,8 @@
 /*
  * register.c — the `partial_map` pass definition and its `hardmap` alias (3C spec H-1..H-3): the
- * arguments `--allow-unknown-blocks` (B-6) and `--min-add N` (4.2 C-4), no processes in the design
- * (the manager refuses a design that still has `$proc` nodes), the entry point is
+ * arguments `--allow-unknown-blocks` (B-6), `--min-add N` (4.2 C-4) and `--mem-width arch` (R-4),
+ * no processes in the design (the manager refuses a design that still has `$proc` nodes), the
+ * entry point is
  * odin3_partial_map_run_opts in hardmap.c.
  */
 #include "odin3/odin3.h"
@@ -46,25 +47,42 @@ static odin3_status parse_min_add(odin3_bytes value, uint32_t *out) {
     return ODIN3_OK;
 }
 
+/* `--mem-width arch` (R-4, spec S-5): the only option. `--mem-width 1` is the default, accepted. */
+static odin3_status parse_mem_width(odin3_bytes *args, odin3_partial_map_opts *opts) {
+    odin3_bytes value = odin3_pass_arg_next(args);
+    if (value.ptr != NULL && odin3_pass_arg_is(value, "arch")) {
+        opts->mem_width_arch = true;
+        return ODIN3_OK;
+    }
+    if (value.ptr != NULL && odin3_pass_arg_is(value, "1")) {
+        return ODIN3_OK;
+    }
+    odin3_log(ODIN3_LOG_ERROR, "partial_map: --mem-width expects arch or 1");
+    return ODIN3_ERR_INVALID_ARG;
+}
+
 static odin3_status partial_map_pass_run(odin3_pass_ctx *ctx, odin3_design *design,
                                          odin3_bytes args, void *user) {
     (void)user;
-    odin3_partial_map_opts opts = {false, 0};
+    odin3_partial_map_opts opts = {.allow_unknown_blocks = false};
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
+        odin3_status st = ODIN3_OK;
         if (odin3_pass_arg_is(word, "--allow-unknown-blocks")) {
             opts.allow_unknown_blocks = true;
         } else if (odin3_pass_arg_is(word, OPT_MIN_ADD)) {
-            odin3_status st = parse_min_add(odin3_pass_arg_next(&args), &opts.min_add);
-            if (st != ODIN3_OK) {
-                return st;
-            }
+            st = parse_min_add(odin3_pass_arg_next(&args), &opts.min_add);
+        } else if (odin3_pass_arg_is(word, "--mem-width")) {
+            st = parse_mem_width(&args, &opts);
         } else {
             odin3_log(ODIN3_LOG_ERROR,
                       "partial_map: unknown argument '%.*s' (known: --allow-unknown-blocks, "
-                      "--min-add N)",
+                      "--min-add N, --mem-width arch)",
                       (int)word.len, (const char *)word.ptr);
-            return ODIN3_ERR_INVALID_ARG;
+            st = ODIN3_ERR_INVALID_ARG;
+        }
+        if (st != ODIN3_OK) {
+            return st;
         }
     }
     return odin3_partial_map_run_opts(ctx, design, &opts, NULL);

@@ -18,10 +18,11 @@
  * DEPTH/TABLE; latch INIT goes to an `init` attribute of the Q net (2 and 3 as "x").
  *
  * Attributes (odin3_attr_foreach order, backends/common/attrs.h) of modules, cells, wires and
- * nets with a netname entry are written to their "attributes" (values as parameters are); BLIF
- * `.attr K` extras become attribute K and `.param K` extras cell parameter K, spelled as Yosys
- * read_blif reads them; `blif_extras` is skipped. A user `src` replaces the provenance `src`;
- * the latch `init` wins over a user `init`; a repeated key keeps the first.
+ * nets with a netname entry are written to their "attributes" (values as parameters are); a
+ * `parameter:K` attribute (an instance parameter) is cell parameter K; BLIF `.attr K` extras
+ * become attribute K and `.param K` extras cell parameter K, spelled as Yosys read_blif reads them;
+ * `blif_extras` is skipped. A user `src` replaces the provenance `src`; the latch `init` wins over
+ * a user `init`; a repeated key keeps the first.
  *
  * `src` (spec 5.4 W-1 to W-5; backends/common/hdl_loc.h) is on modules, cells and netnames, from
  * the object's HDL locations only: the SOURCE leaves of its provenance walk, in parent order, each

@@ -26,7 +26,7 @@ typedef enum rs_kind {
     K_MEM
 } rs_kind;
 
-enum { MAX_DATA = 4, MAX_ADDR = 20, DP_PORTS = 2 };
+enum { MAX_DATA = 64, MAX_ADDR = 20, DP_PORTS = 2 };
 
 /* The pin ports of a RAM, per read/write port (same tables as ram.c's layouts). */
 typedef struct rs_pins {

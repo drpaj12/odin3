@@ -40,6 +40,9 @@
 # pm_carry (4.5 C-4: `partial_map --min-add N` leaves smaller adds soft; bad arguments are refused with a located message).
 # pm_carry_arch (4.5, needs VTR_ROOT: the adder micros through partial_map on the k6 and COFFE records give the same sim vectors as before the pass; the k4 arch (no adder) leaves them to lower).
 # pm_ramstyle (4.7 G-3: a ram_style attribute gives one warning and the same BLIF as without it).
+# pm_mem_rden (4.4 R-10: a read port with an enable that is not constant 1 maps to the RAM with the enable emulated in logic and one located warning per memory; equiv-check proves the BLIF equal to the same design with the RAM block and the emulation written out by hand, and a changed reference is not equivalent).
+# pm_soft_blocks (4.2 D18: on an arch without the model, --vtr-compat builds an explicit single_port_ram, dual_port_ram or multiply instance as soft logic with a located warning, equiv-check equal to the RTL written with arrays; without the flag the unresolved-module error; on k6 no warning).
+# pm_mem_arch (4.4: the RAM depth limit comes from the arch record, an arch without RAM leaves the memory to lower, and `partial_map --mem-width arch` slices to the arch's widest mode with one warning).
 # The project cases run from the project's directory (tests/cli/project), so the paths given are
 # relative.
 set -euo pipefail
@@ -796,7 +799,11 @@ memory_merge_soft)
             fail "$micro: partial_map alone failed"
         "$odin3" -p "$pre; memory_merge; partial_map; $tail; write_blif --vtr $work/b.blif" >"$work/out" 2>"$work/err" ||
             fail "$micro: memory_merge; partial_map failed"
-        "$equiv" "$work/a.blif" "$work/b.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent"
+        # mem_dffe_var maps hard since the read enable is emulated (R-10): its RAM blocks are
+        # unnamed, so they are paired by simulation; mem_offset stays soft and is compared plain
+        flag=""
+        [[ $micro == mem_dffe_var ]] && flag="--match-unnamed"
+        "$equiv" $flag "$work/a.blif" "$work/b.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent"
     done
     pre="read_techlib $lib; read_verilog --vtr-compat $mm/mem_negedge.v; proc; opt"
     "$odin3" -p "$pre; partial_map; $tail; sim 3000 7 $work/a.vec" >"$work/out" 2>"$work/err" ||
@@ -829,7 +836,7 @@ pm_carry)
     expect_fail "partial_map: --min-add 'x1': need a whole number of at least 1" -p "$pre; partial_map --min-add x1"
     expect_fail "partial_map: --min-add '-3': need a whole number of at least 1" -p "$pre; partial_map --min-add -3"
     expect_fail "partial_map: --min-add '+5': need a whole number of at least 1" -p "$pre; partial_map --min-add +5"
-    expect_fail "partial_map: unknown argument '--min-mul' (known: --allow-unknown-blocks, --min-add N)" -p "$pre; partial_map --min-mul 2"
+    expect_fail "partial_map: unknown argument '--min-mul' (known: --allow-unknown-blocks, --min-add N, --mem-width arch)" -p "$pre; partial_map --min-mul 2"
     ;;
 pm_carry_arch)
     # cli_pm_carry_arch (4.5, Task 12): each adder micro, through read_arch of the sweep arch, has
@@ -869,6 +876,102 @@ pm_ramstyle)
     [[ $(grep -c "is ignored" "$work/err") -eq 1 ]] || fail "not exactly one warning"
     diff <(sed 's/mem_ramstyle/mem_regread/g' "$work/mem_ramstyle.blif" | grep -v '^#') \
         <(grep -v '^#' "$work/mem_regread.blif") >/dev/null || fail "the ram_style BLIF differs"
+    ;;
+pm_soft_blocks)
+    mm=$fixtures/../../micro_pm
+    mic=$fixtures/../../micro/verilog
+    arch=$fixtures/../../unit/data/arch/acc_none.xml
+    lib=$fixtures/../../../lib/vtr.o3lib
+    equiv=$(dirname "$compare")/../equiv-check/equiv-check
+    flow="proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full; partial_map; opt -full -ffbits; lower; opt -fast; compact"
+    for case in common/spram:single_port_ram:spram_rtl micro/multiply_hard_block:multiply:multiply_rtl common/dpram:dual_port_ram:dpram_rtl ../../micro_pm/adder_inst:adder:adder_rtl; do
+        IFS=: read -r design block rtl <<<"$case"
+        "$odin3" -p "read_arch $arch; read_verilog --vtr-compat $mic/$design.v; $flow; write_blif --vtr $work/a.blif" \
+            >"$work/out" 2>"$work/err" || fail "$design: odin3 failed"
+        grep -q "${design##*/}.v:[0-9]*:[0-9]*: warning: the architecture has no '$block' model; --vtr-compat builds this instance as soft logic" "$work/err" ||
+            fail "$design: no located warning"
+        "$odin3" -p "read_arch $arch; read_verilog --vtr-compat $mm/$rtl.v; $flow; write_blif --vtr $work/b.blif" \
+            >"$work/out" 2>"$work/err" || fail "$rtl: odin3 failed"
+        "$equiv" "$work/a.blif" "$work/b.blif" >"$work/out" 2>"$work/err" || fail "$design: not equivalent to the RTL"
+        expect_fail "unresolved_module: module '$block' is not defined" -p "read_arch $arch; read_verilog $mic/$design.v"
+        "$odin3" -p "read_techlib $lib; read_verilog --vtr-compat $mic/$design.v; $flow; write_blif --vtr $work/c.blif" \
+            >"$work/out" 2>"$work/err" || fail "$design: k6 failed"
+        if grep -q "builds this instance as soft logic" "$work/err"; then fail "$design: k6 warns"; fi
+    done
+    # the directory of the bodies: ODIN3_SOFT_PRIMITIVES_DIR is the only candidate when set. A
+    # missing one is a located error that names it; a copy of the bodies there works.
+    d=$mic/common/spram.v
+    if ODIN3_SOFT_PRIMITIVES_DIR=$work/none "$odin3" -p "read_arch $arch; read_verilog --vtr-compat $d" >"$work/out" 2>"$work/err"; then
+        fail "a missing soft_primitives directory was accepted"
+    fi
+    grep -qF "spram.v:23:2: error: --vtr-compat needs the soft body of 'single_port_ram'" "$work/err" || fail "no located error"
+    grep -qF "tried '$work/none'" "$work/err" || fail "the error does not name the directory"
+    mkdir "$work/soft"
+    cp "$fixtures"/../../../lib/soft_primitives/*.v "$work/soft/"
+    ODIN3_SOFT_PRIMITIVES_DIR=$work/soft "$odin3" -p "read_arch $arch; read_verilog --vtr-compat $d; $flow" >"$work/out" 2>"$work/err" ||
+        fail "the env override did not work"
+    ;;
+pm_mem_rden)
+    mm=$fixtures/../../micro_pm
+    lib=$fixtures/../../../lib/vtr.o3lib
+    equiv=$(dirname "$compare")/../equiv-check/equiv-check
+    flow="partial_map; opt -full -ffbits; lower; opt -fast; compact"
+    run_one() { # run_one <verilog> <blif>
+        "$odin3" -p "read_techlib $lib; read_verilog --vtr-compat $1; proc; opt; $flow; write_blif --vtr $2" \
+            >"$work/out" 2>"$work/err" || fail "odin3 failed on $1"
+    }
+    for micro in mem_rden mem_rden_dp; do
+        run_one "$mm/$micro.v" "$work/$micro.blif"
+        [[ $(grep -c "has an enable that is not constant 1" "$work/err") -eq 1 ]] || fail "$micro: not exactly one enable warning"
+        grep -q "$micro.v:[0-9]*:[0-9]*: warning: partial_map: memory" "$work/err" || fail "$micro: the warning is not located"
+        run_one "$mm/${micro}_ref.v" "$work/${micro}_ref.blif"
+        "$equiv" --match-unnamed "$work/$micro.blif" "$work/${micro}_ref.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent to the reference"
+    done
+    # the three common micros whose read ports have an enable (they change against 3C: rom, bram, nr)
+    for micro in rom bram nr; do
+        run_one "$fixtures/../../micro/verilog/common/$micro.v" "$work/$micro.blif"
+        run_one "$mm/${micro}_ref.v" "$work/${micro}_ref.blif"
+        "$equiv" --match-unnamed "$work/$micro.blif" "$work/${micro}_ref.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent to the reference"
+    done
+    # bram.v: DEPTH 16 but 8-bit addresses, so its $mem has ABITS 8 and the reference uses 8 bits; a
+    # 4-bit reference is not equivalent
+    sed 's/ADDR_WIDTH(8)/ADDR_WIDTH(4)/; s/\.addr1(wr_addr)/.addr1(wr_addr[3:0])/; s/\.addr2(rd_addr)/.addr2(rd_addr[3:0])/' "$mm/bram_ref.v" >"$work/bram4.v"
+    run_one "$work/bram4.v" "$work/bram4.blif"
+    if "$equiv" --match-unnamed "$work/bram.blif" "$work/bram4.blif" >"$work/out" 2>"$work/err"; then fail "a 4-bit bram reference is equivalent"; fi
+    # nor is an unregistered enable
+    sed 's/assign out = en_r ? ram_out : hold;/assign out = we ? ram_out : hold;/' "$mm/mem_rden_ref.v" >"$work/bad2.v"
+    run_one "$work/bad2.v" "$work/bad2.blif"
+    if "$equiv" --match-unnamed "$work/mem_rden.blif" "$work/bad2.blif" >"$work/out" 2>"$work/err"; then fail "a reference with an unregistered enable is equivalent"; fi
+    # the check is not vacuous: without the hold the reference differs
+    sed 's/assign out = en_r ? ram_out : hold;/assign out = ram_out;/' "$mm/mem_rden_ref.v" >"$work/bad.v"
+    run_one "$work/bad.v" "$work/bad.blif"
+    if "$equiv" --match-unnamed "$work/mem_rden.blif" "$work/bad.blif" >"$work/out" 2>"$work/err"; then fail "a reference without the hold is equivalent"; fi
+    ;;
+pm_mem_arch)
+    # cli_pm_mem_arch (4.4 R-1, R-2, R-4, S-3): on the COFFE-like fixture (D = 11) a 13-bit RAM is 4
+    # blocks, a 9-bit one is padded; with no RAM model `lower` still writes a BLIF; with
+    # `--mem-width arch` the 16 x 8 memory is one block of 8 bits, with one warning.
+    mm=$fixtures/../../micro_pm
+    arch=$fixtures/../../unit/data/arch
+    pm_run() { # pm_run <arch> <micro> <partial_map args> -> $work/<micro>.blif
+        "$odin3" -p "read_arch $1; read_verilog --vtr-compat $mm/$2.v; proc; opt; partial_map $3; opt -full -ffbits; lower; opt -fast; compact; write_blif --vtr $work/$2.blif" \
+            >"$work/out" 2>"$work/err" || fail "odin3 failed on $2.v"
+    }
+    for case in ram_a13_sp:single_port_ram:4 ram_a13_dp:dual_port_ram:4 ram_a9:single_port_ram:1; do
+        IFS=: read -r micro type want <<<"$case"
+        pm_run "$arch/ram_d11.xml" "$micro" ""
+        got=$(grep -c "^\.subckt $type" "$work/$micro.blif" || true)
+        [[ $got -eq $want ]] || fail "$micro: $got $type blocks, want $want"
+    done
+    pm_run "$arch/acc_none.xml" mem_regread ""
+    grep -qF "has no 'single_port_ram' model; 1 '\$mem' cells left to lower" "$work/err" || fail "no S-3 INFO"
+    [[ -s $work/mem_regread.blif ]] || fail "no BLIF for the arch without RAM"
+    if grep -q "^\.subckt \(single\|dual\)_port_ram" "$work/mem_regread.blif"; then fail "RAM block in an arch without RAM"; fi
+    pm_run "$arch/ram_d11.xml" mem_regread "--mem-width arch"
+    [[ $(grep -c "^\.subckt [a-z]*_port_ram" "$work/mem_regread.blif") -eq 1 ]] || fail "not one block with --mem-width arch"
+    [[ $(grep -c "memories are sliced to the arch's widest mode" "$work/err") -eq 1 ]] || fail "not exactly one slice warning"
+    pm_run "$arch/ram_d11.xml" mem_regread ""
+    [[ $(grep -c "^\.subckt [a-z]*_port_ram" "$work/mem_regread.blif") -eq 8 ]] || fail "default is not 8 one-bit blocks"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

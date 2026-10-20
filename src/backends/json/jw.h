@@ -145,6 +145,10 @@ typedef struct jw_cell {
 
 /* `"name": { "hide_name", "type", "parameters": {` ; cell->params then takes the parameters. */
 void jw_cell_begin(jw *out, jw_list *cells, const jw_cell_ref *ref, jw_cell *cell);
+/* A real parameter of the cell being written: as jw_param_int / jw_key on cell->params, and the
+ * name is claimed so a `parameter:<NAME>` attribute of the same name is not written twice. */
+void jw_cell_param_int(jw *out, jw_cell *cell, const char *key, int64_t num);
+void jw_cell_param_key(jw *out, jw_cell *cell, const char *key);
 /* Closes parameters; writes attributes (src); opens port_directions (cell->dirs). */
 void jw_cell_attrs(jw *out, jw_cell *cell, odin3_node_id node);
 /* Closes port_directions and opens connections (cell->conns). */

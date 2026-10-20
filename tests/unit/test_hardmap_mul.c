@@ -892,8 +892,8 @@ static void test_pass_runs_and_refuses_unknown_arguments(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_pass_run(res.design, "hardmap", odin3_bytes_cstr("-x")));
     TEST_ASSERT_NOT_NULL(
-        strstr(log_text,
-               "partial_map: unknown argument '-x' (known: --allow-unknown-blocks, --min-add N)"));
+        strstr(log_text, "partial_map: unknown argument '-x' (known: --allow-unknown-blocks, "
+                         "--min-add N, --mem-width arch)"));
     TEST_ASSERT_EQUAL_UINT32(3, hm_count(res.module, "$mul"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(res.design, "hardmap", (odin3_bytes){NULL, 0}));
     TEST_ASSERT_EQUAL_UINT32(3, hm_count(res.module, "multiply"));

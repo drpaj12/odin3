@@ -26,22 +26,38 @@ bit in that run is a ``PASS``. When there are mismatches it is run five more tim
 vectors that mismatched are kept from each, so the dumps do not pile up), with all uninitialised
 state 1 and with four random states (``--x-initial unique`` plus ``+verilator+rand+reset+0|1|2``,
 a different ``+verilator+seed`` for each random one; the stimulus has a generator of its own, so
-it is the same in every run). A mismatch on a bit whose RTL value differs between those runs at
-that vector is on an ``x`` bit:
+it is the same in every run). A mismatch on a bit whose RTL value, or whose netlist value, differs
+between those runs at that vector is on an ``x`` bit (the netlist has registers without a defined
+start too, and a design whose RTL never loads a register can show the arbitrary start through
+either side):
 it is reported as ``XDEPEND``, never as a pass, and a design with only such mismatches is
 ``UNTESTED`` (exit 3, the caller's ``error``: the netlist cannot be judged on them). Any
-mismatch on a bit whose RTL value is the same in all the runs is a ``MISMATCH``: ``FAIL``,
-whatever else is ``x``. The testbench's own verdict is dropped (it has no initial-state
-classification); the verdict lines are written from the dumps, and a run that compares no output
+mismatch on a bit whose RTL and netlist values are the same in all the runs is a ``MISMATCH``:
+``FAIL``, whatever else is ``x``. No vector, and no stretch of vectors, is skipped. The
+testbench's own verdict is dropped (it has no initial-state classification); the verdict lines
+are written from the dumps, and a run that compares no output
 bit is not a pass.
+
+Before any simulation the RTL is pre-checked (``rtl_precheck``): the flow reads it with
+``--nolatches``, so an RTL that infers latches (Yosys ``read_verilog`` + ``proc`` without it gives
+a ``$dlatch``) or has an incomplete sensitivity list (Odin III's ``read_verilog`` says so) holds
+values or evaluates at times the netlist cannot copy. Such a design is ``UNTESTED`` (exit 3) with
+the reason (the latch count, the signals) in the log, and nothing is simulated. A design with
+neither is simulated as before. A tool that is missing, unset, times out or fails on the RTL
+says nothing, but never silently: a ``PRECHECK-SKIPPED <tool>: <why>`` line goes to the log and the
+design is still simulated. A mismatch on a bit that is stable in the RTL but varies in the netlist
+is ``NETLIST_INIT_DEPEND`` (a possible netlist defect), also ``UNTESTED``; the ``UNTESTED-REASON``
+line names the cause for the table.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import runpy
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,6 +78,134 @@ def drop_port_wires(verilog: str) -> str:
     ports = set(_PORT.findall(body))
     body = _WIRE.sub(lambda m: "" if m.group(1) in ports else m.group(0), body)
     return verilog[: top.start()] + body + verilog[top.end():]
+
+
+# --- RTL pre-check (H1) -------------------------------------------------------------------------
+
+ODIN3_ENV = "QOR_FCHECK_ODIN3"  # the odin3 binary (set by qor_legs.fcheck_command)
+TECHLIB_ENV = "QOR_FCHECK_TECHLIB"  # its techlib ($LIB: the hard blocks the RTL instantiates)
+_OBJECTS = re.compile(r"^(\d+) objects?\.", re.M)
+_SENSITIVITY = re.compile(r"incomplete sensitivity list: '([^']+)' is read but not listed")
+_PRECHECK_TIMEOUT_S = 600
+_SHORT_SIGNALS = 5  # signals named in the table's short reason
+
+
+_UNSAFE = re.compile(r'[;"\\\n\r]')  # would end or break a quoted Yosys script word
+
+
+@dataclass
+class PrecheckNotes:
+    """What the pre-check says besides its reasons: one ``PRECHECK-SKIPPED <tool>: <why>`` line per
+    tool that gave no result (``skipped``), and the short form of each reason (``short``)."""
+
+    skipped: list[str] = field(default_factory=list)
+    short: list[str] = field(default_factory=list)
+
+    def skip(self, tool: str, why: str) -> None:
+        self.skipped.append(f"PRECHECK-SKIPPED {tool}: {why}")
+
+
+def _yosys_latches(rtl: Path, yosys: Path, run: Callable[..., Any], notes: PrecheckNotes,
+                   top: str | None = None) -> int | None:
+    """The latch cells (``$dlatch``, ``$adlatch``, ``$dlatchsr``) under the design's top in
+    Yosys's ``read_verilog`` + ``proc`` of ``rtl`` (no ``-nolatches``); None, with the reason in
+    ``notes``, when there is no result."""
+    if _UNSAFE.search(str(rtl)):
+        notes.skip("yosys", f"unsafe RTL path (has ; \" \\ or a line break): {rtl!r}")
+        return None
+    hier = f"hierarchy -top {top}" if top else "hierarchy -auto-top"
+    with tempfile.TemporaryDirectory() as tmp:
+        count = Path(tmp) / "count.txt"
+        script = (f'read_verilog "{rtl}"; {hier}; proc; '
+                  f"tee -o {count} select -count t:$dlatch t:$adlatch t:$dlatchsr")
+        try:
+            done = run([str(yosys), "-q", "-p", script], capture_output=True, text=True,
+                       check=False, timeout=_PRECHECK_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            notes.skip("yosys", f"timeout after {_PRECHECK_TIMEOUT_S} s")
+            return None
+        except OSError as exc:
+            notes.skip("yosys", f"could not run {yosys}: {exc}")
+            return None
+        if done.returncode != 0 or not count.is_file():
+            notes.skip("yosys", f"could not read the RTL (exit {done.returncode})")
+            return None
+        found = _OBJECTS.search(count.read_text(encoding="utf-8", errors="replace"))
+    if found is None:
+        notes.skip("yosys", "no object count in its output")
+        return None
+    return int(found.group(1))
+
+
+def _odin_sensitivity(rtl: Path, odin3: Path, techlib: Path | None, run: Callable[..., Any],
+                      notes: PrecheckNotes) -> list[str] | None:
+    """The signals Odin III reports as read but missing from a sensitivity list (sorted, each
+    once); None, with the reason in ``notes``, when there is no result."""
+    if _UNSAFE.search(str(rtl)) or re.search(r"\s", str(rtl)):
+        notes.skip("odin3", f"unsafe RTL path (has whitespace, ; \" \\): {rtl!r}")
+        return None
+    lib = f"read_techlib {techlib}; " if techlib is not None else ""
+    try:
+        done = run([str(odin3), "-p", f"{lib}read_verilog --vtr-compat {rtl}"],
+                   capture_output=True, text=True, check=False, timeout=_PRECHECK_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        notes.skip("odin3", f"timeout after {_PRECHECK_TIMEOUT_S} s")
+        return None
+    except OSError as exc:
+        notes.skip("odin3", f"could not run {odin3}: {exc}")
+        return None
+    if done.returncode != 0:
+        notes.skip("odin3", f"could not read the RTL (exit {done.returncode})")
+        return None
+    return sorted(set(_SENSITIVITY.findall(done.stdout + done.stderr)))
+
+
+def rtl_precheck(rtl: Path, yosys: Path | None, odin3: Path | None,
+                 run: Callable[..., Any] = subprocess.run, techlib: Path | None = None,
+                 top: str | None = None, notes: PrecheckNotes | None = None,
+                 no_odin3: str = "no odin3 binary") -> list[str]:
+    """Why ``rtl`` cannot be judged against a ``--nolatches`` netlist: one text per reason, empty
+    for an RTL with neither inferred latches nor incomplete sensitivity lists. A tool that is
+    missing or gives no result checks nothing and never hides a design; ``notes`` (when given)
+    names each such tool (``skipped``) and holds the short reasons (``short``). ``top`` is the
+    design's top module (default: Yosys finds it); ``no_odin3`` says why ``odin3`` is None."""
+    notes = notes if notes is not None else PrecheckNotes()
+    reasons = []
+    if yosys is None:
+        notes.skip("yosys", "no Yosys found")
+        latches = None
+    else:
+        latches = _yosys_latches(rtl, yosys, run, notes, top)
+    if latches:
+        reasons.append(f"the RTL infers {latches} latches (Yosys read_verilog + proc without "
+                       "--nolatches gives $dlatch cells); the flow reads it with --nolatches "
+                       "and drops their held values")
+        notes.short.append(f"latches {latches}")
+    if odin3 is None:
+        notes.skip("odin3", no_odin3)
+        signals = None
+    else:
+        signals = _odin_sensitivity(rtl, odin3, techlib, run, notes)
+    if signals:
+        reasons.append("the RTL has incomplete sensitivity lists (read but not listed: "
+                       f"{', '.join(signals)}); the flow builds them as @*")
+        notes.short.append(f"sensitivity {', '.join(signals[:_SHORT_SIGNALS])}"
+                           f"{', ...' if len(signals) > _SHORT_SIGNALS else ''}")
+    return reasons
+
+
+def render_precheck(reasons: Sequence[str], short: Sequence[str] = (),
+                    skipped: Sequence[str] = ()) -> str:
+    """The log text of a failed pre-check: the ``PRECHECK-SKIPPED`` lines, one ``PRECHECK`` line
+    per reason, ``UNTESTED-REASON`` (the short form, read by the table) and the ``UNTESTED:`` line
+    the callers (``qor_legs.fcheck_verdict``) read."""
+    lines = list(skipped)
+    lines += [f"PRECHECK {reason}" for reason in reasons]
+    if short:
+        lines.append("UNTESTED-REASON " + "; ".join(short))
+    lines.append("UNTESTED: the RTL behaviour is not preserved by the flow's synthesis "
+                 "(--nolatches); nothing was simulated: " + "; ".join(reasons))
+    return "\n".join(lines) + "\n"
 
 
 # --- initial state: classify mismatches by the RTL's dependence on it -------------------------
@@ -134,6 +278,9 @@ class InitVerdict:
     compared_bits: int = 0
     lines: list[str] = field(default_factory=list)  # the first MISMATCH lines
     x_lines: list[str] = field(default_factory=list)  # the first XDEPEND lines
+    xdepend_port_errors: int = 0  # ports with a mismatching bit whose RTL value varies
+    init_depend_port_errors: int = 0  # ports whose mismatching bits vary in the netlist only
+    init_depend_lines: list[str] = field(default_factory=list)  # the first NETLIST_INIT_DEPEND
 
     @property
     def vectors(self) -> int:
@@ -176,10 +323,11 @@ def _dump_rows(lines: Iterable[str], widths: Sequence[int]) -> Iterator[list[tup
 def compare_runs(outputs: Sequence[tuple[str, int]], runs: Sequence[Iterable[str]],
                  indices: Sequence[int] | None = None) -> InitVerdict:
     """Compare ``runs[0]`` (all uninitialised state 0) vector by vector, RTL against netlist, on
-    every output bit. With more runs (other initial states), a mismatching bit whose RTL value
-    differs from ``runs[0]``'s in any of them at that vector is ``x`` (XDEPEND); every other
-    mismatch is real. A vector is ``mismatched`` when it has a real mismatch, ``x_dependent``
-    when it has only x ones, ``matched`` otherwise. Raises ``ValueError`` when the runs dumped a
+    every output bit. With more runs (other initial states), a mismatching bit whose RTL value, or
+    whose netlist value, differs from ``runs[0]``'s in any of them at that vector is ``x``
+    (XDEPEND, or NETLIST_INIT_DEPEND when only the netlist's value differs); every other mismatch
+    is real. A vector is ``mismatched`` when it has a real mismatch, ``x_dependent`` when it has
+    only x ones, ``matched`` otherwise. Raises ``ValueError`` when the runs dumped a
     different number of vectors. ``indices`` names the vectors the dumps hold when they were
     filtered (``keep_vectors``); the others are not counted."""
     widths = [w for _, w in outputs]
@@ -192,19 +340,26 @@ def compare_runs(outputs: Sequence[tuple[str, int]], runs: Sequence[Iterable[str
             bad = rtl ^ syn
             if not bad:
                 continue
-            unknown = 0
+            unknown = syn_unknown = 0
             for row in rows[1:]:
                 unknown |= rtl ^ row[i][0]
+                syn_unknown |= syn ^ row[i][1]  # H2: the netlist's start is arbitrary too
             line = f"vec={index} port={name} rtl={_bits(rtl, width, unknown)} " \
-                   f"synth={_bits(syn, width, 0)}"
-            if bad & ~unknown:
+                   f"synth={_bits(syn, width, syn_unknown)}"
+            if bad & ~(unknown | syn_unknown):
                 real_ports += 1
                 if len(verdict.lines) < _MAX_REPORT:
                     verdict.lines.append("MISMATCH " + line)
-            else:
-                x_ports += 1
+                continue
+            x_ports += 1
+            if bad & unknown:  # the RTL's own bit depends on the start
+                verdict.xdepend_port_errors += 1
                 if len(verdict.x_lines) < _MAX_REPORT:
                     verdict.x_lines.append("XDEPEND " + line)
+            if bad & syn_unknown & ~unknown:  # H2: the netlist depends on it, the RTL does not
+                verdict.init_depend_port_errors += 1
+                if len(verdict.init_depend_lines) < _MAX_REPORT:
+                    verdict.init_depend_lines.append("NETLIST_INIT_DEPEND " + line)
         verdict.compared_bits += sum(w for _, w in outputs)
         verdict.port_errors += real_ports
         verdict.x_port_errors += x_ports
@@ -244,11 +399,15 @@ def keep_vectors(path: Path, keep: set[int]) -> None:
 
 def render_verdict(verdict: InitVerdict) -> str:
     """The verdict lines the callers (``qor_legs.fcheck_verdict``) read."""
-    lines = verdict.lines + verdict.x_lines
+    lines = verdict.lines + verdict.x_lines + verdict.init_depend_lines
     if verdict.port_errors > len(verdict.lines):
         lines.append(f"... {verdict.port_errors - len(verdict.lines)} more MISMATCH ports")
-    if verdict.x_port_errors > len(verdict.x_lines):
-        lines.append(f"... {verdict.x_port_errors - len(verdict.x_lines)} more XDEPEND ports")
+    xdepend = verdict.xdepend_port_errors
+    if xdepend > len(verdict.x_lines):
+        lines.append(f"... {xdepend - len(verdict.x_lines)} more XDEPEND ports")
+    if verdict.init_depend_port_errors > len(verdict.init_depend_lines):
+        lines.append(f"... {verdict.init_depend_port_errors - len(verdict.init_depend_lines)} "
+                     "more NETLIST_INIT_DEPEND ports")
     lines.append(f"VCHECK_SUMMARY matched={verdict.matched} mismatched={verdict.mismatched} "
                  f"vectors={verdict.vectors} port_errors={verdict.port_errors} "
                  f"x_dependent_vectors={verdict.x_dependent}")
@@ -257,9 +416,20 @@ def render_verdict(verdict: InitVerdict) -> str:
     elif verdict.mismatched:
         lines.append(f"FAIL: {verdict.port_errors} mismatches in {verdict.vectors} vectors")
     elif verdict.x_dependent:
-        lines.append(f"UNTESTED: {verdict.x_port_errors} mismatches in {verdict.x_dependent} "
-                     "vectors, every one on a bit whose RTL value depends on the initial state "
-                     "(x in a four-state simulation); the netlist cannot be judged on them")
+        kinds = []
+        if verdict.xdepend_port_errors:
+            kinds.append("XDEPEND")
+        if verdict.init_depend_port_errors:
+            kinds.append("NETLIST_INIT_DEPEND")
+        lines.append("UNTESTED-REASON " + ", ".join(kinds))
+        text = (f"UNTESTED: {verdict.x_port_errors} mismatches in {verdict.x_dependent} "
+                "vectors, every one on a bit that depends on the initial state (x in a "
+                "four-state simulation); the netlist cannot be judged on them")
+        if verdict.init_depend_port_errors:
+            text += (f"; {verdict.init_depend_port_errors} of them NETLIST_INIT_DEPEND: the "
+                     "netlist depends on the initial state where the RTL does not (a possible "
+                     "netlist defect)")
+        lines.append(text)
     else:
         lines.append("ERROR: no output bit was compared (the design has no output port)")
     return "\n".join(lines) + "\n"
@@ -375,6 +545,45 @@ def _install_init_runs() -> bool:
     return True
 
 
+def _option(args: Sequence[str], name: str) -> str | None:
+    """The value after ``name`` in ``args`` (``--name value`` or ``--name=value``), or None."""
+    for i, arg in enumerate(args):
+        if arg == name and i + 1 < len(args):
+            return args[i + 1]
+        if arg.startswith(name + "="):
+            return arg[len(name) + 1:]
+    return None
+
+
+def _precheck_args(args: Sequence[str], blif_to_verilog: Any) -> tuple[list[str], PrecheckNotes]:
+    """``rtl_precheck`` of the checker's ``--rtl`` with its Yosys (``--yosys``, else the one
+    ``resolve_yosys`` finds), the odin3 named by ``ODIN3_ENV`` and the techlib of ``TECHLIB_ENV``:
+    the reasons and the notes (a tool that is missing, unset or unusable is a ``skipped`` line).
+    No ``--rtl`` (a ``--run-dir`` run) checks nothing and notes nothing."""
+    notes = PrecheckNotes()
+    rtl = _option(args, "--rtl")
+    if rtl is None:
+        return [], notes
+    given = _option(args, "--yosys")
+    resolve = getattr(blif_to_verilog, "resolve_yosys", None)
+    yosys: Path | None = Path(given) if given and Path(given).is_file() else None
+    if yosys is None and resolve is not None:
+        try:
+            yosys = resolve(Path(given) if given else None)
+        except (FileNotFoundError, OSError):
+            yosys = None
+    odin = os.environ.get(ODIN3_ENV)
+    odin3: Path | None = Path(odin) if odin and Path(odin).is_file() else None
+    lib = os.environ.get(TECHLIB_ENV)
+    techlib = Path(lib) if lib else None
+    why = f"{ODIN3_ENV} is not set" if not odin else f"{ODIN3_ENV}={odin} is not a file"
+    if odin3 is not None and techlib is not None and not techlib.is_file():
+        why = f"techlib {techlib} ({TECHLIB_ENV}) is not a file"
+        odin3 = None
+    reasons = rtl_precheck(Path(rtl), yosys, odin3, techlib=techlib, notes=notes, no_odin3=why)
+    return reasons, notes
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print("usage: qor_fcheck_run.py <run_random_check.py> [args...]", file=sys.stderr)
@@ -396,6 +605,14 @@ def main(argv: list[str]) -> int:
     blif_to_verilog.pack_bit_blasted_top_ports = patched
     if (script.parent / "tb_generator.py").is_file() and not _install_init_runs():
         return 2
+    reasons, notes = _precheck_args(argv[2:], blif_to_verilog)
+    if reasons:
+        sys.stdout.write(render_precheck(reasons, notes.short, notes.skipped))
+        sys.stdout.flush()
+        return 3
+    if notes.skipped:  # a skipped check is never silent; the design is still simulated
+        sys.stdout.write("".join(f"{line}\n" for line in notes.skipped))
+        sys.stdout.flush()
     sys.argv = [str(script), *argv[2:]]
     try:
         runpy.run_path(str(script), run_name="__main__")
