@@ -417,6 +417,7 @@ odin3_status odin3_partial_map_run_opts(odin3_pass_ctx *ctx, odin3_design *desig
     st = st == ODIN3_OK && hc.rules.have_adder ? all_add_phases(&hc) : st;
     st = st == ODIN3_OK ? all_ram_phases(&hc) : st;
     st = st == ODIN3_OK && (hc.rules.have_sp || hc.rules.have_dp) ? all_mem_phases(&hc) : st;
+    hm_strip_nocarry(&hc);
     if (st == ODIN3_OK) {
         report(&hc);
     }

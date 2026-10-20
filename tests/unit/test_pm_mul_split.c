@@ -433,6 +433,83 @@ static void test_big_operand(void) {
     pb_free(&res);
 }
 
+/* --- fix round: marker, dead pieces ----------------------------------------- */
+
+/* Live nodes of res carrying the internal `partial_map_nocarry` attribute. */
+static uint32_t nocarry_nodes(const pb_result *res) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(res->design),
+                           odin3_bytes_cstr("partial_map_nocarry"), &key)) {
+        return 0;
+    }
+    uint32_t found = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(res->module); id++) {
+        odin3_objref obj = {ODIN3_OBJ_NODE, id};
+        found += odin3_node_live(res->module, (odin3_node_id){id}) &&
+                         odin3_attr_get(res->module, obj, key) != NULL
+                     ? 1U
+                     : 0U;
+    }
+    return found;
+}
+
+static void test_nocarry_not_leaked(void) {
+    pb_result res;
+    build_mul((mulcase){40, 40, 80, false, NULL}, NULL, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, NULL));
+    TEST_ASSERT_EQUAL_UINT32(0, nocarry_nodes(&res));
+    pb_free(&res);
+}
+
+static void test_nocarry_not_leaked_min_add(void) {
+    pb_result res;
+    build_mul((mulcase){40, 40, 80, false, NULL}, NULL, &res);
+    odin3_partial_map_opts opts;
+    memset(&opts, 0, sizeof opts);
+    opts.min_add = 1000; /* every split adder stays a soft `$add` */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_partial_map_run_opts(&res.ctx, res.design, &opts, NULL));
+    TEST_ASSERT_TRUE(hm_count(res.module, "$add") > 0);
+    TEST_ASSERT_EQUAL_UINT32(0, nocarry_nodes(&res));
+    pb_free(&res);
+}
+
+/* A user `$add` with Y_WIDTH = n and no marker still gets its top stage: head, n stages, top. */
+static void test_user_add_keeps_top_stage(void) {
+    pb_result res;
+    hm_build_ok("module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"
+                "  wire width 4 output 3 \\y\n  cell $add \\u\n"
+                "    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+                "    parameter \\A_WIDTH 4\n    parameter \\B_WIDTH 4\n"
+                "    parameter \\Y_WIDTH 4\n"
+                "    connect \\A \\a\n    connect \\B \\b\n    connect \\Y \\y\n"
+                "  end\nend\n",
+                &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, NULL));
+    TEST_ASSERT_EQUAL_UINT32(6, hm_count(res.module, "adder"));
+    pb_free(&res);
+}
+
+/* Y_WIDTH below a + b: no piece feeding only dropped bits is built. */
+static void check_cells(mulcase mc, uint32_t multiplies, uint32_t adders) {
+    pb_result res;
+    build_mul(mc, NULL, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, NULL));
+    TEST_ASSERT_EQUAL_UINT32(multiplies, hm_count(res.module, "multiply"));
+    TEST_ASSERT_EQUAL_UINT32(adders, hm_count(res.module, "adder"));
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$mul"));
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$add"));
+    pb_free(&res);
+}
+
+static void test_dead_pieces_skipped(void) {
+    check_cells((mulcase){40, 8, 20, false, NULL}, 1, 0);  /* A split, Y within m00 */
+    check_cells((mulcase){8, 40, 3, false, NULL}, 1, 0);   /* B split, Y within m00 */
+    check_cells((mulcase){40, 40, 30, false, NULL}, 1, 0); /* both, Y within m00 */
+    TEST_ASSERT_TRUE(sim_equal((mulcase){40, 8, 20, false, NULL}, NULL));
+    TEST_ASSERT_TRUE(sim_equal((mulcase){8, 40, 3, false, NULL}, NULL));
+    TEST_ASSERT_TRUE(sim_equal((mulcase){40, 40, 30, false, NULL}, NULL));
+}
+
 /* --- H-9: out of memory (the source cell is intact) --------------------------------------------
  */
 
@@ -515,6 +592,10 @@ int main(void) {
     RUN_TEST(test_explicit_40);
     RUN_TEST(test_explicit_40_sim);
     RUN_TEST(test_big_operand);
+    RUN_TEST(test_nocarry_not_leaked);
+    RUN_TEST(test_nocarry_not_leaked_min_add);
+    RUN_TEST(test_user_add_keeps_top_stage);
+    RUN_TEST(test_dead_pieces_skipped);
     RUN_TEST(test_oom_sweep);
     return UNITY_END();
 }

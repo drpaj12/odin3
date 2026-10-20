@@ -319,12 +319,19 @@ odin3_status hm_map_explicit(hm_ctx *hc, odin3_node_id src) {
 odin3_status hm_split_explicit(hm_ctx *hc, odin3_node_id src) {
     const odin3_value *width = odin3_node_param(hc->module, src, 0);
     mul_shape sh = shape_of_multiply(hc, src);
-    if (width == NULL || width->i <= (int64_t)hc->rules.mul_width || sh.a == 0 || sh.b == 0 ||
-        sh.y == 0 || sh.y > sh.a + sh.b) {
+    if (width == NULL || width->i <= (int64_t)hc->rules.mul_width) {
         return ODIN3_OK;
     }
     char label[ODIN3_LOG_BUF / 4];
     hm_label(hc, src, label, sizeof label);
+    if (sh.a == 0 || sh.b == 0 || sh.y == 0 || sh.y > sh.a + sh.b) {
+        hm_diag(hc, ODIN3_LOG_WARN, src,
+                "partial_map: explicit 'multiply' instance '%s' (WIDTH %" PRId64
+                ") has pins a=%" PRIu32 " b=%" PRIu32 " out=%" PRIu32
+                " that no split fits (out above a + b, or an empty port); left unsplit",
+                label, width->i, sh.a, sh.b, sh.y);
+        return ODIN3_OK;
+    }
     hm_diag(hc, ODIN3_LOG_WARN, src,
             "partial_map: explicit 'multiply' instance '%s' (WIDTH %" PRId64
             ") treated as '$mul' as Parmys does",

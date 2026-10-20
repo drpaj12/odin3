@@ -158,6 +158,8 @@ void hm_abort(hm_ctx *hc);
 
 /* Checks the design budget: OK, else logs the budget's message and returns ODIN3_ERR_PARSE. */
 odin3_status hm_budget_check(const hm_ctx *hc);
+/* Counts `units` of work that creates no pin (operand copies of a split) like created pins. */
+odin3_status hm_budget_work(hm_ctx *hc, uint64_t units);
 
 /*
  * Logs fmt at level, located at the source of node (its first source leaf: "file:line:col: error:
@@ -202,6 +204,8 @@ odin3_status hm_split_explicit(hm_ctx *hc, odin3_node_id src);
  * Parmys builds the adders of a split multiplier as head plus Y_WIDTH stages (X-4). */
 odin3_status hm_mark_nocarry(hm_ctx *hc, odin3_node_id node);
 bool hm_is_nocarry(const hm_ctx *hc, odin3_node_id node);
+/* Removes the marker from every node of the design (end of the pass). */
+void hm_strip_nocarry(hm_ctx *hc);
 
 /* The `$add` / `$sub` rule (adder.c, A-1..A-9): maps src to an `adder` chain or leaves it soft with
  * a warning (Y_WIDTH above max(A_WIDTH, B_WIDTH) + 1); a cell with both operand widths 0 is left

@@ -111,7 +111,8 @@ static void tie_y(split *sp, uint32_t first_bit, const odin3_net_id *nets, uint3
     }
 }
 
-/* Only A above W: m00 = A[0,W) * B, m10 = A[W,a) * B, add0 = m00.out[W,..) + m10.out. */
+/* Only A above W: m00 = A[0,W) * B, m10 = A[W,a) * B, add0 = m00.out[W,..) + m10.out. With
+ * Y_WIDTH <= W the upper pieces would feed no Y bit: only m00 is built. */
 static odin3_status split_a(split *sp) {
     uint32_t wid = sp->width;
     uint32_t a1 = sp->dims.a - wid;
@@ -119,20 +120,25 @@ static odin3_status split_a(split *sp) {
     odin3_net_id *lo = NULL;
     odin3_net_id *hi = NULL;
     odin3_net_id *sum = NULL;
+    bool upper = sp->dims.y > wid;
     odin3_status st = take(sp, (take_req){wid + bwid, wid + bwid}, &lo);
-    st = st == ODIN3_OK ? take(sp, (take_req){a1 + bwid, a1 + bwid}, &hi) : st;
-    st = st == ODIN3_OK ? take(sp, (take_req){a1 + bwid, a1 + bwid}, &sum) : st;
     st = st == ODIN3_OK ? new_mul(sp, "m00", (port_in){sp->an, wid}, (port_in){sp->bn, bwid}, lo)
                         : st;
-    st = st == ODIN3_OK
-             ? new_mul(sp, "m10", (port_in){sp->an + wid, a1}, (port_in){sp->bn, bwid}, hi)
-             : st;
-    st = st == ODIN3_OK
-             ? new_add(sp, "add0", (port_in){lo + wid, bwid}, (port_in){hi, a1 + bwid}, sum)
-             : st;
+    if (upper) {
+        st = st == ODIN3_OK ? take(sp, (take_req){a1 + bwid, a1 + bwid}, &hi) : st;
+        st = st == ODIN3_OK ? take(sp, (take_req){a1 + bwid, a1 + bwid}, &sum) : st;
+        st = st == ODIN3_OK
+                 ? new_mul(sp, "m10", (port_in){sp->an + wid, a1}, (port_in){sp->bn, bwid}, hi)
+                 : st;
+        st = st == ODIN3_OK
+                 ? new_add(sp, "add0", (port_in){lo + wid, bwid}, (port_in){hi, a1 + bwid}, sum)
+                 : st;
+    }
     if (st == ODIN3_OK) {
         tie_y(sp, 0, lo, wid);
-        tie_y(sp, wid, sum, a1 + bwid);
+        if (upper) {
+            tie_y(sp, wid, sum, a1 + bwid);
+        }
     }
     return st;
 }
@@ -155,7 +161,8 @@ static odin3_status low_port(split *sp, const odin3_net_id *bits, port_in *out) 
 }
 
 /* Only B above W: m00 = A * B[0,b0), m01 = A * B[b0,b), add0 = m00.out[b0,..) + m01.out. With
- * `--parmys-split-ext` (D19) the low product is extended by its top bit, as Parmys does. */
+ * `--parmys-split-ext` (D19) the low product is extended by its top bit, as Parmys does. With
+ * Y_WIDTH <= b0 the upper pieces would feed no Y bit: only m00 is built. */
 static odin3_status split_b(split *sp) {
     uint32_t wid = sp->width;
     uint32_t awid = sp->dims.a;
@@ -163,20 +170,25 @@ static odin3_status split_b(split *sp) {
     odin3_net_id *lo = NULL;
     odin3_net_id *hi = NULL;
     odin3_net_id *sum = NULL;
+    bool upper = sp->dims.y > b0;
     odin3_status st = take(sp, (take_req){awid + b0, awid + b0}, &lo);
-    st = st == ODIN3_OK ? take(sp, (take_req){awid + wid, awid + wid}, &hi) : st;
-    st = st == ODIN3_OK ? take(sp, (take_req){awid + wid, awid + wid}, &sum) : st;
     st = st == ODIN3_OK ? new_mul(sp, "m00", (port_in){sp->an, awid}, (port_in){sp->bn, b0}, lo)
                         : st;
-    st = st == ODIN3_OK
-             ? new_mul(sp, "m01", (port_in){sp->an, awid}, (port_in){sp->bn + b0, wid}, hi)
-             : st;
-    port_in low = {NULL, 0};
-    st = st == ODIN3_OK ? low_port(sp, lo + b0, &low) : st;
-    st = st == ODIN3_OK ? new_add(sp, "add0", low, (port_in){hi, awid + wid}, sum) : st;
+    if (upper) {
+        port_in low = {NULL, 0};
+        st = st == ODIN3_OK ? take(sp, (take_req){awid + wid, awid + wid}, &hi) : st;
+        st = st == ODIN3_OK ? take(sp, (take_req){awid + wid, awid + wid}, &sum) : st;
+        st = st == ODIN3_OK
+                 ? new_mul(sp, "m01", (port_in){sp->an, awid}, (port_in){sp->bn + b0, wid}, hi)
+                 : st;
+        st = st == ODIN3_OK ? low_port(sp, lo + b0, &low) : st;
+        st = st == ODIN3_OK ? new_add(sp, "add0", low, (port_in){hi, awid + wid}, sum) : st;
+    }
     if (st == ODIN3_OK) {
         tie_y(sp, 0, lo, b0);
-        tie_y(sp, b0, sum, awid + wid);
+        if (upper) {
+            tie_y(sp, b0, sum, awid + wid);
+        }
     }
     return st;
 }
@@ -217,8 +229,23 @@ static odin3_status both_products(split *sp, both *bt) {
                : st;
 }
 
+/* Both above W with Y_WIDTH <= W: Y is the low word of m00 alone. */
+static odin3_status split_low(split *sp) {
+    odin3_net_id *lo = NULL;
+    uint32_t wid = sp->width;
+    odin3_status st = take(sp, (take_req){2U * wid, 2U * wid}, &lo);
+    st = st == ODIN3_OK ? new_mul(sp, "m00", (port_in){sp->an, wid}, (port_in){sp->bn, wid}, lo)
+                        : st;
+    if (st == ODIN3_OK) {
+        tie_y(sp, 0, lo, wid);
+    }
+    return st;
+}
+
 /* Both above W (a0 = b0 = W): add0 = m10 + m01 (one carry bit each), add1 = add0 plus
- * {m11, m00[W, 2W)}; Y = m00[0, W) then add1. Parmys's `a0 == b0` branch of split_multiplier. */
+ * {m11, m00[W, 2W)}; Y = m00[0, W) then add1. Parmys's `a0 == b0` branch of split_multiplier. With
+ * Y_WIDTH <= W only m00 is built (split_low). Above that all pieces stay: add1 is one chain whose
+ * size Parmys fixes, so its upper stages stay even when Y drops their bits. */
 static odin3_status split_ab(split *sp) {
     uint32_t wid = sp->width;
     uint32_t a1 = sp->dims.a - wid;
@@ -253,6 +280,8 @@ static size_t scratch_size(const split *sp) {
 static odin3_status build(split *sp) {
     odin3_status st = odin3_vec_reserve(&sp->ties, sp->dims.y);
     st = st == ODIN3_OK ? scratch(&sp->nets, scratch_size(sp)) : st;
+    st =
+        st == ODIN3_OK ? hm_budget_work(sp->hc, scratch_size(sp)) : st; /* the copies: O(a^2 / W) */
     st = st == ODIN3_OK ? hm_begin_cell(sp->hc, sp->src) : st;
     st = st == ODIN3_OK ? hm_const(sp->hc, HM_GND, &sp->gnd) : st;
     if (st != ODIN3_OK) {
@@ -264,7 +293,7 @@ static odin3_status build(split *sp) {
     gather(sp, (gather_req){PORT_A, sp->dims.a}, sp->an);
     gather(sp, (gather_req){PORT_B, sp->dims.b}, sp->bn);
     if (sp->dims.a > sp->width && sp->dims.b > sp->width) {
-        return split_ab(sp);
+        return sp->dims.y <= sp->width ? split_low(sp) : split_ab(sp);
     }
     return sp->dims.a > sp->width ? split_a(sp) : split_b(sp);
 }
