@@ -165,7 +165,7 @@ static void test_missing_input_is_tied_to_gnd(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, load(MICRO("generic_missing_input"), ""));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "partial_map", ""));
     assert_has(log_text, "partial_map: instance 'u_mul' of 'mult_8': input port 'b' is not "
-                         "connected; tied to gnd");
+                         "connected or is x; tied to gnd");
     assert_has(log_text, "1 instances of 1 generic blocks bound (mult_8 1)");
     const char *blif = write_vtr(g_design);
     assert_has(blif, "b[0]=gnd");
@@ -224,6 +224,74 @@ static void test_non_identifier_model_is_not_registered(void) {
     assert_has(log_text, "E ");
 }
 
+/* Review M2: an unconnected clock is not tied to gnd; the writer's E3b refuses it. */
+static void test_unconnected_clock_is_left_for_the_writer(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, load(MICRO("generic_no_clock"), ""));
+    log_text[0] = '\0';
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "partial_map", ""));
+    TEST_ASSERT_FALSE(has("tied to gnd"));
+    char args[PATH_CAP];
+    (void)snprintf(args, sizeof args, "--vtr %s/out.blif", g_dir);
+    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, pass(g_design, "write_blif", args));
+    assert_has(log_text, "clock input 'clk' is unconnected or x");
+}
+
+/* Review M5: a port with only some bits x is not "not connected". */
+static void test_partial_x_is_left_alone(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, load(MICRO("generic_partial_x"), ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "partial_map", ""));
+    TEST_ASSERT_FALSE(has("tied to gnd"));
+}
+
+/* Review M1: a whole port of explicit x is tied to gnd and the warning says so. */
+static void test_explicit_x_warning_says_x(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, load(MICRO("generic_explicit_x"), ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "partial_map", ""));
+    assert_has(log_text, "input port 'b' is not connected or is x; tied to gnd");
+}
+
+/* Review H2: a library black box (lpm) is not an unknown block, with an arch loaded. */
+static void test_lpm_cell_is_not_an_unknown_block(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "read_arch", ARCH_XML));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "read_techlib", ODIN3_LIB_DIR "/lpm.o3lib"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "read_verilog", MICRO("generic_lpm")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "proc", ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "partial_map", ""));
+    TEST_ASSERT_FALSE(has("not a model of architecture"));
+    TEST_ASSERT_FALSE(has("E "));
+    TEST_ASSERT_FALSE(has("generic blocks bound"));
+}
+
+/* Review H1 (3E E6): an lpm cell is still refused by write_blif --vtr, with an arch that does not
+ * have it and with none. */
+static void test_lpm_cell_is_still_refused_by_the_vtr_writer(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "read_arch", ARCH_XML));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "read_techlib", ODIN3_LIB_DIR "/lpm.o3lib"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "read_verilog", MICRO("generic_lpm")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "proc", ""));
+    char args[PATH_CAP];
+    (void)snprintf(args, sizeof args, "--vtr %s/out.blif", g_dir);
+    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, pass(g_design, "write_blif", args));
+    assert_has(log_text, "'lpm_compare' is not a hard cell of a loaded tech library");
+    odin3_design *bare = odin3_design_create();
+    log_text[0] = '\0';
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(bare, "read_techlib", ODIN3_LIB_DIR "/lpm.o3lib"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(bare, "read_verilog", MICRO("generic_lpm")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(bare, "proc", ""));
+    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, pass(bare, "write_blif", args));
+    assert_has(log_text, "'lpm_compare' is not a hard cell of a loaded tech library");
+    odin3_design_destroy(bare);
+}
+
+/* Review M4: the `.subckt` count and the typed list agree for generic blocks. */
+static void test_summary_counts_generic_blocks(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, load(MICRO("generic_ok"), ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass(g_design, "partial_map", ""));
+    log_text[0] = '\0';
+    (void)write_vtr(g_design);
+    assert_has(log_text, "3 .subckt (other 3)");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_binding_design_maps_and_writes_every_formal_bit);
@@ -235,5 +303,11 @@ int main(void) {
     RUN_TEST(test_allow_unknown_blocks_is_a_warning);
     RUN_TEST(test_without_a_record_nothing_is_checked);
     RUN_TEST(test_non_identifier_model_is_not_registered);
+    RUN_TEST(test_unconnected_clock_is_left_for_the_writer);
+    RUN_TEST(test_partial_x_is_left_alone);
+    RUN_TEST(test_explicit_x_warning_says_x);
+    RUN_TEST(test_lpm_cell_is_not_an_unknown_block);
+    RUN_TEST(test_lpm_cell_is_still_refused_by_the_vtr_writer);
+    RUN_TEST(test_summary_counts_generic_blocks);
     return UNITY_END();
 }

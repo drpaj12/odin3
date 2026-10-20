@@ -199,4 +199,12 @@ typedef struct odin3_arch_ram_mode {
 uint32_t odin3_arch_modes_of(const odin3_arch *arch, const char *model, odin3_arch_ram_mode *out,
                              uint32_t cap);
 
+/*
+ * True when the BLIF writers write cell type `type` as a `.subckt` with every formal bit: a
+ * library `hard` cell, or a library `blackbox` cell that the design's arch record registered as a
+ * model (4.2 generic blocks). A library black box the arch does not have (lib/lpm.o3lib cells with
+ * no arch, or an arch without them) is false: VPR would reject its model (3E E6).
+ */
+bool odin3_arch_writes_subckt(const odin3_design *design, odin3_celltype_id type);
+
 #endif

@@ -154,14 +154,13 @@ static void test_z1000_blocks_bind(void) {
 }
 
 int main(void) {
+    if (getenv("VTR_ROOT") == NULL) {
+        return SKIP_CODE;
+    }
     UNITY_BEGIN();
     RUN_TEST(test_coffe_sweep_arch_has_no_generic_model);
     RUN_TEST(test_k4_n4_sweep_arch_has_no_generic_model);
     RUN_TEST(test_k4_frac_fracff_blocks_bind);
     RUN_TEST(test_z1000_blocks_bind);
-    int failures = UNITY_END();
-    if (failures != 0) {
-        return 1;
-    }
-    return getenv("VTR_ROOT") == NULL ? SKIP_CODE : 0;
+    return UNITY_END() != 0 ? 1 : 0;
 }

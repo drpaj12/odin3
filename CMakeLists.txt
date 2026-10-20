@@ -858,6 +858,7 @@ if(BUILD_TESTING)
     # 4.2 Task 7: generic hard blocks (B-1..B-7): the bind check and report of partial_map.
     odin3_add_unit_test(test_pm_generic)
     target_compile_definitions(test_pm_generic PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     # 4.2 Task 8: every registered generic model of the real archs binds and maps (skips 77
     # without VTR_ROOT).

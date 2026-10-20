@@ -17,6 +17,7 @@
 #include "ir/module.h"
 #include "odin3/odin3.h"
 #include "passes/partial_map/hm_kit.h"
+#include "techlib/reader.h"
 #include "util/log.h"
 #include "util/str.h"
 #include "util/vec.h"
@@ -71,26 +72,32 @@ static odin3_status tie_port(gen_state *gs, odin3_node_id node, const odin3_cell
     hm_ctx *hc = gs->hc;
     odin3_net_id gnd = {0};
     odin3_status st = hm_const(hc, HM_GND, &gnd);
-    char label[ODIN3_LOG_BUF / 4];
-    hm_label(hc, node, label, sizeof label);
-    hm_diag(hc, ODIN3_LOG_WARN, node,
-            "partial_map: instance '%s' of '%s': input port '%s' is not connected; tied to gnd",
-            label, def->name, def->ports[port_index].name);
     odin3_pinslice pins = odin3_node_port(hc->module, node, port_index);
     for (uint32_t k = 0; st == ODIN3_OK && k < pins.count; k++) {
         odin3_pin_id pin = {pins.first.v + k};
         (void)odin3_pin_disconnect(hc->module, pin);
         st = odin3_pin_connect(hc->module, pin, gnd);
     }
+    if (st == ODIN3_OK) {
+        char label[ODIN3_LOG_BUF / 4];
+        hm_label(hc, node, label, sizeof label);
+        hm_diag(hc, ODIN3_LOG_WARN, node,
+                "partial_map: instance '%s' of '%s': input port '%s' is not connected or is x; "
+                "tied to gnd",
+                label, def->name, def->ports[port_index].name);
+    }
     return st;
 }
 
-/* B-5 for one instance: every input port that is not connected. */
-static odin3_status tie_inputs(gen_state *gs, odin3_node_id node, const odin3_celltype_def *def) {
+/* B-5 for one instance: every input port that is not connected. A clock port is left alone: the
+ * VTR writer's E3b refuses an unconnected or x clock, and a missing clock must not pass as gnd. */
+static odin3_status tie_inputs(gen_state *gs, odin3_node_id node, const odin3_celltype_def *def,
+                               const odin3_arch_model *model) {
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < def->n_ports; i++) {
         odin3_pinslice pins = odin3_node_port(gs->hc->module, node, i);
-        if (def->ports[i].dir == ODIN3_DIR_IN && port_unconnected(gs->hc->module, pins)) {
+        bool clock = i < model->n_ports && model->ports[i].is_clock;
+        if (def->ports[i].dir == ODIN3_DIR_IN && !clock && port_unconnected(gs->hc->module, pins)) {
             st = tie_port(gs, node, def, i);
         }
     }
@@ -98,8 +105,14 @@ static odin3_status tie_inputs(gen_state *gs, odin3_node_id node, const odin3_ce
 }
 
 /* The B-6 check of one node (nothing is changed). */
-static void check_node(gen_state *gs, odin3_node_id node, const odin3_celltype_def *def) {
-    if (def->gran == ODIN3_GRAN_BLACKBOX && model_of(gs, def) == NULL) {
+static void check_node(gen_state *gs, odin3_node_id node, const odin3_celltype_def *def,
+                       odin3_celltype_id type) {
+    /* A type with a library record (lib/lpm.o3lib, an arch model, a user .o3lib) is known to the
+     * tool; only a black box with none is unknown (the IR does not tell an implicit black box
+     * from a `(* blackbox *)` one: both have no record). */
+    const odin3_techlib_cell *lib =
+        def->gran == ODIN3_GRAN_BLACKBOX ? odin3_celltype_lib(gs->hc->design, type) : NULL;
+    if (def->gran == ODIN3_GRAN_BLACKBOX && lib == NULL && model_of(gs, def) == NULL) {
         report_unknown(gs, node, def->name);
     }
 }
@@ -113,7 +126,7 @@ static odin3_status bind_node(gen_state *gs, odin3_node_id node, const odin3_cel
     uint32_t *count = odin3_vec_at(&gs->counts, (size_t)(model - gs->arch->models));
     (*count)++;
     gs->instances++;
-    return tie_inputs(gs, node, def);
+    return tie_inputs(gs, node, def, model);
 }
 
 /* Runs the B-6 check over every live node of every module. */
@@ -128,7 +141,8 @@ static void check_all(gen_state *gs) {
         for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
             odin3_node_id node = {id};
             if (odin3_node_live(mod, node)) {
-                check_node(gs, node, odin3_celltype_get(hc->design, odin3_node_type(mod, node)));
+                odin3_celltype_id type = odin3_node_type(mod, node);
+                check_node(gs, node, odin3_celltype_get(hc->design, type), type);
             }
         }
     }

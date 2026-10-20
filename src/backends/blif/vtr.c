@@ -2,6 +2,7 @@
  * options (VB-4), legal names (VB-10), and the `.names` covers and their normalisation (VB-6). */
 #include "backends/blif/vtr.h"
 
+#include "frontends/arch/arch.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/lut.h"
@@ -790,7 +791,7 @@ static odin3_status check_other(vtr_walk *walk, odin3_node_id node, const odin3_
     }
     /* A library black box is an arch model with no function (4.2: the generic blocks `read_arch`
      * registers); it is written as a `.subckt` like a hard cell. */
-    if (odin3_techlib_is_subckt(lib)) {
+    if (odin3_arch_writes_subckt(walk->design, odin3_node_type(walk->top, node))) {
         return check_hard(walk, node, lib);
     }
     if (lib != NULL || def->gran == ODIN3_GRAN_HARD || def->gran == ODIN3_GRAN_BLACKBOX) {
@@ -1021,8 +1022,8 @@ static odin3_status warn_node(vtr_walk *walk, odin3_node_id node) {
     }
     const odin3_techlib_cell *lib = odin3_celltype_lib(walk->design, type);
     odin3_status st = ODIN3_OK;
-    for (uint32_t i = 0;
-         odin3_techlib_is_subckt(lib) && st == ODIN3_OK && i < lib->n_ports && i < def->n_ports;
+    for (uint32_t i = 0; odin3_arch_writes_subckt(walk->design, type) && st == ODIN3_OK &&
+                         i < lib->n_ports && i < def->n_ports;
          i++) {
         if (lib->ports[i].clock && def->ports[i].dir == ODIN3_DIR_IN) {
             st = warn_clock(walk, node, def->ports[i].name, clock_class(walk, node, i));
@@ -1036,32 +1037,37 @@ static const char *const SUMMARY_TYPES[] = {"adder", "multiply", "single_port_ra
                                             "dual_port_ram"};
 enum { SUMMARY_TYPE_COUNT = sizeof SUMMARY_TYPES / sizeof SUMMARY_TYPES[0] };
 
-/* counts[j] = the live hard cells of the top of type SUMMARY_TYPES[j]. */
+/* counts[j] = the live hard cells of the top of type SUMMARY_TYPES[j]; counts[SUMMARY_TYPE_COUNT]
+ * = the other `.subckt` cells (the generic blocks of an arch, 4.2), so that the typed list adds up
+ * to the `.subckt` count. */
 static void count_summary_types(const vtr_walk *walk, uint32_t *counts) {
     for (uint32_t i = 1; i < odin3_module_node_end(walk->top); i++) {
         odin3_node_id node = {i};
         odin3_celltype_id type = odin3_node_type(walk->top, node);
-        const odin3_techlib_cell *lib =
-            odin3_node_live(walk->top, node) ? odin3_celltype_lib(walk->design, type) : NULL;
-        const char *name = odin3_celltype_get(walk->design, type)->name;
-        for (uint32_t j = 0;
-             lib != NULL && lib->kind == ODIN3_TECHLIB_HARD && j < SUMMARY_TYPE_COUNT; j++) {
-            counts[j] += strcmp(name, SUMMARY_TYPES[j]) == 0 ? 1U : 0U;
+        if (!odin3_node_live(walk->top, node) || !odin3_arch_writes_subckt(walk->design, type)) {
+            continue;
         }
+        const char *name = odin3_celltype_get(walk->design, type)->name;
+        uint32_t slot = SUMMARY_TYPE_COUNT;
+        for (uint32_t j = 0; j < SUMMARY_TYPE_COUNT; j++) {
+            slot = strcmp(name, SUMMARY_TYPES[j]) == 0 ? j : slot;
+        }
+        counts[slot]++;
     }
 }
 
-/* walk->text = ` (adder A, …)` over the live hard cells of the top (types with 0 left out), or
- * nothing when every count is 0. */
+/* walk->text = ` (adder A, …, other O)` over the live `.subckt` cells of the top (types with 0 left
+ * out), or nothing when every count is 0. */
 static odin3_status summary_types(vtr_walk *walk) {
-    uint32_t counts[SUMMARY_TYPE_COUNT] = {0};
+    uint32_t counts[SUMMARY_TYPE_COUNT + 1] = {0};
     count_summary_types(walk, counts);
     odin3_strbuf_clear(&walk->text);
     odin3_status st = ODIN3_OK;
-    for (uint32_t j = 0; st == ODIN3_OK && j < SUMMARY_TYPE_COUNT; j++) {
+    for (uint32_t j = 0; st == ODIN3_OK && j <= SUMMARY_TYPE_COUNT; j++) {
         if (counts[j] > 0) {
             st = odin3_strbuf_appendf(&walk->text, "%s%s %u", walk->text.len == 0 ? " (" : ", ",
-                                      SUMMARY_TYPES[j], (unsigned)counts[j]);
+                                      j < SUMMARY_TYPE_COUNT ? SUMMARY_TYPES[j] : "other",
+                                      (unsigned)counts[j]);
         }
     }
     return st == ODIN3_OK && walk->text.len > 0
