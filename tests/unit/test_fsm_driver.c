@@ -120,6 +120,26 @@ static void test_a_design_with_proc_cells_is_refused(void) {
     TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, ft_pass("fsm_detect", ""));
 }
 
+/* M3: the library entry rejects an encoding the pass parser would reject. */
+static void test_library_entry_rejects_a_bad_encoding(void) {
+    static const char *const bad[] = {"none", "auto", "user", ""};
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        read_micro("moore_arst");
+        odin3_pass_ctx ctx;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(ft.design, ft_intern("fsm"), &ctx));
+        odin3_fsm_opts opts;
+        memset(&opts, 0, sizeof opts);
+        opts.encoding = bad[i];
+        ft.n_msgs = 0;
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, odin3_fsm_run(&ctx, ft.design, &opts),
+                                      ft_log());
+        char want[64];
+        (void)snprintf(want, sizeof want, "fsm: unsupported encoding '%s'", bad[i]);
+        TEST_ASSERT_TRUE_MESSAGE(ft_has(ODIN3_LOG_ERROR, want), ft_log());
+        ft_close();
+    }
+}
+
 /* --- determinism and idempotence -------------------------------------------------------------- */
 
 static void test_two_runs_give_identical_rtlil(void) {
@@ -154,6 +174,7 @@ int main(void) {
     RUN_TEST(test_detect_marks_are_reused_when_detect_ran_first);
     RUN_TEST(test_bad_options_are_errors);
     RUN_TEST(test_a_design_with_proc_cells_is_refused);
+    RUN_TEST(test_library_entry_rejects_a_bad_encoding);
     RUN_TEST(test_two_runs_give_identical_rtlil);
     RUN_TEST(test_a_second_run_finds_nothing_new);
     return UNITY_END();

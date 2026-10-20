@@ -151,9 +151,24 @@ static void stage_info(const fsm_run *run) {
     }
 }
 
+/* The library entry takes opts as they are; -encoding is one-hot or binary (Yosys log_errors on
+ * anything else), as the pass argument parser enforces. */
+static odin3_status check_opts(const odin3_fsm_opts *opts) {
+    if (opts->encoding != NULL && strcmp(opts->encoding, "one-hot") != 0 &&
+        strcmp(opts->encoding, "binary") != 0) {
+        odin3_log(ODIN3_LOG_ERROR, "fsm: unsupported encoding '%s'", opts->encoding);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
 odin3_status odin3_fsm_run(odin3_pass_ctx *pass, odin3_design *design, const odin3_fsm_opts *opts) {
+    odin3_status st = check_opts(opts);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     fsm_run run;
-    odin3_status st = run_open(&run, design, opts);
+    st = run_open(&run, design, opts);
     if (st == ODIN3_OK && !opts->nodetect) {
         st = stage_detect(&run);
     }
