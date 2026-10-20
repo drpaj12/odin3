@@ -1,9 +1,9 @@
 /*
  * test_levelize.c — the levelize pass (Phase 6 spec 6.4, V-1 to V-8): hand counts, the Q4 rule for
  * memories and black boxes, loop cuts, rerun identity, the --key guard, word-view refusal and the
- * 100000-cell chain bound. Designs are small BLIF files in a mkdtemp directory under the build tree.
- * V-7 (d), the JSON round trip of the levels, needs write_json --odin3 (lane 6.3) and runs after
- * both lanes merge; here the plain attribute is checked in the write_json text.
+ * 100000-cell chain bound. Designs are small BLIF files in a mkdtemp directory under the build
+ * tree. V-7 (d), the JSON round trip of the levels, needs write_json --odin3 (lane 6.3) and runs
+ * after both lanes merge; here the plain attribute is checked in the write_json text.
  */
 #include "ir/check.h"
 #include "ir/design.h"
@@ -41,7 +41,8 @@ enum {
     CHAIN_LEN = 100000,
     CHAIN_MAX_SECONDS = 10,
     CHAIN_MAX_KB = 256 * 1024,
-    TEXT_MAX = 64
+    TEXT_MAX = 64,
+    JSON_MAX = 65536
 };
 
 static char dir[DIR_BUF];
@@ -96,20 +97,14 @@ static odin3_status run(const char *pass, const char *args) {
     return odin3_pass_run(design, pass, odin3_bytes_cstr(args));
 }
 
-static void put_file(const char *name, const char *text) {
+/* Reads a BLIF text into the fresh design. */
+static void read_blif(const char *text) {
     char path[PATH_BUF];
-    path_of(name, path);
+    path_of("t.blif", path);
     FILE *file = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(file);
     TEST_ASSERT_EQUAL_size_t(strlen(text), fwrite(text, 1, strlen(text), file));
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
-}
-
-/* Reads a BLIF text into the fresh design. */
-static void read_blif(const char *text) {
-    char path[PATH_BUF];
-    put_file("t.blif", text);
-    path_of("t.blif", path);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_blif", path), log_text);
 }
 
@@ -119,8 +114,8 @@ static void read_vtr_lib(void) {
 }
 
 static void read_gates_lib(void) {
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_techlib", ODIN3_LIB_DIR "/generic_gates.o3lib"),
-                                  log_text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, run("read_techlib", ODIN3_LIB_DIR "/generic_gates.o3lib"), log_text);
 }
 
 static odin3_module *top(void) {
@@ -149,14 +144,12 @@ static odin3_net_id net_named(const odin3_module *module, const char *name) {
     return net;
 }
 
-/* The level of the net called name (module m, key odin3_level), -1 when unset. */
-static int64_t lvl_of(const odin3_module *module, const char *name, const char *key) {
-    odin3_net_id net = net_named(module, name);
-    return attr_int(module, (odin3_objref){ODIN3_OBJ_NET, net.v}, key);
+static odin3_objref net_ref(const odin3_module *module, const char *name) {
+    return (odin3_objref){ODIN3_OBJ_NET, net_named(module, name).v};
 }
 
 static int64_t net_lvl(const char *name) {
-    return lvl_of(top(), name, "odin3_level");
+    return attr_int(top(), net_ref(top(), name), "odin3_level");
 }
 
 /* The node driving the net called name. */
@@ -166,9 +159,18 @@ static odin3_node_id driver_of(const odin3_module *module, const char *name) {
     return odin3_pin_node(module, pin);
 }
 
-static int64_t cell_lvl(const char *net_name, const char *key) {
+static int64_t cell_attr(const char *net_name, bool cut) {
     odin3_node_id node = driver_of(top(), net_name);
-    return attr_int(top(), (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
+    return attr_int(top(), (odin3_objref){ODIN3_OBJ_NODE, node.v},
+                    cut ? "odin3_level_cut" : "odin3_level");
+}
+
+static int64_t cell_lvl(const char *net_name) {
+    return cell_attr(net_name, false);
+}
+
+static int64_t cell_cut(const char *net_name) {
+    return cell_attr(net_name, true);
 }
 
 static void levelize_ok(const char *args) {
@@ -185,9 +187,9 @@ static void test_chain_of_three(void) {
     TEST_ASSERT_EQUAL_INT64(1, net_lvl("n1"));
     TEST_ASSERT_EQUAL_INT64(2, net_lvl("n2"));
     TEST_ASSERT_EQUAL_INT64(3, net_lvl("n3"));
-    TEST_ASSERT_EQUAL_INT64(1, cell_lvl("n1", "odin3_level"));
-    TEST_ASSERT_EQUAL_INT64(3, cell_lvl("n3", "odin3_level"));
-    TEST_ASSERT_EQUAL_INT64(-1, cell_lvl("n3", "odin3_level_cut"));
+    TEST_ASSERT_EQUAL_INT64(1, cell_lvl("n1"));
+    TEST_ASSERT_EQUAL_INT64(3, cell_lvl("n3"));
+    TEST_ASSERT_EQUAL_INT64(-1, cell_cut("n3"));
     TEST_ASSERT_TRUE(log_has("levelize: 1 modules, 3 cells, max level 3, 0 loops cut"));
     odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, opts));
@@ -210,7 +212,7 @@ static void test_register_resets_level(void) {
     levelize_ok("");
     TEST_ASSERT_EQUAL_INT64(2, net_lvl("n2"));
     TEST_ASSERT_EQUAL_INT64(0, net_lvl("q"));
-    TEST_ASSERT_EQUAL_INT64(0, cell_lvl("q", "odin3_level"));
+    TEST_ASSERT_EQUAL_INT64(0, cell_lvl("q"));
     TEST_ASSERT_EQUAL_INT64(1, net_lvl("n3"));
     TEST_ASSERT_EQUAL_INT64(2, net_lvl("n4"));
 }
@@ -221,12 +223,25 @@ static void test_constant_and_deeper_cone(void) {
               ".names a n1\n1 1\n.names n1 n2\n1 1\n.names a n2 w\n11 1\n.end\n");
     levelize_ok("");
     TEST_ASSERT_EQUAL_INT64(0, net_lvl("k1"));
-    TEST_ASSERT_EQUAL_INT64(0, cell_lvl("k1", "odin3_level"));
+    TEST_ASSERT_EQUAL_INT64(0, cell_lvl("k1"));
     TEST_ASSERT_EQUAL_INT64(1, net_lvl("y"));
     TEST_ASSERT_EQUAL_INT64(3, net_lvl("w"));
 }
 
+static size_t count_of(const char *needle) {
+    size_t count = 0;
+    for (const char *at = strstr(log_text, needle); at != NULL; at = strstr(at + 1, needle)) {
+        count++;
+    }
+    return count;
+}
+
 /* --- V-7 (b): loops ------------------------------------------------------------------------- */
+
+static void expect_one_located_warning(void) {
+    TEST_ASSERT_TRUE(log_has("t.blif:"));
+    TEST_ASSERT_EQUAL_size_t(1, count_of("combinational loop through"));
+}
 
 static void test_loop_of_three_warns_once(void) {
     read_blif(".model m\n.inputs a\n.outputs d\n"
@@ -239,15 +254,14 @@ static void test_loop_of_three_warns_once(void) {
                    (unsigned)first.v);
     levelize_ok("");
     TEST_ASSERT_TRUE_MESSAGE(log_has(want), log_text);
-    TEST_ASSERT_TRUE(log_has("t.blif:"));
-    TEST_ASSERT_NULL(strstr(strstr(log_text, want) + strlen(want), "combinational loop"));
-    TEST_ASSERT_EQUAL_INT64(1, cell_lvl("x1", "odin3_level_cut"));
-    TEST_ASSERT_EQUAL_INT64(0, cell_lvl("x1", "odin3_level"));
+    expect_one_located_warning();
+    TEST_ASSERT_EQUAL_INT64(1, cell_cut("x1"));
+    TEST_ASSERT_EQUAL_INT64(0, cell_lvl("x1"));
     TEST_ASSERT_EQUAL_INT64(0, net_lvl("x1"));
     TEST_ASSERT_EQUAL_INT64(1, net_lvl("x2"));
     TEST_ASSERT_EQUAL_INT64(2, net_lvl("x3"));
     TEST_ASSERT_EQUAL_INT64(2, net_lvl("d"));
-    TEST_ASSERT_EQUAL_INT64(-1, cell_lvl("x2", "odin3_level_cut"));
+    TEST_ASSERT_EQUAL_INT64(-1, cell_cut("x2"));
     TEST_ASSERT_TRUE(log_has("levelize: 1 modules, 4 cells, max level 2, 1 loops cut"));
 }
 
@@ -257,24 +271,16 @@ static void test_cut_is_on_the_cycle_not_downstream(void) {
               ".names x2 d\n1 1\n"
               ".names a x3 x1\n11 1\n.names x1 x2\n1 1\n.names x2 x3\n1 1\n.end\n");
     levelize_ok("");
-    TEST_ASSERT_EQUAL_INT64(-1, cell_lvl("d", "odin3_level_cut"));
-    TEST_ASSERT_EQUAL_INT64(1, cell_lvl("x1", "odin3_level_cut"));
+    TEST_ASSERT_EQUAL_INT64(-1, cell_cut("d"));
+    TEST_ASSERT_EQUAL_INT64(1, cell_cut("x1"));
 }
 
 static void test_self_loop(void) {
     read_blif(".model m\n.inputs a\n.outputs x\n.names a x x\n11 1\n.end\n");
     levelize_ok("");
     TEST_ASSERT_TRUE(log_has("combinational loop through $sop"));
-    TEST_ASSERT_EQUAL_INT64(1, cell_lvl("x", "odin3_level_cut"));
+    TEST_ASSERT_EQUAL_INT64(1, cell_cut("x"));
     TEST_ASSERT_EQUAL_INT64(0, net_lvl("x"));
-}
-
-static size_t count_of(const char *needle) {
-    size_t count = 0;
-    for (const char *at = strstr(log_text, needle); at != NULL; at = strstr(at + 1, needle)) {
-        count++;
-    }
-    return count;
 }
 
 static void test_two_disjoint_loops_warn_twice(void) {
@@ -314,10 +320,9 @@ static void structure_snapshot(odin3_strbuf *out) {
         const odin3_module *module = odin3_module_get(design, (odin3_module_id){mid});
         for (uint32_t id = 1; id < odin3_module_node_end(module); id++) {
             odin3_node_id node = {id};
-            (void)odin3_strbuf_appendf(out, "\nn%u t%u s%u p%u:", (unsigned)id,
-                                       (unsigned)odin3_node_type(module, node).v,
-                                       (unsigned)odin3_node_name(module, node),
-                                       (unsigned)odin3_node_prov(module, node).v);
+            (void)odin3_strbuf_appendf(
+                out, "\nn%u t%u s%u p%u:", (unsigned)id, (unsigned)odin3_node_type(module, node).v,
+                (unsigned)odin3_node_name(module, node), (unsigned)odin3_node_prov(module, node).v);
             odin3_pinslice pins = odin3_node_pins(module, node);
             for (uint32_t i = 0; i < pins.count; i++) {
                 odin3_pin_id pin = {pins.first.v + i};
@@ -337,7 +342,11 @@ static void test_rerun_identical_and_structure_untouched(void) {
     read_blif(".model m\n.inputs a clk\n.outputs d q\n"
               ".names a x3 x1\n11 1\n.names x1 x2\n1 1\n.names x2 x3\n1 1\n"
               ".names x2 d\n1 1\n.latch d q re clk 0\n.end\n");
-    odin3_strbuf before, mid, once, twice, after;
+    odin3_strbuf before;
+    odin3_strbuf mid;
+    odin3_strbuf once;
+    odin3_strbuf twice;
+    odin3_strbuf after;
     odin3_strbuf_init(&before);
     odin3_strbuf_init(&mid);
     odin3_strbuf_init(&once);
@@ -376,9 +385,11 @@ static void test_word_cell_refused(void) {
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, &node));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("levelize", ""));
-    TEST_ASSERT_TRUE_MESSAGE(log_has("levelize: module 'm' has the word-level cell '$dff'; run proc and lower first"),
-                             log_text);
-    TEST_ASSERT_EQUAL_INT64(-1, attr_int(module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, "odin3_level"));
+    TEST_ASSERT_TRUE_MESSAGE(
+        log_has("levelize: module 'm' has the word-level cell '$dff'; run proc and lower first"),
+        log_text);
+    TEST_ASSERT_EQUAL_INT64(
+        -1, attr_int(module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, "odin3_level"));
 }
 
 static void test_process_refused(void) {
@@ -403,8 +414,9 @@ static void test_reserved_key_refused(void) {
 static void test_custom_key_and_cut_key(void) {
     read_blif(".model m\n.inputs a\n.outputs x\n.names a x x\n11 1\n.end\n");
     levelize_ok("--key depth");
-    TEST_ASSERT_EQUAL_INT64(0, lvl_of(top(), "x", "depth"));
-    TEST_ASSERT_EQUAL_INT64(1, cell_lvl("x", "depth_cut"));
+    TEST_ASSERT_EQUAL_INT64(0, attr_int(top(), net_ref(top(), "x"), "depth"));
+    TEST_ASSERT_EQUAL_INT64(
+        1, attr_int(top(), (odin3_objref){ODIN3_OBJ_NODE, driver_of(top(), "x").v}, "depth_cut"));
     TEST_ASSERT_EQUAL_INT64(-1, net_lvl("x"));
     levelize_ok("--key depth");
 }
@@ -419,14 +431,15 @@ static void test_user_attribute_not_overwritten(void) {
                           odin3_attr_set(top(), (odin3_objref){ODIN3_OBJ_NET, net.v}, key, &text));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("levelize", "--key mine"));
     TEST_ASSERT_TRUE(log_has("levelize:"));
-    TEST_ASSERT_EQUAL_INT64(-1, lvl_of(top(), "n1", "mine"));
+    TEST_ASSERT_EQUAL_INT64(-1, attr_int(top(), net_ref(top(), "n1"), "mine"));
     TEST_ASSERT_EQUAL_INT64(-1, net_lvl("a"));
     /* the default key on a cell, user-written as a string */
     uint32_t lvl = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("odin3_level"), &lvl));
-    odin3_node_id node = driver_of(top(), "n1");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_attr_set(top(), (odin3_objref){ODIN3_OBJ_NODE, node.v}, lvl, &text));
+                          odin3_design_intern(design, odin3_bytes_cstr("odin3_level"), &lvl));
+    odin3_node_id node = driver_of(top(), "n1");
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_attr_set(top(), (odin3_objref){ODIN3_OBJ_NODE, node.v}, lvl, &text));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("levelize", ""));
 }
 
@@ -442,7 +455,7 @@ static void test_flops_and_latches_are_sources(void) {
     const char *const sources[] = {"p", "n", "l", "f"};
     for (size_t i = 0; i < 4; i++) {
         TEST_ASSERT_EQUAL_INT64_MESSAGE(0, net_lvl(sources[i]), sources[i]);
-        TEST_ASSERT_EQUAL_INT64_MESSAGE(0, cell_lvl(sources[i], "odin3_level"), sources[i]);
+        TEST_ASSERT_EQUAL_INT64_MESSAGE(0, cell_lvl(sources[i]), sources[i]);
     }
     TEST_ASSERT_EQUAL_INT64(2, net_lvl("n2"));
     TEST_ASSERT_EQUAL_INT64(1, net_lvl("y"));
@@ -491,7 +504,7 @@ static void test_ram_between_two_chains(void) {
     levelize_ok("");
     TEST_ASSERT_EQUAL_INT64(2, net_lvl("n2"));
     TEST_ASSERT_EQUAL_INT64(0, net_lvl("r"));
-    TEST_ASSERT_EQUAL_INT64(0, cell_lvl("r", "odin3_level"));
+    TEST_ASSERT_EQUAL_INT64(0, cell_lvl("r"));
     TEST_ASSERT_EQUAL_INT64(1, net_lvl("m1"));
     TEST_ASSERT_EQUAL_INT64(2, net_lvl("m2"));
 }
@@ -512,7 +525,7 @@ static void test_blackbox_with_register_follows_memory_rule(void) {
     levelize_ok("");
     TEST_ASSERT_EQUAL_INT64(2, net_lvl("n2"));
     TEST_ASSERT_EQUAL_INT64(0, net_lvl("b"));
-    TEST_ASSERT_EQUAL_INT64(0, cell_lvl("b", "odin3_level"));
+    TEST_ASSERT_EQUAL_INT64(0, cell_lvl("b"));
     TEST_ASSERT_EQUAL_INT64(1, net_lvl("z"));
 }
 
@@ -527,12 +540,13 @@ static void test_instance_is_one_combinational_cell(void) {
     TEST_ASSERT_EQUAL_INT64(2, net_lvl("s1"));
     TEST_ASSERT_EQUAL_INT64(3, net_lvl("n2"));
     const odin3_module *sub = odin3_module_get(design, (odin3_module_id){2});
-    TEST_ASSERT_EQUAL_INT64(2, lvl_of(sub, "o", "odin3_level"));
+    TEST_ASSERT_EQUAL_INT64(2, attr_int(sub, net_ref(sub, "o"), "odin3_level"));
     TEST_ASSERT_TRUE(log_has("levelize: 2 modules"));
     TEST_ASSERT_TRUE(log_has("instance"));
 }
 
-/* --- script path: the attribute reaches write_json ---------------------------------------------- */
+/* --- script path: the attribute reaches write_json ----------------------------------------------
+ */
 
 static void test_levels_reach_write_json(void) {
     read_blif(".model m\n.inputs a\n.outputs n2\n.names a n1\n1 1\n.names n1 n2\n1 1\n.end\n");
@@ -540,9 +554,12 @@ static void test_levels_reach_write_json(void) {
     path_of("out.json", path);
     levelize_ok("");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_json", path));
-    char cmd[PATH_BUF + 64];
-    (void)snprintf(cmd, sizeof cmd, "grep -q '\"odin3_level\"' %s", path);
-    TEST_ASSERT_EQUAL_INT(0, system(cmd));
+    char text[JSON_MAX] = {0};
+    FILE *file = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL(file);
+    (void)fread(text, 1, sizeof text - 1, file);
+    (void)fclose(file);
+    TEST_ASSERT_NOT_NULL(strstr(text, "\"odin3_level\""));
 }
 
 /* --- V-6: cost -------------------------------------------------------------------------------- */
@@ -582,11 +599,13 @@ static void test_chain_of_100000(void) {
     levelize_ok("");
     (void)clock_gettime(CLOCK_MONOTONIC, &t1);
     TEST_ASSERT_TRUE((t1.tv_sec - t0.tv_sec) < CHAIN_MAX_SECONDS);
-    TEST_ASSERT_EQUAL_INT64(0, attr_int(module, (odin3_objref){ODIN3_OBJ_NET, first.v}, "odin3_level"));
+    TEST_ASSERT_EQUAL_INT64(
+        0, attr_int(module, (odin3_objref){ODIN3_OBJ_NET, first.v}, "odin3_level"));
     TEST_ASSERT_EQUAL_INT64(CHAIN_LEN,
                             attr_int(module, (odin3_objref){ODIN3_OBJ_NET, last.v}, "odin3_level"));
     for (uint32_t id = 1; id <= CHAIN_LEN; id++) {
-        TEST_ASSERT_EQUAL_INT64(id, attr_int(module, (odin3_objref){ODIN3_OBJ_NODE, id}, "odin3_level"));
+        TEST_ASSERT_EQUAL_INT64(
+            id, attr_int(module, (odin3_objref){ODIN3_OBJ_NODE, id}, "odin3_level"));
     }
     TEST_ASSERT_TRUE(log_has("levelize: 1 modules, 100000 cells, max level 100000, 0 loops cut"));
     struct rusage usage;

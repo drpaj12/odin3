@@ -258,3 +258,27 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
 ## Deviations
 
 (empty; each lane appends what it changed from this plan and why)
+
+6.4 levelize (lane p6-levelize):
+
+1. Ownership of an existing `<key>` (V-1). Attributes carry no author, so "written by levelize" cannot
+   be told from a user INT of the same name. The pass accepts an existing `<key>` or `<key>_cut` that is
+   an INT (a rerun, idempotence V-7 c) and refuses any other kind (`INVALID_ARG`, nothing written). A
+   user INT under the default key is therefore overwritten. A `<key>_cut` left on a cell that is not cut
+   in this run is removed.
+2. V-7 (d), levels surviving `write_json --odin3` then `read_json`, is not testable on this branch (the
+   option is lane 6.3). `test_levelize` and the `levelize_micro_*` script tests check the plain attribute
+   in the default `write_json` text instead; (d) belongs to the integration check after 6.3 merges.
+3. Library cells. The registry flags `SEQ_EDGE`/`SEQ_LEVEL` are not set on tech-library cells, so a
+   library cell with a `seq` statement (generic_gates DFFP and the like) or a `memory` statement (hard
+   RAM) is also a source (level 0 outputs, inputs end paths) through `odin3_celltype_lib`. A plugin
+   black box with the registry flag follows the same rule. A cell that has both state and combinational
+   outputs is treated as a whole: all its outputs are level 0.
+4. INOUT pins count as drivers only (never as inputs), so a tristate or bus cell has no self-edge.
+5. Loop cut cost. Each stall runs one iterative Tarjan over the unfinished cells, O(cells + pins) per
+   stall, and cuts one cell (lowest ID on a cycle). Many loops in a huge module cost one pass each.
+6. Micros. The three `levelize_micro_*` tests start from committed Parmys BLIFs in `tests/golden/blif`
+   (`ff`, `adder_hard_block`, `ansiportlist_2`; netlist view needs no front end) and
+   `levelize_micro_word_refused` runs `pow`, whose `$pow` word cell must be refused.
+7. Base. Branched from `origin/docs/phase6-spec` (PR #185 not merged when the lane started); merge
+   `origin/main` after it merges.
