@@ -210,6 +210,77 @@ static void test_duplicate_key_in_wide_object(void) {
     free(buf);
 }
 
+static void test_yosys_high_byte_escape(void) {
+    expect_str("\"\\uFFFFFFC3\\uFFFFFFA9\"", "\xC3\xA9", 2);
+    expect_str("\"a\\uFFFFFF80b\"",
+               "a\x80"
+               "b",
+               3);
+    expect_err("\"\\uFFFF\"", 1, 2, "not a character");
+    expect_err("\"\\uFFFFFF41\"", 1, 2, "not a character");
+    expect_err("\"\\uFFFF00C3\"", 1, 2, "not a character");
+    expect_err("\"\\uFFFFFFC\"", 1, 2, "not a character");
+}
+
+static void test_error_text_is_printable(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_n("[\x01]", 3));
+    TEST_ASSERT_NOT_NULL(strstr(g_doc.error.message, "0x01"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_n("[\xC3]", 3));
+    TEST_ASSERT_NOT_NULL(strstr(g_doc.error.message, "0xC3"));
+    expect_err("{\"a\\nb\\u00e9\":1,\"a\\nb\\u00e9\":2}", 1, 17, "duplicate key \"a?b??\"");
+}
+
+static void test_failed_parse_resets_doc(void) {
+    g_doc.root = (const odin3_json_node *)&g_doc;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_json_parse(NULL, 1, NULL, &g_doc));
+    TEST_ASSERT_NULL(g_doc.root);
+    TEST_ASSERT_NULL(g_doc.arena);
+}
+
+/* Yosys writes a memory INIT as one string with a character per bit: 64Kx32 is 2 Mi. */
+static void test_big_string_default_limit(void) {
+    enum { BIG = 2 * 1024 * 1024 };
+    char *buf = malloc(BIG + 3);
+    TEST_ASSERT_NOT_NULL(buf);
+    buf[0] = '"';
+    memset(buf + 1, '1', BIG);
+    buf[BIG + 1] = '"';
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_n(buf, BIG + 2));
+    size_t len = 0;
+    TEST_ASSERT_NOT_NULL(odin3_json_string(g_doc.root, &len));
+    TEST_ASSERT_EQUAL_size_t(BIG, len);
+    free(buf);
+}
+
+static void test_node_limit(void) {
+    odin3_json_limits lim = odin3_json_default_limits();
+    lim.max_nodes = 5;
+    odin3_json_test_set_limits(&lim);
+    expect_ok("[1,2,3,4]");
+    expect_err("[1,\n2,3,4,5]", 2, 7, "more than 5 values");
+    expect_err("{\"a\":[1,2],\"b\":3,\"c\":4}", 1, 22, "more than 5 values");
+}
+
+/* Many keys in one object and many small objects: the duplicate check is O(n log n). */
+static void test_many_keys_and_objects(void) {
+    enum { COUNT = 100000, ROW = 24 };
+    char *buf = malloc((size_t)COUNT * ROW + 64);
+    TEST_ASSERT_NOT_NULL(buf);
+    size_t len = 0;
+    buf[len++] = '{';
+    for (int i = 0; i < COUNT; i++) {
+        len += (size_t)snprintf(buf + len, ROW, "%s\"k%d\":{\"a\":1}", i ? "," : "", i);
+    }
+    buf[len++] = '}';
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_n(buf, len));
+    TEST_ASSERT_EQUAL_size_t(COUNT, odin3_json_count(g_doc.root));
+    len--;
+    len += (size_t)snprintf(buf + len, ROW, ",\"k77\":0}");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_n(buf, len));
+    TEST_ASSERT_NOT_NULL(strstr(g_doc.error.message, "duplicate key \"k77\""));
+    free(buf);
+}
+
 static void test_syntax_errors_located(void) {
     expect_err("[1,]", 1, 4, "trailing comma");
     expect_err("{\"a\":1,}", 1, 8, "trailing comma");
@@ -312,7 +383,8 @@ static void test_deep_input_bounded_stack(void) {
     TEST_ASSERT_NOT_NULL(strstr(job.doc.error.message, "nested deeper than 32"));
     odin3_json_doc_free(&job.doc);
     /* a raised limit still never recurses */
-    odin3_json_limits lim = {ODIN3_JSON_MAX_BYTES, ODIN3_JSON_MAX_STRING, DEEP_LEVELS + 1};
+    odin3_json_limits lim = odin3_json_default_limits();
+    lim.max_depth = DEEP_LEVELS + 1;
     odin3_json_test_set_limits(&lim);
     memset(job.text, '[', DEEP_LEVELS);
     memset(job.text + DEEP_LEVELS, ']', DEEP_LEVELS);
@@ -328,7 +400,8 @@ static void test_deep_input_bounded_stack(void) {
 }
 
 static void test_string_limit(void) {
-    odin3_json_limits lim = {ODIN3_JSON_MAX_BYTES, LIMIT_STRING, ODIN3_JSON_MAX_DEPTH};
+    odin3_json_limits lim = odin3_json_default_limits();
+    lim.max_string = LIMIT_STRING;
     odin3_json_test_set_limits(&lim);
     expect_ok("\"12345678\"");
     expect_err("[\"123456789\"]", 1, 2, "string longer than 8");
@@ -338,7 +411,8 @@ static void test_string_limit(void) {
 }
 
 static void test_file_limit(void) {
-    odin3_json_limits lim = {LIMIT_BYTES, ODIN3_JSON_MAX_STRING, ODIN3_JSON_MAX_DEPTH};
+    odin3_json_limits lim = odin3_json_default_limits();
+    lim.max_bytes = LIMIT_BYTES;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_json_parse((const uint8_t *)"[1,2,3,4,5,6,7]",
                                                      LIMIT_BYTES - 1, &lim, &g_doc));
     odin3_json_doc_free(&g_doc);
@@ -375,12 +449,33 @@ static size_t build_sample(char *buf, size_t cap) {
     return len;
 }
 
+/* Line and column just past the first cut bytes of text. */
+static odin3_json_loc end_loc(const char *text, size_t cut) {
+    odin3_json_loc loc = {1, 1};
+    for (size_t i = 0; i < cut; i++) {
+        loc.line += text[i] == '\n' ? 1U : 0U;
+        loc.col = text[i] == '\n' ? 1U : loc.col + 1U;
+    }
+    return loc;
+}
+
+static bool error_is_filled(void) {
+    return g_doc.error.line >= 1 && g_doc.error.col >= 1 && g_doc.error.message[0] != '\0';
+}
+
+static bool error_within(odin3_json_loc end) {
+    return g_doc.error.line < end.line ||
+           (g_doc.error.line == end.line && g_doc.error.col <= end.col);
+}
+
 static void expect_truncation_fails(const char *sample, size_t cut) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE, parse_n(sample, cut),
                                   "truncated file must fail");
     TEST_ASSERT_NULL(g_doc.root);
-    TEST_ASSERT_TRUE(g_doc.error.line >= 1 && g_doc.error.col >= 1);
-    TEST_ASSERT_TRUE(g_doc.error.message[0] != '\0');
+    TEST_ASSERT_TRUE(error_is_filled());
+    /* never past the end of the truncated text */
+    odin3_json_loc end = end_loc(sample, cut);
+    TEST_ASSERT_TRUE(error_within(end));
 }
 
 static void test_truncation_at_every_byte(void) {
@@ -396,7 +491,8 @@ static void test_truncation_at_every_byte(void) {
 static void test_byte_flip_never_crashes(void) {
     char sample[SAMPLE_BYTES + 512];
     size_t len = build_sample(sample, sizeof sample);
-    static const char flips[] = {'"', '\\', '[', ']', '{', '}', ',', ':', '-', '0', 'u', '\0'};
+    static const char flips[] = {'"', '\\', '[', ']', '{',  '}',  ',',    ':',    '-',   '0',
+                                 '9', 'u',  '.', 'e', '\0', '\n', '\x1f', '\x80', '\xff'};
     for (size_t pos = 0; pos < len; pos++) {
         char saved = sample[pos];
         for (size_t idx = 0; idx < sizeof flips; idx++) {
@@ -468,6 +564,12 @@ int main(void) {
     RUN_TEST(test_duplicate_key);
     RUN_TEST(test_duplicate_key_in_wide_object);
     RUN_TEST(test_syntax_errors_located);
+    RUN_TEST(test_yosys_high_byte_escape);
+    RUN_TEST(test_error_text_is_printable);
+    RUN_TEST(test_failed_parse_resets_doc);
+    RUN_TEST(test_big_string_default_limit);
+    RUN_TEST(test_node_limit);
+    RUN_TEST(test_many_keys_and_objects);
     RUN_TEST(test_value_positions);
     RUN_TEST(test_bom_skipped);
     RUN_TEST(test_depth_limit);

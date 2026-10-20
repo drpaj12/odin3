@@ -1,7 +1,8 @@
 /* json_parse.c — the iterative value-tree builder (open containers on an explicit stack). */
 #include "frontends/json/json_lex.h"
-#include "util/alloc.h"
+#include "util/vec.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 struct odin3_json_node {
@@ -20,106 +21,137 @@ struct odin3_json_node {
 
 typedef struct json_frame {
     odin3_json_node *node, *last;
-    uint32_t serial;
+    size_t key_base; /* index in json_parser.keys of this object's first member */
 } json_frame;
 
-/* Open-addressing set of (object serial, key) for the duplicate-key check. */
-typedef struct dup_ent {
+typedef struct key_ref {
     const odin3_json_node *node;
-    uint64_t hash;
-    uint32_t serial;
-} dup_ent;
+} key_ref;
 
-typedef struct dup_tab {
-    dup_ent *ent;
-    size_t cap, used;
-} dup_tab;
+typedef struct dup_pair {
+    const odin3_json_node *earlier, *later;
+} dup_pair;
 
 typedef struct json_parser {
     json_lex lex;
-    odin3_vec frames;
-    dup_tab dups;
-    uint32_t next_serial;
+    odin3_vec frames; /* json_frame, at most max_depth */
+    odin3_vec keys;   /* key_ref: members of the open objects, a stack */
+    size_t nodes;
     odin3_json_doc *doc;
 } json_parser;
 
-enum { DUP_MIN_CAP = 64, FNV_PRIME_SHIFT = 40 };
+enum { KEY_SHOWN = 40, DEL_BYTE = 0x7F, FIRST_PRINTABLE = 0x20 };
+
+static const char k_question = '?';
 
 static odin3_json_limits g_limits = {ODIN3_JSON_MAX_BYTES, ODIN3_JSON_MAX_STRING,
-                                     ODIN3_JSON_MAX_DEPTH};
+                                     ODIN3_JSON_MAX_NODES, ODIN3_JSON_MAX_DEPTH};
+
+odin3_json_limits odin3_json_default_limits(void) {
+    odin3_json_limits dflt = {ODIN3_JSON_MAX_BYTES, ODIN3_JSON_MAX_STRING, ODIN3_JSON_MAX_NODES,
+                              ODIN3_JSON_MAX_DEPTH};
+    return dflt;
+}
 
 void odin3_json_test_set_limits(const odin3_json_limits *lim) {
-    odin3_json_limits dflt = {ODIN3_JSON_MAX_BYTES, ODIN3_JSON_MAX_STRING, ODIN3_JSON_MAX_DEPTH};
-    g_limits = lim != NULL ? *lim : dflt;
+    g_limits = lim != NULL ? *lim : odin3_json_default_limits();
 }
 
-static uint64_t key_hash(const char *key, uint32_t serial) {
-    uint64_t hash = UINT64_C(0xcbf29ce484222325) ^ serial;
-    for (const unsigned char *ch = (const unsigned char *)key; *ch != 0; ch++) {
-        hash = (hash ^ *ch) * UINT64_C(0x100000001b3);
+static odin3_status new_node(json_parser *ps, odin3_json_kind kind, odin3_json_loc pos,
+                             odin3_json_node **out) {
+    if (ps->nodes >= ps->lex.lim.max_nodes) {
+        return json_fail(&ps->lex, pos, ODIN3_ERR_PARSE, "more than %zu values in the file",
+                         ps->lex.lim.max_nodes);
     }
-    return hash ^ (hash >> FNV_PRIME_SHIFT);
-}
-
-static odin3_status dup_grow(json_parser *ps) {
-    dup_tab *tab = &ps->dups;
-    size_t cap = tab->cap == 0 ? DUP_MIN_CAP : tab->cap * 2;
-    dup_ent *ent = odin3_util_calloc(cap * sizeof *ent);
-    if (ent == NULL) {
-        return json_fail(&ps->lex, json_here(&ps->lex), ODIN3_ERR_NO_MEMORY, "out of memory");
-    }
-    for (size_t i = 0; i < tab->cap; i++) {
-        if (tab->ent[i].node == NULL) {
-            continue;
-        }
-        size_t slot = tab->ent[i].hash & (cap - 1);
-        while (ent[slot].node != NULL) {
-            slot = (slot + 1) & (cap - 1);
-        }
-        ent[slot] = tab->ent[i];
-    }
-    odin3_util_free(tab->ent);
-    tab->ent = ent;
-    tab->cap = cap;
-    return ODIN3_OK;
-}
-
-/* Adds node (a keyed member of object `serial`); *dup is the earlier member with that key. */
-static odin3_status dup_insert(json_parser *ps, uint32_t serial, const odin3_json_node *node,
-                               const odin3_json_node **dup) {
-    dup_tab *tab = &ps->dups;
-    *dup = NULL;
-    if ((tab->used + 1) * 2 > tab->cap) {
-        odin3_status st = dup_grow(ps);
-        if (st != ODIN3_OK) {
-            return st;
-        }
-    }
-    uint64_t hash = key_hash(node->key, serial);
-    size_t slot = hash & (tab->cap - 1);
-    while (tab->ent[slot].node != NULL) {
-        const dup_ent *cur = &tab->ent[slot];
-        if (cur->hash == hash && cur->serial == serial && strcmp(cur->node->key, node->key) == 0) {
-            *dup = cur->node;
-            return ODIN3_OK;
-        }
-        slot = (slot + 1) & (tab->cap - 1);
-    }
-    tab->ent[slot] = (dup_ent){node, hash, serial};
-    tab->used++;
-    return ODIN3_OK;
-}
-
-static odin3_json_node *new_node(json_parser *ps, odin3_json_kind kind, odin3_json_loc pos) {
     odin3_json_node *node = odin3_arena_alloc(ps->lex.arena, sizeof *node);
     if (node == NULL) {
-        (void)json_fail(&ps->lex, pos, ODIN3_ERR_NO_MEMORY, "out of memory");
-        return NULL;
+        return json_fail(&ps->lex, pos, ODIN3_ERR_NO_MEMORY, "out of memory");
     }
+    ps->nodes++;
     node->kind = (uint8_t)kind;
     node->line = pos.line;
     node->col = pos.col;
-    return node;
+    *out = node;
+    return ODIN3_OK;
+}
+
+/* Members sort by key, equal keys in file order. */
+static int member_cmp(const void *lhs, const void *rhs) {
+    const odin3_json_node *left = ((const key_ref *)lhs)->node;
+    const odin3_json_node *right = ((const key_ref *)rhs)->node;
+    int diff = strcmp(left->key, right->key);
+    if (diff != 0) {
+        return diff;
+    }
+    if (left->key_line != right->key_line) {
+        return left->key_line < right->key_line ? -1 : 1;
+    }
+    return (left->key_col > right->key_col) - (left->key_col < right->key_col);
+}
+
+static bool later_key(const odin3_json_node *cand, const odin3_json_node *best) {
+    return best == NULL || cand->key_line < best->key_line ||
+           (cand->key_line == best->key_line && cand->key_col < best->key_col);
+}
+
+/* Prints a key with every byte outside printable ASCII shown as '?', cut to KEY_SHOWN. */
+static void show_key(char *dst, const char *key) {
+    size_t shown = 0;
+    while (shown < KEY_SHOWN && key[shown] != '\0') {
+        unsigned char byte = (unsigned char)key[shown];
+        dst[shown] = k_question;
+        if (byte >= FIRST_PRINTABLE && byte < DEL_BYTE) {
+            dst[shown] = (char)byte;
+        }
+        shown++;
+    }
+    dst[shown] = '\0';
+}
+
+/*
+ * Finds the first-in-file duplicate among the sorted members: pair->later is the second
+ * occurrence, pair->earlier the first. Both NULL when all keys differ.
+ */
+static void find_duplicate(const key_ref *sorted, size_t count, dup_pair *pair) {
+    pair->earlier = NULL;
+    pair->later = NULL;
+    for (size_t i = 1; i < count; i++) {
+        bool same = strcmp(sorted[i - 1].node->key, sorted[i].node->key) == 0;
+        bool group_head = i == 1 || strcmp(sorted[i - 2].node->key, sorted[i].node->key) != 0;
+        if (same && group_head && later_key(sorted[i].node, pair->later)) {
+            pair->earlier = sorted[i - 1].node;
+            pair->later = sorted[i].node;
+        }
+    }
+}
+
+/* Closes the object on top of the frame stack: duplicate-key check, then drops its keys. */
+static odin3_status close_object(json_parser *ps, const json_frame *frame) {
+    size_t count = ps->keys.len - frame->key_base;
+    dup_pair pair = {NULL, NULL};
+    if (count > 1) {
+        key_ref *slice = odin3_vec_at(&ps->keys, frame->key_base);
+        qsort(slice, count, sizeof *slice, member_cmp);
+        find_duplicate(slice, count, &pair);
+    }
+    while (ps->keys.len > frame->key_base) {
+        odin3_vec_pop(&ps->keys);
+    }
+    if (pair.later == NULL) {
+        return ODIN3_OK;
+    }
+    char shown[KEY_SHOWN + 1];
+    show_key(shown, pair.later->key);
+    odin3_json_loc pos = {pair.later->key_line, pair.later->key_col};
+    return json_fail(&ps->lex, pos, ODIN3_ERR_PARSE, "duplicate key \"%s\" (first at line %u)",
+                     shown, (unsigned)pair.earlier->key_line);
+}
+
+/* Pops the top frame; an object also checks its keys. */
+static odin3_status pop_frame(json_parser *ps) {
+    json_frame frame = *(const json_frame *)odin3_vec_cat(&ps->frames, ps->frames.len - 1);
+    odin3_vec_pop(&ps->frames);
+    return frame.node->kind == ODIN3_JSON_OBJECT ? close_object(ps, &frame) : ODIN3_OK;
 }
 
 /* Links node as the last child of the open container, or makes it the root. */
@@ -130,17 +162,11 @@ static odin3_status attach(json_parser *ps, odin3_json_node *node) {
     }
     json_frame *top = odin3_vec_at(&ps->frames, ps->frames.len - 1);
     if (top->node->kind == ODIN3_JSON_OBJECT) {
-        const odin3_json_node *dup = NULL;
-        odin3_status st = dup_insert(ps, top->serial, node, &dup);
-        if (st != ODIN3_OK) {
-            return st;
+        key_ref *slot = odin3_vec_push(&ps->keys);
+        if (slot == NULL) {
+            return json_fail(&ps->lex, json_here(&ps->lex), ODIN3_ERR_NO_MEMORY, "out of memory");
         }
-        if (dup != NULL) {
-            odin3_json_loc pos = {node->key_line, node->key_col};
-            return json_fail(&ps->lex, pos, ODIN3_ERR_PARSE,
-                             "duplicate key \"%.40s\" (first at line %u)", node->key,
-                             (unsigned)dup->key_line);
-        }
+        slot->node = node;
     }
     if (top->last == NULL) {
         top->node->u.first = node;
@@ -188,8 +214,12 @@ static odin3_status read_literal(json_parser *ps, odin3_json_node *node) {
             return ODIN3_OK;
         }
     }
-    return json_fail(lex, json_here(lex), ODIN3_ERR_PARSE, "unexpected character '%c'",
-                     json_peek(lex));
+    int byte = json_peek(lex);
+    if (byte >= FIRST_PRINTABLE && byte < DEL_BYTE) {
+        return json_fail(lex, json_here(lex), ODIN3_ERR_PARSE, "unexpected character '%c'", byte);
+    }
+    return json_fail(lex, json_here(lex), ODIN3_ERR_PARSE, "unexpected byte 0x%02X",
+                     (unsigned)byte);
 }
 
 static odin3_status read_scalar(json_parser *ps, odin3_json_node *node, int ch) {
@@ -216,14 +246,13 @@ static odin3_status open_container(json_parser *ps, odin3_json_node *node, bool 
         return json_fail(lex, json_here(lex), ODIN3_ERR_NO_MEMORY, "out of memory");
     }
     frame->node = node;
-    frame->serial = ++ps->next_serial;
+    frame->key_base = ps->keys.len;
     int closer = node->kind == ODIN3_JSON_OBJECT ? '}' : ']';
     json_advance(lex);
     json_skip_ws(lex);
     if (json_peek(lex) == closer) {
         json_advance(lex);
-        odin3_vec_pop(&ps->frames);
-        return ODIN3_OK;
+        return pop_frame(ps);
     }
     *opened = true;
     return ODIN3_OK;
@@ -258,9 +287,10 @@ static odin3_status read_element(json_parser *ps, bool *opened) {
         return json_fail(lex, pos, ODIN3_ERR_PARSE, "JSON nested deeper than %u",
                          (unsigned)lex->lim.max_depth);
     }
-    odin3_json_node *node = new_node(ps, ch == '{' ? ODIN3_JSON_OBJECT : ODIN3_JSON_ARRAY, pos);
-    if (node == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
+    odin3_json_node *node = NULL;
+    st = new_node(ps, ch == '{' ? ODIN3_JSON_OBJECT : ODIN3_JSON_ARRAY, pos, &node);
+    if (st != ODIN3_OK) {
+        return st;
     }
     node->key = key;
     node->key_line = kpos.line;
@@ -299,7 +329,10 @@ static odin3_status after_value(json_parser *ps, bool *done) {
             return json_fail(lex, json_here(lex), ODIN3_ERR_PARSE, "expected ',' or '%c'", closer);
         }
         json_advance(lex);
-        odin3_vec_pop(&ps->frames);
+        odin3_status st = pop_frame(ps);
+        if (st != ODIN3_OK) {
+            return st;
+        }
     }
     *done = true;
     return ODIN3_OK;
@@ -329,21 +362,25 @@ static odin3_status parse_loop(json_parser *ps) {
 
 static void parser_release(json_parser *ps) {
     odin3_vec_free(&ps->frames);
-    odin3_vec_free(&ps->lex.scratch);
-    odin3_util_free(ps->dups.ent);
+    odin3_vec_free(&ps->keys);
 }
 
 odin3_status odin3_json_parse(const uint8_t *text, size_t len, const odin3_json_limits *lim,
                               odin3_json_doc *doc) {
-    if (doc == NULL || (text == NULL && len > 0)) {
+    if (doc == NULL) {
         return ODIN3_ERR_INVALID_ARG;
     }
     memset(doc, 0, sizeof *doc);
+    if (text == NULL && len > 0) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
     json_parser ps = {.doc = doc};
     odin3_vec_init(&ps.frames, sizeof(json_frame));
-    odin3_vec_init(&ps.lex.scratch, 1);
+    odin3_vec_init(&ps.keys, sizeof(key_ref));
     json_lex_init(&ps.lex, text, len);
     ps.lex.lim = lim != NULL ? *lim : g_limits;
+    ps.lex.lim.max_bytes = ps.lex.lim.max_bytes < UINT32_MAX ? ps.lex.lim.max_bytes : UINT32_MAX;
+    ps.lex.lim.max_string = ps.lex.lim.max_string < UINT32_MAX ? ps.lex.lim.max_string : UINT32_MAX;
     ps.lex.err = &doc->error;
     odin3_status st = ODIN3_OK;
     if (len > ps.lex.lim.max_bytes) {
