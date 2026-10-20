@@ -80,6 +80,8 @@ add_library(odin3_core OBJECT
     src/frontends/blif/lexer.c
     src/frontends/blif/param_text.c
     src/frontends/blif/reader.c
+    src/frontends/json/json_lex.c
+    src/frontends/json/json_parse.c
     src/backends/blif/writer.c
     src/backends/blif/vtr.c
     src/backends/blif/isop.c
@@ -743,6 +745,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_util_u64map)
     odin3_add_unit_test(test_util_idindex)
     odin3_add_unit_test(test_util_str)
+    odin3_add_unit_test(test_json_parse)
     odin3_add_unit_test(test_util_log)
     odin3_add_unit_test(test_util_file)
     odin3_add_unit_test(test_sha256)
