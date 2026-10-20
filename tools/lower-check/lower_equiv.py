@@ -43,7 +43,7 @@ compared nothing, or a stale entry; 2 usage, or Odin III or Yosys exited with an
 child crashed, was killed by a signal or its memory cap, or timed out (never absorbed by an expect
 list); 4 unproven (a SAT size limit; no design failed); 77 skipped (an ASan child and no
 systemd-run). The work directory is made under ``$ODIN3_LOWER_WORK`` (else ``$TMPDIR``) and is
-never removed.
+removed on exit unless ``--keep-tmp``.
 """
 
 from __future__ import annotations
@@ -916,7 +916,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
                     help="Parmys's unmodified enable-over-reset maps (spec 16 row 4)")
     ap.add_argument("--mem-cap", type=lc.parse_size, default=lc.DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 3G)")
-    ap.add_argument("--work", type=Path, help="the work directory")
+    ap.add_argument("--work", type=Path, help="the work directory (never removed)")
+    ap.add_argument("--keep-tmp", action="store_true",
+                    help="keep the temporary work directory this run makes (else removed)")
     ap.add_argument("--refine-timeout", type=float, default=opt_equiv.REFINE_TIMEOUT_SECONDS,
                     metavar="S", help="seconds for one SAT proof and for one bounded check "
                     "(default 60); a design that needs longer is unproven")
@@ -962,19 +964,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     opt_equiv.REFINE_TIMEOUT_SECONDS = args.refine_timeout
     global BMC_TIMEOUT_SECONDS
     BMC_TIMEOUT_SECONDS = args.refine_timeout
-    work = lc.make_work(args.work, "lower-equiv-")
-    try:
-        return execute(args, work)
-    except lc.CrashError as exc:
-        print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
-        print(f"{TOOL}: work directory kept: {work}", file=sys.stderr)
-        return lc.EXIT_CRASH
-    except (OSError, lc.ToolError, ValueError) as exc:
-        print(f"{TOOL}: error: {exc}", file=sys.stderr)
-        return lc.EXIT_ERROR
-    except memcap.CapUnavailable as exc:
-        print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
-        return lc.EXIT_SKIP
+    with lc.make_work(args.work, "lower-equiv-", args.keep_tmp) as work:
+        try:
+            return execute(args, work)
+        except lc.CrashError as exc:
+            print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
+            return lc.EXIT_CRASH
+        except (OSError, lc.ToolError, ValueError) as exc:
+            print(f"{TOOL}: error: {exc}", file=sys.stderr)
+            return lc.EXIT_ERROR
+        except memcap.CapUnavailable as exc:
+            print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
+            return lc.EXIT_SKIP
 
 
 if __name__ == "__main__":

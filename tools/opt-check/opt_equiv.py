@@ -60,14 +60,14 @@ has no latch: the cec decides it, e.g. wreduce/y_unused.)
 
 A failing pair prints ``opt-equiv: <NNNN>-<sub>: not a refinement`` with the rule counters of the
 run (Odin III's ``--opt-stats`` lines, which cover the whole run). A work directory this tool
-made is removed after a clean run; a failing run, and ``--work DIR``, keep it.
+made is removed after every run (clean, failing or crashed) unless ``--keep-tmp`` or
+``$ODIN3_KEEP_TMP`` is set, which keeps it and prints its path; ``--work DIR`` is never removed.
 
 ``--min-changed N`` fails (exit 1) a run in which fewer than N calls changed something: a rule
 source is built to make a rule fire, so ``--min-changed 1`` tells a broken or empty
 ``--opt-snapshot`` from "nothing to improve". A run with no changing call and no ``N`` prints a
 ``NOTE``. An empty snapshot file is an error. The work directory this tool made (under
-``$TMPDIR``) is removed after a clean run, after an error (exit 2) and after a ``--min-changed``
-shortfall; a pair that does not refine, and a crash (exit 3), keep it.
+``$TMPDIR``) is removed after every run, whatever the exit code, unless ``--keep-tmp``.
 
 ``--require-sub SUB`` (repeatable) fails a run in which no call of the sub-pass SUB (``opt_share``)
 changed something; ``--min-changed`` counts calls of any sub-pass.
@@ -85,13 +85,15 @@ and no systemd-run).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -774,6 +776,8 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--mem-cap", type=parse_size, default=DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 2G)")
     ap.add_argument("--work", type=Path, help="the work directory (kept)")
+    ap.add_argument("--keep-tmp", action="store_true",
+                    help="keep the temporary work directory this run makes (else removed)")
     ap.add_argument("--refine-timeout", type=float, default=REFINE_TIMEOUT_SECONDS, metavar="S",
                     help="seconds for one SAT proof (default 60); a pair that times out falls "
                          "back to a BLIF cec of the whole script")
@@ -828,29 +832,44 @@ def execute(args: argparse.Namespace, work: Path) -> tuple[int, bool]:
     return (EXIT_FAIL if bad else EXIT_OK), bad
 
 
+KEEP_ENV = "ODIN3_KEEP_TMP"
+
+
+@contextlib.contextmanager
+def scratch(requested: Path | None, prefix: str, tool: str, keep: bool = False,
+            base: str | None = None) -> Iterator[Path]:
+    """The work directory: ``requested`` (created if absent, never removed), else a fresh one
+    under ``base`` (default ``$TMPDIR``) that is removed on exit, success or failure, unless
+    ``keep`` or ``$ODIN3_KEEP_TMP`` is set (then its path is printed)."""
+    if requested is not None:
+        requested.mkdir(parents=True, exist_ok=True)
+        yield requested.resolve()
+        return
+    path = Path(tempfile.mkdtemp(prefix=prefix, dir=base)).resolve()
+    try:
+        yield path
+    finally:
+        if keep or os.environ.get(KEEP_ENV):
+            print(f"{tool}: work directory kept: {path}", file=sys.stderr)
+        else:
+            shutil.rmtree(path, ignore_errors=True)  # the directory this run made, and only it
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
     globals()["REFINE_TIMEOUT_SECONDS"] = args.refine_timeout
-    made = args.work is None
-    work = Path(tempfile.mkdtemp(prefix="opt-equiv-")) if made else args.work
-    work.mkdir(parents=True, exist_ok=True)
-    work = work.resolve()
-    code, keep = EXIT_ERROR, False
-    try:
-        code, keep = execute(args, work)
-    except CrashError as exc:
-        print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
-        code = EXIT_CRASH
-    except (OSError, ToolError, ValueError) as exc:
-        print(f"{TOOL}: error: {exc}", file=sys.stderr)
-    except memcap.CapUnavailable as exc:
-        print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
-        code = EXIT_SKIP
-    if made and code != EXIT_CRASH and not keep:
-        shutil.rmtree(work, ignore_errors=True)  # the directory this run made, and only it
-    elif made:
-        print(f"{TOOL}: work directory kept: {work}", file=sys.stderr)
-    return code
+    with scratch(args.work, "opt-equiv-", TOOL, args.keep_tmp) as work:
+        try:
+            return execute(args, work)[0]
+        except CrashError as exc:
+            print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
+            return EXIT_CRASH
+        except (OSError, ToolError, ValueError) as exc:
+            print(f"{TOOL}: error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        except memcap.CapUnavailable as exc:
+            print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
+            return EXIT_SKIP
 
 
 if __name__ == "__main__":
