@@ -13,8 +13,10 @@ repeats; the default is ``a``)::
                           write_blif OUT
        compare ``write_blif`` and, with ``--via-blif``, every ``abc<r>.in.blif``, ``.cmd`` and
        ``.out.blif`` of V (V is the same path in both runs, and run 1's files are moved aside
-       first); with ``--via-blif`` a run that leaves no ``.in.blif``, ``.cmd`` or ``.out.blif``
-       is an error, not ``same``.  A ``.log`` and ``--log`` are never compared (they hold
+       first); with ``--via-blif`` a design that leaves no ``.in.blif``, ``.cmd`` and
+       ``.out.blif`` (no soft logic: ABC never runs) is ``same (no exchange files)``, and if no
+       design leaves any the run is an error (exit 2), not a pass.  A ``.log`` and ``--log`` are
+       never compared (they hold
        times), and neither is the first-line ``# Benchmark "<name>" written by ABC on <date>``
        comment ABC puts at the head of ``.out.blif`` (a deviation from "byte for byte": it holds
        the wall-clock date).  Then the child route: the same two processes again with
@@ -125,13 +127,13 @@ def check_path(path: Path) -> None:
 # --- modes (a), (c) and (d): two runs of one command ------------------------------------------
 
 
-def require_exchange(directory: Path) -> None:
-    """ToolError unless the directory holds an ``.in.blif``, a ``.cmd`` and an ``.out.blif``: a
-    ``--via-blif`` run that wrote none has compared nothing."""
-    found = {suffix for name in exchange_files(directory)
-             for suffix in ("in.blif", "cmd", "out.blif") if name.endswith("." + suffix)}
-    if len(found) < 3:
-        raise ToolError(f"{directory}: no exchange files (.in.blif, .cmd, .out.blif) written")
+def has_exchange(out: Path) -> bool:
+    """True when a run of the design under out left an ``.in.blif``, a ``.cmd`` and an
+    ``.out.blif`` (a design with no soft logic runs no ABC and leaves none)."""
+    names = [name for sub in ("a", "a-child", "c")
+             for name in exchange_files(out / sub / "exchange-run1")]
+    return all(any(n.endswith("." + suffix) for n in names)
+               for suffix in ("in.blif", "cmd", "out.blif"))
 
 
 def abc_args(cfg: Config, via: Path | None, script: Path | None = None) -> str:
@@ -177,7 +179,7 @@ def first_difference(runs: tuple[Path, Path], files: tuple[Path, Path]) -> str |
 def two_runs(cfg: Config, design: Path, out: Path, binaries: tuple[str, str],
              script: Path | None = None) -> str | None:
     """Two runs of the same command, one per binary (``cfg.gap`` seconds apart); the first
-    difference or None.  ToolError when ``--via-blif`` leaves no exchange files."""
+    difference or None."""
     check_path(out)
     out.mkdir(parents=True, exist_ok=True)
     via = out / "exchange" if cfg.via_blif else None
@@ -193,9 +195,6 @@ def two_runs(cfg: Config, design: Path, out: Path, binaries: tuple[str, str],
             shutil.move(str(via), str(kept))  # the same path again in run 2 (.cmd holds it)
         if number == 0 and cfg.gap > 0:
             cfg.sleep(cfg.gap)
-    if via is not None:
-        require_exchange(kept)
-        require_exchange(via)
     return first_difference(outs, (kept, via if via is not None else kept))
 
 
@@ -324,16 +323,24 @@ def refuse_golden_vtr(cfg: Config, designs: Sequence[Path]) -> None:
 
 
 def run_all(cfg: Config, designs: Sequence[Path]) -> int:
-    same = differs = errors = 0
+    same = differs = errors = empty = 0
     for index, design in enumerate(designs):
-        verdict = judge_design(cfg, design, abc_equiv.design_dir(
+        where = abc_equiv.design_dir(
             abc_equiv.Config("", "", "", cfg.lut, None, None, False, cfg.keep, cfg.timeout),
-            index, design))
-        same += verdict == "same"
+            index, design)
+        verdict = judge_design(cfg, design, where)
+        if verdict == "same" and cfg.via_blif and not has_exchange(where):
+            verdict = "same (no exchange files)"
+            empty += 1
+        same += verdict.startswith("same")
         differs += verdict.startswith("differs")
         errors += verdict.startswith("error")
         print(f"{design} {verdict}", flush=True)
     print(f"{TOOL}: {len(designs)} designs: {same} same, {differs} differs, {errors} error")
+    if cfg.via_blif and designs and empty == len(designs):
+        print(f"{TOOL}: --via-blif: no design left an exchange file; nothing was compared",
+              file=sys.stderr)
+        return EXIT_ERROR
     if errors:
         return EXIT_ERROR
     return EXIT_DIFFERS if differs else EXIT_OK
@@ -349,7 +356,8 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--lut", type=int, default=abc_equiv.DEFAULT_LUT, metavar="K")
     ap.add_argument("--timeout", type=int, default=abc_equiv.DEFAULT_TIMEOUT, metavar="S")
     ap.add_argument("--expect-fail", metavar="F", help="listed designs are skipped")
-    ap.add_argument("--keep", metavar="DIR", help="where the runs' files are kept (default: a new temporary directory, "
+    ap.add_argument("--keep", metavar="DIR",
+                    help="where the runs' files are kept (default: a new temporary directory, "
                     "never removed)")
     return ap
 

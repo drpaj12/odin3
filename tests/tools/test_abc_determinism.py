@@ -124,12 +124,20 @@ class AbcDeterminismTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn(f"{design} differs a:child:write_blif", out)
 
-    def test_via_blif_with_no_exchange_files_is_an_error(self) -> None:
+    def test_via_blif_with_no_exchange_files_at_all_is_an_error(self) -> None:
         design = self.design("d/nofiles.blif")
-        code, out, _ = self.run_tool("--via-blif", design)
+        code, out, err = self.run_tool("--via-blif", design)
         self.assertEqual(code, 2)
-        self.assertIn(f"{design} error", out)
-        self.assertIn("no exchange files", out)
+        self.assertIn(f"{design} same (no exchange files)", out)
+        self.assertIn("nothing was compared", err)
+
+    def test_a_design_without_exchange_files_among_others_is_noted(self) -> None:
+        empty = self.design("d/nofiles.blif")
+        ok = self.design("d/ok.blif")
+        code, out, err = self.run_tool("--via-blif", empty, ok)
+        self.assertEqual(code, 0, out + err)
+        self.assertIn(f"{empty} same (no exchange files)", out)
+        self.assertIn(f"{ok} same\n", out)
 
     def test_only_a_first_line_time_stamp_is_ignored(self) -> None:
         left, right = self.root / "l.blif", self.root / "r.blif"

@@ -1350,7 +1350,7 @@ then the options considered.
       and folding, splice less provenance, and provenance.
     - `abc-diff`'s depth no longer counts an identity buffer as a level (see (n)).
     - **Review fixes (PR review of 3D-8).** H1 (exe peak inflated), M1 (child-route row), M2 (fraig
-      row text), M3 (`--via-blif` with no exchange files is an error), M4 (peak and per-run
+      row text), M3 (`--via-blif`: a design with no exchange files, i.e. no soft logic, prints `same (no exchange files)`; if no design leaves any, exit 2), M4 (peak and per-run
       calibration), M5 (`parse_args` split; the new tests/bench and tools code checked by hand
       with `lizard -C 15 -L 60 -a 5`, as the gate scans only `src` and `adapters/abc`), L1 (a
       test that the hook leaves the written BLIF byte-identical; times are still only checked
