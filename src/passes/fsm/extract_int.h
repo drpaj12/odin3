@@ -44,6 +44,7 @@ typedef struct odin3_fsm_state_ent {
 typedef struct odin3_fsm_xctx {
     odin3_fsm_mod *fm;
     const odin3_vec *excl; /* sorted uint64_t: (bit << 32) | other, pmux selects that exclude */
+    const odin3_vec *insts; /* odin3_fsm_inst: the module's instances; the last is being built */
     odin3_fsm_budget budget;
     odin3_fsm_inst *inst;
     odin3_vec dff_in; /* odin3_fsm_sig: the next-state root */

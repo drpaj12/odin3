@@ -243,6 +243,14 @@ static void test_open_tree_fails(void) {
     TEST_ASSERT_EQUAL_STRING("auto", ft_wire_attr((ft_ref){"t", "st"}, "fsm_encoding"));
 }
 
+/* H1: two wires over one register give one instance; Yosys extracts one FSM per register. */
+static void test_alias_wire_extracted_once(void) {
+    read_micro("alias_wire");
+    extract("alias_wire");
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(1, rn.insts.len, ft_log());
+    TEST_ASSERT_EQUAL_UINT(3, only()->data.states.len);
+}
+
 static void test_one_state_fails(void) {
     ft_read_proc("module t(input clk, input rst, output o);\n"
                  "  (* fsm_encoding = \"auto\" *) reg [1:0] st;\n"
@@ -362,6 +370,7 @@ int main(void) {
     RUN_TEST(test_user_encoding_is_carried);
     RUN_TEST(test_provenance_inputs);
     RUN_TEST(test_open_tree_fails);
+    RUN_TEST(test_alias_wire_extracted_once);
     RUN_TEST(test_one_state_fails);
     RUN_TEST(test_wire_without_register_fails);
     RUN_TEST(test_cap_skips_the_fsm);

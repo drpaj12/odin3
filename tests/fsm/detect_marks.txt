@@ -24,6 +24,7 @@ tests/micro/verilog/full/bm_sfifo_rtl.v - -
 tests/micro/verilog/full/matmul.v - -
 tests/micro/verilog/full/memory_controller.v - -
 tests/micro/verilog/full/paj_framebuftop_hierarchy_no_mem_no_combinational.v scanline.subitem,vidout.pselect scanlinebuffer.next_state:users
+tests/fsm/alias_wire.v alias_wire.st -
 tests/fsm/arst_low.v arst_low.st -
 tests/fsm/counter_not_fsm.v - -
 tests/fsm/ctrl_out_case.v ctrl_out_case.st -

@@ -698,6 +698,28 @@
   ],
   "rejected": {}
  },
+ "fsm/alias_wire": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$50",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "alias_wire",
+    "outputs": 1,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "alias_wire.st"
+  ],
+  "rejected": {}
+ },
  "fsm/arst_low": {
   "failures": [],
   "fsms": [

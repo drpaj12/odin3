@@ -499,6 +499,17 @@ static odin3_status find_register(const odin3_fsm_xctx *xc, reg_ref *reg) {
     return st;
 }
 
+/* True when an earlier instance of the module (not the one being built) took register `node`. */
+static bool already_extracted(const odin3_fsm_xctx *xc, uint32_t node) {
+    const odin3_fsm_inst *insts = xc->insts->data;
+    for (size_t i = 0; i + 1 < xc->insts->len; i++) {
+        if (insts[i].dff_node == node) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Reads the register's Q and D, its clock and reset, and sets dff_in. */
 static odin3_status load_register(odin3_fsm_xctx *xc, reg_ref reg, uint8_t *reset_state) {
     const odin3_fsm_index *ix = &xc->fm->ix;
@@ -518,7 +529,10 @@ static odin3_status load_register(odin3_fsm_xctx *xc, reg_ref reg, uint8_t *rese
                   reg.adff ? "$adff" : "$dff");
         xc->inst->dff_node = reg.node;
         read_clock_reset(xc, node, reset_state);
-        st = set_dff_in(xc, &q_sig, &d_sig);
+        /* Yosys extracts one FSM per register: it rewires the first wire's logic, so a second
+         * wire over the same register finds no closed selection tree. Odin's extract does not
+         * mutate, so the dff_in stays marked here to make that wire fail the same way. */
+        st = already_extracted(xc, reg.node) ? ODIN3_OK : set_dff_in(xc, &q_sig, &d_sig);
     }
     odin3_vec_free(&q_sig);
     odin3_vec_free(&d_sig);
@@ -837,6 +851,7 @@ odin3_status odin3_fsm_extract_module(odin3_fsm_mod *fm, odin3_vec *insts) {
     memset(&xc, 0, sizeof xc);
     xc.fm = fm;
     xc.excl = &excl;
+    xc.insts = insts;
     for (uint32_t id = 1; st == ODIN3_OK && id < odin3_module_wire_end(fm->module); id++) {
         odin3_wire_id wire = {id};
         const char *enc =

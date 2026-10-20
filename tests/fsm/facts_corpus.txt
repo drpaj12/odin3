@@ -33,6 +33,7 @@ micro/full/bm_sfifo_rtl micro tests/micro/verilog/full/bm_sfifo_rtl.v
 micro/full/matmul micro tests/micro/verilog/full/matmul.v
 micro/full/memory_controller micro tests/micro/verilog/full/memory_controller.v
 micro/full/paj_framebuftop_hierarchy_no_mem_no_combinational micro tests/micro/verilog/full/paj_framebuftop_hierarchy_no_mem_no_combinational.v
+fsm/alias_wire micro tests/fsm/alias_wire.v alias_wire
 fsm/arst_low micro tests/fsm/arst_low.v arst_low
 fsm/counter_not_fsm micro tests/fsm/counter_not_fsm.v counter_not_fsm
 fsm/ctrl_out_case micro tests/fsm/ctrl_out_case.v ctrl_out_case

@@ -27,6 +27,7 @@ one_bit_attr tests/fsm/one_bit_attr.v one_bit_attr rst:1 clk 12 yes
 two_fsm tests/fsm/two_fsm.v two_fsm rst:1 clk 12 yes
 sub_twice tests/fsm/sub_twice.v sub_twice rst:1 clk 12 yes
 negedge_clk tests/fsm/negedge_clk.v negedge_clk rst:1 clk 12 yes
+alias_wire tests/fsm/alias_wire.v alias_wire rst:1 clk 12 yes
 arst_low tests/fsm/arst_low.v arst_low rstn:0 clk 12 yes
 selfloop_state tests/fsm/selfloop_state.v selfloop_state rst:1 clk 12 yes
 x_next tests/fsm/x_next.v x_next rst:1 clk 12 no
