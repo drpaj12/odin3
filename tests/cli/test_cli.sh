@@ -702,7 +702,7 @@ hardmap_mul)
     hm=$fixtures/../../hardmap
     "$odin3" -p "read_techlib $fixtures/../../../lib/vtr.o3lib; read_verilog --vtr-compat $hm/mul_8x7.v; proc; opt; hardmap; write_blif --vtr $work/out.blif" \
         >"$work/out" 2>"$work/err" || fail "odin3 hardmap script failed"
-    grep -qF 'hardmap: 1 multiply, 0 adder in 0 chains' "$work/err" || fail "no hardmap INFO line"
+    grep -qF 'partial_map: 1 multiply, 0 adder in 0 chains' "$work/err" || fail "no hardmap INFO line"
     diff <(grep -v '^#' "$hm/expected/mul_8x7.blif") <(grep -v '^#' "$work/out.blif") >/dev/null ||
         fail "write_blif differs from tests/hardmap/expected/mul_8x7.blif"
     "$compare" "$hm/expected/mul_8x7.blif" "$work/out.blif" || fail "netlist-compare: not identical"
@@ -720,7 +720,7 @@ hardmap_add)
     run_pair() { # run_pair <v-file> <adders>: sim before = sim after; INFO line with that count
         "$odin3" -p "$pre $hm/$1; $post; sim 4000 11 $work/before.vec; hardmap; sim 4000 11 $work/after.vec" \
             >"$work/out" 2>"$work/err" || fail "odin3 hardmap script failed on $1"
-        grep -qF "hardmap: 0 multiply, $2 adder in 1 chains" "$work/err" || fail "$1: no INFO line with $2 adders"
+        grep -qF "partial_map: 0 multiply, $2 adder in 1 chains" "$work/err" || fail "$1: no INFO line with $2 adders"
         grep -qF "0 cells left soft" "$work/err" || fail "$1: a cell was left soft"
         cmp "$work/before.vec" "$work/after.vec" || fail "$1: sim vectors differ after hardmap"
     }
@@ -730,7 +730,7 @@ hardmap_add)
     run_pair sx_add_c.v 11
     "$odin3" -p "$pre $hm/sx_add.v; $post; hardmap; write_rtlil $work/sx.il" >"$work/out" 2>"$work/err" ||
         fail "odin3 hardmap script failed on sx_add.v"
-    grep -qF "hardmap: 0 multiply, 11 adder in 1 chains" "$work/err" || fail "sx_add.v: no INFO line with 11 adders"
+    grep -qF "partial_map: 0 multiply, 11 adder in 1 chains" "$work/err" || fail "sx_add.v: no INFO line with 11 adders"
     "$odin3" -p "read_techlib $lib; read_verilog --lib $hm/adder_lib.v; read_verilog --vtr-compat $hm/adder_use.v; proc; opt; flatten; opt; wreduce; opt; sim 500 3 $work/before.vec; hardmap; sim 500 3 $work/after.vec" \
         >"$work/out" 2>"$work/err" || fail "odin3 hardmap script failed on adder_use.v"
     grep -qF "in 4 chains" "$work/err" || fail "adder_use.v: the flattened adder #(4) was not mapped"
@@ -740,6 +740,21 @@ hardmap_add)
     diff <(grep -v '^#' "$hm/expected/add_8x6.blif") <(grep -v '^#' "$work/out.blif") >/dev/null ||
         fail "write_blif differs from tests/hardmap/expected/add_8x6.blif"
     "$compare" "$hm/expected/add_8x6.blif" "$work/out.blif" || fail "netlist-compare: not identical"
+    ;;
+pm_alias)
+    # cli_pm_alias (4.2 S-1): `partial_map` and its alias `hardmap` are both registered, log the
+    # `partial_map:` prefix and write the same BLIF bytes.
+    hm=$fixtures/../../hardmap
+    lib=$fixtures/../../../lib/vtr.o3lib
+    for pass in partial_map hardmap; do
+        "$odin3" -p "read_techlib $lib; read_verilog --vtr-compat $hm/mul_8x7.v; proc; opt; $pass; write_blif --vtr $work/$pass.blif" \
+            >"$work/out" 2>"$work/err" || fail "odin3 $pass script failed"
+        grep -qF 'partial_map: 1 multiply, 0 adder in 0 chains' "$work/err" || fail "$pass: no INFO line"
+    done
+    cmp "$work/partial_map.blif" "$work/hardmap.blif" || fail "partial_map and hardmap BLIFs differ"
+    "$odin3" --help >"$work/out" 2>&1 || true
+    grep -q '^ *partial_map' "$work/out" || fail "--help does not list partial_map"
+    grep -q '^ *hardmap' "$work/out" || fail "--help does not list hardmap"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

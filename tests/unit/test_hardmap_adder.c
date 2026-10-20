@@ -12,7 +12,7 @@
 #include "ir/prov.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
-#include "passes/hardmap/hardmap.h"
+#include "passes/partial_map/hardmap.h"
 #include "proc_build.h"
 #include "unity.h"
 #include "util/alloc.h"
@@ -205,7 +205,7 @@ static void test_h3_missing_type(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hardmap_run(&res.ctx, res.design, NULL));
     TEST_ASSERT_NOT_NULL(
         strstr(log_text,
-               "hardmap: cell type 'adder' is not registered; read_techlib lib/vtr.o3lib first"));
+               "partial_map: cell type 'adder' is not registered; read_techlib lib/vtr.o3lib first"));
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$add"));
     assert_rtlil_equal(&res, &before);
     odin3_strbuf_free(&before);
@@ -676,7 +676,7 @@ static void test_h10_info(void) {
     odin3_hardmap_stats stats;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, &stats));
     TEST_ASSERT_NOT_NULL(strstr(log_text,
-                                "hardmap: 0 multiply, 10 adder in 2 chains, 0 single_port_ram + 0 "
+                                "partial_map: 0 multiply, 10 adder in 2 chains, 0 single_port_ram + 0 "
                                 "dual_port_ram slices; 1 cells left soft"));
     TEST_ASSERT_EQUAL_UINT64(10, stats.adder);
     TEST_ASSERT_EQUAL_UINT64(2, stats.chains);
@@ -718,7 +718,7 @@ static void test_mul_and_add_together(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, &stats));
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "multiply"));
     TEST_ASSERT_EQUAL_UINT32(6, hm_count(res.module, "adder"));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "hardmap: 1 multiply, 6 adder in 1 chains"));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "partial_map: 1 multiply, 6 adder in 1 chains"));
     pb_free(&res);
 }
 

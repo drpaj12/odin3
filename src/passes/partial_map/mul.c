@@ -5,7 +5,7 @@
  * outputs are fresh nets without a reader. A signed cell (both flags, PHASE2 #25) is sign-extended
  * to Y_WIDTH (D3). Cells M-2 leaves soft get one warning each.
  */
-#include "passes/hardmap/hm_kit.h"
+#include "passes/partial_map/hm_kit.h"
 
 #include "passes/opt/kit.h"
 #include "util/log.h"
@@ -78,22 +78,22 @@ static void warn_soft(const hm_ctx *hc, odin3_node_id src, const mul_shape *sh,
     hm_label(hc, src, label, sizeof label);
     if (verdict == MUL_SOFT_2X2) {
         hm_diag(hc, ODIN3_LOG_WARN, src,
-                "hardmap: '$mul' cell '%s' is 2x2; left soft for lower (Parmys builds it from "
+                "partial_map: '$mul' cell '%s' is 2x2; left soft for lower (Parmys builds it from "
                 "gates and adders)",
                 label);
     } else if (verdict == MUL_SOFT_Y_WIDER) {
         hm_diag(hc, ODIN3_LOG_WARN, src,
-                "hardmap: '$mul' cell '%s' has Y_WIDTH %" PRIu32
+                "partial_map: '$mul' cell '%s' has Y_WIDTH %" PRIu32
                 " above A_WIDTH + B_WIDTH (%" PRIu32 "); left soft for lower (run wreduce first)",
                 label, sh->y, sh->a + sh->b);
     } else if (verdict == MUL_SOFT_WIDE) {
         hm_diag(hc, ODIN3_LOG_WARN, src,
-                "hardmap: '$mul' cell '%s' is %" PRIu32 "x%" PRIu32
+                "partial_map: '$mul' cell '%s' is %" PRIu32 "x%" PRIu32
                 "; the arch's multiplier is 36 wide; left soft for lower",
                 label, sh->a, sh->b);
     } else {
         hm_diag(hc, ODIN3_LOG_WARN, src,
-                "hardmap: signed '$mul' cell '%s' has Y_WIDTH %" PRIu32
+                "partial_map: signed '$mul' cell '%s' has Y_WIDTH %" PRIu32
                 " above 36; left soft for lower",
                 label, sh->y);
     }
@@ -222,7 +222,7 @@ static odin3_status check_width(const hm_ctx *hc, odin3_node_id node) {
     char label[ODIN3_LOG_BUF / 4];
     hm_label(hc, node, label, sizeof label);
     hm_diag(hc, ODIN3_LOG_ERROR, node,
-            "hardmap: 'multiply' instance '%s' has WIDTH %" PRId64
+            "partial_map: 'multiply' instance '%s' has WIDTH %" PRId64
             "; the arch's multiplier is 36 wide",
             label, width->i);
     return ODIN3_ERR_INVALID_ARG;
@@ -295,7 +295,7 @@ odin3_status hm_map_explicit(hm_ctx *hc, odin3_node_id src) {
     char label[ODIN3_LOG_BUF / 4];
     hm_label(hc, src, label, sizeof label);
     hm_diag(hc, ODIN3_LOG_WARN, src,
-            "hardmap: explicit 'multiply' instance '%s' (WIDTH %" PRId64
+            "partial_map: explicit 'multiply' instance '%s' (WIDTH %" PRId64
             ") treated as '$mul' as Parmys does",
             label, width->i);
     odin3_status st = transact(hc, src, &sh, verdict == MUL_HARD ? build : build_soft);

@@ -4,7 +4,7 @@
  * write enable of every leaf (a tree of `$and`) and the output `$mux` tree of a data bit. All of
  * it is a loop over levels; nothing recurses.
  */
-#include "passes/hardmap/ram.h"
+#include "passes/partial_map/ram.h"
 
 #include <inttypes.h>
 #include <stdio.h>

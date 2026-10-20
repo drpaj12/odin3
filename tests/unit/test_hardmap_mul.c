@@ -12,7 +12,7 @@
 #include "ir/prov.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
-#include "passes/hardmap/hardmap.h"
+#include "passes/partial_map/hardmap.h"
 #include "passes/manager.h"
 #include "proc_build.h"
 #include "unity.h"
@@ -176,7 +176,7 @@ static void test_h3_missing_type(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hardmap_run(&res.ctx, res.design, NULL));
     TEST_ASSERT_NOT_NULL(strstr(
         log_text,
-        "hardmap: cell type 'multiply' is not registered; read_techlib lib/vtr.o3lib first"));
+        "partial_map: cell type 'multiply' is not registered; read_techlib lib/vtr.o3lib first"));
     assert_rtlil_equal(&res, &before);
     odin3_strbuf_free(&before);
     odin3_strbuf_free(&text);
@@ -195,7 +195,7 @@ static void test_h3_not_hard(void) {
     odin3_strbuf_init(&before);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_rtlil(&res, &before));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hardmap_run(&res.ctx, res.design, NULL));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "hardmap: cell type 'multiply' is not a hard block"));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "partial_map: cell type 'multiply' is not a hard block"));
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mul"));
     assert_rtlil_equal(&res, &before);
     odin3_strbuf_free(&before);
@@ -218,7 +218,7 @@ static void test_h3_bad_shape(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_rtlil(&res, &before));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hardmap_run(&res.ctx, res.design, NULL));
     TEST_ASSERT_NOT_NULL(strstr(
-        log_text, "hardmap: cell type 'multiply' does not have the expected ports and parameters"));
+        log_text, "partial_map: cell type 'multiply' does not have the expected ports and parameters"));
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mul"));
     assert_rtlil_equal(&res, &before);
     odin3_strbuf_free(&before);
@@ -561,7 +561,7 @@ static void test_m6_width_2_is_mul(void) {
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mul"));
     TEST_ASSERT_EQUAL_UINT64(1, stats.soft);
     TEST_ASSERT_NOT_NULL(strstr(
-        log_text, "hardmap: explicit 'multiply' instance 'u' (WIDTH 2) treated as '$mul' as Parmys "
+        log_text, "partial_map: explicit 'multiply' instance 'u' (WIDTH 2) treated as '$mul' as Parmys "
                   "does"));
     TEST_ASSERT_EQUAL_STRING("u", node_name_of(&res, hm_nth(res.module, "$mul", 0)));
     pb_free(&res);
@@ -641,7 +641,7 @@ static void test_m6_over_36_error(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hardmap_run(&res.ctx, res.design, NULL));
     TEST_ASSERT_NOT_NULL(
         strstr(log_text,
-               "hardmap: 'multiply' instance 'u' has WIDTH 40; the arch's multiplier is 36 wide"));
+               "partial_map: 'multiply' instance 'u' has WIDTH 40; the arch's multiplier is 36 wide"));
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mul")); /* nothing was mapped */
     assert_rtlil_equal(&res, &before);
     odin3_strbuf_free(&before);
@@ -732,7 +732,7 @@ static void test_h10_info(void) {
     odin3_hardmap_stats stats;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, &stats));
     TEST_ASSERT_NOT_NULL(strstr(log_text,
-                                "hardmap: 3 multiply, 0 adder in 0 chains, 0 single_port_ram + 0 "
+                                "partial_map: 3 multiply, 0 adder in 0 chains, 0 single_port_ram + 0 "
                                 "dual_port_ram slices; 2 cells left soft"));
     TEST_ASSERT_EQUAL_UINT64(3, stats.multiply);
     TEST_ASSERT_EQUAL_UINT64(2, stats.soft);
@@ -889,7 +889,7 @@ static void test_pass_runs_and_takes_no_arguments(void) {
     build_cases(k_three, 3, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_pass_run(res.design, "hardmap", odin3_bytes_cstr("-x")));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "hardmap: takes no arguments"));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "partial_map: takes no arguments"));
     TEST_ASSERT_EQUAL_UINT32(3, hm_count(res.module, "$mul"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(res.design, "hardmap", (odin3_bytes){NULL, 0}));
     TEST_ASSERT_EQUAL_UINT32(3, hm_count(res.module, "multiply"));

@@ -163,16 +163,16 @@ add_library(odin3_core OBJECT
     src/passes/lower/latch.c
     src/passes/lower/mem.c
     src/passes/lower/snapshot.c
-    src/passes/hardmap/register.c
-    src/passes/hardmap/hardmap.c
-    src/passes/hardmap/hm_kit.c
-    src/passes/hardmap/mul.c
-    src/passes/hardmap/adder.c
-    src/passes/hardmap/ram.c
-    src/passes/hardmap/ram_split.c
-    src/passes/hardmap/mem.c
-    src/passes/hardmap/mem_merge.c
-    src/passes/hardmap/mem_plan.c
+    src/passes/partial_map/register.c
+    src/passes/partial_map/hardmap.c
+    src/passes/partial_map/hm_kit.c
+    src/passes/partial_map/mul.c
+    src/passes/partial_map/adder.c
+    src/passes/partial_map/ram.c
+    src/passes/partial_map/ram_split.c
+    src/passes/partial_map/mem.c
+    src/passes/partial_map/mem_merge.c
+    src/passes/partial_map/mem_plan.c
     src/passes/lpmmap/register.c
     src/passes/lpmmap/lpmmap.c
     src/passes/lpmmap/lm_kit.c
@@ -836,6 +836,11 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_hardmap_add PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_alias
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_alias $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_alias PROPERTIES LABELS unit)
     # 3C Task 3: hardmap's $add/$sub rule (adder chains) on hand-built flat IR.
     odin3_add_unit_test(test_hardmap_adder)
     target_sources(test_hardmap_adder PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)

@@ -8,7 +8,7 @@
 #ifndef ODIN3_PASSES_HARDMAP_MEM_H
 #define ODIN3_PASSES_HARDMAP_MEM_H
 
-#include "passes/hardmap/ram.h"
+#include "passes/partial_map/ram.h"
 
 #include <stdbool.h>
 #include <stdint.h>

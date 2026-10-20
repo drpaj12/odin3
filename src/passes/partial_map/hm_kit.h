@@ -26,7 +26,7 @@
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
-#include "passes/hardmap/hardmap.h"
+#include "passes/partial_map/hardmap.h"
 #include "passes/manager.h"
 #include "util/attr.h"
 #include "util/str.h"
@@ -94,7 +94,7 @@ void hm_set_module(hm_ctx *hc, odin3_module *module);
 /*
  * The cell type of hard cell `which` in *out, checked once per context: it must be registered,
  * of granularity HARD, with the ports and parameters hardmap indexes by position. Otherwise the
- * error "hardmap: cell type 'multiply' is not registered; read_techlib lib/vtr.o3lib first" (or
+ * error "partial_map: cell type 'multiply' is not registered; read_techlib lib/vtr.o3lib first" (or
  * "... is not a hard block ..." / "... does not have the expected ports ...") is logged and
  * ODIN3_ERR_INVALID_ARG returned, nothing changed. The error is located at node `at` (none: bare).
  */
@@ -156,7 +156,7 @@ odin3_status hm_budget_check(const hm_ctx *hc);
 /*
  * Logs fmt at level, located at the source of node (its first source leaf: "file:line:col: error:
  * ..." or the source manager's form) or, without a location, as the bare text. The texts carry
- * their own "hardmap: " prefix.
+ * their own "partial_map: " prefix.
  */
 void hm_diag(const hm_ctx *hc, odin3_log_level level, odin3_node_id node, const char *fmt, ...)
     ODIN3_PRINTF(4, 5);

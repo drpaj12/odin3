@@ -12,7 +12,7 @@
 #ifndef ODIN3_PASSES_HARDMAP_RAM_H
 #define ODIN3_PASSES_HARDMAP_RAM_H
 
-#include "passes/hardmap/hm_kit.h"
+#include "passes/partial_map/hm_kit.h"
 
 #include <stdint.h>
 

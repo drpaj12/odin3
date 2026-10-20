@@ -4,12 +4,12 @@
  * cell in node-ID order, the `$mul` phase, the explicit `multiply` phase and the `$add`/`$sub`
  * phase, then the explicit RAM instances and the inferred `$mem` (H-8; PR 3C-3).
  */
-#include "passes/hardmap/hardmap.h"
+#include "passes/partial_map/hardmap.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/module.h"
 #include "odin3/odin3.h"
-#include "passes/hardmap/hm_kit.h"
+#include "passes/partial_map/hm_kit.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -71,7 +71,7 @@ static odin3_status mul_phase(hm_ctx *hc, odin3_module *mod, odin3_celltype_id m
         if (st == ODIN3_OK && hc->stats.multiply != before) {
             char label[ODIN3_LOG_BUF / 4];
             hm_label(hc, node, label, sizeof label);
-            odin3_log(ODIN3_LOG_DEBUG, "hardmap: '$mul' cell '%s' mapped to a multiply", label);
+            odin3_log(ODIN3_LOG_DEBUG, "partial_map: '$mul' cell '%s' mapped to a multiply", label);
         }
     }
     return st;
@@ -128,7 +128,7 @@ static odin3_status add_phase(hm_ctx *hc, odin3_module *mod, const odin3_celltyp
         if (st == ODIN3_OK && hc->stats.chains != before) {
             char label[ODIN3_LOG_BUF / 4];
             hm_label(hc, node, label, sizeof label);
-            odin3_log(ODIN3_LOG_DEBUG, "hardmap: '%s' cell '%s' mapped to an adder chain",
+            odin3_log(ODIN3_LOG_DEBUG, "partial_map: '%s' cell '%s' mapped to an adder chain",
                       type.v == types[0].v ? "$add" : "$sub", label);
         }
     }
@@ -166,7 +166,7 @@ static odin3_status ram_phase(hm_ctx *hc, odin3_module *mod, const odin3_celltyp
         if (st == ODIN3_OK && hc->stats.sp_slices + hc->stats.dp_slices != before) {
             char label[ODIN3_LOG_BUF / 4];
             hm_label(hc, node, label, sizeof label);
-            odin3_log(ODIN3_LOG_DEBUG, "hardmap: '%s' cell '%s' mapped to %" PRIu64 " slices",
+            odin3_log(ODIN3_LOG_DEBUG, "partial_map: '%s' cell '%s' mapped to %" PRIu64 " slices",
                       type.v == types[0].v ? "single_port_ram" : "dual_port_ram", label,
                       hc->stats.sp_slices + hc->stats.dp_slices - before);
         }
@@ -203,7 +203,7 @@ static odin3_status mem_phase(hm_ctx *hc, odin3_module *mod, odin3_celltype_id m
             if (st == ODIN3_OK && hc->stats.sp_slices + hc->stats.dp_slices != before) {
                 char label[ODIN3_LOG_BUF / 4];
                 hm_label(hc, node, label, sizeof label);
-                odin3_log(ODIN3_LOG_DEBUG, "hardmap: '$mem' cell '%s' mapped to %" PRIu64 " slices",
+                odin3_log(ODIN3_LOG_DEBUG, "partial_map: '$mem' cell '%s' mapped to %" PRIu64 " slices",
                           label, hc->stats.sp_slices + hc->stats.dp_slices - before);
             }
         }
@@ -227,7 +227,7 @@ static odin3_status all_mem_phases(hm_ctx *hc) {
 static void report(hm_ctx *hc) {
     const odin3_hardmap_stats *st = &hc->stats;
     odin3_log(ODIN3_LOG_INFO,
-              "hardmap: %" PRIu64 " multiply, %" PRIu64 " adder in %" PRIu64 " chains, %" PRIu64
+              "partial_map: %" PRIu64 " multiply, %" PRIu64 " adder in %" PRIu64 " chains, %" PRIu64
               " single_port_ram + %" PRIu64 " dual_port_ram slices; %" PRIu64 " cells left soft",
               st->multiply, st->adder, st->chains, st->sp_slices, st->dp_slices, st->soft);
     odin3_strbuf info;
@@ -244,8 +244,8 @@ static void report(hm_ctx *hc) {
     odin3_strbuf_free(&info);
 }
 
-odin3_status odin3_hardmap_run(odin3_pass_ctx *ctx, odin3_design *design,
-                               odin3_hardmap_stats *stats) {
+odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                   odin3_hardmap_stats *stats) {
     hm_ctx hc;
     hm_init(&hc, ctx, design);
     odin3_status st = precheck(&hc);
@@ -261,4 +261,9 @@ odin3_status odin3_hardmap_run(odin3_pass_ctx *ctx, odin3_design *design,
     }
     hm_free(&hc);
     return st;
+}
+
+odin3_status odin3_hardmap_run(odin3_pass_ctx *ctx, odin3_design *design,
+                               odin3_hardmap_stats *stats) {
+    return odin3_partial_map_run(ctx, design, stats);
 }

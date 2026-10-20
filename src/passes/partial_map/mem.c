@@ -5,7 +5,7 @@
  * one transaction with the `$mem` and the flip-flops R-8 made redundant (H-7, H-9). A `$mem` that
  * stays soft is not touched and gets one warning.
  */
-#include "passes/hardmap/mem.h"
+#include "passes/partial_map/mem.h"
 
 #include "util/log.h"
 
@@ -157,22 +157,22 @@ static void warn_soft(const hm_ctx *hc, const mem_model *mm, mem_verdict verdict
     const char *name = mem_name(hc, mm);
     if (verdict == MEM_SOFT_OFFSET) {
         hm_diag(hc, ODIN3_LOG_WARN, mm->node,
-                "hardmap: memory '%s' has OFFSET %" PRId64 "; left to lower", name, mm->offset);
+                "partial_map: memory '%s' has OFFSET %" PRId64 "; left to lower", name, mm->offset);
     } else if (verdict == MEM_SOFT_ASYNC) {
         hm_diag(hc, ODIN3_LOG_WARN, mm->node,
-                "hardmap: memory '%s' has an asynchronous read port; left to lower as "
+                "partial_map: memory '%s' has an asynchronous read port; left to lower as "
                 "flip-flops",
                 name);
     } else if (verdict == MEM_SOFT_EDGE) {
         hm_diag(hc, ODIN3_LOG_WARN, mm->node,
-                "hardmap: memory '%s' has a port on the falling clock edge; left to lower", name);
+                "partial_map: memory '%s' has a port on the falling clock edge; left to lower", name);
     } else if (verdict == MEM_SOFT_EN) {
         hm_diag(hc, ODIN3_LOG_WARN, mm->node,
-                "hardmap: memory '%s' has a read enable that is not constant 1; left to lower",
+                "partial_map: memory '%s' has a read enable that is not constant 1; left to lower",
                 name);
     } else {
         hm_diag(hc, ODIN3_LOG_WARN, mm->node,
-                "hardmap: memory '%s' (%" PRIu32 " read, %" PRIu32
+                "partial_map: memory '%s' (%" PRIu32 " read, %" PRIu32
                 " write ports) has no fixed-subset mapping; left to lower",
                 name, mm->n_rd, mm->n_wr);
     }
@@ -258,12 +258,12 @@ static odin3_status map_hard(hm_ctx *hc, const mem_model *mm) {
     }
     if (mm->init_defined) {
         hm_diag(hc, ODIN3_LOG_WARN, mm->node,
-                "hardmap: memory '%s': initial contents dropped (the arch's RAMs have no init)",
+                "partial_map: memory '%s': initial contents dropped (the arch's RAMs have no init)",
                 mem_name(hc, mm));
     }
     if (mm->n_wr > 1) {
         hm_diag(hc, ODIN3_LOG_WARN, mm->node,
-                "hardmap: memory '%s': a same-address write collision of its write ports is "
+                "partial_map: memory '%s': a same-address write collision of its write ports is "
                 "undefined in the arch's RAM (the `$mem` lets the later port win)",
                 mem_name(hc, mm));
     }

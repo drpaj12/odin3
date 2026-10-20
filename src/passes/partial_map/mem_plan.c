@@ -6,7 +6,7 @@
  * asynchronous write port and a read-during-write port stay soft (R-11); more than 31 address
  * bits stay soft (R-11).
  */
-#include "passes/hardmap/mem.h"
+#include "passes/partial_map/mem.h"
 
 #include "ir/celltype.h"
 
