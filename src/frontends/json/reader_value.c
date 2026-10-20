@@ -126,6 +126,9 @@ odin3_status jr_set_attr_member(jr *rd, odin3_module *module, odin3_objref obj,
         return st;
     }
     jr_where here = {where->section, where->key, path};
+    if (strcmp(key, "src") == 0 && jr_src_member_restorable(rd, member)) {
+        return ODIN3_OK; /* L-8: restored into a record, not kept */
+    }
     if (key[0] == '\0') {
         return jr_error(rd, member, &here, "an attribute has an empty name");
     }
