@@ -1,24 +1,24 @@
 module top (  // tests/flatten/gen.v:13
-  input [2:0] x,  // tests/flatten/gen.v:13
-  input [2:0] z,  // tests/flatten/gen.v:13
-  output [2:0] o,  // tests/flatten/gen.v:13
-  output c  // tests/flatten/gen.v:13
+  (* src = "tests/flatten/gen.v:13.13-13.26" *) input [2:0] x,  // tests/flatten/gen.v:13
+  (* src = "tests/flatten/gen.v:13.28-13.41" *) input [2:0] z,  // tests/flatten/gen.v:13
+  (* src = "tests/flatten/gen.v:13.43-13.57" *) output [2:0] o,  // tests/flatten/gen.v:13
+  (* src = "tests/flatten/gen.v:13.59-13.67" *) output c  // tests/flatten/gen.v:13
 );
-  wire [2:0] \m.a ;  // tests/flatten/gen.v:5
-  wire [2:0] \m.b ;  // tests/flatten/gen.v:5
-  wire [2:0] \m.y ;  // tests/flatten/gen.v:5
-  wire \sel.v.a ;  // tests/flatten/gen.v:2
-  wire \sel.v.b ;  // tests/flatten/gen.v:2
-  wire \sel.v.y ;  // tests/flatten/gen.v:2
-  wire \m.g[0].u.a ;  // tests/flatten/gen.v:2
-  wire \m.g[0].u.b ;  // tests/flatten/gen.v:2
-  wire \m.g[0].u.y ;  // tests/flatten/gen.v:2
-  wire \m.g[1].u.a ;  // tests/flatten/gen.v:2
-  wire \m.g[1].u.b ;  // tests/flatten/gen.v:2
-  wire \m.g[1].u.y ;  // tests/flatten/gen.v:2
-  wire \m.g[2].u.a ;  // tests/flatten/gen.v:2
-  wire \m.g[2].u.b ;  // tests/flatten/gen.v:2
-  wire \m.g[2].u.y ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:5.13-5.26|tests/flatten/gen.v:14.7-14.30" *) wire [2:0] \m.a ;  // tests/flatten/gen.v:5
+  (* src = "tests/flatten/gen.v:5.28-5.41|tests/flatten/gen.v:14.7-14.30" *) wire [2:0] \m.b ;  // tests/flatten/gen.v:5
+  (* src = "tests/flatten/gen.v:5.43-5.57|tests/flatten/gen.v:14.7-14.30" *) wire [2:0] \m.y ;  // tests/flatten/gen.v:5
+  (* src = "tests/flatten/gen.v:2.14-2.21|tests/flatten/gen.v:17.12-17.41" *) wire \sel.v.a ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:2.23-2.30|tests/flatten/gen.v:17.12-17.41" *) wire \sel.v.b ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:2.32-2.40|tests/flatten/gen.v:17.12-17.41" *) wire \sel.v.y ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:2.14-2.21|tests/flatten/gen.v:9.12-9.44" *) wire \m.g[0].u.a ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:2.23-2.30|tests/flatten/gen.v:9.12-9.44" *) wire \m.g[0].u.b ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:2.32-2.40|tests/flatten/gen.v:9.12-9.44" *) wire \m.g[0].u.y ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:2.14-2.21|tests/flatten/gen.v:9.12-9.44" *) wire \m.g[1].u.a ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:2.23-2.30|tests/flatten/gen.v:9.12-9.44" *) wire \m.g[1].u.b ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:2.32-2.40|tests/flatten/gen.v:9.12-9.44" *) wire \m.g[1].u.y ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:2.14-2.21|tests/flatten/gen.v:9.12-9.44" *) wire \m.g[2].u.a ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:2.23-2.30|tests/flatten/gen.v:9.12-9.44" *) wire \m.g[2].u.b ;  // tests/flatten/gen.v:2
+  (* src = "tests/flatten/gen.v:2.32-2.40|tests/flatten/gen.v:9.12-9.44" *) wire \m.g[2].u.y ;  // tests/flatten/gen.v:2
   assign \m.a = x;
   assign \m.b = z;
   assign \m.y = o;

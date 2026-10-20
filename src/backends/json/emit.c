@@ -340,15 +340,6 @@ void jw_param(jw *out, jw_list *list, const char *key, const odin3_value *val) {
 
 /* --- provenance ---------------------------------------------------------------------------- */
 
-static void src_visit(void *user, odin3_prov_id leaf) {
-    jw *out = user;
-    const odin3_prov_record *rec = odin3_prov_get(out->design, leaf);
-    if (!out->have_src && rec != NULL && rec->n_locs > 0 && rec->locs[0].file != 0) {
-        out->src = rec->locs[0];
-        out->have_src = true;
-    }
-}
-
 bool jw_claim(jw *out, odin3_wattr_role role, const char *key) {
     bool fresh = false;
     odin3_wattr_claim_req req = {role, odin3_bytes_cstr(key)};
@@ -363,17 +354,18 @@ void jw_src(jw *out, jw_list *list, odin3_prov_id prov) {
     if (odin3_prov_get(out->design, prov) == NULL || out->status != ODIN3_OK) {
         return;
     }
-    out->have_src = false;
-    odin3_status status = odin3_prov_sources(out->design, prov, src_visit, out);
+    odin3_hdl_locs_out locs;
+    uint32_t written = 0;
+    odin3_status status = odin3_hdl_locs(out->hdl, prov, &locs);
+    odin3_hdl_print_req req = {&locs, false};
+    status = status == ODIN3_OK && locs.n > 0
+                 ? odin3_hdl_src_text(out->hdl, &req, &out->src, &written)
+                 : status;
     if (status != ODIN3_OK) {
         out->status = status;
-    } else if (out->have_src && jw_claim(out, ODIN3_WATTR_ATTRIBUTE, "src")) {
+    } else if (written > 0 && jw_claim(out, ODIN3_WATTR_ATTRIBUTE, "src")) {
         jw_key(out, list, "src");
-        char pos[INT32_BITS];
-        (void)snprintf(pos, sizeof pos, ":%u.%u", (unsigned)out->src.line, (unsigned)out->src.col);
-        const char *file = odin3_strtab_get(out->strtab, out->src.file);
-        jw_name name = {odin3_bytes_cstr(file != NULL ? file : ""), odin3_bytes_cstr(pos)};
-        jw_string2(out, &name);
+        jw_string(out, (odin3_bytes){out->src.data, out->src.len});
     }
 }
 

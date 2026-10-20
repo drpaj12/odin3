@@ -4,6 +4,7 @@
 
 #include "backends/blif/isop.h"
 #include "backends/blif/vtr.h"
+#include "backends/common/hdl_loc.h"
 #include "backends/prov_name.h"
 #include "frontends/arch/arch.h"
 #include "frontends/blif/attrs.h"
@@ -79,7 +80,7 @@ enum { LATCH_INIT = 0, CTRL_PORT = 0, TYPED_D = 1, TYPED_Q = 2, FF_D = 0, FF_Q =
 
 /* Strtab IDs of the attribute keys the reader sets; 0 when never interned (no object has it). */
 typedef struct wr_keys {
-    uint32_t clock, port_name, extras;
+    uint32_t clock, port_name, extras, src_attr; /* src_attr: `blif.attr:src` */
 } wr_keys;
 
 /* Bit `bit` of port `port` (index in port order). */
@@ -111,7 +112,7 @@ typedef struct blif_writer {
     odin3_strbuf token;        /* the token being built */
     odin3_strbuf cand;         /* a candidate generated name */
     odin3_strbuf prov;         /* a provenance name (3E-6), scratch */
-    odin3_u64map *prov_leaf;   /* prov ID -> the record that names it (backends/prov_name.h) */
+    odin3_hdl_ctx *hdl;        /* HDL locations and the records that name objects (hdl_loc.h) */
     odin3_strbuf cover;        /* a $lut's rows (odin3_blif_isop) */
     /* the VTR dialect's names (spec 3E VB-10) */
     odin3_blif_names
@@ -490,15 +491,9 @@ static odin3_status provenance_name(blif_writer *wr, odin3_net_id net, bool *app
         is_generator(wr, net, buf_bytes(&wr->cand))) {
         return ODIN3_OK;
     }
-    if (wr->prov_leaf == NULL) {
-        wr->prov_leaf = odin3_u64map_create(0);
-        if (wr->prov_leaf == NULL) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
-    }
     odin3_prov_id prov = odin3_net_prov(wr->module, net);
     const odin3_prov_record *rec = NULL;
-    odin3_status st = odin3_prov_leaf(wr->design, prov, wr->prov_leaf, &rec);
+    odin3_status st = odin3_hdl_first_record(wr->hdl, prov, &rec);
     odin3_bytes short_name = buf_bytes(&wr->cand);
     if (st == ODIN3_OK && rec != NULL && rec->hier != 0) {
         /* a flattened short name `u1.x` already holds the instance path: `top/u1/x`, not
@@ -506,8 +501,7 @@ static odin3_status provenance_name(blif_writer *wr, odin3_net_id net, bool *app
         size_t skip = odin3_prov_hier_overlap(str_bytes(wr, rec->hier), short_name);
         short_name = (odin3_bytes){(const char *)short_name.ptr + skip, short_name.len - skip};
     }
-    st = st == ODIN3_OK ? odin3_prov_name(wr->design, prov, short_name, wr->prov_leaf, &wr->prov)
-                        : st;
+    st = st == ODIN3_OK ? odin3_prov_name(wr->hdl, prov, short_name, &wr->prov) : st;
     if (st == ODIN3_OK && wr->prov.len != 0) {
         odin3_strbuf_clear(&wr->cand);
         st = odin3_strbuf_append(&wr->cand, buf_bytes(&wr->prov));
@@ -1866,6 +1860,34 @@ static void write_cell_params(blif_writer *wr, odin3_node_id node) {
     }
 }
 
+/* `.attr src "SRC"` with the cell's HDL locations (spec 5.4 W-4 and W-6: Yosys's form, up to 8
+ * joined by `|`), under --src-attr in the plain dialect. A cell that carries its own `src`
+ * attribute (the reader's `blif.attr:src`) is written as it was by write_extra, and a cell with no
+ * HDL location gets no line. */
+static void write_src_attr(blif_writer *wr, odin3_node_id node) {
+    odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
+    odin3_hdl_locs_out locs;
+    uint32_t written = 0;
+    if (!wr->opts->src_attr || string_attr(wr->module, obj, wr->keys.src_attr) != NULL) {
+        return;
+    }
+    odin3_status st = odin3_hdl_locs(wr->hdl, odin3_node_prov(wr->module, node), &locs);
+    odin3_hdl_print_req req = {&locs, true};
+    odin3_strbuf_clear(&wr->prov);
+    st = st == ODIN3_OK && locs.n > 0 ? odin3_hdl_src_text(wr->hdl, &req, &wr->prov, &written) : st;
+    odin3_strbuf_clear(&wr->token);
+    st = st == ODIN3_OK && written > 0 ? odin3_strbuf_appendf(&wr->token, "\"%s\"", wr->prov.data)
+                                       : st;
+    if (st != ODIN3_OK) {
+        (void)wr_fail(wr, st);
+    } else if (written > 0) {
+        wr_begin(wr, ".attr");
+        wr_token(wr, odin3_bytes_cstr("src"));
+        wr_token_built(wr);
+        wr_end(wr);
+    }
+}
+
 /* `.cname` with the node's name, then its `.param` lines, then its `.attr`/`.param` extras in
  * recorded order. */
 static void write_cell_extras(blif_writer *wr, odin3_node_id node) {
@@ -1875,6 +1897,7 @@ static void write_cell_extras(blif_writer *wr, odin3_node_id node) {
         wr_token(wr, str_bytes(wr, name));
         wr_end(wr);
     }
+    write_src_attr(wr, node);
     write_cell_params(wr, node);
     const odin3_value *extras =
         string_attr(wr->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, wr->keys.extras);
@@ -2262,7 +2285,8 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
     odin3_strbuf_init(&wr->first_legal);
     wr->keys = (wr_keys){.clock = find_key(wr, ODIN3_BLIF_ATTR_CLOCK),
                          .port_name = find_key(wr, ODIN3_BLIF_ATTR_PORT_NAME),
-                         .extras = find_key(wr, ODIN3_BLIF_ATTR_EXTRAS)};
+                         .extras = find_key(wr, ODIN3_BLIF_ATTR_EXTRAS),
+                         .src_attr = find_key(wr, "blif.attr:src")};
     for (uint32_t i = 0; i < WR_BUILTINS; i++) {
         wr->builtin[i] = find_type(wr, BUILTIN_NAMES[i]);
     }
@@ -2272,7 +2296,8 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
     wr->lut = find_type(wr, LUT_TYPE_NAME);
     wr->type_module = odin3_u64map_create(0);
     wr->declared = odin3_u64map_create(0);
-    if (wr->type_module == NULL || wr->declared == NULL) {
+    wr->hdl = odin3_hdl_ctx_create(design, "write_blif");
+    if (wr->type_module == NULL || wr->declared == NULL || wr->hdl == NULL) {
         return wr_fail(wr, ODIN3_ERR_NO_MEMORY);
     }
     for (uint32_t i = odin3_design_declared_model_count(design); i > 0; i--) {
@@ -2339,7 +2364,7 @@ static void wr_free(blif_writer *wr) {
     odin3_strbuf_free(&wr->token);
     odin3_strbuf_free(&wr->cand);
     odin3_strbuf_free(&wr->prov);
-    odin3_u64map_destroy(wr->prov_leaf);
+    odin3_hdl_ctx_destroy(wr->hdl);
     odin3_strbuf_free(&wr->cover);
     odin3_strbuf_free(&wr->orig);
     odin3_strbuf_free(&wr->legal);
@@ -2362,6 +2387,8 @@ static odin3_status check_opts(const odin3_blif_write_opts *opts) {
         why = "odin3_blif_write_with: unknown name_style";
     } else if (!vtr && (opts->lut_k != 0 || provenance)) {
         why = "odin3_blif_write_with: lut_k and name_style apply to the VTR dialect only";
+    } else if (vtr && opts->src_attr) {
+        why = "odin3_blif_write_with: src_attr applies to the PLAIN dialect only";
     } else if (opts->lut_k != 0 &&
                (opts->lut_k < ODIN3_BLIF_VTR_MIN_K || opts->lut_k > ODIN3_BLIF_VTR_MAX_K)) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_blif_write_with: lut_k %u is outside %u..%u",
@@ -2497,8 +2524,9 @@ odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
         return ODIN3_ERR_INVALID_ARG; /* 2D EL-33: before the path is opened */
     }
     odin3_blif_write_opts use =
-        opts != NULL ? *opts
-                     : (odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0};
+        opts != NULL
+            ? *opts
+            : (odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_status st = check_opts(&use);
     odin3_blif_vtr_plan plan = {0};
     if (st == ODIN3_OK && use.dialect == ODIN3_BLIF_DIALECT_VTR) {
