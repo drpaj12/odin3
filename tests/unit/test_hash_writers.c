@@ -4,6 +4,7 @@
  * mkdtemp directory under the build tree. The design is a BLIF read with --hdl-locs, so its nets
  * and cells carry HDL locations.
  */
+#include "backends/common/hash_rows.h"
 #include "frontends/blif/reader.h"
 #include "ir/design.h"
 #include "ir/module.h"
@@ -577,6 +578,127 @@ static void test_names_reverse_once(void) {
     odin3_util_free(text);
 }
 
+/* --- more modules, one namespace per module, the width hook, the JSON passes -------------------- */
+
+enum { KEY_MAX = 128, SEEN_MAX = 512, CHAIN = 40 };
+
+/* The `module<TAB>short` pairs of a map, and the number of repeats and of long names. */
+typedef struct seen_pairs {
+    char pair[SEEN_MAX][KEY_MAX];
+    uint32_t count;
+    uint32_t repeats;
+    uint32_t longer; /* hash names longer than the starting width (a collision extended them) */
+    uint32_t start;  /* 1 + the starting width */
+} seen_pairs;
+
+static void note_pair(const entry_view *entry, void *user) {
+    seen_pairs *seen = user;
+    const char *tab = strchr(entry->line, '\t');
+    TEST_ASSERT_NOT_NULL(tab);
+    TEST_ASSERT_TRUE(seen->count < SEEN_MAX);
+    (void)snprintf(seen->pair[seen->count], KEY_MAX, "%.*s\t%s", (int)(tab - entry->line),
+                   entry->line, entry->short_name);
+    for (uint32_t i = 0; i < seen->count; i++) {
+        seen->repeats += strcmp(seen->pair[i], seen->pair[seen->count]) == 0 ? 1U : 0U;
+    }
+    seen->longer += strlen(entry->short_name) > seen->start ? 1U : 0U;
+    seen->count++;
+}
+
+/* A chain of CHAIN located nets, each driving the next, and a named located cell on every one. */
+static void load_chain(const char *module_head) {
+    char *text = odin3_util_calloc(CHAIN * 160 + 256);
+    size_t len = (size_t)sprintf(text, "%s.inputs a\n.outputs y\n", module_head);
+    const char *prev = "a";
+    char prev_buf[SMALL];
+    for (int i = 0; i < CHAIN; i++) {
+        char net[SMALL];
+        (void)snprintf(net, sizeof net, "top/u1/n%d@d.v:%d", i, i + 1);
+        len += (size_t)sprintf(text + len, ".names %s %s\n1 1\n.cname g%d\n", prev, net, i);
+        (void)snprintf(prev_buf, sizeof prev_buf, "%s", net);
+        prev = prev_buf;
+    }
+    (void)sprintf(text + len, ".names %s y\n1 1\n.end\n", prev);
+    load_text(text);
+    odin3_util_free(text);
+}
+
+/* T-hash-3 through a writer: a start width of 1 forces collisions; the names still come out
+ * unique per module (all kinds together in Verilog and JSON), the map still checks, and the
+ * output does not depend on the object order. */
+static void test_collision_width(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_chain(".model top\n");
+        odin3_hash_rows_test_start(1);
+        odin3_status st = write_hash(wc, "narrow");
+        odin3_hash_rows_test_start(0);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, log_text);
+        written one = read_written(wc, "narrow");
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(one.map, "width=1\n"), one.map);
+        seen_pairs *seen = odin3_util_calloc(sizeof *seen);
+        seen->start = 2; /* `h` and one character */
+        each_entry(one.map, note_pair, seen);
+        TEST_ASSERT_TRUE_MESSAGE(seen->count >= CHAIN, one.map);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, seen->repeats, one.map);
+        TEST_ASSERT_TRUE_MESSAGE(seen->longer > 0, "no collision extended a name");
+        odin3_util_free(seen);
+        odin3_status check = ODIN3_OK;
+        char *text = names_out(&check, "--map %s/narrow%s.names --check", dir, wc->ext);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, check, text);
+        TEST_ASSERT_NOT_NULL(strstr(text, "bad_hash=0 duplicates=0 ignored=0"));
+        odin3_util_free(text);
+        free_written(&one);
+        odin3_design_destroy(design);
+        design = odin3_design_create();
+    }
+}
+
+/* More than one module: Verilog and JSON write every module, each with its own map lines, and the
+ * same full name in two modules gives the same hash name (H-2). */
+static void test_two_modules(void) {
+    for (int i = 1; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_text(".model sub\n.inputs a\n.outputs y\n"
+                  ".names a top/u1/w@d.v:3\n1 1\n.cname g1\n.names top/u1/w@d.v:3 y\n1 1\n.end\n"
+                  ".model top\n.inputs a\n.outputs y\n"
+                  ".names a top/u1/w@d.v:3\n1 1\n.cname g1\n"
+                  ".subckt sub a=top/u1/w@d.v:3 y=y\n.end\n");
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, write_hash(wc, "two"), log_text);
+        written one = read_written(wc, "two");
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(one.map, "\nsub\t"), one.map);
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(one.map, "\ntop\t"), one.map);
+        TEST_ASSERT_NULL_MESSAGE(strstr(one.net, "@d.v"), one.net);
+        const char *sub = strstr(one.map, "\nsub\tnet\t");
+        const char *top = strstr(one.map, "\ntop\tnet\t");
+        TEST_ASSERT_NOT_NULL_MESSAGE(sub, one.map);
+        TEST_ASSERT_NOT_NULL_MESSAGE(top, one.map);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(0, strncmp(sub + 10, top + 10, HASH_CHARS), one.map);
+        free_written(&one);
+        odin3_design_destroy(design);
+        design = odin3_design_create();
+    }
+}
+
+/* The two JSON passes agree when a plain key equals another object's provenance name: the user net
+ * keeps its key (bumped past the provenance name as in the first pass), the located one gets its
+ * hash name, and the second pass finds the rows of the first in step. */
+static void test_json_plain_key_equals_provenance(void) {
+    load_design();
+    odin3_module *top = odin3_module_get(design, odin3_design_top(design));
+    TEST_ASSERT_NOT_NULL(top);
+    uint32_t name = 0;
+    odin3_net_id net = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_intern(design, odin3_bytes_cstr("top/u1/w@d.v:3"), &name));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(top, name, (odin3_prov_id){0}, &net));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, write_hash(&WRITERS[2], "plain"), log_text);
+    written one = read_written(&WRITERS[2], "plain");
+    TEST_ASSERT_NULL_MESSAGE(strstr(log_text, "out of step"), log_text);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(WRITERS[2].entries, map_lines(one.map), one.map);
+    free_written(&one);
+}
+
 static void check_corrupted(void);
 
 static void test_names_check(void) {
@@ -644,6 +766,9 @@ int main(void) {
     RUN_TEST(test_names_lookup_reverse);
     RUN_TEST(test_names_absent_fails);
     RUN_TEST(test_names_reverse_once);
+    RUN_TEST(test_collision_width);
+    RUN_TEST(test_two_modules);
+    RUN_TEST(test_json_plain_key_equals_provenance);
     RUN_TEST(test_names_check);
     RUN_TEST(test_names_arguments);
     return UNITY_END();

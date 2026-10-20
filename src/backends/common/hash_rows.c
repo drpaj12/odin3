@@ -15,9 +15,21 @@
 #include <string.h>
 #include <sys/stat.h>
 
+/* The test hook (odin3_hash_rows_test_start): 0 is the production width. */
+static uint32_t test_start = 0;
+
 void odin3_hash_rows_init(odin3_hash_rows *rows) {
     odin3_vec_init(&rows->rows, sizeof(odin3_hash_row));
     odin3_strbuf_init(&rows->text);
+    rows->start = test_start;
+}
+
+void odin3_hash_rows_test_start(uint32_t start) {
+    test_start = start;
+}
+
+static uint32_t start_of(const odin3_hash_rows *rows) {
+    return rows->start != 0 ? rows->start : ODIN3_HASH_NAME_WIDTH;
 }
 
 void odin3_hash_rows_free(odin3_hash_rows *rows) {
@@ -77,7 +89,8 @@ static odin3_status resolve_group(odin3_hash_rows *rows, const odin3_hash_resolv
         }
     }
     if (st == ODIN3_OK && count > 0) {
-        st = odin3_hash_names_resolve(fulls, count, req->reserved, req->nreserved, names);
+        const odin3_hash_name_set set = {fulls, count, req->reserved, req->nreserved};
+        st = odin3_hash_names_resolve_at(&set, start_of(rows), names);
     }
     for (uint32_t i = 0; st == ODIN3_OK && i < count; i++) {
         odin3_hash_row *row = odin3_vec_at(&rows->rows, index[i]);
@@ -145,7 +158,7 @@ odin3_status odin3_hash_rows_map_text(const odin3_hash_rows *rows, odin3_strbuf 
     for (size_t i = 0; i < count; i++) {
         entries[i] = entry_of(rows, odin3_hash_rows_at(rows, i));
     }
-    odin3_status st = odin3_name_map_write(entries, (uint32_t)count, ODIN3_HASH_NAME_WIDTH, out);
+    odin3_status st = odin3_name_map_write(entries, (uint32_t)count, start_of(rows), out);
     odin3_util_free(entries);
     return st;
 }

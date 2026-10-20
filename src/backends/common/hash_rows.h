@@ -37,6 +37,7 @@ typedef struct odin3_hash_row {
 typedef struct odin3_hash_rows {
     odin3_vec rows; /* odin3_hash_row */
     odin3_strbuf text;
+    uint32_t start; /* the starting width of the hash names; 0 = ODIN3_HASH_NAME_WIDTH */
 } odin3_hash_rows;
 
 /* What odin3_hash_rows_add records. */
@@ -50,6 +51,15 @@ typedef struct odin3_hash_row_req {
 
 void odin3_hash_rows_init(odin3_hash_rows *rows);
 void odin3_hash_rows_free(odin3_hash_rows *rows);
+
+/*
+ * Test hook (T-hash-3): the starting width of the hash names of every collection initialised
+ * after this call (1 to 52; 0 = the default, 10). A narrow start forces collisions through a
+ * writer. The map header records it. Not for production use: a process-wide setting, so a test
+ * sets it and resets it to 0.
+ */
+void odin3_hash_rows_test_start(uint32_t start);
+void odin3_hash_rows_set_start(odin3_hash_rows *rows, uint32_t start);
 
 /* Appends a row (the texts are copied). ODIN3_ERR_NO_MEMORY; the collection is unchanged then. */
 odin3_status odin3_hash_rows_add(odin3_hash_rows *rows, const odin3_hash_row_req *req);
