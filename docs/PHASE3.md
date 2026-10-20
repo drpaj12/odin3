@@ -1103,6 +1103,9 @@ then the options considered.
     state register; Phase 4 removes it when `fsm` runs. Nothing else is implemented. Open check, to
     close the gap: compare blob_merge and stereovision3 against a golden with the reset-state bit
     initialised to 1 (a heavy run, not done).
+    **Update (4.8, 2026-10-20):** `fsm` now runs after `proc` and the `read_verilog --vtr-compat`
+    WARNING is removed; see PHASE4 decision 12 for the results (ch_intrinsics equivalent, stereovision3
+    latch count equal, blob_merge listed D16).
 
 44. **3B close: `lower-equiv` checker fixes and the unproven list** (2026-10-18, branch `fix/3B-close`;
     agent defaults, Peter may override). (a) The gold of `lower-equiv` gets `memory_memx; memory_map`
