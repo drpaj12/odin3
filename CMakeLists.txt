@@ -201,6 +201,7 @@ add_library(odin3_core OBJECT
     src/passes/partial_map/generic.c
     src/passes/partial_map/hm_kit.c
     src/passes/partial_map/mul.c
+    src/passes/partial_map/mul_split.c
     src/passes/partial_map/adder.c
     src/passes/partial_map/ram.c
     src/passes/partial_map/ram_split.c
@@ -332,6 +333,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab_pending.c
     src/frontends/elab/elab2.c
     src/frontends/elab/elab2_wires.c
+    src/frontends/elab/netlist_locs.c
     src/frontends/elab/elab2_expr.c
     src/frontends/elab/elab2_select.c
     src/frontends/elab/elab2_varsel.c
@@ -997,6 +999,20 @@ if(BUILD_TESTING)
         ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 4.3 Tasks 13 and 15: multipliers from the arch record (W, shape, --min-mult, signed).
+    odin3_add_unit_test(test_pm_mul_arch)
+    target_sources(test_pm_mul_arch PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_pm_mul_arch PRIVATE
+        ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 4.3 Task 14: the oversize multiplier split (counts of the Parmys probes, 1E simulation).
+    odin3_add_unit_test(test_pm_mul_split)
+    target_sources(test_pm_mul_split PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_pm_mul_split PRIVATE
+        ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     # 4.5 Tasks 11 and 12: carry chains from the arch record (model, --min-add, chain warning).
     odin3_add_unit_test(test_pm_carry)
     target_sources(test_pm_carry PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
@@ -1083,6 +1099,17 @@ if(BUILD_TESTING)
                 --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/diff_expect.txt ${_hm_micros})
     set_tests_properties(hardmap_diff_micro PROPERTIES LABELS unit SKIP_RETURN_CODE 77
                          TIMEOUT 1800)
+    # 4.3 Task 16 (spec T-3): the same micros per sweep arch with the arch read by `read_arch`,
+    # against that arch's Parmys golden and expect file (tools/partial-map-check/pm-diff-micro).
+    # Exit 77 without VTR_ROOT or the golden tree.
+    foreach(_pm_arch k6_frac_N10_frac_chain_mem32K_40nm
+                     k6_frac_N10_4add_2chains_depop50_mem20K_22nm k4_N4_90nm)
+        add_test(NAME pm_diff_micro_${_pm_arch}
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/partial-map-check/pm-diff-micro ${_pm_arch}
+                    $<TARGET_FILE:odin3>)
+        set_tests_properties(pm_diff_micro_${_pm_arch} PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                             TIMEOUT 1800)
+    endforeach()
     # 4.2 Tasks 3 and 4 (spec T-2): the k6 identity gate. Tier 1 (CI): `hardmap` against
     # `partial_map`, same library. This is a wiring/alias test, not a regression test: both names
     # share one entry point in one binary, so it cannot see a behaviour change. Tier 2 (needs
@@ -1440,6 +1467,9 @@ if(BUILD_TESTING)
     # 5.4d: read_blif --hdl-locs (names, `.attr src`, D-5), each case in a mkdtemp directory.
     odin3_add_unit_test(test_blif_locs)
     target_compile_definitions(test_blif_locs PRIVATE ODIN3_LOCS_ROOT="${PROJECT_BINARY_DIR}")
+    # 5.4c: read_verilog -netlist (src attributes, assign comments, L-5 names, IMPORTED records).
+    odin3_add_unit_test(test_netlist_locs)
+    target_compile_definitions(test_netlist_locs PRIVATE ODIN3_LOCS_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_blif_writer)
     target_compile_definitions(test_blif_writer PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")

@@ -15,6 +15,7 @@
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_internal.h"
 #include "frontends/elab/elab_test.h"
+#include "frontends/elab/netlist_locs.h"
 #include "frontends/elab/pg.h"
 #include "ir/design.h"
 #include "ir/module.h"
@@ -158,6 +159,7 @@ odin3_status odin3_elab2_create(odin3_pass_ctx *ctx, odin3_ast *elab, const odin
     e2->design = ctx->design;
     e2->elab = elab;
     e2->opts = opts != NULL ? *opts : (odin3_elab_opts){0};
+    odin3_netlist_begin(e2);
     e2->limits = odin3_elab_limits_get();
     e2->fatal = ODIN3_OK;
     e2->iterations = e2->opts.gen_iters;
@@ -195,6 +197,7 @@ void odin3_elab2_destroy(odin3_elab2 *e2) {
     odin3_u64map_destroy(e2->bboxes);
     odin3_u64map_destroy(e2->modules);
     odin3_u64map_destroy(e2->warned);
+    odin3_u64map_destroy(e2->nl_raw);
     odin3_arena_destroy(e2->scratch);
     odin3_vec_free(&e2->built);
     odin3_vec_free(&e2->stack);
@@ -543,10 +546,12 @@ static odin3_status port_initialisers(odin3_elab2 *e2, odin3_ast_id module_node)
 static odin3_status cont_assign(odin3_elab2 *e2, odin3_ast_id node) {
     odin3_ast_span kids = odin3_ast_children(e2->elab, node);
     odin3_status st = ODIN3_OK;
+    odin3_netlist_assign_begin(e2, node); /* -netlist: the comment of this assign (D-3b) */
     for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_CONT_ASSIGN);
          st == ODIN3_OK && i < kids.n && !e2->stopped; i++) {
         st = assign_one(e2, kids.ids[i]);
     }
+    odin3_netlist_assign_end(e2);
     return st;
 }
 
@@ -860,6 +865,7 @@ static odin3_status finish(odin3_elab2 *e2, double started) {
                           odin3_ast_name_str(e2->elab, unit));
         return ODIN3_ERR_PARSE;
     }
+    odin3_netlist_finish(e2);
     odin3_status st = odin3_design_set_top(e2->design, (odin3_module_id){(uint32_t)id});
     summary sum = {0, 0, 0, 0, 0};
     for (size_t i = 0; st == ODIN3_OK && i < e2->built.len; i++) {
