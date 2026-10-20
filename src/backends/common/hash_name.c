@@ -15,13 +15,6 @@ enum { BITS_PER_CHAR = 5, BYTE_BITS = 8, CHAR_MASK = 0x1F, DIGEST_BITS = 256 };
 
 static const char BASE32[] = "abcdefghijklmnopqrstuvwxyz234567";
 
-/* The width resolve starts at; the test hook changes it. */
-static uint32_t start_width = ODIN3_HASH_NAME_WIDTH;
-
-void odin3_hash_name_test_width(uint32_t chars) {
-    start_width = chars == 0 || chars > ODIN3_HASH_NAME_MAX_CHARS ? ODIN3_HASH_NAME_WIDTH : chars;
-}
-
 /* The 5 bits at bit offset `bit` of digest (big-endian); bits past the 256th read 0. */
 static uint32_t digest_group(const uint8_t digest[ODIN3_SHA256_DIGEST_BYTES], uint32_t bit) {
     uint32_t value = 0;
@@ -109,7 +102,7 @@ static void work_free(hn_work *work) {
     odin3_util_free(work->reserved);
 }
 
-static odin3_status work_init(hn_work *work, const odin3_bytes *reserved) {
+static odin3_status work_init(hn_work *work, const odin3_bytes *reserved, uint32_t start) {
     size_t count = work->n;
     work->rows = (hn_row *)odin3_util_malloc(count * sizeof(hn_row));
     work->widths = (uint8_t *)odin3_util_malloc(count);
@@ -126,7 +119,7 @@ static odin3_status work_init(hn_work *work, const odin3_bytes *reserved) {
         memcpy(work->reserved, reserved, work->nreserved * sizeof(odin3_bytes));
         qsort(work->reserved, work->nreserved, sizeof(odin3_bytes), reserved_cmp);
     }
-    memset(work->widths, (int)start_width, count);
+    memset(work->widths, (int)start, count);
     memset(work->marks, 0, count);
     return ODIN3_OK;
 }
@@ -190,24 +183,25 @@ static bool widen_marked(hn_work *work, bool *changed) {
     return true;
 }
 
-odin3_status odin3_hash_names_resolve(const odin3_bytes *fulls, uint32_t n,
-                                      const odin3_bytes *reserved, uint32_t nreserved,
-                                      odin3_hash_name *out) {
-    if (n > ODIN3_HASH_NAME_MAX_ENTRIES || nreserved > ODIN3_HASH_NAME_MAX_ENTRIES) {
-        odin3_log(ODIN3_LOG_ERROR, "hash names: %u names (limit %d) in one module and kind",
-                  n > nreserved ? n : nreserved, ODIN3_HASH_NAME_MAX_ENTRIES);
+odin3_status odin3_hash_names_resolve_at(const odin3_hash_name_set *set, uint32_t start,
+                                         odin3_hash_name *out) {
+    if (set->n > ODIN3_HASH_NAME_MAX_ENTRIES || set->nreserved > ODIN3_HASH_NAME_MAX_ENTRIES ||
+        start < 1 || start > ODIN3_HASH_NAME_MAX_CHARS) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "hash names: %u names, %u reserved (limit %d each) or start width %u invalid",
+                  set->n, set->nreserved, ODIN3_HASH_NAME_MAX_ENTRIES, start);
         return ODIN3_ERR_INVALID_ARG;
     }
-    if (n == 0) {
+    if (set->n == 0) {
         return ODIN3_OK;
     }
-    hn_work work = {.fulls = fulls, .n = n, .out = out, .nreserved = nreserved};
-    odin3_status st = work_init(&work, reserved);
+    hn_work work = {.fulls = set->fulls, .n = set->n, .out = out, .nreserved = set->nreserved};
+    odin3_status st = work_init(&work, set->reserved, start);
     if (st != ODIN3_OK) {
         return st;
     }
-    for (uint32_t i = 0; i < n; i++) {
-        odin3_hash_name_make(fulls[i], work.widths[i], &out[i]);
+    for (uint32_t i = 0; i < set->n; i++) {
+        odin3_hash_name_make(set->fulls[i], work.widths[i], &out[i]);
     }
     bool changed = true;
     while (changed) {
@@ -219,4 +213,11 @@ odin3_status odin3_hash_names_resolve(const odin3_bytes *fulls, uint32_t n,
     }
     work_free(&work);
     return st;
+}
+
+odin3_status odin3_hash_names_resolve(const odin3_bytes *fulls, uint32_t n,
+                                      const odin3_bytes *reserved, uint32_t nreserved,
+                                      odin3_hash_name *out) {
+    const odin3_hash_name_set set = {fulls, n, reserved, nreserved};
+    return odin3_hash_names_resolve_at(&set, ODIN3_HASH_NAME_WIDTH, out);
 }

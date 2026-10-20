@@ -8,7 +8,8 @@
  *   module<TAB>kind<TAB>short<TAB>full<TAB>hier<TAB>file<TAB>line
  *
  * one line per renamed object, sorted by module, kind, short (byte order). In each field TAB, LF,
- * `\` and `%` are written %09, %0A, %5C, %25. This module writes, parses and checks that text; it
+ * `\` and `%` are written %09, %0A, %5C, %25, and a first byte `#` of the module (which would make
+ * the line a comment) is written %23. This module writes, parses and checks that text; it
  * does no file I/O and touches no IR.
  */
 #ifndef ODIN3_BACKENDS_COMMON_NAME_MAP_H
@@ -52,12 +53,18 @@ typedef struct odin3_name_entry {
     uint32_t line;
 } odin3_name_entry;
 
+/* An index slot: a pointer to an entry (a struct so the index is an array of structs). */
+typedef struct odin3_name_ref {
+    const odin3_name_entry *entry;
+} odin3_name_ref;
+
 /* A parsed map: entries sorted by (module, kind, short); every view lives until map_free. */
 typedef struct odin3_name_map {
     odin3_vec entries; /* odin3_name_entry */
     struct odin3_arena *arena;
-    uint32_t width;   /* the header's width (H-4) */
-    uint32_t ignored; /* entry lines the parse warned about and dropped */
+    uint32_t width;          /* the header's width (H-4) */
+    uint32_t ignored;        /* entry lines the parse warned about and dropped */
+    odin3_name_ref *by_full; /* sorted by (module, kind, full): find_full */
 } odin3_name_map;
 
 /* ODIN3_ERR_NO_MEMORY when the arena cannot be created. */
@@ -93,7 +100,8 @@ odin3_status odin3_name_map_parse(odin3_name_map *map, odin3_bytes text, const c
 const odin3_name_entry *odin3_name_map_find(const odin3_name_map *map, odin3_bytes module,
                                             odin3_name_kind kind, odin3_bytes short_name);
 
-/* The entry with this module, kind and full name (linear scan), or NULL. */
+/* The entry with this module, kind and full name (binary search over an index built by parse;
+ * the first of equals in entry order), or NULL. */
 const odin3_name_entry *odin3_name_map_find_full(const odin3_name_map *map, odin3_bytes module,
                                                  odin3_name_kind kind, odin3_bytes full);
 

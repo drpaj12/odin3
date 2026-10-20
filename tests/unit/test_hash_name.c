@@ -26,16 +26,28 @@ enum {
     SHA_BITS_CHARS = 51
 };
 
+/* Start width of resolve_t: 0 is the default (the public call), else resolve_at. */
+static uint32_t test_start;
+
 void setUp(void) {
     odin3_log_set_sink(NULL, NULL);
 }
 
 void tearDown(void) {
-    odin3_hash_name_test_width(0);
+    test_start = 0;
     odin3_util_set_alloc_fail_after(-1);
 }
 
 /* --- T-hash-1: SHA-256 vectors (FIPS 180-4 / NIST) -------------------------------------------- */
+
+static odin3_status resolve_t(const odin3_bytes *fulls, uint32_t n, const odin3_bytes *reserved,
+                              uint32_t nreserved, odin3_hash_name *out) {
+    if (test_start == 0) {
+        return odin3_hash_names_resolve(fulls, n, reserved, nreserved, out);
+    }
+    const odin3_hash_name_set set = {fulls, n, reserved, nreserved};
+    return odin3_hash_names_resolve_at(&set, test_start, out);
+}
 
 static void expect_sha(const void *data, size_t len, const char *want_hex) {
     odin3_sha256 ctx;
@@ -164,7 +176,7 @@ static void test_default_width_without_collision(void) {
     name_set *set = (name_set *)calloc(1, sizeof *set);
     TEST_ASSERT_NOT_NULL(set);
     fill_names(set, SMALL);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hash_names_resolve(set->view, SMALL, NULL, 0, set->out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(set->view, SMALL, NULL, 0, set->out));
     for (uint32_t i = 0; i < SMALL; i++) {
         odin3_hash_name want;
         odin3_hash_name_make(set->view[i], ODIN3_HASH_NAME_WIDTH, &want);
@@ -174,7 +186,7 @@ static void test_default_width_without_collision(void) {
 }
 
 static void test_empty_set(void) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hash_names_resolve(NULL, 0, NULL, 0, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(NULL, 0, NULL, 0, NULL));
 }
 
 /* Does another name match set->view[idx] at `chars` characters and itself reach `reach`? */
@@ -217,8 +229,8 @@ static void test_narrow_width_forces_collisions(void) {
     name_set *set = (name_set *)calloc(1, sizeof *set);
     TEST_ASSERT_NOT_NULL(set);
     fill_names(set, MANY);
-    odin3_hash_name_test_width(NARROW);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hash_names_resolve(set->view, MANY, NULL, 0, set->out));
+    test_start = NARROW;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(set->view, MANY, NULL, 0, set->out));
     expect_all_distinct(set, MANY);
     expect_extension_is_pairwise(set);
     uint32_t widest = 0;
@@ -271,14 +283,12 @@ static void test_result_independent_of_order(void) {
     TEST_ASSERT_NOT_NULL(second);
     fill_names(first, MANY);
     fill_names(second, MANY);
-    odin3_hash_name_test_width(NARROW);
+    test_start = NARROW;
     lcg_state = LCG_SEED;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_hash_names_resolve(first->view, MANY, NULL, 0, first->out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(first->view, MANY, NULL, 0, first->out));
     for (int round = 0; round < SMALL; round++) {
         shuffle(second->view, MANY);
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                              odin3_hash_names_resolve(second->view, MANY, NULL, 0, second->out));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(second->view, MANY, NULL, 0, second->out));
         expect_same_results(first, second);
     }
     free(first);
@@ -288,8 +298,8 @@ static void test_result_independent_of_order(void) {
 static void test_small_set_all_orders(void) {
     odin3_bytes base[4] = {{"a", 1}, {"b", 1}, {"c", 1}, {"d", 1}};
     odin3_hash_name want[4];
-    odin3_hash_name_test_width(NARROW);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hash_names_resolve(base, 4, NULL, 0, want));
+    test_start = NARROW;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(base, 4, NULL, 0, want));
     for (uint32_t perm = 0; perm < 24; perm++) {
         uint32_t order[4] = {0, 1, 2, 3};
         uint32_t code = perm;
@@ -305,7 +315,7 @@ static void test_small_set_all_orders(void) {
         for (uint32_t i = 0; i < 4; i++) {
             view[i] = base[order[i]];
         }
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hash_names_resolve(view, 4, NULL, 0, out));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(view, 4, NULL, 0, out));
         for (uint32_t i = 0; i < 4; i++) {
             TEST_ASSERT_EQUAL_STRING(want[order[i]].text, out[i].text);
         }
@@ -318,14 +328,14 @@ static void test_reserved_name_extends(void) {
     odin3_hash_name out;
     odin3_hash_name_make(full, ODIN3_HASH_NAME_WIDTH, &plain);
     odin3_bytes reserved[2] = {odin3_bytes_cstr("hzzzzzzzzzz"), odin3_bytes_cstr(plain.text)};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hash_names_resolve(&full, 1, reserved, 2, &out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(&full, 1, reserved, 2, &out));
     TEST_ASSERT_EQUAL_UINT(15, chars_of(&out));
     odin3_hash_name want;
     odin3_hash_name_make(full, 15, &want);
     TEST_ASSERT_EQUAL_STRING(want.text, out.text);
     /* a reserved name of the other width does not matter */
     reserved[1] = odin3_bytes_cstr("h42xiy3yijuqwvoj");
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hash_names_resolve(&full, 1, reserved, 2, &out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(&full, 1, reserved, 2, &out));
     TEST_ASSERT_EQUAL_STRING(plain.text, out.text);
 }
 
@@ -333,7 +343,7 @@ static void test_equal_full_names_are_one_name(void) {
     odin3_bytes fulls[3] = {odin3_bytes_cstr("x@f.v:1"), odin3_bytes_cstr("x@f.v:1"),
                             odin3_bytes_cstr("y@f.v:1")};
     odin3_hash_name out[3];
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hash_names_resolve(fulls, 3, NULL, 0, out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(fulls, 3, NULL, 0, out));
     TEST_ASSERT_EQUAL_STRING(out[0].text, out[1].text);
     TEST_ASSERT_EQUAL_UINT(ODIN3_HASH_NAME_WIDTH, chars_of(&out[0]));
 }
@@ -344,10 +354,9 @@ static void test_unresolvable_at_cap_is_an_error(void) {
     odin3_hash_name out;
     odin3_hash_name_make(full, ODIN3_HASH_NAME_MAX_CHARS, &cap);
     odin3_bytes reserved = odin3_bytes_cstr(cap.text);
-    odin3_hash_name_test_width(ODIN3_HASH_NAME_MAX_CHARS);
+    test_start = ODIN3_HASH_NAME_MAX_CHARS;
     odin3_log_mute(true);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_hash_names_resolve(&full, 1, &reserved, 1, &out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, resolve_t(&full, 1, &reserved, 1, &out));
     odin3_log_mute(false);
 }
 
@@ -357,16 +366,15 @@ static void test_extension_stops_at_cap(void) {
     odin3_hash_name out;
     odin3_hash_name_make(full, 50, &at50);
     odin3_bytes reserved = odin3_bytes_cstr(at50.text);
-    odin3_hash_name_test_width(50);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hash_names_resolve(&full, 1, &reserved, 1, &out));
+    test_start = 50;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(&full, 1, &reserved, 1, &out));
     TEST_ASSERT_EQUAL_UINT(ODIN3_HASH_NAME_MAX_CHARS, chars_of(&out)); /* 50 + 5 clamps to 52 */
 }
 
 static void test_over_limit_is_an_error(void) {
     odin3_log_mute(true);
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_ERR_INVALID_ARG,
-        odin3_hash_names_resolve(NULL, ODIN3_HASH_NAME_MAX_ENTRIES + 1, NULL, 0, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          resolve_t(NULL, ODIN3_HASH_NAME_MAX_ENTRIES + 1, NULL, 0, NULL));
     odin3_log_mute(false);
 }
 
@@ -378,7 +386,7 @@ static void test_out_of_memory_at_every_allocation(void) {
     int fails = 0;
     for (long k = 0; k < 16; k++) {
         odin3_util_set_alloc_fail_after(k);
-        odin3_status st = odin3_hash_names_resolve(set->view, SMALL, &reserved, 1, set->out);
+        odin3_status st = resolve_t(set->view, SMALL, &reserved, 1, set->out);
         odin3_util_set_alloc_fail_after(-1);
         if (st == ODIN3_OK) {
             break;
@@ -387,9 +395,23 @@ static void test_out_of_memory_at_every_allocation(void) {
         fails++;
     }
     TEST_ASSERT_TRUE(fails > 0);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_hash_names_resolve(set->view, SMALL, &reserved, 1, set->out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, resolve_t(set->view, SMALL, &reserved, 1, set->out));
     free(set);
+}
+
+static void test_start_width_is_an_argument(void) {
+    odin3_bytes full = odin3_bytes_cstr("x@f.v:1");
+    odin3_hash_name out;
+    const odin3_hash_name_set set = {&full, 1, NULL, 0};
+    odin3_log_mute(true);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hash_names_resolve_at(&set, 0, &out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hash_names_resolve_at(&set, 53, &out));
+    odin3_log_mute(false);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hash_names_resolve_at(&set, NARROW, &out));
+    TEST_ASSERT_EQUAL_UINT(NARROW, chars_of(&out));
+    /* the narrow call left nothing behind: the public call still starts at 10 */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hash_names_resolve(&full, 1, NULL, 0, &out));
+    TEST_ASSERT_EQUAL_UINT(ODIN3_HASH_NAME_WIDTH, chars_of(&out));
 }
 
 int main(void) {
@@ -411,5 +433,6 @@ int main(void) {
     RUN_TEST(test_extension_stops_at_cap);
     RUN_TEST(test_over_limit_is_an_error);
     RUN_TEST(test_out_of_memory_at_every_allocation);
+    RUN_TEST(test_start_width_is_an_argument);
     return UNITY_END();
 }

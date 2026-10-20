@@ -364,7 +364,8 @@ static void test_corrupted_entries_warn_and_are_ignored(void) {
     TEST_ASSERT_EQUAL_UINT(2, map.entries.len);
     TEST_ASSERT_EQUAL_UINT(6, map.ignored);
     TEST_ASSERT_EQUAL_UINT(6, warn_count);
-    expect_warning(0, "name.map:3: name map entry ignored: short name is not the hash");
+    expect_warning(0,
+                   "name.map:3: name map entry ignored: short name 'hzzzzzzzzzz' is not the hash");
     expect_warning(1, "name.map:4: name map entry ignored: not 7 tab-separated fields");
     expect_warning(2, "name.map:5: name map entry ignored: bad escape");
     expect_warning(3, "name.map:6: name map entry ignored: unknown kind");
@@ -443,7 +444,10 @@ static void test_unknown_version_and_bad_headers_are_errors(void) {
         {"# odin3-names 1 hash=sha256\n", "malformed name map header"},
         {"# odin3-names 1 hash=sha256 width=10 extra\n", "malformed name map header"},
         {"m\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\t1\n", "name.map:1: not a name map"},
-        {"# odin3-names", "not a name map"},
+        {"# odin3-names", "malformed name map header ('# odin3-names' must be followed by a space"},
+        {"# odin3-names\t1 hash=sha256 width=10\n", "name.map:1: malformed name map header"},
+        {"# odin3-names 1 hash=sha256 width=10\r\n",
+         "name.map:1: CRLF line ends are not supported"},
         {"", "empty name map"},
     };
     for (size_t i = 0; i < sizeof CASES / sizeof CASES[0]; i++) {
@@ -498,6 +502,143 @@ static void test_parse_out_of_memory(void) {
     odin3_name_map_free(&map);
 }
 
+static void test_module_starting_with_hash_round_trips(void) {
+    fixture fx;
+    odin3_strbuf out;
+    odin3_name_map map;
+    make_entries(&fx);
+    fx.entry[0].module = text_of("#x");
+    fx.entry[1].module = text_of("#");
+    odin3_strbuf_init(&out);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_write(fx.entry, SPEC_COUNT, 10, &out));
+    TEST_ASSERT_NOT_NULL(strstr(out.data, "\n%23x\tnet\t"));
+    TEST_ASSERT_NOT_NULL(strstr(out.data, "\n%23\tnode\t"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, view_of(&out)));
+    TEST_ASSERT_EQUAL_UINT(SPEC_COUNT, map.entries.len);
+    TEST_ASSERT_EQUAL_UINT(0, map.ignored);
+    for (uint32_t i = 0; i < 2; i++) {
+        const odin3_name_entry *hit =
+            odin3_name_map_find(&map, fx.entry[i].module, fx.entry[i].kind, fx.entry[i].short_name);
+        TEST_ASSERT_NOT_NULL(hit);
+        expect_same_entry(hit, &fx.entry[i]);
+    }
+    odin3_name_map_free(&map);
+    odin3_strbuf_free(&out);
+}
+
+static void test_write_refuses_an_over_long_line(void) {
+    odin3_name_entry entry = {text_of("m"),
+                              ODIN3_NAME_NET,
+                              text_of("h42xiy3yiju"),
+                              {NULL, 0},
+                              text_of(""),
+                              text_of("t.v"),
+                              1};
+    size_t len = (size_t)ODIN3_NAME_MAP_MAX_LINE;
+    char *big = (char *)malloc(len + 1);
+    odin3_strbuf out;
+    TEST_ASSERT_NOT_NULL(big);
+    memset(big, 'x', len);
+    big[len] = '\0';
+    entry.full = text_of(big);
+    odin3_strbuf_init(&out);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_name_map_write(&entry, 1, 10, &out));
+    TEST_ASSERT_EQUAL_UINT(0, out.len);
+    TEST_ASSERT_EQUAL_UINT(1, error_count);
+    TEST_ASSERT_NOT_NULL(strstr(errors[0], "over the limit"));
+    big[len - 100] = '\0'; /* short enough: written, and the parser reads it back */
+    entry.full = text_of(big);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_write(&entry, 1, 10, &out));
+    odin3_strbuf_free(&out);
+    free(big);
+}
+
+static void test_duplicate_keys_resolve_the_same_in_any_order(void) {
+    static const char *const LINES[2] = {"m\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\t5\n",
+                                         "m\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\t1\n"};
+    for (int order = 0; order < 2; order++) {
+        odin3_name_map map;
+        char text[TEXT_BUF];
+        (void)snprintf(text, sizeof text, "%s%s%s", HEADER, LINES[order], LINES[1 - order]);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(text)));
+        const odin3_name_entry *hit =
+            odin3_name_map_find(&map, text_of("m"), ODIN3_NAME_NET, text_of("h42xiy3yiju"));
+        TEST_ASSERT_NOT_NULL(hit);
+        TEST_ASSERT_EQUAL_UINT(1, hit->line);
+        hit = odin3_name_map_find_full(&map, text_of("m"), ODIN3_NAME_NET, text_of("a@t.v:1"));
+        TEST_ASSERT_NOT_NULL(hit);
+        TEST_ASSERT_EQUAL_UINT(1, hit->line);
+        odin3_name_map_free(&map);
+    }
+}
+
+enum { MANY_ENTRIES = 600 };
+
+static void expect_all_found(const odin3_name_map *map) {
+    for (int i = 0; i < MANY_ENTRIES; i++) {
+        char module[8];
+        char full[64];
+        (void)snprintf(module, sizeof module, "m%d", i % 7);
+        (void)snprintf(full, sizeof full, "top/n%d@f.v:%d", i, i + 1);
+        const odin3_name_entry *hit =
+            odin3_name_map_find_full(map, text_of(module), ODIN3_NAME_NET, text_of(full));
+        TEST_ASSERT_NOT_NULL(hit);
+        TEST_ASSERT_EQUAL_UINT((uint32_t)(i + 1), hit->line);
+    }
+}
+
+/* find_full over many entries: every full name is found, in log n steps by index. */
+static void test_find_full_over_many_entries(void) {
+    odin3_strbuf text;
+    odin3_name_map map;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, text_of(HEADER)));
+    for (int i = 0; i < MANY_ENTRIES; i++) {
+        char full[64];
+        odin3_hash_name hash;
+        (void)snprintf(full, sizeof full, "top/n%d@f.v:%d", i, i + 1);
+        odin3_hash_name_make(text_of(full), HASH_CHARS, &hash);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_strbuf_appendf(&text, "m%d\tnet\t%s\t%s\ttop\tf.v\t%d\n", i % 7,
+                                                   hash.text, full, i + 1));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, view_of(&text)));
+    TEST_ASSERT_EQUAL_UINT(MANY_ENTRIES, map.entries.len);
+    expect_all_found(&map);
+    TEST_ASSERT_NULL(odin3_name_map_find_full(&map, text_of("m0"), ODIN3_NAME_NET, text_of("zz")));
+    TEST_ASSERT_NULL(
+        odin3_name_map_find_full(&map, text_of("m0"), ODIN3_NAME_WIRE, text_of("top/n0@f.v:1")));
+    odin3_name_map_free(&map);
+    odin3_strbuf_free(&text);
+}
+
+static void test_escape_case_and_short_length(void) {
+    odin3_name_map map;
+    char text[TEXT_BUF];
+    /* lowercase hex is not an escape of the format: ignored with a warning */
+    (void)snprintf(text, sizeof text, "%sm\tnet\th42xiy3yiju\ta@t.v:1\t\tt%%0av\t1\n", HEADER);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(text)));
+    TEST_ASSERT_EQUAL_UINT(0, map.entries.len);
+    expect_warning(0, "name.map:2: name map entry ignored: bad escape");
+    odin3_name_map_free(&map);
+    /* a short of 12 characters (11 hash characters) is a prefix of the hash at a longer width */
+    (void)snprintf(text, sizeof text, "%sm\tnet\th42xiy3yijuq\ta@t.v:1\t\tt.v\t1\n", HEADER);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(text)));
+    TEST_ASSERT_EQUAL_UINT(1, map.entries.len);
+    TEST_ASSERT_EQUAL_UINT(0, map.ignored);
+    odin3_name_map_free(&map);
+}
+
+static void test_crlf_entry_warns(void) {
+    odin3_name_map map;
+    char text[TEXT_BUF];
+    (void)snprintf(text, sizeof text, "%sm\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\t1\r\n", HEADER);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(text)));
+    TEST_ASSERT_EQUAL_UINT(0, map.entries.len);
+    expect_warning(0, "name.map:2: name map entry ignored: CR at the end of the line");
+    odin3_name_map_free(&map);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_write_exact_text);
@@ -519,6 +660,12 @@ int main(void) {
     RUN_TEST(test_check_counts_a_bad_hash);
     RUN_TEST(test_unknown_version_and_bad_headers_are_errors);
     RUN_TEST(test_over_long_line_is_ignored);
+    RUN_TEST(test_module_starting_with_hash_round_trips);
+    RUN_TEST(test_write_refuses_an_over_long_line);
+    RUN_TEST(test_duplicate_keys_resolve_the_same_in_any_order);
+    RUN_TEST(test_find_full_over_many_entries);
+    RUN_TEST(test_escape_case_and_short_length);
+    RUN_TEST(test_crlf_entry_warns);
     RUN_TEST(test_parse_out_of_memory);
     return UNITY_END();
 }

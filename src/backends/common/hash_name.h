@@ -60,10 +60,20 @@ odin3_status odin3_hash_names_resolve(const odin3_bytes *fulls, uint32_t n,
                                       const odin3_bytes *reserved, uint32_t nreserved,
                                       odin3_hash_name *out);
 
+/* The inputs of one resolve call (one module and kind). */
+typedef struct odin3_hash_name_set {
+    const odin3_bytes *fulls;    /* the names to rename */
+    uint32_t n;                  /* fulls[0..n) */
+    const odin3_bytes *reserved; /* names that stay as they are */
+    uint32_t nreserved;          /* reserved[0..nreserved) */
+} odin3_hash_name_set;
+
 /*
- * Test hook (T-hash-3, hidden, not part of the ABI): the starting width of resolve becomes
- * `chars` (1 to 52) so a test can force collisions; 0 restores ODIN3_HASH_NAME_WIDTH.
+ * Like odin3_hash_names_resolve, starting at `start` characters (1 to 52, else INVALID_ARG) instead
+ * of ODIN3_HASH_NAME_WIDTH. For tests (T-hash-3): a narrow start forces collisions. The width is
+ * an argument, not global state, so calls cannot affect each other.
  */
-void odin3_hash_name_test_width(uint32_t chars);
+odin3_status odin3_hash_names_resolve_at(const odin3_hash_name_set *set, uint32_t start,
+                                         odin3_hash_name *out);
 
 #endif

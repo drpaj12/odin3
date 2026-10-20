@@ -20,7 +20,12 @@ enum {
     WIDTH_KEY_LEN = 6 /* strlen("width=") */
 };
 
+/* The sort order of `kind` is its enum order, which must equal the byte order of the words. */
+_Static_assert(ODIN3_NAME_NET == 0 && ODIN3_NAME_NODE == 1 && ODIN3_NAME_WIRE == 2 &&
+                   ODIN3_NAME_KIND_COUNT == 3,
+               "kind enum order must be net, node, wire (H-4 sort order)");
 static const char *const KIND_NAMES[ODIN3_NAME_KIND_COUNT] = {"net", "node", "wire"};
+static const char HEADER_WORD[] = "# odin3-names";
 static const char HEADER_PREFIX[] = "# odin3-names ";
 
 const char *odin3_name_kind_str(odin3_name_kind kind) {
@@ -63,8 +68,22 @@ static int key_cmp(const odin3_name_entry *lhs, const odin3_name_entry *rhs) {
     return bytes_cmp(lhs->short_name, rhs->short_name);
 }
 
+/* Total order for sorting: the key, then full, line, hier and file, so duplicate keys sort the same
+ * way whatever the input order (qsort is not stable). */
 static int entry_cmp(const void *lhs, const void *rhs) {
-    return key_cmp((const odin3_name_entry *)lhs, (const odin3_name_entry *)rhs);
+    const odin3_name_entry *left = (const odin3_name_entry *)lhs;
+    const odin3_name_entry *right = (const odin3_name_entry *)rhs;
+    int cmp = key_cmp(left, right);
+    if (cmp == 0) {
+        cmp = bytes_cmp(left->full, right->full);
+    }
+    if (cmp == 0 && left->line != right->line) {
+        cmp = left->line < right->line ? -1 : 1;
+    }
+    if (cmp == 0) {
+        cmp = bytes_cmp(left->hier, right->hier);
+    }
+    return cmp != 0 ? cmp : bytes_cmp(left->file, right->file);
 }
 
 /* --- write ---------------------------------------------------------------------------------------
@@ -108,12 +127,24 @@ static odin3_status put_field(odin3_strbuf *out, odin3_bytes field) {
 }
 
 static odin3_status put_entry(odin3_strbuf *out, const odin3_name_entry *entry) {
-    const odin3_bytes fields[] = {
-        entry->module,     odin3_bytes_cstr(odin3_name_kind_str(entry->kind)),
-        entry->short_name, entry->full,
-        entry->hier,       entry->file};
+    odin3_bytes module = entry->module;
+    odin3_status st = ODIN3_OK;
+    if (module.len > 0 && ((const char *)module.ptr)[0] == '#') {
+        /* a line starting `#` is a comment: escape the first byte of the line */
+        st = odin3_strbuf_append(out, odin3_bytes_cstr("%23"));
+        module = (odin3_bytes){(const char *)module.ptr + 1, module.len - 1};
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    const odin3_bytes fields[] = {module,
+                                  odin3_bytes_cstr(odin3_name_kind_str(entry->kind)),
+                                  entry->short_name,
+                                  entry->full,
+                                  entry->hier,
+                                  entry->file};
     for (size_t i = 0; i < sizeof fields / sizeof fields[0]; i++) {
-        odin3_status st = put_field(out, fields[i]);
+        st = put_field(out, fields[i]);
         if (st == ODIN3_OK) {
             st = odin3_strbuf_append(out, odin3_bytes_cstr("\t"));
         }
@@ -179,7 +210,17 @@ odin3_status odin3_name_map_write(const odin3_name_entry *entries, uint32_t n, u
                                   ODIN3_NAME_MAP_VERSION, width);
     }
     for (uint32_t i = 0; st == ODIN3_OK && i < n; i++) {
+        size_t before = out->len;
         st = put_entry(out, &sorted[i]);
+        if (st == ODIN3_OK && out->len - before - 1 > ODIN3_NAME_MAP_MAX_LINE) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "name map: the line of '%.*s' (module '%.*s') is %zu bytes, over the "
+                      "limit of %d",
+                      (int)sorted[i].short_name.len, text_or_empty(sorted[i].short_name),
+                      (int)sorted[i].module.len, text_or_empty(sorted[i].module),
+                      out->len - before - 1, ODIN3_NAME_MAP_MAX_LINE);
+            st = ODIN3_ERR_INVALID_ARG;
+        }
     }
     odin3_util_free(sorted);
     if (st != ODIN3_OK && out->len != start) {
@@ -196,11 +237,14 @@ odin3_status odin3_name_map_init(odin3_name_map *map) {
     map->arena = odin3_arena_create(0);
     map->width = ODIN3_HASH_NAME_WIDTH;
     map->ignored = 0;
+    map->by_full = NULL;
     return map->arena == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
 }
 
 void odin3_name_map_free(odin3_name_map *map) {
     odin3_vec_free(&map->entries);
+    odin3_util_free(map->by_full);
+    map->by_full = NULL;
     odin3_arena_destroy(map->arena);
     map->arena = NULL;
 }
@@ -283,9 +327,24 @@ static size_t header_tokens(odin3_bytes line, odin3_bytes tok[HEADER_TOKENS]) {
 static odin3_status parse_header(nm_parser *ps, odin3_bytes line) {
     odin3_bytes tok[HEADER_TOKENS] = {{NULL, 0}};
     uint32_t width = 0;
+    if (line.len >= sizeof HEADER_WORD - 1 &&
+        memcmp(line.ptr, HEADER_WORD, sizeof HEADER_WORD - 1) == 0 &&
+        (line.len == sizeof HEADER_WORD - 1 ||
+         ((const char *)line.ptr)[sizeof HEADER_WORD - 1] != ' ')) {
+        parse_error(ps,
+                    "malformed name map header ('# odin3-names' must be followed by a space and "
+                    "'VERSION hash=sha256 width=N')",
+                    (odin3_bytes){NULL, 0});
+        return ODIN3_ERR_PARSE;
+    }
     if (line.len < sizeof HEADER_PREFIX - 1 ||
         memcmp(line.ptr, HEADER_PREFIX, sizeof HEADER_PREFIX - 1) != 0) {
         parse_error(ps, "not a name map (no '# odin3-names' header)", (odin3_bytes){NULL, 0});
+        return ODIN3_ERR_PARSE;
+    }
+    if (line.len > 0 && ((const char *)line.ptr)[line.len - 1] == '\r') {
+        parse_error(ps, "CRLF line ends are not supported (a name map uses LF)",
+                    (odin3_bytes){NULL, 0});
         return ODIN3_ERR_PARSE;
     }
     size_t count = header_tokens(line, tok);
@@ -305,8 +364,8 @@ static odin3_status parse_header(nm_parser *ps, odin3_bytes line) {
 
 /* One escape `%XX` at bytes[i]: its byte in *ch, or false when it is not one of the four. */
 static bool decode_escape(const char *bytes, size_t left, char *ch) {
-    static const char CODES[] = {'\t', '\n', '\\', '%'};
-    static const char *const TEXTS[] = {"09", "0A", "5C", "25"};
+    static const char CODES[] = {'\t', '\n', '\\', '%', '#'};
+    static const char *const TEXTS[] = {"09", "0A", "5C", "25", "23"};
     if (left < 1 + HEX_DIGITS) {
         return false;
     }
@@ -385,7 +444,7 @@ static odin3_status build_entry(nm_parser *ps, const odin3_bytes raw[ODIN3_NAME_
         }
         odin3_status st = unescape(ps->map->arena, raw[i], slots[i]);
         if (st != ODIN3_OK) {
-            *why = "bad escape (only %09 %0A %5C %25 are allowed)";
+            *why = "bad escape (only %09 %0A %5C %25 %23 are allowed)";
             return st;
         }
     }
@@ -398,7 +457,13 @@ static odin3_status build_entry(nm_parser *ps, const odin3_bytes raw[ODIN3_NAME_
         return ODIN3_ERR_INVALID_ARG;
     }
     if (!short_matches_full(entry, ps->map->width)) {
-        *why = "short name is not the hash of the full name";
+        odin3_log(ODIN3_LOG_WARN,
+                  "%s:%u: name map entry ignored: short name '%.*s' is not the hash of the full "
+                  "name",
+                  ps->path, ps->lineno, (int)entry->short_name.len,
+                  text_or_empty(entry->short_name));
+        ps->map->ignored++;
+        *why = NULL; /* already reported */
         return ODIN3_ERR_INVALID_ARG;
     }
     return ODIN3_OK;
@@ -414,13 +479,19 @@ static odin3_status parse_entry(nm_parser *ps, odin3_bytes line) {
         ignore_line(ps, "line is too long");
         return ODIN3_OK;
     }
+    if (line.len > 0 && ((const char *)line.ptr)[line.len - 1] == '\r') {
+        ignore_line(ps, "CR at the end of the line (a name map uses LF line ends)");
+        return ODIN3_OK;
+    }
     if (!split_fields(line, raw)) {
         ignore_line(ps, "not 7 tab-separated fields");
         return ODIN3_OK;
     }
     odin3_status st = build_entry(ps, raw, &entry, &why);
     if (st == ODIN3_ERR_INVALID_ARG) {
-        ignore_line(ps, why);
+        if (why != NULL) {
+            ignore_line(ps, why);
+        }
         return ODIN3_OK;
     }
     if (st != ODIN3_OK) {
@@ -451,6 +522,41 @@ static bool next_line(odin3_bytes text, size_t *pos, odin3_bytes *line) {
     return true;
 }
 
+/* Compares an entry with the key (module, kind, full) of a find_full lookup. */
+static int full_key_cmp(const odin3_name_entry *entry, const odin3_name_entry *key) {
+    int cmp = bytes_cmp(entry->module, key->module);
+    if (cmp == 0 && entry->kind != key->kind) {
+        cmp = entry->kind < key->kind ? -1 : 1;
+    }
+    return cmp != 0 ? cmp : bytes_cmp(entry->full, key->full);
+}
+
+/* Order of the by-full index: module, kind, full, then the entry order (short, line, ...). */
+static int full_cmp(const void *lhs, const void *rhs) {
+    const odin3_name_entry *left = ((const odin3_name_ref *)lhs)->entry;
+    const odin3_name_entry *right = ((const odin3_name_ref *)rhs)->entry;
+    int cmp = full_key_cmp(left, right);
+    return cmp != 0 ? cmp : entry_cmp(left, right);
+}
+
+/* The by-full index: references to the entries sorted by full_cmp. NO_MEMORY on out of memory. */
+static odin3_status build_full_index(odin3_name_map *map) {
+    size_t count = map->entries.len;
+    if (count == 0) {
+        return ODIN3_OK;
+    }
+    odin3_name_ref *index = (odin3_name_ref *)odin3_util_malloc(count * sizeof *index);
+    if (index == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (size_t i = 0; i < count; i++) {
+        index[i].entry = (const odin3_name_entry *)odin3_vec_cat(&map->entries, i);
+    }
+    qsort(index, count, sizeof *index, full_cmp);
+    map->by_full = index;
+    return ODIN3_OK;
+}
+
 odin3_status odin3_name_map_parse(odin3_name_map *map, odin3_bytes text, const char *path) {
     nm_parser ps = {map, path, 0};
     odin3_bytes line = {NULL, 0};
@@ -472,7 +578,7 @@ odin3_status odin3_name_map_parse(odin3_name_map *map, odin3_bytes text, const c
     if (st == ODIN3_OK && map->entries.len > 1) {
         qsort(map->entries.data, map->entries.len, sizeof(odin3_name_entry), entry_cmp);
     }
-    return st;
+    return st == ODIN3_OK ? build_full_index(map) : st;
 }
 
 /* --- lookup and check ------------------------------------------------------------------------ */
@@ -499,12 +605,20 @@ const odin3_name_entry *odin3_name_map_find(const odin3_name_map *map, odin3_byt
 
 const odin3_name_entry *odin3_name_map_find_full(const odin3_name_map *map, odin3_bytes module,
                                                  odin3_name_kind kind, odin3_bytes full) {
-    for (size_t i = 0; i < map->entries.len; i++) {
-        const odin3_name_entry *entry = (const odin3_name_entry *)odin3_vec_cat(&map->entries, i);
-        if (entry->kind == kind && bytes_cmp(entry->module, module) == 0 &&
-            bytes_cmp(entry->full, full) == 0) {
-            return entry;
+    const odin3_name_entry key = {module, kind, {NULL, 0}, full, {NULL, 0}, {NULL, 0}, 0};
+    size_t count = map->by_full == NULL ? 0 : map->entries.len;
+    size_t lo = 0;
+    size_t hi = count;
+    while (lo < hi) { /* first entry not less than (module, kind, full) */
+        size_t mid = lo + (hi - lo) / 2;
+        if (full_key_cmp(map->by_full[mid].entry, &key) < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
         }
+    }
+    if (lo < count && full_key_cmp(map->by_full[lo].entry, &key) == 0) {
+        return map->by_full[lo].entry;
     }
     return NULL;
 }
