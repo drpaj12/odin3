@@ -312,6 +312,7 @@ FCHECK_SEED = 1
 # The wrapper reads the odin3 binary from this variable (its RTL pre-check, H1); the same name is
 # ``qor_fcheck_run.ODIN3_ENV``.
 FCHECK_ODIN3_ENV = "QOR_FCHECK_ODIN3"
+FCHECK_TECHLIB_ENV = "QOR_FCHECK_TECHLIB"
 FCHECK_RUNNER = Path(__file__).resolve().parent / "qor_fcheck_run.py"
 
 
@@ -330,7 +331,8 @@ def fcheck_command(ctx: LegContext, design: str, netlist: Path, verilator_j: int
             "--vectors", str(FCHECK_VECTORS), "--seed", str(FCHECK_SEED),
             "--verilator-j", str(verilator_j))
     path = f"{ctx.vtr_root / '.venv' / 'bin'}:{os.environ.get('PATH', os.defpath)}"
-    env = (("PATH", path), (FCHECK_ODIN3_ENV, str(ctx.odin3)))
+    env = (("PATH", path), (FCHECK_ODIN3_ENV, str(ctx.odin3)),
+           (FCHECK_TECHLIB_ENV, str(ctx.repo / LIB_REL)))
     return Command(argv, ctx.job_dir, ctx.job_dir / "fcheck.log", env)
 
 

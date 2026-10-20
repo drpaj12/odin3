@@ -214,6 +214,13 @@ class PrecheckTest(unittest.TestCase):
         self.assertIn("incomplete sensitivity list", reasons[0])
         self.assertIn("b, c", reasons[0])
 
+    def test_the_techlib_is_read_before_the_rtl(self) -> None:
+        """Without ``read_techlib`` Odin III cannot elaborate a design with hard blocks and
+        reports nothing: the script must load it first."""
+        run, calls = _fake_tools(0, "")
+        qor_fcheck_run.rtl_precheck(Path("a.v"), None, Path("/o/odin3"), run, Path("/l/vtr.o3lib"))
+        self.assertEqual(calls[0][2], "read_techlib /l/vtr.o3lib; read_verilog --vtr-compat a.v")
+
     def test_both_reasons(self) -> None:
         run, _ = _fake_tools(2, ODIN_SENS)
         reasons = qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run)

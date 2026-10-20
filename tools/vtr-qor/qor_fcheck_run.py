@@ -79,6 +79,7 @@ def drop_port_wires(verilog: str) -> str:
 # --- RTL pre-check (H1) -------------------------------------------------------------------------
 
 ODIN3_ENV = "QOR_FCHECK_ODIN3"  # the odin3 binary (set by qor_legs.fcheck_command)
+TECHLIB_ENV = "QOR_FCHECK_TECHLIB"  # its techlib ($LIB: the hard blocks the RTL instantiates)
 _OBJECTS = re.compile(r"^(\d+) objects?\.", re.M)
 _SENSITIVITY = re.compile(r"incomplete sensitivity list: '([^']+)' is read but not listed")
 _PRECHECK_TIMEOUT_S = 600
@@ -98,10 +99,12 @@ def _yosys_latches(rtl: Path, yosys: Path, run: Callable[..., Any]) -> int | Non
     return int(found.group(1)) if found else None
 
 
-def _odin_sensitivity(rtl: Path, odin3: Path, run: Callable[..., Any]) -> list[str] | None:
+def _odin_sensitivity(rtl: Path, odin3: Path, techlib: Path | None,
+                      run: Callable[..., Any]) -> list[str] | None:
     """The signals Odin III reports as read but missing from a sensitivity list (sorted, each
     once); None when Odin III could not read ``rtl``."""
-    done = run([str(odin3), "-p", f"read_verilog --vtr-compat {rtl}"], capture_output=True,
+    lib = f"read_techlib {techlib}; " if techlib is not None else ""
+    done = run([str(odin3), "-p", f"{lib}read_verilog --vtr-compat {rtl}"], capture_output=True,
                text=True, check=False, timeout=_PRECHECK_TIMEOUT_S)
     if done.returncode != 0:
         return None
@@ -109,7 +112,8 @@ def _odin_sensitivity(rtl: Path, odin3: Path, run: Callable[..., Any]) -> list[s
 
 
 def rtl_precheck(rtl: Path, yosys: Path | None, odin3: Path | None,
-                 run: Callable[..., Any] = subprocess.run) -> list[str]:
+                 run: Callable[..., Any] = subprocess.run,
+                 techlib: Path | None = None) -> list[str]:
     """Why ``rtl`` cannot be judged against a ``--nolatches`` netlist: one text per reason, empty
     for an RTL with neither inferred latches nor incomplete sensitivity lists (and for a tool that
     is missing or fails: that checks nothing, it never hides a design)."""
@@ -119,7 +123,7 @@ def rtl_precheck(rtl: Path, yosys: Path | None, odin3: Path | None,
         reasons.append(f"the RTL infers {latches} latches (Yosys read_verilog + proc without "
                        "--nolatches gives $dlatch cells); the flow reads it with --nolatches "
                        "and drops their held values")
-    signals = _odin_sensitivity(rtl, odin3, run) if odin3 is not None else None
+    signals = _odin_sensitivity(rtl, odin3, techlib, run) if odin3 is not None else None
     if signals:
         reasons.append("the RTL has incomplete sensitivity lists (read but not listed: "
                        f"{', '.join(signals)}); the flow builds them as @*")
@@ -475,7 +479,8 @@ def _precheck_args(args: Sequence[str], blif_to_verilog: Any) -> list[str]:
             yosys = None
     odin = os.environ.get(ODIN3_ENV)
     odin3 = Path(odin) if odin and Path(odin).is_file() else None
-    return rtl_precheck(Path(rtl), yosys, odin3)
+    lib = os.environ.get(TECHLIB_ENV)
+    return rtl_precheck(Path(rtl), yosys, odin3, techlib=Path(lib) if lib else None)
 
 
 def main(argv: list[str]) -> int:
