@@ -6,9 +6,11 @@
  */
 #include "abc_fake_engine.h"
 #include "abc_fixture.h"
+#include "ir/lut.h"
 #include "ir/prov.h"
 #include "passes/abc/abc.h"
 #include "passes/abc/abc_test.h"
+#include "passes/abc/prov.h"
 #include "passes/abc/region.h"
 #include "passes/abc/result.h"
 #include "passes/abc/run.h"
@@ -161,6 +163,79 @@ static void test_write_is_deterministic(void) {
     free(first);
 }
 
+/* One two-input gate with both inputs on the same net a, driving the output y. */
+static void build_dup(const char *type) {
+    odin3_module_id mid = {0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
+    mod = odin3_module_get(design, mid);
+    odin3_net_id in_a = afx_port(design, mod, "a", ODIN3_DIR_IN);
+    odin3_net_id out_y = afx_port(design, mod, "y", ODIN3_DIR_OUT);
+    odin3_net_id nets[3] = {in_a, in_a, out_y};
+    (void)AFX_CELL(design, mod, type, "g", nets, 3);
+    afx_check(design);
+}
+
+/* The one `.names` line and rows the input BLIF has for the gate: header, then rows. */
+static void expect_dup_cover(const char *type, const char *want_names_and_rows) {
+    build_dup(type);
+    start_region("--lut 6");
+    char path[AFX_PATH];
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_run_path(run, ODIN3_ABC_FILE_IN, path, sizeof path));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_xblif_write(run, &region, path));
+    const char *text = afx_slurp(path);
+    const char *at = strstr(text, ".names");
+    TEST_ASSERT_NOT_NULL(at);
+    const char *end = strstr(text, ".end");
+    TEST_ASSERT_NOT_NULL(end);
+    char got[512];
+    (void)snprintf(got, sizeof got, "%.*s", (int)(end - at), at);
+    TEST_ASSERT_EQUAL_STRING(want_names_and_rows, got);
+}
+
+/* A == B: the columns merge. XOR is constant 0 (an empty cover would be rejected by strash). */
+static void test_dup_fanin_xor_is_constant_0(void) {
+    expect_dup_cover("$_XOR_", ".names o3co0\n");
+}
+
+/* A 2-input $lut (A | ~B, one OFF-set row 01 or 10) on one net twice: the table is constant 1. */
+static void test_dup_fanin_lut_or_not_is_constant_1(void) {
+    odin3_module_id mid = {0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_create(design, afx_intern(design, "m"), (odin3_prov_id){0}, &mid));
+    mod = odin3_module_get(design, mid);
+    odin3_net_id in_a = afx_port(design, mod, "a", ODIN3_DIR_IN);
+    odin3_net_id out_y = afx_port(design, mod, "y", ODIN3_DIR_OUT);
+    static const uint64_t k_table = 0xB;
+    odin3_value params[2];
+    odin3_arena *arena = odin3_arena_create(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_lut_params(arena, 2, &k_table, params));
+    odin3_net_id a_nets[2] = {in_a, in_a};
+    odin3_netvec ports[2] = {{a_nets, 2}, {&out_y, 1}};
+    odin3_node_spec spec = {odin3_abc_lut_type(design), 0, (odin3_prov_id){0}, params, 2};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(mod, &spec, ports, &node));
+    odin3_arena_destroy(arena);
+    afx_check(design);
+    start_region("--lut 6");
+    char path[AFX_PATH];
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_run_path(run, ODIN3_ABC_FILE_IN, path, sizeof path));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_xblif_write(run, &region, path));
+    TEST_ASSERT_NOT_NULL(strstr(afx_slurp(path), ".names o3co0\n1\n.end"));
+}
+
+static void test_dup_fanin_xnor_keeps_both_rows(void) {
+    expect_dup_cover("$_XNOR_", ".names o3ci0 o3co0\n0 1\n1 1\n");
+}
+
+static void test_dup_fanin_and_is_a_buffer(void) {
+    expect_dup_cover("$_AND_", ".names o3ci0 o3co0\n1 1\n");
+}
+
+static void test_dup_fanin_nand_survivor_row(void) {
+    expect_dup_cover("$_NAND_", ".names o3ci0 o3co0\n1 0\n");
+}
+
 /* --- read-back ----------------------------------------------------------------------------- */
 
 /* One crafted output and the one error it must give. */
@@ -308,6 +383,11 @@ int main(void) {
     RUN_TEST(test_readback_errors);
     RUN_TEST(test_readback_missing_file);
     RUN_TEST(test_readback_buffer_is_a_connection);
+    RUN_TEST(test_dup_fanin_xor_is_constant_0);
+    RUN_TEST(test_dup_fanin_lut_or_not_is_constant_1);
+    RUN_TEST(test_dup_fanin_xnor_keeps_both_rows);
+    RUN_TEST(test_dup_fanin_and_is_a_buffer);
+    RUN_TEST(test_dup_fanin_nand_survivor_row);
     RUN_TEST(test_oom_sweep);
     return UNITY_END();
 }

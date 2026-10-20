@@ -206,19 +206,52 @@ static odin3_status put_rows(wctx *wc, const rows_view *rows, odin3_strbuf *plan
     return st;
 }
 
+/* The constant a cover with duplicate input names reduces to when every row contradicts itself
+ * (0 for an ON-set cover or no rows, 1 for an OFF-set cover); -1 when a row survives. */
+static int merged_constant(const wctx *wc, const rows_view *rows, odin3_strbuf *plane) {
+    uint32_t count = (uint32_t)wc->names.len;
+    char out_char = '1';
+    for (uint32_t num = 0; num < rows->count; num++) {
+        const char *row = rows->data + (size_t)num * rows->stride;
+        if (merge_row(wc->names.data, count, row, plane->data)) {
+            return -1;
+        }
+        out_char = row[count + (rows->spaced ? 1U : 0U)];
+    }
+    return out_char == '0' ? 1 : 0;
+}
+
+/* `.names <out>` and its constant row: the output as a constant (no inputs). */
+static odin3_status put_constant(wctx *wc, const xname *out, int value) {
+    odin3_status st = put_text(wc, ".names");
+    st = st == ODIN3_OK ? put_word(wc, out->text) : st;
+    st = st == ODIN3_OK ? put_text(wc, value == 1 ? "\n1\n" : "\n") : st;
+    wc->col = 0;
+    return st;
+}
+
 /* `.names <unique inputs> <out>` and the rows. */
 static odin3_status put_names(wctx *wc, const xname *out, const rows_view *rows) {
     uint32_t count = (uint32_t)wc->names.len;
     const xname *names = wc->names.data;
-    odin3_status st = put_text(wc, ".names");
+    odin3_strbuf plane;
+    odin3_strbuf_init(&plane);
+    odin3_status st = odin3_strbuf_reserve(&plane, (size_t)count + 1U);
+    int constant = -1;
+    if (st == ODIN3_OK && has_twins(names, count)) {
+        constant = merged_constant(wc, rows, &plane);
+    }
+    if (st == ODIN3_OK && constant >= 0) {
+        st = put_constant(wc, out, constant);
+        odin3_strbuf_free(&plane);
+        return st;
+    }
+    st = st == ODIN3_OK ? put_text(wc, ".names") : st;
     for (uint32_t col = 0; st == ODIN3_OK && col < count; col++) {
         st = first_same(names, col) == col ? put_word(wc, names[col].text) : st;
     }
     st = st == ODIN3_OK ? put_word(wc, out->text) : st;
     st = st == ODIN3_OK ? put_text(wc, "\n") : st;
-    odin3_strbuf plane;
-    odin3_strbuf_init(&plane);
-    st = st == ODIN3_OK ? odin3_strbuf_reserve(&plane, (size_t)count + 1U) : st;
     if (st == ODIN3_OK) {
         st = put_rows(wc, rows, &plane);
     }

@@ -1,0 +1,33 @@
+# A cell with the same net on two or more inputs, constants included: abc must dedup the fanin and
+# keep the cover exact (a contradictory row drops; no row left is a constant, never an empty cover).
+.model dup_fanin
+.inputs a b s
+.outputs y0 y1 y2 y3 y4 y5 y6 y7 y8
+.names vcc
+1
+.names gnd
+.names a a y0
+01 1
+10 1
+.names a a y1
+00 1
+11 1
+.names a a b y2
+1-1 1
+0-0 1
+.names a a y3
+11 1
+.names a a y4
+01 0
+10 0
+.names a b a y5
+1-1 1
+01- 1
+.names vcc vcc y6
+11 1
+.names gnd gnd y7
+00 1
+.names vcc gnd vcc s y8
+1-11 1
+-1-1 1
+.end
