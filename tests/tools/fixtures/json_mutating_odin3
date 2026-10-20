@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""A stand-in for odin3 in tests/tools/test_json_check.py: runs the real one ($ODIN3_CLI) and then
+damages one file of the round trip as $JSON_MUTATE says, so the leg that watches the file must
+fail: read (exit 1 on the first read-back), fixpoint (a bit number of F3.json), equivalent (a
+bit of a connection of the read-back R.il or R.blif flipped)."""
+
+import os
+import re
+import subprocess
+import sys
+
+argv = sys.argv[1:]
+script = argv[argv.index("-p") + 1]
+real = subprocess.run([os.environ["ODIN3_CLI"], *argv], check=False)
+mode = os.environ.get("JSON_MUTATE", "")
+
+
+def edit(name, pattern, repl):
+    """Rewrites the first match of pattern in the file `name` of this script's work directory."""
+    found = re.search(r"(\S*/" + re.escape(name) + r")\b", script)
+    if found is None:
+        return
+    with open(found.group(1), encoding="utf-8") as src:
+        text = src.read()
+    with open(found.group(1), "w", encoding="utf-8") as dst:
+        dst.write(re.sub(pattern, repl, text, count=1))
+
+
+def flip(match):
+    return match.group(1) + ("1" if match.group(2) == "0" else "0")
+
+
+if real.returncode == 0 and "read_json" in script:
+    first = "/F1.json" in script  # the first read-back reads F1.json, the second F2.json
+    if mode == "read" and first:
+        sys.exit(1)
+    if mode == "fixpoint" and not first:
+        edit("F3.json", r'("hide_name": )(\d)', flip)
+    if mode == "equivalent" and first:
+        edit("R.il", r"(parameter \\A_SIGNED )(\d)", flip)
+        edit("R.blif", r"(\.names [^\n]*\n[01-]* )(\d)", flip)
+sys.exit(real.returncode)
