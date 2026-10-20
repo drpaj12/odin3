@@ -305,7 +305,7 @@ static void setup_rules(hm_ctx *hc) {
         info_absent(arch, "adder", count_cells(hc, "$add") + count_cells(hc, "$sub"),
                     "$add'/'$sub");
     }
-    if (!reg_sp && !reg_dp) {
+    if (!hc->rules.have_sp && !hc->rules.have_dp) {
         info_absent(arch, "single_port_ram", count_cells(hc, "$mem"), "$mem");
         info_bits(hc);
     }

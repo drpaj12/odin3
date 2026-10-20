@@ -238,6 +238,18 @@ static void test_small_soft_memory_does_not_warn(void) {
     pb_free(&res);
 }
 
+/* Review M-1: the tech library registers every hard type but the record has no RAM model: the
+ * memory phases are skipped, so the INFO and the 50k warning must follow the record. */
+static void test_lib_with_ramless_record(void) {
+    pb_result res;
+    pmf_build_lib_record((pmf_case){PMF_MEM, false, 13, 8, false}, NONE_XML, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pmf_run(&res, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mem"));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "has no 'single_port_ram' model; 1 '$mem' cells left"));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "memory 'mem' of 65536 bits (width x depth) stays soft"));
+    pb_free(&res);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_r2_sp_instance_depth_11);
@@ -253,6 +265,7 @@ int main(void) {
     RUN_TEST(test_read_enable_is_emulated);
     RUN_TEST(test_sim_read_enable);
     RUN_TEST(test_no_ram_model_is_soft);
+    RUN_TEST(test_lib_with_ramless_record);
     RUN_TEST(test_big_soft_memory_warns_no_ram_model);
     RUN_TEST(test_big_soft_memory_warns_pattern);
     RUN_TEST(test_small_soft_memory_does_not_warn);

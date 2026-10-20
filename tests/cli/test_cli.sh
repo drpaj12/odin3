@@ -796,8 +796,11 @@ memory_merge_soft)
             fail "$micro: partial_map alone failed"
         "$odin3" -p "$pre; memory_merge; partial_map; $tail; write_blif --vtr $work/b.blif" >"$work/out" 2>"$work/err" ||
             fail "$micro: memory_merge; partial_map failed"
-        # mem_dffe_var maps hard since the read enable is emulated (R-10): its RAM blocks are unnamed
-        "$equiv" --match-unnamed "$work/a.blif" "$work/b.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent"
+        # mem_dffe_var maps hard since the read enable is emulated (R-10): its RAM blocks are
+        # unnamed, so they are paired by simulation; mem_offset stays soft and is compared plain
+        flag=""
+        [[ $micro == mem_dffe_var ]] && flag="--match-unnamed"
+        "$equiv" $flag "$work/a.blif" "$work/b.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent"
     done
     pre="read_techlib $lib; read_verilog --vtr-compat $mm/mem_negedge.v; proc; opt"
     "$odin3" -p "$pre; partial_map; $tail; sim 3000 7 $work/a.vec" >"$work/out" 2>"$work/err" ||
@@ -852,6 +855,15 @@ pm_mem_rden)
         run_one "$mm/${micro}_ref.v" "$work/${micro}_ref.blif"
         "$equiv" --match-unnamed "$work/$micro.blif" "$work/${micro}_ref.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent to the reference"
     done
+    # bram.v: DEPTH 16 but 8-bit addresses, so its $mem has ABITS 8 and the reference uses 8 bits; a
+    # 4-bit reference is not equivalent
+    sed 's/ADDR_WIDTH(8)/ADDR_WIDTH(4)/; s/\.addr1(wr_addr)/.addr1(wr_addr[3:0])/; s/\.addr2(rd_addr)/.addr2(rd_addr[3:0])/' "$mm/bram_ref.v" >"$work/bram4.v"
+    run_one "$work/bram4.v" "$work/bram4.blif"
+    if "$equiv" --match-unnamed "$work/bram.blif" "$work/bram4.blif" >"$work/out" 2>"$work/err"; then fail "a 4-bit bram reference is equivalent"; fi
+    # nor is an unregistered enable
+    sed 's/assign out = en_r ? ram_out : hold;/assign out = we ? ram_out : hold;/' "$mm/mem_rden_ref.v" >"$work/bad2.v"
+    run_one "$work/bad2.v" "$work/bad2.blif"
+    if "$equiv" --match-unnamed "$work/mem_rden.blif" "$work/bad2.blif" >"$work/out" 2>"$work/err"; then fail "a reference with an unregistered enable is equivalent"; fi
     # the check is not vacuous: without the hold the reference differs
     sed 's/assign out = en_r ? ram_out : hold;/assign out = ram_out;/' "$mm/mem_rden_ref.v" >"$work/bad.v"
     run_one "$work/bad.v" "$work/bad.blif"

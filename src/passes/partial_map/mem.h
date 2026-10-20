@@ -74,6 +74,7 @@ typedef enum mem_verdict {
     MEM_SOFT_OFFSET,  /* OFFSET != 0 (plan agent default e, D13) */
     MEM_SOFT_ASYNC,   /* R-9: an asynchronous read port, or more than one clock domain */
     MEM_SOFT_EDGE,    /* a port on the falling edge (agent default f, D14) */
+    MEM_SOFT_EN,      /* a read enable that is not connected: no value to emulate (R-10) */
     MEM_SOFT_PATTERN, /* R-11: no fixed-subset mapping */
 } mem_verdict;
 

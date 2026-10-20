@@ -32,6 +32,11 @@ typedef struct pmf_case {
  * tech library lib/vtr.o3lib and no record. The last module is the top. */
 void pmf_build(pmf_case cs, const char *arch_xml, pb_result *out);
 
+/* As pmf_build with NULL (the k6 tech library read, so every hard cell type is registered), then
+ * the record of arch_xml attached: the case of `read_techlib` followed by an arch that lacks a
+ * model. */
+void pmf_build_lib_record(pmf_case cs, const char *arch_xml, pb_result *out);
+
 /* odin3_partial_map_run_opts on res with check FULL before and after; returns its status. opts and
  * stats may be NULL. */
 odin3_status pmf_run(pb_result *res, const pm_options *opts, odin3_hardmap_stats *stats);

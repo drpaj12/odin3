@@ -206,6 +206,16 @@ void pmf_build(pmf_case cs, const char *arch_xml, pb_result *out) {
                           odin3_design_set_top(out->design, odin3_module_id_of(out->module)));
 }
 
+void pmf_build_lib_record(pmf_case cs, const char *arch_xml, pb_result *out) {
+    pmf_build(cs, NULL, out);
+    arch_text xml = {NULL, 0};
+    xml.text = slurp(arch_xml, &xml.len);
+    odin3_arch *arch = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_arch(out->design, &arch));
+    load_arch(arch, arch_xml, &xml);
+    free(xml.text);
+}
+
 static void check_full(odin3_design *design) {
     odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, opts));

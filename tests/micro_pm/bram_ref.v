@@ -1,6 +1,7 @@
 // The reference of tests/micro/verilog/common/bram.v for equiv-check (4.4 R-10): the block RAM
 // written out (write port 1, read port 2; the write happens when the read enable is 0) with the
-// read enable emulated by hand.
+// read enable emulated by hand. The original has DEPTH 16 but 8-bit addresses, so its `$mem` has
+// ABITS 8 (SIZE 16) and the block here takes the 8 address bits.
 module block_ram (
     input clock,
     input [7:0] rd_addr,

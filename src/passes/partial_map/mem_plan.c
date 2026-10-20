@@ -108,6 +108,12 @@ static mem_verdict early_verdict(const mem_model *mm) {
     if (mm->too_wide) {
         return MEM_SOFT_PATTERN;
     }
+    for (uint32_t i = 0; i < mm->n_rd; i++) {
+        const mem_rport *rp = rd_at(mm, i);
+        if (!rp->en_always && !odin3_net_valid(rp->en)) {
+            return MEM_SOFT_EN; /* an undriven enable has no value to register */
+        }
+    }
     mem_verdict clocks = clock_verdict(mm);
     if (clocks != MEM_HARD) {
         return clocks;

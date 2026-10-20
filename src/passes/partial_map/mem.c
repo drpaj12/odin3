@@ -146,6 +146,8 @@ static const char *soft_reason(mem_verdict verdict) {
         return "it has an asynchronous read port or ports on more than one clock";
     case MEM_SOFT_EDGE:
         return "it has a port on the falling clock edge";
+    case MEM_SOFT_EN:
+        return "a read enable is not connected";
     default:
         return "it has no fixed-subset mapping to the arch's RAMs";
     }
@@ -179,6 +181,10 @@ static void warn_soft(const hm_ctx *hc, const mem_model *mm, mem_verdict verdict
     } else if (verdict == MEM_SOFT_EDGE) {
         hm_diag(hc, ODIN3_LOG_WARN, mm->node,
                 "partial_map: memory '%s' has a port on the falling clock edge; left to lower",
+                name);
+    } else if (verdict == MEM_SOFT_EN) {
+        hm_diag(hc, ODIN3_LOG_WARN, mm->node,
+                "partial_map: memory '%s' has a read enable that is not connected; left to lower",
                 name);
     } else {
         hm_diag(hc, ODIN3_LOG_WARN, mm->node,
@@ -236,7 +242,6 @@ static odin3_status emu_bit(hm_ctx *hc, const emu_port *ep, odin3_net_id en_r, u
     odin3_net_id hold = {0};
     odin3_net_id next = {0};
     odin3_net_id held = {0};
-    (void)snprintf(role, sizeof role, "rd%" PRIu32 ".hold%" PRIu32, ep->tag, bit);
     odin3_status st = hm_fresh_nets(hc, 1, &hold);
     const odin3_net_id mux_in[2] = {hold, ep->raw[bit]};
     (void)snprintf(role, sizeof role, "rd%" PRIu32 ".sel%" PRIu32, ep->tag, bit);
