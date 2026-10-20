@@ -44,8 +44,10 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -323,8 +325,29 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--min-compared", type=int, default=1, metavar="N",
                     help="fail unless at least N seeds were compared (not unproven, not empty)")
     ap.add_argument("--strict-unproven", action="store_true", help="an unproven seed exits 4")
-    ap.add_argument("--work", type=Path, help="the work directory")
+    ap.add_argument("--work", type=Path, help="the work directory (never removed)")
+    ap.add_argument("--keep-tmp", action="store_true",
+                    help="keep the temporary work directory (else removed unless a seed failed)")
     return ap.parse_args(argv)
+
+
+def run_in_work(args: argparse.Namespace) -> int:
+    """``execute`` in the work directory; one this run made is removed, except after a finding
+    (exit 1 or 3: its seed folders are the repro the output names) or with ``--keep-tmp``."""
+    if args.work is not None:
+        args.work.mkdir(parents=True, exist_ok=True)
+        return execute(args, args.work.resolve())
+    work = Path(tempfile.mkdtemp(prefix="lower-gen-diff-", dir=os.environ.get(lc.WORK_ENV) or None))
+    code = lc.EXIT_ERROR
+    try:
+        code = execute(args, work.resolve())
+        return code
+    finally:
+        if args.keep_tmp or os.environ.get(lc.KEEP_ENV) or code in (lc.EXIT_FAIL,
+                                                                       lc.EXIT_CRASH):
+            print(f"{TOOL}: work directory kept: {work.resolve()}", file=sys.stderr)
+        else:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -335,8 +358,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return lc.EXIT_SKIP
     try:
         lc.parse_size(args.mem_cap_text)
-        work = lc.make_work(args.work, "lower-gen-diff-")
-        return execute(args, work)
+        return run_in_work(args)
     except (OSError, lc.ToolError, GenDiffError, ValueError) as exc:
         print(f"{TOOL}: error: {exc}", file=sys.stderr)
         return lc.EXIT_ERROR
