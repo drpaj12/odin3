@@ -9,6 +9,9 @@
 #include "ir/prov.h"
 #include "odin3/odin3.h"
 
+#include <stdbool.h>
+#include <stdint.h>
+
 /* The attributes the reader sets (blif_clock, blif_name, .attr/.param, blif_extras) and their keys
  * are documented in frontends/blif/attrs.h. */
 
@@ -108,6 +111,33 @@ odin3_status odin3_blif_read(odin3_design *design, const char *path);
  * a run of its design.
  */
 odin3_status odin3_blif_read_in(odin3_pass_ctx *ctx, const char *path);
+
+/*
+ * 5.4d: what a read with the option `hdl_locs` did (spec D-4, D-5, D-7). Without the option the
+ * reader is unchanged byte for byte and the counters stay 0.
+ * - nets: net names decoded from provenance names (SHORT, hier and a location on the net);
+ * - cells: `.attr src` texts restored on their cell (the attribute is dropped);
+ * - inherited: cells that took the location of their output net (D-5), not counted in `cells`;
+ * - capped: restored objects whose text held more than 8 locations (the first 8 are kept);
+ * - bad: `.attr src` texts that are not a location list (kept as attributes, one WARNING each,
+ *   `path:line: ...`; L-6 and D-7: never an error).
+ */
+typedef struct odin3_blif_read_stats {
+    uint32_t nets, cells, inherited, capped, bad;
+} odin3_blif_read_stats;
+
+typedef struct odin3_blif_read_opts {
+    bool hdl_locs;                /* decode HDL locations: names, `.attr src`, D-5 */
+    odin3_blif_read_stats *stats; /* may be NULL; zeroed by the call */
+} odin3_blif_read_opts;
+
+/*
+ * odin3_blif_read with options. ctx NULL: the reader's own run (as odin3_blif_read), else the
+ * caller's run as odin3_blif_read_in. With opts->hdl_locs the reader begins one operation for the
+ * read and makes every location record in it (hdl_restore.h). opts NULL: no options.
+ */
+odin3_status odin3_blif_read_ex(odin3_design *design, odin3_pass_ctx *ctx, const char *path,
+                                const odin3_blif_read_opts *opts);
 
 /* Test hook: hook(user) runs between pass 1 and pass 2 of every later read (NULL: none). */
 void odin3_blif_test_set_between_passes(void (*hook)(void *user), void *user);

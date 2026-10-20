@@ -80,6 +80,7 @@ add_library(odin3_core OBJECT
     src/frontends/blif/lexer.c
     src/frontends/blif/param_text.c
     src/frontends/blif/reader.c
+    src/frontends/blif/reader_locs.c
     src/frontends/json/json_lex.c
     src/frontends/json/json_parse.c
     src/frontends/json/reader.c
@@ -1401,6 +1402,9 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_blif_reader)
     target_compile_definitions(test_blif_reader PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    # 5.4d: read_blif --hdl-locs (names, `.attr src`, D-5), each case in a mkdtemp directory.
+    odin3_add_unit_test(test_blif_locs)
+    target_compile_definitions(test_blif_locs PRIVATE ODIN3_LOCS_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_blif_writer)
     target_compile_definitions(test_blif_writer PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
