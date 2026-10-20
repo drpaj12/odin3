@@ -170,7 +170,8 @@ header = Path(__file__).with_name("abc_line.txt")  # a test's own # abc: line ("
 text = header.read_text() + {BLIF!r} if header.exists() else {ABC_LINE + BLIF!r}
 if "--name-style provenance" in script:
     text += "# names: provenance\\n"
-Path(script.split()[-1]).write_text(text)
+if "write_blif" in script:  # the fcheck pre-check's read_verilog-only script writes nothing
+    Path(script.split()[-1]).write_text(text)
 """
 
 FAKE_TIME = f"""
