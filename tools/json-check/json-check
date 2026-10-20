@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# json-check: write_json -> read_json round trip at the word, gate and LUT levels, and the
+# committed Yosys 0.55 fixtures (5.3 spec sections 6 and 9). Exit codes: 0 every design passes; 1 a
+# leg failed, an expect line is stale or nothing was compared; 2 usage or tool error; 3 a child
+# crashed or timed out; 4 unproven (nobody listed it); 77 skipped (no memory cap). See json_check.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../icells-check:$here/../elab-check:$here/../opt-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/json_check.py" "$@"

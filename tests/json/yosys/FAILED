@@ -1,0 +1,6 @@
+gate adder_hard_block.v ERROR: Module `\adder' referenced in module `\top_module' in cell `\a1' is not part of the design.
+lut adder_hard_block.v ERROR: Module `\adder' referenced in module `\top_module' in cell `\a1' is not part of the design.
+gate hard_adder_cin_propagation.v ERROR: Module `\adder' referenced in module `\top_module' in cell `\add2' is not part of the design.
+lut hard_adder_cin_propagation.v ERROR: Module `\adder' referenced in module `\top_module' in cell `\add2' is not part of the design.
+gate multiply_hard_block.v ERROR: Module `\multiply' referenced in module `\top_module' in cell `\m2' is not part of the design.
+lut multiply_hard_block.v ERROR: Module `\multiply' referenced in module `\top_module' in cell `\m2' is not part of the design.

@@ -426,9 +426,7 @@ static void test_declared_blackbox_module(void) {
 }
 
 /* R-5: the parameters of an instance of a module are attributes parameter:<NAME> after a read;
- * the writer writes any attribute as an attribute (its classify maps only the BLIF keys to
- * parameters), so the fixpoint holds and the Yosys form (parameters) is the writer fix 5.3 reports.
- */
+ * the writer writes them back as the cell's parameters, so files 2 and 3 are the same. */
 static void test_instance_and_parameters(void) {
     odin3_module *sub = new_module("sub");
     (void)add_port(sub, (port_args){"i", ODIN3_DIR_IN, 2});
@@ -443,7 +441,22 @@ static void test_instance_and_parameters(void) {
     char *text = round_trip(NULL);
     assert_has(text, "\"type\": \"sub\"");
     assert_has(text, "\"u1\": {");
-    assert_has(text, "\"parameter:W\": \"00000000000000000000000000001000\"");
+    assert_has(text, "\"parameters\": {\n            \"W\": \"00000000000000000000000000001000\"");
+    assert_lacks_text(text, "parameter:");
+    odin3_util_free(text);
+}
+
+/* R-5 from a file: instance parameters read from JSON write back as parameters, and files 2 and 3
+ * are byte for byte the same (round_trip asserts it). */
+static void test_instance_parameters_from_file(void) {
+    rj_expect_ok("{\"modules\": {\"top\": {\"cells\": {\"u\": {\"type\": \"sub\", "
+                 "\"parameters\": {\"W\": \"00000000000000000000000000001000\", \"S\": \"ab\"}, "
+                 "\"connections\": {\"i\": [2]}}}}, \"sub\": {\"ports\": {\"i\": {\"direction\": "
+                 "\"input\", \"bits\": [2]}}}}}");
+    char *text = round_trip(NULL);
+    assert_has(text, "\"W\": \"00000000000000000000000000001000\"");
+    assert_has(text, "\"S\": \"ab\"");
+    assert_lacks_text(text, "parameter:");
     odin3_util_free(text);
 }
 
@@ -631,6 +644,7 @@ int main(void) {
     RUN_TEST(test_user_attributes);
     RUN_TEST(test_declared_blackbox_module);
     RUN_TEST(test_instance_and_parameters);
+    RUN_TEST(test_instance_parameters_from_file);
     RUN_TEST(test_parameters_binary);
     RUN_TEST(test_2d_word_cells);
     RUN_TEST(test_wire_range_attributes);
