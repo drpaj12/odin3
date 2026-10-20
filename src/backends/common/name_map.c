@@ -128,14 +128,13 @@ static odin3_status put_field(odin3_strbuf *out, odin3_bytes field) {
 
 static odin3_status put_entry(odin3_strbuf *out, const odin3_name_entry *entry) {
     odin3_bytes module = entry->module;
-    odin3_status st = ODIN3_OK;
     if (module.len > 0 && ((const char *)module.ptr)[0] == '#') {
         /* a line starting `#` is a comment: escape the first byte of the line */
-        st = odin3_strbuf_append(out, odin3_bytes_cstr("%23"));
-        module = (odin3_bytes){(const char *)module.ptr + 1, module.len - 1};
-        if (st != ODIN3_OK) {
-            return st;
+        odin3_status first = odin3_strbuf_append(out, odin3_bytes_cstr("%23"));
+        if (first != ODIN3_OK) {
+            return first;
         }
+        module = (odin3_bytes){(const char *)module.ptr + 1, module.len - 1};
     }
     const odin3_bytes fields[] = {module,
                                   odin3_bytes_cstr(odin3_name_kind_str(entry->kind)),
@@ -144,7 +143,7 @@ static odin3_status put_entry(odin3_strbuf *out, const odin3_name_entry *entry) 
                                   entry->hier,
                                   entry->file};
     for (size_t i = 0; i < sizeof fields / sizeof fields[0]; i++) {
-        st = put_field(out, fields[i]);
+        odin3_status st = put_field(out, fields[i]);
         if (st == ODIN3_OK) {
             st = odin3_strbuf_append(out, odin3_bytes_cstr("\t"));
         }
@@ -342,7 +341,7 @@ static odin3_status parse_header(nm_parser *ps, odin3_bytes line) {
         parse_error(ps, "not a name map (no '# odin3-names' header)", (odin3_bytes){NULL, 0});
         return ODIN3_ERR_PARSE;
     }
-    if (line.len > 0 && ((const char *)line.ptr)[line.len - 1] == '\r') {
+    if (((const char *)line.ptr)[line.len - 1] == '\r') {
         parse_error(ps, "CRLF line ends are not supported (a name map uses LF)",
                     (odin3_bytes){NULL, 0});
         return ODIN3_ERR_PARSE;
