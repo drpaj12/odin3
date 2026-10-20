@@ -212,6 +212,134 @@ static void test_keep_src_attr(void) {
     TEST_ASSERT_EQUAL_UINT32(0, count_in_log("location lists"));
 }
 
+/* The module "top" of text, a one-bit net per netname: a port a [2] and the netnames of names. */
+static void read_port_names(const char *names) {
+    char json[1024];
+    (void)snprintf(json, sizeof json,
+                   "{\"modules\": {\"top\": {\"ports\": {\"a\": {\"direction\": \"input\","
+                   "\"bits\": [2]}}, \"netnames\": {%s}}}}",
+                   names);
+    rj_expect_ok(json);
+}
+
+/* Review 2: the JSON parser refuses a duplicate key, so no netname key is indexed twice. */
+static void test_duplicate_netname_keys(void) {
+    rj_expect_error("{\"modules\": {\"top\": {\"netnames\": {"
+                    "\"n\": {\"bits\": [4], \"attributes\": {\"src\": \"m.v:4.1-4.2\"}},"
+                    "\"n\": {\"bits\": [4], \"attributes\": {\"src\": \"m.v:5.1-5.2\"}}}}}}",
+                    "duplicate key");
+}
+
+/* Review 3: a netname bit that makes no net (a port bit) makes no record and no operation. */
+static void test_no_records_without_label(void) {
+    const char *json =
+        "{\"modules\": {\"top\": {\"ports\": {\"a\": {\"direction\": \"input\", \"bits\": [2]}},"
+        "\"netnames\": {\"alias\": {\"bits\": [2], \"attributes\": {\"src\": \"m.v:2.1-2.2\"}}}}}}";
+    rj_expect_ok(json);
+    uint32_t restored = odin3_prov_end(rj_design);
+    odin3_json_opts opts = {.keep_src_attr = true};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &opts));
+    /* only the SOURCE and DERIVED records of the alias wire, none for a net that is not made */
+    TEST_ASSERT_EQUAL_UINT32(odin3_prov_end(rj_design) + 2, restored);
+}
+
+/* Review 3: a read with no restorable src makes the same records as --keep-src-attr, in no op. */
+static void test_nothing_restorable_no_operation(void) {
+    const char *json =
+        "{\"modules\": {\"top\": {\"ports\": {\"a\": {\"direction\": \"input\", \"bits\": [2]}},"
+        "\"netnames\": {\"alias\": {\"bits\": [2], \"attributes\": {\"src\": \"junk\"}}}}}}";
+    rj_expect_ok(json);
+    uint32_t end = odin3_prov_end(rj_design);
+    uint32_t ops = 0;
+    for (uint32_t i = 1; i < end; i++) {
+        ops += odin3_prov_get(rj_design, (odin3_prov_id){i})->kind == ODIN3_PROV_DERIVED ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, ops);
+    odin3_json_opts opts = {.keep_src_attr = true};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &opts));
+    TEST_ASSERT_EQUAL_UINT32(end, odin3_prov_end(rj_design));
+}
+
+/* Review 4: a port's record has the IMPORTED record of its netname value as a parent. */
+static void test_port_parent_is_netname_record(void) {
+    rj_expect_ok("{\"modules\": {\"top\": {\n\"ports\": {\"a\": {\"direction\": \"input\","
+                 "\"bits\": [2]}},\n\"netnames\": {\"a\": {\"bits\": [2],"
+                 "\"attributes\": {\"src\": \"m.v:2.1-2.2\"}}}}}}");
+    odin3_module *mod = rj_module("top");
+    const odin3_prov_record *rec =
+        odin3_prov_get(rj_design, odin3_wire_prov(mod, rj_wire(mod, "a")));
+    const odin3_prov_record *netlist = odin3_prov_get(rj_design, rec->parents.ids[1]);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_IMPORTED, netlist->kind);
+    TEST_ASSERT_EQUAL_UINT32(3, netlist->locs[0].line);
+}
+
+/* Index edge cases: two netnames on one bit, a bad src or none on a port's netname. */
+static void test_two_netnames_one_bit(void) {
+    read_port_names("\"p\": {\"bits\": [4], \"attributes\": {\"src\": \"m.v:4.1-4.2\"}},"
+                    "\"q\": {\"bits\": [4], \"attributes\": {\"src\": \"m.v:5.1-5.2\"}},"
+                    "\"a\": {\"bits\": [2], \"attributes\": {\"src\": \"junk\"}}");
+    odin3_module *mod = rj_module("top");
+    assert_one_loc(odin3_net_prov(mod, odin3_wire_net(mod, rj_wire(mod, "p"), 0)),
+                   (want_loc){"m.v", 4, 1, 4, 2});
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_IMPORTED,
+                          odin3_prov_get(rj_design, odin3_wire_prov(mod, rj_wire(mod, "a")))->kind);
+    rj_log_has("1 `src` attribute(s)");
+}
+
+/* A multi-bit netname named like a port is refused by the width check, before any restore. */
+static void test_multibit_netname_named_like_port(void) {
+    rj_expect_error(
+        "{\"modules\": {\"top\": {\"ports\": {\"a\": {\"direction\": \"input\", \"bits\": [2]}},"
+        "\"netnames\": {\"a\": {\"bits\": [2, 3], \"attributes\": {\"src\": \"m.v:2.1-2.2\"}}}}}}",
+        "has 2 bits but the port 'a' has 1");
+}
+
+static void test_non_string_src_is_attribute(void) {
+    rj_expect_ok("{\"modules\": {\"top\": {\"attributes\": {\"src\": 5}}}}");
+    odin3_module *mod = rj_module("top");
+    TEST_ASSERT_TRUE(
+        has_attr(mod, (odin3_objref){ODIN3_OBJ_MODULE, odin3_module_id_of(mod).v}, "src"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_in_log("location lists"));
+}
+
+/* L-3: a number over UINT32_MAX and a text of only separators are bad texts. */
+static void test_bad_numbers_and_separators(void) {
+    const char *const texts[] = {"a.v:4294967296", "|"};
+    for (size_t i = 0; i < sizeof texts / sizeof texts[0]; i++) {
+        read_module_src(texts[i]);
+        odin3_module *mod = rj_module("top");
+        TEST_ASSERT_TRUE(
+            has_attr(mod, (odin3_objref){ODIN3_OBJ_MODULE, odin3_module_id_of(mod).v}, "src"));
+        TEST_ASSERT_EQUAL_UINT32(1, count_in_log("are not location lists"));
+    }
+}
+
+/* D-7: nine locations: eight are kept, one INFO. */
+static void test_location_cap(void) {
+    read_module_src("a.v:1.1-1.2|a.v:2.1-2.2|a.v:3.1-3.2|a.v:4.1-4.2|a.v:5.1-5.2|a.v:6.1-6.2|"
+                    "a.v:7.1-7.2|a.v:8.1-8.2|a.v:9.1-9.2");
+    odin3_module *mod = rj_module("top");
+    TEST_ASSERT_EQUAL_UINT32(8, locs_of(odin3_module_prov(mod)).n);
+    TEST_ASSERT_EQUAL_UINT32(1, count_in_log("more than 8 locations"));
+}
+
+/* L-8: with --keep-src-attr, read then write gives the file again. */
+static void test_keep_round_trip(void) {
+    odin3_json_opts opts = {.keep_src_attr = true};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(ALL_LEVELS, &opts));
+    const char *f1 = rj_path("k1.json");
+    const char *f2 = rj_path("k2.json");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_json_write(rj_design, f1));
+    rj_fresh();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_json_read(rj_design, f1, &opts));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_json_write(rj_design, f2));
+    char *one = rj_slurp(f1);
+    char *two = rj_slurp(f2);
+    TEST_ASSERT_EQUAL_STRING(one, two);
+    odin3_util_free(one);
+    odin3_util_free(two);
+}
+
 /* T-2, T-4: Yosys's text is printed back as it was; write, read, write is a fixpoint. */
 static void test_write_read_write(void) {
     rj_expect_ok(ALL_LEVELS);
@@ -290,6 +418,16 @@ int main(void) {
     RUN_TEST(test_bad_text_escaped);
     RUN_TEST(test_bad_text_cut_on_boundary);
     RUN_TEST(test_keep_src_attr);
+    RUN_TEST(test_duplicate_netname_keys);
+    RUN_TEST(test_no_records_without_label);
+    RUN_TEST(test_nothing_restorable_no_operation);
+    RUN_TEST(test_port_parent_is_netname_record);
+    RUN_TEST(test_two_netnames_one_bit);
+    RUN_TEST(test_multibit_netname_named_like_port);
+    RUN_TEST(test_non_string_src_is_attribute);
+    RUN_TEST(test_bad_numbers_and_separators);
+    RUN_TEST(test_location_cap);
+    RUN_TEST(test_keep_round_trip);
     RUN_TEST(test_write_read_write);
     RUN_TEST(test_cell_count);
     RUN_TEST(test_pass_option);

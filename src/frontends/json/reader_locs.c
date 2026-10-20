@@ -31,20 +31,22 @@ bool jr_src_restorable(const jr *rd, const odin3_json_node *attrs) {
     return jr_src_member_restorable(rd, src_member(attrs));
 }
 
+enum { CONT_MASK = 0xC0, CONT_BITS = 0x80, PRINT_LO = 0x20, PRINT_HI = 0x7e, ESC_LEN = 4 };
+
 /* The shown prefix of an untrusted text: at most JR_BAD_SHOW bytes, never ending inside a UTF-8
  * sequence; every byte outside 0x20..0x7e is written as \xNN. */
 static void escape_text(const char *text, size_t len, char *out) {
     size_t shown = len < JR_BAD_SHOW ? len : (size_t)JR_BAD_SHOW;
-    while (shown < len && shown > 0 && ((unsigned char)text[shown] & 0xC0U) == 0x80U) {
+    while (shown < len && shown > 0 && ((unsigned char)text[shown] & CONT_MASK) == CONT_BITS) {
         shown--; /* the cut would split a sequence: stop before it */
     }
     size_t at = 0;
     for (size_t i = 0; i < shown; i++) {
         unsigned char byte = (unsigned char)text[i];
-        if (byte >= 0x20U && byte <= 0x7eU) {
+        if (byte >= PRINT_LO && byte <= PRINT_HI) {
             out[at++] = (char)byte;
         } else {
-            at += (size_t)snprintf(out + at, 5, "\\x%02x", (unsigned)byte);
+            at += (size_t)snprintf(out + at, ESC_LEN + 1, "\\x%02x", (unsigned)byte);
         }
     }
     out[at] = '\0';
@@ -92,6 +94,17 @@ odin3_status jr_restore_src(jr *rd, const jr_restore_in *in, odin3_prov_id *out)
 
 /* --- ports (D-2) ---------------------------------------------------------------------------- */
 
+/* Indexes the netname node under its interned key. */
+static odin3_status add_port_src(jr *rd, jr_port_srcs *srcs, const odin3_json_node *name,
+                                 uint32_t str) {
+    const odin3_json_node **slot = (const odin3_json_node **)odin3_vec_push(&srcs->nodes);
+    if (slot == NULL) {
+        return jr_fail(rd, ODIN3_ERR_NO_MEMORY);
+    }
+    *slot = name;
+    return jr_fail(rd, odin3_u64map_put(srcs->by_name, (odin3_kv){str, srcs->nodes.len - 1}));
+}
+
 odin3_status jr_port_srcs_open(jr *rd, const odin3_json_node *mod, jr_port_srcs *srcs) {
     *srcs = (jr_port_srcs){0};
     odin3_vec_init(&srcs->nodes, sizeof(const odin3_json_node *));
@@ -110,12 +123,10 @@ odin3_status jr_port_srcs_open(jr *rd, const odin3_json_node *mod, jr_port_srcs 
             continue;
         }
         uint32_t str = 0;
-        const odin3_json_node **slot = (const odin3_json_node **)odin3_vec_push(&srcs->nodes);
-        st = slot != NULL ? jr_intern(rd, odin3_json_key(name), &str)
-                          : jr_fail(rd, ODIN3_ERR_NO_MEMORY);
-        if (st == ODIN3_OK) {
-            *slot = name;
-            st = jr_fail(rd, odin3_u64map_put(srcs->by_name, (odin3_kv){str, srcs->nodes.len - 1}));
+        uint64_t have = 0;
+        st = jr_intern(rd, odin3_json_key(name), &str);
+        if (st == ODIN3_OK && !odin3_u64map_get(srcs->by_name, str, &have)) { /* first wins */
+            st = add_port_src(rd, srcs, name, str);
         }
     }
     return st;
@@ -141,7 +152,12 @@ odin3_status jr_port_prov(jr *rd, const jr_port_srcs *srcs, const odin3_json_nod
     }
     const odin3_json_node *name =
         *(const odin3_json_node *const *)odin3_vec_cat(&srcs->nodes, (size_t)index);
-    return jr_restore_src(rd, &(jr_restore_in){jr_member(name, "attributes"), base, false}, out);
+    odin3_prov_id value = {0}; /* the IMPORTED record of the netname value, where the text is */
+    st = jr_prov(rd, name, &value);
+    return st == ODIN3_OK
+               ? jr_restore_src(rd, &(jr_restore_in){jr_member(name, "attributes"), value, false},
+                                out)
+               : st;
 }
 
 /* --- one-bit netnames (D-2) ----------------------------------------------------------------- */
@@ -158,12 +174,19 @@ static bool one_bit_label(const odin3_json_node *name, uint64_t *label) {
     return true;
 }
 
+/* True for a label make_label_nets will create a net for: noted, with no net yet. A label a port
+ * bound already maps to its net. */
+static bool label_is_pending(const jr *rd, uint64_t label) {
+    uint64_t net = 0;
+    return odin3_u64map_get(rd->cur.nets, label, &net) && net == 0;
+}
+
 static odin3_status collect_one(jr *rd, const odin3_json_node *name) {
     uint64_t label = 0;
     uint64_t have = 0;
     const odin3_json_node *attrs = jr_member(name, "attributes");
     if (!one_bit_label(name, &label) || !jr_src_restorable(rd, attrs) ||
-        odin3_u64map_get(rd->cur.netloc, label, &have)) {
+        odin3_u64map_get(rd->cur.netloc, label, &have) || !label_is_pending(rd, label)) {
         return ODIN3_OK;
     }
     odin3_prov_id base = {0};
