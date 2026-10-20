@@ -19,7 +19,7 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
 
 ## Checklist
 
-- [ ] 5.1 Altera via LPM, light (was PHASE4 4.14; decision 1):
+- [ ] 5.1 Altera via LPM, light (code on `feat/5.1-lpm-spec`; tick when the PR merges; PHASE5 decisions 7 and 8) (was PHASE4 4.14; decision 1):
   - an LPM tech library (`.o3lib`) with exactly `lpm_add_sub`, `lpm_mult`, `lpm_compare` and
     `altsyncram` (single-port and simple-dual-port). Flip-flops are plain DFFs in soft logic,
     not `lpm_ff`. Everything else is soft logic as structural Verilog gates or assigns;
@@ -72,3 +72,96 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
    so 5.3 reads both.
 4. **LPM first** (same message): 5.1 starts as soon as a Phase 3 lane frees up, ahead of the
    rest of Phase 4.
+5. **5.1 spec agent defaults** (agent default, 2026-10-19; Peter may override; spec
+   `docs/specs/2026-10-19-5.1-lpm-design.md` §14 has the ten questions with recommendations):
+   a new pass `lpmmap` with its own kit, not an LPM rule set inside `hardmap`; the four LPM
+   cells are `blackbox` kind in `lib/lpm.o3lib` (no simulation functions until the deferred
+   equivalence step); `.o3lib` gains `param NAME string "text"` (the LPM parameters are
+   strings); the round trip is judged by a write, read, write Verilog fixpoint plus `check`,
+   because the BLIF writer cannot carry string parameters and `netlist-compare` reads BLIF;
+   every `$mul` and comparison maps (no width threshold); `$mem` maps only with one write and one
+   read on one rising-edge clock, no `INIT`, no byte enable (else soft); the LPM names are
+   verified against Intel documentation before any rule is coded (no local source exists for
+   `lpm_compare`, nor for `lpm_add_sub` and `lpm_mult` beyond a commented-out use in `spree.v`).
+6. **5.1 spec approved** (Peter, 2026-10-19): "yes to all recommendations" on the ten open
+   questions of `docs/specs/2026-10-19-5.1-lpm-design.md` §14, which includes the rule IDs and the
+   mapping rules as written. Chosen: (1) the four LPM cells are `blackbox`; (2) `.o3lib` gains
+   `param NAME string "text"`; (3) the round trip is a write, read, write Verilog fixpoint plus
+   `check` (BLIF as a bonus leg if it works); (4) a new pass `lpmmap`, not a `hardmap` rule set;
+   (5) no `write_verilog --no-stubs` until Quartus is needed; (6) the minimal parameter set, and
+   no `intended_device_family` on the `lpm_*` cells; (7) every `$mul` maps; (8) every comparison
+   maps; (9) reuse the `hardmap` FF merge through a header if it splits cleanly, else data merge
+   only; (10) verify the names against public Intel documentation. Task 1 then verified the
+   names (spec §11, from Altera's UG-01063 and Quartus help). It changed two rules: R-3 maps a
+   `RD_EN` only when it is constant 1 (the behaviour of `rden` low is not verified, V-7), and
+   R-4 sets `address_reg_b` `"CLOCK0"` and `outdata_reg_b` `"UNREGISTERED"` as the Quartus wizard
+   does. Still open: V-7 and a primary-document spelling of `"Cyclone V"`.
+7. **5.1 implemented** (agent defaults under decision 6, 2026-10-19; Peter may override):
+   - the pass is `lpmmap`, `lib/lpm.o3lib`, `tools/lpm-check`, micros in `tests/lpm/` (plan Tasks 2 to
+     9); no heavy run was needed;
+   - the `.o3lib` reader also lets a port be named `clock` (the modifier is read only after the
+     width); `signed` and `x` stay reserved;
+   - R-1 reuses hardmap's R-8 merge: `mem_load` and `mem_model_free` are exported from
+     `src/passes/hardmap/mem.c` and declared in `mem.h`, with no change of behaviour (question 9,
+     option i);
+   - the round trip is a fixpoint of generation 2 to 3, not generation 1 to 2: reading turns an open
+     LPM pin into the constant x (inputs) or a fresh net (outputs), so generation 2 differs from
+     generation 1 in exactly those connections. `lpm-check` also compares instance by instance
+     (type, name, parameters, connected pins; open, x and fresh nets count as equal);
+   - `write_blif` refused LPM cells at first, so the BLIF leg of spec T-3 was dropped; decision 8 brings
+     it back;
+   - `iverilog -Wall` notes every open instance input as a floating port; the lint leg filters
+     exactly those notes (Altera defaults apply, spec H-4) and fails on any other finding, and
+     Verilator runs with `-Wno-PINCONNECTEMPTY -Wno-PINMISSING`;
+   - Verilator is a local-only extra leg of the lint (`lpm-check` runs it when installed); CI has iverilog
+     only and Verilator is not added to CI (review M3, Peter's rule);
+   - review of 47a5ed88: H1, M1, M2, M3, L1, L4, L5, L7 fixed; L2, L6 accepted with the reasons in spec
+     §17; L3 superseded by decision 8;
+   - the Debug `check` logs rule 11 warnings (unconnected pin) for the open LPM inputs; they are
+     warnings, not failures.
+8. **BLIF carries LPM parameters** (agent default, 2026-10-19; Peter asked why LPM cannot be a black
+   box in BLIF; he may override). `write_blif` (PLAIN dialect) writes, after the `.cname` of a
+   `.subckt` of a tech-library cell, a Yosys-style `.param NAME VALUE` line for each parameter the
+   reader cannot derive (format of Yosys `backends/blif/blif.cc` `dump_params`: strings quoted with
+   `\\` and `\"` escapes, integers as 32 binary digits, bits as `01xz`); derivable and default
+   parameters write nothing, so existing BLIF is byte-identical. `read_blif` sets a `.param` on a
+   library cell that declares it (the cell is rebuilt on the same nets, name and attributes);
+   elsewhere it stays an attribute. The VTR dialect still refuses parameterised `.subckt` cells.
+   `lpm-check` has the BLIF leg (write, read, write identical, `netlist-compare` identical with
+   `.blackbox` stubs from the `.o3lib`). Docs: 1C amendment, 3E note, `writer.h`, `reader.h`,
+   `attrs.h`. The IR is not changed.
+9. **5.2 `read_verilog -icells` implemented** (agent defaults, 2026-10-20; Peter may override; spec
+   `docs/specs/2026-10-20-5.2-icells-design.md` v1.1 section 12 has the eleven questions with
+   recommendations, section 13 what the implementation changed; plan
+   `docs/plans/2026-10-20-5.2-icells-plan.md`). No IR, ABI, ADR or Verilog-without-`-icells` change.
+   - the option is `-icells` and `--icells`; an instance of a `$` name is that registered cell (item 0
+     of EL-6, before the module chain, so no stub or module shadows it; an info line when one exists);
+     every registered type but module, port and process may be instantiated, not only the ones the
+     writer emits as instances; an unregistered `$` name is an error, also with `--auto-blackbox`;
+     refused with `--lib` and `--parse-only`;
+   - widths are strict for these instances (an error, not the resize warning), parameter kinds are
+     checked, a string given to a BITS parameter is its bytes and `""` the empty value (the writer's
+     spelling), and the type's `verify` failure is located on the instance;
+   - the round trip is `tools/icells-check`; what each level proves (review H1): `-icells` is exercised
+     where a `$` instance exists in the written Verilog, i.e. the word and LPM levels and the `inst`
+     level (hand-written netlists, one per cell type the writer emits as an instance: 16 types, each
+     required by file name). At the gate and LUT levels no `$` instance exists (every cell is an assign
+     or an always block), so they prove the plain Verilog read-back of the writer's output (equivalent
+     by `equiv-check` on BLIF), also a 5.2 requirement, not `-icells`. Equivalence: the RTLIL Checker
+     (word, LPM, inst) or `equiv-check` (gate, LUT); fixpoint: cell census plus a per-cell signature
+     (type, parameters, widths, wiring up to renaming); instances: type, name, parameters, pins; the
+     report counts the `$` instances read via `-icells` and the library instances;
+   - tests: `test_icells` (21 cases), `test_icells_roundtrip` (16 instance types), `python_tools` (the
+     tool's unit tests and an end-to-end mutated read-back per leg), CTests `icells_inst`,
+     `icells_insttext`, `icells_cells_word/lpm`, `icells_lpm_cells/soft`, `icells_plain_gate/lut`
+     (default set, about 40 s) and `icells_micros_<level>` over the 68 micros (label `sweep`, run with
+     `ctest --test-dir build/debug -R icells_micros`; nothing in heavy-run). CI has no Yosys 0.55, so
+     the CTests that need it are local-only; CI runs `test_icells`, `test_icells_roundtrip` and
+     `python_tools` (its end-to-end tests skip without Yosys 0.55);
+   - `-icells` also reads a `$sop` COVER parameter from the writer's quoted rows, and a user module
+     named `$x` that is not a registered type still resolves as a module;
+   - documented exceptions, none silent (spec X-9 to X-13, `tests/icells/expect.txt`): `always`
+     storage has no text fixpoint; `multiply_hard_block.v` at gate/LUT (the read-back of the written stub is refused by `write_blif --vtr`; passes without the stub; cause not confirmed); `$pow` is
+     unproven by Yosys and `lower` cannot take it; `$memrd`/`$memwr` have no RTLIL form (text legs only);
+   - `lpm-check` keeps `noroundtrip altsyncram_soft.v` (the text fixpoint of X-9); `icells-check`
+     covers that micro at the LPM level.

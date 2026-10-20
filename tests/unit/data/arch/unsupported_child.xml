@@ -1,0 +1,6 @@
+<architecture>
+  <models>
+    <model name="m"><input_ports><port name="a"/></input_ports></model>
+    <xi:include href="x.xml"/>
+  </models>
+</architecture>

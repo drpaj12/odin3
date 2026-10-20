@@ -106,13 +106,16 @@ class TestOrder(unittest.TestCase):
         self.assertEqual(order(text), ["$c2", "$c1"])
 
     def test_cell_connects_are_not_aliases(self) -> None:
-        # a public wire named like a port (\A, \Y, \Q, \D) must not alias anything (review H1)
+        # a public wire named like a port (\\A, \\Y, \\Q, \\D) must not alias anything (review H1).
+        # If cell-internal `connect \\A ...` lines were read as module-level aliases, \\A would stand
+        # for $n9 (the A of the cell that reads it), $n9 would count as named and c3 would not be
+        # placed after c2.
         for port_name in ("w", "A", "B", "Y", "Q", "D"):
-            text = module(cell("$not", "$c1", A=f"\\{port_name}", Y="$n8"),
+            text = module(cell("$not", "$c3", A="$n9", Y="$n10"),
                           cell("$not", "$c2", A="\\x", Y="$n9"),
-                          cell("$not", "$c3", A="$n9", Y="$n10"),
+                          cell("$not", "$c1", A=f"\\{port_name}", Y="$n8"),
                           public=("x", port_name))
-            self.assertEqual(order(text), ["$c1", "$c2", "$c3"], port_name)
+            self.assertEqual(order(text), ["$c2", "$c3", "$c1"], port_name)
 
     def test_storage_output_is_not_followed(self) -> None:
         for kind, ports in (("$dff", {"CLK": "\\x", "D": "$n6", "Q": "$n5"}),

@@ -746,7 +746,9 @@ in order:
 7. otherwise `unresolved_module` (DESIGN §4.0), located at the `INSTANTIATION`'s module name.
 
 Names beginning with `$` never resolve to built-in cell types (`$add` cannot be instantiated
-from Verilog; Yosys allows it only under `-icells`). A `MODULE` carrying `(* blackbox *)` is a
+from Verilog; Yosys allows it only under `-icells`), **except under `read_verilog -icells`
+(5.2, `docs/specs/2026-10-20-5.2-icells-design.md` I-3): then item 0, before item 1, resolves
+such a name to the registered cell type of that name and nothing else is consulted.** A `MODULE` carrying `(* blackbox *)` is a
 definition of kind black box (EL-11).
 
 **Names already taken in the design** (IR-11: a module registers a cell type under its own

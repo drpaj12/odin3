@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# lpm-check: one tests/lpm micro through the LPM script, the Verilog round trip and the lint (5.1
+# spec T-1..T-4). Exit codes: 0 pass; 1 a mismatch (the first is printed); 2 usage or tool error;
+# 77 iverilog is missing. See lpm_check.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec python3 "$here/lpm_check.py" "$@"

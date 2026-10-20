@@ -78,6 +78,7 @@ add_library(odin3_core OBJECT
     src/util/file.c
     src/util/sha256.c
     src/frontends/blif/lexer.c
+    src/frontends/blif/param_text.c
     src/frontends/blif/reader.c
     src/backends/blif/writer.c
     src/backends/blif/vtr.c
@@ -87,6 +88,7 @@ add_library(odin3_core OBJECT
     src/passes/write_formats.c
     src/passes/sim_pass.c
     src/passes/project_pass.c
+    src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
     src/passes/proc/pw_encode.c
@@ -172,6 +174,13 @@ add_library(odin3_core OBJECT
     src/passes/hardmap/mem.c
     src/passes/hardmap/mem_merge.c
     src/passes/hardmap/mem_plan.c
+    src/passes/lpmmap/register.c
+    src/passes/lpmmap/lpmmap.c
+    src/passes/lpmmap/lm_kit.c
+    src/passes/lpmmap/addsub.c
+    src/passes/lpmmap/mult.c
+    src/passes/lpmmap/compare.c
+    src/passes/lpmmap/mem.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -236,6 +245,12 @@ add_library(odin3_core OBJECT
     src/frontends/project/o3proj.c
     src/frontends/project/entry.c
     src/frontends/project/xml.c
+    src/frontends/arch/arch.c
+    src/frontends/arch/arch_xml.c
+    src/frontends/arch/arch_models.c
+    src/frontends/arch/arch_pb.c
+    src/frontends/arch/arch_lib.c
+    src/frontends/arch/arch_templates.c
     src/frontends/project/odin2.c
     src/frontends/verilog/preproc.c
     src/frontends/verilog/macro.c
@@ -1209,6 +1224,69 @@ if(BUILD_TESTING)
         ODIN3_BVT_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/blif_vtr")
     odin3_add_unit_test(test_techlib_expr)
     odin3_add_unit_test(test_techlib_reader)
+    odin3_add_unit_test(test_techlib_string_param)
+    foreach(_t IN ITEMS test_arch_record test_arch_models test_arch_pb test_arch_lib test_arch_pass test_arch_vtr)
+        odin3_add_unit_test(${_t})
+        target_compile_definitions(${_t} PRIVATE
+            ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    endforeach()
+    add_test(NAME cli_arch
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/arch_cli.sh $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tests/unit/data/arch/pb_ok.xml)
+    set_tests_properties(cli_arch PROPERTIES LABELS unit)
+    set_tests_properties(test_arch_vtr PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME arch_corpus
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/arch/corpus.sh $<TARGET_FILE:odin3>)
+    set_tests_properties(arch_corpus PROPERTIES LABELS unit SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    # 5.1 Task 3: lib/lpm.o3lib and LPM-structured Verilog read back as registered cells.
+    odin3_add_unit_test(test_lpm_lib)
+    # BLIF `.param` on a tech-library `.subckt` (1C amendment 2026-10-19, PHASE5 decision 8).
+    odin3_add_unit_test(test_blif_lib_params)
+    target_sources(test_blif_lib_params PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_blif_lib_params PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_scaffold)
+    # 5.1 Task 9 (spec T-1..T-4): one micro per LPM cell through the LPM script, the Verilog round
+    # trip and the lint (tools/lpm-check). Exit 77 (skipped) when iverilog is missing.
+    foreach(_lpm_micro IN ITEMS lpm_add_sub lpm_mult lpm_compare lpm_mixed altsyncram_sp altsyncram_sdp
+                                 altsyncram_soft)
+        add_test(NAME lpm_check_${_lpm_micro}
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/lpm-check/lpm-check
+                    --odin3 $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tests/lpm/${_lpm_micro}.v)
+        set_tests_properties(lpm_check_${_lpm_micro} PROPERTIES LABELS "unit;micro"
+                             SKIP_RETURN_CODE 77 TIMEOUT 300)
+    endforeach()
+    add_test(NAME lpm_check_family
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/lpm-check/lpm-check
+                --odin3 $<TARGET_FILE:odin3> --family "Stratix IV"
+                ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_sp.v)
+    set_tests_properties(lpm_check_family PROPERTIES LABELS "unit;micro" SKIP_RETURN_CODE 77
+                         TIMEOUT 300)
+    odin3_add_unit_test(test_lpmmap_ram)
+    target_sources(test_lpmmap_ram PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_ram PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_compare)
+    target_sources(test_lpmmap_compare PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_compare PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_mult)
+    target_sources(test_lpmmap_mult PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_mult PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_lpmmap_addsub)
+    target_sources(test_lpmmap_addsub PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_addsub PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    target_sources(test_lpmmap_scaffold PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpmmap_scaffold PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    target_sources(test_lpm_lib PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_lpm_lib PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_LPM_DIR="${PROJECT_SOURCE_DIR}/tests/lpm")
     odin3_add_unit_test(test_techlib_libs)
     target_compile_definitions(test_techlib_libs PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
@@ -1373,6 +1451,14 @@ if(BUILD_TESTING)
     target_compile_definitions(test_read_verilog_lib PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 5.2 Task 1/2: read_verilog -icells (spec I, N, V rules).
+    odin3_add_unit_test(test_icells)
+    target_include_directories(test_icells PRIVATE ${_gen})
+    add_dependencies(test_icells verilog_generated)
+    target_compile_definitions(test_icells PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 5.2 Task 3 (spec T-3): every cell type the writer writes as an instance reads back.
+    odin3_add_unit_test(test_icells_roundtrip)
     # 2D Task 20: memories (the mem2reg decision, registers per word, $mem and its read ports).
     odin3_add_unit_test(test_elab_stage2_mem)
     target_include_directories(test_elab_stage2_mem PRIVATE ${_gen})
@@ -2856,6 +2942,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_opt_rules_dir}/wreduce)
         set_tests_properties(opt_equiv_wreduce_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
                              TIMEOUT 1800)
+        # PHASE3 #52 (opt_share parity): the opt_share sources with the Phase 3 script, whose
+        # `opt -full` runs opt_share; every call that changes something is checked in turn, and
+        # opt_share must change something in every source (--require-sub: --min-changed counts
+        # calls of any sub-pass, and wreduce or opt_expr alone would satisfy it).
+        add_test(NAME opt_equiv_share_rules
+            COMMAND ${_opt_sweep} --jobs 1 --opt-equiv --opt-arg=--min-changed=1
+                    --opt-arg=--require-sub=opt_share
+                    --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
+                    --root ${_opt_rules_dir} ${_opt_rules_dir}/share)
+        set_tests_properties(opt_equiv_share_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 1800)
         # 3G (plan Task 3 step 4): Odin III's wreduce and Phase 3 script against Yosys's on the
         # same input: cells, widths and flags of every $add $sub $mul, refinement, identity.
         add_test(NAME opt_diff_wreduce_rules
@@ -2932,6 +3029,75 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --pre proc --lower-args "--neg-edge keep" ${_lower_equiv_neg})
         set_tests_properties(lower_cells_equiv lower_cells_equiv_neg_keep
                              PROPERTIES LABELS lower SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        # 5.2 (spec sections 7 to 9, tools/icells-check). What each test proves:
+        #  - icells_inst, icells_insttext: hand-written netlists of `$` instances, one file per cell
+        #    type the writer emits as an instance (16 types), read with -icells, written, read
+        #    again; every file must hold its type (--require-dollar and the file name).
+        #  - icells_cells_word, icells_cells_lpm: Verilog designs whose word-level netlist has
+        #    `$` instances (memory, $shiftx, $pow, set/reset flip-flops, latches); the written
+        #    Verilog reads back with -icells, equivalent (Yosys 0.55 refinement).
+        #  - icells_lpm_cells: the 5.1 LPM micros; the lpm_*/altsyncram library instances read back.
+        #  - icells_plain_gate, icells_plain_lut: NO `$` instance occurs at the bit levels (every
+        #    gate is an assign or an always block), so these prove the plain Verilog read-back of
+        #    the writer's output (BLIF equiv-check), not -icells.
+        #  - icells_micros_<level> (label sweep): the same over the 68 micros of
+        #    tests/micro/verilog/micro, a few minutes per level in Debug; run with
+        #    `ctest --test-dir build/debug -R icells_micros`.
+        # They need Yosys 0.55 (the CI image has none), so they are local-only; the unit tests
+        # (test_icells, test_icells_roundtrip) and tests/tools (python_tools) run in CI.
+        # tests/tools/test_icells_check.py runs a mutated read-back end to end when Yosys 0.55 is known.
+        set_property(TEST python_tools APPEND PROPERTY ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+        file(GLOB _icells_cells ${PROJECT_SOURCE_DIR}/tests/icells/cell_*.v)
+        file(GLOB _icells_plain ${PROJECT_SOURCE_DIR}/tests/icells/plain_*.v)
+        file(GLOB _icells_inst ${PROJECT_SOURCE_DIR}/tests/icells/inst/inst_*.v)
+        file(GLOB _icells_insttext ${PROJECT_SOURCE_DIR}/tests/icells/inst_text/inst_*.v)
+        file(GLOB _icells_micros ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro/*.v)
+        set(_icells_lpm_cells ${PROJECT_SOURCE_DIR}/tests/lpm/lpm_add_sub.v
+            ${PROJECT_SOURCE_DIR}/tests/lpm/lpm_compare.v ${PROJECT_SOURCE_DIR}/tests/lpm/lpm_mult.v
+            ${PROJECT_SOURCE_DIR}/tests/lpm/lpm_mixed.v ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_sp.v
+            ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_sdp.v)
+        list(SORT _icells_cells)
+        list(SORT _icells_plain)
+        list(SORT _icells_inst)
+        list(SORT _icells_insttext)
+        list(SORT _icells_micros)
+        file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/icells_tmp)
+        set(_icells_run ${CMAKE_COMMAND} -E env TMPDIR=${PROJECT_BINARY_DIR}/icells_tmp
+            ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+            ${PROJECT_SOURCE_DIR}/tools/icells-check/icells-check
+            --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+            --expect ${PROJECT_SOURCE_DIR}/tests/icells/expect.txt)
+        function(odin3_add_icells_test name)
+            cmake_parse_arguments(ARG "" "LEVEL;LABELS" "FLAGS;FILES" ${ARGN})
+            add_test(NAME ${name}
+                COMMAND ${_icells_run} --level ${ARG_LEVEL} ${ARG_FLAGS} ${ARG_FILES})
+            set_tests_properties(${name} PROPERTIES LABELS "${ARG_LABELS}" SKIP_RETURN_CODE 77
+                                 TIMEOUT 1800)
+        endfunction()
+        odin3_add_icells_test(icells_inst LEVEL inst LABELS "icells;unit"
+            FLAGS --require-dollar FILES ${_icells_inst})
+        odin3_add_icells_test(icells_insttext LEVEL insttext LABELS "icells;unit"
+            FLAGS --require-dollar FILES ${_icells_insttext})
+        odin3_add_icells_test(icells_cells_word LEVEL word LABELS "icells;unit"
+            FLAGS --require-dollar FILES ${_icells_cells})
+        odin3_add_icells_test(icells_cells_lpm LEVEL lpm LABELS "icells;unit"
+            FLAGS --require-dollar FILES ${_icells_cells})
+        odin3_add_icells_test(icells_lpm_cells LEVEL lpm LABELS "icells;unit"
+            FLAGS --require-lib FILES ${_icells_lpm_cells})
+        odin3_add_icells_test(icells_lpm_soft LEVEL lpm LABELS "icells;unit"
+            FLAGS --require-dollar FILES ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_soft.v)
+        foreach(_lvl IN ITEMS word lpm)
+            odin3_add_icells_test(icells_micros_${_lvl} LEVEL ${_lvl} LABELS "sweep;icells"
+                FILES ${_icells_micros})
+        endforeach()
+        if(ODIN3_WITH_ABC)
+            foreach(_lvl IN ITEMS gate lut)
+                odin3_add_icells_test(icells_plain_${_lvl} LEVEL ${_lvl} LABELS "icells;unit"
+                    FILES ${_icells_plain} ${_icells_cells})
+                odin3_add_icells_test(icells_micros_${_lvl} LEVEL ${_lvl} LABELS "sweep;icells"
+                    FILES ${_icells_micros})
+            endforeach()
+        endif()
         # 3B Task 9 (spec 14.4, 14.5): the lower corpus over the micros, smallest first, through
         # heavy-run: lower_run_micro (ODIN3_OK, check FULL, the netlist view written as BLIF),
         # lower_sim_micro (the simulator before and after; a type without a hook is `skipped`,

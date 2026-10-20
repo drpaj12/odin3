@@ -2,11 +2,13 @@
 #include "frontends/blif/reader.h"
 
 #include "frontends/blif/lexer.h"
+#include "frontends/blif/param_text.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "ir/value.h"
+#include "techlib/reader.h"
 #include "util/attr.h"
 #include "util/hash.h"
 #include "util/log.h"
@@ -37,7 +39,8 @@ enum {
     LATCH_TYPE_TOK = 3,
     LATCH_CTRL_TOK = 4,
     LATCH_INIT_DEFAULT = 3,
-    EXTRA_MIN = 3, /* .attr key value */
+    EXTRA_MIN = 3,  /* .attr key value */
+    PARAM_MAX = 64, /* parameters of a tech-library cell a `.param` can set */
 };
 
 /* The widest port an undeclared .subckt may get (ir/celltype.h): its widths come from the type,
@@ -1433,6 +1436,139 @@ static odin3_status list_extra(blif_reader *rd, uint32_t key) {
     return st;
 }
 
+/* --- `.param` of a tech-library cell (1C amendment 2026-10-19) ------------------------------- */
+
+typedef struct attr_item {
+    uint32_t key;
+    const odin3_value *value;
+} attr_item;
+
+static odin3_status gather_attr(void *ctx, uint32_t key, const odin3_value *value) {
+    attr_item *item = odin3_vec_push((odin3_vec *)ctx);
+    if (item == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *item = (attr_item){key, value};
+    return ODIN3_OK;
+}
+
+/* Copies every attribute of node from to node to. */
+static odin3_status copy_node_attrs(odin3_module *module, odin3_node_id from, odin3_node_id to) {
+    odin3_vec items;
+    odin3_vec_init(&items, sizeof(attr_item));
+    odin3_status st =
+        odin3_attr_foreach(module, (odin3_objref){ODIN3_OBJ_NODE, from.v}, gather_attr, &items);
+    for (size_t i = 0; st == ODIN3_OK && i < items.len; i++) {
+        const attr_item *item = odin3_vec_cat(&items, i);
+        st = odin3_attr_set(module, (odin3_objref){ODIN3_OBJ_NODE, to.v}, item->key, item->value);
+    }
+    odin3_vec_free(&items);
+    return st;
+}
+
+/* The index of the parameter of def named by token, or -1. */
+static int param_index(const odin3_celltype_def *def, odin3_bytes key) {
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        if (strlen(def->params[i].name) == key.len &&
+            memcmp(def->params[i].name, key.ptr, key.len) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* The previous cell rebuilt with parameter idx set to value: a new node on the same nets (pin
+ * counts cannot change: odin3_node_replace refuses a different port signature), the old name and
+ * attributes; rd->last becomes the new node. */
+static odin3_status rebuild_last(blif_reader *rd, const odin3_celltype_def *def, uint32_t idx,
+                                 const odin3_value *value) {
+    odin3_value params[PARAM_MAX];
+    odin3_node_id old = rd->last;
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        params[i] = *odin3_node_param(rd->module, old, i);
+    }
+    params[idx] = *value;
+    odin3_node_spec spec = {.type = odin3_node_type(rd->module, old),
+                            .prov = odin3_node_prov(rd->module, old),
+                            .params = params,
+                            .n_params = def->n_params};
+    odin3_node_id fresh = {0};
+    uint32_t name = odin3_node_name(rd->module, old);
+    odin3_status st = odin3_node_create(rd->module, &spec, &fresh);
+    st = st == ODIN3_OK ? copy_node_attrs(rd->module, old, fresh) : st;
+    st = st == ODIN3_OK ? odin3_node_replace(rd->module, (odin3_node_pair){old, fresh}) : st;
+    if (st == ODIN3_OK && name != 0) {
+        st = odin3_node_rename(rd->module, fresh, name);
+    }
+    rd->last = st == ODIN3_OK ? fresh : rd->last;
+    return st;
+}
+
+/* The value tokens of ln (from the third) joined by single blanks in rd->scratch. */
+static odin3_status join_value_tokens(blif_reader *rd, const odin3_blif_line *ln) {
+    odin3_strbuf_clear(&rd->scratch);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 2; st == ODIN3_OK && i < ln->count; i++) {
+        st = i == 2 ? ODIN3_OK : odin3_strbuf_append(&rd->scratch, odin3_bytes_cstr(" "));
+        st = st == ODIN3_OK ? odin3_strbuf_append(&rd->scratch, ln->tokens[i]) : st;
+    }
+    return rd_fail(rd, st);
+}
+
+/* The word for a value kind in the `cannot read` message. */
+static const char *kind_word(odin3_value_kind kind) {
+    if (kind == ODIN3_VAL_STRING) {
+        return "string";
+    }
+    return kind == ODIN3_VAL_INT ? "binary integer" : "bit vector";
+}
+
+/*
+ * `.param key value…` on the previous cell when that is a tech-library cell
+ * (odin3_techlib_cell_get) that declares parameter key: the value (param_text.h) becomes the node's
+ * parameter and no attribute is made. *applied is false for any other cell or key: the line is then
+ * an attribute as before.
+ */
+static odin3_status apply_lib_param(blif_reader *rd, const odin3_blif_line *ln, bool *applied) {
+    *applied = false;
+    odin3_celltype_id type = odin3_node_type(rd->module, rd->last);
+    const odin3_celltype_def *def = odin3_celltype_get(rd->design, type);
+    int idx = odin3_techlib_cell_get(rd->design, type) != NULL && def->n_params <= PARAM_MAX
+                  ? param_index(def, ln->tokens[1])
+                  : -1;
+    odin3_status st = idx >= 0 ? join_value_tokens(rd, ln) : ODIN3_OK;
+    if (idx < 0 || st != ODIN3_OK) {
+        return st;
+    }
+    const odin3_param_def *param = &def->params[idx];
+    odin3_strbuf bits;
+    odin3_strbuf_init(&bits);
+    odin3_value value = {0};
+    st = odin3_blif_param_parse(rd->design, param->kind,
+                                (odin3_bytes){rd->scratch.data, rd->scratch.len}, &bits, &value);
+    if (st == ODIN3_ERR_PARSE) {
+        st = rd_error(rd, ln->line, ".param %s of '%s': cannot read '%s' as a %s value",
+                      param->name, def->name, rd->scratch.data, kind_word(param->kind));
+    } else if (st == ODIN3_OK) {
+        st = rebuild_last(rd, def, (uint32_t)idx, &value);
+        *applied = st == ODIN3_OK;
+        st = st == ODIN3_ERR_INVALID_ARG
+                 ? rd_error(rd, ln->line, ".param %s changes the port widths of '%s'", param->name,
+                            def->name)
+                 : rd_fail(rd, st);
+    }
+    odin3_strbuf_free(&bits);
+    return st;
+}
+
+/* `.param` on a library cell is applied; true in *applied then (no attribute). */
+static odin3_status try_param(blif_reader *rd, const odin3_blif_line *ln, const char *prefix,
+                              bool *applied) {
+    *applied = false;
+    return strcmp(prefix, ODIN3_BLIF_PARAM_PREFIX) == 0 ? apply_lib_param(rd, ln, applied)
+                                                        : ODIN3_OK;
+}
+
 /* `.attr key value…` / `.param key value…`: attribute prefix+key = the value tokens joined. */
 static odin3_status read_extra(blif_reader *rd, const odin3_blif_line *ln, const char *prefix) {
     if (ln->count < EXTRA_MIN) {
@@ -1440,7 +1576,9 @@ static odin3_status read_extra(blif_reader *rd, const odin3_blif_line *ln, const
                         (const char *)ln->tokens[0].ptr);
     }
     odin3_status st = need_last(rd, ln);
-    if (st != ODIN3_OK) {
+    bool applied = false;
+    st = st == ODIN3_OK ? try_param(rd, ln, prefix, &applied) : st;
+    if (st != ODIN3_OK || applied) {
         return st;
     }
     uint32_t key = 0;
@@ -1453,11 +1591,7 @@ static odin3_status read_extra(blif_reader *rd, const odin3_blif_line *ln, const
     if (st == ODIN3_OK) {
         st = intern_scratch(rd, &key);
     }
-    odin3_strbuf_clear(&rd->scratch);
-    for (uint32_t i = 2; st == ODIN3_OK && i < ln->count; i++) {
-        st = i == 2 ? ODIN3_OK : odin3_strbuf_append(&rd->scratch, odin3_bytes_cstr(" "));
-        st = st == ODIN3_OK ? odin3_strbuf_append(&rd->scratch, ln->tokens[i]) : st;
-    }
+    st = st == ODIN3_OK ? join_value_tokens(rd, ln) : st;
     if (st == ODIN3_OK) {
         st = intern_scratch(rd, &value.str);
     }

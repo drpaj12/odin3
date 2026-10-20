@@ -247,7 +247,10 @@ would know (`dffeas`, `cyclonev_lcell_comb`, `cyclonev_io_ibuf`, `cyclonev_io_ob
 `cycloneive_lcell_comb`, `cycloneive_io_ibuf`, `cycloneive_io_obuf`; the VQM library would have grown in
 Phase 6, removed by D10) resolve through that library. Any other unresolved instance is `unresolved_module`,
 unless `read_verilog --auto-blackbox` makes it an implicit black box (2D EL-11: named
-connections, `inout` ports sized by the first instance, an info line naming it).
+connections, `inout` ports sized by the first instance, an info line naming it). `read_verilog -icells` (5.2) is the one
+exception for names beginning with `$`: an instance of a registered cell type of that name (`\$mem`,
+`\$shiftx`, `\$dffsr`, ...) is that cell, as in Yosys; it is how the Verilog the writer emits at the
+word, gate, LUT and LPM levels reads back.
 
 *Errors* are located at the project-file or source line (`file:line`) where there is one:
 `missing_file`, `unknown_key`, `unknown_option`, `unknown_file_type`, `unsupported_input_type`,
@@ -330,7 +333,7 @@ Every node, net and wire carries a provenance ID (pins inherit their node's) int
 4a. `flatten` — expands every module instance of the top (and of every `keep_hierarchy` module) into the module that holds it; objects get Yosys-style dotted instance-path names (`u1.mid.x`), the joined port nets keep every name as IR-2 aliases, and the instance path (`top/u1/mid`) goes into `DERIVED` provenance records (`odin3_prov_derive_hier`); black boxes, hard cells and library cells stay (3A; `docs/specs/2026-10-14-3A-flatten-design.md`). The Phase 3 script runs `opt -full` after it (as Parmys does)
 5. `fsm` — Yosys 0.55's `fsm` (`fsm_detect`, `fsm_extract`, `fsm_opt`, `fsm_recode`, `fsm_map`), right after `proc` as Parmys runs it; `auto` encoding is one-hot below 32 states (Phase 4 item 4.8; restored by D10 follow-up 2)
 6. `memory_infer` — `reg` arrays → `$mem` with port analysis; attribute overrides
-7. `read_arch` — `.o3lib` tech libraries (target-agnostic: gates first, then FPGA hard cells; `docs/specs/2026-10-08-1G-techlib-design.md`) → hard/gate set; VPR XML `<model>`s and pb_types via the importer (Phase 4.1) into the same form. The Altera target is an LPM `.o3lib` (Phase 5 item 5.1, D10, D11); there is no Altera device importer in v1.0
+7. `read_arch` — `.o3lib` tech libraries (target-agnostic: gates first, then FPGA hard cells; `docs/specs/2026-10-08-1G-techlib-design.md`) → hard/gate set; VPR XML `<model>`s and pb_types via the importer (Phase 4.1, built: `read_arch <file.xml>`, `docs/specs/2026-10-20-4.1-arch-import-design.md`) into the same form. The Altera target is an LPM `.o3lib` (Phase 5 item 5.1, D10, D11); there is no Altera device importer in v1.0
 8. `partial_map` (§7)
 9. `lower` — word → bit; hard/blackbox nodes untouched. `lower` is Yosys 0.55's `simplemap`/`techmap.v` structures; asynchronous controls become synchronous (decision 19); the script follows it with `opt -fast; compact`
 10. `abc`: linked ABC (`adapters/abc`, an engine behind the C ABI) maps each module's soft logic to `$lut` cells, one ABC run per clock domain, with hard cells, black boxes, instances and other domains' flip-flops as cut points (hard-block inputs on `unconn`, x or a constant pass unchanged; soft logic reads them as 0); the script is `abc --script`, else `--abc-script`, else the project's `abc_script`, else `lib/abc/vtr.abc`; results are re-stitched with provenance from ABC's correspondence (3D spec)
@@ -343,6 +346,7 @@ Partial mapping binds *some* of the word-level IR to the target's hard circuits 
 Components:
 - **Inference** — three tiers, as in Odin II: explicit instantiation (primitive library), coding-style rules (memory inference), and open-ended **subgraph matching** (Odin I, re-implemented generically). v1.0 (D10) has the first two plus exact-port-signature matching; subgraph matching is deferred (D5 amended).
 - **Binding/packing** — for each matched structure choose an implementation: hard block(s) + generated soft glue, or all-soft. Includes recursive multiplier splitting with the small-multiplier threshold auto-derived from the arch, signed multipliers, memory depth/width splitting with width-depth trading, carry chains (`adder` model), DFF feature matching (enable, sync/async reset) to what the arch's FF supports.
+- **LPM mapping** (v1.0, Phase 5 item 5.1, D10, D11): the separate pass `lpmmap` binds `$add`/`$sub`, `$mul`, the comparisons and inferred `$mem` to `lpm_add_sub`, `lpm_mult`, `lpm_compare` and `altsyncram` by fixed rules (`docs/specs/2026-10-19-5.1-lpm-design.md`); it is not a rule set of `hardmap`, which stays the VTR-arch pass.
 - **Generic hard blocks** — any arch `<model>`; matched by exact port signature (Odin II) (v1.0, Phase 4.2) or by a user-supplied pattern (deferred, D10).
 - **Project rules** (§4.0) steer all three (mapping rules: deferred, D10; the project file still reads and stores them): per-scope `map … to/soft/keep`, width/depth thresholds, per-cell budgets, project-only patterns; each binding records the rule that chose it.
 

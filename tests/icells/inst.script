@@ -1,0 +1,9 @@
+# The 5.2 instance level (spec section 8): a hand-written netlist of `$` cell instances (inst/*.v,
+# one file per cell type, named inst_<type>.v) is read with -icells and written; its read-back is
+# what the legs compare. @DESIGN@ is the netlist, @IL@ the RTLIL of the first read (the gold),
+# @OUT@ the Verilog the writer makes of it.
+read_verilog -icells @DESIGN@
+proc
+opt_clean
+write_rtlil @IL@
+write_verilog @OUT@

@@ -1371,6 +1371,63 @@ then the options considered.
     order); a micro `tests/opt/order/order_operand_first.v` is diffed against Yosys under the Phase 3
     script (`opt_diff_wreduce_order`) and `test_operand_visited_before_consumer` pins the widths.
 
+52. **`opt_share` parity with Yosys 0.55: the commutative swap and mux chunks** (Peter, 2026-10-19,
+    branch `feat/opt-share-parity`; item B2 of the hardmap-big triage, approved). Amends 2F spec §11 and
+    §17 #44 and #45 (the amended text is in the spec rows). Soundness (OP-13) still comes first: every
+    widening below has a unit test with negative cases, a Yosys 0.55 case run through the real
+    `opt_share`, an `opt-rules` row (Yosys log, cell histogram and refinement) and an `opt-equiv` run
+    with the Phase 3 script (CTest `opt_equiv_share_rules`).
+    (a) **What is widened.** 1. The shared operand may be on port `A` of one cell and port `B` of
+    another when one of them is `$add $mul $and $or $xor $xnor $eq $ne $logic_and $logic_or`; the signed
+    flags must agree role by role; the new cell keeps the ports of the member on the first mux port. Proof: for these
+    types `f(A, B) = f(B, A)` with the widths and flags swapped too, and the new cell is built from
+    the lead's ports with each member's muxed operand extended as before. 2. An `$add` and a `$sub`
+    share an operand that is not the subtracted one (Yosys: `decode_port_sign` gives a `$sub`'s port `B`
+    the sign 1 and the shared operand is compared with it), so `d + 1` and `1 - d` share the `1`: the
+    mux feeds `d` and `-d` to one `$add`. Proof: `S + m` with `m = d` or `-d` at a width of at least
+    `Y_WIDTH`, as the `$add`/`$sub` mix on port `A` already did. 3. A candidate is a cell whose whole
+    `Y` is a contiguous chunk of a wider data port; the cells of a group start at the same bit; the
+    other bits of the port stay on the old mux. Proof: the new cell's `Y` takes the members' chunk
+    nets, so the old mux reads the same function.
+    (b) **What stays narrower than Yosys, and why.** 1. A cell whose `Y` is wider than the chunk the port
+    reads, with other `Y_WIDTH`s in the group (`diff_port_widths`): that the low bits of a cell's
+    result do not depend on `Y_WIDTH` is not shown for every type (and not by a Yosys case), and in
+    the Phase 3 script `wreduce` trims `Y` to the used bits before `opt -full`, so the case is rare;
+    not done without a per-type proof. 2.
+    A mixed-sign pair and the signed extension of bitwise cells (§17 #47, #57): unchanged. 3. The
+    types Odin III has no cell for (`$sshl $shift $eqx $nex $divfloor $modfloor $alu $concat`) and the
+    gates: unchanged (the gates exist only after `lower`, where `opt -fast` does not run `opt_share`).
+    4. The lead (new cell's type, ports and name) is the member on the first mux port, and the shared
+    operand is port `A` first, as Yosys (review M2 and M3 of 818cec0a; both differed before: the
+    lowest node ID, and the lower net-ID vector). `mixed3.il` (3-member `$add`/`$sub` group: 2 `$neg`,
+    `$add` lead) and `choose_a.il` (`and(a,b) and(a,c) and(d,b)`: `a` shared) are real Yosys cases.
+    (c) **Evidence** (2026-10-19, release build; the commands and outputs are in
+    `.superpowers/sdd/opt-share-parity-report.md`). `d + 1` against `1 - d` under a mux: 34 adders
+    before, 17 after (Parmys 17). `hardmap-diff` on stereovision1 (`tools/heavy-run`): adder +24 before,
+    adder 0 after (the latch -65 of decision 43 is unchanged). `opt_diff_micro` (release, `tools/heavy-run`):
+    passed (6643 s, no `diff_expect` entry stale); `opt_equiv_micro_phase3`: passed (3594 s, every call
+    that changes something proved, `opt_share` included); `opt_diff_micro_wreduce`: 4
+    unexpected failures at 60 s SAT (`full/sha.v` once, under load; `large/spree.v`,
+    `full/cf_cordic_v_18_18_18.v`, `full/cf_fft_256_8.v`). Review M4 rerun of the three, same options
+    with `--refine-timeout=600`, one design at a time under `tools/heavy-run`, main build 5d9d191a
+    against this branch before the merge of main (4af23175): spree ok on both; cf_fft ok on both;
+    cf_cordic ok on main, FAIL on the branch with three STALE entries (phase3 histogram, widths and
+    identity now equal Yosys's; the listed differences `$add` 1 vs 18, `$sub` 56 vs 39 are gone, and
+    no refine verdict failed). So at 600 s all three prove on both builds and the 60 s failures were
+    SAT timeouts; `opt_share` merged the same number of cells in each build (spree 0, cordic 102,
+    fft 0), and the cordic change comes from the lead and operand choice now being Yosys's
+    (M2, M3). cf_cordic now equals Yosys under phase3 (M2/M3 lead and port-A choice); its three stale `diff_expect.txt` lines are removed. Logs:
+    `/tmp/claude-1000/opt-share-m4/{spree,cf_cordic_v_18_18_18,cf_fft_256_8}.{base,head}.log`,
+    counts in `share_counts.txt` there. Rerun on the merged head 3b41d411 (logs in
+    `/tmp/claude-1000/opt-share-final/`): `opt_equiv_micro_phase3` passed (3715 s). The two diff sweeps
+    showed no new difference and no failed proof. The phase3 or full lines of `bm_DL_74381_ALU`,
+    `cf_cordic_v_8_8_8`, `cf_cordic_v_18_18_18`, `bm_functional_test`, `stereovision1`,
+    `mkDelayWorker32B` and the `sv_chip1` widths now equal Yosys's, so those 17 `diff_expect.txt` lines
+    (micro paths) are removed. No expect line was added for the 60 s SAT timeouts: `iir1` proves ok at
+    600 s on the head (`/tmp/claude-1000/opt-share-m4/iir1.head.log`); `ex4LS16_fir` is phase2, where
+    `opt_share` does not run; `spree` fails as it does on main; `stereovision1`, `mkDelayWorker32B` and
+    `sv_chip1` are 60 s timeouts under load from the other lanes. `opt_equiv_micro` (Phase 2 script, no `opt_share`) was not run.
+
 53. **Parity scope after the goals statement** (Peter, 2026-10-19). Peter: Odin III "needs to be
     compatible with modern VTR and Stratix, but doesn't neccessarily need to be right there with
     Parmsys"; "yes to all the recommendations". Comparable results with Parmys (goal 1 of

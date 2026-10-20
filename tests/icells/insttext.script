@@ -1,0 +1,7 @@
+# The 5.2 instance level for cells the RTLIL writer has no form for ($memrd, $memwr: memory ports
+# before memory_collect). The netlist is read with -icells and written; only the text legs run
+# (read, census, instances, library instances), there is no gold and no equivalence. No
+# opt_clean: it removes a $memwr, which has no output.
+read_verilog -icells @DESIGN@
+proc
+write_verilog @OUT@

@@ -90,7 +90,9 @@ typedef struct odin3_verilog_opts {
  * a module instance with named port connections in port order and, unless it instantiates a
  * module, every parameter as `#(.P(value))` (INT decimal, BITS `N'b…` MSB first, STRING quoted
  * byte-exact, COVER rows quoted); Yosys reads a built-in one as its internal cell only with
- * `read_verilog -icells`, Icarus with Yosys simlib.v as a library. A zero-length BITS value has no
+ * `read_verilog -icells`, as does Odin III's `read_verilog -icells` (5.2: every written parameter
+ * and port is checked against the registry; no stub is written for a built-in type, so none shadows
+ * the cell), Icarus with Yosys simlib.v as a library. A zero-length BITS value has no
  * Verilog literal and is written `""` (which tools read as 8 zero bits).
  *
  * Provenance: a declaration or statement whose object has a provenance location ends with

@@ -1,0 +1,7 @@
+# Designs that instantiate tech library cells read the library first (icells-check --techlib-list):
+# <design file name> <tech library> [<soft library>], paths relative to the repository root. The
+# VTR hard blocks `adder` and `multiply` of three micros (5.2 review M4); the n-bit `adder` is the
+# soft module Parmys supplies (tests/hardmap/adder_lib.v, read with --lib).
+adder_hard_block.v lib/vtr.o3lib tests/hardmap/adder_lib.v
+hard_adder_cin_propagation.v lib/vtr.o3lib tests/hardmap/adder_lib.v
+multiply_hard_block.v lib/vtr.o3lib

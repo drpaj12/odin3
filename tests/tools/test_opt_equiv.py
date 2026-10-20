@@ -607,6 +607,16 @@ class MainTest(unittest.TestCase):
         code, out, _ = self.fakes.main("--min-changed", "2")
         self.assertEqual(code, 1, out)
 
+    def test_require_sub_fails_a_run_in_which_that_sub_pass_changed_nothing(self) -> None:
+        """Review M1 of feat/opt-share-parity: --min-changed counts any sub-pass."""
+        self.fakes.spec(self.pair("0001", "opt_expr"))
+        self.assertEqual(self.fakes.main("--require-sub", "opt_expr")[0], 0)
+        code, out, err = self.fakes.main("--require-sub", "opt_share")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("no opt_share call changed something", out + err)
+        self.fakes.spec({**self.pair("0001", "opt_expr"), **self.pair("0002", "opt_share")})
+        self.assertEqual(self.fakes.main("--require-sub", "opt_share")[0], 0)
+
     def test_an_empty_snapshot_file_is_an_error_not_a_pass(self) -> None:
         self.fakes.spec({"0001-opt_expr-before.il": "", "0001-opt_expr-after.il": ""})
         code, _, err = self.fakes.main()

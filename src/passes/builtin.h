@@ -21,6 +21,9 @@ extern const odin3_pass_def odin3_pass_write_verilog;
 extern const odin3_pass_def odin3_pass_write_dot;
 extern const odin3_pass_def odin3_pass_write_rtlil;
 extern const odin3_pass_def odin3_pass_sim;
+/* arch_pass.c (Phase 4.1): read_arch and write_techlib. */
+extern const odin3_pass_def odin3_pass_read_arch;
+extern const odin3_pass_def odin3_pass_write_techlib;
 extern const odin3_pass_def odin3_pass_read_project;
 extern const odin3_pass_def odin3_pass_dump_project;
 extern const odin3_pass_def odin3_pass_preprocess;
@@ -43,6 +46,7 @@ extern const odin3_pass_def odin3_pass_flatten;
 extern const odin3_pass_def odin3_pass_lower;
 /* src/passes/hardmap/register.c (3C Task 2). */
 extern const odin3_pass_def odin3_pass_hardmap;
+extern const odin3_pass_def odin3_pass_lpmmap;
 /* src/frontends/verilog/read_verilog.c (2C §4). */
 extern const odin3_pass_def odin3_read_verilog_pass;
 
