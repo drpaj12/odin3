@@ -64,14 +64,14 @@ static uint64_t key_of(uint32_t mod_key, uint32_t id) {
 }
 
 /* The first name base, base$1, base$2, ... no net of module has; interned, in *out. */
-static odin3_status free_name(blif_locs *locs, odin3_module *module, odin3_bytes base,
+static odin3_status free_name(blif_locs *locs, const odin3_module *module, odin3_bytes base,
                               uint32_t *out) {
     odin3_design *design = locs->ctx->design;
-    for (uint32_t n = 0;; n++) {
+    for (uint32_t attempt = 0;; attempt++) {
         odin3_strbuf_clear(&locs->name);
         odin3_status st = odin3_strbuf_append(&locs->name, base);
-        if (st == ODIN3_OK && n > 0) {
-            st = odin3_strbuf_appendf(&locs->name, "$%u", n);
+        if (st == ODIN3_OK && attempt > 0) {
+            st = odin3_strbuf_appendf(&locs->name, "$%u", attempt);
         }
         if (st == ODIN3_OK) {
             st = odin3_design_intern(design, (odin3_bytes){locs->name.data, locs->name.len}, out);
@@ -82,8 +82,10 @@ static odin3_status free_name(blif_locs *locs, odin3_module *module, odin3_bytes
     }
 }
 
-odin3_status blif_locs_find_net(blif_locs *locs, odin3_module *module, uint32_t mod_key,
-                                uint32_t str, odin3_net_id *out) {
+odin3_status blif_locs_find_net(blif_locs *locs, const blif_scope *scope, uint32_t str,
+                                odin3_net_id *out) {
+    odin3_module *module = scope->module;
+    uint32_t mod_key = scope->key;
     uint64_t found = 0;
     *out = (odin3_net_id){0};
     if (odin3_u64map_get(locs->by_text, key_of(mod_key, str), &found)) {
@@ -134,37 +136,36 @@ static odin3_status name_record(blif_locs *locs, const odin3_hdl_name *nm, odin3
     return st;
 }
 
-odin3_status blif_locs_create_net(blif_locs *locs, odin3_module *module, uint32_t mod_key,
-                                  odin3_bytes name, odin3_prov_id imported, odin3_net_id *out) {
-    odin3_design *design = locs->ctx->design;
-    odin3_hdl_name nm;
-    bool matched = false;
-    odin3_status st = odin3_hdl_name_vtr_decode(name, &locs->buf, &nm, &matched);
-    uint32_t str = 0;
-    odin3_prov_id prov = imported;
-    if (st == ODIN3_OK && matched) {
-        st = name_record(locs, &nm, imported, &prov);
-        if (st == ODIN3_OK) {
-            st = free_name(locs, module, nm.short_name, &str);
-        }
-    } else if (st == ODIN3_OK) {
-        st = odin3_design_intern(design, name, &str);
+/* Registers a decoded net: its original text finds it, and it still holds its SHORT name. */
+static odin3_status note_decoded(blif_locs *locs, const blif_scope *scope, odin3_bytes name,
+                                 odin3_net_id net) {
+    uint32_t raw = 0;
+    odin3_status st = odin3_design_intern(locs->ctx->design, name, &raw);
+    if (st == ODIN3_OK) {
+        st = put(locs->by_text, key_of(scope->key, raw), net.v);
     }
     if (st == ODIN3_OK) {
-        st = odin3_net_create(module, str, prov, out);
-    }
-    uint32_t raw = 0;
-    if (st == ODIN3_OK && matched) {
-        st = odin3_design_intern(design, name, &raw);
-    }
-    if (st == ODIN3_OK && matched) {
-        st = put(locs->by_text, key_of(mod_key, raw), out->v);
-    }
-    if (st == ODIN3_OK && matched) {
-        st = put(locs->decoded, key_of(mod_key, out->v), 1);
+        st = put(locs->decoded, key_of(scope->key, net.v), 1);
         locs->stats->nets++;
     }
     return st;
+}
+
+odin3_status blif_locs_create_net(blif_locs *locs, const blif_scope *scope, odin3_bytes name,
+                                  odin3_prov_id imported, odin3_net_id *out) {
+    odin3_hdl_name decoded;
+    bool matched = false;
+    odin3_status st = odin3_hdl_name_vtr_decode(name, &locs->buf, &decoded, &matched);
+    uint32_t str = 0;
+    odin3_prov_id prov = imported;
+    if (st == ODIN3_OK && matched) {
+        st = name_record(locs, &decoded, imported, &prov);
+        st = st == ODIN3_OK ? free_name(locs, scope->module, decoded.short_name, &str) : st;
+    } else if (st == ODIN3_OK) {
+        st = odin3_design_intern(locs->ctx->design, name, &str);
+    }
+    st = st == ODIN3_OK ? odin3_net_create(scope->module, str, prov, out) : st;
+    return st == ODIN3_OK && matched ? note_decoded(locs, scope, name, *out) : st;
 }
 
 /* --- cells ---------------------------------------------------------------------------------- */
@@ -240,28 +241,33 @@ static odin3_prov_id base_of(const odin3_design *design, odin3_prov_id prov) {
 
 /* The text without one pair of surrounding double quotes. */
 static odin3_bytes unquote(odin3_bytes text) {
-    const char *p = text.ptr;
-    if (text.len >= 2 && p[0] == '"' && p[text.len - 1] == '"') {
-        return (odin3_bytes){p + 1, text.len - 2};
+    const char *chars = text.ptr;
+    if (text.len >= 2 && chars[0] == '"' && chars[text.len - 1] == '"') {
+        return (odin3_bytes){chars + 1, text.len - 2};
     }
     return text;
 }
 
+/* The warning for a `.attr src` that is not a location list (L-6): located, never an error. */
+static void bad_src(blif_locs *locs, const blif_src_text *src) {
+    locs->stats->bad++;
+    odin3_log(ODIN3_LOG_WARN,
+              "%s:%u: `.attr src` value '%.*s' is not a location list; kept as an attribute",
+              locs->path, src->line, (int)src->text.len, (const char *)src->text.ptr);
+}
+
 odin3_status blif_locs_cell_src(blif_locs *locs, odin3_module *module, odin3_node_id *node,
-                                odin3_bytes text, uint32_t line, bool *restored) {
+                                const blif_src_text *src, bool *restored) {
     odin3_hdl_loc found[ODIN3_HDL_LOC_MAX];
-    odin3_bytes src = unquote(text);
-    uint32_t count = odin3_hdl_loc_parse(src, found, ODIN3_HDL_LOC_MAX);
+    uint32_t count = odin3_hdl_loc_parse(unquote(src->text), found, ODIN3_HDL_LOC_MAX);
     *restored = false;
     if (count == 0) {
-        locs->stats->bad++;
-        odin3_log(ODIN3_LOG_WARN, "%s:%u: `.attr src` value '%.*s' is not a location list; kept as "
-                                  "an attribute",
-                  locs->path, line, (int)text.len, (const char *)text.ptr);
+        bad_src(locs, src);
         return ODIN3_OK;
     }
+    uint32_t kept = count < ODIN3_HDL_LOC_MAX ? count : ODIN3_HDL_LOC_MAX;
     odin3_hdl_restore_req req = {base_of(locs->ctx->design, odin3_node_prov(module, *node)), found,
-                                 count < ODIN3_HDL_LOC_MAX ? count : ODIN3_HDL_LOC_MAX, 0};
+                                 kept, 0};
     odin3_hdl_restored made = {0};
     odin3_status st = odin3_hdl_restore(locs->ctx, &req, &made);
     st = st == ODIN3_OK ? reprov_node(locs, module, node, made.prov) : st;
@@ -318,8 +324,8 @@ static odin3_status inherit_node(blif_locs *locs, odin3_module *module, odin3_no
     }
     const odin3_prov_id parents[2] = {source, odin3_node_prov(module, node)};
     odin3_prov_id prov = {0};
-    odin3_status st = odin3_prov_derive_hier(
-        locs->ctx, (odin3_prov_list){parents, 2}, odin3_prov_get(design, source)->hier, &prov);
+    odin3_status st = odin3_prov_derive_hier(locs->ctx, (odin3_prov_list){parents, 2},
+                                             odin3_prov_get(design, source)->hier, &prov);
     st = st == ODIN3_OK ? reprov_node(locs, module, &node, prov) : st;
     locs->stats->inherited += st == ODIN3_OK ? 1U : 0U;
     return st;
@@ -328,8 +334,8 @@ static odin3_status inherit_node(blif_locs *locs, odin3_module *module, odin3_no
 odin3_status blif_locs_inherit(blif_locs *locs, odin3_module *module) {
     uint32_t end = odin3_module_node_end(module); /* nodes made by the rebuilds are not revisited */
     odin3_status st = ODIN3_OK;
-    for (uint32_t n = 1; st == ODIN3_OK && n < end; n++) {
-        st = inherit_node(locs, module, (odin3_node_id){n});
+    for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
+        st = inherit_node(locs, module, (odin3_node_id){id});
     }
     return st;
 }

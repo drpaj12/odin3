@@ -77,9 +77,9 @@ void tearDown(void) {
     design = NULL;
 }
 
-static void put_file(const char *name, const char *text) {
+static void put_input(const char *text) {
     char path[PATH_BUF];
-    path_of(name, path);
+    path_of("t.blif", path);
     FILE *file = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(file);
     TEST_ASSERT_EQUAL_size_t(strlen(text), fwrite(text, 1, strlen(text), file));
@@ -108,7 +108,7 @@ static char *slurp(const char *name) {
 /* Reads text as t.blif into the (fresh) design; the option as given. */
 static odin3_status read_text(const char *text, bool hdl_locs) {
     char path[PATH_BUF];
-    put_file("t.blif", text);
+    put_input(text);
     path_of("t.blif", path);
     odin3_blif_read_opts opts = {.hdl_locs = hdl_locs, .stats = &stats};
     return odin3_blif_read_ex(design, NULL, path, &opts);
@@ -126,17 +126,27 @@ static char *dump(void) {
     return slurp("dump.txt");
 }
 
-static void run_pass(const char *pass, const char *file, const char *options) {
+/* One pass run: `pass options <dir>/file`. */
+typedef struct pass_call {
+    const char *pass;
+    const char *options;
+    const char *file;
+} pass_call;
+
+static void run_pass(const pass_call *call) {
     char path[PATH_BUF];
     char args[2 * PATH_BUF];
-    path_of(file, path);
-    (void)snprintf(args, sizeof args, "%s %s", options, path);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_pass_run(design, pass, odin3_bytes_cstr(args)),
-                                  log_text);
+    path_of(call->file, path);
+    (void)snprintf(args, sizeof args, "%s %s", call->options, path);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_pass_run(design, call->pass, odin3_bytes_cstr(args)), log_text);
 }
 
-/* The lines of text that hold needle in their kind field (`|node|`, `|net|`), as one text. */
-static char *lines_with(const char *text, const char *needle) {
+/* The lines of a dump of one kind, as one text. */
+typedef enum line_kind { LINE_NODE, LINE_NET } line_kind;
+
+static char *lines_of(const char *text, line_kind kind) {
+    const char *needle = kind == LINE_NODE ? "|node|" : "|net|";
     char *out = odin3_util_calloc(strlen(text) + 1);
     const char *at = text;
     while (*at != '\0') {
@@ -168,20 +178,37 @@ static odin3_net_id net_named(const char *name) {
     return odin3_module_find_net(top_module(), str_id(name));
 }
 
-static const char *const NAMES =
-    ".model top\n.inputs a b\n.outputs y z\n"
-    ".names a b w@d.v:3\n11 1\n.cname g1\n"
-    ".names w@d.v:3 y\n1 1\n.cname g2\n"
-    ".latch w@d.v:3 z re a 0\n.cname ff\n"
-    ".end\n";
+static void expect_in(const char *text, const char *needle) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, needle), text);
+}
+
+static void expect_out(const char *text, const char *needle) {
+    TEST_ASSERT_NULL_MESSAGE(strstr(text, needle), text);
+}
+
+static void expect_net(const char *name, bool present) {
+    TEST_ASSERT_EQUAL_INT(present, odin3_net_valid(net_named(name)));
+}
+
+static void expect_check(void) {
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
+}
+
+static const char *const NAMES = ".model top\n.inputs a b\n.outputs y z\n"
+                                 ".names a b w@d.v:3\n11 1\n.cname g1\n"
+                                 ".names w@d.v:3 y\n1 1\n.cname g2\n"
+                                 ".latch w@d.v:3 z re a 0\n.cname ff\n"
+                                 ".end\n";
 
 /* T-5: without the option names are byte for byte and no record is restored. */
 static void test_no_option_no_change(void) {
     read_ok(NAMES, false);
-    TEST_ASSERT_TRUE(odin3_net_valid(net_named("w@d.v:3")));
-    TEST_ASSERT_FALSE(odin3_net_valid(net_named("w")));
+    expect_net("w@d.v:3", true);
+    expect_net("w", false);
     char *text = dump();
-    TEST_ASSERT_NULL_MESSAGE(strstr(text, "|d.v:"), text);
+    expect_out(text, "|d.v:");
     TEST_ASSERT_EQUAL_UINT32(0, stats.nets + stats.cells + stats.inherited);
     odin3_util_free(text);
 }
@@ -189,18 +216,18 @@ static void test_no_option_no_change(void) {
 /* D-4 a, D-5: the name decodes, and the $sop that drives the located net inherits it. */
 static void test_names_decode_and_inherit(void) {
     read_ok(NAMES, true);
-    TEST_ASSERT_FALSE(odin3_net_valid(net_named("w@d.v:3")));
-    TEST_ASSERT_TRUE(odin3_net_valid(net_named("w")));
+    expect_net("w@d.v:3", false);
+    expect_net("w", true);
     TEST_ASSERT_EQUAL_UINT32(1, stats.nets);
     TEST_ASSERT_EQUAL_UINT32(0, stats.cells);
     TEST_ASSERT_EQUAL_UINT32(1, stats.inherited);
     char *text = dump();
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "top|net|w|d.v:3\n"), text);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "top|node|g1|d.v:3\n"), text);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "top|node|g2|\n"), text);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "top|node|ff|\n"), text);
+    expect_in(text, "top|net|w|d.v:3\n");
+    expect_in(text, "top|node|g1|d.v:3\n");
+    expect_in(text, "top|node|g2|\n");
+    expect_in(text, "top|node|ff|\n");
     odin3_util_free(text);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
+    expect_check();
 }
 
 /* D-1: the record is DERIVED{SOURCE, IMPORTED}, the HDL first; hier is on both. */
@@ -228,9 +255,9 @@ static void test_non_match_untouched(void) {
     read_ok(".model top\n.inputs a\n.outputs y\n.names a q@x\n1 1\n.names q@x y\n1 1\n"
             ".names a plain\n1 1\n.names a n@f.v:0\n1 1\n.end\n",
             true);
-    TEST_ASSERT_TRUE(odin3_net_valid(net_named("q@x")));
-    TEST_ASSERT_TRUE(odin3_net_valid(net_named("plain")));
-    TEST_ASSERT_TRUE(odin3_net_valid(net_named("n@f.v:0")));
+    expect_net("q@x", true);
+    expect_net("plain", true);
+    expect_net("n@f.v:0", true);
     TEST_ASSERT_EQUAL_UINT32(0, stats.nets + stats.inherited);
 }
 
@@ -242,17 +269,17 @@ static void test_clash_first_free_suffix(void) {
             true);
     TEST_ASSERT_EQUAL_UINT32(2, stats.nets);
     /* raw names are exact: `w$1` and `w` are the file's nets; the decoded ones moved aside */
-    TEST_ASSERT_TRUE(odin3_net_valid(net_named("w")));
-    TEST_ASSERT_TRUE(odin3_net_valid(net_named("w$1")));
+    expect_net("w", true);
+    expect_net("w$1", true);
     char *text = dump();
-    char *nets = lines_with(text, "|net|");
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(nets, "top|net|w|\n"), nets);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(nets, "top|net|w$1|\n"), nets);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(nets, "|d.v:3\n"), nets);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(nets, "|d.v:4\n"), nets);
+    char *nets = lines_of(text, LINE_NET);
+    expect_in(nets, "top|net|w|\n");
+    expect_in(nets, "top|net|w$1|\n");
+    expect_in(nets, "|d.v:3\n");
+    expect_in(nets, "|d.v:4\n");
     odin3_util_free(nets);
     odin3_util_free(text);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
+    expect_check();
 }
 
 /* D-4 b: `.attr src` with two locations restores both on the cell and drops the extras key. */
@@ -263,7 +290,7 @@ static void test_attr_src_two_locations(void) {
     TEST_ASSERT_EQUAL_UINT32(1, stats.cells);
     TEST_ASSERT_EQUAL_UINT32(0, stats.inherited);
     char *text = dump();
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "top|node|g|a.v:3.1-4.2|b.v:5.1-5.4\n"), text);
+    expect_in(text, "top|node|g|a.v:3.1-4.2|b.v:5.1-5.4\n");
     odin3_util_free(text);
     odin3_node_id node = odin3_module_find_node(top_module(), str_id("g"));
     TEST_ASSERT_TRUE(odin3_node_valid(node));
@@ -271,9 +298,9 @@ static void test_attr_src_two_locations(void) {
     TEST_ASSERT_NULL(odin3_attr_get(top_module(), obj, str_id("blif.attr:src")));
     const odin3_value *extras = odin3_attr_get(top_module(), obj, str_id("blif_extras"));
     TEST_ASSERT_NOT_NULL(extras);
-    TEST_ASSERT_EQUAL_STRING("blif.attr:keep", odin3_strtab_get(odin3_design_strtab(design),
-                                                                 extras->str));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
+    TEST_ASSERT_EQUAL_STRING("blif.attr:keep",
+                             odin3_strtab_get(odin3_design_strtab(design), extras->str));
+    expect_check();
 }
 
 /* Without the option `.attr src` stays an attribute and no location is made. */
@@ -285,7 +312,7 @@ static void test_attr_src_without_option(void) {
     odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
     TEST_ASSERT_NOT_NULL(odin3_attr_get(top_module(), obj, str_id("blif.attr:src")));
     char *text = dump();
-    TEST_ASSERT_NULL_MESSAGE(strstr(text, "a.v"), text);
+    expect_out(text, "a.v");
     odin3_util_free(text);
 }
 
@@ -297,12 +324,12 @@ static void test_malformed_src_is_located_warning(void) {
     TEST_ASSERT_EQUAL_UINT32(1, stats.bad);
     TEST_ASSERT_EQUAL_UINT32(0, stats.cells);
     TEST_ASSERT_EQUAL_UINT32(0, errors);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "t.blif:7: `.attr src` value"), log_text);
+    expect_in(log_text, "t.blif:7: `.attr src` value");
     odin3_node_id node = odin3_module_find_node(top_module(), str_id("g"));
     odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
     TEST_ASSERT_NOT_NULL(odin3_attr_get(top_module(), obj, str_id("blif.attr:src")));
     char *text = dump();
-    TEST_ASSERT_NULL_MESSAGE(strstr(text, "a.v"), text);
+    expect_out(text, "a.v");
     odin3_util_free(text);
 }
 
@@ -313,8 +340,8 @@ static void test_src_over_eight_is_capped(void) {
             true);
     TEST_ASSERT_EQUAL_UINT32(1, stats.capped);
     char *text = dump();
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "f.v:7|f.v:8\n"), text);
-    TEST_ASSERT_NULL(strstr(text, "f.v:9"));
+    expect_in(text, "f.v:7|f.v:8\n");
+    expect_out(text, "f.v:9");
     odin3_util_free(text);
 }
 
@@ -338,20 +365,20 @@ static void test_inherit_rules(void) {
     TEST_ASSERT_EQUAL_UINT32(1, stats.cells);
     TEST_ASSERT_EQUAL_UINT32(2, stats.inherited); /* two and first */
     char *text = dump();
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "top|node|own|own.v:7\n"), text);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "top|node|two|x.v:2\n"), text);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "top|node|first|x.v:3\n"), text);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "top|node|none|\n"), text);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "top|node|ff|\n"), text);
+    expect_in(text, "top|node|own|own.v:7\n");
+    expect_in(text, "top|node|two|x.v:2\n");
+    expect_in(text, "top|node|first|x.v:3\n");
+    expect_in(text, "top|node|none|\n");
+    expect_in(text, "top|node|ff|\n");
     odin3_util_free(text);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
+    expect_check();
 }
 
 /* The pass takes the option in any position and still wants one path. */
 static void test_pass_option(void) {
-    put_file("t.blif", NAMES);
-    run_pass("read_blif", "t.blif", "--hdl-locs");
-    TEST_ASSERT_TRUE(odin3_net_valid(net_named("w")));
+    put_input(NAMES);
+    run_pass(&(pass_call){"read_blif", "--hdl-locs", "t.blif"});
+    expect_net("w", true);
     odin3_design_destroy(design);
     design = odin3_design_create();
     char path[PATH_BUF];
@@ -359,7 +386,7 @@ static void test_pass_option(void) {
     path_of("t.blif", path);
     (void)snprintf(args, sizeof args, "%s --hdl-locs", path);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "read_blif", odin3_bytes_cstr(args)));
-    TEST_ASSERT_TRUE(odin3_net_valid(net_named("w")));
+    expect_net("w", true);
     odin3_design_destroy(design);
     design = odin3_design_create();
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
@@ -374,22 +401,23 @@ static void test_src_attr_round_trip(void) {
             ".latch y z re a 0\n.cname ff\n.attr src \"c.v:9.2\"\n.end\n",
             true);
     char *before = dump();
-    run_pass("write_blif", "w1.blif", "--src-attr");
+    run_pass(&(pass_call){"write_blif", "--src-attr", "w1.blif"});
     odin3_design_destroy(design);
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
     char path[PATH_BUF];
     path_of("w1.blif", path);
     odin3_blif_read_opts opts = {.hdl_locs = true, .stats = &stats};
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read_ex(design, NULL, path, &opts), log_text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read_ex(design, NULL, path, &opts),
+                                  log_text);
     TEST_ASSERT_EQUAL_UINT32(2, stats.cells);
     char *after = dump();
-    char *want = lines_with(before, "|node|");
-    char *got = lines_with(after, "|node|");
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(got, "top|node|g1|a.v:3.1-4.2|b.v:5\n"), got);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(got, "top|node|ff|c.v:9.2\n"), got);
+    char *want = lines_of(before, LINE_NODE);
+    char *got = lines_of(after, LINE_NODE);
+    expect_in(got, "top|node|g1|a.v:3.1-4.2|b.v:5\n");
+    expect_in(got, "top|node|ff|c.v:9.2\n");
     TEST_ASSERT_EQUAL_STRING(want, got);
-    run_pass("write_blif", "w2.blif", "--src-attr");
+    run_pass(&(pass_call){"write_blif", "--src-attr", "w2.blif"});
     char *first = slurp("w1.blif");
     char *second = slurp("w2.blif");
     TEST_ASSERT_EQUAL_STRING(first, second);
@@ -408,19 +436,20 @@ static void test_vtr_provenance_round_trip(void) {
             ".names a b w@d.v:3\n11 1\n"
             ".names w@d.v:3 y\n1 1\n.end\n",
             true);
-    run_pass("write_blif", "v.blif", "--vtr --name-style provenance");
+    run_pass(&(pass_call){"write_blif", "--vtr --name-style provenance", "v.blif"});
     odin3_design_destroy(design);
     design = odin3_design_create();
     char path[PATH_BUF];
     path_of("v.blif", path);
     odin3_blif_read_opts opts = {.hdl_locs = true, .stats = &stats};
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read_ex(design, NULL, path, &opts), log_text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read_ex(design, NULL, path, &opts),
+                                  log_text);
     TEST_ASSERT_EQUAL_UINT32(1, stats.nets);
     TEST_ASSERT_EQUAL_UINT32(1, stats.inherited);
     char *text = dump();
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "top|net|w|d.v:3\n"), text);
+    expect_in(text, "top|net|w|d.v:3\n");
     odin3_util_free(text);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
+    expect_check();
 }
 
 int main(void) {
