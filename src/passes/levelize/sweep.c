@@ -4,7 +4,9 @@
  *
  * Roles. A node is a source (LV_SOURCE) when its cell type is sequential or holds state: the
  * registry's SEQ_EDGE or SEQ_LEVEL flag (celltype.h), or a tech-library cell that states a `seq`
- * or a `memory` (techlib/reader.h; the library data of a type is odin3_celltype_lib). Its inputs
+ * or a `memory` (techlib/reader.h; the library data of a type is odin3_celltype_lib), or a black
+ * box that is a VTR RAM primitive (single_port_ram, dual_port_ram) or the model of a
+ * `class="memory"` leaf of the loaded arch record. Its inputs
  * end paths and its outputs start them at level 0 (Question 4, one rule for memories, registers,
  * latches and black boxes or hard blocks that state a latch or register). Every other cell is
  * combinational (LV_COMB), black boxes, hard blocks without state and instances of design modules
@@ -13,8 +15,11 @@
  * Loop cut (V-4, the abc region's rule): on a stall every unfinished cell lies on a cycle or
  * downstream of one. The lowest-ID cell that lies on a cycle of the unfinished cells is found with
  * Tarjan's strongly connected components (iterative), warned about once and cut: level 0, outputs
- * level 0, sweep continues. Each stall costs O(cells + pins).
+ * level 0, sweep continues. Each stall costs O(cells + pins), and one Tarjan pass cuts the
+ * lowest-ID cell of EVERY cyclic component it finds (in ascending ID order), so K independent loops
+ * cost one pass, not K.
  */
+#include "frontends/arch/arch.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/module.h"
@@ -82,6 +87,25 @@ void lv_free(lv_mod *lv) {
 
 /* --- classification ------------------------------------------------------------------------- */
 
+/* A black box with no library statement of its own is still a memory when it is a VTR RAM
+ * primitive or the loaded arch record gives it to a `class="memory"` leaf (agent default, Peter's
+ * rule: a memory's inputs end paths, its outputs start them). */
+static bool is_memory_model(const odin3_design *design, const char *name) {
+    if (strcmp(name, "single_port_ram") == 0 || strcmp(name, "dual_port_ram") == 0) {
+        return true;
+    }
+    const odin3_arch *arch = odin3_design_arch(design);
+    uint32_t leaf = 0;
+    for (bool more = arch != NULL && odin3_arch_next_leaf_of(arch, name, 0, &leaf); more;
+         more = odin3_arch_next_leaf_of(arch, name, leaf + 1, &leaf)) {
+        const char *cls = odin3_arch_leaf_at(arch, leaf)->cls;
+        if (cls != NULL && strcmp(cls, "memory") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static uint8_t type_role(const odin3_design *design, odin3_celltype_id type, bool *is_inst) {
     const odin3_celltype_def *def = odin3_celltype_get(design, type);
     *is_inst = false;
@@ -93,6 +117,9 @@ static uint8_t type_role(const odin3_design *design, odin3_celltype_id type, boo
     }
     const odin3_techlib_cell *lib = odin3_celltype_lib(design, type);
     if (lib != NULL && (lib->memory != NULL || lib->n_seqs > 0)) {
+        return LV_SOURCE;
+    }
+    if (def->gran == ODIN3_GRAN_BLACKBOX && is_memory_model(design, def->name)) {
         return LV_SOURCE;
     }
     *is_inst = def->gran == ODIN3_GRAN_MODULE;
@@ -241,7 +268,7 @@ static odin3_status tj_enter(lv_mod *lv, uint32_t id) {
     return ODIN3_OK;
 }
 
-/* Closes the component rooted at id: its lowest ID is a candidate when it is a cycle. */
+/* Closes the component rooted at id: its lowest ID is to be cut when it is a cycle. */
 static void tj_close(lv_mod *lv, uint32_t id) {
     uint32_t lowest = UINT32_MAX;
     size_t size = 0;
@@ -254,8 +281,9 @@ static void tj_close(lv_mod *lv, uint32_t id) {
         self = self || (lv->state[at] & LV_SELF) != 0;
         size++;
     }
-    if ((size > 1 || self) && lowest < lv->tj_best) {
-        lv->tj_best = lowest;
+    if (size > 1 || self) {
+        lv->state[lowest] |= LV_CAND;
+        lv->tj_cands++;
     }
 }
 
@@ -292,10 +320,10 @@ static odin3_status tj_step(lv_mod *lv) {
     return ODIN3_OK;
 }
 
-/* Tarjan over the unfinished comb cells; lv->tj_best gets the lowest ID on a cycle. */
-static odin3_status find_cycle_cell(lv_mod *lv) {
+/* Tarjan over the unfinished comb cells; the lowest cell of every cyclic component gets LV_CAND. */
+static odin3_status find_cycle_cells(lv_mod *lv) {
     lv->tj_counter = 0;
-    lv->tj_best = UINT32_MAX;
+    lv->tj_cands = 0;
     if (lv->tj_index == NULL) {
         lv->tj_index = zeroed(lv->n_nodes, sizeof *lv->tj_index);
         lv->tj_low = zeroed(lv->n_nodes, sizeof *lv->tj_low);
@@ -360,17 +388,21 @@ static void warn_loop(const lv_mod *lv, uint32_t id) {
     }
 }
 
-/* A stall: cuts the lowest-ID cell on a cycle (the lowest unfinished cell if none is found). */
-static odin3_status cut_loop(lv_mod *lv) {
-    odin3_status st = find_cycle_cell(lv);
-    uint32_t id = lv->tj_best;
-    for (uint32_t at = 1; st == ODIN3_OK && id == UINT32_MAX && at < lv->n_nodes; at++) {
-        id = lv->role[at] == LV_COMB && (lv->state[at] & LV_DONE) == 0 ? at : id;
-    }
-    if (st == ODIN3_OK) {
-        warn_loop(lv, id);
-        lv->n_cut++;
-        finish(lv, id, true);
+/* A stall: cuts the lowest-ID cell of every cyclic component, in ascending ID order (the lowest
+ * unfinished cell if none is found). */
+static odin3_status cut_loops(lv_mod *lv) {
+    odin3_status st = find_cycle_cells(lv);
+    for (uint32_t id = 1; st == ODIN3_OK && id < lv->n_nodes; id++) {
+        bool pick = (lv->state[id] & LV_CAND) != 0;
+        pick = pick ||
+               (lv->tj_cands == 0 && lv->role[id] == LV_COMB && (lv->state[id] & LV_DONE) == 0);
+        if (pick) {
+            lv->state[id] &= (uint8_t)~LV_CAND;
+            lv->tj_cands = 1; /* the fallback cuts the first unfinished cell only */
+            warn_loop(lv, id);
+            lv->n_cut++;
+            finish(lv, id, true);
+        }
     }
     return st;
 }
@@ -385,7 +417,7 @@ odin3_status lv_sweep(lv_mod *lv) {
             lv->n_stack--;
             finish(lv, lv->stack[lv->n_stack], false);
         } else {
-            st = cut_loop(lv);
+            st = cut_loops(lv);
         }
     }
     return st;

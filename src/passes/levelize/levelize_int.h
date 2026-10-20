@@ -22,7 +22,7 @@ enum {
 };
 
 /* Per-node state bits. */
-enum { LV_DONE = 1, LV_CUT = 2, LV_SELF = 4 };
+enum { LV_DONE = 1, LV_CUT = 2, LV_SELF = 4, LV_CAND = 16 };
 
 /* One module under the sweep. All arrays are indexed by the module-local node or net ID. */
 typedef struct lv_mod {
@@ -48,7 +48,7 @@ typedef struct lv_mod {
     odin3_vec members;   /* Tarjan component stack */
     uint32_t *tj_index;  /* Tarjan index, per node */
     uint32_t tj_counter; /* Tarjan: indices handed out */
-    uint32_t tj_best;    /* Tarjan: lowest ID found on a cycle, UINT32_MAX for none */
+    uint32_t tj_cands;   /* Tarjan: cyclic components found (their lowest cell has LV_CAND) */
     uint32_t *tj_low;    /* Tarjan lowlink, per node */
 } lv_mod;
 

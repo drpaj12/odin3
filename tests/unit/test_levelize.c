@@ -48,9 +48,11 @@ enum {
 static char dir[DIR_BUF];
 static odin3_design *design;
 static char log_text[LOG_MAX];
+static size_t loop_warnings; /* every "combinational loop through" warning, past the log_text cap */
 
 static void sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
+    loop_warnings += strstr(msg, "combinational loop through") != NULL ? 1U : 0U;
     if (level <= ODIN3_LOG_INFO) {
         size_t used = strlen(log_text);
         (void)snprintf(log_text + used, sizeof log_text - used, "%s\n", msg);
@@ -65,6 +67,7 @@ void setUp(void) {
     (void)snprintf(dir, sizeof dir, "%s/lv.XXXXXX", ODIN3_LV_ROOT);
     TEST_ASSERT_NOT_NULL(mkdtemp(dir));
     log_text[0] = '\0';
+    loop_warnings = 0;
     odin3_log_set_sink(sink, NULL);
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
@@ -418,7 +421,8 @@ static void test_custom_key_and_cut_key(void) {
     TEST_ASSERT_EQUAL_INT64(
         1, attr_int(top(), (odin3_objref){ODIN3_OBJ_NODE, driver_of(top(), "x").v}, "depth_cut"));
     TEST_ASSERT_EQUAL_INT64(-1, net_lvl("x"));
-    levelize_ok("--key depth");
+    /* a second run would find the first run's `depth`: a custom key is refused over any value */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("levelize", "--key depth"));
 }
 
 static void test_user_attribute_not_overwritten(void) {
@@ -480,7 +484,23 @@ static const odin3_plugin_port k_bbseq_ports[] = {{"clk", ODIN3_DIR_IN, 1, NULL,
                                                   {"d", ODIN3_DIR_IN, 1, NULL, true},
                                                   {"q", ODIN3_DIR_OUT, 1, NULL, true}};
 
+static const odin3_plugin_port k_io_ports[] = {{"a", ODIN3_DIR_IN, 1, NULL, true},
+                                               {"io", ODIN3_DIR_INOUT, 1, NULL, true},
+                                               {"y", ODIN3_DIR_OUT, 1, NULL, true}};
+
 static void register_plugin_types(void) {
+    odin3_plugin_celltype tri = {.name = "lv_tri",
+                                 .gran = ODIN3_GRAN_BLACKBOX,
+                                 .flags = ODIN3_CT_TRISTATE,
+                                 .ports = k_bb_ports,
+                                 .n_ports = 2};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_register(&tri));
+    odin3_plugin_celltype io = {.name = "lv_io",
+                                .gran = ODIN3_GRAN_BLACKBOX,
+                                .flags = 0,
+                                .ports = k_io_ports,
+                                .n_ports = 3};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_register(&io));
     odin3_plugin_celltype bb = {.name = "lv_bb",
                                 .gran = ODIN3_GRAN_BLACKBOX,
                                 .flags = 0,
@@ -614,6 +634,180 @@ static void test_chain_of_100000(void) {
     TEST_ASSERT_TRUE(usage.ru_maxrss < CHAIN_MAX_KB);
 }
 
+/* --- fix round: loops in bulk, custom key guard, OOM, arch memories, pin shapes ------------- */
+
+enum { MANY_LOOPS = 2000, MANY_MAX_SECONDS = 5, OOM_TRIES = 400 };
+
+static void append_fmt(odin3_strbuf *buf, const char *fmt, unsigned num) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(buf, fmt, num, num, num, num));
+}
+
+static void test_many_independent_loops(void) {
+    odin3_strbuf blif;
+    odin3_strbuf_init(&blif);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&blif, ".model m\n.inputs a\n.outputs"));
+    for (unsigned i = 0; i < MANY_LOOPS; i++) {
+        append_fmt(&blif, " p%u", i);
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&blif, "\n"));
+    for (unsigned i = 0; i < MANY_LOOPS; i++) {
+        append_fmt(&blif, ".names a q%u p%u\n11 1\n.names p%u q%u\n1 1\n", i);
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&blif, ".end\n"));
+    read_blif(blif.data);
+    odin3_strbuf_free(&blif);
+    struct timespec t0;
+    struct timespec t1;
+    (void)clock_gettime(CLOCK_MONOTONIC, &t0);
+    levelize_ok("");
+    (void)clock_gettime(CLOCK_MONOTONIC, &t1);
+    TEST_ASSERT_TRUE((t1.tv_sec - t0.tv_sec) < MANY_MAX_SECONDS);
+    TEST_ASSERT_EQUAL_size_t(MANY_LOOPS, loop_warnings);
+    TEST_ASSERT_EQUAL_INT64(1, cell_cut("p0"));
+    TEST_ASSERT_EQUAL_INT64(-1, cell_cut("q0"));
+    TEST_ASSERT_EQUAL_INT64(1, cell_cut("p1999"));
+    TEST_ASSERT_EQUAL_INT64(-1, cell_cut("q1999"));
+    TEST_ASSERT_EQUAL_INT64(1, cell_lvl("q1999"));
+}
+
+/* A user INT on the key of a custom --key (and its _cut companion) is refused, never replaced. */
+static void test_custom_key_refuses_user_int(void) {
+    read_blif(".model m\n.inputs a\n.outputs n1\n.names a n1\n1 1\n.end\n");
+    uint32_t key = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("mine"), &key));
+    odin3_objref net = net_ref(top(), "n1");
+    odin3_value five = odin3_value_int(5);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(top(), net, key, &five));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("levelize", "--key mine"));
+    TEST_ASSERT_TRUE(log_has("already has the attribute 'mine'"));
+    TEST_ASSERT_EQUAL_INT64(5, attr_int(top(), net, "mine"));
+    TEST_ASSERT_EQUAL_INT64(-1, net_lvl("a"));
+}
+
+static void test_custom_key_keeps_user_cut_attribute(void) {
+    read_blif(".model m\n.inputs a\n.outputs n1\n.names a n1\n1 1\n.end\n");
+    uint32_t key = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_intern(design, odin3_bytes_cstr("mine_cut"), &key));
+    odin3_objref cell = {ODIN3_OBJ_NODE, driver_of(top(), "n1").v};
+    odin3_value seven = odin3_value_int(7);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(top(), cell, key, &seven));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("levelize", "--key mine"));
+    TEST_ASSERT_TRUE(log_has("already has the attribute"));
+    TEST_ASSERT_EQUAL_INT64(7, attr_int(top(), cell, "mine_cut"));
+    TEST_ASSERT_EQUAL_INT64(-1, attr_int(top(), cell, "mine"));
+}
+
+/* An allocation failure at any point: OK or NO_MEMORY, and the structure never changes. */
+static void test_oom_leaves_structure_alone(void) {
+    read_blif(".model m\n.inputs a\n.outputs x n2\n.names a x x\n11 1\n.names a n1\n1 1\n"
+              ".names n1 n2\n1 1\n.end\n");
+    odin3_strbuf before;
+    odin3_strbuf after;
+    odin3_strbuf_init(&before);
+    odin3_strbuf_init(&after);
+    structure_snapshot(&before);
+    bool done = false;
+    for (long tries = 0; !done && tries < OOM_TRIES; tries++) {
+        odin3_util_set_alloc_fail_after(tries);
+        odin3_status st = run("levelize", "");
+        odin3_util_set_alloc_fail_after(-1);
+        TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+        odin3_strbuf_clear(&after);
+        structure_snapshot(&after);
+        TEST_ASSERT_EQUAL_STRING(before.data, after.data);
+        done = st == ODIN3_OK;
+    }
+    TEST_ASSERT_TRUE(done);
+    odin3_strbuf_free(&before);
+    odin3_strbuf_free(&after);
+}
+
+/* A VTR RAM primitive with no tech library loaded still starts and ends paths. */
+static void test_vtr_ram_without_library_is_a_source(void) {
+    read_blif(".model m\n.inputs a clk we\n.outputs m2\n"
+              ".names a n1\n1 1\n.names n1 n2\n1 1\n"
+              ".subckt single_port_ram clk=clk data[0]=n2 addr[0]=a we=we out[0]=r\n"
+              ".names r m1\n1 1\n.names m1 m2\n1 1\n.end\n");
+    levelize_ok("");
+    TEST_ASSERT_EQUAL_INT64(2, net_lvl("n2"));
+    TEST_ASSERT_EQUAL_INT64(0, net_lvl("r"));
+    TEST_ASSERT_EQUAL_INT64(0, cell_lvl("r"));
+    TEST_ASSERT_EQUAL_INT64(2, net_lvl("m2"));
+}
+
+/* A model the loaded arch record gives to a `class="memory"` leaf is a memory too. */
+static void test_arch_memory_model_is_a_source(void) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, run("read_arch", ODIN3_LIB_DIR "/../tests/unit/data/arch/generic_blocks.xml"),
+        log_text);
+    read_blif(".model m\n.inputs a clk we\n.outputs m2\n"
+              ".names a n1\n1 1\n.names n1 n2\n1 1\n"
+              ".subckt dpram_128x8 clk=clk we=we waddr[0]=a din[0]=n2 raddr[0]=a dout[0]=r\n"
+              ".names r m1\n1 1\n.names m1 m2\n1 1\n.end\n");
+    levelize_ok("");
+    TEST_ASSERT_EQUAL_INT64(2, net_lvl("n2"));
+    TEST_ASSERT_EQUAL_INT64(0, net_lvl("r"));
+    TEST_ASSERT_EQUAL_INT64(2, net_lvl("m2"));
+}
+
+/* An INOUT pin drives only: the cell never waits for its own pin. */
+static void test_inout_pin_is_a_driver_only(void) {
+    read_blif(".model m\n.inputs a\n.outputs z c\n"
+              ".names a n1\n1 1\n.names n1 n2\n1 1\n"
+              ".subckt lv_io a=n2 io=b y=c\n.names b z\n1 1\n.end\n");
+    levelize_ok("");
+    TEST_ASSERT_EQUAL_size_t(0, loop_warnings);
+    TEST_ASSERT_EQUAL_INT64(3, net_lvl("b"));
+    TEST_ASSERT_EQUAL_INT64(3, net_lvl("c"));
+    TEST_ASSERT_EQUAL_INT64(4, net_lvl("z"));
+}
+
+/* Two input pins of one cell on the same net: the cell waits for both releases, once each. */
+static void test_two_input_pins_on_one_net(void) {
+    read_blif(".model m\n.inputs a\n.outputs y\n"
+              ".names a n1\n1 1\n.names n1 n1 y\n11 1\n.end\n");
+    levelize_ok("");
+    TEST_ASSERT_EQUAL_INT64(1, net_lvl("n1"));
+    TEST_ASSERT_EQUAL_INT64(2, net_lvl("y"));
+    TEST_ASSERT_EQUAL_INT64(2, cell_lvl("y"));
+}
+
+/* A net with three combinational drivers (two feeders and one in a loop), then a cut. Built with
+ * the API with a tristate black box: the checker allows several drivers only for those. */
+static void test_multi_driver_net_then_cut(void) {
+    odin3_module_id mid = {0};
+    uint32_t name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("md"), &name));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, name, (odin3_prov_id){0}, &mid));
+    odin3_module *module = odin3_module_get(design, mid);
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("lv_tri"), &name));
+    TEST_ASSERT_TRUE(odin3_celltype_find(design, name, &type));
+    odin3_net_id nets[4]; /* a, b, w, v */
+    for (int i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(module, 0, (odin3_prov_id){0}, &nets[i]));
+    }
+    const int wiring[4][2] = {{0, 2}, {1, 2}, {2, 3}, {3, 2}}; /* cell i reads [0], drives [1] */
+    for (int i = 0; i < 4; i++) {
+        odin3_netvec ports[2] = {{&nets[wiring[i][0]], 1}, {&nets[wiring[i][1]], 1}};
+        odin3_node_spec spec = {type, 0, (odin3_prov_id){0}, NULL, 0};
+        odin3_node_id node = {0};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, &node));
+    }
+    levelize_ok("");
+    TEST_ASSERT_EQUAL_size_t(1, loop_warnings);
+    TEST_ASSERT_EQUAL_INT64(1,
+                            attr_int(module, (odin3_objref){ODIN3_OBJ_NODE, 3}, "odin3_level_cut"));
+    TEST_ASSERT_EQUAL_INT64(-1,
+                            attr_int(module, (odin3_objref){ODIN3_OBJ_NODE, 4}, "odin3_level_cut"));
+    TEST_ASSERT_EQUAL_INT64(
+        0, attr_int(module, (odin3_objref){ODIN3_OBJ_NET, nets[3].v}, "odin3_level"));
+    TEST_ASSERT_EQUAL_INT64(1, attr_int(module, (odin3_objref){ODIN3_OBJ_NODE, 4}, "odin3_level"));
+    TEST_ASSERT_EQUAL_INT64(
+        1, attr_int(module, (odin3_objref){ODIN3_OBJ_NET, nets[2].v}, "odin3_level"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     register_plugin_types();
@@ -639,5 +833,14 @@ int main(void) {
     RUN_TEST(test_blackbox_with_register_follows_memory_rule);
     RUN_TEST(test_instance_is_one_combinational_cell);
     RUN_TEST(test_levels_reach_write_json);
+    RUN_TEST(test_many_independent_loops);
+    RUN_TEST(test_custom_key_refuses_user_int);
+    RUN_TEST(test_custom_key_keeps_user_cut_attribute);
+    RUN_TEST(test_oom_leaves_structure_alone);
+    RUN_TEST(test_vtr_ram_without_library_is_a_source);
+    RUN_TEST(test_arch_memory_model_is_a_source);
+    RUN_TEST(test_inout_pin_is_a_driver_only);
+    RUN_TEST(test_two_input_pins_on_one_net);
+    RUN_TEST(test_multi_driver_net_then_cut);
     return UNITY_END();
 }

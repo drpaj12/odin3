@@ -9,9 +9,16 @@
  * written, so a second run gives the same result.
  *
  * The key guard (V-1): a NAME that starts with `odin3_` is refused unless it is exactly
- * `odin3_level`, and so is any existing attribute NAME or `NAME_cut` on a cell or net that is not
- * an INT, since levelize only writes INTs. The word view is refused (a `$dff` and the like carry
- * no sequential flag in the registry, so a word-view result would be wrong).
+ * `odin3_level`. With the default key, an existing `odin3_level` or `odin3_level_cut` that is not
+ * an INT is refused (the INTs are levelize's own and are rewritten on a rerun). With any other
+ * key, an existing NAME or `NAME_cut` of any kind on a cell or net is refused (a user value is
+ * never overwritten or deleted), so a second run with the same custom key is refused too.
+ *
+ * Failure (NO_MEMORY): the attributes are written module by module after all checks and sweeps of
+ * that module, so an allocation failure can leave some attributes written and others not. The
+ * structure (cells, nets, pins, provenance) never changes; run the pass again to complete. The word
+ * view is refused (a `$dff` and the like carry no sequential flag in the registry, so a word-view
+ * result would be wrong).
  */
 #include "ir/celltype.h"
 #include "ir/design.h"
@@ -40,6 +47,7 @@ enum { NAME_BUF = 32 };
 typedef struct lv_keys {
     uint32_t level;
     uint32_t cut;
+    bool custom; /* a key other than odin3_level: any existing NAME or NAME_cut is refused */
 } lv_keys;
 
 /* What a run adds up over the modules. */
@@ -87,6 +95,7 @@ static odin3_status intern_keys(odin3_design *design, const char *key, lv_keys *
     odin3_status st = odin3_strbuf_appendf(&cut, "%s%s", key, k_cut_suffix);
     st = st == ODIN3_OK ? odin3_design_intern(design, odin3_bytes_cstr(key), &keys->level) : st;
     st = st == ODIN3_OK ? odin3_design_intern(design, odin3_bytes_cstr(cut.data), &keys->cut) : st;
+    keys->custom = strcmp(key, k_default_key) != 0;
     odin3_strbuf_free(&cut);
     return st;
 }
@@ -99,10 +108,17 @@ static const char *module_text(const odin3_module *module) {
                             odin3_module_name(module));
 }
 
-/* True when obj carries a key attribute that levelize did not write (not an INT). */
-static bool foreign_attr(const odin3_module *module, odin3_objref obj, uint32_t key) {
+/* True when obj carries a key attribute that levelize did not write: with the default key any
+ * non-INT value (the INTs are levelize's own, rewritten on a rerun); with a custom key any value
+ * at all, since levelize only owns `odin3_level` and its `_cut` companion. */
+static bool foreign_attr(const odin3_module *module, odin3_objref obj, uint32_t key, bool custom) {
     const odin3_value *val = odin3_attr_get(module, obj, key);
-    return val != NULL && val->kind != ODIN3_VAL_INT;
+    return val != NULL && (custom || val->kind != ODIN3_VAL_INT);
+}
+
+static bool foreign_key(const odin3_module *module, odin3_objref obj, const lv_keys *keys) {
+    return foreign_attr(module, obj, keys->level, keys->custom) ||
+           foreign_attr(module, obj, keys->cut, keys->custom);
 }
 
 static odin3_status refuse_attr(const odin3_module *module, odin3_objref obj, const char *key) {
@@ -139,9 +155,7 @@ static odin3_status check_node(const odin3_module *module, uint32_t id, const lv
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_objref obj = {ODIN3_OBJ_NODE, id};
-    return foreign_attr(module, obj, keys->level) || foreign_attr(module, obj, keys->cut)
-               ? refuse_attr(module, obj, key)
-               : ODIN3_OK;
+    return foreign_key(module, obj, keys) ? refuse_attr(module, obj, key) : ODIN3_OK;
 }
 
 static odin3_status check_module(const odin3_module *module, const lv_keys *keys, const char *key) {
@@ -151,8 +165,7 @@ static odin3_status check_module(const odin3_module *module, const lv_keys *keys
     }
     for (uint32_t id = 1; st == ODIN3_OK && id < odin3_module_net_end(module); id++) {
         odin3_objref obj = {ODIN3_OBJ_NET, id};
-        bool bad = odin3_net_live(module, (odin3_net_id){id}) &&
-                   (foreign_attr(module, obj, keys->level) || foreign_attr(module, obj, keys->cut));
+        bool bad = odin3_net_live(module, (odin3_net_id){id}) && foreign_key(module, obj, keys);
         st = bad ? refuse_attr(module, obj, key) : st;
     }
     return st;
@@ -225,7 +238,7 @@ static odin3_status levelize_run(odin3_pass_ctx *ctx, odin3_design *design, odin
     (void)user;
     odin3_strbuf key;
     odin3_strbuf_init(&key);
-    lv_keys keys = {0, 0};
+    lv_keys keys = {0, 0, false};
     lv_totals tot = {0, 0, 0, 0};
     odin3_status st = parse_args(args, &key);
     st = st == ODIN3_OK ? check_key(key.data) : st;
@@ -249,7 +262,9 @@ static odin3_status levelize_run(odin3_pass_ctx *ctx, odin3_design *design, odin
 const odin3_pass_def odin3_pass_levelize = {
     "levelize",
     "levelize [--key NAME]: count the levels of combinational logic of every module as the "
-    "attribute NAME (default odin3_level) on every cell and net (attributes only)",
+    "attribute NAME (default odin3_level) on every cell and net (attributes only; an allocation "
+    "failure can leave some attributes written, the structure never changes; a custom NAME or "
+    "NAME_cut that already exists is refused)",
     levelize_run,
     NULL,
     false,
