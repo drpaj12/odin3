@@ -1015,6 +1015,22 @@ class FcheckTest(RunnerTestBase):
         self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "capped")
         self.assertEqual(self.verdict(job), "capped")
 
+    def test_untested_records_its_short_reason_for_the_table(self) -> None:
+        log = ("PRECHECK RTL infers 3 latches\nUNTESTED-REASON latches 3\n"
+               "UNTESTED: the RTL behaviour is not preserved; nothing was simulated: x")
+        self.mode({"exit": 3, "log": log})
+        job = self.finished("sha")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "untested")
+        verdicts = json.loads((job.job_dir / "metrics.json").read_text())["verdicts"]
+        self.assertEqual((verdicts["fcheck"], verdicts["fcheck_reason"]), ("untested", "latches 3"))
+        self.mode({"exit": 0})
+        job = self.finished("sha")
+        qor_sched.run_fcheck(job, self.opts(), 2)
+        verdicts = json.loads((job.job_dir / "metrics.json").read_text())["verdicts"]
+        self.assertNotIn("fcheck_reason", verdicts)
+
     def test_fcheck_timeout_is_not_error(self) -> None:
         """Review M2: a Verilator check stopped at the job limit is ``timeout``, not ``error``."""
         self.mode({"exit": 0, "sleep": 60})

@@ -1619,9 +1619,9 @@ def _fcheck_netlist(job: Job) -> Path | str:
     return kept
 
 
-def record_verdict(job: Job, name: str, verdict: str) -> None:
-    """Rewrite ``metrics.json`` ``verdicts.<name>`` atomically. A job with no ``ok`` record of
-    this key has no verdict to hold (HeavyError)."""
+def record_verdict(job: Job, name: str, verdict: str | None) -> None:
+    """Rewrite ``metrics.json`` ``verdicts.<name>`` atomically (None or '' removes it). A job with no
+    ``ok`` record of this key has no verdict to hold (HeavyError)."""
     path = job.job_dir / "metrics.json"
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
@@ -1632,7 +1632,8 @@ def record_verdict(job: Job, name: str, verdict: str) -> None:
         raise HeavyError(EXIT_FAILED, f"{_label(job)}: metrics.json is not this job's record; "
                                       f"{name} verdict not recorded")
     verdicts = record.get("verdicts")
-    record["verdicts"] = {**(verdicts if isinstance(verdicts, dict) else {}), name: verdict}
+    held = {**(verdicts if isinstance(verdicts, dict) else {}), name: verdict}
+    record["verdicts"] = {k: v for k, v in held.items() if v or k != name}
     _write_atomic(path, json.dumps(record, sort_keys=True, indent=1) + "\n")
 
 
@@ -1648,7 +1649,9 @@ def _read_log(path: Path) -> str:
         return ""
 
 
-def _fcheck_outcome(job: Job, cmd: Command, opts: RunOptions, scope: ScopeInfo) -> str:
+def _fcheck_outcome(job: Job, cmd: Command, opts: RunOptions,
+                    scope: ScopeInfo) -> tuple[str, str]:
+    """The verdict and, for ``untested``, the wrapper's short reason (else '')."""
     oom_before = qor_heavy.oom_kills(scope)
     outcome = run_command(cmd, opts, deadline=capped_deadline(opts, opts.job_timeout_s[job.group]))
     if outcome.kind == ABORTED:
@@ -1659,19 +1662,23 @@ def _fcheck_outcome(job: Job, cmd: Command, opts: RunOptions, scope: ScopeInfo) 
     elif outcome.kind == "error":
         _emit(opts, f"{_label(job)}: fcheck {outcome.error}")
     if outcome.kind == TIMEOUT:
-        return "timeout"
+        return "timeout", ""
     if outcome.returncode is None:
-        return "error"
+        return "error", ""
     capped = outcome.returncode != 0 and qor_heavy.oom_kills(scope) > oom_before
     verdict = qor_legs.fcheck_verdict(outcome.returncode, capped, _read_log(cmd.stdout))
+    reason = ""
     if verdict == "untested":
-        found = re.search(r"^UNTESTED: .*$", _read_log(cmd.stdout), re.M)
+        log = _read_log(cmd.stdout)
+        short = re.search(r"^UNTESTED-REASON (.+)$", log, re.M)
+        reason = short.group(1).strip() if short else ""
+        found = re.search(r"^UNTESTED: .*$", log, re.M)
         _emit(opts, f"{_label(job)}: fcheck {found.group(0) if found else 'untested'}; "
                     f"see {cmd.stdout}")
     if verdict == "error":
         _emit(opts, f"{_label(job)}: fcheck could not compare (exit {outcome.returncode}); "
                     f"see {cmd.stdout}")
-    return verdict
+    return verdict, reason
 
 
 def run_fcheck(job: Job, opts: RunOptions, verilator_j: int) -> str:
@@ -1690,13 +1697,14 @@ def run_fcheck(job: Job, opts: RunOptions, verilator_j: int) -> str:
         netlist = _fcheck_netlist(job)
         if isinstance(netlist, str):
             _emit(opts, netlist)
-            verdict = "error"
+            verdict, reason = "error", ""
         else:
             cmd = qor_legs.fcheck_command(job.ctx, job.design, netlist, verilator_j)
-            verdict = _fcheck_outcome(job, cmd, opts, scope)
+            verdict, reason = _fcheck_outcome(job, cmd, opts, scope)
     finally:
         qor_heavy.safe_rmtree(staging, job_out_root(job))  # in every outcome
     record_verdict(job, "fcheck", verdict)
+    record_verdict(job, "fcheck_reason", reason if verdict == "untested" else None)
     if verdict == "pass":
         qor_heavy.safe_rmtree(work, job_out_root(job))
     _emit(opts, f"fcheck {_label(job)}: {verdict}")

@@ -1594,7 +1594,10 @@ then the options considered.
       weak evidence, and the latch structures are covered by the micros
       (`common/dlatch.v`, `common/adlatch.v`, `micro/bm_my_D_latch1.v`, `bm_my_D_latch2.v`).
     - **H2:** a mismatching bit whose netlist value differs between the init runs is `XDEPEND`,
-      not `MISMATCH` (no vectors are skipped).
+      not `MISMATCH` (no vectors are skipped). When the RTL bit is stable across the init runs
+      and only the netlist bit varies, the line is `NETLIST_INIT_DEPEND` instead (the netlist
+      depends on the initial state where the RTL does not, a possible netlist defect): the
+      verdict stays `untested`, but the log and the table's hold text name it.
     - **Priority:** what matters most is the front end through elaboration being correct; the
       VTR-flow results (fcheck, QoR on the VTR designs) matter less and are not chased further.
 

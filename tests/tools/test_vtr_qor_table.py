@@ -349,6 +349,15 @@ class GateTest(unittest.TestCase):
             "gate: INCOMPLETE: sha O fcheck untested (RTL latches or "
             "incomplete sensitivity lists, or mismatches only on bits that depend on the "
             "initial state: see fcheck.log); it cannot be judged",)))
+        for reason in ("latches 109", "sensitivity b, c", "XDEPEND", "NETLIST_INIT_DEPEND"):
+            sick = run("O", "sha", override={"fcheck": "untested"})
+            block = sick.metrics["verdicts"]
+            assert isinstance(block, dict)
+            block["fcheck_reason"] = reason
+            why = replace(table(), sick)
+            held = verdict(why).violations
+            self.assertEqual(len(held), 1)
+            self.assertIn(f"untested: {reason}; see fcheck.log", held[0])
         # a P-leg baseline defect (fail or untested) does not fail the gate when Odin III passes
         for baseline in ("fail", "untested"):
             p_bad = replace(table(), run("P", "sha", override={"fcheck": baseline}))
