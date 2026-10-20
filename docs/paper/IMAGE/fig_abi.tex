@@ -8,8 +8,7 @@
       cli/0.83/built/{CLI}/{\odintt{odin3 -p},\\\odintt{.o3} scripts},
       so/2.6/built/{C plugin}/{\odintt{.so}: passes,\\cell types},
       py/4.37/built/{Python}/{\odintt{cffi},\\ABI mode},
-      hook/6.14/planned/{exec hooks}/{JSON on stdio;\\Phase 7},
-      sl/7.91/planned/{slang}/{C++ adapter;\\Phase 5, deferred}}
+      hook/6.14/planned/{exec hooks}/{JSON on stdio;\\Phase 7}}
     \node[client, \s] (\n) at (\x, 0) {\t\\\odinsub{\u}};
   % ---- layers --------------------------------------------------------------------------------
   \node[layer, built, emph] (hdr) at (4.37, -1.62)
@@ -26,7 +25,7 @@
                  \odintt{backends}, \odintt{sim}, \odintt{techlib}}};
   % ---- edges ---------------------------------------------------------------------------------
   \foreach \n in {cli, so, py} \draw[flow] (\n.south) -- (\n.south |- hdr.north);
-  \foreach \n in {hook, sl}    \draw[flowplanned] (\n.south) -- (\n.south |- hdr.north);
+  \foreach \n in {hook}    \draw[flowplanned] (\n.south) -- (\n.south |- hdr.north);
   \draw[flow] (hdr) -- (lib);
   \draw[flow] (lib) -- (core);
   \odinlegend{anchor=north, at={(4.37, -4.75)}}

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# fsm-diff: Odin III's fsm against Yosys 0.55's on the same RTLIL (4.8 spec T-3). See fsm_diff.py.
+# Exit codes: 0 no unexpected difference, 1 a difference, 2 usage or tool error, 3 crash or timeout.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec python3 "$here/fsm_diff.py" "$@"

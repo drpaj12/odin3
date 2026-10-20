@@ -6,7 +6,7 @@ text and print as **[TODO: …]**.
 
 ## Figures
 
-Eleven figures are TikZ, drawn at print size in the paper's fonts; one, the byte-level AST record,
+Fourteen figures are TikZ, drawn at print size in the paper's fonts; one, the byte-level AST record,
 is a hand-drawn SVG.
 
 - `IMAGE/odin3-tikz-styles.tex` holds the shared palette and styles. The palette is ColorBrewer
@@ -37,17 +37,14 @@ Build status is coded by fill and by border, so it survives greyscale printing:
 | specified | white fill, dashed blue border | approved specification and plan |
 | planned | white fill, dotted grey border | a later phase (Phase 3's plan is approved) |
 
-The status shown is as of 2026-10-19 (v1.0 scope: ADR D10, PHASE4):
+The status shown is as of 2026-10-20 (v1.0 phases: ADR D11):
 
-- **Built:** Phases 0-2; Phase 3's `wreduce`, `flatten`, `lower`, `hardmap`, linked ABC (BLIF
-  exchange), `write_blif --vtr` with provenance names, and the QoR harness `vtr-qor`.
-- **In progress:** the in-memory ABC exchange (3D-7, 3D-8), Parmys-matching refinements, and the
-  M2 and M3 exit runs.
-- **Planned (D11):** Phase 4 (VTR architectures and FSM), Phase 5 (outputs and read-back, LPM),
-  Phase 6 (analysis flow and provenance) and Phase 7 (release). The paper body still uses D10's
-  numbering until its next refresh.
-- **After v1.0 (D11):** old Phase 5 (slang, GHDL). **Removed from v1.0:** old Phase 6 (`raise`, RE scorecard,
-  VQM/EDIF, Altera `bind`, Titan), kept as the design in the "Reverse Engineering" section.
+- **Built:** Phases 0-2; Phase 3's code (`wreduce`, `flatten`, `lower`, `partial_map`/`hardmap`,
+  linked ABC, `write_blif --vtr`, `vtr-qor`); Phase 4's 4.1, 4.2 (PRs A to C), 4.7 and 4.8; Phase 5's
+  5.1 and 5.2.
+- **In progress:** the Phase 3 exit runs on the 15-design local gate; `partial_map` PR D and 4.3 to 4.5.
+- **Specified:** 5.3 and 5.4. **Planned:** 4.13, Phase 6 and Phase 7.
+- **After v1.0:** SystemVerilog (slang), VHDL (GHDL) and the research plugins.
 
 When the status changes, update the `built`/`inprog`/`spec`/`planned` keys in the figures, the
 features table and the phases table together.
@@ -65,7 +62,10 @@ features table and the phases table together.
 | `fig_ast` | the 24-byte AST record, node, child and payload tables | SVG → PDF | `\columnwidth` |
 | `fig_techlib` | the `.o3lib` tech library and its users | TikZ | `\columnwidth` |
 | `fig_abi` | the C ABI and plugin model | TikZ | `\columnwidth` |
-| `fig_re` | the reverse-engineering flow (Sec. Reverse Engineering) | TikZ | `\columnwidth` |
+| `fig_re` | the reverse-engineering and analysis flow | TikZ | `\columnwidth` |
+| `fig_flow` | the flow of a design, with what each stage does (drawn by `fig_flow_base`) | TikZ | `\textwidth` |
+| `fig_flow_verify` | the same flow, annotated with the verification techniques | TikZ | `\textwidth` |
+| `fig_flow_prov` | the same flow, annotated with the provenance records | TikZ | `\textwidth` |
 
 ## Build on Overleaf (primary)
 

@@ -623,7 +623,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("empty snapshot", err)
 
-    def test_work_dir_follows_tmpdir_and_is_removed_after_ok_and_error(self) -> None:
+    def test_work_dir_follows_tmpdir_and_is_removed_unless_kept(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             argv = ["--odin3", str(self.fakes.bin / "odin3"), "--yosys",
                     str(self.fakes.bin / "yosys"), str(self.fakes.root / "d.v")]
@@ -639,9 +639,14 @@ class MainTest(unittest.TestCase):
                 self.fakes.spec({})  # a --min-changed shortfall: nothing to debug
                 self.assertEqual(helpers.run_main(oe.main, [*argv, "--min-changed", "1"])[0], 1)
                 self.assertEqual(list(Path(tmpdir).iterdir()), [])
-                self.fakes.spec(self.pair("0001", "opt_expr", IL_BAD))  # a failing pair: kept
+                self.fakes.spec(self.pair("0001", "opt_expr", IL_BAD))  # a failing pair: removed
                 self.assertEqual(helpers.run_main(oe.main, argv)[0], 1)
-                self.assertEqual(len(list(Path(tmpdir).iterdir())), 1)
+                self.assertEqual(list(Path(tmpdir).iterdir()), [])
+                code, _, err = helpers.run_main(oe.main, [*argv, "--keep-tmp"])  # unless asked
+                self.assertEqual(code, 1)
+                kept = list(Path(tmpdir).iterdir())
+                self.assertEqual(len(kept), 1)
+                self.assertIn(f"work directory kept: {kept[0].resolve()}", err)
 
 
 YOSYS = os.environ.get("ODIN3_YOSYS055", "")

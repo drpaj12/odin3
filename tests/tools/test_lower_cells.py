@@ -1,14 +1,13 @@
 """Tests for tools/lower-check/lower-cells (3B Task 3 step 3): the per-cell goldens.
 
 A fake ``odin3`` writes ``in.il`` and ``out.blif`` from ``fake.json``; the real ``netlist-compare``
-judges the BLIF. The work directories are made by ``tempfile.mkdtemp`` and are left in place.
+judges the BLIF. The work directories are removed when each test ends.
 """
 
 from __future__ import annotations
 
 import json
 import subprocess
-import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
@@ -54,7 +53,7 @@ def fake_run(argv: Sequence[str], cap: int, **kwargs: Any) -> subprocess.Complet
 
 class CellsTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.root = Path(tempfile.mkdtemp(prefix="lower_cells_test_"))
+        self.root = helpers.scratch(self, "lower_cells_test_")
         self.bin = self.root / "odin3"
         self.bin.write_text(FAKE_ODIN)
         self.bin.chmod(0o755)

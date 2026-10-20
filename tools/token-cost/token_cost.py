@@ -2,7 +2,7 @@
 
 Usage::
 
-    token-cost [--projects DIR ...] [--out FILE] [--idle-minutes N]
+    token-cost [--projects DIR ...] [--out FILE] [--idle-minutes N] [--backends FILE]
 
 Reads Claude Code transcripts (``<projects dir>/*.jsonl`` for main sessions and
 ``<projects dir>/*/subagents/*.jsonl`` for subagents) and writes a Markdown report: tokens by
@@ -15,6 +15,11 @@ counted.
 Costs are what the same tokens would cost on the Claude API at the list prices in ``PRICES``
 (from the claude-api reference, cached 2026-10-06); the project actually runs on a Claude Max
 subscription, so this is a comparable figure, not a bill. Update ``PRICES`` when prices change.
+
+Sessions run against DeepSeek's Anthropic-compatible API still log Claude model names, so the
+backend comes from the windows file ``docs/token_backends.txt`` (``--backends FILE`` overrides;
+format in its header): requests inside a ``deepseek`` window are reported in their own section,
+the other tables stay Anthropic-only.
 
 Exit 0 on success, 2 on usage or input error.
 """
@@ -31,6 +36,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 DEFAULT_PROJECTS = Path.home() / ".claude" / "projects" / "-home-jamiespa-odin3-ws"
+DEFAULT_BACKENDS = Path(__file__).resolve().parents[2] / "docs" / "token_backends.txt"
+ANTHROPIC = "anthropic"
+DEEPSEEK = "deepseek"
+CONSOLE_TITLE = "DeepSeek console figures"
+CONSOLE_HEADER = "| Date range | Model | Input tokens | Output tokens | Cost (USD) | Source |"
+CONSOLE_ALIGN = "|---|---|---:|---:|---:|---|"
+CONSOLE_PLACEHOLDER = "| _fill from platform.deepseek.com usage page_ | | | | | |"
 MTOK = 1_000_000
 WRITE_5M = 1.25  # cache-write multipliers of the input price
 WRITE_1H = 2.0
@@ -98,6 +110,8 @@ class Request:
     usage: Usage
     session: str
     agent: str  # "main" or the subagent's description
+    backend: str = ANTHROPIC
+    requested: str = ""  # the Claude model name in the transcript (model is the mapped label)
 
 
 @dataclass
@@ -179,7 +193,7 @@ def request_of(record: dict[str, object], session: str, label: str) -> Request |
     if not isinstance(stamp, str):
         return None
     when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-    return Request(model, when, usage_of(usage), session, label)
+    return Request(model, when, usage_of(usage), session, label, requested=model)
 
 
 def scan_projects(dirs: Iterable[Path]) -> Scan:
@@ -192,6 +206,68 @@ def scan_projects(dirs: Iterable[Path]) -> Scan:
             scan_file(path, scan, seen)
     scan.requests.sort(key=lambda r: r.when)
     return scan
+
+
+@dataclass(frozen=True)
+class Window:
+    backend: str
+    start: datetime
+    end: datetime | None  # None: open
+
+
+def parse_stamp(text: str) -> datetime:
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def parse_windows(text: str) -> list[Window]:
+    """Parse the windows file; raise ValueError naming the bad line."""
+    windows: list[Window] = []
+    for num, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 3 or parts[0] != DEEPSEEK:
+            raise ValueError(f"line {num}: expected 'deepseek <start> <end|open>': {line}")
+        try:
+            start = parse_stamp(parts[1])
+            end = None if parts[2] == "open" else parse_stamp(parts[2])
+        except ValueError:
+            raise ValueError(f"line {num}: bad timestamp: {line}") from None
+        windows.append(Window(parts[0], start, end))
+    return windows
+
+
+def load_windows(path: Path) -> list[Window]:
+    try:
+        return parse_windows(path.read_text())
+    except FileNotFoundError:
+        return []
+    except ValueError as exc:
+        raise ValueError(f"{path}: {exc}") from None
+
+
+def deepseek_label(requested: str) -> str:
+    if "opus" in requested:
+        return "deepseek-v4-pro"
+    if "sonnet" in requested or "haiku" in requested:
+        return "deepseek-flash"
+    return "deepseek-unmapped"
+
+
+def apply_backends(scan: Scan, windows: Sequence[Window]) -> None:
+    """Tag each request with its backend; in a deepseek window also relabel its model."""
+    for req in scan.requests:
+        for win in windows:
+            if req.when >= win.start and (win.end is None or req.when < win.end):
+                req.backend = win.backend
+                req.model = deepseek_label(req.requested)
+                break
+
+
+def only_backend(scan: Scan, backend: str) -> Scan:
+    reqs = [r for r in scan.requests if r.backend == backend]
+    return Scan(requests=reqs, bad_lines=scan.bad_lines, files=scan.files)
 
 
 def active_time(times: Sequence[datetime], idle: timedelta) -> timedelta:
@@ -280,6 +356,58 @@ def top_subagents(scan: Scan, limit: int = 20) -> list[str]:
     return rows
 
 
+def backend_table(scan: Scan, idle: timedelta) -> list[str]:
+    rows = ["| Backend | Requests | Total tokens | Active time |", "|---|---:|---:|---:|"]
+    for backend in (ANTHROPIC, DEEPSEEK):
+        reqs = [r for r in scan.requests if r.backend == backend]
+        total = Usage()
+        for r in reqs:
+            total.add(r.usage)
+        active = active_time([r.when for r in reqs], idle)
+        rows.append(f"| {backend} | {total.requests:,} | {fmt_tokens(total.total)} | "
+                    f"{hours(active)} |")
+    return rows
+
+
+def console_rows(previous: str) -> list[str]:
+    """Data rows of the hand-filled console table in an earlier report."""
+    rows: list[str] = []
+    inside = False
+    for line in previous.splitlines():
+        if line.startswith("#"):
+            inside = line.lstrip("#").strip() == CONSOLE_TITLE
+        elif inside and line.startswith("|") and line != CONSOLE_HEADER \
+                and not line.startswith("|---"):
+            rows.append(line)
+    return rows
+
+
+def deepseek_section(scan: Scan, idle: timedelta, previous: str) -> list[str]:
+    ds = only_backend(scan, DEEPSEEK)
+    lines = ["## DeepSeek backend", ""]
+    if not ds.requests:
+        lines += ["No requests fall inside a `deepseek` window of the backends file.", ""]
+    else:
+        lines += [
+            "DeepSeek ignores prompt caching, so cache write and cache read are 0 here and "
+            "*Input* is all uncached input. Model labels are mapped from the requested Claude "
+            "model: opus to `deepseek-v4-pro`, sonnet and haiku to `deepseek-flash`.",
+            "",
+            "| Model | Requested (Claude) " + TOKEN_HEADER[1:],
+            "|---|---|" + TOKEN_ALIGN,
+        ]
+        groups = sum_by(ds, lambda r: (r.model, r.requested))
+        for (model, req), u in sorted(groups.items(), key=lambda kv: -kv[1].total):
+            lines.append(f"| `{model}` | `{req}` | {token_cells(u)} |")
+        lines += ["", *role_table(ds), "", *day_table(ds, idle), ""]
+    lines += [f"### {CONSOLE_TITLE}", "",
+              "Filled by hand from the platform.deepseek.com usage page; kept across "
+              "regenerations.", "", CONSOLE_HEADER, CONSOLE_ALIGN,
+              *(console_rows(previous) or [CONSOLE_PLACEHOLDER]), ""]
+    return lines
+
+
+
 def cost_note(scan: Scan) -> str:
     total = sum(r.usage.cost(r.model) or 0.0 for r in scan.requests)
     prices = "; ".join(f"`{m}` ${p.input:g}/${p.output:g}/${p.cache_read:g}"
@@ -297,9 +425,13 @@ def tilde(path: Path) -> str:
     return "~" + text[len(home):] if text.startswith(home) else text
 
 
-def render(scan: Scan, idle: timedelta, sources: Sequence[Path]) -> str:
-    if not scan.requests:
+def render(full: Scan, idle: timedelta, sources: Sequence[Path], previous: str = "") -> str:
+    if not full.requests:
         return "# Tokens, models and time\n\nNo requests found.\n"
+    scan = only_backend(full, ANTHROPIC)
+    if not scan.requests:
+        return ("# Tokens, models and time\n\nNo Anthropic requests found.\n\n"
+                + "\n".join(deepseek_section(full, idle, previous)))
     first, last = scan.requests[0].when, scan.requests[-1].when
     active = active_time([r.when for r in scan.requests], idle)
     lines = [
@@ -325,6 +457,10 @@ def render(scan: Scan, idle: timedelta, sources: Sequence[Path]) -> str:
         "**Token-saving measures:** each attempt and its date is logged in `docs/PHASE0.md` "
         "§9.1; compare the by-day table before and after each date to judge it.",
         "",
+        "## By backend",
+        "",
+        *backend_table(full, idle),
+        "",
         "## By model",
         "",
         *model_table(scan),
@@ -341,6 +477,7 @@ def render(scan: Scan, idle: timedelta, sources: Sequence[Path]) -> str:
         "",
         *top_subagents(scan),
         "",
+        *deepseek_section(full, idle, previous),
         "## Reference: API-equivalent cost",
         "",
         cost_note(scan),
@@ -354,13 +491,17 @@ def main(argv: Sequence[str]) -> int:
     ap.add_argument("--projects", type=Path, nargs="+", default=[DEFAULT_PROJECTS])
     ap.add_argument("--out", type=Path, help="write the report here (default: stdout)")
     ap.add_argument("--idle-minutes", type=int, default=15)
+    ap.add_argument("--backends", type=Path, default=DEFAULT_BACKENDS,
+                    help="backend windows file (default: docs/token_backends.txt)")
     args = ap.parse_args(argv)
     try:
         scan = scan_projects(args.projects)
-    except OSError as exc:
+        apply_backends(scan, load_windows(args.backends))
+        previous = args.out.read_text() if args.out and args.out.exists() else ""
+    except (OSError, ValueError) as exc:
         print(f"token-cost: {exc}", file=sys.stderr)
         return 2
-    report = render(scan, timedelta(minutes=args.idle_minutes), args.projects)
+    report = render(scan, timedelta(minutes=args.idle_minutes), args.projects, previous)
     if args.out:
         args.out.write_text(report)
     else:

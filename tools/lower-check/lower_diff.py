@@ -45,7 +45,8 @@ Exit codes (one convention across the opt tools): 0 every design agrees to its t
 difference, an unproven check, nothing to compare, or a stale entry; 2 usage, or Odin III or Yosys
 exited with an error; 3 hard: a child crashed, was killed by a signal or its memory cap, or timed
 out (never absorbed by the expect list); 77 skipped (an ASan child and no systemd-run). The work
-directory is made under ``$ODIN3_LOWER_WORK`` (else ``$TMPDIR``) and is never removed.
+directory is made under ``$ODIN3_LOWER_WORK`` (else ``$TMPDIR``) and is removed on
+exit unless ``--keep-tmp``.
 """
 
 from __future__ import annotations
@@ -427,7 +428,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--equiv-check", default=str(EQUIV_CHECK), metavar="E")
     ap.add_argument("--mem-cap", type=lc.parse_size, default=lc.DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 3G)")
-    ap.add_argument("--work", type=Path, help="the work directory")
+    ap.add_argument("--work", type=Path, help="the work directory (never removed)")
+    ap.add_argument("--keep-tmp", action="store_true",
+                    help="keep the temporary work directory this run makes (else removed)")
     ap.add_argument("--each", action="store_true", help="every FILE is its own design")
     ap.add_argument("--verbose", action="store_true", help="print the histograms of every design")
     ap.add_argument("files", nargs="+", help="the Verilog (or BLIF) files")
@@ -455,19 +458,18 @@ def execute(args: argparse.Namespace, work: Path) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
-    work = lc.make_work(args.work, "lower-diff-")
-    try:
-        return execute(args, work)
-    except lc.CrashError as exc:
-        print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
-        print(f"{TOOL}: work directory kept: {work}", file=sys.stderr)
-        return lc.EXIT_CRASH
-    except (OSError, lc.ToolError, ValueError) as exc:
-        print(f"{TOOL}: error: {exc}", file=sys.stderr)
-        return lc.EXIT_ERROR
-    except memcap.CapUnavailable as exc:
-        print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
-        return lc.EXIT_SKIP
+    with lc.make_work(args.work, "lower-diff-", args.keep_tmp) as work:
+        try:
+            return execute(args, work)
+        except lc.CrashError as exc:
+            print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
+            return lc.EXIT_CRASH
+        except (OSError, lc.ToolError, ValueError) as exc:
+            print(f"{TOOL}: error: {exc}", file=sys.stderr)
+            return lc.EXIT_ERROR
+        except memcap.CapUnavailable as exc:
+            print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
+            return lc.EXIT_SKIP
 
 
 if __name__ == "__main__":

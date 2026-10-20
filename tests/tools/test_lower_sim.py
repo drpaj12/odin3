@@ -3,14 +3,13 @@
 A fake ``odin3`` stands in for the real one; ``fake.json`` beside it says what its ``write_rtlil``
 and ``sim`` write. The mutant test shows an injected fault in the lowered netlist is exit 1, and the
 ``$shiftx`` test that a design without a simulate hook is reported ``skipped``, never ``pass``. The
-work directories are made by ``tempfile.mkdtemp`` and are left in place.
+work directories are removed when each test ends.
 """
 
 from __future__ import annotations
 
 import json
 import subprocess
-import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
@@ -126,7 +125,7 @@ class PureTest(unittest.TestCase):
 
 class RunTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.tree = Tree(Path(tempfile.mkdtemp(prefix="lower_sim_test_")))
+        self.tree = Tree(helpers.scratch(self, "lower_sim_test_"))
 
     def test_equal_vectors_pass_per_cell_type_and_print_the_sample_points(self) -> None:
         code, out, err = self.tree.run()

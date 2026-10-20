@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# fsm-probe: what does Yosys 0.55's fsm find in a design? (4.8 spec section 12). See fsm_probe.py.
+# Exit codes: 0 done, 2 usage or tool error, 3 yosys crashed or timed out.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec python3 "$here/fsm_probe.py" "$@"
