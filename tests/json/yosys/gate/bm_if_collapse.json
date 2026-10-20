@@ -1,0 +1,760 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_if_collapse": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_if_collapse.v:4.1-53.10"
+      },
+      "ports": {
+        "clock": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "reset_n": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "a_in": {
+          "direction": "input",
+          "bits": [ 4, 5 ]
+        },
+        "b_in": {
+          "direction": "input",
+          "bits": [ 6, 7 ]
+        },
+        "c_in": {
+          "direction": "input",
+          "bits": [ 8 ]
+        },
+        "d_in": {
+          "direction": "input",
+          "bits": [ 9 ]
+        },
+        "out0": {
+          "direction": "output",
+          "bits": [ 10, 11 ]
+        },
+        "out2": {
+          "direction": "output",
+          "bits": [ 12, 13 ]
+        },
+        "out1": {
+          "direction": "output",
+          "bits": [ 14 ]
+        }
+      },
+      "cells": {
+        "$auto$ff.cc:266:slice$127": {
+          "hide_name": 1,
+          "type": "$_SDFFE_PN0P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:35.1-51.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "E": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 15 ],
+            "E": [ 9 ],
+            "Q": [ 10 ],
+            "R": [ 8 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$128": {
+          "hide_name": 1,
+          "type": "$_SDFFE_PN0P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:35.1-51.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "E": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 16 ],
+            "E": [ 9 ],
+            "Q": [ 11 ],
+            "R": [ 8 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$129": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:35.1-51.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 17 ],
+            "Q": [ 12 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$130": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:35.1-51.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 18 ],
+            "Q": [ 13 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$131": {
+          "hide_name": 1,
+          "type": "$_SDFFE_PN0P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:35.1-51.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "E": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 19 ],
+            "E": [ 9 ],
+            "Q": [ 14 ],
+            "R": [ 8 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$136": {
+          "hide_name": 1,
+          "type": "$_DFFE_PP_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:69.1-84.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "E": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 20 ],
+            "E": [ 21 ],
+            "Q": [ 22 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$137": {
+          "hide_name": 1,
+          "type": "$_DFFE_PP_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:69.1-84.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "E": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 23 ],
+            "E": [ 21 ],
+            "Q": [ 24 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$138": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:69.1-84.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 22 ],
+            "Q": [ 17 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$139": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:69.1-84.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 24 ],
+            "Q": [ 18 ]
+          }
+        },
+        "$auto$opt_expr.cc:617:replace_const_cells$190": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5 ],
+            "Y": [ 25 ]
+          }
+        },
+        "$auto$opt_expr.cc:617:replace_const_cells$194": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4 ],
+            "Y": [ 26 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$133": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": ""
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 27 ],
+            "B": [ 28 ],
+            "Y": [ 29 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$135": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": ""
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 29 ],
+            "B": [ 30 ],
+            "Y": [ 21 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$147": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 26 ],
+            "B": [ 5 ],
+            "Y": [ 31 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$157": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4 ],
+            "B": [ 25 ],
+            "Y": [ 32 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$173": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 26 ],
+            "B": [ 25 ],
+            "Y": [ 33 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$187": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9|yosys-share/techmap.v:598.13-598.15"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 30 ],
+            "B": [ 28 ],
+            "Y": [ 34 ]
+          }
+        },
+        "$auto$simplemap.cc:204:simplemap_lognot$149": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 31 ],
+            "Y": [ 27 ]
+          }
+        },
+        "$auto$simplemap.cc:204:simplemap_lognot$159": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 32 ],
+            "Y": [ 28 ]
+          }
+        },
+        "$auto$simplemap.cc:204:simplemap_lognot$175": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 33 ],
+            "Y": [ 30 ]
+          }
+        },
+        "$auto$simplemap.cc:275:simplemap_mux$184": {
+          "hide_name": 1,
+          "type": "$_MUX_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9|yosys-share/techmap.v:598.13-598.25"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "0" ],
+            "B": [ 28 ],
+            "S": [ 34 ],
+            "Y": [ 20 ]
+          }
+        },
+        "$auto$simplemap.cc:275:simplemap_mux$185": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9|yosys-share/techmap.v:598.13-598.25"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 34 ],
+            "Y": [ 23 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$124": {
+          "hide_name": 1,
+          "type": "$_AND_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:46.12-46.23"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4 ],
+            "B": [ 6 ],
+            "Y": [ 15 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$125": {
+          "hide_name": 1,
+          "type": "$_AND_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:46.12-46.23"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5 ],
+            "B": [ 7 ],
+            "Y": [ 16 ]
+          }
+        },
+        "$auto$simplemap.cc:83:simplemap_bitop$126": {
+          "hide_name": 1,
+          "type": "$_AND_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:47.12-47.23"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 8 ],
+            "B": [ 9 ],
+            "Y": [ 19 ]
+          }
+        },
+        "top_a": {
+          "hide_name": 0,
+          "type": "$scopeinfo",
+          "parameters": {
+            "TYPE": "module"
+          },
+          "attributes": {
+            "cell_module_not_derived": "00000000000000000000000000000001",
+            "cell_src": "tests/micro/verilog/micro/bm_if_collapse.v:33.3-33.35",
+            "module": "a",
+            "module_src": "tests/micro/verilog/micro/bm_if_collapse.v:56.1-86.10"
+          },
+          "port_directions": {
+          },
+          "connections": {
+          }
+        }
+      },
+      "netnames": {
+        "$and$tests/micro/verilog/micro/bm_if_collapse.v:46$4_Y": {
+          "hide_name": 1,
+          "bits": [ 15, 16 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:46.12-46.23"
+          }
+        },
+        "$and$tests/micro/verilog/micro/bm_if_collapse.v:47$5_Y": {
+          "hide_name": 1,
+          "bits": [ 19 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:47.12-47.23"
+          }
+        },
+        "$auto$opt_dff.cc:194:make_patterns_logic$42": {
+          "hide_name": 1,
+          "bits": [ 21 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:3194:NotGate$189": {
+          "hide_name": 1,
+          "bits": [ 25 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:3194:NotGate$193": {
+          "hide_name": 1,
+          "bits": [ 26 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:125:simplemap_reduce$132": {
+          "hide_name": 1,
+          "bits": [ 29 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:254:simplemap_eqne$144": {
+          "hide_name": 1,
+          "bits": [ 31 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:254:simplemap_eqne$154": {
+          "hide_name": 1,
+          "bits": [ 32 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:254:simplemap_eqne$170": {
+          "hide_name": 1,
+          "bits": [ 33 ],
+          "attributes": {
+          }
+        },
+        "$flatten\\top_a.$procmux$12_CMP": {
+          "hide_name": 1,
+          "bits": [ 27 ],
+          "attributes": {
+          }
+        },
+        "$flatten\\top_a.$procmux$9.B_AND_S": {
+          "hide_name": 1,
+          "bits": [ "0", "0", 28, "0" ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9|yosys-share/techmap.v:584.28-584.35"
+          }
+        },
+        "$flatten\\top_a.$procmux$9.S": {
+          "hide_name": 1,
+          "bits": [ 30, 28 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9|yosys-share/techmap.v:574.22-574.23"
+          }
+        },
+        "$flatten\\top_a.$procmux$9.Y": {
+          "hide_name": 1,
+          "bits": [ 20, 23 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9|yosys-share/techmap.v:576.21-576.22"
+          }
+        },
+        "$techmap$flatten\\top_a.$procmux$9.$reduce_or$yosys-share/techmap.v:598$160_Y": {
+          "hide_name": 1,
+          "bits": [ 34 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:0.0-0.0|tests/micro/verilog/micro/bm_if_collapse.v:71.2-82.9|yosys-share/techmap.v:598.13-598.15"
+          }
+        },
+        "a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:18.55-18.59"
+          }
+        },
+        "b_in": {
+          "hide_name": 0,
+          "bits": [ 6, 7 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:19.55-19.59"
+          }
+        },
+        "c_in": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:20.7-20.11"
+          }
+        },
+        "clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:15.7-15.12"
+          }
+        },
+        "d_in": {
+          "hide_name": 0,
+          "bits": [ 9 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:21.7-21.11"
+          }
+        },
+        "out0": {
+          "hide_name": 0,
+          "bits": [ 10, 11 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:23.56-23.60"
+          }
+        },
+        "out1": {
+          "hide_name": 0,
+          "bits": [ 14 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:25.9-25.13"
+          }
+        },
+        "out2": {
+          "hide_name": 0,
+          "bits": [ 12, 13 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:24.56-24.60"
+          }
+        },
+        "reset_n": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:16.8-16.15"
+          }
+        },
+        "temp_a": {
+          "hide_name": 0,
+          "bits": [ 17, 18 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:31.54-31.60"
+          }
+        },
+        "top_a.a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
+          "attributes": {
+            "hdlname": "top_a a_in",
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:62.55-62.59"
+          }
+        },
+        "top_a.b_in": {
+          "hide_name": 0,
+          "bits": [ 6, 7 ],
+          "attributes": {
+            "hdlname": "top_a b_in",
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:63.55-63.59"
+          }
+        },
+        "top_a.clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "hdlname": "top_a clock",
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:61.7-61.12"
+          }
+        },
+        "top_a.out": {
+          "hide_name": 0,
+          "bits": [ 17, 18 ],
+          "attributes": {
+            "hdlname": "top_a out",
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:64.56-64.59"
+          }
+        },
+        "top_a.out1": {
+          "hide_name": 0,
+          "bits": [ 22, 24 ],
+          "attributes": {
+            "hdlname": "top_a out1",
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:66.53-66.57"
+          }
+        },
+        "top_a.out2": {
+          "hide_name": 0,
+          "bits": [ "1", "1" ],
+          "attributes": {
+            "hdlname": "top_a out2",
+            "src": "tests/micro/verilog/micro/bm_if_collapse.v:67.53-67.57"
+          }
+        }
+      }
+    }
+  }
+}

@@ -14,6 +14,8 @@ Three writers over the IR, each validated against an independent tool on the gol
 
 ## JSON (Yosys netlist schema)
 
+(`read_json`, Phase 5.3, reads this schema back: `docs/specs/2026-10-20-5.3-read-json-design.md`; `tools/json-check` round-trips it.)
+
 `{"creator", "modules": {name: {"attributes", "ports": {name: {"direction", "bits"}}, "cells":
 {name: {"type", "parameters", "attributes", "port_directions", "connections"}}, "netnames":
 {name: {"bits", "attributes"}}}}}`. Bits are integers ≥ 2 (0/1 reserved for constants "0"/"1"):

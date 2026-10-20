@@ -1,0 +1,171 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_logic_w_Dff2": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:3.1-14.10"
+      },
+      "ports": {
+        "x1": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "x2": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "x3": {
+          "direction": "input",
+          "bits": [ 4 ]
+        },
+        "Clock": {
+          "direction": "input",
+          "bits": [ 5 ]
+        },
+        "f": {
+          "direction": "output",
+          "bits": [ 6 ]
+        },
+        "g": {
+          "direction": "output",
+          "bits": [ 7 ]
+        }
+      },
+      "cells": {
+        "$abc$87$auto$blifparse.cc:535:parse_blif$88": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1000",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3 ],
+            "Y": [ 8 ]
+          }
+        },
+        "$abc$87$auto$blifparse.cc:535:parse_blif$89": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 4 ],
+            "Y": [ 9 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$85": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:8.2-12.5"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 5 ],
+            "D": [ 8 ],
+            "Q": [ 6 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$86": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:8.2-12.5"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 5 ],
+            "D": [ 9 ],
+            "Q": [ 7 ]
+          }
+        }
+      },
+      "netnames": {
+        "$0\\f[0:0]": {
+          "hide_name": 1,
+          "bits": [ 8 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:8.2-12.5"
+          }
+        },
+        "$0\\g[0:0]": {
+          "hide_name": 1,
+          "bits": [ 9 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:8.2-12.5"
+          }
+        },
+        "Clock": {
+          "hide_name": 0,
+          "bits": [ 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:4.20-4.25"
+          }
+        },
+        "f": {
+          "hide_name": 0,
+          "bits": [ 6 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:5.9-5.10"
+          }
+        },
+        "g": {
+          "hide_name": 0,
+          "bits": [ 7 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:5.12-5.13"
+          }
+        },
+        "x1": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:4.8-4.10"
+          }
+        },
+        "x2": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:4.12-4.14"
+          }
+        },
+        "x3": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff2.v:4.16-4.18"
+          }
+        }
+      }
+    }
+  }
+}

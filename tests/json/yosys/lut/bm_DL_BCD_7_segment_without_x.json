@@ -1,0 +1,167 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_BCD_7_segment_without_x": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_DL_BCD_7_segment_without_x.v:3.1-23.10"
+      },
+      "ports": {
+        "bcd": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5 ]
+        },
+        "leds": {
+          "direction": "output",
+          "offset": 1,
+          "bits": [ 6, 7, 8, 9, 10, 11, 12 ]
+        }
+      },
+      "cells": {
+        "$abc$162$auto$blifparse.cc:535:parse_blif$163": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1101111111111100",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 5, 4, 3 ],
+            "Y": [ 6 ]
+          }
+        },
+        "$abc$162$auto$blifparse.cc:535:parse_blif$164": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1111111101001101",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 4, 2, 5 ],
+            "Y": [ 7 ]
+          }
+        },
+        "$abc$162$auto$blifparse.cc:535:parse_blif$165": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1010100011101111",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5, 3, 4, 2 ],
+            "Y": [ 8 ]
+          }
+        },
+        "$abc$162$auto$blifparse.cc:535:parse_blif$166": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1011111011101111",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5, 3, 4, 2 ],
+            "Y": [ 9 ]
+          }
+        },
+        "$abc$162$auto$blifparse.cc:535:parse_blif$167": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1111111011111111",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 5, 2, 3 ],
+            "Y": [ 10 ]
+          }
+        },
+        "$abc$162$auto$blifparse.cc:535:parse_blif$168": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1110101111111111",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5, 3, 2, 4 ],
+            "Y": [ 11 ]
+          }
+        },
+        "$abc$162$auto$blifparse.cc:535:parse_blif$169": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1111111011101111",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 5, 4, 2 ],
+            "Y": [ 12 ]
+          }
+        }
+      },
+      "netnames": {
+        "bcd": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_7_segment_without_x.v:4.14-4.17"
+          }
+        },
+        "leds": {
+          "hide_name": 0,
+          "bits": [ 6, 7, 8, 9, 10, 11, 12 ],
+          "offset": 1,
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_7_segment_without_x.v:5.15-5.19"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,234 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_4_bit_comparator": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:3.1-27.10"
+      },
+      "ports": {
+        "A": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5 ]
+        },
+        "B": {
+          "direction": "input",
+          "bits": [ 6, 7, 8, 9 ]
+        },
+        "AeqB": {
+          "direction": "output",
+          "bits": [ 10 ]
+        },
+        "AgtB": {
+          "direction": "output",
+          "bits": [ 11 ]
+        },
+        "AltB": {
+          "direction": "output",
+          "bits": [ 12 ]
+        }
+      },
+      "cells": {
+        "$eq$tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:12$2": {
+          "hide_name": 1,
+          "type": "$eq",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000100",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000100",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:12.6-12.12"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 4, 5 ],
+            "B": [ 6, 7, 8, 9 ],
+            "Y": [ 13 ]
+          }
+        },
+        "$gt$tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:17$3": {
+          "hide_name": 1,
+          "type": "$gt",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000100",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000100",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:17.7-17.12"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 4, 5 ],
+            "B": [ 6, 7, 8, 9 ],
+            "Y": [ 14 ]
+          }
+        },
+        "$lt$tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:22$4": {
+          "hide_name": 1,
+          "type": "$lt",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000100",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000100",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:22.7-22.12"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3, 4, 5 ],
+            "B": [ 6, 7, 8, 9 ],
+            "Y": [ 15 ]
+          }
+        },
+        "$procmux$12": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:12.6-12.12|tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:12.3-15.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "0" ],
+            "B": [ "1" ],
+            "S": [ 13 ],
+            "Y": [ 10 ]
+          }
+        },
+        "$procmux$6": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:22.7-22.12|tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:22.3-25.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "0" ],
+            "B": [ "1" ],
+            "S": [ 15 ],
+            "Y": [ 12 ]
+          }
+        },
+        "$procmux$9": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:17.7-17.12|tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:17.3-20.13"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "0" ],
+            "B": [ "1" ],
+            "S": [ 14 ],
+            "Y": [ 11 ]
+          }
+        }
+      },
+      "netnames": {
+        "$eq$tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:12$2_Y": {
+          "hide_name": 1,
+          "bits": [ 13 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:12.6-12.12"
+          }
+        },
+        "$gt$tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:17$3_Y": {
+          "hide_name": 1,
+          "bits": [ 14 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:17.7-17.12"
+          }
+        },
+        "$lt$tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:22$4_Y": {
+          "hide_name": 1,
+          "bits": [ 15 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:22.7-22.12"
+          }
+        },
+        "A": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:4.14-4.15"
+          }
+        },
+        "AeqB": {
+          "hide_name": 0,
+          "bits": [ 10 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:6.9-6.13"
+          }
+        },
+        "AgtB": {
+          "hide_name": 0,
+          "bits": [ 11 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:6.15-6.19"
+          }
+        },
+        "AltB": {
+          "hide_name": 0,
+          "bits": [ 12 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:6.21-6.25"
+          }
+        },
+        "B": {
+          "hide_name": 0,
+          "bits": [ 6, 7, 8, 9 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_comparator.v:5.14-5.15"
+          }
+        }
+      }
+    }
+  }
+}

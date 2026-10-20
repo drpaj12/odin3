@@ -1,0 +1,90 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "top_module": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/adder_hard_block.v:2.1-14.10"
+      },
+      "ports": {
+        "a": {
+          "direction": "input",
+          "bits": [ 2, 3 ]
+        },
+        "b": {
+          "direction": "input",
+          "bits": [ 4, 5 ]
+        },
+        "cin": {
+          "direction": "input",
+          "bits": [ 6 ]
+        },
+        "sumout": {
+          "direction": "output",
+          "bits": [ 7, 8 ]
+        },
+        "cout": {
+          "direction": "output",
+          "bits": [ 9 ]
+        }
+      },
+      "cells": {
+        "a1": {
+          "hide_name": 0,
+          "type": "adder",
+          "parameters": {
+            "$1": "00000000000000000000000000000010"
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/adder_hard_block.v:12.16-12.74"
+          },
+          "connections": {
+            "a": [ 2, 3 ],
+            "b": [ 4, 5 ],
+            "cin": [ 6 ],
+            "cout": [ 9 ],
+            "sumout": [ 7, 8 ]
+          }
+        }
+      },
+      "netnames": {
+        "a": {
+          "hide_name": 0,
+          "bits": [ 2, 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/adder_hard_block.v:5.19-5.20"
+          }
+        },
+        "b": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/adder_hard_block.v:5.22-5.23"
+          }
+        },
+        "cin": {
+          "hide_name": 0,
+          "bits": [ 6 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/adder_hard_block.v:6.11-6.14"
+          }
+        },
+        "cout": {
+          "hide_name": 0,
+          "bits": [ 9 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/adder_hard_block.v:8.12-8.16"
+          }
+        },
+        "sumout": {
+          "hide_name": 0,
+          "bits": [ 7, 8 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/adder_hard_block.v:7.20-7.26"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,278 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_dag3_log": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_dag3_log.v:4.1-32.10"
+      },
+      "ports": {
+        "clock": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "reset_n": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "a_in": {
+          "direction": "input",
+          "bits": [ 4, 5 ]
+        },
+        "b_in": {
+          "direction": "input",
+          "bits": [ 6, 7 ]
+        },
+        "out": {
+          "direction": "output",
+          "bits": [ 8, 9 ]
+        }
+      },
+      "cells": {
+        "$and$tests/micro/verilog/micro/bm_dag3_log.v:27$4": {
+          "hide_name": 1,
+          "type": "$and",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:27.12-27.20"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6, 7 ],
+            "B": [ 10, 11 ],
+            "Y": [ 12, 13 ]
+          }
+        },
+        "$not$tests/micro/verilog/micro/bm_dag3_log.v:29$6": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:29.12-29.17"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 5 ],
+            "Y": [ 10, 11 ]
+          }
+        },
+        "$or$tests/micro/verilog/micro/bm_dag3_log.v:26$1": {
+          "hide_name": 1,
+          "type": "$or",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:26.14-26.19"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12, 13 ],
+            "B": [ 14, 15 ],
+            "Y": [ 16, 17 ]
+          }
+        },
+        "$or$tests/micro/verilog/micro/bm_dag3_log.v:26$2": {
+          "hide_name": 1,
+          "type": "$or",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:26.14-26.23"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 16, 17 ],
+            "B": [ 10, 11 ],
+            "Y": [ 18, 19 ]
+          }
+        },
+        "$or$tests/micro/verilog/micro/bm_dag3_log.v:26$3": {
+          "hide_name": 1,
+          "type": "$or",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:26.14-26.27"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 18, 19 ],
+            "B": [ 20, 21 ],
+            "Y": [ 8, 9 ]
+          }
+        },
+        "$or$tests/micro/verilog/micro/bm_dag3_log.v:30$7": {
+          "hide_name": 1,
+          "type": "$or",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:30.12-30.20"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 14, 15 ],
+            "B": [ 6, 7 ],
+            "Y": [ 20, 21 ]
+          }
+        },
+        "$xor$tests/micro/verilog/micro/bm_dag3_log.v:28$5": {
+          "hide_name": 1,
+          "type": "$xor",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:28.12-28.20"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 5 ],
+            "B": [ 10, 11 ],
+            "Y": [ 14, 15 ]
+          }
+        }
+      },
+      "netnames": {
+        "$or$tests/micro/verilog/micro/bm_dag3_log.v:26$1_Y": {
+          "hide_name": 1,
+          "bits": [ 16, 17 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:26.14-26.19"
+          }
+        },
+        "$or$tests/micro/verilog/micro/bm_dag3_log.v:26$2_Y": {
+          "hide_name": 1,
+          "bits": [ 18, 19 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:26.14-26.23"
+          }
+        },
+        "a": {
+          "hide_name": 0,
+          "bits": [ 12, 13 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:20.57-20.58"
+          }
+        },
+        "a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:14.55-14.59"
+          }
+        },
+        "b": {
+          "hide_name": 0,
+          "bits": [ 14, 15 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:21.57-21.58"
+          }
+        },
+        "b_in": {
+          "hide_name": 0,
+          "bits": [ 6, 7 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:15.55-15.59"
+          }
+        },
+        "c": {
+          "hide_name": 0,
+          "bits": [ 10, 11 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:22.57-22.58"
+          }
+        },
+        "clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:11.7-11.12"
+          }
+        },
+        "d": {
+          "hide_name": 0,
+          "bits": [ 20, 21 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:23.57-23.58"
+          }
+        },
+        "out": {
+          "hide_name": 0,
+          "bits": [ 8, 9 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:17.56-17.59"
+          }
+        },
+        "reset_n": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_dag3_log.v:12.8-12.15"
+          }
+        }
+      }
+    }
+  }
+}

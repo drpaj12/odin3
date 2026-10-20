@@ -1,0 +1,649 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_stmt_compare_padding": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:4.1-94.10"
+      },
+      "ports": {
+        "clock": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "reset_n": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "a_in": {
+          "direction": "input",
+          "bits": [ 4, 5, 6, 7 ]
+        },
+        "b_in": {
+          "direction": "input",
+          "bits": [ 8 ]
+        },
+        "out0": {
+          "direction": "output",
+          "bits": [ 9, 10, 11, 12 ]
+        },
+        "out1": {
+          "direction": "output",
+          "bits": [ 13 ]
+        },
+        "out5": {
+          "direction": "output",
+          "bits": [ 14 ]
+        },
+        "out6": {
+          "direction": "output",
+          "bits": [ 15, 16, 17, 18 ]
+        },
+        "out7": {
+          "direction": "output",
+          "bits": [ 19 ]
+        },
+        "out8": {
+          "direction": "output",
+          "bits": [ 20, 21, 22, 23 ]
+        }
+      },
+      "cells": {
+        "$auto$mem.cc:282:emit$10": {
+          "hide_name": 1,
+          "type": "$memrd_v2",
+          "parameters": {
+            "ABITS": "00000000000000000000000000000011",
+            "ARST_VALUE": "xxxx",
+            "CE_OVER_SRST": "00000000000000000000000000000000",
+            "CLK_ENABLE": "00000000000000000000000000000000",
+            "CLK_POLARITY": "00000000000000000000000000000001",
+            "COLLISION_X_MASK": "",
+            "INIT_VALUE": "xxxx",
+            "MEMID": "$auto$proc_rom.cc:155:do_switch$9",
+            "SRST_VALUE": "xxxx",
+            "TRANSPARENCY_MASK": "",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:39.2-49.9"
+          },
+          "port_directions": {
+            "ADDR": "input",
+            "ARST": "input",
+            "CLK": "input",
+            "DATA": "output",
+            "EN": "input",
+            "SRST": "input"
+          },
+          "connections": {
+            "ADDR": [ 4, 5, 6 ],
+            "ARST": [ "0" ],
+            "CLK": [ "x" ],
+            "DATA": [ 24, 25, 26, 27 ],
+            "EN": [ "1" ],
+            "SRST": [ "0" ]
+          }
+        },
+        "$auto$mem.cc:328:emit$11": {
+          "hide_name": 1,
+          "type": "$meminit",
+          "parameters": {
+            "ABITS": "00000000000000000000000000100000",
+            "MEMID": "$auto$proc_rom.cc:155:do_switch$9",
+            "PRIORITY": "00000000000000000000000000000000",
+            "WIDTH": "00000000000000000000000000000100",
+            "WORDS": "00000000000000000000000000001000"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:39.2-49.9"
+          },
+          "port_directions": {
+            "ADDR": "input",
+            "DATA": "input"
+          },
+          "connections": {
+            "ADDR": [ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" ],
+            "DATA": [ "1", "1", "1", "1", "0", "1", "1", "1", "1", "0", "1", "1", "0", "0", "1", "1", "1", "1", "0", "1", "0", "1", "0", "1", "1", "0", "0", "1", "0", "0", "0", "1" ]
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_stmt_compare_padding.v:77$6": {
+          "hide_name": 1,
+          "type": "$logic_not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000100",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:77.6-77.18"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 5, 6, 7 ],
+            "Y": [ 28 ]
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_stmt_compare_padding.v:82$7": {
+          "hide_name": 1,
+          "type": "$logic_not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000100",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:82.11-82.25"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 5, 6, 7 ],
+            "Y": [ 29 ]
+          }
+        },
+        "$procdff$36": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:75.1-92.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 30 ],
+            "Q": [ 19 ]
+          }
+        },
+        "$procdff$37": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:75.1-92.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 31, 32, 33, 34 ],
+            "Q": [ 20, 21, 22, 23 ]
+          }
+        },
+        "$procdff$38": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:61.1-73.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 35 ],
+            "Q": [ 14 ]
+          }
+        },
+        "$procdff$39": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:61.1-73.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 36, 37, 38, 39 ],
+            "Q": [ 15, 16, 17, 18 ]
+          }
+        },
+        "$procdff$40": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:52.1-59.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 40 ],
+            "Q": [ 13 ]
+          }
+        },
+        "$procdff$41": {
+          "hide_name": 1,
+          "type": "$dff",
+          "parameters": {
+            "CLK_POLARITY": "1",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:37.1-50.4"
+          },
+          "port_directions": {
+            "CLK": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "CLK": [ 2 ],
+            "D": [ 41, 42, 43, 44 ],
+            "Q": [ 9, 10, 11, 12 ]
+          }
+        },
+        "$procmux$13": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:82.11-82.25|tests/micro/verilog/micro/bm_stmt_compare_padding.v:82.7-91.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "0", "0", "0", "0" ],
+            "B": [ "0", "0", "1", "0" ],
+            "S": [ 29 ],
+            "Y": [ 45, 46, 47, 48 ]
+          }
+        },
+        "$procmux$16": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:77.6-77.18|tests/micro/verilog/micro/bm_stmt_compare_padding.v:77.2-91.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 45, 46, 47, 48 ],
+            "B": [ "1", "0", "0", "0" ],
+            "S": [ 28 ],
+            "Y": [ 31, 32, 33, 34 ]
+          }
+        },
+        "$procmux$19": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:82.11-82.25|tests/micro/verilog/micro/bm_stmt_compare_padding.v:82.7-91.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "1" ],
+            "B": [ "0" ],
+            "S": [ 29 ],
+            "Y": [ 49 ]
+          }
+        },
+        "$procmux$22": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:77.6-77.18|tests/micro/verilog/micro/bm_stmt_compare_padding.v:77.2-91.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 49 ],
+            "B": [ "1" ],
+            "S": [ 28 ],
+            "Y": [ 30 ]
+          }
+        },
+        "$procmux$25": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:63.6-63.19|tests/micro/verilog/micro/bm_stmt_compare_padding.v:63.2-72.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "1", "0", "0", "0" ],
+            "B": [ "0", "0", "0", "0" ],
+            "S": [ 8 ],
+            "Y": [ 36, 37, 38, 39 ]
+          }
+        },
+        "$procmux$28": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:63.6-63.19|tests/micro/verilog/micro/bm_stmt_compare_padding.v:63.2-72.5"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "1" ],
+            "B": [ "0" ],
+            "S": [ 8 ],
+            "Y": [ 35 ]
+          }
+        },
+        "$procmux$30": {
+          "hide_name": 1,
+          "type": "$pmux",
+          "parameters": {
+            "S_WIDTH": "00000000000000000000000000000010",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:0.0-0.0|tests/micro/verilog/micro/bm_stmt_compare_padding.v:54.2-58.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "x" ],
+            "B": [ "0", "1" ],
+            "S": [ 8, 50 ],
+            "Y": [ 40 ]
+          }
+        },
+        "$procmux$32_CMP0": {
+          "hide_name": 1,
+          "type": "$not",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:0.0-0.0|tests/micro/verilog/micro/bm_stmt_compare_padding.v:54.2-58.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 8 ],
+            "Y": [ 50 ]
+          }
+        },
+        "$procmux$34": {
+          "hide_name": 1,
+          "type": "$mux",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:39.2-49.9"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 24, 25, 26, 27 ],
+            "B": [ "0", "0", "0", "0" ],
+            "S": [ 7 ],
+            "Y": [ 41, 42, 43, 44 ]
+          }
+        }
+      },
+      "memories": {
+        "$auto$proc_rom.cc:155:do_switch$9": {
+          "hide_name": 1,
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:39.2-49.9"
+          },
+          "width": 4,
+          "start_offset": 0,
+          "size": 8
+        }
+      },
+      "netnames": {
+        "$0\\out0[3:0]": {
+          "hide_name": 1,
+          "bits": [ 41, 42, 43, 44 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:37.1-50.4"
+          }
+        },
+        "$0\\out1[0:0]": {
+          "hide_name": 1,
+          "bits": [ 40 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:52.1-59.4"
+          }
+        },
+        "$0\\out5[0:0]": {
+          "hide_name": 1,
+          "bits": [ 35 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:61.1-73.4"
+          }
+        },
+        "$0\\out6[3:0]": {
+          "hide_name": 1,
+          "bits": [ 36, 37, 38, 39 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:61.1-73.4"
+          }
+        },
+        "$0\\out7[0:0]": {
+          "hide_name": 1,
+          "bits": [ 30 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:75.1-92.4"
+          }
+        },
+        "$0\\out8[3:0]": {
+          "hide_name": 1,
+          "bits": [ 31, 32, 33, 34 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:75.1-92.4"
+          }
+        },
+        "$auto$proc_rom.cc:154:do_switch$8": {
+          "hide_name": 1,
+          "bits": [ 24, 25, 26, 27 ],
+          "attributes": {
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_stmt_compare_padding.v:77$6_Y": {
+          "hide_name": 1,
+          "bits": [ 28 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:77.6-77.18"
+          }
+        },
+        "$eq$tests/micro/verilog/micro/bm_stmt_compare_padding.v:82$7_Y": {
+          "hide_name": 1,
+          "bits": [ 29 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:82.11-82.25"
+          }
+        },
+        "$procmux$13_Y": {
+          "hide_name": 1,
+          "bits": [ 45, 46, 47, 48 ],
+          "attributes": {
+          }
+        },
+        "$procmux$19_Y": {
+          "hide_name": 1,
+          "bits": [ 49 ],
+          "attributes": {
+          }
+        },
+        "$procmux$32_CMP": {
+          "hide_name": 1,
+          "bits": [ 50 ],
+          "attributes": {
+          }
+        },
+        "a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5, 6, 7 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:20.55-20.59"
+          }
+        },
+        "b_in": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:21.8-21.12"
+          }
+        },
+        "clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:17.7-17.12"
+          }
+        },
+        "out0": {
+          "hide_name": 0,
+          "bits": [ 9, 10, 11, 12 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:23.56-23.60"
+          }
+        },
+        "out1": {
+          "hide_name": 0,
+          "bits": [ 13 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:24.9-24.13"
+          }
+        },
+        "out5": {
+          "hide_name": 0,
+          "bits": [ 14 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:25.9-25.13"
+          }
+        },
+        "out6": {
+          "hide_name": 0,
+          "bits": [ 15, 16, 17, 18 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:26.56-26.60"
+          }
+        },
+        "out7": {
+          "hide_name": 0,
+          "bits": [ 19 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:27.9-27.13"
+          }
+        },
+        "out8": {
+          "hide_name": 0,
+          "bits": [ 20, 21, 22, 23 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:28.56-28.60"
+          }
+        },
+        "reset_n": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_stmt_compare_padding.v:18.8-18.15"
+          }
+        }
+      }
+    }
+  }
+}

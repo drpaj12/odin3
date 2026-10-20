@@ -1,0 +1,546 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_2_4_encoder": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:3.1-18.10"
+      },
+      "ports": {
+        "W": {
+          "direction": "input",
+          "bits": [ 2, 3 ]
+        },
+        "Y": {
+          "direction": "output",
+          "bits": [ 4, 5, 6, 7 ]
+        },
+        "En": {
+          "direction": "input",
+          "bits": [ 8 ]
+        }
+      },
+      "cells": {
+        "$auto$opt_expr.cc:617:replace_const_cells$200": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3 ],
+            "Y": [ 9 ]
+          }
+        },
+        "$auto$opt_expr.cc:617:replace_const_cells$204": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 8 ],
+            "Y": [ 10 ]
+          }
+        },
+        "$auto$opt_expr.cc:617:replace_const_cells$206": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2 ],
+            "Y": [ 11 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$116": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2 ],
+            "B": [ 9 ],
+            "Y": [ 12 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$118": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12 ],
+            "B": [ 10 ],
+            "Y": [ 13 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$129": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 11 ],
+            "B": [ 3 ],
+            "Y": [ 14 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$131": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 14 ],
+            "B": [ 10 ],
+            "Y": [ 15 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$142": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2 ],
+            "B": [ 3 ],
+            "Y": [ 16 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$144": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 16 ],
+            "B": [ 10 ],
+            "Y": [ 17 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$188": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10|yosys-share/techmap.v:598.13-598.15"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 18 ],
+            "B": [ 19 ],
+            "Y": [ 20 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$189": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10|yosys-share/techmap.v:598.13-598.15"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 21 ],
+            "B": [ 22 ],
+            "Y": [ 23 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$191": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10|yosys-share/techmap.v:598.13-598.15"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 20 ],
+            "B": [ 23 ],
+            "Y": [ 24 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$93": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 11 ],
+            "B": [ 9 ],
+            "Y": [ 25 ]
+          }
+        },
+        "$auto$simplemap.cc:134:simplemap_reduce$95": {
+          "hide_name": 1,
+          "type": "$_OR_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 25 ],
+            "B": [ 10 ],
+            "Y": [ 26 ]
+          }
+        },
+        "$auto$simplemap.cc:204:simplemap_lognot$120": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 13 ],
+            "Y": [ 19 ]
+          }
+        },
+        "$auto$simplemap.cc:204:simplemap_lognot$133": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 15 ],
+            "Y": [ 21 ]
+          }
+        },
+        "$auto$simplemap.cc:204:simplemap_lognot$146": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 17 ],
+            "Y": [ 22 ]
+          }
+        },
+        "$auto$simplemap.cc:204:simplemap_lognot$97": {
+          "hide_name": 1,
+          "type": "$_NOT_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 26 ],
+            "Y": [ 18 ]
+          }
+        },
+        "$auto$simplemap.cc:275:simplemap_mux$183": {
+          "hide_name": 1,
+          "type": "$_MUX_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10|yosys-share/techmap.v:598.13-598.25"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "0" ],
+            "B": [ 18 ],
+            "S": [ 24 ],
+            "Y": [ 4 ]
+          }
+        },
+        "$auto$simplemap.cc:275:simplemap_mux$184": {
+          "hide_name": 1,
+          "type": "$_MUX_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10|yosys-share/techmap.v:598.13-598.25"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "0" ],
+            "B": [ 19 ],
+            "S": [ 24 ],
+            "Y": [ 5 ]
+          }
+        },
+        "$auto$simplemap.cc:275:simplemap_mux$185": {
+          "hide_name": 1,
+          "type": "$_MUX_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10|yosys-share/techmap.v:598.13-598.25"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "0" ],
+            "B": [ 21 ],
+            "S": [ 24 ],
+            "Y": [ 6 ]
+          }
+        },
+        "$auto$simplemap.cc:275:simplemap_mux$186": {
+          "hide_name": 1,
+          "type": "$_MUX_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10|yosys-share/techmap.v:598.13-598.25"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "S": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ "0" ],
+            "B": [ 22 ],
+            "S": [ 24 ],
+            "Y": [ 7 ]
+          }
+        }
+      },
+      "netnames": {
+        "$auto$rtlil.cc:3194:NotGate$193": {
+          "hide_name": 1,
+          "bits": [ 10 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:3194:NotGate$195": {
+          "hide_name": 1,
+          "bits": [ 11 ],
+          "attributes": {
+          }
+        },
+        "$auto$rtlil.cc:3194:NotGate$197": {
+          "hide_name": 1,
+          "bits": [ 9 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:125:simplemap_reduce$115": {
+          "hide_name": 1,
+          "bits": [ 12 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:125:simplemap_reduce$128": {
+          "hide_name": 1,
+          "bits": [ 14 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:125:simplemap_reduce$141": {
+          "hide_name": 1,
+          "bits": [ 16 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:125:simplemap_reduce$187": {
+          "hide_name": 1,
+          "bits": [ 20, 23 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:125:simplemap_reduce$92": {
+          "hide_name": 1,
+          "bits": [ 25 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:254:simplemap_eqne$113": {
+          "hide_name": 1,
+          "bits": [ 13 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:254:simplemap_eqne$126": {
+          "hide_name": 1,
+          "bits": [ 15 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:254:simplemap_eqne$139": {
+          "hide_name": 1,
+          "bits": [ 17 ],
+          "attributes": {
+          }
+        },
+        "$auto$simplemap.cc:254:simplemap_eqne$90": {
+          "hide_name": 1,
+          "bits": [ 26 ],
+          "attributes": {
+          }
+        },
+        "$procmux$3.B_AND_S": {
+          "hide_name": 1,
+          "bits": [ 18, "0", "0", "0", "0", 19, "0", "0", "0", "0", 21, "0", "0", "0", "0", 22 ],
+          "attributes": {
+            "force_downto": "00000000000000000000000000000001",
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10|yosys-share/techmap.v:584.28-584.35"
+          }
+        },
+        "$techmap$procmux$3.$reduce_or$yosys-share/techmap.v:598$98_Y": {
+          "hide_name": 1,
+          "bits": [ 24 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_2_4_encoder.v:10.3-16.10|yosys-share/techmap.v:598.13-598.15"
+          }
+        },
+        "En": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:5.8-5.10"
+          }
+        },
+        "W": {
+          "hide_name": 0,
+          "bits": [ 2, 3 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:4.14-4.15"
+          }
+        },
+        "Y": {
+          "hide_name": 0,
+          "bits": [ 4, 5, 6, 7 ],
+          "attributes": {
+            "src": "tests/micro/verilog/micro/bm_DL_2_4_encoder.v:6.15-6.16"
+          }
+        }
+      }
+    }
+  }
+}
