@@ -1799,7 +1799,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--leg", required=True, metavar="L[,L...]",
                      help="P, O, Oprime (O'), Pprime (P'), R, Oprov")
     run.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
-                     help="gate, extra, smoke")
+                     help="gate, extra, smoke, offload")
     run.add_argument("--designs", default="", metavar="D[,D...]")
     run.add_argument("-j", dest="jobs", type=int, default=1, metavar="N")
     run.add_argument("--rerun", action="store_true", help="ignore the job cache")
@@ -1820,7 +1820,7 @@ def _parser() -> argparse.ArgumentParser:
     fcheck.add_argument("--leg", required=True, metavar="L[,L...]",
                         help="P, O, Oprime (O'), Pprime (P'), R, Oprov")
     fcheck.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
-                        help="gate, extra, smoke")
+                        help="gate, extra, smoke, offload")
     fcheck.add_argument("--designs", default="", metavar="D[,D...]")
     fcheck.add_argument("--xl", action="store_true",
                         help="the 9 GiB slice, for capped --designs only (the controller's)")
@@ -1829,7 +1829,7 @@ def _parser() -> argparse.ArgumentParser:
     equiv = sub.add_parser("equiv", parents=[common],
                            help="equiv-check before and after abc, O' against O (heavy)")
     equiv.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
-                       help="gate, extra, smoke")
+                       help="gate, extra, smoke, offload")
     equiv.add_argument("--designs", default="", metavar="D[,D...]")
     equiv.add_argument("--resume", action="store_true",
                        help="skip jobs that already hold a measured verdict (exit-run)")
@@ -1837,7 +1837,7 @@ def _parser() -> argparse.ArgumentParser:
                            help="the O front end again, SHA-256 against the first run (heavy)")
     rerun.add_argument("--leg", default="O", choices=("O",), metavar="O")
     rerun.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
-                       help="gate, extra, smoke")
+                       help="gate, extra, smoke, offload")
     rerun.add_argument("--designs", default="", metavar="D[,D...]")
     rerun.add_argument("--resume", action="store_true",
                        help="skip jobs that already hold a measured verdict (exit-run)")
@@ -1870,7 +1870,7 @@ def _parser() -> argparse.ArgumentParser:
                        help="a key per leg (default: the leg's latest)")
     table.add_argument("--label", required=True, metavar="TEXT")
     table.add_argument("--set", dest="sets", default=DEFAULT_TABLE_SETS, metavar="S[,S...]",
-                       help="gate, extra, smoke (default gate,extra)")
+                       help="gate, extra, smoke, offload (default gate,extra)")
     table.add_argument("--seeds", default="", metavar="N[,N...]",
                        help="VPR seeds of O and P to show beside seed 1 (spec §6.3), e.g. 2,3")
     gate = sub.add_parser("gate", parents=[common], help="print a table's verdict")
