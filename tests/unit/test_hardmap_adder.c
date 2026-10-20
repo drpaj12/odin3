@@ -203,9 +203,9 @@ static void test_h3_missing_type(void) {
     odin3_strbuf_init(&before);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_rtlil(&res, &before));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hardmap_run(&res.ctx, res.design, NULL));
-    TEST_ASSERT_NOT_NULL(
-        strstr(log_text,
-               "partial_map: cell type 'adder' is not registered; read_techlib lib/vtr.o3lib first"));
+    TEST_ASSERT_NOT_NULL(strstr(
+        log_text,
+        "partial_map: cell type 'adder' is not registered; read_techlib lib/vtr.o3lib first"));
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$add"));
     assert_rtlil_equal(&res, &before);
     odin3_strbuf_free(&before);
@@ -675,9 +675,9 @@ static void test_h10_info(void) {
     build_cases(cases, 3, &res);
     odin3_hardmap_stats stats;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, &stats));
-    TEST_ASSERT_NOT_NULL(strstr(log_text,
-                                "partial_map: 0 multiply, 10 adder in 2 chains, 0 single_port_ram + 0 "
-                                "dual_port_ram slices; 1 cells left soft"));
+    TEST_ASSERT_NOT_NULL(
+        strstr(log_text, "partial_map: 0 multiply, 10 adder in 2 chains, 0 single_port_ram + 0 "
+                         "dual_port_ram slices; 1 cells left soft"));
     TEST_ASSERT_EQUAL_UINT64(10, stats.adder);
     TEST_ASSERT_EQUAL_UINT64(2, stats.chains);
     TEST_ASSERT_EQUAL_UINT64(1, stats.soft);

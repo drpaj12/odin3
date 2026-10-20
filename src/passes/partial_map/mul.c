@@ -1,9 +1,9 @@
 /*
- * mul.c — `$mul` to `multiply` (3C spec §4, M-1..M-7). One `multiply` of WIDTH W (rules.mul_width) per cell
- * (Parmys: fixed_hard_multiplier, no fracturing); the operand bits the cell has go to the low pins,
- * every other pin is the pad (`$_CONSTX_`, written `unconn`); out[i] drives Y[i]; the unused
- * outputs are fresh nets without a reader. A signed cell (both flags, PHASE2 #25) is sign-extended
- * to Y_WIDTH (D3). Cells M-2 leaves soft get one warning each.
+ * mul.c — `$mul` to `multiply` (3C spec §4, M-1..M-7). One `multiply` of WIDTH W (rules.mul_width)
+ * per cell (Parmys: fixed_hard_multiplier, no fracturing); the operand bits the cell has go to the
+ * low pins, every other pin is the pad (`$_CONSTX_`, written `unconn`); out[i] drives Y[i]; the
+ * unused outputs are fresh nets without a reader. A signed cell (both flags, PHASE2 #25) is
+ * sign-extended to Y_WIDTH (D3). Cells M-2 leaves soft get one warning each.
  */
 #include "passes/partial_map/hm_kit.h"
 
@@ -94,8 +94,8 @@ static void warn_soft(const hm_ctx *hc, odin3_node_id src, const mul_shape *sh,
                 label, sh->a, sh->b, hc->rules.mul_width);
     } else {
         hm_diag(hc, ODIN3_LOG_WARN, src,
-                "partial_map: signed '$mul' cell '%s' has Y_WIDTH %" PRIu32
-                " above %" PRIu32 "; left soft for lower",
+                "partial_map: signed '$mul' cell '%s' has Y_WIDTH %" PRIu32 " above %" PRIu32
+                "; left soft for lower",
                 label, sh->y, hc->rules.mul_width);
     }
 }
@@ -171,8 +171,9 @@ static odin3_status build(hm_ctx *hc, odin3_node_id src, const mul_shape *sh, od
         return st;
     }
     odin3_value width = odin3_value_int(hc->rules.mul_width);
-    odin3_netvec ports[3] = {
-        {nets.a, hc->rules.mul_width}, {nets.b, hc->rules.mul_width}, {nets.out, 2U * hc->rules.mul_width}};
+    odin3_netvec ports[3] = {{nets.a, hc->rules.mul_width},
+                             {nets.b, hc->rules.mul_width},
+                             {nets.out, 2U * hc->rules.mul_width}};
     odin3_node_id node = {0};
     st = hm_new_node(hc, &(hm_node_req){type, &width, 1, ports, "mul"}, &node);
     return st == ODIN3_OK ? make_ties(hc, src, sh, &nets, ties) : st;

@@ -195,7 +195,8 @@ odin3_status hm_need(hm_ctx *hc, hm_hard which, odin3_node_id at, odin3_celltype
     }
     if (why != NULL) {
         hm_diag(hc, ODIN3_LOG_ERROR, at,
-                "partial_map: cell type '%s' %s; read_techlib lib/vtr.o3lib first", shape->type, why);
+                "partial_map: cell type '%s' %s; read_techlib lib/vtr.o3lib first", shape->type,
+                why);
         return ODIN3_ERR_INVALID_ARG;
     }
     hc->hard[which] = id;

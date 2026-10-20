@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import exit_check
 import identity as idt
 
 from .helpers import run_main
@@ -184,7 +185,7 @@ class InputTests(IdentityCase):
         golden = self.tmp / "golden"
         vtr = self.tmp / "vtr.txt"
         vtr.write_text("d\n")
-        with mock.patch.object(idt.exit_check, "golden_path",
+        with mock.patch.object(exit_check, "golden_path",
                                return_value=str(golden / "d.parmys.blif")):
             golden.mkdir()
             (golden / "d.parmys.blif").write_text(".model top_x\n.end\n")

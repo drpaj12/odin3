@@ -26,8 +26,8 @@
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
-#include "passes/partial_map/hardmap.h"
 #include "passes/manager.h"
+#include "passes/partial_map/hardmap.h"
 #include "passes/partial_map/rules.h"
 #include "util/attr.h"
 #include "util/str.h"
@@ -187,8 +187,8 @@ odin3_status hm_map_explicit(hm_ctx *hc, odin3_node_id src);
 odin3_status hm_map_mem(hm_ctx *hc, odin3_node_id src);
 
 /* The explicit RAM rule (ram.c, R-1..R-7): legalises a `single_port_ram` / `dual_port_ram`
- * instance to ADDR_WIDTH rules.mem_depth and DATA_WIDTH 1 slices (depth split, width split, address padding)
- * or leaves it when it already has that shape. Any other node is left alone. */
+ * instance to ADDR_WIDTH rules.mem_depth and DATA_WIDTH 1 slices (depth split, width split, address
+ * padding) or leaves it when it already has that shape. Any other node is left alone. */
 odin3_status hm_map_ram(hm_ctx *hc, odin3_node_id src);
 
 /* The pre-check of a RAM instance: the type's shape (H-3), then ADDR_WIDTH within what hardmap

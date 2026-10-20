@@ -540,7 +540,8 @@ static void expect_soft(pb_result *res, const char *warning) {
     odin3_strbuf_free(&after);
 }
 
-#define W_ASYNC "partial_map: memory 'mem' has an asynchronous read port; left to lower as flip-flops"
+#define W_ASYNC                                                                                    \
+    "partial_map: memory 'mem' has an asynchronous read port; left to lower as flip-flops"
 #define W_EDGE "partial_map: memory 'mem' has a port on the falling clock edge; left to lower"
 #define W_EN "partial_map: memory 'mem' has a read enable that is not constant 1; left to lower"
 
@@ -900,8 +901,9 @@ static void test_p_2_2(void) {
     mc.rd[0].addr_wr = 0; /* no identical address: soft */
     mc.rd[1].addr_wr = 0;
     build_mem(mc, &res);
-    expect_soft(&res, "partial_map: memory 'mem' (2 read, 2 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (2 read, 2 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
 }
 
@@ -930,15 +932,17 @@ static void test_r11_soft_patterns(void) {
         mc.rd[pn].mode = R_SYNC;
     }
     build_mem(mc, &res);
-    expect_soft(&res, "partial_map: memory 'mem' (3 read, 2 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (3 read, 2 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
     log_text[0] = '\0';
     mc = base((shape){4, 2, 1, 3}); /* p_1_3 */
     mc.rd[0].mode = R_SYNC;
     build_mem(mc, &res);
-    expect_soft(&res, "partial_map: memory 'mem' (1 read, 3 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (1 read, 3 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
 }
 
@@ -959,15 +963,17 @@ static void test_p_transparent_and_split_enable(void) {
     mc.rd[0].mode = R_SYNC;
     mc.rd[0].transparent = true;
     build_mem(mc, &res);
-    expect_soft(&res, "partial_map: memory 'mem' (1 read, 1 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (1 read, 1 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
     log_text[0] = '\0';
     mc.rd[0].transparent = false;
     mc.split_en = true; /* a write enable of two nets has no single `we` */
     build_mem(mc, &res);
-    expect_soft(&res, "partial_map: memory 'mem' (1 read, 1 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (1 read, 1 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
 }
 
@@ -1038,8 +1044,9 @@ static void test_e_abits_wide_soft(void) {
     mc.rd[0].mode = R_SYNC;
     pb_result res;
     build_mem(mc, &res);
-    expect_soft(&res, "partial_map: memory 'mem' (1 read, 0 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (1 read, 0 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
 }
 

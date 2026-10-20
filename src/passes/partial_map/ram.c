@@ -2,10 +2,10 @@
  * ram.c — explicit `single_port_ram` / `dual_port_ram` instances legalised to the arch's shape
  * (3C spec §6.1, R-1..R-7, H-4, H-7): depth split first (R-2, ram_split.c), then one slice per
  * data bit (R-3), then address padding (R-4), as Parmys's iterate_memories does. Every slice is a
- * RAM of ADDR_WIDTH D (rules.mem_depth) and DATA_WIDTH 1. A `we` on a constant stays wired to it (R-5); two live
- * write ports get no priority logic (R-6). An instance that already has the arch's shape is left
- * alone. Each instance is one transaction (H-9): every node is built on fresh nets, then the
- * instance is deleted and its output nets are merged into the new ones.
+ * RAM of ADDR_WIDTH D (rules.mem_depth) and DATA_WIDTH 1. A `we` on a constant stays wired to it
+ * (R-5); two live write ports get no priority logic (R-6). An instance that already has the arch's
+ * shape is left alone. Each instance is one transaction (H-9): every node is built on fresh nets,
+ * then the instance is deleted and its output nets are merged into the new ones.
  */
 #include "passes/partial_map/ram.h"
 
@@ -52,7 +52,8 @@ static odin3_status check_addr(const hm_ctx *hc, odin3_node_id node, const ram_l
     char label[ODIN3_LOG_BUF / 4];
     hm_label(hc, node, label, sizeof label);
     hm_diag(hc, ODIN3_LOG_ERROR, node,
-            "partial_map: RAM instance '%s' has ADDR_WIDTH %" PRIu32 "; partial_map splits at most %u",
+            "partial_map: RAM instance '%s' has ADDR_WIDTH %" PRIu32
+            "; partial_map splits at most %u",
             label, addr, PM_RAM_MAX_ADDR);
     return ODIN3_ERR_INVALID_ARG;
 }

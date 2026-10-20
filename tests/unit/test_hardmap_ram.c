@@ -761,9 +761,9 @@ static void test_h10_info(void) {
     pb_result res;
     build_ram((ramcase){false, 16, 3, NULL, NULL}, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, NULL));
-    TEST_ASSERT_NOT_NULL(strstr(log_text,
-                                "partial_map: 0 multiply, 0 adder in 0 chains, 6 single_port_ram + 0 "
-                                "dual_port_ram slices; 0 cells left soft"));
+    TEST_ASSERT_NOT_NULL(
+        strstr(log_text, "partial_map: 0 multiply, 0 adder in 0 chains, 6 single_port_ram + 0 "
+                         "dual_port_ram slices; 0 cells left soft"));
     pb_free(&res);
 }
 

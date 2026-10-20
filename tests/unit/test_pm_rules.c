@@ -21,7 +21,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { LOG_TEXT = 8192, NAME_CAP = 512, MAX_FILE = 262144, K6_WIDTH = 36, K6_DEPTH = 15, K6_MIN = 3 };
+enum {
+    LOG_TEXT = 8192,
+    NAME_CAP = 512,
+    MAX_FILE = 262144,
+    MAX_ARCH = 4194304,
+    K6_WIDTH = 36,
+    K6_DEPTH = 15,
+    K6_MIN = 3
+};
 
 #ifndef ODIN3_SOURCE_DIR
 #error "ODIN3_SOURCE_DIR must name the source tree"
@@ -48,16 +56,16 @@ void tearDown(void) {
     odin3_log_set_sink(NULL, NULL);
 }
 
-static void assert_same_numbers(pm_rules a, pm_rules b) {
-    TEST_ASSERT_EQUAL(a.have_mul, b.have_mul);
-    TEST_ASSERT_EQUAL_UINT32(a.mul_width, b.mul_width);
-    TEST_ASSERT_EQUAL_UINT32(a.min_mul, b.min_mul);
-    TEST_ASSERT_EQUAL(a.have_adder, b.have_adder);
-    TEST_ASSERT_EQUAL_UINT32(a.min_add, b.min_add);
-    TEST_ASSERT_EQUAL(a.have_sp, b.have_sp);
-    TEST_ASSERT_EQUAL(a.have_dp, b.have_dp);
-    TEST_ASSERT_EQUAL_UINT32(a.mem_depth, b.mem_depth);
-    TEST_ASSERT_EQUAL_UINT32(a.mem_width, b.mem_width);
+static void assert_same_numbers(pm_rules left, pm_rules right) {
+    TEST_ASSERT_EQUAL(left.have_mul, right.have_mul);
+    TEST_ASSERT_EQUAL_UINT32(left.mul_width, right.mul_width);
+    TEST_ASSERT_EQUAL_UINT32(left.min_mul, right.min_mul);
+    TEST_ASSERT_EQUAL(left.have_adder, right.have_adder);
+    TEST_ASSERT_EQUAL_UINT32(left.min_add, right.min_add);
+    TEST_ASSERT_EQUAL(left.have_sp, right.have_sp);
+    TEST_ASSERT_EQUAL(left.have_dp, right.have_dp);
+    TEST_ASSERT_EQUAL_UINT32(left.mem_depth, right.mem_depth);
+    TEST_ASSERT_EQUAL_UINT32(left.mem_width, right.mem_width);
 }
 
 static void test_k6_fixed_values(void) {
@@ -71,16 +79,99 @@ static void test_k6_fixed_values(void) {
     TEST_ASSERT_EQUAL_UINT32(1, rules.mem_width);
 }
 
-static void test_from_arch_stub_is_k6(void) {
+/* Reads the fixture `file` into a fresh record with its library text made. */
+static odin3_arch *arch_of(const char *file) {
+    char path[NAME_CAP];
+    (void)snprintf(path, sizeof path, "%s/%s", ODIN3_ARCH_DATA_DIR, file);
+    FILE *fp = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL_MESSAGE(fp, path);
+    char *text = calloc(MAX_FILE, 1);
+    TEST_ASSERT_NOT_NULL(text);
+    size_t got = fread(text, 1, MAX_FILE - 1, fp);
+    (void)fclose(fp);
+    odin3_arch *arch = odin3_arch_create();
+    TEST_ASSERT_NOT_NULL(arch);
+    const odin3_arch_src src = {file, {text, got}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_arch_parse(arch, &src));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_arch_make_library(arch));
+    free(text);
+    return arch;
+}
+
+static void test_from_arch_null_is_k6(void) {
     pm_rules none = pm_rules_from_arch(NULL);
     TEST_ASSERT_FALSE(none.has_record);
     assert_same_numbers(none, pm_rules_k6_fixed());
-    odin3_arch *arch = odin3_arch_create();
-    TEST_ASSERT_NOT_NULL(arch);
-    pm_rules with = pm_rules_from_arch(arch);
-    TEST_ASSERT_TRUE(with.has_record);
-    assert_same_numbers(with, pm_rules_k6_fixed());
+}
+
+static void test_from_arch_27(void) {
+    odin3_arch *arch = arch_of("acc_27.xml");
+    pm_rules rules = pm_rules_from_arch(arch);
+    TEST_ASSERT_TRUE(rules.has_record && rules.have_mul && rules.have_adder);
+    TEST_ASSERT_TRUE(rules.have_sp && rules.have_dp);
+    TEST_ASSERT_EQUAL_UINT32(27, rules.mul_width);
+    TEST_ASSERT_EQUAL_UINT32(11, rules.mem_depth);
+    TEST_ASSERT_EQUAL_UINT32(K6_MIN, rules.min_mul);
+    TEST_ASSERT_EQUAL_UINT32(1, rules.min_add);
+    TEST_ASSERT_EQUAL_UINT32(1, rules.mem_width);
+    TEST_ASSERT_EQUAL_STRING("", log_text);
     odin3_arch_destroy(arch);
+}
+
+static void test_from_arch_asymmetric_multiplier(void) {
+    odin3_arch *arch = arch_of("acc_25x18.xml");
+    pm_rules rules = pm_rules_from_arch(arch);
+    TEST_ASSERT_FALSE(rules.have_mul);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "partial_map: 'multiply' model of 'acc_25x18' is 25x18, "
+                                          "not square; '$mul' cells are left to lower"));
+    odin3_arch_destroy(arch);
+}
+
+static void test_from_arch_renamed_multiplier(void) {
+    odin3_arch *arch = arch_of("acc_renamed.xml");
+    pm_rules rules = pm_rules_from_arch(arch);
+    TEST_ASSERT_FALSE(rules.have_mul || rules.have_adder || rules.have_sp || rules.have_dp);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "'multiply' model of 'acc_renamed' does not have the "
+                                          "ports a, b and out"));
+    odin3_arch_destroy(arch);
+}
+
+static void test_from_arch_no_models(void) {
+    odin3_arch *arch = arch_of("acc_none.xml");
+    pm_rules rules = pm_rules_from_arch(arch);
+    TEST_ASSERT_TRUE(rules.has_record);
+    TEST_ASSERT_FALSE(rules.have_mul || rules.have_adder || rules.have_sp || rules.have_dp);
+    TEST_ASSERT_EQUAL_STRING("", log_text);
+    odin3_arch_destroy(arch);
+}
+
+static void test_from_arch_k6_equals_fixed(void) {
+    const char *root = getenv("VTR_ROOT");
+    if (root == NULL) {
+        TEST_IGNORE_MESSAGE("VTR_ROOT not set");
+    }
+    char rel[NAME_CAP];
+    (void)snprintf(rel, sizeof rel,
+                   "%s/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml", root);
+    FILE *fp = fopen(rel, "rb");
+    TEST_ASSERT_NOT_NULL_MESSAGE(fp, rel);
+    char *text = calloc(MAX_ARCH, 1);
+    TEST_ASSERT_NOT_NULL(text);
+    size_t got = fread(text, 1, MAX_ARCH - 1, fp);
+    (void)fclose(fp);
+    odin3_arch *arch = odin3_arch_create();
+    const odin3_arch_src src = {rel, {text, got}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_arch_parse(arch, &src));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_arch_make_library(arch));
+    free(text);
+    pm_rules rules = pm_rules_from_arch(arch);
+    TEST_ASSERT_TRUE(rules.has_record);
+    assert_same_numbers(rules, pm_rules_k6_fixed());
+    odin3_arch_destroy(arch);
+}
+
+static void assert_logged(const char *needle) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, needle), needle);
 }
 
 /* --- S-3: an absent model ------------------------------------------------------------------ */
@@ -105,56 +196,94 @@ static void test_absent_model_without_record_is_the_h3_error(void) {
 static void test_absent_model_with_record_is_soft(void) {
     pb_result res;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(MUL_RTLIL, &res));
-    odin3_arch *arch = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_arch(res.design, &arch));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_arch_read(res.design, ODIN3_ARCH_DATA_DIR "/acc_none.xml"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_partial_map_run(&res.ctx, res.design, NULL));
-    TEST_ASSERT_NOT_NULL(
-        strstr(log_text, "partial_map: architecture 'unnamed' has no 'multiply' model; 1 '$mul' "
-                         "cells left to lower"));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "has no 'adder' model; 0 '$add'/'$sub' cells left"));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "has no 'single_port_ram' model; 0 '$mem' cells left"));
+    assert_logged("partial_map: architecture 'acc_none' has no 'multiply' model; 1 '$mul' cells "
+                  "left to lower");
+    assert_logged("has no 'adder' model; 0 '$add'/'$sub' cells left");
+    assert_logged("has no 'single_port_ram' model; 0 '$mem' cells left");
     TEST_ASSERT_NULL(strstr(log_text, "error"));
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mul"));
     pb_free(&res);
 }
 
-static void test_record_with_library_maps_as_before(void) {
+static void test_record_maps_with_its_own_width(void) {
     pb_result res;
-    hm_build_ok(MUL_RTLIL, &res);
-    odin3_arch *arch = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_arch(res.design, &arch));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(MUL_RTLIL, &res));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_arch_read(res.design, ODIN3_ARCH_DATA_DIR "/acc_27.xml"));
     odin3_hardmap_stats stats;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_partial_map_run(&res.ctx, res.design, &stats));
     TEST_ASSERT_EQUAL_UINT64(1, stats.multiply);
     TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$mul"));
-    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "multiply"));
+    odin3_node_id node = hm_nth(res.module, "multiply", 0);
+    TEST_ASSERT_TRUE(odin3_node_valid(node));
+    TEST_ASSERT_EQUAL_INT64(27, odin3_node_param(res.module, node, 0)->i);
+    TEST_ASSERT_EQUAL_UINT32(27, odin3_node_port(res.module, node, 0).count);
+    TEST_ASSERT_EQUAL_UINT32(54, odin3_node_port(res.module, node, 2).count);
     TEST_ASSERT_NULL(strstr(log_text, "has no 'multiply' model"));
+    pb_free(&res);
+}
+
+static void test_asymmetric_record_leaves_the_mul_soft(void) {
+    pb_result res;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(MUL_RTLIL, &res));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_arch_read(res.design, ODIN3_ARCH_DATA_DIR "/acc_25x18.xml"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_partial_map_run(&res.ctx, res.design, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "is 25x18, not square; '$mul' cells are left to lower"));
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mul"));
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "multiply"));
     pb_free(&res);
 }
 
 /* --- the guard: the 3C numbers live in rules.c alone ---------------------------------------- */
 
+/* The text after the comment that starts at src; src itself when none does. */
+static const char *skip_comment(const char *src) {
+    if (src[0] == '/' && src[1] == '*') {
+        src += 2;
+        while (*src != '\0' && !(src[0] == '*' && src[1] == '/')) {
+            src++;
+        }
+        return *src != '\0' ? src + 2 : src;
+    }
+    if (src[0] == '/' && src[1] == '/') {
+        while (*src != '\0' && *src != '\n') {
+            src++;
+        }
+    }
+    return src;
+}
+
+/* Copies the string or character literal at src to *dst; returns the text after it. */
+static const char *copy_literal(const char *src, char **dst) {
+    char quote = *src;
+    *(*dst)++ = *src++;
+    while (*src != '\0' && *src != quote) {
+        bool escape = *src == '\\' && src[1] != '\0';
+        *(*dst)++ = *src++;
+        if (escape) {
+            *(*dst)++ = *src++;
+        }
+    }
+    if (*src != '\0') {
+        *(*dst)++ = *src++;
+    }
+    return src;
+}
+
 /* Drops comments, leaving strings and code. */
 static void strip_comments(char *text) {
-    char *src = text;
+    const char *src = text;
     char *dst = text;
-    bool in_str = false;
     while (*src != '\0') {
-        if (in_str) {
-            in_str = !(*src == '"' && src[-1] != '\\');
-            *dst++ = *src++;
-        } else if (src[0] == '/' && src[1] == '*') {
-            src += 2;
-            while (*src != '\0' && !(src[0] == '*' && src[1] == '/')) {
-                src++;
-            }
-            src += *src != '\0' ? 2 : 0;
-        } else if (src[0] == '/' && src[1] == '/') {
-            while (*src != '\0' && *src != '\n') {
-                src++;
-            }
+        const char *next = skip_comment(src);
+        if (next != src) {
+            src = next;
+        } else if (*src == '"' || *src == '\'') {
+            src = copy_literal(src, &dst);
         } else {
-            in_str = *src == '"';
             *dst++ = *src++;
         }
     }
@@ -181,9 +310,8 @@ static bool is_source(const char *name) {
     return len > 2 && (strcmp(name + len - 2, ".c") == 0 || strcmp(name + len - 2, ".h") == 0);
 }
 
-static void check_file(const char *dir, const char *name) {
-    char path[NAME_CAP];
-    (void)snprintf(path, sizeof path, "%s/%s", dir, name);
+/* The contents of path, the caller frees; asserts that it reads and fits. */
+static char *read_source(const char *path) {
     FILE *file = fopen(path, "rb");
     TEST_ASSERT_NOT_NULL_MESSAGE(file, path);
     char *text = calloc(MAX_FILE, 1);
@@ -191,9 +319,17 @@ static void check_file(const char *dir, const char *name) {
     size_t got = fread(text, 1, MAX_FILE - 1, file);
     (void)fclose(file);
     TEST_ASSERT_TRUE_MESSAGE(got > 0 && got < MAX_FILE - 1, path);
+    return text;
+}
+
+static void check_file(const char *dir, const char *name) {
+    char path[NAME_CAP];
+    (void)snprintf(path, sizeof path, "%s/%s", dir, name);
+    char *text = read_source(path);
     strip_comments(text);
-    TEST_ASSERT_FALSE_MESSAGE(has_k6_literal(text), path);
+    bool found = has_k6_literal(text);
     free(text);
+    TEST_ASSERT_FALSE_MESSAGE(found, path);
 }
 
 static void test_no_k6_literal_outside_rules(void) {
@@ -214,10 +350,16 @@ static void test_no_k6_literal_outside_rules(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_k6_fixed_values);
-    RUN_TEST(test_from_arch_stub_is_k6);
+    RUN_TEST(test_from_arch_null_is_k6);
+    RUN_TEST(test_from_arch_27);
+    RUN_TEST(test_from_arch_asymmetric_multiplier);
+    RUN_TEST(test_from_arch_renamed_multiplier);
+    RUN_TEST(test_from_arch_no_models);
+    RUN_TEST(test_from_arch_k6_equals_fixed);
     RUN_TEST(test_absent_model_without_record_is_the_h3_error);
     RUN_TEST(test_absent_model_with_record_is_soft);
-    RUN_TEST(test_record_with_library_maps_as_before);
+    RUN_TEST(test_record_maps_with_its_own_width);
+    RUN_TEST(test_asymmetric_record_leaves_the_mul_soft);
     RUN_TEST(test_no_k6_literal_outside_rules);
     return UNITY_END();
 }

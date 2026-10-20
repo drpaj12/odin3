@@ -846,6 +846,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_pm_rules)
     target_sources(test_pm_rules PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
     target_compile_definitions(test_pm_rules PRIVATE
+        ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     # 3C Task 3: hardmap's $add/$sub rule (adder chains) on hand-built flat IR.
@@ -1244,7 +1245,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_techlib_expr)
     odin3_add_unit_test(test_techlib_reader)
     odin3_add_unit_test(test_techlib_string_param)
-    foreach(_t IN ITEMS test_arch_record test_arch_models test_arch_pb test_arch_lib test_arch_pass test_arch_vtr)
+    foreach(_t IN ITEMS test_arch_record test_arch_models test_arch_pb test_arch_lib test_arch_pass test_arch_vtr test_arch_access)
         odin3_add_unit_test(${_t})
         target_compile_definitions(${_t} PRIVATE
             ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"

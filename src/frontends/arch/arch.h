@@ -40,7 +40,8 @@ typedef struct odin3_arch_model {
     odin3_arch_mport *ports; /* XML order, inputs then outputs as written */
     uint32_t n_ports;
     uint32_t line;
-    bool registered; /* became a library cell (spec M-5) */
+    bool registered;  /* became a library cell (spec M-5) */
+    bool is_template; /* registered as one of the four VTR primitives (spec L-2), not a black box */
 } odin3_arch_model;
 
 typedef enum odin3_arch_leaf_kind {
@@ -170,5 +171,32 @@ const odin3_arch_ic *odin3_arch_ic_at(const odin3_arch *arch, uint32_t index);
 uint32_t odin3_arch_direct_count(const odin3_arch *arch);
 const odin3_arch_direct *odin3_arch_direct_at(const odin3_arch *arch, uint32_t index);
 const char *odin3_arch_library_text(const odin3_arch *arch);
+
+/* --- accessors of partial_map (4.2 spec section 9) ---------------------------------------------
+ */
+
+/* The VPR width (max num_pins over the leaves) of port `port` of `model`; 0 when model is NULL, the
+ * port is absent, or no leaf uses it. */
+uint32_t odin3_arch_model_port_width(const odin3_arch_model *model, const char *port);
+
+/* True when the arch has the model and it took the library template of that name (spec L-2): a
+ * model of the same name with other ports is a black box and gives false. */
+bool odin3_arch_model_is_template(const odin3_arch *arch, const char *model);
+
+/* The most address pins of any leaf of `single_port_ram` or `dual_port_ram`: the largest num_pins
+ * of an input whose name contains "addr" (VTR's determine_memory_addr_width). 0 without such a
+ * leaf. */
+uint32_t odin3_arch_max_addr_pins(const odin3_arch *arch);
+
+/* One mode of a RAM model: the address pins and data pins of one leaf. */
+typedef struct odin3_arch_ram_mode {
+    uint32_t addr, data;
+} odin3_arch_ram_mode;
+
+/* The leaves of `model` in document order as (address, data) pins: the largest num_pins of an
+ * input named "*addr*" and of an input named "*data*". Fills at most `cap` entries of `out` (NULL
+ * allowed with cap 0) and returns the number of leaves. */
+uint32_t odin3_arch_modes_of(const odin3_arch *arch, const char *model, odin3_arch_ram_mode *out,
+                             uint32_t cap);
 
 #endif

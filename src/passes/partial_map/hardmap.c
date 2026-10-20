@@ -5,11 +5,11 @@
  * phase, then the explicit RAM instances and the inferred `$mem` (H-8; PR 3C-3).
  */
 #include "passes/partial_map/hardmap.h"
+#include "frontends/arch/arch.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/module.h"
 #include "odin3/odin3.h"
-#include "frontends/arch/arch.h"
 #include "passes/partial_map/hm_kit.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -52,9 +52,12 @@ static odin3_status precheck_type(hm_ctx *hc, const char *name, check_fn check) 
  * in any module; R-2: no RAM instance with more address bits than hardmap splits; nothing is
  * changed. */
 static odin3_status precheck(hm_ctx *hc) {
-    odin3_status st = precheck_type(hc, "multiply", hm_check_multiply);
-    st = st == ODIN3_OK ? precheck_type(hc, "single_port_ram", hm_check_ram) : st;
-    return st == ODIN3_OK ? precheck_type(hc, "dual_port_ram", hm_check_ram) : st;
+    odin3_status st =
+        hc->rules.have_mul ? precheck_type(hc, "multiply", hm_check_multiply) : ODIN3_OK;
+    st = st == ODIN3_OK && hc->rules.have_sp ? precheck_type(hc, "single_port_ram", hm_check_ram)
+                                             : st;
+    return st == ODIN3_OK && hc->rules.have_dp ? precheck_type(hc, "dual_port_ram", hm_check_ram)
+                                               : st;
 }
 
 /* The `$mul` phase of one module: every `$mul` live at the start, in node-ID order. */
@@ -177,8 +180,8 @@ static odin3_status ram_phase(hm_ctx *hc, odin3_module *mod, const odin3_celltyp
 
 static odin3_status all_ram_phases(hm_ctx *hc) {
     odin3_celltype_id types[2] = {{0}, {0}};
-    bool have_sp = hm_find_type(hc->design, "single_port_ram", &types[0]);
-    bool have_dp = hm_find_type(hc->design, "dual_port_ram", &types[1]);
+    bool have_sp = hc->rules.have_sp && hm_find_type(hc->design, "single_port_ram", &types[0]);
+    bool have_dp = hc->rules.have_dp && hm_find_type(hc->design, "dual_port_ram", &types[1]);
     if (!have_sp && !have_dp) {
         return ODIN3_OK;
     }
@@ -204,8 +207,9 @@ static odin3_status mem_phase(hm_ctx *hc, odin3_module *mod, odin3_celltype_id m
             if (st == ODIN3_OK && hc->stats.sp_slices + hc->stats.dp_slices != before) {
                 char label[ODIN3_LOG_BUF / 4];
                 hm_label(hc, node, label, sizeof label);
-                odin3_log(ODIN3_LOG_DEBUG, "partial_map: '$mem' cell '%s' mapped to %" PRIu64 " slices",
-                          label, hc->stats.sp_slices + hc->stats.dp_slices - before);
+                odin3_log(ODIN3_LOG_DEBUG,
+                          "partial_map: '$mem' cell '%s' mapped to %" PRIu64 " slices", label,
+                          hc->stats.sp_slices + hc->stats.dp_slices - before);
             }
         }
     }
@@ -227,7 +231,8 @@ static odin3_status all_mem_phases(hm_ctx *hc) {
 
 /* --- S-2, S-3: the rules, and what an arch without a block leaves soft ---------------------- */
 
-/* The number of live nodes of the type named name over all modules (0 when it is not registered). */
+/* The number of live nodes of the type named name over all modules (0 when it is not registered).
+ */
 static uint64_t count_cells(hm_ctx *hc, const char *name) {
     odin3_celltype_id type = {0};
     uint64_t found = 0;
@@ -244,18 +249,12 @@ static uint64_t count_cells(hm_ctx *hc, const char *name) {
     return found;
 }
 
-static const char *arch_name(const odin3_arch *arch) {
-    if (arch->library != NULL) {
-        return arch->library;
-    }
-    return arch->file != NULL ? arch->file : "unnamed";
-}
-
 static void info_absent(const odin3_arch *arch, const char *model, uint64_t count,
                         const char *cells) {
     odin3_log(ODIN3_LOG_INFO,
-              "partial_map: architecture '%s' has no '%s' model; %" PRIu64 " '%s' cells left to lower",
-              arch_name(arch), model, count, cells);
+              "partial_map: architecture '%s' has no '%s' model; %" PRIu64
+              " '%s' cells left to lower",
+              pm_arch_name(arch), model, count, cells);
 }
 
 /* S-2 and S-3: with an arch record the rules come from it, and a block whose model the library
@@ -268,17 +267,22 @@ static void setup_rules(hm_ctx *hc) {
         return;
     }
     odin3_celltype_id none = {0};
-    hc->rules.have_mul = hc->rules.have_mul && hm_find_type(hc->design, "multiply", &none);
-    hc->rules.have_adder = hc->rules.have_adder && hm_find_type(hc->design, "adder", &none);
-    hc->rules.have_sp = hc->rules.have_sp && hm_find_type(hc->design, "single_port_ram", &none);
-    hc->rules.have_dp = hc->rules.have_dp && hm_find_type(hc->design, "dual_port_ram", &none);
-    if (!hc->rules.have_mul) {
+    bool reg_mul = hm_find_type(hc->design, "multiply", &none);
+    bool reg_add = hm_find_type(hc->design, "adder", &none);
+    bool reg_sp = hm_find_type(hc->design, "single_port_ram", &none);
+    bool reg_dp = hm_find_type(hc->design, "dual_port_ram", &none);
+    hc->rules.have_mul = hc->rules.have_mul && reg_mul;
+    hc->rules.have_adder = hc->rules.have_adder && reg_add;
+    hc->rules.have_sp = hc->rules.have_sp && reg_sp;
+    hc->rules.have_dp = hc->rules.have_dp && reg_dp;
+    if (!reg_mul) {
         info_absent(arch, "multiply", count_cells(hc, "$mul"), "$mul");
     }
-    if (!hc->rules.have_adder) {
-        info_absent(arch, "adder", count_cells(hc, "$add") + count_cells(hc, "$sub"), "$add'/'$sub");
+    if (!reg_add) {
+        info_absent(arch, "adder", count_cells(hc, "$add") + count_cells(hc, "$sub"),
+                    "$add'/'$sub");
     }
-    if (!hc->rules.have_sp && !hc->rules.have_dp) {
+    if (!reg_sp && !reg_dp) {
         info_absent(arch, "single_port_ram", count_cells(hc, "$mem"), "$mem");
     }
 }

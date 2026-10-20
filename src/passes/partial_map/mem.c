@@ -165,7 +165,8 @@ static void warn_soft(const hm_ctx *hc, const mem_model *mm, mem_verdict verdict
                 name);
     } else if (verdict == MEM_SOFT_EDGE) {
         hm_diag(hc, ODIN3_LOG_WARN, mm->node,
-                "partial_map: memory '%s' has a port on the falling clock edge; left to lower", name);
+                "partial_map: memory '%s' has a port on the falling clock edge; left to lower",
+                name);
     } else if (verdict == MEM_SOFT_EN) {
         hm_diag(hc, ODIN3_LOG_WARN, mm->node,
                 "partial_map: memory '%s' has a read enable that is not constant 1; left to lower",

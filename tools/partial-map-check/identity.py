@@ -34,6 +34,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import elab_sweep
 import exit_check
 import hardmap_diff as hd
 
@@ -195,7 +196,8 @@ def gather(args: argparse.Namespace) -> list[Design]:
     if args.vtr_list:
         if args.vtr_root is None:
             raise hd.ToolError("--vtr-list needs --vtr-root")
-        designs += read_vtr(args.vtr_list, args.vtr_root, args.golden_root)
+        golden = args.golden_root or elab_sweep.load_micro_top().DEFAULT_ROOT
+        designs += read_vtr(args.vtr_list, args.vtr_root, golden if golden.is_dir() else None)
     for item in args.designs:
         name, _, top = item.partition(":")
         designs.append(Design(name, Path(name), top or None))
