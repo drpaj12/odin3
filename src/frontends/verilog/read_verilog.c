@@ -591,7 +591,7 @@ static odin3_status hand_over(odin3_pass_ctx *ctx, odin3_ast *ast, const rv_args
 
 /* D18: the primitives the arch record has no model of, which --vtr-compat builds as soft logic
  * (soft_blocks.h); 0 outside --vtr-compat, --lib and --parse-only. */
-static uint32_t soft_blocks_of(odin3_design *design, const rv_args *args) {
+static uint32_t soft_blocks_of(const odin3_design *design, const rv_args *args) {
     return args->elab.vtr_compat && !args->lib && !args->parse_only
                ? odin3_soft_blocks_missing(design)
                : 0U;
