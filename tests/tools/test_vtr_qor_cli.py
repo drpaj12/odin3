@@ -838,9 +838,19 @@ class RunTest(CliTestBase):
                                 "--job-timeout", "1")
         self.assertEqual(code, 3, err)
         self.assertLess(time.monotonic() - start, 120)  # far below the fake VTR's 300 s
-        self.assertIn("vtr-qor: P ch_intrinsics: timeout after 1 s", err)
+        self.assertRegex(err, r"vtr-qor: P ch_intrinsics: timeout after 1 s in \S+ "
+                              r"\(elapsed \d+ s\)")
         (job,) = self.job_dirs("P", "ch_intrinsics")
         self.assertEqual((job / "status").read_text(), "timeout\n")
+
+    def test_job_timeout_zero_is_accepted(self) -> None:
+        """--job-timeout 0 means no cap; a negative value is a usage error."""
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                "--job-timeout", "0")
+        self.assertEqual(code, 0, err)
+        code, _, _ = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                              "--job-timeout", "-1")
+        self.assertEqual(code, 2)
 
     def test_keep_netlists(self) -> None:
         """--keep-netlists keeps O's <J>/<d>.blif and pre-VPR netlist (point (n))."""

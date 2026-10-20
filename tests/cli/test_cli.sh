@@ -35,6 +35,9 @@
 # opt_determinism (two opt runs are byte-identical; the gates in reverse order compare identical).
 # hardmap_mul (3C-1: hardmap maps an 8x7 `$mul` to one `multiply`; write_blif --vtr equals tests/hardmap/expected/mul_8x7.blif).
 # hardmap_add (3C-2: hardmap maps `$add`/`$sub` to adder chains; the sim vectors before and after equal, an 8+6 add equals tests/hardmap/expected/add_8x6.blif).
+# memory_merge (4.7 G-1: the registered-read RAM micro through memory_merge has the read register merged into the `$mem`; with partial_map after it the BLIF equals partial_map alone).
+# memory_merge_soft (4.7, review M-1: memories partial_map leaves soft, chained after memory_merge, are equivalent to partial_map alone: equiv-check on the BLIFs for a variable read enable and OFFSET != 0, sim vectors for a falling-edge read, the same lower error for write ports on two clocks).
+# pm_ramstyle (4.7 G-3: a ram_style attribute gives one warning and the same BLIF as without it).
 # The project cases run from the project's directory (tests/cli/project), so the paths given are
 # relative.
 set -euo pipefail
@@ -755,6 +758,74 @@ pm_alias)
     "$odin3" --help >"$work/out" 2>&1 || true
     grep -q '^ *partial_map' "$work/out" || fail "--help does not list partial_map"
     grep -q '^ *hardmap' "$work/out" || fail "--help does not list hardmap"
+    ;;
+memory_merge)
+    # cli_memory_merge (4.7 G-1, T-7): the registered-read micro through `memory_merge` is one `$mem`
+    # with RD_CLK_ENABLE set and the read register gone; `memory_merge; partial_map` and
+    # `partial_map` alone write the same BLIF bytes (the merge is the one partial_map runs itself).
+    mm=$fixtures/../../micro_pm
+    lib=$fixtures/../../../lib/vtr.o3lib
+    pre="read_techlib $lib; read_verilog --vtr-compat $mm/mem_regread.v; proc; opt"
+    "$odin3" -p "$pre; write_rtlil $work/before.il" >"$work/out" 2>"$work/err" || fail "odin3 failed before memory_merge"
+    grep -qF 'cell $dff' "$work/before.il" || fail "the micro has no read register before the pass"
+    "$odin3" -p "$pre; memory_merge; write_rtlil $work/after.il" >"$work/out" 2>"$work/err" ||
+        fail "odin3 memory_merge script failed"
+    grep -qF 'memory_merge: 1 read ports merged (1 data, 0 address), 0 left asynchronous' "$work/err" ||
+        fail "no INFO line"
+    grep -qF "parameter \\RD_CLK_ENABLE 1'1" "$work/after.il" || fail "RD_CLK_ENABLE not set"
+    ! grep -qF 'cell $dff' "$work/after.il" || fail "the read register is still there"
+    "$odin3" -p "$pre; partial_map; opt -full -ffbits; lower; opt -fast; compact; write_blif --vtr $work/plain.blif" \
+        >"$work/out" 2>"$work/err" || fail "odin3 partial_map script failed"
+    "$odin3" -p "$pre; memory_merge; partial_map; opt -full -ffbits; lower; opt -fast; compact; write_blif --vtr $work/merged.blif" \
+        >"$work/out" 2>"$work/err" || fail "odin3 memory_merge; partial_map script failed"
+    cmp "$work/plain.blif" "$work/merged.blif" || fail "memory_merge before partial_map changed the BLIF"
+    ;;
+memory_merge_soft)
+    # cli_memory_merge_soft (4.7 review M-1): for a memory partial_map leaves soft, `memory_merge`
+    # before it changes the netlist structure (the read port is synchronous, `lower` builds the
+    # read register itself) but not the function.
+    mm=$fixtures/../../micro_pm
+    lib=$fixtures/../../../lib/vtr.o3lib
+    equiv=$(dirname "$compare")/../equiv-check/equiv-check
+    tail="opt -full -ffbits; lower; opt -fast; compact"
+    for micro in mem_dffe_var mem_offset; do
+        pre="read_techlib $lib; read_verilog --vtr-compat $mm/$micro.v; proc; opt"
+        "$odin3" -p "$pre; partial_map; $tail; write_blif --vtr $work/a.blif" >"$work/out" 2>"$work/err" ||
+            fail "$micro: partial_map alone failed"
+        "$odin3" -p "$pre; memory_merge; partial_map; $tail; write_blif --vtr $work/b.blif" >"$work/out" 2>"$work/err" ||
+            fail "$micro: memory_merge; partial_map failed"
+        "$equiv" "$work/a.blif" "$work/b.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent"
+    done
+    pre="read_techlib $lib; read_verilog --vtr-compat $mm/mem_negedge.v; proc; opt"
+    "$odin3" -p "$pre; partial_map; $tail; sim 3000 7 $work/a.vec" >"$work/out" 2>"$work/err" ||
+        fail "mem_negedge: partial_map alone failed"
+    "$odin3" -p "$pre; memory_merge; partial_map; $tail; sim 3000 7 $work/b.vec" >"$work/out" 2>"$work/err" ||
+        fail "mem_negedge: memory_merge; partial_map failed"
+    cmp <(tail -n +2 "$work/a.vec") <(tail -n +2 "$work/b.vec") || fail "mem_negedge: sim vectors differ"
+    pre="read_techlib $lib; read_verilog --vtr-compat $mm/mem_2clk.v; proc; opt"
+    for chain in "partial_map" "memory_merge; partial_map"; do
+        if "$odin3" -p "$pre; $chain; $tail" >"$work/out" 2>"$work/err"; then
+            fail "mem_2clk: '$chain' unexpectedly lowered"
+        fi
+        grep -qF "has write ports on different clocks or polarities" "$work/err" ||
+            fail "mem_2clk: '$chain' did not give the lower error"
+    done
+    ;;
+pm_ramstyle)
+    # cli_pm_ramstyle (4.7 G-3): the micro with `(* ram_style = "block" *)` gives one warning and
+    # the BLIF of the micro without it (same module name aside).
+    mm=$fixtures/../../micro_pm
+    lib=$fixtures/../../../lib/vtr.o3lib
+    flow="partial_map; opt -full -ffbits; lower; opt -fast; compact"
+    for micro in mem_regread mem_ramstyle; do
+        "$odin3" -p "read_techlib $lib; read_verilog --vtr-compat $mm/$micro.v; proc; opt; $flow; write_blif --vtr $work/$micro.blif" \
+            >"$work/out" 2>"$work/err" || fail "odin3 failed on $micro.v"
+    done
+    grep -qF "partial_map: memory 'block_mem': attribute 'ram_style' is ignored; mapping follows the architecture" "$work/err" ||
+        fail "no ram_style warning"
+    [[ $(grep -c "is ignored" "$work/err") -eq 1 ]] || fail "not exactly one warning"
+    diff <(sed 's/mem_ramstyle/mem_regread/g' "$work/mem_ramstyle.blif" | grep -v '^#') \
+        <(grep -v '^#' "$work/mem_regread.blif") >/dev/null || fail "the ram_style BLIF differs"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

@@ -27,6 +27,24 @@ enum {
     MEM_MAX_ABITS = PM_RAM_MAX_ADDR
 };
 
+/* The `$mem` parameter indices (src/ir/cells/mem.c, declaration order). */
+enum {
+    MP_MEMID,
+    MP_SIZE,
+    MP_OFFSET,
+    MP_ABITS,
+    MP_WIDTH,
+    MP_RD_PORTS,
+    MP_WR_PORTS,
+    MP_RD_CLK_ENABLE,
+    MP_RD_CLK_POLARITY,
+    MP_RD_TRANSPARENT,
+    MP_WR_CLK_ENABLE,
+    MP_WR_CLK_POLARITY,
+    MP_INIT,
+    MP_N_PARAMS
+};
+
 typedef struct mem_rport {
     bool sync;        /* after R-8 */
     bool posedge;     /* rising clock edge */
