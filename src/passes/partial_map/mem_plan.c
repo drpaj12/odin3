@@ -260,7 +260,10 @@ odin3_status mem_classify(const hm_ctx *hc, mem_model *mm, mem_verdict *verdict)
     for (size_t i = 0; st == ODIN3_OK && pat.fits && i < mm->rams.len; i++) {
         /* R-6: a RAM the arch has no model for (SP only, or DP only) is R-11: no mapping */
         const mem_ram *ram = odin3_vec_cat(&mm->rams, i);
-        pat.fits = ram->kind == HM_SP_RAM ? hc->rules.have_sp : hc->rules.have_dp;
+        bool dual = ram->kind == HM_DP_RAM;
+        pat.fits = dual ? hc->rules.have_dp : hc->rules.have_sp;
+        /* --mem-width arch: no arch mode holds a block of this memory (R-4, R-11) */
+        pat.fits = pat.fits && pm_ram_shape_of(&hc->rules, dual, mm->abits).width != 0;
     }
     if (st == ODIN3_OK && !pat.fits) {
         *verdict = MEM_SOFT_PATTERN;

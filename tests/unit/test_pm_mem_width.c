@@ -3,6 +3,7 @@
  * fixture ram_d11.xml: single-port modes (9,40), (10,20), (11,10), dual-port (10,20), (11,10). The
  * default (1-bit slices) is checked beside it. Values are checked on hardmap_ramsim.c.
  */
+#include "frontends/arch/arch.h"
 #include "hardmap_fixture.h"
 #include "ir/celltype.h"
 #include "ir/module.h"
@@ -69,10 +70,31 @@ static block block_of(const pb_result *res, const char *type, uint32_t index) {
                    odin3_node_param(res->module, node, 1)->i};
 }
 
+/* M3: every RAM block that was emitted is a real mode of the arch (address pins, data pins). */
+static void expect_modes(const pb_result *res) {
+    static const char *const k_types[2] = {"single_port_ram", "dual_port_ram"};
+    const odin3_arch *arch = odin3_design_arch(res->design);
+    for (uint32_t kind = 0; kind < 2; kind++) {
+        odin3_arch_ram_mode modes[16];
+        uint32_t count = odin3_arch_modes_of(arch, k_types[kind], modes, 16);
+        for (uint32_t i = 0; i < hm_count(res->module, k_types[kind]); i++) {
+            block blk = block_of(res, k_types[kind], i);
+            bool found = false;
+            for (uint32_t m = 0; m < count && m < 16; m++) {
+                found = found || (modes[m].addr == blk.addr && modes[m].data == blk.data);
+            }
+            TEST_ASSERT_TRUE_MESSAGE(found, "a block that is no mode of the arch");
+        }
+    }
+}
+
 static pb_result run_mem(pmf_case cs, const odin3_partial_map_opts *opts) {
     pb_result res;
     pmf_build(cs, D11_XML, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, pmf_run(&res, opts, NULL));
+    if (opts != NULL) {
+        expect_modes(&res);
+    }
     return res;
 }
 
@@ -83,7 +105,7 @@ static void test_256x32_is_one_block(void) {
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "single_port_ram"));
     block blk = block_of(&res, "single_port_ram", 0);
     TEST_ASSERT_EQUAL_INT64(9, blk.addr);
-    TEST_ASSERT_EQUAL_INT64(32, blk.data);
+    TEST_ASSERT_EQUAL_INT64(40, blk.data); /* the (9, 40) mode; 8 data pins padded */
     TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$mem"));
     TEST_ASSERT_EQUAL_UINT32(1, occurrences(WARN_TEXT));
     pb_free(&res);
@@ -111,7 +133,7 @@ static void test_2048x10_is_one_block(void) {
 static void test_2048x32_is_four_blocks(void) {
     pb_result res = run_mem((pmf_case){PMF_MEM, false, 11, 32, false}, &ARCH_WIDTH);
     TEST_ASSERT_EQUAL_UINT32(4, hm_count(res.module, "single_port_ram"));
-    const int64_t want[4] = {10, 10, 10, 2};
+    const int64_t want[4] = {10, 10, 10, 10}; /* the last slice is 2 bits, padded */
     for (uint32_t i = 0; i < 4; i++) {
         block blk = block_of(&res, "single_port_ram", i);
         TEST_ASSERT_EQUAL_INT64(11, blk.addr);
@@ -128,7 +150,7 @@ static void test_depth_split_then_width(void) {
     for (uint32_t i = 0; i < 8; i++) {
         block blk = block_of(&res, "single_port_ram", i);
         TEST_ASSERT_EQUAL_INT64(11, blk.addr);
-        TEST_ASSERT_TRUE(blk.data == 10 || blk.data == 2);
+        TEST_ASSERT_EQUAL_INT64(10, blk.data);
     }
     pb_free(&res);
 }
@@ -140,7 +162,7 @@ static void test_dp_table(void) {
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "dual_port_ram"));
     block blk = block_of(&res, "dual_port_ram", 0);
     TEST_ASSERT_EQUAL_INT64(10, blk.addr);
-    TEST_ASSERT_EQUAL_INT64(16, blk.data);
+    TEST_ASSERT_EQUAL_INT64(20, blk.data); /* the (10, 20) mode; 4 data pins padded */
     pb_free(&res);
 }
 
@@ -150,7 +172,7 @@ static void test_instance(void) {
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "single_port_ram"));
     block blk = block_of(&res, "single_port_ram", 0);
     TEST_ASSERT_EQUAL_INT64(9, blk.addr);
-    TEST_ASSERT_EQUAL_INT64(32, blk.data);
+    TEST_ASSERT_EQUAL_INT64(40, blk.data); /* the (9, 40) mode; 8 data pins padded */
     pb_free(&res);
     log_text[0] = '\0';
     odin3_hardmap_stats stats;
@@ -234,6 +256,37 @@ static void test_sim_instance(void) {
         pmf_sim_equal((pmf_case){PMF_INSTANCE, false, 8, 32, false}, D11_XML, &ARCH_WIDTH, 0x87U));
 }
 
+#define MIXED_XML ODIN3_ARCH_DATA_DIR "/ram_mixed.xml"
+
+/* M4: D is per kind. Mixed arch: SP modes (9, 40), (11, 10), DP mode (10, 20). A 12-bit SP RAM
+ * splits once (D = 11), a 12-bit DP RAM twice (D = 10); with or without --mem-width arch. */
+static void test_depth_is_per_kind(void) {
+    for (int arch_width = 0; arch_width < 2; arch_width++) {
+        const odin3_partial_map_opts *opts = arch_width != 0 ? &ARCH_WIDTH : NULL;
+        pb_result res;
+        pmf_build((pmf_case){PMF_INSTANCE, false, 12, 1, false}, MIXED_XML, &res);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, pmf_run(&res, opts, NULL));
+        TEST_ASSERT_EQUAL_UINT32(2, hm_count(res.module, "single_port_ram"));
+        TEST_ASSERT_EQUAL_INT64(11, block_of(&res, "single_port_ram", 0).addr);
+        pb_free(&res);
+        pmf_build((pmf_case){PMF_INSTANCE, true, 12, 1, false}, MIXED_XML, &res);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, pmf_run(&res, opts, NULL));
+        TEST_ASSERT_EQUAL_UINT32(4, hm_count(res.module, "dual_port_ram"));
+        TEST_ASSERT_EQUAL_INT64(10, block_of(&res, "dual_port_ram", 0).addr);
+        if (opts != NULL) {
+            expect_modes(&res);
+        }
+        pb_free(&res);
+    }
+}
+
+static void test_sim_mixed_dp(void) {
+    TEST_ASSERT_TRUE(
+        pmf_sim_equal((pmf_case){PMF_INSTANCE, true, 12, 1, false}, MIXED_XML, NULL, 0xC03U));
+    TEST_ASSERT_TRUE(
+        pmf_sim_equal((pmf_case){PMF_MEM, true, 12, 2, false}, MIXED_XML, &ARCH_WIDTH, 0xC03U));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_256x32_is_one_block);
@@ -247,6 +300,8 @@ int main(void) {
     RUN_TEST(test_no_ram_model_is_noop);
     RUN_TEST(test_no_record_is_ignored_with_warning);
     RUN_TEST(test_pass_option);
+    RUN_TEST(test_depth_is_per_kind);
+    RUN_TEST(test_sim_mixed_dp);
     RUN_TEST(test_sim_256x32);
     RUN_TEST(test_sim_2048x32);
     RUN_TEST(test_sim_depth_and_width);

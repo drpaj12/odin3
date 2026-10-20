@@ -269,6 +269,7 @@ static void info_bits(hm_ctx *hc) {
             }
         }
     }
+    hm_set_module(hc, NULL); /* the loop left it on the last module */
     odin3_log(ODIN3_LOG_INFO, "partial_map: %" PRIu64 " bits of '$mem' left soft", bits);
 }
 

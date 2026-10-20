@@ -36,14 +36,15 @@ typedef struct pm_rules {
     uint32_t mul_width; /* the square multiplier's WIDTH (X-1) */
     uint32_t
         min_mul; /* `--min-mult`: a multiplier narrower than this, both operands >= 2, is soft */
-    bool have_adder;     /* the arch has an `adder` model */
-    uint32_t min_add;    /* `--min-add`: an add of fewer bits than this is soft */
-    bool have_sp;        /* the arch has a single-port RAM model */
-    bool have_dp;        /* the arch has a dual-port RAM model */
-    uint32_t mem_depth;  /* D: the address bits of one RAM block (R-2) */
-    uint32_t mem_width;  /* the data bits of one RAM slice (R-3: 1) */
-    bool mem_arch;       /* `--mem-width arch` is on and the record has RAM modes (R-4) */
-    uint32_t n_modes[2]; /* [0] single_port_ram, [1] dual_port_ram */
+    bool have_adder;        /* the arch has an `adder` model */
+    uint32_t min_add;       /* `--min-add`: an add of fewer bits than this is soft */
+    bool have_sp;           /* the arch has a single-port RAM model */
+    bool have_dp;           /* the arch has a dual-port RAM model */
+    uint32_t mem_depth;     /* D: the address bits of one RAM block (R-2) */
+    uint32_t mem_width;     /* the data bits of one RAM slice (R-3: 1) */
+    bool mem_arch;          /* `--mem-width arch` is on and the record has RAM modes (R-4) */
+    uint32_t depth_kind[2]; /* D of each kind (R-2): the most address pins of its leaves; 0: none */
+    uint32_t n_modes[2];    /* [0] single_port_ram, [1] dual_port_ram */
     pm_ram_mode modes[2][PM_RAM_MODE_CAP]; /* distinct modes in document order */
 } pm_rules;
 
@@ -56,6 +57,10 @@ typedef struct pm_ram_shape {
     uint32_t addr;
     uint32_t width;
 } pm_ram_shape;
+
+/* D of the kind (dual: dual_port_ram): the address bits of one block (R-2); mem_depth when the
+ * record gives the kind none (a model that is absent is never built). */
+uint32_t pm_ram_depth(const pm_rules *rules, bool dual);
 
 pm_ram_shape pm_ram_shape_of(const pm_rules *rules, bool dual, uint32_t addr_bits);
 

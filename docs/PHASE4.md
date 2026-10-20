@@ -242,7 +242,7 @@ DESIGN §12.1.
    keep the output while the enable is 0 (Yosys `Mem::emulate_rden`, as called by `memory_libmap`
    `emu_en`). One located WARNING per such memory port. A memory left soft whose width x depth is
    above 50,000 bits draws a located WARNING that names it, its bits and why it stayed soft (a
-   warning only). 4.2 plan PR D, Tasks 11 and 12. Peter approved 2026-10-20: `--mem-width arch`
+   warning only). 4.2 plan PR D, Tasks 11 and 12. Peter approved 2026-10-20 (data padding changed by review M3, plan deviation 13): `--mem-width arch`
    pads the address to the chosen mode's width; DATA_WIDTH is the slice's bit count.
 16. **D17 and D18** (Peter, 2026-10-20). D17, Parmys's soft memory has no read register: keep
    RTL-correct, a Parmys defect, no code change. D18, an explicit `single_port_ram`,

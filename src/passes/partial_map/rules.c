@@ -32,6 +32,8 @@ pm_rules pm_rules_k6_fixed(void) {
     rules.mem_arch = false;
     rules.n_modes[0] = 0;
     rules.n_modes[1] = 0;
+    rules.depth_kind[0] = 0;
+    rules.depth_kind[1] = 0;
     return rules;
 }
 
@@ -95,6 +97,8 @@ static void modes_of(const odin3_arch *arch, const char *model, pm_rules *rules,
     uint32_t found = odin3_arch_modes_of(arch, model, all, PM_RAM_MODE_CAP * 4U);
     found = found < PM_RAM_MODE_CAP * 4U ? found : PM_RAM_MODE_CAP * 4U;
     for (uint32_t i = 0; i < found; i++) {
+        rules->depth_kind[slot] =
+            all[i].addr > rules->depth_kind[slot] ? all[i].addr : rules->depth_kind[slot];
         bool dup = false;
         for (uint32_t j = 0; j < rules->n_modes[slot]; j++) {
             dup = dup || (rules->modes[slot][j].addr == all[i].addr &&
@@ -107,13 +111,19 @@ static void modes_of(const odin3_arch *arch, const char *model, pm_rules *rules,
     }
 }
 
+uint32_t pm_ram_depth(const pm_rules *rules, bool dual) {
+    uint32_t depth = rules->depth_kind[dual ? 1U : 0U];
+    return depth != 0 ? depth : rules->mem_depth;
+}
+
 pm_ram_shape pm_ram_shape_of(const pm_rules *rules, bool dual, uint32_t addr_bits) {
-    pm_ram_shape shape = {rules->mem_depth, rules->mem_width};
+    const uint32_t depth = pm_ram_depth(rules, dual);
+    pm_ram_shape shape = {depth, rules->mem_width};
     if (!rules->mem_arch) {
         return shape;
     }
     uint32_t slot = dual ? 1U : 0U;
-    uint32_t need = addr_bits < rules->mem_depth ? addr_bits : rules->mem_depth;
+    uint32_t need = addr_bits < depth ? addr_bits : depth;
     bool found = false;
     for (uint32_t i = 0; i < rules->n_modes[slot]; i++) {
         pm_ram_mode mode = rules->modes[slot][i];
@@ -124,7 +134,7 @@ pm_ram_shape pm_ram_shape_of(const pm_rules *rules, bool dual, uint32_t addr_bit
             found = true;
         }
     }
-    return found ? shape : (pm_ram_shape){rules->mem_depth, rules->mem_width};
+    return found ? shape : (pm_ram_shape){depth, 0}; /* no mode: width 0, the caller stays soft */
 }
 
 pm_rules pm_rules_from_arch(const struct odin3_arch *arch) {

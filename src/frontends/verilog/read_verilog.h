@@ -53,7 +53,8 @@ typedef struct odin3_rv_opts {
  * 2A §9).
  */
 /* odin3_read_verilog_files with soft_mask (soft_blocks.h): the primitives built as soft logic by
- * this read, warned at each instance of a module that no design unit defines. */
+ * this read; each such module, when no design unit defines it, is read once from its soft body and
+ * warned once, at its first instance. */
 odin3_status odin3_read_verilog_files_soft(odin3_design *design, const odin3_rv_opts *opts,
                                            uint32_t soft_mask, odin3_ast **out);
 
