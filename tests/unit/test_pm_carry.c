@@ -436,9 +436,9 @@ static void assert_min_add_refused(const char *args) {
     pb_result res;
     static const uint32_t widths[] = {4};
     build_adds("$add", widths, 1, &res, true);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(
-        ODIN3_ERR_INVALID_ARG,
-        odin3_pass_run(res.design, "partial_map", odin3_bytes_cstr(args)), args);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG,
+                                  odin3_pass_run(res.design, "partial_map", odin3_bytes_cstr(args)),
+                                  args);
     pb_free(&res);
 }
 
@@ -446,16 +446,15 @@ static void assert_min_add_accepted(const char *args) {
     pb_result res;
     static const uint32_t widths[] = {4};
     build_adds("$add", widths, 1, &res, true);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK,
-                                  odin3_pass_run(res.design, "partial_map", odin3_bytes_cstr(args)),
-                                  args);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_pass_run(res.design, "partial_map", odin3_bytes_cstr(args)), args);
     pb_free(&res);
 }
 
 static void test_min_add_parser_refuses_bad_values(void) {
-    assert_min_add_refused("--min-add");                      /* no value */
+    assert_min_add_refused("--min-add"); /* no value */
     assert_min_add_refused("--min-add 0");
-    assert_min_add_refused("--min-add 4294967296");            /* overflow of uint32 */
+    assert_min_add_refused("--min-add 4294967296");              /* overflow of uint32 */
     assert_min_add_refused("--min-add 99999999999999999999999"); /* overflow of unsigned long */
     assert_min_add_refused("--min-add 12345678901234567890123456789012"); /* length >= 32 */
     assert_min_add_refused("--min-add -3");
@@ -466,7 +465,7 @@ static void test_min_add_parser_refuses_bad_values(void) {
 
 static void test_min_add_parser_blanks(void) {
     assert_min_add_refused("--min-add  8x");
-    assert_min_add_refused("--min-add 8 --min-add");           /* trailing flag without value */
+    assert_min_add_refused("--min-add 8 --min-add"); /* trailing flag without value */
 }
 
 static void test_min_add_parser_accepts(void) {

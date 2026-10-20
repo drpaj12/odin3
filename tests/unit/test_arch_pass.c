@@ -131,15 +131,14 @@ static void test_collision_on_a_later_model_registers_nothing(void) {
 static void test_duplicate_model_names_register_nothing(void) {
     const odin3_arch_src src = {
         "dup.xml",
-        odin3_bytes_cstr(
-            "<architecture><models>"
-            "<model name=\"m1\"><input_ports><port name=\"a\"/></input_ports>"
-            "<output_ports><port name=\"o\"/></output_ports></model>"
-            "<model name=\"m2\"><input_ports><port name=\"a\"/></input_ports>"
-            "<output_ports><port name=\"o\"/></output_ports></model>"
-            "<model name=\"m1\"><input_ports><port name=\"a\"/></input_ports>"
-            "<output_ports><port name=\"o\"/></output_ports></model>"
-            "</models></architecture>")};
+        odin3_bytes_cstr("<architecture><models>"
+                         "<model name=\"m1\"><input_ports><port name=\"a\"/></input_ports>"
+                         "<output_ports><port name=\"o\"/></output_ports></model>"
+                         "<model name=\"m2\"><input_ports><port name=\"a\"/></input_ports>"
+                         "<output_ports><port name=\"o\"/></output_ports></model>"
+                         "<model name=\"m1\"><input_ports><port name=\"a\"/></input_ports>"
+                         "<output_ports><port name=\"o\"/></output_ports></model>"
+                         "</models></architecture>")};
     odin3_status st = odin3_arch_read_text(g_design, &src);
     IS_TRUE(st != ODIN3_OK);
     IS_NULL(odin3_design_arch(g_design));
