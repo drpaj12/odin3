@@ -1,4 +1,4 @@
-# The 19 gate designs and the 2 extra, Parmys through VTR's default flow, as run_vtr_task.py runs
+# The 15 gate designs, the 2 extra and the 4 offload (shipped-out) designs, Parmys through VTR's default flow, as run_vtr_task.py runs
 # them (the same set and parameters as vtr-qor's P leg; sets.json order).
 #
 ############################################

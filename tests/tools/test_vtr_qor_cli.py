@@ -479,7 +479,7 @@ class InputTest(CliTestBase):
         self.assertEqual(err, "vtr-qor: unknown design 'nope' (see tests/vtr/qor/sets.json)\n")
         code, _, err = self.cli("run", "--leg", "P", "--set", "big")
         self.assertEqual(code, 2)
-        self.assertEqual(err, "vtr-qor: unknown set 'big' (gate, extra, smoke)\n")
+        self.assertEqual(err, "vtr-qor: unknown set 'big' (gate, extra, smoke, offload)\n")
         code, _, err = self.cli("run", "--leg", "Q", "--set", "smoke")
         self.assertEqual(code, 2)
         self.assertEqual(err, "vtr-qor: unknown leg 'Q' (P, O, Oprime, Pprime, R, Oprov)\n")
@@ -1118,7 +1118,7 @@ class CommittedInputsTest(unittest.TestCase):
             self.assertEqual(text, f"{counts[design]} multiply, inlined by equiv-check as "
                                    "36x36 logic: the Verilator check stands in")
         for design, _, _ in rows:
-            self.assertIn(design, SETS.gate)
+            self.assertIn(design, (*SETS.gate, *SETS.offload))
         for absent in ("sha", "stereovision0", "blob_merge"):
             self.assertNotIn(absent, [r[0] for r in rows])
 
