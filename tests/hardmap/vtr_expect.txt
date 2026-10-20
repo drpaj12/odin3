@@ -13,7 +13,7 @@
 # diffeq1, diffeq2, mkPktMerge and ch_intrinsics are equivalent to Parmys (the three `counts:`
 # lines of the FSM designs ch_intrinsics, blob_merge and stereovision3 are gone: their latch delta
 # is now 0). The two that remain:
-blob_merge.v D16 4.8 `fsm` (agent default, isolated 2026-10-20): latch count equals Parmys's (575); abc dsec says NOT equivalent only from the all-zero start of the one-hot register (illegal state, as Yosys and Parmys); fsm-equiv --odin proves proc against proc;fsm;opt equivalent from reset at depths 3, 8, 30 and not equivalent without the reset constraint (PHASE4 decision 14, plan Deviations 12 and 15)
+blob_merge.v D16 4.8 `fsm` (agent default, isolated 2026-10-20): latch count equals Parmys's (575); abc dsec says NOT equivalent only from the all-zero start of the one-hot register (illegal state, as Yosys and Parmys); bounded fsm-equiv --odin finds proc and proc;fsm;opt equivalent from reset at depths 3, 8, 30 (depth 60: no verdict; not a proof) and not equivalent at depth 8 without the reset constraint (PHASE4 decision 14, plan Deviations 12 and 15)
 stereovision3.v unproven equiv-check: more than one clock domain (tm3_clk_v0, tm3_clk_v2); latch count equals Parmys's (120) since 4.8 `fsm`, so the unexplained flop of PHASE3 #43 is gone
 sha.v unproven ABC dsec UNDECIDED after 482 s; hard-block and latch counts equal Parmys's
 
