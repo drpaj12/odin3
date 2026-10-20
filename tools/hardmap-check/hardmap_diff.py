@@ -85,6 +85,7 @@ DEFAULT_EQUIV_TIMEOUT = 600
 EQUIV_UNPROVEN, EQUIV_HARD = 4, 5
 DIVERGENCE = re.compile(r"D\d+[a-z]?")
 PLAIN_IDS = ("unproven", "no-golden", "lower-gap")
+UNRESOLVED_NEEDLE = "unresolved_module:"
 GAP_NEEDLES = ("no lowering rule for cell type", "has no bit-level form")
 MODEL = re.compile(r"^\.model\s+(\S+)", re.MULTILINE)
 SUBCKT = re.compile(r"^\.subckt\s+(\S+)")
@@ -93,6 +94,7 @@ HARD_UNITS = tuple(unit for unit in UNITS if unit != "latch")
 NOT_EQUIVALENT = "NOT equivalent"
 UNPAIRED_NEEDLE = "cannot be matched one-to-one"
 D2B = "D2b"
+D18 = "D18"  # an explicit hard-block instance the arch has no model for: unresolved module
 SUB_CHAIN_MARK = "MIN~"  # Parmys names the nets of a `$sub` chain `$sub~N^MIN~M-K[i]`
 ADDER_B_ON_UNCONN = re.compile(r"(?<!\S)(b(?:\[0\])?)=unconn(?!\S)")
 CHAIN_OUTPUT_PINS = ("cout", "sumout")
@@ -101,6 +103,10 @@ PASSING = ("identical", "equivalent")
 
 class ToolError(Exception):
     """A usage or input problem: exit 2."""
+
+
+class UnresolvedModule(ToolError):
+    """``read_verilog`` stopped on an instance of a module the arch does not define (D18)."""
 
 
 class LowerGap(Exception):
@@ -303,6 +309,8 @@ def run_odin(cfg: Config, design: Path, top: str, work: Path) -> tuple[Path, str
     if proc.returncode != 0 and gap_lines:
         gap = gap_lines[0]
         raise LowerGap(gap.replace("odin3: error: ", "").strip(), log)
+    if proc.returncode != 0 and UNRESOLVED_NEEDLE in proc.stderr:
+        raise UnresolvedModule(f"odin3 exited {proc.returncode}: {tail(proc.stderr)}")
     if proc.returncode != 0:
         raise ToolError(f"odin3 exited {proc.returncode}: {tail(proc.stderr)}")
     return out, log
@@ -562,6 +570,11 @@ def check_design(cfg: Config, design: Path, work: Path) -> Result:
     check_arch(cfg, golden)
     try:
         out, log = run_odin(cfg, design, first_model(golden), work)
+    except UnresolvedModule:
+        listed = [e for e in entries if e.ident == D18]
+        if not listed:
+            raise
+        return Result(key, f"listed:{D18}", True, listed[0].reason)
     except LowerGap as gap:
         warned = wreduce_warning(key, gap.log)
         if warned is not None:

@@ -429,6 +429,26 @@ class ErrorTests(ToolCase):
         self.assertEqual(code, 0, out)
         self.assertIn("listed:lower-gap", out)
 
+    def test_unresolved_module_fails_unless_listed_d18(self) -> None:
+        self.spec["odin_rc"] = 1
+        self.spec["odin_stderr"] = (
+            "odin3: error: foo.v:23:2: error: unresolved_module: module 'single_port_ram' "
+            "is not defined\n")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 2)
+        self.assertIn("unresolved_module", out)
+        self.expect("common/foo.v D18 explicit instance, no such model in the arch\n")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 0, out)
+        self.assertIn("listed:D18", out)
+
+    def test_d18_entry_is_stale_when_the_design_runs(self) -> None:
+        self.expect("common/foo.v D18 explicit instance, no such model\n")
+        self.spec["compare_rc"] = 0
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("STALE", out)
+
     def test_wreduce_warning_in_a_lower_gap_run_is_warned(self) -> None:
         self.spec["odin_rc"] = 1
         self.spec["odin_stderr"] = (
