@@ -53,8 +53,8 @@ typedef struct odin3_partial_map_opts {
     bool allow_unknown_blocks; /* `--allow-unknown-blocks` (B-6): an unknown black box is a warning
                                 */
     bool mem_width_arch; /* `--mem-width arch`: slice memories to the arch's widest mode (R-4) */
-    uint32_t min_add;          /* `--min-add N` (4.2 C-4): an `$add`/`$sub` of fewer than N bits is
-                                  left to lower; 0 is "not given" (1) */
+    uint32_t min_add;    /* `--min-add N` (4.2 C-4): an `$add`/`$sub` of fewer than N bits is
+                            left to lower; 0 is "not given" (1) */
 } odin3_partial_map_opts;
 
 /* odin3_partial_map_run with options (NULL: the defaults). `--mem-width arch` on a design without

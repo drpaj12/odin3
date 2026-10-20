@@ -27,7 +27,7 @@ enum { LOG_TEXT = 16384 };
 #define WARN_TEXT "--mem-width arch: memories are sliced to the arch's widest mode"
 
 static char log_text[LOG_TEXT];
-static const odin3_partial_map_opts ARCH_WIDTH = {false, true};
+static const odin3_partial_map_opts ARCH_WIDTH = {.mem_width_arch = true};
 
 static void text_sink(odin3_log_level level, const char *msg, void *user) {
     (void)level;
