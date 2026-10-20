@@ -32,6 +32,8 @@ the Phase 3 design set and the Phase 5 LPM micros.
   reads it and networkx and PyTorch Geometric load it without Odin III (a small loader in
   `plugins/python/`). Test: export of a micro reloads in Python with the same node and edge
   counts as the IR, and `read_json` reads it back identical.
+- Note (4.8): `fsm` leaves `odin3_fsm_states`, `odin3_fsm_encoding`, `odin3_fsm_orig_bits` and
+  `odin3_fsm_orig_name` on a recoded state wire and its register, for the graph analysis here.
 - [ ] 6.4 `levelize` pass (was 4.18): the combinational level of each cell from inputs and
   register outputs, stored as an attribute; combinational loops reported. Test: levels on
   micros match a hand count; a loop gives a located warning.
