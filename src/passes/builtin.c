@@ -173,14 +173,40 @@ static odin3_status select_auto(odin3_design *design) {
 
 /* --- read_blif, write_blif ------------------------------------------------------------------- */
 
+/* read_blif's words: the one path and the option --hdl-locs (D-4), in any order. */
+static odin3_status read_blif_parse(odin3_bytes args, odin3_strbuf *path, bool *hdl_locs) {
+    uint32_t paths = 0;
+    for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
+         word = odin3_pass_arg_next(&args)) {
+        if (odin3_pass_arg_is(word, "--hdl-locs")) {
+            *hdl_locs = true;
+        } else if (word.len > 2 && memcmp(word.ptr, "--", 2) == 0) {
+            odin3_log(ODIN3_LOG_ERROR, "read_blif: unknown option '%.*s'", (int)word.len,
+                      (const char *)word.ptr);
+            return ODIN3_ERR_INVALID_ARG;
+        } else if (++paths == 1 && word.len > 0) {
+            odin3_status st = odin3_strbuf_append(path, word);
+            if (st != ODIN3_OK) {
+                return st;
+            }
+        }
+    }
+    if (paths != 1 || path->len == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "read_blif: expects one path");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
 static odin3_status read_blif_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                   void *user) {
     (void)user;
     odin3_strbuf path;
     odin3_strbuf_init(&path);
-    odin3_status st = one_path("read_blif", args, &path);
+    odin3_blif_read_opts opts = {0};
+    odin3_status st = read_blif_parse(args, &path, &opts.hdl_locs);
     if (st == ODIN3_OK) {
-        st = odin3_blif_read_in(ctx, path.data);
+        st = odin3_blif_read_ex(design, ctx, path.data, &opts);
     }
     const char *top = odin3_pass_get_options().top;
     if (st == ODIN3_OK && top != NULL) {
@@ -664,9 +690,14 @@ static odin3_status write_verilog_ast_run(odin3_pass_ctx *ctx, odin3_design *des
 /* --- the table ------------------------------------------------------------------------------- */
 
 static const odin3_pass_def READ_BLIF = {
-    "read_blif",   "read_blif <file>: read a BLIF netlist into an empty design (first model = top)",
-    read_blif_run, NULL,
-    false,         ODIN3_PASS_PROCESSES_OK};
+    "read_blif",
+    "read_blif [--hdl-locs] <file>: read a BLIF netlist into an empty design (first model = top); "
+    "--hdl-locs restores HDL locations: provenance net names, `.attr src`, and cells take the "
+    "location of their output net",
+    read_blif_run,
+    NULL,
+    false,
+    ODIN3_PASS_PROCESSES_OK};
 static const odin3_pass_def READ_TECHLIB = {
     "read_techlib",
     "read_techlib <file>: read a tech library (.o3lib); its cells become cell types of the design",
