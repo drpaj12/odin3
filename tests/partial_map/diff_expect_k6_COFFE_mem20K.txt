@@ -1,0 +1,32 @@
+# What hardmap-diff may report on the arch k6_frac_N10_4add_2chains_depop50_mem20K_22nm (COFFE: 27x27
+# multiplier, RAM depth 11) against the Parmys goldens in ~/odin3-ws/golden/<arch> (4.2 plan C1).
+# Syntax and use as tests/partial_map/diff_expect_k4_N4_90nm.txt. Run 2026-10-20, release build,
+# one design per call, `timeout 1800`.
+#
+# The 26 micros need no line here (16 equivalent; the 10 listed are those of tests/hardmap/diff_expect.txt
+# unchanged). Of the 15 VTR designs: ch_intrinsics and mkPktMerge are equivalent.
+#
+# Counts: the multipliers wider than 27 bits are not split yet (4.3, plan PR F), so Odin III leaves
+# them soft where Parmys splits them into `multiply` blocks and adders. The lines go when PR F merges.
+diffeq1.v counts:-13 multiply 4.3 not done: `$mul` wider than 27 bits stays soft, Parmys splits it (X-4)
+diffeq1.v counts:-48 adder 4.3 not done: the adders of Parmys's split multipliers
+diffeq2.v counts:-13 multiply 4.3 not done: `$mul` wider than 27 bits stays soft, Parmys splits it (X-4)
+diffeq2.v counts:-92 adder 4.3 not done: the adders of Parmys's split multipliers
+or1200.v counts:-4 multiply 4.3 not done: `$mul` wider than 27 bits stays soft, Parmys splits it (X-4)
+or1200.v counts:-72 adder 4.3 not done: the adders of Parmys's split multipliers
+#
+# As on k6 (tests/hardmap/vtr_expect.txt): counts equal Parmys's, equiv-check cannot decide in time
+# or sees several clocks.
+raygentop.v unproven equiv-check undecided in the time limit; hard-block and latch counts equal Parmys's
+sha.v unproven ABC dsec undecided; hard-block and latch counts equal Parmys's
+stereovision1.v unproven equiv-check undecided in the time limit; hard-block and latch counts equal Parmys's
+stereovision3.v unproven equiv-check: more than one clock domain; counts equal Parmys's
+mkDelayWorker32B.v unproven equiv-check undecided in the time limit; hard-block and latch counts equal Parmys's
+blob_merge.v D16 4.8 `fsm`: the same result as on k6 (tests/hardmap/vtr_expect.txt): one-hot register from the all-zero start
+mkSMAdapter4B.v counts:+4 latch bit-level opt_dff, the same delta as on k6
+#
+# Open, unexplained (each fails the sweep; no D-id; the first two are the same on the k6 mem32K golden, so they
+# are not caused by the arch or by PR D; tests/hardmap/vtr_expect.txt: "the next sweep decides"):
+#   boundtop.v      counts-differ, latch +6
+#   stereovision0.v differs (counts equal)
+#   stereovision2.v unpaired: 102 unnamed `multiply` boxes only in each file, inputs differ (4.3 split?)

@@ -1,0 +1,20 @@
+<architecture>
+  <models>
+    <model name="single_port_ram">
+      <input_ports>
+        <port name="we" clock="clk"/><port name="addr" clock="clk"/><port name="data" clock="clk"/>
+        <port name="clk" is_clock="1"/>
+      </input_ports>
+      <output_ports><port name="out" clock="clk"/></output_ports>
+    </model>
+  </models>
+  <complexblocklist>
+    <pb_type name="memory">
+      <pb_type name="sp11" blif_model=".subckt single_port_ram" class="memory">
+        <input name="addr" num_pins="11"/><input name="data" num_pins="10"/>
+        <input name="we" num_pins="1"/><output name="out" num_pins="10"/>
+        <clock name="clk" num_pins="1"/>
+      </pb_type>
+    </pb_type>
+  </complexblocklist>
+</architecture>

@@ -241,7 +241,7 @@ static void test_min_add_8_leaves_small_adds_soft(void) {
     pb_result res;
     build_adds("$add", widths, 4, &res, false);
     read_arch_fixture(&res, "acc_27.xml");
-    odin3_partial_map_opts opts = {false, MIN_ADD_TEST};
+    odin3_partial_map_opts opts = {.min_add = MIN_ADD_TEST};
     odin3_hardmap_stats stats;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_partial_map_run_opts(&res.ctx, res.design, &opts, &stats));
@@ -257,7 +257,7 @@ static void test_min_add_applies_to_sub_and_without_record(void) {
     static const uint32_t widths[] = {4, 8};
     pb_result res;
     build_adds("$sub", widths, 2, &res, true);
-    odin3_partial_map_opts opts = {false, MIN_ADD_TEST};
+    odin3_partial_map_opts opts = {.min_add = MIN_ADD_TEST};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_partial_map_run_opts(&res.ctx, res.design, &opts, NULL));
     TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$sub"));
     TEST_ASSERT_EQUAL_UINT32(10, hm_count(res.module, "adder"));

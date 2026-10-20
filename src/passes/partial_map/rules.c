@@ -29,6 +29,11 @@ pm_rules pm_rules_k6_fixed(void) {
     rules.have_dp = true;
     rules.mem_depth = K6_MEM_DEPTH;
     rules.mem_width = K6_MEM_WIDTH;
+    rules.mem_arch = false;
+    rules.n_modes[0] = 0;
+    rules.n_modes[1] = 0;
+    rules.depth_kind[0] = 0;
+    rules.depth_kind[1] = 0;
     return rules;
 }
 
@@ -85,6 +90,53 @@ static uint32_t mem_depth_of(const odin3_arch *arch) {
     return depth;
 }
 
+/* R-4: the distinct (address, data) modes of the model, in document order. A mode wider than
+ * PM_RAM_WIDTH_CAP or past PM_RAM_MODE_CAP is left out. */
+static void modes_of(const odin3_arch *arch, const char *model, pm_rules *rules, uint32_t slot) {
+    odin3_arch_ram_mode all[PM_RAM_MODE_CAP * 4U];
+    uint32_t found = odin3_arch_modes_of(arch, model, all, PM_RAM_MODE_CAP * 4U);
+    found = found < PM_RAM_MODE_CAP * 4U ? found : PM_RAM_MODE_CAP * 4U;
+    for (uint32_t i = 0; i < found; i++) {
+        rules->depth_kind[slot] =
+            all[i].addr > rules->depth_kind[slot] ? all[i].addr : rules->depth_kind[slot];
+        bool dup = false;
+        for (uint32_t j = 0; j < rules->n_modes[slot]; j++) {
+            dup = dup || (rules->modes[slot][j].addr == all[i].addr &&
+                          rules->modes[slot][j].data == all[i].data);
+        }
+        if (!dup && all[i].data >= 1U && all[i].data <= PM_RAM_WIDTH_CAP && all[i].addr >= 1U &&
+            rules->n_modes[slot] < PM_RAM_MODE_CAP) {
+            rules->modes[slot][rules->n_modes[slot]++] = (pm_ram_mode){all[i].addr, all[i].data};
+        }
+    }
+}
+
+uint32_t pm_ram_depth(const pm_rules *rules, bool dual) {
+    uint32_t depth = rules->depth_kind[dual ? 1U : 0U];
+    return depth != 0 ? depth : rules->mem_depth;
+}
+
+pm_ram_shape pm_ram_shape_of(const pm_rules *rules, bool dual, uint32_t addr_bits) {
+    const uint32_t depth = pm_ram_depth(rules, dual);
+    pm_ram_shape shape = {depth, rules->mem_width};
+    if (!rules->mem_arch) {
+        return shape;
+    }
+    uint32_t slot = dual ? 1U : 0U;
+    uint32_t need = addr_bits < depth ? addr_bits : depth;
+    bool found = false;
+    for (uint32_t i = 0; i < rules->n_modes[slot]; i++) {
+        pm_ram_mode mode = rules->modes[slot][i];
+        bool better = !found || mode.data > shape.width ||
+                      (mode.data == shape.width && mode.addr < shape.addr);
+        if (mode.addr >= need && better) {
+            shape = (pm_ram_shape){mode.addr, mode.data};
+            found = true;
+        }
+    }
+    return found ? shape : (pm_ram_shape){depth, 0}; /* no mode: width 0, the caller stays soft */
+}
+
 pm_rules pm_rules_from_arch(const struct odin3_arch *arch) {
     pm_rules rules = pm_rules_k6_fixed();
     if (arch == NULL) {
@@ -100,5 +152,9 @@ pm_rules pm_rules_from_arch(const struct odin3_arch *arch) {
     rules.have_sp = ram && odin3_arch_model_is_template(arch, "single_port_ram");
     rules.have_dp = ram && odin3_arch_model_is_template(arch, "dual_port_ram");
     rules.mem_depth = ram ? depth : rules.mem_depth;
+    if (ram) {
+        modes_of(arch, "single_port_ram", &rules, 0);
+        modes_of(arch, "dual_port_ram", &rules, 1);
+    }
     return rules;
 }

@@ -581,8 +581,14 @@ def _rule5_fcheck(ctx: _Ctx, usable: Sequence[str], out: _Collect) -> None:
         elif mine in NOT_RUN:
             _not_run(ctx, design, "fcheck", mine, out)
         elif mine == FCHECK_UNTESTED:  # never a pass; not a failure either: it cannot be judged
-            out.hold(f"gate: INCOMPLETE: {design} {ctx.x} fcheck untested (the RTL leaves the "
-                     "mismatching bits undefined); it cannot be judged")
+            why = text_field(ctx.index[(ctx.x, design)], "fcheck_reason")
+            if why != MISSING:  # the wrapper's short reason (latches N, XDEPEND, ...)
+                out.hold(f"gate: INCOMPLETE: {design} {ctx.x} fcheck untested: {why}; see "
+                         "fcheck.log; it cannot be judged")
+            else:
+                out.hold(f"gate: INCOMPLETE: {design} {ctx.x} fcheck untested (RTL latches or "
+                         "incomplete sensitivity lists, or mismatches only on bits that depend "
+                         "on the initial state: see fcheck.log); it cannot be judged")
         elif mine == FCHECK_FAIL and not _divergence_applies(ctx, design, reference):
             _fcheck_fail(ctx, design, out)
         elif mine not in (FCHECK_PASS, FCHECK_FAIL):

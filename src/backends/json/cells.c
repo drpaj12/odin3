@@ -64,12 +64,12 @@ void jw_cell_begin(jw *out, jw_list *cells, const jw_cell_ref *ref, jw_cell *cel
     jw_raw(out, "\"parameters\": ");
     cell->params.depth = cells->depth + MEMBER_DEPTH_OFFSET;
     jw_open(out, &cell->params);
+    odin3_wattr_seen_clear(&out->seen); /* real parameters claim their names, then the user's */
 }
 
 void jw_cell_attrs(jw *out, jw_cell *cell, odin3_node_id node) {
     jw_list attrs;
     odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
-    odin3_wattr_seen_clear(&out->seen);
     jw_user_attrs(out, &cell->params, obj, ODIN3_WATTR_PARAMETER);
     jw_close(out, &cell->params);
     open_member(out, cell, "attributes", &attrs);
@@ -97,12 +97,13 @@ static bool param_is_net_init(const odin3_celltype_def *def, uint32_t index) {
     return strncmp(def->name, "$_", 2) == 0 && strcmp(def->params[index].name, "INIT") == 0;
 }
 
-static void write_params(jw *out, jw_list *params, odin3_node_id node,
+static void write_params(jw *out, jw_cell *cell, odin3_node_id node,
                          const odin3_celltype_def *def) {
     for (uint32_t i = 0; i < def->n_params; i++) {
         const odin3_value *val = odin3_node_param(out->module, node, i);
         if (val != NULL && !param_is_net_init(def, i)) {
-            jw_param(out, params, def->params[i].name, val);
+            (void)jw_claim(out, ODIN3_WATTR_PARAMETER, def->params[i].name);
+            jw_param(out, &cell->params, def->params[i].name, val);
         }
     }
 }
@@ -112,7 +113,7 @@ static void write_generic(jw *out, jw_list *cells, odin3_node_id node,
     jw_cell_ref ref = {node, "", def->name};
     jw_cell cell;
     jw_cell_begin(out, cells, &ref, &cell);
-    write_params(out, &cell.params, node, def);
+    write_params(out, &cell, node, def);
     jw_cell_attrs(out, &cell, node);
     for (uint32_t i = 0; i < def->n_ports; i++) {
         jw_dir(out, &cell, def->ports[i].name, def->ports[i].dir);

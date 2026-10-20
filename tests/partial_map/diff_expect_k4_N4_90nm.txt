@@ -34,19 +34,19 @@ common/2r2w.v counts:+16 latch D17: Parmys's soft memory has no read registers (
 operators/eightbit_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)
 operators/twobits_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)
 
-# D18 (3C spec section 10): an explicit single_port_ram, dual_port_ram or multiply instance, and
-# k4_N4 has no such model: Odin III stops at read_verilog with `unresolved_module`, Parmys builds
-# the block soft from vtr_primitives.v. The designs are not compared at all, so nothing here says
-# the rest of the netlist matches.
-common/spram.v D18 explicit single_port_ram instance, no such model in k4_N4_90nm (unresolved_module)
-common/dpram.v D18 explicit dual_port_ram instance, no such model in k4_N4_90nm (unresolved_module)
-micro/multiply_hard_block.v D18 explicit multiply instances, no such model in k4_N4_90nm (unresolved_module)
-ch_intrinsics.v D18 explicit hard-block instance with no model in k4_N4_90nm (unresolved_module)
-mkPktMerge.v D18 explicit hard-block instance with no model in k4_N4_90nm (unresolved_module)
-raygentop.v D18 explicit hard-block instance with no model in k4_N4_90nm (unresolved_module)
-boundtop.v D18 explicit hard-block instance with no model in k4_N4_90nm (unresolved_module)
-mkSMAdapter4B.v D18 explicit hard-block instance with no model in k4_N4_90nm (unresolved_module)
-or1200.v D18 explicit hard-block instance with no model in k4_N4_90nm (unresolved_module)
+# D18 (3C spec section 10; Peter 2026-10-20): an explicit single_port_ram, dual_port_ram, multiply
+# or adder instance on an arch with no such model is built as soft logic under --vtr-compat
+# (lib/soft_primitives, a located warning), as Parmys does; without the flag it is the located
+# `unresolved_module` error. So these designs run. The soft RAM keeps its read register (D17):
+# the latch counts are above Parmys's by the read-data bits. By counts only; not itemised.
+common/spram.v counts:+16 latch D17: the soft single_port_ram keeps its 16 read-data flops, Parmys's has none
+common/dpram.v counts:+32 latch D17: the soft dual_port_ram keeps its 2 x 16 read-data flops, Parmys's has none
+ch_intrinsics.v counts:+8 latch D17: read registers of the soft RAM instances (not itemised per design)
+mkPktMerge.v counts:+459 latch D17: read registers of the soft RAM instances (not itemised per design)
+raygentop.v counts:+29 latch D17: read registers of the soft RAM instances (not itemised per design)
+boundtop.v counts:+292 latch D17: read registers of the soft RAM instances (not itemised per design; boundtop is +6 on COFFE and k6 for another reason, unexplained)
+mkSMAdapter4B.v counts:+109 latch D17: read registers of the soft RAM instances (not itemised per design; +4 of it is the bit-level opt_dff delta seen on k6)
+or1200.v counts:+67 latch D17: read registers of the soft RAM instances (not itemised per design)
 
 # OPEN, unexplained (2026-10-20, merged main with 4.8 fsm; not listed on purpose, so the run still
 # fails on them; the latch deltas of Odin III minus Parmys on k4_N4_90nm, not yet isolated):

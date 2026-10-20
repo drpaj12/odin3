@@ -13,6 +13,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* The prefix of the attribute that holds one parameter of a module or black-box instance. */
+#define ODIN3_ATTR_PARAM_PREFIX "parameter:"
+
 /* Where an attribute goes. */
 typedef enum odin3_wattr_role {
     ODIN3_WATTR_SKIP,      /* bookkeeping (the BLIF reader's blif_extras list): not written */
@@ -33,6 +36,7 @@ typedef struct odin3_wattr {
     odin3_bytes key;          /* the name to write */
     odin3_bytes text;         /* TEXT and BINARY */
     const odin3_value *value; /* VALUE */
+    bool instance_param;      /* a `parameter:<NAME>` attribute of an instance (role PARAMETER) */
 } odin3_wattr;
 
 /*
@@ -40,7 +44,9 @@ typedef struct odin3_wattr {
  * BLIF lines meant (frontends/blif/attrs.h): `blif.attr:K` is attribute K and `blif.param:K`
  * parameter K, their STRING value spelled as Yosys read_blif reads it (a value starting with `"`
  * is the string between the quotes, anything else a binary bit vector); `blif_extras` is skipped.
- * Every other key is an attribute with its IR value. The bytes point into tab.
+ * `parameter:<NAME>` (the elaborator's instance parameters, ODIN3_ATTR_PARAM_PREFIX) is parameter
+ * NAME with its IR value and instance_param set. Every other key is an attribute with its IR
+ * value. The bytes point into tab.
  */
 odin3_wattr odin3_wattr_classify(const odin3_strtab *tab, uint32_t key_str,
                                  const odin3_value *value);

@@ -1399,6 +1399,13 @@ static odin3_status attr_visit(void *ctx, uint32_t key_str, const odin3_value *v
     verilog_writer *wr = va->wr;
     odin3_wattr attr = odin3_wattr_classify(wr->tab, key_str, value);
     bool fresh = false;
+    if (attr.instance_param) {
+        /* An instance's parameters stay attributes under their full name: the instantiated module
+         * is already specialised (it declares no parameter to override). */
+        attr.role = ODIN3_WATTR_ATTRIBUTE;
+        attr.key =
+            (odin3_bytes){odin3_strtab_get(wr->tab, key_str), odin3_strtab_len(wr->tab, key_str)};
+    }
     if (attr.role == ODIN3_WATTR_SKIP || wr->st != ODIN3_OK) {
         return wr->st;
     }

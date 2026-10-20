@@ -5,10 +5,11 @@
  *
  * The depth split is a loop over levels (R-2): level L splits on address bit L, `h` (bit 0, the
  * low half) or `s` (bit 1). A leaf is numbered by its choices, bit L of the number being level L's.
- * There are 2^k leaves for k = ADDR_WIDTH - D levels (D = rules.mem_depth). The write enable of a
- * leaf is the instance's `we` ANDed with the matching address bits or their inverses; each read
- * port has one registered select per level (R-7, D4); the output of a data bit is a tree of `$mux`
- * whose root is level 0.
+ * There are 2^k leaves for k = ADDR_WIDTH - D levels (D = rules.mem_depth). The data bits are cut
+ * into chunks of at most w = shape.width bits (R-3, R-4); a leaf has one RAM per chunk. The write
+ * enable of a leaf is the instance's `we` ANDed with the matching address bits or their inverses;
+ * each read port has one registered select per level (R-7, D4); the output of a data bit is a tree
+ * of `$mux` whose root is level 0.
  */
 #ifndef ODIN3_PASSES_HARDMAP_RAM_H
 #define ODIN3_PASSES_HARDMAP_RAM_H
@@ -45,6 +46,7 @@ typedef struct ram_port {
     odin3_net_id sel[RAM_MAX_LEVELS];   /* the registered select of level L */
     odin3_vec we;                       /* odin3_net_id: the write enable of each leaf */
     odin3_vec out;                      /* odin3_net_id: each leaf's output, one data bit */
+    odin3_vec chunk; /* odin3_net_id: the outputs of one data chunk, leaf-major, n bits per leaf */
 } ram_port;
 
 /*
@@ -73,6 +75,7 @@ typedef struct ram_ctx {
     uint32_t addr_bits; /* ADDR_WIDTH of the source */
     uint32_t data_bits; /* DATA_WIDTH of the source */
     uint32_t levels;    /* k: 0 when the address fits */
+    pm_ram_shape shape; /* ADDR_WIDTH of a block and the most data bits of a slice (R-4, R-5) */
     odin3_vec *ties;
     ram_port port[RAM_MAX_PORTS];
 } ram_ctx;
@@ -88,6 +91,13 @@ typedef struct ram_choices {
     uint32_t leaf;
     uint32_t count;
 } ram_choices;
+
+/* A chunk of data bits: the first one and how many (at most shape.width). */
+typedef struct ram_chunk {
+    uint32_t first;
+    uint32_t n;
+    odin3_net_id pad; /* the pad net, set when the block is wider than n (make_slice) */
+} ram_chunk;
 
 /* A place in the split: read/write port (0, or 0 and 1 for dual port), data bit, level and leaf
  * (each used where it applies). */
