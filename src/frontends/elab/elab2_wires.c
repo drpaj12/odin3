@@ -328,18 +328,42 @@ static odin3_status wires_of(odin3_elab2 *e2, odin3_ast_id decl) {
     return st;
 }
 
+/* -netlist, before the wires: the raw spelling of every module-level declarator is noted, so a
+ * decoded name never takes one (the raw name always wins, as in the BLIF reader). */
+static odin3_status raw_names_of(odin3_elab2 *e2, odin3_ast_id decl) {
+    odin3_ast_span kids = odin3_ast_children(e2->elab, decl);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < kids.n; i++) {
+        if (kids.ids[i].v == 0 || odin3_ast_kind_of(e2->elab, kids.ids[i]) != ODIN3_AST_DECLARATOR) {
+            continue;
+        }
+        const odin3_symbol *rec =
+            odin3_symbol_get(e2->st, odin3_elab_sym_of(&e2->bind, kids.ids[i]));
+        uint32_t name = 0;
+        st = rec == NULL ? ODIN3_OK : odin3_elab2_scoped_name(e2, rec, &name);
+        st = st == ODIN3_OK && rec != NULL && name == rec->name
+                 ? odin3_netlist_note_raw(e2, name)
+                 : st;
+    }
+    return st;
+}
+
 /* True for a kind of the E class (an expression): no declaration lives below it. */
 static bool is_expression(odin3_ast_kind kind) {
     return odin3_ast_class_has(ODIN3_AST_CLS_E, odin3_ast_kind_info_of((uint32_t)kind));
 }
 
-/* Whether the walk goes below node; a declaration makes its wires here (status in *st). */
-static bool wires_descend(odin3_elab2 *e2, odin3_ast_id node, odin3_status *st) {
+/* One NET_DECL or VAR_DECL met by the module walk. */
+typedef odin3_status (*decl_fn)(odin3_elab2 *e2, odin3_ast_id decl);
+
+/* Whether the walk goes below node; a declaration is handed to on_decl here (status in *st). */
+static bool wires_descend(odin3_elab2 *e2, odin3_ast_id node, decl_fn on_decl,
+                          odin3_status *st) {
     odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, node);
     switch (kind) {
     case ODIN3_AST_NET_DECL:
     case ODIN3_AST_VAR_DECL:
-        *st = odin3_elab2_pending(e2, node) ? ODIN3_OK : wires_of(e2, node);
+        *st = odin3_elab2_pending(e2, node) ? ODIN3_OK : on_decl(e2, node);
         return false;
     case ODIN3_AST_GEN_BLOCK:
     case ODIN3_AST_SEQ_BLOCK:
@@ -358,22 +382,29 @@ static bool wires_descend(odin3_elab2 *e2, odin3_ast_id node, odin3_status *st) 
     }
 }
 
-odin3_status odin3_elab2_wires(odin3_elab2 *e2, odin3_ast_id module_node) {
-    odin3_status st =
-        e2->mod_node.v == module_node.v ? ODIN3_OK : odin3_elab2_enter(e2, module_node);
+/* Hands every NET_DECL and VAR_DECL of the module (and its selected generate blocks) to on_decl. */
+static odin3_status walk_decls(odin3_elab2 *e2, odin3_ast_id module_node, decl_fn on_decl) {
     odin3_ast_cursor cur;
-    st = st != ODIN3_OK ? st : odin3_ast_cursor_init(&cur, e2->elab, module_node);
+    odin3_status st = odin3_ast_cursor_init(&cur, e2->elab, module_node);
     if (st != ODIN3_OK) {
         return st;
     }
     odin3_ast_event ev;
     odin3_ast_id node;
     while (st == ODIN3_OK && !e2->stopped && odin3_ast_cursor_next(&cur, &ev, &node)) {
-        if (ev == ODIN3_AST_ENTER && !wires_descend(e2, node, &st)) {
+        if (ev == ODIN3_AST_ENTER && !wires_descend(e2, node, on_decl, &st)) {
             odin3_ast_cursor_skip(&cur);
         }
     }
     odin3_ast_cursor_free(&cur);
+    return st;
+}
+
+odin3_status odin3_elab2_wires(odin3_elab2 *e2, odin3_ast_id module_node) {
+    odin3_status st =
+        e2->mod_node.v == module_node.v ? ODIN3_OK : odin3_elab2_enter(e2, module_node);
+    st = st == ODIN3_OK && e2->opts.netlist ? walk_decls(e2, module_node, raw_names_of) : st;
+    st = st == ODIN3_OK ? walk_decls(e2, module_node, wires_of) : st;
     if (st == ODIN3_OK && e2->stopped) {
         return ODIN3_ERR_PARSE;
     }

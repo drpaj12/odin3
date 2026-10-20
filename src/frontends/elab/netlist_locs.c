@@ -121,9 +121,27 @@ odin3_status odin3_netlist_name_decode(odin3_elab2 *e2, uint32_t raw_str, odin3_
     return st;
 }
 
+static uint64_t raw_key(const odin3_elab2 *e2, uint32_t str) {
+    return ((uint64_t)e2->mod_id.v << NL_TAG_SHIFT) | str;
+}
+
+odin3_status odin3_netlist_note_raw(odin3_elab2 *e2, uint32_t str) {
+    if (e2->nl_raw == NULL) {
+        e2->nl_raw = odin3_u64map_create(0);
+    }
+    return e2->nl_raw == NULL ? ODIN3_ERR_NO_MEMORY
+                              : odin3_u64map_put(e2->nl_raw, (odin3_kv){raw_key(e2, str), 1});
+}
+
+/* Whether the current module has a wire of that name, or a declarator spelled so (raw wins). */
+static bool name_taken(const odin3_elab2 *e2, uint32_t str) {
+    return odin3_module_find_wire(e2->mod, str).v != 0 ||
+           (e2->nl_raw != NULL && odin3_u64map_get(e2->nl_raw, raw_key(e2, str), NULL));
+}
+
 odin3_status odin3_netlist_unique_wire(odin3_elab2 *e2, uint32_t short_str, uint32_t *name) {
     *name = short_str;
-    if (odin3_module_find_wire(e2->mod, short_str).v == 0) {
+    if (!name_taken(e2, short_str)) {
         return ODIN3_OK;
     }
     const char *base = odin3_strtab_get(odin3_design_strtab(e2->design), short_str);
@@ -133,7 +151,7 @@ odin3_status odin3_netlist_unique_wire(odin3_elab2 *e2, uint32_t short_str, uint
         st = st != ODIN3_OK ? st
                             : odin3_design_intern(e2->design,
                                                   (odin3_bytes){e2->text.data, e2->text.len}, name);
-        if (st != ODIN3_OK || odin3_module_find_wire(e2->mod, *name).v == 0) {
+        if (st != ODIN3_OK || !name_taken(e2, *name)) {
             return st;
         }
     }

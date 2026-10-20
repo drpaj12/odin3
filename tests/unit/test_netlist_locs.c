@@ -341,6 +341,47 @@ static void test_names_untouched_without_option(void) {
     free(text);
 }
 
+/* Review 5.4c fix 1: the raw name always wins, whatever the order of the declarations. */
+static const char *const RAW_HEAD = "module top(a, y);\n  input a;\n  output y;\n";
+
+static void read_raw(const char *decls) {
+    char text[CHUNK];
+    (void)snprintf(text, sizeof text, "%s%sendmodule\n", RAW_HEAD, decls);
+    read_net(text, OPTS_NETLIST);
+}
+
+static void test_plain_wire_after_decoded_keeps_its_name(void) {
+    read_raw("  wire \\u/x@f.v:3 ;\n  wire x;\n  assign x = a;\n  assign \\u/x@f.v:3  = ~a;\n"
+             "  assign y = x & \\u/x@f.v:3 ;\n");
+    char *text = dump();
+    expect_in(text, "top|wire|x|\n");
+    expect_in(text, "top|wire|x$1|f.v:3\n");
+    expect_out(log_text, "already declared");
+    expect_check();
+    free(text);
+}
+
+static void test_plain_wire_before_decoded_keeps_its_name(void) {
+    read_raw("  wire x;\n  wire \\u/x@f.v:3 ;\n  assign x = a;\n  assign \\u/x@f.v:3  = ~a;\n"
+             "  assign y = x & \\u/x@f.v:3 ;\n");
+    char *text = dump();
+    expect_in(text, "top|wire|x|\n");
+    expect_in(text, "top|wire|x$1|f.v:3\n");
+    expect_check();
+    free(text);
+}
+
+static void test_decoded_skips_a_plain_suffixed_name(void) {
+    read_raw("  wire \\u/x@f.v:3 ;\n  wire x;\n  wire x$1;\n  assign x = a;\n  assign x$1 = a;\n"
+             "  assign \\u/x@f.v:3  = ~a;\n  assign y = x & x$1 & \\u/x@f.v:3 ;\n");
+    char *text = dump();
+    expect_in(text, "top|wire|x|\n");
+    expect_in(text, "top|wire|x$1|\n");
+    expect_in(text, "top|wire|x$2|f.v:3\n");
+    expect_check();
+    free(text);
+}
+
 static void test_malformed_src_stays_an_attribute(void) {
     read_net("module top(a, y);\n  input a;\n  output y;\n  (* src = \"nonsense\" *)\n"
              "  wire w;\n  (* src = \"also bad\" *)\n  wire w2;\n  assign w = a;\n"
@@ -445,6 +486,9 @@ int main(void) {
     RUN_TEST(test_not_one_loc_comment_is_ignored);
     RUN_TEST(test_names_are_split);
     RUN_TEST(test_names_untouched_without_option);
+    RUN_TEST(test_plain_wire_after_decoded_keeps_its_name);
+    RUN_TEST(test_plain_wire_before_decoded_keeps_its_name);
+    RUN_TEST(test_decoded_skips_a_plain_suffixed_name);
     RUN_TEST(test_malformed_src_stays_an_attribute);
     RUN_TEST(test_records_are_imported_and_derived);
     RUN_TEST(test_object_without_text_is_imported_only);

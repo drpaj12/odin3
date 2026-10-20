@@ -197,6 +197,7 @@ void odin3_elab2_destroy(odin3_elab2 *e2) {
     odin3_u64map_destroy(e2->bboxes);
     odin3_u64map_destroy(e2->modules);
     odin3_u64map_destroy(e2->warned);
+    odin3_u64map_destroy(e2->nl_raw);
     odin3_arena_destroy(e2->scratch);
     odin3_vec_free(&e2->built);
     odin3_vec_free(&e2->stack);

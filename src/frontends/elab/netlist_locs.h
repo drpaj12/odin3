@@ -59,9 +59,13 @@ typedef struct odin3_netlist_name {
  */
 odin3_status odin3_netlist_name_decode(odin3_elab2 *e2, uint32_t raw_str, odin3_netlist_name *out);
 
+/* Notes that a declarator of the current module is spelled str: a decoded name never takes it. */
+odin3_status odin3_netlist_note_raw(odin3_elab2 *e2, uint32_t str);
+
 /*
  * The name a decoded wire takes in the current module: SHORT, or SHORT$N with the first free N when
- * the module already has a wire of that name (IR-14: names are unique per kind).
+ * the module already has a wire of that name or a declarator spelled so (IR-14: names are unique
+ * per kind; the raw name always wins, as in the BLIF reader).
  */
 odin3_status odin3_netlist_unique_wire(odin3_elab2 *e2, uint32_t short_str, uint32_t *name);
 
