@@ -46,6 +46,13 @@ class NormaliseTests(unittest.TestCase):
         self.assertEqual(jc.diff_note(FILE1, FILE1), "same")
         self.assertEqual(jc.diff_note(FILE1, other), "normalised")
 
+    def test_numbering_in_another_order_is_the_same_wiring(self) -> None:
+        other = FILE1.replace("[ 2 ]", "[ 8 ]").replace("[ 3 ]", "[ 5 ]")
+        self.assertEqual(jc.normalise_json(FILE1), jc.normalise_json(other))
+        swapped = FILE1.replace("[ 2 ]", "[ 9 ]").replace("[ 3 ]", "[ 2 ]")
+        swapped = swapped.replace("[ 9 ]", "[ 3 ]")
+        self.assertEqual(jc.normalise_json(FILE1), jc.normalise_json(swapped))
+
     def test_a_real_difference_survives_normalisation(self) -> None:
         other = FILE1.replace('"$not"', '"$neg"')
         note = jc.diff_note(FILE1, other)

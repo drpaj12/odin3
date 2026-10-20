@@ -60,6 +60,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import CompletedProcess
+from typing import Any
 
 import icells_check as ic
 
@@ -103,8 +104,6 @@ class Row:
 # --- pure helpers (unit-tested) -------------------------------------------------------------
 
 GENERATED_NAME = re.compile(r'"\$[a-z]*\d+(?:\$\d+)?"')
-BIT_ARRAY = re.compile(r"\[[ 0-9,]+\]")
-BIT_NUMBER = re.compile(r"\b\d+\b")
 SRC_ATTRIBUTE = re.compile(r'^\s*attribute \\src ".*"\n', re.M)
 MODULE_ATTRIBUTE = re.compile(r"^attribute \\(?!top |blackbox )\S+ .*\n", re.M)
 TOP_ATTRIBUTE = re.compile(r"^attribute \\top 32'0+1$", re.M)
@@ -119,18 +118,37 @@ def plain_rtlil(text: str) -> str:
     return TOP_ATTRIBUTE.sub("attribute \\\\top 1", text)
 
 
+def rank_bits(module: dict[str, Any]) -> None:
+    """Replaces the integer bit numbers of one module by the order of their first use: ports, then
+    the connections of the cells, then netnames. The two generations number nets differently
+    (R-2 (c)) but list ports and cells in the same order, so equal wiring gets equal numbers."""
+    lists: list[list[Any]] = []
+    ports, cells = module.get("ports", {}), module.get("cells", {})
+    if isinstance(ports, dict):
+        lists += [e["bits"] for e in ports.values() if isinstance(e.get("bits"), list)]
+    if isinstance(cells, dict):
+        for cell in cells.values():
+            conns = cell.get("connections", {}) if isinstance(cell, dict) else {}
+            lists += [v for v in conns.values() if isinstance(v, list)]
+    names = module.get("netnames", {})
+    if isinstance(names, dict):
+        lists += [e["bits"] for e in names.values() if isinstance(e.get("bits"), list)]
+    rank: dict[int, int] = {}
+    for lst in lists:
+        for bit in lst:
+            if isinstance(bit, int):
+                rank.setdefault(bit, len(rank))
+    for lst in lists:
+        lst[:] = [rank[b] if isinstance(b, int) else b for b in lst]
+
+
 def normalise_json(text: str) -> str:
-    """R-2 (a) to (c): a generated name (``"$c12"``, ``"$n34"``) is ``"$N"``, and the integers of
-    every bit array are numbered by first appearance in the file (the constant strings stay)."""
-    seen: dict[str, int] = {}
-
-    def number(arr: re.Match[str]) -> str:
-        def one(num: re.Match[str]) -> str:
-            return str(seen.setdefault(num.group(0), len(seen)))
-
-        return BIT_NUMBER.sub(one, arr.group(0))
-
-    return BIT_ARRAY.sub(number, GENERATED_NAME.sub('"$N"', text))
+    """R-2 (a) to (c): a generated name (``"$c12"``, ``"$n34"``) is ``"$N"``, and the bit numbers
+    of each module by the order of first use (the constant strings stay)."""
+    data = json.loads(text)
+    for module in data.get("modules", {}).values():
+        rank_bits(module)
+    return GENERATED_NAME.sub('"$N"', json.dumps(data, indent=1))
 
 
 def first_difference(one: str, two: str) -> str:
@@ -381,7 +399,7 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument(
         "--techlib-list",
         type=Path,
-        default=ROOT / "tests" / "icells" / "techlib.txt",
+        default=ROOT / "tests" / "json" / "techlib.txt",
         help="lines '<design file name> <tech library>': designs that read one first",
     )
     ap.add_argument("--yosys-dir", type=Path, help="read the fixtures DIR/<level>/*.json")

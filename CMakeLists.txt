@@ -3423,6 +3423,25 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     FLAGS --smallest-first FILES ${_json_micros})
             endforeach()
         endif()
+        # 5.3c Task 5 step 3: the 14 small VTR designs (PHASE2 #30; qor_sched.EQUIV_REQUIRED) at the LUT
+        # level only: R-1 and equiv-check, no QoR and no big benchmark (they are untested for
+        # equivalence, PHASE3 #16 amended). Smallest first; label sweep, plain test.
+        if(DEFINED ENV{VTR_ROOT})
+            set(_json_vtr_root $ENV{VTR_ROOT})
+        else()
+            set(_json_vtr_root $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing)
+        endif()
+        set(_json_vtr_dir ${_json_vtr_root}/vtr_flow/benchmarks/verilog)
+        set(_json_vtr14)
+        foreach(_d IN ITEMS single_wire single_ff and_latch multiclock_output_and_latch
+                multiclock_separate_and_latch multiclock_reader_writer ch_intrinsics
+                ch_intrinsics_nolatches diffeq1 diffeq2 mkPktMerge sha blob_merge stereovision3)
+            list(APPEND _json_vtr14 ${_json_vtr_dir}/${_d}.v)
+        endforeach()
+        if(ODIN3_WITH_ABC AND EXISTS ${_json_vtr_dir}/sha.v)
+            odin3_add_json_test(json_vtr14_lut LEVEL lut LABELS "sweep;json"
+                FLAGS --smallest-first FILES ${_json_vtr14})
+        endif()
         # 3B Task 9 (spec 14.4, 14.5): the lower corpus over the micros, smallest first, through
         # heavy-run: lower_run_micro (ODIN3_OK, check FULL, the netlist view written as BLIF),
         # lower_sim_micro (the simulator before and after; a type without a hook is `skipped`,
