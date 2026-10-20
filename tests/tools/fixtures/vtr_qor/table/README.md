@@ -2,8 +2,9 @@
 
 `runs/` is a synthetic job tree, laid out as `--out` is:
 `3c9a4d23b27d/k6_frac_N10_frac_chain_mem32K_40nm/<leg>/<key12>/<design>/{status,metrics.json,job.json}`,
-with each leg's `latest` file. It holds four legs, each on the 19 gate designs and the 2 extras
-(84 jobs, all `ok`, VTR at the pin):
+with each leg's `latest` file. It holds four legs, each on the 15 gate designs, the 2 extras and the
+4 offload designs (84 jobs, all `ok`, VTR at the pin; the table's default sets leave the offload
+designs out, so a table holds 68 of them):
 
 | leg | key12 |
 |---|---|
@@ -35,7 +36,8 @@ byte.
 The `mcml` P job ran in `odin3-heavyxl.slice` (`xl`).
 
 **O on gate design i (0-based, in §2 order):**
-- `num_clb` 275 for even i < 18, 176 for odd i, and 220 for i = 18 (`LU32PEEng`);
+- `num_clb` 275 for even i < 18, 176 for odd i, and 220 for i = 18 (`LU32PEEng`, an offload
+  design: not in the table);
 - `min_chan_width` 60;
 - CPD 2.5, except 3.6 on `sha`;
 - wirelength 1050;
@@ -62,15 +64,15 @@ The O `sha` job has a `cost_warnings` line (`*`).
 
 The bands are `num_clb` 0.90–1.10, W 0.25–1.30, CPD 0.50–1.40 and wirelength 0.60–1.50.
 
-## Hand-computed geomeans (over the 19 unless noted)
+## Hand-computed geomeans (over the 15 unless noted)
 
 ### O/P (the gate)
 
 | metric | per-design ratios | geomean | printed |
 |---|---|---|---|
-| `num_clb` | 9 × (275/200 = 1.375, 176/200 = 0.88), 1 × 220/200 = 1.1; 1.375 × 0.88 = 1.21 = 1.1² | 1.1 | `1.100`; max `1.375 (ch_intrinsics)` |
-| `min_chan_width` | 60/50 = 1.2 on all 19 | 1.2 | `1.2000`: within 0.005 of the 1.20 bound, so 4 decimals; it passes (inclusive) |
-| CPD | 1.0 × 18, `sha` 3.6/2.4 = 1.5 | 1.5^(1/19) = e^(0.405465/19) = 1.021570 | `1.022`; `sha` `1.5000` (on the bound, passes) |
+| `num_clb` | 8 × 1.375 (275/200), 7 × 0.88 (176/200); (1.375^8 × 0.88^7)^(1/15) | 1.11649 | `1.116`; max `1.375 (ch_intrinsics)` |
+| `min_chan_width` | 60/50 = 1.2 on all 15 | 1.2 | `1.2000`: within 0.005 of the 1.20 bound, so 4 decimals; it passes (inclusive) |
+| CPD | 1.0 × 14, `sha` 3.6/2.4 = 1.5 | 1.5^(1/15) = e^(0.405465/15) = 1.027399 | `1.027`; `sha` `1.5000` (on the bound, passes) |
 | wirelength | 1050/1000 = 1.05 | 1.05 | `1.050` |
 
 The verdict is PASS, with no violations. On the extras, every gated ratio is 1.3, so their
@@ -80,9 +82,9 @@ geomean (2) is `1.300`.
 
 | metric | O′/P | P′/P | O/O′ | O/P |
 |---|---|---|---|---|
-| `num_clb` | 1.100 | 0.900 | 9 × (1.25, 0.8), 1 × 1.0 → **1.000** | 1.100 |
+| `num_clb` | 1.100 | 0.900 | 8 × 1.25, 7 × 0.8 → (1.25)^(1/15) = **1.015** | 1.100 |
 | `min_chan_width` | 1.100 | 1.000 | 60/55 = **1.091** | 1.2000 |
-| CPD | 1.000 | 1.000 | 1.5^(1/19) = **1.022** | 1.022 |
+| CPD | 1.000 | 1.000 | 1.5^(1/15) = **1.027** | 1.027 |
 | wirelength | 1.050 | 0.950 | 1.000 | 1.050 |
 
 ### Report-only ratios (`ratios.csv`)
@@ -93,7 +95,7 @@ geomean (2) is `1.300`.
 | O/P | `ram_slices` | 0/0 = 1.0 on RAM-free designs | | `1.000` |
 | O/P | `depth` | 4/5 | 0.8 | `0.800` |
 | O/P | front-end peak | 200/100 | 2.0 | `2.000` |
-| P′/P | `depth` | `bgm` undefined | over 18 | `1.000`; `runs.json` `n` 18 of 19 |
+| P′/P | `depth` | none: `bgm`, where P′ depth is -1, is an offload design and not in the table | 1.0 | `1.000`; `runs.json` `n` 15 of 15 |
 | O′/P | front-end peak | 150/100 = 1.5 | 1.5 | `1.5000`: near a bound, so 4 decimals |
 | O/O′ | `num_clb` on the extras | 260/220 | 1.18182 | `1.182` |
 
@@ -101,9 +103,9 @@ geomean (2) is `1.300`.
 
 | metric | ratios | geomean | printed | `outside` |
 |---|---|---|---|---|
-| `num_clb` | 18 × 1.0, `ch_intrinsics` 200/160 = 1.25 | 1.25^(1/19) = e^(0.223144/19) = 1.011814 | `1.012` | `ch_intrinsics` (1.25 > 1.10) |
-| W | `diffeq1` 50/40 = 1.25 | 1.011814 | `1.012` | none: 1.25 ≤ 1.30 |
-| CPD | `stereovision3` missing | 18 × 1.0 | `1.000 (18/19)` | |
+| `num_clb` | 14 × 1.0, `ch_intrinsics` 200/160 = 1.25 | 1.25^(1/15) = e^(0.223144/15) = 1.014987 | `1.015` | `ch_intrinsics` (1.25 > 1.10) |
+| W | `diffeq1` 50/40 = 1.25 | 1.014987 | `1.015` | none: 1.25 ≤ 1.30 |
+| CPD | `stereovision3` missing | 14 × 1.0 | `1.000 (14/15)` | |
 | wirelength | | 1.0 | `1.000` | |
 
 ## Regenerating

@@ -55,7 +55,7 @@ Subcommands here: ``doctor``, ``run``, ``fcheck``, ``status``, ``clean``, ``tabl
   nothing) reads one key per leg (``--keys`` or ``latest``) under the pin's ``<vtr12>`` (the
   VTR checkout's with ``--allow-vtr-drift``), keeps the designs of ``--set`` (default
   ``gate,extra``), gates them (``tests/vtr/qor``'s ``bands.json`` and TSVs; a TSV that does not
-  exist yet is empty) over ``gate_designs``: on k6 decision 3 needs all 19 (a table narrowed by
+  exist yet is empty) over ``gate_designs``: on k6 decision 3 needs all 15 (a table narrowed by
   ``--set`` is "not gated" and INCOMPLETE, ruling N1); on EArch the smoke set, an agent default
   never titled decision 3 (none: not gated). It reads VTR's golden rows of the table's arch
   for the cross-check when P is in the table, and writes
@@ -1360,9 +1360,10 @@ def _golden(args: argparse.Namespace, arch: str) -> qor_table.GoldenXcheck:
 
 
 def gate_designs(sets: Sets, arch_key: str, selected: Collection[str]) -> tuple[str, ...]:
-    """The gate designs a table holds: on k6 §6.2's 19 that its ``--set`` includes (decision 3
-    gates only when all 19 are there, ruling N1); on EArch the smoke set, its only set (§2; an
-    agent default, never decision 3's gate). Empty on EArch: the table is not gated."""
+    """The gate designs a table holds: on k6 §6.2's gate designs (15) that its ``--set`` includes
+    (decision 3 gates only when all of them are there, ruling N1); on EArch the smoke set, its
+    only set (§2; an agent default, never decision 3's gate). Empty on EArch: the table is not
+    gated."""
     base = sets.smoke if arch_key == EARCH else sets.gate
     return tuple(design for design in base if design in selected)
 
@@ -1407,8 +1408,8 @@ def cmd_table(args: argparse.Namespace, argv: Sequence[str]) -> int:
     gate_set = gate_designs(sets, args.arch, designs)
     narrowed = len(gate_set) if args.arch != EARCH and len(gate_set) != len(sets.gate) else None
     if narrowed is not None:
-        gate_set = sets.gate  # GEOMEAN_GATE stays over the 19; n shows how many are there
-        verdict: qor_table.Verdict | None = qor_table.narrowed_verdict(narrowed)
+        gate_set = sets.gate  # GEOMEAN_GATE stays over the gate set; n shows how many are there
+        verdict: qor_table.Verdict | None = qor_table.narrowed_verdict(narrowed, len(sets.gate))
     else:
         verdict = qor_table.gate(qor_table.GateInputs(
             runs=runs, bands=bands, gate_set=gate_set, explanations=explanations,
@@ -1798,7 +1799,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--leg", required=True, metavar="L[,L...]",
                      help="P, O, Oprime (O'), Pprime (P'), R, Oprov")
     run.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
-                     help="gate, extra, smoke")
+                     help="gate, extra, smoke, offload")
     run.add_argument("--designs", default="", metavar="D[,D...]")
     run.add_argument("-j", dest="jobs", type=int, default=1, metavar="N")
     run.add_argument("--rerun", action="store_true", help="ignore the job cache")
@@ -1819,7 +1820,7 @@ def _parser() -> argparse.ArgumentParser:
     fcheck.add_argument("--leg", required=True, metavar="L[,L...]",
                         help="P, O, Oprime (O'), Pprime (P'), R, Oprov")
     fcheck.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
-                        help="gate, extra, smoke")
+                        help="gate, extra, smoke, offload")
     fcheck.add_argument("--designs", default="", metavar="D[,D...]")
     fcheck.add_argument("--xl", action="store_true",
                         help="the 9 GiB slice, for capped --designs only (the controller's)")
@@ -1828,7 +1829,7 @@ def _parser() -> argparse.ArgumentParser:
     equiv = sub.add_parser("equiv", parents=[common],
                            help="equiv-check before and after abc, O' against O (heavy)")
     equiv.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
-                       help="gate, extra, smoke")
+                       help="gate, extra, smoke, offload")
     equiv.add_argument("--designs", default="", metavar="D[,D...]")
     equiv.add_argument("--resume", action="store_true",
                        help="skip jobs that already hold a measured verdict (exit-run)")
@@ -1836,7 +1837,7 @@ def _parser() -> argparse.ArgumentParser:
                            help="the O front end again, SHA-256 against the first run (heavy)")
     rerun.add_argument("--leg", default="O", choices=("O",), metavar="O")
     rerun.add_argument("--set", dest="sets", default="", metavar="S[,S...]",
-                       help="gate, extra, smoke")
+                       help="gate, extra, smoke, offload")
     rerun.add_argument("--designs", default="", metavar="D[,D...]")
     rerun.add_argument("--resume", action="store_true",
                        help="skip jobs that already hold a measured verdict (exit-run)")
@@ -1869,7 +1870,7 @@ def _parser() -> argparse.ArgumentParser:
                        help="a key per leg (default: the leg's latest)")
     table.add_argument("--label", required=True, metavar="TEXT")
     table.add_argument("--set", dest="sets", default=DEFAULT_TABLE_SETS, metavar="S[,S...]",
-                       help="gate, extra, smoke (default gate,extra)")
+                       help="gate, extra, smoke, offload (default gate,extra)")
     table.add_argument("--seeds", default="", metavar="N[,N...]",
                        help="VPR seeds of O and P to show beside seed 1 (spec §6.3), e.g. 2,3")
     gate = sub.add_parser("gate", parents=[common], help="print a table's verdict")

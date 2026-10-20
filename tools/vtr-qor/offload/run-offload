@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# run-offload: the runs PHASE3 decision 54 ships out of the 12-core, 23 GiB WSL machine, for a
+# bigger one. See README.md in this directory (prerequisites, outputs, how to send results back).
+#
+# Usage: tools/vtr-qor/offload/run-offload [--dry-run] [--no-xl] STEP...
+#   STEP: check   prerequisites only (read-only)
+#         vtr     M2/M3 legs (P, O', P', O, with the Verilator check) on LU8PEEng, bgm, mcml,
+#                 LU32PEEng, then their table (decision 54; group B only, no rerun-check)
+#         abc     3D-8 H1 to H6 on mcml, then LU32PEEng
+#         lower   lower_gen_vs_yosys_long: 5,000 seeds of the --lower generator
+#         fuzz    fuzz_lower, 1 h (needs a -DODIN3_FUZZ=ON clang build in $FUZZ_BUILD)
+#         pack    tar the result directories into $OFFLOAD_OUT/offload-results-<date>.tar.gz
+#         all     check vtr abc lower fuzz pack
+#   --dry-run  print every command, run none
+#   --no-xl    run mcml and LU32PEEng in the 6 GiB heavy slice instead of the 9 GiB one
+#
+# Environment (defaults in brackets):
+#   VTR_ROOT      the VTR build at the pin 3c9a4d23b27d [required]
+#   YOSYS         Yosys 0.55 binary [yosys on PATH; VTR_ROOT/build/bin/yosys if that is 0.55]
+#   REPO          this repository [the script's own]
+#   BUILD         a release build of REPO (odin3, bench_abc, third_party/abc/abc) [REPO/build/release]
+#   FUZZ_BUILD    a -DODIN3_FUZZ=ON clang build with fuzz_lower [REPO/build/fuzz]
+#   GOLDEN        the Parmys goldens, k6_frac vtr/ directory
+#                 [~/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/vtr]
+#   ODIN3_QOR_DIR vtr-qor's work tree; vtr-qor requires it under ~/odin3-ws/work or
+#                 /tmp/claude-1000 [~/odin3-ws/work/vtr-qor]
+#   OFFLOAD_OUT   this script's own work and logs [~/odin3-ws/work/offload]
+#
+# Every heavy command goes through tools/heavy-run (one heavy job at a time, 6 GiB slice; the
+# 9 GiB --xl slice for mcml and LU32PEEng). Output of each step goes to $OFFLOAD_OUT/logs/<step>.log,
+# redirected here in the outer shell (a heavy-run child must not be a pipeline). A failing step
+# does not stop the later ones; the exit status is 1 when any step failed.
+set -uo pipefail
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO=${REPO:-$(cd "$HERE/../../.." && pwd)}
+BUILD=${BUILD:-$REPO/build/release}
+FUZZ_BUILD=${FUZZ_BUILD:-$REPO/build/fuzz}
+GOLDEN=${GOLDEN:-$HOME/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/vtr}
+export ODIN3_QOR_DIR=${ODIN3_QOR_DIR:-$HOME/odin3-ws/work/vtr-qor}
+OFFLOAD_OUT=${OFFLOAD_OUT:-$HOME/odin3-ws/work/offload}
+DATE=$(date +%Y%m%d)
+VQ=$REPO/tools/vtr-qor/vtr-qor
+ARCH_XML=vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
+
+dry=0
+xl=1
+steps=()
+for a in "$@"; do
+    case $a in
+        --dry-run) dry=1 ;;
+        --no-xl) xl=0 ;;
+        -h | --help) sed -n '2,/^set -uo/p' "$0" | sed '$d;s/^# \{0,1\}//'; exit 0 ;;
+        check | vtr | abc | lower | fuzz | pack) steps+=("$a") ;;
+        all) steps+=(check vtr abc lower fuzz pack) ;;
+        *) echo "run-offload: unknown argument '$a' (see --help)" >&2; exit 2 ;;
+    esac
+done
+if [[ ${#steps[@]} -eq 0 ]]; then
+    echo "run-offload: no step given (check vtr abc lower fuzz pack all)" >&2
+    exit 2
+fi
+
+fail=0
+mkdir -p "$OFFLOAD_OUT/logs"
+
+# yosys: the YOSYS variable, else PATH, else VTR's own build; it must say 0.55.
+find_yosys() {
+    local y
+    for y in "${YOSYS:-}" "$(command -v yosys || true)" "${VTR_ROOT:-/nonexistent}/build/bin/yosys"; do
+        if [[ -n $y && -x $y ]] && "$y" -V 2>/dev/null | grep -q 'Yosys 0\.55'; then
+            echo "$y"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# run LOGNAME CMD...: echo the command, run it with output to the step's log, record a failure.
+run() {
+    local name=$1
+    shift
+    echo "+ $* > $OFFLOAD_OUT/logs/$name.log"
+    [[ $dry -eq 1 ]] && return 0
+    "$@" >"$OFFLOAD_OUT/logs/$name.log" 2>&1
+    local rc=$?
+    echo "  $name: exit $rc"
+    [[ $rc -ne 0 ]] && fail=1
+    return 0
+}
+
+step_check() {
+    local bad=0 y
+    ok() { echo "ok    $*"; }
+    no() { echo "FAIL  $*"; bad=1; }
+    [[ -n ${VTR_ROOT:-} && -x ${VTR_ROOT:-}/vpr/vpr ]] && ok "VTR_ROOT $VTR_ROOT (vpr)" || no "VTR_ROOT with a built vpr/vpr"
+    [[ -f ${VTR_ROOT:-/nonexistent}/$ARCH_XML ]] && ok "k6_frac arch" || no "$ARCH_XML under VTR_ROOT"
+    git -C "${VTR_ROOT:-/nonexistent}" rev-parse HEAD 2>/dev/null | grep -q '^3c9a4d23b27d' \
+        && ok "VTR at the pin 3c9a4d23b27d" || no "VTR checkout at commit 3c9a4d23b27d (vtr-qor doctor says more)"
+    y=$(find_yosys) && ok "yosys 0.55: $y" || no "Yosys 0.55 (YOSYS=...)"
+    for f in "$BUILD/odin3" "$BUILD/bench_abc" "$BUILD/third_party/abc/abc"; do
+        [[ -x $f ]] && ok "$f" || no "$f (cmake --preset release && cmake --build --preset release)"
+    done
+    for d in LU8PEEng bgm mcml LU32PEEng; do
+        [[ -s $GOLDEN/$d/$d.parmys.blif ]] && ok "golden $d" || no "golden $GOLDEN/$d/$d.parmys.blif"
+    done
+    command -v systemd-run >/dev/null && systemctl --user show-environment >/dev/null 2>&1 \
+        && ok "systemd --user (heavy-run slices)" || no "a running systemd --user manager (tools/heavy-run)"
+    [[ -d /tmp/claude-1000 ]] && ok "/tmp/claude-1000 (heavy-run lock dir)" || no "mkdir -p /tmp/claude-1000"
+    command -v verilator >/dev/null && ok "verilator" || no "verilator (the fcheck)"
+    echo "info  MemAvailable $(awk '/MemAvailable/ {printf "%.1f GiB", $2/1048576}' /proc/meminfo), $(nproc) cores"
+    echo "info  ODIN3_QOR_DIR=$ODIN3_QOR_DIR (free: $(df -BG --output=avail "$(dirname "$ODIN3_QOR_DIR")" 2>/dev/null | tail -1 | tr -d ' '))"
+    [[ $dry -eq 1 ]] && return 0
+    [[ $bad -ne 0 ]] && fail=1
+    "$VQ" doctor >"$OFFLOAD_OUT/logs/doctor.log" 2>&1 || { echo "FAIL  vtr-qor doctor (see $OFFLOAD_OUT/logs/doctor.log)"; fail=1; }
+    return 0
+}
+
+# The M2/M3 legs of decision 54 on the four offload designs: P (Parmys), O' (the pre-ABC netlist
+# through VTR's ABC), P' (Parmys's BLIF through Odin III's abc) and O (Odin III alone), each with
+# the Verilator check and the kept netlists (qor_exit step 1). LU8PEEng and bgm in the 6 GiB
+# slice; mcml and LU32PEEng in the 9 GiB slice unless --no-xl. Smallest first.
+step_vtr() {
+    local legs=P,Oprime,Pprime,O label=offload-$DATE
+    export ODIN3_HEAVY_OK=1 VTR_ROOT
+    run vtr-small "$VQ" run --leg "$legs" --designs LU8PEEng,bgm --fcheck --keep-netlists
+    if [[ $xl -eq 1 ]]; then
+        export ODIN3_HEAVY_XL_OK=1
+        run vtr-xl "$VQ" run --leg "$legs" --designs mcml,LU32PEEng --xl --fcheck --keep-netlists
+    else
+        run vtr-xl "$VQ" run --leg "$legs" --designs mcml,LU32PEEng --fcheck --keep-netlists
+    fi
+    # A P job whose check was capped or not reached (qor_exit step 2).
+    run vtr-fcheck-p "$VQ" fcheck --leg P --set offload --resume
+    # The table of the four (not the gate: decision 3's gate is the local 15; the rows are
+    # non-gating here and the table says "not gated").
+    run vtr-table "$VQ" table --legs "$legs" --set offload --label "$label"
+}
+
+# 3D-8 H1 to H6 (the 3D-8 report's last section), mcml then LU32PEEng. H1: BLIF exchange, abc and
+# equiv steps. H2: bench_abc against the ABC executable. H3: H1's abc step again, then compare.
+# H4: AIG exchange, abc and equiv. H5: in-memory bench_abc. H6: H4's abc step again, then cmp.
+step_abc() {
+    local d R=$BUILD W=$OFFLOAD_OUT/abc
+    local -a eq=(--odin3 "$R/odin3" --equiv-check "$REPO/tools/equiv-check/equiv-check" --lut 6)
+    local -a hr=(env ODIN3_HEAVY_OK=1 "ODIN3_ABC=$R/third_party/abc/abc" ODIN3_REQUIRE_ABC=1 "$REPO/tools/heavy-run" timeout 3h)
+    local ae="$REPO/tools/abc-check/abc_equiv.py"
+    for d in mcml LU32PEEng; do
+        local g=$GOLDEN/$d/$d.parmys.blif
+        run "abc-$d-h1-abc" "${hr[@]}" python3 -I "$ae" --step abc --via-blif "$W/h1/$d/x" --keep "$W/h1/$d" "${eq[@]}" "$g"
+        run "abc-$d-h1-equiv" "${hr[@]}" python3 -I "$ae" --step equiv --timeout 7200 --via-blif "$W/h1/$d/x" --keep "$W/h1/$d" "${eq[@]}" "$g"
+        run "abc-$d-h2" "${hr[@]}" "$R/bench_abc" --one "$g" --lut 6 --header --via-blif "$W/h2/$d" --exe "$R/third_party/abc/abc"
+        run "abc-$d-h3-abc" "${hr[@]}" python3 -I "$ae" --step abc --via-blif "$W/h3/$d/x" --keep "$W/h3/$d" "${eq[@]}" "$g"
+        run "abc-$d-h4-abc" "${hr[@]}" python3 -I "$ae" --step abc --exchange aig --keep "$W/h4/$d" "${eq[@]}" "$g"
+        run "abc-$d-h4-equiv" "${hr[@]}" python3 -I "$ae" --step equiv --timeout 7200 --exchange aig --keep "$W/h4/$d" "${eq[@]}" "$g"
+        run "abc-$d-h5" "${hr[@]}" env ODIN3_ABC_EXCHANGE=aig "$R/bench_abc" --one "$g" --lut 6 --header
+        run "abc-$d-h6-abc" "${hr[@]}" python3 -I "$ae" --step abc --exchange aig --keep "$W/h6/$d" "${eq[@]}" "$g"
+        if [[ $dry -eq 0 ]]; then
+            # H3 against H1: after.blif and abc0.in.blif byte-equal, abc0.cmd equal up to the
+            # directory name, abc0.out.blif equal without ABC's dated '# Benchmark' line.
+            {
+                local a=$W/h1/$d b=$W/h3/$d
+                cmp "$a/after.blif" "$b/after.blif" && echo "h3: after.blif same"
+                cmp "$a/x/abc0.in.blif" "$b/x/abc0.in.blif" && echo "h3: abc0.in.blif same"
+                diff <(sed "s#/h1/#/h3/#g" "$a/x/abc0.cmd") "$b/x/abc0.cmd" && echo "h3: abc0.cmd same"
+                diff <(grep -v '^# Benchmark ' "$a/x/abc0.out.blif") <(grep -v '^# Benchmark ' "$b/x/abc0.out.blif") && echo "h3: abc0.out.blif same"
+                # H6 against H4.
+                cmp "$W/h4/$d/after.blif" "$W/h6/$d/after.blif" && echo "h6: after.blif same"
+            } >"$OFFLOAD_OUT/logs/abc-$d-compare.log" 2>&1 || { echo "  abc-$d-compare: DIFFERS (see log)"; fail=1; }
+        else
+            echo "+ compare h1/h3 and h4/h6 for $d (cmp, diff) > $OFFLOAD_OUT/logs/abc-$d-compare.log"
+        fi
+    done
+}
+
+# lower_gen_vs_yosys_long (CMakeLists.txt): 5,000 seeds, equivalence the criterion, tier-T
+# histogram differences only reported.
+step_lower() {
+    local y
+    if ! y=$(find_yosys); then
+        if [[ $dry -eq 1 ]]; then
+            y=yosys
+        else
+            echo "run-offload: lower: Yosys 0.55 not found (YOSYS=...)" >&2
+            fail=1
+            return 0
+        fi
+    fi
+    run lower-gen-long env ODIN3_HEAVY_OK=1 "$REPO/tools/heavy-run" \
+        "$REPO/tools/lower-check/lower-gen-diff" --odin3 "$BUILD/odin3" --yosys "$y" --mem-cap 3G \
+        --expect "$REPO/tests/lower/gen_diff_expect.txt" --seeds 1..5000 --min-compared 4500 \
+        --tier-t report --work "$OFFLOAD_OUT/lower_gen_long_work"
+}
+
+# fuzz_lower, capped at 1 h (decision 54): libFuzzer's -max_total_time=3600; `timeout 90m` is the
+# backstop. Needs the clang -DODIN3_FUZZ=ON build (cmake --preset fuzz, if the repo has one, or
+# -DCMAKE_C_COMPILER=clang -DODIN3_FUZZ=ON).
+step_fuzz() {
+    local corpus=$OFFLOAD_OUT/fuzz_lower_corpus
+    mkdir -p "$corpus"
+    run fuzz-lower env ODIN3_HEAVY_OK=1 "$REPO/tools/heavy-run" timeout 90m "$FUZZ_BUILD/fuzz_lower" \
+        -max_total_time=3600 -timeout=30 -rss_limit_mb=2048 -max_len=64 -print_funcs=0 \
+        -print_final_stats=1 "$corpus"
+}
+
+# One tarball: the four designs' job directories (status, metrics.json, job.json, kept logs,
+# kept netlists), the table, harness.log, and this script's logs. `latest` files are left out so
+# they cannot overwrite the receiving machine's; planned.json stays.
+step_pack() {
+    local tarball=$OFFLOAD_OUT/offload-results-$DATE.tar.gz
+    echo "+ tar czf $tarball ($ODIN3_QOR_DIR minus latest, $OFFLOAD_OUT/logs, abc/*/*/after.blif, lower and fuzz logs)"
+    [[ $dry -eq 1 ]] && return 0
+    local -a items=()
+    (cd "$ODIN3_QOR_DIR" && tar czf "$OFFLOAD_OUT/vtr-qor-$DATE.tar.gz" --exclude=latest .) || fail=1
+    (cd "$OFFLOAD_OUT" && find abc -name 'after.blif' -o -name 'abc*.cmd' -o -name 'abc*.out.blif' -o -name 'bench*' 2>/dev/null >"$OFFLOAD_OUT/abc-files.txt")
+    items=(vtr-qor-"$DATE".tar.gz logs abc-files.txt)
+    [[ -s $OFFLOAD_OUT/abc-files.txt ]] && while read -r f; do items+=("$f"); done <"$OFFLOAD_OUT/abc-files.txt"
+    [[ -d $OFFLOAD_OUT/lower_gen_long_work ]] && items+=(lower_gen_long_work)
+    (cd "$OFFLOAD_OUT" && tar czf "$tarball" "${items[@]}") || { fail=1; return 0; }
+    echo "wrote $tarball ($(du -h "$tarball" | cut -f1)); sha256 $(sha256sum "$tarball" | cut -d' ' -f1)"
+}
+
+for s in "${steps[@]}"; do
+    echo "== $s"
+    "step_$s"
+done
+exit "$fail"
