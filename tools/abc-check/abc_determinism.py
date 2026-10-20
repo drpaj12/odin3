@@ -13,7 +13,9 @@ repeats; the default is ``a``)::
                           write_blif OUT
        compare ``write_blif`` and, with ``--via-blif``, every ``abc<r>.in.blif``, ``.cmd`` and
        ``.out.blif`` of V (V is the same path in both runs, and run 1's files are moved aside
-       first).  A ``.log`` and ``--log`` are never compared (they hold times).
+       first).  A ``.log`` and ``--log`` are never compared (they hold times), and neither is the
+       ``# Benchmark "<name>" written by ABC on <date>`` line that ABC puts at the head of
+       ``.out.blif`` (a deviation from "byte for byte": it holds the wall-clock date).
     b  one process: the first model of X three times (``<m>``, ``<m>__o3det2``, ``<m>__o3det3``)
        and its other models once, mapped by one ``abc`` call, so the engine opens three sessions
        in one process; the three copies must come out the same, for the default script and for
@@ -61,6 +63,7 @@ MODES = ("a", "b", "c", "d")
 SLEEP_SECONDS = 60  # §13.8 (c)
 COPIES = 3
 FRAIG_SCRIPT = "strash\nfraig\nif -K {K}\n"
+STAMP_HEAD, STAMP_MID = b"# Benchmark ", b" written by ABC on "
 EXCHANGE_FILES = re.compile(r"^abc\d+\.(in\.blif|cmd|out\.blif)$")  # never a .log
 
 
@@ -124,10 +127,18 @@ def exchange_files(directory: Path) -> dict[str, Path]:
     return {p.name: p for p in sorted(directory.iterdir()) if EXCHANGE_FILES.match(p.name)}
 
 
+def comparable(path: Path) -> bytes:
+    """The bytes of a file, without ABC's own time stamp: ``write_hie`` heads ``.out.blif`` with
+    ``# Benchmark "<name>" written by ABC on <date>``, which differs between any two runs."""
+    kept = [line for line in path.read_bytes().splitlines(keepends=True)
+            if not (line.startswith(STAMP_HEAD) and STAMP_MID in line)]
+    return b"".join(kept)
+
+
 def same_bytes(left: Path | None, right: Path | None) -> bool:
     if left is None or right is None:
         return left is right
-    return left.read_bytes() == right.read_bytes()
+    return comparable(left) == comparable(right)
 
 
 def first_difference(runs: tuple[Path, Path], files: tuple[Path, Path]) -> str | None:

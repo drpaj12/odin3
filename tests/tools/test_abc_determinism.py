@@ -20,7 +20,8 @@ from . import helpers
 # models comes out with three equal models) and, with --via-blif D, writes D/abc0.in.blif, .cmd
 # (which names D), .out.blif and .log.  The design's name says what goes wrong:
 #   rand: write_blif differs between runs      cmd: abc0.cmd differs between runs
-#   logonly: only abc0.log differs (not compared)    third: the third model of a copy differs
+#   logonly: only abc0.log and the ABC time stamp of abc0.out.blif differ (not compared)
+#   outbody: abc0.out.blif differs after its time stamp    third: the third model of a copy differs
 #   debug: the Debug binary (named odin3-debug) writes another write_blif
 #   fail: odin3 exits 1
 FAKE_ODIN3 = """#!{python}
@@ -54,7 +55,9 @@ if via:
     open(base + "/abc0.in.blif", "w").write("in\\n")
     open(base + "/abc0.cmd", "w").write("read " + base + "/abc0.in.blif\\n"
                                        + ("# " + tick + "\\n" if "cmd" in name else ""))
-    open(base + "/abc0.out.blif", "w").write("out\\n")
+    stamp = "# Benchmark \\"o3abc\\" written by ABC on " + tick + "\\n"
+    open(base + "/abc0.out.blif", "w").write(stamp + "out\\n"
+                                            + ("# " + tick + "\\n" if "outbody" in name else ""))
     open(base + "/abc0.log", "w").write("time " + tick + "\\n")
 open(target, "w", encoding="utf-8").write(text)
 """
@@ -124,6 +127,12 @@ class AbcDeterminismTest(unittest.TestCase):
         code, out, _ = self.run_tool("--via-blif", cmd)
         self.assertEqual(code, 1)
         self.assertIn(f"{cmd} differs a:abc0.cmd", out)
+
+    def test_a_different_out_blif_body_differs(self) -> None:
+        design = self.design("d/outbody.blif")
+        code, out, _ = self.run_tool("--via-blif", design)
+        self.assertEqual(code, 1)
+        self.assertIn(f"{design} differs a:abc0.out.blif", out)
 
     def test_the_via_blif_directory_is_the_same_path_in_both_runs(self) -> None:
         design = self.design("d/ok.blif")
