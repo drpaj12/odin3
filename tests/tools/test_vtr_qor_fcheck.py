@@ -161,6 +161,129 @@ class WrapperTest(unittest.TestCase):
         self.assertEqual(done.returncode, 2)
 
 
+LATCH_V = ("module lat(input a, input en, output reg q);\n  always @(a or en) if (en) q = a;\n"
+           "endmodule\n")
+SENS_V = ("module sens(input a, input b, output reg q);\n  always @(a) q = a & b;\n"
+          "endmodule\n")
+CLEAN_V = ("module clean(input a, input b, output reg q);\n  always @* q = a & b;\n"
+           "endmodule\n")
+ODIN_SENS = (
+    "odin3: info: read_verilog: 1 units\n"
+    "odin3: warning: sens.v:2:1: warning: incomplete sensitivity list: 'b' is read but not "
+    "listed; the block is built as @*\n"
+    "odin3: warning: sens.v:9:1: warning: incomplete sensitivity list: 'c' is read but not "
+    "listed; the block is built as @*\n"
+    "odin3: warning: sens.v:11:1: warning: incomplete sensitivity list: 'b' is read but not "
+    "listed; the block is built as @*\n")
+
+
+def _fake_tools(latches: int, odin_out: str):  # type: ignore[no-untyped-def]
+    """A ``run`` stand-in: Yosys writes ``<n> objects.`` where ``tee -o`` points, Odin III prints
+    ``odin_out``."""
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        if Path(argv[0]).name == "yosys":
+            script = argv[argv.index("-p") + 1]
+            target = re.search(r"tee -o (\S+) ", script)
+            assert target is not None
+            Path(target.group(1)).write_text(f"{latches} objects.\n", encoding="utf-8")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, odin_out, "")
+
+    return run, calls
+
+
+class PrecheckTest(unittest.TestCase):
+    """H1: an RTL that infers latches (the flow reads it with ``--nolatches``) or has an
+    incomplete sensitivity list is ``UNTESTED`` before any simulation."""
+
+    def test_latches_are_a_reason_with_their_count(self) -> None:
+        run, calls = _fake_tools(109, "")
+        reasons = qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), None, run)
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("109 latches", reasons[0])
+        self.assertIn("nolatches", reasons[0])
+        self.assertEqual(len(calls), 1)  # no Odin III given: only the Yosys read
+
+    def test_sensitivity_signals_are_listed_once_each(self) -> None:
+        run, _ = _fake_tools(0, ODIN_SENS)
+        reasons = qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run)
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("incomplete sensitivity list", reasons[0])
+        self.assertIn("b, c", reasons[0])
+
+    def test_both_reasons(self) -> None:
+        run, _ = _fake_tools(2, ODIN_SENS)
+        reasons = qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run)
+        self.assertEqual(len(reasons), 2)
+
+    def test_a_clean_rtl_has_no_reason(self) -> None:
+        run, calls = _fake_tools(0, "odin3: info: read_verilog: 1 units\n")
+        self.assertEqual(
+            qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run), [])
+        self.assertEqual(len(calls), 2)
+
+    def test_a_failing_tool_is_not_a_verdict(self) -> None:
+        """A Yosys that cannot read the RTL says nothing: the check does not hide the design."""
+        def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(argv, 1, "", "ERROR")
+        self.assertEqual(
+            qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run), [])
+
+    def test_render_is_an_untested_line_the_caller_reads(self) -> None:
+        text = qor_fcheck_run.render_precheck(["RTL infers 3 latches"])
+        self.assertEqual(qor_legs.fcheck_verdict(3, False, text), "untested")
+        self.assertNotIn("MISMATCH", text)
+
+    def test_wrapper_stops_with_untested_before_the_checker_runs(self) -> None:
+        HEAVY_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as tmp:
+            vdir = Path(tmp) / "verilator_check"
+            vdir.mkdir()
+            (vdir / "blif_to_verilog.py").write_text(
+                "def pack_bit_blasted_top_ports(text):\n    return text\n", encoding="utf-8")
+            (vdir / "run_random_check.py").write_text(
+                "print('CHECKER RAN')\n", encoding="utf-8")
+            yosys = Path(tmp) / "yosys"  # a Yosys that finds 4 latches
+            yosys.write_text(
+                "#!/bin/sh\nout=$(echo \"$3\" | sed 's/.*tee -o \\([^ ]*\\) .*/\\1/')\n"
+                "echo '4 objects.' > \"$out\"\n", encoding="utf-8")
+            yosys.chmod(0o755)
+            rtl = Path(tmp) / "a.v"
+            rtl.write_text(LATCH_V, encoding="utf-8")
+            run = [sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER),
+                   str(vdir / "run_random_check.py"), "--rtl", str(rtl), "--yosys", str(yosys)]
+            done = subprocess.run(run, capture_output=True, text=True, check=False)
+            self.assertEqual(done.returncode, 3, done.stderr)
+            self.assertIn("4 latches", done.stdout)
+            self.assertNotIn("CHECKER RAN", done.stdout)
+            self.assertEqual(qor_legs.fcheck_verdict(3, False, done.stdout), "untested")
+
+    def _real(self) -> tuple[Path, Path]:
+        home = Path.home() / "odin3-ws"
+        yosys = home / "external" / "vtr-verilog-to-routing" / "build" / "bin" / "yosys"
+        odin3 = home / "work" / "odin3-pmbase" / "build" / "release" / "odin3"
+        if not yosys.is_file() or not odin3.is_file():
+            self.skipTest("no Yosys / odin3 build at the controller's usual paths")
+        return yosys, odin3
+
+    def test_real_tools_latch_sensitivity_and_clean(self) -> None:
+        yosys, odin3 = self._real()
+        with tempfile.TemporaryDirectory() as tmp:
+            got = {}
+            for name, text in (("lat", LATCH_V), ("sens", SENS_V), ("clean", CLEAN_V)):
+                path = Path(tmp) / f"{name}.v"
+                path.write_text(text, encoding="utf-8")
+                got[name] = qor_fcheck_run.rtl_precheck(path, yosys, odin3)
+        self.assertEqual(len(got["lat"]), 1)
+        self.assertIn("1 latches", got["lat"][0])
+        self.assertEqual(len(got["sens"]), 1)
+        self.assertIn("listed: b)", got["sens"][0])
+        self.assertEqual(got["clean"], [])
+
+
 # The shape of VTR's generated testbench around what the wrapper edits (tb_generator.py).
 TB = """\
 // no $srandom (verilator pli); seed via +verilator+seed+N / $urandom.
@@ -309,6 +432,26 @@ class CompareRunsTest(unittest.TestCase):
         v = self.compare([vd((0, 2), (0, 0))], [vd((0, 2), (0, 0))], [vd((2, 2), (0, 0))])
         self.assertEqual((v.mismatched, v.x_dependent), (0, 1))
         self.assertEqual(v.x_lines, ["XDEPEND vec=0 port=q rtl=0x0 synth=010"])
+
+    def test_netlist_bit_that_varies_across_inits_is_x_not_a_mismatch(self) -> None:
+        # H2: RTL stable at 0 in every start, the netlist bit 0 is 1 in run 0 and 0 in run 1
+        v = self.compare([vd((0, 1), (0, 0))], [vd((0, 0), (0, 0))], [vd((0, 1), (0, 0))])
+        self.assertEqual((v.matched, v.mismatched, v.x_dependent), (0, 0, 1))
+        self.assertEqual(v.x_lines, ["XDEPEND vec=0 port=q rtl=000 synth=00x"])
+        self.assertFalse(v.passed)
+
+    def test_netlist_bit_stable_across_inits_is_still_a_mismatch(self) -> None:
+        # the netlist's bit 1 varies (x) but bit 0 is a stable 1 against a stable RTL 0
+        v = self.compare([vd((0, 0b011), (0, 0))], [vd((0, 0b001), (0, 0))])
+        self.assertEqual((v.mismatched, v.x_dependent), (1, 0))
+        self.assertEqual(v.lines, ["MISMATCH vec=0 port=q rtl=000 synth=0x1"])
+
+    def test_netlist_variation_makes_only_its_own_vector_x(self) -> None:
+        # no vector is skipped: vector 0 varies, vector 1 does not and mismatches
+        run0 = [vd((0, 1), (0, 0)), vd((0, 1), (0, 0))]
+        run1 = [vd((0, 0), (0, 0)), vd((0, 1), (0, 0))]
+        v = self.compare(run0, run1)
+        self.assertEqual((v.mismatched, v.x_dependent, v.vectors), (1, 1, 2))
 
     def test_vector_numbers_and_other_lines(self) -> None:
         run = [vd((1, 1), (0, 0)), "tb clocks: clk\n", vd((1, 2), (1, 0)), vd((4, 4), (1, 1))]

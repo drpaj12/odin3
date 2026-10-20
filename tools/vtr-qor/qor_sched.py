@@ -1665,8 +1665,9 @@ def _fcheck_outcome(job: Job, cmd: Command, opts: RunOptions, scope: ScopeInfo) 
     capped = outcome.returncode != 0 and qor_heavy.oom_kills(scope) > oom_before
     verdict = qor_legs.fcheck_verdict(outcome.returncode, capped, _read_log(cmd.stdout))
     if verdict == "untested":
-        _emit(opts, f"{_label(job)}: fcheck untested (the RTL leaves the mismatching bits "
-                    f"undefined); see {cmd.stdout}")
+        found = re.search(r"^UNTESTED: .*$", _read_log(cmd.stdout), re.M)
+        _emit(opts, f"{_label(job)}: fcheck {found.group(0) if found else 'untested'}; "
+                    f"see {cmd.stdout}")
     if verdict == "error":
         _emit(opts, f"{_label(job)}: fcheck could not compare (exit {outcome.returncode}); "
                     f"see {cmd.stdout}")

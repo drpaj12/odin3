@@ -346,8 +346,9 @@ class GateTest(unittest.TestCase):
         # Odin III's own untested leg is never a pass and not a failure: INCOMPLETE
         untested = replace(table(), run("O", "sha", override={"fcheck": "untested"}))
         self.assertEqual(verdict(untested), Verdict(state="INCOMPLETE", violations=(
-            "gate: INCOMPLETE: sha O fcheck untested (the RTL leaves the mismatching bits "
-            "undefined); it cannot be judged",)))
+            "gate: INCOMPLETE: sha O fcheck untested (RTL latches or "
+            "incomplete sensitivity lists, or mismatches only on bits that depend on the "
+            "initial state: see fcheck.log); it cannot be judged",)))
         # a P-leg baseline defect (fail or untested) does not fail the gate when Odin III passes
         for baseline in ("fail", "untested"):
             p_bad = replace(table(), run("P", "sha", override={"fcheck": baseline}))

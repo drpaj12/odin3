@@ -995,6 +995,8 @@ class FcheckTest(RunnerTestBase):
             "--vectors", "50000", "--seed", "1", "--verilator-j", "2"])
         self.assertEqual((cmd.cwd, cmd.stdout), (ctx.job_dir, ctx.job_dir / "fcheck.log"))
         self.assertEqual(dict(cmd.env)["PATH"].split(":")[0], f"{self.vtr}/.venv/bin")
+        # the wrapper's RTL pre-check (H1) reads incomplete sensitivity lists with Odin III
+        self.assertEqual(dict(cmd.env)["QOR_FCHECK_ODIN3"], str(ctx.odin3))
 
     def test_fcheck_exit_mapping(self) -> None:
         for code, verdict in ((0, "pass"), (1, "fail"), (2, "error"), (3, "error"),
