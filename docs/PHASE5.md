@@ -178,7 +178,7 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
      unproven by Yosys and `lower` cannot take it; `$memrd`/`$memwr` have no RTLIL form (text legs only);
    - `lpm-check` keeps `noroundtrip altsyncram_soft.v` (the text fixpoint of X-9); `icells-check`
      covers that micro at the LPM level.
-10. **5.3 spec and plan** (agent defaults, 2026-10-20; Peter may override; spec
+10. **5.3 spec and plan** (Peter approved all ten recommendations, 2026-10-20; spec
     `docs/specs/2026-10-20-5.3-read-json-design.md` section 12 has the ten questions with
     recommendations; plan `docs/plans/2026-10-20-5.3-read-json-plan.md`). No IR, ABI or ADR change. In
     short: `read_json [--top] [--auto-blackbox]`, an iterative parser with limits (no recursion), a DOM
@@ -186,10 +186,11 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
     2 to 3, unregistered Yosys cell types are a located error (an implicit black box with a warning only
     under `--auto-blackbox`), no resize of widths, `$sop` is written as `$lut` so gen1 and gen2 are
     equivalent and not always `netlist-compare` identical, no public ABI entry, no `$mem_v2`.
-11. **5.4 spec and plan** (agent defaults, 2026-10-20; Peter may override; spec
+11. **5.4 spec and plan** (Peter approved all ten recommendations, 2026-10-20, including
+    question 1, the IR-13 amendment; spec
     `docs/specs/2026-10-20-5.4-hdl-locations-design.md` section 12 has the ten questions with
-    recommendations; plan `docs/plans/2026-10-20-5.4-hdl-locations-plan.md`). **Question 1 needs
-    Peter's confirmation before Task 3:** readers restore a location as one `DERIVED` record (parents:
+    recommendations; plan `docs/plans/2026-10-20-5.4-hdl-locations-plan.md`). **Question 1 (approved by
+    Peter 2026-10-20; amend IR-13 in `docs/IR.md` in Task 3):** readers restore a location as one `DERIVED` record (parents:
     the restored HDL `SOURCE`, then the reader's own `IMPORTED`), a one-sentence amendment of IR-13;
     fallback is one `SOURCE` record. In short: writers print only `SOURCE` leaves (an `IMPORTED` line
     never comes back as HDL), `src` in Yosys form with end span and up to 8 locations, Verilog `(* src *)`
