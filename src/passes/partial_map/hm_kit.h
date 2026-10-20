@@ -28,6 +28,7 @@
 #include "odin3/odin3.h"
 #include "passes/partial_map/hardmap.h"
 #include "passes/manager.h"
+#include "passes/partial_map/rules.h"
 #include "util/attr.h"
 #include "util/str.h"
 #include "util/vec.h"
@@ -55,6 +56,7 @@ typedef struct hm_ctx {
     odin3_design *design;
     odin3_module *module;
     odin3_hardmap_stats stats;
+    pm_rules rules;                      /* S-2: the numbers the rules read */
     odin3_celltype_id hard[HM_N_HARD];   /* found by hm_need; {0} until then */
     odin3_celltype_id glue[HM_N_GLUE];   /* found on first use */
     odin3_celltype_id konst[HM_N_CONST]; /* $_CONST0_, $_CONST1_, $_CONSTX_ */
@@ -173,11 +175,11 @@ odin3_status hm_map_mul(hm_ctx *hc, odin3_node_id src);
 odin3_status hm_map_adder(hm_ctx *hc, odin3_node_id src);
 
 /* The explicit-instance check of M-6 for node (a `multiply`): the type's shape (H-3), then WIDTH
- * above 36: OK, or the located error. */
+ * above the arch's multiplier width: OK, or the located error. */
 odin3_status hm_check_multiply(hm_ctx *hc, odin3_node_id node);
 
 /* The explicit `multiply` rule (M-6 as amended): treat src like the equivalent `$mul`, with a
- * warning; WIDTH 36 is left as it is. */
+ * warning; a WIDTH equal to the arch's is left as it is. */
 odin3_status hm_map_explicit(hm_ctx *hc, odin3_node_id src);
 
 /* The inferred-memory rule (mem.c, R-8..R-12): maps a `$mem` to RAM slices, merging the flip-flops
@@ -185,7 +187,7 @@ odin3_status hm_map_explicit(hm_ctx *hc, odin3_node_id src);
 odin3_status hm_map_mem(hm_ctx *hc, odin3_node_id src);
 
 /* The explicit RAM rule (ram.c, R-1..R-7): legalises a `single_port_ram` / `dual_port_ram`
- * instance to ADDR_WIDTH 15 and DATA_WIDTH 1 slices (depth split, width split, address padding)
+ * instance to ADDR_WIDTH rules.mem_depth and DATA_WIDTH 1 slices (depth split, width split, address padding)
  * or leaves it when it already has that shape. Any other node is left alone. */
 odin3_status hm_map_ram(hm_ctx *hc, odin3_node_id src);
 

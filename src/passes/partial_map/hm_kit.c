@@ -53,6 +53,7 @@ void hm_init(hm_ctx *hc, odin3_pass_ctx *pass, odin3_design *design) {
     memset(hc, 0, sizeof *hc);
     hc->pass = pass;
     hc->design = design;
+    hc->rules = pm_rules_k6_fixed();
     odin3_vec_init(&hc->made_nodes, sizeof(odin3_node_id));
     odin3_vec_init(&hc->made_nets, sizeof(odin3_net_id));
     odin3_vec_init(&hc->merged, sizeof(odin3_net_pair));

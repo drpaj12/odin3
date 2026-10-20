@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# identity: the k6 identity gate of `partial_map` (4.2 spec T-2). Tier 1: `hardmap` against
+# `partial_map` with the k6 tech library. Tier 2: `partial_map` with lib/vtr.o3lib against
+# `partial_map` with `read_arch` of the k6 XML. Tier 3: a baseline binary's `hardmap` against a
+# candidate binary's `partial_map`. Exit 0 every design identical, 1 a difference, 2 usage or tool
+# error, 3 a child crashed or timed out, 77 skipped (tier 2 without VTR_ROOT). See identity.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here/../hardmap-check:$here/../elab-check:$here/../exit-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/identity.py" "$@"

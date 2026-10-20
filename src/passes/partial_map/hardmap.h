@@ -14,9 +14,6 @@
 
 #include <stdint.h>
 
-/* The width of the arch's multiplier (spec H-1: Parmys's fixed_hard_multiplier size). */
-#define ODIN3_HARDMAP_MUL_WIDTH 36U
-
 /* What a run did, for the INFO line of H-10. */
 typedef struct odin3_hardmap_stats {
     uint64_t multiply;  /* `multiply` blocks made */

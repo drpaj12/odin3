@@ -194,8 +194,8 @@ static odin3_status transact(hm_ctx *hc, odin3_node_id src, const add_shape *sh)
 
 odin3_status hm_map_adder(hm_ctx *hc, odin3_node_id src) {
     add_shape sh = shape_of(hc, src);
-    if (sh.n == 0 || sh.y == 0) {
-        return ODIN3_OK; /* a degenerate cell (A-1): left alone */
+    if (sh.n == 0 || sh.y == 0 || sh.n < hc->rules.min_add) {
+        return ODIN3_OK; /* a degenerate cell (A-1) or below --min-add: left alone */
     }
     if (sh.y > sh.n + 1) {
         char label[ODIN3_LOG_BUF / 4];

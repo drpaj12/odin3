@@ -1,0 +1,255 @@
+"""identity: the k6 identity gate of ``partial_map`` (4.2 spec T-2, plan Tasks 3 and 4).
+
+    identity --tier 1 [--odin3 BIN] [--list FILE]... [DESIGN.v[:TOP]]...
+    identity --tier 2 [--odin3 BIN] [--arch-xml XML] [--list FILE]...
+    identity --tier 3 --baseline BIN --candidate BIN [--list FILE]... [--vtr-list FILE
+             --vtr-root DIR [--golden-root DIR]]
+
+Runs Odin III's Phase 3 script up to and including ``lower; opt -fast; compact``
+(tools/hardmap-check/phase3_pre_abc.script) twice per design and compares what ``write_blif
+--vtr`` and plain ``write_blif`` write, byte for byte (lines starting with ``#``, the version
+header, are ignored):
+
+* tier 1 (CI): ``hardmap`` against ``partial_map``, both with ``read_techlib lib/vtr.o3lib``;
+* tier 2 (local, needs VTR_ROOT): ``partial_map`` with the tech library against ``partial_map``
+  with ``read_arch`` of the k6 XML;
+* tier 3 (the controller, heavy): ``hardmap`` of the baseline binary against ``partial_map`` of the
+  candidate binary, over the same designs (the micros of ``--list`` and the 19 of ``--vtr-list``).
+
+A list line is ``path [top]`` (relative to the repository root); a ``--vtr-list`` line is a design
+name under ``--vtr-root``, its top the first ``.model`` of its Parmys golden under
+``--golden-root``. Both runs failing with the same exit status is ``same-failure`` (counted, not a
+difference). Exit codes: 0 no difference and at least ``--min-ok`` designs written the same BLIF;
+1 a difference or too few; 2 usage or tool error; 3 a child crashed or timed out; 77 skipped.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import tempfile
+from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+import exit_check
+import hardmap_diff as hd
+
+TOOL = "identity"
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parents[1]
+EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_HARD, EXIT_SKIP = 0, 1, 2, 3, 77
+K6_ARCH = "vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml"
+DEFAULT_INPUTS = REPO / "tests" / "partial_map" / "identity_inputs.txt"
+OLD_NAME, NEW_NAME = "hardmap", "partial_map"
+
+
+@dataclass(frozen=True)
+class Design:
+    key: str
+    path: Path
+    top: str | None
+
+
+@dataclass(frozen=True)
+class Leg:
+    """One run: a binary, the pass name it runs and the command that loads the library."""
+
+    odin3: str
+    pass_name: str
+    load: str
+
+
+@dataclass(frozen=True)
+class Outcome:
+    rc: int
+    vtr: list[str]
+    plain: list[str]
+    tail: str
+
+
+def read_list(path: Path) -> list[Design]:
+    """The designs of a ``path [top]`` list (``#`` comments), paths relative to the repo root."""
+    designs: list[Design] = []
+    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        words = raw.split("#", 1)[0].split()
+        if not words:
+            continue
+        if len(words) > 2:
+            raise hd.ToolError(f"{path}:{number}: expected 'path [top]'")
+        design = REPO / words[0] if not Path(words[0]).is_absolute() else Path(words[0])
+        designs.append(Design(words[0], design, words[1] if len(words) == 2 else None))
+    return designs
+
+
+def read_vtr(path: Path, root: Path, golden_root: Path | None) -> list[Design]:
+    designs: list[Design] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        name = raw.split("#", 1)[0].strip()
+        if not name:
+            continue
+        source = root / f"{name}.v"
+        top = None
+        if golden_root is not None:
+            golden = Path(exit_check.golden_path(golden_root, source))
+            top = hd.first_model(golden) if golden.is_file() else None
+        designs.append(Design(name, source, top))
+    return designs
+
+
+def script_for(leg: Leg, design: Path, out: Path, plain: Path) -> str:
+    """The Phase 3 script of ``leg`` on ``design``; the BLIFs go to ``out`` and ``plain``."""
+    text = hd.script_text(hd.SCRIPT, hd.REPO / "lib" / "vtr.o3lib", design, out, hd.ADDER_LIB)
+    load = f"read_techlib {hd.REPO / 'lib' / 'vtr.o3lib'}"
+    if text.count(load) != 1 or text.count("; hardmap; ") != 1:
+        raise hd.ToolError("phase3_pre_abc.script no longer has one read_techlib and one hardmap")
+    text = text.replace(load, leg.load).replace("; hardmap; ", f"; {leg.pass_name}; ")
+    return f"{text}; write_blif {plain}"
+
+
+def body(path: Path) -> list[str]:
+    """The lines of a BLIF without the ``#`` header lines; empty when it was not written."""
+    if not path.is_file():
+        return []
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    return [ln for ln in lines if not ln.startswith("#")]
+
+
+def run_leg(leg: Leg, design: Design, work: Path, timeout: float) -> Outcome:
+    out, plain = work / f"{leg.pass_name}.vtr.blif", work / f"{leg.pass_name}.plain.blif"
+    script = script_for(leg, design.path, out, plain)
+    argv = [leg.odin3, *(["--top", design.top] if design.top else []), "-p", script]
+    proc = hd.run_child(argv, timeout)
+    return Outcome(proc.returncode, body(out), body(plain), hd.tail(proc.stderr))
+
+
+def first_difference(left: list[str], right: list[str]) -> str:
+    for number, (a, b) in enumerate(zip(left, right, strict=False), 1):
+        if a != b:
+            return f"line {number}: {a!r} against {b!r}"
+    return f"{len(left)} lines against {len(right)}"
+
+
+def judge(first: Outcome, second: Outcome) -> tuple[str, str]:
+    """(class, detail): identical, same-failure or DIFFERENT."""
+    if first.rc != second.rc:
+        return "DIFFERENT", f"exit {first.rc} against {second.rc}: {first.tail} | {second.tail}"
+    if first.rc != 0:
+        return "same-failure", f"both exit {first.rc}: {first.tail}"
+    if first.vtr != second.vtr:
+        return "DIFFERENT", "write_blif --vtr: " + first_difference(first.vtr, second.vtr)
+    if first.plain != second.plain:
+        return "DIFFERENT", "write_blif: " + first_difference(first.plain, second.plain)
+    if not first.vtr or not first.plain:
+        return "DIFFERENT", "no BLIF written"
+    return "identical", f"{len(first.vtr)} + {len(first.plain)} lines"
+
+
+def legs_for(args: argparse.Namespace) -> tuple[Leg, Leg]:
+    lib = f"read_techlib {hd.REPO / 'lib' / 'vtr.o3lib'}"
+    if args.tier == 1:
+        return Leg(args.odin3, OLD_NAME, lib), Leg(args.odin3, NEW_NAME, lib)
+    if args.tier == 2:
+        return (Leg(args.odin3, NEW_NAME, lib),
+                Leg(args.odin3, NEW_NAME, f"read_arch {args.arch_xml}"))
+    return Leg(args.baseline, OLD_NAME, lib), Leg(args.candidate, NEW_NAME, lib)
+
+
+def compare(legs: tuple[Leg, Leg], design: Design, timeout: float) -> tuple[str, str]:
+    with tempfile.TemporaryDirectory(prefix="partial-map-identity.") as tmp:
+        work = Path(tmp)
+        runs = []
+        for number, leg in enumerate(legs):
+            leg_dir = work / str(number)
+            leg_dir.mkdir()
+            runs.append(run_leg(leg, design, leg_dir, timeout))
+        return judge(runs[0], runs[1])
+
+
+def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
+    ap = argparse.ArgumentParser(prog=TOOL, description=(__doc__ or "").split("\n\n")[0])
+    ap.add_argument("--tier", type=int, choices=(1, 2, 3), required=True)
+    ap.add_argument("--odin3", default=str(REPO / "build" / "release" / "odin3"))
+    ap.add_argument("--baseline", help="tier 3: the binary built from main")
+    ap.add_argument("--candidate", help="tier 3: the binary of the PR")
+    ap.add_argument("--arch-xml", help="tier 2: the k6 arch XML (default under $VTR_ROOT)")
+    ap.add_argument("--list", type=Path, action="append", default=[],
+                    help="a 'path [top]' list (default: tests/partial_map/identity_inputs.txt)")
+    ap.add_argument("--vtr-list", type=Path, help="tier 3: names of the VTR designs")
+    ap.add_argument("--vtr-root", type=Path, help="the directory holding <name>.v")
+    ap.add_argument("--golden-root", type=Path, help="Parmys goldens, for the tops of --vtr-list")
+    ap.add_argument("--min-ok", type=int, default=1,
+                    help="the least number of designs that must write the same BLIF")
+    ap.add_argument("--timeout", type=float, default=hd.DEFAULT_TIMEOUT)
+    ap.add_argument("designs", nargs="*", metavar="DESIGN.v[:TOP]")
+    return ap.parse_args(argv)
+
+
+def gather(args: argparse.Namespace) -> list[Design]:
+    designs: list[Design] = []
+    lists = args.list or ([DEFAULT_INPUTS] if not args.designs and not args.vtr_list else [])
+    for path in lists:
+        designs += read_list(path)
+    if args.vtr_list:
+        if args.vtr_root is None:
+            raise hd.ToolError("--vtr-list needs --vtr-root")
+        designs += read_vtr(args.vtr_list, args.vtr_root, args.golden_root)
+    for item in args.designs:
+        name, _, top = item.partition(":")
+        designs.append(Design(name, Path(name), top or None))
+    if not designs:
+        raise hd.ToolError("no designs")
+    return designs
+
+
+def prepare(args: argparse.Namespace) -> int | None:
+    """Checks the options of the tier; an exit code when the run cannot start."""
+    if args.tier == 3 and not (args.baseline and args.candidate):
+        raise hd.ToolError("tier 3 needs --baseline and --candidate")
+    if args.tier == 2:
+        root = os.environ.get("VTR_ROOT")
+        args.arch_xml = args.arch_xml or (str(Path(root) / K6_ARCH) if root else None)
+        if not args.arch_xml or not Path(args.arch_xml).is_file():
+            print(f"{TOOL}: skipped: tier 2 needs VTR_ROOT or --arch-xml", file=sys.stderr)
+            return EXIT_SKIP
+    return None
+
+
+def run_all(args: argparse.Namespace, designs: list[Design]) -> int:
+    legs = legs_for(args)
+    classes: Counter[str] = Counter()
+    code = EXIT_OK
+    for design in designs:
+        try:
+            cls, detail = compare(legs, design, args.timeout)
+        except hd.HardFailure as exc:
+            cls, detail, code = "HARD", str(exc), EXIT_HARD
+        classes[cls] += 1
+        print(f"{TOOL}: {design.key}: {cls} ({detail})")
+        if cls == "DIFFERENT" and code == EXIT_OK:
+            code = EXIT_FAIL
+    print(f"{TOOL}: tier {args.tier}: {len(designs)} designs: "
+          + ", ".join(f"{n} {c}" for c, n in sorted(classes.items())))
+    if code == EXIT_OK and classes["identical"] < args.min_ok:
+        print(f"{TOOL}: only {classes['identical']} identical, --min-ok is {args.min_ok}",
+              file=sys.stderr)
+        return EXIT_FAIL
+    return code
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        skip = prepare(args)
+        if skip is not None:
+            return skip
+        return run_all(args, gather(args))
+    except (hd.ToolError, OSError) as exc:
+        print(f"{TOOL}: error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+
+if __name__ == "__main__":
+    sys.exit(main())

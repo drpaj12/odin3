@@ -1,5 +1,5 @@
 /*
- * hardmap.c — the driver of the `hardmap` pass (3C spec H-8, H-9, H-10): the explicit-instance
+ * hardmap.c — the driver of the `partial_map` pass (3C spec H-8, H-9, H-10): the explicit-instance
  * pre-check over the whole design (M-6), then, module by module in creation order and cell by
  * cell in node-ID order, the `$mul` phase, the explicit `multiply` phase and the `$add`/`$sub`
  * phase, then the explicit RAM instances and the inferred `$mem` (H-8; PR 3C-3).
@@ -9,6 +9,7 @@
 #include "ir/design.h"
 #include "ir/module.h"
 #include "odin3/odin3.h"
+#include "frontends/arch/arch.h"
 #include "passes/partial_map/hm_kit.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -224,6 +225,64 @@ static odin3_status all_mem_phases(hm_ctx *hc) {
     return st;
 }
 
+/* --- S-2, S-3: the rules, and what an arch without a block leaves soft ---------------------- */
+
+/* The number of live nodes of the type named name over all modules (0 when it is not registered). */
+static uint64_t count_cells(hm_ctx *hc, const char *name) {
+    odin3_celltype_id type = {0};
+    uint64_t found = 0;
+    if (!hm_find_type(hc->design, name, &type)) {
+        return 0;
+    }
+    for (uint32_t mi = 1; mi < odin3_design_module_end(hc->design); mi++) {
+        const odin3_module *mod = module_at(hc->design, mi);
+        for (uint32_t id = 1; mod != NULL && id < odin3_module_node_end(mod); id++) {
+            odin3_node_id node = {id};
+            found += odin3_node_live(mod, node) && odin3_node_type(mod, node).v == type.v ? 1U : 0U;
+        }
+    }
+    return found;
+}
+
+static const char *arch_name(const odin3_arch *arch) {
+    if (arch->library != NULL) {
+        return arch->library;
+    }
+    return arch->file != NULL ? arch->file : "unnamed";
+}
+
+static void info_absent(const odin3_arch *arch, const char *model, uint64_t count,
+                        const char *cells) {
+    odin3_log(ODIN3_LOG_INFO,
+              "partial_map: architecture '%s' has no '%s' model; %" PRIu64 " '%s' cells left to lower",
+              arch_name(arch), model, count, cells);
+}
+
+/* S-2 and S-3: with an arch record the rules come from it, and a block whose model the library
+ * does not hold is simply absent (one INFO line per kind); without a record the 3C values stand
+ * and a missing type stays the H-3 error. */
+static void setup_rules(hm_ctx *hc) {
+    const odin3_arch *arch = odin3_design_arch(hc->design);
+    hc->rules = pm_rules_from_arch(arch);
+    if (arch == NULL) {
+        return;
+    }
+    odin3_celltype_id none = {0};
+    hc->rules.have_mul = hc->rules.have_mul && hm_find_type(hc->design, "multiply", &none);
+    hc->rules.have_adder = hc->rules.have_adder && hm_find_type(hc->design, "adder", &none);
+    hc->rules.have_sp = hc->rules.have_sp && hm_find_type(hc->design, "single_port_ram", &none);
+    hc->rules.have_dp = hc->rules.have_dp && hm_find_type(hc->design, "dual_port_ram", &none);
+    if (!hc->rules.have_mul) {
+        info_absent(arch, "multiply", count_cells(hc, "$mul"), "$mul");
+    }
+    if (!hc->rules.have_adder) {
+        info_absent(arch, "adder", count_cells(hc, "$add") + count_cells(hc, "$sub"), "$add'/'$sub");
+    }
+    if (!hc->rules.have_sp && !hc->rules.have_dp) {
+        info_absent(arch, "single_port_ram", count_cells(hc, "$mem"), "$mem");
+    }
+}
+
 static void report(hm_ctx *hc) {
     const odin3_hardmap_stats *st = &hc->stats;
     odin3_log(ODIN3_LOG_INFO,
@@ -248,11 +307,12 @@ odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
                                    odin3_hardmap_stats *stats) {
     hm_ctx hc;
     hm_init(&hc, ctx, design);
+    setup_rules(&hc);
     odin3_status st = precheck(&hc);
-    st = st == ODIN3_OK ? all_mul_phases(&hc) : st;
-    st = st == ODIN3_OK ? all_add_phases(&hc) : st;
+    st = st == ODIN3_OK && hc.rules.have_mul ? all_mul_phases(&hc) : st;
+    st = st == ODIN3_OK && hc.rules.have_adder ? all_add_phases(&hc) : st;
     st = st == ODIN3_OK ? all_ram_phases(&hc) : st;
-    st = st == ODIN3_OK ? all_mem_phases(&hc) : st;
+    st = st == ODIN3_OK && (hc.rules.have_sp || hc.rules.have_dp) ? all_mem_phases(&hc) : st;
     if (st == ODIN3_OK) {
         report(&hc);
     }

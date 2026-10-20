@@ -2,7 +2,7 @@
  * ram.c — explicit `single_port_ram` / `dual_port_ram` instances legalised to the arch's shape
  * (3C spec §6.1, R-1..R-7, H-4, H-7): depth split first (R-2, ram_split.c), then one slice per
  * data bit (R-3), then address padding (R-4), as Parmys's iterate_memories does. Every slice is a
- * RAM of ADDR_WIDTH 15 and DATA_WIDTH 1. A `we` on a constant stays wired to it (R-5); two live
+ * RAM of ADDR_WIDTH D (rules.mem_depth) and DATA_WIDTH 1. A `we` on a constant stays wired to it (R-5); two live
  * write ports get no priority logic (R-6). An instance that already has the arch's shape is left
  * alone. Each instance is one transaction (H-9): every node is built on fresh nets, then the
  * instance is deleted and its output nets are merged into the new ones.
@@ -46,14 +46,14 @@ static uint32_t pin_count(const hm_ctx *hc, odin3_node_id node, uint32_t port) {
 /* The refusal of an instance with more address bits than hardmap splits (a located error). */
 static odin3_status check_addr(const hm_ctx *hc, odin3_node_id node, const ram_layout *lay) {
     uint32_t addr = pin_count(hc, node, lay->addr[0]);
-    if (addr <= ODIN3_HARDMAP_RAM_MAX_ADDR) {
+    if (addr <= PM_RAM_MAX_ADDR) {
         return ODIN3_OK;
     }
     char label[ODIN3_LOG_BUF / 4];
     hm_label(hc, node, label, sizeof label);
     hm_diag(hc, ODIN3_LOG_ERROR, node,
             "partial_map: RAM instance '%s' has ADDR_WIDTH %" PRIu32 "; partial_map splits at most %u",
-            label, addr, ODIN3_HARDMAP_RAM_MAX_ADDR);
+            label, addr, PM_RAM_MAX_ADDR);
     return ODIN3_ERR_INVALID_ARG;
 }
 
@@ -68,6 +68,11 @@ odin3_status hm_check_ram(hm_ctx *hc, odin3_node_id node) {
 }
 
 /* --- slices -------------------------------------------------------------------------------- */
+
+/* R-2: the depth-split levels of a RAM of addr_bits address bits, D = rules.mem_depth. */
+static uint32_t levels_of(const hm_ctx *hc, uint32_t addr_bits) {
+    return addr_bits > hc->rules.mem_depth ? addr_bits - hc->rules.mem_depth : 0;
+}
 
 static void ctx_init(ram_ctx *rc, hm_ctx *hc, odin3_node_id src, odin3_vec *ties) {
     memset(rc, 0, sizeof *rc);
@@ -85,8 +90,7 @@ static void ctx_init(ram_ctx *rc, hm_ctx *hc, odin3_node_id src, odin3_vec *ties
     }
     rc->addr_bits = pin_count(hc, src, rc->lay->addr[0]);
     rc->data_bits = pin_count(hc, src, rc->lay->data[0]);
-    rc->levels =
-        rc->addr_bits > ODIN3_HARDMAP_RAM_ADDR ? rc->addr_bits - ODIN3_HARDMAP_RAM_ADDR : 0;
+    rc->levels = levels_of(hc, rc->addr_bits);
 }
 
 /* The context of a described RAM (no instance behind it). */
@@ -96,8 +100,7 @@ static void ctx_init_desc(ram_ctx *rc, hm_ctx *hc, const hm_ram_desc *desc, odin
     rc->lay = ram_layout_of(desc->kind);
     rc->addr_bits = desc->addr_bits;
     rc->data_bits = desc->data_bits;
-    rc->levels =
-        rc->addr_bits > ODIN3_HARDMAP_RAM_ADDR ? rc->addr_bits - ODIN3_HARDMAP_RAM_ADDR : 0;
+    rc->levels = levels_of(hc, rc->addr_bits);
     for (uint32_t rwp = 0; rwp < RAM_MAX_PORTS; rwp++) {
         rc->read[rwp] = desc->read[rwp];
     }
@@ -110,10 +113,10 @@ static void ctx_free(ram_ctx *rc) {
     }
 }
 
-/* R-4: the address pins of every slice of port rwp: addr[k .. A-1], then the pad up to 15. */
+/* R-4: the address pins of every slice of port rwp: addr[k .. A-1], then the pad up to D. */
 static odin3_status setup_addr(ram_ctx *rc, uint32_t rwp) {
     odin3_status st = ODIN3_OK;
-    for (uint32_t i = 0; st == ODIN3_OK && i < ODIN3_HARDMAP_RAM_ADDR; i++) {
+    for (uint32_t i = 0; st == ODIN3_OK && i < rc->hc->rules.mem_depth; i++) {
         uint32_t bit = rc->levels + i;
         if (bit < rc->addr_bits) {
             rc->port[rwp].addr[i] = ram_src_net(rc, (ram_pin){rc->lay->addr[rwp], bit});
@@ -144,7 +147,7 @@ static odin3_status make_slice(ram_ctx *rc, ram_at at) {
     for (uint32_t rwp = 0; rwp < lay->n_ports; rwp++) {
         data[rwp] = ram_src_net(rc, (ram_pin){lay->data[rwp], bit});
         ports[lay->data[rwp]] = (odin3_netvec){&data[rwp], 1};
-        ports[lay->addr[rwp]] = (odin3_netvec){rc->port[rwp].addr, ODIN3_HARDMAP_RAM_ADDR};
+        ports[lay->addr[rwp]] = (odin3_netvec){rc->port[rwp].addr, rc->hc->rules.mem_depth};
         ports[lay->we[rwp]] = (odin3_netvec){odin3_vec_cat(&rc->port[rwp].we, leaf), 1};
         ports[lay->out[rwp]] = (odin3_netvec){&fresh[rwp], 1};
     }
@@ -152,8 +155,8 @@ static odin3_status make_slice(ram_ctx *rc, ram_at at) {
     char path[RAM_MAX_LEVELS + 1];
     ram_path(path, sizeof path, (ram_choices){leaf, rc->levels});
     (void)snprintf(role, sizeof role, "b%" PRIu32 "%s%s", bit, rc->levels > 0 ? "." : "", path);
-    const odin3_value params[RAM_PARAMS] = {odin3_value_int(ODIN3_HARDMAP_RAM_ADDR),
-                                            odin3_value_int(1)};
+    const odin3_value params[RAM_PARAMS] = {odin3_value_int(rc->hc->rules.mem_depth),
+                                            odin3_value_int(rc->hc->rules.mem_width)};
     odin3_node_id node = {0};
     st = hm_new_node(rc->hc, &(hm_node_req){rc->type, params, RAM_PARAMS, ports, role}, &node);
     for (uint32_t rwp = 0; st == ODIN3_OK && rwp < lay->n_ports; rwp++) {
@@ -241,7 +244,7 @@ static odin3_status transact(ram_ctx *rc) {
 /* Not a RAM, a degenerate one (no data bit), or one that already has the arch's shape: left. */
 static bool needs_mapping(const ram_ctx *rc) {
     return rc->lay != NULL && rc->data_bits > 0 &&
-           (rc->addr_bits != ODIN3_HARDMAP_RAM_ADDR || rc->data_bits != 1);
+           (rc->addr_bits != rc->hc->rules.mem_depth || rc->data_bits != rc->hc->rules.mem_width);
 }
 
 odin3_status hm_map_ram(hm_ctx *hc, odin3_node_id src) {
