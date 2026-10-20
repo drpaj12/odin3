@@ -4,7 +4,7 @@
     "bm_DL_structural_logic": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_structural_logic.v:3.1-13.10"
+        "src": "tests/micro/verilog/micro/bm_DL_structural_logic.v:3.1-13.10"
       },
       "ports": {
         "x1": {
@@ -49,28 +49,28 @@
           "hide_name": 0,
           "bits": [ 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_structural_logic.v:5.9-5.10"
+            "src": "tests/micro/verilog/micro/bm_DL_structural_logic.v:5.9-5.10"
           }
         },
         "x1": {
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_structural_logic.v:4.8-4.10"
+            "src": "tests/micro/verilog/micro/bm_DL_structural_logic.v:4.8-4.10"
           }
         },
         "x2": {
           "hide_name": 0,
           "bits": [ 3 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_structural_logic.v:4.12-4.14"
+            "src": "tests/micro/verilog/micro/bm_DL_structural_logic.v:4.12-4.14"
           }
         },
         "x3": {
           "hide_name": 0,
           "bits": [ 4 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_structural_logic.v:4.16-4.18"
+            "src": "tests/micro/verilog/micro/bm_DL_structural_logic.v:4.16-4.18"
           }
         }
       }

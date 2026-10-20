@@ -99,6 +99,61 @@ class ExpectTests(unittest.TestCase):
                 jc.parse_expect(text)
 
 
+class JudgeListedTests(unittest.TestCase):
+    """A listed failure matches only when the observed text holds the entry's key."""
+
+    CELL = ("fail:read", "Yosys cell type $_SDFF_PP0_ is not registered")
+
+    def test_matching_key_is_excepted(self) -> None:
+        text = "read_json: f.json:9: cell 'x' has type '$_SDFF_PP0_', which is not registered"
+        passed, word = jc.judge_listed(ic.Verdict("fail:read", text), self.CELL)
+        self.assertTrue(passed)
+        self.assertIn("excepted", word)
+
+    def test_other_read_failure_is_unexpected(self) -> None:
+        text = "read_json: f.json:9: cell 'x' has type '$_DFF_PN0_', which is not registered"
+        passed, word = jc.judge_listed(ic.Verdict("fail:read", text), self.CELL)
+        self.assertFalse(passed)
+        self.assertIn("UNEXPECTED", word)
+
+    def test_key_is_not_a_prefix_match(self) -> None:
+        entry = ("fail:read", "positional parameter ($1)")
+        passed, _ = jc.judge_listed(ic.Verdict("fail:read", "parameter $10 unknown"), entry)
+        self.assertFalse(passed)
+
+    def test_backquoted_phrase_is_a_key(self) -> None:
+        entry = ("fail:read", "refuses the `level-sensitive latch`")
+        good = ic.Verdict("fail:read", "write_blif: level-sensitive latch; VPR")
+        self.assertTrue(jc.judge_listed(good, entry)[0])
+        self.assertFalse(jc.judge_listed(ic.Verdict("fail:read", "bad file"), entry)[0])
+
+    def test_entry_without_key_is_refused(self) -> None:
+        passed, word = jc.judge_listed(ic.Verdict("fail:read", "x"), ("fail:read", "no key"))
+        self.assertFalse(passed)
+        self.assertIn("names no", word)
+
+    def test_unproven_matches_on_outcome(self) -> None:
+        passed, _ = jc.judge_listed(ic.Verdict("unproven", "t"), ("unproven", "why"))
+        self.assertTrue(passed)
+
+    def test_unlisted_and_stale_as_before(self) -> None:
+        self.assertEqual(jc.judge_listed(ic.Verdict("ok"), None), (True, "ok"))
+        self.assertFalse(jc.judge_listed(ic.Verdict("ok"), self.CELL)[0])
+        self.assertFalse(jc.judge_listed(ic.Verdict("fail:read", "$_SDFF_PP0_"), None)[0])
+
+
+class FirstErrorTests(unittest.TestCase):
+    def test_marker_line_beats_earlier_mention(self) -> None:
+        err = "odin3: warning: no error here\nodin3: error: read_json: the real one\n"
+        done = CompletedProcess([], 1, "", err)
+        self.assertEqual(jc.first_error(done), "read_json: the real one")
+
+    def test_falls_back_to_any_error_line_then_first_line(self) -> None:
+        done = CompletedProcess([], 1, "", "a\nan error x\n")
+        self.assertEqual(jc.first_error(done), "an error x")
+        self.assertEqual(jc.first_error(CompletedProcess([], 1, "", "a\nb\n")), "a")
+
+
 def fake_odin3(
     content: dict[str, str], fail_read: bool = False
 ) -> Callable[..., CompletedProcess[str]]:
@@ -222,9 +277,9 @@ class MainTests(unittest.TestCase):
     def test_listed_exception_and_stale_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             expect = Path(tmp) / "expect.txt"
-            expect.write_text("word a.v error:script no cell type\n")
+            expect.write_text("word a.v error:script no cell `type`\n")
             args = ["--odin3", "o", "--expect", str(expect)]
-            code, out, _ = self.run_with([jc.Row("error:script", "m")], args)
+            code, out, _ = self.run_with([jc.Row("error:script", "no cell type")], args)
             self.assertIn("excepted", out)
             self.assertEqual(code, jc.EXIT_FAIL)  # the only design: nothing compared
             code, out, _ = self.run_with([jc.Row("ok", "", "identical")], args)
@@ -238,6 +293,25 @@ class MainTests(unittest.TestCase):
         self.assertIn("word a.v: ok equivalent-only cells 3 wires 4 nets 5", out)
         self.assertIn("compared 1 of 1", out)
         self.assertIn("equivalent-only 1", out)
+
+    def test_unexplained_file_difference_fails(self) -> None:
+        row = jc.Row("ok", "", "identical", (1, 1, 1), "line 3: a | b")
+        code, out, err = self.run_with([row], ["--odin3", "o"])
+        self.assertEqual(code, jc.EXIT_FAIL)
+        self.assertIn("after it in 1", out)
+        self.assertIn("after normalisation", err)
+
+    def test_normalised_difference_passes(self) -> None:
+        row = jc.Row("ok", "", "identical", (1, 1, 1), "normalised")
+        code, _, _ = self.run_with([row], ["--odin3", "o"])
+        self.assertEqual(code, jc.EXIT_OK)
+
+    def test_missing_yosys_is_a_usage_error(self) -> None:
+        code, _, err = run_main(
+            jc.main, ["--level", "word", "--yosys", "/nonexistent/yosys", "a.v"]
+        )
+        self.assertEqual(code, jc.EXIT_ERROR)
+        self.assertIn("names no file", err)
 
     def test_unknown_level_is_a_usage_error(self) -> None:
         code, _, err = run_main(jc.main, ["--level", "nope", "x.v"])

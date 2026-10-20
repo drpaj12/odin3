@@ -4,7 +4,7 @@
     "bm_DL_BCD_adder": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:3.1-22.10"
+        "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:3.1-22.10"
       },
       "ports": {
         "Cin": {
@@ -71,7 +71,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
           },
           "port_directions": {
             "A": "input",
@@ -92,7 +92,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
           },
           "port_directions": {
             "A": "input",
@@ -113,7 +113,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
           },
           "port_directions": {
             "A": "input",
@@ -134,7 +134,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
           },
           "port_directions": {
             "A": "input",
@@ -155,7 +155,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -174,7 +174,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -193,7 +193,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -212,7 +212,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -231,7 +231,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -250,7 +250,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -269,7 +269,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -288,7 +288,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -307,7 +307,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.42-286.49"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.42-286.49"
           },
           "port_directions": {
             "A": "input",
@@ -326,7 +326,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.42-286.49"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.42-286.49"
           },
           "port_directions": {
             "A": "input",
@@ -345,7 +345,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.42-286.49"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.42-286.49"
           },
           "port_directions": {
             "A": "input",
@@ -364,7 +364,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.42-286.49"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.42-286.49"
           },
           "port_directions": {
             "A": "input",
@@ -383,7 +383,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -402,7 +402,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -421,7 +421,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -440,7 +440,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:231.18-231.27"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:231.18-231.27"
           },
           "port_directions": {
             "A": "input",
@@ -459,7 +459,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -478,7 +478,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -497,7 +497,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -516,7 +516,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:241.12-241.34"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:241.12-241.34"
           },
           "port_directions": {
             "A": "input",
@@ -535,7 +535,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248.19-248.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:248.19-248.41"
           },
           "port_directions": {
             "A": "input",
@@ -554,7 +554,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:231.10-231.28"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:231.10-231.28"
           },
           "port_directions": {
             "A": "input",
@@ -573,7 +573,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.12-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.12-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -592,7 +592,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.12-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.12-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -611,7 +611,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.12-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.12-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -630,7 +630,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248.12-248.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:248.12-248.41"
           },
           "port_directions": {
             "A": "input",
@@ -649,7 +649,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -668,7 +668,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248.19-248.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:248.19-248.41"
           },
           "port_directions": {
             "A": "input",
@@ -687,7 +687,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.12-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.12-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -707,7 +707,7 @@
           "bits": [ 16, 37, 22 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:274.23-274.25"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|yosys-share/techmap.v:274.23-274.25"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$11.X": {
@@ -715,7 +715,7 @@
           "bits": [ 16, 21, 18 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:270.23-270.24"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|yosys-share/techmap.v:270.23-270.24"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$11.Y": {
@@ -723,7 +723,7 @@
           "bits": [ 20, 23, 24 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:270.26-270.27"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|yosys-share/techmap.v:270.26-270.27"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$16.Y": {
@@ -731,7 +731,7 @@
           "bits": [ 20, 23, 24, 25 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:270.26-270.27"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21|yosys-share/techmap.v:270.26-270.27"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$19.CO": {
@@ -739,7 +739,7 @@
           "bits": [ 28, 30, 32, 19, "0" ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:274.23-274.25"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:274.23-274.25"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$19.X": {
@@ -747,7 +747,7 @@
           "bits": [ 26, 27, 29, 31, "0" ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:270.23-270.24"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:270.23-270.24"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$19.lcu.G": {
@@ -755,105 +755,105 @@
           "bits": [ 33, 34, 35, 36, "0" ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:214.23-214.24"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:214.23-214.24"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$11.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240$213_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$11.lcu.$and$yosys-share/techmap.v:240$213_Y": {
           "hide_name": 1,
           "bits": [ 45 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:231$137_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$yosys-share/techmap.v:231$137_Y": {
           "hide_name": 1,
           "bits": [ 38 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:231.18-231.27"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:231.18-231.27"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240$139_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$yosys-share/techmap.v:240$139_Y": {
           "hide_name": 1,
           "bits": [ 39 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240$142_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$yosys-share/techmap.v:240$142_Y": {
           "hide_name": 1,
           "bits": [ 40 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240$145_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$yosys-share/techmap.v:240$145_Y": {
           "hide_name": 1,
           "bits": [ 42 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:241$144_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$yosys-share/techmap.v:241$144_Y": {
           "hide_name": 1,
           "bits": [ 41 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:241.12-241.34"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:241.12-241.34"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248$148_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$and$yosys-share/techmap.v:248$148_Y": {
           "hide_name": 1,
           "bits": [ 43 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248.19-248.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:248.19-248.41"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$or$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240$143_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$19.lcu.$or$yosys-share/techmap.v:240$143_Y": {
           "hide_name": 1,
           "bits": [ 44 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.12-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.12-240.41"
           }
         },
         "Cin": {
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:4.8-4.11"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:4.8-4.11"
           }
         },
         "Cout": {
           "hide_name": 0,
           "bits": [ 15 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:7.9-7.13"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:7.9-7.13"
           }
         },
         "S": {
           "hide_name": 0,
           "bits": [ 11, 12, 13, 14 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:6.15-6.16"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:6.15-6.16"
           }
         },
         "X": {
           "hide_name": 0,
           "bits": [ 3, 4, 5, 6 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:5.14-5.15"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:5.14-5.15"
           }
         },
         "Y": {
           "hide_name": 0,
           "bits": [ 7, 8, 9, 10 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:5.17-5.18"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:5.17-5.18"
           }
         },
         "Z": {
           "hide_name": 0,
           "bits": [ 11, 16, 17, 18, 19 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:10.15-10.16"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:10.15-10.16"
           }
         }
       }

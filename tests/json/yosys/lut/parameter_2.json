@@ -5,7 +5,7 @@
       "attributes": {
         "dynports": "00000000000000000000000000000001",
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:1.1-15.10"
+        "src": "tests/micro/verilog/micro/parameter_2.v:1.1-15.10"
       },
       "parameter_default_values": {
         "width": "00000000000000000000000000000100"
@@ -112,10 +112,10 @@
             "TYPE": "module"
           },
           "attributes": {
-            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:11.13-11.34",
+            "cell_src": "tests/micro/verilog/micro/parameter_2.v:11.13-11.34",
             "module": "$paramod$23221bbe9c85be81f7424fb76c64d8df9eba4c0b\\bottom",
             "module_hdlname": "bottom",
-            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:17.1-22.10"
+            "module_src": "tests/micro/verilog/micro/parameter_2.v:17.1-22.10"
           },
           "port_directions": {
           },
@@ -129,10 +129,10 @@
             "TYPE": "module"
           },
           "attributes": {
-            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:8.8-8.29",
+            "cell_src": "tests/micro/verilog/micro/parameter_2.v:8.8-8.29",
             "module": "$paramod\\bottom\\d=s32'00000000000000000000000000000011",
             "module_hdlname": "bottom",
-            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:17.1-22.10"
+            "module_src": "tests/micro/verilog/micro/parameter_2.v:17.1-22.10"
           },
           "port_directions": {
           },
@@ -146,10 +146,10 @@
             "TYPE": "module"
           },
           "attributes": {
-            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:14.16-14.37",
+            "cell_src": "tests/micro/verilog/micro/parameter_2.v:14.16-14.37",
             "module": "$paramod$40a811d08faf61fe64655e72d73cf85d534e9861\\bottom",
             "module_hdlname": "bottom",
-            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:17.1-22.10"
+            "module_src": "tests/micro/verilog/micro/parameter_2.v:17.1-22.10"
           },
           "port_directions": {
           },
@@ -162,35 +162,35 @@
           "hide_name": 0,
           "bits": [ 2, 3, 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:3.20-3.21"
+            "src": "tests/micro/verilog/micro/parameter_2.v:3.20-3.21"
           }
         },
         "b1": {
           "hide_name": 0,
           "bits": [ "1", "1", 2, 3, 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:4.21-4.23"
+            "src": "tests/micro/verilog/micro/parameter_2.v:4.21-4.23"
           }
         },
         "b2": {
           "hide_name": 0,
           "bits": [ "1", "1", 2, 3, 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:4.25-4.27"
+            "src": "tests/micro/verilog/micro/parameter_2.v:4.25-4.27"
           }
         },
         "b3": {
           "hide_name": 0,
           "bits": [ "0", "0", 6, 7, 8, 9 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:4.29-4.31"
+            "src": "tests/micro/verilog/micro/parameter_2.v:4.29-4.31"
           }
         },
         "b4": {
           "hide_name": 0,
           "bits": [ "1", "1", 2, 3, 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:4.33-4.35"
+            "src": "tests/micro/verilog/micro/parameter_2.v:4.33-4.35"
           }
         },
         "inst_1.a": {
@@ -198,7 +198,7 @@
           "bits": [ 2, 3, 4, 5 ],
           "attributes": {
             "hdlname": "inst_1 a",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:19.12-19.13"
+            "src": "tests/micro/verilog/micro/parameter_2.v:19.12-19.13"
           }
         },
         "inst_1.b": {
@@ -206,7 +206,7 @@
           "bits": [ "1", "1", 2, 3, 4, 5 ],
           "attributes": {
             "hdlname": "inst_1 b",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:20.13-20.14"
+            "src": "tests/micro/verilog/micro/parameter_2.v:20.13-20.14"
           }
         },
         "inst_2.a": {
@@ -214,7 +214,7 @@
           "bits": [ 2, 3, 4, 5 ],
           "attributes": {
             "hdlname": "inst_2 a",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:19.12-19.13"
+            "src": "tests/micro/verilog/micro/parameter_2.v:19.12-19.13"
           }
         },
         "inst_2.b": {
@@ -222,7 +222,7 @@
           "bits": [ "1", "1", 2, 3, 4, 5 ],
           "attributes": {
             "hdlname": "inst_2 b",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:20.13-20.14"
+            "src": "tests/micro/verilog/micro/parameter_2.v:20.13-20.14"
           }
         },
         "inst_3.a": {
@@ -230,7 +230,7 @@
           "bits": [ 2, 3, 4, 5 ],
           "attributes": {
             "hdlname": "inst_3 a",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:19.12-19.13"
+            "src": "tests/micro/verilog/micro/parameter_2.v:19.12-19.13"
           }
         },
         "inst_3.b": {
@@ -238,7 +238,7 @@
           "bits": [ "0", "0", 6, 7, 8, 9 ],
           "attributes": {
             "hdlname": "inst_3 b",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/parameter_2.v:20.13-20.14"
+            "src": "tests/micro/verilog/micro/parameter_2.v:20.13-20.14"
           }
         }
       }

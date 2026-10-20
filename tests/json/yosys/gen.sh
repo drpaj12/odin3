@@ -16,7 +16,19 @@ case $version in
     "Yosys 0.55 "*) ;;
     *) echo "gen.sh: want Yosys 0.55, found: $version" >&2; exit 2 ;;
 esac
-if [[ $# -gt 0 ]]; then micros=("$@"); else micros=("$root"/tests/micro/verilog/micro/*.v); fi
+# Yosys records the path it was given in every `src` attribute, so the flows run from the repo root
+# with root-relative paths: no fixture holds a machine-specific absolute path.
+micros=()
+if [[ $# -gt 0 ]]; then
+    for arg in "$@"; do
+        full="$(readlink -f "$arg")"
+        [[ $full == "$root"/* ]] || { echo "gen.sh: $arg is outside $root" >&2; exit 2; }
+        micros+=("${full#"$root"/}")
+    done
+fi
+cd "$root" || exit 2
+[[ ${#micros[@]} -gt 0 ]] || micros=(tests/micro/verilog/micro/*.v)
+rel="${here#"$root"/}"
 mkdir -p "$here/word" "$here/gate" "$here/lut"
 failed="$here/FAILED.new"
 : >"$failed"
@@ -32,13 +44,17 @@ for v in "${micros[@]}"; do
     for level in word gate lut; do
         var="flow_$level"
         script="${!var}"
-        out="$here/$level/$name.json"
+        out="$rel/$level/$name.json"
         script="${script//@V@/$v}"
         script="${script//@J@/$out}"
         rm -f "$out"
         if ! log="$(timeout 600 "$yosys" -q -p "$script" 2>&1)" || [[ ! -s $out ]]; then
             rm -f "$out"
             echo "$level $name.v $(printf '%s\n' "$log" | grep -m1 -i 'error' | cut -c1-200)" >>"$failed"
+        else
+            # Yosys's own techmap sources are absolute too (`src` attributes and the names of the
+            # cells made from a library file): keep the file name, drop the machine-specific prefix.
+            sed -i -E 's#/[^"|$]*/share/(yosys/)?#yosys-share/#g' "$out"
         fi
     done
 done

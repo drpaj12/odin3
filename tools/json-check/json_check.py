@@ -203,6 +203,35 @@ def parse_expect(text: str) -> dict[tuple[str, str], tuple[str, str]]:
     return table
 
 
+EXPECT_KEY = re.compile(r"(\$\w+)|`([^`]+)`")
+
+
+def expect_keys(reason: str) -> list[str]:
+    """The tokens an expect reason names that the observed error must contain: each ``$``-word
+    (a cell type, a parameter) and each backquoted phrase."""
+    return [m.group(1) or m.group(2) for m in EXPECT_KEY.finditer(reason)]
+
+
+def judge_listed(verdict: ic.Verdict, listed: tuple[str, str] | None) -> tuple[bool, str]:
+    """``ic.judge_expected``, but a listed failure matches only when its keys (``expect_keys``)
+    all appear in the observed text: ``fail:read`` must not hide another read failure of the
+    same file. An ``unproven`` entry matches on the outcome (its text is the tool's own)."""
+    passed, word = ic.judge_expected(verdict, listed)
+    if not passed or listed is None or verdict.outcome == "unproven":
+        return passed, word
+    keys = expect_keys(listed[1])
+    if not keys:
+        return False, f"{verdict.outcome} but the expect entry names no `key` or $token to match"
+    for key in keys:
+        found = re.search(re.escape(key) + r"(?![\w$])", verdict.reason)
+        if found is None:
+            return False, (
+                f"UNEXPECTED {verdict.outcome} ({verdict.reason}): the expect entry "
+                f"({listed[1]}) names {key}, not in the observed text"
+            )
+    return True, word
+
+
 # --- running --------------------------------------------------------------------------------
 
 
@@ -231,7 +260,8 @@ def libs_text(cfg: Config, design: Path) -> str:
 def first_error(done: CompletedProcess[str]) -> str:
     """The first error line of a failed odin3 run (the located message), else its last line."""
     lines = ((done.stderr or "") + (done.stdout or "")).splitlines()
-    errors = [ln for ln in lines if "error" in ln]
+    marked = [ln for ln in lines if ln.lstrip().startswith(("odin3: error", "error"))]
+    errors = marked or [ln for ln in lines if "error" in ln]
     text = (errors or lines or ["no output"])[0]
     return text.split("odin3: error: ", 1)[-1][-300:]
 
@@ -442,9 +472,7 @@ class Tally:
 def report(level: str, item: Path, row: Row, listed: tuple[str, str] | None) -> tuple[bool, str]:
     """Prints one row; returns (passes the run, the report word)."""
     cells, wires, nets = row.counts
-    passed, word = ic.judge_expected(
-        ic.Verdict(row.outcome, row.reason), listed
-    )
+    passed, word = judge_listed(ic.Verdict(row.outcome, row.reason), listed)
     detail = f" ({row.reason})" if row.reason and row.outcome != "ok" else ""
     kind = f" {row.kind}" if row.kind else ""
     note = row.reason if row.outcome == "ok" and row.reason else ""
@@ -480,7 +508,9 @@ def execute(args: argparse.Namespace, work: Path) -> int:
         raise ToolError(f"unknown level {bad[0]} (want one of {', '.join(LEVELS)})")
     if args.yosys_dir is None and not args.files:
         raise ToolError("no designs given (and no --yosys-dir)")
-    yosys = str(Path(args.yosys).resolve()) if args.yosys and Path(args.yosys).exists() else ""
+    if args.yosys and not Path(args.yosys).is_file():
+        raise ToolError(f"--yosys (or ODIN3_YOSYS055) names no file: {args.yosys}")
+    yosys = str(Path(args.yosys).resolve()) if args.yosys else ""
     odin3, abc = str(Path(args.odin3).resolve()), args.abc and str(Path(args.abc).resolve())
     cfg = Config(odin3, yosys, args.scripts, opt_equiv.parse_size(args.mem_cap), abc)
     cfg.techlibs = ic.parse_techlibs(args.techlib_list)
@@ -511,6 +541,13 @@ def execute(args: argparse.Namespace, work: Path) -> int:
     )
     if tally.compared == 0 and not (fixtures and not cfg.yosys):
         print(f"{TOOL}: nothing was compared", file=sys.stderr)
+        return EXIT_FAIL
+    if tally.unexplained:
+        print(
+            f"{TOOL}: file 1 and file 2 differ after normalisation in {tally.unexplained}: "
+            "R-2 allows generated names, net numbers and $sop to $lut only",
+            file=sys.stderr,
+        )
         return EXIT_FAIL
     return tally.worst or (EXIT_UNPROVEN if tally.open_unproven else EXIT_OK)
 

@@ -4,7 +4,7 @@
     "dff": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/ff.v:1.1-16.10"
+        "src": "tests/micro/verilog/micro/ff.v:1.1-16.10"
       },
       "ports": {
         "clk": {
@@ -31,7 +31,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/ff.v:8.5-14.8"
+            "src": "tests/micro/verilog/micro/ff.v:8.5-14.8"
           },
           "port_directions": {
             "C": "input",
@@ -52,28 +52,28 @@
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/ff.v:5.11-5.14"
+            "src": "tests/micro/verilog/micro/ff.v:5.11-5.14"
           }
         },
         "d": {
           "hide_name": 0,
           "bits": [ 4 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/ff.v:5.21-5.22"
+            "src": "tests/micro/verilog/micro/ff.v:5.21-5.22"
           }
         },
         "q": {
           "hide_name": 0,
           "bits": [ 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/ff.v:6.12-6.13"
+            "src": "tests/micro/verilog/micro/ff.v:6.12-6.13"
           }
         },
         "rst": {
           "hide_name": 0,
           "bits": [ 3 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/ff.v:5.16-5.19"
+            "src": "tests/micro/verilog/micro/ff.v:5.16-5.19"
           }
         }
       }

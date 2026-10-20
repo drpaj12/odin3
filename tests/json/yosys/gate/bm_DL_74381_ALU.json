@@ -4,7 +4,7 @@
     "bm_DL_74381_ALU": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:2.1-20.10"
+        "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:2.1-20.10"
       },
       "ports": {
         "s": {
@@ -114,7 +114,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -133,7 +133,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -152,7 +152,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -171,7 +171,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -190,7 +190,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -209,7 +209,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -228,7 +228,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -247,7 +247,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -266,7 +266,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -285,7 +285,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -304,7 +304,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -323,7 +323,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -342,7 +342,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -361,7 +361,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -380,7 +380,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -399,7 +399,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -418,7 +418,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -437,7 +437,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -456,7 +456,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -475,7 +475,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -494,7 +494,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -513,7 +513,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -532,7 +532,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -551,7 +551,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -570,7 +570,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -589,7 +589,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -608,7 +608,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -627,7 +627,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -646,7 +646,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -665,7 +665,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -684,7 +684,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:594.20-594.31"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:594.20-594.31"
           },
           "port_directions": {
             "A": "input",
@@ -703,7 +703,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:598.13-598.15"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:598.13-598.15"
           },
           "port_directions": {
             "A": "input",
@@ -722,7 +722,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:598.13-598.15"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:598.13-598.15"
           },
           "port_directions": {
             "A": "input",
@@ -741,7 +741,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:598.13-598.15"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:598.13-598.15"
           },
           "port_directions": {
             "A": "input",
@@ -760,7 +760,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:598.13-598.15"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:598.13-598.15"
           },
           "port_directions": {
             "A": "input",
@@ -779,7 +779,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:598.13-598.15"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:598.13-598.15"
           },
           "port_directions": {
             "A": "input",
@@ -798,7 +798,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -815,7 +815,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -832,7 +832,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -849,7 +849,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -866,7 +866,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -883,7 +883,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -900,7 +900,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10"
           },
           "port_directions": {
             "A": "input",
@@ -980,7 +980,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:598.13-598.25"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:598.13-598.25"
           },
           "port_directions": {
             "A": "input",
@@ -1001,7 +1001,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:598.13-598.25"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:598.13-598.25"
           },
           "port_directions": {
             "A": "input",
@@ -1022,7 +1022,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:598.13-598.25"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:598.13-598.25"
           },
           "port_directions": {
             "A": "input",
@@ -1043,7 +1043,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:598.13-598.25"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:598.13-598.25"
           },
           "port_directions": {
             "A": "input",
@@ -1064,7 +1064,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.31-279.37"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:279.31-279.37"
           },
           "port_directions": {
             "A": "input",
@@ -1081,7 +1081,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.31-279.37"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:279.31-279.37"
           },
           "port_directions": {
             "A": "input",
@@ -1098,7 +1098,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.31-279.37"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:279.31-279.37"
           },
           "port_directions": {
             "A": "input",
@@ -1115,7 +1115,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.31-279.37"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:279.31-279.37"
           },
           "port_directions": {
             "A": "input",
@@ -1132,7 +1132,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.31-279.37"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:279.31-279.37"
           },
           "port_directions": {
             "A": "input",
@@ -1149,7 +1149,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.31-279.37"
+            "src": "yosys-share/techmap.v:279.31-279.37"
           },
           "port_directions": {
             "A": "input",
@@ -1166,7 +1166,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.31-279.37"
+            "src": "yosys-share/techmap.v:279.31-279.37"
           },
           "port_directions": {
             "A": "input",
@@ -1183,7 +1183,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.31-279.37"
+            "src": "yosys-share/techmap.v:279.31-279.37"
           },
           "port_directions": {
             "A": "input",
@@ -1200,7 +1200,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:14.16-14.21"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:14.16-14.21"
           },
           "port_directions": {
             "A": "input",
@@ -1219,7 +1219,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:14.16-14.21"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:14.16-14.21"
           },
           "port_directions": {
             "A": "input",
@@ -1238,7 +1238,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:14.16-14.21"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:14.16-14.21"
           },
           "port_directions": {
             "A": "input",
@@ -1257,7 +1257,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:15.16-15.21"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:15.16-15.21"
           },
           "port_directions": {
             "A": "input",
@@ -1276,7 +1276,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:15.16-15.21"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:15.16-15.21"
           },
           "port_directions": {
             "A": "input",
@@ -1295,7 +1295,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:15.16-15.21"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:15.16-15.21"
           },
           "port_directions": {
             "A": "input",
@@ -1314,7 +1314,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:15.16-15.21"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:15.16-15.21"
           },
           "port_directions": {
             "A": "input",
@@ -1333,7 +1333,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:16.16-16.21"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:16.16-16.21"
           },
           "port_directions": {
             "A": "input",
@@ -1352,7 +1352,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:16.16-16.21"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:16.16-16.21"
           },
           "port_directions": {
             "A": "input",
@@ -1371,7 +1371,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:16.16-16.21"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:16.16-16.21"
           },
           "port_directions": {
             "A": "input",
@@ -1390,7 +1390,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -1409,7 +1409,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -1428,7 +1428,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -1447,7 +1447,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -1466,7 +1466,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -1485,7 +1485,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -1504,7 +1504,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -1523,7 +1523,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.42-286.49"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:286.42-286.49"
           },
           "port_directions": {
             "A": "input",
@@ -1542,7 +1542,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.42-286.49"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:286.42-286.49"
           },
           "port_directions": {
             "A": "input",
@@ -1561,7 +1561,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.42-286.49"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:286.42-286.49"
           },
           "port_directions": {
             "A": "input",
@@ -1580,7 +1580,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -1599,7 +1599,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -1618,7 +1618,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -1637,7 +1637,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -1656,7 +1656,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -1675,7 +1675,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -1694,7 +1694,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -1713,7 +1713,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.42-286.49"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:286.42-286.49"
           },
           "port_directions": {
             "A": "input",
@@ -1732,7 +1732,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.42-286.49"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:286.42-286.49"
           },
           "port_directions": {
             "A": "input",
@@ -1751,7 +1751,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.42-286.49"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:286.42-286.49"
           },
           "port_directions": {
             "A": "input",
@@ -1770,7 +1770,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1789,7 +1789,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1808,7 +1808,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1827,7 +1827,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1846,7 +1846,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1865,7 +1865,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1884,7 +1884,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1903,7 +1903,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1922,7 +1922,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1941,7 +1941,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1960,7 +1960,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1979,7 +1979,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -1998,7 +1998,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -2017,7 +2017,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -2036,7 +2036,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -2055,7 +2055,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -2074,7 +2074,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -2093,7 +2093,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -2112,7 +2112,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -2131,7 +2131,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:586.44-586.84"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:586.44-586.84"
           },
           "port_directions": {
             "A": "input",
@@ -2150,7 +2150,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -2169,7 +2169,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248.19-248.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:248.19-248.41"
           },
           "port_directions": {
             "A": "input",
@@ -2188,7 +2188,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.12-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.12-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -2207,7 +2207,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248.12-248.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:248.12-248.41"
           },
           "port_directions": {
             "A": "input",
@@ -2226,7 +2226,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -2245,7 +2245,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248.19-248.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:248.19-248.41"
           },
           "port_directions": {
             "A": "input",
@@ -2264,7 +2264,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:231.10-231.28"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:231.10-231.28"
           },
           "port_directions": {
             "A": "input",
@@ -2283,7 +2283,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.12-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.12-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -2302,7 +2302,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248.12-248.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:248.12-248.41"
           },
           "port_directions": {
             "A": "input",
@@ -2321,7 +2321,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -2340,7 +2340,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -2359,7 +2359,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:289.13-289.25"
+            "src": "yosys-share/techmap.v:289.13-289.25"
           },
           "port_directions": {
             "A": "input",
@@ -2378,7 +2378,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           },
           "port_directions": {
             "A": "input",
@@ -2397,7 +2397,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248.19-248.41"
+            "src": "yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:248.19-248.41"
           },
           "port_directions": {
             "A": "input",
@@ -2417,7 +2417,7 @@
           "bits": [ 93, 94, 95, 96 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.21-279.23"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:279.21-279.23"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$17.CO": {
@@ -2425,7 +2425,7 @@
           "bits": [ 123, 126, 129, 140 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:274.23-274.25",
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:274.23-274.25",
             "unused_bits": "3"
           }
         },
@@ -2434,7 +2434,7 @@
           "bits": [ 18, 122, 125, 128 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:270.23-270.24"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:270.23-270.24"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$17.Y": {
@@ -2442,7 +2442,7 @@
           "bits": [ 19, 124, 127, 130 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:270.26-270.27"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:270.26-270.27"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$17.lcu.G": {
@@ -2450,7 +2450,7 @@
           "bits": [ 131, 132, 133, 141 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:214.23-214.24",
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:214.23-214.24",
             "unused_bits": "3"
           }
         },
@@ -2459,7 +2459,7 @@
           "bits": [ 9, 87, 89, 91 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:268.22-268.23"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:268.22-268.23"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$20.CO": {
@@ -2467,7 +2467,7 @@
           "bits": [ 111, 114, 117, 142 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:274.23-274.25",
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:274.23-274.25",
             "unused_bits": "3"
           }
         },
@@ -2476,7 +2476,7 @@
           "bits": [ 119, 110, 113, 116 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:270.23-270.24"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:270.23-270.24"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$20.Y": {
@@ -2484,7 +2484,7 @@
           "bits": [ 119, 112, 115, 118 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:270.26-270.27"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:270.26-270.27"
           }
         },
         "$auto$alumacc.cc:495:replace_alu$20.lcu.G": {
@@ -2492,7 +2492,7 @@
           "bits": [ 111, 120, 121, 143 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:214.23-214.24",
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:214.23-214.24",
             "unused_bits": "3"
           }
         },
@@ -2657,7 +2657,7 @@
           "bits": [ "1", "1", "1", "1", 111, 107, 108, 109, 103, 104, 105, 106, 119, 100, 101, 102, 119, 112, 115, 118, 19, 124, 127, 130 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:572.28-572.29"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:572.28-572.29"
           }
         },
         "$procmux$8.B_AND_S": {
@@ -2665,7 +2665,7 @@
           "bits": [ 36, 36, 36, 36, 67, 57, 47, 37, 69, 59, 49, 39, 70, 60, 50, 40, 72, 62, 52, 42, 73, 63, 53, 43 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:584.28-584.35"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:584.28-584.35"
           }
         },
         "$procmux$8.S": {
@@ -2673,7 +2673,7 @@
           "bits": [ 36, 77, 79, 80, 24, 82 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:574.22-574.23"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:574.22-574.23"
           }
         },
         "$procmux$8.Y_B": {
@@ -2681,35 +2681,35 @@
           "bits": [ 76, 66, 56, 46 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:579.19-579.22"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:579.19-579.22"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$17.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240$257_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$17.lcu.$and$yosys-share/techmap.v:240$257_Y": {
           "hide_name": 1,
           "bits": [ 136 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$17.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248$266_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$17.lcu.$and$yosys-share/techmap.v:248$266_Y": {
           "hide_name": 1,
           "bits": [ 137 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248.19-248.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:11.19-11.24|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:248.19-248.41"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$20.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240$257_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$20.lcu.$and$yosys-share/techmap.v:240$257_Y": {
           "hide_name": 1,
           "bits": [ 134 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:240.19-240.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:240.19-240.41"
           }
         },
-        "$techmap$auto$alumacc.cc:495:replace_alu$20.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248$266_Y": {
+        "$techmap$auto$alumacc.cc:495:replace_alu$20.lcu.$and$yosys-share/techmap.v:248$266_Y": {
           "hide_name": 1,
           "bits": [ 135 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:286.27-286.69|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:248.19-248.41"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:13.16-13.21|yosys-share/techmap.v:286.27-286.69|yosys-share/techmap.v:248.19-248.41"
           }
         },
         "$techmap$auto$opt_share.cc:199:merge_operators$26.$auto$alumacc.cc:495:replace_alu$238.BB": {
@@ -2717,7 +2717,7 @@
           "bits": [ 92, 97, 98, 99 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.21-279.23"
+            "src": "yosys-share/techmap.v:279.21-279.23"
           }
         },
         "$techmap$auto$opt_share.cc:199:merge_operators$26.$auto$alumacc.cc:495:replace_alu$238.CO": {
@@ -2725,7 +2725,7 @@
           "bits": [ 92, 138, 139, 144 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:274.23-274.25",
+            "src": "yosys-share/techmap.v:274.23-274.25",
             "unused_bits": "3"
           }
         },
@@ -2734,42 +2734,42 @@
           "bits": [ 9, 86, 88, 90 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:270.26-270.27"
+            "src": "yosys-share/techmap.v:270.26-270.27"
           }
         },
-        "$techmap$procmux$8.$reduce_or$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:598$148_Y": {
+        "$techmap$procmux$8.$reduce_or$yosys-share/techmap.v:598$148_Y": {
           "hide_name": 1,
           "bits": [ 85 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:598.13-598.15"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_74381_ALU.v:9.3-18.10|yosys-share/techmap.v:598.13-598.15"
           }
         },
         "A": {
           "hide_name": 0,
           "bits": [ 5, 6, 7, 8 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:4.14-4.15"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:4.14-4.15"
           }
         },
         "B": {
           "hide_name": 0,
           "bits": [ 9, 10, 11, 12 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:4.17-4.18"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:4.17-4.18"
           }
         },
         "F": {
           "hide_name": 0,
           "bits": [ 13, 14, 15, 16 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:5.15-5.16"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:5.15-5.16"
           }
         },
         "s": {
           "hide_name": 0,
           "bits": [ 2, 3, 4 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_74381_ALU.v:3.14-3.15"
+            "src": "tests/micro/verilog/micro/bm_DL_74381_ALU.v:3.14-3.15"
           }
         }
       }

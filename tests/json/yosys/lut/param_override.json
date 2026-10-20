@@ -5,7 +5,7 @@
       "attributes": {
         "dynports": "00000000000000000000000000000001",
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:1.1-16.10"
+        "src": "tests/micro/verilog/micro/param_override.v:1.1-16.10"
       },
       "parameter_default_values": {
         "width": "00000000000000000000000000000100"
@@ -184,10 +184,10 @@
             "TYPE": "module"
           },
           "attributes": {
-            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:13.29-13.50",
+            "cell_src": "tests/micro/verilog/micro/param_override.v:13.29-13.50",
             "module": "$paramod\\bottom\\d=s32'00000000000000000000000000000011",
             "module_hdlname": "bottom",
-            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:18.1-26.10"
+            "module_src": "tests/micro/verilog/micro/param_override.v:18.1-26.10"
           },
           "port_directions": {
           },
@@ -201,10 +201,10 @@
             "TYPE": "module"
           },
           "attributes": {
-            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:10.12-10.33",
+            "cell_src": "tests/micro/verilog/micro/param_override.v:10.12-10.33",
             "module": "$paramod\\bottom\\d=s32'00000000000000000000000000000100",
             "module_hdlname": "bottom",
-            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:18.1-26.10"
+            "module_src": "tests/micro/verilog/micro/param_override.v:18.1-26.10"
           },
           "port_directions": {
           },
@@ -218,10 +218,10 @@
             "TYPE": "module"
           },
           "attributes": {
-            "cell_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:15.20-15.41",
+            "cell_src": "tests/micro/verilog/micro/param_override.v:15.20-15.41",
             "module": "$paramod$df1942bf5a5ce6287d2e89ba727681b40193fdfd\\bottom",
             "module_hdlname": "bottom",
-            "module_src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:18.1-26.10"
+            "module_src": "tests/micro/verilog/micro/param_override.v:18.1-26.10"
           },
           "port_directions": {
           },
@@ -234,35 +234,35 @@
           "hide_name": 0,
           "bits": [ 2, 3, 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:4.24-4.25"
+            "src": "tests/micro/verilog/micro/param_override.v:4.24-4.25"
           }
         },
         "b1": {
           "hide_name": 0,
           "bits": [ "1", "1", 2, 3, 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:5.25-5.27"
+            "src": "tests/micro/verilog/micro/param_override.v:5.25-5.27"
           }
         },
         "b2": {
           "hide_name": 0,
           "bits": [ "0", "0", 6, 7, 8, 9 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:5.29-5.31"
+            "src": "tests/micro/verilog/micro/param_override.v:5.29-5.31"
           }
         },
         "b3": {
           "hide_name": 0,
           "bits": [ 2, 3, 10, 11, 12, 13 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:5.33-5.35"
+            "src": "tests/micro/verilog/micro/param_override.v:5.33-5.35"
           }
         },
         "b4": {
           "hide_name": 0,
           "bits": [ "1", "1", 2, 3, 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:5.37-5.39"
+            "src": "tests/micro/verilog/micro/param_override.v:5.37-5.39"
           }
         },
         "inst_1.a": {
@@ -270,7 +270,7 @@
           "bits": [ 2, 3, 4, 5 ],
           "attributes": {
             "hdlname": "inst_1 a",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:22.16-22.17"
+            "src": "tests/micro/verilog/micro/param_override.v:22.16-22.17"
           }
         },
         "inst_1.b": {
@@ -278,7 +278,7 @@
           "bits": [ "1", "1", 2, 3, 4, 5 ],
           "attributes": {
             "hdlname": "inst_1 b",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:23.17-23.18"
+            "src": "tests/micro/verilog/micro/param_override.v:23.17-23.18"
           }
         },
         "inst_2.a": {
@@ -286,7 +286,7 @@
           "bits": [ 2, 3, 4, 5 ],
           "attributes": {
             "hdlname": "inst_2 a",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:22.16-22.17"
+            "src": "tests/micro/verilog/micro/param_override.v:22.16-22.17"
           }
         },
         "inst_2.b": {
@@ -294,7 +294,7 @@
           "bits": [ "0", "0", 6, 7, 8, 9 ],
           "attributes": {
             "hdlname": "inst_2 b",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:23.17-23.18"
+            "src": "tests/micro/verilog/micro/param_override.v:23.17-23.18"
           }
         },
         "inst_3.a": {
@@ -302,7 +302,7 @@
           "bits": [ 2, 3, 4, 5 ],
           "attributes": {
             "hdlname": "inst_3 a",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:22.16-22.17"
+            "src": "tests/micro/verilog/micro/param_override.v:22.16-22.17"
           }
         },
         "inst_3.b": {
@@ -310,7 +310,7 @@
           "bits": [ 2, 3, 10, 11, 12, 13 ],
           "attributes": {
             "hdlname": "inst_3 b",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/param_override.v:23.17-23.18"
+            "src": "tests/micro/verilog/micro/param_override.v:23.17-23.18"
           }
         }
       }

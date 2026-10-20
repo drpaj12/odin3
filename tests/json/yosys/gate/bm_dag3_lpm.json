@@ -4,7 +4,7 @@
     "bm_dag3_lpm": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:4.1-32.10"
+        "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:4.1-32.10"
       },
       "ports": {
         "clock": {
@@ -51,7 +51,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:28.12-28.20|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.31-279.37"
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:28.12-28.20|yosys-share/techmap.v:279.31-279.37"
           },
           "port_directions": {
             "A": "input",
@@ -68,7 +68,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:29.12-29.23|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:29.12-29.23|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -87,7 +87,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:28.12-28.20|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:28.12-28.20|yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -106,7 +106,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:206.13-206.19"
+            "src": "yosys-share/techmap.v:206.13-206.19"
           },
           "port_directions": {
             "A": "input",
@@ -125,7 +125,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:205.14-205.19"
+            "src": "yosys-share/techmap.v:205.14-205.19"
           },
           "port_directions": {
             "A": "input",
@@ -145,7 +145,7 @@
           "bits": [ 12, 14 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:28.12-28.20|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:279.21-279.23",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:28.12-28.20|yosys-share/techmap.v:279.21-279.23",
             "unused_bits": "1 "
           }
         },
@@ -154,7 +154,7 @@
           "bits": [ 9, 15 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:28.12-28.20|/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:270.23-270.24",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:28.12-28.20|yosys-share/techmap.v:270.23-270.24",
             "unused_bits": "1 "
           }
         },
@@ -164,21 +164,21 @@
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
             "single_bit_vector": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:203.19-203.21"
+            "src": "yosys-share/techmap.v:203.19-203.21"
           }
         },
         "a_in": {
           "hide_name": 0,
           "bits": [ 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:14.55-14.59"
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:14.55-14.59"
           }
         },
         "b": {
           "hide_name": 0,
           "bits": [ 10, 16 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:21.57-21.58",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:21.57-21.58",
             "unused_bits": "1 "
           }
         },
@@ -186,14 +186,14 @@
           "hide_name": 0,
           "bits": [ 6, 7 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:15.55-15.59"
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:15.55-15.59"
           }
         },
         "c": {
           "hide_name": 0,
           "bits": [ 11, 17 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:22.57-22.58",
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:22.57-22.58",
             "unused_bits": "1 "
           }
         },
@@ -201,21 +201,21 @@
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:11.7-11.12"
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:11.7-11.12"
           }
         },
         "out": {
           "hide_name": 0,
           "bits": [ "0", 8 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:17.56-17.59"
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:17.56-17.59"
           }
         },
         "reset_n": {
           "hide_name": 0,
           "bits": [ 3 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag3_lpm.v:12.8-12.15"
+            "src": "tests/micro/verilog/micro/bm_dag3_lpm.v:12.8-12.15"
           }
         }
       }

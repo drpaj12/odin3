@@ -4,7 +4,7 @@
     "bm_DL_2_cascaded_flip_flops": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:3.1-14.10"
+        "src": "tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:3.1-14.10"
       },
       "ports": {
         "D": {
@@ -31,7 +31,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:8.2-12.5"
+            "src": "tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:8.2-12.5"
           },
           "port_directions": {
             "C": "input",
@@ -50,7 +50,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:8.2-12.5"
+            "src": "tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:8.2-12.5"
           },
           "port_directions": {
             "C": "input",
@@ -69,28 +69,28 @@
           "hide_name": 0,
           "bits": [ 3 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:4.11-4.16"
+            "src": "tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:4.11-4.16"
           }
         },
         "D": {
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:4.8-4.9"
+            "src": "tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:4.8-4.9"
           }
         },
         "Q1": {
           "hide_name": 0,
           "bits": [ 4 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:5.9-5.11"
+            "src": "tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:5.9-5.11"
           }
         },
         "Q2": {
           "hide_name": 0,
           "bits": [ 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:5.13-5.15"
+            "src": "tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v:5.13-5.15"
           }
         }
       }

@@ -4,7 +4,7 @@
     "bm_DL_Dff_w_synch_reset": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:3.1-14.10"
+        "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:3.1-14.10"
       },
       "ports": {
         "D": {
@@ -33,7 +33,7 @@
             "WIDTH": "00000000000000000000000000000001"
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:8.2-12.11"
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:8.2-12.11"
           },
           "port_directions": {
             "CLK": "input",
@@ -54,7 +54,7 @@
           },
           "attributes": {
             "full_case": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:9.7-9.14|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:9.3-12.11"
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:9.7-9.14|tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:9.3-12.11"
           },
           "port_directions": {
             "A": "input",
@@ -75,35 +75,35 @@
           "hide_name": 1,
           "bits": [ 6 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:8.2-12.11"
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:8.2-12.11"
           }
         },
         "Clock": {
           "hide_name": 0,
           "bits": [ 3 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:4.11-4.16"
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:4.11-4.16"
           }
         },
         "D": {
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:4.8-4.9"
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:4.8-4.9"
           }
         },
         "Q": {
           "hide_name": 0,
           "bits": [ 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:5.9-5.10"
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:5.9-5.10"
           }
         },
         "Resetn": {
           "hide_name": 0,
           "bits": [ 4 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:4.18-4.24"
+            "src": "tests/micro/verilog/micro/bm_DL_Dff_w_synch_reset.v:4.18-4.24"
           }
         }
       }

@@ -4,7 +4,7 @@
     "bm_DL_4_16_encoder": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:3.1-15.10"
+        "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:3.1-15.10"
       },
       "ports": {
         "W": {
@@ -28,7 +28,7 @@
           },
           "attributes": {
             "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:9.10-9.35"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:9.10-9.35"
           },
           "port_directions": {
             "En": "input",
@@ -48,7 +48,7 @@
           },
           "attributes": {
             "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:10.10-10.37"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:10.10-10.37"
           },
           "port_directions": {
             "En": "input",
@@ -68,7 +68,7 @@
           },
           "attributes": {
             "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:11.10-11.37"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:11.10-11.37"
           },
           "port_directions": {
             "En": "input",
@@ -88,7 +88,7 @@
           },
           "attributes": {
             "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:12.10-12.38"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:12.10-12.38"
           },
           "port_directions": {
             "En": "input",
@@ -108,7 +108,7 @@
           },
           "attributes": {
             "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:13.10-13.39"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:13.10-13.39"
           },
           "port_directions": {
             "En": "input",
@@ -127,35 +127,35 @@
           "hide_name": 0,
           "bits": [ 22 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:5.8-5.10"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:5.8-5.10"
           }
         },
         "M": {
           "hide_name": 0,
           "bits": [ 23, 24, 25, 26 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:7.13-7.14"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:7.13-7.14"
           }
         },
         "W": {
           "hide_name": 0,
           "bits": [ 2, 3, 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:4.14-4.15"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:4.14-4.15"
           }
         },
         "Y": {
           "hide_name": 0,
           "bits": [ 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:6.16-6.17"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:6.16-6.17"
           }
         }
       }
     },
     "dec2to4": {
       "attributes": {
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:17.1-32.10"
+        "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:17.1-32.10"
       },
       "ports": {
         "W": {
@@ -181,7 +181,7 @@
           },
           "attributes": {
             "full_case": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:24.3-30.10"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_4_16_encoder.v:24.3-30.10"
           },
           "port_directions": {
             "A": "input",
@@ -208,7 +208,7 @@
           },
           "attributes": {
             "full_case": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:24.3-30.10"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_4_16_encoder.v:24.3-30.10"
           },
           "port_directions": {
             "A": "input",
@@ -233,7 +233,7 @@
           },
           "attributes": {
             "full_case": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:24.3-30.10"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_4_16_encoder.v:24.3-30.10"
           },
           "port_directions": {
             "A": "input",
@@ -258,7 +258,7 @@
           },
           "attributes": {
             "full_case": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:24.3-30.10"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_4_16_encoder.v:24.3-30.10"
           },
           "port_directions": {
             "A": "input",
@@ -283,7 +283,7 @@
           },
           "attributes": {
             "full_case": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:0.0-0.0|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:24.3-30.10"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:0.0-0.0|tests/micro/verilog/micro/bm_DL_4_16_encoder.v:24.3-30.10"
           },
           "port_directions": {
             "A": "input",
@@ -326,21 +326,21 @@
           "hide_name": 0,
           "bits": [ 8 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:19.8-19.10"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:19.8-19.10"
           }
         },
         "W": {
           "hide_name": 0,
           "bits": [ 2, 3 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:18.14-18.15"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:18.14-18.15"
           }
         },
         "Y": {
           "hide_name": 0,
           "bits": [ 4, 5, 6, 7 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_16_encoder.v:20.15-20.16"
+            "src": "tests/micro/verilog/micro/bm_DL_4_16_encoder.v:20.15-20.16"
           }
         }
       }

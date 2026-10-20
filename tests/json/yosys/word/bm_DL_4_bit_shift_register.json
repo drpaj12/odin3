@@ -4,7 +4,7 @@
     "bm_DL_4_bit_shift_register": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:3.1-14.10"
+        "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:3.1-14.10"
       },
       "ports": {
         "R": {
@@ -36,7 +36,7 @@
           },
           "attributes": {
             "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:12.9-12.44"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:12.9-12.44"
           },
           "port_directions": {
             "Clock": "input",
@@ -60,7 +60,7 @@
           },
           "attributes": {
             "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:11.9-11.44"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:11.9-11.44"
           },
           "port_directions": {
             "Clock": "input",
@@ -84,7 +84,7 @@
           },
           "attributes": {
             "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:10.9-10.44"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:10.9-10.44"
           },
           "port_directions": {
             "Clock": "input",
@@ -108,7 +108,7 @@
           },
           "attributes": {
             "module_not_derived": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:9.9-9.41"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:9.9-9.41"
           },
           "port_directions": {
             "Clock": "input",
@@ -131,42 +131,42 @@
           "hide_name": 0,
           "bits": [ 8 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:5.14-5.19"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:5.14-5.19"
           }
         },
         "L": {
           "hide_name": 0,
           "bits": [ 6 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:5.8-5.9"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:5.8-5.9"
           }
         },
         "Q": {
           "hide_name": 0,
           "bits": [ 9, 10, 11, 12 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:6.15-6.16"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:6.15-6.16"
           }
         },
         "R": {
           "hide_name": 0,
           "bits": [ 2, 3, 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:4.14-4.15"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:4.14-4.15"
           }
         },
         "w": {
           "hide_name": 0,
           "bits": [ 7 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:5.11-5.12"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:5.11-5.12"
           }
         }
       }
     },
     "muxdff": {
       "attributes": {
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:16.1-27.10"
+        "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:16.1-27.10"
       },
       "ports": {
         "D0": {
@@ -199,7 +199,7 @@
             "WIDTH": "00000000000000000000000000000001"
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:21.2-25.12"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:21.2-25.12"
           },
           "port_directions": {
             "CLK": "input",
@@ -220,7 +220,7 @@
           },
           "attributes": {
             "full_case": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:22.8-22.12|/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:22.4-25.12"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:22.8-22.12|tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:22.4-25.12"
           },
           "port_directions": {
             "A": "input",
@@ -241,42 +241,42 @@
           "hide_name": 1,
           "bits": [ 7 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:21.2-25.12"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:21.2-25.12"
           }
         },
         "Clock": {
           "hide_name": 0,
           "bits": [ 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:17.21-17.26"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:17.21-17.26"
           }
         },
         "D0": {
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:17.8-17.10"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:17.8-17.10"
           }
         },
         "D1": {
           "hide_name": 0,
           "bits": [ 3 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:17.12-17.14"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:17.12-17.14"
           }
         },
         "Q": {
           "hide_name": 0,
           "bits": [ 6 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:18.9-18.10"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:18.9-18.10"
           }
         },
         "Sel": {
           "hide_name": 0,
           "bits": [ 4 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:17.16-17.19"
+            "src": "tests/micro/verilog/micro/bm_DL_4_bit_shift_register.v:17.16-17.19"
           }
         }
       }

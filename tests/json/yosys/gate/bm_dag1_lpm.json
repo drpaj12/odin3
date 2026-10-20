@@ -4,7 +4,7 @@
     "bm_dag1_lpm": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_lpm.v:4.1-30.10"
+        "src": "tests/micro/verilog/micro/bm_dag1_lpm.v:4.1-30.10"
       },
       "ports": {
         "clock": {
@@ -84,7 +84,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:206.25-206.32"
+            "src": "yosys-share/techmap.v:206.25-206.32"
           },
           "port_directions": {
             "A": "input",
@@ -103,7 +103,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:206.13-206.19"
+            "src": "yosys-share/techmap.v:206.13-206.19"
           },
           "port_directions": {
             "A": "input",
@@ -122,7 +122,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:206.13-206.19"
+            "src": "yosys-share/techmap.v:206.13-206.19"
           },
           "port_directions": {
             "A": "input",
@@ -141,7 +141,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:205.38-205.44"
+            "src": "yosys-share/techmap.v:205.38-205.44"
           },
           "port_directions": {
             "A": "input",
@@ -160,7 +160,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:206.25-206.32"
+            "src": "yosys-share/techmap.v:206.25-206.32"
           },
           "port_directions": {
             "A": "input",
@@ -179,7 +179,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:206.13-206.19"
+            "src": "yosys-share/techmap.v:206.13-206.19"
           },
           "port_directions": {
             "A": "input",
@@ -198,7 +198,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:206.13-206.19"
+            "src": "yosys-share/techmap.v:206.13-206.19"
           },
           "port_directions": {
             "A": "input",
@@ -217,7 +217,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:205.38-205.44"
+            "src": "yosys-share/techmap.v:205.38-205.44"
           },
           "port_directions": {
             "A": "input",
@@ -236,7 +236,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:205.26-205.31"
+            "src": "yosys-share/techmap.v:205.26-205.31"
           },
           "port_directions": {
             "A": "input",
@@ -255,7 +255,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:205.14-205.19"
+            "src": "yosys-share/techmap.v:205.14-205.19"
           },
           "port_directions": {
             "A": "input",
@@ -274,7 +274,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:205.14-205.19"
+            "src": "yosys-share/techmap.v:205.14-205.19"
           },
           "port_directions": {
             "A": "input",
@@ -293,7 +293,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:206.25-206.32"
+            "src": "yosys-share/techmap.v:206.25-206.32"
           },
           "port_directions": {
             "A": "input",
@@ -312,7 +312,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:206.13-206.19"
+            "src": "yosys-share/techmap.v:206.13-206.19"
           },
           "port_directions": {
             "A": "input",
@@ -331,7 +331,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:206.13-206.19"
+            "src": "yosys-share/techmap.v:206.13-206.19"
           },
           "port_directions": {
             "A": "input",
@@ -350,7 +350,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:205.38-205.44"
+            "src": "yosys-share/techmap.v:205.38-205.44"
           },
           "port_directions": {
             "A": "input",
@@ -369,7 +369,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:205.26-205.31"
+            "src": "yosys-share/techmap.v:205.26-205.31"
           },
           "port_directions": {
             "A": "input",
@@ -388,7 +388,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:205.14-205.19"
+            "src": "yosys-share/techmap.v:205.14-205.19"
           },
           "port_directions": {
             "A": "input",
@@ -407,7 +407,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:205.14-205.19"
+            "src": "yosys-share/techmap.v:205.14-205.19"
           },
           "port_directions": {
             "A": "input",
@@ -426,7 +426,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:288.13-288.20"
+            "src": "yosys-share/techmap.v:288.13-288.20"
           },
           "port_directions": {
             "A": "input",
@@ -446,7 +446,7 @@
           "bits": [ 11, 7 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:198.26-198.27"
+            "src": "yosys-share/techmap.v:198.26-198.27"
           }
         },
         "$auto$maccmap.cc:114:fulladd$92.X": {
@@ -454,7 +454,7 @@
           "bits": [ 14, 30 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:200.21-200.22",
+            "src": "yosys-share/techmap.v:200.21-200.22",
             "unused_bits": "1 "
           }
         },
@@ -463,7 +463,7 @@
           "bits": [ 15, 16 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:200.24-200.25"
+            "src": "yosys-share/techmap.v:200.24-200.25"
           }
         },
         "$auto$maccmap.cc:114:fulladd$92.t1": {
@@ -471,7 +471,7 @@
           "bits": [ 11, 10 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:203.19-203.21"
+            "src": "yosys-share/techmap.v:203.19-203.21"
           }
         },
         "$auto$maccmap.cc:114:fulladd$92.t3": {
@@ -479,7 +479,7 @@
           "bits": [ 13, 31 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:203.27-203.29",
+            "src": "yosys-share/techmap.v:203.27-203.29",
             "unused_bits": "1 "
           }
         },
@@ -488,7 +488,7 @@
           "bits": [ 12, 14 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:198.23-198.24"
+            "src": "yosys-share/techmap.v:198.23-198.24"
           }
         },
         "$auto$maccmap.cc:114:fulladd$95.X": {
@@ -496,7 +496,7 @@
           "bits": [ 19, 32 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:200.21-200.22",
+            "src": "yosys-share/techmap.v:200.21-200.22",
             "unused_bits": "1 "
           }
         },
@@ -505,7 +505,7 @@
           "bits": [ 21, 23 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:200.24-200.25"
+            "src": "yosys-share/techmap.v:200.24-200.25"
           }
         },
         "$auto$maccmap.cc:114:fulladd$95.t1": {
@@ -513,7 +513,7 @@
           "bits": [ 20, 22 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:203.19-203.21"
+            "src": "yosys-share/techmap.v:203.19-203.21"
           }
         },
         "$auto$maccmap.cc:114:fulladd$95.t2": {
@@ -521,7 +521,7 @@
           "bits": [ 17, 33 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:203.23-203.25",
+            "src": "yosys-share/techmap.v:203.23-203.25",
             "unused_bits": "1 "
           }
         },
@@ -530,7 +530,7 @@
           "bits": [ 18, 34 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:203.27-203.29",
+            "src": "yosys-share/techmap.v:203.27-203.29",
             "unused_bits": "1 "
           }
         },
@@ -539,7 +539,7 @@
           "bits": [ 26, 35 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:200.21-200.22",
+            "src": "yosys-share/techmap.v:200.21-200.22",
             "unused_bits": "1 "
           }
         },
@@ -548,7 +548,7 @@
           "bits": [ 8, 29 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:200.24-200.25"
+            "src": "yosys-share/techmap.v:200.24-200.25"
           }
         },
         "$auto$maccmap.cc:114:fulladd$98.t1": {
@@ -556,7 +556,7 @@
           "bits": [ 27, 28 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:203.19-203.21"
+            "src": "yosys-share/techmap.v:203.19-203.21"
           }
         },
         "$auto$maccmap.cc:114:fulladd$98.t2": {
@@ -564,7 +564,7 @@
           "bits": [ 24, 36 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:203.23-203.25",
+            "src": "yosys-share/techmap.v:203.23-203.25",
             "unused_bits": "1 "
           }
         },
@@ -573,7 +573,7 @@
           "bits": [ 25, 37 ],
           "attributes": {
             "force_downto": "00000000000000000000000000000001",
-            "src": "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/share/techmap.v:203.27-203.29",
+            "src": "yosys-share/techmap.v:203.27-203.29",
             "unused_bits": "1 "
           }
         },
@@ -581,35 +581,35 @@
           "hide_name": 0,
           "bits": [ 4, 5 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_lpm.v:14.55-14.59"
+            "src": "tests/micro/verilog/micro/bm_dag1_lpm.v:14.55-14.59"
           }
         },
         "b_in": {
           "hide_name": 0,
           "bits": [ 6, 7 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_lpm.v:15.55-15.59"
+            "src": "tests/micro/verilog/micro/bm_dag1_lpm.v:15.55-15.59"
           }
         },
         "clock": {
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_lpm.v:11.7-11.12"
+            "src": "tests/micro/verilog/micro/bm_dag1_lpm.v:11.7-11.12"
           }
         },
         "out": {
           "hide_name": 0,
           "bits": [ 8, 9 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_lpm.v:17.56-17.59"
+            "src": "tests/micro/verilog/micro/bm_dag1_lpm.v:17.56-17.59"
           }
         },
         "reset_n": {
           "hide_name": 0,
           "bits": [ 3 ],
           "attributes": {
-            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_dag1_lpm.v:12.8-12.15"
+            "src": "tests/micro/verilog/micro/bm_dag1_lpm.v:12.8-12.15"
           }
         }
       }
