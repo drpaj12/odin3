@@ -734,7 +734,7 @@ static void expect_node_line(const char *text, uint32_t node, const char *needle
 }
 
 static void expect_fill(const char *text, uint32_t node, const char *color) {
-    char needle[NAME_BUF];
+    char needle[PATH_BUF];
     (void)snprintf(needle, sizeof needle, "style=filled, fillcolor=\"%s\"", color);
     expect_node_line(text, node, needle);
 }
