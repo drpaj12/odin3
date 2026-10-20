@@ -1180,6 +1180,12 @@ static void test_mem_sim_variable_enable(void) {
     TEST_ASSERT_TRUE(sim_equal(mc, LOW_BITS));
     mc.rd[0].en_neg = true;
     TEST_ASSERT_TRUE(sim_equal(mc, LOW_BITS));
+}
+
+static void test_active_low_enable_has_a_not(void) {
+    memcase mc = base((shape){4, 3, 1, 1});
+    mc.rd[0].mode = R_DFFE_VAR;
+    mc.rd[0].en_neg = true;
     pb_result res;
     build_mem(mc, &res);
     TEST_ASSERT_TRUE(mapped(&res, NULL));
@@ -1588,6 +1594,7 @@ int main(void) {
     RUN_TEST(test_p_rd_en_nonconst);
     RUN_TEST(test_rd_en_unconnected_stays_soft);
     RUN_TEST(test_mem_sim_variable_enable);
+    RUN_TEST(test_active_low_enable_has_a_not);
     RUN_TEST(test_p_transparent_and_split_enable);
     RUN_TEST(test_r12_init_dropped);
     RUN_TEST(test_e_offset_nonzero_soft);
