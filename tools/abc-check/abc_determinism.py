@@ -13,14 +13,22 @@ repeats; the default is ``a``)::
                           write_blif OUT
        compare ``write_blif`` and, with ``--via-blif``, every ``abc<r>.in.blif``, ``.cmd`` and
        ``.out.blif`` of V (V is the same path in both runs, and run 1's files are moved aside
-       first).  A ``.log`` and ``--log`` are never compared (they hold times), and neither is the
-       ``# Benchmark "<name>" written by ABC on <date>`` line that ABC puts at the head of
-       ``.out.blif`` (a deviation from "byte for byte": it holds the wall-clock date).
+       first); with ``--via-blif`` a run that leaves no ``.in.blif``, ``.cmd`` or ``.out.blif``
+       is an error, not ``same``.  A ``.log`` and ``--log`` are never compared (they hold
+       times), and neither is the first-line ``# Benchmark "<name>" written by ABC on <date>``
+       comment ABC puts at the head of ``.out.blif`` (a deviation from "byte for byte": it holds
+       the wall-clock date).  Then the child route: the same two processes again with
+       ``--script <strash; fraig; if -K K>`` and ``--via-blif`` (a non-default script goes to the
+       ABC child process, and its files are compared); a difference there shows as
+       ``child:<file>``.
     b  one process: the first model of X three times (``<m>``, ``<m>__o3det2``, ``<m>__o3det3``)
-       and its other models once, mapped by one ``abc`` call, so the engine opens three sessions
-       in one process; the three copies must come out the same, for the default script and for
-       ``strash; fraig; if -K K`` (the generators ABC reseeds at ``open``, I5).
-    c  (a)'s first process, a sleep of 60 s, (a)'s first process again: the same.
+       and its other models once, mapped by one ``abc`` call.  With the default script the engine
+       opens three sessions in one process, and the three copies must come out the same (the
+       generators ABC reseeds at ``open``, I5).  With ``strash; fraig; if -K K`` the script is
+       not the default, so each copy is its own ABC child process: that row tests the child
+       route, not reseeding.
+    c  (a)'s two processes with a sleep of 60 s between them (the exchange files too with
+       ``--via-blif``).
     d  (a)'s command with ``--odin3`` (Release) and with ``--odin3-debug`` (Debug): the same
        ``write_blif``.  Micros only: a path under a ``vtr/`` golden directory is refused (exit 2),
        and so is a missing ``--odin3-debug``.
@@ -64,7 +72,7 @@ MODES = ("a", "b", "c", "d")
 SLEEP_SECONDS = 60  # §13.8 (c)
 COPIES = 3
 FRAIG_SCRIPT = "strash\nfraig\nif -K {K}\n"
-STAMP_HEAD, STAMP_MID = b"# Benchmark ", b" written by ABC on "
+STAMP_LINE = re.compile(rb'^# Benchmark "[^"]*" written by ABC on .+$')  # first line only
 EXCHANGE_FILES = re.compile(r"^abc\d+\.(in\.blif|cmd|out\.blif)$")  # never a .log
 
 
@@ -82,6 +90,7 @@ class Config:
     keep: Path
     timeout: int
     sleep: Callable[[float], None]
+    gap: float = 0.0  # seconds slept between the two runs of two_runs
 
 
 # --- one odin3 run ---------------------------------------------------------------------------
@@ -116,6 +125,15 @@ def check_path(path: Path) -> None:
 # --- modes (a), (c) and (d): two runs of one command ------------------------------------------
 
 
+def require_exchange(directory: Path) -> None:
+    """ToolError unless the directory holds an ``.in.blif``, a ``.cmd`` and an ``.out.blif``: a
+    ``--via-blif`` run that wrote none has compared nothing."""
+    found = {suffix for name in exchange_files(directory)
+             for suffix in ("in.blif", "cmd", "out.blif") if name.endswith("." + suffix)}
+    if len(found) < 3:
+        raise ToolError(f"{directory}: no exchange files (.in.blif, .cmd, .out.blif) written")
+
+
 def abc_args(cfg: Config, via: Path | None, script: Path | None = None) -> str:
     text = f"--lut {cfg.lut}"
     text += f" --via-blif {via}" if via is not None else ""
@@ -130,10 +148,12 @@ def exchange_files(directory: Path) -> dict[str, Path]:
 
 def comparable(path: Path) -> bytes:
     """The bytes of a file, without ABC's own time stamp: ``write_hie`` heads ``.out.blif`` with
-    ``# Benchmark "<name>" written by ABC on <date>``, which differs between any two runs."""
-    kept = [line for line in path.read_bytes().splitlines(keepends=True)
-            if not (line.startswith(STAMP_HEAD) and STAMP_MID in line)]
-    return b"".join(kept)
+    ``# Benchmark "<name>" written by ABC on <date>``, which differs between any two runs.  Only
+    a first line of that form is dropped."""
+    lines = path.read_bytes().splitlines(keepends=True)
+    if lines and STAMP_LINE.match(lines[0].rstrip(b"\r\n")):
+        lines = lines[1:]
+    return b"".join(lines)
 
 
 def same_bytes(left: Path | None, right: Path | None) -> bool:
@@ -154,8 +174,10 @@ def first_difference(runs: tuple[Path, Path], files: tuple[Path, Path]) -> str |
     return None
 
 
-def two_runs(cfg: Config, design: Path, out: Path, binaries: tuple[str, str]) -> str | None:
-    """Two runs of the same command, one per binary; the first difference or None."""
+def two_runs(cfg: Config, design: Path, out: Path, binaries: tuple[str, str],
+             script: Path | None = None) -> str | None:
+    """Two runs of the same command, one per binary (``cfg.gap`` seconds apart); the first
+    difference or None.  ToolError when ``--via-blif`` leaves no exchange files."""
     check_path(out)
     out.mkdir(parents=True, exist_ok=True)
     via = out / "exchange" if cfg.via_blif else None
@@ -166,28 +188,39 @@ def two_runs(cfg: Config, design: Path, out: Path, binaries: tuple[str, str]) ->
     outs = (out / "run1.blif", out / "run2.blif")
     for number, binary in enumerate(binaries):
         outs[number].unlink(missing_ok=True)
-        run_odin3(cfg, binary, script_text(design, outs[number], abc_args(cfg, via)))
+        run_odin3(cfg, binary, script_text(design, outs[number], abc_args(cfg, via, script)))
         if number == 0 and via is not None and via.exists():
             shutil.move(str(via), str(kept))  # the same path again in run 2 (.cmd holds it)
+        if number == 0 and cfg.gap > 0:
+            cfg.sleep(cfg.gap)
+    if via is not None:
+        require_exchange(kept)
+        require_exchange(via)
     return first_difference(outs, (kept, via if via is not None else kept))
 
 
+def fraig_script(cfg: Config, where: Path) -> Path:
+    """Writes ``strash; fraig; if -K K`` (not the default script) under where."""
+    where.mkdir(parents=True, exist_ok=True)
+    path = where / "fraig.abc"
+    path.write_text(FRAIG_SCRIPT.replace("{K}", str(cfg.lut)), encoding="utf-8")
+    return path
+
+
 def mode_a(cfg: Config, design: Path, out: Path) -> str | None:
-    return two_runs(cfg, design, out / "a", (cfg.odin3, cfg.odin3))
+    """The default script, then the child route (a non-default script, the BLIF exchange)."""
+    found = two_runs(cfg, design, out / "a", (cfg.odin3, cfg.odin3))
+    if found is not None:
+        return found
+    child = dataclasses.replace(cfg, via_blif=True)
+    found = two_runs(child, design, out / "a-child", (cfg.odin3, cfg.odin3),
+                     fraig_script(cfg, out / "a-child"))
+    return None if found is None else f"child:{found}"
 
 
 def mode_c(cfg: Config, design: Path, out: Path) -> str | None:
-    where = out / "c"
-    check_path(where)
-    where.mkdir(parents=True, exist_ok=True)
-    first = where / "run1.blif"
-    second = where / "run2.blif"
-    for number, target in enumerate((first, second)):
-        target.unlink(missing_ok=True)
-        run_odin3(cfg, cfg.odin3, script_text(design, target, abc_args(cfg, None)))
-        if number == 0:
-            cfg.sleep(SLEEP_SECONDS)
-    return None if same_bytes(first, second) else "write_blif"
+    return two_runs(dataclasses.replace(cfg, gap=SLEEP_SECONDS), design, out / "c",
+                    (cfg.odin3, cfg.odin3))
 
 
 def mode_d(cfg: Config, design: Path, out: Path) -> str | None:
@@ -252,9 +285,7 @@ def mode_b(cfg: Config, design: Path, out: Path) -> str | None:
     where = out / "b"
     check_path(where)
     where.mkdir(parents=True, exist_ok=True)
-    fraig = where / "fraig.abc"
-    fraig.write_text(FRAIG_SCRIPT.replace("{K}", str(cfg.lut)), encoding="utf-8")
-    for script in (None, fraig):
+    for script in (None, fraig_script(cfg, where)):
         found = one_script(cfg, design, where, script)
         if found is not None:
             return found
@@ -318,7 +349,8 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--lut", type=int, default=abc_equiv.DEFAULT_LUT, metavar="K")
     ap.add_argument("--timeout", type=int, default=abc_equiv.DEFAULT_TIMEOUT, metavar="S")
     ap.add_argument("--expect-fail", metavar="F", help="listed designs are skipped")
-    ap.add_argument("--keep", metavar="DIR", help="where the runs' files are kept")
+    ap.add_argument("--keep", metavar="DIR", help="where the runs' files are kept (default: a new temporary directory, "
+                    "never removed)")
     return ap
 
 

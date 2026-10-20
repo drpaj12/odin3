@@ -23,6 +23,8 @@ from . import helpers
 #   logonly: only abc0.log and the ABC time stamp of abc0.out.blif differ (not compared)
 #   outbody: abc0.out.blif differs after its time stamp    third: the third model of a copy differs
 #   debug: the Debug binary (named odin3-debug) writes another write_blif
+#   scriptdiff: write_blif differs between runs only with --script (the child route)
+#   nofiles: with --via-blif no exchange file is written
 #   fail: odin3 exits 1
 FAKE_ODIN3 = """#!{python}
 import json, os, re, sys, time
@@ -42,6 +44,8 @@ text = open(design, encoding="utf-8").read()
 tick = str(time.time_ns())
 if "rand" in name:
     text += "# " + tick + "\\n"
+if "scriptdiff" in name and "--script" in script:
+    text += "# " + tick + "\\n"
 if "debug" in name and os.path.basename(argv[0]) == "odin3-debug":
     text += "# debug build\\n"
 if "third" in name:
@@ -49,7 +53,7 @@ if "third" in name:
     if len(parts) > 3:
         parts[3] += "# only the third\\n"
     text = ".model".join(parts)
-if via:
+if via and "nofiles" not in name:
     os.makedirs(via.group(1), exist_ok=True)
     base = via.group(1)
     open(base + "/abc0.in.blif", "w").write("in\\n")
@@ -107,8 +111,41 @@ class AbcDeterminismTest(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         self.assertEqual(out.splitlines()[0], f"{design} same")
         self.assertIn("1 designs: 1 same, 0 differs, 0 error", out)
-        self.assertEqual(len(self.calls()), 2)
+        calls = self.calls()
+        self.assertEqual(len(calls), 4)  # the default script twice, the child route twice
+        self.assertNotIn("--script", calls[0]["script"])
+        self.assertIn("--script", calls[2]["script"])
+        self.assertIn("--via-blif", calls[2]["script"])
         self.assertEqual(self.sleeps, [])
+
+    def test_the_child_route_row_finds_a_difference_only_it_shows(self) -> None:
+        design = self.design("d/scriptdiff.blif")
+        code, out, _ = self.run_tool(design)
+        self.assertEqual(code, 1)
+        self.assertIn(f"{design} differs a:child:write_blif", out)
+
+    def test_via_blif_with_no_exchange_files_is_an_error(self) -> None:
+        design = self.design("d/nofiles.blif")
+        code, out, _ = self.run_tool("--via-blif", design)
+        self.assertEqual(code, 2)
+        self.assertIn(f"{design} error", out)
+        self.assertIn("no exchange files", out)
+
+    def test_only_a_first_line_time_stamp_is_ignored(self) -> None:
+        left, right = self.root / "l.blif", self.root / "r.blif"
+        left.write_text('# Benchmark "a" written by ABC on Mon\nbody\n', encoding="utf-8")
+        right.write_text('# Benchmark "b" written by ABC on Tue\nbody\n', encoding="utf-8")
+        self.assertTrue(abc_determinism.same_bytes(left, right))
+        left.write_text('body\n# Benchmark "a" written by ABC on Mon\n', encoding="utf-8")
+        right.write_text('body\n# Benchmark "b" written by ABC on Tue\n', encoding="utf-8")
+        self.assertFalse(abc_determinism.same_bytes(left, right))
+
+    def test_mode_c_compares_the_exchange_files_across_the_gap(self) -> None:
+        design = self.design("d/cmd.blif")
+        code, out, _ = self.run_tool("--mode", "c", "--via-blif", design)
+        self.assertEqual(code, 1)
+        self.assertIn(f"{design} differs c:abc0.cmd", out)
+        self.assertEqual(self.sleeps, [60])
 
     def test_a_different_write_blif_differs(self) -> None:
         design = self.design("d/rand.blif")
@@ -139,7 +176,7 @@ class AbcDeterminismTest(unittest.TestCase):
         self.run_tool("--via-blif", design)
         paths = {c["script"].split("--via-blif ")[1].split(" ")[0].split(";")[0]
                  for c in self.calls()}
-        self.assertEqual(len(paths), 1)
+        self.assertEqual(len(paths), 2)  # the default row's and the child row's, each shared
 
     def test_without_via_blif_the_environment_is_passed_through(self) -> None:
         design = self.design("d/ok.blif")
