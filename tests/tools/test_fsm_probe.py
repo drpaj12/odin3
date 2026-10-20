@@ -145,8 +145,11 @@ class CommittedFactsTest(unittest.TestCase):
         path = helpers.REPO_ROOT / "tests/fsm/yosys_facts.json"
         cls.facts = json.loads(path.read_text())
 
+    def vtr_designs(self) -> dict[str, dict[str, list[dict[str, object]]]]:
+        return {k: v for k, v in self.facts.items() if not k.startswith(("micro/", "fsm/"))}
+
     def test_24_user_fsms_in_9_designs(self) -> None:
-        designs = {k: v for k, v in self.facts.items() if not k.startswith("micro/")}
+        designs = self.vtr_designs()
         user = {k: [f for f in v["fsms"] if "memwr" not in str(f["wire"])]
                 for k, v in designs.items()}
         self.assertEqual(len(designs), 9)
@@ -158,7 +161,7 @@ class CommittedFactsTest(unittest.TestCase):
         self.assertEqual(len(fsms), 1)
         self.assertEqual((fsms[0]["states"], fsms[0]["encoding"]), (32, "binary"))
         self.assertEqual((fsms[0]["bits_before"], fsms[0]["bits_after"]), (6, 5))
-        others = [f for k, v in self.facts.items() for f in v["fsms"] if f is not fsms[0]]
+        others = [f for v in self.vtr_designs().values() for f in v["fsms"] if f is not fsms[0]]
         self.assertTrue(all(f["encoding"] == "one-hot" for f in others))
 
     def test_25_micros_have_a_detected_register(self) -> None:
