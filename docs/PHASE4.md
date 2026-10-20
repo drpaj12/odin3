@@ -146,6 +146,24 @@ DESIGN §12.1.
    `test_arch_vtr` and `arch_corpus` skip (exit 77) in CI and run locally only; the
    template-versus-`lib/vtr.o3lib` and fixture tests run everywhere. CI is not changed.
 
+12. **4.8 FSM design questions** (Peter, 2026-10-19, on `docs/specs/2026-10-20-4.8-fsm-design.md`
+    section 20: "Yes to all"). That adopts the recommended answer to each of the ten questions:
+    1. no `$fsm` registry cell; the FSM table lives inside the pass (no IR change);
+    2. `fsm_opt` finds unused outputs with a native "unread and not a port" test, `opt_clean`
+       unchanged;
+    3. `keep` on a state register follows Yosys (detected and recoded; `fsm_encoding = "none"`
+       excludes);
+    4. 1,000,000-evaluation cap per FSM, then skip with a warning;
+    5. no pre-`proc` `opt_expr; opt_clean; opt -nodffe -nosdff` lines in the Phase 3 script;
+    6. `fsm` runs only in scripts that name it (the VTR scripts do), not gated on `--vtr-compat`;
+    7. attributes `odin3_fsm_states`, `odin3_fsm_encoding`, `odin3_fsm_orig_bits`,
+       `odin3_fsm_orig_name`;
+    8. the RAM write-enable 2-state registers are ported faithfully (recoded as Parmys does);
+    9. micro equivalence uses a bounded Yosys miter after reset (`fsm-equiv`);
+    10. stereovision3's unexplained flop is not a blocker for 4.8.
+    The plan (`docs/plans/2026-10-20-4.8-fsm-plan.md`) called this "decision 11"; main already
+    held 9 to 11, so it is 12.
+
 ## Open items
 
 (none open. Item 1, the sweep archs, is closed by decision 10.)
