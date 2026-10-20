@@ -12,14 +12,15 @@
 
 #include "odin3/odin3.h"
 #include "util/hash.h"
+#include "util/sha256.h"
 
 #include <stdint.h>
 
 enum {
-    ODIN3_HASH_NAME_WIDTH = 10,        /* H-3: base characters after the `h` */
-    ODIN3_HASH_NAME_STEP = 5,          /* H-3: each extension adds this many characters */
-    ODIN3_HASH_NAME_MAX_CHARS = 52,    /* 52 * 5 = 260 bits: the whole 256-bit digest */
-    ODIN3_HASH_NAME_BUF = 54,          /* `h`, 52 characters and the NUL */
+    ODIN3_HASH_NAME_WIDTH = 10,           /* H-3: base characters after the `h` */
+    ODIN3_HASH_NAME_STEP = 5,             /* H-3: each extension adds this many characters */
+    ODIN3_HASH_NAME_MAX_CHARS = 52,       /* 52 * 5 = 260 bits: the whole 256-bit digest */
+    ODIN3_HASH_NAME_BUF = 54,             /* `h`, 52 characters and the NUL */
     ODIN3_HASH_NAME_MAX_ENTRIES = 1 << 22 /* one resolve call: names of one module and kind */
 };
 
@@ -33,7 +34,8 @@ typedef struct odin3_hash_name {
  * chars + 1 bytes). The alphabet is `abcdefghijklmnopqrstuvwxyz234567`; character k holds bits
  * 5k to 5k + 4, big-endian, bits past the 256th read as 0. chars must be 1 to 52.
  */
-void odin3_base32_encode(const uint8_t digest[32], uint32_t chars, char *out);
+void odin3_base32_encode(const uint8_t digest[ODIN3_SHA256_DIGEST_BYTES], uint32_t chars,
+                         char *out);
 
 /*
  * The hash name of full at `chars` characters (1 to 52; other values are clamped into that range).

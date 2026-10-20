@@ -11,12 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum {
-    BITS_PER_CHAR = 5,
-    BYTE_BITS = 8,
-    CHAR_MASK = 0x1F,
-    DIGEST_BITS = 256
-};
+enum { BITS_PER_CHAR = 5, BYTE_BITS = 8, CHAR_MASK = 0x1F, DIGEST_BITS = 256 };
 
 static const char BASE32[] = "abcdefghijklmnopqrstuvwxyz234567";
 
@@ -28,7 +23,7 @@ void odin3_hash_name_test_width(uint32_t chars) {
 }
 
 /* The 5 bits at bit offset `bit` of digest (big-endian); bits past the 256th read 0. */
-static uint32_t digest_group(const uint8_t digest[32], uint32_t bit) {
+static uint32_t digest_group(const uint8_t digest[ODIN3_SHA256_DIGEST_BYTES], uint32_t bit) {
     uint32_t value = 0;
     for (uint32_t k = 0; k < BITS_PER_CHAR; k++) {
         uint32_t pos = bit + k;
@@ -41,7 +36,8 @@ static uint32_t digest_group(const uint8_t digest[32], uint32_t bit) {
     return value & CHAR_MASK;
 }
 
-void odin3_base32_encode(const uint8_t digest[32], uint32_t chars, char *out) {
+void odin3_base32_encode(const uint8_t digest[ODIN3_SHA256_DIGEST_BYTES], uint32_t chars,
+                         char *out) {
     for (uint32_t i = 0; i < chars; i++) {
         out[i] = BASE32[digest_group(digest, i * BITS_PER_CHAR)];
     }
@@ -64,7 +60,8 @@ void odin3_hash_name_make(odin3_bytes full, uint32_t chars, odin3_hash_name *out
     odin3_base32_encode(digest, chars, out->text + 1);
 }
 
-/* --- collision resolution ----------------------------------------------------------------------- */
+/* --- collision resolution -----------------------------------------------------------------------
+ */
 
 /* One name at its current width, for sorting into runs of equal text. */
 typedef struct hn_row {
@@ -79,26 +76,26 @@ typedef struct hn_work {
     uint32_t n;
     odin3_hash_name *out;
     hn_row *rows;
-    uint8_t *widths; /* current width of each name (at most 52) */
-    uint8_t *marks;  /* names to extend this round */
+    uint8_t *widths;       /* current width of each name (at most 52) */
+    uint8_t *marks;        /* names to extend this round */
     odin3_bytes *reserved; /* sorted copy */
     uint32_t nreserved;
 } hn_work;
 
-static int bytes_cmp(odin3_bytes a, odin3_bytes b) {
-    size_t common = a.len < b.len ? a.len : b.len;
-    int cmp = common == 0 ? 0 : memcmp(a.ptr, b.ptr, common);
-    if (cmp != 0) {
+static int bytes_cmp(odin3_bytes lhs, odin3_bytes rhs) {
+    size_t common = lhs.len < rhs.len ? lhs.len : rhs.len;
+    int cmp = common == 0 ? 0 : memcmp(lhs.ptr, rhs.ptr, common);
+    if (cmp != 0 || lhs.len == rhs.len) {
         return cmp;
     }
-    return a.len < b.len ? -1 : (a.len > b.len ? 1 : 0);
+    return lhs.len < rhs.len ? -1 : 1;
 }
 
 static int row_cmp(const void *lhs, const void *rhs) {
-    const hn_row *a = (const hn_row *)lhs;
-    const hn_row *b = (const hn_row *)rhs;
-    int cmp = strcmp(a->text, b->text);
-    return cmp != 0 ? cmp : bytes_cmp(a->full, b->full);
+    const hn_row *row_l = (const hn_row *)lhs;
+    const hn_row *row_r = (const hn_row *)rhs;
+    int cmp = strcmp(row_l->text, row_r->text);
+    return cmp != 0 ? cmp : bytes_cmp(row_l->full, row_r->full);
 }
 
 static int reserved_cmp(const void *lhs, const void *rhs) {
@@ -113,10 +110,10 @@ static void work_free(hn_work *work) {
 }
 
 static odin3_status work_init(hn_work *work, const odin3_bytes *reserved) {
-    size_t n = work->n;
-    work->rows = (hn_row *)odin3_util_malloc(n * sizeof(hn_row));
-    work->widths = (uint8_t *)odin3_util_malloc(n);
-    work->marks = (uint8_t *)odin3_util_malloc(n);
+    size_t count = work->n;
+    work->rows = (hn_row *)odin3_util_malloc(count * sizeof(hn_row));
+    work->widths = (uint8_t *)odin3_util_malloc(count);
+    work->marks = (uint8_t *)odin3_util_malloc(count);
     if (work->nreserved > 0) {
         work->reserved = (odin3_bytes *)odin3_util_malloc(work->nreserved * sizeof(odin3_bytes));
     }
@@ -129,16 +126,15 @@ static odin3_status work_init(hn_work *work, const odin3_bytes *reserved) {
         memcpy(work->reserved, reserved, work->nreserved * sizeof(odin3_bytes));
         qsort(work->reserved, work->nreserved, sizeof(odin3_bytes), reserved_cmp);
     }
-    memset(work->widths, (int)start_width, n);
-    memset(work->marks, 0, n);
+    memset(work->widths, (int)start_width, count);
+    memset(work->marks, 0, count);
     return ODIN3_OK;
 }
 
 static bool is_reserved(const hn_work *work, const odin3_hash_name *name) {
     odin3_bytes key = odin3_bytes_cstr(name->text);
-    return work->nreserved > 0 &&
-           bsearch(&key, work->reserved, work->nreserved, sizeof(odin3_bytes), reserved_cmp) !=
-               NULL;
+    return work->nreserved > 0 && bsearch(&key, work->reserved, work->nreserved,
+                                          sizeof(odin3_bytes), reserved_cmp) != NULL;
 }
 
 /* Marks every name of the run rows[first..last] when the run holds two distinct full names. */
@@ -186,8 +182,8 @@ static bool widen_marked(hn_work *work, bool *changed) {
             return false;
         }
         uint32_t next = work->widths[i] + ODIN3_HASH_NAME_STEP;
-        work->widths[i] = (uint8_t)(next > ODIN3_HASH_NAME_MAX_CHARS ? ODIN3_HASH_NAME_MAX_CHARS
-                                                                      : next);
+        work->widths[i] =
+            (uint8_t)(next > ODIN3_HASH_NAME_MAX_CHARS ? ODIN3_HASH_NAME_MAX_CHARS : next);
         odin3_hash_name_make(work->fulls[i], work->widths[i], &work->out[i]);
         *changed = true;
     }

@@ -61,7 +61,8 @@ static const spec SPECS[SPEC_COUNT] = {
     {"top", ODIN3_NAME_NODE, "top/u/g@src/a.v:11", "top/u", "src/a.v", 11},
     {"top", ODIN3_NAME_WIRE, "top/w@src/a.v:12", "top", "src/a.v", 12},
     {"sub", ODIN3_NAME_NET, "q@src/b.v:3", "", "src/b.v", 3},
-    {"we\tird%mod", ODIN3_NAME_NET, "x\ty%z\\w\nv@dir name/a\tb.v:4", "h\nier\\", "dir name/a\tb.v", 4},
+    {"we\tird%mod", ODIN3_NAME_NET, "x\ty%z\\w\nv@dir name/a\tb.v:4", "h\nier\\", "dir name/a\tb.v",
+     4},
     {"", ODIN3_NAME_NODE, "", "", "", UINT32_MAX},
 };
 
@@ -119,11 +120,17 @@ static void expect_warning(unsigned idx, const char *needle) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(warnings[idx], needle), warnings[idx]);
 }
 
-/* --- write --------------------------------------------------------------------------------------- */
+/* --- write ---------------------------------------------------------------------------------------
+ */
 
-void test_write_exact_text(void) {
-    odin3_name_entry entry = {text_of("m"),  ODIN3_NAME_NET, text_of("h42xiy3yiju"),
-                              text_of("a@t.v:1"), text_of(""), text_of("t.v"), 1};
+static void test_write_exact_text(void) {
+    odin3_name_entry entry = {text_of("m"),
+                              ODIN3_NAME_NET,
+                              text_of("h42xiy3yiju"),
+                              text_of("a@t.v:1"),
+                              text_of(""),
+                              text_of("t.v"),
+                              1};
     odin3_strbuf out;
     odin3_strbuf_init(&out);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_write(&entry, 1, 10, &out));
@@ -133,9 +140,14 @@ void test_write_exact_text(void) {
     odin3_strbuf_free(&out);
 }
 
-void test_write_escapes(void) {
-    odin3_name_entry entry = {text_of("a\tb"), ODIN3_NAME_WIRE, text_of("s"), text_of("c%d"),
-                              text_of("e\\f"), text_of("g\nh i"), 5};
+static void test_write_escapes(void) {
+    odin3_name_entry entry = {text_of("a\tb"),
+                              ODIN3_NAME_WIRE,
+                              text_of("s"),
+                              text_of("c%d"),
+                              text_of("e\\f"),
+                              text_of("g\nh i"),
+                              5};
     odin3_strbuf out;
     odin3_strbuf_init(&out);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_write(&entry, 1, 10, &out));
@@ -145,7 +157,21 @@ void test_write_escapes(void) {
     odin3_strbuf_free(&out);
 }
 
-void test_write_sorted_and_order_independent(void) {
+/* Module "" sorts first, then "sub", "top", then "we\tird%mod" (byte order). */
+static const char *position_of(const char *text, const char *needle) {
+    const char *at = strstr(text, needle);
+    TEST_ASSERT_NOT_NULL_MESSAGE(at, needle);
+    return at;
+}
+
+static void expect_module_order(const char *text) {
+    const char *sub = position_of(text, "\nsub\t");
+    const char *top = position_of(text, "\ntop\t");
+    const char *weird = position_of(text, "\nwe%09ird");
+    TEST_ASSERT_TRUE(sub < top && top < weird);
+}
+
+static void test_write_sorted_and_order_independent(void) {
     fixture fx;
     odin3_name_entry rev[SPEC_COUNT];
     odin3_strbuf one;
@@ -159,19 +185,12 @@ void test_write_sorted_and_order_independent(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_write(fx.entry, SPEC_COUNT, 10, &one));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_write(rev, SPEC_COUNT, 10, &two));
     TEST_ASSERT_EQUAL_STRING(one.data, two.data);
-    /* module "" sorts first, then "sub", "top", then "we\tird%mod" (byte order) */
-    const char *sub = strstr(one.data, "\nsub\t");
-    const char *top = strstr(one.data, "\ntop\t");
-    const char *weird = strstr(one.data, "\nwe%09ird");
-    TEST_ASSERT_NOT_NULL(sub);
-    TEST_ASSERT_NOT_NULL(top);
-    TEST_ASSERT_NOT_NULL(weird);
-    TEST_ASSERT_TRUE(sub < top && top < weird);
+    expect_module_order(one.data);
     odin3_strbuf_free(&one);
     odin3_strbuf_free(&two);
 }
 
-void test_write_appends_and_refuses_duplicates(void) {
+static void test_write_appends_and_refuses_duplicates(void) {
     fixture fx;
     odin3_name_entry dup[2];
     odin3_strbuf out;
@@ -189,7 +208,7 @@ void test_write_appends_and_refuses_duplicates(void) {
     odin3_strbuf_free(&out);
 }
 
-void test_write_rejects_bad_arguments(void) {
+static void test_write_rejects_bad_arguments(void) {
     fixture fx;
     odin3_strbuf out;
     make_entries(&fx);
@@ -206,7 +225,7 @@ void test_write_rejects_bad_arguments(void) {
     odin3_strbuf_free(&out);
 }
 
-void test_write_out_of_memory(void) {
+static void test_write_out_of_memory(void) {
     fixture fx;
     make_entries(&fx);
     int fails = 0;
@@ -228,9 +247,10 @@ void test_write_out_of_memory(void) {
     TEST_ASSERT_TRUE(fails > 0);
 }
 
-/* --- round trip ---------------------------------------------------------------------------------- */
+/* --- round trip ----------------------------------------------------------------------------------
+ */
 
-void test_round_trip(void) {
+static void test_round_trip(void) {
     fixture fx;
     odin3_strbuf out;
     odin3_strbuf again;
@@ -245,12 +265,12 @@ void test_round_trip(void) {
     TEST_ASSERT_EQUAL_UINT(10, map.width);
     TEST_ASSERT_EQUAL_UINT(0, warn_count);
     for (uint32_t i = 0; i < SPEC_COUNT; i++) {
-        const odin3_name_entry *hit = odin3_name_map_find(
-            &map, fx.entry[i].module, fx.entry[i].kind, fx.entry[i].short_name);
+        const odin3_name_entry *hit =
+            odin3_name_map_find(&map, fx.entry[i].module, fx.entry[i].kind, fx.entry[i].short_name);
         TEST_ASSERT_NOT_NULL(hit);
         expect_same_entry(hit, &fx.entry[i]);
-        hit = odin3_name_map_find_full(&map, fx.entry[i].module, fx.entry[i].kind,
-                                       fx.entry[i].full);
+        hit =
+            odin3_name_map_find_full(&map, fx.entry[i].module, fx.entry[i].kind, fx.entry[i].full);
         TEST_ASSERT_NOT_NULL(hit);
         expect_same_entry(hit, &fx.entry[i]);
     }
@@ -267,57 +287,78 @@ void test_round_trip(void) {
     odin3_strbuf_free(&again);
 }
 
-void test_find_misses(void) {
+typedef struct find_case {
+    const char *module;
+    odin3_name_kind kind;
+    const char *short_name;
+    bool want;
+} find_case;
+
+static void test_find_misses(void) {
+    static const find_case CASES[] = {
+        {"m", ODIN3_NAME_NET, "h42xiy3yiju", true},   {"m", ODIN3_NAME_NODE, "hfxxdd62auq", true},
+        {"m", ODIN3_NAME_NODE, "h42xiy3yiju", false}, {"n", ODIN3_NAME_NET, "h42xiy3yiju", false},
+        {"m", ODIN3_NAME_NET, "hzz", false},          {"z", ODIN3_NAME_WIRE, "zz", false},
+    };
     odin3_name_map map;
     char text[TEXT_BUF];
     (void)snprintf(text, sizeof text, "%s%s%s", HEADER, GOOD1, GOOD2);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(text)));
-    TEST_ASSERT_NOT_NULL(
-        odin3_name_map_find(&map, text_of("m"), ODIN3_NAME_NET, text_of("h42xiy3yiju")));
-    TEST_ASSERT_NULL(
-        odin3_name_map_find(&map, text_of("m"), ODIN3_NAME_NODE, text_of("h42xiy3yiju")));
-    TEST_ASSERT_NULL(
-        odin3_name_map_find(&map, text_of("n"), ODIN3_NAME_NET, text_of("h42xiy3yiju")));
-    TEST_ASSERT_NULL(odin3_name_map_find(&map, text_of("m"), ODIN3_NAME_NET, text_of("hzz")));
-    TEST_ASSERT_NULL(odin3_name_map_find(&map, text_of("z"), ODIN3_NAME_WIRE, text_of("zz")));
+    for (size_t i = 0; i < sizeof CASES / sizeof CASES[0]; i++) {
+        const odin3_name_entry *hit = odin3_name_map_find(
+            &map, text_of(CASES[i].module), CASES[i].kind, text_of(CASES[i].short_name));
+        TEST_ASSERT_EQUAL_INT_MESSAGE(CASES[i].want ? 1 : 0, hit != NULL ? 1 : 0,
+                                      CASES[i].short_name);
+    }
     TEST_ASSERT_NULL(odin3_name_map_find_full(&map, text_of("m"), ODIN3_NAME_NET, text_of("q")));
     odin3_name_map_free(&map);
+}
+
+static void test_find_in_empty_map(void) {
+    odin3_name_map map;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(HEADER)));
     TEST_ASSERT_NULL(odin3_name_map_find(&map, text_of("m"), ODIN3_NAME_NET, text_of("h")));
     odin3_name_map_free(&map);
 }
 
-void test_kind_words(void) {
-    odin3_name_kind kind = ODIN3_NAME_NET;
+static void test_kind_words(void) {
     TEST_ASSERT_EQUAL_STRING("net", odin3_name_kind_str(ODIN3_NAME_NET));
     TEST_ASSERT_EQUAL_STRING("node", odin3_name_kind_str(ODIN3_NAME_NODE));
     TEST_ASSERT_EQUAL_STRING("wire", odin3_name_kind_str(ODIN3_NAME_WIRE));
     TEST_ASSERT_EQUAL_STRING("", odin3_name_kind_str(ODIN3_NAME_KIND_COUNT));
+}
+
+static void test_kind_parse(void) {
+    odin3_name_kind kind = ODIN3_NAME_NET;
     TEST_ASSERT_TRUE(odin3_name_kind_parse(text_of("wire"), &kind));
     TEST_ASSERT_EQUAL_INT(ODIN3_NAME_WIRE, kind);
-    TEST_ASSERT_FALSE(odin3_name_kind_parse(text_of("wires"), &kind));
-    TEST_ASSERT_FALSE(odin3_name_kind_parse(text_of(""), &kind));
-    TEST_ASSERT_FALSE(odin3_name_kind_parse(text_of("Net"), &kind));
+}
+
+static void test_kind_parse_rejects(void) {
+    static const char *const BAD[] = {"wires", "", "Net", "no", "nodes"};
+    odin3_name_kind kind = ODIN3_NAME_NET;
+    for (size_t i = 0; i < sizeof BAD / sizeof BAD[0]; i++) {
+        TEST_ASSERT_FALSE_MESSAGE(odin3_name_kind_parse(text_of(BAD[i]), &kind), BAD[i]);
+    }
 }
 
 /* --- corrupted entries and bad headers -------------------------------------------------------- */
 
-void test_corrupted_entries_warn_and_are_ignored(void) {
+static void test_corrupted_entries_warn_and_are_ignored(void) {
     odin3_name_map map;
     char text[TEXT_BUF];
     (void)snprintf(text, sizeof text,
-                   "%s"                                               /* line 1 */
-                   "%s"                                               /* 2 good */
-                   "m\tnet\thzzzzzzzzzz\ta@t.v:1\t\tt.v\t1\n"         /* 3 not the hash */
-                   "m\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\n"            /* 4 six fields */
-                   "m%%41\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\t1\n"     /* 5 escape not allowed */
-                   "m\tgate\th42xiy3yiju\ta@t.v:1\t\tt.v\t1\n"        /* 6 unknown kind */
-                   "m\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\t12x\n"       /* 7 line not a number */
+                   "%s"                                                /* line 1 */
+                   "%s"                                                /* 2 good */
+                   "m\tnet\thzzzzzzzzzz\ta@t.v:1\t\tt.v\t1\n"          /* 3 not the hash */
+                   "m\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\n"             /* 4 six fields */
+                   "m%%41\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\t1\n"      /* 5 escape not allowed */
+                   "m\tgate\th42xiy3yiju\ta@t.v:1\t\tt.v\t1\n"         /* 6 unknown kind */
+                   "m\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\t12x\n"        /* 7 line not a number */
                    "m\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\t4294967296\n" /* 8 line over u32 */
-                   "\n"                                               /* 9 blank */
-                   "# a comment\n"                                    /* 10 comment */
-                   "m\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v%%\t1\n"       /* 11 truncated escape */
-                   "m\tnode\thfxxdd62auq\tx@f.v:7$2\t\tf.v\t7",       /* 12 good, no LF */
+                   "\n"                                                /* 9 blank */
+                   "# a comment\n"                                     /* 10 comment */
+                   "m\tnode\thfxxdd62auq\tx@f.v:7$2\t\tf.v\t7",        /* 11 good, no LF */
                    HEADER, GOOD1);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(text)));
     TEST_ASSERT_EQUAL_UINT(2, map.entries.len);
@@ -334,7 +375,7 @@ void test_corrupted_entries_warn_and_are_ignored(void) {
     odin3_name_map_free(&map);
 }
 
-void test_line_11_truncated_escape_warns(void) {
+static void test_line_11_truncated_escape_warns(void) {
     odin3_name_map map;
     char text[TEXT_BUF];
     (void)snprintf(text, sizeof text, "%sm\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v%%\t1\n", HEADER);
@@ -344,7 +385,7 @@ void test_line_11_truncated_escape_warns(void) {
     odin3_name_map_free(&map);
 }
 
-void test_width_rule(void) {
+static void test_width_rule(void) {
     odin3_name_map map;
     char text[TEXT_BUF];
     /* width 15 header: a 10-character short is too short, ignored */
@@ -362,7 +403,7 @@ void test_width_rule(void) {
     odin3_name_map_free(&map);
 }
 
-void test_duplicates_are_reported_by_check(void) {
+static void test_duplicates_are_reported_by_check(void) {
     odin3_name_map map;
     char text[TEXT_BUF];
     (void)snprintf(text, sizeof text, "%s%s%s%s", HEADER, GOOD1, GOOD2, GOOD1);
@@ -374,7 +415,7 @@ void test_duplicates_are_reported_by_check(void) {
     odin3_name_map_free(&map);
 }
 
-void test_check_counts_a_bad_hash(void) {
+static void test_check_counts_a_bad_hash(void) {
     odin3_name_map map;
     char text[TEXT_BUF];
     (void)snprintf(text, sizeof text, "%s%s", HEADER, GOOD1);
@@ -386,32 +427,37 @@ void test_check_counts_a_bad_hash(void) {
     odin3_name_map_free(&map);
 }
 
-static void expect_header_error(const char *text, const char *needle) {
-    odin3_name_map map;
-    error_count = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_text(&map, text_of(text)));
-    TEST_ASSERT_EQUAL_UINT_MESSAGE(1, error_count, text);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(errors[0], needle), errors[0]);
-    TEST_ASSERT_EQUAL_UINT(0, map.entries.len);
-    odin3_name_map_free(&map);
+typedef struct header_case {
+    const char *text, *needle;
+} header_case;
+
+static void test_unknown_version_and_bad_headers_are_errors(void) {
+    static const header_case CASES[] = {
+        {"# odin3-names 2 hash=sha256 width=10\n", "name.map:1: unsupported name map version '2'"},
+        {"# odin3-names 10 hash=sha256 width=10\n", "unsupported name map version '10'"},
+        {"# odin3-names  hash=sha256 width=10\n", "unsupported name map version"},
+        {"# odin3-names 1 hash=md5 width=10\n", "name.map:1: malformed name map header"},
+        {"# odin3-names 1 hash=sha256 width=0\n", "malformed name map header"},
+        {"# odin3-names 1 hash=sha256 width=53\n", "malformed name map header"},
+        {"# odin3-names 1 hash=sha256 width=x\n", "malformed name map header"},
+        {"# odin3-names 1 hash=sha256\n", "malformed name map header"},
+        {"# odin3-names 1 hash=sha256 width=10 extra\n", "malformed name map header"},
+        {"m\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\t1\n", "name.map:1: not a name map"},
+        {"# odin3-names", "not a name map"},
+        {"", "empty name map"},
+    };
+    for (size_t i = 0; i < sizeof CASES / sizeof CASES[0]; i++) {
+        odin3_name_map map;
+        error_count = 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_text(&map, text_of(CASES[i].text)));
+        TEST_ASSERT_EQUAL_UINT_MESSAGE(1, error_count, CASES[i].text);
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(errors[0], CASES[i].needle), errors[0]);
+        TEST_ASSERT_EQUAL_UINT(0, map.entries.len);
+        odin3_name_map_free(&map);
+    }
 }
 
-void test_unknown_version_and_bad_headers_are_errors(void) {
-    expect_header_error("# odin3-names 2 hash=sha256 width=10\n", "name.map:1: unsupported name map version '2'");
-    expect_header_error("# odin3-names 10 hash=sha256 width=10\n", "unsupported name map version '10'");
-    expect_header_error("# odin3-names  hash=sha256 width=10\n", "unsupported name map version");
-    expect_header_error("# odin3-names 1 hash=md5 width=10\n", "name.map:1: malformed name map header");
-    expect_header_error("# odin3-names 1 hash=sha256 width=0\n", "malformed name map header");
-    expect_header_error("# odin3-names 1 hash=sha256 width=53\n", "malformed name map header");
-    expect_header_error("# odin3-names 1 hash=sha256 width=x\n", "malformed name map header");
-    expect_header_error("# odin3-names 1 hash=sha256\n", "malformed name map header");
-    expect_header_error("# odin3-names 1 hash=sha256 width=10 extra\n", "malformed name map header");
-    expect_header_error("m\tnet\th42xiy3yiju\ta@t.v:1\t\tt.v\t1\n", "name.map:1: not a name map");
-    expect_header_error("# odin3-names", "not a name map");
-    expect_header_error("", "empty name map");
-}
-
-void test_over_long_line_is_ignored(void) {
+static void test_over_long_line_is_ignored(void) {
     odin3_name_map map;
     size_t len = (size_t)ODIN3_NAME_MAP_MAX_LINE + 1;
     char *text = (char *)malloc(sizeof HEADER + len + 2);
@@ -427,7 +473,7 @@ void test_over_long_line_is_ignored(void) {
     free(text);
 }
 
-void test_parse_out_of_memory(void) {
+static void test_parse_out_of_memory(void) {
     char text[TEXT_BUF];
     int fails = 0;
     (void)snprintf(text, sizeof text, "%s%s%s", HEADER, GOOD1, GOOD2);
@@ -462,7 +508,10 @@ int main(void) {
     RUN_TEST(test_write_out_of_memory);
     RUN_TEST(test_round_trip);
     RUN_TEST(test_find_misses);
+    RUN_TEST(test_find_in_empty_map);
     RUN_TEST(test_kind_words);
+    RUN_TEST(test_kind_parse);
+    RUN_TEST(test_kind_parse_rejects);
     RUN_TEST(test_corrupted_entries_warn_and_are_ignored);
     RUN_TEST(test_line_11_truncated_escape_warns);
     RUN_TEST(test_width_rule);

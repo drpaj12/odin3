@@ -14,10 +14,10 @@
 
 enum {
     HEADER_TOKENS = 5,
-    KIND_NAME_MAX = 4,
     HEX_DIGITS = 2,
     LINE_DIGITS_MAX = 10,
-    DECIMAL = 10
+    DECIMAL = 10,
+    WIDTH_KEY_LEN = 6 /* strlen("width=") */
 };
 
 static const char *const KIND_NAMES[ODIN3_NAME_KIND_COUNT] = {"net", "node", "wire"};
@@ -28,7 +28,7 @@ const char *odin3_name_kind_str(odin3_name_kind kind) {
 }
 
 bool odin3_name_kind_parse(odin3_bytes text, odin3_name_kind *kind) {
-    for (int k = 0; k < (int)ODIN3_NAME_KIND_COUNT; k++) {
+    for (int k = 0; k < ODIN3_NAME_KIND_COUNT; k++) {
         if (text.len == strlen(KIND_NAMES[k]) && memcmp(text.ptr, KIND_NAMES[k], text.len) == 0) {
             *kind = (odin3_name_kind)k;
             return true;
@@ -37,51 +37,61 @@ bool odin3_name_kind_parse(odin3_bytes text, odin3_name_kind *kind) {
     return false;
 }
 
-static int bytes_cmp(odin3_bytes a, odin3_bytes b) {
-    size_t common = a.len < b.len ? a.len : b.len;
-    int cmp = common == 0 ? 0 : memcmp(a.ptr, b.ptr, common);
-    if (cmp != 0) {
+static int bytes_cmp(odin3_bytes lhs, odin3_bytes rhs) {
+    size_t common = lhs.len < rhs.len ? lhs.len : rhs.len;
+    int cmp = common == 0 ? 0 : memcmp(lhs.ptr, rhs.ptr, common);
+    if (cmp != 0 || lhs.len == rhs.len) {
         return cmp;
     }
-    return a.len < b.len ? -1 : (a.len > b.len ? 1 : 0);
+    return lhs.len < rhs.len ? -1 : 1;
 }
 
 /* The sort and search order of a map: module, kind, short in byte order. */
-static int key_cmp(const odin3_name_entry *a, const odin3_name_entry *b) {
-    int cmp = bytes_cmp(a->module, b->module);
+static int key_cmp(const odin3_name_entry *lhs, const odin3_name_entry *rhs) {
+    int cmp = bytes_cmp(lhs->module, rhs->module);
     if (cmp != 0) {
         return cmp;
     }
-    if (a->kind != b->kind) {
-        return a->kind < b->kind ? -1 : 1;
+    if (lhs->kind != rhs->kind) {
+        return lhs->kind < rhs->kind ? -1 : 1;
     }
-    return bytes_cmp(a->short_name, b->short_name);
+    return bytes_cmp(lhs->short_name, rhs->short_name);
 }
 
 static int entry_cmp(const void *lhs, const void *rhs) {
     return key_cmp((const odin3_name_entry *)lhs, (const odin3_name_entry *)rhs);
 }
 
-/* --- write --------------------------------------------------------------------------------------- */
+/* --- write ---------------------------------------------------------------------------------------
+ */
+
+/* The escape of one byte of a field (TAB, LF, `\` and `%`), or NULL for any other byte. */
+static const char *escape_of(char ch) {
+    switch (ch) {
+    case '\t':
+        return "%09";
+    case '\n':
+        return "%0A";
+    case '\\':
+        return "%5C";
+    case '%':
+        return "%25";
+    default:
+        return NULL;
+    }
+}
 
 /* Appends field with TAB, LF, `\` and `%` written as %09, %0A, %5C, %25. */
 static odin3_status put_field(odin3_strbuf *out, odin3_bytes field) {
     const char *bytes = (const char *)field.ptr;
     size_t run = 0;
-    for (size_t i = 0; i <= field.len; i++) {
-        const char *esc = NULL;
-        if (i < field.len) {
-            esc = bytes[i] == '\t'   ? "%09"
-                  : bytes[i] == '\n' ? "%0A"
-                  : bytes[i] == '\\' ? "%5C"
-                  : bytes[i] == '%'  ? "%25"
-                                     : NULL;
-        }
-        if (esc == NULL && i < field.len) {
+    for (size_t i = 0; i < field.len; i++) {
+        const char *esc = escape_of(bytes[i]);
+        if (esc == NULL) {
             continue;
         }
         odin3_status st = odin3_strbuf_append(out, (odin3_bytes){bytes + run, i - run});
-        if (st == ODIN3_OK && esc != NULL) {
+        if (st == ODIN3_OK) {
             st = odin3_strbuf_append(out, odin3_bytes_cstr(esc));
         }
         if (st != ODIN3_OK) {
@@ -89,12 +99,14 @@ static odin3_status put_field(odin3_strbuf *out, odin3_bytes field) {
         }
         run = i + 1;
     }
-    return ODIN3_OK;
+    return odin3_strbuf_append(out, (odin3_bytes){bytes + run, field.len - run});
 }
 
 static odin3_status put_entry(odin3_strbuf *out, const odin3_name_entry *entry) {
-    const odin3_bytes fields[] = {entry->module, odin3_bytes_cstr(odin3_name_kind_str(entry->kind)),
-                                  entry->short_name, entry->full, entry->hier, entry->file};
+    const odin3_bytes fields[] = {
+        entry->module,     odin3_bytes_cstr(odin3_name_kind_str(entry->kind)),
+        entry->short_name, entry->full,
+        entry->hier,       entry->file};
     for (size_t i = 0; i < sizeof fields / sizeof fields[0]; i++) {
         odin3_status st = put_field(out, fields[i]);
         if (st == ODIN3_OK) {
@@ -109,6 +121,9 @@ static odin3_status put_entry(odin3_strbuf *out, const odin3_name_entry *entry) 
 
 /* Sorted copy of the entries; the caller frees it. NULL on out of memory. */
 static odin3_name_entry *sorted_copy(const odin3_name_entry *entries, uint32_t n) {
+    if (n == 0) {
+        return NULL;
+    }
     odin3_name_entry *copy = (odin3_name_entry *)odin3_util_malloc((size_t)n * sizeof *copy);
     if (copy != NULL) {
         memcpy(copy, entries, (size_t)n * sizeof *copy);
@@ -168,7 +183,8 @@ odin3_status odin3_name_map_write(const odin3_name_entry *entries, uint32_t n, u
     return st;
 }
 
-/* --- parse --------------------------------------------------------------------------------------- */
+/* --- parse ---------------------------------------------------------------------------------------
+ */
 
 odin3_status odin3_name_map_init(odin3_name_map *map) {
     odin3_vec_init(&map->entries, sizeof(odin3_name_entry));
@@ -232,46 +248,51 @@ static bool parse_decimal(odin3_bytes text, uint32_t *value) {
     return true;
 }
 
-/* Header: `# odin3-names 1 hash=sha256 width=N`. ODIN3_ERR_PARSE (logged) for anything else. */
-static odin3_status parse_header(nm_parser *ps, odin3_bytes line) {
-    odin3_bytes tok[HEADER_TOKENS] = {{NULL, 0}};
+/* Is tok exactly `width=N` with N in 1..52? Stores N. */
+static bool parse_width_token(odin3_bytes tok, uint32_t *width) {
+    if (tok.len <= WIDTH_KEY_LEN || memcmp(tok.ptr, "width=", WIDTH_KEY_LEN) != 0) {
+        return false;
+    }
+    odin3_bytes digits = {(const char *)tok.ptr + WIDTH_KEY_LEN, tok.len - WIDTH_KEY_LEN};
+    return parse_decimal(digits, width) && *width >= 1 && *width <= ODIN3_HASH_NAME_MAX_CHARS;
+}
+
+/* Splits the header after its prefix at spaces into at most HEADER_TOKENS - 1 tokens. */
+static size_t header_tokens(odin3_bytes line, odin3_bytes tok[HEADER_TOKENS]) {
     const char *bytes = (const char *)line.ptr;
     size_t count = 0;
-    size_t start = 0;
-    if (line.len < sizeof HEADER_PREFIX - 1 ||
-        memcmp(bytes, HEADER_PREFIX, sizeof HEADER_PREFIX - 1) != 0) {
-        parse_error(ps, "not a name map (no '# odin3-names' header)", (odin3_bytes){NULL, 0});
-        return ODIN3_ERR_PARSE;
-    }
-    start = sizeof HEADER_PREFIX - 1;
+    size_t start = sizeof HEADER_PREFIX - 1;
     for (size_t i = start; i <= line.len && count < HEADER_TOKENS - 1; i++) {
         if (i == line.len || bytes[i] == ' ') {
             tok[count++] = (odin3_bytes){bytes + start, i - start};
             start = i + 1;
         }
     }
+    return count;
+}
+
+/* Header: `# odin3-names 1 hash=sha256 width=N`. ODIN3_ERR_PARSE (logged) for anything else. */
+static odin3_status parse_header(nm_parser *ps, odin3_bytes line) {
+    odin3_bytes tok[HEADER_TOKENS] = {{NULL, 0}};
+    uint32_t width = 0;
+    if (line.len < sizeof HEADER_PREFIX - 1 ||
+        memcmp(line.ptr, HEADER_PREFIX, sizeof HEADER_PREFIX - 1) != 0) {
+        parse_error(ps, "not a name map (no '# odin3-names' header)", (odin3_bytes){NULL, 0});
+        return ODIN3_ERR_PARSE;
+    }
+    size_t count = header_tokens(line, tok);
     if (tok[0].len != 1 || ((const char *)tok[0].ptr)[0] != '0' + ODIN3_NAME_MAP_VERSION) {
         parse_error(ps, "unsupported name map version", tok[0]);
         return ODIN3_ERR_PARSE;
     }
-    uint32_t width = 0;
     if (count != 3 || bytes_cmp(tok[1], odin3_bytes_cstr("hash=sha256")) != 0 ||
-        tok[2].len < 7 || memcmp(tok[2].ptr, "width=", 6) != 0 ||
-        !parse_decimal((odin3_bytes){(const char *)tok[2].ptr + 6, tok[2].len - 6}, &width) ||
-        width < 1 || width > ODIN3_HASH_NAME_MAX_CHARS) {
+        !parse_width_token(tok[2], &width)) {
         parse_error(ps, "malformed name map header (want 'hash=sha256 width=1..52')",
                     (odin3_bytes){NULL, 0});
         return ODIN3_ERR_PARSE;
     }
     ps->map->width = width;
     return ODIN3_OK;
-}
-
-static int hex_value(char ch) {
-    if (ch >= '0' && ch <= '9') {
-        return ch - '0';
-    }
-    return ch >= 'A' && ch <= 'F' ? ch - 'A' + 10 : -1;
 }
 
 /* One escape `%XX` at bytes[i]: its byte in *ch, or false when it is not one of the four. */
@@ -344,10 +365,11 @@ static bool short_matches_full(const odin3_name_entry *entry, uint32_t width) {
            memcmp(want.text, text, entry->short_name.len) == 0;
 }
 
-/* Fills entry from the 7 raw fields. OK, INVALID_ARG (the line is bad, reason in *why) or NO_MEMORY. */
+/* Fills entry from the 7 raw fields. OK, INVALID_ARG (the line is bad, reason in *why) or
+ * NO_MEMORY. */
 static odin3_status build_entry(nm_parser *ps, const odin3_bytes raw[ODIN3_NAME_MAP_FIELDS],
                                 odin3_name_entry *entry, const char **why) {
-    odin3_bytes *const slots[] = {&entry->module, NULL, &entry->short_name,
+    odin3_bytes *const slots[] = {&entry->module, NULL,         &entry->short_name,
                                   &entry->full,   &entry->hier, &entry->file};
     for (size_t i = 0; i < sizeof slots / sizeof slots[0]; i++) {
         if (slots[i] == NULL) {

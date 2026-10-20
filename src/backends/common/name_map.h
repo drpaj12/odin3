@@ -25,8 +25,8 @@
 enum {
     ODIN3_NAME_MAP_VERSION = 1,
     ODIN3_NAME_MAP_FIELDS = 7,
-    ODIN3_NAME_MAP_MAX_LINE = 1 << 20,     /* longest accepted line, bytes (longer: ignored) */
-    ODIN3_NAME_MAP_MAX_ENTRIES = 1 << 24   /* most entries a parse keeps (over: an error) */
+    ODIN3_NAME_MAP_MAX_LINE = 1 << 20,   /* longest accepted line, bytes (longer: ignored) */
+    ODIN3_NAME_MAP_MAX_ENTRIES = 1 << 24 /* most entries a parse keeps (over: an error) */
 };
 
 typedef enum odin3_name_kind {
@@ -54,10 +54,10 @@ typedef struct odin3_name_entry {
 
 /* A parsed map: entries sorted by (module, kind, short); every view lives until map_free. */
 typedef struct odin3_name_map {
-    odin3_vec entries;       /* odin3_name_entry */
+    odin3_vec entries; /* odin3_name_entry */
     struct odin3_arena *arena;
-    uint32_t width;          /* the header's width (H-4) */
-    uint32_t ignored;        /* entry lines the parse warned about and dropped */
+    uint32_t width;   /* the header's width (H-4) */
+    uint32_t ignored; /* entry lines the parse warned about and dropped */
 } odin3_name_map;
 
 /* ODIN3_ERR_NO_MEMORY when the arena cannot be created. */
