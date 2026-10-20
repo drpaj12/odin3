@@ -1,4 +1,4 @@
-% Odin III system pipeline (DESIGN.md sections 3, 4.0, 6, 9, 12; PHASE3.md), status 2026-10-19 (D10 scope).
+% Odin III system pipeline (DESIGN.md sections 3, 4.0, 6, 9, 12; PHASE3.md), status 2026-10-20 (D11 plan).
 % Wide figure: \textwidth (figure*). Row 1 runs left to right (project input to word-level IR),
 % row 2 right to left through the passes, row 3 holds the writers, the VTR flow and the QoR harness.
 \begin{tikzpicture}[odin, node distance=3mm,
@@ -23,10 +23,6 @@
        {word-level\\IR\\[-1pt]\odinsub{with \odintt{\$proc}}};
 
   % ---- row 0: other front ends and the Yosys bridge -----------------------------------
-  \node[box, planned, text width=20mm] (ghdl) at (6.05, 1.7)
-       {GHDL\\\odinsub{VHDL, deferred}};
-  \node[box, planned, text width=25mm] (slang) at (13.3, 1.7)
-       {slang adapter\\\odinsub{SystemVerilog, deferred}};
   \node[box, built, text width=16mm] (rtlil) at (16.95, 1.7)
        {RTLIL writer\\\odinsub{to Yosys 0.55; 2D-1}};
 
@@ -35,9 +31,9 @@
   \node[box, built, text width=12mm] (opt) at (15.1, -2.2) {\odintt{opt}\\\odinsub{2F}};
   \node[box, built, text width=15.5mm] (flat) at (13.2, -2.2)
        {\odintt{wreduce},\\\odintt{flatten}\\[-1pt]\odinsub{3G, 3A}};
-  \node[box, built, text width=15mm] (hmap) at (11.2, -2.2) {\odintt{hardmap}\\\odinsub{3C}};
+  \node[box, built, text width=15mm] (hmap) at (11.2, -2.2) {\odintt{hardmap}\\\odinsub{3C, 4.2}};
   \node[box, built, text width=11mm] (lower) at (9.25, -2.2) {\odintt{lower}\\\odinsub{3B}};
-  \node[box, inprog, text width=12mm] (abc) at (7.75, -2.2) {linked\\ABC\\[-1pt]\odinsub{3D}};
+  \node[box, built, text width=12mm] (abc) at (7.75, -2.2) {linked\\ABC\\[-1pt]\odinsub{3D}};
   \node[store, built, text width=13mm] (bir) at (5.95, -2.2) {bit-level\\IR};
   \node[box, built, text width=15mm] (rblif) at (3.6, -2.2) {BLIF reader\\\odinsub{1C}};
 
@@ -52,7 +48,7 @@
   \end{scope}
   \node[box, built, text width=17mm, minimum height=7.6mm] (vtr) at (11.7, -4.05)
        {VTR flow\\\odinsub{ABC stage, VPR}};
-  \node[box, inprog, text width=34mm, minimum height=7.6mm] (qor) at (14.9, -4.05)
+  \node[box, built, text width=34mm, minimum height=7.6mm] (qor) at (14.9, -4.05)
        {\odintt{vtr-qor}, \odinsub{3H}\\\odinsub{legs P, P$'$, O, O$'$, R, Oprov; fcheck}};
 
   % ---- edges ----------------------------------------------------------------------------
@@ -65,8 +61,6 @@
   \draw[flow] (st1) -- (east);
   \draw[flow] (east) -- (st2);
   \draw[flow] (st2) -- (wir);
-  \draw[flowplanned] (ghdl) -- node[edgelabel, right, fill=none] {Verilog} (pp);
-  \draw[flowplanned] (slang) -- node[edgelabel, right, fill=none] {C ABI} (east);
   \draw[flow] (wir) -- (rtlil);
   \draw[flow] (wir) -- (proc);
   \draw[flow] (proc) -- (opt);

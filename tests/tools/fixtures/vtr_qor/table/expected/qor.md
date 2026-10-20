@@ -22,12 +22,8 @@ VTR 3c9a4d23b27d · odin3 0123456789ab (build bbbbbbbbbbbb) · ABC script 555555
 | mkDelayWorker32B | 200 | 275 | 1.375 | 50 | 60 | 1.2000 | 2.500 | 2.500 | 1.000 | 1000 | 1050 | 1.050 | ✓ |
 | stereovision2 | 200 | 176 | 0.880 | 50 | 60 | 1.2000 | 2.500 | 2.500 | 1.000 | 1000 | 1050 | 1.050 | ✓ |
 | blob_merge | 200 | 275 | 1.375 | 50 | 60 | 1.2000 | 2.500 | 2.500 | 1.000 | 1000 | 1050 | 1.050 | ✓ |
-| LU8PEEng | 200 | 176 | 0.880 | 50 | 60 | 1.2000 | 2.500 | 2.500 | 1.000 | 1000 | 1050 | 1.050 | ✓ |
-| bgm | 200 | 275 | 1.375 | 50 | 60 | 1.2000 | 2.500 | 2.500 | 1.000 | 1000 | 1050 | 1.050 | ✓ |
-| mcml | 200 | 176 | 0.880 | 50 | 60 | 1.2000 | 2.500 | 2.500 | 1.000 | 1000 | 1050 | 1.050 | ✓ |
-| LU32PEEng | 200 | 220 | 1.100 | 50 | 60 | 1.2000 | 2.500 | 2.500 | 1.000 | 1000 | 1050 | 1.050 | ✓ |
-| **geomean (19)** |  |  | **1.100** |  |  | **1.2000** |  |  | **1.022** |  |  | **1.050** |  |
-| max (19) |  |  | 1.375 (ch_intrinsics) |  |  | 1.2000 (ch_intrinsics) |  |  | 1.5000 (sha) |  |  | 1.050 (ch_intrinsics) |  |
+| **geomean (15)** |  |  | **1.116** |  |  | **1.2000** |  |  | **1.027** |  |  | **1.050** |  |
+| max (15) |  |  | 1.375 (ch_intrinsics) |  |  | 1.2000 (ch_intrinsics) |  |  | 1.5000 (sha) |  |  | 1.050 (ch_intrinsics) |  |
 
 No violations.
 
@@ -119,26 +115,6 @@ No violations.
 | blob_merge | O' | 1050 | 100 | 10 | 2 | 0 | 5 | 5 |  |
 | blob_merge | P' | 950 | 100 | 10 | 2 | 0 | 5 | 5 | aig |
 | blob_merge | O/P | 1.100 | 1.000 | 1.000 | 1.000 | 1.000 | 0.800 |  |  |
-| LU8PEEng | P | 1000 | 100 | 10 | 2 | 4 | 5 | 5 |  |
-| LU8PEEng | O | 1100 | 100 | 10 | 2 | 4 | 4 | 4 | aig |
-| LU8PEEng | O' | 1050 | 100 | 10 | 2 | 4 | 5 | 5 |  |
-| LU8PEEng | P' | 950 | 100 | 10 | 2 | 4 | 5 | 5 | aig |
-| LU8PEEng | O/P | 1.100 | 1.000 | 1.000 | 1.000 | 1.000 | 0.800 |  |  |
-| bgm | P | 1000 | 100 | 10 | 2 | 0 | 5 | 5 |  |
-| bgm | O | 1100 | 100 | 10 | 2 | 0 | 4 | 4 | aig |
-| bgm | O' | 1050 | 100 | 10 | 2 | 0 | 5 | 5 |  |
-| bgm | P' | 950 | 100 | 10 | 2 | 0 |  | 5 | aig |
-| bgm | O/P | 1.100 | 1.000 | 1.000 | 1.000 | 1.000 | 0.800 |  |  |
-| mcml | P | 1000 | 100 | 10 | 2 | 4 | 5 | 5 |  |
-| mcml | O | 1100 | 100 | 10 | 2 | 4 | 4 | 4 | blif |
-| mcml | O' | 1050 | 100 | 10 | 2 | 4 | 5 | 5 |  |
-| mcml | P' | 950 | 100 | 10 | 2 | 4 | 5 | 5 | aig |
-| mcml | O/P | 1.100 | 1.000 | 1.000 | 1.000 | 1.000 | 0.800 |  |  |
-| LU32PEEng | P | 1000 | 100 | 10 | 2 | 4 | 5 | 5 |  |
-| LU32PEEng | O | 1100 | 100 | 10 | 2 | 4 | 4 | 4 | aig |
-| LU32PEEng | O' | 1050 | 100 | 10 | 2 | 4 | 5 | 5 |  |
-| LU32PEEng | P' | 950 | 100 | 10 | 2 | 4 | 5 | 5 | aig |
-| LU32PEEng | O/P | 1.100 | 1.000 | 1.000 | 1.000 | 1.000 | 0.800 |  |  |
 | spree | P | 1000 | 100 | 10 | 2 | 4 | 5 | 5 |  |
 | spree | O | 1100 | 100 | 10 | 2 | 4 | 4 | 4 | aig |
 | spree | O' | 1050 | 100 | 10 | 2 | 4 | 5 | 5 |  |
@@ -214,22 +190,6 @@ No violations.
 | blob_merge | O | 275 | 0 | 2 | 21×21 | = P |
 | blob_merge | O' | 220 | 0 | 2 | 20×20 | = P |
 | blob_merge | P' | 180 | 0 | 2 | 20×20 | = P |
-| LU8PEEng | P | 200 | 1 | 2 | 20×20 |  |
-| LU8PEEng | O | 176 | 1 | 2 | 21×21 | = P |
-| LU8PEEng | O' | 220 | 1 | 2 | 20×20 | = P |
-| LU8PEEng | P' | 180 | 1 | 2 | 20×20 | = P |
-| bgm | P | 200 | 0 | 2 | 20×20 |  |
-| bgm | O | 275 | 0 | 2 | 21×21 | = P |
-| bgm | O' | 220 | 0 | 2 | 20×20 | = P |
-| bgm | P' | 180 | 0 | 2 | 20×20 | = P |
-| mcml | P | 200 | 1 | 2 | 20×20 |  |
-| mcml | O | 176 | 1 | 2 | 21×21 | = P |
-| mcml | O' | 220 | 1 | 2 | 20×20 | = P |
-| mcml | P' | 180 | 1 | 2 | 20×20 | = P |
-| LU32PEEng | P | 200 | 1 | 2 | 20×20 |  |
-| LU32PEEng | O | 220 | 1 | 2 | 21×21 | = P |
-| LU32PEEng | O' | 220 | 1 | 2 | 20×20 | = P |
-| LU32PEEng | P' | 180 | 1 | 2 | 20×20 | = P |
 | spree | P | 200 | 1 | 2 | 20×20 |  |
 | spree | O | 260 | 1 | 2 | 21×21 | = P |
 | spree | O' | 220 | 1 | 2 | 20×20 | = P |
@@ -303,22 +263,6 @@ No violations.
 | blob_merge | O | ok | success | 60 | 2.500 | 400.0 | 1050 |
 | blob_merge | O' | ok | success | 55 | 2.500 | 400.0 | 1050 |
 | blob_merge | P' | ok | success | 50 | 2.500 | 400.0 | 950 |
-| LU8PEEng | P | ok | success | 50 | 2.500 | 400.0 | 1000 |
-| LU8PEEng | O | ok | success | 60 | 2.500 | 400.0 | 1050 |
-| LU8PEEng | O' | ok | success | 55 | 2.500 | 400.0 | 1050 |
-| LU8PEEng | P' | ok | success | 50 | 2.500 | 400.0 | 950 |
-| bgm | P | ok | success | 50 | 2.500 | 400.0 | 1000 |
-| bgm | O | ok | success | 60 | 2.500 | 400.0 | 1050 |
-| bgm | O' | ok | success | 55 | 2.500 | 400.0 | 1050 |
-| bgm | P' | ok | success | 50 | 2.500 | 400.0 | 950 |
-| mcml | P | ok | success | 50 | 2.500 | 400.0 | 1000 |
-| mcml | O | ok | success | 60 | 2.500 | 400.0 | 1050 |
-| mcml | O' | ok | success | 55 | 2.500 | 400.0 | 1050 |
-| mcml | P' | ok | success | 50 | 2.500 | 400.0 | 950 |
-| LU32PEEng | P | ok | success | 50 | 2.500 | 400.0 | 1000 |
-| LU32PEEng | O | ok | success | 60 | 2.500 | 400.0 | 1050 |
-| LU32PEEng | O' | ok | success | 55 | 2.500 | 400.0 | 1050 |
-| LU32PEEng | P' | ok | success | 50 | 2.500 | 400.0 | 950 |
 | spree | P | ok | success | 50 | 2.500 | 400.0 | 1000 |
 | spree | O | ok | success | 65 | 3.250 | 307.7 | 1300 |
 | spree | O' | ok | success | 55 | 2.500 | 400.0 | 1050 |
@@ -407,26 +351,6 @@ No violations.
 | blob_merge | O' | 6.0 | 150 | 20.0 | 300 |  |
 | blob_merge | P' | 8.0 | 120 | 20.0 | 300 |  |
 | blob_merge | O/P | 0.500 | 2.000 | 1.100 | 1.100 |  |
-| LU8PEEng | P | 10.0 | 100 | 20.0 | 300 |  |
-| LU8PEEng | O | 5.0 | 200 | 22.0 | 330 |  |
-| LU8PEEng | O' | 6.0 | 150 | 20.0 | 300 |  |
-| LU8PEEng | P' | 8.0 | 120 | 20.0 | 300 |  |
-| LU8PEEng | O/P | 0.500 | 2.000 | 1.100 | 1.100 |  |
-| bgm | P | 10.0 | 100 | 20.0 | 300 |  |
-| bgm | O | 5.0 | 200 | 22.0 | 330 |  |
-| bgm | O' | 6.0 | 150 | 20.0 | 300 |  |
-| bgm | P' | 8.0 | 120 | 20.0 | 300 |  |
-| bgm | O/P | 0.500 | 2.000 | 1.100 | 1.100 |  |
-| mcml | P | 10.0 | 100 | 20.0 | 300 | xl |
-| mcml | O | 5.0 | 200 | 22.0 | 330 |  |
-| mcml | O' | 6.0 | 150 | 20.0 | 300 |  |
-| mcml | P' | 8.0 | 120 | 20.0 | 300 |  |
-| mcml | O/P | 0.500 | 2.000 | 1.100 | 1.100 |  |
-| LU32PEEng | P | 10.0 | 100 | 20.0 | 300 |  |
-| LU32PEEng | O | 5.0 | 200 | 22.0 | 330 |  |
-| LU32PEEng | O' | 6.0 | 150 | 20.0 | 300 |  |
-| LU32PEEng | P' | 8.0 | 120 | 20.0 | 300 |  |
-| LU32PEEng | O/P | 0.500 | 2.000 | 1.100 | 1.100 |  |
 | spree | P | 10.0 | 100 | 20.0 | 300 |  |
 | spree | O | 5.0 | 200 | 22.0 | 330 |  |
 | spree | O' | 6.0 | 150 | 20.0 | 300 |  |
@@ -442,16 +366,16 @@ No violations.
 
 ## Attribution
 
-Geomeans over the 19 gate designs.
+Geomeans over the 15 gate designs.
 
 | metric | O'/P (front end) | P'/P (ABC) | O/O' (ABC) | O/P (total) |
 |---|---|---|---|---|
-| num_clb | 1.100 | 0.900 | 1.000 | 1.100 |
+| num_clb | 1.100 | 0.900 | 1.015 | 1.116 |
 | min_chan_width | 1.100 | 1.000 | 1.091 | 1.2000 |
-| critical_path_delay_ns | 1.000 | 1.000 | 1.022 | 1.022 |
+| critical_path_delay_ns | 1.000 | 1.000 | 1.027 | 1.027 |
 | crit_path_routed_wirelength | 1.050 | 0.950 | 1.000 | 1.050 |
 
-ABC exchange (3D I8; runs per exchange): P' aig 21; O aig 20, blif 1
+ABC exchange (3D I8; runs per exchange): P' aig 17; O aig 17
 
 ## Functional check and determinism
 
@@ -472,10 +396,6 @@ ABC exchange (3D I8; runs per exchange): P' aig 21; O aig 20, blif 1
 | mkDelayWorker32B | pass | pass | ram | same |
 | stereovision2 | pass | pass | equivalent (exception: multiplier) | same |
 | blob_merge | pass | pass | equivalent | same |
-| LU8PEEng | pass | pass | ram | same |
-| bgm | pass | pass | equivalent (exception: multiplier) | same |
-| mcml | pass | pass | ram | same |
-| LU32PEEng | pass | pass | ram | same |
 | spree | pass | pass | ram | same |
 | arm_core | pass | pass | ram | same |
 
@@ -484,12 +404,9 @@ ABC exchange (3D I8; runs per exchange): P' aig 21; O aig 20, blif 1
 | design | class | text |
 |---|---|---|
 | ch_intrinsics | mem-init-dropped | decision 6 step 5: hardmap drops RAM initial values (3C) |
-| LU8PEEng | dual-write-race | 3C R-6: two live write ports to one address are an IEEE race |
-| LU32PEEng | dual-write-race | 3C R-6: two live write ports to one address are an IEEE race |
 | sha | baseline-fails | D2b: read_counter - 7'b1 pads the adder b bits with unconn (reads 0): the netlist adds (P fcheck.log) |
 | blob_merge | baseline-fails | D2b: the divider's constant subtracts pad b with unconn (P fcheck.log) |
 | or1200 | baseline-fails | D2b: 6 subtract chains pad b with unconn (P fcheck.log) |
-| bgm | baseline-fails | D2b: 311 subtract chains pad b with unconn (2 residual mismatches not isolated) (P fcheck.log) |
 | boundtop | baseline-fails | dropped-latches: 103 RTL latches are dropped (read_verilog -nolatches); D2b also applies (P fcheck.log) |
 | raygentop | baseline-fails | dropped-latches: 109 RTL latches are dropped (read_verilog -nolatches); D2b also applies (P fcheck.log) |
 | ch_intrinsics | baseline-fails | x-state: 7 RTL latches are read before they are written; every mismatch bit is initial-state dependent (untested) (P fcheck.log) |
@@ -518,11 +435,7 @@ P against VTR's `golden_results.txt` for `vtr_reg_qor_chain` (another machine an
 | mkDelayWorker32B | 200 | 200 | 1.000 | 50 | 50 | 1.000 | 2.500 | 2.500 | 1.000 | 1000 | 1000 | 1.000 |  |
 | stereovision2 | 200 | 200 | 1.000 | 50 | 50 | 1.000 | 2.500 | 2.500 | 1.000 | 1000 | 1000 | 1.000 |  |
 | blob_merge | 200 | 200 | 1.000 | 50 | 50 | 1.000 | 2.500 | 2.500 | 1.000 | 1000 | 1000 | 1.000 |  |
-| LU8PEEng | 200 | 200 | 1.000 | 50 | 50 | 1.000 | 2.500 | 2.500 | 1.000 | 1000 | 1000 | 1.000 |  |
-| bgm | 200 | 200 | 1.000 | 50 | 50 | 1.000 | 2.500 | 2.500 | 1.000 | 1000 | 1000 | 1.000 |  |
-| mcml | 200 | 200 | 1.000 | 50 | 50 | 1.000 | 2.500 | 2.500 | 1.000 | 1000 | 1000 | 1.000 |  |
-| LU32PEEng | 200 | 200 | 1.000 | 50 | 50 | 1.000 | 2.500 | 2.500 | 1.000 | 1000 | 1000 | 1.000 |  |
-| **geomean (19)** |  |  | 1.012 |  |  | 1.012 |  |  | 1.000 (18/19) |  |  | 1.000 |  |
+| **geomean (15)** |  |  | 1.015 |  |  | 1.015 |  |  | 1.000 (14/15) |  |  | 1.000 |  |
 
 Non-gating rows (spree, arm_core):
 

@@ -2398,6 +2398,15 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         if(_fuzz_env)
             set_tests_properties(fuzz_lower_smoke PROPERTIES ENVIRONMENT "${_fuzz_env}")
         endif()
+        # The long run, capped at 1 h (PHASE3 decision 54: shipped out to the bigger machine,
+        # tools/vtr-qor/offload/run-offload; `timeout 90m` is only a backstop).
+        odin3_add_sweep_test(fuzz_lower_long LABEL sweep
+            COMMAND timeout 90m $<TARGET_FILE:fuzz_lower> -max_total_time=3600 -timeout=30
+                    -rss_limit_mb=2048 -max_len=64 -print_funcs=0 -print_final_stats=1
+                    ${_fl_corpus})
+        if(_fuzz_env)
+            set_tests_properties(fuzz_lower_long PROPERTIES ENVIRONMENT "${_fuzz_env}")
+        endif()
 
         # 3D §13.7 (Task 19): 2,000 runs of the splice fuzzer in the smoke (no odin3 binary needed,
         # so the fuzz label is right); the long run is a sweep.
@@ -3453,7 +3462,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # lower and is never listed; an unproven seed fails (--strict-unproven; 0 measured); the
         # tier-T histogram differences of seeds 1..200 (equivalent, a few gates apart after
         # `opt -fast`) are the list tests/lower/gen_diff_expect.txt, checked by step and gate delta.
-        # lower_gen_vs_yosys_long (5,000 seeds, the heavy-run window, nightly) keeps equivalence
+        # lower_gen_vs_yosys_long (5,000 seeds; shipped out to the bigger machine, PHASE3 decision
+        # 54, tools/vtr-qor/offload/run-offload; not run locally) keeps equivalence
         # (lower-equiv, and lower-diff's equiv step) the pass criterion and only reports the
         # histogram differences (--tier-t report): about 4% of the comb seeds, not listed.
         set(_lower_gen ${PROJECT_SOURCE_DIR}/tools/lower-check/lower-gen-diff

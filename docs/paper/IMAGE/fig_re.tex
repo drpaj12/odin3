@@ -1,28 +1,25 @@
-% Reverse-engineering flow (paper section "Reverse Engineering"; D10, PHASE4 4.14, DESIGN 8, 12.1).
-% Column width. Built = on main; specified = Phase 4.14 (planned, in PHASE4); planned = recorded
-% in DESIGN 12.1 but removed from v1.0.
+% Reverse-engineering and analysis flow (paper section "Reverse Engineering"; D10, D11, PHASE5, PHASE6).
+% Column width. Built = on main; specified = Phase 5 or 6 item (approved, not built); planned =
+% after v1.0 (research plugins).
 \begin{tikzpicture}[odin, node distance=3mm,
   box/.append style={minimum height=9mm, text width=24mm}]
-  \node[box, spec]    (lpm)  at (1.25, 0)    {LPM Verilog\\\odinsub{Cyclone V; 4.14}};
-  \node[box, spec]    (rd)   at (4.25, 0)    {\odintt{read\_verilog --lib}\\\odinsub{LPM = hard cells; 4.14}};
+  \node[box, built]   (lpm)  at (1.25, 0)    {LPM Verilog, BLIF\\\odinsub{5.1, 5.2; 1C}};
+  \node[box, spec]    (rd)   at (4.25, 0)    {gate-level ingest\\\odinsub{6.1}};
   \node[box, built, emph] (ir) at (7.25, 0)  {IR with provenance\\\odinsub{IDs, hierarchy; 1B, 3A}};
 
-  \node[box, built]   (api)  at (1.25, -2.0) {\odintt{write\_dot}, C ABI walk\\\odinsub{1D, 1F}};
-  \node[box, planned] (gra)  at (4.25, -2.0) {graph analysis\\\odinsub{plugin, after v1.0}};
-  \node[box, planned] (raise) at (7.25, -2.0) {\odintt{raise} (matcher)\\\odinsub{Phase 6, removed}};
+  \node[box, built]   (api)  at (1.25, -2.0) {\odintt{write\_dot}, C ABI walk\\\odinsub{1D, 1F; color-by 6.2}};
+  \node[box, spec]    (gx)   at (4.25, -2.0) {graph export\\\odinsub{Yosys JSON + keys; 6.3}};
+  \node[box, spec]    (lev)  at (7.25, -2.0) {\odintt{levelize}\\\odinsub{6.4}};
 
-  \node[box, built]   (src)  at (1.25, -4.0) {AST and source lines\\\odinsub{D9 provenance}};
-  \node[box, planned] (rep)  at (4.25, -4.0) {recovery report\\\odinsub{scorecard}};
-  \node[box, planned] (wir)  at (7.25, -4.0) {word-level IR,\\\odintt{write\_verilog}};
+  \node[box, built]   (src)  at (1.25, -4.0) {AST and source lines\\\odinsub{D9; coverage gate 6.5}};
+  \node[box, planned] (gra)  at (4.25, -4.0) {graph analysis\\\odinsub{plugins, after v1.0}};
 
   \draw[flow] (lpm) -- (rd);
   \draw[flow] (rd) -- (ir);
-  \draw[flow] (ir) -- (raise);
-  \draw[flow] (ir.south west) -- (gra.north east);
   \draw[flow] (ir.south west) to[out=-120,in=60] (api.north east);
-  \draw[flowplanned] (raise) -- (wir);
-  \draw[flowplanned] (wir) -- (rep);
-  \draw[ref] (gra) -- node[edgelabel, right, fill=none] {provenance} (rep.north);
-  \draw[ref] (rep) -- (src);
+  \draw[flow] (ir.south west) -- (gx.north east);
+  \draw[flow] (ir) -- (lev);
+  \draw[flowplanned] (gx) -- (gra);
+  \draw[ref] (gra) -- node[edgelabel, right, fill=none] {provenance} (src);
   \draw[ref] (api.south) -- (src.north);
 \end{tikzpicture}
