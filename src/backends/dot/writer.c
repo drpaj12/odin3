@@ -1,10 +1,12 @@
 /* writer.c — Graphviz dot writer: clusters per module, focus selection, node budget. */
 #include "backends/dot/writer.h"
 
+#include "backends/common/hdl_loc.h"
 #include "ir/celltype.h"
 #include "ir/module.h"
 #include "ir/proc.h"
 #include "ir/prov.h"
+#include "ir/value.h"
 #include "util/alloc.h"
 #include "util/file.h"
 #include "util/log.h"
@@ -14,6 +16,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The nodes to draw: one byte per node ID of each module (indexed by module ID). */
@@ -21,11 +24,31 @@ typedef struct dot_mask {
     uint8_t *bytes;
 } dot_mask;
 
+/* One colour class: a distinct attribute text and the drawn nodes that have it. */
+typedef struct dot_class {
+    const char *text; /* points into dot_color.pool */
+    size_t count;
+} dot_class;
+
+/* --color-by state (C-1 to C-3): the classes sorted bytewise, the drawn nodes with no value. */
+typedef struct dot_color {
+    bool on;
+    bool is_type;      /* "@type": the cell type name */
+    uint32_t key;      /* strtab ID of the attribute key, 0 when no object uses that string */
+    size_t none;       /* drawn nodes in the class (none) */
+    odin3_strbuf pool; /* the class texts, NUL separated */
+    odin3_strbuf text; /* scratch: the text of the node being looked at */
+    odin3_vec classes; /* dot_class, sorted */
+} dot_color;
+
 typedef struct dot_ctx {
     odin3_design *design;
     odin3_strtab *tab;
     dot_mask *mask;
     uint32_t mod_end;
+    const odin3_dot_opts *opts;
+    odin3_hdl_ctx *hdl; /* --locs only */
+    dot_color color;
 } dot_ctx;
 
 enum { DEC_BASE = 10 };
@@ -376,6 +399,204 @@ static odin3_status dot_apply_focus(dot_ctx *dc, const odin3_dot_opts *opts) {
     }
 }
 
+/* --- colour classes (C-1, C-2) ------------------------------------------------------------- */
+
+/* The fills of C-2, in order (Okabe-Ito extended); sorted values take them in turn. */
+enum { PALETTE_SIZE = 12 };
+static const char *const k_palette[PALETTE_SIZE] = {"#e69f00", "#56b4e9", "#009e73", "#f0e442",
+                                                    "#0072b2", "#d55e00", "#cc79a7", "#999999",
+                                                    "#88ccee", "#ddcc77", "#44aa99", "#aa4499"};
+static const char k_none_fill[] = "#e8e8e8";
+static const char k_none_text[] = "(none)";
+static const char k_type_attr[] = "@type";
+
+/* The attribute value as text: an integer in decimal, a string as is, bits MSB first. */
+static odin3_status dot_value_text(const dot_ctx *dc, const odin3_value *val, odin3_strbuf *out) {
+    switch (val->kind) {
+    case ODIN3_VAL_INT:
+        return odin3_strbuf_appendf(out, "%lld", (long long)val->i);
+    case ODIN3_VAL_STRING:
+        return odin3_strbuf_append(out, odin3_bytes_cstr(odin3_strtab_get(dc->tab, val->str)));
+    case ODIN3_VAL_BITS: {
+        static const char k_bit_char[] = {'0', '1', 'x', 'z'};
+        for (uint32_t i = val->len; i > 0; i--) {
+            const odin3_status st =
+                odin3_strbuf_append(out, (odin3_bytes){&k_bit_char[val->bits[i - 1] & 3], 1});
+            if (st != ODIN3_OK) {
+                return st;
+            }
+        }
+        return ODIN3_OK;
+    }
+    case ODIN3_VAL_COVER:
+        return odin3_strbuf_append(out, odin3_bytes_cstr("(cover)"));
+    case ODIN3_VAL_PROC:
+    default:
+        return odin3_strbuf_append(out, odin3_bytes_cstr("(proc)"));
+    }
+}
+
+/* Puts the colour-class text of a node into dc->color.text; *has is false for (none). */
+static odin3_status dot_node_class(dot_ctx *dc, const odin3_module *mod, odin3_node_id node,
+                                   bool *has) {
+    odin3_strbuf_clear(&dc->color.text);
+    *has = false;
+    if (dc->color.is_type) {
+        const odin3_celltype_def *def = odin3_celltype_get(dc->design, odin3_node_type(mod, node));
+        *has = true;
+        return odin3_strbuf_append(&dc->color.text,
+                                   odin3_bytes_cstr(def != NULL ? def->name : "?"));
+    }
+    const odin3_value *val =
+        dc->color.key == 0
+            ? NULL
+            : odin3_attr_get(mod, (odin3_objref){ODIN3_OBJ_NODE, node.v}, dc->color.key);
+    *has = val != NULL;
+    return val != NULL ? dot_value_text(dc, val, &dc->color.text) : ODIN3_OK;
+}
+
+static int dot_cmp_text(const void *lhs, const void *rhs) {
+    return strcmp(((const dot_class *)lhs)->text, ((const dot_class *)rhs)->text);
+}
+
+static int dot_cmp_class(const void *key, const void *elem) {
+    return strcmp((const char *)key, ((const dot_class *)elem)->text);
+}
+
+/* Appends the node's class text to the pool and its offset to offsets, or counts (none). */
+static odin3_status dot_collect_node(dot_ctx *dc, const odin3_module *mod, odin3_node_id node,
+                                     odin3_vec *offsets) {
+    bool has = false;
+    odin3_status st = dot_node_class(dc, mod, node, &has);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (!has) {
+        dc->color.none++;
+        return ODIN3_OK;
+    }
+    size_t *slot = odin3_vec_push(offsets);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = dc->color.pool.len;
+    const char *text = dc->color.text.data != NULL ? dc->color.text.data : "";
+    return odin3_strbuf_append(&dc->color.pool, (odin3_bytes){text, strlen(text) + 1});
+}
+
+static odin3_status dot_collect_module(dot_ctx *dc, uint32_t id, odin3_vec *offsets) {
+    const odin3_module *mod = dot_module(dc, id);
+    for (uint32_t j = 1; j < odin3_module_node_end(mod); j++) {
+        odin3_status st = dc->mask[id].bytes[j]
+                              ? dot_collect_node(dc, mod, (odin3_node_id){j}, offsets)
+                              : ODIN3_OK;
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
+/* Sorts the collected texts bytewise and folds equal ones into classes with their counts. */
+/* One class per collected text (count 1), sorted bytewise. */
+static odin3_status dot_classes_collect(dot_ctx *dc, const odin3_vec *offsets) {
+    for (size_t i = 0; i < offsets->len; i++) {
+        dot_class *slot = odin3_vec_push(&dc->color.classes);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = (dot_class){dc->color.pool.data + *(const size_t *)odin3_vec_cat(offsets, i), 1};
+    }
+    if (dc->color.classes.len > 0) {
+        qsort(dc->color.classes.data, dc->color.classes.len, sizeof(dot_class), dot_cmp_text);
+    }
+    return ODIN3_OK;
+}
+
+/* Folds the sorted equal texts into one class each, in place; counts add up. */
+static void dot_classes_fold(dot_color *color) {
+    dot_class *classes = color->classes.data;
+    size_t out = 0;
+    for (size_t i = 0; i < color->classes.len; i++) {
+        if (out > 0 && strcmp(classes[out - 1].text, classes[i].text) == 0) {
+            classes[out - 1].count++;
+        } else {
+            classes[out++] = classes[i];
+        }
+    }
+    color->classes.len = out;
+}
+
+static odin3_status dot_classes_from(dot_ctx *dc, const odin3_vec *offsets) {
+    odin3_status st = dot_classes_collect(dc, offsets);
+    if (st == ODIN3_OK) {
+        dot_classes_fold(&dc->color);
+    }
+    return st;
+}
+
+static void dot_color_free(dot_ctx *dc) {
+    odin3_strbuf_free(&dc->color.pool);
+    odin3_strbuf_free(&dc->color.text);
+    odin3_vec_free(&dc->color.classes);
+}
+
+static void dot_color_warn(const dot_ctx *dc) {
+    const char *attr = dc->opts->color_attr;
+    if (dc->color.classes.len == 0) {
+        odin3_log(ODIN3_LOG_WARN, "dot: --color-by '%s' is on no drawn node; every node is (none)",
+                  attr);
+    } else if (dc->color.classes.len > PALETTE_SIZE) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "dot: --color-by '%s' has %zu values but the palette has %d colours; colours "
+                  "are reused",
+                  attr, dc->color.classes.len, PALETTE_SIZE);
+    }
+}
+
+/* Reads the attribute of every drawn node and builds the sorted classes. */
+static odin3_status dot_color_prepare(dot_ctx *dc) {
+    const char *attr = dc->opts->color_attr;
+    if (attr == NULL) {
+        return ODIN3_OK;
+    }
+    if (attr[0] == '\0') {
+        return dot_invalid("--color-by expects an attribute name, got", attr);
+    }
+    dc->color.on = true;
+    dc->color.is_type = strcmp(attr, k_type_attr) == 0;
+    (void)odin3_strtab_find(dc->tab, odin3_bytes_cstr(attr), &dc->color.key);
+    odin3_vec offsets;
+    odin3_vec_init(&offsets, sizeof(size_t));
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 1; st == ODIN3_OK && i < dc->mod_end; i++) {
+        st = dot_collect_module(dc, i, &offsets);
+    }
+    st = st == ODIN3_OK ? dot_classes_from(dc, &offsets) : st;
+    odin3_vec_free(&offsets);
+    if (st == ODIN3_OK) {
+        dot_color_warn(dc);
+    }
+    return st;
+}
+
+/* The fill of the node's class, NULL when colouring is off or the node has no value. */
+static odin3_status dot_node_fill(dot_ctx *dc, const odin3_module *mod, odin3_node_id node,
+                                  const char **fill) {
+    bool has = false;
+    odin3_status st = dot_node_class(dc, mod, node, &has);
+    const char *text = dc->color.text.data != NULL ? dc->color.text.data : "";
+    const dot_class *hit = has && st == ODIN3_OK
+                               ? bsearch(text, dc->color.classes.data, dc->color.classes.len,
+                                         sizeof(dot_class), dot_cmp_class)
+                               : NULL;
+    *fill =
+        hit != NULL
+            ? k_palette[(size_t)(hit - (const dot_class *)dc->color.classes.data) % PALETTE_SIZE]
+            : k_none_fill;
+    return st;
+}
+
 /* --- emit ---------------------------------------------------------------------------------- */
 
 static odin3_status dot_put_bytes(odin3_strbuf *buf, const char *text, size_t len) {
@@ -437,7 +658,23 @@ static uint32_t dot_port_name(const odin3_module *mod, odin3_node_id node) {
     return 0;
 }
 
-static odin3_status dot_emit_node(const dot_ctx *dc, odin3_strbuf *buf, const odin3_module *mod,
+/* The second label line of C-4: the first HDL location and "+N" for N more; none for a node
+ * without an HDL location (a netlist position is not one). */
+static odin3_status dot_put_locs(const dot_ctx *dc, odin3_strbuf *buf, const odin3_module *mod,
+                                 odin3_node_id node) {
+    odin3_hdl_locs_out locs;
+    odin3_status st = odin3_hdl_locs(dc->hdl, odin3_node_prov(mod, node), &locs);
+    if (st != ODIN3_OK || locs.n == 0) {
+        return st;
+    }
+    st = dot_put_str(buf, "\\n");
+    st = st == ODIN3_OK ? dot_put_escaped(buf, odin3_strtab_get(dc->tab, locs.locs[0].file)) : st;
+    st = st == ODIN3_OK ? odin3_strbuf_appendf(buf, ":%u", locs.locs[0].line) : st;
+    return st == ODIN3_OK && locs.n > 1 ? odin3_strbuf_appendf(buf, " +%u", locs.n - 1) : st;
+}
+
+/* `label="<type>\n<name>[\n<file:line>[ +N]]"` of a node. */
+static odin3_status dot_put_label(const dot_ctx *dc, odin3_strbuf *buf, const odin3_module *mod,
                                   odin3_node_id node) {
     const odin3_celltype_def *def = odin3_celltype_get(dc->design, odin3_node_type(mod, node));
     uint32_t name = odin3_node_name(mod, node);
@@ -453,11 +690,23 @@ static odin3_status dot_emit_node(const dot_ctx *dc, odin3_strbuf *buf, const od
     } else if (st == ODIN3_OK) {
         st = odin3_strbuf_appendf(buf, "$n%u", node.v);
     }
-    return st == ODIN3_OK ? dot_put_str(buf, "\"];\n") : st;
+    st = st == ODIN3_OK && dc->hdl != NULL ? dot_put_locs(dc, buf, mod, node) : st;
+    return st == ODIN3_OK ? dot_put_str(buf, "\"") : st;
 }
 
-static odin3_status dot_emit_cluster(const dot_ctx *dc, odin3_strbuf *buf,
-                                     const odin3_module *mod) {
+static odin3_status dot_emit_node(dot_ctx *dc, odin3_strbuf *buf, const odin3_module *mod,
+                                  odin3_node_id node) {
+    odin3_status st = dot_put_label(dc, buf, mod, node);
+    const char *fill = NULL;
+    if (st == ODIN3_OK && dc->color.on) {
+        st = dot_node_fill(dc, mod, node, &fill);
+        st = st == ODIN3_OK ? odin3_strbuf_appendf(buf, ", style=filled, fillcolor=\"%s\"", fill)
+                            : st;
+    }
+    return st == ODIN3_OK ? dot_put_str(buf, "];\n") : st;
+}
+
+static odin3_status dot_emit_cluster(dot_ctx *dc, odin3_strbuf *buf, const odin3_module *mod) {
     uint32_t id = odin3_module_id_of(mod).v;
     const char *name = odin3_strtab_get(dc->tab, odin3_module_name(mod));
     /* The module ID alone names the cluster: injective whatever the module names look like. */
@@ -521,7 +770,33 @@ static bool dot_module_drawn(const dot_ctx *dc, uint32_t id) {
     return false;
 }
 
-static odin3_status dot_emit(const dot_ctx *dc, odin3_strbuf *buf) {
+/* One legend entry: a filled node labelled "<text> (<n>)". */
+static odin3_status dot_emit_legend_node(odin3_strbuf *buf, size_t index, const char *text,
+                                         size_t count) {
+    const char *fill = text == k_none_text ? k_none_fill : k_palette[index % PALETTE_SIZE];
+    odin3_status st = odin3_strbuf_appendf(buf, "    legend_%zu [label=\"", index);
+    st = st == ODIN3_OK ? dot_put_escaped(buf, text) : st;
+    return st == ODIN3_OK ? odin3_strbuf_appendf(
+                                buf, " (%zu)\", style=filled, fillcolor=\"%s\"];\n", count, fill)
+                          : st;
+}
+
+/* C-3: cluster_legend, a node per class (sorted values, then (none) when some node has none). */
+static odin3_status dot_emit_legend(const dot_ctx *dc, odin3_strbuf *buf) {
+    odin3_status st = dot_put_str(buf, "  subgraph cluster_legend {\n    label=\"");
+    st = st == ODIN3_OK ? dot_put_escaped(buf, dc->opts->color_attr) : st;
+    st = st == ODIN3_OK ? dot_put_str(buf, "\";\n") : st;
+    const dot_class *classes = dc->color.classes.data;
+    for (size_t i = 0; st == ODIN3_OK && i < dc->color.classes.len; i++) {
+        st = dot_emit_legend_node(buf, i, classes[i].text, classes[i].count);
+    }
+    if (st == ODIN3_OK && dc->color.none > 0) {
+        st = dot_emit_legend_node(buf, dc->color.classes.len, k_none_text, dc->color.none);
+    }
+    return st == ODIN3_OK ? dot_put_str(buf, "  }\n") : st;
+}
+
+static odin3_status dot_emit(dot_ctx *dc, odin3_strbuf *buf) {
     odin3_status st = dot_put_str(buf, "digraph odin3 {\n  rankdir=LR;\n  node [shape=box];\n");
     for (uint32_t i = 1; st == ODIN3_OK && i < dc->mod_end; i++) {
         st = dot_module_drawn(dc, i) ? dot_emit_cluster(dc, buf, dot_module(dc, i)) : ODIN3_OK;
@@ -534,6 +809,7 @@ static odin3_status dot_emit(const dot_ctx *dc, odin3_strbuf *buf) {
                      : ODIN3_OK;
         }
     }
+    st = st == ODIN3_OK && dc->color.on ? dot_emit_legend(dc, buf) : st;
     return st == ODIN3_OK ? dot_put_str(buf, "}\n") : st;
 }
 
@@ -575,12 +851,16 @@ static odin3_status dot_build(dot_ctx *dc, const odin3_dot_opts *opts, odin3_str
         odin3_log(ODIN3_LOG_WARN, "dot: focus '%s' selects no node; the graph is empty",
                   opts->focus);
     }
+    st = st == ODIN3_OK ? dot_color_prepare(dc) : st;
     return st == ODIN3_OK ? dot_emit(dc, buf) : st;
 }
 
 odin3_status odin3_dot_write(const odin3_design *design, const char *path,
                              const odin3_dot_opts *opts) {
     static const odin3_dot_opts k_defaults = {ODIN3_DOT_FOCUS_NONE, NULL, 0, NULL, false};
+    if (opts == NULL) {
+        opts = &k_defaults;
+    }
     if (design == NULL || path == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "dot: design and path are required");
         return ODIN3_ERR_INVALID_ARG;
@@ -589,14 +869,22 @@ odin3_status odin3_dot_write(const odin3_design *design, const char *path,
         return ODIN3_ERR_INVALID_ARG; /* 2D EL-33: before the path is opened */
     }
     /* The module and forward-index accessors take a mutable design; nothing here mutates it. */
-    dot_ctx dc = {(odin3_design *)design, odin3_design_strtab(design), NULL, 0};
+    dot_ctx dc = {
+        .design = (odin3_design *)design, .tab = odin3_design_strtab(design), .opts = opts};
+    odin3_strbuf_init(&dc.color.pool);
+    odin3_strbuf_init(&dc.color.text);
+    odin3_vec_init(&dc.color.classes, sizeof(dot_class));
     odin3_strbuf buf;
     odin3_strbuf_init(&buf);
-    odin3_status st = dot_build(&dc, opts != NULL ? opts : &k_defaults, &buf);
+    dc.hdl = opts->locs ? odin3_hdl_ctx_create(design, "write_dot") : NULL;
+    odin3_status st = opts->locs && dc.hdl == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
+    st = st == ODIN3_OK ? dot_build(&dc, opts, &buf) : st;
     if (st == ODIN3_OK) {
         st = dot_save(path, &buf);
     }
     dot_masks_free(&dc);
+    dot_color_free(&dc);
+    odin3_hdl_ctx_destroy(dc.hdl);
     odin3_strbuf_free(&buf);
     return st;
 }

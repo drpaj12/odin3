@@ -517,8 +517,9 @@ static void test_cone_deep_chain(void) {
     odin3_net_id last = {0};
     (void)build_chain(LONG_CHAIN, &last);
     odin3_dot_opts opts = {ODIN3_DOT_FOCUS_CONE, "n20000", 0, NULL, false};
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_dot_write(design, out_path, &(odin3_dot_opts){0, NULL, 0, NULL, false}));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_ERR_INVALID_ARG,
+        odin3_dot_write(design, out_path, &(odin3_dot_opts){0, NULL, 0, NULL, false}));
     write_ok(&opts);
     char *text = slurp(out_path);
     TEST_ASSERT_EQUAL_UINT(LONG_CHAIN - 1, count_of(text, " -> "));
@@ -698,16 +699,21 @@ static void set_attr(odin3_node_id node, const char *key, const odin3_value *val
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(module, ref, intern(key), val));
 }
 
-static void set_str_attr(uint32_t node, const char *key, const char *text) {
-    odin3_value val = {ODIN3_VAL_STRING, 0, NULL, 0, intern(text), 0};
-    set_attr((odin3_node_id){node}, key, &val);
+typedef struct attr_text {
+    const char *key;
+    const char *text;
+} attr_text;
+
+static void set_str_attr(uint32_t node, attr_text kv) {
+    odin3_value val = {ODIN3_VAL_STRING, 0, NULL, 0, intern(kv.text), 0};
+    set_attr((odin3_node_id){node}, kv.key, &val);
 }
 
 /* The first line of text that starts (after blanks) with prefix, copied into buf. */
-static const char *line_with(const char *text, const char *prefix, char *buf, size_t cap) {
+static const char *line_with(const char *text, odin3_bytes prefix, char *buf, size_t cap) {
     for (const char *at = text; at != NULL && *at != '\0'; at = strchr(at, '\n')) {
         at += strspn(at, "\n \t");
-        if (strncmp(at, prefix, strlen(prefix)) == 0) {
+        if (strncmp(at, prefix.ptr, prefix.len) == 0) {
             size_t len = strcspn(at, "\n");
             TEST_ASSERT_TRUE(len < cap);
             memcpy(buf, at, len);
@@ -722,7 +728,7 @@ static void expect_node_line(const char *text, uint32_t node, const char *needle
     char prefix[NAME_BUF];
     char line[FILE_BUF];
     (void)snprintf(prefix, sizeof prefix, "m%un%u [", odin3_module_id_of(module).v, node);
-    const char *got = line_with(text, prefix, line, sizeof line);
+    const char *got = line_with(text, odin3_bytes_cstr(prefix), line, sizeof line);
     TEST_ASSERT_NOT_NULL_MESSAGE(got, prefix);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(got, needle), needle);
 }
@@ -739,34 +745,51 @@ static char *render_color(const char *attr, bool locs) {
     return slurp(out_path);
 }
 
+typedef struct dot_scan {
+    bool quoted;
+    int depth;
+} dot_scan;
+
+/* One byte of the scan; returns true when the next byte is escaped and must be skipped. */
+static bool scan_byte(dot_scan *scan, char chr) {
+    if (scan->quoted && chr == '\\') {
+        return true;
+    }
+    if (chr == '"') {
+        scan->quoted = !scan->quoted;
+    } else if (!scan->quoted && (chr == '{' || chr == '}')) {
+        scan->depth += chr == '{' ? 1 : -1;
+        TEST_ASSERT_TRUE(scan->depth >= 0);
+    }
+    return false;
+}
+
 /* Quotes balanced (an escaped quote does not count) and braces balanced outside quotes. */
 static void expect_structure(const char *text) {
-    bool quoted = false;
-    int depth = 0;
+    dot_scan scan = {false, 0};
     for (const char *at = text; *at != '\0'; at++) {
-        if (quoted && *at == '\\' && at[1] != '\0') {
-            at++;
-        } else if (*at == '"') {
-            quoted = !quoted;
-        } else if (!quoted && *at == '{') {
-            depth++;
-        } else if (!quoted && *at == '}') {
-            depth--;
-            TEST_ASSERT_TRUE(depth >= 0);
-        }
+        at += scan_byte(&scan, *at) && at[1] != '\0' ? 1 : 0;
     }
-    TEST_ASSERT_FALSE(quoted);
-    TEST_ASSERT_EQUAL_INT(0, depth);
+    TEST_ASSERT_FALSE(scan.quoted);
+    TEST_ASSERT_EQUAL_INT(0, scan.depth);
 }
 
 /* g0..g4 (nodes 1..5) take alpha, beta, alpha, gamma and no value. */
 static void build_classes(void) {
     odin3_net_id last = {0};
     build_chain(CHAIN, &last);
-    set_str_attr(1, "my_class", "gamma");
-    set_str_attr(2, "my_class", "alpha");
-    set_str_attr(3, "my_class", "beta");
-    set_str_attr(4, "my_class", "alpha");
+    set_str_attr(1, (attr_text){"my_class", "gamma"});
+    set_str_attr(2, (attr_text){"my_class", "alpha"});
+    set_str_attr(3, (attr_text){"my_class", "beta"});
+    set_str_attr(4, (attr_text){"my_class", "alpha"});
+}
+
+/* The legend is the last cluster and comes after every edge. */
+static void expect_legend_last(const char *text) {
+    const char *legend = strstr(text, "subgraph cluster_legend");
+    TEST_ASSERT_NOT_NULL(legend);
+    TEST_ASSERT_NULL(strstr(legend, " -> "));
+    TEST_ASSERT_NULL(strstr(legend + strlen("subgraph cluster_legend"), "cluster_"));
 }
 
 static void test_color_classes_and_legend(void) {
@@ -782,11 +805,7 @@ static void test_color_classes_and_legend(void) {
     expect_in(text, "label=\"beta (1)\"");
     expect_in(text, "label=\"gamma (1)\"");
     expect_in(text, "label=\"(none) (1)\"");
-    const char *legend = strstr(text, "subgraph cluster_legend");
-    TEST_ASSERT_NOT_NULL(legend);
-    TEST_ASSERT_NULL(strstr(legend, " -> "));         /* after every edge */
-    TEST_ASSERT_NULL(strstr(legend + 1, "cluster_")); /* the last cluster */
-    TEST_ASSERT_TRUE(strstr(text, "cluster_1") < legend);
+    expect_legend_last(text);
     odin3_util_free(text);
 }
 
@@ -814,7 +833,7 @@ static void test_color_thirteen_values_reuse_warns(void) {
     for (uint32_t i = 0; i < PALETTE_SIZE + 1; i++) {
         char val[NAME_BUF];
         (void)snprintf(val, sizeof val, "v%02u", i);
-        set_str_attr(i + 1, "k", val);
+        set_str_attr(i + 1, (attr_text){"k", val});
     }
     last_warning[0] = '\0';
     char *text = render_color("k", false);
@@ -832,7 +851,7 @@ static void test_color_twelve_values_no_warning(void) {
     for (uint32_t i = 0; i < PALETTE_SIZE; i++) {
         char val[NAME_BUF];
         (void)snprintf(val, sizeof val, "v%02u", i);
-        set_str_attr(i + 1, "k", val);
+        set_str_attr(i + 1, (attr_text){"k", val});
     }
     last_warning[0] = '\0';
     char *text = render_color("k", false);
@@ -891,7 +910,7 @@ static void test_color_int_and_bits_text(void) {
 static void test_color_value_escaping(void) {
     odin3_net_id last = {0};
     build_chain(1, &last);
-    set_str_attr(1, "k", "a\"b&c\\d");
+    set_str_attr(1, (attr_text){"k", "a\"b&c\\d"});
     char *text = render_color("k", false);
     expect_structure(text);
     expect_in(text, "label=\"a\\\"b&amp;c\\\\d (1)\"");
@@ -965,7 +984,7 @@ static void test_locs_second_label_line(void) {
 
 static void test_locs_with_color(void) {
     build_located();
-    set_str_attr(1, "k", "one");
+    set_str_attr(1, (attr_text){"k", "one"});
     char *text = render_color("k", true);
     expect_structure(text);
     expect_node_line(text, 1, "x.v:10\", style=filled");
@@ -976,7 +995,7 @@ static void test_locs_with_color(void) {
 
 static void test_color_oom_sweep(void) {
     build_located();
-    set_str_attr(1, "k", "one");
+    set_str_attr(1, (attr_text){"k", "one"});
     odin3_dot_opts opts = {ODIN3_DOT_FOCUS_NONE, NULL, 0, "k", true};
     oom_sweep(&opts);
 }
@@ -995,8 +1014,8 @@ static bool nop_accepts(const char *path) {
 static void test_graphviz_nop(void) {
     build_hier();
     build_located();
-    set_str_attr(1, "k", "w\"e&i\\rd\nvalue");
-    set_str_attr(2, "k", "plain");
+    set_str_attr(1, (attr_text){"k", "w\"e&i\\rd\nvalue"});
+    set_str_attr(2, (attr_text){"k", "plain"});
     static const struct {
         const char *attr;
         bool locs;
