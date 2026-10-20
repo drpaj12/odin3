@@ -1,19 +1,17 @@
 /*
  * hash_rows.c — renamed objects, hash names and the name map file. See hash_rows.h.
  */
-#define _XOPEN_SOURCE 700 /* realpath */
-
 #include "backends/common/hash_rows.h"
 
 #include "backends/common/hdl_loc.h"
 #include "util/alloc.h"
 #include "util/log.h"
 
-#include <limits.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+
+enum { PATH_BUF = 4096 };
 
 /* The test hook (odin3_hash_rows_test_start): 0 is the production width. */
 static uint32_t test_start = 0;
@@ -163,47 +161,46 @@ odin3_status odin3_hash_rows_map_text(const odin3_hash_rows *rows, odin3_strbuf 
     return st;
 }
 
-/* The directory of path made absolute (realpath), plus "/" and the last component, into out.
- * False when the directory cannot be resolved. */
-static bool canonical_path(const char *path, odin3_strbuf *out) {
+/* The identity of path's directory (device and inode) and the last component. False when the
+ * directory cannot be stat'ed. */
+typedef struct dest_id {
+    dev_t dev;
+    ino_t ino;
+    const char *base;
+} dest_id;
+
+static bool dest_id_of(const char *path, dest_id *out) {
     const char *slash = strrchr(path, '/');
-    char dir_buf[PATH_MAX];
-    char dir_in[PATH_MAX];
-    size_t dir_len = slash == NULL ? 0 : (size_t)(slash - path);
-    if (dir_len >= sizeof dir_in) {
-        return false;
-    }
+    char dir_path[PATH_BUF];
+    struct stat info;
     if (slash == NULL) {
-        (void)strcpy(dir_in, ".");
+        (void)snprintf(dir_path, sizeof dir_path, ".");
+    } else if ((size_t)(slash - path) >= sizeof dir_path) {
+        return false;
     } else {
-        (void)snprintf(dir_in, sizeof dir_in, "%.*s", dir_len == 0 ? 1 : (int)dir_len, path);
+        (void)snprintf(dir_path, sizeof dir_path, "%.*s", slash == path ? 1 : (int)(slash - path),
+                       path);
     }
-    if (realpath(dir_in, dir_buf) == NULL) {
+    if (stat(dir_path, &info) != 0) {
         return false;
     }
-    odin3_strbuf_clear(out);
-    return odin3_strbuf_appendf(out, "%s/%s", dir_buf, slash == NULL ? path : slash + 1) ==
-           ODIN3_OK;
+    *out = (dest_id){info.st_dev, info.st_ino, slash == NULL ? path : slash + 1};
+    return true;
 }
 
-/* True when both paths name one file: the same directory and name after realpath of the
- * directory, or (both exist) the same device and inode. */
+/* True when both paths name one file: the same directory (device and inode, so `dir/./x` and
+ * `dir/x` agree) and the same name, or (both exist) the same device and inode. */
 static bool same_destination(const char *left, const char *right) {
-    struct stat a;
-    struct stat b;
-    if (stat(left, &a) == 0 && stat(right, &b) == 0 && a.st_dev == b.st_dev &&
-        a.st_ino == b.st_ino) {
+    struct stat first;
+    struct stat second;
+    if (stat(left, &first) == 0 && stat(right, &second) == 0 && first.st_dev == second.st_dev &&
+        first.st_ino == second.st_ino) {
         return true;
     }
-    odin3_strbuf first;
-    odin3_strbuf second;
-    odin3_strbuf_init(&first);
-    odin3_strbuf_init(&second);
-    bool same = canonical_path(left, &first) && canonical_path(right, &second) &&
-                strcmp(first.data, second.data) == 0;
-    odin3_strbuf_free(&first);
-    odin3_strbuf_free(&second);
-    return same;
+    dest_id lhs;
+    dest_id rhs;
+    return dest_id_of(left, &lhs) && dest_id_of(right, &rhs) && lhs.dev == rhs.dev &&
+           lhs.ino == rhs.ino && strcmp(lhs.base, rhs.base) == 0;
 }
 
 odin3_status odin3_hash_map_path(const odin3_hash_map_req *req, odin3_strbuf *path) {

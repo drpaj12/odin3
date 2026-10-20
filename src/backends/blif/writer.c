@@ -539,13 +539,13 @@ static odin3_status note_hashed(blif_writer *wr, odin3_net_id net, uint32_t suff
         st = odin3_strbuf_appendf(&full, "$%u", (unsigned)suffix);
     }
     st = st == ODIN3_OK
-             ? odin3_hash_rows_add(
-                   &wr->rows,
-                   &(odin3_hash_row_req){.module = odin3_module_id_of(wr->module).v,
-                                         .module_name = str_bytes(wr, odin3_module_name(wr->module)),
-                                         .kind = ODIN3_NAME_NET,
-                                         .key = net.v,
-                                         .full = {full.data, full.len}})
+             ? odin3_hash_rows_add(&wr->rows,
+                                   &(odin3_hash_row_req){
+                                       .module = odin3_module_id_of(wr->module).v,
+                                       .module_name = str_bytes(wr, odin3_module_name(wr->module)),
+                                       .kind = ODIN3_NAME_NET,
+                                       .key = net.v,
+                                       .full = {full.data, full.len}})
              : st;
     odin3_strbuf_free(&full);
     return st;
@@ -855,6 +855,16 @@ static odin3_status claim_ports(blif_writer *wr) {
     return st;
 }
 
+/* Takes wr->cand as the name of net; taken: a port bit of another net or an earlier net has it
+ * (then `$n<ID>`, or under HASH the provenance name with a `$N` suffix and a hash row). */
+static odin3_status take_named(blif_writer *wr, odin3_net_id net, bool taken) {
+    if (taken) {
+        return hashing_prov(wr) ? take_suffixed(wr, net.v, net) : take_numbered(wr, net.v);
+    }
+    odin3_status st = take_name(wr, net.v);
+    return st == ODIN3_OK ? note_hashed(wr, net, 0) : st;
+}
+
 /*
  * VTR: a named net is written under its own name's VB-10 form (a generator's own name as it is,
  * is_generator), unless a port bit of another net or an earlier net already has that form (VB-10
@@ -878,12 +888,7 @@ static odin3_status name_named_vtr(blif_writer *wr, odin3_net_id net, uint32_t r
     uint64_t owner = 0;
     bool found = odin3_strtab_find(wr->gen_names, buf_bytes(&wr->cand), &id);
     bool own_port = found && odin3_u64map_get(wr->claims, id, &owner) && owner == net.v;
-    if (found && !own_port && hashing_prov(wr)) {
-        st = take_suffixed(wr, net.v, net);
-    } else {
-        st = found && !own_port ? take_numbered(wr, net.v) : take_name(wr, net.v);
-        st = st == ODIN3_OK && !(found && !own_port) ? note_hashed(wr, net, 0) : st;
-    }
+    st = take_named(wr, net, found && !own_port);
     /* a net under its own port bit's name was counted with the port bit (port_renamed) */
     return st == ODIN3_OK && changed && !own_port ? note_renamed(wr, net.v, gen_get(wr, net.v))
                                                   : st;
@@ -2662,8 +2667,8 @@ static odin3_status write_opened(const odin3_design *design, const char *path,
     bool held = wr.opened && map != NULL;
     wr_close(&wr, held); /* the status is sticky: wr.st holds the first failure, closing included */
     if (map != NULL) {
-        wr.st = odin3_hash_map_close(map, odin3_blif_names_map(names), held ? &wr.file : NULL,
-                                     wr.st);
+        wr.st =
+            odin3_hash_map_close(map, odin3_blif_names_map(names), held ? &wr.file : NULL, wr.st);
     }
     st = wr.st;
     wr_free(&wr);
