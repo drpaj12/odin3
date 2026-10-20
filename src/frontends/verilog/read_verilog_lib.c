@@ -13,6 +13,7 @@
 #include "frontends/verilog/parser.h"
 #include "frontends/verilog/preproc.h"
 #include "frontends/verilog/read_verilog.h"
+#include "frontends/verilog/soft_blocks.h"
 #include "ir/design.h"
 #include "odin3/odin3.h"
 #include "util/hash.h"
@@ -103,6 +104,50 @@ static odin3_status read_library(odin3_rv *rv, const odin3_pp_source *src) {
     odin3_status st = odin3_u64map_put(rv->libread, (odin3_kv){src->resolved, 1});
     st = st != ODIN3_OK ? st : odin3_rv_read(rv, src);
     return st != ODIN3_OK ? st : sweep(rv, true);
+}
+
+/* D18 (soft_blocks.h): an instance of a primitive the arch has no model of, with --vtr-compat,
+ * is built from lib/soft_primitives/<name>.v, read as a library unit; the instance is warned. */
+static odin3_status read_soft_block(odin3_rv *rv, const odin3_rv_want *want) {
+    const char *name = text_of(rv, want->name);
+    char dir[SOFT_DIR_CAP];
+    char tried[SOFT_DIR_CAP];
+    bool found = odin3_soft_blocks_dir(dir, tried);
+    for (uint32_t i = 0; i < SOFT_BLOCK_COUNT; i++) {
+        if (((rv->soft_mask >> i) & 1U) == 0 || strcmp(name, odin3_soft_block_name(i)) != 0) {
+            continue;
+        }
+        if (!found) {
+            odin3_vl_report(
+                &rv->vl, ODIN3_LOG_ERROR, want->at,
+                "--vtr-compat needs the soft body of '%s' (the architecture has no such "
+                "model) but no soft_primitives directory was found; tried %s "
+                "(set ODIN3_SOFT_PRIMITIVES_DIR)",
+                name, tried);
+            return ODIN3_OK; /* counted as an error by the run: the read fails */
+        }
+        odin3_strbuf path;
+        odin3_strbuf_init(&path);
+        odin3_pp_source src = {0, 0, 0, want->at};
+        odin3_status st = odin3_strbuf_appendf(&path, "%s/%s.v", dir, name);
+        st = st != ODIN3_OK
+                 ? st
+                 : odin3_design_intern(rv->design, odin3_bytes_cstr("work"), &src.library);
+        st = st != ODIN3_OK
+                 ? st
+                 : odin3_design_intern(rv->design, (odin3_bytes){path.data, path.len}, &src.given);
+        src.resolved = src.given;
+        odin3_strbuf_free(&path);
+        if (st == ODIN3_OK) {
+            odin3_vl_report(&rv->vl, ODIN3_LOG_WARN, want->at,
+                            "the architecture has no '%s' model; --vtr-compat builds this "
+                            "instance as soft logic, as Parmys does",
+                            name);
+            st = read_library(rv, &src);
+        }
+        return st;
+    }
+    return ODIN3_OK;
 }
 
 /* Every Verilog -v file of the record, in order (all its modules become available at once). */
@@ -231,6 +276,17 @@ static odin3_status read_kept_libraries(odin3_rv *rv) {
 
 /* --- step 3 ------------------------------------------------------------------------------- */
 
+/* One wanted module no unit defines yet: the record's -v files, the -y directories, then (D18)
+ * the soft body of a primitive the arch lacks. */
+static odin3_status resolve_want(odin3_rv *rv, const odin3_rv_want *want) {
+    odin3_status st = rv->libfiles_read ? ODIN3_OK : read_libfiles(rv);
+    if (st != ODIN3_OK || is_defined(rv, want->name)) {
+        return st;
+    }
+    st = search_dirs(rv, want);
+    return st != ODIN3_OK || is_defined(rv, want->name) ? st : read_soft_block(rv, want);
+}
+
 odin3_status odin3_rv_resolve_libraries(odin3_rv *rv) {
     odin3_status st = sweep(rv, false);
     uint32_t first = odin3_ast_root_count(rv->ast);
@@ -240,13 +296,7 @@ odin3_status odin3_rv_resolve_libraries(odin3_rv *rv) {
         if (is_defined(rv, want.name)) {
             continue;
         }
-        if (!rv->libfiles_read) {
-            st = read_libfiles(rv);
-            if (st != ODIN3_OK || is_defined(rv, want.name)) {
-                continue;
-            }
-        }
-        st = search_dirs(rv, &want);
+        st = resolve_want(rv, &want);
     }
     if (st == ODIN3_OK && first > 0 && odin3_ast_root_count(rv->ast) > first) {
         odin3_ast_set_library_units_from(rv->ast, first);

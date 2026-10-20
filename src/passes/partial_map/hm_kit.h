@@ -57,6 +57,7 @@ typedef struct hm_ctx {
     odin3_module *module;
     odin3_hardmap_stats stats;
     pm_rules rules;                      /* S-2: the numbers the rules read */
+    bool width_warned;                   /* the S-5 warning of `--mem-width arch` was given */
     bool allow_unknown_blocks;           /* `--allow-unknown-blocks`: B-6 is a warning */
     odin3_celltype_id hard[HM_N_HARD];   /* found by hm_need; {0} until then */
     odin3_celltype_id glue[HM_N_GLUE];   /* found on first use */

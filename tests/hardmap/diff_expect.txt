@@ -21,7 +21,6 @@ common/2r.v counts:+8 dual_port_ram D15: read-only memory without INIT, Parmys d
 # D6 evidence (2026-10-17, owed since 3C-1): with every `adder` subckt of both BLIFs expanded to
 # sumout = a^b^cin, cout = maj(a,b,cin), equiv-check says micro/multiply_hard_block.v is equivalent
 # (abc cec) and twobits_arithmetic_multiply.v is equivalent (abc dsec): only the adder count differs.
-common/bram.v counts:-8 dual_port_ram D9: Parmys drops RD_EN and maps 8 slices, Odin III leaves the `$mem` soft (R-10)
 micro/multiply_hard_block.v counts:-8 adder D6: Parmys builds each 2x2 multiplier from AND gates and 4 hard adders, Odin III leaves the `$mul` soft (M-2)
 operators/twobits_arithmetic_multiply.v counts:-4 adder D6: Parmys builds the 2x2 multiplier from AND gates and 4 hard adders, Odin III leaves the `$mul` soft (M-2)
 
@@ -34,12 +33,14 @@ operators/twobits_arithmetic_minus.v D2b top adder of the unsigned `$sub` pads w
 # D15 on the full `lower` (2026-10-17): with a constant-free read enable hardmap leaves the read-only
 # `$mem` soft (R-10), `lower` turns its read data `$dffe` into latches (3 x 8 in nr) and Parmys, whose
 # opt_mem deleted the memory, has none. Not a hardmap or lower rule: opt_mem is 3G.
-common/rom.v counts:+8 latch D15: read-only memory without INIT, Parmys deletes it and its read register (opt_mem), Odin III keeps the 8 read-data flops
-common/nr.v counts:+24 latch D15: three read-only memories without INIT, Parmys deletes them and their read registers (opt_mem), Odin III keeps 3 x 8 read-data flops
+common/rom.v counts:+9 latch D15: read-only memory without INIT, Parmys deletes it and its read register (opt_mem); Odin III keeps 8 hold flops and one enable flop (R-10 emulation of the read enable)
+common/rom.v counts:+8 single_port_ram D15: read-only memory without INIT, Parmys deletes it (opt_mem), Odin III maps 8 slices
+common/nr.v counts:+27 latch D15: three read-only memories without INIT, Parmys deletes them and their read registers (opt_mem); Odin III keeps 3 x (8 hold flops and one enable flop) (R-10 emulation of the read enable)
+common/nr.v counts:+24 single_port_ram D15: three read-only memories without INIT, Parmys deletes them (opt_mem), Odin III maps 3 x 8 slices
 
 # D9 on the full `lower`: the `$mem` Odin III leaves soft (R-10) is lowered by `lower` to 128 bit flops
 # plus the 8 read-data flops; Parmys maps it to 8 RAM slices.
-common/bram.v counts:+136 latch D9: the soft `$mem` is lowered to 16 x 8 bit latches plus 8 read-data latches
+common/bram.v counts:+9 latch D9: Parmys drops RD_EN (the read data changes on every clock), Odin III emulates the enable exactly (R-10, Peter 2026-10-20): one enable flop and 8 hold flops
 
 # lower-gap: `lower` has no bit-level form for `$pow` (3B-2 left it unmapped as Yosys does), so no
 # netlist view is reachable. hardmap-diff counts the hard cells of the RTLIL written before `lower`

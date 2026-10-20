@@ -174,6 +174,8 @@ def script_text(template: Path, lib: Path, design: Path, out: Path,
     if adder_lib is None:
         commands = [ln for ln in commands if "@ADDERLIB@" not in ln]
     text = "; ".join(commands)
+    if lib.suffix == ".xml":  # an arch XML (4.2): `read_arch` makes the library and the record
+        text = text.replace("read_techlib ", "read_arch ", 1)
     text = text.replace("@LIB@", str(lib)).replace("@DESIGN@", str(design))
     return text.replace("@OUT@", str(out)).replace("@ADDERLIB@", str(adder_lib))
 
@@ -611,7 +613,8 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--arch", help="the arch XML; checked against the golden's .prov")
     ap.add_argument("--expect", type=Path, action="append", default=[])
     ap.add_argument("--keep", type=Path, help="keep each design's work files under this directory")
-    ap.add_argument("--techlib", type=Path, default=REPO / "lib" / "vtr.o3lib")
+    ap.add_argument("--techlib", type=Path, default=REPO / "lib" / "vtr.o3lib",
+                    help="the tech library, or an arch XML (read with read_arch)")
     ap.add_argument("--adder-lib", default=str(ADDER_LIB),
                     help="the n-bit soft adder of vtr_primitives.v, read with --lib ('' for none)")
     ap.add_argument("--netlist-compare", default=str(NETLIST_COMPARE))
