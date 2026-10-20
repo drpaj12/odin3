@@ -487,6 +487,16 @@ class ErrorTests(ToolCase):
         self.assertEqual(code, 0, out)
         self.assertIn("listed:D18", out)
 
+    def test_unresolved_module_outside_d18_set_is_not_listed(self) -> None:
+        self.spec["odin_rc"] = 1
+        self.spec["odin_stderr"] = (
+            "odin3: error: foo.v:23:2: error: unresolved_module: module 'my_sub' "
+            "is not defined\n")
+        self.expect("common/foo.v D18 explicit instance, no such model in the arch\n")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 2)
+        self.assertNotIn("listed:D18", out)
+
     def test_d18_entry_is_stale_when_the_design_runs(self) -> None:
         self.expect("common/foo.v D18 explicit instance, no such model\n")
         self.spec["compare_rc"] = 0
@@ -686,6 +696,11 @@ class UnitTests(unittest.TestCase):
         self.assertTrue(text.endswith("write_blif --vtr /o.blif"))
         self.assertNotIn("@", text)
         self.assertNotIn("#", text)
+
+    def test_arch_path_with_script_separators_is_refused(self) -> None:
+        for bad in ("/a b.xml", "/a;b.xml", "/a#b.xml"):
+            with self.assertRaises(hd.ToolError, msg=bad):
+                hd.script_text(hd.SCRIPT, Path("/l"), Path("/d.v"), Path("/o"), arch=bad)
 
     def test_arch_xml_is_read_with_read_arch(self) -> None:
         text = hd.script_text(hd.SCRIPT, Path("/a.xml"), Path("/d.v"), Path("/o.blif"))
