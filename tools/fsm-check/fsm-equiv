@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# fsm-equiv: bounded miter after reset, recoded design against the RTL (4.8 spec section 15).
+# Exit codes: 0 equivalent, 1 not, 2 usage or tool error, 3 crash or timeout. See fsm_equiv.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec python3 "$here/fsm_equiv.py" "$@"

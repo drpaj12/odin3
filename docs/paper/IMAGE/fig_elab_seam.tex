@@ -1,5 +1,5 @@
 % Two-stage elaboration with the elaborated AST as the seam (2D spec section 2, EL-2, EL-4).
-% Stage 1 is Verilog-only; stage 2 is shared by every front end. The slang adapter (Phase 5)
+% Stage 1 is Verilog-only; stage 2 is shared by every front end. A later front end
 % builds the elaborated form through the C ABI and enters at stage 2. Wide: \textwidth.
 \begin{tikzpicture}[odin,
   stage/.style={box, text width=34mm, align=left, minimum height=21mm},
@@ -37,7 +37,7 @@
   \node[box, light, text width=40mm, align=center] (chk) at (9.81, 2.0)
        {\odintt{odin3\_ast\_check}, rule 7\\\odinsub{enforces the elaborated subset}};
   \node[box, planned, text width=36mm] (sl) at (9.81, -2.35)
-       {slang adapter (C++)\\\odinsub{\odintt{odin3\_ast\_*} builders; Phase 5, deferred}};
+       {another front end\\\odinsub{\odintt{odin3\_ast\_*} builders; after v1.0}};
   \node[box, built, text width=19.5mm] (rt) at (16.94, -2.35)
        {\odintt{write\_rtlil}\\\odinsub{2D-1}};
   \node[box, external, text width=28mm] (yo) at (13.6, -2.35)

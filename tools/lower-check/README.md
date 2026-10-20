@@ -18,4 +18,4 @@ Exit codes (one convention across the opt tools): 0 everything holds; 1 a differ
 tool error; 3 hard (a child crashed, was killed by a signal or its memory cap, or timed out: never
 absorbed by an expect list); 77 skipped (an ASan child and no `systemd-run`). Every child runs
 through `memcap.run` (default cap 3 GiB for `lower-diff`'s Yosys). The work directory is made under
-`$ODIN3_LOWER_WORK` (else `$TMPDIR`) and **is never removed**. Yosys other than 0.55 is refused.
+`$ODIN3_LOWER_WORK` (else `$TMPDIR`) and is removed on exit unless `--keep-tmp` (`$ODIN3_KEEP_TMP`) keeps it; a `--work DIR` is never removed. Yosys other than 0.55 is refused.

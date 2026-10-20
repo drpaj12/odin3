@@ -14,7 +14,7 @@ the ``.v`` instead (overwriting, never removing); review the diff against Yosys 
 before committing. Exit codes as the other lower-check tools: 0 every golden matches (or was
 written), 1 one differs or is missing, 2 usage or a tool error, 3 hard (a child crashed, was killed
 or timed out), 77 skipped. The work directory is made under ``$ODIN3_LOWER_WORK`` (else
-``$TMPDIR``) and is never removed.
+``$TMPDIR``) and is removed on exit unless `--keep-tmp`.
 """
 
 from __future__ import annotations
@@ -113,7 +113,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--netlist-compare", default=str(NETLIST_COMPARE), metavar="N")
     ap.add_argument("--update", action="store_true", help="write the .il and .blif goldens")
     ap.add_argument("--mem-cap", type=lc.parse_size, default=lc.DEFAULT_CAP, metavar="SIZE")
-    ap.add_argument("--work", type=Path, help="the work directory")
+    ap.add_argument("--work", type=Path, help="the work directory (never removed)")
+    ap.add_argument("--keep-tmp", action="store_true",
+                    help="keep the temporary work directory this run makes (else removed)")
     ap.add_argument("paths", nargs="+", help="fixture .v files or directories of them")
     return ap.parse_args(argv)
 
@@ -135,18 +137,18 @@ def execute(args: argparse.Namespace, work: Path) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
-    work = lc.make_work(args.work, "lower-cells-")
-    try:
-        return execute(args, work)
-    except lc.CrashError as exc:
-        print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
-        return lc.EXIT_CRASH
-    except (OSError, lc.ToolError, ValueError, subprocess.SubprocessError) as exc:
-        print(f"{TOOL}: error: {exc}", file=sys.stderr)
-        return lc.EXIT_ERROR
-    except memcap.CapUnavailable as exc:
-        print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
-        return lc.EXIT_SKIP
+    with lc.make_work(args.work, "lower-cells-", args.keep_tmp) as work:
+        try:
+            return execute(args, work)
+        except lc.CrashError as exc:
+            print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
+            return lc.EXIT_CRASH
+        except (OSError, lc.ToolError, ValueError, subprocess.SubprocessError) as exc:
+            print(f"{TOOL}: error: {exc}", file=sys.stderr)
+            return lc.EXIT_ERROR
+        except memcap.CapUnavailable as exc:
+            print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
+            return lc.EXIT_SKIP
 
 
 if __name__ == "__main__":

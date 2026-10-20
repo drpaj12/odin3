@@ -1,15 +1,15 @@
 """Plan Task 9 steps 3 and 6 through the CLI (3B spec 12.1, 14.6): the Phase 3 script on a design
 with hard blocks next to soft cells, and two runs giving byte-identical ``write_rtlil`` and
-``write_blif``. Needs ``ODIN3_CLI``; no Yosys. Work directories are ``tempfile.mkdtemp``, left in
-place (these tools never delete)."""
+``write_blif``. Needs ``ODIN3_CLI``; no Yosys. Work directories are removed when each test ends."""
 
 from __future__ import annotations
 
 import os
 import subprocess
-import tempfile
 import unittest
 from pathlib import Path
+
+from . import helpers
 
 ODIN3 = os.environ.get("ODIN3_CLI", "")
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,7 +33,7 @@ def run(script: str, cwd: Path, env: dict[str, str] | None = None,
 class HardAndSoftTest(unittest.TestCase):
     def test_hard_cells_survive_and_soft_cells_go(self) -> None:
         read = f"read_techlib {TECHLIB}; read_verilog --nolatches {HAND / 'hard_and_soft.v'}"
-        work = Path(tempfile.mkdtemp(prefix="test-lower-script-"))
+        work = helpers.scratch(self, "test-lower-script-")
         text = run(SCRIPT.format(read=read, pre="", write=""), work)
         for hard in ("adder", "multiply", "single_port_ram"):
             self.assertIn(f"stats: module top: cell {hard} 1", text)
@@ -50,7 +50,7 @@ class DeterminismTest(unittest.TestCase):
     def outputs(self, source: Path, techlib: bool) -> tuple[bytes, bytes]:
         """(write_rtlil, write_blif) bytes. The RTLIL view has no form for a storage bit cell
         (1F), so a design with flip-flops or memories is compared by its BLIF alone."""
-        work = Path(tempfile.mkdtemp(prefix="test-lower-det-"))
+        work = helpers.scratch(self, "test-lower-det-")
         storage = any(key in source.name for key in ("dff", "mem", "dlatch", "hard"))
         read = (f"read_techlib {TECHLIB}; " if techlib else "") + \
             f"read_verilog --nolatches {source}"
@@ -93,7 +93,7 @@ class MixedDesignDeterminismTest(unittest.TestCase):
         ({}, ()), ({"MALLOC_PERTURB_": "165"}, ()), ({}, ("setarch", "-R")))
 
     def one(self, env: dict[str, str], prefix: tuple[str, ...]) -> dict[str, bytes]:
-        work = Path(tempfile.mkdtemp(prefix="test-lower-mixed-"))
+        work = helpers.scratch(self, "test-lower-mixed-")
         script = (f"read_verilog --nolatches {self.SOURCE}; hierarchy; proc; opt; "
                   f"lower --lower-snapshot {work}; opt -fast; compact; check; "
                   f"write_blif {work / 'o.blif'}")
@@ -116,7 +116,7 @@ class SnapshotTest(unittest.TestCase):
     identical snapshots across runs."""
 
     def result(self, name: str, techlib: bool, snap: str | None) -> tuple[bytes, Path]:
-        work = Path(tempfile.mkdtemp(prefix="test-lower-snap-"))
+        work = helpers.scratch(self, "test-lower-snap-")
         read = (f"read_techlib {TECHLIB}; " if techlib else "") + \
             f"read_verilog --nolatches {HAND / name}"
         option = f" --lower-snapshot {work / 'snap'}" if snap == "yes" else \
@@ -140,8 +140,8 @@ class SnapshotTest(unittest.TestCase):
                     self.assertEqual((snap1 / file).read_bytes(), (snap2 / file).read_bytes())
 
     def test_an_unwritable_snapshot_directory_is_a_warning_and_not_a_failure(self) -> None:
-        missing = Path(tempfile.mkdtemp(prefix="test-lower-nosnap-")) / "no" / "such" / "dir"
-        work = Path(tempfile.mkdtemp(prefix="test-lower-snap-"))
+        missing = helpers.scratch(self, "test-lower-nosnap-") / "no" / "such" / "dir"
+        work = helpers.scratch(self, "test-lower-snap-")
         read = f"read_verilog --nolatches {HAND / 'and_mux.v'}"
         script = SCRIPT.format(read=read, pre="", write="").replace(
             "lower;", f"lower --lower-snapshot {missing};")

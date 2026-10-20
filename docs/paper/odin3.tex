@@ -1,8 +1,8 @@
 % Odin III paper draft. IEEEtran conference class; compiles with pdfLaTeX (Overleaf) and BibTeX.
 % Figures are TikZ (IMAGE/fig_*.tex, sharing IMAGE/odin3-tikz-styles.tex) except fig_ast, a
 % hand-drawn SVG converted to IMAGE/fig_ast.pdf (see README.md). Every number below is taken
-% from the repository's docs (DESIGN.md, IR.md, PHASE0-3.md, specs/, and PHASE4.md and ADR D10 from the v1.0 re-scope, PR 150) and git log as of
-% 2026-10-19; gaps are marked with \todo{}.
+% from the repository's docs (DESIGN.md, IR.md, PHASE0-6.md, specs/, and ADR D10 and D11 for the v1.0 scope) and git log as of
+% 2026-10-20; gaps are marked with \todo{}.
 \documentclass[conference]{IEEEtran}
 
 \usepackage{cite}
@@ -51,13 +51,13 @@ resource caps and out-of-memory-safe operations, and it was built by AI coding a
 architectural control, specification first and against external oracles. This paper explains how
 each stage works and which phase delivered it, the internal data structures, the verification
 approach (equivalence tools with a strict exit-code discipline, random generators, and a
-Verilator functional check), and how the design departs from Yosys and Odin~II. As of 2026-10-19
-Phases~1 and~2 are closed and Phase~3 (\code{flatten}, \code{wreduce}, \code{lower},
-\code{hardmap}, linked ABC, \code{write\_blif --vtr}, the QoR harness) is built, with its
-Parmys-matching refinements and exit runs in progress. The v1.0 scope (ADR D10) is a tool that
-works on VTR architectures and on Altera Cyclone~V through LPM structural Verilog. The paper
-also has a section on reverse engineering: what the built system already offers, the removed
-\code{raise} design, and the graph-analysis vision that later plugins would serve.
+Verilator functional check), and how the design departs from Yosys and Odin~II. As of 2026-10-20
+Phases~1 and~2 are closed and the code of Phase~3 (\code{flatten}, \code{wreduce}, \code{lower},
+\code{partial\_map}, linked ABC, \code{write\_blif --vtr}, the QoR harness) is done. In Phase~4,
+FSM recoding and the first three \code{partial\_map} pull requests are merged. The v1.0 plan (ADR
+D11) adds outputs and read-back, with an LPM path for Altera, an analysis flow with provenance
+coverage, and the release. The paper also has a section on reverse engineering and graph
+analysis: what the built system offers and what the analysis flow will add.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -77,22 +77,20 @@ Odin~II as deprecated.
 
 Odin III starts from the research questions that remain open with either tool. Three threads
 drive the design (DESIGN \S1): \emph{forward synthesis}, a Parmys/Odin~II-class front end with
-flexible, subgraph-based hard-block inference (multipliers, memories, DSP/MAC and eventually
-tensor tiles); \emph{reverse engineering}, reading flat netlists and recovering higher-level structure,
+architecture-driven hard-block inference (multipliers, adders and memories); \emph{reverse engineering}, reading flat netlists and recovering higher-level structure,
 now approached from Altera LPM structural Verilog upward (Sec.~\ref{sec:re}); and \emph{agentic construction}, the project as a case study in building a
 Yosys-class tool with AI coding agents~\cite{claudecode} under human architectural control.
-The first two were planned to share one engine, a VF2-style~\cite{cordella2004vf2} subgraph
-matcher run forward (bind cells to hard blocks) or backward (raise bit-level cones to word-level
-cells). The v1.0 scope of 2026-10-19 (ADR D10) leaves the matcher out: v1.0 is a tool that works
-on VTR architectures and on Altera Cyclone~V through LPM.
+The v1.0 scope (ADR D10 and D11) is a tool that works on VTR architectures, that writes its
+outputs in BLIF, Verilog and JSON and reads them back with their HDL locations, and that offers an
+analysis flow for netlists.
 
 The contributions of this paper are:
 \begin{itemize}
 \item an architecture in which every stage is a registered pass over one IR with two
   granularities, project input that carries the architecture and mapping rules, and a two-stage
-  elaboration whose seam lets a SystemVerilog front end reuse the back half (Sec.~\ref{sec:arch});
+  elaboration whose seam separates the language-specific half from the shared half (Sec.~\ref{sec:arch});
 \item a feature list that gives each feature's pass or tool, its phase and sub-phase, and an
-  honest status (done, in progress, planned, deferred or removed; Sec.~\ref{sec:features});
+  honest status (done, in progress or planned; Sec.~\ref{sec:features});
 \item the verification approach: equivalence tools, a strict exit-code discipline, random
   generators and a functional check, with the rule to match Parmys and warn where different
   (Sec.~\ref{sec:verify});
@@ -103,11 +101,10 @@ The contributions of this paper are:
   agent-driven method (Sec.~\ref{sec:method}).
 \end{itemize}
 
-Odin III is young. As of 2026-10-19, Phases~1 and~2 are closed and Phase~3 is built: the
+Odin III is young. As of 2026-10-20, Phases~1 and~2 are closed and the code of Phase~3 is done: the
 pipeline from Verilog to VPR-ready BLIF exists and is measured against Parmys, and the
-remaining Phase~3 work matches Parmys more closely and runs the exit tests. The architect has
-re-scoped v1.0 to a tool that works on VTR architectures and on Altera Cyclone~V through LPM
-(Sec.~\ref{sec:status}). Odin III's own quality-of-results numbers await the exit runs; this
+Phase~3 exit runs on the local gate remain. The architect has scoped v1.0 to a tool that works
+on VTR architectures, with outputs that read back and an analysis flow (Sec.~\ref{sec:status}). Odin III's own quality-of-results numbers await the exit runs; this
 paper reports the architecture and the measurements that exist, including the Parmys baseline
 that comparison will use.
 
@@ -132,7 +129,70 @@ equivalence checking. CIRCT~\cite{circt} builds hardware IRs on MLIR~\cite{lattn
 Odin III borrows its op registry, pass manager, verifiers and first-class attributes but does not
 build on it (ADR D7): the LLVM dependency and SSA semantics fight the node/pin/net model needed
 for in-place rewiring and reverse engineering. slang~\cite{slang} is an MIT-licensed
-SystemVerilog compiler that Odin III would use through an adapter (deferred by D10).
+SystemVerilog compiler that Odin III could use through an adapter after v1.0.
+
+\emph{RTLIL.} RTLIL is the register-transfer-level intermediate language of Yosys. Claire Xenia
+Wolf created it with Yosys~\cite{yosys}. A design is a set of modules. A module holds wires, cells,
+processes, memories and connections between signals. A cell has a type, parameters and named
+ports. A process holds the decision structure of an \code{always} block. RTLIL has two forms: a
+text form that tools read and write, and an in-memory form, the C++ objects that the passes
+change. Yosys elaborates in two steps. Its Verilog front end parses the source into an AST and
+simplifies that AST. Then \code{genrtlil} turns each module of the AST directly into RTLIL.
+The hierarchy is kept: an instance becomes a cell whose type is the name of another module. From
+then on, the passes work on RTLIL and never see the AST.
+
+\emph{Oracles.} In this project an oracle is a trusted reference tool whose output we compare
+against. There are two: Yosys with Parmys, and Odin~II. We use them as follows.
+\code{tools/run-oracle.sh} runs an oracle on a design and an architecture and stores the netlist,
+the tool's logs and the commit that made it as a \emph{golden}. Odin III then runs on the same
+design. \code{netlist-compare} checks whether the two netlists are identical after
+canonical renaming, and \code{equiv-check} checks whether they compute the same function
+(Sec.~\ref{sec:verify}). An oracle is trusted because it is the reference, not because it is
+always right. Where Odin III proves an oracle wrong, the difference is declared
+(Sec.~\ref{sec:verify}).
+
+\emph{The AST, the symbol table and elaboration.} In Odin~II, as the author sees it, the parser
+builds an AST, and a symbol table maps each name to its declaration, per scope. Elaboration is
+then a series of passes over the AST. Each pass walks an expression tree depth first. The
+passes walk the module hierarchy and its instances breadth first. Together they transform the
+AST into one flattened netlist graph. RTLIL does not work this way. \code{genrtlil} builds each
+module separately, the hierarchy stays, and flattening is a later pass on the graph. Odin III
+takes the RTLIL route with its own split. Elaboration has two stages with a seam between them, an
+\emph{elaborated AST} (Sec.~\ref{sec:seam}). Stage~1 resolves what the language fixes at
+elaboration time: parameters, generate and constant functions. Stage~2 binds names through the
+symbol table and builds word-level cells for each module. The hierarchy stays in the IR.
+\code{flatten} is a separate pass over the graph.
+
+\emph{Optimisation as graph operations.} Most steps of a synthesis flow are operations on a
+graph, and the author finds that view the clearest one. The netlist is a graph of cells and nets.
+Table~\ref{tab:graph} lists each step with its graph operation. Compiler-style optimisations are
+rewrites on a directed acyclic graph (DAG) of cells. Flattening inlines a subgraph in place of
+each instance. ABC's logic optimisation rewrites an And-Inverter Graph
+(AIG)~\cite{brayton2010abc,mishchenko2006rewriting}, and LUT mapping enumerates cuts of that
+DAG and covers it~\cite{cong1994flowmap}. Partial mapping matches subgraphs, the problem that
+VF2~\cite{cordella2004vf2} solves in general.
+
+\begin{table}[t]
+\caption{Synthesis steps as graph operations}
+\label{tab:graph}
+\centering
+\footnotesize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.36\columnwidth}%
+  >{\raggedright\arraybackslash}p{0.56\columnwidth}@{}}
+\toprule
+Step & Operation on the graph \\
+\midrule
+constant folding & replace a cell whose inputs are constants by a constant driver \\
+dead-code elimination & delete the nodes that reach no output \\
+common-subexpression elimination & merge nodes of one type with the same inputs \\
+flattening & inline the body of a module in place of each instance \\
+FSM extraction & find a state graph in the registers and next-state logic, then recode it \\
+partial mapping & match subgraphs (an adder, a multiplier, a RAM) to hard blocks \\
+ABC optimisation & rewrite an AIG: \code{strash}, \code{rewrite}, \code{balance}, \code{fraig} \\
+LUT mapping & enumerate cuts of the AIG and choose a cover of $K$-input LUTs \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 % ------------------------------------------------------------------------------------------
 \section{Architecture}
@@ -141,34 +201,82 @@ SystemVerilog compiler that Odin III would use through an adapter (deferred by D
 \begin{figure*}[t]
 \centering
 \odinfit{\textwidth}{\input{IMAGE/fig_pipeline}}
-\caption{The Odin III pipeline and its status on 2026-10-19. Built: merged on the main branch;
-in progress: being implemented (linked ABC, whose BLIF exchange is built and whose in-memory
-exchange awaits its default flip, and the QoR harness, whose exit runs are open); planned: later
-work. Every step inside the core is a pass registered with the pass manager, which runs
-\code{check} before and after each pass in Debug builds. The elaborated AST is the seam where a
-slang adapter would enter; that adapter and GHDL are deferred (D10). Phase~4's
-\code{partial\_map} generalises Phase~3's fixed \code{hardmap}.}
+\caption{The Odin III pipeline and its status on 2026-10-20. Built: merged on the main branch.
+Every step inside the core is a pass registered with the pass manager, which runs
+\code{check} before and after each pass in Debug builds. The elaborated AST is the seam between
+the language-specific half of elaboration and the shared half. \code{partial\_map} (script name
+\code{hardmap}) is Phase~3's fixed binding generalised in Phase~4. The in-memory ABC exchange is
+built; its default flip awaits its gate (PHASE3 \#48).}
 \label{fig:pipeline}
 \end{figure*}
 
-Figure~\ref{fig:pipeline} shows the forward flow (DESIGN \S3, \S6). A design is described by a
-\emph{project} (Sec.~\ref{sec:project}). The preprocessor and parser build a parsed AST
-(Phase~2, 2B and 2C). Elaboration runs in two stages through an elaborated AST to word-level IR
-in which \code{always} blocks are \code{\$proc} cells (2D). \code{proc} (2E) turns them into mux
-trees and flip-flops, and the \code{opt} family (2F) folds and cleans. The back end is Phase~3.
-\code{wreduce} (3G) narrows widths and \code{flatten} (3A) joins the hierarchy.
-\code{hardmap} (3C) binds adders, multipliers and RAMs to hard blocks. \code{lower} (3B) takes
-everything else to bit level. Linked ABC (3D) maps the soft logic to LUTs.
-\code{write\_blif --vtr} (3E) writes the BLIF that VPR reads, and the QoR harness
-\code{vtr-qor} (3H) runs the VTR flow on it and compares with Parmys. Other writers emit JSON,
-Graphviz, structural Verilog and, as a bridge to Yosys, RTLIL. Sections~\ref{sec:backend}
-to~\ref{sec:harness} describe each Phase~3 stage; Sec.~\ref{sec:features} lists every feature
-with its phase and status.
+Odin III reads a design into one IR and changes that IR one pass at a time. Figure~\ref{fig:pipeline}
+shows the whole system and its status (DESIGN \S3, \S6). Figure~\ref{fig:flow} shows the path of
+a Verilog design through the stages, in the order of the production script. That script is the O
+leg of the \code{vtr-qor} harness (Sec.~\ref{sec:harness}):
+\begin{lstlisting}
+read_techlib lib/vtr.o3lib
+read_verilog --nolatches --vtr-compat d.v
+proc; fsm; opt; flatten; wreduce
+hardmap; lower
+abc --lut 6
+write_blif --vtr d.blif
+\end{lstlisting}
+Here \code{hardmap} is the script name of \code{partial\_map}. A test harness,
+\code{hardmap-diff}, runs a longer script that adds \code{opt -full} and \code{opt\_clean} calls
+between these passes so that each stage can be compared with Parmys.
 
-The original plan ran this flow backwards for reverse engineering (\code{raise}, Phase~6). On
-2026-10-19 the architect re-scoped v1.0 (ADR D10): the tool must work on VTR architectures and
-on Altera through LPM structural Verilog, and Phases~5 and~6 are out of v1.0.
-Section~\ref{sec:re} explains what remains of that thread.
+\begin{figure*}[t]
+\centering
+\odinfit{\textwidth}{\input{IMAGE/fig_flow}}
+\caption{The flow of a Verilog design through Odin III, in the order of the production script.
+Each box is a stage; the text under it says what it does. The dotted box marks a stage that does
+nothing, and the dashed box a stage that is specified but not yet built. Every stage from
+\code{proc} to \code{write\_blif} is a registered pass.}
+\label{fig:flow}
+\end{figure*}
+
+The stages come from four tools, and each idea keeps its lineage. From Odin and Odin~II, Odin III
+takes the node, pin and net model, the Bison and Flex parser, the reading of an architecture file
+and the idea of partial mapping. From Yosys, it takes the word-level cell set and the semantics of
+Verilog elaboration, and it re-implements the \code{proc}, \code{opt}, \code{wreduce},
+\code{fsm}, \code{flatten} and \code{techmap} steps in C. From Parmys, it takes the order of the
+script and the hard-block rules for the VTR architecture. From ABC, it takes logic optimisation
+and LUT mapping, linked into the core.
+
+\emph{Parse.} A project (Sec.~\ref{sec:project}) names the files. The preprocessor and the parser
+build a parsed AST with source locations, and the symbol table records each declaration
+(Phase~2; Sec.~\ref{sec:parser}).
+
+\emph{Before elaboration.} Odin III has no optimisation pass here. Yosys simplifies its AST before
+\code{genrtlil}; Odin III does not. Elaboration stage~1 evaluates parameters, \code{generate} blocks and
+constant functions, because the language fixes their values. A pre-\code{proc} \code{opt}, as
+Parmys runs, is possible because the \code{opt} passes accept \code{\$proc} cells, but the
+production script does not run it (PHASE4 decision 14, item~5).
+
+\emph{Elaborate.} Two stages through an elaborated AST give word-level IR in which each
+\code{always} block is a \code{\$proc} cell (Sec.~\ref{sec:seam}). \code{proc} then turns these
+cells into mux trees, latches and flip-flops, step by step as Yosys's \code{proc\_*} passes do.
+
+\emph{Word-level passes.} \code{fsm} finds state machines and recodes them one-hot, as Yosys's
+\code{fsm} does, placed right after \code{proc} as Parmys places it. \code{opt} is Yosys's
+\code{opt} family: \code{opt\_expr} folds constants, \code{opt\_clean} removes dead cells,
+\code{opt\_merge} merges cells with equal inputs, \code{opt\_share} merges operators that feed the
+same mux, and \code{opt\_muxtree}, \code{opt\_reduce} and \code{opt\_dff} tidy
+muxes, reductions and flip-flops. \code{flatten} inlines the instances, and \code{wreduce}
+narrows widths. The paragraphs below describe them.
+
+\emph{Partial mapping.} Following Odin~II's partial mapping and Parmys's hard-block rules,
+\code{partial\_map} binds word-level multipliers, adders and RAMs to the hard blocks that the
+architecture record lists, and leaves the rest soft (Sec.~\ref{sec:hardmap}).
+
+\emph{Lower, logic and LUTs.} \code{lower} takes every word cell to bits. The linked ABC
+optimises the soft logic and maps it to $K$-input LUTs, with VTR's own script as the default.
+
+\emph{Outputs.} BLIF with \code{--vtr} goes to VPR. Verilog, Yosys-schema JSON and LPM Verilog for
+Quartus, Graphviz \code{dot} and RTLIL go to other tools. Sections~\ref{sec:backend} to
+\ref{sec:harness} describe the Phase~3 stages, and Sec.~\ref{sec:features} lists every feature
+with its phase and status.
 
 \subsection{One IR, two granularities, passes everywhere}
 
@@ -176,7 +284,7 @@ There is one IR (ADR D1). Each cell type carries a granularity tag---\code{word}
 \code{bit}, \code{hard}, \code{blackbox}, plus the structural \code{module} and
 \code{port}---and two \emph{views} are assertions over that tag: the RTLIL view admits word,
 hard and black-box cells; the netlist view admits bit, hard and black-box cells; mixed
-granularity is legal only inside \code{lower} and \code{raise} (IR-9). Every reader, writer,
+granularity is legal only inside \code{lower} (IR-9). Every reader, writer,
 checker, the simulator and the matcher therefore exist once.
 
 Every reader, writer and transformation is a pass. Running a pass opens a provenance pass run,
@@ -225,19 +333,20 @@ whose synthesis assignments (\code{AUTO\_DSP\_RECOGNITION}, \code{MULTSTYLE}, \l
 mapping rules. Rule precedence is source attribute, instance path, module, global, then
 architecture default. The rules are read, checked and stored today; a mapper that interprets
 them would record the rule (file and line) that chose each binding in provenance, but that
-mapper is not in v1.0 (D10, PHASE4 4.11). Unknown keys are errors, so a typo never silently changes a
+mapper is not in v1.0 (D10). Unknown keys are errors, so a typo never silently changes a
 mapping. The grammar of all formats is normative in DESIGN \S4.0 and pinned by a corpus of 55
 project cases (36 positive, 19 negative), each written in every format that can express it,
 with a stdlib Python reference parser as the oracle for the C readers.
 
 \subsection{Two-stage elaboration and the seam}
+\label{sec:seam}
 
 \begin{figure*}[t]
 \centering
 \odinfit{\textwidth}{\input{IMAGE/fig_elab_seam}}
 \caption{Two-stage elaboration (2D spec). Stage~1 is Verilog-only and produces an elaborated
-AST; stage~2 is shared by every front end. The slang adapter builds the elaborated form through
-the C ABI and enters at stage~2. \code{write\_rtlil} hands the result to Parmys's Yosys~0.55 for
+AST; stage~2 is shared by every front end. A later front end would build the elaborated form
+through the C ABI and enter at stage~2. \code{write\_rtlil} hands the result to Parmys's Yosys~0.55 for
 equivalence checking.}
 \label{fig:seam}
 \end{figure*}
@@ -251,11 +360,9 @@ range and parameter a constant leaf, one \code{MODULE} per parameter specialisat
 scopes named with their indices. Stage~2 is language-neutral: binding through the symbol table,
 widths and signedness, word cells, drivers, memories, processes, inlining and initial values.
 
-The seam exists for SystemVerilog. slang already elaborates SV; its adapter (a small C++ shim,
-the only C++ outside \code{third\_party}) would emit the elaborated subset through the C ABI and
-call stage~2. That adapter is deferred (D10), but the seam is built. Without it, Phase~5 would need a second elaborator over slang's output and
-the two would drift. VHDL takes a different path, \code{ghdl --synth} to Verilog
-(ADR D2).
+The seam exists so that a second front end can reuse stage~2 instead of writing another
+elaborator. Such a front end would emit the elaborated subset through the C ABI. The seam is
+built, and the only front end today is Verilog.
 
 Stage~2 represents an \code{always} block as a \code{\$proc} cell: a word-level node whose
 \code{I} pins are every net the process reads and whose \code{O} pins are every net it drives,
@@ -266,6 +373,7 @@ nets by ID without pins was rejected in review because it broke the ``every driv
 rule.
 
 \subsection{Parsing}
+\label{sec:parser}
 
 The parser (2C; PHASE2 \#10, \#15) keeps Odin~II's Bison/Flex lineage but not its grammar. A
 reentrant Flex lexer reads the preprocessor's stream, and a pure LALR(1) Bison grammar
@@ -323,29 +431,45 @@ order. One divergence is a correctness fix (\S20 \#18, Sec.~\ref{sec:compare}).
 \subsection{The back end: the Phase 3 script}
 \label{sec:backend}
 
-Phase~3 takes word-level IR to a netlist that VPR places and routes. Its exit test fixes the
-script that Odin III alone runs on each of the 19 VTR~7.0 benchmarks (PHASE3 exit item~3):
-\begin{lstlisting}
-read_techlib lib/vtr.o3lib
-read_verilog --nolatches --vtr-compat
-proc; opt; wreduce; opt_clean; opt -full
-flatten; opt -full; hardmap; opt -full
-lower; opt -fast; compact; abc
-write_blif --vtr
-\end{lstlisting}
-The order is Parmys's: \code{wreduce} runs before \code{flatten}, and \code{opt -full} runs
-after \code{flatten} and after \code{hardmap} as Parmys runs it (PHASE3 \#7, \#30, \#31).
-Where Odin III and Parmys could differ, \code{--vtr-compat} makes Odin III do what Parmys does
-and print a WARNING when the result still differs (Sec.~\ref{sec:verify}). The next five
-subsections describe the stages.
+Phase~3 takes word-level IR to a netlist that VPR places and routes. Its exit test runs the
+production script of Sec.~\ref{sec:arch} on the VTR benchmarks of the local gate and routes the
+result with VPR (PHASE3 exit item~3). Where Odin III and Parmys could differ,
+\code{--vtr-compat} makes Odin III do what Parmys does and print a WARNING when the result still
+differs (Sec.~\ref{sec:verify}). The harness \code{hardmap-diff} runs a longer script in Parmys's
+order, with \code{wreduce} before \code{flatten} and extra \code{opt -full} calls (PHASE3 \#7,
+\#30, \#31), so that the netlist before ABC can be compared. The next five subsections describe
+the stages.
+
+\subsection{Word-level optimisation: \code{opt} and \code{fsm}}
+\label{sec:opt}
+
+\code{opt} (2F) follows Yosys~0.55's \code{opt} family and runs its sub-passes to a fixed point.
+Each sub-pass is a rewrite of the cell graph.
+\code{opt\_expr} folds constants and simplifies arithmetic and logic whose inputs are constant or
+repeated. \code{opt\_clean} removes cells and wires that reach no output (dead-code removal).
+\code{opt\_merge} merges cells of one type with the same inputs (common-subexpression
+elimination); with \code{-ffbits} it also merges identical bits of word flip-flops before
+\code{lower}, as Yosys does after \code{techmap} (PHASE3 \#49). \code{opt\_share} merges operators
+that feed the same mux (PHASE3 \#52). \code{opt\_muxtree} and \code{opt\_reduce} collapse
+muxes and reductions, and \code{opt\_dff} removes flip-flop features that are never used. Each
+call is checked as a refinement by \code{opt-equiv} (Sec.~\ref{sec:verify}). \code{opt} never
+renumbers IDs; the scripts call \code{compact} when they want that.
+
+\code{fsm} (4.8) is Odin III's port of Yosys~0.55's \code{fsm} (\code{fsm\_detect},
+\code{fsm\_extract}, \code{fsm\_opt}, \code{fsm\_recode}, \code{fsm\_map}). It finds a state
+register and its next-state logic, extracts the state graph, and recodes it. It runs right after
+\code{proc}, where Parmys runs it. The \code{fsm\_encoding} attribute is honoured, and
+\code{auto} gives one-hot below 32 states and binary from 32. The recoded register and logic get
+DERIVED records whose parents are the original register and logic, and each FSM gets attributes
+(state count, encoding) for the analysis flow. It is merged.
 
 \subsection{Width reduction and flattening: \code{wreduce} and \code{flatten}}
 
 \code{wreduce} (3G) narrows word cells to the widths their inputs and readers need, as Yosys
-0.55's \code{wreduce} does, signed rewrite included. It matters because widths decide hard-block
+0.55's \code{wreduce} does, signed rewrite included, and visits an operand before its consumer as Yosys does (PHASE3 \#51). It matters because widths decide hard-block
 counts: an adder chain has one \code{adder} cell per operand bit, and the multiplier threshold
 reads operand widths. Without it, CLB and adder counts drift for reasons unrelated to mapping.
-The pass runs before \code{flatten}, as in Parmys (PHASE3 \#7, \#31).
+Parmys runs it before \code{flatten}; the production script runs it after.
 
 \code{flatten} (3A) turns a design whose top module instantiates other modules into one flat
 top module. It expands instances top-down from a worklist. The nets joined at a port become one
@@ -356,13 +480,18 @@ untouched, and a pre-flight reports recursive instantiation and any exceeded cap
 changes. Its oracle is Yosys~0.55's \code{flatten}, compared by \code{flatten-diff} on names,
 widths and cell types and by an equivalence proof (PHASE3 \#30, \#35).
 
-\subsection{Mapping to hard blocks: \code{hardmap}}
+\subsection{Partial mapping: \code{partial\_map}}
+\label{sec:hardmap}
 
-\code{hardmap} (3C) is the fixed mapping that copies Parmys's defaults for the architecture
+\code{partial\_map} is Odin III's partial mapping. The idea is Odin~II's: bind some of the
+word-level design to the hard blocks of the target and leave the rest soft for ABC. The rules
+follow Parmys. The pass began as the fixed pass \code{hardmap} (3C), which copies Parmys's defaults for the architecture
 \code{k6\_frac\_N10\_frac\_chain\_mem32K\_40nm}, whose \code{<models>} are \code{adder},
 \code{multiply}, \code{single\_port\_ram} and \code{dual\_port\_ram} (PHASE3 decisions 2, 4).
-Library cells come from \code{lib/vtr.o3lib} (1G), not from code. The rules, which the architect
-approved before any code was written, are:
+Library cells come from \code{lib/vtr.o3lib} (1G), not from code. Phase~4 renamed the pass \code{partial\_map} and kept \code{hardmap} as an alias, and the
+script of Fig.~\ref{fig:flow} still says \code{hardmap}. Parmys's rule is the default, and every
+improvement is a named option that is off by default (PHASE4 decision 12). The k6 rules, which the
+architect approved before any code was written, are:
 \begin{itemize}
 \item \emph{Multipliers.} A \code{\$mul} becomes a \code{multiply} cell of width 36. Low pins
   carry the operand bits and the rest is padded with \code{unconn}. Small multipliers
@@ -374,9 +503,19 @@ approved before any code was written, are:
   \code{single\_port\_ram} or \code{dual\_port\_ram} slices. Memories that cannot share a RAM
   port are replicated or stay soft, with a warning.
 \end{itemize}
-Nodes are named \code{<cell>.<role>} and carry a \code{hardmap} attribute. Phase~4's
-\code{partial\_map} will replace this fixed binding by one read from the architecture, and must
-reproduce it on this architecture (PHASE4, ``Dependencies on Phase~3'').
+Nodes are named \code{<cell>.<role>} and carry a \code{hardmap} attribute.
+
+Phase~4 generalises the pass from the architecture record. \code{read\_arch} (4.1) reads the
+\code{<models>} and \code{pb\_type}s of a VPR architecture file into a tech library and an
+\emph{arch record} on the design. Three pull requests of \code{partial\_map} are merged. PR~A
+is the pass shell, the rule table, the alias and an identity gate, which requires the new pass
+to give the same netlist as \code{hardmap} on the k6 architecture. PR~B is \code{memory\_merge}
+(4.7), which merges registered reads and writes into the ports of a \code{\$mem}; a
+\code{ram\_style} attribute is ignored with a warning. PR~C binds generic hard blocks from the
+arch record (4.2), matched by exact port signature as in Odin~II. PR~D is in progress. It maps a
+RAM with a read enable to the architecture's RAM and emulates the enable exactly in logic,
+because the architecture's RAMs have no read-enable pin (PHASE3 decision 56, approved by the
+architect on 2026-10-20).
 
 \subsection{Lowering to bits: \code{lower}}
 
@@ -467,14 +606,13 @@ functional check of Sec.~\ref{sec:verify}.
 \label{sec:features}
 
 Tables~\ref{tab:features} and~\ref{tab:features2} list the features, the pass or tool that provides each, the phase and
-sub-phase that delivered or will deliver it, and the status on 2026-10-19. ``Done'' means
+sub-phase that delivered or will deliver it, and the status on 2026-10-20. ``Done'' means
 merged on the main branch with its exit test; ``in progress'' means being implemented or
-measured now; ``planned'' means in the v1.0 plan (PHASE4 and Phase~7); ``deferred'' means
-postponed with nothing built; ``removed'' means taken out of v1.0 by ADR D10. The figures use
-the build-status key of Fig.~\ref{fig:pipeline}.
+measured now; ``specified'' means the specification and plan are approved; ``planned'' means in
+the v1.0 plan (ADR D11). The figures use the build-status key of Fig.~\ref{fig:pipeline}.
 
 \begin{table*}[t]
-\caption{Odin III features that are built, status on 2026-10-19 (the v1.0 scope is ADR D10)}
+\caption{Odin III features that are built, status on 2026-10-20 (the v1.0 plan is ADR D11)}
 \label{tab:features}
 \centering
 \footnotesize
@@ -519,28 +657,37 @@ Elaboration & two stages, Yosys~0.55 semantics, \code{\$proc} cells, \code{--lib
   \code{opt\_muxtree}, \code{opt\_reduce}, \code{opt\_share}, \code{opt\_dff}, \code{opt\_clean}
   & 2F & done \\
 Width reduction & narrows word cells to the widths needed (Yosys~0.55 \code{wreduce}) &
-  \code{wreduce} & 3G & done; operand-first order in progress \\
+  \code{wreduce} & 3G & done \\
+FSM recoding & finds state machines and recodes them (Yosys~0.55 \code{fsm}) & \code{fsm} & 4.8 &
+  done \\
 Flatten & one flat top; dotted instance paths; path kept in provenance & \code{flatten} & 3A
   & done \\
 Lowering & word cells to bit cells; flip-flops to \code{\$\_DFF\_P\_}; \code{\$mem} to flip-flops
   and muxes; bit nodes named after the word cell & \code{lower} & 3B & done \\
-Hard-block mapping & fixed Parmys-default binding of adders, multipliers and RAM & \code{hardmap}
-  & 3C & done; FF-bit merge and \code{opt\_share} parity in progress \\
-Linked ABC & \code{\$lut}; run records; script checker; adapter with escape guard; BLIF exchange
-  & \code{abc} & 3D-0 to 3D-6 & done \\
+Partial mapping & Parmys-default binding of adders, multipliers and RAM; generic hard blocks from
+  the arch record; \code{memory\_merge} & \code{partial\_map} (\code{hardmap}) & 3C, 4.2, 4.7 & done
+  (PRs A, B, C) \\
+VPR-XML import & \code{read\_arch} fills a tech library and the arch record from a VPR architecture
+  & \code{read\_arch} & 4.1 & done \\
+Altera LPM path & LPM library (\code{lpm\_add\_sub}, \code{lpm\_mult}, \code{lpm\_compare},
+  \code{altsyncram}); fixed mapping; LPM Verilog written and read back with LPM instances as hard
+  cells & \code{lpmmap}, \code{.o3lib} & 5.1 & done \\
+Verilog read-back & instances of Odin III's own cell types read as those cells &
+  \code{read\_verilog -icells} & 5.2 & done \\
+Linked ABC & \code{\$lut}; run records; script checker; adapter with escape guard; BLIF and in-memory
+  exchanges & \code{abc} & 3D-0 to 3D-8 & done; default flip awaits its gate \\
 VPR BLIF & preflight; \code{blif-vtr-check}; provenance names & \code{write\_blif --vtr} & 3E &
   done \\
 QoR harness & legs P, P$'$, O, O$'$, R, Oprov; heavy-run scheduling; table and gate; \code{fcheck}
-  & \code{vtr-qor} & 3H & done; M2 and M3 exit runs in progress \\
+  & \code{vtr-qor} & 3H & done; exit runs on the 15-design local gate in progress \\
 Equivalence tools & \code{opt-equiv}, \code{lower-equiv}, \code{hardmap-diff}, \code{equiv-check},
-  \code{abc-diff}, generators & \code{tools/*-check} & 2F, 3B, 3C, 3D & done; \code{abc-diff}
-  with 3D-7 \\
+  \code{abc-diff}, generators & \code{tools/*-check} & 2F, 3B, 3C, 3D & done \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
 \begin{table*}[t]
-\caption{Odin III features, continued: in progress, planned, deferred and removed (2026-10-19)}
+\caption{Odin III features, continued: in progress, specified and planned (2026-10-20)}
 \label{tab:features2}
 \centering
 \footnotesize
@@ -550,28 +697,19 @@ Equivalence tools & \code{opt-equiv}, \code{lower-equiv}, \code{hardmap-diff}, \
 \toprule
 Feature & What it does & Pass or tool & Phase & Status \\
 \midrule
-In-memory ABC exchange & MiniAig in, MiniLut out, no BLIF text & \code{abc} & 3D-7, 3D-8 &
-  in progress (PR 148; default flip) \\
-VPR-XML import & \code{read\_arch} fills an \code{.o3lib} from a VPR architecture & --- & 4.1
-  & planned \\
-Generic hard blocks & binding by exact port signature, multiplier and memory splitting from the
-  architecture, carry chains, FF features, memory port merge & \code{partial\_map} & 4.2 to 4.7 &
-  planned \\
+Partial mapping, more & multiplier splitting from the architecture (4.3), memory depth and width
+  splitting (4.4), carry chains from the arch model (4.5); read-enable RAMs mapped hard with the
+  enable emulated exactly in logic (PR D) & \code{partial\_map} & 4.3 to 4.5 & in progress \\
 Architecture sweep & the VTR designs on several VTR architectures route and pass \code{fcheck}
   & \code{vtr-qor} & 4.13 & planned \\
-Altera target (Cyclone~V) & LPM library (\code{lpm\_add\_sub}, \code{lpm\_mult},
-  \code{lpm\_compare}, \code{altsyncram}); partial map to it; structural Verilog writer;
-  LPM Verilog read back with LPM instances as hard cells & \code{.o3lib}, \code{write\_verilog}
-  & 4.14 & planned \\
-FSM detect and recode & Yosys \code{fsm} state recoding & --- & (4.8) & removed from v1.0 \\
-Subgraph matcher & VF2-style matcher, pattern DSL (D5) & --- & (4.10) & removed from v1.0 \\
-Project mapping rules & rules in the project steer mapping (read and stored today) & --- &
-  (4.11) & removed from v1.0 \\
-SystemVerilog, VHDL & slang adapter; GHDL path & --- & 5 & deferred \\
-Reverse engineering & \code{raise}, scorecard, VQM and EDIF readers, Altera \code{bind}, Titan
-  & --- & 6 & removed from v1.0 \\
-Interop and release & CIRCT writer, Yosys JSON reader, visual tooling, docs, release & --- & 7 &
-  planned (EDIF writer removed) \\
+Yosys JSON reader & reads the schema that \code{write\_json} writes, and Yosys's own JSON &
+  \code{read\_json} & 5.3 & specified \\
+HDL locations through write and read & locations survive write and read in BLIF, Verilog and JSON
+  & writers, readers & 5.4 & specified \\
+Analysis flow & gate-level ingest, \code{write\_dot --color-by}, graph export, \code{levelize},
+  provenance coverage gate & several & 6.1 to 6.5 & planned \\
+Interop and release & CIRCT writer, visual tooling, docs with the extension-API review, release &
+  --- & 7 & planned \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -583,6 +721,41 @@ Interop and release & CIRCT writer, Yosys JSON reader, visual tooling, docs, rel
 Odin III's code was written by agents, so correctness evidence must come from outside the code
 (Sec.~\ref{sec:method}). Every pass is checked against an oracle, by a tool that is separate
 from the pass, and the tools follow one reporting discipline.
+
+\subsection{The methods in plain words}
+
+\begin{figure*}[t]
+\centering
+\odinfit{\textwidth}{\input{IMAGE/fig_flow_verify}}
+\caption{The flow of Fig.~\ref{fig:flow}, annotated with the techniques that check each stage.
+Names are tools of the repository; the text of this section explains each method.}
+\label{fig:flow-verify}
+\end{figure*}
+
+Figure~\ref{fig:flow-verify} marks which technique checks which stage. Six methods do the work.
+
+\emph{Golden comparison.} An oracle runs on a design, and its netlist is stored as a golden
+(Sec.~\ref{sec:background}). Odin III runs on the same design. \code{netlist-compare} reads both
+BLIF files, renames and orders them in a canonical way, and says whether they are identical. An
+identical netlist is the strongest result. A different one is not yet a bug, because two correct
+tools can build different netlists.
+
+\emph{Equivalence checking.} \code{equiv-check} reads two BLIF files and asks ABC whether they
+compute the same outputs. \code{cec} compares combinational logic. \code{dsec} compares
+sequential behaviour from the initial state. The answer is equivalent, not equivalent with a
+counterexample, or unproven when the proof runs out of time or size.
+
+\emph{Simulation.} Odin III has a cycle-based, two-state simulator that uses the semantics of the
+op registry. \code{lower-sim} simulates a design before and after \code{lower} on random vectors.
+In Phase~1 the simulator was compared with Icarus Verilog on the goldens.
+
+\emph{Functional check against the source.} \code{fcheck} compares a netlist with the Verilog
+source, not with another netlist (Sec.~\ref{sec:fcheck}).
+
+\emph{Random generators and fuzzers.} Sec.~\ref{sec:fuzz} explains them.
+
+\emph{Exit codes and the Parmys rule.} Every tool reports in one code convention, and Odin III
+matches Parmys and warns where it differs (Sec.~\ref{sec:exitcodes}, Sec.~\ref{sec:parmys}).
 
 \subsection{Oracles and equivalence tools}
 
@@ -626,6 +799,7 @@ a flip-flop's \code{init} is honoured and the others start at 0 (PHASE3 \#41).
 behaviour is covered by simulation against Odin III's RAM model.
 
 \subsection{Exit-code discipline}
+\label{sec:exitcodes}
 
 The tools use one convention, so a script or a controller can read a result without parsing text
 (the \code{opt-check} and \code{lower-check} tools):
@@ -652,7 +826,31 @@ is never a pass}: \code{lower-sim} reports a cell type without a simulate hook a
 Third, an unproven design is recorded with its reason, for example ``untested for now (size
 limit)'', and is carried to a larger machine, not dropped.
 
-\subsection{Random generators}
+\subsection{Random generators and fuzzers}
+\label{sec:fuzz}
+
+Two kinds of random testing run, and they find different bugs.
+
+\emph{Differential generators.} A generator writes a random valid Verilog design from a seed. The
+same seed always gives the same design. \code{tools/verilog-gen} has one profile for the parser,
+elaboration, \code{proc}, \code{opt}, \code{lower} and \code{flatten}. The driver runs Odin III
+and a reference on the design, and compares the results. For the parser the reference is Yosys:
+Odin III must accept what Yosys accepts and must print the generator's own tree. A mutated design,
+with one token dropped, duplicated or swapped, must be rejected with a located error whenever
+Yosys rejects it. For the passes the driver compares Odin III's netlist with the netlist of the
+Yosys pass, and an equivalence tool decides. A \emph{bug} is a case in which Odin III rejects
+a valid design, prints another tree, produces a netlist that is not a refinement of the original,
+crashes, hits a sanitizer report or times out. A case in which Odin III accepts what Yosys rejects
+is reported but is not a failure. The driver keeps the files of every failing seed. A separate
+generator, \code{pp-fuzz}, makes random projects for the preprocessor and predicts the output with
+its own reference expander.
+
+\emph{Crash fuzzers.} Seven libFuzzer targets (the preprocessor, parser, elaboration, \code{opt},
+\code{lower} and two for ABC scripts) run under ASan and UBSan with allocation failures injected
+and the caps lowered. They have no oracle. Each target states its invariants, for example that
+\code{opt} returns OK or out-of-memory, that the structural \code{check} passes afterwards, and
+that nothing leaks or hangs. A \emph{bug} is a violated invariant, a sanitizer report, a leak or a
+hang.
 
 Hand-written fixtures miss interactions, so each front-end pass has a seeded random generator
 (\code{tools/verilog-gen} with one profile per pass: elaboration, flatten, \code{proc},
@@ -667,6 +865,7 @@ and 0 bugs. Equivalence is the pass criterion for the long run, so a histogram d
 counted, not failed.
 
 \subsection{The functional check}
+\label{sec:fcheck}
 
 Equivalence tools compare netlists, and a netlist can be equivalent to a wrong reference.
 \code{fcheck} compares against the Verilog source. It runs VTR's own
@@ -686,12 +885,12 @@ illegal start reaches is ``unproven'', not ``differs'' (PHASE3 \#41, \#43). On
 equivalent.
 
 \subsection{Match Parmys, warn where different}
+\label{sec:parmys}
 
 The rule for the VTR flow is: where Odin III and Parmys differ, match Parmys under
-\code{--vtr-compat} and print a WARNING, and keep no list of known differences. For example,
-\code{read\_verilog --vtr-compat} prints one line that \code{fsm} recoding is not performed and
-that flip-flop counts on designs with state machines differ from Parmys (PHASE3 \#43), because no
-Odin III pass recodes a state register yet.
+\code{--vtr-compat} and print a WARNING, and keep no list of known differences. The \code{fsm} pass is an example of the rule at work: it runs where Parmys runs it, right after
+\code{proc}, so that flip-flop counts on designs with state machines match Parmys (PHASE4
+decision 6).
 
 Two divergences are deliberate, because Parmys is wrong and Odin III is correct to the RTL
 (3C spec, divergence table). \textbf{D1}: signed operands of \code{\$add} and \code{\$sub} are
@@ -713,6 +912,12 @@ operation reserves before it mutates, so an out-of-memory failure leaves the str
 unchanged. Sizes below are \code{sizeof} on x86-64 with gcc, and timings are Release builds on
 the development machine (Intel i7-13700 under WSL2) as recorded in the phase logs.
 
+Figure~\ref{fig:ir} shows the objects and Sec.~\ref{sec:ids} the IDs that link them. The order of
+this section follows the data. First the containers and the arena. Then the IR: design, module,
+node, net, port and wire, at word and at bit granularity. Then the op registry that gives each
+node its type, the provenance store, the source manager, and the AST and symbol table with their
+link to the IR. Last come the tech library with the arch record, the C ABI and the caps.
+
 \subsection{Containers}
 
 \begin{figure}[t]
@@ -732,12 +937,15 @@ mask and two loads, and growth never copies elements. Both hash tables use open 
 Robin Hood probing~\cite{celis1986robinhood} and backward-shift deletion. \code{idindex} is an
 ID-only hash-cons index: its 16-byte slots hold a hash and an ID, and the caller supplies
 equality, so interned strings and provenance records are stored once. String ID~0 is the empty
-string, so a zeroed field means ``no name''. The hash seed is a fixed constant; nothing that
+string, so a zeroed field means ``no name''. A bump \emph{arena} serves the small arrays that belong to one owner, such as parameter vectors,
+wire net vectors and attribute values. Its blocks never move, and one call frees all of them.
+The hash seed is a fixed constant; nothing that
 reaches output depends on hash-map iteration order. A benchmark interned 2M names in
 0.36--0.45\,s, made 2M \code{u64map} insertions in 0.35--0.39\,s and 2M \code{pagevec} pushes in
 0.01\,s, at 176\,MiB maximum RSS.
 
 \subsection{The IR}
+\label{sec:ids}
 
 \begin{figure*}[t]
 \centering
@@ -750,14 +958,22 @@ net owns a contiguous pin array, drivers first. Record sizes are \code{sizeof} o
 \end{figure*}
 
 A design holds a string table, the provenance store, the cell-type table and its modules
-(Fig.~\ref{fig:ir}). A module owns nodes, pins and nets as peers, Odin~II's model: a node has
+(Fig.~\ref{fig:ir}). It also holds containers of facts that are not IR objects: the project
+record and, since Phase~4.1, the \emph{arch record} that \code{read\_arch} fills from a VPR
+architecture file (Sec.~\ref{sec:techlib}). A module owns nodes, pins and nets as peers, Odin~II's model: a node has
 pins, a pin belongs to one node and attaches to one net, and a net has driver and sink pins.
+A \emph{port} is not a separate kind of object. It is a node of a built-in type
+(\code{\$port\_in}, \code{\$port\_out} or \code{\$port\_inout}), and a \emph{wire} is a name for an ordered
+vector of nets. The same objects serve two granularities. In the word-level view, \code{assign y
+= a + b;} on 8-bit signals is one \code{\$add} node with three ports of eight pins each. After
+\code{lower}, the same eight-bit nets feed bit cells such as \code{\$\_XOR\_} and
+\code{\$\_AND\_}. Only the node types change; the nets and the pins are the same kind of object.
 The key decisions, numbered as in IR.md:
 
 \emph{Every net is one bit (IR-1).} A port of width $w$ is $w$ consecutive pins, so a port is a
 slice of its node's pins and word structure stays visible; word- and bit-level cells differ only
 in type. Slicing and concatenation are which nets a pin vector uses, so there are no
-\code{\$concat} or \code{\$slice} cells, and \code{lower}/\code{raise} replace cells without
+\code{\$concat} or \code{\$slice} cells, and \code{lower} replaces cells without
 splitting nets.
 
 \emph{Wires are names, not connectivity (IR-2).} A wire is a named, ordered vector of nets with
@@ -837,6 +1053,54 @@ was built in 0.064\,s (168\,MB), a query on the busiest line returned 200,000 hi
 \code{hier/path/cell@file:line}, so a VPR block can be traced to its source line without Odin III
 loaded.
 
+\subsubsection*{Provenance along the flow}
+
+\begin{figure*}[t]
+\centering
+\odinfit{\textwidth}{\input{IMAGE/fig_flow_prov}}
+\caption{The flow of Fig.~\ref{fig:flow}, annotated with the provenance records that each stage
+makes or reads. SOURCE, DERIVED and IMPORTED are the three record kinds. The plan for Phase~5.4 is
+shown where it applies; it is approved and not yet built.}
+\label{fig:flow-prov}
+\end{figure*}
+
+Figure~\ref{fig:flow-prov} shows where each kind of record comes from. No stage builds a record by
+hand. A pass runs with a context that knows its pass run, starts an operation, and asks for a
+record with a list of parents (IR-13).
+
+\emph{SOURCE, at parse and elaboration.} The parser gives every AST node a source range in the
+source manager's location space. The read pass is a pass run. When elaboration creates an IR
+object from an AST node, it makes one SOURCE record with the file, line and column, the raw
+location and the AST node, and the object carries the record's ID. One origin in one run is one
+record.
+
+\emph{DERIVED, in each pass.} A pass makes a DERIVED record in one of three ways, depending on
+what it does to the objects. A pass that only rewires keeps the existing records. A pass that
+splits one object into many makes one operation and one record with the original as the single
+parent. \code{proc}, \code{partial\_map} and \code{lower} work this way, so all bit cells of one
+\code{\$add} share a record. A pass that joins several objects into one makes one operation whose
+record has all of them as parents. \code{opt\_merge} works this way. \code{flatten} adds the
+instance path to a DERIVED record, \code{fsm} gives the recoded state logic the original register
+and logic as parents, and \code{abc} pairs each new LUT with the old cells that compute the same
+function and takes those as parents. Records are never edited, and a deleted object leaves its
+records and, after \code{compact}, a tombstone.
+
+\emph{IMPORTED, on read.} A netlist reader has no HDL. It makes an IMPORTED record with the
+file and line of the netlist, so that an object read from BLIF still says where it came from.
+
+\emph{Names in the outputs.} With \code{--name-style provenance}, the writers name each object
+\code{hier/path/name@file:line} from the first location of its backward walk, so a VPR block can
+be traced to a source line without Odin III loaded.
+
+\emph{Plan 5.4: locations survive write and read.} The IMPORTED record points at the netlist, not
+at the HDL, so after a read-back the HDL location of a written object is lost. Phase~5.4 fixes
+that. Writers print only the HDL locations, which are the SOURCE leaves of an object's walk:
+the provenance name in BLIF, a \code{src} attribute in Verilog, and the \code{src} field in
+JSON. Readers decode them. The architect approved an amendment to IR-13 on 2026-10-20: a reader
+makes one DERIVED record whose parents are the restored HDL SOURCE record and the reader's own
+IMPORTED record. The location then survives any number of writes and reads as an HDL location,
+and a line of a netlist never becomes one. The coverage gate of Phase~6.5 measures the result.
+
 \subsection{Source manager}
 
 \begin{figure}[t]
@@ -855,7 +1119,7 @@ A location is one 32-bit offset into a virtual source space, as in Clang~\cite{c
 reserving its length plus one: FILE buffers for source and project files (and a
 \code{<command line>} buffer for project defines), an EXPANSION buffer per macro use, a
 MACRO\_ARG buffer per contiguous spelled run of a substituted argument, and SCRATCH for pasted
-text (Phase~5). Each buffer records its \emph{parent} (the macro use, the formal, the
+text. Each buffer records its \emph{parent} (the macro use, the formal, the
 \code{`include} or the project word that opened it) and its \emph{def} (where its bytes are
 spelled). From these, three loops over buffer records give the spelling, the expansion location
 (Clang's \code{getExpansionLoc}) and the file location, and a chain walk prints
@@ -912,7 +1176,15 @@ assigned), direction, declaration node, packed and unpacked dimensions, paramete
 assigning node, and the IR wire they became. ASTs and symbol tables are freed at the end of
 their read pass unless a pass asks to keep them; SOURCE records keep the raw location either way.
 
-\subsection{Tech library}
+The AST and the IR are separate stores, and a provenance record links them. When elaboration
+creates an IR object from an AST node, it makes a SOURCE record that holds the node's ID, and the
+object holds the record's ID. The AST is the high layer, with the syntax and the scopes. The IR is
+the low layer, with cells and nets. The symbol table also points forward: each symbol records the
+IR wire it became. A pass that needs the syntax of an object follows its record to the AST node,
+if the store is still held. If it is not, the record still gives the file, line and column.
+
+\subsection{Tech library and arch record}
+\label{sec:techlib}
 
 \begin{figure}[t]
 \centering
@@ -928,11 +1200,13 @@ The tech library is Odin III's own line-oriented text format, \code{.o3lib}
 first and FPGA targeting grows from the same format. Liberty is ASIC-timing-centric with no
 word-level functions, genlib covers only combinational gates, and VPR XML has no functions and
 keeps widths in \code{pb\_type}s, so importers for those formats would produce \code{.o3lib}
-cells instead (VPR XML import is 4.1). A cell is \code{gate}, \code{hard} or \code{blackbox}; port widths may be integer
+cells instead (VPR XML import, 4.1, is built). A cell is \code{gate}, \code{hard} or \code{blackbox}; port widths may be integer
 expressions over parameters (\code{A\_WIDTH + B\_WIDTH}); outputs are driven by \code{fn}
 expressions, \code{seq} statements or a \code{memory} description; \code{area} and \code{delay}
-are stored for later cost models. One function serves as simulation semantics today and, were a matcher built, as
-its patterns compiled to IR fragments (D5, amended by D10: not in v1.0). When a netlist declares a library cell
+are stored for later cost models. One function serves as the simulation semantics of the cell. A VPR architecture file reaches the same form through \code{read\_arch} (4.1). It reads the
+\code{<models>} and \code{pb\_type}s into generic black-box cells of a tech library, and keeps what
+\code{partial\_map} needs in the \emph{arch record}, a container on the design shaped like the
+project record. The record owns no node, net, wire or ID. When a netlist declares a library cell
 as a \code{.blackbox}, the reader matches its ports by name in any order and infers the
 parameters from the declared widths: the goldens hold 49 distinct black-box stanzas whose port
 order varies between files.
@@ -945,6 +1219,17 @@ order varies between files.
 \caption{The C ABI and plugin model. Everything outside the core sees only \code{odin3.h}.}
 \label{fig:abi}
 \end{figure}
+
+An Application Binary Interface (ABI) is the contract between two pieces of compiled code. It
+fixes the names of the functions, the types of their arguments and results, the sizes and layout
+of the structures that cross the boundary, and the calling convention. An API describes this at the
+source level, and a change that keeps an API can still break an ABI, for example by adding a field in
+the middle of a structure. The ABI matters for plugins because a plugin is a separate compiled
+object. A plugin built against one version of Odin III must still load and run against a later
+build, without a recompile. A C ABI helps here, because C has no name mangling, no class layouts and
+no exceptions that cross the boundary, and Python and other languages can call it. Odin III
+therefore hides its internals, exposes only IDs and an opaque handle, versions the ABI, refuses a
+plugin that asks for a different version, and keeps room in its structures for later hooks.
 
 \code{include/odin3/odin3.h} is the only header plugins see (Fig.~\ref{fig:abi}; 1D spec,
 DESIGN \S15.3). ABI version~4 declares its functions over an opaque design handle; IR objects
@@ -997,18 +1282,18 @@ every container and IR operation reserves first, and unit tests fail every alloc
 through the \code{util} hook and assert that nothing changed and nothing leaked.
 
 % ------------------------------------------------------------------------------------------
-\section{Reverse Engineering}
+\section{Reverse Engineering and Graph Analysis}
 \label{sec:re}
 
 Reverse engineering was one of the three threads that started the project (DESIGN \S1): read a
-flat netlist and recover the higher-level structure a designer would recognise. On 2026-10-19
-the architect re-scoped v1.0 (ADR D10) and moved that thread. This section says what the goal
-is now, what the built system already provides for it, what the removed Phase~6 design was, and
-what open problems are left.
+flat netlist and recover the higher-level structure a designer would recognise. The architect
+scoped it in ADR D10 and D11 as an analysis flow that serves graph methods and keeps provenance
+back to the HDL. This section says what the goal is, what the built system already provides for
+it, what Phases~5 and~6 add, and what open problems are left.
 
 \subsection{The goal: from Altera all the way up}
 
-The goal is now framed \emph{from Altera all the way up}. The architect's words (D10): ``we
+The goal is framed \emph{from Altera all the way up}. The architect's words (D10): ``we
 will be looking reverse engineering from a different perspective of the goal of going from
 altera all the way up \ldots\ I would like to target Altera devices with LPM and structured
 verilog, but I'm not interested in their low-level formats.'' The start point is therefore Verilog that
@@ -1016,25 +1301,23 @@ Quartus-style flows produce or accept: a netlist of LPM megafunctions (\code{lpm
 \code{lpm\_mult}, \code{lpm\_compare}, \code{altsyncram}) for Cyclone~V plus generic gates and
 assigns. The end point is a higher-level description: word-level operators, memories and
 registers, with every recovered object tied to the lines of netlist text it came from.
-VQM and EDIF readers, device atoms (\code{stratixiv\_*}) and Titan are out of v1.0.
 
-Phase~4.14, the Altera target, is the first step. Its LPM tech library (\code{.o3lib}) makes
-such netlists \emph{readable}: the same library that lets a structural Verilog writer instantiate
-LPM modules with their parameters lets the front end read them back, with each LPM instance
-becoming a hard cell. An \code{lpm\_add\_sub} in the input is then already a word-level adder in
-the IR, and a memory is an \code{altsyncram} hard cell, instead of an anonymous cone of gates.
-The 4.14 test requires that the writer's output, re-read by the front end, gives the same
-netlist with its LPM instances kept as hard cells (PHASE4). Recovering structure \emph{between}
-the LPM cells (counters, shift registers, FSM state registers built from plain gates) is the
-part that needs graph methods (Sec.~\ref{sec:re-graph}).
+Phase~5.1, the Altera target, is the first step. Its LPM tech library (\code{.o3lib}) and the
+pass \code{lpmmap} write structural Verilog that instantiates LPM modules with their parameters,
+and the same library lets the front end read them back, with each LPM instance becoming a hard
+cell. An \code{lpm\_add\_sub} in the input is then already a word-level adder in the IR, and a
+memory is an \code{altsyncram} hard cell, instead of an anonymous cone of gates. The test is a
+write, read and write fixpoint plus a Verilog lint. Equivalence under the LPM simulation models
+and a Quartus compile wait until the architect needs that step (PHASE5 decisions 1 and 6).
+Recovering structure \emph{between} the LPM cells (counters, shift registers, FSM state registers
+built from plain gates) is the part that needs graph methods (Sec.~\ref{sec:re-graph}).
 
 \begin{figure}[t]
 \centering
 \odinfit{\columnwidth}{\input{IMAGE/fig_re}}
-\caption{The reverse-engineering flow. Solid-blue boxes are built on main; dashed boxes are
-the Phase~4.14 LPM path (planned, in PHASE4); dotted boxes are recorded designs that are not in
-v1.0 (the plugin and \code{raise} routes). Dashed arrows are provenance links back to the AST
-and source lines.}
+\caption{The reverse-engineering and analysis flow. Solid-blue boxes are built on main; dashed
+boxes are Phase~6 items (approved, not built); the dotted box is the research plugins that follow
+v1.0. Dashed arrows are provenance links back to the AST and source lines.}
 \label{fig:re}
 \end{figure}
 
@@ -1053,7 +1336,7 @@ reverse engineering that cannot be retrofitted. Table~\ref{tab:re-support} lists
 \toprule
 Feature & Use & Phase \\
 \midrule
-Provenance (D9) & every object has a SOURCE or DERIVED record with a parents chain & 1B \\
+Provenance (D9) & every object has a SOURCE, IMPORTED or DERIVED record with a parents chain & 1B \\
 Stable IDs & objects are 32-bit IDs, never pointers; a match can name its cells & 1B \\
 Hierarchy and paths & dotted instance paths and \code{hier} kept in provenance &
   3A \\
@@ -1095,36 +1378,6 @@ provenance through the ABI (1D exit test: ``a Python plugin walks the IR''). \co
 draws a cone, an instance or all objects from a source line, and refuses to draw more than a node
 budget without a focus, so a large netlist stays readable.
 
-\subsection{The removed Phase 6 design: \code{raise}}
-
-The original plan, recorded now in DESIGN \S12.1, had one engine with two directions
-(DESIGN \S8; D5). \emph{Forward}, the subgraph matcher binds cells to hard blocks. \emph{Backward}
-it runs as \code{raise}: ``RE is literally \code{lower} run backwards''. Bit-level cones are
-replaced by word-level cells, and the result is written as higher-level Verilog.
-
-\emph{The matcher.} VF2-style subgraph matching~\cite{cordella2004vf2}, with three additions.
-\emph{Anchor seeding}: candidates start at anchor cells instead of at every node (forward, a
-\code{\$mul}). \emph{Width-agnostic} patterns: a pattern says ``an adder
-of any width'', and the width is read from the matched cone. \emph{Local equivalence}: before a
-candidate is committed, ABC proves the cone equal to the word-level cell that would replace it,
-on the cone alone, so a wrong match cannot enter the IR (D4).
-Overlapping candidates are resolved by maximum cover with a cost tie-break.
-
-\emph{Structures to recover.} Ripple and carry-lookahead adders, comparators, mux trees,
-counters, shift registers, memories, and FSM state registers.
-
-\emph{Scorecard and round trip.} The test is a round trip: Verilog, \code{lower}, BLIF, read,
-\code{raise}, Verilog, equivalence check. A structure-recovery scorecard counts how many
-structures of a known design the pass finds (DESIGN \S11). The Titan subset, smallest first, was
-the scale test (Phase~6.6).
-
-All of it is out of v1.0 (D10, DESIGN \S12.1): the matcher (D5 amended; 4.10 dropped),
-\code{raise} (6.1), the scorecard (6.2), VQM and EDIF readers (6.3), Altera \code{bind} (6.4),
-the primitive library (6.5) and Titan (6.6). The reasons are that Verilog is good enough, that
-the Altera work that matters is LPM structural Verilog, and that a matcher would add a pattern
-language and scale risk to a tool whose goal is to work. Until then, hard blocks are matched by
-exact port signature and the fixed 3C rules.
-
 \subsection{Graph analysis: the architect's vision}
 \label{sec:re-graph}
 
@@ -1132,9 +1385,16 @@ The architect's vision for reverse engineering is graph methods on the netlist: 
 high-level structure of a flat structural Verilog netlist by analysing its graph, and link every
 result back to the AST through provenance, so that a recovered block points at lines of source
 and the result can inform downstream decisions. The structures in view are datapaths, FSMs,
-register files, counters and bus groupings. Subgraph matching, above, is one such method. Which
-other graph methods to use is not decided (Sec.~\ref{sec:re-open}). This paper reports the
-\emph{hooks} that the core keeps for them, not results:
+register files, counters and bus groupings. Which graph methods to use is not decided
+(Sec.~\ref{sec:re-open}). This paper reports the \emph{hooks} that the core keeps for them, and
+the Phase~6 items that build the flow around them, not results. Phase~6 has five items, all
+approved and not yet built: gate-level netlist ingest (6.1); \code{write\_dot --color-by} and
+HDL locations on node labels (6.2); graph export as Yosys JSON plus versioned Odin III keys, which
+networkx and PyTorch Geometric can load without Odin III (6.3); a \code{levelize} pass that stores
+the combinational level of each cell (6.4); and a provenance coverage gate (6.5). The gate asks
+that every LUT, latch, hard block and LPM instance of the final netlist resolves to at least one
+HDL location, with named exception classes, and reports the coverage and the number of distinct
+lines per object. The hooks are:
 \begin{itemize}
 \item provenance on every object and an append-only parents chain, so an analysis can add
   records without rewriting any;
@@ -1142,13 +1402,12 @@ other graph methods to use is not decided (Sec.~\ref{sec:re-open}). This paper r
   instance;
 \item the C ABI and Python plugins that walk the graph, and the registry that lets a plugin add
   cell types for the structures it finds;
-\item the netlist and word-level views, so a recovered word-level cell can sit among bit cells
-  (IR-9 allows mixed granularity only inside \code{lower} and \code{raise}).
+\item the netlist and word-level views, so a recovered word-level cell can sit among bit cells;
+\item the FSM attributes (state count, encoding) that \code{fsm} leaves on recoded registers.
 \end{itemize}
-The route after v1.0 is the one the architect named: add techniques through libraries and
-plugins, without changing the core. D10's last rule protects that route: IR provenance, IDs,
-hierarchy and the C ABI stay intact, so a matcher, \code{raise} and other analyses can be added
-later as plugins.
+The route after v1.0 is the one the architect named: add the research techniques through libraries
+and plugins, without changing the core. D10's last rule protects that route: IR provenance, IDs,
+hierarchy and the C ABI stay intact.
 
 \subsection{Open problems}
 \label{sec:re-open}
@@ -1156,19 +1415,19 @@ later as plugins.
 \begin{enumerate}
 \item \emph{What is recoverable from LPM?} LPM hides the carry chain and the memory port logic
   inside the megafunction. How much structure the surrounding gates still show, and how to name
-  it, is open. The 4.14 write-and-reread test shows only that a netlist Odin III wrote can be
+  it, is open. The 5.1 write-and-reread test shows only that a netlist Odin III wrote can be
   read back.
 \item \emph{Which structures first?} Counters and shift registers are small cycles, and FSM
-  state registers need state recoding to be undone (Yosys's \code{fsm} one-hot recoding is the
-  forward direction, and it is out of v1.0). The order is undecided.
-\item \emph{How to score.} The scorecard needs designs with known structure. Round-tripping
+  state registers need state recoding to be undone (the \code{fsm} pass does the forward
+  direction). The order is undecided.
+\item \emph{How to score.} A score needs designs with known structure. Round-tripping
   Odin III's own output is circular, so it needs designs from outside.
-\item \emph{Equivalence at scale.} Local equivalence per candidate needs ABC on cones, and
+\item \emph{Equivalence at scale.} A check of each recovered structure needs ABC on cones, and
   \code{dsec} already gives ``unproven'' on several large designs (Sec.~\ref{sec:verify}).
 \item \emph{Naming.} Recovered structures need names that mean something. Provenance names
   point to source lines, and a netlist from Quartus has none that carry intent.
-\item \emph{Which graph methods.} Which graph methods beat subgraph matching on structural
-  netlists, and for which structures, is a research question this paper does not answer.
+\item \emph{Which graph methods.} Which graph methods work best on structural netlists, and
+  for which structures, is a research question this paper does not answer.
 \item \emph{The plugin interface.} An analysis plugin needs to add cells and provenance records
   safely. Phase~7's extension-API review is where that interface is checked.
 \end{enumerate}
@@ -1200,11 +1459,11 @@ Traversal & recursive (e.g.\ expression reduction) & recursive (e.g.\ AST simpli
 Resource limits & implicit & implicit & named caps; OOM is a status \\
 Input & command line, XML config & scripts, command line & project record: \code{.o3proj},
   \code{-f}, Quartus; includes architecture and mapping rules \\
-Architecture & VPR XML hard blocks & Parmys reads VPR XML & \code{.o3lib} (VPR XML import: 4.1) \\
+Architecture & VPR XML hard blocks & Parmys reads VPR XML & \code{.o3lib} and the arch record, filled by \code{read\_arch} from VPR XML \\
 ABC & separate step in the VTR flow & external process with a script & default script in a
   linked \code{libabc}; other scripts checked, then run in a capped child process; script
   SHA-256 recorded \\
-SV / VHDL & no & yosys-slang, GHDL plugins & slang adapter at the seam; GHDL (deferred, D10) \\
+SV / VHDL & no & yosys-slang, GHDL plugins & Verilog only in v1.0; the seam allows another front end later \\
 Simulator & yes & \code{sim}, \code{eval}, SAT-based passes & yes, registry semantics \\
 Extension & source changes & C++ passes and plugins & C ABI \code{.so}, Python cffi \\
 License & MIT (VTR) & ISC & MIT \\
@@ -1311,10 +1570,9 @@ Odin~II and Yosys with about 340 one-module tests and found constructs Odin~II's
 differently from Yosys (e.g.\ dropped signedness), shown with equivalence checking.
 
 \emph{The elaboration seam.} Yosys gains SystemVerilog by translating slang's elaborated design
-into RTLIL inside a plugin; Odin~II has no SV path. Odin III's seam
-(Fig.~\ref{fig:seam}) puts the shared work---widths, signedness, drivers, memories,
-processes---in one stage~2 that both the Verilog stage~1 and the slang adapter feed, so the
-(deferred) Phase~5 test that three front ends give one netlist would have one place to fail.
+into RTLIL inside a plugin; Odin~II has no SV path. Odin III's seam (Fig.~\ref{fig:seam}) puts
+the shared work, widths, signedness, drivers, memories and processes, in one stage~2, so that a
+second front end after v1.0 would feed one stage~2 and need no second elaborator.
 
 \emph{Agentic, spec-first development with oracles.} Odin~II and Yosys grew through human
 contributions. Odin III is written by AI coding agents under an architect's control, so its
@@ -1368,7 +1626,7 @@ time}
 \section{Status and Roadmap}
 \label{sec:status}
 \begin{table*}[t]
-\caption{Development phases (DESIGN \S12 as amended by ADR D10) and status on 2026-10-19}
+\caption{Development phases (ADR D11, 2026-10-19) and status on 2026-10-20}
 \label{tab:phases}
 \centering
 \footnotesize
@@ -1386,21 +1644,23 @@ Ph. & Deliverable & Exit test & Status & Target \\
 2 & Verilog-2005 front end, preprocessor, elaboration, project input, \code{proc}, \code{opt} &
   micros equivalent to Parmys; project fixtures elaborate from each format & done, closed
   2026-10-18 (PHASE2 \#30) & --- \\
-3 & \code{wreduce}, \code{flatten}, \code{lower}, \code{hardmap}, linked ABC,
-  \code{write\_blif --vtr}, QoR harness & the 19 VTR~7.0 benchmarks through place and route
-  with Odin III alone; QoR table against Parmys & built; M1 met; Parmys-matching refinements,
-  3D-7 default flip, 3D-8 and the M2 and M3 exit runs in progress & before Phase~4 closes \\
-4 & \emph{the tool works on VTR architectures and on Altera via LPM}: VPR-XML import, generic
-  hard blocks, multiplier and memory splitting, carry chains, FF features, memory port merge,
-  Cyclone~V LPM target (4.14) & VTR designs route on several architectures and pass
-  \code{fcheck}; LPM netlist equivalent to the RTL; QoR parity is not a gate & planned (PHASE4)
-  & v1.0 about 5--10 Nov \\
-5 & slang adapter (SystemVerilog), GHDL path (VHDL) & none in v1.0 & deferred: Verilog is close
-  enough; nothing built & after v1.0 \\
-6 & \code{raise}, RE scorecard, VQM and EDIF, Altera \code{bind}, Titan & none in v1.0 &
-  removed from v1.0; design kept in DESIGN \S12.1 (Sec.~\ref{sec:re}) & --- \\
-7 & CIRCT writer, Yosys JSON reader, visual tooling, documentation with the extension-API
-  review, release (EDIF writer dropped) & release & planned & with v1.0 \\
+3 & VTR flow: \code{wreduce}, \code{flatten}, \code{lower}, \code{hardmap}, linked ABC,
+  \code{write\_blif --vtr}, QoR harness & the VTR~7.0 benchmarks through place and route with
+  Odin III alone; QoR table against Parmys; the local gate is the 15 smaller designs (PHASE3
+  decision 54) & code done; exit runs on the 15 in progress; \code{mcml}, \code{LU32PEEng},
+  \code{bgm}, \code{LU8PEEng} and \code{LU64PEEng} shipped out as too big for this machine &
+  before Phase~4 closes \\
+4 & VTR architectures and FSM: 4.1 to 4.8, 4.13 & VTR designs route on several architectures and
+  pass \code{fcheck}; FSM micros equivalent; QoR parity is not a gate & 4.1, 4.2 (PRs A to C),
+  4.7 and 4.8 merged; 4.3 to 4.5 and PR~D in progress; 4.13 planned & v1.0 about 12--17 Nov \\
+5 & outputs and read-back: LPM (5.1), Verilog read-back (5.2), JSON reader (5.3), HDL locations
+  through write and read (5.4) & every write and read round trip is equivalent and keeps the HDL
+  locations & 5.1 and 5.2 merged; 5.3 and 5.4 specified & with v1.0 \\
+6 & analysis flow and provenance: gate-level ingest, \code{write\_dot --color-by}, graph export,
+  \code{levelize}, coverage gate (6.1 to 6.5) & the 6.5 gate passes on the Phase~3 designs and
+  the LPM micros & planned & with v1.0 \\
+7 & CIRCT writer, visual tooling polish, documentation with the extension-API review, packaging
+  and the v1.0 tag & release & planned & with v1.0 \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -1408,10 +1668,11 @@ Ph. & Deliverable & Exit test & Status & Target \\
 Table~\ref{tab:phases} lists the phases. The status comes from the repository's phase
 documents and from the measured runs of 2026-10-19 that Sec.~\ref{sec:measured} reports. The
 v1.0 scope is ADR D10, accepted on 2026-10-19: ``since our goal is to make Odin III \ldots\ I
-just want the tool to work.'' That moves QoR parity with Parmys out of the exit criteria
-(it is still measured and reported), and it defers or removes the work that was not needed to
-make the tool work. Section~\ref{sec:v1plan} gives the reasons item by item. The target date
-is the controller's estimate; Phase~3 must close first.
+just want the tool to work.'' ADR D11 of the same day splits the plan into the phases above, so
+that Phases~3 and~4 serve the first goal (Verilog through the modern VTR flow, comparable to
+Parmys) and Phases~5 and~6 serve the second and third (a platform for netlist analysis, and
+provenance back to the HDL). QoR parity with Parmys is not an exit criterion, and it is still
+measured and reported. The target date is the controller's estimate; Phase~3 must close first.
 
 Phase~1's exit tests passed on the goldens: every one of
 the 1,846 successful golden BLIFs read and wrote back identically under the text gate, and 1,824
@@ -1488,14 +1749,15 @@ VTR's ABC stage & 364\,MiB \\
 \end{tabular}
 \end{table}
 
-Phase~3's exit test runs the 19 VTR~7.0 benchmarks on
+Phase~3's exit test was written for the 19 VTR~7.0 benchmarks. Since 2026-10-20 the local gate is the 15
+smaller designs, and the other five are shipped out (PHASE3 decision 54). The test runs them on
 \code{k6\_frac\_N10\_frac\_chain\_mem32K\_40nm} with Odin III alone producing each netlist
-(the script of Sec.~\ref{sec:backend}), routes them with VPR, passes VTR's functional check, and
+(the script of Sec.~\ref{sec:arch}), routes them with VPR, passes VTR's functional check, and
 reports a QoR table against the Parmys flow with a loose gate: a geomean ratio of at most
 1.20, and no design above 1.50, on CLB count, channel width, critical-path delay and routed
 wirelength. The gate compares the decimals VTR prints exactly, so 1.20 passes and 1.2001 fails.
-Its milestones are M1 (the P$'$ leg routes all 19), M2 (the O$'$ leg routes all 19) and M3
-(the O leg routes all 19, the exit).
+Its milestones are M1 (the P$'$ leg routes all 19, met), M2 (the O$'$ leg routes the gate set) and M3
+(the O leg routes the gate set, the exit).
 
 The harness's first run of the Parmys leg (Table~\ref{tab:qor}; PHASE3 \#25) routed all 21
 designs (the 19 plus \code{arm\_core} and \code{spree}, as VTR's \code{vtr\_reg\_qor\_chain}
@@ -1549,46 +1811,35 @@ III's netlists are right and Parmys's are wrong, because of the divergence D2b (
 
 \subsection{In progress and next}
 
-Five items are open. (1) \emph{Parmys matching.} The flip-flop-bit merge, the \code{wreduce}
-operand-first order and \code{opt\_share} parity are being made to match Parmys, since the
-explanations above are the only source of count differences. (2) \emph{The in-memory ABC
-exchange.} PR~148 adds it (3D-7); flipping it to the default and 3D-8 follow. (3) \emph{M2 and
-M3.} The O$'$ and O exit runs, with the QoR table and gate, run when the lanes are idle, since a
-running sweep holds the machine-wide heavy lock. (4) \emph{Name style.} The cost of provenance
-names in VPR (the Oprov leg) is not measured yet. \todo{Odin III (leg O) against the Parmys
-baseline once M3 runs} (5) \emph{The token log.} It is regenerated at the end of a session.
+Five items are open. (1) \emph{Phase~3 exit.} The O$'$ and O exit runs, with the QoR table and
+gate, run on the 15-design local gate when the lanes are idle, since a running sweep holds the
+machine-wide heavy lock. The five largest designs, \code{mcml}, \code{LU32PEEng}, \code{bgm},
+\code{LU8PEEng} and \code{LU64PEEng}, are shipped out to a larger machine as ``untested here:
+too big for this machine'', and their tables are report-only (PHASE3 decisions 54 and 55). The
+three Parmys-parity changes that were running, the flip-flop-bit merge, the \code{wreduce}
+operand-first order and the wider \code{opt\_share}, are merged, and no new parity work starts
+after them: comparable results are the target, not parity (PHASE3 decision 53). (2) \emph{The
+in-memory ABC exchange.} It is built (3D-7, 3D-8); its default flip awaits its gate. (3)
+\emph{Partial mapping.} PR~D, read-enable RAMs mapped hard with exact emulation, is approved and
+in progress, with multiplier splitting, memory splitting and carry chains (4.3 to 4.5). (4)
+\emph{Name style.} The cost of provenance names in VPR (the Oprov leg) is not measured yet.
+\todo{Odin III (leg O) against the Parmys baseline once the exit runs finish} (5) \emph{The token
+log.} It is regenerated at the end of a session.
 
-\subsection{The v1.0 plan and what was deferred or removed}
+\subsection{The roadmap to v1.0}
 \label{sec:v1plan}
 
-Phase~4, ``the tool works'' (PHASE4), keeps: VPR-XML import (4.1); generic hard blocks matched by
-exact port signature (4.2); multiplier splitting from the architecture (4.3); memory depth and
-width splitting (4.4); carry chains from the architecture's model (4.5); flip-flop feature
-matching (4.6); memory port merge (4.7); the architecture sweep (4.13); and the Altera target
-(4.14). The sweep runs the VTR designs on \code{k6\_frac\_N10}, one DSP architecture and one
-plain-LUT architecture (which ones is an open item). The Altera target is Cyclone~V (Quartus
-Lite), with exactly four LPM cells (\code{lpm\_add\_sub}, \code{lpm\_mult}, \code{lpm\_compare}
-and \code{altsyncram}, single- and simple-dual-port) and plain D flip-flops in soft logic (an
-agent default); everything else is generic structural Verilog. Its test is that the LPM netlist
-is equivalent to the RTL under the LPM simulation models.
-
-\begin{itemize}
-\item \textbf{Dropped from Phase~4}: FSM detect and recode (4.8), because the tool works without it
-  (it is the cause of the flip-flop count differences that the 3C row of
-  Table~\ref{tab:measured} explains); mux collapsing (4.9), already done by \code{opt\_muxtree}
-  and \code{opt\_reduce}; the matcher (4.10, D5 amended); project mapping rules (4.11), which the
-  project still reads and stores; per-bit \code{opt\_dff} parity (4.12), since QoR parity is no
-  longer a goal.
-\item \textbf{Phase~5, deferred}: SystemVerilog through slang and VHDL through GHDL. Verilog-2005 is
-  close to good enough, and nothing is built. DESIGN \S12.1 records how each step would be done.
-\item \textbf{Phase~6, removed}: the reverse-engineering work of Sec.~\ref{sec:re}. Reverse
-  engineering is now approached from Altera LPM up, which 4.14 starts.
-\item \textbf{Phase~7, kept}: the CIRCT writer, the Yosys JSON reader, visual tooling, documents
-  with the extension-API review, and the release. The EDIF writer is dropped.
-\end{itemize}
-The decision is to be revisited if the architect reopens reverse engineering or Titan, if
-Verilog-only input proves too limiting, or if exact-port-signature matching cannot cover a block
-that the VTR sweep needs (D10).
+Phase~4 finishes the generic hard-block mapping (4.3 to 4.5), and then the architecture sweep
+(4.13). The sweep runs the VTR designs on \code{k6\_frac\_N10}, a DSP architecture and a plain-LUT
+architecture, and passes when VPR routes them and \code{fcheck} passes. Phase~5 builds the outputs
+and their read-back. BLIF, Verilog and JSON must read back into Odin III with their HDL locations;
+\code{dot} is for viewing and RTLIL is for Yosys, and neither needs a reader. The Altera path is
+light: it is tested by write, read back and lint, and equivalence under the LPM models waits until
+the architect needs it. Phase~6 builds the analysis flow of Sec.~\ref{sec:re-graph} and the
+provenance coverage gate. Phase~7 is the release. After v1.0, the plan adds SystemVerilog through
+slang, VHDL through GHDL, and the research plugins (DESIGN \S12.1). The decision is to be revisited
+if a phase turns out to depend on another in a way that blocks the order of three parallel lanes,
+or if the architect needs the LPM equivalence step before Phase~5 closes (D11).
 
 % ------------------------------------------------------------------------------------------
 \section{Conclusion}
@@ -1598,18 +1849,19 @@ part: architecture and mapping rules carried with the design, lineage from every
 back to its source and through every transformation, and a core simple and checked enough for
 AI agents to build and a human to review. Its IR keeps Odin~II's node/pin/net model in ID-based
 paged storage; its front end follows Yosys's semantics, declaring every divergence; and its
-elaboration seam prepares one back half for Verilog and SystemVerilog alike. As of 2026-10-19
-the whole forward flow is built: \code{proc}, \code{opt}, \code{wreduce}, \code{flatten},
-\code{hardmap}, \code{lower}, linked ABC and \code{write\_blif --vtr}, with a QoR harness that
-reproduces VTR's own Parmys baseline. Each stage is checked by a tool that is separate from the
-code, under an exit-code discipline in which a listing never counts as a pass. Where Odin III's
-netlists differ from Parmys's in function, the measured cause so far is a Parmys padding defect,
-not an Odin III one. The next milestones are the Parmys-matching refinements and the M2 and M3
-exit runs, then Phase~4: VTR architecture sweeps and the Cyclone~V LPM target, which is also
-the first step of reverse engineering from Altera upward. Provenance, stable IDs, hierarchy and
-the C ABI are kept intact, so that matcher-based and graph-based analyses can be added after
-v1.0 as libraries and plugins without changing the core.
-\todo{QoR summary once the Phase 3 exit runs (M3) finish}
+elaboration seam keeps the language-specific half of elaboration apart from the shared half. As of
+2026-10-20 the code of the whole forward flow is done: \code{proc}, \code{fsm}, \code{opt},
+\code{flatten}, \code{wreduce}, \code{partial\_map}, \code{lower}, linked ABC and
+\code{write\_blif --vtr}, with a QoR harness that reproduces VTR's own Parmys baseline. Each
+stage is checked by a tool that is separate from the code, under an exit-code discipline in
+which a listing never counts as a pass. Where Odin III's netlists differ from Parmys's in
+function, the measured cause so far is a Parmys padding defect, not an Odin III one. The next
+milestones are the exit runs on the 15-design local gate, the rest of Phase~4, and then Phase~5
+(outputs that read back with their HDL locations) and Phase~6 (the analysis flow), which carry the
+Altera LPM path and the first steps of reverse engineering. Provenance, stable IDs, hierarchy and
+the C ABI are kept intact, so that graph-based analyses can be added after v1.0 as libraries and
+plugins without changing the core.
+\todo{QoR summary once the Phase 3 exit runs finish}
 
 \section*{Acknowledgment}
 \todo{acknowledgments and funding}

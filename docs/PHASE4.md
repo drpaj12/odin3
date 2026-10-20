@@ -48,7 +48,7 @@ Each item has a one-line acceptance test.
 - [ ] 4.7 Memory port merge: registered reads and writes merged into `$mem` ports; no
   `ram_style` attribute overrides. Test: a registered-read RAM micro yields one `$mem` with the
   read register merged, and is equivalent.
-- [ ] 4.8 FSM detect and recode (restored, decision 6): a port of Yosys 0.55's `fsm` as its
+- [x] 4.8 FSM detect and recode (restored, decision 6): a port of Yosys 0.55's `fsm` as its
   default script runs it (`fsm_detect`, `fsm_extract`, `fsm_opt`, `fsm_recode`, `fsm_map`;
   `-expand` and `-export` are not in v1.0). It runs where Parmys runs it, right after `proc`
   (Parmys: `proc -norom; fsm; opt; wreduce`, `parmys.cc`). Encoding follows Yosys: the
@@ -169,6 +169,72 @@ DESIGN §12.1.
    `partial-map-check/identity` with `hardmap-diff` kept for the alias, 17 K from the record for
    `abc` and `write_blif` in a small 4.13 PR, 18 goldens for the new archs are a controller step)
    take the spec's recommendations.
+14. **4.8 FSM design questions** (Peter, 2026-10-19, on `docs/specs/2026-10-20-4.8-fsm-design.md`
+    section 20: "Yes to all"). That adopts the recommended answer to each of the ten questions:
+    1. no `$fsm` registry cell; the FSM table lives inside the pass (no IR change);
+    2. `fsm_opt` finds unused outputs with a native "unread and not a port" test, `opt_clean`
+       unchanged;
+    3. `keep` on a state register follows Yosys (detected and recoded; `fsm_encoding = "none"`
+       excludes);
+    4. 1,000,000-evaluation cap per FSM, then skip with a warning;
+    5. no pre-`proc` `opt_expr; opt_clean; opt -nodffe -nosdff` lines in the Phase 3 script;
+    6. `fsm` runs only in scripts that name it (the VTR scripts do), not gated on `--vtr-compat`;
+    7. attributes `odin3_fsm_states`, `odin3_fsm_encoding`, `odin3_fsm_orig_bits`,
+       `odin3_fsm_orig_name`;
+    8. the RAM write-enable 2-state registers are ported faithfully (recoded as Parmys does);
+    9. micro equivalence uses a bounded Yosys miter after reset (`fsm-equiv`);
+    10. stereovision3's unexplained flop is not a blocker for 4.8.
+    The plan (`docs/plans/2026-10-20-4.8-fsm-plan.md`) called this "decision 11"; main already
+    held 9 to 13, so it is 14.
+    **Result (2026-10-20, branch `feat/4.8-fsm`; agent defaults, Peter may override).**
+    - Micros: `fsm_equiv_micro` and `fsm_diff_micro` pass (32 `yes` rows equivalent from reset;
+      Odin III's `fsm` matches Yosys 0.55 on the same RTLIL). 9 VTR designs through `fsm-diff`
+      (logs `/tmp/claude-1000/fsm/diff/*.log`): ch_intrinsics, stereovision3, raygentop, boundtop,
+      LU8PEEng, LU32PEEng ok; stereovision1 and mcml differ only in that Odin III logs an alias
+      wire of a rejected register as a second rejection; blob_merge differs only in the no-fsm
+      baseline (5 `$dffe`); all in `tests/fsm/diff_expect.txt`.
+    - `hardmap-diff` on the 19 (`/tmp/claude-1000/fsm/hm/sweep.log`): ch_intrinsics is now
+      equivalent to Parmys; stereovision3's latch count equals Parmys's (the unexplained flop of
+      PHASE3 #43 is gone) and it is `unproven` (two clock domains); blob_merge latch count equals
+      Parmys's and dsec says NOT equivalent from the all-zero start (D16 in
+      `tests/hardmap/vtr_expect.txt`). D16 is isolated (outcome A, 2026-10-20): `timeout 900
+      tools/fsm-check/fsm-equiv --odin build/release/odin3 blob_merge.v --top RLE_BlobMerging
+      --rst iReset:1 --depth N` (Odin III's `proc` against `proc; fsm; opt`, a Yosys miter with the
+      reset held in steps 1 and 2) exits 0 (equivalent) at depth 3, 8 and 30 (depth 60 stopped with
+      exit 3 after 60 s, no verdict); the same run without `--rst`, depth 8, exits 1. So the two
+      netlists agree from reset and differ only in the illegal all-zero start state, which the
+      one-hot register of a sync-reset FSM has and the binary original did not (decision text
+      below; plan Deviations 12 and 15). The sweep stays red on the 11 big designs that
+      have no expect line (as before this change, listed in the vtr_expect comment).
+    - **Behaviour change, all-zero start.** A one-hot register without async reset (sync-reset FSMs:
+      blob_merge, ch_intrinsics) powers up all-zero, an illegal state with no outgoing transition;
+      the binary original powered up in state 0. This is Yosys and Parmys behaviour, so parity
+      holds, but anything simulating from the all-zero start (ABC dsec, equiv-check) sees another
+      machine; equivalence holds from reset. `fsm_opt` also removes a no-reset state that has no
+      incoming transition, as Yosys does. RAM write-enable registers (ruling 8): nothing to port,
+      Odin III's proc makes no `$memwr` registers (plan Deviation 16).
+    - **Summary tables** (from the logs under `/tmp/claude-1000/fsm`). `fsm-diff` on 9 VTR designs:
+      ok LU32PEEng (3 FSMs), LU8PEEng (3), boundtop (6), ch_intrinsics (1), raygentop (6),
+      stereovision3 (1); differs, all in diff_expect: blob_merge (1), mcml (1), stereovision1 (2).
+      `hardmap-diff` on the 19: equivalent diffeq1, diffeq2, mkPktMerge, ch_intrinsics; listed
+      stereovision3 (unproven), sha (unproven), blob_merge (D16), bgm (D2b); counts-differ boundtop
+      (latch +6), mkSMAdapter4B (latch +4), stereovision1 (adder +24), LU8PEEng and LU32PEEng
+      (adder +53), mcml (adder -2, latch -1); differs raygentop, or1200, stereovision0; unproven
+      mkDelayWorker32B; unpaired stereovision2 (19 designs: 6 counts-differ, 3 differs, 4
+      equivalent, 4 listed, 1 unpaired, 1 unproven). `vtr-qor run --leg O` on 21: 17 ok, 3 failed,
+      1 capped (LU32PEEng) in 3:36:30.
+    - `vtr-qor run --leg O --fcheck` (`/tmp/claude-1000/fsm/qor_run.log`, `qor2_run.log`): 17 of 21
+      designs `vpr_status=success`; fcheck pass on 14; fail on raygentop, boundtop, stereovision0
+      (the same designs fail on the P leg for `dropped-latches` and `x-state`, PHASE3 #50; no
+      no-fsm control run was made). arm_core: pre-existing hang in linked ABC (also without `fsm`,
+      controller's rerun; not rerun here). LU32PEEng: capped at the 6 GiB scope in the front end.
+      **bgm and mcml: `abc` fails at `strash`**, new with `fsm`: the O-leg script has no `opt`
+      after `flatten`, so the mapped decoders of `LogCalc.r_indexFirstOne` (32 states, binary) get
+      constant inputs from the instance and `lower` writes `.names vcc vcc n` (XOR 10/01); the
+      `abc` adapter's exchange deduplicates the fanin and ABC rejects the empty cover ("SOP has a
+      mismatch between its cover size (0) and its fanin number (1)"). With `opt -full` after
+      `flatten` (as `phase3_pre_abc.script` has) mcml passes `strash`. Not fixed here: either add
+      that `opt` to `qor_legs.py` or make the adapter fold equal-fanin cells; controller's call.
 
 ## Open items
 

@@ -13,7 +13,7 @@ Per design:
    ``--arch`` must name the arch of the golden's ``.prov`` (``arch=``), when both say one, and
    Odin III then reads it with ``read_arch`` instead of ``read_techlib`` (4.2);
 2. Odin III runs the script of ``phase3_pre_abc.script`` (``read_techlib; read_verilog --nolatches
-   --vtr-compat; proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full; hardmap;
+   --vtr-compat; proc; fsm; opt; wreduce; opt_clean; opt -full; flatten; opt -full; hardmap;
    opt -full -ffbits; lower; opt -fast; compact; write_blif --vtr``), ``--top`` the first
    ``.model`` of the golden. A ``run wreduce first`` warning on its output (``hardmap`` left a
    ``$mul``, ``$add`` or ``$sub`` soft only because the script did not narrow it) is the class
