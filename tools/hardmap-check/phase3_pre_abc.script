@@ -2,13 +2,14 @@
 # source of the string hardmap-diff runs. `wreduce` runs before `flatten` as in Parmys; `hardmap`
 # needs the flat design; the last `opt -full -ffbits` also merges the identical bits of word
 # flip-flops, which Yosys merges after techmap (PHASE3 #49); `lower` makes the netlist view;
-# `compact` renumbers IDs last.
+# `compact` renumbers IDs last. `fsm` follows `proc` as in Parmys's synthesis.tcl (4.8, PHASE3 #43).
 # @ADDERLIB@ is the n-bit soft adder Parmys gets from vtr_primitives.v (spec A-9; dropped when
 # the tool has none). @LIB@ is lib/vtr.o3lib, @DESIGN@ the source, @OUT@ the BLIF hardmap-diff compares to Parmys's.
 read_techlib @LIB@
 read_verilog --lib @ADDERLIB@
 read_verilog --nolatches --vtr-compat @DESIGN@
 proc
+fsm
 opt
 wreduce
 opt_clean

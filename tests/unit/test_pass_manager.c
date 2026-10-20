@@ -1154,8 +1154,9 @@ static void test_builtin_processes_values(void) {
                                      "read_arch",
                                      "write_techlib"};
     static const char *const refuse[] = {
-        "write_blif", "write_json",  "write_verilog", "write_dot", "flatten", "lower",
-        "hardmap",    "partial_map", "memory_merge",  "lpmmap",    "sim",     "abc"};
+        "write_blif", "write_json", "write_verilog", "write_dot",    "flatten",
+        "lower",      "hardmap",    "partial_map",   "memory_merge", "lpmmap",
+        "sim",        "abc",        "fsm_detect",    "fsm"};
     for (size_t i = 0; i < sizeof ok / sizeof ok[0]; i++) {
         const odin3_pass_def *def = odin3_pass_find(odin3_bytes_cstr(ok[i]));
         TEST_ASSERT_NOT_NULL_MESSAGE(def, ok[i]);

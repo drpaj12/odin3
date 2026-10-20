@@ -1,0 +1,31 @@
+# NAME STAGE REASON   (4.8 spec T-3; every line needs a reason, a stale line is an error)
+# A difference between Odin III and Yosys 0.55 that the plan accepts. NAME is the corpus name
+# (tests/fsm/facts_corpus.txt), STAGE is detect, extract, opt, recode, map or equiv.
+micro/syntax/8_bit_for_pass_through native-detect Odin III proc keeps no flip-flop for the for-loop variable i (dead after the loop); Yosys proc makes a 32-bit $dff that fsm_detect marks and fsm_extract then rejects
+micro/syntax/8_bit_for_pass_through_off_by_1 native-detect as 8_bit_for_pass_through
+micro/syntax/complex_post_for_loop native-detect as 8_bit_for_pass_through
+micro/syntax/for_loop_adv_post native-detect as 8_bit_for_pass_through
+micro/syntax/for_loop_adv_pre native-detect as 8_bit_for_pass_through
+micro/syntax/h7_of_8_bit_for_pass_through native-detect as 8_bit_for_pass_through
+micro/syntax/l2_and_h2_of_8_bit_for_pass_through native-detect as 8_bit_for_pass_through
+stereovision1 detect Odin III nets are merged, so an alias wire (assign) of a rejected register is logged as a second rejection; Yosys logs only the canonical wire (offchip_sram_oe/we alias tm3_sram_oe/we). Marking is unaffected
+mcml detect as stereovision1 (r_diff__0 and r_dl_b__0 alias c_diff__1 and c_dl_b__1)
+blob_merge map the cell histograms after fsm are identical (RLE_BlobMerging: 83 $dffe, 1 $dff, 8 $reduce_or); only the no-fsm baselines differ by 5 $dffe (Odin opt merges 5 enable flops Yosys opt -fast merges after fsm), so the baseline-relative delta differs
+fsm/alias_wire detect Odin III nets are merged, so the alias wire w of st is a second marked register; Yosys marks only the canonical wire. Marking of st is unaffected
+fsm/alias_wire failures the second wire w over the same $dff is skipped (Yosys: one FSM per register, the first extraction rewires the logic so the second finds no closed tree); Yosys never examines the alias
+fsm/alias_wire native-detect Odin III nets are merged, so Odin marks both wires over st (the detect_marks.txt row lists the Yosys facts: st only); the unit test skips the row, fsm-diff absorbs it with the detect line
+micro/common/1r2w native-memwr Yosys proc makes 2 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/common/2r1w native-memwr Yosys proc makes 1 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/common/bram native-memwr Yosys proc makes 1 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/common/dpram native-memwr Yosys proc makes 2 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/common/nrnw native-memwr Yosys proc makes 3 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/common/spram native-memwr Yosys proc makes 1 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/full/bm_base_memory native-memwr Yosys proc makes 1 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/full/bm_sfifo_rtl native-memwr Yosys proc makes 1 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/full/matmul native-memwr Yosys proc makes 1 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/full/memory_controller native-memwr Yosys proc makes 3 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/syntax/both_ram native-memwr Yosys proc makes 3 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/syntax/constant_module_inst native-memwr Yosys proc makes 1 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/syntax/memlooptesting native-memwr Yosys proc makes 1 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/syntax/memory_combinational native-memwr Yosys proc makes 2 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
+micro/syntax/spram_big native-memwr Yosys proc makes 1 $memwr write-enable register(s) (2 one-hot flops each after fsm) that Odin III proc lacks: it keeps memories as $mem with no $memwr/$EN register (spec rows 88, 1356); fsm_facts.py leaves them out of detect_marks.txt
