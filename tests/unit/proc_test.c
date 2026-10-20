@@ -55,10 +55,9 @@ uint32_t pt_diag_errors(void) {
     return pt_rs.errors - et_count_with(&pt_rs, ODIN3_LOG_ERROR, "pass read_verilog: failed");
 }
 
-/* The warnings of 2D: not the IR check's, not read_verilog's `--vtr-compat` fsm notice (#43). */
+/* The warnings of 2D: not the IR check's. */
 uint32_t pt_soft_warnings(void) {
-    return pt_rs.warnings - et_count_with(&pt_rs, ODIN3_LOG_WARN, "check: ") -
-           et_count_with(&pt_rs, ODIN3_LOG_WARN, "fsm recoding (Parmys)");
+    return pt_rs.warnings - et_count_with(&pt_rs, ODIN3_LOG_WARN, "check: ");
 }
 
 void pt_read_clean(const char *text) {
