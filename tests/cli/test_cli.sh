@@ -39,6 +39,7 @@
 # memory_merge_soft (4.7, review M-1: memories partial_map leaves soft, chained after memory_merge, are equivalent to partial_map alone: equiv-check on the BLIFs for a variable read enable and OFFSET != 0, sim vectors for a falling-edge read, the same lower error for write ports on two clocks).
 # pm_ramstyle (4.7 G-3: a ram_style attribute gives one warning and the same BLIF as without it).
 # pm_mem_rden (4.4 R-10: a read port with an enable that is not constant 1 maps to the RAM with the enable emulated in logic and one located warning per memory; equiv-check proves the BLIF equal to the same design with the RAM block and the emulation written out by hand, and a changed reference is not equivalent).
+# pm_soft_blocks (4.2 D18: on an arch without the model, --vtr-compat builds an explicit single_port_ram, dual_port_ram or multiply instance as soft logic with a located warning, equiv-check equal to the RTL written with arrays; without the flag the unresolved-module error; on k6 no warning).
 # pm_mem_arch (4.4: the RAM depth limit comes from the arch record, an arch without RAM leaves the memory to lower, and `partial_map --mem-width arch` slices to the arch's widest mode with one warning).
 # The project cases run from the project's directory (tests/cli/project), so the paths given are
 # relative.
@@ -832,6 +833,28 @@ pm_ramstyle)
     [[ $(grep -c "is ignored" "$work/err") -eq 1 ]] || fail "not exactly one warning"
     diff <(sed 's/mem_ramstyle/mem_regread/g' "$work/mem_ramstyle.blif" | grep -v '^#') \
         <(grep -v '^#' "$work/mem_regread.blif") >/dev/null || fail "the ram_style BLIF differs"
+    ;;
+pm_soft_blocks)
+    mm=$fixtures/../../micro_pm
+    mic=$fixtures/../../micro/verilog
+    arch=$fixtures/../../unit/data/arch/acc_none.xml
+    lib=$fixtures/../../../lib/vtr.o3lib
+    equiv=$(dirname "$compare")/../equiv-check/equiv-check
+    flow="proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full; partial_map; opt -full -ffbits; lower; opt -fast; compact"
+    for case in common/spram:single_port_ram:spram_rtl micro/multiply_hard_block:multiply:multiply_rtl common/dpram:dual_port_ram:dpram_rtl; do
+        IFS=: read -r design block rtl <<<"$case"
+        "$odin3" -p "read_arch $arch; read_verilog --vtr-compat $mic/$design.v; $flow; write_blif --vtr $work/a.blif" \
+            >"$work/out" 2>"$work/err" || fail "$design: odin3 failed"
+        grep -q "$design.v:[0-9]*:[0-9]*: warning: the architecture has no '$block' model; --vtr-compat builds this instance as soft logic" "$work/err" ||
+            fail "$design: no located warning"
+        "$odin3" -p "read_arch $arch; read_verilog --vtr-compat $mm/$rtl.v; $flow; write_blif --vtr $work/b.blif" \
+            >"$work/out" 2>"$work/err" || fail "$rtl: odin3 failed"
+        "$equiv" "$work/a.blif" "$work/b.blif" >"$work/out" 2>"$work/err" || fail "$design: not equivalent to the RTL"
+        expect_fail "unresolved_module: module '$block' is not defined" -p "read_arch $arch; read_verilog $mic/$design.v"
+        "$odin3" -p "read_techlib $lib; read_verilog --vtr-compat $mic/$design.v; $flow; write_blif --vtr $work/c.blif" \
+            >"$work/out" 2>"$work/err" || fail "$design: k6 failed"
+        if grep -q "builds this instance as soft logic" "$work/err"; then fail "$design: k6 warns"; fi
+    done
     ;;
 pm_mem_rden)
     mm=$fixtures/../../micro_pm

@@ -20,6 +20,7 @@
 #include "frontends/verilog/parser.h"
 #include "frontends/verilog/preproc.h"
 #include "frontends/verilog/read_verilog_test.h"
+#include "frontends/verilog/soft_blocks.h"
 #include "ir/check.h"
 #include "ir/design.h"
 #include "ir/prov.h"
@@ -38,6 +39,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -344,6 +346,11 @@ static odin3_status read_all(odin3_rv *rv, const odin3_rv_opts *opts) {
 
 odin3_status odin3_read_verilog_files(odin3_design *design, const odin3_rv_opts *opts,
                                       odin3_ast **out) {
+    return odin3_read_verilog_files_soft(design, opts, 0, out);
+}
+
+odin3_status odin3_read_verilog_files_soft(odin3_design *design, const odin3_rv_opts *opts,
+                                           uint32_t soft_mask, odin3_ast **out) {
     if (out != NULL) {
         *out = NULL;
     }
@@ -354,6 +361,7 @@ odin3_status odin3_read_verilog_files(odin3_design *design, const odin3_rv_opts 
     double start = odin3_now_ms();
     odin3_rv rv;
     odin3_status st = rv_open(&rv, design, opts);
+    rv.soft_mask = soft_mask;
     st = st != ODIN3_OK ? st : read_all(&rv, opts);
     st = st != ODIN3_OK ? st : seal(&rv, start);
     if (st == ODIN3_OK) {
@@ -581,6 +589,14 @@ static odin3_status hand_over(odin3_pass_ctx *ctx, odin3_ast *ast, const rv_args
     return st;
 }
 
+/* D18: the primitives the arch record has no model of, which --vtr-compat builds as soft logic
+ * (soft_blocks.h); 0 outside --vtr-compat, --lib and --parse-only. */
+static uint32_t soft_blocks_of(odin3_design *design, const rv_args *args) {
+    return args->elab.vtr_compat && !args->lib && !args->parse_only
+               ? odin3_soft_blocks_missing(design)
+               : 0U;
+}
+
 static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                      void *user) {
     (void)user;
@@ -590,10 +606,11 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     odin3_vec_init(&srcs, sizeof(odin3_pp_source));
     odin3_status st = parse_args(args, &parsed);
     st = st != ODIN3_OK ? st : collect_sources(design, &parsed, &srcs);
+    uint32_t soft = soft_blocks_of(design, &parsed);
     odin3_ast *ast = NULL;
     if (st == ODIN3_OK) {
         odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL, parsed.lib};
-        st = odin3_read_verilog_files(design, &opts, &ast);
+        st = odin3_read_verilog_files_soft(design, &opts, soft, &ast);
     }
     st = st != ODIN3_OK ? st : hand_over(ctx, ast, &parsed);
     odin3_vec_free(&srcs);

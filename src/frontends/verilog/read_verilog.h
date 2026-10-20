@@ -52,6 +52,11 @@ typedef struct odin3_rv_opts {
  * argument or no files. *out is NULL on failure and the store is destroyed (the IR is untouched,
  * 2A §9).
  */
+/* odin3_read_verilog_files with soft_mask (soft_blocks.h): the primitives built as soft logic by
+ * this read, warned at each instance of a module that no design unit defines. */
+odin3_status odin3_read_verilog_files_soft(odin3_design *design, const odin3_rv_opts *opts,
+                                           uint32_t soft_mask, odin3_ast **out);
+
 odin3_status odin3_read_verilog_files(odin3_design *design, const odin3_rv_opts *opts,
                                       odin3_ast **out);
 
@@ -88,6 +93,7 @@ typedef struct odin3_rv {
     uint64_t bytes;
     uint32_t ndesign;
     bool libfiles_read;
+    uint32_t soft_mask; /* soft_blocks.h: primitives built as soft logic here */
     bool keep; /* odin3_rv_read keeps each preprocessed stream in rv->ast (design files of --lib) */
 } odin3_rv;
 

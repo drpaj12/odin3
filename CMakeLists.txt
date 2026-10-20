@@ -299,6 +299,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/ceval_interp.c
     src/frontends/elab/bind.c
     src/frontends/verilog/read_verilog.c
+    src/frontends/verilog/soft_blocks.c
     src/frontends/verilog/read_verilog_lib.c
     src/frontends/verilog/elab1.c
     src/frontends/verilog/elab1_lookup.c
@@ -434,6 +435,8 @@ add_custom_target(verilog_generated
 # the warning off (verified with CMake 3.28 and both compilers).
 target_sources(odin3_core PRIVATE ${BISON_verilog_parser_OUTPUTS} ${FLEX_verilog_lexer_OUTPUTS})
 target_include_directories(odin3_core PRIVATE ${_gen})
+target_compile_definitions(odin3_core PRIVATE
+    ODIN3_SOFT_PRIMITIVES_DIR="${PROJECT_SOURCE_DIR}/lib/soft_primitives")
 # The list as measured with Bison 3.8.2, Flex 2.6.4, gcc 13 and clang 18 at -O0 and -O2: the
 # expected conversion, sign, unused-parameter and missing-prototypes warnings do not occur, and
 # the scanner needs nothing (re-measured with the full lexer of 2C Task 3: start conditions,
@@ -937,6 +940,11 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_pm_mem_arch PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_soft_blocks
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_soft_blocks $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_soft_blocks PROPERTIES LABELS unit)
     add_test(NAME cli_pm_mem_rden
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_mem_rden $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
