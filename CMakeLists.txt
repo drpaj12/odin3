@@ -87,6 +87,7 @@ add_library(odin3_core OBJECT
     src/frontends/json/reader_cell.c
     src/frontends/json/reader_ext.c
     src/frontends/json/reader_implicit.c
+    src/frontends/json/reader_locs.c
     src/frontends/json/reader_module.c
     src/frontends/json/reader_net.c
     src/frontends/json/reader_sop.c
@@ -788,6 +789,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_read_json_cells)
     target_compile_definitions(test_read_json_cells PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_read_json_locs)
+    target_compile_definitions(test_read_json_locs PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_json_roundtrip)
     target_compile_definitions(test_json_roundtrip PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_util_log)
