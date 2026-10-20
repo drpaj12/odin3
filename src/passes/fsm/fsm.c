@@ -90,6 +90,36 @@ static odin3_status stage_extract(fsm_run *run) {
     return st;
 }
 
+/* One fsm_opt over the FSMs of a module; the second call knows which outputs nothing reads. */
+static odin3_status opt_module(modrun *mod, bool with_unused) {
+    uint8_t *used = NULL;
+    odin3_status st = ODIN3_OK;
+    odin3_fsm_inst *insts = mod->insts.data;
+    if (mod->insts.len == 0) {
+        return ODIN3_OK;
+    }
+    if (with_unused) {
+        st = odin3_fsm_used_nets(&mod->fm, &mod->insts, &used);
+    }
+    odin3_vec flags;
+    odin3_vec_init(&flags, sizeof(uint8_t));
+    for (size_t k = 0; st == ODIN3_OK && k < mod->insts.len; k++) {
+        st = with_unused ? odin3_fsm_unused_flags(&insts[k], used, &flags) : ODIN3_OK;
+        st = st == ODIN3_OK ? odin3_fsm_opt(&insts[k], with_unused ? flags.data : NULL) : st;
+    }
+    odin3_vec_free(&flags);
+    odin3_util_free(used);
+    return st;
+}
+
+static odin3_status stage_opt(fsm_run *run, bool with_unused) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < run->n_mods; i++) {
+        st = opt_module(&run->mods[i], with_unused);
+    }
+    return st;
+}
+
 static void stage_info(const fsm_run *run) {
     for (uint32_t i = 0; i < run->n_mods; i++) {
         const odin3_fsm_inst *insts = run->mods[i].insts.data;
@@ -107,6 +137,12 @@ odin3_status odin3_fsm_run(odin3_design *design, const odin3_fsm_opts *opts) {
     }
     if (st == ODIN3_OK) {
         st = stage_extract(&run);
+    }
+    if (st == ODIN3_OK) {
+        st = stage_opt(&run, false);
+    }
+    if (st == ODIN3_OK) {
+        st = stage_opt(&run, true);
     }
     if (st == ODIN3_OK) {
         stage_info(&run);

@@ -37,3 +37,4 @@ bm_DL_simple_fsm tests/micro/verilog/syntax/bm_DL_simple_fsm.v bm_DL_simple_fsm 
 multi_clock_reader_writer tests/micro/verilog/syntax/multi_clock_reader_writer.v multiclock_reader_writer reset:1 clock_reader_head 8 yes
 paj_framebuftop tests/micro/verilog/full/paj_framebuftop_hierarchy_no_mem_no_combinational.v paj_framebuftop_hierarchy_no_mem globalreset:1 tm3_clk_v0 4 yes
 memory_controller tests/micro/verilog/full/memory_controller.v memory_controller - clk 8 no
+live_old_reg tests/fsm/live_old_reg.v live_old_reg rst:1 clk 12 yes

@@ -104,6 +104,39 @@ void odin3_fsm_inst_free(odin3_fsm_inst *inst);
  */
 odin3_status odin3_fsm_extract_module(odin3_fsm_mod *fm, odin3_vec *insts);
 
+/* --- opt (fsm_opt.cc; spec O-0 to O-5) ----------------------------------------------------- */
+
+/*
+ * The six stages of fsm_opt on one FSM, in Yosys's order (fsm_opt.cc:302-310): unreachable states,
+ * unused outputs, aliased inputs, feedback inputs, don't-care merging, constant and unused inputs.
+ * unused (may be NULL: none) has one byte per control output, non-zero for an output that no live
+ * logic reads (O-1). The tables, ctrl_in and ctrl_out of inst change; the IR does not. NO_MEMORY
+ * leaves inst valid (a stage may be half done).
+ */
+odin3_status odin3_fsm_opt(odin3_fsm_inst *inst, const uint8_t *unused);
+
+/* The stages one by one, for the tests. */
+odin3_status odin3_fsm_opt_unreachable(odin3_fsm_inst *inst);
+void odin3_fsm_opt_unused_outputs(odin3_fsm_inst *inst, const uint8_t *unused);
+void odin3_fsm_opt_alias_inputs(odin3_fsm_inst *inst);
+void odin3_fsm_opt_feedback_inputs(odin3_fsm_inst *inst);
+odin3_status odin3_fsm_opt_dont_care(odin3_fsm_inst *inst);
+odin3_status odin3_fsm_opt_const_inputs(odin3_fsm_inst *inst);
+
+/*
+ * The "unread and not a port" query that replaces unused_bits (spec O-1, question 2): for module
+ * fm with the FSMs insts (elements odin3_fsm_inst), *used gets one byte per net of the module
+ * (free it with odin3_util_free), non-zero for a net read by a live node, a module output or a
+ * keep wire, where "live" is opt_clean's liveness with every FSM's old register and logic dead
+ * unless something else reads them: the FSM itself stands in for the drivers of its control
+ * outputs and reads its control inputs, clock and reset. NO_MEMORY with *used NULL.
+ */
+odin3_status odin3_fsm_used_nets(const odin3_fsm_mod *fm, const odin3_vec *insts, uint8_t **used);
+
+/* The unused flags of inst's control outputs for a used-net map (a constant output is used). */
+odin3_status odin3_fsm_unused_flags(const odin3_fsm_inst *inst, const uint8_t *used,
+                                    odin3_vec *flags);
+
 /* --- info (fsm_info.cc, FsmData::log_info; spec I-1) -------------------------------------- */
 
 /* Logs the tables of inst at INFO level, one message per line, each starting "fsm: ". */

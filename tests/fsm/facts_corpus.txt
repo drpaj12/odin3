@@ -63,3 +63,4 @@ fsm/two_fsm micro tests/fsm/two_fsm.v two_fsm
 fsm/selfloop_state micro tests/fsm/selfloop_state.v selfloop_state
 fsm/x_next micro tests/fsm/x_next.v x_next
 fsm/states32w micro tests/fsm/states32w.v states32w
+fsm/live_old_reg micro tests/fsm/live_old_reg.v live_old_reg

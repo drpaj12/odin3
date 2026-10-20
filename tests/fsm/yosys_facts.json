@@ -928,6 +928,28 @@
   ],
   "rejected": {}
  },
+ "fsm/live_old_reg": {
+  "failures": [],
+  "fsms": [
+   {
+    "bits_after": 3,
+    "bits_before": 2,
+    "cell": "$fsm$\\st$51",
+    "encoding": "one-hot",
+    "inputs": 1,
+    "module": "live_old_reg",
+    "outputs": 3,
+    "reset_index": 0,
+    "states": 3,
+    "transitions": 4,
+    "wire": "st"
+   }
+  ],
+  "marked": [
+   "live_old_reg.st"
+  ],
+  "rejected": {}
+ },
  "fsm/mealy_arst": {
   "failures": [],
   "fsms": [

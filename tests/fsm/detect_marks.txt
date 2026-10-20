@@ -54,3 +54,4 @@ tests/fsm/two_fsm.v two_fsm.a,two_fsm.b -
 tests/fsm/selfloop_state.v selfloop_state.st -
 tests/fsm/x_next.v x_next.st -
 tests/fsm/states32w.v states32w.st -
+tests/fsm/live_old_reg.v live_old_reg.st -
