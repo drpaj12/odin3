@@ -920,6 +920,12 @@ operation reserves before it mutates, so an out-of-memory failure leaves the str
 unchanged. Sizes below are \code{sizeof} on x86-64 with gcc, and timings are Release builds on
 the development machine (Intel i7-13700 under WSL2) as recorded in the phase logs.
 
+Figure~\ref{fig:ir} shows the objects and Sec.~\ref{sec:ids} the IDs that link them. The order of
+this section follows the data. First the containers and the arena. Then the IR: design, module,
+node, net, port and wire, at word and at bit granularity. Then the op registry that gives each
+node its type, the provenance store, the source manager, and the AST and symbol table with their
+link to the IR. Last come the tech library with the arch record, the C ABI and the caps.
+
 \subsection{Containers}
 
 \begin{figure}[t]
@@ -939,12 +945,15 @@ mask and two loads, and growth never copies elements. Both hash tables use open 
 Robin Hood probing~\cite{celis1986robinhood} and backward-shift deletion. \code{idindex} is an
 ID-only hash-cons index: its 16-byte slots hold a hash and an ID, and the caller supplies
 equality, so interned strings and provenance records are stored once. String ID~0 is the empty
-string, so a zeroed field means ``no name''. The hash seed is a fixed constant; nothing that
+string, so a zeroed field means ``no name''. A bump \emph{arena} serves the small arrays that belong to one owner, such as parameter vectors,
+wire net vectors and attribute values. Its blocks never move, and one call frees all of them.
+The hash seed is a fixed constant; nothing that
 reaches output depends on hash-map iteration order. A benchmark interned 2M names in
 0.36--0.45\,s, made 2M \code{u64map} insertions in 0.35--0.39\,s and 2M \code{pagevec} pushes in
 0.01\,s, at 176\,MiB maximum RSS.
 
 \subsection{The IR}
+\label{sec:ids}
 
 \begin{figure*}[t]
 \centering
@@ -957,8 +966,16 @@ net owns a contiguous pin array, drivers first. Record sizes are \code{sizeof} o
 \end{figure*}
 
 A design holds a string table, the provenance store, the cell-type table and its modules
-(Fig.~\ref{fig:ir}). A module owns nodes, pins and nets as peers, Odin~II's model: a node has
+(Fig.~\ref{fig:ir}). It also holds containers of facts that are not IR objects: the project
+record and, since Phase~4.1, the \emph{arch record} that \code{read\_arch} fills from a VPR
+architecture file (Sec.~\ref{sec:techlib}). A module owns nodes, pins and nets as peers, Odin~II's model: a node has
 pins, a pin belongs to one node and attaches to one net, and a net has driver and sink pins.
+A \emph{port} is not a separate kind of object. It is a node of a built-in type
+(\code{\$port\_in}, \code{\$port\_out} or \code{\$port\_inout}), and a \emph{wire} is a name for an ordered
+vector of nets. The same objects serve two granularities. In the word-level view, \code{assign y
+= a + b;} on 8-bit signals is one \code{\$add} node with three ports of eight pins each. After
+\code{lower}, the same eight-bit nets feed bit cells such as \code{\$\_XOR\_} and
+\code{\$\_AND\_}. Only the node types change; the nets and the pins are the same kind of object.
 The key decisions, numbered as in IR.md:
 
 \emph{Every net is one bit (IR-1).} A port of width $w$ is $w$ consecutive pins, so a port is a
@@ -1119,7 +1136,15 @@ assigned), direction, declaration node, packed and unpacked dimensions, paramete
 assigning node, and the IR wire they became. ASTs and symbol tables are freed at the end of
 their read pass unless a pass asks to keep them; SOURCE records keep the raw location either way.
 
-\subsection{Tech library}
+The AST and the IR are separate stores, and a provenance record links them. When elaboration
+creates an IR object from an AST node, it makes a SOURCE record that holds the node's ID, and the
+object holds the record's ID. The AST is the high layer, with the syntax and the scopes. The IR is
+the low layer, with cells and nets. The symbol table also points forward: each symbol records the
+IR wire it became. A pass that needs the syntax of an object follows its record to the AST node,
+if the store is still held. If it is not, the record still gives the file, line and column.
+
+\subsection{Tech library and arch record}
+\label{sec:techlib}
 
 \begin{figure}[t]
 \centering
@@ -1139,7 +1164,10 @@ cells instead (VPR XML import is 4.1). A cell is \code{gate}, \code{hard} or \co
 expressions over parameters (\code{A\_WIDTH + B\_WIDTH}); outputs are driven by \code{fn}
 expressions, \code{seq} statements or a \code{memory} description; \code{area} and \code{delay}
 are stored for later cost models. One function serves as simulation semantics today and, were a matcher built, as
-its patterns compiled to IR fragments (D5, amended by D10: not in v1.0). When a netlist declares a library cell
+its patterns compiled to IR fragments (D5, amended by D10: not in v1.0). A VPR architecture file reaches the same form through \code{read\_arch} (4.1). It reads the
+\code{<models>} and \code{pb\_type}s into generic black-box cells of a tech library, and keeps what
+\code{partial\_map} needs in the \emph{arch record}, a container on the design shaped like the
+project record. The record owns no node, net, wire or ID. When a netlist declares a library cell
 as a \code{.blackbox}, the reader matches its ports by name in any order and infers the
 parameters from the declared widths: the goldens hold 49 distinct black-box stanzas whose port
 order varies between files.
