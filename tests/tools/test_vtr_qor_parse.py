@@ -28,7 +28,7 @@ PY = V / ".venv" / "bin" / "python"
 LIBS = "/v/vtr_flow/scripts/python_libs"
 ARCH = V / "vtr_flow" / "arch" / "timing" / "k6_frac_N10_frac_chain_mem32K_40nm.xml"
 TIME_V = (
-    "\tCommand being timed: \"x\"\n"
+    '\tCommand being timed: "x"\n'
     "\tElapsed (wall clock) time (h:mm:ss or m:ss): {elapsed}\n"
     "\tMaximum resident set size (kbytes): {kib}\n"
 )
@@ -36,9 +36,7 @@ TIME_V = (
 
 def run_fixtures() -> list[Path]:
     # netstats/ is the qor_netstats fixtures (its expected.json has another layout).
-    return sorted(
-        p.parent for p in FIXTURES.glob("*/expected.json") if p.parent.name != "netstats"
-    )
+    return sorted(p.parent for p in FIXTURES.glob("*/expected.json") if p.parent.name != "netstats")
 
 
 def read_results(fixture: Path, name: str) -> dict[str, str]:
@@ -101,9 +99,20 @@ class FixtureTest(unittest.TestCase):
         self.assertEqual(parse["arch"], "EArch.xml")
         self.assertEqual(parse["hostname"], "CEC-JAMIESPA701")
         qor = read_results(FIXTURES / "blink_P", "qor_results.txt")
-        self.assertEqual(list(qor), ["arch", "circuit", "script_params", "vpr_status",
-                                     "total_wirelength", "total_runtime", "num_clb",
-                                     "min_chan_width", "crit_path_delay"])
+        self.assertEqual(
+            list(qor),
+            [
+                "arch",
+                "circuit",
+                "script_params",
+                "vpr_status",
+                "total_wirelength",
+                "total_runtime",
+                "num_clb",
+                "min_chan_width",
+                "crit_path_delay",
+            ],
+        )
 
     def test_results_keep_vtrs_trailing_tab(self) -> None:
         """The pre-commit hooks must not rewrite the fixtures: VTR ends each row with a tab."""
@@ -114,8 +123,9 @@ class FixtureTest(unittest.TestCase):
             self.assertTrue(lines[0].endswith(b"\t") and lines[1].endswith(b"\t"), name)
 
     def test_frontend_time(self) -> None:
-        self.assertEqual(qor_parse.read_time_v(FIXTURES / "frontend" / "frontend.time"),
-                         TimeV(0.0, 20))
+        self.assertEqual(
+            qor_parse.read_time_v(FIXTURES / "frontend" / "frontend.time"), TimeV(0.0, 20)
+        )
 
 
 class CommandTest(unittest.TestCase):
@@ -125,12 +135,26 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(len(cmds), 2)
         common = [f"arch={ARCH.name}", "circuit=sha.v", "script_params=common"]
         script = f"{LIBS}/vtr/parse_vtr_flow.py"
-        self.assertEqual(list(cmds[0].argv), [
-            "/v/.venv/bin/python", script, "/w/j/run",
-            "/v/vtr_flow/parse/parse_config/vpr_standard.txt", *common])
-        self.assertEqual(list(cmds[1].argv), [
-            "/v/.venv/bin/python", script, "/w/j/run",
-            "/v/vtr_flow/parse/qor_config/qor_standard.txt", *common])
+        self.assertEqual(
+            list(cmds[0].argv),
+            [
+                "/v/.venv/bin/python",
+                script,
+                "/w/j/run",
+                "/v/vtr_flow/parse/parse_config/vpr_standard.txt",
+                *common,
+            ],
+        )
+        self.assertEqual(
+            list(cmds[1].argv),
+            [
+                "/v/.venv/bin/python",
+                script,
+                "/w/j/run",
+                "/v/vtr_flow/parse/qor_config/qor_standard.txt",
+                *common,
+            ],
+        )
         self.assertEqual(cmds[0].stdout, run_dir / "parse_results.txt")
         self.assertEqual(cmds[1].stdout, run_dir / "qor_results.txt")
         for cmd in cmds:
@@ -140,8 +164,9 @@ class CommandTest(unittest.TestCase):
     def test_stderr_goes_to_its_own_file(self) -> None:
         run_dir = Path("/w/j/run")
         cmds = qor_parse.parse_commands(V, PY, run_dir, ARCH, "sha.v")
-        self.assertEqual([c.stderr for c in cmds],
-                         [run_dir / "parse_results.err", run_dir / "qor_results.err"])
+        self.assertEqual(
+            [c.stderr for c in cmds], [run_dir / "parse_results.err", run_dir / "qor_results.err"]
+        )
         for cmd in cmds:
             self.assertNotEqual(cmd.stderr, cmd.stdout)
 
@@ -161,31 +186,37 @@ class ReadParseResultsTest(TempTest):
         with self.assertRaises(HeavyError) as caught:
             qor_parse.read_parse_results(path, not_before=not_before, label="P sha")
         self.assertEqual(caught.exception.code, 1)
-        self.assertEqual(caught.exception.message,
-                         "P sha: stale parse_results.txt from an earlier attempt; job failed")
+        self.assertEqual(
+            caught.exception.message,
+            "P sha: stale parse_results.txt from an earlier attempt; job failed",
+        )
 
     def test_stale_names_the_file(self) -> None:
         path = self.write("qor_results.txt", self.ROW)
         os.utime(path, (10.0, 10.0))
         with self.assertRaises(HeavyError) as caught:
             qor_parse.read_parse_results(path, not_before=11.0, label="O sha")
-        self.assertEqual(caught.exception.message,
-                         "O sha: stale qor_results.txt from an earlier attempt; job failed")
+        self.assertEqual(
+            caught.exception.message,
+            "O sha: stale qor_results.txt from an earlier attempt; job failed",
+        )
 
     def test_fresh_and_boundary(self) -> None:
         path = self.write("parse_results.txt", self.ROW)
         os.utime(path, (500.0, 500.0))
         for not_before in (500.0, 499.0):
             got = qor_parse.read_parse_results(path, not_before=not_before, label="P sha")
-            self.assertEqual(got, {"arch": "EArch.xml", "circuit": "sha.v", "error": "",
-                                   "num_clb": "7"})
+            self.assertEqual(
+                got, {"arch": "EArch.xml", "circuit": "sha.v", "error": "", "num_clb": "7"}
+            )
 
     def test_missing_file(self) -> None:
         with self.assertRaises(HeavyError) as caught:
             qor_parse.read_parse_results(self.tmp / "nope.txt", not_before=0.0, label="P sha")
         self.assertEqual(caught.exception.code, 1)
-        self.assertEqual(caught.exception.message,
-                         "P sha: cannot read nope.txt: No such file or directory")
+        self.assertEqual(
+            caught.exception.message, "P sha: cannot read nope.txt: No such file or directory"
+        )
 
     def test_malformed(self) -> None:
         for name, text in (
@@ -201,13 +232,17 @@ class ReadParseResultsTest(TempTest):
                 with self.assertRaises(HeavyError) as caught:
                     qor_parse.read_parse_results(path, not_before=0.0, label="P sha")
                 self.assertEqual(caught.exception.code, 1)
-                self.assertEqual(caught.exception.message,
-                                 f"P sha: malformed {name}.txt; job failed")
+                self.assertEqual(
+                    caught.exception.message, f"P sha: malformed {name}.txt; job failed"
+                )
 
     def test_stderr_in_its_own_file_leaves_the_results_whole(self) -> None:
         """A parse script that warns on stderr, run with the commands' redirections."""
-        script = self.write("warn.py", "import sys\nsys.stderr.write('DeprecationWarning: x\\n')\n"
-                            "print('a\\tb\\t')\nprint('1\\t2\\t')\n")
+        script = self.write(
+            "warn.py",
+            "import sys\nsys.stderr.write('DeprecationWarning: x\\n')\n"
+            "print('a\\tb\\t')\nprint('1\\t2\\t')\n",
+        )
         cmd = qor_parse.parse_commands(V, Path(sys.executable), self.tmp, ARCH, "x.v")[0]
         self.assertIsNotNone(cmd.stderr)
         with cmd.stdout.open("w") as out, (cmd.stderr or cmd.stdout).open("w") as err:
@@ -215,26 +250,56 @@ class ReadParseResultsTest(TempTest):
         self.assertIn("DeprecationWarning", (cmd.stderr or cmd.stdout).read_text())
         self.assertEqual(
             qor_parse.read_parse_results(cmd.stdout, not_before=0.0, label="P x"),
-            {"a": "1", "b": "2"})
+            {"a": "1", "b": "2"},
+        )
 
     def test_trailing_blank_lines_and_crlf_tolerated(self) -> None:
         path = self.write("p.txt", "a\tb\t\r\n1\t\t\r\n\n\n")
-        self.assertEqual(qor_parse.read_parse_results(path, not_before=0.0, label="x"),
-                         {"a": "1", "b": ""})
+        self.assertEqual(
+            qor_parse.read_parse_results(path, not_before=0.0, label="x"), {"a": "1", "b": ""}
+        )
 
 
 class PresentTest(unittest.TestCase):
     def test_absent(self) -> None:
-        for text in ("\u0663", "1\u0663", "-1", "", "nan", "inf", None, "-1.0", " -1 ", "NaN",
-                     "-inf", "Infinity", "abc", "1_000", "0x10", "1,5", "1.2.3", "--1", "1e999",
-                     " "):
+        for text in (
+            "\u0663",
+            "1\u0663",
+            "-1",
+            "",
+            "nan",
+            "inf",
+            None,
+            "-1.0",
+            " -1 ",
+            "NaN",
+            "-inf",
+            "Infinity",
+            "abc",
+            "1_000",
+            "0x10",
+            "1,5",
+            "1.2.3",
+            "--1",
+            "1e999",
+            " ",
+        ):
             with self.subTest(text=text):
                 self.assertIsNone(qor_parse.present(text))
 
     def test_numbers(self) -> None:
-        for text, value in (("0", 0.0), ("1.934", 1.934), (" 2 ", 2.0), ("1e3", 1000.0),
-                            ("-0.5", -0.5), ("+3", 3.0), (".5", 0.5), ("7.", 7.0),
-                            ("-1.5", -1.5), ("-2", -2.0)):
+        for text, value in (
+            ("0", 0.0),
+            ("1.934", 1.934),
+            (" 2 ", 2.0),
+            ("1e3", 1000.0),
+            ("-0.5", -0.5),
+            ("+3", 3.0),
+            (".5", 0.5),
+            ("7.", 7.0),
+            ("-1.5", -1.5),
+            ("-2", -2.0),
+        ):
             with self.subTest(text=text):
                 self.assertEqual(qor_parse.present(text), value)
 
@@ -257,8 +322,16 @@ class TimeVTest(TempTest):
         self.assertEqual(self.read("0:00.00").wall_s, 0.0)
 
     def test_rss_rounds_half_up(self) -> None:
-        for kib, mib in ((70000, 68), (511, 0), (512, 1), (1023, 1), (1024, 1), (1535, 1),
-                         (1536, 2), (0, 0)):
+        for kib, mib in (
+            (70000, 68),
+            (511, 0),
+            (512, 1),
+            (1023, 1),
+            (1024, 1),
+            (1535, 1),
+            (1536, 2),
+            (0, 0),
+        ):
             with self.subTest(kib=kib):
                 self.assertEqual(self.read("0:01.00", kib).peak_rss_mib, mib)
 
@@ -284,8 +357,11 @@ class TimeVTest(TempTest):
         self.assertEqual(self.read("garbage"), TimeV(None, 68))
 
     def test_blocks_add_wall_and_take_peak(self) -> None:
-        text = (TIME_V.format(elapsed="0:10.00", kib=2048)
-                + "log text\n" + TIME_V.format(elapsed="0:05.50", kib=1024))
+        text = (
+            TIME_V.format(elapsed="0:10.00", kib=2048)
+            + "log text\n"
+            + TIME_V.format(elapsed="0:05.50", kib=1024)
+        )
         self.assertEqual(qor_parse.read_time_v(self.write("m", text)), TimeV(15.5, 2))
 
     def test_lines_amid_program_output(self) -> None:
@@ -302,8 +378,9 @@ class VprTimeTest(TempTest):
         self.assertEqual(qor_parse.vpr_time_s(self.tmp), 12.75)
 
     def test_every_line_counts(self) -> None:
-        (self.tmp / "vpr.out").write_text(self.LINE.format("1") + self.LINE.format("2"),
-                                          encoding="utf-8")
+        (self.tmp / "vpr.out").write_text(
+            self.LINE.format("1") + self.LINE.format("2"), encoding="utf-8"
+        )
         self.assertEqual(qor_parse.vpr_time_s(self.tmp), 3.0)
 
     def test_one_log(self) -> None:
@@ -355,13 +432,18 @@ class StageCostTest(TempTest):
         self.assertTrue(cost.complete)
         self.assertEqual(cost.warnings, ())
         text = (run / "abc1.out").read_text(encoding="utf-8")
-        stripped = "".join(line for line in text.splitlines(keepends=True)
-                           if "Elapsed" not in line and "Maximum resident" not in line)
+        stripped = "".join(
+            line
+            for line in text.splitlines(keepends=True)
+            if "Elapsed" not in line and "Maximum resident" not in line
+        )
         (run / "abc1.out").write_text(stripped, encoding="utf-8")
         cost = qor_parse.stage_costs(run, STAGE_GLOBS, "P stereovision3")
         self.assertFalse(cost.complete)
-        self.assertEqual(cost.warnings, (
-            "vtr-qor: P stereovision3: no time -v in abc1.out; stage cost incomplete",))
+        self.assertEqual(
+            cost.warnings,
+            ("vtr-qor: P stereovision3: no time -v in abc1.out; stage cost incomplete",),
+        )
         # The log that has no lines adds nothing; the others still count.
         self.assertAlmostEqual(cost.wall_s, 0.07, places=9)
         self.assertEqual(cost.peak_rss_mib, 34)
@@ -372,14 +454,19 @@ class StageCostTest(TempTest):
         (run / "restore_latch0.out").write_text("none\n", encoding="utf-8")
         cost = qor_parse.stage_costs(run, STAGE_GLOBS, "O' x")
         self.assertFalse(cost.complete)
-        self.assertEqual(cost.warnings, (
-            "vtr-qor: O' x: no time -v in parmys.out; stage cost incomplete",
-            "vtr-qor: O' x: no time -v in restore_latch0.out; stage cost incomplete"))
+        self.assertEqual(
+            cost.warnings,
+            (
+                "vtr-qor: O' x: no time -v in parmys.out; stage cost incomplete",
+                "vtr-qor: O' x: no time -v in restore_latch0.out; stage cost incomplete",
+            ),
+        )
 
     def test_half_a_block_is_incomplete(self) -> None:
         run = self.copy_fixture("blink_P")
         (run / "abc0.out").write_text(
-            "\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:03.00\n", encoding="utf-8")
+            "\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:03.00\n", encoding="utf-8"
+        )
         cost = qor_parse.stage_costs(run, ("abc*.out",), "P x")
         self.assertFalse(cost.complete)
         self.assertEqual(len(cost.warnings), 1)
@@ -387,11 +474,13 @@ class StageCostTest(TempTest):
     def test_only_rss_line_is_incomplete(self) -> None:
         run = self.copy_fixture("blink_P")
         (run / "abc0.out").write_text(
-            "\tMaximum resident set size (kbytes): 2048\n", encoding="utf-8")
+            "\tMaximum resident set size (kbytes): 2048\n", encoding="utf-8"
+        )
         cost = qor_parse.stage_costs(run, ("abc*.out",), "P x")
         self.assertFalse(cost.complete)
-        self.assertEqual(cost.warnings, (
-            "vtr-qor: P x: no time -v in abc0.out; stage cost incomplete",))
+        self.assertEqual(
+            cost.warnings, ("vtr-qor: P x: no time -v in abc0.out; stage cost incomplete",)
+        )
         self.assertEqual(cost.peak_rss_mib, 2)
 
     def test_directories_are_not_logs(self) -> None:
@@ -409,24 +498,45 @@ class StageCostTest(TempTest):
         self.assertEqual(once, twice)
         self.assertAlmostEqual(once.wall_s, 0.04, places=9)
         self.assertEqual(once.peak_rss_mib, 26)
-        (run / "vpr.out").write_text(TIME_V.format(elapsed="9:00.00", kib=9_000_000),
-                                     encoding="utf-8")
+        (run / "vpr.out").write_text(
+            TIME_V.format(elapsed="9:00.00", kib=9_000_000), encoding="utf-8"
+        )
         self.assertEqual(qor_parse.stage_costs(run, ("parmys.out",), "P x"), once)
 
     def test_no_logs_is_incomplete(self) -> None:
         cost = qor_parse.stage_costs(self.tmp, STAGE_GLOBS, "P x")
-        self.assertEqual(cost, StageCost(0.0, 0, False, (
-            f"vtr-qor: P x: no stage logs in {self.tmp}; stage cost incomplete",)))
+        self.assertEqual(
+            cost,
+            StageCost(
+                0.0,
+                0,
+                False,
+                (f"vtr-qor: P x: no stage logs in {self.tmp}; stage cost incomplete",),
+            ),
+        )
 
     def test_stage_globs(self) -> None:
-        self.assertEqual(STAGE_GLOBS, ("parmys.out", "abc*.out", "*_blackboxing_latch.out",
-                                       "restore_latch*.out", "report_clocks.abc.out"))
+        self.assertEqual(
+            STAGE_GLOBS,
+            (
+                "parmys.out",
+                "abc*.out",
+                "*_blackboxing_latch.out",
+                "restore_latch*.out",
+                "report_clocks.abc.out",
+            ),
+        )
 
     def test_wall_sums_exactly_the_matched_files(self) -> None:
-        for name, wall in (("parmys.out", "0:01.00"), ("abc0.out", "0:02.00"),
-                           ("abc10.out", "0:04.00"), ("0_blackboxing_latch.out", "0:08.00"),
-                           ("restore_latch0.out", "0:16.00"), ("report_clocks.abc.out", "0:32.00"),
-                           ("vpr.out", "1:04.00")):
+        for name, wall in (
+            ("parmys.out", "0:01.00"),
+            ("abc0.out", "0:02.00"),
+            ("abc10.out", "0:04.00"),
+            ("0_blackboxing_latch.out", "0:08.00"),
+            ("restore_latch0.out", "0:16.00"),
+            ("report_clocks.abc.out", "0:32.00"),
+            ("vpr.out", "1:04.00"),
+        ):
             (self.tmp / name).write_text(TIME_V.format(elapsed=wall, kib=1024), encoding="utf-8")
         cost = qor_parse.stage_costs(self.tmp, STAGE_GLOBS, "P x")
         self.assertEqual(cost, StageCost(63.0, 1, True, ()))
@@ -434,22 +544,40 @@ class StageCostTest(TempTest):
 
 class MetricsTest(unittest.TestCase):
     PARSE = {
-        "num_clb": "104", "num_memories": "2", "num_mult": "3", "device_width": "12",
-        "device_height": "11", "vpr_status": "success", "min_chan_width": "34",
-        "critical_path_delay": "2.5", "crit_path_routed_wirelength": "12345",
+        "num_clb": "104",
+        "num_memories": "2",
+        "num_mult": "3",
+        "device_width": "12",
+        "device_height": "11",
+        "vpr_status": "success",
+        "min_chan_width": "34",
+        "critical_path_delay": "2.5",
+        "crit_path_routed_wirelength": "12345",
         "max_vpr_mem": "63568",
     }
     QOR = {"total_runtime": "12.75"}
 
     def test_full(self) -> None:
-        self.assertEqual(qor_parse.metrics_from_parse(self.PARSE, self.QOR), {
-            "packed": {"num_clb": 104, "num_memories": 2, "num_mult": 3, "device_width": 12,
-                       "device_height": 11},
-            "routed": {"vpr_status": "success", "min_chan_width": 34,
-                       "critical_path_delay_ns": 2.5, "fmax_mhz": 400.0,
-                       "crit_path_routed_wirelength": 12345},
-            "cost": {"max_vpr_mem_mib": 62, "vpr_total_runtime_s": 12.75},
-        })
+        self.assertEqual(
+            qor_parse.metrics_from_parse(self.PARSE, self.QOR),
+            {
+                "packed": {
+                    "num_clb": 104,
+                    "num_memories": 2,
+                    "num_mult": 3,
+                    "device_width": 12,
+                    "device_height": 11,
+                },
+                "routed": {
+                    "vpr_status": "success",
+                    "min_chan_width": 34,
+                    "critical_path_delay_ns": 2.5,
+                    "fmax_mhz": 400.0,
+                    "crit_path_routed_wirelength": 12345,
+                },
+                "cost": {"max_vpr_mem_mib": 62, "vpr_total_runtime_s": 12.75},
+            },
+        )
 
     def test_types(self) -> None:
         got = qor_parse.metrics_from_parse(self.PARSE, self.QOR)
@@ -466,14 +594,24 @@ class MetricsTest(unittest.TestCase):
         self.assertTrue(math.isclose(float(fmax or 0.0), 1000 / 1.934, rel_tol=1e-12))
         for delay in ("0", "-2.5", "-1", "", "nan", "inf"):
             with self.subTest(delay=delay):
-                got = qor_parse.metrics_from_parse(dict(self.PARSE, critical_path_delay=delay),
-                                                   self.QOR)
+                got = qor_parse.metrics_from_parse(
+                    dict(self.PARSE, critical_path_delay=delay), self.QOR
+                )
                 self.assertIsNone(got["routed"]["fmax_mhz"])
                 self.assertIsNone(got["routed"]["critical_path_delay_ns"])
 
     def test_mem_rounds_half_up(self) -> None:
-        for kib, mib in (("0", 0), ("511", 0), ("512", 1), ("1023", 1), ("1024", 1),
-                         ("1535", 1), ("1536", 2), ("63568", 62), ("6291456", 6144)):
+        for kib, mib in (
+            ("0", 0),
+            ("511", 0),
+            ("512", 1),
+            ("1023", 1),
+            ("1024", 1),
+            ("1535", 1),
+            ("1536", 2),
+            ("63568", 62),
+            ("6291456", 6144),
+        ):
             with self.subTest(kib=kib):
                 got = qor_parse.metrics_from_parse(dict(self.PARSE, max_vpr_mem=kib), self.QOR)
                 self.assertEqual(got["cost"]["max_vpr_mem_mib"], mib)
@@ -514,8 +652,10 @@ class MetricsTest(unittest.TestCase):
                 full = qor_parse.metrics_from_parse(self.PARSE, self.QOR)
                 changed = [(g, k) for g in got for k in got[g] if got[g][k] != full[g][k]]
                 expected = {
-                    "critical_path_delay": [("routed", "critical_path_delay_ns"),
-                                            ("routed", "fmax_mhz")],
+                    "critical_path_delay": [
+                        ("routed", "critical_path_delay_ns"),
+                        ("routed", "fmax_mhz"),
+                    ],
                     "max_vpr_mem": [("cost", "max_vpr_mem_mib")],
                     "num_clb": [("packed", "num_clb")],
                     "num_memories": [("packed", "num_memories")],

@@ -18,13 +18,14 @@ D_ROW = re.compile(r"^\| (D\d+[a-z]?) \|", re.MULTILINE)
 
 
 def names(path: Path) -> list[str]:
-    return [ln.strip() for ln in path.read_text().splitlines() if ln.strip()
-            and not ln.startswith("#")]
+    return [
+        ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")
+    ]
 
 
 def survey_designs() -> set[str]:
     text = SPEC.read_text()
-    section = text[text.index("## 2. Survey"):text.index("**Findings:**")]
+    section = text[text.index("## 2. Survey") : text.index("**Findings:**")]
     return set(SURVEY_ROW.findall(section))
 
 
@@ -61,9 +62,13 @@ class ListTests(unittest.TestCase):
                 self.assertIn(ident, spec_ids, f"{file.name}: {ident}")
 
     def test_dual_write_race_rows(self) -> None:
-        rows = [ln.split("\t") for ln in
-                (REPO_ROOT / "tests" / "vtr" / "qor" / "divergences.tsv").read_text().splitlines()
-                if ln and not ln.startswith("#")]
+        rows = [
+            ln.split("\t")
+            for ln in (REPO_ROOT / "tests" / "vtr" / "qor" / "divergences.tsv")
+            .read_text()
+            .splitlines()
+            if ln and not ln.startswith("#")
+        ]
         races = {row[0] for row in rows if row[1] == "dual-write-race"}
         self.assertEqual(races, {"LU8PEEng", "LU32PEEng"})
 

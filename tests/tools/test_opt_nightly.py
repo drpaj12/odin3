@@ -15,9 +15,11 @@ import opt_nightly as nightly
 
 from . import helpers
 
-REAL_EXPECT = [nightly.REPO / "tests/opt/vtr_expect_fail.txt",
-               nightly.REPO / "tests/opt/vtr_nightly_xl.txt",
-               nightly.REPO / "tests/opt/vtr_equiv_expect_fail.txt"]
+REAL_EXPECT = [
+    nightly.REPO / "tests/opt/vtr_expect_fail.txt",
+    nightly.REPO / "tests/opt/vtr_nightly_xl.txt",
+    nightly.REPO / "tests/opt/vtr_equiv_expect_fail.txt",
+]
 
 
 def make_tree(root: Path, sizes: dict[str, int]) -> None:
@@ -27,8 +29,15 @@ def make_tree(root: Path, sizes: dict[str, int]) -> None:
         path.write_text("x" * size, encoding="utf-8")
 
 
-FAKE = {"mcml.v": 900, "a.v": 30, "b.v": 10, "c.v": 20, "koios/lenet.v": 1000,
-        "koios/k1.v": 15, "koios/hard_mem_include.v": 5}
+FAKE = {
+    "mcml.v": 900,
+    "a.v": 30,
+    "b.v": 10,
+    "c.v": 20,
+    "koios/lenet.v": 1000,
+    "koios/k1.v": 15,
+    "koios/hard_mem_include.v": 5,
+}
 
 
 class Runs:
@@ -38,8 +47,9 @@ class Runs:
         self.calls: list[tuple[str, str, int]] = []
         self.answer = answer
 
-    def __call__(self, _cfg: nightly.Config, unit: nightly.Unit, item: elab_sweep.Item,
-                 cap: int) -> nightly.Result:
+    def __call__(
+        self, _cfg: nightly.Config, unit: nightly.Unit, item: elab_sweep.Item, cap: int
+    ) -> nightly.Result:
         self.calls.append((item.rel, unit.label, cap))
         if callable(self.answer):
             res = self.answer(item.rel, unit.label)
@@ -67,10 +77,23 @@ class Base(unittest.TestCase):
 
     def args(self, **kw: object) -> argparse.Namespace:
         base: dict[str, object] = dict(
-            odin3="odin3", yosys="yosys", set="vtr31", xl=False, keep=None,
-            expect_fail=[self.expect_file], diff_expect=Path("diff.txt"), root=self.root,
-            tops=None, techlib=None, leg="both", mem_cap=3 << 30, cap_for=[], limit=None,
-            timeout=60.0, min_changed_total=0)
+            odin3="odin3",
+            yosys="yosys",
+            set="vtr31",
+            xl=False,
+            keep=None,
+            expect_fail=[self.expect_file],
+            diff_expect=Path("diff.txt"),
+            root=self.root,
+            tops=None,
+            techlib=None,
+            leg="both",
+            mem_cap=3 << 30,
+            cap_for=[],
+            limit=None,
+            timeout=60.0,
+            min_changed_total=0,
+        )
         base.update(kw)
         return argparse.Namespace(**base)
 
@@ -83,14 +106,20 @@ class Base(unittest.TestCase):
 class MinChangedTest(Base):
     def test_a_leg_in_which_odin3_changes_nothing_fails_the_minimum(self) -> None:
         """Review N3: a do-nothing odin3 passed the equiv leg."""
-        silent = Runs(lambda rel, label: nightly.Result(
-            0, 0.1, "opt-equiv: 0 calls changed something: 0 refine, 0 do not\n", False))
+        silent = Runs(
+            lambda rel, label: nightly.Result(
+                0, 0.1, "opt-equiv: 0 calls changed something: 0 refine, 0 do not\n", False
+            )
+        )
         self.assertEqual(self.execute(silent)[0], 0)
         code, lines = self.execute(silent, min_changed_total=1, leg="equiv")
         self.assertEqual(code, 1)
         self.assertTrue(any("0 changing calls in total, want at least 1" in x for x in lines))
-        busy = Runs(lambda rel, label: nightly.Result(
-            0, 0.1, "opt-equiv: 5 calls changed something: 5 refine, 0 do not\n", False))
+        busy = Runs(
+            lambda rel, label: nightly.Result(
+                0, 0.1, "opt-equiv: 5 calls changed something: 5 refine, 0 do not\n", False
+            )
+        )
         self.assertEqual(self.execute(busy, min_changed_total=20, leg="equiv")[0], 0)
         self.assertEqual(self.execute(busy, min_changed_total=21, leg="equiv")[0], 1)
 
@@ -102,14 +131,25 @@ class OrderTest(Base):
 
     def test_all64_adds_koios_and_puts_lenet_last(self) -> None:
         names = [i.rel for i in nightly.collect_set(self.root, "all64")]
-        self.assertEqual(names, ["koios/hard_mem_include.v", "b.v", "koios/k1.v", "c.v", "a.v",
-                                 "mcml.v", "koios/lenet.v"])
+        self.assertEqual(
+            names,
+            [
+                "koios/hard_mem_include.v",
+                "b.v",
+                "koios/k1.v",
+                "c.v",
+                "a.v",
+                "mcml.v",
+                "koios/lenet.v",
+            ],
+        )
 
     def test_a_missing_root_and_an_unknown_set_are_usage_errors(self) -> None:
         with self.assertRaises(nightly.UsageError):
             nightly.collect_set(self.root, "all65")
         code, _, err = helpers.run_main(
-            nightly.main, ["--odin3", "o", "--yosys", "y", "--root", str(self.root / "nope")])
+            nightly.main, ["--odin3", "o", "--yosys", "y", "--root", str(self.root / "nope")]
+        )
         self.assertEqual(code, 2)
         self.assertIn("no such directory", err)
 
@@ -124,20 +164,41 @@ class UnitsTest(unittest.TestCase):
         found = nightly.units()
         self.assertEqual(found[0].label, "opt-equiv")
         diffs = [u for u in found[1:]]
-        self.assertEqual([u.args for u in diffs],
-                         [("--script", s) for s in ("phase2", "opt -full", "opt -fast",
-                                                    "opt -fast -noff", "opt -nodffe -nosdff")])
+        self.assertEqual(
+            [u.args for u in diffs],
+            [
+                ("--script", s)
+                for s in (
+                    "phase2",
+                    "opt -full",
+                    "opt -fast",
+                    "opt -fast -noff",
+                    "opt -nodffe -nosdff",
+                )
+            ],
+        )
         self.assertTrue(all(u.tool == nightly.OPT_DIFF for u in diffs))
 
     def test_the_scripts_are_the_ones_opt_diff_accepts(self) -> None:
         import opt_diff
+
         for script in nightly.SCRIPTS:
             opt_diff.script_named(script)
 
     def test_argv_carries_the_cap_top_expect_root_and_keep_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            cfg = nightly.Config("O", "Y", Path("/r"), 3 << 30, {}, {"d.v": "top"}, "L.o3lib",
-                                 Path("de.txt"), Path(tmp), 60.0)
+            cfg = nightly.Config(
+                "O",
+                "Y",
+                Path("/r"),
+                3 << 30,
+                {},
+                {"d.v": "top"},
+                "L.o3lib",
+                Path("de.txt"),
+                Path(tmp),
+                60.0,
+            )
             item = elab_sweep.Item(Path("/r/koios/d.v"), "koios/d.v", 1)
             argv = nightly.unit_argv(cfg, nightly.units()[1], item, 5 << 30)
             self.assertEqual(argv[2:6], ["--odin3", "O", "--yosys", "Y"])
@@ -176,8 +237,9 @@ class UnitsTest(unittest.TestCase):
             res = nightly.run_unit(cfg, nightly.units("diff")[0], item, 3 << 30)
         self.assertTrue(res.hard)
         self.assertFalse(res.unproven)
-        done = mock.Mock(returncode=4, stdout="opt-diff: unproven: yosys: killed (exit -9)\n",
-                         stderr="")
+        done = mock.Mock(
+            returncode=4, stdout="opt-diff: unproven: yosys: killed (exit -9)\n", stderr=""
+        )
         with mock.patch.object(memcap, "run", return_value=done):
             res = nightly.run_unit(cfg, nightly.units("diff")[0], item, 3 << 30)
         self.assertTrue(res.unproven)
@@ -188,8 +250,12 @@ class UnitsTest(unittest.TestCase):
         out, even Yosys, and its text may say `unproven` or `killed`) is hard."""
         cfg = nightly.Config("O", "Y", Path("/r"), 3 << 30, {}, {}, None, Path("de"), None, 9.0)
         item = elab_sweep.Item(Path("/r/a.v"), "a.v", 1)
-        done = mock.Mock(returncode=3, stdout="", stderr="opt-diff: HARD: yosys-refine: timed out "
-                         "after 60 s\nrefine: DIFFERS: unproven: x\n")
+        done = mock.Mock(
+            returncode=3,
+            stdout="",
+            stderr="opt-diff: HARD: yosys-refine: timed out "
+            "after 60 s\nrefine: DIFFERS: unproven: x\n",
+        )
         with mock.patch.object(memcap, "run", return_value=done):
             res = nightly.run_unit(cfg, nightly.units("diff")[0], item, 3 << 30)
         self.assertFalse(res.unproven)
@@ -201,8 +267,10 @@ class UnitsTest(unittest.TestCase):
         III's cap kill is the tool's exit 3). Both are listable."""
         cfg = nightly.Config("O", "Y", Path("/r"), 3 << 30, {}, {}, None, Path("de"), None, 9.0)
         item = elab_sweep.Item(Path("/r/a.v"), "a.v", 1)
-        lines = ("opt-equiv: 0001-opt_expr: inconclusive (yosys-refine: timed out after 60 s)\n"
-                 "opt-equiv: unproven: 2 calls hit the SAT size limit (timeout or cap kill)\n")
+        lines = (
+            "opt-equiv: 0001-opt_expr: inconclusive (yosys-refine: timed out after 60 s)\n"
+            "opt-equiv: unproven: 2 calls hit the SAT size limit (timeout or cap kill)\n"
+        )
         for code in (4, -9, 137):
             done = mock.Mock(returncode=code, stdout=lines, stderr="")
             with mock.patch.object(memcap, "run", return_value=done):
@@ -223,8 +291,10 @@ class RunTest(Base):
         self.assertIn("opt-nightly: b.v [opt-equiv]: ok", lines[0])
         self.assertIn("opt-nightly: b.v [opt-diff[opt -fast -noff]]: ok", lines[4])
         self.assertEqual(
-            lines[-1], "opt-nightly: summary: set vtr31: 4 files (0 skipped as xl or unselected), "
-            "24 runs: 24 ok, 0 fail as listed, 0 UNEXPECTED")
+            lines[-1],
+            "opt-nightly: summary: set vtr31: 4 files (0 skipped as xl or unselected), "
+            "24 runs: 24 ok, 0 fail as listed, 0 UNEXPECTED",
+        )
 
     def test_limit_runs_the_smallest_files_only(self) -> None:
         runs = Runs()
@@ -255,56 +325,69 @@ class RunTest(Base):
 
     def test_an_unlisted_failure_fails_the_run(self) -> None:
         code, lines = self.execute(
-            Runs(lambda f, label: bad("diff") if (f, label) == ("a.v", "opt-equiv") else ok()))
+            Runs(lambda f, label: bad("diff") if (f, label) == ("a.v", "opt-equiv") else ok())
+        )
         self.assertEqual(code, 1)
         self.assertTrue(any("a.v [opt-equiv]: FAIL: diff" in line for line in lines))
         self.assertIn("1 UNEXPECTED", lines[-1])
 
     def test_a_hard_failure_is_never_expected(self) -> None:
         self.expect_file.write_text("a.v out of memory\n", encoding="utf-8")
-        code, lines = self.execute(Runs(lambda f, _l: bad("out of memory (cap 3G)", 2, True)
-                                        if f == "a.v" else ok()))
+        code, lines = self.execute(
+            Runs(lambda f, _l: bad("out of memory (cap 3G)", 2, True) if f == "a.v" else ok())
+        )
         self.assertEqual(code, 1)
         self.assertTrue(any("HARD FAIL" in line for line in lines))
 
     def test_an_unproven_file_is_listable_and_unlisted_it_is_named_unproven(self) -> None:
-        unproven = nightly.Result(4, 0.1, "opt-equiv: unproven: 2 calls hit the SAT size limit",
-                                  False, True)
+        unproven = nightly.Result(
+            4, 0.1, "opt-equiv: unproven: 2 calls hit the SAT size limit", False, True
+        )
         answer = Runs(lambda f, label: unproven if (f, label) == ("a.v", "opt-equiv") else ok())
         code, lines = self.execute(answer)
         self.assertEqual(code, 1)
         self.assertTrue(any("a.v [opt-equiv]: UNPROVEN:" in line for line in lines))
-        self.expect_file.write_text("a.v [unproven:] untested for now (size limit): 60 s timeout\n",
-                                    encoding="utf-8")
+        self.expect_file.write_text(
+            "a.v [unproven:] untested for now (size limit): 60 s timeout\n", encoding="utf-8"
+        )
         code, lines = self.execute(answer)
         self.assertEqual(code, 0, lines)
-        self.assertTrue(any("a.v [opt-equiv]: fails as listed (untested for now" in line
-                            for line in lines))
+        self.assertTrue(
+            any("a.v [opt-equiv]: fails as listed (untested for now" in line for line in lines)
+        )
 
     def test_an_unproven_entry_needs_exit_4_not_another_failure_with_the_same_word(self) -> None:
         """2H review H2: `[unproven:]` also matches `refine: DIFFERS: unproven: ...` next to a real
         difference (opt-diff exit 1). Such an entry is expected only on the unproven exit."""
-        self.expect_file.write_text("a.v [unproven:] untested for now (size limit): 60 s timeout\n",
-                                    encoding="utf-8")
+        self.expect_file.write_text(
+            "a.v [unproven:] untested for now (size limit): 60 s timeout\n", encoding="utf-8"
+        )
         text = "refine: DIFFERS: unproven: x\nhistogram: DIFFERS: module 't'\n"
         mixed = nightly.Result(1, 0.1, text, False, False)
         answer = Runs(lambda f, label: mixed if (f, label) == ("a.v", "opt-diff[phase2]") else ok())
         code, lines = self.execute(answer)
         self.assertEqual(code, 1, lines)
-        self.assertTrue(any("a.v [opt-diff[phase2]]: FAIL (listed as unproven, but exit 1 is not "
-                            "4)" in line for line in lines), lines)
+        self.assertTrue(
+            any(
+                "a.v [opt-diff[phase2]]: FAIL (listed as unproven, but exit 1 is not 4)" in line
+                for line in lines
+            ),
+            lines,
+        )
         alone = nightly.Result(4, 0.1, text, False, True)
         answer = Runs(lambda f, label: alone if (f, label) == ("a.v", "opt-diff[phase2]") else ok())
         code, lines = self.execute(answer)
         self.assertEqual(code, 0, lines)
 
     def test_a_listed_failure_passes_and_a_listed_pass_is_stale(self) -> None:
-        self.expect_file.write_text("a.v [boom] a known reason\nb.v a known reason\n",
-                                    encoding="utf-8")
+        self.expect_file.write_text(
+            "a.v [boom] a known reason\nb.v a known reason\n", encoding="utf-8"
+        )
         code, lines = self.execute(Runs(lambda f, _l: bad() if f == "a.v" else ok()))
         self.assertEqual(code, 1)
-        self.assertTrue(any("a.v [opt-equiv]: fails as listed (a known reason)" in x
-                            for x in lines))
+        self.assertTrue(
+            any("a.v [opt-equiv]: fails as listed (a known reason)" in x for x in lines)
+        )
         self.assertTrue(any("b.v: STALE entry" in line for line in lines))
         self.assertIn("6 fail as listed, 1 UNEXPECTED", lines[-1])
 
@@ -342,9 +425,20 @@ class XlTest(Base):
     def test_an_empty_xl_selection_exits_2(self) -> None:
         with self.assertRaises(nightly.UsageError):
             self.execute(Runs(), set="vtr31", xl=True)  # lenet.v is not in vtr31
-        code, _, err = helpers.run_main(nightly.main, [
-            "--odin3", "o", "--yosys", "y", "--root", str(self.root), "--xl",
-            "--expect-fail", str(self.expect_file)])
+        code, _, err = helpers.run_main(
+            nightly.main,
+            [
+                "--odin3",
+                "o",
+                "--yosys",
+                "y",
+                "--root",
+                str(self.root),
+                "--xl",
+                "--expect-fail",
+                str(self.expect_file),
+            ],
+        )
         self.assertEqual(code, 2)
         self.assertIn("selects no file", err)
 

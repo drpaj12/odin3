@@ -87,14 +87,12 @@ class CaseArgsTest(unittest.TestCase):
     def test_the_script_carries_the_args(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vtr-args.") as tmp:
             fake = Path(tmp) / "odin3"
-            fake.write_text("#!/bin/sh\necho \"$2\" >&2\n", encoding="utf-8")
+            fake.write_text('#!/bin/sh\necho "$2" >&2\n', encoding="utf-8")
             fake.chmod(0o755)
             proc = vtr_fixtures.rewrite(
                 fake, Path(tmp) / "a.blif", Path(tmp) / "o.blif", "--name-style provenance"
             )
-            self.assertIn(
-                b'write_blif --vtr --name-style provenance "', proc.stderr
-            )
+            self.assertIn(b'write_blif --vtr --name-style provenance "', proc.stderr)
             plain = vtr_fixtures.rewrite(fake, Path(tmp) / "a.blif", Path(tmp) / "o.blif")
             self.assertIn(b'write_blif --vtr "', plain.stderr)
 
@@ -170,14 +168,20 @@ class StrictExceptionTest(unittest.TestCase):
             log.write_bytes(proc.stderr)
             self.assertIn(b"net 'unconn' feeds 7 .names/.latch pins", proc.stderr)
             self.assertEqual(1, vtr_fixtures.check_file(CHECKER, w, True).returncode)
-            paired = subprocess.run([str(CHECKER), "--strict", "--writer-log", str(log), str(w)],
-                                    capture_output=True, text=True, check=False, timeout=60)
+            paired = subprocess.run(
+                [str(CHECKER), "--strict", "--writer-log", str(log), str(w)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            )
             self.assertEqual((0, ""), (paired.returncode, paired.stdout))
 
     def test_stale_exception_fails(self) -> None:
         why, _ = self.check("shiftx.parmys", FIXTURES / "two_clock.vtr.blif")
-        self.assertEqual("in STRICT_EXCEPTIONS but passes blif-vtr-check --strict "
-                         "(drop the exception)", why)
+        self.assertEqual(
+            "in STRICT_EXCEPTIONS but passes blif-vtr-check --strict (drop the exception)", why
+        )
 
 
 if __name__ == "__main__":

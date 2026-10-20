@@ -63,8 +63,9 @@ SPR = ".model spr\n.inputs addr[5]\n.outputs out[0]\n.blackbox\n.end\n"
 
 
 def design_text(extra: str = "", pad: int = 0) -> str:
-    return (".model t\n.inputs a\n.outputs y\n.names a y\n1 1\n" + extra + ".end\n" + "#" * pad
-            + "\n")
+    return (
+        ".model t\n.inputs a\n.outputs y\n.names a y\n1 1\n" + extra + ".end\n" + "#" * pad + "\n"
+    )
 
 
 class AbcEquivTest(unittest.TestCase):
@@ -99,8 +100,15 @@ class AbcEquivTest(unittest.TestCase):
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
     def run_tool(self, *extra: str) -> tuple[int, str, str]:
-        argv = ["--odin3", self.odin3, "--equiv-check", self.equiv, "--keep", str(self.keep),
-                *extra]
+        argv = [
+            "--odin3",
+            self.odin3,
+            "--equiv-check",
+            self.equiv,
+            "--keep",
+            str(self.keep),
+            *extra,
+        ]
         return helpers.run_main(abc_equiv.main, argv)
 
     def test_one_size_order_across_two_directories(self) -> None:
@@ -118,14 +126,25 @@ class AbcEquivTest(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         work = self.keep / "0000-one"
         (odin3_call,) = self.calls("odin3")
-        script = (f"read_techlib lib/vtr.o3lib; read_blif {design}; write_blif "
-                  f"{work}/before.blif; abc --lut 4 --via-blif xd; write_blif {work}/after.blif; "
-                  f"write_blif --vtr {work}/after.vtr.blif")
+        script = (
+            f"read_techlib lib/vtr.o3lib; read_blif {design}; write_blif "
+            f"{work}/before.blif; abc --lut 4 --via-blif xd; write_blif {work}/after.blif; "
+            f"write_blif --vtr {work}/after.vtr.blif"
+        )
         self.assertEqual(odin3_call["argv"], [self.odin3, "-p", script])
         (equiv_call,) = self.calls("equiv")
-        self.assertEqual(equiv_call["argv"], [
-            self.equiv, "--blackbox", "adder,multiply,single_port_ram,dual_port_ram",
-            "--timeout", "600", f"{work}/before.blif", f"{work}/after.blif"])
+        self.assertEqual(
+            equiv_call["argv"],
+            [
+                self.equiv,
+                "--blackbox",
+                "adder,multiply,single_port_ram,dual_port_ram",
+                "--timeout",
+                "600",
+                f"{work}/before.blif",
+                f"{work}/after.blif",
+            ],
+        )
         self.assertRegex(out, r"one\.blif equivalent [0-9.]+ s\n")
 
     def test_allow_undriven_only_for_the_listed_designs(self) -> None:
@@ -154,8 +173,11 @@ class AbcEquivTest(unittest.TestCase):
         stable = self.blif("stable.blif", design_text(ram, pad=50) + SPR)
         code, out, err = self.run_tool(design, stable)
         self.assertEqual(code, 1, out + err)
-        self.assertRegex(out, r"unconn\.blif unconn-changed [0-9.]+ s \(after\.blif: no longer "
-                              r"on unconn \[\('spr', 1, 'addr\[5\]'\)\]")
+        self.assertRegex(
+            out,
+            r"unconn\.blif unconn-changed [0-9.]+ s \(after\.blif: no longer "
+            r"on unconn \[\('spr', 1, 'addr\[5\]'\)\]",
+        )
         self.assertRegex(out, r"stable\.blif equivalent")
 
     def test_the_expect_list_rules(self) -> None:
@@ -163,16 +185,20 @@ class AbcEquivTest(unittest.TestCase):
         broken = self.blif("broken.blif", design_text(pad=1))
         diff = self.blif("diff.blif", design_text("# differs\n", pad=2))
         fine = self.blif("fine.blif", design_text(pad=3))
-        expect = self.blif("expect.txt",
-                           "views.blif views x\nbroken.blif views x\nfine.blif error x\n")
+        expect = self.blif(
+            "expect.txt", "views.blif views x\nbroken.blif views x\nfine.blif error x\n"
+        )
         code, out, err = self.run_tool("--expect-fail", expect, views, broken, diff, fine)
         self.assertEqual(code, 1, out + err)
         self.assertRegex(out, r"views\.blif views [0-9.]+ s \(listed: views")
         self.assertRegex(out, r"broken\.blif odin3-error [0-9.]+ s \(UNEXPECTED: listed as views")
         self.assertRegex(out, r"diff\.blif differs")
         self.assertRegex(out, r"fine\.blif equivalent [0-9.]+ s \(XPASS: listed \(error x\)")
-        self.assertIn("abc-equiv: 4 designs: 1 passed, 3 failed (differs 1, equivalent 1, "
-                      "odin3-error 1, views 1)", out)
+        self.assertIn(
+            "abc-equiv: 4 designs: 1 passed, 3 failed (differs 1, equivalent 1, "
+            "odin3-error 1, views 1)",
+            out,
+        )
 
     def test_a_listed_design_passes_only_with_its_pinned_status(self) -> None:
         multi = self.blif("multi.blif", design_text("# multiclock\n"))
@@ -201,8 +227,9 @@ class AbcEquivTest(unittest.TestCase):
         b = self.blif("b.blif", design_text(pad=5))
         code, out, _ = self.run_tool(a, b)
         self.assertEqual(code, 0)
-        self.assertEqual(out.splitlines()[-1], "abc-equiv: 2 designs: 2 passed, 0 failed "
-                                               "(equivalent 2)")
+        self.assertEqual(
+            out.splitlines()[-1], "abc-equiv: 2 designs: 2 passed, 0 failed (equivalent 2)"
+        )
 
     def test_a_listed_multiclock_design_passes(self) -> None:
         multi = self.blif("multi.blif", design_text("# multiclock\n"))
@@ -252,8 +279,10 @@ class AbcEquivTest(unittest.TestCase):
     def test_a_step_without_keep_is_a_usage_error(self) -> None:
         design = self.blif("one.blif", design_text())
         for step in ("abc", "equiv"):
-            code, out, err = helpers.run_main(abc_equiv.main, [
-                "--odin3", self.odin3, "--equiv-check", self.equiv, "--step", step, design])
+            code, out, err = helpers.run_main(
+                abc_equiv.main,
+                ["--odin3", self.odin3, "--equiv-check", self.equiv, "--step", step, design],
+            )
             self.assertEqual(code, 2, out)
             self.assertIn(f"--step {step} needs --keep DIR", err)
 
@@ -282,8 +311,10 @@ class AbcEquivTest(unittest.TestCase):
         golden.mkdir()
         design = self.blif("golden/g.parmys.blif", design_text())
         refusal = qor_heavy.HeavyError(2, "not inside a heavy run: test")
-        with mock.patch.object(abc_equiv, "GOLDEN_ROOT", golden), \
-                mock.patch.object(qor_heavy, "require_heavy", side_effect=refusal):
+        with (
+            mock.patch.object(abc_equiv, "GOLDEN_ROOT", golden),
+            mock.patch.object(qor_heavy, "require_heavy", side_effect=refusal),
+        ):
             code, out, err = self.run_tool(design)
         self.assertEqual(code, 2, out)
         self.assertIn("abc-equiv: not inside a heavy run: test", err)

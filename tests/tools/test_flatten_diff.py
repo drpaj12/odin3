@@ -64,9 +64,7 @@ class CompareTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "expect.txt"
             path.write_text("# comment\na.v: private names differ\n")
-            self.assertEqual(
-                fd.load_expect(path), {"a.v": fd.Expected((), "private names differ")}
-            )
+            self.assertEqual(fd.load_expect(path), {"a.v": fd.Expected((), "private names differ")})
         self.assertEqual(fd.load_expect(None), {})
 
     def test_expect_kinds(self) -> None:

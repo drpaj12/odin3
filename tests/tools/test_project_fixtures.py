@@ -33,20 +33,35 @@ class _TmpCase(unittest.TestCase):
         path.write_text(text)
         return path
 
-    def load(self, fmt: str, entry: str, env: dict[str, str] | None = None,
-             options: dict[str, str] | None = None) -> pf.Result:
+    def load(
+        self,
+        fmt: str,
+        entry: str,
+        env: dict[str, str] | None = None,
+        options: dict[str, str] | None = None,
+    ) -> pf.Result:
         return pf.load_project(self.dir, fmt, self.dir / entry, env, options)
 
-    def record(self, fmt: str, entry: str, env: dict[str, str] | None = None,
-               options: dict[str, str] | None = None) -> dict[str, Any]:
+    def record(
+        self,
+        fmt: str,
+        entry: str,
+        env: dict[str, str] | None = None,
+        options: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """The parsed record (resolution errors after parsing do not matter here)."""
         res = self.load(fmt, entry, env, options)
         self.assertIsNotNone(res.record, str(res.error))
         assert res.record is not None
         return res.record
 
-    def error(self, fmt: str, entry: str, env: dict[str, str] | None = None,
-              options: dict[str, str] | None = None) -> pf.ProjectError:
+    def error(
+        self,
+        fmt: str,
+        entry: str,
+        env: dict[str, str] | None = None,
+        options: dict[str, str] | None = None,
+    ) -> pf.ProjectError:
         res = self.load(fmt, entry, env, options)
         self.assertIsNotNone(res.error, "expected an error")
         assert res.error is not None
@@ -63,13 +78,16 @@ def module(name: str, *insts: str) -> str:
 
 class WordsTest(unittest.TestCase):
     def test_words(self) -> None:
-        self.assertEqual(pf.split_words('a "b c" "d\\"e\\\\" # x', "p:1"),
-                         [("a", False), ("b c", True), ('d"e\\', True)])
+        self.assertEqual(
+            pf.split_words('a "b c" "d\\"e\\\\" # x', "p:1"),
+            [("a", False), ("b c", True), ('d"e\\', True)],
+        )
         self.assertEqual(pf.split_words("a // b", "p:1", file_list=True), [("a", False)])
         self.assertEqual(pf.split_words("+define+D=#1 #c", "p:1"), [("+define+D=#1", False)])
         self.assertEqual(pf.split_words("C:\\rtl\\a.v", "p:1"), [("C:\\rtl\\a.v", False)])
-        self.assertEqual(pf.split_words('+define+TAG="AB"', "p:1", file_list=True),
-                         [('+define+TAG="AB"', False)])
+        self.assertEqual(
+            pf.split_words('+define+TAG="AB"', "p:1", file_list=True), [('+define+TAG="AB"', False)]
+        )
 
     def test_word_errors(self) -> None:
         for line in ('"a', '""', '"a"b', 'a"b"', '"a\\n"', '"a"#c'):
@@ -88,7 +106,9 @@ class O3projTest(_TmpCase):
         self.put("p.o3lib")
         self.put("f.o3")
         self.put("abc/map.abc", "strash; dch -f; if -K {K}\n")
-        self.put("p.o3proj", """# comment
+        self.put(
+            "p.o3proj",
+            """# comment
 file verilog src/top.v   # trailing comment
 file vhdl "src/top.v" library mylib
 file verilog src/top.v
@@ -114,28 +134,47 @@ cell m27 from multiply param A=27
 patterns p.o3lib
 flow f.o3
 abc_script abc/map.abc
-""")
+""",
+        )
         rec = self.record("o3proj", "p.o3proj")
-        self.assertEqual(rec["files"][1], {"path": "src/top.v", "language": "vhdl",
-                                           "library": "mylib"})
+        self.assertEqual(
+            rec["files"][1], {"path": "src/top.v", "language": "vhdl", "library": "mylib"}
+        )
         self.assertEqual((len(rec["files"]), rec["duplicates"]), (2, ["src/top.v"]))
         self.assertEqual(rec["libfiles"], [{"path": "lib/p.v", "language": "verilog"}])
-        self.assertEqual((rec["libdirs"], rec["libext"], rec["incdirs"]),
-                         (["cells"], [".v", ".sv"], ["inc"]))
-        self.assertEqual(rec["defines"], [{"name": "A", "value": None},
-                                          {"name": "B", "value": "x y"}])
+        self.assertEqual(
+            (rec["libdirs"], rec["libext"], rec["incdirs"]), (["cells"], [".v", ".sv"], ["inc"])
+        )
+        self.assertEqual(
+            rec["defines"], [{"name": "A", "value": None}, {"name": "B", "value": "x y"}]
+        )
         self.assertEqual(rec["top"], "top")
-        self.assertEqual(rec["params"], [
-            {"scope": "top", "name": "W", "value": "3", "type": "number"},
-            {"scope": "top.u_x", "name": "S", "value": "text", "type": "string"},
-            {"scope": "top", "name": "H", "value": "8'hFF", "type": "number"}])
-        self.assertEqual(rec["arch"][1], {"kind": "device", "family": "Cyclone V",
-                                          "device": "5CSEMA5F31C6"})
-        self.assertEqual(rec["rules"][0], {"rule": "map", "scope": "top.u_*", "subject": "$mul",
-                                           "action": "to", "cells": ["multiply", "mult_27"],
-                                           "min_width": 9, "max_width": 36})
-        self.assertEqual(rec["rules"][2], {"rule": "split", "subject": "$mem", "width": True,
-                                           "depth": "64"})
+        self.assertEqual(
+            rec["params"],
+            [
+                {"scope": "top", "name": "W", "value": "3", "type": "number"},
+                {"scope": "top.u_x", "name": "S", "value": "text", "type": "string"},
+                {"scope": "top", "name": "H", "value": "8'hFF", "type": "number"},
+            ],
+        )
+        self.assertEqual(
+            rec["arch"][1], {"kind": "device", "family": "Cyclone V", "device": "5CSEMA5F31C6"}
+        )
+        self.assertEqual(
+            rec["rules"][0],
+            {
+                "rule": "map",
+                "scope": "top.u_*",
+                "subject": "$mul",
+                "action": "to",
+                "cells": ["multiply", "mult_27"],
+                "min_width": 9,
+                "max_width": 36,
+            },
+        )
+        self.assertEqual(
+            rec["rules"][2], {"rule": "split", "subject": "$mem", "width": True, "depth": "64"}
+        )
         self.assertEqual(rec["rules"][4], {"rule": "patterns", "path": "p.o3lib"})
         self.assertEqual(rec["overrides"][1]["params"], {"A": "27"})
         self.assertEqual(rec["flow"], "f.o3")
@@ -149,45 +188,69 @@ abc_script abc/map.abc
         self.assertEqual(self.record("o3proj", "proj/p.o3proj")["abc_script"], "proj/abc/map.txt")
         self.put("proj/p.o3proj", "abc_script abc/map.txt\n# x\n\nabc_script abc/none.abc\n")
         err = self.error("o3proj", "proj/p.o3proj")
-        self.assertEqual(err.as_json(), {"kind": "syntax", "at": "proj/p.o3proj:4",
-                                         "names": ["abc_script"]})
+        self.assertEqual(
+            err.as_json(), {"kind": "syntax", "at": "proj/p.o3proj:4", "names": ["abc_script"]}
+        )
         self.assertEqual(err.detail, "abc_script given twice")
         self.put("proj/p.o3proj", "abc_script abc/none.abc\n")
-        self.assertEqual(self.error("o3proj", "proj/p.o3proj").as_json(),
-                         {"kind": "missing_file", "at": "proj/p.o3proj:1",
-                          "names": ["proj/abc/none.abc"]})
+        self.assertEqual(
+            self.error("o3proj", "proj/p.o3proj").as_json(),
+            {"kind": "missing_file", "at": "proj/p.o3proj:1", "names": ["proj/abc/none.abc"]},
+        )
         for text in ("abc_script\n", "abc_script a b\n"):
             with self.subTest(text=text):
                 self.put("proj/p.o3proj", text)
-                self.assertEqual(self.error("o3proj", "proj/p.o3proj").detail,
-                                 "usage: abc_script <file>")
+                self.assertEqual(
+                    self.error("o3proj", "proj/p.o3proj").detail, "usage: abc_script <file>"
+                )
 
     def test_abc_script_only_in_o3proj(self) -> None:
         """A -f list has no form for it; a Quartus ABC_SCRIPT is ignored like any assignment."""
         self.put("src/top.v", module("top"))
         self.put("x.abc", "strash\n")
         self.put("files.f", "src/top.v\n-abc_script x.abc\n")
-        self.assertEqual(self.error("f", "files.f").as_json(),
-                         {"kind": "unknown_option", "at": "files.f:2", "names": ["-abc_script"]})
+        self.assertEqual(
+            self.error("f", "files.f").as_json(),
+            {"kind": "unknown_option", "at": "files.f:2", "names": ["-abc_script"]},
+        )
         self.put("p.qpf", 'PROJECT_REVISION = "top"\n')
-        self.put("top.qsf", "set_global_assignment -name VERILOG_FILE src/top.v\n"
-                            "set_global_assignment -name ABC_SCRIPT x.abc\n")
+        self.put(
+            "top.qsf",
+            "set_global_assignment -name VERILOG_FILE src/top.v\n"
+            "set_global_assignment -name ABC_SCRIPT x.abc\n",
+        )
         rec = self.record("qsf", "p.qpf")
         self.assertEqual((rec["abc_script"], rec["ignored"]), (None, ["ABC_SCRIPT"]))
 
     def test_unknown_key_is_located(self) -> None:
         self.put("p.o3proj", "\n# x\nmaps * $mul soft\n")
         err = self.error("o3proj", "p.o3proj")
-        self.assertEqual(err.as_json(), {"kind": "unknown_key", "at": "p.o3proj:3",
-                                         "names": ["maps"]})
+        self.assertEqual(
+            err.as_json(), {"kind": "unknown_key", "at": "p.o3proj:3", "names": ["maps"]}
+        )
 
     def test_syntax_errors(self) -> None:
-        for text in ("map * $mul to a b", "map * $mul soft min_width", "map * $mul soft x 3",
-                     "map * $mul fast", "param W 3", "limit m lots", "top", "file cobol x.v",
-                     'define "unterminated', "cell m from x param", "define 9X",
-                     "top a\ntop b", "top t\nparam other.W 3", "param t.W 3",
-                     "top t\nparam t.W wide", "split $mem", "split $mem depth deep",
-                     "top a.b.c", 'file verilog "a"b'):
+        for text in (
+            "map * $mul to a b",
+            "map * $mul soft min_width",
+            "map * $mul soft x 3",
+            "map * $mul fast",
+            "param W 3",
+            "limit m lots",
+            "top",
+            "file cobol x.v",
+            'define "unterminated',
+            "cell m from x param",
+            "define 9X",
+            "top a\ntop b",
+            "top t\nparam other.W 3",
+            "param t.W 3",
+            "top t\nparam t.W wide",
+            "split $mem",
+            "split $mem depth deep",
+            "top a.b.c",
+            'file verilog "a"b',
+        ):
             with self.subTest(text=text):
                 self.put("p.o3proj", text + "\n")
                 self.assertEqual(self.error("o3proj", "p.o3proj").kind, "syntax")
@@ -212,13 +275,16 @@ abc_script abc/map.abc
     def test_lone_cr_stays_in_the_word_and_crlf_is_lf(self) -> None:
         (self.dir / "p.o3proj").write_bytes(b"define A=x\ry\r\ndefine B\r\n")
         rec = self.record("o3proj", "p.o3proj")
-        self.assertEqual(rec["defines"], [{"name": "A", "value": "x\ry"},
-                                          {"name": "B", "value": None}])
+        self.assertEqual(
+            rec["defines"], [{"name": "A", "value": "x\ry"}, {"name": "B", "value": None}]
+        )
 
     def test_counts(self) -> None:
-        for text, kind in (("available c \u00b2", "syntax"),  # 4294967295: parsed, no top
-                           ("available c 4294967296", "syntax"),
-                           ("available c 4294967295", "no_top")):
+        for text, kind in (
+            ("available c \u00b2", "syntax"),  # 4294967295: parsed, no top
+            ("available c 4294967296", "syntax"),
+            ("available c 4294967295", "no_top"),
+        ):
             with self.subTest(text=text):
                 self.put("p.o3proj", text + "\n")
                 res = self.load("o3proj", "p.o3proj")
@@ -239,8 +305,11 @@ abc_script abc/map.abc
     def test_import_quartus(self) -> None:
         self.put("a.v", module("a"))
         self.put("p.qpf", 'PROJECT_REVISION = "r1"\nPROJECT_REVISION = "r2"\n')
-        self.put("r2.qsf", "set_global_assignment -name VERILOG_FILE a.v\n"
-                           "set_global_assignment -name TOP_LEVEL_ENTITY a\n")
+        self.put(
+            "r2.qsf",
+            "set_global_assignment -name VERILOG_FILE a.v\n"
+            "set_global_assignment -name TOP_LEVEL_ENTITY a\n",
+        )
         self.put("p.o3proj", "define X\nimport p.qpf revision r2\n")
         rec = self.record("o3proj", "p.o3proj")
         self.assertEqual((rec["top"], rec["files"][0]["path"]), ("a", "a.v"))
@@ -252,9 +321,12 @@ abc_script abc/map.abc
     def test_param_scopes_are_checked_per_line_after_an_import(self) -> None:
         """Imported parameters must not shift which `param` line is checked (DESIGN §4.0)."""
         self.put("src/a.v", module("top"))
-        self.put("q/top.qsf", "set_global_assignment -name TOP_LEVEL_ENTITY top\n"
-                              "set_global_assignment -name VERILOG_FILE ../src/a.v\n"
-                              "set_parameter -name W 8\n")
+        self.put(
+            "q/top.qsf",
+            "set_global_assignment -name TOP_LEVEL_ENTITY top\n"
+            "set_global_assignment -name VERILOG_FILE ../src/a.v\n"
+            "set_parameter -name W 8\n",
+        )
         self.put("p.o3proj", "import q/top.qsf\nparam x.W 1\n")
         err = self.error("o3proj", "p.o3proj")
         self.assertEqual(err.as_json(), {"kind": "syntax", "at": "p.o3proj:2", "names": ["x"]})
@@ -262,8 +334,9 @@ abc_script abc/map.abc
         err = self.error("o3proj", "p.o3proj")
         self.assertEqual(err.as_json(), {"kind": "syntax", "at": "p.o3proj:3", "names": ["lib"]})
         self.put("p.o3proj", "import q/top.qsf\nparam top.u.W 1\n")
-        self.assertEqual([p["scope"] for p in self.record("o3proj", "p.o3proj")["params"]],
-                         ["top", "top.u"])
+        self.assertEqual(
+            [p["scope"] for p in self.record("o3proj", "p.o3proj")["params"]], ["top", "top.u"]
+        )
 
 
 class FileListTest(_TmpCase):
@@ -273,14 +346,18 @@ class FileListTest(_TmpCase):
         self.put("inc/.keep")
         self.put("src/sub/inner.f", "src/sub/b.sv // -f: relative to the outermost list\n")
         self.put("src/sub/own.F", "b.sv\n")
-        self.put("files.f", "+define+X+Y=2 +incdir+inc\n# comment\n-f src/sub/inner.f\n"
-                            "-F src/sub/own.F\nsrc/a.v\n+libext+.v+.sv\n")
+        self.put(
+            "files.f",
+            "+define+X+Y=2 +incdir+inc\n# comment\n-f src/sub/inner.f\n"
+            "-F src/sub/own.F\nsrc/a.v\n+libext+.v+.sv\n",
+        )
         rec = self.record("f", "files.f")
         self.assertEqual([f["path"] for f in rec["files"]], ["src/sub/b.sv", "src/a.v"])
         self.assertEqual(rec["duplicates"], ["src/sub/b.sv"])
         self.assertEqual(rec["files"][0]["language"], "systemverilog")
-        self.assertEqual(rec["defines"], [{"name": "X", "value": None},
-                                          {"name": "Y", "value": "2"}])
+        self.assertEqual(
+            rec["defines"], [{"name": "X", "value": None}, {"name": "Y", "value": "2"}]
+        )
         self.assertEqual((rec["incdirs"], rec["libext"]), (["inc"], [".v", ".sv"]))
 
     def test_top_sv_vars_and_crlf(self) -> None:
@@ -291,8 +368,9 @@ class FileListTest(_TmpCase):
         self.assertEqual(rec["top"], "b")
         self.assertEqual([f["language"] for f in rec["files"]], ["verilog", "systemverilog"])
         err = self.error("f", "files.f")
-        self.assertEqual(err.as_json(), {"kind": "undefined_variable", "at": "files.f:2",
-                                         "names": ["D"]})
+        self.assertEqual(
+            err.as_json(), {"kind": "undefined_variable", "at": "files.f:2", "names": ["D"]}
+        )
         self.put("in.f", "-sv\nrtl/b.v\n")
         self.put("files.f", "-f in.f\nrtl/a.v\n")
         rec = self.record("f", "files.f")  # -sv ends with the list that says it
@@ -304,16 +382,22 @@ class FileListTest(_TmpCase):
         self.put("a.f", "-f b.f\n")
         self.put("b.f", "\n-f a.f\n")
         err = self.error("f", "a.f")
-        self.assertEqual(err.as_json(), {"kind": "f_cycle", "at": "b.f:2",
-                                         "names": ["a.f", "b.f", "a.f"]})
+        self.assertEqual(
+            err.as_json(), {"kind": "f_cycle", "at": "b.f:2", "names": ["a.f", "b.f", "a.f"]}
+        )
 
     def test_errors(self) -> None:
         self.put("x.txt")
-        for text, kind in (("-bogus x\n", "unknown_option"), ("+foo+1\n", "unknown_option"),
-                           ("-v\n", "syntax"), ("+incdir+\n", "syntax"),
-                           ("x.txt\n", "unknown_file_type"), ("+libext+.txt\n",
-                                                              "unknown_file_type"),
-                           ("-y nodir\n", "missing_file"), ("$\n", "syntax")):
+        for text, kind in (
+            ("-bogus x\n", "unknown_option"),
+            ("+foo+1\n", "unknown_option"),
+            ("-v\n", "syntax"),
+            ("+incdir+\n", "syntax"),
+            ("x.txt\n", "unknown_file_type"),
+            ("+libext+.txt\n", "unknown_file_type"),
+            ("-y nodir\n", "missing_file"),
+            ("$\n", "syntax"),
+        ):
             with self.subTest(text=text):
                 self.put("files.f", text)
                 self.assertEqual(self.error("f", "files.f").kind, kind)
@@ -325,15 +409,25 @@ class TclTest(unittest.TestCase):
         return list(pf.TclReader(text, lambda n: f"q:{n}", qip_dir).commands())
 
     def test_words(self) -> None:
-        text = ('# c\nset_a -name X "a \\"b\\""; set_b {x {y} z}\n'
-                "set_c one \\\n  two\n  # a comment where a command may start\nset_d a\"b\n")
-        self.assertEqual(self.cmds(text), [(["set_a", "-name", "X", 'a "b"'], 2),
-                                           (["set_b", "x {y} z"], 2),
-                                           (["set_c", "one", "two"], 3), (["set_d", 'a"b'], 6)])
+        text = (
+            '# c\nset_a -name X "a \\"b\\""; set_b {x {y} z}\n'
+            'set_c one \\\n  two\n  # a comment where a command may start\nset_d a"b\n'
+        )
+        self.assertEqual(
+            self.cmds(text),
+            [
+                (["set_a", "-name", "X", 'a "b"'], 2),
+                (["set_b", "x {y} z"], 2),
+                (["set_c", "one", "two"], 3),
+                (["set_d", 'a"b'], 6),
+            ],
+        )
 
     def test_qip_idiom(self) -> None:
-        text = 'set -name F [file join $::quartus(qip_path) "x.v"]\nset [file join ' \
-               "$::quartus(qip_path) y.v]\n"
+        text = (
+            'set -name F [file join $::quartus(qip_path) "x.v"]\nset [file join '
+            "$::quartus(qip_path) y.v]\n"
+        )
         self.assertEqual([w[-1] for w, _ in self.cmds(text, qip=True)], ["/q/x.v", "/q/y.v"])
 
     def test_brackets_inside_words(self) -> None:
@@ -342,8 +436,7 @@ class TclTest(unittest.TestCase):
         self.assertEqual(self.cmds(text)[1][0][2], "SW[1]")
 
     def test_errors(self) -> None:
-        for text in ('a "x"y', "a {x}y", 'a "\\n"', "a $x", "a [b]", 'a "x', "a {x",
-                     "a b\\c"):
+        for text in ('a "x"y', "a {x}y", 'a "\\n"', "a $x", "a [b]", 'a "x', "a {x", "a b\\c"):
             with self.subTest(text=text), self.assertRaises(pf.ProjectError) as cm:
                 self.cmds(text)
             self.assertEqual(cm.exception.kind, "syntax")
@@ -358,7 +451,9 @@ class QuartusTest(_TmpCase):
         self.put("lib1/.keep")
         self.put("lib2/.keep")
         self.put("p.qpf", 'QUARTUS_VERSION = "23.1"\n\nPROJECT_REVISION = "r"\n')
-        self.put("r.qsf", """set_global_assignment -name VHDL_FILE src/a.vhd -library lib1
+        self.put(
+            "r.qsf",
+            """set_global_assignment -name VHDL_FILE src/a.vhd -library lib1
 set_global_assignment -name vqm_file src/n.vqm
 set_global_assignment -name TOP_LEVEL_ENTITY first
 set_global_assignment -name TOP_LEVEL_ENTITY r
@@ -375,32 +470,45 @@ set_instance_assignment -name MULTSTYLE DSP -to u_x
 set_location_assignment PIN_A1 -to a
 set_location_assignment PIN_A2 -to b
 source other.tcl
-""")
+""",
+        )
         rec = self.record("qsf", "p.qpf")
         self.assertEqual(rec["top"], "r")
-        self.assertEqual(rec["files"], [
-            {"path": "src/a.vhd", "language": "vhdl", "library": "lib1"},
-            {"path": "src/n.vqm", "language": "vqm", "library": "work"}])
-        self.assertEqual((rec["incdirs"], rec["libdirs"]), (["lib1", "lib2"],
-                                                           ["lib1", "lib2", "lib2"]))
-        self.assertEqual(rec["params"], [
-            {"scope": "r", "name": "W", "value": "4", "type": "number"},
-            {"scope": "r", "name": "D", "value": "txt", "type": "string"},
-            {"scope": "r.u_s", "name": "E", "value": "2", "type": "number"}])
-        self.assertEqual([(r["scope"], r["subject"]) for r in rec["rules"]],
-                         [("*", "$mul"), ("r.u_m", "$mem"), ("sub", "$mul")])
+        self.assertEqual(
+            rec["files"],
+            [
+                {"path": "src/a.vhd", "language": "vhdl", "library": "lib1"},
+                {"path": "src/n.vqm", "language": "vqm", "library": "work"},
+            ],
+        )
+        self.assertEqual(
+            (rec["incdirs"], rec["libdirs"]), (["lib1", "lib2"], ["lib1", "lib2", "lib2"])
+        )
+        self.assertEqual(
+            rec["params"],
+            [
+                {"scope": "r", "name": "W", "value": "4", "type": "number"},
+                {"scope": "r", "name": "D", "value": "txt", "type": "string"},
+                {"scope": "r.u_s", "name": "E", "value": "2", "type": "number"},
+            ],
+        )
+        self.assertEqual(
+            [(r["scope"], r["subject"]) for r in rec["rules"]],
+            [("*", "$mul"), ("r.u_m", "$mem"), ("sub", "$mul")],
+        )
         self.assertEqual(rec["ignored"], ["LOCATION", "MULTSTYLE", "source"])
 
     def test_option_and_value_errors(self) -> None:
         self.put("p.qpf", "")
-        for line, kind in (("set_global_assignment -name TOP_LEVEL_ENTITY t -to x",
-                            "unknown_option"),
-                           ("set_global_assignment -name X v -bogus 1", "unknown_option"),
-                           ("set_global_assignment -name X a b", "syntax"),
-                           ("set_global_assignment -name X", "syntax"),
-                           ("set_global_assignment X", "syntax"),
-                           ("set_parameter -entity other -name W 1", "syntax"),
-                           ("set_parameter W 1", "syntax")):
+        for line, kind in (
+            ("set_global_assignment -name TOP_LEVEL_ENTITY t -to x", "unknown_option"),
+            ("set_global_assignment -name X v -bogus 1", "unknown_option"),
+            ("set_global_assignment -name X a b", "syntax"),
+            ("set_global_assignment -name X", "syntax"),
+            ("set_global_assignment X", "syntax"),
+            ("set_parameter -entity other -name W 1", "syntax"),
+            ("set_parameter W 1", "syntax"),
+        ):
             with self.subTest(line=line):
                 self.put("p.qsf", line + "\n")
                 self.assertEqual(self.error("qsf", "p.qpf").kind, kind)
@@ -409,16 +517,21 @@ source other.tcl
         self.put("p.qpf", '\nPROJECT_REVISION = "a"\nPROJECT_REVISION = "b"\n')
         self.put("a.qsf", "set_global_assignment -name TOP_LEVEL_ENTITY ta\n")
         self.put("b.qsf", "")
-        self.assertEqual(self.error("qsf", "p.qpf").as_json(),
-                         {"kind": "ambiguous_revision", "at": "p.qpf:2", "names": ["a", "b"]})
+        self.assertEqual(
+            self.error("qsf", "p.qpf").as_json(),
+            {"kind": "ambiguous_revision", "at": "p.qpf:2", "names": ["a", "b"]},
+        )
         self.assertEqual(self.record("qsf", "p.qpf", options={"revision": "b"})["top"], "b")
-        self.assertEqual(self.error("qsf", "p.qpf", options={"revision": "c"}).as_json(),
-                         {"kind": "unknown_revision", "at": None, "names": ["c"]})
+        self.assertEqual(
+            self.error("qsf", "p.qpf", options={"revision": "c"}).as_json(),
+            {"kind": "unknown_revision", "at": None, "names": ["c"]},
+        )
         self.put("i.o3proj", "\nimport p.qpf revision c\n")
         self.assertEqual(self.error("o3proj", "i.o3proj").at, "i.o3proj:2")
         self.assertEqual(self.record("qsf", "a.qsf")["top"], "ta")  # a .qsf as the entry
-        self.assertEqual(self.error("qsf", "a.qsf", options={"revision": "b"}).kind,
-                         "unknown_revision")
+        self.assertEqual(
+            self.error("qsf", "a.qsf", options={"revision": "b"}).kind, "unknown_revision"
+        )
 
     def test_qpf_without_revision_uses_its_name(self) -> None:
         self.put("proj.qpf", "# nothing\n")
@@ -434,16 +547,27 @@ source other.tcl
 
     def test_qip_nesting_and_cycle(self) -> None:
         self.put("ip/x.v", module("x"))
-        self.put("ip/a.qip", "set_global_assignment -name QIP_FILE "
-                             '[file join $::quartus(qip_path) "b.qip"]\n')
-        self.put("ip/b.qip", "# plain paths: relative to the project\n"
-                             "set_global_assignment -name VERILOG_FILE ip/x.v\n")
+        self.put(
+            "ip/a.qip",
+            'set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) "b.qip"]\n',
+        )
+        self.put(
+            "ip/b.qip",
+            "# plain paths: relative to the project\n"
+            "set_global_assignment -name VERILOG_FILE ip/x.v\n",
+        )
         self.put("t.qsf", "set_global_assignment -name QIP_FILE ip/a.qip\n")
         self.assertEqual(self.record("qsf", "t.qsf")["files"][0]["path"], "ip/x.v")
         self.put("ip/b.qip", "set_global_assignment -name QIP_FILE ip/a.qip\n")
         err = self.error("qsf", "t.qsf")
-        self.assertEqual(err.as_json(), {"kind": "qip_cycle", "at": "ip/b.qip:1",
-                                         "names": ["ip/a.qip", "ip/b.qip", "ip/a.qip"]})
+        self.assertEqual(
+            err.as_json(),
+            {
+                "kind": "qip_cycle",
+                "at": "ip/b.qip:1",
+                "names": ["ip/a.qip", "ip/b.qip", "ip/a.qip"],
+            },
+        )
 
     def test_anchored_scopes(self) -> None:
         self.assertEqual(pf.anchored(None, None, "t"), "*")
@@ -458,48 +582,70 @@ class Odin2Test(_TmpCase):
         self.put("a.v", module("a"))
         self.put("n.blif", ".model n\n.inputs x\n.outputs y\n.names x y\n1 1\n.end\n")
         self.put("arch.xml", "<architecture/>")
-        self.put("legacy.xml", "<config><verilog_files><verilog_file> a.v </verilog_file>"
-                               "</verilog_files><output><target><arch_file>arch.xml</arch_file>"
-                               "</target></output><debug_outputs/></config>")
+        self.put(
+            "legacy.xml",
+            "<config><verilog_files><verilog_file> a.v </verilog_file>"
+            "</verilog_files><output><target><arch_file>arch.xml</arch_file>"
+            "</target></output><debug_outputs/></config>",
+        )
         rec = self.record("odin2", "legacy.xml")
         self.assertEqual(rec["files"][0]["path"], "a.v")
         self.assertEqual(rec["arch"], [{"kind": "vpr_xml", "path": "arch.xml"}])
         self.assertEqual((rec["output"], rec["ignored"]), (None, ["debug_outputs"]))
-        self.put("inputs.xml", "<config><inputs><input_path_and_name>n.blif"
-                               "</input_path_and_name><input_type>BLIF</input_type></inputs>"
-                               "<output><output_path_and_name>o/x.blif</output_path_and_name>"
-                               "</output></config>")
+        self.put(
+            "inputs.xml",
+            "<config><inputs><input_path_and_name>n.blif"
+            "</input_path_and_name><input_type>BLIF</input_type></inputs>"
+            "<output><output_path_and_name>o/x.blif</output_path_and_name>"
+            "</output></config>",
+        )
         rec = self.record("odin2", "inputs.xml")
-        self.assertEqual(rec["files"], [{"path": "n.blif", "language": "blif",
-                                         "library": "work"}])
+        self.assertEqual(rec["files"], [{"path": "n.blif", "language": "blif", "library": "work"}])
         self.assertEqual(rec["output"], {"path": "o/x.blif", "format": None})
 
     def test_optimizations(self) -> None:
-        self.put("o.xml", '<config><optimizations><multiply size="9" fixed="1"/>'
-                          '<adder size="2" threshold_size="4"/><memory split_memory_width="1"/>'
-                          '<mix_soft_hard_blocks/></optimizations></config>')
+        self.put(
+            "o.xml",
+            '<config><optimizations><multiply size="9" fixed="1"/>'
+            '<adder size="2" threshold_size="4"/><memory split_memory_width="1"/>'
+            "<mix_soft_hard_blocks/></optimizations></config>",
+        )
         rec = self.record("odin2", "o.xml")
-        self.assertEqual([(r["rule"], r.get("subject"), r.get("min_width")) for r in rec["rules"]],
-                         [("map", "$mul", 9), ("map", "$add", 4), ("split", "$mem", None)])
-        self.assertEqual(rec["ignored"], ["optimizations/adder@size",
-                                          "optimizations/mix_soft_hard_blocks",
-                                          "optimizations/multiply@fixed"])
+        self.assertEqual(
+            [(r["rule"], r.get("subject"), r.get("min_width")) for r in rec["rules"]],
+            [("map", "$mul", 9), ("map", "$add", 4), ("split", "$mem", None)],
+        )
+        self.assertEqual(
+            rec["ignored"],
+            [
+                "optimizations/adder@size",
+                "optimizations/mix_soft_hard_blocks",
+                "optimizations/multiply@fixed",
+            ],
+        )
 
     def test_errors(self) -> None:
         self.put("bad.xml", "<config>\n<inputs>\n</config>\n")
         self.assertEqual(self.error("odin2", "bad.xml").at, "bad.xml:3")
         self.put("root.xml", "<odin/>")
         self.assertEqual(self.error("odin2", "root.xml").kind, "syntax")
-        self.put("type.xml", "<config><inputs>\n<input_type>systemverilog</input_type>"
-                             "</inputs></config>")
-        self.assertEqual(self.error("odin2", "type.xml").as_json(),
-                         {"kind": "unsupported_input_type", "at": "type.xml:2",
-                          "names": ["systemverilog"]})
-        self.put("two.xml", "<config><inputs><input_type>blif</input_type>\n"
-                            "<input_type>blif</input_type></inputs></config>")
+        self.put(
+            "type.xml", "<config><inputs>\n<input_type>systemverilog</input_type></inputs></config>"
+        )
+        self.assertEqual(
+            self.error("odin2", "type.xml").as_json(),
+            {"kind": "unsupported_input_type", "at": "type.xml:2", "names": ["systemverilog"]},
+        )
+        self.put(
+            "two.xml",
+            "<config><inputs><input_type>blif</input_type>\n"
+            "<input_type>blif</input_type></inputs></config>",
+        )
         self.assertEqual(self.error("odin2", "two.xml").at, "two.xml:2")
-        self.put("mem.xml", '<config><optimizations><memory split_memory_depth="deep"/>'
-                            "</optimizations></config>")
+        self.put(
+            "mem.xml",
+            '<config><optimizations><memory split_memory_depth="deep"/></optimizations></config>',
+        )
         self.assertEqual(self.error("odin2", "mem.xml").kind, "syntax")
 
 
@@ -514,8 +660,14 @@ class ResolveTest(_TmpCase):
     def test_include_search_order_and_ifdef(self) -> None:
         self.put("src/x.vh", "`define FROM_SRC\n")
         self.put("inc/x.vh", "`define FROM_INC\n")
-        self.put("src/top.v", '`include "x.vh"\n`ifdef FROM_SRC\n' + module("top", "leaf")
-                 + "`else\n" + module("top", "other") + "`endif\n")
+        self.put(
+            "src/top.v",
+            '`include "x.vh"\n`ifdef FROM_SRC\n'
+            + module("top", "leaf")
+            + "`else\n"
+            + module("top", "other")
+            + "`endif\n",
+        )
         self.put("src/leaf.v", "/* block\n comment */ " + module("leaf"))
         self.put("src/other.v", module("other"))
         res = self.resolved("incdir inc\nfile verilog src/top.v\nfile verilog src/leaf.v\n")
@@ -527,44 +679,58 @@ class ResolveTest(_TmpCase):
         self.put("b.vh", '\n`include "a.vh"\n')
         self.put("t.v", '`include "a.vh"\n' + module("t"))
         self.put("p.o3proj", "file verilog t.v\n")
-        self.assertEqual(self.error("o3proj", "p.o3proj").as_json(),
-                         {"kind": "include_cycle", "at": "b.vh:2", "names": ["a.vh"]})
+        self.assertEqual(
+            self.error("o3proj", "p.o3proj").as_json(),
+            {"kind": "include_cycle", "at": "b.vh:2", "names": ["a.vh"]},
+        )
 
     def test_global_define_selects_branch(self) -> None:
-        self.put("top.v", "`ifndef ALT\n" + module("top", "a") + "`elsif ALT\n"
-                 + module("top", "b") + "`endif\n")
+        self.put(
+            "top.v",
+            "`ifndef ALT\n" + module("top", "a") + "`elsif ALT\n" + module("top", "b") + "`endif\n",
+        )
         self.put("a.v", module("a"))
         self.put("b.v", module("b"))
-        res = self.resolved("define ALT=1\nfile verilog top.v\nfile verilog a.v\n"
-                            "file verilog b.v\ntop top\n")
+        res = self.resolved(
+            "define ALT=1\nfile verilog top.v\nfile verilog a.v\nfile verilog b.v\ntop top\n"
+        )
         self.assertEqual(res["units"], ["work.b", "work.top"])
 
     def test_top_errors(self) -> None:
         self.put("a.v", module("a"))
         self.put("b.v", module("b"))
         self.put("p.o3proj", "file verilog a.v\nfile verilog b.v\n")
-        self.assertEqual(self.error("o3proj", "p.o3proj").as_json(),
-                         {"kind": "ambiguous_top", "at": None, "names": ["work.a", "work.b"]})
+        self.assertEqual(
+            self.error("o3proj", "p.o3proj").as_json(),
+            {"kind": "ambiguous_top", "at": None, "names": ["work.a", "work.b"]},
+        )
         self.put("p.o3proj", "file verilog a.v\ntop nope\n")
-        self.assertEqual(self.error("o3proj", "p.o3proj").as_json(),
-                         {"kind": "unknown_top", "at": "p.o3proj:2", "names": ["nope"]})
+        self.assertEqual(
+            self.error("o3proj", "p.o3proj").as_json(),
+            {"kind": "unknown_top", "at": "p.o3proj:2", "names": ["nope"]},
+        )
         self.put("p.o3proj", "file verilog a.v library l1\nfile verilog a.v library l2\ntop a\n")
-        self.assertEqual(self.error("o3proj", "p.o3proj").as_json(),
-                         {"kind": "ambiguous_top", "at": "p.o3proj:3", "names": ["l1.a", "l2.a"]})
-        res = self.resolved("file verilog a.v library l1\nfile verilog a.v library l2\n"
-                            "top l2.a\n")
+        self.assertEqual(
+            self.error("o3proj", "p.o3proj").as_json(),
+            {"kind": "ambiguous_top", "at": "p.o3proj:3", "names": ["l1.a", "l2.a"]},
+        )
+        res = self.resolved("file verilog a.v library l1\nfile verilog a.v library l2\ntop l2.a\n")
         self.assertEqual(res["top"], "l2.a")
         self.put("c.v", module("c", "d"))
         self.put("p.o3proj", "file verilog c.v\n")
-        self.assertEqual(self.error("o3proj", "p.o3proj").as_json(),
-                         {"kind": "unresolved_module", "at": "c.v:2", "names": ["d"]})
+        self.assertEqual(
+            self.error("o3proj", "p.o3proj").as_json(),
+            {"kind": "unresolved_module", "at": "c.v:2", "names": ["d"]},
+        )
 
     def test_duplicate_is_located_at_the_second(self) -> None:
         self.put("a.v", module("m"))
         self.put("b.v", "\n" + module("m"))
         self.put("p.o3proj", "file verilog a.v\nfile verilog b.v\n")
-        self.assertEqual(self.error("o3proj", "p.o3proj").as_json(),
-                         {"kind": "duplicate_module", "at": "b.v:2", "names": ["m"]})
+        self.assertEqual(
+            self.error("o3proj", "p.o3proj").as_json(),
+            {"kind": "duplicate_module", "at": "b.v:2", "names": ["m"]},
+        )
 
     def test_library_search_order(self) -> None:
         self.put("top.v", module("top", "leafcell", "other"))
@@ -586,22 +752,30 @@ class ResolveTest(_TmpCase):
         self.assertEqual(res["read"], ["top.v"])
 
     def test_vhdl_names_are_case_insensitive_across_languages(self) -> None:
-        self.put("e.vhd", "-- c\nENTITY Leaf IS\nEND ENTITY Leaf;\n"
-                          "architecture rtl of LEAF is begin end architecture;\n")
+        self.put(
+            "e.vhd",
+            "-- c\nENTITY Leaf IS\nEND ENTITY Leaf;\n"
+            "architecture rtl of LEAF is begin end architecture;\n",
+        )
         self.put("top.v", module("top", "leaf"))
         res = self.resolved("file vhdl e.vhd\nfile verilog top.v\n")
         self.assertEqual(res["units"], ["work.leaf", "work.top"])
 
     def test_vhdl_library_qualified_entities_and_order(self) -> None:
         self.put("x.vhd", "entity core is end entity;\narchitecture a of core is begin end;\n")
-        self.put("top.vhd", "use work.p.all;\nentity top is end entity;\n"
-                            "architecture a of top is begin\n"
-                            "  u1 : entity l1.core;\n  u2 : entity work.helper port map (x);\n"
-                            "  u3 : component core;\nend architecture;\n")
+        self.put(
+            "top.vhd",
+            "use work.p.all;\nentity top is end entity;\n"
+            "architecture a of top is begin\n"
+            "  u1 : entity l1.core;\n  u2 : entity work.helper port map (x);\n"
+            "  u3 : component core;\nend architecture;\n",
+        )
         self.put("h.vhd", "entity helper is end entity helper;\n")
         self.put("p.vhd", "package p is end package;\n")
-        res = self.resolved("file vhdl top.vhd\nfile vhdl x.vhd library l1\n"
-                            "file vhdl x.vhd library l2\nfile vhdl h.vhd\nfile vhdl p.vhd\n")
+        res = self.resolved(
+            "file vhdl top.vhd\nfile vhdl x.vhd library l1\n"
+            "file vhdl x.vhd library l2\nfile vhdl h.vhd\nfile vhdl p.vhd\n"
+        )
         self.assertEqual(res["top"], "work.top")
         self.assertIn("l1.core", res["units"])
         self.assertEqual(res["order"], ["x.vhd", "x.vhd", "h.vhd", "p.vhd", "top.vhd"])
@@ -612,10 +786,11 @@ class ResolveTest(_TmpCase):
         self.put("ent.vhd", "entity e is end entity;\n")
         self.put("pkg.vhd", "package p is end package;\n")
         self.put("leaf.vhd", "entity leaf is end entity;\n")
-        res = self.resolved("file vhdl arch.vhd\nfile vhdl body.vhd\nfile vhdl ent.vhd\n"
-                            "file vhdl pkg.vhd\nfile vhdl leaf.vhd\n")
-        self.assertEqual(res["order"], ["ent.vhd", "pkg.vhd", "body.vhd", "leaf.vhd",
-                                        "arch.vhd"])
+        res = self.resolved(
+            "file vhdl arch.vhd\nfile vhdl body.vhd\nfile vhdl ent.vhd\n"
+            "file vhdl pkg.vhd\nfile vhdl leaf.vhd\n"
+        )
+        self.assertEqual(res["order"], ["ent.vhd", "pkg.vhd", "body.vhd", "leaf.vhd", "arch.vhd"])
         self.assertEqual(res["units"], ["work.e", "work.leaf"])  # arch.vhd's instance counts
 
     def test_vhdl_dependency_cycle(self) -> None:
@@ -643,8 +818,10 @@ class ResolveTest(_TmpCase):
         self.assertEqual(self.error("o3proj", "p.o3proj").kind, "unsupported_language")
 
     def test_sv_package_function_is_not_an_instance(self) -> None:
-        self.put("p.sv", "package p;\n  function automatic word_t f (input x);\n"
-                         "  endfunction\nendpackage\n")
+        self.put(
+            "p.sv",
+            "package p;\n  function automatic word_t f (input x);\n  endfunction\nendpackage\n",
+        )
         self.put("t.sv", "module t;\n  word_t w [1:0];\n  p::word_t v;\nendmodule\n")
         res = self.resolved("file systemverilog p.sv\nfile systemverilog t.sv\n")
         self.assertEqual(res["units"], ["work.t"])
@@ -701,8 +878,9 @@ class CheckTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def check(self, case: str) -> tuple[int, str]:
-        code, out, err = helpers.run_main(pf.main, ["check", "--root", str(self.root),
-                                                    "--case", case])
+        code, out, err = helpers.run_main(
+            pf.main, ["check", "--root", str(self.root), "--case", case]
+        )
         return code, out + err
 
     def edit(self, case: str, change: dict[str, Any]) -> None:
@@ -725,8 +903,10 @@ class CheckTest(unittest.TestCase):
         self.assertIn("record files", out)
 
     def test_error_mismatch(self) -> None:
-        self.edit("neg_missing_file", {"error": {"kind": "missing_file", "at": "x:1",
-                                                 "names": ["src/missing.v"]}})
+        self.edit(
+            "neg_missing_file",
+            {"error": {"kind": "missing_file", "at": "x:1", "names": ["src/missing.v"]}},
+        )
         self.assertIn("expected error", self.check("neg_missing_file")[1])
 
     def test_unused_files_and_oracle_files(self) -> None:
@@ -747,8 +927,10 @@ class CheckTest(unittest.TestCase):
 
     def test_unreferenced_nested_list(self) -> None:
         f = self.root / "nested_f" / "files.f"
-        f.write_text(f.read_text().replace("-f src/core/core.f\n", "") +
-                     "src/common/dffr.v\nsrc/core/alu.v\nsrc/core/regs.v\n+incdir+src/include\n")
+        f.write_text(
+            f.read_text().replace("-f src/core/core.f\n", "")
+            + "src/common/dffr.v\nsrc/core/alu.v\nsrc/core/regs.v\n+incdir+src/include\n"
+        )
         self.assertIn("src/core/core.f is not used", self.check("nested_f")[1])
 
     def test_stray_project_file(self) -> None:
@@ -756,8 +938,15 @@ class CheckTest(unittest.TestCase):
         self.assertIn("odin2 is not in formats", self.check("lib_v_y")[1])
 
     def test_schema(self) -> None:
-        self.edit("multi_dir", {"formats": ["o3proj", "verilator"], "extra": 1, "phase": 3,
-                                "format_overrides": {"o3proj": {"top": "x"}}})
+        self.edit(
+            "multi_dir",
+            {
+                "formats": ["o3proj", "verilator"],
+                "extra": 1,
+                "phase": 3,
+                "format_overrides": {"o3proj": {"top": "x"}},
+            },
+        )
         out = self.check("multi_dir")[1]
         self.assertIn("unknown key 'extra'", out)
         self.assertIn("bad formats", out)
@@ -770,8 +959,10 @@ class CheckTest(unittest.TestCase):
 
     def test_ref_cmd_header(self) -> None:
         cmd = self.root / "multi_dir" / "ref.cmd"
-        cmd.write_text("\n".join(ln for ln in cmd.read_text().splitlines()
-                                 if not ln.startswith("# versions:")) + "\n")
+        cmd.write_text(
+            "\n".join(ln for ln in cmd.read_text().splitlines() if not ln.startswith("# versions:"))
+            + "\n"
+        )
         self.assertIn("'# versions:' line", self.check("multi_dir")[1])
 
     def test_usage_errors(self) -> None:
@@ -781,8 +972,9 @@ class CheckTest(unittest.TestCase):
         self.assertIn("not a directory", err)
 
     def test_parse_command(self) -> None:
-        code, out, _ = helpers.run_main(pf.main, ["parse", str(self.root / "neg_missing_file"),
-                                                  "f"])
+        code, out, _ = helpers.run_main(
+            pf.main, ["parse", str(self.root / "neg_missing_file"), "f"]
+        )
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["error"]["at"], "files.f:2")
 

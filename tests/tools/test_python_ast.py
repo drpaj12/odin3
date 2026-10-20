@@ -67,18 +67,22 @@ class Builder:
     def module(self) -> None:
         """`module m(input a, output y); assign y = a + 4'b10x?; endmodule` in one UNIT."""
         decl_a = self.node("DECLARATOR", [0], name="a", loc=self.at(1, 16))
-        port_a = self.node("PORT_DECL", [0, decl_a], sub="ODIN3_AST_PORT_DECL_INPUT",
-                           loc=self.at(1, 10))
+        port_a = self.node(
+            "PORT_DECL", [0, decl_a], sub="ODIN3_AST_PORT_DECL_INPUT", loc=self.at(1, 10)
+        )
         decl_y = self.node("DECLARATOR", [0], name="y", loc=self.at(1, 26))
-        port_y = self.node("PORT_DECL", [0, decl_y], sub="ODIN3_AST_PORT_DECL_OUTPUT",
-                           loc=self.at(1, 19))
+        port_y = self.node(
+            "PORT_DECL", [0, decl_y], sub="ODIN3_AST_PORT_DECL_OUTPUT", loc=self.at(1, 19)
+        )
         ports = self.node("LIST", [port_a, port_y], loc=self.at(1, 9))
         lhs = self.node("IDENT", [], name="y", loc=self.at(2, 10))
         a_ref = self.node("IDENT", [], name="a", loc=self.at(2, 14))
-        payload = self.odin3.get("odin3_ast_number_new_str", "uint32_t", self.ptr,
-                                 self.at(2, 18), 4, b"10x?")
-        number = self.node("NUMBER", [], sub="ODIN3_AST_NUMBER_BIN", payload=int(payload),
-                           loc=self.at(2, 18))
+        payload = self.odin3.get(
+            "odin3_ast_number_new_str", "uint32_t", self.ptr, self.at(2, 18), 4, b"10x?"
+        )
+        number = self.node(
+            "NUMBER", [], sub="ODIN3_AST_NUMBER_BIN", payload=int(payload), loc=self.at(2, 18)
+        )
         add = self.node("BINARY", [a_ref, number], sub="ODIN3_AST_BINARY_ADD", loc=self.at(2, 14))
         net = self.node("NET_ASSIGN", [lhs, add], loc=self.at(2, 10))
         assign = self.node("CONT_ASSIGN", [0, 0, net], loc=self.at(2, 3))

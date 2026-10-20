@@ -40,7 +40,12 @@ def _pin_check(*defines: str, source: str = "third_party/abc") -> subprocess.Com
         raise unittest.SkipTest("no cmake")
     return subprocess.run(
         [cmake, f"-DODIN3_ABC_SOURCE_DIR={source}", *defines, "-P", "cmake/abc_pin.cmake"],
-        cwd=helpers.REPO_ROOT, capture_output=True, text=True, timeout=120, check=False)
+        cwd=helpers.REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
 
 
 class AbcPinTest(unittest.TestCase):
@@ -78,8 +83,14 @@ class AbcToolTest(unittest.TestCase):
             self.skipTest("ODIN3_ABC not set")
         with tempfile.TemporaryDirectory() as work:
             (Path(work) / "t.blif").write_text(TWO_GATES, encoding="utf-8")
-            run = subprocess.run([ABC, "-c", "read t.blif; strash; print_stats"], cwd=work,
-                                 capture_output=True, text=True, timeout=120, check=False)
+            run = subprocess.run(
+                [ABC, "-c", "read t.blif; strash; print_stats"],
+                cwd=work,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
             self.assertIn("and =", run.stdout)
             self.assertFalse((Path(work) / "abc.history").exists())  # ABC_NO_HISTORY

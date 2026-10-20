@@ -38,8 +38,17 @@ def fake_vtr_root(root: Path, printed: str) -> Path:
     python.write_text(f"#!/bin/sh\nprintf '{printed}'\n", encoding="utf-8")
     python.chmod(0o755)
     env = vtr_models._clean_env()
-    git = [str(GIT), "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.com",
-           "-c", "commit.gpgsign=false"]
+    git = [
+        str(GIT),
+        "-C",
+        str(root),
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "commit.gpgsign=false",
+    ]
     subprocess.run([*git, "init", "-q"], check=True, env=env)
     subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "fake"], check=True, env=env)
     return root
@@ -76,14 +85,28 @@ class ExtractTest(unittest.TestCase):
             data = vtr_models.extract(MINI_ARCH, root)
         models = data["models"]
         assert isinstance(models, dict)
-        self.assertEqual({"inputs": {"a": 1, "b": 1, "cin": 1},
-                          "outputs": {"cout": 1, "sumout": 1}, "clocks": []}, models["adder"])
+        self.assertEqual(
+            {
+                "inputs": {"a": 1, "b": 1, "cin": 1},
+                "outputs": {"cout": 1, "sumout": 1},
+                "clocks": [],
+            },
+            models["adder"],
+        )
         # R11: the largest num_pins per port over the two RAM pb_types; the data ports of a
         # class="memory" pb_type count 1 (VPR's ProcessMemoryClass)
-        self.assertEqual({"inputs": {"we": 1, "addr": 15, "data": 1, "clk": 1},
-                          "outputs": {"out": 1}, "clocks": ["clk"]}, models["single_port_ram"])
-        self.assertEqual((1, "mini_arch.xml", 6, 15),
-                         (data["schema"], data["arch"], data["lut_size"], data["ram_addr_width"]))
+        self.assertEqual(
+            {
+                "inputs": {"we": 1, "addr": 15, "data": 1, "clk": 1},
+                "outputs": {"out": 1},
+                "clocks": ["clk"],
+            },
+            models["single_port_ram"],
+        )
+        self.assertEqual(
+            (1, "mini_arch.xml", 6, 15),
+            (data["schema"], data["arch"], data["lut_size"], data["ram_addr_width"]),
+        )
         self.assertRegex(str(data["vtr_commit"]), r"^[0-9a-f]{40}$")
         self.assertRegex(str(data["arch_sha256"]), r"^[0-9a-f]{64}$")
         self.assertEqual([], vtr_models.check_schema(data))
@@ -91,8 +114,9 @@ class ExtractTest(unittest.TestCase):
     def test_vtr_disagrees_on_ram_addr_width(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = fake_vtr_root(Path(tmp), "6\\n14\\n")
-            code, out, err = helpers.run_main(vtr_models.main, [
-                "extract", str(MINI_ARCH), "--vtr-root", str(root)])
+            code, out, err = helpers.run_main(
+                vtr_models.main, ["extract", str(MINI_ARCH), "--vtr-root", str(root)]
+            )
         self.assertEqual((1, ""), (code, out))
         self.assertEqual("vtr-models: ram_addr_width: VTR says 14, the pb_types give 15\n", err)
 
@@ -109,27 +133,32 @@ class ExtractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = fake_vtr_root(Path(tmp) / "vtr", "6\\n15\\n")
             out = Path(tmp) / "m.json"
-            code, _, err = helpers.run_main(vtr_models.main, [
-                "extract", str(MINI_ARCH), "--out", str(out), "--vtr-root", str(root)])
+            code, _, err = helpers.run_main(
+                vtr_models.main,
+                ["extract", str(MINI_ARCH), "--out", str(out), "--vtr-root", str(root)],
+            )
             self.assertEqual((0, ""), (code, err))
             text = out.read_text(encoding="utf-8")
             self.assertEqual(vtr_models.dumps(json.loads(text)), text)
-            code, _, err = helpers.run_main(vtr_models.main, ["check", str(out),
-                                                              "--arch", str(MINI_ARCH)])
+            code, _, err = helpers.run_main(
+                vtr_models.main, ["check", str(out), "--arch", str(MINI_ARCH)]
+            )
             self.assertEqual((0, ""), (code, err))
 
     def test_vtr_disagrees_on_lut_size(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = fake_vtr_root(Path(tmp), "5\\n15\\n")
-            code, out, err = helpers.run_main(vtr_models.main, [
-                "extract", str(MINI_ARCH), "--vtr-root", str(root)])
+            code, out, err = helpers.run_main(
+                vtr_models.main, ["extract", str(MINI_ARCH), "--vtr-root", str(root)]
+            )
         self.assertEqual((1, ""), (code, out))
         self.assertEqual("vtr-models: lut_size: VTR says 5, the pb_types give 6\n", err)
 
     def test_vtr_python_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            code, _, err = helpers.run_main(vtr_models.main, [
-                "extract", str(MINI_ARCH), "--vtr-root", tmp])
+            code, _, err = helpers.run_main(
+                vtr_models.main, ["extract", str(MINI_ARCH), "--vtr-root", tmp]
+            )
         self.assertEqual(2, code)
         self.assertTrue(err.startswith("vtr-models: extract: VTR's Python: "), err)
 
@@ -153,65 +182,100 @@ class ArchFactsTest(unittest.TestCase):
             return vtr_models.arch_facts(variant_arch(Path(tmp), old, new), "extract")
 
     def test_data_ports_full_width_without_memory_class(self) -> None:
-        facts = self.facts('class="memory" num_pb="1">\n          <input name="addr" num_pins="9"',
-                           'num_pb="1">\n          <input name="addr" num_pins="9"')
+        facts = self.facts(
+            'class="memory" num_pb="1">\n          <input name="addr" num_pins="9"',
+            'num_pb="1">\n          <input name="addr" num_pins="9"',
+        )
         ram = facts.models["single_port_ram"]
-        self.assertEqual(({"we": 1, "addr": 15, "data": 64, "clk": 1}, {"out": 64}),
-                         (ram["inputs"], ram["outputs"]))
+        self.assertEqual(
+            ({"we": 1, "addr": 15, "data": 64, "clk": 1}, {"out": 64}),
+            (ram["inputs"], ram["outputs"]),
+        )
         self.assertEqual([], facts.problems)
 
     def test_direction_differs(self) -> None:
-        facts = self.facts('<output name="cout" num_pins="1"/>',
-                           '<input name="cout" num_pins="1"/>')
-        self.assertEqual(["adder: pb_type 'adder' port 'cout': direction differs from the model"],
-                         facts.problems)
+        facts = self.facts(
+            '<output name="cout" num_pins="1"/>', '<input name="cout" num_pins="1"/>'
+        )
+        self.assertEqual(
+            ["adder: pb_type 'adder' port 'cout': direction differs from the model"], facts.problems
+        )
         facts = self.facts('<input name="a" num_pins="1"/>', '<output name="a" num_pins="1"/>')
-        self.assertEqual(["adder: pb_type 'adder' port 'a': direction differs from the model"],
-                         facts.problems)
+        self.assertEqual(
+            ["adder: pb_type 'adder' port 'a': direction differs from the model"], facts.problems
+        )
 
     def test_is_clock_differs(self) -> None:
-        facts = self.facts('<clock name="clk" num_pins="1" port_class="clock"/>',
-                           '<input name="clk" num_pins="1" port_class="clock"/>')
-        self.assertEqual(["single_port_ram: pb_type 'mem_512x64_sp' port 'clk': is_clock "
-                          "differs from the model"], facts.problems)
-        facts = self.facts('<input name="we" num_pins="1" port_class="write_en"/>',
-                           '<clock name="we" num_pins="1" port_class="write_en"/>')
-        self.assertEqual(["single_port_ram: pb_type 'mem_512x64_sp' port 'we': is_clock "
-                          "differs from the model"], facts.problems)
+        facts = self.facts(
+            '<clock name="clk" num_pins="1" port_class="clock"/>',
+            '<input name="clk" num_pins="1" port_class="clock"/>',
+        )
+        self.assertEqual(
+            [
+                "single_port_ram: pb_type 'mem_512x64_sp' port 'clk': is_clock "
+                "differs from the model"
+            ],
+            facts.problems,
+        )
+        facts = self.facts(
+            '<input name="we" num_pins="1" port_class="write_en"/>',
+            '<clock name="we" num_pins="1" port_class="write_en"/>',
+        )
+        self.assertEqual(
+            ["single_port_ram: pb_type 'mem_512x64_sp' port 'we': is_clock differs from the model"],
+            facts.problems,
+        )
 
     def test_ports_and_models_must_match(self) -> None:
-        self.assertEqual(["adder: port 'cin' is on no pb_type"],
-                         self.facts('<input name="cin" num_pins="1"/>', '').problems)
-        self.assertEqual(["adder: pb_type port 'x' is not on the model"],
-                         self.facts('<input name="cin" num_pins="1"/>',
-                                    '<input name="cin" num_pins="1"/><input name="x" '
-                                    'num_pins="1"/>').problems)
-        self.assertEqual(["adder: port 'a' is on no pb_type", "adder: port 'b' is on no pb_type",
-                          "adder: port 'cin' is on no pb_type",
-                          "adder: port 'cout' is on no pb_type",
-                          "adder: port 'sumout' is on no pb_type",
-                          "sub: a pb_type's .subckt model is not in <models>"],
-                         self.facts('blif_model=".subckt adder"', 'blif_model=".subckt sub"')
-                         .problems)
+        self.assertEqual(
+            ["adder: port 'cin' is on no pb_type"],
+            self.facts('<input name="cin" num_pins="1"/>', "").problems,
+        )
+        self.assertEqual(
+            ["adder: pb_type port 'x' is not on the model"],
+            self.facts(
+                '<input name="cin" num_pins="1"/>',
+                '<input name="cin" num_pins="1"/><input name="x" num_pins="1"/>',
+            ).problems,
+        )
+        self.assertEqual(
+            [
+                "adder: port 'a' is on no pb_type",
+                "adder: port 'b' is on no pb_type",
+                "adder: port 'cin' is on no pb_type",
+                "adder: port 'cout' is on no pb_type",
+                "adder: port 'sumout' is on no pb_type",
+                "sub: a pb_type's .subckt model is not in <models>",
+            ],
+            self.facts('blif_model=".subckt adder"', 'blif_model=".subckt sub"').problems,
+        )
 
     @unittest.skipUnless(GIT, "git not found")
     def test_extract_refuses_a_problem(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            arch = variant_arch(Path(tmp), '<output name="cout" num_pins="1"/>',
-                                '<input name="cout" num_pins="1"/>')
+            arch = variant_arch(
+                Path(tmp), '<output name="cout" num_pins="1"/>', '<input name="cout" num_pins="1"/>'
+            )
             root = fake_vtr_root(Path(tmp) / "vtr", "6\\n15\\n")
-            code, out, err = helpers.run_main(vtr_models.main, [
-                "extract", str(arch), "--vtr-root", str(root)])
+            code, out, err = helpers.run_main(
+                vtr_models.main, ["extract", str(arch), "--vtr-root", str(root)]
+            )
         self.assertEqual((1, ""), (code, out))
-        self.assertEqual("vtr-models: extract: models: adder: pb_type 'adder' port 'cout': "
-                         "direction differs from the model\n", err)
+        self.assertEqual(
+            "vtr-models: extract: models: adder: pb_type 'adder' port 'cout': "
+            "direction differs from the model\n",
+            err,
+        )
 
     def test_dual_port_ram_addresses_count(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             arch = Path(tmp) / "a.xml"
-            arch.write_text('<architecture><pb_type name="m" blif_model=".subckt dual_port_ram">'
-                            '<input name="addr1" num_pins="11"/><input name="data1" '
-                            'num_pins="16"/></pb_type></architecture>', encoding="utf-8")
+            arch.write_text(
+                '<architecture><pb_type name="m" blif_model=".subckt dual_port_ram">'
+                '<input name="addr1" num_pins="11"/><input name="data1" '
+                'num_pins="16"/></pb_type></architecture>',
+                encoding="utf-8",
+            )
             self.assertEqual(11, vtr_models.arch_facts(arch, "check").ram_addr_width)
 
 
@@ -239,14 +303,17 @@ class CheckTest(unittest.TestCase):
         data["models"]["multiply"]["inputs"]["a"] = 0
         data["ram_addr_width"] = -1
         data["extra"] = 1
-        self.assertEqual([
-            "extra: unknown key",
-            "schema: not 1",
-            "lut_size: not a positive integer",
-            "ram_addr_width: not a non-negative integer",
-            "models: adder: clocks: 'clk' is not an input",
-            "models: multiply: inputs: port 'a' needs a positive width",
-        ], vtr_models.check_schema(data))
+        self.assertEqual(
+            [
+                "extra: unknown key",
+                "schema: not 1",
+                "lut_size: not a positive integer",
+                "ram_addr_width: not a non-negative integer",
+                "models: adder: clocks: 'clk' is not an input",
+                "models: multiply: inputs: port 'a' needs a positive width",
+            ],
+            vtr_models.check_schema(data),
+        )
 
     def test_not_json_is_exit_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -259,23 +326,34 @@ class CheckTest(unittest.TestCase):
     def test_stale_against_arch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             arch = Path(tmp) / "mini_arch.xml"
-            arch.write_text(MINI_ARCH.read_text(encoding="utf-8").replace(
-                'name="addr" num_pins="15"', 'name="addr" num_pins="14"'), encoding="utf-8")
-            code, _, err = helpers.run_main(vtr_models.main, ["check", str(K6_JSON),
-                                                              "--arch", str(arch)])
+            arch.write_text(
+                MINI_ARCH.read_text(encoding="utf-8").replace(
+                    'name="addr" num_pins="15"', 'name="addr" num_pins="14"'
+                ),
+                encoding="utf-8",
+            )
+            code, _, err = helpers.run_main(
+                vtr_models.main, ["check", str(K6_JSON), "--arch", str(arch)]
+            )
         self.assertEqual(1, code)
-        self.assertIn("vtr-models: check: arch: 'k6_frac_N10_frac_chain_mem32K_40nm.xml' is not "
-                      "'mini_arch.xml'\n", err)
+        self.assertIn(
+            "vtr-models: check: arch: 'k6_frac_N10_frac_chain_mem32K_40nm.xml' is not "
+            "'mini_arch.xml'\n",
+            err,
+        )
         self.assertIn("vtr-models: check: arch_sha256: differs from mini_arch.xml", err)
-        self.assertIn("vtr-models: check: models: single_port_ram: inputs: differs from the "
-                      "arch\n", err)
+        self.assertIn(
+            "vtr-models: check: models: single_port_ram: inputs: differs from the arch\n", err
+        )
         self.assertIn("vtr-models: check: models: multiply: not in the arch\n", err)
         self.assertIn("vtr-models: check: ram_addr_width: 15, but the arch gives 14\n", err)
 
     @unittest.skipUnless(VTR_ARCH_DIR.is_dir(), "no VTR checkout")
     def test_committed_jsons_fresh(self) -> None:
-        for path, arch in ((K6_JSON, "k6_frac_N10_frac_chain_mem32K_40nm.xml"),
-                           (EARCH_JSON, "EArch.xml")):
+        for path, arch in (
+            (K6_JSON, "k6_frac_N10_frac_chain_mem32K_40nm.xml"),
+            (EARCH_JSON, "EArch.xml"),
+        ):
             with self.subTest(arch=arch):
                 self.assertEqual([], vtr_models.check(path, VTR_ARCH_DIR / arch))
 
@@ -285,21 +363,52 @@ class CommittedJsonTest(unittest.TestCase):
 
     def test_k6_equals_spec_table(self) -> None:
         data = json.loads(K6_JSON.read_text(encoding="utf-8"))
-        self.assertEqual({
-            "adder": {"inputs": {"a": 1, "b": 1, "cin": 1},
-                      "outputs": {"cout": 1, "sumout": 1}, "clocks": []},
-            "multiply": {"inputs": {"a": 36, "b": 36}, "outputs": {"out": 72}, "clocks": []},
-            # VPR's ProcessMemoryClass makes the RAM data ports 1 bit (spec §23, Task 7 review I1)
-            "single_port_ram": {"inputs": {"we": 1, "addr": 15, "data": 1, "clk": 1},
-                                "outputs": {"out": 1}, "clocks": ["clk"]},
-            "dual_port_ram": {"inputs": {"we1": 1, "we2": 1, "addr1": 15, "addr2": 15,
-                                         "data1": 1, "data2": 1, "clk": 1},
-                              "outputs": {"out1": 1, "out2": 1}, "clocks": ["clk"]},
-        }, data["models"])
-        self.assertEqual((1, 6, 15, "k6_frac_N10_frac_chain_mem32K_40nm.xml",
-                          "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"),
-                         (data["schema"], data["lut_size"], data["ram_addr_width"], data["arch"],
-                          data["vtr_commit"]))
+        self.assertEqual(
+            {
+                "adder": {
+                    "inputs": {"a": 1, "b": 1, "cin": 1},
+                    "outputs": {"cout": 1, "sumout": 1},
+                    "clocks": [],
+                },
+                "multiply": {"inputs": {"a": 36, "b": 36}, "outputs": {"out": 72}, "clocks": []},
+                # VPR's ProcessMemoryClass makes the RAM data ports 1 bit (spec §23, Task 7 review I1)
+                "single_port_ram": {
+                    "inputs": {"we": 1, "addr": 15, "data": 1, "clk": 1},
+                    "outputs": {"out": 1},
+                    "clocks": ["clk"],
+                },
+                "dual_port_ram": {
+                    "inputs": {
+                        "we1": 1,
+                        "we2": 1,
+                        "addr1": 15,
+                        "addr2": 15,
+                        "data1": 1,
+                        "data2": 1,
+                        "clk": 1,
+                    },
+                    "outputs": {"out1": 1, "out2": 1},
+                    "clocks": ["clk"],
+                },
+            },
+            data["models"],
+        )
+        self.assertEqual(
+            (
+                1,
+                6,
+                15,
+                "k6_frac_N10_frac_chain_mem32K_40nm.xml",
+                "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b",
+            ),
+            (
+                data["schema"],
+                data["lut_size"],
+                data["ram_addr_width"],
+                data["arch"],
+                data["vtr_commit"],
+            ),
+        )
 
     def test_earch_same_models(self) -> None:
         k6 = json.loads(K6_JSON.read_text(encoding="utf-8"))
@@ -329,18 +438,23 @@ end
 
 class CheckLibTest(unittest.TestCase):
     def test_vtr_lib_against_k6(self) -> None:
-        code, out, err = helpers.run_main(vtr_models.main, [
-            "check-lib", str(VTR_LIB), "--models", str(K6_JSON)])
+        code, out, err = helpers.run_main(
+            vtr_models.main, ["check-lib", str(VTR_LIB), "--models", str(K6_JSON)]
+        )
         self.assertEqual((0, "", ""), (code, out, err))
         self.assertEqual(0, helpers.run_main(vtr_models.main, ["check-lib", str(VTR_LIB)])[0])
 
     def test_extra_port(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            lib = write_lib(Path(tmp), "cell adder hard\n  in a 1 ; in b 1 ; in cin 1 ; in x 1\n"
-                                       "  out cout 1 ; out sumout 1\nend\n")
+            lib = write_lib(
+                Path(tmp),
+                "cell adder hard\n  in a 1 ; in b 1 ; in cin 1 ; in x 1\n"
+                "  out cout 1 ; out sumout 1\nend\n",
+            )
             code, _, err = helpers.run_main(vtr_models.main, ["check-lib", str(lib)])
-        self.assertEqual((1, "vtr-models: check-lib: adder: port 'x' is not on the model\n"),
-                         (code, err))
+        self.assertEqual(
+            (1, "vtr-models: check-lib: adder: port 'x' is not on the model\n"), (code, err)
+        )
 
     def test_clock_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -348,8 +462,14 @@ class CheckLibTest(unittest.TestCase):
             self.assertEqual([], vtr_models.check_lib(good, k6_models()))
             lib = write_lib(Path(tmp), SPRAM.format(clock=""))
             code, _, err = helpers.run_main(vtr_models.main, ["check-lib", str(lib)])
-        self.assertEqual((1, "vtr-models: check-lib: single_port_ram: port 'clk' clock flag "
-                             "differs from the model\n"), (code, err))
+        self.assertEqual(
+            (
+                1,
+                "vtr-models: check-lib: single_port_ram: port 'clk' clock flag "
+                "differs from the model\n",
+            ),
+            (code, err),
+        )
 
     def test_other_reasons(self) -> None:
         text = (
@@ -361,27 +481,37 @@ class CheckLibTest(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             found = vtr_models.check_lib(write_lib(Path(tmp), text), k6_models())
-        self.assertEqual([
-            "mystery: no model of this name",
-            "adder: port 'a' direction differs from the model",
-            "multiply: port 'a' default width 40 exceeds the model's 36",
-            "multiply: port 'out' default width 76 exceeds the model's 72",
-            "multiply: model port 'b' is not on the cell",
-        ], found)
+        self.assertEqual(
+            [
+                "mystery: no model of this name",
+                "adder: port 'a' direction differs from the model",
+                "multiply: port 'a' default width 40 exceeds the model's 36",
+                "multiply: port 'out' default width 76 exceeds the model's 72",
+                "multiply: model port 'b' is not on the cell",
+            ],
+            found,
+        )
 
     def test_width_boundary(self) -> None:
-        cell = ("cell multiply hard\n  param A_WIDTH int {a}\n  in a A_WIDTH\n  in b 36\n"
-                "  out out 72\nend\n")
+        cell = (
+            "cell multiply hard\n  param A_WIDTH int {a}\n  in a A_WIDTH\n  in b 36\n"
+            "  out out 72\nend\n"
+        )
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual([], vtr_models.check_lib(write_lib(Path(tmp), cell.format(a=36)),
-                                                      k6_models()))
-            self.assertEqual(["multiply: port 'a' default width 37 exceeds the model's 36"],
-                             vtr_models.check_lib(write_lib(Path(tmp), cell.format(a=37)),
-                                                  k6_models()))
-            self.assertEqual(["multiply: param 'A_WIDTH' default cannot be evaluated",
-                              "multiply: port 'a' default width 'A_WIDTH' cannot be evaluated"],
-                             vtr_models.check_lib(write_lib(Path(tmp), cell.format(a="x ? 1")),
-                                                  k6_models()))
+            self.assertEqual(
+                [], vtr_models.check_lib(write_lib(Path(tmp), cell.format(a=36)), k6_models())
+            )
+            self.assertEqual(
+                ["multiply: port 'a' default width 37 exceeds the model's 36"],
+                vtr_models.check_lib(write_lib(Path(tmp), cell.format(a=37)), k6_models()),
+            )
+            self.assertEqual(
+                [
+                    "multiply: param 'A_WIDTH' default cannot be evaluated",
+                    "multiply: port 'a' default width 'A_WIDTH' cannot be evaluated",
+                ],
+                vtr_models.check_lib(write_lib(Path(tmp), cell.format(a="x ? 1")), k6_models()),
+            )
 
     def test_lib_errors_are_exit_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -409,16 +539,16 @@ CLASSES = {
     "c1": r"illegal character <0x[0-9A-F]{2}> in name|unterminated quoted string",
     "c2": r"directive '.*' is not read by VPR|'.*' needs --circuit_format eblif",
     "c3": r"second model '.*' with primitives; VPR reads one|black-box model '.*' "
-          r"(is not an arch model|has primitives)|stub port '.*' of '.*': .*"
-          r"|no model with primitives; VPR needs one",
+    r"(is not an arch model|has primitives)|stub port '.*' of '.*': .*"
+    r"|no model with primitives; VPR needs one",
     "c4": r"\.names with \d+ inputs exceeds K=\d+",
     "c5": r"cover row has \d+ columns, expected \d+|cover row character '.*'",
     "c5b": r"1-input \.names '.*' has \d+ cover rows; VPR asserts exactly one "
-           r"\(absorb_buffer_luts\)",
+    r"\(absorb_buffer_luts\)",
     "c6": r"latch type '.*' \(VPR accepts only re\)|latch without a clock|latch init '.*'"
-          r"|'.*' on a \.latch line lexes as a keyword",
+    r"|'.*' on a \.latch line lexes as a keyword",
     "c7": r"\.subckt model '.*' is not an arch model|no port '.*' on model '.*'"
-          r"|port '.*' exceeds width \d+ of '.*'|formal '.*' given twice",
+    r"|port '.*' exceeds width \d+ of '.*'|formal '.*' given twice",
     "c8": r"duplicate block name '.*' \(\w+ and \w+\)",
     "c9": r"net '.*' has \d+ drivers",
     "cs1": r"latch init 3 \(write 2; VTR's ABC rejects 3\)",
@@ -427,18 +557,38 @@ CLASSES = {
     "cs4": r"missing header|\.clock present|stub '.*' unused",
     "cs5": r"clock net '.*' contains '\|' or '_\^_' \(breaks VTR's blackbox_latches\.pl\)",
 }
-TOP_FILES = {"c1_illegal_char", "c2_clock", "c3_two_models", "c3_bad_blackbox", "c4_wide_names",
-             "c5_row_width", "c5b_buffer_rows", "c6_fe", "c6_no_clock", "c6_init4", "c6_keyword",
-             "c7_no_model", "c7_no_port", "c7_wide_port", "c7_twice", "c7_ram_data_bit",
-             "c8_dup_block",
-             "c9_two_drivers"}
+TOP_FILES = {
+    "c1_illegal_char",
+    "c2_clock",
+    "c3_two_models",
+    "c3_bad_blackbox",
+    "c4_wide_names",
+    "c5_row_width",
+    "c5b_buffer_rows",
+    "c6_fe",
+    "c6_no_clock",
+    "c6_init4",
+    "c6_keyword",
+    "c7_no_model",
+    "c7_no_port",
+    "c7_wide_port",
+    "c7_twice",
+    "c7_ram_data_bit",
+    "c8_dup_block",
+    "c9_two_drivers",
+}
 LINE = re.compile(r"^blif-vtr-check: (?P<path>.+):(?P<line>\d+): (?P<message>.+)$")
 
 
 def run_checker(path: Path, strict: bool) -> tuple[int, list[str]]:
     """(exit code, the violation messages) of blif-vtr-check on path."""
-    proc = subprocess.run([str(CHECKER), *(["--strict"] if strict else []), str(path)],
-                          capture_output=True, text=True, check=False, timeout=60)
+    proc = subprocess.run(
+        [str(CHECKER), *(["--strict"] if strict else []), str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
     messages = []
     for line in proc.stdout.splitlines():
         match = LINE.match(line)

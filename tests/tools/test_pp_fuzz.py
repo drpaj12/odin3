@@ -23,8 +23,11 @@ def tearDownModule() -> None:
     _TREES.cleanup()
 
 
-def run_ref(files: dict[str, str], root: str = "src/t.v",
-            defines: list[tuple[str, str | None]] | None = None) -> tuple[pf.Text, str]:
+def run_ref(
+    files: dict[str, str],
+    root: str = "src/t.v",
+    defines: list[tuple[str, str | None]] | None = None,
+) -> tuple[pf.Text, str]:
     """The reference's stream for root in a fresh tree holding files; (stream, tree)."""
     tmp = tempfile.mkdtemp(dir=_TREES.name)
     for rel, text in files.items():
@@ -42,7 +45,7 @@ def at(tree: str, rel: str, line: int, col: int) -> pf.Origin:
     """The origin of rel's line:col (1-based) in tree."""
     path = os.path.join(tree, rel)
     lines = Path(path).read_bytes().decode("latin-1").split("\n")
-    return (path, sum(len(x) + 1 for x in lines[:line - 1]) + col - 1)
+    return (path, sum(len(x) + 1 for x in lines[: line - 1]) + col - 1)
 
 
 def definitions(text: str) -> list[tuple[str, list[str]]]:
@@ -123,20 +126,30 @@ class GeneratorTest(unittest.TestCase):
             gen = pf.Gen(random.Random(f"pp-fuzz/1/{case}"))
             defines = "\n".join(line for line in body.splitlines() if line.startswith("`define M"))
             uses = "\n".join(line for line in body.splitlines() if not line.startswith("`define"))
-            seen |= {k for k, hit in {
-                "default": any(m.formals and any(m.formals) for m in gen.macros),
-                "comment in default": "=/*c*/ 3" in body or "= 1 /* c */+ 2" in body,
-                "string in body": '"' in defines, "comment in body": "/* c pa */" in defines,
-                "nested use in actual": re.search(r"[(,]\s*`M[0-9]", uses) is not None,
-                "escaped actual": ",)q +1" in body,
-                "include": "`include" in body, "elsif": "`elsif" in body,
-                "translate_off": "translate_off" in body, "crlf": "\r\n" in body,
-                "continuation": "\\\n" in body or "\\\r\n" in body, "line": "`line" in body,
-                "pass-through": "`timescale" in body, "empty list": "()" in body,
-                "tail": any(m.tail for m in gen.macros),
-                "open tail": any(m.tail and m.tail[1] for m in gen.macros),
-                "cond in actual": "+ (2, 3) `else" in body, "escaped": "\\bus" in body,
-            }.items() if hit}
+            seen |= {
+                k
+                for k, hit in {
+                    "default": any(m.formals and any(m.formals) for m in gen.macros),
+                    "comment in default": "=/*c*/ 3" in body or "= 1 /* c */+ 2" in body,
+                    "string in body": '"' in defines,
+                    "comment in body": "/* c pa */" in defines,
+                    "nested use in actual": re.search(r"[(,]\s*`M[0-9]", uses) is not None,
+                    "escaped actual": ",)q +1" in body,
+                    "include": "`include" in body,
+                    "elsif": "`elsif" in body,
+                    "translate_off": "translate_off" in body,
+                    "crlf": "\r\n" in body,
+                    "continuation": "\\\n" in body or "\\\r\n" in body,
+                    "line": "`line" in body,
+                    "pass-through": "`timescale" in body,
+                    "empty list": "()" in body,
+                    "tail": any(m.tail for m in gen.macros),
+                    "open tail": any(m.tail and m.tail[1] for m in gen.macros),
+                    "cond in actual": "+ (2, 3) `else" in body,
+                    "escaped": "\\bus" in body,
+                }.items()
+                if hit
+            }
         self.assertEqual(18, len(seen), seen)
 
 
@@ -170,14 +183,18 @@ class ReferenceTest(unittest.TestCase):
         self.assertEqual([None, None], [out[1][1], out[11][1]])
 
     def test_2a_example_spelling(self) -> None:
-        src = ("`define INNER(p) (p + 1)\n`define OUTER(q) `INNER(q * 2)\n"
-               "assign y = `OUTER(xx);\n")
+        src = "`define INNER(p) (p + 1)\n`define OUTER(q) `INNER(q * 2)\nassign y = `OUTER(xx);\n"
         out, tree = run_ref({"src/t.v": src})
         self.assertEqual("\n\nassign y = (xx * 2 + 1);\n", text(out))
         f = "src/t.v"
-        want = [at(tree, f, 1, 18), at(tree, f, 3, 19), at(tree, f, 3, 20),
-                *[at(tree, f, 2, 26 + k) for k in range(4)],
-                *[at(tree, f, 1, 20 + k) for k in range(5)], at(tree, f, 3, 22)]
+        want = [
+            at(tree, f, 1, 18),
+            at(tree, f, 3, 19),
+            at(tree, f, 3, 20),
+            *[at(tree, f, 2, 26 + k) for k in range(4)],
+            *[at(tree, f, 1, 20 + k) for k in range(5)],
+            at(tree, f, 3, 22),
+        ]
         self.assertEqual(want, [o for _, o in out[13:26]])
 
     def test_defaults_and_empty_actuals(self) -> None:
@@ -225,8 +242,13 @@ class ReferenceTest(unittest.TestCase):
         self.assertEqual("a \nc\n", text(out))
 
     def test_include_search_order(self) -> None:
-        files = {"src/t.v": '`include "h.vh"\n', "src/h.vh": '1 `include "g.vh"\n',
-                 "inc/h.vh": "2\n", "inc/g.vh": "3\n", "inc2/g.vh": "4\n"}
+        files = {
+            "src/t.v": '`include "h.vh"\n',
+            "src/h.vh": '1 `include "g.vh"\n',
+            "inc/h.vh": "2\n",
+            "inc/g.vh": "3\n",
+            "inc2/g.vh": "4\n",
+        }
         out, _ = run_ref(files)
         self.assertEqual("1 3\n\n\n", text(out))
 
@@ -236,8 +258,14 @@ class ReferenceTest(unittest.TestCase):
         self.assertEqual([("8", (pf.CMDLINE, 20))], ref.macros["P"].body)
 
     def test_errors_are_reported(self) -> None:
-        for src in ("`UNDEF\n", "`define A(x) x\n`A\n", "`define B `ifdef X\n`B\n",
-                    "`ifdef X\n", "`endif\n", "`define F() 1\n`F(2)\n"):
+        for src in (
+            "`UNDEF\n",
+            "`define A(x) x\n`A\n",
+            "`define B `ifdef X\n`B\n",
+            "`ifdef X\n",
+            "`endif\n",
+            "`define F() 1\n`F(2)\n",
+        ):
             with self.subTest(src=src), self.assertRaises(pf.RefError):
                 run_ref({"src/t.v": src})
 
@@ -253,17 +281,24 @@ class CheckTest(unittest.TestCase):
 
     def seg(self, offset: int, line: int | None, col: int | None) -> dict[str, object]:
         where = None if line is None else self.src
-        return {"out_offset": offset, "file": where, "spell_file": where, "spell_line": line,
-                "spell_col": col}
+        return {
+            "out_offset": offset,
+            "file": where,
+            "spell_file": where,
+            "spell_line": line,
+            "spell_col": col,
+        }
 
-    def origins(self, text: str, segs: list[dict[str, object]]) -> tuple[list[pf.Origin],
-                                                                         list[str]]:
+    def origins(
+        self, text: str, segs: list[dict[str, object]]
+    ) -> tuple[list[pf.Origin], list[str]]:
         probs: list[str] = []
         return pf.stream_origins(text, segs, pf.Sources(""), probs), probs
 
     def test_good_map(self) -> None:
-        got, probs = self.origins("y a", [self.seg(0, 1, 2), self.seg(1, None, None),
-                                          self.seg(2, 2, 1)])
+        got, probs = self.origins(
+            "y a", [self.seg(0, 1, 2), self.seg(1, None, None), self.seg(2, 2, 1)]
+        )
         self.assertEqual([], probs)
         self.assertEqual([(self.src, 1), None, (self.src, 3)], got)
 
@@ -292,10 +327,17 @@ class CheckTest(unittest.TestCase):
         self.assertIn("start at 0", probs[0])
 
     def test_tokens_and_their_spelling(self) -> None:
-        want: pf.Text = [("x", ("f", 0)), ("y", ("f", 1)), (" ", None), ("/", ("g", 0)),
-                         ("/", ("g", 1)), ("c", ("g", 2))]
-        self.assertEqual([("xy", (("f", 0), ("f", 1))), ("//c", (("g", 0), ("g", 1), ("g", 2)))],
-                         pf.tokens(want))
+        want: pf.Text = [
+            ("x", ("f", 0)),
+            ("y", ("f", 1)),
+            (" ", None),
+            ("/", ("g", 0)),
+            ("/", ("g", 1)),
+            ("c", ("g", 2)),
+        ]
+        self.assertEqual(
+            [("xy", (("f", 0), ("f", 1))), ("//c", (("g", 0), ("g", 1), ("g", 2)))], pf.tokens(want)
+        )
         src = pf.Sources("")
         self.assertEqual([], pf.compare_tokens(want, list(want), src))
         moved = [("x", ("f", 0)), ("y", ("f", 2)), *want[2:]]
@@ -309,28 +351,46 @@ class CheckTest(unittest.TestCase):
         (out / "0.v").write_text("x", encoding="latin-1")
         (out / "0.segments.json").write_text(json.dumps([self.seg(0, 1, 1)]), encoding="latin-1")
         self.assertEqual([], pf.check_stream(0, [("x", (self.src, 0))], out, pf.Sources("")))
-        self.assertIn("stream 0: token 0", pf.check_stream(0, [("z", (self.src, 0))], out,
-                                                           pf.Sources(""))[0])
+        self.assertIn(
+            "stream 0: token 0", pf.check_stream(0, [("z", (self.src, 0))], out, pf.Sources(""))[0]
+        )
 
 
 class SeedsTest(unittest.TestCase):
     def test_seeds_get_both_options_bytes_smallest_first(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            for rel, data in (("src/a.v", b"module a;"), ("src/b.vh", b"`x"),
-                              ("src/notes.txt", b"x"), ("micro/plain.v", b"module p;"),
-                              ("micro/tick.v", b"`define A")):
+            for rel, data in (
+                ("src/a.v", b"module a;"),
+                ("src/b.vh", b"`x"),
+                ("src/notes.txt", b"x"),
+                ("micro/plain.v", b"module p;"),
+                ("micro/tick.v", b"`define A"),
+            ):
                 Path(tmp, rel).parent.mkdir(parents=True, exist_ok=True)
                 Path(tmp, rel).write_bytes(data)
-            code, out, _ = helpers.run_main(pf.main, [
-                "seeds", os.path.join(tmp, "out"), os.path.join(tmp, "src"),
-                "--backtick", os.path.join(tmp, "micro")])
+            code, out, _ = helpers.run_main(
+                pf.main,
+                [
+                    "seeds",
+                    os.path.join(tmp, "out"),
+                    os.path.join(tmp, "src"),
+                    "--backtick",
+                    os.path.join(tmp, "micro"),
+                ],
+            )
             self.assertEqual((0, "pp-fuzz: 6 seeds from 3 files"), (code, out[:29]))
             got = {p.name: p.read_bytes() for p in Path(tmp, "out").iterdir()}
-            self.assertEqual({"0000_b.vh.00": b"\0`x", "0000_b.vh.c3": b"\xc3`x",
-                              "0001_tick.v.00": b"\0`define A",  # same size: by path
-                              "0001_tick.v.c3": b"\xc3`define A",
-                              "0002_a.v.00": b"\0module a;", "0002_a.v.c3": b"\xc3module a;"},
-                             got)
+            self.assertEqual(
+                {
+                    "0000_b.vh.00": b"\0`x",
+                    "0000_b.vh.c3": b"\xc3`x",
+                    "0001_tick.v.00": b"\0`define A",  # same size: by path
+                    "0001_tick.v.c3": b"\xc3`define A",
+                    "0002_a.v.00": b"\0module a;",
+                    "0002_a.v.c3": b"\xc3module a;",
+                },
+                got,
+            )
 
 
 if __name__ == "__main__":

@@ -38,6 +38,7 @@ crashed or timed out.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import re
 import shutil
@@ -47,6 +48,7 @@ import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 TOOL = "loc-check"
 ROOT = Path(__file__).resolve().parents[2]
@@ -87,11 +89,11 @@ RULES: dict[tuple[str, str, bool], str] = {
     ("plain", "net", False): "X-1",
     ("plain", "net", True): "X-7",
 }
-# Where a first-location match without the rest is the format (not a bug): X-2, an `assign`
-# comment carries file and line; and a BLIF VTR net name `hier/short@file:line` carries the line
-# only (W-3: names and the Verilog comment take the first location, line only).
-LINE_OK = {("verilog", "node"): "X-2", ("blif", "net"): "name"}
-BLIF_FORMATS = ("blif", "plain")
+# Where a match of the first location's file and line without the rest is the format (not a bug):
+# X-2, an `assign` carries `// file:line` only, for the cell and for the net it drives (the
+# reader gives that net the cell's comment); and a BLIF VTR net name `hier/short@file:line`
+# carries the line only (W-3: names and the Verilog comment take the first location, line only).
+LINE_OK = {("verilog", "node"): "X-2", ("verilog", "net"): "X-2", ("blif", "net"): "name"}
 GENERATED = re.compile(r"^\$[cnwm]\d+$")
 LOC_RE = re.compile(r"^(.*):(\d+)(?:\.\d+(?:-\d+\.\d+)?)?$")
 TOP_RE = re.compile(r"read_verilog: elaborated top '([^']+)'")
@@ -184,6 +186,18 @@ def is_generated(name: str) -> bool:
 # --- the comparison --------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class CellSet:
+    """The cells of one module in its JSON file: all names, and those that only copy a net (a
+    one-input identity LUT or buffer), which the Verilog writer folds into an alias."""
+
+    names: frozenset[str]
+    buffers: frozenset[str]
+
+
+Written = dict[str, CellSet]
+
+
 @dataclass
 class Tally:
     """The columns of one kind (one design, or a sum)."""
@@ -214,10 +228,25 @@ def distinct_lines(locs: Sequence[Loc]) -> int:
     return len({(x.file, x.line) for x in locs})
 
 
-def lose(fmt: str, kind: str, named: bool, tally: Tally, port: bool = False) -> None:
-    cls = RULES.get((fmt, kind, named))
-    if port and fmt in BLIF_FORMATS and kind == "node":
-        cls = "X-8"
+def lose(scope: Scope, before: Obj, tally: Tally) -> None:
+    """Counts a lost object under its class. A cell the JSON file of the same netlist has no entry
+    for (``scope.written``) has no carrier in any format: X-8 when it has the location of a
+    declared wire (a port cell: every format writes ports, not cells), else X-9 (a constant driver
+    or other cell the writers fold into a literal); a buffer lost in Verilog is X-9 too (the
+    writer folds it into an alias). A module the read-back has no trace of (the
+    Verilog writer writes the top and what it instantiates) is X-1, no carrier. Everything else
+    by RULES."""
+    cls = RULES.get((scope.fmt, scope.kind, not is_generated(before.name)))
+    if not scope.present:
+        cls = "X-1"
+    elif (
+        scope.kind == "node"
+        and scope.written is not None
+        and before.name not in scope.written.names
+    ):
+        cls = "X-8" if before.src in scope.wire_srcs else "X-9"
+    elif scope.kind == "node" and scope.fmt == "verilog" and scope.written is not None:
+        cls = "X-9" if before.name in scope.written.buffers else cls
     if cls is None:
         tally.unclassified += 1
     else:
@@ -226,29 +255,36 @@ def lose(fmt: str, kind: str, named: bool, tally: Tally, port: bool = False) -> 
 
 @dataclass(frozen=True)
 class Scope:
-    """What a pairing needs: the format, the kind and the location texts of the module's wires
-    (a cell with the location of a declared wire is a port cell, class X-8 in the BLIF
-    dialects, which list ports and write no cell for them)."""
+    """What a pairing needs: the format, the kind, the location texts of the module's wires and the
+    names of the cells its JSON file has (None: not known, every cell counts as written)."""
 
     fmt: str
     kind: str
     wire_srcs: frozenset[str]
+    written: CellSet | None
+    present: bool = True
+
+
+def from_wire(scope: Scope, after: Obj) -> bool:
+    """A net that has the location of a declared wire of its module after read-back: the readers
+    give a net the location of its netname or declaration (D-2, D-3), so the net is `inherited`
+    from the wire, not `gained`."""
+    return scope.kind == "net" and after.src in scope.wire_srcs
 
 
 def judge_pair(scope: Scope, before: Obj, after: Obj | None, tally: Tally) -> None:
     """Counts one paired object: before has a location or not, after is its read-back (or None)."""
     fmt, kind = scope.fmt, scope.kind
-    port = before.src in scope.wire_srcs
     mine = parse_locs(before.src)
-    named = not is_generated(before.name)
     inherits = fmt == "blif" and kind == "node"  # counted as `inherited`, not as same or line
     if not mine:
         if after is not None and after.src and not inherits:
-            tally.gained += 1
+            tally.inherited += from_wire(scope, after)
+            tally.gained += not from_wire(scope, after)
         return
     theirs = parse_locs(after.src) if after is not None else []
     if not theirs:
-        lose(fmt, kind, named, tally, port)
+        lose(scope, before, tally)
     elif after is not None and after.src == before.src:
         tally.same += not inherits
         tally.lines_after.append(distinct_lines(theirs))
@@ -256,13 +292,15 @@ def judge_pair(scope: Scope, before: Obj, after: Obj | None, tally: Tally) -> No
         tally.line += not inherits
         tally.lines_after.append(distinct_lines(theirs))
     else:
-        lose(fmt, kind, named, tally, port)  # a changed location is a lost one
+        lose(scope, before, tally)  # a changed location is a lost one
 
 
-def pool_pairs(group_b: list[Obj], group_a: list[Obj]) -> tuple[list[tuple[Obj, Obj | None]], int]:
+def pool_pairs(
+    group_b: list[Obj], group_a: list[Obj]
+) -> tuple[list[tuple[Obj, Obj | None]], list[Obj]]:
     """Pairs the objects with no name partner: exact location list, then first file and line.
-    Returns (before object, after object or None) for every had object, and the number of after
-    objects with a location that nobody took."""
+    Returns (before object, after object or None) for every had object, and the after objects
+    with a location that nobody took."""
     pairs: list[tuple[Obj, Obj | None]] = []
     free: dict[str, list[Obj]] = {}
     for obj in group_a:
@@ -285,8 +323,7 @@ def pool_pairs(group_b: list[Obj], group_a: list[Obj]) -> tuple[list[tuple[Obj, 
         key = (first[0].file, first[0].line) if first else ("", 0)
         pairs.append((obj, by_line[key].pop() if by_line.get(key) else None))
     taken = {id(a) for _, a in pairs if a is not None}
-    surplus = sum(1 for objs in free.values() for obj in objs if id(obj) not in taken)
-    return pairs, surplus
+    return pairs, [obj for objs in free.values() for obj in objs if id(obj) not in taken]
 
 
 def compare_group(scope: Scope, before: list[Obj], after: list[Obj], tally: Tally) -> None:
@@ -304,23 +341,31 @@ def compare_group(scope: Scope, before: list[Obj], after: list[Obj], tally: Tall
         else:
             left_b.append(obj)
     left_a = [o for o in after if o.name not in taken or is_generated(o.name) or pool_all]
+    if scope.written is not None:  # a cell with no carrier takes what is left (stable sort)
+        left_b.sort(key=lambda o: o.name not in (scope.written.names if scope.written else ()))
     pairs, surplus = pool_pairs(left_b, left_a)
     for obj, partner in pairs:
         judge_pair(scope, obj, partner, tally)
     nolocs = sum(1 for o in left_b if not o.src)
     if not pool_all:
-        tally.gained += min(surplus, nolocs)
+        wired = min(sum(1 for o in surplus if from_wire(scope, o)), nolocs)
+        tally.inherited += wired
+        tally.gained += min(len(surplus) - wired, nolocs - wired)
     else:
         tally.inherited += sum(1 for o in after if o.src)
 
 
-def compare(fmt: str, before: list[Obj], after: list[Obj]) -> dict[str, Tally]:
-    """The tally of every kind present, for one design at one level in one format."""
+def compare(
+    fmt: str, before: list[Obj], after: list[Obj], written: Written | None = None
+) -> dict[str, Tally]:
+    """The tally of every kind present, for one design at one level in one format. ``written``:
+    module -> the names of the cells in its JSON file (for the classes X-8 and X-9)."""
     out: dict[str, Tally] = {}
     groups_b: dict[tuple[str, str], list[Obj]] = {}
     groups_a: dict[tuple[str, str], list[Obj]] = {}
     for obj in before:
         groups_b.setdefault((obj.module, obj.kind), []).append(obj)
+    modules_after = {o.module for o in after}
     for obj in after:
         groups_a.setdefault((obj.module, obj.kind), []).append(obj)
     for key in sorted(set(groups_b) | set(groups_a)):
@@ -335,7 +380,9 @@ def compare(fmt: str, before: list[Obj], after: list[Obj]) -> dict[str, Tally]:
                 tally.lines_before.append(distinct_lines(locs))
                 tally.capped += len(locs) >= CAP
         wires = frozenset(o.src for o in groups_b.get((key[0], "wire"), []) if o.src)
-        compare_group(Scope(fmt, kind, wires), group_b, groups_a.get(key, []), tally)
+        cells = written.get(key[0]) if written else None
+        scope = Scope(fmt, kind, wires, cells, key[0] in modules_after)
+        compare_group(scope, group_b, groups_a.get(key, []), tally)
     return out
 
 
@@ -436,7 +483,39 @@ class ReadFail:
     reason: str
 
 
-Result = tuple[list[Obj], list[Obj]] | ReadFail
+@dataclass
+class Pair:
+    """The listings of one format: before, after, and the cells of the JSON file by module."""
+
+    before: list[Obj]
+    after: list[Obj]
+    written: Written | None = None
+
+
+Result = Pair | ReadFail
+
+
+def json_cells(path: Path) -> Written:
+    """module -> the cell names of a ``write_json`` file."""
+    modules = json.loads(path.read_text(encoding="utf-8")).get("modules", {})
+    return {name: cell_set(mod.get("cells", {})) for name, mod in modules.items()}
+
+
+def is_buffer(cell: dict[str, Any]) -> bool:
+    """A cell that copies its one input to its one output."""
+    if cell.get("type") == "$_BUF_":
+        return True
+    params = cell.get("parameters", {})
+    return (
+        cell.get("type") == "$lut"
+        and params.get("WIDTH") == "1".zfill(32)
+        and params.get("LUT") == "10"
+    )
+
+
+def cell_set(cells: dict[str, Any]) -> CellSet:
+    return CellSet(frozenset(cells), frozenset(k for k, v in cells.items() if is_buffer(v)))
+
 
 WRITES = {
     "json": ("write_json {p}", "read_json {p}"),
@@ -489,16 +568,17 @@ def run_design(cfg: Config, level: str, design: Path, work: Path) -> dict[str, R
     if level == "lpm":
         prefix = f"read_techlib {cfg.lib}; "
     results: dict[str, Result] = {}
+    written = json_cells(paths["json"])
     rows = parse_dump(before.read_text(encoding="utf-8"))
     for fmt in formats:
         after = work / f"after-{fmt}.txt"
         script = f"{prefix}{WRITES[fmt][1].format(p=paths[fmt])}; dump_locs {after}"
         try:
-            odin3_run(cfg, script, work, flags if fmt == "verilog" else [])
+            odin3_run(cfg, script, work, flags)
         except ScriptError as exc:
             results[fmt] = ReadFail(str(exc))
             continue
-        results[fmt] = (rows, parse_dump(after.read_text(encoding="utf-8")))
+        results[fmt] = Pair(rows, parse_dump(after.read_text(encoding="utf-8")), written)
     return results
 
 
@@ -543,7 +623,7 @@ def outcome_of(results: dict[str, Result]) -> tuple[str, str]:
             return "error:read", f"{fmt}: {res.reason}"
     for fmt, res in results.items():
         if not isinstance(res, ReadFail):
-            problems = check_tallies(fmt, compare(fmt, *res))
+            problems = check_tallies(fmt, compare(fmt, res.before, res.after, res.written))
             if problems:
                 return "fail", f"{fmt}: {problems[0]}"
     return "ok", ""
@@ -574,7 +654,7 @@ def one_design(
     for fmt, res in results.items():
         if isinstance(res, ReadFail):
             continue
-        tallies = compare(fmt, *res)
+        tallies = compare(fmt, res.before, res.after, res.written)
         if outcome == "ok":
             state.sums.setdefault((level, fmt), []).append(tallies)
         if verbose or not passed:
@@ -593,7 +673,7 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--odin3", default=str(ROOT / "build" / "debug" / "odin3"))
     ap.add_argument("--scripts", type=Path, default=ROOT / "tests" / "loc")
     ap.add_argument("--expect", type=Path)
-    ap.add_argument("--techlib-list", type=Path, default=ROOT / "tests" / "icells" / "techlib.txt")
+    ap.add_argument("--techlib-list", type=Path, default=ROOT / "tests" / "loc" / "techlib.txt")
     ap.add_argument("--lib", type=Path, default=ROOT / "lib" / "lpm.o3lib")
     ap.add_argument("--work", type=Path, help="keep every file here")
     ap.add_argument("--smallest-first", action="store_true", help="run the designs by size")

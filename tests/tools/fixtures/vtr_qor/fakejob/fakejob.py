@@ -110,6 +110,7 @@ def main() -> int:
     if spec.get("ignore_term"):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     if "on_term" in spec:
+
         def on_term(signum: int, frame: object) -> None:
             Path(spec["on_term"]).write_text("term\n", encoding="utf-8")
             os._exit(143)

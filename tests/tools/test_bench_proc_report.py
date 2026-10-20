@@ -38,8 +38,9 @@ class ParseTest(unittest.TestCase):
 
 
 class TargetsTest(unittest.TestCase):
-    def verdicts(self, rows: dict[str, dict[str, str]],
-                 expected: frozenset[str] = frozenset()) -> dict[str, str]:
+    def verdicts(
+        self, rows: dict[str, dict[str, str]], expected: frozenset[str] = frozenset()
+    ) -> dict[str, str]:
         return {t.name: t.verdict for t in bpr.proc_targets(rows, expected)}
 
     def test_empty_run_is_all_missed(self) -> None:
@@ -48,10 +49,12 @@ class TargetsTest(unittest.TestCase):
         self.assertEqual(self.verdicts({}, listed)["lenet.v proc --noopt"], "n/a")
 
     def test_mcml_limit(self) -> None:
-        self.assertEqual(self.verdicts({"mcml.v": row(noopt_ms="199.9")})["mcml.v proc --noopt"],
-                         "ok")
-        self.assertEqual(self.verdicts({"mcml.v": row(noopt_ms="200.1")})["mcml.v proc --noopt"],
-                         "MISSED")
+        self.assertEqual(
+            self.verdicts({"mcml.v": row(noopt_ms="199.9")})["mcml.v proc --noopt"], "ok"
+        )
+        self.assertEqual(
+            self.verdicts({"mcml.v": row(noopt_ms="200.1")})["mcml.v proc --noopt"], "MISSED"
+        )
 
     def test_lenet_time_and_rss(self) -> None:
         ok = self.verdicts({"koios/lenet.v": row(noopt_ms="4999", rss_kib=str(2_900_000))})
@@ -67,11 +70,13 @@ class TargetsTest(unittest.TestCase):
         verdicts = self.verdicts(vtr)
         self.assertEqual(verdicts[f"the {bpr.VTR_FILES} VTR files, total proc --noopt"], "ok")
         vtr["v0.v"] = row(noopt_ms="500")
-        self.assertEqual(self.verdicts(vtr)[f"the {bpr.VTR_FILES} VTR files, total proc --noopt"],
-                         "MISSED")
+        self.assertEqual(
+            self.verdicts(vtr)[f"the {bpr.VTR_FILES} VTR files, total proc --noopt"], "MISSED"
+        )
         del vtr["v0.v"]
-        self.assertEqual(self.verdicts(vtr)[f"the {bpr.VTR_FILES} VTR files, total proc --noopt"],
-                         "MISSED")
+        self.assertEqual(
+            self.verdicts(vtr)[f"the {bpr.VTR_FILES} VTR files, total proc --noopt"], "MISSED"
+        )
 
     def test_koios_set(self) -> None:
         koios = {f"koios/k{i}.v": row(noopt_ms="100") for i in range(bpr.KOIOS_FILES - 3)}
@@ -117,8 +122,12 @@ class ReportTest(unittest.TestCase):
     def test_main_exit_code_and_expect_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "log"
-            log.write_text("ok    mcml.v (1 B, 0.1 s)\nbench: " + " ".join(
-                f"{k}={v}" for k, v in row(noopt_ms="1").items()) + "\n", "utf-8")
+            log.write_text(
+                "ok    mcml.v (1 B, 0.1 s)\nbench: "
+                + " ".join(f"{k}={v}" for k, v in row(noopt_ms="1").items())
+                + "\n",
+                "utf-8",
+            )
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(bpr.main(["report", str(log)]), 1)
             expect = Path(tmp) / "expect.txt"
@@ -152,8 +161,9 @@ class DebugGuardTest(unittest.TestCase):
         exe = os.environ.get("ODIN3_BENCH_PROC")
         if not exe:
             self.skipTest("ODIN3_BENCH_PROC is not set (run through ctest)")
-        done = subprocess.run([exe, "--one", "/dev/null"], capture_output=True, text=True,
-                              check=False, timeout=60)
+        done = subprocess.run(
+            [exe, "--one", "/dev/null"], capture_output=True, text=True, check=False, timeout=60
+        )
         if "needs a Release build" not in done.stderr:
             self.skipTest("this bench_proc is a Release build")
         self.assertEqual(done.returncode, 2)

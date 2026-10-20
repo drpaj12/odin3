@@ -152,22 +152,29 @@ class ExitCheckCase(unittest.TestCase):
         self.micros = self.dir / "tests" / "micro" / "verilog"
         self.work = self.dir / "work"
         stack = contextlib.ExitStack()
-        stack.enter_context(mock.patch.dict(os.environ, {"FAKE_LOG": str(self.log),
-                                                         "FAKE_PID": str(self.pid_file)}))
+        stack.enter_context(
+            mock.patch.dict(os.environ, {"FAKE_LOG": str(self.log), "FAKE_PID": str(self.pid_file)})
+        )
         stack.enter_context(mock.patch.object(memcap, "MEMINFO", str(self.meminfo)))
         stack.enter_context(mock.patch.object(memcap, "SYSTEMD_RUN", "no-such-systemd-run"))
         self.vtr_state = stack.enter_context(
-            mock.patch.object(exit_check, "vtr_state", return_value=(COMMIT, 0)))
+            mock.patch.object(exit_check, "vtr_state", return_value=(COMMIT, 0))
+        )
         self.addCleanup(stack.close)
 
-    def prov(self, blif: Path, design: Path, status: str = "ok",
-             **override: str) -> dict[str, str]:
+    def prov(self, blif: Path, design: Path, status: str = "ok", **override: str) -> dict[str, str]:
         """Write the golden's ``.prov`` as run-oracle.sh does (``override`` replaces a field; an
         empty value drops it)."""
-        fields = {"vtr_commit": COMMIT, "vtr_dirty_files": "0",
-                  "arch": "vtr_flow/arch/a.xml", "arch_sha256": sha(self.arch),
-                  "source": "x/" + design.name, "source_sha256": sha(design), "tool": "parmys",
-                  "status": status}
+        fields = {
+            "vtr_commit": COMMIT,
+            "vtr_dirty_files": "0",
+            "arch": "vtr_flow/arch/a.xml",
+            "arch_sha256": sha(self.arch),
+            "source": "x/" + design.name,
+            "source_sha256": sha(design),
+            "tool": "parmys",
+            "status": status,
+        }
         if status == "ok" and blif.is_file():
             fields["blif_sha256"] = sha(blif)
         fields.update(override)
@@ -175,8 +182,15 @@ class ExitCheckCase(unittest.TestCase):
         blif.with_suffix(".prov").write_text(text, encoding="utf-8")
         return fields
 
-    def micro(self, group: str, leaf: str, text: str, top: str | None = "top",
-              golden_text: str | None = None, **prov: str) -> Path:
+    def micro(
+        self,
+        group: str,
+        leaf: str,
+        text: str,
+        top: str | None = "top",
+        golden_text: str | None = None,
+        **prov: str,
+    ) -> Path:
         """A micro source and (unless ``top`` is None) its Parmys golden with a matching
         ``.prov``."""
         path = self.micros / group / f"{leaf}.v"
@@ -199,12 +213,31 @@ class ExitCheckCase(unittest.TestCase):
         return path
 
     def run_tool(self, *args: str, inputs: Sequence[Path] | None = None) -> tuple[int, str, str]:
-        argv = ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--arch", str(self.arch),
-                "--sp-splice", str(self.splice), "--netlist-compare", str(self.compare),
-                "--equiv-check", str(self.equiv), "--golden-root", str(self.golden),
-                "--vtr-root", str(self.vtr), "--work", str(self.work), "--root", str(self.micros),
-                *([] if "--vtr-config-template" in args else ["--no-config"]), *args,
-                *map(str, inputs if inputs is not None else [self.micros])]
+        argv = [
+            "--odin3",
+            str(self.odin3),
+            "--yosys",
+            str(self.yosys),
+            "--arch",
+            str(self.arch),
+            "--sp-splice",
+            str(self.splice),
+            "--netlist-compare",
+            str(self.compare),
+            "--equiv-check",
+            str(self.equiv),
+            "--golden-root",
+            str(self.golden),
+            "--vtr-root",
+            str(self.vtr),
+            "--work",
+            str(self.work),
+            "--root",
+            str(self.micros),
+            *([] if "--vtr-config-template" in args else ["--no-config"]),
+            *args,
+            *map(str, inputs if inputs is not None else [self.micros]),
+        ]
         return helpers.run_main(exit_check.main, argv)
 
     def calls(self, tool: str | None = None) -> list[list[str]]:
@@ -222,8 +255,12 @@ class ExitCheckCase(unittest.TestCase):
 XCONES = ("o[3]", "o[4]")
 
 
-def eqx_record(rel: str, cones: Sequence[str] = XCONES, count: int | None = None,
-               reason: str = "reviewed: reads an x memory bit") -> str:
+def eqx_record(
+    rel: str,
+    cones: Sequence[str] = XCONES,
+    count: int | None = None,
+    reason: str = "reviewed: reads an x memory bit",
+) -> str:
     """An eq-x record text for the design ``rel`` with outputs ``cones``."""
     digest = exit_check.cones_digest(cones)
     lines = [f"design {rel} {len(cones) if count is None else count} {digest} {reason}"]
@@ -248,9 +285,12 @@ class ClassesTest(ExitCheckCase):
         self.assertIn("NOT equivalent outside x-cones (abc cec)", out)
         self.assertIn("error      g/e_error.v", out)
         self.assertIn("sp-splice: 'a' has two drivers", out)
-        self.assertIn("5 designs: PROVEN 2 (1 identical, 1 equivalent, 0 eq-x with a reviewed "
-                      "record), 0 listed-reject; NOT PROVEN 0 unproven (listed); NOT CHECKED 0 "
-                      "no-golden; 3 failing", out)
+        self.assertIn(
+            "5 designs: PROVEN 2 (1 identical, 1 equivalent, 0 eq-x with a reviewed "
+            "record), 0 listed-reject; NOT PROVEN 0 unproven (listed); NOT CHECKED 0 "
+            "no-golden; 3 failing",
+            out,
+        )
 
     def test_identical_and_equivalent_exit_0(self) -> None:
         self.micro("g", "a", "IDENT\n")
@@ -306,9 +346,11 @@ class EqxTest(ExitCheckCase):
 
     def test_a_record_that_differs_from_the_observed_outputs_fails(self) -> None:
         self.micro("g", "x", "XCONE\n")
-        for name, record in (("fewer", eqx_record("g/x.v", ("o[3]",))),
-                             ("other", eqx_record("g/x.v", ("o[3]", "p[0]"))),
-                             ("more", eqx_record("g/x.v", ("o[3]", "o[4]", "o[5]")))):
+        for name, record in (
+            ("fewer", eqx_record("g/x.v", ("o[3]",))),
+            ("other", eqx_record("g/x.v", ("o[3]", "p[0]"))),
+            ("more", eqx_record("g/x.v", ("o[3]", "o[4]", "o[5]"))),
+        ):
             with self.subTest(name):
                 code, out, _ = self.run_tool("--eqx-record", self.expect(record, "eqx.txt"))
                 self.assertEqual(code, 1, out)
@@ -323,10 +365,12 @@ class EqxTest(ExitCheckCase):
 
     def test_a_malformed_record_is_a_usage_error(self) -> None:
         self.micro("g", "x", "XCONE\n")
-        for text, message in ((eqx_record("g/x.v", count=5), "add up to 2, not 5"),
-                              ("design g/x.v 2 abc\n", "expected 'design <path>"),
-                              ("bus g/x.v o 2\n", "without a design line"),
-                              (eqx_record("g/x.v") * 2, "recorded twice")):
+        for text, message in (
+            (eqx_record("g/x.v", count=5), "add up to 2, not 5"),
+            ("design g/x.v 2 abc\n", "expected 'design <path>"),
+            ("bus g/x.v o 2\n", "without a design line"),
+            (eqx_record("g/x.v") * 2, "recorded twice"),
+        ):
             with self.subTest(message):
                 code, _, err = self.run_tool("--eqx-record", self.expect(text, "e.txt"))
                 self.assertEqual(code, 2)
@@ -357,9 +401,12 @@ class UnprovenTest(ExitCheckCase):
 
     def test_an_inconclusive_guess_is_unproven_too(self) -> None:
         self.micro("g", "guess", "EQGUESS\n")
-        code, out, _ = self.run_tool("--expect-unproven",
-                                     self.expect("g/guess.v [inconclusive] guessed pairs\n"),
-                                     "--min-checked", "0")
+        code, out, _ = self.run_tool(
+            "--expect-unproven",
+            self.expect("g/guess.v [inconclusive] guessed pairs\n"),
+            "--min-checked",
+            "0",
+        )
         self.assertEqual(code, 0, out)
 
     def test_a_listed_unproven_design_that_now_passes_is_xpass(self) -> None:
@@ -376,15 +423,20 @@ class UnprovenTest(ExitCheckCase):
 
     def test_the_unproven_needle_must_match(self) -> None:
         self.micro("g", "slow", "EQUNPROVEN\n")
-        code, out, _ = self.run_tool("--expect-unproven",
-                                     self.expect("g/slow.v [clock domains] two clocks\n"))
+        code, out, _ = self.run_tool(
+            "--expect-unproven", self.expect("g/slow.v [clock domains] two clocks\n")
+        )
         self.assertEqual(code, 1)
         self.assertIn("fails differently from the listing", out)
 
     def test_a_path_in_two_lists_is_a_usage_error(self) -> None:
         self.micro("g", "slow", "EQUNPROVEN\n")
-        code, _, err = self.run_tool("--expect-unproven", self.expect("g/slow.v a\n", "u.txt"),
-                                     "--expect-fail", self.expect("g/slow.v b\n", "r.txt"))
+        code, _, err = self.run_tool(
+            "--expect-unproven",
+            self.expect("g/slow.v a\n", "u.txt"),
+            "--expect-fail",
+            self.expect("g/slow.v b\n", "r.txt"),
+        )
         self.assertEqual(code, 2)
         self.assertIn("'g/slow.v' is in more than one exception list", err)
 
@@ -520,8 +572,9 @@ class ArgvTest(ExitCheckCase):
 
     def test_optional_splice_arguments_are_passed_on(self) -> None:
         self.micro("g", "a", "IDENT\n")
-        self.assertEqual(self.run_tool("--techlib", "T.o3lib", "--primitives", "P.v",
-                                       "--config", "C.xml")[0], 0)
+        self.assertEqual(
+            self.run_tool("--techlib", "T.o3lib", "--primitives", "P.v", "--config", "C.xml")[0], 0
+        )
         a = self.calls("sp-splice")[0]
         self.assertEqual(a[a.index("--techlib") + 1], "T.o3lib")
         self.assertEqual(a[a.index("--primitives") + 1], "P.v")
@@ -543,16 +596,18 @@ class ArgvTest(ExitCheckCase):
 
     def test_vtr_config_is_filled_per_design_as_vtr_fills_it(self) -> None:
         self.arch.write_text(
-            "<architecture><pb_type blif_model=\".subckt single_port_ram\">"
-            "<input name=\"addr\" num_pins=\"15\"/><input name=\"data\" num_pins=\"64\"/>"
-            "</pb_type><pb_type blif_model=\".subckt dual_port_ram\">"
-            "<input name=\"addr1\" num_pins=\"14\"/></pb_type></architecture>\n",
-            encoding="utf-8")
+            '<architecture><pb_type blif_model=".subckt single_port_ram">'
+            '<input name="addr" num_pins="15"/><input name="data" num_pins="64"/>'
+            '</pb_type><pb_type blif_model=".subckt dual_port_ram">'
+            '<input name="addr1" num_pins="14"/></pb_type></architecture>\n',
+            encoding="utf-8",
+        )
         template = self.dir / "template.xml"
         template.write_text(
-            "<config><in>TTT XXX</in><arch>YYY</arch><mult size=\"MMM\" fixed=\"1\"/>"
-            "<mem depth=\"PPP\"/><add threshold=\"AAA\"/><out>ZZZ</out></config>\n",
-            encoding="utf-8")
+            '<config><in>TTT XXX</in><arch>YYY</arch><mult size="MMM" fixed="1"/>'
+            '<mem depth="PPP"/><add threshold="AAA"/><out>ZZZ</out></config>\n',
+            encoding="utf-8",
+        )
         src = self.micro("g", "a", "IDENT\n")
         code, out, err = self.run_tool("--vtr-config-template", str(template))
         self.assertEqual(code, 0, out + err)
@@ -560,28 +615,49 @@ class ArgvTest(ExitCheckCase):
         config = Path(call[call.index("--config") + 1])
         self.assertEqual(config.parent, self.work / "0000-g_a.v")
         text = config.read_text()
-        for expected in (f"Verilog {src}", "<arch>arch.xml</arch>", 'size="3" fixed="1"',
-                         'depth="15"', 'threshold="1"'):
+        for expected in (
+            f"Verilog {src}",
+            "<arch>arch.xml</arch>",
+            'size="3" fixed="1"',
+            'depth="15"',
+            'threshold="1"',
+        ):
             self.assertIn(expected, text)
-        code, out, err = self.run_tool("--vtr-config-template", str(template),
-                                       "--min-hard-mult-size", "5", "--min-hard-adder-size", "0")
+        code, out, err = self.run_tool(
+            "--vtr-config-template",
+            str(template),
+            "--min-hard-mult-size",
+            "5",
+            "--min-hard-adder-size",
+            "0",
+        )
         self.assertIn('size="5"', config.read_text())
         self.assertIn('threshold="0"', config.read_text())
 
     def test_no_template_is_a_usage_error(self) -> None:
         self.micro("g", "a", "IDENT\n")
         with mock.patch.dict(os.environ, {"VTR_ROOT": str(self.dir / "none")}):
-            code, _, err = helpers.run_main(exit_check.main, [
-                "--odin3", str(self.odin3), "--yosys", str(self.yosys), "--arch", str(self.arch),
-                "--golden-root", str(self.golden), str(self.micros)])
+            code, _, err = helpers.run_main(
+                exit_check.main,
+                [
+                    "--odin3",
+                    str(self.odin3),
+                    "--yosys",
+                    str(self.yosys),
+                    "--arch",
+                    str(self.arch),
+                    "--golden-root",
+                    str(self.golden),
+                    str(self.micros),
+                ],
+            )
         self.assertEqual(code, 2)
         self.assertIn("basic_odin_config_split.xml not found", err)
 
     def test_a_cap_for_design_gets_its_cap_and_runs_alone(self) -> None:
         self.micro("g", "small", "IDENT\n")
         self.micro("g", "big", "IDENT" + " " * 99 + "\n")
-        code, out, err = self.run_tool("--mem-cap", "1G", "--cap-for", "g/big.v=5G",
-                                       "--jobs", "2")
+        code, out, err = self.run_tool("--mem-cap", "1G", "--cap-for", "g/big.v=5G", "--jobs", "2")
         self.assertEqual(code, 0, out + err)
         caps = {Path(c[-1]).name: c[c.index("--mem-cap") + 1] for c in self.calls("sp-splice")}
         self.assertEqual(caps, {"small.v": str(GIB), "big.v": str(5 * GIB)})
@@ -602,8 +678,12 @@ class ArgvTest(ExitCheckCase):
             blif = self.golden / "vtr" / f"{rel}.parmys.blif"
             blif.parent.mkdir(parents=True)
             blif.write_text(f".model {top}\n.end\n", encoding="utf-8")
-            self.prov(blif, bench / (rel.split("/")[-1] + ".v") if "koios" not in rel
-                      else bench / "koios" / "gemm.v")
+            self.prov(
+                blif,
+                bench / (rel.split("/")[-1] + ".v")
+                if "koios" not in rel
+                else bench / "koios" / "gemm.v",
+            )
         code, out, err = self.run_tool(inputs=[bench])
         self.assertEqual(code, 0, out + err)
         tops = {Path(c[-1]).name: c[c.index("--top") + 1] for c in self.calls("sp-splice")}
@@ -645,8 +725,10 @@ class ProvenanceTest(ExitCheckCase):
         self.assertEqual(self.run_tool()[0], 0)
 
     def test_each_provenance_field_is_checked(self) -> None:
-        self.assertIn("vtr_commit golden=aaaaaaaaaaaa current=3c9a4d23b27d",
-                      self.mismatch(vtr_commit="a" * 40))
+        self.assertIn(
+            "vtr_commit golden=aaaaaaaaaaaa current=3c9a4d23b27d",
+            self.mismatch(vtr_commit="a" * 40),
+        )
         self.assertIn("arch_sha256 golden=000000000000", self.mismatch(arch_sha256="0" * 64))
         self.assertIn("source_sha256 golden=000000000000", self.mismatch(source_sha256="0" * 64))
         self.assertIn("blif_sha256 golden=000000000000", self.mismatch(blif_sha256="0" * 64))
@@ -692,14 +774,25 @@ class ProvenanceTest(ExitCheckCase):
         upstream = self.vtr / "x" / "a.v"
         upstream.parent.mkdir()
         upstream.write_text("module top;\nendmodule", encoding="utf-8")
-        self.micro("g", "a", "module other;\nendmodule\n", source_sha256=sha(upstream),
-                   source="x/a.v")
+        self.micro(
+            "g", "a", "module other;\nendmodule\n", source_sha256=sha(upstream), source="x/a.v"
+        )
         self.assertEqual(self.run_tool()[0], 1)
 
     def test_no_vtr_checkout_is_a_usage_error(self) -> None:
         self.micro("g", "a", "IDENT\n")
-        argv = ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--arch", str(self.arch),
-                "--no-config", "--golden-root", str(self.golden), str(self.micros)]
+        argv = [
+            "--odin3",
+            str(self.odin3),
+            "--yosys",
+            str(self.yosys),
+            "--arch",
+            str(self.arch),
+            "--no-config",
+            "--golden-root",
+            str(self.golden),
+            str(self.micros),
+        ]
         with mock.patch.dict(os.environ):
             os.environ.pop("VTR_ROOT", None)
             code, _, err = helpers.run_main(exit_check.main, argv)
@@ -714,15 +807,22 @@ class ProvenanceTest(ExitCheckCase):
         self.assertIn("2 modified file(s)", err)
 
     def test_vtr_state_reads_a_real_git_checkout(self) -> None:
-        env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
-               "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull,
-               "GIT_CONFIG_SYSTEM": os.devnull, "PATH": os.environ["PATH"]}
+        env = {
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "PATH": os.environ["PATH"],
+        }
         repo = self.dir / "repo"
         repo.mkdir()
         (repo / "f.txt").write_text("x\n", encoding="utf-8")
         for words in (["init", "-q"], ["add", "f.txt"], ["commit", "-q", "-m", "m"]):
-            subprocess.run(["git", "-C", str(repo), *words], check=True, env=env,
-                           capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(repo), *words], check=True, env=env, capture_output=True
+            )
         commit, dirty = _real_vtr_state(repo)
         self.assertRegex(commit, "^[0-9a-f]{40}$")
         self.assertEqual(dirty, 0)
@@ -790,8 +890,9 @@ class ListedTest(ExitCheckCase):
         self.assertIn("NOT CHECKED 1 no-golden", out)
         self.assertIn("0 listed-reject", out)
         self.assertIn("PROVEN 1 (1 identical", out)
-        code, out, _ = self.run_tool("--expect-no-golden",
-                                     self.expect("g/inc.v [undefined macro] -D\n"))
+        code, out, _ = self.run_tool(
+            "--expect-no-golden", self.expect("g/inc.v [undefined macro] -D\n")
+        )
         self.assertEqual(code, 1)
         self.assertIn("fails differently from the listing", out)
 
@@ -801,8 +902,9 @@ class ListedTest(ExitCheckCase):
         blif = self.golden / "regression" / "verilog" / "g" / leaf / f"{leaf}.parmys.blif"
         blif.parent.mkdir(parents=True)
         self.prov(blif, path, status="capped")
-        blif.with_suffix(".log").write_text("run-oracle: killed at the 16824 MB memory cap\n",
-                                            encoding="utf-8")
+        blif.with_suffix(".log").write_text(
+            "run-oracle: killed at the 16824 MB memory cap\n", encoding="utf-8"
+        )
         return path
 
     def test_an_unlisted_capped_golden_fails(self) -> None:
@@ -843,8 +945,9 @@ class ListedTest(ExitCheckCase):
     def test_differs_and_error_are_never_listable(self) -> None:
         self.micro("g", "d", "nothing\n")
         self.micro("g", "e", "SPLICEFAIL" + " " * 10 + "\n")
-        listing = self.expect("g/d.v [NOT equivalent outside] proven: x\n"
-                              "g/e.v [two drivers] reason\n")
+        listing = self.expect(
+            "g/d.v [NOT equivalent outside] proven: x\ng/e.v [two drivers] reason\n"
+        )
         code, out, _ = self.run_tool("--expect-fail", listing)
         self.assertEqual(code, 1)
         self.assertEqual(out.count("(listed, but not for this result)"), 2)
@@ -903,20 +1006,37 @@ class LogTest(ExitCheckCase):
     def test_help_and_usage_errors(self) -> None:
         code, out, _ = helpers.run_main(exit_check.main, ["--help"])
         self.assertEqual(code, 0)
-        for flag in ("--expect-fail", "--expect-unproven", "--expect-no-golden", "--eqx-record",
-                     "--min-checked", "--vtr-root"):
+        for flag in (
+            "--expect-fail",
+            "--expect-unproven",
+            "--expect-no-golden",
+            "--eqx-record",
+            "--min-checked",
+            "--vtr-root",
+        ):
             self.assertIn(flag, out)
-        code, _, err = helpers.run_main(exit_check.main, [
-            "--odin3", str(self.odin3), "--yosys", "no-such-yosys", "--arch", str(self.arch),
-            "--golden-root", str(self.golden), "--no-config", str(self.micros)])
+        code, _, err = helpers.run_main(
+            exit_check.main,
+            [
+                "--odin3",
+                str(self.odin3),
+                "--yosys",
+                "no-such-yosys",
+                "--arch",
+                str(self.arch),
+                "--golden-root",
+                str(self.golden),
+                "--no-config",
+                str(self.micros),
+            ],
+        )
         self.assertEqual(code, 2)
         self.assertIn("no-such-yosys is not an executable file", err)
 
     def test_the_wrapper_script_runs(self) -> None:
         wrapper = helpers.REPO_ROOT / "tools" / "exit-check" / "exit-check"
         self.assertTrue(os.access(wrapper, os.X_OK))
-        done = subprocess.run([str(wrapper), "--help"], capture_output=True, text=True,
-                              check=False)
+        done = subprocess.run([str(wrapper), "--help"], capture_output=True, text=True, check=False)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("exit-check", done.stdout)
 

@@ -71,16 +71,24 @@ IL_BAD = "attribute \\top 1\nmodule \\t\n  wire input 1 \\a\n  # BAD\nend\n"
 
 def fake_run(argv: Sequence[str], cap: int, **kwargs: Any) -> subprocess.CompletedProcess[str]:
     del cap
-    return subprocess.run(list(argv), capture_output=True, text=True, check=False,
-                          cwd=kwargs.get("cwd"), env=kwargs.get("env"))
+    return subprocess.run(
+        list(argv),
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=kwargs.get("cwd"),
+        env=kwargs.get("env"),
+    )
 
 
 def yosys_exits(status: int) -> Any:
     """A memcap.run stand-in: the refinement check's Yosys exits with ``status``."""
+
     def effect(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
         if "equiv_make" in " ".join(argv):
             return subprocess.CompletedProcess(list(argv), status, "", "")
         return fake_run(argv, cap, **kw)
+
     return effect
 
 
@@ -95,12 +103,19 @@ class Fakes:
         (root / "d.v").write_text("module t; endmodule\n")
 
     def spec(self, files: dict[str, str], **extra: Any) -> None:
-        (self.bin / "fake.json").write_text(json.dumps(
-            {"files": files, "log": ODIN_LOG, **extra}))
+        (self.bin / "fake.json").write_text(json.dumps({"files": files, "log": ODIN_LOG, **extra}))
 
     def main(self, *extra: str) -> tuple[int, str, str]:
-        argv = ["--odin3", str(self.bin / "odin3"), "--yosys", str(self.bin / "yosys"),
-                "--work", str(self.root / "work"), *extra, str(self.root / "d.v")]
+        argv = [
+            "--odin3",
+            str(self.bin / "odin3"),
+            "--yosys",
+            str(self.bin / "yosys"),
+            "--work",
+            str(self.root / "work"),
+            *extra,
+            str(self.root / "d.v"),
+        ]
         with mock.patch.object(memcap, "run", fake_run):
             return helpers.run_main(oe.main, argv)
 
@@ -115,24 +130,31 @@ class PureTest(unittest.TestCase):
             "read_rtlil g.il; read_rtlil h.il; flatten; expose -evert c:* t:$* %d; "
             "clk2fflogic; opt_merge; opt_clean; "
             "techmap; equiv_make gold gate eq; hierarchy -top eq; flatten; "
-            "equiv_simple -undef -seq 4; equiv_induct -undef; equiv_status -assert")
+            "equiv_simple -undef -seq 4; equiv_induct -undef; equiv_status -assert",
+        )
 
     def test_script_variants(self) -> None:
         plain = oe.refinement_script("g.il", "h.il", lowering=())
         self.assertNotIn("clk2fflogic", plain)
         self.assertNotIn("proc", plain)
-        self.assertIn("read_rtlil h.il; flatten; expose -evert c:* t:$* %d; "
-                      "equiv_make gold gate eq", plain)
+        self.assertIn(
+            "read_rtlil h.il; flatten; expose -evert c:* t:$* %d; equiv_make gold gate eq", plain
+        )
         procs = oe.refinement_script("g.il", "h.il", procs=True, lowering=oe.ONE_CLOCK[0])
-        self.assertIn("read_rtlil h.il; proc; flatten; expose -evert c:* t:$* %d; async2sync; "
-                      "equiv_make",
-                      procs)
+        self.assertIn(
+            "read_rtlil h.il; proc; flatten; expose -evert c:* t:$* %d; async2sync; equiv_make",
+            procs,
+        )
         self.assertNotIn("techmap", procs)
-        self.assertIn("flatten; expose -evert c:* t:$* %d; memory; clk2fflogic; opt_merge; "
-                      "opt_clean; techmap; equiv_make",
-                      oe.refinement_script("g.il", "h.il", lowering=oe.LOWERINGS[2]))
-        self.assertIn("techmap; opt_clean -purge; equiv_make",
-                      oe.refinement_script("g.il", "h.il", purge=True))
+        self.assertIn(
+            "flatten; expose -evert c:* t:$* %d; memory; clk2fflogic; opt_merge; "
+            "opt_clean; techmap; equiv_make",
+            oe.refinement_script("g.il", "h.il", lowering=oe.LOWERINGS[2]),
+        )
+        self.assertIn(
+            "techmap; opt_clean -purge; equiv_make",
+            oe.refinement_script("g.il", "h.il", purge=True),
+        )
 
     def test_a_purged_retry_proves_what_the_plain_script_cannot(self) -> None:
         """Every lowering is tried plain first, then with `opt_clean -purge`: a proof in either is
@@ -147,14 +169,18 @@ class PureTest(unittest.TestCase):
         def child(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
             purged = "opt_clean -purge" in " ".join(argv)
             seen.append(purged)
-            out = "" if purged else (
-                "ERROR: Found 1 unproven $equiv cells in 'equiv_status -assert'.")
+            out = (
+                ""
+                if purged
+                else ("ERROR: Found 1 unproven $equiv cells in 'equiv_status -assert'.")
+            )
             return subprocess.CompletedProcess(list(argv), 0 if purged else 1, out, "")
+
         checker = oe.Checker("y", work, 1 << 30)
         with mock.patch.object(checker, "child", side_effect=child):
             ok, _ = checker.refines(work / "g.il", work / "h.il", "p")
         self.assertTrue(ok)
-        self.assertEqual(seen[:len(seen) - 1].count(True), 0)  # plain lowerings first
+        self.assertEqual(seen[: len(seen) - 1].count(True), 0)  # plain lowerings first
         self.assertTrue(seen[-1])
 
     def test_a_memory_refusal_does_not_hide_the_timeout_of_the_lowering_that_ran(self) -> None:
@@ -173,16 +199,22 @@ class PureTest(unittest.TestCase):
             if "memory;" in " ".join(argv):
                 raise oe.CrashError("yosys-refine", "timed out after 60 s", True)
             return subprocess.CompletedProcess(list(argv), 1, refuse, "")
+
         checker = oe.Checker("y", work, 1 << 30)
-        with mock.patch.object(checker, "child", side_effect=child), \
-                self.assertRaises(oe.CrashError) as ctx:
+        with (
+            mock.patch.object(checker, "child", side_effect=child),
+            self.assertRaises(oe.CrashError) as ctx,
+        ):
             checker.refines(work / "g.il", work / "h.il", "p")
         self.assertTrue(ctx.exception.size_limit)
 
         def refuses(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
             return subprocess.CompletedProcess(list(argv), 1, refuse, "")
-        with mock.patch.object(checker, "child", side_effect=refuses), \
-                self.assertRaises(oe.RefineAbort):
+
+        with (
+            mock.patch.object(checker, "child", side_effect=refuses),
+            self.assertRaises(oe.RefineAbort),
+        ):
             checker.refines(work / "g.il", work / "h.il", "p")
 
     def test_a_real_difference_survives_the_purged_retry(self) -> None:
@@ -224,21 +256,28 @@ class PureTest(unittest.TestCase):
 
     def test_phase3_script_and_the_wreduce_call(self) -> None:
         commands = oe.phase2_commands(oe.HERE / "phase3.script")
-        self.assertEqual(commands[commands.index("wreduce") + 1:commands.index("compact")],
-                         ["opt_clean", "opt -full"])
+        self.assertEqual(
+            commands[commands.index("wreduce") + 1 : commands.index("compact")],
+            ["opt_clean", "opt -full"],
+        )
         self.assertIn("wreduce --opt-stats", oe.with_stats(commands))
         self.assertIsNotNone(oe.PAIR_NAME.match("0019-wreduce-before.il"))
         self.assertIsNotNone(oe.PAIR_NAME.match("0003-opt_expr-before.il"))
 
     def test_read_commands(self) -> None:
-        self.assertEqual(oe.read_commands(["a.v", "b c.v"], "t", True),
-                         ["read_verilog --nolatches a.v \"b c.v\"", "hierarchy --top t"])
-        self.assertEqual(oe.read_commands(["a.v"], None, False),
-                         ["read_verilog a.v", "hierarchy -auto"])
+        self.assertEqual(
+            oe.read_commands(["a.v", "b c.v"], "t", True),
+            ['read_verilog --nolatches a.v "b c.v"', "hierarchy --top t"],
+        )
+        self.assertEqual(
+            oe.read_commands(["a.v"], None, False), ["read_verilog a.v", "hierarchy -auto"]
+        )
 
     def test_rename_modules(self) -> None:
-        text = ("attribute \\top 1\nmodule \\t\n  cell \\sub \\u\n  end\n  cell $add \\a\n  end\n"
-                "end\nmodule \\sub\nend\n")
+        text = (
+            "attribute \\top 1\nmodule \\t\n  cell \\sub \\u\n  end\n  cell $add \\a\n  end\n"
+            "end\nmodule \\sub\nend\n"
+        )
         top = oe.top_module(text)
         self.assertEqual(top, "\\t")
         out = oe.rename_modules(text, "gold", top)
@@ -287,17 +326,21 @@ class MainTest(unittest.TestCase):
         script = self.fakes.log("odin.log")[0]
         self.assertIn("--top t --opt-snapshot ", script)
         self.assertIn("-p read_verilog --nolatches ", script)
-        self.assertIn("hierarchy --top t; opt_expr --opt-stats; opt_clean --opt-stats; "
-                      "opt -nodffe -nosdff --opt-stats; proc; opt --opt-stats; compact", script)
+        self.assertIn(
+            "hierarchy --top t; opt_expr --opt-stats; opt_clean --opt-stats; "
+            "opt -nodffe -nosdff --opt-stats; proc; opt --opt-stats; compact",
+            script,
+        )
 
     def test_failing_pair_is_named_with_counters(self) -> None:
-        self.fakes.spec({**self.pair("0001", "opt_expr"),
-                         **self.pair("0002", "opt_merge", IL_BAD)})
+        self.fakes.spec({**self.pair("0001", "opt_expr"), **self.pair("0002", "opt_merge", IL_BAD)})
         code, out, _ = self.fakes.main()
         self.assertEqual(code, 1)
         self.assertIn("opt-equiv: 0001-opt_expr: ok", out)
-        self.assertIn("opt-equiv: 0002-opt_merge: not a refinement (rules: "
-                      "const_and 2, opt_dff.add_en 1)", out)
+        self.assertIn(
+            "opt-equiv: 0002-opt_merge: not a refinement (rules: const_and 2, opt_dff.add_en 1)",
+            out,
+        )
         self.assertIn("1 refine, 1 do not", out)
 
     def test_pairs_run_in_sequence_order(self) -> None:
@@ -347,6 +390,7 @@ class MainTest(unittest.TestCase):
             if "equiv_make" in " ".join(argv):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
+
         with mock.patch.object(oe, "cec_ils", return_value=(oe.CEC_PROVED, "")) as cec:
             code, out, err = self.run_with(hang)
         self.assertEqual(code, 0, out + err)
@@ -354,11 +398,19 @@ class MainTest(unittest.TestCase):
 
     def test_the_cec_refuses_latches_without_a_defined_init(self) -> None:
         loose = ".model m\n.inputs c d\n.outputs q\n"
-        cases = {"none": ".latch d q re c\n", "two": ".latch d q re c 2\n",
-                 "three": ".latch d q re c 3\n", "bare": ".latch d q\n",
-                 "bare3": ".latch d q 3\n", "wrapped": ".latch d q \\\n re c\n"}
-        tight = {"zero": ".latch d q re c 0\n", "one": ".latch d q 1\n",
-                 "comment": ".latch d q re c 1 # init 1\n"}
+        cases = {
+            "none": ".latch d q re c\n",
+            "two": ".latch d q re c 2\n",
+            "three": ".latch d q re c 3\n",
+            "bare": ".latch d q\n",
+            "bare3": ".latch d q 3\n",
+            "wrapped": ".latch d q \\\n re c\n",
+        }
+        tight = {
+            "zero": ".latch d q re c 0\n",
+            "one": ".latch d q 1\n",
+            "comment": ".latch d q re c 1 # init 1\n",
+        }
         with tempfile.TemporaryDirectory() as tmp:
             for name, line in {**cases, **tight}.items():
                 path = Path(tmp) / f"{name}.blif"
@@ -380,6 +432,7 @@ class MainTest(unittest.TestCase):
             if "expose -shared" in " ".join(argv):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
+
         code, out, _ = self.run_with(hang, "--no-cec")
         self.assertEqual(code, oe.EXIT_UNPROVEN, out)
         self.assertIn("inconclusive (yosys-bmc: base case from the initial state", out)
@@ -410,8 +463,16 @@ class MainTest(unittest.TestCase):
         self.assertIn("0 calls changed something", out)
 
     def run_with(self, side_effect: Any, *extra: str) -> tuple[int, str, str]:
-        argv = ["--odin3", str(self.fakes.bin / "odin3"), "--yosys", str(self.fakes.bin / "yosys"),
-                "--work", str(self.fakes.root / "work"), *extra, str(self.fakes.root / "d.v")]
+        argv = [
+            "--odin3",
+            str(self.fakes.bin / "odin3"),
+            "--yosys",
+            str(self.fakes.bin / "yosys"),
+            "--work",
+            str(self.fakes.root / "work"),
+            *extra,
+            str(self.fakes.root / "d.v"),
+        ]
         with mock.patch.object(memcap, "run", side_effect=side_effect):
             return helpers.run_main(oe.main, argv)
 
@@ -440,13 +501,19 @@ class MainTest(unittest.TestCase):
     def test_a_yosys_error_abort_is_a_tool_error_not_a_refutation(self) -> None:
         """Review I3: an ERROR that is not the failed proof (parser, port, missing module)."""
         self.fakes.spec(self.pair("0001", "opt_expr"))
-        for text in ("ERROR: Parser error in line 1: syntax error",
-                     "ERROR: Can't find gate module x.", "ERROR: Can't match gate port y"):
-            def abort(argv: Sequence[str], cap: int, _t: str = text, **kw: Any
-                      ) -> subprocess.CompletedProcess[str]:
+        for text in (
+            "ERROR: Parser error in line 1: syntax error",
+            "ERROR: Can't find gate module x.",
+            "ERROR: Can't match gate port y",
+        ):
+
+            def abort(
+                argv: Sequence[str], cap: int, _t: str = text, **kw: Any
+            ) -> subprocess.CompletedProcess[str]:
                 if "equiv_make" in " ".join(argv):
                     return subprocess.CompletedProcess(list(argv), 1, _t + "\n", "")
                 return fake_run(argv, cap, **kw)
+
             with self.subTest(text=text):
                 code, out, err = self.run_with(abort)
                 self.assertEqual(code, 2, out + err)
@@ -458,8 +525,10 @@ class MainTest(unittest.TestCase):
         def nomodel(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
             if "equiv_make" in " ".join(argv):
                 return subprocess.CompletedProcess(
-                    list(argv), 1, "ERROR: No SAT model available for cell $c5 ($pow).\n", "")
+                    list(argv), 1, "ERROR: No SAT model available for cell $c5 ($pow).\n", ""
+                )
             return fake_run(argv, cap, **kw)
+
         code, out, err = self.run_with(nomodel)
         self.assertEqual(code, 1, out + err)
         self.assertIn("not a refinement", out)
@@ -483,6 +552,7 @@ class MainTest(unittest.TestCase):
             if "equiv_make" in " ".join(argv):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
+
         code, out, err = self.run_with(hang, "--no-cec")
         self.assertEqual(code, oe.EXIT_UNPROVEN, out + err)
         self.assertIn("unproven", out)
@@ -497,19 +567,30 @@ class MainTest(unittest.TestCase):
             if "equiv_make" in " ".join(argv):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
-        for verdict, code, needle in ((oe.CEC_PROVED, 0, "proved by the BLIF cec"),
-                                      (oe.CEC_UNPROVEN, oe.EXIT_UNPROVEN, "not decided"),
-                                      (oe.CEC_DIFFERS, oe.EXIT_FAIL, "NOT equivalent")):
-            with self.subTest(verdict=verdict), mock.patch.object(
-                    oe, "cec_ils", return_value=(verdict, "text")):
+
+        for verdict, code, needle in (
+            (oe.CEC_PROVED, 0, "proved by the BLIF cec"),
+            (oe.CEC_UNPROVEN, oe.EXIT_UNPROVEN, "not decided"),
+            (oe.CEC_DIFFERS, oe.EXIT_FAIL, "NOT equivalent"),
+        ):
+            with (
+                self.subTest(verdict=verdict),
+                mock.patch.object(oe, "cec_ils", return_value=(verdict, "text")),
+            ):
                 got, out, err = self.run_with(hang)
                 self.assertEqual(got, code, out + err)
                 self.assertIn(needle, out)
                 self.assertIn("inconclusive", out)
 
     def test_sat_is_not_retried_after_two_timeouts(self) -> None:
-        self.fakes.spec({**self.pair("0001", "opt_expr"), **self.pair("0002", "opt_clean"),
-                         **self.pair("0003", "opt_merge"), **self.pair("0004", "opt_dff")})
+        self.fakes.spec(
+            {
+                **self.pair("0001", "opt_expr"),
+                **self.pair("0002", "opt_clean"),
+                **self.pair("0003", "opt_merge"),
+                **self.pair("0004", "opt_dff"),
+            }
+        )
         calls: list[str] = []
 
         def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
@@ -517,6 +598,7 @@ class MainTest(unittest.TestCase):
                 calls.append("x")
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
+
         code, out, _ = self.run_with(hang, "--no-cec")
         self.assertEqual(code, oe.EXIT_UNPROVEN, out)
         self.assertEqual(len(calls), oe.MAX_SAT_TIMEOUTS)
@@ -531,6 +613,7 @@ class MainTest(unittest.TestCase):
             if "equiv_make" in " ".join(argv):
                 seen.append(kw["timeout"])
             return fake_run(argv, cap, **kw)
+
         saved = oe.REFINE_TIMEOUT_SECONDS
         self.addCleanup(setattr, oe, "REFINE_TIMEOUT_SECONDS", saved)
         code, out, err = self.run_with(spy, "--refine-timeout", "7")
@@ -552,11 +635,17 @@ class MainTest(unittest.TestCase):
     def test_cec_blif_verdicts(self) -> None:
         """equiv-check exit 0 proves, 1 differs, anything else (4 unproven, 2 unsupported) decides
         nothing."""
+
         def run(code: int) -> Any:
             done = subprocess.CompletedProcess([], code, "", "equiv-check: why\n")
             return mock.patch.object(oe, "capped", return_value=done)
-        for code, want in ((0, oe.CEC_PROVED), (1, oe.CEC_DIFFERS), (4, oe.CEC_UNPROVEN),
-                           (2, oe.CEC_UNPROVEN)):
+
+        for code, want in (
+            (0, oe.CEC_PROVED),
+            (1, oe.CEC_DIFFERS),
+            (4, oe.CEC_UNPROVEN),
+            (2, oe.CEC_UNPROVEN),
+        ):
             with run(code):
                 self.assertEqual(oe.cec_blifs(Path("a"), Path("b"), 1 << 30, Path("."))[0], want)
 
@@ -571,17 +660,21 @@ class MainTest(unittest.TestCase):
         plain = work / "plain.blif"
         plain.write_text(".model t\n.inputs a\n.outputs y\n.names unconn\n.names a y\n1 1\n.end\n")
         xed = work / "x.blif"
-        xed.write_text(".model t\n.inputs a\n.outputs y\n.names unconn\n.names unconn a y\n"
-                       "1- 1\n.end\n")
+        xed.write_text(
+            ".model t\n.inputs a\n.outputs y\n.names unconn\n.names unconn a y\n1- 1\n.end\n"
+        )
         self.assertFalse(oe.uses_x(plain))
         self.assertTrue(oe.uses_x(xed))
         longer = work / "longer.blif"  # a net called unconn_q or a.unconn is no x
-        longer.write_text(".model t\n.inputs a\n.outputs y\n.names unconn\n"
-                          ".names a.unconn unconn_q a y\n11- 1\n.end\n")
+        longer.write_text(
+            ".model t\n.inputs a\n.outputs y\n.names unconn\n"
+            ".names a.unconn unconn_q a y\n11- 1\n.end\n"
+        )
         self.assertFalse(oe.uses_x(longer))
         subckt = work / "subckt.blif"
-        subckt.write_text(".model t\n.inputs a\n.outputs y\n.names unconn\n"
-                          ".subckt m i=unconn o=y\n.end\n")
+        subckt.write_text(
+            ".model t\n.inputs a\n.outputs y\n.names unconn\n.subckt m i=unconn o=y\n.end\n"
+        )
         self.assertTrue(oe.uses_x(subckt))
         self.assertFalse(oe.uses_x(work / "missing.blif"))
         done = subprocess.CompletedProcess([], 1, "", "equiv-check: NOT equivalent\n")
@@ -625,12 +718,19 @@ class MainTest(unittest.TestCase):
 
     def test_work_dir_follows_tmpdir_and_is_removed_unless_kept(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            argv = ["--odin3", str(self.fakes.bin / "odin3"), "--yosys",
-                    str(self.fakes.bin / "yosys"), str(self.fakes.root / "d.v")]
+            argv = [
+                "--odin3",
+                str(self.fakes.bin / "odin3"),
+                "--yosys",
+                str(self.fakes.bin / "yosys"),
+                str(self.fakes.root / "d.v"),
+            ]
             self.fakes.spec(self.pair("0001", "opt_expr"))
-            with mock.patch.dict(os.environ, {"TMPDIR": tmpdir}), \
-                    mock.patch.object(tempfile, "tempdir", None), \
-                    mock.patch.object(memcap, "run", fake_run):
+            with (
+                mock.patch.dict(os.environ, {"TMPDIR": tmpdir}),
+                mock.patch.object(tempfile, "tempdir", None),
+                mock.patch.object(memcap, "run", fake_run),
+            ):
                 self.assertEqual(helpers.run_main(oe.main, argv)[0], 0)
                 self.assertEqual(list(Path(tmpdir).iterdir()), [])
                 self.fakes.spec({}, exit=1)
@@ -707,9 +807,11 @@ def _port(kind: str, name: str, index: int) -> str:
     return f"  wire {kind} {index} \\{name}\n"
 
 
-AND_CELL = ("  cell $and \\c1\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
-            "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"
-            "    connect \\A \\a\n    connect \\B \\b\n    connect \\Y \\y\n  end\n")
+AND_CELL = (
+    "  cell $and \\c1\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+    "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"
+    "    connect \\A \\a\n    connect \\B \\b\n    connect \\Y \\y\n  end\n"
+)
 
 
 def mutant_module(body: str, with_q: bool = True) -> str:
@@ -721,22 +823,30 @@ def mutant_module(body: str, with_q: bool = True) -> str:
     return "attribute \\top 1\nmodule \\t\n" + "".join(ports) + body + "end\n"
 
 
-def adff_cell(clk_pol: int = 1, rst_pol: int = 1, value: int = 0, d: str = "\\a",
-              clk: str = "\\clk") -> str:
-    return ("  cell $adff \\f\n    parameter \\WIDTH 1\n"
-            f"    parameter \\CLK_POLARITY {clk_pol}\n    parameter \\ARST_POLARITY {rst_pol}\n"
-            f"    parameter \\ARST_VALUE 1'{value}\n    connect \\CLK {clk}\n"
-            f"    connect \\ARST \\rst\n    connect \\D {d}\n    connect \\Q \\q\n  end\n")
+def adff_cell(
+    clk_pol: int = 1, rst_pol: int = 1, value: int = 0, d: str = "\\a", clk: str = "\\clk"
+) -> str:
+    return (
+        "  cell $adff \\f\n    parameter \\WIDTH 1\n"
+        f"    parameter \\CLK_POLARITY {clk_pol}\n    parameter \\ARST_POLARITY {rst_pol}\n"
+        f"    parameter \\ARST_VALUE 1'{value}\n    connect \\CLK {clk}\n"
+        f"    connect \\ARST \\rst\n    connect \\D {d}\n    connect \\Q \\q\n  end\n"
+    )
 
 
-DFF_CELL = ("  cell $dff \\f\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
-            "    connect \\CLK \\clk\n    connect \\D \\a\n    connect \\Q \\q\n  end\n")
-SDFF_CELL = ("  cell $sdff \\f\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
-             "    parameter \\SRST_POLARITY 1\n    parameter \\SRST_VALUE 0\n"
-             "    connect \\CLK \\clk\n    connect \\SRST \\rst\n    connect \\D \\a\n"
-             "    connect \\Q \\q\n  end\n")
+DFF_CELL = (
+    "  cell $dff \\f\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+    "    connect \\CLK \\clk\n    connect \\D \\a\n    connect \\Q \\q\n  end\n"
+)
+SDFF_CELL = (
+    "  cell $sdff \\f\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+    "    parameter \\SRST_POLARITY 1\n    parameter \\SRST_VALUE 0\n"
+    "    connect \\CLK \\clk\n    connect \\SRST \\rst\n    connect \\D \\a\n"
+    "    connect \\Q \\q\n  end\n"
+)
 RENAMED_Y = AND_CELL.replace("\\Y \\y", "\\Y \\yy").replace(
-    "  cell $and", "  wire \\yy\n  cell $and")
+    "  cell $and", "  wire \\yy\n  cell $and"
+)
 CLOCK_GOLD = mutant_module(AND_CELL + adff_cell())
 # The review's mutants (C1): every one must fail the check; the posedge-to-negedge and the clock-net
 # mutants passed all three lowerings of the async2sync flow.
@@ -857,21 +967,27 @@ class ProbeTest(unittest.TestCase):
         """Review I4: the 0001-opt_expr call of micro/bm_if_collapse.v (an `$eq` of the top to a
         `$not`, with a submodule of x-init flops). equiv_make matches only the two tops, so the
         submodule outputs were `unproven`; flatten before equiv_make proves the pair."""
-        self.assertTrue(self.refines(
-            (helpers.FIXTURES / "opt_equiv_hier_before.il").read_text(encoding="utf-8"),
-            (helpers.FIXTURES / "opt_equiv_hier_after.il").read_text(encoding="utf-8")))
+        self.assertTrue(
+            self.refines(
+                (helpers.FIXTURES / "opt_equiv_hier_before.il").read_text(encoding="utf-8"),
+                (helpers.FIXTURES / "opt_equiv_hier_after.il").read_text(encoding="utf-8"),
+            )
+        )
 
     def test_the_unflattened_script_cannot_prove_it(self) -> None:
         """The control: without `flatten` the same pair is `unproven` (the I4 false negative)."""
         for side in ("before", "after"):
             text = (helpers.FIXTURES / f"opt_equiv_hier_{side}.il").read_text(encoding="utf-8")
             (self.work / f"{side}.il").write_text(
-                oe.rename_modules(text, "gold" if side == "before" else "gate", "\\bm_if_collapse"))
-        script = oe.refinement_script(str(self.work / "before.il"), str(self.work / "after.il"),
-                                      True, oe.ONE_CLOCK[0])
+                oe.rename_modules(text, "gold" if side == "before" else "gate", "\\bm_if_collapse")
+            )
+        script = oe.refinement_script(
+            str(self.work / "before.il"), str(self.work / "after.il"), True, oe.ONE_CLOCK[0]
+        )
         script = script.replace(f"proc; flatten; {oe.EVERT_BLACKBOXES};", "proc;", 1)
-        done = subprocess.run([YOSYS, "-q", "-p", script], capture_output=True, text=True,
-                              check=False)
+        done = subprocess.run(
+            [YOSYS, "-q", "-p", script], capture_output=True, text=True, check=False
+        )
         self.assertEqual(done.returncode, 1, done.stderr[-300:])
         self.assertIn("unproven", done.stdout + done.stderr)
 
@@ -899,50 +1015,65 @@ class ProbeTest(unittest.TestCase):
 
 # The 3B soundness review's adversarial cases, as Odin III writes them (`write_rtlil` of a design
 # with the tech library: `single_port_ram` declared `dynports` with 1-bit `data`/`out`).
-NOT_CELL = ("  cell $not $n{k}\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"
-            "    parameter \\Y_WIDTH 1\n    connect \\A {a}\n    connect \\Y {y}\n  end\n")
-AND4_CELL = ("  cell $and $g\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
-             "    parameter \\A_WIDTH 4\n    parameter \\B_WIDTH 4\n    parameter \\Y_WIDTH 4\n"
-             "    connect \\A \\d\n    connect \\B 4'1111\n    connect \\Y \\dd\n  end\n")
-RAM_DECL = ("attribute \\blackbox 1\nattribute \\dynports 1\nmodule \\single_port_ram\n"
-            "  parameter \\ADDR_WIDTH 15\n  parameter \\DATA_WIDTH 1\n  wire input 1 \\clk\n"
-            "  wire input 2 \\data\n  wire width 15 input 3 \\addr\n  wire input 4 \\we\n"
-            "  wire output 5 \\out\nend\n")
+NOT_CELL = (
+    "  cell $not $n{k}\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"
+    "    parameter \\Y_WIDTH 1\n    connect \\A {a}\n    connect \\Y {y}\n  end\n"
+)
+AND4_CELL = (
+    "  cell $and $g\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+    "    parameter \\A_WIDTH 4\n    parameter \\B_WIDTH 4\n    parameter \\Y_WIDTH 4\n"
+    "    connect \\A \\d\n    connect \\B 4'1111\n    connect \\Y \\dd\n  end\n"
+)
+RAM_DECL = (
+    "attribute \\blackbox 1\nattribute \\dynports 1\nmodule \\single_port_ram\n"
+    "  parameter \\ADDR_WIDTH 15\n  parameter \\DATA_WIDTH 1\n  wire input 1 \\clk\n"
+    "  wire input 2 \\data\n  wire width 15 input 3 \\addr\n  wire input 4 \\we\n"
+    "  wire output 5 \\out\nend\n"
+)
 
 
-def ram(extra: str = "", data: str = "\\d", we: str = "\\we", out: str = "\\q",
-        width: int = 4) -> str:
+def ram(
+    extra: str = "", data: str = "\\d", we: str = "\\we", out: str = "\\q", width: int = 4
+) -> str:
     """A top whose 4-bit output ``q`` is a ``single_port_ram``'s read data."""
-    return ("attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire input 2 \\we\n"
-            "  wire width 4 input 3 \\d\n  wire width 4 input 4 \\a\n"
-            f"  wire width 4 output 5 \\q\n{extra}  cell \\single_port_ram \\i\n"
-            f"    parameter \\ADDR_WIDTH 4\n    parameter \\DATA_WIDTH {width}\n"
-            f"    connect \\clk \\clk\n    connect \\data {data}\n    connect \\addr \\a\n"
-            f"    connect \\we {we}\n    connect \\out {out}\n  end\nend\n" + RAM_DECL)
+    return (
+        "attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire input 2 \\we\n"
+        "  wire width 4 input 3 \\d\n  wire width 4 input 4 \\a\n"
+        f"  wire width 4 output 5 \\q\n{extra}  cell \\single_port_ram \\i\n"
+        f"    parameter \\ADDR_WIDTH 4\n    parameter \\DATA_WIDTH {width}\n"
+        f"    connect \\clk \\clk\n    connect \\data {data}\n    connect \\addr \\a\n"
+        f"    connect \\we {we}\n    connect \\out {out}\n  end\nend\n" + RAM_DECL
+    )
 
 
 def counter(init: str) -> str:
     """A 4-bit counter ``q`` (output ``y``) with ``attribute \\init 4'<init>``."""
-    return ("attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire width 4 output 2 \\y\n"
-            f"  attribute \\init 4'{init}\n  wire width 4 \\q\n  wire width 4 \\n\n"
-            "  cell $add $a\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
-            "    parameter \\A_WIDTH 4\n    parameter \\B_WIDTH 4\n    parameter \\Y_WIDTH 4\n"
-            "    connect \\A \\q\n    connect \\B 4'0001\n    connect \\Y \\n\n  end\n"
-            "  cell $dff $f\n    parameter \\WIDTH 4\n    parameter \\CLK_POLARITY 1\n"
-            "    connect \\CLK \\clk\n    connect \\D \\n\n    connect \\Q \\q\n  end\n"
-            "  connect \\y \\q\nend\n")
+    return (
+        "attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire width 4 output 2 \\y\n"
+        f"  attribute \\init 4'{init}\n  wire width 4 \\q\n  wire width 4 \\n\n"
+        "  cell $add $a\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+        "    parameter \\A_WIDTH 4\n    parameter \\B_WIDTH 4\n    parameter \\Y_WIDTH 4\n"
+        "    connect \\A \\q\n    connect \\B 4'0001\n    connect \\Y \\n\n  end\n"
+        "  cell $dff $f\n    parameter \\WIDTH 4\n    parameter \\CLK_POLARITY 1\n"
+        "    connect \\CLK \\clk\n    connect \\D \\n\n    connect \\Q \\q\n  end\n"
+        "  connect \\y \\q\nend\n"
+    )
 
 
 RAM = ram()
 RAM_MUTANTS = {
-    "data_bit_2": ram("  wire \\n2\n" + NOT_CELL.format(k=1, a="\\d [2]", y="\\n2"),
-                      data="{ \\d [3] \\n2 \\d [1:0] }"),
-    "out_bit_3": ram("  wire width 4 \\qq\n  wire \\n3\n"
-                     + NOT_CELL.format(k=1, a="\\qq [3]", y="\\n3")
-                     + "  connect \\q { \\n3 \\qq [2:0] }\n", out="\\qq"),
+    "data_bit_2": ram(
+        "  wire \\n2\n" + NOT_CELL.format(k=1, a="\\d [2]", y="\\n2"),
+        data="{ \\d [3] \\n2 \\d [1:0] }",
+    ),
+    "out_bit_3": ram(
+        "  wire width 4 \\qq\n  wire \\n3\n"
+        + NOT_CELL.format(k=1, a="\\qq [3]", y="\\n3")
+        + "  connect \\q { \\n3 \\qq [2:0] }\n",
+        out="\\qq",
+    ),
     "data_width_5": ram("  wire \\qx\n", data="{ 1'0 \\d }", out="{ \\qx \\q }", width=5),
-    "we_inverted": ram("  wire \\nwe\n" + NOT_CELL.format(k=1, a="\\we", y="\\nwe"),
-                       we="\\nwe"),
+    "we_inverted": ram("  wire \\nwe\n" + NOT_CELL.format(k=1, a="\\we", y="\\nwe"), we="\\nwe"),
     "addr_width_param": RAM.replace("parameter \\ADDR_WIDTH 4", "parameter \\ADDR_WIDTH 5"),
     # review M1: a parameter on one side only (the block falls back to its declaration default)
     "data_width_param_dropped": RAM.replace("    parameter \\DATA_WIDTH 4\n", ""),
@@ -952,21 +1083,24 @@ RAM_MUTANTS = {
 def hold(d_net: str) -> str:
     """The re-check's N2 case: a flip-flop ``r`` with no init, ``r <= <d_net>`` (``\\n`` is
     ``r & d``, ``\\r`` holds), output ``y = r``."""
-    return ("attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire input 2 \\d\n"
-            "  wire output 3 \\y\n  wire \\r\n  wire \\n\n"
-            "  cell $and $a\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
-            "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"
-            "    connect \\A \\r\n    connect \\B \\d\n    connect \\Y \\n\n  end\n"
-            "  cell $dff $f\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
-            f"    connect \\CLK \\clk\n    connect \\D {d_net}\n    connect \\Q \\r\n  end\n"
-            "  connect \\y \\r\nend\n")
+    return (
+        "attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire input 2 \\d\n"
+        "  wire output 3 \\y\n  wire \\r\n  wire \\n\n"
+        "  cell $and $a\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+        "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"
+        "    connect \\A \\r\n    connect \\B \\d\n    connect \\Y \\n\n  end\n"
+        "  cell $dff $f\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+        f"    connect \\CLK \\clk\n    connect \\D {d_net}\n    connect \\Q \\r\n  end\n"
+        "  connect \\y \\r\nend\n"
+    )
 
 
 class HardBlockTextTest(unittest.TestCase):
     """``hard_blocks``: the declarations at instance width and the mismatch rule (no Yosys)."""
 
-    USE = hb.BoxUse("\\single_port_ram", (("\\addr", 4), ("\\data", 4), ("\\out", 4)),
-                    (("\\DATA_WIDTH", "4"),))
+    USE = hb.BoxUse(
+        "\\single_port_ram", (("\\addr", 4), ("\\data", 4), ("\\out", 4)), (("\\DATA_WIDTH", "4"),)
+    )
 
     def test_a_declaration_takes_the_instance_widths(self) -> None:
         text = hb.box_declaration(RAM_DECL, "\\r$o3w0", {"\\data": 8, "\\out": 8, "\\we": 1})
@@ -982,8 +1116,9 @@ class HardBlockTextTest(unittest.TestCase):
     def test_a_shared_block_must_agree_on_type_widths_and_parameters(self) -> None:
         same = {"\\i": self.USE}
         self.assertEqual(hb.box_mismatch(same, same), "")
-        wider = hb.BoxUse(self.USE.kind, (("\\addr", 4), ("\\data", 5), ("\\out", 5)),
-                          self.USE.params)
+        wider = hb.BoxUse(
+            self.USE.kind, (("\\addr", 4), ("\\data", 5), ("\\out", 5)), self.USE.params
+        )
         self.assertIn("hard block \\i differs", hb.box_mismatch(same, {"\\i": wider}))
         param = hb.BoxUse(self.USE.kind, self.USE.widths, (("\\DATA_WIDTH", "5"),))
         self.assertIn("DATA_WIDTH=5", hb.box_mismatch(same, {"\\i": param}))
@@ -1005,8 +1140,11 @@ class HardBlockTextTest(unittest.TestCase):
         self.assertIn("async2sync; opt_clean; expose -shared gold gate; miter -equiv", base)
         self.assertIn("sat -seq 4 -set-init-undef -enable_undef", base)
         out = oe.bounded_script("g.il", "h.il", True, oe.BMC_STEPS, (False, False, True))
-        self.assertIn("proc; flatten; " + oe.EVERT_BLACKBOXES + "; memory; clk2fflogic; "
-                      "opt_clean -purge; miter", out)
+        self.assertIn(
+            "proc; flatten; " + oe.EVERT_BLACKBOXES + "; memory; clk2fflogic; "
+            "opt_clean -purge; miter",
+            out,
+        )
         self.assertNotIn("expose -shared", out)
 
 
@@ -1040,8 +1178,11 @@ class SoundnessTest(unittest.TestCase):
 
     def test_correct_pairs_still_refine(self) -> None:
         rewrite = ram("  wire width 4 \\dd\n" + AND4_CELL, data="\\dd")  # d & 4'1111 -> d
-        for name, gold, gate in (("ram", RAM, RAM), ("ram_rewrite", rewrite, RAM),
-                                 ("init", counter("0000"), counter("0000"))):
+        for name, gold, gate in (
+            ("ram", RAM, RAM),
+            ("ram_rewrite", rewrite, RAM),
+            ("init", counter("0000"), counter("0000")),
+        ):
             with self.subTest(pair=name):
                 self.assertEqual(self.judge(gold, gate), (True, "", False))
 
@@ -1071,8 +1212,10 @@ class SoundnessTest(unittest.TestCase):
         """opt_dff's d_eq_q: a flip-flop with D = Q and no init is x for ever, so the gate may
         drive its output with an x; a base case that starts it at 0 would call that a
         difference (tests/opt/rules/dff/d_eq_q.v)."""
-        gate = ("attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire input 2 \\d\n"
-                "  wire output 3 \\y\n  connect \\y 1'x\nend\n")
+        gate = (
+            "attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire input 2 \\d\n"
+            "  wire output 3 \\y\n  connect \\y 1'x\nend\n"
+        )
         self.assertEqual(self.judge(hold("\\r"), gate), (True, "", False))
 
 
@@ -1081,13 +1224,18 @@ def deep_delay(init: str, stages: int = 12) -> str:
     ``stages`` flops to the output ``y``: a difference of ``r`` shows 13 clock edges later,
     beyond the 20-step output check."""
     nets = "".join(f"  wire \\c{k}\n" for k in range(stages))
-    flop = ("  cell $dff ${name}\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
-            "    connect \\CLK \\clk\n    connect \\D {d}\n    connect \\Q {q}\n  end\n")
+    flop = (
+        "  cell $dff ${name}\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"
+        "    connect \\CLK \\clk\n    connect \\D {d}\n    connect \\Q {q}\n  end\n"
+    )
     chain = ["\\r", *(f"\\c{k}" for k in range(stages))]
     cells = flop.format(name="hold", d="\\r", q="\\r") + "".join(
-        flop.format(name=f"s{k}", d=chain[k], q=chain[k + 1]) for k in range(stages))
-    return ("attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire output 2 \\y\n"
-            f"{init}  wire \\r\n{nets}{cells}  connect \\y {chain[-1]}\nend\n")
+        flop.format(name=f"s{k}", d=chain[k], q=chain[k + 1]) for k in range(stages)
+    )
+    return (
+        "attribute \\top 1\nmodule \\m\n  wire input 1 \\clk\n  wire output 2 \\y\n"
+        f"{init}  wire \\r\n{nets}{cells}  connect \\y {chain[-1]}\nend\n"
+    )
 
 
 @unittest.skipUnless(YOSYS and Path(YOSYS).exists(), "Yosys 0.55 (ODIN3_YOSYS055) not found")

@@ -28,13 +28,17 @@ class JudgeTest(unittest.TestCase):
         self.assertIn(f"ODIN3_OPT_MAX_ITERATIONS = {opt_run.MAX_ITERATIONS},", text)
 
     def test_the_largest_count_is_reported(self) -> None:
-        log = ("odin3: info: opt: fixed point after 3 iterations\n"
-               "odin3: info: opt: fixed point after 9 iterations\n")
+        log = (
+            "odin3: info: opt: fixed point after 3 iterations\n"
+            "odin3: info: opt: fixed point after 9 iterations\n"
+        )
         self.assertEqual(opt_run.judge(log), (0, "ok: iterations max=9 opt-runs=2"))
 
     def test_no_fixed_point_fails(self) -> None:
-        log = ("odin3: warn: opt: module 'm': no fixed point after 10000 iterations; stopping\n"
-               "odin3: info: opt: fixed point after 3 iterations\n")
+        log = (
+            "odin3: warn: opt: module 'm': no fixed point after 10000 iterations; stopping\n"
+            "odin3: info: opt: fixed point after 3 iterations\n"
+        )
         code, line = opt_run.judge(log)
         self.assertEqual(code, 1)
         self.assertIn("no fixed point after 10000 iterations", line)
@@ -54,8 +58,9 @@ class RunTest(unittest.TestCase):
         self.file = Path(self._tmp.name) / "d.v"
         self.file.write_text("module t; endmodule\n", encoding="utf-8")
 
-    def run_tool(self, result: subprocess.CompletedProcess[str], *args: str
-                 ) -> tuple[int, str, list[list[str]]]:
+    def run_tool(
+        self, result: subprocess.CompletedProcess[str], *args: str
+    ) -> tuple[int, str, list[list[str]]]:
         calls: list[list[str]] = []
 
         def fake(argv: list[str], cap: int, **_: object) -> subprocess.CompletedProcess[str]:
@@ -64,13 +69,21 @@ class RunTest(unittest.TestCase):
 
         with mock.patch.object(memcap, "run", fake):
             code, out, _ = helpers.run_main(
-                opt_run.main, ["--odin3", "odin3", *args, str(self.file)])
+                opt_run.main, ["--odin3", "odin3", *args, str(self.file)]
+            )
         return code, out, calls
 
     def test_the_script_is_the_read_hierarchy_phase2_and_check_under_check(self) -> None:
         code, out, calls = self.run_tool(
-            child(0, "opt: fixed point after 2 iterations\n"), "--top", "t", "--techlib", "L.o3lib",
-            "--nolatches", "--mem-cap", "3G")
+            child(0, "opt: fixed point after 2 iterations\n"),
+            "--top",
+            "t",
+            "--techlib",
+            "L.o3lib",
+            "--nolatches",
+            "--mem-cap",
+            "3G",
+        )
         self.assertEqual(code, 0, out)
         self.assertIn("opt-run: ok: iterations max=2 opt-runs=1", out)
         argv = calls[0]
@@ -101,8 +114,9 @@ class RunTest(unittest.TestCase):
             self.assertIn("CRASH", out)
 
     def test_a_timeout_is_a_crash(self) -> None:
-        with mock.patch.object(memcap, "run",
-                               side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)):
+        with mock.patch.object(
+            memcap, "run", side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)
+        ):
             code, out, _ = helpers.run_main(opt_run.main, ["--odin3", "odin3", str(self.file)])
         self.assertEqual(code, 3)
         self.assertIn("timed out", out)

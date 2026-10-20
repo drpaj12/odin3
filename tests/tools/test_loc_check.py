@@ -93,6 +93,19 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(lc.compare("blif", before, after)["node"].lost, {"X-6": 1})
         self.assertEqual(lc.compare("plain", before, after)["net"].lost, {"X-1": 2})
 
+    def test_cell_without_a_json_entry(self) -> None:
+        # a constant driver the JSON file has no cell for: X-9; a port cell (the location of a
+        # declared wire): X-8; a cell the file has but the read-back lost: no class
+        before = dump(("wire", "x", A), ("node", "$c1", A), ("node", "$c2", B), ("node", "$c3", C))
+        after = dump(
+            ("wire", "x", A), ("node", "$c1", ""), ("node", "$c2", ""), ("node", "$c3", "")
+        )
+        written = {"m": lc.CellSet(frozenset({"$c3"}), frozenset())}
+        t = lc.compare("json", before, after, written)["node"]
+        self.assertEqual((t.lost, t.unclassified), ({"X-8": 1, "X-9": 1}, 1))
+        t = lc.compare("json", before, after)["node"]  # no JSON file known: all are written
+        self.assertEqual((t.lost, t.unclassified), ({}, 3))
+
     def test_named_net_class(self) -> None:
         before = dump(("net", "n", A))
         after = dump(("net", "n", ""))
@@ -117,6 +130,32 @@ class CompareTests(unittest.TestCase):
         after = dump(("node", "$c1", A), ("node", "$c2", B))
         t = lc.compare("json", before, after)["node"]
         self.assertEqual((t.same, t.gained), (1, 1))
+
+    def test_buffer_lost_in_verilog_is_x9(self) -> None:
+        before = dump(("node", "$c1", A), ("node", "$c2", B))
+        after = dump(("node", "$c1", A), ("node", "$c2", ""))
+        written = {"m": lc.CellSet(frozenset({"$c1", "$c2"}), frozenset({"$c2"}))}
+        t = lc.compare("verilog", before, after, written)["node"]
+        self.assertEqual((t.lost, t.unclassified), ({"X-9": 1}, 0))
+        t = lc.compare("json", before, after, written)["node"]  # JSON keeps the buffer
+        self.assertEqual((t.lost, t.unclassified), ({}, 1))
+
+    def test_buffer_cells(self) -> None:
+        lut = {"type": "$lut", "parameters": {"WIDTH": "0" * 31 + "1", "LUT": "10"}}
+        inverter = {"type": "$lut", "parameters": {"WIDTH": "0" * 31 + "1", "LUT": "01"}}
+        self.assertTrue(lc.is_buffer(lut))
+        self.assertFalse(lc.is_buffer(inverter))
+        self.assertTrue(lc.is_buffer({"type": "$_BUF_"}))
+        self.assertEqual(lc.cell_set({"a": lut, "b": inverter}).buffers, frozenset({"a"}))
+
+    def test_net_with_a_wire_location_is_inherited(self) -> None:
+        # D-2, D-3: a net takes the location of its netname or declaration
+        before = dump(("wire", "x", A), ("net", "$n1", ""), ("net", "$n2", ""))
+        after = dump(("wire", "x", A), ("net", "$n1", A), ("net", "$n2", B))
+        t = lc.compare("json", before, after)["net"]
+        self.assertEqual((t.inherited, t.gained), (1, 1))
+        named = lc.compare("json", dump(("wire", "x", A), ("net", "n", "")), dump(("net", "n", A)))
+        self.assertEqual((named["net"].inherited, named["net"].gained), (1, 0))
 
     def test_new_objects_are_not_gained(self) -> None:
         before = dump(("wire", "x", A))
@@ -226,7 +265,7 @@ class MainTests(unittest.TestCase):
 
     def test_run_with_fixed_dumps(self) -> None:
         rows = [lc.Obj("m", "module", "m", A), lc.Obj("m", "wire", "x", A)]
-        runs = {fmt: (rows, rows) for fmt in ("json", "verilog")}
+        runs = {fmt: lc.Pair(rows, rows) for fmt in ("json", "verilog")}
         with tempfile.TemporaryDirectory() as tmp:
             design = Path(tmp) / "d.v"
             design.write_text("module m; endmodule\n", encoding="utf-8")
@@ -242,7 +281,7 @@ class MainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             design = Path(tmp) / "d.v"
             design.write_text("module m; endmodule\n", encoding="utf-8")
-            with mock.patch.object(lc, "run_design", return_value={"json": (before, after)}):
+            with mock.patch.object(lc, "run_design", return_value={"json": lc.Pair(before, after)}):
                 code, out, _ = run_main(lc.main, ["--level", "word", str(design)])
         self.assertEqual(code, 1)
         self.assertIn("gained", out)
@@ -254,7 +293,7 @@ class MainTests(unittest.TestCase):
             design.write_text("module m; endmodule\n", encoding="utf-8")
             expect = Path(tmp) / "expect.txt"
             expect.write_text("word d.v error:script was broken\n", encoding="utf-8")
-            with mock.patch.object(lc, "run_design", return_value={"json": (rows, rows)}):
+            with mock.patch.object(lc, "run_design", return_value={"json": lc.Pair(rows, rows)}):
                 code, out, _ = run_main(
                     lc.main, ["--level", "word", "--expect", str(expect), str(design)]
                 )

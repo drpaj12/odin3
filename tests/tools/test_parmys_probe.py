@@ -23,9 +23,7 @@ HAVE_IVERILOG = shutil.which("iverilog") is not None and shutil.which("vvp") is 
 
 class BlifToVerilogTests(unittest.TestCase):
     def test_blif_to_verilog_names(self) -> None:
-        text = (
-            ".model t\n.inputs x~0 x~1\n.outputs y\n.names z\n.names x~0 x~1 y\n11 1\n.end\n"
-        )
+        text = ".model t\n.inputs x~0 x~1\n.outputs y\n.names z\n.names x~0 x~1 y\n11 1\n.end\n"
         verilog = pp.blif_to_verilog(text)
         self.assertIn("input [1:0] x;", verilog)
         self.assertIn("output y;", verilog)

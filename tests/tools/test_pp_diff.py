@@ -93,9 +93,7 @@ class NormalizeTest(unittest.TestCase):
 class TokenizeTest(unittest.TestCase):
     def test_whitespace_and_comments_dropped(self) -> None:
         text = "wire  /* c */ a ; // tail\n\tassign\r\na=b;"
-        self.assertEqual(
-            pp_diff.tokenize(text), ["wire", "a", ";", "assign", "a", "=", "b", ";"]
-        )
+        self.assertEqual(pp_diff.tokenize(text), ["wire", "a", ";", "assign", "a", "=", "b", ";"])
 
     def test_numbers_and_based_literals(self) -> None:
         self.assertEqual(
@@ -115,9 +113,38 @@ class TokenizeTest(unittest.TestCase):
     def test_operators_longest_match(self) -> None:
         self.assertEqual(
             pp_diff.tokenize("a<<<=b>>>c===d!==e**f&&g||h~&i~^j^~k+:l-:m->n<=o"),
-            ["a", "<<<", "=", "b", ">>>", "c", "===", "d", "!==", "e", "**", "f", "&&", "g",
-             "||", "h", "~&", "i", "~^", "j", "^~", "k", "+:", "l", "-:", "m", "->", "n",
-             "<=", "o"],
+            [
+                "a",
+                "<<<",
+                "=",
+                "b",
+                ">>>",
+                "c",
+                "===",
+                "d",
+                "!==",
+                "e",
+                "**",
+                "f",
+                "&&",
+                "g",
+                "||",
+                "h",
+                "~&",
+                "i",
+                "~^",
+                "j",
+                "^~",
+                "k",
+                "+:",
+                "l",
+                "-:",
+                "m",
+                "->",
+                "n",
+                "<=",
+                "o",
+            ],
         )
 
     def test_single_characters(self) -> None:

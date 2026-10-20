@@ -32,8 +32,9 @@ def say(text: str) -> str:
 
 def fake_run(argv: Sequence[str], cap: int, **kwargs: Any) -> subprocess.CompletedProcess[str]:
     del cap
-    return subprocess.run(list(argv), capture_output=True, text=True, check=False,
-                          cwd=kwargs.get("cwd"))
+    return subprocess.run(
+        list(argv), capture_output=True, text=True, check=False, cwd=kwargs.get("cwd")
+    )
 
 
 class RunTest(unittest.TestCase):
@@ -51,8 +52,10 @@ class RunTest(unittest.TestCase):
 
     def test_the_script_is_the_phase_3_script_up_to_compact(self) -> None:
         script = lr.script_for(["a.v"], None, None, "", Path("/tmp/o.blif"))
-        self.assertTrue(script.endswith("proc; opt; lower; opt -fast; compact; check; "
-                                        "write_blif /tmp/o.blif"), script)
+        self.assertTrue(
+            script.endswith("proc; opt; lower; opt -fast; compact; check; write_blif /tmp/o.blif"),
+            script,
+        )
 
     def test_a_lowered_design_is_ok_and_counted(self) -> None:
         code, out, err = self.run_fake(say(LOWERED))
@@ -90,8 +93,10 @@ class RunTest(unittest.TestCase):
 
     def test_a_timeout_is_exit_3(self) -> None:
         with mock.patch.object(lr, "TIMEOUT_SECONDS", 0.2):
-            def slow(argv: Sequence[str], cap: int, **kwargs: Any
-                     ) -> subprocess.CompletedProcess[str]:
+
+            def slow(
+                argv: Sequence[str], cap: int, **kwargs: Any
+            ) -> subprocess.CompletedProcess[str]:
                 raise subprocess.TimeoutExpired(list(argv), kwargs.get("timeout", 0.0))
 
             with mock.patch.object(memcap, "run", slow):

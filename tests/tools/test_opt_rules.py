@@ -76,15 +76,23 @@ YSTAT = """
      $xor                            2
 """
 COVER = "passes/opt/opt_expr.cc:570:replace_const_cells   1 opt.opt_expr.const_and\n"
-SOURCE = ("// expr/const_and: AND with a zero\n// options: -fine\n"
-          "module t(input a, output y);\nendmodule\n")
+SOURCE = (
+    "// expr/const_and: AND with a zero\n// options: -fine\n"
+    "module t(input a, output y);\nendmodule\n"
+)
 
 
 def fake_run(argv: Sequence[str], cap: int, **kwargs: Any) -> subprocess.CompletedProcess[str]:
     """Stands in for memcap.run: no cap, the child's cwd and env as given."""
     del cap
-    return subprocess.run(list(argv), capture_output=True, text=True, check=False,
-                          cwd=kwargs.get("cwd"), env=kwargs.get("env"))
+    return subprocess.run(
+        list(argv),
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=kwargs.get("cwd"),
+        env=kwargs.get("env"),
+    )
 
 
 class Tree:
@@ -107,8 +115,9 @@ class Tree:
         spec.update(changes)
         (self.bin / "fake.json").write_text(json.dumps(spec))
 
-    def rule(self, name: str, row: str, *, golden: str | None = "OUT\n", source: str = SOURCE
-             ) -> None:
+    def rule(
+        self, name: str, row: str, *, golden: str | None = "OUT\n", source: str = SOURCE
+    ) -> None:
         sub, leaf = name.split("/")
         base = self.root / "rules" / sub / leaf
         base.with_name(base.name + ".v").write_text(source)
@@ -117,13 +126,19 @@ class Tree:
         with open(self.rules, "a", encoding="utf-8") as handle:
             handle.write(row + "\n")
 
-    def run(self, *extra: str, yosys: bool = True, refine: bool = False
-            ) -> tuple[int, str, str]:
-        argv = ["--odin3", str(self.bin / "odin3"), "--rules", str(self.rules),
-                "--work", str(self.root / "work"), *(["--yosys", str(self.bin / "yosys")]
-                                                     if yosys else []),
-                *([] if refine else ["--no-refine"]), *extra,
-                str(self.root / "rules" / "expr")]
+    def run(self, *extra: str, yosys: bool = True, refine: bool = False) -> tuple[int, str, str]:
+        argv = [
+            "--odin3",
+            str(self.bin / "odin3"),
+            "--rules",
+            str(self.rules),
+            "--work",
+            str(self.root / "work"),
+            *(["--yosys", str(self.bin / "yosys")] if yosys else []),
+            *([] if refine else ["--no-refine"]),
+            *extra,
+            str(self.root / "rules" / "expr"),
+        ]
         with mock.patch.object(memcap, "run", fake_run):
             return helpers.run_main(orr.main, argv)
 
@@ -151,30 +166,45 @@ class OptRulesTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         work = (self.tree.root / "work" / "expr_const_and").resolve()
         src = (self.tree.root / "rules" / "expr" / "const_and.v").resolve()
-        self.assertEqual(self.tree.log("odin.log"), [
-            f"read_verilog --nolatches {src}; proc --noopt; write_rtlil {work}/in.il; "
-            f"opt_expr -fine --opt-stats; stats; write_rtlil {work}/out.il"])
-        self.assertEqual(self.tree.log("yosys.log"),
-                         [f"read_rtlil {work}/in.il; debug opt_expr -fine; stat"])
+        self.assertEqual(
+            self.tree.log("odin.log"),
+            [
+                f"read_verilog --nolatches {src}; proc --noopt; write_rtlil {work}/in.il; "
+                f"opt_expr -fine --opt-stats; stats; write_rtlil {work}/out.il"
+            ],
+        )
+        self.assertEqual(
+            self.tree.log("yosys.log"), [f"read_rtlil {work}/in.il; debug opt_expr -fine; stat"]
+        )
 
     def test_wreduce_row_commands(self) -> None:
         rule = orr.Rule("wreduce/port_a", "wreduce.port_a", "log:Removed")
-        script = orr.odin_script(rule, Path("/x/p.v"), ["-memx"], Path("/w/in.il"),
-                                 Path("/w/out.il"))
-        self.assertEqual(script, "read_verilog --nolatches /x/p.v; proc; opt; "
-                                 "write_rtlil /w/in.il; wreduce -memx --opt-stats; stats; "
-                                 "write_rtlil /w/out.il")
-        self.assertEqual(orr.yosys_script(rule, ["-memx"], Path("/w/in.il"), Path("/w/y.il")),
-                         "read_rtlil /w/in.il; debug wreduce -memx; write_rtlil /w/y.il; stat")
+        script = orr.odin_script(
+            rule, Path("/x/p.v"), ["-memx"], Path("/w/in.il"), Path("/w/out.il")
+        )
+        self.assertEqual(
+            script,
+            "read_verilog --nolatches /x/p.v; proc; opt; "
+            "write_rtlil /w/in.il; wreduce -memx --opt-stats; stats; "
+            "write_rtlil /w/out.il",
+        )
+        self.assertEqual(
+            orr.yosys_script(rule, ["-memx"], Path("/w/in.il"), Path("/w/y.il")),
+            "read_rtlil /w/in.il; debug wreduce -memx; write_rtlil /w/y.il; stat",
+        )
         self.assertEqual(orr.parse_rules("wreduce/a wreduce.port_a -\n")[0].sub, "wreduce")
 
     def test_cell_signatures_compare_widths_and_flags(self) -> None:
         def cell(aw: int, sg: int) -> str:
-            return (f"module \\m\n  cell $add \\c1\n    parameter \\A_SIGNED {sg}\n"
-                    f"    parameter signed \\A_WIDTH {aw}\n    parameter \\Y_WIDTH 9\n"
-                    "    connect \\A \\a\n  end\nend\n")
-        self.assertEqual(orr.cell_signatures(cell(8, 0)),
-                         {"m": ["$add A_SIGNED=0 A_WIDTH=8 Y_WIDTH=9"]})
+            return (
+                f"module \\m\n  cell $add \\c1\n    parameter \\A_SIGNED {sg}\n"
+                f"    parameter signed \\A_WIDTH {aw}\n    parameter \\Y_WIDTH 9\n"
+                "    connect \\A \\a\n  end\nend\n"
+            )
+
+        self.assertEqual(
+            orr.cell_signatures(cell(8, 0)), {"m": ["$add A_SIGNED=0 A_WIDTH=8 Y_WIDTH=9"]}
+        )
         self.assertEqual(orr.signature_diff(cell(8, 0), cell(8, 0)), "")
         self.assertIn("A_WIDTH=9", orr.signature_diff(cell(8, 0), cell(9, 0)))
         self.assertIn("A_SIGNED=1", orr.signature_diff(cell(8, 0), cell(8, 1)))
@@ -190,11 +220,15 @@ class OptRulesTest(unittest.TestCase):
         rule = orr.Rule("dff/x", "c", "-")
         prepass = orr.source_prepass("// dff/x: d\n// prepass: opt_dff; opt_expr\nmodule t;\n")
         self.assertEqual(prepass, ["opt_dff", "opt_expr"])
-        script = orr.odin_script(rule, Path("/x/g.v"), [], Path("/w/in.il"), Path("/w/out.il"),
-                                 prepass)
-        self.assertEqual(script, "read_verilog --nolatches /x/g.v; proc --noopt; opt_dff; "
-                                 "opt_expr; write_rtlil /w/in.il; opt_dff --opt-stats; stats; "
-                                 "write_rtlil /w/out.il")
+        script = orr.odin_script(
+            rule, Path("/x/g.v"), [], Path("/w/in.il"), Path("/w/out.il"), prepass
+        )
+        self.assertEqual(
+            script,
+            "read_verilog --nolatches /x/g.v; proc --noopt; opt_dff; "
+            "opt_expr; write_rtlil /w/in.il; opt_dff --opt-stats; stats; "
+            "write_rtlil /w/out.il",
+        )
         self.assertEqual(orr.source_prepass("module t;\n"), [])
 
     def test_pass_and_golden_match(self) -> None:
@@ -231,16 +265,20 @@ class OptRulesTest(unittest.TestCase):
 
     def test_histogram_difference_fails(self) -> None:
         self.good()
-        self.tree.set_spec(ystat=YSTAT.replace("$xor                            2",
-                                               "$xor                            3"))
+        self.tree.set_spec(
+            ystat=YSTAT.replace(
+                "$xor                            2", "$xor                            3"
+            )
+        )
         code, out, _ = self.tree.run()
         self.assertEqual(code, 1)
         self.assertIn("cell histogram differs", out)
         self.assertIn("module 't'", out)
 
     def test_golden_difference_fails(self) -> None:
-        self.tree.rule("expr/const_and", "expr/const_and const_and opt.opt_expr.const_and",
-                       golden="OTHER\n")
+        self.tree.rule(
+            "expr/const_and", "expr/const_and const_and opt.opt_expr.const_and", golden="OTHER\n"
+        )
         code, out, _ = self.tree.run()
         self.assertEqual(code, 1)
         self.assertIn("out.il differs from const_and.il", out)
@@ -254,8 +292,9 @@ class OptRulesTest(unittest.TestCase):
 
     def test_pending_rows_are_listed_not_failed(self) -> None:
         self.good()
-        self.tree.rule("expr/later", "expr/later const_or opt.opt_expr.const_or pending",
-                       golden=None)
+        self.tree.rule(
+            "expr/later", "expr/later const_or opt.opt_expr.const_or pending", golden=None
+        )
         code, out, _ = self.tree.run()
         self.assertEqual(code, 0, out)
         self.assertIn("expr/later: pending", out)
@@ -272,8 +311,9 @@ class OptRulesTest(unittest.TestCase):
         self.assertFalse((self.tree.root / "rules" / "expr" / "second.il").exists())
 
     def test_write_writes_when_all_pass(self) -> None:
-        self.tree.rule("expr/const_and", "expr/const_and const_and opt.opt_expr.const_and",
-                       golden=None)
+        self.tree.rule(
+            "expr/const_and", "expr/const_and const_and opt.opt_expr.const_and", golden=None
+        )
         self.tree.set_spec(out="NEW\n")
         code, out, _ = self.tree.run("--write")
         self.assertEqual(code, 0, out)
@@ -298,12 +338,16 @@ class OptRulesTest(unittest.TestCase):
         self.tree.set_spec(ystat=YSTAT + "     $pos                            1\n")
         self.assertEqual(self.tree.run()[0], 0)
         rule = orr.Rule("expr/x", "c", "-", "dev=24")
-        self.assertEqual(orr.yosys_script(rule, ["-mux_undef"], Path("/w/in.il")),
-                         "read_rtlil /w/in.il; debug opt_expr -mux_undef; "
-                         "opt_clean; debug opt_expr -mux_undef; stat")
+        self.assertEqual(
+            orr.yosys_script(rule, ["-mux_undef"], Path("/w/in.il")),
+            "read_rtlil /w/in.il; debug opt_expr -mux_undef; "
+            "opt_clean; debug opt_expr -mux_undef; stat",
+        )
         other = orr.Rule("expr/x", "c", "-", "dev=7")
-        self.assertEqual(orr.yosys_script(other, [], Path("/w/in.il")),
-                         "read_rtlil /w/in.il; debug opt_expr; stat")
+        self.assertEqual(
+            orr.yosys_script(other, [], Path("/w/in.il")),
+            "read_rtlil /w/in.il; debug opt_expr; stat",
+        )
 
     def test_other_deviation_is_reported_not_failed(self) -> None:
         self.good("dev=7")
@@ -313,12 +357,19 @@ class OptRulesTest(unittest.TestCase):
         self.assertIn("deviation 7: cell histogram differs", out)
 
     def test_info_counters(self) -> None:
-        log = ("odin3: info: opt_merge: removed 3 cells\n"
-               "odin3: info: opt_dff: 2 flip-flops changed, 5 constant bits\n")
+        log = (
+            "odin3: info: opt_merge: removed 3 cells\n"
+            "odin3: info: opt_dff: 2 flip-flops changed, 5 constant bits\n"
+        )
         self.assertEqual(orr.counter_value(orr.Rule("merge/a", "merge.removed", "-"), log), 3)
         self.assertEqual(orr.counter_value(orr.Rule("dff/a", "dff.constbits", "-"), log), 5)
-        self.assertEqual(orr.counter_value(orr.Rule("dff/a", "opt_dff.d_eq_q", "-"),
-                                           "odin3: info: opt: rule opt_dff.d_eq_q 4\n"), 4)
+        self.assertEqual(
+            orr.counter_value(
+                orr.Rule("dff/a", "opt_dff.d_eq_q", "-"),
+                "odin3: info: opt: rule opt_dff.d_eq_q 4\n",
+            ),
+            4,
+        )
 
     def refining(self, skips: str = "", **spec: Any) -> None:
         """A good row with valid RTLIL in/out (the refinement check reads their modules)."""
@@ -362,8 +413,11 @@ class OptRulesTest(unittest.TestCase):
 
     def test_a_yosys_error_abort_is_a_tool_error_no_skip_absorbs_it(self) -> None:
         """Review I3: an ERROR that is not the failed proof is exit 2, never a skip."""
-        self.refining(skips="expr/const_and no model for it\n", refine_rc=1,
-                      refine_out="ERROR: Parser error in line 3: syntax error\n")
+        self.refining(
+            skips="expr/const_and no model for it\n",
+            refine_rc=1,
+            refine_out="ERROR: Parser error in line 3: syntax error\n",
+        )
         code, out, err = self.tree.run(refine=True)
         self.assertEqual(code, 2, out + err)
         self.assertNotIn("refinement skipped", out)
@@ -374,22 +428,38 @@ class OptRulesTest(unittest.TestCase):
         code, out, err = self.tree.run()
         self.assertEqual(code, 3, out + err)
         self.tree.set_spec()
-        with mock.patch.object(memcap, "run",
-                               side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)):
-            argv = ["--odin3", str(self.tree.bin / "odin3"), "--rules", str(self.tree.rules),
-                    "--work", str(self.tree.root / "work2"), "--no-refine",
-                    str(self.tree.root / "rules" / "expr")]
+        with mock.patch.object(
+            memcap, "run", side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)
+        ):
+            argv = [
+                "--odin3",
+                str(self.tree.bin / "odin3"),
+                "--rules",
+                str(self.tree.rules),
+                "--work",
+                str(self.tree.root / "work2"),
+                "--no-refine",
+                str(self.tree.root / "rules" / "expr"),
+            ]
             code, out, err = helpers.run_main(orr.main, argv)
         self.assertEqual(code, 3, out + err)
         self.assertNotIn("Traceback", err)
 
     def test_a_cap_above_the_limit_is_a_usage_error_not_a_traceback(self) -> None:
         self.good()
-        argv = ["--odin3", str(self.tree.bin / "odin3"), "--rules", str(self.tree.rules),
-                "--work", str(self.tree.root / "work"), "--no-refine",
-                str(self.tree.root / "rules" / "expr")]
-        with mock.patch.object(memcap, "run",
-                               side_effect=ValueError("cap 9 bytes exceeds 60% of MemTotal")):
+        argv = [
+            "--odin3",
+            str(self.tree.bin / "odin3"),
+            "--rules",
+            str(self.tree.rules),
+            "--work",
+            str(self.tree.root / "work"),
+            "--no-refine",
+            str(self.tree.root / "rules" / "expr"),
+        ]
+        with mock.patch.object(
+            memcap, "run", side_effect=ValueError("cap 9 bytes exceeds 60% of MemTotal")
+        ):
             code, _, err = helpers.run_main(orr.main, argv)
         self.assertEqual(code, 2)
         self.assertIn("exceeds", err)

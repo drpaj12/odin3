@@ -35,8 +35,10 @@ class GridTest(unittest.TestCase):
         self.assertIn("assign y = a * b;", by_stem["mul_w3x5"].text)
         self.assertIn("assign y = a / b;", by_stem["div_w4_s"].text)
         self.assertIn("assign y = a % b;", by_stem["mod_w5x3_ms"].text)
-        self.assertIn("module m(input signed [3:0] a, input signed [3:0] b, output [2:0] y);",
-                      by_stem["mul_w4_s_y3"].text)
+        self.assertIn(
+            "module m(input signed [3:0] a, input signed [3:0] b, output [2:0] y);",
+            by_stem["mul_w4_s_y3"].text,
+        )
         for prefix in ("mul_", "div_", "mod_"):
             self.assertTrue(any(s.startswith(prefix) for s in by_stem), prefix)
 
@@ -45,7 +47,8 @@ class GridTest(unittest.TestCase):
         self.assertEqual(
             by_stem["and_w3x5_ms"].text,
             "module m(input signed [2:0] a, input [4:0] b, output [4:0] y);\n"
-            "  assign y = a & b;\nendmodule\n")
+            "  assign y = a & b;\nendmodule\n",
+        )
         self.assertIn("assign y = s ? b : a;", by_stem["mux_w8"].text)
         self.assertIn("assign y = a == b;", by_stem["eq_w5"].text)
         self.assertIn("assign y = ~^a;", by_stem["reduce_xnor_w3"].text)
@@ -71,8 +74,10 @@ class GridTest(unittest.TestCase):
         for _ in range(2):
             code, _, _ = helpers.run_main(gc.main, ["--out", str(out)])
             self.assertEqual(code, 0)
-        self.assertEqual((out / "and_w5.v").read_text(),
-                         {c.stem: c for c in gc.generate(["bitwise"])}["and_w5"].text)
+        self.assertEqual(
+            (out / "and_w5.v").read_text(),
+            {c.stem: c for c in gc.generate(["bitwise"])}["and_w5"].text,
+        )
         code, text, _ = helpers.run_main(gc.main, ["--list"])
         self.assertEqual(code, 0)
         self.assertEqual(sorted(p.name for p in out.glob("*.v")), sorted(text.split()))
@@ -86,8 +91,9 @@ class GridTest(unittest.TestCase):
             self.assertIn(f"{kind}_w4_neg", cells)
             self.assertEqual(f"{kind}_w4_lo" in cells, kind != "dff")
         text = cells["adffe_w4_neg_lo"].text
-        self.assertIn("always @(negedge clk or negedge rst) if (!rst) q <= 4'd5; "
-                      "else if (!en) q <= d;", text)
+        self.assertIn(
+            "always @(negedge clk or negedge rst) if (!rst) q <= 4'd5; else if (!en) q <= d;", text
+        )
         self.assertIn("input en", cells["sdffce_w1"].text)
         self.assertNotIn("input en", cells["sdff_w1"].text)
         self.assertIn("4'b1010", cells["dffsr_w4"].text)

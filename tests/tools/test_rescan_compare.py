@@ -19,7 +19,7 @@ import rescan_compare
 from . import helpers
 
 MEMINFO_32G = "MemTotal:       33554432 kB\nMemFree:        1000 kB\n"
-SCRIPT = ("opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt; compact")
+SCRIPT = "opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt; compact"
 
 # The fake odin3 logs its argv; write_rtlil NAME writes "same" or, for b.il when FAKE_DIFFER names
 # the source's file, "other"; FAKE_FAIL_B makes a script with --opt-full-rescan fail.
@@ -56,8 +56,9 @@ class RescanCompareTest(unittest.TestCase):
         meminfo = self.dir / "meminfo"
         meminfo.write_text(MEMINFO_32G, encoding="ascii")
         stack = contextlib.ExitStack()
-        stack.enter_context(mock.patch.dict(os.environ, {"FAKE_LOG": str(self.log),
-                                                         "PATH": str(self.dir)}))
+        stack.enter_context(
+            mock.patch.dict(os.environ, {"FAKE_LOG": str(self.log), "PATH": str(self.dir)})
+        )
         stack.enter_context(mock.patch.object(memcap, "MEMINFO", str(meminfo)))
         self.addCleanup(stack.close)
 
@@ -73,13 +74,18 @@ class RescanCompareTest(unittest.TestCase):
         code, out, _ = self.run_tool()
         self.assertEqual(code, 0)
         small, big = str(self.corpus / "small.v"), str(self.corpus / "big.v")
-        a = ("read_verilog --nolatches {f}; opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt; "
-             "compact; write_rtlil a.il")
-        b = ("read_verilog --nolatches {f}; opt_expr --opt-full-rescan; opt_clean; "
-             "opt -nodffe -nosdff --opt-full-rescan; proc; opt --opt-full-rescan; compact; "
-             "write_rtlil b.il")
-        self.assertEqual(self.scripts(), [a.format(f=small), b.format(f=small),
-                                          a.format(f=big), b.format(f=big)])
+        a = (
+            "read_verilog --nolatches {f}; opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt; "
+            "compact; write_rtlil a.il"
+        )
+        b = (
+            "read_verilog --nolatches {f}; opt_expr --opt-full-rescan; opt_clean; "
+            "opt -nodffe -nosdff --opt-full-rescan; proc; opt --opt-full-rescan; compact; "
+            "write_rtlil b.il"
+        )
+        self.assertEqual(
+            self.scripts(), [a.format(f=small), b.format(f=small), a.format(f=big), b.format(f=big)]
+        )
         self.assertIn("2 files: 2 identical, 0 differ, 0 errors", out)
 
     def test_a_difference_is_exit_1_and_named(self) -> None:
@@ -97,22 +103,35 @@ class RescanCompareTest(unittest.TestCase):
         self.assertIn("rescan boom", out)
 
     def test_bad_input_is_exit_2(self) -> None:
-        code, _, err = helpers.run_main(rescan_compare.main,
-                                        ["--odin3", str(self.odin3), str(self.dir / "none")])
+        code, _, err = helpers.run_main(
+            rescan_compare.main, ["--odin3", str(self.odin3), str(self.dir / "none")]
+        )
         self.assertEqual(code, 2)
         self.assertIn("no such file", err)
 
     def test_with_rescan_only_touches_opt_and_opt_expr(self) -> None:
-        self.assertEqual(rescan_compare.with_rescan(["opt_clean", "opt", "opt_expr -full", "proc"]),
-                         ["opt_clean", "opt --opt-full-rescan", "opt_expr -full --opt-full-rescan",
-                          "proc"])
+        self.assertEqual(
+            rescan_compare.with_rescan(["opt_clean", "opt", "opt_expr -full", "proc"]),
+            ["opt_clean", "opt --opt-full-rescan", "opt_expr -full --opt-full-rescan", "proc"],
+        )
 
     def test_techlib_is_read_first(self) -> None:
-        argv = ["--odin3", str(self.odin3), "--work", str(self.work), "--techlib", "/nolib/v.o3lib",
-                str(self.corpus / "small.v")]
+        argv = [
+            "--odin3",
+            str(self.odin3),
+            "--work",
+            str(self.work),
+            "--techlib",
+            "/nolib/v.o3lib",
+            str(self.corpus / "small.v"),
+        ]
         self.assertEqual(helpers.run_main(rescan_compare.main, argv)[0], 0)
-        self.assertTrue(all(s.startswith("read_techlib /nolib/v.o3lib; read_verilog --nolatches ")
-                            for s in self.scripts()))
+        self.assertTrue(
+            all(
+                s.startswith("read_techlib /nolib/v.o3lib; read_verilog --nolatches ")
+                for s in self.scripts()
+            )
+        )
 
     def test_default_script_is_phase2_script(self) -> None:
         text = rescan_compare.DEFAULT_SCRIPT.read_text(encoding="utf-8")

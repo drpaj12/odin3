@@ -94,18 +94,25 @@ if spec.get("compare_signal"):
 sys.exit(spec.get("compare_rc", 0))
 """
 
-ODIN_LOG = ("odin3: info: opt: rule const_and 2\n"
-            "odin3: info: stats: module t: cell $xor 2\n")
-YSTAT = ("\n=== t ===\n\n   Number of cells:                  2\n"
-         "     $xor                            2\n")
+ODIN_LOG = "odin3: info: opt: rule const_and 2\nodin3: info: stats: module t: cell $xor 2\n"
+YSTAT = (
+    "\n=== t ===\n\n   Number of cells:                  2\n"
+    "     $xor                            2\n"
+)
 YSTAT_MORE = YSTAT.replace("$xor                            2", "$xor                            3")
 COVER = "passes/opt/opt_expr.cc:570:f   3 opt.opt_expr.const_and\nx.cc:1:g   0 opt.opt_expr.zero\n"
 
 
 def fake_run(argv: Sequence[str], cap: int, **kwargs: Any) -> subprocess.CompletedProcess[str]:
     del cap
-    return subprocess.run(list(argv), capture_output=True, text=True, check=False,
-                          cwd=kwargs.get("cwd"), env=kwargs.get("env"))
+    return subprocess.run(
+        list(argv),
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=kwargs.get("cwd"),
+        env=kwargs.get("env"),
+    )
 
 
 class Tree:
@@ -113,8 +120,11 @@ class Tree:
         self.root = root
         self.bin = root / "bin"
         self.bin.mkdir()
-        for name, text in (("odin3", FAKE_ODIN), ("yosys", FAKE_YOSYS),
-                           ("netlist-compare", FAKE_COMPARE)):
+        for name, text in (
+            ("odin3", FAKE_ODIN),
+            ("yosys", FAKE_YOSYS),
+            ("netlist-compare", FAKE_COMPARE),
+        ):
             (self.bin / name).write_text(text)
             (self.bin / name).chmod(0o755)
         (root / "micro").mkdir()
@@ -132,9 +142,18 @@ class Tree:
         return ["--expect", str(path), "--root", str(self.root / "micro")]
 
     def run(self, *extra: str) -> tuple[int, str, str]:
-        argv = ["--odin3", str(self.bin / "odin3"), "--yosys", str(self.bin / "yosys"),
-                "--netlist-compare", str(self.bin / "netlist-compare"),
-                "--work", str(self.root / "work"), *extra, str(self.root / "micro" / "d.v")]
+        argv = [
+            "--odin3",
+            str(self.bin / "odin3"),
+            "--yosys",
+            str(self.bin / "yosys"),
+            "--netlist-compare",
+            str(self.bin / "netlist-compare"),
+            "--work",
+            str(self.root / "work"),
+            *extra,
+            str(self.root / "micro" / "d.v"),
+        ]
         with mock.patch.object(memcap, "run", fake_run):
             return helpers.run_main(od.main, argv)
 
@@ -158,43 +177,55 @@ class ScriptTest(unittest.TestCase):
             self.odin("phase2", "t"),
             "read_verilog --nolatches a.v b.v; hierarchy --top t; write_rtlil w/in.il; "
             "opt_expr --opt-stats; opt_clean --opt-stats; opt -nodffe -nosdff --opt-stats; proc; "
-            "opt --opt-stats; compact; write_rtlil w/odin.il; stats")
+            "opt --opt-stats; compact; write_rtlil w/odin.il; stats",
+        )
         self.assertEqual(
             self.yosys("phase2"),
             "read_rtlil w/in.il; opt_expr; opt_clean; opt -nodffe -nosdff; proc -norom; opt; "
-            "write_rtlil w/yosys.il; stat")
+            "write_rtlil w/yosys.il; stat",
+        )
 
     def test_every_opt_script(self) -> None:
-        for name, slug in (("opt -full", "full"), ("opt -fast", "fast"),
-                           ("opt -fast -noff", "fast-noff"),
-                           ("opt -nodffe -nosdff", "nodffe-nosdff")):
+        for name, slug in (
+            ("opt -full", "full"),
+            ("opt -fast", "fast"),
+            ("opt -fast -noff", "fast-noff"),
+            ("opt -nodffe -nosdff", "nodffe-nosdff"),
+        ):
             self.assertEqual(od.script_named(name).slug, slug)
             self.assertEqual(
                 self.odin(name),
                 f"read_verilog --nolatches a.v b.v; hierarchy -auto; proc; opt_expr -keepdc; "
-                f"write_rtlil w/in.il; {name} --opt-stats; write_rtlil w/odin.il; stats")
-            self.assertEqual(self.yosys(name),
-                             f"read_rtlil w/in.il; {name}; write_rtlil w/yosys.il; stat")
+                f"write_rtlil w/in.il; {name} --opt-stats; write_rtlil w/odin.il; stats",
+            )
+            self.assertEqual(
+                self.yosys(name), f"read_rtlil w/in.il; {name}; write_rtlil w/yosys.il; stat"
+            )
 
     def test_wreduce_and_phase3_scripts(self) -> None:
         self.assertEqual(od.script_named("wreduce").slug, "wreduce")
         self.assertEqual(
             self.odin("wreduce"),
             "read_verilog --nolatches a.v b.v; hierarchy -auto; proc; opt_expr -keepdc; opt; "
-            "write_rtlil w/in.il; wreduce --opt-stats; write_rtlil w/odin.il; stats")
-        self.assertEqual(self.yosys("wreduce"),
-                         "read_rtlil w/in.il; wreduce; write_rtlil w/yosys.il; stat")
+            "write_rtlil w/in.il; wreduce --opt-stats; write_rtlil w/odin.il; stats",
+        )
+        self.assertEqual(
+            self.yosys("wreduce"), "read_rtlil w/in.il; wreduce; write_rtlil w/yosys.il; stat"
+        )
         # Phase 2's lines, then wreduce; opt_clean; opt -full (3G WR-9); in.il before proc
         self.assertEqual(
             self.odin("phase3", "t"),
             "read_verilog --nolatches a.v b.v; hierarchy --top t; write_rtlil w/in.il; "
             "opt_expr --opt-stats; opt_clean --opt-stats; opt -nodffe -nosdff --opt-stats; proc; "
             "opt --opt-stats; wreduce --opt-stats; opt_clean --opt-stats; opt -full --opt-stats; "
-            "compact; write_rtlil w/odin.il; stats")
+            "compact; write_rtlil w/odin.il; stats",
+        )
         self.assertIn("wreduce; opt_clean; opt -full; write_rtlil", self.yosys("phase3"))
         self.assertIn("widths", od.STEPS)
-        table = od.parse_expect("a.v wreduce widths structural only: a reason\n"
-                                "a.v phase3 identity structural only: a reason\n")
+        table = od.parse_expect(
+            "a.v wreduce widths structural only: a reason\n"
+            "a.v phase3 identity structural only: a reason\n"
+        )
         self.assertEqual(len(table), 2)
 
     def test_unknown_script(self) -> None:
@@ -206,11 +237,13 @@ class ScriptTest(unittest.TestCase):
             od.lowering_script(Path("o.il"), Path("o.blif")),
             "read_rtlil o.il; hierarchy -auto-top; flatten; memory; techmap; opt -fast; dffunmap; "
             "opt -fast -noff; opt_clean -purge; "
-            "write_blif -true + vcc -false + gnd -undef + unconn -blackbox o.blif")
+            "write_blif -true + vcc -false + gnd -undef + unconn -blackbox o.blif",
+        )
 
     def test_expect_parser(self) -> None:
-        table = od.parse_expect("# c\nsub/d.v phase2 histogram why not  # note\n"
-                                "e.v * refine another\n")
+        table = od.parse_expect(
+            "# c\nsub/d.v phase2 histogram why not  # note\ne.v * refine another\n"
+        )
         self.assertEqual(table[("sub/d.v", "phase2", "histogram")].reason, "why not")
         self.assertIn(("e.v", "*", "refine"), table)
         for bad in ("d.v phase2 histogram\n", "d.v nosuch refine why\n", "d.v full nostep why\n"):
@@ -289,19 +322,33 @@ class RunTest(unittest.TestCase):
         """A timed-out proof goes to equiv-check on the lowered BLIFs: proved is a pass, a cec
         that decides nothing is the difference `unproven` (exit 4, nothing else failed), a cec
         that says not equivalent is exit 1, --no-cec keeps the hard timeout."""
+
         def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
             if "equiv_make" in " ".join(argv):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
-        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
-                "--netlist-compare", str(self.tree.bin / "netlist-compare"),
-                "--work", str(self.tree.root / "work"), str(self.tree.root / "micro" / "d.v")]
-        for verdict, code, needle in ((opt_equiv.CEC_PROVED, 0, "[phase2]: ok"),
-                                      (opt_equiv.CEC_UNPROVEN, 4, "refine: DIFFERS: unproven"),
-                                      (opt_equiv.CEC_DIFFERS, 1, "refine: DIFFERS: text")):
-            with self.subTest(verdict=verdict), mock.patch.object(
-                    memcap, "run", hang), mock.patch.object(
-                    opt_equiv, "cec_blifs", return_value=(verdict, "text")):
+
+        argv = [
+            "--odin3",
+            str(self.tree.bin / "odin3"),
+            "--yosys",
+            str(self.tree.bin / "yosys"),
+            "--netlist-compare",
+            str(self.tree.bin / "netlist-compare"),
+            "--work",
+            str(self.tree.root / "work"),
+            str(self.tree.root / "micro" / "d.v"),
+        ]
+        for verdict, code, needle in (
+            (opt_equiv.CEC_PROVED, 0, "[phase2]: ok"),
+            (opt_equiv.CEC_UNPROVEN, 4, "refine: DIFFERS: unproven"),
+            (opt_equiv.CEC_DIFFERS, 1, "refine: DIFFERS: text"),
+        ):
+            with (
+                self.subTest(verdict=verdict),
+                mock.patch.object(memcap, "run", hang),
+                mock.patch.object(opt_equiv, "cec_blifs", return_value=(verdict, "text")),
+            ):
                 got, out, err = helpers.run_main(od.main, argv)
                 self.assertEqual(got, code, out + err)
                 self.assertIn(needle, out)
@@ -314,18 +361,27 @@ class RunTest(unittest.TestCase):
         whose latches have no 0/1 init, so the step is `unproven` (exit 4), never ok (the message
         says why: the checker is not run). It gets the gold (Yosys) first, the gate (Odin III)
         second."""
+
         def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
             if "equiv_make" in " ".join(argv):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
-        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
-                "--netlist-compare", str(self.tree.bin / "netlist-compare"),
-                "--work", str(self.tree.root / "work"), str(self.tree.root / "micro" / "d.v")]
+
+        argv = [
+            "--odin3",
+            str(self.tree.bin / "odin3"),
+            "--yosys",
+            str(self.tree.bin / "yosys"),
+            "--netlist-compare",
+            str(self.tree.bin / "netlist-compare"),
+            "--work",
+            str(self.tree.root / "work"),
+            str(self.tree.root / "micro" / "d.v"),
+        ]
         seen: list[tuple[Path, Path, bool]] = []
         real = opt_equiv.cec_blifs
 
-        def spy(a: Path, b: Path, cap: int, work: Path, need_init: bool = False
-                ) -> tuple[str, str]:
+        def spy(a: Path, b: Path, cap: int, work: Path, need_init: bool = False) -> tuple[str, str]:
             seen.append((a, b, need_init))
             return real(a, b, cap, work, need_init)
 
@@ -336,9 +392,12 @@ class RunTest(unittest.TestCase):
                 blif.write_text(".model m\n.inputs c d\n.outputs q\n.latch d q re c\n.end\n")
                 paths.append(blif)
             return paths
-        with mock.patch.object(memcap, "run", hang), mock.patch.object(
-                od.Diff, "lower", lower), mock.patch.object(
-                opt_equiv, "cec_blifs", spy):
+
+        with (
+            mock.patch.object(memcap, "run", hang),
+            mock.patch.object(od.Diff, "lower", lower),
+            mock.patch.object(opt_equiv, "cec_blifs", spy),
+        ):
             got, out, err = helpers.run_main(od.main, argv)
         self.assertEqual(got, 4, out + err)
         self.assertIn("refine: DIFFERS: unproven", out)
@@ -351,40 +410,62 @@ class RunTest(unittest.TestCase):
         """L3: Odin III's BLIF is the gate. An `unconn` read by the gate is unproven without running
         the checker; one read only by Yosys's (the gold: an x there is a don't care) lets a passing
         checker prove, and a failing checker is "no verdict", not a difference."""
+
         def hang(argv: Sequence[str], cap: int, **kw: Any) -> subprocess.CompletedProcess[str]:
             if "equiv_make" in " ".join(argv):
                 raise subprocess.TimeoutExpired(list(argv), 60.0)
             return fake_run(argv, cap, **kw)
-        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
-                "--netlist-compare", str(self.tree.bin / "netlist-compare"),
-                "--work", str(self.tree.root / "work"), str(self.tree.root / "micro" / "d.v")]
+
+        argv = [
+            "--odin3",
+            str(self.tree.bin / "odin3"),
+            "--yosys",
+            str(self.tree.bin / "yosys"),
+            "--netlist-compare",
+            str(self.tree.bin / "netlist-compare"),
+            "--work",
+            str(self.tree.root / "work"),
+            str(self.tree.root / "micro" / "d.v"),
+        ]
         clean = ".model m\n.inputs c d\n.outputs q\n.latch d q re c 0\n.end\n"
         with_x = clean.replace(".end", ".names unconn\n.names unconn q\n1 1\n.end")
         real_capped = opt_equiv.capped
         for odin_x, yosys_x, checker, want_code, want_text in (
-                (True, False, 0, 4, "gate reads x nets"),
-                (False, True, 0, 0, "[phase2]: ok"),
-                (False, True, 1, 4, "no verdict either way")):
+            (True, False, 0, 4, "gate reads x nets"),
+            (False, True, 0, 0, "[phase2]: ok"),
+            (False, True, 1, 4, "no verdict either way"),
+        ):
             checker_calls: list[list[str]] = []
 
-            def capped(what: str, cmd: Sequence[str], *args: Any, _rc: int = checker,
-                       _calls: list[list[str]] = checker_calls, **kw: Any) -> Any:
+            def capped(
+                what: str,
+                cmd: Sequence[str],
+                *args: Any,
+                _rc: int = checker,
+                _calls: list[list[str]] = checker_calls,
+                **kw: Any,
+            ) -> Any:
                 if what == "equiv-check":
                     _calls.append(list(cmd))
                     return subprocess.CompletedProcess(list(cmd), _rc, "", "")
                 return real_capped(what, cmd, *args, **kw)
 
-            def lower(_self: Any, run_dir: Path, _o: bool = odin_x, _y: bool = yosys_x
-                      ) -> list[Path]:
+            def lower(
+                _self: Any, run_dir: Path, _o: bool = odin_x, _y: bool = yosys_x
+            ) -> list[Path]:
                 paths = []
                 for side, has_x in (("odin", _o), ("yosys", _y)):
                     blif = run_dir / f"{side}.blif"
                     blif.write_text(with_x if has_x else clean)
                     paths.append(blif)
                 return paths
-            with self.subTest(odin_x=odin_x, yosys_x=yosys_x, checker=checker), mock.patch.object(
-                    memcap, "run", hang), mock.patch.object(od.Diff, "lower", lower), \
-                    mock.patch.object(opt_equiv, "capped", capped):
+
+            with (
+                self.subTest(odin_x=odin_x, yosys_x=yosys_x, checker=checker),
+                mock.patch.object(memcap, "run", hang),
+                mock.patch.object(od.Diff, "lower", lower),
+                mock.patch.object(opt_equiv, "capped", capped),
+            ):
                 got, out, err = helpers.run_main(od.main, argv)
             self.assertEqual(got, want_code, out + err)
             self.assertIn(want_text, out)
@@ -416,10 +497,18 @@ class RunTest(unittest.TestCase):
                 self.assertIn("odin3", err)
 
     def test_a_timeout_is_hard_exit_3_with_no_traceback(self) -> None:
-        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
-                "--work", str(self.tree.root / "work"), str(self.tree.root / "micro" / "d.v")]
-        with mock.patch.object(memcap, "run",
-                               side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)):
+        argv = [
+            "--odin3",
+            str(self.tree.bin / "odin3"),
+            "--yosys",
+            str(self.tree.bin / "yosys"),
+            "--work",
+            str(self.tree.root / "work"),
+            str(self.tree.root / "micro" / "d.v"),
+        ]
+        with mock.patch.object(
+            memcap, "run", side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)
+        ):
             code, _, err = helpers.run_main(od.main, argv)
         self.assertEqual(code, 3, err)
         self.assertIn("timed out", err)
@@ -443,8 +532,12 @@ class RunTest(unittest.TestCase):
                 self.assertEqual(code, 4, out + err)
                 self.assertIn("opt-diff: unproven: yosys", err)
                 self.assertNotIn("HARD", err)
-        for spec in ({"yosys_signal": 11}, {"lower_signal": 11}, {"odin_signal": 9},
-                     {"compare_signal": 9}):
+        for spec in (
+            {"yosys_signal": 11},
+            {"lower_signal": 11},
+            {"odin_signal": 9},
+            {"compare_signal": 9},
+        ):
             with self.subTest(spec=spec):
                 self.tree.set_spec(**spec)
                 code, out, err = self.tree.run()
@@ -466,8 +559,9 @@ class RunTest(unittest.TestCase):
         """SIGKILL (the memory cap) takes the BLIF cec fallback like a timeout: unproven there is
         exit 4, and no expect line turns it into a pass (2H review: a listing never counts)."""
         self.tree.set_spec(refine_signal=9)
-        with mock.patch.object(opt_equiv, "cec_blifs",
-                               return_value=(opt_equiv.CEC_UNPROVEN, "BLIF cec: no verdict")):
+        with mock.patch.object(
+            opt_equiv, "cec_blifs", return_value=(opt_equiv.CEC_UNPROVEN, "BLIF cec: no verdict")
+        ):
             code, out, err = self.tree.run()
             self.assertEqual(code, 4, out + err)
             self.assertIn("refine: DIFFERS: unproven: the SAT proof hit its size limit", out)
@@ -482,8 +576,9 @@ class RunTest(unittest.TestCase):
         unlisted difference, a stale entry or a refine that is not unproven makes it exit 1; a
         listed other difference leaves exit 4."""
         self.tree.set_spec(refine_signal=9)
-        unproven = mock.patch.object(opt_equiv, "cec_blifs",
-                                     return_value=(opt_equiv.CEC_UNPROVEN, "BLIF cec: no verdict"))
+        unproven = mock.patch.object(
+            opt_equiv, "cec_blifs", return_value=(opt_equiv.CEC_UNPROVEN, "BLIF cec: no verdict")
+        )
         with unproven:
             self.assertEqual(self.tree.run()[0], 4)
             self.tree.set_spec(refine_signal=9, compare_rc=1)  # identity differs as well
@@ -501,8 +596,9 @@ class RunTest(unittest.TestCase):
             self.assertEqual(code, 1, out)  # a stale entry
             self.assertIn("stale entry", out)
         self.tree.set_spec(refine_signal=9)
-        with mock.patch.object(opt_equiv, "cec_blifs",
-                               return_value=(opt_equiv.CEC_DIFFERS, "not equivalent")):
+        with mock.patch.object(
+            opt_equiv, "cec_blifs", return_value=(opt_equiv.CEC_DIFFERS, "not equivalent")
+        ):
             self.assertEqual(self.tree.run()[0], 1)
 
     def test_h1_an_untested_listing_needs_an_unproven_step(self) -> None:
@@ -517,8 +613,9 @@ class RunTest(unittest.TestCase):
         honest = self.tree.expect("d.v phase2 identity structural only: refine passes\n")
         self.assertEqual(self.tree.run(*honest)[0], 0)
         self.tree.set_spec(compare_rc=1, refine_signal=9)
-        with mock.patch.object(opt_equiv, "cec_blifs",
-                               return_value=(opt_equiv.CEC_UNPROVEN, "BLIF cec: no verdict")):
+        with mock.patch.object(
+            opt_equiv, "cec_blifs", return_value=(opt_equiv.CEC_UNPROVEN, "BLIF cec: no verdict")
+        ):
             code, out, _ = self.tree.run(*untested)
         self.assertEqual(code, 4, out)
         self.assertNotIn("nothing is untested", out)
@@ -534,17 +631,28 @@ class RunTest(unittest.TestCase):
                 if argv[0].endswith("yosys") and f"/{slug}/" in " ".join(argv):
                     return subprocess.CompletedProcess(list(argv), -9, "", "killed")
                 return fake_run(argv, cap, **kw)
+
             return run
 
         def argv_for(*scripts: str) -> list[str]:
-            return ["--odin3", str(self.tree.bin / "odin3"), "--yosys",
-                    str(self.tree.bin / "yosys"), "--netlist-compare",
-                    str(self.tree.bin / "netlist-compare"), "--work", str(self.tree.root / "work"),
-                    *(a for s in scripts for a in ("--script", s)),
-                    str(self.tree.root / "micro" / "d.v")]
+            return [
+                "--odin3",
+                str(self.tree.bin / "odin3"),
+                "--yosys",
+                str(self.tree.bin / "yosys"),
+                "--netlist-compare",
+                str(self.tree.bin / "netlist-compare"),
+                "--work",
+                str(self.tree.root / "work"),
+                *(a for s in scripts for a in ("--script", s)),
+                str(self.tree.root / "micro" / "d.v"),
+            ]
+
         self.tree.set_spec(ystat=hist)
-        for first, second, killed in (("phase2", "opt -full", "full"),
-                                      ("opt -full", "phase2", "full")):
+        for first, second, killed in (
+            ("phase2", "opt -full", "full"),
+            ("opt -full", "phase2", "full"),
+        ):
             with self.subTest(first=first), mock.patch.object(memcap, "run", kill_in(killed)):
                 code, out, err = helpers.run_main(od.main, argv_for(first, second))
                 self.assertEqual(code, 1, out + err)
@@ -561,15 +669,28 @@ class RunTest(unittest.TestCase):
     def test_a_hard_crash_in_a_later_script_still_prints_the_earlier_findings(self) -> None:
         self.tree.set_spec(ystat=YSTAT_MORE)
 
-        def crash_full(argv: Sequence[str], cap: int, **kw: Any
-                       ) -> subprocess.CompletedProcess[str]:
+        def crash_full(
+            argv: Sequence[str], cap: int, **kw: Any
+        ) -> subprocess.CompletedProcess[str]:
             if argv[0].endswith("odin3") and "/full/" in " ".join(argv):
                 return subprocess.CompletedProcess(list(argv), -11, "", "segfault")
             return fake_run(argv, cap, **kw)
-        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
-                "--netlist-compare", str(self.tree.bin / "netlist-compare"), "--work",
-                str(self.tree.root / "work"), "--script", "phase2", "--script", "opt -full",
-                str(self.tree.root / "micro" / "d.v")]
+
+        argv = [
+            "--odin3",
+            str(self.tree.bin / "odin3"),
+            "--yosys",
+            str(self.tree.bin / "yosys"),
+            "--netlist-compare",
+            str(self.tree.bin / "netlist-compare"),
+            "--work",
+            str(self.tree.root / "work"),
+            "--script",
+            "phase2",
+            "--script",
+            "opt -full",
+            str(self.tree.root / "micro" / "d.v"),
+        ]
         with mock.patch.object(memcap, "run", crash_full):
             code, out, err = helpers.run_main(od.main, argv)
         self.assertEqual(code, 3, out + err)
@@ -579,15 +700,26 @@ class RunTest(unittest.TestCase):
     def test_m3b_the_work_dir_goes_after_exit_4_and_stays_after_exit_1(self) -> None:
         """2H review M3b: the docstring says the directory this run made is removed after exit 4;
         a failure keeps it."""
-        base = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
-                "--netlist-compare", str(self.tree.bin / "netlist-compare"),
-                str(self.tree.root / "micro" / "d.v")]
-        for spec, want_code, kept in (({"yosys_signal": 9}, 4, False),
-                                      ({"ystat": YSTAT_MORE}, 1, True)):
-            with self.subTest(code=want_code), tempfile.TemporaryDirectory() as tmpdir, \
-                    mock.patch.dict(os.environ, {"TMPDIR": tmpdir}), \
-                    mock.patch.object(tempfile, "tempdir", None), \
-                    mock.patch.object(memcap, "run", fake_run):
+        base = [
+            "--odin3",
+            str(self.tree.bin / "odin3"),
+            "--yosys",
+            str(self.tree.bin / "yosys"),
+            "--netlist-compare",
+            str(self.tree.bin / "netlist-compare"),
+            str(self.tree.root / "micro" / "d.v"),
+        ]
+        for spec, want_code, kept in (
+            ({"yosys_signal": 9}, 4, False),
+            ({"ystat": YSTAT_MORE}, 1, True),
+        ):
+            with (
+                self.subTest(code=want_code),
+                tempfile.TemporaryDirectory() as tmpdir,
+                mock.patch.dict(os.environ, {"TMPDIR": tmpdir}),
+                mock.patch.object(tempfile, "tempdir", None),
+                mock.patch.object(memcap, "run", fake_run),
+            ):
                 self.tree.set_spec(**spec)
                 self.assertEqual(helpers.run_main(od.main, base)[0], want_code)
                 self.assertEqual(bool(list(Path(tmpdir).iterdir())), kept)
@@ -607,13 +739,21 @@ class RunTest(unittest.TestCase):
         self.assertIn("no module", err)
 
     def test_the_work_dir_follows_tmpdir_and_goes_after_a_clean_run(self) -> None:
-        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
-                "--netlist-compare", str(self.tree.bin / "netlist-compare"),
-                str(self.tree.root / "micro" / "d.v")]
-        with tempfile.TemporaryDirectory() as tmpdir, \
-                mock.patch.dict(os.environ, {"TMPDIR": tmpdir}), \
-                mock.patch.object(tempfile, "tempdir", None), \
-                mock.patch.object(memcap, "run", fake_run):
+        argv = [
+            "--odin3",
+            str(self.tree.bin / "odin3"),
+            "--yosys",
+            str(self.tree.bin / "yosys"),
+            "--netlist-compare",
+            str(self.tree.bin / "netlist-compare"),
+            str(self.tree.root / "micro" / "d.v"),
+        ]
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            mock.patch.dict(os.environ, {"TMPDIR": tmpdir}),
+            mock.patch.object(tempfile, "tempdir", None),
+            mock.patch.object(memcap, "run", fake_run),
+        ):
             self.assertEqual(helpers.run_main(od.main, argv)[0], 0)
             self.assertEqual(list(Path(tmpdir).iterdir()), [])
 

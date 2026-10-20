@@ -47,8 +47,9 @@ class LeakTest(unittest.TestCase):
     def left(self) -> list[Path]:
         return sorted(self.tmp.iterdir())
 
-    def call(self, module: ModuleType, argv: Sequence[str], execute: Callable[..., Any]
-             ) -> tuple[int, str]:
+    def call(
+        self, module: ModuleType, argv: Sequence[str], execute: Callable[..., Any]
+    ) -> tuple[int, str]:
         with mock.patch.object(module, "execute", execute):
             code, out, err = helpers.run_main(module.main, argv)
         return code, out + err
@@ -60,6 +61,7 @@ class LeakTest(unittest.TestCase):
     def test_nothing_is_left_after_a_success(self) -> None:
         for name, module, _, argv in FAMILIES:
             with self.subTest(tool=name):
+
                 def run(args: Any, work: Path, module: ModuleType = module) -> Any:
                     (work / "x.txt").write_text("x", encoding="utf-8")
                     return self.result(module, 0)
@@ -69,19 +71,23 @@ class LeakTest(unittest.TestCase):
 
     def test_nothing_is_left_after_failures(self) -> None:
         raises: list[Callable[[], BaseException]] = [
-            lambda: lc.CrashError("odin3", "boom"), lambda: lc.ToolError("bad"),
-            lambda: OSError("disk"), lambda: ValueError("v")]
+            lambda: lc.CrashError("odin3", "boom"),
+            lambda: lc.ToolError("bad"),
+            lambda: OSError("disk"),
+            lambda: ValueError("v"),
+        ]
         for name, module, _, argv in FAMILIES:
             for make in raises:
                 with self.subTest(tool=name, error=repr(make())):
-                    def run(args: Any, work: Path, make: Callable[[], BaseException] = make
-                            ) -> Any:
+
+                    def run(args: Any, work: Path, make: Callable[[], BaseException] = make) -> Any:
                         (work / "x.txt").write_text("x", encoding="utf-8")
                         raise make()
 
                     self.assertNotEqual(self.call(module, argv, run)[0], 0)
                     self.assertEqual(self.left(), [])
             with self.subTest(tool=name, error="exit 1"):
+
                 def fail(args: Any, work: Path, module: ModuleType = module) -> Any:
                     return self.result(module, 1)
 
@@ -91,6 +97,7 @@ class LeakTest(unittest.TestCase):
     def test_keep_tmp_keeps_the_directory_and_prints_its_path(self) -> None:
         for name, module, prefix, argv in FAMILIES:
             with self.subTest(tool=name):
+
                 def run(args: Any, work: Path, module: ModuleType = module) -> Any:
                     return self.result(module, 0)
 
@@ -105,6 +112,7 @@ class LeakTest(unittest.TestCase):
         for name, module, _, argv in FAMILIES:
             with self.subTest(tool=name):
                 work = self.tmp / "mine"
+
                 def run(args: Any, work: Path, module: ModuleType = module) -> Any:
                     return self.result(module, 0)
 
@@ -138,8 +146,9 @@ class GenDiffLeakTest(unittest.TestCase):
             return code
 
         with mock.patch.object(lower_gen_diff, "execute", execute):
-            helpers.run_main(lower_gen_diff.main, [*ARGS, "--seeds", "1..1",
-                                                   "--parmys-techlibs", "t", *extra])
+            helpers.run_main(
+                lower_gen_diff.main, [*ARGS, "--seeds", "1..1", "--parmys-techlibs", "t", *extra]
+            )
         found = sorted(self.tmp.iterdir())
         for path in found:
             path.rmdir()

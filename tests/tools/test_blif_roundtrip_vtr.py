@@ -184,8 +184,10 @@ class ReportTest(RoundTripVtrBase):
         self.assertEqual(
             [row[0] for row in rows], ["small.parmys.blif", "mid.parmys.blif", "big.parmys.blif"]
         )
-        self.assertEqual(rows[0], ["small.parmys.blif", "parmys", "written", "-", "bytes",
-                                   "identical", "-", "pass"])
+        self.assertEqual(
+            rows[0],
+            ["small.parmys.blif", "parmys", "written", "-", "bytes", "identical", "-", "pass"],
+        )
         self.assertIn("RESULT: PASS", result.stdout)
         # the work order: each file's W1 then its W2, file by file, in that order
         writes = self.rt_log.read_text(encoding="utf-8").splitlines()
@@ -287,8 +289,9 @@ class RefusalTest(RoundTripVtrBase):
         self.add("fe.parmys.blif", blif("refuse E1", cells=self.FE))
         result = self.run_tool()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.rows()[0],
-                         ["fe.parmys.blif", "parmys", "refused", "E1", "-", "-", "-", "pass"])
+        self.assertEqual(
+            self.rows()[0], ["fe.parmys.blif", "parmys", "refused", "E1", "-", "-", "-", "pass"]
+        )
 
     def test_an_fe_file_that_is_not_refused_fails(self) -> None:
         self.add("fe.parmys.blif", blif(cells=self.FE))
@@ -360,12 +363,29 @@ class EquivTest(RoundTripVtrBase):
             self.add(name, text)
         equiv = make_exec(self.tmp / "fake-equiv", FAKE_EQUIV)
         self.equiv_log = self.tmp / "equiv.log"
-        args = [str(TOOL), "--vtr", "--rt", str(self.rt), "--nc", str(NC), "--equiv", str(equiv),
-                "--out", str(self.tmp / "out"), "--fixtures", str(self.root)]
-        env = dict(os.environ, FAKE_RT_LOG=str(self.rt_log), FAKE_EQUIV_LOG=str(self.equiv_log),
-                   FAKE_EQUIV_RC=str(rc))
-        return subprocess.run(args, capture_output=True, text=True, check=False, env=env,
-                              timeout=300)
+        args = [
+            str(TOOL),
+            "--vtr",
+            "--rt",
+            str(self.rt),
+            "--nc",
+            str(NC),
+            "--equiv",
+            str(equiv),
+            "--out",
+            str(self.tmp / "out"),
+            "--fixtures",
+            str(self.root),
+        ]
+        env = dict(
+            os.environ,
+            FAKE_RT_LOG=str(self.rt_log),
+            FAKE_EQUIV_LOG=str(self.equiv_log),
+            FAKE_EQUIV_RC=str(rc),
+        )
+        return subprocess.run(
+            args, capture_output=True, text=True, check=False, env=env, timeout=300
+        )
 
     def test_odin_files_run_equiv_with_the_timeout(self) -> None:
         result = self.run_equiv(("a.odin.blif", blif()), ("p.parmys.blif", blif(pad=1)))
@@ -413,27 +433,58 @@ class HeavyGateTest(RoundTripVtrBase):
         self.add("a.parmys.blif", blif())
 
     def run_golden(self, require_rc: int, ok: bool) -> subprocess.CompletedProcess[str]:
-        env = dict(os.environ, FAKE_HEAVY_LOG=str(self.log), FAKE_REQUIRE_RC=str(require_rc),
-                   FAKE_RT_LOG=str(self.rt_log), MARK="same")
+        env = dict(
+            os.environ,
+            FAKE_HEAVY_LOG=str(self.log),
+            FAKE_REQUIRE_RC=str(require_rc),
+            FAKE_RT_LOG=str(self.rt_log),
+            MARK="same",
+        )
         env.pop("ODIN3_HEAVY_OK", None)
         if ok:
             env["ODIN3_HEAVY_OK"] = "1"
-        args = [str(self.script), "--vtr", "--rt", str(self.rt), "--nc", str(NC), "--no-equiv",
-                "--out", str(self.tmp / "out"), str(self.root)]
-        return subprocess.run(args, capture_output=True, text=True, check=False, env=env,
-                              timeout=300)
+        args = [
+            str(self.script),
+            "--vtr",
+            "--rt",
+            str(self.rt),
+            "--nc",
+            str(NC),
+            "--no-equiv",
+            "--out",
+            str(self.tmp / "out"),
+            str(self.root),
+        ]
+        return subprocess.run(
+            args, capture_output=True, text=True, check=False, env=env, timeout=300
+        )
 
     def run_memlimit(self, name: str) -> subprocess.CompletedProcess[str]:
         """A golden-mode run whose netlist-compare hits the memory limit on the odin file `name`."""
         self.add("a.parmys.blif", blif(), ok=False)  # not a golden: setUp's file stays out
         self.add(name, blif())
         nc = make_exec(self.tmp / "memlimit-nc", MEMLIMIT_NC)
-        env = dict(os.environ, FAKE_HEAVY_LOG=str(self.log), FAKE_REQUIRE_RC="0",
-                   FAKE_RT_LOG=str(self.rt_log))
-        args = [str(self.script), "--vtr", "--rt", str(self.rt), "--nc", str(nc), "--no-equiv",
-                "--out", str(self.tmp / "out"), str(self.root)]
-        return subprocess.run(args, capture_output=True, text=True, check=False, env=env,
-                              timeout=300)
+        env = dict(
+            os.environ,
+            FAKE_HEAVY_LOG=str(self.log),
+            FAKE_REQUIRE_RC="0",
+            FAKE_RT_LOG=str(self.rt_log),
+        )
+        args = [
+            str(self.script),
+            "--vtr",
+            "--rt",
+            str(self.rt),
+            "--nc",
+            str(nc),
+            "--no-equiv",
+            "--out",
+            str(self.tmp / "out"),
+            str(self.root),
+        ]
+        return subprocess.run(
+            args, capture_output=True, text=True, check=False, env=env, timeout=300
+        )
 
     def test_a_listed_memlimit_is_capped_not_pass(self) -> None:
         result = self.run_memlimit("LargeRam.odin.blif")

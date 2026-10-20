@@ -139,8 +139,10 @@ def ff(clk: str = "clk", rst: str = "rst", val: str = "4'b0101") -> str:
     return FF.format(clk=clk, body=RST_FIRST.format(rst=rst, val=val))
 
 
-@unittest.skipUnless(ODIN3 and YOSYS and Path(YOSYS).exists() and Path(ODIN3).exists(),
-                     "odin3 (ODIN3_CLI) and Yosys 0.55 (ODIN3_YOSYS055) are needed")
+@unittest.skipUnless(
+    ODIN3 and YOSYS and Path(YOSYS).exists() and Path(ODIN3).exists(),
+    "odin3 (ODIN3_CLI) and Yosys 0.55 (ODIN3_YOSYS055) are needed",
+)
 class RefinementTest(unittest.TestCase):
     """Correct lowerings refine (exit 0); each mutant of spec 14.4 does not."""
 
@@ -175,10 +177,16 @@ class RefinementTest(unittest.TestCase):
         self.assertEqual(got.kind, "differs", f"{got.kind}: {got.detail}")
 
     def test_correct_lowerings_refine(self) -> None:
-        for text in (ff(), FF.format(clk="clk", body=EN_FIRST),
-                     PMUX.format(one="b", two="c"), CMP.format(sign="signed"),
-                     CMP.format(sign=""), SHR.format(expr="a >> b"),
-                     MEM.format(lo=0, hi=7), COMB.format(zexpr="a | b")):
+        for text in (
+            ff(),
+            FF.format(clk="clk", body=EN_FIRST),
+            PMUX.format(one="b", two="c"),
+            CMP.format(sign="signed"),
+            CMP.format(sign=""),
+            SHR.format(expr="a >> b"),
+            MEM.format(lo=0, hi=7),
+            COMB.format(zexpr="a | b"),
+        ):
             with self.subTest(text=text.splitlines()[0] + text.splitlines()[1]):
                 self.refines(text)
 
@@ -209,12 +217,19 @@ class RefinementTest(unittest.TestCase):
         self.differs(ff(), ff(rst="!rst"))
 
     def test_a_tied_output(self) -> None:
-        self.differs(COMB.format(zexpr="a | b"), COMB.format(zexpr="a | b").replace(
-            "assign y = a & b;", "assign y = {a[3:1] & b[3:1], 1'b0};"))
+        self.differs(
+            COMB.format(zexpr="a | b"),
+            COMB.format(zexpr="a | b").replace(
+                "assign y = a & b;", "assign y = {a[3:1] & b[3:1], 1'b0};"
+            ),
+        )
 
     def test_a_missing_port(self) -> None:
-        gate = COMB.format(zexpr="a | b").replace("output [3:0] z", "output [2:0] z").replace(
-            "assign z = a | b;", "assign z = a[2:0] | b[2:0];")
+        gate = (
+            COMB.format(zexpr="a | b")
+            .replace("output [3:0] z", "output [2:0] z")
+            .replace("assign z = a | b;", "assign z = a[2:0] | b[2:0];")
+        )
         self.differs(COMB.format(zexpr="a | b"), gate)
 
     def test_reset_and_enable_swapped(self) -> None:
@@ -278,8 +293,9 @@ class RefinementTest(unittest.TestCase):
         for bit in (3, 1):
             body = [f"~qq[{k}]" if k == bit else f"qq[{k}]" for k in range(3, -1, -1)]
             gate = HARD_BLOCK.replace(".out(q)", ".out(qq)").replace(
-                "  reg [3:0] a;", f"  wire [3:0] qq; assign q = {{{', '.join(body)}}};\n"
-                "  reg [3:0] a;")
+                "  reg [3:0] a;",
+                f"  wire [3:0] qq; assign q = {{{', '.join(body)}}};\n  reg [3:0] a;",
+            )
             with self.subTest(bit=bit):
                 self.hard_differs(gate)
 
@@ -423,8 +439,11 @@ class PairRegistersTest(unittest.TestCase):
 
     def test_a_register_gets_its_golds_name_with_the_bits_in_order(self) -> None:
         out = le.pair_registers(PAIR_GATE, PAIR_GOLD)
-        self.assertIn("  wire width 3 \\r\n  connect \\r [0] $n2\n  connect \\r [1] $n5\n"
-                      "  connect \\r [2] $n8\n", out)
+        self.assertIn(
+            "  wire width 3 \\r\n  connect \\r [0] $n2\n  connect \\r [1] $n5\n"
+            "  connect \\r [2] $n8\n",
+            out,
+        )
         self.assertIn("  wire \\s\n  connect \\s $n1\n", out)
 
     def test_the_bits_the_golds_cells_drive_take_the_cells_that_survived(self) -> None:
@@ -509,10 +528,14 @@ class BoundedScriptTest(unittest.TestCase):
         self.assertNotIn("-set-init-zero", undef)
 
     def test_a_tied_start_gives_both_sides_one_value_to_paired_wires_only(self) -> None:
-        gold = ("autoidx 1\nmodule \\m\n  wire input 1 \\clk\n  wire width 4 \\r\n"
-                "  attribute \\init 1'1\n  wire \\s\n  wire \\only\n  wire \\x\nend\n")
-        gate = ("autoidx 1\nmodule \\m\n  wire input 1 \\clk\n  attribute \\init 4'xxxx\n"
-                "  wire width 4 \\r\n  wire \\s\n  wire \\x\nend\n")
+        gold = (
+            "autoidx 1\nmodule \\m\n  wire input 1 \\clk\n  wire width 4 \\r\n"
+            "  attribute \\init 1'1\n  wire \\s\n  wire \\only\n  wire \\x\nend\n"
+        )
+        gate = (
+            "autoidx 1\nmodule \\m\n  wire input 1 \\clk\n  attribute \\init 4'xxxx\n"
+            "  wire width 4 \\r\n  wire \\s\n  wire \\x\nend\n"
+        )
         new_gold, new_gate = le.tie_starts(gold, gate, ("\\m", "\\m"))
         self.assertIn("  attribute \\init 4'1111\n  wire width 4 \\r\n", new_gold)
         self.assertIn("  attribute \\init 4'1111\n  wire width 4 \\r\n", new_gate)
@@ -552,8 +575,9 @@ class ReportTest(unittest.TestCase):
 
     def test_unlisted_difference_unproven_and_empty(self) -> None:
         self.assertEqual(le.report_line("a.v", "a.v", le.Verdict("differs", "d"), {})[1], 1)
-        self.assertEqual(le.report_line("a.v", "a.v", le.Verdict("unproven", "t"), {})[1],
-                         le.EXIT_UNPROVEN)
+        self.assertEqual(
+            le.report_line("a.v", "a.v", le.Verdict("unproven", "t"), {})[1], le.EXIT_UNPROVEN
+        )
         self.assertEqual(le.report_line("a.v", "a.v", le.Verdict("empty"), {})[1], 1)
         self.assertEqual(le.report_line("a.v", "a.v", le.Verdict("empty"), {}, True)[1], 0)
 
@@ -564,8 +588,9 @@ class ReportTest(unittest.TestCase):
 
 def verdicts(*kinds: str) -> AbstractContextManager[Any]:
     """``check_design`` returning these verdict kinds in turn (no tool runs)."""
-    return mock.patch.object(le, "check_design",
-                             side_effect=[le.Verdict(kind, "d", 1) for kind in kinds])
+    return mock.patch.object(
+        le, "check_design", side_effect=[le.Verdict(kind, "d", 1) for kind in kinds]
+    )
 
 
 class ExitCodeTest(unittest.TestCase):
@@ -575,8 +600,10 @@ class ExitCodeTest(unittest.TestCase):
         base = helpers.scratch(self, "test-lower-equiv-exit-")
         files = [str(base / f"d{n}.v") for n in range(len(kinds))]
         with verdicts(*kinds), mock.patch.object(ld, "check_yosys"):
-            code, out, err = helpers.run_main(le.main, ["--odin3", "o", "--yosys", "y", "--work",
-                                                        str(base / "w"), "--each", *files])
+            code, out, err = helpers.run_main(
+                le.main,
+                ["--odin3", "o", "--yosys", "y", "--work", str(base / "w"), "--each", *files],
+            )
         return code, out + err
 
     def test_an_unproven_design_alone_is_exit_4(self) -> None:
@@ -612,8 +639,9 @@ class RefineVerdictTest(unittest.TestCase):
     GOLD = "autoidx 1\nmodule \\m\n  cell $dff \\c\n  end\nend\n"
     GATE = "autoidx 1\nmodule \\m\n  wire \\x\nend\n"
 
-    def verdict(self, sat_ok: bool, bmc: list[str], cec: str = opt_equiv.CEC_UNPROVEN
-                ) -> tuple[str, str, list[Any]]:
+    def verdict(
+        self, sat_ok: bool, bmc: list[str], cec: str = opt_equiv.CEC_UNPROVEN
+    ) -> tuple[str, str, list[Any]]:
         """(verdict, detail, the checks run); ``bmc`` = the answers of the bounded checks in call
         order: a base case (``bounded_check``, recorded as its ``run``) or the concrete output
         runs (``output_trace``, recorded as "outputs")."""
@@ -634,10 +662,12 @@ class RefineVerdictTest(unittest.TestCase):
             runs.append("outputs")
             return next(answers)
 
-        with mock.patch.object(opt_equiv, "Checker", return_value=checker), \
-                mock.patch.object(le, "bounded_check", bounded), \
-                mock.patch.object(le, "output_trace", outputs), \
-                mock.patch.object(le, "cec_gold_and_blif", return_value=(cec, "cec text")):
+        with (
+            mock.patch.object(opt_equiv, "Checker", return_value=checker),
+            mock.patch.object(le, "bounded_check", bounded),
+            mock.patch.object(le, "output_trace", outputs),
+            mock.patch.object(le, "cec_gold_and_blif", return_value=(cec, "cec text")),
+        ):
             kind, detail = le.refine("y", (gold, gate), base / "after.blif", base, 1, None)
         return kind, detail, runs
 
@@ -656,11 +686,14 @@ class RefineVerdictTest(unittest.TestCase):
         self.assertEqual(kind, "ok")
         self.assertEqual(runs[1], (None, le.BASE_STEPS, True, le.START_UNDEF))  # N2: base case too
         # a cec proof starts every flop at 0: a base-case doubt is a difference only with a trace
-        self.assertEqual(self.verdict(False, [le.NO_TRACE, le.TRACE, le.TRACE], proved)[0],
-                         "differs")
-        for answers in ([le.NO_TRACE, le.TRACE, le.NO_TRACE],
-                        [le.NO_TRACE, le.NO_ANSWER, le.NO_ANSWER],
-                        [le.NO_TRACE, le.TRACE, le.NO_ANSWER]):
+        self.assertEqual(
+            self.verdict(False, [le.NO_TRACE, le.TRACE, le.TRACE], proved)[0], "differs"
+        )
+        for answers in (
+            [le.NO_TRACE, le.TRACE, le.NO_TRACE],
+            [le.NO_TRACE, le.NO_ANSWER, le.NO_ANSWER],
+            [le.NO_TRACE, le.TRACE, le.NO_ANSWER],
+        ):
             with self.subTest(answers=answers):
                 self.assertEqual(self.verdict(False, answers, proved)[0], "unproven")
 
@@ -699,24 +732,40 @@ class HardFailureTest(unittest.TestCase):
             got = le.check_pair("y", before, before, before.parent, 1, (None, None, False))
         self.assertEqual(got.kind, "unproven", got.detail)
         segv = opt_equiv.CrashError("yosys", "killed (exit -11)")
-        with mock.patch.object(le, "make_gold", side_effect=segv), \
-                self.assertRaises(opt_equiv.CrashError):
+        with (
+            mock.patch.object(le, "make_gold", side_effect=segv),
+            self.assertRaises(opt_equiv.CrashError),
+        ):
             le.check_pair("y", before, before, before.parent, 1, (None, None, False))
 
     def test_a_crashing_yosys_is_exit_3(self) -> None:
         base = helpers.scratch(self, "test-lower-equiv-hard-")
         fake = base / "yosys"
-        fake.write_text("#!/usr/bin/env bash\n"
-                        "if [ \"$1\" = -V ]; then echo 'Yosys 0.55 (fake)'; exit 0; fi\n"
-                        "kill -SEGV $$\n", encoding="utf-8")
+        fake.write_text(
+            "#!/usr/bin/env bash\n"
+            "if [ \"$1\" = -V ]; then echo 'Yosys 0.55 (fake)'; exit 0; fi\n"
+            "kill -SEGV $$\n",
+            encoding="utf-8",
+        )
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
         source = base / "m.v"
         source.write_text(COMB.format(zexpr="a | b"), encoding="utf-8")
         expect = base / "expect.txt"
         expect.write_text("m.v refine pretend this is expected\n", encoding="utf-8")
-        code, _, err = helpers.run_main(le.main, ["--odin3", ODIN3, "--yosys", str(fake),
-                                                  "--work", str(base / "w"), "--expect",
-                                                  str(expect), str(source)])
+        code, _, err = helpers.run_main(
+            le.main,
+            [
+                "--odin3",
+                ODIN3,
+                "--yosys",
+                str(fake),
+                "--work",
+                str(base / "w"),
+                "--expect",
+                str(expect),
+                str(source),
+            ],
+        )
         self.assertEqual(code, 3, err)
         self.assertIn("HARD", err)
 
@@ -736,8 +785,10 @@ class HardFailureTest(unittest.TestCase):
             (stale / le.AFTER_NAME).write_text(".model m\n.end\n", encoding="utf-8")
         source = base / "m.v"
         source.write_text(COMB.format(zexpr="a | b"), encoding="utf-8")
-        code, _, err = helpers.run_main(le.main, ["--odin3", str(odin), "--yosys", str(yosys),
-                                                  "--work", str(base / "w"), str(source)])
+        code, _, err = helpers.run_main(
+            le.main,
+            ["--odin3", str(odin), "--yosys", str(yosys), "--work", str(base / "w"), str(source)],
+        )
         self.assertEqual(code, 2, err)
         self.assertIn("wrote no", err)
 
@@ -746,9 +797,18 @@ class HardFailureTest(unittest.TestCase):
         fake = base / "yosys"
         fake.write_text("#!/usr/bin/env bash\necho 'Yosys 0.55 (fake)'\n", encoding="utf-8")
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-        code, _, err = helpers.run_main(le.main, ["--odin3", ODIN3, "--yosys", str(fake),
-                                                  "--work", str(base / "w"),
-                                                  str(base / "missing.v")])
+        code, _, err = helpers.run_main(
+            le.main,
+            [
+                "--odin3",
+                ODIN3,
+                "--yosys",
+                str(fake),
+                "--work",
+                str(base / "w"),
+                str(base / "missing.v"),
+            ],
+        )
         self.assertEqual(code, 2, err)
 
 

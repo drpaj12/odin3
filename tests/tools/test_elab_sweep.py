@@ -220,8 +220,9 @@ class LowerEquivStrictTest(unittest.TestCase):
         self.assertEqual(self.verdict(3, hard=True), "FAIL")
 
     def test_the_needle_form_needs_exit_4_without_a_reason_prefix(self) -> None:
-        self.assertTrue(elab_sweep.needs_unproven(elab_sweep.Expect("checker limit", False,
-                                                                    "UNPROVEN:")))
+        self.assertTrue(
+            elab_sweep.needs_unproven(elab_sweep.Expect("checker limit", False, "UNPROVEN:"))
+        )
 
 
 class CollectTest(SweepTestCase):
@@ -233,7 +234,8 @@ class CollectTest(SweepTestCase):
         self.write("b/tiny.v", "x" * 1)
         self.write("a/header.vh", "x" * 2)  # a header never runs alone
         code, out, err = self.run_tool(
-            "--root", str(self.dir), str(self.dir / "a"), str(self.dir / "b"))
+            "--root", str(self.dir), str(self.dir / "a"), str(self.dir / "b")
+        )
         self.assertEqual(code, 0, err)
         order = [line.split()[1] for line in out.splitlines() if line.startswith("ok")]
         self.assertEqual(order, ["b/tiny.v", "a/small.v", "b/mid.v", "a/big.v"])
@@ -257,8 +259,10 @@ class CollectTest(SweepTestCase):
         items = elab_sweep.collect([str(self.dir)], self.dir)
         expect = elab_sweep.read_expect(Path(self.expect("koios/lenet.v xl: Yosys side 7 GB\n")))
         run, skipped = elab_sweep.split_xl(items, expect, xl=False)
-        self.assertEqual(([i.rel for i in run], [i.rel for i in skipped]),
-                         (["small.v", "mid.v"], ["koios/lenet.v"]))
+        self.assertEqual(
+            ([i.rel for i in run], [i.rel for i in skipped]),
+            (["small.v", "mid.v"], ["koios/lenet.v"]),
+        )
         run, skipped = elab_sweep.split_xl(items, {}, xl=False, skip_over=30)
         self.assertEqual([i.rel for i in skipped], ["koios/lenet.v"])
         run, skipped = elab_sweep.split_xl(items, expect, xl=True)
@@ -296,7 +300,8 @@ class LimitsTest(SweepTestCase):
         asan = _exe(self.bin / "odin3-asan", "#!{python}\n# __asan_init\n")
         self.write("a/x.v")
         code, _, err = helpers.run_main(
-            elab_sweep.main, ["--odin3", str(asan), str(self.dir / "a")])
+            elab_sweep.main, ["--odin3", str(asan), str(self.dir / "a")]
+        )
         self.assertEqual(code, 77)
         self.assertIn("ASan", err)
         self.assertEqual(self.calls(), [])
@@ -313,17 +318,32 @@ class LimitsTest(SweepTestCase):
 
         with mock.patch.object(memcap, "run", spy):
             code, out, err = self.run_tool(
-                "--jobs", "2", "--cap-for", "koios/lenet.v=5G", "--root", str(self.dir),
-                str(self.dir / "a"), str(self.dir / "koios"))
+                "--jobs",
+                "2",
+                "--cap-for",
+                "koios/lenet.v=5G",
+                "--root",
+                str(self.dir),
+                str(self.dir / "a"),
+                str(self.dir / "koios"),
+            )
         self.assertEqual(code, 0, err)
         self.assertEqual(caps, [4 * GIB, 5 * GIB])
         self.assertLess(out.index("small.v"), out.index("lenet.v"))
 
     def test_techlib_run_still_elaborates_with_nolatches(self) -> None:
         item = elab_sweep.Item(self.write("a/x.v"), "a/x.v", 1)
-        cfg = elab_sweep.Config(odin3=str(self.odin3), yosys=None, equiv_check=None, bench=None,
-                                cap=GIB, caps={}, tops={}, golden_root=None,
-                                techlib="/lib/t.o3lib")
+        cfg = elab_sweep.Config(
+            odin3=str(self.odin3),
+            yosys=None,
+            equiv_check=None,
+            bench=None,
+            cap=GIB,
+            caps={},
+            tops={},
+            golden_root=None,
+            techlib="/lib/t.o3lib",
+        )
         seen: list[list[str]] = []
 
         def spy(argv: list[str], cap: int, start: float) -> tuple[None, elab_sweep.Outcome]:
@@ -332,8 +352,9 @@ class LimitsTest(SweepTestCase):
 
         with mock.patch.object(elab_sweep, "run_child", spy):
             elab_sweep.run_elab(cfg, item, GIB)
-        self.assertIn(f"read_techlib /lib/t.o3lib; read_verilog --nolatches {item.path}; stats",
-                      seen[0])
+        self.assertIn(
+            f"read_techlib /lib/t.o3lib; read_verilog --nolatches {item.path}; stats", seen[0]
+        )
 
     def test_a_cap_for_file_starts_with_nothing_else_in_flight(self) -> None:
         for n in range(4):
@@ -342,6 +363,7 @@ class LimitsTest(SweepTestCase):
         live = [0]
         at_start: dict[int, int] = {}
         lock = threading.Lock()
+
         def spy(argv: list[str], cap: int, *a: object, **k: object) -> object:
             with lock:
                 live[0] += 1
@@ -355,15 +377,31 @@ class LimitsTest(SweepTestCase):
 
         with mock.patch.object(memcap, "run", spy):
             code, _, err = self.run_tool(
-                "--jobs", "2", "--cap-for", "koios/lenet.v=5G", "--root", str(self.dir),
-                str(self.dir / "a"), str(self.dir / "koios"))
+                "--jobs",
+                "2",
+                "--cap-for",
+                "koios/lenet.v=5G",
+                "--root",
+                str(self.dir),
+                str(self.dir / "a"),
+                str(self.dir / "koios"),
+            )
         self.assertEqual(code, 0, err)
         self.assertEqual(at_start[5 * GIB], 1)
 
     def test_a_cap_for_file_is_checked_alone_against_the_slice(self) -> None:
         self.write("koios/lenet.v", "x")
-        argv = ["--jobs", "2", "--mem-cap", "2G", "--cap-for", "koios/lenet.v=5G", "--root",
-                str(self.dir), str(self.dir / "koios")]
+        argv = [
+            "--jobs",
+            "2",
+            "--mem-cap",
+            "2G",
+            "--cap-for",
+            "koios/lenet.v=5G",
+            "--root",
+            str(self.dir),
+            str(self.dir / "koios"),
+        ]
         with mock.patch.object(elab_sweep, "slice_limit", return_value=4 * GIB):
             code, _, err = self.run_tool(*argv)
         self.assertEqual(code, 2)
@@ -398,13 +436,15 @@ class VerdictTest(SweepTestCase):
     def test_a_needle_must_appear_in_the_output_of_a_listed_failure(self) -> None:
         self.write("m/bad.v", "BAD\n")
         tree = str(self.dir / "m")
-        code, out, _ = self.run_tool("--expect-fail", self.expect("bad.v [boom at line 3] why\n"),
-                                     tree)
+        code, out, _ = self.run_tool(
+            "--expect-fail", self.expect("bad.v [boom at line 3] why\n"), tree
+        )
         self.assertEqual(code, 0, out)
         self.assertIn("xfail bad.v", out)
         # the wrong message: the file fails, but not as listed
-        code, out, _ = self.run_tool("--expect-fail", self.expect("bad.v [other error] why\n"),
-                                     tree)
+        code, out, _ = self.run_tool(
+            "--expect-fail", self.expect("bad.v [other error] why\n"), tree
+        )
         self.assertEqual(code, 1)
         self.assertIn("FAIL  bad.v", out)
         self.assertIn("expected [other error]", out)
@@ -421,15 +461,15 @@ class VerdictTest(SweepTestCase):
             self.assertIn("killed by signal 11", out)
             self.assertNotIn("xfail", out)
         self.write("k/killed.v", "KILL\n")
-        code, out, _ = self.run_tool("--expect-fail", self.expect("killed.v [x] why\n"),
-                                     str(self.dir / "k"))
+        code, out, _ = self.run_tool(
+            "--expect-fail", self.expect("killed.v [x] why\n"), str(self.dir / "k")
+        )
         self.assertEqual(code, 1, out)
         self.assertIn("FAIL  killed.v", out)
         self.assertIn("out of memory", out)
         self.write("t/slow.v", "SLOW\n")
         argv = ["--expect-fail", self.expect("slow.v [x] why\n"), str(self.dir / "t")]
-        with mock.patch.object(memcap, "run",
-                               side_effect=subprocess.TimeoutExpired("o", 1)):
+        with mock.patch.object(memcap, "run", side_effect=subprocess.TimeoutExpired("o", 1)):
             code, out, _ = self.run_tool(*argv)
         self.assertEqual(code, 1, out)
         self.assertIn("FAIL  slow.v", out)
@@ -554,8 +594,16 @@ class ModeTest(SweepTestCase):
     def test_a_cap_killed_bridge_run_is_never_an_expected_failure(self) -> None:
         self.write("m/oom.v", "EQOOM\n")
         listed = self.expect("oom.v [equiv-check failed] listed\n")
-        code, out, _ = self.run_tool("--equiv", "--yosys", "Y", "--equiv-check", "E",
-                                     "--expect-fail", listed, str(self.dir / "m"))
+        code, out, _ = self.run_tool(
+            "--equiv",
+            "--yosys",
+            "Y",
+            "--equiv-check",
+            "E",
+            "--expect-fail",
+            listed,
+            str(self.dir / "m"),
+        )
         self.assertEqual(code, 1, out)
         self.assertIn("FAIL  oom.v", out)
         self.assertNotIn("xfail", out)
@@ -601,15 +649,24 @@ class ModeTest(SweepTestCase):
         code, _, err = self.run_tool("--equiv", str(self.dir / "m"))
         self.assertEqual(code, 2)
         self.assertIn("--equiv needs --yosys and --equiv-check", err)
-        code, _, err = self.run_tool("--equiv", "--bench", str(self.bench), "--yosys", "Y",
-                                     "--equiv-check", "E", str(self.dir / "m"))
+        code, _, err = self.run_tool(
+            "--equiv",
+            "--bench",
+            str(self.bench),
+            "--yosys",
+            "Y",
+            "--equiv-check",
+            "E",
+            str(self.dir / "m"),
+        )
         self.assertEqual(code, 2)
         self.assertIn("cannot be combined", err)
 
     def test_the_bridge_skipping_with_77_skips_the_run(self) -> None:
         self.write("m/a.v", "EQ77\n")
-        code, _, _ = self.run_tool("--equiv", "--yosys", "Y", "--equiv-check", "E",
-                                   str(self.dir / "m"))
+        code, _, _ = self.run_tool(
+            "--equiv", "--yosys", "Y", "--equiv-check", "E", str(self.dir / "m")
+        )
         self.assertEqual(code, 77)
 
 
@@ -629,8 +686,15 @@ class OptModesTest(SweepTestCase):
             self.log.write_text("", encoding="utf-8")
             tools = dict(elab_sweep.OPT_TOOLS, **{name: fake})
             with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
-                code, out, _ = self.run_tool(mode, "--yosys", "Y", "--opt-arg=--script=phase2",
-                                             "--tops", str(tops), str(self.dir / "m"))
+                code, out, _ = self.run_tool(
+                    mode,
+                    "--yosys",
+                    "Y",
+                    "--opt-arg=--script=phase2",
+                    "--tops",
+                    str(tops),
+                    str(self.dir / "m"),
+                )
             self.assertEqual(code, 1)
             self.assertIn("FAIL  diff.v", out)
             self.assertIn("NOT ok: opt-tool: message for exit 1", out)
@@ -649,8 +713,9 @@ class OptModesTest(SweepTestCase):
             self.log.write_text("", encoding="utf-8")
             tools = dict(elab_sweep.OPT_TOOLS, **{name: fake})
             with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
-                code, out, _ = self.run_tool(mode, "--yosys", "Y", "--timeout-for", "slow.v=300",
-                                             str(self.dir / "m"))
+                code, out, _ = self.run_tool(
+                    mode, "--yosys", "Y", "--timeout-for", "slow.v=300", str(self.dir / "m")
+                )
             self.assertEqual(code, 0, out)
             slow = next(c for c in self.tool_calls() if c[-1].endswith("slow.v"))
             fast = next(c for c in self.tool_calls() if c[-1].endswith("fast.v"))
@@ -671,8 +736,9 @@ class OptModesTest(SweepTestCase):
         for mode, name in (("--opt-equiv", "opt-equiv"), ("--opt-diff", "opt-diff")):
             tools = dict(elab_sweep.OPT_TOOLS, **{name: fake})
             with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
-                code, out, _ = self.run_tool(mode, "--yosys", "Y", "--expect-fail", str(expect),
-                                             str(self.dir / "m"))
+                code, out, _ = self.run_tool(
+                    mode, "--yosys", "Y", "--expect-fail", str(expect), str(self.dir / "m")
+                )
             self.assertEqual(code, 1, out)
             self.assertIn("FAIL  c.v", out)
             self.assertNotIn("xfail", out)
@@ -683,11 +749,13 @@ class OptModesTest(SweepTestCase):
         fake = _exe(self.bin / "fake_opt_tool.py", FAKE_OPT_TOOL)
         self.write("m/u.v", "OT4\n")
         expect = self.expect(
-            "u.v [message for exit 4] untested for now (size limit): Yosys killed\n")
+            "u.v [message for exit 4] untested for now (size limit): Yosys killed\n"
+        )
         tools = dict(elab_sweep.OPT_TOOLS, **{"opt-diff": fake})
         with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
-            code, out, _ = self.run_tool("--opt-diff", "--yosys", "Y", "--expect-fail", str(expect),
-                                         str(self.dir / "m"))
+            code, out, _ = self.run_tool(
+                "--opt-diff", "--yosys", "Y", "--expect-fail", str(expect), str(self.dir / "m")
+            )
             self.assertEqual(code, 0, out)
             self.assertIn("xfail u.v", out)
             code, out, _ = self.run_tool("--opt-diff", "--yosys", "Y", str(self.dir / "m"))
@@ -715,13 +783,16 @@ class OptModesTest(SweepTestCase):
         self.write("m/real.v", "OT1 WORD\n")  # exit 1, text holds `unproven`
         self.write("m/limit.v", "OT4 WORD\n")  # exit 4, the same text
         tools = dict(elab_sweep.OPT_TOOLS, **{"opt-equiv": fake})
-        for listing in ("real.v [unproven] x\nlimit.v [unproven] x\n",
-                        "real.v [message] untested for now (size limit): x\n"
-                        "limit.v [message] untested for now (size limit): x\n"):
+        for listing in (
+            "real.v [unproven] x\nlimit.v [unproven] x\n",
+            "real.v [message] untested for now (size limit): x\n"
+            "limit.v [message] untested for now (size limit): x\n",
+        ):
             expect = self.expect(listing)
             with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
-                code, out, _ = self.run_tool("--opt-equiv", "--yosys", "Y", "--expect-fail",
-                                             str(expect), str(self.dir / "m"))
+                code, out, _ = self.run_tool(
+                    "--opt-equiv", "--yosys", "Y", "--expect-fail", str(expect), str(self.dir / "m")
+                )
             self.assertEqual(code, 1, out)
             self.assertIn("FAIL  real.v", out)
             self.assertIn("needs exit 4", out)
@@ -734,16 +805,20 @@ class OptModesTest(SweepTestCase):
         fake = _exe(self.bin / "fake_opt_tool.py", FAKE_OPT_TOOL)
         self.write("m/mixed.v", "OT1 WORD\n")  # exit 1, text holds `refine: DIFFERS: unproven`
         self.write("m/only.v", "OT4 WORD\n")  # exit 4, the same text
-        by_reason = ("mixed.v [message for exit] untested for now (size limit): x\n"
-                     "only.v [message for exit] untested for now (size limit): x\n")
-        by_needle = ("mixed.v [refine: DIFFERS: unproven] known\n"
-                     "only.v [refine: DIFFERS: unproven] known\n")
+        by_reason = (
+            "mixed.v [message for exit] untested for now (size limit): x\n"
+            "only.v [message for exit] untested for now (size limit): x\n"
+        )
+        by_needle = (
+            "mixed.v [refine: DIFFERS: unproven] known\nonly.v [refine: DIFFERS: unproven] known\n"
+        )
         tools = dict(elab_sweep.OPT_TOOLS, **{"opt-diff": fake})
         for listing in (by_reason, by_needle):
             expect = self.expect(listing)
             with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
-                code, out, _ = self.run_tool("--opt-diff", "--yosys", "Y", "--expect-fail",
-                                             str(expect), str(self.dir / "m"))
+                code, out, _ = self.run_tool(
+                    "--opt-diff", "--yosys", "Y", "--expect-fail", str(expect), str(self.dir / "m")
+                )
             self.assertEqual(code, 1, out)
             self.assertIn("FAIL  mixed.v", out)
             self.assertIn("needs exit 4", out)
@@ -752,18 +827,19 @@ class OptModesTest(SweepTestCase):
         # another reason is not held to exit 4, and opt-equiv mode is not touched
         expect = self.expect("mixed.v [message for exit 1] a known difference\n")
         with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
-            code, out, _ = self.run_tool("--opt-diff", "--yosys", "Y", "--expect-fail",
-                                         str(expect), str(self.dir / "m"))
+            code, out, _ = self.run_tool(
+                "--opt-diff", "--yosys", "Y", "--expect-fail", str(expect), str(self.dir / "m")
+            )
         self.assertIn("xfail mixed.v", out)
 
     def test_modes_need_yosys_and_exclude_each_other(self) -> None:
         self.write("m/a.v", "x\n")
         self.assertEqual(self.run_tool("--opt-diff", str(self.dir / "m"))[0], 2)
-        code, _, err = self.run_tool("--opt-diff", "--opt-equiv", "--yosys", "Y",
-                                     str(self.dir / "m"))
+        code, _, err = self.run_tool(
+            "--opt-diff", "--opt-equiv", "--yosys", "Y", str(self.dir / "m")
+        )
         self.assertEqual(code, 2)
         self.assertIn("cannot be combined", err)
-
 
     def test_opt_run_needs_no_yosys_and_reports_the_largest_iteration_count(self) -> None:
         fake = _exe(self.bin / "fake_opt_run.py", FAKE_OPT_RUN)
@@ -788,8 +864,9 @@ class OptModesTest(SweepTestCase):
         expect = self.expect("c.v [CRASH] listed\n")
         tools = dict(elab_sweep.OPT_TOOLS, **{"opt-run": fake})
         with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
-            code, out, _ = self.run_tool("--opt-run", "--expect-fail", str(expect),
-                                         str(self.dir / "m"))
+            code, out, _ = self.run_tool(
+                "--opt-run", "--expect-fail", str(expect), str(self.dir / "m")
+            )
         self.assertEqual(code, 1)
         self.assertIn("FAIL  c.v", out)
 
@@ -812,16 +889,22 @@ class OptModesTest(SweepTestCase):
 
     def test_an_aborted_refinement_check_is_hard_even_when_listed(self) -> None:
         """Review I3: exit 2 from our own Yosys check is never an expected failure."""
-        fake = _exe(self.bin / "fake_opt_equiv.py", FAKE_OPT_EQUIV.replace(
-            'n = int', 'if "ABORT" in open(sys.argv[-1]).read():\n'
-            '    print("opt-equiv: error: yosys-refine exit 1: ERROR: Parser error")\n'
-            '    sys.exit(2)\nn = int'))
+        fake = _exe(
+            self.bin / "fake_opt_equiv.py",
+            FAKE_OPT_EQUIV.replace(
+                "n = int",
+                'if "ABORT" in open(sys.argv[-1]).read():\n'
+                '    print("opt-equiv: error: yosys-refine exit 1: ERROR: Parser error")\n'
+                "    sys.exit(2)\nn = int",
+            ),
+        )
         self.write("m/a.v", "ABORT CH1\n")
         expect = self.expect("a.v [Parser error] listed\n")
         tools = dict(elab_sweep.OPT_TOOLS, **{"opt-equiv": fake})
         with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
-            code, out, _ = self.run_tool("--opt-equiv", "--yosys", "Y", "--expect-fail", expect,
-                                         str(self.dir / "m"))
+            code, out, _ = self.run_tool(
+                "--opt-equiv", "--yosys", "Y", "--expect-fail", expect, str(self.dir / "m")
+            )
         self.assertEqual(code, 1, out)
         self.assertIn("FAIL  a.v", out)
         self.assertIn("never an expected failure", out)
@@ -858,8 +941,7 @@ class OptModesTest(SweepTestCase):
 
     def test_opt_run_excludes_the_other_modes(self) -> None:
         self.write("m/a.v", "x\n")
-        code, _, err = self.run_tool("--opt-run", "--opt-diff", "--yosys", "Y",
-                                     str(self.dir / "m"))
+        code, _, err = self.run_tool("--opt-run", "--opt-diff", "--yosys", "Y", str(self.dir / "m"))
         self.assertEqual(code, 2)
         self.assertIn("cannot be combined", err)
 
@@ -876,8 +958,17 @@ class ProcModesTest(SweepTestCase):
         self.write("m/err.v", "PD2\n")
         self.write("m/tie.v", "PD3\n")
         tops = self.write("tops.txt", "ok.v cpu\n")
-        code, out, _ = self.run_tool("--proc-diff", "--yosys", "Y", "--techlib", "L.o3lib",
-                                     "--nolatches", "--tops", str(tops), str(self.dir / "m"))
+        code, out, _ = self.run_tool(
+            "--proc-diff",
+            "--yosys",
+            "Y",
+            "--techlib",
+            "L.o3lib",
+            "--nolatches",
+            "--tops",
+            str(tops),
+            str(self.dir / "m"),
+        )
         self.assertEqual(code, 1)
         self.assertIn("FAIL  diff.v", out)
         self.assertIn("NOT identical", out)
@@ -924,8 +1015,14 @@ class ProcModesTest(SweepTestCase):
         code, _, err = self.run_tool(*base)
         self.assertEqual(code, 2)
         self.assertIn("--trio on", err)
-        argv = ["--odin3", str(self.odin3_opt), "--golden-root", str(self.golden),
-                "--also-no-trio", *base]
+        argv = [
+            "--odin3",
+            str(self.odin3_opt),
+            "--golden-root",
+            str(self.golden),
+            "--also-no-trio",
+            *base,
+        ]
         code, out, _ = helpers.run_main(elab_sweep.main, argv)
         self.assertEqual(code, 0, out)
         runs = self.proc_diff_calls()
@@ -933,8 +1030,18 @@ class ProcModesTest(SweepTestCase):
 
     def test_the_bridge_ends_after_proc_with_pass_proc(self) -> None:
         self.write("m/a.v", "x\n")
-        base = ["--equiv", "--yosys", "Y", "--equiv-check", "E", "--pass", "proc", "--trio", "off",
-                str(self.dir / "m")]
+        base = [
+            "--equiv",
+            "--yosys",
+            "Y",
+            "--equiv-check",
+            "E",
+            "--pass",
+            "proc",
+            "--trio",
+            "off",
+            str(self.dir / "m"),
+        ]
         code, out, _ = self.run_tool(*base)
         self.assertEqual(code, 0, out)
         argv = next(c for c in self.calls() if c[0] == "elab-equiv")
@@ -984,22 +1091,33 @@ class BenchReportTest(SweepTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.bench = _exe(self.bin / "bench_elab", FAKE_BENCH_FULL.replace(
-            "bench_report.ELAB_COLUMNS", repr(bench_report.ELAB_COLUMNS)))
+        self.bench = _exe(
+            self.bin / "bench_elab",
+            FAKE_BENCH_FULL.replace("bench_report.ELAB_COLUMNS", repr(bench_report.ELAB_COLUMNS)),
+        )
 
     def test_bench_passes_the_techlib_to_each_child(self) -> None:
         self.write("m/a.v", "xx")
         lib = self.write("lib.o3lib", "x")
-        code, _, err = self.run_tool("--bench", str(self.bench), "--techlib", str(lib),
-                                     str(self.dir / "m"))
+        code, _, err = self.run_tool(
+            "--bench", str(self.bench), "--techlib", str(lib), str(self.dir / "m")
+        )
         self.assertEqual(code, 0, err)
-        self.assertEqual(self.calls(),
-                         [["bench", "--one", str(self.dir / "m/a.v"), "--techlib", str(lib)]])
+        self.assertEqual(
+            self.calls(), [["bench", "--one", str(self.dir / "m/a.v"), "--techlib", str(lib)]]
+        )
 
     def test_bench_report_prints_the_targets_after_the_sweep(self) -> None:
         self.write("m/mcml.v", "module m; endmodule\n")
-        code, out, err = self.run_tool("--bench", str(self.bench), "--bench-report", "elab",
-                                       "--root", str(self.dir / "m"), str(self.dir / "m"))
+        code, out, err = self.run_tool(
+            "--bench",
+            str(self.bench),
+            "--bench-report",
+            "elab",
+            "--root",
+            str(self.dir / "m"),
+            str(self.dir / "m"),
+        )
         self.assertEqual(code, 0, err)
         self.assertIn("bench targets (spec 15):", out)
         self.assertRegex(out, r"ok +mcml\.v stage 1 \+ stage 2")
@@ -1007,8 +1125,15 @@ class BenchReportTest(SweepTestCase):
 
     def test_a_missed_target_fails_the_run(self) -> None:
         self.write("m/mcml.v", "SLOW\n")
-        code, out, _ = self.run_tool("--bench", str(self.bench), "--bench-report", "elab",
-                                     "--root", str(self.dir / "m"), str(self.dir / "m"))
+        code, out, _ = self.run_tool(
+            "--bench",
+            str(self.bench),
+            "--bench-report",
+            "elab",
+            "--root",
+            str(self.dir / "m"),
+            str(self.dir / "m"),
+        )
         self.assertEqual(code, 1)
         self.assertRegex(out, r"MISSED +mcml\.v stage 1 \+ stage 2")
         self.assertIn("estimate terms of mcml.v", out)
@@ -1021,7 +1146,8 @@ class BenchReportTest(SweepTestCase):
 
     def test_unknown_profile_is_a_usage_error(self) -> None:
         self.write("m/a.v")
-        code, _, err = self.run_tool("--bench", str(self.bench), "--bench-report", "nope",
-                                     str(self.dir / "m"))
+        code, _, err = self.run_tool(
+            "--bench", str(self.bench), "--bench-report", "nope", str(self.dir / "m")
+        )
         self.assertEqual(code, 2)
         self.assertIn("unknown bench profile", err)

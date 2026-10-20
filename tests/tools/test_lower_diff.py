@@ -100,8 +100,14 @@ MUX_SWAPPED = MUX.replace("s a b y", "s b a y")
 
 def fake_run(argv: Sequence[str], cap: int, **kwargs: Any) -> subprocess.CompletedProcess[str]:
     del cap
-    return subprocess.run(list(argv), capture_output=True, text=True, check=False,
-                          cwd=kwargs.get("cwd"), env=kwargs.get("env"))
+    return subprocess.run(
+        list(argv),
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=kwargs.get("cwd"),
+        env=kwargs.get("env"),
+    )
 
 
 class Tree:
@@ -109,8 +115,11 @@ class Tree:
         self.root = root
         self.bin = root / "bin"
         self.bin.mkdir()
-        for name, text in (("odin3", FAKE_ODIN), ("yosys", FAKE_YOSYS),
-                           ("equiv-check", FAKE_CHECK)):
+        for name, text in (
+            ("odin3", FAKE_ODIN),
+            ("yosys", FAKE_YOSYS),
+            ("equiv-check", FAKE_CHECK),
+        ):
             (self.bin / name).write_text(text)
             (self.bin / name).chmod(0o755)
         self.compare = str(helpers.REPO_ROOT / "tools/netlist-compare/netlist-compare")
@@ -129,7 +138,9 @@ class Tree:
         spec: dict[str, Any] = {
             "rtlil": {"in.il": IN_IL, "lo.il": LO_IL, "lo_opt.il": LO_IL},
             "yosys_rtlil": {"yo.il": YO_IL, "yo_opt.il": YO_IL},
-            "lo_blif": BLIF, "yo_blif": BLIF}
+            "lo_blif": BLIF,
+            "yo_blif": BLIF,
+        }
         spec.update(changes)
         (self.bin / "fake.json").write_text(json.dumps(spec))
 
@@ -139,11 +150,22 @@ class Tree:
         return ["--expect", str(path), "--root", str(self.root / "cells")]
 
     def run(self, *extra: str) -> tuple[int, str, str]:
-        argv = ["--odin3", str(self.bin / "odin3"), "--yosys", str(self.bin / "yosys"),
-                "--netlist-compare", self.compare,
-                "--equiv-check", str(self.bin / "equiv-check"),
-                "--parmys-techlibs", str(self.root / "techlibs"),
-                "--work", str(self.root / "work"), *extra, str(self.root / "cells" / "and_2.v")]
+        argv = [
+            "--odin3",
+            str(self.bin / "odin3"),
+            "--yosys",
+            str(self.bin / "yosys"),
+            "--netlist-compare",
+            self.compare,
+            "--equiv-check",
+            str(self.bin / "equiv-check"),
+            "--parmys-techlibs",
+            str(self.root / "techlibs"),
+            "--work",
+            str(self.root / "work"),
+            *extra,
+            str(self.root / "cells" / "and_2.v"),
+        ]
         with mock.patch.object(memcap, "run", fake_run):
             return helpers.run_main(ld.main, argv)
 
@@ -158,31 +180,41 @@ class PureTest(unittest.TestCase):
             ld.odin_script(plan, Path("w")),
             "read_verilog --nolatches a.v b.v; hierarchy --top t; proc; opt; write_rtlil w/in.il; "
             "lower --async error; write_rtlil w/lo.il; write_blif w/lo.blif; opt -fast; "
-            "write_rtlil w/lo_opt.il")
+            "write_rtlil w/lo_opt.il",
+        )
 
     def test_a_blif_file_is_read_with_read_blif_and_the_techlib_first(self) -> None:
         plan = ld.Plan(("x.blif",), None, (), "", None)
         self.assertTrue(ld.odin_script(plan, Path("w")).startswith("read_blif x.blif; write_rtlil"))
         plan = ld.Plan(("a.v",), None, ("proc",), "", "lib/x.o3lib")
-        self.assertTrue(ld.odin_script(plan, Path("w")).startswith(
-            "read_techlib lib/x.o3lib; read_verilog --nolatches a.v; hierarchy -auto; proc;"))
+        self.assertTrue(
+            ld.odin_script(plan, Path("w")).startswith(
+                "read_techlib lib/x.o3lib; read_verilog --nolatches a.v; hierarchy -auto; proc;"
+            )
+        )
 
     def test_the_storage_families_write_no_rtlil_of_the_lowered_netlist(self) -> None:
         plan = ld.Plan(("a.v",), None, ("proc", "opt"), "", None, False)
         self.assertEqual(
             ld.odin_script(plan, Path("w")),
             "read_verilog --nolatches a.v; hierarchy -auto; proc; opt; write_rtlil w/in.il; lower; "
-            "write_blif w/lo.blif")
+            "write_blif w/lo.blif",
+        )
 
     def test_yosys_storage_subckts_become_latches_and_blif_histograms_count_them(self) -> None:
-        yosys = (".model m\n.inputs c d\n.outputs q r\n.subckt $_DFF_P_ C=c D=d Q=q\n"
-                 ".subckt $_DFF_N_ D=d Q=r C=c\n.subckt $_MUX_ A=a B=b S=s Y=y\n.end\n")
+        yosys = (
+            ".model m\n.inputs c d\n.outputs q r\n.subckt $_DFF_P_ C=c D=d Q=q\n"
+            ".subckt $_DFF_N_ D=d Q=r C=c\n.subckt $_MUX_ A=a B=b S=s Y=y\n.end\n"
+        )
         odin = ".model m\n.inputs c d\n.outputs q r\n.latch d q re c 3\n.latch d r fe c 3\n.end\n"
-        self.assertEqual(lc.storage_to_latch(yosys).splitlines()[3:5],
-                         [".latch d q re c 3", ".latch d r fe c 3"])
+        self.assertEqual(
+            lc.storage_to_latch(yosys).splitlines()[3:5], [".latch d q re c 3", ".latch d r fe c 3"]
+        )
         self.assertEqual(dict(lc.blif_histogram(odin)["m"]), {"$_DFF_P_": 1, "$_DFF_N_": 1})
-        self.assertEqual(dict(lc.blif_histogram(lc.storage_to_latch(yosys))["m"]),
-                         {"$_DFF_P_": 1, "$_DFF_N_": 1, "$_MUX_": 1})
+        self.assertEqual(
+            dict(lc.blif_histogram(lc.storage_to_latch(yosys))["m"]),
+            {"$_DFF_P_": 1, "$_DFF_N_": 1, "$_MUX_": 1},
+        )
 
     def test_the_ff_maps_cover_dffsr_and_parmys_exact_swaps_the_enable_maps(self) -> None:
         self.assertIn("dffsr2dff.v", ld.FF_MAPS)
@@ -198,7 +230,8 @@ class PureTest(unittest.TestCase):
             "read_rtlil w/in.il; techmap -map m/a.v; techmap -map m/b.v; techmap; dffunmap; "
             "opt_clean -purge; write_rtlil w/yo.il; "
             "write_blif -icells -true + vcc -false + gnd -undef + unconn w/yo.blif; opt -fast; "
-            "write_rtlil w/yo_opt.il")
+            "write_rtlil w/yo_opt.il",
+        )
 
     def test_tiers(self) -> None:
         self.assertEqual(ld.tier_of(ld.family_named("bitwise"), None, ""), "S")
@@ -213,8 +246,9 @@ class PureTest(unittest.TestCase):
             ld.family_named("nosuch")
 
     def test_expect_parser(self) -> None:
-        table = ld.parse_expect("# c\nsub/d.v arith histogram why not  # note\n"
-                                "e.v * equiv another\n")
+        table = ld.parse_expect(
+            "# c\nsub/d.v arith histogram why not  # note\ne.v * equiv another\n"
+        )
         self.assertEqual(table[("sub/d.v", "arith", "histogram")].reason, "why not")
         self.assertIn(("e.v", "*", "equiv"), table)
         for bad in ("d.v arith histogram\n", "d.v nosuch equiv why\n", "d.v arith nostep why\n"):
@@ -226,15 +260,22 @@ class PureTest(unittest.TestCase):
         self.assertEqual(ld.rel_key(["/a/b/c/d.v"], Path("/x")), "d.v")
 
     def test_unused_constant_generators_are_stripped(self) -> None:
-        blif = (".model m\n.inputs a\n.outputs y z\n.names gnd\n.names vcc\n1\n.names unconn\n"
-                ".subckt $_AND_ A=a B=gnd Y=y\n.names z\n1\n.end\n")
+        blif = (
+            ".model m\n.inputs a\n.outputs y z\n.names gnd\n.names vcc\n1\n.names unconn\n"
+            ".subckt $_AND_ A=a B=gnd Y=y\n.names z\n1\n.end\n"
+        )
         stripped = lc.strip_unused_constants(blif)
-        self.assertEqual(stripped, ".model m\n.inputs a\n.outputs y z\n.names gnd\n"
-                         ".subckt $_AND_ A=a B=gnd Y=y\n.names z\n1\n.end\n")
+        self.assertEqual(
+            stripped,
+            ".model m\n.inputs a\n.outputs y z\n.names gnd\n"
+            ".subckt $_AND_ A=a B=gnd Y=y\n.names z\n1\n.end\n",
+        )
 
     def test_a_net_read_only_on_a_continuation_line_keeps_its_constant(self) -> None:
-        blif = (".model m\n.inputs a\n.outputs y\n.names one\n1\n"
-                ".subckt $_AND_ A=a \\\n B=one Y=y\n.end\n")
+        blif = (
+            ".model m\n.inputs a\n.outputs y\n.names one\n1\n"
+            ".subckt $_AND_ A=a \\\n B=one Y=y\n.end\n"
+        )
         self.assertIn(".names one", lc.strip_unused_constants(blif))
 
     def test_histograms_ignore_constants_and_compare_per_module(self) -> None:
@@ -242,8 +283,10 @@ class PureTest(unittest.TestCase):
         self.assertEqual(dict(lc.histogram(text)["m"]), {"$_AND_": 2})
         other = "module \\m\n  cell $_AND_ $a\nend\n"
         self.assertEqual(lc.histogram_diff(lc.histogram(text), lc.histogram(text)), "")
-        self.assertIn("module m: odin3 $_AND_ 2; yosys $_AND_ 1",
-                      lc.histogram_diff(lc.histogram(text), lc.histogram(other)))
+        self.assertIn(
+            "module m: odin3 $_AND_ 2; yosys $_AND_ 1",
+            lc.histogram_diff(lc.histogram(text), lc.histogram(other)),
+        )
 
 
 class RunTest(unittest.TestCase):
@@ -260,12 +303,14 @@ class RunTest(unittest.TestCase):
         self.assertFalse((self.tree.bin / "equiv-check.log").exists())
 
     def test_tier_s_histogram_difference_fails(self) -> None:
-        self.tree.set_spec(yosys_rtlil={"yo.il": "module \\m\n  cell $_AND_ $x\nend\n",
-                                        "yo_opt.il": YO_IL})
+        self.tree.set_spec(
+            yosys_rtlil={"yo.il": "module \\m\n  cell $_AND_ $x\nend\n", "yo_opt.il": YO_IL}
+        )
         code, out, _ = self.tree.run()
         self.assertEqual(code, 1)
-        self.assertIn("[bitwise/S]: histogram: DIFFERS: module m: odin3 $_AND_ 2; yosys $_AND_ 1",
-                      out)
+        self.assertIn(
+            "[bitwise/S]: histogram: DIFFERS: module m: odin3 $_AND_ 2; yosys $_AND_ 1", out
+        )
 
     def test_tier_s_identity_failure_and_error(self) -> None:
         self.tree.set_spec(**{"netlist-compare_rc": 1})
@@ -308,8 +353,10 @@ class RunTest(unittest.TestCase):
 
     def test_a_design_with_no_word_cell_compared_nothing_and_fails(self) -> None:
         folded = "module \\m\nend\n"  # opt folded the cell away: nothing in, nothing out
-        self.tree.set_spec(rtlil={"in.il": folded, "lo.il": folded, "lo_opt.il": folded},
-                           yosys_rtlil={"yo.il": folded, "yo_opt.il": folded})
+        self.tree.set_spec(
+            rtlil={"in.il": folded, "lo.il": folded, "lo_opt.il": folded},
+            yosys_rtlil={"yo.il": folded, "yo_opt.il": folded},
+        )
         code, out, _ = self.tree.run()
         self.assertEqual(code, 1)
         self.assertIn("[bitwise/S]: compared: NOTHING TO COMPARE", out)
@@ -320,8 +367,10 @@ class RunTest(unittest.TestCase):
 
     def test_an_expect_line_may_list_an_empty_comparison_until_cells_return(self) -> None:
         folded = "module \\m\nend\n"
-        self.tree.set_spec(rtlil={"in.il": folded, "lo.il": folded, "lo_opt.il": folded},
-                           yosys_rtlil={"yo.il": folded, "yo_opt.il": folded})
+        self.tree.set_spec(
+            rtlil={"in.il": folded, "lo.il": folded, "lo_opt.il": folded},
+            yosys_rtlil={"yo.il": folded, "yo_opt.il": folded},
+        )
         extra = self.tree.expect("and_2.v * compared folded by opt\n")
         code, out, _ = self.tree.run(*extra)
         self.assertEqual(code, 0)
@@ -332,15 +381,25 @@ class RunTest(unittest.TestCase):
         self.assertIn("compared: stale entry in the expect list", out)
 
     def test_ok_says_how_many_word_cells_were_compared(self) -> None:
-        self.tree.set_spec(rtlil={"in.il": "module \\m\n  cell $and $a\n  cell $or $b\n"
-                                  "  cell $_AND_ $g\nend\n", "lo.il": LO_IL, "lo_opt.il": LO_IL})
+        self.tree.set_spec(
+            rtlil={
+                "in.il": "module \\m\n  cell $and $a\n  cell $or $b\n  cell $_AND_ $g\nend\n",
+                "lo.il": LO_IL,
+                "lo_opt.il": LO_IL,
+            }
+        )
         code, out, _ = self.tree.run()
         self.assertEqual(code, 0, out)
         self.assertIn("[bitwise/S]: ok (2 cells)", out)
 
     def test_tier_d_compares_with_the_declared_maps(self) -> None:
-        self.tree.set_spec(rtlil={"in.il": "module \\m\n  cell $adffe $c\nend\n", "lo.il": LO_IL,
-                                  "lo_opt.il": LO_IL})
+        self.tree.set_spec(
+            rtlil={
+                "in.il": "module \\m\n  cell $adffe $c\nend\n",
+                "lo.il": LO_IL,
+                "lo_opt.il": LO_IL,
+            }
+        )
         code, out, err = self.tree.run("--family", "ff")
         self.assertEqual(code, 0, out + err)
         self.assertIn("[ff/D]: ok", out)
@@ -351,8 +410,9 @@ class RunTest(unittest.TestCase):
         self.assertEqual(len(self.tree.log("equiv-check.log")), 1)
 
     def test_a_missing_map_is_an_error(self) -> None:
-        code, _, err = self.tree.run("--family", "ff", "--parmys-techlibs",
-                                     str(self.tree.root / "nowhere"))
+        code, _, err = self.tree.run(
+            "--family", "ff", "--parmys-techlibs", str(self.tree.root / "nowhere")
+        )
         self.assertEqual(code, 2)
         self.assertIn("adff2dff.v not found", err)
 
@@ -393,10 +453,18 @@ class RunTest(unittest.TestCase):
         self.assertNotIn("differs as listed", out)
 
     def test_a_timeout_is_hard_with_no_traceback(self) -> None:
-        argv = ["--odin3", str(self.tree.bin / "odin3"), "--yosys", str(self.tree.bin / "yosys"),
-                "--work", str(self.tree.root / "work"), str(self.tree.root / "cells" / "and_2.v")]
-        with mock.patch.object(memcap, "run",
-                               side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)):
+        argv = [
+            "--odin3",
+            str(self.tree.bin / "odin3"),
+            "--yosys",
+            str(self.tree.bin / "yosys"),
+            "--work",
+            str(self.tree.root / "work"),
+            str(self.tree.root / "cells" / "and_2.v"),
+        ]
+        with mock.patch.object(
+            memcap, "run", side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)
+        ):
             code, _, err = helpers.run_main(ld.main, argv)
         self.assertEqual(code, 3, err)
         self.assertIn("timed out", err)
@@ -430,9 +498,11 @@ class BeyondXTest(unittest.TestCase):
         import lower_equiv
 
         boxes = (Path("in.il"), Path("gate.il"), "")
-        with mock.patch.object(lower_equiv, "make_gate", return_value=Path("gate.il")), \
-                mock.patch.object(lower_equiv, "prepare_boxes", return_value=boxes), \
-                mock.patch.object(lower_equiv, "refine", return_value=(kind, "detail")):
+        with (
+            mock.patch.object(lower_equiv, "make_gate", return_value=Path("gate.il")),
+            mock.patch.object(lower_equiv, "prepare_boxes", return_value=boxes),
+            mock.patch.object(lower_equiv, "refine", return_value=(kind, "detail")),
+        ):
             code, out, err = self.tree.run("--family", "shift", *self.extra)
         return code, out + err
 

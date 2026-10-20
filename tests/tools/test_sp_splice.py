@@ -118,12 +118,27 @@ class SpSpliceTest(unittest.TestCase):
         stack.enter_context(mock.patch.object(memcap, "MEMINFO", str(meminfo)))
         self.addCleanup(stack.close)
 
-    def run_tool(self, *args: str, extra: dict[str, str] | None = None,
-                 files: list[Path] | None = None) -> tuple[int, str, str]:
-        argv = ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--arch", "/arch/k6.xml",
-                "--top", "top", "--primitives", "/vtr/prim.v", "--techlib", "/lib/vtr.o3lib",
-                "--keep", str(self.keep), *args,
-                *map(str, files or [self.a, self.b])]
+    def run_tool(
+        self, *args: str, extra: dict[str, str] | None = None, files: list[Path] | None = None
+    ) -> tuple[int, str, str]:
+        argv = [
+            "--odin3",
+            str(self.odin3),
+            "--yosys",
+            str(self.yosys),
+            "--arch",
+            "/arch/k6.xml",
+            "--top",
+            "top",
+            "--primitives",
+            "/vtr/prim.v",
+            "--techlib",
+            "/lib/vtr.o3lib",
+            "--keep",
+            str(self.keep),
+            *args,
+            *map(str, files or [self.a, self.b]),
+        ]
         with mock.patch.dict(os.environ, extra or {}):
             return helpers.run_main(sp_splice.main, argv)
 
@@ -144,8 +159,10 @@ class SpSpliceTest(unittest.TestCase):
     def test_both_command_strings_exactly(self) -> None:
         code, out, err = self.run_tool("--config", "/cfg/c.xml")
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(self.scripts(), [("odin3", self.expected_odin3()),
-                                          ("yosys", "yosys -import\n" + YOSYS_SCRIPT + "\n")])
+        self.assertEqual(
+            self.scripts(),
+            [("odin3", self.expected_odin3()), ("yosys", "yosys -import\n" + YOSYS_SCRIPT + "\n")],
+        )
         self.assertEqual(self.calls()[-1][:3], ["yosys", "-c", "yosys.tcl"])
         self.assertEqual(out.strip(), str(self.keep / "out.blif"))
         self.assertTrue((self.keep / "a.il").is_file())
@@ -175,13 +192,17 @@ class SpSpliceTest(unittest.TestCase):
         self.run_tool()
         yosys = self.scripts()[1][1].split("; ")
         start = yosys.index("read_verilog -nomem2reg /vtr/prim.v")
-        self.assertEqual(yosys[start:start + 6], [
-            "read_verilog -nomem2reg /vtr/prim.v",
-            "setattr -mod -set keep_hierarchy 1 single_port_ram",
-            "setattr -mod -set keep_hierarchy 1 dual_port_ram",
-            "read_rtlil -nooverwrite a.il",
-            "hierarchy -check -auto-top -purge_lib",
-            "procs -norom"])
+        self.assertEqual(
+            yosys[start : start + 6],
+            [
+                "read_verilog -nomem2reg /vtr/prim.v",
+                "setattr -mod -set keep_hierarchy 1 single_port_ram",
+                "setattr -mod -set keep_hierarchy 1 dual_port_ram",
+                "read_rtlil -nooverwrite a.il",
+                "hierarchy -check -auto-top -purge_lib",
+                "procs -norom",
+            ],
+        )
 
     def test_default_techlib_is_the_repo_one(self) -> None:
         self.assertEqual(sp_splice.DEFAULT_TECHLIB, helpers.REPO_ROOT / "lib" / "vtr.o3lib")
@@ -196,8 +217,14 @@ class SpSpliceTest(unittest.TestCase):
         self.assertIn("hierarchy -check -auto-top -purge_lib", yosys)
 
     def test_pre_commands_and_no_primitives(self) -> None:
-        code, _, _ = self.run_tool("--odin3-pre", "read_techlib /lib/other.o3lib", "--no-techlib",
-                                   "--no-primitives", "--primitives", "")
+        code, _, _ = self.run_tool(
+            "--odin3-pre",
+            "read_techlib /lib/other.o3lib",
+            "--no-techlib",
+            "--no-primitives",
+            "--primitives",
+            "",
+        )
         self.assertEqual(code, 0)
         expected = ODIN3_SCRIPT.replace("/src/a.v", str(self.a)).replace("/src/b.v", str(self.b))
         expected = expected.replace("read_techlib /lib/vtr.o3lib; ", "")
@@ -256,8 +283,21 @@ class SpSpliceTest(unittest.TestCase):
         self.assertIn("wrote no out.blif", err)
 
     def test_missing_tool_is_exit_2(self) -> None:
-        argv = ["--odin3", str(self.dir / "nope"), "--yosys", str(self.yosys), "--arch", "a",
-                "--top", "t", "--primitives", "p.v", "--keep", str(self.keep), str(self.a)]
+        argv = [
+            "--odin3",
+            str(self.dir / "nope"),
+            "--yosys",
+            str(self.yosys),
+            "--arch",
+            "a",
+            "--top",
+            "t",
+            "--primitives",
+            "p.v",
+            "--keep",
+            str(self.keep),
+            str(self.a),
+        ]
         code, _, err = helpers.run_main(sp_splice.main, argv)
         self.assertEqual(code, 2)
         self.assertIn("cannot run", err)
@@ -275,8 +315,9 @@ class SpSpliceTest(unittest.TestCase):
         self.assertEqual(self.scripts(), [])
 
     def test_allow_version_accepts_a_named_drift_version(self) -> None:
-        code, _, _ = self.run_tool("--allow-version", "0.69",
-                                   extra={"FAKE_YOSYS_VERSION": "Yosys 0.69 (git sha1 abc)"})
+        code, _, _ = self.run_tool(
+            "--allow-version", "0.69", extra={"FAKE_YOSYS_VERSION": "Yosys 0.69 (git sha1 abc)"}
+        )
         self.assertEqual(code, 0)
 
     def test_version_ok_is_not_fooled_by_0_550_or_0_5(self) -> None:
@@ -314,8 +355,10 @@ class Phase2ScriptTest(unittest.TestCase):
     def test_phase2_script_is_opt_proc_opt_compact(self) -> None:
         # IR-6 unchanged (PHASE2 #19): opt never compacts, the script does. proc ends with
         # opt_expr -keepdc (step F, wired), so no separate opt_expr follows it.
-        self.assertEqual(phase2_commands(),
-                         ["opt_expr", "opt_clean", "opt -nodffe -nosdff", "proc", "opt", "compact"])
+        self.assertEqual(
+            phase2_commands(),
+            ["opt_expr", "opt_clean", "opt -nodffe -nosdff", "proc", "opt", "compact"],
+        )
 
     def test_bench_opt_runs_the_same_commands(self) -> None:
         bench = (helpers.REPO_ROOT / "tests" / "bench" / "bench_opt.c").read_text(encoding="utf-8")

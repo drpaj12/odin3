@@ -86,7 +86,8 @@ IL_OK = (
 SUB_GOLDEN = GOLDEN.replace(
     ".subckt adder a[0]=a b[0]=a cin[0]=n1 cout[0]=n2 sumout[0]=y2\n",
     ".subckt adder a=a b=unconn cin=n1 cout=$sub~7^MIN~8-1[0] \\\n  sumout=$sub~7^MIN~8-1[1]\n"
-    ".subckt adder a=a b=unconn cin=n1 cout=$add~7^ADD~8-1[0] sumout=$add~7^ADD~8-1[1]\n")
+    ".subckt adder a=a b=unconn cin=n1 cout=$add~7^ADD~8-1[0] sumout=$add~7^ADD~8-1[1]\n",
+)
 UNPAIRED_OUT = (
     "equiv-check: unnamed black-box instances cannot be matched one-to-one (matched by simulation "
     "signature)\n  only in A: multiply unnamed, out[0]=$mul~1[0] (g.blif:5)\n"
@@ -109,8 +110,11 @@ class ToolCase(unittest.TestCase):
         self.put_golden(GOLDEN)
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
-        for name, text in (("odin3", FAKE_ODIN), ("netlist-compare", FAKE_COMPARE),
-                           ("equiv-check", FAKE_EQUIV)):
+        for name, text in (
+            ("odin3", FAKE_ODIN),
+            ("netlist-compare", FAKE_COMPARE),
+            ("equiv-check", FAKE_EQUIV),
+        ):
             path = self.bin / name
             path.write_text(text)
             path.chmod(0o755)
@@ -130,10 +134,18 @@ class ToolCase(unittest.TestCase):
 
     def run_tool(self, *extra: str, design: Path | None = None) -> tuple[int, str, str]:
         (self.bin / "fake.json").write_text(json.dumps(self.spec))
-        argv = ["--odin3", str(self.bin / "odin3"),
-                "--netlist-compare", str(self.bin / "netlist-compare"),
-                "--equiv-check", str(self.bin / "equiv-check"),
-                "--golden-root", str(self.golden_root), "--techlib", "/lib/vtr.o3lib"]
+        argv = [
+            "--odin3",
+            str(self.bin / "odin3"),
+            "--netlist-compare",
+            str(self.bin / "netlist-compare"),
+            "--equiv-check",
+            str(self.bin / "equiv-check"),
+            "--golden-root",
+            str(self.golden_root),
+            "--techlib",
+            "/lib/vtr.o3lib",
+        ]
         for path in self.expect_files:
             argv += ["--expect", str(path)]
         argv += [*extra, str(design or self.design)]
@@ -364,8 +376,9 @@ class UnpairedTests(ToolCase):
 
     def test_d2b_beside_a_counts_entry_is_stale(self) -> None:
         self.expect("common/foo.v D2b pad\ncommon/foo.v counts:+6 latch x\n")
-        self.spec["odin_blif"] = SUB_GOLDEN.replace(".latch a q re clk 0\n",
-                                                    ".latch a q re clk 0\n" * 7)
+        self.spec["odin_blif"] = SUB_GOLDEN.replace(
+            ".latch a q re clk 0\n", ".latch a q re clk 0\n" * 7
+        )
         code, out, _ = self.run_tool()
         self.assertEqual(code, 1, out)
         self.assertIn("STALE", out)
@@ -401,8 +414,10 @@ class ListedTests(ToolCase):
         self.assertEqual(self.log("compare.log"), "")
 
     def test_counts_beside_another_entry_is_stale(self) -> None:
-        self.expect("common/foo.v counts:+6 latch D4: select flip-flops\n"
-                    "common/foo.v unproven cannot decide\n")
+        self.expect(
+            "common/foo.v counts:+6 latch D4: select flip-flops\n"
+            "common/foo.v unproven cannot decide\n"
+        )
         self.spec["odin_blif"] = SIX_LATCHES
         code, out, _ = self.run_tool()
         self.assertEqual(code, 1, out)
@@ -448,7 +463,8 @@ class ErrorTests(ToolCase):
         self.expect("common/foo.v D1 anything\n")
         self.spec["compare_rc"] = 0
         self.spec["odin_stderr"] = (
-            "odin3: warning: hardmap: cell 'm': left soft for lower (run wreduce first)\n")
+            "odin3: warning: hardmap: cell 'm': left soft for lower (run wreduce first)\n"
+        )
         code, out, _ = self.run_tool()
         self.assertEqual(code, 1)
         self.assertIn("WARNED", out)
@@ -464,7 +480,8 @@ class ErrorTests(ToolCase):
     def test_lower_gap_fails_unless_listed(self) -> None:
         self.spec["odin_rc"] = 1
         self.spec["odin_stderr"] = (
-            "odin3: error: lower: no lowering rule for cell type '$mul' ('m1'): not yet (3B-2)\n")
+            "odin3: error: lower: no lowering rule for cell type '$mul' ('m1'): not yet (3B-2)\n"
+        )
         self.spec["odin_il"] = IL_OK
         code, out, _ = self.run_tool()
         self.assertEqual(code, 1)
@@ -478,7 +495,8 @@ class ErrorTests(ToolCase):
         self.spec["odin_rc"] = 1
         self.spec["odin_stderr"] = (
             "odin3: error: foo.v:23:2: error: unresolved_module: module 'single_port_ram' "
-            "is not defined\n")
+            "is not defined\n"
+        )
         code, out, _ = self.run_tool()
         self.assertEqual(code, 2)
         self.assertIn("unresolved_module", out)
@@ -498,7 +516,8 @@ class ErrorTests(ToolCase):
         self.spec["odin_rc"] = 1
         self.spec["odin_stderr"] = (
             "odin3: warning: hardmap: cell 'm': left soft for lower (run wreduce first)\n"
-            "odin3: error: lower: no lowering rule for cell type '$mul' ('m1')\n")
+            "odin3: error: lower: no lowering rule for cell type '$mul' ('m1')\n"
+        )
         self.spec["odin_il"] = IL_OK
         self.expect("common/foo.v lower-gap waits for 3B-2\n")
         code, out, _ = self.run_tool()
@@ -545,8 +564,13 @@ class ErrorTests(ToolCase):
         self.assertIn("no golden", out)
 
     def test_bad_expect_lines(self) -> None:
-        lines = ("common/foo.v D1\n", "common/foo.v Q9 why\n", "common/foo.v counts:+x latch w\n",
-                 "common/foo.v counts:+1 wire why\n", "common/foo.v counts:+0 latch why\n")
+        lines = (
+            "common/foo.v D1\n",
+            "common/foo.v Q9 why\n",
+            "common/foo.v counts:+x latch w\n",
+            "common/foo.v counts:+1 wire why\n",
+            "common/foo.v counts:+0 latch why\n",
+        )
         for line in lines:
             with self.subTest(line=line):
                 self.expect(line)
@@ -569,16 +593,20 @@ class MechanicsTests(ToolCase):
         self.run_tool()
         line = self.log("odin.log")
         self.assertIn("--top top", line)
-        for needle in ("read_techlib /lib/vtr.o3lib", "read_verilog --nolatches --vtr-compat",
-                       "wreduce; opt_clean; opt -full; flatten; opt -full; hardmap; "
-                       "opt -full -ffbits; lower; opt -fast; compact; write_blif --vtr "):
+        for needle in (
+            "read_techlib /lib/vtr.o3lib",
+            "read_verilog --nolatches --vtr-compat",
+            "wreduce; opt_clean; opt -full; flatten; opt -full; hardmap; "
+            "opt -full -ffbits; lower; opt -fast; compact; write_blif --vtr ",
+        ):
             self.assertIn(needle, line)
 
     def test_adder_lib_read_before_the_design(self) -> None:
         self.spec["compare_rc"] = 0
         self.run_tool("--adder-lib", "/x/adder_lib.v")
-        self.assertIn("read_verilog --lib /x/adder_lib.v; read_verilog --nolatches",
-                      self.log("odin.log"))
+        self.assertIn(
+            "read_verilog --lib /x/adder_lib.v; read_verilog --nolatches", self.log("odin.log")
+        )
         self.run_tool("--adder-lib", "")
         self.assertNotIn("--lib", self.log("odin.log").splitlines()[-1])
 
@@ -633,32 +661,37 @@ class UnitTests(unittest.TestCase):
             self.assertEqual(hd.count_blocks(path), Counter(adder=2, multiply=1, latch=1))
 
     def test_normalize_d2b_ties_only_sub_chain_b_pads(self) -> None:
-        text = (".model t\n"
-                ".subckt adder a=x b=unconn cin=c cout=$sub~1^MIN~2-1[0] \\\n"
-                "  sumout=$sub~1^MIN~2-1[1]\n"
-                ".subckt adder a=unconn b=unconn cin=c cout=$sub~1^MIN~2-2[0] sumout=s\n"
-                ".subckt adder a=x b=unconn cin=c cout=$add~1^ADD~2-1[0] sumout=s2\n"
-                ".subckt adder a=x b=y cin=c cout=$sub~3^MIN~4-1[0] sumout=s3\n.end\n")
+        text = (
+            ".model t\n"
+            ".subckt adder a=x b=unconn cin=c cout=$sub~1^MIN~2-1[0] \\\n"
+            "  sumout=$sub~1^MIN~2-1[1]\n"
+            ".subckt adder a=unconn b=unconn cin=c cout=$sub~1^MIN~2-2[0] sumout=s\n"
+            ".subckt adder a=x b=unconn cin=c cout=$add~1^ADD~2-1[0] sumout=s2\n"
+            ".subckt adder a=x b=y cin=c cout=$sub~3^MIN~4-1[0] sumout=s3\n.end\n"
+        )
         with tempfile.TemporaryDirectory() as tmp:
             src, dst = Path(tmp) / "g.blif", Path(tmp) / "d.blif"
             src.write_text(text)
             self.assertEqual(hd.normalize_d2b(src, dst), 2)
             lines = dst.read_text().splitlines()
-        self.assertIn(".subckt adder a=x b=vcc cin=c cout=$sub~1^MIN~2-1[0] "
-                      "sumout=$sub~1^MIN~2-1[1]", lines)
+        self.assertIn(
+            ".subckt adder a=x b=vcc cin=c cout=$sub~1^MIN~2-1[0] sumout=$sub~1^MIN~2-1[1]", lines
+        )
         self.assertIn(".subckt adder a=unconn b=vcc cin=c cout=$sub~1^MIN~2-2[0] sumout=s", lines)
         self.assertIn(".subckt adder a=x b=unconn cin=c cout=$add~1^ADD~2-1[0] sumout=s2", lines)
         self.assertIn(".subckt adder a=x b=y cin=c cout=$sub~3^MIN~4-1[0] sumout=s3", lines)
 
     def test_normalize_d2b_leaves_add_adders_and_prefix_names_alone(self) -> None:
-        text = (".model t\n"
-                # an $add adder that only reads a $sub net: its pad is correct
-                ".subckt adder a=$sub~1^MIN~2-1[0] b=unconn cin=$sub~1^MIN~2-1[0] "
-                "cout=$add~5^ADD~6-1[0] sumout=s0\n"
-                ".subckt adder2 a=x b=unconn cin=c cout=$sub~1^MIN~2-3[0] sumout=s1\n"
-                ".subckt adder_x a=x b=unconn cin=c cout=$sub~1^MIN~2-4[0] sumout=s2\n"
-                ".subckt adder a=x b[0]=unconn cin=c cout=$sub~1^MIN~2-5[0] sumout=s3\n"
-                ".subckt adder a=x b=unconn cin=c cout=c9 sumout=$sub~1^MIN~2-6[1]\n.end\n")
+        text = (
+            ".model t\n"
+            # an $add adder that only reads a $sub net: its pad is correct
+            ".subckt adder a=$sub~1^MIN~2-1[0] b=unconn cin=$sub~1^MIN~2-1[0] "
+            "cout=$add~5^ADD~6-1[0] sumout=s0\n"
+            ".subckt adder2 a=x b=unconn cin=c cout=$sub~1^MIN~2-3[0] sumout=s1\n"
+            ".subckt adder_x a=x b=unconn cin=c cout=$sub~1^MIN~2-4[0] sumout=s2\n"
+            ".subckt adder a=x b[0]=unconn cin=c cout=$sub~1^MIN~2-5[0] sumout=s3\n"
+            ".subckt adder a=x b=unconn cin=c cout=c9 sumout=$sub~1^MIN~2-6[1]\n.end\n"
+        )
         with tempfile.TemporaryDirectory() as tmp:
             src, dst = Path(tmp) / "g.blif", Path(tmp) / "d.blif"
             src.write_text(text)
@@ -678,8 +711,9 @@ class UnitTests(unittest.TestCase):
         self.assertIn("; read_verilog --nolatches --vtr-compat /d.v; proc; ", text)
         self.assertNotIn("--lib", text)
         with_lib = hd.script_text(hd.SCRIPT, Path("/l"), Path("/d.v"), Path("/o"), Path("/a.v"))
-        self.assertIn("read_techlib /l; read_verilog --lib /a.v; read_verilog --nolatches",
-                      with_lib)
+        self.assertIn(
+            "read_techlib /l; read_verilog --lib /a.v; read_verilog --nolatches", with_lib
+        )
         with_arch = hd.script_text(hd.SCRIPT, Path("/l"), Path("/d.v"), Path("/o"), arch="/a.xml")
         self.assertTrue(with_arch.startswith("read_arch /a.xml; "))
         self.assertNotIn("read_techlib", with_arch)

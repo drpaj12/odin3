@@ -41,8 +41,7 @@ def _exe(path: Path, text: str) -> Path:
 
 
 def seed_with(latch: bool) -> int:
-    return next(s for s in range(1, 200)
-                if ("latch" in proc_profile.generate(s).features) == latch)
+    return next(s for s in range(1, 200) if ("latch" in proc_profile.generate(s).features) == latch)
 
 
 class ProfileTest(unittest.TestCase):
@@ -66,8 +65,18 @@ class ProfileTest(unittest.TestCase):
 
     def test_text_shows_each_construct(self) -> None:
         text = "".join(proc_profile.generate(s).text for s in range(1, 51))
-        for needle in ("casez (", "casex (", "// synopsys full_case", "parallel_case",
-                       "negedge", "3'b", "?", "or posedge r", "or negedge r", " [0:3];"):
+        for needle in (
+            "casez (",
+            "casex (",
+            "// synopsys full_case",
+            "parallel_case",
+            "negedge",
+            "3'b",
+            "?",
+            "or posedge r",
+            "or negedge r",
+            " [0:3];",
+        ):
             self.assertIn(needle, text, needle)
 
     def test_cli_writes_the_profile_and_no_ast(self) -> None:
@@ -79,8 +88,9 @@ class ProfileTest(unittest.TestCase):
             self.assertFalse(out.with_suffix(".ast").exists())
 
     def test_proc_and_mutate_are_exclusive(self) -> None:
-        code, _, _ = helpers.run_main(verilog_gen.main, ["--proc", "--mutate", "--seed", "1",
-                                                          "--out", "/dev/null"])
+        code, _, _ = helpers.run_main(
+            verilog_gen.main, ["--proc", "--mutate", "--seed", "1", "--out", "/dev/null"]
+        )
         self.assertEqual(code, 2)
 
     def test_parses_with_yosys_055(self) -> None:
@@ -91,8 +101,12 @@ class ProfileTest(unittest.TestCase):
             for seed in range(1, 51):
                 path = Path(tmp) / f"s{seed}.v"
                 path.write_text(proc_profile.generate(seed).text, encoding="utf-8")
-                done = subprocess.run([yosys, "-q", "-p", f"read_verilog -sv {path}"],
-                                      capture_output=True, text=True, check=False)
+                done = subprocess.run(
+                    [yosys, "-q", "-p", f"read_verilog -sv {path}"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
                 self.assertEqual(done.returncode, 0, f"seed {seed}: {done.stderr[-300:]}")
 
 
@@ -103,14 +117,24 @@ class ProcGenDiffTest(unittest.TestCase):
         self.dir = Path(self._tmp.name).resolve()
         self.log = self.dir / "argv.log"
         python = sys.executable
-        self.proc_diff = _exe(self.dir / "proc-diff", FAKE_TOOL.replace("{python}", python)
-                              .replace("{name!r}", "'proc-diff'")
-                              .replace("{var!r}", "'FAKE_PD_RC'"))
-        self.elab_equiv = _exe(self.dir / "elab-equiv", FAKE_TOOL.replace("{python}", python)
-                               .replace("{name!r}", "'elab-equiv'")
-                               .replace("{var!r}", "'FAKE_EE_RC'"))
-        self.odin3 = _exe(self.dir / "odin3", FAKE_TOOL.replace("{python}", python)
-                          .replace("{name!r}", "'odin3'").replace("{var!r}", "'FAKE_OPT_RC'"))
+        self.proc_diff = _exe(
+            self.dir / "proc-diff",
+            FAKE_TOOL.replace("{python}", python)
+            .replace("{name!r}", "'proc-diff'")
+            .replace("{var!r}", "'FAKE_PD_RC'"),
+        )
+        self.elab_equiv = _exe(
+            self.dir / "elab-equiv",
+            FAKE_TOOL.replace("{python}", python)
+            .replace("{name!r}", "'elab-equiv'")
+            .replace("{var!r}", "'FAKE_EE_RC'"),
+        )
+        self.odin3 = _exe(
+            self.dir / "odin3",
+            FAKE_TOOL.replace("{python}", python)
+            .replace("{name!r}", "'odin3'")
+            .replace("{var!r}", "'FAKE_OPT_RC'"),
+        )
         self.yosys = _exe(self.dir / "yosys", "#!/bin/sh\nexit 0\n")
         self.yosys069 = _exe(self.dir / "yosys069", "#!/bin/sh\nexit 0\n")
         self.equiv_check = _exe(self.dir / "equiv-check", "#!/bin/sh\nexit 0\n")
@@ -124,8 +148,17 @@ class ProcGenDiffTest(unittest.TestCase):
         self.addCleanup(env_patch.stop)
 
     def run_tool(self, *args: str, env: dict[str, str] | None = None) -> tuple[int, str, str]:
-        argv = ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--equiv-check",
-                str(self.equiv_check), "--work", str(self.work), *args]
+        argv = [
+            "--odin3",
+            str(self.odin3),
+            "--yosys",
+            str(self.yosys),
+            "--equiv-check",
+            str(self.equiv_check),
+            "--work",
+            str(self.work),
+            *args,
+        ]
         with mock.patch.dict(os.environ, env or {}):
             return helpers.run_main(proc_gen_diff.main, argv)
 
@@ -162,8 +195,11 @@ class ProcGenDiffTest(unittest.TestCase):
     def test_a_range_runs_every_seed_in_order(self) -> None:
         code, out, _ = self.run_tool("--seeds", "3..6", "--no-trio")
         self.assertEqual(code, 0)
-        order = [int(line.split()[1].rstrip(":")) for line in out.splitlines()
-                 if line.startswith("seed ")]
+        order = [
+            int(line.split()[1].rstrip(":"))
+            for line in out.splitlines()
+            if line.startswith("seed ")
+        ]
         self.assertEqual(order, [3, 4, 5, 6])
 
     def test_a_bad_range_is_a_usage_error(self) -> None:
@@ -174,8 +210,9 @@ class ProcGenDiffTest(unittest.TestCase):
 
     def test_a_difference_fails_and_keeps_the_seed_and_file(self) -> None:
         seed = seed_with(latch=False)
-        code, out, _ = self.run_tool("--seeds", f"{seed}..{seed}", "--no-trio",
-                                     env={"FAKE_PD_RC": "1"})
+        code, out, _ = self.run_tool(
+            "--seeds", f"{seed}..{seed}", "--no-trio", env={"FAKE_PD_RC": "1"}
+        )
         self.assertEqual(code, 1)
         self.assertIn(f"seed {seed}: FAIL", out)
         kept = self.work / f"seed{seed}" / f"seed{seed}.v"
@@ -184,16 +221,22 @@ class ProcGenDiffTest(unittest.TestCase):
 
     def test_an_error_exit_is_a_failure_too(self) -> None:
         seed = seed_with(latch=False)
-        code, out, _ = self.run_tool("--seeds", f"{seed}..{seed}", "--no-trio",
-                                     env={"FAKE_EE_RC": "2"})
+        code, out, _ = self.run_tool(
+            "--seeds", f"{seed}..{seed}", "--no-trio", env={"FAKE_EE_RC": "2"}
+        )
         self.assertEqual(code, 1)
         self.assertIn("bridge", out)
 
     def test_drift_between_055_and_069_is_classified_not_failed(self) -> None:
         seed = seed_with(latch=False)
-        code, out, _ = self.run_tool("--seeds", f"{seed}..{seed}", "--no-trio",
-                                     "--yosys-069", str(self.yosys069),
-                                     env={"FAKE_PD_RC_069": "1"})
+        code, out, _ = self.run_tool(
+            "--seeds",
+            f"{seed}..{seed}",
+            "--no-trio",
+            "--yosys-069",
+            str(self.yosys069),
+            env={"FAKE_PD_RC_069": "1"},
+        )
         self.assertEqual(code, 0, out)
         self.assertIn("oracle drift", out)
         self.assertNotIn("FAIL", out)
@@ -203,17 +246,23 @@ class ProcGenDiffTest(unittest.TestCase):
 
     def test_a_055_difference_is_a_failure_even_when_069_agrees(self) -> None:
         seed = seed_with(latch=False)
-        code, out, _ = self.run_tool("--seeds", f"{seed}..{seed}", "--no-trio",
-                                     "--yosys-069", str(self.yosys069),
-                                     env={"FAKE_PD_RC": "1"})
+        code, out, _ = self.run_tool(
+            "--seeds",
+            f"{seed}..{seed}",
+            "--no-trio",
+            "--yosys-069",
+            str(self.yosys069),
+            env={"FAKE_PD_RC": "1"},
+        )
         self.assertEqual(code, 1)
         self.assertIn("FAIL", out)
         self.assertNotIn("oracle drift:", out)
 
     def test_a_run_of_only_oracle_crashes_fails_as_unverified(self) -> None:
         seed = seed_with(latch=False)
-        code, out, _ = self.run_tool("--seeds", f"{seed}..{seed}", "--no-trio",
-                                     env={"FAKE_EE_RC": "3"})
+        code, out, _ = self.run_tool(
+            "--seeds", f"{seed}..{seed}", "--no-trio", env={"FAKE_EE_RC": "3"}
+        )
         self.assertEqual(code, 1, out)
         self.assertIn("oracle crash", out)
         self.assertIn("1 oracle crashes", out)
@@ -229,8 +278,9 @@ class ProcGenDiffTest(unittest.TestCase):
 
     def test_a_run_of_only_skips_fails_as_unverified(self) -> None:
         seed = seed_with(latch=False)
-        code, out, _ = self.run_tool("--seeds", f"{seed}..{seed}", "--no-trio",
-                                     env={"FAKE_EE_RC": "77"})
+        code, out, _ = self.run_tool(
+            "--seeds", f"{seed}..{seed}", "--no-trio", env={"FAKE_EE_RC": "77"}
+        )
         self.assertEqual(code, 1, out)
         self.assertIn("1 unverified", out)
 

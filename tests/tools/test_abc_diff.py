@@ -69,12 +69,16 @@ if "# aigside" in text:
 print("equiv-check: equivalent (abc cec)")
 """
 
-CHAIN = (".model t\n.inputs a\n.outputs y\n.names a b\n0 1\n.names b c\n0 1\n.names c d\n0 1\n"
-         ".names d y\n0 1\n.latch y q re clk 0\n.end\n")
+CHAIN = (
+    ".model t\n.inputs a\n.outputs y\n.names a b\n0 1\n.names b c\n0 1\n.names c d\n0 1\n"
+    ".names d y\n0 1\n.latch y q re clk 0\n.end\n"
+)
 # two POs share one NOT; the second is an identity buffer of the first (the in-memory exchange's
 # shape for equal port nets); the depth is 2, not 3, though all three cells are counted as LUTs
-SHARED_PO = (".model t\n.inputs a b\n.outputs y z\n.names a b n\n11 1\n.names n y\n0 1\n"
-             ".names y z\n1 1\n.end\n")
+SHARED_PO = (
+    ".model t\n.inputs a b\n.outputs y z\n.names a b n\n11 1\n.names n y\n0 1\n"
+    ".names y z\n1 1\n.end\n"
+)
 
 
 def design_text() -> str:
@@ -130,8 +134,15 @@ class AbcDiffTest(unittest.TestCase):
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
     def run_tool(self, *extra: str) -> tuple[int, str, str]:
-        argv = ["--odin3", self.odin3, "--equiv-check", self.equiv, "--keep", str(self.keep),
-                *extra]
+        argv = [
+            "--odin3",
+            self.odin3,
+            "--equiv-check",
+            self.equiv,
+            "--keep",
+            str(self.keep),
+            *extra,
+        ]
         return helpers.run_main(abc_diff.main, argv)
 
     def test_the_line_format_and_both_exchanges_run(self) -> None:
@@ -139,8 +150,9 @@ class AbcDiffTest(unittest.TestCase):
         code, out, err = self.run_tool(design)
         self.assertEqual(code, 0, out + err)
         first = out.splitlines()[0]
-        self.assertEqual(first, f"{design} luts 101 101 1.000 ffs 0 0 1.000 depth 0 0 1.000 "
-                                f"equivalent")
+        self.assertEqual(
+            first, f"{design} luts 101 101 1.000 ffs 0 0 1.000 depth 0 0 1.000 equivalent"
+        )
         blif_call, aig_call = self.calls("odin3")
         self.assertIsNone(blif_call["exchange"])
         self.assertEqual(aig_call["exchange"], "aig")
@@ -148,9 +160,9 @@ class AbcDiffTest(unittest.TestCase):
         work = self.keep / "0000-l100"
         self.assertIn(
             f"abc --lut 6 --via-blif {work}/blif-files; write_blif {work}/blif/after.blif",
-            blif_script)
-        self.assertIn(f"abc --lut 6; write_blif {work}/aig/after.blif",
-                      str(aig_call["argv"][2]))  # type: ignore[index]
+            blif_script,
+        )
+        self.assertIn(f"abc --lut 6; write_blif {work}/aig/after.blif", str(aig_call["argv"][2]))  # type: ignore[index]
         self.assertEqual(len(self.calls("equiv")), 3)  # input~blif, input~aig, blif~aig
 
     def test_explain_marks_a_ratio_more_than_five_percent_from_one(self) -> None:
@@ -159,8 +171,9 @@ class AbcDiffTest(unittest.TestCase):
         code, out, err = self.run_tool(high, low)
         self.assertEqual(code, 0, out + err)
         lines = {Path(ln.split()[0]).name: ln for ln in out.splitlines() if ln.startswith("/")}
-        self.assertIn("luts 1001 1052 1.051 ffs 0 0 1.000 depth 0 0 1.000 explain",
-                      lines["l1000r1051.blif"])
+        self.assertIn(
+            "luts 1001 1052 1.051 ffs 0 0 1.000 depth 0 0 1.000 explain", lines["l1000r1051.blif"]
+        )
         self.assertTrue(lines["l1000r1049.blif"].endswith("equivalent"))
         self.assertIn("abc-diff: 2 designs: 2 passed, 0 failed (equivalent 1, explain 1)", out)
 
@@ -170,15 +183,19 @@ class AbcDiffTest(unittest.TestCase):
         mid = self.blif("d2/l3.blif", design_text() + "#" * 10)
         code, out, err = self.run_tool(str(self.root / "d1"), str(self.root / "d2"))
         self.assertEqual(code, 0, out + err)
-        self.assertEqual([ln.split()[0] for ln in out.splitlines() if ln.startswith("/")],
-                         [small, mid, big])
+        self.assertEqual(
+            [ln.split()[0] for ln in out.splitlines() if ln.startswith("/")], [small, mid, big]
+        )
 
     def test_a_non_equivalent_pair_is_exit_one(self) -> None:
         design = self.blif("d/l2aig.blif", design_text())
         code, out, err = self.run_tool(design)
         self.assertEqual(code, 1, out + err)
-        self.assertRegex(out, r"l2aig\.blif luts 3 3 1\.000 ffs 0 0 1\.000 depth 0 0 1\.000 "
-                              r"differs \(input~aig: equiv-check: NOT equivalent")
+        self.assertRegex(
+            out,
+            r"l2aig\.blif luts 3 3 1\.000 ffs 0 0 1\.000 depth 0 0 1\.000 "
+            r"differs \(input~aig: equiv-check: NOT equivalent",
+        )
         self.assertIn("1 failed", out)
 
     def test_an_odin3_failure_has_no_counts(self) -> None:

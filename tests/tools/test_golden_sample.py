@@ -38,8 +38,9 @@ class GoldenSampleTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_group_of(self) -> None:
-        self.assertEqual(golden_sample.group_of("regression/verilog/syntax/x/y"),
-                         "regression/verilog/syntax")
+        self.assertEqual(
+            golden_sample.group_of("regression/verilog/syntax/x/y"), "regression/verilog/syntax"
+        )
         self.assertEqual(golden_sample.group_of("vtr/mcml"), "vtr")
         self.assertEqual(golden_sample.group_of("quickstart/blink"), "quickstart")
 
@@ -76,8 +77,9 @@ class GoldenSampleTest(unittest.TestCase):
         _design(self.golden, "vtr/good")
         gi = self.golden / ".gitignore"
         gi.write_text(f"keep-me\n{golden_sample.BEGIN}\n!/stale.blif\n{golden_sample.END}\ntail\n")
-        code, out, err = helpers.run_main(golden_sample.main, ["--golden", str(self.golden),
-                                                               "--write"])
+        code, out, err = helpers.run_main(
+            golden_sample.main, ["--golden", str(self.golden), "--write"]
+        )
         self.assertEqual(code, 0, err)
         self.assertIn("total", out)
         lines = gi.read_text().splitlines()
@@ -89,8 +91,7 @@ class GoldenSampleTest(unittest.TestCase):
         self.assertIn("!/B/vtr/good/good.parmys.blif", lines)
 
     def test_missing_golden_is_input_error(self) -> None:
-        code, _, err = helpers.run_main(golden_sample.main,
-                                        ["--golden", str(self.golden / "nope")])
+        code, _, err = helpers.run_main(golden_sample.main, ["--golden", str(self.golden / "nope")])
         self.assertEqual(code, 2)
         self.assertIn("golden-sample:", err)
 

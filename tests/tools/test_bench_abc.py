@@ -16,17 +16,41 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SET_TOOL = REPO_ROOT / "tools" / "abc-check" / "bench-abc-set"
 FF = REPO_ROOT / "tests" / "golden" / "blif" / "ff.parmys.blif"
-COLUMNS = ["design", "module", "domain", "exchange", "cells", "ffs", "luts", "depth",
-           "classify_ms", "aig_ms", "check_ms", "splice_ms", "prov_ms", "outside_ms", "abc_ms",
-           "namemap_ms", "namemap_cov_pct", "edges", "rss_before_mb", "rss_peak_mb",
-           "abc_nodes", "abc_latches", "abc_levels", "aig_objs", "bytes_per_aig_obj"]
+COLUMNS = [
+    "design",
+    "module",
+    "domain",
+    "exchange",
+    "cells",
+    "ffs",
+    "luts",
+    "depth",
+    "classify_ms",
+    "aig_ms",
+    "check_ms",
+    "splice_ms",
+    "prov_ms",
+    "outside_ms",
+    "abc_ms",
+    "namemap_ms",
+    "namemap_cov_pct",
+    "edges",
+    "rss_before_mb",
+    "rss_peak_mb",
+    "abc_nodes",
+    "abc_latches",
+    "abc_levels",
+    "aig_objs",
+    "bytes_per_aig_obj",
+]
 TIME_COLUMNS = COLUMNS[8:16]
 BENCH = os.environ.get("ODIN3_BENCH_ABC")
 
 
 def run(argv: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, cwd=REPO_ROOT, env=env, capture_output=True, text=True,
-                          timeout=600, check=False)
+    return subprocess.run(
+        argv, cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=600, check=False
+    )
 
 
 def rows(out: str) -> list[dict[str, str]]:
@@ -66,8 +90,7 @@ class BenchAbcTest(unittest.TestCase):
         if not exe:
             self.skipTest("needs ODIN3_ABC")
         with tempfile.TemporaryDirectory() as tmp:
-            proc = run([str(BENCH), "--one", str(FF), "--header", "--via-blif", tmp,
-                        "--exe", exe])
+            proc = run([str(BENCH), "--one", str(FF), "--header", "--via-blif", tmp, "--exe", exe])
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertTrue((Path(tmp) / "abc0.exe.out.blif").is_file())
         linked, pinned = rows(proc.stdout)
@@ -86,8 +109,9 @@ class BenchAbcTest(unittest.TestCase):
         proc = run([str(BENCH), "--selftest-rss", "200", "--exe", sleeper])
         self.assertEqual(proc.returncode, 0, proc.stderr)
         fields = proc.stdout.split()
-        self.assertEqual((fields[0], fields[1], fields[3]),
-                         ("selftest_rss", "parent_mb", "child_peak_mb"))
+        self.assertEqual(
+            (fields[0], fields[1], fields[3]), ("selftest_rss", "parent_mb", "child_peak_mb")
+        )
         parent, child = float(fields[2]), float(fields[4])
         self.assertGreaterEqual(parent, 200.0)
         self.assertGreater(child, 0.0)
@@ -102,16 +126,23 @@ class BenchAbcTest(unittest.TestCase):
         proc = run([str(BENCH), "--micro"])
         self.assertEqual(proc.returncode, 0, proc.stderr)
         words = proc.stdout.strip().split("\t")
-        self.assertEqual([words[i] for i in (0, 1, 3, 5)],
-                         ["micro", "open_close_ms", "checker_ms", "checker_bytes"])
+        self.assertEqual(
+            [words[i] for i in (0, 1, 3, 5)],
+            ["micro", "open_close_ms", "checker_ms", "checker_bytes"],
+        )
         self.assertGreater(float(words[2]), 0.0)
         self.assertGreater(float(words[4]), 0.0)
         self.assertGreater(int(words[6]), 60000)  # a 64 KiB script
 
     def test_usage_errors_are_exit_two(self) -> None:
-        for argv in ([], ["--one"], ["--one", str(FF), "--lut", "1"],
-                     ["--one", str(FF), "--exe", "/bin/true"], ["--bogus"],
-                     ["--micro", "--one", str(FF)]):
+        for argv in (
+            [],
+            ["--one"],
+            ["--one", str(FF), "--lut", "1"],
+            ["--one", str(FF), "--exe", "/bin/true"],
+            ["--bogus"],
+            ["--micro", "--one", str(FF)],
+        ):
             self.assertEqual(run([str(BENCH), *argv]).returncode, 2, argv)
 
     def test_a_missing_file_is_exit_one(self) -> None:
@@ -128,8 +159,10 @@ class BenchSetToolTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.log = self.root / "calls"
         fake = self.root / "bench"
-        fake.write_text('#!/bin/sh\necho "$ODIN3_ABC_EXCHANGE|$*" >> "$FAKE_LOG"\n'
-                        '[ "${FAKE_FAIL:-}" != "$2" ] || exit 1\necho "ok $2"\n')
+        fake.write_text(
+            '#!/bin/sh\necho "$ODIN3_ABC_EXCHANGE|$*" >> "$FAKE_LOG"\n'
+            '[ "${FAKE_FAIL:-}" != "$2" ] || exit 1\necho "ok $2"\n'
+        )
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
         self.bench = str(fake)
         self.env = dict(os.environ, FAKE_LOG=str(self.log))
@@ -145,8 +178,20 @@ class BenchSetToolTest(unittest.TestCase):
 
     def test_runs_smallest_first_with_one_header_and_a_directory_per_design(self) -> None:
         big, small = self.blif("big.parmys.blif", 50), self.blif("small.parmys.blif", 5)
-        proc = run([str(SET_TOOL), "--bench", self.bench, "--exe", "/x/abc", "--keep",
-                    str(self.root / "keep"), big, small], self.env)
+        proc = run(
+            [
+                str(SET_TOOL),
+                "--bench",
+                self.bench,
+                "--exe",
+                "/x/abc",
+                "--keep",
+                str(self.root / "keep"),
+                big,
+                small,
+            ],
+            self.env,
+        )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         first, second = self.calls()
         self.assertIn(f"--one {small} --lut 6 --header --via-blif {self.root}/keep/small", first)
@@ -170,8 +215,12 @@ class BenchSetToolTest(unittest.TestCase):
 
     def test_usage_errors_are_exit_two(self) -> None:
         one = self.blif("a.blif", 1)
-        for argv in ([], ["--bench", self.bench], ["--bench", self.bench, "--exe", "/x", one],
-                     ["--bench", self.bench, "--exchange", "xyz", one]):
+        for argv in (
+            [],
+            ["--bench", self.bench],
+            ["--bench", self.bench, "--exe", "/x", one],
+            ["--bench", self.bench, "--exchange", "xyz", one],
+        ):
             self.assertEqual(run([str(SET_TOOL), *argv], self.env).returncode, 2, argv)
 
 

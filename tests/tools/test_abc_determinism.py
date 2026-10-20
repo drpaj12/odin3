@@ -182,8 +182,9 @@ class AbcDeterminismTest(unittest.TestCase):
     def test_the_via_blif_directory_is_the_same_path_in_both_runs(self) -> None:
         design = self.design("d/ok.blif")
         self.run_tool("--via-blif", design)
-        paths = {c["script"].split("--via-blif ")[1].split(" ")[0].split(";")[0]
-                 for c in self.calls()}
+        paths = {
+            c["script"].split("--via-blif ")[1].split(" ")[0].split(";")[0] for c in self.calls()
+        }
         self.assertEqual(len(paths), 2)  # the default row's and the child row's, each shared
 
     def test_without_via_blif_the_environment_is_passed_through(self) -> None:
@@ -242,8 +243,10 @@ class AbcDeterminismTest(unittest.TestCase):
     def test_mode_d_refuses_a_vtr_golden(self) -> None:
         golden = self.root / "golden" / "arch"
         design = self.design("golden/arch/vtr/x/x.parmys.blif")
-        with (mock.patch.object(abc_equiv, "GOLDEN_ROOT", self.root / "golden"),
-              mock.patch("abc_equiv.qor_heavy.require_heavy")):
+        with (
+            mock.patch.object(abc_equiv, "GOLDEN_ROOT", self.root / "golden"),
+            mock.patch("abc_equiv.qor_heavy.require_heavy"),
+        ):
             code, _, err = self.run_tool("--mode", "d", "--odin3-debug", self.dbg, design)
         self.assertEqual(code, 2)
         self.assertIn("micros", err)

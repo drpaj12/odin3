@@ -36,8 +36,14 @@ class CheckSymbolsOnlyTest(unittest.TestCase):
         for name, source in (("good", GOOD), ("bad", BAD)):
             (cls.tmp / f"{name}.c").write_text(source, encoding="utf-8")
             subprocess.run(
-                ["cc", "-shared", "-fPIC", "-o", str(cls.tmp / f"{name}.so"),
-                 str(cls.tmp / f"{name}.c")],
+                [
+                    "cc",
+                    "-shared",
+                    "-fPIC",
+                    "-o",
+                    str(cls.tmp / f"{name}.so"),
+                    str(cls.tmp / f"{name}.c"),
+                ],
                 check=True,
             )
 
@@ -46,9 +52,7 @@ class CheckSymbolsOnlyTest(unittest.TestCase):
         shutil.rmtree(cls.tmp)
 
     def run_script(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [str(SCRIPT), *args], capture_output=True, text=True, check=False
-        )
+        return subprocess.run([str(SCRIPT), *args], capture_output=True, text=True, check=False)
 
     def test_exact_exports_and_no_forbidden_import_pass(self) -> None:
         lib = str(self.tmp / "good.so")
@@ -88,8 +92,7 @@ class CheckSymbolsOnlyTest(unittest.TestCase):
         missing = str(self.tmp / "missing.so")
         result = self.run_script("--only", ONLY, "--forbid", FORBID, missing)
         self.assertEqual(result.returncode, 2)
-        self.assertIn(f"check-symbols: cannot read the dynamic symbols of {missing}",
-                      result.stderr)
+        self.assertIn(f"check-symbols: cannot read the dynamic symbols of {missing}", result.stderr)
 
 
 if __name__ == "__main__":

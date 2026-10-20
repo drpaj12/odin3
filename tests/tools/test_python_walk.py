@@ -41,9 +41,18 @@ HAND_SUB_LINE = 18  # `.subckt sub ...` (u_sub)
 # blif003; 3E's neg_e12 and C9; 3A's flatten fixture), and the files of 3E's VPR negative corpus,
 # tests/vtr/blif-bad, that our reader refuses as VPR does. They test a refusal, not the walk.
 READ_REJECTS = {
-    "neg_e8_mixed.in.blif", "elsif_both_defined.odin.blif", "neg_e12_multidriver.in.blif",
-    "c9_two_drivers.blif", "multidriver.blif", "c5_row_width.blif", "c6_init4.blif",
-    "c7_no_port.blif", "c7_twice.blif", "c7_wide_port.blif", "c7_ram_data_bit.blif"}
+    "neg_e8_mixed.in.blif",
+    "elsif_both_defined.odin.blif",
+    "neg_e12_multidriver.in.blif",
+    "c9_two_drivers.blif",
+    "multidriver.blif",
+    "c5_row_width.blif",
+    "c6_init4.blif",
+    "c7_no_port.blif",
+    "c7_twice.blif",
+    "c7_wide_port.blif",
+    "c7_ram_data_bit.blif",
+}
 
 try:
     import cffi  # noqa: F401
@@ -104,8 +113,7 @@ class PythonWalkTest(unittest.TestCase):
         self.assertGreater(len(paths), 100)
         compared = 0
         for path in paths:
-            with (self.subTest(fixture=str(path.relative_to(REPO_ROOT))),
-                  self.read(path) as design):
+            with self.subTest(fixture=str(path.relative_to(REPO_ROOT))), self.read(path) as design:
                 from_stats = walk.stats_lines(design)
                 self.assertGreater(len(from_stats), 1)
                 self.assertEqual(walk.walk_lines(design), from_stats)
@@ -413,8 +421,14 @@ class PassrunInfoTest(unittest.TestCase):
         return bytes(ffi.string(out))
 
     def abc_words(self, script: str) -> list[tuple[str, str]]:
-        return [("script", script), ("sha256", SHA256), ("abc", ABC_COMMIT), ("K", "6"),
-                ("exchange", "blif"), ("depth", "3")]
+        return [
+            ("script", script),
+            ("sha256", SHA256),
+            ("abc", ABC_COMMIT),
+            ("K", "6"),
+            ("exchange", "blif"),
+            ("depth", "3"),
+        ]
 
     def test_qor_netstats_reads_every_script_path(self) -> None:
         for script in SCRIPT_PATHS:
@@ -424,8 +438,10 @@ class PassrunInfoTest(unittest.TestCase):
                 self.assertEqual(line.startswith(b'script="'), not bare)
                 with tempfile.TemporaryDirectory() as tmp:
                     path = Path(tmp) / "d.blif"
-                    path.write_bytes(b"# Odin III 0.0.0 write_blif --vtr (K=6, names short)\n"
-                                     b"# abc: " + line + b"\n\n.model top\n.end\n")
+                    path.write_bytes(
+                        b"# Odin III 0.0.0 write_blif --vtr (K=6, names short)\n"
+                        b"# abc: " + line + b"\n\n.model top\n.end\n"
+                    )
                     header = qor_netstats.abc_header(path)
                 assert header is not None
                 self.assertEqual(header.script, script)
@@ -438,8 +454,10 @@ class PassrunInfoTest(unittest.TestCase):
                 with self.assertRaises(Odin3Error) as ctx:
                     self.info(self.abc_words(script))
                 self.assertEqual(ctx.exception.status, self.odin3.lib.ODIN3_ERR_INVALID_ARG)
-                self.assertEqual([rec.message for rec in log],
-                                 ["odin3_passrun_info_append: invalid argument value"])
+                self.assertEqual(
+                    [rec.message for rec in log],
+                    ["odin3_passrun_info_append: invalid argument value"],
+                )
 
 
 if __name__ == "__main__":

@@ -39,9 +39,23 @@ MONDAY, SATURDAY, SUNDAY = date(2026, 10, 19), date(2026, 10, 17), date(2026, 10
 
 
 def git(repo: Path, *args: str) -> str:
-    proc = subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
-                           "-c", "commit.gpgsign=false", *args],
-                          capture_output=True, text=True, check=True)
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     return proc.stdout.strip()
 
 
@@ -76,15 +90,18 @@ class DeadlineTest(RunnerTestBase):
         jobs = [self.job(d, [{}]) for d in expected]
         summary, lines = self.run_jobs(jobs, opts, finish)
         self.assertEqual([r.status for r in summary.results], ["ok", "ok", "skipped", "ok"])
-        self.assertIn("vtr-qor: nightly: P bgm not started: expected 100 min would pass 06:00",
-                      lines)
+        self.assertIn(
+            "vtr-qor: nightly: P bgm not started: expected 100 min would pass 06:00", lines
+        )
         self.assertEqual(summary.exit_code, 0)  # the refused line is exit 0 for that line alone
 
     def test_expected_minutes(self) -> None:
         job = self.job("sha", [{}])
         history = self.tmp / "history"
-        self.assertEqual(qor_nightly.expected_minutes(job, history, SETS),
-                         SETS.designs["sha"].vtr_flow_time_s * 1.5 / 60.0)
+        self.assertEqual(
+            qor_nightly.expected_minutes(job, history, SETS),
+            SETS.designs["sha"].vtr_flow_time_s * 1.5 / 60.0,
+        )
 
         def record(leg: str, key: str, **fields: object) -> None:
             path = history / "aaaaaaaaaaaa" / K6 / leg / key / "sha" / "metrics.json"
@@ -98,9 +115,11 @@ class DeadlineTest(RunnerTestBase):
         self.assertEqual(qor_nightly.expected_minutes(odin3_job, history, SETS), flow / 60.0)
         record("O", "k2", cost={"frontend_wall_s": 60.0}, status="ok")
         (history / "aaaaaaaaaaaa" / K6 / "O" / "k2" / "sha" / "metrics.json").write_text(
-            json.dumps({"status": "ok", "cost": {"frontend_wall_s": 60.0}}))
-        self.assertEqual(qor_nightly.expected_minutes(odin3_job, history, SETS),
-                         (flow + 60.0) / 60.0)
+            json.dumps({"status": "ok", "cost": {"frontend_wall_s": 60.0}})
+        )
+        self.assertEqual(
+            qor_nightly.expected_minutes(odin3_job, history, SETS), (flow + 60.0) / 60.0
+        )
 
 
 class PlanTest(unittest.TestCase):
@@ -143,24 +162,37 @@ class PlanTest(unittest.TestCase):
             path.write_text("")
         work = Path("/w/nightly/20261019")
         commands = qor_nightly.sweep_3d_commands(self.repo, Path("/o/odin3"), golden, SETS, work)
-        self.assertEqual([Path(c[0]).name for c in commands],
-                         ["abc-equiv", "abc-diff", "abc-determinism", "abc-determinism",
-                          "abc-determinism"])
+        self.assertEqual(
+            [Path(c[0]).name for c in commands],
+            ["abc-equiv", "abc-diff", "abc-determinism", "abc-determinism", "abc-determinism"],
+        )
         files = [str(golden / "vtr" / d / f"{d}.parmys.blif") for d in ("ch_intrinsics", "sha")]
         equiv_check = str(self.repo / "tools" / "equiv-check" / "equiv-check")
         expect = str(self.repo / "tests" / "abc" / "equiv_expect_fail.txt")
-        common = ["--odin3", "/o/odin3", "--equiv-check", equiv_check, "--lut", "6",
-                  "--timeout", "3000", "--expect-fail", expect]
+        common = [
+            "--odin3",
+            "/o/odin3",
+            "--equiv-check",
+            equiv_check,
+            "--lut",
+            "6",
+            "--timeout",
+            "3000",
+            "--expect-fail",
+            expect,
+        ]
         # Review H2: the options of the CTest sweep abc_equiv_golden, kept files under <work>.
-        self.assertEqual(commands[0][1:], [*common, "--keep",
-                                           "/w/nightly/20261019/abc-equiv-golden", *files])
+        self.assertEqual(
+            commands[0][1:], [*common, "--keep", "/w/nightly/20261019/abc-equiv-golden", *files]
+        )
         self.assertEqual(commands[1][1:], [*common, *files])
         self.assertEqual(commands[2][1:3], ["--odin3", "/o/odin3"])
         self.assertEqual([c[c.index("--mode") + 1] for c in commands[2:]], ["a", "c", "d"])
         self.assertNotIn("--equiv-check", commands[2])  # abc-determinism has no such option
         debug = commands[4]
-        self.assertEqual(debug[debug.index("--odin3-debug") + 1],
-                         str(self.repo / "build" / "debug" / "odin3"))
+        self.assertEqual(
+            debug[debug.index("--odin3-debug") + 1], str(self.repo / "build" / "debug" / "odin3")
+        )
         self.assertNotIn("--debug-odin3", debug)
         big = " ".join(" ".join(c) for c in commands[:4])
         self.assertIn("ch_intrinsics.parmys.blif", big)
@@ -184,8 +216,10 @@ class PlanTest(unittest.TestCase):
                 return 0
 
         lines: list[str] = []
-        with mock.patch.object(qor_sched, "lock_fds", return_value=(9,)), \
-                mock.patch.object(subprocess, "Popen", FakeProc):
+        with (
+            mock.patch.object(qor_sched, "lock_fds", return_value=(9,)),
+            mock.patch.object(subprocess, "Popen", FakeProc),
+        ):
             summary = qor_nightly.run_sweeps(commands, lines.append, "3D sweeps")
         self.assertEqual([argv for argv, _ in seen], commands)
         self.assertEqual({fds for _, fds in seen}, {(9,)})
@@ -194,7 +228,8 @@ class PlanTest(unittest.TestCase):
     def assert_abc_equiv_accepts(self, argv: list[str]) -> None:
         """The present ``abc-equiv``'s own parser accepts the argv (no guessed option)."""
         spec = importlib.util.spec_from_file_location(
-            "abc_equiv", REPO_ROOT / "tools" / "abc-check" / "abc_equiv.py")
+            "abc_equiv", REPO_ROOT / "tools" / "abc-check" / "abc_equiv.py"
+        )
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         sys.modules["abc_equiv"] = module
@@ -232,11 +267,13 @@ class PlanTest(unittest.TestCase):
             calls.append(kwargs)
             return 0
 
-        out = qor_nightly.run_sweeps([[str(tools / "abc-equiv")]], lines.append, "3D sweeps",
-                                     runner, remaining=lambda: 12.5)
+        out = qor_nightly.run_sweeps(
+            [[str(tools / "abc-equiv")]], lines.append, "3D sweeps", runner, remaining=lambda: 12.5
+        )
         self.assertEqual((out, calls), (["abc-equiv: exit 0"], [{"timeout_s": 12.5}]))
-        out = qor_nightly.run_sweeps([[str(tools / "abc-equiv")]], lines.append, "3D sweeps",
-                                     runner, remaining=lambda: 0.0)
+        out = qor_nightly.run_sweeps(
+            [[str(tools / "abc-equiv")]], lines.append, "3D sweeps", runner, remaining=lambda: 0.0
+        )
         self.assertEqual(out, ["abc-equiv: not started (deadline)"])
         self.assertEqual(len(calls), 1)
         self.assertFalse(qor_nightly.sweep_ran(out))
@@ -245,8 +282,9 @@ class PlanTest(unittest.TestCase):
 
     def test_absent_tools_are_skipped(self) -> None:
         lines: list[str] = []
-        out = qor_nightly.run_sweeps([[str(self.repo / "tools/abc-check/abc-diff")]],
-                                     lines.append, "3D sweeps")
+        out = qor_nightly.run_sweeps(
+            [[str(self.repo / "tools/abc-check/abc-diff")]], lines.append, "3D sweeps"
+        )
         self.assertEqual(lines, ["nightly: 3D sweeps skipped (abc-check/abc-diff absent)"])
         self.assertEqual(out, ["abc-diff: skipped (absent)"])
 
@@ -261,21 +299,23 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(MONDAY.weekday(), 0)
         quiet = qor_nightly.plan_night(self.state(next_slot=3), self.repo, MONDAY)
         head = git(self.repo, "rev-parse", "HEAD")
-        again = qor_nightly.plan_night({**self.state(next_slot=3), "last_sweep_commit": head},
-                                       self.repo, MONDAY)
+        again = qor_nightly.plan_night(
+            {**self.state(next_slot=3), "last_sweep_commit": head}, self.repo, MONDAY
+        )
         self.assertEqual((quiet.sweep_3e, again.sweep_3e), (True, False))
         self.assertEqual(again.slot, ROTATION[2])
-        saturday = qor_nightly.plan_night({**self.state(), "last_sweep_commit": head},
-                                          self.repo, SATURDAY)
+        saturday = qor_nightly.plan_night(
+            {**self.state(), "last_sweep_commit": head}, self.repo, SATURDAY
+        )
         self.assertEqual((saturday.sweep_3e, saturday.slot), (True, None))
         sunday = qor_nightly.plan_night(self.state(), self.repo, SUNDAY)
         self.assertEqual((sunday.sweep_3d, sunday.slot), (True, None))
         golden = Path("/g") / K6
         work = Path("/w/n")
-        commands = qor_nightly.sweep_3e_commands(self.repo, Path("/b/release/odin3"),
-                                                 Path("/vtr"), golden, work)
-        self.assertEqual([Path(c[0]).name for c in commands], ["blif-roundtrip",
-                                                               "vtr-read-check"])
+        commands = qor_nightly.sweep_3e_commands(
+            self.repo, Path("/b/release/odin3"), Path("/vtr"), golden, work
+        )
+        self.assertEqual([Path(c[0]).name for c in commands], ["blif-roundtrip", "vtr-read-check"])
         self.assertEqual(commands[0][1], "--vtr")
         # Review M5: the harness's own odin3 and VTR, and reports kept under <work>.
         roundtrip, read_check = commands
@@ -283,8 +323,10 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(roundtrip[roundtrip.index("--out") + 1], "/w/n/blif-roundtrip-vtr")
         self.assertEqual(read_check[read_check.index("--odin3") + 1], "/b/release/odin3")
         self.assertEqual(read_check[read_check.index("--vpr") + 1], "/vtr/vpr/vpr")
-        self.assertEqual(read_check[read_check.index("--arch") + 1],
-                         str(qor_legs.arch_xml_path(Path("/vtr"), "k6")))
+        self.assertEqual(
+            read_check[read_check.index("--arch") + 1],
+            str(qor_legs.arch_xml_path(Path("/vtr"), "k6")),
+        )
         self.assertEqual(read_check[read_check.index("--work") + 1], "/w/n/vtr-read-check")
 
     def test_no_recorded_commit_is_no_change(self) -> None:
@@ -301,14 +343,15 @@ class PlanTest(unittest.TestCase):
         qor_nightly.settle_slot(state, ROTATION[3], ran=False, today=MONDAY)  # refused
         self.assertEqual(state["next_slot"], 4)  # a slot advances only when it ran
         plan = qor_nightly.plan_night(state, self.repo, MONDAY)
-        self.assertEqual((plan.slot, plan.starved_first, plan.starved_nights),
-                         (ROTATION[3], True, 1))  # step 4 before step 3
+        self.assertEqual(
+            (plan.slot, plan.starved_first, plan.starved_nights), (ROTATION[3], True, 1)
+        )  # step 4 before step 3
         qor_nightly.settle_slot(state, ROTATION[3], ran=False, today=MONDAY)
         line = qor_nightly.starved_line(ROTATION[3], 2)
-        self.assertEqual(line, "vtr-qor: nightly: group B slot 4 (mcml O′) starved for "
-                               "2 nights")
-        self.assertTrue(qor_nightly.summary_text([line], ["1 doctor: exit 0"], []
-                                                 ).startswith(line + "\n"))
+        self.assertEqual(line, "vtr-qor: nightly: group B slot 4 (mcml O′) starved for 2 nights")
+        self.assertTrue(
+            qor_nightly.summary_text([line], ["1 doctor: exit 0"], []).startswith(line + "\n")
+        )
         qor_nightly.settle_slot(state, ROTATION[3], ran=True, today=MONDAY)
         self.assertEqual((state["next_slot"], state["starved"]), (5, {}))
         wrap = self.state(next_slot=8)
@@ -331,55 +374,87 @@ class PlanTest(unittest.TestCase):
 
 
 def make_run(leg: str, design: str, status: str = "ok", clb: float = 100.0) -> Run:
-    metrics = {"leg": leg, "design": design, "status": status,
-               "packed": {"num_clb": clb}, "routed": {"min_chan_width": 60}}
-    return Run(leg=leg, design=design, arch=K6, key12="0" * 12, status=status, gating=True,
-               metrics=metrics)
+    metrics = {
+        "leg": leg,
+        "design": design,
+        "status": status,
+        "packed": {"num_clb": clb},
+        "routed": {"min_chan_width": 60},
+    }
+    return Run(
+        leg=leg, design=design, arch=K6, key12="0" * 12, status=status, gating=True, metrics=metrics
+    )
 
 
 class SummaryTest(unittest.TestCase):
     def test_summary_diff(self) -> None:
-        before = [make_run("O", "sha"), make_run("O", "bgm"), make_run("P", "sha"),
-                  make_run("Pprime", "sha")]
-        after = [make_run("O", "sha", clb=102.5), make_run("O", "bgm", clb=101.9),
-                 make_run("P", "sha", status="failed"), make_run("Pprime", "sha")]
+        before = [
+            make_run("O", "sha"),
+            make_run("O", "bgm"),
+            make_run("P", "sha"),
+            make_run("Pprime", "sha"),
+        ]
+        after = [
+            make_run("O", "sha", clb=102.5),
+            make_run("O", "bgm", clb=101.9),
+            make_run("P", "sha", status="failed"),
+            make_run("Pprime", "sha"),
+        ]
         lines = qor_nightly.diff_runs(before, after, ("num_clb", "min_chan_width"))
-        self.assertEqual(lines, ["O sha: num_clb 100 -> 102.5 (+2.5%)",
-                                 "P sha: status ok -> failed"])
+        self.assertEqual(
+            lines, ["O sha: num_clb 100 -> 102.5 (+2.5%)", "P sha: status ok -> failed"]
+        )
 
     def test_previous_table(self) -> None:
         with tempfile.TemporaryDirectory(dir=qor_heavy.HEAVY_DIR) as name:
             tables = Path(name)
-            for stamp in ("20261016-0100-nightly-20261016", "20261017-0100-nightly-20261017",
-                          "20261017-0900-other"):
+            for stamp in (
+                "20261016-0100-nightly-20261016",
+                "20261017-0100-nightly-20261017",
+                "20261017-0900-other",
+            ):
                 (tables / stamp).mkdir()
             current = tables / "20261018-0100-nightly-20261018"
-            self.assertEqual(qor_nightly.previous_table(tables, "nightly-", current),
-                             tables / "20261017-0100-nightly-20261017")
-            self.assertIsNone(qor_nightly.previous_table(
-                tables, "nightly-", tables / "20261016-0100-nightly-20261016"))
+            self.assertEqual(
+                qor_nightly.previous_table(tables, "nightly-", current),
+                tables / "20261017-0100-nightly-20261017",
+            )
+            self.assertIsNone(
+                qor_nightly.previous_table(
+                    tables, "nightly-", tables / "20261016-0100-nightly-20261016"
+                )
+            )
 
 
 class UnitFileTest(unittest.TestCase):
     def test_service_is_bounded(self) -> None:
         """Review H3: the unit stops the run itself, so a hung tool cannot hold the lock."""
-        service = (REPO_ROOT / "tools" / "vtr-qor" / "systemd"
-                   / "odin3-vtr-qor-nightly.service").read_text().splitlines()
+        service = (
+            (REPO_ROOT / "tools" / "vtr-qor" / "systemd" / "odin3-vtr-qor-nightly.service")
+            .read_text()
+            .splitlines()
+        )
         self.assertTrue(any(line.startswith("RuntimeMaxSec=") for line in service))
 
     def test_unit_files(self) -> None:
         directory = REPO_ROOT / "tools" / "vtr-qor" / "systemd"
         service = (directory / "odin3-vtr-qor-nightly.service").read_text().splitlines()
         timer = (directory / "odin3-vtr-qor-nightly.timer").read_text().splitlines()
-        for line in ("Type=exec", "Environment=ODIN3_HEAVY_OK=1",
-                     "ExecStart=%h/odin3-ws/odin3/tools/heavy-run "
-                     "%h/odin3-ws/odin3/tools/vtr-qor/vtr-qor nightly"):
+        for line in (
+            "Type=exec",
+            "Environment=ODIN3_HEAVY_OK=1",
+            "ExecStart=%h/odin3-ws/odin3/tools/heavy-run "
+            "%h/odin3-ws/odin3/tools/vtr-qor/vtr-qor nightly",
+        ):
             self.assertIn(line, service)
         for line in ("OnCalendar=*-*-* 01:00", "Persistent=false", "WantedBy=timers.target"):
             self.assertIn(line, timer)
         header = "\n".join(service[:6])
-        self.assertIn("systemctl --user daemon-reload && systemctl --user enable --now "
-                      "odin3-vtr-qor-nightly.timer", header)
+        self.assertIn(
+            "systemctl --user daemon-reload && systemctl --user enable --now "
+            "odin3-vtr-qor-nightly.timer",
+            header,
+        )
         self.assertIn("systemctl --user disable --now odin3-vtr-qor-nightly.timer", header)
 
 
@@ -392,8 +467,10 @@ class CliTest(CliTestBase):
             ran.append(list(argv))
             return 0
 
-        with mock.patch.dict(os.environ, {"ODIN3_HEAVY_SLICE": ""}), \
-                mock.patch.object(vtr_qor, "run_inner", record):
+        with (
+            mock.patch.dict(os.environ, {"ODIN3_HEAVY_SLICE": ""}),
+            mock.patch.object(vtr_qor, "run_inner", record),
+        ):
             code, _, err = self.cli("nightly")
         self.assertEqual((code, err), (2, f"vtr-qor: {qor_heavy.MSG_NOT_INSIDE}\n"))
         self.assertEqual(ran, [])
@@ -406,8 +483,10 @@ class CliTest(CliTestBase):
         binary.parent.mkdir(parents=True)
         binary.write_text("")
         self.assertEqual(vtr_qor._odin3(argparse.Namespace(odin3=None)), binary)
-        self.assertTrue((REPO_ROOT / "CMakeLists.txt").read_text().count(
-            "add_executable(odin3 src/cli/main.c)") == 1)
+        self.assertTrue(
+            (REPO_ROOT / "CMakeLists.txt").read_text().count("add_executable(odin3 src/cli/main.c)")
+            == 1
+        )
 
     def test_nightly_without_odin3_fails_loudly(self) -> None:
         """Review H1: a missing binary is exit 2 and a clear line, not a quiet P-only night."""
@@ -418,8 +497,9 @@ class CliTest(CliTestBase):
             return 0
 
         with mock.patch.object(vtr_qor, "run_inner", record):
-            code, _, err = self.cli("nightly", "--odin3", str(self.tmp / "build" / "release"
-                                                              / "odin3"), common=False)
+            code, _, err = self.cli(
+                "nightly", "--odin3", str(self.tmp / "build" / "release" / "odin3"), common=False
+            )
         self.assertEqual(code, 2)
         self.assertIn("nightly: odin3 binary not found: ", err)
         self.assertEqual(ran, [])
@@ -431,26 +511,35 @@ class CliTest(CliTestBase):
             admission = vtr_qor.Admission(50.0, "06:00", lambda job: 0.0)
             first = admission.start()[0]
             clock[0] = 130.0
-            self.assertEqual((admission.start()[0], first, admission.remaining()),
-                             (150.0, 150.0, 20.0))
+            self.assertEqual(
+                (admission.start()[0], first, admission.remaining()), (150.0, 150.0, 20.0)
+            )
 
     def test_check_lib_argv(self) -> None:
         argv = qor_nightly.check_lib_command(Path("/r"), Path("/v"))
-        self.assertEqual(argv, [
-            "/r/tools/vtr-models/vtr-models", "check-lib", "/r/lib/vtr.o3lib", "--models",
-            "/r/tests/vtr/arch/k6_frac_N10_frac_chain_mem32K_40nm.models.json",
-            "--vtr-root", "/v"])
+        self.assertEqual(
+            argv,
+            [
+                "/r/tools/vtr-models/vtr-models",
+                "check-lib",
+                "/r/lib/vtr.o3lib",
+                "--models",
+                "/r/tests/vtr/arch/k6_frac_N10_frac_chain_mem32K_40nm.models.json",
+                "--vtr-root",
+                "/v",
+            ],
+        )
         with mock.patch.object(subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 3)
             code, _, _ = self.cli("check-lib")
         self.assertEqual(code, 3)
-        self.assertEqual(run.call_args.args[0],
-                         qor_nightly.check_lib_command(self.repo, self.vtr))
+        self.assertEqual(run.call_args.args[0], qor_nightly.check_lib_command(self.repo, self.vtr))
 
     def task_results(self, num_clb: str, runtime: str) -> None:
         (self.vtr / "task-results").write_text(
             "circuit\tvpr_status\tnum_clb\tvpr_flow_runtime\tmax_vpr_mem\t\n"
-            f"ch_intrinsics.v\tsuccess\t{num_clb}\t{runtime}\t99999\t\n")
+            f"ch_intrinsics.v\tsuccess\t{num_clb}\t{runtime}\t99999\t\n"
+        )
 
     def test_crosscheck_compare(self) -> None:
         code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")
@@ -466,11 +555,18 @@ class CliTest(CliTestBase):
         self.assertEqual(err, "vtr-qor: crosscheck: ch_intrinsics num_clb: task 13, harness 12\n")
 
     def test_crosscheck_rows(self) -> None:
-        row = {"circuit": "a.v", "num_clb": "1", "vpr_flow_runtime": "9", "max_vpr_mem": "1",
-               "total_time": "3"}
+        row = {
+            "circuit": "a.v",
+            "num_clb": "1",
+            "vpr_flow_runtime": "9",
+            "max_vpr_mem": "1",
+            "total_time": "3",
+        }
         self.assertEqual(qor_nightly.crosscheck_lines("a", row, {"num_clb": "1"}), [])
-        self.assertEqual(qor_nightly.crosscheck_lines("a", {"num_clb": "1"}, {}),
-                         ["vtr-qor: crosscheck: a num_clb: task 1, harness (absent)"])
+        self.assertEqual(
+            qor_nightly.crosscheck_lines("a", {"num_clb": "1"}, {}),
+            ["vtr-qor: crosscheck: a num_clb: task 1, harness (absent)"],
+        )
         self.assertTrue(qor_nightly.is_time_key("pack_time"))
         self.assertTrue(qor_nightly.is_time_key("max_vpr_mem"))
         self.assertFalse(qor_nightly.is_time_key("num_clb"))
@@ -490,12 +586,14 @@ class NightRunTest(CliTestBase):
         self.calls_made.append(list(argv))
         if self.refuse and argv[0] == "run" and "mcml" in argv:
             with self.log.open("a") as handle:
-                handle.write("vtr-qor: nightly: Oprime mcml not started: expected 99 min would "
-                             "pass 06:00\n")
+                handle.write(
+                    "vtr-qor: nightly: Oprime mcml not started: expected 99 min would pass 06:00\n"
+                )
         return 0
 
-    def night(self, state: dict[str, object], plan: qor_nightly.NightPlan, slot: int | None = None
-              ) -> tuple[int, Path]:
+    def night(
+        self, state: dict[str, object], plan: qor_nightly.NightPlan, slot: int | None = None
+    ) -> tuple[int, Path]:
         repo = self.tmp / "nightrepo"
         if not repo.exists():
             (repo / "src").mkdir(parents=True)
@@ -504,10 +602,19 @@ class NightRunTest(CliTestBase):
             git(repo, "add", "-A")
             git(repo, "commit", "-q", "-m", "one")
         ctx = qor_nightly.NightContext(
-            out=self.out, repo=repo, odin3=self.odin3, vtr_root=self.vtr,
-            golden_k6=self.golden / K6, sets=SETS, legs=("P", "Pprime", "Oprime", "O", "R"),
-            common=("--out", str(self.out)), today=MONDAY, run_inner=self.inner,
-            emit=lambda m: None, refused=vtr_qor._refused_counter(self.out))
+            out=self.out,
+            repo=repo,
+            odin3=self.odin3,
+            vtr_root=self.vtr,
+            golden_k6=self.golden / K6,
+            sets=SETS,
+            legs=("P", "Pprime", "Oprime", "O", "R"),
+            common=("--out", str(self.out)),
+            today=MONDAY,
+            run_inner=self.inner,
+            emit=lambda m: None,
+            refused=vtr_qor._refused_counter(self.out),
+        )
         args = argparse.Namespace(slot=slot)
         with mock.patch.object(vtr_qor, "_nightly_table", return_value=None):
             code = vtr_qor._run_night(args, ctx, state, plan)
@@ -527,8 +634,11 @@ class NightRunTest(CliTestBase):
         self.assertNotIn("mcml", runs[2])
         self.assertEqual(self.calls_made[0][0], "doctor")
         self.assertEqual((state["next_slot"], state["starved"]), (4, {"4": 2}))
-        self.assertTrue(summary.read_text().startswith(
-            "vtr-qor: nightly: group B slot 4 (mcml O′) starved for 2 nights\n"))
+        self.assertTrue(
+            summary.read_text().startswith(
+                "vtr-qor: nightly: group B slot 4 (mcml O′) starved for 2 nights\n"
+            )
+        )
         # Two refused nights: group A runs no equiv; an admitted slot advances and clears.
         self.calls_made.clear()
         plan = qor_nightly.NightPlan(ROTATION[3], True, False, False, 2)
@@ -583,11 +693,13 @@ class NightRunTest(CliTestBase):
         state = qor_nightly.default_state()
         state.update(last_sweep_commit="a" * 40, last_3d_commit="b" * 40)
         plan = qor_nightly.NightPlan(None, False, True, True, 0)
-        with mock.patch.object(qor_nightly, "run_sweeps",
-                               return_value=["abc-equiv: skipped (absent)"]):
+        with mock.patch.object(
+            qor_nightly, "run_sweeps", return_value=["abc-equiv: skipped (absent)"]
+        ):
             self.night(state, plan)
-        self.assertEqual((state["last_sweep_commit"], state["last_3d_commit"]),
-                         ("a" * 40, "b" * 40))
+        self.assertEqual(
+            (state["last_sweep_commit"], state["last_3d_commit"]), ("a" * 40, "b" * 40)
+        )
         with mock.patch.object(qor_nightly, "run_sweeps", return_value=["abc-equiv: exit 0"]):
             self.night(state, plan)
         self.assertNotEqual(state["last_sweep_commit"], "a" * 40)
@@ -595,9 +707,17 @@ class NightRunTest(CliTestBase):
 
     def test_summary_lists_verdict_changes(self) -> None:
         """Review M4: a changed fcheck or equiv verdict is listed like a moved metric."""
+
         def run(fcheck: str) -> Run:
-            return Run(leg="O", design="sha", arch="k6", key12="a" * 12, status="ok",
-                       gating=True, metrics={"verdicts": {"fcheck": fcheck, "equiv": "equivalent"}})
+            return Run(
+                leg="O",
+                design="sha",
+                arch="k6",
+                key12="a" * 12,
+                status="ok",
+                gating=True,
+                metrics={"verdicts": {"fcheck": fcheck, "equiv": "equivalent"}},
+            )
 
         lines = qor_nightly.diff_runs([run("pass")], [run("fail")], [])
         self.assertEqual(lines, ["O sha: fcheck pass -> fail"])

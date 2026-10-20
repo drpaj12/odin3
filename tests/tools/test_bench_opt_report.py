@@ -53,8 +53,9 @@ class ParseTest(unittest.TestCase):
 
 
 class TargetsTest(unittest.TestCase):
-    def verdicts(self, rows: dict[str, dict[str, str]],
-                 expected: frozenset[str] = frozenset()) -> dict[str, str]:
+    def verdicts(
+        self, rows: dict[str, dict[str, str]], expected: frozenset[str] = frozenset()
+    ) -> dict[str, str]:
         return {t.name: t.verdict for t in bor.opt_targets(rows, expected)}
 
     def test_empty_run_is_all_missed_unless_listed(self) -> None:
@@ -106,8 +107,10 @@ class ReportTest(unittest.TestCase):
         self.assertIn("slowest file: mcml.v 1.500 s", text)
 
     def test_a_complete_run_passes(self) -> None:
-        rows = {"mcml.v": row(t_total="0.8", full_t_total="0.1"),
-                "koios/lenet.v": row(t_total="9", rss_opt_growth_pct="20")}
+        rows = {
+            "mcml.v": row(t_total="0.8", full_t_total="0.1"),
+            "koios/lenet.v": row(t_total="9", rss_opt_growth_pct="20"),
+        }
         rows |= {f"v{i}.v": row(t_total="0.05") for i in range(bor.VTR_FILES - 1)}
         lines, missed = bor.report(rows)
         self.assertFalse(missed, lines)
@@ -165,8 +168,11 @@ class SmokeTest(unittest.TestCase):
 
     def test_a_timeout_fails_without_a_traceback(self) -> None:
         with contextlib.ExitStack() as stack:
-            stack.enter_context(mock.patch.object(
-                memcap, "run", side_effect=subprocess.TimeoutExpired(["bench_opt"], 600.0)))
+            stack.enter_context(
+                mock.patch.object(
+                    memcap, "run", side_effect=subprocess.TimeoutExpired(["bench_opt"], 600.0)
+                )
+            )
             stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
             err = io.StringIO()
             stack.enter_context(contextlib.redirect_stderr(err))

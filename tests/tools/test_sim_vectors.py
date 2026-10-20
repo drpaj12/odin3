@@ -45,11 +45,15 @@ def header(stdout: str) -> list[str]:
 
 def doubling_blif(depth: int) -> str:
     """top -> m<depth>; m0 = NOT; m<k> = two m<k-1> in a chain (2^depth flat cells)."""
-    models = [f".model top\n.inputs a\n.outputs y\n.subckt m{depth} a=a y=y\n.end\n",
-              ".model m0\n.inputs a\n.outputs y\n.names a y\n0 1\n.end\n"]
+    models = [
+        f".model top\n.inputs a\n.outputs y\n.subckt m{depth} a=a y=y\n.end\n",
+        ".model m0\n.inputs a\n.outputs y\n.names a y\n0 1\n.end\n",
+    ]
     for k in range(1, depth + 1):
-        models.append(f".model m{k}\n.inputs a\n.outputs y\n"
-                      f".subckt m{k - 1} a=a y=mid\n.subckt m{k - 1} a=mid y=y\n.end\n")
+        models.append(
+            f".model m{k}\n.inputs a\n.outputs y\n"
+            f".subckt m{k - 1} a=a y=mid\n.subckt m{k - 1} a=mid y=y\n.end\n"
+        )
     return "\n".join(models)
 
 

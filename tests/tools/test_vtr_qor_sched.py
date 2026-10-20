@@ -46,9 +46,17 @@ HEX = frozenset("0123456789abcdef")
 ALL_LEGS = ("P", "Pprime", "Oprime", "O", "R", "Oprov")
 
 BASE = KeyInputs(
-    leg="O", design="sha", arch_base=K6, arch_sha256="a" * 64, source_sha256="b" * 64,
-    vtr_commit=PIN, params=tuple(qor_legs.key_params()), odin3_build="c" * 64,
-    script="read_techlib $LIB; ...", lib_sha256="d" * 64, abc_script_sha256="e" * 64,
+    leg="O",
+    design="sha",
+    arch_base=K6,
+    arch_sha256="a" * 64,
+    source_sha256="b" * 64,
+    vtr_commit=PIN,
+    params=tuple(qor_legs.key_params()),
+    odin3_build="c" * 64,
+    script="read_techlib $LIB; ...",
+    lib_sha256="d" * 64,
+    abc_script_sha256="e" * 64,
 )
 
 
@@ -177,10 +185,23 @@ class PlanTestBase(unittest.TestCase):
         self.ldd.chmod(0o755)
         return odin3, libs
 
-    def request(self, legs: tuple[str, ...], designs: tuple[str, ...], *, rerun: bool = False,
-                arch: str = "k6") -> PlanRequest:
-        return PlanRequest(legs=legs, designs=designs, arch=arch, out=self.out,
-                           vtr_root=self.vtr, odin3=self.odin3, rerun=rerun)
+    def request(
+        self,
+        legs: tuple[str, ...],
+        designs: tuple[str, ...],
+        *,
+        rerun: bool = False,
+        arch: str = "k6",
+    ) -> PlanRequest:
+        return PlanRequest(
+            legs=legs,
+            designs=designs,
+            arch=arch,
+            out=self.out,
+            vtr_root=self.vtr,
+            odin3=self.odin3,
+            rerun=rerun,
+        )
 
     def keys(self, legs: tuple[str, ...]) -> dict[tuple[str, str], str]:
         jobs = qor_sched.plan_jobs(self.request(legs, ("sha", "ch_intrinsics")), SETS)
@@ -188,17 +209,20 @@ class PlanTestBase(unittest.TestCase):
 
     def patching(self, name: str, **kwargs: Any) -> Callable[[], object]:
         """A mutation that patches ``qor_legs.<name>`` for the rest of the test."""
+
         def start() -> object:
             patcher = mock.patch.object(qor_legs, name, **kwargs)
             self.addCleanup(patcher.stop)
             return patcher.start()
+
         return start
 
     def plan_all(self) -> list[Job]:
         return qor_sched.plan_jobs(self.request(ALL_LEGS, ("sha", "ch_intrinsics")), SETS)
 
-    def assert_rekeys(self, mutate: Callable[[], object], affected: Callable[[Job], bool],
-                      *, key12_moves: bool) -> None:
+    def assert_rekeys(
+        self, mutate: Callable[[], object], affected: Callable[[Job], bool], *, key12_moves: bool
+    ) -> None:
         """Plan every leg on two designs and mark each job ``ok`` under its key; after
         ``mutate``, exactly the ``affected`` jobs re-key (their key12 moving iff
         ``key12_moves``) and are not cached, and every other job is reused unchanged."""
@@ -206,7 +230,8 @@ class PlanTestBase(unittest.TestCase):
         for job in before:
             job.job_dir.mkdir(parents=True, exist_ok=True)
             (job.job_dir / "metrics.json").write_text(
-                json.dumps({"schema": 1, "status": "ok", "key": job.key}))
+                json.dumps({"schema": 1, "status": "ok", "key": job.key})
+            )
         self.assertTrue(all(j.cached for j in self.plan_all()))
         mutate()
         after = self.plan_all()
@@ -218,8 +243,9 @@ class PlanTestBase(unittest.TestCase):
                 self.assertFalse(new.cached, where)
                 self.assertEqual(new.key12 != old.key12, key12_moves, where)
             else:
-                self.assertEqual((new.key, new.key12, new.cached), (old.key, old.key12, True),
-                                 where)
+                self.assertEqual(
+                    (new.key, new.key12, new.cached), (old.key, old.key12, True), where
+                )
 
 
 class BuildIdTest(PlanTestBase):
@@ -228,8 +254,12 @@ class BuildIdTest(PlanTestBase):
         self.assertEqual(len(first), 64)
         manifest = "".join(
             f"{name}\0{hashlib.sha256(path.read_bytes()).hexdigest()}\n"
-            for name, path in (("odin3", self.odin3), ("libodin3.so", self.libs["libodin3.so"]),
-                               ("libodin3_abc.so", self.libs["libodin3_abc.so"])))
+            for name, path in (
+                ("odin3", self.odin3),
+                ("libodin3.so", self.libs["libodin3.so"]),
+                ("libodin3_abc.so", self.libs["libodin3_abc.so"]),
+            )
+        )
         self.assertEqual(first, hashlib.sha256(manifest.encode()).hexdigest())
         _bump(self.libc)
         self.assertEqual(qor_sched.odin3_build_id(self.odin3), first)  # libc is not odin3's
@@ -248,8 +278,9 @@ class BuildIdTest(PlanTestBase):
         self.ldd.write_text("#!/bin/sh\necho '\tlibodin3.so.0 => not found'\n")
         with self.assertRaises(HeavyError) as caught:
             qor_sched.odin3_build_id(self.odin3)
-        self.assertEqual(caught.exception.message,
-                         f"{self.odin3}: {self.ldd} cannot find libodin3.so.0")
+        self.assertEqual(
+            caught.exception.message, f"{self.odin3}: {self.ldd} cannot find libodin3.so.0"
+        )
         with self.assertRaises(HeavyError) as caught:
             qor_sched.odin3_build_id(self.tmp / "absent")
         self.assertEqual(caught.exception.code, 2)
@@ -259,9 +290,15 @@ class PlanTest(PlanTestBase):
     def test_plan_order(self) -> None:
         designs = qor_sched.select_designs(SETS, [], ["sha", "ch_intrinsics"])
         jobs = qor_sched.plan_jobs(self.request(("O", "P"), designs), SETS)
-        self.assertEqual([(j.design, j.leg) for j in jobs], [
-            ("ch_intrinsics", "P"), ("ch_intrinsics", "O"), ("sha", "P"), ("sha", "O"),
-        ])
+        self.assertEqual(
+            [(j.design, j.leg) for j in jobs],
+            [
+                ("ch_intrinsics", "P"),
+                ("ch_intrinsics", "O"),
+                ("sha", "P"),
+                ("sha", "O"),
+            ],
+        )
         # The planner orders by itself, whatever order the request gives.
         unsorted = qor_sched.plan_jobs(self.request(("O", "P"), ("sha", "ch_intrinsics")), SETS)
         self.assertEqual([(j.design, j.leg) for j in unsorted], [(j.design, j.leg) for j in jobs])
@@ -269,16 +306,17 @@ class PlanTest(PlanTestBase):
         self.assertEqual(tuple(j.design for j in everything), SETS.order)
         self.assertEqual(tuple(j.group for j in everything), ("A",) * 17 + ("B",) * 4)
         every = qor_sched.plan_jobs(
-            self.request(("Oprov", "R", "O", "O'", "P'", "P"), ("sha",)), SETS)
+            self.request(("Oprov", "R", "O", "O'", "P'", "P"), ("sha",)), SETS
+        )
         self.assertEqual([j.leg for j in every], ["P", "Pprime", "Oprime", "O", "R", "Oprov"])
 
     def test_plan_job_fields(self) -> None:
         jobs = qor_sched.plan_jobs(self.request(("P", "O"), ("sha", "ch_intrinsics")), SETS)
         by = {(j.design, j.leg): j for j in jobs}
         sha_o, ch_o = by[("sha", "O")], by[("ch_intrinsics", "O")]
-        self.assertEqual(sha_o.key12, ch_o.key12)          # one leg key per leg configuration
+        self.assertEqual(sha_o.key12, ch_o.key12)  # one leg key per leg configuration
         self.assertNotEqual(sha_o.key, ch_o.key)
-        self.assertNotEqual(sha_o.key12, sha_o.key[:12])   # key12 is the leg key's
+        self.assertNotEqual(sha_o.key12, sha_o.key[:12])  # key12 is the leg key's
         self.assertEqual(sha_o.job_dir, self.out / PIN[:12] / K6 / "O" / sha_o.key12 / "sha")
         self.assertEqual((sha_o.arch, sha_o.group, sha_o.gating), (K6, "A", True))
         self.assertEqual(len(sha_o.commands), 2)
@@ -288,8 +326,10 @@ class PlanTest(PlanTestBase):
         self.assertFalse(sha_o.cached)
 
         big = qor_sched.plan_jobs(self.request(("P",), ("mcml", "spree")), SETS)
-        self.assertEqual([(j.design, j.group, j.gating) for j in big],
-                         [("spree", "A", False), ("mcml", "B", False)])
+        self.assertEqual(
+            [(j.design, j.group, j.gating) for j in big],
+            [("spree", "A", False), ("mcml", "B", False)],
+        )
         self.assertIn("14400", big[1].commands[0].argv)
         earch = qor_sched.plan_jobs(self.request(("P",), ("sha",), arch="earch"), SETS)
         self.assertEqual((earch[0].arch, earch[0].gating), ("EArch", False))
@@ -298,12 +338,14 @@ class PlanTest(PlanTestBase):
     def test_plan_unknown(self) -> None:
         with self.assertRaises(HeavyError) as caught:
             qor_sched.plan_jobs(self.request(("X",), ("sha",)), SETS)
-        self.assertEqual(caught.exception.message,
-                         "unknown leg 'X' (P, O, Oprime, Pprime, R, Oprov)")
+        self.assertEqual(
+            caught.exception.message, "unknown leg 'X' (P, O, Oprime, Pprime, R, Oprov)"
+        )
         with self.assertRaises(HeavyError) as caught:
             qor_sched.plan_jobs(self.request(("P",), ("nope",)), SETS)
-        self.assertEqual(caught.exception.message,
-                         "unknown design 'nope' (see tests/vtr/qor/sets.json)")
+        self.assertEqual(
+            caught.exception.message, "unknown design 'nope' (see tests/vtr/qor/sets.json)"
+        )
 
     def test_plan_cache(self) -> None:
         (job,) = qor_sched.plan_jobs(self.request(("P",), ("sha",)), SETS)
@@ -331,19 +373,31 @@ class PlanTest(PlanTestBase):
         v_sha = sha((self.vtr / "vtr_flow/benchmarks/verilog/sha.v").read_bytes()).hexdigest()
         g_sha = sha((self.golden / K6 / "vtr/sha/sha.parmys.blif").read_bytes()).hexdigest()
         p = KeyInputs(
-            leg="P", design="sha", arch_base=K6, arch_sha256=sha(xml.read_bytes()).hexdigest(),
-            source_sha256=v_sha, vtr_commit=PIN, params=tuple(qor_legs.key_params()),
-            odin3_build=None, script=None, lib_sha256=None, abc_script_sha256=None,
+            leg="P",
+            design="sha",
+            arch_base=K6,
+            arch_sha256=sha(xml.read_bytes()).hexdigest(),
+            source_sha256=v_sha,
+            vtr_commit=PIN,
+            params=tuple(qor_legs.key_params()),
+            odin3_build=None,
+            script=None,
+            lib_sha256=None,
+            abc_script_sha256=None,
         )
         o = dataclasses.replace(
-            p, leg="O", odin3_build=qor_sched.odin3_build_id(self.odin3),
+            p,
+            leg="O",
+            odin3_build=qor_sched.odin3_build_id(self.odin3),
             lib_sha256=sha((self.repo / "lib/vtr.o3lib").read_bytes()).hexdigest(),
             abc_script_sha256=sha((self.repo / "lib/abc/vtr.abc").read_bytes()).hexdigest(),
             script="read_techlib $LIB; read_verilog --nolatches --vtr-compat $IN; proc; fsm; opt; "
             "flatten; wreduce; hardmap; lower; abc --lut 6; write_blif --vtr --lut-k 6 $OUT",
         )
         pprime = dataclasses.replace(
-            o, leg="Pprime", source_sha256=g_sha,
+            o,
+            leg="Pprime",
+            source_sha256=g_sha,
             script="read_techlib $LIB; read_blif $IN; abc --lut 6; write_blif --vtr --lut-k 6 $OUT",
         )
         expected = {"P": p, "O": o, "Pprime": pprime}
@@ -360,28 +414,34 @@ class PlanTest(PlanTestBase):
             self.assert_rekeys(functools.partial(_bump, path), odin3_legs, key12_moves=True)
         # The script text itself (with K in it).
         key_script = qor_legs.key_script
-        self.assert_rekeys(self.patching("key_script",
-                                         side_effect=lambda *a: key_script(*a) + "; stats"),
-                           odin3_legs, key12_moves=True)
-        self.assert_rekeys(self.patching("lut_size", return_value=4), odin3_legs,
-                           key12_moves=True)
+        self.assert_rekeys(
+            self.patching("key_script", side_effect=lambda *a: key_script(*a) + "; stats"),
+            odin3_legs,
+            key12_moves=True,
+        )
+        self.assert_rekeys(self.patching("lut_size", return_value=4), odin3_legs, key12_moves=True)
 
     def test_plan_rekeys_on_sources(self) -> None:
         """A design's source re-keys that design's jobs alone, in the same key12 directory."""
         v = self.vtr / "vtr_flow" / "benchmarks" / "verilog" / "sha.v"
-        self.assert_rekeys(lambda: _bump(v),
-                           lambda job: job.design == "sha" and job.leg not in ("Pprime", "R"),
-                           key12_moves=False)
+        self.assert_rekeys(
+            lambda: _bump(v),
+            lambda job: job.design == "sha" and job.leg not in ("Pprime", "R"),
+            key12_moves=False,
+        )
         g = self.golden / K6 / "vtr" / "sha" / "sha.parmys.blif"
-        self.assert_rekeys(lambda: _bump(g),
-                           lambda job: job.design == "sha" and job.leg in ("Pprime", "R"),
-                           key12_moves=False)
+        self.assert_rekeys(
+            lambda: _bump(g),
+            lambda job: job.design == "sha" and job.leg in ("Pprime", "R"),
+            key12_moves=False,
+        )
 
     def test_plan_rekeys_on_arch_and_vtr(self) -> None:
         xml = self.vtr / "vtr_flow" / "arch" / "timing" / f"{K6}.xml"
         self.assert_rekeys(lambda: _bump(xml), lambda job: True, key12_moves=True)
-        self.assert_rekeys(self.patching("vtr_commit", return_value="f" * 40), lambda job: True,
-                           key12_moves=True)
+        self.assert_rekeys(
+            self.patching("vtr_commit", return_value="f" * 40), lambda job: True, key12_moves=True
+        )
         moved = self.plan_all()[0]
         self.assertEqual(moved.job_dir.relative_to(self.out).parts[0], "f" * 12)
 
@@ -396,10 +456,12 @@ class PlanTest(PlanTestBase):
         golden = self.keys(legs)
         changed = {lk for lk, key in golden.items() if key != after[lk]}
         self.assertEqual(changed, {("Pprime", "sha")})
-        self.assert_rekeys(lambda: _bump(self.libs["libodin3.so"]), lambda job: job.leg != "P",
-                           key12_moves=True)
-        seeded = qor_sched.plan_jobs(dataclasses.replace(
-            self.request(legs, ("sha",)), seed=2), SETS)
+        self.assert_rekeys(
+            lambda: _bump(self.libs["libodin3.so"]), lambda job: job.leg != "P", key12_moves=True
+        )
+        seeded = qor_sched.plan_jobs(
+            dataclasses.replace(self.request(legs, ("sha",)), seed=2), SETS
+        )
         self.assertTrue(all(j.key != golden[(j.leg, j.design)] for j in seeded))
         self.assertIn("--seed", seeded[0].commands[0].argv)
 
@@ -408,10 +470,14 @@ class PlanTest(PlanTestBase):
         self.assertIn(str(qor_legs.golden_blif(K6, "diffeq1")), job.commands[0].argv[-1])
         (with_golden,) = qor_sched.plan_jobs(self.request(("R",), ("sha",)), SETS)
         inputs = KeyInputs(
-            leg="R", design="diffeq1", arch_base=K6,
+            leg="R",
+            design="diffeq1",
+            arch_base=K6,
             arch_sha256=qor_sched.file_sha256(self.vtr / "vtr_flow/arch/timing" / f"{K6}.xml"),
-            source_sha256=qor_sched.GOLDEN_MISSING, vtr_commit=PIN,
-            params=tuple(qor_legs.key_params()), odin3_build=qor_sched.odin3_build_id(self.odin3),
+            source_sha256=qor_sched.GOLDEN_MISSING,
+            vtr_commit=PIN,
+            params=tuple(qor_legs.key_params()),
+            odin3_build=qor_sched.odin3_build_id(self.odin3),
             script="read_techlib $LIB; read_blif $IN; write_blif --vtr --lut-k 6 $OUT",
             lib_sha256=qor_sched.file_sha256(self.repo / "lib/vtr.o3lib"),
             abc_script_sha256=qor_sched.file_sha256(self.repo / "lib/abc/vtr.abc"),
@@ -425,21 +491,29 @@ class PlanTest(PlanTestBase):
 class SelectTest(unittest.TestCase):
     def test_select_designs(self) -> None:
         self.assertEqual(qor_sched.select_designs(SETS, ["gate"], []), SETS.gate)
-        self.assertEqual(qor_sched.select_designs(SETS, ["extra", "gate"], []),
-                         SETS.order[:len(SETS.order) - len(SETS.offload)])
+        self.assertEqual(
+            qor_sched.select_designs(SETS, ["extra", "gate"], []),
+            SETS.order[: len(SETS.order) - len(SETS.offload)],
+        )
         self.assertEqual(qor_sched.select_designs(SETS, ["offload"], []), SETS.offload)
-        self.assertEqual(qor_sched.select_designs(SETS, ["offload", "extra", "gate"], []),
-                         SETS.order)
-        self.assertEqual(qor_sched.select_designs(SETS, ["smoke"], ["mcml", "spree"]),
-                         (*SETS.smoke, "spree", "mcml"))
+        self.assertEqual(
+            qor_sched.select_designs(SETS, ["offload", "extra", "gate"], []), SETS.order
+        )
+        self.assertEqual(
+            qor_sched.select_designs(SETS, ["smoke"], ["mcml", "spree"]),
+            (*SETS.smoke, "spree", "mcml"),
+        )
         with self.assertRaises(HeavyError) as caught:
             qor_sched.select_designs(SETS, ["big"], [])
-        self.assertEqual(caught.exception.message,
-                         "unknown set 'big' (gate, extra, smoke, offload)")
+        self.assertEqual(
+            caught.exception.message, "unknown set 'big' (gate, extra, smoke, offload)"
+        )
         with self.assertRaises(HeavyError) as caught:
             qor_sched.select_designs(SETS, [], ["nope"])
-        self.assertEqual((caught.exception.code, caught.exception.message),
-                         (2, "unknown design 'nope' (see tests/vtr/qor/sets.json)"))
+        self.assertEqual(
+            (caught.exception.code, caught.exception.message),
+            (2, "unknown design 'nope' (see tests/vtr/qor/sets.json)"),
+        )
 
     def test_load_sets_refusals(self) -> None:
         good = json.loads((qor_legs.REPO_ROOT / "tests/vtr/qor/sets.json").read_text())
@@ -462,8 +536,10 @@ class SelectTest(unittest.TestCase):
                 lambda d: d["designs"]["sha"].update(rank=0),
                 lambda d: d["designs"]["sha"].update(rank=True),
                 lambda d: [d["designs"][n].update(rank=1) for n in d["gate"]],
-                lambda d: (d["designs"]["sha"].update(rank=6),
-                           d["designs"]["raygentop"].update(rank=7)),
+                lambda d: (
+                    d["designs"]["sha"].update(rank=6),
+                    d["designs"]["raygentop"].update(rank=7),
+                ),
                 lambda d: d["designs"]["spree"].update(rank=20),
                 lambda d: d["designs"]["sha"].update(extra=1),
                 lambda d: d["designs"]["sha"].pop("rank"),
@@ -514,16 +590,28 @@ class VtrCommitTest(unittest.TestCase):
             root = Path(name)
             with self.assertRaises(HeavyError) as caught:
                 qor_legs.vtr_commit(root)
-            self.assertEqual(caught.exception.message,
-                             f"VTR not found at {root} (set VTR_ROOT or --vtr-root)")
-            git = ["git", "-C", name, "-c", "user.name=t", "-c", "user.email=t@t",
-                   "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false"]
+            self.assertEqual(
+                caught.exception.message, f"VTR not found at {root} (set VTR_ROOT or --vtr-root)"
+            )
+            git = [
+                "git",
+                "-C",
+                name,
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "commit.gpgsign=false",
+            ]
             subprocess.run([*git, "init", "-q"], check=True)
             subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "x"], check=True)
-            head = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True,
-                                  text=True).stdout.strip()
+            head = subprocess.run(
+                [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+            ).stdout.strip()
             self.assertEqual(qor_legs.vtr_commit(root), head)
-
 
 
 # -- the runner (plan Task 5: T4) --------------------------------------------------------------
@@ -536,14 +624,34 @@ VTR12 = PIN[:12]
 KEY12 = "0123456789ab"
 START_LINE = re.compile(r"vtr-qor: \[\d+/\d+\] \S+ \S+ start")
 SLICE_DIRS = "user.slice/user-1000.slice/user@1000.service/odin3.slice"
-HINT = ("vtr-qor: free C: by compacting the WSL disk (wsl --shutdown, then Optimize-VHD or "
-        "diskpart compact vdisk; Peter's hands)")
-KEEP_PRESENT = ("vtr_flow.out", "output.txt", "parse_results.txt", "qor_results.txt", "vpr.out",
-                "vpr.crit_path.out", "parmys.out", "abc0.out", "abc1.out",
-                "sha_blackboxing_latch.out", "restore_latch0.out", "report_clocks.abc.out",
-                "parse_results.err", "qor_results.err")  # the parse's stderr (final review M1)
-SCRATCH = ("sha.pre-vpr.blif", "sha.net", "sha.place", "sha.route", "sha.parmys.blif",
-           "sha.abc.blif")
+HINT = (
+    "vtr-qor: free C: by compacting the WSL disk (wsl --shutdown, then Optimize-VHD or "
+    "diskpart compact vdisk; Peter's hands)"
+)
+KEEP_PRESENT = (
+    "vtr_flow.out",
+    "output.txt",
+    "parse_results.txt",
+    "qor_results.txt",
+    "vpr.out",
+    "vpr.crit_path.out",
+    "parmys.out",
+    "abc0.out",
+    "abc1.out",
+    "sha_blackboxing_latch.out",
+    "restore_latch0.out",
+    "report_clocks.abc.out",
+    "parse_results.err",
+    "qor_results.err",
+)  # the parse's stderr (final review M1)
+SCRATCH = (
+    "sha.pre-vpr.blif",
+    "sha.net",
+    "sha.place",
+    "sha.route",
+    "sha.parmys.blif",
+    "sha.abc.blif",
+)
 PARSE_TEXT = "arch\tcircuit\tvpr_status\t\nk6.xml\tsha.v\tsuccess\t\n"
 
 Spec = dict[str, Any]
@@ -641,14 +749,19 @@ class RunnerTestBase(unittest.TestCase):
             f"if os.path.exists({str(self.df_hang)!r}):\n"
             "    time.sleep(600)\n"
             "gib = int(open(sys.argv[1]).read())\n"
-            f"print('Mounted on   Avail')\nprint('/mnt/c', gib * {GIB})\n")
+            f"print('Mounted on   Avail')\nprint('/mnt/c', gib * {GIB})\n"
+        )
         self.meminfo = self.tmp / "meminfo"
         self.set_mem(16.0)
         stack = ExitStack()
         self.addCleanup(stack.close)
-        for name, value in (("SELF_CGROUP", self_cgroup), ("CGROUP_ROOT", root), ("FD9", fd9),
-                            ("HEAVY_LOCK", self.lock),
-                            ("DF_CMD", (sys.executable, "-I", str(fake_df), str(self.df_file)))):
+        for name, value in (
+            ("SELF_CGROUP", self_cgroup),
+            ("CGROUP_ROOT", root),
+            ("FD9", fd9),
+            ("HEAVY_LOCK", self.lock),
+            ("DF_CMD", (sys.executable, "-I", str(fake_df), str(self.df_file))),
+        ):
             stack.enter_context(mock.patch.object(qor_heavy, name, value))
         stack.enter_context(mock.patch.dict(os.environ, {"ODIN3_HEAVY_SLICE": "odin3-heavy.slice"}))
         self.scope = qor_heavy.require_heavy()
@@ -666,16 +779,31 @@ class RunnerTestBase(unittest.TestCase):
     def job_dir(self, design: str, leg: str = "P") -> Path:
         return self.out / VTR12 / K6 / leg / KEY12 / design
 
-    def command(self, spec: Spec, stdout: Path, *, stderr: Path | None = None,
-                env: tuple[tuple[str, str], ...] = ()) -> qor_legs.Command:
+    def command(
+        self,
+        spec: Spec,
+        stdout: Path,
+        *,
+        stderr: Path | None = None,
+        env: tuple[tuple[str, str], ...] = (),
+    ) -> qor_legs.Command:
         self.n_specs += 1
         path = self.tmp / f"spec-{self.n_specs}.json"
         path.write_text(json.dumps(spec))
-        return qor_legs.Command((sys.executable, "-I", str(FAKEJOB), str(path)), stdout.parent,
-                                stdout, env, stderr)
+        return qor_legs.Command(
+            (sys.executable, "-I", str(FAKEJOB), str(path)), stdout.parent, stdout, env, stderr
+        )
 
-    def job(self, design: str, specs: list[Spec], *, leg: str = "P", group: str = "A",
-            cached: bool = False, key: str = "f" * 64) -> Job:
+    def job(
+        self,
+        design: str,
+        specs: list[Spec],
+        *,
+        leg: str = "P",
+        group: str = "A",
+        cached: bool = False,
+        key: str = "f" * 64,
+    ) -> Job:
         """A job whose commands are fake jobs: for an odin3 leg the first is the front end
         (stdout frontend.log), every other one VTR (stdout run/vtr_flow.out)."""
         job_dir = self.job_dir(design, leg)
@@ -684,19 +812,38 @@ class RunnerTestBase(unittest.TestCase):
             front = leg != "P" and i == 0
             stdout = job_dir / "frontend.log" if front else job_dir / "run" / "vtr_flow.out"
             commands.append(self.command(spec, stdout))
-        return Job(leg=leg, design=design, arch=K6, group=group, gating=True, key=key,
-                   key12=KEY12, job_dir=job_dir, commands=tuple(commands), cached=cached)
+        return Job(
+            leg=leg,
+            design=design,
+            arch=K6,
+            group=group,
+            gating=True,
+            key=key,
+            key12=KEY12,
+            job_dir=job_dir,
+            commands=tuple(commands),
+            cached=cached,
+        )
 
     def opts(self, clock: Callable[[], float] | None = None, **kwargs: Any) -> qor_sched.RunOptions:
         fake = FakeClock()
         kwargs.setdefault("scope", self.scope)
         return qor_sched.RunOptions(
-            out=self.out, clock=clock or fake, sleep=kwargs.pop("sleep", fake.sleep),
-            meminfo=self.meminfo, **kwargs)
+            out=self.out,
+            clock=clock or fake,
+            sleep=kwargs.pop("sleep", fake.sleep),
+            meminfo=self.meminfo,
+            **kwargs,
+        )
 
-    def run_jobs(self, jobs: list[Job], opts: qor_sched.RunOptions,
-                 finish: qor_sched.Finish = finish_ok, *, starts: bool = False
-                 ) -> tuple[qor_sched.RunSummary, list[str]]:
+    def run_jobs(
+        self,
+        jobs: list[Job],
+        opts: qor_sched.RunOptions,
+        finish: qor_sched.Finish = finish_ok,
+        *,
+        starts: bool = False,
+    ) -> tuple[qor_sched.RunSummary, list[str]]:
         """Run and return the stderr lines; the per-job ``start`` lines (pinned by
         test_run_lines) are left out unless ``starts``."""
         err = io.StringIO()
@@ -720,10 +867,19 @@ class RunOrderTest(RunnerTestBase):
     def test_order_groups(self) -> None:
         """Five A and two B jobs given interleaved, fcheck on: every job and fcheck runs alone,
         each fcheck straight after its own job, every B after the last A (point (w))."""
-        plan = [("a1", "A"), ("b1", "B"), ("a2", "A"), ("a3", "A"), ("b2", "B"), ("a4", "A"),
-                ("a5", "A")]
-        jobs = [self.job(d, [{"stamp": str(self.stamps), "name": d, "sleep": 0.05}], group=g)
-                for d, g in plan]
+        plan = [
+            ("a1", "A"),
+            ("b1", "B"),
+            ("a2", "A"),
+            ("a3", "A"),
+            ("b2", "B"),
+            ("a4", "A"),
+            ("a5", "A"),
+        ]
+        jobs = [
+            self.job(d, [{"stamp": str(self.stamps), "name": d, "sleep": 0.05}], group=g)
+            for d, g in plan
+        ]
         calls: list[tuple[str, int]] = []
 
         def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
@@ -745,20 +901,26 @@ class RunOrderTest(RunnerTestBase):
         for _, name, when in self.stamp_lines():
             spans.setdefault(name, []).append(float(when))
         intervals = sorted((s, e, n) for n, (s, e) in spans.items())
-        self.assertEqual([n for _, _, n in intervals],
-                         [x for d in order for x in (d, f"fcheck-{d}")])
+        self.assertEqual(
+            [n for _, _, n in intervals], [x for d in order for x in (d, f"fcheck-{d}")]
+        )
         for (_, end, name), (start, _, nxt) in zip(intervals, intervals[1:], strict=False):
             self.assertLessEqual(end, start, f"{name} overlaps {nxt}")
         last_a = max(e for _, e, n in intervals if n.removeprefix("fcheck-").startswith("a"))
-        self.assertTrue(all(s >= last_a for s, _, n in intervals
-                            if n.removeprefix("fcheck-").startswith("b")))
+        self.assertTrue(
+            all(s >= last_a for s, _, n in intervals if n.removeprefix("fcheck-").startswith("b"))
+        )
 
     def test_fcheck_after_cleanup_and_admitted(self) -> None:
         """The fcheck step sees the job already cleaned up (P's netlist gzipped) and is
         admitted like a job: memory short after the job makes it wait."""
         run = self.job_dir("sha") / "run"
-        spec = {"write": [{"path": str(run / "sha.pre-vpr.blif"), "text": ".model sha\n"},
-                          {"path": str(self.meminfo), "text": "MemAvailable: 1000 kB\n"}]}
+        spec = {
+            "write": [
+                {"path": str(run / "sha.pre-vpr.blif"), "text": ".model sha\n"},
+                {"path": str(self.meminfo), "text": "MemAvailable: 1000 kB\n"},
+            ]
+        }
         seen: list[list[str]] = []
         clock = FakeClock()
         clock.on_sleep = lambda n: self.set_mem(8.0)
@@ -768,9 +930,9 @@ class RunOrderTest(RunnerTestBase):
             return "pass"
 
         with mock.patch.object(qor_sched, "run_fcheck", fake_fcheck):
-            summary, lines = self.run_jobs([self.job("sha", [spec])],
-                                           self.opts(clock=clock, sleep=clock.sleep,
-                                                     fcheck=True))
+            summary, lines = self.run_jobs(
+                [self.job("sha", [spec])], self.opts(clock=clock, sleep=clock.sleep, fcheck=True)
+            )
         self.assertEqual(seen, [["sha.pre-vpr.blif.gz", "vtr_flow.out"]])
         self.assertIn("vtr-qor: waiting: 0.0 GiB available (< 7)", lines)
         self.assertEqual(clock.sleeps, [60])
@@ -794,8 +956,10 @@ class RunOrderTest(RunnerTestBase):
         jobs = [self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}])]
         with self.assertRaises(HeavyError) as caught:
             self.run_jobs(jobs, self.opts(jobs=2))
-        self.assertEqual((caught.exception.code, caught.exception.message),
-                         (2, "-j 2 exceeds 1 (the heavy-run rule)"))
+        self.assertEqual(
+            (caught.exception.code, caught.exception.message),
+            (2, "-j 2 exceeds 1 (the heavy-run rule)"),
+        )
         self.assertEqual(qor_sched.MAX_JOBS, 1)
         self.assertEqual(self.starts(), [])
         self.assertFalse((self.out / "harness.log").exists())
@@ -805,19 +969,43 @@ class RunOrderTest(RunnerTestBase):
     def test_constants(self) -> None:
         """The Global Constraints' scheduler caps."""
         self.assertEqual(
-            (qor_sched.MIN_MEM_AVAILABLE_GIB, qor_sched.MIN_DISK_FREE_GIB,
-             qor_sched.DISK_FLOOR_GIB, qor_sched.PAUSE_LIMIT_S, qor_sched.POLL_S,
-             dict(qor_sched.JOB_TIMEOUT_S), qor_sched.KILL_GRACE_S, qor_sched.CAPPED_RETRIES,
-             qor_sched.KEEP_KEYS, qor_sched.KEEP_FAILED, qor_sched.KEEP_FAILED_BYTES),
-            (7, 20, 10, 7200, 60, {"A": 3600, "B": 21600}, 30, 0, 3, 5, 2 * GIB))
-        self.assertEqual(qor_sched.KEEP_RUN_FILES, (
-            "vtr_flow.out", "output.txt", "parse_results.txt", "qor_results.txt", "vpr.out",
-            "vpr.crit_path.out", "parmys.out", "abc*.out", "*_blackboxing_latch.out",
-            "restore_latch*.out", "report_clocks.abc.out", "parse_results.err",
-            "qor_results.err"))
+            (
+                qor_sched.MIN_MEM_AVAILABLE_GIB,
+                qor_sched.MIN_DISK_FREE_GIB,
+                qor_sched.DISK_FLOOR_GIB,
+                qor_sched.PAUSE_LIMIT_S,
+                qor_sched.POLL_S,
+                dict(qor_sched.JOB_TIMEOUT_S),
+                qor_sched.KILL_GRACE_S,
+                qor_sched.CAPPED_RETRIES,
+                qor_sched.KEEP_KEYS,
+                qor_sched.KEEP_FAILED,
+                qor_sched.KEEP_FAILED_BYTES,
+            ),
+            (7, 20, 10, 7200, 60, {"A": 3600, "B": 21600}, 30, 0, 3, 5, 2 * GIB),
+        )
+        self.assertEqual(
+            qor_sched.KEEP_RUN_FILES,
+            (
+                "vtr_flow.out",
+                "output.txt",
+                "parse_results.txt",
+                "qor_results.txt",
+                "vpr.out",
+                "vpr.crit_path.out",
+                "parmys.out",
+                "abc*.out",
+                "*_blackboxing_latch.out",
+                "restore_latch*.out",
+                "report_clocks.abc.out",
+                "parse_results.err",
+                "qor_results.err",
+            ),
+        )
 
-    def fcheck_exit(self, verdicts: list[str], jobs: list[Job], **kwargs: Any
-                    ) -> qor_sched.RunSummary:
+    def fcheck_exit(
+        self, verdicts: list[str], jobs: list[Job], **kwargs: Any
+    ) -> qor_sched.RunSummary:
         queue = iter(verdicts)
 
         def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
@@ -843,8 +1031,9 @@ class RunOrderTest(RunnerTestBase):
         job.job_dir.mkdir(parents=True)
         (job.job_dir / "status").write_text("ok\n")
         record = {"status": "ok", "key": job.key, "verdicts": {"fcheck": "pass"}}
-        (job.job_dir / "metrics.json").write_text(json.dumps({**record, "verdicts": {
-            "fcheck": "skipped"}}))
+        (job.job_dir / "metrics.json").write_text(
+            json.dumps({**record, "verdicts": {"fcheck": "skipped"}})
+        )
         calls: list[str] = []
 
         def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
@@ -869,8 +1058,10 @@ class RunOrderTest(RunnerTestBase):
         job = self.job("sha", [{}])
         opts = self.opts(clock=lambda: 10.0, fcheck=True, deadline=10.0, deadline_text="06:00")
         run = qor_sched._Run([job], opts, finish_ok, qor_sched.HarnessLog(self.out))
-        with mock.patch.object(qor_sched, "run_fcheck", fake_fcheck), \
-                redirect_stderr(io.StringIO()):
+        with (
+            mock.patch.object(qor_sched, "run_fcheck", fake_fcheck),
+            redirect_stderr(io.StringIO()),
+        ):
             self.assertTrue(qor_sched._after_ok(run, job))
         self.assertEqual(calls, [])
         self.assertEqual(qor_sched._exit_code([], 0, run.fchecks), 3)
@@ -941,7 +1132,8 @@ class FcheckTest(RunnerTestBase):
         self.script.parent.mkdir(parents=True)
         self.script.write_text(FAKE_RANDOM_CHECK)
         (self.script.parent / "blif_to_verilog.py").write_text(
-            "def pack_bit_blasted_top_ports(text):\n    return text\n")
+            "def pack_bit_blasted_top_ports(text):\n    return text\n"
+        )
         self.mode({})
 
     def mode(self, mode: dict[str, Any]) -> None:
@@ -959,15 +1151,29 @@ class FcheckTest(RunnerTestBase):
 
     def legctx(self, design: str, leg: str, group: str) -> qor_legs.LegContext:
         return qor_legs.LegContext(
-            vtr_root=self.vtr, python=Path(sys.executable), arch_xml=self.vtr / "arch.xml",
-            odin3=self.tmp / "odin3", repo=self.tmp / "repo", job_dir=self.job_dir(design, leg),
-            k=6, group=group)
+            vtr_root=self.vtr,
+            python=Path(sys.executable),
+            arch_xml=self.vtr / "arch.xml",
+            odin3=self.tmp / "odin3",
+            repo=self.tmp / "repo",
+            job_dir=self.job_dir(design, leg),
+            k=6,
+            group=group,
+        )
 
-    def finished(self, design: str, *, leg: str = "P", group: str = "A", gz: bool = True,
-                 netlist: str = ".model m\n.end\n") -> Job:
+    def finished(
+        self,
+        design: str,
+        *,
+        leg: str = "P",
+        group: str = "A",
+        gz: bool = True,
+        netlist: str = ".model m\n.end\n",
+    ) -> Job:
         """An ok job on disk (metrics.json, and the kept netlist as the runner leaves it)."""
-        job = dataclasses.replace(self.job(design, [{}], leg=leg, group=group),
-                                  ctx=self.legctx(design, leg, group))
+        job = dataclasses.replace(
+            self.job(design, [{}], leg=leg, group=group), ctx=self.legctx(design, leg, group)
+        )
         run = job.job_dir / "run"
         run.mkdir(parents=True, exist_ok=True)
         pre = run / f"{design}.pre-vpr.blif"
@@ -976,8 +1182,11 @@ class FcheckTest(RunnerTestBase):
                 handle.write(netlist)
         else:
             pre.write_text(netlist)
-        (job.job_dir / "metrics.json").write_text(json.dumps(
-            {"schema": 1, "key": job.key, "status": "ok", "verdicts": {"fcheck": "skipped"}}))
+        (job.job_dir / "metrics.json").write_text(
+            json.dumps(
+                {"schema": 1, "key": job.key, "status": "ok", "verdicts": {"fcheck": "skipped"}}
+            )
+        )
         return job
 
     def verdict(self, job: Job) -> str:
@@ -987,12 +1196,28 @@ class FcheckTest(RunnerTestBase):
         ctx = self.legctx("sha", "P", "A")
         netlist = ctx.job_dir / "fcheck-in" / "sha.pre-vpr.blif"
         cmd = qor_legs.fcheck_command(ctx, "sha", netlist, 2)
-        self.assertEqual(list(cmd.argv), [
-            sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER),
-            f"{self.vtr}/mosaic/verilator_check/run_random_check.py",
-            "--rtl", f"{self.vtr}/vtr_flow/benchmarks/verilog/sha.v",
-            "--post-synth-blif", str(netlist), "--work-dir", f"{ctx.job_dir}/fcheck",
-            "--vectors", "50000", "--seed", "1", "--verilator-j", "2"])
+        self.assertEqual(
+            list(cmd.argv),
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                str(qor_legs.FCHECK_RUNNER),
+                f"{self.vtr}/mosaic/verilator_check/run_random_check.py",
+                "--rtl",
+                f"{self.vtr}/vtr_flow/benchmarks/verilog/sha.v",
+                "--post-synth-blif",
+                str(netlist),
+                "--work-dir",
+                f"{ctx.job_dir}/fcheck",
+                "--vectors",
+                "50000",
+                "--seed",
+                "1",
+                "--verilator-j",
+                "2",
+            ],
+        )
         self.assertEqual((cmd.cwd, cmd.stdout), (ctx.job_dir, ctx.job_dir / "fcheck.log"))
         self.assertEqual(dict(cmd.env)["PATH"].split(":")[0], f"{self.vtr}/.venv/bin")
         # the wrapper's RTL pre-check (H1) reads incomplete sensitivity lists with Odin III
@@ -1000,24 +1225,28 @@ class FcheckTest(RunnerTestBase):
         self.assertEqual(dict(cmd.env)["QOR_FCHECK_TECHLIB"], str(ctx.repo / "lib" / "vtr.o3lib"))
 
     def test_fcheck_exit_mapping(self) -> None:
-        for code, verdict in ((0, "pass"), (1, "fail"), (2, "error"), (3, "error"),
-                              (137, "error")):
+        for code, verdict in ((0, "pass"), (1, "fail"), (2, "error"), (3, "error"), (137, "error")):
             self.mode({"exit": code})
             job = self.finished("sha")
             self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), verdict, code)
             self.assertEqual(self.verdict(job), verdict)
         self.assertEqual(qor_legs.fcheck_verdict(137, True, ""), "capped")
-        self.assertEqual(qor_legs.fcheck_verdict(
-            0, False, "PASS: 5 vectors matched\nVCHECK_SUMMARY matched=5 mismatched=0 vectors=5"),
-            "pass")
+        self.assertEqual(
+            qor_legs.fcheck_verdict(
+                0, False, "PASS: 5 vectors matched\nVCHECK_SUMMARY matched=5 mismatched=0 vectors=5"
+            ),
+            "pass",
+        )
         self.mode({"exit": 137, "oom": str(self.events)})
         job = self.finished("sha")
         self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "capped")
         self.assertEqual(self.verdict(job), "capped")
 
     def test_untested_records_its_short_reason_for_the_table(self) -> None:
-        log = ("PRECHECK RTL infers 3 latches\nUNTESTED-REASON latches 3\n"
-               "UNTESTED: the RTL behaviour is not preserved; nothing was simulated: x")
+        log = (
+            "PRECHECK RTL infers 3 latches\nUNTESTED-REASON latches 3\n"
+            "UNTESTED: the RTL behaviour is not preserved; nothing was simulated: x"
+        )
         self.mode({"exit": 3, "log": log})
         job = self.finished("sha")
         err = io.StringIO()
@@ -1038,7 +1267,8 @@ class FcheckTest(RunnerTestBase):
         err = io.StringIO()
         with redirect_stderr(err):
             verdict = qor_sched.run_fcheck(
-                job, self.opts(clock=time.monotonic, job_timeout_s={"A": 0.5, "B": 0.5}), 2)
+                job, self.opts(clock=time.monotonic, job_timeout_s={"A": 0.5, "B": 0.5}), 2
+            )
         self.assertEqual((verdict, self.verdict(job)), ("timeout", "timeout"))
 
     def test_zero_job_timeout_fcheck_no_cap(self) -> None:
@@ -1053,8 +1283,12 @@ class FcheckTest(RunnerTestBase):
         """Review H3: the check is capped by the night's deadline, not only the job limit."""
         self.mode({"exit": 0, "sleep": 60})
         job = self.finished("sha")
-        opts = self.opts(clock=time.monotonic, job_timeout_s={"A": 600, "B": 600},
-                         deadline=time.monotonic() + 0.5, deadline_text="06:00")
+        opts = self.opts(
+            clock=time.monotonic,
+            job_timeout_s={"A": 600, "B": 600},
+            deadline=time.monotonic() + 0.5,
+            deadline_text="06:00",
+        )
         started = time.monotonic()
         with redirect_stderr(io.StringIO()):
             verdict = qor_sched.run_fcheck(job, opts, 2)
@@ -1066,8 +1300,10 @@ class FcheckTest(RunnerTestBase):
         self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "pass")
         (call,) = self.calls()
         argv = call["argv"]
-        self.assertEqual(argv[argv.index("--post-synth-blif") + 1],
-                         str(job.job_dir / "fcheck-in" / "sha.pre-vpr.blif"))
+        self.assertEqual(
+            argv[argv.index("--post-synth-blif") + 1],
+            str(job.job_dir / "fcheck-in" / "sha.pre-vpr.blif"),
+        )
         self.assertEqual(argv[argv.index("--work-dir") + 1], str(job.job_dir / "fcheck"))
         self.assertEqual(call["netlist"], ".model sha\n.names a b\n11 1\n.end\n")
 
@@ -1083,8 +1319,10 @@ class FcheckTest(RunnerTestBase):
         # a check killed by the deadline or an exception in the runner also leaves no staging
         self.mode({"exit": 0})
         job = self.finished("diffeq1")
-        with mock.patch.object(qor_sched, "_fcheck_outcome", side_effect=RuntimeError("boom")), \
-                self.assertRaises(RuntimeError):
+        with (
+            mock.patch.object(qor_sched, "_fcheck_outcome", side_effect=RuntimeError("boom")),
+            self.assertRaises(RuntimeError),
+        ):
             qor_sched.run_fcheck(job, self.opts(), 2)
         self.assertFalse((job.job_dir / "fcheck-in").exists())
 
@@ -1092,14 +1330,18 @@ class FcheckTest(RunnerTestBase):
         job = self.finished("sha", leg="O", gz=False)
         self.assertEqual(qor_sched.run_fcheck(job, self.opts(), 2), "pass")
         (call,) = self.calls()
-        self.assertEqual(call["argv"][call["argv"].index("--post-synth-blif") + 1],
-                         str(job.job_dir / "run" / "sha.pre-vpr.blif"))
+        self.assertEqual(
+            call["argv"][call["argv"].index("--post-synth-blif") + 1],
+            str(job.job_dir / "run" / "sha.pre-vpr.blif"),
+        )
         gone = self.finished("stereovision3", leg="O", gz=True)  # only a .gz: not a kept pre-vpr
         err = io.StringIO()
         with redirect_stderr(err):
             self.assertEqual(qor_sched.run_fcheck(gone, self.opts(), 2), "error")
-        self.assertIn("vtr-qor: fcheck: O stereovision3: no kept netlist (run with "
-                      "--keep-netlists)", err.getvalue())
+        self.assertIn(
+            "vtr-qor: fcheck: O stereovision3: no kept netlist (run with --keep-netlists)",
+            err.getvalue(),
+        )
         self.assertEqual(self.verdict(gone), "error")
         self.assertEqual(len(self.calls()), 1)  # none for stereovision3
 
@@ -1120,25 +1362,40 @@ class FcheckTest(RunnerTestBase):
     def test_fcheck_after_own_job(self) -> None:
         """Each fcheck starts after its own VPR job ends and ends before the next job starts;
         group B gets --verilator-j 1, group A 2."""
-        specs = {d: {"stamp": str(self.stamps), "name": d,
-                     "write": [{"path": str(self.job_dir(d, "O") / "run" / f"{d}.pre-vpr.blif"),
-                                "text": ".model m\n.end\n"}]}
-                 for d in ("sha", "mkPktMerge", "bgm")}
+        specs = {
+            d: {
+                "stamp": str(self.stamps),
+                "name": d,
+                "write": [
+                    {
+                        "path": str(self.job_dir(d, "O") / "run" / f"{d}.pre-vpr.blif"),
+                        "text": ".model m\n.end\n",
+                    }
+                ],
+            }
+            for d in ("sha", "mkPktMerge", "bgm")
+        }
         self.mode({"sleep": 0.05})
-        jobs = [dataclasses.replace(self.job(d, [specs[d]], leg="O", group=g),
-                                    ctx=self.legctx(d, "O", g))
-                for d, g in (("sha", "A"), ("mkPktMerge", "A"), ("bgm", "B"))]
+        jobs = [
+            dataclasses.replace(
+                self.job(d, [specs[d]], leg="O", group=g), ctx=self.legctx(d, "O", g)
+            )
+            for d, g in (("sha", "A"), ("mkPktMerge", "A"), ("bgm", "B"))
+        ]
         summary, _ = self.run_jobs(jobs, self.opts(fcheck=True, keep_netlists=frozenset({"O"})))
         self.assertEqual([r.status for r in summary.results], ["ok"] * 3)
         stamps = {(f[0], f[1]): float(f[2]) for f in self.stamp_lines()}
         starts, ends = self.calls(), self.ends()
-        self.assertEqual([c["argv"][c["argv"].index("--verilator-j") + 1] for c in starts],
-                         ["2", "2", "1"])
+        self.assertEqual(
+            [c["argv"][c["argv"].index("--verilator-j") + 1] for c in starts], ["2", "2", "1"]
+        )
         order = ["sha", "mkPktMerge", "bgm"]
         for i, design in enumerate(order):
             self.assertGreater(starts[i]["t0"], stamps[("end", design)])
-            self.assertLess(ends[i]["t1"], stamps.get(("start", order[i + 1]), 1e18)
-                            if i + 1 < len(order) else 1e18)
+            self.assertLess(
+                ends[i]["t1"],
+                stamps.get(("start", order[i + 1]), 1e18) if i + 1 < len(order) else 1e18,
+            )
         self.assertEqual([self.verdict(j) for j in jobs], ["pass"] * 3)
 
 
@@ -1178,16 +1435,30 @@ class EquivTest(RunnerTestBase):
         jobs = []
         for leg in ("O", "Oprime"):
             ctx = qor_legs.LegContext(
-                vtr_root=self.tmp / "vtr", python=Path(sys.executable), arch_xml=self.tmp / "a",
-                odin3=self.tmp / "odin3", repo=self.repo, job_dir=self.job_dir(design, leg),
-                k=6, group="A")
+                vtr_root=self.tmp / "vtr",
+                python=Path(sys.executable),
+                arch_xml=self.tmp / "a",
+                odin3=self.tmp / "odin3",
+                repo=self.repo,
+                job_dir=self.job_dir(design, leg),
+                k=6,
+                group="A",
+            )
             job = dataclasses.replace(self.job(design, [{}], leg=leg), ctx=ctx)
             job.job_dir.mkdir(parents=True, exist_ok=True)
             if keep:
                 (job.job_dir / f"{design}.blif").write_text(f".model {leg}\n.end\n")
-            (job.job_dir / "metrics.json").write_text(json.dumps({
-                "schema": 1, "key": job.key, "status": "ok", "verdicts": {"equiv": "skipped"},
-                "netlist": {"ram_slices": ram}}))
+            (job.job_dir / "metrics.json").write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "key": job.key,
+                        "status": "ok",
+                        "verdicts": {"equiv": "skipped"},
+                        "netlist": {"ram_slices": ram},
+                    }
+                )
+            )
             jobs.append(job)
         return jobs[0], jobs[1]
 
@@ -1196,15 +1467,22 @@ class EquivTest(RunnerTestBase):
 
     def test_equiv_command(self) -> None:
         repo, before, after = Path("/r"), Path("/j/Oprime/sha/sha.blif"), Path("/j/O/sha/sha.blif")
-        self.assertEqual(qor_sched.equiv_command(repo, before, after), [
-            "/r/tools/equiv-check/equiv-check", "--timeout", "600", str(before), str(after)])
+        self.assertEqual(
+            qor_sched.equiv_command(repo, before, after),
+            ["/r/tools/equiv-check/equiv-check", "--timeout", "600", str(before), str(after)],
+        )
         self.assertEqual((qor_sched.EQUIV_TIMEOUT_S, qor_sched.EQUIV_WALL_S), (600, 660))
 
     def test_equiv_classification(self) -> None:
         cases = [
-            (0, "", "equivalent"), (1, "equiv-check: NOT equivalent", "differs"),
-            (2, "equiv-check: unproven: x: unsupported: more than one clock domain (type, "
-                "clock): [('re', 'a'), ('re', 'b')]", "multiclock"),
+            (0, "", "equivalent"),
+            (1, "equiv-check: NOT equivalent", "differs"),
+            (
+                2,
+                "equiv-check: unproven: x: unsupported: more than one clock domain (type, "
+                "clock): [('re', 'a'), ('re', 'b')]",
+                "multiclock",
+            ),
             (4, "unproven: x: unsupported: more than one clock domain", "multiclock"),
             (2, "equiv-check: running ABC failed: timed out", "timeout"),
             (4, "unproven: ABC dsec timed out after 600 seconds", "timeout"),
@@ -1212,7 +1490,8 @@ class EquivTest(RunnerTestBase):
             (None, "", "timeout"),
             (2, "equiv-check: cannot read a.blif", "error"),
             (2, "running ABC failed: no such file", "error"),
-            (5, "ABC killed by signal 9", "capped"), (3, "", "error"),
+            (5, "ABC killed by signal 9", "capped"),
+            (3, "", "error"),
         ]
         for code, err, expected in cases:
             self.assertEqual(qor_sched.equiv_verdict(code, err), expected, (code, err))
@@ -1220,25 +1499,36 @@ class EquivTest(RunnerTestBase):
     def test_equiv_runs_the_tool(self) -> None:
         """The fake tool's exit and stderr give each verdict, written to the O job; the argv is
         O' then O."""
-        for code, err, expected in ((0, "", "equivalent"), (1, "", "differs"),
-                                    (2, "unsupported: more than one clock domain", "multiclock"),
-                                    (4, "timed out", "timeout"), (2, "boom", "error")):
+        for code, err, expected in (
+            (0, "", "equivalent"),
+            (1, "", "differs"),
+            (2, "unsupported: more than one clock domain", "multiclock"),
+            (4, "timed out", "timeout"),
+            (2, "boom", "error"),
+        ):
             self.mode({"exit": code, "stderr": err})
             o_job, prime = self.pair("sha")
             self.assertEqual(qor_sched.run_equiv("sha", o_job, prime, self.opts()), expected)
             self.assertEqual(self.verdict(o_job), expected)
             self.assertEqual((o_job.job_dir / "equiv.err").read_text(), err)
-        self.assertEqual(self.calls()[-1], [
-            "--timeout", "600", str(self.job_dir("sha", "Oprime") / "sha.blif"),
-            str(self.job_dir("sha", "O") / "sha.blif")])
+        self.assertEqual(
+            self.calls()[-1],
+            [
+                "--timeout",
+                "600",
+                str(self.job_dir("sha", "Oprime") / "sha.blif"),
+                str(self.job_dir("sha", "O") / "sha.blif"),
+            ],
+        )
 
     def test_equiv_stopped_at_the_night_deadline(self) -> None:
         """Review H3: ``equiv-check`` is killed at the night's deadline, well before its own
         wall cap."""
         o_job, prime = self.pair("sha")
         self.mode({"exit": 0, "sleep": 60})
-        opts = self.opts(clock=time.monotonic, deadline=time.monotonic() + 0.5,
-                         deadline_text="06:00")
+        opts = self.opts(
+            clock=time.monotonic, deadline=time.monotonic() + 0.5, deadline_text="06:00"
+        )
         started = time.monotonic()
         with redirect_stderr(io.StringIO()):
             verdict = qor_sched.run_equiv("sha", o_job, prime, opts)
@@ -1287,10 +1577,13 @@ class EquivTest(RunnerTestBase):
         gone_o, gone_prime = self.pair("stereovision3", keep=False)
         err = io.StringIO()
         with redirect_stderr(err):
-            self.assertEqual(qor_sched.run_equiv("stereovision3", gone_o, gone_prime,
-                                                 self.opts()), "error")
-        self.assertIn("vtr-qor: equiv: O' stereovision3: no kept netlist", err.getvalue()
-                      .replace("Oprime", "O'"))
+            self.assertEqual(
+                qor_sched.run_equiv("stereovision3", gone_o, gone_prime, self.opts()), "error"
+            )
+        self.assertIn(
+            "vtr-qor: equiv: O' stereovision3: no kept netlist",
+            err.getvalue().replace("Oprime", "O'"),
+        )
         self.assertEqual(self.verdict(gone_o), "error")
 
     def test_equiv_refused_outside_heavy_run(self) -> None:
@@ -1313,8 +1606,9 @@ class HeavyGuardTest(RunnerTestBase):
         no_scope = self.opts(scope=None)
         self.assert_refused(lambda: self.run_jobs([job], no_scope))
         self.assert_refused(lambda: qor_sched.run_one(job, no_scope, finish_ok))
-        self.assert_refused(lambda: qor_sched.run_command(job.commands[0], no_scope,
-                                                          deadline=time.time() + 60))
+        self.assert_refused(
+            lambda: qor_sched.run_command(job.commands[0], no_scope, deadline=time.time() + 60)
+        )
         self.assertFalse((self.out / "harness.log").exists())
         # ODIN3_HEAVY_SLICE with a scope object, but descriptor 9 is not the lock: not inside.
         with mock.patch.object(qor_heavy, "FD9", self.tmp / "no-fd9"):
@@ -1335,8 +1629,9 @@ class HeavyGuardTest(RunnerTestBase):
         shallow = dataclasses.replace(job, job_dir=self.out / "a" / "b" / "c" / "d")
         self.assert_refused(lambda: self.run_jobs([shallow], self.opts()))
         # An unknown group is refused, never silently dropped from the run.
-        self.assert_refused(lambda: self.run_jobs([job, dataclasses.replace(job, group="C")],
-                                                  self.opts()))
+        self.assert_refused(
+            lambda: self.run_jobs([job, dataclasses.replace(job, group="C")], self.opts())
+        )
         self.assert_refused(lambda: self.run_jobs([job], self.opts(job_timeout_s={"B": 1})))
 
 
@@ -1351,13 +1646,15 @@ class CommandTest(RunnerTestBase):
         out.write_text("old contents\n")
         spec = {"stdout": "OUT\n", "stderr": "ERR\n", "env_dump": str(dump)}
         cmd = self.command(spec, out, stderr=err, env=(("PYTHONPATH", "/v/libs"),))
-        result = qor_sched.run_command(cmd, self.opts(env={"PATH": os.defpath, "X": "1"}),
-                                       deadline=FakeClock().now + 60)
+        result = qor_sched.run_command(
+            cmd, self.opts(env={"PATH": os.defpath, "X": "1"}), deadline=FakeClock().now + 60
+        )
         self.assertEqual((result.kind, result.returncode), ("exit", 0))
         self.assertEqual((out.read_text(), err.read_text()), ("OUT\n", "ERR\n"))
         env = json.loads(dump.read_text())
-        self.assertEqual((env["PYTHONDONTWRITEBYTECODE"], env["PYTHONPATH"], env["X"]),
-                         ("1", "/v/libs", "1"))
+        self.assertEqual(
+            (env["PYTHONDONTWRITEBYTECODE"], env["PYTHONPATH"], env["X"]), ("1", "/v/libs", "1")
+        )
         merged = work / "merged.log"
         cmd = self.command(spec, merged)
         qor_sched.run_command(cmd, self.opts(), deadline=FakeClock().now + 60)
@@ -1369,8 +1666,9 @@ class CommandTest(RunnerTestBase):
         job = dataclasses.replace(job, commands=(bad,))
         result = qor_sched.run_one(job, self.opts(), finish_ok)
         self.assertEqual(result.status, "failed")
-        self.assertEqual(result.error,
-                         f"P sha: cannot run {self.tmp / 'nope'}: No such file or directory")
+        self.assertEqual(
+            result.error, f"P sha: cannot run {self.tmp / 'nope'}: No such file or directory"
+        )
 
     def test_group_stragglers_killed(self) -> None:
         """A job that exits 0 but leaves a grandchild running: the grandchild is killed before
@@ -1428,8 +1726,10 @@ class CommandTest(RunnerTestBase):
         flag, pids = self.tmp / "term", self.tmp / "pids"
         spec = {"on_term": str(flag), "spawn_sleep": 600, "pids": str(pids), "sleep": 600}
         began = frozen = time.monotonic()
-        opts = self.opts(clock=lambda: time.monotonic() if pids.exists() else frozen,
-                         job_timeout_s={"A": 1, "B": 1})
+        opts = self.opts(
+            clock=lambda: time.monotonic() if pids.exists() else frozen,
+            job_timeout_s={"A": 1, "B": 1},
+        )
         with mock.patch.object(qor_sched, "KILL_GRACE_S", 60.0):
             result = qor_sched.run_one(self.job("sha", [spec]), opts, finish_ok)
         self.assertEqual(result.status, "timeout")
@@ -1458,8 +1758,7 @@ class CommandTest(RunnerTestBase):
             fd = os.open(other, os.O_RDONLY)
             os.dup2(fd, 9)
             qor_sched.run_command(cmd, self.opts(), deadline=FakeClock().now + 60)
-            self.assertFalse(any(line.startswith("9 ") for line in
-                                 dump.read_text().splitlines()))
+            self.assertFalse(any(line.startswith("9 ") for line in dump.read_text().splitlines()))
         finally:
             os.close(9)
             os.close(fd)
@@ -1473,16 +1772,26 @@ class OutcomeTest(RunnerTestBase):
         (self.slice / "memory.peak").write_text(f"{6100 * MIB}\n")
         vpr_out = str(self.job_dir("sha") / "run" / "vpr.out")
         parmys = str(self.job_dir("sha") / "run" / "parmys.out")
-        spec = {"stamp": str(self.stamps), "name": "sha", "exit": 1,
-                "write": [{"path": parmys, "text": "done\n", "age_s": 60},
-                          {"path": vpr_out, "text": "routing\n"}],
-                "oom_kill": {"events": str(self.events), "add": 1}}
+        spec = {
+            "stamp": str(self.stamps),
+            "name": "sha",
+            "exit": 1,
+            "write": [
+                {"path": parmys, "text": "done\n", "age_s": 60},
+                {"path": vpr_out, "text": "routing\n"},
+            ],
+            "oom_kill": {"events": str(self.events), "add": 1},
+        }
         summary, lines = self.run_jobs([self.job("sha", [spec])], self.opts())
         self.assertEqual([r.status for r in summary.results], ["capped"])
-        capped = ("vtr-qor: P sha: capped: stage vpr.out exceeded the 6 GiB scope "
-                  "(peak ≥ 6000 MiB at the kill)")
-        self.assertEqual(lines[:3], [capped, "vtr-qor: P sha: no verdict",
-                                     "vtr-qor: [1/1] P sha capped 0.0 s (A, j1)"])
+        capped = (
+            "vtr-qor: P sha: capped: stage vpr.out exceeded the 6 GiB scope "
+            "(peak ≥ 6000 MiB at the kill)"
+        )
+        self.assertEqual(
+            lines[:3],
+            [capped, "vtr-qor: P sha: no verdict", "vtr-qor: [1/1] P sha capped 0.0 s (A, j1)"],
+        )
         self.assertEqual(self.starts(), ["sha"])
         self.assertEqual(summary.exit_code, 3)
         self.assertEqual((self.job_dir("sha") / "status").read_text(), "capped\n")
@@ -1500,14 +1809,23 @@ class OutcomeTest(RunnerTestBase):
     def test_capped_unknown_peak_and_xl(self) -> None:
         spec = {"exit": 137, "oom_kill": {"events": str(self.events), "add": 2}}
         result = qor_sched.run_one(self.job("sha", [spec]), self.opts(), finish_ok)
-        self.assertEqual(result.error, "P sha: capped: stage ? exceeded the 6 GiB scope "
-                                       "(peak ≥ ? MiB at the kill)")
+        self.assertEqual(
+            result.error,
+            "P sha: capped: stage ? exceeded the 6 GiB scope (peak ≥ ? MiB at the kill)",
+        )
 
     def test_fresh_attempt_mtime(self) -> None:
         job_dir = self.job_dir("sha")
         (job_dir / "run").mkdir(parents=True)
-        for name in ("run/vpr.out", "run/parse_results.txt", "metrics.json", "status",
-                     "job.json", "sha.blif", "frontend.log"):
+        for name in (
+            "run/vpr.out",
+            "run/parse_results.txt",
+            "metrics.json",
+            "status",
+            "job.json",
+            "sha.blif",
+            "frontend.log",
+        ):
             (job_dir / name).write_text("previous attempt\n")
         job = self.job("sha", [])
         before = time.time()
@@ -1519,8 +1837,9 @@ class OutcomeTest(RunnerTestBase):
         parse = str(job_dir / "run" / "parse_results.txt")
 
         def finish(job: Job, attempt_start: float) -> dict[str, object]:
-            fields = qor_parse.read_parse_results(Path(parse), not_before=attempt_start,
-                                                  label=f"{job.leg} {job.design}")
+            fields = qor_parse.read_parse_results(
+                Path(parse), not_before=attempt_start, label=f"{job.leg} {job.design}"
+            )
             return {"routed": {"vpr_status": fields["vpr_status"]}}
 
         stale = self.job("sha", [{"write": [{"path": parse, "text": PARSE_TEXT, "age_s": 60}]}])
@@ -1574,8 +1893,10 @@ class OutcomeTest(RunnerTestBase):
         with mock.patch.object(qor_sched, "KILL_GRACE_S", 0.5):
             summary, lines = self.run_jobs(jobs, opts)
         self.assertEqual([r.status for r in summary.results], ["timeout", "ok"])
-        pattern = re.compile(r"vtr-qor: O slow: timeout after 1 s in front end "
-                             r"\(elapsed \d+ s\)")
+        pattern = re.compile(
+            r"vtr-qor: O slow: timeout after 1 s in front end "
+            r"\(elapsed \d+ s\)"
+        )
         self.assertTrue(any(pattern.fullmatch(line) for line in lines), lines)
         self.assertEqual(summary.exit_code, 3)
 
@@ -1614,13 +1935,13 @@ class OutcomeTest(RunnerTestBase):
         job = self.job("sha", [{}])
 
         def finish(job: Job, start: float) -> dict[str, object]:
-            (job.job_dir / "metrics.json").write_text(json.dumps({"status": "ok",
-                                                                  "key": job.key}))
+            (job.job_dir / "metrics.json").write_text(json.dumps({"status": "ok", "key": job.key}))
             raise ValueError("bad number")
 
         result = qor_sched.run_one(job, self.opts(), finish)
-        self.assertEqual((result.status, result.error),
-                         ("failed", "P sha: cannot finish the job: bad number"))
+        self.assertEqual(
+            (result.status, result.error), ("failed", "P sha: cannot finish the job: bad number")
+        )
         self.assertFalse((job.job_dir / "metrics.json").exists())
         self.assertFalse(qor_sched.job_complete(job))
         result = qor_sched.run_one(job, self.opts(), lambda j, s: {"x": object()})
@@ -1633,8 +1954,10 @@ class OutcomeTest(RunnerTestBase):
         result = qor_sched.run_one(job, self.opts(clock=clock), finish_ok)
         self.assertEqual(result.status, "ok")
         metrics = json.loads((job.job_dir / "metrics.json").read_text())
-        self.assertEqual((metrics["status"], metrics["key"], metrics["error"], metrics["leg"]),
-                         ("ok", job.key, "", "P"))
+        self.assertEqual(
+            (metrics["status"], metrics["key"], metrics["error"], metrics["leg"]),
+            ("ok", job.key, "", "P"),
+        )
         self.assertEqual(metrics["elapsed_s"], round(result.elapsed_s, 1))
         self.assertTrue((job.job_dir / "metrics.json").read_text().startswith('{\n "elapsed_s"'))
         self.assertEqual((job.job_dir / "status").read_text(), "ok\n")
@@ -1653,8 +1976,13 @@ class CgroupKillTest(RunnerTestBase):
 
     def stage(self, **extra: Any) -> Spec:
         """A fake run_vtr_flow: a stage in its own session, then it waits."""
-        spec: Spec = {"spawn_sleep": 600, "spawn_session": True, "pids": str(self.pids),
-                      "cgroup_procs": str(self.cg / "cgroup.procs"), "sleep": 600}
+        spec: Spec = {
+            "spawn_sleep": 600,
+            "spawn_session": True,
+            "pids": str(self.pids),
+            "cgroup_procs": str(self.cg / "cgroup.procs"),
+            "sleep": 600,
+        }
         spec.update(extra)
         return spec
 
@@ -1683,12 +2011,15 @@ class CgroupKillTest(RunnerTestBase):
         self.assertIn(str(leader), (self.cg / "cgroup.procs").read_text().split())
 
     def test_setsid_stage_killed_on_timeout(self) -> None:
-        opts = self.opts(clock=self.held_clock(), sleep=time.sleep,
-                         job_timeout_s={"A": 1, "B": 1})
+        opts = self.opts(clock=self.held_clock(), sleep=time.sleep, job_timeout_s={"A": 1, "B": 1})
         with mock.patch.object(qor_sched, "KILL_GRACE_S", 0.5):
-            summary, lines = self.run_jobs([self.job("sha", [self.stage()]),
-                                            self.job("next", [{"stamp": str(self.stamps),
-                                                               "name": "next"}])], opts)
+            summary, lines = self.run_jobs(
+                [
+                    self.job("sha", [self.stage()]),
+                    self.job("next", [{"stamp": str(self.stamps), "name": "next"}]),
+                ],
+                opts,
+            )
         self.assertEqual(len(set(self.sessions)), 2)  # the stage really had its own session
         self.assertEqual([r.status for r in summary.results], ["timeout", "ok"])
         self.assertTrue(_wait_dead(self.pid_list(), 0.1))  # dead before the next job ran
@@ -1698,8 +2029,7 @@ class CgroupKillTest(RunnerTestBase):
     def test_setsid_stage_killed_on_floor(self) -> None:
         spec = self.stage(write=[{"path": str(self.df_file), "text": "9\n"}])
         summary, _ = self.run_jobs([self.job("sha", [spec])], self.opts(clock=ScaledClock(600)))
-        self.assertEqual(([r.status for r in summary.results], summary.exit_code),
-                         (["aborted"], 5))
+        self.assertEqual(([r.status for r in summary.results], summary.exit_code), (["aborted"], 5))
         self.assertTrue(_wait_dead(self.pid_list(), 0.1))
 
     def test_setsid_stage_killed_on_sigterm(self) -> None:
@@ -1721,8 +2051,7 @@ class CgroupKillTest(RunnerTestBase):
     def test_setsid_straggler_after_exit(self) -> None:
         """A job that exits 0 leaving a stage in its own session: the stage is killed before
         run_one returns."""
-        result = qor_sched.run_one(self.job("sha", [self.stage(sleep=0)]), self.opts(),
-                                   finish_ok)
+        result = qor_sched.run_one(self.job("sha", [self.stage(sleep=0)]), self.opts(), finish_ok)
         self.assertEqual(result.status, "ok")
         self.assertTrue(_wait_dead(self.pid_list(), 0.1))
 
@@ -1730,11 +2059,11 @@ class CgroupKillTest(RunnerTestBase):
         """On a timeout the stage in its own session gets SIGTERM, and the grace lasts until the
         cgroup is empty (not just until run_vtr_flow, which dies at once, has gone)."""
         flag = self.tmp / "stage-term"
-        opts = self.opts(clock=self.held_clock(), sleep=time.sleep,
-                         job_timeout_s={"A": 1, "B": 1})
+        opts = self.opts(clock=self.held_clock(), sleep=time.sleep, job_timeout_s={"A": 1, "B": 1})
         with mock.patch.object(qor_sched, "KILL_GRACE_S", 20.0):
-            result = qor_sched.run_one(self.job("sha", [self.stage(stage_on_term=str(flag))]),
-                                       opts, finish_ok)
+            result = qor_sched.run_one(
+                self.job("sha", [self.stage(stage_on_term=str(flag))]), opts, finish_ok
+            )
         self.assertEqual(result.status, "timeout")
         self.assertEqual(flag.read_text(), "term\n")
         self.assertTrue(_wait_dead(self.pid_list(), 0.1))
@@ -1742,11 +2071,11 @@ class CgroupKillTest(RunnerTestBase):
     def test_cgroup_kill_written(self) -> None:
         self.cg.mkdir()
         (self.cg / "cgroup.kill").write_text("")
-        opts = self.opts(clock=self.held_clock(), sleep=time.sleep,
-                         job_timeout_s={"A": 1, "B": 1})
+        opts = self.opts(clock=self.held_clock(), sleep=time.sleep, job_timeout_s={"A": 1, "B": 1})
         with mock.patch.object(qor_sched, "KILL_GRACE_S", 0.2):
-            result = qor_sched.run_one(self.job("sha", [self.stage(ignore_term=True)]), opts,
-                                       finish_ok)
+            result = qor_sched.run_one(
+                self.job("sha", [self.stage(ignore_term=True)]), opts, finish_ok
+            )
         self.assertEqual(result.status, "timeout")
         self.assertEqual((self.cg / "cgroup.kill").read_text(), "1")
         self.assertTrue(_wait_dead(self.pid_list(), 0.1))
@@ -1761,8 +2090,11 @@ class CgroupKillTest(RunnerTestBase):
             where.mkdir(exist_ok=True)
             (where / "cgroup.procs").write_text(f"{os.getpid()}\n{sleeper.pid}\n")
             summary, lines = self.run_jobs([job], self.opts())
-            self.assertEqual(lines[0], f"vtr-qor: one job at a time: {where} still holds "
-                                       f"process {sleeper.pid}; not starting another")
+            self.assertEqual(
+                lines[0],
+                f"vtr-qor: one job at a time: {where} still holds "
+                f"process {sleeper.pid}; not starting another",
+            )
             self.assertEqual((summary.exit_code, self.starts()), (2, []))
             (where / "cgroup.procs").write_text("")
         summary, _ = self.run_jobs([job], self.opts())
@@ -1772,23 +2104,28 @@ class CgroupKillTest(RunnerTestBase):
         """A member that cannot be killed (pid 1 stands in): the run stops rather than start the
         next job beside it."""
         spec = {"write": [{"path": str(self.cg / "cgroup.procs"), "text": "1\n"}]}
-        jobs = [self.job("sha", [spec]), self.job("next", [{"stamp": str(self.stamps),
-                                                            "name": "next"}])]
+        jobs = [
+            self.job("sha", [spec]),
+            self.job("next", [{"stamp": str(self.stamps), "name": "next"}]),
+        ]
         with mock.patch.object(qor_sched, "CGROUP_DRAIN_S", 0.3):
             summary, lines = self.run_jobs(jobs, self.opts())
         error = f"P sha: failed (drain): {self.cg} still holds processes [1] after 0.3 s; stopping"
         self.assertIn(f"vtr-qor: {error}", lines)
         self.assertIn("vtr-qor: [1/2] P sha failed 0.0 s (A, j1)", lines)
-        self.assertEqual([(r.job.design, r.status, r.error) for r in summary.results],
-                         [("sha", "failed", error), ("next", "skipped", "not started")])
+        self.assertEqual(
+            [(r.job.design, r.status, r.error) for r in summary.results],
+            [("sha", "failed", error), ("next", "skipped", "not started")],
+        )
         self.assertEqual((self.job_dir("sha") / "status").read_text(), "failed\n")
         self.assertEqual((summary.exit_code, self.starts()), (2, []))
 
     def test_no_cgroup_no_job(self) -> None:
         """A job cgroup that cannot be created (here: a file in its place): nothing starts."""
         self.cg.write_text("")
-        summary, lines = self.run_jobs([self.job("sha", [{"stamp": str(self.stamps),
-                                                          "name": "sha"}])], self.opts())
+        summary, lines = self.run_jobs(
+            [self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}])], self.opts()
+        )
         self.assertTrue(lines[0].startswith(f"vtr-qor: cannot create the job cgroup {self.cg}"))
         self.assertEqual((summary.exit_code, self.starts()), (2, []))
 
@@ -1800,8 +2137,9 @@ class DfTest(RunnerTestBase):
         self.df_hang.touch()
         began = time.monotonic()
         with mock.patch.object(qor_heavy, "DF_TIMEOUT_S", 0.3):
-            summary, lines = self.run_jobs([self.job("sha", [{"stamp": str(self.stamps),
-                                                              "name": "sha"}])], self.opts())
+            summary, lines = self.run_jobs(
+                [self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}])], self.opts()
+            )
         self.assertLess(time.monotonic() - began, 60)  # the hung df sleeps 600 s
         self.assertEqual(lines[0], "vtr-qor: cannot read free space of /mnt/c")
         self.assertEqual((summary.exit_code, self.starts()), (5, []))
@@ -1810,22 +2148,32 @@ class DfTest(RunnerTestBase):
         spec = {"write": [{"path": str(self.df_hang), "text": ""}], "sleep": 600}
         began = time.monotonic()
         with mock.patch.object(qor_heavy, "DF_TIMEOUT_S", 0.3):
-            summary, _ = self.run_jobs([self.job("sha", [spec])],
-                                       self.opts(clock=ScaledClock(600)))
+            summary, _ = self.run_jobs([self.job("sha", [spec])], self.opts(clock=ScaledClock(600)))
         self.assertLess(time.monotonic() - began, 60)  # the hung df sleeps 600 s
-        self.assertEqual((summary.results[0].status, summary.results[0].error, summary.exit_code),
-                         ("aborted", "cannot read free space of /mnt/c", 5))
+        self.assertEqual(
+            (summary.results[0].status, summary.results[0].error, summary.exit_code),
+            ("aborted", "cannot read free space of /mnt/c", 5),
+        )
 
     def test_timeout_despite_hung_df(self) -> None:
         pids = self.tmp / "pids"
-        spec = {"write": [{"path": str(self.df_hang), "text": ""}], "spawn_sleep": 600,
-                "pids": str(pids), "sleep": 600}
+        spec = {
+            "write": [{"path": str(self.df_hang), "text": ""}],
+            "spawn_sleep": 600,
+            "pids": str(pids),
+            "sleep": 600,
+        }
         frozen = time.monotonic()
-        opts = self.opts(clock=lambda: time.monotonic() if pids.exists() else frozen,
-                         sleep=time.sleep, job_timeout_s={"A": 1, "B": 1})
+        opts = self.opts(
+            clock=lambda: time.monotonic() if pids.exists() else frozen,
+            sleep=time.sleep,
+            job_timeout_s={"A": 1, "B": 1},
+        )
         began = time.monotonic()
-        with mock.patch.object(qor_sched, "POLL_S", 0.05), \
-                mock.patch.object(qor_sched, "KILL_GRACE_S", 0.5):
+        with (
+            mock.patch.object(qor_sched, "POLL_S", 0.05),
+            mock.patch.object(qor_sched, "KILL_GRACE_S", 0.5),
+        ):
             result = qor_sched.run_one(self.job("sha", [spec]), opts, finish_ok)
         self.assertEqual(result.status, "timeout")  # not aborted by the df probe's 30 s limit
         self.assertLess(time.monotonic() - began, 25)
@@ -1837,26 +2185,32 @@ class CompletionTest(RunnerTestBase):
 
     def p_spec(self) -> Spec:
         run = self.job_dir("sha") / "run"
-        return {"stamp": str(self.stamps), "name": "sha",
-                "write": [{"path": str(run / "sha.pre-vpr.blif"), "text": ".model sha\n"}]}
+        return {
+            "stamp": str(self.stamps),
+            "name": "sha",
+            "write": [{"path": str(run / "sha.pre-vpr.blif"), "text": ".model sha\n"}],
+        }
 
     def test_interrupted_cleanup_publishes_nothing(self) -> None:
         job = self.job("sha", [self.p_spec()])
-        with mock.patch.object(qor_sched, "cleanup_job", side_effect=SystemExit(143)), \
-                self.assertRaises(SystemExit):
+        with (
+            mock.patch.object(qor_sched, "cleanup_job", side_effect=SystemExit(143)),
+            self.assertRaises(SystemExit),
+        ):
             qor_sched.run_one(job, self.opts(), finish_ok)
         self.assertFalse((job.job_dir / "metrics.json").exists())
         self.assertFalse(qor_sched.job_complete(job))
 
     def test_cleanup_failure_fails_the_job(self) -> None:
         job = self.job("sha", [self.p_spec()])
-        with mock.patch.object(qor_sched, "cleanup_job",
-                               side_effect=HeavyError(2, "refusing to delete x")):
+        with mock.patch.object(
+            qor_sched, "cleanup_job", side_effect=HeavyError(2, "refusing to delete x")
+        ):
             result = qor_sched.run_one(job, self.opts(), finish_ok)
-        self.assertEqual((result.status, result.error),
-                         ("failed", "P sha: cleanup failed: refusing to delete x"))
-        self.assertEqual(json.loads((job.job_dir / "metrics.json").read_text())["status"],
-                         "failed")
+        self.assertEqual(
+            (result.status, result.error), ("failed", "P sha: cleanup failed: refusing to delete x")
+        )
+        self.assertEqual(json.loads((job.job_dir / "metrics.json").read_text())["status"], "failed")
         self.assertFalse(qor_sched.job_complete(job))
 
     def test_order_cleanup_status_metrics(self) -> None:
@@ -1866,8 +2220,10 @@ class CompletionTest(RunnerTestBase):
         run = job.job_dir / "run"
         self.assertTrue((run / "sha.pre-vpr.blif.gz").exists())
         self.assertFalse((run / "sha.pre-vpr.blif").exists())
-        self.assertLessEqual((job.job_dir / "status").stat().st_mtime_ns,
-                             (job.job_dir / "metrics.json").stat().st_mtime_ns)
+        self.assertLessEqual(
+            (job.job_dir / "status").stat().st_mtime_ns,
+            (job.job_dir / "metrics.json").stat().st_mtime_ns,
+        )
         self.assertTrue(qor_sched.job_complete(job))
 
     def test_half_done_job_redone(self) -> None:
@@ -1900,10 +2256,15 @@ class CompletionTest(RunnerTestBase):
         def broken(job: Job, start: float) -> None:
             raise ValueError("no disk")
 
-        result = qor_sched.run_one(self.job("sha", [{"stamp": str(self.stamps), "name": "x"}]),
-                                   self.opts(prepare=broken), finish_ok)
-        self.assertEqual((result.status, result.error, self.starts()),
-                         ("failed", "P sha: cannot prepare the job: no disk", []))
+        result = qor_sched.run_one(
+            self.job("sha", [{"stamp": str(self.stamps), "name": "x"}]),
+            self.opts(prepare=broken),
+            finish_ok,
+        )
+        self.assertEqual(
+            (result.status, result.error, self.starts()),
+            ("failed", "P sha: cannot prepare the job: no disk", []),
+        )
 
     def test_unwritable_log(self) -> None:
         (self.out / "harness.log").mkdir()
@@ -1924,9 +2285,13 @@ class AdmissionTest(RunnerTestBase):
         clock.on_sleep = lambda n: self.set_df(25)
         job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}])
         summary, lines = self.run_jobs([job], self.opts(clock=clock, sleep=clock.sleep))
-        self.assertEqual(lines[:2], [
-            "vtr-qor: paused: C: has 15 GiB free (< 20 GiB); checking every 60 s",
-            "vtr-qor: resumed: C: has 25 GiB free"])
+        self.assertEqual(
+            lines[:2],
+            [
+                "vtr-qor: paused: C: has 15 GiB free (< 20 GiB); checking every 60 s",
+                "vtr-qor: resumed: C: has 25 GiB free",
+            ],
+        )
         self.assertEqual(clock.sleeps, [60])
         self.assertEqual((self.starts(), summary.exit_code), (["sha"], 0))
 
@@ -1935,24 +2300,37 @@ class AdmissionTest(RunnerTestBase):
         clock = FakeClock()
         jobs = [self.job(d, [{"stamp": str(self.stamps), "name": d}]) for d in ("a", "b", "c")]
         summary, lines = self.run_jobs(jobs, self.opts(clock=clock, sleep=clock.sleep))
-        self.assertEqual(lines[:3], [
-            "vtr-qor: paused: C: has 15 GiB free (< 20 GiB); checking every 60 s",
-            "vtr-qor: C: stayed below 20 GiB free for 2 h; stopping (3 jobs not started)",
-            HINT])
+        self.assertEqual(
+            lines[:3],
+            [
+                "vtr-qor: paused: C: has 15 GiB free (< 20 GiB); checking every 60 s",
+                "vtr-qor: C: stayed below 20 GiB free for 2 h; stopping (3 jobs not started)",
+                HINT,
+            ],
+        )
         self.assertEqual(sum(clock.sleeps), 7200)
         self.assertEqual(self.starts(), [])
         self.assertEqual([r.status for r in summary.results], ["skipped"] * 3)
         self.assertEqual((summary.exit_code, summary.stopped_for_disk), (5, True))
-        self.assertTrue(lines[-1].startswith("vtr-qor: done: 0 ok, 0 failed, 0 capped, "
-                                             "0 timeout, 3 skipped in "))
+        self.assertTrue(
+            lines[-1].startswith(
+                "vtr-qor: done: 0 ok, 0 failed, 0 capped, 0 timeout, 3 skipped in "
+            )
+        )
 
     def test_admission_floor_while_running(self) -> None:
         """C: drops to 9 GiB while a job runs: it is terminated (aborted), the run stops, exit 5."""
         pids = self.tmp / "pids"
-        spec = {"write": [{"path": str(self.df_file), "text": "9\n"}], "spawn_sleep": 600,
-                "pids": str(pids), "sleep": 600}
-        jobs = [self.job("sha", [spec]),
-                self.job("later", [{"stamp": str(self.stamps), "name": "later"}])]
+        spec = {
+            "write": [{"path": str(self.df_file), "text": "9\n"}],
+            "spawn_sleep": 600,
+            "pids": str(pids),
+            "sleep": 600,
+        }
+        jobs = [
+            self.job("sha", [spec]),
+            self.job("later", [{"stamp": str(self.stamps), "name": "later"}]),
+        ]
         summary, lines = self.run_jobs(jobs, self.opts(clock=ScaledClock(600)))
         self.assertIn("vtr-qor: C: fell below 10 GiB free; terminating 1 running jobs", lines)
         self.assertEqual([r.status for r in summary.results], ["aborted", "skipped"])
@@ -1964,8 +2342,7 @@ class AdmissionTest(RunnerTestBase):
 
     def test_df_fails_while_running(self) -> None:
         spec = {"write": [{"path": str(self.df_file), "text": "garbage\n"}], "sleep": 600}
-        summary, lines = self.run_jobs([self.job("sha", [spec])],
-                                       self.opts(clock=ScaledClock(600)))
+        summary, lines = self.run_jobs([self.job("sha", [spec])], self.opts(clock=ScaledClock(600)))
         self.assertEqual(summary.results[0].error, "cannot read free space of /mnt/c")
         self.assertEqual((summary.results[0].status, summary.exit_code), ("aborted", 5))
 
@@ -1973,8 +2350,7 @@ class AdmissionTest(RunnerTestBase):
         self.df_file.write_text("garbage\n")
         summary, lines = self.run_jobs([self.job("sha", [{}])], self.opts())
         self.assertEqual(lines[0], "vtr-qor: cannot read free space of /mnt/c")
-        self.assertEqual(([r.status for r in summary.results], summary.exit_code),
-                         (["skipped"], 5))
+        self.assertEqual(([r.status for r in summary.results], summary.exit_code), (["skipped"], 5))
 
     def test_admission_mem_wait(self) -> None:
         self.set_mem(6.5)
@@ -2001,10 +2377,14 @@ class AdmissionTest(RunnerTestBase):
         clock = FakeClock()
         jobs = [self.job(d, [{"stamp": str(self.stamps), "name": d}]) for d in ("a", "b")]
         summary, lines = self.run_jobs(jobs, self.opts(clock=clock, sleep=clock.sleep))
-        self.assertEqual(lines[:3], [
-            "vtr-qor: waiting: 6.5 GiB available (< 7)",
-            "vtr-qor: MemAvailable stayed below 7 GiB for 2 h; stopping (2 jobs not started)",
-            "vtr-qor: done: 0 ok, 0 failed, 0 capped, 0 timeout, 2 skipped in 2:00:00"])
+        self.assertEqual(
+            lines[:3],
+            [
+                "vtr-qor: waiting: 6.5 GiB available (< 7)",
+                "vtr-qor: MemAvailable stayed below 7 GiB for 2 h; stopping (2 jobs not started)",
+                "vtr-qor: done: 0 ok, 0 failed, 0 capped, 0 timeout, 2 skipped in 2:00:00",
+            ],
+        )
         self.assertEqual((sum(clock.sleeps), summary.exit_code, self.starts()), (7200, 5, []))
         # Short for 1 h, fine, short again for 1 h: the count restarted, so no stop.
         clock = FakeClock()
@@ -2037,15 +2417,25 @@ class AdmissionTest(RunnerTestBase):
         clock = FakeClock()
         jobs = [self.job(d, [{"stamp": str(self.stamps), "name": d}]) for d in ("a", "b", "c")]
         minutes = {"a": 30, "b": 200, "c": 30}
-        opts = self.opts(clock=clock, sleep=clock.sleep, deadline=clock.now + 100 * 60,
-                         expected_s=lambda job: minutes[job.design] * 60.0)
+        opts = self.opts(
+            clock=clock,
+            sleep=clock.sleep,
+            deadline=clock.now + 100 * 60,
+            expected_s=lambda job: minutes[job.design] * 60.0,
+        )
         summary, lines = self.run_jobs(jobs, opts)
         self.assertEqual([r.status for r in summary.results], ["ok", "skipped", "ok"])
         # The deadline is on the run's clock; the text shows it as local wall time.
-        whens = {time.strftime("%H:%M", time.localtime(time.time() + 100 * 60 + d))
-                 for d in (-60, 0)}
-        self.assertTrue(any(f"vtr-qor: nightly: P b not started: expected 200 min would pass "
-                            f"{when}" in lines for when in whens), lines)
+        whens = {
+            time.strftime("%H:%M", time.localtime(time.time() + 100 * 60 + d)) for d in (-60, 0)
+        }
+        self.assertTrue(
+            any(
+                f"vtr-qor: nightly: P b not started: expected 200 min would pass {when}" in lines
+                for when in whens
+            ),
+            lines,
+        )
         self.assertEqual(summary.exit_code, 0)
 
 
@@ -2062,8 +2452,9 @@ class CleanupTest(RunnerTestBase):
         self.assertEqual(len(list(run.iterdir())), 20)
         original = (run / "sha.pre-vpr.blif").read_bytes()
         qor_sched.cleanup_job(job, self.ok(job), frozenset())
-        self.assertEqual(sorted(p.name for p in run.iterdir()),
-                         sorted((*KEEP_PRESENT, "sha.pre-vpr.blif.gz")))
+        self.assertEqual(
+            sorted(p.name for p in run.iterdir()), sorted((*KEEP_PRESENT, "sha.pre-vpr.blif.gz"))
+        )
         self.assertEqual(gzip.decompress((run / "sha.pre-vpr.blif.gz").read_bytes()), original)
         # Reproducible bytes (no name, no time in the gzip header).
         first = (run / "sha.pre-vpr.blif.gz").read_bytes()
@@ -2100,8 +2491,11 @@ class CleanupTest(RunnerTestBase):
         for status in ("failed", "capped", "timeout", "aborted"):
             job, run, blif = self.make_o()
             qor_sched.cleanup_job(job, qor_sched.JobResult(job, status, 1.0, "x"), frozenset())
-            self.assertEqual(sorted(p.name for p in run.iterdir()),
-                             ["sha.net", "sha.pre-vpr.blif", "sub", "vpr.out"], status)
+            self.assertEqual(
+                sorted(p.name for p in run.iterdir()),
+                ["sha.net", "sha.pre-vpr.blif", "sub", "vpr.out"],
+                status,
+            )
             self.assertTrue(blif.exists())
 
     def test_cleanup_refuses_symlink(self) -> None:
@@ -2117,12 +2511,18 @@ class CleanupTest(RunnerTestBase):
 
     def test_run_cleans_ok_job(self) -> None:
         run = self.job_dir("sha") / "run"
-        spec = {"write": [{"path": str(run / n), "text": n} for n in ("vpr.out", "sha.net",
-                                                                      "sha.pre-vpr.blif")]}
+        spec = {
+            "write": [
+                {"path": str(run / n), "text": n}
+                for n in ("vpr.out", "sha.net", "sha.pre-vpr.blif")
+            ]
+        }
         summary, _ = self.run_jobs([self.job("sha", [spec])], self.opts())
         self.assertEqual(summary.exit_code, 0)
-        self.assertEqual(sorted(p.name for p in run.iterdir()),
-                         ["sha.pre-vpr.blif.gz", "vpr.out", "vtr_flow.out"])
+        self.assertEqual(
+            sorted(p.name for p in run.iterdir()),
+            ["sha.pre-vpr.blif.gz", "vpr.out", "vtr_flow.out"],
+        )
 
 
 class RetentionBase(RunnerTestBase):
@@ -2131,8 +2531,7 @@ class RetentionBase(RunnerTestBase):
     def leg_dir(self, leg: str = "P") -> Path:
         return self.out / VTR12 / K6 / leg
 
-    def make(self, key12: str, design: str, status: str, when: float, *,
-             size: int = 100) -> Path:
+    def make(self, key12: str, design: str, status: str, when: float, *, size: int = 100) -> Path:
         job_dir = self.leg_dir() / key12 / design
         (job_dir / "run").mkdir(parents=True)
         with (job_dir / "run" / "big").open("wb") as handle:
@@ -2143,8 +2542,11 @@ class RetentionBase(RunnerTestBase):
         os.utime(job_dir / "status", (when, when))
         return job_dir
 
-    def prune(self, designs: tuple[str, ...] | None = ("sha", "ch_intrinsics"),
-              protect: tuple[str, ...] = ()) -> None:
+    def prune(
+        self,
+        designs: tuple[str, ...] | None = ("sha", "ch_intrinsics"),
+        protect: tuple[str, ...] = (),
+    ) -> None:
         qor_sched.prune(self.out, VTR12, K6, "P", designs=designs, protect=protect)
 
     def names(self) -> list[str]:
@@ -2200,14 +2602,23 @@ class RetentionTest(RetentionBase):
         for i in range(1, 4):
             for design in ("sha", "ch_intrinsics"):
                 self.make(f"{i:012x}", design, "ok", 1_000_000.0 + i)
-        self.make("aaaaaaaaaaaa", "sha", "failed", 1.0)       # older than all 3: goes
-        self.make("bbbbbbbbbbbb", "sha", "ok", 1_000_002.5)   # newer than one: stays
-        self.make("cccccccccccc", "sha", "failed", 2.0)       # old but latest: stays
-        self.make("dddddddddddd", "sha", "failed", 3.0)       # old but the run's: stays
+        self.make("aaaaaaaaaaaa", "sha", "failed", 1.0)  # older than all 3: goes
+        self.make("bbbbbbbbbbbb", "sha", "ok", 1_000_002.5)  # newer than one: stays
+        self.make("cccccccccccc", "sha", "failed", 2.0)  # old but latest: stays
+        self.make("dddddddddddd", "sha", "failed", 3.0)  # old but the run's: stays
         (self.leg_dir() / "latest").write_text("cccccccccccc\n")
         self.prune(protect=("dddddddddddd",))
-        self.assertEqual(self.names(), ["000000000001", "000000000002", "000000000003",
-                                        "bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd"])
+        self.assertEqual(
+            self.names(),
+            [
+                "000000000001",
+                "000000000002",
+                "000000000003",
+                "bbbbbbbbbbbb",
+                "cccccccccccc",
+                "dddddddddddd",
+            ],
+        )
         # With only 2 newer complete keys, an old incomplete key stays.
         qor_heavy.safe_rmtree(self.leg_dir() / "000000000003", self.out)
         self.make("eeeeeeeeeeee", "sha", "failed", 1.0)
@@ -2219,20 +2630,27 @@ class RetentionTest(RetentionBase):
             for design in ("sha", "ch_intrinsics"):
                 self.make(f"{i:012x}", design, "ok", 1_000_000.0 + i)
         self.prune(protect=("000000000000",))
-        self.assertEqual(self.names(), ["000000000000", "000000000002", "000000000003",
-                                        "000000000004"])
+        self.assertEqual(
+            self.names(), ["000000000000", "000000000002", "000000000003", "000000000004"]
+        )
 
     def test_retention_failed_count(self) -> None:
-        dirs = [self.make("aaaaaaaaaaaa", f"d{i}", "failed" if i % 2 else "capped",
-                          1_000_000.0 + 10 * (7 - i)) for i in range(7)]
+        dirs = [
+            self.make(
+                "aaaaaaaaaaaa", f"d{i}", "failed" if i % 2 else "capped", 1_000_000.0 + 10 * (7 - i)
+            )
+            for i in range(7)
+        ]
         self.prune()
         with_run = [d for d in dirs if (d / "run").exists()]
         self.assertEqual(with_run, dirs[:5])
         self.assertTrue(all((d / "status").exists() for d in dirs))
 
     def test_retention_failed_bytes(self) -> None:
-        dirs = [self.make("bbbbbbbbbbbb", f"d{i}", "timeout", 1_000_000.0 + i, size=GIB)
-                for i in range(3)]
+        dirs = [
+            self.make("bbbbbbbbbbbb", f"d{i}", "timeout", 1_000_000.0 + i, size=GIB)
+            for i in range(3)
+        ]
         self.prune()
         self.assertEqual([(d / "run").exists() for d in dirs], [False, True, True])
         total = sum(qor_sched._tree_bytes(d / "run") for d in dirs if (d / "run").exists())
@@ -2247,8 +2665,10 @@ class RetentionTest(RetentionBase):
         link.symlink_to(outside)
         with self.assertRaises(HeavyError) as caught:
             self.prune()
-        self.assertEqual((caught.exception.code, caught.exception.message),
-                         (2, f"refusing to delete {link}: {link} is a symlink"))
+        self.assertEqual(
+            (caught.exception.code, caught.exception.message),
+            (2, f"refusing to delete {link}: {link} is a symlink"),
+        )
         self.assertTrue((outside / "sha" / "status").exists())
         link.unlink()
         (self.leg_dir() / "cccccccccccc" / "lnk").symlink_to(outside)
@@ -2297,26 +2717,34 @@ class ProgressTest(RunnerTestBase):
     def test_progress_lines(self) -> None:
         log = qor_sched.HarnessLog(self.out)
         job = self.job("sha", [])
-        results = ([qor_sched.JobResult(job, "ok", 14.25, "")] * 19
-                   + [qor_sched.JobResult(job, "failed", 1.0, "x"),
-                      qor_sched.JobResult(job, "timeout", 1.0, "x"),
-                      qor_sched.JobResult(dataclasses.replace(job, group="B", leg="O"),
-                                          "capped", 3723.04, "x")])
+        results = [qor_sched.JobResult(job, "ok", 14.25, "")] * 19 + [
+            qor_sched.JobResult(job, "failed", 1.0, "x"),
+            qor_sched.JobResult(job, "timeout", 1.0, "x"),
+            qor_sched.JobResult(
+                dataclasses.replace(job, group="B", leg="O"), "capped", 3723.04, "x"
+            ),
+        ]
         with redirect_stderr(io.StringIO()) as err:
             log.job(3, 21, qor_sched.JobResult(job, "ok", 14.21, ""))
             log.job(21, 21, results[-1])
             log.done(results, 3723.4)
-        expected = ["vtr-qor: [3/21] P sha ok 14.2 s (A, j1)",
-                    "vtr-qor: [21/21] O sha capped 3723.0 s (B, j1)",
-                    "vtr-qor: done: 19 ok, 1 failed, 1 capped, 1 timeout, 0 skipped in 1:02:03"]
+        expected = [
+            "vtr-qor: [3/21] P sha ok 14.2 s (A, j1)",
+            "vtr-qor: [21/21] O sha capped 3723.0 s (B, j1)",
+            "vtr-qor: done: 19 ok, 1 failed, 1 capped, 1 timeout, 0 skipped in 1:02:03",
+        ]
         self.assertEqual(err.getvalue().splitlines(), expected)
         self.assertEqual((self.out / "harness.log").read_text().splitlines(), expected)
-        self.assertEqual((qor_sched.hms(0.6), qor_sched.hms(59.5), qor_sched.hms(-3)),
-                         ("0:00:01", "0:01:00", "0:00:00"))
+        self.assertEqual(
+            (qor_sched.hms(0.6), qor_sched.hms(59.5), qor_sched.hms(-3)),
+            ("0:00:01", "0:01:00", "0:00:00"),
+        )
         with redirect_stderr(io.StringIO()):
             log.done([], 0.4)
-        self.assertEqual((self.out / "harness.log").read_text().splitlines()[-1],
-                         "vtr-qor: done: 0 ok, 0 failed, 0 capped, 0 timeout, 0 skipped in 0:00:00")
+        self.assertEqual(
+            (self.out / "harness.log").read_text().splitlines()[-1],
+            "vtr-qor: done: 0 ok, 0 failed, 0 capped, 0 timeout, 0 skipped in 0:00:00",
+        )
 
     def test_run_lines(self) -> None:
         jobs = [self.job("sha", [{}]), self.job("mcml", [{"exit": 2}], group="B")]
@@ -2324,13 +2752,17 @@ class ProgressTest(RunnerTestBase):
         summary, lines = self.run_jobs(jobs, self.opts(clock=clock), starts=True)
         flow = self.job_dir("mcml") / "run" / "vtr_flow.out"
         python = Path(sys.executable).name
-        self.assertEqual(lines, [
-            "vtr-qor: [1/2] P sha start",
-            "vtr-qor: [1/2] P sha ok 0.0 s (A, j1)",
-            "vtr-qor: [2/2] P mcml start",
-            f"vtr-qor: P mcml: {python} exited 2; see {flow}",
-            "vtr-qor: [2/2] P mcml failed 0.0 s (B, j1)",
-            "vtr-qor: done: 1 ok, 1 failed, 0 capped, 0 timeout, 0 skipped in 0:00:00"])
+        self.assertEqual(
+            lines,
+            [
+                "vtr-qor: [1/2] P sha start",
+                "vtr-qor: [1/2] P sha ok 0.0 s (A, j1)",
+                "vtr-qor: [2/2] P mcml start",
+                f"vtr-qor: P mcml: {python} exited 2; see {flow}",
+                "vtr-qor: [2/2] P mcml failed 0.0 s (B, j1)",
+                "vtr-qor: done: 1 ok, 1 failed, 0 capped, 0 timeout, 0 skipped in 0:00:00",
+            ],
+        )
         self.assertEqual(lines, (self.out / "harness.log").read_text().splitlines())
 
 
@@ -2340,8 +2772,14 @@ class RetentionFailedOnlyTest(RetentionBase):
         (older than every failed one, so they would go first) keeps every parse file and
         gzipped netlist while seven failed jobs are cut to KEEP_FAILED run directories."""
         designs = ("ch_intrinsics", "stereovision3", "diffeq2", "diffeq1", "mkPktMerge", "sha")
-        kept = ("parse_results.txt", "qor_results.txt", "vpr.out", "vpr.crit_path.out",
-                "parmys.out", "abc0.out")
+        kept = (
+            "parse_results.txt",
+            "qor_results.txt",
+            "vpr.out",
+            "vpr.crit_path.out",
+            "parmys.out",
+            "abc0.out",
+        )
         ok_files = {}
         for i, design in enumerate(designs):
             job = self.make("aaaaaaaaaaaa", design, "ok", 1000.0 + i)
@@ -2349,14 +2787,16 @@ class RetentionFailedOnlyTest(RetentionBase):
                 (job / "run" / name).write_text(f"{design} {name}\n")
             ok_files[design] = sorted(p.name for p in (job / "run").iterdir())
         (self.leg_dir() / "aaaaaaaaaaaa" / "planned.json").write_text(
-            json.dumps({"designs": sorted(designs)}))
+            json.dumps({"designs": sorted(designs)})
+        )
         failed = [self.make("bbbbbbbbbbbb", f"f{i}", "failed", 2000.0 + i) for i in range(7)]
         qor_sched.prune(self.out, VTR12, K6, "P", planned=True)
         for design in designs:
             run = self.leg_dir() / "aaaaaaaaaaaa" / design / "run"
             self.assertEqual(sorted(p.name for p in run.iterdir()), ok_files[design], design)
-        self.assertEqual([(job / "run").is_dir() for job in failed],
-                         [False, False, True, True, True, True, True])
+        self.assertEqual(
+            [(job / "run").is_dir() for job in failed], [False, False, True, True, True, True, True]
+        )
         self.assertTrue(all((job / "status").read_text() == "failed\n" for job in failed))
 
 
@@ -2419,8 +2859,9 @@ class FixRound6Test(RetentionBase):
         latest.write_text(f"{KEY12}\n")
         self.assertEqual(qor_sched.write_planned([self.job("sha", [{}])]), [])
         self.assertTrue(latest.exists())
-        self.assertEqual(qor_sched.write_planned([self.job("mcml", [{}], group="B")]),
-                         [f"P {KEY12}"])
+        self.assertEqual(
+            qor_sched.write_planned([self.job("mcml", [{}], group="B")]), [f"P {KEY12}"]
+        )
         self.assertFalse(latest.exists())
         self.assertEqual(qor_sched.read_planned(key), frozenset({"sha", "mcml"}))
         latest.write_text("aaaaaaaaaaaa\n")  # another key's latest is left alone
@@ -2456,17 +2897,18 @@ class FixRound6Test(RetentionBase):
 
     def test_prune_by_own_planned_set(self) -> None:
         """Each key is complete by its own planned.json; a key without one never is."""
-        for i, key in enumerate(("aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc",
-                                 "dddddddddddd")):
+        for i, key in enumerate(("aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd")):
             self.make(key, "sha", "ok", 1000.0 + i)
             (self.leg_dir() / key / "planned.json").write_text('{"designs": ["sha"]}')
         self.make("eeeeeeeeeeee", "sha", "ok", 2000.0)  # complete jobs, but no planned set
         self.make("ffffffffffff", "sha", "ok", 900.0)
         (self.leg_dir() / "ffffffffffff" / "planned.json").write_text(
-            '{"designs": ["sha", "mcml"]}')  # planned mcml never ran: incomplete, old
+            '{"designs": ["sha", "mcml"]}'
+        )  # planned mcml never ran: incomplete, old
         qor_sched.prune(self.out, VTR12, K6, "P", planned=True)
-        self.assertEqual(self.names(), ["bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd",
-                                        "eeeeeeeeeeee"])
+        self.assertEqual(
+            self.names(), ["bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd", "eeeeeeeeeeee"]
+        )
 
     def test_after_run_before_done(self) -> None:
         got: list[list[str]] = []
@@ -2486,6 +2928,7 @@ class FixRound6Test(RetentionBase):
     def test_drain_error_in_finish_stops_the_run(self) -> None:
         """Review M4: a busy cgroup left by a command finish ran stops the run at once; the
         next job is not started (so its directory is not wiped)."""
+
         def finish(job: Job, start: float) -> dict[str, object]:
             raise qor_sched.DrainError(2, "cg still holds processes [1] after 60 s; stopping")
 
