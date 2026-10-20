@@ -1,7 +1,7 @@
 /*
  * fsm.h — the fsm pass (4.8; docs/specs/2026-10-20-4.8-fsm-design.md): Yosys 0.55's fsm driver and
  * its fsm_detect, fsm_extract, fsm_opt, fsm_recode, fsm_info and fsm_map stages, ported to the IR
- * with the FSM table inside the pass (no `$fsm` cell; PHASE4 decision 12).
+ * with the FSM table inside the pass (no `$fsm` cell; PHASE4 decision 14).
  *
  * The stages run over the whole design in Yosys's order (fsm.cc:138-160): detect, extract, opt,
  * (opt_clean in Yosys: here the unused-output query of unused.c), opt, recode, info, map. Each

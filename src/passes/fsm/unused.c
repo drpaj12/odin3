@@ -1,6 +1,6 @@
 /*
  * unused.c — the native "unread and not a port" query that stands for Yosys's `unused_bits`
- * attribute (spec O-1, PHASE4 decision 12 question 2; opt_clean.cc:476-491 sets the attribute from
+ * attribute (spec O-1, PHASE4 decision 14 question 2; opt_clean.cc:476-491 sets the attribute from
  * rmunused_module_cells and rmunused_module_signals).
  *
  * The liveness is opt_clean's (clean.c): roots are the module's ports, the nodes and wires with

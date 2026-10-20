@@ -10,7 +10,7 @@
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "odin3/odin3.h"
-#include "passes/hardmap/hardmap.h"
+#include "passes/partial_map/hardmap.h"
 #include "proc_build.h"
 
 #include <stdbool.h>

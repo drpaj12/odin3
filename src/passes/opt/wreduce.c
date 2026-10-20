@@ -4,9 +4,10 @@
  * pre-step and the operator rules) and wreduce_ff.c (muxes, flip-flops, latches).
  *
  * Order (WR-7). Yosys visits the cells of a round in the order their names were first interned,
- * and a rewritten cell keeps its name. A rebuilt Odin III node has a new ID, so each node carries
- * a rank, the ID of the node it descends from, and a round is sorted by rank: the same order as
- * Yosys's on an RTLIL file written in node-ID order. No hash order reaches the IR.
+ * and a rewritten cell keeps its name. Its front end creates an operand's cell before the cell
+ * that consumes it, so the initial rank of a node is its place in an operand-first post-order of
+ * the net graph (wreduce_order.c). A rebuilt Odin III node has a new ID, so it inherits the rank
+ * of the node it descends from, and a round is sorted by rank. No hash order reaches the IR.
  *
  * Nets. Yosys's work_queue_bits are SigBits, which a later connect redirects; here a changed net
  * that is merged away is followed through `fwd` (a net that wreduce merged into another) to the
@@ -166,15 +167,27 @@ static odin3_status grow_u32(odin3_vec *vec, size_t want, bool identity) {
     return st;
 }
 
+static odin3_status grow_rank(odin3_vec *vec, size_t want) {
+    odin3_status st = odin3_vec_reserve(vec, want);
+    while (st == ODIN3_OK && vec->len < want) {
+        uint32_t *slot = odin3_vec_push(vec);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = UINT32_MAX;
+    }
+    return st;
+}
+
 /* Room for the rewrite about to happen: the merged-into table, the new nodes' ranks. */
 static odin3_status prepare(wr_state *ws) {
     odin3_status st = grow_u32(&ws->fwd, (size_t)odin3_module_net_end(ws->m) + 1U, false);
-    return st == ODIN3_OK ? grow_u32(&ws->rank, (size_t)odin3_module_node_end(ws->m) + 2U, true)
-                          : st;
+    return st == ODIN3_OK ? grow_rank(&ws->rank, (size_t)odin3_module_node_end(ws->m) + 2U) : st;
 }
 
+/* A node with no rank of its own sorts after every ranked node (by node ID among such nodes). */
 static uint32_t rank_of(const wr_state *ws, uint32_t node) {
-    return node < ws->rank.len ? *(const uint32_t *)odin3_vec_cat(&ws->rank, node) : node;
+    return node < ws->rank.len ? *(const uint32_t *)odin3_vec_cat(&ws->rank, node) : UINT32_MAX;
 }
 
 static void inherit_rank(wr_state *ws, odin3_node_id from, odin3_node_id to) {
@@ -463,7 +476,8 @@ static void state_free(wr_state *ws) {
 static odin3_status module_budget(const wr_state *ws) {
     const uint64_t extra =
         ((uint64_t)odin3_module_net_end(ws->m) * 2U + (uint64_t)odin3_module_node_end(ws->m) * 3U) *
-        sizeof(uint32_t);
+            sizeof(uint32_t) +
+        (uint64_t)odin3_module_node_end(ws->m) * WR_ORDER_BYTES_PER_NODE; /* wr_order_ranks */
     if (odin3_budget_check(ws->oc->pass, ws->oc->design, extra) == ODIN3_OK) {
         return ODIN3_OK;
     }
@@ -480,6 +494,7 @@ static odin3_status module_run(wr_state *ws) {
     odin3_status st = module_budget(ws);
     st = st == ODIN3_OK ? odin3_opt_canon_consts(ws->oc) : st;
     st = st == ODIN3_OK ? prepare(ws) : st;
+    st = st == ODIN3_OK ? wr_order_ranks(ws) : st;
     const uint32_t end = odin3_module_node_end(ws->m);
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
         if (odin3_node_live(ws->m, (odin3_node_id){id})) {
@@ -487,6 +502,31 @@ static odin3_status module_run(wr_state *ws) {
         }
     }
     return st == ODIN3_OK ? rounds(ws) : st;
+}
+
+/* Test hook (opt_test.h): the initial ranks of one module, without running the pass. */
+odin3_status odin3_opt_wreduce_probe_ranks(odin3_pass_ctx *ctx, odin3_module *module,
+                                           const odin3_opt_opts *opts, uint32_t *ranks,
+                                           uint32_t count) {
+    odin3_opt_ctx oc;
+    odin3_wreduce_counts counts;
+    memset(&counts, 0, sizeof counts);
+    odin3_status st = odin3_opt_ctx_init(&oc, ctx, module, opts);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    wr_state ws;
+    state_init(&ws, &oc, &counts);
+    st = prepare(&ws);
+    st = st == ODIN3_OK ? wr_order_ranks(&ws) : st;
+    for (uint32_t i = 0; st == ODIN3_OK && i < count; i++) {
+        ranks[i] = i < odin3_module_node_end(module) && odin3_node_live(module, (odin3_node_id){i})
+                       ? rank_of(&ws, i)
+                       : 0U;
+    }
+    state_free(&ws);
+    odin3_opt_ctx_free(&oc);
+    return st;
 }
 
 static void log_totals(const odin3_wreduce_counts *now, const odin3_wreduce_counts *before) {

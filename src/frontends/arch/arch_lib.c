@@ -203,12 +203,14 @@ static odin3_status emit_models(arch_rd *rd, lib_out *out) {
     for (uint32_t i = 0; i < arch->n_models; i++) {
         odin3_arch_model *model = &arch->models[i];
         model->registered = model_names_ok(model);
+        model->is_template = false;
         if (!model->registered) {
             out->first_skipped = out->skipped == 0 ? model->name : out->first_skipped;
             out->skipped++;
             continue;
         }
         const odin3_arch_template *tpl = template_for(rd, model);
+        model->is_template = tpl != NULL;
         odin3_status st = tpl != NULL ? odin3_strbuf_appendf(&out->body, "%s", tpl->text)
                                       : add_generic(rd, model, &out->body);
         if (st != ODIN3_OK) {

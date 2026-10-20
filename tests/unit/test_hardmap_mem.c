@@ -14,7 +14,7 @@
 #include "ir/prov.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
-#include "passes/hardmap/hardmap.h"
+#include "passes/partial_map/hardmap.h"
 #include "proc_build.h"
 #include "unity.h"
 #include "util/alloc.h"
@@ -540,9 +540,10 @@ static void expect_soft(pb_result *res, const char *warning) {
     odin3_strbuf_free(&after);
 }
 
-#define W_ASYNC "hardmap: memory 'mem' has an asynchronous read port; left to lower as flip-flops"
-#define W_EDGE "hardmap: memory 'mem' has a port on the falling clock edge; left to lower"
-#define W_EN "hardmap: memory 'mem' has a read enable that is not constant 1; left to lower"
+#define W_ASYNC                                                                                    \
+    "partial_map: memory 'mem' has an asynchronous read port; left to lower as flip-flops"
+#define W_EDGE "partial_map: memory 'mem' has a port on the falling clock edge; left to lower"
+#define W_EN "partial_map: memory 'mem' has a read enable that is not constant 1; left to lower"
 
 typedef struct shape {
     uint32_t abits;
@@ -900,8 +901,9 @@ static void test_p_2_2(void) {
     mc.rd[0].addr_wr = 0; /* no identical address: soft */
     mc.rd[1].addr_wr = 0;
     build_mem(mc, &res);
-    expect_soft(&res, "hardmap: memory 'mem' (2 read, 2 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (2 read, 2 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
 }
 
@@ -930,15 +932,17 @@ static void test_r11_soft_patterns(void) {
         mc.rd[pn].mode = R_SYNC;
     }
     build_mem(mc, &res);
-    expect_soft(&res, "hardmap: memory 'mem' (3 read, 2 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (3 read, 2 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
     log_text[0] = '\0';
     mc = base((shape){4, 2, 1, 3}); /* p_1_3 */
     mc.rd[0].mode = R_SYNC;
     build_mem(mc, &res);
-    expect_soft(&res, "hardmap: memory 'mem' (1 read, 3 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (1 read, 3 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
 }
 
@@ -959,21 +963,23 @@ static void test_p_transparent_and_split_enable(void) {
     mc.rd[0].mode = R_SYNC;
     mc.rd[0].transparent = true;
     build_mem(mc, &res);
-    expect_soft(&res, "hardmap: memory 'mem' (1 read, 1 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (1 read, 1 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
     log_text[0] = '\0';
     mc.rd[0].transparent = false;
     mc.split_en = true; /* a write enable of two nets has no single `we` */
     build_mem(mc, &res);
-    expect_soft(&res, "hardmap: memory 'mem' (1 read, 1 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (1 read, 1 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
 }
 
 /* --- R-12, the open points ----------------------------------------------------------------- */
 
-#define W_INIT "hardmap: memory 'mem': initial contents dropped (the arch's RAMs have no init)"
+#define W_INIT "partial_map: memory 'mem': initial contents dropped (the arch's RAMs have no init)"
 
 /* A synchronous ROM of the shape, with or without a defined INIT, mapped; the log is kept. */
 static void map_rom(bool init) {
@@ -1001,7 +1007,7 @@ static void test_e_offset_nonzero_soft(void) {
     mc.offset = 3;
     pb_result res;
     build_mem(mc, &res);
-    expect_soft(&res, "hardmap: memory 'mem' has OFFSET 3; left to lower");
+    expect_soft(&res, "partial_map: memory 'mem' has OFFSET 3; left to lower");
     pb_free(&res);
 }
 
@@ -1038,8 +1044,9 @@ static void test_e_abits_wide_soft(void) {
     mc.rd[0].mode = R_SYNC;
     pb_result res;
     build_mem(mc, &res);
-    expect_soft(&res, "hardmap: memory 'mem' (1 read, 0 write ports) has no fixed-subset mapping; "
-                      "left to lower");
+    expect_soft(&res,
+                "partial_map: memory 'mem' (1 read, 0 write ports) has no fixed-subset mapping; "
+                "left to lower");
     pb_free(&res);
 }
 
@@ -1352,7 +1359,7 @@ static void test_h10_info(void) {
     pb_result res;
     build_mem(mc, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, NULL));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "hardmap: 0 multiply, 0 adder in 0 chains, 2 "
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "partial_map: 0 multiply, 0 adder in 0 chains, 2 "
                                           "single_port_ram + 0 dual_port_ram slices; 0 cells "
                                           "left soft"));
     pb_free(&res);

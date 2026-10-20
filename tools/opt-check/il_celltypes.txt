@@ -1,0 +1,98 @@
+# tools/opt-check/il_celltypes.txt: the cell table of the wreduce order walk (3G WR-7), used by
+# il_order.py and checked against the registry and src/passes/opt/wreduce_order.c by the unit test
+# test_il_celltypes (regenerate the registry rows: ODIN3_PRINT_CELL_TABLE=1 build/debug/test_il_celltypes).
+#
+#   <type> seq|comb <port>:<i|o|io> ... [walk=<port>,...]
+#
+# Ports are in registry order (the order the walk reads them unless `walk=` gives another: `$mux`
+# reads S, B, A, the order Yosys creates a ternary's operands, genrtlil.cc:1904). `seq` types are
+# storage: the walk does not follow their outputs. A type that is not here is an error in
+# il_order.py (exit 2); so is a port that is not listed.
+#
+# Rows that start with `yosys` are Yosys cell types Odin III's registry does not have (they
+# can appear in a file written by Yosys). The test does not check them.
+$port_in comb P:o
+$port_out comb P:i
+$port_inout comb P:io
+$_CONST0_ comb Y:o
+$_CONST1_ comb Y:o
+$_CONSTX_ comb Y:o
+$_CONSTZ_ comb Y:o
+$add comb A:i B:i Y:o
+$sub comb A:i B:i Y:o
+$mul comb A:i B:i Y:o
+$div comb A:i B:i Y:o
+$mod comb A:i B:i Y:o
+$and comb A:i B:i Y:o
+$or comb A:i B:i Y:o
+$xor comb A:i B:i Y:o
+$not comb A:i Y:o
+$shl comb A:i B:i Y:o
+$shr comb A:i B:i Y:o
+$sshr comb A:i B:i Y:o
+$eq comb A:i B:i Y:o
+$ne comb A:i B:i Y:o
+$lt comb A:i B:i Y:o
+$le comb A:i B:i Y:o
+$gt comb A:i B:i Y:o
+$ge comb A:i B:i Y:o
+$reduce_and comb A:i Y:o
+$reduce_or comb A:i Y:o
+$reduce_xor comb A:i Y:o
+$mux comb A:i B:i S:i Y:o walk=S,B,A,Y
+$pmux comb A:i B:i S:i Y:o
+$dff seq CLK:i D:i Q:o
+$dffe seq CLK:i EN:i D:i Q:o
+$adff seq CLK:i ARST:i D:i Q:o
+$sdff seq CLK:i SRST:i D:i Q:o
+$mem seq RD_CLK:i RD_EN:i RD_ADDR:i RD_DATA:o WR_CLK:i WR_EN:i WR_ADDR:i WR_DATA:i
+$memrd comb CLK:i EN:i ADDR:i DATA:o
+$memwr comb CLK:i EN:i ADDR:i DATA:i
+$tribuf comb A:i EN:i Y:o
+$_BUF_ comb A:i Y:o
+$_NOT_ comb A:i Y:o
+$_AND_ comb A:i B:i Y:o
+$_OR_ comb A:i B:i Y:o
+$_XOR_ comb A:i B:i Y:o
+$_NAND_ comb A:i B:i Y:o
+$_NOR_ comb A:i B:i Y:o
+$_XNOR_ comb A:i B:i Y:o
+$_MUX_ comb A:i B:i S:i Y:o
+$_DFF_P_ seq C:i D:i Q:o
+$_DFF_N_ seq C:i D:i Q:o
+$_DLATCH_P_ seq E:i D:i Q:o
+$_DLATCH_N_ seq E:i D:i Q:o
+$_FF_ seq D:i Q:o
+$sop comb A:i Y:o
+$neg comb A:i Y:o
+$xnor comb A:i B:i Y:o
+$reduce_xnor comb A:i Y:o
+$reduce_bool comb A:i Y:o
+$logic_not comb A:i Y:o
+$logic_and comb A:i B:i Y:o
+$logic_or comb A:i B:i Y:o
+$shiftx comb A:i B:i Y:o
+$pow comb A:i B:i Y:o
+$proc comb I:i O:o
+$adffe seq CLK:i ARST:i EN:i D:i Q:o
+$sdffe seq CLK:i SRST:i EN:i D:i Q:o
+$sdffce seq CLK:i SRST:i EN:i D:i Q:o
+$aldff seq CLK:i ALOAD:i AD:i D:i Q:o
+$aldffe seq CLK:i ALOAD:i AD:i EN:i D:i Q:o
+$dffsr seq CLK:i SET:i CLR:i D:i Q:o
+$dffsre seq CLK:i SET:i CLR:i EN:i D:i Q:o
+$dlatch seq EN:i D:i Q:o
+$adlatch seq EN:i ARST:i D:i Q:o
+$dlatchsr seq EN:i SET:i CLR:i D:i Q:o
+$sr seq SET:i CLR:i Q:o
+$lut comb A:i Y:o
+yosys $mem_v2 seq RD_CLK:i RD_EN:i RD_ARST:i RD_SRST:i RD_ADDR:i RD_DATA:o WR_CLK:i WR_EN:i WR_ADDR:i WR_DATA:i
+yosys $alu comb A:i B:i CI:i BI:i X:o Y:o CO:o
+yosys $fa comb A:i B:i C:i X:o Y:o
+yosys $lcu comb P:i G:i CI:i CO:o
+yosys $macc comb A:i B:i Y:o
+yosys $pos comb A:i Y:o
+yosys $sshl comb A:i B:i Y:o
+yosys $eqx comb A:i B:i Y:o
+yosys $nex comb A:i B:i Y:o
+yosys $shift comb A:i B:i Y:o

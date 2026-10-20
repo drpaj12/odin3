@@ -128,6 +128,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/wreduce.c
     src/passes/opt/wreduce_op.c
     src/passes/opt/wreduce_ff.c
+    src/passes/opt/wreduce_order.c
     src/passes/opt/reduce.c
     src/passes/opt/share.c
     src/passes/opt/dff.c
@@ -180,16 +181,17 @@ add_library(odin3_core OBJECT
     src/passes/lower/latch.c
     src/passes/lower/mem.c
     src/passes/lower/snapshot.c
-    src/passes/hardmap/register.c
-    src/passes/hardmap/hardmap.c
-    src/passes/hardmap/hm_kit.c
-    src/passes/hardmap/mul.c
-    src/passes/hardmap/adder.c
-    src/passes/hardmap/ram.c
-    src/passes/hardmap/ram_split.c
-    src/passes/hardmap/mem.c
-    src/passes/hardmap/mem_merge.c
-    src/passes/hardmap/mem_plan.c
+    src/passes/partial_map/register.c
+    src/passes/partial_map/hardmap.c
+    src/passes/partial_map/hm_kit.c
+    src/passes/partial_map/mul.c
+    src/passes/partial_map/adder.c
+    src/passes/partial_map/ram.c
+    src/passes/partial_map/ram_split.c
+    src/passes/partial_map/mem.c
+    src/passes/partial_map/mem_merge.c
+    src/passes/partial_map/mem_plan.c
+    src/passes/partial_map/rules.c
     src/passes/lpmmap/register.c
     src/passes/lpmmap/lpmmap.c
     src/passes/lpmmap/lm_kit.c
@@ -819,6 +821,10 @@ if(BUILD_TESTING)
     # 3G: wreduce.
     odin3_add_unit_test(test_wreduce)
     target_sources(test_wreduce PRIVATE tests/unit/proc_build.c)
+    # WR-7: tools/opt-check/il_celltypes.txt (il_order.py's cell table) against the registry.
+    odin3_add_unit_test(test_il_celltypes)
+    target_compile_definitions(test_il_celltypes PRIVATE
+        IL_CELLTYPES_FILE="${PROJECT_SOURCE_DIR}/tools/opt-check/il_celltypes.txt")
     # 2F Task 10: opt_muxtree.
     odin3_add_unit_test(test_opt_muxtree)
     target_sources(test_opt_muxtree PRIVATE tests/unit/proc_build.c)
@@ -881,6 +887,18 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_hardmap_add PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_alias
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_alias $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_alias PROPERTIES LABELS unit)
+    # 4.2 Task 3: pm_rules (k6 values, absent models, no 3C number outside rules.c).
+    odin3_add_unit_test(test_pm_rules)
+    target_sources(test_pm_rules PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_pm_rules PRIVATE
+        ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     # 3C Task 3: hardmap's $add/$sub rule (adder chains) on hand-built flat IR.
     odin3_add_unit_test(test_hardmap_adder)
     target_sources(test_hardmap_adder PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
@@ -914,6 +932,20 @@ if(BUILD_TESTING)
                 --odin3 $<TARGET_FILE:odin3>
                 --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/diff_expect.txt ${_hm_micros})
     set_tests_properties(hardmap_diff_micro PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                         TIMEOUT 1800)
+    # 4.2 Tasks 3 and 4 (spec T-2): the k6 identity gate. Tier 1 (CI): `hardmap` against
+    # `partial_map`, same library. This is a wiring/alias test, not a regression test: both names
+    # share one entry point in one binary, so it cannot see a behaviour change. Tier 2 (needs
+    # VTR_ROOT, else exit 77): the tech library against `read_arch` of the k6 XML. Tier 3 (two
+    # binaries, main against the head; heavy; run by the controller) is the merge gate.
+    add_test(NAME partial_map_identity
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/partial-map-check/identity --tier 1
+                --odin3 $<TARGET_FILE:odin3> --min-ok 25)
+    set_tests_properties(partial_map_identity PROPERTIES LABELS unit TIMEOUT 1800)
+    add_test(NAME partial_map_identity_arch
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/partial-map-check/identity --tier 2
+                --odin3 $<TARGET_FILE:odin3> --min-ok 25)
+    set_tests_properties(partial_map_identity_arch PROPERTIES LABELS unit SKIP_RETURN_CODE 77
                          TIMEOUT 1800)
     # 3A Task 2: flatten's pre-flight graph; every test_flatten_* links the fixture helper.
     odin3_add_unit_test(test_flatten_graph)
@@ -1265,7 +1297,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_techlib_expr)
     odin3_add_unit_test(test_techlib_reader)
     odin3_add_unit_test(test_techlib_string_param)
-    foreach(_t IN ITEMS test_arch_record test_arch_models test_arch_pb test_arch_lib test_arch_pass test_arch_vtr)
+    foreach(_t IN ITEMS test_arch_record test_arch_models test_arch_pb test_arch_lib test_arch_pass test_arch_vtr test_arch_access)
         odin3_add_unit_test(${_t})
         target_compile_definitions(${_t} PRIVATE
             ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
@@ -3005,6 +3037,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_opt_rules_dir}/wreduce)
         set_tests_properties(opt_equiv_wreduce_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
                              TIMEOUT 1800)
+        # PHASE3 #52 (opt_share parity): the opt_share sources with the Phase 3 script, whose
+        # `opt -full` runs opt_share; every call that changes something is checked in turn, and
+        # opt_share must change something in every source (--require-sub: --min-changed counts
+        # calls of any sub-pass, and wreduce or opt_expr alone would satisfy it).
+        add_test(NAME opt_equiv_share_rules
+            COMMAND ${_opt_sweep} --jobs 1 --opt-equiv --opt-arg=--min-changed=1
+                    --opt-arg=--require-sub=opt_share
+                    --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
+                    --root ${_opt_rules_dir} ${_opt_rules_dir}/share)
+        set_tests_properties(opt_equiv_share_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 1800)
         # 3G (plan Task 3 step 4): Odin III's wreduce and Phase 3 script against Yosys's on the
         # same input: cells, widths and flags of every $add $sub $mul, refinement, identity.
         add_test(NAME opt_diff_wreduce_rules
@@ -3015,6 +3058,35 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_opt_rules_dir}/wreduce)
         set_tests_properties(opt_diff_wreduce_rules PROPERTIES LABELS opt SKIP_RETURN_CODE 77
                              TIMEOUT 1800)
+        # WR-7 amended (PHASE3 #51): the visiting order. tests/opt/order holds Verilog whose result
+        # depends on the order of the cells. CIRCULAR on the order: Yosys reads Odin III's file
+        # through il_order.py, which ranks cells with the same walk as wreduce_order.c, so this
+        # proves that the two agree and that wreduce refines Yosys's result for that order, not that
+        # the walk is Yosys's front-end order. That is measured by hardmap-diff on LU8PEEng,
+        # LU32PEEng and mcml against the Parmys goldens (PHASE3 #51). Both scripts run; the one
+        # difference of `wreduce` alone (cell names, two buffers) is listed in diff_expect.txt with
+        # its cause.
+        add_test(NAME opt_diff_wreduce_order
+            COMMAND ${_opt_sweep} --jobs 1 --opt-diff
+                    --opt-arg=--script=wreduce --opt-arg=--script=phase3
+                    --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
+                    --opt-arg=--root=${PROJECT_SOURCE_DIR}/tests/opt
+                    --root ${PROJECT_SOURCE_DIR}/tests/opt
+                    ${PROJECT_SOURCE_DIR}/tests/opt/order)
+        set_tests_properties(opt_diff_wreduce_order PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 600)
+        # A forward reference (a net with a wire is not followed): Odin III keeps node-ID order and,
+        # like Yosys's front end, leaves the cells wide. Script wreduce alone: after `proc` and
+        # compact the Phase 3 names differ from Yosys's for a reason that is not wreduce's.
+        add_test(NAME opt_diff_wreduce_forward
+            COMMAND ${_opt_sweep} --jobs 1 --opt-diff
+                    --opt-arg=--script=wreduce
+                    --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
+                    --opt-arg=--root=${PROJECT_SOURCE_DIR}/tests/opt
+                    --root ${PROJECT_SOURCE_DIR}/tests/opt
+                    ${PROJECT_SOURCE_DIR}/tests/opt/order_forward)
+        set_tests_properties(opt_diff_wreduce_forward PROPERTIES LABELS opt SKIP_RETURN_CODE 77
+                             TIMEOUT 600)
         # --cap-for: syntax/inferred_ram_w_clog2.v (1479 B, a 3776-latch RAM) needs 2.3 GB for its base
         # case from the initial state, over the 2G child cap; it proves at 4G under both scripts (2H).
         odin3_add_sweep_test(opt_equiv_micro LABEL sweep
@@ -3182,6 +3254,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         odin3_add_sweep_test(opt_equiv_micro_phase3 LABEL sweep
             COMMAND ${_opt_sweep} --opt-equiv --min-changed-total 200 ${_micro_expect}
                     --cap-for syntax/inferred_ram_w_clog2.v=4G
+                    # WR-7 (PHASE3 #51): the wreduce call of des_area refines but takes 60 to 600 s
+                    # of SAT with the new visiting order (main: under 60 s); proved at 600 s.
+                    --timeout-for large/des_area.v=600
                     --opt-arg=--script=${PROJECT_SOURCE_DIR}/tools/opt-check/phase3.script
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/equiv_expect_fail.txt
@@ -3193,6 +3268,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_expect_fail.txt
                     --expect-fail ${PROJECT_SOURCE_DIR}/tests/opt/diff_micro_wreduce_expect_fail.txt
+                    # WR-7 (PHASE3 #51): these refine, but not within 60 s any more (proved at 600 s)
+                    --timeout-for full/iir1.v=600 --timeout-for large/spree.v=600
+                    --timeout-for full/cf_fft_256_8.v=600
                     --opt-arg=--script=wreduce --opt-arg=--script=phase3
                     --opt-arg=--expect=${PROJECT_SOURCE_DIR}/tests/opt/diff_expect.txt
                     --opt-arg=--root=${_micro_dir} ${_micro_dir})

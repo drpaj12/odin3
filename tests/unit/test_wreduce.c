@@ -887,9 +887,10 @@ static void test_dff_all_unused_goes(void) {
 /* --- the worker: rounds, order, determinism ----------------------------------------------------
  */
 
-/* add2 reads the register that add1 feeds. The cells are in this order, so each round only sees
- * what the earlier rounds exposed: add1 narrows in round 1, the register in round 2, add2 in
- * round 3. */
+/* add2 reads the register that add1 feeds, through named wires (`t`, `u`): a named net is a
+ * statement boundary and is not followed by the order walk (WR-7), so the nodes are visited in ID
+ * order and each round only sees what the earlier rounds exposed: add1 narrows in round 1, the
+ * register in round 2, add2 in round 3. */
 #define CASCADE                                                                                    \
     "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"                         \
     "  wire width 4 input 3 \\c\n  wire input 4 \\clk\n  wire width 8 output 5 \\y\n"              \
@@ -911,6 +912,282 @@ static void test_cascade_needs_rounds(void) {
     run_wreduce();
     expect_cascade_done();
     TEST_ASSERT_EQUAL_UINT32(0, count_prefix(ODIN3_LOG_WARN, "wreduce:"));
+}
+
+/* --- the order walk (WR-7, wreduce_order.c) -----------------------------------------------------
+ */
+
+typedef struct rank_set {
+    uint32_t *r;
+    uint32_t n;
+} rank_set;
+
+static rank_set probe_ranks(void) {
+    rank_set set;
+    set.n = odin3_module_node_end(fx.module);
+    set.r = (uint32_t *)calloc(set.n, sizeof *set.r);
+    TEST_ASSERT_NOT_NULL(set.r);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_opt_wreduce_probe_ranks(&fx.ctx, fx.module, &fx.opts, set.r, set.n));
+    return set;
+}
+
+/* x is ranked before y. */
+static void expect_before(const rank_set *set, const char *first, const char *second);
+
+static uint32_t rank_named(const rank_set *set, const char *name) {
+    odin3_node_id node = node_named(name);
+    TEST_ASSERT_TRUE_MESSAGE(odin3_node_valid(node) && node.v < set->n, name);
+    return set->r[node.v];
+}
+
+static void expect_before(const rank_set *set, const char *first, const char *second) {
+    const uint32_t rank_first = rank_named(set, first);
+    const uint32_t rank_second = rank_named(set, second);
+    TEST_ASSERT_TRUE_MESSAGE(rank_first != 0 && rank_second != 0 && rank_first < rank_second,
+                             first);
+}
+
+enum { BUS_TEXT = 640, TEXT_MAX = 8192, DEEP_CELLS = 100000, BIG_TEXT_PER_CELL = 160 };
+
+/* "{ $n<base+w-1> ... $n<base> }": a bus of anonymous single-bit nets, MSB first. */
+typedef struct bus_span {
+    uint32_t base;
+    uint32_t width;
+} bus_span;
+
+static void bus(char *out, size_t cap, bus_span span) {
+    size_t at = (size_t)snprintf(out, cap, "{");
+    for (uint32_t k = span.width; k > 0; k--) {
+        at += (size_t)snprintf(out + at, cap - at, " $tmp%u", span.base + k - 1U);
+    }
+    (void)snprintf(out + at, cap - at, " }");
+}
+
+/* `(c == s1) ^ (c == s1+5-2)` as Odin III numbers it: each consumer before its operand, every
+ * operand net anonymous (an expression temporary). */
+static void operand_first_text(char *out, size_t cap) {
+    char s1[BUS_TEXT];
+    char add_out[BUS_TEXT];
+    char s2[BUS_TEXT];
+    bus(s1, sizeof s1, (bus_span){0, 32});
+    bus(add_out, sizeof add_out, (bus_span){32, 32});
+    bus(s2, sizeof s2, (bus_span){64, 32});
+    size_t at =
+        (size_t)snprintf(out, cap,
+                         "module \\m\n  wire width 2 input 1 \\m\n  wire width 5 input 2 \\c\n"
+                         "  wire output 3 \\o\n");
+    for (uint32_t k = 0; k < 96; k++) {
+        at += (size_t)snprintf(out + at, cap - at, "  wire $tmp%u\n", k);
+    }
+    const char *zero27 = "27'000000000000000000000000000";
+    const char *zero30 = "30'000000000000000000000000000000";
+    at += (size_t)snprintf(
+        out + at, cap - at,
+        "  cell $eq \\eq\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+        "    parameter \\A_WIDTH 32\n    parameter \\B_WIDTH 32\n    parameter \\Y_WIDTH 1\n"
+        "    connect \\A { %s \\c }\n    connect \\B %s\n    connect \\Y \\o\n  end\n"
+        "  cell $sub \\sub2\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+        "    parameter \\A_WIDTH 32\n    parameter \\B_WIDTH 32\n    parameter \\Y_WIDTH 32\n"
+        "    connect \\A %s\n    connect \\B 32'00000000000000000000000000000010\n"
+        "    connect \\Y %s\n  end\n"
+        "  cell $add \\add\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+        "    parameter \\A_WIDTH 32\n    parameter \\B_WIDTH 32\n    parameter \\Y_WIDTH 32\n"
+        "    connect \\A %s\n    connect \\B 32'00000000000000000000000000000101\n"
+        "    connect \\Y %s\n  end\n"
+        "  cell $sub \\sub1\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"
+        "    parameter \\A_WIDTH 32\n    parameter \\B_WIDTH 32\n    parameter \\Y_WIDTH 32\n"
+        "    connect \\A { %s \\m }\n    connect \\B 32'00000000000000000000000000000001\n"
+        "    connect \\Y %s\n  end\nend\n",
+        zero27, s2, add_out, s2, s1, add_out, zero30, s1);
+}
+
+/* WR-7 (amended): `(c == m-1) ^ (c == m-1+5-2)`, cells in Odin III's elaboration order (a consumer
+ * before its operand). A round still visits the operand first, so the $sub narrows to A2:B1:Y3, the
+ * $add becomes signed A3:B4:Y5 and the next $sub signed A5:B3:Y6, the widths Yosys's own front end
+ * (and Parmys) reach. In node-ID order the $add stayed A32:B3 and cost 33 adder stages. */
+static void test_operand_visited_before_consumer(void) {
+    char text[TEXT_MAX];
+    operand_first_text(text, sizeof text);
+    build(text);
+    run_wreduce();
+    expect_bin("sub1", 0, 0, 2, 1, 3);
+    expect_bin("add", 1, 1, 3, 4, 5);
+    expect_bin("sub2", 1, 1, 5, 3, 6);
+}
+
+/* The same cells, but every net named (a statement boundary): visited in node-ID order, so the
+ * order walk changes nothing (the forward-reference case of WR-7). */
+static void test_named_nets_keep_id_order(void) {
+    char text[TEXT_MAX];
+    operand_first_text(text, sizeof text);
+    char *named = strdup(text);
+    TEST_ASSERT_NOT_NULL(named);
+    /* every anonymous temporary gets a wire: declare s1, a, s2 as 32-bit wires aliasing the nets */
+    char extra[3 * BUS_TEXT + 256];
+    char b0[BUS_TEXT];
+    char b1[BUS_TEXT];
+    char b2[BUS_TEXT];
+    bus(b0, sizeof b0, (bus_span){0, 32});
+    bus(b1, sizeof b1, (bus_span){32, 32});
+    bus(b2, sizeof b2, (bus_span){64, 32});
+    (void)snprintf(extra, sizeof extra,
+                   "  wire width 32 \\s1\n  wire width 32 \\a\n  wire width 32 \\s2\n"
+                   "  connect \\s1 %s\n  connect \\a %s\n  connect \\s2 %s\n",
+                   b0, b1, b2);
+    char full[TEXT_MAX + sizeof extra];
+    const char *cut = strstr(named, "  cell $eq");
+    TEST_ASSERT_NOT_NULL(cut);
+    (void)snprintf(full, sizeof full, "%.*s%s%s", (int)(cut - named), named, extra, cut);
+    free(named);
+    build(full);
+    run_wreduce();
+    expect_bin("add", 0, 0, 32, 3,
+               32); /* not narrowed: consumer before operand, as in node-ID order */
+}
+
+#define NOT1(name, a, y) UNW("$not", name, "0", "1", "1", a, y)
+#define NETS4 "  wire $tmp1\n  wire $tmp2\n  wire $tmp3\n  wire $tmp4\n"
+#define OHEAD "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire input 3 \\clk\n" NETS4
+
+static void test_rank_operand_before_consumer(void) {
+    build(OHEAD NOT1("cons", "$tmp1", "$tmp2") NOT1("op", "\\a", "$tmp1") "end\n");
+    rank_set set = probe_ranks();
+    expect_before(&set, "op", "cons");
+    free(set.r);
+}
+
+static void test_rank_named_net_is_not_followed(void) {
+    build("module \\m\n  wire input 1 \\a\n  wire $tmp2\n  wire \\w\n" NOT1("cons", "\\w", "$tmp2")
+              NOT1("op", "\\a", "\\w") "end\n");
+    rank_set set = probe_ranks();
+    expect_before(&set, "cons", "op");
+    free(set.r);
+}
+
+static void test_rank_combinational_loop_terminates(void) {
+    build(OHEAD NOT1("c1", "$tmp2", "$tmp1") NOT1("c2", "$tmp1", "$tmp2") "end\n");
+    rank_set set = probe_ranks();
+    const uint32_t r1 = rank_named(&set, "c1");
+    const uint32_t r2 = rank_named(&set, "c2");
+    TEST_ASSERT_TRUE(r1 != 0 && r2 != 0 && r1 != r2);
+    free(set.r);
+}
+
+static void test_rank_loop_through_flip_flop(void) {
+    build(OHEAD NOT1(
+        "c1", "$tmp3",
+        "$tmp4") "  cell $dff \\ff\n    parameter \\WIDTH 1\n"
+                 "    parameter \\CLK_POLARITY 1\n    connect \\CLK \\clk\n    connect \\D $tmp4\n"
+                 "    connect \\Q $tmp3\n  end\nend\n");
+    rank_set set = probe_ranks();
+    /* the flip-flop's output is not followed: c1 is first, the flip-flop (its D driver) after */
+    expect_before(&set, "c1", "ff");
+    free(set.r);
+}
+
+static void test_rank_first_driver_of_a_shared_net(void) {
+    const char *tri = "    parameter \\WIDTH 1\n    connect \\A \\a\n    connect \\EN \\b\n";
+    char text[TEXT_MAX];
+    (void)snprintf(text, sizeof text,
+                   "%s%s  cell $tribuf \\t1\n%s    connect \\Y $tmp1\n  end\n"
+                   "  cell $tribuf \\t2\n%s    connect \\Y $tmp1\n  end\nend\n",
+                   OHEAD, NOT1("cons", "$tmp1", "$tmp2"), tri, tri);
+    build(text);
+    rank_set set = probe_ranks();
+    /* t1 drives the net first: it goes before the reader; t2 is entered later, after it */
+    expect_before(&set, "t1", "cons");
+    expect_before(&set, "cons", "t2");
+    free(set.r);
+}
+
+/* Bit 0 first: a 2-bit port fed by {n2 n1} walks n1's driver before n2's, whatever their IDs. */
+static void test_rank_bus_is_walked_lsb_first(void) {
+    build(OHEAD "  wire width 2 output 4 \\y\n" BINW("$add", "cons", "0", "0", "2", "2", "2",
+                                                     "{ $tmp2 $tmp1 }", "{ $tmp4 $tmp3 }", "\\y")
+              NOT1("d2", "\\a", "$tmp2") NOT1("d1", "\\a", "$tmp1") "end\n");
+    rank_set set = probe_ranks();
+    expect_before(&set, "d1", "d2");
+    expect_before(&set, "d2", "cons");
+    free(set.r);
+}
+
+/* Port A before port B (Yosys's binop: left, then right). */
+static void test_rank_port_a_before_port_b(void) {
+    build(OHEAD BINW("$and", "cons", "0", "0", "1", "1", "1", "$tmp2", "$tmp1", "$tmp3")
+              NOT1("db", "\\a", "$tmp1") NOT1("da", "\\a", "$tmp2") "end\n");
+    rank_set set = probe_ranks();
+    expect_before(&set, "da", "db");
+    expect_before(&set, "db", "cons");
+    free(set.r);
+}
+
+/* A ternary's operands: the condition first, then the true value (B), then the false value (A). */
+static void test_rank_mux_walks_s_then_b_then_a(void) {
+    build(OHEAD
+          "  wire $tmp5\n  wire $tmp6\n  cell $mux \\mx\n    parameter \\WIDTH 1\n"
+          "    connect \\A $tmp1\n    connect \\B $tmp2\n    connect \\S $tmp3\n    connect \\Y "
+          "$tmp4\n  end\n" NOT1("da", "\\a", "$tmp1") NOT1("db", "\\a", "$tmp2")
+              NOT1("ds", "\\a", "$tmp3") "end\n");
+    rank_set set = probe_ranks();
+    expect_before(&set, "ds", "db");
+    expect_before(&set, "db", "da");
+    expect_before(&set, "da", "mx");
+    free(set.r);
+}
+
+/* 100,000 cells, each before the one it feeds: the walk is as deep as the design. */
+static void test_rank_deep_chain_uses_no_recursion(void) {
+    const size_t cap = (size_t)DEEP_CELLS * BIG_TEXT_PER_CELL * 2U;
+    char *text = (char *)malloc(cap);
+    TEST_ASSERT_NOT_NULL(text);
+    size_t at = (size_t)snprintf(text, cap, "module \\m\n  wire input 1 \\a\n");
+    for (uint32_t k = 0; k <= DEEP_CELLS; k++) {
+        at += (size_t)snprintf(text + at, cap - at, "  wire $tmp%u\n", k);
+    }
+    for (uint32_t k = DEEP_CELLS; k > 0; k--) { /* cell k reads net k-1: consumer first */
+        char in[32];
+        (void)snprintf(in, sizeof in, k == 1 ? "\\a" : "$tmp%u", k - 1U);
+        at += (size_t)snprintf(text + at, cap - at,
+                               "  cell $not \\c%u\n    parameter \\A_SIGNED 0\n"
+                               "    parameter \\A_WIDTH 1\n    parameter \\Y_WIDTH 1\n"
+                               "    connect \\A %s\n    connect \\Y $tmp%u\n  end\n",
+                               k, in, k);
+    }
+    (void)snprintf(text + at, cap - at, "end\n");
+    build(text);
+    free(text);
+    rank_set set = probe_ranks();
+    char last[16];
+    (void)snprintf(last, sizeof last, "c%u", (unsigned)DEEP_CELLS);
+    expect_before(&set, "c1", "c2");
+    TEST_ASSERT_EQUAL_UINT32(rank_named(&set, "c1") + DEEP_CELLS - 1U, rank_named(&set, last));
+    free(set.r);
+}
+
+/* Every allocation of the ranking fails once: NO_MEMORY, never a wrong rank or a leak. */
+static void test_rank_oom(void) {
+    char text[TEXT_MAX];
+    operand_first_text(text, sizeof text);
+    bool done = false;
+    for (long fail = 0; !done && fail < OOM_LIMIT; fail++) {
+        reset();
+        build(text);
+        uint32_t ranks[16] = {0};
+        odin3_util_set_alloc_fail_after(fail);
+        odin3_status st = odin3_opt_wreduce_probe_ranks(&fx.ctx, fx.module, &fx.opts, ranks, 16);
+        odin3_util_set_alloc_fail_after(-1);
+        TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+        done = st == ODIN3_OK;
+    }
+    TEST_ASSERT_TRUE(done);
+}
+
+/* The whole pass with each allocation failing once (the walk's included): a valid IR. */
+static void test_order_oom(void) {
+    char text[TEXT_MAX];
+    operand_first_text(text, sizeof text);
+    oom_sweep(text, false);
 }
 
 static void test_round_cap_warns_and_stays_valid(void) {
@@ -1052,6 +1329,23 @@ static void test_ff_and_mux_oom(void) {
     oom_sweep(CASCADE, false);
 }
 
+/* The order walk (WR-7). */
+static void run_order_tests(void) {
+    RUN_TEST(test_operand_visited_before_consumer);
+    RUN_TEST(test_named_nets_keep_id_order);
+    RUN_TEST(test_rank_operand_before_consumer);
+    RUN_TEST(test_rank_named_net_is_not_followed);
+    RUN_TEST(test_rank_combinational_loop_terminates);
+    RUN_TEST(test_rank_loop_through_flip_flop);
+    RUN_TEST(test_rank_first_driver_of_a_shared_net);
+    RUN_TEST(test_rank_bus_is_walked_lsb_first);
+    RUN_TEST(test_rank_port_a_before_port_b);
+    RUN_TEST(test_rank_mux_walks_s_then_b_then_a);
+    RUN_TEST(test_rank_deep_chain_uses_no_recursion);
+    RUN_TEST(test_rank_oom);
+    RUN_TEST(test_order_oom);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_one_bit_result);
@@ -1096,6 +1390,7 @@ int main(void) {
     RUN_TEST(test_dff_unused_q_bits_and_init);
     RUN_TEST(test_dff_all_unused_goes);
     RUN_TEST(test_cascade_needs_rounds);
+    run_order_tests();
     RUN_TEST(test_round_cap_warns_and_stays_valid);
     RUN_TEST(test_two_runs_are_identical);
     RUN_TEST(test_two_runs_are_identical_mixed);

@@ -1,7 +1,7 @@
 /*
  * fsmdata.h — the FSM table of the fsm pass (4.8 spec section 4, F-n): Yosys 0.55's FsmData
  * (passes/fsm/fsmdata.h) as a C struct that lives inside the pass; no `$fsm` cell exists in the
- * IR (PHASE4 decision 12, question 1).
+ * IR (PHASE4 decision 14, question 1).
  *
  * A code is `state_bits` values of odin3_fsm_bit, bit 0 first (Yosys RTLIL::Const). The six values
  * are Yosys's State order, which is also the order of the Const comparator (rtlil.cc:316-326):
