@@ -80,6 +80,12 @@ drive the design (DESIGN \S1): \emph{forward synthesis}, a Parmys/Odin~II-class 
 architecture-driven hard-block inference (multipliers, adders and memories); \emph{reverse engineering}, reading flat netlists and recovering higher-level structure,
 now approached from Altera LPM structural Verilog upward (Sec.~\ref{sec:re}); and \emph{agentic construction}, the project as a case study in building a
 Yosys-class tool with AI coding agents~\cite{claudecode} under human architectural control.
+The first example that suggested this was possible was Yu and Ren's multi-agent self-evolved
+ABC~\cite{yu2026selfevolvedabc}, in which LLM agents change the source of a million-line logic
+synthesis system, rebuild it, check it and keep the changes that improve results; VPR-Evolve~\cite{wu2026vprevolve}
+has since done the same for FPGA place and route, and Ding et al.\ survey high-level synthesis
+in the agentic era~\cite{ding2026hlsagentic}. Those works evolve an existing tool; Odin III asks
+whether agents can build a new one from a specification.
 The v1.0 scope (ADR D10 and D11) is a tool that works on VTR architectures, that writes its
 outputs in BLIF, Verilog and JSON and reads them back with their HDL locations, and that offers an
 analysis flow for netlists.
@@ -1585,6 +1591,18 @@ corpus, and fuzzers. Section~\ref{sec:method} describes the method.
 % ------------------------------------------------------------------------------------------
 \section{Development Methodology}
 \label{sec:method}
+
+Agent-driven EDA work so far evolves tools that already exist. Self-evolved
+ABC~\cite{yu2026selfevolvedabc} lets agents rewrite ABC's flow tuning, logic minimisation and
+technology mapping, and scores each compiled candidate on ISCAS, VTR, EPFL and IWLS~2005
+benchmarks. VPR-Evolve~\cite{wu2026vprevolve} rewrites VPR's placement and routing per design,
+guided by a shared memory of past outcomes, and reports up to 9.8\% lower delay and 18.1\% lower
+wirelength than stock VPR on five VTR-9 benchmarks. Ding et al.~\cite{ding2026hlsagentic} discuss
+what agents change for high-level synthesis. In all three the existing code base is the
+specification and a benchmark score is the judge. Odin III differs on both counts: there is no
+code base to start from, so the specification is written first and reviewed by the architect,
+and the judge is equivalence against oracles (Sec.~\ref{sec:verify}) before any quality
+number counts.
 
 Every sub-project follows the same path: a specification in \code{docs/specs} with numbered
 decisions, an independent critique by a fresh read-only agent, an implementation plan, tasks

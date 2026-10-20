@@ -80,14 +80,25 @@ add_library(odin3_core OBJECT
     src/frontends/blif/lexer.c
     src/frontends/blif/param_text.c
     src/frontends/blif/reader.c
+    src/frontends/blif/reader_locs.c
     src/frontends/json/json_lex.c
     src/frontends/json/json_parse.c
+    src/frontends/json/reader.c
+    src/frontends/json/reader_cell.c
+    src/frontends/json/reader_ext.c
+    src/frontends/json/reader_implicit.c
+    src/frontends/json/reader_module.c
+    src/frontends/json/reader_net.c
+    src/frontends/json/reader_sop.c
+    src/frontends/json/reader_value.c
+    src/frontends/json/reader_wire.c
     src/backends/blif/writer.c
     src/backends/blif/vtr.c
     src/backends/blif/isop.c
     src/passes/manager.c
     src/passes/builtin.c
     src/passes/write_formats.c
+    src/passes/read_json_pass.c
     src/passes/sim_pass.c
     src/passes/project_pass.c
     src/passes/dump_locs.c
@@ -302,6 +313,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/ceval_interp.c
     src/frontends/elab/bind.c
     src/frontends/verilog/read_verilog.c
+    src/frontends/verilog/soft_blocks.c
     src/frontends/verilog/read_verilog_lib.c
     src/frontends/verilog/elab1.c
     src/frontends/verilog/elab1_lookup.c
@@ -439,6 +451,9 @@ add_custom_target(verilog_generated
 # the warning off (verified with CMake 3.28 and both compilers).
 target_sources(odin3_core PRIVATE ${BISON_verilog_parser_OUTPUTS} ${FLEX_verilog_lexer_OUTPUTS})
 target_include_directories(odin3_core PRIVATE ${_gen})
+install(DIRECTORY lib/soft_primitives DESTINATION share/odin3 FILES_MATCHING PATTERN "*.v")
+target_compile_definitions(odin3_core PRIVATE
+    ODIN3_SOFT_PRIMITIVES_DIR="${PROJECT_SOURCE_DIR}/lib/soft_primitives")
 # The list as measured with Bison 3.8.2, Flex 2.6.4, gcc 13 and clang 18 at -O0 and -O2: the
 # expected conversion, sign, unused-parameter and missing-prototypes warnings do not occur, and
 # the scanner needs nothing (re-measured with the full lexer of 2C Task 3: start conditions,
@@ -766,6 +781,13 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_util_idindex)
     odin3_add_unit_test(test_util_str)
     odin3_add_unit_test(test_json_parse)
+    odin3_add_unit_test(test_read_json)
+    target_compile_definitions(test_read_json PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}")
+    odin3_add_unit_test(test_read_json_cells)
+    target_compile_definitions(test_read_json_cells PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_json_roundtrip)
+    target_compile_definitions(test_json_roundtrip PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_util_log)
     odin3_add_unit_test(test_util_file)
     odin3_add_unit_test(test_sha256)
@@ -938,6 +960,21 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_pm_ramstyle PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_mem_arch
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_mem_arch $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_mem_arch PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_soft_blocks
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_soft_blocks $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_soft_blocks PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_mem_rden
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_mem_rden $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_mem_rden PROPERTIES LABELS unit)
     add_test(NAME cli_pm_carry
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_carry $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
@@ -1016,6 +1053,17 @@ if(BUILD_TESTING)
     target_compile_definitions(test_pm_ramstyle PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 4.4 (plan Tasks 9 and 10): memories from the arch record (depth limit, absent models) and
+    # `--mem-width arch`, on RTLIL built over the library and record of a small arch XML.
+    foreach(_pm_mem IN ITEMS test_pm_mem_arch test_pm_mem_width)
+        odin3_add_unit_test(${_pm_mem})
+        target_sources(${_pm_mem} PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c
+            tests/unit/hardmap_ramsim.c tests/unit/pm_mem_fixture.c)
+        target_compile_definitions(${_pm_mem} PRIVATE
+            ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+            ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    endforeach()
     # 3C Task 4 (spec 9.3): the arithmetic and memory micros through the Phase 3 script up to
     # `lower`, against the Parmys goldens (tools/hardmap-check/hardmap-diff). Exit 77 (skipped)
     # when the golden tree is absent (CI). Its Python tests run in python_tools.
@@ -1384,6 +1432,9 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_blif_reader)
     target_compile_definitions(test_blif_reader PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    # 5.4d: read_blif --hdl-locs (names, `.attr src`, D-5), each case in a mkdtemp directory.
+    odin3_add_unit_test(test_blif_locs)
+    target_compile_definitions(test_blif_locs PRIVATE ODIN3_LOCS_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_blif_writer)
     target_compile_definitions(test_blif_writer PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")

@@ -235,6 +235,22 @@ DESIGN §12.1.
       mismatch between its cover size (0) and its fanin number (1)"). With `opt -full` after
       `flatten` (as `phase3_pre_abc.script` has) mcml passes `strash`. Not fixed here: either add
       that `opt` to `qor_legs.py` or make the adapter fold equal-fanin cells; controller's call.
+15. **Read-enable RAMs and big soft memories** (Peter, 2026-10-20): read-enable RAMs map hard with
+   exact soft emulation; soft-memory warning above 50k FFs; ABC time cap deferred. A `$mem` read
+   port whose enable is not constant 1 no longer stays soft (`MEM_SOFT_EN` is gone): the RAM reads
+   every cycle, the enable goes through a flip-flop, and a hold register and a `$mux` per data bit
+   keep the output while the enable is 0 (Yosys `Mem::emulate_rden`, as called by `memory_libmap`
+   `emu_en`). One located WARNING per such memory port. A memory left soft whose width x depth is
+   above 50,000 bits draws a located WARNING that names it, its bits and why it stayed soft (a
+   warning only). 4.2 plan PR D, Tasks 11 and 12. Peter approved 2026-10-20 (data padding changed by review M3, plan deviation 13): `--mem-width arch`
+   pads the address to the chosen mode's width; DATA_WIDTH is the slice's bit count.
+16. **D17 and D18** (Peter, 2026-10-20). D17, Parmys's soft memory has no read register: keep
+   RTL-correct, a Parmys defect, no code change. D18, an explicit `single_port_ram`,
+   `dual_port_ram`, `multiply` or `adder` instance on an arch without that model: under
+   `read_verilog --vtr-compat` it is built as soft logic from `lib/soft_primitives/<name>.v` (our
+   own behavioural bodies, read as library units on demand) with a located WARNING, as Parmys
+   does; without `--vtr-compat` the unresolved-module error stays. Including `adder` in D18 is an
+   agent default, Peter may override. 4.2 plan PR D.
 
 ## Open items
 
