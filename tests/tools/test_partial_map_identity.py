@@ -33,13 +33,21 @@ with open(HERE / "odin.log", "a") as log:
     log.write(" ".join(sys.argv[1:]) + "\n")
 name = "hardmap" if "; hardmap; " in script else "partial_map"
 leg = spec.get(name, {})
+if "write_blif" not in script:  # the hardmap-only run: stops before lower
+    pre = leg.get("pre", {})
+    if pre.get("rc"):
+        sys.exit(pre["rc"])
+    sys.stderr.write(pre.get("err", ""))
+    Path(script.rsplit("write_rtlil ", 1)[1].strip()).write_text(pre.get("il", "# v1\nw 1\n"))
+    sys.exit(0)
 if leg.get("rc"):
     sys.stderr.write(leg.get("err", "odin3: error: boom\n"))
     sys.exit(leg["rc"])
 vtr = re.search(r"write_blif --vtr (\S+?);", script).group(1)
-plain = script.rsplit("write_blif ", 1)[1].strip()
+plain, il = re.search(r"; write_blif (?!--vtr)(\S+); write_rtlil (\S+)$", script).groups()
 Path(vtr).write_text(leg.get("vtr", "# v1\n.model a\n.end\n"))
 Path(plain).write_text(leg.get("plain", "# v1\n.model b\n.end\n"))
+Path(il).write_text(leg.get("il", "# v1\nmodule m\n"))
 """
 
 
@@ -91,14 +99,70 @@ class ClassTests(IdentityCase):
         self.assertEqual(code, 1)
         self.assertIn("exit 0 against 1", out)
 
-    def test_same_failure_is_not_a_difference_but_does_not_count(self) -> None:
+    def test_rtlil_difference(self) -> None:
+        self.spec = {"partial_map": {"il": "module other\n"}}
+        code, out, _ = self.run_tool("--tier", "1", str(self.design))
+        self.assertEqual(code, 1)
+        self.assertIn("DIFFERENT (write_rtlil: line 1", out)
+
+    def allow_file(self, *names: str) -> str:
+        path = self.tmp / "allow.txt"
+        path.write_text("# c\n" + "".join(f"{n}\n" for n in names))
+        return str(path)
+
+    def test_same_failure_outside_the_allow_list_is_different(self) -> None:
         self.spec = {"hardmap": {"rc": 1}, "partial_map": {"rc": 1}}
-        code, out, err = self.run_tool("--tier", "1", str(self.design))
+        code, out, _ = self.run_tool("--tier", "1", "--allow-same-failure", self.allow_file(),
+                                     str(self.design))
+        self.assertEqual(code, 1, out)
+        self.assertIn("DIFFERENT (both exit 1, not in the allow-list", out)
+
+    def test_allowed_same_failure_runs_hardmap_only_and_does_not_count(self) -> None:
+        self.spec = {"hardmap": {"rc": 1}, "partial_map": {"rc": 1}}
+        allow = self.allow_file(str(self.design))
+        code, out, err = self.run_tool("--allow-same-failure", allow, "--list",
+                                       self.listing(), str(self.design))
         self.assertEqual(code, 1, out)  # --min-ok 1 not met
-        self.assertIn("same-failure", out)
+        self.assertIn("same-failure (both exit 1", out)
+        self.assertIn("hardmap-only identical", out)
         self.assertIn("--min-ok", err)
-        code, out, _ = self.run_tool("--tier", "1", "--min-ok", "0", str(self.design))
+        code, out, _ = self.run_tool("--allow-same-failure", allow, "--min-ok", "0",
+                                     str(self.design))
         self.assertEqual(code, 0, out)
+        self.assertEqual(len([ln for ln in self.log().splitlines() if "write_blif" not in ln]), 4)
+
+    def listing(self) -> str:
+        path = self.tmp / "empty.txt"
+        path.write_text("# none\n")
+        return str(path)
+
+    def test_allowed_failure_with_a_different_hardmap_result(self) -> None:
+        self.spec = {"hardmap": {"rc": 1}, "partial_map": {"rc": 1, "pre": {"il": "x\n"}}}
+        code, out, _ = self.run_tool("--allow-same-failure", self.allow_file(str(self.design)),
+                                     str(self.design))
+        self.assertEqual(code, 1)
+        self.assertIn("DIFFERENT (both exit 1", out)
+        self.assertIn("hardmap-only write_rtlil", out)
+
+    def test_allowed_failure_with_a_dead_hardmap_leg(self) -> None:
+        self.spec = {"hardmap": {"rc": 1, "pre": {"rc": 1}},
+                     "partial_map": {"rc": 1, "pre": {"rc": 1}}}
+        code, out, _ = self.run_tool("--allow-same-failure", self.allow_file(str(self.design)),
+                                     str(self.design))
+        self.assertEqual(code, 1)
+        self.assertIn("hardmap-only run failed", out)
+
+    def test_failure_logs_are_compared_modulo_the_prefix(self) -> None:
+        allow = self.allow_file(str(self.design))
+        self.spec = {"hardmap": {"rc": 1, "err": "error: hardmap: boom\nnoise\ninfo: pass hardmap: 0.3 ms\n"},
+                     "partial_map": {"rc": 1, "err": "error: partial_map: boom\nother\ninfo: pass partial_map: 0.5 ms\n"}}
+        code, out, _ = self.run_tool("--allow-same-failure", allow, "--min-ok", "0",
+                                     str(self.design))
+        self.assertEqual(code, 0, out)
+        self.spec["partial_map"]["err"] = "error: partial_map: bang\n"
+        code, out, _ = self.run_tool("--allow-same-failure", allow, str(self.design))
+        self.assertEqual(code, 1)
+        self.assertIn("DIFFERENT (pass log: line 1", out)
 
     def test_crash_is_hard(self) -> None:
         self.spec = {}
@@ -120,6 +184,7 @@ class ScriptTests(IdentityCase):
         for line in lines:
             self.assertIn("read_techlib", line)
             self.assertIn("opt -fast; compact; write_blif --vtr", line)
+            self.assertIn("; write_rtlil ", line)
 
     def test_tier2_swaps_the_library_for_read_arch(self) -> None:
         xml = self.tmp / "k6.xml"
@@ -173,6 +238,16 @@ class InputTests(IdentityCase):
         code, _, err = self.run_tool("--list", str(listing))
         self.assertEqual(code, 2)
         self.assertIn("expected 'path [top]'", err)
+
+    def test_shipped_allow_list_is_part_of_the_inputs(self) -> None:
+        keys = {d.key for d in idt.read_list(idt.DEFAULT_INPUTS)}
+        allowed = {d.key for d in idt.read_list(idt.DEFAULT_ALLOW)}
+        self.assertEqual(len(allowed), 2)
+        self.assertLessEqual(allowed, keys)
+
+    def test_tier3_script_requires_50_identical(self) -> None:
+        text = (idt.HERE / "tier3").read_text(encoding="utf-8")
+        self.assertIn("--min-ok 50", text)
 
     def test_shipped_list_names_existing_files(self) -> None:
         designs = idt.read_list(idt.DEFAULT_INPUTS)

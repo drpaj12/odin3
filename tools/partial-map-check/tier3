@@ -4,7 +4,9 @@
 # the 19 VTR designs of tests/hardmap/vtr_designs.txt (smallest first). Needs VTR_ROOT and the
 # Parmys goldens (for the tops of the 19). Run it through tools/heavy-run, lanes idle:
 #   tools/heavy-run tools/partial-map-check/tier3 BASELINE_ODIN3 CANDIDATE_ODIN3
-# Exit codes are identity's.
+# --min-ok 50 = 52 designs minus the two known `lower` failures
+# (tests/partial_map/identity_known_failures.txt), so a dead VTR half cannot pass; any other
+# design failing on both sides is DIFFERENT. Exit codes are identity's.
 set -euo pipefail
 if [ "$#" -ne 2 ]; then
     echo "usage: tier3 BASELINE_ODIN3 CANDIDATE_ODIN3" >&2
@@ -16,4 +18,4 @@ repo="$here/../.."
 exec "$here/identity" --tier 3 --baseline "$1" --candidate "$2" \
     --list "$repo/tests/partial_map/identity_inputs.txt" \
     --vtr-list "$repo/tests/hardmap/vtr_designs.txt" \
-    --vtr-root "$VTR_ROOT/vtr_flow/benchmarks/verilog" --min-ok 25
+    --vtr-root "$VTR_ROOT/vtr_flow/benchmarks/verilog" --min-ok 50

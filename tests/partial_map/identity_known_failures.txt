@@ -1,0 +1,8 @@
+# Designs allowed to fail on both sides of the identity gate (same exit status). Any other design
+# that fails on both sides is a DIFFERENT result: a dead VTR half (wrong --vtr-root, missing
+# goldens) must not pass as "same-failure".
+# These two fail in `lower` with ODIN3_ERR_INVALID_ARG on main and on the head alike. For them the
+# tool compares the hardmap-only run (script stopped before `lower`, write_rtlil) and the
+# hardmap/partial_map log lines instead.
+tests/micro/verilog/operators/eightbit_arithmetic_power.v
+tests/micro/verilog/operators/twobits_arithmetic_power.v
