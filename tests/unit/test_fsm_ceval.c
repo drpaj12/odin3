@@ -292,7 +292,8 @@ static void test_dff_is_not_evaluable(void) {
     char got[MAX_BITS + 1];
     odin3_fsm_ceval_res res;
     TEST_ASSERT_FALSE(eval_wire("y", got, &res));
-    TEST_ASSERT_FALSE(res.has_undef); /* an evaluation error, as CellTypes::eval */
+    TEST_ASSERT_TRUE(
+        res.has_undef); /* ConstEval knows no flip-flop: Q has no driver, it is undef */
     TEST_ASSERT_FALSE(res.capped);
     set_wire("q=1"); /* a value on Q is enough: the flip-flop is never asked */
     expect_eval("y=0");

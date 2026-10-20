@@ -258,7 +258,8 @@ static odin3_status collect_drivers(odin3_fsm_ceval *ce, const odin3_fsm_sig *si
         odin3_fsm_refs span = odin3_fsm_ix_refs(ce->ix, sig[i]);
         for (uint32_t k = 0; k < span.count; k++) {
             uint32_t flags = span.refs[k].flags;
-            if ((flags & ODIN3_FSM_REF_OUT) != 0 && (flags & ODIN3_FSM_REF_UNKNOWN) == 0 &&
+            if ((flags & ODIN3_FSM_REF_OUT) != 0 &&
+                (flags & (ODIN3_FSM_REF_UNKNOWN | ODIN3_FSM_REF_SEQ)) == 0 &&
                 odin3_kit_push_u32(&ce->drivers, span.refs[k].node) != ODIN3_OK) {
                 return ODIN3_ERR_NO_MEMORY;
             }

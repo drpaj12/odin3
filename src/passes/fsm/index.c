@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum { CONST_PREFIX_LEN = 7 };
@@ -46,6 +47,21 @@ static node_kind kind_of(const odin3_design *design, const odin3_module *module,
     bool internal =
         def->name[0] == '$' && (def->gran == ODIN3_GRAN_WORD || def->gran == ODIN3_GRAN_BIT);
     return internal ? KIND_KNOWN : KIND_OTHER;
+}
+
+/* Type-name prefixes of the sequential and memory cells (Yosys CellTypes::setup_internals_mem). */
+static const char *const k_seq_prefix[] = {"$dff",    "$adff",    "$sdff", "$aldff",
+                                           "$dlatch", "$adlatch", "$sr",   "$ff",
+                                           "$_DFF",   "$_DLATCH", "$_FF_", "$mem"};
+
+static bool is_seq(const odin3_design *design, const odin3_module *module, odin3_node_id node) {
+    const odin3_celltype_def *def = odin3_celltype_get(design, odin3_node_type(module, node));
+    for (size_t i = 0; i < sizeof k_seq_prefix / sizeof k_seq_prefix[0]; i++) {
+        if (strncmp(def->name, k_seq_prefix[i], strlen(k_seq_prefix[i])) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static uint32_t ref_flags(odin3_dir dir, node_kind kind) {
@@ -123,30 +139,34 @@ static void classify_nets(odin3_fsm_index *ix) {
     }
 }
 
-/* One pass over the pins of the reference-bearing nodes: counts (fill false) or stores them. */
-static void scan_refs(odin3_fsm_index *ix, bool fill, uint32_t *cursor) {
+/* One reference pass over a node's pins: counts (cursor NULL) or stores them. */
+static void scan_node(odin3_fsm_index *ix, odin3_node_id node, node_kind kind, uint32_t *cursor) {
     const odin3_module *module = ix->module;
-    for (uint32_t id = 1; id < ix->node_end; id++) {
-        odin3_node_id node = {id};
-        node_kind kind = kind_of(ix->design, module, node);
-        if (kind != KIND_KNOWN && kind != KIND_OTHER) {
+    odin3_pinslice pins = odin3_node_pins(module, node);
+    uint32_t seq = kind == KIND_KNOWN && is_seq(ix->design, module, node) ? ODIN3_FSM_REF_SEQ : 0U;
+    for (uint32_t k = 0; k < pins.count; k++) {
+        odin3_pin_id pin = {pins.first.v + k};
+        odin3_net_id net = odin3_pin_net(module, pin);
+        if (net.v == 0 || ix->net_const[net.v] != ODIN3_FSM_NO_CONST) {
             continue;
         }
-        odin3_pinslice pins = odin3_node_pins(module, node);
-        for (uint32_t k = 0; k < pins.count; k++) {
-            odin3_pin_id pin = {pins.first.v + k};
-            odin3_net_id net = odin3_pin_net(module, pin);
-            if (net.v == 0 || ix->net_const[net.v] != ODIN3_FSM_NO_CONST) {
-                continue;
-            }
-            if (!fill) {
-                ix->off[net.v + 1]++;
-                continue;
-            }
-            odin3_fsm_ref *ref = &ix->refs[cursor[net.v]++];
-            ref->node = id;
-            ref->port = odin3_pin_port(module, pin);
-            ref->flags = ref_flags(odin3_pin_dir(module, pin), kind);
+        if (cursor == NULL) {
+            ix->off[net.v + 1]++;
+            continue;
+        }
+        odin3_fsm_ref *ref = &ix->refs[cursor[net.v]++];
+        ref->node = node.v;
+        ref->port = odin3_pin_port(module, pin);
+        ref->flags = ref_flags(odin3_pin_dir(module, pin), kind) | seq;
+    }
+}
+
+/* One pass over the reference-bearing nodes: counts (cursor NULL) or stores the references. */
+static void scan_refs(odin3_fsm_index *ix, uint32_t *cursor) {
+    for (uint32_t id = 1; id < ix->node_end; id++) {
+        node_kind kind = kind_of(ix->design, ix->module, (odin3_node_id){id});
+        if (kind == KIND_KNOWN || kind == KIND_OTHER) {
+            scan_node(ix, (odin3_node_id){id}, kind, cursor);
         }
     }
 }
@@ -169,7 +189,7 @@ odin3_status odin3_fsm_index_build(odin3_design *design, odin3_module *module,
         return ODIN3_ERR_NO_MEMORY;
     }
     classify_nets(ix);
-    scan_refs(ix, false, NULL);
+    scan_refs(ix, NULL);
     for (uint32_t net = 1; net <= ix->net_end; net++) {
         ix->off[net] += ix->off[net - 1];
     }
@@ -182,7 +202,7 @@ odin3_status odin3_fsm_index_build(odin3_design *design, odin3_module *module,
         odin3_fsm_index_free(ix);
         return ODIN3_ERR_NO_MEMORY;
     }
-    scan_refs(ix, true, cursor);
+    scan_refs(ix, cursor);
     odin3_util_free(cursor);
     return ODIN3_OK;
 }
@@ -232,4 +252,64 @@ uint32_t odin3_fsm_ix_type(const odin3_fsm_index *ix, uint32_t node) {
         return 0;
     }
     return odin3_node_type(ix->module, (odin3_node_id){node}).v;
+}
+
+static int cmp_pair(const void *lhs, const void *rhs) {
+    const uint32_t *lhs_p = lhs;
+    const uint32_t *rhs_p = rhs;
+    if (lhs_p[0] != rhs_p[0]) {
+        return lhs_p[0] < rhs_p[0] ? -1 : 1;
+    }
+    return (lhs_p[1] > rhs_p[1]) - (lhs_p[1] < rhs_p[1]);
+}
+
+/* Appends the matching references of one net to vec. */
+typedef struct ref_query {
+    uint32_t net, want;
+} ref_query;
+
+static odin3_status push_matching(const odin3_fsm_index *ix, ref_query query, odin3_vec *vec) {
+    const uint32_t want = query.want;
+    odin3_fsm_refs span = odin3_fsm_ix_refs(ix, query.net);
+    for (uint32_t k = 0; k < span.count; k++) {
+        if ((span.refs[k].flags & (want | ODIN3_FSM_REF_UNKNOWN)) == 0) {
+            continue;
+        }
+        if (odin3_kit_push_u32(vec, span.refs[k].node) != ODIN3_OK ||
+            odin3_kit_push_u32(vec, span.refs[k].port) != ODIN3_OK) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    return ODIN3_OK;
+}
+
+odin3_status odin3_fsm_ix_pairs(const odin3_fsm_index *ix, odin3_fsm_sigref sigs, uint32_t want,
+                                odin3_vec *vec, uint32_t *count) {
+    size_t first = vec->len;
+    *count = 0;
+    for (uint32_t i = 0; i < sigs.len; i++) {
+        odin3_status st = odin3_fsm_sig_is_const(sigs.sig[i])
+                              ? ODIN3_OK
+                              : push_matching(ix, (ref_query){sigs.sig[i], want}, vec);
+        if (st != ODIN3_OK) {
+            odin3_kit_truncate(vec, first);
+            return st;
+        }
+    }
+    if (vec->len == first) {
+        return ODIN3_OK;
+    }
+    uint32_t *base = vec->data;
+    qsort(base + first, (vec->len - first) / 2, 2 * sizeof *base, cmp_pair);
+    size_t kept = first;
+    for (size_t at = first; at < vec->len; at += 2) {
+        if (kept == first || base[kept - 2] != base[at] || base[kept - 1] != base[at + 1]) {
+            base[kept] = base[at];
+            base[kept + 1] = base[at + 1];
+            kept += 2;
+        }
+    }
+    odin3_kit_truncate(vec, kept);
+    *count = (uint32_t)((kept - first) / 2);
+    return ODIN3_OK;
 }

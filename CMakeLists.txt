@@ -137,6 +137,11 @@ add_library(odin3_core OBJECT
     src/passes/fsm/fsmdata.c
     src/passes/fsm/index.c
     src/passes/fsm/ceval.c
+    src/passes/fsm/common.c
+    src/passes/fsm/sigcache.c
+    src/passes/fsm/detect.c
+    src/passes/fsm/fsm.c
+    src/passes/fsm/register.c
     src/passes/opt/dff_gates.c
     src/passes/opt/dff_rules.c
     src/passes/opt/dff_constbits.c
@@ -814,6 +819,10 @@ if(BUILD_TESTING)
     # 4.8 Task 3: the fsm pass's table and net index.
     odin3_add_unit_test(test_fsm_data)
     target_sources(test_fsm_data PRIVATE tests/unit/proc_build.c)
+    odin3_add_unit_test(test_fsm_detect)
+    target_sources(test_fsm_detect PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_fsm_detect PRIVATE
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     odin3_add_unit_test(test_fsm_ceval)
     target_sources(test_fsm_ceval PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_fsm_ceval PRIVATE

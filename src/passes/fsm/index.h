@@ -12,7 +12,9 @@
  * $port_inout) and the constant nodes ($_CONST*_) is a reference of its net, with the pin's port
  * index and flags: IN (the pin reads), OUT (it drives; an inout pin has both) and UNKNOWN (the
  * node is not an internal cell of Yosys: an instance of a module, a black box or a hard cell, which
- * fsm_detect treats as driver and user of every pin, fsm_detect.cc:322, :327). A net on a port
+ * fsm_detect treats as driver and user of every pin, fsm_detect.cc:322, :327) and SEQ (a flip-flop,
+ * latch or memory cell, which Yosys's ConstEval does not know, consteval.h:42: setup_internals has
+ * the combinational cells only). A net on a port
  * node's pin is a port net (sig_at_port).
  *
  * Failures. ODIN3_ERR_NO_MEMORY with the index empty; nothing logs.
@@ -32,6 +34,12 @@
 
 typedef uint32_t odin3_fsm_sig;
 
+/* A signal: an array of bits and its length. */
+typedef struct odin3_fsm_sigref {
+    const odin3_fsm_sig *sig;
+    uint32_t len;
+} odin3_fsm_sigref;
+
 #define ODIN3_FSM_SIG_CONST_BASE 0xFFFFFFF0U
 enum { ODIN3_FSM_NO_CONST = 0xFF };
 
@@ -50,7 +58,12 @@ static inline bool odin3_fsm_sig_defined(odin3_fsm_sig sig) {
     return odin3_fsm_sig_is_const(sig) && odin3_fsm_bit_defined(odin3_fsm_sig_bit(sig));
 }
 
-enum { ODIN3_FSM_REF_IN = 1, ODIN3_FSM_REF_OUT = 2, ODIN3_FSM_REF_UNKNOWN = 4 };
+enum {
+    ODIN3_FSM_REF_IN = 1,
+    ODIN3_FSM_REF_OUT = 2,
+    ODIN3_FSM_REF_UNKNOWN = 4,
+    ODIN3_FSM_REF_SEQ = 8
+};
 
 typedef struct odin3_fsm_ref {
     uint32_t node;  /* odin3_node_id */
@@ -120,6 +133,20 @@ odin3_fsm_sig odin3_fsm_ix_pin_sig(const odin3_fsm_index *ix, odin3_pin_id pin);
 /* Appends the signal bits of port `port` of node to out (elements odin3_fsm_sig), LSB first. */
 odin3_status odin3_fsm_ix_port_sigs(const odin3_fsm_index *ix, odin3_node_id node, uint32_t port,
                                     odin3_vec *out);
+
+/*
+ * Appends to vec (elements uint32_t) the (node, port) pairs that drive (want = ODIN3_FSM_REF_OUT)
+ * or read (ODIN3_FSM_REF_IN) a bit of sigs, node then port, sorted and without repeats: Yosys's
+ * sig2driver.find and sig2user.find. An unknown node counts for both. *count gets the number of
+ * pairs added. Constant bits have none. NO_MEMORY with vec as it was.
+ */
+odin3_status odin3_fsm_ix_pairs(const odin3_fsm_index *ix, odin3_fsm_sigref sigs, uint32_t want,
+                                odin3_vec *vec, uint32_t *count);
+
+/* Pair idx of a vec filled by odin3_fsm_ix_pairs starting at element `first`. */
+static inline const uint32_t *odin3_fsm_pair_at(const odin3_vec *vec, size_t first, uint32_t idx) {
+    return (const uint32_t *)vec->data + first + (size_t)idx * 2U;
+}
 
 /* The type ID of node (0 for a dead node). */
 uint32_t odin3_fsm_ix_type(const odin3_fsm_index *ix, uint32_t node);

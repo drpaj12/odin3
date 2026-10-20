@@ -218,8 +218,8 @@ static bool has_ref(odin3_fsm_refs span, uint32_t flags, uint32_t port, const ch
     for (uint32_t i = 0; i < span.count; i++) {
         const odin3_celltype_def *def = odin3_celltype_get(
             res.design, odin3_node_type(res.module, (odin3_node_id){span.refs[i].node}));
-        if (span.refs[i].flags == flags && span.refs[i].port == port &&
-            strcmp(def->name, type_name) == 0) {
+        if ((span.refs[i].flags & ~(uint32_t)ODIN3_FSM_REF_SEQ) == flags &&
+            span.refs[i].port == port && strcmp(def->name, type_name) == 0) {
             return true;
         }
     }
@@ -238,6 +238,19 @@ static void test_index_refs(void) {
     TEST_ASSERT_FALSE(odin3_fsm_ix_port_net(&ix, q_net));
     TEST_ASSERT_EQUAL_UINT32(q_net, odin3_fsm_ix_sig(&ix, q_net));
     odin3_fsm_index_free(&ix);
+    odin3_fsm_index_free(&ix);
+}
+
+static void test_index_sequential_flag(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(k_mod, &res));
+    odin3_fsm_index ix;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_fsm_index_build(res.design, res.module, &ix));
+    odin3_fsm_refs span = odin3_fsm_ix_refs(&ix, wire_net("q", 0));
+    uint32_t seq = 0;
+    for (uint32_t i = 0; i < span.count; i++) {
+        seq += (span.refs[i].flags & ODIN3_FSM_REF_SEQ) != 0 ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, seq); /* the flip-flop, not the $eq */
     odin3_fsm_index_free(&ix);
 }
 
@@ -298,7 +311,7 @@ static void test_index_whole_wire(void) {
     odin3_node_id dff = {0};
     odin3_fsm_refs span = odin3_fsm_ix_refs(&ix, wire_net("q", 0));
     for (uint32_t i = 0; i < span.count; i++) {
-        if (span.refs[i].flags == ODIN3_FSM_REF_OUT) {
+        if ((span.refs[i].flags & ODIN3_FSM_REF_OUT) != 0) {
             dff.v = span.refs[i].node;
         }
     }
@@ -337,6 +350,7 @@ int main(void) {
     RUN_TEST(test_data_copy_oom);
     RUN_TEST(test_data_fill_oom);
     RUN_TEST(test_index_refs);
+    RUN_TEST(test_index_sequential_flag);
     RUN_TEST(test_index_ports_and_unknown);
     RUN_TEST(test_index_constants);
     RUN_TEST(test_index_whole_wire);

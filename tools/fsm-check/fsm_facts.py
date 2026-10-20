@@ -10,6 +10,12 @@ name under ``$VTR_ROOT/vtr_flow/benchmarks/verilog``; the RAM-model setattr line
 reports for it (``fsm_probe``'s rows plus the marked and rejected registers and the extraction
 failures).  With ``--check`` nothing is written; the exit code is 1 when the file differs.
 
+``--marks FILE`` writes the detection facts of the micros (no Yosys run: derived from the JSON)
+in the form the C unit test reads: ``PATH MARKED REJECTED`` per micro, MARKED the registers
+fsm_detect marked as ``module.wire`` joined by commas, REJECTED ``module.wire:reason+reason``
+(reasons port, users, init, selfreset) joined by commas, ``-`` for none. RAM write-enable
+registers (``$memwr``) are left out: Odin III's pipeline needs the VTR models to build them.
+
 Exit codes: 0 done (or equal with --check); 1 differs (--check); 2 usage or tool error; 3 Yosys
 crashed or timed out on a design.
 """
@@ -70,6 +76,31 @@ def facts_of(yosys: str, kind: str, rel: str, top: str | None) -> dict[str, obje
     }
 
 
+REASON_CODES = {
+    "Register is connected to module port": "port",
+    "Users of register don't seem to benefit from recoding": "users",
+    "Register has an initialization value": "init",
+    "Circuit seems to be self-resetting": "selfreset",
+}
+
+
+def marks_text(facts: dict[str, dict[str, object]],
+               corpus: Sequence[tuple[str, str, str, str | None]]) -> str:
+    """The detection facts of the micros of the corpus, one line each."""
+    lines = ["# PATH MARKED REJECTED (tools/fsm-check/fsm-facts --marks; do not edit)"]
+    for name, kind, rel, _top in corpus:
+        if kind != "micro":
+            continue
+        entry = facts[name]
+        marked = [m for m in entry["marked"] if "$memwr" not in m]  # type: ignore[attr-defined]
+        rejected = []
+        for reg, reasons in sorted(entry["rejected"].items()):  # type: ignore[attr-defined]
+            codes = "+".join(REASON_CODES[r] for r in reasons)
+            rejected.append(f"{reg}:{codes}")
+        lines.append(f"{rel} {','.join(marked) or '-'} {','.join(rejected) or '-'}")
+    return "\n".join(lines) + "\n"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="fsm-facts", description=__doc__.split("\n")[0])
     ap.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
@@ -77,9 +108,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--yosys", default=fsm_probe.default_yosys())
     ap.add_argument("--only", nargs="*", default=[], help="regenerate only these names")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--marks", type=Path, help="write the detection marks of the micros here")
     args = ap.parse_args(argv)
     try:
         corpus = read_corpus(args.corpus)
+        if args.marks is not None:
+            args.marks.write_text(marks_text(json.loads(args.out.read_text()), corpus))
+            return EXIT_OK
         old: dict[str, object] = json.loads(args.out.read_text()) if args.out.exists() else {}
         new: dict[str, object] = dict(old) if args.only else {}
         for name, kind, rel, top in corpus:
