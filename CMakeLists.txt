@@ -166,6 +166,7 @@ add_library(odin3_core OBJECT
     src/passes/lower/snapshot.c
     src/passes/partial_map/register.c
     src/passes/partial_map/hardmap.c
+    src/passes/partial_map/generic.c
     src/passes/partial_map/hm_kit.c
     src/passes/partial_map/mul.c
     src/passes/partial_map/adder.c
@@ -854,6 +855,14 @@ if(BUILD_TESTING)
         ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 4.2 Task 7: generic hard blocks (B-1..B-7): the bind check and report of partial_map.
+    odin3_add_unit_test(test_pm_generic)
+    target_compile_definitions(test_pm_generic PRIVATE
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 4.2 Task 8: every registered generic model of the real archs binds and maps (skips 77
+    # without VTR_ROOT).
+    odin3_add_unit_test(test_pm_generic_vtr)
+    set_tests_properties(test_pm_generic_vtr PROPERTIES SKIP_RETURN_CODE 77)
     # 3C Task 3: hardmap's $add/$sub rule (adder chains) on hand-built flat IR.
     odin3_add_unit_test(test_hardmap_adder)
     target_sources(test_hardmap_adder PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)

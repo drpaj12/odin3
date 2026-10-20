@@ -788,7 +788,9 @@ static odin3_status check_other(vtr_walk *walk, odin3_node_id node, const odin3_
     if (def->gran == ODIN3_GRAN_MODULE) {
         return refuse_instance(walk, node);
     }
-    if (lib != NULL && lib->kind == ODIN3_TECHLIB_HARD) {
+    /* A library black box is an arch model with no function (4.2: the generic blocks `read_arch`
+     * registers); it is written as a `.subckt` like a hard cell. */
+    if (odin3_techlib_is_subckt(lib)) {
         return check_hard(walk, node, lib);
     }
     if (lib != NULL || def->gran == ODIN3_GRAN_HARD || def->gran == ODIN3_GRAN_BLACKBOX) {
@@ -1019,8 +1021,8 @@ static odin3_status warn_node(vtr_walk *walk, odin3_node_id node) {
     }
     const odin3_techlib_cell *lib = odin3_celltype_lib(walk->design, type);
     odin3_status st = ODIN3_OK;
-    for (uint32_t i = 0; lib != NULL && lib->kind == ODIN3_TECHLIB_HARD && st == ODIN3_OK &&
-                         i < lib->n_ports && i < def->n_ports;
+    for (uint32_t i = 0;
+         odin3_techlib_is_subckt(lib) && st == ODIN3_OK && i < lib->n_ports && i < def->n_ports;
          i++) {
         if (lib->ports[i].clock && def->ports[i].dir == ODIN3_DIR_IN) {
             st = warn_clock(walk, node, def->ports[i].name, clock_class(walk, node, i));

@@ -416,9 +416,7 @@ static odin3_status node_clocks(blif_writer *wr, odin3_node_id node) {
     }
     const odin3_techlib_cell *lib = odin3_celltype_lib(wr->design, type);
     odin3_status st = ODIN3_OK;
-    for (uint32_t i = 0;
-         lib != NULL && lib->kind == ODIN3_TECHLIB_HARD && st == ODIN3_OK && i < lib->n_ports;
-         i++) {
+    for (uint32_t i = 0; odin3_techlib_is_subckt(lib) && st == ODIN3_OK && i < lib->n_ports; i++) {
         st = lib->ports[i].clock ? mark_clocks(wr, node, i) : ODIN3_OK;
     }
     return st;
@@ -632,11 +630,11 @@ static bool names_every_pin(const blif_writer *wr, odin3_node_id node) {
            (wr->vtr && odin3_blif_vtr_rows_of(wr->module, node, &rows));
 }
 
-/* True for a hard cell of a loaded tech library (1G): in the VTR dialect, a .subckt that writes
- * every formal (spec 3E §8). */
+/* True for a hard or black-box cell of a loaded tech library (1G, 4.2): in the VTR dialect, a
+ * .subckt that writes every formal (spec 3E §8). */
 static bool hard_type(const odin3_design *design, odin3_celltype_id type) {
     const odin3_techlib_cell *lib = odin3_celltype_lib(design, type);
-    return lib != NULL && lib->kind == ODIN3_TECHLIB_HARD;
+    return odin3_techlib_is_subckt(lib);
 }
 
 /* Generates names for the unconnected pins of a node written by pin (see names_every_pin), or

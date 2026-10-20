@@ -1,7 +1,7 @@
 /*
  * register.c — the `partial_map` pass definition and its `hardmap` alias (3C spec H-1..H-3): no
- * arguments, no processes in the design (the manager refuses a design that still has `$proc`
- * nodes), the entry point is odin3_hardmap_run in hardmap.c.
+ * arguments but `--allow-unknown-blocks` (B-6), no processes in the design (the manager refuses a
+ * design that still has `$proc` nodes), the entry point is odin3_hardmap_run in hardmap.c.
  */
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
@@ -14,11 +14,17 @@
 static odin3_status partial_map_pass_run(odin3_pass_ctx *ctx, odin3_design *design,
                                          odin3_bytes args, void *user) {
     (void)user;
-    if (odin3_pass_arg_next(&args).ptr != NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "partial_map: takes no arguments");
-        return ODIN3_ERR_INVALID_ARG;
+    odin3_partial_map_opts opts = {false};
+    for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
+         word = odin3_pass_arg_next(&args)) {
+        if (!odin3_pass_arg_is(word, "--allow-unknown-blocks")) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "partial_map: takes no arguments but --allow-unknown-blocks");
+            return ODIN3_ERR_INVALID_ARG;
+        }
+        opts.allow_unknown_blocks = true;
     }
-    return odin3_partial_map_run(ctx, design, NULL);
+    return odin3_partial_map_run_opts(ctx, design, &opts, NULL);
 }
 
 const odin3_pass_def odin3_pass_partial_map = {

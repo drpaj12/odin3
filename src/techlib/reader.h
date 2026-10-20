@@ -127,6 +127,15 @@ struct odin3_techlib_cell {
     const odin3_fnsim_prog *sim;
 };
 
+/*
+ * True for a library cell that VTR reads as a model of the architecture and the BLIF writers
+ * write as a `.subckt` with every formal bit: a `hard` cell, or a `blackbox` cell (4.2: the
+ * generic blocks `read_arch` registers). NULL is false.
+ */
+static inline bool odin3_techlib_is_subckt(const odin3_techlib_cell *lib) {
+    return lib != NULL && (lib->kind == ODIN3_TECHLIB_HARD || lib->kind == ODIN3_TECHLIB_BLACKBOX);
+}
+
 /* A library held in memory: name (used in messages and recorded per cell) and contents. */
 typedef struct odin3_techlib_text {
     const char *name;
