@@ -1,0 +1,93 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "top_module": {
+      "attributes": {
+        "cells_not_processed": "00000000000000000000000000000001",
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/hard_adder_cin_propagation.v:2.1-13.10"
+      },
+      "ports": {
+        "a": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5, 6 ]
+        },
+        "b": {
+          "direction": "input",
+          "bits": [ 7, 8, 9, 10, 11 ]
+        },
+        "out": {
+          "direction": "output",
+          "bits": [ 12, 13, 14, 15, 16 ]
+        }
+      },
+      "cells": {
+        "add1": {
+          "hide_name": 0,
+          "type": "adder",
+          "parameters": {
+            "$1": "00000000000000000000000000000101"
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/hard_adder_cin_propagation.v:10.13-10.85"
+          },
+          "connections": {
+            "a": [ 2, 3 ],
+            "b": [ 7, 8 ],
+            "cin": [ "0" ],
+            "cout": [ 17 ],
+            "sumout": [ 12, 13 ]
+          }
+        },
+        "add2": {
+          "hide_name": 0,
+          "type": "adder",
+          "parameters": {
+            "$1": "00000000000000000000000000000101"
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/hard_adder_cin_propagation.v:11.13-11.87"
+          },
+          "connections": {
+            "a": [ 4, 5 ],
+            "b": [ 9, 10 ],
+            "cin": [ 17 ],
+            "cout": [ 16 ],
+            "sumout": [ 14, 15 ]
+          }
+        }
+      },
+      "netnames": {
+        "a": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5, 6 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/hard_adder_cin_propagation.v:4.20-4.21"
+          }
+        },
+        "b": {
+          "hide_name": 0,
+          "bits": [ 7, 8, 9, 10, 11 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/hard_adder_cin_propagation.v:4.23-4.24"
+          }
+        },
+        "cout": {
+          "hide_name": 0,
+          "bits": [ 17 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/hard_adder_cin_propagation.v:8.8-8.12"
+          }
+        },
+        "out": {
+          "hide_name": 0,
+          "bits": [ 12, 13, 14, 15, 16 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/hard_adder_cin_propagation.v:5.20-5.23"
+          }
+        }
+      }
+    }
+  }
+}

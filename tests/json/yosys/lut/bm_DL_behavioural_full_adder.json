@@ -1,0 +1,107 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_behavioural_full_adder": {
+      "attributes": {
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_behavioural_full_adder.v:3.1-11.10"
+      },
+      "ports": {
+        "Cin": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "x": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "y": {
+          "direction": "input",
+          "bits": [ 4 ]
+        },
+        "s": {
+          "direction": "output",
+          "bits": [ 5 ]
+        },
+        "Cout": {
+          "direction": "output",
+          "bits": [ 6 ]
+        }
+      },
+      "cells": {
+        "$abc$110$auto$blifparse.cc:535:parse_blif$111": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "11101000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 3, 2 ],
+            "Y": [ 6 ]
+          }
+        },
+        "$abc$110$auto$blifparse.cc:535:parse_blif$112": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10010110",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 3, 2 ],
+            "Y": [ 5 ]
+          }
+        }
+      },
+      "netnames": {
+        "Cin": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_behavioural_full_adder.v:4.8-4.11"
+          }
+        },
+        "Cout": {
+          "hide_name": 0,
+          "bits": [ 6 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_behavioural_full_adder.v:5.12-5.16"
+          }
+        },
+        "s": {
+          "hide_name": 0,
+          "bits": [ 5 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_behavioural_full_adder.v:5.9-5.10"
+          }
+        },
+        "x": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_behavioural_full_adder.v:4.13-4.14"
+          }
+        },
+        "y": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_behavioural_full_adder.v:4.16-4.17"
+          }
+        }
+      }
+    }
+  }
+}

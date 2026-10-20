@@ -1,0 +1,389 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_four_bit_adder_continuous_assign": {
+      "attributes": {
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:3.1-12.10"
+      },
+      "ports": {
+        "carryin": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "x3": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "x2": {
+          "direction": "input",
+          "bits": [ 4 ]
+        },
+        "x1": {
+          "direction": "input",
+          "bits": [ 5 ]
+        },
+        "x0": {
+          "direction": "input",
+          "bits": [ 6 ]
+        },
+        "y3": {
+          "direction": "input",
+          "bits": [ 7 ]
+        },
+        "y2": {
+          "direction": "input",
+          "bits": [ 8 ]
+        },
+        "y1": {
+          "direction": "input",
+          "bits": [ 9 ]
+        },
+        "y0": {
+          "direction": "input",
+          "bits": [ 10 ]
+        },
+        "s3": {
+          "direction": "output",
+          "bits": [ 11 ]
+        },
+        "s2": {
+          "direction": "output",
+          "bits": [ 12 ]
+        },
+        "s1": {
+          "direction": "output",
+          "bits": [ 13 ]
+        },
+        "s0": {
+          "direction": "output",
+          "bits": [ 14 ]
+        },
+        "carryout": {
+          "direction": "output",
+          "bits": [ 15 ]
+        }
+      },
+      "cells": {
+        "stage0": {
+          "hide_name": 0,
+          "type": "fulladd",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:7.10-7.42"
+          },
+          "port_directions": {
+            "Cin": "input",
+            "Cout": "output",
+            "s": "output",
+            "x": "input",
+            "y": "input"
+          },
+          "connections": {
+            "Cin": [ 2 ],
+            "Cout": [ 16 ],
+            "s": [ 14 ],
+            "x": [ 6 ],
+            "y": [ 10 ]
+          }
+        },
+        "stage1": {
+          "hide_name": 0,
+          "type": "fulladd",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:8.10-8.37"
+          },
+          "port_directions": {
+            "Cin": "input",
+            "Cout": "output",
+            "s": "output",
+            "x": "input",
+            "y": "input"
+          },
+          "connections": {
+            "Cin": [ 16 ],
+            "Cout": [ 17 ],
+            "s": [ 13 ],
+            "x": [ 5 ],
+            "y": [ 9 ]
+          }
+        },
+        "stage2": {
+          "hide_name": 0,
+          "type": "fulladd",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:9.10-9.37"
+          },
+          "port_directions": {
+            "Cin": "input",
+            "Cout": "output",
+            "s": "output",
+            "x": "input",
+            "y": "input"
+          },
+          "connections": {
+            "Cin": [ 17 ],
+            "Cout": [ 18 ],
+            "s": [ 12 ],
+            "x": [ 4 ],
+            "y": [ 8 ]
+          }
+        },
+        "stage3": {
+          "hide_name": 0,
+          "type": "fulladd",
+          "parameters": {
+          },
+          "attributes": {
+            "module_not_derived": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:10.10-10.43"
+          },
+          "port_directions": {
+            "Cin": "input",
+            "Cout": "output",
+            "s": "output",
+            "x": "input",
+            "y": "input"
+          },
+          "connections": {
+            "Cin": [ 18 ],
+            "Cout": [ 15 ],
+            "s": [ 11 ],
+            "x": [ 3 ],
+            "y": [ 7 ]
+          }
+        }
+      },
+      "netnames": {
+        "c1": {
+          "hide_name": 0,
+          "bits": [ 16 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:7.39-7.41"
+          }
+        },
+        "c2": {
+          "hide_name": 0,
+          "bits": [ 17 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:8.34-8.36"
+          }
+        },
+        "c3": {
+          "hide_name": 0,
+          "bits": [ 18 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:9.34-9.36"
+          }
+        },
+        "carryin": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:4.8-4.15"
+          }
+        },
+        "carryout": {
+          "hide_name": 0,
+          "bits": [ 15 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:5.25-5.33"
+          }
+        },
+        "s0": {
+          "hide_name": 0,
+          "bits": [ 14 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:5.21-5.23"
+          }
+        },
+        "s1": {
+          "hide_name": 0,
+          "bits": [ 13 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:5.17-5.19"
+          }
+        },
+        "s2": {
+          "hide_name": 0,
+          "bits": [ 12 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:5.13-5.15"
+          }
+        },
+        "s3": {
+          "hide_name": 0,
+          "bits": [ 11 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:5.9-5.11"
+          }
+        },
+        "x0": {
+          "hide_name": 0,
+          "bits": [ 6 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:4.29-4.31"
+          }
+        },
+        "x1": {
+          "hide_name": 0,
+          "bits": [ 5 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:4.25-4.27"
+          }
+        },
+        "x2": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:4.21-4.23"
+          }
+        },
+        "x3": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:4.17-4.19"
+          }
+        },
+        "y0": {
+          "hide_name": 0,
+          "bits": [ 10 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:4.45-4.47"
+          }
+        },
+        "y1": {
+          "hide_name": 0,
+          "bits": [ 9 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:4.41-4.43"
+          }
+        },
+        "y2": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:4.37-4.39"
+          }
+        },
+        "y3": {
+          "hide_name": 0,
+          "bits": [ 7 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:4.33-4.35"
+          }
+        }
+      }
+    },
+    "fulladd": {
+      "attributes": {
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:14.1-21.10"
+      },
+      "ports": {
+        "Cin": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "x": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "y": {
+          "direction": "input",
+          "bits": [ 4 ]
+        },
+        "s": {
+          "direction": "output",
+          "bits": [ 5 ]
+        },
+        "Cout": {
+          "direction": "output",
+          "bits": [ 6 ]
+        }
+      },
+      "cells": {
+        "$abc$93$auto$blifparse.cc:535:parse_blif$94": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10010110",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 4, 2 ],
+            "Y": [ 5 ]
+          }
+        },
+        "$abc$93$auto$blifparse.cc:535:parse_blif$95": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "11101000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 3, 4, 2 ],
+            "Y": [ 6 ]
+          }
+        }
+      },
+      "netnames": {
+        "Cin": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:15.8-15.11"
+          }
+        },
+        "Cout": {
+          "hide_name": 0,
+          "bits": [ 6 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:16.12-16.16"
+          }
+        },
+        "s": {
+          "hide_name": 0,
+          "bits": [ 5 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:16.9-16.10"
+          }
+        },
+        "x": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:15.13-15.14"
+          }
+        },
+        "y": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_four_bit_adder_continuous_assign.v:15.16-15.17"
+          }
+        }
+      }
+    }
+  }
+}

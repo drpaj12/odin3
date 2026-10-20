@@ -1,0 +1,111 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_BCD_7_segment_without_x": {
+      "attributes": {
+        "cells_not_processed": "00000000000000000000000000000001",
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_7_segment_without_x.v:3.1-23.10"
+      },
+      "ports": {
+        "bcd": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5 ]
+        },
+        "leds": {
+          "direction": "output",
+          "offset": 1,
+          "bits": [ 6, 7, 8, 9, 10, 11, 12 ]
+        }
+      },
+      "cells": {
+        "$auto$mem.cc:282:emit$4": {
+          "hide_name": 1,
+          "type": "$memrd_v2",
+          "parameters": {
+            "ABITS": "00000000000000000000000000000100",
+            "ARST_VALUE": "xxxxxxx",
+            "CE_OVER_SRST": "00000000000000000000000000000000",
+            "CLK_ENABLE": "00000000000000000000000000000000",
+            "CLK_POLARITY": "00000000000000000000000000000001",
+            "COLLISION_X_MASK": "",
+            "INIT_VALUE": "xxxxxxx",
+            "MEMID": "$auto$proc_rom.cc:155:do_switch$3",
+            "SRST_VALUE": "xxxxxxx",
+            "TRANSPARENCY_MASK": "",
+            "WIDTH": "00000000000000000000000000000111"
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_7_segment_without_x.v:9.3-21.10"
+          },
+          "port_directions": {
+            "ADDR": "input",
+            "ARST": "input",
+            "CLK": "input",
+            "DATA": "output",
+            "EN": "input",
+            "SRST": "input"
+          },
+          "connections": {
+            "ADDR": [ 2, 3, 4, 5 ],
+            "ARST": [ "0" ],
+            "CLK": [ "x" ],
+            "DATA": [ 6, 7, 8, 9, 10, 11, 12 ],
+            "EN": [ "1" ],
+            "SRST": [ "0" ]
+          }
+        },
+        "$auto$mem.cc:328:emit$5": {
+          "hide_name": 1,
+          "type": "$meminit",
+          "parameters": {
+            "ABITS": "00000000000000000000000000100000",
+            "MEMID": "$auto$proc_rom.cc:155:do_switch$3",
+            "PRIORITY": "00000000000000000000000000000000",
+            "WIDTH": "00000000000000000000000000000111",
+            "WORDS": "00000000000000000000000000010000"
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_7_segment_without_x.v:9.3-21.10"
+          },
+          "port_directions": {
+            "ADDR": "input",
+            "DATA": "input"
+          },
+          "connections": {
+            "ADDR": [ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" ],
+            "DATA": [ "0", "1", "1", "1", "1", "1", "1", "0", "0", "0", "0", "1", "1", "0", "1", "0", "1", "1", "0", "1", "1", "1", "0", "0", "1", "1", "1", "1", "1", "1", "0", "0", "1", "1", "0", "1", "1", "0", "1", "1", "0", "1", "1", "1", "1", "1", "1", "0", "1", "0", "0", "0", "0", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "0", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1" ]
+          }
+        }
+      },
+      "memories": {
+        "$auto$proc_rom.cc:155:do_switch$3": {
+          "hide_name": 1,
+          "attributes": {
+            "full_case": "00000000000000000000000000000001",
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_7_segment_without_x.v:9.3-21.10"
+          },
+          "width": 7,
+          "start_offset": 0,
+          "size": 16
+        }
+      },
+      "netnames": {
+        "bcd": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_7_segment_without_x.v:4.14-4.17"
+          }
+        },
+        "leds": {
+          "hide_name": 0,
+          "bits": [ 6, 7, 8, 9, 10, 11, 12 ],
+          "offset": 1,
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_7_segment_without_x.v:5.15-5.19"
+          }
+        }
+      }
+    }
+  }
+}

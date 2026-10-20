@@ -1,0 +1,412 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_DL_BCD_adder": {
+      "attributes": {
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:3.1-22.10"
+      },
+      "ports": {
+        "Cin": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "X": {
+          "direction": "input",
+          "bits": [ 3, 4, 5, 6 ]
+        },
+        "Y": {
+          "direction": "input",
+          "bits": [ 7, 8, 9, 10 ]
+        },
+        "S": {
+          "direction": "output",
+          "bits": [ 11, 12, 13, 14 ]
+        },
+        "Cout": {
+          "direction": "output",
+          "bits": [ 15 ]
+        },
+        "Z": {
+          "direction": "output",
+          "bits": [ 11, 16, 17, 18, 19 ]
+        }
+      },
+      "cells": {
+        "$abc$263$auto$blifparse.cc:535:parse_blif$264": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01101001",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 20, 8, 4 ],
+            "Y": [ 16 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$265": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "00010111",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 7, 3 ],
+            "Y": [ 20 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$266": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0010101111010100",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 20, 8, 4, 21 ],
+            "Y": [ 17 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$267": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 9, 5 ],
+            "Y": [ 21 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$268": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "00101100",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 17, 16, 18 ],
+            "Y": [ 12 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$269": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "00011110",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 22, 23, 24 ],
+            "Y": [ 18 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$270": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1101010000000000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 20, 8, 4, 21 ],
+            "Y": [ 22 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$271": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1000",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 9, 5 ],
+            "Y": [ 23 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$272": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 10, 6 ],
+            "Y": [ 24 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$273": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10110000",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 16, 18, 17 ],
+            "Y": [ 13 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$274": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1000",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 18, 25 ],
+            "Y": [ 14 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$275": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1001010000000010",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 20, 8, 4, 21 ],
+            "Y": [ 25 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$276": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1110111011101000",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 10, 6, 22, 23 ],
+            "Y": [ 19 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$277": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0110",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 19, 26 ],
+            "Y": [ 15 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$278": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0000000100001110",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 22, 23, 25, 24 ],
+            "Y": [ 26 ]
+          }
+        },
+        "$abc$263$auto$blifparse.cc:535:parse_blif$279": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "10010110",
+            "WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 7, 3 ],
+            "Y": [ 11 ]
+          }
+        }
+      },
+      "netnames": {
+        "$abc$263$new_n21": {
+          "hide_name": 1,
+          "bits": [ 20 ],
+          "attributes": {
+          }
+        },
+        "$abc$263$new_n23": {
+          "hide_name": 1,
+          "bits": [ 21 ],
+          "attributes": {
+          }
+        },
+        "$abc$263$new_n26": {
+          "hide_name": 1,
+          "bits": [ 22 ],
+          "attributes": {
+          }
+        },
+        "$abc$263$new_n27": {
+          "hide_name": 1,
+          "bits": [ 23 ],
+          "attributes": {
+          }
+        },
+        "$abc$263$new_n28": {
+          "hide_name": 1,
+          "bits": [ 24 ],
+          "attributes": {
+          }
+        },
+        "$abc$263$new_n31": {
+          "hide_name": 1,
+          "bits": [ 25 ],
+          "attributes": {
+          }
+        },
+        "$abc$263$new_n34": {
+          "hide_name": 1,
+          "bits": [ 26 ],
+          "attributes": {
+          }
+        },
+        "Cin": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:4.8-4.11"
+          }
+        },
+        "Cout": {
+          "hide_name": 0,
+          "bits": [ 15 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:7.9-7.13"
+          }
+        },
+        "S": {
+          "hide_name": 0,
+          "bits": [ 11, 12, 13, 14 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:6.15-6.16"
+          }
+        },
+        "X": {
+          "hide_name": 0,
+          "bits": [ 3, 4, 5, 6 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:5.14-5.15"
+          }
+        },
+        "Y": {
+          "hide_name": 0,
+          "bits": [ 7, 8, 9, 10 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:5.17-5.18"
+          }
+        },
+        "Z": {
+          "hide_name": 0,
+          "bits": [ 11, 16, 17, 18, 19 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_DL_BCD_adder.v:10.15-10.16"
+          }
+        }
+      }
+    }
+  }
+}

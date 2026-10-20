@@ -1,0 +1,95 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "if_generate": {
+      "attributes": {
+        "cells_not_processed": "00000000000000000000000000000001",
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/if_generate.v:21.1-43.10"
+      },
+      "parameter_default_values": {
+        "my_param": "00000000000000000000000000000010"
+      },
+      "ports": {
+        "out": {
+          "direction": "output",
+          "bits": [ "0" ]
+        }
+      },
+      "cells": {
+      },
+      "netnames": {
+        "out": {
+          "hide_name": 0,
+          "bits": [ "0" ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/if_generate.v:25.12-25.15"
+          }
+        }
+      }
+    },
+    "simple_mod": {
+      "attributes": {
+        "cells_not_processed": "00000000000000000000000000000001",
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/if_generate.v:45.1-56.10"
+      },
+      "ports": {
+        "out": {
+          "direction": "output",
+          "bits": [ "0" ]
+        }
+      },
+      "cells": {
+      },
+      "netnames": {
+        "out": {
+          "hide_name": 0,
+          "bits": [ "0" ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/if_generate.v:50.12-50.15"
+          }
+        },
+        "val": {
+          "hide_name": 0,
+          "bits": [ "0" ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/if_generate.v:52.10-52.13"
+          }
+        }
+      }
+    },
+    "top": {
+      "attributes": {
+        "cells_not_processed": "00000000000000000000000000000001",
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/if_generate.v:1.1-19.10"
+      },
+      "ports": {
+        "clk": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "out": {
+          "direction": "output",
+          "bits": [ 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 ]
+        }
+      },
+      "cells": {
+      },
+      "netnames": {
+        "clk": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/if_generate.v:5.11-5.14"
+          }
+        },
+        "out": {
+          "hide_name": 0,
+          "bits": [ 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/if_generate.v:6.19-6.22"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,354 @@
+{
+  "creator": "Yosys 0.55 (git sha1 60f126cd0, g++ 13.3.0-6ubuntu2~24.04.1 -fPIC -O3)",
+  "modules": {
+    "bm_stmt_compare_padding": {
+      "attributes": {
+        "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:4.1-94.10"
+      },
+      "ports": {
+        "clock": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "reset_n": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "a_in": {
+          "direction": "input",
+          "bits": [ 4, 5, 6, 7 ]
+        },
+        "b_in": {
+          "direction": "input",
+          "bits": [ 8 ]
+        },
+        "out0": {
+          "direction": "output",
+          "bits": [ 9, 10, 11, 12 ]
+        },
+        "out1": {
+          "direction": "output",
+          "bits": [ 13 ]
+        },
+        "out5": {
+          "direction": "output",
+          "bits": [ 13 ]
+        },
+        "out6": {
+          "direction": "output",
+          "bits": [ 13, "0", "0", "0" ]
+        },
+        "out7": {
+          "direction": "output",
+          "bits": [ "1" ]
+        },
+        "out8": {
+          "direction": "output",
+          "bits": [ 14, "0", "0", "0" ]
+        }
+      },
+      "cells": {
+        "$abc$164$auto$blifparse.cc:535:parse_blif$165": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "0000000000000001",
+            "WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4, 5, 6, 7 ],
+            "Y": [ 15 ]
+          }
+        },
+        "$abc$164$auto$blifparse.cc:535:parse_blif$166": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6 ],
+            "Y": [ 16 ]
+          }
+        },
+        "$abc$164$auto$blifparse.cc:535:parse_blif$167": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 4 ],
+            "Y": [ 17 ]
+          }
+        },
+        "$abc$164$auto$blifparse.cc:535:parse_blif$168": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 8 ],
+            "Y": [ 18 ]
+          }
+        },
+        "$abc$164$auto$blifparse.cc:535:parse_blif$169": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "01",
+            "WIDTH": "00000000000000000000000000000001"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 5 ],
+            "Y": [ 19 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$156": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP0_",
+          "parameters": {
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 17 ],
+            "Q": [ 9 ],
+            "R": [ 7 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$157": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP0_",
+          "parameters": {
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 19 ],
+            "Q": [ 10 ],
+            "R": [ 7 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$158": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP0_",
+          "parameters": {
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 16 ],
+            "Q": [ 11 ],
+            "R": [ 7 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$161": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:75.1-92.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 15 ],
+            "Q": [ 14 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$162": {
+          "hide_name": 1,
+          "type": "$_DFF_P_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:61.1-73.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ 18 ],
+            "Q": [ 13 ]
+          }
+        },
+        "$auto$ff.cc:266:slice$163": {
+          "hide_name": 1,
+          "type": "$_SDFF_PP0_",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:37.1-50.4"
+          },
+          "port_directions": {
+            "C": "input",
+            "D": "input",
+            "Q": "output",
+            "R": "input"
+          },
+          "connections": {
+            "C": [ 2 ],
+            "D": [ "1" ],
+            "Q": [ 12 ],
+            "R": [ 7 ]
+          }
+        }
+      },
+      "netnames": {
+        "$$auto$proc_rom.cc:155:do_switch$9$rdreg[0]$d": {
+          "hide_name": 1,
+          "bits": [ 17, 19, 16 ],
+          "attributes": {
+          }
+        },
+        "$0\\out1[0:0]": {
+          "hide_name": 1,
+          "bits": [ 18 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:52.1-59.4"
+          }
+        },
+        "$0\\out8[3:0]": {
+          "hide_name": 1,
+          "bits": [ 15 ],
+          "attributes": {
+          }
+        },
+        "a_in": {
+          "hide_name": 0,
+          "bits": [ 4, 5, 6, 7 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:20.55-20.59"
+          }
+        },
+        "b_in": {
+          "hide_name": 0,
+          "bits": [ 8 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:21.8-21.12"
+          }
+        },
+        "clock": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:17.7-17.12"
+          }
+        },
+        "out0": {
+          "hide_name": 0,
+          "bits": [ 9, 10, 11, 12 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:23.56-23.60"
+          }
+        },
+        "out1": {
+          "hide_name": 0,
+          "bits": [ 13 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:24.9-24.13"
+          }
+        },
+        "out5": {
+          "hide_name": 0,
+          "bits": [ 13 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:25.9-25.13"
+          }
+        },
+        "out6": {
+          "hide_name": 0,
+          "bits": [ 13, "0", "0", "0" ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:26.56-26.60"
+          }
+        },
+        "out7": {
+          "hide_name": 0,
+          "bits": [ "1" ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:27.9-27.13"
+          }
+        },
+        "out8": {
+          "hide_name": 0,
+          "bits": [ 14, "0", "0", "0" ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:28.56-28.60"
+          }
+        },
+        "reset_n": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+            "src": "/home/jamiespa/odin3-ws/work/odin3-p53c/tests/micro/verilog/micro/bm_stmt_compare_padding.v:18.8-18.15"
+          }
+        }
+      }
+    }
+  }
+}
