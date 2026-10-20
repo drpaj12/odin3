@@ -142,6 +142,10 @@ DESIGN §12.1.
    `timing/k6_N10_40nm.xml`). Each needs Parmys goldens from `tools/run-oracle.sh`, scheduled by
    the coordinator (not run by the 4.1 lane).
 
+11. **CI coverage of 4.1** (agent default). `.github/workflows/ci.yml` does not set `VTR_ROOT`, so
+   `test_arch_vtr` and `arch_corpus` skip (exit 77) in CI and run locally only; the
+   template-versus-`lib/vtr.o3lib` and fixture tests run everywhere. CI is not changed.
+
 ## Open items
 
 (none open. Item 1, the sweep archs, is closed by decision 10.)

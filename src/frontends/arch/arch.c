@@ -4,6 +4,7 @@
 #include "frontends/arch/arch.h"
 
 #include "frontends/arch/arch_read.h"
+#include "ir/celltype.h"
 #include "techlib/reader.h"
 #include "util/alloc.h"
 #include "util/log.h"
@@ -151,7 +152,12 @@ odin3_status odin3_arch_parse(odin3_arch *arch, const odin3_arch_src *src) {
 /* --- the import --------------------------------------------------------------------------------
  */
 
-enum { ARCH_READ_CHUNK = 1 << 16, ARCH_NAME_MAX = 1024 };
+enum {
+    ARCH_READ_CHUNK = 1 << 16,
+    ARCH_NAME_MAX = 1024,
+    ARCH_MIB_SHIFT = 20,
+    ARCH_MAX_FILE_BYTES = 256 << ARCH_MIB_SHIFT
+};
 
 static odin3_status slurp(const char *path, odin3_strbuf *buf) {
     FILE *file = fopen(path, "rb");
@@ -163,6 +169,12 @@ static odin3_status slurp(const char *path, odin3_strbuf *buf) {
     odin3_status st = ODIN3_OK;
     size_t count = 0;
     while (st == ODIN3_OK && (count = fread(chunk, 1, sizeof chunk, file)) > 0) {
+        if (buf->len + count > ARCH_MAX_FILE_BYTES) {
+            odin3_log(ODIN3_LOG_ERROR, "%s: the file is larger than %u MiB", path,
+                      (unsigned)(ARCH_MAX_FILE_BYTES >> ARCH_MIB_SHIFT));
+            st = ODIN3_ERR_PARSE;
+            break;
+        }
         st = odin3_strbuf_append(buf, (odin3_bytes){chunk, count});
     }
     if (st == ODIN3_OK && ferror(file) != 0) {
@@ -171,6 +183,24 @@ static odin3_status slurp(const char *path, odin3_strbuf *buf) {
     }
     (void)fclose(file);
     return st;
+}
+
+/* Spec L-7: every model that becomes a cell must be free, so a failure registers nothing. */
+static odin3_status check_collisions(const odin3_design *design, const odin3_arch *arch) {
+    for (uint32_t i = 0; i < arch->n_models; i++) {
+        const odin3_arch_model *model = &arch->models[i];
+        uint32_t str = 0;
+        odin3_celltype_id id = {0};
+        if (model->registered &&
+            odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(model->name), &str) &&
+            odin3_celltype_find(design, str, &id)) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "%s:%u: model '%s' has the name of a cell type the design already has",
+                      arch->file, model->line, model->name);
+            return ODIN3_ERR_PARSE;
+        }
+    }
+    return ODIN3_OK;
 }
 
 odin3_status odin3_arch_read_text(odin3_design *design, const odin3_arch_src *src) {
@@ -182,6 +212,7 @@ odin3_status odin3_arch_read_text(odin3_design *design, const odin3_arch_src *sr
     odin3_status st = odin3_design_get_arch(design, &arch);
     st = st != ODIN3_OK ? st : odin3_arch_parse(arch, src);
     st = st != ODIN3_OK ? st : odin3_arch_make_library(arch);
+    st = st != ODIN3_OK ? st : check_collisions(design, arch);
     if (st == ODIN3_OK) {
         /* the lines in a message refer to the generated text, not to the XML */
         char name[ARCH_NAME_MAX];

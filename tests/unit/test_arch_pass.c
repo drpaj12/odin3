@@ -88,9 +88,25 @@ static void test_failed_import_changes_nothing(void) {
     EQ_INT(ODIN3_OK, run(g_design, "read_techlib", ODIN3_LIB_DIR "/vtr.o3lib"));
     arch_test_reset();
     EQ_INT(ODIN3_ERR_PARSE, run(g_design, "read_arch", XML));
-    NOT_NULL(strstr(g_msg, "pb_ok.xml (generated .o3lib):"));
-    NOT_NULL(strstr(g_msg, "cell type 'multiply' already exists"));
+    NOT_NULL(strstr(g_msg, "pb_ok.xml:"));
+    NOT_NULL(strstr(g_msg, "model 'multiply' has the name of a cell type"));
     IS_NULL(odin3_design_arch(g_design));
+}
+
+static void test_collision_on_a_later_model_registers_nothing(void) {
+    odin3_design *design = g_design;
+    const odin3_techlib_text lib = {
+        "one.o3lib", odin3_bytes_cstr("library L\ncell adder blackbox\n  in a 1\nend\n")};
+    EQ_INT_MSG(ODIN3_OK, odin3_techlib_read_text(design, &lib), g_msg);
+    arch_test_reset();
+    /* pb_ok.xml has multiply, adder, single_port_ram: adder collides, the others must not stay */
+    EQ_INT(ODIN3_ERR_PARSE, run(design, "read_arch", XML));
+    EQ_STR("pb_ok.xml:7: model 'adder' has the name of a cell type the design already has",
+           strstr(g_msg, "pb_ok.xml:"));
+    IS_NULL(odin3_design_arch(design));
+    IS_FALSE(has_type(design, "multiply"));
+    IS_FALSE(has_type(design, "single_port_ram"));
+    IS_TRUE(has_type(design, "adder"));
 }
 
 static void test_second_import_is_refused(void) {
@@ -126,6 +142,7 @@ int main(void) {
     RUN_TEST(test_o3lib_argument_is_read_techlib);
     RUN_TEST(test_bad_arguments);
     RUN_TEST(test_failed_import_changes_nothing);
+    RUN_TEST(test_collision_on_a_later_model_registers_nothing);
     RUN_TEST(test_second_import_is_refused);
     RUN_TEST(test_oom_sweep);
     return UNITY_END();

@@ -159,6 +159,15 @@ static odin3_status check_leaf(const pb_walk *walk, const odin3_xml_elem *elem,
     return ODIN3_OK;
 }
 
+static odin3_arch_mport *find_mport_mut(odin3_arch_model *model, const char *name) {
+    for (uint32_t i = 0; i < model->n_ports; i++) {
+        if (strcmp(model->ports[i].name, name) == 0) {
+            return &model->ports[i];
+        }
+    }
+    return NULL;
+}
+
 static void note_lut(odin3_arch *arch, const odin3_arch_leaf *leaf) {
     for (uint32_t i = 0; leaf->kind == ODIN3_ARCH_LEAF_NAMES && i < leaf->n_pins; i++) {
         if (leaf->pins[i].dir != ODIN3_ARCH_PIN_IN) {
@@ -425,9 +434,9 @@ static bool is_adder_model(const odin3_arch_model *model) {
 }
 
 /* The VPR port sizes: the maximum and minimum num_pins over the leaves of the model. */
-static void note_widths(const odin3_arch_model *model, const odin3_arch_leaf *leaf) {
+static void note_widths(odin3_arch_model *model, const odin3_arch_leaf *leaf) {
     for (uint32_t pin_idx = 0; pin_idx < leaf->n_pins; pin_idx++) {
-        odin3_arch_mport *port = (odin3_arch_mport *)find_mport(model, leaf->pins[pin_idx].name);
+        odin3_arch_mport *port = find_mport_mut(model, leaf->pins[pin_idx].name);
         uint32_t width = leaf->pins[pin_idx].num_pins;
         port->max_width = width > port->max_width ? width : port->max_width;
         port->min_width =
@@ -439,8 +448,9 @@ void arch_finish_widths(arch_rd *rd) {
     odin3_arch *arch = rd->arch;
     for (uint32_t i = 0; i < arch->leaves.len; i++) {
         const odin3_arch_leaf *leaf = odin3_vec_cat(&arch->leaves, i);
-        const odin3_arch_model *model =
-            leaf->kind == ODIN3_ARCH_LEAF_SUBCKT ? odin3_arch_model_find(arch, leaf->model) : NULL;
+        odin3_arch_model *model = leaf->kind == ODIN3_ARCH_LEAF_SUBCKT
+                                      ? (odin3_arch_model *)odin3_arch_model_find(arch, leaf->model)
+                                      : NULL;
         if (model != NULL) {
             arch->has_adder =
                 arch->has_adder || (strcmp(model->name, "adder") == 0 && is_adder_model(model));

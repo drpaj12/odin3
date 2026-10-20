@@ -5,6 +5,7 @@
  */
 #include "frontends/arch/arch_read.h"
 #include "frontends/arch/arch_templates.h"
+#include "ir/celltype.h"
 #include "util/log.h"
 
 #include <stdio.h>
@@ -133,6 +134,7 @@ static const odin3_arch_template *template_for(const arch_rd *rd, const odin3_ar
 
 static odin3_status add_generic(const arch_rd *rd, const odin3_arch_model *model,
                                 odin3_strbuf *out) {
+    uint64_t total = 0;
     odin3_status st = odin3_strbuf_appendf(out, "cell %s blackbox\n", model->name);
     for (uint32_t i = 0; st == ODIN3_OK && i < model->n_ports; i++) {
         const odin3_arch_mport *port = &model->ports[i];
@@ -143,6 +145,15 @@ static odin3_status add_generic(const arch_rd *rd, const odin3_arch_model *model
                       "%s:%u: model '%s' port '%s' is not used by any pb_type; "
                       "width 1",
                       rd->file, port->line, model->name, port->name);
+        }
+        total += width;
+        if (width > ODIN3_READER_MAX_WIDTH || total > ODIN3_READER_MAX_TOTAL_WIDTH) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "%s:%u: model '%s' port '%s' is too wide for a library cell (a port is at "
+                      "most %d bits, a cell %d bits in all)",
+                      rd->file, port->line, model->name, port->name, (int)ODIN3_READER_MAX_WIDTH,
+                      (int)ODIN3_READER_MAX_TOTAL_WIDTH);
+            return ODIN3_ERR_PARSE;
         }
         st = odin3_strbuf_appendf(out, "  %s %s %u%s\n", port->is_out ? "out" : "in", port->name,
                                   width, (!port->is_out && port->is_clock) ? " clock" : "");
@@ -228,7 +239,7 @@ odin3_status odin3_arch_make_library(odin3_arch *arch) {
     odin3_strbuf_free(&out.body);
     if (st == ODIN3_OK && out.skipped > 0) {
         odin3_log(ODIN3_LOG_WARN,
-                  "%s: %u models have names that are not .o3lib identifiers and "
+                  "%s: %u models have names that cannot be .o3lib names and "
                   "are not registered (first: '%s')",
                   arch->file, out.skipped, out.first_skipped);
     }

@@ -72,7 +72,8 @@ static char *read_all(const char *path) {
     TEST_ASSERT_NOT_NULL_MESSAGE(fp, path);
     char *buf = calloc(1U << 16, 1);
     NOT_NULL(buf);
-    (void)fread(buf, 1, (1U << 16) - 1U, fp);
+    size_t got = fread(buf, 1, (1U << 16) - 1U, fp);
+    buf[got] = '\0';
     (void)fclose(fp);
     return buf;
 }
@@ -161,10 +162,24 @@ static void test_non_identifier_warning_and_text(void) {
          "<model name=\"ram.opmode{rom}\"><input_ports><port name=\"a\"/></input_ports></model>"
          "<model name=\"xp\"><input_ports><port name=\"x\"/></input_ports></model>"
          "</models></architecture>");
-    EQ_STR("x/arch one.xml: 2 models have names that are not .o3lib identifiers "
+    EQ_STR("x/arch one.xml: 2 models have names that cannot be .o3lib names "
            "and are not registered (first: 'ram.opmode{rom}')",
            g_warn);
     IS_NULL(strstr(odin3_arch_library_text(g_arch), "ram.opmode"));
+}
+
+static void test_too_wide_port_is_located_in_the_xml(void) {
+    EQ_INT_MSG(ODIN3_OK,
+               arch_test_parse(g_arch, "w.xml",
+                               "<architecture><models><model name=\"big\"><input_ports>"
+                               "<port name=\"a\"/></input_ports></model></models>"
+                               "<complexblocklist><pb_type name=\"b\">"
+                               "<pb_type name=\"p\" blif_model=\".subckt big\">"
+                               "<input name=\"a\" num_pins=\"4294967295\"/></pb_type>"
+                               "</pb_type></complexblocklist></architecture>"),
+               g_msg);
+    EQ_INT(ODIN3_ERR_PARSE, odin3_arch_make_library(g_arch));
+    NOT_NULL(strstr(g_msg, "w.xml:1: model 'big' port 'a' is too wide"));
 }
 
 static void test_no_models_makes_empty_library(void) {
@@ -199,6 +214,7 @@ int main(void) {
     RUN_TEST(test_generic_widths_and_clock);
     RUN_TEST(test_non_identifier_names_are_skipped);
     RUN_TEST(test_non_identifier_warning_and_text);
+    RUN_TEST(test_too_wide_port_is_located_in_the_xml);
     RUN_TEST(test_no_models_makes_empty_library);
     RUN_TEST(test_library_oom_sweep);
     return UNITY_END();
