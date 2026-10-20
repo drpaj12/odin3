@@ -173,6 +173,7 @@ typedef struct fold_job {
     odin3_opt_ctx *oc;
     odin3_node_id node;
     const fold_row *row;
+    const odin3_opt_eval_req *given; /* operands handed in (odin3_opt_eval_cell), else the nets */
     odin3_arena *arena;
     odin3_cval a, b, s;
     bool a_signed, b_signed, all_const;
@@ -196,8 +197,35 @@ static void z_to_zero(odin3_cval *val) {
     }
 }
 
+/* The operand of an odin3_opt_eval_cell request for `port`. */
+static const odin3_cval *given_operand(const fold_job *job, uint32_t port) {
+    switch (port) {
+    case PORT_A:
+        return job->given->a;
+    case PORT_B:
+        return job->given->b;
+    default:
+        return job->given->s;
+    }
+}
+
+/* The operand for `port` of an odin3_opt_eval_cell request, copied (the planes are edited). */
+static odin3_status take_given(fold_job *job, uint32_t port, bool is_signed, odin3_cval *out) {
+    const odin3_cval *src = given_operand(job, port);
+    if (src == NULL) {
+        job->all_const = false;
+        return ODIN3_OK;
+    }
+    odin3_status st = odin3_cval_copy(job->arena, src, out);
+    out->flags = is_signed ? ODIN3_CVAL_SIGNED : 0;
+    return st;
+}
+
 /* Loads port `port` into *out; clears job->all_const when it is not constant. */
 static odin3_status load_port(fold_job *job, uint32_t port, bool is_signed, odin3_cval *out) {
+    if (job->given != NULL) {
+        return take_given(job, port, is_signed, out);
+    }
     odin3_opt_load_req req = {job->node, port, is_signed, job->arena};
     bool all = false;
     odin3_status st = odin3_opt_load(job->oc, &req, out, &all);
@@ -479,5 +507,27 @@ odin3_status odin3_opt_fold(odin3_opt_ctx *oc, odin3_node_id node, bool *folded)
         oc->counts->expr.folded++;
         oc->counts->fold_type[row]++;
     }
+    return st;
+}
+
+odin3_status odin3_opt_eval_cell(odin3_opt_ctx *oc, const odin3_opt_eval_req *req, odin3_cval *out,
+                                 bool *evaluable) {
+    if (oc == NULL || req == NULL || out == NULL || evaluable == NULL || req->arena == NULL ||
+        !odin3_node_live(oc->module, req->node)) {
+        odin3_log(ODIN3_LOG_ERROR, "opt: odin3_opt_eval_cell: bad argument");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    *evaluable = false;
+    uint32_t row = row_of(oc, odin3_node_type(oc->module, req->node));
+    fold_job job = {.oc = oc, .node = req->node, .given = req, .arena = req->arena};
+    if (row >= ODIN3_OPT_FOLD_TYPES || !job_init(&job, row)) {
+        return ODIN3_OK;
+    }
+    odin3_status st = load_operands(&job);
+    if (st != ODIN3_OK || !job.all_const) {
+        return st;
+    }
+    st = evaluate_y(&job, out);
+    *evaluable = st == ODIN3_OK;
     return st;
 }

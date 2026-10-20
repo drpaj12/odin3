@@ -136,6 +136,7 @@ add_library(odin3_core OBJECT
     # 4.8: the fsm pass.
     src/passes/fsm/fsmdata.c
     src/passes/fsm/index.c
+    src/passes/fsm/ceval.c
     src/passes/opt/dff_gates.c
     src/passes/opt/dff_rules.c
     src/passes/opt/dff_constbits.c
@@ -813,6 +814,10 @@ if(BUILD_TESTING)
     # 4.8 Task 3: the fsm pass's table and net index.
     odin3_add_unit_test(test_fsm_data)
     target_sources(test_fsm_data PRIVATE tests/unit/proc_build.c)
+    odin3_add_unit_test(test_fsm_ceval)
+    target_sources(test_fsm_ceval PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_fsm_ceval PRIVATE
+        ODIN3_OPT_DATA="${PROJECT_SOURCE_DIR}/tests/opt")
     # 2F Task 5: folding on 2D's evaluator, replayed against the Yosys 0.55 fold table.
     odin3_add_unit_test(test_opt_fold)
     target_sources(test_opt_fold PRIVATE tests/unit/proc_build.c)
