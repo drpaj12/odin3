@@ -64,16 +64,18 @@ odin3_status jr_cur_begin(jr *rd, const jr_mod *mod) {
     odin3_u64map_destroy(cur->nets);
     odin3_u64map_destroy(cur->qbits);
     odin3_u64map_destroy(cur->qinit);
+    odin3_u64map_destroy(cur->netloc);
     cur->nets = odin3_u64map_create(0);
     cur->qbits = odin3_u64map_create(0);
     cur->qinit = odin3_u64map_create(0);
+    cur->netloc = odin3_u64map_create(0);
     odin3_vec_clear(&cur->labels);
     memset(cur->consts, 0, sizeof cur->consts);
     memset(cur->const_used, 0, sizeof cur->const_used);
     cur->n_consts = 0;
     cur->mod = mod;
     cur->module = odin3_module_get(rd->design, mod->module);
-    if (cur->nets == NULL || cur->qbits == NULL || cur->qinit == NULL) {
+    if (cur->nets == NULL || cur->qbits == NULL || cur->qinit == NULL || cur->netloc == NULL) {
         return jr_fail(rd, ODIN3_ERR_NO_MEMORY);
     }
     return ODIN3_OK;
@@ -84,7 +86,8 @@ void jr_cur_end(jr *rd) {
     odin3_u64map_destroy(cur->nets);
     odin3_u64map_destroy(cur->qbits);
     odin3_u64map_destroy(cur->qinit);
-    cur->nets = cur->qbits = cur->qinit = NULL;
+    odin3_u64map_destroy(cur->netloc);
+    cur->nets = cur->qbits = cur->qinit = cur->netloc = NULL;
     odin3_vec_free(&cur->labels);
     odin3_vec_free(&cur->conn_nets);
     odin3_vec_free(&cur->conn_ports);
@@ -360,7 +363,12 @@ static odin3_status make_label_nets(jr *rd, odin3_prov_id prov) {
     for (size_t i = 0; st == ODIN3_OK && i < cur->labels.len; i++) {
         uint64_t label = *(const uint64_t *)odin3_vec_cat(&cur->labels, i);
         odin3_net_id net = {0};
-        st = jr_fail(rd, odin3_net_create(cur->module, 0, prov, &net));
+        uint64_t own = 0; /* a one-bit netname with a restored src: its record (D-2) */
+        odin3_prov_id used = prov;
+        if (odin3_u64map_get(cur->netloc, label, &own)) {
+            used.v = (uint32_t)own;
+        }
+        st = jr_fail(rd, odin3_net_create(cur->module, 0, used, &net));
         if (st == ODIN3_OK) {
             st = jr_fail(rd, odin3_u64map_put(cur->nets, (odin3_kv){label, net.v}));
         }
@@ -403,8 +411,9 @@ static odin3_status make_const_nets(jr *rd, odin3_prov_id prov) {
 }
 
 odin3_status jr_make_nets(jr *rd) {
-    odin3_prov_id prov = odin3_module_prov(rd->cur.module);
-    odin3_status st = make_label_nets(rd, prov);
+    odin3_prov_id prov = rd->cur.mod->base; /* X-1: the nets keep the netlist record */
+    odin3_status st = jr_collect_netlocs(rd);
+    st = st == ODIN3_OK ? make_label_nets(rd, prov) : st;
     return st == ODIN3_OK ? make_const_nets(rd, prov) : st;
 }
 

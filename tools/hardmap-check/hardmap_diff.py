@@ -94,6 +94,7 @@ HARD_UNITS = tuple(unit for unit in UNITS if unit != "latch")
 NOT_EQUIVALENT = "NOT equivalent"
 UNPAIRED_NEEDLE = "cannot be matched one-to-one"
 D2B = "D2b"
+D19 = "D19"  # a B-split multiplier: Parmys sign-extends the low product (partial_map: zero)
 D18 = "D18"  # an explicit hard-block instance the arch has no model for: unresolved module
 SUB_CHAIN_MARK = "MIN~"  # Parmys names the nets of a `$sub` chain `$sub~N^MIN~M-K[i]`
 ADDER_B_ON_UNCONN = re.compile(r"(?<!\S)(b(?:\[0\])?)=unconn(?!\S)")
@@ -300,13 +301,17 @@ def tail(text: str, lines: int = 3) -> str:
     return " | ".join(text.strip().splitlines()[-lines:])
 
 
-def run_odin(cfg: Config, design: Path, top: str, work: Path) -> tuple[Path, str]:
-    """Odin III's script; returns (BLIF, its output). Exit != 0 is ``ToolError``."""
-    out = work / "odin.blif"
+def run_odin(cfg: Config, design: Path, top: str, work: Path, compat: bool = False
+             ) -> tuple[Path, str]:
+    """Odin III's script; returns (BLIF, its output). Exit != 0 is ``ToolError``. With ``compat``
+    the ``hardmap`` line gets ``--parmys-split-ext`` (D19) and the files carry ``.compat``."""
+    out = work / ("odin.compat.blif" if compat else "odin.blif")
     script = script_text(SCRIPT, cfg.techlib, design, out, cfg.adder_lib, arch=cfg.arch)
+    if compat:
+        script = script.replace("; hardmap; ", "; hardmap --parmys-split-ext; ")
     proc = run_child([cfg.odin3, "--top", top, "-p", script], cfg.timeout)
     log = proc.stderr + proc.stdout
-    (work / "odin.log").write_text(log, encoding="utf-8")
+    (work / ("odin.compat.log" if compat else "odin.log")).write_text(log, encoding="utf-8")
     gap_lines = [ln for ln in proc.stderr.splitlines() if any(n in ln for n in GAP_NEEDLES)]
     if proc.returncode != 0 and gap_lines:
         gap = gap_lines[0]
@@ -405,6 +410,7 @@ class Compared:
     cls: str
     normalized: bool = False
     note: str = ""
+    compat: bool = False  # Odin III was rerun with ``--parmys-split-ext`` (D19)
 
 
 def compare_netlists(cfg: Config, golden: Path, out: Path, work: Path,
@@ -458,6 +464,14 @@ def judge_compare(key: str, entries: list[Entry], compared: Compared) -> Result:
     ``unpaired``, and only when the retry on the golden with D2b undone proves equivalence (or is
     ``unproven`` with its own ``unproven`` line); a plain ``differs`` is never D2b's."""
     cls = compared.cls
+    if compared.compat:  # rerun with Parmys's sign extension (D19): equivalent proves the rest
+        d19 = [e for e in entries if e.ident == D19]
+        if cls == "equivalent":
+            stale = stale_others(key, entries, (D19,))
+            if stale is not None:
+                return stale
+            return Result(key, f"listed:{D19}", True, f"{d19[0].reason}; {compared.note}")
+        return Result(key, cls, False, f"with Parmys's sign extension (D19): {compared.note}")
     divergences = [e for e in entries if DIVERGENCE.fullmatch(e.ident)]
     unproven = [e for e in entries if e.ident == "unproven"]
     d2b = [e for e in divergences if e.ident == D2B]
@@ -587,8 +601,17 @@ def check_design(cfg: Config, design: Path, work: Path) -> Result:
         return warned
     delta = count_delta(count_blocks(out), count_blocks(golden))
     try_d2b = any(e.ident == D2B for e in entries)
-    return judge(key, entries, delta,
-                 lambda: compare_netlists(cfg, golden, out, work, try_d2b))
+
+    def compare() -> Compared:
+        first = compare_netlists(cfg, golden, out, work, try_d2b)
+        if first.cls in PASSING or not any(e.ident == D19 for e in entries):
+            return first
+        again, _ = run_odin(cfg, design, first_model(golden), work, compat=True)
+        second = compare_netlists(cfg, golden, again, work, False)
+        return Compared(second.cls, False, f"{first.cls} before; rerun with --parmys-split-ext",
+                        True)
+
+    return judge(key, entries, delta, compare)
 
 
 def run_design(cfg: Config, design: Path) -> Result:

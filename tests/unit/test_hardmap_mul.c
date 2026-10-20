@@ -268,10 +268,10 @@ static const threshold_row k_rows[] = {
     {{32, 2, 34, false, false, NULL}, HARD, NULL},
     {{3, 3, 6, false, false, NULL}, HARD, NULL},
     {{36, 36, 72, false, false, NULL}, HARD, NULL},
-    {{37, 4, 41, false, false, NULL}, SOFT_WARN, "is 37x4; the arch's multiplier is 36 wide"},
-    {{4, 37, 41, false, false, NULL}, SOFT_WARN, "is 4x37; the arch's multiplier is 36 wide"},
+    {{37, 4, 41, true, true, NULL}, SOFT_WARN, "needs Y_WIDTH 41 > 36"},
+    {{4, 37, 41, true, true, NULL}, SOFT_WARN, "needs Y_WIDTH 41 > 36"},
     {{18, 18, 36, true, true, NULL}, HARD, NULL},
-    {{18, 18, 37, true, true, NULL}, SOFT_WARN, "has Y_WIDTH 37 above 36"},
+    {{18, 18, 37, true, true, NULL}, SOFT_WARN, "needs Y_WIDTH 37 > 36"},
     {{4, 4, 8, true, false, NULL}, HARD, NULL}, /* mixed signs: the unsigned path (PHASE2 #25) */
     {{4, 4, 12, false, false, NULL}, SOFT_WARN, "above A_WIDTH + B_WIDTH (8)"},
     {{4, 4, 12, true, true, NULL}, HARD, NULL}, /* signed: every Y bit is driven */
@@ -631,22 +631,18 @@ static void test_m6_explicit_sim(void) {
     TEST_ASSERT_TRUE(hm_sim_exhaustive(build_explicit_5));
 }
 
-static void test_m6_over_36_error(void) {
+/* X-6 (4.3): a WIDTH above W is the equivalent `$mul`, split; it is no longer an error. */
+static void test_m6_over_36_split(void) {
     pb_result res;
     odin3_strbuf text;
     odin3_strbuf_init(&text);
     explicit_text(&text, 40, true);
     hm_build_ok(text.data, &res);
-    odin3_strbuf before;
-    odin3_strbuf_init(&before);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_rtlil(&res, &before));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hardmap_run(&res.ctx, res.design, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, NULL));
     TEST_ASSERT_NOT_NULL(strstr(
-        log_text,
-        "partial_map: 'multiply' instance 'u' has WIDTH 40; the arch's multiplier is 36 wide"));
-    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mul")); /* nothing was mapped */
-    assert_rtlil_equal(&res, &before);
-    odin3_strbuf_free(&before);
+        log_text, "partial_map: explicit 'multiply' instance 'u' (WIDTH 40) treated as '$mul'"));
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$mul"));
+    TEST_ASSERT_EQUAL_UINT32(5, hm_count(res.module, "multiply")); /* four pieces and `v` */
     odin3_strbuf_free(&text);
     pb_free(&res);
 }
@@ -893,7 +889,7 @@ static void test_pass_runs_and_refuses_unknown_arguments(void) {
                           odin3_pass_run(res.design, "hardmap", odin3_bytes_cstr("-x")));
     TEST_ASSERT_NOT_NULL(
         strstr(log_text, "partial_map: unknown argument '-x' (known: --allow-unknown-blocks, "
-                         "--min-add N, --mem-width arch)"));
+                         "--min-add N, --min-mult N, --mem-width arch, --parmys-split-ext)"));
     TEST_ASSERT_EQUAL_UINT32(3, hm_count(res.module, "$mul"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(res.design, "hardmap", (odin3_bytes){NULL, 0}));
     TEST_ASSERT_EQUAL_UINT32(3, hm_count(res.module, "multiply"));
@@ -931,7 +927,7 @@ int main(void) {
     RUN_TEST(test_m6_width_2_is_mul);
     RUN_TEST(test_m6_width_8_padded);
     RUN_TEST(test_m6_explicit_sim);
-    RUN_TEST(test_m6_over_36_error);
+    RUN_TEST(test_m6_over_36_split);
     RUN_TEST(test_m4_two_modules);
     RUN_TEST(test_h3_bad_shape);
     RUN_TEST(test_m7_order_naming);

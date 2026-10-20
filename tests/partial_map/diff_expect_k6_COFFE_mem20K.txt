@@ -6,14 +6,9 @@
 # The 26 micros need no line here (16 equivalent; the 10 listed are those of tests/hardmap/diff_expect.txt
 # unchanged). Of the 15 VTR designs: ch_intrinsics and mkPktMerge are equivalent.
 #
-# Counts: the multipliers wider than 27 bits are not split yet (4.3, plan PR F), so Odin III leaves
-# them soft where Parmys splits them into `multiply` blocks and adders. The lines go when PR F merges.
-diffeq1.v counts:-13 multiply 4.3 not done: `$mul` wider than 27 bits stays soft, Parmys splits it (X-4)
-diffeq1.v counts:-48 adder 4.3 not done: the adders of Parmys's split multipliers
-diffeq2.v counts:-13 multiply 4.3 not done: `$mul` wider than 27 bits stays soft, Parmys splits it (X-4)
-diffeq2.v counts:-92 adder 4.3 not done: the adders of Parmys's split multipliers
-or1200.v counts:-4 multiply 4.3 not done: `$mul` wider than 27 bits stays soft, Parmys splits it (X-4)
-or1200.v counts:-72 adder 4.3 not done: the adders of Parmys's split multipliers
+# Counts: the multipliers wider than 27 bits are split like Parmys's (4.3, X-4), so diffeq1, diffeq2
+# and or1200 need no counts line any more (their multiply and adder counts equal Parmys's).
+diffeq2.v D19 Parmys sign-extends the low product of a B split (2x32 constant multiplies): wrong when its top bit is set; partial_map zero-extends. Equivalent to the golden when rerun with `hardmap --parmys-split-ext`
 #
 # As on k6 (tests/hardmap/vtr_expect.txt): counts equal Parmys's, equiv-check cannot decide in time
 # or sees several clocks.

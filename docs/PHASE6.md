@@ -1,6 +1,9 @@
 # Odin III: Phase 6: analysis flow and provenance
 
-Spec: `docs/DESIGN.md` §5 (IR, provenance), §9 (writers), §12; ADRs D11 (this phase), D10
+Spec: `docs/specs/2026-10-21-6-analysis-flow-design.md` (v1, awaiting Peter's approval). Plan:
+`docs/plans/2026-10-21-6-analysis-flow-plan.md`.
+
+Design inputs: `docs/DESIGN.md` §5 (IR, provenance), §9 (writers), §12; ADRs D11 (this phase), D10
 follow-up 2 (the goals), D9 (provenance). Inputs: `write_dot` (1F), `write_json` (1F), the
 provenance index and `DERIVED` records across every pass including `abc` (PHASE3 decision 14),
 `read_blif`/`read_verilog`, Phase 5's `read_json` and provenance read-back, and `tools/vtr-qor`
@@ -62,3 +65,12 @@ the Phase 3 design set and the Phase 5 LPM micros.
    exception classes.
 3. **Graph export is Yosys JSON plus Odin III keys** (Peter, 2026-10-19, PHASE5 decision 3):
    one format, one reader.
+4. **Spec approved** (Peter, 2026-10-20): the Phase 6 spec v1.2 is approved, all section 9 questions
+   decided (Q1-3, Q5-Q11 as recommended). Q4 rule: memories (hard RAM, any memory cell) treat their
+   inputs as primary outputs and their outputs as primary inputs; black boxes and hard blocks that
+   state a latch or register follow the same rule (registers in the netlist already cut alike); all
+   other black boxes are combinational paths.
+   `levelize` scope: just an algorithm to count the levels of logic from a combinational node
+   perspective; timing detail can be added later (no delays, arcs or criticality). Amendment to
+   decision 2: `inherited` and `pad` are approved named exception classes (strict figure always
+   reported).

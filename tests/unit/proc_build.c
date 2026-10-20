@@ -1304,7 +1304,10 @@ static odin3_status state_open(pb_state *st, pb_result *out, const char *lib_pat
         return ODIN3_ERR_NO_MEMORY;
     }
     if (lib_path != NULL) {
-        odin3_status lib = odin3_pass_run(out->design, "read_techlib", odin3_bytes_cstr(lib_path));
+        size_t len = strlen(lib_path);
+        bool xml = len > 4 && strcmp(lib_path + len - 4, ".xml") == 0; /* a VPR arch: read_arch */
+        odin3_status lib = odin3_pass_run(out->design, xml ? "read_arch" : "read_techlib",
+                                          odin3_bytes_cstr(lib_path));
         if (lib != ODIN3_OK) {
             return lib;
         }

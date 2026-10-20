@@ -333,7 +333,12 @@ static odin3_status create_node(jr *rd, const jr_cell *cell, odin3_node_id *node
     odin3_node_spec spec = {.type = cell->type,
                             .params = cell->def->n_params > 0 ? rd->cur.params.data : NULL,
                             .n_params = cell->def->n_params};
-    odin3_status st = jr_prov(rd, cell->node, &spec.prov);
+    odin3_prov_id imported = {0};
+    odin3_status st = jr_prov(rd, cell->node, &imported);
+    if (st == ODIN3_OK) {
+        st = jr_restore_src(
+            rd, &(jr_restore_in){jr_member(cell->node, "attributes"), imported, true}, &spec.prov);
+    }
     if (st == ODIN3_OK) {
         st = jr_intern(rd, cell->key, &spec.name);
     }

@@ -6,7 +6,9 @@
  * by ext(X) of A-2 (the sign net for a signed cell, else gnd): divergence D1 from Parmys, which
  * pads with `unconn`. Y[i] is the sum of stage i. A Y wider than n + 1 (A-7) stays soft with a
  * warning, as M-3 does for `$mul`: aliasing the extra Y bits onto a net, or onto gnd, would
- * allocate after the source is deleted (H-9); 3G's wreduce caps Y at n + 1.
+ * allocate after the source is deleted (H-9); 3G's wreduce caps Y at n + 1. An `$add` that the
+ * multiplier split made (hm_is_nocarry) has Y_WIDTH = n and no top stage: head and n stages, n + 1
+ * cells, the chain Parmys builds for the adders of a split multiplier (X-4).
  */
 #include "passes/partial_map/hm_kit.h"
 
@@ -29,6 +31,7 @@ typedef struct add_shape {
     uint32_t y; /* Y_WIDTH */
     bool is_signed;
     bool sub;
+    bool no_top; /* a split multiplier's adder: no top stage (X-4) */
 } add_shape;
 
 /* The state of one chain being built. */
@@ -57,6 +60,7 @@ static add_shape shape_of(const hm_ctx *hc, odin3_node_id node) {
     sh.y = param_u32(hc, node, P_Y_WIDTH);
     sh.is_signed = odin3_opt_both_signed(hc->module, node);
     sh.sub = def != NULL && strcmp(def->name, "$sub") == 0;
+    sh.no_top = !sh.sub && sh.y <= sh.n && hm_is_nocarry(hc, node);
     return sh;
 }
 
@@ -171,7 +175,8 @@ static odin3_status build(hm_ctx *hc, odin3_node_id src, const add_shape *sh, od
         st = ch.inverted != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
     }
     st = st == ODIN3_OK ? add_head(&ch) : st;
-    for (uint32_t i = 0; st == ODIN3_OK && i <= sh->n; i++) {
+    uint32_t stages = sh->no_top ? sh->n : sh->n + 1U;
+    for (uint32_t i = 0; st == ODIN3_OK && i < stages; i++) {
         st = add_stage(&ch, i);
     }
     odin3_u64map_destroy(ch.inverted);
@@ -210,7 +215,7 @@ odin3_status hm_map_adder(hm_ctx *hc, odin3_node_id src) {
     }
     odin3_status st = transact(hc, src, &sh);
     if (st == ODIN3_OK) {
-        hc->stats.adder += (uint64_t)sh.n + 2U;
+        hc->stats.adder += (uint64_t)sh.n + (sh.no_top ? 1U : 2U);
         hc->stats.chains++;
     }
     return st;
