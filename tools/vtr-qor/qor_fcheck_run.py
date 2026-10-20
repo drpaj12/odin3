@@ -325,9 +325,9 @@ def compare_runs(outputs: Sequence[tuple[str, int]], runs: Sequence[Iterable[str
     """Compare ``runs[0]`` (all uninitialised state 0) vector by vector, RTL against netlist, on
     every output bit. With more runs (other initial states), a mismatching bit whose RTL value, or
     whose netlist value, differs from ``runs[0]``'s in any of them at that vector is ``x``
-    (XDEPEND, or NETLIST_INIT_DEPEND
-    when only the netlist's value differs); every other mismatch is real. A vector is ``mismatched`` when it has a real mismatch, ``x_dependent``
-    when it has only x ones, ``matched`` otherwise. Raises ``ValueError`` when the runs dumped a
+    (XDEPEND, or NETLIST_INIT_DEPEND when only the netlist's value differs); every other mismatch
+    is real. A vector is ``mismatched`` when it has a real mismatch, ``x_dependent`` when it has
+    only x ones, ``matched`` otherwise. Raises ``ValueError`` when the runs dumped a
     different number of vectors. ``indices`` names the vectors the dumps hold when they were
     filtered (``keep_vectors``); the others are not counted."""
     widths = [w for _, w in outputs]

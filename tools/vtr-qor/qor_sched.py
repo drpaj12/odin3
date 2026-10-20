@@ -1620,8 +1620,8 @@ def _fcheck_netlist(job: Job) -> Path | str:
 
 
 def record_verdict(job: Job, name: str, verdict: str | None) -> None:
-    """Rewrite ``metrics.json`` ``verdicts.<name>`` atomically (None or '' removes it). A job with no
-    ``ok`` record of this key has no verdict to hold (HeavyError)."""
+    """Rewrite ``metrics.json`` ``verdicts.<name>`` atomically (None or '' removes it). A job
+    with no ``ok`` record of this key has no verdict to hold (HeavyError)."""
     path = job.job_dir / "metrics.json"
     try:
         record = json.loads(path.read_text(encoding="utf-8"))

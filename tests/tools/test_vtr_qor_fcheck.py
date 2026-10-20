@@ -241,7 +241,8 @@ class PrecheckTest(unittest.TestCase):
 
     def test_timeout_and_oserror_are_no_result_never_a_traceback(self) -> None:
         for exc in (subprocess.TimeoutExpired(["yosys"], 600), OSError("exec format error")):
-            def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            def run(argv: list[str], exc: Exception = exc,
+                    **kwargs: object) -> subprocess.CompletedProcess[str]:
                 raise exc
             notes = qor_fcheck_run.PrecheckNotes()
             reasons = qor_fcheck_run.rtl_precheck(
