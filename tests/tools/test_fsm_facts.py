@@ -9,7 +9,6 @@ from pathlib import Path
 import fsm_facts
 
 
-
 class NormaliseTest(unittest.TestCase):
     def test_repo_and_vtr_roots_are_stripped(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
