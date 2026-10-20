@@ -15,6 +15,7 @@
 #include "passes/abc/script.h"
 #include "passes/abc/xblif.h"
 #include "passes/builtin.h"
+#include "util/clock.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -295,17 +296,24 @@ odin3_status odin3_abc_exchange_blif(odin3_abc_run *run, odin3_abc_result *out) 
     odin3_strbuf_clear(&run->lines);
     st = open_run_log(run);
     log_header(run);
+    double written = odin3_now_ms();
     st = st == ODIN3_OK ? write_inputs(run, &files) : st;
+    run->stats.aig_ms = odin3_now_ms() - written;
     if (st == ODIN3_OK) {
+        double called = odin3_now_ms();
         st = run->route == ODIN3_ABC_ROUTE_CHILD ? run_child(run, files.cmd)
                                                  : run_linked(run, &files);
+        run->stats.abc_ms = odin3_now_ms() - called;
     }
     close_run_log(run);
     run->run_no++;
     if (st != ODIN3_OK) {
         return st;
     }
-    return odin3_abc_xblif_read(run, files.out, out);
+    double read_back = odin3_now_ms();
+    st = odin3_abc_xblif_read(run, files.out, out);
+    run->stats.aig_ms += odin3_now_ms() - read_back;
+    return st;
 }
 
 /* --- the in-memory exchange ---------------------------------------------------------------- */
@@ -355,14 +363,18 @@ static odin3_status push_u32(odin3_vec *vec, uint32_t value) {
 }
 
 /* One MiniAIG literal (or -1) per aligned object, as the result's old_lit per LUT object. */
-static odin3_status store_old_lit(odin3_abc_result *res, const int32_t *lits, uint32_t lut_base) {
+static odin3_status store_old_lit(odin3_abc_run *run, odin3_abc_result *res, const int32_t *lits,
+                                  uint32_t lut_base) {
     uint32_t total = odin3_abc_result_first_lut(res) + res->n_luts;
     odin3_vec_clear(&res->old_lit);
     odin3_status st = odin3_vec_reserve(&res->old_lit, total);
+    uint32_t first = odin3_abc_result_first_lut(res);
+    run->stats.namemap_hit = 0;
+    run->stats.namemap_total = res->n_luts;
     for (uint32_t obj = 0; st == ODIN3_OK && obj < total; obj++) {
-        uint32_t first = odin3_abc_result_first_lut(res);
-        st = push_u32(&res->old_lit,
-                      obj >= first ? (uint32_t)lits[lut_base + obj - first] : UINT32_MAX);
+        uint32_t lit = obj >= first ? (uint32_t)lits[lut_base + obj - first] : UINT32_MAX;
+        run->stats.namemap_hit += obj >= first && lit != UINT32_MAX ? 1U : 0U;
+        st = push_u32(&res->old_lit, lit);
     }
     return st;
 }
@@ -382,6 +394,7 @@ static odin3_status aig_name_map(odin3_abc_run *run, const odin3_abc_luts *luts,
                        "the AIG has more than %u objects", (unsigned)cap);
         return ODIN3_OK;
     }
+    double started = odin3_now_ms();
     odin3_arena *arena = odin3_arena_create(0);
     odin3_abc_luts aligned = {0};
     odin3_abc_fail fail = {0};
@@ -399,9 +412,10 @@ static odin3_status aig_name_map(odin3_abc_run *run, const odin3_abc_luts *luts,
         st = name_map_failed(run, &fail);
     } else if (st == ODIN3_OK) {
         uint32_t lut_base = FIRST_OBJ_NUMBER + res->n_cis + (uint32_t)run->region->regs.len;
-        st = store_old_lit(res, lits, lut_base);
+        st = store_old_lit(run, res, lits, lut_base);
     }
     odin3_arena_destroy(arena);
+    run->stats.namemap_ms = odin3_now_ms() - started;
     return st;
 }
 
@@ -437,10 +451,13 @@ static odin3_status aig_session(odin3_abc_run *run, odin3_abc_result *out) {
     if (st != ODIN3_OK) {
         return st;
     }
+    double opened = odin3_now_ms();
     st = aig_commands(run);
     st = st == ODIN3_OK ? aig_collect(run, out) : st;
     eng->close(eng->self);
     flush_lines(run);
+    double spent = odin3_now_ms() - opened - run->stats.namemap_ms;
+    run->stats.abc_ms = spent > 0.0 ? spent : 0.0;
     return st;
 }
 
@@ -451,7 +468,9 @@ odin3_status odin3_abc_exchange_aig(odin3_abc_run *run, odin3_abc_result *out) {
     run->nomap_reason[0] = '\0';
     odin3_strbuf_clear(&run->lines);
     log_header(run);
+    double built = odin3_now_ms();
     odin3_status st = odin3_abc_aig_build(run, run->region, &run->aig);
+    run->stats.aig_ms = odin3_now_ms() - built;
     st = st == ODIN3_OK ? aig_session(run, out) : st;
     run->run_no++;
     return st;
