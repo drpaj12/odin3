@@ -31,11 +31,16 @@ enum { PATH_BUF = 512, DIR_BUF = 256, CHUNK = 4096, LOG_MAX = 4096, PARENTS = 2 
 static char dir[DIR_BUF];
 static odin3_design *design;
 static char log_text[LOG_MAX];
+static char info_text[LOG_MAX]; /* the INFO lines of a read */
 static uint32_t warnings;
 
 static void sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     warnings += level == ODIN3_LOG_WARN ? 1U : 0U;
+    if (level == ODIN3_LOG_INFO) {
+        size_t taken = strlen(info_text);
+        (void)snprintf(info_text + taken, sizeof info_text - taken, "%s\n", msg);
+    }
     if (level <= ODIN3_LOG_WARN) {
         size_t used = strlen(log_text);
         (void)snprintf(log_text + used, sizeof log_text - used, "%s\n", msg);
@@ -50,6 +55,7 @@ void setUp(void) {
     (void)snprintf(dir, sizeof dir, "%s/nlocs.XXXXXX", ODIN3_LOCS_ROOT);
     TEST_ASSERT_NOT_NULL(mkdtemp(dir));
     log_text[0] = '\0';
+    info_text[0] = '\0';
     warnings = 0;
     odin3_log_set_sink(sink, NULL);
     design = odin3_design_create();
@@ -399,6 +405,152 @@ static void test_malformed_src_stays_an_attribute(void) {
     free(out);
 }
 
+/* Counts the lines of text that hold needle. */
+static uint32_t lines_with(const char *text, const char *needle) {
+    uint32_t count = 0;
+    for (const char *at = strstr(text, needle); at != NULL; at = strstr(at + 1, needle)) {
+        count++;
+    }
+    return count;
+}
+
+/* Review 5.4c fix 2: more than 8 locations keep the first 8, with one INFO line per read. */
+static void test_over_eight_locations_are_counted(void) {
+    read_net("module top(a, y);\n  input a;\n  output y;\n"
+             "  (* src = \"a.v:1|a.v:2|a.v:3|a.v:4|a.v:5|a.v:6|a.v:7|a.v:8|a.v:9\" *)\n  wire w;\n"
+             "  (* src = \"b.v:1|b.v:2|b.v:3|b.v:4|b.v:5|b.v:6|b.v:7|b.v:8\" *)\n  wire v;\n"
+             "  (* src = \"c.v:1|c.v:2|c.v:3|c.v:4|c.v:5|c.v:6|c.v:7|c.v:8|c.v:9|c.v:10\" *)\n"
+             "  wire u;\n  assign w = a;\n  assign v = a;\n  assign u = a;\n  assign y = w & v & u;\n"
+             "endmodule\n",
+             OPTS_NETLIST);
+    TEST_ASSERT_EQUAL_UINT32(1, lines_with(info_text, "more than 8 locations"));
+    expect_in(info_text, "2 `src` attribute(s) hold more than 8 locations");
+    char *text = dump();
+    expect_in(text, "a.v:8");
+    expect_out(text, "a.v:9");
+    expect_in(text, "b.v:8");
+    free(text);
+}
+
+/* Fix 3: a src the record did not use stays an attribute; the comment wins on an assign. */
+static void test_src_and_comment_on_one_assign(void) {
+    read_net("module top(a, b, y);\n  input a;\n  input b;\n  output y;\n"
+             "  (* src = \"b.v:5\" *)\n  assign y = a & b; // a.v:7\nendmodule\n",
+             OPTS_NETLIST);
+    char *text = dump();
+    expect_in(text, "|a.v:7\n");
+    expect_out(text, "b.v:5");
+    free(text);
+}
+
+static void test_two_src_on_one_wire_keep_the_second_as_attribute(void) {
+    read_net("module top(a, y);\n  input a;\n  output y;\n"
+             "  (* src = \"a.v:1\" *)\n  (* src = \"c.v:2\" *)\n  wire w;\n  assign w = a;\n"
+             "  assign y = w;\nendmodule\n",
+             OPTS_NETLIST);
+    char *text = dump();
+    expect_in(text, "top|wire|w|a.v:1\n");
+    expect_out(text, "c.v:2");
+    free(text);
+    run_ok(&(pass_call){"write_verilog", "", "out.v"});
+    char *out = slurp("out.v");
+    expect_in(out, "c.v:2"); /* the second stays the user's attribute */
+    free(out);
+}
+
+/* Fix 4: the comment belongs to the last item on its line only. */
+static void test_comment_goes_to_the_last_assign_of_the_line(void) {
+    read_net("module top(a, b, y, z);\n  input a;\n  input b;\n  output y;\n  output z;\n"
+             "  assign y = a & b; assign z = a | b; // a.v:7\nendmodule\n",
+             OPTS_NETLIST);
+    char *text = dump();
+    expect_in(text, "|a.v:7\n");
+    const char *first = strstr(text, "|a.v:7\n");
+    TEST_ASSERT_NULL(strstr(first + 1, "|a.v:7\n"));
+    free(text);
+}
+
+/* Fix 5: untrusted src text is escaped in the WARNING and never cut inside a UTF-8 sequence. */
+static void test_bad_src_text_is_escaped(void) {
+    read_net("module top(a, y);\n  input a;\n  output y;\n"
+             "  (* src = \"x\\001\\033[31m\\377\\303\\251\" *)\n  wire w;\n  assign w = a;\n"
+             "  assign y = w;\nendmodule\n",
+             OPTS_NETLIST);
+    TEST_ASSERT_EQUAL_UINT32(1, warnings);
+    expect_in(log_text, "first: \"x\\x01\\x1b[31m\\xff\\xc3\\xa9\"");
+    expect_out(log_text, "\033");
+    expect_out(log_text, "\xc3");
+}
+
+static void test_bad_src_text_is_cut_between_escapes(void) {
+    char text[CHUNK];
+    (void)snprintf(text, sizeof text,
+                   "module top(a, y);\n  input a;\n  output y;\n"
+                   "  (* src = \"%s\\303\\251\" *)\n  wire w;\n  assign w = a;\n  assign y = w;\n"
+                   "endmodule\n",
+                   "0123456789012345678901234567890123456789012345678901234567890123456789");
+    read_net(text, OPTS_NETLIST);
+    TEST_ASSERT_EQUAL_UINT32(1, warnings);
+    expect_out(log_text, "\xc3");
+    expect_out(log_text, "\\x"); /* the 70 plain bytes fill the cap before the escapes */
+    expect_in(log_text, "first: \"0123456789");
+}
+
+/* Fix 7: a user attribute named like stage 1's internal one is refused with a warning. */
+static void test_user_internal_attribute_is_refused(void) {
+    read_net("module top(a, b, y);\n  input a;\n  input b;\n  output y;\n"
+             "  (* odin3_netlist_loc = \"z.v:9\" *)\n  assign y = a & b;\nendmodule\n",
+             OPTS_NETLIST);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1, warnings);
+    expect_in(log_text, "odin3_netlist_loc");
+    char *text = dump();
+    expect_out(text, "z.v:9");
+    free(text);
+}
+
+/* Fix 8: coverage gaps. */
+static void test_generate_scope_wire_is_not_decoded(void) {
+    read_net("module top(a, y);\n  input a;\n  output y;\n"
+             "  generate if (1) begin : g\n    wire \\u/x@f.v:3 ;\n    assign \\u/x@f.v:3  = a;\n"
+             "  end endgenerate\n  assign y = a;\nendmodule\n",
+             OPTS_NETLIST);
+    char *text = dump();
+    expect_in(text, "x@f.v:3");
+    expect_out(text, "|f.v:3\n");
+    expect_check();
+    free(text);
+}
+
+static void test_module_instantiated_twice_warns_once(void) {
+    read_net("module top(a, y, z);\n  input a;\n  output y;\n  output z;\n"
+             "  sub u1(.a(a), .y(y));\n  sub u2(.a(a), .y(z));\nendmodule\n"
+             "module sub(a, y);\n  input a;\n  output y;\n  (* src = \"bad\" *)\n  wire w;\n"
+             "  assign w = a;\n  assign y = w;\nendmodule\n",
+             OPTS_NETLIST);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, warnings, log_text);
+    expect_in(log_text, "1 `src` attribute(s)");
+}
+
+static void test_src_on_a_memory_is_restored(void) {
+    read_net("module top(clk, a, y);\n  input clk;\n  input a;\n  output reg y;\n"
+             "  (* src = \"m.v:3.3-3.20\" *)\n  reg mem [0:1];\n"
+             "  always @(posedge clk) begin\n    mem[0] <= a;\n    y <= mem[0];\n  end\nendmodule\n",
+             OPTS_NETLIST);
+    char *text = dump();
+    expect_in(text, "m.v:3.3-3.20");
+    expect_check();
+    free(text);
+}
+
+static void test_internal_attribute_is_not_written(void) {
+    read_net(NET, OPTS_BOTH);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "proc", odin3_bytes_cstr("")));
+    run_ok(&(pass_call){"write_verilog", "", "out.v"});
+    char *out = slurp("out.v");
+    expect_out(out, "odin3_netlist_loc");
+    free(out);
+}
+
 static void test_records_are_imported_and_derived(void) {
     read_net(NET, OPTS_BOTH);
     expect_no_source_in_net();
@@ -490,6 +642,17 @@ int main(void) {
     RUN_TEST(test_plain_wire_before_decoded_keeps_its_name);
     RUN_TEST(test_decoded_skips_a_plain_suffixed_name);
     RUN_TEST(test_malformed_src_stays_an_attribute);
+    RUN_TEST(test_over_eight_locations_are_counted);
+    RUN_TEST(test_src_and_comment_on_one_assign);
+    RUN_TEST(test_two_src_on_one_wire_keep_the_second_as_attribute);
+    RUN_TEST(test_comment_goes_to_the_last_assign_of_the_line);
+    RUN_TEST(test_bad_src_text_is_escaped);
+    RUN_TEST(test_bad_src_text_is_cut_between_escapes);
+    RUN_TEST(test_user_internal_attribute_is_refused);
+    RUN_TEST(test_generate_scope_wire_is_not_decoded);
+    RUN_TEST(test_module_instantiated_twice_warns_once);
+    RUN_TEST(test_src_on_a_memory_is_restored);
+    RUN_TEST(test_internal_attribute_is_not_written);
     RUN_TEST(test_records_are_imported_and_derived);
     RUN_TEST(test_object_without_text_is_imported_only);
     RUN_TEST(test_round_trip_through_the_writer);

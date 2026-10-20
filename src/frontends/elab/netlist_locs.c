@@ -16,7 +16,14 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { NL_BAD_TAG = 0x4e4c42, NL_BLANKS = 2, NL_TAG_SHIFT = 32 };
+enum {
+    NL_BAD_TAG = 0x4e4c42,
+    NL_TAKEN_TAG = 0x4e4c54,
+    NL_CAP_TAG = 0x4e4c43,
+    NL_BLANKS = 2,
+    NL_TAG_SHIFT = 32,
+    NL_HEX_ESC = 4 /* the bytes of `\\xNN` */
+};
 
 /* --- stage 1: the comment of an assign ----------------------------------------------------------
  */
@@ -63,8 +70,21 @@ static bool same_line(const odin3_srcman *sm, uint32_t last, odin3_loc comment) 
            here.buffer == there.buffer && here.line == there.line;
 }
 
+/* Whether the item that follows starts before the comment on the same line: a token lies between
+ * the assign and the comment, so the comment is not the assign's. */
+static bool item_between(const odin3_srcman *sm, const odin3_ast *parsed, odin3_ast_id next,
+                         odin3_loc comment) {
+    odin3_srcpos there;
+    odin3_srcpos after;
+    if (next.v == 0 || odin3_srcman_get_position(sm, comment.v, &there) != ODIN3_OK ||
+        odin3_srcman_get_position(sm, odin3_ast_loc(parsed, next).v, &after) != ODIN3_OK) {
+        return false;
+    }
+    return after.buffer == there.buffer && after.line == there.line && after.col < there.col;
+}
+
 bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed, odin3_ast_id item,
-                                  odin3_bytes *text) {
+                                  odin3_ast_id next, odin3_bytes *text) {
     odin3_srcman *sm = NULL;
     odin3_loc end = odin3_ast_end(parsed, item);
     if (end.v < 2U || odin3_design_get_srcman(design, &sm) != ODIN3_OK) {
@@ -75,7 +95,8 @@ bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed,
         odin3_ast_comments_of(parsed, odin3_srcman_buffer_of(sm, (odin3_loc){last}));
     uint32_t at = first_from(span, end.v);
     if (at >= span.n || span.items[at].kind != ODIN3_AST_COMMENT_LINE ||
-        !same_line(sm, last, span.items[at].loc)) {
+        !same_line(sm, last, span.items[at].loc) ||
+        item_between(sm, parsed, next, span.items[at].loc)) {
         return false;
     }
     odin3_bytes body = comment_body(&span.items[at]);
@@ -98,18 +119,15 @@ void odin3_netlist_begin(odin3_elab2 *e2) {
 
 odin3_status odin3_netlist_name_decode(odin3_elab2 *e2, uint32_t raw_str, odin3_netlist_name *out) {
     *out = (odin3_netlist_name){0};
-    const char *raw = odin3_strtab_get(odin3_design_strtab(e2->design), raw_str);
-    size_t len = raw != NULL ? strlen(raw) : 0;
+    const odin3_strtab *tab = odin3_design_strtab(e2->design);
+    size_t len = odin3_strtab_len(tab, raw_str);
     if (len == 0) {
         return ODIN3_OK;
     }
-    char *copy = odin3_arena_alloc(e2->scratch, len + 1U);
-    if (copy == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    memcpy(copy, raw, len + 1U);
+    /* the table never moves a string: the decoded views stay valid while the name is interned */
+    odin3_bytes raw = {(const unsigned char *)odin3_strtab_get(tab, raw_str), len};
     odin3_hdl_name name;
-    if (!odin3_hdl_name_decode((odin3_bytes){(const unsigned char *)copy, len}, &name)) {
+    if (!odin3_hdl_name_decode(raw, &name)) {
         return ODIN3_OK;
     }
     odin3_status st = odin3_design_intern(e2->design, name.short_name, &out->short_str);
@@ -171,19 +189,42 @@ static bool src_text(const odin3_elab2 *e2, odin3_ast_id attr, const char **text
     return true;
 }
 
-/* L-6: counts a `src` that is not a location, once per attribute. */
-static void note_bad(odin3_elab2 *e2, odin3_ast_id attr, const char *text) {
-    uint64_t key = ((uint64_t)NL_BAD_TAG << NL_TAG_SHIFT) | attr.v;
+/* Whether the key was new in the warned map (false: seen before, or out of memory: e2->fatal). */
+static bool first_time(odin3_elab2 *e2, uint32_t tag, odin3_ast_id attr) {
+    uint64_t key = ((uint64_t)tag << NL_TAG_SHIFT) | attr.v;
     if (odin3_u64map_get(e2->warned, key, NULL)) {
-        return;
+        return false;
     }
     if (odin3_u64map_put(e2->warned, (odin3_kv){key, 1}) != ODIN3_OK) {
         e2->fatal = e2->fatal != ODIN3_OK ? e2->fatal : ODIN3_ERR_NO_MEMORY;
+        return false;
+    }
+    return true;
+}
+
+/* Copies text into the first-example buffer: a byte outside 0x20..0x7e is written as `\xNN`, and
+ * the copy stops before an escape that does not fit, so no UTF-8 sequence is cut in two. */
+static void copy_escaped(char *out, size_t cap, const char *text) {
+    size_t used = 0;
+    for (const unsigned char *at = (const unsigned char *)text; *at != 0; at++) {
+        bool plain = *at >= 0x20 && *at <= 0x7e;
+        if (used + (plain ? 1U : NL_HEX_ESC) >= cap) {
+            break;
+        }
+        used += plain ? (size_t)snprintf(out + used, cap - used, "%c", *at)
+                      : (size_t)snprintf(out + used, cap - used, "\\x%02x", (unsigned)*at);
+    }
+    out[used] = '\0';
+}
+
+/* L-6: counts a `src` that is not a location, once per attribute. */
+static void note_bad(odin3_elab2 *e2, odin3_ast_id attr, const char *text) {
+    if (!first_time(e2, NL_BAD_TAG, attr)) {
         return;
     }
     if (e2->nl_bad++ == 0) {
         e2->nl_bad_loc = odin3_ast_loc(e2->elab, attr);
-        (void)snprintf(e2->nl_bad_text, sizeof e2->nl_bad_text, "%s", text);
+        copy_escaped(e2->nl_bad_text, sizeof e2->nl_bad_text, text);
     }
 }
 
@@ -194,26 +235,33 @@ bool odin3_netlist_src_consumed(odin3_elab2 *e2, odin3_ast_id attr) {
     }
     odin3_hdl_loc locs[ODIN3_HDL_LOC_MAX];
     if (odin3_hdl_loc_parse(odin3_bytes_cstr(text), locs, ODIN3_HDL_LOC_MAX) > 0) {
-        return true;
+        /* a src is dropped only when a record took it (an assign comment, or an earlier src of
+         * the same object, wins and leaves it as an attribute) */
+        return odin3_u64map_get(e2->warned, ((uint64_t)NL_TAKEN_TAG << NL_TAG_SHIFT) | attr.v, NULL);
     }
     note_bad(e2, attr, text);
     return false;
 }
 
-/* The locations of the first parsing `src` attribute of node. */
-static uint32_t node_src(const odin3_elab2 *e2, odin3_ast_id node, odin3_hdl_loc *locs,
-                         uint32_t *total) {
+/* The locations of the first parsing `src` attribute of node; *took is that attribute. */
+static uint32_t node_src(odin3_elab2 *e2, odin3_ast_id node, odin3_hdl_loc *locs,
+                         odin3_ast_id *took) {
     if (node.v == 0) {
         return 0;
     }
     odin3_ast_span attrs = odin3_ast_attrs(e2->elab, node);
     for (uint32_t i = 0; i < attrs.n; i++) {
         const char *text = NULL;
-        if (src_text(e2, attrs.ids[i], &text)) {
-            *total = odin3_hdl_loc_parse(odin3_bytes_cstr(text), locs, ODIN3_HDL_LOC_MAX);
-            if (*total > 0) {
-                return *total < ODIN3_HDL_LOC_MAX ? *total : ODIN3_HDL_LOC_MAX;
+        if (!src_text(e2, attrs.ids[i], &text)) {
+            continue;
+        }
+        uint32_t total = odin3_hdl_loc_parse(odin3_bytes_cstr(text), locs, ODIN3_HDL_LOC_MAX);
+        if (total > 0) {
+            *took = attrs.ids[i];
+            if (total > ODIN3_HDL_LOC_MAX && first_time(e2, NL_CAP_TAG, *took)) {
+                e2->nl_capped++; /* the first 8 are kept; one INFO line per read (X-3) */
             }
+            return total < ODIN3_HDL_LOC_MAX ? total : ODIN3_HDL_LOC_MAX;
         }
     }
     return 0;
@@ -227,13 +275,13 @@ odin3_status odin3_netlist_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req
         return ODIN3_OK;
     }
     odin3_hdl_loc locs[ODIN3_HDL_LOC_MAX];
-    uint32_t total = 0;
+    odin3_ast_id took = {0};
     uint32_t count = 0;
     if (e2->asg_loc != NULL) {
         count = odin3_hdl_loc_parse(odin3_bytes_cstr(e2->asg_loc), locs, 1) > 0 ? 1U : 0U;
     } else {
-        count = node_src(e2, req->node, locs, &total);
-        count = count != 0 || nl == NULL ? count : node_src(e2, nl->attrs, locs, &total);
+        count = node_src(e2, req->node, locs, &took);
+        count = count != 0 || nl == NULL ? count : node_src(e2, nl->attrs, locs, &took);
     }
     const odin3_netlist_name *name = nl != NULL ? nl->name : NULL;
     bool named = name != NULL && name->matched;
@@ -248,6 +296,9 @@ odin3_status odin3_netlist_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req
     odin3_hdl_restored done;
     odin3_status st = odin3_hdl_restore(e2->ctx, &restore, &done);
     *out = st == ODIN3_OK ? done.prov : base;
+    if (st == ODIN3_OK && took.v != 0) {
+        (void)first_time(e2, NL_TAKEN_TAG, took); /* the record took it: not stored as an attribute */
+    }
     return st;
 }
 
@@ -267,6 +318,12 @@ void odin3_netlist_assign_end(odin3_elab2 *e2) {
 }
 
 void odin3_netlist_finish(odin3_elab2 *e2) {
+    if (e2->nl_capped > 0) {
+        odin3_log(ODIN3_LOG_INFO,
+                  "read_verilog -netlist: %u `src` attribute(s) hold more than %u locations; the "
+                  "first %u of each were kept",
+                  e2->nl_capped, (unsigned)ODIN3_HDL_LOC_MAX, (unsigned)ODIN3_HDL_LOC_MAX);
+    }
     if (e2->nl_bad == 0) {
         return;
     }

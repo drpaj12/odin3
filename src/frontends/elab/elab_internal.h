@@ -216,6 +216,7 @@ struct odin3_elab2 {
     /* read_verilog -netlist (5.4c; netlist_locs.c) */
     const char *asg_loc;  /* the `// LOC` text of the CONT_ASSIGN being emitted; NULL: none */
     odin3_u64map *nl_raw; /* (module, strtab ID) of every raw declarator name, made on use */
+    uint32_t nl_capped;   /* `src` attributes holding more than 8 locations (INFO; X-3) */
     uint32_t nl_bad;      /* `src` attributes that are not locations (kept; L-6) */
     odin3_loc nl_bad_loc; /* the first of them */
     char nl_bad_text[ODIN3_NL_BAD_TEXT]; /* its text, cut */

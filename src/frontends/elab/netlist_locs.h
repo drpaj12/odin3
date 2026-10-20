@@ -34,10 +34,12 @@
  * line comment that starts at or after the item's end (a binary search of the file's comment
  * table) and on that line, whose text after `//` and blanks is exactly one LOC (L-1). *text views
  * the comment (valid while the parsed store lives). False for none, a block comment, a text that
- * is not one LOC, or an item whose end is unknown or inside a macro expansion.
+ * is not one LOC, an item whose end is unknown or inside a macro expansion, or an item that is not
+ * the last on its line before the comment (next, the item after it in the same body or 0, starts
+ * between them).
  */
 bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed, odin3_ast_id item,
-                                  odin3_bytes *text);
+                                  odin3_ast_id next, odin3_bytes *text);
 
 /* --- stage 2 -----------------------------------------------------------------------------------
  */

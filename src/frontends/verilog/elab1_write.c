@@ -75,6 +75,7 @@ typedef struct e1w {
     odin3_u64map *unnamed_ids; /* source block node -> its k (generate iterations share it) */
     odin3_u64map *locals;      /* names local to the enclosing blocks and subroutines -> depth */
     bool in_initial;           /* the statement being copied is an INITIAL's */
+    odin3_ast_id next_item;    /* the item after the one being written in its body (0: none) */
 } e1w;
 
 static bool live(const e1w *wr) {
@@ -390,12 +391,16 @@ static uint32_t w_unit_attrs(e1w *wr, const w_attrs_of *at, odin3_ast_id *ids) {
 static bool w_reserved_attr(e1w *wr, odin3_ast_id attr) {
     const char *name = odin3_elab1_str(wr->env->e1, odin3_ast_name(wr->ast, attr));
     static const char k_prefix[] = "odin3_lib";
-    if (strncmp(name, k_prefix, sizeof k_prefix - 1U) != 0) {
+    bool lib = strncmp(name, k_prefix, sizeof k_prefix - 1U) == 0;
+    /* under -netlist the key of an assign's `// LOC` is stage 1's own: a user attribute of that
+     * name would pick the location of a cell (5.4c review, agent default) */
+    bool key = wr->e1->opts.netlist && strcmp(name, ODIN3_NETLIST_ASSIGN_KEY) == 0;
+    if (!lib && !key) {
         return false;
     }
     char text[W_ATTR_MSG];
-    (void)snprintf(text, sizeof text, "attribute '%s' is reserved for library reads; ignored",
-                   name);
+    (void)snprintf(text, sizeof text, "attribute '%s' is reserved for %s; ignored", name,
+                   key ? "read_verilog -netlist" : "library reads");
     odin3_elab1_report(wr->env->e1, ODIN3_LOG_WARN, odin3_ast_loc(wr->ast, attr), text);
     return true;
 }
@@ -1192,7 +1197,7 @@ static odin3_ast_id w_cont_assign(e1w *wr, odin3_ast_id item) {
     odin3_ast_id id = w_make_plain(wr, &spec, mark, item);
     w_attrs_of at = {.from = item, .made = id};
     if (wr->e1->opts.netlist) {
-        (void)odin3_netlist_assign_comment(wr->e1->design, wr->ast, item, &at.loc_text);
+        (void)odin3_netlist_assign_comment(wr->e1->design, wr->ast, item, wr->next_item, &at.loc_text);
     }
     w_attach_attrs(wr, &at);
     return id;
@@ -2054,7 +2059,9 @@ static void w_body(e1w *wr, odin3_ast_id module) {
             w_open_block(wr, frame);
         } else if (now.next < now.end) {
             frame->next++;
-            w_item(wr, odin3_ast_children(wr->ast, now.node).ids[now.next]);
+            odin3_ast_span items = odin3_ast_children(wr->ast, now.node);
+            wr->next_item = now.next + 1U < now.end ? items.ids[now.next + 1U] : (odin3_ast_id){0};
+            w_item(wr, items.ids[now.next]);
         } else {
             odin3_vec_pop(&wr->walk);
             if (now.block) {
