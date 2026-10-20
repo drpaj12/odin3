@@ -548,13 +548,13 @@ static void test_file_printable_zero_is_none(void) {
 
 /* --- the text a writer prints ----------------------------------------------------------------- */
 
-static void src_text_of(const odin3_hdl_locs_out *locs, bool quote_free, const char *want,
+static void src_text_of(const odin3_hdl_locs_out *locs, bool plain_token, const char *want,
                         uint32_t want_n) {
     odin3_hdl_ctx *ctx = make_ctx();
     odin3_strbuf out;
     uint32_t written = 0;
     odin3_strbuf_init(&out);
-    odin3_hdl_print_req req = {locs, quote_free};
+    odin3_hdl_print_req req = {locs, plain_token};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hdl_src_text(ctx, &req, &out, &written));
     TEST_ASSERT_EQUAL_UINT(want_n, written);
     TEST_ASSERT_EQUAL_STRING(want, out.data != NULL ? out.data : "");

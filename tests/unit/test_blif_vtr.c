@@ -10,6 +10,7 @@
 #include "backends/blif/writer.h"
 #include "backends/prov_name.h"
 #include "blif_vtr_test.h"
+#include "frontends/blif/attrs.h"
 #include "frontends/blif/reader.h"
 #include "ir/celltype.h"
 #include "ir/check.h"
@@ -476,17 +477,20 @@ static void test_api_plain_rejects_vtr_options(void) {
     static const char *const want =
         "odin3_blif_write_with: lut_k and name_style apply to the VTR dialect only";
     expect_api_refused(
-        &(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_PROVENANCE, 0}, want);
+        &(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_PROVENANCE, 0, false},
+        want);
     expect_api_refused(
-        &(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 6}, want);
+        &(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 6, false}, want);
 }
 
 static void test_api_lut_k_range(void) {
     read_ok(TWO_MODELS, false);
-    expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 1},
-                       "odin3_blif_write_with: lut_k 1 is outside 2..16");
-    expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 17},
-                       "odin3_blif_write_with: lut_k 17 is outside 2..16");
+    expect_api_refused(
+        &(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 1, false},
+        "odin3_blif_write_with: lut_k 1 is outside 2..16");
+    expect_api_refused(
+        &(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 17, false},
+        "odin3_blif_write_with: lut_k 17 is outside 2..16");
 }
 
 /* NULL opts is odin3_blif_write, byte for byte. */
@@ -515,7 +519,7 @@ static void test_api_vtr_matches_pass(void) {
     odin3_strbuf_init(&api);
     read_ok(TWO_MODELS, false);
     path_in_dir("api.blif", path);
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 4};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 4, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_write_with(tc.design, path, &opts));
     slurp_into(path, &api);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "--vtr --lut-k 4 out.blif", &out));
@@ -536,7 +540,7 @@ static void test_e13_no_top(void) {
     expect_refused(
         (refusal){"--vtr out.blif",
                   "write_blif: --vtr: no top module (read_blif sets one; or run hierarchy)"});
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_blif_vtr_report report = {.errors = 7};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_blif_vtr_preflight(tc.design, &opts, &report));
@@ -567,7 +571,7 @@ static void test_e13_keeps_old_file(void) {
 
 static void test_preflight_report_and_k(void) {
     read_ok(TWO_MODELS, false);
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     TEST_ASSERT_EQUAL_UINT32(ODIN3_BLIF_VTR_DEFAULT_K, odin3_blif_vtr_k(&opts));
     odin3_blif_vtr_report report = {.errors = 7, .renamed = 3};
     odin3_strbuf_clear(&tc.log);
@@ -880,8 +884,15 @@ static odin3_net_id hand_net(odin3_module *module, const char *name) {
     return net;
 }
 
-/* A buffer `$sop` from in to `to`; its node. */
-static odin3_node_id hand_buffer(odin3_module *module, odin3_net_id in, odin3_net_id to) {
+/* What names and traces a hand-made cell. */
+typedef struct hand_origin {
+    const char *name; /* NULL: unnamed */
+    odin3_prov_id prov;
+} hand_origin;
+
+/* A buffer `$sop` from in to `to`, named and with provenance as origin says; its node. */
+static odin3_node_id hand_buffer_of(odin3_module *module, odin3_net_id in, odin3_net_id to,
+                                    hand_origin origin) {
     static const uint8_t rows[] = {'1', '1'};
     odin3_value params[2] = {odin3_value_int(1), {.kind = ODIN3_VAL_COVER}};
     params[1].bits = rows;
@@ -889,11 +900,20 @@ static odin3_node_id hand_buffer(odin3_module *module, odin3_net_id in, odin3_ne
     params[1].cover_inputs = 1;
     odin3_celltype_id sop = {0};
     TEST_ASSERT_TRUE(odin3_celltype_find(tc.design, intern("$sop"), &sop));
-    odin3_node_spec spec = {.type = sop, .params = params, .n_params = 2};
+    odin3_node_spec spec = {.type = sop,
+                            .name = origin.name != NULL ? intern(origin.name) : 0,
+                            .prov = origin.prov,
+                            .params = params,
+                            .n_params = 2};
     const odin3_netvec ports[] = {{&in, 1}, {&to, 1}};
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, &node));
     return node;
+}
+
+/* A buffer `$sop` from in to `to`; its node. */
+static odin3_node_id hand_buffer(odin3_module *module, odin3_net_id in, odin3_net_id to) {
+    return hand_buffer_of(module, in, to, (hand_origin){NULL, {0}});
 }
 
 /* The written file after the header and `.model top`, which it must start with. */
@@ -972,15 +992,15 @@ static void test_prov_names_unnamed_net(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, want), out.data);
 }
 
-/* A reader's record has a location but no hierarchy: `n@t.blif:4`, as the 1F Verilog writer
- * names it. */
+/* A reader's record is IMPORTED, a netlist line and not an HDL location: no net is named by it
+ * (spec 5.4 W-2; before 5.4 the nets were `n@t.blif:4`). */
 static void test_prov_names_read_blif(void) {
     read_ok(".model top\n.inputs a b\n.outputs y\n.names a b n\n11 1\n.names n b y\n1- 1\n.end\n",
             false);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "--vtr --name-style provenance out.blif", &out));
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names a b n@t.blif:4\n11 1\n"), out.data);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names n@t.blif:4 b y\n"), out.data);
-    TEST_ASSERT_NOT_NULL(strstr(out.data, ".inputs a b\n.outputs y\n"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(out.data, ".inputs a b\n.outputs y\n.names a b n\n11 1\n.names n b y\n"), out.data);
+    TEST_ASSERT_NULL(strstr(out.data, "@"));
 }
 
 /* VB-10 rule 1 on the path: a blank is %20. */
@@ -1213,7 +1233,7 @@ static void test_port_collision_refused(void) {
                                            "nets have the BLIF name 'a[1]'"),
                              tc.log.data);
     TEST_ASSERT_FALSE(bvt_file_exists(&tc, "out.blif"));
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_blif_vtr_report report = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_blif_vtr_preflight(tc.design, &opts, &report));
@@ -1325,7 +1345,7 @@ static void test_info_line(void) {
         tc.log.data);
     TEST_ASSERT_EQUAL_UINT32(1, count_of(tc.log.data, "legalised"));
     TEST_ASSERT_EQUAL_UINT32(0, count_of(tc.log.data, "write_blif: --vtr: port"));
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_blif_vtr_report report = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_preflight(tc.design, &opts, &report));
     TEST_ASSERT_EQUAL_UINT32(3, report.renamed);
@@ -1367,7 +1387,7 @@ static void expect_vtr_refused(const char *want) {
 
 /* odin3_blif_vtr_preflight (default K) is INVALID_ARG and logs exactly `error: <want>`. */
 static void expect_preflight_refused(const char *want) {
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_blif_vtr_report report = {0};
     char line[LINE_BUF * 2];
     TEST_ASSERT_TRUE(snprintf(line, sizeof line, "error: %s\n", want) < (int)sizeof line);
@@ -1460,7 +1480,7 @@ static void test_e1b_names(void) {
             ".subckt $_DFFE_PP0_ C=c D=d Q=q\n"
             ".end\n",
             false);
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_blif_vtr_report report = {0};
     odin3_strbuf_clear(&tc.log);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
@@ -1747,8 +1767,8 @@ static void test_e12_one_cell_twice(void) {
     const char *want =
         line_of("write_blif: --vtr: top: net 'n' has 2 drivers ('$c%u', '$c%u')", adder, adder);
     expect_preflight_refused(want);
-    expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0},
-                       want);
+    expect_api_refused(
+        &(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false}, want);
 }
 
 /* 21 `fe` latches: 20 E1 lines, then the count line; report.errors is exact. */
@@ -1768,7 +1788,7 @@ static void test_error_cap(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr(".end\n")));
     read_ok(text.data, false);
     odin3_strbuf_free(&text);
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_blif_vtr_report report = {0};
     odin3_strbuf_clear(&tc.log);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
@@ -1812,7 +1832,7 @@ static void test_naming_refusal_past_cap(void) {
     for (int i = 0; i < 20; i++) {
         (void)hand_cell(top, "$_DFF_N_", NULL, 0);
     }
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_blif_vtr_report report = {0};
     odin3_strbuf_clear(&tc.log);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
@@ -1893,7 +1913,7 @@ static void test_classes_by_pin_kind(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_UNDRIVEN,
                           odin3_blif_vtr_net_class(top, (odin3_net_id){0}));
     /* the plan keeps the classes that are not SIGNAL */
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_blif_vtr_report report = {0};
     odin3_blif_vtr_plan plan = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_plan_build(tc.design, &opts, &plan, &report));
@@ -1949,7 +1969,7 @@ static uint32_t lines_starting(const odin3_strbuf *buf, const char *word) {
  * counts are the written file's lines. */
 static void test_clean_report(void) {
     read_golden_with("adder_hard_block.parmys", true);
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_blif_vtr_report report = {.errors = 9};
     odin3_strbuf_clear(&tc.log);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_preflight(tc.design, &opts, &report));
@@ -1968,7 +1988,7 @@ static void test_clean_report(void) {
 /* odin3_blif_vtr_preflight under an allocation failure at every step: NO_MEMORY until it gives
  * want (leaks are LeakSanitizer's). */
 static void preflight_oom_sweep(odin3_status want) {
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_blif_vtr_report clean = {0};
     odin3_strbuf clean_log;
     odin3_strbuf_init(&clean_log);
@@ -2018,8 +2038,10 @@ static void test_help_string(void) {
     }
     TEST_ASSERT_NOT_NULL(def);
     TEST_ASSERT_EQUAL_STRING("write_blif [--vtr] [--lut-k K] [--name-style short|provenance] "
-                             "<file>: write the design as BLIF (the top first); --vtr writes the "
-                             "top alone in the dialect VPR reads",
+                             "[--src-attr] <file>: write the design as BLIF (the top first); --vtr "
+                             "writes the top alone in the dialect VPR reads; --src-attr (plain "
+                             "dialect only) writes each cell's HDL locations as `.attr src "
+                             "\"SRC\"`",
                              def->help);
 }
 
@@ -2030,8 +2052,9 @@ static void test_processes_refused_first(void) {
     (void)proc_fixture_design(tc.design);
     expect_refused(
         (refusal){"--vtr out.blif", "pass 'write_blif': module 'm' has processes; run proc first"});
-    expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 1},
-                       "module 'm' has processes; run proc first");
+    expect_api_refused(
+        &(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 1, false},
+        "module 'm' has processes; run proc first");
 }
 
 /* --- out of memory --------------------------------------------------------------------------- */
@@ -2053,7 +2076,7 @@ static void test_out_of_memory_sweep(void) {
     char path[PATH_BUF];
     read_ok(TWO_MODELS, false);
     path_in_dir("api.blif", path);
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 3};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 3, false};
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
         done = api_oom_step(fail_at, path, &opts);
@@ -2127,7 +2150,7 @@ static void test_out_of_memory_sweep_renames(void) {
     char path[PATH_BUF];
     three_illegal();
     path_in_dir("api.blif", path);
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
         done = api_oom_step(fail_at, path, &opts);
@@ -2197,7 +2220,7 @@ static void test_latch_init_map(void) {
 
 /* The VTR report of tc's design (preflight, default K), which must pass. */
 static odin3_blif_vtr_report vtr_report(void) {
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     odin3_blif_vtr_report report = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_preflight(tc.design, &opts, &report));
     return report;
@@ -2587,7 +2610,7 @@ static void test_out_of_memory_sweep_gates(void) {
     char path[PATH_BUF];
     read_ok(GATES, false);
     path_in_dir("api.blif", path);
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
         done = api_oom_step(fail_at, path, &opts);
@@ -2887,7 +2910,7 @@ static void test_out_of_memory_sweep_stubs(void) {
             ".model adder\n.inputs cin b a\n.outputs sumout cout\n.blackbox\n.end\n",
             true);
     path_in_dir("api.blif", path);
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
         done = api_oom_step(fail_at, path, &opts);
@@ -3098,7 +3121,7 @@ static void test_out_of_memory_sweep_lut(void) {
     char path[PATH_BUF];
     (void)hand_lut((lut_case){3, 0xE8});
     path_in_dir("api.blif", path);
-    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false};
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
         done = api_oom_step(fail_at, path, &opts);
@@ -3254,7 +3277,8 @@ static void test_prov_names_clock_net(void) {
     TEST_ASSERT_NULL(strstr(out.data, "|"));
 }
 
-/* A DERIVED record whose leaf has a hierarchy but no location: `hier/name`, no `@`. */
+/* A DERIVED record whose leaf has a hierarchy but no location has no HDL location (spec 5.4 W-2):
+ * the net keeps its short name (before 5.4 it was `hier/name`, no `@`). */
 static void test_prov_names_hier_only(void) {
     odin3_module *top = hand_top();
     odin3_pass_ctx ctx;
@@ -3266,7 +3290,8 @@ static void test_prov_names_hier_only(void) {
     odin3_prov_begin_op(&ctx);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){&leaf, 1}, &derived));
     write_prov_chain(top, prov_net(top, "n", derived));
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names a top/u1/n\n"), out.data);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names a n\n"), out.data);
+    TEST_ASSERT_NULL(strstr(out.data, "top/u1"));
 }
 
 /* An unnamed net with no provenance keeps what the short style gives, under the provenance style.
@@ -3295,6 +3320,164 @@ static void test_prov_names_read_back(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names a top/n@t.blif:7\n1 1\n"
                                                   ".names top/n@t.blif:7 y\n"),
                                  out.data);
+}
+
+/* --- 5.4a: write_blif --src-attr (spec 5.4 W-4, W-6; plain dialect) ----------------------------
+ */
+
+/* A SOURCE (imported: IMPORTED) record at file:line, columns 1 to 5, in a run of its own. */
+static odin3_prov_id hdl_prov(const char *file, uint32_t line, bool imported) {
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(tc.design, intern("probe"), &ctx));
+    odin3_srcloc loc = {
+        .file = intern(file), .line = line, .col = 1, .end_line = line, .end_col = 5};
+    odin3_prov_origin origin = {.locs = &loc, .n_locs = 1};
+    odin3_prov_id id = {0};
+    odin3_status st =
+        imported ? odin3_prov_imported(&ctx, &origin, &id) : odin3_prov_source(&ctx, &origin, &id);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    return id;
+}
+
+static odin3_prov_id hdl_derived(const odin3_prov_id *parents, uint32_t count) {
+    odin3_pass_ctx ctx;
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(tc.design, intern("derive"), &ctx));
+    odin3_prov_begin_op(&ctx);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_prov_derive(&ctx, (odin3_prov_list){parents, count}, &id));
+    return id;
+}
+
+static odin3_module *src_top;
+static odin3_net_id src_in, src_out;
+
+/* A fresh design: top with input a and output y (src_cell then adds the cell between them). */
+static void src_begin(void) {
+    src_top = hand_top();
+    src_in = hand_scalar(src_top, "a", ODIN3_DIR_IN);
+    src_out = hand_scalar(src_top, "y", ODIN3_DIR_OUT);
+}
+
+/* The buffer cell `g` a -> y with provenance prov; its node. */
+static odin3_node_id src_cell(odin3_prov_id prov) {
+    return hand_buffer_of(src_top, src_in, src_out, (hand_origin){"g", prov});
+}
+
+static void write_plain(const char *args) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, args, &out), tc.log.data);
+}
+
+/* W-6: `.attr src "SRC"` after `.cname`, Yosys's form with the end span. */
+static void test_src_attr_after_cname(void) {
+    src_begin();
+    (void)src_cell(hdl_prov("a.v", 3, false));
+    write_plain("--src-attr out.blif");
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(out.data, ".names a y\n1 1\n.cname g\n.attr src \"a.v:3.1-3.5\"\n.end\n"), out.data);
+}
+
+/* W-6: the option is off by default, and then the bytes are those of a design with no location. */
+static void test_src_attr_off_is_unchanged(void) {
+    src_begin();
+    (void)src_cell(hdl_prov("a.v", 3, false));
+    write_plain("out.blif");
+    TEST_ASSERT_NULL_MESSAGE(strstr(out.data, ".attr"), out.data);
+    char *plain = odin3_util_malloc(out.len + 1);
+    TEST_ASSERT_NOT_NULL(plain);
+    memcpy(plain, out.data, out.len + 1);
+    bvt_free(&tc);
+    src_begin();
+    (void)src_cell((odin3_prov_id){0});
+    write_plain("out.blif");
+    TEST_ASSERT_EQUAL_STRING(plain, out.data);
+    odin3_util_free(plain);
+}
+
+/* W-2, T-6: a cell whose only leaves are IMPORTED (a netlist line) gets no .attr. */
+static void test_src_attr_imported_writes_none(void) {
+    src_begin();
+    (void)src_cell(hdl_prov("d.blif", 3, true));
+    write_plain("--src-attr out.blif");
+    TEST_ASSERT_NULL_MESSAGE(strstr(out.data, ".attr"), out.data);
+    TEST_ASSERT_NULL(strstr(out.data, "d.blif"));
+}
+
+/* W-3: up to 8 locations, in parent order, `|` between them. */
+static void test_src_attr_many_locations(void) {
+    src_begin();
+    odin3_prov_id parents[3] = {hdl_prov("c.v", 3, false), hdl_prov("a.v", 1, false),
+                                hdl_prov("b.v", 2, true)};
+    (void)src_cell(hdl_derived(parents, 3));
+    write_plain("--src-attr out.blif");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".attr src \"c.v:3.1-3.5|a.v:1.1-1.5\"\n"),
+                                 out.data);
+    TEST_ASSERT_NULL(strstr(out.data, "b.v"));
+}
+
+/* A cell that already has a `src` of its own (a read `.attr src`) keeps it and gets no second. */
+static void test_src_attr_own_src_wins(void) {
+    src_begin();
+    odin3_node_id node = src_cell(hdl_prov("a.v", 3, false));
+    odin3_module *top = odin3_module_get(tc.design, odin3_design_top(tc.design));
+    odin3_value own = {.kind = ODIN3_VAL_STRING, .str = intern("\"mine.v:1\"")};
+    odin3_value extras = {.kind = ODIN3_VAL_STRING, .str = intern("blif.attr:src")};
+    odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(top, obj, intern("blif.attr:src"), &own));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_attr_set(top, obj, intern(ODIN3_BLIF_ATTR_EXTRAS), &extras));
+    write_plain("--src-attr out.blif");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".attr src \"mine.v:1\"\n"), out.data);
+    TEST_ASSERT_NULL(strstr(out.data, "a.v:3"));
+}
+
+/* W-5, X-4: a file name a BLIF token cannot carry is skipped, with one WARNING. */
+static void test_src_attr_unwritable_file(void) {
+    src_begin();
+    odin3_prov_id parents[2] = {hdl_prov("a\"b.v", 3, false), hdl_prov("ok.v", 4, false)};
+    (void)src_cell(hdl_derived(parents, 2));
+    write_plain("--src-attr out.blif");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".attr src \"ok.v:4.1-4.5\"\n"), out.data);
+    TEST_ASSERT_NULL(strstr(out.data, "a\"b"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data, "warn: write_blif: source file name 'a\"b.v'"),
+                                 tc.log.data);
+}
+
+/* The VTR dialect has no .attr lines: the pass and the API refuse the combination. */
+static void test_src_attr_refused_with_vtr(void) {
+    src_begin();
+    (void)src_cell(hdl_prov("a.v", 3, false));
+    expect_refused((refusal){"--vtr --src-attr out.blif",
+                             "write_blif: --src-attr is for the plain dialect; the VTR dialect has "
+                             "no .attr lines"});
+    expect_api_refused(
+        &(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, true},
+        "odin3_blif_write_with: src_attr applies to the PLAIN dialect only");
+}
+
+/* VTR provenance names: unchanged for a SOURCE design, short names for an IMPORTED-only one. */
+static void test_vtr_names_source_and_imported(void) {
+    odin3_module *top = hand_top();
+    odin3_net_id mid = prov_net(top, "n", hdl_prov("a.v", 7, false));
+    write_prov_chain(top, mid);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names a n@a.v:7\n"), out.data);
+    bvt_free(&tc);
+    top = hand_top();
+    write_prov_chain(top, prov_net(top, "n", hdl_prov("d.blif", 7, true)));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names a n\n"), out.data);
+    TEST_ASSERT_NULL(strstr(out.data, "@"));
+}
+
+/* 5.4a: write_blif --src-attr and the HDL-only provenance names. */
+static void run_src_attr(void) {
+    RUN_TEST(test_src_attr_after_cname);
+    RUN_TEST(test_src_attr_off_is_unchanged);
+    RUN_TEST(test_src_attr_imported_writes_none);
+    RUN_TEST(test_src_attr_many_locations);
+    RUN_TEST(test_src_attr_own_src_wins);
+    RUN_TEST(test_src_attr_unwritable_file);
+    RUN_TEST(test_src_attr_refused_with_vtr);
+    RUN_TEST(test_vtr_names_source_and_imported);
 }
 
 /* Tasks 1 and 2: options, arguments, the API, E13, names. */
@@ -3398,6 +3581,7 @@ static void run_task_3_and_more(void) {
 int main(void) {
     UNITY_BEGIN();
     run_tasks_1_2();
+    run_src_attr();
     run_task_3_and_more();
     run_task_4();
     run_task_5();

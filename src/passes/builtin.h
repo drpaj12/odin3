@@ -26,6 +26,8 @@ extern const odin3_pass_def odin3_pass_read_arch;
 extern const odin3_pass_def odin3_pass_write_techlib;
 extern const odin3_pass_def odin3_pass_read_project;
 extern const odin3_pass_def odin3_pass_dump_project;
+/* dump_locs.c (5.4): dump_locs. */
+extern const odin3_pass_def odin3_pass_dump_locs;
 extern const odin3_pass_def odin3_pass_preprocess;
 extern const odin3_pass_def odin3_pass_proc;
 /* src/passes/opt/register.c (2F Task 4): the eight opt passes. */

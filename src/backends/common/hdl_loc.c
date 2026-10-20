@@ -439,10 +439,14 @@ odin3_status odin3_hdl_locs(odin3_hdl_ctx *ctx, odin3_prov_id prov, odin3_hdl_lo
     return st != ODIN3_OK ? st : col.st;
 }
 
-odin3_status odin3_hdl_first(odin3_hdl_ctx *ctx, odin3_prov_id prov, odin3_srcloc *loc,
-                             bool *found) {
+const odin3_design *odin3_hdl_ctx_design(const odin3_hdl_ctx *ctx) {
+    return ctx->design;
+}
+
+odin3_status odin3_hdl_first_record(odin3_hdl_ctx *ctx, odin3_prov_id prov,
+                                    const odin3_prov_record **rec) {
     uint64_t leaf = 0;
-    *found = false;
+    *rec = NULL;
     if (odin3_prov_get(ctx->design, prov) == NULL) {
         return ODIN3_OK;
     }
@@ -458,12 +462,32 @@ odin3_status odin3_hdl_first(odin3_hdl_ctx *ctx, odin3_prov_id prov, odin3_srclo
             return ODIN3_ERR_NO_MEMORY;
         }
     }
-    const odin3_prov_record *rec = odin3_prov_get(ctx->design, (odin3_prov_id){(uint32_t)leaf});
-    if (leaf != 0 && rec != NULL) {
-        *loc = rec->locs[0];
-        *found = true;
-    }
+    *rec = leaf != 0 ? odin3_prov_get(ctx->design, (odin3_prov_id){(uint32_t)leaf}) : NULL;
     return ODIN3_OK;
+}
+
+odin3_status odin3_hdl_first(odin3_hdl_ctx *ctx, odin3_prov_id prov, odin3_srcloc *loc,
+                             bool *found) {
+    const odin3_prov_record *rec = NULL;
+    odin3_status st = odin3_hdl_first_record(ctx, prov, &rec);
+    *found = st == ODIN3_OK && rec != NULL;
+    if (*found) {
+        *loc = rec->locs[0];
+    }
+    return st;
+}
+
+/* True when text[0..len) has a blank at either end or two blanks in a row. */
+static bool odd_blanks(const char *text, size_t len) {
+    if (len > 0 && (text[0] == ' ' || text[len - 1] == ' ')) {
+        return true;
+    }
+    for (size_t i = 1; i < len; i++) {
+        if (text[i] == ' ' && text[i - 1] == ' ') {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* True when the file's bytes can be written in a src text of the target. */
@@ -472,9 +496,11 @@ static bool file_writable(odin3_hdl_ctx *ctx, const odin3_hdl_print_req *req, ui
     const odin3_strtab *tab = odin3_design_strtab(ctx->design);
     const char *text = odin3_strtab_get(tab, file);
     size_t len = odin3_strtab_len(tab, file);
-    bool bad =
-        memchr(text, '|', len) != NULL ||
-        (req->quote_free && (memchr(text, '"', len) != NULL || memchr(text, '\\', len) != NULL));
+    bool bad = memchr(text, '|', len) != NULL;
+    if (req->plain_token) {
+        bad = bad || memchr(text, '"', len) != NULL || memchr(text, '\\', len) != NULL ||
+              memchr(text, '#', len) != NULL || odd_blanks(text, len);
+    }
     if (bad) {
         odin3_status warned = warn_file(
             ctx, file, WHY_TEXT, "cannot be written in a src text; its locations are skipped");

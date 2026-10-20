@@ -124,22 +124,36 @@ typedef struct odin3_hdl_locs_out {
  */
 odin3_status odin3_hdl_locs(odin3_hdl_ctx *ctx, odin3_prov_id prov, odin3_hdl_locs_out *out);
 
+/* The design a context was made for. */
+const odin3_design *odin3_hdl_ctx_design(const odin3_hdl_ctx *ctx);
+
 /*
- * The first HDL location of prov, the one names and comments carry (W-3): locs[0] of
- * odin3_hdl_locs. *found is false for none. Cached per prov ID. NO_MEMORY or the walk's status.
+ * The record that names an object (W-2): the first SOURCE leaf of the backward walk, in parent
+ * order, whose first location has a printable file; *rec is NULL for none (no provenance, only
+ * IMPORTED leaves, only unwritable files). It belongs to the design. Cached per prov ID.
+ * NO_MEMORY or the walk's status; *rec is NULL then.
+ */
+odin3_status odin3_hdl_first_record(odin3_hdl_ctx *ctx, odin3_prov_id prov,
+                                    const odin3_prov_record **rec);
+
+/*
+ * The first HDL location of prov, the one names and comments carry (W-3): locs[0] of the record
+ * odin3_hdl_first_record gives. *found is false for none. NO_MEMORY or the walk's status.
  */
 odin3_status odin3_hdl_first(odin3_hdl_ctx *ctx, odin3_prov_id prov, odin3_srcloc *loc,
                              bool *found);
 
 /*
  * Appends the SRC text (W-4) of the locations in locs to out; the files are the design's strings.
- * Locations whose file holds `|` (or, when quote_free is true, `"` or `\`) are skipped, with one
- * WARNING per file (W-5); *n_written is the number printed. A text of none is left empty.
- * out is cleared first. NO_MEMORY.
+ * Locations whose file holds `|` are skipped, and so, when plain_token is true (the text goes into
+ * a BLIF line: `"`, `\` and `#` are not safe there, nor a leading, trailing or doubled blank, which
+ * the reader would trim or join), those whose file holds such a byte. Each file is warned about
+ * once (W-5); *n_written is the number printed. A text of none is left empty. out is cleared
+ * first. NO_MEMORY.
  */
 typedef struct odin3_hdl_print_req {
     const odin3_hdl_locs_out *locs;
-    bool quote_free; /* the target cannot escape `"` and `\` in a file name (BLIF) */
+    bool plain_token; /* the text is a BLIF token: see above */
 } odin3_hdl_print_req;
 odin3_status odin3_hdl_src_text(odin3_hdl_ctx *ctx, const odin3_hdl_print_req *req,
                                 odin3_strbuf *out, uint32_t *n_written);

@@ -1,0 +1,299 @@
+/*
+ * test_hdl_restore.c — unit tests for the reader's record of restored HDL locations (spec 5.4
+ * D-1, D-7), with the dump_locs pass that lists them.
+ */
+#include "backends/common/hdl_loc.h"
+#include "frontends/hdl_restore.h"
+#include "ir/check.h"
+#include "ir/design.h"
+#include "ir/module.h"
+#include "ir/prov.h"
+#include "passes/manager.h"
+#include "unity.h"
+#include "util/alloc.h"
+#include "util/log.h"
+#include "util/str.h"
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+enum { MANY = 12, TEXT_MAX = 4096, PATH_MAX_LEN = 128 };
+
+static odin3_design *design;
+static odin3_pass_ctx run;
+
+static uint32_t intern(const char *text) {
+    uint32_t str = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr(text), &str));
+    return str;
+}
+
+void setUp(void) {
+    odin3_log_set_level(ODIN3_LOG_ERROR);
+    design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("read_x"), &run));
+}
+
+void tearDown(void) {
+    odin3_util_set_alloc_fail_after(-1);
+    odin3_log_set_sink(NULL, NULL);
+    odin3_design_destroy(design);
+    design = NULL;
+}
+
+/* The reader's own record: IMPORTED at line 4 of a netlist. */
+static odin3_prov_id netlist_prov(void) {
+    odin3_srcloc loc = {intern("d.blif"), 4, 0, 0, 0, 0};
+    odin3_prov_origin origin = {&loc, 1, 0, 0};
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_imported(&run, &origin, &id));
+    return id;
+}
+
+static odin3_hdl_loc hdl_loc(const char *file, uint32_t line) {
+    return (odin3_hdl_loc){odin3_bytes_cstr(file), line, 1, line, 9};
+}
+
+static odin3_hdl_restored restore(const odin3_hdl_restore_req *req) {
+    odin3_hdl_restored out = {{0}, false};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hdl_restore(&run, req, &out));
+    return out;
+}
+
+/* D-1: DERIVED{parents = [SOURCE, base]}, the HDL first. */
+static void test_record_shape(void) {
+    odin3_prov_id base = netlist_prov();
+    odin3_hdl_loc loc = hdl_loc("a.v", 7);
+    odin3_prov_begin_op(&run);
+    odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){base, &loc, 1, intern("top/u1")});
+    const odin3_prov_record *rec = odin3_prov_get(design, got.prov);
+    TEST_ASSERT_NOT_NULL(rec);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
+    TEST_ASSERT_EQUAL_UINT(2, rec->parents.count);
+    const odin3_prov_record *first = odin3_prov_get(design, rec->parents.ids[0]);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_SOURCE, first->kind);
+    TEST_ASSERT_EQUAL_UINT(base.v, rec->parents.ids[1].v);
+    TEST_ASSERT_EQUAL_UINT(1, first->n_locs);
+    TEST_ASSERT_EQUAL_UINT(7, first->locs[0].line);
+    TEST_ASSERT_EQUAL_UINT(9, first->locs[0].end_col);
+    TEST_ASSERT_EQUAL_UINT(0, first->ast);
+    TEST_ASSERT_EQUAL_UINT(0, first->locs[0].loc);
+    TEST_ASSERT_FALSE(got.capped);
+}
+
+/* D-1: hier is on both records. */
+static void test_hier_on_both(void) {
+    odin3_hdl_loc loc = hdl_loc("a.v", 7);
+    uint32_t hier = intern("top/u1");
+    odin3_prov_begin_op(&run);
+    odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), &loc, 1, hier});
+    const odin3_prov_record *rec = odin3_prov_get(design, got.prov);
+    TEST_ASSERT_EQUAL_UINT(hier, rec->hier);
+    TEST_ASSERT_EQUAL_UINT(hier, odin3_prov_get(design, rec->parents.ids[0])->hier);
+}
+
+/* No netlist record (base 0): the SOURCE alone. */
+static void test_base_zero_is_source_alone(void) {
+    odin3_hdl_loc loc = hdl_loc("a.v", 7);
+    odin3_prov_begin_op(&run);
+    odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){{0}, &loc, 1, 0});
+    const odin3_prov_record *rec = odin3_prov_get(design, got.prov);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_SOURCE, rec->kind);
+}
+
+/* Hash-consing: equal restore calls are one record; another base or location is another. */
+static void test_equal_calls_one_record(void) {
+    odin3_prov_id base = netlist_prov();
+    odin3_hdl_loc loc = hdl_loc("a.v", 7);
+    odin3_hdl_loc other = hdl_loc("a.v", 8);
+    odin3_prov_begin_op(&run);
+    odin3_hdl_restore_req req = {base, &loc, 1, 0};
+    odin3_hdl_restored first = restore(&req);
+    odin3_hdl_restored second = restore(&req);
+    TEST_ASSERT_EQUAL_UINT(first.prov.v, second.prov.v);
+    odin3_hdl_restore_req other_req = {base, &other, 1, 0};
+    TEST_ASSERT_NOT_EQUAL_UINT(first.prov.v, restore(&other_req).prov.v);
+}
+
+/* The record names the object by its HDL leaf; odin3_hdl_locs returns what was restored. */
+static void test_hdl_view_of_restored(void) {
+    odin3_hdl_loc locs[2] = {hdl_loc("a.v", 3), hdl_loc("b.v", 5)};
+    odin3_prov_begin_op(&run);
+    odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), locs, 2, 0});
+    odin3_hdl_ctx *ctx = odin3_hdl_ctx_create(design, "test");
+    TEST_ASSERT_NOT_NULL(ctx);
+    odin3_hdl_locs_out out;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hdl_locs(ctx, got.prov, &out));
+    TEST_ASSERT_EQUAL_UINT(2, out.n);
+    TEST_ASSERT_EQUAL_UINT(3, out.locs[0].line);
+    TEST_ASSERT_EQUAL_UINT(5, out.locs[1].line);
+    TEST_ASSERT_EQUAL_UINT(1, out.locs[1].col);
+    TEST_ASSERT_EQUAL_UINT(9, out.locs[1].end_col);
+    const odin3_prov_record *named = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_hdl_first_record(ctx, got.prov, &named));
+    TEST_ASSERT_NOT_NULL(named);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_SOURCE, named->kind);
+    TEST_ASSERT_EQUAL_STRING("a.v",
+                             odin3_strtab_get(odin3_design_strtab(design), named->locs[0].file));
+    odin3_hdl_ctx_destroy(ctx);
+}
+
+/* D-7: more than 8 locations keep the first 8 and set the flag. */
+static void test_cap(void) {
+    odin3_hdl_loc locs[MANY];
+    for (uint32_t i = 0; i < MANY; i++) {
+        locs[i] = hdl_loc("a.v", i + 1);
+    }
+    odin3_prov_begin_op(&run);
+    odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), locs, MANY, 0});
+    TEST_ASSERT_TRUE(got.capped);
+    const odin3_prov_record *rec = odin3_prov_get(design, got.prov);
+    const odin3_prov_record *source = odin3_prov_get(design, rec->parents.ids[0]);
+    TEST_ASSERT_EQUAL_UINT(ODIN3_HDL_LOC_MAX, source->n_locs);
+    TEST_ASSERT_EQUAL_UINT(ODIN3_HDL_LOC_MAX, source->locs[ODIN3_HDL_LOC_MAX - 1].line);
+}
+
+static unsigned errors_seen;
+
+static void error_sink(odin3_log_level level, const char *msg, void *user) {
+    (void)msg;
+    (void)user;
+    if (level == ODIN3_LOG_ERROR) {
+        errors_seen++;
+    }
+}
+
+/* No operation begun, no locations, a bad base, a NULL argument: INVALID_ARG, logged. */
+static void test_invalid_arguments(void) {
+    odin3_hdl_loc loc = hdl_loc("a.v", 7);
+    odin3_hdl_restored out = {{0}, false};
+    odin3_hdl_restore_req req = {{0}, &loc, 1, 0};
+    errors_seen = 0;
+    odin3_log_set_sink(error_sink, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hdl_restore(&run, &req, &out)); /* op 0 */
+    odin3_prov_begin_op(&run);
+    req.n = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hdl_restore(&run, &req, &out));
+    req.n = 1;
+    req.base = (odin3_prov_id){99999};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hdl_restore(&run, &req, &out));
+    req.base = (odin3_prov_id){0};
+    req.hier_str = 99999;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hdl_restore(&run, &req, &out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hdl_restore(NULL, &req, &out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hdl_restore(&run, NULL, &out));
+    TEST_ASSERT_TRUE(errors_seen >= 4);
+}
+
+/* A design whose objects carry such records passes the full check, and the forward index finds
+ * the object from the HDL file and line. */
+static void test_check_and_forward_index(void) {
+    odin3_hdl_loc loc = hdl_loc("a.v", 7);
+    odin3_prov_begin_op(&run);
+    odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), &loc, 1, 0});
+    odin3_module_id mid = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("top"), got.prov, &mid));
+    odin3_module *mod = odin3_module_get(design, mid);
+    odin3_net_id net = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(mod, intern("n"), got.prov, &net));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
+    odin3_prov_index *index = odin3_prov_index_build(design);
+    TEST_ASSERT_NOT_NULL(index);
+    odin3_srcloc where = {intern("a.v"), 7, 0, 0, 0, 0};
+    odin3_prov_hits hits = odin3_prov_index_by_loc(index, where);
+    bool found_net = false;
+    for (uint32_t i = 0; i < hits.count; i++) {
+        found_net =
+            found_net || (hits.hits[i].obj.kind == ODIN3_OBJ_NET && hits.hits[i].obj.id == net.v);
+    }
+    TEST_ASSERT_TRUE(found_net);
+    odin3_srcloc elsewhere = {intern("d.blif"), 4, 0, 0, 0, 0};
+    TEST_ASSERT_TRUE(odin3_prov_index_by_loc(index, elsewhere).count >
+                     0); /* the netlist line stays reachable */
+    odin3_prov_index_destroy(index);
+}
+
+/* --- dump_locs ------------------------------------------------------------------------------- */
+
+static char *read_whole(const char *path) {
+    FILE *file = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL(file);
+    char *text = odin3_util_calloc(TEXT_MAX);
+    TEST_ASSERT_NOT_NULL(text);
+    size_t len = fread(text, 1, TEXT_MAX - 1, file);
+    TEST_ASSERT_TRUE(len < TEXT_MAX - 1);
+    (void)fclose(file);
+    return text;
+}
+
+/* A design with a located module and net, an unlocated net, and the dump_locs output of it. */
+static char *dump_of_located_design(unsigned *bare_id) {
+    odin3_hdl_loc loc = hdl_loc("a.v", 7);
+    odin3_prov_begin_op(&run);
+    odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), &loc, 1, 0});
+    odin3_module_id mid = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("top"), got.prov, &mid));
+    odin3_module *mod = odin3_module_get(design, mid);
+    odin3_net_id located = {0};
+    odin3_net_id bare = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(mod, intern("n"), got.prov, &located));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(mod, 0, netlist_prov(), &bare));
+    *bare_id = (unsigned)bare.v;
+    char dir[] = "/tmp/odin3_dumplocs_XXXXXX";
+    char path[PATH_MAX_LEN];
+    TEST_ASSERT_NOT_NULL(mkdtemp(dir));
+    (void)snprintf(path, sizeof path, "%s/locs.txt", dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "dump_locs", odin3_bytes_cstr(path)));
+    char *text = read_whole(path);
+    (void)remove(path);
+    (void)rmdir(dir);
+    return text;
+}
+
+static void expect_line(const char *text, const char *want) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, want), text);
+}
+
+/* The pass lists module, wire, net and node lines, SRC empty for an object with no HDL location,
+ * and a restored object shows what was restored (never the netlist line). */
+static void test_dump_locs_lines(void) {
+    unsigned bare = 0;
+    char *text = dump_of_located_design(&bare);
+    char want_bare[64];
+    (void)snprintf(want_bare, sizeof want_bare, "top|net|$n%u|\n", bare);
+    expect_line(text, "top|module|top|a.v:7.1-7.9\n");
+    expect_line(text, "top|net|n|a.v:7.1-7.9\n");
+    expect_line(text, want_bare);
+    TEST_ASSERT_NULL(strstr(text, "d.blif"));
+    odin3_util_free(text);
+}
+
+static void test_dump_locs_arguments(void) {
+    errors_seen = 0;
+    odin3_log_set_sink(error_sink, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_pass_run(design, "dump_locs", odin3_bytes_cstr("a b")));
+    TEST_ASSERT_TRUE(errors_seen > 0);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    RUN_TEST(test_record_shape);
+    RUN_TEST(test_hier_on_both);
+    RUN_TEST(test_base_zero_is_source_alone);
+    RUN_TEST(test_equal_calls_one_record);
+    RUN_TEST(test_hdl_view_of_restored);
+    RUN_TEST(test_cap);
+    RUN_TEST(test_invalid_arguments);
+    RUN_TEST(test_check_and_forward_index);
+    RUN_TEST(test_dump_locs_lines);
+    RUN_TEST(test_dump_locs_arguments);
+    return UNITY_END();
+}

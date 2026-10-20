@@ -88,6 +88,7 @@ add_library(odin3_core OBJECT
     src/passes/write_formats.c
     src/passes/sim_pass.c
     src/passes/project_pass.c
+    src/passes/dump_locs.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
@@ -371,6 +372,7 @@ add_library(odin3_core OBJECT
     src/backends/json/writer.c
     src/backends/prov_name.c
     src/backends/common/hdl_loc.c
+    src/frontends/hdl_restore.c
     src/backends/verilog/escape.c
     src/backends/verilog/writer.c
     src/backends/rtlil/writer.c)
@@ -1398,6 +1400,7 @@ if(BUILD_TESTING)
     target_compile_definitions(test_sim_word PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     odin3_add_unit_test(test_dot_writer)
     odin3_add_unit_test(test_hdl_loc)
+    odin3_add_unit_test(test_hdl_restore)
     odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)
     # 2E Task 1: test_verilog_writer also writes rtlil/ffcells.v (IR change D's eleven cells),
