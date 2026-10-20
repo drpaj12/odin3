@@ -169,6 +169,14 @@ DESIGN §12.1.
    `partial-map-check/identity` with `hardmap-diff` kept for the alias, 17 K from the record for
    `abc` and `write_blif` in a small 4.13 PR, 18 goldens for the new archs are a controller step)
    take the spec's recommendations.
+14. **Read-enable RAMs and big soft memories** (Peter, 2026-10-20): read-enable RAMs map hard with
+   exact soft emulation; soft-memory warning above 50k FFs; ABC time cap deferred. A `$mem` read
+   port whose enable is not constant 1 no longer stays soft (`MEM_SOFT_EN` is gone): the RAM reads
+   every cycle, the enable goes through a flip-flop, and a hold register and a `$mux` per data bit
+   keep the output while the enable is 0 (Yosys `Mem::emulate_rden`, as called by `memory_libmap`
+   `emu_en`). One located WARNING per such memory port. A memory left soft whose width x depth is
+   above 50,000 bits draws a located WARNING that names it, its bits and why it stayed soft (a
+   warning only). 4.2 plan PR D, Tasks 11 and 12.
 
 ## Open items
 

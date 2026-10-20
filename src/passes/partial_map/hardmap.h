@@ -12,6 +12,7 @@
 #include "odin3/odin3.h"
 #include "passes/manager.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /* What a run did, for the INFO line of H-10. */
@@ -45,6 +46,16 @@ typedef struct odin3_hardmap_stats {
  */
 odin3_status odin3_partial_map_run(odin3_pass_ctx *ctx, odin3_design *design,
                                    odin3_hardmap_stats *stats);
+
+/* The options of the pass (4.2 spec S-5): every one is off unless given. */
+typedef struct pm_options {
+    bool mem_width_arch; /* `--mem-width arch`: slice memories to the arch's widest mode (R-4) */
+} pm_options;
+
+/* odin3_partial_map_run with options (NULL: all off). `--mem-width arch` on a design without an
+ * arch record, or whose record has no RAM modes, is a WARNING and changes nothing. */
+odin3_status odin3_partial_map_run_opts(odin3_pass_ctx *ctx, odin3_design *design,
+                                        const pm_options *opts, odin3_hardmap_stats *stats);
 
 /* The 3C name of odin3_partial_map_run (4.2 S-1), kept for the existing tests. */
 odin3_status odin3_hardmap_run(odin3_pass_ctx *ctx, odin3_design *design,

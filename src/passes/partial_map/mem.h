@@ -51,6 +51,7 @@ typedef struct mem_rport {
     bool transparent; /* RD_TRANSPARENT */
     bool en_pos;      /* the enable is active high */
     bool en_always;   /* no enable (a merged `$dff`): reads every cycle */
+    bool emu_en;      /* a read enable that is not constant active: emulated in logic (R-10) */
     bool addr_merged; /* R-8 address merge: addr[] are the flip-flops' D nets */
     odin3_net_id clk;
     odin3_net_id en;
@@ -73,7 +74,6 @@ typedef enum mem_verdict {
     MEM_SOFT_OFFSET,  /* OFFSET != 0 (plan agent default e, D13) */
     MEM_SOFT_ASYNC,   /* R-9: an asynchronous read port, or more than one clock domain */
     MEM_SOFT_EDGE,    /* a port on the falling edge (agent default f, D14) */
-    MEM_SOFT_EN,      /* a read enable that is not constant 1 (R-10, D9) */
     MEM_SOFT_PATTERN, /* R-11: no fixed-subset mapping */
 } mem_verdict;
 
@@ -100,6 +100,13 @@ typedef struct mem_model {
     odin3_vec dead; /* odin3_node_id: the flip-flops R-8 makes redundant */
     odin3_vec rams; /* mem_ram: the plan (mem_classify) */
 } mem_model;
+
+/* More flip-flops than this in a memory left soft draw a located WARNING (Peter 2026-10-20). */
+enum { PM_SOFT_FF_WARN = 50000 };
+
+/* The WARNING for the `$mem` node (current module) when its bits (SIZE x WIDTH) are above
+ * PM_SOFT_FF_WARN: it names the memory, its bits and `reason` it stays soft. Never an error. */
+void pm_mem_warn_big(const hm_ctx *hc, odin3_node_id node, const char *reason);
 
 /* A pin of a node: pin port (the cell type's port index) and the pin's index in it. */
 typedef struct mem_pin {

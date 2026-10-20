@@ -543,7 +543,7 @@ static void expect_soft(pb_result *res, const char *warning) {
 #define W_ASYNC                                                                                    \
     "partial_map: memory 'mem' has an asynchronous read port; left to lower as flip-flops"
 #define W_EDGE "partial_map: memory 'mem' has a port on the falling clock edge; left to lower"
-#define W_EN "partial_map: memory 'mem' has a read enable that is not constant 1; left to lower"
+#define W_EN "read port 0 has an enable that is not constant 1; the RAM has none, so the enable is"
 
 typedef struct shape {
     uint32_t abits;
@@ -603,12 +603,13 @@ static void test_r8_data_merge_dffe(void) {
     TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$dffe"));
     TEST_ASSERT_EQUAL_UINT32(3, hm_count(res.module, "dual_port_ram"));
     pb_free(&res);
-    /* a variable enable becomes RD_EN, which has no pin: soft, the original flip-flop stays */
+    /* a variable enable becomes RD_EN, which has no pin: emulated in logic (R-10), warned */
     mc.rd[0].mode = R_DFFE_VAR;
     build_mem(mc, &res);
-    expect_soft(&res, W_EN);
-    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$dffe"));
-    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$mem"));
+    TEST_ASSERT_TRUE(mapped(&res, &stats));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, W_EN));
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$dffe"));
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$mem"));
     pb_free(&res);
 }
 
@@ -674,28 +675,29 @@ static void test_r8_addr_merge_shared_q_stays(void) {
     pb_free(&res);
 }
 
-/* Review M-3: a `$dffe` with EN_POLARITY 0. The constant 0 is the active level (merges), the
- * constant 1 never enables (the read enable is not constant active: soft). */
-static void test_r8_dffe_active_low(void) {
-    memcase mc = base((shape){4, 3, 1, 1});
+/* Maps mc and asserts the `$mem` and its `$dffe` are gone; the enable warning is there or not. */
+static void expect_mapped(memcase mc, bool warned) {
     pb_result res;
     odin3_hardmap_stats stats;
-    mc.rd[0].mode = R_DFFE_ONE;
-    mc.rd[0].en_neg = true;
+    log_text[0] = '\0';
     build_mem(mc, &res);
     TEST_ASSERT_TRUE(mapped(&res, &stats));
     TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$dffe"));
+    TEST_ASSERT_EQUAL_INT(warned, strstr(log_text, W_EN) != NULL);
     pb_free(&res);
+}
+
+/* Review M-3: a `$dffe` with EN_POLARITY 0. The constant 0 is the active level (merges without
+ * logic), the constant 1 never enables (not constant active: emulated, so the output holds). */
+static void test_r8_dffe_active_low(void) {
+    memcase mc = base((shape){4, 3, 1, 1});
+    mc.rd[0].mode = R_DFFE_ONE;
+    mc.rd[0].en_neg = true;
+    expect_mapped(mc, false);
     mc.rd[0].en_off = true;
-    build_mem(mc, &res);
-    expect_soft(&res, W_EN);
-    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$dffe"));
-    pb_free(&res);
-    log_text[0] = '\0';
+    expect_mapped(mc, true);
     mc.rd[0].en_neg = false; /* the positive twin: the constant 0 never enables */
-    build_mem(mc, &res);
-    expect_soft(&res, W_EN);
-    pb_free(&res);
+    expect_mapped(mc, true);
 }
 
 static void test_r8_mixed_clocks_no_merge(void) {
@@ -951,8 +953,13 @@ static void test_p_rd_en_nonconst(void) {
     mc.rd[0].mode = R_SYNC;
     mc.rd[0].en_var = true;
     pb_result res;
+    odin3_hardmap_stats stats;
     build_mem(mc, &res);
-    expect_soft(&res, W_EN);
+    TEST_ASSERT_TRUE(mapped(&res, &stats)); /* emulated in logic (R-10), one warning */
+    TEST_ASSERT_EQUAL_UINT64(0, stats.soft);
+    const char *at = strstr(log_text, W_EN);
+    TEST_ASSERT_NOT_NULL(at);
+    TEST_ASSERT_NULL(strstr(at + 1, W_EN));
     pb_free(&res);
 }
 

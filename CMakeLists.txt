@@ -865,6 +865,16 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_pm_ramstyle PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_mem_arch
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_mem_arch $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_mem_arch PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_mem_rden
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_mem_rden $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_mem_rden PROPERTIES LABELS unit)
     # 4.2 Task 3: pm_rules (k6 values, absent models, no 3C number outside rules.c).
     odin3_add_unit_test(test_pm_rules)
     target_sources(test_pm_rules PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
@@ -905,6 +915,17 @@ if(BUILD_TESTING)
     target_compile_definitions(test_pm_ramstyle PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 4.4 (plan Tasks 9 and 10): memories from the arch record (depth limit, absent models) and
+    # `--mem-width arch`, on RTLIL built over the library and record of a small arch XML.
+    foreach(_pm_mem IN ITEMS test_pm_mem_arch test_pm_mem_width)
+        odin3_add_unit_test(${_pm_mem})
+        target_sources(${_pm_mem} PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c
+            tests/unit/hardmap_ramsim.c tests/unit/pm_mem_fixture.c)
+        target_compile_definitions(${_pm_mem} PRIVATE
+            ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+            ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    endforeach()
     # 3C Task 4 (spec 9.3): the arithmetic and memory micros through the Phase 3 script up to
     # `lower`, against the Parmys goldens (tools/hardmap-check/hardmap-diff). Exit 77 (skipped)
     # when the golden tree is absent (CI). Its Python tests run in python_tools.

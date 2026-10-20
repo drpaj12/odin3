@@ -38,6 +38,8 @@
 # memory_merge (4.7 G-1: the registered-read RAM micro through memory_merge has the read register merged into the `$mem`; with partial_map after it the BLIF equals partial_map alone).
 # memory_merge_soft (4.7, review M-1: memories partial_map leaves soft, chained after memory_merge, are equivalent to partial_map alone: equiv-check on the BLIFs for a variable read enable and OFFSET != 0, sim vectors for a falling-edge read, the same lower error for write ports on two clocks).
 # pm_ramstyle (4.7 G-3: a ram_style attribute gives one warning and the same BLIF as without it).
+# pm_mem_rden (4.4 R-10: a read port with an enable that is not constant 1 maps to the RAM with the enable emulated in logic and one located warning per memory; equiv-check proves the BLIF equal to the same design with the RAM block and the emulation written out by hand, and a changed reference is not equivalent).
+# pm_mem_arch (4.4: the RAM depth limit comes from the arch record, an arch without RAM leaves the memory to lower, and `partial_map --mem-width arch` slices to the arch's widest mode with one warning).
 # The project cases run from the project's directory (tests/cli/project), so the paths given are
 # relative.
 set -euo pipefail
@@ -794,7 +796,8 @@ memory_merge_soft)
             fail "$micro: partial_map alone failed"
         "$odin3" -p "$pre; memory_merge; partial_map; $tail; write_blif --vtr $work/b.blif" >"$work/out" 2>"$work/err" ||
             fail "$micro: memory_merge; partial_map failed"
-        "$equiv" "$work/a.blif" "$work/b.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent"
+        # mem_dffe_var maps hard since the read enable is emulated (R-10): its RAM blocks are unnamed
+        "$equiv" --match-unnamed "$work/a.blif" "$work/b.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent"
     done
     pre="read_techlib $lib; read_verilog --vtr-compat $mm/mem_negedge.v; proc; opt"
     "$odin3" -p "$pre; partial_map; $tail; sim 3000 7 $work/a.vec" >"$work/out" 2>"$work/err" ||
@@ -826,6 +829,59 @@ pm_ramstyle)
     [[ $(grep -c "is ignored" "$work/err") -eq 1 ]] || fail "not exactly one warning"
     diff <(sed 's/mem_ramstyle/mem_regread/g' "$work/mem_ramstyle.blif" | grep -v '^#') \
         <(grep -v '^#' "$work/mem_regread.blif") >/dev/null || fail "the ram_style BLIF differs"
+    ;;
+pm_mem_rden)
+    mm=$fixtures/../../micro_pm
+    lib=$fixtures/../../../lib/vtr.o3lib
+    equiv=$(dirname "$compare")/../equiv-check/equiv-check
+    flow="partial_map; opt -full -ffbits; lower; opt -fast; compact"
+    run_one() { # run_one <verilog> <blif>
+        "$odin3" -p "read_techlib $lib; read_verilog --vtr-compat $1; proc; opt; $flow; write_blif --vtr $2" \
+            >"$work/out" 2>"$work/err" || fail "odin3 failed on $1"
+    }
+    for micro in mem_rden mem_rden_dp; do
+        run_one "$mm/$micro.v" "$work/$micro.blif"
+        [[ $(grep -c "has an enable that is not constant 1" "$work/err") -eq 1 ]] || fail "$micro: not exactly one enable warning"
+        grep -q "$micro.v:[0-9]*:[0-9]*: warning: partial_map: memory" "$work/err" || fail "$micro: the warning is not located"
+        run_one "$mm/${micro}_ref.v" "$work/${micro}_ref.blif"
+        "$equiv" --match-unnamed "$work/$micro.blif" "$work/${micro}_ref.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent to the reference"
+    done
+    # the three common micros whose read ports have an enable (they change against 3C: rom, bram, nr)
+    for micro in rom bram nr; do
+        run_one "$fixtures/../../micro/verilog/common/$micro.v" "$work/$micro.blif"
+        run_one "$mm/${micro}_ref.v" "$work/${micro}_ref.blif"
+        "$equiv" --match-unnamed "$work/$micro.blif" "$work/${micro}_ref.blif" >"$work/out" 2>"$work/err" || fail "$micro: not equivalent to the reference"
+    done
+    # the check is not vacuous: without the hold the reference differs
+    sed 's/assign out = en_r ? ram_out : hold;/assign out = ram_out;/' "$mm/mem_rden_ref.v" >"$work/bad.v"
+    run_one "$work/bad.v" "$work/bad.blif"
+    if "$equiv" --match-unnamed "$work/mem_rden.blif" "$work/bad.blif" >"$work/out" 2>"$work/err"; then fail "a reference without the hold is equivalent"; fi
+    ;;
+pm_mem_arch)
+    # cli_pm_mem_arch (4.4 R-1, R-2, R-4, S-3): on the COFFE-like fixture (D = 11) a 13-bit RAM is 4
+    # blocks, a 9-bit one is padded; with no RAM model `lower` still writes a BLIF; with
+    # `--mem-width arch` the 16 x 8 memory is one block of 8 bits, with one warning.
+    mm=$fixtures/../../micro_pm
+    arch=$fixtures/../../unit/data/arch
+    pm_run() { # pm_run <arch> <micro> <partial_map args> -> $work/<micro>.blif
+        "$odin3" -p "read_arch $1; read_verilog --vtr-compat $mm/$2.v; proc; opt; partial_map $3; opt -full -ffbits; lower; opt -fast; compact; write_blif --vtr $work/$2.blif" \
+            >"$work/out" 2>"$work/err" || fail "odin3 failed on $2.v"
+    }
+    for case in ram_a13_sp:single_port_ram:4 ram_a13_dp:dual_port_ram:4 ram_a9:single_port_ram:1; do
+        IFS=: read -r micro type want <<<"$case"
+        pm_run "$arch/ram_d11.xml" "$micro" ""
+        got=$(grep -c "^\.subckt $type" "$work/$micro.blif" || true)
+        [[ $got -eq $want ]] || fail "$micro: $got $type blocks, want $want"
+    done
+    pm_run "$arch/acc_none.xml" mem_regread ""
+    grep -qF "has no 'single_port_ram' model; 1 '\$mem' cells left to lower" "$work/err" || fail "no S-3 INFO"
+    [[ -s $work/mem_regread.blif ]] || fail "no BLIF for the arch without RAM"
+    if grep -q "^\.subckt \(single\|dual\)_port_ram" "$work/mem_regread.blif"; then fail "RAM block in an arch without RAM"; fi
+    pm_run "$arch/ram_d11.xml" mem_regread "--mem-width arch"
+    [[ $(grep -c "^\.subckt [a-z]*_port_ram" "$work/mem_regread.blif") -eq 1 ]] || fail "not one block with --mem-width arch"
+    [[ $(grep -c "memories are sliced to the arch's widest mode" "$work/err") -eq 1 ]] || fail "not exactly one slice warning"
+    pm_run "$arch/ram_d11.xml" mem_regread ""
+    [[ $(grep -c "^\.subckt [a-z]*_port_ram" "$work/mem_regread.blif") -eq 8 ]] || fail "default is not 8 one-bit blocks"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

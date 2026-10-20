@@ -80,6 +80,7 @@ static void ctx_init(ram_ctx *rc, hm_ctx *hc, odin3_node_id src, odin3_vec *ties
     for (uint32_t rwp = 0; rwp < RAM_MAX_PORTS; rwp++) {
         odin3_vec_init(&rc->port[rwp].we, sizeof(odin3_net_id));
         odin3_vec_init(&rc->port[rwp].out, sizeof(odin3_net_id));
+        odin3_vec_init(&rc->port[rwp].chunk, sizeof(odin3_net_id));
         rc->read[rwp] = true;
     }
     rc->hc = hc;
@@ -92,6 +93,7 @@ static void ctx_init(ram_ctx *rc, hm_ctx *hc, odin3_node_id src, odin3_vec *ties
     rc->addr_bits = pin_count(hc, src, rc->lay->addr[0]);
     rc->data_bits = pin_count(hc, src, rc->lay->data[0]);
     rc->levels = levels_of(hc, rc->addr_bits);
+    rc->shape = pm_ram_shape_of(&hc->rules, rc->lay->kind == HM_DP_RAM, rc->addr_bits);
 }
 
 /* The context of a described RAM (no instance behind it). */
@@ -102,6 +104,7 @@ static void ctx_init_desc(ram_ctx *rc, hm_ctx *hc, const hm_ram_desc *desc, odin
     rc->addr_bits = desc->addr_bits;
     rc->data_bits = desc->data_bits;
     rc->levels = levels_of(hc, rc->addr_bits);
+    rc->shape = pm_ram_shape_of(&hc->rules, desc->kind == HM_DP_RAM, rc->addr_bits);
     for (uint32_t rwp = 0; rwp < RAM_MAX_PORTS; rwp++) {
         rc->read[rwp] = desc->read[rwp];
     }
@@ -111,13 +114,15 @@ static void ctx_free(ram_ctx *rc) {
     for (uint32_t rwp = 0; rwp < RAM_MAX_PORTS; rwp++) {
         odin3_vec_free(&rc->port[rwp].we);
         odin3_vec_free(&rc->port[rwp].out);
+        odin3_vec_free(&rc->port[rwp].chunk);
     }
 }
 
-/* R-4: the address pins of every slice of port rwp: addr[k .. A-1], then the pad up to D. */
+/* R-5: the address pins of every slice of port rwp: addr[k .. A-1], then the pad up to the
+ * block's ADDR_WIDTH (D by default). */
 static odin3_status setup_addr(ram_ctx *rc, uint32_t rwp) {
     odin3_status st = ODIN3_OK;
-    for (uint32_t i = 0; st == ODIN3_OK && i < rc->hc->rules.mem_depth; i++) {
+    for (uint32_t i = 0; st == ODIN3_OK && i < rc->shape.addr; i++) {
         uint32_t bit = rc->levels + i;
         if (bit < rc->addr_bits) {
             rc->port[rwp].addr[i] = ram_src_net(rc, (ram_pin){rc->lay->addr[rwp], bit});
@@ -128,61 +133,79 @@ static odin3_status setup_addr(ram_ctx *rc, uint32_t rwp) {
     return st;
 }
 
-/* R-3: the slice of data bit `bit` in leaf `leaf`; its outputs are appended to each port's out. */
-static odin3_status make_slice(ram_ctx *rc, ram_at at) {
+/* R-3: the RAM of the chunk `ck` of data bits in leaf `leaf`; its n outputs are appended to the
+ * chunk list of each read port. */
+static odin3_status make_slice(ram_ctx *rc, uint32_t leaf, ram_chunk ck) {
     const ram_layout *lay = rc->lay;
-    uint32_t leaf = at.leaf;
-    uint32_t bit = at.bit;
     odin3_net_id clk = ram_src_net(rc, (ram_pin){lay->clk, 0});
-    odin3_net_id data[RAM_MAX_PORTS] = {{0}, {0}};
-    odin3_net_id fresh[RAM_MAX_PORTS] = {{0}, {0}};
+    odin3_net_id data[RAM_MAX_PORTS][PM_RAM_WIDTH_CAP];
+    odin3_net_id fresh[RAM_MAX_PORTS][PM_RAM_WIDTH_CAP];
     odin3_netvec ports[RAM_MAX_PINS];
+    memset(fresh, 0, sizeof fresh); /* a port nobody reads keeps its output open */
     odin3_status st = ODIN3_OK;
     for (uint32_t rwp = 0; st == ODIN3_OK && rwp < lay->n_ports; rwp++) {
-        st = rc->read[rwp] ? hm_fresh_nets(rc->hc, 1, &fresh[rwp]) : st;
+        st = rc->read[rwp] ? hm_fresh_nets(rc->hc, ck.n, fresh[rwp]) : st;
     }
     if (st != ODIN3_OK) {
         return st;
     }
     ports[lay->clk] = (odin3_netvec){&clk, 1};
     for (uint32_t rwp = 0; rwp < lay->n_ports; rwp++) {
-        data[rwp] = ram_src_net(rc, (ram_pin){lay->data[rwp], bit});
-        ports[lay->data[rwp]] = (odin3_netvec){&data[rwp], 1};
-        ports[lay->addr[rwp]] = (odin3_netvec){rc->port[rwp].addr, rc->hc->rules.mem_depth};
+        for (uint32_t j = 0; j < ck.n; j++) {
+            data[rwp][j] = ram_src_net(rc, (ram_pin){lay->data[rwp], ck.first + j});
+        }
+        ports[lay->data[rwp]] = (odin3_netvec){data[rwp], ck.n};
+        ports[lay->addr[rwp]] = (odin3_netvec){rc->port[rwp].addr, rc->shape.addr};
         ports[lay->we[rwp]] = (odin3_netvec){odin3_vec_cat(&rc->port[rwp].we, leaf), 1};
-        ports[lay->out[rwp]] = (odin3_netvec){&fresh[rwp], 1};
+        ports[lay->out[rwp]] = (odin3_netvec){fresh[rwp], ck.n};
     }
     char role[ROLE_SIZE];
     char path[RAM_MAX_LEVELS + 1];
     ram_path(path, sizeof path, (ram_choices){leaf, rc->levels});
-    (void)snprintf(role, sizeof role, "b%" PRIu32 "%s%s", bit, rc->levels > 0 ? "." : "", path);
-    const odin3_value params[RAM_PARAMS] = {odin3_value_int(rc->hc->rules.mem_depth),
-                                            odin3_value_int(rc->hc->rules.mem_width)};
+    (void)snprintf(role, sizeof role, "b%" PRIu32 "%s%s", ck.first, rc->levels > 0 ? "." : "",
+                   path);
+    const odin3_value params[RAM_PARAMS] = {odin3_value_int(rc->shape.addr), odin3_value_int(ck.n)};
     odin3_node_id node = {0};
     st = hm_new_node(rc->hc, &(hm_node_req){rc->type, params, RAM_PARAMS, ports, role}, &node);
     for (uint32_t rwp = 0; st == ODIN3_OK && rwp < lay->n_ports; rwp++) {
-        if (rc->read[rwp]) {
-            *(odin3_net_id *)odin3_vec_push(&rc->port[rwp].out) = fresh[rwp]; /* reserved */
+        for (uint32_t j = 0; rc->read[rwp] && j < ck.n; j++) {
+            *(odin3_net_id *)odin3_vec_push(&rc->port[rwp].chunk) = fresh[rwp][j]; /* reserved */
         }
     }
     return st;
 }
 
-/* All slices of data bit `bit` (every leaf), then each port's output tree and its tie. */
-static odin3_status build_bit(ram_ctx *rc, uint32_t bit) {
-    for (uint32_t rwp = 0; rwp < rc->lay->n_ports; rwp++) {
-        odin3_vec_clear(&rc->port[rwp].out);
+/* The output tree of data bit ck.first + idx of read/write port rwp, and its tie. */
+static odin3_status tie_bit(ram_ctx *rc, uint32_t rwp, ram_chunk ck, uint32_t idx) {
+    ram_port *rp = &rc->port[rwp];
+    odin3_vec_clear(&rp->out);
+    for (uint32_t leaf = 0; leaf < ((uint32_t)1 << rc->levels); leaf++) {
+        const odin3_net_id *from = odin3_vec_cat(&rp->chunk, (size_t)leaf * ck.n + idx);
+        *(odin3_net_id *)odin3_vec_push(&rp->out) = *from; /* reserved by ram_split_glue */
     }
+    odin3_net_id root = {0};
+    odin3_status st = ram_mux_tree(rc, (ram_at){rwp, ck.first + idx, 0, 0}, &root);
+    if (st == ODIN3_OK) {
+        hm_tie *tie = odin3_vec_push(rc->ties); /* reserved by build_body: never NULL */
+        *tie = (hm_tie){ram_src_net(rc, (ram_pin){rc->lay->out[rwp], ck.first + idx}), root};
+    }
+    return st;
+}
+
+/* All the RAMs of the chunk (every leaf), then each read port's output trees and ties. */
+static odin3_status build_chunk(ram_ctx *rc, ram_chunk ck) {
+    const size_t leaves = (size_t)1 << rc->levels;
     odin3_status st = ODIN3_OK;
-    for (uint32_t leaf = 0; st == ODIN3_OK && leaf < ((uint32_t)1 << rc->levels); leaf++) {
-        st = make_slice(rc, (ram_at){0, bit, 0, leaf});
+    for (uint32_t rwp = 0; st == ODIN3_OK && rwp < rc->lay->n_ports; rwp++) {
+        odin3_vec_clear(&rc->port[rwp].chunk);
+        st = odin3_vec_reserve(&rc->port[rwp].chunk, leaves * ck.n);
+    }
+    for (uint32_t leaf = 0; st == ODIN3_OK && leaf < leaves; leaf++) {
+        st = make_slice(rc, leaf, ck);
     }
     for (uint32_t rwp = 0; st == ODIN3_OK && rwp < rc->lay->n_ports; rwp++) {
-        odin3_net_id root = {0};
-        st = rc->read[rwp] ? ram_mux_tree(rc, (ram_at){rwp, bit, 0, 0}, &root) : st;
-        if (st == ODIN3_OK && rc->read[rwp]) {
-            hm_tie *tie = odin3_vec_push(rc->ties); /* reserved by build: never NULL */
-            *tie = (hm_tie){ram_src_net(rc, (ram_pin){rc->lay->out[rwp], bit}), root};
+        for (uint32_t j = 0; rc->read[rwp] && st == ODIN3_OK && j < ck.n; j++) {
+            st = tie_bit(rc, rwp, ck, j);
         }
     }
     return st;
@@ -198,21 +221,39 @@ static odin3_status build_body(ram_ctx *rc) {
         st = setup_addr(rc, rwp);
         st = st == ODIN3_OK ? ram_split_glue(rc, rwp) : st;
     }
-    for (uint32_t bit = 0; st == ODIN3_OK && bit < rc->data_bits; bit++) {
-        st = build_bit(rc, bit);
+    for (uint32_t first = 0; st == ODIN3_OK && first < rc->data_bits; first += rc->shape.width) {
+        uint32_t left = rc->data_bits - first;
+        st = build_chunk(rc, (ram_chunk){first, left < rc->shape.width ? left : rc->shape.width});
     }
     return st;
 }
 
-/* The number of RAMs rc builds: 2^levels leaves per data bit. */
+/* S-5: one WARNING per design when `--mem-width arch` gave a block other than the default one. */
+static void warn_width(ram_ctx *rc) {
+    hm_ctx *hc = rc->hc;
+    if (hc->rules.mem_arch && !hc->width_warned &&
+        (rc->shape.addr != hc->rules.mem_depth ||
+         (rc->data_bits > hc->rules.mem_width && rc->shape.width > hc->rules.mem_width))) {
+        hc->width_warned = true;
+        odin3_log(ODIN3_LOG_WARN,
+                  "partial_map: --mem-width arch: memories are sliced to the arch's widest mode, "
+                  "not 1 bit as Parmys does");
+    }
+}
+
+/* The number of RAMs rc builds: 2^levels leaves per chunk of data bits. */
 static uint64_t slice_count(const ram_ctx *rc) {
-    return ((uint64_t)1 << rc->levels) * rc->data_bits;
+    uint64_t chunks = ((uint64_t)rc->data_bits + rc->shape.width - 1U) / rc->shape.width;
+    return ((uint64_t)1 << rc->levels) * chunks;
 }
 
 odin3_status hm_build_ram(hm_ctx *hc, const hm_ram_desc *desc, odin3_vec *ties, uint64_t *slices) {
     ram_ctx rc;
     ctx_init_desc(&rc, hc, desc, ties);
     odin3_status st = build_body(&rc);
+    if (st == ODIN3_OK) {
+        warn_width(&rc);
+    }
     *slices += st == ODIN3_OK ? slice_count(&rc) : 0;
     ctx_free(&rc);
     return st;
@@ -235,6 +276,7 @@ static odin3_status transact(ram_ctx *rc) {
     }
     st = hm_commit(hc, odin3_vec_cat(rc->ties, 0), rc->ties->len);
     if (st == ODIN3_OK) {
+        warn_width(rc);
         uint64_t slices = slice_count(rc);
         uint64_t *count = rc->lay->kind == HM_SP_RAM ? &hc->stats.sp_slices : &hc->stats.dp_slices;
         *count += slices;
@@ -245,7 +287,7 @@ static odin3_status transact(ram_ctx *rc) {
 /* Not a RAM, a degenerate one (no data bit), or one that already has the arch's shape: left. */
 static bool needs_mapping(const ram_ctx *rc) {
     return rc->lay != NULL && rc->data_bits > 0 &&
-           (rc->addr_bits != rc->hc->rules.mem_depth || rc->data_bits != rc->hc->rules.mem_width);
+           (rc->levels > 0 || rc->addr_bits != rc->shape.addr || rc->data_bits > rc->shape.width);
 }
 
 odin3_status hm_map_ram(hm_ctx *hc, odin3_node_id src) {
