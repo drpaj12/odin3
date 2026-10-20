@@ -619,6 +619,11 @@ class UnitTests(unittest.TestCase):
         self.assertNotIn("@", text)
         self.assertNotIn("#", text)
 
+    def test_arch_xml_is_read_with_read_arch(self) -> None:
+        text = hd.script_text(hd.SCRIPT, Path("/a.xml"), Path("/d.v"), Path("/o.blif"))
+        self.assertTrue(text.startswith("read_arch /a.xml; "))
+        self.assertNotIn("read_techlib", text)
+
 
 if __name__ == "__main__":
     unittest.main()
