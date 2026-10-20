@@ -1584,6 +1584,13 @@ if(BUILD_TESTING)
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib")
+    # Phase 6 (6.4): the levelize pass.
+    odin3_add_unit_test(test_levelize)
+    target_sources(test_levelize PRIVATE tests/unit/proc_fixture.c
+                                         tests/unit/proc_fixture_core.c)
+    target_compile_definitions(test_levelize PRIVATE
+        ODIN3_LV_ROOT="${PROJECT_BINARY_DIR}"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     # 3D Task 8: the pass-run table's arguments and run information (IR-12).
     odin3_add_unit_test(test_passrun)
     # 2D Task 5: write_rtlil. Its designs are also written to rtlil/*.il, the input of the
