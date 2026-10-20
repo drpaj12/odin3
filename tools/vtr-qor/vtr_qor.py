@@ -38,10 +38,11 @@ Subcommands here: ``doctor``, ``run``, ``fcheck``, ``status``, ``clean``, ``tabl
   ``differs``, ``error`` or a missing job, 3 for ``capped`` or ``timeout``. ``run --seed N`` is
   another VPR seed (a new key that never moves ``latest``); ``table --seeds 2,3`` shows the seed
   jobs beside seed 1 (spec §6.3).
-- ``run --job-timeout S`` caps each job's wall time (default 3600 s; 0 is no cap). Its commands
-  (front end, VTR flow, ``--fcheck``) share the one limit and each runs in its own session and
-  the job cgroup; on expiry the whole group gets SIGTERM, then SIGKILL, the job is ``timeout``
-  (``<job>: timeout after S s in <command> (elapsed N s)``, exit 3) and the run goes on.
+- ``run --job-timeout S`` caps each job's wall time (default 3600 s in group A, 21600 s in
+  group B; 0 is no cap). Its commands (front end, VTR flow, ``--fcheck``) share the one limit
+  and each runs in its own session and the job cgroup; on expiry the whole group gets SIGTERM,
+  then SIGKILL, the job is ``timeout`` (``<job>: timeout after S s in <command> (elapsed N s)``,
+  exit 3) and the run goes on.
 - ``exit-run --label TEXT [--budget H]`` (heavy, started inside ``tools/heavy-run`` like
   ``nightly``) runs ``qor_exit``'s eight steps; started again with the label it resumes. Exit
   ``gate``'s when every job ran, else the run's code. ``Oprov`` needs 3E-6: it is available only
@@ -1807,7 +1808,8 @@ def _parser() -> argparse.ArgumentParser:
                      help="VPR seed (default 1; N > 1 is a new key and never moves latest)")
     run.add_argument("--job-timeout", type=_non_negative, metavar="S",
                      help=f"wall limit per job in seconds, shared by its commands "
-                          f"(default {qor_sched.JOB_TIMEOUT_S['A']}; 0: no cap)")
+                          f"(default {qor_sched.JOB_TIMEOUT_S['A']} in group A, "
+                          f"{qor_sched.JOB_TIMEOUT_S['B']} in group B; 0: no cap)")
     run.add_argument("--stage-timeout", type=_positive, metavar="S")
     run.add_argument("--dry-run", action="store_true", help="print the jobs; run nothing")
     run.add_argument("--xl", action="store_true",

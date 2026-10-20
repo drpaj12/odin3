@@ -499,8 +499,9 @@ DISK_FLOOR_GIB = 10
 PAUSE_LIMIT_S = 7200
 POLL_S = 60
 # Wall limit per job in seconds (``run --job-timeout``): every command of a job shares it; 0 is
-# no cap. One hung tool must not hold the heavy lock for hours.
-JOB_TIMEOUT_S: Mapping[str, int] = MappingProxyType({"A": 3600, "B": 3600})
+# no cap. Group B stays at 21600 s (mcml runs 4699 s,
+# LU32PEEng 3237 s). One hung tool must not hold the heavy lock for hours.
+JOB_TIMEOUT_S: Mapping[str, int] = MappingProxyType({"A": 3600, "B": 21600})
 KILL_GRACE_S = 30.0
 CAPPED_RETRIES = 0
 KEEP_KEYS = 3

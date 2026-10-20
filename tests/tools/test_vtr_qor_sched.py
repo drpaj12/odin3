@@ -799,7 +799,7 @@ class RunOrderTest(RunnerTestBase):
              qor_sched.DISK_FLOOR_GIB, qor_sched.PAUSE_LIMIT_S, qor_sched.POLL_S,
              dict(qor_sched.JOB_TIMEOUT_S), qor_sched.KILL_GRACE_S, qor_sched.CAPPED_RETRIES,
              qor_sched.KEEP_KEYS, qor_sched.KEEP_FAILED, qor_sched.KEEP_FAILED_BYTES),
-            (7, 20, 10, 7200, 60, {"A": 3600, "B": 3600}, 30, 0, 3, 5, 2 * GIB))
+            (7, 20, 10, 7200, 60, {"A": 3600, "B": 21600}, 30, 0, 3, 5, 2 * GIB))
         self.assertEqual(qor_sched.KEEP_RUN_FILES, (
             "vtr_flow.out", "output.txt", "parse_results.txt", "qor_results.txt", "vpr.out",
             "vpr.crit_path.out", "parmys.out", "abc*.out", "*_blackboxing_latch.out",
