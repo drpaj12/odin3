@@ -1,0 +1,67 @@
+{
+  "creator": "Odin III",
+  "modules": {
+    "sub": {
+      "attributes": {
+        "src": "t.v:1.1-1.1"
+      },
+      "ports": {
+        "i": {
+          "direction": "input",
+          "bits": [ 2 ]
+        }
+      },
+      "cells": {
+      },
+      "netnames": {
+        "i": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "t.v:2.1-2.1"
+          }
+        }
+      }
+    },
+    "top": {
+      "attributes": {
+        "src": "t.v:1.1-1.1"
+      },
+      "ports": {
+        "x": {
+          "direction": "input",
+          "bits": [ 2 ]
+        }
+      },
+      "cells": {
+        "u1": {
+          "hide_name": 0,
+          "type": "sub",
+          "parameters": {
+          },
+          "attributes": {
+            "parameter:W": "00000000000000000000000000001000",
+            "parameter:S": "ab",
+            "keep": "00000000000000000000000000000001",
+            "src": "t.v:8.1-8.1"
+          },
+          "port_directions": {
+            "i": "input"
+          },
+          "connections": {
+            "i": [ 2 ]
+          }
+        }
+      },
+      "netnames": {
+        "x": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "t.v:2.1-2.1"
+          }
+        }
+      }
+    }
+  }
+}

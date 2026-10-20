@@ -618,6 +618,28 @@ static void test_instance_and_parameters(void) {
     (void)remove("t6.json");
 }
 
+/* An instance's `parameter:<NAME>` attributes are its parameters, not attributes (R-5). */
+static void test_instance_parameter_attributes(void) {
+    odin3_module *sub = new_module("sub");
+    (void)add_port(sub, (port_args){"i", ODIN3_DIR_IN, 1});
+    odin3_module *mod = new_module("top");
+    odin3_net_id net_x = add_port(mod, (port_args){"x", ODIN3_DIR_IN, 1});
+    odin3_node_spec spec = {odin3_module_celltype(sub), intern("u1"), prov_at(8), NULL, 0};
+    odin3_netvec ports[1] = {{&net_x, 1}};
+    add_node(mod, &spec, ports);
+    odin3_objref obj = {ODIN3_OBJ_NODE, odin3_module_find_node(mod, intern("u1")).v};
+    set_attr(mod, obj, "parameter:W", odin3_value_int(8));
+    set_attr(mod, obj, "parameter:S", str_value("ab"));
+    set_attr(mod, obj, "keep", odin3_value_int(1));
+    char *text = write_json("t6c.json");
+    assert_has(text, "\"parameters\": {\n            \"W\": \"00000000000000000000000000001000\",\n"
+                     "            \"S\": \"ab\"\n          }");
+    assert_has(text, "\"attributes\": {\n            \"keep\": ");
+    assert_lacks(text, "parameter:");
+    odin3_util_free(text);
+    (void)remove("t6c.json");
+}
+
 /* Parameters are binary strings (Yosys style). */
 static void test_parameters_binary(void) {
     odin3_module *mod = new_module("top");
@@ -1166,6 +1188,7 @@ int main(void) {
     RUN_TEST(test_user_attributes);
     RUN_TEST(test_declared_blackbox_module);
     RUN_TEST(test_instance_and_parameters);
+    RUN_TEST(test_instance_parameter_attributes);
     RUN_TEST(test_parameters_binary);
     RUN_TEST(test_2d_word_cells);
     RUN_TEST(test_wire_range_attributes);
