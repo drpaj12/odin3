@@ -5,6 +5,7 @@
 #include "ir/design.h"
 #include "ast/ast.h"
 #include "ast/srcman.h"
+#include "frontends/arch/arch.h"
 #include "frontends/project/project.h"
 #include "ir/ir_internal.h"
 #include "ir/module.h"
@@ -49,6 +50,7 @@ ODIN3_EXPORT void odin3_design_destroy(odin3_design *design) {
     }
     odin3_vec_free(&design->asts);
     odin3_project_destroy(design->project);
+    odin3_arch_destroy(design->arch);
     odin3_srcman_destroy(design->srcman);
     odin3_prov_store_free(design);
     odin3_module_table_free(design);
@@ -238,6 +240,26 @@ odin3_status odin3_design_get_project(odin3_design *design, odin3_project **out)
 
 odin3_project *odin3_design_project(const odin3_design *design) {
     return design->project;
+}
+
+odin3_status odin3_design_get_arch(odin3_design *design, odin3_arch **out) {
+    if (design->arch == NULL) {
+        design->arch = odin3_arch_create();
+        if (design->arch == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    *out = design->arch;
+    return ODIN3_OK;
+}
+
+odin3_arch *odin3_design_arch(const odin3_design *design) {
+    return design->arch;
+}
+
+void odin3_design_drop_arch(odin3_design *design) {
+    odin3_arch_destroy(design->arch);
+    design->arch = NULL;
 }
 
 void odin3_design_drop_project(odin3_design *design) {

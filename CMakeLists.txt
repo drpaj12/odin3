@@ -88,6 +88,7 @@ add_library(odin3_core OBJECT
     src/passes/write_formats.c
     src/passes/sim_pass.c
     src/passes/project_pass.c
+    src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
     src/passes/proc/pw_encode.c
@@ -243,6 +244,12 @@ add_library(odin3_core OBJECT
     src/frontends/project/o3proj.c
     src/frontends/project/entry.c
     src/frontends/project/xml.c
+    src/frontends/arch/arch.c
+    src/frontends/arch/arch_xml.c
+    src/frontends/arch/arch_models.c
+    src/frontends/arch/arch_pb.c
+    src/frontends/arch/arch_lib.c
+    src/frontends/arch/arch_templates.c
     src/frontends/project/odin2.c
     src/frontends/verilog/preproc.c
     src/frontends/verilog/macro.c
@@ -1213,6 +1220,20 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_techlib_expr)
     odin3_add_unit_test(test_techlib_reader)
     odin3_add_unit_test(test_techlib_string_param)
+    foreach(_t IN ITEMS test_arch_record test_arch_models test_arch_pb test_arch_lib test_arch_pass test_arch_vtr)
+        odin3_add_unit_test(${_t})
+        target_compile_definitions(${_t} PRIVATE
+            ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    endforeach()
+    add_test(NAME cli_arch
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/arch_cli.sh $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tests/unit/data/arch/pb_ok.xml)
+    set_tests_properties(cli_arch PROPERTIES LABELS unit)
+    set_tests_properties(test_arch_vtr PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME arch_corpus
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/arch/corpus.sh $<TARGET_FILE:odin3>)
+    set_tests_properties(arch_corpus PROPERTIES LABELS unit SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # 5.1 Task 3: lib/lpm.o3lib and LPM-structured Verilog read back as registered cells.
     odin3_add_unit_test(test_lpm_lib)
     # BLIF `.param` on a tech-library `.subckt` (1C amendment 2026-10-19, PHASE5 decision 8).

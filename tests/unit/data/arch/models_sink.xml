@@ -1,0 +1,8 @@
+<architecture>
+  <models>
+    <model name="m">
+      <input_ports><port name="a" combinational_sink_ports="nope"/></input_ports>
+      <output_ports><port name="o"/></output_ports>
+    </model>
+  </models>
+</architecture>

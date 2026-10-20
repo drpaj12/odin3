@@ -1,0 +1,13 @@
+<architecture>
+  <models>
+    <model name="m"><input_ports><port name="a"/><port name="clk" is_clock="1"/></input_ports>
+      <output_ports><port name="o"/></output_ports></model>
+  </models>
+  <complexblocklist>
+    <pb_type name="blk">
+      <pb_type name="leaf" blif_model=".subckt m">
+        <input name="zz" num_pins="1"/>
+      </pb_type>
+    </pb_type>
+  </complexblocklist>
+</architecture>
