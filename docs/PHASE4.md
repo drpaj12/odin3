@@ -146,6 +146,26 @@ DESIGN §12.1.
    `test_arch_vtr` and `arch_corpus` skip (exit 77) in CI and run locally only; the
    template-versus-`lib/vtr.o3lib` and fixture tests run everywhere. CI is not changed.
 
+12. **4.2 to 4.7 design: the eleven questions** (Peter, 2026-10-19: "Yes to all"). Spec
+   `docs/specs/2026-10-20-4.2-partial-map-design.md` section 12, plan
+   `docs/plans/2026-10-20-4.2-partial-map-plan.md`. Approved: (a) `hardmap` is renamed
+   `partial_map`, with `hardmap` kept as an alias; (b) Parmys's rule is the default and every
+   improvement is a named option that is off by default; (c) the 3C rulings D1, D2b, D3, D4, D5
+   stay RTL-correct and warned; (d) `--min-mult 3` and `--min-add 1`, so 4.3's "threshold from the
+   XML" is corrected: the XML has none; (e) the multiplier WIDTH is square and comes from the
+   arch, and a non-square model stays soft with a warning; (f) an oversize multiplier is split as
+   Parmys does, after a probe; (g) signed multipliers sign-extend when Y fits, else stay soft;
+   (h) the RAM depth limit comes from the arch, slices are 1 bit by default, and `--mem-width
+   arch` selects the arch's modes; (i) the 4.2 errors and warnings are as specified (B-3 to B-7);
+   (j) 4.6 is a `--ff-file` table on `read_arch`, off by default, built last and droppable from
+   v1.0; (k) 4.7 is read-side only (`memory_merge`), `ram_style` is ignored with a warning.
+13. **Spec questions not put to Peter** (agent defaults, he may override): the spec's other seven
+   open questions (8 fracturing deferred, 10 one depth limit D for SP and DP, 12 PR order A to H,
+   14 no name-based FF classification, 16 new tools `partial-map-diff` and
+   `partial-map-check/identity` with `hardmap-diff` kept for the alias, 17 K from the record for
+   `abc` and `write_blif` in a small 4.13 PR, 18 goldens for the new archs are a controller step)
+   take the spec's recommendations.
+
 ## Open items
 
 (none open. Item 1, the sweep archs, is closed by decision 10.)
