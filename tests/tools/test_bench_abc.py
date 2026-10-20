@@ -82,7 +82,8 @@ class BenchAbcTest(unittest.TestCase):
         proc = run([str(BENCH), "--micro"])
         self.assertEqual(proc.returncode, 0, proc.stderr)
         words = proc.stdout.strip().split("\t")
-        self.assertEqual(words[0::2], ["micro", "open_close_ms", "checker_ms", "checker_bytes"])
+        self.assertEqual([words[i] for i in (0, 1, 3, 5)],
+                         ["micro", "open_close_ms", "checker_ms", "checker_bytes"])
         self.assertGreater(float(words[2]), 0.0)
         self.assertGreater(float(words[4]), 0.0)
         self.assertGreater(int(words[6]), 60000)  # a 64 KiB script
@@ -146,15 +147,6 @@ class BenchSetToolTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(len(self.calls()), 2)
         self.assertIn("failed", proc.stderr)
-
-    def test_micro_prints_the_two_fixed_costs_as_numbers(self) -> None:
-        proc = run([str(BENCH), "--micro"])
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        words = proc.stdout.strip().split("\t")
-        self.assertEqual(words[0::2], ["micro", "open_close_ms", "checker_ms", "checker_bytes"])
-        self.assertGreater(float(words[2]), 0.0)
-        self.assertGreater(float(words[4]), 0.0)
-        self.assertGreater(int(words[6]), 60000)  # a 64 KiB script
 
     def test_usage_errors_are_exit_two(self) -> None:
         one = self.blif("a.blif", 1)
