@@ -149,7 +149,7 @@ with its evidence or left open with what is missing.
 - [x] **M3 / exit** (closed on the existing M2/M3 data, decision 58): `exit-run exit-20261020`
   (main 69f92d1c, `/tmp/claude-1000/m3-1020-1242/exit.log`). O leg: run 66 ok, 1 failed, 1 timeout
   for `arm_core` (O' timeout at 3600 s and O stopped: that main lacked PR D, #179); `arm_core`
-  after PR D: ARMCORE_RESULT. Functional check (`fcheck` O): 12 pass; `raygentop`, `boundtop`,
+  after PR D: `arm_core` routes on O and O' (148 s each, main e817cd25, 2026-10-20; it timed out at 3600 s before PR D because its 16 RAMs stayed soft). Functional check (`fcheck` O): 12 pass; `raygentop`, `boundtop`,
   `stereovision0` classified untested, not Odin III bugs (decision 57, which lands with PR #181;
   `work/controller-scripts/reports/m3-fcheck-classify.md`). `equiv`: `sha` and `blob_merge`
   equivalent; `ch_intrinsics` and `mkPktMerge` ram; `stereovision3` multiclock; `stereovision0`
@@ -1610,7 +1610,7 @@ then the options considered.
     elaboration is the priority and the VTR links are less; a full M3 rerun would hold the machine
     (decision 55) for results that would not change the front-end evidence. The close rests on the
     M2 table `20261020-1642-M2`, the M3 `exit-run` of main 69f92d1c, and the `arm_core` check after
-    PR D (#179): ARMCORE_RESULT. Skipped, by decision:
+    PR D (#179): `arm_core` routes on O and O' (148 s each, main e817cd25, 2026-10-20; it timed out at 3600 s before PR D because its 16 RAMs stayed soft). Skipped, by decision:
     - `exit-run` steps 7 and 8 (the final seed table and the final QoR table); no new M3 run.
     - The k4/COFFE latch and count investigation: the open deltas stay as comment lines in the
       expect files, noted "not investigated (Peter 2026-10-20)".
