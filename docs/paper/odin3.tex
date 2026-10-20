@@ -1229,6 +1229,17 @@ order varies between files.
 \label{fig:abi}
 \end{figure}
 
+An Application Binary Interface (ABI) is the contract between two pieces of compiled code. It
+fixes the names of the functions, the types of their arguments and results, the sizes and layout
+of the structures that cross the boundary, and the calling convention. An API describes this at the
+source level, and a change that keeps an API can still break an ABI, for example by adding a field in
+the middle of a structure. The ABI matters for plugins because a plugin is a separate compiled
+object. A plugin built against one version of Odin III must still load and run against a later
+build, without a recompile. A C ABI helps here, because C has no name mangling, no class layouts and
+no exceptions that cross the boundary, and Python and other languages can call it. Odin III
+therefore hides its internals, exposes only IDs and an opaque handle, versions the ABI, refuses a
+plugin that asks for a different version, and keeps room in its structures for later hooks.
+
 \code{include/odin3/odin3.h} is the only header plugins see (Fig.~\ref{fig:abi}; 1D spec,
 DESIGN \S15.3). ABI version~4 declares its functions over an opaque design handle; IR objects
 are raw 32-bit IDs passed with their module handle, every function returns
