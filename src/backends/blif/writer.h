@@ -23,6 +23,7 @@ typedef enum odin3_blif_dialect {
 typedef enum odin3_blif_name_style {
     ODIN3_BLIF_NAMES_SHORT = 0,      /* own name, else generated (default) */
     ODIN3_BLIF_NAMES_PROVENANCE = 1, /* hier/<short name>@file:line where provenance has one */
+    ODIN3_BLIF_NAMES_HASH = 2,       /* those names as `h` + 10 base32 characters (5.4f, H-1) */
 } odin3_blif_name_style;
 
 typedef struct odin3_blif_write_opts {
@@ -30,6 +31,7 @@ typedef struct odin3_blif_write_opts {
     odin3_blif_name_style name_style; /* VTR only; PLAIN requires SHORT */
     uint32_t lut_k;                   /* VTR only: max .names inputs; 0 = the default */
     bool src_attr;                    /* PLAIN only: `.attr src` with each cell's HDL locations */
+    const char *name_map; /* HASH only: the name map file; NULL means `<path>.names` (5.4f, H-4) */
 } odin3_blif_write_opts;
 
 #define ODIN3_BLIF_VTR_DEFAULT_K 6U /* k6_frac_N10_frac_chain_mem32K_40nm and EArch */
@@ -162,8 +164,16 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
  * VB-10 rules 1 to 4 apply as above; any other net, including one read from a BLIF (an IMPORTED
  * record), keeps its short name. Nets are the only named objects of this dialect (no `.cname`).
  *
+ * With ODIN3_BLIF_NAMES_HASH (5.4f, spec section 13) the nets ODIN3_BLIF_NAMES_PROVENANCE would
+ * rename get `h` and 10 lower-case base32 characters of the SHA-256 of that provenance name
+ * (before VB-10), extended on a collision (backends/common/hash_name.h); nothing else is renamed.
+ * The name map (H-4, backends/common/name_map.h) is written to opts->name_map, else to
+ * `<path>.names`, as a private temporary opened before the netlist and renamed after it: a map
+ * that cannot be created refuses the write (ODIN3_ERR_IO), and a path of "-" with no name_map is
+ * ODIN3_ERR_INVALID_ARG. Without HASH, name_map is ignored.
+ *
  * VTR output (spec 3E §5-§9): the header line `# Odin III <version> write_blif --vtr (K=<K>,
- * names short|provenance)`, one `# abc: <run information>` line per pass run named `abc` that has
+ * names short|provenance|hash)`, one `# abc: <run information>` line per pass run named `abc` that has
  * run information (odin3_passrun_info, verbatim; 3D AB-25), in run order, and a blank line;
  * `.model <top>`; `.inputs`/`.outputs` (no `.clock`);
  * the generators `.names gnd`, `.names vcc` / `1`, `.names unconn` that some pin or buffer reads,
@@ -236,5 +246,9 @@ odin3_status odin3_blif_vtr_name_top(const odin3_blif_names_req *req, odin3_blif
 
 /* Frees names (NULL is a no-op). */
 void odin3_blif_names_free(odin3_blif_names *names);
+
+/* The name map text (5.4f) the naming run built for ODIN3_BLIF_NAMES_HASH; empty for other
+ * styles. Valid until names is freed. */
+odin3_bytes odin3_blif_names_map(const odin3_blif_names *names);
 
 #endif

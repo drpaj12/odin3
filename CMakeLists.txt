@@ -404,6 +404,7 @@ add_library(odin3_core OBJECT
     src/backends/prov_name.c
     src/backends/common/hdl_loc.c
     src/backends/common/hash_name.c
+    src/backends/common/hash_rows.c
     src/backends/common/name_map.c
     src/frontends/hdl_restore.c
     src/backends/verilog/escape.c

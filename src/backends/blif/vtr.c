@@ -146,7 +146,8 @@ static odin3_status check_opts(const odin3_blif_write_opts *opts) {
         return ODIN3_ERR_INVALID_ARG;
     }
     if (opts->name_style != ODIN3_BLIF_NAMES_SHORT &&
-        opts->name_style != ODIN3_BLIF_NAMES_PROVENANCE) {
+        opts->name_style != ODIN3_BLIF_NAMES_PROVENANCE &&
+        opts->name_style != ODIN3_BLIF_NAMES_HASH) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_blif_vtr_preflight: name_style %d is unknown",
                   (int)opts->name_style);
         return ODIN3_ERR_INVALID_ARG;

@@ -4,6 +4,7 @@
 
 #include "backends/blif/isop.h"
 #include "backends/blif/vtr.h"
+#include "backends/common/hash_rows.h"
 #include "backends/common/hdl_loc.h"
 #include "backends/prov_name.h"
 #include "frontends/arch/arch.h"
@@ -112,6 +113,9 @@ typedef struct blif_writer {
     odin3_strbuf token;        /* the token being built */
     odin3_strbuf cand;         /* a candidate generated name */
     odin3_strbuf prov;         /* a provenance name (3E-6), scratch */
+    odin3_hash_rows rows;      /* HASH: the nets named by provenance, for hash_finalize */
+    odin3_strbuf map_text;     /* HASH: the name map of the naming run (5.4f) */
+    bool last_applied;         /* the last provenance_name call named its net by provenance */
     odin3_hdl_ctx *hdl;        /* HDL locations and the records that name objects (hdl_loc.h) */
     odin3_strbuf cover;        /* a $lut's rows (odin3_blif_isop) */
     /* the VTR dialect's names (spec 3E VB-10) */
@@ -476,6 +480,12 @@ static odin3_status take_numbered(blif_writer *wr, uint64_t key) {
     return st;
 }
 
+/* True for the styles that name a net by its provenance first: provenance and hash (5.4f). */
+static bool prov_style(const blif_writer *wr) {
+    return wr->opts->name_style == ODIN3_BLIF_NAMES_PROVENANCE ||
+           wr->opts->name_style == ODIN3_BLIF_NAMES_HASH;
+}
+
 /*
  * VTR with --name-style provenance (spec 3E §10 item 7): wr->cand, the net's short name, becomes
  * `hier/<short name>@file:line` from the net's provenance record. Unchanged for a net on a port
@@ -486,8 +496,8 @@ static odin3_status take_numbered(blif_writer *wr, uint64_t key) {
 static odin3_status provenance_name(blif_writer *wr, odin3_net_id net, bool *applied) {
     uint64_t owner = 0;
     *applied = false;
-    if (wr->opts->name_style != ODIN3_BLIF_NAMES_PROVENANCE ||
-        odin3_u64map_get(wr->net_port, net.v, &owner) ||
+    wr->last_applied = false;
+    if (!prov_style(wr) || odin3_u64map_get(wr->net_port, net.v, &owner) ||
         is_generator(wr, net, buf_bytes(&wr->cand))) {
         return ODIN3_OK;
     }
@@ -506,14 +516,29 @@ static odin3_status provenance_name(blif_writer *wr, odin3_net_id net, bool *app
         odin3_strbuf_clear(&wr->cand);
         st = odin3_strbuf_append(&wr->cand, buf_bytes(&wr->prov));
         *applied = st == ODIN3_OK;
+        wr->last_applied = *applied;
     }
     return st;
+}
+
+/* HASH: remembers net, just named by provenance (the full name is wr->orig, before VB-10), for
+ * hash_finalize. */
+static odin3_status note_hashed(blif_writer *wr, odin3_net_id net) {
+    if (wr->opts->name_style != ODIN3_BLIF_NAMES_HASH || !wr->last_applied) {
+        return ODIN3_OK;
+    }
+    return odin3_hash_rows_add(
+        &wr->rows, &(odin3_hash_row_req){.module = odin3_module_id_of(wr->module).v,
+                                         .module_name = str_bytes(wr, odin3_module_name(wr->module)),
+                                         .kind = ODIN3_NAME_NET,
+                                         .key = net.v,
+                                         .full = buf_bytes(&wr->orig)});
 }
 
 /* An unnamed net under --name-style provenance: its short name (the wire bit name, else `$n<ID>`)
  * wrapped by provenance_name; *found is set when the wrapped name replaces the candidate. */
 static odin3_status generate_provenance(blif_writer *wr, odin3_net_id net, bool *found) {
-    if (wr->opts->name_style != ODIN3_BLIF_NAMES_PROVENANCE) {
+    if (!prov_style(wr)) {
         return ODIN3_OK;
     }
     if (!*found) {
@@ -536,6 +561,7 @@ static odin3_status generate(blif_writer *wr, uint64_t key) {
     odin3_net_id self = {pin ? 0 : (uint32_t)key};
     bool found = false;
     bool changed = false;
+    wr->last_applied = false;
     odin3_status st = pin ? ODIN3_OK : wire_bit_name(wr, self, &found);
     if (st == ODIN3_OK && wr->vtr && !pin) {
         st = generate_provenance(wr, self, &found);
@@ -546,9 +572,9 @@ static odin3_status generate(blif_writer *wr, uint64_t key) {
     if (st != ODIN3_OK) {
         return st;
     }
-    st = found && name_free(wr, (odin3_bytes){wr->cand.data, wr->cand.len}, self)
-             ? take_name(wr, key)
-             : take_numbered(wr, key);
+    bool as_is = found && name_free(wr, (odin3_bytes){wr->cand.data, wr->cand.len}, self);
+    st = as_is ? take_name(wr, key) : take_numbered(wr, key);
+    st = st == ODIN3_OK && as_is ? note_hashed(wr, self) : st;
     return st == ODIN3_OK && changed ? note_renamed(wr, self.v, gen_get(wr, key)) : st;
 }
 
@@ -795,6 +821,7 @@ static odin3_status name_named_vtr(blif_writer *wr, odin3_net_id net, uint32_t r
     odin3_bytes own = str_bytes(wr, real);
     bool changed = false;
     odin3_strbuf_clear(&wr->cand);
+    wr->last_applied = false;
     odin3_status st = odin3_strbuf_append(&wr->cand, own);
     if (st == ODIN3_OK && !is_generator(wr, net, own)) {
         bool applied = false;
@@ -809,6 +836,7 @@ static odin3_status name_named_vtr(blif_writer *wr, odin3_net_id net, uint32_t r
     bool found = odin3_strtab_find(wr->gen_names, buf_bytes(&wr->cand), &id);
     bool own_port = found && odin3_u64map_get(wr->claims, id, &owner) && owner == net.v;
     st = found && !own_port ? take_numbered(wr, net.v) : take_name(wr, net.v);
+    st = st == ODIN3_OK && !(found && !own_port) ? note_hashed(wr, net) : st;
     /* a net under its own port bit's name was counted with the port bit (port_renamed) */
     return st == ODIN3_OK && changed && !own_port ? note_renamed(wr, net.v, gen_get(wr, net.v))
                                                   : st;
@@ -956,6 +984,51 @@ static odin3_status name_header(blif_writer *wr) {
     return st == ODIN3_OK && !wr->vtr ? reserve_generators(wr) : st;
 }
 
+/* HASH: the names of the nets that stay as they are, for hash_finalize's collision rule (H-3). */
+static odin3_status hash_reserved(blif_writer *wr, odin3_bytes **out, uint32_t *count) {
+    odin3_u64map *renamed = NULL;
+    odin3_status st = odin3_hash_rows_index(&wr->rows, &renamed);
+    uint32_t end = odin3_module_net_end(wr->module);
+    *out = st == ODIN3_OK ? odin3_util_calloc(((size_t)end + 1) * sizeof **out) : NULL;
+    st = st == ODIN3_OK && *out == NULL ? ODIN3_ERR_NO_MEMORY : st;
+    *count = 0;
+    for (uint32_t i = 1; st == ODIN3_OK && i < end; i++) {
+        uint64_t row = 0;
+        if (odin3_net_live(wr->module, (odin3_net_id){i}) && !odin3_u64map_get(renamed, i, &row)) {
+            (*out)[(*count)++] = net_name(wr, (odin3_net_id){i});
+        }
+    }
+    odin3_u64map_destroy(renamed);
+    return st;
+}
+
+/*
+ * HASH (5.4f): the nets named by provenance get their hash names (H-3), written in place of the
+ * provenance names (a hash name needs no VB-10 form), and the name map text is built.
+ */
+static odin3_status hash_finalize(blif_writer *wr) {
+    if (wr->opts->name_style != ODIN3_BLIF_NAMES_HASH) {
+        return ODIN3_OK;
+    }
+    odin3_bytes *reserved = NULL;
+    uint32_t nreserved = 0;
+    odin3_status st = hash_reserved(wr, &reserved, &nreserved);
+    st = st == ODIN3_OK
+             ? odin3_hash_rows_resolve(&wr->rows, &(odin3_hash_resolve_req){0, reserved, nreserved,
+                                                                            false})
+             : st;
+    for (size_t i = 0; st == ODIN3_OK && i < odin3_hash_rows_count(&wr->rows); i++) {
+        const odin3_hash_row *row = odin3_hash_rows_at(&wr->rows, i);
+        uint32_t id = 0;
+        st = odin3_strtab_intern(wr->gen_names,
+                                 (odin3_bytes){row->hash.text, strlen(row->hash.text)}, &id);
+        st = st == ODIN3_OK ? set_gen(wr, row->key, id) : st;
+    }
+    st = st == ODIN3_OK ? odin3_hash_rows_map_text(&wr->rows, &wr->map_text) : st;
+    odin3_util_free(reserved);
+    return st;
+}
+
 /* Names the module: (VTR: its `.model` name, then its clock nets, for VB-10 rule 8) port bit
  * names, (plain: then the generators it reads, §9.4) then every live net (ID order), then the
  * unconnected pins of .names, .latch and port cells (VTR: and the unconnected outputs of hard
@@ -979,7 +1052,7 @@ static odin3_status name_module(blif_writer *wr) {
             st = name_node_pins(wr, (odin3_node_id){i});
         }
     }
-    return st;
+    return st == ODIN3_OK && wr->vtr ? hash_finalize(wr) : st;
 }
 
 /* --- VTR: constants, x and `unconn` (spec 3E §9) -------------------------------------------- */
@@ -2010,6 +2083,7 @@ static odin3_status write_vtr_generators(blif_writer *wr) {
 struct odin3_blif_names {
     odin3_strtab *gen_names;
     odin3_u64map *claims, *net_port, *gen, *port_of, *clocks;
+    odin3_strbuf map_text; /* HASH: the name map text (5.4f) */
 };
 
 /* Moves the names in from (each table it holds) to the writer's tables, leaving from empty. */
@@ -2020,13 +2094,15 @@ static void names_take(blif_writer *wr, odin3_blif_names *from) {
     wr->gen = from->gen;
     wr->port_of = from->port_of;
     wr->clocks = from->clocks;
+    wr->map_text = from->map_text;
     *from = (odin3_blif_names){0};
 }
 
 /* Moves the writer's tables (each it holds) into to, which must be empty. */
 static void names_give(blif_writer *wr, odin3_blif_names *to) {
-    *to = (odin3_blif_names){wr->gen_names, wr->claims,  wr->net_port,
-                             wr->gen,       wr->port_of, wr->clocks};
+    *to = (odin3_blif_names){wr->gen_names, wr->claims,  wr->net_port, wr->gen,
+                             wr->port_of,   wr->clocks, wr->map_text};
+    odin3_strbuf_init(&wr->map_text);
     wr->gen_names = NULL;
     wr->claims = NULL;
     wr->net_port = NULL;
@@ -2045,7 +2121,14 @@ void odin3_blif_names_free(odin3_blif_names *names) {
     odin3_u64map_destroy(names->gen);
     odin3_u64map_destroy(names->port_of);
     odin3_u64map_destroy(names->clocks);
+    odin3_strbuf_free(&names->map_text);
     odin3_util_free(names);
+}
+
+odin3_bytes odin3_blif_names_map(const odin3_blif_names *names) {
+    return names != NULL && names->map_text.data != NULL
+               ? (odin3_bytes){names->map_text.data, names->map_text.len}
+               : (odin3_bytes){"", 0};
 }
 
 /* Ends the module being written: lent names go back to their owner (the plan), the writer's own
@@ -2278,6 +2361,8 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
     odin3_strbuf_init(&wr->token);
     odin3_strbuf_init(&wr->cand);
     odin3_strbuf_init(&wr->prov);
+    odin3_strbuf_init(&wr->map_text);
+    odin3_hash_rows_init(&wr->rows);
     odin3_strbuf_init(&wr->cover);
     odin3_strbuf_init(&wr->orig);
     odin3_strbuf_init(&wr->legal);
@@ -2364,6 +2449,8 @@ static void wr_free(blif_writer *wr) {
     odin3_strbuf_free(&wr->token);
     odin3_strbuf_free(&wr->cand);
     odin3_strbuf_free(&wr->prov);
+    odin3_strbuf_free(&wr->map_text);
+    odin3_hash_rows_free(&wr->rows);
     odin3_hdl_ctx_destroy(wr->hdl);
     odin3_strbuf_free(&wr->cover);
     odin3_strbuf_free(&wr->orig);
@@ -2379,7 +2466,8 @@ static void wr_free(blif_writer *wr) {
  * preflight (whose own option checks serve its direct callers); logged, ODIN3_ERR_INVALID_ARG. */
 static odin3_status check_opts(const odin3_blif_write_opts *opts) {
     bool vtr = opts->dialect == ODIN3_BLIF_DIALECT_VTR;
-    bool provenance = opts->name_style == ODIN3_BLIF_NAMES_PROVENANCE;
+    bool provenance = opts->name_style == ODIN3_BLIF_NAMES_PROVENANCE ||
+                      opts->name_style == ODIN3_BLIF_NAMES_HASH;
     const char *why = NULL;
     if (!vtr && opts->dialect != ODIN3_BLIF_DIALECT_PLAIN) {
         why = "odin3_blif_write_with: unknown dialect";
@@ -2422,13 +2510,15 @@ static void write_abc_runs(blif_writer *wr) {
     }
 }
 
+static const char *const NAME_STYLE_WORD[] = {"short", "provenance", "hash"};
+
 /* The VTR dialect's header (spec 3E §5 item 1): no date, host or path, so reruns are identical. */
 static odin3_status write_vtr_header(blif_writer *wr) {
     odin3_strbuf_clear(&wr->token);
     odin3_status st = odin3_strbuf_appendf(
         &wr->token, "# Odin III %s write_blif --vtr (K=%u, names %s)", odin3_version_string(),
         (unsigned)odin3_blif_vtr_k(wr->opts),
-        wr->opts->name_style == ODIN3_BLIF_NAMES_PROVENANCE ? "provenance" : "short");
+        NAME_STYLE_WORD[wr->opts->name_style]);
     if (st != ODIN3_OK) {
         return wr_fail(wr, st);
     }
@@ -2510,6 +2600,26 @@ static odin3_status write_opened(const odin3_design *design, const char *path,
     return st;
 }
 
+/* Writes the design; HASH also writes the name map (5.4f, H-1): its temporary is opened first, so
+ * a map that cannot be created refuses the write before the netlist is touched. */
+static odin3_status write_planned(const odin3_design *design, const char *path,
+                                  const odin3_blif_write_opts *opts, odin3_blif_vtr_plan *plan) {
+    if (opts->name_style != ODIN3_BLIF_NAMES_HASH) {
+        return write_opened(design, path, opts, plan->names);
+    }
+    odin3_strbuf map_path;
+    odin3_hash_map_file map = {.open = false};
+    odin3_strbuf_init(&map_path);
+    odin3_status st = odin3_hash_map_path("write_blif", path, opts->name_map, &map_path);
+    st = st == ODIN3_OK ? odin3_hash_map_open(&map, map_path.data) : st;
+    if (st == ODIN3_OK) {
+        st = write_opened(design, path, opts, plan->names);
+        st = odin3_hash_map_close(&map, odin3_blif_names_map(plan->names), st);
+    }
+    odin3_strbuf_free(&map_path);
+    return st;
+}
+
 odin3_status odin3_blif_write(const odin3_design *design, const char *path) {
     return odin3_blif_write_with(design, path, NULL);
 }
@@ -2526,7 +2636,8 @@ odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
     odin3_blif_write_opts use =
         opts != NULL
             ? *opts
-            : (odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false};
+            : (odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false,
+                                     NULL};
     odin3_status st = check_opts(&use);
     odin3_blif_vtr_plan plan = {0};
     if (st == ODIN3_OK && use.dialect == ODIN3_BLIF_DIALECT_VTR) {
@@ -2535,7 +2646,7 @@ odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
             odin3_blif_vtr_plan_build(design, &use, &plan, &report); /* before the path is opened */
     }
     if (st == ODIN3_OK) {
-        st = write_opened(design, path, &use, plan.names);
+        st = write_planned(design, path, &use, &plan);
     }
     if (st == ODIN3_OK) {
         odin3_blif_vtr_log_summary(&plan); /* VTR: once the file is written (plain: none) */
