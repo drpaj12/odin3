@@ -81,6 +81,8 @@ add_library(odin3_core OBJECT
     src/frontends/blif/param_text.c
     src/frontends/blif/reader.c
     src/frontends/blif/reader_locs.c
+    src/frontends/json/json_lex.c
+    src/frontends/json/json_parse.c
     src/backends/blif/writer.c
     src/backends/blif/vtr.c
     src/backends/blif/isop.c
@@ -764,6 +766,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_util_u64map)
     odin3_add_unit_test(test_util_idindex)
     odin3_add_unit_test(test_util_str)
+    odin3_add_unit_test(test_json_parse)
     odin3_add_unit_test(test_util_log)
     odin3_add_unit_test(test_util_file)
     odin3_add_unit_test(test_sha256)
@@ -936,6 +939,16 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_pm_ramstyle PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_carry
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_carry $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_carry PROPERTIES LABELS unit)
+    add_test(NAME cli_pm_carry_arch
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_carry_arch $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_pm_carry_arch PROPERTIES LABELS unit SKIP_RETURN_CODE 77)
     # 4.2 Task 3: pm_rules (k6 values, absent models, no 3C number outside rules.c).
     odin3_add_unit_test(test_pm_rules)
     target_sources(test_pm_rules PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
@@ -943,6 +956,25 @@ if(BUILD_TESTING)
         ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # 4.5 Tasks 11 and 12: carry chains from the arch record (model, --min-add, chain warning).
+    odin3_add_unit_test(test_pm_carry)
+    target_sources(test_pm_carry PRIVATE tests/unit/hardmap_fixture.c tests/unit/proc_build.c)
+    target_compile_definitions(test_pm_carry PRIVATE
+        ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # The sweep-arch half: the same source with PM_CARRY_VTR; exits 77 without VTR_ROOT.
+    add_executable(test_pm_carry_vtr tests/unit/test_pm_carry.c tests/unit/hardmap_fixture.c
+        tests/unit/proc_build.c)
+    target_include_directories(test_pm_carry_vtr PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(test_pm_carry_vtr PRIVATE odin3_core unity odin3_flags)
+    add_test(NAME test_pm_carry_vtr COMMAND test_pm_carry_vtr)
+    set_tests_properties(test_pm_carry_vtr PROPERTIES LABELS unit)
+    target_compile_definitions(test_pm_carry_vtr PRIVATE PM_CARRY_VTR=1
+        ODIN3_ARCH_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/arch"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    set_tests_properties(test_pm_carry_vtr PROPERTIES SKIP_RETURN_CODE 77)
     # 4.2 Task 7: generic hard blocks (B-1..B-7): the bind check and report of partial_map.
     odin3_add_unit_test(test_pm_generic)
     target_compile_definitions(test_pm_generic PRIVATE

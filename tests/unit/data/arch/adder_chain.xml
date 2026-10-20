@@ -1,0 +1,29 @@
+<architecture>
+  <models>
+    <model name="adder">
+      <input_ports><port name="a"/><port name="b"/><port name="cin"/></input_ports>
+      <output_ports><port name="cout"/><port name="sumout"/></output_ports>
+    </model>
+  </models>
+  <complexblocklist>
+    <pb_type name="clb">
+      <input name="in" num_pins="4"/>
+      <input name="cin" num_pins="1"/>
+      <output name="cout" num_pins="1"/>
+      <pb_type name="add" blif_model=".subckt adder" num_pb="1">
+        <input name="a" num_pins="1"/><input name="b" num_pins="1"/>
+        <input name="cin" num_pins="1"/>
+        <output name="cout" num_pins="1"/><output name="sumout" num_pins="1"/>
+      </pb_type>
+      <interconnect>
+        <direct name="carry_in" input="clb.cin" output="add[0:0].cin">
+          <pack_pattern name="chain" in_port="clb.cin" out_port="add[0:0].cin"/>
+          <pack_pattern name="chain2" in_port="clb.cin" out_port="add[0:0].cin"/>
+        </direct>
+        <direct name="carry_out" input="add.cout" output="clb.cout">
+          <pack_pattern name="chain" in_port="add.cout" out_port="clb.cout"/>
+        </direct>
+      </interconnect>
+    </pb_type>
+  </complexblocklist>
+</architecture>

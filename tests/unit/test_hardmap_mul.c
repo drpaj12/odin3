@@ -886,12 +886,14 @@ static void test_h9_oom_variants(void) {
 
 /* --- the pass ------------------------------------------------------------------------------- */
 
-static void test_pass_runs_and_takes_no_arguments(void) {
+static void test_pass_runs_and_refuses_unknown_arguments(void) {
     pb_result res;
     build_cases(k_three, 3, &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_pass_run(res.design, "hardmap", odin3_bytes_cstr("-x")));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "partial_map: takes no arguments"));
+    TEST_ASSERT_NOT_NULL(
+        strstr(log_text,
+               "partial_map: unknown argument '-x' (known: --allow-unknown-blocks, --min-add N)"));
     TEST_ASSERT_EQUAL_UINT32(3, hm_count(res.module, "$mul"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(res.design, "hardmap", (odin3_bytes){NULL, 0}));
     TEST_ASSERT_EQUAL_UINT32(3, hm_count(res.module, "multiply"));
@@ -940,7 +942,7 @@ int main(void) {
     RUN_TEST(test_h9_oom);
     RUN_TEST(test_h9_oom_y_wider);
     RUN_TEST(test_h9_oom_variants);
-    RUN_TEST(test_pass_runs_and_takes_no_arguments);
+    RUN_TEST(test_pass_runs_and_refuses_unknown_arguments);
     RUN_TEST(test_refuse_processes);
     return UNITY_END();
 }

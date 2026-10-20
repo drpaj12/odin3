@@ -54,10 +54,11 @@ class ListTests(unittest.TestCase):
 
     def test_divergence_ids_are_in_the_spec_table(self) -> None:
         spec_ids = set(D_ROW.findall(SPEC.read_text()))
-        for file in ("diff_expect.txt", "vtr_expect.txt"):
-            text = (HM / file).read_text()
-            for ident in re.findall(r"\b(D\d+[a-z]?)\b", text):
-                self.assertIn(ident, spec_ids, f"{file}: {ident}")
+        files = [HM / "diff_expect.txt", HM / "vtr_expect.txt"]
+        files += sorted((REPO_ROOT / "tests" / "partial_map").glob("diff_expect_*.txt"))
+        for file in files:
+            for ident in re.findall(r"\b(D\d+[a-z]?)\b", file.read_text()):
+                self.assertIn(ident, spec_ids, f"{file.name}: {ident}")
 
     def test_dual_write_race_rows(self) -> None:
         rows = [ln.split("\t") for ln in
