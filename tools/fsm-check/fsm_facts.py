@@ -14,7 +14,8 @@ failures).  With ``--check`` nothing is written; the exit code is 1 when the fil
 in the form the C unit test reads: ``PATH MARKED REJECTED`` per micro, MARKED the registers
 fsm_detect marked as ``module.wire`` joined by commas, REJECTED ``module.wire:reason+reason``
 (reasons port, users, init, selfreset) joined by commas, ``-`` for none. RAM write-enable
-registers (``$memwr``) are left out: Odin III's pipeline needs the VTR models to build them.
+registers (``$memwr``) are left out: Odin III's proc makes none (the ``native-memwr`` lines of
+diff_expect.txt name each micro and the count).
 
 Exit codes: 0 done (or equal with --check); 1 differs (--check); 2 usage or tool error; 3 Yosys
 crashed or timed out on a design.
@@ -91,6 +92,20 @@ REASON_CODES = {
 }
 
 
+def _strings(value: object) -> list[str]:
+    """A JSON list of strings, checked."""
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"expected a list of strings, got {value!r}")
+    return [str(item) for item in value]
+
+
+def _reasons(value: object) -> dict[str, list[str]]:
+    """The JSON object register -> list of rejection reasons, checked."""
+    if not isinstance(value, dict):
+        raise ValueError(f"expected an object, got {value!r}")
+    return {str(reg): _strings(reasons) for reg, reasons in value.items()}
+
+
 def marks_text(facts: dict[str, dict[str, object]],
                corpus: Sequence[tuple[str, str, str, str | None]]) -> str:
     """The detection facts of the micros of the corpus, one line each."""
@@ -99,9 +114,9 @@ def marks_text(facts: dict[str, dict[str, object]],
         if kind != "micro":
             continue
         entry = facts[name]
-        marked = [m for m in entry["marked"] if "$memwr" not in m]  # type: ignore[attr-defined]
+        marked = [m for m in _strings(entry["marked"]) if "$memwr" not in m]
         rejected = []
-        for reg, reasons in sorted(entry["rejected"].items()):  # type: ignore[attr-defined]
+        for reg, reasons in sorted(_reasons(entry["rejected"]).items()):
             codes = "+".join(REASON_CODES[r] for r in reasons)
             rejected.append(f"{reg}:{codes}")
         lines.append(f"{rel} {','.join(marked) or '-'} {','.join(rejected) or '-'}")

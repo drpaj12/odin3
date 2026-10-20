@@ -173,9 +173,33 @@ DESIGN §12.1.
     - `hardmap-diff` on the 19 (`/tmp/claude-1000/fsm/hm/sweep.log`): ch_intrinsics is now
       equivalent to Parmys; stereovision3's latch count equals Parmys's (the unexplained flop of
       PHASE3 #43 is gone) and it is `unproven` (two clock domains); blob_merge latch count equals
-      Parmys's but dsec says NOT equivalent (D16 in `tests/hardmap/vtr_expect.txt`, not isolated;
-      two bounded miters did not finish in 900 s). The sweep stays red on the 11 big designs that
+      Parmys's and dsec says NOT equivalent from the all-zero start (D16 in
+      `tests/hardmap/vtr_expect.txt`). D16 is isolated (outcome A, 2026-10-20): `timeout 900
+      tools/fsm-check/fsm-equiv --odin build/release/odin3 blob_merge.v --top RLE_BlobMerging
+      --rst iReset:1 --depth N` (Odin III's `proc` against `proc; fsm; opt`, a Yosys miter with the
+      reset held in steps 1 and 2) exits 0 (equivalent) at depth 3, 8 and 30 (depth 60 stopped with
+      exit 3 after 60 s, no verdict); the same run without `--rst`, depth 8, exits 1. So the two
+      netlists agree from reset and differ only in the illegal all-zero start state, which the
+      one-hot register of a sync-reset FSM has and the binary original did not (decision text
+      below; plan Deviations 12 and 15). The sweep stays red on the 11 big designs that
       have no expect line (as before this change, listed in the vtr_expect comment).
+    - **Behaviour change, all-zero start.** A one-hot register without async reset (sync-reset FSMs:
+      blob_merge, ch_intrinsics) powers up all-zero, an illegal state with no outgoing transition;
+      the binary original powered up in state 0. This is Yosys and Parmys behaviour, so parity
+      holds, but anything simulating from the all-zero start (ABC dsec, equiv-check) sees another
+      machine; equivalence holds from reset. `fsm_opt` also removes a no-reset state that has no
+      incoming transition, as Yosys does. RAM write-enable registers (ruling 8): nothing to port,
+      Odin III's proc makes no `$memwr` registers (plan Deviation 16).
+    - **Summary tables** (from the logs under `/tmp/claude-1000/fsm`). `fsm-diff` on 9 VTR designs:
+      ok LU32PEEng (3 FSMs), LU8PEEng (3), boundtop (6), ch_intrinsics (1), raygentop (6),
+      stereovision3 (1); differs, all in diff_expect: blob_merge (1), mcml (1), stereovision1 (2).
+      `hardmap-diff` on the 19: equivalent diffeq1, diffeq2, mkPktMerge, ch_intrinsics; listed
+      stereovision3 (unproven), sha (unproven), blob_merge (D16), bgm (D2b); counts-differ boundtop
+      (latch +6), mkSMAdapter4B (latch +4), stereovision1 (adder +24), LU8PEEng and LU32PEEng
+      (adder +53), mcml (adder -2, latch -1); differs raygentop, or1200, stereovision0; unproven
+      mkDelayWorker32B; unpaired stereovision2 (19 designs: 6 counts-differ, 3 differs, 4
+      equivalent, 4 listed, 1 unpaired, 1 unproven). `vtr-qor run --leg O` on 21: 17 ok, 3 failed,
+      1 capped (LU32PEEng) in 3:36:30.
     - `vtr-qor run --leg O --fcheck` (`/tmp/claude-1000/fsm/qor_run.log`, `qor2_run.log`): 17 of 21
       designs `vpr_status=success`; fcheck pass on 14; fail on raygentop, boundtop, stereovision0
       (the same designs fail on the P leg for `dropped-latches` and `x-state`, PHASE3 #50; no
