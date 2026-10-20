@@ -23,14 +23,12 @@ reader exists: the Verilog netlist is read by ``read_verilog`` with the library 
                          location).
 - ``dump MICRO``         ``names`` then ``prov`` (the CTest ``netlist_dump_<micro>``).
 - ``src MICRO``          G-6: ``mapped_src.v`` read with ``read_verilog -netlist`` (5.4c) restores
-                         the RTL location. Skipped (exit 77, named) while ``read_verilog`` has no
-                         ``-netlist`` option.
+                         the RTL location (``rtl.v``, as the ``src`` attribute spells it).
 - ``unknown``            G-7: a cell no library defines is a located ``unresolved_module`` error;
                          with ``--auto-blackbox`` it is an implicit black box.
 
 Every child runs under the memory cap of ``memcap`` (``tools/elab-check``). Exit codes: 0 the check
-passed, 1 it failed, 2 usage or tool error, 77 skipped (no cap available, or the named skip of
-``src``).
+passed, 1 it failed, 2 usage or tool error, 77 skipped (no cap available).
 """
 
 from __future__ import annotations
@@ -280,25 +278,16 @@ def check_dump(args: argparse.Namespace) -> int:
     return max(check_names(args), check_prov(args))
 
 
-def has_netlist_option(binary: str) -> bool:
-    """True when ``read_verilog`` lists ``-netlist`` (5.4c)."""
-    _, text = run([binary, "--help"])
-    return any(line.strip().startswith("read_verilog ") and "-netlist" in line
-               for line in text.splitlines())
-
-
 def check_src(args: argparse.Namespace) -> int:
     """G-6: the ``src`` fixture restores the RTL location with ``read_verilog -netlist``."""
-    if not has_netlist_option(args.odin3):
-        print("SKIP netlist_src: read_verilog -netlist (5.4c) is not merged")
-        return EXIT_SKIP
     micro = micro_dir(args.micro)
     read = f"read_verilog --lib {CELLS}; read_verilog -netlist {micro / 'mapped_src.v'}"
     rows, why = dump_lines(args.odin3, read)
     if why:
         print(f"FAIL {args.micro} src: {why}")
         return EXIT_FAIL
-    rtl = str(micro / "rtl.v")
+    # The reader keeps the file name as the ``src`` attribute spells it (``rtl.v``, relative).
+    rtl = "rtl.v"
     restored = [row for row in rows if row[3].startswith(rtl + ":")]
     print(f"netlist_src {args.micro}: {len(restored)} objects restored to {rtl}")
     if not restored:

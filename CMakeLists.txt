@@ -1161,8 +1161,8 @@ if(BUILD_TESTING)
     # driver tools/netlist-ingest). The equivalence legs are netlist_ingest_<micro>_<form> (with
     # ABC, below). netlist_cells_elab: the cell models elaborate alone and as --lib;
     # netlist_dump_<micro>: cells stay cells, instance and net names kept, netlist locations
-    # (G-3, G-4, G-6); netlist_src_<micro>: the `src` restoration, a named skip (77) until
-    # `read_verilog -netlist` (5.4c) is merged; netlist_unknown: an unknown cell (G-7).
+    # (G-3, G-4, G-6); netlist_src_<micro>: the `src` restoration through
+    # `read_verilog -netlist` (5.4c); netlist_unknown: an unknown cell (G-7).
     set(ODIN3_NETLIST_MICROS dffsr dff dffe adff mux adder bm_DL_Dff_w_synch_reset regen cone)
     set(_ni_tool ${PROJECT_SOURCE_DIR}/tools/netlist-ingest/netlist-ingest
                  --odin3 $<TARGET_FILE:odin3>)

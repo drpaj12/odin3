@@ -299,8 +299,10 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
 5. `gen.sh` adds `insbuf -buf $_BUF_ A Y` so that `BUF` occurs (G-7: every cell of G-2 occurs) and
    `delete t:$scopeinfo`; `opt_clean` runs before the techmap only (it would delete the buffers
    after).
-6. The `src` restoration test (`netlist_src_<micro>`) probes `odin3 --help` for `read_verilog
-   -netlist` and exits 77 with a named skip until 5.4c is merged; its enabled branch is untested.
+6. The `src` restoration test (`netlist_src_<micro>`) had a named skip (exit 77) until 5.4c
+   (`read_verilog -netlist`, #187) was merged; the probe is removed and the test runs. The reader keeps
+   the file name as the `src` attribute spells it (`rtl.v`, relative), so the test matches `rtl.v:`
+   and not the absolute fixture path.
 7. `dump_locs` has no provenance-kind column, so the BLIF `IMPORTED` kind is checked as "the BLIF
    object prints no HDL location" and the Verilog `SOURCE` kind as "prints a location in
    mapped.v".
