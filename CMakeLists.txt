@@ -1436,6 +1436,9 @@ if(BUILD_TESTING)
     # 5.4d: read_blif --hdl-locs (names, `.attr src`, D-5), each case in a mkdtemp directory.
     odin3_add_unit_test(test_blif_locs)
     target_compile_definitions(test_blif_locs PRIVATE ODIN3_LOCS_ROOT="${PROJECT_BINARY_DIR}")
+    # 5.4c: read_verilog -netlist (src attributes, assign comments, L-5 names, IMPORTED records).
+    odin3_add_unit_test(test_netlist_locs)
+    target_compile_definitions(test_netlist_locs PRIVATE ODIN3_LOCS_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_blif_writer)
     target_compile_definitions(test_blif_writer PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")

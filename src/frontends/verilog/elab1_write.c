@@ -347,8 +347,9 @@ static uint32_t w_loc_attr(e1w *wr, const w_attrs_of *at, odin3_ast_id *ids) {
     odin3_ast_id value = {0};
     odin3_status st = string_spec(wr->e1, at->loc_text, &text);
     st = st != ODIN3_OK ? st : odin3_ast_make(wr->out, &text, NULL, 0, &value);
-    st = st != ODIN3_OK ? st : odin3_ast_intern(wr->out, odin3_bytes_cstr(ODIN3_NETLIST_ASSIGN_KEY),
-                                                &spec.name);
+    st = st != ODIN3_OK
+             ? st
+             : odin3_ast_intern(wr->out, odin3_bytes_cstr(ODIN3_NETLIST_ASSIGN_KEY), &spec.name);
     st = st != ODIN3_OK ? st : odin3_ast_make(wr->out, &spec, &value, 1, ids);
     if (st != ODIN3_OK) {
         fail(wr, st);

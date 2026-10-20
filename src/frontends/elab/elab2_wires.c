@@ -10,8 +10,8 @@
 #include "ast/symtab.h"
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_internal.h"
-#include "frontends/elab/netlist_locs.h"
 #include "frontends/elab/elab_test.h"
+#include "frontends/elab/netlist_locs.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -256,8 +256,35 @@ static uint32_t implicit_key(const odin3_elab2 *e2, const odin3_symbol *rec) {
     return key;
 }
 
+/* Under -netlist, a module-level wire named `\\hier/short@file:line ` takes SHORT (L-5, D-3c), made
+ * unique (IR-14); nl_name carries the decoded name for its record. */
+static odin3_status netlist_wire_name(odin3_elab2 *e2, const odin3_symbol *rec,
+                                      odin3_wire_spec *spec, odin3_netlist_name *nl_name) {
+    if (!e2->opts.netlist || spec->name != rec->name) {
+        return ODIN3_OK;
+    }
+    odin3_status st = odin3_netlist_name_decode(e2, rec->name, nl_name);
+    return st != ODIN3_OK || !nl_name->matched
+               ? st
+               : odin3_netlist_unique_wire(e2, nl_name->short_str, &spec->name);
+}
+
+/* The declaration's attributes, then the declarator's, onto a wire just made. */
+typedef struct wire_decl {
+    odin3_ast_id decl, declarator;
+} wire_decl;
+
+static odin3_status wire_attrs(odin3_elab2 *e2, const odin3_symbol *rec, const wire_decl *wd,
+                               odin3_wire_id wire) {
+    odin3_objref obj = {ODIN3_OBJ_WIRE, wire.v};
+    odin3_status st = attrs_apply(e2, wd->decl, obj, implicit_key(e2, rec));
+    return st != ODIN3_OK ? st : attrs_apply(e2, wd->declarator, obj, 0);
+}
+
 /* The wire of one net or variable declarator (a memory makes none: EL-27, Task 20). */
-static odin3_status wire_one(odin3_elab2 *e2, odin3_ast_id decl, odin3_ast_id declarator) {
+static odin3_status wire_one(odin3_elab2 *e2, const wire_decl *wd) {
+    odin3_ast_id decl = wd->decl;
+    odin3_ast_id declarator = wd->declarator;
     odin3_sym_id sym = odin3_elab_sym_of(&e2->bind, declarator);
     const odin3_symbol *rec = odin3_symbol_get(e2->st, sym);
     if (rec == NULL || rec->ir_wire.v != 0 || rec->n_unpacked > 0) {
@@ -276,20 +303,13 @@ static odin3_status wire_one(odin3_elab2 *e2, odin3_ast_id decl, odin3_ast_id de
         return ODIN3_OK;
     }
     odin3_netlist_name nl_name = {0};
-    if (st == ODIN3_OK && e2->opts.netlist && spec.name == rec->name) { /* module-level name */
-        st = odin3_netlist_name_decode(e2, rec->name, &nl_name);
-        st = st != ODIN3_OK || !nl_name.matched ? st
-                                                : odin3_netlist_unique_wire(e2, nl_name.short_str,
-                                                                            &spec.name);
-    }
+    st = st != ODIN3_OK ? st : netlist_wire_name(e2, rec, &spec, &nl_name);
     odin3_elab2_prov_req req = {declarator, {0}, rec->scope.v};
     odin3_elab2_nl_extra nl = {decl, &nl_name};
     st = st != ODIN3_OK ? st : odin3_elab2_prov_nl(e2, &req, &nl, &spec.prov);
     odin3_wire_id wire = {0};
     st = st != ODIN3_OK ? st : odin3_wire_create(e2->mod, &spec, NULL, &wire);
-    odin3_objref obj = {ODIN3_OBJ_WIRE, wire.v};
-    st = st != ODIN3_OK ? st : attrs_apply(e2, decl, obj, implicit_key(e2, rec));
-    st = st != ODIN3_OK ? st : attrs_apply(e2, declarator, obj, 0);
+    st = st != ODIN3_OK ? st : wire_attrs(e2, rec, wd, wire);
     st = st != ODIN3_OK ? st : odin3_symbol_set_ir(e2->st, sym, e2->mod_id, wire);
     odin3_elab2_counts made = {0, 0, width, 1};
     return st != ODIN3_OK ? st : odin3_elab2_account(e2, &made);
@@ -302,7 +322,7 @@ static odin3_status wires_of(odin3_elab2 *e2, odin3_ast_id decl) {
     for (uint32_t i = 0; st == ODIN3_OK && i < kids.n && !e2->stopped; i++) {
         if (kids.ids[i].v != 0 &&
             odin3_ast_kind_of(e2->elab, kids.ids[i]) == ODIN3_AST_DECLARATOR) {
-            st = wire_one(e2, decl, kids.ids[i]);
+            st = wire_one(e2, &(wire_decl){decl, kids.ids[i]});
         }
     }
     return st;

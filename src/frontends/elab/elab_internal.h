@@ -165,6 +165,8 @@ enum { ODIN3_E2_CONSTS = 4 }; /* $_CONST0_, 1, X, Z: indexed by odin3_bit */
  * and later 2D stage-2 files touch them; tests read the public functions below.
  */
 typedef struct odin3_elab2 odin3_elab2;
+
+enum { ODIN3_NL_BAD_TEXT = 64 }; /* bytes of the first malformed `src` text a -netlist run keeps */
 struct odin3_elab2 {
     odin3_pass_ctx *ctx;
     odin3_design *design;
@@ -212,10 +214,10 @@ struct odin3_elab2 {
     uint64_t next_check; /* the object count of the next budget check */
     uint32_t ports_made; /* ports created (the refuse_port test hook counts them) */
     /* read_verilog -netlist (5.4c; netlist_locs.c) */
-    const char *asg_loc;      /* the `// LOC` text of the CONT_ASSIGN being emitted; NULL: none */
-    uint32_t nl_bad;          /* `src` attributes that are not locations (kept; L-6) */
-    odin3_loc nl_bad_loc;     /* the first of them */
-    char nl_bad_text[64];     /* its text, cut */
+    const char *asg_loc;  /* the `// LOC` text of the CONT_ASSIGN being emitted; NULL: none */
+    uint32_t nl_bad;      /* `src` attributes that are not locations (kept; L-6) */
+    odin3_loc nl_bad_loc; /* the first of them */
+    char nl_bad_text[ODIN3_NL_BAD_TEXT]; /* its text, cut */
     bool pend_seen[ODIN3_PEND_END];
 };
 

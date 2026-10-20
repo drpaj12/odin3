@@ -16,9 +16,10 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { NL_BAD_TAG = 0x4e4c42ULL, NL_BAD_TEXT = 64, NL_BLANKS = 2, NL_SUFFIX_MAX = 16 };
+enum { NL_BAD_TAG = 0x4e4c42, NL_BLANKS = 2, NL_TAG_SHIFT = 32 };
 
-/* --- stage 1: the comment of an assign ---------------------------------------------------------- */
+/* --- stage 1: the comment of an assign ----------------------------------------------------------
+ */
 
 /* The index of the first comment of span whose loc is at or after at (binary search). */
 static uint32_t first_from(odin3_ast_comment_span span, uint32_t at) {
@@ -70,7 +71,8 @@ bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed,
         return false;
     }
     uint32_t last = end.v - 1U;
-    odin3_ast_comment_span span = odin3_ast_comments_of(parsed, odin3_srcman_buffer_of(sm, (odin3_loc){last}));
+    odin3_ast_comment_span span =
+        odin3_ast_comments_of(parsed, odin3_srcman_buffer_of(sm, (odin3_loc){last}));
     uint32_t at = first_from(span, end.v);
     if (at >= span.n || span.items[at].kind != ODIN3_AST_COMMENT_LINE ||
         !same_line(sm, last, span.items[at].loc)) {
@@ -85,7 +87,8 @@ bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed,
     return true;
 }
 
-/* --- stage 2 ------------------------------------------------------------------------------------ */
+/* --- stage 2 ------------------------------------------------------------------------------------
+ */
 
 void odin3_netlist_begin(odin3_elab2 *e2) {
     if (e2->opts.netlist && e2->ctx->op == 0) {
@@ -128,8 +131,8 @@ odin3_status odin3_netlist_unique_wire(odin3_elab2 *e2, uint32_t short_str, uint
         odin3_strbuf_clear(&e2->text);
         odin3_status st = odin3_strbuf_appendf(&e2->text, "%s$%u", base, suffix);
         st = st != ODIN3_OK ? st
-                            : odin3_design_intern(
-                                  e2->design, (odin3_bytes){e2->text.data, e2->text.len}, name);
+                            : odin3_design_intern(e2->design,
+                                                  (odin3_bytes){e2->text.data, e2->text.len}, name);
         if (st != ODIN3_OK || odin3_module_find_wire(e2->mod, *name).v == 0) {
             return st;
         }
@@ -152,7 +155,7 @@ static bool src_text(const odin3_elab2 *e2, odin3_ast_id attr, const char **text
 
 /* L-6: counts a `src` that is not a location, once per attribute. */
 static void note_bad(odin3_elab2 *e2, odin3_ast_id attr, const char *text) {
-    uint64_t key = ((uint64_t)NL_BAD_TAG << 32U) | attr.v;
+    uint64_t key = ((uint64_t)NL_BAD_TAG << NL_TAG_SHIFT) | attr.v;
     if (odin3_u64map_get(e2->warned, key, NULL)) {
         return;
     }
@@ -180,7 +183,8 @@ bool odin3_netlist_src_consumed(odin3_elab2 *e2, odin3_ast_id attr) {
 }
 
 /* The locations of the first parsing `src` attribute of node. */
-static uint32_t node_src(odin3_elab2 *e2, odin3_ast_id node, odin3_hdl_loc *locs, uint32_t *total) {
+static uint32_t node_src(const odin3_elab2 *e2, odin3_ast_id node, odin3_hdl_loc *locs,
+                         uint32_t *total) {
     if (node.v == 0) {
         return 0;
     }

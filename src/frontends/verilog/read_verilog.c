@@ -640,7 +640,8 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "-icells (or --icells) reads an instance of a `$` cell type as that registered cell, as Yosys "
     "does; -netlist (or --netlist) says the file is a netlist written by write_verilog or Yosys: "
     "its records are IMPORTED, a `(* src = \"file:line\" *)` attribute, a trailing `// file:line` "
-    "comment on an assign and a `\\hier/short@file:line ` net name restore HDL locations; --lib keeps "
+    "comment on an assign and a `\\hier/short@file:line ` net name restore HDL locations; --lib "
+    "keeps "
     "the modules as library units for later reads (elaborated, under this read's --nolatches, "
     "--nomem2reg and --vtr-compat, only where a later design instantiates them)",
     read_verilog_run,

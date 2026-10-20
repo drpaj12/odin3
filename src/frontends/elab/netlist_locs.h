@@ -26,7 +26,8 @@
 /* The name of the internal attribute stage 1 puts on a CONT_ASSIGN with a location comment. */
 #define ODIN3_NETLIST_ASSIGN_KEY "odin3_netlist_loc"
 
-/* --- stage 1 ----------------------------------------------------------------------------------- */
+/* --- stage 1 -----------------------------------------------------------------------------------
+ */
 
 /*
  * The text of the `// LOC` comment on the line where the parsed CONT_ASSIGN item ends: the first
@@ -38,7 +39,8 @@
 bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed, odin3_ast_id item,
                                   odin3_bytes *text);
 
-/* --- stage 2 ----------------------------------------------------------------------------------- */
+/* --- stage 2 -----------------------------------------------------------------------------------
+ */
 
 /* Begins the read's one operation (D-1) when -netlist is on and none is begun. */
 void odin3_netlist_begin(odin3_elab2 *e2);

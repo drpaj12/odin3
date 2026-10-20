@@ -68,8 +68,8 @@ typedef struct odin3_elab_opts {
     bool nomem2reg;     /* never replace a memory by registers except where forced (EL-27) */
     bool auto_blackbox; /* an undefined module becomes a black box, not unresolved_module */
     bool icells;        /* Yosys -icells (5.2): an instance of a `$` name is that registered cell */
-    bool netlist;       /* read_verilog -netlist (5.4c): the file is a netlist; records are IMPORTED and
-                           `src` attributes, assign comments and L-5 names restore HDL locations */
+    bool netlist; /* read_verilog -netlist (5.4c): the file is a netlist; records are IMPORTED and
+                     `src` attributes, assign comments and L-5 names restore HDL locations */
     bool vtr_compat;  /* VTR/Parmys compatibility: `initial x = <non-constant>` is `assign x = ...`
                          (Peter 2026-10-13; EL-40) */
     double stage1_ms; /* stage 1's time, for stage 2's summary line (odin3_elab_run fills it) */
