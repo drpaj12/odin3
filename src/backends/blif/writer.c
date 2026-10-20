@@ -521,19 +521,52 @@ static odin3_status provenance_name(blif_writer *wr, odin3_net_id net, bool *app
     return st;
 }
 
-/* HASH: remembers net, just named by provenance (the full name is wr->orig, before VB-10), for
- * hash_finalize. */
-static odin3_status note_hashed(blif_writer *wr, odin3_net_id net) {
+/* True when the net just named got its provenance name under HASH. */
+static bool hashing_prov(const blif_writer *wr) {
+    return wr->opts->name_style == ODIN3_BLIF_NAMES_HASH && wr->last_applied;
+}
+
+/* HASH: remembers net, just named by provenance (the full name is wr->orig, before VB-10, plus
+ * `$<suffix>` when suffix is not 0: H-2), for hash_finalize. */
+static odin3_status note_hashed(blif_writer *wr, odin3_net_id net, uint32_t suffix) {
     if (wr->opts->name_style != ODIN3_BLIF_NAMES_HASH || !wr->last_applied) {
         return ODIN3_OK;
     }
-    return odin3_hash_rows_add(
-        &wr->rows,
-        &(odin3_hash_row_req){.module = odin3_module_id_of(wr->module).v,
-                              .module_name = str_bytes(wr, odin3_module_name(wr->module)),
-                              .kind = ODIN3_NAME_NET,
-                              .key = net.v,
-                              .full = buf_bytes(&wr->orig)});
+    odin3_strbuf full;
+    odin3_strbuf_init(&full);
+    odin3_status st = odin3_strbuf_append(&full, buf_bytes(&wr->orig));
+    if (st == ODIN3_OK && suffix != 0) {
+        st = odin3_strbuf_appendf(&full, "$%u", (unsigned)suffix);
+    }
+    st = st == ODIN3_OK
+             ? odin3_hash_rows_add(
+                   &wr->rows,
+                   &(odin3_hash_row_req){.module = odin3_module_id_of(wr->module).v,
+                                         .module_name = str_bytes(wr, odin3_module_name(wr->module)),
+                                         .kind = ODIN3_NAME_NET,
+                                         .key = net.v,
+                                         .full = {full.data, full.len}})
+             : st;
+    odin3_strbuf_free(&full);
+    return st;
+}
+
+/* HASH: net's provenance name is taken (by a port bit or an earlier net). It keeps a hash row of
+ * its own: the full name with the first free `$N`, N >= 1 (H-2), so every provenance-named net is
+ * hashed and the names depend only on the set of full names (H-3). The written name is a
+ * placeholder (cand + `$N`), replaced by the hash name in hash_finalize. */
+static odin3_status take_suffixed(blif_writer *wr, uint64_t key, odin3_net_id self) {
+    size_t base = wr->cand.len;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t suffix = 1; st == ODIN3_OK; suffix++) {
+        wr->cand.len = base;
+        st = odin3_strbuf_appendf(&wr->cand, "$%u", (unsigned)suffix);
+        if (st == ODIN3_OK && name_free(wr, (odin3_bytes){wr->cand.data, wr->cand.len}, self)) {
+            st = take_name(wr, key);
+            return st == ODIN3_OK ? note_hashed(wr, self, suffix) : st;
+        }
+    }
+    return st;
 }
 
 /* An unnamed net under --name-style provenance: its short name (the wire bit name, else `$n<ID>`)
@@ -559,8 +592,11 @@ static odin3_status generate_provenance(blif_writer *wr, odin3_net_id net, bool 
  * named by provenance. */
 static odin3_status take_generated(blif_writer *wr, uint64_t key, odin3_net_id self, bool found) {
     bool as_is = found && name_free(wr, (odin3_bytes){wr->cand.data, wr->cand.len}, self);
+    if (found && !as_is && hashing_prov(wr)) {
+        return take_suffixed(wr, key, self);
+    }
     odin3_status st = as_is ? take_name(wr, key) : take_numbered(wr, key);
-    return st == ODIN3_OK && as_is ? note_hashed(wr, self) : st;
+    return st == ODIN3_OK && as_is ? note_hashed(wr, self, 0) : st;
 }
 
 /* The generated name of key (an unnamed net, or 1 << 32 | an unconnected pin): the net's wire bit
@@ -842,8 +878,12 @@ static odin3_status name_named_vtr(blif_writer *wr, odin3_net_id net, uint32_t r
     uint64_t owner = 0;
     bool found = odin3_strtab_find(wr->gen_names, buf_bytes(&wr->cand), &id);
     bool own_port = found && odin3_u64map_get(wr->claims, id, &owner) && owner == net.v;
-    st = found && !own_port ? take_numbered(wr, net.v) : take_name(wr, net.v);
-    st = st == ODIN3_OK && !(found && !own_port) ? note_hashed(wr, net) : st;
+    if (found && !own_port && hashing_prov(wr)) {
+        st = take_suffixed(wr, net.v, net);
+    } else {
+        st = found && !own_port ? take_numbered(wr, net.v) : take_name(wr, net.v);
+        st = st == ODIN3_OK && !(found && !own_port) ? note_hashed(wr, net, 0) : st;
+    }
     /* a net under its own port bit's name was counted with the port bit (port_renamed) */
     return st == ODIN3_OK && changed && !own_port ? note_renamed(wr, net.v, gen_get(wr, net.v))
                                                   : st;

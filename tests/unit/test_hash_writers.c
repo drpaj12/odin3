@@ -115,14 +115,18 @@ static const char *const INPUT = ".model top\n.inputs a b\n.outputs y\n"
                                  ".names top/u1/w@d.v:3 v@d.v:4\n1 1\n"
                                  ".names v@d.v:4 y\n1 1\n.end\n";
 
-static void load_design(void) {
+static void load_text(const char *text) {
     char path[PATH_BUF];
-    put_file("in.blif", odin3_bytes_cstr(INPUT));
+    put_file("in.blif", odin3_bytes_cstr(text));
     path_of("in.blif", path);
     odin3_blif_read_stats stats = {0};
     odin3_blif_read_opts opts = {.hdl_locs = true, .stats = &stats};
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read_ex(design, NULL, path, &opts),
                                   log_text);
+}
+
+static void load_design(void) {
+    load_text(INPUT);
 }
 
 /* The formatted arguments of a pass call (one buffer: use the result at once). */
@@ -381,6 +385,23 @@ static void test_map_is_output_path(void) {
     }
 }
 
+/* Two nets whose provenance text is equal (`u1.w` under hierarchy top/u1 is `w` there): both get
+ * a hash row, the second from the full name with the `$N` suffix (H-2), and the result does not
+ * depend on which net was named first (H-3). */
+static void test_blif_equal_provenance(void) {
+    load_text(".model top\n.inputs a b\n.outputs y\n"
+              ".names a b top/u1/w@d.v:3\n11 1\n"
+              ".names top/u1/w@d.v:3 top/u1/u1.w@d.v:3\n1 1\n"
+              ".names top/u1/u1.w@d.v:3 y\n1 1\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, write_hash(&WRITERS[0], "eq"), log_text);
+    written one = read_written(&WRITERS[0], "eq");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, map_lines(one.map), one.map);
+    TEST_ASSERT_NULL_MESSAGE(strstr(one.net, "$n"), one.net);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(one.map, "w@d.v:3\t"), one.map);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(one.map, "w@d.v:3$1\t"), one.map);
+    free_written(&one);
+}
+
 /* Output "-" (stdout) has no default map path: refused with --name-style hash. */
 static void test_refused_stdout_without_map(void) {
     for (int i = 0; i < N_WRITERS; i++) {
@@ -595,6 +616,7 @@ int main(void) {
     RUN_TEST(test_refused_without_map);
     RUN_TEST(test_map_commit_failure);
     RUN_TEST(test_map_is_output_path);
+    RUN_TEST(test_blif_equal_provenance);
     RUN_TEST(test_refused_stdout_without_map);
     RUN_TEST(test_map_needs_hash);
     RUN_TEST(test_no_map_without_hash);
