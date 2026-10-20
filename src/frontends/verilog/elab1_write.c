@@ -1197,7 +1197,8 @@ static odin3_ast_id w_cont_assign(e1w *wr, odin3_ast_id item) {
     odin3_ast_id id = w_make_plain(wr, &spec, mark, item);
     w_attrs_of at = {.from = item, .made = id};
     if (wr->e1->opts.netlist) {
-        (void)odin3_netlist_assign_comment(wr->e1->design, wr->ast, item, wr->next_item, &at.loc_text);
+        odin3_netlist_assign_src where = {item, wr->next_item};
+        (void)odin3_netlist_assign_comment(wr->e1->design, wr->ast, &where, &at.loc_text);
     }
     w_attach_attrs(wr, &at);
     return id;

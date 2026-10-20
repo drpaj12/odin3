@@ -416,13 +416,14 @@ static uint32_t lines_with(const char *text, const char *needle) {
 
 /* Review 5.4c fix 2: more than 8 locations keep the first 8, with one INFO line per read. */
 static void test_over_eight_locations_are_counted(void) {
-    read_net("module top(a, y);\n  input a;\n  output y;\n"
-             "  (* src = \"a.v:1|a.v:2|a.v:3|a.v:4|a.v:5|a.v:6|a.v:7|a.v:8|a.v:9\" *)\n  wire w;\n"
-             "  (* src = \"b.v:1|b.v:2|b.v:3|b.v:4|b.v:5|b.v:6|b.v:7|b.v:8\" *)\n  wire v;\n"
-             "  (* src = \"c.v:1|c.v:2|c.v:3|c.v:4|c.v:5|c.v:6|c.v:7|c.v:8|c.v:9|c.v:10\" *)\n"
-             "  wire u;\n  assign w = a;\n  assign v = a;\n  assign u = a;\n  assign y = w & v & u;\n"
-             "endmodule\n",
-             OPTS_NETLIST);
+    read_net(
+        "module top(a, y);\n  input a;\n  output y;\n"
+        "  (* src = \"a.v:1|a.v:2|a.v:3|a.v:4|a.v:5|a.v:6|a.v:7|a.v:8|a.v:9\" *)\n  wire w;\n"
+        "  (* src = \"b.v:1|b.v:2|b.v:3|b.v:4|b.v:5|b.v:6|b.v:7|b.v:8\" *)\n  wire v;\n"
+        "  (* src = \"c.v:1|c.v:2|c.v:3|c.v:4|c.v:5|c.v:6|c.v:7|c.v:8|c.v:9|c.v:10\" *)\n"
+        "  wire u;\n  assign w = a;\n  assign v = a;\n  assign u = a;\n  assign y = w & v & u;\n"
+        "endmodule\n",
+        OPTS_NETLIST);
     TEST_ASSERT_EQUAL_UINT32(1, lines_with(info_text, "more than 8 locations"));
     expect_in(info_text, "2 `src` attribute(s) hold more than 8 locations");
     char *text = dump();
@@ -532,10 +533,11 @@ static void test_module_instantiated_twice_warns_once(void) {
 }
 
 static void test_src_on_a_memory_is_restored(void) {
-    read_net("module top(clk, a, y);\n  input clk;\n  input a;\n  output reg y;\n"
-             "  (* src = \"m.v:3.3-3.20\" *)\n  reg mem [0:1];\n"
-             "  always @(posedge clk) begin\n    mem[0] <= a;\n    y <= mem[0];\n  end\nendmodule\n",
-             OPTS_NETLIST);
+    read_net(
+        "module top(clk, a, y);\n  input clk;\n  input a;\n  output reg y;\n"
+        "  (* src = \"m.v:3.3-3.20\" *)\n  reg mem [0:1];\n"
+        "  always @(posedge clk) begin\n    mem[0] <= a;\n    y <= mem[0];\n  end\nendmodule\n",
+        OPTS_NETLIST);
     char *text = dump();
     expect_in(text, "m.v:3.3-3.20");
     expect_check();

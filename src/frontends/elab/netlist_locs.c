@@ -22,6 +22,8 @@ enum {
     NL_CAP_TAG = 0x4e4c43,
     NL_BLANKS = 2,
     NL_TAG_SHIFT = 32,
+    NL_PRINT_FIRST = 0x20,
+    NL_PRINT_LAST = 0x7e,
     NL_HEX_ESC = 4 /* the bytes of `\\xNN` */
 };
 
@@ -83,10 +85,10 @@ static bool item_between(const odin3_srcman *sm, const odin3_ast *parsed, odin3_
     return after.buffer == there.buffer && after.line == there.line && after.col < there.col;
 }
 
-bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed, odin3_ast_id item,
-                                  odin3_ast_id next, odin3_bytes *text) {
+bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed,
+                                  const odin3_netlist_assign_src *src, odin3_bytes *text) {
     odin3_srcman *sm = NULL;
-    odin3_loc end = odin3_ast_end(parsed, item);
+    odin3_loc end = odin3_ast_end(parsed, src->item);
     if (end.v < 2U || odin3_design_get_srcman(design, &sm) != ODIN3_OK) {
         return false;
     }
@@ -96,7 +98,7 @@ bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed,
     uint32_t at = first_from(span, end.v);
     if (at >= span.n || span.items[at].kind != ODIN3_AST_COMMENT_LINE ||
         !same_line(sm, last, span.items[at].loc) ||
-        item_between(sm, parsed, next, span.items[at].loc)) {
+        item_between(sm, parsed, src->next, span.items[at].loc)) {
         return false;
     }
     odin3_bytes body = comment_body(&span.items[at]);
@@ -207,7 +209,7 @@ static bool first_time(odin3_elab2 *e2, uint32_t tag, odin3_ast_id attr) {
 static void copy_escaped(char *out, size_t cap, const char *text) {
     size_t used = 0;
     for (const unsigned char *at = (const unsigned char *)text; *at != 0; at++) {
-        bool plain = *at >= 0x20 && *at <= 0x7e;
+        bool plain = *at >= NL_PRINT_FIRST && *at <= NL_PRINT_LAST;
         if (used + (plain ? 1U : NL_HEX_ESC) >= cap) {
             break;
         }
@@ -237,7 +239,8 @@ bool odin3_netlist_src_consumed(odin3_elab2 *e2, odin3_ast_id attr) {
     if (odin3_hdl_loc_parse(odin3_bytes_cstr(text), locs, ODIN3_HDL_LOC_MAX) > 0) {
         /* a src is dropped only when a record took it (an assign comment, or an earlier src of
          * the same object, wins and leaves it as an attribute) */
-        return odin3_u64map_get(e2->warned, ((uint64_t)NL_TAKEN_TAG << NL_TAG_SHIFT) | attr.v, NULL);
+        return odin3_u64map_get(e2->warned, ((uint64_t)NL_TAKEN_TAG << NL_TAG_SHIFT) | attr.v,
+                                NULL);
     }
     note_bad(e2, attr, text);
     return false;
@@ -267,6 +270,22 @@ static uint32_t node_src(odin3_elab2 *e2, odin3_ast_id node, odin3_hdl_loc *locs
     return 0;
 }
 
+/* The locations the record of an object takes (assign comment, `src`, or decoded name): how many;
+ * *took is the `src` attribute used, if any. */
+static uint32_t prov_locs(odin3_elab2 *e2, const odin3_elab2_prov_req *req,
+                          const odin3_elab2_nl_extra *nl, odin3_hdl_loc *locs, odin3_ast_id *took) {
+    if (e2->asg_loc != NULL) {
+        return odin3_hdl_loc_parse(odin3_bytes_cstr(e2->asg_loc), locs, 1) > 0 ? 1U : 0U;
+    }
+    uint32_t count = node_src(e2, req->node, locs, took);
+    count = count != 0 || nl == NULL ? count : node_src(e2, nl->attrs, locs, took);
+    if (count == 0 && nl != NULL && nl->name != NULL && nl->name->matched) {
+        locs[0] = nl->name->loc;
+        count = 1;
+    }
+    return count;
+}
+
 odin3_status odin3_netlist_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req,
                                 const odin3_elab2_nl_extra *nl, odin3_prov_id base,
                                 odin3_prov_id *out) {
@@ -276,28 +295,18 @@ odin3_status odin3_netlist_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req
     }
     odin3_hdl_loc locs[ODIN3_HDL_LOC_MAX];
     odin3_ast_id took = {0};
-    uint32_t count = 0;
-    if (e2->asg_loc != NULL) {
-        count = odin3_hdl_loc_parse(odin3_bytes_cstr(e2->asg_loc), locs, 1) > 0 ? 1U : 0U;
-    } else {
-        count = node_src(e2, req->node, locs, &took);
-        count = count != 0 || nl == NULL ? count : node_src(e2, nl->attrs, locs, &took);
-    }
-    const odin3_netlist_name *name = nl != NULL ? nl->name : NULL;
-    bool named = name != NULL && name->matched;
-    if (count == 0 && named) {
-        locs[0] = name->loc;
-        count = 1;
-    }
+    uint32_t count = prov_locs(e2, req, nl, locs, &took);
     if (count == 0) {
         return ODIN3_OK;
     }
-    odin3_hdl_restore_req restore = {base, locs, count, named ? name->hier_str : 0};
+    bool named = nl != NULL && nl->name != NULL && nl->name->matched;
+    odin3_hdl_restore_req restore = {base, locs, count, named ? nl->name->hier_str : 0};
     odin3_hdl_restored done;
     odin3_status st = odin3_hdl_restore(e2->ctx, &restore, &done);
     *out = st == ODIN3_OK ? done.prov : base;
     if (st == ODIN3_OK && took.v != 0) {
-        (void)first_time(e2, NL_TAKEN_TAG, took); /* the record took it: not stored as an attribute */
+        (void)first_time(e2, NL_TAKEN_TAG,
+                         took); /* the record took it: not stored as an attribute */
     }
     return st;
 }

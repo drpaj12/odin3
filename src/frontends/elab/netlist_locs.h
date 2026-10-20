@@ -29,6 +29,11 @@
 /* --- stage 1 -----------------------------------------------------------------------------------
  */
 
+typedef struct odin3_netlist_assign_src {
+    odin3_ast_id item; /* the parsed CONT_ASSIGN */
+    odin3_ast_id next; /* the item after it in the same body, 0 for none */
+} odin3_netlist_assign_src;
+
 /*
  * The text of the `// LOC` comment on the line where the parsed CONT_ASSIGN item ends: the first
  * line comment that starts at or after the item's end (a binary search of the file's comment
@@ -38,8 +43,8 @@
  * the last on its line before the comment (next, the item after it in the same body or 0, starts
  * between them).
  */
-bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed, odin3_ast_id item,
-                                  odin3_ast_id next, odin3_bytes *text);
+bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed,
+                                  const odin3_netlist_assign_src *src, odin3_bytes *text);
 
 /* --- stage 2 -----------------------------------------------------------------------------------
  */

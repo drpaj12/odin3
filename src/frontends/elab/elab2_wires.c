@@ -334,16 +334,16 @@ static odin3_status raw_names_of(odin3_elab2 *e2, odin3_ast_id decl) {
     odin3_ast_span kids = odin3_ast_children(e2->elab, decl);
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < kids.n; i++) {
-        if (kids.ids[i].v == 0 || odin3_ast_kind_of(e2->elab, kids.ids[i]) != ODIN3_AST_DECLARATOR) {
+        if (kids.ids[i].v == 0 ||
+            odin3_ast_kind_of(e2->elab, kids.ids[i]) != ODIN3_AST_DECLARATOR) {
             continue;
         }
         const odin3_symbol *rec =
             odin3_symbol_get(e2->st, odin3_elab_sym_of(&e2->bind, kids.ids[i]));
         uint32_t name = 0;
         st = rec == NULL ? ODIN3_OK : odin3_elab2_scoped_name(e2, rec, &name);
-        st = st == ODIN3_OK && rec != NULL && name == rec->name
-                 ? odin3_netlist_note_raw(e2, name)
-                 : st;
+        st = st == ODIN3_OK && rec != NULL && name == rec->name ? odin3_netlist_note_raw(e2, name)
+                                                                : st;
     }
     return st;
 }
@@ -357,8 +357,7 @@ static bool is_expression(odin3_ast_kind kind) {
 typedef odin3_status (*decl_fn)(odin3_elab2 *e2, odin3_ast_id decl);
 
 /* Whether the walk goes below node; a declaration is handed to on_decl here (status in *st). */
-static bool wires_descend(odin3_elab2 *e2, odin3_ast_id node, decl_fn on_decl,
-                          odin3_status *st) {
+static bool wires_descend(odin3_elab2 *e2, odin3_ast_id node, decl_fn on_decl, odin3_status *st) {
     odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, node);
     switch (kind) {
     case ODIN3_AST_NET_DECL:
